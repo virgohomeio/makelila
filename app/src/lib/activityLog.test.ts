@@ -1,16 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { insertMock, selectMock, fromMock, getUserMock } = vi.hoisted(() => {
+const { insertMock, fromMock, getUserMock } = vi.hoisted(() => {
   const insertMock = vi.fn();
-  const selectMock = vi.fn();
-  const fromMock = vi.fn(() => ({
-    insert: insertMock,
-    select: selectMock,
-  }));
-  const getUserMock = vi.fn(() => Promise.resolve({
-    data: { user: { id: 'user-1' } },
-  }));
-  return { insertMock, selectMock, fromMock, getUserMock };
+  const fromMock = vi.fn(() => ({ insert: insertMock }));
+  const getUserMock = vi.fn<() => Promise<{ data: { user: { id: string } | null } }>>(
+    () => Promise.resolve({ data: { user: { id: 'user-1' } } }),
+  );
+  return { insertMock, fromMock, getUserMock };
 });
 
 vi.mock('./supabase', () => ({
