@@ -1,0 +1,49 @@
+:root {
+  /* Brand */
+  --color-crimson: #8B1A1A;
+  --color-us-navy: #3C3B6E;
+
+  /* Status */
+  --color-success: #276749;
+  --color-success-bg: #f0fff4;
+  --color-success-border: #9ae6b4;
+  --color-warning: #744210;
+  --color-warning-strong: #d69e2e;
+  --color-warning-bg: #fffbeb;
+  --color-warning-border: #f6ad55;
+  --color-error: #c53030;
+  --color-error-strong: #e53e3e;
+  --color-error-bg: #fff5f5;
+  --color-error-border: #fc8181;
+  --color-info: #2b6cb0;
+  --color-info-bg: #ebf8ff;
+  --color-info-border: #bee3f8;
+  --color-purple: #553c9a;
+  --color-purple-bg: #faf5ff;
+
+  /* Neutrals */
+  --color-ink: #1a202c;
+  --color-ink-muted: #4a5568;
+  --color-ink-subtle: #718096;
+  --color-ink-faint: #a0aec0;
+  --color-border: #e2e8f0;
+  --color-surface: #f7fafc;
+  --color-page: #f0f0f0;
+
+  /* Dark UI */
+  --color-dark-0: #111;
+  --color-dark-1: #1c1c1c;
+  --color-dark-2: #232323;
+  --color-dark-3: #2a2a2a;
+
+  /* Typography */
+  --font-sans: -apple-system, BlinkMacSystemFont, 'SF Pro Display',
+               'SF Pro Text', 'Helvetica Neue', sans-serif;
+
+  /* Sizing */
+  --page-max: 1200px;
+  --nav-height: 40px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+}
