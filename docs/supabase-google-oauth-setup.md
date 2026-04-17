@@ -23,7 +23,7 @@ to `@virgohome.io` is enforced client-side in `app/src/lib/auth.tsx` via
 2. Enable **Google** provider.
 3. Paste Client ID and Client Secret.
 4. Under **URL Configuration → Site URL**, set it to the production GitHub Pages
-   URL: `https://virgohome.github.io/makelila/`.
+   URL: `https://virgohomeio.github.io/makelila/`.
 5. Under **Redirect URLs**, add the same GitHub Pages URL.
 6. Save.
 
@@ -81,5 +81,5 @@ Add these repository secrets at **Settings → Secrets and variables → Actions
 - `VITE_SUPABASE_ANON_KEY` — production Supabase publishable/anon key.
 
 After the first deploy, add the production GitHub Pages URL
-`https://virgohome.github.io/makelila/` to the Supabase redirect allowlist
+`https://virgohomeio.github.io/makelila/` to the Supabase redirect allowlist
 (Auth → URL Configuration).
