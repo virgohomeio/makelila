@@ -33,7 +33,7 @@ Console: https://console.cloud.google.com/apis/credentials?project=lila-api-3938
 1. Go to https://app.supabase.com/project/txeftbbzeflequvrmjjr/auth/providers
 2. Enable **Google** provider.
 3. Paste the **Client ID** above and the **Client Secret** from your password manager.
-4. Under **URL Configuration → Site URL**: `https://virgohomeio.github.io/makelila/`.
+4. Under **URL Configuration → Site URL**: `https://lila.vip/`.
 5. Under **Redirect URLs**: add the same URL.
 6. Save.
 
