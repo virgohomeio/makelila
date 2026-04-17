@@ -1,0 +1,223 @@
+<style>
+  * { font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'Helvetica Neue', sans-serif !important; box-sizing: border-box; }
+  .repl-row {
+    display: grid;
+    grid-template-columns: 1.4fr 1.1fr 0.55fr 0.8fr 0.8fr 0.55fr 0.65fr 1.5fr 0.75fr;
+    align-items: center;
+    padding: 8px 14px;
+    border-bottom: 1px solid #f0f0f0;
+    min-width: 860px;
+  }
+  .repl-row:nth-child(even) { background: #fffdf5; }
+  .repl-row:nth-child(odd)  { background: #fff; }
+  .badge-ca { display:inline-block;font-size:9px;background:#8B1A1A;color:#fff;padding:2px 6px;border-radius:3px;font-weight:700; }
+  .badge-us { display:inline-block;font-size:9px;background:#3C3B6E;color:#fff;padding:2px 6px;border-radius:3px;font-weight:700; }
+  .part-tag { display:inline-block;font-size:9px;background:#fefcbf;color:#744210;padding:2px 7px;border-radius:4px;font-weight:700;margin-left:4px;white-space:nowrap; }
+  .status-delivered { display:inline-block;font-size:9px;background:#c6f6d5;color:#276749;padding:2px 7px;border-radius:8px;font-weight:600; }
+  .status-transit   { display:inline-block;font-size:9px;background:#bee3f8;color:#2b6cb0;padding:2px 7px;border-radius:8px;font-weight:600; }
+  .status-pickedup  { display:inline-block;font-size:9px;background:#e9d8fd;color:#553c9a;padding:2px 7px;border-radius:8px;font-weight:600; }
+  .tracking-id { font-size:9px;font-family:monospace !important;color:#444;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
+  .carrier-canpar { font-size:9px;color:#555;font-weight:600; }
+  .carrier-ups    { font-size:9px;color:#3C3B6E;font-weight:600; }
+</style>
+
+<h2>Replacement Parts — Separate Tab</h2>
+<p class="subtitle">All replacement part shipments isolated from main fulfillment history</p>
+
+<!-- 4-TAB BAR -->
+<div style="display:flex;gap:0;margin-bottom:0;border-bottom:2px solid #8B1A1A;flex-wrap:wrap;">
+  <div style="padding:8px 16px;background:#f5f5f5;color:#8B1A1A;font-size:11px;font-weight:600;cursor:pointer;border-radius:4px 4px 0 0;border:1px solid #e2e8f0;border-bottom:none;">Fulfillment Queue</div>
+  <div style="padding:8px 16px;background:#f5f5f5;color:#8B1A1A;font-size:11px;font-weight:600;cursor:pointer;border-radius:4px 4px 0 0;border:1px solid #e2e8f0;border-bottom:none;margin-left:3px;">Inventory Shelf Setup</div>
+  <div style="padding:8px 16px;background:#f5f5f5;color:#8B1A1A;font-size:11px;font-weight:600;cursor:pointer;border-radius:4px 4px 0 0;border:1px solid #e2e8f0;border-bottom:none;margin-left:3px;">Fulfillment History</div>
+  <div style="padding:8px 16px;background:#8B1A1A;color:#fff;font-size:11px;font-weight:600;border-radius:4px 4px 0 0;margin-left:3px;">Replacement Parts <span style="background:rgba(255,255,255,.25);padding:1px 6px;border-radius:8px;font-size:10px;margin-left:4px;">9</span></div>
+</div>
+
+<div class="mockup" style="border-top:none;border-radius:0 4px 4px 4px;">
+  <div class="mockup-header" style="background:#8B1A1A;color:#fff;display:flex;align-items:center;justify-content:space-between;padding:8px 16px;">
+    <div style="display:flex;align-items:center;gap:12px;">
+      <img src="https://lilacomposter.com/cdn/shop/files/B1_26bd5139-7008-47c1-804d-1a175ba84b23.png" style="height:28px;filter:brightness(0) invert(1);" onerror="this.style.display='none'">
+      <span style="font-size:11px;font-weight:600;letter-spacing:.5px;opacity:.85;">REPLACEMENT PART SHIPMENTS</span>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;">
+      <div style="background:rgba(255,255,255,.15);border-radius:4px;padding:4px 10px;font-size:10px;color:rgba(255,255,255,.65);width:160px;">🔍 Search customer…</div>
+      <div style="background:rgba(255,255,255,.15);border-radius:4px;padding:4px 10px;font-size:10px;color:rgba(255,255,255,.85);font-weight:600;">All parts ▾</div>
+      <div style="background:rgba(255,255,255,.2);border-radius:4px;padding:4px 10px;font-size:10px;color:#fff;font-weight:600;cursor:pointer;">↓ Export CSV</div>
+    </div>
+  </div>
+
+  <div class="mockup-body" style="padding:0;">
+
+    <!-- Summary bar -->
+    <div style="display:flex;background:#fafafa;border-bottom:1px solid #e2e8f0;">
+      <div style="flex:1;padding:9px 12px;border-right:1px solid #e2e8f0;text-align:center;">
+        <div style="font-size:17px;font-weight:800;color:#744210;">9</div>
+        <div style="font-size:8px;color:#718096;font-weight:600;margin-top:1px;">TOTAL REPLACEMENTS</div>
+      </div>
+      <div style="flex:1;padding:9px 12px;border-right:1px solid #e2e8f0;text-align:center;">
+        <div style="font-size:17px;font-weight:800;color:#276749;">6</div>
+        <div style="font-size:8px;color:#718096;font-weight:600;margin-top:1px;">DELIVERED</div>
+      </div>
+      <div style="flex:1;padding:9px 12px;border-right:1px solid #e2e8f0;text-align:center;">
+        <div style="font-size:17px;font-weight:800;color:#2b6cb0;">3</div>
+        <div style="font-size:8px;color:#718096;font-weight:600;margin-top:1px;">IN TRANSIT</div>
+      </div>
+      <div style="flex:1;padding:9px 12px;border-right:1px solid #e2e8f0;text-align:center;">
+        <div style="font-size:17px;font-weight:800;color:#8B1A1A;">5</div>
+        <div style="font-size:8px;color:#718096;font-weight:600;margin-top:1px;">🍁 CA</div>
+      </div>
+      <div style="flex:1;padding:9px 12px;border-right:1px solid #e2e8f0;text-align:center;">
+        <div style="font-size:17px;font-weight:800;color:#3C3B6E;">4</div>
+        <div style="font-size:8px;color:#718096;font-weight:600;margin-top:1px;">🦅 US</div>
+      </div>
+      <div style="flex:1;padding:9px 12px;text-align:center;">
+        <div style="font-size:15px;font-weight:800;color:#c05621;">$312.66</div>
+        <div style="font-size:8px;color:#718096;font-weight:600;margin-top:1px;">TOTAL FREIGHT</div>
+      </div>
+    </div>
+
+    <!-- Part type filter -->
+    <div style="display:flex;gap:8px;padding:9px 14px;background:#fff;border-bottom:1px solid #e2e8f0;align-items:center;">
+      <div style="font-size:9px;color:#718096;font-weight:700;margin-right:4px;">PART TYPE:</div>
+      <div style="padding:4px 12px;border-radius:4px;font-size:10px;font-weight:600;cursor:pointer;background:#8B1A1A;color:#fff;border:1.5px solid #8B1A1A;">All (9)</div>
+      <div style="padding:4px 12px;border-radius:4px;font-size:10px;font-weight:600;cursor:pointer;background:#f5f5f5;color:#555;border:1.5px solid #e2e8f0;">Top Lid (5)</div>
+      <div style="padding:4px 12px;border-radius:4px;font-size:10px;font-weight:600;cursor:pointer;background:#f5f5f5;color:#555;border:1.5px solid #e2e8f0;">Filter Cup (1)</div>
+      <div style="padding:4px 12px;border-radius:4px;font-size:10px;font-weight:600;cursor:pointer;background:#f5f5f5;color:#555;border:1.5px solid #e2e8f0;">LILA Pad (1)</div>
+      <div style="padding:4px 12px;border-radius:4px;font-size:10px;font-weight:600;cursor:pointer;background:#f5f5f5;color:#555;border:1.5px solid #e2e8f0;">Chamber+Tray (1)</div>
+      <div style="padding:4px 12px;border-radius:4px;font-size:10px;font-weight:600;cursor:pointer;background:#f5f5f5;color:#555;border:1.5px solid #e2e8f0;">P100 Replacement (1)</div>
+    </div>
+
+    <div style="overflow-x:auto;overflow-y:auto;max-height:380px;">
+
+      <!-- Header -->
+      <div class="repl-row" style="background:#f7fafc !important;border-bottom:2px solid #e2e8f0;position:sticky;top:0;z-index:2;">
+        <div style="font-size:9px;color:#718096;font-weight:700;">CUSTOMER</div>
+        <div style="font-size:9px;color:#718096;font-weight:700;">ORIGINAL SERIAL</div>
+        <div style="font-size:9px;color:#718096;font-weight:700;">PART</div>
+        <div style="font-size:9px;color:#718096;font-weight:700;">SHIP DATE</div>
+        <div style="font-size:9px;color:#718096;font-weight:700;">DELIVERED</div>
+        <div style="font-size:9px;color:#718096;font-weight:700;">PRICE</div>
+        <div style="font-size:9px;color:#718096;font-weight:700;">REGION</div>
+        <div style="font-size:9px;color:#718096;font-weight:700;">TRACKING</div>
+        <div style="font-size:9px;color:#718096;font-weight:700;">STATUS</div>
+      </div>
+
+      <!-- In Transit replacements (newest first) -->
+      <div class="repl-row">
+        <div style="font-size:10px;font-weight:600;color:#744210;">Anthony Kurt</div>
+        <div class="tracking-id" style="font-size:9px;color:#8B1A1A;">LL01-00000000212</div>
+        <div><span class="part-tag">Top Lid</span></div>
+        <div style="font-size:10px;color:#555;">Apr 17, 2026</div>
+        <div style="font-size:10px;color:#a0aec0;">—</div>
+        <div style="font-size:10px;font-weight:700;color:#276749;">$34.06</div>
+        <div><span class="badge-us">🦅 US</span></div>
+        <div class="tracking-id"><span class="carrier-ups">UPS</span> 1ZV56D26DK16952184</div>
+        <div><span class="status-transit">In Transit</span></div>
+      </div>
+
+      <div class="repl-row">
+        <div style="font-size:10px;font-weight:600;color:#744210;">Douglas Hanson</div>
+        <div class="tracking-id" style="font-size:9px;color:#8B1A1A;">LL01-00000000232</div>
+        <div><span class="part-tag">Top Lid</span></div>
+        <div style="font-size:10px;color:#555;">Apr 17, 2026</div>
+        <div style="font-size:10px;color:#a0aec0;">—</div>
+        <div style="font-size:10px;font-weight:700;color:#276749;">$39.76</div>
+        <div><span class="badge-us">🦅 US</span></div>
+        <div class="tracking-id"><span class="carrier-ups">UPS</span> 1ZV56D266825626892</div>
+        <div><span class="status-transit">In Transit</span></div>
+      </div>
+
+      <div class="repl-row">
+        <div style="font-size:10px;font-weight:600;color:#744210;">Frederick Whittington</div>
+        <div class="tracking-id" style="font-size:9px;color:#8B1A1A;">LL01-00000000234</div>
+        <div><span class="part-tag">Top Lid</span></div>
+        <div style="font-size:10px;color:#555;">Apr 17, 2026</div>
+        <div style="font-size:10px;color:#a0aec0;">—</div>
+        <div style="font-size:10px;font-weight:700;color:#276749;">$34.06</div>
+        <div><span class="badge-us">🦅 US</span></div>
+        <div class="tracking-id"><span class="carrier-ups">UPS</span> 1ZV56D266821266216</div>
+        <div><span class="status-transit">In Transit</span></div>
+      </div>
+
+      <!-- Delivered replacements -->
+      <div class="repl-row">
+        <div style="font-size:10px;font-weight:600;color:#744210;">Jenifer Henry</div>
+        <div class="tracking-id" style="font-size:9px;color:#8B1A1A;">LL01-00000000050</div>
+        <div><span class="part-tag">Top Lid</span></div>
+        <div style="font-size:10px;color:#555;">Apr 10, 2026</div>
+        <div style="font-size:10px;color:#276749;font-weight:600;">Apr 15, 2026</div>
+        <div style="font-size:10px;font-weight:700;color:#276749;">—</div>
+        <div><span class="badge-ca">🍁 CA</span></div>
+        <div class="tracking-id"><span class="carrier-ups">UPS</span> —</div>
+        <div><span class="status-delivered">Delivered</span></div>
+      </div>
+
+      <div class="repl-row">
+        <div style="font-size:10px;font-weight:600;color:#744210;">Angeline Purcell</div>
+        <div class="tracking-id" style="font-size:9px;color:#8B1A1A;">LL01-00000000115</div>
+        <div><span class="part-tag">Top Lid</span></div>
+        <div style="font-size:10px;color:#555;">Mar 25, 2026</div>
+        <div style="font-size:10px;color:#276749;font-weight:600;">Mar 30, 2026</div>
+        <div style="font-size:10px;font-weight:700;color:#276749;">—</div>
+        <div><span class="badge-ca">🍁 CA</span></div>
+        <div class="tracking-id"><span class="carrier-ups">UPS</span> —</div>
+        <div><span class="status-delivered">Delivered</span></div>
+      </div>
+
+      <div class="repl-row">
+        <div style="font-size:10px;font-weight:600;color:#744210;">Rodney Richards</div>
+        <div class="tracking-id" style="font-size:9px;color:#8B1A1A;">LL01-00000000228</div>
+        <div><span class="part-tag" style="background:#e9d8fd;color:#553c9a;">Filter Cup</span></div>
+        <div style="font-size:10px;color:#555;">Mar 13, 2026</div>
+        <div style="font-size:10px;color:#553c9a;font-weight:600;">Picked up Mar 20</div>
+        <div style="font-size:10px;font-weight:700;color:#276749;">$37.92</div>
+        <div><span class="badge-us">🦅 US</span></div>
+        <div class="tracking-id"><span class="carrier-ups">UPS</span> 1ZV56D26DK15048887</div>
+        <div><span class="status-pickedup">Picked Up</span></div>
+      </div>
+
+      <div class="repl-row">
+        <div style="font-size:10px;font-weight:600;color:#744210;">Amanda McCordic</div>
+        <div class="tracking-id" style="font-size:9px;color:#8B1A1A;">LL01-00000000145</div>
+        <div><span class="part-tag">Top Lid</span></div>
+        <div style="font-size:10px;color:#555;">Feb 10, 2026</div>
+        <div style="font-size:10px;color:#276749;font-weight:600;">Feb 16, 2026</div>
+        <div style="font-size:10px;font-weight:700;color:#276749;">—</div>
+        <div><span class="badge-ca">🍁 CA</span></div>
+        <div class="tracking-id"><span class="carrier-canpar">Canpar</span> —</div>
+        <div><span class="status-delivered">Delivered</span></div>
+      </div>
+
+      <div class="repl-row">
+        <div style="font-size:10px;font-weight:600;color:#744210;">Ellery Bunn</div>
+        <div class="tracking-id" style="font-size:9px;color:#8B1A1A;">LL01-00000000110</div>
+        <div><span class="part-tag" style="background:#c6f6d5;color:#276749;">Chamber+Tray</span></div>
+        <div style="font-size:10px;color:#555;">Dec 1, 2025</div>
+        <div style="font-size:10px;color:#276749;font-weight:600;">Dec 5, 2025</div>
+        <div style="font-size:10px;font-weight:700;color:#276749;">$22.93</div>
+        <div><span class="badge-ca">🍁 CA</span></div>
+        <div class="tracking-id"><span class="carrier-canpar">Canpar</span> D4203524…507286001</div>
+        <div><span class="status-delivered">Delivered</span></div>
+      </div>
+
+      <div class="repl-row">
+        <div style="font-size:10px;font-weight:600;color:#744210;">Brian Fryer</div>
+        <div class="tracking-id" style="font-size:9px;color:#8B1A1A;">LL01-00000000107</div>
+        <div><span class="part-tag" style="background:#ebf8ff;color:#2b6cb0;">LILA Pad</span></div>
+        <div style="font-size:10px;color:#555;">Nov 13, 2025</div>
+        <div style="font-size:10px;color:#276749;font-weight:600;">Nov 17, 2025</div>
+        <div style="font-size:10px;font-weight:700;color:#276749;">$15.00</div>
+        <div><span class="badge-ca">🍁 CA</span></div>
+        <div class="tracking-id"><span class="carrier-canpar">Canpar</span> D4203524…397773001</div>
+        <div><span class="status-delivered">Delivered</span></div>
+      </div>
+
+    </div>
+
+    <!-- Footer with + New Replacement button -->
+    <div style="padding:9px 14px;background:#f7fafc;border-top:1px solid #e2e8f0;display:flex;justify-content:space-between;align-items:center;">
+      <div style="font-size:9px;color:#a0aec0;">9 records · Original serial linked to each replacement · click row for full order history</div>
+      <div style="font-size:10px;background:#8B1A1A;color:#fff;padding:5px 14px;border-radius:4px;font-weight:700;cursor:pointer;">+ Log New Replacement</div>
+    </div>
+
+  </div>
+</div>

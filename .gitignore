@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+*.tsbuildinfo
+
+# Environment
+.env.local
+.env.*.local
+
+# Supabase
+supabase/.temp/
+supabase/.branches/
+
+# Brainstorm server state (volatile pid/status files)
+.superpowers/**/state/
+
+# IDE / OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Logs
+*.log
+npm-debug.log*

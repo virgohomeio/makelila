@@ -1,0 +1,193 @@
+<style>
+  .mockup, .mockup *, .section, .section * {
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'Helvetica Neue', sans-serif !important;
+  }
+</style>
+
+<h2>Fulfillment — History Tab</h2>
+<p class="subtitle">Third tab showing completed orders with real data from the Lila fulfillment sheet</p>
+
+<!-- TAB BAR -->
+<div style="display:flex;gap:0;margin-bottom:0;border-bottom:2px solid #8B1A1A;font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display',sans-serif;">
+  <div style="padding:8px 18px;background:#f5f5f5;color:#8B1A1A;font-size:11px;font-weight:600;cursor:pointer;border-radius:4px 4px 0 0;border:1px solid #e2e8f0;border-bottom:none;">Fulfillment Queue</div>
+  <div style="padding:8px 18px;background:#f5f5f5;color:#8B1A1A;font-size:11px;font-weight:600;cursor:pointer;border-radius:4px 4px 0 0;border:1px solid #e2e8f0;border-bottom:none;margin-left:3px;">Inventory Shelf Setup</div>
+  <div style="padding:8px 18px;background:#8B1A1A;color:#fff;font-size:11px;font-weight:600;cursor:pointer;border-radius:4px 4px 0 0;margin-left:3px;">Fulfillment History</div>
+</div>
+
+<div class="mockup" style="border-top:none;border-radius:0 4px 4px 4px;">
+  <div class="mockup-header" style="background:#8B1A1A;color:#fff;display:flex;align-items:center;justify-content:space-between;padding:8px 16px;">
+    <div style="display:flex;align-items:center;gap:12px;">
+      <img src="https://lilacomposter.com/cdn/shop/files/B1_26bd5139-7008-47c1-804d-1a175ba84b23.png"
+           style="height:28px;filter:brightness(0) invert(1);" onerror="this.style.display:'none'">
+      <span style="font-size:11px;font-weight:600;letter-spacing:.5px;opacity:.85;">FULFILLMENT HISTORY</span>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;">
+      <!-- Search -->
+      <div style="background:rgba(255,255,255,.15);border-radius:4px;padding:4px 10px;font-size:10px;color:rgba(255,255,255,.7);min-width:140px;">🔍 Search customer or serial…</div>
+      <!-- Filter -->
+      <div style="background:rgba(255,255,255,.15);border-radius:4px;padding:4px 10px;font-size:10px;color:rgba(255,255,255,.85);font-weight:600;">All batches ▾</div>
+      <!-- Export -->
+      <div style="background:rgba(255,255,255,.2);border-radius:4px;padding:4px 10px;font-size:10px;color:#fff;font-weight:600;cursor:pointer;">↓ Export CSV</div>
+    </div>
+  </div>
+
+  <div class="mockup-body" style="padding:0;">
+
+    <!-- Summary bar -->
+    <div style="display:flex;gap:0;background:#fafafa;border-bottom:1px solid #e2e8f0;">
+      <div style="flex:1;padding:10px 16px;border-right:1px solid #e2e8f0;text-align:center;">
+        <div style="font-size:18px;font-weight:800;color:#8B1A1A;">10</div>
+        <div style="font-size:9px;color:#718096;font-weight:600;margin-top:1px;">TOTAL SHIPPED</div>
+      </div>
+      <div style="flex:1;padding:10px 16px;border-right:1px solid #e2e8f0;text-align:center;">
+        <div style="font-size:18px;font-weight:800;color:#276749;">10</div>
+        <div style="font-size:9px;color:#718096;font-weight:600;margin-top:1px;">DELIVERED</div>
+      </div>
+      <div style="flex:1;padding:10px 16px;border-right:1px solid #e2e8f0;text-align:center;">
+        <div style="font-size:18px;font-weight:800;color:#555;">2</div>
+        <div style="font-size:9px;color:#718096;font-weight:600;margin-top:1px;">BATCHES</div>
+      </div>
+      <div style="flex:1;padding:10px 16px;text-align:center;">
+        <div style="font-size:18px;font-weight:800;color:#3C3B6E;">2</div>
+        <div style="font-size:9px;color:#718096;font-weight:600;margin-top:1px;">REPLACEMENTS</div>
+      </div>
+    </div>
+
+    <!-- Table header -->
+    <div style="display:grid;grid-template-columns:1.4fr 1fr 80px 90px 90px 90px 80px;gap:0;background:#f7fafc;padding:8px 14px;border-bottom:1px solid #e2e8f0;">
+      <div style="font-size:9px;color:#718096;font-weight:700;">CUSTOMER</div>
+      <div style="font-size:9px;color:#718096;font-weight:700;">SERIAL NUMBER</div>
+      <div style="font-size:9px;color:#718096;font-weight:700;">BATCH</div>
+      <div style="font-size:9px;color:#718096;font-weight:700;">SHIP DATE</div>
+      <div style="font-size:9px;color:#718096;font-weight:700;">DELIVERED</div>
+      <div style="font-size:9px;color:#718096;font-weight:700;">REGION</div>
+      <div style="font-size:9px;color:#718096;font-weight:700;">STATUS</div>
+    </div>
+
+    <!-- Real data rows -->
+    <div style="overflow-y:auto;max-height:340px;">
+
+      <div style="display:grid;grid-template-columns:1.4fr 1fr 80px 90px 90px 90px 80px;gap:0;padding:9px 14px;border-bottom:1px solid #f0f0f0;background:#fff;align-items:center;">
+        <div style="font-size:10px;font-weight:600;color:#2d3748;">Mary Oskamp</div>
+        <div style="font-size:10px;font-family:monospace;color:#555;">LL01-00000000005</div>
+        <div style="font-size:10px;color:#555;">P150</div>
+        <div style="font-size:10px;color:#555;">Apr 10, 2026</div>
+        <div style="font-size:10px;color:#276749;font-weight:600;">Apr 14, 2026</div>
+        <div style="font-size:9px;background:#8B1A1A;color:#fff;padding:2px 6px;border-radius:3px;font-weight:700;display:inline-block;">🍁 CA</div>
+        <div style="font-size:9px;background:#c6f6d5;color:#276749;padding:2px 6px;border-radius:8px;font-weight:600;display:inline-block;">Delivered</div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1.4fr 1fr 80px 90px 90px 90px 80px;gap:0;padding:9px 14px;border-bottom:1px solid #f0f0f0;background:#f9fafb;align-items:center;">
+        <div style="font-size:10px;font-weight:600;color:#2d3748;">Joan Teichroeb</div>
+        <div style="font-size:10px;font-family:monospace;color:#555;">LL01-00000000109</div>
+        <div style="font-size:10px;color:#555;">P150</div>
+        <div style="font-size:10px;color:#555;">Mar 18, 2026</div>
+        <div style="font-size:10px;color:#276749;font-weight:600;">Mar 30, 2026</div>
+        <div style="font-size:9px;background:#8B1A1A;color:#fff;padding:2px 6px;border-radius:3px;font-weight:700;display:inline-block;">🍁 CA</div>
+        <div style="font-size:9px;background:#c6f6d5;color:#276749;padding:2px 6px;border-radius:8px;font-weight:600;display:inline-block;">Delivered</div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1.4fr 1fr 80px 90px 90px 90px 80px;gap:0;padding:9px 14px;border-bottom:1px solid #f0f0f0;background:#fff;align-items:center;">
+        <div style="font-size:10px;font-weight:600;color:#2d3748;">Joy Seargeant</div>
+        <div style="font-size:10px;font-family:monospace;color:#555;">LL01-00000000142</div>
+        <div style="font-size:10px;color:#555;">P150</div>
+        <div style="font-size:10px;color:#555;">Mar 20, 2026</div>
+        <div style="font-size:10px;color:#276749;font-weight:600;">Mar 30, 2026</div>
+        <div style="font-size:9px;background:#8B1A1A;color:#fff;padding:2px 6px;border-radius:3px;font-weight:700;display:inline-block;">🍁 CA</div>
+        <div style="font-size:9px;background:#c6f6d5;color:#276749;padding:2px 6px;border-radius:8px;font-weight:600;display:inline-block;">Delivered</div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1.4fr 1fr 80px 90px 90px 90px 80px;gap:0;padding:9px 14px;border-bottom:1px solid #f0f0f0;background:#f9fafb;align-items:center;">
+        <div style="font-size:10px;font-weight:600;color:#2d3748;">Jeremiah Pauw</div>
+        <div style="font-size:10px;font-family:monospace;color:#555;">LL01-00000000201</div>
+        <div style="font-size:10px;color:#555;">P50N</div>
+        <div style="font-size:10px;color:#555;">Mar 5, 2026</div>
+        <div style="font-size:10px;color:#276749;font-weight:600;">Mar 10, 2026</div>
+        <div style="font-size:9px;background:#3C3B6E;color:#fff;padding:2px 6px;border-radius:3px;font-weight:700;display:inline-block;">🦅 US</div>
+        <div style="font-size:9px;background:#c6f6d5;color:#276749;padding:2px 6px;border-radius:8px;font-weight:600;display:inline-block;">Delivered</div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1.4fr 1fr 80px 90px 90px 90px 80px;gap:0;padding:9px 14px;border-bottom:1px solid #f0f0f0;background:#fff;align-items:center;">
+        <div style="font-size:10px;font-weight:600;color:#2d3748;">Scott Gilbert</div>
+        <div style="font-size:10px;font-family:monospace;color:#555;">LL01-00000000122</div>
+        <div style="font-size:10px;color:#555;">P150</div>
+        <div style="font-size:10px;color:#555;">Mar 5, 2026</div>
+        <div style="font-size:10px;color:#276749;font-weight:600;">Mar 11, 2026</div>
+        <div style="font-size:9px;background:#8B1A1A;color:#fff;padding:2px 6px;border-radius:3px;font-weight:700;display:inline-block;">🍁 CA</div>
+        <div style="font-size:9px;background:#c6f6d5;color:#276749;padding:2px 6px;border-radius:8px;font-weight:600;display:inline-block;">Delivered</div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1.4fr 1fr 80px 90px 90px 90px 80px;gap:0;padding:9px 14px;border-bottom:1px solid #f0f0f0;background:#f9fafb;align-items:center;">
+        <div style="font-size:10px;font-weight:600;color:#2d3748;">Robert Simoneau</div>
+        <div style="font-size:10px;font-family:monospace;color:#555;">LL01-00000000144</div>
+        <div style="font-size:10px;color:#555;">P150</div>
+        <div style="font-size:10px;color:#555;">Feb 24, 2026</div>
+        <div style="font-size:10px;color:#276749;font-weight:600;">Feb 26, 2026</div>
+        <div style="font-size:9px;background:#8B1A1A;color:#fff;padding:2px 6px;border-radius:3px;font-weight:700;display:inline-block;">🍁 CA</div>
+        <div style="font-size:9px;background:#c6f6d5;color:#276749;padding:2px 6px;border-radius:8px;font-weight:600;display:inline-block;">Delivered</div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1.4fr 1fr 80px 90px 90px 90px 80px;gap:0;padding:9px 14px;border-bottom:1px solid #f0f0f0;background:#fff;align-items:center;">
+        <div style="font-size:10px;font-weight:600;color:#2d3748;">Joan Teichroeb</div>
+        <div style="font-size:10px;font-family:monospace;color:#555;">LL01-00000000239</div>
+        <div style="font-size:10px;color:#555;">P50N</div>
+        <div style="font-size:10px;color:#555;">Feb 17, 2026</div>
+        <div style="font-size:10px;color:#276749;font-weight:600;">Feb 27, 2026</div>
+        <div style="font-size:9px;background:#8B1A1A;color:#fff;padding:2px 6px;border-radius:3px;font-weight:700;display:inline-block;">🍁 CA</div>
+        <div style="font-size:9px;background:#c6f6d5;color:#276749;padding:2px 6px;border-radius:8px;font-weight:600;display:inline-block;">Delivered</div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1.4fr 1fr 80px 90px 90px 90px 80px;gap:0;padding:9px 14px;border-bottom:1px solid #f0f0f0;background:#f9fafb;align-items:center;">
+        <div style="font-size:10px;font-weight:600;color:#2d3748;">Vicki Myhre</div>
+        <div style="font-size:10px;font-family:monospace;color:#555;">LL01-00000000126</div>
+        <div style="font-size:10px;color:#555;">P150</div>
+        <div style="font-size:10px;color:#555;">Feb 17, 2026</div>
+        <div style="font-size:10px;color:#276749;font-weight:600;">Feb 24, 2026</div>
+        <div style="font-size:9px;background:#3C3B6E;color:#fff;padding:2px 6px;border-radius:3px;font-weight:700;display:inline-block;">🦅 US</div>
+        <div style="font-size:9px;background:#c6f6d5;color:#276749;padding:2px 6px;border-radius:8px;font-weight:600;display:inline-block;">Delivered</div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1.4fr 1fr 80px 90px 90px 90px 80px;gap:0;padding:9px 14px;border-bottom:1px solid #f0f0f0;background:#fff;align-items:center;">
+        <div style="font-size:10px;font-weight:600;color:#2d3748;">Jason Kemp</div>
+        <div style="font-size:10px;font-family:monospace;color:#555;">LL01-00000000045</div>
+        <div style="font-size:10px;color:#555;">P150</div>
+        <div style="font-size:10px;color:#555;">Jan 30, 2026</div>
+        <div style="font-size:10px;color:#276749;font-weight:600;">Feb 5, 2026</div>
+        <div style="font-size:9px;background:#8B1A1A;color:#fff;padding:2px 6px;border-radius:3px;font-weight:700;display:inline-block;">🍁 CA</div>
+        <div style="font-size:9px;background:#c6f6d5;color:#276749;padding:2px 6px;border-radius:8px;font-weight:600;display:inline-block;">Delivered</div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1.4fr 1fr 80px 90px 90px 90px 80px;gap:0;padding:9px 14px;border-bottom:1px solid #f0f0f0;background:#f9fafb;align-items:center;">
+        <div style="font-size:10px;font-weight:600;color:#2d3748;">Amanda McCordic</div>
+        <div style="font-size:10px;font-family:monospace;color:#555;">LL01-00000000145</div>
+        <div style="font-size:10px;color:#555;">P150</div>
+        <div style="font-size:10px;color:#555;">Jan 29, 2026</div>
+        <div style="font-size:10px;color:#276749;font-weight:600;">Feb 4, 2026</div>
+        <div style="font-size:9px;background:#8B1A1A;color:#fff;padding:2px 6px;border-radius:3px;font-weight:700;display:inline-block;">🍁 CA</div>
+        <div style="font-size:9px;background:#c6f6d5;color:#276749;padding:2px 6px;border-radius:8px;font-weight:600;display:inline-block;">Delivered</div>
+      </div>
+
+      <!-- Replacement rows -->
+      <div style="display:grid;grid-template-columns:1.4fr 1fr 80px 90px 90px 90px 80px;gap:0;padding:9px 14px;border-bottom:1px solid #f0f0f0;background:#fffdf5;align-items:center;">
+        <div style="font-size:10px;font-weight:600;color:#744210;">Amanda McCordic <span style="font-size:8px;background:#fefcbf;color:#744210;padding:1px 5px;border-radius:4px;margin-left:4px;">Replacement</span></div>
+        <div style="font-size:10px;font-family:monospace;color:#a0aec0;">Top Lid</div>
+        <div style="font-size:10px;color:#a0aec0;">—</div>
+        <div style="font-size:10px;color:#555;">Feb 10, 2026</div>
+        <div style="font-size:10px;color:#276749;font-weight:600;">Feb 16, 2026</div>
+        <div style="font-size:9px;background:#8B1A1A;color:#fff;padding:2px 6px;border-radius:3px;font-weight:700;display:inline-block;">🍁 CA</div>
+        <div style="font-size:9px;background:#c6f6d5;color:#276749;padding:2px 6px;border-radius:8px;font-weight:600;display:inline-block;">Delivered</div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1.4fr 1fr 80px 90px 90px 90px 80px;gap:0;padding:9px 14px;background:#fffdf5;align-items:center;">
+        <div style="font-size:10px;font-weight:600;color:#744210;">Jenifer Henry <span style="font-size:8px;background:#fefcbf;color:#744210;padding:1px 5px;border-radius:4px;margin-left:4px;">Replacement</span></div>
+        <div style="font-size:10px;font-family:monospace;color:#a0aec0;">Top Lid</div>
+        <div style="font-size:10px;color:#a0aec0;">—</div>
+        <div style="font-size:10px;color:#555;">Apr 10, 2026</div>
+        <div style="font-size:10px;color:#276749;font-weight:600;">Apr 15, 2026</div>
+        <div style="font-size:9px;background:#8B1A1A;color:#fff;padding:2px 6px;border-radius:3px;font-weight:700;display:inline-block;">🍁 CA</div>
+        <div style="font-size:9px;background:#c6f6d5;color:#276749;padding:2px 6px;border-radius:8px;font-weight:600;display:inline-block;">Delivered</div>
+      </div>
+
+    </div>
+  </div>
+</div>

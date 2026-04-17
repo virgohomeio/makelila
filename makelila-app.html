@@ -1,0 +1,976 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>makelila — Operations Hub (Lite)</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  .pill { display:inline-flex; align-items:center; padding:2px 8px; border-radius:9999px; font-size:11px; font-weight:600; }
+  table { border-collapse: collapse; }
+  .scroll-thin::-webkit-scrollbar { width:8px; height:8px; }
+  .scroll-thin::-webkit-scrollbar-thumb { background:#cbd5e1; border-radius:4px; }
+</style>
+</head>
+<body class="bg-slate-50">
+<div id="root"></div>
+
+<!--
+  makelila lite prototype - seeded with REAL data from Virgo_Operations_Hub_MRP.xlsx
+  - 50 Shopify customers, 50 sales orders, 54 serials, 76 shipments, 12 BOM rows, 5 POs, 4 make orders
+  - No build. No auth. Mock data only. Replace seeds with Supabase PostgREST calls to go live.
+-->
+
+<script>
+const PRODUCTS = [{"sku": "VH-100", "name": "Virgo Smart Hub", "category": "Smart Home", "price": 490, "cost": 43.95, "currency": "CAD", "reorder_point": 25, "reorder_qty": 50, "lead_time": 14, "supplier": "ShenZhen Electronics Co", "active": true}, {"sku": "VH-200", "name": "Virgo Motion Sensor", "category": "Sensors", "price": 65, "cost": 32, "currency": "CAD", "reorder_point": 50, "reorder_qty": 100, "lead_time": 10, "supplier": "ShenZhen Electronics Co", "active": true}, {"sku": "VH-300", "name": "Virgo Security Cam", "category": "Security", "price": 890, "cost": 58.7, "currency": "CAD", "reorder_point": 30, "reorder_qty": 30, "lead_time": 21, "supplier": "OptiLens Taiwan", "active": true}, {"sku": "VH-400", "name": "Virgo Door Lock", "category": "Access", "price": 650, "cost": 95, "currency": "CAD", "reorder_point": 20, "reorder_qty": 25, "lead_time": 18, "supplier": "LockTech Shenzhen", "active": true}, {"sku": "VH-500", "name": "Virgo Thermostat", "category": "Climate", "price": 280, "cost": 68, "currency": "CAD", "reorder_point": 25, "reorder_qty": 50, "lead_time": 12, "supplier": "ShenZhen Electronics Co", "active": true}, {"sku": "LILA-001", "name": "LILA Composter", "category": "Composter", "price": 1049, "cost": null, "currency": "USD", "reorder_point": 20, "reorder_qty": 100, "lead_time": 60, "supplier": "Factory-CN", "active": true}];
+const INVENTORY = [{"sku": "VH-100", "name": "Virgo Smart Hub", "loc": "Toronto-01", "on_hand": 150, "committed": 7, "available": 143, "expected": 50, "reorder_point": 25, "status": "OK", "unit_cost": 85, "total_value": 12750, "batch": "LOT-2026-041", "days_on_hand": 150, "alert": "OK"}, {"sku": "VH-200", "name": "Virgo Motion Sensor", "loc": "Toronto-01", "on_hand": 320, "committed": 13, "available": 307, "expected": 100, "reorder_point": 50, "status": "OK", "unit_cost": 32, "total_value": 10240, "batch": "LOT-2026-038", "days_on_hand": 172, "alert": "OK"}, {"sku": "VH-300", "name": "Virgo Security Cam", "loc": "Toronto-01", "on_hand": 80, "committed": 10, "available": 70, "expected": 0, "reorder_point": 30, "status": "OK", "unit_cost": 120, "total_value": 9600, "batch": "LOT-2026-035", "days_on_hand": 56, "alert": "OK"}, {"sku": "VH-400", "name": "Virgo Door Lock", "loc": "Toronto-01", "on_hand": 45, "committed": 8, "available": 37, "expected": 25, "reorder_point": 20, "status": "OK", "unit_cost": 95, "total_value": 4275, "batch": "LOT-2026-040", "days_on_hand": 39, "alert": "OK"}, {"sku": "VH-100", "name": "Virgo Smart Hub", "loc": "Vancouver-01", "on_hand": 60, "committed": 2, "available": 58, "expected": 0, "reorder_point": 15, "status": "OK", "unit_cost": 85, "total_value": 5100, "batch": "LOT-2026-039", "days_on_hand": 210, "alert": "OK"}, {"sku": "VH-500", "name": "Virgo Thermostat", "loc": "Toronto-01", "on_hand": 10, "committed": 0, "available": 10, "expected": 50, "reorder_point": 25, "status": "LOW", "unit_cost": 68, "total_value": 680, "batch": "LOT-2026-042", "days_on_hand": "N/A", "alert": "REORDER"}];
+const CUSTOMERS = [{"id": "CUST-001", "name": "Annmarie Kennedy", "email": null, "phone": null, "address": "Seymour CT, United States", "channel": "Shopify", "orders": 1, "revenue": 1037.27, "last_order": "2026-04-10"}, {"id": "CUST-002", "name": "Phayvanh Nanthavongdouangsy", "email": null, "phone": null, "address": "Riverside CA, United States", "channel": "Shopify", "orders": 1, "revenue": 1016.36, "last_order": "2026-04-10"}, {"id": "CUST-003", "name": "Mary Granger", "email": "oskampm@mac.com", "phone": "905-536-6985", "address": null, "channel": "Shopify", "orders": 0, "revenue": 0, "last_order": null}, {"id": "CUST-004", "name": "Jill jeannine", "email": null, "phone": null, "address": null, "channel": "Shopify", "orders": 0, "revenue": 0, "last_order": null}, {"id": "CUST-005", "name": "Sarah Harris", "email": null, "phone": null, "address": "CROSBY TX, United States", "channel": "Shopify", "orders": 1, "revenue": 1016.08, "last_order": "2026-04-09"}, {"id": "CUST-006", "name": "Kristen Pimentel", "email": null, "phone": null, "address": "Salt Lake City UT, United States", "channel": "Shopify", "orders": 1, "revenue": 985.23, "last_order": "2026-04-09"}, {"id": "CUST-007", "name": "Grant Bieker", "email": null, "phone": null, "address": null, "channel": "Shopify", "orders": 0, "revenue": 0, "last_order": null}, {"id": "CUST-008", "name": "Angela Findlay", "email": "fireandprose17@outlook.com", "phone": "647-775-9377", "address": null, "channel": "Shopify", "orders": 1, "revenue": 42.38, "last_order": "2026-03-27"}, {"id": "CUST-009", "name": "Louis DiPalma", "email": "ljdpdm@me.com", "phone": "303-919-9498", "address": "New Rochelle NY, United States", "channel": "Shopify", "orders": 1, "revenue": 1043.06, "last_order": "2026-04-07"}, {"id": "CUST-010", "name": "Pedrum", "email": null, "phone": null, "address": null, "channel": "Shopify", "orders": 4, "revenue": 0, "last_order": "2026-04-07"}, {"id": "CUST-011", "name": "Katrina Dowd", "email": "katrinadowd83@gmail.com", "phone": "813-598-6409", "address": "Omaha NE, United States", "channel": "Shopify", "orders": 1, "revenue": 1302.95, "last_order": "2026-03-31"}, {"id": "CUST-012", "name": "Matthew Mossey", "email": null, "phone": null, "address": null, "channel": "Shopify", "orders": 2, "revenue": 87.48, "last_order": "2026-03-27"}, {"id": "CUST-013", "name": "Elizabeth Antony", "email": null, "phone": null, "address": null, "channel": "Shopify", "orders": 2, "revenue": 262.5, "last_order": "2026-03-26"}, {"id": "CUST-014", "name": "Tara Dupper", "email": "Tarajdupper@gmail.com", "phone": "315-956-8380", "address": "New Port Richey FL, United States", "channel": "Shopify", "orders": 1, "revenue": 1351.87, "last_order": "2026-03-23"}, {"id": "CUST-015", "name": "Lisa Clarke", "email": "lisaclarkewell@gmail.com", "phone": "289-404-2364", "address": "Enfield NS, Canada", "channel": "Shopify", "orders": 1, "revenue": 127.13, "last_order": "2026-03-22"}, {"id": "CUST-016", "name": "Cole Perkins", "email": "cperkins39741@gmail.com", "phone": "619-916-7732", "address": "Oshawa ON, Canada", "channel": "Shopify", "orders": 1, "revenue": 1372.36, "last_order": "2026-03-22"}, {"id": "CUST-017", "name": "Rebecca Campbell", "email": "campbellra652@gmail.com", "phone": "902-818-8352", "address": "Belwood ON, Canada", "channel": "Shopify", "orders": 1, "revenue": 19.95, "last_order": "2026-03-22"}, {"id": "CUST-018", "name": "Jacob Wenger", "email": "wenger.jake@gmail.com", "phone": "218-301-4249", "address": "Kinzer PA, United States", "channel": "Shopify", "orders": 1, "revenue": 1372.36, "last_order": "2026-03-21"}, {"id": "CUST-019", "name": "Ashley Wright", "email": null, "phone": null, "address": "Pottstown PA, United States", "channel": "Shopify", "orders": 1, "revenue": 1502.89, "last_order": "2026-03-19"}, {"id": "CUST-020", "name": "Brent Neave", "email": "brent@baker-neave.com", "phone": "604-329-2421", "address": "Rocky Mountain House AB, Canada", "channel": "Shopify", "orders": 1, "revenue": 1396.49, "last_order": "2026-03-18"}, {"id": "CUST-021", "name": "Dale Bober", "email": "dalebober@gmail.com", "phone": "760-799-9286", "address": "Rosemount MN, United States", "channel": "Shopify", "orders": 1, "revenue": 1346.46, "last_order": "2026-03-16"}, {"id": "CUST-022", "name": "Scott Iles", "email": "mrscottg@gmail.com", "phone": "780-952-9739", "address": "Indianapolis IN, United States", "channel": "Shopify", "orders": 1, "revenue": 19.78, "last_order": "2026-03-16"}, {"id": "CUST-023", "name": "Rick Stauffer", "email": "rick@freshveggie.com", "phone": "407-417-0530", "address": "Youngsville PA, United States", "channel": "Shopify", "orders": 1, "revenue": 1351.17, "last_order": "2026-03-14"}, {"id": "CUST-024", "name": "Pedrum Amin", "email": null, "phone": null, "address": null, "channel": "Shopify", "orders": 1, "revenue": 0, "last_order": "2026-03-13"}, {"id": "CUST-025", "name": "Antonio Cernuto", "email": "antonio@pur2o.com", "phone": "973-647-2939", "address": "San Giuliano Milanese, Italy", "channel": "Shopify", "orders": 1, "revenue": 1336.32, "last_order": "2026-03-11"}, {"id": "CUST-026", "name": "Rashida Lee", "email": "happy1today@gmail.com", "phone": "713-819-8539", "address": "Aiken SC, United States", "channel": "Shopify", "orders": 1, "revenue": 999.61, "last_order": "2026-03-06"}, {"id": "CUST-027", "name": "Jean Cotis", "email": "designerjeanssalon@yahoo.com", "phone": "973-224-9459", "address": "Ajaccio, France", "channel": "Shopify", "orders": 1, "revenue": 1023.44, "last_order": "2026-02-28"}, {"id": "CUST-028", "name": "Frederick Whittington", "email": "fawjr61@gmail.com", "phone": "443-618-1651", "address": "Richmond TX, United States", "channel": "Shopify", "orders": 1, "revenue": 1023.44, "last_order": "2026-02-28"}, {"id": "CUST-029", "name": "Justin Plumley", "email": "jplumley6@yahoo.com", "phone": "864-415-1243", "address": "Gallatin TN, United States", "channel": "Shopify", "orders": 1, "revenue": 1022.27, "last_order": "2026-02-27"}, {"id": "CUST-030", "name": "Richard Ahola", "email": null, "phone": null, "address": "Georgetown ON, Canada", "channel": "Shopify", "orders": 1, "revenue": 1129.99, "last_order": "2026-02-26"}, {"id": "CUST-031", "name": "AUDREY BALANAY-ST JOHN", "email": "audreystjohn143@gmail.com", "phone": "904-208-0720", "address": "Pembroke Pines FL, United States", "channel": "Shopify", "orders": 1, "revenue": 1007.06, "last_order": "2026-02-25"}, {"id": "CUST-032", "name": "Michael Romans", "email": "xseaman@msn.com", "phone": "831-760-0031", "address": "Windham ME, United States", "channel": "Shopify", "orders": 1, "revenue": 1026.43, "last_order": "2026-02-25"}, {"id": "CUST-033", "name": "Suzan Jackovatz", "email": "suzan@jackovatz.com", "phone": "678-997-7421", "address": "Calgary AB, Canada", "channel": "Shopify", "orders": 1, "revenue": 1008.01, "last_order": "2026-02-24"}, {"id": "CUST-034", "name": "Dixie Bean", "email": "dixbean@yahoo.com", "phone": "304-257-7716", "address": "Murfreesboro TN, United States", "channel": "Shopify", "orders": 1, "revenue": 1006.76, "last_order": "2026-02-23"}, {"id": "CUST-035", "name": "Joy Seargeant", "email": "thejosierave@hotmail.com", "phone": "807-630-7618", "address": "Barrie ON, Canada", "channel": "Shopify", "orders": 1, "revenue": 1107.39, "last_order": "2026-02-23"}, {"id": "CUST-036", "name": "Ann Prendergast", "email": "evirdhgih@gmail.com", "phone": "604-250-7085", "address": "Concord NH, United States", "channel": "Shopify", "orders": 1, "revenue": 1049.99, "last_order": "2026-02-22"}, {"id": "CUST-037", "name": "Sandra Sweet", "email": "Shschestnut@gmail.com", "phone": "847-917-9141", "address": "Tampa FL, United States", "channel": "Shopify", "orders": 1, "revenue": 1026.36, "last_order": "2026-02-22"}, {"id": "CUST-038", "name": "Karon Plasha", "email": "kfplasha@icloud.com", "phone": "703-534-6858", "address": "Indianapolis IN, United States", "channel": "Shopify", "orders": 1, "revenue": 1005.96, "last_order": "2026-02-22"}, {"id": "CUST-039", "name": "Robert Simoneau", "email": "robert@akamna.com", "phone": "514-777-8247", "address": "Vernon BC, Canada", "channel": "Shopify", "orders": 1, "revenue": 1028.99, "last_order": "2026-02-19"}, {"id": "CUST-040", "name": "Anthony kurt", "email": "tnykurt313@yahoo.com", "phone": "313-502-3452", "address": "Mississauga ON, Canada", "channel": "Shopify", "orders": 1, "revenue": 1006.97, "last_order": "2026-02-18"}, {"id": "CUST-041", "name": "ron russell", "email": "ron@newcmi.ca", "phone": "604-834-4451", "address": "Sooke BC, Canada", "channel": "Shopify", "orders": 1, "revenue": 1049.99, "last_order": "2026-02-18"}, {"id": "CUST-042", "name": "Robert Buckley", "email": "robert.daniel.buckley@gmail.com", "phone": "850-696-3184", "address": "Burnham PA, United States", "channel": "Shopify", "orders": 1, "revenue": 1001.65, "last_order": "2026-02-16"}, {"id": "CUST-043", "name": "Fred Rice", "email": "ricefj50@yahoo.com", "phone": "814-688-7182", "address": "Milford NH, United States", "channel": "Shopify", "orders": 1, "revenue": 1024.49, "last_order": "2026-02-15"}, {"id": "CUST-044", "name": "Scott Gilbert", "email": "mrscottg@gmail.com", "phone": "780-952-9739", "address": "Bonney Lake WA, United States", "channel": "Shopify", "orders": 1, "revenue": 1049.99, "last_order": "2026-02-13"}, {"id": "CUST-045", "name": "Melissa Braschuk", "email": null, "phone": null, "address": null, "channel": "Shopify", "orders": 1, "revenue": 43.74, "last_order": "2026-02-13"}, {"id": "CUST-046", "name": "Tricia Bowling", "email": "Triciab12@gmail.com", "phone": "251-348-6873", "address": "Dade City FL, United States", "channel": "Shopify", "orders": 1, "revenue": 1001.48, "last_order": "2026-02-13"}, {"id": "CUST-047", "name": "Joseph Le", "email": null, "phone": null, "address": "Montreal QC, Canada", "channel": "Shopify", "orders": 1, "revenue": 0, "last_order": "2026-02-13"}, {"id": "CUST-048", "name": "Jeremiah Pauw", "email": "jeremiah@peacockhospitality.ca", "phone": "250-278-6788", "address": "Chilliwack BC, Canada", "channel": "Shopify", "orders": 1, "revenue": 1028.99, "last_order": "2026-02-12"}, {"id": "CUST-049", "name": "Douglas Hanson", "email": "dhanson7298@gmail.com", "phone": "605-660-7298", "address": "Crestwood KY, United States", "channel": "Shopify", "orders": 1, "revenue": 996.07, "last_order": "2026-02-10"}, {"id": "CUST-050", "name": "Janna Moore", "email": null, "phone": null, "address": null, "channel": "Shopify", "orders": 0, "revenue": 0, "last_order": null}];
+const SALES_ORDERS = [{"so": "#1111", "date": "2026-04-10", "channel": "Shopify", "customer": "Annmarie Kennedy", "email": null, "sku": "LILA-001", "qty": 1, "total": 1037.27, "currency": "USD", "status": "Open", "payment": "Paid", "fulfill": "Unfulfilled", "shipped_date": null, "tracking": null, "notes": "U.S. Free Shipping"}, {"so": "#1110", "date": "2026-04-10", "channel": "Shopify", "customer": "Phayvanh Nanthavongdouangsy", "email": null, "sku": "LILA-001", "qty": 1, "total": 1016.36, "currency": "USD", "status": "Open", "payment": "Paid", "fulfill": "Unfulfilled", "shipped_date": null, "tracking": null, "notes": "U.S. Free Shipping"}, {"so": "#1109", "date": "2026-04-09", "channel": "Shopify", "customer": "Sarah Harris", "email": null, "sku": "LILA-001", "qty": 1, "total": 1016.08, "currency": "USD", "status": "Open", "payment": "Paid", "fulfill": "Unfulfilled", "shipped_date": null, "tracking": null, "notes": "U.S. Free Shipping"}, {"so": "#1108", "date": "2026-04-09", "channel": "Shopify", "customer": "Kristen Pimentel", "email": null, "sku": "LILA-001", "qty": 1, "total": 985.23, "currency": "USD", "status": "Open", "payment": "Paid", "fulfill": "Unfulfilled", "shipped_date": null, "tracking": null, "notes": "U.S. Free Shipping"}, {"so": "#1107", "date": "2026-04-07", "channel": "Shopify", "customer": "Louis DiPalma", "email": "ljdpdm@me.com", "sku": "LILA-001", "qty": 1, "total": 1043.06, "currency": "USD", "status": "Open", "payment": "Paid", "fulfill": "Unfulfilled", "shipped_date": null, "tracking": null, "notes": "U.S. Free Shipping"}, {"so": "#1106", "date": "2026-04-07", "channel": "Shopify", "customer": "Pedrum", "email": null, "sku": "LILA-001", "qty": 1, "total": 0, "currency": "USD", "status": "Delivered", "payment": "Paid", "fulfill": "Fulfilled", "shipped_date": "2026-04-07", "tracking": null, "notes": "U.S. Free Shipping"}, {"so": "#1105", "date": "2026-04-07", "channel": "Shopify", "customer": "Pedrum", "email": null, "sku": "LILA-001", "qty": 1, "total": 0, "currency": "CAD", "status": "Delivered", "payment": "Paid", "fulfill": "Fulfilled", "shipped_date": "2026-04-07", "tracking": null, "notes": "Canpar Ground"}, {"so": "#1104", "date": "2026-03-31", "channel": "Shopify", "customer": "Katrina Dowd", "email": "katrinadowd83@gmail.com", "sku": "LILA-001", "qty": 1, "total": 1302.95, "currency": "USD", "status": "Open", "payment": "Paid", "fulfill": "Unfulfilled", "shipped_date": null, "tracking": null, "notes": "Standard International"}, {"so": "#1103", "date": "2026-03-27", "channel": "Shopify", "customer": "Angela Findlay", "email": "fireandprose17@outlook.com", "sku": "LILA-001", "qty": 1, "total": 42.38, "currency": "USD", "status": "Open", "payment": "Paid", "fulfill": "Unfulfilled", "shipped_date": null, "tracking": null, "notes": "Standard"}, {"so": "#1102", "date": "2026-03-27", "channel": "Shopify", "customer": "Matthew Mossey", "email": null, "sku": "LILA-001", "qty": 1, "total": 43.74, "currency": "USD", "status": "Delivered", "payment": "Paid", "fulfill": "Fulfilled", "shipped_date": "2026-03-27", "tracking": null, "notes": "Standard | Open ticket HS-0048: Machine crack (P100 needed)"}, {"so": "#1101", "date": "2026-03-26", "channel": "Shopify", "customer": "Pedrum", "email": null, "sku": "LILA-001", "qty": 1, "total": 0, "currency": "USD", "status": "Delivered", "payment": "Paid", "fulfill": "Fulfilled", "shipped_date": "2026-03-26", "tracking": null, "notes": "Standard"}, {"so": "#1100", "date": "2026-03-26", "channel": "Shopify", "customer": "Elizabeth Antony", "email": null, "sku": "LILA-001", "qty": 1, "total": 131.25, "currency": "USD", "status": "Delivered", "payment": "Paid", "fulfill": "Fulfilled", "shipped_date": "2026-03-26", "tracking": null, "notes": "Standard"}, {"so": "#1099", "date": "2026-03-23", "channel": "Shopify", "customer": "Tara Dupper", "email": "Tarajdupper@gmail.com", "sku": "LILA-001", "qty": 1, "total": 1351.87, "currency": "USD", "status": "Open", "payment": "Paid", "fulfill": "Unfulfilled", "shipped_date": null, "tracking": null, "notes": "Standard International"}, {"so": "#1098", "date": "2026-03-22", "channel": "Shopify", "customer": "Lisa Clarke", "email": "lisaclarkewell@gmail.com", "sku": "LILA-001", "qty": 1, "total": 127.13, "currency": "USD", "status": "Open", "payment": "Paid", "fulfill": "Unfulfilled", "shipped_date": null, "tracking": null, "notes": "Standard"}, {"so": "#1097", "date": "2026-03-22", "channel": "Shopify", "customer": "Cole Perkins", "email": "cperkins39741@gmail.com", "sku": "LILA-001", "qty": 1, "total": 1372.36, "currency": "USD", "status": "Open", "payment": "Paid", "fulfill": "Unfulfilled", "shipped_date": null, "tracking": null, "notes": "Standard International"}, {"so": "#1096", "date": "2026-03-22", "channel": "Shopify", "customer": "Rebecca Campbell", "email": "campbellra652@gmail.com", "sku": "LILA-001", "qty": 1, "total": 19.95, "currency": "USD", "status": "Open", "payment": "Paid", "fulfill": "Unfulfilled", "shipped_date": null, "tracking": null, "notes": "Standard"}, {"so": "#1095", "date": "2026-03-21", "channel": "Shopify", "customer": "Jacob Wenger", "email": "wenger.jake@gmail.com", "sku": "LILA-001", "qty": 1, "total": 1372.36, "currency": "USD", "status": "Open", "payment": "Paid", "fulfill": "Unfulfilled", "shipped_date": null, "tracking": null, "notes": "Standard International"}, {"so": "#1094", "date": "2026-03-19", "channel": "Shopify", "customer": "Ashley Wright", "email": null, "sku": "LILA-001", "qty": 1, "total": 1502.89, "currency": "USD", "status": "Open", "payment": "Paid", "fulfill": "Unfulfilled", "shipped_date": null, "tracking": null, "notes": "Standard"}, {"so": "#1093", "date": "2026-03-18", "channel": "Shopify", "customer": "Brent Neave", "email": "brent@baker-neave.com", "sku": "LILA-001", "qty": 1, "total": 1396.49, "currency": "USD", "status": "Open", "payment": "Paid", "fulfill": "Unfulfilled", "shipped_date": null, "tracking": null, "notes": "Standard"}, {"so": "#1092", "date": "2026-03-16", "channel": "Shopify", "customer": "Dale Bober", "email": "dalebober@gmail.com", "sku": "LILA-001", "qty": 1, "total": 1346.46, "currency": "USD", "status": "Open", "payment": "Paid", "fulfill": "Unfulfilled", "shipped_date": null, "tracking": null, "notes": "Standard International"}, {"so": "#1091", "date": "2026-03-16", "channel": "Shopify", "customer": "Scott Iles", "email": "mrscottg@gmail.com", "sku": "LILA-001", "qty": 1, "total": 19.78, "currency": "USD", "status": "Open", "payment": "Paid", "fulfill": "Unfulfilled", "shipped_date": "2026-03-05", "tracking": "D420352470001907601001", "notes": "Standard"}, {"so": "#1090", "date": "2026-03-14", "channel": "Shopify", "customer": "Rick Stauffer", "email": "rick@freshveggie.com", "sku": "LILA-001", "qty": 1, "total": 1351.17, "currency": "USD", "status": "Open", "payment": "Paid", "fulfill": "Unfulfilled", "shipped_date": null, "tracking": null, "notes": "Standard International"}, {"so": "#1089", "date": "2026-03-13", "channel": "Shopify", "customer": "Pedrum Amin", "email": null, "sku": "LILA-001", "qty": 1, "total": 0, "currency": "USD", "status": "Delivered", "payment": "Paid", "fulfill": "Fulfilled", "shipped_date": "2026-03-13", "tracking": null, "notes": "Standard"}, {"so": "#1088", "date": "2026-03-11", "channel": "Shopify", "customer": "Antonio Cernuto", "email": "antonio@pur2o.com", "sku": "LILA-001", "qty": 1, "total": 1336.32, "currency": "USD", "status": "Open", "payment": "Paid", "fulfill": "Unfulfilled", "shipped_date": null, "tracking": null, "notes": "Standard International"}, {"so": "#1087", "date": "2026-03-06", "channel": "Shopify", "customer": "Rashida Lee", "email": "happy1today@gmail.com", "sku": "LILA-001", "qty": 1, "total": 999.61, "currency": "USD", "status": "Delivered", "payment": "Paid", "fulfill": "Fulfilled", "shipped_date": "2026-03-06", "tracking": "1ZV56D26DK14619146", "notes": "Standard International"}, {"so": "#1086", "date": "2026-02-28", "channel": "Shopify", "customer": "Jean Cotis", "email": "designerjeanssalon@yahoo.com", "sku": "LILA-001", "qty": 1, "total": 1023.44, "currency": "USD", "status": "Delivered", "payment": "Paid", "fulfill": "Fulfilled", "shipped_date": "2026-02-28", "tracking": "1ZV56D26DK21357951", "notes": "Standard International"}, {"so": "#1085", "date": "2026-02-28", "channel": "Shopify", "customer": "Frederick Whittington", "email": "fawjr61@gmail.com", "sku": "LILA-001", "qty": 1, "total": 1023.44, "currency": "USD", "status": "Delivered", "payment": "Paid", "fulfill": "Fulfilled", "shipped_date": "2026-02-28", "tracking": "1ZV56D26DK26329419", "notes": "Standard International"}, {"so": "#1084", "date": "2026-02-27", "channel": "Shopify", "customer": "Justin Plumley", "email": "jplumley6@yahoo.com", "sku": "LILA-001", "qty": 1, "total": 1022.27, "currency": "USD", "status": "Delivered", "payment": "Paid", "fulfill": "Fulfilled", "shipped_date": "2026-02-27", "tracking": "1ZV56D26DK25313599", "notes": "Standard International"}, {"so": "#1083", "date": "2026-02-27", "channel": "Shopify", "customer": "Matthew Mossey", "email": null, "sku": "LILA-001", "qty": 1, "total": 43.74, "currency": "USD", "status": "Delivered", "payment": "Paid", "fulfill": "Fulfilled", "shipped_date": "2026-02-27", "tracking": null, "notes": "Standard | Open ticket HS-0048: Machine crack (P100 needed)"}, {"so": "#1082", "date": "2026-02-26", "channel": "Shopify", "customer": "Richard Ahola", "email": null, "sku": "LILA-001", "qty": 1, "total": 1129.99, "currency": "USD", "status": "Delivered", "payment": "Paid", "fulfill": "Fulfilled", "shipped_date": "2026-02-26", "tracking": null, "notes": "Standard"}, {"so": "#1081", "date": "2026-02-25", "channel": "Shopify", "customer": "Elizabeth Antony", "email": null, "sku": "LILA-001", "qty": 1, "total": 131.25, "currency": "USD", "status": "Delivered", "payment": "Paid", "fulfill": "Fulfilled", "shipped_date": "2026-02-25", "tracking": null, "notes": "Standard"}, {"so": "#1080", "date": "2026-02-25", "channel": "Shopify", "customer": "AUDREY BALANAY-ST JOHN", "email": "audreystjohn143@gmail.com", "sku": "LILA-001", "qty": 1, "total": 1007.06, "currency": "USD", "status": "Delivered", "payment": "Paid", "fulfill": "Fulfilled", "shipped_date": "2026-02-25", "tracking": "1ZV56D26DK23942494", "notes": "Standard International"}, {"so": "#1079", "date": "2026-02-25", "channel": "Shopify", "customer": "Michael Romans", "email": "xseaman@msn.com", "sku": "LILA-001", "qty": 1, "total": 1026.43, "currency": "USD", "status": "Delivered", "payment": "Paid", "fulfill": "Fulfilled", "shipped_date": "2026-02-25", "tracking": "1ZV56D26DK28560325", "notes": "Standard International"}, {"so": "#1078", "date": "2026-02-24", "channel": "Shopify", "customer": "Suzan Jackovatz", "email": "suzan@jackovatz.com", "sku": "LILA-001", "qty": 1, "total": 1008.01, "currency": "USD", "status": "Delivered", "payment": "Paid", "fulfill": "Fulfilled", "shipped_date": "2026-02-24", "tracking": "1ZV56D26DK04334507", "notes": "Standard International"}, {"so": "#1077", "date": "2026-02-23", "channel": "Shopify", "customer": "Dixie Bean", "email": "dixbean@yahoo.com", "sku": "LILA-001", "qty": 1, "total": 1006.76, "currency": "USD", "status": "Delivered", "payment": "Paid", "fulfill": "Fulfilled", "shipped_date": "2026-02-23", "tracking": "1ZV56D26DK18155292", "notes": "Standard International"}, {"so": "#1076", "date": "2026-02-23", "channel": "Shopify", "customer": "Joy Seargeant", "email": "thejosierave@hotmail.com", "sku": "LILA-001", "qty": 1, "total": 1107.39, "currency": "USD", "status": "Delivered", "payment": "Paid", "fulfill": "Fulfilled", "shipped_date": "2026-02-23", "tracking": "D420352470001966966001", "notes": "Standard"}, {"so": "#1075", "date": "2026-02-22", "channel": "Shopify", "customer": "Ann Prendergast", "email": "evirdhgih@gmail.com", "sku": "LILA-001", "qty": 1, "total": 1049.99, "currency": "USD", "status": "Open", "payment": "Paid", "fulfill": "Unfulfilled", "shipped_date": null, "tracking": null, "notes": "Standard"}, {"so": "#1074", "date": "2026-02-22", "channel": "Shopify", "customer": "Sandra Sweet", "email": "Shschestnut@gmail.com", "sku": "LILA-001", "qty": 1, "total": 1026.36, "currency": "USD", "status": "Delivered", "payment": "Paid", "fulfill": "Fulfilled", "shipped_date": "2026-02-22", "tracking": "1ZV56D26DK09789697", "notes": "Standard International"}, {"so": "#1073", "date": "2026-02-22", "channel": "Shopify", "customer": "Karon Plasha", "email": "kfplasha@icloud.com", "sku": "LILA-001", "qty": 1, "total": 1005.96, "currency": "USD", "status": "Delivered", "payment": "Paid", "fulfill": "Fulfilled", "shipped_date": "2026-02-22", "tracking": "1ZV56D26DK36337632", "notes": "Standard International"}, {"so": "#1072", "date": "2026-02-19", "channel": "Shopify", "customer": "Robert Simoneau", "email": "robert@akamna.com", "sku": "LILA-001", "qty": 1, "total": 1028.99, "currency": "USD", "status": "Delivered", "payment": "Paid", "fulfill": "Fulfilled", "shipped_date": "2026-02-19", "tracking": "D556276790000035134001", "notes": "Standard"}, {"so": "#1071", "date": "2026-02-18", "channel": "Shopify", "customer": "Anthony kurt", "email": "tnykurt313@yahoo.com", "sku": "LILA-001", "qty": 1, "total": 1006.97, "currency": "USD", "status": "Delivered", "payment": "Paid", "fulfill": "Fulfilled", "shipped_date": "2026-02-18", "tracking": "1ZV56D26DK37674810", "notes": "Standard International | Open ticket HS-0075: Top lid cracked (replacement needed)"}, {"so": "#1070", "date": "2026-02-18", "channel": "Shopify", "customer": "ron russell", "email": "ron@newcmi.ca", "sku": "LILA-001", "qty": 1, "total": 1049.99, "currency": "USD", "status": "Open", "payment": "Paid", "fulfill": "Unfulfilled", "shipped_date": null, "tracking": null, "notes": "Standard"}, {"so": "#1069", "date": "2026-02-16", "channel": "Shopify", "customer": "Robert Buckley", "email": "robert.daniel.buckley@gmail.com", "sku": "LILA-001", "qty": 1, "total": 1001.65, "currency": "USD", "status": "Delivered", "payment": "Paid", "fulfill": "Fulfilled", "shipped_date": "2026-02-16", "tracking": "1ZV56D26DK01309291", "notes": "Standard International"}, {"so": "#1068", "date": "2026-02-15", "channel": "Shopify", "customer": "Fred Rice", "email": "ricefj50@yahoo.com", "sku": "LILA-001", "qty": 1, "total": 1024.49, "currency": "USD", "status": "Delivered", "payment": "Paid", "fulfill": "Fulfilled", "shipped_date": "2026-02-15", "tracking": "1ZV56D26DK37984360", "notes": "Standard International"}, {"so": "#1067", "date": "2026-02-13", "channel": "Shopify", "customer": "Scott Gilbert", "email": "mrscottg@gmail.com", "sku": "LILA-001", "qty": 1, "total": 1049.99, "currency": "USD", "status": "Delivered", "payment": "Paid", "fulfill": "Fulfilled", "shipped_date": "2026-02-13", "tracking": "D420352470001907601001", "notes": "Standard"}, {"so": "#1066", "date": "2026-02-13", "channel": "Shopify", "customer": "Melissa Braschuk", "email": null, "sku": "LILA-001", "qty": 1, "total": 43.74, "currency": "USD", "status": "Delivered", "payment": "Paid", "fulfill": "Fulfilled", "shipped_date": "2026-02-13", "tracking": null, "notes": "Standard"}, {"so": "#1065", "date": "2026-02-13", "channel": "Shopify", "customer": "Tricia Bowling", "email": "Triciab12@gmail.com", "sku": "LILA-001", "qty": 1, "total": 1001.48, "currency": "USD", "status": "Delivered", "payment": "Paid", "fulfill": "Fulfilled", "shipped_date": "2026-02-13", "tracking": "1ZV56D26DK06672193", "notes": "Standard International | Open ticket HS-0076: Machine flashing issue"}, {"so": "#1064", "date": "2026-02-13", "channel": "Shopify", "customer": "Joseph Le", "email": null, "sku": "LILA-001", "qty": 0, "total": 0, "currency": "USD", "status": "Cancelled", "payment": "Refunded", "fulfill": "Unfulfilled", "shipped_date": null, "tracking": null, "notes": "Standard International"}, {"so": "#1063", "date": "2026-02-12", "channel": "Shopify", "customer": "Jeremiah Pauw", "email": "jeremiah@peacockhospitality.ca", "sku": "LILA-001", "qty": 1, "total": 1028.99, "currency": "USD", "status": "Delivered", "payment": "Paid", "fulfill": "Fulfilled", "shipped_date": "2026-02-12", "tracking": "D420352470001907597001", "notes": "Standard"}, {"so": "#1062", "date": "2026-02-10", "channel": "Shopify", "customer": "Douglas Hanson", "email": "dhanson7298@gmail.com", "sku": "LILA-001", "qty": 1, "total": 996.07, "currency": "USD", "status": "Delivered", "payment": "Paid", "fulfill": "Fulfilled", "shipped_date": "2026-02-10", "tracking": "1ZV56D26DK34315829", "notes": "Standard International | Open ticket HS-0077: Back lid/power button issue"}];
+const SERIALS = [{"sn": "LL01-00000000005", "sku": "LILA-001", "batch": "P50N", "ship_date": "2026-04-10", "customer": "Mary Oskamp", "phone": "905-536-6985", "destination": "12 Pulla Street, Trenton, ON, K8V 5P7", "carrier": "Canpar", "tracking": "D420352470002041843001", "shipment_id": "SHP-CA-038", "status": "In Transit", "ticket": null, "warranty_end": "2028-04-09"}, {"sn": "LL01-00000000045", "sku": "LILA-001", "batch": "P50N", "ship_date": "2026-01-30", "customer": "Jason Kemp", "phone": "613-791-7734", "destination": "2401 Shanna Rd, Carp, ON, K0A 1L0", "carrier": "Canpar", "tracking": "D556276790000029076001", "shipment_id": "SHP-CA-002", "status": "Delivered", "ticket": null, "warranty_end": "2028-01-30"}, {"sn": "LL01-00000000109", "sku": "LILA-001", "batch": "P100", "ship_date": "2026-03-18", "customer": "Joan Teichroeb", "phone": "250-961-8667", "destination": "395 Redfern Dr, Vanderhoof, BC, V0J 3A2", "carrier": "Canpar", "tracking": "D556276790000042526001", "shipment_id": "SHP-CA-025", "status": "Delivered", "ticket": "HS-0044", "warranty_end": "2028-03-17"}, {"sn": "LL01-00000000122", "sku": "LILA-001", "batch": "P100", "ship_date": "2026-03-05", "customer": "Scott Gilbert", "phone": "780-952-9739", "destination": "5601 56a St, Beaumont, AB, T4X 1A7", "carrier": "Canpar", "tracking": "D420352470001907601001", "shipment_id": "SHP-CA-023", "status": "Delivered", "ticket": null, "warranty_end": "2028-03-04"}, {"sn": "LL01-00000000126", "sku": "LILA-001", "batch": "P100", "ship_date": "2026-02-17", "customer": "Vicki Myhre", "phone": "403-901-9472", "destination": "115 Hillview Rd, Strathmore, AB, T1P 1W2", "carrier": "Canpar", "tracking": "D556276790000032996001", "shipment_id": "SHP-CA-004", "status": "Delivered", "ticket": null, "warranty_end": "2028-02-17"}, {"sn": "LL01-00000000142", "sku": "LILA-001", "batch": "P100", "ship_date": "2026-03-20", "customer": "Joy Seargeant", "phone": "807-630-7618", "destination": "147 Mud Lake Road, Murillo, ON, P0T 2G0", "carrier": "Canpar", "tracking": "D420352470001966966001", "shipment_id": "SHP-CA-028", "status": "Delivered", "ticket": null, "warranty_end": "2028-03-19"}, {"sn": "LL01-00000000144", "sku": "LILA-001", "batch": "P100", "ship_date": "2026-02-24", "customer": "Robert Simoneau", "phone": "514-777-8247", "destination": "4367 Pl. Joseph-Lenoir, Saint-Laurent, QC, H4R 3C3", "carrier": "Canpar", "tracking": "D556276790000035134001", "shipment_id": "SHP-CA-024", "status": "Delivered", "ticket": "HS-0064", "warranty_end": "2028-02-24"}, {"sn": "LL01-00000000145", "sku": "LILA-001", "batch": "P100", "ship_date": "2026-01-29", "customer": "Amanda McCordic", "phone": "506-478-4711", "destination": "16 Johnstone Ln, Charters Settlement, NB, E3C 0E3", "carrier": "UPS", "tracking": "1ZV56D26DK27263612", "shipment_id": "SHP-CA-001", "status": "Delivered", "ticket": "HS-0045", "warranty_end": "2028-01-29"}, {"sn": "LL01-00000000201", "sku": "LILA-001", "batch": "P150", "ship_date": "2026-03-05", "customer": "Jeremiah Pauw", "phone": "250-278-6788", "destination": "2021 Hwy 3, Fernie, BC, V0B 1M1", "carrier": "Canpar", "tracking": "D420352470001907597001", "shipment_id": "SHP-CA-022", "status": "Delivered", "ticket": null, "warranty_end": "2028-03-04"}, {"sn": "LL01-00000000202", "sku": "LILA-001", "batch": "P150", "ship_date": "2026-03-03", "customer": "Kaiti Klucas", "phone": "570-419-8076", "destination": "8634 Union Ridge Dr, Hokah, MN, 55941", "carrier": "UPS", "tracking": "1ZV56D26DK00652359", "shipment_id": "SHP-US-043", "status": "Delivered", "ticket": null, "warranty_end": "2028-03-02"}, {"sn": "LL01-00000000203", "sku": "LILA-001", "batch": "P150", "ship_date": "2026-03-13", "customer": "Audrey Balanay-St John", "phone": "904-208-0720", "destination": "140 Lakes Blvd, Kingsland, GA, 31548", "carrier": "UPS", "tracking": "1ZV56D26DK23942494", "shipment_id": "SHP-US-062", "status": "Delivered", "ticket": null, "warranty_end": "2028-03-12"}, {"sn": "LL01-00000000205", "sku": "LILA-001", "batch": "P150", "ship_date": "2026-03-10", "customer": "Tricia Bowling", "phone": "251-348-6873", "destination": "4150 Shan Dr E, Mobile, AL, 36693", "carrier": "UPS", "tracking": "1ZV56D26DK06672193", "shipment_id": "SHP-US-047", "status": "Delivered", "ticket": "HS-0076", "warranty_end": "2028-03-09"}, {"sn": "LL01-00000000207", "sku": "LILA-001", "batch": "P150", "ship_date": "2026-03-05", "customer": "Esmeralda Burgess", "phone": "443-820-5971", "destination": "3264 Wendlyn Way, Edgewater, MD, 21037", "carrier": "UPS", "tracking": "1ZV56D26DK22305246", "shipment_id": "SHP-US-046", "status": "Delivered", "ticket": null, "warranty_end": "2028-03-04"}, {"sn": "LL01-00000000210", "sku": "LILA-001", "batch": "P150", "ship_date": "2026-03-12", "customer": "Fred Rice", "phone": "814-688-7182", "destination": "6284 Smith Rd, Hamburg, NY, 14075", "carrier": "UPS", "tracking": "1ZV56D26DK37984360", "shipment_id": "SHP-US-055", "status": "Delivered", "ticket": null, "warranty_end": "2028-03-11"}, {"sn": "LL01-00000000211", "sku": "LILA-001", "batch": "P150", "ship_date": "2026-03-05", "customer": "Keith Taitano", "phone": "808-699-0587", "destination": "84-781 Alahele St, Waianae, HI, 96792", "carrier": "UPS", "tracking": "1ZV56D26DG25936156", "shipment_id": "SHP-US-045", "status": "Delivered", "ticket": null, "warranty_end": "2028-03-04"}, {"sn": "LL01-00000000212", "sku": "LILA-001", "batch": "P150", "ship_date": "2026-03-12", "customer": "Anthony Kurt", "phone": "313-502-3452", "destination": "18303 Muirland St, Detroit, MI, 48221", "carrier": "UPS", "tracking": "1ZV56D26DK37674810", "shipment_id": "SHP-US-048", "status": "Delivered", "ticket": "HS-0075", "warranty_end": "2028-03-11"}, {"sn": "LL01-00000000215", "sku": "LILA-001", "batch": "P150", "ship_date": "2026-03-11", "customer": "Heather Hall", "phone": "775-297-3381", "destination": "2775 Oak Ridge Dr, Carson City, NV, 89703", "carrier": "UPS", "tracking": "1ZV56D26DK34720248", "shipment_id": "SHP-US-051", "status": "Delivered", "ticket": null, "warranty_end": "2028-03-10"}, {"sn": "LL01-00000000216", "sku": "LILA-001", "batch": "P150", "ship_date": "2026-03-13", "customer": "Michael Romans", "phone": "831-760-0031", "destination": "1261 Soto St, Seaside, CA, 93955", "carrier": "UPS", "tracking": "1ZV56D26DK28560325", "shipment_id": "SHP-US-061", "status": "Delivered", "ticket": null, "warranty_end": "2028-03-12"}, {"sn": "LL01-00000000217", "sku": "LILA-001", "batch": "P150", "ship_date": "2026-04-01", "customer": "Rashida Lee", "phone": "713-819-8539", "destination": "13431 Raven Flight Dr, Cypress, TX, 77429", "carrier": "UPS", "tracking": "1ZV56D26DK14619146", "shipment_id": "SHP-US-068", "status": "Delivered", "ticket": null, "warranty_end": "2028-03-31"}, {"sn": "LL01-00000000218", "sku": "LILA-001", "batch": "P150", "ship_date": "2026-03-13", "customer": "Suzan Jackovatz", "phone": "678-997-7421", "destination": "5528 Ridgemoor Dr, Braselton, GA, 30517", "carrier": "UPS", "tracking": "1ZV56D26DK04334507", "shipment_id": "SHP-US-060", "status": "Delivered", "ticket": null, "warranty_end": "2028-03-12"}, {"sn": "LL01-00000000219", "sku": "LILA-001", "batch": "P150", "ship_date": "2026-03-12", "customer": "Thomi Clinton", "phone": "760-218-4326", "destination": "16431 Avenida Ramada, Desert Hot Springs, CA, 92240", "carrier": "UPS", "tracking": "1ZV56D26DK37424349", "shipment_id": "SHP-US-053", "status": "Delivered", "ticket": null, "warranty_end": "2028-03-11"}, {"sn": "LL01-00000000221", "sku": "LILA-001", "batch": "P150", "ship_date": "2026-03-12", "customer": "Robert Buckley", "phone": "850-696-3184", "destination": "4871 Randee Cir, Pensacola, FL, 32526", "carrier": "UPS", "tracking": "1ZV56D26DK01309291", "shipment_id": "SHP-US-056", "status": "Delivered", "ticket": null, "warranty_end": "2028-03-11"}, {"sn": "LL01-00000000223", "sku": "LILA-001", "batch": "P150", "ship_date": "2026-03-11", "customer": "Sandra Colligan", "phone": "508-380-3307", "destination": "3 Atwood St, Southborough, MA, 01772", "carrier": "UPS", "tracking": "1ZV56D26DK10390006", "shipment_id": "SHP-US-050", "status": "Delivered", "ticket": null, "warranty_end": "2028-03-10"}, {"sn": "LL01-00000000224", "sku": "LILA-001", "batch": "P150", "ship_date": "2026-03-12", "customer": "Sandra Sweet", "phone": "847-917-9141", "destination": "1084 Ironwood Ct, Glenview, IL, 60025", "carrier": "UPS", "tracking": "1ZV56D26DK09789697", "shipment_id": "SHP-US-058", "status": "Delivered", "ticket": null, "warranty_end": "2028-03-11"}, {"sn": "LL01-00000000227", "sku": "LILA-001", "batch": "P150", "ship_date": "2026-03-05", "customer": "Kristi Blue", "phone": "270-316-0404", "destination": "2965 Cr-1506J, Owensboro, KY, 42303", "carrier": "UPS", "tracking": "1ZV56D26DK06425441", "shipment_id": "SHP-US-044", "status": "In Transit", "ticket": null, "warranty_end": "2028-03-04"}, {"sn": "LL01-00000000228", "sku": "LILA-001", "batch": "P150", "ship_date": "2026-02-24", "customer": "Rodney Richards", "phone": "816-456-8317", "destination": "1207 Spruce Dr, Greenwood, MO, 64034", "carrier": "UPS", "tracking": "1ZV56D26DK34362984", "shipment_id": "SHP-US-040", "status": "Delivered", "ticket": null, "warranty_end": "2028-02-24"}, {"sn": "LL01-00000000229", "sku": "LILA-001", "batch": "P150", "ship_date": "2026-03-13", "customer": "Dixie Bean", "phone": "304-257-7716", "destination": "2365 Cunningham Ln, Moorefield, WV, 26836", "carrier": "UPS", "tracking": "1ZV56D26DK18155292", "shipment_id": "SHP-US-059", "status": "Delivered", "ticket": null, "warranty_end": "2028-03-12"}, {"sn": "LL01-00000000230", "sku": "LILA-001", "batch": "P150", "ship_date": "2026-03-11", "customer": "Peter Lupachino", "phone": "203-228-3873", "destination": "1451 Guernseytown Rd, Watertown, CT, 06795", "carrier": "UPS", "tracking": "1ZV56D26DK37979134", "shipment_id": "SHP-US-052", "status": "Delivered", "ticket": null, "warranty_end": "2028-03-10"}, {"sn": "LL01-00000000231", "sku": "LILA-001", "batch": "P150", "ship_date": "2026-03-11", "customer": "Frank Nikolaidis", "phone": "330-705-0764", "destination": "10202 Ruffian Ln, Berlin, MD, 21811", "carrier": "UPS", "tracking": "1ZV56D26DK38341918", "shipment_id": "SHP-US-049", "status": "Delivered", "ticket": null, "warranty_end": "2028-03-10"}, {"sn": "LL01-00000000232", "sku": "LILA-001", "batch": "P150", "ship_date": "2026-03-18", "customer": "Douglas Hanson", "phone": "605-660-7298", "destination": "2809 Deer Blvd, Yankton, SD, 57078", "carrier": "UPS", "tracking": "1ZV56D26DK34315829", "shipment_id": "SHP-US-066", "status": "Delivered", "ticket": "HS-0077", "warranty_end": "2028-03-17"}, {"sn": "LL01-00000000233", "sku": "LILA-001", "batch": "P150", "ship_date": "2026-02-24", "customer": "Jeffrey Van Dyke", "phone": "971-344-2438", "destination": "731 E Twin Palms Dr, Palm Springs, CA, 92264", "carrier": "UPS", "tracking": "1ZV56D26DK36986995", "shipment_id": "SHP-US-041", "status": "Delivered", "ticket": "HS-0072", "warranty_end": "2028-02-24"}, {"sn": "LL01-00000000234", "sku": "LILA-001", "batch": "P150", "ship_date": "2026-03-13", "customer": "Frederick Whittington", "phone": "443-618-1651", "destination": "4120 Hidden Creek Rd, Port Republic, MD, 20676", "carrier": "UPS", "tracking": "1ZV56D26DK26329419", "shipment_id": "SHP-US-065", "status": "Delivered", "ticket": null, "warranty_end": "2028-03-12"}, {"sn": "LL01-00000000235", "sku": "LILA-001", "batch": "P150", "ship_date": "2026-03-12", "customer": "Karon Plasha", "phone": "703-534-6858", "destination": "2605 N Jefferson St, Arlington, VA 22207-1415", "carrier": "UPS", "tracking": "1ZV56D26DK36337632", "shipment_id": "SHP-US-057", "status": "Delivered", "ticket": null, "warranty_end": "2028-03-11"}, {"sn": "LL01-00000000236", "sku": "LILA-001", "batch": "P150", "ship_date": "2026-02-24", "customer": "Amila Smith", "phone": "229-412-8866", "destination": "174 Boyette Rd, Lakeland, GA, 31635", "carrier": "UPS", "tracking": "1ZV56D26DK12089222", "shipment_id": "SHP-US-042", "status": "Delivered", "ticket": null, "warranty_end": "2028-02-24"}, {"sn": "LL01-00000000238", "sku": "LILA-001", "batch": "P150", "ship_date": "2026-03-12", "customer": "Jefy Chacko", "phone": "763-670-3926", "destination": "258 Newtown Turnpike, Wilton, CT, 06897", "carrier": "UPS", "tracking": "1ZV56D26DK39171458", "shipment_id": "SHP-US-054", "status": "Delivered", "ticket": "HS-0070", "warranty_end": "2028-03-11"}, {"sn": "LL01-00000000239", "sku": "LILA-001", "batch": "P150", "ship_date": "2026-02-17", "customer": "Joan Teichroeb", "phone": "250-961-8667", "destination": "395 Redfern Dr, Vanderhoof, BC, V0J 3A2", "carrier": "Canpar", "tracking": "D420352470001836731001", "shipment_id": "SHP-CA-005", "status": "Delivered", "ticket": "HS-0044", "warranty_end": "2028-02-17"}, {"sn": "LL01-00000000243", "sku": "LILA-001", "batch": "P150", "ship_date": "2026-03-13", "customer": "Justin Plumley", "phone": "864-415-1243", "destination": "910 Angel Trace Ct, Inman, SC, 29349", "carrier": "UPS", "tracking": "1ZV56D26DK25313599", "shipment_id": "SHP-US-063", "status": "Delivered", "ticket": null, "warranty_end": "2028-03-12"}, {"sn": "LL01-00000000244", "sku": "LILA-001", "batch": "P150", "ship_date": "2026-02-24", "customer": "Teresa Just", "phone": "801-425-8250", "destination": "1193 N 1950 E, Layton, UT, 84040", "carrier": "UPS", "tracking": "1ZV56D26DK07619589", "shipment_id": "SHP-US-039", "status": "Delivered", "ticket": null, "warranty_end": "2028-02-24"}, {"sn": "LL01-00000000245", "sku": "LILA-001", "batch": "P150", "ship_date": "2026-03-20", "customer": "Jean Cotis", "phone": "973-224-9459", "destination": "88 Spring Valley Rd, Hardwick Township, NJ, 07825", "carrier": "UPS", "tracking": "1ZV56D26DK21357951", "shipment_id": "SHP-US-067", "status": "Delivered", "ticket": null, "warranty_end": "2028-03-19"}, {"sn": "(pending)", "sku": "LILA-001", "batch": null, "ship_date": null, "customer": "Amanda McCordic", "phone": "506-478-4711", "destination": "16 Johnstone Ln, Charters Settlement, NB, E3C 0E3", "carrier": "Purolator", "tracking": "520331991965", "shipment_id": "SHP-CA-003", "status": "Delivered", "ticket": "HS-0045", "warranty_end": null}, {"sn": "(pending)", "sku": "LILA-001", "batch": null, "ship_date": null, "customer": "Tien Tran", "phone": null, "destination": null, "carrier": null, "tracking": null, "shipment_id": "SHP-CA-009", "status": "Pending", "ticket": "HS-0067", "warranty_end": null}, {"sn": "(pending)", "sku": "LILA-001", "batch": null, "ship_date": null, "customer": "Matthew Mossey", "phone": null, "destination": null, "carrier": null, "tracking": null, "shipment_id": "SHP-CA-010", "status": "Pending", "ticket": "HS-0048", "warranty_end": null}, {"sn": "(pending)", "sku": "LILA-001", "batch": null, "ship_date": null, "customer": "Michael Madigan", "phone": null, "destination": null, "carrier": null, "tracking": null, "shipment_id": "SHP-CA-012", "status": "Pending", "ticket": "HS-0049", "warranty_end": null}, {"sn": "(pending)", "sku": "LILA-001", "batch": null, "ship_date": null, "customer": "Chris & Renata Grant", "phone": null, "destination": null, "carrier": null, "tracking": null, "shipment_id": "SHP-CA-016", "status": "Pending", "ticket": "HS-0043", "warranty_end": null}, {"sn": "(pending)", "sku": "LILA-001", "batch": null, "ship_date": null, "customer": "Tamara Martin", "phone": null, "destination": null, "carrier": null, "tracking": null, "shipment_id": "SHP-CA-017", "status": "Pending", "ticket": "HS-0046", "warranty_end": null}, {"sn": "(pending)", "sku": "LILA-001", "batch": null, "ship_date": null, "customer": "Candace Chan", "phone": null, "destination": null, "carrier": null, "tracking": null, "shipment_id": "SHP-CA-018", "status": "Pending", "ticket": "HS-0042", "warranty_end": null}, {"sn": "(pending)", "sku": "LILA-001", "batch": null, "ship_date": null, "customer": "Zhenghe Zhang", "phone": null, "destination": null, "carrier": null, "tracking": null, "shipment_id": "SHP-CA-019", "status": "Pending", "ticket": "HS-0060", "warranty_end": null}, {"sn": "(pending)", "sku": "LILA-001", "batch": null, "ship_date": null, "customer": "Kevin Cheng", "phone": null, "destination": null, "carrier": null, "tracking": null, "shipment_id": "SHP-CA-020", "status": "Pending", "ticket": "HS-0071", "warranty_end": null}, {"sn": "(pending)", "sku": "LILA-001", "batch": null, "ship_date": null, "customer": "Ann Prendergast", "phone": "604-250-7085", "destination": "135 Hardy Ave (Box 235), Sointula, BC, V0N3E0", "carrier": null, "tracking": null, "shipment_id": "SHP-CA-027", "status": "Pending", "ticket": "HS-0075", "warranty_end": null}, {"sn": "(pending)", "sku": "LILA-001", "batch": null, "ship_date": null, "customer": "Brent Neave", "phone": "604-329-2421", "destination": "4506 Grizzly Hill Rd., Spallumcheen, BC V4Y 0M1", "carrier": null, "tracking": null, "shipment_id": "SHP-CA-029", "status": "Pending", "ticket": "HS-0049", "warranty_end": null}, {"sn": "(pending)", "sku": "LILA-001", "batch": null, "ship_date": null, "customer": "Jenifer Henry", "phone": "403-804-1573", "destination": "304 8 Ave, Gleichen, AB, T0J 1N0", "carrier": "Canpar", "tracking": "D420352470001987399001", "shipment_id": "SHP-CA-031", "status": "In Transit", "ticket": "HS-0057", "warranty_end": null}, {"sn": "(pending)", "sku": "LILA-001", "batch": null, "ship_date": null, "customer": "Angeline Purcell", "phone": "506-523-7006", "destination": "499 Main St, Elsipogtog First Nation, NB, E4W 2X5", "carrier": "Canpar", "tracking": "D420352470001982720001", "shipment_id": "SHP-CA-032", "status": "Delivered", "ticket": "HS-0066", "warranty_end": null}, {"sn": "(pending)", "sku": "LILA-001", "batch": null, "ship_date": null, "customer": "Amanda McCordic", "phone": "506-478-4711", "destination": "16 Johnstone Ln, Charters Settlement, NB, E3C 0E3", "carrier": null, "tracking": null, "shipment_id": "SHP-CA-033", "status": "Pending", "ticket": "HS-0045", "warranty_end": null}, {"sn": "(pending)", "sku": "LILA-001", "batch": null, "ship_date": null, "customer": "Karolina Chmiel", "phone": null, "destination": null, "carrier": null, "tracking": null, "shipment_id": "SHP-CA-037", "status": "Pending", "ticket": "HS-0073", "warranty_end": null}];
+const MAKE_ORDERS = [{"mo": "MO-001", "sku": "VH-100", "name": "Virgo Smart Hub", "bom_version": "v2.1", "qty": 5, "completed": 0, "pct": 0, "start": "2026-04-10", "due": "2026-04-14", "status": "Planned", "assigned": "Line A Team", "materials": "Available", "linked_so": "SO-001", "warehouse": "Toronto-01"}, {"mo": "MO-002", "sku": "VH-300", "name": "Virgo Security Cam", "bom_version": "v1.3", "qty": 10, "completed": 3, "pct": 0.3, "start": "2026-04-09", "due": "2026-04-16", "status": "In Progress", "assigned": "Line B Team", "materials": "Partial", "linked_so": "SO-002", "warehouse": "Toronto-01"}, {"mo": "MO-003", "sku": "VH-200", "name": "Virgo Motion Sensor", "bom_version": "v3.0", "qty": 100, "completed": 100, "pct": 1, "start": "2026-04-05", "due": "2026-04-09", "status": "Completed", "assigned": "Line A Team", "materials": "Complete", "linked_so": null, "warehouse": "Toronto-01"}, {"mo": "MO-004", "sku": "VH-500", "name": "Virgo Thermostat", "bom_version": "v1.0", "qty": 50, "completed": 0, "pct": 0, "start": "2026-04-12", "due": "2026-04-22", "status": "Planned", "assigned": "Line C Team", "materials": "Awaiting PO", "linked_so": null, "warehouse": "Toronto-01"}];
+const BOMS = [{"bom_id": "BOM-001", "sku": "VH-100", "name": "Virgo Smart Hub", "version": "v2.1", "level": 0, "component_sku": "\u2014", "component_name": "\u2014 FINISHED GOOD \u2014", "qty": 1, "uom": "EA", "cost": null, "extended": 43.95, "supplier": null, "wastage": null, "status": "Active"}, {"bom_id": "BOM-001", "sku": "VH-100", "name": "Virgo Smart Hub", "version": "v2.1", "level": 1, "component_sku": "VH-100-PCB", "component_name": "Smart Hub PCB Assembly", "qty": 1, "uom": "EA", "cost": 22.5, "extended": 22.5, "supplier": "ShenZhen Electronics", "wastage": 2, "status": "Active"}, {"bom_id": "BOM-001", "sku": "VH-100", "name": "Virgo Smart Hub", "version": "v2.1", "level": 1, "component_sku": "VH-ENC-01", "component_name": "Device Enclosure", "qty": 1, "uom": "EA", "cost": 4.75, "extended": 4.75, "supplier": "Canadian Plastics", "wastage": 1, "status": "Active"}, {"bom_id": "BOM-001", "sku": "VH-100", "name": "Virgo Smart Hub", "version": "v2.1", "level": 1, "component_sku": "VH-BAT-LI", "component_name": "Li-Ion Battery Pack", "qty": 1, "uom": "EA", "cost": 6.2, "extended": 6.2, "supplier": "BatteryWorld", "wastage": 1, "status": "Active"}, {"bom_id": "BOM-001", "sku": "VH-100", "name": "Virgo Smart Hub", "version": "v2.1", "level": 1, "component_sku": "VH-ANT-WIFI", "component_name": "WiFi Antenna Module", "qty": 1, "uom": "EA", "cost": 3.8, "extended": 3.8, "supplier": "ShenZhen Electronics", "wastage": 1, "status": "Active"}, {"bom_id": "BOM-001", "sku": "VH-100", "name": "Virgo Smart Hub", "version": "v2.1", "level": 1, "component_sku": "VH-PWR-USB", "component_name": "USB-C Power Supply", "qty": 1, "uom": "EA", "cost": 5.5, "extended": 5.5, "supplier": "BatteryWorld", "wastage": 0, "status": "Active"}, {"bom_id": "BOM-001", "sku": "VH-100", "name": "Virgo Smart Hub", "version": "v2.1", "level": 1, "component_sku": "VH-LBL-100", "component_name": "Product Label & Packaging", "qty": 1, "uom": "EA", "cost": 1.2, "extended": 1.2, "supplier": "Canadian Plastics", "wastage": 5, "status": "Active"}, {"bom_id": "BOM-002", "sku": "VH-300", "name": "Virgo Security Cam", "version": "v1.3", "level": 0, "component_sku": "\u2014", "component_name": "\u2014 FINISHED GOOD \u2014", "qty": 1, "uom": "EA", "cost": null, "extended": 58.7, "supplier": null, "wastage": null, "status": "Active"}, {"bom_id": "BOM-002", "sku": "VH-300", "name": "Virgo Security Cam", "version": "v1.3", "level": 1, "component_sku": "VH-300-PCB", "component_name": "Camera PCB Assembly", "qty": 1, "uom": "EA", "cost": 28, "extended": 28, "supplier": "ShenZhen Electronics", "wastage": 2, "status": "Active"}, {"bom_id": "BOM-002", "sku": "VH-300", "name": "Virgo Security Cam", "version": "v1.3", "level": 1, "component_sku": "VH-300-LENS", "component_name": "Camera Lens Module", "qty": 1, "uom": "EA", "cost": 18, "extended": 18, "supplier": "OptiLens Taiwan", "wastage": 1, "status": "Active"}, {"bom_id": "BOM-002", "sku": "VH-300", "name": "Virgo Security Cam", "version": "v1.3", "level": 1, "component_sku": "VH-ENC-03", "component_name": "Camera Enclosure (weatherproof)", "qty": 1, "uom": "EA", "cost": 8.5, "extended": 8.5, "supplier": "Canadian Plastics", "wastage": 2, "status": "Active"}, {"bom_id": "BOM-002", "sku": "VH-300", "name": "Virgo Security Cam", "version": "v1.3", "level": 1, "component_sku": "VH-IR-LED", "component_name": "IR LED Array (night vision)", "qty": 1, "uom": "EA", "cost": 4.2, "extended": 4.2, "supplier": "ShenZhen Electronics", "wastage": 1, "status": "Active"}];
+const VENDORS = [{"po": "PO-001", "date": "2026-04-01", "vendor": "ShenZhen Electronics Co", "contact": "Li Wei", "email": "li@szelectronics.cn", "sku": "VH-100-PCB", "item": "Smart Hub PCB Assembly", "qty": 200, "unit_cost": 22.5, "currency": "USD", "total": 4500, "status": "Received", "expected": "2026-04-08", "actual": "2026-04-07", "received": 200, "variance": 0, "days_overdue": 0}, {"po": "PO-002", "date": "2026-04-02", "vendor": "OptiLens Taiwan", "contact": "Chen Yu", "email": "chen@optilens.tw", "sku": "VH-300-LENS", "item": "Camera Lens Module", "qty": 100, "unit_cost": 18, "currency": "USD", "total": 1800, "status": "In Transit", "expected": "2026-04-12", "actual": null, "received": 0, "variance": -100, "days_overdue": 0}, {"po": "PO-003", "date": "2026-04-03", "vendor": "Canadian Plastics Inc", "contact": "Marie Dupont", "email": "marie@canplastics.ca", "sku": "VH-ENC-01", "item": "Device Enclosures (assorted)", "qty": 500, "unit_cost": 4.75, "currency": "CAD", "total": 2375, "status": "Open", "expected": "2026-04-20", "actual": null, "received": 0, "variance": -500, "days_overdue": 0}, {"po": "PO-004", "date": "2026-04-05", "vendor": "BatteryWorld Ltd", "contact": "James Park", "email": "james@battworld.com", "sku": "VH-BAT-LI", "item": "Li-Ion Battery Pack 3.7V", "qty": 300, "unit_cost": 6.2, "currency": "USD", "total": 1860, "status": "Open", "expected": "2026-04-22", "actual": null, "received": 0, "variance": -300, "days_overdue": 0}, {"po": "PO-005", "date": "2026-04-08", "vendor": "ThermoComp GmbH", "contact": "Klaus M\u00fcller", "email": "klaus@thermocomp.de", "sku": "VH-500-CTRL", "item": "Thermostat Controller Board", "qty": 50, "unit_cost": 35, "currency": "EUR", "total": 1750, "status": "Open", "expected": "2026-04-21", "actual": null, "received": 0, "variance": -50, "days_overdue": 0}];
+const SHIPMENTS = [{"id": "SHP-CA-001", "so": null, "date": "2026-01-29", "carrier": "UPS", "service": "UPS Standard", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": "16 Johnstone Ln, Charters Settlement, NB, E3C 0E3", "weight": null, "status": "Delivered"}, {"id": "SHP-CA-002", "so": null, "date": "2026-01-30", "carrier": "Canpar", "service": "Canpar Ground", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": "2401 Shanna Rd, Carp, ON, K0A 1L0", "weight": null, "status": "Delivered"}, {"id": "SHP-CA-003", "so": null, "date": "2026-02-12", "carrier": "Purolator", "service": "Purolator Express", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": "16 Johnstone Ln, Charters Settlement, NB, E3C 0E3", "weight": null, "status": "Delivered"}, {"id": "SHP-CA-004", "so": null, "date": "2026-02-17", "carrier": "Canpar", "service": "Canpar Ground", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": "115 Hillview Rd, Strathmore, AB, T1P 1W2", "weight": null, "status": "Delivered"}, {"id": "SHP-CA-005", "so": null, "date": "2026-02-17", "carrier": "Canpar", "service": "Canpar Ground", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": "395 Redfern Dr, Vanderhoof, BC, V0J 3A2", "weight": null, "status": "Delivered"}, {"id": "SHP-CA-006", "so": null, "date": null, "carrier": null, "service": "Standard", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": null, "weight": null, "status": "Pending"}, {"id": "SHP-CA-007", "so": "#1088", "date": null, "carrier": null, "service": "Standard", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": null, "weight": null, "status": "Pending"}, {"id": "SHP-CA-008", "so": null, "date": null, "carrier": null, "service": "Standard", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": null, "weight": null, "status": "Pending"}, {"id": "SHP-CA-009", "so": null, "date": null, "carrier": null, "service": "Standard", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": null, "weight": null, "status": "Pending"}, {"id": "SHP-CA-010", "so": "#1083", "date": null, "carrier": null, "service": "Standard", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": null, "weight": null, "status": "Pending"}, {"id": "SHP-CA-011", "so": null, "date": null, "carrier": null, "service": "Standard", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": null, "weight": null, "status": "Pending"}, {"id": "SHP-CA-012", "so": "#1079", "date": null, "carrier": null, "service": "Standard", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": null, "weight": null, "status": "Pending"}, {"id": "SHP-CA-013", "so": null, "date": null, "carrier": null, "service": "Standard", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": null, "weight": null, "status": "Pending"}, {"id": "SHP-CA-014", "so": null, "date": null, "carrier": null, "service": "Standard", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": null, "weight": null, "status": "Pending"}, {"id": "SHP-CA-015", "so": null, "date": null, "carrier": null, "service": "Standard", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": null, "weight": null, "status": "Pending"}, {"id": "SHP-CA-016", "so": null, "date": null, "carrier": null, "service": "Standard", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": null, "weight": null, "status": "Pending"}, {"id": "SHP-CA-017", "so": null, "date": null, "carrier": null, "service": "Standard", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": null, "weight": null, "status": "Pending"}, {"id": "SHP-CA-018", "so": null, "date": null, "carrier": null, "service": "Standard", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": null, "weight": null, "status": "Pending"}, {"id": "SHP-CA-019", "so": null, "date": null, "carrier": null, "service": "Standard", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": null, "weight": null, "status": "Pending"}, {"id": "SHP-CA-020", "so": null, "date": null, "carrier": null, "service": "Standard", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": null, "weight": null, "status": "Pending"}, {"id": "SHP-CA-021", "so": null, "date": null, "carrier": null, "service": "Standard", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": null, "weight": null, "status": "Pending"}, {"id": "SHP-CA-022", "so": "#1063", "date": "2026-03-05", "carrier": "Canpar", "service": "Canpar Ground", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": "2021 Hwy 3, Fernie, BC, V0B 1M1", "weight": null, "status": "Delivered"}, {"id": "SHP-CA-023", "so": "#1067", "date": "2026-03-05", "carrier": "Canpar", "service": "Canpar Ground", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": "5601 56a St, Beaumont, AB, T4X 1A7", "weight": null, "status": "Delivered"}, {"id": "SHP-CA-024", "so": "#1072", "date": "2026-02-24", "carrier": "Canpar", "service": "Canpar Ground", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": "4367 Pl. Joseph-Lenoir, Saint-Laurent, QC, H4R 3C3", "weight": null, "status": "Delivered"}, {"id": "SHP-CA-025", "so": null, "date": "2026-03-18", "carrier": "Canpar", "service": "Canpar Ground", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": "395 Redfern Dr, Vanderhoof, BC, V0J 3A2", "weight": null, "status": "Delivered"}, {"id": "SHP-CA-026", "so": "#1070", "date": null, "carrier": null, "service": "Standard", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": "4059 207th Street, Langley, BC, V3A 2E2", "weight": null, "status": "Pending"}, {"id": "SHP-CA-027", "so": "#1075", "date": null, "carrier": null, "service": "Standard", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": "135 Hardy Ave (Box 235), Sointula, BC, V0N3E0", "weight": null, "status": "Pending"}, {"id": "SHP-CA-028", "so": "#1076", "date": "2026-03-20", "carrier": "Canpar", "service": "Canpar Ground", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": "147 Mud Lake Road, Murillo, ON, P0T 2G0", "weight": null, "status": "Delivered"}, {"id": "SHP-CA-029", "so": "#1093", "date": null, "carrier": null, "service": "Standard", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": "4506 Grizzly Hill Rd., Spallumcheen, BC V4Y 0M1", "weight": null, "status": "Pending"}, {"id": "SHP-CA-030", "so": "#1094", "date": null, "carrier": null, "service": "Standard", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": "MAYBE IN PERSON", "weight": null, "status": "Pending"}, {"id": "SHP-CA-031", "so": null, "date": "2026-03-26", "carrier": "Canpar", "service": "Canpar Ground", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": "304 8 Ave, Gleichen, AB, T0J 1N0", "weight": null, "status": "In Transit"}, {"id": "SHP-CA-032", "so": null, "date": "2026-03-25", "carrier": "Canpar", "service": "Canpar Ground", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": "499 Main St, Elsipogtog First Nation, NB, E4W 2X5", "weight": null, "status": "Delivered"}, {"id": "SHP-CA-033", "so": null, "date": null, "carrier": null, "service": "Standard", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": "16 Johnstone Ln, Charters Settlement, NB, E3C 0E3", "weight": null, "status": "Pending"}, {"id": "SHP-CA-034", "so": "#1096", "date": null, "carrier": null, "service": "Standard", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": "304-716 Old Sackville Rd., Lower Sackville, NS, B4C 2K3", "weight": null, "status": "Pending"}, {"id": "SHP-CA-035", "so": "#1098", "date": null, "carrier": null, "service": "Standard", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": "1469 Telephone Rd, Colborne, ON, K0K 1S0", "weight": null, "status": "Pending"}, {"id": "SHP-CA-036", "so": "#1103", "date": null, "carrier": null, "service": "Standard", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": "4 Birchlawn Avenue, Scarborough, ON, M1N 1H9", "weight": null, "status": "Pending"}, {"id": "SHP-CA-037", "so": null, "date": null, "carrier": null, "service": "Standard", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": null, "weight": null, "status": "Pending"}, {"id": "SHP-CA-038", "so": null, "date": "2026-04-10", "carrier": "Canpar", "service": "Canpar Ground", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": "12 Pulla Street, Trenton, ON, K8V 5P7", "weight": null, "status": "In Transit"}, {"id": "SHP-US-039", "so": null, "date": "2026-02-24", "carrier": "UPS", "service": "UPS Standard International", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": "1193 N 1950 E, Layton, UT, 84040", "weight": null, "status": "Delivered"}, {"id": "SHP-US-040", "so": null, "date": "2026-02-24", "carrier": "UPS", "service": "UPS Standard International", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": "1207 Spruce Dr, Greenwood, MO, 64034", "weight": null, "status": "Delivered"}, {"id": "SHP-US-041", "so": null, "date": "2026-02-24", "carrier": "UPS", "service": "UPS Standard International", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": "731 E Twin Palms Dr, Palm Springs, CA, 92264", "weight": null, "status": "Delivered"}, {"id": "SHP-US-042", "so": null, "date": "2026-02-24", "carrier": "UPS", "service": "UPS Standard International", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": "174 Boyette Rd, Lakeland, GA, 31635", "weight": null, "status": "Delivered"}, {"id": "SHP-US-043", "so": null, "date": "2026-03-03", "carrier": "UPS", "service": "UPS Standard International", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": "8634 Union Ridge Dr, Hokah, MN, 55941", "weight": null, "status": "Delivered"}, {"id": "SHP-US-044", "so": null, "date": "2026-03-05", "carrier": "UPS", "service": "UPS Standard International", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": "2965 Cr-1506J, Owensboro, KY, 42303", "weight": null, "status": "In Transit"}, {"id": "SHP-US-045", "so": null, "date": "2026-03-05", "carrier": "UPS", "service": "UPS Standard International", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": "84-781 Alahele St, Waianae, HI, 96792", "weight": null, "status": "Delivered"}, {"id": "SHP-US-046", "so": null, "date": "2026-03-05", "carrier": "UPS", "service": "UPS Standard International", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": "3264 Wendlyn Way, Edgewater, MD, 21037", "weight": null, "status": "Delivered"}, {"id": "SHP-US-047", "so": "#1065", "date": "2026-03-10", "carrier": "UPS", "service": "UPS Standard International", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": "4150 Shan Dr E, Mobile, AL, 36693", "weight": null, "status": "Delivered"}, {"id": "SHP-US-048", "so": "#1071", "date": "2026-03-12", "carrier": "UPS", "service": "UPS Standard International", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": "18303 Muirland St, Detroit, MI, 48221", "weight": null, "status": "Delivered"}, {"id": "SHP-US-049", "so": null, "date": "2026-03-11", "carrier": "UPS", "service": "UPS Standard International", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": "10202 Ruffian Ln, Berlin, MD, 21811", "weight": null, "status": "Delivered"}, {"id": "SHP-US-050", "so": "#1074", "date": "2026-03-11", "carrier": "UPS", "service": "UPS Standard International", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": "3 Atwood St, Southborough, MA, 01772", "weight": null, "status": "Delivered"}, {"id": "SHP-US-051", "so": null, "date": "2026-03-11", "carrier": "UPS", "service": "UPS Standard International", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": "2775 Oak Ridge Dr, Carson City, NV, 89703", "weight": null, "status": "Delivered"}, {"id": "SHP-US-052", "so": null, "date": "2026-03-11", "carrier": "UPS", "service": "UPS Standard International", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": "1451 Guernseytown Rd, Watertown, CT, 06795", "weight": null, "status": "Delivered"}, {"id": "SHP-US-053", "so": null, "date": "2026-03-12", "carrier": "UPS", "service": "UPS Standard International", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": "16431 Avenida Ramada, Desert Hot Springs, CA, 92240", "weight": null, "status": "Delivered"}, {"id": "SHP-US-054", "so": null, "date": "2026-03-12", "carrier": "UPS", "service": "UPS Standard International", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": "258 Newtown Turnpike, Wilton, CT, 06897", "weight": null, "status": "Delivered"}, {"id": "SHP-US-055", "so": "#1068", "date": "2026-03-12", "carrier": "UPS", "service": "UPS Standard International", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": "6284 Smith Rd, Hamburg, NY, 14075", "weight": null, "status": "Delivered"}, {"id": "SHP-US-056", "so": "#1069", "date": "2026-03-12", "carrier": "UPS", "service": "UPS Standard International", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": "4871 Randee Cir, Pensacola, FL, 32526", "weight": null, "status": "Delivered"}, {"id": "SHP-US-057", "so": "#1073", "date": "2026-03-12", "carrier": "UPS", "service": "UPS Standard International", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": "2605 N Jefferson St, Arlington, VA 22207-1415", "weight": null, "status": "Delivered"}, {"id": "SHP-US-058", "so": "#1074", "date": "2026-03-12", "carrier": "UPS", "service": "UPS Standard International", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": "1084 Ironwood Ct, Glenview, IL, 60025", "weight": null, "status": "Delivered"}, {"id": "SHP-US-059", "so": "#1077", "date": "2026-03-13", "carrier": "UPS", "service": "UPS Standard International", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": "2365 Cunningham Ln, Moorefield, WV, 26836", "weight": null, "status": "Delivered"}, {"id": "SHP-US-060", "so": "#1078", "date": "2026-03-13", "carrier": "UPS", "service": "UPS Standard International", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": "5528 Ridgemoor Dr, Braselton, GA, 30517", "weight": null, "status": "Delivered"}, {"id": "SHP-US-061", "so": "#1079", "date": "2026-03-13", "carrier": "UPS", "service": "UPS Standard International", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": "1261 Soto St, Seaside, CA, 93955", "weight": null, "status": "Delivered"}, {"id": "SHP-US-062", "so": "#1080", "date": "2026-03-13", "carrier": "UPS", "service": "UPS Standard International", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": "140 Lakes Blvd, Kingsland, GA, 31548", "weight": null, "status": "Delivered"}, {"id": "SHP-US-063", "so": "#1084", "date": "2026-03-13", "carrier": "UPS", "service": "UPS Standard International", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": "910 Angel Trace Ct, Inman, SC, 29349", "weight": null, "status": "Delivered"}, {"id": "SHP-US-064", "so": null, "date": "2026-03-13", "carrier": "UPS", "service": "UPS Standard International", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": "1207 Spruce Dr, Greenwood, MO, 64034", "weight": null, "status": "Delivered"}, {"id": "SHP-US-065", "so": "#1085", "date": "2026-03-13", "carrier": "UPS", "service": "UPS Standard International", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": "4120 Hidden Creek Rd, Port Republic, MD, 20676", "weight": null, "status": "Delivered"}, {"id": "SHP-US-066", "so": "#1062", "date": "2026-03-18", "carrier": "UPS", "service": "UPS Standard International", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": "2809 Deer Blvd, Yankton, SD, 57078", "weight": null, "status": "Delivered"}, {"id": "SHP-US-067", "so": "#1086", "date": "2026-03-20", "carrier": "UPS", "service": "UPS Standard International", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": "88 Spring Valley Rd, Hardwick Township, NJ, 07825", "weight": null, "status": "Delivered"}, {"id": "SHP-US-068", "so": "#1087", "date": "2026-04-01", "carrier": "UPS", "service": "UPS Standard International", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": "13431 Raven Flight Dr, Cypress, TX, 77429", "weight": null, "status": "Delivered"}, {"id": "SHP-US-069", "so": "#1088", "date": null, "carrier": "UPS", "service": "UPS Standard International", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": "1500 Sussex Turnpike, Randolph, NJ, 07869", "weight": null, "status": "Pending"}, {"id": "SHP-US-070", "so": "#1090", "date": null, "carrier": "UPS", "service": "UPS Standard International", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": "1695 Saddle Creek Farms Rd, Osteen, FL, 32764", "weight": null, "status": "Pending"}, {"id": "SHP-US-071", "so": "#1092", "date": null, "carrier": "UPS", "service": "UPS Standard International", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": "4021 Palo Alto Ave, Yucca Valley, CA, 92284", "weight": null, "status": "Pending"}, {"id": "SHP-US-072", "so": "#1095", "date": null, "carrier": "UPS", "service": "UPS Standard International", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": "20757 Atlantic Puffin Dr, Grand Rapids, MN 55744", "weight": null, "status": "Pending"}, {"id": "SHP-US-073", "so": "#1097", "date": null, "carrier": null, "service": "Standard", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": "918 Maryland Dr, Vista, CA 92083", "weight": null, "status": "Pending"}, {"id": "SHP-US-074", "so": "#1099", "date": null, "carrier": null, "service": "Standard", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": "100 Hoag Drive, Phoenix, NY, 13135-3314", "weight": null, "status": "Pending"}, {"id": "SHP-US-075", "so": "#1104", "date": null, "carrier": null, "service": "Standard", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": "12827 Lake Vista Dr, Gibsonton, FL, 33534", "weight": null, "status": "Pending"}, {"id": "SHP-US-076", "so": "#1107", "date": null, "carrier": null, "service": "Standard", "origin": "VirgoHome HQ, Toronto, ON, Canada", "destination": "500 NE Saddle Ridge Rd, Bentonville, AR, 72712", "weight": null, "status": "Pending"}];
+</script>
+
+<script type="text/babel" data-presets="react">
+const { useState, useMemo } = React;
+
+// ------------------------------------------------------------
+// Helpers
+// ------------------------------------------------------------
+const Pill = ({ children, tone = "slate" }) => {
+  const tones = {
+    green:  "bg-emerald-100 text-emerald-800",
+    yellow: "bg-amber-100 text-amber-800",
+    red:    "bg-rose-100 text-rose-800",
+    blue:   "bg-sky-100 text-sky-800",
+    slate:  "bg-slate-100 text-slate-700",
+    violet: "bg-violet-100 text-violet-800",
+  };
+  return <span className={`pill ${tones[tone] || tones.slate}`}>{children}</span>;
+};
+
+const statusTone = (s) => ({
+  "Shipped":"green","Delivered":"green","Received":"green","Completed":"green","Fulfilled":"green","OK":"green","Active":"green","Paid":"green",
+  "In Transit":"blue","In Progress":"blue",
+  "Picking":"yellow","Pending":"yellow","Open":"yellow","Partial":"yellow","Planned":"slate","LOW":"yellow","Waiting":"yellow","Awaiting PO":"yellow",
+  "Cancelled":"red","OUT":"red","REORDER":"red",
+  "Available":"green","Unfulfilled":"yellow",
+}[s] || "slate");
+
+const money = (n, c) => n == null ? '—' : `${c==='CAD'?'CA$':c==='EUR'?'€':'$'}${Number(n).toLocaleString(undefined,{minimumFractionDigits:2, maximumFractionDigits:2})}`;
+const fmt = (v) => v == null || v === '' ? <span className="text-slate-400">—</span> : v;
+
+const Panel = ({ title, children, right }) => (
+  <div className="bg-white rounded-lg border border-slate-200">
+    <div className="px-4 py-3 border-b border-slate-200 flex items-center justify-between">
+      <h3 className="font-semibold text-slate-800">{title}</h3>
+      {right}
+    </div>
+    <div className="p-4 overflow-x-auto scroll-thin">{children}</div>
+  </div>
+);
+
+const Row = ({ k, v }) => (
+  <div className="flex justify-between gap-4 py-1"><span className="text-slate-500">{k}</span><span className="font-medium text-right">{v}</span></div>
+);
+
+// ------------------------------------------------------------
+// Dashboard
+// ------------------------------------------------------------
+function Dashboard() {
+  const openSOs   = SALES_ORDERS.filter(s => s.status === "Open").length;
+  const deliveredSOs = SALES_ORDERS.filter(s => s.status === "Delivered").length;
+  const rev30d = SALES_ORDERS.reduce((a, r) => a + (Number(r.total) || 0), 0);
+  const totalInventoryValue = INVENTORY.reduce((a, r) => a + (Number(r.total_value) || 0), 0);
+  const lowStock = INVENTORY.filter(r => r.alert === "REORDER" || r.status === "LOW").length;
+  const inTransit = SERIALS.filter(s => s.status === "In Transit").length;
+  const pendingSerials = SERIALS.filter(s => s.status === "Pending").length;
+  const openTickets = SERIALS.filter(s => s.ticket).length;
+
+  // Ashwini feedback KPIs
+  const openTeamTasks = TEAM_TASKS.filter(t => t.status==='Open' || t.status==='In Progress').length;
+  const openRepairs = REPAIR_TICKETS.filter(t => t.status==='Open' || t.status==='In Progress').length;
+  const followupsDue = FOLLOWUPS.filter(f => f.due && new Date(f.due) <= new Date('2026-04-22')).length;
+  const activeCampaigns = CAMPAIGNS.filter(c => new Date(c.end) >= new Date('2026-04-15')).length;
+  const shipsMissingWeight = SHIPMENTS.filter(s => !s.weight || s.weight === 0).length;
+
+  const kpis = [
+    { label:"Revenue (YTD)",     val: `$${Math.round(rev30d).toLocaleString()}`, tone:"green" },
+    { label:"Open Sales Orders", val: openSOs, tone: openSOs>15?"yellow":"blue" },
+    { label:"Delivered Orders",  val: deliveredSOs, tone:"green" },
+    { label:"Inventory Value",   val: `$${Math.round(totalInventoryValue).toLocaleString()}`, tone:"slate" },
+    { label:"Low-Stock SKUs",    val: lowStock, tone: lowStock>0?"yellow":"green" },
+    { label:"In Transit",        val: inTransit, tone:"blue" },
+    { label:"Pending Fulfillment", val: pendingSerials, tone: pendingSerials>5?"yellow":"slate" },
+    { label:"Linked Tickets",    val: openTickets, tone: openTickets>10?"yellow":"slate" },
+    { label:"Open Team Tasks",   val: openTeamTasks, tone: openTeamTasks>0?"yellow":"slate" },
+    { label:"Open Repairs",      val: openRepairs, tone: openRepairs>0?"red":"green" },
+    { label:"Follow-ups Due 7d", val: followupsDue, tone: followupsDue>3?"yellow":"slate" },
+    { label:"Active Campaigns",  val: activeCampaigns, tone:"violet" },
+    { label:"Ships Missing Wt",  val: shipsMissingWeight, tone: shipsMissingWeight>10?"red":"yellow" },
+  ];
+
+  const reorder = INVENTORY.filter(r => r.alert === "REORDER" || r.status !== "OK");
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl font-bold text-slate-800">Dashboard</h1>
+        <p className="text-sm text-slate-500 mt-1">Live snapshot — seeded from VirgoHome Operations Hub</p>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        {kpis.map(k => (
+          <div key={k.label} className="bg-white rounded-lg border border-slate-200 p-4">
+            <div className="text-xs uppercase tracking-wide text-slate-500">{k.label}</div>
+            <div className="mt-2 text-2xl font-bold text-slate-800">{k.val}</div>
+            <div className="mt-2"><Pill tone={k.tone}>live</Pill></div>
+          </div>
+        ))}
+      </div>
+
+      <div className="grid lg:grid-cols-2 gap-6">
+        <Panel title={`Reorder alerts (${reorder.length})`}>
+          {reorder.length === 0 && <div className="text-slate-400 text-sm">All SKUs healthy.</div>}
+          {reorder.length > 0 && (
+            <table className="w-full text-sm">
+              <thead className="text-left text-slate-500 border-b">
+                <tr><th className="py-2">SKU</th><th>Name</th><th>Loc</th><th className="text-right">On Hand</th><th className="text-right">Reorder@</th><th>Status</th></tr>
+              </thead>
+              <tbody>
+                {reorder.map((r, i) => (
+                  <tr key={i} className="border-b last:border-0">
+                    <td className="py-2 font-medium">{r.sku}</td>
+                    <td>{r.name}</td>
+                    <td className="text-xs">{r.loc}</td>
+                    <td className="text-right">{r.on_hand}</td>
+                    <td className="text-right text-slate-500">{r.reorder_point}</td>
+                    <td><Pill tone={statusTone(r.alert || r.status)}>{r.alert || r.status}</Pill></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </Panel>
+
+        <Panel title="Recent sales orders">
+          <table className="w-full text-sm">
+            <thead className="text-left text-slate-500 border-b">
+              <tr><th className="py-2">SO</th><th>Customer</th><th className="text-right">Total</th><th>Status</th></tr>
+            </thead>
+            <tbody>
+              {SALES_ORDERS.slice(0, 8).map(s => (
+                <tr key={s.so} className="border-b last:border-0">
+                  <td className="py-2 font-mono text-xs">{s.so}</td>
+                  <td className="truncate max-w-[180px]">{s.customer}</td>
+                  <td className="text-right">{money(s.total, s.currency)}</td>
+                  <td><Pill tone={statusTone(s.status)}>{s.status}</Pill></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Panel>
+      </div>
+
+      <Panel title="Active make orders">
+        <table className="w-full text-sm">
+          <thead className="text-left text-slate-500 border-b">
+            <tr><th className="py-2">MO</th><th>Product</th><th className="text-right">Qty</th><th className="text-right">Done</th><th>Due</th><th>Materials</th><th>Status</th></tr>
+          </thead>
+          <tbody>
+            {MAKE_ORDERS.map(m => (
+              <tr key={m.mo} className="border-b last:border-0">
+                <td className="py-2 font-mono text-xs">{m.mo}</td>
+                <td>{m.sku} <span className="text-slate-500">· {m.name}</span></td>
+                <td className="text-right">{m.qty}</td>
+                <td className="text-right">{m.completed}</td>
+                <td>{m.due}</td>
+                <td><Pill tone={statusTone(m.materials)}>{m.materials}</Pill></td>
+                <td><Pill tone={statusTone(m.status)}>{m.status}</Pill></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Panel>
+    </div>
+  );
+}
+
+// ------------------------------------------------------------
+// Sales Orders
+// ------------------------------------------------------------
+function SalesOrders() {
+  const [sel, setSel] = useState(SALES_ORDERS[0]?.so);
+  const [filter, setFilter] = useState('All');
+  const filtered = SALES_ORDERS.filter(s => filter==='All' || s.status===filter);
+  const order = SALES_ORDERS.find(s => s.so === sel);
+  const custSerials = order ? SERIALS.filter(s => s.customer === order.customer) : [];
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold text-slate-800">Sales Orders</h1>
+        <div className="flex gap-1">
+          {['All','Open','Delivered','Cancelled'].map(f => (
+            <button key={f} onClick={()=>setFilter(f)}
+              className={`px-3 py-1 text-xs rounded-lg border ${filter===f?'bg-emerald-600 text-white border-emerald-600':'bg-white text-slate-600 border-slate-200'}`}>{f}</button>
+          ))}
+        </div>
+      </div>
+
+      <div className="grid lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-2">
+          <Panel title={`${filtered.length} orders`}>
+            <div className="max-h-[600px] overflow-y-auto scroll-thin">
+              <table className="w-full text-sm">
+                <thead className="text-left text-slate-500 border-b sticky top-0 bg-white">
+                  <tr><th className="py-2">SO</th><th>Date</th><th>Customer</th><th>SKU</th><th className="text-right">Total</th><th>Status</th></tr>
+                </thead>
+                <tbody>
+                  {filtered.map(s => (
+                    <tr key={s.so} onClick={() => setSel(s.so)}
+                      className={`border-b last:border-0 cursor-pointer hover:bg-slate-50 ${sel===s.so?'bg-emerald-50':''}`}>
+                      <td className="py-2 font-mono text-xs">{s.so}</td>
+                      <td className="text-xs">{s.date}</td>
+                      <td className="truncate max-w-[180px]">{s.customer}</td>
+                      <td className="text-xs">{s.sku}</td>
+                      <td className="text-right">{money(s.total, s.currency)}</td>
+                      <td><Pill tone={statusTone(s.status)}>{s.status}</Pill></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Panel>
+        </div>
+        <div>
+          <Panel title="Order detail">
+            {order && (
+              <div className="text-sm space-y-1">
+                <Row k="SO" v={<span className="font-mono">{order.so}</span>} />
+                <Row k="Date" v={order.date} />
+                <Row k="Channel" v={order.channel} />
+                <Row k="Customer" v={order.customer} />
+                <Row k="Email" v={fmt(order.email)} />
+                <Row k="Product" v={`${order.sku} × ${order.qty}`} />
+                <Row k="Total" v={money(order.total, order.currency)} />
+                <Row k="Payment" v={<Pill tone={statusTone(order.payment)}>{order.payment}</Pill>} />
+                <Row k="Fulfillment" v={<Pill tone={statusTone(order.fulfill)}>{order.fulfill}</Pill>} />
+                <Row k="Shipped" v={fmt(order.shipped_date)} />
+                <Row k="Tracking" v={fmt(order.tracking)} />
+                {order.notes && <Row k="Notes" v={<span className="text-xs text-right">{order.notes}</span>} />}
+                <div className="pt-3 border-t mt-3">
+                  <div className="text-xs uppercase tracking-wide text-slate-500 mb-2">Linked serials ({custSerials.length})</div>
+                  {custSerials.length === 0 && <div className="text-slate-400 text-xs">No serials linked</div>}
+                  {custSerials.slice(0,5).map(s => (
+                    <div key={s.sn} className="font-mono text-xs py-1 flex items-center justify-between gap-2">
+                      <span className="truncate">{s.sn}</span>
+                      {s.ticket && <Pill tone="yellow">{s.ticket}</Pill>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </Panel>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ------------------------------------------------------------
+// Inventory
+// ------------------------------------------------------------
+function Inventory() {
+  return (
+    <div className="space-y-6">
+      <h1 className="text-2xl font-bold text-slate-800">Inventory</h1>
+      <Panel title="On-hand by SKU × location">
+        <table className="w-full text-sm">
+          <thead className="text-left text-slate-500 border-b">
+            <tr>
+              <th className="py-2">SKU</th><th>Name</th><th>Location</th>
+              <th className="text-right">On Hand</th><th className="text-right">Committed</th>
+              <th className="text-right">Available</th><th className="text-right">Expected</th>
+              <th className="text-right">Reorder@</th><th>Batch</th><th className="text-right">Value</th><th>Alert</th>
+            </tr>
+          </thead>
+          <tbody>
+            {INVENTORY.map((r, i) => (
+              <tr key={i} className="border-b last:border-0">
+                <td className="py-2 font-medium">{r.sku}</td>
+                <td>{r.name}</td>
+                <td className="text-xs">{r.loc}</td>
+                <td className="text-right">{r.on_hand}</td>
+                <td className="text-right">{r.committed}</td>
+                <td className="text-right font-semibold">{r.available}</td>
+                <td className="text-right text-slate-500">{r.expected}</td>
+                <td className="text-right text-slate-500">{r.reorder_point}</td>
+                <td className="font-mono text-xs">{r.batch}</td>
+                <td className="text-right">${Number(r.total_value || 0).toLocaleString()}</td>
+                <td><Pill tone={statusTone(r.alert || r.status)}>{r.alert || r.status}</Pill></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Panel>
+
+      <Panel title="Products">
+        <table className="w-full text-sm">
+          <thead className="text-left text-slate-500 border-b">
+            <tr><th className="py-2">SKU</th><th>Name</th><th>Category</th><th className="text-right">Price</th><th className="text-right">Cost</th><th className="text-right">Reorder@</th><th className="text-right">Lead</th><th>Primary Supplier</th></tr>
+          </thead>
+          <tbody>
+            {PRODUCTS.map(p => (
+              <tr key={p.sku} className="border-b last:border-0">
+                <td className="py-2 font-medium">{p.sku}</td>
+                <td>{p.name}</td>
+                <td className="text-xs">{p.category}</td>
+                <td className="text-right">{money(p.price, p.currency)}</td>
+                <td className="text-right text-slate-500">{p.cost ? money(p.cost, p.currency) : '—'}</td>
+                <td className="text-right">{p.reorder_point}</td>
+                <td className="text-right">{p.lead_time}d</td>
+                <td className="text-xs">{p.supplier}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Panel>
+    </div>
+  );
+}
+
+// ------------------------------------------------------------
+// Make Orders
+// ------------------------------------------------------------
+function MakeOrders() {
+  return (
+    <div className="space-y-6">
+      <h1 className="text-2xl font-bold text-slate-800">Make Orders</h1>
+      <Panel title="Production runs">
+        <table className="w-full text-sm">
+          <thead className="text-left text-slate-500 border-b">
+            <tr><th className="py-2">MO</th><th>SKU</th><th>Product</th><th>BOM</th><th className="text-right">Qty</th><th className="text-right">Done</th><th>Start</th><th>Due</th><th>Materials</th><th>Status</th><th>Linked SO</th></tr>
+          </thead>
+          <tbody>
+            {MAKE_ORDERS.map(m => (
+              <tr key={m.mo} className="border-b last:border-0">
+                <td className="py-2 font-mono text-xs">{m.mo}</td>
+                <td className="font-medium">{m.sku}</td>
+                <td>{m.name}</td>
+                <td className="text-xs">{m.bom_version}</td>
+                <td className="text-right">{m.qty}</td>
+                <td className="text-right">{m.completed} <span className="text-slate-400 text-xs">({Math.round((m.pct||0)*100)}%)</span></td>
+                <td className="text-xs">{m.start}</td>
+                <td className="text-xs">{m.due}</td>
+                <td><Pill tone={statusTone(m.materials)}>{m.materials}</Pill></td>
+                <td><Pill tone={statusTone(m.status)}>{m.status}</Pill></td>
+                <td className="font-mono text-xs">{fmt(m.linked_so)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Panel>
+
+      <Panel title="Bill of Materials">
+        <table className="w-full text-sm">
+          <thead className="text-left text-slate-500 border-b">
+            <tr><th className="py-2">BOM</th><th>SKU</th><th>Version</th><th>Lvl</th><th>Component</th><th>Name</th><th className="text-right">Qty</th><th className="text-right">Cost</th><th className="text-right">Ext</th><th>Supplier</th></tr>
+          </thead>
+          <tbody>
+            {BOMS.map((b, i) => (
+              <tr key={i} className={`border-b last:border-0 ${b.level===0?'bg-slate-50 font-semibold':''}`}>
+                <td className="py-2 font-mono text-xs">{b.bom_id}</td>
+                <td>{b.sku}</td>
+                <td className="text-xs">{b.version}</td>
+                <td className="text-center">{b.level}</td>
+                <td className="font-mono text-xs">{b.component_sku}</td>
+                <td>{b.component_name}</td>
+                <td className="text-right">{b.qty}</td>
+                <td className="text-right">{b.cost ? `$${b.cost}` : '—'}</td>
+                <td className="text-right">{b.extended ? `$${b.extended}` : '—'}</td>
+                <td className="text-xs">{fmt(b.supplier)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Panel>
+    </div>
+  );
+}
+
+// ------------------------------------------------------------
+// Purchase Orders
+// ------------------------------------------------------------
+function PurchaseOrders() {
+  return (
+    <div className="space-y-6">
+      <h1 className="text-2xl font-bold text-slate-800">Purchase Orders</h1>
+      <Panel title="Open & recent POs">
+        <table className="w-full text-sm">
+          <thead className="text-left text-slate-500 border-b">
+            <tr><th className="py-2">PO</th><th>Date</th><th>Vendor</th><th>Item</th><th className="text-right">Qty</th><th className="text-right">Recv</th><th className="text-right">Total</th><th>Expected</th><th>Status</th></tr>
+          </thead>
+          <tbody>
+            {VENDORS.map(v => (
+              <tr key={v.po} className="border-b last:border-0">
+                <td className="py-2 font-mono text-xs">{v.po}</td>
+                <td className="text-xs">{v.date}</td>
+                <td>{v.vendor}</td>
+                <td className="text-xs">{v.sku} <span className="text-slate-500">· {v.item}</span></td>
+                <td className="text-right">{v.qty}</td>
+                <td className="text-right">{v.received}</td>
+                <td className="text-right">{money(v.total, v.currency)}</td>
+                <td className="text-xs">{v.expected}</td>
+                <td><Pill tone={statusTone(v.status)}>{v.status}</Pill></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Panel>
+    </div>
+  );
+}
+
+// ------------------------------------------------------------
+// Serial Tracker
+// ------------------------------------------------------------
+function SerialTracker() {
+  const [q, setQ] = useState("");
+  const [batch, setBatch] = useState("All");
+  const batches = ["All", ...Array.from(new Set(SERIALS.map(s => s.batch).filter(Boolean)))];
+  const filtered = SERIALS.filter(s => {
+    if (batch !== "All" && s.batch !== batch) return false;
+    if (!q) return true;
+    const needle = q.toLowerCase();
+    return [s.sn, s.customer, s.tracking, s.ticket, s.destination].some(v => v && String(v).toLowerCase().includes(needle));
+  });
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <h1 className="text-2xl font-bold text-slate-800">Serial Tracker</h1>
+        <div className="flex items-center gap-2">
+          <div className="flex gap-1">
+            {batches.map(b => (
+              <button key={b} onClick={()=>setBatch(b)}
+                className={`px-3 py-1 text-xs rounded-lg border ${batch===b?'bg-emerald-600 text-white border-emerald-600':'bg-white text-slate-600 border-slate-200'}`}>{b}</button>
+            ))}
+          </div>
+          <input
+            value={q} onChange={e => setQ(e.target.value)}
+            placeholder="Search serial / customer / tracking / ticket…"
+            className="w-80 px-3 py-1.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+          />
+        </div>
+      </div>
+
+      <Panel title={`${filtered.length} of ${SERIALS.length} serials`}>
+        <div className="max-h-[600px] overflow-y-auto scroll-thin">
+          <table className="w-full text-sm">
+            <thead className="text-left text-slate-500 border-b sticky top-0 bg-white">
+              <tr>
+                <th className="py-2">Serial</th><th>SKU</th><th>Batch</th><th>Ship Date</th><th>Customer</th>
+                <th>Destination</th><th>Carrier</th><th>Status</th><th>Ticket</th><th>Warranty</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map(s => (
+                <tr key={s.sn} className="border-b last:border-0">
+                  <td className="py-2 font-mono text-xs font-medium">{s.sn}</td>
+                  <td className="text-xs">{s.sku}</td>
+                  <td>{fmt(s.batch)}</td>
+                  <td className="text-xs">{fmt(s.ship_date)}</td>
+                  <td className="truncate max-w-[140px]">{s.customer}</td>
+                  <td className="text-xs truncate max-w-[200px]">{fmt(s.destination)}</td>
+                  <td className="text-xs">{fmt(s.carrier)}</td>
+                  <td><Pill tone={statusTone(s.status)}>{s.status}</Pill></td>
+                  <td>{s.ticket ? <Pill tone="yellow">{s.ticket}</Pill> : <span className="text-slate-400">—</span>}</td>
+                  <td className="text-xs text-slate-500">{fmt(s.warranty_end)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Panel>
+    </div>
+  );
+}
+
+// ------------------------------------------------------------
+// Shipments
+// ------------------------------------------------------------
+function Shipments() {
+  const [q, setQ] = useState("");
+  const filtered = SHIPMENTS.filter(s => !q || [s.id, s.so, s.destination, s.carrier].some(v => v && String(v).toLowerCase().includes(q.toLowerCase())));
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold text-slate-800">Shipments</h1>
+        <input value={q} onChange={e=>setQ(e.target.value)} placeholder="Search shipment / SO / destination…"
+          className="w-80 px-3 py-1.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+      </div>
+      <Panel title={`${filtered.length} of ${SHIPMENTS.length} shipments`}>
+        <div className="max-h-[640px] overflow-y-auto scroll-thin">
+          <table className="w-full text-sm">
+            <thead className="text-left text-slate-500 border-b sticky top-0 bg-white">
+              <tr><th className="py-2">Shipment</th><th>SO</th><th>Date</th><th>Carrier</th><th>Service</th><th>Origin</th><th>Destination</th><th className="text-right">Weight</th><th>Status</th></tr>
+            </thead>
+            <tbody>
+              {filtered.map(s => (
+                <tr key={s.id} className="border-b last:border-0">
+                  <td className="py-2 font-mono text-xs">{s.id}</td>
+                  <td className="font-mono text-xs">{fmt(s.so)}</td>
+                  <td className="text-xs">{fmt(s.date)}</td>
+                  <td className="text-xs">{fmt(s.carrier)}</td>
+                  <td className="text-xs">{fmt(s.service)}</td>
+                  <td className="text-xs truncate max-w-[160px]">{fmt(s.origin)}</td>
+                  <td className="text-xs truncate max-w-[200px]">{fmt(s.destination)}</td>
+                  <td className="text-right text-xs">{s.weight ? `${s.weight} kg` : '—'}</td>
+                  <td><Pill tone={statusTone(s.status)}>{s.status}</Pill></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Panel>
+    </div>
+  );
+}
+
+// ------------------------------------------------------------
+// Customers
+// ------------------------------------------------------------
+function Customers() {
+  const [q, setQ] = useState("");
+  const filtered = CUSTOMERS.filter(c => !q || [c.name, c.email, c.address].some(v => v && String(v).toLowerCase().includes(q.toLowerCase())));
+  const totalRev = CUSTOMERS.reduce((a,c)=>a + (Number(c.revenue)||0), 0);
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold text-slate-800">Customers</h1>
+        <input value={q} onChange={e=>setQ(e.target.value)} placeholder="Search name / email / city…"
+          className="w-80 px-3 py-1.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+      </div>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="bg-white rounded-lg border border-slate-200 p-4"><div className="text-xs uppercase text-slate-500">Total Customers</div><div className="text-2xl font-bold mt-1">{CUSTOMERS.length}</div></div>
+        <div className="bg-white rounded-lg border border-slate-200 p-4"><div className="text-xs uppercase text-slate-500">Total Revenue</div><div className="text-2xl font-bold mt-1">${Math.round(totalRev).toLocaleString()}</div></div>
+        <div className="bg-white rounded-lg border border-slate-200 p-4"><div className="text-xs uppercase text-slate-500">Repeat Buyers</div><div className="text-2xl font-bold mt-1">{CUSTOMERS.filter(c=>c.orders>1).length}</div></div>
+        <div className="bg-white rounded-lg border border-slate-200 p-4"><div className="text-xs uppercase text-slate-500">With Tickets</div><div className="text-2xl font-bold mt-1">{new Set(SERIALS.filter(s=>s.ticket).map(s=>s.customer)).size}</div></div>
+      </div>
+      <Panel title={`${filtered.length} of ${CUSTOMERS.length} customers`}>
+        <div className="max-h-[600px] overflow-y-auto scroll-thin">
+          <table className="w-full text-sm">
+            <thead className="text-left text-slate-500 border-b sticky top-0 bg-white">
+              <tr><th className="py-2">ID</th><th>Name</th><th>Email</th><th>Phone</th><th>Location</th><th>Channel</th><th className="text-right">Orders</th><th className="text-right">Revenue</th><th>Last Order</th></tr>
+            </thead>
+            <tbody>
+              {filtered.map(c => (
+                <tr key={c.id} className="border-b last:border-0">
+                  <td className="py-2 font-mono text-xs">{c.id}</td>
+                  <td className="font-medium">{c.name}</td>
+                  <td className="text-slate-600 text-xs">{fmt(c.email)}</td>
+                  <td className="text-xs">{fmt(c.phone)}</td>
+                  <td className="text-xs truncate max-w-[200px]">{fmt(c.address)}</td>
+                  <td className="text-xs">{c.channel}</td>
+                  <td className="text-right">{c.orders}</td>
+                  <td className="text-right">${Number(c.revenue||0).toLocaleString()}</td>
+                  <td className="text-xs">{fmt(c.last_order)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Panel>
+    </div>
+  );
+}
+
+// ------------------------------------------------------------
+// Settings
+// ------------------------------------------------------------
+function Settings() {
+  const locations = Array.from(new Set(INVENTORY.map(i => i.loc)));
+  const suppliers = Array.from(new Set(PRODUCTS.map(p => p.supplier).filter(Boolean)));
+  return (
+    <div className="space-y-6">
+      <h1 className="text-2xl font-bold text-slate-800">Settings</h1>
+      <Panel title="Integrations">
+        <div className="space-y-1 text-sm">
+          <Row k="Supabase project" v={<span className="font-mono text-xs">txeftbbzeflequvrmjjr</span>} />
+          <Row k="Shopify store" v="lilacomposter.myshopify.com" />
+          <Row k="HubSpot tickets" v={<Pill tone="green">connected</Pill>} />
+          <Row k="Freightcom tracking" v={<Pill tone="slate">not configured</Pill>} />
+          <Row k="Resend email" v={<Pill tone="slate">not configured</Pill>} />
+        </div>
+      </Panel>
+      <div className="grid md:grid-cols-2 gap-6">
+        <Panel title={`Warehouses (${locations.length})`}>
+          <ul className="text-sm space-y-1">{locations.map(l => <li key={l} className="font-mono text-xs">{l}</li>)}</ul>
+        </Panel>
+        <Panel title={`Suppliers (${suppliers.length})`}>
+          <ul className="text-sm space-y-1">{suppliers.map(s => <li key={s}>{s}</li>)}</ul>
+        </Panel>
+      </div>
+      <Panel title="Roles (Supabase Auth JWT claims)">
+        <div className="text-sm text-slate-600">admin · staff · warehouse · finance · viewer</div>
+      </Panel>
+    </div>
+  );
+}
+
+// ============================================================
+// Ashwini feedback modules (2026-04-12)
+// ============================================================
+
+const FULFILLMENT_REGIONS = ['CA','US','Personal','Hold','International'];
+
+const FOLLOWUPS = [
+  { customer:'Annmarie Kennedy', ship:'2026-04-10', onboarding:null, fu1:null, fu2:null, compost:false, review:'Pending', platform:null, sw:'V17', dash:false, action:'Send onboarding kit', due:'2026-04-18' },
+  { customer:'Louis DiPalma',    ship:'2026-04-07', onboarding:'2026-04-09', fu1:'2026-04-14', fu2:null, compost:true, review:'Pending', platform:null, sw:'V17', dash:true, action:'Ask for Google review', due:'2026-04-21' },
+  { customer:'Katrina Dowd',     ship:'2026-03-31', onboarding:'2026-04-02', fu1:'2026-04-05', fu2:null, compost:true, review:'Yes', platform:'Shopify', sw:'V16', dash:true, action:null, due:null },
+  { customer:'Tara Dupper',      ship:'2026-03-23', onboarding:'2026-03-25', fu1:'2026-03-30', fu2:'2026-04-06', compost:true, review:'No', platform:null, sw:'V16', dash:true, action:'Retry review request', due:'2026-04-16' },
+  { customer:'Cole Perkins',     ship:'2026-03-22', onboarding:'2026-03-24', fu1:'2026-03-29', fu2:null, compost:false, review:'Pending', platform:null, sw:'V16', dash:false, action:'Troubleshoot dashboard pairing', due:'2026-04-16' },
+  { customer:'Brent Neave',      ship:'2026-03-18', onboarding:'2026-03-20', fu1:'2026-03-25', fu2:'2026-04-01', compost:true, review:'Yes', platform:'Amazon', sw:'V16', dash:true, action:null, due:null },
+  { customer:'Dale Bober',       ship:'2026-03-16', onboarding:null, fu1:null, fu2:null, compost:false, review:'Pending', platform:null, sw:'V15', dash:false, action:'Onboarding overdue', due:'2026-04-14' },
+  { customer:'Joy Seargeant',    ship:'2026-03-20', onboarding:'2026-03-22', fu1:'2026-03-27', fu2:null, compost:true, review:'Yes', platform:'Google', sw:'V16', dash:true, action:null, due:null },
+];
+
+const TEAM_TASKS = [
+  { id:'TASK-0001', raised:'2026-04-12', by:'Ash',     to:'Raymond', customer:'Sarah Harris',    so:'#1109', desc:'Confirm replacement P100 shipped for crack on arrival', status:'In Progress', reply:null },
+  { id:'TASK-0002', raised:'2026-04-11', by:'Ash',     to:'Junaid',  customer:'Matthew Mossey',  so:'#1102', desc:'Machine crack (HS-0048) - assess repair vs replacement', status:'Open', reply:null },
+  { id:'TASK-0003', raised:'2026-04-10', by:'Pedrum',  to:'Ash',     customer:'-',                so:null,    desc:'Pull April campaign buyer list for follow-up sequence', status:'Open', reply:null },
+  { id:'TASK-0004', raised:'2026-04-08', by:'Raymond', to:'Ash',     customer:'Jeremiah Pauw',   so:null,    desc:'Customer asking about software V17 upgrade - confirm eligibility', status:'Resolved', reply:'2026-04-10' },
+  { id:'TASK-0005', raised:'2026-04-05', by:'Ash',     to:'Pedrum',  customer:'-',                so:null,    desc:'March sale ROI by region', status:'Resolved', reply:'2026-04-09' },
+  { id:'TASK-0006', raised:'2026-04-03', by:'Ash',     to:'Junaid',  customer:'Fred Rice',       so:null,    desc:'Firmware update failure - remote reset attempted', status:'Irrelevant', reply:'2026-04-04' },
+];
+
+const CAMPAIGNS = [
+  { code:'MAR-SALE-2026',   name:'March Sale 2026',     start:'2026-03-01', end:'2026-03-31', channel:'Meta',   creative:'V3', discount:'MAR20', buyers:42, revenue:52340, regions:'CA,US', aov:1246, plans:{Outright:22, '12mo':14, '36mo':4, Sezzle:2} },
+  { code:'APR-LAUNCH-2026', name:'April Launch Blast',  start:'2026-04-01', end:'2026-04-30', channel:'Google', creative:'V1', discount:'APRIL', buyers:18, revenue:19120, regions:'CA,US', aov:1062, plans:{Outright:10, '12mo':6,  '36mo':2, Sezzle:0} },
+  { code:'EMAIL-WARM-2026', name:'Email Warm Sequence', start:'2026-02-15', end:'2026-04-15', channel:'Email',  creative:'V2', discount:null,    buyers:9,  revenue:9450,  regions:'CA',    aov:1050, plans:{Outright:7,  '12mo':2,  '36mo':0, Sezzle:0} },
+];
+
+const REPAIR_TICKETS = [
+  { id:'REP-0001', opened:'2026-04-10', by:'Ash',     serial:'LL01-00000000109', customer:'Joan Teichroeb',   problem:'LCD screen not displaying',       batch:'P100', type:'Hardware', parts:'LCD module', status:'In Progress', resolved:null, notes:null, signoff:null },
+  { id:'REP-0002', opened:'2026-04-08', by:'Raymond', serial:'LL01-00000000144', customer:'Robert Simoneau',  problem:'Motor overheating during cycle',  batch:'P100', type:'Hardware', parts:'Motor + thermistor', status:'Open', resolved:null, notes:null, signoff:null },
+  { id:'REP-0003', opened:'2026-04-05', by:'Ash',     serial:'LL01-00000000205', customer:'Tricia Bowling',   problem:'Firmware V17 pairing failure',    batch:'P150', type:'Firmware', parts:'-', status:'Resolved', resolved:'2026-04-07', notes:'Remote flash successful', signoff:'Junaid' },
+  { id:'REP-0004', opened:'2026-04-03', by:'Ash',     serial:'LL01-00000000145', customer:'Amanda McCordic',  problem:'Lid latch misaligned',            batch:'P100', type:'Hardware', parts:'Latch kit', status:'Open', resolved:null, notes:null, signoff:null },
+  { id:'REP-0005', opened:'2026-03-28', by:'Raymond', serial:'LL01-00000000202', customer:'Kaiti Klucas',     problem:'Unit dead on arrival (shipping)', batch:'P150', type:'Hardware', parts:'Full replacement', status:'Resolved', resolved:'2026-04-01', notes:'Replacement P150 shipped, original scrapped', signoff:'Junaid' },
+];
+
+function Fulfillment() {
+  const [region, setRegion] = useState('All');
+  const withRegion = SALES_ORDERS.map(s => {
+    const addr = (CUSTOMERS.find(c => c.name === s.customer)?.address) || '';
+    let r = 'US';
+    if (addr.includes('Canada') || /\b(ON|BC|AB|QC|NS|NB|MB|SK|PE|NL)\b/.test(addr)) r = 'CA';
+    if (!addr) r = 'Personal';
+    if (s.status === 'Cancelled') r = 'Hold';
+    return { ...s, region: r };
+  });
+  const filtered = withRegion.filter(s => region === 'All' || s.region === region);
+  const counts = FULFILLMENT_REGIONS.reduce((a, r) => ({...a, [r]: withRegion.filter(s => s.region === r).length}), {});
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-800">Fulfillment Queue</h1>
+          <p className="text-sm text-slate-500 mt-1">Raymond & Aaron - unified CA / US / Personal / Hold / Returns</p>
+        </div>
+        <div className="flex gap-1">
+          {['All', ...FULFILLMENT_REGIONS].map(r => (
+            <button key={r} onClick={() => setRegion(r)}
+              className={`px-3 py-1 text-xs rounded-lg border ${region===r?'bg-emerald-600 text-white border-emerald-600':'bg-white text-slate-600 border-slate-200'}`}>
+              {r}{r!=='All' && ` (${counts[r]||0})`}
+            </button>
+          ))}
+        </div>
+      </div>
+      <Panel title={`${filtered.length} orders`}>
+        <div className="max-h-[640px] overflow-y-auto scroll-thin">
+          <table className="w-full text-sm">
+            <thead className="text-left text-slate-500 border-b sticky top-0 bg-white">
+              <tr><th className="py-2">SO</th><th>Date</th><th>Region</th><th>Customer</th><th>Destination</th><th>Status</th><th>Tracking</th></tr>
+            </thead>
+            <tbody>
+              {filtered.map(s => {
+                const cust = CUSTOMERS.find(c => c.name === s.customer);
+                return (
+                  <tr key={s.so} className="border-b last:border-0">
+                    <td className="py-2 font-mono text-xs">{s.so}</td>
+                    <td className="text-xs">{s.date}</td>
+                    <td><Pill tone={s.region==='Hold'?'red':s.region==='CA'?'blue':s.region==='US'?'slate':'violet'}>{s.region}</Pill></td>
+                    <td className="truncate max-w-[160px]">{s.customer}</td>
+                    <td className="text-xs truncate max-w-[220px]">{fmt(cust?.address)}</td>
+                    <td><Pill tone={statusTone(s.status)}>{s.status}</Pill></td>
+                    <td className="text-xs font-mono">{fmt(s.tracking)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </Panel>
+    </div>
+  );
+}
+
+function Followups() {
+  const overdue = FOLLOWUPS.filter(f => f.due && new Date(f.due) <= new Date('2026-04-16'));
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl font-bold text-slate-800">Customer Follow-ups</h1>
+        <p className="text-sm text-slate-500 mt-1">Ash - onboarding, follow-up cadence, review attribution, dashboard status</p>
+      </div>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="bg-white rounded-lg border border-slate-200 p-4"><div className="text-xs uppercase text-slate-500">Active</div><div className="text-2xl font-bold mt-1">{FOLLOWUPS.length}</div></div>
+        <div className="bg-white rounded-lg border border-slate-200 p-4"><div className="text-xs uppercase text-slate-500">Overdue Actions</div><div className="text-2xl font-bold mt-1 text-amber-600">{overdue.length}</div></div>
+        <div className="bg-white rounded-lg border border-slate-200 p-4"><div className="text-xs uppercase text-slate-500">Reviews Submitted</div><div className="text-2xl font-bold mt-1 text-emerald-600">{FOLLOWUPS.filter(f=>f.review==='Yes').length}</div></div>
+        <div className="bg-white rounded-lg border border-slate-200 p-4"><div className="text-xs uppercase text-slate-500">Not on Dashboard</div><div className="text-2xl font-bold mt-1">{FOLLOWUPS.filter(f=>!f.dash).length}</div></div>
+      </div>
+      <Panel title="Follow-up pipeline">
+        <table className="w-full text-sm">
+          <thead className="text-left text-slate-500 border-b">
+            <tr><th className="py-2">Customer</th><th>Shipped</th><th>Onboarded</th><th>FU-1</th><th>FU-2</th><th>Compost?</th><th>Review</th><th>Sw</th><th>Dash</th><th>Action Item</th><th>Due</th></tr>
+          </thead>
+          <tbody>
+            {FOLLOWUPS.map((f,i) => (
+              <tr key={i} className="border-b last:border-0">
+                <td className="py-2 font-medium">{f.customer}</td>
+                <td className="text-xs">{f.ship}</td>
+                <td className="text-xs">{fmt(f.onboarding)}</td>
+                <td className="text-xs">{fmt(f.fu1)}</td>
+                <td className="text-xs">{fmt(f.fu2)}</td>
+                <td>{f.compost ? <Pill tone="green">Yes</Pill> : <Pill tone="slate">No</Pill>}</td>
+                <td><Pill tone={f.review==='Yes'?'green':f.review==='No'?'red':'yellow'}>{f.review}</Pill></td>
+                <td className="text-xs">{f.sw}</td>
+                <td>{f.dash ? <Pill tone="green">Y</Pill> : <Pill tone="slate">N</Pill>}</td>
+                <td className="text-xs">{fmt(f.action)}</td>
+                <td className="text-xs">{f.due ? <span className={new Date(f.due) <= new Date('2026-04-16') ? 'text-amber-600 font-semibold' : ''}>{f.due}</span> : <span className="text-slate-400">-</span>}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Panel>
+    </div>
+  );
+}
+
+function TeamTasks() {
+  const [filter, setFilter] = useState('All');
+  const filtered = TEAM_TASKS.filter(t => filter==='All' || t.status===filter);
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-800">Team Tasks</h1>
+          <p className="text-sm text-slate-500 mt-1">Cross-team escalation log - replaces "To Ask Team Members" tab</p>
+        </div>
+        <div className="flex gap-1">
+          {['All','Open','In Progress','Resolved','Irrelevant'].map(f => (
+            <button key={f} onClick={()=>setFilter(f)}
+              className={`px-3 py-1 text-xs rounded-lg border ${filter===f?'bg-emerald-600 text-white border-emerald-600':'bg-white text-slate-600 border-slate-200'}`}>{f}</button>
+          ))}
+        </div>
+      </div>
+      <Panel title={`${filtered.length} tasks`}>
+        <table className="w-full text-sm">
+          <thead className="text-left text-slate-500 border-b">
+            <tr><th className="py-2">Task</th><th>Raised</th><th>By</th><th>Assigned</th><th>Customer</th><th>SO</th><th>Description</th><th>Status</th><th>Replied</th></tr>
+          </thead>
+          <tbody>
+            {filtered.map(t => (
+              <tr key={t.id} className="border-b last:border-0">
+                <td className="py-2 font-mono text-xs">{t.id}</td>
+                <td className="text-xs">{t.raised}</td>
+                <td className="text-xs">{t.by}</td>
+                <td className="text-xs font-medium">{t.to}</td>
+                <td className="text-xs">{t.customer}</td>
+                <td className="text-xs font-mono">{fmt(t.so)}</td>
+                <td className="text-xs">{t.desc}</td>
+                <td><Pill tone={statusTone(t.status)}>{t.status}</Pill></td>
+                <td className="text-xs">{fmt(t.reply)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Panel>
+    </div>
+  );
+}
+
+function Campaigns() {
+  const totalBuyers = CAMPAIGNS.reduce((a,c)=>a+c.buyers,0);
+  const totalRev = CAMPAIGNS.reduce((a,c)=>a+c.revenue,0);
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl font-bold text-slate-800">Marketing Campaigns</h1>
+        <p className="text-sm text-slate-500 mt-1">Pedrum - unified campaign tracker - links to Sales Orders via campaign_id</p>
+      </div>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="bg-white rounded-lg border border-slate-200 p-4"><div className="text-xs uppercase text-slate-500">Active Campaigns</div><div className="text-2xl font-bold mt-1">{CAMPAIGNS.filter(c=>new Date(c.end)>=new Date('2026-04-15')).length}</div></div>
+        <div className="bg-white rounded-lg border border-slate-200 p-4"><div className="text-xs uppercase text-slate-500">Total Buyers</div><div className="text-2xl font-bold mt-1">{totalBuyers}</div></div>
+        <div className="bg-white rounded-lg border border-slate-200 p-4"><div className="text-xs uppercase text-slate-500">Total Revenue</div><div className="text-2xl font-bold mt-1">${totalRev.toLocaleString()}</div></div>
+        <div className="bg-white rounded-lg border border-slate-200 p-4"><div className="text-xs uppercase text-slate-500">Avg Order Value</div><div className="text-2xl font-bold mt-1">${Math.round(totalRev/totalBuyers).toLocaleString()}</div></div>
+      </div>
+      <Panel title="All campaigns">
+        <table className="w-full text-sm">
+          <thead className="text-left text-slate-500 border-b">
+            <tr><th className="py-2">Code</th><th>Name</th><th>Channel</th><th>Start</th><th>End</th><th>Discount</th><th className="text-right">Buyers</th><th className="text-right">Revenue</th><th className="text-right">AOV</th><th>Regions</th></tr>
+          </thead>
+          <tbody>
+            {CAMPAIGNS.map(c => (
+              <tr key={c.code} className="border-b last:border-0">
+                <td className="py-2 font-mono text-xs">{c.code}</td>
+                <td>{c.name}</td>
+                <td className="text-xs">{c.channel}</td>
+                <td className="text-xs">{c.start}</td>
+                <td className="text-xs">{c.end}</td>
+                <td className="text-xs font-mono">{fmt(c.discount)}</td>
+                <td className="text-right">{c.buyers}</td>
+                <td className="text-right">${c.revenue.toLocaleString()}</td>
+                <td className="text-right">${c.aov.toLocaleString()}</td>
+                <td className="text-xs">{c.regions}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Panel>
+      <Panel title="Plan breakdown (Outright / 12mo / 36mo / Sezzle)">
+        <table className="w-full text-sm">
+          <thead className="text-left text-slate-500 border-b">
+            <tr><th className="py-2">Campaign</th><th className="text-right">Outright</th><th className="text-right">12-month</th><th className="text-right">36-month</th><th className="text-right">Sezzle</th></tr>
+          </thead>
+          <tbody>
+            {CAMPAIGNS.map(c => (
+              <tr key={c.code} className="border-b last:border-0">
+                <td className="py-2 font-mono text-xs">{c.code}</td>
+                <td className="text-right">{c.plans.Outright}</td>
+                <td className="text-right">{c.plans['12mo']}</td>
+                <td className="text-right">{c.plans['36mo']}</td>
+                <td className="text-right">{c.plans.Sezzle}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Panel>
+    </div>
+  );
+}
+
+function RepairTickets() {
+  const [filter, setFilter] = useState('All');
+  const filtered = REPAIR_TICKETS.filter(t => filter==='All' || t.status===filter);
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-800">Repair Tickets</h1>
+          <p className="text-sm text-slate-500 mt-1">Junaid - machine repair log - linked to Serial Tracker</p>
+        </div>
+        <div className="flex gap-1">
+          {['All','Open','In Progress','Resolved','Scrapped'].map(f => (
+            <button key={f} onClick={()=>setFilter(f)}
+              className={`px-3 py-1 text-xs rounded-lg border ${filter===f?'bg-emerald-600 text-white border-emerald-600':'bg-white text-slate-600 border-slate-200'}`}>{f}</button>
+          ))}
+        </div>
+      </div>
+      <Panel title={`${filtered.length} tickets`}>
+        <table className="w-full text-sm">
+          <thead className="text-left text-slate-500 border-b">
+            <tr><th className="py-2">Ticket</th><th>Opened</th><th>Serial</th><th>Customer</th><th>Batch</th><th>Type</th><th>Problem</th><th>Parts Needed</th><th>Status</th><th>Resolved</th><th>Signed Off</th></tr>
+          </thead>
+          <tbody>
+            {filtered.map(t => (
+              <tr key={t.id} className="border-b last:border-0">
+                <td className="py-2 font-mono text-xs">{t.id}</td>
+                <td className="text-xs">{t.opened}</td>
+                <td className="font-mono text-xs">{t.serial}</td>
+                <td className="text-xs">{t.customer}</td>
+                <td className="text-xs">{t.batch}</td>
+                <td><Pill tone={t.type==='Hardware'?'red':t.type==='Firmware'?'blue':'slate'}>{t.type}</Pill></td>
+                <td className="text-xs">{t.problem}</td>
+                <td className="text-xs">{t.parts}</td>
+                <td><Pill tone={statusTone(t.status)}>{t.status}</Pill></td>
+                <td className="text-xs">{fmt(t.resolved)}</td>
+                <td className="text-xs">{fmt(t.signoff)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Panel>
+    </div>
+  );
+}
+
+// ------------------------------------------------------------
+// Shell
+// ------------------------------------------------------------
+const NAV = [
+  { key:"dashboard", label:"Dashboard",     icon:"▦" },
+  { key:"so",        label:"Sales Orders",  icon:"⊞" },
+  { key:"fulfill",   label:"Fulfillment",   icon:"◇" },
+  { key:"inv",       label:"Inventory",     icon:"▤" },
+  { key:"mo",        label:"Make Orders",   icon:"⚒" },
+  { key:"po",        label:"Purchase Orders", icon:"$" },
+  { key:"serial",    label:"Serial Tracker", icon:"#" },
+  { key:"ship",      label:"Shipments",     icon:"➤" },
+  { key:"cust",      label:"Customers",     icon:"◉" },
+  { key:"followups", label:"Follow-ups",    icon:"✉" },
+  { key:"tasks",     label:"Team Tasks",    icon:"!" },
+  { key:"campaigns", label:"Campaigns",     icon:"▲" },
+  { key:"repair",    label:"Repair Tickets", icon:"⚙" },
+  { key:"settings",  label:"Settings",      icon:"☰" },
+];
+
+function App() {
+  const [view, setView] = useState("dashboard");
+  const render = () => ({
+    dashboard: <Dashboard />, so: <SalesOrders />, fulfill: <Fulfillment />,
+    inv: <Inventory />, mo: <MakeOrders />, po: <PurchaseOrders />,
+    serial: <SerialTracker />, ship: <Shipments />, cust: <Customers />,
+    followups: <Followups />, tasks: <TeamTasks />, campaigns: <Campaigns />,
+    repair: <RepairTickets />, settings: <Settings />,
+  })[view] || <Dashboard />;
+
+  return (
+    <div className="min-h-screen flex">
+      <aside className="w-60 bg-slate-900 text-slate-200 flex flex-col">
+        <div className="px-5 py-5 border-b border-slate-800">
+          <div className="text-xl font-bold text-white">makelila</div>
+          <div className="text-xs text-emerald-400 mt-1">Operations Hub - Lite</div>
+        </div>
+        <nav className="flex-1 py-3 overflow-y-auto">
+          {NAV.map(n => (
+            <button key={n.key} onClick={() => setView(n.key)}
+              className={`w-full text-left px-5 py-2 text-sm flex items-center gap-3 transition ${view===n.key?"bg-emerald-600 text-white":"hover:bg-slate-800 text-slate-300"}`}>
+              <span className="w-5 text-center opacity-80">{n.icon}</span>
+              <span>{n.label}</span>
+            </button>
+          ))}
+        </nav>
+        <div className="px-5 py-4 border-t border-slate-800 text-xs text-slate-400">
+          <div>huayi@virgohome.io</div>
+          <div className="mt-1">role: admin</div>
+        </div>
+      </aside>
+      <main className="flex-1 p-8 overflow-auto">{render()}</main>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>

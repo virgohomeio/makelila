@@ -1,0 +1,437 @@
+<style>
+  * { font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'Helvetica Neue', sans-serif !important; box-sizing: border-box; }
+  .hist-row {
+    display: grid;
+    grid-template-columns: 1.3fr 1.4fr 0.5fr 0.75fr 0.75fr 0.55fr 1.3fr 1.3fr 0.7fr;
+    align-items: center;
+    padding: 8px 12px;
+    border-bottom: 1px solid #f0f0f0;
+    min-width: 900px;
+  }
+  .hist-row:nth-child(even) { background: #f9fafb; }
+  .hist-row:nth-child(odd)  { background: #fff; }
+  .badge-ca  { font-size:9px;background:#8B1A1A;color:#fff;padding:2px 6px;border-radius:3px;font-weight:700;white-space:nowrap; }
+  .badge-us  { font-size:9px;background:#3C3B6E;color:#fff;padding:2px 6px;border-radius:3px;font-weight:700;white-space:nowrap; }
+  .status-delivered { font-size:9px;background:#c6f6d5;color:#276749;padding:2px 7px;border-radius:8px;font-weight:600;white-space:nowrap; }
+  .status-shipped   { font-size:9px;background:#bee3f8;color:#2b6cb0;padding:2px 7px;border-radius:8px;font-weight:600;white-space:nowrap; }
+  .status-pending   { font-size:9px;background:#e2e8f0;color:#718096;padding:2px 7px;border-radius:8px;font-weight:600;white-space:nowrap; }
+  .tracking-id { font-size:9px;font-family:monospace !important;color:#444;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
+  .amazon-id   { font-size:9px;font-family:monospace !important;color:#c05621;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
+  .repl-tag { font-size:8px;background:#fefcbf;color:#744210;padding:1px 4px;border-radius:3px;margin-left:3px;font-weight:600; }
+  .note-tag { font-size:8px;background:#e9d8fd;color:#553c9a;padding:1px 4px;border-radius:3px;margin-left:3px;font-weight:600; }
+</style>
+
+<h2>Fulfillment History — US Orders</h2>
+<p class="subtitle">Full data from US fulfillment sheet · shipping price · UPS + Amazon starter tracking IDs</p>
+
+<div style="display:flex;gap:0;margin-bottom:0;border-bottom:2px solid #8B1A1A;">
+  <div style="padding:8px 18px;background:#f5f5f5;color:#8B1A1A;font-size:11px;font-weight:600;cursor:pointer;border-radius:4px 4px 0 0;border:1px solid #e2e8f0;border-bottom:none;">Fulfillment Queue</div>
+  <div style="padding:8px 18px;background:#f5f5f5;color:#8B1A1A;font-size:11px;font-weight:600;cursor:pointer;border-radius:4px 4px 0 0;border:1px solid #e2e8f0;border-bottom:none;margin-left:3px;">Inventory Shelf Setup</div>
+  <div style="padding:8px 18px;background:#8B1A1A;color:#fff;font-size:11px;font-weight:600;border-radius:4px 4px 0 0;margin-left:3px;">Fulfillment History</div>
+</div>
+
+<div class="mockup" style="border-top:none;border-radius:0 4px 4px 4px;">
+  <div class="mockup-header" style="background:#8B1A1A;color:#fff;display:flex;align-items:center;justify-content:space-between;padding:8px 16px;">
+    <div style="display:flex;align-items:center;gap:12px;">
+      <img src="https://lilacomposter.com/cdn/shop/files/B1_26bd5139-7008-47c1-804d-1a175ba84b23.png" style="height:28px;filter:brightness(0) invert(1);" onerror="this.style.display='none'">
+      <span style="font-size:11px;font-weight:600;letter-spacing:.5px;opacity:.85;">FULFILLMENT HISTORY</span>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;">
+      <div style="background:rgba(255,255,255,.15);border-radius:4px;padding:4px 10px;font-size:10px;color:rgba(255,255,255,.65);width:170px;">🔍 Search customer or serial…</div>
+      <div style="background:rgba(255,255,255,.15);border-radius:4px;padding:4px 10px;font-size:10px;color:rgba(255,255,255,.85);font-weight:600;">All batches ▾</div>
+      <div style="background:rgba(255,255,255,.15);border-radius:4px;padding:4px 10px;font-size:10px;color:rgba(255,255,255,.85);font-weight:600;">All regions ▾</div>
+      <div style="background:rgba(255,255,255,.2);border-radius:4px;padding:4px 10px;font-size:10px;color:#fff;font-weight:600;cursor:pointer;">↓ Export CSV</div>
+    </div>
+  </div>
+
+  <div class="mockup-body" style="padding:0;">
+
+    <!-- Summary bar -->
+    <div style="display:flex;background:#fafafa;border-bottom:1px solid #e2e8f0;">
+      <div style="flex:1;padding:9px 12px;border-right:1px solid #e2e8f0;text-align:center;">
+        <div style="font-size:17px;font-weight:800;color:#8B1A1A;">36</div>
+        <div style="font-size:8px;color:#718096;font-weight:600;margin-top:1px;">TOTAL SHIPPED</div>
+      </div>
+      <div style="flex:1;padding:9px 12px;border-right:1px solid #e2e8f0;text-align:center;">
+        <div style="font-size:17px;font-weight:800;color:#276749;">30</div>
+        <div style="font-size:8px;color:#718096;font-weight:600;margin-top:1px;">DELIVERED</div>
+      </div>
+      <div style="flex:1;padding:9px 12px;border-right:1px solid #e2e8f0;text-align:center;">
+        <div style="font-size:17px;font-weight:800;color:#2b6cb0;">6</div>
+        <div style="font-size:8px;color:#718096;font-weight:600;margin-top:1px;">IN TRANSIT</div>
+      </div>
+      <div style="flex:1;padding:9px 12px;border-right:1px solid #e2e8f0;text-align:center;">
+        <div style="font-size:17px;font-weight:800;color:#c05621;">$5,430</div>
+        <div style="font-size:8px;color:#718096;font-weight:600;margin-top:1px;">TOTAL FREIGHT</div>
+      </div>
+      <div style="flex:1;padding:9px 12px;border-right:1px solid #e2e8f0;text-align:center;">
+        <div style="font-size:17px;font-weight:800;color:#553c9a;">3</div>
+        <div style="font-size:8px;color:#718096;font-weight:600;margin-top:1px;">REPLACEMENTS</div>
+      </div>
+      <div style="flex:1;padding:9px 12px;text-align:center;">
+        <div style="font-size:17px;font-weight:800;color:#3C3B6E;">3</div>
+        <div style="font-size:8px;color:#718096;font-weight:600;margin-top:1px;">BATCHES</div>
+      </div>
+    </div>
+
+    <!-- Table wrapper — horizontal scroll for wide table -->
+    <div style="overflow-x:auto;overflow-y:auto;max-height:420px;">
+
+      <!-- Header -->
+      <div class="hist-row" style="background:#f7fafc !important;border-bottom:2px solid #e2e8f0;position:sticky;top:0;z-index:2;">
+        <div style="font-size:9px;color:#718096;font-weight:700;">CUSTOMER</div>
+        <div style="font-size:9px;color:#718096;font-weight:700;">SERIAL NUMBER</div>
+        <div style="font-size:9px;color:#718096;font-weight:700;">BATCH</div>
+        <div style="font-size:9px;color:#718096;font-weight:700;">SHIP DATE</div>
+        <div style="font-size:9px;color:#718096;font-weight:700;">DELIVERED</div>
+        <div style="font-size:9px;color:#718096;font-weight:700;">PRICE</div>
+        <div style="font-size:9px;color:#718096;font-weight:700;">UPS TRACKING</div>
+        <div style="font-size:9px;color:#c05621;font-weight:700;">🦅 AMAZON STARTER</div>
+        <div style="font-size:9px;color:#718096;font-weight:700;">STATUS</div>
+      </div>
+
+      <!-- P100 batch — In Transit (newest first) -->
+      <div class="hist-row" style="background:#f0f7ff !important;">
+        <div style="font-size:10px;font-weight:600;color:#2d3748;">Dale Bober</div>
+        <div class="tracking-id">LL01-00000000347</div>
+        <div style="font-size:10px;color:#555;">P100</div>
+        <div style="font-size:10px;color:#555;">Apr 16</div>
+        <div style="font-size:10px;color:#a0aec0;">—</div>
+        <div style="font-size:10px;color:#276749;font-weight:700;">$173.75</div>
+        <div class="tracking-id">1ZV56D26DK27199513</div>
+        <div class="amazon-id">—</div>
+        <div><span class="status-shipped">In Transit</span></div>
+      </div>
+      <div class="hist-row" style="background:#f0f7ff !important;">
+        <div style="font-size:10px;font-weight:600;color:#2d3748;">Jacob Wenger</div>
+        <div class="tracking-id">LL01-00000000346</div>
+        <div style="font-size:10px;color:#555;">P100</div>
+        <div style="font-size:10px;color:#555;">Apr 16</div>
+        <div style="font-size:10px;color:#a0aec0;">—</div>
+        <div style="font-size:10px;color:#276749;font-weight:700;">$151.18</div>
+        <div class="tracking-id">1ZV56D26DK12450474</div>
+        <div class="amazon-id">—</div>
+        <div><span class="status-shipped">In Transit</span></div>
+      </div>
+      <div class="hist-row" style="background:#f0f7ff !important;">
+        <div style="font-size:10px;font-weight:600;color:#2d3748;">Cole Perkins</div>
+        <div class="tracking-id">LL01-00000000345</div>
+        <div style="font-size:10px;color:#555;">P100</div>
+        <div style="font-size:10px;color:#555;">Apr 16</div>
+        <div style="font-size:10px;color:#a0aec0;">—</div>
+        <div style="font-size:10px;color:#276749;font-weight:700;">$173.75</div>
+        <div class="tracking-id">1ZV56D26DK29721088</div>
+        <div class="amazon-id">—</div>
+        <div><span class="status-shipped">In Transit</span></div>
+      </div>
+      <div class="hist-row" style="background:#f0f7ff !important;">
+        <div style="font-size:10px;font-weight:600;color:#2d3748;">Tara Dupper</div>
+        <div class="tracking-id">LL01-00000000329</div>
+        <div style="font-size:10px;color:#555;">P100</div>
+        <div style="font-size:10px;color:#555;">Apr 16</div>
+        <div style="font-size:10px;color:#a0aec0;">—</div>
+        <div style="font-size:10px;color:#276749;font-weight:700;">$129.14</div>
+        <div class="tracking-id">1ZV56D26DK05649023</div>
+        <div class="amazon-id">—</div>
+        <div><span class="status-shipped">In Transit</span></div>
+      </div>
+      <div class="hist-row" style="background:#f0f7ff !important;">
+        <div style="font-size:10px;font-weight:600;color:#2d3748;">Rick Stauffer</div>
+        <div class="tracking-id">LL01-00000000289</div>
+        <div style="font-size:10px;color:#555;">P100</div>
+        <div style="font-size:10px;color:#555;">Apr 15</div>
+        <div style="font-size:10px;color:#a0aec0;">—</div>
+        <div style="font-size:10px;color:#276749;font-weight:700;">$151.18</div>
+        <div class="tracking-id">1ZV56D26DK14798686</div>
+        <div class="amazon-id">—</div>
+        <div><span class="status-shipped">In Transit</span></div>
+      </div>
+      <div class="hist-row" style="background:#f0f7ff !important;">
+        <div style="font-size:10px;font-weight:600;color:#2d3748;">Antonio Cernuto</div>
+        <div class="tracking-id">LL01-00000000323</div>
+        <div style="font-size:10px;color:#555;">P100</div>
+        <div style="font-size:10px;color:#555;">Apr 15</div>
+        <div style="font-size:10px;color:#a0aec0;">—</div>
+        <div style="font-size:10px;color:#276749;font-weight:700;">$133.92</div>
+        <div class="tracking-id">1ZV56D26DK11403428</div>
+        <div class="amazon-id">—</div>
+        <div><span class="status-shipped">In Transit</span></div>
+      </div>
+
+      <!-- Delivered rows — P50N -->
+      <div class="hist-row">
+        <div style="font-size:10px;font-weight:600;color:#2d3748;">Rashida Lee<span class="note-tag">P50N→sent</span></div>
+        <div class="tracking-id">LL01-00000000217</div>
+        <div style="font-size:10px;color:#555;">P50N</div>
+        <div style="font-size:10px;color:#555;">Apr 1</div>
+        <div style="font-size:10px;color:#276749;font-weight:600;">Apr 1</div>
+        <div style="font-size:10px;color:#276749;font-weight:700;">$164.08</div>
+        <div class="tracking-id">1ZV56D26DK14619146</div>
+        <div class="amazon-id">TBA330044822495</div>
+        <div><span class="status-delivered">Delivered</span></div>
+      </div>
+      <div class="hist-row">
+        <div style="font-size:10px;font-weight:600;color:#2d3748;">Jean Cotis</div>
+        <div class="tracking-id">LL01-00000000245</div>
+        <div style="font-size:10px;color:#555;">P50N</div>
+        <div style="font-size:10px;color:#555;">Mar 20</div>
+        <div style="font-size:10px;color:#276749;font-weight:600;">Mar 26</div>
+        <div style="font-size:10px;color:#276749;font-weight:700;">$135.34</div>
+        <div class="tracking-id">1ZV56D26DK21357951</div>
+        <div class="amazon-id">TBA329559460407</div>
+        <div><span class="status-delivered">Delivered</span></div>
+      </div>
+      <div class="hist-row">
+        <div style="font-size:10px;font-weight:600;color:#2d3748;">Douglas Hanson</div>
+        <div class="tracking-id">LL01-00000000232</div>
+        <div style="font-size:10px;color:#555;">P50N</div>
+        <div style="font-size:10px;color:#555;">Mar 18</div>
+        <div style="font-size:10px;color:#276749;font-weight:600;">Mar 24</div>
+        <div style="font-size:10px;color:#276749;font-weight:700;">$144.69</div>
+        <div class="tracking-id">1ZV56D26DK34315829</div>
+        <div class="amazon-id">TBA329556966422</div>
+        <div><span class="status-delivered">Delivered</span></div>
+      </div>
+      <div class="hist-row">
+        <div style="font-size:10px;font-weight:600;color:#2d3748;">Michael Romans</div>
+        <div class="tracking-id">LL01-00000000216</div>
+        <div style="font-size:10px;color:#555;">P50N</div>
+        <div style="font-size:10px;color:#555;">Mar 13</div>
+        <div style="font-size:10px;color:#276749;font-weight:600;">Mar 23</div>
+        <div style="font-size:10px;color:#276749;font-weight:700;">$166.85</div>
+        <div class="tracking-id">1ZV56D26DK28560325</div>
+        <div class="amazon-id">TBA329497552238</div>
+        <div><span class="status-delivered">Delivered</span></div>
+      </div>
+      <div class="hist-row">
+        <div style="font-size:10px;font-weight:600;color:#2d3748;">Thomi Clinton</div>
+        <div class="tracking-id">LL01-00000000219</div>
+        <div style="font-size:10px;color:#555;">P50N</div>
+        <div style="font-size:10px;color:#555;">Mar 12</div>
+        <div style="font-size:10px;color:#276749;font-weight:600;">Mar 20</div>
+        <div style="font-size:10px;color:#276749;font-weight:700;">$166.68</div>
+        <div class="tracking-id">1ZV56D26DK37424349</div>
+        <div class="amazon-id">TBA329408887040</div>
+        <div><span class="status-delivered">Delivered</span></div>
+      </div>
+      <div class="hist-row">
+        <div style="font-size:10px;font-weight:600;color:#2d3748;">Sandra Sweet</div>
+        <div class="tracking-id">LL01-00000000224</div>
+        <div style="font-size:10px;color:#555;">P50N</div>
+        <div style="font-size:10px;color:#555;">Mar 12</div>
+        <div style="font-size:10px;color:#276749;font-weight:600;">Mar 19</div>
+        <div style="font-size:10px;color:#276749;font-weight:700;">$138.09</div>
+        <div class="tracking-id">1ZV56D26DK09789697</div>
+        <div class="amazon-id">TBA329490291127</div>
+        <div><span class="status-delivered">Delivered</span></div>
+      </div>
+      <div class="hist-row">
+        <div style="font-size:10px;font-weight:600;color:#2d3748;">Robert Buckley</div>
+        <div class="tracking-id">LL01-00000000221</div>
+        <div style="font-size:10px;color:#555;">P50N</div>
+        <div style="font-size:10px;color:#555;">Mar 12</div>
+        <div style="font-size:10px;color:#276749;font-weight:600;">Mar 17</div>
+        <div style="font-size:10px;color:#276749;font-weight:700;">$141.33</div>
+        <div class="tracking-id">1ZV56D26DK01309291</div>
+        <div class="amazon-id">TBA329442318513</div>
+        <div><span class="status-delivered">Delivered</span></div>
+      </div>
+      <div class="hist-row">
+        <div style="font-size:10px;font-weight:600;color:#2d3748;">Heather Hall</div>
+        <div class="tracking-id">LL01-00000000215</div>
+        <div style="font-size:10px;color:#555;">P50N</div>
+        <div style="font-size:10px;color:#555;">Mar 11</div>
+        <div style="font-size:10px;color:#276749;font-weight:600;">Mar 18</div>
+        <div style="font-size:10px;color:#276749;font-weight:700;">$166.68</div>
+        <div class="tracking-id">1ZV56D26DK34720248</div>
+        <div class="amazon-id">TBA329355229241</div>
+        <div><span class="status-delivered">Delivered</span></div>
+      </div>
+      <div class="hist-row">
+        <div style="font-size:10px;font-weight:600;color:#2d3748;">Sandra Colligan</div>
+        <div class="tracking-id">LL01-00000000223</div>
+        <div style="font-size:10px;color:#555;">P50N</div>
+        <div style="font-size:10px;color:#555;">Mar 11</div>
+        <div style="font-size:10px;color:#276749;font-weight:600;">Mar 18</div>
+        <div style="font-size:10px;color:#276749;font-weight:700;">$138.09</div>
+        <div class="tracking-id">1ZV56D26DK10390006</div>
+        <div class="amazon-id">TBA329423382001</div>
+        <div><span class="status-delivered">Delivered</span></div>
+      </div>
+      <div class="hist-row">
+        <div style="font-size:10px;font-weight:600;color:#2d3748;">Frank Nikolaidis</div>
+        <div class="tracking-id">LL01-00000000231</div>
+        <div style="font-size:10px;color:#555;">P50N</div>
+        <div style="font-size:10px;color:#555;">Mar 11</div>
+        <div style="font-size:10px;color:#276749;font-weight:600;">Mar 17</div>
+        <div style="font-size:10px;color:#276749;font-weight:700;">$138.09</div>
+        <div class="tracking-id">1ZV56D26DK38341918</div>
+        <div class="amazon-id" style="font-size:9px;color:#c05621;">9361289752062…</div>
+        <div><span class="status-delivered">Delivered</span></div>
+      </div>
+      <div class="hist-row">
+        <div style="font-size:10px;font-weight:600;color:#2d3748;">Peter Lupachino</div>
+        <div class="tracking-id">LL01-00000000230</div>
+        <div style="font-size:10px;color:#555;">P50N</div>
+        <div style="font-size:10px;color:#555;">Mar 11</div>
+        <div style="font-size:10px;color:#276749;font-weight:600;">Apr 1</div>
+        <div style="font-size:10px;color:#276749;font-weight:700;">$128.49</div>
+        <div class="tracking-id">1ZV56D26DK37979134</div>
+        <div class="amazon-id">TBA329397814904</div>
+        <div><span class="status-delivered">Delivered</span></div>
+      </div>
+      <div class="hist-row">
+        <div style="font-size:10px;font-weight:600;color:#2d3748;">Anthony Kurt</div>
+        <div class="tracking-id">LL01-00000000212</div>
+        <div style="font-size:10px;color:#555;">P50N</div>
+        <div style="font-size:10px;color:#555;">Mar 12</div>
+        <div style="font-size:10px;color:#276749;font-weight:600;">Mar 18</div>
+        <div style="font-size:10px;color:#276749;font-weight:700;">$128.49</div>
+        <div class="tracking-id">1ZV56D26DK37674810</div>
+        <div class="amazon-id">TBA329355643295</div>
+        <div><span class="status-delivered">Delivered</span></div>
+      </div>
+      <div class="hist-row">
+        <div style="font-size:10px;font-weight:600;color:#2d3748;">Tricia Bowling</div>
+        <div class="tracking-id">LL01-00000000205</div>
+        <div style="font-size:10px;color:#555;">P50N</div>
+        <div style="font-size:10px;color:#555;">Mar 10</div>
+        <div style="font-size:10px;color:#276749;font-weight:600;">Mar 14</div>
+        <div style="font-size:10px;color:#276749;font-weight:700;">$141.33</div>
+        <div class="tracking-id">1ZV56D26DK06672193</div>
+        <div class="amazon-id">TBA329320046762</div>
+        <div><span class="status-delivered">Delivered</span></div>
+      </div>
+      <div class="hist-row">
+        <div style="font-size:10px;font-weight:600;color:#2d3748;">Kaiti Klucas<span class="note-tag">Marketing</span></div>
+        <div class="tracking-id">LL01-00000000202</div>
+        <div style="font-size:10px;color:#555;">P50N</div>
+        <div style="font-size:10px;color:#555;">Mar 3</div>
+        <div style="font-size:10px;color:#276749;font-weight:600;">Mar 9</div>
+        <div style="font-size:10px;color:#276749;font-weight:700;">$144.74</div>
+        <div class="tracking-id">1ZV56D26DK00652359</div>
+        <div class="amazon-id">TBA329145771289</div>
+        <div><span class="status-delivered">Delivered</span></div>
+      </div>
+      <div class="hist-row">
+        <div style="font-size:10px;font-weight:600;color:#2d3748;">Esmeralda Burgess</div>
+        <div class="tracking-id">LL01-00000000207</div>
+        <div style="font-size:10px;color:#555;">P50N</div>
+        <div style="font-size:10px;color:#555;">Mar 5</div>
+        <div style="font-size:10px;color:#276749;font-weight:600;">Mar 10</div>
+        <div style="font-size:10px;color:#276749;font-weight:700;">$128.23</div>
+        <div class="tracking-id">1ZV56D26DK22305246</div>
+        <div class="amazon-id">TBA329147559609</div>
+        <div><span class="status-delivered">Delivered</span></div>
+      </div>
+      <div class="hist-row">
+        <div style="font-size:10px;font-weight:600;color:#2d3748;">Keith Taitano</div>
+        <div class="tracking-id">LL01-00000000211</div>
+        <div style="font-size:10px;color:#555;">P50N</div>
+        <div style="font-size:10px;color:#555;">Mar 5</div>
+        <div style="font-size:10px;color:#276749;font-weight:600;">Mar 6</div>
+        <div style="font-size:10px;color:#e53e3e;font-weight:700;">$210.51</div>
+        <div class="tracking-id">1ZV56D26DG25936156</div>
+        <div class="amazon-id">TBA329156867737</div>
+        <div><span class="status-delivered">Delivered</span></div>
+      </div>
+      <div class="hist-row">
+        <div style="font-size:10px;font-weight:600;color:#2d3748;">Kristi Blue</div>
+        <div class="tracking-id">LL01-00000000227</div>
+        <div style="font-size:10px;color:#555;">P50N</div>
+        <div style="font-size:10px;color:#555;">Mar 5</div>
+        <div style="font-size:10px;color:#276749;font-weight:600;">Mar 10</div>
+        <div style="font-size:10px;color:#276749;font-weight:700;">$137.81</div>
+        <div class="tracking-id">1ZV56D26DK06425441</div>
+        <div class="amazon-id" style="color:#a0aec0;">— no starter</div>
+        <div><span class="status-delivered">Delivered</span></div>
+      </div>
+      <div class="hist-row">
+        <div style="font-size:10px;font-weight:600;color:#2d3748;">Teresa Just</div>
+        <div class="tracking-id">LL01-00000000244</div>
+        <div style="font-size:10px;color:#555;">P50N</div>
+        <div style="font-size:10px;color:#555;">Feb 24</div>
+        <div style="font-size:10px;color:#276749;font-weight:600;">Feb 28</div>
+        <div style="font-size:10px;color:#276749;font-weight:700;">$160.80</div>
+        <div class="tracking-id">1ZV56D26DK07619589</div>
+        <div class="amazon-id">TBA329075760192</div>
+        <div><span class="status-delivered">Delivered</span></div>
+      </div>
+      <div class="hist-row">
+        <div style="font-size:10px;font-weight:600;color:#2d3748;">Rodney Richards</div>
+        <div class="tracking-id">LL01-00000000228</div>
+        <div style="font-size:10px;color:#555;">P50N</div>
+        <div style="font-size:10px;color:#555;">Feb 24</div>
+        <div style="font-size:10px;color:#276749;font-weight:600;">Mar 3</div>
+        <div style="font-size:10px;color:#276749;font-weight:700;">$140.75</div>
+        <div class="tracking-id">1ZV56D26DK34362984</div>
+        <div class="amazon-id">TBA329081884100</div>
+        <div><span class="status-delivered">Delivered</span></div>
+      </div>
+      <div class="hist-row">
+        <div style="font-size:10px;font-weight:600;color:#2d3748;">Jeffrey Van Dyke</div>
+        <div class="tracking-id">LL01-00000000233</div>
+        <div style="font-size:10px;color:#555;">P50N</div>
+        <div style="font-size:10px;color:#555;">Feb 24</div>
+        <div style="font-size:10px;color:#276749;font-weight:600;">Mar 4</div>
+        <div style="font-size:10px;color:#276749;font-weight:700;">$166.00</div>
+        <div class="tracking-id">1ZV56D26DK36986995</div>
+        <div class="amazon-id">TBA329082268643</div>
+        <div><span class="status-delivered">Delivered</span></div>
+      </div>
+      <div class="hist-row">
+        <div style="font-size:10px;font-weight:600;color:#2d3748;">Amila Smith</div>
+        <div class="tracking-id">LL01-00000000236</div>
+        <div style="font-size:10px;color:#555;">P50N</div>
+        <div style="font-size:10px;color:#555;">Feb 24</div>
+        <div style="font-size:10px;color:#276749;font-weight:600;">Mar 2</div>
+        <div style="font-size:10px;color:#276749;font-weight:700;">$144.45</div>
+        <div class="tracking-id">1ZV56D26DK12089222</div>
+        <div class="amazon-id" style="font-size:9px;color:#c05621;">9361289717961…</div>
+        <div><span class="status-delivered">Delivered</span></div>
+      </div>
+
+      <!-- Replacements -->
+      <div class="hist-row" style="background:#fffdf5 !important;">
+        <div style="font-size:10px;font-weight:600;color:#744210;">Anthony Kurt <span class="repl-tag">Top Lid</span></div>
+        <div class="tracking-id" style="color:#a0aec0;">—</div>
+        <div style="font-size:10px;color:#a0aec0;">—</div>
+        <div style="font-size:10px;color:#555;">Apr 17</div>
+        <div style="font-size:10px;color:#a0aec0;">—</div>
+        <div style="font-size:10px;color:#276749;font-weight:700;">$34.06</div>
+        <div class="tracking-id">1ZV56D26DK16952184</div>
+        <div class="amazon-id" style="color:#a0aec0;">—</div>
+        <div><span class="status-shipped">In Transit</span></div>
+      </div>
+      <div class="hist-row" style="background:#fffdf5 !important;">
+        <div style="font-size:10px;font-weight:600;color:#744210;">Douglas Hanson <span class="repl-tag">Top Lid</span></div>
+        <div class="tracking-id" style="color:#a0aec0;">—</div>
+        <div style="font-size:10px;color:#a0aec0;">—</div>
+        <div style="font-size:10px;color:#555;">Apr 17</div>
+        <div style="font-size:10px;color:#a0aec0;">—</div>
+        <div style="font-size:10px;color:#276749;font-weight:700;">$39.76</div>
+        <div class="tracking-id">1ZV56D266825626892</div>
+        <div class="amazon-id" style="color:#a0aec0;">—</div>
+        <div><span class="status-shipped">In Transit</span></div>
+      </div>
+      <div class="hist-row" style="background:#fffdf5 !important;">
+        <div style="font-size:10px;font-weight:600;color:#744210;">Whittington <span class="repl-tag">Top Lid</span></div>
+        <div class="tracking-id" style="color:#a0aec0;">—</div>
+        <div style="font-size:10px;color:#a0aec0;">—</div>
+        <div style="font-size:10px;color:#555;">Apr 17</div>
+        <div style="font-size:10px;color:#a0aec0;">—</div>
+        <div style="font-size:10px;color:#276749;font-weight:700;">$34.06</div>
+        <div class="tracking-id">1ZV56D266821266216</div>
+        <div class="amazon-id" style="color:#a0aec0;">—</div>
+        <div><span class="status-shipped">In Transit</span></div>
+      </div>
+
+    </div>
+
+    <div style="padding:8px 14px;background:#f7fafc;border-top:1px solid #e2e8f0;display:flex;justify-content:space-between;align-items:center;">
+      <div style="font-size:9px;color:#a0aec0;">39 records · 🔵 In Transit (P100 + replacements) · Delivered (P50N) · 🟡 Replacement parts</div>
+      <div style="font-size:9px;color:#a0aec0;">Click any row to view full order details</div>
+    </div>
+
+  </div>
+</div>

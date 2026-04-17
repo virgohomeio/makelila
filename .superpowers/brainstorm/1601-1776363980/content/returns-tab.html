@@ -1,0 +1,461 @@
+<style>
+  * { font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'Helvetica Neue', sans-serif !important; box-sizing: border-box; }
+  .rtn-row {
+    display: grid;
+    grid-template-columns: 0.65fr 1.4fr 0.55fr 0.75fr 0.7fr 0.9fr 0.75fr 0.65fr 1.4fr;
+    align-items: center;
+    padding: 7px 14px;
+    border-bottom: 1px solid #f0f0f0;
+    min-width: 980px;
+  }
+  .rtn-row:nth-child(even) { background: #fafafa; }
+  .rtn-row:nth-child(odd)  { background: #fff; }
+  .rtn-row.pending-row     { background: #fffbeb !important; }
+  .badge-ca  { display:inline-block;font-size:9px;background:#8B1A1A;color:#fff;padding:2px 5px;border-radius:3px;font-weight:700; }
+  .badge-us  { display:inline-block;font-size:9px;background:#3C3B6E;color:#fff;padding:2px 5px;border-radius:3px;font-weight:700; }
+  .s-completed { display:inline-block;font-size:9px;background:#c6f6d5;color:#276749;padding:2px 7px;border-radius:8px;font-weight:600; }
+  .s-pending   { display:inline-block;font-size:9px;background:#fefcbf;color:#744210;padding:2px 7px;border-radius:8px;font-weight:600; }
+  .reason-defect   { display:inline-block;font-size:9px;background:#fed7d7;color:#9b2c2c;padding:2px 6px;border-radius:4px;font-weight:600; }
+  .reason-finance  { display:inline-block;font-size:9px;background:#e9d8fd;color:#553c9a;padding:2px 6px;border-radius:4px;font-weight:600; }
+  .reason-other    { display:inline-block;font-size:9px;background:#e2e8f0;color:#4a5568;padding:2px 6px;border-radius:4px;font-weight:600; }
+  .reason-software { display:inline-block;font-size:9px;background:#bee3f8;color:#2b6cb0;padding:2px 6px;border-radius:4px;font-weight:600; }
+  .reason-shipping { display:inline-block;font-size:9px;background:#fbd38d;color:#744210;padding:2px 6px;border-radius:4px;font-weight:600; }
+  .cond-unused   { font-size:9px;color:#276749;font-weight:600; }
+  .cond-used     { font-size:9px;color:#c05621;font-weight:600; }
+  .cond-damaged  { font-size:9px;color:#9b2c2c;font-weight:600; }
+  .filter-btn { padding:4px 12px;border-radius:4px;font-size:10px;font-weight:600;cursor:pointer;border:1.5px solid #e2e8f0;background:#f5f5f5;color:#555; }
+  .filter-btn.active { background:#8B1A1A;color:#fff;border-color:#8B1A1A; }
+</style>
+
+<h2>Returns & Refunds Tab</h2>
+<p class="subtitle">30 returns from VCycene Return & Refund Checklist</p>
+
+<!-- 5-TAB BAR -->
+<div style="display:flex;gap:0;margin-bottom:0;border-bottom:2px solid #8B1A1A;flex-wrap:wrap;">
+  <div style="padding:7px 14px;background:#f5f5f5;color:#8B1A1A;font-size:11px;font-weight:600;cursor:pointer;border-radius:4px 4px 0 0;border:1px solid #e2e8f0;border-bottom:none;">Fulfillment Queue</div>
+  <div style="padding:7px 14px;background:#f5f5f5;color:#8B1A1A;font-size:11px;font-weight:600;cursor:pointer;border-radius:4px 4px 0 0;border:1px solid #e2e8f0;border-bottom:none;margin-left:2px;">Inventory Shelf</div>
+  <div style="padding:7px 14px;background:#f5f5f5;color:#8B1A1A;font-size:11px;font-weight:600;cursor:pointer;border-radius:4px 4px 0 0;border:1px solid #e2e8f0;border-bottom:none;margin-left:2px;">Fulfillment History</div>
+  <div style="padding:7px 14px;background:#f5f5f5;color:#8B1A1A;font-size:11px;font-weight:600;cursor:pointer;border-radius:4px 4px 0 0;border:1px solid #e2e8f0;border-bottom:none;margin-left:2px;">Replacements</div>
+  <div style="padding:7px 14px;background:#8B1A1A;color:#fff;font-size:11px;font-weight:600;border-radius:4px 4px 0 0;margin-left:2px;">Returns &amp; Refunds <span style="background:rgba(255,255,255,.25);padding:1px 6px;border-radius:8px;font-size:10px;margin-left:3px;">30</span></div>
+</div>
+
+<div class="mockup" style="border-top:none;border-radius:0 4px 4px 4px;">
+  <div class="mockup-header" style="background:#8B1A1A;color:#fff;display:flex;align-items:center;justify-content:space-between;padding:8px 16px;">
+    <div style="display:flex;align-items:center;gap:12px;">
+      <img src="https://lilacomposter.com/cdn/shop/files/B1_26bd5139-7008-47c1-804d-1a175ba84b23.png" style="height:28px;filter:brightness(0) invert(1);" onerror="this.style.display='none'">
+      <span style="font-size:11px;font-weight:600;letter-spacing:.5px;opacity:.85;">RETURNS &amp; REFUNDS</span>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;">
+      <div style="background:rgba(255,255,255,.15);border-radius:4px;padding:4px 10px;font-size:10px;color:rgba(255,255,255,.65);width:160px;">🔍 Search customer…</div>
+      <div style="background:rgba(255,255,255,.15);border-radius:4px;padding:4px 10px;font-size:10px;color:rgba(255,255,255,.85);font-weight:600;">All regions ▾</div>
+      <div style="background:rgba(255,255,255,.2);border-radius:4px;padding:4px 10px;font-size:10px;color:#fff;font-weight:600;cursor:pointer;">↓ Export CSV</div>
+    </div>
+  </div>
+
+  <div class="mockup-body" style="padding:0;">
+
+    <!-- Summary bar -->
+    <div style="display:flex;background:#fafafa;border-bottom:1px solid #e2e8f0;">
+      <div style="flex:1;padding:9px 8px;border-right:1px solid #e2e8f0;text-align:center;">
+        <div style="font-size:16px;font-weight:800;color:#8B1A1A;">30</div>
+        <div style="font-size:8px;color:#718096;font-weight:600;margin-top:1px;">TOTAL RETURNS</div>
+      </div>
+      <div style="flex:1;padding:9px 8px;border-right:1px solid #e2e8f0;text-align:center;">
+        <div style="font-size:16px;font-weight:800;color:#fbd38d;">4</div>
+        <div style="font-size:8px;color:#744210;font-weight:600;margin-top:1px;">PENDING</div>
+      </div>
+      <div style="flex:1;padding:9px 8px;border-right:1px solid #e2e8f0;text-align:center;">
+        <div style="font-size:16px;font-weight:800;color:#276749;">26</div>
+        <div style="font-size:8px;color:#718096;font-weight:600;margin-top:1px;">COMPLETED</div>
+      </div>
+      <div style="flex:1;padding:9px 8px;border-right:1px solid #e2e8f0;text-align:center;">
+        <div style="font-size:16px;font-weight:800;color:#9b2c2c;">8</div>
+        <div style="font-size:8px;color:#718096;font-weight:600;margin-top:1px;">PRODUCT DEFECTS</div>
+      </div>
+      <div style="flex:1;padding:9px 8px;border-right:1px solid #e2e8f0;text-align:center;">
+        <div style="font-size:16px;font-weight:800;color:#553c9a;">4</div>
+        <div style="font-size:8px;color:#718096;font-weight:600;margin-top:1px;">TARIFF REFUSALS</div>
+      </div>
+      <div style="flex:1;padding:9px 8px;border-right:1px solid #e2e8f0;text-align:center;">
+        <div style="font-size:14px;font-weight:800;color:#c05621;">$18,294</div>
+        <div style="font-size:8px;color:#718096;font-weight:600;margin-top:1px;">TOTAL REFUNDED</div>
+      </div>
+      <div style="flex:1;padding:9px 8px;text-align:center;">
+        <div style="font-size:16px;font-weight:800;color:#8B1A1A;">19</div>
+        <div style="font-size:8px;color:#718096;font-weight:600;margin-top:1px;">🍁 CA &nbsp;|&nbsp; <span style="color:#3C3B6E;">11</span> 🦅 US</div>
+      </div>
+    </div>
+
+    <!-- Reason filter -->
+    <div style="display:flex;gap:6px;padding:9px 14px;background:#fff;border-bottom:1px solid #e2e8f0;align-items:center;flex-wrap:wrap;">
+      <div style="font-size:9px;color:#718096;font-weight:700;margin-right:2px;">REASON:</div>
+      <div class="filter-btn active">All (30)</div>
+      <div class="filter-btn">Product Defect (8)</div>
+      <div class="filter-btn">Tariff / Finance (4)</div>
+      <div class="filter-btn">Cancelled / Other (14)</div>
+      <div class="filter-btn">Software / Odor (2)</div>
+      <div class="filter-btn">Shipping Damage (3)</div>
+      <div style="margin-left:auto;display:flex;gap:6px;">
+        <div class="filter-btn">🔴 Pending (4)</div>
+        <div style="font-size:10px;background:#8B1A1A;color:#fff;padding:4px 12px;border-radius:4px;font-weight:700;cursor:pointer;">+ Log Return</div>
+      </div>
+    </div>
+
+    <div style="overflow-x:auto;overflow-y:auto;max-height:400px;">
+
+      <!-- Header -->
+      <div class="rtn-row" style="background:#f7fafc !important;border-bottom:2px solid #e2e8f0;position:sticky;top:0;z-index:2;">
+        <div style="font-size:9px;color:#718096;font-weight:700;">RETURN ID</div>
+        <div style="font-size:9px;color:#718096;font-weight:700;">CUSTOMER</div>
+        <div style="font-size:9px;color:#718096;font-weight:700;">REGION</div>
+        <div style="font-size:9px;color:#718096;font-weight:700;">DATE REQ.</div>
+        <div style="font-size:9px;color:#718096;font-weight:700;">CONDITION</div>
+        <div style="font-size:9px;color:#718096;font-weight:700;">REASON</div>
+        <div style="font-size:9px;color:#718096;font-weight:700;">REFUND</div>
+        <div style="font-size:9px;color:#718096;font-weight:700;">STATUS</div>
+        <div style="font-size:9px;color:#718096;font-weight:700;">NOTES</div>
+      </div>
+
+      <!-- PENDING rows first -->
+      <div class="rtn-row pending-row">
+        <div style="font-size:10px;font-weight:700;color:#744210;font-family:monospace;">RTN-0030</div>
+        <div style="font-size:10px;font-weight:600;color:#2d3748;">Chad &amp; Sarah Lockhart</div>
+        <div><span class="badge-ca">🍁 CA</span></div>
+        <div style="font-size:10px;color:#a0aec0;">—</div>
+        <div style="font-size:9px;color:#a0aec0;">—</div>
+        <div><span class="reason-other">Cancelled</span></div>
+        <div style="font-size:10px;color:#a0aec0;">—</div>
+        <div><span class="s-pending">Pending</span></div>
+        <div style="font-size:9px;color:#555;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">Machine damaged; long-delayed P100 promise</div>
+      </div>
+      <div class="rtn-row pending-row">
+        <div style="font-size:10px;font-weight:700;color:#744210;font-family:monospace;">RTN-0029</div>
+        <div style="font-size:10px;font-weight:600;color:#2d3748;">Kristi Blue</div>
+        <div><span class="badge-us">🦅 US</span></div>
+        <div style="font-size:10px;color:#a0aec0;">—</div>
+        <div style="font-size:9px;color:#a0aec0;">—</div>
+        <div style="font-size:9px;color:#a0aec0;">—</div>
+        <div style="font-size:10px;color:#a0aec0;">—</div>
+        <div><span class="s-pending">Pending</span></div>
+        <div style="font-size:9px;color:#a0aec0;">No details provided</div>
+      </div>
+      <div class="rtn-row pending-row">
+        <div style="font-size:10px;font-weight:700;color:#744210;font-family:monospace;">RTN-0028</div>
+        <div style="font-size:10px;font-weight:600;color:#2d3748;">Jefy Chacko</div>
+        <div><span class="badge-us">🦅 US</span></div>
+        <div style="font-size:10px;color:#555;">Mar 18, 2026</div>
+        <div class="cond-unused">Unused</div>
+        <div><span class="reason-shipping">Ship Damage</span></div>
+        <div style="font-size:10px;color:#a0aec0;">—</div>
+        <div><span class="s-pending">Pending</span></div>
+        <div style="font-size:9px;color:#555;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">Broken tray; received P50N instead of crusher</div>
+      </div>
+      <div class="rtn-row pending-row">
+        <div style="font-size:10px;font-weight:700;color:#744210;font-family:monospace;">RTN-0027</div>
+        <div style="font-size:10px;font-weight:600;color:#2d3748;">Shelley Small</div>
+        <div><span class="badge-ca">🍁 CA</span></div>
+        <div style="font-size:10px;color:#555;">Feb 27, 2026</div>
+        <div class="cond-damaged">Damaged</div>
+        <div><span class="reason-shipping">Ship Damage</span></div>
+        <div style="font-size:10px;font-weight:700;color:#c05621;">$7.08</div>
+        <div><span class="s-pending">Pending</span></div>
+        <div style="font-size:9px;color:#555;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">Broken plastic; damaged base rim</div>
+      </div>
+
+      <!-- COMPLETED rows — newest first -->
+      <div class="rtn-row">
+        <div style="font-size:10px;font-weight:600;color:#555;font-family:monospace;">RTN-0010</div>
+        <div style="font-size:10px;font-weight:600;color:#2d3748;">Lisa Jervis</div>
+        <div><span class="badge-us">🦅 US</span></div>
+        <div style="font-size:10px;color:#555;">Mar 5, 2026</div>
+        <div class="cond-unused">Unused</div>
+        <div><span class="reason-finance">Tariff</span></div>
+        <div style="font-size:10px;font-weight:700;color:#c05621;">$1,004.31</div>
+        <div><span class="s-completed">Completed</span></div>
+        <div style="font-size:9px;color:#555;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">Unwilling to pay import tariffs; pre-shipment</div>
+      </div>
+      <div class="rtn-row">
+        <div style="font-size:10px;font-weight:600;color:#555;font-family:monospace;">RTN-0001</div>
+        <div style="font-size:10px;font-weight:600;color:#2d3748;">Chezo Nojang</div>
+        <div><span class="badge-us">🦅 US</span></div>
+        <div style="font-size:10px;color:#555;">Mar 4, 2026</div>
+        <div class="cond-unused">Unused</div>
+        <div><span class="reason-other">Cancelled</span></div>
+        <div style="font-size:10px;font-weight:700;color:#c05621;">$1,040.03</div>
+        <div><span class="s-completed">Completed</span></div>
+        <div style="font-size:9px;color:#555;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">Duties + shipping delay; customer lost interest</div>
+      </div>
+      <div class="rtn-row">
+        <div style="font-size:10px;font-weight:600;color:#555;font-family:monospace;">RTN-0023</div>
+        <div style="font-size:10px;font-weight:600;color:#2d3748;">Ari &amp; Jack</div>
+        <div><span class="badge-ca">🍁 CA</span></div>
+        <div style="font-size:10px;color:#555;">Feb 7, 2026</div>
+        <div class="cond-used">Used</div>
+        <div><span class="reason-defect">Defect</span></div>
+        <div style="font-size:10px;font-weight:700;color:#c05621;">$1,467.87</div>
+        <div><span class="s-completed">Completed</span></div>
+        <div style="font-size:9px;color:#555;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">Multiple problems reported</div>
+      </div>
+      <div class="rtn-row">
+        <div style="font-size:10px;font-weight:600;color:#555;font-family:monospace;">RTN-0004</div>
+        <div style="font-size:10px;font-weight:600;color:#2d3748;">Desiree Page</div>
+        <div><span class="badge-us">🦅 US</span></div>
+        <div style="font-size:10px;color:#555;">Feb 7, 2026</div>
+        <div class="cond-unused">Unused</div>
+        <div><span class="reason-finance">Tariff</span></div>
+        <div style="font-size:10px;font-weight:700;color:#c05621;">$1,003.29</div>
+        <div><span class="s-completed">Completed</span></div>
+        <div style="font-size:9px;color:#555;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">Refused tariff payment; awaiting reduction</div>
+      </div>
+      <div class="rtn-row">
+        <div style="font-size:10px;font-weight:600;color:#555;font-family:monospace;">RTN-0003</div>
+        <div style="font-size:10px;font-weight:600;color:#2d3748;">Matthew Miller</div>
+        <div><span class="badge-us">🦅 US</span></div>
+        <div style="font-size:10px;color:#555;">Feb 9, 2026</div>
+        <div class="cond-unused">Unused</div>
+        <div><span class="reason-finance">Tariff</span></div>
+        <div style="font-size:10px;font-weight:700;color:#c05621;">$1,019.71</div>
+        <div><span class="s-completed">Completed</span></div>
+        <div style="font-size:9px;color:#555;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">Unwilling to pay 18% U.S. duty</div>
+      </div>
+      <div class="rtn-row">
+        <div style="font-size:10px;font-weight:600;color:#555;font-family:monospace;">RTN-0024</div>
+        <div style="font-size:10px;font-weight:600;color:#2d3748;">Sharai Mustatia</div>
+        <div><span class="badge-ca">🍁 CA</span></div>
+        <div style="font-size:10px;color:#555;">Feb 5, 2026</div>
+        <div class="cond-used">Used</div>
+        <div><span class="reason-shipping">Ship Damage</span></div>
+        <div style="font-size:10px;font-weight:700;color:#c05621;">$51.17</div>
+        <div><span class="s-completed">Completed</span></div>
+        <div style="font-size:9px;color:#555;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">Plastic smell; shipping damage</div>
+      </div>
+      <div class="rtn-row">
+        <div style="font-size:10px;font-weight:600;color:#555;font-family:monospace;">RTN-0002</div>
+        <div style="font-size:10px;font-weight:600;color:#2d3748;">Jeannette Sanchez</div>
+        <div><span class="badge-us">🦅 US</span></div>
+        <div style="font-size:10px;color:#555;">Feb 3, 2026</div>
+        <div class="cond-unused">Unused</div>
+        <div><span class="reason-other">Cancelled</span></div>
+        <div style="font-size:10px;font-weight:700;color:#c05621;">$1,023.43</div>
+        <div><span class="s-completed">Completed</span></div>
+        <div style="font-size:9px;color:#555;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">Order cancelled</div>
+      </div>
+      <div class="rtn-row">
+        <div style="font-size:10px;font-weight:600;color:#555;font-family:monospace;">RTN-0025</div>
+        <div style="font-size:10px;font-weight:600;color:#2d3748;">Joseph Le</div>
+        <div><span class="badge-us">🦅 US</span></div>
+        <div style="font-size:10px;color:#555;">Feb 16, 2026</div>
+        <div class="cond-unused">Unused</div>
+        <div><span class="reason-other">Cancelled</span></div>
+        <div style="font-size:10px;font-weight:700;color:#c05621;">$1,005.25</div>
+        <div><span class="s-completed">Completed</span></div>
+        <div style="font-size:9px;color:#555;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">Customer seeking future reconsideration</div>
+      </div>
+      <div class="rtn-row">
+        <div style="font-size:10px;font-weight:600;color:#555;font-family:monospace;">RTN-0005</div>
+        <div style="font-size:10px;font-weight:600;color:#2d3748;">Matthew Lypkie</div>
+        <div><span class="badge-ca">🍁 CA</span></div>
+        <div style="font-size:10px;color:#555;">Jan 9, 2026</div>
+        <div class="cond-unused">Unused</div>
+        <div><span class="reason-other">Cancelled</span></div>
+        <div style="font-size:10px;font-weight:700;color:#c05621;">$72.17</div>
+        <div><span class="s-completed">Completed</span></div>
+        <div style="font-size:9px;color:#555;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">Unit too large for apartment; Mini prospect 👀</div>
+      </div>
+      <div class="rtn-row">
+        <div style="font-size:10px;font-weight:600;color:#555;font-family:monospace;">RTN-0016</div>
+        <div style="font-size:10px;font-weight:600;color:#2d3748;">Scott Destephanis</div>
+        <div><span class="badge-ca">🍁 CA</span></div>
+        <div style="font-size:10px;color:#555;">Jan 4, 2026</div>
+        <div class="cond-used">Used</div>
+        <div><span class="reason-software">Odor</span></div>
+        <div style="font-size:10px;font-weight:700;color:#c05621;">$751.45</div>
+        <div><span class="s-completed">Completed</span></div>
+        <div style="font-size:9px;color:#555;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">Refund due to unpleasant odor</div>
+      </div>
+      <div class="rtn-row">
+        <div style="font-size:10px;font-weight:600;color:#555;font-family:monospace;">RTN-0014</div>
+        <div style="font-size:10px;font-weight:600;color:#2d3748;">Mike Ferguson</div>
+        <div><span class="badge-ca">🍁 CA</span></div>
+        <div style="font-size:10px;color:#555;">Nov 21, 2025</div>
+        <div class="cond-used">Used</div>
+        <div><span class="reason-other">Hardship</span></div>
+        <div style="font-size:10px;font-weight:700;color:#c05621;">$1,067.85</div>
+        <div><span class="s-completed">Completed</span></div>
+        <div style="font-size:9px;color:#555;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">Personal hardship circumstance</div>
+      </div>
+      <div class="rtn-row">
+        <div style="font-size:10px;font-weight:600;color:#555;font-family:monospace;">RTN-0022</div>
+        <div style="font-size:10px;font-weight:600;color:#2d3748;">Cecilia Lee</div>
+        <div><span class="badge-ca">🍁 CA</span></div>
+        <div style="font-size:10px;color:#555;">Oct 21, 2025</div>
+        <div class="cond-used">Used</div>
+        <div><span class="reason-defect">Defect</span></div>
+        <div style="font-size:10px;font-weight:700;color:#c05621;">$751.45</div>
+        <div><span class="s-completed">Completed</span></div>
+        <div style="font-size:9px;color:#555;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">Multiple issues (P50 + P150)</div>
+      </div>
+      <div class="rtn-row">
+        <div style="font-size:10px;font-weight:600;color:#555;font-family:monospace;">RTN-0019</div>
+        <div style="font-size:10px;font-weight:600;color:#2d3748;">Peter Phillips</div>
+        <div><span class="badge-ca">🍁 CA</span></div>
+        <div style="font-size:10px;color:#555;">—</div>
+        <div class="cond-unused">Unused</div>
+        <div><span class="reason-other">Cancelled</span></div>
+        <div style="font-size:10px;font-weight:700;color:#c05621;">$500.00</div>
+        <div><span class="s-completed">Completed</span></div>
+        <div style="font-size:9px;color:#555;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">No longer needed after property sale</div>
+      </div>
+      <div class="rtn-row">
+        <div style="font-size:10px;font-weight:600;color:#555;font-family:monospace;">RTN-0013</div>
+        <div style="font-size:10px;font-weight:600;color:#2d3748;">Marie Kessaris &amp; Sean Li</div>
+        <div><span class="badge-ca">🍁 CA</span></div>
+        <div style="font-size:10px;color:#555;">May 22, 2025</div>
+        <div class="cond-damaged">Damaged</div>
+        <div><span class="reason-defect">Defect</span></div>
+        <div style="font-size:10px;font-weight:700;color:#c05621;">$751.45</div>
+        <div><span class="s-completed">Completed</span></div>
+        <div style="font-size:9px;color:#555;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">Water damage from floor (P50)</div>
+      </div>
+      <div class="rtn-row">
+        <div style="font-size:10px;font-weight:600;color:#555;font-family:monospace;">RTN-0021</div>
+        <div style="font-size:10px;font-weight:600;color:#2d3748;">Thao Truong</div>
+        <div><span class="badge-ca">🍁 CA</span></div>
+        <div style="font-size:10px;color:#555;">Jun 6, 2025</div>
+        <div class="cond-used">Used</div>
+        <div><span class="reason-defect">Defect</span></div>
+        <div style="font-size:10px;font-weight:700;color:#c05621;">$551.45</div>
+        <div><span class="s-completed">Completed</span></div>
+        <div style="font-size:9px;color:#555;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">Strong odor (P50); user error noted</div>
+      </div>
+      <div class="rtn-row">
+        <div style="font-size:10px;font-weight:600;color:#555;font-family:monospace;">RTN-0018</div>
+        <div style="font-size:10px;font-weight:600;color:#2d3748;">Robert &amp; Mylene Facchini</div>
+        <div><span class="badge-ca">🍁 CA</span></div>
+        <div style="font-size:10px;color:#555;">Jul 9, 2025</div>
+        <div class="cond-used">Used</div>
+        <div><span class="reason-defect">Defect</span></div>
+        <div style="font-size:10px;font-weight:700;color:#c05621;">$1,067.85</div>
+        <div><span class="s-completed">Completed</span></div>
+        <div style="font-size:9px;color:#555;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">Excessive odor (P50)</div>
+      </div>
+      <div class="rtn-row">
+        <div style="font-size:10px;font-weight:600;color:#555;font-family:monospace;">RTN-0017</div>
+        <div style="font-size:10px;font-weight:600;color:#2d3748;">Francine Bryant</div>
+        <div><span class="badge-ca">🍁 CA</span></div>
+        <div style="font-size:10px;color:#555;">—</div>
+        <div class="cond-unused">Unused</div>
+        <div><span class="reason-other">Cancelled</span></div>
+        <div style="font-size:10px;font-weight:700;color:#c05621;">$200.00</div>
+        <div><span class="s-completed">Completed</span></div>
+        <div style="font-size:9px;color:#555;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">Prolonged wait prompted cancellation</div>
+      </div>
+      <div class="rtn-row">
+        <div style="font-size:10px;font-weight:600;color:#555;font-family:monospace;">RTN-0009</div>
+        <div style="font-size:10px;font-weight:600;color:#2d3748;">Jim Ford</div>
+        <div><span class="badge-ca">🍁 CA</span></div>
+        <div style="font-size:10px;color:#555;">—</div>
+        <div class="cond-unused">Unused</div>
+        <div><span class="reason-other">Cancelled</span></div>
+        <div style="font-size:10px;font-weight:700;color:#c05621;">$858.80</div>
+        <div><span class="s-completed">Completed</span></div>
+        <div style="font-size:9px;color:#555;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">Impatient; cancelled order</div>
+      </div>
+      <div class="rtn-row">
+        <div style="font-size:10px;font-weight:600;color:#555;font-family:monospace;">RTN-0012</div>
+        <div style="font-size:10px;font-weight:600;color:#2d3748;">Prema Vaidyanethen</div>
+        <div><span class="badge-ca">🍁 CA</span></div>
+        <div style="font-size:10px;color:#555;">—</div>
+        <div class="cond-unused">Unused</div>
+        <div><span class="reason-other">Cancelled</span></div>
+        <div style="font-size:10px;font-weight:700;color:#c05621;">$1,067.85</div>
+        <div><span class="s-completed">Completed</span></div>
+        <div style="font-size:9px;color:#555;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">Impatient; cancelled order</div>
+      </div>
+      <div class="rtn-row">
+        <div style="font-size:10px;font-weight:600;color:#555;font-family:monospace;">RTN-0008</div>
+        <div style="font-size:10px;font-weight:600;color:#2d3748;">Tim Li</div>
+        <div><span class="badge-ca">🍁 CA</span></div>
+        <div style="font-size:10px;color:#555;">—</div>
+        <div class="cond-unused">Unused</div>
+        <div><span class="reason-other">Cancelled</span></div>
+        <div style="font-size:10px;font-weight:700;color:#c05621;">$402.57</div>
+        <div><span class="s-completed">Completed</span></div>
+        <div style="font-size:9px;color:#555;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">Unwilling to wait for delivery</div>
+      </div>
+      <div class="rtn-row">
+        <div style="font-size:10px;font-weight:600;color:#555;font-family:monospace;">RTN-0006</div>
+        <div style="font-size:10px;font-weight:600;color:#2d3748;">Allen Yi &amp; Jessie Hu</div>
+        <div><span class="badge-ca">🍁 CA</span></div>
+        <div style="font-size:10px;color:#555;">—</div>
+        <div class="cond-unused">Unused</div>
+        <div><span class="reason-other">Cancelled</span></div>
+        <div style="font-size:10px;font-weight:700;color:#c05621;">$429.40</div>
+        <div><span class="s-completed">Completed</span></div>
+        <div style="font-size:9px;color:#555;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">Impatient about delivery wait</div>
+      </div>
+      <div class="rtn-row">
+        <div style="font-size:10px;font-weight:600;color:#555;font-family:monospace;">RTN-0011</div>
+        <div style="font-size:10px;font-weight:600;color:#2d3748;">Kimberley Mayers</div>
+        <div><span class="badge-ca">🍁 CA</span></div>
+        <div style="font-size:10px;color:#555;">—</div>
+        <div class="cond-unused">Unused</div>
+        <div><span class="reason-other">Cancelled</span></div>
+        <div style="font-size:10px;font-weight:700;color:#c05621;">$200.00</div>
+        <div><span class="s-completed">Completed</span></div>
+        <div style="font-size:9px;color:#555;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">Impatient; cancelled order</div>
+      </div>
+      <div class="rtn-row">
+        <div style="font-size:10px;font-weight:600;color:#555;font-family:monospace;">RTN-0007</div>
+        <div style="font-size:10px;font-weight:600;color:#2d3748;">Ruiping Guo</div>
+        <div><span class="badge-ca">🍁 CA</span></div>
+        <div style="font-size:10px;color:#555;">—</div>
+        <div class="cond-unused">Unused</div>
+        <div><span class="reason-other">Cancelled</span></div>
+        <div style="font-size:10px;font-weight:700;color:#c05621;">$200.00</div>
+        <div><span class="s-completed">Completed</span></div>
+        <div style="font-size:9px;color:#555;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">Cancelled due to delivery delays</div>
+      </div>
+      <div class="rtn-row">
+        <div style="font-size:10px;font-weight:600;color:#555;font-family:monospace;">RTN-0026</div>
+        <div style="font-size:10px;font-weight:600;color:#2d3748;">Don Saldana</div>
+        <div><span class="badge-ca">🍁 CA</span></div>
+        <div style="font-size:10px;color:#555;">Feb 9, 2026</div>
+        <div class="cond-used">Used</div>
+        <div><span class="reason-software">Odor</span></div>
+        <div style="font-size:10px;color:#a0aec0;">—</div>
+        <div><span class="s-completed">Completed</span></div>
+        <div style="font-size:9px;color:#555;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">Pervasive odor prompted return</div>
+      </div>
+      <div class="rtn-row">
+        <div style="font-size:10px;font-weight:600;color:#555;font-family:monospace;">RTN-0020</div>
+        <div style="font-size:10px;font-weight:600;color:#2d3748;">Karen Dubeau</div>
+        <div><span class="badge-ca">🍁 CA</span></div>
+        <div style="font-size:10px;color:#555;">—</div>
+        <div class="cond-unused">Unused</div>
+        <div><span class="reason-other">Cancelled</span></div>
+        <div style="font-size:10px;font-weight:700;color:#c05621;">$56.00</div>
+        <div><span class="s-completed">Completed</span></div>
+        <div style="font-size:9px;color:#555;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">Long delays; purchased alternative</div>
+      </div>
+      <div class="rtn-row">
+        <div style="font-size:10px;font-weight:600;color:#555;font-family:monospace;">RTN-0015</div>
+        <div style="font-size:10px;font-weight:600;color:#2d3748;">Grace Tam</div>
+        <div><span class="badge-ca">🍁 CA</span></div>
+        <div style="font-size:10px;color:#555;">—</div>
+        <div class="cond-unused">Unused</div>
+        <div><span class="reason-other">Exchange</span></div>
+        <div style="font-size:10px;font-weight:700;color:#276749;">$0.00</div>
+        <div><span class="s-completed">Completed</span></div>
+        <div style="font-size:9px;color:#555;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">Wishes to exchange for Mini model</div>
+      </div>
+
+    </div>
+
+    <div style="padding:9px 14px;background:#f7fafc;border-top:1px solid #e2e8f0;display:flex;justify-content:space-between;align-items:center;">
+      <div style="font-size:9px;color:#a0aec0;">30 records · Pending shown first · <span style="color:#9b2c2c;font-weight:600;">8 defect returns</span> · <span style="color:#553c9a;font-weight:600;">4 tariff refusals (all US)</span></div>
+      <div style="font-size:9px;color:#a0aec0;">Approved by: George (management) · Processed by: Accounting</div>
+    </div>
+
+  </div>
+</div>
