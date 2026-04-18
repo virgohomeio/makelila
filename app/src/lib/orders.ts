@@ -20,7 +20,7 @@ export type Order = {
   customer_email: string | null;
   customer_phone: string | null;
   quo_thread_url: string | null;
-  address_line: string;
+  address_line: string | null;
   city: string;
   region_state: string | null;
   country: 'US' | 'CA';

@@ -15,16 +15,37 @@ const VERDICT_LABEL: Record<Order['address_verdict'], string> = {
   remote: 'Remote area · freight surcharge likely',
 };
 
+function MissingField() {
+  return <span className={styles.missing}>Missing — complete via QUO</span>;
+}
+
 export function AddressCard({ order }: { order: Order }) {
   return (
     <div className={styles.card}>
       <div className={styles.cardHead}>Shipping Address</div>
       <div className={styles.cardBody}>
-        <div>{order.address_line}</div>
-        <div className={styles.muted}>
-          {order.city}{order.region_state ? `, ${order.region_state}` : ''} · {order.country}
+        <div className={styles.contactLine}>
+          <span className={styles.contactLabel}>Street</span>
+          {order.address_line
+            ? <span>{order.address_line}</span>
+            : <MissingField />}
         </div>
-        <div className={`${styles.verdict} ${VERDICT_CLASS[order.address_verdict]}`}>
+        <div className={styles.contactLine}>
+          <span className={styles.contactLabel}>City</span>
+          <span>{order.city}</span>
+        </div>
+        <div className={styles.contactLine}>
+          <span className={styles.contactLabel}>Region</span>
+          {order.region_state
+            ? <span>{order.region_state}</span>
+            : <MissingField />}
+        </div>
+        <div className={styles.contactLine}>
+          <span className={styles.contactLabel}>Country</span>
+          <span>{order.country}</span>
+        </div>
+
+        <div className={`${styles.verdict} ${VERDICT_CLASS[order.address_verdict]}`} style={{ marginTop: 12 }}>
           <strong>{order.address_verdict.toUpperCase()}</strong>
           <span>{VERDICT_LABEL[order.address_verdict]}</span>
         </div>
