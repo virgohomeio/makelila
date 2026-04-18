@@ -17,6 +17,15 @@ export default function OrderReview() {
     }
   }, [loading, orderId, pending, navigate]);
 
+  const afterDisposition = () => {
+    const remaining = pending.filter(o => o.id !== orderId);
+    if (remaining.length > 0) {
+      navigate(`/order-review/${remaining[0].id}`);
+    } else {
+      navigate('/order-review');
+    }
+  };
+
   return (
     <div className={styles.layout}>
       <Sidebar
@@ -28,9 +37,11 @@ export default function OrderReview() {
         onSelect={(id) => navigate(`/order-review/${id}`)}
       />
       {selected ? (
-        <Detail order={selected} />
+        <Detail order={selected} onAfterDisposition={afterDisposition} />
       ) : (
-        <div className={styles.empty}>Select an order from the left to review.</div>
+        <section className={styles.empty}>
+          {loading ? 'Loading…' : 'Select an order from the left to review.'}
+        </section>
       )}
     </div>
   );
