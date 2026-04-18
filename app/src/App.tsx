@@ -23,7 +23,8 @@ export default function App() {
             }
           >
             <Route index element={<Navigate to="order-review" replace />} />
-            <Route path="order-review"  element={<OrderReview />} />
+            <Route path="order-review"          element={<OrderReview />} />
+            <Route path="order-review/:orderId" element={<OrderReview />} />
             <Route path="fulfillment"   element={<Fulfillment />} />
             <Route path="post-shipment" element={<PostShipment />} />
             <Route path="stock"         element={<Stock />} />
