@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useOrders } from '../../lib/orders';
 import styles from './OrderReview.module.css';
@@ -9,9 +10,11 @@ export default function OrderReview() {
   const selected = orderId ? all.find(o => o.id === orderId) ?? null : null;
 
   // Auto-select the first pending order if no selection
-  if (!loading && !orderId && pending.length > 0) {
-    navigate(`/order-review/${pending[0].id}`, { replace: true });
-  }
+  useEffect(() => {
+    if (!loading && !orderId && pending.length > 0) {
+      navigate(`/order-review/${pending[0].id}`, { replace: true });
+    }
+  }, [loading, orderId, pending, navigate]);
 
   return (
     <div className={styles.layout}>
