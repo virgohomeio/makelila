@@ -10,6 +10,8 @@ import { ActionBar }    from './detail/ActionBar';
 import { ConfirmBanner } from './detail/ConfirmBanner';
 import styles from './OrderReview.module.css';
 
+type Banner = { variant: 'success' | 'error'; message: string } | null;
+
 export function Detail({
   order,
   onAfterDisposition,
@@ -17,18 +19,25 @@ export function Detail({
   order: Order;
   onAfterDisposition: () => void;
 }) {
-  const [banner, setBanner] = useState<string | null>(null);
+  const [banner, setBanner] = useState<Banner>(null);
   const dismissBanner = useCallback(() => setBanner(null), []);
 
   const wrap = async (label: string, fn: () => Promise<void>) => {
-    await fn();
-    setBanner(`${label} · ${order.customer_name}`);
-    onAfterDisposition();
+    try {
+      await fn();
+      setBanner({ variant: 'success', message: `${label} · ${order.customer_name}` });
+      onAfterDisposition();
+    } catch (err) {
+      setBanner({
+        variant: 'error',
+        message: `Failed: ${(err as Error).message ?? 'unknown error'}`,
+      });
+    }
   };
 
   return (
     <section className={styles.detail}>
-      <ConfirmBanner message={banner} onDismiss={dismissBanner} />
+      <ConfirmBanner banner={banner} onDismiss={dismissBanner} />
       <ActionBar
         order={order}
         onApprove={() => wrap('Approved', () => disposition(order, 'approved'))}

@@ -3,16 +3,17 @@ import type { Order } from '../../lib/orders';
 import { OrderRow } from './OrderRow';
 import styles from './OrderReview.module.css';
 
-type Tab = 'pending' | 'held' | 'flagged' | 'all';
+type Tab = 'pending' | 'held' | 'flagged' | 'approved' | 'all';
 
 export function Sidebar({
-  pending, held, flagged, all,
+  pending, held, flagged, approved, all,
   selectedId,
   onSelect,
 }: {
   pending: Order[];
   held: Order[];
   flagged: Order[];
+  approved: Order[];
   all: Order[];
   selectedId: string | null;
   onSelect: (id: string) => void;
@@ -20,9 +21,10 @@ export function Sidebar({
   const [tab, setTab] = useState<Tab>('pending');
   const [query, setQuery] = useState('');
 
-  const source = tab === 'pending' ? pending
-               : tab === 'held'    ? held
-               : tab === 'flagged' ? flagged
+  const source = tab === 'pending'  ? pending
+               : tab === 'held'     ? held
+               : tab === 'flagged'  ? flagged
+               : tab === 'approved' ? approved
                : all;
 
   const visible = useMemo(() => {
@@ -36,10 +38,11 @@ export function Sidebar({
   }, [source, query]);
 
   const tabs: Array<{ key: Tab; label: string; count: number }> = [
-    { key: 'pending', label: 'Pending', count: pending.length },
-    { key: 'held',    label: 'Held',    count: held.length },
-    { key: 'flagged', label: 'Flagged', count: flagged.length },
-    { key: 'all',     label: 'All',     count: all.length },
+    { key: 'pending',  label: 'Pending',   count: pending.length },
+    { key: 'held',     label: 'Held',      count: held.length },
+    { key: 'flagged',  label: 'Flagged',   count: flagged.length },
+    { key: 'approved', label: 'Confirmed', count: approved.length },
+    { key: 'all',      label: 'All',       count: all.length },
   ];
 
   return (

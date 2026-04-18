@@ -329,6 +329,27 @@
   font-weight: 700;
 }
 
+.bannerError {
+  background: var(--color-error-bg);
+  border: 1.5px solid var(--color-error-border);
+  border-radius: var(--radius-md);
+  padding: 10px 14px;
+  margin: 16px 18px 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--color-error);
+}
+.bannerCloseError {
+  background: transparent;
+  border: none;
+  color: var(--color-error);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 700;
+}
+
 .notesSaveBtn {
   background: var(--color-ink);
   color: #fff;

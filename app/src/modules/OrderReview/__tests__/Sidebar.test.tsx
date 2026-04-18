@@ -40,6 +40,7 @@ describe('Sidebar', () => {
         pending={[p1, p2]}
         held={[h1]}
         flagged={[f1]}
+        approved={[]}
         selectedId={selectedId}
         onSelect={onSelect}
       />,
@@ -78,7 +79,7 @@ describe('Sidebar', () => {
   it('shows empty-state copy when the active tab has no rows', () => {
     render(
       <Sidebar
-        all={[]} pending={[]} held={[]} flagged={[]}
+        all={[]} pending={[]} held={[]} flagged={[]} approved={[]}
         selectedId={null} onSelect={vi.fn()}
       />,
     );

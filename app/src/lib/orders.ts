@@ -118,6 +118,7 @@ export function useOrders(): {
   pending: Order[];
   held: Order[];
   flagged: Order[];
+  approved: Order[];
   loading: boolean;
 } {
   const [cache, setCache] = useState<Order[]>([]);
@@ -160,10 +161,11 @@ export function useOrders(): {
   }, []);
 
   return useMemo(() => ({
-    all:     cache,
-    pending: cache.filter(o => o.status === 'pending'),
-    held:    cache.filter(o => o.status === 'held'),
-    flagged: cache.filter(o => o.status === 'flagged'),
+    all:      cache,
+    pending:  cache.filter(o => o.status === 'pending'),
+    held:     cache.filter(o => o.status === 'held'),
+    flagged:  cache.filter(o => o.status === 'flagged'),
+    approved: cache.filter(o => o.status === 'approved'),
     loading,
   }), [cache, loading]);
 }
