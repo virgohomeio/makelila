@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useOrders } from '../../lib/orders';
+import { Sidebar } from './Sidebar';
 import styles from './OrderReview.module.css';
 
 export default function OrderReview() {
@@ -9,7 +10,6 @@ export default function OrderReview() {
   const { all, pending, held, flagged, loading } = useOrders();
   const selected = orderId ? all.find(o => o.id === orderId) ?? null : null;
 
-  // Auto-select the first pending order if no selection
   useEffect(() => {
     if (!loading && !orderId && pending.length > 0) {
       navigate(`/order-review/${pending[0].id}`, { replace: true });
@@ -18,12 +18,14 @@ export default function OrderReview() {
 
   return (
     <div className={styles.layout}>
-      <aside>
-        {/* Sidebar comes in Task 6 */}
-        <div className={styles.empty}>
-          {loading ? 'Loading…' : `${pending.length} pending · ${held.length} held · ${flagged.length} flagged`}
-        </div>
-      </aside>
+      <Sidebar
+        all={all}
+        pending={pending}
+        held={held}
+        flagged={flagged}
+        selectedId={orderId ?? null}
+        onSelect={(id) => navigate(`/order-review/${id}`)}
+      />
       <section>
         {selected ? (
           <div className={styles.empty}>Selected: {selected.order_ref}</div>
