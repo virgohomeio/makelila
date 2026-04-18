@@ -3,6 +3,7 @@ import { CustomerCard } from './detail/CustomerCard';
 import { AddressCard }  from './detail/AddressCard';
 import { FreightCard }  from './detail/FreightCard';
 import { LineItemsCard } from './detail/LineItemsCard';
+import { NotesCard } from './detail/NotesCard';
 import styles from './OrderReview.module.css';
 
 export function Detail({ order }: { order: Order }) {
@@ -13,6 +14,7 @@ export function Detail({ order }: { order: Order }) {
         <AddressCard order={order} />
         <FreightCard order={order} />
         <LineItemsCard order={order} />
+        <NotesCard order={order} />
       </div>
     </section>
   );

@@ -231,3 +231,21 @@
 }
 .liTable th { color: var(--color-ink-subtle); font-weight: 700; font-size: 10px; text-transform: uppercase; }
 .liTable tfoot td { font-weight: 700; }
+
+.notesArea {
+  width: 100%;
+  min-height: 80px;
+  resize: vertical;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  font-family: inherit;
+  color: var(--color-ink);
+}
+
+.notesStatus {
+  margin-top: 6px;
+  font-size: 10px;
+  color: var(--color-ink-faint);
+}
