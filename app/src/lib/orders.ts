@@ -46,7 +46,7 @@ async function currentUserId(): Promise<string> {
 }
 
 export async function disposition(
-  id: string,
+  order: Pick<Order, 'id' | 'order_ref' | 'customer_name'>,
   status: Exclude<OrderStatus, 'pending'>,
   reason?: string,
 ): Promise<void> {
@@ -59,15 +59,17 @@ export async function disposition(
       dispositioned_by: userId,
       dispositioned_at: new Date().toISOString(),
     })
-    .eq('id', id);
+    .eq('id', order.id);
   if (error) throw error;
 
-  await logAction(ACTION_TYPE[status], `Order ${id.slice(0, 8)}`, reason ?? '');
+  await logAction(ACTION_TYPE[status], order.order_ref, reason ?? order.customer_name);
 }
 
-export async function needInfo(id: string, note: string = ''): Promise<void> {
-  await currentUserId();
-  await logAction('order_need_info', `Order ${id.slice(0, 8)}`, note);
+export async function needInfo(
+  order: Pick<Order, 'id' | 'order_ref' | 'customer_name'>,
+  note?: string,
+): Promise<void> {
+  await logAction('order_need_info', order.order_ref, note ?? order.customer_name);
 }
 
 export async function updateNotes(id: string, notes: string): Promise<void> {

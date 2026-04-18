@@ -36,7 +36,8 @@ describe('disposition', () => {
   });
 
   it('updates status + timestamps and writes activity_log verb-form type', async () => {
-    await disposition('order-1', 'approved', 'Looks good');
+    const testOrder = { id: 'order-1', order_ref: '#TEST-1', customer_name: 'Test Customer' };
+    await disposition(testOrder, 'approved', 'Looks good');
 
     expect(fromMock).toHaveBeenCalledWith('orders');
     expect(updateMock).toHaveBeenCalledWith(expect.objectContaining({
@@ -44,30 +45,35 @@ describe('disposition', () => {
       dispositioned_by: 'user-1',
     }));
     expect(eqMock).toHaveBeenCalledWith('id', 'order-1');
-    expect(logActionMock).toHaveBeenCalledWith(
-      'order_approve',
-      expect.any(String),
-      'Looks good',
-    );
+    expect(logActionMock).toHaveBeenCalledWith('order_approve', '#TEST-1', 'Looks good');
   });
 
   it.each([
     ['flagged' as const, 'order_flag'],
     ['held' as const,    'order_hold'],
   ])('maps %s → %s', async (status, type) => {
-    await disposition('order-2', status, 'reason');
-    expect(logActionMock).toHaveBeenCalledWith(type, expect.any(String), 'reason');
+    const testOrder = { id: 'order-2', order_ref: '#T-2', customer_name: 'T' };
+    await disposition(testOrder, status, 'reason');
+    expect(logActionMock).toHaveBeenCalledWith(type, '#T-2', 'reason');
   });
 
   it('throws if unauthenticated', async () => {
     getUserMock.mockResolvedValueOnce({ data: { user: null } });
-    await expect(disposition('order-3', 'approved')).rejects.toThrow(/not authenticated/i);
+    const o = { id: 'order-3', order_ref: '#T-3', customer_name: 'T' };
+    await expect(disposition(o, 'approved')).rejects.toThrow(/not authenticated/i);
   });
 
   it('surfaces the UPDATE error', async () => {
     eqMock.mockResolvedValueOnce({ data: null, error: new Error('RLS denied') });
-    await expect(disposition('order-4', 'approved')).rejects.toThrow(/RLS denied/);
+    const o = { id: 'order-4', order_ref: '#T-4', customer_name: 'T' };
+    await expect(disposition(o, 'approved')).rejects.toThrow(/RLS denied/);
     expect(logActionMock).not.toHaveBeenCalled();
+  });
+
+  it('falls back to customer_name when reason is omitted', async () => {
+    const o = { id: 'order-5', order_ref: '#FB', customer_name: 'Fallback Customer' };
+    await disposition(o, 'approved');
+    expect(logActionMock).toHaveBeenCalledWith('order_approve', '#FB', 'Fallback Customer');
   });
 });
 
@@ -79,11 +85,12 @@ describe('needInfo', () => {
   });
 
   it('writes activity_log without changing status', async () => {
-    await needInfo('order-1', 'Need a photo of the driveway');
+    const o = { id: 'order-1', order_ref: '#NI-1', customer_name: 'Ned' };
+    await needInfo(o, 'Need a photo of the driveway');
     expect(updateMock).not.toHaveBeenCalled();
     expect(logActionMock).toHaveBeenCalledWith(
       'order_need_info',
-      expect.any(String),
+      '#NI-1',
       'Need a photo of the driveway',
     );
   });
