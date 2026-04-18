@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useOrders } from '../../lib/orders';
 import { Sidebar } from './Sidebar';
+import { Detail } from './Detail';
 import styles from './OrderReview.module.css';
 
 export default function OrderReview() {
@@ -26,13 +27,11 @@ export default function OrderReview() {
         selectedId={orderId ?? null}
         onSelect={(id) => navigate(`/order-review/${id}`)}
       />
-      <section>
-        {selected ? (
-          <div className={styles.empty}>Selected: {selected.order_ref}</div>
-        ) : (
-          <div className={styles.empty}>Select an order from the left to review.</div>
-        )}
-      </section>
+      {selected ? (
+        <Detail order={selected} />
+      ) : (
+        <div className={styles.empty}>Select an order from the left to review.</div>
+      )}
     </div>
   );
 }
