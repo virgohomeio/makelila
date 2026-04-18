@@ -1,21 +1,34 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
-const { dispositionMock, needInfoMock, updateNotesMock } = vi.hoisted(() => ({
-  dispositionMock: vi.fn(() => Promise.resolve()),
-  needInfoMock:    vi.fn(() => Promise.resolve()),
-  updateNotesMock: vi.fn(() => Promise.resolve()),
+const { dispositionMock, needInfoMock, addOrderNoteMock, useOrderNotesMock } = vi.hoisted(() => ({
+  dispositionMock:  vi.fn(() => Promise.resolve()),
+  needInfoMock:     vi.fn(() => Promise.resolve()),
+  addOrderNoteMock: vi.fn(() => Promise.resolve()),
+  useOrderNotesMock: vi.fn(() => ({ notes: [], loading: false })),
 }));
 
 vi.mock('../../../lib/orders', async () => {
   const actual = await vi.importActual<typeof import('../../../lib/orders')>('../../../lib/orders');
   return {
     ...actual,
-    disposition: dispositionMock,
-    needInfo:    needInfoMock,
-    updateNotes: updateNotesMock,
+    disposition:    dispositionMock,
+    needInfo:       needInfoMock,
+    addOrderNote:   addOrderNoteMock,
+    useOrderNotes:  useOrderNotesMock,
   };
 });
+
+vi.mock('../../../lib/auth', () => ({
+  useAuth: () => ({
+    profile: { id: 'u1', display_name: 'Test User', role: 'member' },
+    user: { id: 'u1', email: 'test@virgohome.io' },
+    session: null,
+    loading: false,
+    signInWithGoogle: vi.fn(),
+    signOut: vi.fn(),
+  }),
+}));
 
 import { Detail } from '../Detail';
 import type { Order } from '../../../lib/orders';
@@ -34,7 +47,6 @@ const order: Order = {
   freight_estimate_usd: 89.5, freight_threshold_usd: 200,
   total_usd: 1149,
   line_items: [{ sku: 'LL01', name: 'Lila 01', qty: 1, price_usd: 1149 }],
-  notes: '',
   dispositioned_by: null, dispositioned_at: null,
   created_at: '2026-04-17T00:00:00Z',
 };
@@ -43,7 +55,7 @@ describe('Detail', () => {
   beforeEach(() => {
     dispositionMock.mockClear();
     needInfoMock.mockClear();
-    updateNotesMock.mockClear();
+    addOrderNoteMock.mockClear();
   });
 
   it('Confirm calls disposition with status=approved', async () => {
@@ -87,14 +99,14 @@ describe('Detail', () => {
     });
   });
 
-  it('Notes save button fires updateNotes on click, not on change', async () => {
+  it('Add note button fires addOrderNote with the current user name + body', async () => {
     render(<Detail order={order} onAfterDisposition={vi.fn()} />);
-    const textarea = screen.getByPlaceholderText(/internal notes/i);
-    fireEvent.change(textarea, { target: { value: 'needs follow-up' } });
-    expect(updateNotesMock).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('button', { name: /save notes/i }));
+    const textarea = screen.getByPlaceholderText(/add a review note/i);
+    fireEvent.change(textarea, { target: { value: 'first note' } });
+    expect(addOrderNoteMock).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: /add note/i }));
     await waitFor(() => {
-      expect(updateNotesMock).toHaveBeenCalledWith('order-1', 'needs follow-up');
+      expect(addOrderNoteMock).toHaveBeenCalledWith('order-1', 'Test User', 'first note');
     });
   });
 });

@@ -22,7 +22,7 @@ vi.mock('./activityLog', () => ({
   logAction: logActionMock,
 }));
 
-import { disposition, needInfo, updateNotes } from './orders';
+import { disposition, needInfo } from './orders';
 
 describe('disposition', () => {
   beforeEach(() => {
@@ -96,19 +96,3 @@ describe('needInfo', () => {
   });
 });
 
-describe('updateNotes', () => {
-  beforeEach(() => {
-    updateMock.mockReset();
-    eqMock.mockReset();
-    updateMock.mockReturnValue({ eq: eqMock });
-    eqMock.mockResolvedValue({ data: null, error: null });
-    logActionMock.mockReset();
-  });
-
-  it('issues an UPDATE and does not log', async () => {
-    await updateNotes('order-1', 'internal follow-up needed');
-    expect(updateMock).toHaveBeenCalledWith({ notes: 'internal follow-up needed' });
-    expect(eqMock).toHaveBeenCalledWith('id', 'order-1');
-    expect(logActionMock).not.toHaveBeenCalled();
-  });
-});

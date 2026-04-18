@@ -12,6 +12,15 @@ export type LineItem = {
   price_usd: number;
 };
 
+export type OrderNote = {
+  id: number;
+  order_id: string;
+  author_id: string;
+  author_name: string;
+  body: string;
+  created_at: string;
+};
+
 export type Order = {
   id: string;
   order_ref: string;
@@ -29,7 +38,6 @@ export type Order = {
   freight_threshold_usd: number;
   total_usd: number;
   line_items: LineItem[];
-  notes: string;
   dispositioned_by: string | null;
   dispositioned_at: string | null;
   created_at: string;
@@ -74,8 +82,18 @@ export async function needInfo(
   await logAction('order_need_info', order.order_ref, note ?? order.customer_name);
 }
 
-export async function updateNotes(id: string, notes: string): Promise<void> {
-  const { error } = await supabase.from('orders').update({ notes }).eq('id', id);
+export async function addOrderNote(
+  orderId: string,
+  authorName: string,
+  body: string,
+): Promise<void> {
+  const userId = await currentUserId();
+  const { error } = await supabase.from('order_notes').insert({
+    order_id: orderId,
+    author_id: userId,
+    author_name: authorName,
+    body,
+  });
   if (error) throw error;
 }
 
@@ -154,4 +172,54 @@ export function useOrder(id: string | null): { order: Order | null; loading: boo
   const { all, loading } = useOrders();
   const order = id ? all.find(o => o.id === id) ?? null : null;
   return { order, loading: loading && !order };
+}
+
+export function useOrderNotes(orderId: string | null): {
+  notes: OrderNote[];
+  loading: boolean;
+} {
+  const [notes, setNotes] = useState<OrderNote[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!orderId) { setNotes([]); setLoading(false); return; }
+
+    let channel: RealtimeChannel | null = null;
+    let cancelled = false;
+
+    (async () => {
+      const { data, error } = await supabase
+        .from('order_notes')
+        .select('*')
+        .eq('order_id', orderId)
+        .order('created_at', { ascending: false });
+
+      if (cancelled) return;
+      if (!error && data) setNotes(data as OrderNote[]);
+      setLoading(false);
+
+      channel = supabase
+        .channel(`order_notes:${orderId}`)
+        .on(
+          'postgres_changes',
+          {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'order_notes',
+            filter: `order_id=eq.${orderId}`,
+          },
+          (payload) => {
+            setNotes(prev => [payload.new as OrderNote, ...prev]);
+          },
+        )
+        .subscribe();
+    })();
+
+    return () => {
+      cancelled = true;
+      if (channel) void channel.unsubscribe();
+    };
+  }, [orderId]);
+
+  return { notes, loading };
 }
