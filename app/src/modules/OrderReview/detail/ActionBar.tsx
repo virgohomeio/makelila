@@ -5,7 +5,6 @@ import styles from '../OrderReview.module.css';
 type ExpandedAction = 'flag' | 'hold' | 'info' | null;
 
 export function ActionBar({
-  order,
   onApprove,
   onFlag,
   onHold,
@@ -62,17 +61,6 @@ export function ActionBar({
           >Submit</button>
           <button className={styles.reasonCancel} onClick={cancel}>Cancel</button>
         </div>
-      </div>
-    );
-  }
-
-  // Don't show the action bar if the order isn't in a disposition-able state
-  if (order.status !== 'pending' && order.status !== 'held') {
-    return (
-      <div className={styles.actionBar}>
-        <span className={styles.muted} style={{ fontSize: 11 }}>
-          This order is {order.status}. No actions available.
-        </span>
       </div>
     );
   }
