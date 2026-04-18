@@ -13,14 +13,15 @@ export function NotesCard({
   const [draft, setDraft] = useState(order.notes);
   const [status, setStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
 
-  // Reset draft if selected order changes or external update comes in
   useEffect(() => {
     setDraft(order.notes);
     setStatus('idle');
   }, [order.id, order.notes]);
 
-  const handleBlur = async () => {
-    if (draft === order.notes) return;
+  const dirty = draft !== order.notes;
+
+  const handleSave = async () => {
+    if (!dirty) return;
     setStatus('saving');
     try {
       await saveNotes(order.id, draft);
@@ -37,14 +38,21 @@ export function NotesCard({
         <textarea
           className={styles.notesArea}
           value={draft}
-          onChange={e => setDraft(e.target.value)}
-          onBlur={handleBlur}
-          placeholder="Internal notes (visible to the whole team; saves when you click out)"
+          onChange={e => { setDraft(e.target.value); if (status === 'saved') setStatus('idle'); }}
+          placeholder="Internal notes (visible to the whole team)"
         />
-        <div className={styles.notesStatus}>
-          {status === 'saving' && 'Saving…'}
-          {status === 'saved'  && 'Saved ✓'}
-          {status === 'error'  && 'Save failed — try again'}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 6 }}>
+          <button
+            onClick={handleSave}
+            disabled={!dirty || status === 'saving'}
+            className={styles.notesSaveBtn}
+          >
+            {status === 'saving' ? 'Saving…' : 'Save notes'}
+          </button>
+          <div className={styles.notesStatus}>
+            {status === 'saved' && 'Saved ✓'}
+            {status === 'error' && 'Save failed — try again'}
+          </div>
         </div>
       </div>
     </div>

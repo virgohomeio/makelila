@@ -29,13 +29,6 @@ export function Detail({
   return (
     <section className={styles.detail}>
       <ConfirmBanner message={banner} onDismiss={dismissBanner} />
-      <div className={styles.detailBody}>
-        <CustomerCard order={order} />
-        <AddressCard order={order} />
-        <FreightCard order={order} />
-        <LineItemsCard order={order} />
-        <NotesCard order={order} />
-      </div>
       <ActionBar
         order={order}
         onApprove={() => wrap('Approved', () => disposition(order, 'approved'))}
@@ -43,6 +36,13 @@ export function Detail({
         onHold={(reason) => wrap('Held',    () => disposition(order, 'held',    reason))}
         onNeedInfo={(note) => wrap('Need-info logged', () => needInfo(order, note))}
       />
+      <div className={styles.detailBody}>
+        <CustomerCard order={order} />
+        <AddressCard order={order} />
+        <FreightCard order={order} />
+        <LineItemsCard order={order} />
+        <NotesCard order={order} />
+      </div>
     </section>
   );
 }

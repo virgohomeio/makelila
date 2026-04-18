@@ -28,7 +28,6 @@ export function AddressCard({ order }: { order: Order }) {
           <strong>{order.address_verdict.toUpperCase()}</strong>
           <span>{VERDICT_LABEL[order.address_verdict]}</span>
         </div>
-        <div className={styles.mapMock} aria-label="Map preview placeholder" />
       </div>
     </div>
   );

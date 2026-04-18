@@ -87,12 +87,12 @@ describe('Detail', () => {
     });
   });
 
-  it('Notes textarea fires updateNotes on blur, not on change', async () => {
+  it('Notes save button fires updateNotes on click, not on change', async () => {
     render(<Detail order={order} onAfterDisposition={vi.fn()} />);
     const textarea = screen.getByPlaceholderText(/internal notes/i);
     fireEvent.change(textarea, { target: { value: 'needs follow-up' } });
     expect(updateNotesMock).not.toHaveBeenCalled();
-    fireEvent.blur(textarea);
+    fireEvent.click(screen.getByRole('button', { name: /save notes/i }));
     await waitFor(() => {
       expect(updateNotesMock).toHaveBeenCalledWith('order-1', 'needs follow-up');
     });
