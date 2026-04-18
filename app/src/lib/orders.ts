@@ -1,3 +1,5 @@
+import { useEffect, useMemo, useState } from 'react';
+import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase } from './supabase';
 import { logAction } from './activityLog';
 
@@ -75,4 +77,81 @@ export async function needInfo(
 export async function updateNotes(id: string, notes: string): Promise<void> {
   const { error } = await supabase.from('orders').update({ notes }).eq('id', id);
   if (error) throw error;
+}
+
+function applyChange(cache: Order[], payload: { eventType: string; new: Order | null; old: { id: string } | null }): Order[] {
+  if (payload.eventType === 'DELETE' && payload.old) {
+    return cache.filter(o => o.id !== payload.old!.id);
+  }
+  if (payload.new) {
+    const existing = cache.findIndex(o => o.id === payload.new!.id);
+    if (existing >= 0) {
+      const next = [...cache];
+      next[existing] = payload.new;
+      return next;
+    }
+    return [payload.new, ...cache];
+  }
+  return cache;
+}
+
+export function useOrders(): {
+  all: Order[];
+  pending: Order[];
+  held: Order[];
+  flagged: Order[];
+  loading: boolean;
+} {
+  const [cache, setCache] = useState<Order[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let channel: RealtimeChannel | null = null;
+    let cancelled = false;
+
+    (async () => {
+      const { data, error } = await supabase
+        .from('orders')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (cancelled) return;
+      if (!error && data) setCache(data as Order[]);
+      setLoading(false);
+
+      channel = supabase
+        .channel('orders:realtime')
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'orders' },
+          (payload) => {
+            setCache(prev => applyChange(prev, {
+              eventType: payload.eventType,
+              new: payload.new as Order | null,
+              old: payload.old as { id: string } | null,
+            }));
+          },
+        )
+        .subscribe();
+    })();
+
+    return () => {
+      cancelled = true;
+      if (channel) void channel.unsubscribe();
+    };
+  }, []);
+
+  return useMemo(() => ({
+    all:     cache,
+    pending: cache.filter(o => o.status === 'pending'),
+    held:    cache.filter(o => o.status === 'held'),
+    flagged: cache.filter(o => o.status === 'flagged'),
+    loading,
+  }), [cache, loading]);
+}
+
+export function useOrder(id: string | null): { order: Order | null; loading: boolean } {
+  const { all, loading } = useOrders();
+  const order = id ? all.find(o => o.id === id) ?? null : null;
+  return { order, loading: loading && !order };
 }
