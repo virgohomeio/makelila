@@ -64,6 +64,7 @@ describe('Detail', () => {
     await waitFor(() => {
       expect(dispositionMock).toHaveBeenCalledWith(order, 'approved');
     });
+    expect(addOrderNoteMock).not.toHaveBeenCalled();
   });
 
   it('Flag requires a reason before Submit is enabled', async () => {
@@ -77,6 +78,7 @@ describe('Detail', () => {
     await waitFor(() => {
       expect(dispositionMock).toHaveBeenCalledWith(order, 'flagged', 'bad zip');
     });
+    expect(addOrderNoteMock).toHaveBeenCalledWith('order-1', 'Test User', 'Flagged: bad zip');
   });
 
   it('Hold allows empty reason', async () => {
@@ -86,6 +88,7 @@ describe('Detail', () => {
     await waitFor(() => {
       expect(dispositionMock).toHaveBeenCalledWith(order, 'held', '');
     });
+    expect(addOrderNoteMock).not.toHaveBeenCalled();
   });
 
   it('Need Info calls needInfo (not disposition)', async () => {
@@ -97,6 +100,7 @@ describe('Detail', () => {
       expect(needInfoMock).toHaveBeenCalledWith(order, 'driveway photo');
       expect(dispositionMock).not.toHaveBeenCalled();
     });
+    expect(addOrderNoteMock).toHaveBeenCalledWith('order-1', 'Test User', 'Need info: driveway photo');
   });
 
   it('Add note button fires addOrderNote with the current user name + body', async () => {

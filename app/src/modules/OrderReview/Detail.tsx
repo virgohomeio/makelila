@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react';
 import type { Order } from '../../lib/orders';
-import { disposition, needInfo } from '../../lib/orders';
+import { disposition, needInfo, addOrderNote } from '../../lib/orders';
+import { useAuth } from '../../lib/auth';
 import { CustomerCard } from './detail/CustomerCard';
 import { AddressCard }  from './detail/AddressCard';
 import { FreightCard }  from './detail/FreightCard';
@@ -21,10 +22,21 @@ export function Detail({
 }) {
   const [banner, setBanner] = useState<Banner>(null);
   const dismissBanner = useCallback(() => setBanner(null), []);
+  const { profile, user } = useAuth();
+  const authorName = profile?.display_name ?? user?.email ?? 'Unknown';
 
-  const wrap = async (label: string, fn: () => Promise<void>) => {
+  const wrap = async (
+    label: string,
+    fn: () => Promise<void>,
+    noteLabel?: string,
+    reason?: string,
+  ) => {
     try {
       await fn();
+      const trimmed = reason?.trim();
+      if (noteLabel && trimmed) {
+        await addOrderNote(order.id, authorName, `${noteLabel}: ${trimmed}`);
+      }
       setBanner({ variant: 'success', message: `${label} · ${order.customer_name}` });
       onAfterDisposition();
     } catch (err) {
@@ -41,9 +53,9 @@ export function Detail({
       <ActionBar
         order={order}
         onApprove={() => wrap('Approved', () => disposition(order, 'approved'))}
-        onFlag={(reason) => wrap('Flagged', () => disposition(order, 'flagged', reason))}
-        onHold={(reason) => wrap('Held',    () => disposition(order, 'held',    reason))}
-        onNeedInfo={(note) => wrap('Need-info logged', () => needInfo(order, note))}
+        onFlag={(reason) => wrap('Flagged', () => disposition(order, 'flagged', reason), 'Flagged', reason)}
+        onHold={(reason) => wrap('Held',    () => disposition(order, 'held',    reason), 'Held', reason)}
+        onNeedInfo={(note) => wrap('Need-info logged', () => needInfo(order, note), 'Need info', note)}
       />
       <div className={styles.detailBody}>
         <CustomerCard order={order} />
