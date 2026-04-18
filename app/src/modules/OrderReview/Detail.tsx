@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import type { Order } from '../../lib/orders';
 import { disposition, needInfo } from '../../lib/orders';
 import { CustomerCard } from './detail/CustomerCard';
@@ -18,6 +18,7 @@ export function Detail({
   onAfterDisposition: () => void;
 }) {
   const [banner, setBanner] = useState<string | null>(null);
+  const dismissBanner = useCallback(() => setBanner(null), []);
 
   const wrap = async (label: string, fn: () => Promise<void>) => {
     await fn();
@@ -27,7 +28,7 @@ export function Detail({
 
   return (
     <section className={styles.detail}>
-      <ConfirmBanner message={banner} onDismiss={() => setBanner(null)} />
+      <ConfirmBanner message={banner} onDismiss={dismissBanner} />
       <div className={styles.detailBody}>
         <CustomerCard order={order} />
         <AddressCard order={order} />
