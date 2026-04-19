@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase } from './supabase';
+import { logAction } from './activityLog';
 
 export type FulfillmentStep = 1 | 2 | 3 | 4 | 5 | 6;
 export type ShelfSlotStatus = 'available' | 'reserved' | 'rework' | 'empty';
@@ -213,4 +214,161 @@ export function useOpenReworks(): { reworks: UnitRework[]; loading: boolean } {
   }, []);
 
   return { reworks, loading };
+}
+
+// --- action functions ---
+
+async function currentUserId(): Promise<string> {
+  const { data } = await supabase.auth.getUser();
+  if (!data.user) throw new Error('fulfillment: not authenticated');
+  return data.user.id;
+}
+
+/** Step 1: reserve the serial for this queue row; advance 1→2. */
+export async function assignUnit(queueId: string, serial: string): Promise<void> {
+  const userId = await currentUserId();
+  // Reserve shelf slot
+  const { error: slotErr } = await supabase
+    .from('shelf_slots')
+    .update({ status: 'reserved', updated_at: new Date().toISOString() })
+    .eq('serial', serial);
+  if (slotErr) throw slotErr;
+  // Advance queue row
+  const { error: qErr } = await supabase
+    .from('fulfillment_queue')
+    .update({ assigned_serial: serial, step: 2 })
+    .eq('id', queueId);
+  if (qErr) throw qErr;
+  await logAction('fq_assign', queueId, `Assigned ${serial}`);
+  void userId;
+}
+
+/** Step 2 pass: advance 2→3 with optional test report URL. */
+export async function confirmTestReport(queueId: string, testReportUrl?: string): Promise<void> {
+  const userId = await currentUserId();
+  const { error } = await supabase
+    .from('fulfillment_queue')
+    .update({
+      step: 3,
+      test_report_url: testReportUrl?.trim() || null,
+      test_confirmed_at: new Date().toISOString(),
+      test_confirmed_by: userId,
+    })
+    .eq('id', queueId);
+  if (error) throw error;
+  await logAction('fq_test_ok', queueId, 'Test verified');
+}
+
+/** Step 2 fail: flag rework → drops order back to step 1; flips slot to 'rework'. */
+export async function flagRework(
+  queueId: string,
+  serial: string,
+  issue: string,
+  flaggedByName: string,
+): Promise<void> {
+  const userId = await currentUserId();
+  // Insert rework row
+  const { error: rwErr } = await supabase.from('unit_reworks').insert({
+    serial,
+    issue,
+    flagged_by: userId,
+    flagged_by_name: flaggedByName,
+  });
+  if (rwErr) throw rwErr;
+  // Flip shelf slot to rework
+  const { error: slotErr } = await supabase
+    .from('shelf_slots')
+    .update({ status: 'rework', updated_at: new Date().toISOString() })
+    .eq('serial', serial);
+  if (slotErr) throw slotErr;
+  // Drop queue row to step 1 + clear assigned serial
+  const { error: qErr } = await supabase
+    .from('fulfillment_queue')
+    .update({ step: 1, assigned_serial: null })
+    .eq('id', queueId);
+  if (qErr) throw qErr;
+  await logAction('fq_test_flagged', queueId, `${serial}: ${issue}`);
+}
+
+/** Step 3: upload PDF (optional) + save carrier/tracking; advance 3→4. */
+export async function confirmLabel(
+  queueId: string,
+  input: { carrier: string; tracking_num: string; label_pdf?: File },
+): Promise<void> {
+  const userId = await currentUserId();
+  let label_pdf_path: string | null = null;
+  if (input.label_pdf) {
+    const path = `${queueId}/label-${Date.now()}.pdf`;
+    const { error: upErr } = await supabase.storage
+      .from('order-labels')
+      .upload(path, input.label_pdf, { contentType: 'application/pdf' });
+    if (upErr) throw upErr;
+    label_pdf_path = path;
+  }
+  const { error } = await supabase
+    .from('fulfillment_queue')
+    .update({
+      step: 4,
+      carrier: input.carrier,
+      tracking_num: input.tracking_num,
+      ...(label_pdf_path ? { label_pdf_path } : {}),
+      label_confirmed_at: new Date().toISOString(),
+      label_confirmed_by: userId,
+    })
+    .eq('id', queueId);
+  if (error) throw error;
+  await logAction('fq_label_confirmed', queueId, `${input.carrier} · ${input.tracking_num}`);
+}
+
+/** Step 4: toggle one of the 4 dock checklist booleans. */
+export async function toggleDockCheck(
+  queueId: string,
+  field: 'printed' | 'affixed' | 'docked' | 'notified',
+  value: boolean,
+): Promise<void> {
+  const column = ({
+    printed: 'dock_printed', affixed: 'dock_affixed',
+    docked: 'dock_docked', notified: 'dock_notified',
+  } as const)[field];
+  const { error } = await supabase
+    .from('fulfillment_queue')
+    .update({ [column]: value })
+    .eq('id', queueId);
+  if (error) throw error;
+}
+
+/** Step 4: all 4 checks confirmed → advance 4→5. */
+export async function confirmDock(queueId: string): Promise<void> {
+  const userId = await currentUserId();
+  const { error } = await supabase
+    .from('fulfillment_queue')
+    .update({
+      step: 5,
+      dock_confirmed_at: new Date().toISOString(),
+      dock_confirmed_by: userId,
+    })
+    .eq('id', queueId);
+  if (error) throw error;
+  await logAction('fq_dock_confirmed', queueId, 'Dock check complete');
+}
+
+/** Step 5: US-only starter tracking input. */
+export async function setStarterTracking(queueId: string, starter_tracking_num: string): Promise<void> {
+  const { error } = await supabase
+    .from('fulfillment_queue')
+    .update({ starter_tracking_num })
+    .eq('id', queueId);
+  if (error) throw error;
+}
+
+/** Step 5: invoke edge function to send the email (advances 5→6). */
+export async function sendFulfillmentEmail(queueId: string): Promise<{ email_id: string }> {
+  await currentUserId();
+  const { data, error } = await supabase.functions.invoke<{ email_id: string }>(
+    'send-fulfillment-email',
+    { body: { queue_id: queueId } },
+  );
+  if (error) throw error;
+  if (!data) throw new Error('send-fulfillment-email returned no data');
+  return data;
 }
