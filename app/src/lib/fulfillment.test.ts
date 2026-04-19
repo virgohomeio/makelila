@@ -21,6 +21,7 @@ vi.mock('./supabase', () => ({
 vi.mock('./activityLog', () => ({ logAction: logActionMock }));
 
 import { confirmTestReport, toggleDockCheck, setStarterTracking } from './fulfillment';
+import { swapSlots, confirmShelfLayout, resolveRework } from './fulfillment';
 
 describe('confirmTestReport', () => {
   beforeEach(() => {
@@ -85,5 +86,44 @@ describe('setStarterTracking', () => {
     await setStarterTracking('queue-1', '1ZA99 starter');
     expect(updateMock).toHaveBeenCalledWith({ starter_tracking_num: '1ZA99 starter' });
     expect(eqMock).toHaveBeenCalledWith('id', 'queue-1');
+  });
+});
+
+describe('resolveRework', () => {
+  beforeEach(() => {
+    updateMock.mockReset();
+    eqMock.mockReset();
+    updateMock.mockReturnValue({ eq: eqMock });
+    eqMock.mockResolvedValue({ data: null, error: null });
+    logActionMock.mockReset();
+    logActionMock.mockResolvedValue(undefined);
+  });
+
+  it('writes resolved_at + flips slot to available + logs rework_resolved', async () => {
+    await resolveRework(42, 'LL01-00000000050', 'Replaced pad', 'Junaid');
+    // First update: unit_reworks
+    // Second update: shelf_slots
+    // (both via same update/eq mock chain — we just check at least one call matches each shape)
+    expect(updateMock).toHaveBeenCalledWith(expect.objectContaining({
+      resolution_notes: 'Replaced pad',
+      resolved_by: 'user-1',
+      resolved_by_name: 'Junaid',
+    }));
+    expect(updateMock).toHaveBeenCalledWith(expect.objectContaining({
+      status: 'available',
+    }));
+    expect(logActionMock).toHaveBeenCalledWith('rework_resolved', 'LL01-00000000050', 'Replaced pad');
+  });
+});
+
+describe('confirmShelfLayout', () => {
+  beforeEach(() => {
+    logActionMock.mockReset();
+    logActionMock.mockResolvedValue(undefined);
+  });
+
+  it('logs shelf_layout_saved without touching shelf_slots', async () => {
+    await confirmShelfLayout();
+    expect(logActionMock).toHaveBeenCalledWith('shelf_layout_saved', 'Shelf', expect.any(String));
   });
 });

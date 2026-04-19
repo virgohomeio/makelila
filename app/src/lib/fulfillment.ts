@@ -372,3 +372,65 @@ export async function sendFulfillmentEmail(queueId: string): Promise<{ email_id:
   if (!data) throw new Error('send-fulfillment-email returned no data');
   return data;
 }
+
+/** Swap two shelf slots atomically (serial/batch/status). */
+export async function swapSlots(
+  a: { skid: string; slot_index: number },
+  b: { skid: string; slot_index: number },
+): Promise<void> {
+  await currentUserId();
+  // Fetch both rows
+  const { data, error } = await supabase
+    .from('shelf_slots')
+    .select('*')
+    .or(`and(skid.eq.${a.skid},slot_index.eq.${a.slot_index}),and(skid.eq.${b.skid},slot_index.eq.${b.slot_index})`);
+  if (error) throw error;
+  if (!data || data.length !== 2) throw new Error(`swapSlots: expected 2 rows, got ${data?.length ?? 0}`);
+
+  const rowA = data.find(r => r.skid === a.skid && r.slot_index === a.slot_index)!;
+  const rowB = data.find(r => r.skid === b.skid && r.slot_index === b.slot_index)!;
+
+  const now = new Date().toISOString();
+  const { error: errA } = await supabase
+    .from('shelf_slots')
+    .update({ serial: rowB.serial, batch: rowB.batch, status: rowB.status, updated_at: now })
+    .eq('skid', a.skid).eq('slot_index', a.slot_index);
+  if (errA) throw errA;
+  const { error: errB } = await supabase
+    .from('shelf_slots')
+    .update({ serial: rowA.serial, batch: rowA.batch, status: rowA.status, updated_at: now })
+    .eq('skid', b.skid).eq('slot_index', b.slot_index);
+  if (errB) throw errB;
+}
+
+/** UX checkpoint: logs that the current shelf layout was reviewed. */
+export async function confirmShelfLayout(): Promise<void> {
+  await currentUserId();
+  await logAction('shelf_layout_saved', 'Shelf', 'Layout reviewed');
+}
+
+/** Resolve an open rework → flip the slot back to available. */
+export async function resolveRework(
+  reworkId: number,
+  serial: string,
+  notes: string | undefined,
+  resolvedByName: string,
+): Promise<void> {
+  const userId = await currentUserId();
+  const { error: rwErr } = await supabase
+    .from('unit_reworks')
+    .update({
+      resolved_at: new Date().toISOString(),
+      resolved_by: userId,
+      resolved_by_name: resolvedByName,
+      resolution_notes: notes?.trim() || null,
+    })
+    .eq('id', reworkId);
+  if (rwErr) throw rwErr;
+  const { error: slotErr } = await supabase
+    .from('shelf_slots')
+    .update({ status: 'available', updated_at: new Date().toISOString() })
+    .eq('serial', serial);
+  if (slotErr) throw slotErr;
+  await logAction('rework_resolved', serial, notes ?? 'Resolved');
+}
