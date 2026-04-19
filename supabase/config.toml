@@ -412,3 +412,12 @@ s3_secret_key = "env(S3_SECRET_KEY)"
 # declarative_schema_path = "./database"
 # JSON string passed through to pg-delta SQL formatting.
 # format_options = "{\"keywordCase\":\"upper\",\"indent\":2,\"maxWidth\":80,\"commaStyle\":\"trailing\"}"
+
+# sync-shopify-orders function: disable gateway JWT check so ES256-signed
+# session tokens from newer Supabase Auth releases don't get rejected with
+# UNSUPPORTED_TOKEN_ALGORITHM. The function uses the service-role key
+# internally and only writes to our orders/order_notes tables, so caller
+# identity isn't needed for correctness.
+[functions.sync-shopify-orders]
+verify_jwt = false
+
