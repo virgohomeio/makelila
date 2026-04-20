@@ -32,7 +32,7 @@ export function evaluateReadiness(order: Order): {
   const threshold = Number(order.freight_threshold_usd) || 200;
   const freightOk = freightValue > 0 && freightValue <= threshold;
   const reason3 = freightValue <= 0
-    ? 'Freight not synced — get quote from Freightcom'
+    ? 'Freight not synced — get quote from ClickShip'
     : freightValue > threshold
       ? `Freight $${freightValue.toFixed(2)} exceeds $${threshold.toFixed(2)} threshold`
       : `Freight $${freightValue.toFixed(2)} within $${threshold.toFixed(2)} threshold`;

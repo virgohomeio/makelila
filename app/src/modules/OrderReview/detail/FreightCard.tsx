@@ -29,7 +29,7 @@ function EditFreight({ order }: { order: Order }) {
             background: 'transparent', border: 'none', color: 'var(--color-info)',
             textDecoration: 'underline', cursor: 'pointer', padding: 0, fontSize: 10,
           }}
-        >Edit freight (paste Freightcom quote)</button>
+        >Edit freight (paste ClickShip quote)</button>
       </div>
     );
   }
@@ -47,7 +47,7 @@ function EditFreight({ order }: { order: Order }) {
       </div>
       {error && <div style={{ color: 'var(--color-error)', fontSize: 10, marginTop: 4 }}>{error}</div>}
       <div className={styles.freightHint}>
-        Get quote at <a href="https://login.freightcom.com/" target="_blank" rel="noopener noreferrer">freightcom.com</a> and paste the total.
+        Get quote on <a href="https://app.clickship.com/clickship/app-frame/my-orders?tabKey=nav-unfulfilledunfulfilled-tab&amp;status=Unfulfilled" target="_blank" rel="noopener noreferrer">ClickShip — Unfulfilled Orders</a> and paste the total.
       </div>
     </div>
   );
