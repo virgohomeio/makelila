@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useShelf, swapSlots, confirmShelfLayout, type ShelfSlot } from '../../../lib/fulfillment';
 import { SkidCard } from './SkidCard';
+import { ReworksPanel } from './ReworksPanel';
 import styles from '../Fulfillment.module.css';
 
 type Pos = { skid: string; slot_index: number };
@@ -105,6 +106,7 @@ export default function Shelf() {
           />
         ))}
       </div>
+      <ReworksPanel />
     </div>
   );
 }

@@ -251,3 +251,22 @@
 }
 .confirmLayoutBtn:disabled { background: var(--color-border); color: var(--color-ink-faint); cursor: not-allowed; }
 .confirmLayoutBtn.saved { background: #c6f6d5; color: var(--color-success); }
+
+.reworksPanel {
+  border: 1px solid var(--color-error-border);
+  background: var(--color-error-bg);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+}
+.reworksTitle { font-size: 11px; font-weight: 700; color: var(--color-error); margin-bottom: 8px; }
+.reworkCard {
+  background: #fff;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  padding: 8px 10px;
+  margin-bottom: 6px;
+  font-size: 11px;
+}
+.reworkMeta { color: var(--color-ink-subtle); font-size: 10px; margin-bottom: 3px; }
+.reworkBody { color: var(--color-ink); white-space: pre-wrap; }
+.reworkRow { display: flex; gap: 8px; margin-top: 6px; align-items: flex-start; }
