@@ -1,4 +1,5 @@
-import type { FulfillmentQueueRow } from '../../../lib/fulfillment';
+import { useState } from 'react';
+import { setQueuePriority, type FulfillmentQueueRow } from '../../../lib/fulfillment';
 import styles from '../Fulfillment.module.css';
 
 export function QueueHeader({
@@ -9,15 +10,43 @@ export function QueueHeader({
   order: { order_ref: string; customer_name: string; city: string; region_state: string | null; country: 'US'|'CA' };
 }) {
   const STEP_LABELS = ['', 'Assign', 'Test', 'Label', 'Dock', 'Email', 'Fulfilled'];
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const fulfilled = row.step === 6;
+
+  const handleTogglePriority = async () => {
+    setBusy(true); setError(null);
+    try { await setQueuePriority(row.id, !row.priority); }
+    catch (e) { setError((e as Error).message); }
+    finally { setBusy(false); }
+  };
+
   return (
     <div className={styles.header}>
-      <div className={styles.headerTitle}>
-        {order.customer_name} — LILA Pro
+      <div className={styles.headerRow}>
+        <div>
+          <div className={styles.headerTitle}>
+            {row.priority && !fulfilled && <span className={styles.priorityBadge} title="Priority — expedite">⭐</span>}
+            {order.customer_name} — LILA Pro
+          </div>
+          <div className={styles.headerMeta}>
+            {order.order_ref} · {order.city}{order.region_state ? `, ${order.region_state}` : ''} · {order.country}
+            {row.due_date && <> · Due {new Date(row.due_date).toLocaleDateString()}</>}
+          </div>
+        </div>
+        {!fulfilled && (
+          <button
+            className={row.priority ? styles.priorityBtnOn : styles.priorityBtnOff}
+            onClick={handleTogglePriority}
+            disabled={busy}
+            title="Sales: flag this order as priority so packers see it first"
+          >
+            {busy ? '…' : row.priority ? '⭐ Priority · clear' : '☆ Prioritize'}
+          </button>
+        )}
       </div>
-      <div className={styles.headerMeta}>
-        {order.order_ref} · {order.city}{order.region_state ? `, ${order.region_state}` : ''} · {order.country}
-        {row.due_date && <> · Due {new Date(row.due_date).toLocaleDateString()}</>}
-      </div>
+      {error && <div style={{ color: 'var(--color-error)', fontSize: 11, marginTop: 4 }}>{error}</div>}
       <div className={styles.progressBar} aria-label={`Step ${row.step} of 6 — ${STEP_LABELS[row.step]}`}>
         {[1,2,3,4,5,6].map(s => (
           <div

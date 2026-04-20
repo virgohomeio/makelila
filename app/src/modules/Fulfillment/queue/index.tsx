@@ -38,7 +38,12 @@ export default function Queue() {
       const refB = orderLookup.get(b.order_id)?.order_ref ?? '';
       return refA.localeCompare(refB);
     };
-    return [...[...ready].sort(byRef), ...[...fulfilled].sort(byRef)];
+    // Priority rows (sales-flagged expedites) float to the top of Ready.
+    const readySorted = [...ready].sort((a, b) => {
+      if (a.priority !== b.priority) return a.priority ? -1 : 1;
+      return byRef(a, b);
+    });
+    return [...readySorted, ...[...fulfilled].sort(byRef)];
   }, [ready, fulfilled, orderLookup]);
 
   // Fetch orders referenced by the queue rows (one-shot; orders rarely change once approved)

@@ -49,10 +49,12 @@ export function QueueSidebar({
           r.id === selectedId ? styles.selected : '',
           overdue ? styles.overdue : '',
           fulfilled ? styles.fulfilled : '',
+          r.priority && !fulfilled ? styles.priority : '',
         ].filter(Boolean).join(' ');
         return (
           <div key={r.id} className={cls} onClick={() => onSelect(r.id)} role="button" tabIndex={0}>
             <div className={styles.rowName}>
+              {r.priority && !fulfilled && <span className={styles.priorityBadge} title="Priority — expedite">⭐</span>}
               {o?.customer_name ?? r.order_id}
               <span className={styles.stepBadge}>{r.step}/6</span>
             </div>

@@ -13,7 +13,7 @@ function mkRow(partial: Partial<FulfillmentQueueRow> & { id: string; order_id: s
     dock_confirmed_at: null, dock_confirmed_by: null,
     starter_tracking_num: null, email_sent_at: null, email_sent_by: null,
     fulfilled_at: null, fulfilled_by: null,
-    due_date: null, created_at: '2026-04-19T00:00:00Z',
+    due_date: null, priority: false, created_at: '2026-04-19T00:00:00Z',
     ...partial,
   };
 }
@@ -51,5 +51,11 @@ describe('QueueSidebar', () => {
   it('shows empty-state when no rows', () => {
     render(<QueueSidebar rows={[]} orderLookup={orders} selectedId={null} onSelect={vi.fn()} />);
     expect(screen.getByText(/No queued orders/i)).toBeInTheDocument();
+  });
+
+  it('renders a ⭐ priority badge for prioritized rows', () => {
+    const pri = mkRow({ id: 'q3', order_id: 'o1', step: 1, priority: true });
+    render(<QueueSidebar rows={[pri]} orderLookup={orders} selectedId={null} onSelect={vi.fn()} />);
+    expect(screen.getByTitle(/Priority/i)).toBeInTheDocument();
   });
 });

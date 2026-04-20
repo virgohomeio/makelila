@@ -24,7 +24,7 @@ const rowBase: FulfillmentQueueRow = {
   dock_printed: true, dock_affixed: true, dock_docked: true, dock_notified: true,
   dock_confirmed_at: null, dock_confirmed_by: null,
   starter_tracking_num: null, email_sent_at: null, email_sent_by: null,
-  fulfilled_at: null, fulfilled_by: null, due_date: null, created_at: '2026-04-19T00:00:00Z',
+  fulfilled_at: null, fulfilled_by: null, due_date: null, priority: false, created_at: '2026-04-19T00:00:00Z',
 };
 
 const orderUS = { customer_name: 'Alice Ames', customer_email: 'a@ex.com', order_ref: '#1001', country: 'US' as const };

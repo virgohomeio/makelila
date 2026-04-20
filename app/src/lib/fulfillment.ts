@@ -37,6 +37,7 @@ export type FulfillmentQueueRow = {
   fulfilled_by: string | null;
 
   due_date: string | null;
+  priority: boolean;
   created_at: string;
 };
 
@@ -371,6 +372,22 @@ export async function sendFulfillmentEmail(queueId: string): Promise<{ email_id:
   if (error) throw error;
   if (!data) throw new Error('send-fulfillment-email returned no data');
   return data;
+}
+
+/** Sales action: flag or un-flag a queue row as priority. Prioritized rows
+ *  float to the top of the sidebar so packers see them first. */
+export async function setQueuePriority(queueId: string, priority: boolean): Promise<void> {
+  await currentUserId();
+  const { error } = await supabase
+    .from('fulfillment_queue')
+    .update({ priority })
+    .eq('id', queueId);
+  if (error) throw error;
+  await logAction(
+    priority ? 'fq_prioritized' : 'fq_unprioritized',
+    queueId,
+    priority ? 'Marked priority' : 'Cleared priority',
+  );
 }
 
 /** Swap two shelf slots atomically via Postgres RPC.
