@@ -1,3 +1,6 @@
+/* LILA brand fonts: Inter for UI, Brolink for the LILA wordmark */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+@import url('https://db.onlinewebfonts.com/c/34359bec84c16be942414f8200c904fb?family=Brolink+DEMO');
 @import './tokens.css';
 
 *, *::before, *::after {

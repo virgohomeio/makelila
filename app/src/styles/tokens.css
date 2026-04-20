@@ -1,6 +1,14 @@
 :root {
-  /* Brand */
-  --color-crimson: #8B1A1A;
+  /* Brand — LILA Brand Guideline v1.0 (April 2026)
+     Primary: Ladybug Red #CC2D30 — used for CTAs, brand chrome, active states.
+     Legacy --color-crimson name retained so every module keeps working. */
+  --color-crimson:       #CC2D30;  /* Ladybug Red   — primary */
+  --color-crimson-dark:  #991B1E;  /* Deep Ladybug  — hover/active */
+  --color-accent-gold:   #C9A96E;  /* Muted Gold    — accent highlights */
+  --color-accent-coffee: #A68B6B;  /* Warm Coffee   — secondary accent */
+  --color-accent-clay:   #C17F5E;  /* Soft Clay     — badges, gentle alerts */
+
+  /* Legacy slots retained */
   --color-us-navy: #3C3B6E;
 
   /* Status */
@@ -21,28 +29,31 @@
   --color-purple: #553c9a;
   --color-purple-bg: #faf5ff;
 
-  /* Neutrals */
-  --color-ink: #1a202c;
-  --color-ink-muted: #4a5568;
-  --color-ink-subtle: #718096;
-  --color-ink-faint: #a0aec0;
-  --color-border: #e2e8f0;
-  --color-surface: #f7fafc;
-  --color-page: #f0f0f0;
+  /* Neutrals — LILA warm palette (Charcoal Soil → Warm White) */
+  --color-ink:         #2C2A25;  /* Charcoal Soil — headings */
+  --color-ink-muted:   #5C564E;  /* Warm Gray     — body text */
+  --color-ink-subtle:  #A39B8F;  /* Stone         — secondary text */
+  --color-ink-faint:   #C5BEB2;  /* lighter stone — tertiary text */
+  --color-border:      #E8E0D4;  /* Warm Linen */
+  --color-surface:     #F5F1EB;  /* Cream — section BG */
+  --color-page:        #FAF8F5;  /* Warm White — page BG */
 
-  /* Dark UI */
+  /* Dark UI (app nav, sidebar) — kept dark so the nav keeps its contrast
+     against the warm-white page background. */
   --color-dark-0: #111;
   --color-dark-1: #1c1c1c;
   --color-dark-2: #232323;
   --color-dark-3: #2a2a2a;
 
-  /* Typography */
-  --font-sans: -apple-system, BlinkMacSystemFont, 'SF Pro Display',
-               'SF Pro Text', 'Helvetica Neue', sans-serif;
+  /* Typography — LILA brand uses Inter for UI/body and Brolink for the
+     "LILA" wordmark (logo use only — never for body copy). */
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont,
+               'SF Pro Display', 'SF Pro Text', 'Helvetica Neue', sans-serif;
+  --font-logo: 'Brolink DEMO', 'Brolink', 'Inter', sans-serif;
 
   /* Sizing */
   --page-max: 1200px;
-  --nav-height: 40px;
+  --nav-height: 48px;
   --radius-sm: 4px;
   --radius-md: 6px;
   --radius-lg: 8px;

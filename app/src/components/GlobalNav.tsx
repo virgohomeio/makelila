@@ -13,7 +13,16 @@ const MODULES = [
 export function GlobalNav() {
   return (
     <nav className={styles.nav}>
-      <div className={styles.brand}>MAKE LILA</div>
+      <div className={styles.brand}>
+        <img
+          src={`${import.meta.env.BASE_URL}vcycene-logo-square.png`}
+          alt="VCycene"
+          className={styles.brandLogo}
+        />
+        <span className={styles.brandWordmark}>
+          make <span className={styles.brandLila}>LILA</span>
+        </span>
+      </div>
       {MODULES.map(m => (
         <NavLink
           key={m.path}

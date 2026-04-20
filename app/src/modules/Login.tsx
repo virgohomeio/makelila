@@ -8,12 +8,33 @@ export default function Login() {
 
   return (
     <div style={{
-      minHeight: '70vh', display: 'flex', alignItems: 'center',
-      justifyContent: 'center', flexDirection: 'column', gap: 16,
+      minHeight: '80vh', display: 'flex', alignItems: 'center',
+      justifyContent: 'center', flexDirection: 'column', gap: 20,
+      padding: 24,
     }}>
-      <h1 style={{ fontSize: 22, fontWeight: 800, color: 'var(--color-crimson)' }}>
-        Make Lila
-      </h1>
+      <img
+        src={`${import.meta.env.BASE_URL}vcycene-logo-square.png`}
+        alt="VCycene"
+        style={{ width: 120, height: 'auto' }}
+      />
+      <div style={{ textAlign: 'center' }}>
+        <h1 style={{
+          fontSize: 18, fontWeight: 500, color: 'var(--color-ink-muted)',
+          letterSpacing: '0.3px', marginBottom: 2,
+        }}>
+          make{' '}
+          <span style={{
+            fontFamily: 'var(--font-logo)',
+            color: 'var(--color-crimson)',
+            letterSpacing: '0.08em',
+            fontSize: 28,
+            fontWeight: 700,
+          }}>LILA</span>
+        </h1>
+        <p style={{ fontSize: 12, color: 'var(--color-ink-subtle)', marginTop: 8 }}>
+          Internal operations tool for VCycene Inc.
+        </p>
+      </div>
       <p style={{ fontSize: 12, color: 'var(--color-ink-subtle)' }}>
         Sign in with your @virgohome.io account.
       </p>
@@ -21,7 +42,8 @@ export default function Login() {
         onClick={() => void signInWithGoogle()}
         style={{
           background: 'var(--color-crimson)', color: '#fff', border: 'none',
-          padding: '10px 20px', borderRadius: 6, fontSize: 12, fontWeight: 700,
+          padding: '10px 22px', borderRadius: 6, fontSize: 13, fontWeight: 600,
+          letterSpacing: '0.3px', cursor: 'pointer',
         }}
       >Sign in with Google</button>
     </div>

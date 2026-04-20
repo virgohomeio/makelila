@@ -17,8 +17,11 @@ export function StepFulfilled({
     ? `Amazon · ${row.starter_tracking_num ?? '—'}`
     : 'Packed In';
 
-  const labelStyle = { color: 'var(--color-ink-subtle)' };
-  const valStyle = { fontFamily: 'ui-monospace, monospace' as const };
+  // Keep every row in the brand's Inter font (inherited). Use tabular-nums
+  // so tracking numbers and serials align without switching font-family —
+  // previously we mixed ui-monospace and Inter which looked inconsistent.
+  const labelStyle = { color: 'var(--color-ink-subtle)' } as const;
+  const valStyle = { fontVariantNumeric: 'tabular-nums' as const, color: 'var(--color-ink)' } as const;
 
   return (
     <div>
@@ -32,30 +35,31 @@ export function StepFulfilled({
         alignItems: 'center',
         justifyContent: 'space-between',
       }}>
-        <strong style={{ color: 'var(--color-success)', fontSize: 13 }}>
+        <strong style={{ color: 'var(--color-success)', fontSize: 13, fontWeight: 700 }}>
           ✓ Fulfilled · {fulfilledOn}
         </strong>
-        <span style={{ color: 'var(--color-success)', fontSize: 11 }}>
+        <span style={{ color: 'var(--color-success)', fontSize: 11, fontVariantNumeric: 'tabular-nums' }}>
           Email sent · Unit {serial}
         </span>
       </div>
 
       <div style={{
-        border: '1px solid var(--color-border)', borderRadius: 6, padding: 14, fontSize: 11,
-        display: 'grid', gridTemplateColumns: '140px 1fr', rowGap: 6, columnGap: 14,
+        border: '1px solid var(--color-border)', borderRadius: 6, padding: 14, fontSize: 12,
+        display: 'grid', gridTemplateColumns: '140px 1fr', rowGap: 8, columnGap: 14,
+        background: '#fff',
       }}>
         <span style={labelStyle}>Customer</span>
-        <span>{order.customer_name}</span>
+        <span style={valStyle}>{order.customer_name}</span>
         <span style={labelStyle}>Order ref</span>
         <span style={valStyle}>{order.order_ref}</span>
         <span style={labelStyle}>Email</span>
-        <span>{order.customer_email ?? '—'}</span>
+        <span style={valStyle}>{order.customer_email ?? '—'}</span>
         <span style={labelStyle}>Serial shipped</span>
         <span style={valStyle}>{serial}</span>
         <span style={labelStyle}>LILA shipment</span>
         <span style={valStyle}>{lilaShipment}</span>
         <span style={labelStyle}>Starter kit</span>
-        <span style={order.country === 'CA' ? undefined : valStyle}>{starterKit}</span>
+        <span style={valStyle}>{starterKit}</span>
       </div>
 
       <div style={{ marginTop: 14, display: 'flex', gap: 10 }}>
@@ -64,16 +68,16 @@ export function StepFulfilled({
           style={{
             background: '#fff', color: 'var(--color-ink-muted)',
             border: '1px solid var(--color-border)', padding: '6px 12px',
-            borderRadius: 4, fontSize: 11, cursor: 'pointer',
+            borderRadius: 4, fontSize: 11, fontWeight: 600, cursor: 'pointer',
           }}
         >Copy handoff ref ({handoffRef})</button>
         {order.customer_email && (
           <a
             href={`mailto:${order.customer_email}`}
             style={{
-              background: '#fff', color: 'var(--color-info)',
+              background: '#fff', color: 'var(--color-crimson)',
               border: '1px solid var(--color-border)', padding: '6px 12px',
-              borderRadius: 4, fontSize: 11, textDecoration: 'none',
+              borderRadius: 4, fontSize: 11, fontWeight: 600, textDecoration: 'none',
             }}
           >Open customer email thread</a>
         )}

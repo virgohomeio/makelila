@@ -12,14 +12,37 @@
 .brand {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   padding-right: 20px;
   border-right: 1px solid var(--color-dark-3);
   margin-right: 8px;
-  font-size: 12px;
-  font-weight: 800;
   color: #fff;
-  letter-spacing: 0.5px;
+}
+
+.brandLogo {
+  height: 28px;
+  width: auto;
+  display: block;
+  /* The logo PNG has a white background in the source artwork; treat it as
+     a square badge on the dark nav by masking with the provided square. */
+  background: #fff;
+  border-radius: 4px;
+  padding: 2px;
+}
+
+.brandWordmark {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  color: #d7d7d7;
+}
+
+.brandLila {
+  font-family: var(--font-logo);
+  font-size: 14px;
+  letter-spacing: 0.08em;
+  color: var(--color-crimson);
+  margin-left: 2px;
 }
 
 .item {
