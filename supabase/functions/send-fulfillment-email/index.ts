@@ -1,4 +1,6 @@
-import { serve } from 'https://deno.land/std@0.224.0/http/server.ts';
+// Deno.serve is native on Deno 2 (what Supabase edge runtime uses) — avoids
+// pulling in std/http which has caused transient boot errors on the edge
+// runtime. createClient is pinned to a recent v2 release.
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { corsHeaders } from '../_shared/cors.ts';
 
@@ -20,9 +22,20 @@ type OrderRow = {
   country: 'US' | 'CA';
 };
 
-serve(async (req: Request) => {
+Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
   if (req.method !== 'POST') return new Response('Method not allowed', { status: 405, headers: corsHeaders });
+  try {
+    return await handle(req);
+  } catch (err) {
+    return new Response(
+      JSON.stringify({ error: `Uncaught: ${(err as Error)?.message ?? String(err)}` }),
+      { status: 500, headers: { ...corsHeaders, 'content-type': 'application/json' } },
+    );
+  }
+});
+
+async function handle(req: Request): Promise<Response> {
 
   const supabaseUrl = Deno.env.get('SUPABASE_URL');
   const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
@@ -192,4 +205,4 @@ serve(async (req: Request) => {
     JSON.stringify({ email_id: sent.id }),
     { status: 200, headers: { ...corsHeaders, 'content-type': 'application/json' } },
   );
-});
+}
