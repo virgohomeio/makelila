@@ -421,3 +421,10 @@ s3_secret_key = "env(S3_SECRET_KEY)"
 [functions.sync-shopify-orders]
 verify_jwt = false
 
+# send-fulfillment-email: same ES256 gateway workaround. The function still
+# reads the Authorization header to record email_sent_by / fulfilled_by via
+# base64 payload decode (no signature verification is needed since we only
+# attribute the action, not authorize it — RLS already protects the table).
+[functions.send-fulfillment-email]
+verify_jwt = false
+
