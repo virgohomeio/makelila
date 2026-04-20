@@ -21,7 +21,7 @@ vi.mock('./supabase', () => ({
 vi.mock('./activityLog', () => ({ logAction: logActionMock }));
 
 import { confirmTestReport, toggleDockCheck, setStarterTracking } from './fulfillment';
-import { swapSlots, confirmShelfLayout, resolveRework } from './fulfillment';
+import { confirmShelfLayout, resolveRework } from './fulfillment';
 
 describe('confirmTestReport', () => {
   beforeEach(() => {
