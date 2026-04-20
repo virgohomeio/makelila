@@ -6,6 +6,7 @@ import { QueueHeader } from './QueueHeader';
 import { StepAssign } from './StepAssign';
 import { StepTest } from './StepTest';
 import { StepLabel } from './StepLabel';
+import { StepDock } from './StepDock';
 import styles from '../Fulfillment.module.css';
 
 type Order = {
@@ -67,7 +68,8 @@ export default function Queue() {
             {selected.step === 1 && <StepAssign row={selected} />}
             {selected.step === 2 && <StepTest row={selected} />}
             {selected.step === 3 && <StepLabel row={selected} />}
-            {selected.step >= 4 && <div>Step {selected.step} — UI coming in Tasks 16–18</div>}
+            {selected.step === 4 && <StepDock row={selected} />}
+            {selected.step >= 5 && <div>Step {selected.step} — UI coming in Tasks 17–18</div>}
           </>
         )}
       </section>
