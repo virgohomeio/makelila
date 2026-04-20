@@ -4,6 +4,7 @@ import { useFulfillmentQueue } from '../../../lib/fulfillment';
 import { QueueSidebar } from './QueueSidebar';
 import { QueueHeader } from './QueueHeader';
 import { StepAssign } from './StepAssign';
+import { StepTest } from './StepTest';
 import styles from '../Fulfillment.module.css';
 
 type Order = {
@@ -63,7 +64,8 @@ export default function Queue() {
           <>
             <QueueHeader row={selected} order={selectedOrder} />
             {selected.step === 1 && <StepAssign row={selected} />}
-            {selected.step >= 2 && <div>Step {selected.step} — UI coming in Tasks 14–18</div>}
+            {selected.step === 2 && <StepTest row={selected} />}
+            {selected.step >= 3 && <div>Step {selected.step} — UI coming in Tasks 15–18</div>}
           </>
         )}
       </section>
