@@ -1,4 +1,5 @@
 import { useNavigate, useParams } from 'react-router-dom';
+import Queue from './queue';
 import styles from './Fulfillment.module.css';
 
 type Tab = 'queue' | 'shelf';
@@ -22,7 +23,7 @@ export default function Fulfillment() {
       </div>
       <div className={styles.tabPanel}>
         {active === 'queue' ? (
-          <div>Queue sub-tab — filled in by Task 12</div>
+          <Queue />
         ) : (
           <div>Shelf sub-tab — filled in by Task 19</div>
         )}
