@@ -238,3 +238,16 @@
 
 .slotSerial { font-family: ui-monospace, monospace; font-weight: 700; font-size: 9px; }
 .slotBatch { font-size: 8px; opacity: 0.7; margin-top: 2px; }
+
+.confirmLayoutBtn {
+  background: var(--color-success);
+  color: #fff;
+  border: none;
+  padding: 8px 16px;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.confirmLayoutBtn:disabled { background: var(--color-border); color: var(--color-ink-faint); cursor: not-allowed; }
+.confirmLayoutBtn.saved { background: #c6f6d5; color: var(--color-success); }
