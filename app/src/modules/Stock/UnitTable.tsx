@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import {
-  STATUS_META, STATUS_ORDER, updateUnitStatus, type Unit, type UnitStatus,
+  STATUS_META, STATUS_ORDER, getStatusMeta, updateUnitStatus, type Unit, type UnitStatus,
 } from '../../lib/stock';
 import styles from './Stock.module.css';
 
@@ -53,7 +53,7 @@ export function UnitTable({ units }: { units: Unit[] }) {
         <tbody>
           {units.map(u => {
             const statusVal = pending[u.serial] ?? u.status;
-            const meta = STATUS_META[statusVal];
+            const meta = getStatusMeta(statusVal);
             const changed = statusVal !== u.status;
             const shippedDate = u.shipped_at
               ? new Date(u.shipped_at).toLocaleDateString('en-US', { year: '2-digit', month: 'short', day: 'numeric' })

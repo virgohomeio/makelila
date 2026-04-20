@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
 import {
   useBatches, useUnits, useStatusCountsByBatch,
-  STATUS_META, STATUS_ORDER, type UnitStatus, type StatusCategory,
+  STATUS_META, STATUS_ORDER, getStatusMeta,
+  type UnitStatus, type StatusCategory,
 } from '../../lib/stock';
 import { BatchCards } from './BatchCards';
 import { UnitTable } from './UnitTable';
@@ -24,7 +25,7 @@ export default function Stock() {
     return units.filter(u => {
       if (batchFilter && u.batch !== batchFilter) return false;
       if (statusFilter && u.status !== statusFilter) return false;
-      if (categoryFilter !== 'all' && STATUS_META[u.status].category !== categoryFilter) return false;
+      if (categoryFilter !== 'all' && getStatusMeta(u.status).category !== categoryFilter) return false;
       if (q && !(
         u.serial.toLowerCase().includes(q) ||
         (u.customer_name?.toLowerCase().includes(q)) ||
@@ -67,18 +68,21 @@ export default function Stock() {
           >All</button>
           {STATUS_ORDER.filter(s =>
             categoryFilter === 'all' || STATUS_META[s].category === categoryFilter
-          ).map(s => (
-            <button
-              key={s}
-              onClick={() => setStatusFilter(prev => prev === s ? null : s)}
-              className={`${styles.chip} ${statusFilter === s ? styles.chipActive : ''}`}
-              style={statusFilter === s ? {
-                background: STATUS_META[s].bg,
-                color: STATUS_META[s].color,
-                borderColor: STATUS_META[s].border,
-              } : undefined}
-            >{STATUS_META[s].label}</button>
-          ))}
+          ).map(s => {
+            const meta = STATUS_META[s];
+            return (
+              <button
+                key={s}
+                onClick={() => setStatusFilter(prev => prev === s ? null : s)}
+                className={`${styles.chip} ${statusFilter === s ? styles.chipActive : ''}`}
+                style={statusFilter === s ? {
+                  background: meta.bg,
+                  color: meta.color,
+                  borderColor: meta.border,
+                } : undefined}
+              >{meta.label}</button>
+            );
+          })}
         </div>
 
         <input

@@ -36,6 +36,22 @@ export const STATUS_ORDER: UnitStatus[] = [
   'shipped','team-test','scrap','lost',
 ];
 
+/** Defensive lookup: if a unit somehow has a status that isn't in
+ *  STATUS_META (e.g. a DB migration shipped a new status before the
+ *  frontend was redeployed), fall back to a neutral gray pill so the
+ *  whole page doesn't blank out on `STATUS_META[status].category`. */
+const UNKNOWN_META = {
+  label: 'Unknown',
+  category: 'warehouse' as StatusCategory,
+  color: '#4a5568',
+  bg: '#f7fafc',
+  border: '#cbd5e1',
+};
+export function getStatusMeta(s: string | null | undefined) {
+  if (!s) return UNKNOWN_META;
+  return (STATUS_META as Record<string, typeof UNKNOWN_META>)[s] ?? UNKNOWN_META;
+}
+
 export type Batch = {
   id: string;
   version: string | null;
