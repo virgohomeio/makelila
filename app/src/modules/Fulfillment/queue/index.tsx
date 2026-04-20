@@ -3,6 +3,7 @@ import { supabase } from '../../../lib/supabase';
 import { useFulfillmentQueue } from '../../../lib/fulfillment';
 import { QueueSidebar } from './QueueSidebar';
 import { QueueHeader } from './QueueHeader';
+import { StepAssign } from './StepAssign';
 import styles from '../Fulfillment.module.css';
 
 type Order = {
@@ -61,7 +62,8 @@ export default function Queue() {
         ) : (
           <>
             <QueueHeader row={selected} order={selectedOrder} />
-            <div>Step {selected.step} — UI coming in Tasks 13–18</div>
+            {selected.step === 1 && <StepAssign row={selected} />}
+            {selected.step >= 2 && <div>Step {selected.step} — UI coming in Tasks 14–18</div>}
           </>
         )}
       </section>
