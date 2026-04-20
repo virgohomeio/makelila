@@ -8,6 +8,7 @@ import { StepTest } from './StepTest';
 import { StepLabel } from './StepLabel';
 import { StepDock } from './StepDock';
 import { StepEmail } from './StepEmail';
+import { StepFulfilled } from './StepFulfilled';
 import styles from '../Fulfillment.module.css';
 
 type Order = {
@@ -72,7 +73,7 @@ export default function Queue() {
             {selected.step === 3 && <StepLabel row={selected} />}
             {selected.step === 4 && <StepDock row={selected} />}
             {selected.step === 5 && <StepEmail row={selected} order={selectedOrder} />}
-            {selected.step === 6 && <div>Step 6 fulfilled — UI coming in Task 18</div>}
+            {selected.step === 6 && <StepFulfilled row={selected} order={selectedOrder} />}
           </>
         )}
       </section>
