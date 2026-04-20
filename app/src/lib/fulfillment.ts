@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { RealtimeChannel } from '@supabase/supabase-js';
-import { supabase } from './supabase';
+import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from './supabase';
 import { logAction } from './activityLog';
 
 export type FulfillmentStep = 1 | 2 | 3 | 4 | 5 | 6;
@@ -384,33 +384,33 @@ export async function setStarterTracking(queueId: string, starter_tracking_num: 
   if (error) throw error;
 }
 
-/** Step 5: invoke edge function to send the email (advances 5→6). */
+/** Step 5: invoke edge function to send the email (advances 5→6).
+ *  Uses direct fetch rather than supabase.functions.invoke so the response
+ *  body can be read on non-2xx (functions.invoke consumes it internally and
+ *  exposes only "Edge Function returned a non-2xx status code"). */
 export async function sendFulfillmentEmail(queueId: string): Promise<{ email_id: string }> {
   await currentUserId();
-  const { data, error } = await supabase.functions.invoke<{ email_id: string }>(
-    'send-fulfillment-email',
-    { body: { queue_id: queueId } },
-  );
-  if (error) {
-    // FunctionsHttpError's generic message is "Edge Function returned a
-    // non-2xx status code" which hides the actual reason. Read the response
-    // body (JSON { error } if available, otherwise raw text) so the UI can
-    // show something useful.
-    const ctx = (error as { context?: Response }).context;
-    let detail = '';
-    if (ctx && typeof ctx.text === 'function') {
-      try {
-        const body = await ctx.text();
-        try {
-          const parsed = JSON.parse(body) as { error?: string };
-          detail = parsed.error ?? body;
-        } catch { detail = body; }
-      } catch { /* swallow */ }
-    }
-    throw new Error(detail ? `Send email failed: ${detail}` : error.message);
+  const { data: { session } } = await supabase.auth.getSession();
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/send-fulfillment-email`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      apikey: SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${session?.access_token ?? SUPABASE_ANON_KEY}`,
+    },
+    body: JSON.stringify({ queue_id: queueId }),
+  });
+  const bodyText = await res.text();
+  if (!res.ok) {
+    let detail = bodyText;
+    try {
+      const parsed = JSON.parse(bodyText) as { error?: string };
+      if (parsed.error) detail = parsed.error;
+    } catch { /* keep raw */ }
+    throw new Error(`Send email failed (${res.status}): ${detail}`);
   }
-  if (!data) throw new Error('send-fulfillment-email returned no data');
-  return data;
+  try { return JSON.parse(bodyText) as { email_id: string }; }
+  catch { throw new Error('Send email: response was not JSON'); }
 }
 
 /** Sales action: flag or un-flag a queue row as priority. Prioritized rows
