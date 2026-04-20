@@ -19,18 +19,13 @@ export default function Login() {
       />
       <div style={{ textAlign: 'center' }}>
         <h1 style={{
-          fontSize: 18, fontWeight: 500, color: 'var(--color-ink-muted)',
-          letterSpacing: '0.3px', marginBottom: 2,
-        }}>
-          make{' '}
-          <span style={{
-            fontFamily: 'var(--font-logo)',
-            color: 'var(--color-crimson)',
-            letterSpacing: '0.08em',
-            fontSize: 28,
-            fontWeight: 700,
-          }}>LILA</span>
-        </h1>
+          fontFamily: 'var(--font-logo)',
+          fontSize: 32,
+          fontWeight: 700,
+          letterSpacing: '0.1em',
+          color: 'var(--color-crimson)',
+          marginBottom: 2,
+        }}>MAKE LILA</h1>
         <p style={{ fontSize: 12, color: 'var(--color-ink-subtle)', marginTop: 8 }}>
           Internal operations tool for VCycene Inc.
         </p>
