@@ -9,6 +9,7 @@ import { LineItemsCard } from './detail/LineItemsCard';
 import { NotesCard }    from './detail/NotesCard';
 import { ActionBar }    from './detail/ActionBar';
 import { ConfirmBanner } from './detail/ConfirmBanner';
+import { ReadinessChecklist, canConfirm } from './detail/ReadinessChecklist';
 import styles from './OrderReview.module.css';
 
 type Banner = { variant: 'success' | 'error'; message: string } | null;
@@ -47,17 +48,21 @@ export function Detail({
     }
   };
 
+  const confirmReady = canConfirm(order);
+
   return (
     <section className={styles.detail}>
       <ConfirmBanner banner={banner} onDismiss={dismissBanner} />
       <ActionBar
         order={order}
+        confirmReady={confirmReady}
         onApprove={() => wrap('Approved', () => disposition(order, 'approved'))}
         onFlag={(reason) => wrap('Flagged', () => disposition(order, 'flagged', reason), 'Flagged', reason)}
         onHold={(reason) => wrap('Held',    () => disposition(order, 'held',    reason), 'Held', reason)}
         onNeedInfo={(note) => wrap('Need-info logged', () => needInfo(order, note), 'Need info', note)}
       />
       <div className={styles.detailBody}>
+        <ReadinessChecklist order={order} />
         <CustomerCard order={order} />
         <AddressCard order={order} />
         <FreightCard order={order} />

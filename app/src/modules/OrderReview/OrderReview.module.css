@@ -433,3 +433,59 @@
   color: var(--color-ink);
   white-space: pre-wrap;
 }
+
+.readinessRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 11px;
+  line-height: 1.5;
+  padding: 3px 0;
+}
+.readinessOk { color: var(--color-success); font-weight: 700; font-size: 13px; }
+.readinessFail { color: var(--color-error); font-weight: 700; font-size: 13px; }
+
+.freightEdit {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+.freightEdit input {
+  width: 100px;
+  padding: 4px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  font-family: ui-monospace, monospace;
+}
+.freightEdit button {
+  background: var(--color-ink);
+  color: #fff;
+  border: none;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.freightEdit .cancelBtn {
+  background: #fff;
+  color: var(--color-ink-subtle);
+  border: 1px solid var(--color-border);
+}
+.freightHint { font-size: 9px; color: var(--color-ink-faint); margin-top: 4px; }
+
+.salesConfirmToggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 8px 10px;
+  background: var(--color-warning-bg);
+  border: 1px solid var(--color-warning-border);
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  color: var(--color-warning);
+}
+.salesConfirmToggle label { cursor: pointer; font-weight: 600; }

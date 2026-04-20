@@ -39,7 +39,7 @@ const order: Order = {
   status: 'pending',
   customer_name: 'Keith Taitano',
   customer_email: 'k@example.com',
-  customer_phone: null,
+  customer_phone: '+1-555-0100',
   quo_thread_url: null,
   address_line: '2847 SW Corbett',
   city: 'Portland', region_state: 'OR', country: 'US',
@@ -47,6 +47,7 @@ const order: Order = {
   freight_estimate_usd: 89.5, freight_threshold_usd: 200,
   total_usd: 1149,
   line_items: [{ sku: 'LL01', name: 'Lila 01', qty: 1, price_usd: 1149 }],
+  sales_confirmed_fit: false,
   dispositioned_by: null, dispositioned_at: null,
   created_at: '2026-04-17T00:00:00Z',
 };

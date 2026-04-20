@@ -21,6 +21,7 @@ function mkOrder(partial: Partial<Order> & { id: string; status: Order['status']
     freight_threshold_usd: 200,
     total_usd: 1149,
     line_items: [],
+    sales_confirmed_fit: false,
     dispositioned_by: null,
     dispositioned_at: null,
     created_at: '2026-04-17T00:00:00Z',

@@ -38,6 +38,7 @@ export type Order = {
   freight_threshold_usd: number;
   total_usd: number;
   line_items: LineItem[];
+  sales_confirmed_fit: boolean;
   dispositioned_by: string | null;
   dispositioned_at: string | null;
   created_at: string;
@@ -94,6 +95,16 @@ export async function addOrderNote(
     author_name: authorName,
     body,
   });
+  if (error) throw error;
+}
+
+export async function setSalesConfirmedFit(id: string, value: boolean): Promise<void> {
+  const { error } = await supabase.from('orders').update({ sales_confirmed_fit: value }).eq('id', id);
+  if (error) throw error;
+}
+
+export async function updateFreightEstimate(id: string, amount: number): Promise<void> {
+  const { error } = await supabase.from('orders').update({ freight_estimate_usd: amount }).eq('id', id);
   if (error) throw error;
 }
 

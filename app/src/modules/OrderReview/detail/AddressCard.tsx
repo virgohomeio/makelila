@@ -1,4 +1,5 @@
 import type { Order } from '../../../lib/orders';
+import { setSalesConfirmedFit } from '../../../lib/orders';
 import styles from '../OrderReview.module.css';
 
 const VERDICT_CLASS: Record<Order['address_verdict'], string> = {
@@ -49,6 +50,23 @@ export function AddressCard({ order }: { order: Order }) {
           <strong>{order.address_verdict.toUpperCase()}</strong>
           <span>{VERDICT_LABEL[order.address_verdict]}</span>
         </div>
+
+        {order.address_verdict !== 'house' && (
+          <div className={styles.salesConfirmToggle}>
+            <input
+              type="checkbox"
+              id={`sales-fit-${order.id}`}
+              checked={order.sales_confirmed_fit}
+              onChange={async e => {
+                try { await setSalesConfirmedFit(order.id, e.target.checked); }
+                catch (err) { alert((err as Error).message); }
+              }}
+            />
+            <label htmlFor={`sales-fit-${order.id}`}>
+              Sales confirmed fit with customer (required for {order.address_verdict} addresses)
+            </label>
+          </div>
+        )}
       </div>
     </div>
   );

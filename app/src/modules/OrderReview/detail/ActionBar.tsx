@@ -9,12 +9,14 @@ export function ActionBar({
   onFlag,
   onHold,
   onNeedInfo,
+  confirmReady = true,
 }: {
   order: Order;
   onApprove: () => void;
   onFlag: (reason: string) => void;
   onHold: (reason: string) => void;
   onNeedInfo: (note: string) => void;
+  confirmReady?: boolean;
 }) {
   const [expanded, setExpanded] = useState<ExpandedAction>(null);
   const [reason, setReason] = useState('');
@@ -67,10 +69,21 @@ export function ActionBar({
 
   return (
     <div className={styles.actionBar}>
-      <button className={`${styles.actionBtn} ${styles.actionConfirm}`} onClick={onApprove}>✓ Confirm</button>
+      <button
+        className={`${styles.actionBtn} ${styles.actionConfirm}`}
+        onClick={onApprove}
+        disabled={!confirmReady}
+        style={!confirmReady ? { opacity: 0.5, cursor: 'not-allowed' } : undefined}
+        title={!confirmReady ? 'Complete the 3 readiness criteria first' : 'Confirm order'}
+      >✓ Confirm</button>
       <button className={`${styles.actionBtn} ${styles.actionFlag}`}    onClick={() => setExpanded('flag')}>⚑ Flag</button>
       <button className={`${styles.actionBtn} ${styles.actionHold}`}    onClick={() => setExpanded('hold')}>⏸ Hold</button>
       <button className={`${styles.actionBtn} ${styles.actionInfo}`}    onClick={() => setExpanded('info')}>? Need Info</button>
+      {!confirmReady && (
+        <span style={{ fontSize: 10, color: 'var(--color-ink-faint)', marginLeft: 4 }}>
+          Complete 3 criteria to enable Confirm
+        </span>
+      )}
     </div>
   );
 }
