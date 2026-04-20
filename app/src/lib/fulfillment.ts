@@ -391,7 +391,24 @@ export async function sendFulfillmentEmail(queueId: string): Promise<{ email_id:
     'send-fulfillment-email',
     { body: { queue_id: queueId } },
   );
-  if (error) throw error;
+  if (error) {
+    // FunctionsHttpError's generic message is "Edge Function returned a
+    // non-2xx status code" which hides the actual reason. Read the response
+    // body (JSON { error } if available, otherwise raw text) so the UI can
+    // show something useful.
+    const ctx = (error as { context?: Response }).context;
+    let detail = '';
+    if (ctx && typeof ctx.text === 'function') {
+      try {
+        const body = await ctx.text();
+        try {
+          const parsed = JSON.parse(body) as { error?: string };
+          detail = parsed.error ?? body;
+        } catch { detail = body; }
+      } catch { /* swallow */ }
+    }
+    throw new Error(detail ? `Send email failed: ${detail}` : error.message);
+  }
   if (!data) throw new Error('send-fulfillment-email returned no data');
   return data;
 }
