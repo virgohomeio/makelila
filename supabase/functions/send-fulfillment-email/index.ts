@@ -113,6 +113,22 @@ serve(async (req: Request) => {
     `Happy Composting! 🌱\n` +
     `-The VCycene Team`;
 
+  // Testing override: if EMAIL_TEST_RECIPIENT is set, redirect every send to
+  // that address instead of the real customer. Subject gets a [TEST → <real>]
+  // prefix and the body is prepended with a banner so it's obvious the email
+  // was not delivered to the customer. Unset this env var to go live.
+  const testRecipient = Deno.env.get('EMAIL_TEST_RECIPIENT');
+  const realTo = order.customer_email;
+  const to = testRecipient || realTo;
+  const subject = testRecipient
+    ? `[TEST → ${realTo}] Your LILA has officially shipped! 🎉 (${order.order_ref})`
+    : `Your LILA has officially shipped! 🎉 (${order.order_ref})`;
+  const body = testRecipient
+    ? `*** TEST MODE — this email would have been sent to ${realTo} ***\n` +
+      `*** EMAIL_TEST_RECIPIENT is set on the edge function; unset to go live ***\n\n` +
+      text
+    : text;
+
   // Send via Resend
   const resendRes = await fetch('https://api.resend.com/emails', {
     method: 'POST',
@@ -123,9 +139,9 @@ serve(async (req: Request) => {
     body: JSON.stringify({
       from: 'VCycene Team <support@lilacomposter.com>',
       reply_to: 'support@lilacomposter.com',
-      to: [order.customer_email],
-      subject: `Your LILA has officially shipped! 🎉 (${order.order_ref})`,
-      text,
+      to: [to],
+      subject,
+      text: body,
     }),
   });
   if (!resendRes.ok) {
