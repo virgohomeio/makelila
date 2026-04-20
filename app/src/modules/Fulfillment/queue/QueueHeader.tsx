@@ -25,10 +25,14 @@ export function QueueHeader({
   };
 
   const canGoBack = row.step > 1 && row.step < 6;
-  const STEP_LABELS_FOR_BACK = ['', 'Assign', 'Test', 'Label', 'Dock', 'Email'];
+  const backTitle = row.step === 1
+    ? 'No previous step — already at Assign'
+    : row.step >= 6
+      ? 'Order is already fulfilled — cannot rewind'
+      : `Back to ${STEP_LABELS[row.step - 1]}`;
   const handleBack = async () => {
     if (!canGoBack) return;
-    const prevLabel = STEP_LABELS_FOR_BACK[row.step - 1];
+    const prevLabel = STEP_LABELS[row.step - 1];
     if (!window.confirm(`Step back to "${prevLabel}"? Data already saved for later steps is kept.`)) return;
     setBusy(true); setError(null);
     try { await goBackStep(row.id, row.step); }
@@ -58,14 +62,12 @@ export function QueueHeader({
               Due: {due.dueLabel}
             </span>
           )}
-          {canGoBack && (
-            <button
-              className={styles.backBtn}
-              onClick={handleBack}
-              disabled={busy}
-              title="Undo the last step advancement"
-            >← Back</button>
-          )}
+          <button
+            className={styles.backBtn}
+            onClick={handleBack}
+            disabled={busy || !canGoBack}
+            title={backTitle}
+          >← Back</button>
           {!fulfilled && (
             <button
               className={row.priority ? styles.priorityBtnOn : styles.priorityBtnOff}
