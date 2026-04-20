@@ -291,10 +291,10 @@ export async function flagRework(
   await logAction('fq_test_flagged', queueId, `${serial}: ${issue}`);
 }
 
-/** Step 3: upload PDF (optional) + save carrier/tracking; advance 3→4. */
+/** Step 3: upload PDF (optional) + save LILA carrier/tracking (and US starter tracking); advance 3→4. */
 export async function confirmLabel(
   queueId: string,
-  input: { carrier: string; tracking_num: string; label_pdf?: File },
+  input: { carrier: string; tracking_num: string; label_pdf?: File; starter_tracking_num?: string },
 ): Promise<void> {
   const userId = await currentUserId();
   let label_pdf_path: string | null = null;
@@ -306,6 +306,7 @@ export async function confirmLabel(
     if (upErr) throw upErr;
     label_pdf_path = path;
   }
+  const starter = input.starter_tracking_num?.trim();
   const { error } = await supabase
     .from('fulfillment_queue')
     .update({
@@ -313,12 +314,33 @@ export async function confirmLabel(
       carrier: input.carrier,
       tracking_num: input.tracking_num,
       ...(label_pdf_path ? { label_pdf_path } : {}),
+      ...(starter ? { starter_tracking_num: starter } : {}),
       label_confirmed_at: new Date().toISOString(),
       label_confirmed_by: userId,
     })
     .eq('id', queueId);
   if (error) throw error;
-  await logAction('fq_label_confirmed', queueId, `${input.carrier} · ${input.tracking_num}`);
+  await logAction(
+    'fq_label_confirmed',
+    queueId,
+    `${input.carrier} · ${input.tracking_num}${starter ? ` · starter ${starter}` : ''}`,
+  );
+}
+
+/** Go back one step on a queue row (undo accidental advancement).
+ *  Data already saved (test report, label, etc.) is preserved; only the step
+ *  counter moves back so the corresponding step UI is shown again. */
+export async function goBackStep(queueId: string, currentStep: FulfillmentStep): Promise<void> {
+  await currentUserId();
+  if (currentStep <= 1) throw new Error('already at the first step');
+  if (currentStep >= 6) throw new Error('cannot rewind a fulfilled order');
+  const prev = (currentStep - 1) as FulfillmentStep;
+  const { error } = await supabase
+    .from('fulfillment_queue')
+    .update({ step: prev })
+    .eq('id', queueId);
+  if (error) throw error;
+  await logAction('fq_step_back', queueId, `Step ${currentStep} → ${prev}`);
 }
 
 /** Step 4: toggle one of the 4 dock checklist booleans. */

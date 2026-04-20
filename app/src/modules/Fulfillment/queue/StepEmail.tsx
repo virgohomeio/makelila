@@ -30,6 +30,10 @@ export function StepEmail({
 
   const firstName = order.customer_name.split(' ')[0];
   const track = trackingUrl(row.carrier, row.tracking_num);
+  const starterBlock = order.country === 'US' && row.starter_tracking_num
+    ? `\nCompost Starter Kit (ships separately via Amazon)\n\n` +
+      `Starter Tracking Number: ${row.starter_tracking_num}\n\n`
+    : '';
   const preview =
     `Subject: Your LILA has officially shipped! 🎉 (${order.order_ref})\n` +
     `From: VCycene Team <support@lilacomposter.com>\n` +
@@ -38,7 +42,8 @@ export function StepEmail({
     `Your LILA has officially shipped! 🎉 It's on its way to you. Here are your shipping details:\n\n` +
     `Carrier: ${row.carrier ?? ''}\n\n` +
     `Tracking Number: ${row.tracking_num ?? ''}\n\n` +
-    `Tracking Link: ${track}\n\n` +
+    `Tracking Link: ${track}\n` +
+    starterBlock + `\n` +
     `You can use the link above to check on your delivery progress at any time.\n\n` +
     `Important next steps\n\n` +
     `1. Mandatory onboarding session\n` +

@@ -84,7 +84,7 @@ export default function Queue() {
             <QueueHeader row={selected} order={selectedOrder} />
             {selected.step === 1 && <StepAssign row={selected} />}
             {selected.step === 2 && <StepTest row={selected} />}
-            {selected.step === 3 && <StepLabel row={selected} />}
+            {selected.step === 3 && <StepLabel row={selected} country={selectedOrder.country} />}
             {selected.step === 4 && <StepDock row={selected} />}
             {selected.step === 5 && <StepEmail row={selected} order={selectedOrder} />}
             {selected.step === 6 && <StepFulfilled row={selected} order={selectedOrder} />}

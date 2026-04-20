@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { setQueuePriority, type FulfillmentQueueRow } from '../../../lib/fulfillment';
+import { setQueuePriority, goBackStep, type FulfillmentQueueRow } from '../../../lib/fulfillment';
 import { orderDue } from '../../../lib/orders';
 import styles from '../Fulfillment.module.css';
 
@@ -20,6 +20,18 @@ export function QueueHeader({
   const handleTogglePriority = async () => {
     setBusy(true); setError(null);
     try { await setQueuePriority(row.id, !row.priority); }
+    catch (e) { setError((e as Error).message); }
+    finally { setBusy(false); }
+  };
+
+  const canGoBack = row.step > 1 && row.step < 6;
+  const STEP_LABELS_FOR_BACK = ['', 'Assign', 'Test', 'Label', 'Dock', 'Email'];
+  const handleBack = async () => {
+    if (!canGoBack) return;
+    const prevLabel = STEP_LABELS_FOR_BACK[row.step - 1];
+    if (!window.confirm(`Step back to "${prevLabel}"? Data already saved for later steps is kept.`)) return;
+    setBusy(true); setError(null);
+    try { await goBackStep(row.id, row.step); }
     catch (e) { setError((e as Error).message); }
     finally { setBusy(false); }
   };
@@ -45,6 +57,14 @@ export function QueueHeader({
             >
               Due: {due.dueLabel}
             </span>
+          )}
+          {canGoBack && (
+            <button
+              className={styles.backBtn}
+              onClick={handleBack}
+              disabled={busy}
+              title="Undo the last step advancement"
+            >← Back</button>
           )}
           {!fulfilled && (
             <button
