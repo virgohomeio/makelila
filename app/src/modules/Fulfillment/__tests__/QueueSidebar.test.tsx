@@ -19,7 +19,10 @@ function mkRow(partial: Partial<FulfillmentQueueRow> & { id: string; order_id: s
 }
 
 describe('QueueSidebar', () => {
-  const today = new Date().toISOString().slice(0, 10);
+  // Use local-calendar YYYY-MM-DD (not toISOString which is UTC) so the
+  // component's local-TZ comparison agrees no matter where CI runs.
+  const d = new Date();
+  const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   const row1 = mkRow({ id: 'q1', order_id: 'o1', step: 1, due_date: today });
   const row2 = mkRow({ id: 'q2', order_id: 'o2', step: 3, due_date: '2099-01-01' });
 

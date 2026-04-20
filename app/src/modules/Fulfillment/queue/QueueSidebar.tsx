@@ -1,12 +1,24 @@
 import type { FulfillmentQueueRow } from '../../../lib/fulfillment';
 import styles from '../Fulfillment.module.css';
 
+/** Parse a "YYYY-MM-DD" due-date as a LOCAL calendar date (not UTC midnight).
+ *  Browsers parse `new Date("2026-04-20")` as UTC, which is off by a day in
+ *  negative-UTC timezones — so "Due TODAY" could display as "OVERDUE by 1d". */
+function parseLocalDate(dueDate: string): Date {
+  const [y, m, d] = dueDate.split('-').map(Number);
+  return new Date(y, (m ?? 1) - 1, d ?? 1);
+}
+
+function daysUntil(dueDate: string): number {
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const due = parseLocalDate(dueDate); due.setHours(0, 0, 0, 0);
+  return Math.round((due.getTime() - today.getTime()) / 86_400_000);
+}
+
 function dueClass(dueDate: string | null, fulfilled: boolean): string {
   if (fulfilled) return `${styles.rowDue} ${styles.done}`;
   if (!dueDate) return styles.rowDue;
-  const today = new Date(); today.setHours(0, 0, 0, 0);
-  const due = new Date(dueDate); due.setHours(0, 0, 0, 0);
-  const days = Math.round((due.getTime() - today.getTime()) / 86_400_000);
+  const days = daysUntil(dueDate);
   if (days < 0) return `${styles.rowDue} ${styles.today}`;
   if (days === 0) return `${styles.rowDue} ${styles.today}`;
   if (days <= 2) return `${styles.rowDue} ${styles.soon}`;
@@ -16,9 +28,7 @@ function dueClass(dueDate: string | null, fulfilled: boolean): string {
 function dueLabel(dueDate: string | null, fulfilled: boolean): string {
   if (fulfilled) return '✓ Fulfilled';
   if (!dueDate) return '—';
-  const today = new Date(); today.setHours(0, 0, 0, 0);
-  const due = new Date(dueDate); due.setHours(0, 0, 0, 0);
-  const days = Math.round((due.getTime() - today.getTime()) / 86_400_000);
+  const days = daysUntil(dueDate);
   if (days < 0) return `⏰ OVERDUE by ${Math.abs(days)}d`;
   if (days === 0) return '⏰ Due TODAY';
   return `⏰ Due in ${days}d`;
