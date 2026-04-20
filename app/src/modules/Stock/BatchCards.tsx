@@ -6,7 +6,7 @@ import styles from './Stock.module.css';
 // status palette so the legend reads the same way across the app.
 type Slice = { key: string; label: string; color: string; statuses: UnitStatus[] };
 const SLICES: Slice[] = [
-  { key: 'preship',   label: 'Pre-ship',  color: '#9f7aea', statuses: ['in-production','inbound','ca-test'] },
+  { key: 'preship',   label: 'Pre-ship',  color: '#9f7aea', statuses: ['in-production','inbound','cn-test','ca-test'] },
   { key: 'available', label: 'Available', color: '#48bb78', statuses: ['ready','reserved'] },
   { key: 'shipped',   label: 'Shipped',   color: '#4299e1', statuses: ['shipped'] },
   { key: 'team',      label: 'Team/Test', color: '#d69e2e', statuses: ['team-test','rework'] },
@@ -251,7 +251,7 @@ function AllCard({
 
 function aggregateAll(countsByBatch: Map<string, Record<UnitStatus, number>>): Record<UnitStatus, number> {
   const out: Record<UnitStatus, number> = {
-    'in-production':0,'inbound':0,'ca-test':0,
+    'in-production':0,'inbound':0,'cn-test':0,'ca-test':0,
     'ready':0,'reserved':0,'rework':0,
     'shipped':0,'team-test':0,'scrap':0,'lost':0,
   };

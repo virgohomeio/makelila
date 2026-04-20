@@ -4,7 +4,7 @@ import { supabase } from './supabase';
 import { logAction } from './activityLog';
 
 export type UnitStatus =
-  | 'in-production' | 'inbound' | 'ca-test'
+  | 'in-production' | 'inbound' | 'cn-test' | 'ca-test'
   | 'ready' | 'reserved' | 'rework'
   | 'shipped' | 'team-test' | 'scrap' | 'lost';
 
@@ -19,6 +19,7 @@ export const STATUS_META: Record<UnitStatus, {
 }> = {
   'in-production': { label: 'In Production', category: 'inbound',   color: '#6b46c1', bg: '#faf5ff', border: '#d6bcfa' },
   'inbound':       { label: 'Inbound',       category: 'inbound',   color: '#2b6cb0', bg: '#ebf8ff', border: '#bee3f8' },
+  'cn-test':       { label: 'CN Test',       category: 'inbound',   color: '#b7791f', bg: '#fffbeb', border: '#ecc94b' },
   'ca-test':       { label: 'CA Test',       category: 'inbound',   color: '#975a16', bg: '#fffbeb', border: '#f6ad55' },
   'ready':         { label: 'Ready',         category: 'warehouse', color: '#276749', bg: '#f0fff4', border: '#9ae6b4' },
   'reserved':      { label: 'Reserved',      category: 'warehouse', color: '#c05621', bg: '#fffaf0', border: '#fbd38d' },
@@ -30,7 +31,7 @@ export const STATUS_META: Record<UnitStatus, {
 };
 
 export const STATUS_ORDER: UnitStatus[] = [
-  'in-production','inbound','ca-test',
+  'in-production','inbound','cn-test','ca-test',
   'ready','reserved','rework',
   'shipped','team-test','scrap','lost',
 ];
@@ -169,7 +170,7 @@ export function useStatusCountsByBatch(units: Unit[]): Map<string, Record<UnitSt
     for (const u of units) {
       let row = m.get(u.batch);
       if (!row) {
-        row = { 'in-production':0,'inbound':0,'ca-test':0,
+        row = { 'in-production':0,'inbound':0,'cn-test':0,'ca-test':0,
           'ready':0,'reserved':0,'rework':0,
           'shipped':0,'team-test':0,'scrap':0,'lost':0 };
         m.set(u.batch, row);
