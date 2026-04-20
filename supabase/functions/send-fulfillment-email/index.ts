@@ -136,7 +136,7 @@ async function handle(req: Request): Promise<Response> {
   const subject = testRecipient
     ? `[TEST → ${realTo}] Your LILA has officially shipped! 🎉 (${order.order_ref})`
     : `Your LILA has officially shipped! 🎉 (${order.order_ref})`;
-  const body = testRecipient
+  const emailText = testRecipient
     ? `*** TEST MODE — this email would have been sent to ${realTo} ***\n` +
       `*** EMAIL_TEST_RECIPIENT is set on the edge function; unset to go live ***\n\n` +
       text
@@ -154,7 +154,7 @@ async function handle(req: Request): Promise<Response> {
       reply_to: 'support@lilacomposter.com',
       to: [to],
       subject,
-      text: body,
+      text: emailText,
     }),
   });
   if (!resendRes.ok) {
