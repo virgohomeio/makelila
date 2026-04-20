@@ -7,12 +7,14 @@ import { StepAssign } from './StepAssign';
 import { StepTest } from './StepTest';
 import { StepLabel } from './StepLabel';
 import { StepDock } from './StepDock';
+import { StepEmail } from './StepEmail';
 import styles from '../Fulfillment.module.css';
 
 type Order = {
   id: string;
   order_ref: string;
   customer_name: string;
+  customer_email: string | null;
   city: string;
   region_state: string | null;
   country: 'US' | 'CA';
@@ -30,7 +32,7 @@ export default function Queue() {
     const ids = Array.from(new Set(rows.map(r => r.order_id)));
     void supabase
       .from('orders')
-      .select('id, order_ref, customer_name, city, region_state, country')
+      .select('id, order_ref, customer_name, customer_email, city, region_state, country')
       .in('id', ids)
       .then(({ data }) => setOrders((data as Order[]) ?? []));
   }, [rows]);
@@ -69,7 +71,8 @@ export default function Queue() {
             {selected.step === 2 && <StepTest row={selected} />}
             {selected.step === 3 && <StepLabel row={selected} />}
             {selected.step === 4 && <StepDock row={selected} />}
-            {selected.step >= 5 && <div>Step {selected.step} — UI coming in Tasks 17–18</div>}
+            {selected.step === 5 && <StepEmail row={selected} order={selectedOrder} />}
+            {selected.step === 6 && <div>Step 6 fulfilled — UI coming in Task 18</div>}
           </>
         )}
       </section>
