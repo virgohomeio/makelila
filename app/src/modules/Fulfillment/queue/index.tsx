@@ -19,6 +19,7 @@ type Order = {
   city: string;
   region_state: string | null;
   country: 'US' | 'CA';
+  placed_at: string | null;
 };
 
 export default function Queue() {
@@ -52,7 +53,7 @@ export default function Queue() {
     if (ids.length === 0) return;
     void supabase
       .from('orders')
-      .select('id, order_ref, customer_name, customer_email, city, region_state, country')
+      .select('id, order_ref, customer_name, customer_email, city, region_state, country, placed_at')
       .in('id', ids)
       .then(({ data }) => setOrders((data as Order[]) ?? []));
   }, [ready, fulfilled]);

@@ -61,6 +61,23 @@ export function orderUrgency(placed_at: string | null): {
   return { days, severity: 'ok', label: days === 0 ? 'today' : `${days}d` };
 }
 
+/** Due date for the 2-day order-confirmation SLA: placed_at + 2 days.
+ *  Severity is keyed off days-since-placement (not days-until-due) so the pill
+ *  turns yellow the moment the SLA is missed and red when >4 days have passed. */
+export function orderDue(placed_at: string | null): {
+  dueDate: Date | null;
+  dueLabel: string;
+  severity: UrgencySeverity;
+} {
+  if (!placed_at) return { dueDate: null, dueLabel: '—', severity: 'ok' };
+  const placed = new Date(placed_at); placed.setHours(0, 0, 0, 0);
+  const due = new Date(placed); due.setDate(due.getDate() + 2);
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const days = Math.max(0, Math.round((today.getTime() - placed.getTime()) / 86_400_000));
+  const severity: UrgencySeverity = days > 4 ? 'overdue' : days >= 3 ? 'urgent' : 'ok';
+  return { dueDate: due, dueLabel: due.toLocaleDateString(), severity };
+}
+
 const ACTION_TYPE: Record<Exclude<OrderStatus, 'pending'>, string> = {
   approved: 'order_approve',
   flagged:  'order_flag',

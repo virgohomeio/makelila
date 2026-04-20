@@ -151,6 +151,25 @@
 }
 .priorityBtnOn:hover { background: #fed7aa; }
 .priorityBtnOff:disabled, .priorityBtnOn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.headerRight {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.duePill {
+  padding: 5px 12px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  border: 1.5px solid transparent;
+  white-space: nowrap;
+}
+.due_ok      { background: #f0fff4; color: #276749; border-color: #9ae6b4; }
+.due_urgent  { background: #fffaf0; color: #975a16; border-color: #f6ad55; }
+.due_overdue { background: #fff5f5; color: #c53030; border-color: #fc8181; }
 .headerMeta {
   font-size: 11px;
   color: var(--color-ink-subtle);

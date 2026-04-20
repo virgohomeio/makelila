@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { setQueuePriority, type FulfillmentQueueRow } from '../../../lib/fulfillment';
+import { orderDue } from '../../../lib/orders';
 import styles from '../Fulfillment.module.css';
 
 export function QueueHeader({
@@ -7,8 +8,9 @@ export function QueueHeader({
   order,
 }: {
   row: FulfillmentQueueRow;
-  order: { order_ref: string; customer_name: string; city: string; region_state: string | null; country: 'US'|'CA' };
+  order: { order_ref: string; customer_name: string; city: string; region_state: string | null; country: 'US'|'CA'; placed_at: string | null };
 }) {
+  const due = orderDue(order.placed_at);
   const STEP_LABELS = ['', 'Assign', 'Test', 'Label', 'Dock', 'Email', 'Fulfilled'];
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -35,16 +37,26 @@ export function QueueHeader({
             {row.due_date && <> · Due {new Date(row.due_date).toLocaleDateString()}</>}
           </div>
         </div>
-        {!fulfilled && (
-          <button
-            className={row.priority ? styles.priorityBtnOn : styles.priorityBtnOff}
-            onClick={handleTogglePriority}
-            disabled={busy}
-            title="Sales: flag this order as priority so packers see it first"
-          >
-            {busy ? '…' : row.priority ? '⭐ Priority · clear' : '☆ Prioritize'}
-          </button>
-        )}
+        <div className={styles.headerRight}>
+          {due.dueDate && (
+            <span
+              className={`${styles.duePill} ${styles[`due_${due.severity}`]}`}
+              title="Order-confirmation SLA: placed date + 2 days"
+            >
+              Due: {due.dueLabel}
+            </span>
+          )}
+          {!fulfilled && (
+            <button
+              className={row.priority ? styles.priorityBtnOn : styles.priorityBtnOff}
+              onClick={handleTogglePriority}
+              disabled={busy}
+              title="Sales: flag this order as priority so packers see it first"
+            >
+              {busy ? '…' : row.priority ? '⭐ Priority · clear' : '☆ Prioritize'}
+            </button>
+          )}
+        </div>
       </div>
       {error && <div style={{ color: 'var(--color-error)', fontSize: 11, marginTop: 4 }}>{error}</div>}
       <div className={styles.progressBar} aria-label={`Step ${row.step} of 6 — ${STEP_LABELS[row.step]}`}>

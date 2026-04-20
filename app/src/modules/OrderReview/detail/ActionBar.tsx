@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import type { Order } from '../../../lib/orders';
+import { orderDue, type Order } from '../../../lib/orders';
 import styles from '../OrderReview.module.css';
 
 type ExpandedAction = 'flag' | 'hold' | 'info' | null;
 
 export function ActionBar({
+  order,
   onApprove,
   onFlag,
   onHold,
@@ -18,6 +19,7 @@ export function ActionBar({
   onNeedInfo: (note: string) => void;
   confirmReady?: boolean;
 }) {
+  const due = orderDue(order.placed_at);
   const [expanded, setExpanded] = useState<ExpandedAction>(null);
   const [reason, setReason] = useState('');
 
@@ -82,6 +84,14 @@ export function ActionBar({
       {!confirmReady && (
         <span style={{ fontSize: 10, color: 'var(--color-ink-faint)', marginLeft: 4 }}>
           Complete 3 criteria to enable Confirm
+        </span>
+      )}
+      {due.dueDate && (
+        <span
+          className={`${styles.duePill} ${styles[`due_${due.severity}`]}`}
+          title="Order-confirmation SLA: placed date + 2 days"
+        >
+          Due: {due.dueLabel}
         </span>
       )}
     </div>
