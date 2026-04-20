@@ -52,6 +52,24 @@ function verdictFor(addressLine: string | null | undefined): 'house' | 'apt' {
   return 'house';
 }
 
+function parseShippingFreight(order: ShopifyOrder): number {
+  const line = order.shipping_lines?.[0];
+  if (!line) return 0;
+  // Newer API: price_set.shop_money.amount (multi-currency aware)
+  const priceSetAmount = (line as { price_set?: { shop_money?: { amount?: string | null } } })
+    .price_set?.shop_money?.amount;
+  if (priceSetAmount) {
+    const n = Number(priceSetAmount);
+    if (Number.isFinite(n)) return n;
+  }
+  // Older API: flat price string
+  if (line.price) {
+    const n = Number(line.price);
+    if (Number.isFinite(n)) return n;
+  }
+  return 0;
+}
+
 function mapOrder(o: ShopifyOrder): MappedOrder | { error: string; order_ref: string } {
   const addr = o.shipping_address ?? null;
   const country = addr?.country_code;
@@ -65,7 +83,7 @@ function mapOrder(o: ShopifyOrder): MappedOrder | { error: string; order_ref: st
   const name = [o.customer?.first_name, o.customer?.last_name].filter(Boolean).join(' ') || (o.customer?.email ?? 'Unknown');
   const email = o.customer?.email ?? o.email ?? null;
   const phone = o.customer?.phone ?? o.phone ?? addr.phone ?? null;
-  const freight = Number(o.shipping_lines?.[0]?.price ?? '0') || 0;
+  const freight = parseShippingFreight(o);
   const total = Number(o.total_price ?? '0') || 0;
 
   return {

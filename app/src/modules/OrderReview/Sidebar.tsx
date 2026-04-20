@@ -37,12 +37,14 @@ export function Sidebar({
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return source;
-    return source.filter(o =>
-      o.customer_name.toLowerCase().includes(q) ||
-      o.order_ref.toLowerCase().includes(q) ||
-      (o.customer_email ?? '').toLowerCase().includes(q),
-    );
+    const filtered = !q
+      ? source
+      : source.filter(o =>
+          o.customer_name.toLowerCase().includes(q) ||
+          o.order_ref.toLowerCase().includes(q) ||
+          (o.customer_email ?? '').toLowerCase().includes(q),
+        );
+    return [...filtered].sort((a, b) => a.order_ref.localeCompare(b.order_ref));
   }, [source, query]);
 
   const tabs: Array<{ key: Tab; label: string; count: number }> = [

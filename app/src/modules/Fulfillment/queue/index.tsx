@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../../../lib/supabase';
-import { useFulfillmentQueue } from '../../../lib/fulfillment';
+import { useFulfillmentQueue, type FulfillmentQueueRow } from '../../../lib/fulfillment';
 import { QueueSidebar } from './QueueSidebar';
 import { QueueHeader } from './QueueHeader';
 import { StepAssign } from './StepAssign';
@@ -23,26 +23,34 @@ type Order = {
 
 export default function Queue() {
   const { ready, fulfilled, loading } = useFulfillmentQueue();
-  const rows = useMemo(() => [...ready, ...fulfilled], [ready, fulfilled]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [orders, setOrders] = useState<Order[]>([]);
-
-  // Fetch orders referenced by the queue rows (one-shot; orders rarely change once approved)
-  useEffect(() => {
-    if (rows.length === 0) return;
-    const ids = Array.from(new Set(rows.map(r => r.order_id)));
-    void supabase
-      .from('orders')
-      .select('id, order_ref, customer_name, customer_email, city, region_state, country')
-      .in('id', ids)
-      .then(({ data }) => setOrders((data as Order[]) ?? []));
-  }, [rows]);
 
   const orderLookup = useMemo(() => {
     const m = new Map<string, Order>();
     for (const o of orders) m.set(o.id, o);
     return m;
   }, [orders]);
+
+  const rows = useMemo(() => {
+    const byRef = (a: FulfillmentQueueRow, b: FulfillmentQueueRow) => {
+      const refA = orderLookup.get(a.order_id)?.order_ref ?? '';
+      const refB = orderLookup.get(b.order_id)?.order_ref ?? '';
+      return refA.localeCompare(refB);
+    };
+    return [...[...ready].sort(byRef), ...[...fulfilled].sort(byRef)];
+  }, [ready, fulfilled, orderLookup]);
+
+  // Fetch orders referenced by the queue rows (one-shot; orders rarely change once approved)
+  useEffect(() => {
+    const ids = Array.from(new Set([...ready, ...fulfilled].map(r => r.order_id)));
+    if (ids.length === 0) return;
+    void supabase
+      .from('orders')
+      .select('id, order_ref, customer_name, customer_email, city, region_state, country')
+      .in('id', ids)
+      .then(({ data }) => setOrders((data as Order[]) ?? []));
+  }, [ready, fulfilled]);
 
   // Default-select first row on load
   useEffect(() => {
