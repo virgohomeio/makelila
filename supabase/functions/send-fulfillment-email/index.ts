@@ -76,25 +76,36 @@ serve(async (req: Request) => {
     });
   }
 
-  if (order.country === 'US' && !q.starter_tracking_num) {
-    return new Response(JSON.stringify({ error: 'US orders require starter_tracking_num' }), {
-      status: 409, headers: { ...corsHeaders, 'content-type': 'application/json' },
-    });
+  const firstName = order.customer_name.split(' ')[0] ?? order.customer_name;
+
+  // Carrier-specific pre-filled tracking URL so the customer lands on their shipment.
+  function trackingUrl(carrier: string | null, tracking: string | null): string {
+    if (!tracking) return 'https://www.ups.com/track?loc=en_US';
+    switch (carrier) {
+      case 'UPS':          return `https://www.ups.com/track?tracknum=${encodeURIComponent(tracking)}`;
+      case 'FedEx':        return `https://www.fedex.com/fedextrack/?trknbr=${encodeURIComponent(tracking)}`;
+      case 'Purolator':    return `https://www.purolator.com/en/shipping/tracker?pin=${encodeURIComponent(tracking)}`;
+      case 'Canada Post':  return `https://www.canadapost-postescanada.ca/track-reperage/en#/search?searchFor=${encodeURIComponent(tracking)}`;
+      default:             return 'https://www.ups.com/track?loc=en_US';
+    }
   }
 
-  const firstName = order.customer_name.split(' ')[0] ?? order.customer_name;
-  const starterLine = order.country === 'US'
-    ? `\nStarter kit · ${q.carrier}: ${q.starter_tracking_num}`
-    : '';
   const text =
     `Hi ${firstName},\n\n` +
-    `Your LILA Pro is on the way. Here are your tracking details:\n\n` +
-    `LILA Pro · ${q.carrier}: ${q.tracking_num}` + starterLine + `\n\n` +
-    `Expected delivery in 3–7 business days.\n\n` +
-    `Questions? Just reply to this email.\n\n` +
-    `Thanks for your order —\n` +
-    `Team Lila\n` +
-    `support@lilacomposter.com`;
+    `Your LILA has officially shipped! 🎉 It's on its way to you. Here are your shipping details:\n\n` +
+    `Carrier: ${q.carrier ?? ''}\n\n` +
+    `Tracking Number: ${q.tracking_num ?? ''}\n\n` +
+    `Tracking Link: ${trackingUrl(q.carrier, q.tracking_num)}\n\n` +
+    `You can use the link above to check on your delivery progress at any time.\n\n` +
+    `Important next steps\n\n` +
+    `1. Mandatory onboarding session\n` +
+    `Once your unit arrives, you'll need to book a mandatory onboarding session before using LILA. This session is required to ensure your first batches produce high-quality compost, avoid common mistakes, and help you get the best results from day one.\n` +
+    `Book a session here: https://calendly.com/lila-ed.\n\n` +
+    `2. Please keep the original box\n` +
+    `Please do not throw out the original packaging for the first 30 days after delivery. In the rare event of shipping damage or if a return is required during our 30-day refund period, the unit must be returned in its original box.\n\n` +
+    `Thank you again for being part of the LILA community and supporting our mission to make composting effortless and sustainable. We can't wait to see the difference your LILA will make in your home.\n\n` +
+    `Happy Composting! 🌱\n` +
+    `-The VCycene Team`;
 
   // Send via Resend
   const resendRes = await fetch('https://api.resend.com/emails', {
@@ -104,10 +115,10 @@ serve(async (req: Request) => {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      from: 'Team Lila <support@lilacomposter.com>',
+      from: 'VCycene Team <support@lilacomposter.com>',
       reply_to: 'support@lilacomposter.com',
       to: [order.customer_email],
-      subject: `Your LILA Pro has shipped! (${order.order_ref})`,
+      subject: `Your LILA has officially shipped! 🎉 (${order.order_ref})`,
       text,
     }),
   });

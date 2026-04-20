@@ -1,8 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
-const { setStarterMock, sendEmailMock } = vi.hoisted(() => ({
-  setStarterMock: vi.fn(() => Promise.resolve()),
+const { sendEmailMock } = vi.hoisted(() => ({
   sendEmailMock: vi.fn(() => Promise.resolve({ email_id: 're_123' })),
 }));
 
@@ -10,7 +9,6 @@ vi.mock('../../../lib/fulfillment', async () => {
   const actual = await vi.importActual<typeof import('../../../lib/fulfillment')>('../../../lib/fulfillment');
   return {
     ...actual,
-    setStarterTracking: setStarterMock,
     sendFulfillmentEmail: sendEmailMock,
   };
 });
@@ -31,21 +29,30 @@ const rowBase: FulfillmentQueueRow = {
 
 const orderUS = { customer_name: 'Alice Ames', customer_email: 'a@ex.com', order_ref: '#1001', country: 'US' as const };
 const orderCA = { customer_name: 'Bob Boxer',  customer_email: 'b@ex.com', order_ref: '#1002', country: 'CA' as const };
+const orderNoEmail = { customer_name: 'Cory C',  customer_email: null,       order_ref: '#1003', country: 'CA' as const };
 
 describe('StepEmail', () => {
-  beforeEach(() => { setStarterMock.mockClear(); sendEmailMock.mockClear(); });
+  beforeEach(() => { sendEmailMock.mockClear(); });
 
-  it('US order: Send disabled until starter tracking is filled', () => {
+  it('Send enabled whenever customer_email is present (US order)', () => {
     render(<StepEmail row={rowBase} order={orderUS} />);
-    expect(screen.getByRole('button', { name: /send email/i })).toBeDisabled();
-    fireEvent.change(screen.getByPlaceholderText(/1Z.+starter/i), { target: { value: '1ZSTARTER' } });
     expect(screen.getByRole('button', { name: /send email/i })).toBeEnabled();
   });
 
-  it('CA order: no starter field shown; Send enabled right away', () => {
+  it('Send enabled whenever customer_email is present (CA order)', () => {
     render(<StepEmail row={rowBase} order={orderCA} />);
-    expect(screen.queryByPlaceholderText(/starter/i)).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /send email/i })).toBeEnabled();
+  });
+
+  it('Send disabled when customer_email is missing', () => {
+    render(<StepEmail row={rowBase} order={orderNoEmail} />);
+    expect(screen.getByRole('button', { name: /send email/i })).toBeDisabled();
+  });
+
+  it('Preview includes tracking link and Calendly onboarding URL', () => {
+    render(<StepEmail row={rowBase} order={orderCA} />);
+    expect(screen.getByText(/Your LILA has officially shipped/)).toBeInTheDocument();
+    expect(screen.getByText(/calendly\.com\/lila-ed/)).toBeInTheDocument();
   });
 
   it('Clicking Send calls sendFulfillmentEmail', async () => {
