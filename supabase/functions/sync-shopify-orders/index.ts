@@ -159,9 +159,13 @@ serve(async (req: Request) => {
     else mapped.push(result);
   }
 
-  // 3. Upsert via service-role client (bypasses RLS); ON CONFLICT DO NOTHING.
+  // 3. Insert new orders (ignore dupes), then refresh Shopify-sourced fields
+  //    (placed_at, freight_estimate_usd) on existing rows so historical syncs
+  //    that happened before placed_at was mapped get corrected. We never
+  //    overwrite internal fields like status/dispositioned_* here.
   const admin = createClient(supabaseUrl, serviceKey);
   let imported = 0;
+  let refreshed = 0;
   for (const m of mapped) {
     const { data, error } = await admin
       .from('orders')
@@ -171,14 +175,30 @@ serve(async (req: Request) => {
       skipped.push({ order_ref: m.order_ref, error: `db: ${error.message}` });
       continue;
     }
-    // data is the inserted rows (empty array if ignored as duplicate)
-    if (data && data.length > 0) imported++;
+    if (data && data.length > 0) {
+      imported++;
+      continue;
+    }
+    // Already existed — refresh Shopify source-of-truth fields
+    const { error: upErr } = await admin
+      .from('orders')
+      .update({
+        placed_at: m.placed_at,
+        freight_estimate_usd: m.freight_estimate_usd,
+      })
+      .eq('order_ref', m.order_ref);
+    if (upErr) {
+      skipped.push({ order_ref: m.order_ref, error: `refresh: ${upErr.message}` });
+      continue;
+    }
+    refreshed++;
   }
 
   return new Response(
     JSON.stringify({
       fetched: orders?.length ?? 0,
       imported,
+      refreshed,
       skipped: skipped.length,
       skippedDetails: skipped,
     }),
