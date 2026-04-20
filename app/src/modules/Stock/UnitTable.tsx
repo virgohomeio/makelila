@@ -41,10 +41,11 @@ export function UnitTable({ units }: { units: Unit[] }) {
           <tr>
             <th>Serial</th>
             <th>Batch</th>
+            <th>Color</th>
             <th>Status</th>
-            <th>Tested</th>
-            <th>Location / Customer</th>
-            <th>Tracking</th>
+            <th>Customer / Location</th>
+            <th>Shipped</th>
+            <th>Carrier</th>
             <th>Notes</th>
             <th></th>
           </tr>
@@ -54,10 +55,28 @@ export function UnitTable({ units }: { units: Unit[] }) {
             const statusVal = pending[u.serial] ?? u.status;
             const meta = STATUS_META[statusVal];
             const changed = statusVal !== u.status;
+            const shippedDate = u.shipped_at
+              ? new Date(u.shipped_at).toLocaleDateString('en-US', { year: '2-digit', month: 'short', day: 'numeric' })
+              : null;
+            // defect_reason takes precedence in the notes column when present —
+            // surfaces the "why did this come back" right where scrap/rework
+            // rows live.
+            const primaryNote = u.defect_reason ?? u.notes;
             return (
               <tr key={u.serial}>
                 <td className={styles.serial}>{u.serial}</td>
                 <td className={styles.batch}>{u.batch}</td>
+                <td>
+                  {u.color ? (
+                    <span className={styles.colorCell}>
+                      <span
+                        className={styles.colorSwatch}
+                        style={{ background: u.color === 'Black' ? '#1a1a1a' : '#f5f5f5', border: u.color === 'White' ? '1px solid #ccc' : 'none' }}
+                      />
+                      {u.color}
+                    </span>
+                  ) : <span className={styles.muted}>—</span>}
+                </td>
                 <td>
                   <select
                     value={statusVal}
@@ -78,19 +97,23 @@ export function UnitTable({ units }: { units: Unit[] }) {
                     ))}
                   </select>
                 </td>
-                <td>{u.tested ? '✓' : '—'}</td>
                 <td>
                   {u.customer_name
                     ? <span>{u.customer_name}{u.customer_order_ref ? ` · ${u.customer_order_ref}` : ''}</span>
                     : <span className={styles.muted}>{u.location ?? '—'}</span>}
                 </td>
-                <td className={styles.tracking}>
-                  {u.carrier && u.tracking_num
-                    ? <>{u.carrier} · {u.tracking_num}</>
-                    : <span className={styles.muted}>—</span>}
+                <td className={styles.shippedCell}>
+                  {shippedDate ?? <span className={styles.muted}>—</span>}
                 </td>
-                <td className={styles.notes} title={u.notes ?? ''}>
-                  {u.notes ?? <span className={styles.muted}>—</span>}
+                <td>
+                  {u.carrier ?? <span className={styles.muted}>—</span>}
+                </td>
+                <td className={styles.notes} title={primaryNote ?? ''}>
+                  {u.defect_reason ? (
+                    <span className={styles.defect}>⚠ {u.defect_reason}</span>
+                  ) : u.notes ? (
+                    u.notes
+                  ) : <span className={styles.muted}>—</span>}
                 </td>
                 <td>
                   {changed && (

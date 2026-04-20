@@ -29,7 +29,8 @@ export default function Stock() {
         u.serial.toLowerCase().includes(q) ||
         (u.customer_name?.toLowerCase().includes(q)) ||
         (u.customer_order_ref?.toLowerCase().includes(q)) ||
-        (u.tracking_num?.toLowerCase().includes(q))
+        (u.carrier?.toLowerCase().includes(q)) ||
+        (u.location?.toLowerCase().includes(q))
       )) return false;
       return true;
     });
@@ -84,7 +85,7 @@ export default function Stock() {
           type="search"
           value={search}
           onChange={e => setSearch(e.target.value)}
-          placeholder="Search serial, customer, tracking…"
+          placeholder="Search serial, customer, carrier, location…"
           className={styles.searchInput}
         />
 

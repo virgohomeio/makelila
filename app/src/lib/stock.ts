@@ -53,17 +53,20 @@ export type Batch = {
   created_at: string;
 };
 
+export type UnitColor = 'White' | 'Black';
+
 export type Unit = {
   serial: string;
   batch: string;
   status: UnitStatus;
-  tested: boolean;
+  color: UnitColor | null;
   location: string | null;
   customer_name: string | null;
   customer_order_ref: string | null;
   carrier: string | null;
-  tracking_num: string | null;
   firmware_version: string | null;
+  defect_reason: string | null;
+  shipped_at: string | null;
   notes: string | null;
   status_updated_at: string;
   status_updated_by: string | null;
@@ -206,7 +209,10 @@ export async function updateUnitStatus(
 
 export async function updateUnitFields(
   serial: string,
-  patch: Partial<Pick<Unit, 'location' | 'customer_name' | 'customer_order_ref' | 'carrier' | 'tracking_num' | 'firmware_version' | 'notes' | 'tested'>>,
+  patch: Partial<Pick<Unit,
+    'color' | 'location' | 'customer_name' | 'customer_order_ref' |
+    'carrier' | 'firmware_version' | 'defect_reason' | 'shipped_at' | 'notes'
+  >>,
 ): Promise<void> {
   await currentUserId();
   const { error } = await supabase.from('units').update(patch).eq('serial', serial);
