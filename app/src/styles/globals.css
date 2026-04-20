@@ -1,7 +1,18 @@
-/* LILA brand fonts: Inter for UI, Brolink for the LILA wordmark */
+/* LILA brand fonts: Inter for UI, Brolink DEMO for the LILA wordmark.
+   Brolink is self-hosted from /fonts/ so we don't depend on the
+   onlinewebfonts CDN (which silently returned CSS without the woff2
+   resolving reliably in-browser). */
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
-@import url('https://db.onlinewebfonts.com/c/34359bec84c16be942414f8200c904fb?family=Brolink+DEMO');
 @import './tokens.css';
+
+@font-face {
+  font-family: 'Brolink DEMO';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('../assets/fonts/brolink-demo.woff2') format('woff2'),
+       url('../assets/fonts/brolink-demo.woff') format('woff');
+}
 
 *, *::before, *::after {
   box-sizing: border-box;
