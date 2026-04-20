@@ -168,3 +168,73 @@
   cursor: pointer;
 }
 .confirmBtn:disabled { background: var(--color-border); color: var(--color-ink-faint); cursor: not-allowed; }
+
+.shelfLayout {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.shelfBar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 12px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+.shelfStats { font-size: 11px; color: var(--color-ink-subtle); }
+.shelfStats strong { color: var(--color-ink); font-weight: 700; }
+
+.skidGrid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 12px;
+}
+
+.skidCard {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 8px;
+  background: #fff;
+}
+.skidLabel {
+  font-size: 10px;
+  font-weight: 800;
+  color: var(--color-crimson);
+  margin-bottom: 6px;
+  letter-spacing: 0.5px;
+}
+.skidRowTop {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+  margin-bottom: 4px;
+}
+.skidRowBottom {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 4px;
+}
+.slot {
+  border: 1.5px solid var(--color-border);
+  border-radius: 3px;
+  padding: 4px;
+  text-align: center;
+  font-size: 9px;
+  cursor: grab;
+  user-select: none;
+  overflow: hidden;
+}
+.slot.portrait  { aspect-ratio: 4/6; }
+.slot.landscape { aspect-ratio: 6/4; }
+.slot.available { background: var(--color-success-bg); border-color: var(--color-success-border); color: var(--color-success); }
+.slot.reserved  { background: var(--color-warning-bg); border-color: var(--color-warning-border); color: var(--color-warning); }
+.slot.rework    { background: var(--color-error-bg); border-color: var(--color-error-border); color: var(--color-error); }
+.slot.empty     { background: transparent; border-style: dashed; color: var(--color-ink-faint); }
+.slot.dragging  { opacity: 0.3; }
+.slot.dropTarget { outline: 2px dashed var(--color-crimson); outline-offset: 2px; }
+
+.slotSerial { font-family: ui-monospace, monospace; font-weight: 700; font-size: 9px; }
+.slotBatch { font-size: 8px; opacity: 0.7; margin-top: 2px; }
