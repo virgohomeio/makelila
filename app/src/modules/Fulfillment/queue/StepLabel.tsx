@@ -30,6 +30,25 @@ export function StepLabel({ row }: { row: FulfillmentQueueRow }) {
     <div>
       <h3 style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>Attach the shipping label details</h3>
 
+      <div style={{
+        background: 'var(--color-info-bg)',
+        border: '1px solid var(--color-info-border)',
+        borderRadius: 'var(--radius-sm)',
+        padding: '8px 12px',
+        marginBottom: 12,
+        fontSize: 11,
+        color: 'var(--color-info)',
+      }}>
+        Generate the shipping label on{' '}
+        <a
+          href="https://live.freightcom.com/c/mNyRdnwfdBn2raBkyImG9lemXej03RJB/ship/new"
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{ fontWeight: 700, textDecoration: 'underline', color: 'var(--color-info)' }}
+        >Freightcom — New Shipment ↗</a>
+        {' '}· then paste the carrier + tracking number below and optionally upload the label PDF.
+      </div>
+
       <label style={{ display: 'block', fontSize: 11, color: 'var(--color-ink-subtle)', marginTop: 8 }}>
         Carrier:
       </label>
