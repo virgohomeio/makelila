@@ -20,6 +20,7 @@ type Order = {
   region_state: string | null;
   country: 'US' | 'CA';
   placed_at: string | null;
+  created_at: string;
 };
 
 export default function Queue() {
@@ -51,11 +52,16 @@ export default function Queue() {
   useEffect(() => {
     const ids = Array.from(new Set([...ready, ...fulfilled].map(r => r.order_id)));
     if (ids.length === 0) return;
+    // select('*') is tolerant of missing columns (placed_at may be unmigrated
+    // on some environments; we fall back to created_at for the Due pill).
     void supabase
       .from('orders')
-      .select('id, order_ref, customer_name, customer_email, city, region_state, country, placed_at')
+      .select('*')
       .in('id', ids)
-      .then(({ data }) => setOrders((data as Order[]) ?? []));
+      .then(({ data, error }) => {
+        if (error) { console.error('Queue orders fetch failed:', error); return; }
+        setOrders((data as Order[]) ?? []);
+      });
   }, [ready, fulfilled]);
 
   // Default-select first row on load

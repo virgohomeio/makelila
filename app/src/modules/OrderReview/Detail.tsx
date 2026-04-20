@@ -63,9 +63,10 @@ export function Detail({
       />
       <div className={styles.detailBody}>
         {(() => {
-          const u = orderUrgency(order.placed_at);
+          const basis = order.placed_at ?? order.created_at;
+          const u = orderUrgency(basis);
           if (!u.label) return null;
-          const placed = order.placed_at ? new Date(order.placed_at).toLocaleDateString() : '—';
+          const placed = basis ? new Date(basis).toLocaleDateString() : '—';
           return (
             <div className={`${styles.urgencyBanner} ${styles[u.severity]}`}>
               <strong>Placed {placed}</strong> · {u.days ?? '?'} day{u.days === 1 ? '' : 's'} ago · {u.label.includes('OVERDUE') ? 'OVERDUE' : u.label.includes('URGENT') ? 'URGENT — approve within 4 days' : 'OK — approve within 2 days (max 4)'}

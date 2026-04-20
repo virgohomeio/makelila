@@ -8,9 +8,9 @@ export function QueueHeader({
   order,
 }: {
   row: FulfillmentQueueRow;
-  order: { order_ref: string; customer_name: string; city: string; region_state: string | null; country: 'US'|'CA'; placed_at: string | null };
+  order: { order_ref: string; customer_name: string; city: string; region_state: string | null; country: 'US'|'CA'; placed_at: string | null; created_at: string };
 }) {
-  const due = orderDue(order.placed_at);
+  const due = orderDue(order.placed_at ?? order.created_at);
   const STEP_LABELS = ['', 'Assign', 'Test', 'Label', 'Dock', 'Email', 'Fulfilled'];
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);

@@ -19,7 +19,7 @@ export function ActionBar({
   onNeedInfo: (note: string) => void;
   confirmReady?: boolean;
 }) {
-  const due = orderDue(order.placed_at);
+  const due = orderDue(order.placed_at ?? order.created_at);
   const [expanded, setExpanded] = useState<ExpandedAction>(null);
   const [reason, setReason] = useState('');
 
