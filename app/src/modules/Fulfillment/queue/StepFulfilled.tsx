@@ -11,6 +11,15 @@ export function StepFulfilled({
   const fulfilledOn = row.fulfilled_at
     ? new Date(row.fulfilled_at).toLocaleString()
     : '—';
+  const serial = row.assigned_serial ?? '— not recorded —';
+  const lilaShipment = [row.carrier, row.tracking_num].filter(Boolean).join(' · ') || '—';
+  const starterKit = order.country === 'US'
+    ? `Amazon · ${row.starter_tracking_num ?? '—'}`
+    : 'Packed In';
+
+  const labelStyle = { color: 'var(--color-ink-subtle)' };
+  const valStyle = { fontFamily: 'ui-monospace, monospace' as const };
+
   return (
     <div>
       <div style={{
@@ -27,30 +36,26 @@ export function StepFulfilled({
           ✓ Fulfilled · {fulfilledOn}
         </strong>
         <span style={{ color: 'var(--color-success)', fontSize: 11 }}>
-          Email sent · Unit {row.assigned_serial}
+          Email sent · Unit {serial}
         </span>
       </div>
 
       <div style={{
         border: '1px solid var(--color-border)', borderRadius: 6, padding: 14, fontSize: 11,
-        display: 'grid', gridTemplateColumns: '120px 1fr', rowGap: 6, columnGap: 14,
+        display: 'grid', gridTemplateColumns: '140px 1fr', rowGap: 6, columnGap: 14,
       }}>
-        <span style={{ color: 'var(--color-ink-subtle)' }}>Customer</span>
+        <span style={labelStyle}>Customer</span>
         <span>{order.customer_name}</span>
-        <span style={{ color: 'var(--color-ink-subtle)' }}>Order ref</span>
-        <span style={{ fontFamily: 'ui-monospace, monospace' }}>{order.order_ref}</span>
-        <span style={{ color: 'var(--color-ink-subtle)' }}>Email</span>
+        <span style={labelStyle}>Order ref</span>
+        <span style={valStyle}>{order.order_ref}</span>
+        <span style={labelStyle}>Email</span>
         <span>{order.customer_email ?? '—'}</span>
-        <span style={{ color: 'var(--color-ink-subtle)' }}>Serial shipped</span>
-        <span style={{ fontFamily: 'ui-monospace, monospace' }}>{row.assigned_serial}</span>
-        <span style={{ color: 'var(--color-ink-subtle)' }}>{row.carrier}</span>
-        <span style={{ fontFamily: 'ui-monospace, monospace' }}>{row.tracking_num}</span>
-        {order.country === 'US' && (
-          <>
-            <span style={{ color: 'var(--color-ink-subtle)' }}>Starter kit</span>
-            <span style={{ fontFamily: 'ui-monospace, monospace' }}>{row.starter_tracking_num ?? '—'}</span>
-          </>
-        )}
+        <span style={labelStyle}>Serial shipped</span>
+        <span style={valStyle}>{serial}</span>
+        <span style={labelStyle}>LILA shipment</span>
+        <span style={valStyle}>{lilaShipment}</span>
+        <span style={labelStyle}>Starter kit</span>
+        <span style={order.country === 'CA' ? undefined : valStyle}>{starterKit}</span>
       </div>
 
       <div style={{ marginTop: 14, display: 'flex', gap: 10 }}>

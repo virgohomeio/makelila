@@ -170,6 +170,7 @@
 .due_ok      { background: #f0fff4; color: #276749; border-color: #9ae6b4; }
 .due_urgent  { background: #fffaf0; color: #975a16; border-color: #f6ad55; }
 .due_overdue { background: #fff5f5; color: #c53030; border-color: #fc8181; }
+.fulfilledPill { background: var(--color-success); color: #fff; border-color: var(--color-success); }
 
 .backBtn {
   background: #fff;

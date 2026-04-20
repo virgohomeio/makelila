@@ -329,15 +329,24 @@ export async function confirmLabel(
 
 /** Go back one step on a queue row (undo accidental advancement).
  *  Data already saved (test report, label, etc.) is preserved; only the step
- *  counter moves back so the corresponding step UI is shown again. */
+ *  counter moves back so the corresponding step UI is shown again. When
+ *  rewinding from step 6 (fulfilled), email_sent_at and fulfilled_at are
+ *  cleared so Send email can be retried without "email already sent" 409. */
 export async function goBackStep(queueId: string, currentStep: FulfillmentStep): Promise<void> {
   await currentUserId();
   if (currentStep <= 1) throw new Error('already at the first step');
-  if (currentStep >= 6) throw new Error('cannot rewind a fulfilled order');
+  if (currentStep > 6) throw new Error('invalid step');
   const prev = (currentStep - 1) as FulfillmentStep;
+  const update: Record<string, unknown> = { step: prev };
+  if (currentStep === 6) {
+    update.email_sent_at = null;
+    update.email_sent_by = null;
+    update.fulfilled_at = null;
+    update.fulfilled_by = null;
+  }
   const { error } = await supabase
     .from('fulfillment_queue')
-    .update({ step: prev })
+    .update(update)
     .eq('id', queueId);
   if (error) throw error;
   await logAction('fq_step_back', queueId, `Step ${currentStep} → ${prev}`);
