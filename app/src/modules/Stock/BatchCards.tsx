@@ -1,15 +1,15 @@
 import type { Batch, UnitStatus } from '../../lib/stock';
 import styles from './Stock.module.css';
 
-// Group the 10 statuses into 5 slices for the pie chart — enough to show
-// health at a glance without being noisy. Colors roughly align with the
-// status palette so the legend reads the same way across the app.
+// Pie slices map 1:1 or N:1 to status so each color is one concept and
+// the legend reads cleanly. Colors roughly follow the status palette.
 type Slice = { key: string; label: string; color: string; statuses: UnitStatus[] };
 const SLICES: Slice[] = [
   { key: 'preship',   label: 'Pre-ship',  color: '#9f7aea', statuses: ['in-production','inbound','cn-test','ca-test'] },
   { key: 'available', label: 'Available', color: '#48bb78', statuses: ['ready','reserved'] },
+  { key: 'rework',    label: 'Rework',    color: '#d69e2e', statuses: ['rework'] },
   { key: 'shipped',   label: 'Shipped',   color: '#4299e1', statuses: ['shipped'] },
-  { key: 'team',      label: 'Team/Test', color: '#d69e2e', statuses: ['team-test','rework'] },
+  { key: 'team',      label: 'Team Test', color: '#ed8936', statuses: ['team-test'] },
   { key: 'loss',      label: 'Loss',      color: '#e53e3e', statuses: ['scrap','lost'] },
 ];
 
@@ -75,25 +75,27 @@ function PieChart({ byKey, total, size = 54 }: { byKey: Record<string, number>; 
 }
 
 function StatsList({
-  total, preship, available, shipped, loss,
+  total, preship, available, rework, shipped, loss,
 }: {
   total: number;
-  preship: number;   // in-production + inbound + ca-test
-  available: number; // ready + reserved
+  preship: number;
+  available: number;
+  rework: number;
   shipped: number;
-  loss: number;      // scrap + lost
+  loss: number;
 }) {
-  // Sell-through: of the units that have actually arrived (i.e. excluding
-  // pre-ship stock still in China / on the boat), what % have shipped to
-  // customers. Signals how quickly we're burning down landed inventory.
+  // Sell-through is computed over *landed* units (exclude pre-ship so a
+  // batch still in production doesn't read 0/100 = 0%).
   const arrived = total - preship;
   const sellThroughPct = arrived > 0 ? Math.round((shipped / arrived) * 100) : 0;
-  // Loss rate over arrived units (scrap/lost only count once they're landed).
   const lossPct = arrived > 0 ? Math.round((loss / arrived) * 100) : 0;
   return (
     <div className={styles.statsCol}>
       <div className={styles.stat}><span>Total</span><strong>{total}</strong></div>
       <div className={styles.stat}><span>Ready</span><strong>{available}</strong></div>
+      {rework > 0 && (
+        <div className={styles.stat}><span>Rework</span><strong>{rework}</strong></div>
+      )}
       <div className={styles.stat}>
         <span>Shipped</span>
         <strong>{shipped}{arrived > 0 && <span className={styles.statPct}> · {sellThroughPct}%</span>}</strong>
@@ -180,6 +182,7 @@ export function BatchCards({
                   total={total}
                   preship={byKey.preship}
                   available={byKey.available}
+                  rework={byKey.rework}
                   shipped={byKey.shipped}
                   loss={byKey.loss}
                 />
@@ -238,6 +241,7 @@ function AllCard({
           total={total}
           preship={byKey.preship}
           available={byKey.available}
+          rework={byKey.rework}
           shipped={byKey.shipped}
           loss={byKey.loss}
         />
