@@ -4,8 +4,8 @@ import styles from '../Fulfillment.module.css';
 type DragHandlers = {
   onDragStart: (e: React.DragEvent, slot: ShelfSlot) => void;
   onDragEnd: (e: React.DragEvent) => void;
-  onDragOver: (e: React.DragEvent) => void;
-  onDragLeave: (e: React.DragEvent) => void;
+  onDragOver: (e: React.DragEvent, slot: ShelfSlot) => void;
+  onDragLeave: (e: React.DragEvent, slot: ShelfSlot) => void;
   onDrop: (e: React.DragEvent, slot: ShelfSlot) => void;
 };
 
@@ -38,8 +38,8 @@ export function Slot({
       draggable={draggable}
       onDragStart={e => handlers.onDragStart(e, slot)}
       onDragEnd={handlers.onDragEnd}
-      onDragOver={handlers.onDragOver}
-      onDragLeave={handlers.onDragLeave}
+      onDragOver={e => handlers.onDragOver(e, slot)}
+      onDragLeave={e => handlers.onDragLeave(e, slot)}
       onDrop={e => handlers.onDrop(e, slot)}
       title={slot.serial ? `${slot.serial} (${slot.skid} · ${slot.slot_index})` : `empty ${slot.skid} · ${slot.slot_index}`}
     >

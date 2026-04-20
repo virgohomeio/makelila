@@ -373,34 +373,21 @@ export async function sendFulfillmentEmail(queueId: string): Promise<{ email_id:
   return data;
 }
 
-/** Swap two shelf slots atomically (serial/batch/status). */
+/** Swap two shelf slots atomically via Postgres RPC.
+ *  The UNIQUE(serial) constraint on shelf_slots prevents a client-side two-UPDATE
+ *  approach (both slots would briefly share the same serial). The swap_shelf_slots
+ *  function runs a 3-step swap (clear A → move A→B → move B→A) in a single
+ *  transaction so failure rolls back atomically. */
 export async function swapSlots(
   a: { skid: string; slot_index: number },
   b: { skid: string; slot_index: number },
 ): Promise<void> {
   await currentUserId();
-  // Fetch both rows
-  const { data, error } = await supabase
-    .from('shelf_slots')
-    .select('*')
-    .or(`and(skid.eq.${a.skid},slot_index.eq.${a.slot_index}),and(skid.eq.${b.skid},slot_index.eq.${b.slot_index})`);
+  const { error } = await supabase.rpc('swap_shelf_slots', {
+    a_skid: a.skid, a_slot_index: a.slot_index,
+    b_skid: b.skid, b_slot_index: b.slot_index,
+  });
   if (error) throw error;
-  if (!data || data.length !== 2) throw new Error(`swapSlots: expected 2 rows, got ${data?.length ?? 0}`);
-
-  const rowA = data.find(r => r.skid === a.skid && r.slot_index === a.slot_index)!;
-  const rowB = data.find(r => r.skid === b.skid && r.slot_index === b.slot_index)!;
-
-  const now = new Date().toISOString();
-  const { error: errA } = await supabase
-    .from('shelf_slots')
-    .update({ serial: rowB.serial, batch: rowB.batch, status: rowB.status, updated_at: now })
-    .eq('skid', a.skid).eq('slot_index', a.slot_index);
-  if (errA) throw errA;
-  const { error: errB } = await supabase
-    .from('shelf_slots')
-    .update({ serial: rowA.serial, batch: rowA.batch, status: rowA.status, updated_at: now })
-    .eq('skid', b.skid).eq('slot_index', b.slot_index);
-  if (errB) throw errB;
 }
 
 /** UX checkpoint: logs that the current shelf layout was reviewed. */

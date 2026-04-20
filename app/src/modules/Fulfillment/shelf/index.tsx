@@ -49,10 +49,21 @@ export default function Shelf() {
     onDragStart: (e: React.DragEvent, slot: ShelfSlot) => {
       setSource({ skid: slot.skid, slot_index: slot.slot_index });
       e.dataTransfer.effectAllowed = 'move';
+      // Firefox requires setData to initiate a drag; Chrome is lenient but setting
+      // it is harmless. The payload is the source coordinates — we don't rely on
+      // reading it back (we use React state), but it must be non-empty for Firefox.
+      e.dataTransfer.setData('text/plain', `${slot.skid}:${slot.slot_index}`);
     },
     onDragEnd: () => { setSource(null); setTarget(null); },
-    onDragOver: (e: React.DragEvent) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; },
-    onDragLeave: () => { setTarget(null); },
+    onDragOver: (e: React.DragEvent, slot: ShelfSlot) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      setTarget({ skid: slot.skid, slot_index: slot.slot_index });
+    },
+    onDragLeave: (_e: React.DragEvent, slot: ShelfSlot) => {
+      // Only clear if we're leaving THIS target (dragover on a sibling will reset target to that one)
+      setTarget(prev => (prev && prev.skid === slot.skid && prev.slot_index === slot.slot_index ? null : prev));
+    },
     onDrop: async (e: React.DragEvent, slot: ShelfSlot) => {
       e.preventDefault();
       const from = source;
