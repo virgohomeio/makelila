@@ -19,9 +19,7 @@ export function GlobalNav() {
           alt="VCycene"
           className={styles.brandLogo}
         />
-        <span className={styles.brandWordmark}>
-          make <span className={styles.brandLila}>LILA</span>
-        </span>
+        <span className={styles.brandWordmark}>MAKE LILA</span>
       </div>
       {MODULES.map(m => (
         <NavLink

@@ -31,18 +31,11 @@
 }
 
 .brandWordmark {
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.3px;
-  color: #d7d7d7;
-}
-
-.brandLila {
   font-family: var(--font-logo);
-  font-size: 14px;
-  letter-spacing: 0.08em;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
   color: var(--color-crimson);
-  margin-left: 2px;
 }
 
 .item {

@@ -226,7 +226,7 @@ function AllCard({
       className={`${styles.batchCard} ${styles.batchCardAll} ${showAllActive ? styles.batchCardActive : ''}`}
     >
       <div className={styles.batchHead}>
-        <span className={styles.batchName}>All LILA Pros</span>
+        <span className={styles.batchName}>LILA PRO</span>
         <span className={styles.batchMfg}>{batches.length} batches</span>
       </div>
       <div className={styles.batchDate}>
