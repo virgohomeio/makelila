@@ -20,7 +20,7 @@ function ReworkCard({ rw, resolverName }: { rw: UnitRework; resolverName: string
       <div className={styles.reworkMeta}>
         <strong style={{ fontFamily: 'ui-monospace, monospace' }}>{rw.serial}</strong>
         {' · flagged by '}{rw.flagged_by_name}
-        {' · '}{new Date(rw.flagged_at).toLocaleString()}
+        {' · '}{new Date(rw.flagged_at).toLocaleString('en-US')}
       </div>
       <div className={styles.reworkBody}>{rw.issue}</div>
       <div className={styles.reworkRow}>

@@ -54,7 +54,7 @@ export function QueueHeader({
   };
 
   const fulfilledOn = row.fulfilled_at
-    ? new Date(row.fulfilled_at).toLocaleDateString()
+    ? new Date(row.fulfilled_at).toLocaleDateString('en-US')
     : '';
 
   return (
@@ -67,7 +67,7 @@ export function QueueHeader({
           </div>
           <div className={styles.headerMeta}>
             {order.order_ref} · {order.city}{order.region_state ? `, ${order.region_state}` : ''} · {order.country}
-            {row.due_date && <> · Due {new Date(row.due_date).toLocaleDateString()}</>}
+            {row.due_date && <> · Due {new Date(row.due_date).toLocaleDateString('en-US')}</>}
           </div>
         </div>
         <div className={styles.headerRight}>

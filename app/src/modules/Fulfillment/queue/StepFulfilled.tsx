@@ -9,7 +9,7 @@ export function StepFulfilled({
 }) {
   const handoffRef = `${row.id.slice(0, 8)}-${Math.floor(Date.now() / 1000).toString(36)}`;
   const fulfilledOn = row.fulfilled_at
-    ? new Date(row.fulfilled_at).toLocaleString()
+    ? new Date(row.fulfilled_at).toLocaleString('en-US')
     : '—';
   const serial = row.assigned_serial ?? '— not recorded —';
   const lilaShipment = [row.carrier, row.tracking_num].filter(Boolean).join(' · ') || '—';

@@ -158,7 +158,7 @@ export function BatchCards({
           const { total, byKey } = sliceTotals(counts);
           const isActive = activeBatch === b.id;
           const arrivedLabel = b.arrived_at
-            ? new Date(b.arrived_at).toLocaleDateString(undefined, { year: 'numeric', month: 'short' })
+            ? new Date(b.arrived_at).toLocaleDateString('en-US', { year: 'numeric', month: 'short' })
             : 'In production';
 
           return (
@@ -187,7 +187,7 @@ export function BatchCards({
 
               {b.unit_cost_usd !== null && (
                 <div className={styles.batchCost}>
-                  ${b.unit_cost_usd.toLocaleString()}/unit · {b.incoterm}
+                  ${b.unit_cost_usd.toLocaleString('en-US')}/unit · {b.incoterm}
                 </div>
               )}
             </button>
@@ -243,7 +243,7 @@ function AllCard({
         />
       </div>
       <div className={styles.batchCost}>
-        ${totalInvested.toLocaleString()} total invested
+        ${totalInvested.toLocaleString('en-US')} total invested
       </div>
     </button>
   );

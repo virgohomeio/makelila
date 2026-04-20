@@ -43,7 +43,7 @@ export default function ActivityLog() {
               gap: 10, fontSize: 11,
             }}>
               <div style={{ color: 'var(--color-ink-subtle)', fontFamily: 'monospace' }}>
-                {new Date(e.ts).toLocaleString()}
+                {new Date(e.ts).toLocaleString('en-US')}
               </div>
               <div style={{ fontWeight: 700, color: 'var(--color-ink)' }}>{e.type}</div>
               <div style={{ color: 'var(--color-ink)' }}>{e.entity}</div>

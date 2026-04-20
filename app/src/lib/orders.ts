@@ -75,7 +75,7 @@ export function orderDue(placed_at: string | null): {
   const today = new Date(); today.setHours(0, 0, 0, 0);
   const days = Math.max(0, Math.round((today.getTime() - placed.getTime()) / 86_400_000));
   const severity: UrgencySeverity = days > 4 ? 'overdue' : days >= 3 ? 'urgent' : 'ok';
-  return { dueDate: due, dueLabel: due.toLocaleDateString(), severity };
+  return { dueDate: due, dueLabel: due.toLocaleDateString('en-US'), severity };
 }
 
 const ACTION_TYPE: Record<Exclude<OrderStatus, 'pending'>, string> = {

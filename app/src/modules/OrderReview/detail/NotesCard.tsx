@@ -65,7 +65,7 @@ export function NotesCard({
                 <div className={styles.notesLogMeta}>
                   <strong>{n.author_name}</strong>
                   <span className={styles.notesLogTs}>
-                    {new Date(n.created_at).toLocaleString()}
+                    {new Date(n.created_at).toLocaleString('en-US')}
                   </span>
                 </div>
                 <div className={styles.notesLogBody}>{n.body}</div>
