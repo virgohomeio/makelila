@@ -1,4 +1,5 @@
 import type { Order } from '../../lib/orders';
+import { orderUrgency } from '../../lib/orders';
 import styles from './OrderReview.module.css';
 
 export function OrderRow({
@@ -28,6 +29,11 @@ export function OrderRow({
           <span className={`${styles.tag} ${styles.tagWarn}`}>{order.address_verdict}</span>
         )}
         {order.order_ref} · {order.city}
+        {(() => {
+          const u = orderUrgency(order.placed_at);
+          if (!u.label) return null;
+          return <span className={`${styles.urgencyChip} ${styles[u.severity]}`}>{u.label}</span>;
+        })()}
       </div>
     </div>
   );

@@ -50,6 +50,7 @@ const order: Order = {
   sales_confirmed_fit: false,
   dispositioned_by: null, dispositioned_at: null,
   created_at: '2026-04-17T00:00:00Z',
+  placed_at: '2026-04-19T00:00:00Z',
 };
 
 describe('Detail', () => {

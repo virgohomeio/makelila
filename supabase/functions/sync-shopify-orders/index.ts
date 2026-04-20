@@ -21,6 +21,7 @@ type ShopifyOrder = {
   name: string;                       // e.g. "#1113"
   email?: string | null;
   phone?: string | null;
+  created_at?: string | null;
   total_price?: string | null;
   shipping_lines?: Array<{ price?: string | null }>;
   shipping_address?: ShopifyAddress | null;
@@ -44,6 +45,7 @@ type MappedOrder = {
   freight_threshold_usd: number;
   total_usd: number;
   line_items: Array<{ sku: string; name: string; qty: number; price_usd: number }>;
+  placed_at: string | null;
 };
 
 function verdictFor(addressLine: string | null | undefined): 'house' | 'apt' {
@@ -107,6 +109,7 @@ function mapOrder(o: ShopifyOrder): MappedOrder | { error: string; order_ref: st
       qty: Number(li.quantity ?? 1) || 1,
       price_usd: Number(li.price ?? '0') || 0,
     })),
+    placed_at: o.created_at ?? null,
   };
 }
 

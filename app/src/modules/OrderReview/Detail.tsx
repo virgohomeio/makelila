@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
 import type { Order } from '../../lib/orders';
-import { disposition, needInfo, addOrderNote } from '../../lib/orders';
+import { disposition, needInfo, addOrderNote, orderUrgency } from '../../lib/orders';
 import { useAuth } from '../../lib/auth';
 import { CustomerCard } from './detail/CustomerCard';
 import { AddressCard }  from './detail/AddressCard';
@@ -62,6 +62,16 @@ export function Detail({
         onNeedInfo={(note) => wrap('Need-info logged', () => needInfo(order, note), 'Need info', note)}
       />
       <div className={styles.detailBody}>
+        {(() => {
+          const u = orderUrgency(order.placed_at);
+          if (!u.label) return null;
+          const placed = order.placed_at ? new Date(order.placed_at).toLocaleDateString() : '—';
+          return (
+            <div className={`${styles.urgencyBanner} ${styles[u.severity]}`}>
+              <strong>Placed {placed}</strong> · {u.days ?? '?'} day{u.days === 1 ? '' : 's'} ago · {u.label.includes('OVERDUE') ? 'OVERDUE' : u.label.includes('URGENT') ? 'URGENT — approve within 4 days' : 'OK — approve within 2 days (max 4)'}
+            </div>
+          );
+        })()}
         <ReadinessChecklist order={order} />
         <CustomerCard order={order} />
         <AddressCard order={order} />

@@ -42,7 +42,24 @@ export type Order = {
   dispositioned_by: string | null;
   dispositioned_at: string | null;
   created_at: string;
+  placed_at: string | null;
 };
+
+export type UrgencySeverity = 'ok' | 'urgent' | 'overdue';
+
+export function orderUrgency(placed_at: string | null): {
+  days: number | null;
+  severity: UrgencySeverity;
+  label: string;
+} {
+  if (!placed_at) return { days: null, severity: 'ok', label: '' };
+  const placed = new Date(placed_at); placed.setHours(0, 0, 0, 0);
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const days = Math.max(0, Math.round((today.getTime() - placed.getTime()) / 86_400_000));
+  if (days > 4)  return { days, severity: 'overdue', label: `${days}d OVERDUE` };
+  if (days >= 3) return { days, severity: 'urgent',  label: `${days}d URGENT` };
+  return { days, severity: 'ok', label: days === 0 ? 'today' : `${days}d` };
+}
 
 const ACTION_TYPE: Record<Exclude<OrderStatus, 'pending'>, string> = {
   approved: 'order_approve',
