@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { supabase } from '../../../lib/supabase';
 import { useFulfillmentQueue, type FulfillmentQueueRow } from '../../../lib/fulfillment';
+import type { OrderStatus } from '../../../lib/orders';
 import { QueueSidebar } from './QueueSidebar';
 import { QueueHeader } from './QueueHeader';
 import { StepAssign } from './StepAssign';
@@ -19,6 +21,7 @@ type Order = {
   city: string;
   region_state: string | null;
   country: 'US' | 'CA';
+  status: OrderStatus;
   placed_at: string | null;
   created_at: string;
 };
@@ -88,15 +91,55 @@ export default function Queue() {
         ) : (
           <>
             <QueueHeader row={selected} order={selectedOrder} />
-            {selected.step === 1 && <StepAssign row={selected} />}
-            {selected.step === 2 && <StepTest row={selected} />}
-            {selected.step === 3 && <StepLabel row={selected} country={selectedOrder.country} />}
-            {selected.step === 4 && <StepDock row={selected} />}
-            {selected.step === 5 && <StepEmail row={selected} order={selectedOrder} />}
-            {selected.step === 6 && <StepFulfilled row={selected} order={selectedOrder} />}
+            {selectedOrder.status !== 'approved' && selected.step < 6 ? (
+              <PauseBanner status={selectedOrder.status} orderId={selectedOrder.id} />
+            ) : (
+              <>
+                {selected.step === 1 && <StepAssign row={selected} />}
+                {selected.step === 2 && <StepTest row={selected} />}
+                {selected.step === 3 && <StepLabel row={selected} country={selectedOrder.country} />}
+                {selected.step === 4 && <StepDock row={selected} />}
+                {selected.step === 5 && <StepEmail row={selected} order={selectedOrder} />}
+                {selected.step === 6 && <StepFulfilled row={selected} order={selectedOrder} />}
+              </>
+            )}
           </>
         )}
       </section>
+    </div>
+  );
+}
+
+function PauseBanner({ status, orderId }: { status: OrderStatus; orderId: string }) {
+  const label = status === 'flagged' ? '⚑ Flagged' : status === 'held' ? '⏸ Held' : '• ' + status;
+  const copy = status === 'flagged'
+    ? 'This order was flagged after being confirmed. Fulfillment is paused until Order Review clears the flag or re-approves the order.'
+    : status === 'held'
+      ? 'This order is currently on hold. Fulfillment is paused until Order Review releases the hold.'
+      : 'This order is not in an approved state. Fulfillment is paused.';
+  return (
+    <div style={{
+      border: '1.5px solid var(--color-error-border)',
+      background: 'var(--color-error-bg)',
+      borderRadius: 8, padding: '16px 18px',
+    }}>
+      <div style={{
+        fontSize: 14, fontWeight: 700, color: 'var(--color-error)',
+        marginBottom: 8, letterSpacing: '0.3px',
+      }}>
+        {label.toUpperCase()} — FULFILLMENT PAUSED
+      </div>
+      <div style={{ fontSize: 13, color: 'var(--color-ink-muted)', lineHeight: 1.55, marginBottom: 12 }}>
+        {copy}
+      </div>
+      <Link
+        to={`/order-review/${orderId}`}
+        style={{
+          display: 'inline-block', background: '#fff', color: 'var(--color-crimson)',
+          border: '1.5px solid var(--color-crimson)', padding: '7px 16px',
+          borderRadius: 6, fontSize: 12, fontWeight: 600, textDecoration: 'none',
+        }}
+      >Open in Order Review →</Link>
     </div>
   );
 }

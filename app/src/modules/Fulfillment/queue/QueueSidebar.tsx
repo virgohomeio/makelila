@@ -1,4 +1,5 @@
 import type { FulfillmentQueueRow } from '../../../lib/fulfillment';
+import type { OrderStatus } from '../../../lib/orders';
 import styles from '../Fulfillment.module.css';
 
 /** Parse a "YYYY-MM-DD" due-date as a LOCAL calendar date (not UTC midnight).
@@ -41,7 +42,7 @@ export function QueueSidebar({
   onSelect,
 }: {
   rows: FulfillmentQueueRow[];
-  orderLookup: Map<string, { order_ref: string; customer_name: string; city: string; country: 'US'|'CA' }>;
+  orderLookup: Map<string, { order_ref: string; customer_name: string; city: string; country: 'US'|'CA'; status?: OrderStatus }>;
   selectedId: string | null;
   onSelect: (id: string) => void;
 }) {
@@ -54,13 +55,18 @@ export function QueueSidebar({
         const o = orderLookup.get(r.order_id);
         const fulfilled = r.step === 6;
         const overdue = !fulfilled && r.due_date && new Date(r.due_date) < new Date(new Date().setHours(0,0,0,0));
+        const paused = !fulfilled && o?.status && o.status !== 'approved';
         const cls = [
           styles.queueRow,
           r.id === selectedId ? styles.selected : '',
           overdue ? styles.overdue : '',
           fulfilled ? styles.fulfilled : '',
           r.priority && !fulfilled ? styles.priority : '',
+          paused ? styles.paused : '',
         ].filter(Boolean).join(' ');
+        const pauseBadge = paused
+          ? (o?.status === 'flagged' ? '⚑ FLAGGED' : o?.status === 'held' ? '⏸ HELD' : '• PAUSED')
+          : null;
         return (
           <div key={r.id} className={cls} onClick={() => onSelect(r.id)} role="button" tabIndex={0}>
             <div className={styles.rowName}>
@@ -71,9 +77,13 @@ export function QueueSidebar({
             <div className={styles.rowMeta}>
               {o?.order_ref ?? '—'} · {o?.city ?? ''} · {o?.country ?? ''}
             </div>
-            <div className={dueClass(r.due_date, fulfilled)}>
-              {dueLabel(r.due_date, fulfilled)}
-            </div>
+            {pauseBadge ? (
+              <div className={styles.pauseBadge}>{pauseBadge}</div>
+            ) : (
+              <div className={dueClass(r.due_date, fulfilled)}>
+                {dueLabel(r.due_date, fulfilled)}
+              </div>
+            )}
           </div>
         );
       })}

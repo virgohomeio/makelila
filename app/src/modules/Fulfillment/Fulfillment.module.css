@@ -81,6 +81,22 @@
 .queueRow.priority:hover { background: linear-gradient(90deg, #4a360f 0%, #2a2a2a 60%); }
 .queueRow.priority.selected { background: #3a1a1a; border-left: 3px solid var(--color-crimson); }
 
+.queueRow.paused {
+  background: linear-gradient(90deg, #3a1818 0%, #1f1818 70%);
+  border-left: 3px solid var(--color-error-strong);
+  padding-left: 11px;
+}
+.queueRow.paused:hover { background: linear-gradient(90deg, #4a1e1e 0%, #2a1e1e 70%); }
+.queueRow.paused.selected { background: #4a1010; }
+
+.pauseBadge {
+  font-size: 9px;
+  font-weight: 800;
+  margin-top: 3px;
+  letter-spacing: 0.5px;
+  color: #fc8181;
+}
+
 .priorityBadge {
   display: inline-block;
   margin-right: 4px;
