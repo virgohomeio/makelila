@@ -1,4 +1,7 @@
 import { useMemo } from 'react';
+import { MapContainer, TileLayer, CircleMarker, Polyline, Popup, Marker } from 'react-leaflet';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 import { useUnits, type Unit } from '../../lib/stock';
 import styles from './PostShipment.module.css';
 
@@ -157,70 +160,101 @@ function RegionBar({ list, total }: { list: { code: string; country: 'CA' | 'US'
 }
 
 // ============================================================================
-// Region map — simplified North America with rough province/state coords.
-// Not cartographically accurate; intent is "where are units going" at a glance.
+// Region map — Leaflet + OpenStreetMap tiles. Province/state centroid
+// lookup gives us real lat/lng so we can render proper geographic markers
+// scaled by shipment count, with dashed great-circle lines from Markham.
 // ============================================================================
-const REGION_XY: Record<string, [number, number]> = {
+
+// Approximate province / state centroid lat/lng. Good enough for "ship
+// destinations are spread roughly here" visualization without bringing in
+// a topojson dependency.
+const REGION_LATLNG: Record<string, [number, number]> = {
   // Canadian provinces
-  'BC': [120, 95],  'AB': [180, 110], 'SK': [220, 115], 'MB': [260, 120],
-  'ON': [340, 145], 'QC': [400, 130], 'NB': [445, 145], 'NS': [465, 155],
-  'PE': [460, 145], 'NL': [490, 110], 'YT': [110, 50],  'NT': [180, 50],  'NU': [280, 60],
-  // US states (approximate)
-  'CA': [110, 220], 'NV': [130, 215], 'OR': [120, 175], 'WA': [125, 145],
-  'AZ': [165, 245], 'UT': [165, 215], 'CO': [205, 220], 'NM': [205, 250],
-  'TX': [240, 280], 'OK': [240, 250], 'KS': [240, 220], 'NE': [240, 195],
-  'SD': [240, 175], 'ND': [235, 150], 'MN': [275, 165], 'IA': [285, 200],
-  'MO': [290, 230], 'AR': [295, 260], 'LA': [305, 290], 'MS': [320, 280],
-  'AL': [340, 275], 'GA': [365, 270], 'FL': [380, 305], 'SC': [380, 255],
-  'NC': [385, 235], 'TN': [330, 245], 'KY': [340, 225], 'IN': [325, 210],
-  'IL': [310, 210], 'WI': [305, 180], 'MI': [340, 185], 'OH': [355, 210],
-  'WV': [375, 220], 'VA': [395, 230], 'PA': [400, 200], 'NY': [415, 180],
-  'NJ': [425, 200], 'CT': [435, 190], 'RI': [445, 188], 'MA': [445, 178],
-  'NH': [445, 165], 'VT': [435, 165], 'ME': [460, 150], 'MD': [410, 220],
-  'DE': [420, 215], 'DC': [410, 222], 'HI': [80, 320], 'AK': [50, 80],
-  'ID': [155, 175], 'MT': [180, 145], 'WY': [205, 175],
+  'BC': [54.0, -125.0], 'AB': [55.0, -115.0], 'SK': [55.0, -106.0], 'MB': [55.0,  -98.0],
+  'ON': [50.0,  -85.0], 'QC': [52.0,  -71.5], 'NB': [46.5,  -66.5], 'NS': [45.0,  -63.0],
+  'PE': [46.4,  -63.2], 'NL': [53.0,  -60.0], 'YT': [64.0, -135.0], 'NT': [65.0, -120.0], 'NU': [70.0,  -90.0],
+  // US states (approx centroids)
+  'AL': [32.8, -86.8],  'AK': [64.2, -149.5], 'AZ': [34.5, -111.7], 'AR': [34.9, -92.4],
+  'CA': [37.2, -119.7], 'CO': [39.1, -105.5], 'CT': [41.6, -72.7],  'DE': [38.9, -75.5],
+  'FL': [28.6, -82.5],  'GA': [32.7, -83.4],  'HI': [20.7, -156.5], 'ID': [44.4, -114.6],
+  'IL': [40.0, -89.2],  'IN': [39.9, -86.3],  'IA': [42.1, -93.2],  'KS': [38.5, -98.4],
+  'KY': [37.5, -85.3],  'LA': [31.1, -91.9],
+  'ME': [45.4, -69.2],  'MD': [39.0, -76.7],  'MA': [42.3, -71.8],  'MI': [44.3, -85.4],
+  'MN': [46.3, -94.3],  'MS': [32.7, -89.7],  'MO': [38.4, -92.5],  'MT': [47.0, -109.6],
+  'NE': [41.5, -99.8],  'NV': [38.5, -116.6], 'NH': [43.7, -71.6],  'NJ': [40.2, -74.5],
+  'NM': [34.4, -106.1], 'NY': [42.9, -75.6],  'NC': [35.6, -79.4],  'ND': [47.5, -100.3],
+  'OH': [40.3, -82.8],  'OK': [35.6, -97.5],  'OR': [44.0, -120.6], 'PA': [40.9, -77.8],
+  'RI': [41.7, -71.6],  'SC': [33.9, -80.9],  'SD': [44.4, -100.2], 'TN': [35.9, -86.4],
+  'TX': [31.5, -99.3],  'UT': [39.3, -111.7], 'VT': [44.1, -72.7],  'VA': [37.5, -78.9],
+  'WA': [47.4, -120.4], 'WV': [38.6, -80.6],  'WI': [44.5, -89.6],  'WY': [43.0, -107.5],
+  'DC': [38.9, -77.0],
 };
-const ORIGIN_XY: [number, number] = [340, 145]; // Markham, ON
+
+const ORIGIN_LATLNG: [number, number] = [43.8561, -79.3370]; // Markham, ON
+
+const ORIGIN_ICON = L.divIcon({
+  className: 'lila-origin-marker',
+  html: `<div style="background:#CC2D30;color:#fff;border:2px solid #fff;border-radius:50%;width:18px;height:18px;box-shadow:0 0 0 2px #CC2D30;"></div>`,
+  iconSize: [18, 18],
+  iconAnchor: [9, 9],
+});
 
 function RegionMap({ regions }: { regions: { code: string; country: 'CA' | 'US' | '??'; count: number }[] }) {
   const maxCount = Math.max(1, ...regions.map(r => r.count));
+
   return (
     <div className={styles.card}>
       <div className={styles.cardHead}>Delivery Map (Markham → destinations)</div>
-      <div className={styles.cardBody}>
-        <svg viewBox="0 0 540 360" className={styles.mapSvg}>
-          {/* Background frame */}
-          <rect x="0" y="0" width="540" height="360" fill="#f5f1eb" rx="6" />
-          {/* Origin */}
-          <circle cx={ORIGIN_XY[0]} cy={ORIGIN_XY[1]} r="6" fill="#CC2D30" stroke="#fff" strokeWidth="2" />
-          <text x={ORIGIN_XY[0] + 8} y={ORIGIN_XY[1] - 8} fontSize="9" fill="#2C2A25" fontWeight="700">Markham, ON</text>
-
+      <div className={styles.cardBody} style={{ padding: 0 }}>
+        <MapContainer
+          center={[42, -95]}
+          zoom={3}
+          scrollWheelZoom={false}
+          style={{ height: 380, width: '100%' }}
+        >
+          <TileLayer
+            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          />
+          <Marker position={ORIGIN_LATLNG} icon={ORIGIN_ICON}>
+            <Popup>Markham, ON · Origin</Popup>
+          </Marker>
           {regions.map(r => {
-            const xy = REGION_XY[r.code];
-            if (!xy) return null;
-            const [x, y] = xy;
-            if (x === ORIGIN_XY[0] && y === ORIGIN_XY[1]) {
-              // Origin region itself — don't draw a line to itself, just emphasize origin marker
-              return null;
-            }
-            const radius = 3 + Math.round((r.count / maxCount) * 7);
+            const ll = REGION_LATLNG[r.code];
+            if (!ll) return null;
+            const radius = 5 + Math.round((r.count / maxCount) * 14);
             const color = r.country === 'CA' ? '#CC2D30' : '#3C3B6E';
             return (
-              <g key={r.code}>
-                <line
-                  x1={ORIGIN_XY[0]} y1={ORIGIN_XY[1]} x2={x} y2={y}
-                  stroke={color} strokeWidth="0.5" strokeDasharray="2 2" opacity="0.4"
-                />
-                <circle cx={x} cy={y} r={radius} fill={color} opacity="0.85" />
-                <text x={x + radius + 2} y={y + 3} fontSize="8" fill="#2C2A25">{r.code} · {r.count}</text>
-              </g>
+              <CircleMarker
+                key={r.code}
+                center={ll}
+                radius={radius}
+                pathOptions={{ color, fillColor: color, fillOpacity: 0.55, weight: 1 }}
+              >
+                <Popup>
+                  <strong>{r.code}</strong> · {r.country}<br />
+                  {r.count} shipment{r.count === 1 ? '' : 's'}
+                </Popup>
+              </CircleMarker>
             );
           })}
-        </svg>
+          {regions.map(r => {
+            const ll = REGION_LATLNG[r.code];
+            if (!ll) return null;
+            const color = r.country === 'CA' ? '#CC2D30' : '#3C3B6E';
+            return (
+              <Polyline
+                key={`line-${r.code}`}
+                positions={[ORIGIN_LATLNG, ll]}
+                pathOptions={{ color, weight: 1, opacity: 0.35, dashArray: '4 4' }}
+              />
+            );
+          })}
+        </MapContainer>
         <div className={styles.mapLegend}>
           <span><span className={styles.legendDot} style={{ background: '#CC2D30' }} /> Canada</span>
           <span><span className={styles.legendDot} style={{ background: '#3C3B6E' }} /> US</span>
-          <span className={styles.muted}>· marker size ∝ shipment count</span>
+          <span className={styles.muted}>· marker size ∝ shipment count · click for details</span>
         </div>
       </div>
     </div>
