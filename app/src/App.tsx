@@ -5,6 +5,7 @@ import OrderReview from './modules/OrderReview';
 import Fulfillment from './modules/Fulfillment';
 import PostShipment from './modules/PostShipment';
 import Stock from './modules/Stock';
+import Customers from './modules/Customers';
 import ActivityLog from './modules/ActivityLog';
 import Login from './modules/Login';
 
@@ -29,6 +30,7 @@ export default function App() {
             <Route path="fulfillment/:tab"  element={<Fulfillment />} />
             <Route path="post-shipment" element={<PostShipment />} />
             <Route path="stock"         element={<Stock />} />
+            <Route path="customers"     element={<Customers />} />
             <Route path="activity-log"  element={<ActivityLog />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />

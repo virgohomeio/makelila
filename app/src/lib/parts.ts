@@ -136,6 +136,7 @@ export async function adjustPartStock(partId: string, delta: number, reason: str
 export async function recordPartShipment(input: {
   part_id: string;
   quantity: number;
+  customer_id?: string;
   customer_name?: string;
   linked_unit_serial?: string;
   linked_order_ref?: string;
@@ -149,5 +150,5 @@ export async function recordPartShipment(input: {
     shipped_at: input.shipped_at ?? new Date().toISOString(),
   });
   if (error) throw error;
-  await logAction('part_ship', input.part_id, `${input.quantity}× to ${input.customer_name ?? 'unknown'}`);
+  await logAction('part_ship', input.part_id, `${input.quantity}× to ${input.customer_name ?? input.customer_id ?? 'unknown'}`);
 }

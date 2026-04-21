@@ -428,3 +428,9 @@ verify_jwt = false
 [functions.send-fulfillment-email]
 verify_jwt = false
 
+# sync-hubspot-customers: same ES256 gateway workaround. Function uses the
+# service-role key internally and HUBSPOT_ACCESS_TOKEN for outbound calls,
+# so caller identity isn't needed for correctness.
+[functions.sync-hubspot-customers]
+verify_jwt = false
+

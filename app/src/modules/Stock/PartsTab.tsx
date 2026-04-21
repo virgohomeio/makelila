@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react';
 import {
-  useParts, usePartShipments, adjustPartStock,
+  useParts, usePartShipments, adjustPartStock, recordPartShipment,
   type Part, type PartCategory,
 } from '../../lib/parts';
+import { useCustomers, type Customer } from '../../lib/customers';
 import styles from './Stock.module.css';
 
 type CatFilter = 'all' | PartCategory;
@@ -10,9 +11,11 @@ type CatFilter = 'all' | PartCategory;
 export function PartsTab() {
   const { parts, loading: pLoading } = useParts();
   const { shipments, loading: sLoading } = usePartShipments();
+  const { customers, loading: cLoading } = useCustomers();
   const [catFilter, setCatFilter] = useState<CatFilter>('all');
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [shipForPartId, setShipForPartId] = useState<string | null>(null);
 
   const filtered = useMemo(
     () => catFilter === 'all' ? parts : parts.filter(p => p.category === catFilter),
@@ -58,7 +61,9 @@ export function PartsTab() {
     finally { setBusy(null); }
   };
 
-  if (pLoading || sLoading) return <div className={styles.loading}>Loading parts…</div>;
+  if (pLoading || sLoading || cLoading) return <div className={styles.loading}>Loading parts…</div>;
+
+  const shipForPart = shipForPartId ? parts.find(p => p.id === shipForPartId) ?? null : null;
 
   return (
     <div className={styles.stockLayout}>
@@ -123,25 +128,33 @@ export function PartsTab() {
                   </td>
                   <td className={styles.numCol}>{shipCountByPart.get(p.id) ?? 0}</td>
                   <td>
-                    {p.category === 'replacement' && (
-                      <span className={styles.adjustGroup}>
-                        <button
-                          className={styles.adjustBtn}
-                          onClick={() => void adjust(p, -1, 'manual decrement')}
-                          disabled={busy === p.id || p.on_hand === 0}
-                        >−1</button>
-                        <button
-                          className={styles.adjustBtn}
-                          onClick={() => void adjust(p, +1, 'manual increment')}
-                          disabled={busy === p.id}
-                        >+1</button>
-                        <button
-                          className={styles.adjustBtn}
-                          onClick={() => void adjust(p, +10, 'restock')}
-                          disabled={busy === p.id}
-                        >+10</button>
-                      </span>
-                    )}
+                    <span className={styles.adjustGroup}>
+                      {p.category === 'replacement' && (
+                        <>
+                          <button
+                            className={styles.adjustBtn}
+                            onClick={() => void adjust(p, -1, 'manual decrement')}
+                            disabled={busy === p.id || p.on_hand === 0}
+                          >−1</button>
+                          <button
+                            className={styles.adjustBtn}
+                            onClick={() => void adjust(p, +1, 'manual increment')}
+                            disabled={busy === p.id}
+                          >+1</button>
+                          <button
+                            className={styles.adjustBtn}
+                            onClick={() => void adjust(p, +10, 'restock')}
+                            disabled={busy === p.id}
+                          >+10</button>
+                        </>
+                      )}
+                      <button
+                        className={styles.shipBtn}
+                        onClick={() => setShipForPartId(p.id)}
+                        disabled={busy === p.id || (p.category === 'replacement' && p.on_hand === 0)}
+                        title="Create part shipment to a customer"
+                      >📦 Ship</button>
+                    </span>
                   </td>
                   <td className={styles.notes} title={p.notes ?? ''}>
                     {p.notes ?? <span className={styles.muted}>—</span>}
@@ -195,6 +208,188 @@ export function PartsTab() {
             )}
           </tbody>
         </table>
+      </div>
+
+      {shipForPart && (
+        <ShipPartModal
+          part={shipForPart}
+          customers={customers}
+          onClose={() => setShipForPartId(null)}
+          onSubmit={async (input) => {
+            setBusy(shipForPart.id); setError(null);
+            try {
+              await recordPartShipment(input);
+              setShipForPartId(null);
+            } catch (e) {
+              setError((e as Error).message);
+            } finally {
+              setBusy(null);
+            }
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function ShipPartModal({
+  part, customers, onClose, onSubmit,
+}: {
+  part: Part;
+  customers: Customer[];
+  onClose: () => void;
+  onSubmit: (input: {
+    part_id: string; quantity: number; customer_id?: string; customer_name?: string;
+    linked_unit_serial?: string; carrier?: string; tracking_num?: string; notes?: string;
+  }) => Promise<void>;
+}) {
+  const [customerSearch, setCustomerSearch] = useState('');
+  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
+  const [quantity, setQuantity] = useState(1);
+  const [linkedUnit, setLinkedUnit] = useState('');
+  const [carrier, setCarrier] = useState('UPS');
+  const [tracking, setTracking] = useState('');
+  const [notes, setNotes] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  const candidates = useMemo(() => {
+    const q = customerSearch.trim().toLowerCase();
+    if (!q) return [];
+    return customers.filter(c =>
+      c.full_name.toLowerCase().includes(q) ||
+      c.email?.toLowerCase().includes(q) ||
+      c.phone?.toLowerCase().includes(q),
+    ).slice(0, 8);
+  }, [customers, customerSearch]);
+
+  const submit = async () => {
+    if (!selectedCustomer && !customerSearch.trim()) return;
+    setSubmitting(true);
+    try {
+      await onSubmit({
+        part_id: part.id,
+        quantity,
+        customer_id: selectedCustomer?.id,
+        customer_name: selectedCustomer?.full_name ?? customerSearch.trim(),
+        linked_unit_serial: linkedUnit.trim() || undefined,
+        carrier: carrier || undefined,
+        tracking_num: tracking.trim() || undefined,
+        notes: notes.trim() || undefined,
+      });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className={styles.modalBackdrop} onClick={onClose}>
+      <div className={styles.modalCard} onClick={e => e.stopPropagation()}>
+        <div className={styles.modalHead}>
+          <strong>Ship part: {part.name}</strong>
+          <button onClick={onClose} className={styles.modalClose}>✕</button>
+        </div>
+        <div className={styles.modalBody}>
+          <div className={styles.modalRow}>
+            <label>Customer</label>
+            {selectedCustomer ? (
+              <div className={styles.modalSelected}>
+                <strong>{selectedCustomer.full_name}</strong>
+                <span className={styles.muted}>
+                  {[selectedCustomer.email, selectedCustomer.city, selectedCustomer.region]
+                    .filter(Boolean).join(' · ')}
+                </span>
+                <button
+                  className={styles.modalLinkBtn}
+                  onClick={() => { setSelectedCustomer(null); setCustomerSearch(''); }}
+                >change</button>
+              </div>
+            ) : (
+              <div className={styles.modalPicker}>
+                <input
+                  type="text"
+                  value={customerSearch}
+                  onChange={e => setCustomerSearch(e.target.value)}
+                  placeholder="Type a name / email — or freeform if not in HubSpot"
+                  className={styles.modalInput}
+                  autoFocus
+                />
+                {candidates.length > 0 && (
+                  <div className={styles.modalDropdown}>
+                    {candidates.map(c => (
+                      <button
+                        key={c.id}
+                        type="button"
+                        onClick={() => setSelectedCustomer(c)}
+                        className={styles.modalDropItem}
+                      >
+                        <strong>{c.full_name}</strong>
+                        <span className={styles.muted}>{c.email ?? '—'}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+          <div className={styles.modalGrid}>
+            <div className={styles.modalRow}>
+              <label>Quantity</label>
+              <input
+                type="number" min={1} max={part.category === 'replacement' ? part.on_hand : 999}
+                value={quantity}
+                onChange={e => setQuantity(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                className={styles.modalInput}
+              />
+            </div>
+            <div className={styles.modalRow}>
+              <label>Carrier</label>
+              <select value={carrier} onChange={e => setCarrier(e.target.value)} className={styles.modalInput}>
+                <option>UPS</option>
+                <option>FedEx</option>
+                <option>Canpar</option>
+                <option>Purolator</option>
+                <option>Canada Post</option>
+                <option>USPS</option>
+                <option>Other</option>
+              </select>
+            </div>
+            <div className={styles.modalRow}>
+              <label>Tracking #</label>
+              <input
+                type="text" value={tracking} onChange={e => setTracking(e.target.value)}
+                placeholder="Optional"
+                className={styles.modalInput}
+              />
+            </div>
+            <div className={styles.modalRow}>
+              <label>Linked LILA serial</label>
+              <input
+                type="text" value={linkedUnit} onChange={e => setLinkedUnit(e.target.value)}
+                placeholder="LL01-… (optional)"
+                className={styles.modalInput}
+              />
+            </div>
+          </div>
+          <div className={styles.modalRow}>
+            <label>Notes</label>
+            <textarea
+              value={notes} onChange={e => setNotes(e.target.value)}
+              placeholder="Why this shipment? Any context for the warehouse."
+              className={styles.modalTextarea}
+              rows={2}
+            />
+          </div>
+        </div>
+        <div className={styles.modalFoot}>
+          <button onClick={onClose} className={styles.modalSecondary}>Cancel</button>
+          <button
+            onClick={() => void submit()}
+            className={styles.modalPrimary}
+            disabled={submitting || (!selectedCustomer && !customerSearch.trim())}
+          >
+            {submitting ? 'Shipping…' : `Ship ${quantity} × ${part.sku}`}
+          </button>
+        </div>
       </div>
     </div>
   );

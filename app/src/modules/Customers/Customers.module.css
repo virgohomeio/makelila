@@ -1,0 +1,190 @@
+.layout {
+  background: #fff;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  overflow: hidden;
+  min-height: calc(100vh - 200px);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.title {
+  font-family: var(--font-logo);
+  font-size: 22px;
+  letter-spacing: 0.05em;
+  color: var(--color-crimson);
+  margin: 0;
+}
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.lastSync {
+  font-size: 11px;
+  color: var(--color-ink-subtle);
+}
+.syncBtn {
+  background: var(--color-crimson);
+  color: #fff;
+  border: none;
+  padding: 8px 16px;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  letter-spacing: 0.3px;
+}
+.syncBtn:hover { background: var(--color-crimson-dark); }
+.syncBtn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.toastSuccess {
+  background: var(--color-success-bg);
+  color: var(--color-success);
+  border: 1px solid var(--color-success-border);
+  padding: 8px 14px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 600;
+}
+.toastError {
+  background: var(--color-error-bg);
+  color: var(--color-error);
+  border: 1px solid var(--color-error-border);
+  padding: 8px 14px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.loading {
+  padding: 40px;
+  text-align: center;
+  color: var(--color-ink-subtle);
+  font-size: 13px;
+}
+
+.kpiRow {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+.kpi {
+  background: #fff;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 10px 14px;
+}
+.kpiLabel {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--color-ink-subtle);
+  margin-bottom: 4px;
+}
+.kpiValue {
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--color-ink);
+  font-variant-numeric: tabular-nums;
+}
+.kpiSub {
+  font-size: 10px;
+  color: var(--color-ink-subtle);
+  margin-top: 2px;
+}
+
+.filterBar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  background: #fff;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 8px 12px;
+}
+.chip {
+  border: 1px solid var(--color-border);
+  background: #fff;
+  color: var(--color-ink-muted);
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.chip:hover { border-color: var(--color-ink-subtle); color: var(--color-ink); }
+.chipActive {
+  background: var(--color-crimson);
+  color: #fff;
+  border-color: var(--color-crimson);
+}
+.searchInput {
+  flex: 1;
+  min-width: 200px;
+  padding: 6px 10px;
+  font-size: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+}
+.searchInput:focus { outline: none; border-color: var(--color-crimson); }
+.resultCount {
+  font-size: 11px;
+  color: var(--color-ink-subtle);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.tableWrap {
+  background: #fff;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow-x: auto;
+  overflow-y: auto;
+  max-height: calc(100vh - 480px);
+  min-height: 280px;
+}
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.table th {
+  position: sticky;
+  top: 0;
+  background: var(--color-surface);
+  border-bottom: 1.5px solid var(--color-border);
+  padding: 8px 10px;
+  text-align: left;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--color-ink-subtle);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+}
+.table td {
+  padding: 7px 10px;
+  border-bottom: 1px solid #f0eee8;
+  vertical-align: middle;
+}
+.table tr:hover td { background: #fafaf6; }
+
+.mono { font-family: 'SF Mono', monospace; font-size: 11px; }
+.muted { color: var(--color-ink-faint); }
+.empty {
+  padding: 30px;
+  text-align: center;
+  color: var(--color-ink-subtle);
+  font-size: 12px;
+}
