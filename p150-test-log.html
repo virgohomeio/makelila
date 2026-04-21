@@ -4,287 +4,375 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>P150 Defect Assessment — LILA by VCycene</title>
-<link href="https://fonts.googleapis.com/css2?family=Raleway:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js" integrity="sha512-8Q6Y9XnTbOE+JNvjBQwJ2H8S+UV4uA6hiRykhdtIyDYZ2TprdNmWOUaKdGzOhyr4dCyk287OejbPvwl7lrfqrQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js" integrity="sha512-MOCpqoRoisCTwJ8vQQiciZv0qcpROCidek3GTFS6KTk2+y7munJIlKCVkFCYY+p3ErYFXCjmFjnfTTRSC1OHWQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js" integrity="sha512-OG8Ewzlpr7HnTHwrXzN256M6xbPdDJdurFYIRh0vRHOeFsL0S9yIwHiWSA2kopUevhG/ta4qyVVc2hCRSJy2MQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-:root{
-  --rose:#CC2D30;--rose-dark:#991B1E;--gold:#C9A96E;--coffee:#A68B6B;--clay:#C17F5E;
-  --charcoal:#2C2A25;--warm-gray:#5C564E;--stone:#A39B8F;
-  --linen:#E8E0D4;--cream:#F5F1EB;--warm-white:#FAF8F5;
-}
-body{font-family:'Raleway',sans-serif;background:var(--warm-white);color:var(--warm-gray);min-height:100vh;-webkit-font-smoothing:antialiased}
+body{font-family:-apple-system,'SF Pro Display','SF Pro Text','Helvetica Neue',sans-serif;background:#f5f5f7;color:#1d1d1f;min-height:100vh;-webkit-font-smoothing:antialiased}
 ::-webkit-scrollbar{width:6px;height:6px}
-::-webkit-scrollbar-track{background:var(--cream)}
-::-webkit-scrollbar-thumb{background:var(--linen);border-radius:3px}
-::-webkit-scrollbar-thumb:hover{background:var(--stone)}
+::-webkit-scrollbar-track{background:#f5f5f7}
+::-webkit-scrollbar-thumb{background:#d2d2d7;border-radius:3px}
 </style>
 </head>
 <body>
 <div id="root"></div>
 <script type="text/babel">
-const { useState, useMemo, useCallback } = React;
+const {useState,useMemo,useCallback}=React;
 
-const UNITS = [
-  {sn:"LL01-00000000006",id:1,colour:"White",defect:true,returned:false,prepared:false,notes:"",issues:["Undiagnosed"],action:"diagnose",actionLabel:"Needs Diagnosis",difficulty:null},
-  {sn:"LL01-00000000008",id:2,colour:"White",defect:true,returned:false,prepared:false,notes:"",issues:["Undiagnosed"],action:"diagnose",actionLabel:"Needs Diagnosis",difficulty:null},
-  {sn:"LL01-00000000009",id:97,colour:"White",defect:true,returned:false,prepared:false,notes:"",issues:["Undiagnosed"],action:"diagnose",actionLabel:"Needs Diagnosis",difficulty:null},
-  {sn:"LL01-00000000010",id:3,colour:"White",defect:true,returned:false,prepared:false,notes:"",issues:["Tight Left Latch"],action:"rework-conditional",actionLabel:"Sell to Tolerant Customer",difficulty:"High",fix:"Manufacturer defect — metal blade deformed. No in-house fix. May ship to customers with tolerance for imperfection."},
-  {sn:"LL01-00000000018",id:4,colour:"White",defect:true,returned:false,prepared:false,notes:"",issues:["Undiagnosed"],action:"diagnose",actionLabel:"Needs Diagnosis",difficulty:null},
-  {sn:"LL01-00000000024",id:5,colour:"White",defect:true,returned:false,prepared:false,notes:"Testing",issues:["Filter Crack"],action:"rework",actionLabel:"Rework — Parts Swap",difficulty:"Low",fix:"Swap filter from scrapped unit or tape damaged area."},
-  {sn:"LL01-00000000027",id:6,colour:"White",defect:true,returned:false,prepared:false,notes:"",issues:["Board Interference","Chamber Crack"],action:"rework-conditional",actionLabel:"Rework — Software + Mechanical",difficulty:"Medium/High",fix:"Software fix: remove BME sensor readings → hardcoded algorithm. Chamber may need AB glue reinforcement. Root cause: PP+10%GF weakness."},
-  {sn:"LL01-00000000028",id:7,colour:"White",defect:true,returned:false,prepared:false,notes:"Testing",issues:["Crusher Not Turning","Body Cracks"],action:"rework-conditional",actionLabel:"Conditional — Crusher Deprecated",difficulty:"Unknown",fix:"Crusher being removed in future batches. Body cracks from moisture absorption. Assess severity."},
-  {sn:"LL01-00000000030",id:8,colour:"White",defect:true,returned:false,prepared:false,notes:"",issues:["LED Does Not Display"],action:"rework-conditional",actionLabel:"Rework IF Parts Procured",difficulty:"High",fix:"Full disassembly + LED replacement needed. No LED material in-house currently. Recoverable if parts ordered."},
-  {sn:"LL01-00000000034",id:10,colour:"White",defect:true,returned:false,prepared:false,notes:"",issues:["Undiagnosed"],action:"diagnose",actionLabel:"Needs Diagnosis",difficulty:null},
-  {sn:"LL01-00000000035",id:11,colour:"White",defect:true,returned:false,prepared:false,notes:"",issues:["Liquid Thinner Spill"],action:"rework",actionLabel:"Rework — Cleaning",difficulty:"Low-Medium",fix:"Attempt TSP (tri-sodium phosphate) degreaser cleaning. Non-functional impact but customer-facing."},
-  {sn:"LL01-00000000038",id:12,colour:"White",defect:true,returned:false,prepared:false,notes:"",issues:["Tight Left Latch"],action:"rework-conditional",actionLabel:"Sell to Tolerant Customer",difficulty:"High",fix:"Manufacturer defect — metal blade deformed. No in-house fix."},
-  {sn:"LL01-00000000039",id:13,colour:"White",defect:true,returned:false,prepared:false,notes:"",issues:["Undiagnosed"],action:"diagnose",actionLabel:"Needs Diagnosis",difficulty:null},
-  {sn:"LL01-00000000046",id:103,colour:"White",defect:true,returned:false,prepared:false,notes:"Huayi for testing, being prepared",issues:["Undiagnosed — In Use"],action:"diagnose",actionLabel:"In Use (Huayi Testing)",difficulty:null,fix:"Currently used for testing. Re-evaluate after testing complete."},
-  {sn:"LL01-00000000047",id:105,colour:"White",defect:true,returned:false,prepared:false,notes:"",issues:["Left Pad Heater Failure"],action:"scrap",actionLabel:"SCRAP → Parts Donor",difficulty:"High",fix:"No replacement pad heaters. Full disassembly required. No materials in-house. Designate as parts donor."},
-  {sn:"LL01-00000000048",id:14,colour:"White",defect:true,returned:false,prepared:false,notes:"",issues:["Right Pad Heater Failure"],action:"scrap",actionLabel:"SCRAP → Parts Donor",difficulty:"High",fix:"No replacement pad heaters. Full disassembly required. No materials in-house. Designate as parts donor."},
-  {sn:"LL01-00000000051",id:15,colour:"White",defect:true,returned:false,prepared:false,notes:"",issues:["Missing Gear Box"],action:"rework",actionLabel:"Rework — Parts Swap",difficulty:"Low",fix:"Harvest gear box from a scrapped unit. Easy installation."},
-  {sn:"LL01-00000000053",id:94,colour:"White",defect:true,returned:false,prepared:false,notes:"",issues:["Undiagnosed"],action:"diagnose",actionLabel:"Needs Diagnosis",difficulty:null},
-  {sn:"LL01-00000000066",id:100,colour:"White",defect:true,returned:false,prepared:false,notes:"Production Testing",issues:["Undiagnosed — Production Testing"],action:"diagnose",actionLabel:"Needs Diagnosis",difficulty:null,fix:"Flag set during production testing. Run PC application test to identify issue."},
-  {sn:"LL01-00000000072",id:18,colour:"Black",defect:true,returned:false,prepared:false,notes:"",issues:["Missing Front Gasket"],action:"rework",actionLabel:"Rework — Parts Swap",difficulty:"Low",fix:"Order replacement gasket or harvest from scrapped unit. Attach with silicone glue."},
-  {sn:"LL01-00000000086",id:19,colour:"White",defect:true,returned:false,prepared:false,notes:"",issues:["Undiagnosed"],action:"diagnose",actionLabel:"Needs Diagnosis",difficulty:null},
-  {sn:"LL01-00000000089",id:21,colour:"White",defect:true,returned:false,prepared:false,notes:"",issues:["Cracks on Machine Body"],action:"rework-conditional",actionLabel:"Assess Severity",difficulty:"Unknown",fix:"Moisture-induced cracking. Root cause: PP+10%GF. Assess crack severity — may still be shippable if cosmetic only."},
-  {sn:"LL01-00000000090",id:95,colour:"White",defect:true,returned:false,prepared:false,notes:"Huayi Testing / Onboarding demos",issues:["Undiagnosed — In Use"],action:"diagnose",actionLabel:"In Use (Demos/Testing)",difficulty:null,fix:"Used for onboarding demos, now Huayi testing."},
-  {sn:"LL01-00000000093",id:22,colour:"White",defect:true,returned:false,prepared:false,notes:"",issues:["LED Does Not Display"],action:"rework-conditional",actionLabel:"Rework IF Parts Procured",difficulty:"High",fix:"Full disassembly + LED replacement. No LED material in-house. Recoverable if parts ordered."},
-  {sn:"LL01-00000000094",id:96,colour:"White",defect:true,returned:false,prepared:false,notes:"",issues:["Undiagnosed"],action:"diagnose",actionLabel:"Needs Diagnosis",difficulty:null},
-  {sn:"LL01-00000000095",id:23,colour:"White",defect:true,returned:false,prepared:false,notes:"",issues:["Rear Lid Notch Missing"],action:"rework",actionLabel:"Rework — Parts Swap",difficulty:"Low",fix:"Harvest rear lid notch from scrapped unit."},
-  {sn:"LL01-00000000096",id:24,colour:"Black",defect:true,returned:false,prepared:false,notes:"",issues:["Internal PTC Failure"],action:"scrap",actionLabel:"SCRAP → Parts Donor",difficulty:"High",fix:"No compatible PTC spares. P50 PTC is different form factor. Machine non-functional. Designate as parts donor."},
-  {sn:"LL01-00000000098",id:25,colour:"Black",defect:true,returned:false,prepared:false,notes:"",issues:["Undiagnosed"],action:"diagnose",actionLabel:"Needs Diagnosis",difficulty:null},
-  {sn:"LL01-00000000102",id:106,colour:"White",defect:true,returned:false,prepared:false,notes:"",issues:["Undiagnosed"],action:"diagnose",actionLabel:"Needs Diagnosis",difficulty:null},
-  {sn:"LL01-00000000103",id:27,colour:"White",defect:true,returned:false,prepared:false,notes:"Marketing, In Office",issues:["Undiagnosed — Marketing Unit"],action:"diagnose",actionLabel:"Marketing Unit — Diagnose",difficulty:null,fix:"In office, used for marketing. Run diagnostic to assess."},
-  {sn:"LL01-00000000106",id:28,colour:"Black",defect:true,returned:false,prepared:false,notes:"Testing",issues:["AC Main Power Test Failure"],action:"scrap",actionLabel:"SCRAP → Parts Donor",difficulty:"Unknown",fix:"Relay did not switch during PC test. No solution identified. Machine non-functional. Designate as parts donor."},
-  {sn:"LL01-00000000111",id:30,colour:"White",defect:true,returned:false,prepared:false,notes:"",issues:["Undiagnosed"],action:"diagnose",actionLabel:"Needs Diagnosis",difficulty:null},
-  {sn:"LL01-00000000113",id:90,colour:"White",defect:true,returned:false,prepared:false,notes:"Testing",issues:["Undiagnosed — Testing"],action:"diagnose",actionLabel:"Needs Diagnosis",difficulty:null},
-  {sn:"LL01-00000000118",id:31,colour:"White",defect:true,returned:false,prepared:false,notes:"",issues:["Left Motor Failure"],action:"scrap",actionLabel:"SCRAP → Parts Donor",difficulty:"High",fix:"Motor did not turn during PC test. No replacement motors in-house. Full disassembly required. Designate as parts donor."},
-  {sn:"LL01-00000000123",id:32,colour:"White",defect:true,returned:false,prepared:false,notes:"",issues:["Tight Left Latch","Liquid Thinner Spill"],action:"rework-conditional",actionLabel:"Rework — Multiple Issues",difficulty:"High/Unknown",fix:"Two issues: (1) Tight latch — manufacturer defect, (2) Thinner spill — try TSP cleaning. May sell to tolerant customer after cleaning."},
-  {sn:"LL01-00000000128",id:93,colour:"Black",defect:true,returned:false,prepared:false,notes:"Testing",issues:["Undiagnosed — Testing"],action:"diagnose",actionLabel:"Needs Diagnosis",difficulty:null},
-  {sn:"LL01-00000000131",id:92,colour:"Black",defect:true,returned:false,prepared:false,notes:"Testing",issues:["Undiagnosed — Testing"],action:"diagnose",actionLabel:"Needs Diagnosis",difficulty:null},
-  {sn:"LL01-00000000134",id:99,colour:"Black",defect:true,returned:false,prepared:false,notes:"",issues:["Undiagnosed"],action:"diagnose",actionLabel:"Needs Diagnosis",difficulty:null},
-  {sn:"LL01-00000000139",id:35,colour:"Unknown",defect:true,returned:false,prepared:false,notes:"In storage. Colour is unknown",issues:["Tight Left Latch"],action:"rework-conditional",actionLabel:"Sell to Tolerant Customer",difficulty:"High",fix:"Manufacturer defect. Colour photo unclear. Needs visual re-inspection."},
-  {sn:"LL01-00000000148",id:37,colour:"White",defect:true,returned:false,prepared:false,notes:"",issues:["Undiagnosed"],action:"diagnose",actionLabel:"Needs Diagnosis",difficulty:null},
-  {sn:"LL01-00000000149",id:38,colour:"Black",defect:true,returned:false,prepared:false,notes:"",issues:["Rear Lid Notch Missing"],action:"rework",actionLabel:"Rework — Parts Swap",difficulty:"Low",fix:"Harvest rear lid notch from scrapped unit."},
-  {sn:"LL01-00000000158",id:43,colour:"White",defect:true,returned:false,prepared:false,notes:"",issues:["Gasket Missing"],action:"rework",actionLabel:"Rework — Glue Gasket",difficulty:"Low",fix:"Glue gasket onto machine body. Material available in-house."},
-  {sn:"LL01-00000000159",id:44,colour:"White",defect:true,returned:false,prepared:false,notes:"Testing",issues:["Undiagnosed — Testing"],action:"diagnose",actionLabel:"Needs Diagnosis",difficulty:null},
-  {sn:"LL01-00000000160",id:104,colour:"White",defect:true,returned:false,prepared:false,notes:"",issues:["Undiagnosed"],action:"diagnose",actionLabel:"Needs Diagnosis",difficulty:null},
-  {sn:"LL01-00000000162",id:45,colour:"Black",defect:true,returned:false,prepared:false,notes:"",issues:["Liquid Thinner Spill"],action:"rework",actionLabel:"Rework — Cleaning",difficulty:"Low-Medium",fix:"Attempt TSP cleaning. Non-functional but customer-facing stain."},
-  {sn:"LL01-00000000031",id:9,colour:"White",defect:false,returned:true,prepared:false,notes:"Mike Ferguson Return",issues:["Customer Return"],action:"diagnose-return",actionLabel:"Diagnose Return",difficulty:null,fix:"Returned by Mike Ferguson. Run full diagnostic before re-deployment."},
-  {sn:"LL01-00000000033",id:46,colour:"White",defect:false,returned:true,prepared:false,notes:"David Forster return, In Office",issues:["Customer Return"],action:"diagnose-return",actionLabel:"Diagnose Return",difficulty:null,fix:"Returned by David Forster. In office. Run diagnostic."},
-  {sn:"LL01-00000000064",id:17,colour:"Black",defect:false,returned:true,prepared:false,notes:"Antonio Gonsalves return, In Office",issues:["Customer Return"],action:"diagnose-return",actionLabel:"Diagnose Return",difficulty:null,fix:"Returned by Antonio Gonsalves. In office. Run diagnostic."},
-  {sn:"LL01-00000000068",id:57,colour:"Black",defect:false,returned:true,prepared:false,notes:"Elayne Baka Return",issues:["Customer Return"],action:"diagnose-return",actionLabel:"Diagnose Return",difficulty:null,fix:"Returned by Elayne Baka. Run diagnostic."},
-  {sn:"LL01-00000000099",id:87,colour:"Black",defect:false,returned:true,prepared:false,notes:"In Office",issues:["Customer Return"],action:"diagnose-return",actionLabel:"Diagnose Return",difficulty:null,fix:"Returned unit. In office. Run diagnostic."},
-  {sn:"LL01-00000000108",id:61,colour:"Black",defect:false,returned:true,prepared:false,notes:"Scott Destephanis return, In Office",issues:["Chamber Break"],action:"rework-conditional",actionLabel:"Assess Chamber Damage",difficulty:"High",fix:"Compost spilled onto pad heaters. Scott Destephanis return. Needs full disassembly assessment."},
-  {sn:"LL01-00000000135",id:67,colour:"Black",defect:false,returned:true,prepared:false,notes:"Mark/Cheryl Marshall return, In Office",issues:["Customer Return"],action:"diagnose-return",actionLabel:"Diagnose Return",difficulty:null,fix:"Returned by Mark/Cheryl Marshall. In office."},
-  {sn:"LL01-00000000137",id:78,colour:"White",defect:false,returned:true,prepared:false,notes:"Yuanbo Luo return, odor issue",issues:["Odor Issue"],action:"rework",actionLabel:"Rework — Gasket/Seal Check",difficulty:"Low-Medium",fix:"Returned for odor issue. Check gaskets, seals, drainage. May need gasket replacement."},
-  {sn:"LL01-00000000138",id:34,colour:"Black",defect:false,returned:false,prepared:false,notes:"Ari return, In Office",issues:["Customer Return"],action:"diagnose-return",actionLabel:"Diagnose Return",difficulty:null,fix:"Returned by Ari. In office. Not flagged as returned in system."},
-  {sn:"LL01-00000000140",id:36,colour:"Black",defect:false,returned:true,prepared:false,notes:"Sarah Lockhart Return, In storage",issues:["Customer Return"],action:"diagnose-return",actionLabel:"Diagnose Return",difficulty:null,fix:"Returned by Sarah Lockhart. In storage."},
-  {sn:"LL01-00000000147",id:50,colour:"Black",defect:false,returned:true,prepared:false,notes:"Annie Wu Return",issues:["Customer Return"],action:"diagnose-return",actionLabel:"Diagnose Return",difficulty:null,fix:"Returned by Annie Wu. Run diagnostic."},
-  {sn:"LL01-00000000151",id:56,colour:"Black",defect:false,returned:true,prepared:false,notes:"Ari Return",issues:["Customer Return"],action:"diagnose-return",actionLabel:"Diagnose Return",difficulty:null,fix:"Returned by Ari (2nd unit). Run diagnostic."},
-  {sn:"LL01-00000000154",id:40,colour:"White",defect:false,returned:true,prepared:false,notes:"In Office",issues:["Customer Return"],action:"diagnose-return",actionLabel:"Diagnose Return",difficulty:null,fix:"Returned unit. In office. Run diagnostic."},
-  {sn:"LL01-00000000081",id:101,colour:"Black",defect:false,returned:false,prepared:true,notes:"",issues:["None — Ready"],action:"ship",actionLabel:"Ready to Ship",difficulty:null,fix:"Prepared and passing. Queue for next fulfillment."},
-  {sn:"LL01-00000000117",id:49,colour:"Black",defect:false,returned:false,prepared:true,notes:"",issues:["None — Ready"],action:"ship",actionLabel:"Ready to Ship",difficulty:null,fix:"Prepared and passing. Queue for next fulfillment."},
-];
+/* ───── Complete P150 Machine Counter (IDs 1–150) ───── */
+/* Source: Kishore's Notion, queried 2026-04-20 */
+const KNOWN={
+1:{sn:"006",c:"W",def:true,del:false,ret:false,prep:false,n:"",iss:["Undiagnosed"],act:"diagnose"},
+2:{sn:"008",c:"W",def:true,del:false,ret:false,prep:false,n:"",iss:["Undiagnosed"],act:"diagnose"},
+3:{sn:"010",c:"W",def:true,del:false,ret:false,prep:false,n:"",iss:["Tight Left Latch"],act:"rework-conditional",diff:"High",fix:"Manufacturer defect — metal blade deformed. No in-house fix. May ship to tolerant customers."},
+4:{sn:"018",c:"W",def:true,del:false,ret:false,prep:false,n:"",iss:["Undiagnosed"],act:"diagnose"},
+5:{sn:"024",c:"W",def:true,del:false,ret:false,prep:false,n:"Testing",iss:["Filter Crack"],act:"rework",diff:"Low",fix:"Swap filter from scrapped unit or tape damaged area."},
+6:{sn:"027",c:"W",def:true,del:false,ret:false,prep:false,n:"",iss:["Board Interference","Chamber Crack"],act:"rework-conditional",diff:"Medium/High",fix:"Software fix: remove BME sensor readings → hardcoded algorithm. Chamber may need AB glue reinforcement."},
+7:{sn:"028",c:"W",def:true,del:false,ret:false,prep:false,n:"Testing",iss:["Crusher Not Turning","Body Cracks"],act:"rework-conditional",diff:"Unknown",fix:"Crusher being removed in future batches. Body cracks from moisture absorption. Assess severity."},
+8:{sn:"030",c:"W",def:true,del:false,ret:false,prep:false,n:"",iss:["LED Does Not Display"],act:"rework-conditional",diff:"High",fix:"Full disassembly + LED replacement needed. No LED material in-house currently."},
+9:{sn:"031",c:"W",def:false,del:false,ret:true,prep:false,n:"Mike Ferguson Return",iss:["Customer Return"],act:"diagnose-return",fix:"Returned by Mike Ferguson. Run full diagnostic."},
+10:{sn:"034",c:"W",def:true,del:false,ret:false,prep:false,n:"",iss:["Undiagnosed"],act:"diagnose"},
+11:{sn:"035",c:"W",def:true,del:false,ret:false,prep:false,n:"",iss:["Liquid Thinner Spill"],act:"rework",diff:"Low-Medium",fix:"Attempt TSP degreaser cleaning. Non-functional but customer-facing."},
+12:{sn:"038",c:"W",def:true,del:false,ret:false,prep:false,n:"",iss:["Tight Left Latch"],act:"rework-conditional",diff:"High",fix:"Manufacturer defect — metal blade deformed. No in-house fix."},
+13:{sn:"039",c:"W",def:true,del:false,ret:false,prep:false,n:"",iss:["Undiagnosed"],act:"diagnose"},
+14:{sn:"048",c:"W",def:true,del:false,ret:false,prep:false,n:"",iss:["Right Pad Heater Failure"],act:"scrap",diff:"High",fix:"No replacement pad heaters. Designate as parts donor."},
+15:{sn:"051",c:"W",def:true,del:false,ret:false,prep:false,n:"",iss:["Missing Gear Box"],act:"rework",diff:"Low",fix:"Harvest gear box from a scrapped unit. Easy installation."},
+16:{sn:"062",c:"W",def:false,del:true,ret:false,prep:false,n:"",iss:[],act:"delivered"},
+17:{sn:"064",c:"B",def:false,del:false,ret:true,prep:false,n:"Antonio Gonsalves return, In Office",iss:["Customer Return"],act:"diagnose-return",fix:"Returned by Antonio Gonsalves. Run diagnostic."},
+18:{sn:"072",c:"B",def:true,del:false,ret:false,prep:false,n:"",iss:["Missing Front Gasket"],act:"rework",diff:"Low",fix:"Order replacement gasket or harvest from scrapped unit."},
+19:{sn:"086",c:"W",def:true,del:false,ret:false,prep:false,n:"",iss:["Undiagnosed"],act:"diagnose"},
+20:{sn:"087",c:"W",def:false,del:true,ret:false,prep:false,n:"",iss:[],act:"delivered"},
+21:{sn:"089",c:"W",def:true,del:false,ret:false,prep:false,n:"",iss:["Cracks on Machine Body"],act:"rework-conditional",diff:"Unknown",fix:"Moisture-induced cracking. Assess severity — may be shippable if cosmetic."},
+22:{sn:"093",c:"W",def:true,del:false,ret:false,prep:false,n:"",iss:["LED Does Not Display"],act:"rework-conditional",diff:"High",fix:"Full disassembly + LED replacement. No material in-house."},
+23:{sn:"095",c:"W",def:true,del:false,ret:false,prep:false,n:"",iss:["Rear Lid Notch Missing"],act:"rework",diff:"Low",fix:"Harvest rear lid notch from scrapped unit."},
+24:{sn:"096",c:"B",def:true,del:false,ret:false,prep:false,n:"",iss:["Internal PTC Failure"],act:"scrap",diff:"High",fix:"No compatible PTC spares. P50 PTC incompatible. Designate as parts donor."},
+25:{sn:"098",c:"B",def:true,del:false,ret:false,prep:false,n:"",iss:["Undiagnosed"],act:"diagnose"},
+26:{sn:"100",c:"B",def:false,del:true,ret:false,prep:false,n:"",iss:[],act:"delivered"},
+27:{sn:"103",c:"W",def:true,del:false,ret:false,prep:false,n:"Marketing, In Office",iss:["Undiagnosed — Marketing Unit"],act:"diagnose",fix:"In office for marketing. Run diagnostic."},
+28:{sn:"106",c:"B",def:true,del:false,ret:false,prep:false,n:"Testing",iss:["AC Main Power Test Failure"],act:"scrap",diff:"Unknown",fix:"Relay failure during PC test. No solution. Designate as parts donor."},
+29:{sn:"107",c:"W",def:false,del:true,ret:false,prep:false,n:"",iss:[],act:"delivered"},
+30:{sn:"111",c:"W",def:true,del:false,ret:false,prep:false,n:"",iss:["Undiagnosed"],act:"diagnose"},
+31:{sn:"118",c:"W",def:true,del:false,ret:false,prep:false,n:"",iss:["Left Motor Failure"],act:"scrap",diff:"High",fix:"No replacement motors in-house. Designate as parts donor."},
+32:{sn:"123",c:"W",def:true,del:false,ret:false,prep:false,n:"",iss:["Tight Left Latch","Liquid Thinner Spill"],act:"rework-conditional",diff:"High/Unknown",fix:"Two issues: tight latch (manufacturer) + thinner spill (try TSP). May sell to tolerant customer."},
+33:{sn:"132",c:"B",def:false,del:true,ret:false,prep:false,n:"",iss:[],act:"delivered"},
+34:{sn:"138",c:"B",def:false,del:false,ret:false,prep:false,n:"Ari return, In Office",iss:["Customer Return"],act:"diagnose-return",fix:"Returned by Ari. In office."},
+35:{sn:"139",c:"?",def:true,del:false,ret:false,prep:false,n:"In storage. Colour unknown",iss:["Tight Left Latch"],act:"rework-conditional",diff:"High",fix:"Manufacturer defect. Needs visual re-inspection."},
+36:{sn:"140",c:"B",def:false,del:false,ret:true,prep:false,n:"Sarah Lockhart Return, In storage",iss:["Customer Return"],act:"diagnose-return",fix:"Returned by Sarah Lockhart."},
+37:{sn:"148",c:"W",def:true,del:false,ret:false,prep:false,n:"",iss:["Undiagnosed"],act:"diagnose"},
+38:{sn:"149",c:"B",def:true,del:false,ret:false,prep:false,n:"",iss:["Rear Lid Notch Missing"],act:"rework",diff:"Low",fix:"Harvest rear lid notch from scrapped unit."},
+39:{sn:"153",c:"W",def:false,del:true,ret:false,prep:false,n:"",iss:[],act:"delivered"},
+40:{sn:"154",c:"W",def:false,del:false,ret:true,prep:false,n:"In Office",iss:["Customer Return"],act:"diagnose-return",fix:"Returned unit. In office."},
+41:{sn:"156",c:"W",def:false,del:true,ret:false,prep:false,n:"",iss:[],act:"delivered"},
+42:{sn:"157",c:"W",def:false,del:true,ret:false,prep:false,n:"",iss:[],act:"delivered"},
+43:{sn:"158",c:"W",def:true,del:false,ret:false,prep:false,n:"",iss:["Gasket Missing"],act:"rework",diff:"Low",fix:"Glue gasket onto machine body. Material available."},
+44:{sn:"159",c:"W",def:true,del:false,ret:false,prep:false,n:"Testing",iss:["Undiagnosed — Testing"],act:"diagnose"},
+45:{sn:"162",c:"B",def:true,del:false,ret:false,prep:false,n:"",iss:["Liquid Thinner Spill"],act:"rework",diff:"Low-Medium",fix:"Attempt TSP cleaning."},
+46:{sn:"033",c:"W",def:false,del:false,ret:true,prep:false,n:"David Forster return, In Office",iss:["Customer Return"],act:"diagnose-return",fix:"Returned by David Forster."},
+48:{sn:"026",c:"W",def:false,del:true,ret:false,prep:false,n:"",iss:[],act:"delivered"},
+49:{sn:"117",c:"B",def:false,del:false,ret:false,prep:true,n:"",iss:["None — Ready"],act:"ship",fix:"Prepared and passing. Queue for fulfillment."},
+50:{sn:"147",c:"B",def:false,del:false,ret:true,prep:false,n:"Annie Wu Return",iss:["Customer Return"],act:"diagnose-return",fix:"Returned by Annie Wu."},
+51:{sn:"060",c:"W",def:false,del:true,ret:false,prep:false,n:"",iss:[],act:"delivered"},
+52:{sn:"110",c:"W",def:false,del:true,ret:false,prep:false,n:"",iss:[],act:"delivered"},
+53:{sn:"063",c:"B",def:false,del:true,ret:false,prep:false,n:"",iss:[],act:"delivered"},
+55:{sn:"013",c:"W",def:false,del:true,ret:false,prep:false,n:"",iss:[],act:"delivered"},
+56:{sn:"151",c:"B",def:false,del:false,ret:true,prep:false,n:"Ari Return",iss:["Customer Return"],act:"diagnose-return",fix:"Returned by Ari (2nd unit)."},
+57:{sn:"068",c:"B",def:false,del:false,ret:true,prep:false,n:"Elayne Baka Return",iss:["Customer Return"],act:"diagnose-return",fix:"Returned by Elayne Baka."},
+58:{sn:"104",c:"B",def:false,del:true,ret:false,prep:false,n:"",iss:[],act:"delivered"},
+59:{sn:"130",c:"B",def:false,del:true,ret:false,prep:false,n:"",iss:[],act:"delivered"},
+61:{sn:"108",c:"B",def:false,del:false,ret:true,prep:false,n:"Scott Destephanis return, In Office",iss:["Chamber Break"],act:"rework-conditional",diff:"High",fix:"Compost spilled onto pad heaters. Needs full disassembly assessment."},
+62:{sn:"119",c:"B",def:false,del:true,ret:false,prep:false,n:"",iss:[],act:"delivered"},
+63:{sn:"136",c:"B",def:false,del:true,ret:false,prep:false,n:"",iss:[],act:"delivered"},
+64:{sn:"082",c:"B",def:false,del:true,ret:false,prep:false,n:"",iss:[],act:"delivered"},
+65:{sn:"073",c:"B",def:false,del:true,ret:false,prep:false,n:"",iss:[],act:"delivered"},
+66:{sn:"077",c:"B",def:false,del:true,ret:false,prep:false,n:"",iss:[],act:"delivered"},
+67:{sn:"135",c:"B",def:false,del:false,ret:true,prep:false,n:"Mark/Cheryl Marshall return, In Office",iss:["Customer Return"],act:"diagnose-return",fix:"Returned by Mark/Cheryl Marshall."},
+68:{sn:"105",c:"W",def:false,del:true,ret:false,prep:false,n:"",iss:[],act:"delivered"},
+69:{sn:"161",c:"B",def:false,del:true,ret:false,prep:false,n:"",iss:[],act:"delivered"},
+70:{sn:"016",c:"W",def:false,del:true,ret:false,prep:false,n:"",iss:[],act:"delivered"},
+71:{sn:"133",c:"B",def:false,del:true,ret:false,prep:false,n:"",iss:[],act:"delivered"},
+72:{sn:"017",c:"W",def:false,del:true,ret:false,prep:false,n:"",iss:[],act:"delivered"},
+73:{sn:"116",c:"W",def:false,del:true,ret:false,prep:false,n:"",iss:[],act:"delivered"},
+74:{sn:"127",c:"B",def:false,del:true,ret:false,prep:false,n:"",iss:[],act:"delivered"},
+75:{sn:"101",c:"B",def:false,del:true,ret:false,prep:false,n:"",iss:[],act:"delivered"},
+76:{sn:"076",c:"B",def:false,del:true,ret:false,prep:false,n:"",iss:[],act:"delivered"},
+77:{sn:"004",c:"W",def:false,del:true,ret:false,prep:false,n:"",iss:[],act:"delivered"},
+78:{sn:"137",c:"W",def:false,del:false,ret:true,prep:false,n:"Yuanbo Luo return, odor issue",iss:["Odor Issue"],act:"rework",diff:"Low-Medium",fix:"Returned for odor. Check gaskets, seals, drainage."},
+79:{sn:"146",c:"W",def:false,del:true,ret:false,prep:false,n:"",iss:[],act:"delivered"},
+80:{sn:"075",c:"B",def:false,del:true,ret:false,prep:false,n:"Caroline/Mike McMaurice",iss:[],act:"delivered"},
+81:{sn:"029",c:"W",def:false,del:true,ret:false,prep:false,n:"",iss:[],act:"delivered"},
+82:{sn:"014",c:"W",def:false,del:true,ret:false,prep:false,n:"",iss:[],act:"delivered"},
+83:{sn:"088",c:"W",def:false,del:true,ret:false,prep:false,n:"",iss:[],act:"delivered"},
+84:{sn:"074",c:"B",def:false,del:true,ret:false,prep:false,n:"",iss:[],act:"delivered"},
+86:{sn:"067",c:"B",def:false,del:true,ret:false,prep:false,n:"",iss:[],act:"delivered"},
+87:{sn:"099",c:"B",def:false,del:false,ret:true,prep:false,n:"In Office",iss:["Customer Return"],act:"diagnose-return",fix:"Returned unit. In office."},
+88:{sn:"070",c:"B",def:false,del:true,ret:false,prep:false,n:"",iss:[],act:"delivered"},
+89:{sn:"049",c:"W",def:false,del:true,ret:false,prep:false,n:"James and Jill",iss:[],act:"delivered"},
+90:{sn:"113",c:"W",def:true,del:false,ret:false,prep:false,n:"Testing",iss:["Undiagnosed — Testing"],act:"diagnose"},
+92:{sn:"131",c:"B",def:true,del:false,ret:false,prep:false,n:"Testing",iss:["Undiagnosed — Testing"],act:"diagnose"},
+93:{sn:"128",c:"B",def:true,del:false,ret:false,prep:false,n:"Testing",iss:["Undiagnosed — Testing"],act:"diagnose"},
+94:{sn:"053",c:"W",def:true,del:false,ret:false,prep:false,n:"",iss:["Undiagnosed"],act:"diagnose"},
+95:{sn:"090",c:"W",def:true,del:false,ret:false,prep:false,n:"Huayi Testing / Onboarding demos",iss:["Undiagnosed — In Use"],act:"diagnose",fix:"Used for demos, now Huayi testing."},
+96:{sn:"094",c:"W",def:true,del:false,ret:false,prep:false,n:"",iss:["Undiagnosed"],act:"diagnose"},
+97:{sn:"009",c:"W",def:true,del:false,ret:false,prep:false,n:"",iss:["Undiagnosed"],act:"diagnose"},
+99:{sn:"134",c:"B",def:true,del:false,ret:false,prep:false,n:"",iss:["Undiagnosed"],act:"diagnose"},
+100:{sn:"066",c:"W",def:true,del:false,ret:false,prep:false,n:"Production Testing",iss:["Undiagnosed — Production Testing"],act:"diagnose",fix:"Flag set during production testing. Run PC test."},
+101:{sn:"081",c:"B",def:false,del:false,ret:false,prep:true,n:"",iss:["None — Ready"],act:"ship",fix:"Prepared and passing."},
+102:{sn:"078",c:"B",def:false,del:true,ret:false,prep:false,n:"",iss:[],act:"delivered"},
+103:{sn:"046",c:"W",def:true,del:false,ret:false,prep:false,n:"Huayi for testing",iss:["Undiagnosed — In Use"],act:"diagnose",fix:"Currently used for testing."},
+104:{sn:"160",c:"W",def:true,del:false,ret:false,prep:false,n:"",iss:["Undiagnosed"],act:"diagnose"},
+105:{sn:"047",c:"W",def:true,del:false,ret:false,prep:false,n:"",iss:["Left Pad Heater Failure"],act:"scrap",diff:"High",fix:"No replacement pad heaters. Designate as parts donor."},
+106:{sn:"102",c:"W",def:true,del:false,ret:false,prep:false,n:"",iss:["Undiagnosed"],act:"diagnose"},
+/* Additional entries found via search — IDs 107+ */
+107:{sn:"065",c:"B",def:false,del:true,ret:false,prep:false,n:"",iss:[],act:"delivered"},
+108:{sn:"025",c:"W",def:false,del:true,ret:false,prep:false,n:"",iss:[],act:"delivered"},
+109:{sn:"050",c:"W",def:false,del:true,ret:false,prep:false,n:"",iss:[],act:"delivered"},
+110:{sn:"021",c:"W",def:false,del:true,ret:false,prep:false,n:"",iss:[],act:"delivered"},
+111:{sn:"043",c:"W",def:false,del:true,ret:false,prep:false,n:"",iss:[],act:"delivered"},
+};
+
+/* Build full 1–150 array, then sort ascending by serial number */
+const UNITS=[];
+for(let i=1;i<=150;i++){
+  if(KNOWN[i]){
+    const k=KNOWN[i];
+    UNITS.push({id:i,sn:"LL01-00000000"+k.sn,colour:k.c==="W"?"White":k.c==="B"?"Black":"Unknown",
+      defect:k.def,delivered:k.del,returned:k.ret,prepared:k.prep,notes:k.n,
+      issues:k.iss.length?k.iss:k.del?["Delivered to Customer"]:["—"],
+      action:k.act,difficulty:k.diff||null,fix:k.fix||null});
+  } else {
+    /* Skip — not in Notion Counter */
+  }
+}
+UNITS.sort((a,b)=>{
+  if(a.sn==="—"&&b.sn!=="—") return 1;
+  if(a.sn!=="—"&&b.sn==="—") return -1;
+  return a.sn.localeCompare(b.sn);
+});
 
 const ACTION_CONFIG = {
-  scrap:              {bg:"#991B1E12",border:"#991B1E40",text:"#991B1E",icon:"✕",label:"Scrap"},
-  rework:             {bg:"#4a7c5920",border:"#4a7c5950",text:"#3d6b4a",icon:"↻",label:"Rework"},
-  "rework-conditional":{bg:"#C9A96E18",border:"#C9A96E50",text:"#8a7040",icon:"◐",label:"Conditional"},
-  diagnose:           {bg:"#5C564E12",border:"#5C564E40",text:"#5C564E",icon:"◎",label:"Diagnose"},
-  "diagnose-return":  {bg:"#A68B6B18",border:"#A68B6B50",text:"#7a6248",icon:"↩",label:"Return"},
-  ship:               {bg:"#2a6b4a18",border:"#2a6b4a50",text:"#2a6b4a",icon:"→",label:"Ship"},
+  scrap:              {bg:"#fef2f2",border:"#fca5a5",text:"#dc2626",dot:"#ef4444",icon:"✕",label:"Scrap"},
+  rework:             {bg:"#f0fdf4",border:"#86efac",text:"#16a34a",dot:"#22c55e",icon:"↻",label:"Rework"},
+  "rework-conditional":{bg:"#fefce8",border:"#fde047",text:"#ca8a04",dot:"#eab308",icon:"◐",label:"Conditional"},
+  diagnose:           {bg:"#eef2ff",border:"#a5b4fc",text:"#4f46e5",dot:"#6366f1",icon:"◎",label:"Diagnose"},
+  "diagnose-return":  {bg:"#faf5ff",border:"#d8b4fe",text:"#9333ea",dot:"#a855f7",icon:"↩",label:"Return"},
+  ship:               {bg:"#f0fdfa",border:"#5eead4",text:"#0d9488",dot:"#14b8a6",icon:"→",label:"Ship"},
+  delivered:          {bg:"#f8fafc",border:"#e2e8f0",text:"#64748b",dot:"#94a3b8",icon:"✓",label:"Delivered"},
+  missing:            {bg:"#fafafa",border:"#e5e5e5",text:"#a3a3a3",dot:"#d4d4d4",icon:"?",label:"Missing"},
 };
 
 const DIFF_COLORS = {
-  Low:      {bg:"#4a7c5915",text:"#3d6b4a",border:"#4a7c5930"},
-  "Low-Medium":{bg:"#6b8a4018",text:"#5a7535",border:"#6b8a4035"},
-  Medium:   {bg:"#C9A96E18",text:"#8a7040",border:"#C9A96E35"},
-  "Medium/High":{bg:"#C17F5E18",text:"#9a5f3e",border:"#C17F5E35"},
-  High:     {bg:"#991B1E12",text:"#991B1E",border:"#991B1E30"},
-  Unknown:  {bg:"#5C564E10",text:"#5C564E",border:"#5C564E25"},
+  Low:          {bg:"#f0fdf4",text:"#15803d",border:"#bbf7d0"},
+  "Low-Medium": {bg:"#f7fee7",text:"#4d7c0f",border:"#d9f99d"},
+  Medium:       {bg:"#fefce8",text:"#a16207",border:"#fef08a"},
+  "Medium/High":{bg:"#fff7ed",text:"#c2410c",border:"#fed7aa"},
+  High:         {bg:"#fef2f2",text:"#dc2626",border:"#fecaca"},
+  "High/Unknown":{bg:"#fef2f2",text:"#dc2626",border:"#fecaca"},
+  Unknown:      {bg:"#f5f5f5",text:"#6b7280",border:"#e5e7eb"},
 };
 
-function App() {
-  const [filter, setFilter] = useState("all");
-  const [colourFilter, setColourFilter] = useState("all");
-  const [search, setSearch] = useState("");
-  const [expandedRow, setExpandedRow] = useState(null);
-  const [overrides, setOverrides] = useState({});
+function App(){
+  const [filter,setFilter]=useState("all");
+  const [colourFilter,setColourFilter]=useState("all");
+  const [search,setSearch]=useState("");
+  const [expandedRow,setExpandedRow]=useState(null);
+  const [overrides,setOverrides]=useState({});
+  const [hideDelivered,setHideDelivered]=useState(false);
 
-  const filtered = useMemo(() => {
-    return UNITS.filter(u => {
-      const act = overrides[u.sn] || u.action;
-      if (filter !== "all" && act !== filter) return false;
-      if (colourFilter !== "all" && u.colour !== colourFilter) return false;
-      if (search && !u.sn.toLowerCase().includes(search.toLowerCase()) && !u.notes.toLowerCase().includes(search.toLowerCase()) && !u.issues.join(" ").toLowerCase().includes(search.toLowerCase())) return false;
+  const filtered=useMemo(()=>{
+    return UNITS.filter(u=>{
+      const act=overrides[u.id]||u.action;
+      if(hideDelivered && act==="delivered") return false;
+      if(filter!=="all" && act!==filter) return false;
+      if(colourFilter!=="all" && u.colour!==colourFilter) return false;
+      if(search){
+        const q=search.toLowerCase();
+        if(!u.sn.toLowerCase().includes(q) && !u.notes.toLowerCase().includes(q) && !u.issues.join(" ").toLowerCase().includes(q) && !String(u.id).includes(q)) return false;
+      }
       return true;
     });
-  }, [filter, colourFilter, search, overrides]);
+  },[filter,colourFilter,search,overrides,hideDelivered]);
 
-  const counts = useMemo(() => {
-    const c = {scrap:0,rework:0,"rework-conditional":0,diagnose:0,"diagnose-return":0,ship:0,total:UNITS.length};
-    UNITS.forEach(u => { c[overrides[u.sn] || u.action]++; });
+  const counts=useMemo(()=>{
+    const c={scrap:0,rework:0,"rework-conditional":0,diagnose:0,"diagnose-return":0,ship:0,delivered:0,missing:0,total:0};
+    UNITS.forEach(u=>{c[overrides[u.id]||u.action]++});
     return c;
-  }, [overrides]);
+  },[overrides]);
 
-  const toggleRow = (sn) => setExpandedRow(prev => prev === sn ? null : sn);
-  const cycleAction = (sn, e) => {
+  const toggleRow=id=>setExpandedRow(p=>p===id?null:id);
+  const cycleAction=(id,e)=>{
     e.stopPropagation();
-    const actions = ["scrap","rework","rework-conditional","diagnose","diagnose-return","ship"];
-    const current = overrides[sn] || UNITS.find(u=>u.sn===sn)?.action;
-    const next = actions[(actions.indexOf(current)+1) % actions.length];
-    setOverrides(prev => ({...prev, [sn]: next}));
+    const actions=["scrap","rework","rework-conditional","diagnose","diagnose-return","ship","delivered","missing"];
+    const cur=overrides[id]||UNITS.find(u=>u.id===id)?.action;
+    const next=actions[(actions.indexOf(cur)+1)%actions.length];
+    setOverrides(p=>({...p,[id]:next}));
   };
 
+  const totalCount=counts.scrap+counts.rework+counts["rework-conditional"]+counts.diagnose+counts["diagnose-return"]+counts.ship+counts.delivered+counts.missing;
+  const cardData=[
+    {key:"all",label:"Total",count:totalCount,isTotal:true},
+    {key:"delivered",label:"Delivered",count:counts.delivered},
+    {key:"rework",label:"Rework",count:counts.rework},
+    {key:"rework-conditional",label:"Conditional",count:counts["rework-conditional"]},
+    {key:"diagnose",label:"Diagnose",count:counts.diagnose},
+    {key:"diagnose-return",label:"Returns",count:counts["diagnose-return"]},
+    {key:"scrap",label:"Scrap",count:counts.scrap},
+    {key:"ship",label:"Ship Ready",count:counts.ship},
+  ];
+
   return (
-    <div style={{maxWidth:1100,margin:"0 auto",padding:"40px 24px"}}>
+    <div style={{maxWidth:1100,margin:"0 auto",padding:"36px 20px 60px"}}>
       {/* Header */}
-      <div style={{marginBottom:32,display:"flex",alignItems:"flex-end",justifyContent:"space-between",flexWrap:"wrap",gap:12}}>
-        <div>
-          <div style={{fontSize:11,fontWeight:700,letterSpacing:2,textTransform:"uppercase",color:"#CC2D30",marginBottom:6}}>LILA Pro · P150 Batch</div>
-          <h1 style={{fontSize:26,fontWeight:700,color:"#2C2A25",letterSpacing:"-0.02em"}}>Defect Assessment Dashboard</h1>
-          <p style={{fontSize:13,color:"#A39B8F",marginTop:4}}>58 units in-house — click rows for details, click action to override</p>
-        </div>
-        <div style={{fontSize:11,color:"#A39B8F",textAlign:"right"}}>
-          Source: Kishore's Notion<br/>Updated: April 2026
-        </div>
+      <div style={{marginBottom:28}}>
+        <div style={{fontSize:12,fontWeight:600,letterSpacing:1,textTransform:"uppercase",color:"#86868b",marginBottom:6}}>LILA Pro · P150 Batch · 150 Units</div>
+        <h1 style={{fontSize:28,fontWeight:700,color:"#1d1d1f",letterSpacing:"-0.025em"}}>Defect Assessment</h1>
+        <p style={{fontSize:14,color:"#86868b",marginTop:4}}>Complete inventory P150-001 through P150-150 — click rows for details, click action to override</p>
       </div>
 
       {/* Summary Cards */}
-      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:12,marginBottom:28}}>
-        {[
-          {key:"scrap",label:"Scrap",count:counts.scrap,color:"#991B1E",bg:"#991B1E08",borderC:"#991B1E25"},
-          {key:"rework",label:"Rework",count:counts.rework,color:"#3d6b4a",bg:"#4a7c5910",borderC:"#4a7c5925"},
-          {key:"rework-conditional",label:"Conditional",count:counts["rework-conditional"],color:"#8a7040",bg:"#C9A96E10",borderC:"#C9A96E30"},
-          {key:"diagnose",label:"Diagnose",count:counts.diagnose,color:"#5C564E",bg:"#5C564E08",borderC:"#5C564E20"},
-          {key:"diagnose-return",label:"Returns",count:counts["diagnose-return"],color:"#7a6248",bg:"#A68B6B10",borderC:"#A68B6B25"},
-          {key:"ship",label:"Ship Ready",count:counts.ship,color:"#2a6b4a",bg:"#2a6b4a10",borderC:"#2a6b4a25"},
-        ].map(c => (
-          <div key={c.key} onClick={() => setFilter(f => f===c.key?"all":c.key)}
-            style={{background: filter===c.key ? c.bg : "#FFFFFF",border:`1.5px solid ${filter===c.key ? c.color : c.borderC}`,
-              borderRadius:12,padding:"16px 18px",cursor:"pointer",transition:"all .2s",
-              boxShadow: filter===c.key ? `0 2px 12px ${c.color}15` : "0 1px 4px rgba(44,42,37,0.04)"}}>
-            <div style={{fontSize:32,fontWeight:700,color:c.color,letterSpacing:"-0.02em"}}>{c.count}</div>
-            <div style={{fontSize:12,fontWeight:600,color:c.color,opacity:.75,marginTop:2,letterSpacing:"0.02em"}}>{c.label}</div>
-          </div>
-        ))}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(8,1fr)",gap:8,marginBottom:24}}>
+        {cardData.map(c=>{
+          const isTotal=c.isTotal;
+          const cfg=isTotal?null:ACTION_CONFIG[c.key];
+          const active=isTotal?(filter==="all"):filter===c.key;
+          return(
+            <div key={c.key} onClick={()=>setFilter(isTotal?"all":(f=>f===c.key?"all":c.key))}
+              style={{background:isTotal?"#1d1d1f":"#fff",borderRadius:12,padding:"14px 12px",cursor:"pointer",transition:"all .2s",
+                border:active?(isTotal?"2px solid #1d1d1f":`2px solid ${cfg.dot}`):"1px solid #e5e5ea",
+                boxShadow:active?(isTotal?"0 0 0 3px rgba(29,29,31,0.15)":`0 0 0 3px ${cfg.dot}18`):"0 1px 3px rgba(0,0,0,0.04)"}}>
+              <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:6}}>
+                {!isTotal&&<span style={{width:7,height:7,borderRadius:"50%",background:cfg.dot}}/>}
+                <span style={{fontSize:10,fontWeight:600,color:isTotal?"#aeaeb2":"#86868b",letterSpacing:"0.02em"}}>{c.label}</span>
+              </div>
+              <div style={{fontSize:24,fontWeight:700,color:isTotal?"#fff":cfg.text,letterSpacing:"-0.03em"}}>{c.count}</div>
+            </div>
+          );
+        })}
       </div>
 
       {/* Filters */}
-      <div style={{display:"flex",gap:10,marginBottom:20,flexWrap:"wrap",alignItems:"center"}}>
-        <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search serial, notes, issue…"
-          style={{flex:1,minWidth:200,padding:"10px 14px",borderRadius:8,border:"1.5px solid #E8E0D4",background:"#FFFFFF",
-            color:"#2C2A25",fontSize:13,fontFamily:"'Raleway',sans-serif",outline:"none",transition:"border .2s"}}
-          onFocus={e=>e.target.style.borderColor="#C9A96E"} onBlur={e=>e.target.style.borderColor="#E8E0D4"}/>
+      <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap",alignItems:"center"}}>
+        <div style={{flex:1,minWidth:200,position:"relative"}}>
+          <span style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",color:"#aeaeb2",fontSize:14}}>⌕</span>
+          <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search ID, serial, notes, issue…"
+            style={{width:"100%",padding:"9px 12px 9px 32px",borderRadius:10,border:"1px solid #e5e5ea",background:"#fff",
+              color:"#1d1d1f",fontSize:13,fontFamily:"inherit",outline:"none",transition:"border .2s,box-shadow .2s"}}
+            onFocus={e=>{e.target.style.borderColor="#007aff";e.target.style.boxShadow="0 0 0 3px rgba(0,122,255,0.12)"}}
+            onBlur={e=>{e.target.style.borderColor="#e5e5ea";e.target.style.boxShadow="none"}}/>
+        </div>
         <select value={colourFilter} onChange={e=>setColourFilter(e.target.value)}
-          style={{padding:"10px 14px",borderRadius:8,border:"1.5px solid #E8E0D4",background:"#FFFFFF",
-            color:"#2C2A25",fontSize:13,fontFamily:"'Raleway',sans-serif",cursor:"pointer"}}>
-          <option value="all">All Colours</option>
-          <option value="White">White</option>
-          <option value="Black">Black</option>
-          <option value="Unknown">Unknown</option>
+          style={{padding:"9px 12px",borderRadius:10,border:"1px solid #e5e5ea",background:"#fff",color:"#1d1d1f",fontSize:13,fontFamily:"inherit"}}>
+          <option value="all">All Colours</option><option value="White">White</option><option value="Black">Black</option><option value="Unknown">Unknown</option>
         </select>
-        {filter !== "all" && (
-          <button onClick={() => setFilter("all")}
-            style={{padding:"10px 16px",borderRadius:8,border:"1.5px solid #E8E0D4",background:"#FFFFFF",
-              color:"#5C564E",fontSize:12,fontFamily:"'Raleway',sans-serif",fontWeight:600,cursor:"pointer"}}>
-            Clear Filter ✕
-          </button>
+        <label style={{display:"flex",alignItems:"center",gap:6,fontSize:13,color:"#6e6e73",cursor:"pointer",padding:"9px 14px",borderRadius:10,border:"1px solid #e5e5ea",background:hideDelivered?"#eef2ff":"#fff"}}>
+          <input type="checkbox" checked={hideDelivered} onChange={e=>setHideDelivered(e.target.checked)} style={{accentColor:"#6366f1"}}/>
+          Hide Delivered
+        </label>
+        {filter!=="all"&&(
+          <button onClick={()=>setFilter("all")} style={{padding:"9px 14px",borderRadius:10,border:"1px solid #e5e5ea",background:"#fff",color:"#1d1d1f",fontSize:12,fontFamily:"inherit",fontWeight:600,cursor:"pointer"}}>Clear ✕</button>
         )}
-        <span style={{fontSize:12,color:"#A39B8F",fontWeight:500}}>{filtered.length} of {UNITS.length}</span>
+        <span style={{fontSize:12,color:"#aeaeb2",fontWeight:500}}>{filtered.length} of {UNITS.length}</span>
       </div>
 
       {/* Table */}
-      <div style={{borderRadius:14,border:"1.5px solid #E8E0D4",overflow:"hidden",background:"#FFFFFF",
-        boxShadow:"0 2px 16px rgba(44,42,37,0.04)"}}>
+      <div style={{borderRadius:14,overflow:"hidden",background:"#fff",border:"1px solid #e5e5ea",boxShadow:"0 1px 4px rgba(0,0,0,0.04)"}}>
         <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
           <thead>
-            <tr style={{background:"#F5F1EB"}}>
-              <th style={thStyle}>Serial Number</th>
-              <th style={thStyle}>Colour</th>
-              <th style={thStyle}>Issue(s)</th>
-              <th style={thStyle}>Difficulty</th>
-              <th style={{...thStyle,textAlign:"center"}}>Proposed Action</th>
+            <tr style={{background:"#fafafa"}}>
+              {["Serial Number","Colour","Status","Issue(s)","Difficulty","Action"].map((h,i)=>(
+                <th key={h} style={{padding:"10px 14px",textAlign:i===5?"center":"left",color:"#86868b",fontWeight:600,fontSize:10,textTransform:"uppercase",letterSpacing:"0.06em",borderBottom:"1px solid #e5e5ea"}}>{h}</th>
+              ))}
             </tr>
           </thead>
           <tbody>
-            {filtered.map((u,i) => {
-              const act = overrides[u.sn] || u.action;
-              const cfg = ACTION_CONFIG[act];
-              const isExpanded = expandedRow === u.sn;
-              const isOverridden = overrides[u.sn] && overrides[u.sn] !== u.action;
-              return (
-                <React.Fragment key={u.sn}>
-                  <tr onClick={() => toggleRow(u.sn)}
-                    style={{background: isExpanded ? "#FAF8F5" : i%2===0 ? "#FFFFFF" : "#FDFCFB",
-                      cursor:"pointer",transition:"background .15s"}}
-                    onMouseEnter={e=>{if(!isExpanded)e.currentTarget.style.background="#FAF8F5"}}
-                    onMouseLeave={e=>{if(!isExpanded)e.currentTarget.style.background=i%2===0?"#FFFFFF":"#FDFCFB"}}>
-                    <td style={tdStyle}>
-                      <span style={{fontFamily:"'SF Mono','Courier New',monospace",fontWeight:700,fontSize:13,color:"#2C2A25"}}>{u.sn.slice(-3)}</span>
-                      <span style={{color:"#A39B8F",marginLeft:3,fontSize:11,fontFamily:"'SF Mono','Courier New',monospace"}}>{u.sn.slice(5,-3)}</span>
-                      {u.returned && <span style={{marginLeft:8,fontSize:10,padding:"2px 6px",borderRadius:4,background:"#A68B6B15",color:"#7a6248",border:"1px solid #A68B6B30",fontWeight:600}}>RTN</span>}
-                      {u.prepared && <span style={{marginLeft:8,fontSize:10,padding:"2px 6px",borderRadius:4,background:"#2a6b4a12",color:"#2a6b4a",border:"1px solid #2a6b4a25",fontWeight:600}}>PREP</span>}
+            {filtered.map((u,i)=>{
+              const act=overrides[u.id]||u.action;
+              const cfg=ACTION_CONFIG[act];
+              const isExp=expandedRow===u.id;
+              const isOver=overrides[u.id]&&overrides[u.id]!==u.action;
+              const isMissing=act==="missing";
+              const isDel=act==="delivered";
+              const rowOpacity=isMissing?.45:isDel?.55:1;
+
+              return(
+                <React.Fragment key={u.id}>
+                  <tr onClick={()=>toggleRow(u.id)}
+                    style={{background:isExp?"#fafafa":"#fff",cursor:"pointer",transition:"background .12s",opacity:rowOpacity}}
+                    onMouseEnter={e=>{if(!isExp)e.currentTarget.style.background="#fafafa"}}
+                    onMouseLeave={e=>{if(!isExp)e.currentTarget.style.background="#fff"}}>
+
+                    <td style={tdS}>
+                      {u.sn==="—"?(
+                        <span style={{color:"#d4d4d4",fontSize:12}}>—</span>
+                      ):(
+                        <span>
+                          <span style={{fontFamily:"'SF Mono',SFMono-Regular,Menlo,monospace",fontWeight:600,fontSize:12,color:"#1d1d1f"}}>{u.sn.slice(-3)}</span>
+                          <span style={{color:"#aeaeb2",marginLeft:2,fontSize:10,fontFamily:"'SF Mono',SFMono-Regular,Menlo,monospace"}}>{u.sn.slice(5,-3)}</span>
+                          {u.returned&&<span style={{marginLeft:6,fontSize:9,padding:"1px 5px",borderRadius:4,background:"#faf5ff",color:"#9333ea",border:"1px solid #e9d5ff",fontWeight:600}}>RTN</span>}
+                          {u.prepared&&<span style={{marginLeft:6,fontSize:9,padding:"1px 5px",borderRadius:4,background:"#f0fdfa",color:"#0d9488",border:"1px solid #99f6e4",fontWeight:600}}>PREP</span>}
+                        </span>
+                      )}
                     </td>
-                    <td style={tdStyle}>
-                      <span style={{display:"inline-flex",alignItems:"center",gap:6}}>
-                        <span style={{width:12,height:12,borderRadius:"50%",border:"1.5px solid #E8E0D4",
-                          background:u.colour==="White"?"#FFFFFF":u.colour==="Black"?"#2C2A25":"#A39B8F",display:"inline-block",
-                          boxShadow:"inset 0 1px 2px rgba(0,0,0,0.08)"}}/>
-                        <span style={{color:"#5C564E",fontSize:12,fontWeight:500}}>{u.colour}</span>
+
+                    <td style={tdS}>
+                      {u.colour==="—"?<span style={{color:"#d4d4d4"}}>—</span>:(
+                        <span style={{display:"inline-flex",alignItems:"center",gap:5}}>
+                          <span style={{width:12,height:12,borderRadius:"50%",border:"1.5px solid #d2d2d7",
+                            background:u.colour==="White"?"#fff":u.colour==="Black"?"#1d1d1f":"#aeaeb2",
+                            boxShadow:"0 1px 2px rgba(0,0,0,0.08)"}}/>
+                          <span style={{color:"#6e6e73",fontSize:12,fontWeight:500}}>{u.colour}</span>
+                        </span>
+                      )}
+                    </td>
+
+                    <td style={tdS}>
+                      <span style={{fontSize:10,padding:"3px 8px",borderRadius:5,fontWeight:600,
+                        background:cfg.bg,color:cfg.text,border:`1px solid ${cfg.border}`}}>
+                        {cfg.label}
                       </span>
                     </td>
-                    <td style={tdStyle}>
-                      <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
-                        {u.issues.map((iss,j) => {
-                          const isUndiag = iss.includes("Undiagnosed");
-                          const isReturn = iss==="Customer Return" || iss==="Odor Issue";
-                          const isReady = iss.includes("None");
-                          return (
-                            <span key={j} style={{fontSize:11,padding:"3px 8px",borderRadius:5,fontWeight:500,
-                              background: isUndiag ? "#5C564E0C" : isReturn ? "#A68B6B12" : isReady ? "#2a6b4a10" : "#C17F5E12",
-                              color: isUndiag ? "#5C564E" : isReturn ? "#7a6248" : isReady ? "#2a6b4a" : "#9a5030",
-                              border:`1px solid ${isUndiag ? "#5C564E18" : isReturn ? "#A68B6B25" : isReady ? "#2a6b4a20" : "#C17F5E25"}`
-                            }}>{iss}</span>
-                          );
+
+                    <td style={tdS}>
+                      <div style={{display:"flex",flexWrap:"wrap",gap:3}}>
+                        {u.issues.map((iss,j)=>{
+                          const isU=iss.includes("Undiagnosed"),isR=iss==="Customer Return"||iss==="Odor Issue",isOk=iss.includes("None"),isDlv=iss.includes("Delivered"),isMi=iss.includes("Not in");
+                          const s=isMi?{bg:"#fafafa",c:"#a3a3a3",b:"#e5e5e5"}:isDlv?{bg:"#f8fafc",c:"#64748b",b:"#e2e8f0"}:isU?{bg:"#eef2ff",c:"#4f46e5",b:"#c7d2fe"}:isR?{bg:"#faf5ff",c:"#9333ea",b:"#e9d5ff"}:isOk?{bg:"#f0fdfa",c:"#0d9488",b:"#99f6e4"}:{bg:"#fff7ed",c:"#c2410c",b:"#fed7aa"};
+                          return <span key={j} style={{fontSize:10,padding:"2px 7px",borderRadius:5,fontWeight:500,background:s.bg,color:s.c,border:`1px solid ${s.b}`}}>{iss}</span>;
                         })}
                       </div>
                     </td>
-                    <td style={tdStyle}>
-                      {u.difficulty && (() => {
-                        const dc = DIFF_COLORS[u.difficulty] || DIFF_COLORS.Unknown;
-                        return <span style={{fontSize:11,padding:"3px 8px",borderRadius:5,fontWeight:600,
-                          background:dc.bg,color:dc.text,border:`1px solid ${dc.border}`}}>{u.difficulty}</span>;
+
+                    <td style={tdS}>
+                      {u.difficulty&&(()=>{
+                        const dc=DIFF_COLORS[u.difficulty]||DIFF_COLORS.Unknown;
+                        return <span style={{fontSize:10,padding:"2px 7px",borderRadius:5,fontWeight:600,background:dc.bg,color:dc.text,border:`1px solid ${dc.border}`}}>{u.difficulty}</span>;
                       })()}
                     </td>
-                    <td style={{...tdStyle,textAlign:"center"}}>
-                      <button onClick={(e) => cycleAction(u.sn, e)}
-                        style={{fontSize:11,padding:"6px 12px",borderRadius:7,cursor:"pointer",fontWeight:700,
-                          fontFamily:"'Raleway',sans-serif",letterSpacing:"0.01em",
-                          background:cfg.bg,color:cfg.text,border:`1.5px solid ${cfg.border}`,
-                          boxShadow: isOverridden ? `0 0 0 2px ${cfg.text}25` : "none",
-                          transition:"all .15s"}}>
-                        {cfg.icon} {cfg.label}
+
+                    <td style={{...tdS,textAlign:"center"}}>
+                      <button onClick={e=>cycleAction(u.id,e)}
+                        style={{fontSize:11,padding:"5px 11px",borderRadius:7,cursor:"pointer",fontWeight:600,
+                          fontFamily:"inherit",background:cfg.bg,color:cfg.text,border:`1.5px solid ${cfg.border}`,
+                          boxShadow:isOver?`0 0 0 2px ${cfg.dot}30`:"none",transition:"all .15s"}}>
+                        <span style={{marginRight:3}}>{cfg.icon}</span>{cfg.label}
                       </button>
                     </td>
                   </tr>
-                  {isExpanded && (
-                    <tr style={{background:"#FAF8F5"}}>
-                      <td colSpan={5} style={{padding:"16px 24px 20px",borderBottom:"1.5px solid #E8E0D4"}}>
-                        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20,fontSize:13}}>
+
+                  {isExp&&!isMissing&&(
+                    <tr style={{background:"#fafafa"}}>
+                      <td colSpan={6} style={{padding:"0 14px 14px",borderBottom:"1px solid #e5e5ea"}}>
+                        <div style={{background:"#fff",borderRadius:10,border:"1px solid #e5e5ea",padding:"14px 18px",
+                          display:"grid",gridTemplateColumns:"1fr 1fr",gap:20,fontSize:13}}>
                           <div>
-                            <div style={{color:"#CC2D30",marginBottom:6,fontWeight:700,textTransform:"uppercase",fontSize:10,letterSpacing:1.5}}>Recommendation</div>
-                            <div style={{color:"#2C2A25",lineHeight:1.7,fontWeight:400}}>{u.fix || "Run PC application test to identify failure mode. Update Machine Counter with results."}</div>
+                            <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1.2,color:cfg.text,marginBottom:5}}>Recommendation</div>
+                            <div style={{color:"#1d1d1f",lineHeight:1.6}}>{u.fix||(isDel?"With customer. No action needed.":"Run PC application test to identify failure mode.")}</div>
                           </div>
                           <div>
-                            <div style={{color:"#A39B8F",marginBottom:6,fontWeight:700,textTransform:"uppercase",fontSize:10,letterSpacing:1.5}}>Details</div>
-                            <div style={{color:"#5C564E",lineHeight:1.7}}>{u.notes || "No additional notes"}</div>
-                            <div style={{marginTop:10,padding:"8px 12px",borderRadius:6,background:"#F5F1EB",border:"1px solid #E8E0D4",fontSize:11,color:"#A39B8F"}}>
-                              Counter ID: <span style={{color:"#5C564E",fontWeight:600}}>P150-{u.id}</span> · Defect: <span style={{color:"#5C564E",fontWeight:600}}>{u.defect?"Yes":"No"}</span> · Returned: <span style={{color:"#5C564E",fontWeight:600}}>{u.returned?"Yes":"No"}</span>
+                            <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:1.2,color:"#86868b",marginBottom:5}}>Details</div>
+                            <div style={{color:"#6e6e73",lineHeight:1.6}}>{u.notes||"No additional notes"}</div>
+                            <div style={{marginTop:8,padding:"7px 10px",borderRadius:7,background:"#f5f5f7",fontSize:11,color:"#aeaeb2"}}>
+                              P150-{String(u.id).padStart(3,"0")} · SN: {u.sn} · Defect: <b style={{color:"#1d1d1f"}}>{u.defect?"Yes":"No"}</b> · Returned: <b style={{color:"#1d1d1f"}}>{u.returned?"Yes":"No"}</b>
                             </div>
                           </div>
                         </div>
@@ -299,60 +387,54 @@ function App() {
       </div>
 
       {/* Recovery Footer */}
-      <div style={{marginTop:28,padding:24,borderRadius:14,border:"1.5px solid #E8E0D4",background:"#FFFFFF",
-        boxShadow:"0 2px 16px rgba(44,42,37,0.04)"}}>
-        <h3 style={{fontSize:14,fontWeight:700,color:"#2C2A25",marginBottom:14,letterSpacing:"-0.01em"}}>Recovery Estimate</h3>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:16,fontSize:13}}>
-          <div style={{padding:"12px 16px",borderRadius:8,background:"#4a7c590A",border:"1px solid #4a7c5920"}}>
-            <div style={{color:"#3d6b4a",fontWeight:700,fontSize:16}}>{counts.rework + counts.ship}</div>
-            <div style={{color:"#5C564E",fontSize:11,marginTop:2}}>Recoverable now (low-effort rework + ready)</div>
-          </div>
-          <div style={{padding:"12px 16px",borderRadius:8,background:"#C9A96E0A",border:"1px solid #C9A96E25"}}>
-            <div style={{color:"#8a7040",fontWeight:700,fontSize:16}}>{counts["rework-conditional"]}</div>
-            <div style={{color:"#5C564E",fontSize:11,marginTop:2}}>Pending assessment or parts procurement</div>
-          </div>
-          <div style={{padding:"12px 16px",borderRadius:8,background:"#5C564E08",border:"1px solid #5C564E15"}}>
-            <div style={{color:"#5C564E",fontWeight:700,fontSize:16}}>{counts.diagnose + counts["diagnose-return"]}</div>
-            <div style={{color:"#5C564E",fontSize:11,marginTop:2}}>Need PC test + physical inspection</div>
-          </div>
-          <div style={{padding:"12px 16px",borderRadius:8,background:"#991B1E08",border:"1px solid #991B1E18"}}>
-            <div style={{color:"#991B1E",fontWeight:700,fontSize:16}}>{counts.scrap}</div>
-            <div style={{color:"#5C564E",fontSize:11,marginTop:2}}>Scrap → harvest parts for rework</div>
-          </div>
+      <div style={{marginTop:24,borderRadius:14,background:"#fff",border:"1px solid #e5e5ea",overflow:"hidden",boxShadow:"0 1px 4px rgba(0,0,0,0.04)"}}>
+        <div style={{padding:"18px 22px 0"}}>
+          <h3 style={{fontSize:15,fontWeight:700,color:"#1d1d1f",letterSpacing:"-0.01em"}}>Recovery Estimate <span style={{fontSize:12,fontWeight:400,color:"#86868b"}}>(non-delivered units)</span></h3>
         </div>
-
-        {/* Progress bar */}
-        <div style={{marginTop:20,padding:"14px 16px",borderRadius:8,background:"#F5F1EB",border:"1px solid #E8E0D4"}}>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:0,padding:"14px 10px"}}>
+          {[
+            {n:counts.rework+counts.ship,label:"Recoverable now",sub:"Low-effort rework + ready to ship",color:ACTION_CONFIG.rework},
+            {n:counts["rework-conditional"],label:"Pending assessment",sub:"Need software fix or parts",color:ACTION_CONFIG["rework-conditional"]},
+            {n:counts.diagnose+counts["diagnose-return"],label:"Need testing",sub:"PC test + physical inspection",color:ACTION_CONFIG.diagnose},
+            {n:counts.scrap,label:"Parts donors",sub:"Harvest components for rework",color:ACTION_CONFIG.scrap},
+          ].map((b,i)=>(
+            <div key={i} style={{padding:"6px 12px",borderRight:i<3?"1px solid #f0f0f0":"none"}}>
+              <div style={{fontSize:22,fontWeight:700,color:b.color.text,letterSpacing:"-0.02em"}}>{b.n}</div>
+              <div style={{fontSize:12,fontWeight:600,color:"#1d1d1f",marginTop:1}}>{b.label}</div>
+              <div style={{fontSize:11,color:"#aeaeb2",marginTop:1}}>{b.sub}</div>
+            </div>
+          ))}
+        </div>
+        <div style={{margin:"0 22px 18px",padding:"14px",borderRadius:10,background:"#f5f5f7"}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-            <span style={{fontSize:11,fontWeight:700,color:"#2C2A25",textTransform:"uppercase",letterSpacing:1}}>Best-Case Recovery</span>
-            <span style={{fontSize:14,fontWeight:700,color:"#CC2D30"}}>{Math.round((1 - counts.scrap/UNITS.length)*100)}%</span>
+            <span style={{fontSize:10,fontWeight:700,color:"#6e6e73",textTransform:"uppercase",letterSpacing:1}}>In-House Recovery Potential</span>
+            <span style={{fontSize:15,fontWeight:700,color:"#1d1d1f"}}>{Math.round(((counts.rework+counts.ship+counts["rework-conditional"]+counts.diagnose+counts["diagnose-return"])/(UNITS.length-counts.delivered-counts.missing))*100)||0}%</span>
           </div>
-          <div style={{height:8,borderRadius:4,background:"#E8E0D4",overflow:"hidden",display:"flex"}}>
-            <div style={{width:`${(counts.rework+counts.ship)/UNITS.length*100}%`,background:"#4a7c59",transition:"width .4s"}}/>
-            <div style={{width:`${counts["rework-conditional"]/UNITS.length*100}%`,background:"#C9A96E",transition:"width .4s"}}/>
-            <div style={{width:`${(counts.diagnose+counts["diagnose-return"])/UNITS.length*100}%`,background:"#A39B8F",transition:"width .4s"}}/>
-            <div style={{width:`${counts.scrap/UNITS.length*100}%`,background:"#991B1E",transition:"width .4s"}}/>
+          <div style={{height:8,borderRadius:4,background:"#e5e5ea",overflow:"hidden",display:"flex"}}>
+            {[
+              {w:counts.delivered,c:"#94a3b8"},{w:counts.rework+counts.ship,c:"#22c55e"},
+              {w:counts["rework-conditional"],c:"#eab308"},{w:counts.diagnose+counts["diagnose-return"],c:"#6366f1"},
+              {w:counts.scrap,c:"#ef4444"},{w:counts.missing,c:"#d4d4d4"}
+            ].map((s,i)=><div key={i} style={{width:`${s.w/UNITS.length*100}%`,background:s.c,transition:"width .4s"}}/>)}
           </div>
-          <div style={{display:"flex",gap:16,marginTop:8,fontSize:10,color:"#A39B8F",fontWeight:500}}>
-            <span><span style={{display:"inline-block",width:8,height:8,borderRadius:2,background:"#4a7c59",marginRight:4,verticalAlign:"middle"}}/>Rework</span>
-            <span><span style={{display:"inline-block",width:8,height:8,borderRadius:2,background:"#C9A96E",marginRight:4,verticalAlign:"middle"}}/>Conditional</span>
-            <span><span style={{display:"inline-block",width:8,height:8,borderRadius:2,background:"#A39B8F",marginRight:4,verticalAlign:"middle"}}/>Diagnose</span>
-            <span><span style={{display:"inline-block",width:8,height:8,borderRadius:2,background:"#991B1E",marginRight:4,verticalAlign:"middle"}}/>Scrap</span>
+          <div style={{display:"flex",gap:14,marginTop:8,fontSize:10,color:"#86868b",fontWeight:500,flexWrap:"wrap"}}>
+            {[{c:"#94a3b8",l:`Delivered (${counts.delivered})`},{c:"#22c55e",l:`Rework (${counts.rework+counts.ship})`},{c:"#eab308",l:`Conditional (${counts["rework-conditional"]})`},{c:"#6366f1",l:`Diagnose (${counts.diagnose+counts["diagnose-return"]})`},{c:"#ef4444",l:`Scrap (${counts.scrap})`},{c:"#d4d4d4",l:`Missing (${counts.missing})`}].map(d=>(
+              <span key={d.l}><span style={{display:"inline-block",width:7,height:7,borderRadius:2,background:d.c,marginRight:4,verticalAlign:"middle"}}/>{d.l}</span>
+            ))}
           </div>
         </div>
       </div>
 
-      <div style={{marginTop:20,textAlign:"center",fontSize:11,color:"#A39B8F",padding:8,fontWeight:500}}>
-        VCycene Inc. · LILA Pro P150 · Generated {new Date().toLocaleDateString()}
+      <div style={{marginTop:16,textAlign:"center",fontSize:11,color:"#aeaeb2"}}>
+        VCycene Inc. · LILA Pro P150 · Source: Kishore's Notion · {new Date().toLocaleDateString()}
       </div>
     </div>
   );
 }
 
-const thStyle = {padding:"12px 16px",textAlign:"left",color:"#5C564E",fontWeight:700,fontSize:10,textTransform:"uppercase",letterSpacing:1.2,borderBottom:"1.5px solid #E8E0D4",fontFamily:"'Raleway',sans-serif"};
-const tdStyle = {padding:"12px 16px",borderBottom:"1px solid #F5F1EB",verticalAlign:"middle"};
+const tdS={padding:"9px 14px",borderBottom:"1px solid #f0f0f0",verticalAlign:"middle"};
 
-ReactDOM.render(<App/>, document.getElementById("root"));
+ReactDOM.render(<App/>,document.getElementById("root"));
 </script>
 </body>
 </html>
