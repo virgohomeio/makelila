@@ -28,15 +28,50 @@ export function ReplacementsTab() {
   }, [units]);
 
   const stats = useMemo(() => {
-    const s = { total: 0, queued: 0, assigned: 0, priority: 0 };
+    const now = Date.now();
+    const batchNeed = new Map<string, number>(); // batch → count of queued
+    let total = 0, queued = 0, assigned = 0, shipped = 0, priority = 0;
+    let oldestQueued: number | null = null;
     for (const r of queue) {
-      s.total++;
-      if (r.status === 'queued') s.queued++;
-      if (r.status === 'assigned') s.assigned++;
-      if (r.priority && r.status !== 'closed') s.priority++;
+      total++;
+      if (r.status === 'queued') {
+        queued++;
+        const b = r.batch_preference ?? '?';
+        batchNeed.set(b, (batchNeed.get(b) ?? 0) + 1);
+        const t = new Date(r.created_at).getTime();
+        if (oldestQueued === null || t < oldestQueued) oldestQueued = t;
+      }
+      if (r.status === 'assigned') assigned++;
+      if (r.status === 'shipped')  shipped++;
+      if (r.priority && r.status !== 'closed') priority++;
     }
-    return s;
+    const oldestDays = oldestQueued !== null
+      ? Math.floor((now - oldestQueued) / 86_400_000)
+      : null;
+    const fillRate = total > 0 ? Math.round(((assigned + shipped) / total) * 100) : 0;
+    const batchNeedSummary = [...batchNeed.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([b, n]) => `${b}:${n}`)
+      .join(' · ') || '—';
+    return { total, queued, assigned, shipped, priority, oldestDays, fillRate, batchNeedSummary };
   }, [queue]);
+
+  const availabilityVsNeed = useMemo(() => {
+    // Per preferred batch: how many available units vs how many queued.
+    // Surfaces "we don't have enough P100 to satisfy queue" at a glance.
+    const need = new Map<string, number>();
+    for (const r of queue) {
+      if (r.status !== 'queued') continue;
+      const b = r.batch_preference ?? 'P100';
+      need.set(b, (need.get(b) ?? 0) + 1);
+    }
+    const out: { batch: string; available: number; needed: number; gap: number }[] = [];
+    for (const [b, needed] of need) {
+      const available = (availableByBatch.get(b) ?? []).length;
+      out.push({ batch: b, available, needed, gap: available - needed });
+    }
+    return out.sort((a, b) => a.gap - b.gap);
+  }, [queue, availableByBatch]);
 
   const handleAssign = async (row: ReplQueueRow, serial: string) => {
     if (!serial) return;
@@ -72,11 +107,23 @@ export function ReplacementsTab() {
   return (
     <div className={styles.tabContent}>
       <div className={styles.kpiRow}>
-        <KPI label="Total in queue" value={stats.total} />
-        <KPI label="Awaiting assign" value={stats.queued} tone={stats.queued > 0 ? 'warn' : undefined} />
-        <KPI label="Assigned" value={stats.assigned} />
-        <KPI label="Priority ⭐" value={stats.priority} />
+        <KPI label="Total in queue" value={stats.total} sub={`${stats.fillRate}% filled`} />
+        <KPI label="Awaiting assign" value={stats.queued} tone={stats.queued > 0 ? 'warn' : undefined} sub={stats.queued > 0 ? stats.batchNeedSummary : 'queue empty'} />
+        <KPI label="Oldest waiting" value={stats.oldestDays !== null ? `${stats.oldestDays}d` : '—'} tone={stats.oldestDays !== null && stats.oldestDays > 14 ? 'warn' : undefined} sub={stats.oldestDays !== null ? 'days since queued' : undefined} />
+        <KPI label="Priority ⭐" value={stats.priority} sub={stats.priority > 0 ? 'expedite needed' : 'normal'} />
       </div>
+
+      {availabilityVsNeed.length > 0 && (
+        <div className={styles.availStrip}>
+          <span className={styles.availStripLabel}>Stock vs. need:</span>
+          {availabilityVsNeed.map(a => (
+            <span key={a.batch} className={a.gap < 0 ? styles.availGap : styles.availOk}>
+              <strong>{a.batch}</strong>: {a.available} ready / {a.needed} queued
+              {a.gap < 0 ? ` · ${Math.abs(a.gap)} short` : ` · +${a.gap} buffer`}
+            </span>
+          ))}
+        </div>
+      )}
 
       {error && <div className={styles.errorBar}>{error}</div>}
 
@@ -159,11 +206,12 @@ export function ReplacementsTab() {
   );
 }
 
-function KPI({ label, value, tone }: { label: string; value: number | string; tone?: 'warn' }) {
+function KPI({ label, value, tone, sub }: { label: string; value: number | string; tone?: 'warn'; sub?: string }) {
   return (
     <div className={styles.kpi}>
       <div className={styles.kpiLabel}>{label}</div>
       <div className={`${styles.kpiValue} ${tone === 'warn' ? styles.kpiWarn : ''}`}>{value}</div>
+      {sub && <div className={styles.kpiSub}>{sub}</div>}
     </div>
   );
 }

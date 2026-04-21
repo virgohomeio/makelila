@@ -45,15 +45,35 @@ export function HistoryTab() {
     const d7  = now - 7  * 86_400_000;
     const d30 = now - 30 * 86_400_000;
     const perBatch: Record<string, number> = {};
-    let last7 = 0, last30 = 0;
+    const customers = new Map<string, number>();
+    let last7 = 0, last30 = 0, withDate = 0, undated = 0;
+    let earliest = Infinity, latest = 0;
+    let testCount = 0;
     for (const u of shipped) {
       perBatch[u.batch] = (perBatch[u.batch] ?? 0) + 1;
-      if (!u.shipped_at) continue;
+      if (u.customer_name?.toLowerCase().includes('(test)')) { testCount++; continue; }
+      const c = u.customer_name ?? '—';
+      customers.set(c, (customers.get(c) ?? 0) + 1);
+      if (!u.shipped_at) { undated++; continue; }
+      withDate++;
       const t = new Date(u.shipped_at).getTime();
+      if (t < earliest) earliest = t;
+      if (t > latest)   latest   = t;
       if (t >= d7)  last7++;
       if (t >= d30) last30++;
     }
-    return { total: shipped.length, last7, last30, perBatch };
+    const days = earliest === Infinity ? 0 : Math.max(1, Math.round((latest - earliest) / 86_400_000));
+    const perWeek = days > 0 ? +((withDate / days) * 7).toFixed(1) : 0;
+    // Customers with multiple units = replacement chain
+    const repeatCustomers = [...customers.entries()].filter(([, n]) => n > 1).length;
+    const totalCustomers = customers.size;
+    return {
+      total: shipped.length, last7, last30, perBatch,
+      perWeek, undated, testCount,
+      latest: latest ? new Date(latest) : null,
+      earliest: earliest === Infinity ? null : new Date(earliest),
+      totalCustomers, repeatCustomers,
+    };
   }, [shipped]);
 
   if (loading) return <div className={styles.loading}>Loading fulfillment history…</div>;
@@ -61,12 +81,15 @@ export function HistoryTab() {
   return (
     <div className={styles.tabContent}>
       <div className={styles.kpiRow}>
-        <KPI label="Total shipped (all time)" value={stats.total} />
-        <KPI label="Last 7 days" value={stats.last7} />
-        <KPI label="Last 30 days" value={stats.last30} />
+        <KPI label="Total shipped" value={stats.total} sub={stats.testCount > 0 ? `incl. ${stats.testCount} test` : undefined} />
+        <KPI label="Last 30 days" value={stats.last30} sub={`${stats.last7} in last 7d`} />
+        <KPI label="Velocity" value={`${stats.perWeek}/wk`} sub={stats.earliest ? `since ${formatDate(stats.earliest.toISOString())}` : undefined} />
+        <KPI label="Unique customers" value={stats.totalCustomers} sub={stats.repeatCustomers > 0 ? `${stats.repeatCustomers} got replacements` : undefined} />
         <KPI label="By batch"
-          value={`P50:${stats.perBatch.P50 ?? 0} · P150:${stats.perBatch.P150 ?? 0} · P50N:${stats.perBatch.P50N ?? 0} · P100:${stats.perBatch.P100 ?? 0}`}
+          value={`P50:${stats.perBatch.P50 ?? 0} · P150:${stats.perBatch.P150 ?? 0}`}
+          sub={`P50N:${stats.perBatch.P50N ?? 0} · P100:${stats.perBatch.P100 ?? 0}`}
         />
+        <KPI label="Undated rows" value={stats.undated} sub={stats.undated > 0 ? 'no shipped_at on file' : 'all dated'} />
       </div>
 
       <div className={styles.filterBar}>
@@ -139,11 +162,12 @@ function formatDate(iso: string | null): string {
   return new Date(iso).toLocaleDateString('en-US', { year: '2-digit', month: 'short', day: 'numeric' });
 }
 
-function KPI({ label, value }: { label: string; value: number | string }) {
+function KPI({ label, value, sub }: { label: string; value: number | string; sub?: string }) {
   return (
     <div className={styles.kpi}>
       <div className={styles.kpiLabel}>{label}</div>
       <div className={styles.kpiValue}>{value}</div>
+      {sub && <div className={styles.kpiSub}>{sub}</div>}
     </div>
   );
 }

@@ -32,18 +32,33 @@ export function ReturnsTab() {
   }, [returns, filter, search]);
 
   const stats = useMemo(() => {
-    const s = { total: 0, open: 0, refunded: 0, pending: 0, refundedUsd: 0 };
+    const reasons = new Map<string, number>();
+    const conditions = { unused: 0, used: 0, damaged: 0 };
+    let total = 0, open = 0, refunded = 0, pending = 0, refundedUsd = 0;
+    let canada = 0, usa = 0;
+    let amounts: number[] = [];
     for (const r of returns) {
-      s.total++;
+      total++;
+      if (r.channel === 'Canada') canada++;
+      else if (r.channel === 'USA') usa++;
+      if (r.condition && conditions[r.condition] !== undefined) conditions[r.condition]++;
+      if (r.reason) reasons.set(r.reason, (reasons.get(r.reason) ?? 0) + 1);
       if (r.status === 'refunded' || r.status === 'closed') {
-        s.refunded++;
-        s.refundedUsd += Number(r.refund_amount_usd ?? 0);
+        refunded++;
+        const amt = Number(r.refund_amount_usd ?? 0);
+        refundedUsd += amt;
+        if (amt > 0) amounts.push(amt);
       } else {
-        s.open++;
-        if (r.status === 'received' || r.status === 'inspected') s.pending++;
+        open++;
+        if (r.status === 'received' || r.status === 'inspected') pending++;
       }
     }
-    return s;
+    const topReason = [...reasons.entries()].sort((a, b) => b[1] - a[1])[0];
+    const avgRefund = amounts.length > 0 ? Math.round(amounts.reduce((a, b) => a + b, 0) / amounts.length) : 0;
+    return {
+      total, open, refunded, pending, refundedUsd,
+      canada, usa, conditions, topReason, avgRefund,
+    };
   }, [returns]);
 
   const commit = async (id: string) => {
@@ -68,10 +83,11 @@ export function ReturnsTab() {
   return (
     <div className={styles.tabContent}>
       <div className={styles.kpiRow}>
-        <KPI label="Total returns" value={stats.total} />
-        <KPI label="Open" value={stats.open} tone={stats.pending > 0 ? 'warn' : undefined} />
-        <KPI label="Refunded" value={stats.refunded} />
-        <KPI label="Refunded $" value={`$${stats.refundedUsd.toLocaleString('en-US')}`} />
+        <KPI label="Total returns" value={stats.total} sub={`Canada ${stats.canada} · US ${stats.usa}`} />
+        <KPI label="Open" value={stats.open} tone={stats.pending > 0 ? 'warn' : undefined} sub={stats.pending > 0 ? `${stats.pending} awaiting refund` : 'all advanced'} />
+        <KPI label="Refunded $" value={`$${stats.refundedUsd.toLocaleString('en-US')}`} sub={`avg $${stats.avgRefund.toLocaleString('en-US')}/return`} />
+        <KPI label="Top reason" value={stats.topReason ? stats.topReason[0] : '—'} sub={stats.topReason ? `${stats.topReason[1]} returns` : undefined} />
+        <KPI label="By condition" value={`${stats.conditions.unused}u · ${stats.conditions.used}us · ${stats.conditions.damaged}d`} sub="unused / used / damaged" />
       </div>
 
       <div className={styles.filterBar}>
@@ -157,11 +173,12 @@ export function ReturnsTab() {
   );
 }
 
-function KPI({ label, value, tone }: { label: string; value: number | string; tone?: 'warn' }) {
+function KPI({ label, value, tone, sub }: { label: string; value: number | string; tone?: 'warn'; sub?: string }) {
   return (
     <div className={styles.kpi}>
       <div className={styles.kpiLabel}>{label}</div>
       <div className={`${styles.kpiValue} ${tone === 'warn' ? styles.kpiWarn : ''}`}>{value}</div>
+      {sub && <div className={styles.kpiSub}>{sub}</div>}
     </div>
   );
 }

@@ -45,10 +45,14 @@ export function DeliveryMapTab() {
     const now = Date.now();
     const last7 = now - 7 * 86_400_000;
     const last30 = now - 30 * 86_400_000;
+    const last90 = now - 90 * 86_400_000;
     const carriers = new Map<string, number>();
     const regions = new Map<string, { country: 'CA' | 'US' | '??'; count: number }>();
-    let ca = 0, us = 0, unknown = 0, n7 = 0, n30 = 0;
-    for (const u of shipped) {
+    let ca = 0, us = 0, unknown = 0, n7 = 0, n30 = 0, n90 = 0;
+    let earliest = Infinity, latest = 0;
+    // exclude test fulfillments from "real customer" tallies
+    const realShipped = shipped.filter(u => !u.customer_name?.toLowerCase().includes('(test)'));
+    for (const u of realShipped) {
       const r = parseRegion(u.location);
       if (r.country === 'CA') ca++;
       else if (r.country === 'US') us++;
@@ -60,15 +64,35 @@ export function DeliveryMapTab() {
       const c = u.carrier ?? 'Unknown';
       carriers.set(c, (carriers.get(c) ?? 0) + 1);
 
-      const t = new Date(u.shipped_at!).getTime();
+      const t = u.shipped_at ? new Date(u.shipped_at).getTime() : 0;
+      if (!t) continue;
+      if (t < earliest) earliest = t;
+      if (t > latest) latest = t;
       if (t >= last7) n7++;
       if (t >= last30) n30++;
+      if (t >= last90) n90++;
     }
     const carrierList = [...carriers.entries()].sort((a, b) => b[1] - a[1]);
     const regionList = [...regions.entries()]
       .sort((a, b) => b[1].count - a[1].count)
       .map(([code, v]) => ({ code, ...v }));
-    return { ca, us, unknown, n7, n30, total: shipped.length, carrierList, regionList };
+    // Velocity: shipments per week over the period covered by data
+    const days = earliest === Infinity ? 0 : Math.max(1, Math.round((latest - earliest) / 86_400_000));
+    const perWeek = days > 0 ? +((realShipped.length / days) * 7).toFixed(1) : 0;
+    const topRegion = regionList[0];
+    const topCarrier = carrierList[0];
+    return {
+      ca, us, unknown, n7, n30, n90,
+      total: realShipped.length,
+      testCount: shipped.length - realShipped.length,
+      perWeek,
+      latest: latest ? new Date(latest) : null,
+      earliest: earliest === Infinity ? null : new Date(earliest),
+      topRegion,
+      topCarrier,
+      carrierList,
+      regionList,
+    };
   }, [shipped]);
 
   if (loading) return <div className={styles.loading}>Loading shipments…</div>;
@@ -76,10 +100,12 @@ export function DeliveryMapTab() {
   return (
     <div className={styles.tabContent}>
       <div className={styles.kpiRow}>
-        <KPI label="Total shipped" value={stats.total} />
-        <KPI label="Last 7 days" value={stats.n7} />
-        <KPI label="Last 30 days" value={stats.n30} />
-        <KPI label="Canada / US" value={`${stats.ca} / ${stats.us}`} />
+        <KPI label="Customer shipments" value={stats.total} sub={stats.testCount > 0 ? `+ ${stats.testCount} test` : undefined} />
+        <KPI label="Last 30 days" value={stats.n30} sub={`${stats.n7} in last 7d`} />
+        <KPI label="Velocity" value={`${stats.perWeek}/wk`} sub="shipments per week" />
+        <KPI label="Canada / US" value={`${stats.ca} / ${stats.us}`} sub={stats.unknown > 0 ? `+ ${stats.unknown} unknown` : undefined} />
+        <KPI label="Top destination" value={stats.topRegion ? `${stats.topRegion.code} · ${stats.topRegion.count}` : '—'} sub={stats.topRegion ? stats.topRegion.country : undefined} />
+        <KPI label="Top carrier" value={stats.topCarrier ? stats.topCarrier[0] : '—'} sub={stats.topCarrier ? `${stats.topCarrier[1]} shipments` : undefined} />
       </div>
 
       <div className={styles.mapGrid}>
@@ -93,11 +119,12 @@ export function DeliveryMapTab() {
   );
 }
 
-function KPI({ label, value }: { label: string; value: number | string }) {
+function KPI({ label, value, sub }: { label: string; value: number | string; sub?: string }) {
   return (
     <div className={styles.kpi}>
       <div className={styles.kpiLabel}>{label}</div>
       <div className={styles.kpiValue}>{value}</div>
+      {sub && <div className={styles.kpiSub}>{sub}</div>}
     </div>
   );
 }

@@ -70,7 +70,47 @@
   color: var(--color-ink);
   font-variant-numeric: tabular-nums;
 }
+.kpiSub {
+  font-size: 10px;
+  color: var(--color-ink-subtle);
+  margin-top: 2px;
+}
 .kpiWarn { color: var(--color-error-strong); }
+
+.availStrip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: center;
+  background: #fff;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 8px 14px;
+  font-size: 11px;
+  color: var(--color-ink);
+}
+.availStripLabel {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--color-ink-subtle);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.availOk {
+  background: #f0fff4;
+  color: #276749;
+  padding: 3px 8px;
+  border-radius: 10px;
+  border: 1px solid #9ae6b4;
+}
+.availGap {
+  background: #fff5f5;
+  color: #c53030;
+  padding: 3px 8px;
+  border-radius: 10px;
+  border: 1px solid #fc8181;
+  font-weight: 700;
+}
 
 /* Filter bar */
 .filterBar {
