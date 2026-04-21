@@ -1,10 +1,121 @@
+.stockShell {
+  background: #fff;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  overflow: hidden;
+  min-height: calc(100vh - 200px);
+}
+.stockTabs {
+  display: flex;
+  border-bottom: 2px solid var(--color-crimson);
+}
+.stockTab {
+  padding: 9px 20px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--color-crimson);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-bottom: none;
+  cursor: pointer;
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+  margin-right: 3px;
+}
+.stockTab.active {
+  background: var(--color-crimson);
+  color: #fff;
+}
+
 .stockLayout {
   padding: 14px 16px 24px;
   display: flex;
   flex-direction: column;
   gap: 14px;
   background: var(--color-page);
-  min-height: calc(100vh - 200px);
+  min-height: calc(100vh - 260px);
+}
+
+/* Parts tab specifics */
+.kpiRowParts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 10px;
+}
+.kpi {
+  background: #fff;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 10px 14px;
+}
+.kpiLabel {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--color-ink-subtle);
+  margin-bottom: 4px;
+}
+.kpiValue {
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--color-ink);
+  font-variant-numeric: tabular-nums;
+}
+.kpiSub {
+  font-size: 10px;
+  color: var(--color-ink-subtle);
+  margin-top: 2px;
+}
+.kpiWarn { color: var(--color-error-strong); }
+
+.numCol { text-align: right; font-variant-numeric: tabular-nums; }
+
+.badgeRepl {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 700;
+  background: #fffaf0;
+  color: #c05621;
+  padding: 2px 7px;
+  border-radius: 10px;
+  letter-spacing: 0.3px;
+}
+.badgeCons {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 700;
+  background: #ebf8ff;
+  color: #2b6cb0;
+  padding: 2px 7px;
+  border-radius: 10px;
+  letter-spacing: 0.3px;
+}
+
+.rowLowStock { background: #fff5f5 !important; }
+.lowText { color: var(--color-error-strong); }
+
+.adjustGroup { display: inline-flex; gap: 3px; }
+.adjustBtn {
+  background: #fff;
+  border: 1px solid var(--color-border);
+  color: var(--color-ink-muted);
+  padding: 2px 7px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.adjustBtn:hover { border-color: var(--color-crimson); color: var(--color-crimson); }
+.adjustBtn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.partsShipHeader {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--color-crimson);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-top: 14px;
+  margin-bottom: -8px;
 }
 
 .loading {
