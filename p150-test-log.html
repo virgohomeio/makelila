@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>P150 Defect Assessment — LILA by VCycene</title>
+<link href="https://fonts.googleapis.com/css2?family=Raleway:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --rose:#CC2D30;--rose-dark:#991B1E;--gold:#C9A96E;--coffee:#A68B6B;--clay:#C17F5E;
+  --charcoal:#2C2A25;--warm-gray:#5C564E;--stone:#A39B8F;
+  --linen:#E8E0D4;--cream:#F5F1EB;--warm-white:#FAF8F5;
+}
+body{font-family:'Raleway',sans-serif;background:var(--warm-white);color:var(--warm-gray);min-height:100vh;-webkit-font-smoothing:antialiased}
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-track{background:var(--cream)}
+::-webkit-scrollbar-thumb{background:var(--linen);border-radius:3px}
+::-webkit-scrollbar-thumb:hover{background:var(--stone)}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useMemo, useCallback } = React;
+
+const UNITS = [
+  {sn:"LL01-00000000006",id:1,colour:"White",defect:true,returned:false,prepared:false,notes:"",issues:["Undiagnosed"],action:"diagnose",actionLabel:"Needs Diagnosis",difficulty:null},
+  {sn:"LL01-00000000008",id:2,colour:"White",defect:true,returned:false,prepared:false,notes:"",issues:["Undiagnosed"],action:"diagnose",actionLabel:"Needs Diagnosis",difficulty:null},
+  {sn:"LL01-00000000009",id:97,colour:"White",defect:true,returned:false,prepared:false,notes:"",issues:["Undiagnosed"],action:"diagnose",actionLabel:"Needs Diagnosis",difficulty:null},
+  {sn:"LL01-00000000010",id:3,colour:"White",defect:true,returned:false,prepared:false,notes:"",issues:["Tight Left Latch"],action:"rework-conditional",actionLabel:"Sell to Tolerant Customer",difficulty:"High",fix:"Manufacturer defect — metal blade deformed. No in-house fix. May ship to customers with tolerance for imperfection."},
+  {sn:"LL01-00000000018",id:4,colour:"White",defect:true,returned:false,prepared:false,notes:"",issues:["Undiagnosed"],action:"diagnose",actionLabel:"Needs Diagnosis",difficulty:null},
+  {sn:"LL01-00000000024",id:5,colour:"White",defect:true,returned:false,prepared:false,notes:"Testing",issues:["Filter Crack"],action:"rework",actionLabel:"Rework — Parts Swap",difficulty:"Low",fix:"Swap filter from scrapped unit or tape damaged area."},
+  {sn:"LL01-00000000027",id:6,colour:"White",defect:true,returned:false,prepared:false,notes:"",issues:["Board Interference","Chamber Crack"],action:"rework-conditional",actionLabel:"Rework — Software + Mechanical",difficulty:"Medium/High",fix:"Software fix: remove BME sensor readings → hardcoded algorithm. Chamber may need AB glue reinforcement. Root cause: PP+10%GF weakness."},
+  {sn:"LL01-00000000028",id:7,colour:"White",defect:true,returned:false,prepared:false,notes:"Testing",issues:["Crusher Not Turning","Body Cracks"],action:"rework-conditional",actionLabel:"Conditional — Crusher Deprecated",difficulty:"Unknown",fix:"Crusher being removed in future batches. Body cracks from moisture absorption. Assess severity."},
+  {sn:"LL01-00000000030",id:8,colour:"White",defect:true,returned:false,prepared:false,notes:"",issues:["LED Does Not Display"],action:"rework-conditional",actionLabel:"Rework IF Parts Procured",difficulty:"High",fix:"Full disassembly + LED replacement needed. No LED material in-house currently. Recoverable if parts ordered."},
+  {sn:"LL01-00000000034",id:10,colour:"White",defect:true,returned:false,prepared:false,notes:"",issues:["Undiagnosed"],action:"diagnose",actionLabel:"Needs Diagnosis",difficulty:null},
+  {sn:"LL01-00000000035",id:11,colour:"White",defect:true,returned:false,prepared:false,notes:"",issues:["Liquid Thinner Spill"],action:"rework",actionLabel:"Rework — Cleaning",difficulty:"Low-Medium",fix:"Attempt TSP (tri-sodium phosphate) degreaser cleaning. Non-functional impact but customer-facing."},
+  {sn:"LL01-00000000038",id:12,colour:"White",defect:true,returned:false,prepared:false,notes:"",issues:["Tight Left Latch"],action:"rework-conditional",actionLabel:"Sell to Tolerant Customer",difficulty:"High",fix:"Manufacturer defect — metal blade deformed. No in-house fix."},
+  {sn:"LL01-00000000039",id:13,colour:"White",defect:true,returned:false,prepared:false,notes:"",issues:["Undiagnosed"],action:"diagnose",actionLabel:"Needs Diagnosis",difficulty:null},
+  {sn:"LL01-00000000046",id:103,colour:"White",defect:true,returned:false,prepared:false,notes:"Huayi for testing, being prepared",issues:["Undiagnosed — In Use"],action:"diagnose",actionLabel:"In Use (Huayi Testing)",difficulty:null,fix:"Currently used for testing. Re-evaluate after testing complete."},
+  {sn:"LL01-00000000047",id:105,colour:"White",defect:true,returned:false,prepared:false,notes:"",issues:["Left Pad Heater Failure"],action:"scrap",actionLabel:"SCRAP → Parts Donor",difficulty:"High",fix:"No replacement pad heaters. Full disassembly required. No materials in-house. Designate as parts donor."},
+  {sn:"LL01-00000000048",id:14,colour:"White",defect:true,returned:false,prepared:false,notes:"",issues:["Right Pad Heater Failure"],action:"scrap",actionLabel:"SCRAP → Parts Donor",difficulty:"High",fix:"No replacement pad heaters. Full disassembly required. No materials in-house. Designate as parts donor."},
+  {sn:"LL01-00000000051",id:15,colour:"White",defect:true,returned:false,prepared:false,notes:"",issues:["Missing Gear Box"],action:"rework",actionLabel:"Rework — Parts Swap",difficulty:"Low",fix:"Harvest gear box from a scrapped unit. Easy installation."},
+  {sn:"LL01-00000000053",id:94,colour:"White",defect:true,returned:false,prepared:false,notes:"",issues:["Undiagnosed"],action:"diagnose",actionLabel:"Needs Diagnosis",difficulty:null},
+  {sn:"LL01-00000000066",id:100,colour:"White",defect:true,returned:false,prepared:false,notes:"Production Testing",issues:["Undiagnosed — Production Testing"],action:"diagnose",actionLabel:"Needs Diagnosis",difficulty:null,fix:"Flag set during production testing. Run PC application test to identify issue."},
+  {sn:"LL01-00000000072",id:18,colour:"Black",defect:true,returned:false,prepared:false,notes:"",issues:["Missing Front Gasket"],action:"rework",actionLabel:"Rework — Parts Swap",difficulty:"Low",fix:"Order replacement gasket or harvest from scrapped unit. Attach with silicone glue."},
+  {sn:"LL01-00000000086",id:19,colour:"White",defect:true,returned:false,prepared:false,notes:"",issues:["Undiagnosed"],action:"diagnose",actionLabel:"Needs Diagnosis",difficulty:null},
+  {sn:"LL01-00000000089",id:21,colour:"White",defect:true,returned:false,prepared:false,notes:"",issues:["Cracks on Machine Body"],action:"rework-conditional",actionLabel:"Assess Severity",difficulty:"Unknown",fix:"Moisture-induced cracking. Root cause: PP+10%GF. Assess crack severity — may still be shippable if cosmetic only."},
+  {sn:"LL01-00000000090",id:95,colour:"White",defect:true,returned:false,prepared:false,notes:"Huayi Testing / Onboarding demos",issues:["Undiagnosed — In Use"],action:"diagnose",actionLabel:"In Use (Demos/Testing)",difficulty:null,fix:"Used for onboarding demos, now Huayi testing."},
+  {sn:"LL01-00000000093",id:22,colour:"White",defect:true,returned:false,prepared:false,notes:"",issues:["LED Does Not Display"],action:"rework-conditional",actionLabel:"Rework IF Parts Procured",difficulty:"High",fix:"Full disassembly + LED replacement. No LED material in-house. Recoverable if parts ordered."},
+  {sn:"LL01-00000000094",id:96,colour:"White",defect:true,returned:false,prepared:false,notes:"",issues:["Undiagnosed"],action:"diagnose",actionLabel:"Needs Diagnosis",difficulty:null},
+  {sn:"LL01-00000000095",id:23,colour:"White",defect:true,returned:false,prepared:false,notes:"",issues:["Rear Lid Notch Missing"],action:"rework",actionLabel:"Rework — Parts Swap",difficulty:"Low",fix:"Harvest rear lid notch from scrapped unit."},
+  {sn:"LL01-00000000096",id:24,colour:"Black",defect:true,returned:false,prepared:false,notes:"",issues:["Internal PTC Failure"],action:"scrap",actionLabel:"SCRAP → Parts Donor",difficulty:"High",fix:"No compatible PTC spares. P50 PTC is different form factor. Machine non-functional. Designate as parts donor."},
+  {sn:"LL01-00000000098",id:25,colour:"Black",defect:true,returned:false,prepared:false,notes:"",issues:["Undiagnosed"],action:"diagnose",actionLabel:"Needs Diagnosis",difficulty:null},
+  {sn:"LL01-00000000102",id:106,colour:"White",defect:true,returned:false,prepared:false,notes:"",issues:["Undiagnosed"],action:"diagnose",actionLabel:"Needs Diagnosis",difficulty:null},
+  {sn:"LL01-00000000103",id:27,colour:"White",defect:true,returned:false,prepared:false,notes:"Marketing, In Office",issues:["Undiagnosed — Marketing Unit"],action:"diagnose",actionLabel:"Marketing Unit — Diagnose",difficulty:null,fix:"In office, used for marketing. Run diagnostic to assess."},
+  {sn:"LL01-00000000106",id:28,colour:"Black",defect:true,returned:false,prepared:false,notes:"Testing",issues:["AC Main Power Test Failure"],action:"scrap",actionLabel:"SCRAP → Parts Donor",difficulty:"Unknown",fix:"Relay did not switch during PC test. No solution identified. Machine non-functional. Designate as parts donor."},
+  {sn:"LL01-00000000111",id:30,colour:"White",defect:true,returned:false,prepared:false,notes:"",issues:["Undiagnosed"],action:"diagnose",actionLabel:"Needs Diagnosis",difficulty:null},
+  {sn:"LL01-00000000113",id:90,colour:"White",defect:true,returned:false,prepared:false,notes:"Testing",issues:["Undiagnosed — Testing"],action:"diagnose",actionLabel:"Needs Diagnosis",difficulty:null},
+  {sn:"LL01-00000000118",id:31,colour:"White",defect:true,returned:false,prepared:false,notes:"",issues:["Left Motor Failure"],action:"scrap",actionLabel:"SCRAP → Parts Donor",difficulty:"High",fix:"Motor did not turn during PC test. No replacement motors in-house. Full disassembly required. Designate as parts donor."},
+  {sn:"LL01-00000000123",id:32,colour:"White",defect:true,returned:false,prepared:false,notes:"",issues:["Tight Left Latch","Liquid Thinner Spill"],action:"rework-conditional",actionLabel:"Rework — Multiple Issues",difficulty:"High/Unknown",fix:"Two issues: (1) Tight latch — manufacturer defect, (2) Thinner spill — try TSP cleaning. May sell to tolerant customer after cleaning."},
+  {sn:"LL01-00000000128",id:93,colour:"Black",defect:true,returned:false,prepared:false,notes:"Testing",issues:["Undiagnosed — Testing"],action:"diagnose",actionLabel:"Needs Diagnosis",difficulty:null},
+  {sn:"LL01-00000000131",id:92,colour:"Black",defect:true,returned:false,prepared:false,notes:"Testing",issues:["Undiagnosed — Testing"],action:"diagnose",actionLabel:"Needs Diagnosis",difficulty:null},
+  {sn:"LL01-00000000134",id:99,colour:"Black",defect:true,returned:false,prepared:false,notes:"",issues:["Undiagnosed"],action:"diagnose",actionLabel:"Needs Diagnosis",difficulty:null},
+  {sn:"LL01-00000000139",id:35,colour:"Unknown",defect:true,returned:false,prepared:false,notes:"In storage. Colour is unknown",issues:["Tight Left Latch"],action:"rework-conditional",actionLabel:"Sell to Tolerant Customer",difficulty:"High",fix:"Manufacturer defect. Colour photo unclear. Needs visual re-inspection."},
+  {sn:"LL01-00000000148",id:37,colour:"White",defect:true,returned:false,prepared:false,notes:"",issues:["Undiagnosed"],action:"diagnose",actionLabel:"Needs Diagnosis",difficulty:null},
+  {sn:"LL01-00000000149",id:38,colour:"Black",defect:true,returned:false,prepared:false,notes:"",issues:["Rear Lid Notch Missing"],action:"rework",actionLabel:"Rework — Parts Swap",difficulty:"Low",fix:"Harvest rear lid notch from scrapped unit."},
+  {sn:"LL01-00000000158",id:43,colour:"White",defect:true,returned:false,prepared:false,notes:"",issues:["Gasket Missing"],action:"rework",actionLabel:"Rework — Glue Gasket",difficulty:"Low",fix:"Glue gasket onto machine body. Material available in-house."},
+  {sn:"LL01-00000000159",id:44,colour:"White",defect:true,returned:false,prepared:false,notes:"Testing",issues:["Undiagnosed — Testing"],action:"diagnose",actionLabel:"Needs Diagnosis",difficulty:null},
+  {sn:"LL01-00000000160",id:104,colour:"White",defect:true,returned:false,prepared:false,notes:"",issues:["Undiagnosed"],action:"diagnose",actionLabel:"Needs Diagnosis",difficulty:null},
+  {sn:"LL01-00000000162",id:45,colour:"Black",defect:true,returned:false,prepared:false,notes:"",issues:["Liquid Thinner Spill"],action:"rework",actionLabel:"Rework — Cleaning",difficulty:"Low-Medium",fix:"Attempt TSP cleaning. Non-functional but customer-facing stain."},
+  {sn:"LL01-00000000031",id:9,colour:"White",defect:false,returned:true,prepared:false,notes:"Mike Ferguson Return",issues:["Customer Return"],action:"diagnose-return",actionLabel:"Diagnose Return",difficulty:null,fix:"Returned by Mike Ferguson. Run full diagnostic before re-deployment."},
+  {sn:"LL01-00000000033",id:46,colour:"White",defect:false,returned:true,prepared:false,notes:"David Forster return, In Office",issues:["Customer Return"],action:"diagnose-return",actionLabel:"Diagnose Return",difficulty:null,fix:"Returned by David Forster. In office. Run diagnostic."},
+  {sn:"LL01-00000000064",id:17,colour:"Black",defect:false,returned:true,prepared:false,notes:"Antonio Gonsalves return, In Office",issues:["Customer Return"],action:"diagnose-return",actionLabel:"Diagnose Return",difficulty:null,fix:"Returned by Antonio Gonsalves. In office. Run diagnostic."},
+  {sn:"LL01-00000000068",id:57,colour:"Black",defect:false,returned:true,prepared:false,notes:"Elayne Baka Return",issues:["Customer Return"],action:"diagnose-return",actionLabel:"Diagnose Return",difficulty:null,fix:"Returned by Elayne Baka. Run diagnostic."},
+  {sn:"LL01-00000000099",id:87,colour:"Black",defect:false,returned:true,prepared:false,notes:"In Office",issues:["Customer Return"],action:"diagnose-return",actionLabel:"Diagnose Return",difficulty:null,fix:"Returned unit. In office. Run diagnostic."},
+  {sn:"LL01-00000000108",id:61,colour:"Black",defect:false,returned:true,prepared:false,notes:"Scott Destephanis return, In Office",issues:["Chamber Break"],action:"rework-conditional",actionLabel:"Assess Chamber Damage",difficulty:"High",fix:"Compost spilled onto pad heaters. Scott Destephanis return. Needs full disassembly assessment."},
+  {sn:"LL01-00000000135",id:67,colour:"Black",defect:false,returned:true,prepared:false,notes:"Mark/Cheryl Marshall return, In Office",issues:["Customer Return"],action:"diagnose-return",actionLabel:"Diagnose Return",difficulty:null,fix:"Returned by Mark/Cheryl Marshall. In office."},
+  {sn:"LL01-00000000137",id:78,colour:"White",defect:false,returned:true,prepared:false,notes:"Yuanbo Luo return, odor issue",issues:["Odor Issue"],action:"rework",actionLabel:"Rework — Gasket/Seal Check",difficulty:"Low-Medium",fix:"Returned for odor issue. Check gaskets, seals, drainage. May need gasket replacement."},
+  {sn:"LL01-00000000138",id:34,colour:"Black",defect:false,returned:false,prepared:false,notes:"Ari return, In Office",issues:["Customer Return"],action:"diagnose-return",actionLabel:"Diagnose Return",difficulty:null,fix:"Returned by Ari. In office. Not flagged as returned in system."},
+  {sn:"LL01-00000000140",id:36,colour:"Black",defect:false,returned:true,prepared:false,notes:"Sarah Lockhart Return, In storage",issues:["Customer Return"],action:"diagnose-return",actionLabel:"Diagnose Return",difficulty:null,fix:"Returned by Sarah Lockhart. In storage."},
+  {sn:"LL01-00000000147",id:50,colour:"Black",defect:false,returned:true,prepared:false,notes:"Annie Wu Return",issues:["Customer Return"],action:"diagnose-return",actionLabel:"Diagnose Return",difficulty:null,fix:"Returned by Annie Wu. Run diagnostic."},
+  {sn:"LL01-00000000151",id:56,colour:"Black",defect:false,returned:true,prepared:false,notes:"Ari Return",issues:["Customer Return"],action:"diagnose-return",actionLabel:"Diagnose Return",difficulty:null,fix:"Returned by Ari (2nd unit). Run diagnostic."},
+  {sn:"LL01-00000000154",id:40,colour:"White",defect:false,returned:true,prepared:false,notes:"In Office",issues:["Customer Return"],action:"diagnose-return",actionLabel:"Diagnose Return",difficulty:null,fix:"Returned unit. In office. Run diagnostic."},
+  {sn:"LL01-00000000081",id:101,colour:"Black",defect:false,returned:false,prepared:true,notes:"",issues:["None — Ready"],action:"ship",actionLabel:"Ready to Ship",difficulty:null,fix:"Prepared and passing. Queue for next fulfillment."},
+  {sn:"LL01-00000000117",id:49,colour:"Black",defect:false,returned:false,prepared:true,notes:"",issues:["None — Ready"],action:"ship",actionLabel:"Ready to Ship",difficulty:null,fix:"Prepared and passing. Queue for next fulfillment."},
+];
+
+const ACTION_CONFIG = {
+  scrap:              {bg:"#991B1E12",border:"#991B1E40",text:"#991B1E",icon:"✕",label:"Scrap"},
+  rework:             {bg:"#4a7c5920",border:"#4a7c5950",text:"#3d6b4a",icon:"↻",label:"Rework"},
+  "rework-conditional":{bg:"#C9A96E18",border:"#C9A96E50",text:"#8a7040",icon:"◐",label:"Conditional"},
+  diagnose:           {bg:"#5C564E12",border:"#5C564E40",text:"#5C564E",icon:"◎",label:"Diagnose"},
+  "diagnose-return":  {bg:"#A68B6B18",border:"#A68B6B50",text:"#7a6248",icon:"↩",label:"Return"},
+  ship:               {bg:"#2a6b4a18",border:"#2a6b4a50",text:"#2a6b4a",icon:"→",label:"Ship"},
+};
+
+const DIFF_COLORS = {
+  Low:      {bg:"#4a7c5915",text:"#3d6b4a",border:"#4a7c5930"},
+  "Low-Medium":{bg:"#6b8a4018",text:"#5a7535",border:"#6b8a4035"},
+  Medium:   {bg:"#C9A96E18",text:"#8a7040",border:"#C9A96E35"},
+  "Medium/High":{bg:"#C17F5E18",text:"#9a5f3e",border:"#C17F5E35"},
+  High:     {bg:"#991B1E12",text:"#991B1E",border:"#991B1E30"},
+  Unknown:  {bg:"#5C564E10",text:"#5C564E",border:"#5C564E25"},
+};
+
+function App() {
+  const [filter, setFilter] = useState("all");
+  const [colourFilter, setColourFilter] = useState("all");
+  const [search, setSearch] = useState("");
+  const [expandedRow, setExpandedRow] = useState(null);
+  const [overrides, setOverrides] = useState({});
+
+  const filtered = useMemo(() => {
+    return UNITS.filter(u => {
+      const act = overrides[u.sn] || u.action;
+      if (filter !== "all" && act !== filter) return false;
+      if (colourFilter !== "all" && u.colour !== colourFilter) return false;
+      if (search && !u.sn.toLowerCase().includes(search.toLowerCase()) && !u.notes.toLowerCase().includes(search.toLowerCase()) && !u.issues.join(" ").toLowerCase().includes(search.toLowerCase())) return false;
+      return true;
+    });
+  }, [filter, colourFilter, search, overrides]);
+
+  const counts = useMemo(() => {
+    const c = {scrap:0,rework:0,"rework-conditional":0,diagnose:0,"diagnose-return":0,ship:0,total:UNITS.length};
+    UNITS.forEach(u => { c[overrides[u.sn] || u.action]++; });
+    return c;
+  }, [overrides]);
+
+  const toggleRow = (sn) => setExpandedRow(prev => prev === sn ? null : sn);
+  const cycleAction = (sn, e) => {
+    e.stopPropagation();
+    const actions = ["scrap","rework","rework-conditional","diagnose","diagnose-return","ship"];
+    const current = overrides[sn] || UNITS.find(u=>u.sn===sn)?.action;
+    const next = actions[(actions.indexOf(current)+1) % actions.length];
+    setOverrides(prev => ({...prev, [sn]: next}));
+  };
+
+  return (
+    <div style={{maxWidth:1100,margin:"0 auto",padding:"40px 24px"}}>
+      {/* Header */}
+      <div style={{marginBottom:32,display:"flex",alignItems:"flex-end",justifyContent:"space-between",flexWrap:"wrap",gap:12}}>
+        <div>
+          <div style={{fontSize:11,fontWeight:700,letterSpacing:2,textTransform:"uppercase",color:"#CC2D30",marginBottom:6}}>LILA Pro · P150 Batch</div>
+          <h1 style={{fontSize:26,fontWeight:700,color:"#2C2A25",letterSpacing:"-0.02em"}}>Defect Assessment Dashboard</h1>
+          <p style={{fontSize:13,color:"#A39B8F",marginTop:4}}>58 units in-house — click rows for details, click action to override</p>
+        </div>
+        <div style={{fontSize:11,color:"#A39B8F",textAlign:"right"}}>
+          Source: Kishore's Notion<br/>Updated: April 2026
+        </div>
+      </div>
+
+      {/* Summary Cards */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:12,marginBottom:28}}>
+        {[
+          {key:"scrap",label:"Scrap",count:counts.scrap,color:"#991B1E",bg:"#991B1E08",borderC:"#991B1E25"},
+          {key:"rework",label:"Rework",count:counts.rework,color:"#3d6b4a",bg:"#4a7c5910",borderC:"#4a7c5925"},
+          {key:"rework-conditional",label:"Conditional",count:counts["rework-conditional"],color:"#8a7040",bg:"#C9A96E10",borderC:"#C9A96E30"},
+          {key:"diagnose",label:"Diagnose",count:counts.diagnose,color:"#5C564E",bg:"#5C564E08",borderC:"#5C564E20"},
+          {key:"diagnose-return",label:"Returns",count:counts["diagnose-return"],color:"#7a6248",bg:"#A68B6B10",borderC:"#A68B6B25"},
+          {key:"ship",label:"Ship Ready",count:counts.ship,color:"#2a6b4a",bg:"#2a6b4a10",borderC:"#2a6b4a25"},
+        ].map(c => (
+          <div key={c.key} onClick={() => setFilter(f => f===c.key?"all":c.key)}
+            style={{background: filter===c.key ? c.bg : "#FFFFFF",border:`1.5px solid ${filter===c.key ? c.color : c.borderC}`,
+              borderRadius:12,padding:"16px 18px",cursor:"pointer",transition:"all .2s",
+              boxShadow: filter===c.key ? `0 2px 12px ${c.color}15` : "0 1px 4px rgba(44,42,37,0.04)"}}>
+            <div style={{fontSize:32,fontWeight:700,color:c.color,letterSpacing:"-0.02em"}}>{c.count}</div>
+            <div style={{fontSize:12,fontWeight:600,color:c.color,opacity:.75,marginTop:2,letterSpacing:"0.02em"}}>{c.label}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Filters */}
+      <div style={{display:"flex",gap:10,marginBottom:20,flexWrap:"wrap",alignItems:"center"}}>
+        <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search serial, notes, issue…"
+          style={{flex:1,minWidth:200,padding:"10px 14px",borderRadius:8,border:"1.5px solid #E8E0D4",background:"#FFFFFF",
+            color:"#2C2A25",fontSize:13,fontFamily:"'Raleway',sans-serif",outline:"none",transition:"border .2s"}}
+          onFocus={e=>e.target.style.borderColor="#C9A96E"} onBlur={e=>e.target.style.borderColor="#E8E0D4"}/>
+        <select value={colourFilter} onChange={e=>setColourFilter(e.target.value)}
+          style={{padding:"10px 14px",borderRadius:8,border:"1.5px solid #E8E0D4",background:"#FFFFFF",
+            color:"#2C2A25",fontSize:13,fontFamily:"'Raleway',sans-serif",cursor:"pointer"}}>
+          <option value="all">All Colours</option>
+          <option value="White">White</option>
+          <option value="Black">Black</option>
+          <option value="Unknown">Unknown</option>
+        </select>
+        {filter !== "all" && (
+          <button onClick={() => setFilter("all")}
+            style={{padding:"10px 16px",borderRadius:8,border:"1.5px solid #E8E0D4",background:"#FFFFFF",
+              color:"#5C564E",fontSize:12,fontFamily:"'Raleway',sans-serif",fontWeight:600,cursor:"pointer"}}>
+            Clear Filter ✕
+          </button>
+        )}
+        <span style={{fontSize:12,color:"#A39B8F",fontWeight:500}}>{filtered.length} of {UNITS.length}</span>
+      </div>
+
+      {/* Table */}
+      <div style={{borderRadius:14,border:"1.5px solid #E8E0D4",overflow:"hidden",background:"#FFFFFF",
+        boxShadow:"0 2px 16px rgba(44,42,37,0.04)"}}>
+        <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
+          <thead>
+            <tr style={{background:"#F5F1EB"}}>
+              <th style={thStyle}>Serial Number</th>
+              <th style={thStyle}>Colour</th>
+              <th style={thStyle}>Issue(s)</th>
+              <th style={thStyle}>Difficulty</th>
+              <th style={{...thStyle,textAlign:"center"}}>Proposed Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map((u,i) => {
+              const act = overrides[u.sn] || u.action;
+              const cfg = ACTION_CONFIG[act];
+              const isExpanded = expandedRow === u.sn;
+              const isOverridden = overrides[u.sn] && overrides[u.sn] !== u.action;
+              return (
+                <React.Fragment key={u.sn}>
+                  <tr onClick={() => toggleRow(u.sn)}
+                    style={{background: isExpanded ? "#FAF8F5" : i%2===0 ? "#FFFFFF" : "#FDFCFB",
+                      cursor:"pointer",transition:"background .15s"}}
+                    onMouseEnter={e=>{if(!isExpanded)e.currentTarget.style.background="#FAF8F5"}}
+                    onMouseLeave={e=>{if(!isExpanded)e.currentTarget.style.background=i%2===0?"#FFFFFF":"#FDFCFB"}}>
+                    <td style={tdStyle}>
+                      <span style={{fontFamily:"'SF Mono','Courier New',monospace",fontWeight:700,fontSize:13,color:"#2C2A25"}}>{u.sn.slice(-3)}</span>
+                      <span style={{color:"#A39B8F",marginLeft:3,fontSize:11,fontFamily:"'SF Mono','Courier New',monospace"}}>{u.sn.slice(5,-3)}</span>
+                      {u.returned && <span style={{marginLeft:8,fontSize:10,padding:"2px 6px",borderRadius:4,background:"#A68B6B15",color:"#7a6248",border:"1px solid #A68B6B30",fontWeight:600}}>RTN</span>}
+                      {u.prepared && <span style={{marginLeft:8,fontSize:10,padding:"2px 6px",borderRadius:4,background:"#2a6b4a12",color:"#2a6b4a",border:"1px solid #2a6b4a25",fontWeight:600}}>PREP</span>}
+                    </td>
+                    <td style={tdStyle}>
+                      <span style={{display:"inline-flex",alignItems:"center",gap:6}}>
+                        <span style={{width:12,height:12,borderRadius:"50%",border:"1.5px solid #E8E0D4",
+                          background:u.colour==="White"?"#FFFFFF":u.colour==="Black"?"#2C2A25":"#A39B8F",display:"inline-block",
+                          boxShadow:"inset 0 1px 2px rgba(0,0,0,0.08)"}}/>
+                        <span style={{color:"#5C564E",fontSize:12,fontWeight:500}}>{u.colour}</span>
+                      </span>
+                    </td>
+                    <td style={tdStyle}>
+                      <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
+                        {u.issues.map((iss,j) => {
+                          const isUndiag = iss.includes("Undiagnosed");
+                          const isReturn = iss==="Customer Return" || iss==="Odor Issue";
+                          const isReady = iss.includes("None");
+                          return (
+                            <span key={j} style={{fontSize:11,padding:"3px 8px",borderRadius:5,fontWeight:500,
+                              background: isUndiag ? "#5C564E0C" : isReturn ? "#A68B6B12" : isReady ? "#2a6b4a10" : "#C17F5E12",
+                              color: isUndiag ? "#5C564E" : isReturn ? "#7a6248" : isReady ? "#2a6b4a" : "#9a5030",
+                              border:`1px solid ${isUndiag ? "#5C564E18" : isReturn ? "#A68B6B25" : isReady ? "#2a6b4a20" : "#C17F5E25"}`
+                            }}>{iss}</span>
+                          );
+                        })}
+                      </div>
+                    </td>
+                    <td style={tdStyle}>
+                      {u.difficulty && (() => {
+                        const dc = DIFF_COLORS[u.difficulty] || DIFF_COLORS.Unknown;
+                        return <span style={{fontSize:11,padding:"3px 8px",borderRadius:5,fontWeight:600,
+                          background:dc.bg,color:dc.text,border:`1px solid ${dc.border}`}}>{u.difficulty}</span>;
+                      })()}
+                    </td>
+                    <td style={{...tdStyle,textAlign:"center"}}>
+                      <button onClick={(e) => cycleAction(u.sn, e)}
+                        style={{fontSize:11,padding:"6px 12px",borderRadius:7,cursor:"pointer",fontWeight:700,
+                          fontFamily:"'Raleway',sans-serif",letterSpacing:"0.01em",
+                          background:cfg.bg,color:cfg.text,border:`1.5px solid ${cfg.border}`,
+                          boxShadow: isOverridden ? `0 0 0 2px ${cfg.text}25` : "none",
+                          transition:"all .15s"}}>
+                        {cfg.icon} {cfg.label}
+                      </button>
+                    </td>
+                  </tr>
+                  {isExpanded && (
+                    <tr style={{background:"#FAF8F5"}}>
+                      <td colSpan={5} style={{padding:"16px 24px 20px",borderBottom:"1.5px solid #E8E0D4"}}>
+                        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20,fontSize:13}}>
+                          <div>
+                            <div style={{color:"#CC2D30",marginBottom:6,fontWeight:700,textTransform:"uppercase",fontSize:10,letterSpacing:1.5}}>Recommendation</div>
+                            <div style={{color:"#2C2A25",lineHeight:1.7,fontWeight:400}}>{u.fix || "Run PC application test to identify failure mode. Update Machine Counter with results."}</div>
+                          </div>
+                          <div>
+                            <div style={{color:"#A39B8F",marginBottom:6,fontWeight:700,textTransform:"uppercase",fontSize:10,letterSpacing:1.5}}>Details</div>
+                            <div style={{color:"#5C564E",lineHeight:1.7}}>{u.notes || "No additional notes"}</div>
+                            <div style={{marginTop:10,padding:"8px 12px",borderRadius:6,background:"#F5F1EB",border:"1px solid #E8E0D4",fontSize:11,color:"#A39B8F"}}>
+                              Counter ID: <span style={{color:"#5C564E",fontWeight:600}}>P150-{u.id}</span> · Defect: <span style={{color:"#5C564E",fontWeight:600}}>{u.defect?"Yes":"No"}</span> · Returned: <span style={{color:"#5C564E",fontWeight:600}}>{u.returned?"Yes":"No"}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Recovery Footer */}
+      <div style={{marginTop:28,padding:24,borderRadius:14,border:"1.5px solid #E8E0D4",background:"#FFFFFF",
+        boxShadow:"0 2px 16px rgba(44,42,37,0.04)"}}>
+        <h3 style={{fontSize:14,fontWeight:700,color:"#2C2A25",marginBottom:14,letterSpacing:"-0.01em"}}>Recovery Estimate</h3>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:16,fontSize:13}}>
+          <div style={{padding:"12px 16px",borderRadius:8,background:"#4a7c590A",border:"1px solid #4a7c5920"}}>
+            <div style={{color:"#3d6b4a",fontWeight:700,fontSize:16}}>{counts.rework + counts.ship}</div>
+            <div style={{color:"#5C564E",fontSize:11,marginTop:2}}>Recoverable now (low-effort rework + ready)</div>
+          </div>
+          <div style={{padding:"12px 16px",borderRadius:8,background:"#C9A96E0A",border:"1px solid #C9A96E25"}}>
+            <div style={{color:"#8a7040",fontWeight:700,fontSize:16}}>{counts["rework-conditional"]}</div>
+            <div style={{color:"#5C564E",fontSize:11,marginTop:2}}>Pending assessment or parts procurement</div>
+          </div>
+          <div style={{padding:"12px 16px",borderRadius:8,background:"#5C564E08",border:"1px solid #5C564E15"}}>
+            <div style={{color:"#5C564E",fontWeight:700,fontSize:16}}>{counts.diagnose + counts["diagnose-return"]}</div>
+            <div style={{color:"#5C564E",fontSize:11,marginTop:2}}>Need PC test + physical inspection</div>
+          </div>
+          <div style={{padding:"12px 16px",borderRadius:8,background:"#991B1E08",border:"1px solid #991B1E18"}}>
+            <div style={{color:"#991B1E",fontWeight:700,fontSize:16}}>{counts.scrap}</div>
+            <div style={{color:"#5C564E",fontSize:11,marginTop:2}}>Scrap → harvest parts for rework</div>
+          </div>
+        </div>
+
+        {/* Progress bar */}
+        <div style={{marginTop:20,padding:"14px 16px",borderRadius:8,background:"#F5F1EB",border:"1px solid #E8E0D4"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+            <span style={{fontSize:11,fontWeight:700,color:"#2C2A25",textTransform:"uppercase",letterSpacing:1}}>Best-Case Recovery</span>
+            <span style={{fontSize:14,fontWeight:700,color:"#CC2D30"}}>{Math.round((1 - counts.scrap/UNITS.length)*100)}%</span>
+          </div>
+          <div style={{height:8,borderRadius:4,background:"#E8E0D4",overflow:"hidden",display:"flex"}}>
+            <div style={{width:`${(counts.rework+counts.ship)/UNITS.length*100}%`,background:"#4a7c59",transition:"width .4s"}}/>
+            <div style={{width:`${counts["rework-conditional"]/UNITS.length*100}%`,background:"#C9A96E",transition:"width .4s"}}/>
+            <div style={{width:`${(counts.diagnose+counts["diagnose-return"])/UNITS.length*100}%`,background:"#A39B8F",transition:"width .4s"}}/>
+            <div style={{width:`${counts.scrap/UNITS.length*100}%`,background:"#991B1E",transition:"width .4s"}}/>
+          </div>
+          <div style={{display:"flex",gap:16,marginTop:8,fontSize:10,color:"#A39B8F",fontWeight:500}}>
+            <span><span style={{display:"inline-block",width:8,height:8,borderRadius:2,background:"#4a7c59",marginRight:4,verticalAlign:"middle"}}/>Rework</span>
+            <span><span style={{display:"inline-block",width:8,height:8,borderRadius:2,background:"#C9A96E",marginRight:4,verticalAlign:"middle"}}/>Conditional</span>
+            <span><span style={{display:"inline-block",width:8,height:8,borderRadius:2,background:"#A39B8F",marginRight:4,verticalAlign:"middle"}}/>Diagnose</span>
+            <span><span style={{display:"inline-block",width:8,height:8,borderRadius:2,background:"#991B1E",marginRight:4,verticalAlign:"middle"}}/>Scrap</span>
+          </div>
+        </div>
+      </div>
+
+      <div style={{marginTop:20,textAlign:"center",fontSize:11,color:"#A39B8F",padding:8,fontWeight:500}}>
+        VCycene Inc. · LILA Pro P150 · Generated {new Date().toLocaleDateString()}
+      </div>
+    </div>
+  );
+}
+
+const thStyle = {padding:"12px 16px",textAlign:"left",color:"#5C564E",fontWeight:700,fontSize:10,textTransform:"uppercase",letterSpacing:1.2,borderBottom:"1.5px solid #E8E0D4",fontFamily:"'Raleway',sans-serif"};
+const tdStyle = {padding:"12px 16px",borderBottom:"1px solid #F5F1EB",verticalAlign:"middle"};
+
+ReactDOM.render(<App/>, document.getElementById("root"));
+</script>
+</body>
+</html>
