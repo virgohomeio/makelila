@@ -1,27 +1,38 @@
 import { useState } from 'react';
 import { ReturnsTab } from './ReturnsTab';
 import { ReplacementsTab } from './ReplacementsTab';
+import { DeliveryMapTab } from './DeliveryMapTab';
+import { HistoryTab } from './HistoryTab';
 import styles from './PostShipment.module.css';
 
-type Tab = 'returns' | 'replacements';
+type Tab = 'map' | 'history' | 'returns' | 'replacements';
+
+const TABS: { key: Tab; label: string }[] = [
+  { key: 'map',          label: 'Delivery Map' },
+  { key: 'history',      label: 'Fulfillment History' },
+  { key: 'returns',      label: 'Returns' },
+  { key: 'replacements', label: 'Replacements' },
+];
 
 export default function PostShipment() {
-  const [tab, setTab] = useState<Tab>('returns');
+  const [tab, setTab] = useState<Tab>('map');
 
   return (
     <div className={styles.layout}>
       <div className={styles.tabs}>
-        <button
-          className={`${styles.tab} ${tab === 'returns' ? styles.active : ''}`}
-          onClick={() => setTab('returns')}
-        >Returns</button>
-        <button
-          className={`${styles.tab} ${tab === 'replacements' ? styles.active : ''}`}
-          onClick={() => setTab('replacements')}
-        >Replacements</button>
+        {TABS.map(t => (
+          <button
+            key={t.key}
+            className={`${styles.tab} ${tab === t.key ? styles.active : ''}`}
+            onClick={() => setTab(t.key)}
+          >{t.label}</button>
+        ))}
       </div>
       <div className={styles.panel}>
-        {tab === 'returns' ? <ReturnsTab /> : <ReplacementsTab />}
+        {tab === 'map'          && <DeliveryMapTab />}
+        {tab === 'history'      && <HistoryTab />}
+        {tab === 'returns'      && <ReturnsTab />}
+        {tab === 'replacements' && <ReplacementsTab />}
       </div>
     </div>
   );
