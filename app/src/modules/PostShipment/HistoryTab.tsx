@@ -1,98 +1,87 @@
-import { useEffect, useMemo, useState } from 'react';
-import { supabase } from '../../lib/supabase';
-import { useFulfillmentQueue } from '../../lib/fulfillment';
+import { useMemo, useState } from 'react';
+import { useUnits } from '../../lib/stock';
 import styles from './PostShipment.module.css';
 
-type Order = {
-  id: string;
-  order_ref: string;
-  customer_name: string;
-  city: string;
-  region_state: string | null;
-  country: 'US' | 'CA';
-};
+type BatchFilter = 'all' | 'P50' | 'P150' | 'P50N' | 'P100' | 'P100X';
+
+const BATCHES: BatchFilter[] = ['all','P50','P150','P50N','P100','P100X'];
 
 export function HistoryTab() {
-  const { fulfilled, loading: qLoading } = useFulfillmentQueue();
-  const [orders, setOrders] = useState<Order[]>([]);
+  const { units, loading } = useUnits();
   const [search, setSearch] = useState('');
+  const [batchFilter, setBatchFilter] = useState<BatchFilter>('all');
 
-  useEffect(() => {
-    const ids = Array.from(new Set(fulfilled.map(r => r.order_id)));
-    if (ids.length === 0) return;
-    void supabase
-      .from('orders')
-      .select('id, order_ref, customer_name, city, region_state, country')
-      .in('id', ids)
-      .then(({ data }) => setOrders((data as Order[]) ?? []));
-  }, [fulfilled]);
-
-  const orderLookup = useMemo(() => {
-    const m = new Map<string, Order>();
-    for (const o of orders) m.set(o.id, o);
-    return m;
-  }, [orders]);
+  const shipped = useMemo(
+    () => units.filter(u => u.status === 'shipped'),
+    [units],
+  );
 
   const rows = useMemo(() => {
-    const base = [...fulfilled].sort((a, b) => {
-      const ta = a.fulfilled_at ?? a.created_at;
-      const tb = b.fulfilled_at ?? b.created_at;
-      return tb.localeCompare(ta);
-    });
-    const q = search.trim().toLowerCase();
-    if (!q) return base;
-    return base.filter(r => {
-      const o = orderLookup.get(r.order_id);
+    const filtered = shipped.filter(u => {
+      if (batchFilter !== 'all' && u.batch !== batchFilter) return false;
+      const q = search.trim().toLowerCase();
+      if (!q) return true;
       return (
-        o?.customer_name.toLowerCase().includes(q) ||
-        o?.order_ref.toLowerCase().includes(q) ||
-        r.assigned_serial?.toLowerCase().includes(q) ||
-        r.tracking_num?.toLowerCase().includes(q) ||
-        r.carrier?.toLowerCase().includes(q)
+        u.serial.toLowerCase().includes(q) ||
+        u.customer_name?.toLowerCase().includes(q) ||
+        u.customer_order_ref?.toLowerCase().includes(q) ||
+        u.carrier?.toLowerCase().includes(q) ||
+        u.location?.toLowerCase().includes(q)
       );
     });
-  }, [fulfilled, orderLookup, search]);
+    // Sort by shipped_at desc; rows with no shipped_at land at bottom.
+    return [...filtered].sort((a, b) => {
+      const ta = a.shipped_at ?? '';
+      const tb = b.shipped_at ?? '';
+      if (!ta && !tb) return 0;
+      if (!ta) return 1;
+      if (!tb) return -1;
+      return tb.localeCompare(ta);
+    });
+  }, [shipped, batchFilter, search]);
 
-  // KPI aggregates
   const stats = useMemo(() => {
-    const s = {
-      total: fulfilled.length,
-      last7: 0,
-      last30: 0,
-      us: 0,
-      ca: 0,
-    };
     const now = Date.now();
-    const d7 = now - 7 * 86_400_000;
+    const d7  = now - 7  * 86_400_000;
     const d30 = now - 30 * 86_400_000;
-    for (const r of fulfilled) {
-      const o = orderLookup.get(r.order_id);
-      if (o?.country === 'US') s.us++;
-      if (o?.country === 'CA') s.ca++;
-      const t = r.fulfilled_at ? new Date(r.fulfilled_at).getTime() : 0;
-      if (t >= d7) s.last7++;
-      if (t >= d30) s.last30++;
+    const perBatch: Record<string, number> = {};
+    let last7 = 0, last30 = 0;
+    for (const u of shipped) {
+      perBatch[u.batch] = (perBatch[u.batch] ?? 0) + 1;
+      if (!u.shipped_at) continue;
+      const t = new Date(u.shipped_at).getTime();
+      if (t >= d7)  last7++;
+      if (t >= d30) last30++;
     }
-    return s;
-  }, [fulfilled, orderLookup]);
+    return { total: shipped.length, last7, last30, perBatch };
+  }, [shipped]);
 
-  if (qLoading) return <div className={styles.loading}>Loading fulfillment history…</div>;
+  if (loading) return <div className={styles.loading}>Loading fulfillment history…</div>;
 
   return (
     <div className={styles.tabContent}>
       <div className={styles.kpiRow}>
-        <KPI label="Total fulfilled" value={stats.total} />
+        <KPI label="Total shipped (all time)" value={stats.total} />
         <KPI label="Last 7 days" value={stats.last7} />
         <KPI label="Last 30 days" value={stats.last30} />
-        <KPI label="Canada / US" value={`${stats.ca} / ${stats.us}`} />
+        <KPI label="By batch"
+          value={`P50:${stats.perBatch.P50 ?? 0} · P150:${stats.perBatch.P150 ?? 0} · P50N:${stats.perBatch.P50N ?? 0} · P100:${stats.perBatch.P100 ?? 0}`}
+        />
       </div>
 
       <div className={styles.filterBar}>
+        {BATCHES.map(b => (
+          <button
+            key={b}
+            onClick={() => setBatchFilter(b)}
+            className={`${styles.chip} ${batchFilter === b ? styles.chipActive : ''}`}
+          >{b === 'all' ? 'All batches' : b}</button>
+        ))}
         <input
           type="search"
           value={search}
           onChange={e => setSearch(e.target.value)}
-          placeholder="Search customer, order #, serial, carrier…"
+          placeholder="Search customer, serial, carrier, location…"
           className={styles.searchInput}
         />
         <div className={styles.resultCount}>{rows.length} {rows.length === 1 ? 'row' : 'rows'}</div>
@@ -102,36 +91,42 @@ export function HistoryTab() {
         <table className={styles.table}>
           <thead>
             <tr>
-              <th>Fulfilled</th>
+              <th>Shipped</th>
               <th>Customer</th>
-              <th>Order #</th>
-              <th>Destination</th>
+              <th>Batch</th>
+              <th>Color</th>
               <th>Serial</th>
+              <th>Destination</th>
               <th>Carrier</th>
-              <th>Tracking</th>
-              <th>Email sent</th>
+              <th>Notes</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map(r => {
-              const o = orderLookup.get(r.order_id);
-              return (
-                <tr key={r.id}>
-                  <td className={styles.mono}>{formatDate(r.fulfilled_at)}</td>
-                  <td>{o?.customer_name ?? <span className={styles.muted}>—</span>}</td>
-                  <td className={styles.mono}>{o?.order_ref ?? '—'}</td>
-                  <td>
-                    {o ? (
-                      <span>{o.city}{o.region_state ? `, ${o.region_state}` : ''} · {o.country}</span>
-                    ) : <span className={styles.muted}>—</span>}
-                  </td>
-                  <td className={styles.mono}>{r.assigned_serial ?? <span className={styles.muted}>—</span>}</td>
-                  <td>{r.carrier ?? <span className={styles.muted}>—</span>}</td>
-                  <td className={styles.mono}>{r.tracking_num ?? <span className={styles.muted}>—</span>}</td>
-                  <td className={styles.mono}>{formatDate(r.email_sent_at)}</td>
-                </tr>
-              );
-            })}
+            {rows.map(u => (
+              <tr key={u.serial}>
+                <td className={styles.mono}>{formatDate(u.shipped_at)}</td>
+                <td>{u.customer_name ?? <span className={styles.muted}>—</span>}</td>
+                <td><span className={styles.batchBadge}>{u.batch}</span></td>
+                <td>
+                  {u.color ? (
+                    <span className={styles.colorCell}>
+                      <span
+                        className={styles.colorDot}
+                        style={{
+                          background: u.color === 'Black' ? '#1a1a1a' : '#f5f5f5',
+                          border: u.color === 'White' ? '1px solid #ccc' : 'none',
+                        }}
+                      />
+                      {u.color}
+                    </span>
+                  ) : <span className={styles.muted}>—</span>}
+                </td>
+                <td className={styles.mono}>{u.serial}</td>
+                <td>{u.location ?? <span className={styles.muted}>—</span>}</td>
+                <td>{u.carrier ?? <span className={styles.muted}>—</span>}</td>
+                <td className={styles.notes} title={u.notes ?? ''}>{u.notes ?? <span className={styles.muted}>—</span>}</td>
+              </tr>
+            ))}
           </tbody>
         </table>
       </div>
@@ -152,4 +147,3 @@ function KPI({ label, value }: { label: string; value: number | string }) {
     </div>
   );
 }
-

@@ -309,6 +309,31 @@
   margin-right: 4px;
 }
 
+.batchBadge {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 800;
+  color: var(--color-crimson);
+  background: #fff5f5;
+  padding: 2px 7px;
+  border-radius: 10px;
+  letter-spacing: 0.3px;
+}
+
+.colorCell {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+.colorDot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
 .mapSvg {
   width: 100%;
   height: auto;
