@@ -25,7 +25,7 @@ export default function Login() {
           letterSpacing: '0.1em',
           color: 'var(--color-crimson)',
           marginBottom: 2,
-        }}>MAKE LILA</h1>
+        }}>make lila</h1>
         <p style={{ fontSize: 12, color: 'var(--color-ink-subtle)', marginTop: 8 }}>
           Internal operations tool for VCycene Inc.
         </p>
