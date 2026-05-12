@@ -8,6 +8,8 @@ import Stock from './modules/Stock';
 import Customers from './modules/Customers';
 import ActivityLog from './modules/ActivityLog';
 import Login from './modules/Login';
+import ReturnForm from './modules/Forms/ReturnForm';
+import CancelOrderForm from './modules/Forms/CancelOrderForm';
 
 export default function App() {
   return (
@@ -15,6 +17,9 @@ export default function App() {
       <AuthProvider>
         <Routes>
           <Route path="/login" element={<Login />} />
+          {/* Public customer-facing forms — no auth required */}
+          <Route path="/return"       element={<ReturnForm />} />
+          <Route path="/cancel-order" element={<CancelOrderForm />} />
           <Route
             path="/"
             element={
