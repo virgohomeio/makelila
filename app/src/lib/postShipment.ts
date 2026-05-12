@@ -202,3 +202,172 @@ export async function updateReplStatus(id: string, newStatus: ReplQueueStatus): 
   if (error) throw error;
   await logAction('repl_status', id, `→ ${newStatus}`);
 }
+
+// ============================================================================
+// Refund approvals (Pedrum dual sign-off: George manager → Julie finance)
+// ============================================================================
+
+export type RefundStatus =
+  | 'submitted' | 'manager_review' | 'finance_review'
+  | 'refunded' | 'denied' | 'closed';
+
+export const REFUND_STATUS_META: Record<RefundStatus, { label: string; color: string; bg: string; border: string }> = {
+  submitted:       { label: 'Submitted',        color: '#4a5568', bg: '#f7fafc', border: '#cbd5e1' },
+  manager_review:  { label: 'Manager review',   color: '#2b6cb0', bg: '#ebf8ff', border: '#bee3f8' },
+  finance_review:  { label: 'Finance review',   color: '#c05621', bg: '#fffaf0', border: '#fbd38d' },
+  refunded:        { label: 'Refunded',         color: '#276749', bg: '#f0fff4', border: '#9ae6b4' },
+  denied:          { label: 'Denied',           color: '#9b2c2c', bg: '#fff5f5', border: '#fc8181' },
+  closed:          { label: 'Closed',           color: '#718096', bg: '#edf2f7', border: '#cbd5e1' },
+};
+
+export type RefundApproval = {
+  id: string;
+  return_id: string | null;
+  order_id: string | null;
+  customer_name: string;
+  customer_email: string | null;
+  refund_amount_usd: number;
+  currency: string;
+  payment_method: string | null;
+  reason: string | null;
+  notes: string | null;
+  status: RefundStatus;
+  submitted_by: string | null;
+  submitted_at: string;
+  manager_approved_by: string | null;
+  manager_approved_at: string | null;
+  manager_decision_note: string | null;
+  finance_approved_by: string | null;
+  finance_approved_at: string | null;
+  finance_decision_note: string | null;
+  refunded_at: string | null;
+  denied_by: string | null;
+  denied_at: string | null;
+  denied_at_stage: 'manager_review' | 'finance_review' | null;
+  denied_reason: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+// Role allowlist for the two approval stages. Once we ship proper RBAC
+// these move to a profiles.role column, but for 8 named users a simple
+// email list is fine and visible in code review.
+export const MANAGER_EMAILS = ['george@virgohome.io', 'huayi@virgohome.io'];
+export const FINANCE_EMAILS = ['julie@virgohome.io',  'huayi@virgohome.io'];
+
+export function canApproveManager(email: string | null | undefined): boolean {
+  return !!email && MANAGER_EMAILS.includes(email.toLowerCase());
+}
+export function canApproveFinance(email: string | null | undefined): boolean {
+  return !!email && FINANCE_EMAILS.includes(email.toLowerCase());
+}
+
+export function useRefundApprovals(): { approvals: RefundApproval[]; loading: boolean } {
+  const [approvals, setApprovals] = useState<RefundApproval[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let channel: RealtimeChannel | null = null;
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await supabase
+        .from('refund_approvals')
+        .select('*')
+        .order('submitted_at', { ascending: false });
+      if (cancelled) return;
+      if (!error && data) setApprovals(data as RefundApproval[]);
+      setLoading(false);
+
+      channel = supabase
+        .channel('refund_approvals:realtime')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'refund_approvals' }, (payload) => {
+          setApprovals(prev => {
+            if (payload.eventType === 'DELETE' && payload.old) {
+              return prev.filter(r => r.id !== (payload.old as { id: string }).id);
+            }
+            if (payload.new) {
+              const row = payload.new as RefundApproval;
+              const idx = prev.findIndex(r => r.id === row.id);
+              if (idx >= 0) { const next = [...prev]; next[idx] = row; return next; }
+              return [row, ...prev];
+            }
+            return prev;
+          });
+        })
+        .subscribe();
+    })();
+    return () => { cancelled = true; if (channel) void channel.unsubscribe(); };
+  }, []);
+
+  return { approvals, loading };
+}
+
+async function currentUserId(): Promise<string> {
+  const { data } = await supabase.auth.getUser();
+  if (!data.user) throw new Error('refund: not authenticated');
+  return data.user.id;
+}
+
+export async function submitRefundRequest(input: {
+  return_id?: string;
+  order_id?: string;
+  customer_name: string;
+  customer_email?: string;
+  refund_amount_usd: number;
+  payment_method?: string;
+  reason?: string;
+  notes?: string;
+}): Promise<void> {
+  const userId = await currentUserId();
+  const { error } = await supabase.from('refund_approvals').insert({
+    ...input,
+    status: 'manager_review',
+    submitted_by: userId,
+  });
+  if (error) throw error;
+  await logAction('refund_submitted', input.customer_name, `$${input.refund_amount_usd} (${input.reason ?? 'no reason'})`);
+}
+
+export async function managerApprove(id: string, note?: string): Promise<void> {
+  const userId = await currentUserId();
+  const { error } = await supabase.from('refund_approvals').update({
+    status: 'finance_review',
+    manager_approved_by: userId,
+    manager_approved_at: new Date().toISOString(),
+    manager_decision_note: note ?? null,
+  }).eq('id', id);
+  if (error) throw error;
+  await logAction('refund_manager_approved', id, note ?? 'approved');
+}
+
+export async function financeApprove(id: string, note?: string): Promise<void> {
+  const userId = await currentUserId();
+  const { error } = await supabase.from('refund_approvals').update({
+    status: 'refunded',
+    finance_approved_by: userId,
+    finance_approved_at: new Date().toISOString(),
+    finance_decision_note: note ?? null,
+    refunded_at: new Date().toISOString(),
+  }).eq('id', id);
+  if (error) throw error;
+  await logAction('refund_finance_approved', id, note ?? 'paid');
+}
+
+export async function denyRefund(id: string, stage: 'manager_review' | 'finance_review', reason: string): Promise<void> {
+  const userId = await currentUserId();
+  const { error } = await supabase.from('refund_approvals').update({
+    status: 'denied',
+    denied_by: userId,
+    denied_at: new Date().toISOString(),
+    denied_at_stage: stage,
+    denied_reason: reason,
+  }).eq('id', id);
+  if (error) throw error;
+  await logAction('refund_denied', id, `${stage}: ${reason}`);
+}
+
+export async function closeRefund(id: string): Promise<void> {
+  const { error } = await supabase.from('refund_approvals').update({ status: 'closed' }).eq('id', id);
+  if (error) throw error;
+  await logAction('refund_closed', id, 'archived');
+}

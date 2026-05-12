@@ -112,6 +112,191 @@
   font-weight: 700;
 }
 
+/* ============================================================ Refunds tab */
+
+.refundsBar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.requestRefundBtn {
+  background: var(--color-crimson);
+  color: #fff;
+  border: none;
+  padding: 8px 16px;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  letter-spacing: 0.3px;
+}
+.requestRefundBtn:hover { background: var(--color-crimson-dark); }
+.refundsError {
+  background: var(--color-error-bg);
+  color: var(--color-error);
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.kanban {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+}
+
+.kanbanCol {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 10px;
+  min-height: 300px;
+  display: flex;
+  flex-direction: column;
+}
+.kanbanColHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  color: var(--color-ink);
+}
+.kanbanColLabel { text-transform: uppercase; }
+.kanbanColCount {
+  background: #fff;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  padding: 1px 8px;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.kanbanColSub {
+  font-size: 10px;
+  color: var(--color-ink-subtle);
+  margin-top: 2px;
+  margin-bottom: 8px;
+}
+.kanbanList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+}
+.kanbanEmpty {
+  text-align: center;
+  color: var(--color-ink-faint);
+  font-size: 12px;
+  padding: 20px;
+}
+
+.refundCard {
+  background: #fff;
+  border: 1px solid var(--color-border);
+  border-left: 4px solid var(--color-ink-subtle);
+  border-radius: var(--radius-sm);
+  padding: 10px;
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.refundCardHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.refundAmount {
+  font-weight: 800;
+  color: var(--color-ink);
+  font-variant-numeric: tabular-nums;
+  font-size: 14px;
+}
+.refundReason {
+  color: var(--color-ink-muted);
+  font-size: 11px;
+}
+.refundMeta {
+  color: var(--color-ink-subtle);
+  font-size: 10px;
+  font-style: italic;
+}
+
+.refundTimeline {
+  border-top: 1px dashed var(--color-border);
+  padding-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.refundStep {
+  font-size: 10px;
+  color: var(--color-ink-subtle);
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px;
+  align-items: baseline;
+}
+.refundStepActive { color: var(--color-ink); }
+.refundStepNeg { color: var(--color-error); }
+.refundStepLabel { font-weight: 700; }
+.refundStepTs { font-variant-numeric: tabular-nums; }
+.refundStepNote {
+  grid-column: 1 / -1;
+  font-style: italic;
+  color: var(--color-ink-muted);
+  font-size: 10px;
+  padding-top: 1px;
+}
+
+.refundActions {
+  display: flex;
+  gap: 5px;
+  margin-top: 4px;
+  flex-wrap: wrap;
+}
+.refundApproveBtn {
+  background: var(--color-success);
+  color: #fff;
+  border: none;
+  padding: 4px 10px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+  flex: 1;
+  white-space: nowrap;
+}
+.refundApproveBtn:hover { filter: brightness(1.05); }
+.refundApproveBtn:disabled { opacity: 0.5; cursor: not-allowed; }
+.refundDenyBtn {
+  background: #fff;
+  color: var(--color-error);
+  border: 1px solid var(--color-error-border);
+  padding: 4px 10px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.refundDenyBtn:hover { background: var(--color-error-bg); }
+.refundCloseBtn {
+  background: #fff;
+  color: var(--color-ink-subtle);
+  border: 1px solid var(--color-border);
+  padding: 4px 10px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+@media (max-width: 1200px) {
+  .kanban { grid-template-columns: repeat(2, 1fr); }
+}
+
 /* Filter bar */
 .filterBar {
   display: flex;

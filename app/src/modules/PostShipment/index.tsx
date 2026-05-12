@@ -3,14 +3,16 @@ import { ReturnsTab } from './ReturnsTab';
 import { ReplacementsTab } from './ReplacementsTab';
 import { DeliveryMapTab } from './DeliveryMapTab';
 import { HistoryTab } from './HistoryTab';
+import { RefundsTab } from './RefundsTab';
 import styles from './PostShipment.module.css';
 
-type Tab = 'map' | 'history' | 'returns' | 'replacements';
+type Tab = 'map' | 'history' | 'returns' | 'refunds' | 'replacements';
 
 const TABS: { key: Tab; label: string }[] = [
   { key: 'map',          label: 'Delivery Map' },
   { key: 'history',      label: 'Fulfillment History' },
   { key: 'returns',      label: 'Returns' },
+  { key: 'refunds',      label: 'Refunds' },
   { key: 'replacements', label: 'Replacements' },
 ];
 
@@ -32,6 +34,7 @@ export default function PostShipment() {
         {tab === 'map'          && <DeliveryMapTab />}
         {tab === 'history'      && <HistoryTab />}
         {tab === 'returns'      && <ReturnsTab />}
+        {tab === 'refunds'      && <RefundsTab />}
         {tab === 'replacements' && <ReplacementsTab />}
       </div>
     </div>
