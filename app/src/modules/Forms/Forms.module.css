@@ -17,67 +17,107 @@
   border-radius: var(--radius-md);
   border: 1px solid var(--color-border);
   overflow: hidden;
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.04);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.06);
+}
+
+/* Brand stripe across the very top of the card — Ladybug Red */
+.brandStripe {
+  height: 4px;
+  background: var(--color-crimson);
 }
 
 .header {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 18px 24px;
+  gap: 14px;
+  padding: 22px 28px;
   border-bottom: 1px solid var(--color-border);
   background: var(--color-surface);
 }
 .logo {
-  width: 44px;
-  height: 44px;
+  width: 48px;
+  height: 48px;
   object-fit: contain;
+  flex-shrink: 0;
+}
+.brandLockup {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  line-height: 1.1;
 }
 .wordmark {
-  font-size: 18px;
-  font-weight: 500;
-  color: var(--color-ink-muted);
-  letter-spacing: 0.3px;
-}
-.lila {
   font-family: var(--font-logo);
   color: var(--color-crimson);
-  letter-spacing: 0.08em;
-  font-size: 22px;
+  letter-spacing: 0.1em;
+  font-size: 26px;
   font-weight: 700;
+}
+.subwordmark {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+  color: var(--color-ink-subtle);
+  text-transform: uppercase;
 }
 
 .main {
-  padding: 28px 28px 30px;
+  padding: 28px 32px 32px;
 }
 
 .title {
-  font-size: 22px;
+  font-size: 24px;
   font-weight: 700;
   color: var(--color-ink);
-  margin-bottom: 6px;
+  margin-bottom: 8px;
   letter-spacing: -0.01em;
+  position: relative;
+  padding-bottom: 10px;
+}
+.title::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 44px;
+  height: 3px;
+  background: var(--color-crimson);
+  border-radius: 2px;
 }
 .intro {
   font-size: 13px;
   color: var(--color-ink-muted);
   line-height: 1.6;
   margin-bottom: 22px;
+  margin-top: 12px;
 }
 
 .footer {
   width: 100%;
   max-width: 640px;
-  padding: 16px;
+  padding: 20px 16px;
   font-size: 11px;
   color: var(--color-ink-subtle);
   text-align: center;
 }
+.footerLinks {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
 .footer a {
   color: var(--color-crimson);
   text-decoration: none;
+  font-weight: 600;
 }
 .footer a:hover { text-decoration: underline; }
+.footerDot { color: var(--color-ink-faint); }
+.footerCopy {
+  margin-top: 6px;
+  font-size: 10px;
+  color: var(--color-ink-faint);
+  letter-spacing: 0.3px;
+}
 
 /* ===== Form fields ===== */
 
