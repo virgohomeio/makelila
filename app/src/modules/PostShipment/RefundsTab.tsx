@@ -9,6 +9,8 @@ import {
 import { useAuth } from '../../lib/auth';
 import styles from './PostShipment.module.css';
 
+const STAR = '★';
+
 type ColKey = 'manager_review' | 'finance_review' | 'refunded' | 'denied';
 
 const COLUMNS: { key: ColKey; label: string; helper: string }[] = [
@@ -25,10 +27,25 @@ export function RefundsTab() {
   const userEmail = user?.email;
 
   const [showRequestModal, setShowRequestModal] = useState(false);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const isManager = canApproveManager(userEmail);
   const isFinance = canApproveFinance(userEmail);
+
+  const returnsById = useMemo(() => {
+    const m = new Map<string, ReturnRow>();
+    for (const r of returns) m.set(r.id, r);
+    return m;
+  }, [returns]);
+
+  const selectedRefund = useMemo(
+    () => approvals.find(a => a.id === selectedId) ?? null,
+    [approvals, selectedId],
+  );
+  const selectedReturn = selectedRefund?.return_id
+    ? returnsById.get(selectedRefund.return_id) ?? null
+    : null;
 
   const byColumn = useMemo(() => {
     const m = new Map<ColKey, RefundApproval[]>();
@@ -111,6 +128,8 @@ export function RefundsTab() {
                     refund={r}
                     canManager={isManager}
                     canFinance={isFinance}
+                    selected={selectedId === r.id}
+                    onSelect={() => setSelectedId(prev => prev === r.id ? null : r.id)}
                     onError={setError}
                   />
                 ))}
@@ -119,6 +138,17 @@ export function RefundsTab() {
           );
         })}
       </div>
+
+      {selectedRefund && (
+        <RefundDetailPanel
+          refund={selectedRefund}
+          linkedReturn={selectedReturn}
+          canManager={isManager}
+          canFinance={isFinance}
+          onClose={() => setSelectedId(null)}
+          onError={setError}
+        />
+      )}
 
       {showRequestModal && (
         <RequestRefundModal
@@ -135,11 +165,13 @@ export function RefundsTab() {
 // Refund card
 // ============================================================================
 function RefundCard({
-  refund, canManager, canFinance, onError,
+  refund, canManager, canFinance, selected, onSelect, onError,
 }: {
   refund: RefundApproval;
   canManager: boolean;
   canFinance: boolean;
+  selected: boolean;
+  onSelect: () => void;
   onError: (msg: string | null) => void;
 }) {
   const [busy, setBusy] = useState(false);
@@ -182,7 +214,13 @@ function RefundCard({
   const canDeny = canActManager || canActFinance;
 
   return (
-    <div className={styles.refundCard} style={{ borderLeftColor: meta.color }}>
+    <div
+      className={`${styles.refundCard} ${selected ? styles.refundCardSelected : ''}`}
+      style={{ borderLeftColor: meta.color }}
+      onClick={onSelect}
+      role="button"
+      tabIndex={0}
+    >
       <div className={styles.refundCardHead}>
         <strong>{refund.customer_name}</strong>
         <span className={styles.refundAmount}>${Number(refund.refund_amount_usd).toLocaleString('en-US')}</span>
@@ -221,7 +259,7 @@ function RefundCard({
           />
         )}
       </div>
-      <div className={styles.refundActions}>
+      <div className={styles.refundActions} onClick={e => e.stopPropagation()}>
         {(canActManager || canActFinance) && (
           <button onClick={() => void runApprove()} disabled={busy}
                   className={styles.refundApproveBtn}>
@@ -238,6 +276,174 @@ function RefundCard({
             Close
           </button>
         )}
+      </div>
+      {!selected && (
+        <div className={styles.refundCardHint}>Click to review full return form ↓</div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================================
+// Detail panel — shown below the Kanban when a card is selected.
+// Renders the linked return-form data + approve / deny actions.
+// ============================================================================
+function RefundDetailPanel({
+  refund, linkedReturn, canManager, canFinance, onClose, onError,
+}: {
+  refund: RefundApproval;
+  linkedReturn: ReturnRow | null;
+  canManager: boolean;
+  canFinance: boolean;
+  onClose: () => void;
+  onError: (msg: string | null) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const meta = REFUND_STATUS_META[refund.status];
+
+  const canActManager = (refund.status === 'manager_review' || refund.status === 'submitted') && canManager;
+  const canActFinance = refund.status === 'finance_review' && canFinance;
+  const canAct = canActManager || canActFinance;
+
+  const runApprove = async () => {
+    setBusy(true); onError(null);
+    try {
+      if (canActManager) {
+        const note = window.prompt('Manager approval note (optional):') ?? undefined;
+        await managerApprove(refund.id, note);
+      } else if (canActFinance) {
+        const note = window.prompt('Finance approval note (e.g. Stripe refund ID):') ?? undefined;
+        await financeApprove(refund.id, note);
+      }
+      onClose();
+    } catch (e) { onError((e as Error).message); }
+    finally { setBusy(false); }
+  };
+
+  const runDeny = async () => {
+    const reason = window.prompt('Reason for denial (required):');
+    if (!reason) return;
+    setBusy(true); onError(null);
+    try {
+      const stage = refund.status === 'finance_review' ? 'finance_review' : 'manager_review';
+      await denyRefund(refund.id, stage, reason);
+      onClose();
+    } catch (e) { onError((e as Error).message); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div className={styles.refundDetail}>
+      <div className={styles.refundDetailHead}>
+        <div>
+          <div className={styles.refundDetailTitleRow}>
+            <h3 className={styles.refundDetailTitle}>{refund.customer_name}</h3>
+            <span
+              className={styles.refundDetailStatusPill}
+              style={{ color: meta.color, background: meta.bg, borderColor: meta.border }}
+            >{meta.label}</span>
+          </div>
+          <div className={styles.refundDetailSub}>
+            {linkedReturn?.original_order_ref ?? '—'} ·
+            {' '}{linkedReturn?.customer_email ?? refund.customer_email ?? '—'} ·
+            {' '}{linkedReturn?.customer_phone ?? '—'}
+          </div>
+        </div>
+        <button onClick={onClose} className={styles.refundDetailClose} title="Close detail">✕</button>
+      </div>
+
+      {!linkedReturn ? (
+        <div className={styles.refundDetailEmpty}>
+          This refund isn't linked to a return record. No customer form data to display.
+        </div>
+      ) : (
+        <div className={styles.refundDetailGrid}>
+          <DetailField label="Order #" value={linkedReturn.original_order_ref ?? '—'} mono />
+          <DetailField label="Unit serial" value={linkedReturn.unit_serial ?? '—'} mono />
+          <DetailField label="Channel" value={linkedReturn.channel ?? '—'} />
+          <DetailField label="Source" value={linkedReturn.source ?? '—'} />
+          <DetailField label="Usage duration" value={linkedReturn.usage_duration ?? '—'} />
+          <DetailField label="Condition" value={linkedReturn.condition ?? '—'} />
+          <DetailField label="Packaging" value={linkedReturn.packaging_status ?? '—'} />
+          <DetailField label="Alternative composting" value={linkedReturn.alternative_composting ?? '—'} />
+          <DetailField label="Refund preference" value={linkedReturn.refund_method_preference ?? '—'} />
+          <DetailField label="Refund contact" value={linkedReturn.refund_contact ?? '—'} mono />
+          <DetailField label="Future LILA likelihood" value={linkedReturn.future_likelihood ?? '—'} />
+          <DetailField
+            label="Experience rating"
+            value={
+              linkedReturn.experience_rating
+                ? `${STAR.repeat(linkedReturn.experience_rating)}${'☆'.repeat(5 - linkedReturn.experience_rating)} (${linkedReturn.experience_rating}/5)`
+                : '—'
+            }
+          />
+
+          <DetailField label="Selected reasons" wide>
+            {linkedReturn.return_reasons && linkedReturn.return_reasons.length > 0 ? (
+              <div className={styles.reasonTags}>
+                {linkedReturn.return_reasons.map(r => (
+                  <span key={r} className={styles.reasonTag}>{r}</span>
+                ))}
+              </div>
+            ) : '—'}
+          </DetailField>
+
+          <DetailField label="Support contacted" wide value={linkedReturn.support_contacted ?? '—'} />
+
+          <DetailField label="Issue description" wide>
+            <div className={styles.detailQuote}>{linkedReturn.description ?? '—'}</div>
+          </DetailField>
+
+          {linkedReturn.would_change_decision && (
+            <DetailField label="What would've changed their mind" wide>
+              <div className={styles.detailQuote}>{linkedReturn.would_change_decision}</div>
+            </DetailField>
+          )}
+
+          {linkedReturn.additional_comments && (
+            <DetailField label="Additional comments" wide>
+              <div className={styles.detailQuote}>{linkedReturn.additional_comments}</div>
+            </DetailField>
+          )}
+        </div>
+      )}
+
+      <div className={styles.refundDetailActions}>
+        <div className={styles.refundDetailRolePill}>
+          {canActManager ? 'You can act as Manager for this case' :
+           canActFinance ? 'You can act as Finance for this case' :
+           refund.status === 'refunded' ? 'Refunded — no action needed' :
+           refund.status === 'denied'   ? 'Denied — no action needed' :
+           refund.status === 'closed'   ? 'Closed — no action needed' :
+                                          'Not your stage — view only'}
+        </div>
+        <div className={styles.refundDetailButtons}>
+          {canAct && (
+            <button onClick={() => void runApprove()} disabled={busy}
+                    className={styles.refundDetailApproveBtn}>
+              {busy ? '…' : canActManager ? '✓ Approve as Manager' : '✓ Approve as Finance (paid)'}
+            </button>
+          )}
+          {canAct && (
+            <button onClick={() => void runDeny()} disabled={busy}
+                    className={styles.refundDetailDenyBtn}>
+              ✕ Deny
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DetailField({
+  label, value, children, mono, wide,
+}: { label: string; value?: string; children?: React.ReactNode; mono?: boolean; wide?: boolean }) {
+  return (
+    <div className={`${styles.detailField} ${wide ? styles.detailFieldWide : ''}`}>
+      <div className={styles.detailFieldLabel}>{label}</div>
+      <div className={`${styles.detailFieldValue} ${mono ? styles.detailFieldMono : ''}`}>
+        {children ?? value}
       </div>
     </div>
   );

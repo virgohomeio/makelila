@@ -297,6 +297,182 @@
   .kanban { grid-template-columns: repeat(2, 1fr); }
 }
 
+.refundCard {
+  cursor: pointer;
+}
+.refundCardSelected {
+  outline: 2px solid var(--color-crimson);
+  outline-offset: -1px;
+  background: #fffbfb;
+}
+.refundCardHint {
+  margin-top: 4px;
+  font-size: 9px;
+  color: var(--color-ink-faint);
+  text-align: right;
+  font-style: italic;
+}
+
+/* ============================================================ Detail panel */
+.refundDetail {
+  background: #fff;
+  border: 1.5px solid var(--color-crimson);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  box-shadow: 0 4px 20px rgba(204, 45, 48, 0.08);
+}
+
+.refundDetailHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface);
+  gap: 14px;
+}
+.refundDetailTitleRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.refundDetailTitle {
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--color-ink);
+  margin: 0;
+}
+.refundDetailStatusPill {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 9px;
+  border-radius: 10px;
+  border: 1px solid;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+}
+.refundDetailSub {
+  font-size: 11px;
+  color: var(--color-ink-subtle);
+  margin-top: 4px;
+}
+.refundDetailClose {
+  background: transparent;
+  border: none;
+  font-size: 16px;
+  color: var(--color-ink-subtle);
+  cursor: pointer;
+  padding: 4px 8px;
+}
+.refundDetailClose:hover { color: var(--color-error); }
+
+.refundDetailEmpty {
+  padding: 30px;
+  text-align: center;
+  color: var(--color-ink-subtle);
+  font-size: 12px;
+}
+
+.refundDetailGrid {
+  padding: 16px 18px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 18px;
+}
+
+.detailField {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.detailFieldWide {
+  grid-column: 1 / -1;
+}
+.detailFieldLabel {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--color-ink-subtle);
+}
+.detailFieldValue {
+  font-size: 12px;
+  color: var(--color-ink);
+  line-height: 1.4;
+}
+.detailFieldMono {
+  font-variant-numeric: tabular-nums;
+}
+
+.reasonTags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.reasonTag {
+  display: inline-block;
+  background: #fff5f5;
+  color: var(--color-crimson);
+  font-size: 10px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 10px;
+  border: 1px solid #fed7d7;
+}
+
+.detailQuote {
+  background: var(--color-surface);
+  padding: 8px 12px;
+  border-left: 3px solid var(--color-crimson);
+  border-radius: 0 4px 4px 0;
+  font-size: 12px;
+  color: var(--color-ink);
+  line-height: 1.5;
+  font-style: italic;
+}
+
+.refundDetailActions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 18px;
+  border-top: 1px solid var(--color-border);
+  background: var(--color-surface);
+  gap: 12px;
+}
+.refundDetailRolePill {
+  font-size: 11px;
+  color: var(--color-ink-muted);
+  font-style: italic;
+}
+.refundDetailButtons {
+  display: flex;
+  gap: 8px;
+}
+.refundDetailApproveBtn {
+  background: var(--color-success);
+  color: #fff;
+  border: none;
+  padding: 9px 18px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.refundDetailApproveBtn:hover { filter: brightness(1.05); }
+.refundDetailApproveBtn:disabled { opacity: 0.5; cursor: not-allowed; }
+.refundDetailDenyBtn {
+  background: #fff;
+  color: var(--color-error);
+  border: 1.5px solid var(--color-error-border);
+  padding: 9px 18px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.refundDetailDenyBtn:hover { background: var(--color-error-bg); }
+
 /* Filter bar */
 .filterBar {
   display: flex;
