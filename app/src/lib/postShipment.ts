@@ -11,7 +11,9 @@ export type ReturnStatus =
   | 'created' | 'pickup_scheduled' | 'picked_up' | 'received'
   | 'inspected' | 'refunded' | 'denied' | 'closed';
 
-export type ReturnCondition = 'unused' | 'used' | 'damaged';
+export type ReturnCondition =
+  | 'unused' | 'used' | 'damaged'           // legacy / coarse
+  | 'like-new' | 'good' | 'fair';           // granular (matches Jotform)
 
 export const RETURN_STATUS_META: Record<ReturnStatus, { label: string; color: string; bg: string; border: string }> = {
   'created':          { label: 'Created',    color: '#4a5568', bg: '#f7fafc', border: '#cbd5e1' },
@@ -33,6 +35,7 @@ export type ReturnRow = {
   return_ref: string | null;
   customer_name: string;
   customer_email: string | null;
+  customer_phone: string | null;
   channel: 'Canada' | 'USA' | null;
   unit_serial: string | null;
   original_order_ref: string | null;
@@ -46,6 +49,20 @@ export type ReturnRow = {
   received_at: string | null;
   refund_issued_at: string | null;
   notes: string | null;
+  description: string | null;
+  source: 'ops' | 'customer_form';
+  // Extended fields from the Jotform return form
+  usage_duration: string | null;
+  return_reasons: string[];
+  support_contacted: string | null;
+  experience_rating: number | null;
+  would_change_decision: string | null;
+  future_likelihood: string | null;
+  packaging_status: string | null;
+  alternative_composting: string | null;
+  refund_method_preference: string | null;
+  refund_contact: string | null;
+  additional_comments: string | null;
   created_at: string;
   updated_at: string;
 };

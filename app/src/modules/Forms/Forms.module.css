@@ -141,6 +141,11 @@
   gap: 8px;
   flex-wrap: wrap;
 }
+.radioStack {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
 .radioBtn {
   flex: 1;
   min-width: 100px;
@@ -152,6 +157,13 @@
   font-size: 12px;
   font-weight: 600;
   color: var(--color-ink);
+  text-align: left;
+}
+.radioStack .radioBtn {
+  text-align: left;
+  min-width: 0;
+}
+.radioGroup .radioBtn {
   text-align: center;
 }
 .radioBtn:hover { border-color: var(--color-ink-subtle); }
@@ -159,6 +171,92 @@
   background: var(--color-crimson);
   color: #fff;
   border-color: var(--color-crimson);
+}
+
+/* ===== Section header / multi-select / star rating ===== */
+
+.sectionHeader {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--color-crimson);
+  border-bottom: 1.5px solid var(--color-border);
+  padding-bottom: 6px;
+  margin-top: 14px;
+  margin-bottom: 2px;
+}
+.sectionHeader:first-child {
+  margin-top: 0;
+}
+
+.checkboxStack {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.checkboxRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 9px 12px;
+  background: #fff;
+  border: 1.5px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-ink);
+  text-align: left;
+  font-family: inherit;
+}
+.checkboxRow:hover { border-color: var(--color-ink-subtle); }
+.checkboxRowActive {
+  background: #fff5f5;
+  border-color: var(--color-crimson);
+  color: var(--color-ink);
+}
+.checkboxBox {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  border: 1.5px solid var(--color-border);
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 800;
+  background: #fff;
+  color: var(--color-crimson);
+}
+.checkboxRowActive .checkboxBox {
+  background: var(--color-crimson);
+  border-color: var(--color-crimson);
+  color: #fff;
+}
+
+.starRow {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.starBtn {
+  background: transparent;
+  border: none;
+  font-size: 28px;
+  line-height: 1;
+  color: #d1d5db;
+  cursor: pointer;
+  padding: 0 2px;
+  transition: color 0.1s, transform 0.1s;
+}
+.starBtn:hover { transform: scale(1.1); }
+.starBtnActive { color: #f6ad55; }
+.starLabel {
+  font-size: 11px;
+  color: var(--color-ink-subtle);
+  margin-left: 10px;
 }
 
 .submitRow {

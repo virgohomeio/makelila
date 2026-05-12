@@ -33,7 +33,11 @@ export function ReturnsTab() {
 
   const stats = useMemo(() => {
     const reasons = new Map<string, number>();
-    const conditions = { unused: 0, used: 0, damaged: 0 };
+    // Map all 6 possible condition values (legacy + Jotform-granular).
+    const conditions: Record<string, number> = {
+      unused: 0, used: 0, damaged: 0,
+      'like-new': 0, good: 0, fair: 0,
+    };
     let total = 0, open = 0, refunded = 0, pending = 0, refundedUsd = 0;
     let canada = 0, usa = 0;
     let amounts: number[] = [];
