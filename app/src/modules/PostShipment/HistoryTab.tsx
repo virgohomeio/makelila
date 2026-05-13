@@ -1,6 +1,77 @@
 import { useMemo, useState } from 'react';
 import { useUnits } from '../../lib/stock';
+import { supabase } from '../../lib/supabase';
 import styles from './PostShipment.module.css';
+
+type ShopifyPushResult = {
+  candidates: number;
+  pushed: number;
+  already_fulfilled: number;
+  skipped: { order_ref: string; reason: string }[];
+  failed: { order_ref: string; error: string }[];
+  dry_run: boolean;
+};
+
+type PushState =
+  | { kind: 'idle' }
+  | { kind: 'running'; dryRun: boolean }
+  | { kind: 'done'; result: ShopifyPushResult }
+  | { kind: 'error'; message: string };
+
+function ShopifyPushBar() {
+  const [state, setState] = useState<PushState>({ kind: 'idle' });
+
+  const run = async (dryRun: boolean) => {
+    setState({ kind: 'running', dryRun });
+    const { data, error } = await supabase.functions.invoke<ShopifyPushResult>(
+      'push-shopify-fulfillments',
+      { body: { dry_run: dryRun } },
+    );
+    if (error) { setState({ kind: 'error', message: error.message }); return; }
+    if (!data) { setState({ kind: 'error', message: 'empty response' }); return; }
+    setState({ kind: 'done', result: data });
+  };
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12, padding: '10px 12px', background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+        <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--color-ink)' }}>Push fulfillments → Shopify</span>
+        <span style={{ fontSize: 10, color: 'var(--color-ink-subtle)' }}>
+          Marks fulfilled orders as shipped in Shopify with tracking. Dry-run first to preview.
+        </span>
+      </div>
+      <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+        <button
+          onClick={() => void run(true)}
+          disabled={state.kind === 'running'}
+          style={{ padding: '6px 12px', fontSize: 11, fontWeight: 600, background: '#fff', color: 'var(--color-ink-muted)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', cursor: 'pointer' }}
+        >
+          {state.kind === 'running' && state.dryRun ? 'Checking…' : 'Dry-run'}
+        </button>
+        <button
+          onClick={() => void run(false)}
+          disabled={state.kind === 'running'}
+          style={{ padding: '6px 12px', fontSize: 11, fontWeight: 700, background: 'var(--color-crimson)', color: '#fff', border: 'none', borderRadius: 'var(--radius-sm)', cursor: 'pointer' }}
+        >
+          {state.kind === 'running' && !state.dryRun ? 'Pushing…' : 'Push to Shopify'}
+        </button>
+      </div>
+      {state.kind === 'done' && (
+        <div style={{ marginLeft: 14, fontSize: 11, color: 'var(--color-ink-muted)' }}>
+          {state.result.dry_run ? 'Would push' : 'Pushed'}: <strong>{state.result.pushed}</strong>
+          {' · '}already fulfilled: <strong>{state.result.already_fulfilled}</strong>
+          {' · '}skipped: <strong>{state.result.skipped.length}</strong>
+          {state.result.failed.length > 0 && (
+            <> {' · '}<span style={{ color: 'var(--color-error)' }}>failed: <strong>{state.result.failed.length}</strong></span></>
+          )}
+        </div>
+      )}
+      {state.kind === 'error' && (
+        <div style={{ marginLeft: 14, fontSize: 11, color: 'var(--color-error)' }}>Error: {state.message}</div>
+      )}
+    </div>
+  );
+}
 
 type BatchFilter = 'all' | 'P50' | 'P150' | 'P50N' | 'P100' | 'P100X';
 
@@ -91,6 +162,8 @@ export function HistoryTab() {
         />
         <KPI label="Undated rows" value={stats.undated} sub={stats.undated > 0 ? 'no shipped_at on file' : 'all dated'} />
       </div>
+
+      <ShopifyPushBar />
 
       <div className={styles.filterBar}>
         {BATCHES.map(b => (

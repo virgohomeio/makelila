@@ -450,3 +450,9 @@ verify_jwt = false
 # so caller identity isn't needed for correctness.
 [functions.sync-hubspot-tickets]
 verify_jwt = false
+
+# push-shopify-fulfillments: same ES256 gateway workaround. Function uses
+# the service-role key internally and SHOPIFY_ADMIN_TOKEN for outbound
+# calls, so caller identity isn't needed for correctness.
+[functions.push-shopify-fulfillments]
+verify_jwt = false
