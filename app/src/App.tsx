@@ -4,6 +4,7 @@ import { AppShell } from './components/AppShell';
 import OrderReview from './modules/OrderReview';
 import Fulfillment from './modules/Fulfillment';
 import PostShipment from './modules/PostShipment';
+import Service from './modules/Service';
 import Stock from './modules/Stock';
 import Customers from './modules/Customers';
 import Templates from './modules/Templates';
@@ -35,6 +36,7 @@ export default function App() {
             <Route path="fulfillment"       element={<Fulfillment />} />
             <Route path="fulfillment/:tab"  element={<Fulfillment />} />
             <Route path="post-shipment" element={<PostShipment />} />
+            <Route path="service"       element={<Service />} />
             <Route path="stock"         element={<Stock />} />
             <Route path="customers"     element={<Customers />} />
             <Route path="templates"     element={<Templates />} />
