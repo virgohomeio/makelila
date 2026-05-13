@@ -289,6 +289,36 @@ export async function flagRework(
     .eq('id', queueId);
   if (qErr) throw qErr;
   await logAction('fq_test_flagged', queueId, `${serial}: ${issue}`);
+
+  // Also create a service_tickets row so the Service module's Repair
+  // tab picks this up. Idempotent on fulfillment_queue_id; if the
+  // ticket insert fails we just log — the QC flag already succeeded.
+  try {
+    const { data: existing } = await supabase
+      .from('service_tickets')
+      .select('id')
+      .eq('fulfillment_queue_id', queueId)
+      .eq('source', 'fulfillment_flag')
+      .maybeSingle();
+    if (!existing) {
+      const { error: tErr } = await supabase
+        .from('service_tickets')
+        .insert({
+          category:             'repair',
+          source:               'fulfillment_flag',
+          status:               'new',
+          priority:             'high',
+          unit_serial:          serial,
+          subject:              `QC flag: ${issue}`,
+          description:          `Flagged at fulfillment QC by ${flaggedByName}.`,
+          fulfillment_queue_id: queueId,
+          owner_email:          'junaid@virgohome.io',
+        });
+      if (tErr) console.warn('Service ticket insert failed (non-fatal):', tErr.message);
+    }
+  } catch (e) {
+    console.warn('Service ticket insert threw (non-fatal):', (e as Error).message);
+  }
 }
 
 /** Step 3: upload PDF (optional) + save LILA carrier/tracking (and US starter tracking); advance 3→4. */
