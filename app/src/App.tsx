@@ -12,6 +12,7 @@ import ActivityLog from './modules/ActivityLog';
 import Login from './modules/Login';
 import ReturnForm from './modules/Forms/ReturnForm';
 import CancelOrderForm from './modules/Forms/CancelOrderForm';
+import ServiceRequestForm from './modules/Forms/ServiceRequestForm';
 
 export default function App() {
   return (
@@ -22,6 +23,7 @@ export default function App() {
           {/* Public customer-facing forms — no auth required */}
           <Route path="/return"       element={<ReturnForm />} />
           <Route path="/cancel-order" element={<CancelOrderForm />} />
+          <Route path="/service-request" element={<ServiceRequestForm />} />
           <Route
             path="/"
             element={
