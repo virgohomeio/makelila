@@ -167,23 +167,32 @@ export function useOrders(): {
   loading: boolean;
 } {
   const [cache, setCache] = useState<Order[]>([]);
+  const [fulfilledOrderIds, setFulfilledOrderIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    let channel: RealtimeChannel | null = null;
+    let ordersChannel: RealtimeChannel | null = null;
+    let queueChannel: RealtimeChannel | null = null;
     let cancelled = false;
 
     (async () => {
-      const { data, error } = await supabase
-        .from('orders')
-        .select('*')
-        .order('created_at', { ascending: false });
+      const [{ data: ordersData, error: ordersErr }, { data: queueData, error: queueErr }] = await Promise.all([
+        supabase.from('orders').select('*').order('created_at', { ascending: false }),
+        supabase.from('fulfillment_queue').select('order_id, step, fulfilled_at'),
+      ]);
 
       if (cancelled) return;
-      if (!error && data) setCache(data as Order[]);
+      if (!ordersErr && ordersData) setCache(ordersData as Order[]);
+      if (!queueErr && queueData) {
+        setFulfilledOrderIds(new Set(
+          (queueData as { order_id: string; step: number; fulfilled_at: string | null }[])
+            .filter(q => q.step === 6 || q.fulfilled_at !== null)
+            .map(q => q.order_id)
+        ));
+      }
       setLoading(false);
 
-      channel = supabase
+      ordersChannel = supabase
         .channel('orders:realtime')
         .on(
           'postgres_changes',
@@ -197,22 +206,54 @@ export function useOrders(): {
           },
         )
         .subscribe();
+
+      // Keep the fulfilled set fresh — orders flip in/out of the queue when ops
+      // promote them through steps. We only care about step transitions to 6
+      // (fulfilled), but for simplicity rebuild the set from the row on any change.
+      queueChannel = supabase
+        .channel('orders:fulfillment_queue')
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'fulfillment_queue' },
+          (payload) => {
+            const row = (payload.new ?? payload.old) as { order_id?: string; step?: number; fulfilled_at?: string | null } | null;
+            if (!row?.order_id) return;
+            setFulfilledOrderIds(prev => {
+              const next = new Set(prev);
+              const isFulfilled = (payload.new as { step?: number; fulfilled_at?: string | null } | null);
+              if (isFulfilled && (isFulfilled.step === 6 || isFulfilled.fulfilled_at)) {
+                next.add(row.order_id!);
+              } else {
+                next.delete(row.order_id!);
+              }
+              return next;
+            });
+          },
+        )
+        .subscribe();
     })();
 
     return () => {
       cancelled = true;
-      if (channel) void channel.unsubscribe();
+      if (ordersChannel) void ordersChannel.unsubscribe();
+      if (queueChannel) void queueChannel.unsubscribe();
     };
   }, []);
 
-  return useMemo(() => ({
-    all:      cache,
-    pending:  cache.filter(o => o.status === 'pending'),
-    held:     cache.filter(o => o.status === 'held'),
-    flagged:  cache.filter(o => o.status === 'flagged'),
-    approved: cache.filter(o => o.status === 'approved'),
-    loading,
-  }), [cache, loading]);
+  return useMemo(() => {
+    // Exclude orders whose fulfillment_queue row has reached step 6 (fulfilled).
+    // Order Review is for triage of orders still in motion; once fulfilled,
+    // the unit is shipped and the row belongs in Post-Shipment / History.
+    const active = cache.filter(o => !fulfilledOrderIds.has(o.id));
+    return {
+      all:      active,
+      pending:  active.filter(o => o.status === 'pending'),
+      held:     active.filter(o => o.status === 'held'),
+      flagged:  active.filter(o => o.status === 'flagged'),
+      approved: active.filter(o => o.status === 'approved'),
+      loading,
+    };
+  }, [cache, fulfilledOrderIds, loading]);
 }
 
 export function useOrder(id: string | null): { order: Order | null; loading: boolean } {
