@@ -168,17 +168,28 @@ export function useOrders(): {
 } {
   const [cache, setCache] = useState<Order[]>([]);
   const [fulfilledOrderIds, setFulfilledOrderIds] = useState<Set<string>>(new Set());
+  // Customer-name match (lowercased) for any shipped unit. Used as a second
+  // signal: an order whose customer has a shipped unit is effectively
+  // fulfilled even if fulfillment_queue never advanced to step 6 (e.g.
+  // orders shipped via the legacy Excel workflow before queue rows existed).
+  const [shippedCustomers, setShippedCustomers] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let ordersChannel: RealtimeChannel | null = null;
     let queueChannel: RealtimeChannel | null = null;
+    let unitsChannel: RealtimeChannel | null = null;
     let cancelled = false;
 
     (async () => {
-      const [{ data: ordersData, error: ordersErr }, { data: queueData, error: queueErr }] = await Promise.all([
+      const [
+        { data: ordersData, error: ordersErr },
+        { data: queueData, error: queueErr },
+        { data: unitsData, error: unitsErr },
+      ] = await Promise.all([
         supabase.from('orders').select('*').order('created_at', { ascending: false }),
         supabase.from('fulfillment_queue').select('order_id, step, fulfilled_at'),
+        supabase.from('units').select('customer_name, status').eq('status', 'shipped'),
       ]);
 
       if (cancelled) return;
@@ -188,6 +199,13 @@ export function useOrders(): {
           (queueData as { order_id: string; step: number; fulfilled_at: string | null }[])
             .filter(q => q.step === 6 || q.fulfilled_at !== null)
             .map(q => q.order_id)
+        ));
+      }
+      if (!unitsErr && unitsData) {
+        setShippedCustomers(new Set(
+          (unitsData as { customer_name: string | null; status: string }[])
+            .map(u => (u.customer_name ?? '').toLowerCase().trim())
+            .filter(Boolean)
         ));
       }
       setLoading(false);
@@ -207,9 +225,6 @@ export function useOrders(): {
         )
         .subscribe();
 
-      // Keep the fulfilled set fresh — orders flip in/out of the queue when ops
-      // promote them through steps. We only care about step transitions to 6
-      // (fulfilled), but for simplicity rebuild the set from the row on any change.
       queueChannel = supabase
         .channel('orders:fulfillment_queue')
         .on(
@@ -231,20 +246,45 @@ export function useOrders(): {
           },
         )
         .subscribe();
+
+      unitsChannel = supabase
+        .channel('orders:units')
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'units' },
+          (payload) => {
+            const row = (payload.new ?? payload.old) as { customer_name?: string | null; status?: string } | null;
+            const name = (row?.customer_name ?? '').toLowerCase().trim();
+            if (!name) return;
+            setShippedCustomers(prev => {
+              const next = new Set(prev);
+              const newStatus = (payload.new as { status?: string } | null)?.status;
+              if (newStatus === 'shipped') next.add(name);
+              return next;
+            });
+          },
+        )
+        .subscribe();
     })();
 
     return () => {
       cancelled = true;
       if (ordersChannel) void ordersChannel.unsubscribe();
       if (queueChannel) void queueChannel.unsubscribe();
+      if (unitsChannel) void unitsChannel.unsubscribe();
     };
   }, []);
 
   return useMemo(() => {
-    // Exclude orders whose fulfillment_queue row has reached step 6 (fulfilled).
-    // Order Review is for triage of orders still in motion; once fulfilled,
-    // the unit is shipped and the row belongs in Post-Shipment / History.
-    const active = cache.filter(o => !fulfilledOrderIds.has(o.id));
+    // Exclude orders that are fulfilled, by either signal:
+    //   (a) fulfillment_queue row reached step 6 / has fulfilled_at, OR
+    //   (b) customer has a shipped unit (catches legacy Excel-only shipments
+    //       where the queue row was never created or advanced).
+    const active = cache.filter(o => {
+      if (fulfilledOrderIds.has(o.id)) return false;
+      if (shippedCustomers.has(o.customer_name.toLowerCase().trim())) return false;
+      return true;
+    });
     return {
       all:      active,
       pending:  active.filter(o => o.status === 'pending'),
@@ -253,7 +293,7 @@ export function useOrders(): {
       approved: active.filter(o => o.status === 'approved'),
       loading,
     };
-  }, [cache, fulfilledOrderIds, loading]);
+  }, [cache, fulfilledOrderIds, shippedCustomers, loading]);
 }
 
 export function useOrder(id: string | null): { order: Order | null; loading: boolean } {
