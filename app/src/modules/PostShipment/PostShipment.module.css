@@ -473,6 +473,28 @@
 }
 .refundDetailDenyBtn:hover { background: var(--color-error-bg); }
 
+/* ============================================================ Cancellations */
+
+.cancellationRow {
+  cursor: pointer;
+}
+.cancellationRow:hover td { background: #fafaf6; }
+.cancellationRowSelected td {
+  background: #fffbfb !important;
+  box-shadow: inset 3px 0 0 var(--color-crimson);
+}
+
+.cancStatusPill {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 10px;
+  border: 1px solid;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
 /* Filter bar */
 .filterBar {
   display: flex;

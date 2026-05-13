@@ -388,3 +388,138 @@ export async function closeRefund(id: string): Promise<void> {
   if (error) throw error;
   await logAction('refund_closed', id, 'archived');
 }
+
+// ============================================================================
+// Order cancellations (customer-submitted via /cancel-order)
+// ============================================================================
+
+export type CancellationStatus = 'submitted' | 'approved' | 'denied' | 'completed';
+
+export const CANCELLATION_STATUS_META: Record<CancellationStatus, { label: string; color: string; bg: string; border: string }> = {
+  submitted: { label: 'Submitted', color: '#2b6cb0', bg: '#ebf8ff', border: '#bee3f8' },
+  approved:  { label: 'Approved',  color: '#c05621', bg: '#fffaf0', border: '#fbd38d' },
+  denied:    { label: 'Denied',    color: '#9b2c2c', bg: '#fff5f5', border: '#fc8181' },
+  completed: { label: 'Completed', color: '#276749', bg: '#f0fff4', border: '#9ae6b4' },
+};
+
+export type OrderCancellation = {
+  id: string;
+  order_ref: string | null;
+  customer_name: string;
+  customer_email: string;
+  customer_phone: string | null;
+  preferred_contact: 'email' | 'phone' | null;
+  order_date: string | null;
+  product_name: string | null;
+  order_amount_usd: number | null;
+  purchase_channel: string | null;
+  reason: string | null;
+  description: string | null;
+  product_received: boolean | null;
+  desired_resolution: string | null;
+  status: CancellationStatus;
+  ops_notes: string | null;
+  processed_by: string | null;
+  processed_at: string | null;
+  refund_approval_id: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export function useOrderCancellations(): { cancellations: OrderCancellation[]; loading: boolean } {
+  const [cancellations, setCancellations] = useState<OrderCancellation[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let channel: RealtimeChannel | null = null;
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await supabase
+        .from('order_cancellations')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (cancelled) return;
+      if (!error && data) setCancellations(data as OrderCancellation[]);
+      setLoading(false);
+
+      channel = supabase
+        .channel('order_cancellations:realtime')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'order_cancellations' }, (payload) => {
+          setCancellations(prev => {
+            if (payload.eventType === 'DELETE' && payload.old) {
+              return prev.filter(c => c.id !== (payload.old as { id: string }).id);
+            }
+            if (payload.new) {
+              const row = payload.new as OrderCancellation;
+              const idx = prev.findIndex(c => c.id === row.id);
+              if (idx >= 0) { const next = [...prev]; next[idx] = row; return next; }
+              return [row, ...prev];
+            }
+            return prev;
+          });
+        })
+        .subscribe();
+    })();
+    return () => { cancelled = true; if (channel) void channel.unsubscribe(); };
+  }, []);
+
+  return { cancellations, loading };
+}
+
+/** Approve the cancellation. If `createRefund` is true, also spawn a
+ *  refund_approval row in manager_review so finance can process payback. */
+export async function approveCancellation(id: string, createRefund: boolean, refundAmount?: number, opsNote?: string): Promise<void> {
+  const userId = await currentUserId();
+  const { data: c, error: rErr } = await supabase
+    .from('order_cancellations')
+    .select('*')
+    .eq('id', id)
+    .single();
+  if (rErr || !c) throw rErr ?? new Error('cancellation not found');
+
+  let refundApprovalId: string | null = null;
+  if (createRefund) {
+    const { data: ra, error: raErr } = await supabase.from('refund_approvals').insert({
+      order_id: null,
+      customer_name: c.customer_name,
+      customer_email: c.customer_email,
+      refund_amount_usd: refundAmount ?? c.order_amount_usd ?? 0,
+      payment_method: c.preferred_contact === 'phone' ? 'Credit Card (call to process)' : 'E-Transfer',
+      reason: `Order cancellation: ${c.reason ?? 'no reason'}`,
+      notes: `Auto-created from order_cancellation ${c.order_ref ?? id}. Customer preferred contact: ${c.preferred_contact ?? '—'}.`,
+      status: 'manager_review',
+      submitted_by: userId,
+    }).select('id').single();
+    if (raErr) throw raErr;
+    refundApprovalId = (ra as { id: string }).id;
+  }
+
+  const { error: upErr } = await supabase.from('order_cancellations').update({
+    status: 'approved',
+    processed_by: userId,
+    processed_at: new Date().toISOString(),
+    refund_approval_id: refundApprovalId,
+    ops_notes: opsNote ? `${c.ops_notes ?? ''}\n${opsNote}`.trim() : c.ops_notes,
+  }).eq('id', id);
+  if (upErr) throw upErr;
+
+  await logAction('cancellation_approved', id, refundApprovalId ? `→ refund ${refundApprovalId}` : 'no refund');
+}
+
+export async function denyCancellation(id: string, reason: string): Promise<void> {
+  const userId = await currentUserId();
+  const { error } = await supabase.from('order_cancellations').update({
+    status: 'denied',
+    processed_by: userId,
+    processed_at: new Date().toISOString(),
+    ops_notes: reason,
+  }).eq('id', id);
+  if (error) throw error;
+  await logAction('cancellation_denied', id, reason);
+}
+
+export async function markCancellationCompleted(id: string): Promise<void> {
+  const { error } = await supabase.from('order_cancellations').update({ status: 'completed' }).eq('id', id);
+  if (error) throw error;
+  await logAction('cancellation_completed', id, 'archived');
+}
