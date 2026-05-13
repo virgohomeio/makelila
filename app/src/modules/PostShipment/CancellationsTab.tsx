@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import {
-  useOrderCancellations, approveCancellation, denyCancellation, markCancellationCompleted,
+  useOrderCancellations, processCancellation,
   CANCELLATION_STATUS_META,
   type OrderCancellation,
 } from '../../lib/postShipment';
@@ -18,8 +18,8 @@ export function CancellationsTab() {
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
     return cancellations.filter(c => {
-      if (filter === 'open' && (c.status === 'completed' || c.status === 'denied')) return false;
-      if (filter === 'closed' && !(c.status === 'completed' || c.status === 'denied')) return false;
+      if (filter === 'open' && c.status === 'completed') return false;
+      if (filter === 'closed' && c.status !== 'completed') return false;
       if (q && !(
         c.customer_name.toLowerCase().includes(q) ||
         c.customer_email.toLowerCase().includes(q) ||
@@ -31,12 +31,10 @@ export function CancellationsTab() {
   }, [cancellations, filter, search]);
 
   const stats = useMemo(() => {
-    const s = { total: 0, open: 0, approved: 0, denied: 0, completed: 0, received: 0, sumAmount: 0 };
+    const s = { total: 0, open: 0, completed: 0, received: 0, sumAmount: 0 };
     for (const c of cancellations) {
       s.total++;
       if (c.status === 'submitted') s.open++;
-      if (c.status === 'approved')  s.approved++;
-      if (c.status === 'denied')    s.denied++;
       if (c.status === 'completed') s.completed++;
       if (c.product_received)       s.received++;
       if (c.order_amount_usd)       s.sumAmount += Number(c.order_amount_usd);
@@ -54,11 +52,11 @@ export function CancellationsTab() {
   return (
     <div className={styles.tabContent}>
       <div className={styles.kpiRow}>
-        <KPI label="Submitted (awaiting)" value={stats.open} tone={stats.open > 0 ? 'warn' : undefined}
-             sub={stats.open > 0 ? 'needs decision' : 'queue clear'} />
-        <KPI label="Approved" value={stats.approved} sub="payback in flight" />
+        <KPI label="Awaiting processing" value={stats.open} tone={stats.open > 0 ? 'warn' : undefined}
+             sub={stats.open > 0 ? 'click to process' : 'queue clear'} />
+        <KPI label="Completed" value={stats.completed} sub="cancelled + refund routed" />
         <KPI label="Already received" value={stats.received}
-             sub={stats.received > 0 ? 'route to Returns' : 'all pre-ship'} />
+             sub={stats.received > 0 ? 'consider Returns' : 'all pre-ship'} />
         <KPI label="Total cancellation $" value={`$${Math.round(stats.sumAmount).toLocaleString('en-US')}`}
              sub={`${stats.total} total requests`} />
       </div>
@@ -155,34 +153,18 @@ function CancellationDetail({
 
   const canAct = c.status === 'submitted';
 
-  const runApprove = async () => {
+  const runProcess = async () => {
+    // Money already collected? Spawn a refund_approval. Pre-charge cancel
+    // (e.g. abandoned during checkout) → mark completed only, no refund.
     const refundConfirm = window.confirm(
-      `Approve cancellation for ${c.customer_name}?\n\nClick OK to ALSO create a refund_approval (manager_review) for $${c.order_amount_usd ?? 0}.\nClick Cancel to approve without creating a refund (e.g. payment never collected).`
+      `Process cancellation for ${c.customer_name}?\n\nClick OK if payment was already collected — this creates a refund_approval (manager_review) for $${c.order_amount_usd ?? 0}.\nClick Cancel if no money needs to be refunded (e.g. pre-charge cancel).`
     );
     const opsNote = window.prompt('Ops note (optional):') ?? undefined;
     setBusy(true); onError(null);
     try {
-      await approveCancellation(c.id, refundConfirm, undefined, opsNote);
+      await processCancellation(c.id, refundConfirm, undefined, opsNote);
       onClose();
     } catch (e) { onError((e as Error).message); }
-    finally { setBusy(false); }
-  };
-
-  const runDeny = async () => {
-    const reason = window.prompt('Reason for denial (required — customer will hear this):');
-    if (!reason) return;
-    setBusy(true); onError(null);
-    try {
-      await denyCancellation(c.id, reason);
-      onClose();
-    } catch (e) { onError((e as Error).message); }
-    finally { setBusy(false); }
-  };
-
-  const runComplete = async () => {
-    setBusy(true); onError(null);
-    try { await markCancellationCompleted(c.id); onClose(); }
-    catch (e) { onError((e as Error).message); }
     finally { setBusy(false); }
   };
 
@@ -240,26 +222,16 @@ function CancellationDetail({
       <div className={styles.refundDetailActions}>
         <div className={styles.refundDetailRolePill}>
           {c.product_received
-            ? '⚠ Customer says they received the unit — consider routing to Returns instead of cancellation.'
-            : canAct ? 'Approve or deny this cancellation request.' : 'Closed — view only.'}
+            ? '⚠ Customer says they received the unit — consider routing through Returns instead.'
+            : canAct
+              ? 'Cancellations are always accepted. Process to cancel the order and route any refund.'
+              : 'Completed — view only.'}
         </div>
         <div className={styles.refundDetailButtons}>
           {canAct && (
-            <>
-              <button onClick={() => void runApprove()} disabled={busy}
-                      className={styles.refundDetailApproveBtn}>
-                {busy ? '…' : '✓ Approve cancellation'}
-              </button>
-              <button onClick={() => void runDeny()} disabled={busy}
-                      className={styles.refundDetailDenyBtn}>
-                ✕ Deny
-              </button>
-            </>
-          )}
-          {c.status === 'approved' && (
-            <button onClick={() => void runComplete()} disabled={busy}
+            <button onClick={() => void runProcess()} disabled={busy}
                     className={styles.refundDetailApproveBtn}>
-              {busy ? '…' : '✓ Mark completed'}
+              {busy ? '…' : '✓ Process cancellation'}
             </button>
           )}
         </div>

@@ -393,12 +393,13 @@ export async function closeRefund(id: string): Promise<void> {
 // Order cancellations (customer-submitted via /cancel-order)
 // ============================================================================
 
-export type CancellationStatus = 'submitted' | 'approved' | 'denied' | 'completed';
+// Cancellations skip the manager/finance review — every customer request
+// is accepted as intent. Two states: submitted (just came in, ops hasn't
+// processed yet) and completed (cancelled + refund routed if applicable).
+export type CancellationStatus = 'submitted' | 'completed';
 
 export const CANCELLATION_STATUS_META: Record<CancellationStatus, { label: string; color: string; bg: string; border: string }> = {
   submitted: { label: 'Submitted', color: '#2b6cb0', bg: '#ebf8ff', border: '#bee3f8' },
-  approved:  { label: 'Approved',  color: '#c05621', bg: '#fffaf0', border: '#fbd38d' },
-  denied:    { label: 'Denied',    color: '#9b2c2c', bg: '#fff5f5', border: '#fc8181' },
   completed: { label: 'Completed', color: '#276749', bg: '#f0fff4', border: '#9ae6b4' },
 };
 
@@ -466,9 +467,15 @@ export function useOrderCancellations(): { cancellations: OrderCancellation[]; l
   return { cancellations, loading };
 }
 
-/** Approve the cancellation. If `createRefund` is true, also spawn a
- *  refund_approval row in manager_review so finance can process payback. */
-export async function approveCancellation(id: string, createRefund: boolean, refundAmount?: number, opsNote?: string): Promise<void> {
+/** Process the cancellation request: marks status='completed' and
+ *  optionally spawns a refund_approval row when money needs to be paid
+ *  back. No review/deny step — every customer request is accepted. */
+export async function processCancellation(
+  id: string,
+  createRefund: boolean,
+  refundAmount?: number,
+  opsNote?: string,
+): Promise<void> {
   const userId = await currentUserId();
   const { data: c, error: rErr } = await supabase
     .from('order_cancellations')
@@ -495,7 +502,7 @@ export async function approveCancellation(id: string, createRefund: boolean, ref
   }
 
   const { error: upErr } = await supabase.from('order_cancellations').update({
-    status: 'approved',
+    status: 'completed',
     processed_by: userId,
     processed_at: new Date().toISOString(),
     refund_approval_id: refundApprovalId,
@@ -503,23 +510,5 @@ export async function approveCancellation(id: string, createRefund: boolean, ref
   }).eq('id', id);
   if (upErr) throw upErr;
 
-  await logAction('cancellation_approved', id, refundApprovalId ? `→ refund ${refundApprovalId}` : 'no refund');
-}
-
-export async function denyCancellation(id: string, reason: string): Promise<void> {
-  const userId = await currentUserId();
-  const { error } = await supabase.from('order_cancellations').update({
-    status: 'denied',
-    processed_by: userId,
-    processed_at: new Date().toISOString(),
-    ops_notes: reason,
-  }).eq('id', id);
-  if (error) throw error;
-  await logAction('cancellation_denied', id, reason);
-}
-
-export async function markCancellationCompleted(id: string): Promise<void> {
-  const { error } = await supabase.from('order_cancellations').update({ status: 'completed' }).eq('id', id);
-  if (error) throw error;
-  await logAction('cancellation_completed', id, 'archived');
+  await logAction('cancellation_processed', id, refundApprovalId ? `→ refund ${refundApprovalId}` : 'no refund needed');
 }
