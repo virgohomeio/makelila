@@ -6,6 +6,7 @@ import Fulfillment from './modules/Fulfillment';
 import PostShipment from './modules/PostShipment';
 import Stock from './modules/Stock';
 import Customers from './modules/Customers';
+import Templates from './modules/Templates';
 import ActivityLog from './modules/ActivityLog';
 import Login from './modules/Login';
 import ReturnForm from './modules/Forms/ReturnForm';
@@ -36,6 +37,7 @@ export default function App() {
             <Route path="post-shipment" element={<PostShipment />} />
             <Route path="stock"         element={<Stock />} />
             <Route path="customers"     element={<Customers />} />
+            <Route path="templates"     element={<Templates />} />
             <Route path="activity-log"  element={<ActivityLog />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />

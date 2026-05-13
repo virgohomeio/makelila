@@ -434,3 +434,8 @@ verify_jwt = false
 [functions.sync-hubspot-customers]
 verify_jwt = false
 
+# send-template-email: same ES256 gateway workaround. Function reads
+# auth header manually (base64 decode) for sent_by attribution.
+[functions.send-template-email]
+verify_jwt = false
+

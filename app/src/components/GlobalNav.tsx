@@ -8,6 +8,7 @@ const MODULES = [
   { path: '/post-shipment', label: 'Post-Shipment' },
   { path: '/stock',         label: 'Stock' },
   { path: '/customers',     label: 'Customers' },
+  { path: '/templates',     label: 'Templates' },
   { path: '/activity-log',  label: 'Activity Log' },
 ];
 
