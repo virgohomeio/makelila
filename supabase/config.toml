@@ -439,3 +439,9 @@ verify_jwt = false
 [functions.send-template-email]
 verify_jwt = false
 
+# sync-calendly-events: same ES256 gateway workaround. Function uses the
+# service-role key internally and CALENDLY_TOKEN for outbound calls,
+# so caller identity isn't needed for correctness.
+[functions.sync-calendly-events]
+verify_jwt = false
+
