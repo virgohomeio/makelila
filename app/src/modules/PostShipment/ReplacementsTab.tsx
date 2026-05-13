@@ -5,13 +5,54 @@ import {
   type ReplQueueRow, type ReplQueueStatus,
 } from '../../lib/postShipment';
 import { useUnits } from '../../lib/stock';
+import { useServiceTickets, type ServiceTicket } from '../../lib/service';
 import styles from './PostShipment.module.css';
+
+// Keyword detection for replacement requests in support ticket descriptions.
+// Check parts first — "replacement filter" should classify as parts, not unit.
+type ReplacementKind = 'parts' | 'unit' | 'both' | 'unclear';
+
+function classifyReplacement(ticket: ServiceTicket): ReplacementKind | null {
+  const text = `${ticket.subject ?? ''} ${ticket.description ?? ''}`.toLowerCase();
+  const isParts = /\b(filter|starter|carbon|consumable|refill|kit|sleeve|gasket|parts?)\b/.test(text);
+  const isUnit = /(replac\w*\s+(unit|composter|machine|lila)|new\s+(unit|composter|machine|lila)|send\s+\w+\s+new\s+(one|unit)|broken\s+(unit|composter|machine|lila)|won['’]?t\s+(turn|work|start|run)|doesn['’]?t\s+work|dead\s+(unit|machine|composter|lila)|swap\s+(unit|composter|machine))/.test(text);
+  if (isParts && isUnit) return 'both';
+  if (isParts) return 'parts';
+  if (isUnit) return 'unit';
+  if (/\breplac\w*\b/.test(text)) return 'unclear';
+  return null;
+}
+
+const KIND_META: Record<ReplacementKind, { label: string; bg: string; color: string }> = {
+  unit:    { label: 'Unit',    bg: '#fff5f5', color: '#c53030' },
+  parts:   { label: 'Parts',   bg: '#ebf8ff', color: '#2b6cb0' },
+  both:    { label: 'Both',    bg: '#faf5ff', color: '#553c9a' },
+  unclear: { label: 'Unclear', bg: '#f7fafc', color: '#718096' },
+};
 
 export function ReplacementsTab() {
   const { queue, loading: qLoading } = useReplacementQueue();
   const { units, loading: uLoading } = useUnits();
+  const { tickets } = useServiceTickets('support');
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Open support tickets whose description signals a replacement request.
+  // We don't auto-create replacement_queue rows — ops triages manually
+  // after reading the full ticket.
+  const replacementTickets = useMemo(() => {
+    const open = tickets.filter(t => t.status !== 'resolved' && t.status !== 'closed');
+    return open
+      .map(t => ({ ticket: t, kind: classifyReplacement(t) }))
+      .filter((x): x is { ticket: ServiceTicket; kind: ReplacementKind } => x.kind !== null)
+      .sort((a, b) => {
+        // unit > both > parts > unclear, then newest first
+        const order: Record<ReplacementKind, number> = { unit: 0, both: 1, parts: 2, unclear: 3 };
+        const k = order[a.kind] - order[b.kind];
+        if (k !== 0) return k;
+        return new Date(b.ticket.created_at).getTime() - new Date(a.ticket.created_at).getTime();
+      });
+  }, [tickets]);
 
   // Units that could be assigned to a queued replacement: ready or ca-test
   // in the preferred batch (default P100).
@@ -125,6 +166,8 @@ export function ReplacementsTab() {
         </div>
       )}
 
+      <IncomingFromSupport rows={replacementTickets} />
+
       {error && <div className={styles.errorBar}>{error}</div>}
 
       <div className={styles.tableWrap}>
@@ -212,6 +255,56 @@ function KPI({ label, value, tone, sub }: { label: string; value: number | strin
       <div className={styles.kpiLabel}>{label}</div>
       <div className={`${styles.kpiValue} ${tone === 'warn' ? styles.kpiWarn : ''}`}>{value}</div>
       {sub && <div className={styles.kpiSub}>{sub}</div>}
+    </div>
+  );
+}
+
+function IncomingFromSupport({ rows }: { rows: { ticket: ServiceTicket; kind: ReplacementKind }[] }) {
+  if (rows.length === 0) return null;
+  return (
+    <div style={{ marginBottom: 14, background: '#fff', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', overflow: 'hidden' }}>
+      <div style={{ padding: '10px 14px', background: 'var(--color-surface)', borderBottom: '1px solid var(--color-border)', display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
+        <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: 0.5, textTransform: 'uppercase', color: 'var(--color-ink-subtle)' }}>
+          Incoming replacement requests (from Support Tickets)
+        </span>
+        <span style={{ fontSize: 11, color: 'var(--color-ink-muted)' }}>{rows.length} open</span>
+      </div>
+      <table className={styles.table}>
+        <thead>
+          <tr>
+            <th>Type</th>
+            <th>Ticket #</th>
+            <th>Customer</th>
+            <th>Subject</th>
+            <th>Description excerpt</th>
+            <th>Open</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(({ ticket, kind }) => {
+            const meta = KIND_META[kind];
+            const excerpt = (ticket.description ?? '').replace(/\s+/g, ' ').slice(0, 140);
+            const daysOpen = Math.floor((Date.now() - new Date(ticket.created_at).getTime()) / 86_400_000);
+            return (
+              <tr key={ticket.id}>
+                <td>
+                  <span style={{ display: 'inline-block', fontSize: 9, fontWeight: 800, padding: '2px 7px', borderRadius: 10, textTransform: 'uppercase', letterSpacing: 0.3, background: meta.bg, color: meta.color }}>
+                    {meta.label}
+                  </span>
+                </td>
+                <td className={styles.mono}>{ticket.ticket_number}</td>
+                <td>{ticket.customer_name ?? ticket.customer_email ?? '—'}</td>
+                <td>{ticket.subject}</td>
+                <td className={styles.notes} style={{ maxWidth: 360 }}>
+                  {excerpt || <span className={styles.muted}>—</span>}
+                  {excerpt && (ticket.description?.length ?? 0) > 140 ? '…' : ''}
+                </td>
+                <td>{daysOpen}d</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
     </div>
   );
 }

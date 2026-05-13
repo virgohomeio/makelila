@@ -8,7 +8,7 @@ type Tab = 'onboarding' | 'support' | 'repair';
 
 const TABS: { key: Tab; label: string }[] = [
   { key: 'onboarding', label: 'Onboarding' },
-  { key: 'support',    label: 'Support' },
+  { key: 'support',    label: 'Support Tickets' },
   { key: 'repair',     label: 'Repair' },
 ];
 
