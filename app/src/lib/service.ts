@@ -7,7 +7,7 @@ import { logAction } from './activityLog';
 
 export type TicketCategory = 'onboarding' | 'support' | 'repair';
 export type TicketSource =
-  | 'calendly' | 'customer_form' | 'hubspot' | 'fulfillment_flag' | 'ops_manual';
+  | 'calendly' | 'customer_form' | 'hubspot' | 'fulfillment_flag' | 'ops_manual' | 'gmail';
 export type TicketStatus =
   | 'new' | 'triaging' | 'in_progress' | 'waiting_customer'
   | 'resolved' | 'closed' | 'escalated';
@@ -101,6 +101,7 @@ export const SOURCE_LABEL: Record<TicketSource, string> = {
   hubspot:          'HubSpot',
   fulfillment_flag: 'Fulfillment',
   ops_manual:       'Manual',
+  gmail:            'Gmail',
 };
 
 // Allowed next-states for the state machine (UI gating)
