@@ -1,0 +1,65 @@
+name: Deploy Supabase backend
+
+# Auto-deploys edge functions on every push to main. Migrations are gated
+# behind a manual workflow_dispatch trigger so DDL changes get a human review
+# (and so we don't push on top of unresolved migration drift).
+#
+# Required GitHub secrets:
+#   SUPABASE_ACCESS_TOKEN  — personal access token from supabase.com/dashboard/account/tokens
+#   SUPABASE_DB_PASSWORD   — only needed for the migrations job (DB password)
+#
+# Project ref is hardcoded; change here if the project moves.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'supabase/functions/**'
+  workflow_dispatch:
+    inputs:
+      apply_migrations:
+        description: 'Also run supabase db push (apply migrations to remote)'
+        type: boolean
+        default: false
+
+env:
+  SUPABASE_PROJECT_REF: txeftbbzeflequvrmjjr
+
+jobs:
+  deploy-functions:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - name: Deploy all edge functions
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          set -euo pipefail
+          for fn in supabase/functions/*/; do
+            name=$(basename "$fn")
+            [ "$name" = "_shared" ] && continue
+            echo "::group::Deploying $name"
+            supabase functions deploy "$name" \
+              --project-ref "$SUPABASE_PROJECT_REF" \
+              --no-verify-jwt
+            echo "::endgroup::"
+          done
+
+  apply-migrations:
+    if: github.event_name == 'workflow_dispatch' && inputs.apply_migrations == true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - name: Push migrations
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+        run: |
+          supabase link --project-ref "$SUPABASE_PROJECT_REF"
+          supabase db push
