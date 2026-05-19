@@ -3,6 +3,7 @@ import {
   useServiceTickets, createTicket, STATUS_META, PRIORITY_META, SOURCE_LABEL,
   type TicketStatus, type TicketPriority, type ServiceTicket,
 } from '../../lib/service';
+import { useCustomers, type Customer } from '../../lib/customers';
 import { TicketDetailPanel } from './TicketDetailPanel';
 import styles from './Service.module.css';
 
@@ -17,6 +18,7 @@ const STATUS_FILTERS: { key: TicketStatus | 'all'; label: string }[] = [
 
 export function SupportTab() {
   const { tickets, loading } = useServiceTickets('support');
+  const { customers } = useCustomers();
   const [statusFilter, setStatusFilter] = useState<TicketStatus | 'all'>('all');
   const [sourceFilter, setSourceFilter] = useState<'all' | 'customer_form' | 'hubspot'>('all');
   const [q, setQ] = useState('');
@@ -124,6 +126,7 @@ export function SupportTab() {
 
       {showNew && (
         <NewTicketModal
+          customers={customers}
           onClose={() => setShowNew(false)}
           onCreated={(t) => { setShowNew(false); setSelectedId(t.id); }}
         />
@@ -133,21 +136,35 @@ export function SupportTab() {
 }
 
 function NewTicketModal({
-  onClose, onCreated,
-}: { onClose: () => void; onCreated: (t: ServiceTicket) => void }) {
+  customers, onClose, onCreated,
+}: {
+  customers: Customer[];
+  onClose: () => void;
+  onCreated: (t: ServiceTicket) => void;
+}) {
   const [subject, setSubject] = useState('');
   const [description, setDescription] = useState('');
   const [priority, setPriority] = useState<TicketPriority>('normal');
-  const [customerName, setCustomerName] = useState('');
-  const [customerEmail, setCustomerEmail] = useState('');
-  const [customerPhone, setCustomerPhone] = useState('');
+  const [customerSearch, setCustomerSearch] = useState('');
+  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [unitSerial, setUnitSerial] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const canSubmit = subject.trim().length > 0 && !submitting;
+  const candidates = useMemo(() => {
+    const needle = customerSearch.trim().toLowerCase();
+    if (!needle) return [];
+    return customers.filter(c =>
+      c.full_name.toLowerCase().includes(needle) ||
+      (c.email ?? '').toLowerCase().includes(needle) ||
+      (c.phone ?? '').toLowerCase().includes(needle),
+    ).slice(0, 8);
+  }, [customers, customerSearch]);
+
+  const canSubmit = subject.trim().length > 0 && selectedCustomer !== null && !submitting;
 
   const submit = async () => {
+    if (!selectedCustomer) return;
     setSubmitting(true);
     setError(null);
     try {
@@ -156,9 +173,10 @@ function NewTicketModal({
         subject: subject.trim(),
         description: description.trim() || null,
         priority,
-        customer_name: customerName.trim() || null,
-        customer_email: customerEmail.trim() || null,
-        customer_phone: customerPhone.trim() || null,
+        customer_id: selectedCustomer.id,
+        customer_name: selectedCustomer.full_name,
+        customer_email: selectedCustomer.email,
+        customer_phone: selectedCustomer.phone,
         unit_serial: unitSerial.trim() || null,
       });
       onCreated(row);
@@ -186,6 +204,54 @@ function NewTicketModal({
               placeholder="Short summary of the issue"
               autoFocus
             />
+          </div>
+          <div className={styles.modalRow}>
+            <label>Customer *</label>
+            {selectedCustomer ? (
+              <div className={styles.modalSelected}>
+                <strong>{selectedCustomer.full_name}</strong>
+                <span className={styles.muted}>
+                  {[selectedCustomer.email, selectedCustomer.phone, selectedCustomer.city]
+                    .filter(Boolean).join(' · ') || '—'}
+                </span>
+                <button
+                  className={styles.modalLinkBtn}
+                  onClick={() => { setSelectedCustomer(null); setCustomerSearch(''); }}
+                >change</button>
+              </div>
+            ) : (
+              <div className={styles.modalPicker}>
+                <input
+                  type="text"
+                  className={styles.modalInput}
+                  value={customerSearch}
+                  onChange={e => setCustomerSearch(e.target.value)}
+                  placeholder="Type a name, email, or phone…"
+                />
+                {candidates.length > 0 && (
+                  <div className={styles.modalDropdown}>
+                    {candidates.map(c => (
+                      <button
+                        key={c.id}
+                        type="button"
+                        onClick={() => setSelectedCustomer(c)}
+                        className={styles.modalDropItem}
+                      >
+                        <strong>{c.full_name}</strong>
+                        <span className={styles.muted}>
+                          {[c.email, c.phone].filter(Boolean).join(' · ') || '—'}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {customerSearch.trim() && candidates.length === 0 && (
+                  <span className={styles.muted} style={{ fontSize: 11, marginTop: 4 }}>
+                    No matching customer. Add them in the Customers tab first.
+                  </span>
+                )}
+              </div>
+            )}
           </div>
           <div className={styles.modalRow}>
             <label>Description</label>
@@ -219,33 +285,6 @@ function NewTicketModal({
                 value={unitSerial}
                 onChange={e => setUnitSerial(e.target.value)}
                 placeholder="LL01-… (optional)"
-              />
-            </div>
-            <div className={styles.modalRow}>
-              <label>Customer name</label>
-              <input
-                type="text"
-                className={styles.modalInput}
-                value={customerName}
-                onChange={e => setCustomerName(e.target.value)}
-              />
-            </div>
-            <div className={styles.modalRow}>
-              <label>Customer email</label>
-              <input
-                type="text"
-                className={styles.modalInput}
-                value={customerEmail}
-                onChange={e => setCustomerEmail(e.target.value)}
-              />
-            </div>
-            <div className={styles.modalRow}>
-              <label>Customer phone</label>
-              <input
-                type="text"
-                className={styles.modalInput}
-                value={customerPhone}
-                onChange={e => setCustomerPhone(e.target.value)}
               />
             </div>
           </div>

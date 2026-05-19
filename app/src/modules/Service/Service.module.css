@@ -414,6 +414,65 @@
   outline: none; border-color: var(--color-crimson);
 }
 .modalTextarea { resize: vertical; min-height: 60px; }
+
+.modalPicker { position: relative; }
+.modalDropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  margin-top: 2px;
+  background: #fff;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.08);
+  max-height: 220px;
+  overflow-y: auto;
+  z-index: 10;
+}
+.modalDropItem {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  padding: 8px 12px;
+  background: #fff;
+  border: none;
+  border-bottom: 1px solid #f0eee8;
+  text-align: left;
+  font-size: 12px;
+  cursor: pointer;
+}
+.modalDropItem:hover { background: var(--color-surface); }
+
+.modalSelected {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: #f0fff4;
+  border: 1px solid #c6f6d5;
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+  font-size: 12px;
+  position: relative;
+}
+.muted {
+  font-size: 11px;
+  color: var(--color-ink-subtle);
+}
+.modalLinkBtn {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  background: transparent;
+  border: none;
+  color: var(--color-ink-subtle);
+  font-size: 11px;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
 .modalError {
   font-size: 11px;
   color: var(--color-crimson);

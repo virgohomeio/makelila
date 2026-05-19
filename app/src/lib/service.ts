@@ -267,6 +267,7 @@ export type NewTicketInput = {
   subject: string;
   description?: string | null;
   priority?: TicketPriority;
+  customer_id?: string | null;
   customer_name?: string | null;
   customer_email?: string | null;
   customer_phone?: string | null;
@@ -282,6 +283,7 @@ export async function createTicket(input: NewTicketInput): Promise<ServiceTicket
       subject: input.subject,
       description: input.description ?? null,
       priority: input.priority ?? 'normal',
+      customer_id: input.customer_id ?? null,
       customer_name: input.customer_name ?? null,
       customer_email: input.customer_email ?? null,
       customer_phone: input.customer_phone ?? null,
