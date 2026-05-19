@@ -18,6 +18,16 @@
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { SignJWT, importPKCS8 } from 'https://esm.sh/jose@5.9.6';
 import { corsHeaders } from '../_shared/cors.ts';
+import { classify, type Priority, type ThreadInput } from '../_shared/classifier.ts';
+
+// Maps classifier priority ('urgent'|'high'|'medium'|'low') to the DB enum
+// on service_tickets.priority ('urgent'|'high'|'normal'|'low').
+const PRIORITY_TO_DB: Record<Priority, 'urgent' | 'high' | 'normal' | 'low'> = {
+  urgent: 'urgent',
+  high:   'high',
+  medium: 'normal',
+  low:    'low',
+};
 
 const GMAIL_QUERY = 'in:inbox -from:me -category:promotions -category:social -category:updates -category:forums newer_than:30d';
 const SCOPES = 'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.modify';
@@ -241,7 +251,7 @@ async function upsertThread(
   const { data: ticket, error: upErr } = await admin
     .from('service_tickets')
     .upsert(ticketRow, { onConflict: 'gmail_thread_id' })
-    .select('id, status')
+    .select('id, status, is_manually_overridden, last_classified_at, customer_name')
     .single();
   if (upErr || !ticket) {
     throw new Error(`upsert ticket failed (thread ${thread.id}): ${upErr?.message ?? 'no row'}`);
@@ -284,7 +294,65 @@ async function upsertThread(
       .eq('id', ticket.id);
   }
 
+  // Classify if needed: new ticket, or new messages since last classification.
+  const lastSentMs = Date.parse(lastAt ?? '') || 0;
+  const lastClassifiedMs = Date.parse(ticket.last_classified_at ?? '') || 0;
+  const needsClassify = !ticket.last_classified_at || lastSentMs > lastClassifiedMs;
+  if (needsClassify) {
+    await classifyAndApply(admin, ticket, subjectHeader, rows);
+  }
+
   return { messageCount: rows.length };
+}
+
+// ============================================================ Classifier integration
+async function classifyAndApply(
+  admin: SupabaseClient,
+  ticket: { id: string; status: string; is_manually_overridden: boolean | null; customer_name: string | null },
+  subject: string,
+  rows: Array<{ direction: 'inbound' | 'outbound'; sent_at: string | null; body_text: string | null; snippet: string | null }>,
+): Promise<void> {
+  const threadInput: ThreadInput = {
+    subject,
+    customer_name: ticket.customer_name,
+    messages: rows.map(r => ({
+      direction: r.direction,
+      sent_at: r.sent_at ?? new Date().toISOString(),
+      body_text: r.body_text ?? r.snippet ?? '',
+      snippet: r.snippet ?? undefined,
+    })),
+  };
+  const result = classify(threadInput);
+
+  const update: Record<string, unknown> = {
+    last_classified_at: new Date().toISOString(),
+  };
+  // Only write classifier fields if staff hasn't manually overridden.
+  if (!ticket.is_manually_overridden) {
+    update.priority = PRIORITY_TO_DB[result.priority];
+    update.topic = result.category;
+    update.summary = result.summary;
+    update.suggested_next_action = result.suggested_next_action;
+    // Auto-resolve from closed-ack only when status is still open-ish.
+    if (result.status === 'resolved' && ['new','triaging','waiting_customer'].includes(ticket.status)) {
+      update.status = 'resolved';
+      update.resolved_at = new Date().toISOString();
+    }
+  }
+
+  const { error: updErr } = await admin.from('service_tickets').update(update).eq('id', ticket.id);
+  if (updErr) {
+    console.warn(`classify update failed (ticket ${ticket.id}): ${updErr.message}`);
+    return;
+  }
+
+  await admin.from('ticket_classification_log').insert({
+    ticket_id: ticket.id,
+    method: 'rules',
+    priority: result.priority,
+    category: result.category,
+    rule_id: result.ruleId ?? null,
+  });
 }
 
 // ============================================================ Header / parse helpers
