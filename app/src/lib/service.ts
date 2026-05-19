@@ -262,6 +262,39 @@ export function useTicketAttachments(ticketId: string | null): {
 
 // ============================================================ Mutations
 
+export type NewTicketInput = {
+  category: TicketCategory;
+  subject: string;
+  description?: string | null;
+  priority?: TicketPriority;
+  customer_name?: string | null;
+  customer_email?: string | null;
+  customer_phone?: string | null;
+  unit_serial?: string | null;
+};
+
+export async function createTicket(input: NewTicketInput): Promise<ServiceTicket> {
+  const { data, error } = await supabase
+    .from('service_tickets')
+    .insert({
+      category: input.category,
+      source: 'ops_manual',
+      subject: input.subject,
+      description: input.description ?? null,
+      priority: input.priority ?? 'normal',
+      customer_name: input.customer_name ?? null,
+      customer_email: input.customer_email ?? null,
+      customer_phone: input.customer_phone ?? null,
+      unit_serial: input.unit_serial ?? null,
+    })
+    .select()
+    .single();
+  if (error) throw error;
+  const row = data as ServiceTicket;
+  await logAction('ticket_created', row.id, `${row.ticket_number} ${input.subject}`);
+  return row;
+}
+
 export async function updateTicketStatus(id: string, status: TicketStatus): Promise<void> {
   const { error } = await supabase.from('service_tickets').update({ status }).eq('id', id);
   if (error) throw error;

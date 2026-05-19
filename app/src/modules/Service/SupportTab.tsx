@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import {
-  useServiceTickets, STATUS_META, PRIORITY_META, SOURCE_LABEL,
-  type TicketStatus, type ServiceTicket,
+  useServiceTickets, createTicket, STATUS_META, PRIORITY_META, SOURCE_LABEL,
+  type TicketStatus, type TicketPriority, type ServiceTicket,
 } from '../../lib/service';
 import { TicketDetailPanel } from './TicketDetailPanel';
 import styles from './Service.module.css';
@@ -21,6 +21,7 @@ export function SupportTab() {
   const [sourceFilter, setSourceFilter] = useState<'all' | 'customer_form' | 'hubspot'>('all');
   const [q, setQ] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [showNew, setShowNew] = useState(false);
 
   const filtered = useMemo(() => {
     return tickets.filter(t => {
@@ -88,6 +89,9 @@ export function SupportTab() {
           value={q}
           onChange={e => setQ(e.target.value)}
         />
+        <button className={styles.addBtn} onClick={() => setShowNew(true)}>
+          + Add ticket
+        </button>
       </div>
 
       {filtered.length === 0 ? (
@@ -117,7 +121,148 @@ export function SupportTab() {
       )}
 
       {selected && <TicketDetailPanel ticket={selected} onClose={() => setSelectedId(null)} />}
+
+      {showNew && (
+        <NewTicketModal
+          onClose={() => setShowNew(false)}
+          onCreated={(t) => { setShowNew(false); setSelectedId(t.id); }}
+        />
+      )}
     </>
+  );
+}
+
+function NewTicketModal({
+  onClose, onCreated,
+}: { onClose: () => void; onCreated: (t: ServiceTicket) => void }) {
+  const [subject, setSubject] = useState('');
+  const [description, setDescription] = useState('');
+  const [priority, setPriority] = useState<TicketPriority>('normal');
+  const [customerName, setCustomerName] = useState('');
+  const [customerEmail, setCustomerEmail] = useState('');
+  const [customerPhone, setCustomerPhone] = useState('');
+  const [unitSerial, setUnitSerial] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const canSubmit = subject.trim().length > 0 && !submitting;
+
+  const submit = async () => {
+    setSubmitting(true);
+    setError(null);
+    try {
+      const row = await createTicket({
+        category: 'support',
+        subject: subject.trim(),
+        description: description.trim() || null,
+        priority,
+        customer_name: customerName.trim() || null,
+        customer_email: customerEmail.trim() || null,
+        customer_phone: customerPhone.trim() || null,
+        unit_serial: unitSerial.trim() || null,
+      });
+      onCreated(row);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to create ticket');
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className={styles.modalBackdrop} onClick={onClose}>
+      <div className={styles.modalCard} onClick={e => e.stopPropagation()}>
+        <div className={styles.modalHead}>
+          <strong>New support ticket</strong>
+          <button onClick={onClose} className={styles.modalClose}>✕</button>
+        </div>
+        <div className={styles.modalBody}>
+          <div className={styles.modalRow}>
+            <label>Subject *</label>
+            <input
+              type="text"
+              className={styles.modalInput}
+              value={subject}
+              onChange={e => setSubject(e.target.value)}
+              placeholder="Short summary of the issue"
+              autoFocus
+            />
+          </div>
+          <div className={styles.modalRow}>
+            <label>Description</label>
+            <textarea
+              className={styles.modalTextarea}
+              value={description}
+              onChange={e => setDescription(e.target.value)}
+              placeholder="What happened? Steps the customer took, error messages, etc."
+              rows={3}
+            />
+          </div>
+          <div className={styles.modalGrid}>
+            <div className={styles.modalRow}>
+              <label>Priority</label>
+              <select
+                className={styles.modalSelect}
+                value={priority}
+                onChange={e => setPriority(e.target.value as TicketPriority)}
+              >
+                <option value="low">Low</option>
+                <option value="normal">Normal</option>
+                <option value="high">High</option>
+                <option value="urgent">Urgent</option>
+              </select>
+            </div>
+            <div className={styles.modalRow}>
+              <label>Unit serial</label>
+              <input
+                type="text"
+                className={styles.modalInput}
+                value={unitSerial}
+                onChange={e => setUnitSerial(e.target.value)}
+                placeholder="LL01-… (optional)"
+              />
+            </div>
+            <div className={styles.modalRow}>
+              <label>Customer name</label>
+              <input
+                type="text"
+                className={styles.modalInput}
+                value={customerName}
+                onChange={e => setCustomerName(e.target.value)}
+              />
+            </div>
+            <div className={styles.modalRow}>
+              <label>Customer email</label>
+              <input
+                type="text"
+                className={styles.modalInput}
+                value={customerEmail}
+                onChange={e => setCustomerEmail(e.target.value)}
+              />
+            </div>
+            <div className={styles.modalRow}>
+              <label>Customer phone</label>
+              <input
+                type="text"
+                className={styles.modalInput}
+                value={customerPhone}
+                onChange={e => setCustomerPhone(e.target.value)}
+              />
+            </div>
+          </div>
+          {error && <div className={styles.modalError}>{error}</div>}
+        </div>
+        <div className={styles.modalFoot}>
+          <button onClick={onClose} className={styles.modalSecondary}>Cancel</button>
+          <button
+            onClick={() => void submit()}
+            className={styles.modalPrimary}
+            disabled={!canSubmit}
+          >
+            {submitting ? 'Creating…' : 'Create ticket'}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
