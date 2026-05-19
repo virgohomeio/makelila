@@ -120,6 +120,24 @@ export const CATEGORY_META: Record<TicketCategory, { label: string; color: strin
   repair:     { label: 'Repair',     color: '#c05621', bg: '#fffaf0' },
 };
 
+export const TOPIC_LABEL: Record<TicketTopic, string> = {
+  return_hardware_defect: 'Return / hardware',
+  warranty_replacement:   'Warranty',
+  refund:                 'Refund',
+  software_firmware:      'Software / firmware',
+  complaint:              'Complaint',
+  callback:               'Callback',
+  assembly_support:       'Assembly support',
+  troubleshooting:        'Troubleshooting',
+  logistics_pickup:       'Logistics',
+  order_fulfillment:      'Order fulfillment',
+  in_person_service:      'In-person',
+  appointment:            'Appointment',
+  marketing_social:       'Marketing',
+  closed_acknowledgment:  'Acknowledgment',
+  other:                  'Other',
+};
+
 export const STATUS_META: Record<TicketStatus, { label: string; color: string; bg: string }> = {
   new:              { label: 'New',              color: '#2b6cb0', bg: '#ebf8ff' },
   triaging:         { label: 'Triaging',         color: '#553c9a', bg: '#faf5ff' },
@@ -446,6 +464,29 @@ export async function setTicketTopic(id: string, topic: TicketTopic): Promise<vo
     .eq('id', id);
   if (error) throw error;
   await logAction('ticket_topic_set', id, topic);
+}
+
+/** Trigger an on-demand run of the Gmail sync edge function. Returns the
+ *  function's run summary so the UI can show a toast. */
+export async function syncGmailTickets(): Promise<unknown> {
+  const { data: { session } } = await supabase.auth.getSession();
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/sync-gmail-tickets`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      apikey: SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${session?.access_token ?? SUPABASE_ANON_KEY}`,
+    },
+    body: '{}',
+  });
+  const text = await res.text();
+  if (!res.ok) {
+    let detail = text;
+    try { detail = (JSON.parse(text) as { error?: string }).error ?? text; } catch { /* keep raw */ }
+    throw new Error(`Gmail sync failed (${res.status}): ${detail}`);
+  }
+  await logAction('gmail_sync_manual', 'tickets');
+  return JSON.parse(text);
 }
 
 /** Force a classifier rerun on a single ticket. Resets the manual-override

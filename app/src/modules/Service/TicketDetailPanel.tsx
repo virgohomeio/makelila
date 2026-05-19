@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import {
   type ServiceTicket, type TicketStatus,
-  STATUS_META, CATEGORY_META, PRIORITY_META, SOURCE_LABEL, NEXT_STATUSES,
+  STATUS_META, CATEGORY_META, PRIORITY_META, SOURCE_LABEL, TOPIC_LABEL, NEXT_STATUSES,
   updateTicketStatus, assignTicketOwner, setTicketPriority,
-  updateTicketNotes, setRepairFields,
+  updateTicketNotes, setRepairFields, reclassifyTicket,
   useCustomerLifecycle, warrantyState,
+  useTicketMessages, useClassificationLog,
 } from '../../lib/service';
 import { AttachmentStrip } from './AttachmentStrip';
 import styles from './Service.module.css';
@@ -34,6 +35,10 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
   const { rows: lifecycle } = useCustomerLifecycle();
   const lifecycleRow = ticket.unit_serial ? lifecycle.find(l => l.unit_serial === ticket.unit_serial) : null;
   const warranty = warrantyState(lifecycleRow ?? null);
+  const { messages } = useTicketMessages(ticket.source === 'gmail' ? ticket.id : null);
+  const { entries: classifyLog } = useClassificationLog(
+    (ticket.source === 'gmail' || ticket.topic) ? ticket.id : null,
+  );
 
   const cat = CATEGORY_META[ticket.category];
   const status = STATUS_META[ticket.status];
@@ -95,10 +100,78 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
           </div>
         </div>
 
+        {(ticket.topic || ticket.summary || ticket.suggested_next_action) && (
+          <div className={styles.detailSection}>
+            <div className={styles.detailSectionLabel}>
+              Classification
+              {ticket.is_manually_overridden && (
+                <span style={{ marginLeft: 8, fontSize: 9, color: '#c05621', fontWeight: 800 }}>
+                  • MANUAL OVERRIDE
+                </span>
+              )}
+            </div>
+            <div className={styles.detailFieldGrid}>
+              <span className={styles.detailFieldLabel}>Topic</span>
+              <span className={styles.detailFieldValue}>{ticket.topic ? TOPIC_LABEL[ticket.topic] : '—'}</span>
+              <span className={styles.detailFieldLabel}>Summary</span>
+              <span className={styles.detailFieldValue}>{ticket.summary ?? '—'}</span>
+              <span className={styles.detailFieldLabel}>Suggested action</span>
+              <span className={styles.detailFieldValue}>{ticket.suggested_next_action ?? '—'}</span>
+            </div>
+            <div className={styles.actionsRow}>
+              <button
+                className={styles.btnSecondary}
+                disabled={busy}
+                onClick={() => run(reclassifyTicket(ticket.id))}
+              >🔄 Reclassify</button>
+            </div>
+          </div>
+        )}
+
         {ticket.description && (
           <div className={styles.detailSection}>
             <div className={styles.detailSectionLabel}>Description</div>
             <div className={styles.detailValue}>{ticket.description}</div>
+          </div>
+        )}
+
+        {messages.length > 0 && (
+          <div className={styles.detailSection}>
+            <div className={styles.detailSectionLabel}>Conversation ({messages.length})</div>
+            <div className={styles.threadList}>
+              {messages.map(m => (
+                <div
+                  key={m.id}
+                  className={`${styles.threadMsg} ${m.direction === 'outbound' ? styles.threadMsgOut : styles.threadMsgIn}`}
+                >
+                  <div className={styles.threadMsgMeta}>
+                    {m.direction === 'outbound' ? 'Staff' : 'Customer'}
+                    {m.sender ? ` · ${m.sender}` : ''}
+                    {m.sent_at ? ` · ${new Date(m.sent_at).toLocaleString()}` : ''}
+                  </div>
+                  <div className={styles.threadMsgBody}>
+                    {m.body_text || m.snippet || '—'}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {classifyLog.length > 0 && (
+          <div className={styles.detailSection}>
+            <div className={styles.detailSectionLabel}>Classification history ({classifyLog.length})</div>
+            <div className={styles.classifyList}>
+              {classifyLog.map(e => (
+                <div key={e.id} className={styles.classifyEntry}>
+                  <span className={styles.classifyTime}>{new Date(e.created_at).toLocaleString()}</span>
+                  <span>
+                    <strong>{e.priority ?? '—'}</strong> / {e.category ?? '—'}
+                    <span className={styles.classifyRule}> · {e.method}{e.rule_id ? ` · ${e.rule_id}` : ''}</span>
+                  </span>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 

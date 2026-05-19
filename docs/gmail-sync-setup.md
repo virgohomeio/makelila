@@ -44,12 +44,14 @@ The service account will be able to read ANY mailbox in the domain once DWD is g
 
 In the Supabase project dashboard → *Edge Functions → Secrets* (or via CLI), add:
 
-| Name | Value |
-|---|---|
-| `GOOGLE_SERVICE_ACCOUNT_KEY` | base64 of the JSON file from step 1.4 — `base64 < makelila-gmail-sync.json \| tr -d '\n'` |
-| `GMAIL_DELEGATED_MAILBOXES` | `huayi@virgohome.io,reina@virgohome.io` (no spaces) |
+| Name | Required | Value |
+|---|---|---|
+| `GOOGLE_SERVICE_ACCOUNT_KEY` | yes | base64 of the JSON file from step 1.4 — `base64 < makelila-gmail-sync.json \| tr -d '\n'` |
+| `GMAIL_DELEGATED_MAILBOXES`  | yes | `huayi@virgohome.io,reina@virgohome.io` (no spaces) |
+| `ANTHROPIC_API_KEY`          | optional | Anthropic API key for the LLM fallback on tickets where rules fall through to `other`. Capped at 20 calls per sync run. If unset, those tickets remain `topic='other'`. |
+| `SLACK_TICKET_WEBHOOK_URL`   | optional | Slack incoming webhook URL. Posts a notification when the classifier promotes a ticket to `priority='urgent'` (no notification on manual edits). If unset, no Slack traffic. |
 
-`SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are already available in the edge function environment by default — no action needed.
+`SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and `SUPABASE_ANON_KEY` are already available in the edge function environment by default — no action needed.
 
 ## 5. Smoke test
 

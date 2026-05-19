@@ -18,7 +18,8 @@
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { SignJWT, importPKCS8 } from 'https://esm.sh/jose@5.9.6';
 import { corsHeaders } from '../_shared/cors.ts';
-import { classify, type Priority, type ThreadInput } from '../_shared/classifier.ts';
+import { classify, type Category, type Priority, type ThreadInput } from '../_shared/classifier.ts';
+import { llmClassify, sha256Hex } from '../_shared/classifier-llm.ts';
 
 // Maps classifier priority ('urgent'|'high'|'medium'|'low') to the DB enum
 // on service_tickets.priority ('urgent'|'high'|'normal'|'low').
@@ -28,6 +29,10 @@ const PRIORITY_TO_DB: Record<Priority, 'urgent' | 'high' | 'normal' | 'low'> = {
   medium: 'normal',
   low:    'low',
 };
+
+const LLM_BUDGET_PER_RUN = 20;
+
+type RunBudget = { llmCalls: number; llmMax: number };
 
 const GMAIL_QUERY = 'in:inbox -from:me -category:promotions -category:social -category:updates -category:forums newer_than:30d';
 const SCOPES = 'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.modify';
@@ -110,9 +115,10 @@ async function handle(): Promise<Response> {
   }
 
   const admin = createClient(supabaseUrl, serviceKey);
+  const budget: RunBudget = { llmCalls: 0, llmMax: LLM_BUDGET_PER_RUN };
   const results: RunResult[] = [];
   for (const mailbox of mailboxes) {
-    const r = await syncMailbox(admin, saKey, mailbox);
+    const r = await syncMailbox(admin, saKey, mailbox, budget);
     results.push(r);
   }
 
@@ -122,7 +128,7 @@ async function handle(): Promise<Response> {
 
 // ============================================================ Per-mailbox sync
 async function syncMailbox(
-  admin: SupabaseClient, saKey: ServiceAccountKey, mailbox: string,
+  admin: SupabaseClient, saKey: ServiceAccountKey, mailbox: string, budget: RunBudget,
 ): Promise<RunResult> {
   const result: RunResult = {
     mailbox,
@@ -172,7 +178,7 @@ async function syncMailbox(
       });
       if (!thread || !thread.messages || thread.messages.length === 0) continue;
 
-      const upserted = await upsertThread(admin, mailbox, thread);
+      const upserted = await upsertThread(admin, mailbox, thread, budget);
       if (upserted) {
         result.threads_processed++;
         result.messages_upserted += upserted.messageCount;
@@ -212,7 +218,7 @@ async function syncMailbox(
 
 // ============================================================ Upsert one thread
 async function upsertThread(
-  admin: SupabaseClient, mailbox: string, thread: GmailThread,
+  admin: SupabaseClient, mailbox: string, thread: GmailThread, budget: RunBudget,
 ): Promise<{ messageCount: number } | null> {
   const messages = (thread.messages ?? []).slice().sort((a, b) => {
     return Number(a.internalDate ?? 0) - Number(b.internalDate ?? 0);
@@ -251,7 +257,7 @@ async function upsertThread(
   const { data: ticket, error: upErr } = await admin
     .from('service_tickets')
     .upsert(ticketRow, { onConflict: 'gmail_thread_id' })
-    .select('id, status, is_manually_overridden, last_classified_at, customer_name')
+    .select('id, status, priority, is_manually_overridden, last_classified_at, customer_name')
     .single();
   if (upErr || !ticket) {
     throw new Error(`upsert ticket failed (thread ${thread.id}): ${upErr?.message ?? 'no row'}`);
@@ -299,18 +305,21 @@ async function upsertThread(
   const lastClassifiedMs = Date.parse(ticket.last_classified_at ?? '') || 0;
   const needsClassify = !ticket.last_classified_at || lastSentMs > lastClassifiedMs;
   if (needsClassify) {
-    await classifyAndApply(admin, ticket, subjectHeader, rows);
+    await classifyAndApply(admin, ticket, subjectHeader, messages, rows, mailbox, budget);
   }
 
   return { messageCount: rows.length };
 }
 
-// ============================================================ Classifier integration
+// ============================================================ Classifier + LLM integration
 async function classifyAndApply(
   admin: SupabaseClient,
-  ticket: { id: string; status: string; is_manually_overridden: boolean | null; customer_name: string | null },
+  ticket: { id: string; status: string; priority: string; is_manually_overridden: boolean | null; customer_name: string | null },
   subject: string,
+  gmailMessages: GmailMessage[],
   rows: Array<{ direction: 'inbound' | 'outbound'; sent_at: string | null; body_text: string | null; snippet: string | null }>,
+  mailbox: string,
+  budget: RunBudget,
 ): Promise<void> {
   const threadInput: ThreadInput = {
     subject,
@@ -322,19 +331,48 @@ async function classifyAndApply(
       snippet: r.snippet ?? undefined,
     })),
   };
-  const result = classify(threadInput);
+  const rulesResult = classify(threadInput);
+
+  // Start with rules result. Promote to LLM if rules fell through to 'other'
+  // and we have budget left.
+  let finalPriority: Priority = rulesResult.priority;
+  let finalCategory: Category = rulesResult.category;
+  let finalSummary = rulesResult.summary;
+  let finalNextAction = rulesResult.suggested_next_action;
+  let finalStatus = rulesResult.status;
+  let method: 'rules' | 'llm' = 'rules';
+  let ruleId: string | null = rulesResult.ruleId ?? null;
+  let llmInputHash: string | null = null;
+  let llmConfidence: number | null = null;
+
+  if (rulesResult.category === 'other' && budget.llmCalls < budget.llmMax) {
+    const lastMsgId = gmailMessages[gmailMessages.length - 1]?.id ?? '';
+    llmInputHash = await sha256Hex(`${ticket.id}|${lastMsgId}`);
+    const llmOut = await llmClassify(threadInput);
+    if (llmOut) {
+      finalPriority = llmOut.priority;
+      finalCategory = llmOut.category;
+      finalSummary = llmOut.summary;
+      finalNextAction = llmOut.suggested_next_action;
+      finalStatus = undefined; // LLM never auto-resolves; only closed-ack rule does
+      llmConfidence = llmOut.confidence;
+      method = 'llm';
+      ruleId = null;
+      budget.llmCalls += 1;
+    }
+  }
 
   const update: Record<string, unknown> = {
     last_classified_at: new Date().toISOString(),
   };
   // Only write classifier fields if staff hasn't manually overridden.
   if (!ticket.is_manually_overridden) {
-    update.priority = PRIORITY_TO_DB[result.priority];
-    update.topic = result.category;
-    update.summary = result.summary;
-    update.suggested_next_action = result.suggested_next_action;
-    // Auto-resolve from closed-ack only when status is still open-ish.
-    if (result.status === 'resolved' && ['new','triaging','waiting_customer'].includes(ticket.status)) {
+    update.priority = PRIORITY_TO_DB[finalPriority];
+    update.topic = finalCategory;
+    update.summary = finalSummary;
+    update.suggested_next_action = finalNextAction;
+    if (llmConfidence != null) update.classification_confidence = llmConfidence;
+    if (finalStatus === 'resolved' && ['new','triaging','waiting_customer'].includes(ticket.status)) {
       update.status = 'resolved';
       update.resolved_at = new Date().toISOString();
     }
@@ -348,10 +386,43 @@ async function classifyAndApply(
 
   await admin.from('ticket_classification_log').insert({
     ticket_id: ticket.id,
-    method: 'rules',
-    priority: result.priority,
-    category: result.category,
-    rule_id: result.ruleId ?? null,
+    method,
+    priority: finalPriority,
+    category: finalCategory,
+    rule_id: ruleId,
+    llm_input_hash: llmInputHash,
+    confidence: llmConfidence,
+  });
+
+  // Slack notify: classifier-driven escalation to urgent (not manual edits).
+  const prevDbPriority = ticket.priority;
+  const newDbPriority = PRIORITY_TO_DB[finalPriority];
+  if (!ticket.is_manually_overridden && newDbPriority === 'urgent' && prevDbPriority !== 'urgent') {
+    await notifySlackUrgent({
+      ticket_id: ticket.id,
+      subject,
+      customer_name: ticket.customer_name,
+      summary: finalSummary,
+      mailbox,
+    }).catch(e => console.warn(`slack notify failed: ${(e as Error).message}`));
+  }
+}
+
+// ============================================================ Slack notify (best-effort)
+async function notifySlackUrgent(args: {
+  ticket_id: string;
+  subject: string;
+  customer_name: string | null;
+  summary: string;
+  mailbox: string;
+}): Promise<void> {
+  const webhook = Deno.env.get('SLACK_TICKET_WEBHOOK_URL');
+  if (!webhook) return;                                     // feature off
+  const text = `:rotating_light: *Urgent ticket* — ${args.customer_name ?? 'Unknown customer'} via ${args.mailbox}\n*${args.subject}*\n${args.summary}`;
+  await fetch(webhook, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ text }),
   });
 }
 

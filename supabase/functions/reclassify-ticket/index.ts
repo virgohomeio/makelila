@@ -10,7 +10,8 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { corsHeaders } from '../_shared/cors.ts';
-import { classify, type Priority, type ThreadInput } from '../_shared/classifier.ts';
+import { classify, type Category, type Priority, type ThreadInput } from '../_shared/classifier.ts';
+import { llmClassify, sha256Hex } from '../_shared/classifier-llm.ts';
 
 const PRIORITY_TO_DB: Record<Priority, 'urgent' | 'high' | 'normal' | 'low'> = {
   urgent: 'urgent',
@@ -64,7 +65,7 @@ async function handle(req: Request): Promise<Response> {
 
   const { data: messages, error: mErr } = await admin
     .from('ticket_messages')
-    .select('direction, sent_at, body_text, snippet')
+    .select('id, gmail_message_id, direction, sent_at, body_text, snippet')
     .eq('ticket_id', body.ticket_id)
     .order('sent_at', { ascending: true });
   if (mErr) return json({ error: mErr.message }, 500);
@@ -79,19 +80,49 @@ async function handle(req: Request): Promise<Response> {
       snippet: m.snippet ?? undefined,
     })),
   };
-  const result = classify(threadInput);
+
+  const rules = classify(threadInput);
+
+  // Same fallback flow as the sync function: if rules say 'other', try LLM.
+  // No budget gate here — reclassify is one call per invocation.
+  let finalPriority: Priority = rules.priority;
+  let finalCategory: Category = rules.category;
+  let finalSummary = rules.summary;
+  let finalNextAction = rules.suggested_next_action;
+  let finalStatus = rules.status;
+  let method: 'rules' | 'llm' = 'rules';
+  let ruleId: string | null = rules.ruleId ?? null;
+  let llmHash: string | null = null;
+  let llmConfidence: number | null = null;
+
+  if (rules.category === 'other') {
+    const lastMsgId = (messages ?? []).at(-1)?.gmail_message_id ?? '';
+    llmHash = await sha256Hex(`${body.ticket_id}|${lastMsgId}`);
+    const llm = await llmClassify(threadInput);
+    if (llm) {
+      finalPriority = llm.priority;
+      finalCategory = llm.category;
+      finalSummary = llm.summary;
+      finalNextAction = llm.suggested_next_action;
+      finalStatus = undefined;
+      llmConfidence = llm.confidence;
+      method = 'llm';
+      ruleId = null;
+    }
+  }
 
   // Reclassify resets manual override — staff clicked "reclassify" so they
   // want the classifier's answer to win.
   const update: Record<string, unknown> = {
-    priority: PRIORITY_TO_DB[result.priority],
-    topic: result.category,
-    summary: result.summary,
-    suggested_next_action: result.suggested_next_action,
+    priority: PRIORITY_TO_DB[finalPriority],
+    topic: finalCategory,
+    summary: finalSummary,
+    suggested_next_action: finalNextAction,
     last_classified_at: new Date().toISOString(),
     is_manually_overridden: false,
+    classification_confidence: llmConfidence,
   };
-  if (result.status === 'resolved' && ['new','triaging','waiting_customer'].includes(ticket.status)) {
+  if (finalStatus === 'resolved' && ['new','triaging','waiting_customer'].includes(ticket.status)) {
     update.status = 'resolved';
     update.resolved_at = new Date().toISOString();
   }
@@ -101,13 +132,24 @@ async function handle(req: Request): Promise<Response> {
 
   await admin.from('ticket_classification_log').insert({
     ticket_id: body.ticket_id,
-    method: 'rules',
-    priority: result.priority,
-    category: result.category,
-    rule_id: result.ruleId ?? null,
+    method,
+    priority: finalPriority,
+    category: finalCategory,
+    rule_id: ruleId,
+    llm_input_hash: llmHash,
+    confidence: llmConfidence,
   });
 
-  return json({ ok: true, result }, 200);
+  return json({
+    ok: true,
+    result: {
+      priority: finalPriority,
+      category: finalCategory,
+      summary: finalSummary,
+      suggested_next_action: finalNextAction,
+      method,
+    },
+  }, 200);
 }
 
 function json(body: unknown, status: number): Response {

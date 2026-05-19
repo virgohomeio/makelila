@@ -511,6 +511,119 @@
 }
 .modalPrimary:disabled { opacity: 0.5; cursor: not-allowed; }
 
+/* ============================================================ Topic filters + sync */
+.filterGroupLabel {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--color-ink-subtle);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-right: 4px;
+}
+.chipSm {
+  border: 1px solid var(--color-border);
+  background: #fff;
+  color: var(--color-ink-muted);
+  padding: 3px 8px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.chipSm:hover { border-color: var(--color-ink-subtle); color: var(--color-ink); }
+.syncMessage {
+  font-size: 11px;
+  color: var(--color-ink-muted);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  margin-bottom: 10px;
+}
+
+/* ============================================================ Row enhancements */
+.age { color: var(--color-ink-muted); font-size: 11px; }
+.ageStale { color: var(--color-crimson); font-size: 11px; font-weight: 700; }
+.rowSummary {
+  font-size: 10px;
+  color: var(--color-ink-subtle);
+  margin-top: 2px;
+  line-height: 1.4;
+  max-width: 380px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.topicPill {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 10px;
+  background: #ebf8ff;
+  color: #2c5282;
+  letter-spacing: 0.3px;
+}
+.gmailLink {
+  font-size: 13px;
+  color: var(--color-ink-subtle);
+  text-decoration: none;
+  padding: 2px 6px;
+}
+.gmailLink:hover { color: var(--color-crimson); }
+
+/* ============================================================ Conversation + classification history (detail panel) */
+.threadList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 320px;
+  overflow-y: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 8px;
+  background: var(--color-surface);
+}
+.threadMsg {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+  line-height: 1.5;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+}
+.threadMsgIn  { background: #fff; border: 1px solid #e2e8f0; }
+.threadMsgOut { background: #f0fff4; border: 1px solid #c6f6d5; }
+.threadMsgMeta {
+  font-size: 9px;
+  color: var(--color-ink-subtle);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  font-weight: 700;
+}
+.threadMsgBody {
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  color: var(--color-ink);
+}
+
+.classifyList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+}
+.classifyEntry {
+  display: flex;
+  gap: 8px;
+  padding: 4px 0;
+  border-bottom: 1px solid #f0eee8;
+}
+.classifyEntry:last-child { border-bottom: none; }
+.classifyTime { color: var(--color-ink-subtle); font-family: ui-monospace, monospace; min-width: 110px; }
+.classifyRule { color: var(--color-ink-muted); }
+
 /* ============================================================ Empty / loading */
 .empty {
   padding: 40px 20px;
