@@ -20,6 +20,7 @@ import { SignJWT, importPKCS8 } from 'https://esm.sh/jose@5.9.6';
 import { corsHeaders } from '../_shared/cors.ts';
 import { classify, type Category, type Priority, type ThreadInput } from '../_shared/classifier.ts';
 import { llmClassify, sha256Hex } from '../_shared/classifier-llm.ts';
+import { parseQuoSubject, parseFromHeader, normalizePhone } from '../_shared/quo-parsers.ts';
 
 // Maps classifier priority ('urgent'|'high'|'medium'|'low') to the DB enum
 // on service_tickets.priority ('urgent'|'high'|'normal'|'low').
@@ -435,43 +436,6 @@ function msgDate(msg: GmailMessage): string | null {
   if (!msg.internalDate) return null;
   const ms = Number(msg.internalDate);
   return Number.isFinite(ms) ? new Date(ms).toISOString() : null;
-}
-
-// "New text message from RJ Down (813) 492-5113"
-// "Missed call from RJ Down (813) 492-5113"
-// "New text message from (813) 492-5113"
-// "Missed call from (813) 492-5113"
-const QUO_RE = /^(New text message|Missed call) from(?:\s+(.+?))?\s+(\(\d{3}\)\s*\d{3}[-\s]?\d{4})\s*$/i;
-export function parseQuoSubject(subject: string): {
-  kind: 'sms' | 'missed_call' | null; name: string | null; phone: string | null;
-} {
-  const m = subject?.match(QUO_RE);
-  if (!m) return { kind: null, name: null, phone: null };
-  const kind = m[1].toLowerCase().startsWith('new') ? 'sms' : 'missed_call';
-  return {
-    kind,
-    name: (m[2]?.trim()) || null,
-    phone: m[3],
-  };
-}
-
-// "Name <email@host>" → { name, email }
-// "email@host"        → { name: null, email }
-const FROM_RE = /^\s*(?:"?([^"<]+?)"?\s*)?<?([^>\s]+@[^>\s]+)>?\s*$/;
-export function parseFromHeader(from: string): { name: string | null; email: string | null } {
-  if (!from) return { name: null, email: null };
-  const m = from.match(FROM_RE);
-  if (!m) return { name: null, email: null };
-  return { name: m[1]?.trim() || null, email: m[2]?.toLowerCase() || null };
-}
-
-// E.164 for US/CA numbers. 10 digits → +1NXXNXXXXXX; 11 starting with 1 → +1...; otherwise raw.
-export function normalizePhone(raw: string): string | null {
-  if (!raw) return null;
-  const digits = raw.replace(/\D/g, '');
-  if (digits.length === 10) return `+1${digits}`;
-  if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`;
-  return raw;
 }
 
 // Walk MIME parts, prefer text/plain, fall back to text/html stripped.
