@@ -38,19 +38,30 @@ export function parseQuoSubject(subject: string): QuoSubject {
 
 // ============================================================ RFC 5322 From parsing
 //
-//   "Name <email@host>"   → { name: "Name",     email: "email@host" }
+//   "Name <email@host>"     → { name: "Name",     email: "email@host" }
 //   "\"Name\" <email@host>" → quotes stripped
-//   "email@host"          → { name: null,       email: "email@host" }
+//   "<email@host>"          → { name: null,       email: "email@host" }
+//   "email@host"            → { name: null,       email: "email@host" }
+//
+// Named and bare are split into two regexes so the bare case can't be
+// misparsed (a single optional-name group greedily ate the first char of
+// bare emails, turning "quo@quo.com" into { name: "q", email: "uo@quo.com" }).
 
-const FROM_RE = /^\s*(?:"?([^"<]+?)"?\s*)?<?([^>\s]+@[^>\s]+)>?\s*$/;
+const NAMED_FROM_RE = /^\s*(?:"([^"]+)"|([^<]+?))\s*<([^>\s]+@[^>\s]+)>\s*$/;
+const BARE_FROM_RE  = /^\s*<?([^>\s]+@[^>\s]+)>?\s*$/;
 
 export type ParsedFrom = { name: string | null; email: string | null };
 
 export function parseFromHeader(from: string): ParsedFrom {
   if (!from) return { name: null, email: null };
-  const m = from.match(FROM_RE);
-  if (!m) return { name: null, email: null };
-  return { name: m[1]?.trim() || null, email: m[2]?.toLowerCase() || null };
+  const named = from.match(NAMED_FROM_RE);
+  if (named) {
+    const name = (named[1] ?? named[2] ?? '').trim();
+    return { name: name || null, email: named[3].toLowerCase() };
+  }
+  const bare = from.match(BARE_FROM_RE);
+  if (bare) return { name: null, email: bare[1].toLowerCase() };
+  return { name: null, email: null };
 }
 
 // ============================================================ Phone normalization
