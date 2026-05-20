@@ -268,12 +268,15 @@ export async function flagRework(
   flaggedByName: string,
 ): Promise<void> {
   const userId = await currentUserId();
-  // Insert rework row
-  const { error: rwErr } = await supabase.from('unit_reworks').insert({
-    serial,
-    issue,
-    flagged_by: userId,
-    flagged_by_name: flaggedByName,
+  const { error: rwErr } = await supabase.from('build_defects').insert({
+    unit_serial: serial,
+    category: 'assembly',
+    subject: `QC flag: ${issue.slice(0, 80)}`,
+    description: issue,
+    severity: 'high',
+    status: 'in_rework',
+    found_by: userId,
+    found_by_name: flaggedByName,
   });
   if (rwErr) throw rwErr;
   // Flip shelf slot to rework
