@@ -446,8 +446,16 @@ export async function endBurnIn(id: string, result: BurnInResult, failure_mode?:
 }
 
 export async function releaseToFulfillment(unit_serial: string): Promise<void> {
-  const { error } = await supabase.from('units').update({ status: 'ready' }).eq('serial', unit_serial);
-  if (error) throw error;
+  const { error: uErr } = await supabase.from('units').update({ status: 'ready' }).eq('serial', unit_serial);
+  if (uErr) throw uErr;
+  // Flip the shelf slot to 'available' so Fulfillment's serial picker sees it.
+  // If no shelf_slots row exists for this serial yet (unit not physically racked),
+  // the update affects 0 rows silently — that's a separate operator workflow problem.
+  const { error: sErr } = await supabase
+    .from('shelf_slots')
+    .update({ status: 'available', updated_at: new Date().toISOString() })
+    .eq('serial', unit_serial);
+  if (sErr) throw sErr;
   await logAction('released_to_fulfillment', unit_serial, 'unit ready for fulfillment');
 }
 
