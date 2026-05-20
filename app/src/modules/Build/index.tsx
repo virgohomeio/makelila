@@ -99,7 +99,7 @@ export default function Build() {
             >Table</button>
           </div>
           <button className={styles.btnPrimary} onClick={() => setShowNewPO(true)}>+ New PO</button>
-          <button className={styles.btnSecondary} onClick={() => setShowClaimSerial({ batch: 'P100' })}>+ Claim serial</button>
+          <button className={styles.btnSecondary} onClick={() => { setShowClaimSerial({ batch: 'P100' }); setClaimSerial(''); setClaimError(null); }}>+ Claim serial</button>
         </div>
       </div>
       {loading ? (
@@ -132,9 +132,19 @@ export default function Build() {
            onClick={() => setShowClaimSerial(null)}>
         <div onClick={e => e.stopPropagation()}
           style={{ background: '#fff', borderRadius: 'var(--radius-md)', padding: 20, width: 380 }}>
-          <h3 style={{ margin: '0 0 12px', fontSize: 16 }}>
-            Claim a serial for {showClaimSerial.batch}
-          </h3>
+          <h3 style={{ margin: '0 0 12px', fontSize: 16 }}>Claim a serial</h3>
+          <div style={{ marginBottom: 10 }}>
+            <label style={{ display: 'block', fontSize: 12, marginBottom: 4, color: 'var(--color-text-secondary)' }}>Batch</label>
+            <select
+              className={styles.input}
+              value={showClaimSerial.batch}
+              onChange={e => setShowClaimSerial({ batch: e.target.value })}
+            >
+              {(['P50N', 'P100', 'P100X', 'P200'] as const).map(b => (
+                <option key={b} value={b}>{b}</option>
+              ))}
+            </select>
+          </div>
           <input className={styles.input} placeholder="LL01-00000000XYZ"
             value={claimSerial}
             onChange={e => setClaimSerial(e.target.value.toUpperCase())} />
