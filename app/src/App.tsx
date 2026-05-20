@@ -3,6 +3,7 @@ import { AuthProvider, ProtectedRoute } from './lib/auth';
 import { AppShell } from './components/AppShell';
 import OrderReview from './modules/OrderReview';
 import Fulfillment from './modules/Fulfillment';
+import Build from './modules/Build';
 import PostShipment from './modules/PostShipment';
 import Service from './modules/Service';
 import Stock from './modules/Stock';
@@ -37,6 +38,7 @@ export default function App() {
             <Route path="order-review/:orderId" element={<OrderReview />} />
             <Route path="fulfillment"       element={<Fulfillment />} />
             <Route path="fulfillment/:tab"  element={<Fulfillment />} />
+            <Route path="build"         element={<Build />} />
             <Route path="post-shipment" element={<PostShipment />} />
             <Route path="service"       element={<Service />} />
             <Route path="stock"         element={<Stock />} />
