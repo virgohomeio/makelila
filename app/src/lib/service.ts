@@ -1,19 +1,25 @@
 import { useEffect, useState } from 'react';
 import type { RealtimeChannel } from '@supabase/supabase-js';
-import { supabase } from './supabase';
+import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from './supabase';
 import { logAction } from './activityLog';
 
 // ============================================================ Types
 
 export type TicketCategory = 'onboarding' | 'support' | 'repair';
 export type TicketSource =
-  | 'calendly' | 'customer_form' | 'hubspot' | 'fulfillment_flag' | 'ops_manual';
+  | 'calendly' | 'customer_form' | 'hubspot' | 'fulfillment_flag' | 'ops_manual' | 'gmail';
 export type TicketStatus =
   | 'new' | 'triaging' | 'in_progress' | 'waiting_customer'
   | 'resolved' | 'closed' | 'escalated';
 export type TicketPriority = 'low' | 'normal' | 'high' | 'urgent';
 export type OnboardingStatus =
   | 'not_scheduled' | 'scheduled' | 'completed' | 'no_show' | 'skipped';
+
+export type TicketTopic =
+  | 'return_hardware_defect' | 'warranty_replacement' | 'refund' | 'software_firmware'
+  | 'complaint' | 'callback' | 'assembly_support' | 'troubleshooting'
+  | 'logistics_pickup' | 'order_fulfillment' | 'in_person_service' | 'appointment'
+  | 'marketing_social' | 'closed_acknowledgment' | 'other';
 
 export type ServiceTicket = {
   id: string;
@@ -43,6 +49,18 @@ export type ServiceTicket = {
   closed_at: string | null;
   created_at: string;
   updated_at: string;
+  // Gmail pipeline (PR1 + PR2)
+  gmail_thread_id: string | null;
+  gmail_account: string | null;
+  topic: TicketTopic | null;
+  summary: string | null;
+  suggested_next_action: string | null;
+  last_classified_at: string | null;
+  classification_confidence: number | null;
+  message_count: number;
+  first_message_at: string | null;
+  last_message_at: string | null;
+  is_manually_overridden: boolean;
 };
 
 export type CustomerLifecycle = {
@@ -57,6 +75,30 @@ export type CustomerLifecycle = {
   notes: string | null;
   created_at: string;
   updated_at: string;
+};
+
+export type TicketMessage = {
+  id: string;
+  ticket_id: string;
+  gmail_message_id: string;
+  direction: 'inbound' | 'outbound';
+  sender: string | null;
+  sent_at: string | null;
+  snippet: string | null;
+  body_text: string | null;
+  created_at: string;
+};
+
+export type ClassificationLogEntry = {
+  id: string;
+  ticket_id: string;
+  method: 'rules' | 'llm';
+  priority: string | null;
+  category: string | null;
+  rule_id: string | null;
+  llm_input_hash: string | null;
+  confidence: number | null;
+  created_at: string;
 };
 
 export type TicketAttachment = {
@@ -76,6 +118,24 @@ export const CATEGORY_META: Record<TicketCategory, { label: string; color: strin
   onboarding: { label: 'Onboarding', color: '#276749', bg: '#f0fff4' },
   support:    { label: 'Support',    color: '#2b6cb0', bg: '#ebf8ff' },
   repair:     { label: 'Repair',     color: '#c05621', bg: '#fffaf0' },
+};
+
+export const TOPIC_LABEL: Record<TicketTopic, string> = {
+  return_hardware_defect: 'Return / hardware',
+  warranty_replacement:   'Warranty',
+  refund:                 'Refund',
+  software_firmware:      'Software / firmware',
+  complaint:              'Complaint',
+  callback:               'Callback',
+  assembly_support:       'Assembly support',
+  troubleshooting:        'Troubleshooting',
+  logistics_pickup:       'Logistics',
+  order_fulfillment:      'Order fulfillment',
+  in_person_service:      'In-person',
+  appointment:            'Appointment',
+  marketing_social:       'Marketing',
+  closed_acknowledgment:  'Acknowledgment',
+  other:                  'Other',
 };
 
 export const STATUS_META: Record<TicketStatus, { label: string; color: string; bg: string }> = {
@@ -101,6 +161,7 @@ export const SOURCE_LABEL: Record<TicketSource, string> = {
   hubspot:          'HubSpot',
   fulfillment_flag: 'Fulfillment',
   ops_manual:       'Manual',
+  gmail:            'Gmail',
 };
 
 // Allowed next-states for the state machine (UI gating)
@@ -260,6 +321,82 @@ export function useTicketAttachments(ticketId: string | null): {
   return { attachments, loading };
 }
 
+export function useTicketMessages(ticketId: string | null): {
+  messages: TicketMessage[];
+  loading: boolean;
+} {
+  const [messages, setMessages] = useState<TicketMessage[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!ticketId) { setMessages([]); setLoading(false); return; }
+    let channel: RealtimeChannel | null = null;
+    let cancelled = false;
+    setLoading(true);
+    (async () => {
+      const { data, error } = await supabase
+        .from('ticket_messages')
+        .select('*')
+        .eq('ticket_id', ticketId)
+        .order('sent_at', { ascending: true });
+      if (cancelled) return;
+      if (!error && data) setMessages(data as TicketMessage[]);
+      setLoading(false);
+
+      channel = supabase
+        .channel(`ticket_messages:${ticketId}`)
+        .on('postgres_changes',
+          { event: '*', schema: 'public', table: 'ticket_messages', filter: `ticket_id=eq.${ticketId}` },
+          (payload) => {
+            setMessages(prev => {
+              if (payload.eventType === 'DELETE' && payload.old) {
+                return prev.filter(m => m.id !== (payload.old as { id: string }).id);
+              }
+              if (payload.new) {
+                const row = payload.new as TicketMessage;
+                const idx = prev.findIndex(m => m.id === row.id);
+                if (idx >= 0) { const next = [...prev]; next[idx] = row; return next; }
+                return [...prev, row].sort((a, b) =>
+                  (a.sent_at ?? '').localeCompare(b.sent_at ?? ''));
+              }
+              return prev;
+            });
+          })
+        .subscribe();
+    })();
+    return () => { cancelled = true; if (channel) void channel.unsubscribe(); };
+  }, [ticketId]);
+
+  return { messages, loading };
+}
+
+export function useClassificationLog(ticketId: string | null): {
+  entries: ClassificationLogEntry[];
+  loading: boolean;
+} {
+  const [entries, setEntries] = useState<ClassificationLogEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!ticketId) { setEntries([]); setLoading(false); return; }
+    let cancelled = false;
+    setLoading(true);
+    (async () => {
+      const { data, error } = await supabase
+        .from('ticket_classification_log')
+        .select('*')
+        .eq('ticket_id', ticketId)
+        .order('created_at', { ascending: false });
+      if (cancelled) return;
+      if (!error && data) setEntries(data as ClassificationLogEntry[]);
+      setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [ticketId]);
+
+  return { entries, loading };
+}
+
 // ============================================================ Mutations
 
 export type NewTicketInput = {
@@ -267,6 +404,7 @@ export type NewTicketInput = {
   subject: string;
   description?: string | null;
   priority?: TicketPriority;
+  customer_id?: string | null;
   customer_name?: string | null;
   customer_email?: string | null;
   customer_phone?: string | null;
@@ -282,6 +420,7 @@ export async function createTicket(input: NewTicketInput): Promise<ServiceTicket
       subject: input.subject,
       description: input.description ?? null,
       priority: input.priority ?? 'normal',
+      customer_id: input.customer_id ?? null,
       customer_name: input.customer_name ?? null,
       customer_email: input.customer_email ?? null,
       customer_phone: input.customer_phone ?? null,
@@ -308,9 +447,68 @@ export async function assignTicketOwner(id: string, owner_email: string | null):
 }
 
 export async function setTicketPriority(id: string, priority: TicketPriority): Promise<void> {
-  const { error } = await supabase.from('service_tickets').update({ priority }).eq('id', id);
+  // Staff edit locks the classifier out of overwriting priority/topic/etc.
+  // until they click "Reclassify" (which resets the flag).
+  const { error } = await supabase
+    .from('service_tickets')
+    .update({ priority, is_manually_overridden: true })
+    .eq('id', id);
   if (error) throw error;
   await logAction('ticket_priority_set', id, priority);
+}
+
+export async function setTicketTopic(id: string, topic: TicketTopic): Promise<void> {
+  const { error } = await supabase
+    .from('service_tickets')
+    .update({ topic, is_manually_overridden: true })
+    .eq('id', id);
+  if (error) throw error;
+  await logAction('ticket_topic_set', id, topic);
+}
+
+/** Trigger an on-demand run of the Gmail sync edge function. Returns the
+ *  function's run summary so the UI can show a toast. */
+export async function syncGmailTickets(): Promise<unknown> {
+  const { data: { session } } = await supabase.auth.getSession();
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/sync-gmail-tickets`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      apikey: SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${session?.access_token ?? SUPABASE_ANON_KEY}`,
+    },
+    body: '{}',
+  });
+  const text = await res.text();
+  if (!res.ok) {
+    let detail = text;
+    try { detail = (JSON.parse(text) as { error?: string }).error ?? text; } catch { /* keep raw */ }
+    throw new Error(`Gmail sync failed (${res.status}): ${detail}`);
+  }
+  await logAction('gmail_sync_manual', 'tickets');
+  return JSON.parse(text);
+}
+
+/** Force a classifier rerun on a single ticket. Resets the manual-override
+ *  flag so the new classification sticks. */
+export async function reclassifyTicket(id: string): Promise<void> {
+  const { data: { session } } = await supabase.auth.getSession();
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/reclassify-ticket`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      apikey: SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${session?.access_token ?? SUPABASE_ANON_KEY}`,
+    },
+    body: JSON.stringify({ ticket_id: id }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    let detail = text;
+    try { detail = (JSON.parse(text) as { error?: string }).error ?? text; } catch { /* keep raw */ }
+    throw new Error(`Reclassify failed (${res.status}): ${detail}`);
+  }
+  await logAction('ticket_reclassified', id);
 }
 
 export async function updateTicketNotes(id: string, internal_notes: string): Promise<void> {

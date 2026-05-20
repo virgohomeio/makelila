@@ -1,8 +1,10 @@
 import { useMemo, useState } from 'react';
 import {
-  useServiceTickets, createTicket, STATUS_META, PRIORITY_META, SOURCE_LABEL,
-  type TicketStatus, type TicketPriority, type ServiceTicket,
+  useServiceTickets, createTicket, syncGmailTickets,
+  STATUS_META, PRIORITY_META, SOURCE_LABEL, TOPIC_LABEL,
+  type TicketStatus, type TicketPriority, type TicketTopic, type ServiceTicket,
 } from '../../lib/service';
+import { useCustomers, type Customer } from '../../lib/customers';
 import { TicketDetailPanel } from './TicketDetailPanel';
 import styles from './Service.module.css';
 
@@ -17,28 +19,53 @@ const STATUS_FILTERS: { key: TicketStatus | 'all'; label: string }[] = [
 
 export function SupportTab() {
   const { tickets, loading } = useServiceTickets('support');
+  const { customers } = useCustomers();
   const [statusFilter, setStatusFilter] = useState<TicketStatus | 'all'>('all');
-  const [sourceFilter, setSourceFilter] = useState<'all' | 'customer_form' | 'hubspot'>('all');
+  const [sourceFilter, setSourceFilter] = useState<'all' | 'customer_form' | 'hubspot' | 'gmail'>('all');
+  const [topicFilter, setTopicFilter] = useState<TicketTopic | 'all'>('all');
   const [q, setQ] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showNew, setShowNew] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
 
   const filtered = useMemo(() => {
     return tickets.filter(t => {
       if (statusFilter !== 'all' && t.status !== statusFilter) return false;
       if (sourceFilter !== 'all' && t.source !== sourceFilter) return false;
+      if (topicFilter !== 'all' && t.topic !== topicFilter) return false;
       if (q) {
         const needle = q.toLowerCase();
         return (
           t.subject.toLowerCase().includes(needle) ||
           (t.customer_name ?? '').toLowerCase().includes(needle) ||
           (t.customer_email ?? '').toLowerCase().includes(needle) ||
+          (t.summary ?? '').toLowerCase().includes(needle) ||
           t.ticket_number.toLowerCase().includes(needle)
         );
       }
       return true;
     });
-  }, [tickets, statusFilter, sourceFilter, q]);
+  }, [tickets, statusFilter, sourceFilter, topicFilter, q]);
+
+  const onSyncNow = async () => {
+    setSyncing(true); setSyncMessage(null);
+    try {
+      const r = await syncGmailTickets() as { ok?: boolean; skipped?: boolean; results?: { mailbox: string; threads_processed: number }[] };
+      if (r?.skipped) {
+        setSyncMessage('Gmail sync not yet configured.');
+      } else if (r?.results) {
+        const total = r.results.reduce((n, x) => n + (x.threads_processed ?? 0), 0);
+        setSyncMessage(`Synced ${total} thread${total === 1 ? '' : 's'} across ${r.results.length} mailbox${r.results.length === 1 ? '' : 'es'}.`);
+      } else {
+        setSyncMessage('Synced.');
+      }
+    } catch (e) {
+      setSyncMessage(`Error: ${(e as Error).message}`);
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   const selected = filtered.find(t => t.id === selectedId) ?? tickets.find(t => t.id === selectedId) ?? null;
 
@@ -76,6 +103,10 @@ export function SupportTab() {
           onClick={() => setSourceFilter('all')}
         >Any source</button>
         <button
+          className={`${styles.chip} ${sourceFilter === 'gmail' ? styles.chipActive : ''}`}
+          onClick={() => setSourceFilter('gmail')}
+        >Gmail</button>
+        <button
           className={`${styles.chip} ${sourceFilter === 'customer_form' ? styles.chipActive : ''}`}
           onClick={() => setSourceFilter('customer_form')}
         >Form</button>
@@ -85,14 +116,37 @@ export function SupportTab() {
         >HubSpot</button>
         <input
           className={styles.search}
-          placeholder="Search ticket #, subject, customer…"
+          placeholder="Search ticket #, subject, customer, summary…"
           value={q}
           onChange={e => setQ(e.target.value)}
         />
+        <button
+          className={styles.addBtn}
+          onClick={() => void onSyncNow()}
+          disabled={syncing}
+          title="Manually trigger the Gmail sync edge function"
+        >{syncing ? 'Syncing…' : 'Sync now'}</button>
         <button className={styles.addBtn} onClick={() => setShowNew(true)}>
           + Add ticket
         </button>
       </div>
+
+      <div className={styles.filterRow}>
+        <span className={styles.filterGroupLabel}>Topic:</span>
+        <button
+          className={`${styles.chipSm} ${topicFilter === 'all' ? styles.chipActive : ''}`}
+          onClick={() => setTopicFilter('all')}
+        >Any</button>
+        {(Object.keys(TOPIC_LABEL) as TicketTopic[]).map(k => (
+          <button
+            key={k}
+            className={`${styles.chipSm} ${topicFilter === k ? styles.chipActive : ''}`}
+            onClick={() => setTopicFilter(k)}
+          >{TOPIC_LABEL[k]}</button>
+        ))}
+      </div>
+
+      {syncMessage && <div className={styles.syncMessage}>{syncMessage}</div>}
 
       {filtered.length === 0 ? (
         <div className={styles.empty}>No tickets match these filters.</div>
@@ -101,13 +155,15 @@ export function SupportTab() {
           <thead>
             <tr>
               <th>#</th>
-              <th>Created</th>
+              <th>Age</th>
               <th>Customer</th>
               <th>Subject</th>
+              <th>Topic</th>
               <th>Source</th>
               <th>Priority</th>
               <th>Status</th>
               <th>Owner</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
@@ -124,6 +180,7 @@ export function SupportTab() {
 
       {showNew && (
         <NewTicketModal
+          customers={customers}
           onClose={() => setShowNew(false)}
           onCreated={(t) => { setShowNew(false); setSelectedId(t.id); }}
         />
@@ -133,21 +190,35 @@ export function SupportTab() {
 }
 
 function NewTicketModal({
-  onClose, onCreated,
-}: { onClose: () => void; onCreated: (t: ServiceTicket) => void }) {
+  customers, onClose, onCreated,
+}: {
+  customers: Customer[];
+  onClose: () => void;
+  onCreated: (t: ServiceTicket) => void;
+}) {
   const [subject, setSubject] = useState('');
   const [description, setDescription] = useState('');
   const [priority, setPriority] = useState<TicketPriority>('normal');
-  const [customerName, setCustomerName] = useState('');
-  const [customerEmail, setCustomerEmail] = useState('');
-  const [customerPhone, setCustomerPhone] = useState('');
+  const [customerSearch, setCustomerSearch] = useState('');
+  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [unitSerial, setUnitSerial] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const canSubmit = subject.trim().length > 0 && !submitting;
+  const candidates = useMemo(() => {
+    const needle = customerSearch.trim().toLowerCase();
+    if (!needle) return [];
+    return customers.filter(c =>
+      c.full_name.toLowerCase().includes(needle) ||
+      (c.email ?? '').toLowerCase().includes(needle) ||
+      (c.phone ?? '').toLowerCase().includes(needle),
+    ).slice(0, 8);
+  }, [customers, customerSearch]);
+
+  const canSubmit = subject.trim().length > 0 && selectedCustomer !== null && !submitting;
 
   const submit = async () => {
+    if (!selectedCustomer) return;
     setSubmitting(true);
     setError(null);
     try {
@@ -156,9 +227,10 @@ function NewTicketModal({
         subject: subject.trim(),
         description: description.trim() || null,
         priority,
-        customer_name: customerName.trim() || null,
-        customer_email: customerEmail.trim() || null,
-        customer_phone: customerPhone.trim() || null,
+        customer_id: selectedCustomer.id,
+        customer_name: selectedCustomer.full_name,
+        customer_email: selectedCustomer.email,
+        customer_phone: selectedCustomer.phone,
         unit_serial: unitSerial.trim() || null,
       });
       onCreated(row);
@@ -186,6 +258,54 @@ function NewTicketModal({
               placeholder="Short summary of the issue"
               autoFocus
             />
+          </div>
+          <div className={styles.modalRow}>
+            <label>Customer *</label>
+            {selectedCustomer ? (
+              <div className={styles.modalSelected}>
+                <strong>{selectedCustomer.full_name}</strong>
+                <span className={styles.muted}>
+                  {[selectedCustomer.email, selectedCustomer.phone, selectedCustomer.city]
+                    .filter(Boolean).join(' · ') || '—'}
+                </span>
+                <button
+                  className={styles.modalLinkBtn}
+                  onClick={() => { setSelectedCustomer(null); setCustomerSearch(''); }}
+                >change</button>
+              </div>
+            ) : (
+              <div className={styles.modalPicker}>
+                <input
+                  type="text"
+                  className={styles.modalInput}
+                  value={customerSearch}
+                  onChange={e => setCustomerSearch(e.target.value)}
+                  placeholder="Type a name, email, or phone…"
+                />
+                {candidates.length > 0 && (
+                  <div className={styles.modalDropdown}>
+                    {candidates.map(c => (
+                      <button
+                        key={c.id}
+                        type="button"
+                        onClick={() => setSelectedCustomer(c)}
+                        className={styles.modalDropItem}
+                      >
+                        <strong>{c.full_name}</strong>
+                        <span className={styles.muted}>
+                          {[c.email, c.phone].filter(Boolean).join(' · ') || '—'}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {customerSearch.trim() && candidates.length === 0 && (
+                  <span className={styles.muted} style={{ fontSize: 11, marginTop: 4 }}>
+                    No matching customer. Add them in the Customers tab first.
+                  </span>
+                )}
+              </div>
+            )}
           </div>
           <div className={styles.modalRow}>
             <label>Description</label>
@@ -221,33 +341,6 @@ function NewTicketModal({
                 placeholder="LL01-… (optional)"
               />
             </div>
-            <div className={styles.modalRow}>
-              <label>Customer name</label>
-              <input
-                type="text"
-                className={styles.modalInput}
-                value={customerName}
-                onChange={e => setCustomerName(e.target.value)}
-              />
-            </div>
-            <div className={styles.modalRow}>
-              <label>Customer email</label>
-              <input
-                type="text"
-                className={styles.modalInput}
-                value={customerEmail}
-                onChange={e => setCustomerEmail(e.target.value)}
-              />
-            </div>
-            <div className={styles.modalRow}>
-              <label>Customer phone</label>
-              <input
-                type="text"
-                className={styles.modalInput}
-                value={customerPhone}
-                onChange={e => setCustomerPhone(e.target.value)}
-              />
-            </div>
           </div>
           {error && <div className={styles.modalError}>{error}</div>}
         </div>
@@ -278,19 +371,50 @@ function Kpi({ label, value }: { label: string; value: number }) {
 function TicketRow({ t, selected, onClick }: { t: ServiceTicket; selected: boolean; onClick: () => void }) {
   const s = STATUS_META[t.status];
   const p = PRIORITY_META[t.priority];
+  // Age: prefer last_message_at (gmail-aware) then created_at.
+  const lastTs = t.last_message_at ?? t.created_at;
+  const ageHours = (Date.now() - new Date(lastTs).getTime()) / 3_600_000;
+  const stale =
+    (t.priority === 'urgent' && ageHours > 24) ||
+    (t.priority === 'high'   && ageHours > 48);
+  const gmailLink = t.gmail_thread_id
+    ? `https://mail.google.com/mail/u/0/?authuser=${encodeURIComponent(t.gmail_account ?? '')}#all/${t.gmail_thread_id}`
+    : null;
   return (
     <tr
       className={`${styles.row} ${selected ? styles.rowSelected : ''}`}
       onClick={onClick}
+      title={t.suggested_next_action ?? undefined}
     >
       <td style={{ fontFamily: 'ui-monospace, monospace' }}>{t.ticket_number}</td>
-      <td>{new Date(t.created_at).toLocaleDateString()}</td>
+      <td>
+        <span className={stale ? styles.ageStale : styles.age}>
+          {stale && <span aria-label="stale" title="Stale">⚠ </span>}
+          {formatAge(ageHours)}
+        </span>
+      </td>
       <td>{t.customer_name ?? t.customer_email ?? '—'}</td>
-      <td>{t.subject}</td>
+      <td>
+        <div>{t.subject}</div>
+        {t.summary && <div className={styles.rowSummary}>{t.summary}</div>}
+      </td>
+      <td>{t.topic ? <span className={styles.topicPill}>{TOPIC_LABEL[t.topic]}</span> : '—'}</td>
       <td>{SOURCE_LABEL[t.source]}</td>
       <td><span className={styles.pill} style={{ background: '#f7fafc', color: p.color }}>{p.label}</span></td>
       <td><span className={styles.pill} style={{ background: s.bg, color: s.color }}>{s.label}</span></td>
       <td>{t.owner_email ? t.owner_email.split('@')[0] : '—'}</td>
+      <td onClick={e => e.stopPropagation()}>
+        {gmailLink && (
+          <a className={styles.gmailLink} href={gmailLink} target="_blank" rel="noreferrer" title="Open in Gmail">↗</a>
+        )}
+      </td>
     </tr>
   );
+}
+
+function formatAge(hours: number): string {
+  if (hours < 1) return `${Math.max(0, Math.floor(hours * 60))}m`;
+  if (hours < 24) return `${Math.floor(hours)}h`;
+  const days = Math.floor(hours / 24);
+  return days < 30 ? `${days}d` : `${Math.floor(days / 30)}mo`;
 }
