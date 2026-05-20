@@ -1,10 +1,12 @@
 import { useMemo, useState } from 'react';
 import {
   useFactoryOrders, useFreightShipments, useBuildDefects, useBurnInTests,
+  assignSerial,
 } from '../../lib/build';
 import { useUnits } from '../../lib/stock';
 import { PipelineBoard } from './PipelineBoard';
 import { TableView } from './TableView';
+import { NewPOModal } from './NewPOModal';
 import styles from './Build.module.css';
 
 type View = 'board' | 'table';
@@ -20,6 +22,23 @@ export default function Build() {
   const [view, setView] = useState<View>('board');
   const [batchFilter, setBatchFilter] = useState<BatchFilter>('all');
   const [search, setSearch] = useState('');
+  const [showNewPO, setShowNewPO] = useState(false);
+  const [showClaimSerial, setShowClaimSerial] = useState<{ batch: string } | null>(null);
+  const [claimSerial, setClaimSerial] = useState('');
+  const [claimBusy, setClaimBusy] = useState(false);
+  const [claimError, setClaimError] = useState<string | null>(null);
+
+  async function submitClaim() {
+    if (!showClaimSerial) return;
+    const s = claimSerial.trim();
+    if (!/^LL01-\d{11}$/.test(s)) { setClaimError('Format: LL01-NNNNNNNNNNN'); return; }
+    setClaimBusy(true); setClaimError(null);
+    try {
+      await assignSerial({ serial: s, batch: showClaimSerial.batch });
+      setShowClaimSerial(null); setClaimSerial('');
+    } catch (e) { setClaimError((e as Error).message); }
+    finally { setClaimBusy(false); }
+  }
 
   const stats = useMemo(() => {
     const inFlight = orders.filter(o => ['placed','in_production','ready_to_ship','shipped'].includes(o.status));
@@ -43,6 +62,7 @@ export default function Build() {
   const loading = oLoading || sLoading || dLoading || tLoading || uLoading;
 
   return (
+    <>
     <div className={styles.layout}>
       <div className={styles.header}>
         <div className={styles.kpiStrip}>
@@ -78,6 +98,8 @@ export default function Build() {
               onClick={() => setView('table')}
             >Table</button>
           </div>
+          <button className={styles.btnPrimary} onClick={() => setShowNewPO(true)}>+ New PO</button>
+          <button className={styles.btnSecondary} onClick={() => setShowClaimSerial({ batch: 'P100' })}>+ Claim serial</button>
         </div>
       </div>
       {loading ? (
@@ -104,6 +126,27 @@ export default function Build() {
         />
       )}
     </div>
+    {showNewPO && <NewPOModal onClose={() => setShowNewPO(false)} />}
+    {showClaimSerial && (
+      <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+           onClick={() => setShowClaimSerial(null)}>
+        <div onClick={e => e.stopPropagation()}
+          style={{ background: '#fff', borderRadius: 'var(--radius-md)', padding: 20, width: 380 }}>
+          <h3 style={{ margin: '0 0 12px', fontSize: 16 }}>
+            Claim a serial for {showClaimSerial.batch}
+          </h3>
+          <input className={styles.input} placeholder="LL01-00000000XYZ"
+            value={claimSerial}
+            onChange={e => setClaimSerial(e.target.value.toUpperCase())} />
+          {claimError && <div style={{ color: 'var(--color-error)', fontSize: 11, marginTop: 6 }}>{claimError}</div>}
+          <div className={styles.actionsRow}>
+            <button className={styles.btnPrimary} disabled={claimBusy} onClick={submitClaim}>Create unit</button>
+            <button className={styles.btnSecondary} disabled={claimBusy} onClick={() => setShowClaimSerial(null)}>Cancel</button>
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   );
 }
 
