@@ -37,6 +37,12 @@ export type Order = {
   freight_estimate_usd: number;
   freight_threshold_usd: number;
   total_usd: number;
+  subtotal_usd: number | null;
+  tax_usd: number | null;
+  discount_total_usd: number | null;
+  discount_codes: string[] | null;
+  payment_methods: string[] | null;
+  financial_status: string | null;
   line_items: LineItem[];
   sales_confirmed_fit: boolean;
   dispositioned_by: string | null;

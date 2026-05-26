@@ -23,6 +23,12 @@ type ShopifyOrder = {
   phone?: string | null;
   created_at?: string | null;
   total_price?: string | null;
+  subtotal_price?: string | null;
+  total_tax?: string | null;
+  total_discounts?: string | null;
+  discount_codes?: Array<{ code?: string | null }> | null;
+  payment_gateway_names?: string[] | null;
+  financial_status?: string | null;
   shipping_lines?: Array<{ price?: string | null }>;
   shipping_address?: ShopifyAddress | null;
   customer?: { first_name?: string | null; last_name?: string | null; email?: string | null; phone?: string | null } | null;
@@ -44,9 +50,21 @@ type MappedOrder = {
   freight_estimate_usd: number;
   freight_threshold_usd: number;
   total_usd: number;
+  subtotal_usd: number | null;
+  tax_usd: number | null;
+  discount_total_usd: number | null;
+  discount_codes: string[] | null;
+  payment_methods: string[] | null;
+  financial_status: string | null;
   line_items: Array<{ sku: string; name: string; qty: number; price_usd: number }>;
   placed_at: string | null;
 };
+
+function num(v: string | null | undefined): number | null {
+  if (v == null || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
 
 function verdictFor(addressLine: string | null | undefined): 'house' | 'apt' {
   const s = (addressLine ?? '').toLowerCase();
@@ -103,6 +121,12 @@ function mapOrder(o: ShopifyOrder): MappedOrder | { error: string; order_ref: st
     freight_estimate_usd: freight,
     freight_threshold_usd: 200.00,
     total_usd: total,
+    subtotal_usd: num(o.subtotal_price),
+    tax_usd: num(o.total_tax),
+    discount_total_usd: num(o.total_discounts),
+    discount_codes: o.discount_codes?.map(d => d.code).filter((c): c is string => !!c) ?? null,
+    payment_methods: o.payment_gateway_names ?? null,
+    financial_status: o.financial_status ?? null,
     line_items: (o.line_items ?? []).map(li => ({
       sku: li.sku ?? 'UNKNOWN',
       name: li.title ?? 'Unknown item',
@@ -185,6 +209,12 @@ serve(async (req: Request) => {
       .update({
         placed_at: m.placed_at,
         freight_estimate_usd: m.freight_estimate_usd,
+        subtotal_usd: m.subtotal_usd,
+        tax_usd: m.tax_usd,
+        discount_total_usd: m.discount_total_usd,
+        discount_codes: m.discount_codes,
+        payment_methods: m.payment_methods,
+        financial_status: m.financial_status,
       })
       .eq('order_ref', m.order_ref);
     if (upErr) {

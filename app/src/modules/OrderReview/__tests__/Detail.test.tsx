@@ -46,6 +46,8 @@ const order: Order = {
   address_verdict: 'house',
   freight_estimate_usd: 89.5, freight_threshold_usd: 200,
   total_usd: 1149,
+  subtotal_usd: null, tax_usd: null, discount_total_usd: null,
+  discount_codes: null, payment_methods: null, financial_status: null,
   line_items: [{ sku: 'LL01', name: 'Lila 01', qty: 1, price_usd: 1149 }],
   sales_confirmed_fit: false,
   dispositioned_by: null, dispositioned_at: null,
