@@ -72,12 +72,14 @@ Deno.serve(async (req: Request) => {
 
   const { data: order, error: oErr } = await admin
     .from('orders')
-    .select('id, address_line, city, region_state, country, status')
+    .select('id, address_line, city, region_state, country, postal_code, status')
     .eq('id', order_id)
     .single();
   if (oErr || !order) return j({ error: `Order not found: ${oErr?.message}` }, 404);
 
-  const query = [order.address_line, order.city, order.region_state, order.country]
+  // Include postal_code in the geocoding query when we have it — Google's
+  // match is much tighter with the ZIP than without.
+  const query = [order.address_line, order.city, order.region_state, order.postal_code, order.country]
     .filter(Boolean).join(', ');
   if (!query) return j({ error: 'Order has no address to verify' }, 400);
 
@@ -88,7 +90,13 @@ Deno.serve(async (req: Request) => {
     return j({ error: `Google ${gRes.status}: ${body.slice(0, 400)}` }, 502);
   }
   const gJson = (await gRes.json()) as GoogleResponse;
-  const customerPostal = normalizePostal(parseCustomerPostal(order.address_line, order.country), order.country);
+  // Prefer the postal_code column (populated from Shopify shipping_address.zip);
+  // fall back to regex on address_line for orders synced before that field
+  // was captured.
+  const customerPostal = normalizePostal(
+    order.postal_code ?? parseCustomerPostal(order.address_line, order.country),
+    order.country,
+  );
 
   if (gJson.status !== 'OK' || gJson.results.length === 0) {
     await admin.from('orders').update({

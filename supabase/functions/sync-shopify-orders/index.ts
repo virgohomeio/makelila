@@ -7,6 +7,7 @@ type ShopifyAddress = {
   city?: string | null;
   province_code?: string | null;
   country_code?: string | null;
+  zip?: string | null;
   phone?: string | null;
 };
 
@@ -50,6 +51,7 @@ type MappedOrder = {
   freight_estimate_usd: number;
   freight_threshold_usd: number;
   total_usd: number;
+  postal_code: string | null;
   subtotal_usd: number | null;
   tax_usd: number | null;
   discount_total_usd: number | null;
@@ -121,6 +123,7 @@ function mapOrder(o: ShopifyOrder): MappedOrder | { error: string; order_ref: st
     freight_estimate_usd: freight,
     freight_threshold_usd: 200.00,
     total_usd: total,
+    postal_code: addr.zip?.trim() || null,
     subtotal_usd: num(o.subtotal_price),
     tax_usd: num(o.total_tax),
     discount_total_usd: num(o.total_discounts),
@@ -209,6 +212,7 @@ serve(async (req: Request) => {
       .update({
         placed_at: m.placed_at,
         freight_estimate_usd: m.freight_estimate_usd,
+        postal_code: m.postal_code,
         subtotal_usd: m.subtotal_usd,
         tax_usd: m.tax_usd,
         discount_total_usd: m.discount_total_usd,
