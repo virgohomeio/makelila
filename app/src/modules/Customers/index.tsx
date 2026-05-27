@@ -319,11 +319,19 @@ function CustomerDetailPanel({ customer, onClose }: { customer: Customer; onClos
             {myUnits.length === 0
               ? <div className={styles.emptyRow}>No shipped units on file.</div>
               : myUnits.map(u => (
-                  <div key={u.serial} className={styles.itemRow}>
-                    <span className={styles.mono}>{u.serial}</span>
-                    <span>{u.batch}</span>
-                    <span className={styles.muted}>{u.shipped_at ? new Date(u.shipped_at).toLocaleDateString('en-US') : '—'}</span>
-                    <span>{u.carrier ?? '—'}</span>
+                  <div key={u.serial} className={styles.shippedUnitRow}>
+                    <div className={styles.itemRow}>
+                      <span className={styles.mono}>{u.serial}</span>
+                      <span>{u.batch}</span>
+                      <span className={styles.muted}>{u.shipped_at ? new Date(u.shipped_at).toLocaleDateString('en-US') : '—'}</span>
+                      <span>{u.carrier ?? '—'}</span>
+                    </div>
+                    <div className={styles.trackingLine}>
+                      Tracking:{' '}
+                      {u.tracking_num
+                        ? <span className={styles.mono}>{u.tracking_num}</span>
+                        : <span className={styles.missingTracking}>missing</span>}
+                    </div>
                   </div>
                 ))
             }

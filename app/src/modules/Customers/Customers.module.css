@@ -45,6 +45,23 @@
 .syncBtn:hover { background: var(--color-crimson-dark); }
 .syncBtn:disabled { opacity: 0.6; cursor: not-allowed; }
 
+.shippedUnitRow {
+  border-bottom: 1px solid #f4f4f4;
+  padding: 4px 0;
+}
+.shippedUnitRow:last-child { border-bottom: none; }
+.trackingLine {
+  font-size: 11px;
+  color: var(--color-ink-subtle);
+  padding: 2px 0 4px 0;
+  margin-left: 2px;
+}
+.missingTracking {
+  color: var(--color-error, #c53030);
+  font-weight: 600;
+  font-style: italic;
+}
+
 .exportBtn {
   background: #fff;
   color: var(--color-ink-muted);

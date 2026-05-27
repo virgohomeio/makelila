@@ -110,6 +110,7 @@ for (const sheet of SHEETS) {
       customer_name: r['Customer Name']?.toString().trim() || null,
       address: r['Address']?.toString().trim() || null,
       carrier: r['Carrier']?.toString().trim() || null,
+      tracking_num: r['Tracking Number']?.toString().trim() || null,
       shipping_date: r['Shipping Date'] ?? r['Order Date'] ?? null,
     });
   }
@@ -128,7 +129,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
 const serialList = [...bySerial.keys()];
 const { data: dbUnits, error: fetchErr } = await supabase
   .from('units')
-  .select('serial, status, customer_name, shipped_at, location, carrier')
+  .select('serial, status, customer_name, shipped_at, location, carrier, tracking_num')
   .in('serial', serialList);
 if (fetchErr) {
   console.error('Failed to fetch units:', fetchErr.message);
@@ -203,6 +204,7 @@ for (const { serial, db, excel } of buckets.flip_to_shipped) {
     customer_name: db.customer_name ?? excel.customer_name,
     location:      (db.location === 'MicroArt Warehouse' || !db.location) ? (excelLoc ?? db.location) : db.location,
     carrier:       excel.carrier   ?? db.carrier,
+    tracking_num:  db.tracking_num ?? excel.tracking_num,
     shipped_at:    excelDateToISO(excel.shipping_date) ?? db.shipped_at,
   };
   const { error } = await supabase.from('units').update(update).eq('serial', serial);

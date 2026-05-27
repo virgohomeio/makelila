@@ -91,6 +91,7 @@ export type Unit = {
   carrier: string | null;
   firmware_version: string | null;
   defect_reason: string | null;
+  tracking_num: string | null;
   shipped_at: string | null;
   notes: string | null;
   status_updated_at: string;
