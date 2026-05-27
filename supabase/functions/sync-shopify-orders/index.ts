@@ -38,7 +38,7 @@ type ShopifyOrder = {
 
 type MappedOrder = {
   order_ref: string;
-  status: 'pending';
+  status: 'pending' | 'flagged';
   customer_name: string;
   customer_email: string | null;
   customer_phone: string | null;
@@ -107,10 +107,15 @@ function mapOrder(o: ShopifyOrder): MappedOrder | { error: string; order_ref: st
   const phone = o.customer?.phone ?? o.phone ?? addr.phone ?? null;
   const freight = parseShippingFreight(o);
   const total = Number(o.total_price ?? '0') || 0;
+  const verdict = verdictFor(addr.address1);
+  // Apt + non-house addresses get auto-flagged for ops review. Caught by the
+  // verdictFor regex (apt/apartment/suite/unit/#NNN). 'remote' detection
+  // requires postal-code lookup which we don't have yet; comes later.
+  const initialStatus: 'pending' | 'flagged' = verdict === 'house' ? 'pending' : 'flagged';
 
   return {
     order_ref: o.name,
-    status: 'pending',
+    status: initialStatus,
     customer_name: name,
     customer_email: email,
     customer_phone: phone,
@@ -119,7 +124,7 @@ function mapOrder(o: ShopifyOrder): MappedOrder | { error: string; order_ref: st
     city: addr.city,
     region_state: addr.province_code ?? null,
     country,
-    address_verdict: verdictFor(addr.address1),
+    address_verdict: verdict,
     freight_estimate_usd: freight,
     freight_threshold_usd: 200.00,
     total_usd: total,
