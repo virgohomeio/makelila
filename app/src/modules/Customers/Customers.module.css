@@ -188,3 +188,129 @@
   color: var(--color-ink-subtle);
   font-size: 12px;
 }
+
+.clickableRow {
+  cursor: pointer;
+}
+.clickableRow:hover {
+  background: var(--color-surface);
+}
+
+.panelBackdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.3);
+  z-index: 80;
+  display: flex;
+  justify-content: flex-end;
+}
+.panel {
+  width: 480px;
+  max-width: 90vw;
+  height: 100vh;
+  background: #fff;
+  border-left: 1px solid var(--color-border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.panelHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+.panelTitle {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--color-ink);
+}
+.panelSubtitle {
+  font-size: 12px;
+  color: var(--color-ink-subtle);
+  margin-top: 2px;
+}
+.panelClose {
+  background: none;
+  border: none;
+  font-size: 24px;
+  cursor: pointer;
+  line-height: 1;
+  color: var(--color-ink-subtle);
+  padding: 0 6px;
+}
+.panelClose:hover {
+  color: var(--color-ink);
+}
+.panelBody {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 20px;
+}
+.section {
+  margin-bottom: 22px;
+}
+.sectionTitle {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--color-ink-subtle);
+  letter-spacing: 0.5px;
+  margin-bottom: 8px;
+}
+.sectionBody {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.kvRow {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 4px 0;
+  font-size: 12px;
+}
+.kvLabel {
+  min-width: 70px;
+  color: var(--color-ink-subtle);
+  font-size: 11px;
+}
+.kvValue, .kvValueMulti {
+  color: var(--color-ink);
+  flex: 1;
+}
+.kvValueMulti { white-space: pre-wrap; }
+.itemRow {
+  display: grid;
+  grid-template-columns: 1fr 80px 90px auto;
+  gap: 10px;
+  align-items: center;
+  padding: 6px 0;
+  border-bottom: 1px solid #f4f4f4;
+  font-size: 12px;
+}
+.itemRow:last-child { border-bottom: none; }
+.itemAmount {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  text-align: right;
+}
+.emptyRow {
+  padding: 8px 0;
+  font-size: 12px;
+  color: var(--color-ink-subtle);
+  font-style: italic;
+}
+.statusPill {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  font-weight: 600;
+}
