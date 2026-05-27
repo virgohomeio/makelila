@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import {
-  useCustomers, syncCustomersFromHubspot, exportPurchasers,
+  useCustomers, syncCustomersFromHubspot, exportPurchasers, pushToKlaviyo,
   computeFuState, recordFollowUp, FU_STATE_META,
   type Customer, type FuState,
 } from '../../lib/customers';
@@ -126,6 +126,25 @@ export default function Customers() {
     }
   };
 
+  const handleKlaviyoPush = async (minusRefunds: boolean) => {
+    const listId = window.prompt(
+      `Klaviyo list ID for ${minusRefunds ? 'minus-refunds' : 'all-purchasers'} push?\n\n(Find in Klaviyo → Audience → Lists & Segments → list → Settings. Looks like 'R' + 6 chars.)`,
+    );
+    if (!listId?.trim()) return;
+    setBusy(true); setError(null); setToast(null);
+    try {
+      const r = await pushToKlaviyo({
+        list_id: listId.trim(),
+        filter: minusRefunds ? 'minus_refunds' : 'all_purchasers',
+      });
+      setToast(`✓ Pushed ${r.pushed} profiles to Klaviyo list ${listId.trim()}${r.excluded ? ` (${r.excluded} excluded as refunded)` : ''}`);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   if (loading) return <div className={styles.loading}>Loading customers…</div>;
 
   return (
@@ -144,6 +163,12 @@ export default function Customers() {
           </button>
           <button onClick={() => void handleExport(true)} disabled={busy} className={styles.exportBtn}>
             ↓ Minus refunds (CSV)
+          </button>
+          <button onClick={() => void handleKlaviyoPush(false)} disabled={busy} className={styles.exportBtn}>
+            ↑ Push all → Klaviyo
+          </button>
+          <button onClick={() => void handleKlaviyoPush(true)} disabled={busy} className={styles.exportBtn}>
+            ↑ Push minus refunds → Klaviyo
           </button>
           <button onClick={handleSync} disabled={busy} className={styles.syncBtn}>
             {busy ? 'Syncing…' : '⟳ Sync from HubSpot'}

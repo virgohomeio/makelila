@@ -221,6 +221,37 @@ export async function exportPurchasers(opts: { minusRefunds: boolean }): Promise
   return { csv, count: rows.length, excluded };
 }
 
+/** Push a filtered customer list to a Klaviyo list. Same filter semantics as
+ *  exportPurchasers. The Supabase edge function `push-customer-list` builds
+ *  the same purchaser set and bulk-subscribes profiles via Klaviyo's OAuth-
+ *  authenticated API.
+ *
+ *  Fails with a clear message if KLAVIYO_* secrets aren't set yet. */
+export async function pushToKlaviyo(opts: {
+  list_id: string;
+  filter: 'all_purchasers' | 'minus_refunds';
+}): Promise<{ pushed: number; excluded: number; message?: string }> {
+  const { data: { session } } = await supabase.auth.getSession();
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/push-customer-list`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      apikey: SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${session?.access_token ?? SUPABASE_ANON_KEY}`,
+    },
+    body: JSON.stringify(opts),
+  });
+  const text = await res.text();
+  if (!res.ok) {
+    let detail = text;
+    try { detail = (JSON.parse(text) as { error?: string }).error ?? text; } catch { /* keep raw */ }
+    throw new Error(`Klaviyo push failed (${res.status}): ${detail}`);
+  }
+  const json = JSON.parse(text) as { pushed: number; excluded: number; message?: string };
+  await logAction('klaviyo_push', opts.filter, `list=${opts.list_id} pushed=${json.pushed}`);
+  return json;
+}
+
 /** Trigger the sync-hubspot-customers edge function. Returns the response
  *  body so the UI can show a "synced N, skipped M" toast. */
 export async function syncCustomersFromHubspot(): Promise<{
