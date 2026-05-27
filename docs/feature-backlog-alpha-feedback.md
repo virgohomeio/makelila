@@ -100,11 +100,23 @@ These fields should live on the Serial Tracker and be visible/editable during th
 
 ---
 
+## Raymond Zhu Feedback (May 27)
+
+### 10. Link Customer → their Order(s) from the Customers module
+**Source:** Raymond Zhu (May 27 email)
+**Description:** From the Customers tab, when an operator opens a customer's record they currently see name, email, phone, and location — but there's no jump to that customer's order(s) in the Order Review / Post-Shipment / Fulfillment modules. Add a clickable list (or button) on the customer detail that shows their orders + opens the relevant module's detail panel.
+
+### 11. Customer detail: show full address instead of just "location"
+**Source:** Raymond Zhu (May 27 email)
+**Description:** The `location` field on the Customer detail is too coarse for workflow use. Show the full address (street + city + region + postal + country) instead. Data exists on `customers` (address_line, city, region, postal_code, country); UI just needs to render all of it.
+
+---
+
 ## Feedback Still Outstanding
 
-- **Raymond Zhu** — Feedback requested, due before May 28 fulfillment day
 - **Reina George** — Was asked to populate Pedrum's feedback onto the CJM (May 7). Status unknown.
 - **Aaron, Ashwini, Kevin** — On the original email thread but no feedback submitted yet
+- ~~**Raymond Zhu**~~ — Received May 27. See items #10, #11.
 
 ---
 
