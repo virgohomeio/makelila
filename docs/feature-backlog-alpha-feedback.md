@@ -112,11 +112,17 @@ These fields should live on the Serial Tracker and be visible/editable during th
 
 ---
 
-## Feedback Still Outstanding
+## Feedback Status (as of 2026-05-27)
 
-- **Reina George** — Was asked to populate Pedrum's feedback onto the CJM (May 7). Status unknown.
-- **Aaron, Ashwini, Kevin** — On the original email thread but no feedback submitted yet
-- ~~**Raymond Zhu**~~ — Received May 27. See items #10, #11.
+- ✅ **Pedrum Amin** — items #1, #3, #4 (Apr 29 + May 26)
+- ✅ **George Yin** — item #2 (May 24)
+- ✅ **Junaid Siddiqui** — item #5 (May 26)
+- ✅ **Raymond Zhu** — items #10, #11 (May 27)
+- **Reina George** — Was asked to populate Pedrum's feedback onto the CJM (May 7). Status unknown; ops feedback overlaps with the meeting-derived backlog (follow-up calendar, ticket autocomplete, etc.).
+- ~~**Aaron, Ashwini**~~ — Co-op terms complete; left the company. No feedback expected.
+- ~~**Kevin**~~ — In China; not collecting feedback this round.
+
+Alpha feedback collection window is **closed**. The 11 items above plus the meeting-derived backlog are the working scope.
 
 ---
 
