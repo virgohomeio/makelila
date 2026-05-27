@@ -51,10 +51,10 @@ export function AddressCard({ order }: { order: Order }) {
         to: order.customer_email,
         to_name: order.customer_name,
         variables: {
-          customer_first_name: order.customer_name.split(' ')[0],
-          customer_address:    order.address_line ?? '',
-          google_address:      order.address_google_formatted ?? '',
-          order_ref:           order.order_ref,
+          customer_first_name:  order.customer_name.split(' ')[0],
+          address_we_have:      order.address_line ?? '',
+          address_standardized: order.address_google_formatted ?? '',
+          order_ref:            order.order_ref,
         },
       });
       setMsg(`✓ Email sent (id ${r.message_id})`);

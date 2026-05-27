@@ -456,3 +456,9 @@ verify_jwt = false
 # calls, so caller identity isn't needed for correctness.
 [functions.push-shopify-fulfillments]
 verify_jwt = false
+
+# verify-address: same ES256 gateway workaround. Function uses the
+# service-role key internally and GOOGLE_MAPS_API_KEY for outbound calls,
+# so caller identity isn't needed for correctness.
+[functions.verify-address]
+verify_jwt = false
