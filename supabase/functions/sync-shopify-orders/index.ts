@@ -196,8 +196,22 @@ serve(async (req: Request) => {
   //    that happened before placed_at was mapped get corrected. We never
   //    overwrite internal fields like status/dispositioned_* here.
   const admin = createClient(supabaseUrl, serviceKey);
+
+  // Pre-fetch existing orders so the refresh path can decide whether to also
+  // pull contact/address updates (only safe when the operator hasn't yet
+  // approved/held the order, i.e. status is pending or flagged).
+  const orderRefs = mapped.map(m => m.order_ref);
+  const { data: existingOrders } = await admin
+    .from('orders')
+    .select('order_ref, status, address_line, postal_code')
+    .in('order_ref', orderRefs);
+  const existingByRef = new Map(
+    (existingOrders ?? []).map(o => [o.order_ref, o as { order_ref: string; status: string; address_line: string | null; postal_code: string | null }]),
+  );
+
   let imported = 0;
   let refreshed = 0;
+  let addressUpdated = 0;
   for (const m of mapped) {
     const { data, error } = await admin
       .from('orders')
@@ -211,26 +225,64 @@ serve(async (req: Request) => {
       imported++;
       continue;
     }
-    // Already existed — refresh Shopify source-of-truth fields
+
+    // Already existed — refresh Shopify source-of-truth fields. Always-safe
+    // fields update unconditionally. Contact + address only update for orders
+    // still in pending/flagged status (operator hasn't validated yet).
+    const existing = existingByRef.get(m.order_ref);
+    const operatorTouched = existing && !['pending', 'flagged'].includes(existing.status);
+
+    const refreshPatch: Record<string, unknown> = {
+      placed_at: m.placed_at,
+      freight_estimate_usd: m.freight_estimate_usd,
+      postal_code: m.postal_code,
+      subtotal_usd: m.subtotal_usd,
+      tax_usd: m.tax_usd,
+      discount_total_usd: m.discount_total_usd,
+      discount_codes: m.discount_codes,
+      payment_methods: m.payment_methods,
+      financial_status: m.financial_status,
+    };
+
+    let addressChanged = false;
+    if (!operatorTouched) {
+      refreshPatch.customer_email = m.customer_email;
+      refreshPatch.customer_phone = m.customer_phone;
+      refreshPatch.address_line   = m.address_line;
+      refreshPatch.city           = m.city;
+      refreshPatch.region_state   = m.region_state;
+      refreshPatch.country        = m.country;
+      refreshPatch.address_verdict = m.address_verdict;
+      // Escalate pending → flagged if the new verdict isn't 'house'
+      // (mirrors the new-order auto-flag rule)
+      if (existing?.status === 'pending' && m.address_verdict !== 'house') {
+        refreshPatch.status = 'flagged';
+      }
+      // If postal or street changed, the prior verification verdict is stale
+      // — clear it so operator re-verifies
+      if (
+        (existing?.postal_code ?? null) !== (m.postal_code ?? null) ||
+        (existing?.address_line ?? null) !== (m.address_line ?? null)
+      ) {
+        refreshPatch.address_verified_at = null;
+        refreshPatch.address_match = null;
+        refreshPatch.address_google_formatted = null;
+        refreshPatch.address_google_postal = null;
+        refreshPatch.address_customer_postal = null;
+        addressChanged = true;
+      }
+    }
+
     const { error: upErr } = await admin
       .from('orders')
-      .update({
-        placed_at: m.placed_at,
-        freight_estimate_usd: m.freight_estimate_usd,
-        postal_code: m.postal_code,
-        subtotal_usd: m.subtotal_usd,
-        tax_usd: m.tax_usd,
-        discount_total_usd: m.discount_total_usd,
-        discount_codes: m.discount_codes,
-        payment_methods: m.payment_methods,
-        financial_status: m.financial_status,
-      })
+      .update(refreshPatch)
       .eq('order_ref', m.order_ref);
     if (upErr) {
       skipped.push({ order_ref: m.order_ref, error: `refresh: ${upErr.message}` });
       continue;
     }
     refreshed++;
+    if (addressChanged) addressUpdated++;
   }
 
   return new Response(
@@ -238,6 +290,7 @@ serve(async (req: Request) => {
       fetched: orders?.length ?? 0,
       imported,
       refreshed,
+      addressUpdated,
       skipped: skipped.length,
       skippedDetails: skipped,
     }),
