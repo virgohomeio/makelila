@@ -403,17 +403,66 @@ export async function managerApprove(id: string, note?: string): Promise<void> {
   await logAction('refund_manager_approved', id, note ?? 'approved');
 }
 
-export async function financeApprove(id: string, note?: string): Promise<void> {
+export type FinanceApproveOpts = {
+  method: RefundMethod;
+  amount?: number;             // if omitted, keep original
+  correction_note?: string;    // required if amount differs from original
+  note?: string;               // free-form optional note (e.g. Stripe refund ID)
+};
+
+export async function financeApprove(id: string, opts: FinanceApproveOpts): Promise<void> {
   const userId = await currentUserId();
-  const { error } = await supabase.from('refund_approvals').update({
+
+  // 1. Fetch the approval row to validate + read original amount
+  const { data: approval, error: aErr } = await supabase
+    .from('refund_approvals')
+    .select('id, return_id, original_amount_usd, refund_amount_usd, status')
+    .eq('id', id)
+    .single();
+  if (aErr || !approval) throw new Error(`Refund approval not found: ${aErr?.message}`);
+  if (approval.status !== 'finance_review') {
+    throw new Error(`Cannot finance-approve from status: ${approval.status}`);
+  }
+
+  // 2. Guard: if linked to a return, the return must be in a received-or-later status
+  if (approval.return_id) {
+    const { data: ret, error: rErr } = await supabase
+      .from('returns')
+      .select('id, status')
+      .eq('id', approval.return_id)
+      .single();
+    if (rErr || !ret) throw new Error(`Linked return not found: ${rErr?.message}`);
+    if (!['received','inspected','refunded','closed'].includes(ret.status)) {
+      throw new Error(`Return is in status '${ret.status}' — refund cannot be processed until the unit is received.`);
+    }
+  }
+
+  // 3. Compute amount + validate correction_note
+  const original = Number(approval.original_amount_usd ?? approval.refund_amount_usd);
+  const adjusted = opts.amount ?? original;
+  const amountChanged = Number(adjusted.toFixed(2)) !== Number(original.toFixed(2));
+  if (amountChanged && !opts.correction_note?.trim()) {
+    throw new Error('Correction note is required when changing the refund amount.');
+  }
+
+  // 4. Update the approval row → status='refunded'
+  const updatePatch: Record<string, unknown> = {
     status: 'refunded',
+    refund_method: opts.method,
+    refund_amount_usd: adjusted,
+    amount_correction_note: amountChanged ? opts.correction_note!.trim() : null,
     finance_approved_by: userId,
     finance_approved_at: new Date().toISOString(),
-    finance_decision_note: note ?? null,
+    finance_decision_note: opts.note?.trim() || null,
     refunded_at: new Date().toISOString(),
-  }).eq('id', id);
-  if (error) throw error;
-  await logAction('refund_finance_approved', id, note ?? 'paid');
+  };
+  const { error: upErr } = await supabase
+    .from('refund_approvals')
+    .update(updatePatch)
+    .eq('id', id);
+  if (upErr) throw upErr;
+
+  await logAction('refund_finance_approved', id, `${opts.method} $${adjusted.toFixed(2)}`);
 }
 
 export async function denyRefund(id: string, stage: 'manager_review' | 'finance_review', reason: string): Promise<void> {
