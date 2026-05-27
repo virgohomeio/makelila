@@ -219,8 +219,14 @@ async function handle(): Promise<Response> {
         country: p.country ?? parsed.country,
         last_synced_at: now,
       };
+      // makelila is the system of record (see docs/system-of-record.md). HubSpot
+      // is an INPUT only: we seed new customers from it but never clobber
+      // existing rows that operators may have curated. To force-refresh a
+      // single customer from HubSpot, do it manually via SQL or the upcoming
+      // "Re-pull from HubSpot" button (TBD).
       const { error: upErr } = await admin.from('customers').upsert(row, {
         onConflict: 'hubspot_id',
+        ignoreDuplicates: true,
       });
       if (upErr) {
         skipped.push({ id: c.id, reason: `db: ${upErr.message}` });

@@ -127,6 +127,12 @@ Full specs: `docs/feature-backlog-alpha-feedback.md`
 
 ---
 
+## System of record
+
+**makelila is the source of truth for all internal operational data.** HubSpot, Shopify, Calendly, Klaviyo, OpenPhone/Quo, Resend, Gmail are inputs — they seed new records and never clobber operator-curated data. See [docs/system-of-record.md](docs/system-of-record.md) for the per-data-type ownership table + sync direction rules.
+
+When adding a new sync, the default is **insert-only on conflict** unless there's a documented reason to allow refresh (e.g., Shopify "always-safe" fields like financial breakdown).
+
 ## Conventions
 
 - Match existing code style. CSS Modules, not inline styles (except minor overrides).
