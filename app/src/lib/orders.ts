@@ -34,6 +34,11 @@ export type Order = {
   region_state: string | null;
   country: 'US' | 'CA';
   address_verdict: 'house' | 'apt' | 'remote' | 'condo';
+  address_verified_at: string | null;
+  address_match: 'match' | 'mismatch' | 'unverifiable' | null;
+  address_google_formatted: string | null;
+  address_google_postal: string | null;
+  address_customer_postal: string | null;
   freight_estimate_usd: number;
   freight_threshold_usd: number;
   total_usd: number;
@@ -146,6 +151,24 @@ export async function setSalesConfirmedFit(id: string, value: boolean): Promise<
 export async function updateFreightEstimate(id: string, amount: number): Promise<void> {
   const { error } = await supabase.from('orders').update({ freight_estimate_usd: amount }).eq('id', id);
   if (error) throw error;
+}
+
+export type VerifyAddressResult = {
+  match: 'match' | 'mismatch' | 'unverifiable';
+  customer_postal: string | null;
+  google_postal: string | null;
+  google_formatted: string | null;
+};
+
+export async function verifyAddress(orderId: string): Promise<VerifyAddressResult> {
+  const { data, error } = await supabase.functions.invoke<VerifyAddressResult>(
+    'verify-address',
+    { body: { order_id: orderId } },
+  );
+  if (error) throw new Error(error.message);
+  if (!data) throw new Error('Empty response from verify-address');
+  await logAction('address_verified', orderId, data.match);
+  return data;
 }
 
 function applyChange(cache: Order[], payload: { eventType: string; new: Order | null; old: { id: string } | null }): Order[] {
