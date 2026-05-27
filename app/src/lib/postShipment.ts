@@ -30,6 +30,24 @@ export const RETURN_STATUS_ORDER: ReturnStatus[] = [
   'created','pickup_scheduled','picked_up','received','inspected','refunded','denied','closed',
 ];
 
+export type ReturnCategory =
+  | 'product_defect' | 'software_issue' | 'shipping_damage'
+  | 'customer_service' | 'financing' | 'other';
+
+export const RETURN_CATEGORY_META: Record<ReturnCategory, { label: string; color: string; bg: string }> = {
+  product_defect:    { label: 'Product Defect',     color: '#9b2c2c', bg: '#fff5f5' },
+  software_issue:    { label: 'Software Issue',     color: '#2b6cb0', bg: '#ebf8ff' },
+  shipping_damage:   { label: 'Shipping Damage',    color: '#c05621', bg: '#fffaf0' },
+  customer_service:  { label: 'Customer Service',   color: '#553c9a', bg: '#faf5ff' },
+  financing:         { label: 'Financing',          color: '#276749', bg: '#f0fff4' },
+  other:             { label: 'Other',              color: '#718096', bg: '#f7fafc' },
+};
+
+export const RETURN_CATEGORIES: ReturnCategory[] = [
+  'product_defect','software_issue','shipping_damage',
+  'customer_service','financing','other',
+];
+
 export type ReturnRow = {
   id: string;
   return_ref: string | null;
@@ -41,6 +59,7 @@ export type ReturnRow = {
   original_order_ref: string | null;
   condition: ReturnCondition | null;
   reason: string | null;
+  return_category: ReturnCategory | null;
   refund_amount_usd: number | null;
   status: ReturnStatus;
   pickup_carrier: string | null;
@@ -118,6 +137,15 @@ export async function updateReturnStatus(id: string, newStatus: ReturnStatus): P
   const { error } = await supabase.from('returns').update(patch).eq('id', id);
   if (error) throw error;
   await logAction('return_status', id, `→ ${newStatus}`);
+}
+
+export async function updateReturnCategory(id: string, category: ReturnCategory | null): Promise<void> {
+  const { error } = await supabase
+    .from('returns')
+    .update({ return_category: category })
+    .eq('id', id);
+  if (error) throw error;
+  await logAction('return_category', id, category ?? 'cleared');
 }
 
 async function hasField(id: string, field: string): Promise<boolean> {
@@ -237,6 +265,21 @@ export const REFUND_STATUS_META: Record<RefundStatus, { label: string; color: st
   closed:          { label: 'Closed',           color: '#718096', bg: '#edf2f7', border: '#cbd5e1' },
 };
 
+export type RefundMethod =
+  | 'shopify' | 'sezzle' | 'quickbooks_cc' | 'bank_etransfer' | 'original_card';
+
+export const REFUND_METHOD_META: Record<RefundMethod, { label: string; description: string }> = {
+  shopify:        { label: 'Shopify',              description: 'Process via Shopify Admin' },
+  sezzle:         { label: 'Sezzle financing',     description: 'For Sezzle-financed orders' },
+  quickbooks_cc:  { label: 'QuickBooks CC',        description: 'Card refund in QuickBooks' },
+  bank_etransfer: { label: 'Bank e-transfer',      description: 'CA customers only' },
+  original_card:  { label: 'Back to original card',description: 'Refund to the card used at checkout' },
+};
+
+export const REFUND_METHODS: RefundMethod[] = [
+  'shopify','sezzle','quickbooks_cc','bank_etransfer','original_card',
+];
+
 export type RefundApproval = {
   id: string;
   return_id: string | null;
@@ -244,6 +287,9 @@ export type RefundApproval = {
   customer_name: string;
   customer_email: string | null;
   refund_amount_usd: number;
+  refund_method: RefundMethod | null;
+  original_amount_usd: number | null;
+  amount_correction_note: string | null;
   currency: string;
   payment_method: string | null;
   reason: string | null;
