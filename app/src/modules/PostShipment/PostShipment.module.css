@@ -958,3 +958,61 @@
 }
 .btnSecondary:hover { border-color: var(--color-ink-subtle); }
 .btnSecondary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ============================================================ Dashboard tab */
+
+.dashGrid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  margin-top: 16px;
+}
+.chartCard {
+  background: #fff;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 14px;
+}
+.chartCardHead {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--color-ink-subtle);
+  letter-spacing: 0.5px;
+  margin-bottom: 10px;
+}
+.chartCardBody {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 200px;
+}
+.chartSvg { width: 100%; height: auto; max-width: 360px; }
+.chartEmpty {
+  color: var(--color-ink-subtle);
+  font-size: 12px;
+  font-style: italic;
+}
+.donutWrap {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  width: 100%;
+}
+.donutLegend {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+}
+.donutLegendRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.donutSwatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { DashboardTab } from './DashboardTab';
 import { ReturnsTab } from './ReturnsTab';
 import { ReplacementsTab } from './ReplacementsTab';
 import { DeliveryMapTab } from './DeliveryMapTab';
@@ -7,9 +8,10 @@ import { RefundsTab } from './RefundsTab';
 import { CancellationsTab } from './CancellationsTab';
 import styles from './PostShipment.module.css';
 
-type Tab = 'map' | 'history' | 'returns' | 'refunds' | 'cancellations' | 'replacements';
+type Tab = 'dashboard' | 'map' | 'history' | 'returns' | 'refunds' | 'cancellations' | 'replacements';
 
 const TABS: { key: Tab; label: string }[] = [
+  { key: 'dashboard',     label: 'Dashboard' },
   { key: 'map',           label: 'Delivery Map' },
   { key: 'history',       label: 'Fulfillment History' },
   { key: 'returns',       label: 'Returns' },
@@ -19,7 +21,7 @@ const TABS: { key: Tab; label: string }[] = [
 ];
 
 export default function PostShipment() {
-  const [tab, setTab] = useState<Tab>('map');
+  const [tab, setTab] = useState<Tab>('dashboard');
 
   return (
     <div className={styles.layout}>
@@ -33,6 +35,7 @@ export default function PostShipment() {
         ))}
       </div>
       <div className={styles.panel}>
+        {tab === 'dashboard'     && <DashboardTab />}
         {tab === 'map'           && <DeliveryMapTab />}
         {tab === 'history'       && <HistoryTab />}
         {tab === 'returns'       && <ReturnsTab />}
