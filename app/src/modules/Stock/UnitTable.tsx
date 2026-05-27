@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import {
-  STATUS_META, STATUS_ORDER, getStatusMeta, updateUnitStatus, type Unit, type UnitStatus,
+  STATUS_META, STATUS_ORDER, getStatusMeta, updateUnitStatus, updateUnitFields,
+  QC_CHECK_META,
+  type Unit, type UnitStatus, type QcCheck,
 } from '../../lib/stock';
 import styles from './Stock.module.css';
 
@@ -10,6 +12,8 @@ export function UnitTable({ units }: { units: Unit[] }) {
   const [pending, setPending] = useState<Record<string, UnitStatus>>({});
   const [busySerial, setBusySerial] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [qcSerial, setQcSerial] = useState<string | null>(null);
+  const qcUnit = units.find(u => u.serial === qcSerial) ?? null;
 
   const commit = async (serial: string) => {
     const next = pending[serial];
@@ -46,6 +50,7 @@ export function UnitTable({ units }: { units: Unit[] }) {
             <th>Customer / Location</th>
             <th>Shipped</th>
             <th>Carrier</th>
+            <th>QC</th>
             <th>Notes</th>
             <th></th>
           </tr>
@@ -108,6 +113,16 @@ export function UnitTable({ units }: { units: Unit[] }) {
                 <td>
                   {u.carrier ?? <span className={styles.muted}>—</span>}
                 </td>
+                <td>
+                  <button
+                    className={styles.qcCell}
+                    onClick={() => setQcSerial(u.serial)}
+                    title={`Technician: ${u.technician ?? '—'} · Notes: ${u.defect_notes ?? '—'}`}
+                  >
+                    <QcChip label="E" v={u.electrical_check} />
+                    <QcChip label="M" v={u.mechanical_check} />
+                  </button>
+                </td>
                 <td className={styles.notes} title={primaryNote ?? ''}>
                   {u.defect_reason ? (
                     <span className={styles.defect}>⚠ {u.defect_reason}</span>
@@ -131,6 +146,148 @@ export function UnitTable({ units }: { units: Unit[] }) {
           })}
         </tbody>
       </table>
+      {qcUnit && (
+        <QcEditorModal
+          unit={qcUnit}
+          onClose={() => setQcSerial(null)}
+          onError={setError}
+        />
+      )}
+    </div>
+  );
+}
+
+function QcChip({ label, v }: { label: string; v: QcCheck | null }) {
+  if (!v) {
+    return <span className={styles.qcChipEmpty}>{label}:—</span>;
+  }
+  const meta = QC_CHECK_META[v];
+  const sym = v === 'pass' ? '✓' : v === 'fail' ? '✗' : '?';
+  return (
+    <span
+      className={styles.qcChip}
+      style={{ color: meta.color, background: meta.bg, borderColor: meta.color + '44' }}
+    >
+      {label}:{sym}
+    </span>
+  );
+}
+
+function QcEditorModal({
+  unit, onClose, onError,
+}: {
+  unit: Unit;
+  onClose: () => void;
+  onError: (msg: string | null) => void;
+}) {
+  const [technician, setTechnician] = useState(unit.technician ?? '');
+  const [eCheck, setECheck] = useState<QcCheck | ''>(unit.electrical_check ?? '');
+  const [mCheck, setMCheck] = useState<QcCheck | ''>(unit.mechanical_check ?? '');
+  const [defectNotes, setDefectNotes] = useState(unit.defect_notes ?? '');
+  const [firmwareVersion, setFirmwareVersion] = useState(unit.firmware_version ?? '');
+  const [busy, setBusy] = useState(false);
+
+  const save = async () => {
+    setBusy(true); onError(null);
+    try {
+      await updateUnitFields(unit.serial, {
+        technician:        technician.trim() || null,
+        electrical_check:  eCheck || null,
+        mechanical_check:  mCheck || null,
+        defect_notes:      defectNotes.trim() || null,
+        firmware_version:  firmwareVersion.trim() || null,
+      });
+      onClose();
+    } catch (e) {
+      onError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className={styles.modalBackdrop} onClick={onClose}>
+      <div className={styles.modalCard} onClick={e => e.stopPropagation()}>
+        <h3 className={styles.modalTitle}>QC · {unit.serial}</h3>
+
+        <div className={styles.modalField}>
+          <label className={styles.modalLabel}>Technician</label>
+          <input
+            value={technician}
+            onChange={e => setTechnician(e.target.value)}
+            placeholder="Who last touched this machine"
+            className={styles.modalInput}
+          />
+        </div>
+
+        <div className={styles.modalField}>
+          <label className={styles.modalLabel}>Firmware version</label>
+          <input
+            value={firmwareVersion}
+            onChange={e => setFirmwareVersion(e.target.value)}
+            placeholder="e.g. v1.2.4"
+            className={styles.modalInput}
+          />
+        </div>
+
+        <div className={styles.modalField}>
+          <label className={styles.modalLabel}>Electrical check</label>
+          <QcTri value={eCheck} onChange={setECheck} />
+        </div>
+
+        <div className={styles.modalField}>
+          <label className={styles.modalLabel}>Mechanical check</label>
+          <QcTri value={mCheck} onChange={setMCheck} />
+        </div>
+
+        <div className={styles.modalField}>
+          <label className={styles.modalLabel}>Defect notes</label>
+          <textarea
+            value={defectNotes}
+            onChange={e => setDefectNotes(e.target.value)}
+            placeholder="Free-form notes on any defects found"
+            className={styles.modalInput}
+            rows={4}
+          />
+        </div>
+
+        <div className={styles.modalActions}>
+          <button onClick={onClose} disabled={busy} className={styles.btnSecondary}>Cancel</button>
+          <button onClick={() => void save()} disabled={busy} className={styles.btnPrimary}>
+            {busy ? 'Saving…' : 'Save QC'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function QcTri({ value, onChange }: { value: QcCheck | ''; onChange: (v: QcCheck | '') => void }) {
+  const options: Array<{ k: QcCheck | ''; label: string }> = [
+    { k: 'pass',       label: '✓ Pass' },
+    { k: 'fail',       label: '✗ Fail' },
+    { k: 'incomplete', label: '? Incomplete' },
+    { k: '',           label: '— Unset' },
+  ];
+  return (
+    <div className={styles.qcTriGroup}>
+      {options.map(o => {
+        const selected = value === o.k;
+        const meta = o.k ? QC_CHECK_META[o.k] : null;
+        return (
+          <button
+            key={o.k}
+            type="button"
+            onClick={() => onChange(o.k)}
+            className={`${styles.qcTriBtn} ${selected ? styles.qcTriBtnActive : ''}`}
+            style={selected && meta ? {
+              background: meta.bg, color: meta.color, borderColor: meta.color,
+            } : undefined}
+          >
+            {o.label}
+          </button>
+        );
+      })}
     </div>
   );
 }

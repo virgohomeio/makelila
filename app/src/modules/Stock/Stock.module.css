@@ -606,3 +606,124 @@
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
 }
+
+/* ── Machine-level QC (Alpha P2 #5) ──────────────────────────────────── */
+.qcCell {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  background: transparent;
+  border: 1px dashed transparent;
+  padding: 2px 4px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.qcCell:hover { border-color: var(--color-border); background: var(--color-surface); }
+.qcChip {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 3px;
+  border: 1px solid;
+  letter-spacing: 0.3px;
+}
+.qcChipEmpty {
+  display: inline-block;
+  font-size: 10px;
+  color: var(--color-ink-subtle);
+  font-weight: 600;
+  padding: 1px 6px;
+}
+
+.modalBackdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: 20px;
+}
+.modalCard {
+  background: #fff;
+  border-radius: var(--radius-md);
+  width: 100%;
+  max-width: 480px;
+  padding: 24px;
+  box-shadow: 0 12px 32px rgba(0,0,0,0.2);
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+}
+.modalTitle {
+  margin: 0 0 18px 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--color-ink);
+}
+.modalField { margin-bottom: 14px; }
+.modalLabel {
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--color-ink-subtle);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
+}
+.modalInput {
+  width: 100%;
+  padding: 8px 10px;
+  font-size: 13px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+}
+.modalActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 20px;
+}
+.btnPrimary {
+  background: var(--color-crimson);
+  color: #fff;
+  border: none;
+  padding: 8px 16px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.btnPrimary:hover { background: var(--color-crimson-dark); }
+.btnPrimary:disabled { opacity: 0.5; cursor: not-allowed; }
+.btnSecondary {
+  background: #fff;
+  color: var(--color-ink-muted);
+  border: 1px solid var(--color-border);
+  padding: 8px 16px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btnSecondary:hover { background: var(--color-surface); }
+.btnSecondary:disabled { opacity: 0.5; cursor: not-allowed; }
+.qcTriGroup {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.qcTriBtn {
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  background: #fff;
+  color: var(--color-ink-muted);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.qcTriBtn:hover { background: var(--color-surface); }
+.qcTriBtnActive { font-weight: 700; }

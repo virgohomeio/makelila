@@ -72,6 +72,14 @@ export type Batch = {
 
 export type UnitColor = 'White' | 'Black';
 
+export type QcCheck = 'pass' | 'fail' | 'incomplete';
+
+export const QC_CHECK_META: Record<QcCheck, { label: string; color: string; bg: string }> = {
+  pass:       { label: 'PASS',       color: '#276749', bg: '#f0fff4' },
+  fail:       { label: 'FAIL',       color: '#9b2c2c', bg: '#fff5f5' },
+  incomplete: { label: 'INCOMPLETE', color: '#c05621', bg: '#fffaf0' },
+};
+
 export type Unit = {
   serial: string;
   batch: string;
@@ -88,6 +96,11 @@ export type Unit = {
   status_updated_at: string;
   status_updated_by: string | null;
   created_at: string;
+  // Alpha P2 #5 — machine-level QC tracking (replaces Feishu)
+  technician: string | null;
+  electrical_check: QcCheck | null;
+  mechanical_check: QcCheck | null;
+  defect_notes: string | null;
 };
 
 // ---------- hooks ----------
@@ -228,7 +241,8 @@ export async function updateUnitFields(
   serial: string,
   patch: Partial<Pick<Unit,
     'color' | 'location' | 'customer_name' | 'customer_order_ref' |
-    'carrier' | 'firmware_version' | 'defect_reason' | 'shipped_at' | 'notes'
+    'carrier' | 'firmware_version' | 'defect_reason' | 'shipped_at' | 'notes' |
+    'technician' | 'electrical_check' | 'mechanical_check' | 'defect_notes'
   >>,
 ): Promise<void> {
   await currentUserId();
