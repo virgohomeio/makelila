@@ -17,10 +17,80 @@ export type Customer = {
   postal_code: string | null;
   country: string | null;
   notes: string | null;
+  onboard_date: string | null;
+  fu1_status: string | null;
+  fu2_status: string | null;
+  fu_notes: string | null;
   last_synced_at: string | null;
   created_at: string;
   updated_at: string;
 };
+
+export type FuState =
+  | 'overdue_fu1' | 'overdue_fu2'
+  | 'due_fu1' | 'due_fu2'
+  | 'upcoming_fu1' | 'upcoming_fu2'
+  | 'complete' | 'unscheduled';
+
+export const FU_STATE_META: Record<FuState, { label: string; color: string; bg: string; sortKey: number }> = {
+  overdue_fu1:  { label: 'FU1 overdue',  color: '#9b2c2c', bg: '#fff5f5', sortKey: 1 },
+  overdue_fu2:  { label: 'FU2 overdue',  color: '#9b2c2c', bg: '#fff5f5', sortKey: 2 },
+  due_fu1:      { label: 'FU1 today',    color: '#c05621', bg: '#fffaf0', sortKey: 3 },
+  due_fu2:      { label: 'FU2 today',    color: '#c05621', bg: '#fffaf0', sortKey: 4 },
+  upcoming_fu1: { label: 'FU1 upcoming', color: '#2b6cb0', bg: '#ebf8ff', sortKey: 5 },
+  upcoming_fu2: { label: 'FU2 upcoming', color: '#2b6cb0', bg: '#ebf8ff', sortKey: 6 },
+  complete:     { label: 'Complete',     color: '#276749', bg: '#f0fff4', sortKey: 7 },
+  unscheduled:  { label: '—',            color: '#718096', bg: '#f7fafc', sortKey: 8 },
+};
+
+/** Compute the follow-up state for a customer. FU1 cadence: 7 days after
+ *  onboard. FU2 cadence: 14 days after onboard. "Today" = same calendar day. */
+export function computeFuState(c: Customer, today: Date = new Date()): FuState {
+  if (!c.onboard_date) return 'unscheduled';
+  const onboard = new Date(c.onboard_date + 'T00:00:00');
+  const fu1Due = new Date(onboard); fu1Due.setDate(fu1Due.getDate() + 7);
+  const fu2Due = new Date(onboard); fu2Due.setDate(fu2Due.getDate() + 14);
+  const todayMid = new Date(today); todayMid.setHours(0, 0, 0, 0);
+
+  if (c.fu1_status && c.fu2_status) return 'complete';
+
+  if (!c.fu1_status) {
+    if (todayMid > fu1Due) return 'overdue_fu1';
+    if (todayMid.getTime() === fu1Due.getTime()) return 'due_fu1';
+    return 'upcoming_fu1';
+  }
+  // fu1 done, fu2 pending
+  if (todayMid > fu2Due) return 'overdue_fu2';
+  if (todayMid.getTime() === fu2Due.getTime()) return 'due_fu2';
+  return 'upcoming_fu2';
+}
+
+/** Mark a follow-up done (or update its recorded status). Pass `kind='fu1'`
+ *  or `'fu2'`. The status string is free-form to match the calendar's
+ *  values: 'called' / 'messaged' / 'reviewed' / 'completed' / etc. */
+export async function recordFollowUp(
+  customerId: string,
+  kind: 'fu1' | 'fu2',
+  status: string,
+  noteToAppend?: string,
+): Promise<void> {
+  const col = kind === 'fu1' ? 'fu1_status' : 'fu2_status';
+  const patch: Record<string, unknown> = { [col]: status };
+  if (noteToAppend?.trim()) {
+    // Read existing notes to append rather than overwrite
+    const { data: existing } = await supabase
+      .from('customers')
+      .select('fu_notes')
+      .eq('id', customerId)
+      .single();
+    const today = new Date().toISOString().slice(0, 10);
+    const newLine = `[Makelila ${today}] ${kind.toUpperCase()} ${status}: ${noteToAppend.trim()}`;
+    patch.fu_notes = existing?.fu_notes ? `${existing.fu_notes}\n${newLine}` : newLine;
+  }
+  const { error } = await supabase.from('customers').update(patch).eq('id', customerId);
+  if (error) throw error;
+  await logAction('followup_recorded', customerId, `${kind} = ${status}`);
+}
 
 export function useCustomers(): { customers: Customer[]; loading: boolean } {
   const [customers, setCustomers] = useState<Customer[]>([]);
