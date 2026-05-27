@@ -127,8 +127,17 @@ async function handle(req: Request): Promise<Response> {
     rows.push(c);
   }
 
+  const diag = {
+    order_emails_loaded:     purchaserEmails.size,
+    shipped_unit_names_loaded: purchaserNames.size,
+    customers_loaded:        (customers ?? []).length,
+    customers_with_email:    (customers ?? []).filter((c: { email: string | null }) => !!c.email).length,
+    matched_purchasers:      rows.length,
+    excluded_refunded:       excluded,
+  };
+
   if (rows.length === 0) {
-    return j({ pushed: 0, excluded, message: 'No purchaser customers matched the filter.' });
+    return j({ pushed: 0, excluded, diag, message: 'No purchaser customers matched the filter.' });
   }
 
   // 2. Mint a fresh access token via refresh_token grant.
@@ -224,6 +233,7 @@ async function handle(req: Request): Promise<Response> {
     pushed:    pushedTotal,
     excluded:  excluded,
     failures:  failures.length > 0 ? failures : undefined,
+    diag,
     list_id,
     filter,
   });
