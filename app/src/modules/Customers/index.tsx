@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { useCustomers, syncCustomersFromHubspot, type Customer } from '../../lib/customers';
+import { useCustomers, syncCustomersFromHubspot, exportPurchasers, type Customer } from '../../lib/customers';
 import { useOrders } from '../../lib/orders';
 import { useUnits } from '../../lib/stock';
 import { useServiceTickets } from '../../lib/service';
@@ -66,6 +66,28 @@ export default function Customers() {
     }
   };
 
+  const handleExport = async (minusRefunds: boolean) => {
+    setBusy(true); setError(null); setToast(null);
+    try {
+      const r = await exportPurchasers({ minusRefunds });
+      const blob = new Blob([r.csv], { type: 'text/csv;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const ts = new Date().toISOString().slice(0, 10);
+      a.href = url;
+      a.download = `customers-${minusRefunds ? 'minus-refunds' : 'all-purchasers'}-${ts}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      setToast(`Exported ${r.count} rows${minusRefunds ? ` (${r.excluded} excluded as refunded)` : ''}`);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   if (loading) return <div className={styles.loading}>Loading customers…</div>;
 
   return (
@@ -79,6 +101,12 @@ export default function Customers() {
               Last HubSpot sync · {stats.lastSync.toLocaleString('en-US')}
             </span>
           )}
+          <button onClick={() => void handleExport(false)} disabled={busy} className={styles.exportBtn}>
+            ↓ All purchasers (CSV)
+          </button>
+          <button onClick={() => void handleExport(true)} disabled={busy} className={styles.exportBtn}>
+            ↓ Minus refunds (CSV)
+          </button>
           <button onClick={handleSync} disabled={busy} className={styles.syncBtn}>
             {busy ? 'Syncing…' : '⟳ Sync from HubSpot'}
           </button>
