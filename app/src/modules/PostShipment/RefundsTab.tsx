@@ -1,12 +1,13 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   useRefundApprovals, useReturns,
   submitRefundRequest, managerApprove, financeApprove, denyRefund, closeRefund,
   canApproveManager, canApproveFinance,
-  REFUND_STATUS_META,
-  type RefundApproval, type ReturnRow,
+  REFUND_STATUS_META, REFUND_METHODS, REFUND_METHOD_META,
+  type RefundApproval, type ReturnRow, type RefundMethod,
 } from '../../lib/postShipment';
 import { useAuth } from '../../lib/auth';
+import { supabase } from '../../lib/supabase';
 import styles from './PostShipment.module.css';
 
 const STAR = '★';
@@ -28,6 +29,7 @@ export function RefundsTab() {
 
   const [showRequestModal, setShowRequestModal] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [financeModalId, setFinanceModalId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const isManager = canApproveManager(userEmail);
@@ -131,6 +133,7 @@ export function RefundsTab() {
                     selected={selectedId === r.id}
                     onSelect={() => setSelectedId(prev => prev === r.id ? null : r.id)}
                     onError={setError}
+                    onOpenFinanceModal={setFinanceModalId}
                   />
                 ))}
               </div>
@@ -147,6 +150,7 @@ export function RefundsTab() {
           canFinance={isFinance}
           onClose={() => setSelectedId(null)}
           onError={setError}
+          onOpenFinanceModal={setFinanceModalId}
         />
       )}
 
@@ -157,6 +161,20 @@ export function RefundsTab() {
           onError={setError}
         />
       )}
+
+      {financeModalId && (() => {
+        const refund = approvals.find(a => a.id === financeModalId);
+        if (!refund) return null;
+        const linked = refund.return_id ? returnsById.get(refund.return_id) ?? null : null;
+        return (
+          <FinanceApproveModal
+            refund={refund}
+            linkedReturn={linked}
+            onClose={() => setFinanceModalId(null)}
+            onError={setError}
+          />
+        );
+      })()}
     </div>
   );
 }
@@ -165,7 +183,7 @@ export function RefundsTab() {
 // Refund card
 // ============================================================================
 function RefundCard({
-  refund, canManager, canFinance, selected, onSelect, onError,
+  refund, canManager, canFinance, selected, onSelect, onError, onOpenFinanceModal,
 }: {
   refund: RefundApproval;
   canManager: boolean;
@@ -173,19 +191,21 @@ function RefundCard({
   selected: boolean;
   onSelect: () => void;
   onError: (msg: string | null) => void;
+  onOpenFinanceModal: (id: string) => void;
 }) {
   const [busy, setBusy] = useState(false);
   const meta = REFUND_STATUS_META[refund.status];
 
   const runApprove = async () => {
+    if (refund.status === 'finance_review') {
+      onOpenFinanceModal(refund.id);
+      return;
+    }
     setBusy(true); onError(null);
     try {
       if (refund.status === 'manager_review' || refund.status === 'submitted') {
         const note = window.prompt('Manager approval note (optional):') ?? undefined;
         await managerApprove(refund.id, note);
-      } else if (refund.status === 'finance_review') {
-        const note = window.prompt('Finance approval note (e.g. Stripe refund ID):') ?? undefined;
-        await financeApprove(refund.id, note);
       }
     } catch (e) { onError((e as Error).message); }
     finally { setBusy(false); }
@@ -289,7 +309,7 @@ function RefundCard({
 // Renders the linked return-form data + approve / deny actions.
 // ============================================================================
 function RefundDetailPanel({
-  refund, linkedReturn, canManager, canFinance, onClose, onError,
+  refund, linkedReturn, canManager, canFinance, onClose, onError, onOpenFinanceModal,
 }: {
   refund: RefundApproval;
   linkedReturn: ReturnRow | null;
@@ -297,6 +317,7 @@ function RefundDetailPanel({
   canFinance: boolean;
   onClose: () => void;
   onError: (msg: string | null) => void;
+  onOpenFinanceModal: (id: string) => void;
 }) {
   const [busy, setBusy] = useState(false);
   const meta = REFUND_STATUS_META[refund.status];
@@ -306,16 +327,17 @@ function RefundDetailPanel({
   const canAct = canActManager || canActFinance;
 
   const runApprove = async () => {
+    if (canActFinance) {
+      onOpenFinanceModal(refund.id);
+      return;
+    }
     setBusy(true); onError(null);
     try {
       if (canActManager) {
         const note = window.prompt('Manager approval note (optional):') ?? undefined;
         await managerApprove(refund.id, note);
-      } else if (canActFinance) {
-        const note = window.prompt('Finance approval note (e.g. Stripe refund ID):') ?? undefined;
-        await financeApprove(refund.id, note);
+        onClose();
       }
-      onClose();
     } catch (e) { onError((e as Error).message); }
     finally { setBusy(false); }
   };
@@ -607,6 +629,138 @@ function KPI({ label, value, tone, sub }: { label: string; value: number | strin
       <div className={styles.kpiLabel}>{label}</div>
       <div className={`${styles.kpiValue} ${tone === 'warn' ? styles.kpiWarn : ''}`}>{value}</div>
       {sub && <div className={styles.kpiSub}>{sub}</div>}
+    </div>
+  );
+}
+
+// ============================================================================
+// Finance approve modal
+// ============================================================================
+function FinanceApproveModal({
+  refund, linkedReturn, onClose, onError,
+}: {
+  refund: RefundApproval;
+  linkedReturn: ReturnRow | null;
+  onClose: () => void;
+  onError: (m: string | null) => void;
+}) {
+  const [method, setMethod] = useState<RefundMethod>('shopify');
+  const original = Number(refund.original_amount_usd ?? refund.refund_amount_usd);
+  const [amountStr, setAmountStr] = useState(original.toFixed(2));
+  const [note, setNote] = useState('');
+  const [correctionNote, setCorrectionNote] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const amount = Number(amountStr);
+  const amountChanged = !Number.isNaN(amount) && Number(amount.toFixed(2)) !== Number(original.toFixed(2));
+
+  const [shipping, setShipping] = useState<{ total: number; freight: number } | null>(null);
+  useEffect(() => {
+    const ref = linkedReturn?.original_order_ref;
+    if (!ref) { setShipping(null); return; }
+    (async () => {
+      const { data } = await supabase
+        .from('orders')
+        .select('total_usd, freight_estimate_usd')
+        .eq('order_ref', ref)
+        .maybeSingle();
+      if (data) setShipping({
+        total: Number((data as { total_usd: number; freight_estimate_usd: number }).total_usd),
+        freight: Number((data as { total_usd: number; freight_estimate_usd: number }).freight_estimate_usd),
+      });
+    })();
+  }, [linkedReturn?.original_order_ref]);
+
+  const run = async () => {
+    if (amountChanged && !correctionNote.trim()) {
+      onError('Correction note required when changing amount.');
+      return;
+    }
+    setBusy(true); onError(null);
+    try {
+      await financeApprove(refund.id, {
+        method,
+        amount,
+        correction_note: amountChanged ? correctionNote.trim() : undefined,
+        note: note.trim() || undefined,
+      });
+      onClose();
+    } catch (e) {
+      onError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className={styles.modalBackdrop} onClick={onClose}>
+      <div className={styles.modalCard} onClick={e => e.stopPropagation()}>
+        <h3 className={styles.modalTitle}>Process refund</h3>
+
+        <div className={styles.modalField}>
+          <label className={styles.modalLabel}>Method</label>
+          <select
+            value={method}
+            onChange={e => setMethod(e.target.value as RefundMethod)}
+            className={styles.modalInput}
+          >
+            {REFUND_METHODS.map(m => (
+              <option key={m} value={m}>{REFUND_METHOD_META[m].label}</option>
+            ))}
+          </select>
+          <div className={styles.modalHint}>{REFUND_METHOD_META[method].description}</div>
+        </div>
+
+        <div className={styles.modalField}>
+          <label className={styles.modalLabel}>Amount (USD)</label>
+          <input
+            type="number" step="0.01" min="0"
+            value={amountStr}
+            onChange={e => setAmountStr(e.target.value)}
+            className={styles.modalInput}
+          />
+          <div className={styles.modalHint}>
+            Original request: ${original.toFixed(2)}
+            {shipping && (
+              <> · Order total: ${shipping.total.toFixed(2)} · Shipping (non-refundable): ${shipping.freight.toFixed(2)} · Max refundable: ${(shipping.total - shipping.freight).toFixed(2)}</>
+            )}
+          </div>
+        </div>
+
+        {amountChanged && (
+          <div className={styles.modalField}>
+            <label className={styles.modalLabel}>Correction note <span style={{color:'var(--color-error, #c53030)'}}>*</span></label>
+            <textarea
+              value={correctionNote}
+              onChange={e => setCorrectionNote(e.target.value)}
+              placeholder="Why is the amount different from the original request?"
+              className={styles.modalInput}
+              rows={3}
+            />
+          </div>
+        )}
+
+        <div className={styles.modalField}>
+          <label className={styles.modalLabel}>Note (optional)</label>
+          <input
+            value={note}
+            onChange={e => setNote(e.target.value)}
+            placeholder="Stripe refund ID, etc."
+            className={styles.modalInput}
+          />
+        </div>
+
+        <div className={styles.modalActions}>
+          <button onClick={onClose} disabled={busy} className={styles.btnSecondary}>Cancel</button>
+          <button
+            onClick={() => void run()}
+            disabled={busy || Number.isNaN(amount) || amount < 0}
+            className={styles.btnPrimary}
+          >
+            {busy ? 'Processing…' : `Refund $${Number.isNaN(amount) ? '?' : amount.toFixed(2)}`}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

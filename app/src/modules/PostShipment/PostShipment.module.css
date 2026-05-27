@@ -790,3 +790,171 @@
   text-decoration: underline;
 }
 .linkBtn:hover { color: var(--color-error); }
+
+/* ============================================================ Modals (shared) */
+
+.modalBackdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: 20px;
+}
+.modalCard {
+  background: #fff;
+  border-radius: var(--radius-md);
+  width: 100%;
+  max-width: 480px;
+  padding: 24px;
+  box-shadow: 0 12px 32px rgba(0,0,0,0.2);
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+}
+
+/* RequestRefundModal layout helpers */
+.modalHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-ink);
+}
+.modalClose {
+  background: transparent;
+  border: none;
+  font-size: 16px;
+  color: var(--color-ink-subtle);
+  cursor: pointer;
+  padding: 4px 8px;
+}
+.modalClose:hover { color: var(--color-error); }
+.modalBody {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.modalRow {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--color-ink);
+}
+.modalRow label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-ink-subtle);
+}
+.modalGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.modalInput {
+  width: 100%;
+  padding: 8px 10px;
+  font-size: 13px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+  box-sizing: border-box;
+}
+.modalTextarea {
+  width: 100%;
+  padding: 8px 10px;
+  font-size: 13px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+  resize: vertical;
+  box-sizing: border-box;
+}
+.modalFoot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 20px;
+}
+.modalPrimary {
+  background: var(--color-crimson);
+  color: #fff;
+  border: none;
+  padding: 9px 18px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.modalPrimary:hover { background: var(--color-crimson-dark); }
+.modalPrimary:disabled { opacity: 0.5; cursor: not-allowed; }
+.modalSecondary {
+  background: #fff;
+  color: var(--color-ink-muted);
+  border: 1px solid var(--color-border);
+  padding: 9px 18px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.modalSecondary:hover { border-color: var(--color-ink-subtle); }
+
+/* FinanceApproveModal layout helpers */
+.modalTitle {
+  margin: 0 0 18px 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--color-ink);
+}
+.modalField {
+  margin-bottom: 14px;
+}
+.modalLabel {
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--color-ink-subtle);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
+}
+.modalHint {
+  font-size: 11px;
+  color: var(--color-ink-subtle);
+  margin-top: 4px;
+}
+.modalActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 20px;
+}
+.btnPrimary {
+  background: var(--color-success);
+  color: #fff;
+  border: none;
+  padding: 9px 18px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.btnPrimary:hover { filter: brightness(1.05); }
+.btnPrimary:disabled { opacity: 0.5; cursor: not-allowed; }
+.btnSecondary {
+  background: #fff;
+  color: var(--color-ink-muted);
+  border: 1px solid var(--color-border);
+  padding: 9px 18px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btnSecondary:hover { border-color: var(--color-ink-subtle); }
+.btnSecondary:disabled { opacity: 0.5; cursor: not-allowed; }
