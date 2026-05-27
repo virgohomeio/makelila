@@ -47,7 +47,7 @@ type MappedOrder = {
   city: string;
   region_state: string | null;
   country: 'US' | 'CA';
-  address_verdict: 'house' | 'apt';
+  address_verdict: 'house' | 'apt' | 'remote';
   freight_estimate_usd: number;
   freight_threshold_usd: number;
   total_usd: number;
@@ -68,7 +68,17 @@ function num(v: string | null | undefined): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-function verdictFor(addressLine: string | null | undefined): 'house' | 'apt' {
+function verdictFor(
+  addressLine: string | null | undefined,
+  postalCode: string | null,
+  remotePrefixes: string[],
+): 'house' | 'apt' | 'remote' {
+  // Postal-prefix match wins over the apt heuristic — remote zone is the
+  // hardest-to-recover-from problem (carrier surcharge or refuses delivery).
+  if (postalCode) {
+    const p = postalCode.toUpperCase().replace(/\s/g, '');
+    if (remotePrefixes.some(prefix => p.startsWith(prefix))) return 'remote';
+  }
   const s = (addressLine ?? '').toLowerCase();
   if (/\bapt\b|\bapartment\b|\bsuite\b|\bunit\b|#\s*\d/.test(s)) return 'apt';
   return 'house';
@@ -92,7 +102,10 @@ function parseShippingFreight(order: ShopifyOrder): number {
   return 0;
 }
 
-function mapOrder(o: ShopifyOrder): MappedOrder | { error: string; order_ref: string } {
+function mapOrder(
+  o: ShopifyOrder,
+  remotePrefixes: string[],
+): MappedOrder | { error: string; order_ref: string } {
   const addr = o.shipping_address ?? null;
   const country = addr?.country_code;
   if (country !== 'US' && country !== 'CA') {
@@ -107,10 +120,9 @@ function mapOrder(o: ShopifyOrder): MappedOrder | { error: string; order_ref: st
   const phone = o.customer?.phone ?? o.phone ?? addr.phone ?? null;
   const freight = parseShippingFreight(o);
   const total = Number(o.total_price ?? '0') || 0;
-  const verdict = verdictFor(addr.address1);
-  // Apt + non-house addresses get auto-flagged for ops review. Caught by the
-  // verdictFor regex (apt/apartment/suite/unit/#NNN). 'remote' detection
-  // requires postal-code lookup which we don't have yet; comes later.
+  const postal = addr.zip?.trim() || null;
+  const verdict = verdictFor(addr.address1, postal, remotePrefixes);
+  // Anything non-house (apt OR remote) gets auto-flagged for ops review.
   const initialStatus: 'pending' | 'flagged' = verdict === 'house' ? 'pending' : 'flagged';
 
   return {
@@ -128,7 +140,7 @@ function mapOrder(o: ShopifyOrder): MappedOrder | { error: string; order_ref: st
     freight_estimate_usd: freight,
     freight_threshold_usd: 200.00,
     total_usd: total,
-    postal_code: addr.zip?.trim() || null,
+    postal_code: postal,
     subtotal_usd: num(o.subtotal_price),
     tax_usd: num(o.total_tax),
     discount_total_usd: num(o.total_discounts),
@@ -182,20 +194,27 @@ serve(async (req: Request) => {
   }
   const { orders } = await shopRes.json() as { orders: ShopifyOrder[] };
 
-  // 2. Map + split mapped vs. skipped
+  // 2. Load remote-postal prefixes once (used by verdictFor)
+  const admin = createClient(supabaseUrl, serviceKey);
+  const { data: prefixRows } = await admin
+    .from('remote_postal_prefixes')
+    .select('prefix');
+  const remotePrefixes: string[] = (prefixRows ?? [])
+    .map((r: { prefix: string }) => r.prefix.toUpperCase());
+
+  // 3. Map + split mapped vs. skipped
   const mapped: MappedOrder[] = [];
   const skipped: Array<{ order_ref: string; error: string }> = [];
   for (const o of orders ?? []) {
-    const result = mapOrder(o);
+    const result = mapOrder(o, remotePrefixes);
     if ('error' in result) skipped.push(result);
     else mapped.push(result);
   }
 
-  // 3. Insert new orders (ignore dupes), then refresh Shopify-sourced fields
+  // 4. Insert new orders (ignore dupes), then refresh Shopify-sourced fields
   //    (placed_at, freight_estimate_usd) on existing rows so historical syncs
   //    that happened before placed_at was mapped get corrected. We never
   //    overwrite internal fields like status/dispositioned_* here.
-  const admin = createClient(supabaseUrl, serviceKey);
 
   // Pre-fetch existing orders so the refresh path can decide whether to also
   // pull contact/address updates (only safe when the operator hasn't yet
@@ -254,7 +273,7 @@ serve(async (req: Request) => {
       refreshPatch.country        = m.country;
       refreshPatch.address_verdict = m.address_verdict;
       // Escalate pending → flagged if the new verdict isn't 'house'
-      // (mirrors the new-order auto-flag rule)
+      // (mirrors the new-order auto-flag rule; covers apt + remote)
       if (existing?.status === 'pending' && m.address_verdict !== 'house') {
         refreshPatch.status = 'flagged';
       }

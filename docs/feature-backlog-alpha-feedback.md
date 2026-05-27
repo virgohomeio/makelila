@@ -100,6 +100,14 @@ These fields should live on the Serial Tracker and be visible/editable during th
 
 ---
 
+## Post-alpha additions
+
+### 12. Outbound replies from tickets via support@virgohome.io
+**Source:** Huayi (May 27, while wiring Quo→ticket polling)
+**Description:** Tickets currently land in makelila from Gmail and (soon) OpenPhone/Quo, but operators can't reply from within makelila. Add a "Reply" composer to the TicketDetailPanel that sends through the `support@virgohome.io` mailbox (probably via Gmail API send-on-behalf or a Resend-from address). Threads outbound replies into the same ticket. Out of scope for v1 of the Quo integration; tracked here for follow-up.
+
+---
+
 ## Raymond Zhu Feedback (May 27)
 
 ### 10. Link Customer → their Order(s) from the Customers module
