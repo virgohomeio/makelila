@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react';
 import {
-  useReturns, updateReturnStatus,
+  useReturns, updateReturnStatus, updateReturnCategory,
   RETURN_STATUS_META, RETURN_STATUS_ORDER,
-  type ReturnStatus,
+  RETURN_CATEGORIES, RETURN_CATEGORY_META,
+  type ReturnStatus, type ReturnCategory,
 } from '../../lib/postShipment';
 import styles from './PostShipment.module.css';
 
@@ -125,6 +126,7 @@ export function ReturnsTab() {
               <th>Channel</th>
               <th>Unit</th>
               <th>Condition</th>
+              <th>Category</th>
               <th>Reason</th>
               <th>Refund</th>
               <th>Status</th>
@@ -143,6 +145,25 @@ export function ReturnsTab() {
                   <td>{r.channel ?? '—'}</td>
                   <td className={styles.mono}>{r.unit_serial ?? <span className={styles.muted}>—</span>}</td>
                   <td>{r.condition ?? <span className={styles.muted}>—</span>}</td>
+                  <td>
+                    <select
+                      value={r.return_category ?? ''}
+                      onChange={e => {
+                        const v = e.target.value;
+                        void updateReturnCategory(r.id, v === '' ? null : v as ReturnCategory);
+                      }}
+                      className={styles.statusSelect}
+                      style={r.return_category ? {
+                        color: RETURN_CATEGORY_META[r.return_category].color,
+                        background: RETURN_CATEGORY_META[r.return_category].bg,
+                      } : undefined}
+                    >
+                      <option value="">— Uncategorized —</option>
+                      {RETURN_CATEGORIES.map(c => (
+                        <option key={c} value={c}>{RETURN_CATEGORY_META[c].label}</option>
+                      ))}
+                    </select>
+                  </td>
                   <td>{r.reason ?? <span className={styles.muted}>—</span>}</td>
                   <td className={styles.num}>{r.refund_amount_usd != null ? `$${Number(r.refund_amount_usd).toLocaleString('en-US')}` : <span className={styles.muted}>—</span>}</td>
                   <td>
