@@ -41,6 +41,19 @@ type OPMessagesResponse = {
   nextPageToken?: string;
 };
 
+type OPConversation = {
+  id: string;
+  participants: string[]; // E.164 numbers of the other party (not our line)
+  lastActivityAt?: string;
+  updatedAt?: string;
+  createdAt?: string;
+};
+
+type OPConversationsResponse = {
+  data: OPConversation[];
+  nextPageToken?: string;
+};
+
 // ---- Run summary ----
 
 type RunResult = {
@@ -129,24 +142,37 @@ async function syncPhoneNumber(
   };
 
   try {
-    // Fetch all messages since `since`, paginating via nextPageToken.
-    const allMessages = await fetchAllMessages(apiKey, phoneNumberId, since);
+    // Step 1: list all conversations for this phone number.
+    const allConversations = await fetchAllConversations(apiKey, phoneNumberId);
+    const sinceMs = new Date(since).getTime();
 
-    // Group by conversationId.
-    const byConversation = new Map<string, OPMessage[]>();
-    for (const msg of allMessages) {
-      const list = byConversation.get(msg.conversationId) ?? [];
-      list.push(msg);
-      byConversation.set(msg.conversationId, list);
-    }
+    for (const convo of allConversations) {
+      // Skip conversations with no activity since `since`.
+      const activityTs = convo.lastActivityAt ?? convo.updatedAt ?? convo.createdAt;
+      const lastActivity = activityTs ? new Date(activityTs).getTime() : 0;
+      if (lastActivity < sinceMs) continue;
 
-    result.conversations_seen = byConversation.size;
+      result.conversations_seen++;
 
-    for (const [conversationId, msgs] of byConversation) {
+      // Step 2: fetch messages for this conversation.
+      // participants[] = other-party phone numbers; skip if empty.
+      const otherParties = convo.participants.filter(p => p && p.trim());
+      if (otherParties.length === 0) continue;
+
+      let msgs: OPMessage[];
+      try {
+        msgs = await fetchMessagesForConversation(apiKey, phoneNumberId, otherParties);
+      } catch (err) {
+        result.skipped++;
+        // record per-conversation error but keep processing others
+        if (!result.error) result.error = (err as Error).message;
+        continue;
+      }
+
       // Sort oldest-first for consistent processing.
       msgs.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 
-      const outcome = await upsertConversation(admin, conversationId, msgs);
+      const outcome = await upsertConversation(admin, convo.id, msgs);
       if (outcome === 'created')   result.tickets_created++;
       else if (outcome === 'appended') result.tickets_appended++;
       else result.skipped++;
@@ -293,10 +319,34 @@ async function insertNewMessages(
 
 // ============================================================ OpenPhone API client
 
-async function fetchAllMessages(
+async function fetchAllConversations(
   apiKey: string,
   phoneNumberId: string,
-  since: string,
+): Promise<OPConversation[]> {
+  const all: OPConversation[] = [];
+  let pageToken: string | undefined;
+  let pages = 0;
+
+  do {
+    const url = new URL(`${OPENPHONE_BASE}/conversations`);
+    url.searchParams.set('phoneNumberId', phoneNumberId);
+    url.searchParams.set('maxResults', '100');
+    if (pageToken) url.searchParams.set('pageToken', pageToken);
+
+    const res = await opFetch<OPConversationsResponse>(apiKey, url.toString());
+    for (const c of res.data ?? []) all.push(c);
+    pageToken = res.nextPageToken;
+    pages++;
+    if (pages > 20) break; // soft cap: 2,000 conversations
+  } while (pageToken);
+
+  return all;
+}
+
+async function fetchMessagesForConversation(
+  apiKey: string,
+  phoneNumberId: string,
+  otherParties: string[],
 ): Promise<OPMessage[]> {
   const all: OPMessage[] = [];
   let pageToken: string | undefined;
@@ -305,7 +355,7 @@ async function fetchAllMessages(
   do {
     const url = new URL(`${OPENPHONE_BASE}/messages`);
     url.searchParams.set('phoneNumberId', phoneNumberId);
-    url.searchParams.set('since', since);
+    for (const p of otherParties) url.searchParams.append('participants[]', p);
     url.searchParams.set('maxResults', '100');
     if (pageToken) url.searchParams.set('pageToken', pageToken);
 
@@ -313,7 +363,7 @@ async function fetchAllMessages(
     for (const m of res.data ?? []) all.push(m);
     pageToken = res.nextPageToken;
     pages++;
-    if (pages > 50) break; // soft cap: 5,000 messages per run per phone number
+    if (pages > 10) break; // soft cap: 1,000 messages per conversation
   } while (pageToken);
 
   return all;
