@@ -161,17 +161,19 @@ async function handle(req: Request): Promise<Response> {
   // Surface scope on the diag so we can debug 403-missing-scope errors
   (diag as Record<string, unknown>).granted_scope = tokens.scope ?? '(none returned)';
 
-  // 3. Bulk subscribe profiles to the list. Klaviyo API JSON:API spec:
-  //    POST /api/profile-subscription-bulk-create-jobs/
-  //    Body: { data: { type: 'profile-subscription-bulk-create-job',
-  //                    attributes: { profiles: { data: [...] },
-  //                                  custom_source: 'makelila push' },
-  //                    relationships: { list: { data: { type: 'list', id: '...' } } } } }
+  // 3. Bulk-import profiles + add to list. Klaviyo API JSON:API spec:
+  //    POST /api/profile-bulk-import-jobs/
   //
-  // Each profile entry under attributes.profiles.data[*]:
-  //    { type: 'profile', attributes: { email, phone_number, first_name, last_name, location:{...} } }
+  // Why this endpoint instead of /profile-subscription-bulk-create-jobs:
+  //   - subscription-create only accepts email/phone/subscriptions on the
+  //     profile attributes (rejects first_name, last_name, location, etc.)
+  //     AND it mutates marketing consent (legally tricky without opt-in).
+  //   - bulk-import accepts the full profile schema (name, location,
+  //     properties) AND just adds list membership without touching
+  //     subscription consent — exactly what the "push to marketing list"
+  //     use case wants. Consent is honored at send-time by Klaviyo.
   //
-  // Klaviyo caps each job at 1000 profiles; chunk if needed.
+  // Klaviyo caps each job at 10,000 profiles; we batch at 1000 anyway.
   const CHUNK = 1000;
   let pushedTotal = 0;
   const failures: Array<{ chunk: number; error: string }> = [];
@@ -180,10 +182,6 @@ async function handle(req: Request): Promise<Response> {
     const chunk = rows.slice(i, i + CHUNK);
     const profilesData = chunk.map(r => ({
       type: 'profile',
-      // Klaviyo's profile-subscription-bulk-create-jobs endpoint rejects a
-      // `properties` field directly on the profile (400: "not a valid field
-      // for the resource 'profile'"). Custom props (onboard_date, source)
-      // would need a separate PATCH /api/profiles/{id} call per profile.
       attributes: {
         email:        r.email,
         phone_number: r.phone ?? undefined,
@@ -196,23 +194,26 @@ async function handle(req: Request): Promise<Response> {
           zip:         r.postal_code ?? undefined,
           country:     r.country ?? undefined,
         } : undefined,
+        properties: {
+          ...(r.onboard_date ? { onboard_date: r.onboard_date } : {}),
+          source: 'makelila',
+        },
       },
     }));
 
     const pushBody = {
       data: {
-        type: 'profile-subscription-bulk-create-job',
+        type: 'profile-bulk-import-job',
         attributes: {
           profiles: { data: profilesData },
-          custom_source: 'makelila push-customer-list',
         },
         relationships: {
-          list: { data: { type: 'list', id: list_id } },
+          lists: { data: [{ type: 'list', id: list_id }] },
         },
       },
     };
 
-    const pushRes = await fetch('https://a.klaviyo.com/api/profile-subscription-bulk-create-jobs/', {
+    const pushRes = await fetch('https://a.klaviyo.com/api/profile-bulk-import-jobs/', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${tokens.access_token}`,
@@ -227,8 +228,20 @@ async function handle(req: Request): Promise<Response> {
       pushedTotal += chunk.length;
     } else {
       const body = await pushRes.text();
-      failures.push({ chunk: i / CHUNK, error: `${pushRes.status}: ${body.slice(0, 300)}` });
+      failures.push({ chunk: i / CHUNK, error: `${pushRes.status}: ${body.slice(0, 500)}` });
     }
+  }
+
+  // If every chunk failed, return 502 so the UI's `!res.ok` path surfaces
+  // the underlying Klaviyo error (instead of silently showing "Pushed 0").
+  if (pushedTotal === 0 && failures.length > 0) {
+    return j({
+      error: `All chunks failed. First error: ${failures[0].error}`,
+      failures,
+      diag,
+      list_id,
+      filter,
+    }, 502);
   }
 
   return j({
