@@ -17,10 +17,17 @@
 // the constraint and don't collide with real Gmail IDs.
 
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
-import { corsHeaders } from '../_shared/cors.ts';
+
+// Inline corsHeaders to avoid module-resolution issues at deploy time.
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+};
 
 const OPENPHONE_BASE = 'https://api.openphone.com/v1';
 const DEFAULT_LOOKBACK_DAYS = 7;
+const DEFAULT_OWNER_EMAIL = 'junaid@virgohome.io';
 
 // ---- OpenPhone API types ----
 
@@ -31,7 +38,8 @@ type OPMessage = {
   // 'from' is a reserved word in TS; OpenPhone returns it as 'from'
   from: string;
   to: string[];
-  body: string;
+  text: string;   // OpenPhone returns message content as 'text', not 'body'
+  body?: string;  // kept as optional fallback for safety
   createdAt: string; // ISO 8601
   status?: string;
 };
@@ -52,6 +60,14 @@ type OPConversation = {
 type OPConversationsResponse = {
   data: OPConversation[];
   nextPageToken?: string;
+};
+
+// ---- Customer / unit / order lookup types ----
+
+type CustomerLite = {
+  id: string;
+  full_name: string | null;
+  email: string | null;
 };
 
 // ---- Run summary ----
@@ -100,6 +116,54 @@ async function handle(): Promise<Response> {
 
   const admin = createClient(supabaseUrl, serviceKey);
 
+  // ---- Build in-memory lookup caches (once per invocation) ----
+
+  // 1. All customers with non-null phone, keyed by digits-only phone.
+  const { data: allCustomers } = await admin
+    .from('customers')
+    .select('id, full_name, email, phone')
+    .not('phone', 'is', null)
+    .range(0, 9999);
+  const customersByPhone = new Map<string, CustomerLite>();
+  for (const c of (allCustomers ?? []) as Array<CustomerLite & { phone: string | null }>) {
+    if (c.phone) {
+      customersByPhone.set(digitsOnly(c.phone), {
+        id: c.id,
+        full_name: c.full_name,
+        email: c.email,
+      });
+    }
+  }
+
+  // 2. Most-recent shipped unit per customer name (lower-trimmed).
+  const { data: shippedUnits } = await admin
+    .from('units')
+    .select('serial, customer_name, shipped_at')
+    .eq('status', 'shipped')
+    .not('customer_name', 'is', null)
+    .order('shipped_at', { ascending: false, nullsFirst: false })
+    .range(0, 9999);
+  const unitsByCustomerName = new Map<string, string>(); // lower-name → serial
+  for (const u of (shippedUnits ?? []) as Array<{ serial: string; customer_name: string | null; shipped_at: string | null }>) {
+    if (!u.customer_name) continue;
+    const key = u.customer_name.toLowerCase().trim();
+    if (!unitsByCustomerName.has(key)) unitsByCustomerName.set(key, u.serial);
+  }
+
+  // 3. Most-recent order per customer email (lower-trimmed).
+  const { data: orders } = await admin
+    .from('orders')
+    .select('order_ref, customer_email, placed_at')
+    .not('customer_email', 'is', null)
+    .order('placed_at', { ascending: false, nullsFirst: false })
+    .range(0, 9999);
+  const ordersByEmail = new Map<string, string>(); // lower-email → order_ref
+  for (const o of (orders ?? []) as Array<{ order_ref: string; customer_email: string | null }>) {
+    if (!o.customer_email) continue;
+    const key = o.customer_email.toLowerCase().trim();
+    if (!ordersByEmail.has(key)) ordersByEmail.set(key, o.order_ref);
+  }
+
   // Determine `since`: max last_message_at across all existing quo tickets.
   // Falls back to DEFAULT_LOOKBACK_DAYS ago when no quo tickets exist yet.
   const { data: sinceRow } = await admin
@@ -115,7 +179,10 @@ async function handle(): Promise<Response> {
 
   const results: RunResult[] = [];
   for (const phoneNumberId of phoneNumberIds) {
-    const r = await syncPhoneNumber(admin, apiKey, phoneNumberId, since);
+    const r = await syncPhoneNumber(
+      admin, apiKey, phoneNumberId, since,
+      customersByPhone, unitsByCustomerName, ordersByEmail,
+    );
     results.push(r);
   }
 
@@ -130,6 +197,9 @@ async function syncPhoneNumber(
   apiKey: string,
   phoneNumberId: string,
   since: string,
+  customersByPhone: Map<string, CustomerLite>,
+  unitsByCustomerName: Map<string, string>,
+  ordersByEmail: Map<string, string>,
 ): Promise<RunResult> {
   const result: RunResult = {
     phone_number_id: phoneNumberId,
@@ -172,7 +242,10 @@ async function syncPhoneNumber(
       // Sort oldest-first for consistent processing.
       msgs.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 
-      const outcome = await upsertConversation(admin, convo.id, msgs);
+      const outcome = await upsertConversation(
+        admin, convo.id, msgs,
+        customersByPhone, unitsByCustomerName, ordersByEmail,
+      );
       if (outcome === 'created')   result.tickets_created++;
       else if (outcome === 'appended') result.tickets_appended++;
       else result.skipped++;
@@ -194,6 +267,9 @@ async function upsertConversation(
   admin: SupabaseClient,
   conversationId: string,
   msgs: OPMessage[],
+  customersByPhone: Map<string, CustomerLite>,
+  unitsByCustomerName: Map<string, string>,
+  ordersByEmail: Map<string, string>,
 ): Promise<'created' | 'appended' | 'skipped'> {
   if (msgs.length === 0) return 'skipped';
 
@@ -205,17 +281,8 @@ async function upsertConversation(
   const customerPhone = inboundMsg.from;
   const normalizedCustomerPhone = digitsOnly(customerPhone);
 
-  // Look up customer by phone (digits-only match).
-  const { data: customer } = await admin
-    .from('customers')
-    .select('id, full_name, email, phone')
-    .filter('phone', 'not.is', null)
-    .limit(100) // fetch a batch; we'll filter client-side for digit normalization
-    .then(async (res) => {
-      if (res.error || !res.data) return { data: null };
-      const match = res.data.find(c => digitsOnly(c.phone ?? '') === normalizedCustomerPhone);
-      return { data: match ?? null };
-    });
+  // O(1) customer lookup from pre-built in-memory map.
+  const customer = customersByPhone.get(normalizedCustomerPhone) ?? null;
 
   // Check if ticket already exists for this conversation.
   const { data: existing } = await admin
@@ -243,17 +310,26 @@ async function upsertConversation(
 
   // Create new ticket.
   const subject = buildSubject(firstMsg, customerPhone);
+  const msgText = firstMsg.text ?? firstMsg.body ?? '';
+
   const ticketRow = {
     source:              'quo' as const,
     category:            'support',
     status:              'new',
     priority:            'normal',
     subject,
-    description:         firstMsg.body || null,
+    description:         msgText || null,
     customer_name:       customer?.full_name ?? null,
     customer_phone:      customerPhone,
     customer_email:      customer?.email ?? null,
     customer_id:         customer?.id ?? null,
+    unit_serial:         customer?.full_name
+                           ? (unitsByCustomerName.get(customer.full_name.toLowerCase().trim()) ?? null)
+                           : null,
+    order_ref:           customer?.email
+                           ? (ordersByEmail.get(customer.email.toLowerCase().trim()) ?? null)
+                           : null,
+    owner_email:         DEFAULT_OWNER_EMAIL,
     quo_conversation_id: conversationId,
     quo_last_message_id: lastMsg.id,
     first_message_at:    firstMsg.createdAt,
@@ -294,17 +370,20 @@ async function insertNewMessages(
   }
   if (toInsert.length === 0) return 0;
 
-  const rows = toInsert.map(m => ({
-    ticket_id:       ticketId,
-    // Prefix with 'quo:' — gmail_message_id is NOT NULL and the upsert conflict key;
-    // the prefix prevents collision with real Gmail IDs and enables idempotent re-runs.
-    gmail_message_id: `quo:${m.id}`,
-    direction:       m.direction === 'incoming' ? 'inbound' : 'outbound',
-    sender:          m.from || null,
-    sent_at:         m.createdAt,
-    snippet:         (m.body ?? '').slice(0, 200),
-    body_text:       (m.body ?? '').slice(0, 50_000) || null,
-  }));
+  const rows = toInsert.map(m => {
+    const text = m.text ?? m.body ?? '';
+    return {
+      ticket_id:        ticketId,
+      // Prefix with 'quo:' — gmail_message_id is NOT NULL and the upsert conflict key;
+      // the prefix prevents collision with real Gmail IDs and enables idempotent re-runs.
+      gmail_message_id: `quo:${m.id}`,
+      direction:        m.direction === 'incoming' ? 'inbound' : 'outbound',
+      sender:           m.from || null,
+      sent_at:          m.createdAt,
+      snippet:          text.slice(0, 200),
+      body_text:        text.slice(0, 50_000) || null,
+    };
+  });
 
   for (let i = 0; i < rows.length; i += 100) {
     const slice = rows.slice(i, i + 100);
@@ -397,9 +476,9 @@ function digitsOnly(phone: string): string {
   return phone.replace(/\D/g, '');
 }
 
-/** First line of first message body, truncated to 80 chars; fallback to generic subject. */
+/** First line of first message text, truncated to 80 chars; fallback to generic subject. */
 function buildSubject(msg: OPMessage, customerPhone: string): string {
-  const firstLine = (msg.body ?? '').split('\n')[0].trim();
+  const firstLine = (msg.text ?? msg.body ?? '').split('\n')[0].trim();
   if (firstLine.length > 0) {
     return firstLine.length <= 80 ? firstLine : firstLine.slice(0, 77) + '...';
   }
