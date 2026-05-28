@@ -127,7 +127,7 @@ async function handle(): Promise<Response> {
   const customersByPhone = new Map<string, CustomerLite>();
   for (const c of (allCustomers ?? []) as Array<CustomerLite & { phone: string | null }>) {
     if (c.phone) {
-      customersByPhone.set(digitsOnly(c.phone), {
+      customersByPhone.set(phoneKey(c.phone), {
         id: c.id,
         full_name: c.full_name,
         email: c.email,
@@ -279,10 +279,9 @@ async function upsertConversation(
   // The inbound message tells us the customer's phone number.
   const inboundMsg = msgs.find(m => m.direction === 'incoming') ?? firstMsg;
   const customerPhone = inboundMsg.from;
-  const normalizedCustomerPhone = digitsOnly(customerPhone);
 
-  // O(1) customer lookup from pre-built in-memory map.
-  const customer = customersByPhone.get(normalizedCustomerPhone) ?? null;
+  // O(1) customer lookup from pre-built in-memory map (keyed by last-10 digits).
+  const customer = customersByPhone.get(phoneKey(customerPhone)) ?? null;
 
   // Check if ticket already exists for this conversation.
   const { data: existing } = await admin
@@ -474,6 +473,13 @@ async function opFetch<T>(apiKey: string, url: string): Promise<T> {
 /** Strip all non-digit characters for phone number comparison. */
 function digitsOnly(phone: string): string {
   return phone.replace(/\D/g, '');
+}
+
+/** Phone-match key: last 10 digits. Drops the country-code prefix so that
+ *  Quo's "+15192004646" matches customers.phone "519-200-4646" (which is
+ *  stored without the leading 1 in our DB). */
+function phoneKey(phone: string): string {
+  return digitsOnly(phone).slice(-10);
 }
 
 /** First line of first message text, truncated to 80 chars; fallback to generic subject. */
