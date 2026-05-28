@@ -35,7 +35,9 @@ const CB_PATH = '/callback';
 const clientId     = process.env.KLAVIYO_CLIENT_ID;
 const clientSecret = process.env.KLAVIYO_CLIENT_SECRET;
 const scopes       = process.env.KLAVIYO_SCOPES
-  || 'accounts:read profiles:read profiles:write lists:read lists:write';
+  || 'accounts:read profiles:read profiles:write lists:read lists:write subscriptions:write';
+// subscriptions:write is required by the bulk-subscription endpoint that
+// push-customer-list uses. Confirmed via 403 on 2026-05-27.
 
 if (!clientId || !clientSecret) {
   console.error('Missing env vars:');
