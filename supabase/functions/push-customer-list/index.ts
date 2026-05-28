@@ -157,7 +157,9 @@ async function handle(req: Request): Promise<Response> {
     const body = await tokenRes.text();
     return j({ error: `Klaviyo /oauth/token ${tokenRes.status}: ${body.slice(0, 400)}` }, 502);
   }
-  const tokens = await tokenRes.json() as { access_token: string };
+  const tokens = await tokenRes.json() as { access_token: string; scope?: string };
+  // Surface scope on the diag so we can debug 403-missing-scope errors
+  (diag as Record<string, unknown>).granted_scope = tokens.scope ?? '(none returned)';
 
   // 3. Bulk subscribe profiles to the list. Klaviyo API JSON:API spec:
   //    POST /api/profile-subscription-bulk-create-jobs/
@@ -178,6 +180,10 @@ async function handle(req: Request): Promise<Response> {
     const chunk = rows.slice(i, i + CHUNK);
     const profilesData = chunk.map(r => ({
       type: 'profile',
+      // Klaviyo's profile-subscription-bulk-create-jobs endpoint rejects a
+      // `properties` field directly on the profile (400: "not a valid field
+      // for the resource 'profile'"). Custom props (onboard_date, source)
+      // would need a separate PATCH /api/profiles/{id} call per profile.
       attributes: {
         email:        r.email,
         phone_number: r.phone ?? undefined,
@@ -190,10 +196,6 @@ async function handle(req: Request): Promise<Response> {
           zip:         r.postal_code ?? undefined,
           country:     r.country ?? undefined,
         } : undefined,
-        properties: {
-          ...(r.onboard_date ? { onboard_date: r.onboard_date } : {}),
-          source: 'makelila',
-        },
       },
     }));
 
