@@ -134,6 +134,53 @@ Alpha feedback collection window is **closed**. The 11 items above plus the meet
 
 ---
 
+## In-person team walkthrough (2026-05-28)
+
+> Source: in-person review at the office with Pedrum (Sales & Marketing), Raymond + Junaid (Fulfillment & Stock), and Reina (Customer Service). Recap also captured in Fireflies. 32 items below, organized by team area; numbering continues from the alpha-feedback set.
+
+### Sales & Marketing — Pedrum
+
+- **#13** Verify-address: returns "Could not verify" too often. Google Maps Geocoding is unreliable on Canadian rural addresses. Investigate an LLM-backed verifier (Claude) as a fallback or replacement. *Follow-up to shipped #1.*
+- **#14** Freight estimate fails to render on some orders (e.g. Joseph's) — ops had to compute manually.
+- **#15** Freight estimate must account for line-item quantity (currently appears to assume single unit).
+- **#16** Freight estimate text doesn't show on the order card in some states.
+- **#17** Surface the freight-estimate source (ClickShip / Freightcom / Shopify) on the card so ops know which system the number came from.
+- **#18** Change freight estimate display currency to **CAD** (currently USD).
+- **#19** Pull freight estimate from **ClickShip or Freightcom**, not Shopify. Shopify totals include our free-shipping promo + $100 credit, which makes the number wrong for refund and cost math. *Ties to pending #7 ClickShip dedup.*
+- **#20** Shopify Payment Summary: show currency code per line. *Follow-up to shipped #4.*
+
+### Fulfillment & Stock — Raymond & Junaid
+
+- **#21** Reverse the "assign serial" flow. Today the order auto-suggests an available unit and ops chase the machine. Desired: prep a unit to "ready" status in Stock first, then assign it to a customer/order later.
+- **#22** Stock state out-of-sync. Serial 284 was shipped to Linda but the app still offers it as available for Joseph. Need a full re-sync from physical inventory + Notion IQC log.
+- **#23** Add a search bar for unit serial numbers on the "assign to customer" picker so ops can type a known serial.
+- **#24** Create a Google Drive folder for electrical test reports and link it from the unit detail panel so techs can attach reports per unit.
+- **#25** Add **Canpar** and **GLS** to the carrier dropdown on the shipment step.
+- **#26** Fulfillment back-button bug: after selecting a serial for one customer, navigating back leaves the unit marked unavailable for other customers within the session — needs to release the hold on back-out.
+- **#27** Rename "Customer / Location" column header in the Stock tab (label mismatched with what's actually shown).
+- **#28** To-dock handoff checklist: add a "Carrier picked up" step.
+- **#29** Tracking-link email to customer didn't auto-send during testing — debug the send-template-email trigger on shipment commit.
+- **#30** Auto-confirm customer receipt — either delivery webhook from the carrier or a follow-up SMS/email asking the customer to confirm.
+
+### Customer Service — Reina
+
+- **#31** Onboarding tab: split into "needs onboarding — not yet scheduled" vs. "onboarding scheduled" sections so Reina can see who to chase.
+- **#32** Calendly sync delay. Reina scheduled an onboarding session with Huayi (using Pedrum's test profile) and Pedrum accepted it, but the booking didn't appear in makeLILA promptly. Tighten the sync cadence or webhook.
+- **#33** Onboarding detail panel currently reuses the ticket layout. Needs an onboarding-specific view with a "Mark complete" button instead of ticket fields.
+- **#34** Customer picker for new tickets didn't surface Pedrum's secondary profile (`pedruma71@gmail.com`). That profile is also missing from the Customers tab. Customer-sync gap.
+- **#35** *(Note for later — strategic.)* If we rule HubSpot out as a customer source, we'll need a robust Shopify → customer sync. Today there's a rare Shopify import path that fails to create the customer profile on order arrival. *Ties to #8 system-of-record decision.*
+- **#36** "Create support ticket" form: once a customer is selected, auto-populate their unit serial number(s).
+- **#37** Ticket status labels need refresh — action-oriented terms like "Complete", "Needs to reach out", etc.
+- **#38** Add a Category field on tickets so we can report issue volume per area (electrical, mechanical, onboarding, billing, etc.).
+- **#39** Owner-email list is stale: Aaron and Ashwini still appear (both left); Reina is missing.
+- **#40** Follow-up calendar based on onboarding date — auto-schedule 1-week / 1-month check-ins after onboarding completes.
+- **#41** Define the support-ticket → Repair tab pipeline. Today it's ambiguous how a defect-flagged ticket moves into the repair queue.
+- **#42** Customers tab: data sync is incomplete — fields missing on some customers. Likely linked to #34.
+- **#43** Add unit serial number to the customer profile card in the Customers tab (currently you have to cross-reference Stock).
+- **#44** Auto-invite Reina to every customer onboarding call when it is scheduled in Calendly.
+
+---
+
 ## Reference
 
 - Email thread: "makeLILA app beta release, VCycene, Huayi" (started Apr 21, 2026)
