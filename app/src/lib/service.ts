@@ -7,7 +7,11 @@ import { logAction } from './activityLog';
 
 export type TicketCategory = 'onboarding' | 'support' | 'repair';
 export type TicketSource =
-  | 'calendly' | 'customer_form' | 'hubspot' | 'fulfillment_flag' | 'ops_manual' | 'gmail';
+  | 'calendly' | 'customer_form' | 'hubspot' | 'fulfillment_flag'
+  | 'ops_manual' | 'gmail' | 'quo';
+
+export type TicketKind = 'conversation' | 'ticket';
+export type InboxDisposition = 'promoted' | 'sales' | 'follow_up' | 'dismissed';
 export type TicketStatus =
   | 'new' | 'triaging' | 'in_progress' | 'waiting_customer'
   | 'resolved' | 'closed' | 'escalated';
@@ -47,6 +51,8 @@ export type ServiceTicket = {
   owner_email: string | null;
   resolved_at: string | null;
   closed_at: string | null;
+  kind: TicketKind;
+  inbox_disposition: InboxDisposition | null;
   created_at: string;
   updated_at: string;
   // Gmail pipeline (PR1 + PR2)
@@ -201,6 +207,7 @@ export function useServiceTickets(category?: TicketCategory): {
       let q = supabase
         .from('service_tickets')
         .select('*')
+        .eq('kind', 'ticket')
         .order('created_at', { ascending: false });
       if (category) q = q.eq('category', category);
       const { data, error } = await q;
@@ -217,6 +224,7 @@ export function useServiceTickets(category?: TicketCategory): {
             }
             if (payload.new) {
               const row = payload.new as ServiceTicket;
+              if (row.kind !== 'ticket') return prev.filter(t => t.id !== row.id);
               if (category && row.category !== category) return prev;
               const idx = prev.findIndex(t => t.id === row.id);
               if (idx >= 0) { const next = [...prev]; next[idx] = row; return next; }
@@ -231,6 +239,89 @@ export function useServiceTickets(category?: TicketCategory): {
   }, [category]);
 
   return { tickets, loading };
+}
+
+export function useInbox(disposition?: InboxDisposition | 'untriaged' | 'all'): {
+  rows: ServiceTicket[];
+  loading: boolean;
+} {
+  const [rows, setRows] = useState<ServiceTicket[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let channel: RealtimeChannel | null = null;
+    let cancelled = false;
+    (async () => {
+      let q = supabase
+        .from('service_tickets')
+        .select('*')
+        .eq('kind', 'conversation')
+        .order('last_message_at', { ascending: false, nullsFirst: false });
+      if (disposition === 'untriaged') q = q.is('inbox_disposition', null);
+      else if (disposition && disposition !== 'all') q = q.eq('inbox_disposition', disposition);
+      const { data, error } = await q;
+      if (cancelled) return;
+      if (!error && data) setRows(data as ServiceTicket[]);
+      setLoading(false);
+
+      channel = supabase
+        .channel(`service_inbox:${disposition ?? 'all'}`)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'service_tickets' }, (payload) => {
+          setRows(prev => {
+            if (payload.eventType === 'DELETE' && payload.old) {
+              return prev.filter(r => r.id !== (payload.old as { id: string }).id);
+            }
+            if (payload.new) {
+              const row = payload.new as ServiceTicket;
+              // Drop rows that no longer belong in this view
+              if (row.kind !== 'conversation') return prev.filter(r => r.id !== row.id);
+              if (disposition === 'untriaged' && row.inbox_disposition !== null) return prev.filter(r => r.id !== row.id);
+              if (disposition && disposition !== 'all' && disposition !== 'untriaged' && row.inbox_disposition !== disposition) {
+                return prev.filter(r => r.id !== row.id);
+              }
+              const idx = prev.findIndex(r => r.id === row.id);
+              if (idx >= 0) { const next = [...prev]; next[idx] = row; return next; }
+              return [row, ...prev];
+            }
+            return prev;
+          });
+        })
+        .subscribe();
+    })();
+    return () => { cancelled = true; if (channel) void channel.unsubscribe(); };
+  }, [disposition]);
+
+  return { rows, loading };
+}
+
+export async function setInboxDisposition(
+  ticketId: string,
+  disposition: InboxDisposition | null,
+): Promise<void> {
+  const { error } = await supabase
+    .from('service_tickets')
+    .update({ inbox_disposition: disposition })
+    .eq('id', ticketId);
+  if (error) throw new Error(`setInboxDisposition: ${error.message}`);
+  await logAction('inbox_disposition_set', ticketId, disposition ?? '(cleared)');
+}
+
+export async function promoteToTicket(
+  ticketId: string,
+  fields: { category: TicketCategory; owner_email: string },
+): Promise<void> {
+  const { error } = await supabase
+    .from('service_tickets')
+    .update({
+      kind: 'ticket',
+      inbox_disposition: 'promoted',
+      category: fields.category,
+      owner_email: fields.owner_email,
+      status: 'triaging',
+    })
+    .eq('id', ticketId);
+  if (error) throw new Error(`promoteToTicket: ${error.message}`);
+  await logAction('promoted_to_ticket', ticketId, `${fields.category} → ${fields.owner_email}`);
 }
 
 export function useCustomerLifecycle(): { rows: CustomerLifecycle[]; loading: boolean } {
