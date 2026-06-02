@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, within } from '@testing-library/react';
 import { InboxTab } from '../InboxTab';
 import type { ServiceTicket } from '../../../lib/service';
 
@@ -62,21 +62,24 @@ describe('InboxTab', () => {
 
   it('clicking Dismiss calls setInboxDisposition with dismissed', async () => {
     render(<InboxTab />);
-    const buttons = screen.getAllByRole('button', { name: /dismiss/i });
+    const table = screen.getByRole('table');
+    const buttons = within(table).getAllByRole('button', { name: /^dismiss$/i });
     fireEvent.click(buttons[0]);
     expect(setDispositionMock).toHaveBeenCalledWith('c1', 'dismissed');
   });
 
   it('clicking Sales calls setInboxDisposition with sales', async () => {
     render(<InboxTab />);
-    const buttons = screen.getAllByRole('button', { name: /^sales$/i });
+    const table = screen.getByRole('table');
+    const buttons = within(table).getAllByRole('button', { name: /^sales$/i });
     fireEvent.click(buttons[0]);
     expect(setDispositionMock).toHaveBeenCalledWith('c1', 'sales');
   });
 
   it('clicking Follow-up calls setInboxDisposition with follow_up', async () => {
     render(<InboxTab />);
-    const buttons = screen.getAllByRole('button', { name: /follow-up/i });
+    const table = screen.getByRole('table');
+    const buttons = within(table).getAllByRole('button', { name: /^follow-up$/i });
     fireEvent.click(buttons[0]);
     expect(setDispositionMock).toHaveBeenCalledWith('c1', 'follow_up');
   });

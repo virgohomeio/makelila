@@ -640,8 +640,18 @@
 
 .inboxSnippet {
   max-width: 320px;
+}
+.inboxSubject {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+.inboxPreview {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--color-ink-subtle);
+  font-size: 11px;
+  margin-top: 1px;
 }

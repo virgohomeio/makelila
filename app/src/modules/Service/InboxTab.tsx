@@ -8,17 +8,17 @@ import styles from './Service.module.css';
 
 type DispositionFilter = 'all' | 'untriaged' | InboxDisposition;
 
-const FILTERS: { key: DispositionFilter; label: string; ariaLabel: string }[] = [
-  { key: 'untriaged', label: 'Untriaged', ariaLabel: 'View untriaged inbox' },
-  { key: 'all',       label: 'All',       ariaLabel: 'View entire inbox' },
-  { key: 'sales',     label: 'Sales',     ariaLabel: 'View triaged as sales' },
-  { key: 'follow_up', label: 'Follow-up', ariaLabel: 'View triaged for later' },
-  { key: 'dismissed', label: 'Dismissed', ariaLabel: 'View archived items' },
+const FILTERS: { key: DispositionFilter; label: string }[] = [
+  { key: 'untriaged', label: 'Untriaged' },
+  { key: 'all',       label: 'All' },
+  { key: 'sales',     label: 'Sales' },
+  { key: 'follow_up', label: 'Follow-up' },
+  { key: 'dismissed', label: 'Dismissed' },
 ];
 
 function channelIcon(source: ServiceTicket['source']): string {
-  if (source === 'quo') return '☎️';
-  if (source === 'gmail') return '✉️';
+  if (source === 'quo') return '☎';
+  if (source === 'gmail') return '✉';
   return '?';
 }
 
@@ -37,10 +37,12 @@ export function InboxTab() {
   const [filter, setFilter] = useState<DispositionFilter>('untriaged');
   const { rows, loading } = useInbox(filter);
   const [promoteId, setPromoteId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   async function handleDisposition(id: string, d: InboxDisposition) {
+    setError(null);
     try { await setInboxDisposition(id, d); }
-    catch (e) { alert((e as Error).message); }
+    catch (e) { setError((e as Error).message); }
   }
 
   return (
@@ -51,10 +53,12 @@ export function InboxTab() {
             key={f.key}
             className={`${styles.chip} ${filter === f.key ? styles.chipActive : ''}`}
             onClick={() => setFilter(f.key)}
-            aria-label={f.ariaLabel}
+            aria-label={`Filter: ${f.label}`}
           >{f.label}</button>
         ))}
       </div>
+
+      {error && <div className={styles.syncMessage}>{error}</div>}
 
       {loading && <div className={styles.empty}>Loading…</div>}
       {!loading && rows.length === 0 && <div className={styles.empty}>Inbox empty.</div>}
@@ -75,11 +79,19 @@ export function InboxTab() {
           <tbody>
             {rows.map(r => (
               <tr key={r.id}>
-                <td>{channelIcon(r.source)}</td>
+                <td>
+                  <span aria-label={SOURCE_LABEL[r.source]} title={SOURCE_LABEL[r.source]}>
+                    {channelIcon(r.source)}
+                  </span>
+                </td>
                 <td>{r.customer_name ?? r.customer_phone ?? r.customer_email ?? 'Unknown'}</td>
                 <td className={styles.inboxSnippet}>
-                  {r.subject && <div>{r.subject}</div>}
-                  <div>{(r.description ?? '').slice(0, 80)}</div>
+                  {r.subject && <div className={styles.inboxSubject}>{r.subject}</div>}
+                  {r.description && (
+                    <div className={styles.inboxPreview}>
+                      {r.description.slice(0, 80)}
+                    </div>
+                  )}
                 </td>
                 <td>{relativeAge(r.last_message_at)}</td>
                 <td>{SOURCE_LABEL[r.source]}</td>
