@@ -1,19 +1,21 @@
 import { useState } from 'react';
+import { InboxTab } from './InboxTab';
 import { OnboardingTab } from './OnboardingTab';
 import { SupportTab } from './SupportTab';
 import { RepairTab } from './RepairTab';
 import styles from './Service.module.css';
 
-type Tab = 'onboarding' | 'support' | 'repair';
+type Tab = 'inbox' | 'onboarding' | 'support' | 'repair';
 
 const TABS: { key: Tab; label: string }[] = [
+  { key: 'inbox',      label: 'Inbox' },
   { key: 'onboarding', label: 'Onboarding' },
   { key: 'support',    label: 'Support Tickets' },
   { key: 'repair',     label: 'Repair' },
 ];
 
 export default function Service() {
-  const [tab, setTab] = useState<Tab>('support');
+  const [tab, setTab] = useState<Tab>('inbox');
 
   return (
     <div className={styles.layout}>
@@ -27,6 +29,7 @@ export default function Service() {
         ))}
       </div>
       <div className={styles.panel}>
+        {tab === 'inbox'      && <InboxTab />}
         {tab === 'onboarding' && <OnboardingTab />}
         {tab === 'support'    && <SupportTab />}
         {tab === 'repair'     && <RepairTab />}
