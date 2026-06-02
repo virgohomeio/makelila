@@ -21,7 +21,7 @@ export function SupportTab() {
   const { tickets, loading } = useServiceTickets('support');
   const { customers } = useCustomers();
   const [statusFilter, setStatusFilter] = useState<TicketStatus | 'all'>('all');
-  const [sourceFilter, setSourceFilter] = useState<'all' | 'customer_form' | 'hubspot' | 'gmail'>('all');
+  const [sourceFilter, setSourceFilter] = useState<'all' | 'customer_form' | 'hubspot' | 'gmail' | 'quo'>('all');
   const [topicFilter, setTopicFilter] = useState<TicketTopic | 'all'>('all');
   const [q, setQ] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
