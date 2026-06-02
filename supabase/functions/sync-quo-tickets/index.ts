@@ -341,14 +341,22 @@ async function upsertConversation(
   if (insErr) {
     // Concurrent insert won the race; the unique index ux_tickets_quo_conv
     // rejected this insert with 23505. Re-fetch the surviving row and
-    // append the messages instead.
-    if (insErr.code === '23505') {
-      const { data: race } = await admin
+    // append the messages instead. If the re-fetch itself errors, we
+    // surface that secondary error alongside the original 23505 below so
+    // debugging isn't misled.
+    let raceErr: { message: string } | null = null;
+    if (insErr.code === '23505' || /duplicate key/i.test(insErr.message)) {
+      const fetched = await admin
         .from('service_tickets')
         .select('id, quo_last_message_id, message_count')
         .eq('quo_conversation_id', conversationId)
         .maybeSingle();
+      raceErr = fetched.error ?? null;
+      const race = fetched.data;
       if (race) {
+        // Note: the recovered row may be from a pre-Inbox cron run with
+        // kind='ticket'. That's fine — we only append messages here and
+        // do not flip kind back to 'conversation'.
         const added = await insertNewMessages(admin, race.id, msgs, race.quo_last_message_id);
         if (added > 0) {
           await admin.from('service_tickets').update({
@@ -359,8 +367,14 @@ async function upsertConversation(
         }
         return 'appended';
       }
+      // race fetch returned null (row deleted between collision and
+      // re-fetch, RLS, etc.) — fall through to the throw below, which
+      // now includes raceErr context if available.
     }
-    throw new Error(`insert ticket failed (conversation ${conversationId}): ${insErr.message}`);
+    throw new Error(
+      `insert ticket failed (conversation ${conversationId}): ${insErr.message}`
+        + (raceErr ? ` (race-recovery query also failed: ${raceErr.message})` : ''),
+    );
   }
   if (!ticket) {
     throw new Error(`insert ticket returned no row (conversation ${conversationId})`);
