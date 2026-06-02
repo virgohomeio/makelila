@@ -51,4 +51,30 @@ describe('PromoteToTicketModal', () => {
     expect(promoteMock).not.toHaveBeenCalled();
     expect(onClose).toHaveBeenCalled();
   });
+
+  it('shows the error banner and does NOT close on submission failure', async () => {
+    promoteMock.mockRejectedValueOnce(new Error('permission denied'));
+    const onClose = vi.fn();
+    render(<PromoteToTicketModal conversationId="c4" onClose={onClose} />);
+
+    fireEvent.click(screen.getByRole('button', { name: /promote/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/permission denied/i)).toBeInTheDocument();
+    });
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('falls back to a generic message when a non-Error is thrown', async () => {
+    promoteMock.mockRejectedValueOnce('weird string');
+    const onClose = vi.fn();
+    render(<PromoteToTicketModal conversationId="c5" onClose={onClose} />);
+
+    fireEvent.click(screen.getByRole('button', { name: /promote/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/failed to promote conversation/i)).toBeInTheDocument();
+    });
+    expect(onClose).not.toHaveBeenCalled();
+  });
 });

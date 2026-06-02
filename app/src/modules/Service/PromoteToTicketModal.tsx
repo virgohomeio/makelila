@@ -19,7 +19,7 @@ export function PromoteToTicketModal({ conversationId, onClose }: Props) {
       await promoteToTicket(conversationId, { category, owner_email: owner });
       onClose();
     } catch (e) {
-      setError((e as Error).message);
+      setError(e instanceof Error ? e.message : 'Failed to promote conversation');
     } finally {
       setSubmitting(false);
     }
@@ -40,6 +40,7 @@ export function PromoteToTicketModal({ conversationId, onClose }: Props) {
               className={styles.modalSelect}
               value={category}
               onChange={e => setCategory(e.target.value as TicketCategory)}
+              autoFocus
             >
               <option value="support">Support</option>
               <option value="onboarding">Onboarding</option>
