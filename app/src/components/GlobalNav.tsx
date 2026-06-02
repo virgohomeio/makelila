@@ -3,6 +3,7 @@ import styles from './GlobalNav.module.css';
 import { UserBadge } from './UserBadge';
 
 const MODULES = [
+  { path: '/dashboard',     label: 'Dashboard' },
   { path: '/order-review',  label: 'Order Review' },
   { path: '/fulfillment',   label: 'Fulfillment' },
   { path: '/build',         label: 'Build' },

@@ -10,6 +10,7 @@ import Stock from './modules/Stock';
 import Customers from './modules/Customers';
 import Templates from './modules/Templates';
 import ActivityLog from './modules/ActivityLog';
+import Dashboard from './modules/Dashboard';
 import Login from './modules/Login';
 import ReturnForm from './modules/Forms/ReturnForm';
 import CancelOrderForm from './modules/Forms/CancelOrderForm';
@@ -45,6 +46,7 @@ export default function App() {
             <Route path="customers"     element={<Customers />} />
             <Route path="templates"     element={<Templates />} />
             <Route path="activity-log"  element={<ActivityLog />} />
+            <Route path="dashboard"     element={<Dashboard />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
