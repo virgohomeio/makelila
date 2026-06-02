@@ -168,6 +168,7 @@ export const SOURCE_LABEL: Record<TicketSource, string> = {
   fulfillment_flag: 'Fulfillment',
   ops_manual:       'Manual',
   gmail:            'Gmail',
+  quo:              'Quo',
 };
 
 // Allowed next-states for the state machine (UI gating)
@@ -302,7 +303,7 @@ export async function setInboxDisposition(
     .from('service_tickets')
     .update({ inbox_disposition: disposition })
     .eq('id', ticketId);
-  if (error) throw new Error(`setInboxDisposition: ${error.message}`);
+  if (error) throw error;
   await logAction('inbox_disposition_set', ticketId, disposition ?? '(cleared)');
 }
 
@@ -320,7 +321,7 @@ export async function promoteToTicket(
       status: 'triaging',
     })
     .eq('id', ticketId);
-  if (error) throw new Error(`promoteToTicket: ${error.message}`);
+  if (error) throw error;
   await logAction('promoted_to_ticket', ticketId, `${fields.category} → ${fields.owner_email}`);
 }
 
