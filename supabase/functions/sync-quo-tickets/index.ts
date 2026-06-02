@@ -275,44 +275,40 @@ async function upsertConversation(
 
   const firstMsg = msgs[0];
   const lastMsg  = msgs[msgs.length - 1];
-
-  // The inbound message tells us the customer's phone number.
   const inboundMsg = msgs.find(m => m.direction === 'incoming') ?? firstMsg;
   const customerPhone = inboundMsg.from;
-
-  // O(1) customer lookup from pre-built in-memory map (keyed by last-10 digits).
   const customer = customersByPhone.get(phoneKey(customerPhone)) ?? null;
 
-  // Check if ticket already exists for this conversation.
+  const subject = buildSubject(firstMsg, customerPhone);
+  const msgText = firstMsg.text ?? firstMsg.body ?? '';
+
+  // Existing-row lookup. Safe to use .maybeSingle() now that the partial
+  // unique index ux_tickets_quo_conv guarantees at most one row per
+  // (source='quo', quo_conversation_id) combination — no race window where
+  // two rows could both be returned.
   const { data: existing } = await admin
     .from('service_tickets')
-    .select('id, quo_last_message_id, message_count, status')
+    .select('id, quo_last_message_id, message_count')
     .eq('quo_conversation_id', conversationId)
     .maybeSingle();
 
   if (existing) {
-    // Append new messages only.
     const added = await insertNewMessages(admin, existing.id, msgs, existing.quo_last_message_id);
     if (added === 0) return 'skipped';
-
-    await admin
-      .from('service_tickets')
-      .update({
-        last_message_at:    lastMsg.createdAt,
-        quo_last_message_id: lastMsg.id,
-        message_count:       (existing.message_count ?? 0) + added,
-      })
-      .eq('id', existing.id);
-
+    await admin.from('service_tickets').update({
+      last_message_at:     lastMsg.createdAt,
+      quo_last_message_id: lastMsg.id,
+      message_count:       (existing.message_count ?? 0) + added,
+    }).eq('id', existing.id);
     return 'appended';
   }
 
-  // Create new ticket.
-  const subject = buildSubject(firstMsg, customerPhone);
-  const msgText = firstMsg.text ?? firstMsg.body ?? '';
-
+  // No existing row: insert. New rows land as kind='conversation' so they
+  // arrive in the Service Inbox for operator triage rather than the
+  // Tickets tab.
   const ticketRow = {
     source:              'quo' as const,
+    kind:                'conversation' as const,
     category:            'support',
     status:              'new',
     priority:            'normal',
@@ -342,8 +338,32 @@ async function upsertConversation(
     .select('id')
     .single();
 
-  if (insErr || !ticket) {
-    throw new Error(`insert ticket failed (conversation ${conversationId}): ${insErr?.message ?? 'no row'}`);
+  if (insErr) {
+    // Concurrent insert won the race; the unique index ux_tickets_quo_conv
+    // rejected this insert with 23505. Re-fetch the surviving row and
+    // append the messages instead.
+    if (insErr.code === '23505') {
+      const { data: race } = await admin
+        .from('service_tickets')
+        .select('id, quo_last_message_id, message_count')
+        .eq('quo_conversation_id', conversationId)
+        .maybeSingle();
+      if (race) {
+        const added = await insertNewMessages(admin, race.id, msgs, race.quo_last_message_id);
+        if (added > 0) {
+          await admin.from('service_tickets').update({
+            last_message_at:     lastMsg.createdAt,
+            quo_last_message_id: lastMsg.id,
+            message_count:       (race.message_count ?? 0) + added,
+          }).eq('id', race.id);
+        }
+        return 'appended';
+      }
+    }
+    throw new Error(`insert ticket failed (conversation ${conversationId}): ${insErr.message}`);
+  }
+  if (!ticket) {
+    throw new Error(`insert ticket returned no row (conversation ${conversationId})`);
   }
 
   await insertNewMessages(admin, ticket.id, msgs, null);
