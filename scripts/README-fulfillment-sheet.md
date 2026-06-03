@@ -35,6 +35,29 @@ file instead of upserting (apply it by hand).
 The service-role key is in the Supabase dashboard → **Project Settings → API → `service_role`**
 (or `supabase login && supabase projects api-keys --project-ref txeftbbzeflequvrmjjr`).
 
+## Customer serial numbers (sheet = source of truth)
+
+After loading `fulfillment_log`, the importer calls
+`public.sync_customer_serials_from_fulfillment()`, which populates
+`customers.serials` (a `text[]`) from the sheet:
+
+- Matches each real `LL01-…` serial to a customer by **email first**, then
+  **full name** as a fallback. Non-serial cells (`Posters`, notes, etc.) are
+  ignored.
+- **The sheet wins:** every run clears and re-populates `customers.serials`, so a
+  serial removed from the sheet disappears here too. This is a deliberate
+  exception to the usual insert-only rule (see `CLAUDE.md` → System of record).
+- Unmatched serials (customer not in the table) are **skipped and reported**, not
+  auto-created.
+
+The Customers tab "Serial(s)" column renders `customers.serials` when present,
+falling back to the older units-derived list. To re-sync serials without a full
+sheet reload, just call the function:
+
+```sql
+select public.sync_customer_serials_from_fulfillment();
+```
+
 ## Future: make it fully scheduled
 
 To run on a cron like the other syncs, port this into a Supabase Edge Function

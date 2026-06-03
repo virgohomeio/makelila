@@ -22,6 +22,10 @@ export type Customer = {
   fu2_status: string | null;
   fu_notes: string | null;
   last_synced_at: string | null;
+  // Unit serials from the fulfillment sheet (source of truth). Synced by
+  // public.sync_customer_serials_from_fulfillment(); see scripts/import-fulfillment-sheet.mjs.
+  serials: string[] | null;
+  serials_synced_at: string | null;
   created_at: string;
   updated_at: string;
 };

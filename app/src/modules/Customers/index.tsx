@@ -269,7 +269,13 @@ export default function Customers() {
                   key={c.id}
                   c={c}
                   fu={fu}
-                  serials={serialsByCustomerName.get(c.full_name?.toLowerCase() ?? '') ?? []}
+                  serials={
+                    // Sheet is the source of truth: prefer the synced serials,
+                    // fall back to the units-derived list when none are synced.
+                    (c.serials && c.serials.length > 0)
+                      ? c.serials
+                      : (serialsByCustomerName.get(c.full_name?.toLowerCase() ?? '') ?? [])
+                  }
                   onSelect={() => setSelectedCustomerId(c.id)}
                 />
               ))}

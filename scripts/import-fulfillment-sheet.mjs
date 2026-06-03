@@ -23,6 +23,9 @@ import { inflateRawSync } from 'node:zlib';
 const KEY_PATH = process.env.GSA_KEY_PATH || '.secrets/lila-bot.json';
 const SHEET_ID = process.env.SHEET_ID;
 const DRY_RUN = process.argv.includes('--dry-run');
+// Compact bootstrap: emit only the identity columns (tab,row,name,email,serial)
+// so the serial→customer sync can run before a full service-role load exists.
+const EMIT_BOOTSTRAP = process.argv.includes('--emit-bootstrap');
 const SB_URL = process.env.SUPABASE_URL;
 const SB_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
@@ -249,6 +252,22 @@ async function restUpsert(rows) {
   }
 }
 
+// After loading fulfillment_log, refresh customers.serials from it (sheet wins).
+async function syncCustomerSerials() {
+  const res = await fetch(`${SB_URL}/rest/v1/rpc/sync_customer_serials_from_fulfillment`, {
+    method: 'POST',
+    headers: {
+      apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: '{}',
+  });
+  if (!res.ok) throw new Error(`serial sync ${res.status}: ${(await res.text()).slice(0, 400)}`);
+  const report = await res.json();
+  console.error(`  customer serials: ${report.customers_updated} updated, ${report.unmatched_count} unmatched`);
+  if (report.unmatched_count > 0) console.error('  unmatched:', JSON.stringify(report.unmatched));
+}
+
 // ----- Main -------------------------------------------------------------------
 async function main() {
   const token = await getAccessToken('https://www.googleapis.com/auth/drive.readonly');
@@ -263,7 +282,32 @@ async function main() {
   console.error(`  TOTAL rows to load: ${rows.length}\n`);
 
   if (DRY_RUN) { console.error('--dry-run: not writing.'); return; }
-  if (SB_URL && SB_KEY) { console.error('Writing via REST upsert...'); await restUpsert(rows); console.error('Done (REST).'); }
+
+  if (EMIT_BOOTSTRAP) {
+    // Compact INSERT (identity columns only) — safe to apply via MCP without a
+    // service-role key. ON CONFLICT DO NOTHING so a later full load can enrich.
+    mkdirSync('scripts/out', { recursive: true });
+    const q = (v) => v === null || v === undefined || v === '' ? 'NULL' : `'${String(v).replace(/'/g, "''")}'`;
+    const values = rows.map((r) =>
+      `  (${q(r.source_tab)}, ${r.source_row}, ${q(r.customer_name)}, ${q(r.email)}, ` +
+      `${q(r.serial_number)}, ${q(JSON.stringify({ serial: r.serial_number, name: r.customer_name, email: r.email, _bootstrap: true }))}::jsonb)`
+    ).join(',\n');
+    const sql =
+      `insert into public.fulfillment_log (source_tab, source_row, customer_name, email, serial_number, raw) values\n` +
+      values + `\non conflict (source_tab, source_row) do nothing;`;
+    const path = 'scripts/out/fulfillment_bootstrap.sql';
+    writeFileSync(path, sql + '\n');
+    console.error(`Wrote compact bootstrap SQL (${rows.length} rows) to ${path}`);
+    return;
+  }
+
+  if (SB_URL && SB_KEY) {
+    console.error('Writing via REST upsert...');
+    await restUpsert(rows);
+    console.error('Syncing customer serials (sheet = source of truth)...');
+    await syncCustomerSerials();
+    console.error('Done (REST).');
+  }
   else { const p = emitSql(rows); console.error(`No SUPABASE_SERVICE_ROLE_KEY — wrote SQL to ${p}`); }
 }
 main().catch((e) => { console.error('\nERROR:', e.message); process.exit(1); });
