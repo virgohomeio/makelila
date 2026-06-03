@@ -655,11 +655,36 @@ export async function setRepairFields(
 }
 
 export async function markOnboardingComplete(lifecycleId: string): Promise<void> {
+  const completedAt = new Date().toISOString();
+  // Fetch the lifecycle row first so we can mirror onboarding_completed_at
+  // onto the linked customer's onboard_date (walkthrough #40). The FU1/FU2
+  // calendar runs off customers.onboard_date; auto-populating it removes
+  // the manual CSV-import step Reina was doing.
+  const { data: lc, error: lcErr } = await supabase
+    .from('customer_lifecycle')
+    .select('customer_id')
+    .eq('id', lifecycleId)
+    .maybeSingle();
+  if (lcErr) throw lcErr;
+
   const { error } = await supabase
     .from('customer_lifecycle')
-    .update({ onboarding_status: 'completed', onboarding_completed_at: new Date().toISOString() })
+    .update({ onboarding_status: 'completed', onboarding_completed_at: completedAt })
     .eq('id', lifecycleId);
   if (error) throw error;
+
+  // Only set onboard_date when it's still null — preserves manually-set
+  // values from prior CSV imports.
+  if (lc?.customer_id) {
+    const onboardDate = completedAt.slice(0, 10); // YYYY-MM-DD
+    const { error: cErr } = await supabase
+      .from('customers')
+      .update({ onboard_date: onboardDate })
+      .eq('id', lc.customer_id)
+      .is('onboard_date', null);
+    if (cErr) throw cErr;
+  }
+
   await logAction('onboarding_completed', lifecycleId);
 }
 

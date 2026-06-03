@@ -43,13 +43,18 @@ export const FU_STATE_META: Record<FuState, { label: string; color: string; bg: 
   unscheduled:  { label: '—',            color: '#718096', bg: '#f7fafc', sortKey: 8 },
 };
 
-/** Compute the follow-up state for a customer. FU1 cadence: 7 days after
- *  onboard. FU2 cadence: 14 days after onboard. "Today" = same calendar day. */
+// Days from onboard completion until each follow-up is due. Reina's "1-week,
+// 1-month" framing (walkthrough #40): one check-in at a week, one at a month.
+export const FU1_DAYS = 7;
+export const FU2_DAYS = 30;
+
+/** Compute the follow-up state for a customer. FU1 cadence: FU1_DAYS after
+ *  onboard. FU2 cadence: FU2_DAYS after onboard. "Today" = same calendar day. */
 export function computeFuState(c: Customer, today: Date = new Date()): FuState {
   if (!c.onboard_date) return 'unscheduled';
   const onboard = new Date(c.onboard_date + 'T00:00:00');
-  const fu1Due = new Date(onboard); fu1Due.setDate(fu1Due.getDate() + 7);
-  const fu2Due = new Date(onboard); fu2Due.setDate(fu2Due.getDate() + 14);
+  const fu1Due = new Date(onboard); fu1Due.setDate(fu1Due.getDate() + FU1_DAYS);
+  const fu2Due = new Date(onboard); fu2Due.setDate(fu2Due.getDate() + FU2_DAYS);
   const todayMid = new Date(today); todayMid.setHours(0, 0, 0, 0);
 
   if (c.fu1_status && c.fu2_status) return 'complete';

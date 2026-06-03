@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import {
   useCustomers, syncCustomersFromHubspot, exportPurchasers, pushToKlaviyo,
-  computeFuState, recordFollowUp, FU_STATE_META,
+  computeFuState, recordFollowUp, FU_STATE_META, FU1_DAYS, FU2_DAYS,
   type Customer, type FuState,
 } from '../../lib/customers';
 import { useOrders } from '../../lib/orders';
@@ -544,7 +544,7 @@ const WEEK_DAYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 type CalEvent = {
   customer: Customer;
   kind: 'fu1' | 'fu2';
-  dueDate: Date;     // the calendar-rendered date (onboard + 7 or 14)
+  dueDate: Date;     // onboard + FU1_DAYS or FU2_DAYS
   state: FuState;    // current state of this customer's overall FU
 };
 
@@ -574,8 +574,8 @@ function FollowUpCalendar({
     for (const c of customers) {
       if (!c.onboard_date) continue;
       const onboard = new Date(c.onboard_date + 'T00:00:00');
-      const fu1 = new Date(onboard); fu1.setDate(fu1.getDate() + 7);
-      const fu2 = new Date(onboard); fu2.setDate(fu2.getDate() + 14);
+      const fu1 = new Date(onboard); fu1.setDate(fu1.getDate() + FU1_DAYS);
+      const fu2 = new Date(onboard); fu2.setDate(fu2.getDate() + FU2_DAYS);
       const state = computeFuState(c, today);
       // Only include events whose due date falls within the visible window
       for (const [kind, dueDate] of [['fu1', fu1], ['fu2', fu2]] as const) {
