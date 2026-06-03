@@ -82,6 +82,17 @@ Deno.serve(async (req: Request) => {
       const draft = await buildDraftForCustomer(admin, anthropicKey, id);
       if (draft) drafts.push(draft);
     }
+
+    // If every customer in the batch errored with an LLM-error skip_reason,
+    // upstream (Anthropic) is the likely cause — return 502 so the UI shows
+    // "service unavailable" rather than rendering 0 usable drafts.
+    if (drafts.length > 0 && drafts.every(d => d.skip_reason?.startsWith('LLM error:'))) {
+      return j({
+        error: 'All drafts failed at the LLM stage — Anthropic likely down. First error: ' + drafts[0].skip_reason,
+        drafts,
+      }, 502);
+    }
+
     return j({ drafts });
   } catch (err) {
     return j({ error: `Uncaught: ${(err as Error)?.message ?? String(err)}` }, 500);
@@ -200,17 +211,108 @@ async function buildDraftForCustomer(
     };
   }
 
-  // Order (most recent by customer_email)
-  const orderRes = c.email
-    ? await admin.from('orders').select('order_ref, placed_at, country').eq('customer_email', c.email).order('placed_at', { ascending: false }).limit(1).maybeSingle()
-    : { data: null };
-  const orderRow = orderRes.data;
+  // Activity bundle for the LLM prompt (independent of skip rules — fetches
+  // latest regardless of status so Claude sees historical refunds/returns
+  // when drafting). Each "last 1" per table, newest first.
+  const activityParts: string[] = [];
 
-  // Unit (most recent shipped to this customer_name)
-  const unitRes = c.full_name
-    ? await admin.from('units').select('serial, batch, shipped_at').ilike('customer_name', c.full_name).order('shipped_at', { ascending: false, nullsFirst: false }).limit(1).maybeSingle()
-    : { data: null };
-  const unitRow = unitRes.data;
+  if (c.email) {
+    const { data: latestReturn } = await admin
+      .from('returns')
+      .select('return_ref, status, reason, created_at')
+      .eq('customer_email', c.email)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (latestReturn) {
+      activityParts.push(
+        `Return ${latestReturn.return_ref} (${latestReturn.status}) on ${latestReturn.created_at?.slice(0,10) ?? '?'}` +
+        (latestReturn.reason ? ` — ${latestReturn.reason.slice(0, 100)}` : '')
+      );
+    }
+
+    const { data: latestApproval } = await admin
+      .from('refund_approvals')
+      .select('status, refund_amount_usd, created_at')
+      .eq('customer_email', c.email)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (latestApproval) {
+      activityParts.push(
+        `Refund approval ${latestApproval.status}` +
+        (latestApproval.refund_amount_usd ? ` ($${latestApproval.refund_amount_usd})` : '') +
+        ` on ${latestApproval.created_at?.slice(0,10) ?? '?'}`
+      );
+    }
+
+    const { data: latestCancel } = await admin
+      .from('order_cancellations')
+      .select('status, reason, created_at')
+      .eq('customer_email', c.email)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (latestCancel) {
+      activityParts.push(
+        `Cancellation request (${latestCancel.status}) on ${latestCancel.created_at?.slice(0,10) ?? '?'}` +
+        (latestCancel.reason ? ` — ${latestCancel.reason.slice(0, 100)}` : '')
+      );
+    }
+  }
+
+  const activitySummary = activityParts.length > 0 ? activityParts.join('\n') : '(no recent returns / refunds / cancellations)';
+
+  // Order (most recent by customer_email, fallback to customer_name)
+  let orderRow: { order_ref: string; placed_at: string | null; country: string | null } | null = null;
+  if (c.email) {
+    const { data } = await admin
+      .from('orders')
+      .select('order_ref, placed_at, country')
+      .eq('customer_email', c.email)
+      .order('placed_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    orderRow = data;
+  } else if (c.full_name) {
+    // Email-null fallback: lowercase-trimmed match on customer_name.
+    const needle = c.full_name.toLowerCase().trim();
+    const { data: candidates } = await admin
+      .from('orders')
+      .select('order_ref, placed_at, country, customer_name')
+      .not('customer_name', 'is', null)
+      .order('placed_at', { ascending: false })
+      .limit(50);
+    const match = (candidates ?? []).find(o =>
+      o.customer_name && o.customer_name.toLowerCase().trim() === needle
+    );
+    if (match) {
+      orderRow = { order_ref: match.order_ref, placed_at: match.placed_at, country: match.country };
+    }
+  }
+
+  // Unit (most recent shipped to this customer_name).
+  // Use a lowercase-trimmed exact match. ilike() is case-insensitive but
+  // treats % and _ as wildcards, which is unsafe for arbitrary names; an
+  // explicit lower(trim(...)) join in SQL would be ideal but the Supabase
+  // JS client doesn't expose a `lower()` filter, so fetch a candidate set
+  // and filter client-side.
+  let unitRow: { serial: string; batch: string; shipped_at: string | null } | null = null;
+  if (c.full_name) {
+    const needle = c.full_name.toLowerCase().trim();
+    const { data: candidates } = await admin
+      .from('units')
+      .select('serial, batch, shipped_at, customer_name')
+      .not('customer_name', 'is', null)
+      .order('shipped_at', { ascending: false, nullsFirst: false })
+      .limit(50);
+    const match = (candidates ?? []).find(u =>
+      u.customer_name && u.customer_name.toLowerCase().trim() === needle
+    );
+    if (match) {
+      unitRow = { serial: match.serial, batch: match.batch, shipped_at: match.shipped_at };
+    }
+  }
 
   // Quo history (last 20 messages, chronological)
   const { data: quoMsgs } = await admin
@@ -237,7 +339,8 @@ async function buildDraftForCustomer(
     unitSerial: unitRow?.serial ?? null,
     unitBatch: unitRow?.batch ?? null,
     orderRef: orderRow?.order_ref ?? null,
-    activitySummary: '(none)',
+    activitySummary,
+    fuNotes: c.fu_notes ?? null,
     quoHistory: history.map(m => `${m.direction} ${m.sent_at?.slice(0,10) ?? '?'}: ${(m.body_text ?? '').slice(0, 200)}`).join('\n'),
   });
 
@@ -268,6 +371,7 @@ function composePrompt(args: {
   unitBatch: string | null;
   orderRef: string | null;
   activitySummary: string;
+  fuNotes: string | null;
   quoHistory: string;
 }): string {
   return `You are drafting a short SMS follow-up from Reina at VCycene (the company
@@ -293,6 +397,9 @@ Customer profile:
 
 Recent activity:
 ${args.activitySummary}
+
+Operator notes on this customer (most recent first):
+${args.fuNotes ? args.fuNotes.slice(-500) : '(none)'}
 
 Last few Quo messages with this customer (chronological):
 ${args.quoHistory || '(none)'}
