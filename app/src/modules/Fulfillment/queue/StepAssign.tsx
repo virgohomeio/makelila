@@ -22,8 +22,19 @@ export function StepAssign({ row }: { row: FulfillmentQueueRow }) {
   const available = useMemo(() => slots.filter(s => s.status === 'available' && s.serial), [slots]);
   const suggested = useMemo(() => autoSuggestSerial(slots), [slots]);
   const [picked, setPicked] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const filteredAvailable = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return available;
+    return available.filter(s =>
+      s.serial?.toLowerCase().includes(q)
+      || s.skid.toLowerCase().includes(q)
+      || s.batch?.toLowerCase().includes(q),
+    );
+  }, [available, search]);
 
   const effective = picked ?? suggested;
 
@@ -48,8 +59,24 @@ export function StepAssign({ row }: { row: FulfillmentQueueRow }) {
       <p style={{ fontSize: 11, color: 'var(--color-ink-subtle)', marginBottom: 10 }}>
         Auto-suggested next: <strong>{suggested ?? '—'}</strong>. Click any available slot to override.
       </p>
+      <input
+        type="search"
+        value={search}
+        onChange={e => setSearch(e.target.value)}
+        placeholder="Search by serial, skid, or batch…"
+        style={{
+          width: '100%', maxWidth: 320, marginBottom: 10,
+          padding: '6px 10px', fontSize: 12,
+          border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)',
+        }}
+      />
+      {filteredAvailable.length === 0 && available.length > 0 && (
+        <div style={{ fontSize: 11, color: 'var(--color-ink-subtle)', marginBottom: 8 }}>
+          No matches for "{search}". {available.length} unit{available.length === 1 ? '' : 's'} available — clear search to see all.
+        </div>
+      )}
       <div className={styles.slotGrid}>
-        {available.map(s => (
+        {filteredAvailable.map(s => (
           <div
             key={`${s.skid}-${s.slot_index}`}
             className={[

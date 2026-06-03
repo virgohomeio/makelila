@@ -1,10 +1,11 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   useServiceTickets, createTicket, syncGmailTickets,
   STATUS_META, PRIORITY_META, SOURCE_LABEL, TOPIC_LABEL,
   type TicketStatus, type TicketPriority, type TicketTopic, type ServiceTicket,
 } from '../../lib/service';
 import { useCustomers, type Customer } from '../../lib/customers';
+import { useUnits } from '../../lib/stock';
 import { TicketDetailPanel } from './TicketDetailPanel';
 import styles from './Service.module.css';
 
@@ -196,14 +197,39 @@ function NewTicketModal({
   onClose: () => void;
   onCreated: (t: ServiceTicket) => void;
 }) {
+  const { units } = useUnits();
   const [subject, setSubject] = useState('');
   const [description, setDescription] = useState('');
   const [priority, setPriority] = useState<TicketPriority>('normal');
   const [customerSearch, setCustomerSearch] = useState('');
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [unitSerial, setUnitSerial] = useState('');
+  const [serialAutoFilled, setSerialAutoFilled] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Auto-populate the unit serial when a customer is picked (walkthrough #36).
+  // Match on lowercased customer_name; if the customer has multiple shipped
+  // units we pick the most-recent and tag the field with a hint. We only
+  // overwrite the serial when (a) the field is empty, or (b) it was
+  // previously auto-filled — never when the operator has typed manually.
+  useEffect(() => {
+    if (!selectedCustomer) return;
+    if (unitSerial && !serialAutoFilled) return;
+    const lcName = selectedCustomer.full_name.toLowerCase();
+    const matches = units
+      .filter(u => u.customer_name?.toLowerCase() === lcName)
+      .sort((a, b) => (b.shipped_at ?? '').localeCompare(a.shipped_at ?? ''));
+    if (matches.length === 0) return;
+    setUnitSerial(matches[0].serial);
+    setSerialAutoFilled(true);
+  }, [selectedCustomer, units, unitSerial, serialAutoFilled]);
+
+  const matchedUnitCount = useMemo(() => {
+    if (!selectedCustomer) return 0;
+    const lcName = selectedCustomer.full_name.toLowerCase();
+    return units.filter(u => u.customer_name?.toLowerCase() === lcName).length;
+  }, [selectedCustomer, units]);
 
   const candidates = useMemo(() => {
     const needle = customerSearch.trim().toLowerCase();
@@ -337,9 +363,14 @@ function NewTicketModal({
                 type="text"
                 className={styles.modalInput}
                 value={unitSerial}
-                onChange={e => setUnitSerial(e.target.value)}
+                onChange={e => { setUnitSerial(e.target.value); setSerialAutoFilled(false); }}
                 placeholder="LL01-… (optional)"
               />
+              {serialAutoFilled && matchedUnitCount > 0 && (
+                <span className={styles.muted} style={{ fontSize: 10, marginTop: 2 }}>
+                  Auto-filled from {selectedCustomer?.full_name}'s {matchedUnitCount === 1 ? 'shipped unit' : `most recent of ${matchedUnitCount} shipped units`} — edit to override.
+                </span>
+              )}
             </div>
           </div>
           {error && <div className={styles.modalError}>{error}</div>}
