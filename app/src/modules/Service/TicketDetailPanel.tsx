@@ -4,11 +4,12 @@ import {
   STATUS_META, CATEGORY_META, PRIORITY_META, SOURCE_LABEL, TOPIC_LABEL, NEXT_STATUSES,
   ISSUE_AREAS, ISSUE_AREA_LABEL,
   updateTicketStatus, assignTicketOwner, setTicketPriority, setTicketIssueArea, setTicketCategory,
-  updateTicketNotes, setRepairFields, reclassifyTicket, deleteTicket, updateTicketSubject,
+  setRepairFields, reclassifyTicket, deleteTicket, updateTicketSubject,
   useCustomerLifecycle, warrantyState,
   useTicketMessages, useClassificationLog,
 } from '../../lib/service';
 import { AttachmentStrip } from './AttachmentStrip';
+import { TicketNotes } from './TicketNotes';
 import styles from './Service.module.css';
 
 const OPS_OWNERS = [
@@ -26,7 +27,6 @@ type Props = {
 };
 
 export function TicketDetailPanel({ ticket, onClose }: Props) {
-  const [notes, setNotes] = useState(ticket.internal_notes ?? '');
   const [defectCat, setDefectCat] = useState(ticket.defect_category ?? '');
   const [parts, setParts] = useState(ticket.parts_needed ?? '');
   const [busy, setBusy] = useState(false);
@@ -358,20 +358,8 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
         </div>
 
         <div className={styles.detailSection}>
-          <div className={styles.detailSectionLabel}>Internal notes</div>
-          <textarea
-            className={styles.textarea}
-            placeholder="Internal notes (ops only)"
-            value={notes}
-            onChange={e => setNotes(e.target.value)}
-          />
-          <div className={styles.actionsRow}>
-            <button
-              className={styles.btnSecondary}
-              disabled={busy}
-              onClick={() => run(updateTicketNotes(ticket.id, notes))}
-            >Save notes</button>
-          </div>
+          <div className={styles.detailSectionLabel}>Notes</div>
+          <TicketNotes ticketId={ticket.id} />
         </div>
 
         {ticket.hubspot_ticket_id && (
