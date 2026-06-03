@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { supabaseTelemetry as supabase } from './supabaseTelemetry';
+import { supabaseTelemetry } from './supabaseTelemetry';
+
+// Non-null assertion: the App.tsx route guard ensures Dashboard (and
+// therefore this module's hooks) is only mounted when telemetry is
+// configured. supabaseTelemetry was made nullable so importing this file
+// doesn't crash unrelated routes like /login when env vars are missing.
+const supabase = supabaseTelemetry!;
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 

@@ -12,18 +12,19 @@ import { createClient } from '@supabase/supabase-js';
 const url = import.meta.env.VITE_TELEMETRY_SUPABASE_URL;
 const anonKey = import.meta.env.VITE_TELEMETRY_SUPABASE_ANON_KEY;
 
-if (!url || !anonKey) {
-  throw new Error(
-    'Missing VITE_TELEMETRY_SUPABASE_URL or VITE_TELEMETRY_SUPABASE_ANON_KEY. ' +
-    'These point the Dashboard at the device-telemetry project. ' +
-    'Copy .env.example to .env and fill in values.',
-  );
-}
+// Exported as a flag so callers (mainly the Dashboard route) can render a
+// "Telemetry not configured" state instead of crashing the module at import.
+// Previously this file threw at module load, which propagated through
+// dashboard.ts and broke unrelated routes like /login when the telemetry
+// env vars were absent.
+export const isTelemetryConfigured = !!(url && anonKey);
 
-export const supabaseTelemetry = createClient(url, anonKey, {
-  auth: {
-    persistSession: false,
-    autoRefreshToken: false,
-    storageKey: 'sb-telemetry-auth',
-  },
-});
+export const supabaseTelemetry = isTelemetryConfigured
+  ? createClient(url!, anonKey!, {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+        storageKey: 'sb-telemetry-auth',
+      },
+    })
+  : null;
