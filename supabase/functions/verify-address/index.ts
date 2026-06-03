@@ -186,6 +186,12 @@ Deno.serve(async (req: Request) => {
         // Claude says plausible but couldn't infer a postal — take the
         // customer's postal at face value and call it a match.
         match = 'match';
+      } else if (claudeVerdict === 'plausible' && !customerPostal) {
+        // Shopify didn't capture the customer's postal at our end (common
+        // for older orders before we started recording postal_code). Google
+        // returned a usable granularity AND Claude judged the address
+        // plausible — the order is deliverable, treat as match.
+        match = 'match';
       } else if (claudeVerdict === 'implausible') {
         match = 'mismatch';
       }
