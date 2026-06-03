@@ -39,6 +39,9 @@ export type Order = {
   address_google_formatted: string | null;
   address_google_postal: string | null;
   address_customer_postal: string | null;
+  address_claude_verdict: 'plausible' | 'implausible' | 'unknown' | null;
+  address_claude_notes: string | null;
+  address_claude_postal: string | null;
   freight_estimate_usd: number;
   freight_threshold_usd: number;
   total_usd: number;

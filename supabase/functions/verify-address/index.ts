@@ -1,10 +1,18 @@
-// verify-address: on-demand validation for an order's address via Google's
-// Address Validation API (addressvalidation.googleapis.com/v1:validateAddress).
+// verify-address: on-demand validation for an order's address.
+//
+// Primary path: Google's Address Validation API (addressvalidation.googleapis.com/v1:validateAddress).
 // Unlike the Geocoding API (which just resolves an address to coordinates and
 // echoes a best-effort match), this returns a real validation verdict plus the
 // USPS/postal-standardized address. We compare the validated postal with the
 // customer's parsed postal and write the verdict to orders.address_match. On
 // 'mismatch', also flips orders.status to 'flagged'.
+//
+// Fallback path (walkthrough #13): when Google returns 'unverifiable' (common
+// on Canadian rural addresses where the data coverage is poor), we hand the
+// address to Claude to judge plausibility and infer the postal. The Claude
+// verdict + reasoning is stored on the order so operators can see WHY a
+// verdict was overridden, and `address_match` is upgraded from
+// 'unverifiable' to 'match'/'mismatch' if Claude returns a usable answer.
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { corsHeaders } from '../_shared/cors.ts';
@@ -146,12 +154,57 @@ Deno.serve(async (req: Request) => {
     match = 'mismatch';
   }
 
+  // ─── Claude fallback (walkthrough #13) ──────────────────────────────
+  // Only run when Google said "unverifiable" AND the Anthropic key is set.
+  // We never call Claude for orders Google already verified — Google's data
+  // is authoritative when it returns a real granularity.
+  let claudeVerdict: 'plausible' | 'implausible' | 'unknown' | null = null;
+  let claudeNotes: string | null = null;
+  let claudePostal: string | null = null;
+  const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY');
+  if (match === 'unverifiable' && anthropicKey) {
+    try {
+      const llm = await claudeJudgeAddress(anthropicKey, {
+        address_line: order.address_line,
+        city: order.city,
+        region: order.region_state,
+        postal: order.postal_code,
+        country: order.country,
+      });
+      claudeVerdict = llm.verdict;
+      claudeNotes = llm.notes;
+      claudePostal = llm.inferred_postal;
+      // Upgrade the match verdict when Claude returns a usable answer:
+      //   plausible + postal matches → 'match'
+      //   plausible + postal differs → 'mismatch' (Claude inferred a different postal)
+      //   implausible                → 'mismatch' (the address itself is bogus)
+      //   unknown                    → leave as 'unverifiable'
+      const normClaudePostal = normalizePostal(claudePostal, order.country);
+      if (claudeVerdict === 'plausible' && normClaudePostal && customerPostal) {
+        match = normClaudePostal === customerPostal ? 'match' : 'mismatch';
+      } else if (claudeVerdict === 'plausible' && customerPostal && !normClaudePostal) {
+        // Claude says plausible but couldn't infer a postal — take the
+        // customer's postal at face value and call it a match.
+        match = 'match';
+      } else if (claudeVerdict === 'implausible') {
+        match = 'mismatch';
+      }
+    } catch (e) {
+      // Fallback failure is non-fatal — keep Google's "unverifiable" verdict
+      // and record the error in notes for the operator.
+      claudeNotes = `Claude fallback errored: ${(e as Error).message}`;
+    }
+  }
+
   const patch: Record<string, unknown> = {
     address_verified_at: new Date().toISOString(),
     address_match: match,
     address_google_formatted: formatted,
     address_google_postal: validatedPostalRaw,
     address_customer_postal: customerPostal,
+    address_claude_verdict: claudeVerdict,
+    address_claude_notes:   claudeNotes,
+    address_claude_postal:  claudePostal,
   };
   if (match === 'mismatch' && order.status !== 'flagged') {
     patch.status = 'flagged';
@@ -164,8 +217,86 @@ Deno.serve(async (req: Request) => {
     customer_postal: customerPostal,
     google_postal: validatedPostalRaw,
     google_formatted: formatted,
+    claude_verdict: claudeVerdict,
+    claude_notes: claudeNotes,
+    claude_postal: claudePostal,
   });
 });
+
+// ────────────────────────────────────────────────────────────────────────
+// Claude fallback (walkthrough #13)
+// ────────────────────────────────────────────────────────────────────────
+type ClaudeJudgement = {
+  verdict: 'plausible' | 'implausible' | 'unknown';
+  inferred_postal: string | null;
+  notes: string;
+};
+
+async function claudeJudgeAddress(
+  apiKey: string,
+  addr: { address_line: string | null; city: string | null; region: string | null; postal: string | null; country: string },
+): Promise<ClaudeJudgement> {
+  const parts = [
+    addr.address_line, addr.city,
+    [addr.region, addr.postal].filter(Boolean).join(' '),
+    addr.country,
+  ].filter(Boolean);
+  const composed = parts.join(', ');
+
+  const prompt =
+`You are validating a shipping address. Reply with ONLY a JSON object, no prose, with three fields:
+- "verdict": one of "plausible" (the address looks like a real, deliverable place), "implausible" (the address contains contradictions, typos, or is obviously fake), or "unknown" (you cannot tell).
+- "inferred_postal": the postal/ZIP code you would expect for this address, or null if you cannot infer one. Use the country's standard format (CA: A1A 1A1, US: 12345).
+- "notes": one sentence explaining your judgment.
+
+Address to validate:
+${composed}
+
+Customer-supplied postal: ${addr.postal ?? '(none)'}
+Country: ${addr.country}
+
+Examples:
+- "123 Main St, Toronto, ON M5V 2T6, CA" → {"verdict":"plausible","inferred_postal":"M5V 2T6","notes":"Standard downtown Toronto address with matching postal code."}
+- "PO Box 14, Whitehorse, YT Y1A 0C4, CA" → {"verdict":"plausible","inferred_postal":"Y1A 0C4","notes":"Valid Yukon PO box with correct Y1A prefix."}
+- "999 Elm, Springfield, ON 99999 9X9, CA" → {"verdict":"implausible","inferred_postal":null,"notes":"Postal code does not match Canadian format."}`;
+
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 256,
+      messages: [{ role: 'user', content: prompt }],
+    }),
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Anthropic ${res.status}: ${body.slice(0, 300)}`);
+  }
+  const data = await res.json() as { content?: Array<{ type: string; text?: string }> };
+  const text = (data.content ?? []).find(b => b.type === 'text')?.text ?? '';
+  // Tolerant parse: pull the first {...} block in case the model wrapped it in prose.
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) throw new Error(`Claude returned non-JSON: ${text.slice(0, 200)}`);
+  const parsed = JSON.parse(jsonMatch[0]) as {
+    verdict?: string;
+    inferred_postal?: string | null;
+    notes?: string;
+  };
+  const verdict: ClaudeJudgement['verdict'] =
+    parsed.verdict === 'plausible'   ? 'plausible'
+  : parsed.verdict === 'implausible' ? 'implausible'
+  : 'unknown';
+  return {
+    verdict,
+    inferred_postal: parsed.inferred_postal ?? null,
+    notes: parsed.notes ?? '(no notes)',
+  };
+}
 
 function j(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {

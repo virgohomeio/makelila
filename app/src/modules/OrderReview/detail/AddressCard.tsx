@@ -149,7 +149,26 @@ export function AddressCard({ order }: { order: Order }) {
                 letterSpacing: 0.3,
               }}>UNVERIFIABLE</span>
             )}
+            {order.address_claude_verdict && (
+              <span
+                title={order.address_claude_notes ?? ''}
+                style={{
+                  fontSize: 10, padding: '3px 8px', borderRadius: 4,
+                  background: '#ebf8ff', color: '#2c5282', border: '1px solid #90cdf4',
+                  fontWeight: 700, letterSpacing: 0.3,
+                }}
+              >via Claude: {order.address_claude_verdict}</span>
+            )}
           </div>
+
+          {order.address_claude_notes && (
+            <div style={{ marginTop: 6, fontSize: 11, color: 'var(--color-ink-muted)', fontStyle: 'italic' }}>
+              Claude: {order.address_claude_notes}
+              {order.address_claude_postal && (
+                <> · inferred postal: <strong>{order.address_claude_postal}</strong></>
+              )}
+            </div>
+          )}
 
           {order.address_match === 'mismatch' && order.address_google_formatted && (
             <div style={{ marginTop: 10, fontSize: 11, color: 'var(--color-ink-muted)' }}>
