@@ -23,6 +23,7 @@ type ShopifyOrder = {
   email?: string | null;
   phone?: string | null;
   created_at?: string | null;
+  currency?: string | null;           // ISO code, e.g. "USD" / "CAD"
   total_price?: string | null;
   subtotal_price?: string | null;
   total_tax?: string | null;
@@ -51,6 +52,7 @@ type MappedOrder = {
   freight_estimate_usd: number;
   freight_threshold_usd: number;
   total_usd: number;
+  currency: string;
   postal_code: string | null;
   subtotal_usd: number | null;
   tax_usd: number | null;
@@ -140,6 +142,7 @@ function mapOrder(
     freight_estimate_usd: freight,
     freight_threshold_usd: 200.00,
     total_usd: total,
+    currency: o.currency ?? 'USD',
     postal_code: postal,
     subtotal_usd: num(o.subtotal_price),
     tax_usd: num(o.total_tax),
@@ -254,6 +257,7 @@ serve(async (req: Request) => {
     const refreshPatch: Record<string, unknown> = {
       placed_at: m.placed_at,
       freight_estimate_usd: m.freight_estimate_usd,
+      currency: m.currency,
       postal_code: m.postal_code,
       subtotal_usd: m.subtotal_usd,
       tax_usd: m.tax_usd,

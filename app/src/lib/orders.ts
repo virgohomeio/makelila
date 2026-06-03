@@ -44,6 +44,8 @@ export type Order = {
   address_claude_postal: string | null;
   freight_estimate_usd: number;
   freight_threshold_usd: number;
+  // Monetary *_usd fields hold the amount in the order's own `currency`, despite the historical `_usd` naming.
+  currency: string;
   total_usd: number;
   subtotal_usd: number | null;
   tax_usd: number | null;

@@ -1,4 +1,5 @@
 import type { Order } from '../../../lib/orders';
+import { formatMoney } from '../../../lib/money';
 import styles from '../OrderReview.module.css';
 
 export function evaluateReadiness(order: Order): {
@@ -34,8 +35,8 @@ export function evaluateReadiness(order: Order): {
   const reason3 = freightValue <= 0
     ? 'Freight not synced — get quote from ClickShip'
     : freightValue > threshold
-      ? `Freight $${freightValue.toFixed(2)} exceeds $${threshold.toFixed(2)} threshold`
-      : `Freight $${freightValue.toFixed(2)} within $${threshold.toFixed(2)} threshold`;
+      ? `Freight ${formatMoney(freightValue, order.currency)} exceeds ${formatMoney(threshold, order.currency)} threshold`
+      : `Freight ${formatMoney(freightValue, order.currency)} within ${formatMoney(threshold, order.currency)} threshold`;
 
   return { contact, address: addressOk, freight: freightOk, reason1, reason2, reason3 };
 }
