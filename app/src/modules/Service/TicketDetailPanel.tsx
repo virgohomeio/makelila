@@ -13,10 +13,9 @@ import styles from './Service.module.css';
 const OPS_OWNERS = [
   'george@virgohome.io',
   'julie@virgohome.io',
-  'ashwini@virgohome.io',
   'junaid@virgohome.io',
-  'aaron@virgohome.io',
   'raymond@virgohome.io',
+  'reina@virgohome.io',
   'huayi@virgohome.io',
 ];
 

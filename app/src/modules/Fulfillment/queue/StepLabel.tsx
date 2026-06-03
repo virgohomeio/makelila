@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { confirmLabel, type FulfillmentQueueRow } from '../../../lib/fulfillment';
 import styles from '../Fulfillment.module.css';
 
-const CARRIERS = ['UPS', 'FedEx', 'Purolator', 'Canada Post'] as const;
+const CARRIERS = ['UPS', 'FedEx', 'Purolator', 'Canada Post', 'Canpar', 'GLS'] as const;
 
 const FREIGHTCOM_URL = 'https://live.freightcom.com/c/mNyRdnwfdBn2raBkyImG9lemXej03RJB/ship/new';
 const AMAZON_URL     = 'https://www.amazon.com/gp/your-account/order-history';

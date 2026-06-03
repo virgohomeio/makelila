@@ -11,6 +11,20 @@ import styles from './Customers.module.css';
 
 export default function Customers() {
   const { customers, loading } = useCustomers();
+  const { units } = useUnits();
+  // Pre-build a lowercase-name → serial[] map so each row can render its
+  // serial(s) without re-filtering the full units list.
+  const serialsByCustomerName = useMemo(() => {
+    const m = new Map<string, string[]>();
+    for (const u of units) {
+      if (!u.customer_name) continue;
+      const key = u.customer_name.toLowerCase();
+      const arr = m.get(key);
+      if (arr) arr.push(u.serial);
+      else m.set(key, [u.serial]);
+    }
+    return m;
+  }, [units]);
   const [search, setSearch] = useState('');
   const [country, setCountry] = useState<'all' | 'CA' | 'US' | 'other'>('all');
   const [fuFilter, setFuFilter] = useState<'all' | 'needs_action' | FuState>('all');
@@ -242,6 +256,7 @@ export default function Customers() {
                 <th>Name</th>
                 <th>Email</th>
                 <th>Phone</th>
+                <th>Serial(s)</th>
                 <th>Address</th>
                 <th>Follow-up</th>
                 <th>Last sync</th>
@@ -249,10 +264,16 @@ export default function Customers() {
             </thead>
             <tbody>
               {filtered.map(({ c, fu }) => (
-                <CustomerRow key={c.id} c={c} fu={fu} onSelect={() => setSelectedCustomerId(c.id)} />
+                <CustomerRow
+                  key={c.id}
+                  c={c}
+                  fu={fu}
+                  serials={serialsByCustomerName.get(c.full_name?.toLowerCase() ?? '') ?? []}
+                  onSelect={() => setSelectedCustomerId(c.id)}
+                />
               ))}
               {filtered.length === 0 && (
-                <tr><td colSpan={6} className={styles.empty}>No customers match the filter.</td></tr>
+                <tr><td colSpan={7} className={styles.empty}>No customers match the filter.</td></tr>
               )}
             </tbody>
           </table>
@@ -280,16 +301,24 @@ export default function Customers() {
   );
 }
 
-function CustomerRow({ c, fu, onSelect }: { c: Customer; fu: FuState; onSelect: () => void }) {
+function CustomerRow({ c, fu, serials, onSelect }: { c: Customer; fu: FuState; serials: string[]; onSelect: () => void }) {
   const cityRegion = [c.city, c.region].filter(Boolean).join(', ');
   const fullAddrParts = [c.address_line, cityRegion, c.postal_code, c.country].filter(Boolean);
   const addr = fullAddrParts.join(' · ');
   const fuMeta = FU_STATE_META[fu];
+  const serialsLabel = serials.length === 0
+    ? null
+    : serials.length === 1
+      ? serials[0]
+      : `${serials[0]} +${serials.length - 1}`;
   return (
     <tr onClick={onSelect} className={styles.clickableRow}>
       <td><strong>{c.full_name || <span className={styles.muted}>—</span>}</strong></td>
       <td className={styles.mono}>{c.email ?? <span className={styles.muted}>—</span>}</td>
       <td>{c.phone ?? <span className={styles.muted}>—</span>}</td>
+      <td className={styles.mono} title={serials.join(', ')}>
+        {serialsLabel ?? <span className={styles.muted}>—</span>}
+      </td>
       <td title={addr}>{addr || <span className={styles.muted}>—</span>}</td>
       <td>
         {fu === 'unscheduled' ? (
