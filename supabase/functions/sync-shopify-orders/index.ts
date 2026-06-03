@@ -11,11 +11,18 @@ type ShopifyAddress = {
   phone?: string | null;
 };
 
+// Shopify money_set: amounts in both the shop's base currency (shop_money)
+// and what the customer was charged/shown (presentment_money). We use
+// presentment everywhere so a CAD customer's summary shows CAD amounts.
+type Money = { amount?: string | null; currency_code?: string | null };
+type MoneySet = { shop_money?: Money | null; presentment_money?: Money | null };
+
 type ShopifyLineItem = {
   sku?: string | null;
   title?: string | null;
   quantity?: number | null;
   price?: string | null;
+  price_set?: MoneySet | null;
 };
 
 type ShopifyOrder = {
@@ -23,15 +30,20 @@ type ShopifyOrder = {
   email?: string | null;
   phone?: string | null;
   created_at?: string | null;
-  currency?: string | null;           // ISO code, e.g. "USD" / "CAD"
+  currency?: string | null;           // shop/settlement currency, e.g. "USD"
+  presentment_currency?: string | null; // what the customer was charged in, e.g. "CAD"
   total_price?: string | null;
   subtotal_price?: string | null;
   total_tax?: string | null;
   total_discounts?: string | null;
+  total_price_set?: MoneySet | null;
+  subtotal_price_set?: MoneySet | null;
+  total_tax_set?: MoneySet | null;
+  total_discounts_set?: MoneySet | null;
   discount_codes?: Array<{ code?: string | null }> | null;
   payment_gateway_names?: string[] | null;
   financial_status?: string | null;
-  shipping_lines?: Array<{ price?: string | null }>;
+  shipping_lines?: Array<{ price?: string | null; price_set?: MoneySet | null }>;
   shipping_address?: ShopifyAddress | null;
   customer?: { first_name?: string | null; last_name?: string | null; email?: string | null; phone?: string | null } | null;
   line_items?: ShopifyLineItem[];
@@ -70,6 +82,12 @@ function num(v: string | null | undefined): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+// Amount the customer was actually charged: prefer presentment_money, fall back
+// to shop_money, then to the legacy flat string.
+function presentmentNum(set: MoneySet | null | undefined, fallback?: string | null): number | null {
+  return num(set?.presentment_money?.amount) ?? num(set?.shop_money?.amount) ?? num(fallback);
+}
+
 function verdictFor(
   addressLine: string | null | undefined,
   postalCode: string | null,
@@ -89,19 +107,7 @@ function verdictFor(
 function parseShippingFreight(order: ShopifyOrder): number {
   const line = order.shipping_lines?.[0];
   if (!line) return 0;
-  // Newer API: price_set.shop_money.amount (multi-currency aware)
-  const priceSetAmount = (line as { price_set?: { shop_money?: { amount?: string | null } } })
-    .price_set?.shop_money?.amount;
-  if (priceSetAmount) {
-    const n = Number(priceSetAmount);
-    if (Number.isFinite(n)) return n;
-  }
-  // Older API: flat price string
-  if (line.price) {
-    const n = Number(line.price);
-    if (Number.isFinite(n)) return n;
-  }
-  return 0;
+  return presentmentNum(line.price_set, line.price) ?? 0;
 }
 
 function mapOrder(
@@ -121,7 +127,7 @@ function mapOrder(
   const email = o.customer?.email ?? o.email ?? null;
   const phone = o.customer?.phone ?? o.phone ?? addr.phone ?? null;
   const freight = parseShippingFreight(o);
-  const total = Number(o.total_price ?? '0') || 0;
+  const total = presentmentNum(o.total_price_set, o.total_price) ?? 0;
   const postal = addr.zip?.trim() || null;
   const verdict = verdictFor(addr.address1, postal, remotePrefixes);
   // Anything non-house (apt OR remote) gets auto-flagged for ops review.
@@ -142,11 +148,12 @@ function mapOrder(
     freight_estimate_usd: freight,
     freight_threshold_usd: 200.00,
     total_usd: total,
-    currency: o.currency ?? 'USD',
+    // Currency the customer was charged in (presentment); falls back to shop currency.
+    currency: o.presentment_currency ?? o.currency ?? 'USD',
     postal_code: postal,
-    subtotal_usd: num(o.subtotal_price),
-    tax_usd: num(o.total_tax),
-    discount_total_usd: num(o.total_discounts),
+    subtotal_usd: presentmentNum(o.subtotal_price_set, o.subtotal_price),
+    tax_usd: presentmentNum(o.total_tax_set, o.total_tax),
+    discount_total_usd: presentmentNum(o.total_discounts_set, o.total_discounts),
     discount_codes: o.discount_codes?.map(d => d.code).filter((c): c is string => !!c) ?? null,
     payment_methods: o.payment_gateway_names ?? null,
     financial_status: o.financial_status ?? null,
@@ -154,7 +161,7 @@ function mapOrder(
       sku: li.sku ?? 'UNKNOWN',
       name: li.title ?? 'Unknown item',
       qty: Number(li.quantity ?? 1) || 1,
-      price_usd: Number(li.price ?? '0') || 0,
+      price_usd: presentmentNum(li.price_set, li.price) ?? 0,
     })),
     placed_at: o.created_at ?? null,
   };

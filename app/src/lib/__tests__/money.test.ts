@@ -11,4 +11,10 @@ describe('formatMoney', () => {
     expect(formatMoney(null, 'USD')).toBe('—');
     expect(formatMoney(undefined, 'CAD')).toBe('—');
   });
+
+  it('falls back to USD when currency is missing', () => {
+    expect(formatMoney(200, undefined)).toBe('$200.00 USD');
+    expect(formatMoney(200, null)).toBe('$200.00 USD');
+    expect(formatMoney(200, '')).toBe('$200.00 USD');
+  });
 });

@@ -2,7 +2,7 @@
  *  Order amounts are stored in the order's own currency (orders.currency)
  *  despite the historical `_usd` column names — always pass that currency so
  *  CAD orders aren't silently shown as USD. */
-export function formatMoney(amount: number | null | undefined, currency: string): string {
+export function formatMoney(amount: number | null | undefined, currency?: string | null): string {
   if (amount == null) return '—';
-  return `$${amount.toFixed(2)} ${currency}`;
+  return `$${amount.toFixed(2)} ${currency || 'USD'}`;
 }
