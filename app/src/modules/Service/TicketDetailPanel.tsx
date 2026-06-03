@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import {
-  type ServiceTicket, type TicketStatus, type IssueArea,
+  type ServiceTicket, type TicketStatus, type IssueArea, type TicketCategory,
   STATUS_META, CATEGORY_META, PRIORITY_META, SOURCE_LABEL, TOPIC_LABEL, NEXT_STATUSES,
   ISSUE_AREAS, ISSUE_AREA_LABEL,
-  updateTicketStatus, assignTicketOwner, setTicketPriority, setTicketIssueArea,
+  updateTicketStatus, assignTicketOwner, setTicketPriority, setTicketIssueArea, setTicketCategory,
   updateTicketNotes, setRepairFields, reclassifyTicket, deleteTicket,
   useCustomerLifecycle, warrantyState,
   useTicketMessages, useClassificationLog,
@@ -137,6 +137,20 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
                 onClick={() => run(reclassifyTicket(ticket.id))}
               >🔄 Reclassify</button>
             </div>
+            {/* Walkthrough #41: nudge operator toward Repair tab when topic
+                suggests a hardware issue but category hasn't been flipped. */}
+            {ticket.category !== 'repair' &&
+              (ticket.topic === 'return_hardware_defect' || ticket.topic === 'warranty_replacement') && (
+              <div style={{
+                marginTop: 8, padding: '8px 10px', fontSize: 11,
+                background: '#fffaf0', color: '#c05621', border: '1px solid #fbd38d',
+                borderRadius: 4,
+              }}>
+                Classifier flagged this as a hardware issue. Use{' '}
+                <strong>Move to → Repair</strong> below once a defect is confirmed
+                to route this ticket into the Repair queue.
+              </div>
+            )}
           </div>
         )}
 
@@ -219,6 +233,30 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
             </div>
           </div>
         )}
+
+        <div className={styles.detailSection}>
+          <div
+            className={styles.detailSectionLabel}
+            title="Moves the ticket to a different tab. Flip to 'Repair' once a defect is confirmed; this routes the ticket to the Repair queue and exposes the Repair Details section above."
+          >Move to (category)</div>
+          <div className={styles.actionsRow}>
+            {(['support', 'repair', 'onboarding'] as const).map(c => (
+              <button
+                key={c}
+                className={ticket.category === c ? styles.btnPrimary : styles.btnSecondary}
+                disabled={busy || ticket.category === c}
+                onClick={() => run(setTicketCategory(ticket.id, c as TicketCategory))}
+                title={
+                  c === 'repair'
+                    ? 'Confirmed hardware defect — needs disassembly / parts'
+                    : c === 'onboarding'
+                      ? 'Customer needs an onboarding session (Calendly)'
+                      : 'General customer support inquiry'
+                }
+              >{CATEGORY_META[c].label}</button>
+            ))}
+          </div>
+        </div>
 
         <div className={styles.detailSection}>
           <div className={styles.detailSectionLabel}>Status — transition</div>

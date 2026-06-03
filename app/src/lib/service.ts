@@ -578,6 +578,19 @@ export async function assignTicketOwner(id: string, owner_email: string | null):
   await logAction('ticket_owner_assigned', id, owner_email ?? '(unassigned)');
 }
 
+// Walkthrough #41: defines the support → repair pipeline. Operators flip a
+// ticket's category here once they've confirmed it's actually a hardware
+// repair issue (vs. an onboarding question or a general support inquiry).
+// The category column gates which tab the ticket appears under — flipping
+// to 'repair' surfaces the Repair Details section on this panel and routes
+// the row to the Repair tab. Status is preserved so the operator's progress
+// (triaging / in_progress / etc.) doesn't reset.
+export async function setTicketCategory(id: string, category: TicketCategory): Promise<void> {
+  const { error } = await supabase.from('service_tickets').update({ category }).eq('id', id);
+  if (error) throw error;
+  await logAction('ticket_category_changed', id, category);
+}
+
 export async function setTicketPriority(id: string, priority: TicketPriority): Promise<void> {
   // Staff edit locks the classifier out of overwriting priority/topic/etc.
   // until they click "Reclassify" (which resets the flag).
