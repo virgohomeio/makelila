@@ -86,6 +86,21 @@ function findCaRegion(beforePostal: string): { region: string; before: string } 
   return null;
 }
 
+// Normalize a HubSpot-style country string ("Canada", "United States", "USA",
+// etc.) to an ISO-2 code so the customers.country column stays consistent
+// (walkthrough #42). Returns the input unchanged for non-CA/US values so we
+// don't silently drop "MX", "GB", etc. — those will surface in the data and
+// can be mapped explicitly later.
+function normalizeCountry(c: string | null | undefined): string | null {
+  if (!c) return null;
+  const s = c.trim().toLowerCase();
+  if (!s) return null;
+  if (s === 'ca' || s === 'canada') return 'CA';
+  if (s === 'us' || s === 'usa' || s === 'u.s.a.' || s === 'u.s.'
+      || s === 'united states' || s === 'united states of america') return 'US';
+  return c.trim(); // unknown — preserve as-is
+}
+
 function parseAddress(addr: string | null | undefined): {
   city: string | null;
   region: string | null;
@@ -109,9 +124,9 @@ function parseAddress(addr: string | null | undefined): {
     if (found) {
       const parts = found.before.split(',').map(s => s.trim()).filter(Boolean);
       const city = parts.length > 0 ? parts[parts.length - 1] : null;
-      return { city, region: found.region, postal_code: postal, country: 'Canada' };
+      return { city, region: found.region, postal_code: postal, country: 'CA' };
     }
-    return { city: null, region: null, postal_code: postal, country: 'Canada' };
+    return { city: null, region: null, postal_code: postal, country: 'CA' };
   }
 
   // US ZIP: 5 digits, optionally + 4, at the trailing position (after country
@@ -216,7 +231,7 @@ async function handle(): Promise<Response> {
         city: p.city ?? parsed.city,
         region: p.state ?? parsed.region,
         postal_code: p.zip ?? parsed.postal_code,
-        country: p.country ?? parsed.country,
+        country: normalizeCountry(p.country ?? parsed.country),
         last_synced_at: now,
       };
       // makelila is the system of record (see docs/system-of-record.md). HubSpot

@@ -6,7 +6,7 @@ import {
   type TicketStatus, type TicketPriority, type TicketTopic, type ServiceTicket,
   type IssueArea,
 } from '../../lib/service';
-import { useCustomers, type Customer } from '../../lib/customers';
+import { useCustomers, syncCustomersFromHubspot, type Customer } from '../../lib/customers';
 import { useUnits } from '../../lib/stock';
 import { TicketDetailPanel } from './TicketDetailPanel';
 import styles from './Service.module.css';
@@ -253,6 +253,23 @@ function NewTicketModal({
   const [priority, setPriority] = useState<TicketPriority>('normal');
   const [customerSearch, setCustomerSearch] = useState('');
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
+  const [resyncing, setResyncing] = useState(false);
+  const [resyncMsg, setResyncMsg] = useState<string | null>(null);
+
+  // Walkthrough #34: when no candidates match the search, operators
+  // suspected the HubSpot sync was stale. Inline this re-sync so they
+  // can recover mid-call instead of switching tabs.
+  async function handleResync() {
+    setResyncing(true); setResyncMsg(null);
+    try {
+      const r = await syncCustomersFromHubspot();
+      setResyncMsg(`Synced ${r.upserted} new customer${r.upserted === 1 ? '' : 's'} from HubSpot. Try the search again.`);
+    } catch (e) {
+      setResyncMsg(`Sync failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setResyncing(false);
+    }
+  }
   const [unitSerial, setUnitSerial] = useState('');
   const [serialAutoFilled, setSerialAutoFilled] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -376,9 +393,21 @@ function NewTicketModal({
                   </div>
                 )}
                 {customerSearch.trim() && candidates.length === 0 && (
-                  <span className={styles.muted} style={{ fontSize: 11, marginTop: 4 }}>
-                    No matching customer. Add them in the Customers tab first.
-                  </span>
+                  <div style={{ marginTop: 4, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    <span className={styles.muted} style={{ fontSize: 11 }}>
+                      No matching customer. If you just received their message, the HubSpot sync may be a few minutes behind.
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => void handleResync()}
+                      disabled={resyncing}
+                      className={styles.modalSecondary}
+                      style={{ alignSelf: 'flex-start' }}
+                    >{resyncing ? 'Re-syncing…' : 'Re-sync from HubSpot'}</button>
+                    {resyncMsg && (
+                      <span className={styles.muted} style={{ fontSize: 11 }}>{resyncMsg}</span>
+                    )}
+                  </div>
                 )}
               </div>
             )}
