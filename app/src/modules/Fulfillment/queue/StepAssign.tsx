@@ -1,48 +1,33 @@
 import { useMemo, useState } from 'react';
-import { useShelf, assignUnit, type FulfillmentQueueRow, type ShelfSlot } from '../../../lib/fulfillment';
+import { assignUnit, type FulfillmentQueueRow } from '../../../lib/fulfillment';
+import { useUnits } from '../../../lib/stock';
 import styles from '../Fulfillment.module.css';
 
-function autoSuggestSerial(slots: ShelfSlot[]): string | null {
-  // Prefer slot_index 3 or 4 (front row) first; then 0,1,2 (back row). Skid order A1→A30.
-  const sorted = [...slots].sort((a, b) => {
-    const aFront = a.slot_index >= 3 ? 0 : 1;
-    const bFront = b.slot_index >= 3 ? 0 : 1;
-    if (aFront !== bFront) return aFront - bFront;
-    // Skid 'A7' → 7; 'A30' → 30
-    const aNum = parseInt(a.skid.replace(/^[A-Z]+/, ''), 10);
-    const bNum = parseInt(b.skid.replace(/^[A-Z]+/, ''), 10);
-    if (aNum !== bNum) return aNum - bNum;
-    return a.slot_index - b.slot_index;
-  });
-  return sorted.find(s => s.status === 'available' && s.serial)?.serial ?? null;
-}
-
 export function StepAssign({ row }: { row: FulfillmentQueueRow }) {
-  const { slots, loading } = useShelf();
-  const available = useMemo(() => slots.filter(s => s.status === 'available' && s.serial), [slots]);
-  const suggested = useMemo(() => autoSuggestSerial(slots), [slots]);
+  const { units, loading } = useUnits();
+  // Stock is the source of truth: only units the team has marked 'ready' under
+  // the Stock tab are available to ship.
+  const ready = useMemo(() => units.filter(u => u.status === 'ready'), [units]);
   const [picked, setPicked] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const filteredAvailable = useMemo(() => {
+  const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return available;
-    return available.filter(s =>
-      s.serial?.toLowerCase().includes(q)
-      || s.skid.toLowerCase().includes(q)
-      || s.batch?.toLowerCase().includes(q),
+    if (!q) return ready;
+    return ready.filter(u =>
+      u.serial.toLowerCase().includes(q)
+      || u.batch.toLowerCase().includes(q)
+      || (u.location?.toLowerCase().includes(q) ?? false),
     );
-  }, [available, search]);
-
-  const effective = picked ?? suggested;
+  }, [ready, search]);
 
   const handleConfirm = async () => {
-    if (!effective) return;
+    if (!picked) return;
     setBusy(true); setError(null);
     try {
-      await assignUnit(row.id, effective);
+      await assignUnit(row.id, picked, row.order_id);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -50,55 +35,53 @@ export function StepAssign({ row }: { row: FulfillmentQueueRow }) {
     }
   };
 
-  if (loading) return <div>Loading shelf…</div>;
-  if (available.length === 0) return <div>No available units on the shelf. Flag a rework as resolved first.</div>;
+  if (loading) return <div>Loading ready units…</div>;
+  if (ready.length === 0) {
+    return <div>No units are ready to ship. Mark a machine “ready” in the Stock tab first.</div>;
+  }
 
   return (
     <div>
-      <h3 style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>Assign a tested unit from the shelf</h3>
+      <h3 style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>Assign a ready unit</h3>
       <p style={{ fontSize: 11, color: 'var(--color-ink-subtle)', marginBottom: 10 }}>
-        Auto-suggested next: <strong>{suggested ?? '—'}</strong>. Click any available slot to override.
+        {ready.length} unit{ready.length === 1 ? '' : 's'} marked ready in Stock. Click one to assign it to this order.
       </p>
       <input
         type="search"
         value={search}
         onChange={e => setSearch(e.target.value)}
-        placeholder="Search by serial, skid, or batch…"
+        placeholder="Search by serial, batch, or location…"
         style={{
           width: '100%', maxWidth: 320, marginBottom: 10,
           padding: '6px 10px', fontSize: 12,
           border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)',
         }}
       />
-      {filteredAvailable.length === 0 && available.length > 0 && (
+      {filtered.length === 0 && (
         <div style={{ fontSize: 11, color: 'var(--color-ink-subtle)', marginBottom: 8 }}>
-          No matches for "{search}". {available.length} unit{available.length === 1 ? '' : 's'} available — clear search to see all.
+          No matches for "{search}". {ready.length} ready unit{ready.length === 1 ? '' : 's'} — clear search to see all.
         </div>
       )}
       <div className={styles.slotGrid}>
-        {filteredAvailable.map(s => (
+        {filtered.map(u => (
           <div
-            key={`${s.skid}-${s.slot_index}`}
-            className={[
-              styles.slotPick,
-              effective === s.serial ? styles.selected : '',
-              s.serial === suggested ? styles.suggested : '',
-            ].filter(Boolean).join(' ')}
-            onClick={() => setPicked(s.serial!)}
+            key={u.serial}
+            className={[styles.slotPick, picked === u.serial ? styles.selected : ''].filter(Boolean).join(' ')}
+            onClick={() => setPicked(u.serial)}
           >
             <div className={styles.slotPickTop}>
-              {s.serial?.slice(-5)}
-              <span className={styles.slotPickBatch}>{s.batch}</span>
+              {u.serial.slice(-5)}
+              <span className={styles.slotPickBatch}>{u.batch}</span>
             </div>
             <div className={styles.slotPickBottom}>
-              {s.skid} · slot {s.slot_index}
+              {u.location ?? 'no location'}
             </div>
           </div>
         ))}
       </div>
       <div className={styles.stepBar}>
-        <button className={styles.confirmBtn} onClick={handleConfirm} disabled={!effective || busy}>
-          {busy ? 'Assigning…' : `✓ Confirm ${effective ?? ''}`}
+        <button className={styles.confirmBtn} onClick={handleConfirm} disabled={!picked || busy}>
+          {busy ? 'Assigning…' : `✓ Confirm ${picked ?? ''}`}
         </button>
         {error && <span style={{ color: 'var(--color-error)', fontSize: 11 }}>{error}</span>}
       </div>
