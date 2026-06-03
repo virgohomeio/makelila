@@ -663,6 +663,15 @@ export async function markOnboardingNoShow(lifecycleId: string): Promise<void> {
   await logAction('onboarding_no_show', lifecycleId);
 }
 
+export async function markOnboardingSkipped(lifecycleId: string): Promise<void> {
+  const { error } = await supabase
+    .from('customer_lifecycle')
+    .update({ onboarding_status: 'skipped' })
+    .eq('id', lifecycleId);
+  if (error) throw error;
+  await logAction('onboarding_skipped', lifecycleId);
+}
+
 // Signed URL for displaying an attachment (1 hour expiry).
 export async function attachmentSignedUrl(file_path: string): Promise<string | null> {
   const { data, error } = await supabase.storage
