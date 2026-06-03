@@ -670,6 +670,21 @@ export async function updateTicketNotes(id: string, internal_notes: string): Pro
   if (error) throw error;
 }
 
+export async function updateTicketSubject(id: string, subject: string): Promise<void> {
+  const trimmed = subject.trim();
+  if (!trimmed) throw new Error('Subject cannot be empty.');
+  const { data, error } = await supabase
+    .from('service_tickets')
+    .update({ subject: trimmed })
+    .eq('id', id)
+    .select('id');
+  if (error) throw error;
+  if (!data || data.length === 0) {
+    throw new Error('Subject was not updated (no permission or ticket removed).');
+  }
+  await logAction('ticket_subject_updated', id, trimmed);
+}
+
 export async function setRepairFields(
   id: string,
   patch: { defect_category?: string | null; parts_needed?: string | null },
