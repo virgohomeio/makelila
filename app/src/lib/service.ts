@@ -520,6 +520,19 @@ export async function updateTicketNote(noteId: string, body: string): Promise<vo
   await logAction('ticket_note_edited', data[0].ticket_id as string, trimmed.slice(0, 120));
 }
 
+export async function deleteTicketNote(noteId: string): Promise<void> {
+  const { data, error } = await supabase
+    .from('ticket_notes')
+    .delete()
+    .eq('id', noteId)
+    .select('id, ticket_id');
+  if (error) throw error;
+  if (!data || data.length === 0) {
+    throw new Error('Note was not deleted (no permission or already removed).');
+  }
+  await logAction('ticket_note_deleted', data[0].ticket_id as string, '');
+}
+
 export function useTicketMessages(ticketId: string | null): {
   messages: TicketMessage[];
   loading: boolean;

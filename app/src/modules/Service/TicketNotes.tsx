@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useTicketNotes, addTicketNote, updateTicketNote, type TicketNote } from '../../lib/service';
+import { useTicketNotes, addTicketNote, updateTicketNote, deleteTicketNote, type TicketNote } from '../../lib/service';
 import styles from './Service.module.css';
 
 type Props = { ticketId: string };
@@ -62,6 +62,7 @@ export function TicketNotes({ ticketId }: Props) {
 
 function NoteItem({ note }: { note: TicketNote }) {
   const [editing, setEditing] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const [draft, setDraft] = useState(note.body);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -82,6 +83,18 @@ function NoteItem({ note }: { note: TicketNote }) {
     }
   }
 
+  async function remove() {
+    setBusy(true); setError(null);
+    try {
+      await deleteTicketNote(note.id);
+      // Row disappears via the realtime DELETE event; no local state to reset.
+    } catch (e) {
+      setError((e as Error).message);
+      setBusy(false);
+      setConfirmDelete(false);
+    }
+  }
+
   return (
     <div className={styles.noteItem}>
       <div className={styles.noteMeta}>
@@ -90,14 +103,37 @@ function NoteItem({ note }: { note: TicketNote }) {
           {new Date(note.created_at).toLocaleString()}
           {edited && <span className={styles.noteEdited}> · edited {new Date(note.updated_at).toLocaleString()}</span>}
         </span>
-        {!editing && (
-          <button
-            className={styles.noteEditBtn}
-            title="Edit note"
-            onClick={() => { setDraft(note.body); setEditing(true); }}
-          >✎</button>
+        {!editing && !confirmDelete && (
+          <>
+            <button
+              className={styles.noteEditBtn}
+              title="Edit note"
+              onClick={() => { setDraft(note.body); setEditing(true); }}
+            >✎</button>
+            <button
+              className={styles.noteDeleteBtn}
+              title="Delete note"
+              disabled={busy}
+              onClick={() => setConfirmDelete(true)}
+            >🗑</button>
+          </>
         )}
       </div>
+
+      {confirmDelete && (
+        <>
+          <div className={styles.noteConfirm}>
+            <span>Delete this note?</span>
+            <button className={styles.btnDanger} disabled={busy} onClick={() => void remove()}>
+              {busy ? 'Deleting…' : 'Delete'}
+            </button>
+            <button className={styles.btnSecondary} disabled={busy} onClick={() => setConfirmDelete(false)}>
+              Cancel
+            </button>
+          </div>
+          {error && <div className={styles.noteError}>{error}</div>}
+        </>
+      )}
       {editing ? (
         <div>
           <textarea

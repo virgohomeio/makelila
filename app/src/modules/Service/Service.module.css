@@ -237,6 +237,24 @@
   padding: 0 2px;
 }
 .noteEditBtn:hover { color: var(--color-crimson); }
+.noteDeleteBtn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--color-ink-subtle);
+  padding: 0 2px;
+}
+.noteDeleteBtn:hover { color: var(--color-error); }
+.noteDeleteBtn:disabled { opacity: 0.5; cursor: default; }
+.noteConfirm {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0;
+  font-size: 11px;
+  color: var(--color-ink-muted);
+}
 .noteBody {
   font-size: 12px;
   color: var(--color-ink);
