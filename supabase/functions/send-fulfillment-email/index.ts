@@ -194,11 +194,20 @@ async function handle(req: Request): Promise<Response> {
     });
   }
 
-  // Release the shelf slot back to empty (unit shipped)
+  // Release the shelf slot back to empty (unit shipped). Flip status only;
+  // leave `serial` set because fulfillment_queue.assigned_serial has a FK
+  // pointing here. Nullifying it errors and the error used to be silently
+  // swallowed (no .error check), which left 74 historical shipped units
+  // still showing as 'available' on the picker. The DB trigger
+  // sync_shelf_slot_on_unit_status_change (migration 20260603130000) also
+  // catches this when units.status flips to 'shipped' via other paths.
   if (q.assigned_serial) {
-    await admin.from('shelf_slots')
-      .update({ serial: null, batch: null, status: 'empty', updated_at: now })
+    const { error: shelfErr } = await admin.from('shelf_slots')
+      .update({ status: 'empty', updated_at: now })
       .eq('serial', q.assigned_serial);
+    if (shelfErr) {
+      console.error(`shelf_slots empty failed for ${q.assigned_serial}: ${shelfErr.message}`);
+    }
   }
 
   return new Response(
