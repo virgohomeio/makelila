@@ -51,7 +51,12 @@ Deno.serve(async (req: Request) => {
     if (cErr || !c) return j({ error: `Customer not found: ${cErr?.message ?? 'no row'}` }, 404);
     if (!c.phone) return j({ error: 'Customer has no phone on file' }, 400);
 
-    // Idempotency: matching body in this customer's Quo thread in the last 5 min?
+    // Idempotency: dedupe a rapid double-click on the same edited body.
+    // 5 min is wider than any reasonable double-click but tighter than the
+    // operator pace of one customer/minute — sized so it can't accidentally
+    // swallow a deliberate retry hours later. Keyed on body_text exact
+    // match (NOT on the originally-generated draft) so edits-then-double-
+    // approve also dedupe correctly.
     const fiveMinAgo = new Date(Date.now() - 5 * 60_000).toISOString();
     const { data: recentDup } = await admin
       .from('ticket_messages')
@@ -66,7 +71,11 @@ Deno.serve(async (req: Request) => {
       return j({ ok: true, duplicate: true, ticket_message_id: recentDup[0].id });
     }
 
-    // Send via OpenPhone
+    // Send via OpenPhone. FOLLOWUP_SMS_TEST_PHONE redirect mirrors the
+    // EMAIL_TEST_RECIPIENT pattern in send-fulfillment-email — when set,
+    // every send routes to that number instead of the real customer, with
+    // a [TEST → <real>] body prefix making it obvious. Unset the env var
+    // (via `supabase secrets unset FOLLOWUP_SMS_TEST_PHONE`) to go live.
     const to = testPhone || c.phone;
     const body = testPhone
       ? `[TEST → ${c.phone}] ${message}`
@@ -88,9 +97,16 @@ Deno.serve(async (req: Request) => {
       return j({ error: `OpenPhone ${opRes.status}: ${txt.slice(0, 300)}` }, 502);
     }
     const opJson = await opRes.json() as { data?: { id?: string } };
-    const opMessageId = opJson.data?.id ?? `auto-${crypto.randomUUID()}`;
+    // OpenPhone normally returns data.id; the UUID fallback keeps the
+    // NOT-NULL gmail_message_id constraint satisfied if their response
+    // shape ever shifts (no "auto-" prefix here — the surrounding
+    // `quo:auto-fu-` template already signals "auto-generated").
+    const opMessageId = opJson.data?.id ?? crypto.randomUUID();
 
-    // Find-or-create the Quo ticket for this customer
+    // Find-or-create the Quo ticket for this customer. Most customers
+    // have a single Quo thread, but data drift / cron races have produced
+    // multiples for ~3 customers historically — pick the most-recently-
+    // active one so the new SMS lands where Reina last saw activity.
     const { data: existingTicket } = await admin
       .from('service_tickets')
       .select('id, message_count')
@@ -155,13 +171,17 @@ Deno.serve(async (req: Request) => {
     const { error: upErr } = await admin.from('customers').update(patch).eq('id', c.id);
     if (upErr) return j({ error: `customer update: ${upErr.message}` }, 500);
 
-    // Activity log (best-effort)
+    // Activity log (best-effort — surface failures to edge fn logs but
+    // don't abort the send response, which already succeeded).
     await admin.from('activity_log').insert({
       user_id: callerUserId,
       type: 'auto_followup_sent',
       entity: c.id,
       detail: `${c.full_name ?? c.phone}: "${message.slice(0, 100)}"`,
-    }).then(() => undefined, () => undefined);
+    }).then(
+      () => undefined,
+      (err) => { console.error('activity_log insert failed:', err); },
+    );
 
     return j({
       ok: true,
