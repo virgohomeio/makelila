@@ -590,10 +590,10 @@
   border: 1px solid var(--color-border, #cbd5e0);
   background: #fff;
 }
-.draftActions button:first-child {
-  background: var(--color-crimson, #c53030);
-  color: #fff;
-  border-color: var(--color-crimson, #c53030);
+.draftPrimary {
+  background: var(--color-crimson, #c53030) !important;
+  color: #fff !important;
+  border-color: var(--color-crimson, #c53030) !important;
   font-weight: 600;
 }
 .draftActions button:disabled {

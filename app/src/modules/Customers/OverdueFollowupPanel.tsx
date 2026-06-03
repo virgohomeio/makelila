@@ -29,6 +29,21 @@ export function OverdueFollowupPanel({ overdueCount, overdueCustomerIds }: Props
   if (overdueCount === 0) return null;
 
   async function handleGenerate() {
+    // Guard: regenerating wholesale-replaces the queue. If Reina has
+    // pending edits or unsent errors in-flight, confirm before nuking them.
+    // Skipped + sent rows are dispositionally done; don't count toward
+    // the prompt.
+    const inProgress = Array.from(rows.values()).filter(
+      r => r.status === 'pending' || r.status === 'error',
+    ).length;
+    if (inProgress > 0) {
+      const ok = window.confirm(
+        `You have ${inProgress} draft${inProgress === 1 ? '' : 's'} in progress. ` +
+        `Regenerating will replace ${inProgress === 1 ? 'it' : 'them'}. Continue?`,
+      );
+      if (!ok) return;
+    }
+
     setGenerating(true);
     setGenerateError(null);
     try {
@@ -193,7 +208,7 @@ function DraftCard({
         <div className={styles.followupError}>{state.error}</div>
       )}
       <div className={styles.draftActions}>
-        <button onClick={onApprove} disabled={!editedMessage.trim()}>
+        <button className={styles.draftPrimary} onClick={onApprove} disabled={!editedMessage.trim()}>
           ✓ Approve &amp; send
         </button>
         <button onClick={onSkip}>Skip</button>
