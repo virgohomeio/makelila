@@ -550,8 +550,19 @@ export async function deleteTicket(id: string): Promise<void> {
   // Child rows (messages, attachments, classification log) are removed by the
   // `on delete cascade` FKs. Realtime fires a DELETE event that drops the row
   // from any open `useServiceTickets`/`useInbox` list.
-  const { error } = await supabase.from('service_tickets').delete().eq('id', id);
+  //
+  // We `select()` the deleted rows back so an RLS-blocked delete — which
+  // returns success with zero rows rather than an error — surfaces as a
+  // failure instead of silently leaving the ticket in place.
+  const { data, error } = await supabase
+    .from('service_tickets')
+    .delete()
+    .eq('id', id)
+    .select('id');
   if (error) throw error;
+  if (!data || data.length === 0) {
+    throw new Error('Ticket was not deleted (no permission or already removed).');
+  }
   await logAction('ticket_deleted', id, 'Ticket deleted');
 }
 
