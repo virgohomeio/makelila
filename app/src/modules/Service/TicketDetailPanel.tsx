@@ -4,7 +4,7 @@ import {
   STATUS_META, CATEGORY_META, PRIORITY_META, SOURCE_LABEL, TOPIC_LABEL, NEXT_STATUSES,
   ISSUE_AREAS, ISSUE_AREA_LABEL,
   updateTicketStatus, assignTicketOwner, setTicketPriority, setTicketIssueArea,
-  updateTicketNotes, setRepairFields, reclassifyTicket,
+  updateTicketNotes, setRepairFields, reclassifyTicket, deleteTicket,
   useCustomerLifecycle, warrantyState,
   useTicketMessages, useClassificationLog,
 } from '../../lib/service';
@@ -31,6 +31,18 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
   const [parts, setParts] = useState(ticket.parts_needed ?? '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  async function onDelete() {
+    setBusy(true); setError(null);
+    try {
+      await deleteTicket(ticket.id);
+      onClose();
+    } catch (e) {
+      setError((e as Error).message);
+      setBusy(false);
+    }
+  }
 
   const { rows: lifecycle } = useCustomerLifecycle();
   const lifecycleRow = ticket.unit_serial ? lifecycle.find(l => l.unit_serial === ticket.unit_serial) : null;
@@ -289,6 +301,38 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
             >Open in HubSpot ↗</a>
           </div>
         )}
+
+        <div className={styles.detailSection}>
+          <div className={styles.detailSectionLabel}>Danger zone</div>
+          {confirmDelete ? (
+            <div className={styles.dangerConfirm}>
+              <span className={styles.dangerConfirmText}>
+                Permanently delete {ticket.ticket_number}? This also removes its
+                messages and attachments and cannot be undone.
+              </span>
+              <div className={styles.actionsRow}>
+                <button
+                  className={styles.btnDanger}
+                  disabled={busy}
+                  onClick={() => void onDelete()}
+                >{busy ? 'Deleting…' : 'Yes, delete ticket'}</button>
+                <button
+                  className={styles.btnSecondary}
+                  disabled={busy}
+                  onClick={() => setConfirmDelete(false)}
+                >Cancel</button>
+              </div>
+            </div>
+          ) : (
+            <div className={styles.actionsRow}>
+              <button
+                className={styles.btnDanger}
+                disabled={busy}
+                onClick={() => setConfirmDelete(true)}
+              >🗑 Delete ticket</button>
+            </div>
+          )}
+        </div>
 
         {error && <div style={{ color: 'var(--color-error)', fontSize: 11 }}>{error}</div>}
       </div>
