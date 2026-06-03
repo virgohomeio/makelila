@@ -7,6 +7,7 @@ import {
 import { useOrders } from '../../lib/orders';
 import { useUnits } from '../../lib/stock';
 import { useServiceTickets } from '../../lib/service';
+import { OverdueFollowupPanel } from './OverdueFollowupPanel';
 import styles from './Customers.module.css';
 
 export default function Customers() {
@@ -47,6 +48,17 @@ export default function Customers() {
     () => customers.map(c => ({ c, fu: computeFuState(c, today) })),
     [customers, today],
   );
+
+  const overdueIds = useMemo(() => {
+    return withFu
+      .filter(({ fu }) => fu === 'overdue_fu1' || fu === 'overdue_fu2')
+      .sort((a, b) => {
+        const ao = a.c.onboard_date ?? '9999-12-31';
+        const bo = b.c.onboard_date ?? '9999-12-31';
+        return ao.localeCompare(bo);
+      })
+      .map(({ c }) => c.id);
+  }, [withFu]);
 
   const fuCounts = useMemo(() => {
     const counts: Partial<Record<FuState, number>> = {};
@@ -199,6 +211,11 @@ export default function Customers() {
         <KPI label="With email" value={stats.withEmail} sub={stats.total > 0 ? `${Math.round((stats.withEmail / stats.total) * 100)}% coverage` : undefined} />
         <KPI label="With address" value={stats.withAddress} sub={stats.total > 0 ? `${Math.round((stats.withAddress / stats.total) * 100)}% coverage` : undefined} />
       </div>
+
+      <OverdueFollowupPanel
+        overdueCount={overdueIds.length}
+        overdueCustomerIds={overdueIds}
+      />
 
       <div className={styles.filterBar}>
         {(['all','CA','US','other'] as const).map(c => (

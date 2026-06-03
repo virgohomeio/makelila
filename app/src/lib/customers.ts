@@ -284,3 +284,52 @@ export async function syncCustomersFromHubspot(): Promise<{
   await logAction('hubspot_sync', 'customers', `${json.upserted} upserted, ${json.skipped} skipped`);
   return json;
 }
+
+// ────────────────────────────────────────────────────────────────────────
+// Auto follow-up queue (spec: docs/superpowers/specs/2026-06-03-auto-followup-queue-design.md)
+// ────────────────────────────────────────────────────────────────────────
+
+export type FollowupDraft = {
+  customer_id: string;
+  customer_name: string;
+  customer_phone: string | null;
+  days_overdue: number;
+  fu_kind: 'fu1' | 'fu2';
+  draft_message: string | null;
+  skip_reason: string | null;
+  context_summary: string;
+};
+
+export async function generateFollowupDrafts(customer_ids: string[]): Promise<{ drafts: FollowupDraft[] }> {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) throw new Error('Not signed in');
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/generate-followup-drafts`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      apikey: SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${session.access_token}`,
+    },
+    body: JSON.stringify({ customer_ids }),
+  });
+  const body = await res.json();
+  if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
+  return body as { drafts: FollowupDraft[] };
+}
+
+export async function sendFollowupSms(input: { customer_id: string; message: string }): Promise<{ ok: boolean; duplicate?: boolean; test_redirected?: boolean }> {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) throw new Error('Not signed in');
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/send-followup-sms`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      apikey: SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${session.access_token}`,
+    },
+    body: JSON.stringify(input),
+  });
+  const body = await res.json();
+  if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
+  return body;
+}
