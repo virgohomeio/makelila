@@ -21,9 +21,12 @@ const rowBase: FulfillmentQueueRow = {
   test_report_url: null, test_confirmed_at: null, test_confirmed_by: null,
   carrier: 'UPS', tracking_num: '1ZABC',
   label_pdf_path: null, label_confirmed_at: null, label_confirmed_by: null,
-  dock_printed: true, dock_affixed: true, dock_docked: true, dock_notified: true,
+  dock_printed: true, dock_affixed: true, dock_docked: true, dock_notified: true, dock_picked_up: true,
   dock_confirmed_at: null, dock_confirmed_by: null,
-  starter_tracking_num: null, email_sent_at: null, email_sent_by: null,
+  // email_sent_at is non-null so the auto-send effect (walkthrough #29)
+  // is skipped — these tests cover the manual Send/Resend button behavior.
+  // Auto-send is covered in its own test below.
+  starter_tracking_num: null, email_sent_at: '2026-04-19T12:00:00Z', email_sent_by: null,
   fulfilled_at: null, fulfilled_by: null, due_date: null, priority: false, created_at: '2026-04-19T00:00:00Z',
 };
 
@@ -59,5 +62,29 @@ describe('StepEmail', () => {
     render(<StepEmail row={rowBase} order={orderCA} />);
     fireEvent.click(screen.getByRole('button', { name: /send email/i }));
     await waitFor(() => expect(sendEmailMock).toHaveBeenCalledWith('q-e'));
+  });
+
+  it('Auto-sends on entry to step 5 when email_sent_at is null (walkthrough #29)', async () => {
+    const freshRow = { ...rowBase, email_sent_at: null, email_sent_by: null };
+    render(<StepEmail row={freshRow} order={orderCA} />);
+    await waitFor(() => expect(sendEmailMock).toHaveBeenCalledWith('q-e'));
+    expect(sendEmailMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('Does NOT auto-send when email_sent_at is already populated', () => {
+    render(<StepEmail row={rowBase} order={orderCA} />);
+    expect(sendEmailMock).not.toHaveBeenCalled();
+  });
+
+  it('Does NOT auto-send when customer_email is missing', () => {
+    const freshRow = { ...rowBase, email_sent_at: null };
+    render(<StepEmail row={freshRow} order={orderNoEmail} />);
+    expect(sendEmailMock).not.toHaveBeenCalled();
+  });
+
+  it('Does NOT auto-send when tracking_num is missing', () => {
+    const noTracking = { ...rowBase, email_sent_at: null, tracking_num: null };
+    render(<StepEmail row={noTracking} order={orderCA} />);
+    expect(sendEmailMock).not.toHaveBeenCalled();
   });
 });

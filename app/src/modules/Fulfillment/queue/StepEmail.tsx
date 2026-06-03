@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   sendFulfillmentEmail,
   type FulfillmentQueueRow,
@@ -27,8 +27,30 @@ export function StepEmail({
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [autoSent, setAutoSent] = useState(false);
 
   const canSend = !!order.customer_email;
+  const alreadySent = !!row.email_sent_at;
+
+  // Auto-send on entry to step 5 (walkthrough #29). Operators reported that
+  // the shipment-confirmation email was never going out because the manual
+  // button was being missed. We fire once per row visit, gated on:
+  //   - row.email_sent_at is null (never sent before)
+  //   - canSend (customer has an email address)
+  //   - row.tracking_num is set (no point sending an email without tracking)
+  // A ref ensures we only attempt once per mount even if React re-renders.
+  // If the send fails, the manual button stays available for retry.
+  const autoSendAttempted = useRef(false);
+  useEffect(() => {
+    if (autoSendAttempted.current) return;
+    if (alreadySent || !canSend || !row.tracking_num) return;
+    autoSendAttempted.current = true;
+    setBusy(true);
+    void sendFulfillmentEmail(row.id)
+      .then(() => setAutoSent(true))
+      .catch(e => setError(`Auto-send failed: ${(e as Error).message} — use the Send button below to retry.`))
+      .finally(() => setBusy(false));
+  }, [row.id, row.tracking_num, alreadySent, canSend]);
 
   const firstName = order.customer_name.split(' ')[0];
   const track = trackingUrl(row.carrier, row.tracking_num);
@@ -74,9 +96,14 @@ export function StepEmail({
         padding: 10, borderRadius: 4, fontSize: 10, lineHeight: 1.5,
         whiteSpace: 'pre-wrap', maxHeight: 320, overflowY: 'auto',
       }}>{preview}</pre>
+      {(alreadySent || autoSent) && (
+        <div style={{ fontSize: 11, color: 'var(--color-success, #2f855a)', margin: '6px 0' }}>
+          ✓ Email sent{row.email_sent_at && ` at ${new Date(row.email_sent_at).toLocaleString()}`}.
+        </div>
+      )}
       <div className={styles.stepBar}>
         <button className={styles.confirmBtn} onClick={handleSend} disabled={!canSend || busy}>
-          {busy ? 'Sending…' : '✉ Send email'}
+          {busy ? 'Sending…' : alreadySent || autoSent ? '✉ Resend email' : '✉ Send email'}
         </button>
       </div>
       {error && <div style={{ color: 'var(--color-error)', fontSize: 11, marginTop: 6 }}>{error}</div>}

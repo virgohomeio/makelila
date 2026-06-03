@@ -47,7 +47,7 @@ export function UnitTable({ units }: { units: Unit[] }) {
             <th>Batch</th>
             <th>Color</th>
             <th>Status</th>
-            <th>Customer / Location</th>
+            <th>Assigned to</th>
             <th>Shipped</th>
             <th>Carrier</th>
             <th>QC</th>

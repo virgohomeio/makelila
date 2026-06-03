@@ -3,10 +3,11 @@ import { toggleDockCheck, confirmDock, type FulfillmentQueueRow } from '../../..
 import styles from '../Fulfillment.module.css';
 
 const ITEMS = [
-  { key: 'printed' as const,  col: 'dock_printed' as const,  label: 'Label printed' },
-  { key: 'affixed' as const,  col: 'dock_affixed' as const,  label: 'Label affixed to box' },
-  { key: 'docked' as const,   col: 'dock_docked' as const,   label: 'Box on outbound dock' },
-  { key: 'notified' as const, col: 'dock_notified' as const, label: 'Carrier notified for pickup' },
+  { key: 'printed' as const,   col: 'dock_printed' as const,   label: 'Label printed' },
+  { key: 'affixed' as const,   col: 'dock_affixed' as const,   label: 'Label affixed to box' },
+  { key: 'docked' as const,    col: 'dock_docked' as const,    label: 'Box on outbound dock' },
+  { key: 'notified' as const,  col: 'dock_notified' as const,  label: 'Carrier notified for pickup' },
+  { key: 'picked_up' as const, col: 'dock_picked_up' as const, label: 'Carrier picked up' },
 ];
 
 export function StepDock({ row }: { row: FulfillmentQueueRow }) {

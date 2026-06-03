@@ -9,7 +9,7 @@ function mkRow(partial: Partial<FulfillmentQueueRow> & { id: string; order_id: s
     test_report_url: null, test_confirmed_at: null, test_confirmed_by: null,
     carrier: null, tracking_num: null, label_pdf_path: null,
     label_confirmed_at: null, label_confirmed_by: null,
-    dock_printed: false, dock_affixed: false, dock_docked: false, dock_notified: false,
+    dock_printed: false, dock_affixed: false, dock_docked: false, dock_notified: false, dock_picked_up: false,
     dock_confirmed_at: null, dock_confirmed_by: null,
     starter_tracking_num: null, email_sent_at: null, email_sent_by: null,
     fulfilled_at: null, fulfilled_by: null,

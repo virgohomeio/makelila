@@ -26,6 +26,7 @@ export type FulfillmentQueueRow = {
   dock_affixed: boolean;
   dock_docked: boolean;
   dock_notified: boolean;
+  dock_picked_up: boolean;
   dock_confirmed_at: string | null;
   dock_confirmed_by: string | null;
 
@@ -385,15 +386,16 @@ export async function goBackStep(queueId: string, currentStep: FulfillmentStep):
   await logAction('fq_step_back', queueId, `Step ${currentStep} → ${prev}`);
 }
 
-/** Step 4: toggle one of the 4 dock checklist booleans. */
+/** Step 4: toggle one of the dock checklist booleans. */
 export async function toggleDockCheck(
   queueId: string,
-  field: 'printed' | 'affixed' | 'docked' | 'notified',
+  field: 'printed' | 'affixed' | 'docked' | 'notified' | 'picked_up',
   value: boolean,
 ): Promise<void> {
   const column = ({
     printed: 'dock_printed', affixed: 'dock_affixed',
     docked: 'dock_docked', notified: 'dock_notified',
+    picked_up: 'dock_picked_up',
   } as const)[field];
   const { error } = await supabase
     .from('fulfillment_queue')
