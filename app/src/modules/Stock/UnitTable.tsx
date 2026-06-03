@@ -71,10 +71,17 @@ export function UnitTable({ units }: { units: Unit[] }) {
             const shippedDate = u.shipped_at
               ? new Date(u.shipped_at).toLocaleDateString('en-US', { year: '2-digit', month: 'short', day: 'numeric' })
               : null;
-            // defect_reason takes precedence in the notes column when present —
-            // surfaces the "why did this come back" right where scrap/rework
-            // rows live.
-            const primaryNote = u.defect_reason ?? u.notes;
+            // Prioritize real per-machine signals over the batch-level seeded
+            // `notes`: electrical FAIL (+ failed tests) → defect_reason →
+            // operator defect_notes → electrical incomplete → seeded note.
+            const electricalFail = u.electrical_check === 'fail';
+            const realNote =
+              electricalFail
+                ? `Electrical FAIL${u.electrical_failed_tests ? `: ${u.electrical_failed_tests}` : ''}`
+                : u.defect_reason
+                  ?? u.defect_notes
+                  ?? (u.electrical_check === 'incomplete' ? 'Electrical test incomplete' : null);
+            const primaryNote = realNote ?? u.notes;
             return (
               <tr key={u.serial}>
                 <td className={styles.serial}>{u.serial}</td>
@@ -132,10 +139,14 @@ export function UnitTable({ units }: { units: Unit[] }) {
                   </button>
                 </td>
                 <td className={styles.notes} title={primaryNote ?? ''}>
-                  {u.defect_reason ? (
+                  {electricalFail ? (
+                    <span className={styles.defect}>⚠ {primaryNote}</span>
+                  ) : u.defect_reason ? (
                     <span className={styles.defect}>⚠ {u.defect_reason}</span>
+                  ) : realNote ? (
+                    realNote
                   ) : u.notes ? (
-                    u.notes
+                    <span className={styles.muted}>{u.notes}</span>
                   ) : <span className={styles.muted}>—</span>}
                 </td>
                 <td>

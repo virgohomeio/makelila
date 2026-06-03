@@ -31,6 +31,7 @@ describe('parseTestReport', () => {
     expect(r.result).toBe('fail');
     expect(r.passed).toBe(11);
     expect(r.failed).toBe(2);
+    expect(r.failedTests).toEqual(['Left Motor', 'Right Motor']);
   });
 
   it('parses a passing report', () => {

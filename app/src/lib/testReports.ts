@@ -9,6 +9,7 @@ export type ParsedTestReport = {
   result: QcCheck;     // 'pass' | 'fail' | 'incomplete'
   passed: number | null;
   failed: number | null;
+  failedTests: string[];  // e.g. ['Left Motor', 'Right Motor']
 };
 
 /** Parse a test-script .md report. Serial comes from the "Serial Number:" line;
@@ -23,12 +24,20 @@ export function parseTestReport(text: string): ParsedTestReport {
   const passed = passedMatch ? Number(passedMatch[1]) : null;
   const failed = failedMatch ? Number(failedMatch[1]) : null;
 
+  // Per-test failures: heading lines like "### Test Left Motor: <x> FAIL".
+  const failedTests: string[] = [];
+  const re = /^#{1,6}\s+(.+?):[^\n]*\bFAIL\b/gm;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    failedTests.push(m[1].replace(/^Test\s+/i, '').trim());
+  }
+
   let result: QcCheck;
   if (failed == null) result = 'incomplete';
   else if (failed > 0) result = 'fail';
   else result = 'pass';
 
-  return { serial: serialMatch ? serialMatch[1] : null, result, passed, failed };
+  return { serial: serialMatch ? serialMatch[1] : null, result, passed, failed, failedTests };
 }
 
 /** Serial implied by a filename like "LL01-00000000332.md". */
@@ -71,6 +80,7 @@ export async function uploadTestReports(files: File[], validSerials: Set<string>
         .from('units')
         .update({
           electrical_check: parsed.result,
+          electrical_failed_tests: parsed.failedTests.length ? parsed.failedTests.join(', ') : null,
           test_report_path: path,
           test_report_name: file.name,
           test_report_uploaded_at: new Date().toISOString(),
