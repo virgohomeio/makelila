@@ -6,6 +6,7 @@ import {
 } from '../../lib/stock';
 import { BatchCards } from './BatchCards';
 import { UnitTable } from './UnitTable';
+import { TestReportUploader } from './TestReportUploader';
 import styles from './Stock.module.css';
 
 type CategoryFilter = 'all' | StatusCategory;
@@ -14,6 +15,7 @@ export function UnitsTab() {
   const { batches, loading: bLoading } = useBatches();
   const { units, loading: uLoading } = useUnits();
   const countsByBatch = useStatusCountsByBatch(units);
+  const validSerials = useMemo(() => new Set(units.map(u => u.serial)), [units]);
 
   const [batchFilter, setBatchFilter] = useState<string | null>(null);
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>('all');
@@ -98,6 +100,8 @@ export function UnitsTab() {
           {filtered.length !== units.length && <> of {units.length}</>}
         </div>
       </div>
+
+      <TestReportUploader validSerials={validSerials} />
 
       <UnitTable units={filtered} />
     </div>

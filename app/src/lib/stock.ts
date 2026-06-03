@@ -102,6 +102,10 @@ export type Unit = {
   electrical_check: QcCheck | null;
   mechanical_check: QcCheck | null;
   defect_notes: string | null;
+  // Uploaded electrical test report (.md) in the 'test-reports' storage bucket.
+  test_report_path: string | null;
+  test_report_name: string | null;
+  test_report_uploaded_at: string | null;
 };
 
 // ---------- hooks ----------

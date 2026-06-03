@@ -4,6 +4,7 @@ import {
   QC_CHECK_META,
   type Unit, type UnitStatus, type QcCheck,
 } from '../../lib/stock';
+import { signedReportUrl } from '../../lib/testReports';
 import styles from './Stock.module.css';
 
 export function UnitTable({ units }: { units: Unit[] }) {
@@ -18,6 +19,13 @@ export function UnitTable({ units }: { units: Unit[] }) {
   const commit = async (serial: string) => {
     const next = pending[serial];
     if (!next) return;
+    // Warn (don't block) when marking a unit ready whose latest electrical
+    // test report is a FAIL.
+    const unit = units.find(u => u.serial === serial);
+    if (next === 'ready' && unit?.electrical_check === 'fail') {
+      const ok = window.confirm(`${serial}: latest electrical test is a FAIL. Mark ready to ship anyway?`);
+      if (!ok) return;
+    }
     setBusySerial(serial); setError(null);
     try {
       await updateUnitStatus(serial, next);
@@ -233,6 +241,24 @@ function QcEditorModal({
         <div className={styles.modalField}>
           <label className={styles.modalLabel}>Electrical check</label>
           <QcTri value={eCheck} onChange={setECheck} />
+          {unit.test_report_path && (
+            <div className={styles.reportLink}>
+              Report:{' '}
+              <button
+                type="button"
+                className={styles.reportOpenBtn}
+                onClick={async () => {
+                  try { window.open(await signedReportUrl(unit.test_report_path!), '_blank', 'noopener'); }
+                  catch (e) { onError((e as Error).message); }
+                }}
+              >
+                {unit.test_report_name ?? 'test report'} ↗
+              </button>
+              {unit.test_report_uploaded_at && (
+                <span className={styles.muted}> · {new Date(unit.test_report_uploaded_at).toLocaleDateString('en-US')}</span>
+              )}
+            </div>
+          )}
         </div>
 
         <div className={styles.modalField}>
