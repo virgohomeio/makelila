@@ -2,7 +2,9 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   useServiceTickets, createTicket, syncGmailTickets,
   STATUS_META, PRIORITY_META, SOURCE_LABEL, TOPIC_LABEL,
+  ISSUE_AREAS, ISSUE_AREA_LABEL,
   type TicketStatus, type TicketPriority, type TicketTopic, type ServiceTicket,
+  type IssueArea,
 } from '../../lib/service';
 import { useCustomers, type Customer } from '../../lib/customers';
 import { useUnits } from '../../lib/stock';
@@ -24,6 +26,7 @@ export function SupportTab() {
   const [statusFilter, setStatusFilter] = useState<TicketStatus | 'all'>('all');
   const [sourceFilter, setSourceFilter] = useState<'all' | 'customer_form' | 'hubspot' | 'gmail' | 'quo'>('all');
   const [topicFilter, setTopicFilter] = useState<TicketTopic | 'all'>('all');
+  const [areaFilter, setAreaFilter] = useState<IssueArea | 'all' | 'none'>('all');
   const [q, setQ] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showNew, setShowNew] = useState(false);
@@ -35,6 +38,8 @@ export function SupportTab() {
       if (statusFilter !== 'all' && t.status !== statusFilter) return false;
       if (sourceFilter !== 'all' && t.source !== sourceFilter) return false;
       if (topicFilter !== 'all' && t.topic !== topicFilter) return false;
+      if (areaFilter === 'none' && t.issue_area !== null) return false;
+      if (areaFilter !== 'all' && areaFilter !== 'none' && t.issue_area !== areaFilter) return false;
       if (q) {
         const needle = q.toLowerCase();
         return (
@@ -47,7 +52,22 @@ export function SupportTab() {
       }
       return true;
     });
-  }, [tickets, statusFilter, sourceFilter, topicFilter, q]);
+  }, [tickets, statusFilter, sourceFilter, topicFilter, areaFilter, q]);
+
+  // Volume per issue area, computed over the *unfiltered* support-ticket
+  // pool so the chip counts don't shift when other filters narrow the view.
+  const areaCounts = useMemo(() => {
+    const counts: Partial<Record<IssueArea, number>> = {};
+    let untagged = 0;
+    for (const t of tickets) {
+      if (t.issue_area && ISSUE_AREAS.includes(t.issue_area)) {
+        counts[t.issue_area] = (counts[t.issue_area] ?? 0) + 1;
+      } else {
+        untagged++;
+      }
+    }
+    return { counts, untagged };
+  }, [tickets]);
 
   const onSyncNow = async () => {
     setSyncing(true); setSyncMessage(null);
@@ -145,6 +165,36 @@ export function SupportTab() {
             onClick={() => setTopicFilter(k)}
           >{TOPIC_LABEL[k]}</button>
         ))}
+      </div>
+
+      <div className={styles.filterRow}>
+        <span className={styles.filterGroupLabel}>Issue area:</span>
+        <button
+          className={`${styles.chipSm} ${areaFilter === 'all' ? styles.chipActive : ''}`}
+          onClick={() => setAreaFilter('all')}
+        >Any</button>
+        {ISSUE_AREAS.map(a => (
+          <button
+            key={a}
+            className={`${styles.chipSm} ${areaFilter === a ? styles.chipActive : ''}`}
+            onClick={() => setAreaFilter(a)}
+          >
+            {ISSUE_AREA_LABEL[a]}
+            {(areaCounts.counts[a] ?? 0) > 0 && (
+              <span className={styles.chipBadge}>{areaCounts.counts[a]}</span>
+            )}
+          </button>
+        ))}
+        <button
+          className={`${styles.chipSm} ${areaFilter === 'none' ? styles.chipActive : ''}`}
+          onClick={() => setAreaFilter('none')}
+          title="Tickets with no issue area set yet"
+        >
+          Uncategorized
+          {areaCounts.untagged > 0 && (
+            <span className={styles.chipBadge}>{areaCounts.untagged}</span>
+          )}
+        </button>
       </div>
 
       {syncMessage && <div className={styles.syncMessage}>{syncMessage}</div>}

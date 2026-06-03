@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import {
-  type ServiceTicket, type TicketStatus,
+  type ServiceTicket, type TicketStatus, type IssueArea,
   STATUS_META, CATEGORY_META, PRIORITY_META, SOURCE_LABEL, TOPIC_LABEL, NEXT_STATUSES,
-  updateTicketStatus, assignTicketOwner, setTicketPriority,
+  ISSUE_AREAS, ISSUE_AREA_LABEL,
+  updateTicketStatus, assignTicketOwner, setTicketPriority, setTicketIssueArea,
   updateTicketNotes, setRepairFields, reclassifyTicket,
   useCustomerLifecycle, warrantyState,
   useTicketMessages, useClassificationLog,
@@ -246,6 +247,19 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
               >{PRIORITY_META[p].label}</button>
             ))}
           </div>
+        </div>
+
+        <div className={styles.detailSection}>
+          <div className={styles.detailSectionLabel}>Issue area</div>
+          <select
+            className={styles.select}
+            value={ticket.issue_area ?? ''}
+            disabled={busy}
+            onChange={(e) => void run(setTicketIssueArea(ticket.id, (e.target.value || null) as IssueArea | null))}
+          >
+            <option value="">— Not categorized —</option>
+            {ISSUE_AREAS.map(a => <option key={a} value={a}>{ISSUE_AREA_LABEL[a]}</option>)}
+          </select>
         </div>
 
         <div className={styles.detailSection}>

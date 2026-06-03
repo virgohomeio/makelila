@@ -25,6 +25,7 @@ function mkConv(partial: Partial<ServiceTicket> & { id: string }): ServiceTicket
     first_message_at: '2026-05-28T00:00:00Z',
     last_message_at: '2026-05-28T00:00:00Z',
     is_manually_overridden: false,
+    issue_area: null,
     kind: 'conversation',
     inbox_disposition: null,
     ...partial,

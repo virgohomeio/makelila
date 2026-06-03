@@ -655,3 +655,14 @@
   font-size: 11px;
   margin-top: 1px;
 }
+
+.chipBadge {
+  display: inline-block;
+  margin-left: 5px;
+  padding: 0 5px;
+  background: var(--color-crimson);
+  color: #fff;
+  border-radius: 8px;
+  font-size: 9px;
+  font-weight: 700;
+}

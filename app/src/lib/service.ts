@@ -25,6 +25,25 @@ export type TicketTopic =
   | 'logistics_pickup' | 'order_fulfillment' | 'in_person_service' | 'appointment'
   | 'marketing_social' | 'closed_acknowledgment' | 'other';
 
+// Coarser, operator-set classification for volume reporting (walkthrough #38).
+// Distinct from `topic` (which is auto-classified and granular). DB column is
+// `text` with no check constraint so this list can iterate without a migration.
+export const ISSUE_AREAS = [
+  'electrical', 'mechanical', 'software', 'shipping',
+  'billing', 'onboarding', 'other',
+] as const;
+export type IssueArea = (typeof ISSUE_AREAS)[number];
+
+export const ISSUE_AREA_LABEL: Record<IssueArea, string> = {
+  electrical: 'Electrical',
+  mechanical: 'Mechanical',
+  software:   'Software',
+  shipping:   'Shipping',
+  billing:    'Billing',
+  onboarding: 'Onboarding',
+  other:      'Other',
+};
+
 export type ServiceTicket = {
   id: string;
   ticket_number: string;
@@ -67,6 +86,7 @@ export type ServiceTicket = {
   first_message_at: string | null;
   last_message_at: string | null;
   is_manually_overridden: boolean;
+  issue_area: IssueArea | null;
 };
 
 export type CustomerLifecycle = {
@@ -556,6 +576,15 @@ export async function setTicketTopic(id: string, topic: TicketTopic): Promise<vo
     .eq('id', id);
   if (error) throw error;
   await logAction('ticket_topic_set', id, topic);
+}
+
+export async function setTicketIssueArea(id: string, issue_area: IssueArea | null): Promise<void> {
+  const { error } = await supabase
+    .from('service_tickets')
+    .update({ issue_area })
+    .eq('id', id);
+  if (error) throw error;
+  await logAction('ticket_issue_area_set', id, issue_area ?? '(cleared)');
 }
 
 /** Trigger an on-demand run of the Gmail sync edge function. Returns the
