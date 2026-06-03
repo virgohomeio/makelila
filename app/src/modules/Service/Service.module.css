@@ -262,6 +262,28 @@
   cursor: pointer;
 }
 .btnGhost:hover { text-decoration: underline; }
+.btnDanger {
+  background: var(--color-error);
+  color: #fff;
+  border: 1px solid var(--color-error);
+  padding: 7px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btnDanger:hover { filter: brightness(0.92); }
+.btnDanger:disabled { opacity: 0.6; cursor: default; }
+.dangerConfirm {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--color-error);
+  border-radius: var(--radius-sm);
+  background: #fff5f5;
+}
+.dangerConfirmText { font-size: 11px; color: var(--color-ink-muted); }
 
 .select, .input, .textarea {
   padding: 6px 9px;

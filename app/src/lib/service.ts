@@ -546,6 +546,15 @@ export async function createTicket(input: NewTicketInput): Promise<ServiceTicket
   return row;
 }
 
+export async function deleteTicket(id: string): Promise<void> {
+  // Child rows (messages, attachments, classification log) are removed by the
+  // `on delete cascade` FKs. Realtime fires a DELETE event that drops the row
+  // from any open `useServiceTickets`/`useInbox` list.
+  const { error } = await supabase.from('service_tickets').delete().eq('id', id);
+  if (error) throw error;
+  await logAction('ticket_deleted', id, 'Ticket deleted');
+}
+
 export async function updateTicketStatus(id: string, status: TicketStatus): Promise<void> {
   const { error } = await supabase.from('service_tickets').update({ status }).eq('id', id);
   if (error) throw error;
