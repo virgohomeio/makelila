@@ -79,8 +79,23 @@ Deno.serve(async (req: Request) => {
     // 2. Build per-customer drafts (serialized; ~10s for 10 customers).
     const drafts: Draft[] = [];
     for (const id of ids) {
-      const draft = await buildDraftForCustomer(admin, anthropicKey, id);
-      if (draft) drafts.push(draft);
+      try {
+        const draft = await buildDraftForCustomer(admin, anthropicKey, id);
+        if (draft) drafts.push(draft);
+      } catch (e) {
+        // Bad row shouldn't crash the batch. Surface as a skip so the
+        // operator sees something rather than losing 49 other drafts.
+        drafts.push({
+          customer_id: id,
+          customer_name: '(unknown — fetch failed)',
+          customer_phone: null,
+          days_overdue: 0,
+          fu_kind: 'fu1',
+          draft_message: null,
+          skip_reason: `Internal error: ${(e as Error).message}`,
+          context_summary: '',
+        });
+      }
     }
 
     // If every customer in the batch errored with an LLM-error skip_reason,
@@ -144,52 +159,60 @@ async function buildDraftForCustomer(
     return { ...baseDraft, skip_reason: 'No phone on file', context_summary: 'No phone on file' };
   }
 
-  // Auto-skip: active return / refund / cancellation
-  const { data: activeReturn } = await admin
-    .from('returns')
-    .select('return_ref, status')
-    .eq('customer_email', c.email)
-    .in('status', ['created','in_transit','received','inspecting'])
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (activeReturn) {
-    return {
-      ...baseDraft,
-      skip_reason: `Active return ${activeReturn.return_ref} (${activeReturn.status}) — manual touch only`,
-      context_summary: `Active return ${activeReturn.return_ref}`,
-    };
+  // Auto-skip: active return / refund / cancellation.
+  // Gate on c.email — without an email we can't key these tables, so we
+  // fall through and let Reina handle the judgment call manually.
+  if (c.email) {
+    const { data: activeReturn } = await admin
+      .from('returns')
+      .select('return_ref, status')
+      .eq('customer_email', c.email)
+      .in('status', ['created','in_transit','received','inspecting'])
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (activeReturn) {
+      return {
+        ...baseDraft,
+        skip_reason: `Active return ${activeReturn.return_ref} (${activeReturn.status}) — manual touch only`,
+        context_summary: `Active return ${activeReturn.return_ref}`,
+      };
+    }
   }
 
-  const { data: activeApproval } = await admin
-    .from('refund_approvals')
-    .select('id, status')
-    .eq('customer_email', c.email)
-    .in('status', ['manager_review','finance_review','approved'])
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (activeApproval) {
-    return {
-      ...baseDraft,
-      skip_reason: `Active refund approval (${activeApproval.status}) — manual touch only`,
-      context_summary: `Active refund approval`,
-    };
+  if (c.email) {
+    const { data: activeApproval } = await admin
+      .from('refund_approvals')
+      .select('id, status')
+      .eq('customer_email', c.email)
+      .in('status', ['manager_review','finance_review','approved'])
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (activeApproval) {
+      return {
+        ...baseDraft,
+        skip_reason: `Active refund approval (${activeApproval.status}) — manual touch only`,
+        context_summary: `Active refund approval`,
+      };
+    }
   }
 
-  const { data: activeCancel } = await admin
-    .from('order_cancellations')
-    .select('id')
-    .eq('customer_email', c.email)
-    .eq('status', 'submitted')
-    .limit(1)
-    .maybeSingle();
-  if (activeCancel) {
-    return {
-      ...baseDraft,
-      skip_reason: 'Active cancellation request — manual touch only',
-      context_summary: 'Active cancellation',
-    };
+  if (c.email) {
+    const { data: activeCancel } = await admin
+      .from('order_cancellations')
+      .select('id')
+      .eq('customer_email', c.email)
+      .eq('status', 'submitted')
+      .limit(1)
+      .maybeSingle();
+    if (activeCancel) {
+      return {
+        ...baseDraft,
+        skip_reason: 'Active cancellation request — manual touch only',
+        context_summary: 'Active cancellation',
+      };
+    }
   }
 
   // Auto-skip: outbound Quo message within last 7 days
@@ -276,13 +299,17 @@ async function buildDraftForCustomer(
     orderRow = data;
   } else if (c.full_name) {
     // Email-null fallback: lowercase-trimmed match on customer_name.
+    // TODO(perf): for larger datasets, pre-build a customer-keyed map at
+    // the top of handle() instead of re-fetching per customer. Pattern in
+    // sync-quo-tickets/index.ts lines 119-165. Acceptable today at ~300
+    // customers; revisit if the customer base grows.
     const needle = c.full_name.toLowerCase().trim();
     const { data: candidates } = await admin
       .from('orders')
       .select('order_ref, placed_at, country, customer_name')
       .not('customer_name', 'is', null)
       .order('placed_at', { ascending: false })
-      .limit(50);
+      .range(0, 9999);
     const match = (candidates ?? []).find(o =>
       o.customer_name && o.customer_name.toLowerCase().trim() === needle
     );
@@ -297,6 +324,10 @@ async function buildDraftForCustomer(
   // explicit lower(trim(...)) join in SQL would be ideal but the Supabase
   // JS client doesn't expose a `lower()` filter, so fetch a candidate set
   // and filter client-side.
+  // TODO(perf): for larger datasets, pre-build a customer-keyed map at
+  // the top of handle() instead of re-fetching per customer. Pattern in
+  // sync-quo-tickets/index.ts lines 119-165. Acceptable today at ~300
+  // customers; revisit if the customer base grows.
   let unitRow: { serial: string; batch: string; shipped_at: string | null } | null = null;
   if (c.full_name) {
     const needle = c.full_name.toLowerCase().trim();
@@ -305,7 +336,7 @@ async function buildDraftForCustomer(
       .select('serial, batch, shipped_at, customer_name')
       .not('customer_name', 'is', null)
       .order('shipped_at', { ascending: false, nullsFirst: false })
-      .limit(50);
+      .range(0, 9999);
     const match = (candidates ?? []).find(u =>
       u.customer_name && u.customer_name.toLowerCase().trim() === needle
     );
