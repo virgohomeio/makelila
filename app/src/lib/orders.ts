@@ -538,6 +538,44 @@ export async function createReplacementOrder(input: ReplacementOrderInput):
   return { id: row.id, order_ref: row.order_ref };
 }
 
+/** Live-subscribed list of all replacement orders, newest first. */
+export function useReplacementOrders(): { orders: Order[]; loading: boolean } {
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let channel: ReturnType<typeof supabase.channel> | null = null;
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await supabase
+        .from('orders')
+        .select('*')
+        .eq('kind', 'replacement')
+        .order('created_at', { ascending: false });
+      if (cancelled) return;
+      if (!error && data) setOrders(data as Order[]);
+      setLoading(false);
+
+      channel = supabase
+        .channel('orders:replacement:realtime')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, (payload) => {
+          setOrders(prev => {
+            const row = (payload.new ?? payload.old) as Order | undefined;
+            if (!row || row.kind !== 'replacement') return prev;
+            if (payload.eventType === 'DELETE') return prev.filter(o => o.id !== row.id);
+            const idx = prev.findIndex(o => o.id === row.id);
+            if (idx >= 0) { const next = [...prev]; next[idx] = row; return next; }
+            return [row, ...prev];
+          });
+        })
+        .subscribe();
+    })();
+    return () => { cancelled = true; if (channel) void channel.unsubscribe(); };
+  }, []);
+
+  return { orders, loading };
+}
+
 /** Records that an order shipped. Sets shipped_at and shipping_cost_usd
  *  (the actual freight/label cost from Freightcom/ClickShip). Works for
  *  both sales and replacements. */
