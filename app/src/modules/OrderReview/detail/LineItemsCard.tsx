@@ -11,7 +11,10 @@ export function LineItemsCard({ order }: { order: Order }) {
     order.subtotal_usd != null ||
     order.tax_usd != null ||
     order.discount_total_usd != null;
-  const shipping = order.freight_estimate_usd;
+  // Customer-paid shipping is independent of the operator-editable freight
+  // estimate (backlog #65). Fall back to the estimate only if the new
+  // column hasn't been populated yet (very old orders pre-migration).
+  const shipping = order.customer_paid_shipping_usd ?? order.freight_estimate_usd;
   const showShipping = hasBreakdown && shipping > 0;
   const showDiscount =
     hasBreakdown && (order.discount_total_usd ?? 0) > 0;

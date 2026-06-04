@@ -51,6 +51,10 @@ export type Order = {
   address_claude_postal: string | null;
   freight_estimate_usd: number;
   freight_threshold_usd: number;
+  // What Shopify recorded the customer paying for shipping. Distinct from
+  // freight_estimate_usd (the operator-editable carrier-quote field).
+  // Editing the estimate must NOT change this. Backlog #65.
+  customer_paid_shipping_usd: number | null;
   // *_usd fields hold the amount in the order's own `currency`, despite the historical `_usd` naming — CAD orders are NOT in USD.
   currency: string;
   total_usd: number;

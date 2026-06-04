@@ -64,6 +64,7 @@ type MappedOrder = {
   address_verdict: 'house' | 'apt' | 'remote';
   freight_estimate_usd: number;
   freight_threshold_usd: number;
+  customer_paid_shipping_usd: number;
   total_usd: number;
   currency: string;
   postal_code: string | null;
@@ -148,6 +149,10 @@ function mapOrder(
     address_verdict: verdict,
     freight_estimate_usd: freight,
     freight_threshold_usd: 200.00,
+    // Customer-paid shipping is initialized from the same Shopify value but
+    // lives in its own column so operator edits to freight_estimate_usd
+    // don't change the displayed paid-shipping amount. Backlog #65.
+    customer_paid_shipping_usd: freight,
     total_usd: total,
     // Currency the customer was charged in (presentment); falls back to shop currency.
     currency: o.presentment_currency ?? o.currency ?? 'USD',
@@ -272,6 +277,7 @@ serve(async (req: Request) => {
     const refreshPatch: Record<string, unknown> = {
       placed_at: m.placed_at,
       freight_estimate_usd: m.freight_estimate_usd,
+      customer_paid_shipping_usd: m.customer_paid_shipping_usd,
       currency: m.currency,
       postal_code: m.postal_code,
       subtotal_usd: m.subtotal_usd,
