@@ -1,4 +1,6 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
+import ReplacementPickerModal from './ReplacementPickerModal';
+import { useCustomers } from '../../lib/customers';
 import {
   type ServiceTicket, type TicketStatus, type IssueArea, type TicketCategory,
   STATUS_META, CATEGORY_META, PRIORITY_META, SOURCE_LABEL, TOPIC_LABEL, NEXT_STATUSES,
@@ -34,6 +36,18 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [editingSubject, setEditingSubject] = useState(false);
   const [subjectDraft, setSubjectDraft] = useState(ticket.subject);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const { customers } = useCustomers();
+  const linkedCustomer = useMemo(() =>
+    ticket.customer_id ? customers.find(c => c.id === ticket.customer_id) : null,
+    [customers, ticket.customer_id]);
+  const pickerAddress = useMemo(() => ({
+    address_line: linkedCustomer?.address_line ?? null,
+    city: linkedCustomer?.city ?? '',
+    region_state: linkedCustomer?.region ?? null,
+    country: (linkedCustomer?.country === 'US' ? 'US' : 'CA') as 'US' | 'CA',
+    postal_code: linkedCustomer?.postal_code ?? null,
+  }), [linkedCustomer]);
 
   async function saveSubject() {
     const next = subjectDraft.trim();
@@ -156,6 +170,44 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
             <span className={styles.detailFieldValue}>{new Date(ticket.created_at).toLocaleString()}</span>
           </div>
         </div>
+
+        <div className={styles.detailSection}>
+          {ticket.replacement_order_id ? (
+            <div className={styles.replacementLink}>
+              Replacement order:&nbsp;
+              <a href={`#/order-review?order_id=${ticket.replacement_order_id}`}>
+                open in Order Review
+              </a>
+            </div>
+          ) : (
+            <button
+              type="button"
+              className={styles.replacementBtn}
+              disabled={busy}
+              onClick={() => setPickerOpen(true)}
+            >
+              Send replacement
+            </button>
+          )}
+        </div>
+
+        {pickerOpen && (
+          <ReplacementPickerModal
+            ticket={{
+              id: ticket.id,
+              customer_name: ticket.customer_name,
+              customer_email: ticket.customer_email,
+              customer_phone: ticket.customer_phone,
+              ticket_number: ticket.ticket_number,
+            }}
+            address={pickerAddress}
+            onClose={() => setPickerOpen(false)}
+            onCreated={(result) => {
+              setPickerOpen(false);
+              window.location.hash = `#/order-review?order_id=${result.id}`;
+            }}
+          />
+        )}
 
         {(ticket.topic || ticket.summary || ticket.suggested_next_action) && (
           <div className={styles.detailSection}>
