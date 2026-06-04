@@ -346,7 +346,25 @@ Alpha feedback collection window is **closed**. The 11 items above plus the meet
   **Source:** #55 deferred follow-up + final code review (2026-06-04)
   **Description:** `ReplacementPickerModal.addUnit` currently hard-codes `cost_usd: 312` for every replacement-unit line item. This flows into `orders.cogs_usd`, the activity log, and the ReplacementTab KPI strip — all of which now report inaccurate numbers. Replace with a real lookup: join the `units` row's `batch` to `batches.unit_cost_usd` (or whatever column holds the per-unit landed cost) and use that. Touches: `ReplacementPickerModal.tsx` `addUnit` function; verify `batches` exposes the cost field (per `lib/stock.ts` `Batch` type, the field is `unit_cost_usd`). Depends on no schema changes.
 
----
+- **#66** Dashboard: friendly outreach SMS for `NOT_MIXING` customers (revises #60 stance).
+  **Source:** Huayi (2026-06-04 in-session note)
+  **Description:** When a customer's machine shows `NOT_MIXING` on the Dashboard, send a *non-alarming* SMS asking how their compost is doing and whether the LILA is behaving normally. Different from #60's other status actions: the goal is **information-gathering**, not telling the customer their unit is broken. Many `NOT_MIXING` flags turn out to be benign (customer mode, lid quirk, brief sensor blip) and we want to confirm before escalating to a service ticket.
+  **Current target list (as of 2026-06-04, pulled by Huayi from live Dashboard):**
+    1. Michael Romance
+    2. Susan Jacobat
+    3. Amelia Smith
+    4. Christian Pimentel
+  Tone (operator can edit before send):
+    > "Hi {first_name} — quick check-in on your LILA composter! We're seeing some unusual signals in the data and wanted to make sure things are still looking good on your end. How's the compost coming along? Any noises, smells, or anything that doesn't seem right? Reply here and we'll dig in."
+  **Revises #60's earlier note** that NOT_MIXING should NOT auto-message and should route to Service. The new framing: NOT_MIXING DOES get a customer SMS, but with a discovery template (not the prescriptive "add water" template used for DRY_SOIL). The four-status mapping from #60 becomes:
+    - `DRY_SOIL` → "Send moisture check SMS" (add ½ cup water — prescriptive)
+    - `SOAKED_SOIL` → "Send drainage check SMS" (run a dry cycle — prescriptive)
+    - `OPEN_LID` → "Send lid alert SMS" (please close the lid — prescriptive)
+    - `NOT_MIXING` → "Send wellness-check SMS" (open-ended discovery)
+    - `NEW_FOOD` / `OK` → no action
+    - `DIAGNOSE` → no SMS (operator should call)
+  Reuses #60's machinery (template in Templates module, `send-followup-sms` edge fn, activity log entry, 48h cooldown). Replies route back via Quo and land as a ticket in the Service Inbox.
+  **Likely touch:** see #60 — same surface. Add a fourth template + status mapping. **Ship #66 together with #60** rather than as a separate effort; it's just one more entry in the status→template table.
 
 ## Reference
 
