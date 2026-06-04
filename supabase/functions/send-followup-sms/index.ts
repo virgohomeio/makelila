@@ -3,6 +3,7 @@
 // docs/superpowers/specs/2026-06-03-auto-followup-queue-design.md.
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
+import { authenticate } from '../_shared/auth.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -29,15 +30,13 @@ Deno.serve(async (req: Request) => {
 
     const admin = createClient(supabaseUrl, serviceKey);
 
-    // TODO(security-pass): swap to _shared/auth.ts authenticate()
-    const authz = req.headers.get('authorization') ?? '';
-    const jwt = authz.replace(/^Bearer\s+/i, '');
-    if (!jwt) return j({ error: 'Missing Authorization header' }, 401);
-    const { data: userData, error: userErr } = await admin.auth.getUser(jwt);
-    if (userErr || !userData?.user) return j({ error: 'Invalid token' }, 401);
-    const { data: callerProfile } = await admin.from('profiles').select('is_internal').eq('id', userData.user.id).maybeSingle();
-    if (!callerProfile?.is_internal) return j({ error: 'Not authorized' }, 403);
-    const callerUserId = userData.user.id;
+    let _caller;
+    try { _caller = await authenticate(req, admin); }
+    catch (e) { if (e instanceof Response) return e; throw e; }
+    if (_caller.kind !== 'user') {
+      return j({ error: 'This function requires an operator JWT — cron-secret not accepted.' }, 403);
+    }
+    const callerUserId = _caller.user_id;
 
     const { customer_id, message } = (await req.json()) as Input;
     if (!customer_id || !message?.trim()) return j({ error: 'customer_id + message required' }, 400);
