@@ -272,6 +272,55 @@ Alpha feedback collection window is **closed**. The 11 items above plus the meet
   **Why now (after #55):** #55 introduces `orders.cogs_usd` + `orders.shipping_cost_usd` on every order, which is the data foundation this tab needs. Without #55, lifetime cost can't be computed.
   **Likely touch:** new `app/src/modules/Customers/ProfitabilityTab.tsx` + `lib/customers.ts` aggregate helpers (likely a SQL view `customer_profitability` for the heavy join across orders + refund_approvals + service_tickets, since per-customer aggregation in the browser would be slow over thousands of orders).
 
+- **#59** Distinguish team-test units from real customer units everywhere.
+  **Source:** Huayi (2026-06-04 in-session note)
+  **Description:** Units the team uses for internal testing (currently owned by Huayi, Junaid, Pedrum, George) get mixed in with real customer units in too many surfaces — the Dashboard, Stock tab, Customers tab, ticket attribution, and especially anything that rolls up profitability or warranty cost (e.g. #58). They distort the numbers and pollute the picker dropdowns. Today `units.status` has a `team-test` value but it's used inconsistently — some team units sit in `shipped` with the team member's name in `customer_name` and never get tagged as `team-test`.
+  Make the distinction explicit and authoritative:
+    1. **Add `units.is_team_test` boolean** (default `false`), distinct from `units.status`. A unit can be `team-test` (status) AND `is_team_test=true`, or it can be `shipped` to a team member AND still `is_team_test=true`. The flag is the source of truth — `status` describes the unit's pipeline stage, the flag describes whether it counts as real-customer activity.
+    2. **Seed the flag for the four current team members.** Run a one-time backfill: set `is_team_test=true` on every unit where `customer_name` matches Huayi / Junaid / Pedrum / George (resolved via `customers.full_name` or `profiles.full_name`). New units shipped to those four also auto-flag at the Order Review or Fulfillment assignment step.
+    3. **Default-filter team-test units OUT of:** Dashboard sidebar (unless toggled on), Customers tab list, Customer Profitability rollups (#58), Stock warranty/cost reports. They should stay visible in the Stock raw table (operators still need to find them) and in the Dashboard when a "Show team units" toggle is on.
+    4. **UI badge.** Wherever a team-test unit IS displayed, show a small "team" pill so the operator immediately knows it's not a real customer signal. Same treatment in Service tickets that reference a team-test unit.
+    5. **Future-proofing.** The team list (Huayi/Junaid/Pedrum/George) is not hard-coded into the backfill query — it's resolved against `profiles.is_internal=true` people who happen to be linked to a unit. When the team grows or shrinks, the next backfill picks up the new list automatically.
+  **Why it matters:** without this, #58 profitability shows Huayi as our worst customer because he has 4 returns and zero revenue, which is technically true but utterly misleading. Same problem for any KPI tile counting "shipped units" or "warranty cost per customer".
+  **Likely touch:** SQL migration adding `units.is_team_test` + backfill; `lib/stock.ts` Unit type + filter helpers; default filter in `Dashboard/index.tsx`, `Customers/index.tsx`, and (when #58 ships) `Customers/ProfitabilityTab.tsx`; new "team" pill style in shared CSS.
+
+- **#60** Dashboard: send a Quo SMS to the customer when their machine shows `DRY_SOIL` (and generalize to other statuses).
+  **Source:** Huayi (2026-06-04 in-session note)
+  **Description:** The Dashboard already classifies machine status (`OK | DRY_SOIL | SOAKED_SOIL | NEW_FOOD | NOT_MIXING | OPEN_LID | DIAGNOSE` — see `STATUS_DESCRIPTIONS` in `lib/dashboard.ts`). When a unit's status is `DRY_SOIL`, the operator should be able to one-click send a Quo (OpenPhone) SMS to the customer asking how their compost is doing and suggesting they add water. Make this a status-keyed action so we can extend it to the other actionable statuses without re-doing the wiring each time.
+  Specifically:
+    1. On the Dashboard machine detail panel, when `status='DRY_SOIL'` AND the unit is linked to a customer (via #53/#54 `units.customer_name`) AND the customer has a phone number — show a "Send moisture check SMS" button.
+    2. Clicking opens a small modal with a pre-drafted message (editable):
+       > "Hi {first_name}, your LILA composter is showing low moisture levels. The contents may benefit from a small amount of water — about ½ cup is usually enough. Let us know if you're seeing anything unusual!"
+    3. On confirm, the SMS goes through the existing `send-followup-sms` edge function (same path the Customers → Overdue Follow-ups panel uses, so we reuse the auth wrapper, OpenPhone API key, FOLLOWUP_SMS_TEST_PHONE redirect for QA, and activity log integration).
+    4. Log to `activity_log` with action `dashboard_status_sms`, target = serial, detail = `{status}: {message[:60]}…`.
+    5. Add a small client-side cooldown: if the same serial already had a `dashboard_status_sms` event for the same status code within the last 48 hours, disable the button and show a "Already messaged $TIME ago" tooltip. Prevents accidental spam if the status flickers.
+  **Generalize per-status (not just DRY_SOIL):**
+    Each of these statuses gets its own action button + canned template:
+    - `DRY_SOIL` → "Send moisture check SMS" (add ½ cup water)
+    - `SOAKED_SOIL` → "Send drainage check SMS" (run a dry cycle, check drainage)
+    - `OPEN_LID` → "Send lid alert SMS" (please close the lid)
+    - `NOT_MIXING` → does NOT auto-message; routes to Service (likely warranty / motor issue, needs operator triage, see #55)
+    - `NEW_FOOD` / `OK` → no action (no problem to solve)
+    - `DIAGNOSE` → does NOT auto-message; the unit hasn't transmitted, customer SMS doesn't help — operator should call instead.
+  Templates editable from the Templates module (so they live alongside the other SMS templates and Pedrum/Reina can tune the copy). Status code → template key mapping is hard-coded in `lib/dashboard.ts`.
+  **Likely touch:** `Dashboard/MachineDetail` for the button, new `Dashboard/StatusSmsModal.tsx`, `lib/dashboard.ts` for the status→template mapping + cooldown lookup, reuse `lib/customers.ts sendFollowupSms()` (or generalize it to `lib/sms.ts sendOperationalSms()`), new SMS template rows in `templates` table.
+
+- **#61** Dashboard: label telemetry windows as "smelly" / "no smell" for future ML training data.
+  **Source:** Huayi (2026-06-04 in-session note)
+  **Description:** Customers occasionally report whether their compost smells (via SMS, phone, support ticket, or in-person feedback). Today that feedback evaporates into a ticket comment and never gets paired with the underlying telemetry. We want the operator to take that report and *annotate* the dataset — drawing a time-range box on the Dashboard charts and tagging it. Once we have a few hundred labelled windows, that becomes training data for a smell-detection model (likely a small classifier over BME humidity / temperature / gas resistance / motor current features).
+  Specifically:
+    1. **New `dataset_labels` table** with columns: `id uuid pk`, `serial_number text` (FK→units.serial), `started_at timestamptz`, `ended_at timestamptz`, `label text` (initially `'smelly' | 'no_smell'`, extensible via check constraint with new values added by migration), `confidence text` (`'customer_reported' | 'operator_inferred'`), `source text` (`'sms' | 'phone' | 'ticket' | 'in_person'`, free-form), `notes text`, `linked_ticket_id uuid` nullable, `labeled_by uuid` FK→profiles, `created_at timestamptz default now()`.
+    2. **UI on Dashboard machine detail:** below each chart card add a small "Label this window" affordance. Clicking it lets the operator drag-select a time range on the chart (or pre-fills the currently-visible window) and opens a small modal: label = smelly / no_smell (radio), source = sms / phone / ticket / in_person (dropdown), confidence = customer_reported / operator_inferred (radio, default customer_reported), optional ticket link (search), free-text notes. Confirm → INSERT into `dataset_labels`.
+    3. **Visual overlay:** any existing labels for the viewed serial render as faint colored bands on the chart (red tint for smelly, green for no_smell). Hover shows the label metadata. Operator can click → edit / delete (with confirmation). Bands stay visible across chart refreshes so the operator can see at a glance what has and hasn't been labeled.
+    4. **Export endpoint:** new edge function `export-dataset-labels` (cron-only initially, can later add a UI button) emits a CSV/Parquet bundle joining `dataset_labels` with the matching `bme_sensors` / `ac_current` / `temperature_sensors` rows in the labeled window. This is the artifact the ML training pipeline consumes. Store the export to a private Supabase bucket so it accumulates over time.
+    5. **Auditing.** Every label / edit / delete logs to `activity_log` so we can later spot which operator labelled which windows and how consistent the labeling is.
+  Out of scope (defer):
+    - Multi-class labels beyond smelly / no_smell (e.g. "too dry", "too wet" — though those overlap with telemetry-derived statuses in #60).
+    - In-app model inference / live smell prediction — this feature only *collects* the training data. Building or hosting the model itself is a separate effort.
+    - Customer-facing labeling (asking customers to label directly in an app or SMS reply). Operator-mediated for V1.
+  **Why now:** the telemetry dataset is growing every day; the longer we wait to start labeling, the more catch-up work the operator has to do for any given window. Even sparse labels (few per week) accrue value if collected consistently.
+  **Likely touch:** SQL migration for `dataset_labels` table + RLS gating (internal-only read/write); `lib/dashboard.ts` for `useDatasetLabels(serialNumber)` hook + `createLabel()` / `updateLabel()` mutations; new `Dashboard/LabelOverlay.tsx` for the chart bands; new `Dashboard/LabelModal.tsx` for the form; Plotly drag-to-select integration in `Dashboard/PlotlyChart.tsx` (Plotly already supports `selecteddata` events); new edge function `supabase/functions/export-dataset-labels/index.ts`.
+
 ---
 
 ## Reference
