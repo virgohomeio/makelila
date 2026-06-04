@@ -798,3 +798,15 @@
   font-size: .85rem; color: #2b6cb0; margin: 8px 0;
 }
 .replacementLink a { color: #2b6cb0; text-decoration: underline; }
+
+/* Backlog #71 — awaiting-inbound-batch tag in the Replacement table */
+.awaitingBatchTag {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: #fef3c7;
+  color: #b7791f;
+  font-size: 0.7rem;
+  font-weight: 500;
+  cursor: help;
+}

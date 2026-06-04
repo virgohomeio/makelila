@@ -29,6 +29,7 @@ function mkOrder(partial: Partial<Order> & { id: string; status: Order['status']
     freight_threshold_usd: 200,
     customer_paid_shipping_usd: 89.5,
     customer_id: null,
+    awaiting_batch_id: null,
     currency: 'USD',
     total_usd: 1149,
     subtotal_usd: null, tax_usd: null, discount_total_usd: null,

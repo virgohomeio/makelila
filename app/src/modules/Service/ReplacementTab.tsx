@@ -1,11 +1,16 @@
 import { useMemo, useState } from 'react';
 import { useReplacementOrders, type Order } from '../../lib/orders';
 import { isReplacementLine } from '../../lib/orders';
+import { useBatches, type Batch } from '../../lib/stock';
 import styles from './Service.module.css';
 
-type Stage = 'pending' | 'approved' | 'fulfilling' | 'shipped' | 'delivered' | 'closed';
+type Stage = 'pending' | 'approved' | 'fulfilling' | 'shipped' | 'delivered' | 'closed' | 'awaiting_batch';
 
 function stageFor(o: Order): Stage {
+  // Backlog #71 — batch-blocked orders surface as their own group so
+  // operators can see at a glance which orders are stuck waiting on
+  // inbound stock vs. actionable in the normal pipeline.
+  if (o.awaiting_batch_id && !o.shipped_at && !o.delivered_at) return 'awaiting_batch';
   if (o.delivered_at) return 'delivered';
   if (o.shipped_at) return 'shipped';
   if (o.status === 'approved') return 'fulfilling';
@@ -25,17 +30,25 @@ function summarize(line_items: Order['line_items']): string {
 }
 
 const STAGES: { key: Stage | 'all'; label: string }[] = [
-  { key: 'all', label: 'All' },
-  { key: 'pending', label: 'Pending' },
-  { key: 'fulfilling', label: 'Fulfilling' },
-  { key: 'shipped', label: 'Shipped' },
-  { key: 'delivered', label: 'Delivered' },
-  { key: 'closed', label: 'Closed' },
+  { key: 'all',             label: 'All' },
+  { key: 'pending',         label: 'Pending' },
+  { key: 'awaiting_batch',  label: 'Awaiting batch' },
+  { key: 'fulfilling',      label: 'Fulfilling' },
+  { key: 'shipped',         label: 'Shipped' },
+  { key: 'delivered',       label: 'Delivered' },
+  { key: 'closed',          label: 'Closed' },
 ];
 
 export default function ReplacementTab() {
   const { orders, loading } = useReplacementOrders();
+  const { batches } = useBatches();
   const [filter, setFilter] = useState<Stage | 'all'>('all');
+
+  const batchById = useMemo(() => {
+    const m = new Map<string, Batch>();
+    for (const b of batches) m.set(b.id, b);
+    return m;
+  }, [batches]);
 
   const filtered = useMemo(
     () => orders.filter(o => filter === 'all' || stageFor(o) === filter),
@@ -45,6 +58,7 @@ export default function ReplacementTab() {
   const now = Date.now();
   const monthAgo = now - 30 * 86400_000;
   const open = orders.filter(o => !o.delivered_at).length;
+  const awaitingBatch = orders.filter(o => o.awaiting_batch_id && !o.shipped_at && !o.delivered_at).length;
   const shipped30 = orders.filter(o => o.shipped_at && new Date(o.shipped_at).getTime() > monthAgo).length;
   const delivered30 = orders.filter(o => o.delivered_at && new Date(o.delivered_at).getTime() > monthAgo).length;
   const cogs30: number[] = orders
@@ -58,6 +72,7 @@ export default function ReplacementTab() {
     <>
       <div className={styles.kpiStrip}>
         <div className={styles.kpiCard}><div className={styles.kpiLabel}>Open</div><div className={styles.kpiValue}>{open}</div></div>
+        <div className={styles.kpiCard}><div className={styles.kpiLabel}>Awaiting batch</div><div className={styles.kpiValue}>{awaitingBatch}</div></div>
         <div className={styles.kpiCard}><div className={styles.kpiLabel}>Shipped (30d)</div><div className={styles.kpiValue}>{shipped30}</div></div>
         <div className={styles.kpiCard}><div className={styles.kpiLabel}>Delivered (30d)</div><div className={styles.kpiValue}>{delivered30}</div></div>
         <div className={styles.kpiCard}><div className={styles.kpiLabel}>Avg COGS (30d)</div><div className={styles.kpiValue}>{avgCogs == null ? '—' : `$${avgCogs.toFixed(2)}`}</div></div>
@@ -84,14 +99,26 @@ export default function ReplacementTab() {
           <tbody>
             {filtered.map(o => {
               const daysOpen = Math.floor((now - new Date(o.created_at).getTime()) / 86400_000);
+              const stage = stageFor(o);
+              const batch = o.awaiting_batch_id ? batchById.get(o.awaiting_batch_id) : null;
               return (
                 <tr key={o.id} className={styles.row}>
                   <td><a href="#/order-review">{o.order_ref}</a></td>
                   <td>{o.linked_ticket_id ? <a href="#/service">open</a> : '—'}</td>
                   <td>{o.customer_name}</td>
-                  <td>{summarize(o.line_items)}</td>
+                  <td>
+                    {stage === 'awaiting_batch' ? (
+                      <span className={styles.awaitingBatchTag} title={batch?.notes ?? ''}>
+                        Awaiting {o.awaiting_batch_id}
+                      </span>
+                    ) : (
+                      summarize(o.line_items)
+                    )}
+                  </td>
                   <td>${(o.cogs_usd ?? 0).toFixed(2)}</td>
-                  <td>{stageFor(o)}</td>
+                  <td>{stage === 'awaiting_batch' ? (
+                    <span className={styles.awaitingBatchTag}>awaiting batch</span>
+                  ) : stage}</td>
                   <td>{daysOpen}</td>
                 </tr>
               );

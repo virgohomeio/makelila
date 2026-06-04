@@ -33,6 +33,11 @@ export type Order = {
   // lookup in preference to fuzzy email/name match.
   customer_id: string | null;
   linked_ticket_id: string | null;
+  // Backlog #71 — when set, this order is waiting on an inbound batch
+  // (e.g. P100X currently in production in China). UI shows it grouped
+  // in the Replacement tab under "Awaiting batch" with the batch's
+  // expected arrival.
+  awaiting_batch_id: string | null;
   cogs_usd: number | null;
   shipping_cost_usd: number | null;
   shipped_at: string | null;
