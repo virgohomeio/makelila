@@ -6,7 +6,8 @@ import { logAction } from './activityLog';
 export type OrderStatus = 'pending' | 'approved' | 'flagged' | 'held';
 
 export type LineItem =
-  | { sku: string; name: string; qty: number; price_usd: number }       // sale (legacy shape)
+  // Legacy Shopify-synced sale line — do not add new sale shapes here; extend the 'part'/'unit' variants instead.
+  | { sku: string; name: string; qty: number; price_usd: number }
   | { kind: 'part'; part_id: string; sku: string; name: string; qty: number; cost_per_unit_usd: number }
   | { kind: 'unit'; unit_serial: string; batch: string; name: string; qty: 1; cost_usd: number };
 
@@ -50,6 +51,7 @@ export type Order = {
   address_claude_postal: string | null;
   freight_estimate_usd: number;
   freight_threshold_usd: number;
+  // *_usd fields hold the amount in the order's own `currency`, despite the historical `_usd` naming — CAD orders are NOT in USD.
   currency: string;
   total_usd: number;
   subtotal_usd: number | null;
