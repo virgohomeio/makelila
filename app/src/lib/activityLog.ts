@@ -2,6 +2,21 @@ import { useEffect, useState } from 'react';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase } from './supabase';
 
+// PostgREST returns embedded relations as either an object or an array.
+function toEntry(row: Record<string, unknown>): ActivityLogEntry {
+  const p = row.profiles as { display_name?: string | null } | Array<{ display_name?: string | null }> | null;
+  const profile = Array.isArray(p) ? p[0] : p;
+  return {
+    id: row.id as number,
+    user_id: row.user_id as string,
+    ts: row.ts as string,
+    type: row.type as string,
+    entity: row.entity as string,
+    detail: (row.detail as string) ?? '',
+    actor_name: profile?.display_name ?? null,
+  };
+}
+
 export type ActivityLogEntry = {
   id: number;
   user_id: string;
@@ -9,7 +24,52 @@ export type ActivityLogEntry = {
   type: string;
   entity: string;
   detail: string;
+  // Joined from public.profiles via the embed below. May be null for
+  // entries written before the profiles row existed.
+  actor_name: string | null;
 };
+
+/** Group consecutive entries by the same user when they're within 90 min
+ *  of each other. Returns sessions newest-first (matching feed order). */
+export type ActivitySession = {
+  user_id: string;
+  actor_name: string | null;
+  started_at: string;
+  ended_at: string;
+  entries: ActivityLogEntry[];
+};
+
+const SESSION_GAP_MS = 90 * 60 * 1000;
+
+export function sessionize(entries: ActivityLogEntry[]): ActivitySession[] {
+  // Entries arrive newest-first; build sessions newest-first too.
+  const out: ActivitySession[] = [];
+  for (const e of entries) {
+    const last = out[out.length - 1];
+    const t = Date.parse(e.ts);
+    if (last && last.user_id === e.user_id) {
+      const lastT = Date.parse(last.ended_at);
+      // Since entries are newest-first, "ended_at" on the existing session
+      // is actually older than `e.ts`; the gap is therefore lastEntryTs - t.
+      const oldestInSession = Date.parse(last.ended_at);
+      if (Math.abs(t - oldestInSession) <= SESSION_GAP_MS) {
+        last.entries.push(e);
+        last.ended_at = e.ts;
+        continue;
+      }
+      // Avoid unused-var lint
+      void lastT;
+    }
+    out.push({
+      user_id: e.user_id,
+      actor_name: e.actor_name,
+      started_at: e.ts,
+      ended_at: e.ts,
+      entries: [e],
+    });
+  }
+  return out;
+}
 
 /** Insert an audit entry stamped with the current authenticated user. */
 export async function logAction(
@@ -43,14 +103,18 @@ export function useActivityLog(limit: number = 100) {
     let cancelled = false;
 
     (async () => {
+      // Join profiles for the actor's display name. PostgREST embed syntax;
+      // the FK from activity_log.user_id → profiles.id makes this implicit.
       const { data, error } = await supabase
         .from('activity_log')
-        .select('id, user_id, ts, type, entity, detail')
+        .select('id, user_id, ts, type, entity, detail, profiles(display_name)')
         .order('ts', { ascending: false })
         .limit(limit);
 
       if (cancelled) return;
-      if (!error && data) setEntries(data as ActivityLogEntry[]);
+      if (!error && data) {
+        setEntries((data as Array<Record<string, unknown>>).map(toEntry));
+      }
       setLoading(false);
 
       channel = supabase
@@ -59,7 +123,19 @@ export function useActivityLog(limit: number = 100) {
           'postgres_changes',
           { event: 'INSERT', schema: 'public', table: 'activity_log' },
           (payload) => {
-            setEntries(prev => [payload.new as ActivityLogEntry, ...prev].slice(0, limit));
+            // Realtime payloads don't include the embed, so fetch the
+            // actor's display_name in a follow-up query. Best-effort —
+            // if it fails the entry just shows without a name.
+            const raw = payload.new as Record<string, unknown>;
+            void (async () => {
+              const { data: pRow } = await supabase
+                .from('profiles')
+                .select('display_name')
+                .eq('id', raw.user_id as string)
+                .maybeSingle();
+              const enriched = toEntry({ ...raw, profiles: pRow });
+              setEntries(prev => [enriched, ...prev].slice(0, limit));
+            })();
           },
         )
         .subscribe();
