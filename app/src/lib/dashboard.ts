@@ -522,10 +522,11 @@ export function classifyMachineStatus(args: {
 }): MachineStatus {
   if (!args.isReceiving) return 'DIAGNOSE';
   if (isOpenLid(args.events)) return 'OPEN_LID';
-  // NOT_MIXING when a side is stalled (Left only / Right only / Neither).
+  // NOT_MIXING only when neither side is mixing. If at least one side is still
+  // mixing (Left only / Right only), the machine is mixing — don't flag it.
   // NO_DATA falls through so we don't flag machines with no current telemetry.
   const mix = classifyMixing(args.liveData);
-  if (mix.verdict !== 'BOTH' && mix.verdict !== 'NO_DATA') return 'NOT_MIXING';
+  if (mix.verdict === 'NEITHER') return 'NOT_MIXING';
   const bySensor = bmeHumidityFromLiveData(args.liveData);
   if (!bySensor[1] && !bySensor[2]) return 'OK';
   if (isDrySoilFromBme(bySensor)) return 'DRY_SOIL';
