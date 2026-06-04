@@ -253,6 +253,25 @@ Alpha feedback collection window is **closed**. The 11 items above plus the meet
   **Why temporary:** Once the historical Sheet is fully imported, this UI should be hidden again — otherwise it becomes a permanent backdoor that lets ops re-assign already-shipped serials, which is exactly the kind of state drift #22 is trying to prevent. Add a TODO/cleanup ticket inline. *Related: #21 (reverse assign-serial), #22 (stock-state re-sync), #29 (tracking-link email auto-send).*
   **Likely touch:** Fulfillment serial picker (`Fulfillment/Queue/SerialPicker.tsx` or similar) — extend the status filter to include `shipped` when the backfill flag is set; new "Backfill" tab or hidden route in Fulfillment; reuse existing `updateUnitFields` for the pairing write; light log entry per backfill via `activity_log`.
 
+- **#58** Customers: per-customer profitability tab with filter/search + insights.
+  **Source:** Huayi (2026-06-04 in-session note, mid-brainstorming for #55)
+  **Description:** Add a "Profitability" tab to the Customers module that surfaces which customers we're making money on and which we're losing money on. One card per customer; filterable + searchable.
+  Per-customer card surfaces:
+    1. Lifetime revenue (sum of `orders.total_usd` where `kind='sale'`).
+    2. Lifetime cost-of-goods (sum of `orders.cogs_usd` across both sales and replacements, since #55 introduces that column).
+    3. Lifetime shipping cost (sum of `orders.shipping_cost_usd` — the actual freight/label cost, also introduced by #55).
+    4. Warranty cost (sum of `orders.cogs_usd + shipping_cost_usd` where `kind='replacement'`) — surfaced separately because high warranty cost is the biggest signal of an unhappy / defective-unit customer.
+    5. Refunds issued (sum from `refund_approvals`).
+    6. Net margin = revenue − COGS − shipping − refunds − warranty.
+    7. Counts: # orders, # replacements, # returns, # support tickets opened.
+  Filters / sorts:
+    (a) "Most profitable" — sort by net margin descending.
+    (b) "Losing money" — filter to net margin ≤ 0, sort ascending.
+    Search box for customer name. Optional secondary filters: by country (CA vs. US), by onboard-date cohort (helps spot if a specific batch / month has a warranty-rate spike).
+  Insights view (small panel above the card grid): aggregate stats — e.g. "Avg margin per CA customer: $X / per US customer: $Y", "Customers with ≥2 replacements: N (avg margin: $Z, vs. baseline $W)". The goal is to reveal customer cohorts where margin is structurally negative.
+  **Why now (after #55):** #55 introduces `orders.cogs_usd` + `orders.shipping_cost_usd` on every order, which is the data foundation this tab needs. Without #55, lifetime cost can't be computed.
+  **Likely touch:** new `app/src/modules/Customers/ProfitabilityTab.tsx` + `lib/customers.ts` aggregate helpers (likely a SQL view `customer_profitability` for the heavy join across orders + refund_approvals + service_tickets, since per-customer aggregation in the browser would be slow over thousands of orders).
+
 ---
 
 ## Reference
