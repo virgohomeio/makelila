@@ -58,7 +58,7 @@ When a sync IN runs and finds an existing makelila record:
 | Sync function | Behavior | Status |
 |---|---|---|
 | `sync-shopify-orders` | Refresh path freezes contact/address once operator dispositions (status leaves pending/flagged). Always-safe fields refresh unconditionally. | ✅ Compliant (commit 509c1e0) |
-| `sync-hubspot-customers` | Insert-only via `ignoreDuplicates: true` on conflict. Existing makelila rows never overwritten. | ✅ Compliant (this commit) |
+| `sync-hubspot-customers` | Insert net-new + **fill blank columns** on existing rows + refresh `last_synced_at` every run. Never overwrites a non-blank (operator-curated) value. | ✅ Compliant — matches "insert + new-field-fill only" rule |
 | `sync-calendly-events` | Creates new onboarding tickets; doesn't write back to customers. | ✅ Compliant |
 | `sync-gmail-tickets` | Append-only (each email creates a ticket; no overwrites). | ✅ Compliant |
 | `sync-hubspot-tickets` | TBD — should verify same insert-only behavior. | ⚠ Audit needed |
@@ -68,7 +68,7 @@ When a sync IN runs and finds an existing makelila record:
 
 **To correct customer data:** Edit in makelila. Don't touch HubSpot/Shopify for record-keeping; those are now treated as external feeds.
 
-**To pull fresh data from HubSpot for an existing customer:** Currently requires manual SQL (or a forthcoming "Re-pull from HubSpot" button). The default `⟳ Sync from HubSpot` no longer overwrites — it only adds net-new customers.
+**To pull fresh data from HubSpot for an existing customer:** The default `⟳ Sync from HubSpot` adds net-new customers and **fills any blank columns** on existing rows (e.g. a missing phone), but never overwrites a value that's already populated. To force-overwrite a non-blank field that an operator changed, do it manually via SQL (or a forthcoming "Re-pull from HubSpot" button).
 
 **To push customer-list to Klaviyo:** Use the `↓ Export CSV` buttons today; future Klaviyo integration will replace this with `↑ Push to Klaviyo list`.
 

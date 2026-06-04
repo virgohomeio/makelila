@@ -111,7 +111,7 @@ export default function Customers() {
     setBusy(true); setError(null); setToast(null);
     try {
       const r = await syncCustomersFromHubspot();
-      setToast(`Synced ${r.upserted} customer${r.upserted === 1 ? '' : 's'} (${r.fetched} fetched, ${r.skipped} skipped, ${r.pages} page${r.pages === 1 ? '' : 's'})`);
+      setToast(`Synced from HubSpot · ${r.inserted} new, ${r.filled} field${r.filled === 1 ? '' : 's'}-filled, ${r.touched} refreshed (${r.fetched} fetched, ${r.skipped} skipped)`);
     } catch (e) {
       setError((e as Error).message);
     } finally {

@@ -262,9 +262,13 @@ export async function pushToKlaviyo(opts: {
 }
 
 /** Trigger the sync-hubspot-customers edge function. Returns the response
- *  body so the UI can show a "synced N, skipped M" toast. */
+ *  body so the UI can show a "N new, M fields filled" toast. The sync inserts
+ *  net-new customers, fills blank columns on existing rows, and refreshes
+ *  last_synced_at — it never overwrites operator-curated values. */
 export async function syncCustomersFromHubspot(): Promise<{
-  pages: number; fetched: number; upserted: number; skipped: number;
+  pages: number; fetched: number;
+  inserted: number; filled: number; touched: number;
+  upserted: number; skipped: number;
 }> {
   const { data: { session } } = await supabase.auth.getSession();
   const res = await fetch(`${SUPABASE_URL}/functions/v1/sync-hubspot-customers`, {
@@ -283,8 +287,10 @@ export async function syncCustomersFromHubspot(): Promise<{
     throw new Error(`HubSpot sync failed (${res.status}): ${detail}`);
   }
   const json = JSON.parse(text) as {
-    pages: number; fetched: number; upserted: number; skipped: number;
+    pages: number; fetched: number;
+    inserted: number; filled: number; touched: number;
+    upserted: number; skipped: number;
   };
-  await logAction('hubspot_sync', 'customers', `${json.upserted} upserted, ${json.skipped} skipped`);
+  await logAction('hubspot_sync', 'customers', `${json.inserted} new, ${json.filled} filled, ${json.touched} refreshed, ${json.skipped} skipped`);
   return json;
 }
