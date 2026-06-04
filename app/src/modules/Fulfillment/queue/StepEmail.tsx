@@ -28,7 +28,7 @@ export function StepEmail({
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [autoSent, setAutoSent] = useState(false);
+  const [autoSent] = useState(false);
   const [shippingCost, setShippingCost] = useState('');
   const [shipError, setShipError] = useState<string | null>(null);
 

@@ -59,6 +59,12 @@ const order: Order = {
   line_items: [{ sku: 'LL01', name: 'Lila 01', qty: 1, price_usd: 1149 }],
   sales_confirmed_fit: false,
   dispositioned_by: null, dispositioned_at: null,
+  kind: 'sale',
+  linked_ticket_id: null,
+  cogs_usd: null,
+  shipping_cost_usd: null,
+  shipped_at: null,
+  delivered_at: null,
   created_at: '2026-04-17T00:00:00Z',
   placed_at: '2026-04-19T00:00:00Z',
 };

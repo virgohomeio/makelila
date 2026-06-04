@@ -200,7 +200,7 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
             }}
             address={pickerAddress}
             onClose={() => setPickerOpen(false)}
-            onCreated={(result) => {
+            onCreated={(_result) => {
               setPickerOpen(false);
               window.location.hash = '#/order-review';
             }}

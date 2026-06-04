@@ -130,12 +130,13 @@ describe('createReplacementOrder', () => {
     const ticketUpdate = vi.fn().mockResolvedValue({ error: null });
     const unitsUpdate = vi.fn().mockResolvedValue({ error: null });
 
-    fromMock.mockImplementation((table: string) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    fromMock.mockImplementation(((table: string) => {
       if (table === 'orders') return { insert };
       if (table === 'service_tickets') return { update: () => ({ eq: ticketUpdate }) };
       if (table === 'units') return { update: () => ({ eq: unitsUpdate }) };
       throw new Error(`unexpected table ${table}`);
-    });
+    }) as any);
 
     logActionMock.mockResolvedValue(undefined);
 
@@ -181,7 +182,8 @@ describe('markOrderShipped', () => {
     const select = vi.fn().mockReturnValue({ eq: selectEq });
     const updateEq = vi.fn().mockResolvedValue({ error: null });
     const update = vi.fn().mockReturnValue({ eq: updateEq });
-    fromMock.mockReturnValue({ select, update });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    fromMock.mockReturnValue({ select, update } as any);
     await markOrderShipped('o1', 42.75);
     expect(update).toHaveBeenCalledWith(expect.objectContaining({
       shipping_cost_usd: 42.75,
@@ -210,11 +212,12 @@ describe('markOrderDelivered', () => {
     const orderUpdateEq = vi.fn().mockResolvedValue({ error: null });
     const orderUpdate = vi.fn().mockReturnValue({ eq: orderUpdateEq });
     const ticketUpdate = vi.fn();
-    fromMock.mockImplementation((table: string) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    fromMock.mockImplementation(((table: string) => {
       if (table === 'orders') return { update: orderUpdate, select: () => ({ eq: orderEqSel }) };
       if (table === 'service_tickets') return { update: ticketUpdate };
       throw new Error(`unexpected table ${table}`);
-    });
+    }) as any);
     await markOrderDelivered('o1');
     expect(orderUpdate).toHaveBeenCalledWith(expect.objectContaining({ delivered_at: expect.any(String) }));
     expect(ticketUpdate).not.toHaveBeenCalled();
@@ -229,11 +232,12 @@ describe('markOrderDelivered', () => {
     const orderUpdate = vi.fn().mockReturnValue({ eq: orderUpdateEq });
     const ticketUpdateEq = vi.fn().mockResolvedValue({ error: null });
     const ticketUpdate = vi.fn().mockReturnValue({ eq: ticketUpdateEq });
-    fromMock.mockImplementation((table: string) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    fromMock.mockImplementation(((table: string) => {
       if (table === 'orders') return { update: orderUpdate, select: () => ({ eq: orderEqSel }) };
       if (table === 'service_tickets') return { update: ticketUpdate };
       throw new Error(`unexpected table ${table}`);
-    });
+    }) as any);
     await markOrderDelivered('o1');
     expect(orderUpdate).toHaveBeenCalled();
     expect(ticketUpdate).toHaveBeenCalledWith(expect.objectContaining({

@@ -69,7 +69,6 @@ describe('ReplacementPickerModal', () => {
       onClose={() => {}} onCreated={() => {}} />);
     fireEvent.click(screen.getByText('LL01-284'));
     fireEvent.click(screen.getByText('LL01-284'));
-    const cartLines = screen.getAllByText('LL01-284');
     // One in picker still, one in cart row, none duplicated in cart
     // Just verify that the cart only has one unit line:
     expect(screen.getAllByText(/LL01-284/)).toHaveLength(2);  // picker + cart

@@ -28,6 +28,7 @@ function mkConv(partial: Partial<ServiceTicket> & { id: string }): ServiceTicket
     issue_area: null,
     kind: 'conversation',
     inbox_disposition: null,
+    replacement_order_id: null,
     ...partial,
   };
 }
