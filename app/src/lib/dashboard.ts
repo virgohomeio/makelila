@@ -890,29 +890,37 @@ export async function customerForSerial(serial: string): Promise<{
 
   // Fallback path for units the backfill couldn't resolve uniquely.
   if (!unit.customer_name) return null;
-  const name = unit.customer_name.trim();
 
-  // 1. Exact (case-insensitive) full_name match
-  const { data: exact } = await supabaseMain
-    .from('customers')
-    .select('id, full_name, first_name, phone')
-    .ilike('full_name', name)
-    .limit(1)
-    .maybeSingle();
-  if (exact) return exact;
+  // Try the raw name first, then the parenthetical-stripped variant
+  // (catches "Brian Fryer (original)" → "Brian Fryer"). Both pass through
+  // the same exact + token cascade.
+  const raw = unit.customer_name.trim();
+  const cleaned = raw.replace(/\s*\([^)]*\)\s*/g, ' ').replace(/\s+/g, ' ').trim();
+  const candidates = cleaned && cleaned !== raw ? [raw, cleaned] : [raw];
 
-  // 2. Token cascade: first + last word from the unit's name
-  const parts = name.split(/\s+/).filter(Boolean);
-  if (parts.length >= 2) {
-    const first = parts[0];
-    const last  = parts[parts.length - 1];
-    const { data: byTokens } = await supabaseMain
+  for (const name of candidates) {
+    // 1. Exact (case-insensitive) full_name match
+    const { data: exact } = await supabaseMain
       .from('customers')
       .select('id, full_name, first_name, phone')
-      .ilike('last_name', last)
-      .ilike('first_name', `${first}%`)
-      .limit(2);
-    if (byTokens && byTokens.length === 1) return byTokens[0];
+      .ilike('full_name', name)
+      .limit(1)
+      .maybeSingle();
+    if (exact) return exact;
+
+    // 2. Token cascade: first + last word
+    const parts = name.split(/\s+/).filter(Boolean);
+    if (parts.length >= 2) {
+      const first = parts[0];
+      const last  = parts[parts.length - 1];
+      const { data: byTokens } = await supabaseMain
+        .from('customers')
+        .select('id, full_name, first_name, phone')
+        .ilike('last_name', last)
+        .ilike('first_name', `${first}%`)
+        .limit(2);
+      if (byTokens && byTokens.length === 1) return byTokens[0];
+    }
   }
 
   return null;
