@@ -428,3 +428,102 @@
   gap: 12px;
   align-items: flex-start;
 }
+
+/* Backlog #61 — Dataset label button + list */
+.labelBtn {
+  padding: 6px 12px;
+  border: 1px solid #cbd5e0;
+  background: #fff;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+.labelBtn:hover { background: #f7fafc; }
+
+.labelList {
+  margin: 12px 0 16px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 8px 12px;
+  background: #fff;
+}
+.labelList summary {
+  cursor: pointer;
+  font-size: 0.85rem;
+  color: #4a5568;
+  font-weight: 600;
+}
+.labelList ul {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0 0;
+}
+.labelList li {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  border-top: 1px solid #f1f5f9;
+  font-size: 0.8rem;
+}
+.labelList li:first-child { border-top: none; }
+.labelChip {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: #edf2f7;
+  color: #4a5568;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+.labelChip_smelly,
+.labelChip_wet { background: #fed7d7; color: #9b2c2c; }
+.labelChip_dry { background: #feebc8; color: #b7791f; }
+.labelChip_no_smell,
+.labelChip_mixing { background: #c6f6d5; color: #22543d; }
+.labelChip_not_mixing { background: #fed7d7; color: #c53030; }
+.labelMeta { color: #718096; }
+.labelNotes {
+  grid-column: 1 / -1;
+  margin-top: 2px;
+  color: #1a202c;
+  font-style: italic;
+}
+.labelDelete {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: #a0aec0;
+  font-size: 1.2rem;
+  line-height: 1;
+}
+.labelDelete:hover { color: #c53030; }
+
+.labelFormRow {
+  display: grid;
+  grid-template-columns: 90px 1fr;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.labelFormRow label {
+  font-size: 0.85rem;
+  color: #4a5568;
+}
+.labelFormRow input,
+.labelFormRow select,
+.labelFormRow textarea {
+  padding: 6px 8px;
+  border: 1px solid #cbd5e0;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  font-family: inherit;
+}
+.labelHelp {
+  font-size: 0.75rem;
+  color: #718096;
+  margin: -4px 0 8px 98px;
+  font-style: italic;
+}

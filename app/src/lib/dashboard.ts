@@ -988,6 +988,83 @@ export async function lastStatusSmsAt(serial: string, status: MachineStatus): Pr
   return null;
 }
 
+// ── Backlog #61: dataset labels (ML training pairs) ─────────────────────────
+
+export type DatasetLabelKind = 'smelly' | 'no_smell' | 'dry' | 'wet' | 'mixing' | 'not_mixing' | 'other';
+export type DatasetLabelSource = 'sms' | 'phone' | 'ticket' | 'in_person' | 'operator_inferred';
+export type DatasetLabelConfidence = 'customer_reported' | 'operator_inferred';
+
+export type DatasetLabel = {
+  id: string;
+  serial_number: string;
+  started_at: string;
+  ended_at: string;
+  label: DatasetLabelKind;
+  source: DatasetLabelSource;
+  confidence: DatasetLabelConfidence;
+  notes: string | null;
+  linked_ticket_id: string | null;
+  labeled_by: string | null;
+  created_at: string;
+};
+
+export function useDatasetLabels(serial: string | null) {
+  const [labels, setLabels] = useState<DatasetLabel[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [tick, setTick] = useState(0);
+  const refresh = useCallback(() => setTick(t => t + 1), []);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!serial) { setLabels([]); setLoading(false); return; }
+    (async () => {
+      const { data } = await supabaseMain
+        .from('dataset_labels')
+        .select('*')
+        .eq('serial_number', serial)
+        .order('started_at', { ascending: false });
+      if (cancelled) return;
+      setLabels((data ?? []) as DatasetLabel[]);
+      setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [serial, tick]);
+
+  return { labels, loading, refresh };
+}
+
+export async function createDatasetLabel(input: {
+  serial_number: string;
+  started_at: string;
+  ended_at: string;
+  label: DatasetLabelKind;
+  source: DatasetLabelSource;
+  confidence: DatasetLabelConfidence;
+  notes?: string | null;
+  linked_ticket_id?: string | null;
+}): Promise<void> {
+  const { data: userData } = await supabaseMain.auth.getUser();
+  if (!userData.user) throw new Error('Not signed in');
+  const { error } = await supabaseMain.from('dataset_labels').insert({
+    ...input,
+    notes: input.notes ?? null,
+    linked_ticket_id: input.linked_ticket_id ?? null,
+    labeled_by: userData.user.id,
+  });
+  if (error) throw error;
+  await logAction(
+    'dataset_label_create',
+    input.serial_number,
+    `${input.label} · ${new Date(input.started_at).toLocaleDateString()} → ${new Date(input.ended_at).toLocaleDateString()}`,
+  );
+}
+
+export async function deleteDatasetLabel(id: string, serial: string): Promise<void> {
+  const { error } = await supabaseMain.from('dataset_labels').delete().eq('id', id);
+  if (error) throw error;
+  await logAction('dataset_label_delete', serial, `id=${id}`);
+}
+
 /** Backlog #59. Returns the set of unit serials flagged as internal team
  *  test units (units.is_team_test=true). The Dashboard filters these out
  *  of the live machine sidebar by default — operators can toggle to show

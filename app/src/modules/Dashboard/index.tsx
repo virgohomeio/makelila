@@ -2,6 +2,7 @@ import { useMemo, useState, type ReactNode } from 'react';
 import PlotlyChart from './PlotlyChart';
 import AssignCustomerModal from './AssignCustomerModal';
 import StatusSmsModal from './StatusSmsModal';
+import LabelWindowModal from './LabelWindowModal';
 import {
   MIXING_VERDICT_META,
   STATUS_DESCRIPTIONS,
@@ -13,11 +14,13 @@ import {
   latestHumidity,
   useAvailableSerials,
   useDashboardData,
+  useDatasetLabels,
   useLiveSerials,
   useMachineStatus,
   useSerialToUser,
   useTeamTestSerials,
   useUnitCustomerMap,
+  deleteDatasetLabel,
   RecordType,
 } from '../../lib/dashboard';
 import {
@@ -215,7 +218,9 @@ function MachineDetail({
   const { data, loading, error, refresh } = useDashboardData(serialNumber);
   const { status, color } = useMachineStatus(serialNumber);
   const [smsOpen, setSmsOpen] = useState(false);
+  const [labelOpen, setLabelOpen] = useState(false);
   const smsKind = status ? STATUS_SMS_KIND[status] : null;
+  const { labels: existingLabels, refresh: refreshLabels } = useDatasetLabels(serialNumber);
 
   const hum = latestHumidity(data.liveData);
   const seen = lastReceived(data);
@@ -251,9 +256,14 @@ function MachineDetail({
           </div>
           <p className={styles.muted}>{serialNumber}</p>
         </div>
-        <button className={styles.refreshBtn} onClick={refresh} disabled={loading}>
-          {loading ? 'Loading…' : 'Refresh'}
-        </button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className={styles.labelBtn} onClick={() => setLabelOpen(true)}>
+            🏷️ Label window
+          </button>
+          <button className={styles.refreshBtn} onClick={refresh} disabled={loading}>
+            {loading ? 'Loading…' : 'Refresh'}
+          </button>
+        </div>
       </header>
 
       {error && <p className={styles.error}>Failed to load: {error.message}</p>}
@@ -267,6 +277,40 @@ function MachineDetail({
             </button>
           )}
         </div>
+      )}
+
+      {existingLabels.length > 0 && (
+        <details className={styles.labelList}>
+          <summary>{existingLabels.length} label{existingLabels.length === 1 ? '' : 's'} on this serial</summary>
+          <ul>
+            {existingLabels.map(l => (
+              <li key={l.id}>
+                <span className={`${styles.labelChip} ${styles[`labelChip_${l.label}`] ?? ''}`}>{l.label}</span>
+                <span className={styles.labelMeta}>
+                  {new Date(l.started_at).toLocaleDateString()} → {new Date(l.ended_at).toLocaleDateString()}
+                  {' '}· {l.source} · {l.confidence}
+                </span>
+                {l.notes && <span className={styles.labelNotes}>{l.notes}</span>}
+                <button
+                  className={styles.labelDelete}
+                  onClick={async () => {
+                    if (!window.confirm(`Delete the "${l.label}" label?`)) return;
+                    await deleteDatasetLabel(l.id, serialNumber);
+                    refreshLabels();
+                  }}
+                >×</button>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+
+      {labelOpen && (
+        <LabelWindowModal
+          serialNumber={serialNumber}
+          onClose={() => setLabelOpen(false)}
+          onSaved={() => { setLabelOpen(false); refreshLabels(); }}
+        />
       )}
 
       {smsOpen && status && (
