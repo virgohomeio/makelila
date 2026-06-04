@@ -186,3 +186,154 @@
   padding-bottom: 6px;
   border-bottom: 1px solid #e4e4e4;
 }
+
+.assignBadge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 8px;
+  font-size: 0.7rem;
+  font-weight: 500;
+  color: #2b6cb0;
+  background: #ebf8ff;
+  border: 1px solid #bee3f8;
+  border-radius: 999px;
+  cursor: pointer;
+  vertical-align: middle;
+}
+
+.assignBadge:hover {
+  background: #bee3f8;
+}
+
+.modalBackdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modalCard {
+  background: #fff;
+  border-radius: 8px;
+  width: 480px;
+  max-width: 90vw;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  padding: 20px 24px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+}
+
+.modalHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.modalHeader h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.modalClose {
+  background: transparent;
+  border: none;
+  font-size: 1.4rem;
+  cursor: pointer;
+  color: #666;
+  line-height: 1;
+  padding: 0 4px;
+}
+
+.modalSearch {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  margin-bottom: 10px;
+  box-sizing: border-box;
+}
+
+.modalList {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 12px;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+  border: 1px solid #eee;
+  border-radius: 6px;
+}
+
+.modalListRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  padding: 8px 12px;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid #f1f1f1;
+  cursor: pointer;
+  text-align: left;
+}
+
+.modalListRow:hover {
+  background: #f7fafc;
+}
+
+.modalListRowActive {
+  background: #e8f0fe;
+}
+
+.modalListName {
+  font-weight: 500;
+  color: #1a202c;
+}
+
+.modalListMeta {
+  font-size: 0.8rem;
+  color: #718096;
+  margin-left: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+}
+
+.modalFooter {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: auto;
+}
+
+.modalCancel,
+.modalConfirm {
+  padding: 8px 14px;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  cursor: pointer;
+  border: 1px solid #ccc;
+}
+
+.modalCancel {
+  background: #fff;
+  color: #333;
+}
+
+.modalConfirm {
+  background: #2b6cb0;
+  color: #fff;
+  border-color: #2b6cb0;
+}
+
+.modalConfirm:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}

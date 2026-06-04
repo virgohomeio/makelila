@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { supabase as supabaseMain } from './supabase';
 import { supabaseTelemetry } from './supabaseTelemetry';
+import { logAction } from './activityLog';
 
 // Non-null assertion: the App.tsx route guard ensures Dashboard (and
 // therefore this module's hooks) is only mounted when telemetry is
@@ -671,6 +673,74 @@ export function useAvailableSerials() {
   }, []);
 
   return { data, loading, error };
+}
+
+/** Reads the makelila system-of-record `units.customer_name` for every
+ *  serial. Used by the Dashboard so machines display as "Linda Smith"
+ *  instead of "LL01-284". Source: main makelila supabase (NOT telemetry).
+ *  Falls through to `useSerialToUser` (telemetry `lila.user`) for serials
+ *  with no units row yet. */
+export function useUnitCustomerMap() {
+  const [data, setData] = useState<Record<string, string>>({});
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
+  const [tick, setTick] = useState(0);
+  const refresh = useCallback(() => setTick((t) => t + 1), []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data: rows, error: err } = await supabaseMain
+        .from('units')
+        .select('serial, customer_name')
+        .not('customer_name', 'is', null);
+      if (cancelled) return;
+      if (err) {
+        setError(err as unknown as Error);
+        setLoading(false);
+        return;
+      }
+      const map: Record<string, string> = {};
+      for (const r of (rows ?? []) as Array<{ serial: string; customer_name: string | null }>) {
+        if (r.customer_name && r.customer_name.trim()) map[r.serial] = r.customer_name.trim();
+      }
+      setData(map);
+      setLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [tick]);
+
+  return { data, loading, error, refresh };
+}
+
+/** Writes `units.customer_name` for the given serial via the makelila
+ *  supabase, then logs to activity_log. Throws if the units row doesn't
+ *  exist (the operator should add the unit to Stock first).
+ *  System-of-record per CLAUDE.md: makelila `units` is the truth; the
+ *  telemetry `lila.user` field is downstream display only. */
+export async function assignCustomerToSerial(serial: string, customerName: string): Promise<void> {
+  const trimmed = customerName.trim();
+  if (!trimmed) throw new Error('Customer name required.');
+  const { data: existing, error: lookupErr } = await supabaseMain
+    .from('units')
+    .select('serial, customer_name')
+    .eq('serial', serial)
+    .maybeSingle();
+  if (lookupErr) throw lookupErr;
+  if (!existing) {
+    throw new Error(
+      `No units row for ${serial}. Add the unit to Stock first, then assign the customer there.`,
+    );
+  }
+  const prev = existing.customer_name ?? '(unassigned)';
+  const { error: updateErr } = await supabaseMain
+    .from('units')
+    .update({ customer_name: trimmed })
+    .eq('serial', serial);
+  if (updateErr) throw updateErr;
+  await logAction('stock_edit', serial, `customer_name: ${prev} → ${trimmed} (dashboard)`);
 }
 
 export function useSerialToUser() {
