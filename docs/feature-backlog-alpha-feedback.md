@@ -321,6 +321,18 @@ Alpha feedback collection window is **closed**. The 11 items above plus the meet
   **Why now:** the telemetry dataset is growing every day; the longer we wait to start labeling, the more catch-up work the operator has to do for any given window. Even sparse labels (few per week) accrue value if collected consistently.
   **Likely touch:** SQL migration for `dataset_labels` table + RLS gating (internal-only read/write); `lib/dashboard.ts` for `useDatasetLabels(serialNumber)` hook + `createLabel()` / `updateLabel()` mutations; new `Dashboard/LabelOverlay.tsx` for the chart bands; new `Dashboard/LabelModal.tsx` for the form; Plotly drag-to-select integration in `Dashboard/PlotlyChart.tsx` (Plotly already supports `selecteddata` events); new edge function `supabase/functions/export-dataset-labels/index.ts`.
 
+- **#62** Shared `.replBadge` CSS token (deduplicate across modules).
+  **Source:** Final code review of #55 (2026-06-04)
+  **Description:** During #55 implementation, `.replBadge` ended up defined three times — once each in `OrderReview.module.css`, `Fulfillment.module.css`, `PostShipment.module.css` — with identical values. Extract to a shared styles file (or a Badge component) so the visual stays consistent if the design ever tweaks it. Low priority; cosmetic.
+
+- **#63** Deep-link replacement order / ticket from Service module.
+  **Source:** Final code review of #55 (2026-06-04)
+  **Description:** Several links in `ReplacementTab.tsx` and `TicketDetailPanel.tsx` (and the modal redirect) use bare `#/order-review` / `#/service` because the existing HashRouter doesn't parse query params after the fragment. Operators must search by ref after navigation. Add proper deep-link support: wire `useNavigate` / `useSearchParams` (or extend the route's component to read a `?order_id=` / `?ticket_id=` query) so the link lands on the specific record's detail panel. Touches: OrderReview's top-level route component to honor an order_id param; Service module's tab router to focus a specific ticket; the link href call sites.
+
+- **#64** Unit batch cost lookup for replacement orders (replace `cost_usd: 312` placeholder).
+  **Source:** #55 deferred follow-up + final code review (2026-06-04)
+  **Description:** `ReplacementPickerModal.addUnit` currently hard-codes `cost_usd: 312` for every replacement-unit line item. This flows into `orders.cogs_usd`, the activity log, and the ReplacementTab KPI strip — all of which now report inaccurate numbers. Replace with a real lookup: join the `units` row's `batch` to `batches.unit_cost_usd` (or whatever column holds the per-unit landed cost) and use that. Touches: `ReplacementPickerModal.tsx` `addUnit` function; verify `batches` exposes the cost field (per `lib/stock.ts` `Batch` type, the field is `unit_cost_usd`). Depends on no schema changes.
+
 ---
 
 ## Reference
