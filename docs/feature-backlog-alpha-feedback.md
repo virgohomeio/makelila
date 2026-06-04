@@ -350,10 +350,10 @@ Alpha feedback collection window is **closed**. The 11 items above plus the meet
   **Source:** Huayi (2026-06-04 in-session notes — first naming NOT_MIXING, then broadening to DRY_SOIL + SOAKED_SOIL).
   **Description:** When a customer's machine shows `NOT_MIXING`, `DRY_SOIL`, or `SOAKED_SOIL` on the Dashboard, send a *non-alarming* SMS asking how their compost is doing and whether the LILA is behaving normally. Different from #60's prescriptive lid alert: the goal is **information-gathering**, not telling the customer their unit needs intervention. Many of these flags turn out to be benign (transient state, sensor blip, customer behavior), and a wellness-check confirms what's actually happening before we escalate to a service ticket or push an instruction the customer doesn't need.
   **Initial target list (NOT_MIXING customers as of 2026-06-04, pulled by Huayi from live Dashboard):**
-    1. Michael Romance
+    1. Michael Romans
     2. Susan Jacobat
     3. Amelia Smith
-    4. Christian Pimentel
+    4. Kristen Pimentel
   (The same wellness-check template applies to the DRY_SOIL / SOAKED_SOIL cohorts on subsequent days — pull the current list from the Dashboard at send time, not from this snapshot.)
   Tone (operator can edit before send):
     > "Hi {first_name} — quick check-in on your LILA composter! We're seeing some unusual signals in the data and wanted to make sure things are still looking good on your end. How's the compost coming along? Any noises, smells, or anything that doesn't seem right? Reply here and we'll dig in."
@@ -370,6 +370,19 @@ Alpha feedback collection window is **closed**. The 11 items above plus the meet
 - **#68** `orders.customer_id` FK + Shopify-sync resolver (mirror #67 on the orders side).
   **Source:** #67 follow-up surfaced 2026-06-04 — `customer_profitability` view (#58) still joins orders↔customers via fuzzy email/name match because Shopify-imported orders don't carry a `customer_id`. Same class of false-positive risk that #67 fixed for units.
   **Description:** Add `orders.customer_id uuid REFERENCES customers(id) ON DELETE SET NULL`. Backfill by running the same exact + token cascade we now have in `resolve_customer_id_from_name()` (already exposed as a Postgres function), but matching on the order's `customer_email` first (more reliable than name on the orders side), falling back to name. Update `sync-shopify-orders` to set `customer_id` at INSERT/refresh time using the same resolver. Migrate the profitability view's `order_match` CTE to prefer the FK and fall back to email/name only when null. Once readers are migrated, drop or strictly-cache `orders.customer_name`/`customer_email`.
+
+- **#70** Dashboard classifier: `NOT_MIXING` false-positive when motor works but current doesn't peak.
+  **Source:** Huayi (2026-06-04) — surfaced via replies to the wellness-check SMS sent to the four NOT_MIXING customers:
+    - **Michael Romans** — unit running normally, producing good compost (minor smell when meat goes in).
+    - **Kristen Pimentel** — also clearly mixing fine (her separate complaint is a cracked main body, not the motor).
+  Two of four flagged customers confirm the motors are mechanically operating. The classifier triggered because `chamber_motor_left` / `chamber_motor_right` current readings never crossed `NOT_MIXING_CURRENT_THRESHOLD` (0.05 A) over the lookback window — yet the motors are mechanically operating.
+  **Description:** Today `isNotMixing()` in `app/src/lib/dashboard.ts` only consults AC current readings (`liveData[RecordType.Current]`). If the **current sensor itself** drifts low or fails calibration, the classifier reports `NOT_MIXING` regardless of whether the motor is actually turning. This produces alarming UX (wellness SMS asking what's wrong) for customers whose unit is fine, and erodes operator trust in the classifier.
+  **Fix paths to investigate (likely all three, in priority order):**
+    1. **Cross-check against another mechanical signal before classifying NOT_MIXING.** Candidates: BME humidity/temperature variance (a stirring chamber shows oscillation if the food is being mixed), chamber temperature stability, lid/microswitch events. If the secondary signal contradicts the zero-current reading, downgrade to a softer "diagnose current sensor" status instead of "not mixing".
+    2. **Investigate / characterize the current-sensor drift on Michael's specific unit** (LL01-???). Pull 48h+ of `ac_current` readings; compare with similar-batch units. If the sensor reads near-zero when the motor is provably running, this is a hardware QC issue worth flagging in the unit's defect_notes and (longer-term) into a Stock module health report.
+    3. **Loosen the `NOT_MIXING_CURRENT_THRESHOLD` or `NOT_MIXING_LOOKBACK_HOURS` constants**, or move them per-unit-calibrated. The current 0.05 A / 48h thresholds assume sensor accuracy that may not hold across batches.
+  **Out of scope (for now):** rebuilding the classifier as an ML model. This is a deterministic-rules tweak, not a model-training effort.
+  **Likely touch:** `lib/dashboard.ts` `isNotMixing()` (add the secondary-signal check + soft fallback status), `classifyMachineStatus()` (route the new status); possibly a new `'SENSOR_DIAGNOSE'` MachineStatus to surface the difference between "machine broken" and "sensor unreliable".
 
 - **#69** Sweep the ~47 still-orphaned `units.customer_name` values (no matching customer record).
   **Source:** #67 backfill leftover. The original backfill + parenthetical-strip pass linked 132/181 customer-assigned units; the rest are mostly customers that exist in Shopify or HubSpot but were never imported into the makelila `customers` table.
