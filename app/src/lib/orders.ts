@@ -27,6 +27,11 @@ export type Order = {
   order_ref: string;
   kind: OrderKind;
   status: OrderStatus;
+  // Canonical FK to customers.id (backlog #68). Auto-populated by the
+  // orders_auto_customer_id trigger; sync-shopify-orders doesn't need to
+  // set it explicitly. Use this for any "the customer for this order"
+  // lookup in preference to fuzzy email/name match.
+  customer_id: string | null;
   linked_ticket_id: string | null;
   cogs_usd: number | null;
   shipping_cost_usd: number | null;
