@@ -15,6 +15,7 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { corsHeaders } from '../_shared/cors.ts';
+import { authenticate } from '../_shared/auth.ts';
 
 const API_VERSION = '2024-10';
 
@@ -56,13 +57,24 @@ async function handle(req: Request): Promise<Response> {
     );
   }
 
+  const admin = createClient(supabaseUrl, serviceKey);
+
+  let _caller;
+  try { _caller = await authenticate(req, admin); }
+  catch (e) { if (e instanceof Response) return e; throw e; }
+  // Reject cron-secret calls — these functions are operator-triggered only.
+  if (_caller.kind !== 'user') {
+    return new Response(
+      JSON.stringify({ error: 'This function requires an operator JWT — cron-secret not accepted.' }),
+      { status: 403, headers: { 'content-type': 'application/json', 'access-control-allow-origin': '*' } },
+    );
+  }
+
   // Optional payload: { dry_run?: boolean, limit?: number }
   let body: { dry_run?: boolean; limit?: number } = {};
   try { body = await req.json(); } catch { /* no body, that's fine */ }
   const dryRun = body.dry_run === true;
   const limit = Math.max(1, Math.min(500, body.limit ?? 500));
-
-  const admin = createClient(supabaseUrl, serviceKey);
 
   // Pull candidates: orders whose fulfillment_queue is at step=6 with tracking,
   // joined with the order's order_ref + customer_name.

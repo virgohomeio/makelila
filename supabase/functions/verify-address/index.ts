@@ -16,6 +16,7 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { corsHeaders } from '../_shared/cors.ts';
+import { authenticate } from '../_shared/auth.ts';
 
 type VerifyInput = { order_id: string };
 
@@ -83,10 +84,21 @@ Deno.serve(async (req: Request) => {
     return j({ error: 'GOOGLE_MAPS_API_KEY not configured. Set it via supabase secrets set.' }, 500);
   }
 
+  const admin = createClient(supabaseUrl, serviceKey);
+
+  let _caller;
+  try { _caller = await authenticate(req, admin); }
+  catch (e) { if (e instanceof Response) return e; throw e; }
+  // Reject cron-secret calls — these functions are operator-triggered only.
+  if (_caller.kind !== 'user') {
+    return new Response(
+      JSON.stringify({ error: 'This function requires an operator JWT — cron-secret not accepted.' }),
+      { status: 403, headers: { 'content-type': 'application/json', 'access-control-allow-origin': '*' } },
+    );
+  }
+
   const { order_id } = (await req.json()) as VerifyInput;
   if (!order_id) return j({ error: 'order_id required' }, 400);
-
-  const admin = createClient(supabaseUrl, serviceKey);
 
   const { data: order, error: oErr } = await admin
     .from('orders')
