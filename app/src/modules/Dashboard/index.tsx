@@ -2,7 +2,9 @@ import { useMemo, useState, type ReactNode } from 'react';
 import PlotlyChart from './PlotlyChart';
 import AssignCustomerModal from './AssignCustomerModal';
 import {
+  MIXING_VERDICT_META,
   STATUS_DESCRIPTIONS,
+  classifyMixing,
   formatAgo,
   lastReceived,
   latestHumidity,
@@ -189,6 +191,8 @@ function MachineDetail({
 
   const hum = latestHumidity(data.liveData);
   const seen = lastReceived(data);
+  const mixing = useMemo(() => classifyMixing(data.liveData), [data.liveData]);
+  const mixMeta = MIXING_VERDICT_META[mixing.verdict];
 
   const eventCharts = useMemo(() => buildEventCharts(data.events), [data.events]);
   const currents = useMemo(() => buildCurrentsChart(data.liveData), [data.liveData]);
@@ -201,14 +205,15 @@ function MachineDetail({
     <section>
       <header className={styles.detailHeader}>
         <div>
-          <h2 className={styles.machineTitle}>
-            {displayName}
-            {!assigned && (
-              <button type="button" className={styles.assignBadge} onClick={onAssign}>
-                + assign customer
-              </button>
-            )}
-          </h2>
+          <div className={styles.titleRow}>
+            <h2 className={styles.machineTitle}>{displayName}</h2>
+            <span
+              className={styles.mixingBadge}
+              style={{ color: mixMeta.color, background: mixMeta.bg }}
+            >
+              {mixMeta.label}
+            </span>
+          </div>
           <p className={styles.muted}>{serialNumber}</p>
         </div>
         <button className={styles.refreshBtn} onClick={refresh} disabled={loading}>
