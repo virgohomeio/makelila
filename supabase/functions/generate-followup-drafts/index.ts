@@ -2,10 +2,10 @@
 // for a list of overdue customers. See
 // docs/superpowers/specs/2026-06-03-auto-followup-queue-design.md.
 //
-// Auth: operator JWT required. TEMPORARY inline auth check — replace
-// with _shared/auth.ts authenticate() once the security pass ships.
+// Auth: operator JWT required (gated via _shared/auth.ts authenticate()).
 
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
+import { authenticate } from '../_shared/auth.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -44,14 +44,12 @@ Deno.serve(async (req: Request) => {
 
     const admin = createClient(supabaseUrl, serviceKey);
 
-    // TODO(security-pass): swap to _shared/auth.ts authenticate()
-    const authz = req.headers.get('authorization') ?? '';
-    const jwt = authz.replace(/^Bearer\s+/i, '');
-    if (!jwt) return j({ error: 'Missing Authorization header' }, 401);
-    const { data: userData, error: userErr } = await admin.auth.getUser(jwt);
-    if (userErr || !userData?.user) return j({ error: 'Invalid token' }, 401);
-    const { data: profile } = await admin.from('profiles').select('is_internal').eq('id', userData.user.id).maybeSingle();
-    if (!profile?.is_internal) return j({ error: 'Not authorized' }, 403);
+    let _caller;
+    try { _caller = await authenticate(req, admin); }
+    catch (e) { if (e instanceof Response) return e; throw e; }
+    if (_caller.kind !== 'user') {
+      return j({ error: 'This function requires an operator JWT — cron-secret not accepted.' }, 403);
+    }
 
     const { customer_ids } = (await req.json()) as Input;
 
