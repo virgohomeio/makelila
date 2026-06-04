@@ -352,10 +352,10 @@ Alpha feedback collection window is **closed**. The 11 items above plus the meet
   **Source:** Huayi (2026-06-04 in-session notes — first naming NOT_MIXING, then broadening to DRY_SOIL + SOAKED_SOIL).
   **Description:** When a customer's machine shows `NOT_MIXING`, `DRY_SOIL`, or `SOAKED_SOIL` on the Dashboard, send a *non-alarming* SMS asking how their compost is doing and whether the LILA is behaving normally. Different from #60's prescriptive lid alert: the goal is **information-gathering**, not telling the customer their unit needs intervention. Many of these flags turn out to be benign (transient state, sensor blip, customer behavior), and a wellness-check confirms what's actually happening before we escalate to a service ticket or push an instruction the customer doesn't need.
   **Initial target list (NOT_MIXING customers as of 2026-06-04, pulled by Huayi from live Dashboard):**
-    1. Michael Romans
-    2. Susan Jacobat
-    3. Amelia Smith
-    4. Kristen Pimentel
+    1. Michael Romans (`LL01-00000000216`)
+    2. Suzan Jackovatz (`LL01-00000000218`)
+    3. Amelia Smith (`LL01-00000000236` — actually `Amila & Rob Smith` in `customers`)
+    4. Kristen Pimentel (`LL01-00000000267`)
   (The same wellness-check template applies to the DRY_SOIL / SOAKED_SOIL cohorts on subsequent days — pull the current list from the Dashboard at send time, not from this snapshot.)
   Tone (operator can edit before send):
     > "Hi {first_name} — quick check-in on your LILA composter! We're seeing some unusual signals in the data and wanted to make sure things are still looking good on your end. How's the compost coming along? Any noises, smells, or anything that doesn't seem right? Reply here and we'll dig in."
@@ -373,6 +373,17 @@ Alpha feedback collection window is **closed**. The 11 items above plus the meet
   **Source:** #67 follow-up surfaced 2026-06-04 — `customer_profitability` view (#58) still joins orders↔customers via fuzzy email/name match because Shopify-imported orders don't carry a `customer_id`. Same class of false-positive risk that #67 fixed for units.
   **Description:** Add `orders.customer_id uuid REFERENCES customers(id) ON DELETE SET NULL`. Backfill by running the same exact + token cascade we now have in `resolve_customer_id_from_name()` (already exposed as a Postgres function), but matching on the order's `customer_email` first (more reliable than name on the orders side), falling back to name. Update `sync-shopify-orders` to set `customer_id` at INSERT/refresh time using the same resolver. Migrate the profitability view's `order_match` CTE to prefer the FK and fall back to email/name only when null. Once readers are migrated, drop or strictly-cache `orders.customer_name`/`customer_email`.
 
+- **#72** Centralize Trustpilot review link + canned SMS / email templates in one source of truth.
+  **Source:** Surfaced 2026-06-04 — an SMS to Michael Romans went out with `trustpilot.com/review/vcycene.com` (a guessed URL). The actual link is `trustpilot.com/review/lilacomposter.com`. Operator had to send a correction SMS. Today there's no central place where the review URL lives; each operator typing a customer-facing message has to remember the right link.
+  **Description:** Build a `templates` table (or extend an existing config table) holding:
+    - **External URLs:** Trustpilot review (`https://www.trustpilot.com/review/lilacomposter.com`), Google review link, support email signature URL, etc.
+    - **Canned message bodies:** wellness-check (already inline in `lib/dashboard.ts STATUS_SMS_TEMPLATES`), lid alert, review-request SMS, defective-unit acknowledgment, etc. — all parameterized on `{first_name}`, `{order_ref}`, etc.
+  Surface in two places:
+    1. **Backing the existing inline templates** in `lib/dashboard.ts` so operators can edit copy without code deploys.
+    2. **The `StatusSmsModal` "Send template" picker** — let the operator pick from any template (not just the status-keyed one) when sending a one-off message from the Dashboard. Same for the Quo reply UI in Service tickets.
+  This also resolves the Quo-reply-via-template gap in #3 / #12 (the existing Templates module was scoped to Order Review email templates only).
+  **Likely touch:** new `templates` table migration; `lib/templates.ts` extension with non-tab-specific templates; `Dashboard/StatusSmsModal.tsx` to pull templates from the DB instead of `STATUS_SMS_TEMPLATES`; future Templates-module UI for ops to edit.
+
 - **#71** Replacement orders: first-class "awaiting inbound batch" state + visible queue.
   **Source:** Surfaced 2026-06-04 — Kristen Pimentel's cracked-shell replacement (R-0001) needs a P100X unit, but no P100X units are `ready` yet (batch is in production in China, expected end of July). Today the only signal is `orders.line_items = []` + `cogs_usd = null` on a `status='pending'` row, plus a free-text note in `batches.notes`. Operators have no list view of "what's waiting on which batch", and customers get vague "we'll queue it" replies.
   **Description:**
@@ -385,9 +396,10 @@ Alpha feedback collection window is **closed**. The 11 items above plus the meet
 
 - **#70** Dashboard classifier: `NOT_MIXING` false-positive when motor works but current doesn't peak.
   **Source:** Huayi (2026-06-04) — surfaced via replies to the wellness-check SMS sent to the four NOT_MIXING customers:
-    - **Michael Romans** — unit running normally, producing good compost (minor smell when meat goes in).
-    - **Kristen Pimentel** — also clearly mixing fine (her separate complaint is a cracked main body, not the motor).
-  Two of four flagged customers confirm the motors are mechanically operating. The classifier triggered because `chamber_motor_left` / `chamber_motor_right` current readings never crossed `NOT_MIXING_CURRENT_THRESHOLD` (0.05 A) over the lookback window — yet the motors are mechanically operating.
+    - **Michael Romans** (`LL01-00000000216`) — unit running normally, producing good compost (minor smell when meat goes in).
+    - **Suzan Jackovatz** (`LL01-00000000218`) — compost is mixing well, no issue. Confirmed false positive.
+    - **Kristen Pimentel** (`LL01-00000000267`) — also clearly mixing fine (her separate complaint is a cracked main body, not the motor).
+  **Three of four** flagged customers confirm the motors are mechanically operating — a 75% false-positive rate at the current threshold. The classifier triggered because `chamber_motor_left` / `chamber_motor_right` current readings never crossed `NOT_MIXING_CURRENT_THRESHOLD` (0.05 A) over the lookback window — yet the motors are mechanically operating.
   **Description:** Today `isNotMixing()` in `app/src/lib/dashboard.ts` only consults AC current readings (`liveData[RecordType.Current]`). If the **current sensor itself** drifts low or fails calibration, the classifier reports `NOT_MIXING` regardless of whether the motor is actually turning. This produces alarming UX (wellness SMS asking what's wrong) for customers whose unit is fine, and erodes operator trust in the classifier.
   **Fix paths to investigate (likely all three, in priority order):**
     1. **Cross-check against another mechanical signal before classifying NOT_MIXING.** Candidates: BME humidity/temperature variance (a stirring chamber shows oscillation if the food is being mixed), chamber temperature stability, lid/microswitch events. If the secondary signal contradicts the zero-current reading, downgrade to a softer "diagnose current sensor" status instead of "not mixing".
