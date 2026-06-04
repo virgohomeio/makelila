@@ -185,10 +185,52 @@ async function handle(req: Request): Promise<Response> {
   // Mixed-caller: accept both cron and user — no kind check.
   void _caller;
 
+  // Prefetch the existing roster once so we can (a) detect new contacts and
+  // (b) fill only BLANK columns on existing rows without an extra round-trip
+  // per contact. Keyed by hubspot_id and by lowercased email so a HubSpot
+  // contact still matches a row that was seeded from another source (e.g. an
+  // order) and has a null hubspot_id.
+  type ExistingRow = {
+    id: string;
+    hubspot_id: string | null;
+    email: string | null;
+    first_name: string | null;
+    last_name: string | null;
+    phone: string | null;
+    address_line: string | null;
+    city: string | null;
+    region: string | null;
+    postal_code: string | null;
+    country: string | null;
+  };
+  const { data: existingRows, error: loadErr } = await admin
+    .from('customers')
+    .select('id, hubspot_id, email, first_name, last_name, phone, address_line, city, region, postal_code, country');
+  if (loadErr) {
+    return new Response(
+      JSON.stringify({ error: `load existing customers: ${loadErr.message}` }),
+      { status: 500, headers: { ...corsHeaders, 'content-type': 'application/json' } },
+    );
+  }
+  const byHubspot = new Map<string, ExistingRow>();
+  const byEmail = new Map<string, ExistingRow>();
+  for (const r of (existingRows ?? []) as ExistingRow[]) {
+    if (r.hubspot_id) byHubspot.set(r.hubspot_id, r);
+    if (r.email) byEmail.set(r.email.toLowerCase(), r);
+  }
+
+  // Columns HubSpot may fill. Operator-owned columns (notes, fu_notes,
+  // onboard_date, fu1/fu2_status, serials) are intentionally absent — HubSpot
+  // never touches them.
+  const FILLABLE = ['email', 'first_name', 'last_name', 'phone', 'address_line', 'city', 'region', 'postal_code', 'country'] as const;
+  const isBlank = (v: unknown): boolean => v === null || v === undefined || (typeof v === 'string' && v.trim() === '');
+
   let after: string | undefined = undefined;
   let pages = 0;
   let fetched = 0;
-  let upserted = 0;
+  let inserted = 0;   // brand-new customers added
+  let filled = 0;     // existing rows that had >=1 blank column populated
+  let touched = 0;    // existing rows whose last_synced_at was refreshed
   const skipped: { id: string; reason: string }[] = [];
   const now = new Date().toISOString();
 
@@ -228,9 +270,9 @@ async function handle(req: Request): Promise<Response> {
       // Fall back to parsing the concatenated address line when HubSpot's
       // structured city/state/zip/country fields are empty.
       const parsed = parseAddress(p.address);
-      const row = {
-        hubspot_id: c.id,
-        email: p.email?.toLowerCase() ?? null,
+      const email = p.email?.toLowerCase() ?? null;
+      const candidate: Record<typeof FILLABLE[number], string | null> = {
+        email,
         first_name: p.firstname ?? null,
         last_name: p.lastname ?? null,
         phone: p.phone ?? null,
@@ -239,22 +281,60 @@ async function handle(req: Request): Promise<Response> {
         region: p.state ?? parsed.region,
         postal_code: p.zip ?? parsed.postal_code,
         country: normalizeCountry(p.country ?? parsed.country),
-        last_synced_at: now,
       };
+
+      // Match an existing row by hubspot_id first, then by email (covers rows
+      // seeded elsewhere that have no hubspot_id yet).
+      const existing = byHubspot.get(c.id) ?? (email ? byEmail.get(email) : undefined);
+
       // makelila is the system of record (see docs/system-of-record.md). HubSpot
-      // is an INPUT only: we seed new customers from it but never clobber
-      // existing rows that operators may have curated. To force-refresh a
-      // single customer from HubSpot, do it manually via SQL or the upcoming
-      // "Re-pull from HubSpot" button (TBD).
-      const { error: upErr } = await admin.from('customers').upsert(row, {
-        onConflict: 'hubspot_id',
-        ignoreDuplicates: true,
-      });
-      if (upErr) {
-        skipped.push({ id: c.id, reason: `db: ${upErr.message}` });
+      // is an INPUT: we seed NEW customers from it and FILL BLANK fields on
+      // existing rows, but never clobber a value an operator may have curated.
+      if (!existing) {
+        const { data: insRows, error: insErr } = await admin
+          .from('customers')
+          .insert({ hubspot_id: c.id, ...candidate, last_synced_at: now })
+          .select('id, hubspot_id, email, first_name, last_name, phone, address_line, city, region, postal_code, country');
+        if (insErr) {
+          // Likely a race / unique collision — skip rather than clobber.
+          skipped.push({ id: c.id, reason: `insert: ${insErr.message}` });
+          continue;
+        }
+        inserted++;
+        // Track within-run so a later duplicate contact fills instead of re-inserting.
+        const row = (insRows?.[0] ?? null) as ExistingRow | null;
+        if (row) {
+          byHubspot.set(c.id, row);
+          if (row.email) byEmail.set(row.email.toLowerCase(), row);
+        }
         continue;
       }
-      upserted++;
+
+      // Existing row: fill only blank columns, adopt hubspot_id if missing,
+      // always refresh last_synced_at so the UI reflects a live sync.
+      const patch: Record<string, string | null> = { last_synced_at: now };
+      let fillCount = 0;
+      for (const col of FILLABLE) {
+        if (isBlank(existing[col]) && !isBlank(candidate[col])) {
+          patch[col] = candidate[col];
+          // Reflect the fill in the in-memory row so a later duplicate contact
+          // in the same run doesn't try to re-fill it.
+          existing[col] = candidate[col];
+          fillCount++;
+        }
+      }
+      if (isBlank(existing.hubspot_id)) { patch.hubspot_id = c.id; existing.hubspot_id = c.id; }
+
+      const { error: updErr } = await admin
+        .from('customers')
+        .update(patch)
+        .eq('id', existing.id);
+      if (updErr) {
+        skipped.push({ id: c.id, reason: `update: ${updErr.message}` });
+        continue;
+      }
+      touched++;
+      if (fillCount > 0) filled++;
     }
 
     after = json.paging?.next?.after;
@@ -262,7 +342,15 @@ async function handle(req: Request): Promise<Response> {
   }
 
   return new Response(
-    JSON.stringify({ pages, fetched, upserted, skipped: skipped.length, skippedDetails: skipped.slice(0, 20) }),
+    JSON.stringify({
+      pages, fetched,
+      inserted, filled, touched,
+      // Back-compat: `upserted` historically meant "rows written". Keep it so
+      // older callers don't break; it now sums new inserts + rows that changed.
+      upserted: inserted + filled,
+      skipped: skipped.length,
+      skippedDetails: skipped.slice(0, 20),
+    }),
     { status: 200, headers: { ...corsHeaders, 'content-type': 'application/json' } },
   );
 }

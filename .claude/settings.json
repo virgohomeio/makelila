@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(awk '{print $NF}')",
+      "Bash(npx tsc *)",
+      "Bash(echo \"---EXIT:$?---\")",
+      "Bash(git commit -m ' *)",
+      "Bash(env)",
+      "Bash(ssh -o StrictHostKeyChecking=no -o BatchMode=yes -T git@github.com)",
+      "Bash(ssh -o StrictHostKeyChecking=no -o BatchMode=yes -i ~/.ssh/id_ed25519_github_ssh -T git@github.com)",
+      "Bash(npx supabase *)",
+      "mcp__claude_ai_Supabase__list_migrations",
+      "mcp__claude_ai_Supabase__apply_migration",
+      "Bash(grep -nA3 \"export type TicketStatus\" app/src/lib/service.ts)",
+      "Bash(git cherry-pick *)",
+      "Bash(git ls-tree *)",
+      "Bash(git reset *)"
+    ]
+  }
+}

@@ -137,8 +137,15 @@ export const NEW_FOOD_SINGLE_CHAMBER_RISE_SLOPE = 20.0;
 export const NEW_FOOD_CHAMBER_IMBALANCE_SLOPE = 4.0;
 export const NEW_FOOD_GRADIENT_LOOKBACK_HOURS = 24;
 export const NEW_FOOD_GRADIENT_MIN_SEGMENT_MINUTES = 30.0;
-export const NOT_MIXING_CURRENT_THRESHOLD = 0.05;
-export const NOT_MIXING_LOOKBACK_HOURS = 48;
+// Per-side mixing detection. Motor current is bimodal: idle ≈ 0–15 A,
+// active mixing ≈ 80–110 A (calibrated against the `ac_current` telemetry).
+// A healthy side fires short ~3–7 min runs roughly every ~90 min, pausing
+// overnight, with occasional lone single-sample inrush spikes (110–278 A).
+export const MIX_ON_AMPS = 30;                   // ≥ this ⇒ motor actively driving
+export const MIX_RUN_MERGE_GAP_MS = 8 * 60_000;  // bridge ≤8 min gaps (~2.5× the 3-min cadence) within one run
+export const MIX_MIN_RUNS = 3;                   // valid runs needed to call a side "mixing"
+export const MIX_RECENCY_HOURS = 12;             // most recent run must be within this
+export const MIX_WINDOW_HOURS = DATA_RETENTION_HOURS; // 48
 export const LID_SENSOR_NAMES = ['FrontMicroswitch', 'RearMicroswitch'] as const;
 export const LID_OPEN_STATE = 1;
 export const RECENT_RECEIVING_WINDOW_MINUTES = 10;
@@ -161,6 +168,16 @@ export const STATUS_DESCRIPTIONS: Record<MachineStatus, string> = {
   DIAGNOSE:    'No data received in the last 10 minutes.',
   NOT_MIXING:  'Chamber motors not running as expected.',
   OPEN_LID:    'Lid open condition detected.',
+};
+
+export type MixingVerdict = 'BOTH' | 'LEFT_ONLY' | 'RIGHT_ONLY' | 'NEITHER' | 'NO_DATA';
+
+export const MIXING_VERDICT_META: Record<MixingVerdict, { label: string; color: string; bg: string }> = {
+  BOTH:       { label: 'Both sides mixing',     color: '#27ae60', bg: '#eafaf0' },
+  LEFT_ONLY:  { label: 'Left side only mixing',  color: '#e67e22', bg: '#fdf2e6' },
+  RIGHT_ONLY: { label: 'Right side only mixing', color: '#e67e22', bg: '#fdf2e6' },
+  NEITHER:    { label: 'Neither side mixing',    color: '#e74c3c', bg: '#fdecea' },
+  NO_DATA:    { label: 'No current data',        color: '#95a5a6', bg: '#f4f6f6' },
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -395,23 +412,107 @@ export function isOpenLid(events: ParsedEvent[]): boolean {
   return false;
 }
 
-export function isNotMixing(
-  currentData: LiveSample<CurrentSample>[],
-  lookbackHours = NOT_MIXING_LOOKBACK_HOURS,
-): boolean {
-  const cutoff = Date.now() - lookbackHours * 3_600_000;
-  let anyRecent = false;
-  for (const d of currentData) {
-    if (d.timestamp.getTime() < cutoff) continue;
-    anyRecent = true;
-    if (
-      (d.data.LeftMotorCurrent ?? 0) > NOT_MIXING_CURRENT_THRESHOLD ||
-      (d.data.RightMotorCurrent ?? 0) > NOT_MIXING_CURRENT_THRESHOLD
-    ) {
-      return false;
-    }
+export interface SideMixing {
+  mixing: boolean;
+  runCount: number;
+  lastRunAt: Date | null;
+  medianIntervalMin: number | null;
+  peakAmps: number;
+  hasData: boolean;
+}
+
+/**
+ * Detects whether one chamber side is mixing by grouping high-current samples
+ * into "runs" (a motor-on burst) and requiring repeated, recent runs.
+ *
+ * `pick` selects the side's current (LeftMotorCurrent / RightMotorCurrent).
+ * `now` is passed in (not read via Date.now) so the logic is deterministically
+ * testable.
+ */
+export function detectSideMixing(
+  samples: LiveSample<CurrentSample>[],
+  pick: (d: CurrentSample) => number,
+  now: number,
+): SideMixing {
+  const windowStart = now - MIX_WINDOW_HOURS * 3_600_000;
+
+  // Window-filtered samples in ascending time order.
+  const inWindow = samples
+    .filter((s) => s.timestamp.getTime() >= windowStart)
+    .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+
+  if (inWindow.length === 0) {
+    return { mixing: false, runCount: 0, lastRunAt: null, medianIntervalMin: null, peakAmps: 0, hasData: false };
   }
-  return anyRecent;
+
+  let peakAmps = 0;
+  for (const s of inWindow) {
+    const a = pick(s.data) ?? 0;
+    if (a > peakAmps) peakAmps = a;
+  }
+
+  // Group consecutive motor-on samples into runs, bridging short gaps.
+  const runStarts: number[] = [];
+  let lastRunEnd: number | null = null;
+  let prevOnTs: number | null = null;
+
+  for (const s of inWindow) {
+    const a = pick(s.data) ?? 0;
+    if (a < MIX_ON_AMPS) continue;
+    const t = s.timestamp.getTime();
+    if (prevOnTs === null || t - prevOnTs > MIX_RUN_MERGE_GAP_MS) {
+      runStarts.push(t); // start of a new run
+    }
+    prevOnTs = t;
+    lastRunEnd = t;
+  }
+
+  const runCount = runStarts.length;
+
+  // Median gap between consecutive run starts (diagnostic only — not gating).
+  let medianIntervalMin: number | null = null;
+  if (runStarts.length >= 2) {
+    const gaps: number[] = [];
+    for (let i = 1; i < runStarts.length; i++) gaps.push(runStarts[i] - runStarts[i - 1]);
+    gaps.sort((a, b) => a - b);
+    const mid = Math.floor(gaps.length / 2);
+    const medianMs = gaps.length % 2 ? gaps[mid] : (gaps[mid - 1] + gaps[mid]) / 2;
+    medianIntervalMin = medianMs / 60_000;
+  }
+
+  const recentEnough = lastRunEnd !== null && now - lastRunEnd <= MIX_RECENCY_HOURS * 3_600_000;
+  const mixing = runCount >= MIX_MIN_RUNS && recentEnough;
+
+  return {
+    mixing,
+    runCount,
+    lastRunAt: lastRunEnd !== null ? new Date(lastRunEnd) : null,
+    medianIntervalMin,
+    peakAmps,
+    hasData: true,
+  };
+}
+
+export interface MixingResult {
+  verdict: MixingVerdict;
+  left: SideMixing;
+  right: SideMixing;
+}
+
+/** Combines per-side mixing detection into a single verdict for the machine. */
+export function classifyMixing(liveData: LiveData, now: number = Date.now()): MixingResult {
+  const currents = liveData[RecordType.Current];
+  const left = detectSideMixing(currents, (d) => d.LeftMotorCurrent, now);
+  const right = detectSideMixing(currents, (d) => d.RightMotorCurrent, now);
+
+  let verdict: MixingVerdict;
+  if (!left.hasData && !right.hasData) verdict = 'NO_DATA';
+  else if (left.mixing && right.mixing) verdict = 'BOTH';
+  else if (left.mixing) verdict = 'LEFT_ONLY';
+  else if (right.mixing) verdict = 'RIGHT_ONLY';
+  else verdict = 'NEITHER';
+
+  return { verdict, left, right };
 }
 
 export function classifyMachineStatus(args: {
@@ -421,7 +522,11 @@ export function classifyMachineStatus(args: {
 }): MachineStatus {
   if (!args.isReceiving) return 'DIAGNOSE';
   if (isOpenLid(args.events)) return 'OPEN_LID';
-  if (isNotMixing(args.liveData[RecordType.Current])) return 'NOT_MIXING';
+  // NOT_MIXING only when neither side is mixing. If at least one side is still
+  // mixing (Left only / Right only), the machine is mixing — don't flag it.
+  // NO_DATA falls through so we don't flag machines with no current telemetry.
+  const mix = classifyMixing(args.liveData);
+  if (mix.verdict === 'NEITHER') return 'NOT_MIXING';
   const bySensor = bmeHumidityFromLiveData(args.liveData);
   if (!bySensor[1] && !bySensor[2]) return 'OK';
   if (isDrySoilFromBme(bySensor)) return 'DRY_SOIL';
