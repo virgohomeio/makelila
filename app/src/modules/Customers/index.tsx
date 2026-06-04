@@ -5,6 +5,7 @@ import {
   type Customer, type FuState,
 } from '../../lib/customers';
 import { useOrders } from '../../lib/orders';
+import { formatMoney } from '../../lib/money';
 import { useUnits } from '../../lib/stock';
 import { useServiceTickets } from '../../lib/service';
 import { OverdueFollowupPanel } from './OverdueFollowupPanel';
@@ -285,7 +286,13 @@ export default function Customers() {
                   key={c.id}
                   c={c}
                   fu={fu}
-                  serials={serialsByCustomerName.get(c.full_name?.toLowerCase() ?? '') ?? []}
+                  serials={
+                    // Sheet is the source of truth: prefer the synced serials,
+                    // fall back to the units-derived list when none are synced.
+                    (c.serials && c.serials.length > 0)
+                      ? c.serials
+                      : (serialsByCustomerName.get(c.full_name?.toLowerCase() ?? '') ?? [])
+                  }
                   onSelect={() => setSelectedCustomerId(c.id)}
                 />
               ))}
@@ -406,7 +413,7 @@ function CustomerDetailPanel({ customer, onClose }: { customer: Customer; onClos
                     <span className={styles.mono}>{o.order_ref}</span>
                     <span className={styles.statusPill}>{o.status}</span>
                     <span className={styles.muted}>{o.placed_at ? new Date(o.placed_at).toLocaleDateString('en-US') : '—'}</span>
-                    <span className={styles.itemAmount}>${o.total_usd.toFixed(2)}</span>
+                    <span className={styles.itemAmount}>{formatMoney(o.total_usd, o.currency)}</span>
                   </div>
                 ))
             }

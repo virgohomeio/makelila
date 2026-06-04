@@ -138,6 +138,16 @@ export type TicketAttachment = {
   uploaded_by: string | null;
 };
 
+export type TicketNote = {
+  id: string;
+  ticket_id: string;
+  body: string;
+  author_id: string | null;
+  author_email: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 // ============================================================ Display metadata
 
 export const CATEGORY_META: Record<TicketCategory, { label: string; color: string; bg: string }> = {
@@ -433,6 +443,96 @@ export function useTicketAttachments(ticketId: string | null): {
   return { attachments, loading };
 }
 
+export function useTicketNotes(ticketId: string | null): {
+  notes: TicketNote[];
+  loading: boolean;
+} {
+  const [notes, setNotes] = useState<TicketNote[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!ticketId) { setNotes([]); setLoading(false); return; }
+    let channel: RealtimeChannel | null = null;
+    let cancelled = false;
+    setLoading(true);
+    (async () => {
+      const { data, error } = await supabase
+        .from('ticket_notes')
+        .select('*')
+        .eq('ticket_id', ticketId)
+        .order('created_at', { ascending: true });
+      if (cancelled) return;
+      if (!error && data) setNotes(data as TicketNote[]);
+      setLoading(false);
+
+      channel = supabase
+        .channel(`ticket_notes:${ticketId}`)
+        .on('postgres_changes',
+          { event: '*', schema: 'public', table: 'ticket_notes', filter: `ticket_id=eq.${ticketId}` },
+          (payload) => {
+            setNotes(prev => {
+              if (payload.eventType === 'DELETE' && payload.old) {
+                return prev.filter(n => n.id !== (payload.old as { id: string }).id);
+              }
+              if (payload.new) {
+                const row = payload.new as TicketNote;
+                const idx = prev.findIndex(n => n.id === row.id);
+                if (idx >= 0) { const next = [...prev]; next[idx] = row; return next; }
+                return [...prev, row];
+              }
+              return prev;
+            });
+          })
+        .subscribe();
+    })();
+    return () => { cancelled = true; if (channel) void channel.unsubscribe(); };
+  }, [ticketId]);
+
+  return { notes, loading };
+}
+
+export async function addTicketNote(ticketId: string, body: string): Promise<void> {
+  const trimmed = body.trim();
+  if (!trimmed) throw new Error('Note cannot be empty.');
+  const { data: { user } } = await supabase.auth.getUser();
+  const { error } = await supabase.from('ticket_notes').insert({
+    ticket_id: ticketId,
+    body: trimmed,
+    author_id: user?.id ?? null,
+    author_email: user?.email ?? null,
+  });
+  if (error) throw error;
+  await logAction('ticket_note_added', ticketId, trimmed.slice(0, 120));
+}
+
+export async function updateTicketNote(noteId: string, body: string): Promise<void> {
+  const trimmed = body.trim();
+  if (!trimmed) throw new Error('Note cannot be empty.');
+  const { data, error } = await supabase
+    .from('ticket_notes')
+    .update({ body: trimmed })
+    .eq('id', noteId)
+    .select('id, ticket_id');
+  if (error) throw error;
+  if (!data || data.length === 0) {
+    throw new Error('Note was not updated (no permission or note removed).');
+  }
+  await logAction('ticket_note_edited', data[0].ticket_id as string, trimmed.slice(0, 120));
+}
+
+export async function deleteTicketNote(noteId: string): Promise<void> {
+  const { data, error } = await supabase
+    .from('ticket_notes')
+    .delete()
+    .eq('id', noteId)
+    .select('id, ticket_id');
+  if (error) throw error;
+  if (!data || data.length === 0) {
+    throw new Error('Note was not deleted (no permission or already removed).');
+  }
+  await logAction('ticket_note_deleted', data[0].ticket_id as string, '');
+}
+
 export function useTicketMessages(ticketId: string | null): {
   messages: TicketMessage[];
   loading: boolean;
@@ -668,6 +768,21 @@ export async function reclassifyTicket(id: string): Promise<void> {
 export async function updateTicketNotes(id: string, internal_notes: string): Promise<void> {
   const { error } = await supabase.from('service_tickets').update({ internal_notes }).eq('id', id);
   if (error) throw error;
+}
+
+export async function updateTicketSubject(id: string, subject: string): Promise<void> {
+  const trimmed = subject.trim();
+  if (!trimmed) throw new Error('Subject cannot be empty.');
+  const { data, error } = await supabase
+    .from('service_tickets')
+    .update({ subject: trimmed })
+    .eq('id', id)
+    .select('id');
+  if (error) throw error;
+  if (!data || data.length === 0) {
+    throw new Error('Subject was not updated (no permission or ticket removed).');
+  }
+  await logAction('ticket_subject_updated', id, trimmed);
 }
 
 export async function setRepairFields(

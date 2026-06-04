@@ -1,11 +1,9 @@
 import type { Order } from '../../../lib/orders';
+import { formatMoney } from '../../../lib/money';
 import styles from '../OrderReview.module.css';
 
-function fmt(n: number | null | undefined): string {
-  return n == null ? '—' : `$${n.toFixed(2)}`;
-}
-
 export function LineItemsCard({ order }: { order: Order }) {
+  const fmt = (n: number | null | undefined) => formatMoney(n, order.currency);
   // Show breakdown rows only when we have the data. Backfill arrives via the
   // next ⟲ Sync from Shopify click — older orders may have null fields.
   const hasBreakdown =
@@ -41,7 +39,7 @@ export function LineItemsCard({ order }: { order: Order }) {
                 <td>{li.sku}</td>
                 <td>{li.name}</td>
                 <td>{li.qty}</td>
-                <td style={{ textAlign: 'right' }}>${(li.qty * li.price_usd).toFixed(2)}</td>
+                <td style={{ textAlign: 'right' }}>{fmt(li.qty * li.price_usd)}</td>
               </tr>
             ))}
           </tbody>
@@ -71,14 +69,14 @@ export function LineItemsCard({ order }: { order: Order }) {
                 {showShipping && (
                   <tr style={{ fontWeight: 400 }}>
                     <td colSpan={3} style={{ color: 'var(--color-ink-subtle)' }}>Shipping</td>
-                    <td style={{ textAlign: 'right', fontWeight: 400 }}>${shipping.toFixed(2)}</td>
+                    <td style={{ textAlign: 'right', fontWeight: 400 }}>{fmt(shipping)}</td>
                   </tr>
                 )}
               </>
             )}
             <tr>
               <td colSpan={3}>Total</td>
-              <td style={{ textAlign: 'right' }}>${order.total_usd.toFixed(2)}</td>
+              <td style={{ textAlign: 'right' }}>{fmt(order.total_usd)}</td>
             </tr>
           </tfoot>
         </table>

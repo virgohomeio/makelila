@@ -177,6 +177,90 @@
   color: var(--color-ink);
   margin: 0;
 }
+.subjectEditBtn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--color-ink-subtle);
+  margin-left: 6px;
+  padding: 0 2px;
+}
+.subjectEditBtn:hover { color: var(--color-crimson); }
+.subjectEditRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.subjectEditInput {
+  flex: 1;
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--color-ink);
+  padding: 4px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+.subjectEditInput:focus {
+  outline: none;
+  border-color: var(--color-crimson);
+}
+
+/* Notes log */
+.noteComposer { margin-bottom: 12px; }
+.noteError { color: var(--color-error); font-size: 11px; margin: 4px 0; }
+.noteEmpty { font-size: 11px; color: var(--color-ink-subtle); }
+.noteList { display: flex; flex-direction: column; gap: 8px; }
+.noteItem {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  background: #fff;
+}
+.noteMeta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.noteAuthor { font-size: 11px; font-weight: 700; color: var(--color-ink); }
+.noteTime { font-size: 10px; color: var(--color-ink-subtle); }
+.noteEdited { font-style: italic; }
+.noteEditBtn {
+  margin-left: auto;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--color-ink-subtle);
+  padding: 0 2px;
+}
+.noteEditBtn:hover { color: var(--color-crimson); }
+.noteDeleteBtn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--color-ink-subtle);
+  padding: 0 2px;
+}
+.noteDeleteBtn:hover { color: var(--color-error); }
+.noteDeleteBtn:disabled { opacity: 0.5; cursor: default; }
+.noteConfirm {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0;
+  font-size: 11px;
+  color: var(--color-ink-muted);
+}
+.noteBody {
+  font-size: 12px;
+  color: var(--color-ink);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
 .detailMetaRow {
   margin-top: 6px;
   display: flex;

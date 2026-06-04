@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { Order } from '../../../lib/orders';
 import { updateFreightEstimate } from '../../../lib/orders';
+import { formatMoney } from '../../../lib/money';
 import styles from '../OrderReview.module.css';
 
 function EditFreight({ order }: { order: Order }) {
@@ -64,9 +65,9 @@ export function FreightCard({ order }: { order: Order }) {
       <div className={styles.cardHead}>Freight Estimate</div>
       <div className={styles.cardBody}>
         <div>
-          <strong>${order.freight_estimate_usd.toFixed(2)}</strong>
+          <strong>{formatMoney(order.freight_estimate_usd, order.currency)}</strong>
           <span className={styles.muted}>
-            &nbsp;· threshold ${order.freight_threshold_usd.toFixed(2)}
+            &nbsp;· threshold {formatMoney(order.freight_threshold_usd, order.currency)}
             {over && <strong style={{ color: 'var(--color-error)' }}> · OVER</strong>}
           </span>
         </div>

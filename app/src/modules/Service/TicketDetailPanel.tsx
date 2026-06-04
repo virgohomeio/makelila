@@ -4,11 +4,12 @@ import {
   STATUS_META, CATEGORY_META, PRIORITY_META, SOURCE_LABEL, TOPIC_LABEL, NEXT_STATUSES,
   ISSUE_AREAS, ISSUE_AREA_LABEL,
   updateTicketStatus, assignTicketOwner, setTicketPriority, setTicketIssueArea, setTicketCategory,
-  updateTicketNotes, setRepairFields, reclassifyTicket, deleteTicket,
+  setRepairFields, reclassifyTicket, deleteTicket, updateTicketSubject,
   useCustomerLifecycle, warrantyState,
   useTicketMessages, useClassificationLog,
 } from '../../lib/service';
 import { AttachmentStrip } from './AttachmentStrip';
+import { TicketNotes } from './TicketNotes';
 import styles from './Service.module.css';
 
 const OPS_OWNERS = [
@@ -26,12 +27,27 @@ type Props = {
 };
 
 export function TicketDetailPanel({ ticket, onClose }: Props) {
-  const [notes, setNotes] = useState(ticket.internal_notes ?? '');
   const [defectCat, setDefectCat] = useState(ticket.defect_category ?? '');
   const [parts, setParts] = useState(ticket.parts_needed ?? '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [editingSubject, setEditingSubject] = useState(false);
+  const [subjectDraft, setSubjectDraft] = useState(ticket.subject);
+
+  async function saveSubject() {
+    const next = subjectDraft.trim();
+    if (!next || next === ticket.subject) { setEditingSubject(false); return; }
+    setBusy(true); setError(null);
+    try {
+      await updateTicketSubject(ticket.id, next);
+      setEditingSubject(false);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function onDelete() {
     setBusy(true); setError(null);
@@ -68,7 +84,36 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
       <div className={styles.detailHead}>
         <div>
           <div className={styles.detailTicketNum}>{ticket.ticket_number}</div>
-          <h3 className={styles.detailSubject}>{ticket.subject}</h3>
+          {editingSubject ? (
+            <div className={styles.subjectEditRow}>
+              <input
+                className={styles.subjectEditInput}
+                value={subjectDraft}
+                autoFocus
+                disabled={busy}
+                onChange={e => setSubjectDraft(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') void saveSubject();
+                  if (e.key === 'Escape') { setSubjectDraft(ticket.subject); setEditingSubject(false); }
+                }}
+              />
+              <button className={styles.btnPrimary} disabled={busy} onClick={() => void saveSubject()}>Save</button>
+              <button
+                className={styles.btnSecondary}
+                disabled={busy}
+                onClick={() => { setSubjectDraft(ticket.subject); setEditingSubject(false); }}
+              >Cancel</button>
+            </div>
+          ) : (
+            <h3 className={styles.detailSubject}>
+              {ticket.subject}
+              <button
+                className={styles.subjectEditBtn}
+                title="Edit subject"
+                onClick={() => { setSubjectDraft(ticket.subject); setEditingSubject(true); }}
+              >✎</button>
+            </h3>
+          )}
           <div className={styles.detailMetaRow}>
             <span className={styles.pill} style={{ background: cat.bg, color: cat.color }}>{cat.label}</span>
             <span className={styles.pill} style={{ background: status.bg, color: status.color }}>{status.label}</span>
@@ -313,20 +358,8 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
         </div>
 
         <div className={styles.detailSection}>
-          <div className={styles.detailSectionLabel}>Internal notes</div>
-          <textarea
-            className={styles.textarea}
-            placeholder="Internal notes (ops only)"
-            value={notes}
-            onChange={e => setNotes(e.target.value)}
-          />
-          <div className={styles.actionsRow}>
-            <button
-              className={styles.btnSecondary}
-              disabled={busy}
-              onClick={() => run(updateTicketNotes(ticket.id, notes))}
-            >Save notes</button>
-          </div>
+          <div className={styles.detailSectionLabel}>Notes</div>
+          <TicketNotes ticketId={ticket.id} />
         </div>
 
         {ticket.hubspot_ticket_id && (

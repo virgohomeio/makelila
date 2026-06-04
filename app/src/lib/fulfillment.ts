@@ -226,10 +226,25 @@ async function currentUserId(): Promise<string> {
   return data.user.id;
 }
 
-/** Step 1: reserve the serial for this queue row; advance 1→2. */
-export async function assignUnit(queueId: string, serial: string): Promise<void> {
-  const userId = await currentUserId();
-  // Reserve shelf slot
+/** Step 1: reserve a ready unit for this order; advance 1→2.
+ *  Stock (units.status) is the source of truth — flip the unit ready→reserved
+ *  and stamp the order on it. The shelf slot is kept in sync for the shelf view. */
+export async function assignUnit(queueId: string, serial: string, orderId: string): Promise<void> {
+  await currentUserId();
+  // Look up the order so we can stamp the unit with who it's going to.
+  const { data: order, error: oErr } = await supabase
+    .from('orders')
+    .select('order_ref, customer_name')
+    .eq('id', orderId)
+    .single();
+  if (oErr) throw oErr;
+  // Reserve the unit in Stock (source of truth) + link the order.
+  const { error: uErr } = await supabase
+    .from('units')
+    .update({ status: 'reserved', customer_order_ref: order.order_ref, customer_name: order.customer_name })
+    .eq('serial', serial);
+  if (uErr) throw uErr;
+  // Keep the physical shelf view in sync (no-op if the unit isn't on a slot).
   const { error: slotErr } = await supabase
     .from('shelf_slots')
     .update({ status: 'reserved', updated_at: new Date().toISOString() })
@@ -242,7 +257,6 @@ export async function assignUnit(queueId: string, serial: string): Promise<void>
     .eq('id', queueId);
   if (qErr) throw qErr;
   await logAction('fq_assign', queueId, `Assigned ${serial}`);
-  void userId;
 }
 
 /** Step 2 pass: advance 2→3 with optional test report URL. */

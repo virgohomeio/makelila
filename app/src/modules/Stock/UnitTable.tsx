@@ -4,6 +4,7 @@ import {
   QC_CHECK_META,
   type Unit, type UnitStatus, type QcCheck,
 } from '../../lib/stock';
+import { signedReportUrl } from '../../lib/testReports';
 import styles from './Stock.module.css';
 
 export function UnitTable({ units }: { units: Unit[] }) {
@@ -18,6 +19,13 @@ export function UnitTable({ units }: { units: Unit[] }) {
   const commit = async (serial: string) => {
     const next = pending[serial];
     if (!next) return;
+    // Warn (don't block) when marking a unit ready whose latest electrical
+    // test report is a FAIL.
+    const unit = units.find(u => u.serial === serial);
+    if (next === 'ready' && unit?.electrical_check === 'fail') {
+      const ok = window.confirm(`${serial}: latest electrical test is a FAIL. Mark ready to ship anyway?`);
+      if (!ok) return;
+    }
     setBusySerial(serial); setError(null);
     try {
       await updateUnitStatus(serial, next);
@@ -63,10 +71,17 @@ export function UnitTable({ units }: { units: Unit[] }) {
             const shippedDate = u.shipped_at
               ? new Date(u.shipped_at).toLocaleDateString('en-US', { year: '2-digit', month: 'short', day: 'numeric' })
               : null;
-            // defect_reason takes precedence in the notes column when present —
-            // surfaces the "why did this come back" right where scrap/rework
-            // rows live.
-            const primaryNote = u.defect_reason ?? u.notes;
+            // Prioritize real per-machine signals over the batch-level seeded
+            // `notes`: electrical FAIL (+ failed tests) → defect_reason →
+            // operator defect_notes → electrical incomplete → seeded note.
+            const electricalFail = u.electrical_check === 'fail';
+            const realNote =
+              electricalFail
+                ? `Electrical FAIL${u.electrical_failed_tests ? `: ${u.electrical_failed_tests}` : ''}`
+                : u.defect_reason
+                  ?? u.defect_notes
+                  ?? (u.electrical_check === 'incomplete' ? 'Electrical test incomplete' : null);
+            const primaryNote = realNote ?? u.notes;
             return (
               <tr key={u.serial}>
                 <td className={styles.serial}>{u.serial}</td>
@@ -124,10 +139,14 @@ export function UnitTable({ units }: { units: Unit[] }) {
                   </button>
                 </td>
                 <td className={styles.notes} title={primaryNote ?? ''}>
-                  {u.defect_reason ? (
+                  {electricalFail ? (
+                    <span className={styles.defect}>⚠ {primaryNote}</span>
+                  ) : u.defect_reason ? (
                     <span className={styles.defect}>⚠ {u.defect_reason}</span>
+                  ) : realNote ? (
+                    realNote
                   ) : u.notes ? (
-                    u.notes
+                    <span className={styles.muted}>{u.notes}</span>
                   ) : <span className={styles.muted}>—</span>}
                 </td>
                 <td>
@@ -233,6 +252,24 @@ function QcEditorModal({
         <div className={styles.modalField}>
           <label className={styles.modalLabel}>Electrical check</label>
           <QcTri value={eCheck} onChange={setECheck} />
+          {unit.test_report_path && (
+            <div className={styles.reportLink}>
+              Report:{' '}
+              <button
+                type="button"
+                className={styles.reportOpenBtn}
+                onClick={async () => {
+                  try { window.open(await signedReportUrl(unit.test_report_path!), '_blank', 'noopener'); }
+                  catch (e) { onError((e as Error).message); }
+                }}
+              >
+                {unit.test_report_name ?? 'test report'} ↗
+              </button>
+              {unit.test_report_uploaded_at && (
+                <span className={styles.muted}> · {new Date(unit.test_report_uploaded_at).toLocaleDateString('en-US')}</span>
+              )}
+            </div>
+          )}
         </div>
 
         <div className={styles.modalField}>

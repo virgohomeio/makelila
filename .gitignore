@@ -27,3 +27,13 @@ Thumbs.db
 # Logs
 *.log
 npm-debug.log*
+
+# Local service-account keys (never commit)
+.secrets/
+*.sa.json
+
+# SA key dropped at repo root
+lila-bot.json
+
+# Generated SQL output (contains customer PII)
+scripts/out/
