@@ -118,22 +118,21 @@ describe('createReplacementOrder', () => {
   beforeEach(() => vi.clearAllMocks());
 
   it('inserts an order with kind=replacement and computes COGS', async () => {
-    rpcMock.mockResolvedValue({ data: 'R-0007', error: null });
+    // rpcMock handles both next_replacement_order_ref and decrement_part_on_hand
+    rpcMock.mockImplementation((name: string) => {
+      if (name === 'next_replacement_order_ref') return Promise.resolve({ data: 'R-0007', error: null });
+      if (name === 'decrement_part_on_hand') return Promise.resolve({ data: 8, error: null });
+      return Promise.resolve({ data: null, error: { message: `unexpected rpc ${name}` } });
+    });
     const insertSingle = vi.fn().mockResolvedValue({ data: { id: 'o1', order_ref: 'R-0007' }, error: null });
     const select = vi.fn().mockReturnValue({ single: insertSingle });
     const insert = vi.fn().mockReturnValue({ select });
     const ticketUpdate = vi.fn().mockResolvedValue({ error: null });
-    const partsUpdate = vi.fn().mockResolvedValue({ error: null });
     const unitsUpdate = vi.fn().mockResolvedValue({ error: null });
-    const partsRead = vi.fn().mockResolvedValue({ data: { on_hand: 10 }, error: null });
 
     fromMock.mockImplementation((table: string) => {
       if (table === 'orders') return { insert };
       if (table === 'service_tickets') return { update: () => ({ eq: ticketUpdate }) };
-      if (table === 'parts') return {
-        update: () => ({ eq: partsUpdate }),
-        select: () => ({ eq: () => ({ single: partsRead }) }),
-      };
       if (table === 'units') return { update: () => ({ eq: unitsUpdate }) };
       throw new Error(`unexpected table ${table}`);
     });
@@ -159,7 +158,7 @@ describe('createReplacementOrder', () => {
     expect(insertArg.linked_ticket_id).toBe('t1');
     expect(insertArg.cogs_usd).toBeCloseTo(4.2 * 2 + 312, 2);
     expect(ticketUpdate).toHaveBeenCalled();
-    expect(partsUpdate).toHaveBeenCalled();
+    expect(rpcMock).toHaveBeenCalledWith('decrement_part_on_hand', { p_part_id: 'p1', p_qty: 2 });
     expect(unitsUpdate).toHaveBeenCalled();
   });
 

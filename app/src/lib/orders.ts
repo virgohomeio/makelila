@@ -435,9 +435,39 @@ function computeCogs(items: ReplacementLineItem[]): number {
   }, 0);
 }
 
+// Replacement orders are internal/warranty and skip Shopify-style financial
+// fields. These defaults make the row valid for the existing Order Review
+// flow (which expects non-null totals + currency) without implying any
+// customer payment.
+const REPLACEMENT_ORDER_DEFAULTS = {
+  freight_estimate_usd: 0,
+  freight_threshold_usd: 0,
+  currency: 'USD',
+  total_usd: 0,
+  address_verdict: 'house' as const,
+  sales_confirmed_fit: false,
+};
+
 /** Creates a replacement order (kind='replacement', status='pending'),
  *  back-links the ticket, decrements parts.on_hand, and reserves any units.
- *  Returns the new order_ref + id. */
+ *  Returns the new order_ref + id.
+ *
+ *  Atomicity caveat: the four writes (order INSERT, ticket UPDATE, parts
+ *  decrement, units reserve) are NOT transactional. Partial-failure
+ *  recovery, by step:
+ *    - INSERT fails: nothing to clean up.
+ *    - INSERT ok, ticket UPDATE fails: the order exists but no back-link.
+ *      Manually run `update service_tickets set replacement_order_id = ?
+ *      where id = ?` or delete the order.
+ *    - Ticket UPDATE ok, parts decrement fails partway: some on_hand
+ *      values already decremented. The exact set is recoverable from
+ *      activity_log entries; reverse with adjustPartStock.
+ *    - Parts ok, units reserve fails: same shape — recover by reading
+ *      activity_log + manually reverting units.status to 'ready'.
+ *  A future migration may wrap all four in a server-side RPC for true
+ *  transactional safety. For now (low-volume operator workflow) the
+ *  trade-off is acceptable.
+ */
 export async function createReplacementOrder(input: ReplacementOrderInput):
   Promise<{ id: string; order_ref: string }> {
   if (input.line_items.length === 0) throw new Error('At least one line item required');
@@ -461,14 +491,9 @@ export async function createReplacementOrder(input: ReplacementOrderInput):
       city: input.address.city,
       region_state: input.address.region_state,
       country: input.address.country,
-      address_verdict: 'house',
       postal_code: input.address.postal_code,
       address_customer_postal: input.address.postal_code,
-      freight_estimate_usd: 0,
-      freight_threshold_usd: 0,
-      currency: 'USD',
-      total_usd: 0,
-      sales_confirmed_fit: false,
+      ...REPLACEMENT_ORDER_DEFAULTS,
       line_items: input.line_items,
     })
     .select('id, order_ref')
@@ -482,15 +507,16 @@ export async function createReplacementOrder(input: ReplacementOrderInput):
     .eq('id', input.ticket_id);
   if (tErr) throw new Error(`Link ticket: ${tErr.message}`);
 
-  // 3. Decrement parts.on_hand for each part line item.
+  // 3. Decrement parts.on_hand atomically per line item. The RPC takes a
+  //    transaction-level lock on the parts row and floors at 0, so two
+  //    concurrent replacement orders can't lose a decrement (see migration
+  //    20260604220000_decrement_part_on_hand.sql).
   for (const li of input.line_items) {
     if (li.kind !== 'part') continue;
-    const { data: cur, error: rErr } = await supabase
-      .from('parts').select('on_hand').eq('id', li.part_id).single();
-    if (rErr) throw new Error(`Read part ${li.part_id}: ${rErr.message}`);
-    const next = Math.max(0, (cur?.on_hand ?? 0) - li.qty);
-    const { error: pErr } = await supabase
-      .from('parts').update({ on_hand: next }).eq('id', li.part_id);
+    const { error: pErr } = await supabase.rpc('decrement_part_on_hand', {
+      p_part_id: li.part_id,
+      p_qty: li.qty,
+    });
     if (pErr) throw new Error(`Decrement part ${li.part_id}: ${pErr.message}`);
   }
 
