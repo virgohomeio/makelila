@@ -13,12 +13,17 @@ alter table public.orders
   add column if not exists shipped_at timestamptz,
   add column if not exists delivered_at timestamptz;
 
+-- Note: existing rows pick up kind='sale' automatically because Postgres
+-- writes the default value on ADD COLUMN NOT NULL DEFAULT (no separate
+-- backfill needed).
+
 alter table public.orders
   drop constraint if exists orders_kind_check;
 alter table public.orders
   add constraint orders_kind_check check (kind in ('sale', 'replacement'));
 
-create index if not exists orders_kind_idx on public.orders(kind);
+create index if not exists orders_kind_idx on public.orders(kind)
+  where kind = 'replacement';
 create index if not exists orders_linked_ticket_idx on public.orders(linked_ticket_id)
   where linked_ticket_id is not null;
 
@@ -40,6 +45,10 @@ as $$
 declare
   n int;
 begin
+  -- Serialize concurrent callers so two replacement-order creations can't
+  -- both read MAX(order_ref) and return the same ref. Transaction-scoped
+  -- lock — released at COMMIT/ROLLBACK.
+  perform pg_advisory_xact_lock(hashtext('next_replacement_order_ref'));
   select coalesce(max(nullif(regexp_replace(order_ref, '^R-', ''), '')::int), 0)
     into n
     from public.orders
