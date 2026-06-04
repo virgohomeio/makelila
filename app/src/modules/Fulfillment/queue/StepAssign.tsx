@@ -7,7 +7,14 @@ export function StepAssign({ row }: { row: FulfillmentQueueRow }) {
   const { units, loading } = useUnits();
   // Stock is the source of truth: only units the team has marked 'ready' under
   // the Stock tab are available to ship.
-  const ready = useMemo(() => units.filter(u => u.status === 'ready'), [units]);
+  // Backlog #57 — temporary backfill mode also surfaces 'shipped' units so
+  // Raymond can pair a historical (already-delivered) unit with its order
+  // in makelila without losing the shipped status. Visible warning when on.
+  const [backfillMode, setBackfillMode] = useState(false);
+  const candidates = useMemo(
+    () => units.filter(u => u.status === 'ready' || (backfillMode && u.status === 'shipped')),
+    [units, backfillMode],
+  );
   const [picked, setPicked] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [busy, setBusy] = useState(false);
@@ -15,13 +22,17 @@ export function StepAssign({ row }: { row: FulfillmentQueueRow }) {
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return ready;
-    return ready.filter(u =>
+    if (!q) return candidates;
+    return candidates.filter(u =>
       u.serial.toLowerCase().includes(q)
       || u.batch.toLowerCase().includes(q)
-      || (u.location?.toLowerCase().includes(q) ?? false),
+      || (u.location?.toLowerCase().includes(q) ?? false)
+      || (u.customer_name?.toLowerCase().includes(q) ?? false),
     );
-  }, [ready, search]);
+  }, [candidates, search]);
+
+  const pickedUnit = picked ? units.find(u => u.serial === picked) : null;
+  const isPickedShipped = pickedUnit?.status === 'shipped';
 
   const handleConfirm = async () => {
     if (!picked) return;
@@ -36,16 +47,49 @@ export function StepAssign({ row }: { row: FulfillmentQueueRow }) {
   };
 
   if (loading) return <div>Loading ready units…</div>;
-  if (ready.length === 0) {
-    return <div>No units are ready to ship. Mark a machine “ready” in the Stock tab first.</div>;
+  if (candidates.length === 0 && !backfillMode) {
+    return (
+      <div>
+        <div style={{ marginBottom: 10 }}>
+          No units are ready to ship. Mark a machine “ready” in the Stock tab first.
+        </div>
+        <label style={{ fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+          <input type="checkbox" checked={backfillMode} onChange={e => setBackfillMode(e.target.checked)} />
+          Backfill mode — include already-shipped units (Raymond's historical pairing flow, #57)
+        </label>
+      </div>
+    );
   }
 
   return (
     <div>
-      <h3 style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>Assign a ready unit</h3>
-      <p style={{ fontSize: 11, color: 'var(--color-ink-subtle)', marginBottom: 10 }}>
-        {ready.length} unit{ready.length === 1 ? '' : 's'} marked ready in Stock. Click one to assign it to this order.
+      <h3 style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>
+        {backfillMode ? 'Assign or backfill a unit' : 'Assign a ready unit'}
+      </h3>
+      <p style={{ fontSize: 11, color: 'var(--color-ink-subtle)', marginBottom: 6 }}>
+        {candidates.length} unit{candidates.length === 1 ? '' : 's'} {backfillMode ? '(ready + already-shipped)' : 'marked ready in Stock'}. Click one to assign it to this order.
       </p>
+      <label style={{ fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 6, marginBottom: 8, cursor: 'pointer' }}>
+        <input type="checkbox" checked={backfillMode} onChange={e => setBackfillMode(e.target.checked)} />
+        Backfill mode — include already-shipped units (#57)
+      </label>
+      {backfillMode && (
+        <div style={{
+          fontSize: 11, color: '#744210', background: '#fefcbf',
+          borderLeft: '4px solid #d69e2e', padding: '6px 10px', borderRadius: 4, marginBottom: 10,
+        }}>
+          ⚠️ Backfill mode is on. Picking a <strong>shipped</strong> unit will pair it to this order WITHOUT
+          flipping its status (it stays shipped). Use this only for historical units that left the warehouse
+          before makelila tracked the shipment. The unit will be stamped with <code>backfilled_at</code>.
+        </div>
+      )}
+      {isPickedShipped && (
+        <div style={{
+          fontSize: 11, color: '#22543d', background: '#c6f6d5', padding: '4px 8px', borderRadius: 4, marginBottom: 8,
+        }}>
+          Picked unit is <strong>already shipped</strong> — will be recorded as a backfill.
+        </div>
+      )}
       <input
         type="search"
         value={search}
@@ -59,7 +103,7 @@ export function StepAssign({ row }: { row: FulfillmentQueueRow }) {
       />
       {filtered.length === 0 && (
         <div style={{ fontSize: 11, color: 'var(--color-ink-subtle)', marginBottom: 8 }}>
-          No matches for "{search}". {ready.length} ready unit{ready.length === 1 ? '' : 's'} — clear search to see all.
+          No matches for "{search}". {candidates.length} {backfillMode ? 'pickable' : 'ready'} unit{candidates.length === 1 ? '' : 's'} — clear search to see all.
         </div>
       )}
       <div className={styles.slotGrid}>

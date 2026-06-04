@@ -238,11 +238,23 @@ export async function assignUnit(queueId: string, serial: string, orderId: strin
     .eq('id', orderId)
     .single();
   if (oErr) throw oErr;
-  // Reserve the unit in Stock (source of truth) + link the order.
-  const { error: uErr } = await supabase
-    .from('units')
-    .update({ status: 'reserved', customer_order_ref: order.order_ref, customer_name: order.customer_name })
-    .eq('serial', serial);
+  // Backlog #57 — if the picked unit is already 'shipped' (Raymond's
+  // backfill flow: pairing a unit that left the warehouse before makelila
+  // was the system of record), preserve its status and stamp backfill
+  // metadata instead of overwriting to 'reserved'.
+  const { data: existing, error: rErr } = await supabase
+    .from('units').select('status').eq('serial', serial).single();
+  if (rErr) throw rErr;
+  const isBackfill = existing?.status === 'shipped';
+  const patch: Record<string, unknown> = isBackfill
+    ? {
+        customer_order_ref: order.order_ref,
+        customer_name: order.customer_name,
+        backfilled_at: new Date().toISOString(),
+        backfill_source: 'manual-backfill',
+      }
+    : { status: 'reserved', customer_order_ref: order.order_ref, customer_name: order.customer_name };
+  const { error: uErr } = await supabase.from('units').update(patch).eq('serial', serial);
   if (uErr) throw uErr;
   // Keep the physical shelf view in sync (no-op if the unit isn't on a slot).
   const { error: slotErr } = await supabase
@@ -250,13 +262,20 @@ export async function assignUnit(queueId: string, serial: string, orderId: strin
     .update({ status: 'reserved', updated_at: new Date().toISOString() })
     .eq('serial', serial);
   if (slotErr) throw slotErr;
-  // Advance queue row
+  // Advance queue row. Backfilled assignments still go to step 2 so the
+  // operator can manually click through the remaining steps; downstream
+  // step actions are no-ops on an already-shipped unit but the operator
+  // sees the trail in the queue.
   const { error: qErr } = await supabase
     .from('fulfillment_queue')
     .update({ assigned_serial: serial, step: 2 })
     .eq('id', queueId);
   if (qErr) throw qErr;
-  await logAction('fq_assign', queueId, `Assigned ${serial}`);
+  await logAction(
+    isBackfill ? 'fq_assign_backfill' : 'fq_assign',
+    queueId,
+    isBackfill ? `Backfilled ${serial} (already shipped)` : `Assigned ${serial}`,
+  );
 }
 
 /** Step 2 pass: advance 2→3 with optional test report URL. */

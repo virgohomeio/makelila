@@ -116,6 +116,10 @@ export type Unit = {
   // Default-filtered out of Dashboard / Customers / profitability rollups
   // so internal noise doesn't distort real-customer signals.
   is_team_test: boolean;
+  // Backlog #57 — non-null on units paired via Raymond's backfill flow
+  // (already shipped before makelila tracked them).
+  backfilled_at: string | null;
+  backfill_source: string | null;
 };
 
 // ---------- hooks ----------
