@@ -15,6 +15,8 @@ export function UnitTable({ units }: { units: Unit[] }) {
   const [error, setError] = useState<string | null>(null);
   const [qcSerial, setQcSerial] = useState<string | null>(null);
   const qcUnit = units.find(u => u.serial === qcSerial) ?? null;
+  const [assignSerial, setAssignSerial] = useState<string | null>(null);
+  const assignUnit = units.find(u => u.serial === assignSerial) ?? null;
 
   const commit = async (serial: string) => {
     const next = pending[serial];
@@ -118,9 +120,15 @@ export function UnitTable({ units }: { units: Unit[] }) {
                   </select>
                 </td>
                 <td>
-                  {u.customer_name
-                    ? <span>{u.customer_name}{u.customer_order_ref ? ` · ${u.customer_order_ref}` : ''}</span>
-                    : <span className={styles.muted}>{u.location ?? '—'}</span>}
+                  <button
+                    className={styles.assignCell}
+                    onClick={() => setAssignSerial(u.serial)}
+                    title="Edit customer / location"
+                  >
+                    {u.customer_name
+                      ? <span>{u.customer_name}{u.customer_order_ref ? ` · ${u.customer_order_ref}` : ''}</span>
+                      : <span className={styles.muted}>{u.location ?? '—'}</span>}
+                  </button>
                 </td>
                 <td className={styles.shippedCell}>
                   {shippedDate ?? <span className={styles.muted}>—</span>}
@@ -172,6 +180,87 @@ export function UnitTable({ units }: { units: Unit[] }) {
           onError={setError}
         />
       )}
+      {assignUnit && (
+        <AssignEditorModal
+          unit={assignUnit}
+          onClose={() => setAssignSerial(null)}
+          onError={setError}
+        />
+      )}
+    </div>
+  );
+}
+
+function AssignEditorModal({
+  unit, onClose, onError,
+}: {
+  unit: Unit;
+  onClose: () => void;
+  onError: (msg: string | null) => void;
+}) {
+  const [customerName, setCustomerName] = useState(unit.customer_name ?? '');
+  const [orderRef, setOrderRef] = useState(unit.customer_order_ref ?? '');
+  const [location, setLocation] = useState(unit.location ?? '');
+  const [busy, setBusy] = useState(false);
+
+  const save = async () => {
+    setBusy(true); onError(null);
+    try {
+      await updateUnitFields(unit.serial, {
+        customer_name:      customerName.trim() || null,
+        customer_order_ref: orderRef.trim() || null,
+        location:           location.trim() || null,
+      });
+      onClose();
+    } catch (e) {
+      onError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className={styles.modalBackdrop} onClick={onClose}>
+      <div className={styles.modalCard} onClick={e => e.stopPropagation()}>
+        <h3 className={styles.modalTitle}>Assignment · {unit.serial}</h3>
+
+        <div className={styles.modalField}>
+          <label className={styles.modalLabel}>Customer</label>
+          <input
+            value={customerName}
+            onChange={e => setCustomerName(e.target.value)}
+            placeholder="Customer name (leave blank if unassigned)"
+            className={styles.modalInput}
+          />
+        </div>
+
+        <div className={styles.modalField}>
+          <label className={styles.modalLabel}>Order ref</label>
+          <input
+            value={orderRef}
+            onChange={e => setOrderRef(e.target.value)}
+            placeholder="e.g. #1234"
+            className={styles.modalInput}
+          />
+        </div>
+
+        <div className={styles.modalField}>
+          <label className={styles.modalLabel}>Location</label>
+          <input
+            value={location}
+            onChange={e => setLocation(e.target.value)}
+            placeholder="Warehouse, city, etc."
+            className={styles.modalInput}
+          />
+        </div>
+
+        <div className={styles.modalActions}>
+          <button onClick={onClose} disabled={busy} className={styles.btnSecondary}>Cancel</button>
+          <button onClick={() => void save()} disabled={busy} className={styles.btnPrimary}>
+            {busy ? 'Saving…' : 'Save'}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

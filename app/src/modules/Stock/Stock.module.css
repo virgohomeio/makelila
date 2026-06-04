@@ -619,6 +619,19 @@
   cursor: pointer;
 }
 .qcCell:hover { border-color: var(--color-border); background: var(--color-surface); }
+.assignCell {
+  display: inline-flex;
+  align-items: center;
+  text-align: left;
+  background: transparent;
+  border: 1px dashed transparent;
+  padding: 2px 4px;
+  border-radius: 4px;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+}
+.assignCell:hover { border-color: var(--color-border); background: var(--color-surface); }
 .qcChip {
   display: inline-block;
   font-size: 10px;

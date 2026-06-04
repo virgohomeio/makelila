@@ -7,7 +7,10 @@ const STATUS_FILTERS: { key: TicketStatus | 'all'; label: string }[] = [
   { key: 'all',         label: 'All' },
   { key: 'new',         label: 'New' },
   { key: 'triaging',    label: 'Diagnosing' },
+  { key: 'needs_outreach', label: 'Needs to reach out' },
+  { key: 'scheduled',   label: 'Scheduled' },
   { key: 'in_progress', label: 'In repair' },
+  { key: 'on_hold',     label: 'On hold' },
   { key: 'waiting_customer', label: 'Waiting parts/customer' },
   { key: 'resolved',    label: 'Resolved' },
 ];
