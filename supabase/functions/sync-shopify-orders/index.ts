@@ -190,16 +190,11 @@ serve(async (req: Request) => {
 
   const admin = createClient(supabaseUrl, serviceKey);
 
-  let _caller;
-  try { _caller = await authenticate(req, admin); }
+  // Accept both pg_cron (X-Cron-Secret) and operator JWT (Order Review's
+  // manual "Sync from Shopify" button). The security pass briefly gated this
+  // as cron-only, which broke that UI affordance.
+  try { await authenticate(req, admin); }
   catch (e) { if (e instanceof Response) return e; throw e; }
-  // Reject UI-triggered calls — these functions only run from pg_cron.
-  if (_caller.kind !== 'cron') {
-    return new Response(
-      JSON.stringify({ error: 'This function is cron-only — use the X-Cron-Secret header.' }),
-      { status: 403, headers: { 'content-type': 'application/json', 'access-control-allow-origin': '*' } },
-    );
-  }
 
   // 1. Fetch Shopify orders
   const shopUrl = `https://${shop}/admin/api/2024-10/orders.json?status=open&fulfillment_status=unfulfilled&limit=50`;
