@@ -140,7 +140,7 @@ Alpha feedback collection window is **closed**. The 11 items above plus the meet
 
 ### Sales & Marketing — Pedrum
 
-- **#13** Verify-address: returns "Could not verify" too often. Google Maps Geocoding is unreliable on Canadian rural addresses. Investigate an LLM-backed verifier (Claude) as a fallback or replacement. *Follow-up to shipped #1.*
+- **#13** Verify-address: returns "Could not verify" too often. Google Maps Geocoding is unreliable on Canadian rural addresses. Investigate an LLM-backed verifier (Claude) as a fallback or replacement. *Follow-up to shipped #1.* — **SHIPPED** (verify-address edge fn v23, lines 169–215; runs Claude haiku-4-5 only when Google returns "unverifiable" AND `ANTHROPIC_API_KEY` is set; upgrades the match verdict per Claude's plausibility judgment).
 - **#14** Freight estimate fails to render on some orders (e.g. Joseph's) — ops had to compute manually.
 - **#15** Freight estimate must account for line-item quantity (currently appears to assume single unit).
 - **#16** Freight estimate text doesn't show on the order card in some states.
