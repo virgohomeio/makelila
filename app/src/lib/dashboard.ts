@@ -859,24 +859,37 @@ const STATUS_SMS_COOLDOWN_MS = 48 * 3600 * 1000;
  *  the unit isn't tied to a customer or the customer can't be resolved.
  *  Used by the Dashboard status-SMS flow.
  *
- *  Name resolution cascade — needed because `units.customer_name` is set
- *  as free-text at fulfillment time and frequently drifts from the
- *  canonical `customers.full_name` (e.g. unit says "Amila Smith" but the
- *  customer record is "Amila & Rob Smith"):
- *    1. Exact case-insensitive match on full_name
+ *  Resolution order:
+ *    0. units.customer_id (the canonical FK, backlog #67) — 65% of units
+ *       are linked this way after the one-shot backfill; new units should
+ *       get linked at fulfillment-assignment time (separate follow-up).
+ *    1. units.customer_name exact case-insensitive match on full_name
  *    2. Last-name match + first-name starts-with (handles spouse-joined
- *       names like "Amila & Rob Smith")
- *  If step 2 matches more than one customer the lookup gives up (return
- *  null) rather than risk silently sending to the wrong person. */
+ *       names like "Amila & Rob Smith" vs unit name "Amila Smith")
+ *  Step 2 returns null if >1 customer matches — better to surface
+ *  "no customer linked" than silently text the wrong person. */
 export async function customerForSerial(serial: string): Promise<{
   id: string; full_name: string; first_name: string | null; phone: string | null;
 } | null> {
   const { data: unit } = await supabaseMain
     .from('units')
-    .select('customer_name, is_team_test')
+    .select('customer_id, customer_name, is_team_test')
     .eq('serial', serial)
     .maybeSingle();
-  if (!unit?.customer_name || unit.is_team_test) return null;
+  if (!unit || unit.is_team_test) return null;
+
+  // 0. FK — canonical link (backlog #67)
+  if (unit.customer_id) {
+    const { data: byId } = await supabaseMain
+      .from('customers')
+      .select('id, full_name, first_name, phone')
+      .eq('id', unit.customer_id)
+      .maybeSingle();
+    if (byId) return byId;
+  }
+
+  // Fallback path for units the backfill couldn't resolve uniquely.
+  if (!unit.customer_name) return null;
   const name = unit.customer_name.trim();
 
   // 1. Exact (case-insensitive) full_name match

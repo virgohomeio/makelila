@@ -87,6 +87,11 @@ export type Unit = {
   color: UnitColor | null;
   location: string | null;
   customer_name: string | null;
+  // Canonical FK to customers.id (backlog #67). Set by the migration's
+  // one-shot cascade for ~65% of historical units; new units should set
+  // this at fulfillment-assignment time (follow-up). customer_name stays
+  // as a denormalized display cache for now.
+  customer_id: string | null;
   customer_order_ref: string | null;
   carrier: string | null;
   firmware_version: string | null;
