@@ -5,14 +5,26 @@ import {
   markOnboardingComplete, markOnboardingNoShow, markOnboardingSkipped,
   type ServiceTicket, type CustomerLifecycle,
 } from '../../lib/service';
-import { useCustomers, type Customer } from '../../lib/customers';
+import {
+  useCustomers, computeFuState, recordFollowUp,
+  FU_STATE_META, FU1_DAYS, FU2_DAYS,
+  type Customer, type FuState,
+} from '../../lib/customers';
 import { TicketDetailPanel } from './TicketDetailPanel';
 import styles from './Service.module.css';
 
 // View modes — walkthrough #31 asked for an explicit "needs onboarding —
 // not yet scheduled" view so Reina can see who to chase. Default to that
 // view because it's the actionable cohort; everything else is reference.
-type ViewMode = 'not_scheduled' | 'scheduled' | 'all_units';
+// "check_ins" surfaces the 1-week / 1-month follow-up cadence (#40) here in
+// the onboarding flow; the schedule is derived from customers.onboard_date.
+type ViewMode = 'not_scheduled' | 'scheduled' | 'all_units' | 'check_ins';
+
+// FU states that represent a pending check-in (FU1 or FU2 not yet recorded).
+const PENDING_FU: FuState[] = [
+  'overdue_fu1', 'overdue_fu2', 'due_fu1', 'due_fu2', 'upcoming_fu1', 'upcoming_fu2',
+];
+const DUE_FU: FuState[] = ['overdue_fu1', 'overdue_fu2', 'due_fu1', 'due_fu2'];
 
 export function OnboardingTab() {
   const { tickets, loading: ticketsLoading } = useServiceTickets('onboarding');
@@ -35,6 +47,25 @@ export function OnboardingTab() {
   const scheduled = useMemo(
     () => lifecycle.filter(l => l.onboarding_status === 'scheduled'),
     [lifecycle],
+  );
+
+  // Follow-up check-ins (#40): derive each customer's FU state from
+  // onboard_date and surface the pending ones here. Sorted overdue → due →
+  // upcoming (FU_STATE_META.sortKey), then by due date ascending.
+  const today = useMemo(() => new Date(), []);
+  const checkIns = useMemo(() => {
+    const rows = customers
+      .map(c => ({ c, fu: computeFuState(c, today) }))
+      .filter(({ fu }) => PENDING_FU.includes(fu));
+    return rows.sort((a, b) => {
+      const sk = FU_STATE_META[a.fu].sortKey - FU_STATE_META[b.fu].sortKey;
+      if (sk !== 0) return sk;
+      return checkInDueDate(a.c).getTime() - checkInDueDate(b.c).getTime();
+    });
+  }, [customers, today]);
+  const checkInsDue = useMemo(
+    () => checkIns.filter(({ fu }) => DUE_FU.includes(fu)).length,
+    [checkIns],
   );
 
   // Default the view to whichever cohort has actionable rows. "Not scheduled"
@@ -73,6 +104,7 @@ export function OnboardingTab() {
       <div className={styles.kpiStrip}>
         <Kpi label="Scheduled (7d)"     value={scheduledThisWeek} />
         <Kpi label="Completed (30d)"    value={completedThisMonth} />
+        <Kpi label="Check-ins due"      value={checkInsDue} />
         <Kpi label="No-shows"           value={noShows} />
         <Kpi label="Avg ship → onboard" value={avgDaysToOnboard !== null ? `${avgDaysToOnboard}d` : '—'} />
       </div>
@@ -95,6 +127,14 @@ export function OnboardingTab() {
           {scheduled.length > 0 && <span className={styles.chipBadge}>{scheduled.length}</span>}
         </button>
         <button
+          className={`${styles.chip} ${view === 'check_ins' ? styles.chipActive : ''}`}
+          onClick={() => setView('check_ins')}
+          title="1-week / 1-month follow-up check-ins for onboarded customers"
+        >
+          Check-ins
+          {checkInsDue > 0 && <span className={styles.chipBadge}>{checkInsDue}</span>}
+        </button>
+        <button
           className={`${styles.chip} ${view === 'all_units' ? styles.chipActive : ''}`}
           onClick={() => setView('all_units')}
         >All units ({lifecycle.length})</button>
@@ -112,6 +152,10 @@ export function OnboardingTab() {
           selectedId={selectedTicketId}
           onSelect={setSelectedTicketId}
         />
+      )}
+
+      {view === 'check_ins' && (
+        <CheckInsView rows={checkIns} today={today} />
       )}
 
       {view === 'all_units' && (
@@ -315,6 +359,97 @@ function AllUnitsView({ rows, customerById }: {
         })}
       </tbody>
     </table>
+  );
+}
+
+// ───────────────────────────────────────────────────────────────────────
+// Follow-up check-ins (#40)
+// ───────────────────────────────────────────────────────────────────────
+
+// Due date of a customer's next pending check-in: FU1 (onboard + FU1_DAYS)
+// until FU1 is recorded, then FU2 (onboard + FU2_DAYS).
+function checkInDueDate(c: Customer): Date {
+  const onboard = new Date((c.onboard_date ?? '') + 'T00:00:00');
+  const offset = c.fu1_status ? FU2_DAYS : FU1_DAYS;
+  const d = new Date(onboard);
+  d.setDate(d.getDate() + offset);
+  return d;
+}
+
+function CheckInsView({ rows, today }: {
+  rows: { c: Customer; fu: FuState }[];
+  today: Date;
+}) {
+  if (rows.length === 0) {
+    return <div className={styles.empty}>No check-ins due — everyone&apos;s onboarding follow-ups are up to date.</div>;
+  }
+  const todayMid = new Date(today); todayMid.setHours(0, 0, 0, 0);
+  return (
+    <table className={styles.table}>
+      <thead>
+        <tr>
+          <th>Customer</th>
+          <th>Onboarded</th>
+          <th>Check-in</th>
+          <th>Due</th>
+          <th>State</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map(({ c, fu }) => {
+          const kind: 'fu1' | 'fu2' = c.fu1_status ? 'fu2' : 'fu1';
+          const due = checkInDueDate(c);
+          const dayDiff = Math.round((due.getTime() - todayMid.getTime()) / 86400_000);
+          const dueLabel = dayDiff < 0 ? `${Math.abs(dayDiff)}d overdue`
+            : dayDiff === 0 ? 'due today'
+            : `in ${dayDiff}d`;
+          const meta = FU_STATE_META[fu];
+          return (
+            <tr key={c.id}>
+              <td>
+                <div>{c.full_name}</div>
+                <div style={{ fontSize: 10, color: 'var(--color-ink-subtle)' }}>{c.email ?? c.phone ?? ''}</div>
+              </td>
+              <td>{c.onboard_date ? new Date(c.onboard_date + 'T00:00:00').toLocaleDateString() : '—'}</td>
+              <td><span className={styles.pill}>{kind.toUpperCase()}</span></td>
+              <td>{due.toLocaleDateString()}<div style={{ fontSize: 10, color: 'var(--color-ink-subtle)' }}>{dueLabel}</div></td>
+              <td><span className={styles.pill} style={{ background: meta.bg, color: meta.color }}>{meta.label}</span></td>
+              <td><CheckInActions customer={c} kind={kind} /></td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  );
+}
+
+// Inline recording for a pending check-in — mirrors the Customers detail
+// panel's follow-up buttons. The realtime customers subscription advances or
+// drops the row once recorded, so no manual refetch is needed.
+function CheckInActions({ customer, kind }: { customer: Customer; kind: 'fu1' | 'fu2' }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const statuses = kind === 'fu1'
+    ? (['called', 'messaged'] as const)
+    : (['called', 'messaged', 'reviewed'] as const);
+
+  async function record(status: string) {
+    setBusy(true); setErr(null);
+    try { await recordFollowUp(customer.id, kind, status); }
+    catch (e) { setErr((e as Error).message); }
+    finally { setBusy(false); }
+  }
+
+  return (
+    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+      {statuses.map(s => (
+        <button key={s} className={styles.btnGhost} disabled={busy} onClick={() => void record(s)}>
+          {s.charAt(0).toUpperCase() + s.slice(1)}
+        </button>
+      ))}
+      {err && <span style={{ color: 'var(--color-error)', fontSize: 11 }}>{err}</span>}
+    </div>
   );
 }
 
