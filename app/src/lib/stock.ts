@@ -252,6 +252,17 @@ export async function updateUnitStatus(
   await logAction('stock_status', serial, `${existing?.status ?? '?'} → ${newStatus}`);
 }
 
+/** Backlog #69 — explicitly link an unmatched unit to a canonical customer
+ *  without modifying the legacy customer_name string (preserves operator
+ *  context like "(test)" / "(original)" suffixes that distinguish this
+ *  shipment from a regular sale). */
+export async function linkUnitToCustomer(serial: string, customerId: string): Promise<void> {
+  await currentUserId();
+  const { error } = await supabase.from('units').update({ customer_id: customerId }).eq('serial', serial);
+  if (error) throw error;
+  await logAction('stock_link_customer', serial, `customer_id=${customerId}`);
+}
+
 export async function updateUnitFields(
   serial: string,
   patch: Partial<Pick<Unit,

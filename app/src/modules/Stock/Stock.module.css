@@ -762,3 +762,108 @@
   color: var(--color-info); text-decoration: underline; cursor: pointer;
   font-size: 11px; font-family: inherit;
 }
+
+/* Backlog #69 — Orphan units cleanup tab */
+.orphanLayout {
+  padding: 16px 24px;
+}
+.orphanHeader h2 {
+  margin: 0 0 8px;
+  font-size: 1.1rem;
+  color: #1a202c;
+}
+.orphanIntro {
+  margin: 0 0 16px;
+  color: #4a5568;
+  font-size: 0.85rem;
+  max-width: 760px;
+  line-height: 1.5;
+}
+.orphanIntro code {
+  background: #edf2f7;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 0.8rem;
+}
+.orphanTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+.orphanTable th {
+  text-align: left;
+  font-weight: 600;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  color: #718096;
+  padding: 8px 12px;
+  border-bottom: 1px solid #cbd5e0;
+}
+.orphanTable td {
+  padding: 10px 12px;
+  border-bottom: 1px solid #edf2f7;
+  vertical-align: top;
+}
+.orphanTable code {
+  font-family: ui-monospace, monospace;
+  font-size: 0.75rem;
+  color: #4a5568;
+}
+.orphanRowDone {
+  background: #f0fff4;
+  color: #276749;
+}
+.orphanRowDone td {
+  border-bottom: 1px solid #c6f6d5;
+}
+.orphanSearch {
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid #cbd5e0;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  box-sizing: border-box;
+}
+.orphanMatchList {
+  list-style: none;
+  padding: 0;
+  margin: 6px 0 0;
+  border: 1px solid #e2e8f0;
+  border-radius: 4px;
+  background: #fff;
+}
+.orphanMatchBtn {
+  width: 100%;
+  text-align: left;
+  padding: 6px 10px;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid #f1f5f9;
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+.orphanMatchBtn:hover:not(:disabled) {
+  background: #ebf8ff;
+}
+.orphanMatchBtn:last-child {
+  border-bottom: none;
+}
+.orphanMatchMeta {
+  color: #718096;
+  font-size: 0.75rem;
+}
+.orphanNoMatches {
+  margin: 6px 0 0;
+  font-size: 0.75rem;
+  color: #b7791f;
+}
+.orphanBadge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 7px;
+  background: #fef3c7;
+  color: #b7791f;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 600;
+}
