@@ -392,3 +392,19 @@
 .reworkMeta { color: var(--color-ink-subtle); font-size: 10px; margin-bottom: 3px; }
 .reworkBody { color: var(--color-ink); white-space: pre-wrap; }
 .reworkRow { display: flex; gap: 8px; margin-top: 6px; align-items: flex-start; }
+
+.replBadge {
+  display: inline-block; margin-left: 6px;
+  padding: 1px 8px; border-radius: 999px;
+  background: #fef3c7; color: #b7791f;
+  font-size: .7rem; font-weight: 500;
+}
+.shippingCostLabel {
+  display: block; margin: 8px 0; font-size: .85rem;
+}
+.shippingCostLabel input {
+  width: 110px; padding: 4px 8px; border: 1px solid #ccc; border-radius: 4px;
+}
+.error {
+  color: var(--color-error, #c53030); font-size: 11px; margin: 4px 0 0;
+}

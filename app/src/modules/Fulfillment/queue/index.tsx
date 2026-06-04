@@ -16,6 +16,7 @@ import styles from '../Fulfillment.module.css';
 type Order = {
   id: string;
   order_ref: string;
+  kind: 'sale' | 'replacement';
   customer_name: string;
   customer_email: string | null;
   city: string;

@@ -3,6 +3,7 @@ import {
   sendFulfillmentEmail,
   type FulfillmentQueueRow,
 } from '../../../lib/fulfillment';
+import { markOrderShipped } from '../../../lib/orders';
 import styles from '../Fulfillment.module.css';
 
 function trackingUrl(carrier: string | null, tracking: string | null): string {
@@ -23,34 +24,23 @@ export function StepEmail({
   order,
 }: {
   row: FulfillmentQueueRow;
-  order: { customer_name: string; customer_email: string | null; order_ref: string; country: 'US'|'CA' };
+  order: { id: string; customer_name: string; customer_email: string | null; order_ref: string; country: 'US'|'CA' };
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [autoSent, setAutoSent] = useState(false);
+  const [shippingCost, setShippingCost] = useState('');
+  const [shipError, setShipError] = useState<string | null>(null);
 
   const canSend = !!order.customer_email;
   const alreadySent = !!row.email_sent_at;
 
-  // Auto-send on entry to step 5 (walkthrough #29). Operators reported that
-  // the shipment-confirmation email was never going out because the manual
-  // button was being missed. We fire once per row visit, gated on:
-  //   - row.email_sent_at is null (never sent before)
-  //   - canSend (customer has an email address)
-  //   - row.tracking_num is set (no point sending an email without tracking)
-  // A ref ensures we only attempt once per mount even if React re-renders.
-  // If the send fails, the manual button stays available for retry.
+  // Auto-send is intentionally disabled: shipping cost must be recorded before
+  // the fulfillment email is sent (markOrderShipped is called in handleSend).
+  // The ref is kept to avoid removing the import of useRef and to guard against
+  // accidental re-enables without re-adding the cost gate.
   const autoSendAttempted = useRef(false);
-  useEffect(() => {
-    if (autoSendAttempted.current) return;
-    if (alreadySent || !canSend || !row.tracking_num) return;
-    autoSendAttempted.current = true;
-    setBusy(true);
-    void sendFulfillmentEmail(row.id)
-      .then(() => setAutoSent(true))
-      .catch(e => setError(`Auto-send failed: ${(e as Error).message} — use the Send button below to retry.`))
-      .finally(() => setBusy(false));
-  }, [row.id, row.tracking_num, alreadySent, canSend]);
+  useEffect(() => { autoSendAttempted.current = true; }, []);
 
   const firstName = order.customer_name.split(' ')[0];
   const track = trackingUrl(row.carrier, row.tracking_num);
@@ -81,8 +71,17 @@ export function StepEmail({
 
   const handleSend = async () => {
     if (!canSend) return;
+    const n = Number(shippingCost);
+    if (!shippingCost.trim() || !Number.isFinite(n) || n < 0) {
+      setShipError('Enter a valid shipping cost before sending.');
+      return;
+    }
+    setShipError(null);
     setBusy(true); setError(null);
-    try { await sendFulfillmentEmail(row.id); }
+    try {
+      await markOrderShipped(order.id, n);
+      await sendFulfillmentEmail(row.id);
+    }
     catch (e) { setError((e as Error).message); }
     finally { setBusy(false); }
   };
@@ -101,8 +100,24 @@ export function StepEmail({
           ✓ Email sent{row.email_sent_at && ` at ${new Date(row.email_sent_at).toLocaleString()}`}.
         </div>
       )}
+      <label className={styles.shippingCostLabel}>
+        Actual shipping cost (USD):&nbsp;
+        <input
+          type="number"
+          step="0.01"
+          min="0"
+          value={shippingCost}
+          onChange={e => { setShippingCost(e.target.value); setShipError(null); }}
+          placeholder="42.75"
+        />
+      </label>
+      {shipError && <p className={styles.error}>{shipError}</p>}
       <div className={styles.stepBar}>
-        <button className={styles.confirmBtn} onClick={handleSend} disabled={!canSend || busy}>
+        <button
+          className={styles.confirmBtn}
+          onClick={handleSend}
+          disabled={!canSend || busy || shippingCost.trim() === ''}
+        >
           {busy ? 'Sending…' : alreadySent || autoSent ? '✉ Resend email' : '✉ Send email'}
         </button>
       </div>

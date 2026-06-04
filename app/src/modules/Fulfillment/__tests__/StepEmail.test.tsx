@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
-const { sendEmailMock } = vi.hoisted(() => ({
+const { sendEmailMock, markOrderShippedMock } = vi.hoisted(() => ({
   sendEmailMock: vi.fn(() => Promise.resolve({ email_id: 're_123' })),
+  markOrderShippedMock: vi.fn(() => Promise.resolve()),
 }));
 
 vi.mock('../../../lib/fulfillment', async () => {
@@ -10,6 +11,14 @@ vi.mock('../../../lib/fulfillment', async () => {
   return {
     ...actual,
     sendFulfillmentEmail: sendEmailMock,
+  };
+});
+
+vi.mock('../../../lib/orders', async () => {
+  const actual = await vi.importActual<typeof import('../../../lib/orders')>('../../../lib/orders');
+  return {
+    ...actual,
+    markOrderShipped: markOrderShippedMock,
   };
 });
 
@@ -23,32 +32,37 @@ const rowBase: FulfillmentQueueRow = {
   label_pdf_path: null, label_confirmed_at: null, label_confirmed_by: null,
   dock_printed: true, dock_affixed: true, dock_docked: true, dock_notified: true, dock_picked_up: true,
   dock_confirmed_at: null, dock_confirmed_by: null,
-  // email_sent_at is non-null so the auto-send effect (walkthrough #29)
-  // is skipped — these tests cover the manual Send/Resend button behavior.
-  // Auto-send is covered in its own test below.
   starter_tracking_num: null, email_sent_at: '2026-04-19T12:00:00Z', email_sent_by: null,
   fulfilled_at: null, fulfilled_by: null, due_date: null, priority: false, created_at: '2026-04-19T00:00:00Z',
 };
 
-const orderUS = { customer_name: 'Alice Ames', customer_email: 'a@ex.com', order_ref: '#1001', country: 'US' as const };
-const orderCA = { customer_name: 'Bob Boxer',  customer_email: 'b@ex.com', order_ref: '#1002', country: 'CA' as const };
-const orderNoEmail = { customer_name: 'Cory C',  customer_email: null,       order_ref: '#1003', country: 'CA' as const };
+const orderUS       = { id: 'o-us', customer_name: 'Alice Ames', customer_email: 'a@ex.com', order_ref: '#1001', country: 'US' as const };
+const orderCA       = { id: 'o-ca', customer_name: 'Bob Boxer',  customer_email: 'b@ex.com', order_ref: '#1002', country: 'CA' as const };
+const orderNoEmail  = { id: 'o-ne', customer_name: 'Cory C',     customer_email: null,       order_ref: '#1003', country: 'CA' as const };
 
 describe('StepEmail', () => {
-  beforeEach(() => { sendEmailMock.mockClear(); });
+  beforeEach(() => { sendEmailMock.mockClear(); markOrderShippedMock.mockClear(); });
 
-  it('Send enabled whenever customer_email is present (US order)', () => {
+  it('Send disabled until shipping cost is entered', () => {
     render(<StepEmail row={rowBase} order={orderUS} />);
+    expect(screen.getByRole('button', { name: /send email/i })).toBeDisabled();
+  });
+
+  it('Send enabled after shipping cost is entered (US order)', () => {
+    render(<StepEmail row={rowBase} order={orderUS} />);
+    fireEvent.change(screen.getByPlaceholderText('42.75'), { target: { value: '35.00' } });
     expect(screen.getByRole('button', { name: /send email/i })).toBeEnabled();
   });
 
-  it('Send enabled whenever customer_email is present (CA order)', () => {
+  it('Send enabled after shipping cost is entered (CA order)', () => {
     render(<StepEmail row={rowBase} order={orderCA} />);
+    fireEvent.change(screen.getByPlaceholderText('42.75'), { target: { value: '35.00' } });
     expect(screen.getByRole('button', { name: /send email/i })).toBeEnabled();
   });
 
   it('Send disabled when customer_email is missing', () => {
     render(<StepEmail row={rowBase} order={orderNoEmail} />);
+    fireEvent.change(screen.getByPlaceholderText('42.75'), { target: { value: '35.00' } });
     expect(screen.getByRole('button', { name: /send email/i })).toBeDisabled();
   });
 
@@ -58,17 +72,20 @@ describe('StepEmail', () => {
     expect(screen.getByText(/calendly\.com\/lila-ed/)).toBeInTheDocument();
   });
 
-  it('Clicking Send calls sendFulfillmentEmail', async () => {
+  it('Clicking Send calls markOrderShipped then sendFulfillmentEmail', async () => {
     render(<StepEmail row={rowBase} order={orderCA} />);
+    fireEvent.change(screen.getByPlaceholderText('42.75'), { target: { value: '42.75' } });
     fireEvent.click(screen.getByRole('button', { name: /send email/i }));
+    await waitFor(() => expect(markOrderShippedMock).toHaveBeenCalledWith('o-ca', 42.75));
     await waitFor(() => expect(sendEmailMock).toHaveBeenCalledWith('q-e'));
   });
 
-  it('Auto-sends on entry to step 5 when email_sent_at is null (walkthrough #29)', async () => {
+  it('Does NOT auto-send (auto-send disabled; shipping cost required first)', async () => {
     const freshRow = { ...rowBase, email_sent_at: null, email_sent_by: null };
     render(<StepEmail row={freshRow} order={orderCA} />);
-    await waitFor(() => expect(sendEmailMock).toHaveBeenCalledWith('q-e'));
-    expect(sendEmailMock).toHaveBeenCalledTimes(1);
+    // Wait a tick to confirm no auto-send fires
+    await new Promise(r => setTimeout(r, 50));
+    expect(sendEmailMock).not.toHaveBeenCalled();
   });
 
   it('Does NOT auto-send when email_sent_at is already populated', () => {
