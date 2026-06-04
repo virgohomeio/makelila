@@ -1,6 +1,7 @@
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { corsHeaders } from '../_shared/cors.ts';
+import { authenticate } from '../_shared/auth.ts';
 
 type ShopifyAddress = {
   address1?: string | null;
@@ -187,6 +188,19 @@ serve(async (req: Request) => {
     );
   }
 
+  const admin = createClient(supabaseUrl, serviceKey);
+
+  let _caller;
+  try { _caller = await authenticate(req, admin); }
+  catch (e) { if (e instanceof Response) return e; throw e; }
+  // Reject UI-triggered calls — these functions only run from pg_cron.
+  if (_caller.kind !== 'cron') {
+    return new Response(
+      JSON.stringify({ error: 'This function is cron-only — use the X-Cron-Secret header.' }),
+      { status: 403, headers: { 'content-type': 'application/json', 'access-control-allow-origin': '*' } },
+    );
+  }
+
   // 1. Fetch Shopify orders
   const shopUrl = `https://${shop}/admin/api/2024-10/orders.json?status=open&fulfillment_status=unfulfilled&limit=50`;
   const shopRes = await fetch(shopUrl, {
@@ -205,7 +219,6 @@ serve(async (req: Request) => {
   const { orders } = await shopRes.json() as { orders: ShopifyOrder[] };
 
   // 2. Load remote-postal prefixes once (used by verdictFor)
-  const admin = createClient(supabaseUrl, serviceKey);
   const { data: prefixRows } = await admin
     .from('remote_postal_prefixes')
     .select('prefix');

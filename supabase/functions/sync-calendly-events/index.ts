@@ -7,6 +7,7 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { corsHeaders } from '../_shared/cors.ts';
+import { authenticate } from '../_shared/auth.ts';
 
 type CalendlyEvent = {
   uri: string;
@@ -33,7 +34,7 @@ Deno.serve(async (req: Request) => {
   if (req.method !== 'POST') {
     return new Response('Method not allowed', { status: 405, headers: corsHeaders });
   }
-  try { return await handle(); }
+  try { return await handle(req); }
   catch (err) {
     return new Response(
       JSON.stringify({ error: `Uncaught: ${(err as Error)?.message ?? String(err)}` }),
@@ -42,7 +43,7 @@ Deno.serve(async (req: Request) => {
   }
 });
 
-async function handle(): Promise<Response> {
+async function handle(req: Request): Promise<Response> {
   const supabaseUrl = Deno.env.get('SUPABASE_URL');
   const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
   const calendlyToken = Deno.env.get('CALENDLY_TOKEN');
@@ -55,6 +56,17 @@ async function handle(): Promise<Response> {
   }
 
   const admin = createClient(supabaseUrl, serviceKey);
+
+  let _caller;
+  try { _caller = await authenticate(req, admin); }
+  catch (e) { if (e instanceof Response) return e; throw e; }
+  // Reject UI-triggered calls — these functions only run from pg_cron.
+  if (_caller.kind !== 'cron') {
+    return new Response(
+      JSON.stringify({ error: 'This function is cron-only — use the X-Cron-Secret header.' }),
+      { status: 403, headers: { 'content-type': 'application/json', 'access-control-allow-origin': '*' } },
+    );
+  }
 
   const minStart = new Date(Date.now() - 3600 * 1000).toISOString();         // now - 1h
   const maxStart = new Date(Date.now() + 30 * 86400 * 1000).toISOString();   // now + 30d
