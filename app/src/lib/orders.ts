@@ -397,3 +397,117 @@ export function useOrderNotes(orderId: string | null): {
 
   return { notes, loading };
 }
+
+/** Returns the next replacement order ref (R-0001, R-0002, ...). Server-side
+ *  RPC to avoid client-side races on the counter. */
+export async function nextReplacementOrderRef(): Promise<string> {
+  const { data, error } = await supabase.rpc('next_replacement_order_ref');
+  if (error) throw new Error(error.message);
+  if (typeof data !== 'string' || !data.startsWith('R-')) {
+    throw new Error(`Unexpected response from next_replacement_order_ref: ${JSON.stringify(data)}`);
+  }
+  return data;
+}
+
+export type ReplacementLineItem =
+  | { kind: 'part'; part_id: string; sku: string; name: string; qty: number; cost_per_unit_usd: number }
+  | { kind: 'unit'; unit_serial: string; batch: string; name: string; qty: 1; cost_usd: number };
+
+export type ReplacementOrderInput = {
+  ticket_id: string;
+  customer_name: string;
+  customer_email?: string | null;
+  customer_phone?: string | null;
+  address: {
+    address_line: string | null;
+    city: string;
+    region_state: string | null;
+    country: 'US' | 'CA';
+    postal_code: string | null;
+  };
+  line_items: ReplacementLineItem[];
+};
+
+function computeCogs(items: ReplacementLineItem[]): number {
+  return items.reduce((sum, li) => {
+    if (li.kind === 'part') return sum + li.cost_per_unit_usd * li.qty;
+    return sum + li.cost_usd;
+  }, 0);
+}
+
+/** Creates a replacement order (kind='replacement', status='pending'),
+ *  back-links the ticket, decrements parts.on_hand, and reserves any units.
+ *  Returns the new order_ref + id. */
+export async function createReplacementOrder(input: ReplacementOrderInput):
+  Promise<{ id: string; order_ref: string }> {
+  if (input.line_items.length === 0) throw new Error('At least one line item required');
+  const order_ref = await nextReplacementOrderRef();
+  const cogs_usd = computeCogs(input.line_items);
+
+  // 1. Insert the order. Address verdict defaults to 'house' so the address
+  //    card still renders; operator can re-run verify if they need to.
+  const { data: row, error: insErr } = await supabase
+    .from('orders')
+    .insert({
+      order_ref,
+      kind: 'replacement',
+      status: 'pending',
+      linked_ticket_id: input.ticket_id,
+      cogs_usd,
+      customer_name: input.customer_name,
+      customer_email: input.customer_email ?? null,
+      customer_phone: input.customer_phone ?? null,
+      address_line: input.address.address_line,
+      city: input.address.city,
+      region_state: input.address.region_state,
+      country: input.address.country,
+      address_verdict: 'house',
+      postal_code: input.address.postal_code,
+      address_customer_postal: input.address.postal_code,
+      freight_estimate_usd: 0,
+      freight_threshold_usd: 0,
+      currency: 'USD',
+      total_usd: 0,
+      sales_confirmed_fit: false,
+      line_items: input.line_items,
+    })
+    .select('id, order_ref')
+    .single();
+  if (insErr || !row) throw new Error(`Create order: ${insErr?.message ?? 'no row'}`);
+
+  // 2. Back-link the ticket.
+  const { error: tErr } = await supabase
+    .from('service_tickets')
+    .update({ replacement_order_id: row.id })
+    .eq('id', input.ticket_id);
+  if (tErr) throw new Error(`Link ticket: ${tErr.message}`);
+
+  // 3. Decrement parts.on_hand for each part line item.
+  for (const li of input.line_items) {
+    if (li.kind !== 'part') continue;
+    const { data: cur, error: rErr } = await supabase
+      .from('parts').select('on_hand').eq('id', li.part_id).single();
+    if (rErr) throw new Error(`Read part ${li.part_id}: ${rErr.message}`);
+    const next = Math.max(0, (cur?.on_hand ?? 0) - li.qty);
+    const { error: pErr } = await supabase
+      .from('parts').update({ on_hand: next }).eq('id', li.part_id);
+    if (pErr) throw new Error(`Decrement part ${li.part_id}: ${pErr.message}`);
+  }
+
+  // 4. Reserve units.
+  for (const li of input.line_items) {
+    if (li.kind !== 'unit') continue;
+    const { error: uErr } = await supabase
+      .from('units')
+      .update({ status: 'reserved', customer_order_ref: row.order_ref, customer_name: input.customer_name })
+      .eq('serial', li.unit_serial);
+    if (uErr) throw new Error(`Reserve unit ${li.unit_serial}: ${uErr.message}`);
+  }
+
+  await logAction(
+    'replacement_create',
+    row.order_ref,
+    `from ticket ${input.ticket_id} · ${input.line_items.length} items · COGS $${cogs_usd.toFixed(2)}`,
+  );
+  return { id: row.id, order_ref: row.order_ref };
+}

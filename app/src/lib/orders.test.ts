@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { updateMock, eqMock, fromMock, getUserMock, logActionMock } = vi.hoisted(() => {
+const { updateMock, eqMock, fromMock, getUserMock, logActionMock, rpcMock } = vi.hoisted(() => {
   const updateMock = vi.fn();
   const eqMock = vi.fn();
   // All .from() calls in these tests go through 'orders'; logAction is fully mocked.
@@ -9,20 +9,22 @@ const { updateMock, eqMock, fromMock, getUserMock, logActionMock } = vi.hoisted(
     () => Promise.resolve({ data: { user: { id: 'user-1' } } }),
   );
   const logActionMock = vi.fn(() => Promise.resolve());
-  return { updateMock, eqMock, fromMock, getUserMock, logActionMock };
+  const rpcMock = vi.fn();
+  return { updateMock, eqMock, fromMock, getUserMock, logActionMock, rpcMock };
 });
 
 vi.mock('./supabase', () => ({
   supabase: {
     from: fromMock,
     auth: { getUser: getUserMock },
+    rpc: rpcMock,
   },
 }));
 vi.mock('./activityLog', () => ({
   logAction: logActionMock,
 }));
 
-import { disposition, needInfo } from './orders';
+import { disposition, needInfo, nextReplacementOrderRef, createReplacementOrder } from './orders';
 
 describe('disposition', () => {
   beforeEach(() => {
@@ -96,3 +98,68 @@ describe('needInfo', () => {
   });
 });
 
+describe('nextReplacementOrderRef', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('returns the value of the next_replacement_order_ref RPC', async () => {
+    rpcMock.mockResolvedValueOnce({ data: 'R-0042', error: null });
+    const ref = await nextReplacementOrderRef();
+    expect(ref).toBe('R-0042');
+    expect(rpcMock).toHaveBeenCalledWith('next_replacement_order_ref');
+  });
+
+  it('throws when the RPC errors', async () => {
+    rpcMock.mockResolvedValueOnce({ data: null, error: { message: 'rpc failed' } });
+    await expect(nextReplacementOrderRef()).rejects.toThrow('rpc failed');
+  });
+});
+
+describe('createReplacementOrder', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('inserts an order with kind=replacement and computes COGS', async () => {
+    rpcMock.mockResolvedValue({ data: 'R-0007', error: null });
+    const insertSingle = vi.fn().mockResolvedValue({ data: { id: 'o1', order_ref: 'R-0007' }, error: null });
+    const select = vi.fn().mockReturnValue({ single: insertSingle });
+    const insert = vi.fn().mockReturnValue({ select });
+    const ticketUpdate = vi.fn().mockResolvedValue({ error: null });
+    const partsUpdate = vi.fn().mockResolvedValue({ error: null });
+    const unitsUpdate = vi.fn().mockResolvedValue({ error: null });
+    const partsRead = vi.fn().mockResolvedValue({ data: { on_hand: 10 }, error: null });
+
+    fromMock.mockImplementation((table: string) => {
+      if (table === 'orders') return { insert };
+      if (table === 'service_tickets') return { update: () => ({ eq: ticketUpdate }) };
+      if (table === 'parts') return {
+        update: () => ({ eq: partsUpdate }),
+        select: () => ({ eq: () => ({ single: partsRead }) }),
+      };
+      if (table === 'units') return { update: () => ({ eq: unitsUpdate }) };
+      throw new Error(`unexpected table ${table}`);
+    });
+
+    logActionMock.mockResolvedValue(undefined);
+
+    const result = await createReplacementOrder({
+      ticket_id: 't1',
+      customer_name: 'Linda Smith',
+      address: { address_line: '123 Maple', city: 'Toronto', region_state: 'ON',
+                 country: 'CA', postal_code: 'M5J 2N8' },
+      line_items: [
+        { kind: 'part', part_id: 'p1', sku: 'HINGE-01', name: 'Lid Hinge', qty: 2, cost_per_unit_usd: 4.2 },
+        { kind: 'unit', unit_serial: 'LL01-284', batch: 'B7', name: 'LILA Pro (B7 White)', qty: 1, cost_usd: 312 },
+      ],
+    });
+
+    expect(result.order_ref).toBe('R-0007');
+    const insertArg = insert.mock.calls[0][0];
+    expect(insertArg.kind).toBe('replacement');
+    expect(insertArg.status).toBe('pending');
+    expect(insertArg.order_ref).toBe('R-0007');
+    expect(insertArg.linked_ticket_id).toBe('t1');
+    expect(insertArg.cogs_usd).toBeCloseTo(4.2 * 2 + 312, 2);
+    expect(ticketUpdate).toHaveBeenCalled();
+    expect(partsUpdate).toHaveBeenCalled();
+    expect(unitsUpdate).toHaveBeenCalled();
+  });
+});
