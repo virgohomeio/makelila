@@ -1,5 +1,6 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import PlotlyChart from './PlotlyChart';
+import AssignCustomerModal from './AssignCustomerModal';
 import {
   STATUS_DESCRIPTIONS,
   formatAgo,
@@ -10,6 +11,7 @@ import {
   useLiveSerials,
   useMachineStatus,
   useSerialToUser,
+  useUnitCustomerMap,
   RecordType,
 } from '../../lib/dashboard';
 import {
@@ -24,14 +26,33 @@ import styles from './Dashboard.module.css';
 
 export default function Dashboard() {
   const { data: serials, loading: serialsLoading, error: serialsErr } = useAvailableSerials();
-  const { data: userMap } = useSerialToUser();
+  const { data: telemetryUserMap } = useSerialToUser();
+  const { data: unitCustomerMap, refresh: refreshUnits } = useUnitCustomerMap();
   const { live, checked } = useLiveSerials(serials);
   const [selected, setSelected] = useState<string | null>(null);
+  const [assignTarget, setAssignTarget] = useState<string | null>(null);
 
   const liveSerials = useMemo(
     () => serials.filter((sn) => live.has(sn)).sort(),
     [serials, live],
   );
+
+  // makelila system-of-record (units.customer_name) wins over telemetry
+  // (lila.user) wins over the raw serial. When the result IS the raw
+  // serial, the machine has no assigned customer anywhere — that's the
+  // signal to make the row clickable for assignment (#54).
+  const resolveDisplay = (sn: string): { name: string; assigned: boolean } => {
+    const fromUnits = unitCustomerMap[sn];
+    if (fromUnits) return { name: fromUnits, assigned: true };
+    const fromTelemetry = telemetryUserMap[sn];
+    if (fromTelemetry && fromTelemetry !== sn) return { name: fromTelemetry, assigned: true };
+    return { name: sn, assigned: false };
+  };
+
+  const handleAssigned = () => {
+    setAssignTarget(null);
+    refreshUnits();
+  };
 
   return (
     <div className={styles.dashboard}>
@@ -53,25 +74,47 @@ export default function Dashboard() {
         )}
 
         <ul className={styles.machineList}>
-          {liveSerials.map((sn) => (
-            <MachineRow
-              key={sn}
-              serialNumber={sn}
-              displayName={userMap[sn] ?? sn}
-              active={selected === sn}
-              onSelect={() => setSelected(sn)}
-            />
-          ))}
+          {liveSerials.map((sn) => {
+            const { name, assigned } = resolveDisplay(sn);
+            return (
+              <MachineRow
+                key={sn}
+                serialNumber={sn}
+                displayName={name}
+                assigned={assigned}
+                active={selected === sn}
+                onSelect={() => setSelected(sn)}
+                onAssign={() => setAssignTarget(sn)}
+              />
+            );
+          })}
         </ul>
       </aside>
 
       <main className={styles.detail}>
-        {selected ? (
-          <MachineDetail serialNumber={selected} displayName={userMap[selected] ?? selected} />
-        ) : (
+        {selected ? (() => {
+          const { name, assigned } = resolveDisplay(selected);
+          return (
+            <MachineDetail
+              serialNumber={selected}
+              displayName={name}
+              assigned={assigned}
+              onAssign={() => setAssignTarget(selected)}
+            />
+          );
+        })() : (
           <p className={styles.placeholder}>Select a live machine to view charts.</p>
         )}
       </main>
+
+      {assignTarget && (
+        <AssignCustomerModal
+          serialNumber={assignTarget}
+          telemetryHint={telemetryUserMap[assignTarget] && telemetryUserMap[assignTarget] !== assignTarget ? telemetryUserMap[assignTarget] : null}
+          onClose={() => setAssignTarget(null)}
+          onAssigned={handleAssigned}
+        />
+      )}
     </div>
   );
 }
@@ -79,13 +122,17 @@ export default function Dashboard() {
 function MachineRow({
   serialNumber,
   displayName,
+  assigned,
   active,
   onSelect,
+  onAssign,
 }: {
   serialNumber: string;
   displayName: string;
+  assigned: boolean;
   active: boolean;
   onSelect: () => void;
+  onAssign: () => void;
 }) {
   const { status, color } = useMachineStatus(serialNumber);
   return (
@@ -99,7 +146,27 @@ function MachineRow({
           style={{ background: color ?? '#bbb' }}
           title={status ?? 'classifying…'}
         />
-        <span className={styles.machineName}>{displayName}</span>
+        <span className={styles.machineName}>
+          {displayName}
+          {!assigned && (
+            <span
+              role="button"
+              tabIndex={0}
+              className={styles.assignBadge}
+              onClick={(e) => { e.stopPropagation(); onAssign(); }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onAssign();
+                }
+              }}
+              title="Assign customer"
+            >
+              + assign
+            </span>
+          )}
+        </span>
         <span className={styles.machineStatus}>{status ?? '…'}</span>
       </button>
     </li>
@@ -109,9 +176,13 @@ function MachineRow({
 function MachineDetail({
   serialNumber,
   displayName,
+  assigned,
+  onAssign,
 }: {
   serialNumber: string;
   displayName: string;
+  assigned: boolean;
+  onAssign: () => void;
 }) {
   const { data, loading, error, refresh } = useDashboardData(serialNumber);
   const { status, color } = useMachineStatus(serialNumber);
@@ -130,7 +201,14 @@ function MachineDetail({
     <section>
       <header className={styles.detailHeader}>
         <div>
-          <h2 className={styles.machineTitle}>{displayName}</h2>
+          <h2 className={styles.machineTitle}>
+            {displayName}
+            {!assigned && (
+              <button type="button" className={styles.assignBadge} onClick={onAssign}>
+                + assign customer
+              </button>
+            )}
+          </h2>
           <p className={styles.muted}>{serialNumber}</p>
         </div>
         <button className={styles.refreshBtn} onClick={refresh} disabled={loading}>
