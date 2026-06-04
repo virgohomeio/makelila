@@ -9,9 +9,13 @@ import { formatMoney } from '../../lib/money';
 import { useUnits } from '../../lib/stock';
 import { useServiceTickets } from '../../lib/service';
 import { OverdueFollowupPanel } from './OverdueFollowupPanel';
+import { ProfitabilityTab } from './ProfitabilityTab';
 import styles from './Customers.module.css';
 
+type Tab = 'directory' | 'profitability';
+
 export default function Customers() {
+  const [tab, setTab] = useState<Tab>('directory');
   const { customers, loading } = useCustomers();
   const { units } = useUnits();
   // Pre-build a lowercase-name → serial[] map so each row can render its
@@ -174,11 +178,28 @@ export default function Customers() {
 
   if (loading) return <div className={styles.loading}>Loading customers…</div>;
 
+  if (tab === 'profitability') {
+    return (
+      <div className={styles.layout}>
+        <div className={styles.header}>
+          <div className={styles.titleRow}>
+            <h2 className={styles.title}>Customers</h2>
+            <CustomersTabs tab={tab} onChange={setTab} />
+          </div>
+        </div>
+        <ProfitabilityTab />
+      </div>
+    );
+  }
+
   return (
     <>
     <div className={styles.layout}>
       <div className={styles.header}>
-        <h2 className={styles.title}>Customers</h2>
+        <div className={styles.titleRow}>
+          <h2 className={styles.title}>Customers</h2>
+          <CustomersTabs tab={tab} onChange={setTab} />
+        </div>
         <div className={styles.headerActions}>
           {stats.lastSync && (
             <span className={styles.lastSync}>
@@ -689,6 +710,25 @@ function FollowUpCalendar({
           );
         })}
       </div>
+    </div>
+  );
+}
+
+
+function CustomersTabs({ tab, onChange }: { tab: Tab; onChange: (t: Tab) => void }) {
+  const tabs: { key: Tab; label: string }[] = [
+    { key: 'directory',     label: 'Directory' },
+    { key: 'profitability', label: 'Profitability' },
+  ];
+  return (
+    <div className={styles.customersTabs}>
+      {tabs.map(t => (
+        <button
+          key={t.key}
+          className={`${styles.customersTab} ${tab === t.key ? styles.customersTabActive : ''}`}
+          onClick={() => onChange(t.key)}
+        >{t.label}</button>
+      ))}
     </div>
   );
 }

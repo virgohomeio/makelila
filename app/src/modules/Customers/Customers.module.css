@@ -614,3 +614,180 @@
   font-size: 12px;
   color: var(--color-ink-subtle, #718096);
 }
+
+/* Customers module tabs (Directory / Profitability) */
+.titleRow {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  flex: 1;
+}
+.customersTabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid #e2e8f0;
+}
+.customersTab {
+  background: transparent;
+  border: none;
+  padding: 8px 16px;
+  cursor: pointer;
+  font-size: .9rem;
+  color: #718096;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.customersTab:hover {
+  color: #2b6cb0;
+}
+.customersTabActive {
+  color: #2b6cb0;
+  border-bottom-color: #2b6cb0;
+  font-weight: 600;
+}
+
+/* Profitability tab */
+.profitabilityTab {
+  padding: 16px 24px;
+}
+.profSummary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.profStat {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 14px 16px;
+}
+.profStatGood { border-left: 4px solid #38a169; }
+.profStatBad  { border-left: 4px solid #c53030; }
+.profStatWarn { border-left: 4px solid #d69e2e; }
+.profStatLabel {
+  font-size: .75rem;
+  color: #718096;
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+.profStatValue {
+  font-size: 1.3rem;
+  font-weight: 600;
+  color: #1a202c;
+}
+
+.profControls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 16px;
+}
+.profSearch {
+  flex: 1;
+  min-width: 200px;
+  padding: 6px 10px;
+  border: 1px solid #cbd5e0;
+  border-radius: 6px;
+  font-size: .9rem;
+}
+.profControls select {
+  padding: 6px 10px;
+  border: 1px solid #cbd5e0;
+  border-radius: 6px;
+  font-size: .85rem;
+  background: #fff;
+}
+.profToggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: .8rem;
+  color: #4a5568;
+  cursor: pointer;
+}
+
+.profGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+}
+.profCard {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+}
+.profCardWin   { border-left: 4px solid #38a169; }
+.profCardFlat  { border-left: 4px solid #cbd5e0; }
+.profCardLoss  { border-left: 4px solid #c53030; }
+
+.profCardHead { margin-bottom: 8px; }
+.profCardName {
+  font-weight: 600;
+  color: #1a202c;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.profCardMeta {
+  font-size: .75rem;
+  color: #718096;
+  margin-top: 2px;
+}
+.profTeamPill {
+  font-size: .65rem;
+  font-weight: 500;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: #fef3c7;
+  color: #b7791f;
+  text-transform: uppercase;
+  letter-spacing: .03em;
+}
+.profMargin {
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: #2d3748;
+  margin: 4px 0 0;
+}
+.profCardLabel {
+  font-size: .7rem;
+  color: #a0aec0;
+  text-transform: uppercase;
+  letter-spacing: .03em;
+  margin-bottom: 10px;
+}
+.profCardBreakdown {
+  list-style: none;
+  margin: 0 0 10px;
+  padding: 0;
+  font-size: .8rem;
+}
+.profCardBreakdown > div {
+  display: flex;
+  justify-content: space-between;
+  padding: 2px 0;
+  border-bottom: 1px dotted #f1f5f9;
+}
+.profCardBreakdown dt {
+  color: #718096;
+}
+.profCardBreakdown dd {
+  margin: 0;
+  color: #1a202c;
+  font-variant-numeric: tabular-nums;
+}
+.profCardCounts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: .7rem;
+  color: #718096;
+  margin-top: auto;
+  padding-top: 6px;
+  border-top: 1px solid #f1f5f9;
+}

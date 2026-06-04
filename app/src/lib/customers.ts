@@ -101,6 +101,71 @@ export async function recordFollowUp(
   await logAction('followup_recorded', customerId, `${kind} = ${status}`);
 }
 
+// Backlog #58 — aggregated per-customer profitability sourced from the
+// public.customer_profitability SQL view (migration 20260604260000). The
+// view does the heavy joining server-side so the browser doesn't have
+// to pull thousands of orders/returns/tickets.
+export type CustomerProfitability = {
+  id: string;
+  full_name: string;
+  email: string | null;
+  country: string | null;
+  onboard_date: string | null;
+  revenue_usd: number;
+  cogs_usd: number;
+  shipping_cost_usd: number;
+  warranty_cost_usd: number;
+  refund_usd: number;
+  net_margin_usd: number;
+  order_count: number;
+  replacement_count: number;
+  refund_count: number;
+  ticket_count: number;
+  is_team_member: boolean;
+};
+
+export function useCustomerProfitability(): {
+  rows: CustomerProfitability[];
+  loading: boolean;
+  error: Error | null;
+} {
+  const [rows, setRows] = useState<CustomerProfitability[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data, error: err } = await supabase
+        .from('customer_profitability')
+        .select('*')
+        .order('net_margin_usd', { ascending: false });
+      if (cancelled) return;
+      if (err) {
+        setError(err as unknown as Error);
+        setLoading(false);
+        return;
+      }
+      // Supabase returns numerics as strings; coerce to numbers so the UI
+      // can do arithmetic without string juggling.
+      const coerced = (data ?? []).map((r: Record<string, unknown>) => ({
+        ...r,
+        revenue_usd:       Number(r.revenue_usd ?? 0),
+        cogs_usd:          Number(r.cogs_usd ?? 0),
+        shipping_cost_usd: Number(r.shipping_cost_usd ?? 0),
+        warranty_cost_usd: Number(r.warranty_cost_usd ?? 0),
+        refund_usd:        Number(r.refund_usd ?? 0),
+        net_margin_usd:    Number(r.net_margin_usd ?? 0),
+      })) as CustomerProfitability[];
+      setRows(coerced);
+      setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  return { rows, loading, error };
+}
+
 export function useCustomers(): { customers: Customer[]; loading: boolean } {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);
