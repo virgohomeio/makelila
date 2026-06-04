@@ -206,7 +206,14 @@ function MachineDetail({
       <header className={styles.detailHeader}>
         <div>
           <div className={styles.titleRow}>
-            <h2 className={styles.machineTitle}>{displayName}</h2>
+            <h2 className={styles.machineTitle}>
+              {displayName}
+              {!assigned && (
+                <button type="button" className={styles.assignBadge} onClick={onAssign}>
+                  + assign customer
+                </button>
+              )}
+            </h2>
             <span
               className={styles.mixingBadge}
               style={{ color: mixMeta.color, background: mixMeta.bg }}
