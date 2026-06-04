@@ -537,3 +537,46 @@ export async function createReplacementOrder(input: ReplacementOrderInput):
   );
   return { id: row.id, order_ref: row.order_ref };
 }
+
+/** Records that an order shipped. Sets shipped_at and shipping_cost_usd
+ *  (the actual freight/label cost from Freightcom/ClickShip). Works for
+ *  both sales and replacements. */
+export async function markOrderShipped(orderId: string, shippingCostUsd: number): Promise<void> {
+  if (!Number.isFinite(shippingCostUsd) || shippingCostUsd < 0) {
+    throw new Error('shipping_cost_usd must be a non-negative number');
+  }
+  const { error } = await supabase
+    .from('orders')
+    .update({ shipped_at: new Date().toISOString(), shipping_cost_usd: shippingCostUsd })
+    .eq('id', orderId);
+  if (error) throw new Error(error.message);
+  await logAction('order_shipped', orderId, `shipping $${shippingCostUsd.toFixed(2)}`);
+}
+
+/** Records that an order was delivered. For replacement orders, also closes
+ *  the linked service ticket. Idempotent — safe to call twice. */
+export async function markOrderDelivered(orderId: string): Promise<void> {
+  const { data: row, error: rErr } = await supabase
+    .from('orders')
+    .select('kind, linked_ticket_id, order_ref')
+    .eq('id', orderId)
+    .single();
+  if (rErr || !row) throw new Error(`Read order: ${rErr?.message ?? 'not found'}`);
+
+  const deliveredAt = new Date().toISOString();
+  const { error: uErr } = await supabase
+    .from('orders')
+    .update({ delivered_at: deliveredAt })
+    .eq('id', orderId);
+  if (uErr) throw new Error(uErr.message);
+  await logAction('order_delivered', row.order_ref, '');
+
+  if (row.kind === 'replacement' && row.linked_ticket_id) {
+    const { error: tErr } = await supabase
+      .from('service_tickets')
+      .update({ status: 'closed', resolved_at: deliveredAt, closed_at: deliveredAt })
+      .eq('id', row.linked_ticket_id);
+    if (tErr) throw new Error(`Close ticket: ${tErr.message}`);
+    await logAction('ticket_auto_closed', row.linked_ticket_id, `via replacement ${row.order_ref}`);
+  }
+}

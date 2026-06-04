@@ -24,7 +24,7 @@ vi.mock('./activityLog', () => ({
   logAction: logActionMock,
 }));
 
-import { disposition, needInfo, nextReplacementOrderRef, createReplacementOrder } from './orders';
+import { disposition, needInfo, nextReplacementOrderRef, createReplacementOrder, markOrderShipped, markOrderDelivered } from './orders';
 
 describe('disposition', () => {
   beforeEach(() => {
@@ -169,5 +169,71 @@ describe('createReplacementOrder', () => {
       address: { address_line: null, city: '', region_state: null, country: 'CA', postal_code: null },
       line_items: [],
     })).rejects.toThrow(/at least one line item/i);
+  });
+});
+
+describe('markOrderShipped', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('sets shipped_at and shipping_cost_usd', async () => {
+    const eq = vi.fn().mockResolvedValue({ error: null });
+    const update = vi.fn().mockReturnValue({ eq });
+    fromMock.mockReturnValue({ update });
+    await markOrderShipped('o1', 42.75);
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({
+      shipping_cost_usd: 42.75,
+      shipped_at: expect.any(String),
+    }));
+  });
+
+  it('throws on negative shipping cost', async () => {
+    await expect(markOrderShipped('o1', -1)).rejects.toThrow(/non-negative/i);
+  });
+
+  it('throws on non-finite shipping cost', async () => {
+    await expect(markOrderShipped('o1', Number.NaN)).rejects.toThrow(/non-negative/i);
+  });
+});
+
+describe('markOrderDelivered', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('sets delivered_at on a sale order without touching tickets', async () => {
+    const orderSingle = vi.fn().mockResolvedValue({
+      data: { kind: 'sale', linked_ticket_id: null, order_ref: '#1113' }, error: null,
+    });
+    const orderEqSel = vi.fn().mockReturnValue({ single: orderSingle });
+    const orderUpdateEq = vi.fn().mockResolvedValue({ error: null });
+    const orderUpdate = vi.fn().mockReturnValue({ eq: orderUpdateEq });
+    const ticketUpdate = vi.fn();
+    fromMock.mockImplementation((table: string) => {
+      if (table === 'orders') return { update: orderUpdate, select: () => ({ eq: orderEqSel }) };
+      if (table === 'service_tickets') return { update: ticketUpdate };
+      throw new Error(`unexpected table ${table}`);
+    });
+    await markOrderDelivered('o1');
+    expect(orderUpdate).toHaveBeenCalledWith(expect.objectContaining({ delivered_at: expect.any(String) }));
+    expect(ticketUpdate).not.toHaveBeenCalled();
+  });
+
+  it('closes the linked ticket on a replacement order', async () => {
+    const orderSingle = vi.fn().mockResolvedValue({
+      data: { kind: 'replacement', linked_ticket_id: 't1', order_ref: 'R-0007' }, error: null,
+    });
+    const orderEqSel = vi.fn().mockReturnValue({ single: orderSingle });
+    const orderUpdateEq = vi.fn().mockResolvedValue({ error: null });
+    const orderUpdate = vi.fn().mockReturnValue({ eq: orderUpdateEq });
+    const ticketUpdateEq = vi.fn().mockResolvedValue({ error: null });
+    const ticketUpdate = vi.fn().mockReturnValue({ eq: ticketUpdateEq });
+    fromMock.mockImplementation((table: string) => {
+      if (table === 'orders') return { update: orderUpdate, select: () => ({ eq: orderEqSel }) };
+      if (table === 'service_tickets') return { update: ticketUpdate };
+      throw new Error(`unexpected table ${table}`);
+    });
+    await markOrderDelivered('o1');
+    expect(orderUpdate).toHaveBeenCalled();
+    expect(ticketUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      status: 'closed', resolved_at: expect.any(String), closed_at: expect.any(String),
+    }));
   });
 });
