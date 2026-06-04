@@ -820,6 +820,35 @@ export function useUnitCustomerMap() {
   return { data, loading, error, refresh };
 }
 
+/** Backlog #59. Returns the set of unit serials flagged as internal team
+ *  test units (units.is_team_test=true). The Dashboard filters these out
+ *  of the live machine sidebar by default — operators can toggle to show
+ *  them when they need to diagnose a test unit. */
+export function useTeamTestSerials() {
+  const [data, setData] = useState<Set<string>>(new Set());
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data: rows, error } = await supabaseMain
+        .from('units')
+        .select('serial')
+        .eq('is_team_test', true);
+      if (cancelled) return;
+      if (!error && rows) {
+        setData(new Set(rows.map((r: { serial: string }) => r.serial)));
+      }
+      setLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return { data, loading };
+}
+
 /** Writes `units.customer_name` for the given serial via the makelila
  *  supabase, then logs to activity_log. Throws if the units row doesn't
  *  exist (the operator should add the unit to Stock first).

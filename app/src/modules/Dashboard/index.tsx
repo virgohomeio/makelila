@@ -13,6 +13,7 @@ import {
   useLiveSerials,
   useMachineStatus,
   useSerialToUser,
+  useTeamTestSerials,
   useUnitCustomerMap,
   RecordType,
 } from '../../lib/dashboard';
@@ -30,13 +31,24 @@ export default function Dashboard() {
   const { data: serials, loading: serialsLoading, error: serialsErr } = useAvailableSerials();
   const { data: telemetryUserMap } = useSerialToUser();
   const { data: unitCustomerMap, refresh: refreshUnits } = useUnitCustomerMap();
+  const { data: teamSerials } = useTeamTestSerials();
   const { live, checked } = useLiveSerials(serials);
   const [selected, setSelected] = useState<string | null>(null);
   const [assignTarget, setAssignTarget] = useState<string | null>(null);
+  // Backlog #59 — team test units default-hidden so internal noise doesn't
+  // distort what an operator scanning the sidebar sees.
+  const [showTeamUnits, setShowTeamUnits] = useState(false);
 
   const liveSerials = useMemo(
-    () => serials.filter((sn) => live.has(sn)).sort(),
-    [serials, live],
+    () => serials
+      .filter((sn) => live.has(sn))
+      .filter((sn) => showTeamUnits || !teamSerials.has(sn))
+      .sort(),
+    [serials, live, teamSerials, showTeamUnits],
+  );
+  const hiddenTeamCount = useMemo(
+    () => showTeamUnits ? 0 : serials.filter((sn) => live.has(sn) && teamSerials.has(sn)).length,
+    [serials, live, teamSerials, showTeamUnits],
   );
 
   // makelila system-of-record (units.customer_name) wins over telemetry
@@ -66,6 +78,17 @@ export default function Dashboard() {
               ? `${liveSerials.length} live / ${serials.length} total`
               : 'checking…'}
           </p>
+          <label className={styles.teamToggle}>
+            <input
+              type="checkbox"
+              checked={showTeamUnits}
+              onChange={(e) => setShowTeamUnits(e.target.checked)}
+            />
+            <span>
+              Show team test units
+              {hiddenTeamCount > 0 && <em> ({hiddenTeamCount} hidden)</em>}
+            </span>
+          </label>
         </header>
 
         {serialsErr && <p className={styles.error}>Failed to load: {serialsErr.message}</p>}

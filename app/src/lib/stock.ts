@@ -107,6 +107,10 @@ export type Unit = {
   test_report_path: string | null;
   test_report_name: string | null;
   test_report_uploaded_at: string | null;
+  // Backlog #59 — true for units the team uses for internal testing.
+  // Default-filtered out of Dashboard / Customers / profitability rollups
+  // so internal noise doesn't distort real-customer signals.
+  is_team_test: boolean;
 };
 
 // ---------- hooks ----------

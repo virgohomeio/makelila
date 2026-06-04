@@ -17,9 +17,28 @@
 }
 
 .subtitle {
-  margin: 0 0 16px;
+  margin: 0 0 8px;
   color: #888;
   font-size: 0.85em;
+}
+
+.teamToggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 16px;
+  font-size: 0.75em;
+  color: #666;
+  cursor: pointer;
+}
+
+.teamToggle input {
+  margin: 0;
+}
+
+.teamToggle em {
+  color: #888;
+  font-style: normal;
 }
 
 .machineList {
