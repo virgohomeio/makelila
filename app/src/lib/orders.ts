@@ -5,12 +5,12 @@ import { logAction } from './activityLog';
 
 export type OrderStatus = 'pending' | 'approved' | 'flagged' | 'held';
 
-export type LineItem = {
-  sku: string;
-  name: string;
-  qty: number;
-  price_usd: number;
-};
+export type LineItem =
+  | { sku: string; name: string; qty: number; price_usd: number }       // sale (legacy shape)
+  | { kind: 'part'; part_id: string; sku: string; name: string; qty: number; cost_per_unit_usd: number }
+  | { kind: 'unit'; unit_serial: string; batch: string; name: string; qty: 1; cost_usd: number };
+
+export type OrderKind = 'sale' | 'replacement';
 
 export type OrderNote = {
   id: number;
@@ -24,7 +24,13 @@ export type OrderNote = {
 export type Order = {
   id: string;
   order_ref: string;
+  kind: OrderKind;
   status: OrderStatus;
+  linked_ticket_id: string | null;
+  cogs_usd: number | null;
+  shipping_cost_usd: number | null;
+  shipped_at: string | null;
+  delivered_at: string | null;
   customer_name: string;
   customer_email: string | null;
   customer_phone: string | null;
@@ -44,7 +50,6 @@ export type Order = {
   address_claude_postal: string | null;
   freight_estimate_usd: number;
   freight_threshold_usd: number;
-  // Monetary *_usd fields hold the amount in the order's own `currency`, despite the historical `_usd` naming.
   currency: string;
   total_usd: number;
   subtotal_usd: number | null;
@@ -60,6 +65,11 @@ export type Order = {
   created_at: string;
   placed_at: string | null;
 };
+
+/** Type guard for replacement-shaped line items. */
+export function isReplacementLine(li: LineItem): li is Extract<LineItem, { kind: 'part' | 'unit' }> {
+  return 'kind' in li && (li.kind === 'part' || li.kind === 'unit');
+}
 
 export type UrgencySeverity = 'ok' | 'urgent' | 'overdue';
 
