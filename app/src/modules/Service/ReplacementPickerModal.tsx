@@ -1,8 +1,14 @@
 import { useMemo, useState } from 'react';
 import { useParts } from '../../lib/parts';
-import { useUnits } from '../../lib/stock';
+import { useBatches, useUnits } from '../../lib/stock';
 import { createReplacementOrder, type ReplacementLineItem } from '../../lib/orders';
 import styles from './Service.module.css';
+
+// Backlog #64 — fallback when batches.unit_cost_usd is null (cost not
+// yet recorded for that batch). Replacement orders still need a number
+// for COGS rollups (#58 profitability); the long-run average ~$314
+// from P100 is a reasonable approximation for un-costed batches.
+const FALLBACK_UNIT_COST_USD = 314;
 
 type CartLine = ReplacementLineItem;
 
@@ -28,6 +34,15 @@ type Props = {
 export default function ReplacementPickerModal({ ticket, address, onClose, onCreated }: Props) {
   const { parts, loading: partsLoading } = useParts();
   const { units, loading: unitsLoading } = useUnits();
+  const { batches } = useBatches();
+  // Backlog #64 — resolve per-unit landed cost from batches.unit_cost_usd
+  // instead of hard-coding. Falls back to a global default when the batch
+  // has no cost recorded yet (e.g. P100X is still in production).
+  const batchCost = useMemo(() => {
+    const m = new Map<string, number | null>();
+    for (const b of batches) m.set(b.id, b.unit_cost_usd);
+    return m;
+  }, [batches]);
   const [cart, setCart] = useState<CartLine[]>([]);
   // addr is seeded from the prop once. Callers must unmount-and-remount the
   // modal (e.g., {open && <Modal />}) if they change the address — otherwise
@@ -79,9 +94,10 @@ export default function ReplacementPickerModal({ ticket, address, onClose, onCre
   function addUnit(u: typeof units[number]) {
     setCart(prev => {
       if (prev.some(l => l.kind === 'unit' && l.unit_serial === u.serial)) return prev;
+      const cost = batchCost.get(u.batch) ?? FALLBACK_UNIT_COST_USD;
       return [...prev, {
         kind: 'unit', unit_serial: u.serial, batch: u.batch,
-        name: `LILA (${u.batch}, ${u.color ?? '?'})`, qty: 1, cost_usd: 312,  // TODO: source from batches.unit_cost_usd via join — placeholder per spec deferred follow-up.
+        name: `LILA (${u.batch}, ${u.color ?? '?'})`, qty: 1, cost_usd: cost,
       }];
     });
   }

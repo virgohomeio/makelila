@@ -21,6 +21,11 @@ vi.mock('../../../lib/stock', () => ({
     ],
     loading: false,
   }),
+  // Backlog #64 — modal now resolves unit cost from batches.unit_cost_usd
+  useBatches: () => ({
+    batches: [{ id: 'B7', unit_cost_usd: 312, version: null, manufacturer: 'X' }],
+    loading: false,
+  }),
 }));
 vi.mock('../../../lib/orders', () => ({
   createReplacementOrder: vi.fn().mockResolvedValue({ id: 'o1', order_ref: 'R-0001' }),
