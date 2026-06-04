@@ -545,12 +545,19 @@ export async function markOrderShipped(orderId: string, shippingCostUsd: number)
   if (!Number.isFinite(shippingCostUsd) || shippingCostUsd < 0) {
     throw new Error('shipping_cost_usd must be a non-negative number');
   }
+  const { data: row, error: rErr } = await supabase
+    .from('orders')
+    .select('order_ref')
+    .eq('id', orderId)
+    .single();
+  if (rErr || !row) throw new Error(`Read order: ${rErr?.message ?? 'not found'}`);
+
   const { error } = await supabase
     .from('orders')
     .update({ shipped_at: new Date().toISOString(), shipping_cost_usd: shippingCostUsd })
     .eq('id', orderId);
   if (error) throw new Error(error.message);
-  await logAction('order_shipped', orderId, `shipping $${shippingCostUsd.toFixed(2)}`);
+  await logAction('order_shipped', row.order_ref, `shipping $${shippingCostUsd.toFixed(2)}`);
 }
 
 /** Records that an order was delivered. For replacement orders, also closes
@@ -558,10 +565,11 @@ export async function markOrderShipped(orderId: string, shippingCostUsd: number)
 export async function markOrderDelivered(orderId: string): Promise<void> {
   const { data: row, error: rErr } = await supabase
     .from('orders')
-    .select('kind, linked_ticket_id, order_ref')
+    .select('kind, linked_ticket_id, order_ref, delivered_at')
     .eq('id', orderId)
     .single();
   if (rErr || !row) throw new Error(`Read order: ${rErr?.message ?? 'not found'}`);
+  if (row.delivered_at) return;  // already delivered; honor the JSDoc idempotency claim
 
   const deliveredAt = new Date().toISOString();
   const { error: uErr } = await supabase
@@ -569,7 +577,7 @@ export async function markOrderDelivered(orderId: string): Promise<void> {
     .update({ delivered_at: deliveredAt })
     .eq('id', orderId);
   if (uErr) throw new Error(uErr.message);
-  await logAction('order_delivered', row.order_ref, '');
+  await logAction('order_delivered', row.order_ref, 'delivery confirmed');
 
   if (row.kind === 'replacement' && row.linked_ticket_id) {
     const { error: tErr } = await supabase
