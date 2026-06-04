@@ -225,6 +225,11 @@ Alpha feedback collection window is **closed**. The 11 items above plus the meet
   **Source:** Huayi (2026-06-03 in-session note)
   **Description:** The telemetry Dashboard currently lists machines by their LL01-*** serials. Operators rarely think in serials — they know customers by name. Replace the serial label in the Dashboard's serial picker / chart legends / status table with the customer's name (fall back to serial when no customer is linked, e.g. team/test units). Data source: join `dashboard.useSerialToUser()` already exposes the link; just thread the resolved name through the UI.
 
+- **#54** Dashboard: click an unassigned serial to assign a customer (with makelila-suggested match).
+  **Source:** Huayi (2026-06-04 in-session note)
+  **Description:** Complement to #53. When the Dashboard renders a unit by its serial because no customer is linked, make that serial clickable. Opens a small assignment modal: makelila suggests the most likely customer based on the existing serial → customer mapping in `units.customer_name` / `customer_lifecycle.customer_id` (e.g. fuzzy-match on names, or recent orders shipped near that serial's manufacture date). Operator verifies the suggestion (or picks a different customer from a search box) and confirms; on confirm, write the link to `units.customer_name` (and/or `customer_lifecycle`) so the unit appears under that customer everywhere — Dashboard, Customers tab, Service tickets, etc. Should also create a `customer_lifecycle` row if one doesn't exist for the (customer, serial) pair so the FU calendar wires up. Audit: log via `activity_log` who did the assignment + when.
+  **Likely touch:** new `lib/dashboard.ts` mutator for assignment; new modal component in `Dashboard/`; light JOIN logic for the suggestion (probably matches against `customers.full_name` ILIKE patterns derived from any partial-name fields already attached to the telemetry record, or surfaces customers without a linked unit as candidates).
+
 ---
 
 ## Reference
