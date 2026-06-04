@@ -74,7 +74,7 @@ export function Detail({
             {order.cogs_usd != null && <>&nbsp;·&nbsp;COGS ${order.cogs_usd.toFixed(2)}</>}
           </div>
         )}
-        {(() => {
+        {order.kind === 'sale' && (() => {
           const basis = order.placed_at ?? order.created_at;
           const u = orderUrgency(basis);
           if (!u.label) return null;

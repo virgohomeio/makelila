@@ -206,7 +206,7 @@ describe('markOrderDelivered', () => {
 
   it('sets delivered_at on a sale order without touching tickets', async () => {
     const orderSingle = vi.fn().mockResolvedValue({
-      data: { kind: 'sale', linked_ticket_id: null, order_ref: '#1113', delivered_at: null }, error: null,
+      data: { kind: 'sale', linked_ticket_id: null, order_ref: '#1113', delivered_at: null, shipped_at: '2026-06-04T10:00:00Z' }, error: null,
     });
     const orderEqSel = vi.fn().mockReturnValue({ single: orderSingle });
     const orderUpdateEq = vi.fn().mockResolvedValue({ error: null });
@@ -225,7 +225,7 @@ describe('markOrderDelivered', () => {
 
   it('closes the linked ticket on a replacement order', async () => {
     const orderSingle = vi.fn().mockResolvedValue({
-      data: { kind: 'replacement', linked_ticket_id: 't1', order_ref: 'R-0007', delivered_at: null }, error: null,
+      data: { kind: 'replacement', linked_ticket_id: 't1', order_ref: 'R-0007', delivered_at: null, shipped_at: '2026-06-04T10:00:00Z' }, error: null,
     });
     const orderEqSel = vi.fn().mockReturnValue({ single: orderSingle });
     const orderUpdateEq = vi.fn().mockResolvedValue({ error: null });
@@ -243,6 +243,20 @@ describe('markOrderDelivered', () => {
     expect(ticketUpdate).toHaveBeenCalledWith(expect.objectContaining({
       status: 'closed', resolved_at: expect.any(String), closed_at: expect.any(String),
     }));
+  });
+
+  it('throws if shipped_at is null', async () => {
+    const orderSingle = vi.fn().mockResolvedValue({
+      data: { kind: 'sale', linked_ticket_id: null, order_ref: '#1113',
+              delivered_at: null, shipped_at: null }, error: null,
+    });
+    const orderEqSel = vi.fn().mockReturnValue({ single: orderSingle });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    fromMock.mockImplementation(((table: string) => {
+      if (table === 'orders') return { select: () => ({ eq: orderEqSel }) };
+      throw new Error(`unexpected table ${table}`);
+    }) as any);
+    await expect(markOrderDelivered('o1')).rejects.toThrow(/not been shipped/i);
   });
 
   it('is idempotent — early-returns when delivered_at is already set', async () => {

@@ -328,7 +328,9 @@ export function useOrders(): {
     //       where the queue row was never created or advanced).
     const active = cache.filter(o => {
       if (fulfilledOrderIds.has(o.id)) return false;
-      if (shippedCustomers.has(o.customer_name.toLowerCase().trim())) return false;
+      // Never hide replacement orders by the shipped-customer name check —
+      // a returning customer's replacement must always be visible in Order Review.
+      if (o.kind !== 'replacement' && shippedCustomers.has(o.customer_name.toLowerCase().trim())) return false;
       return true;
     });
     return {
@@ -648,11 +650,14 @@ export function useShippedOrders(): { orders: Order[]; loading: boolean } {
 export async function markOrderDelivered(orderId: string): Promise<void> {
   const { data: row, error: rErr } = await supabase
     .from('orders')
-    .select('kind, linked_ticket_id, order_ref, delivered_at')
+    .select('kind, linked_ticket_id, order_ref, delivered_at, shipped_at')
     .eq('id', orderId)
     .single();
   if (rErr || !row) throw new Error(`Read order: ${rErr?.message ?? 'not found'}`);
   if (row.delivered_at) return;  // already delivered; honor the JSDoc idempotency claim
+  if (!row.shipped_at) {
+    throw new Error('Cannot mark delivered: order has not been shipped yet.');
+  }
 
   const deliveredAt = new Date().toISOString();
   const { error: uErr } = await supabase

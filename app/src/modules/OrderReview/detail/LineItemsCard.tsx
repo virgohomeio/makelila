@@ -1,4 +1,5 @@
 import type { Order } from '../../../lib/orders';
+import { isReplacementLine } from '../../../lib/orders';
 import { formatMoney } from '../../../lib/money';
 import styles from '../OrderReview.module.css';
 
@@ -35,17 +36,17 @@ export function LineItemsCard({ order }: { order: Order }) {
           </thead>
           <tbody>
             {order.line_items.map((li, i) => {
-              if ('kind' in li && li.kind === 'part') {
-                return (
-                  <tr key={`p-${i}`}>
-                    <td className={styles.sku}>{li.sku}</td>
-                    <td>{li.name}</td>
-                    <td>{li.qty}</td>
-                    <td style={{ textAlign: 'right' }}>{fmt(li.cost_per_unit_usd * li.qty)}</td>
-                  </tr>
-                );
-              }
-              if ('kind' in li && li.kind === 'unit') {
+              if (isReplacementLine(li)) {
+                if (li.kind === 'part') {
+                  return (
+                    <tr key={`p-${i}`}>
+                      <td className={styles.sku}>{li.sku}</td>
+                      <td>{li.name}</td>
+                      <td>{li.qty}</td>
+                      <td style={{ textAlign: 'right' }}>{fmt(li.cost_per_unit_usd * li.qty)}</td>
+                    </tr>
+                  );
+                }
                 return (
                   <tr key={`u-${i}`}>
                     <td className={styles.sku}>{li.unit_serial}</td>
@@ -55,6 +56,7 @@ export function LineItemsCard({ order }: { order: Order }) {
                   </tr>
                 );
               }
+              // Legacy sale shape
               return (
                 <tr key={`${li.sku}-${i}`}>
                   <td>{li.sku}</td>
