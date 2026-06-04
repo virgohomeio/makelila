@@ -857,7 +857,17 @@ const STATUS_SMS_COOLDOWN_MS = 48 * 3600 * 1000;
 
 /** Look up the customer record linked to a unit serial. Returns null when
  *  the unit isn't tied to a customer or the customer can't be resolved.
- *  Used by the Dashboard status-SMS flow. */
+ *  Used by the Dashboard status-SMS flow.
+ *
+ *  Name resolution cascade — needed because `units.customer_name` is set
+ *  as free-text at fulfillment time and frequently drifts from the
+ *  canonical `customers.full_name` (e.g. unit says "Amila Smith" but the
+ *  customer record is "Amila & Rob Smith"):
+ *    1. Exact case-insensitive match on full_name
+ *    2. Last-name match + first-name starts-with (handles spouse-joined
+ *       names like "Amila & Rob Smith")
+ *  If step 2 matches more than one customer the lookup gives up (return
+ *  null) rather than risk silently sending to the wrong person. */
 export async function customerForSerial(serial: string): Promise<{
   id: string; full_name: string; first_name: string | null; phone: string | null;
 } | null> {
@@ -867,14 +877,32 @@ export async function customerForSerial(serial: string): Promise<{
     .eq('serial', serial)
     .maybeSingle();
   if (!unit?.customer_name || unit.is_team_test) return null;
+  const name = unit.customer_name.trim();
 
-  const { data: customer } = await supabaseMain
+  // 1. Exact (case-insensitive) full_name match
+  const { data: exact } = await supabaseMain
     .from('customers')
     .select('id, full_name, first_name, phone')
-    .ilike('full_name', unit.customer_name)
+    .ilike('full_name', name)
     .limit(1)
     .maybeSingle();
-  return customer ?? null;
+  if (exact) return exact;
+
+  // 2. Token cascade: first + last word from the unit's name
+  const parts = name.split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) {
+    const first = parts[0];
+    const last  = parts[parts.length - 1];
+    const { data: byTokens } = await supabaseMain
+      .from('customers')
+      .select('id, full_name, first_name, phone')
+      .ilike('last_name', last)
+      .ilike('first_name', `${first}%`)
+      .limit(2);
+    if (byTokens && byTokens.length === 1) return byTokens[0];
+  }
+
+  return null;
 }
 
 /** Returns the timestamp of the most recent `dashboard_status_sms` log entry
