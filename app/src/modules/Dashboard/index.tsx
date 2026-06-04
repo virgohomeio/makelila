@@ -1,9 +1,12 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import PlotlyChart from './PlotlyChart';
 import AssignCustomerModal from './AssignCustomerModal';
+import StatusSmsModal from './StatusSmsModal';
 import {
   MIXING_VERDICT_META,
   STATUS_DESCRIPTIONS,
+  STATUS_SMS_KIND,
+  STATUS_SMS_TEMPLATES,
   classifyMixing,
   formatAgo,
   lastReceived,
@@ -211,6 +214,8 @@ function MachineDetail({
 }) {
   const { data, loading, error, refresh } = useDashboardData(serialNumber);
   const { status, color } = useMachineStatus(serialNumber);
+  const [smsOpen, setSmsOpen] = useState(false);
+  const smsKind = status ? STATUS_SMS_KIND[status] : null;
 
   const hum = latestHumidity(data.liveData);
   const seen = lastReceived(data);
@@ -256,7 +261,20 @@ function MachineDetail({
       {status && (
         <div className={styles.statusBanner} style={{ borderLeftColor: color ?? '#bbb' }}>
           <strong>{status}</strong> — {STATUS_DESCRIPTIONS[status]}
+          {smsKind && assigned && (
+            <button type="button" className={styles.statusSmsBtn} onClick={() => setSmsOpen(true)}>
+              ✉️ {STATUS_SMS_TEMPLATES[smsKind].label}
+            </button>
+          )}
         </div>
+      )}
+
+      {smsOpen && status && (
+        <StatusSmsModal
+          serialNumber={serialNumber}
+          status={status}
+          onClose={() => setSmsOpen(false)}
+        />
       )}
 
       <dl className={styles.metricGrid}>

@@ -820,6 +820,81 @@ export function useUnitCustomerMap() {
   return { data, loading, error, refresh };
 }
 
+// ── Backlog #60 + #66: status-keyed customer SMS ────────────────────────────
+//
+// Operators can send a customer-facing SMS keyed off the live machine status.
+// Three statuses get a discovery (wellness-check) template, OPEN_LID gets a
+// prescriptive template, the rest are no-op. A 48h same-status cooldown
+// prevents accidental spam if the status flickers.
+
+export type StatusSmsKind = 'wellness' | 'lid' | null;
+
+export const STATUS_SMS_KIND: Record<MachineStatus, StatusSmsKind> = {
+  OK:          null,
+  NEW_FOOD:    null,
+  DRY_SOIL:    'wellness',
+  SOAKED_SOIL: 'wellness',
+  NOT_MIXING:  'wellness',
+  OPEN_LID:    'lid',
+  DIAGNOSE:    null,
+};
+
+export const STATUS_SMS_TEMPLATES: Record<NonNullable<StatusSmsKind>, {
+  label: string;
+  body: (firstName: string) => string;
+}> = {
+  wellness: {
+    label: 'Wellness-check SMS',
+    body: (n) => `Hi ${n} — quick check-in on your LILA composter! We're seeing some unusual signals in the data and wanted to make sure things are still looking good on your end. How's the compost coming along? Any noises, smells, or anything that doesn't seem right? Reply here and we'll dig in.`,
+  },
+  lid: {
+    label: 'Lid alert SMS',
+    body: (n) => `Hi ${n} — heads up, your LILA's lid sensor is reporting open. The unit pauses heating + mixing while the lid is open, so it'll resume once it's closed. Reply if you think the sensor is mis-reading and we'll take a look!`,
+  },
+};
+
+const STATUS_SMS_COOLDOWN_MS = 48 * 3600 * 1000;
+
+/** Look up the customer record linked to a unit serial. Returns null when
+ *  the unit isn't tied to a customer or the customer can't be resolved.
+ *  Used by the Dashboard status-SMS flow. */
+export async function customerForSerial(serial: string): Promise<{
+  id: string; full_name: string; first_name: string | null; phone: string | null;
+} | null> {
+  const { data: unit } = await supabaseMain
+    .from('units')
+    .select('customer_name, is_team_test')
+    .eq('serial', serial)
+    .maybeSingle();
+  if (!unit?.customer_name || unit.is_team_test) return null;
+
+  const { data: customer } = await supabaseMain
+    .from('customers')
+    .select('id, full_name, first_name, phone')
+    .ilike('full_name', unit.customer_name)
+    .limit(1)
+    .maybeSingle();
+  return customer ?? null;
+}
+
+/** Returns the timestamp of the most recent `dashboard_status_sms` log entry
+ *  for this serial+status within the cooldown window, or null. */
+export async function lastStatusSmsAt(serial: string, status: MachineStatus): Promise<Date | null> {
+  const cutoff = new Date(Date.now() - STATUS_SMS_COOLDOWN_MS).toISOString();
+  const { data } = await supabaseMain
+    .from('activity_log')
+    .select('ts, detail')
+    .eq('type', 'dashboard_status_sms')
+    .eq('entity', serial)
+    .gte('ts', cutoff)
+    .order('ts', { ascending: false })
+    .limit(10);
+  for (const row of (data ?? []) as Array<{ ts: string; detail: string | null }>) {
+    if ((row.detail ?? '').startsWith(`${status}:`)) return new Date(row.ts);
+  }
+  return null;
+}
+
 /** Backlog #59. Returns the set of unit serials flagged as internal team
  *  test units (units.is_team_test=true). The Dashboard filters these out
  *  of the live machine sidebar by default — operators can toggle to show

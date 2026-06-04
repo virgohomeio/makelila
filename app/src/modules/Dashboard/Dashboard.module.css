@@ -373,3 +373,58 @@
   opacity: 0.6;
   cursor: not-allowed;
 }
+
+/* Status SMS button + modal (backlog #60 + #66) */
+.statusSmsBtn {
+  margin-left: 12px;
+  padding: 3px 10px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: #fff;
+  background: #2b6cb0;
+  border: 1px solid #2c5282;
+  border-radius: 999px;
+  cursor: pointer;
+  vertical-align: middle;
+}
+.statusSmsBtn:hover {
+  background: #2c5282;
+}
+
+.statusSmsTo {
+  font-size: 0.9rem;
+  margin: 0 0 8px;
+  color: #1a202c;
+}
+
+.statusSmsTextarea {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid #cbd5e0;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  font-family: inherit;
+  resize: vertical;
+  box-sizing: border-box;
+  margin-bottom: 8px;
+}
+
+.statusSmsCooldown {
+  background: #fefcbf;
+  border-left: 4px solid #d69e2e;
+  padding: 8px 12px;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  color: #744210;
+  margin: 0 0 10px;
+}
+
+.statusSmsResult {
+  padding: 12px 0;
+  font-size: 0.95rem;
+  color: #276749;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: flex-start;
+}
