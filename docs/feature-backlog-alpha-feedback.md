@@ -367,6 +367,18 @@ Alpha feedback collection window is **closed**. The 11 items above plus the meet
   Reuses #60's machinery (template in Templates module, `send-followup-sms` edge fn, activity log entry, 48h cooldown). Replies route back via Quo and land as a ticket in the Service Inbox.
   **Likely touch:** see #60 — same surface. Add a fourth template + status mapping. **Ship #66 together with #60** rather than as a separate effort; it's just one more entry in the status→template table.
 
+- **#67** Canonicalize the units → customers link (replace free-text `units.customer_name` with a proper FK).
+  **Source:** Surfaced during #60/#66 SMS send — operator hit "no customer linked" for unit LL01-00000000236 because `units.customer_name = "Amila Smith"` while the canonical customer record is `"Amila & Rob Smith"` (joint account). Patched 2026-06-04 with a tolerant last-name + first-name-starts-with cascade in `customerForSerial()`, but the underlying schema is the actual bug.
+  **Description:** Today `units.customer_name` is a free-text column populated at fulfillment time. The corresponding `customers.full_name` may differ (spouse appended, nickname vs. legal, typos, Shopify-imported vs. HubSpot-imported representation). Every cross-module lookup that wants "the customer record for this unit" has to do fuzzy resolution. This will keep biting us as more features (#58 profitability rollups, #60/#66 status SMS, #54 Dashboard click-to-assign, etc.) cross from units → customers.
+  Fix path:
+    1. **Add `units.customer_id uuid REFERENCES customers(id) ON DELETE SET NULL`** as the new authoritative link. Index it.
+    2. **Backfill** by running the existing fuzzy resolver against every shipped unit. Cases where the resolver returns >1 candidate get flagged for manual operator review (rather than silently picking wrong).
+    3. **Update the fulfillment serial-assignment flow** so it sets `customer_id` from the picked customer's ID (Order Review already has the customer in scope when the operator approves) rather than copying the name string. Keep `customer_name` as a denormalized display cache for now to avoid breaking everything that reads it.
+    4. **Migrate readers one module at a time** to prefer `customer_id` lookups over name resolution. The tolerant cascade in `customerForSerial()` becomes the legacy code path that only kicks in when `customer_id IS NULL`.
+    5. Once every reader is on `customer_id`, drop the free-text column (or keep it as a one-way denormalized cache and stop relying on it for joins).
+  **Why now:** the longer we wait, the more code paths get written against the fuzzy join. Doing the FK + backfill now is a small migration; redoing five tabs later is a bigger one.
+  **Likely touch:** SQL migration (column + FK + backfill); `lib/stock.ts` Unit type; `lib/dashboard.ts` `customerForSerial` to prefer `customer_id`; `Fulfillment/queue/StepAssign.tsx` (or wherever assignment writes the unit) to populate the FK; reviews of every `units.customer_name` reader for migration.
+
 ## Reference
 
 - Email thread: "makeLILA app beta release, VCycene, Huayi" (started Apr 21, 2026)
