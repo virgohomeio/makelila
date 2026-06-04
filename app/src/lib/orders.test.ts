@@ -162,4 +162,13 @@ describe('createReplacementOrder', () => {
     expect(partsUpdate).toHaveBeenCalled();
     expect(unitsUpdate).toHaveBeenCalled();
   });
+
+  it('throws when line_items is empty', async () => {
+    await expect(createReplacementOrder({
+      ticket_id: 't1',
+      customer_name: 'X',
+      address: { address_line: null, city: '', region_state: null, country: 'CA', postal_code: null },
+      line_items: [],
+    })).rejects.toThrow(/at least one line item/i);
+  });
 });
