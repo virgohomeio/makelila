@@ -42,7 +42,8 @@ export default function ReplacementTab() {
     [orders, filter],
   );
 
-  const monthAgo = Date.now() - 30 * 86400_000;
+  const now = Date.now();
+  const monthAgo = now - 30 * 86400_000;
   const open = orders.filter(o => !o.delivered_at).length;
   const shipped30 = orders.filter(o => o.shipped_at && new Date(o.shipped_at).getTime() > monthAgo).length;
   const delivered30 = orders.filter(o => o.delivered_at && new Date(o.delivered_at).getTime() > monthAgo).length;
@@ -56,7 +57,7 @@ export default function ReplacementTab() {
   return (
     <>
       <div className={styles.kpiStrip}>
-        <div className={styles.kpiCard}><div className={styles.kpiLabel}>Open</div><div className={styles.kpiValue}>Open: {open}</div></div>
+        <div className={styles.kpiCard}><div className={styles.kpiLabel}>Open</div><div className={styles.kpiValue}>{open}</div></div>
         <div className={styles.kpiCard}><div className={styles.kpiLabel}>Shipped (30d)</div><div className={styles.kpiValue}>{shipped30}</div></div>
         <div className={styles.kpiCard}><div className={styles.kpiLabel}>Delivered (30d)</div><div className={styles.kpiValue}>{delivered30}</div></div>
         <div className={styles.kpiCard}><div className={styles.kpiLabel}>Avg COGS (30d)</div><div className={styles.kpiValue}>{avgCogs == null ? '—' : `$${avgCogs.toFixed(2)}`}</div></div>
@@ -82,7 +83,7 @@ export default function ReplacementTab() {
           </thead>
           <tbody>
             {filtered.map(o => {
-              const daysOpen = Math.floor((Date.now() - new Date(o.created_at).getTime()) / 86400_000);
+              const daysOpen = Math.floor((now - new Date(o.created_at).getTime()) / 86400_000);
               return (
                 <tr key={o.id} className={styles.row}>
                   <td><a href="#/order-review">{o.order_ref}</a></td>
