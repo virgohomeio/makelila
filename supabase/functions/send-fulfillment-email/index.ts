@@ -3,6 +3,7 @@
 // runtime. createClient is pinned to a recent v2 release.
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { corsHeaders } from '../_shared/cors.ts';
+import { authenticate } from '../_shared/auth.ts';
 
 type QueueRow = {
   id: string;
@@ -47,14 +48,25 @@ async function handle(req: Request): Promise<Response> {
     );
   }
 
+  const admin = createClient(supabaseUrl, serviceKey);
+
+  let _caller;
+  try { _caller = await authenticate(req, admin); }
+  catch (e) { if (e instanceof Response) return e; throw e; }
+  // Reject cron-secret calls — these functions are operator-triggered only.
+  if (_caller.kind !== 'user') {
+    return new Response(
+      JSON.stringify({ error: 'This function requires an operator JWT — cron-secret not accepted.' }),
+      { status: 403, headers: { 'content-type': 'application/json', 'access-control-allow-origin': '*' } },
+    );
+  }
+
   const body = await req.json() as { queue_id?: string };
   if (!body.queue_id) {
     return new Response(JSON.stringify({ error: 'queue_id required' }), {
       status: 400, headers: { ...corsHeaders, 'content-type': 'application/json' },
     });
   }
-
-  const admin = createClient(supabaseUrl, serviceKey);
 
   // Fetch queue row + joined order
   const { data: q, error: qErr } = await admin
@@ -168,15 +180,7 @@ async function handle(req: Request): Promise<Response> {
 
   // Update queue row → step 6 + fulfilled
   const now = new Date().toISOString();
-  // user_id from the JWT is available via req.headers; simplest: parse sub claim.
-  const authz = req.headers.get('authorization') ?? '';
-  const jwt = authz.replace(/^Bearer\s+/i, '');
-  let userId: string | null = null;
-  try {
-    const [, payload] = jwt.split('.');
-    const decoded = JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/')));
-    userId = decoded.sub ?? null;
-  } catch { /* leave null */ }
+  const userId = _caller.user_id;
 
   const { error: upErr } = await admin
     .from('fulfillment_queue')

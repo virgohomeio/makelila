@@ -10,6 +10,7 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { corsHeaders } from '../_shared/cors.ts';
+import { authenticate } from '../_shared/auth.ts';
 import { classify, type Category, type Priority, type ThreadInput } from '../_shared/classifier.ts';
 import { llmClassify, sha256Hex } from '../_shared/classifier-llm.ts';
 
@@ -34,27 +35,22 @@ Deno.serve(async (req: Request) => {
 async function handle(req: Request): Promise<Response> {
   const supabaseUrl = Deno.env.get('SUPABASE_URL');
   const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
-  const anonKey = Deno.env.get('SUPABASE_ANON_KEY');
-  if (!supabaseUrl || !serviceKey || !anonKey) {
-    return json({ error: 'Missing SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY / SUPABASE_ANON_KEY' }, 500);
+  if (!supabaseUrl || !serviceKey) {
+    return json({ error: 'Missing SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY' }, 500);
   }
 
-  // Require a real user JWT (not just anon key) — gates the mutation to staff.
-  const authHeader = req.headers.get('authorization') ?? '';
-  const userJwt = authHeader.replace(/^Bearer\s+/i, '');
-  if (!userJwt || userJwt === anonKey) {
-    return json({ error: 'unauthorized' }, 401);
+  const admin = createClient(supabaseUrl, serviceKey);
+
+  let _caller;
+  try { _caller = await authenticate(req, admin); }
+  catch (e) { if (e instanceof Response) return e; throw e; }
+  // Reject cron-secret calls — these functions are operator-triggered only.
+  if (_caller.kind !== 'user') {
+    return json({ error: 'This function requires an operator JWT — cron-secret not accepted.' }, 403);
   }
-  const userClient = createClient(supabaseUrl, anonKey, {
-    global: { headers: { Authorization: `Bearer ${userJwt}` } },
-  });
-  const { data: { user } } = await userClient.auth.getUser();
-  if (!user) return json({ error: 'unauthorized' }, 401);
 
   const body = await req.json().catch(() => ({})) as { ticket_id?: string };
   if (!body.ticket_id) return json({ error: 'ticket_id required' }, 400);
-
-  const admin = createClient(supabaseUrl, serviceKey);
 
   const { data: ticket, error: tErr } = await admin
     .from('service_tickets')

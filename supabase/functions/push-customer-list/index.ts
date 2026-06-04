@@ -19,6 +19,7 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { corsHeaders } from '../_shared/cors.ts';
+import { authenticate } from '../_shared/auth.ts';
 
 type PushInput = {
   list_id: string;
@@ -60,13 +61,21 @@ async function handle(req: Request): Promise<Response> {
     }, 500);
   }
 
+  const admin = createClient(supabaseUrl, serviceKey);
+
+  let _caller;
+  try { _caller = await authenticate(req, admin); }
+  catch (e) { if (e instanceof Response) return e; throw e; }
+  // Reject cron-secret calls — these functions are operator-triggered only.
+  if (_caller.kind !== 'user') {
+    return j({ error: 'This function requires an operator JWT — cron-secret not accepted.' }, 403);
+  }
+
   const { list_id, filter } = (await req.json()) as PushInput;
   if (!list_id) return j({ error: 'list_id required' }, 400);
   if (filter !== 'all_purchasers' && filter !== 'minus_refunds') {
     return j({ error: `invalid filter: ${filter}` }, 400);
   }
-
-  const admin = createClient(supabaseUrl, serviceKey);
 
   // 1. Build the same "purchasers" set the CSV export uses.
   const [{ data: orderEmails }, { data: unitNames }] = await Promise.all([

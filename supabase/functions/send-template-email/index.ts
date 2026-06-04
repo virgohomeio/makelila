@@ -16,6 +16,7 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { corsHeaders } from '../_shared/cors.ts';
+import { authenticate } from '../_shared/auth.ts';
 
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
@@ -47,11 +48,22 @@ async function handle(req: Request): Promise<Response> {
     return j({ error: 'Missing SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY / RESEND_API_KEY' }, 500);
   }
 
+  const admin = createClient(supabaseUrl, serviceKey);
+
+  let _caller;
+  try { _caller = await authenticate(req, admin); }
+  catch (e) { if (e instanceof Response) return e; throw e; }
+  // Reject cron-secret calls — these functions are operator-triggered only.
+  if (_caller.kind !== 'user') {
+    return new Response(
+      JSON.stringify({ error: 'This function requires an operator JWT — cron-secret not accepted.' }),
+      { status: 403, headers: { 'content-type': 'application/json', 'access-control-allow-origin': '*' } },
+    );
+  }
+
   const body = (await req.json()) as SendInput;
   if (!body.template_key) return j({ error: 'template_key required' }, 400);
   if (!body.to)           return j({ error: 'to required' }, 400);
-
-  const admin = createClient(supabaseUrl, serviceKey);
 
   // Fetch template
   const { data: tpl, error: tplErr } = await admin
@@ -77,17 +89,8 @@ async function handle(req: Request): Promise<Response> {
       `*** EMAIL_TEST_RECIPIENT is set on the edge function; unset to go live ***\n\n${rBody}`
     : rBody;
 
-  // Caller's user id from JWT (best effort, no verification — gateway has verify_jwt=false)
-  const authz = req.headers.get('authorization') ?? '';
-  const jwt = authz.replace(/^Bearer\s+/i, '');
-  let userId: string | null = null;
-  try {
-    const [, payload] = jwt.split('.');
-    if (payload) {
-      const decoded = JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/')));
-      userId = decoded.sub ?? null;
-    }
-  } catch { /* ignore */ }
+  // Caller's user id comes from the authenticated JWT.
+  const userId = _caller.user_id;
 
   // Log message in 'queued' state up front so we always have an audit row
   // even if Resend errors out.
