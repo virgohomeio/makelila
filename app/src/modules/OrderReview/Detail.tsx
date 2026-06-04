@@ -62,6 +62,18 @@ export function Detail({
         onNeedInfo={(note) => wrap('Need-info logged', () => needInfo(order, note), 'Need info', note)}
       />
       <div className={styles.detailBody}>
+        {order.kind === 'replacement' && (
+          <div className={styles.replHeaderBanner}>
+            <strong>Replacement order</strong>
+            {order.linked_ticket_id && (
+              <>
+                &nbsp;·&nbsp;
+                <a href="#/service">originating ticket</a>
+              </>
+            )}
+            {order.cogs_usd != null && <>&nbsp;·&nbsp;COGS ${order.cogs_usd.toFixed(2)}</>}
+          </div>
+        )}
         {(() => {
           const basis = order.placed_at ?? order.created_at;
           const u = orderUrgency(basis);
@@ -76,7 +88,7 @@ export function Detail({
         <ReadinessChecklist order={order} />
         <CustomerCard order={order} />
         <AddressCard order={order} />
-        <FreightCard order={order} />
+        {order.kind === 'sale' && <FreightCard order={order} />}
         <LineItemsCard order={order} />
         <NotesCard order={order} />
       </div>

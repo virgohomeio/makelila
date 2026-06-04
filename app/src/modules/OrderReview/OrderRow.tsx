@@ -28,7 +28,11 @@ export function OrderRow({
         {isRiskAddress && (
           <span className={`${styles.tag} ${styles.tagWarn}`}>{order.address_verdict}</span>
         )}
-        {order.order_ref} · {order.city}
+        {order.order_ref}
+        {order.kind === 'replacement' && (
+          <span className={styles.replBadge}>Replacement</span>
+        )}
+        {' '}· {order.city}
         {(() => {
           const u = orderUrgency(order.placed_at);
           if (!u.label) return null;

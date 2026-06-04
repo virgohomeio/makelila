@@ -34,14 +34,36 @@ export function LineItemsCard({ order }: { order: Order }) {
             </tr>
           </thead>
           <tbody>
-            {order.line_items.map((li, i) => (
-              <tr key={`${li.sku}-${i}`}>
-                <td>{li.sku}</td>
-                <td>{li.name}</td>
-                <td>{li.qty}</td>
-                <td style={{ textAlign: 'right' }}>{fmt(li.qty * li.price_usd)}</td>
-              </tr>
-            ))}
+            {order.line_items.map((li, i) => {
+              if ('kind' in li && li.kind === 'part') {
+                return (
+                  <tr key={`p-${i}`}>
+                    <td className={styles.sku}>{li.sku}</td>
+                    <td>{li.name}</td>
+                    <td>{li.qty}</td>
+                    <td style={{ textAlign: 'right' }}>{fmt(li.cost_per_unit_usd * li.qty)}</td>
+                  </tr>
+                );
+              }
+              if ('kind' in li && li.kind === 'unit') {
+                return (
+                  <tr key={`u-${i}`}>
+                    <td className={styles.sku}>{li.unit_serial}</td>
+                    <td>{li.name}</td>
+                    <td>{li.qty}</td>
+                    <td style={{ textAlign: 'right' }}>{fmt(li.cost_usd)}</td>
+                  </tr>
+                );
+              }
+              return (
+                <tr key={`${li.sku}-${i}`}>
+                  <td>{li.sku}</td>
+                  <td>{li.name}</td>
+                  <td>{li.qty}</td>
+                  <td style={{ textAlign: 'right' }}>{fmt(li.qty * li.price_usd)}</td>
+                </tr>
+              );
+            })}
           </tbody>
           <tfoot>
             {hasBreakdown && (
