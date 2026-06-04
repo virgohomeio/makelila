@@ -70,6 +70,7 @@ export type ServiceTicket = {
   owner_email: string | null;
   resolved_at: string | null;
   closed_at: string | null;
+  replacement_order_id: string | null;
   kind: TicketKind;
   inbox_disposition: InboxDisposition | null;
   created_at: string;
