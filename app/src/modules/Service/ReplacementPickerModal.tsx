@@ -26,9 +26,12 @@ type Props = {
 };
 
 export default function ReplacementPickerModal({ ticket, address, onClose, onCreated }: Props) {
-  const { parts } = useParts();
-  const { units } = useUnits();
+  const { parts, loading: partsLoading } = useParts();
+  const { units, loading: unitsLoading } = useUnits();
   const [cart, setCart] = useState<CartLine[]>([]);
+  // addr is seeded from the prop once. Callers must unmount-and-remount the
+  // modal (e.g., {open && <Modal />}) if they change the address — otherwise
+  // the operator's edits would be silently overwritten.
   const [addr, setAddr] = useState(address);
   const [search, setSearch] = useState('');
   const [busy, setBusy] = useState(false);
@@ -36,7 +39,9 @@ export default function ReplacementPickerModal({ ticket, address, onClose, onCre
 
   const availableParts = useMemo(
     () => parts.filter(p => p.category === 'replacement' && p.on_hand > 0
-      && (search === '' || p.name.toLowerCase().includes(search.toLowerCase()))),
+      && (search === ''
+          || p.name.toLowerCase().includes(search.toLowerCase())
+          || p.sku.toLowerCase().includes(search.toLowerCase()))),
     [parts, search],
   );
   const cartUnitSerials = useMemo(
@@ -45,7 +50,10 @@ export default function ReplacementPickerModal({ ticket, address, onClose, onCre
   );
   const availableUnits = useMemo(
     () => units.filter(u => u.status === 'ready'
-      && (search === '' || u.serial.toLowerCase().includes(search.toLowerCase()))),
+      && (search === ''
+          || u.serial.toLowerCase().includes(search.toLowerCase())
+          || u.batch.toLowerCase().includes(search.toLowerCase())
+          || (u.color ?? '').toLowerCase().includes(search.toLowerCase()))),
     [units, search],
   );
 
@@ -73,7 +81,7 @@ export default function ReplacementPickerModal({ ticket, address, onClose, onCre
       if (prev.some(l => l.kind === 'unit' && l.unit_serial === u.serial)) return prev;
       return [...prev, {
         kind: 'unit', unit_serial: u.serial, batch: u.batch,
-        name: `LILA (${u.batch}, ${u.color ?? '?'})`, qty: 1, cost_usd: 312,
+        name: `LILA (${u.batch}, ${u.color ?? '?'})`, qty: 1, cost_usd: 312,  // TODO: source from batches.unit_cost_usd via join — placeholder per spec deferred follow-up.
       }];
     });
   }
@@ -113,7 +121,13 @@ export default function ReplacementPickerModal({ ticket, address, onClose, onCre
   }
 
   return (
-    <div className={styles.modalBackdrop} onClick={onClose}>
+    <div className={styles.modalBackdrop} onClick={() => {
+      // Guard against losing cart contents on accidental backdrop clicks.
+      if (cart.length > 0) {
+        if (!window.confirm('Discard the replacement order in progress?')) return;
+      }
+      onClose();
+    }}>
       <div className={styles.modalCard} onClick={(e) => e.stopPropagation()}>
         <header className={styles.modalHead}>
           <span>Send replacement — {ticket.customer_name} (ticket {ticket.ticket_number})</span>
@@ -151,6 +165,9 @@ export default function ReplacementPickerModal({ ticket, address, onClose, onCre
             onChange={e => setSearch(e.target.value)} />
 
           <div className={styles.rpPickerList}>
+            {(partsLoading || unitsLoading) && (
+              <p style={{ padding: '8px 12px', color: '#888' }}>Loading inventory…</p>
+            )}
             {availableParts.length > 0 && <h4 className={styles.rpPickerHeading}>Parts</h4>}
             {availableParts.map(p => (
               <button key={p.id} className={styles.rpPickerRow} onClick={() => addPart(p)}>
