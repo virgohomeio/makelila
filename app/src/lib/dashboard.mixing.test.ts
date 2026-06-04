@@ -132,3 +132,91 @@ describe('classifyMixing — combined verdict', () => {
     expect(classifyMixing(liveData(currents), NOW).verdict).toBe('NO_DATA');
   });
 });
+
+// Backlog #70 — NOT_MIXING cross-check
+import { classifyMachineStatus, hasRecentHumidityActivity } from './dashboard';
+
+function liveDataWith({
+  currents = [],
+  bmeLeft = [],
+  bmeRight = [],
+}: {
+  currents?: LiveSample<CurrentSample>[];
+  bmeLeft?: Array<{ timestamp: Date; data: { Temperature: number; Humidity: number; Pressure: number; GasResistance: number } }>;
+  bmeRight?: Array<{ timestamp: Date; data: { Temperature: number; Humidity: number; Pressure: number; GasResistance: number } }>;
+}): LiveData {
+  return {
+    [RecordType.Current]: currents,
+    [RecordType.Temperature]: [],
+    [RecordType.MachineHealth]: [],
+    [RecordType.BmeLeft]: bmeLeft as never,
+    [RecordType.BmeRight]: bmeRight as never,
+  };
+}
+
+describe('hasRecentHumidityActivity — #70 cross-check', () => {
+  it('returns false for a static humidity series (no chamber activity)', () => {
+    // 24 samples over 12h, humidity drifts slowly from 40% to 41% — well below threshold
+    const series: Array<[Date, number]> = Array.from({ length: 24 }, (_, i) => [
+      new Date(NOW - (24 - i) * 30 * MIN), 40 + i * (1 / 24),
+    ]);
+    expect(hasRecentHumidityActivity({ 1: series })).toBe(false);
+  });
+
+  it('returns true when humidity shows real activity (mixing chamber turnover)', () => {
+    // Mimic mixing: humidity oscillates 35 → 50 → 38 → 48 over the window
+    const series: Array<[Date, number]> = [
+      [new Date(NOW - 12 * HOUR), 40],
+      [new Date(NOW - 9 * HOUR), 50],
+      [new Date(NOW - 6 * HOUR), 35],
+      [new Date(NOW - 3 * HOUR), 48],
+      [new Date(NOW - 1 * HOUR), 38],
+      [new Date(NOW),             45],
+    ];
+    expect(hasRecentHumidityActivity({ 1: series })).toBe(true);
+  });
+
+  it('returns false when given no series', () => {
+    expect(hasRecentHumidityActivity({})).toBe(false);
+  });
+});
+
+describe('classifyMachineStatus — NOT_MIXING cross-check (#70)', () => {
+  it('still flags NOT_MIXING when neither side mixes AND humidity is static', () => {
+    const lowCurrent = Array.from({ length: 40 }, (_, i) =>
+      sample(NOW - (40 - i) * 30 * MIN, 0.01, 0.01),
+    );
+    const staticBme = Array.from({ length: 24 }, (_, i) => ({
+      timestamp: new Date(NOW - (24 - i) * 30 * MIN),
+      data: { Temperature: 25, Humidity: 40 + i * 0.05, Pressure: 1013, GasResistance: 30000 },
+    }));
+    const status = classifyMachineStatus({
+      events: [],
+      liveData: liveDataWith({ currents: lowCurrent, bmeLeft: staticBme }),
+      isReceiving: true,
+    });
+    expect(status).toBe('NOT_MIXING');
+  });
+
+  it('suppresses NOT_MIXING when humidity is varying (current sensor probably miscalibrated)', () => {
+    const lowCurrent = Array.from({ length: 40 }, (_, i) =>
+      sample(NOW - (40 - i) * 30 * MIN, 0.01, 0.01),
+    );
+    const activeBme = [
+      { timestamp: new Date(NOW - 12 * HOUR), data: { Temperature: 25, Humidity: 40, Pressure: 1013, GasResistance: 30000 } },
+      { timestamp: new Date(NOW - 9  * HOUR), data: { Temperature: 25, Humidity: 50, Pressure: 1013, GasResistance: 30000 } },
+      { timestamp: new Date(NOW - 6  * HOUR), data: { Temperature: 25, Humidity: 35, Pressure: 1013, GasResistance: 30000 } },
+      { timestamp: new Date(NOW - 3  * HOUR), data: { Temperature: 25, Humidity: 48, Pressure: 1013, GasResistance: 30000 } },
+      { timestamp: new Date(NOW - 1  * HOUR), data: { Temperature: 25, Humidity: 38, Pressure: 1013, GasResistance: 30000 } },
+      { timestamp: new Date(NOW),             data: { Temperature: 25, Humidity: 45, Pressure: 1013, GasResistance: 30000 } },
+    ];
+    const status = classifyMachineStatus({
+      events: [],
+      liveData: liveDataWith({ currents: lowCurrent, bmeLeft: activeBme }),
+      isReceiving: true,
+    });
+    // Should NOT be NOT_MIXING. With this humidity range it'll likely be SOAKED_SOIL,
+    // DRY_SOIL, or OK depending on the exact pattern — the key assertion is "not NOT_MIXING".
+    expect(status).not.toBe('NOT_MIXING');
+  });
+});

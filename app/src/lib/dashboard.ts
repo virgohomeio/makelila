@@ -402,6 +402,44 @@ export function wetSoilNewFoodFromBme(
   return { wetSoil, newFood };
 }
 
+// Backlog #70 — NOT_MIXING cross-check. The current-only `isNotMixing()`
+// + `classifyMixing()` path fires 75% false-positive (3 of 4 customers
+// confirmed motors run fine despite zero current readings — sensor drift
+// or calibration drift). Before flagging the customer-visible NOT_MIXING
+// status, cross-check whether the chamber humidity is actually moving.
+// A mixing chamber turns over content, which surfaces wet/dry pockets and
+// produces humidity oscillations; a truly static chamber's humidity drifts
+// only slowly with ambient + heater effects.
+//
+// Heuristic: sum the absolute consecutive-sample humidity deltas in the
+// last 12h, ignoring jitter below the 0.5% noise floor. If the total
+// exceeds 5% the chamber has been actively turned over. Slope smoothing
+// is intentionally NOT used here — smoothing washes out the oscillations
+// that mixing produces (rise + fall + rise cancels under a 5-pt mean).
+export const MIXING_HUMIDITY_LOOKBACK_HOURS = 12;
+export const MIXING_HUMIDITY_NOISE_FLOOR_PCT = 0.5;
+export const MIXING_HUMIDITY_MIN_TOTAL_ABS_PCT = 5.0;
+
+export function hasRecentHumidityActivity(
+  bySensor: Partial<Record<1 | 2, Array<[Date, number]>>>,
+): boolean {
+  for (const series of Object.values(bySensor)) {
+    if (!series || series.length < 2) continue;
+    const tEnd = series[series.length - 1][0].getTime();
+    const cutoff = tEnd - MIXING_HUMIDITY_LOOKBACK_HOURS * 3_600_000;
+    const recent = series.filter(([t]) => t.getTime() >= cutoff);
+    if (recent.length < 2) continue;
+
+    let totalAbs = 0;
+    for (let i = 1; i < recent.length; i++) {
+      const d = Math.abs(recent[i][1] - recent[i - 1][1]);
+      if (d >= MIXING_HUMIDITY_NOISE_FLOOR_PCT) totalAbs += d;
+    }
+    if (totalAbs >= MIXING_HUMIDITY_MIN_TOTAL_ABS_PCT) return true;
+  }
+  return false;
+}
+
 export function isOpenLid(events: ParsedEvent[]): boolean {
   for (let i = events.length - 1; i >= 0; i--) {
     const ev = events[i];
@@ -526,8 +564,14 @@ export function classifyMachineStatus(args: {
   // mixing (Left only / Right only), the machine is mixing — don't flag it.
   // NO_DATA falls through so we don't flag machines with no current telemetry.
   const mix = classifyMixing(args.liveData);
-  if (mix.verdict === 'NEITHER') return 'NOT_MIXING';
   const bySensor = bmeHumidityFromLiveData(args.liveData);
+  if (mix.verdict === 'NEITHER') {
+    // Backlog #70 — current-only NOT_MIXING fires 75% false-positive.
+    // Suppress the flag if BME humidity is actively varying (chamber IS
+    // being disturbed; current sensor probably miscalibrated).
+    if (!hasRecentHumidityActivity(bySensor)) return 'NOT_MIXING';
+    // Else fall through to BME-based status.
+  }
   if (!bySensor[1] && !bySensor[2]) return 'OK';
   if (isDrySoilFromBme(bySensor)) return 'DRY_SOIL';
   const { wetSoil, newFood } = wetSoilNewFoodFromBme(bySensor);
