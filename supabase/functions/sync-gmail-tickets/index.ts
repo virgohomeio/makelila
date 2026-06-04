@@ -18,6 +18,7 @@
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { SignJWT, importPKCS8 } from 'https://esm.sh/jose@5.9.6';
 import { corsHeaders } from '../_shared/cors.ts';
+import { authenticate } from '../_shared/auth.ts';
 import { classify, type Category, type Priority, type ThreadInput } from '../_shared/classifier.ts';
 import { llmClassify, sha256Hex } from '../_shared/classifier-llm.ts';
 import { parseQuoSubject, parseFromHeader, normalizePhone } from '../_shared/quo-parsers.ts';
@@ -82,14 +83,14 @@ Deno.serve(async (req: Request) => {
   if (req.method !== 'POST') {
     return new Response('Method not allowed', { status: 405, headers: corsHeaders });
   }
-  try { return await handle(); }
+  try { return await handle(req); }
   catch (err) {
     const msg = (err as Error)?.message ?? String(err);
     return jsonResponse({ error: `Uncaught: ${msg}` }, 500);
   }
 });
 
-async function handle(): Promise<Response> {
+async function handle(req: Request): Promise<Response> {
   const supabaseUrl = Deno.env.get('SUPABASE_URL');
   const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
   const saKeyB64 = Deno.env.get('GOOGLE_SERVICE_ACCOUNT_KEY');
@@ -99,6 +100,20 @@ async function handle(): Promise<Response> {
   if (!supabaseUrl || !serviceKey) {
     return jsonResponse({ error: 'Missing SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY' }, 500);
   }
+
+  const admin = createClient(supabaseUrl, serviceKey);
+
+  let _caller;
+  try { _caller = await authenticate(req, admin); }
+  catch (e) { if (e instanceof Response) return e; throw e; }
+  // Reject UI-triggered calls — these functions only run from pg_cron.
+  if (_caller.kind !== 'cron') {
+    return new Response(
+      JSON.stringify({ error: 'This function is cron-only — use the X-Cron-Secret header.' }),
+      { status: 403, headers: { 'content-type': 'application/json', 'access-control-allow-origin': '*' } },
+    );
+  }
+
   if (!saKeyB64 || mailboxes.length === 0) {
     // Soft no-op when not yet configured — cron will hit this until Workspace
     // admin completes setup. Don't fail the run.
@@ -114,8 +129,6 @@ async function handle(): Promise<Response> {
   } catch (e) {
     return jsonResponse({ error: `GOOGLE_SERVICE_ACCOUNT_KEY decode/parse failed: ${(e as Error).message}` }, 500);
   }
-
-  const admin = createClient(supabaseUrl, serviceKey);
   const budget: RunBudget = { llmCalls: 0, llmMax: LLM_BUDGET_PER_RUN };
   const results: RunResult[] = [];
   for (const mailbox of mailboxes) {

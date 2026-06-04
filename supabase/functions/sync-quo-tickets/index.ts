@@ -17,6 +17,7 @@
 // the constraint and don't collide with real Gmail IDs.
 
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
+import { authenticate } from '../_shared/auth.ts';
 
 // Inline corsHeaders to avoid module-resolution issues at deploy time.
 const corsHeaders = {
@@ -90,14 +91,14 @@ Deno.serve(async (req: Request) => {
   if (req.method !== 'POST') {
     return new Response('Method not allowed', { status: 405, headers: corsHeaders });
   }
-  try { return await handle(); }
+  try { return await handle(req); }
   catch (err) {
     const msg = (err as Error)?.message ?? String(err);
     return jsonResponse({ error: `Uncaught: ${msg}` }, 500);
   }
 });
 
-async function handle(): Promise<Response> {
+async function handle(req: Request): Promise<Response> {
   const supabaseUrl    = Deno.env.get('SUPABASE_URL');
   const serviceKey     = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
   const apiKey         = Deno.env.get('OPENPHONE_API_KEY');
@@ -107,14 +108,26 @@ async function handle(): Promise<Response> {
   if (!supabaseUrl || !serviceKey) {
     return jsonResponse({ error: 'Missing SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY' }, 500);
   }
+
+  const admin = createClient(supabaseUrl, serviceKey);
+
+  let _caller;
+  try { _caller = await authenticate(req, admin); }
+  catch (e) { if (e instanceof Response) return e; throw e; }
+  // Reject UI-triggered calls — these functions only run from pg_cron.
+  if (_caller.kind !== 'cron') {
+    return new Response(
+      JSON.stringify({ error: 'This function is cron-only — use the X-Cron-Secret header.' }),
+      { status: 403, headers: { 'content-type': 'application/json', 'access-control-allow-origin': '*' } },
+    );
+  }
+
   if (!apiKey || phoneNumberIds.length === 0) {
     return jsonResponse({
       skipped: true,
       reason: 'OPENPHONE_API_KEY or OPENPHONE_PHONE_NUMBER_IDS not configured — inert until secrets are set',
     }, 200);
   }
-
-  const admin = createClient(supabaseUrl, serviceKey);
 
   // ---- Build in-memory lookup caches (once per invocation) ----
 
