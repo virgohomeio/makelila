@@ -393,12 +393,7 @@
 .reworkBody { color: var(--color-ink); white-space: pre-wrap; }
 .reworkRow { display: flex; gap: 8px; margin-top: 6px; align-items: flex-start; }
 
-.replBadge {
-  display: inline-block; margin-left: 6px;
-  padding: 1px 8px; border-radius: 999px;
-  background: #fef3c7; color: #b7791f;
-  font-size: .7rem; font-weight: 500;
-}
+/* .replBadge moved to src/styles/globals.css (backlog #62) */
 .shippingCostLabel {
   display: block; margin: 8px 0; font-size: .85rem;
 }

@@ -263,7 +263,7 @@ function AwaitingDelivery() {
               <td>
                 {o.customer_name}
                 {o.kind === 'replacement' && (
-                  <span className={styles.replBadge}>Replacement</span>
+                  <span className="replBadge">Replacement</span>
                 )}
               </td>
               <td>{o.kind}</td>

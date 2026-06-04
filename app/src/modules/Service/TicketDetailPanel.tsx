@@ -14,13 +14,20 @@ import { AttachmentStrip } from './AttachmentStrip';
 import { TicketNotes } from './TicketNotes';
 import styles from './Service.module.css';
 
+// Backlog #39 — keep in sync with public.team_invite_list. Aaron/Ashwini
+// were removed earlier (left the company); Lezhong + Pedrum added
+// 2026-06-04 matching the invite list. Julie was retired in the same pass —
+// re-add if she rejoins. Long-term this should query the invite list
+// directly instead of hard-coding (see also #72 — central template /
+// config store).
 const OPS_OWNERS = [
   'george@virgohome.io',
-  'julie@virgohome.io',
+  'huayi@virgohome.io',
   'junaid@virgohome.io',
+  'lezhong@virgohome.io',
+  'pedrum@virgohome.io',
   'raymond@virgohome.io',
   'reina@virgohome.io',
-  'huayi@virgohome.io',
 ];
 
 type Props = {

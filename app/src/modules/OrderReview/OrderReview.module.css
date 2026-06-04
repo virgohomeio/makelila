@@ -526,12 +526,7 @@
 .urgencyBanner.urgent   { background: var(--color-warning-bg); border-color: var(--color-warning-border); color: var(--color-warning); }
 .urgencyBanner.overdue  { background: var(--color-error-bg);   border-color: var(--color-error-border);   color: var(--color-error);   font-weight: 700; }
 
-.replBadge {
-  display: inline-block; margin-left: 6px;
-  padding: 1px 8px; border-radius: 999px;
-  background: #fef3c7; color: #b7791f;
-  font-size: .7rem; font-weight: 500;
-}
+/* .replBadge moved to src/styles/globals.css (backlog #62) */
 .replHeaderBanner {
   background: #fffbeb; border-left: 4px solid #f6ad55;
   padding: 8px 12px; border-radius: 6px;

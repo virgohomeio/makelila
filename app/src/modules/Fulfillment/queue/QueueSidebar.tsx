@@ -72,7 +72,7 @@ export function QueueSidebar({
             <div className={styles.rowName}>
               {r.priority && !fulfilled && <span className={styles.priorityBadge} title="Priority — expedite">⭐</span>}
               {o?.customer_name ?? r.order_id}
-              {o?.kind === 'replacement' && <span className={styles.replBadge}>Replacement</span>}
+              {o?.kind === 'replacement' && <span className="replBadge">Replacement</span>}
               <span className={styles.stepBadge}>{r.step}/6</span>
             </div>
             <div className={styles.rowMeta}>

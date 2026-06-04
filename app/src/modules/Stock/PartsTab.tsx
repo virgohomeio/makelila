@@ -349,6 +349,7 @@ function ShipPartModal({
                 <option>Canpar</option>
                 <option>Purolator</option>
                 <option>Canada Post</option>
+                <option>GLS</option>
                 <option>USPS</option>
                 <option>Other</option>
               </select>

@@ -1003,16 +1003,7 @@
 .markDeliveredBtn:hover { background: #9ae6b4; }
 .markDeliveredBtn:disabled { opacity: 0.5; cursor: not-allowed; }
 
-.replBadge {
-  display: inline-block;
-  margin-left: 6px;
-  padding: 1px 8px;
-  border-radius: 999px;
-  background: #fef3c7;
-  color: #b7791f;
-  font-size: .7rem;
-  font-weight: 500;
-}
+/* .replBadge moved to src/styles/globals.css (backlog #62) */
 
 /* ============================================================ Dashboard tab */
 

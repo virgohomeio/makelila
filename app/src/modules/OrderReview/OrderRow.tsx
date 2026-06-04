@@ -30,7 +30,7 @@ export function OrderRow({
         )}
         {order.order_ref}
         {order.kind === 'replacement' && (
-          <span className={styles.replBadge}>Replacement</span>
+          <span className="replBadge">Replacement</span>
         )}
         {' '}· {order.city}
         {(() => {
