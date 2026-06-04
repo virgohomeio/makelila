@@ -598,6 +598,51 @@ export async function markOrderShipped(orderId: string, shippingCostUsd: number)
   await logAction('order_shipped', row.order_ref, `shipping $${shippingCostUsd.toFixed(2)}`);
 }
 
+/** Shipped orders that have not yet been marked delivered.
+ *  Live-subscribed; disappears from the list once delivered_at is set. */
+export function useShippedOrders(): { orders: Order[]; loading: boolean } {
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let channel: ReturnType<typeof supabase.channel> | null = null;
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await supabase
+        .from('orders')
+        .select('id, order_ref, kind, customer_name, shipped_at, delivered_at')
+        .not('shipped_at', 'is', null)
+        .is('delivered_at', null)
+        .order('shipped_at', { ascending: false });
+      if (cancelled) return;
+      if (!error && data) setOrders(data as Order[]);
+      setLoading(false);
+
+      channel = supabase
+        .channel('orders:shipped:realtime')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, (payload) => {
+          setOrders(prev => {
+            const row = payload.new as Order | null;
+            if (payload.eventType === 'DELETE') {
+              const old = payload.old as { id: string } | null;
+              return old ? prev.filter(o => o.id !== old.id) : prev;
+            }
+            if (!row) return prev;
+            // Remove row if it now has delivered_at or no shipped_at (it no longer belongs)
+            if (!row.shipped_at || row.delivered_at) return prev.filter(o => o.id !== row.id);
+            const idx = prev.findIndex(o => o.id === row.id);
+            if (idx >= 0) { const next = [...prev]; next[idx] = row; return next; }
+            return [row, ...prev];
+          });
+        })
+        .subscribe();
+    })();
+    return () => { cancelled = true; if (channel) void channel.unsubscribe(); };
+  }, []);
+
+  return { orders, loading };
+}
+
 /** Records that an order was delivered. For replacement orders, also closes
  *  the linked service ticket. Idempotent — safe to call twice. */
 export async function markOrderDelivered(orderId: string): Promise<void> {

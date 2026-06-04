@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useUnits } from '../../lib/stock';
+import { useShippedOrders, markOrderDelivered } from '../../lib/orders';
 import { supabase } from '../../lib/supabase';
 import styles from './PostShipment.module.css';
 
@@ -163,6 +164,8 @@ export function HistoryTab() {
         <KPI label="Undated rows" value={stats.undated} sub={stats.undated > 0 ? 'no shipped_at on file' : 'all dated'} />
       </div>
 
+      <AwaitingDelivery />
+
       <ShopifyPushBar />
 
       <div className={styles.filterBar}>
@@ -226,6 +229,63 @@ export function HistoryTab() {
           </tbody>
         </table>
       </div>
+    </div>
+  );
+}
+
+function AwaitingDelivery() {
+  const { orders, loading } = useShippedOrders();
+  const [busy, setBusy] = useState<string | null>(null);
+
+  if (loading) return null;
+  if (orders.length === 0) return null;
+
+  return (
+    <div className={styles.awaitingDelivery}>
+      <div className={styles.awaitingHeader}>
+        Awaiting delivery confirmation
+        <span className={styles.awaitingCount}>{orders.length}</span>
+      </div>
+      <table className={styles.table}>
+        <thead>
+          <tr>
+            <th>Order ref</th>
+            <th>Customer</th>
+            <th>Kind</th>
+            <th>Shipped</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {orders.map(o => (
+            <tr key={o.id}>
+              <td className={styles.mono}>{o.order_ref}</td>
+              <td>
+                {o.customer_name}
+                {o.kind === 'replacement' && (
+                  <span className={styles.replBadge}>Replacement</span>
+                )}
+              </td>
+              <td>{o.kind}</td>
+              <td className={styles.mono}>{formatDate(o.shipped_at)}</td>
+              <td>
+                <button
+                  className={styles.markDeliveredBtn}
+                  disabled={busy === o.id}
+                  onClick={async () => {
+                    setBusy(o.id);
+                    try { await markOrderDelivered(o.id); }
+                    catch (e) { alert((e as Error).message); }
+                    finally { setBusy(null); }
+                  }}
+                >
+                  {busy === o.id ? 'Saving…' : 'Mark delivered'}
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

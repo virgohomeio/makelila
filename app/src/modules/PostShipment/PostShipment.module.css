@@ -959,6 +959,61 @@
 .btnSecondary:hover { border-color: var(--color-ink-subtle); }
 .btnSecondary:disabled { opacity: 0.5; cursor: not-allowed; }
 
+/* ============================================================ Awaiting delivery (HistoryTab) */
+
+.awaitingDelivery {
+  background: #fff;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.awaitingHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 14px;
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--color-ink-subtle);
+}
+.awaitingCount {
+  background: var(--color-crimson);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 800;
+  padding: 1px 7px;
+  border-radius: 10px;
+  letter-spacing: 0;
+}
+
+.markDeliveredBtn {
+  padding: 4px 10px;
+  border-radius: 4px;
+  background: #c6f6d5;
+  color: #22543d;
+  border: 1px solid #9ae6b4;
+  cursor: pointer;
+  font-size: .8rem;
+  white-space: nowrap;
+}
+.markDeliveredBtn:hover { background: #9ae6b4; }
+.markDeliveredBtn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.replBadge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: #fef3c7;
+  color: #b7791f;
+  font-size: .7rem;
+  font-weight: 500;
+}
+
 /* ============================================================ Dashboard tab */
 
 .dashGrid {
