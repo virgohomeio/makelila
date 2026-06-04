@@ -172,12 +172,10 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
         </div>
 
         <div className={styles.detailSection}>
-          {ticket.replacement_order_id ? (
+          {ticket.replacement_order_id && ticket.replacement_order_id.length > 0 ? (
             <div className={styles.replacementLink}>
               Replacement order:&nbsp;
-              <a href={`#/order-review?order_id=${ticket.replacement_order_id}`}>
-                open in Order Review
-              </a>
+              <a href="#/order-review">open in Order Review</a>
             </div>
           ) : (
             <button
@@ -204,7 +202,7 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
             onClose={() => setPickerOpen(false)}
             onCreated={(result) => {
               setPickerOpen(false);
-              window.location.hash = `#/order-review?order_id=${result.id}`;
+              window.location.hash = '#/order-review';
             }}
           />
         )}
