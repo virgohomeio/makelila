@@ -177,7 +177,7 @@ Alpha feedback collection window is **closed**. The 11 items above plus the meet
 - **#41** Define the support-ticket → Repair tab pipeline. Today it's ambiguous how a defect-flagged ticket moves into the repair queue. — **SHIPPED** (Replacement tab now has a default-open "Triage candidates" section listing service tickets where topic ∈ return_hardware_defect/warranty_replacement AND status not closed/resolved AND replacement_order_id is null; click → ticket panel → "Send replacement" creates the order via #55 flow; row drops off automatically once linked).
 - **#42** Customers tab: data sync is incomplete — fields missing on some customers. Likely linked to #34.
 - **#43** Add unit serial number to the customer profile card in the Customers tab (currently you have to cross-reference Stock).
-- **#44** Auto-invite Reina to every customer onboarding call when it is scheduled in Calendly.
+- **#44** Auto-invite Reina to every customer onboarding call when it is scheduled in Calendly. — **SHIPPED** (2026-06-04; refined 2026-06-04 per operator feedback). `sync-calendly-events` cron looks up the Calendly-created event on `CALENDAR_INVITER_MAILBOX`'s Google Calendar via `events.list` (±2 min window around `calendly_event_start`, matched by customer email attendee) and PATCHes its attendees to add `REINA_INVITE_EMAIL` with `sendUpdates=all`. Skips Saturday + Sunday in `REINA_TIMEZONE` (default `America/Toronto`). Dedupe via `service_tickets.reina_invited_at`. Originally created standalone "co-host" events instead of patching — replaced after the first 3 went out because Reina's calendar got cluttered with duplicate events.
 
 ---
 

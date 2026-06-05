@@ -97,6 +97,10 @@ async function handle(req: Request): Promise<Response> {
   const reinaEmail        = Deno.env.get('REINA_INVITE_EMAIL') ?? null;
   const calendarInviter   = Deno.env.get('CALENDAR_INVITER_MAILBOX') ?? null;
   const saKeyB64          = Deno.env.get('GOOGLE_SERVICE_ACCOUNT_KEY') ?? null;
+  // Reina is off Saturday + Sunday — skip invites for events that fall
+  // on weekends in her local timezone. Configurable via env in case she
+  // ever changes timezones.
+  const reinaTimezone     = Deno.env.get('REINA_TIMEZONE') ?? 'America/Toronto';
   let calendarToken: string | null = null;
   if (reinaEmail && calendarInviter && saKeyB64) {
     try {
@@ -211,33 +215,55 @@ async function handle(req: Request): Promise<Response> {
           .eq('onboarding_status', 'not_scheduled');
       }
 
-      // Backlog #44 — invite Reina if not already done and the event is
-      // still in the future. Skips silently when env isn't configured;
-      // failures don't break the sync.
+      // Backlog #44 — add Reina as a co-host on the *existing* Calendly
+      // event in Huayi's calendar. Skip when:
+      //   • env not configured
+      //   • already invited (reina_invited_at set)
+      //   • event in the past
+      //   • event falls on a weekend in Reina's timezone (she's off Sat+Sun)
+      // Approach: find the Google Calendar event Calendly created on
+      // calendarInviter's calendar by start-time + customer email match,
+      // then PATCH its attendees to include Reina (sendUpdates=all so
+      // she gets the standard invitation email).
       if (
         inviteEnabled
         && !upRow?.reina_invited_at
         && Date.parse(ev.start_time) > Date.now()
       ) {
-        try {
-          await createCalendarInvite(calendarToken!, calendarInviter!, {
-            summary: `Onboarding co-host: ${invitee?.name ?? row.customer_name ?? 'Customer'}`,
-            description: [
-              `Calendly: ${ev.uri}`,
-              row.customer_email ? `Customer: ${row.customer_name ?? ''} <${row.customer_email}>` : null,
-              `Joining as a co-host on the customer onboarding call.`,
-            ].filter(Boolean).join('\n'),
-            start: ev.start_time,
-            end:   ev.end_time,
-            attendees: [reinaEmail!],
-          });
-          await admin
-            .from('service_tickets')
-            .update({ reina_invited_at: new Date().toISOString() })
-            .eq('id', upRow.id);
-          invitesSent++;
-        } catch (e) {
-          inviteErrors.push({ uri: ev.uri, reason: (e as Error).message.slice(0, 200) });
+        if (isWeekendInTimezone(ev.start_time, reinaTimezone)) {
+          invitesSkipped++;
+          // Don't stamp reina_invited_at — leaves the door open if the
+          // event gets rescheduled to a weekday later.
+        } else {
+          try {
+            const matched = await findCalendlyEventOnCalendar(
+              calendarToken!,
+              calendarInviter!,
+              ev.start_time,
+              invitee?.email ?? null,
+            );
+            if (!matched) {
+              inviteErrors.push({
+                uri: ev.uri,
+                reason: `No matching event on ${calendarInviter}'s calendar at ${ev.start_time}`,
+              });
+            } else {
+              await addAttendeeToCalendarEvent(
+                calendarToken!,
+                calendarInviter!,
+                matched.id,
+                matched.attendees ?? [],
+                reinaEmail!,
+              );
+              await admin
+                .from('service_tickets')
+                .update({ reina_invited_at: new Date().toISOString() })
+                .eq('id', upRow.id);
+              invitesSent++;
+            }
+          } catch (e) {
+            inviteErrors.push({ uri: ev.uri, reason: (e as Error).message.slice(0, 200) });
+          }
         }
       } else if (inviteEnabled) {
         invitesSkipped++;
@@ -296,35 +322,118 @@ async function getCalendarAccessToken(
   return json.access_token;
 }
 
-async function createCalendarInvite(
+/** Returns true when the given ISO timestamp falls on a Sat/Sun in the
+ *  given IANA timezone. Used to skip Reina's co-host invite for weekend
+ *  bookings (she doesn't work weekends). */
+function isWeekendInTimezone(isoTs: string, timezone: string): boolean {
+  const fmt = new Intl.DateTimeFormat('en-US', {
+    timeZone: timezone,
+    weekday: 'short',
+  });
+  const wd = fmt.format(new Date(isoTs));
+  return wd === 'Sat' || wd === 'Sun';
+}
+
+type CalendarAttendee = {
+  email?: string;
+  displayName?: string;
+  responseStatus?: string;
+  organizer?: boolean;
+  self?: boolean;
+};
+
+type CalendarEvent = {
+  id: string;
+  summary?: string;
+  description?: string;
+  start?: { dateTime?: string };
+  end?:   { dateTime?: string };
+  attendees?: CalendarAttendee[];
+  status?: string;
+};
+
+/** Locate the Google Calendar event Calendly created for a given
+ *  scheduled-event start time + invitee email. We list events in a
+ *  ±2 minute window around the Calendly start time and pick the first
+ *  one whose attendee list contains the customer's email. ±2 min covers
+ *  small clock skew between Calendly's stored time and Google's stored
+ *  time without grabbing adjacent bookings. */
+async function findCalendlyEventOnCalendar(
   accessToken: string,
-  calendarId: string,   // delegated subject; use 'primary' for that mailbox's primary calendar
-  ev: {
-    summary: string;
-    description: string;
-    start: string;       // ISO 8601
-    end: string;         // ISO 8601
-    attendees: string[];
-  },
+  calendarId: string,
+  calendlyStartIso: string,
+  customerEmail: string | null,
+): Promise<CalendarEvent | null> {
+  const startMs = Date.parse(calendlyStartIso);
+  const timeMin = new Date(startMs - 2 * 60 * 1000).toISOString();
+  const timeMax = new Date(startMs + 2 * 60 * 1000).toISOString();
+
+  const url = new URL(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`);
+  url.searchParams.set('timeMin', timeMin);
+  url.searchParams.set('timeMax', timeMax);
+  url.searchParams.set('singleEvents', 'true');
+  url.searchParams.set('orderBy', 'startTime');
+  url.searchParams.set('maxResults', '20');
+
+  const res = await fetch(url.toString(), {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) {
+    throw new Error(`Calendar events.list ${res.status}: ${(await res.text()).slice(0, 300)}`);
+  }
+  const json = await res.json() as { items?: CalendarEvent[] };
+  const items = (json.items ?? []).filter(e => e.status !== 'cancelled');
+
+  if (customerEmail) {
+    const target = customerEmail.toLowerCase();
+    const match = items.find(e =>
+      (e.attendees ?? []).some(a => (a.email ?? '').toLowerCase() === target)
+    );
+    if (match) return match;
+  }
+
+  // No customer email available, or no attendee match: fall back to the
+  // single closest event by start-time delta (only safe when there's
+  // exactly one event in the window).
+  if (items.length === 1) return items[0];
+  return null;
+}
+
+/** PATCH the event's attendees array to include the new attendee. If
+ *  the email is already on the list (e.g. operator added Reina manually
+ *  before this ran), this is a no-op against Google. sendUpdates=all
+ *  fires the standard Google Calendar invite email to the new attendee. */
+async function addAttendeeToCalendarEvent(
+  accessToken: string,
+  calendarId: string,
+  eventId: string,
+  existingAttendees: CalendarAttendee[],
+  newAttendeeEmail: string,
 ): Promise<void> {
-  const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events?sendUpdates=all`;
-  const body = {
-    summary: ev.summary,
-    description: ev.description,
-    start: { dateTime: ev.start },
-    end:   { dateTime: ev.end },
-    attendees: ev.attendees.map(email => ({ email })),
-    reminders: { useDefault: true },
-  };
+  const alreadyOn = existingAttendees.some(
+    a => (a.email ?? '').toLowerCase() === newAttendeeEmail.toLowerCase()
+  );
+  const nextAttendees = alreadyOn
+    ? existingAttendees
+    : [...existingAttendees, { email: newAttendeeEmail }];
+
+  // Strip fields Google rejects on write (organizer/self/displayName from
+  // the read echo are fine to pass back; responseStatus would force a reset).
+  const cleanAttendees = nextAttendees
+    .filter(a => a.email)
+    .map(a => ({ email: a.email!, displayName: a.displayName, responseStatus: a.responseStatus }));
+
+  const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}?sendUpdates=all`;
   const res = await fetch(url, {
-    method: 'POST',
+    method: 'PATCH',
     headers: {
       Authorization: `Bearer ${accessToken}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify(body),
+    body: JSON.stringify({ attendees: cleanAttendees }),
   });
   if (!res.ok) {
-    throw new Error(`Calendar events.insert ${res.status}: ${(await res.text()).slice(0, 300)}`);
+    throw new Error(`Calendar events.patch ${res.status}: ${(await res.text()).slice(0, 300)}`);
   }
 }
+
