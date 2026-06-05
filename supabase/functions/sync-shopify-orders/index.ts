@@ -64,6 +64,7 @@ type MappedOrder = {
   address_verdict: 'house' | 'apt' | 'remote';
   freight_estimate_usd: number;
   freight_threshold_usd: number;
+  freight_estimate_source: string;
   customer_paid_shipping_usd: number;
   total_usd: number;
   currency: string;
@@ -147,11 +148,14 @@ function mapOrder(
     region_state: addr.province_code ?? null,
     country,
     address_verdict: verdict,
-    freight_estimate_usd: freight,
+    // Freight estimate is the operator's carrier quote (ClickShip/Freightcom)
+    // and is NOT sourced from Shopify. New orders start with no quote (0 =>
+    // "No freight quote on file" in the UI) for the operator to fill in
+    // manually. The customer-paid shipping amount Shopify recorded lives in its
+    // own column (customer_paid_shipping_usd) and feeds the payment summary.
+    freight_estimate_usd: 0,
     freight_threshold_usd: 200.00,
-    // Customer-paid shipping is initialized from the same Shopify value but
-    // lives in its own column so operator edits to freight_estimate_usd
-    // don't change the displayed paid-shipping amount. Backlog #65.
+    freight_estimate_source: 'manual',
     customer_paid_shipping_usd: freight,
     total_usd: total,
     // Currency the customer was charged in (presentment); falls back to shop currency.
@@ -235,9 +239,10 @@ serve(async (req: Request) => {
   }
 
   // 4. Insert new orders (ignore dupes), then refresh Shopify-sourced fields
-  //    (placed_at, freight_estimate_usd) on existing rows so historical syncs
-  //    that happened before placed_at was mapped get corrected. We never
-  //    overwrite internal fields like status/dispositioned_* here.
+  //    (placed_at, customer_paid_shipping_usd, financial breakdown) on existing
+  //    rows so historical syncs that happened before those were mapped get
+  //    corrected. We never overwrite internal/operator-owned fields like
+  //    status/dispositioned_* or freight_estimate_usd here.
 
   // Pre-fetch existing orders so the refresh path can decide whether to also
   // pull contact/address updates (only safe when the operator hasn't yet
@@ -276,7 +281,9 @@ serve(async (req: Request) => {
 
     const refreshPatch: Record<string, unknown> = {
       placed_at: m.placed_at,
-      freight_estimate_usd: m.freight_estimate_usd,
+      // NOTE: freight_estimate_usd is intentionally NOT refreshed here. It's an
+      // operator-owned manual quote and must never be clobbered by a sync. The
+      // Shopify shipping amount is still refreshed into customer_paid_shipping_usd.
       customer_paid_shipping_usd: m.customer_paid_shipping_usd,
       currency: m.currency,
       postal_code: m.postal_code,
