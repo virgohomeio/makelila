@@ -41,7 +41,7 @@ export function ReturnsTab() {
     };
     let total = 0, open = 0, refunded = 0, pending = 0, refundedUsd = 0;
     let canada = 0, usa = 0;
-    let amounts: number[] = [];
+    const amounts: number[] = [];
     for (const r of returns) {
       total++;
       if (r.channel === 'Canada') canada++;

@@ -1,3 +1,7 @@
+// Mock fixtures pass `as any` to satisfy the polymorphic supabase client
+// surface — this is the right escape valve for test mocks; the runtime
+// behavior is what the tests assert.
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const { updateMock, eqMock, fromMock, getUserMock, logActionMock, rpcMock } = vi.hoisted(() => {
@@ -130,7 +134,6 @@ describe('createReplacementOrder', () => {
     const ticketUpdate = vi.fn().mockResolvedValue({ error: null });
     const unitsUpdate = vi.fn().mockResolvedValue({ error: null });
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     fromMock.mockImplementation(((table: string) => {
       if (table === 'orders') return { insert };
       if (table === 'service_tickets') return { update: () => ({ eq: ticketUpdate }) };
@@ -182,7 +185,6 @@ describe('markOrderShipped', () => {
     const select = vi.fn().mockReturnValue({ eq: selectEq });
     const updateEq = vi.fn().mockResolvedValue({ error: null });
     const update = vi.fn().mockReturnValue({ eq: updateEq });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     fromMock.mockReturnValue({ select, update } as any);
     await markOrderShipped('o1', 42.75);
     expect(update).toHaveBeenCalledWith(expect.objectContaining({
@@ -212,7 +214,6 @@ describe('markOrderDelivered', () => {
     const orderUpdateEq = vi.fn().mockResolvedValue({ error: null });
     const orderUpdate = vi.fn().mockReturnValue({ eq: orderUpdateEq });
     const ticketUpdate = vi.fn();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     fromMock.mockImplementation(((table: string) => {
       if (table === 'orders') return { update: orderUpdate, select: () => ({ eq: orderEqSel }) };
       if (table === 'service_tickets') return { update: ticketUpdate };
@@ -232,7 +233,6 @@ describe('markOrderDelivered', () => {
     const orderUpdate = vi.fn().mockReturnValue({ eq: orderUpdateEq });
     const ticketUpdateEq = vi.fn().mockResolvedValue({ error: null });
     const ticketUpdate = vi.fn().mockReturnValue({ eq: ticketUpdateEq });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     fromMock.mockImplementation(((table: string) => {
       if (table === 'orders') return { update: orderUpdate, select: () => ({ eq: orderEqSel }) };
       if (table === 'service_tickets') return { update: ticketUpdate };
@@ -251,7 +251,6 @@ describe('markOrderDelivered', () => {
               delivered_at: null, shipped_at: null }, error: null,
     });
     const orderEqSel = vi.fn().mockReturnValue({ single: orderSingle });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     fromMock.mockImplementation(((table: string) => {
       if (table === 'orders') return { select: () => ({ eq: orderEqSel }) };
       throw new Error(`unexpected table ${table}`);
