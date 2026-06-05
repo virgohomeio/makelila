@@ -903,3 +903,76 @@ export async function attachmentSignedUrl(file_path: string): Promise<string | n
   if (error || !data) return null;
   return data.signedUrl;
 }
+
+// Storage bucket constraints — mirrored from the bucket config so the UI
+// can validate client-side before hitting Supabase Storage (which returns
+// opaque "Payload too large" / "mime type not allowed" errors).
+export const ATTACHMENT_BUCKET = 'ticket-attachments';
+export const ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024;
+export const ATTACHMENT_ALLOWED_MIME = [
+  'image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif',
+  'video/mp4',  'video/quicktime', 'video/webm',
+] as const;
+export const ATTACHMENT_INPUT_ACCEPT = ATTACHMENT_ALLOWED_MIME.join(',');
+
+/** Upload a single photo or video to a ticket. Validates type + size
+ *  client-side, uploads to private storage bucket, then writes the DB row
+ *  so realtime picks it up. Caller should handle thrown errors (show in UI). */
+export async function uploadTicketAttachment(
+  ticketId: string,
+  file: File,
+): Promise<TicketAttachment> {
+  if (!ATTACHMENT_ALLOWED_MIME.includes(file.type as typeof ATTACHMENT_ALLOWED_MIME[number])) {
+    throw new Error(`Unsupported file type: ${file.type || '(unknown)'}. Allowed: JPEG, PNG, WebP, HEIC, MP4, MOV, WebM.`);
+  }
+  if (file.size > ATTACHMENT_MAX_BYTES) {
+    throw new Error(`File too large (${(file.size / 1_000_000).toFixed(1)} MB). Maximum is 25 MB.`);
+  }
+  const { data: { user } } = await supabase.auth.getUser();
+  // Path layout mirrors ServiceRequestForm: ticketId folder so RLS /
+  // signed-URL scoping by ticket is straightforward, UUID prefix avoids
+  // collisions when the same filename is uploaded twice.
+  const path = `${ticketId}/${crypto.randomUUID()}-${file.name}`;
+  const { error: upErr } = await supabase.storage
+    .from(ATTACHMENT_BUCKET)
+    .upload(path, file, { contentType: file.type, upsert: false });
+  if (upErr) throw new Error(`Upload failed: ${upErr.message}`);
+
+  const { data: row, error: rowErr } = await supabase
+    .from('service_ticket_attachments')
+    .insert({
+      ticket_id:   ticketId,
+      file_path:   path,
+      file_name:   file.name,
+      mime_type:   file.type,
+      size_bytes:  file.size,
+      uploaded_by: user?.id ?? null,
+    })
+    .select('*')
+    .single();
+  if (rowErr || !row) {
+    // Best-effort cleanup of the orphaned storage object so we don't leak
+    // bytes. If this delete fails too, the file just sits in the bucket
+    // unreferenced — operator can purge later.
+    await supabase.storage.from(ATTACHMENT_BUCKET).remove([path]);
+    throw new Error(`Attachment record failed: ${rowErr?.message ?? 'no row returned'}`);
+  }
+  await logAction('ticket_attachment_added', ticketId, `${file.name} (${Math.round(file.size / 1000)} KB)`);
+  return row as TicketAttachment;
+}
+
+/** Delete an attachment — storage object first, then DB row. If the storage
+ *  delete fails we still drop the DB row to avoid the operator seeing a
+ *  "ghost" attachment that 404s on signed-URL fetch. */
+export async function deleteTicketAttachment(att: TicketAttachment): Promise<void> {
+  const { error: storageErr } = await supabase.storage
+    .from(ATTACHMENT_BUCKET)
+    .remove([att.file_path]);
+  if (storageErr) console.warn('Attachment storage delete failed (non-fatal):', storageErr.message);
+  const { error: rowErr } = await supabase
+    .from('service_ticket_attachments')
+    .delete()
+    .eq('id', att.id);
+  if (rowErr) throw new Error(`Failed to delete attachment record: ${rowErr.message}`);
+  await logAction('ticket_attachment_deleted', att.ticket_id, att.file_name);
+}

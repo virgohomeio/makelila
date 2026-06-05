@@ -888,3 +888,78 @@
   padding: 0;
   font: inherit;
 }
+
+/* ============================================================ Attachment upload + delete affordances */
+.attachUploadRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.attachUploadBtn {
+  padding: 6px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  background: #fff;
+  color: var(--color-ink);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.attachUploadBtn:hover:not(:disabled) {
+  background: var(--color-surface);
+  border-color: var(--color-crimson);
+}
+.attachUploadBtn:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+.attachHint {
+  font-size: 10px;
+  color: var(--color-ink-subtle);
+}
+.attachEmpty {
+  font-size: 11px;
+  color: var(--color-ink-subtle);
+}
+.attachError {
+  font-size: 11px;
+  color: var(--color-error);
+  background: #fff5f5;
+  border: 1px solid #f5c6cb;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  margin-bottom: 8px;
+}
+.attachUploadingPlaceholder {
+  width: 100%; height: 100%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 10px;
+  color: var(--color-ink-subtle);
+  background: var(--color-surface);
+}
+/* Delete X button overlaid on each thumb. Visible on hover so it doesn't
+ * compete with the content visually but is reachable when needed. */
+.attachThumb .attachDeleteBtn,
+.attachFileWrap .attachDeleteBtn {
+  position: absolute;
+  top: 4px; right: 4px;
+  width: 18px; height: 18px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(0,0,0,0.7);
+  color: #fff;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+.attachThumb:hover .attachDeleteBtn,
+.attachFileWrap:hover .attachDeleteBtn {
+  opacity: 1;
+}
+.attachFileWrap {
+  position: relative;
+  display: inline-block;
+}
