@@ -130,7 +130,8 @@ Deno.serve(async (req: Request) => {
           source: 'quo',
           kind: 'conversation',
           category: 'support',
-          status: 'new',
+          // We just sent the customer a follow-up SMS — ball's in their court.
+          status: 'waiting_on_customer',
           priority: 'normal',
           subject: `Follow-up SMS to ${c.full_name ?? c.phone}`,
           description: message.slice(0, 200),
