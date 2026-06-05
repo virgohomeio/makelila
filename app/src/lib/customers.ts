@@ -105,16 +105,18 @@ export async function recordFollowUp(
 // public.customer_profitability SQL view (migration 20260604260000). The
 // view does the heavy joining server-side so the browser doesn't have
 // to pull thousands of orders/returns/tickets.
-// Backlog #58 V3 — 4-bucket cost model. See migration
-// 20260605010000_customer_profitability_v3.sql for the SQL view.
+// Backlog #58 V3 + V4 — 4-bucket cost model with sales tax split out
+// of revenue (V4). See migration 20260605050000_customer_profitability_v4_tax_split.sql.
 export type CustomerProfitability = {
   id: string;
   full_name: string;
   email: string | null;
   country: string | null;
   onboard_date: string | null;
-  // Revenue
+  // Revenue (net of tax — tax is pass-through to govt and not VCycene income)
   revenue_usd: number;
+  // Sales tax collected on behalf of govt — informational, NOT part of margin
+  tax_collected_usd: number;
   // 4 cost buckets — sale_cogs + sale_shipping are sales-only;
   // expected_warranty covers ALL non-cancelled replacement orders;
   // expected_refund covers ALL non-denied refund approvals.
@@ -167,6 +169,7 @@ export function useCustomerProfitability(): {
       const coerced = (data ?? []).map((r: Record<string, unknown>) => ({
         ...r,
         revenue_usd:                Number(r.revenue_usd ?? 0),
+        tax_collected_usd:          Number(r.tax_collected_usd ?? 0),
         sale_cogs_usd:              Number(r.sale_cogs_usd ?? 0),
         sale_shipping_usd:          Number(r.sale_shipping_usd ?? 0),
         expected_warranty_cost_usd: Number(r.expected_warranty_cost_usd ?? 0),

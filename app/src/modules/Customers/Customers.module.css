@@ -874,6 +874,10 @@
   color: #1a202c;
   font-variant-numeric: tabular-nums;
 }
+.profTaxLine {
+  color: #718096 !important;
+  font-style: italic;
+}
 .profCardCounts {
   display: flex;
   flex-wrap: wrap;

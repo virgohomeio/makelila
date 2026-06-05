@@ -48,14 +48,15 @@ export function ProfitabilityTab() {
     <div className={styles.profitabilityTab}>
       <div className={styles.profSummary}>
         <SummaryStat label="Customers"            value={String(filtered.length)} />
-        <SummaryStat label="Revenue"              value={fmt(totals.revenue)} />
+        <SummaryStat label="Revenue (net of tax)" value={fmt(totals.revenue)} />
+        <SummaryStat label="Tax collected"        value={fmt(totals.tax)}       variant="warn" />
         <SummaryStat label="COGS + shipping"      value={fmt(totals.salesCost)} variant="warn" />
         <SummaryStat label="Expected warranty"    value={fmt(totals.warranty)}  variant="warn" />
         <SummaryStat label="Expected refunds"     value={fmt(totals.refund)}    variant="warn" />
         <SummaryStat label="Net margin"           value={fmt(totals.margin)}    variant={totals.margin < 0 ? 'bad' : 'good'} />
       </div>
       <div className={styles.profCurrencyNote}>
-        "Expected warranty" sums COGS + shipping for every non-cancelled replacement order. "Expected refunds" sums every refund approval that isn't denied (covers in-flight + settled). Amounts shown in the order's native currency (CAD for most rows) — see #65 for the FX conversion follow-up.
+        Revenue excludes sales tax (passed through to govt, not VCycene income). "Expected warranty" sums COGS + shipping for every non-cancelled replacement order. "Expected refunds" sums every refund approval that isn't denied. Amounts shown in the order's native currency (CAD for most rows) — see #65 for the FX conversion follow-up.
       </div>
 
       <InsightsPanel insights={insights} />
@@ -133,7 +134,14 @@ function ProfitCard({ row }: { row: CustomerProfitability }) {
       <div className={styles.profMargin}>{fmt(margin)}</div>
       <div className={styles.profCardLabel}>net margin</div>
       <dl className={styles.profCardBreakdown}>
-        <div><dt>Revenue</dt><dd>{fmt(row.revenue_usd)}</dd></div>
+        <div title="net of sales tax — tax is passed through to the govt, not VCycene revenue">
+          <dt>Revenue</dt><dd>{fmt(row.revenue_usd)}</dd>
+        </div>
+        {row.tax_collected_usd > 0 && (
+          <div title="sales tax collected for the govt (not in margin)">
+            <dt>Tax</dt><dd className={styles.profTaxLine}>+{fmt(row.tax_collected_usd)}</dd>
+          </div>
+        )}
         <div><dt>COGS</dt><dd>{fmt(row.sale_cogs_usd)}</dd></div>
         <div><dt>Shipping</dt><dd>{fmt(row.sale_shipping_usd)}</dd></div>
         <div title="cogs + shipping on all non-cancelled replacement orders">
@@ -193,12 +201,13 @@ function aggregate(rs: CustomerProfitability[]) {
   return rs.reduce(
     (acc, r) => ({
       revenue:   acc.revenue   + r.revenue_usd,
+      tax:       acc.tax       + r.tax_collected_usd,
       salesCost: acc.salesCost + r.sale_cogs_usd + r.sale_shipping_usd,
       warranty:  acc.warranty  + r.expected_warranty_cost_usd,
       refund:    acc.refund    + r.expected_refund_usd,
       margin:    acc.margin    + r.net_margin_usd,
     }),
-    { revenue: 0, salesCost: 0, warranty: 0, refund: 0, margin: 0 },
+    { revenue: 0, tax: 0, salesCost: 0, warranty: 0, refund: 0, margin: 0 },
   );
 }
 
