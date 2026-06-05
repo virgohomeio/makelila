@@ -92,15 +92,26 @@ async function handle(req: Request): Promise<Response> {
     );
   }
 
-  // Backlog #44 — resolve Reina-invite config once per run. Soft no-op
-  // when any piece is missing so the core sync keeps working.
+  // Backlog #44 + #75 — co-host invite config. Resolved once per run.
+  // Soft no-op when any piece is missing so the core sync keeps working.
+  //   • REINA_INVITE_EMAIL          — sole co-host for ONBOARDING events (#44)
+  //   • DIAGNOSIS_COHOST_EMAILS     — comma-separated co-hosts for DIAGNOSIS events (#75)
+  //   • CALENDAR_INVITER_MAILBOX    — mailbox whose calendar Calendly writes to
+  //   • GOOGLE_SERVICE_ACCOUNT_KEY  — base64 SA JSON with calendar.events DWD
+  // Diagnosis events are identified by Calendly event-type name (default
+  // "LILA Diagnosis Chat"). Operator-tunable without redeploy.
   const reinaEmail        = Deno.env.get('REINA_INVITE_EMAIL') ?? null;
+  const diagnosisCohosts  = (Deno.env.get('DIAGNOSIS_COHOST_EMAILS') ?? '')
+    .split(',').map(s => s.trim()).filter(Boolean);
   const calendarInviter   = Deno.env.get('CALENDAR_INVITER_MAILBOX') ?? null;
   const saKeyB64          = Deno.env.get('GOOGLE_SERVICE_ACCOUNT_KEY') ?? null;
   // Reina is off Saturday + Sunday — skip invites for events that fall
   // on weekends in her local timezone. Configurable via env in case she
   // ever changes timezones.
   const reinaTimezone     = Deno.env.get('REINA_TIMEZONE') ?? 'America/Toronto';
+  // Substring (case-insensitive) for classifying a Calendly event-type
+  // name as a diagnosis call. Default matches "LILA Diagnosis Chat".
+  const diagnosisPattern  = (Deno.env.get('DIAGNOSIS_EVENT_NAME_MATCH') ?? 'diagnosis').toLowerCase();
   let calendarToken: string | null = null;
   if (reinaEmail && calendarInviter && saKeyB64) {
     try {
@@ -179,8 +190,15 @@ async function handle(req: Request): Promise<Response> {
 
       const host = ev.event_memberships?.[0];
 
+      // Backlog #75 — classify the Calendly event-type. "LILA Diagnosis
+      // Chat" (or whatever DIAGNOSIS_EVENT_NAME_MATCH points at) lands
+      // in category='diagnosis_call' with Reina+Junaid as co-hosts; all
+      // other event-types stay 'onboarding' with just Reina.
+      const isDiagnosis = (ev.name ?? '').toLowerCase().includes(diagnosisPattern);
+      const category = isDiagnosis ? 'diagnosis_call' as const : 'onboarding' as const;
+
       const row = {
-        category: 'onboarding' as const,
+        category,
         source: 'calendly' as const,
         status: 'new' as const,
         priority: 'normal' as const,
@@ -188,7 +206,7 @@ async function handle(req: Request): Promise<Response> {
         customer_name: invitee?.name ?? null,
         customer_email: invitee?.email?.toLowerCase() ?? null,
         customer_phone: invitee?.text_reminder_number ?? null,
-        subject: ev.name || 'Onboarding call',
+        subject: ev.name || (isDiagnosis ? 'Diagnosis call' : 'Onboarding call'),
         description: null,
         calendly_event_uri: ev.uri,
         calendly_event_start: ev.start_time,
@@ -198,7 +216,7 @@ async function handle(req: Request): Promise<Response> {
       const { data: upRow, error: upErr } = await admin
         .from('service_tickets')
         .upsert(row, { onConflict: 'calendly_event_uri', ignoreDuplicates: false })
-        .select('id, reina_invited_at, calendly_event_start')
+        .select('id, reina_invited_at, diag_cohost_invited_at, calendly_event_start')
         .single();
       if (upErr) {
         skipped.push({ uri: ev.uri, reason: `db: ${upErr.message}` });
@@ -207,7 +225,8 @@ async function handle(req: Request): Promise<Response> {
       upserted++;
 
       // Bump matching lifecycle row to onboarding_status='scheduled'
-      if (customer_id) {
+      // (only meaningful for actual onboarding events).
+      if (!isDiagnosis && customer_id) {
         await admin
           .from('customer_lifecycle')
           .update({ onboarding_status: 'scheduled' })
@@ -215,25 +234,35 @@ async function handle(req: Request): Promise<Response> {
           .eq('onboarding_status', 'not_scheduled');
       }
 
-      // Backlog #44 — add Reina as a co-host on the *existing* Calendly
-      // event in Huayi's calendar. Skip when:
-      //   • env not configured
-      //   • already invited (reina_invited_at set)
-      //   • event in the past
-      //   • event falls on a weekend in Reina's timezone (she's off Sat+Sun)
-      // Approach: find the Google Calendar event Calendly created on
-      // calendarInviter's calendar by start-time + customer email match,
-      // then PATCH its attendees to include Reina (sendUpdates=all so
-      // she gets the standard invitation email).
+      // ─── Co-host invite path ──────────────────────────────────────────
+      // Onboarding events  → invite Reina  (dedupe via reina_invited_at)
+      // Diagnosis events   → invite Reina + Junaid (dedupe via diag_cohost_invited_at)
+      // Both: skip past events, skip weekends in Reina's tz (she's off Sat+Sun
+      // — and Calendly already enforces M-F availability for both event-types
+      // today, so the weekend check is defensive).
+      //
+      // Approach in both cases: find the Google Calendar event Calendly
+      // created on calendarInviter's calendar by start-time + customer
+      // email match, then PATCH its attendees to add the co-hosts
+      // (sendUpdates=all so they get the standard invitation email).
+      const cohosts: string[] = isDiagnosis
+        ? diagnosisCohosts
+        : (reinaEmail ? [reinaEmail] : []);
+      const alreadyDone = isDiagnosis
+        ? !!upRow?.diag_cohost_invited_at
+        : !!upRow?.reina_invited_at;
+      const stampColumn = isDiagnosis ? 'diag_cohost_invited_at' : 'reina_invited_at';
+
+      const cohostsConfigured = cohosts.length > 0;
       if (
         inviteEnabled
-        && !upRow?.reina_invited_at
+        && cohostsConfigured
+        && !alreadyDone
         && Date.parse(ev.start_time) > Date.now()
       ) {
         if (isWeekendInTimezone(ev.start_time, reinaTimezone)) {
           invitesSkipped++;
-          // Don't stamp reina_invited_at — leaves the door open if the
-          // event gets rescheduled to a weekday later.
+          // Don't stamp — leaves the door open if the event reschedules.
         } else {
           try {
             const matched = await findCalendlyEventOnCalendar(
@@ -248,16 +277,16 @@ async function handle(req: Request): Promise<Response> {
                 reason: `No matching event on ${calendarInviter}'s calendar at ${ev.start_time}`,
               });
             } else {
-              await addAttendeeToCalendarEvent(
+              await addAttendeesToCalendarEvent(
                 calendarToken!,
                 calendarInviter!,
                 matched.id,
                 matched.attendees ?? [],
-                reinaEmail!,
+                cohosts,
               );
               await admin
                 .from('service_tickets')
-                .update({ reina_invited_at: new Date().toISOString() })
+                .update({ [stampColumn]: new Date().toISOString() })
                 .eq('id', upRow.id);
               invitesSent++;
             }
@@ -278,9 +307,20 @@ async function handle(req: Request): Promise<Response> {
     JSON.stringify({
       pages, fetched, upserted,
       skipped: skipped.length, skippedDetails: skipped.slice(0, 20),
-      reinaInvite: inviteEnabled
-        ? { enabled: true, sent: invitesSent, alreadySent: invitesSkipped, errors: inviteErrors.slice(0, 10) }
-        : { enabled: false, reason: 'REINA_INVITE_EMAIL / CALENDAR_INVITER_MAILBOX / GOOGLE_SERVICE_ACCOUNT_KEY not all set' },
+      coHostInvite: inviteEnabled
+        ? {
+            enabled: true,
+            onboardingCohost: reinaEmail,
+            diagnosisCohosts,
+            diagnosisPattern,
+            sent: invitesSent,
+            skipped: invitesSkipped,
+            errors: inviteErrors.slice(0, 10),
+          }
+        : {
+            enabled: false,
+            reason: 'REINA_INVITE_EMAIL / CALENDAR_INVITER_MAILBOX / GOOGLE_SERVICE_ACCOUNT_KEY not all set',
+          },
     }),
     { status: 200, headers: { ...corsHeaders, 'content-type': 'application/json' } },
   );
@@ -399,27 +439,28 @@ async function findCalendlyEventOnCalendar(
   return null;
 }
 
-/** PATCH the event's attendees array to include the new attendee. If
- *  the email is already on the list (e.g. operator added Reina manually
- *  before this ran), this is a no-op against Google. sendUpdates=all
- *  fires the standard Google Calendar invite email to the new attendee. */
-async function addAttendeeToCalendarEvent(
+/** PATCH the event's attendees array to include the new attendees. Any
+ *  emails already on the list are silently de-duped. sendUpdates=all
+ *  fires the standard Google Calendar invite email to the *added*
+ *  attendees only. */
+async function addAttendeesToCalendarEvent(
   accessToken: string,
   calendarId: string,
   eventId: string,
   existingAttendees: CalendarAttendee[],
-  newAttendeeEmail: string,
+  newAttendeeEmails: string[],
 ): Promise<void> {
-  const alreadyOn = existingAttendees.some(
-    a => (a.email ?? '').toLowerCase() === newAttendeeEmail.toLowerCase()
+  const existingLower = new Set(
+    existingAttendees.map(a => (a.email ?? '').toLowerCase()).filter(Boolean)
   );
-  const nextAttendees = alreadyOn
-    ? existingAttendees
-    : [...existingAttendees, { email: newAttendeeEmail }];
+  const toAdd: CalendarAttendee[] = newAttendeeEmails
+    .filter(e => !existingLower.has(e.toLowerCase()))
+    .map(email => ({ email }));
+  if (toAdd.length === 0) return;  // already on the event — no-op
 
-  // Strip fields Google rejects on write (organizer/self/displayName from
-  // the read echo are fine to pass back; responseStatus would force a reset).
-  const cleanAttendees = nextAttendees
+  // Strip fields Google rejects on write (organizer/self echo back is
+  // fine; responseStatus would force a reset of the customer's response).
+  const cleanAttendees = [...existingAttendees, ...toAdd]
     .filter(a => a.email)
     .map(a => ({ email: a.email!, displayName: a.displayName, responseStatus: a.responseStatus }));
 

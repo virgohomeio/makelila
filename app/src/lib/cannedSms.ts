@@ -19,10 +19,15 @@
 
 export const TRUSTPILOT_REVIEW_URL = 'https://www.trustpilot.com/review/lilacomposter.com';
 
-// Backlog #75 — Huayi's Google Calendar appointment schedule for
-// customer diagnosis calls. Centralized here so the "Send diagnosis
-// link" button (Service/TicketDetailPanel) can never paste a typo'd URL.
-export const DIAGNOSIS_CALL_BOOKING_URL = 'https://calendar.app.google/fB7amKsS8ekase689';
+// Backlog #75 — Huayi's Calendly event-type for customer diagnosis
+// calls ("LILA Diagnosis Chat", group event, M-F 1pm-5pm ET, 15min).
+// Centralized here so the "Send diagnosis link" button
+// (Service/TicketDetailPanel) can never paste a typo'd URL.
+//
+// Switched from a Google Calendar Appointment Schedule to Calendly on
+// 2026-06-04 because Google's appointment schedules cap at 1 invitee
+// per slot, and we need 2 (Reina + Junaid as co-hosts).
+export const DIAGNOSIS_CALL_BOOKING_URL = 'https://calendly.com/lila-ed/lila-diagnosis-chat';
 
 export type CannedSmsKey =
   | 'trustpilot_review_request'
