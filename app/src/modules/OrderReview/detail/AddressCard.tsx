@@ -86,6 +86,12 @@ export function AddressCard({ order }: { order: Order }) {
             : <MissingField />}
         </div>
         <div className={styles.contactLine}>
+          <span className={styles.contactLabel}>{order.country === 'US' ? 'ZIP Code' : 'Postal Code'}</span>
+          {order.address_customer_postal
+            ? <span>{order.address_customer_postal}</span>
+            : <MissingField />}
+        </div>
+        <div className={styles.contactLine}>
           <span className={styles.contactLabel}>Country</span>
           <span>{order.country}</span>
         </div>
