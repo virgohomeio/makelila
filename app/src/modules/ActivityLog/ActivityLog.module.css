@@ -34,7 +34,7 @@
 
 .body {
   display: grid;
-  grid-template-columns: 1fr 320px;
+  grid-template-columns: 1fr 420px;
   flex: 1;
   min-height: 0;
 }
@@ -245,4 +245,118 @@
 .kpiTeamCount {
   font-weight: 700;
   color: #2b6cb0;
+}
+
+/* ----- Backlog #56 V2 — extended KPI layout ----- */
+.kpiSection {
+  font-size: 10px;
+  font-weight: 700;
+  color: #4a5568;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin: 18px 0 6px;
+}
+.kpiSection:first-of-type { margin-top: 0; }
+
+.kpiTopRow {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 6px;
+}
+
+.kpiCardRow {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.kpiCard {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+
+.kpiCardValue {
+  font-size: 22px;
+  font-weight: 700;
+  color: #2b6cb0;
+  line-height: 1.1;
+}
+
+.kpiCardLabel {
+  font-size: 10px;
+  color: #4a5568;
+  margin-top: 2px;
+  font-weight: 600;
+}
+
+.kpiTopRow .kpiTile {
+  padding: 8px 6px;
+  text-align: center;
+}
+.kpiTopRow .kpiTileValue {
+  font-size: 18px;
+}
+.kpiTopRow .kpiTileLabel {
+  font-size: 9px;
+}
+
+.kpiTwoCol {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.kpiColumn {
+  background: #f7fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+
+.kpiColumnHeader {
+  font-size: 10px;
+  font-weight: 700;
+  color: #4a5568;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 6px;
+}
+
+.kpiModule {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.kpiModuleRow {
+  display: grid;
+  grid-template-columns: 80px 1fr auto;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+}
+
+.kpiModuleName {
+  color: #2d3748;
+  font-weight: 600;
+  font-size: 10px;
+}
+
+.kpiModuleBar {
+  height: 6px;
+  background: #2b6cb0;
+  border-radius: 3px;
+  min-width: 2px;
+}
+
+.kpiModuleCount {
+  font-weight: 700;
+  color: #2b6cb0;
+  font-size: 11px;
 }

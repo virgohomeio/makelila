@@ -90,6 +90,53 @@ export async function logAction(
   if (error) throw error;
 }
 
+/** Backlog #56 V2 — server-aggregated KPI window for the side panel.
+ *  Pulls every activity_log row within the last `days` days (default 7),
+ *  then aggregates client-side into the buckets the KpiPanel needs. The
+ *  audit log churn is low (state-change-driven, not user-action-driven),
+ *  so 7d of entries fits comfortably in memory and avoids the per-tile
+ *  count() round-trips that would otherwise need a Postgres RPC. */
+export function useActivityKpis(days: number = 7) {
+  const [entries, setEntries] = useState<ActivityLogEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshTick, setRefreshTick] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    let channel: RealtimeChannel | null = null;
+    (async () => {
+      const sinceIso = new Date(Date.now() - days * 24 * 3600_000).toISOString();
+      const { data, error } = await supabase
+        .from('activity_log')
+        .select('id, user_id, ts, type, entity, detail, profiles(display_name)')
+        .gte('ts', sinceIso)
+        .order('ts', { ascending: false })
+        .limit(5000);
+      if (cancelled) return;
+      if (!error && data) {
+        setEntries((data as Array<Record<string, unknown>>).map(toEntry));
+      }
+      setLoading(false);
+
+      // Live-update on new inserts so the tiles tick up in real time.
+      channel = supabase
+        .channel('activity_log:kpis:realtime')
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'activity_log' }, () => {
+          // Cheap: bump a tick to re-run the bulk query. Avoids per-row
+          // enrichment plumbing for what's already a small dataset.
+          setRefreshTick(t => t + 1);
+        })
+        .subscribe();
+    })();
+    return () => {
+      cancelled = true;
+      if (channel) void channel.unsubscribe();
+    };
+  }, [days, refreshTick]);
+
+  return { entries, loading };
+}
+
 /**
  * Subscribe to the most recent `limit` activity_log entries, with realtime updates
  * prepended as new rows arrive.

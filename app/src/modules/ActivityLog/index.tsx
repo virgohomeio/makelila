@@ -30,7 +30,7 @@ export default function ActivityLog() {
             <Feed entries={entries} />
           )}
         </section>
-        <KpiPanel entries={entries} />
+        <KpiPanel />
       </div>
     </div>
   );
