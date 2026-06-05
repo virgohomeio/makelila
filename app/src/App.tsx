@@ -3,25 +3,35 @@ import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom
 import { AuthProvider, ProtectedRoute } from './lib/auth';
 import { AppShell } from './components/AppShell';
 import { isTelemetryConfigured } from './lib/supabaseTelemetry';
+// Eager: OrderReview is the default landing route + Login is on the auth
+// path. Everything else loads on demand so first-paint is fast.
 import OrderReview from './modules/OrderReview';
-import Fulfillment from './modules/Fulfillment';
-import Build from './modules/Build';
-import PostShipment from './modules/PostShipment';
-import Service from './modules/Service';
-import Stock from './modules/Stock';
-import Customers from './modules/Customers';
-import Templates from './modules/Templates';
-import ActivityLog from './modules/ActivityLog';
 import Login from './modules/Login';
 import ReturnForm from './modules/Forms/ReturnForm';
 import CancelOrderForm from './modules/Forms/CancelOrderForm';
 import ServiceRequestForm from './modules/Forms/ServiceRequestForm';
 
-// Lazy-loaded: the Dashboard pulls in Plotly (~1MB) and the telemetry
-// Supabase client. Keeping it out of the main chunk speeds up the
-// initial paint of operational routes and prevents a telemetry-config
-// gap from blocking login.
-const Dashboard = lazy(() => import('./modules/Dashboard'));
+// Backlog #51 — Dashboard pulls in Plotly (~1MB) and telemetry. The other
+// modules below get the same treatment so the main chunk doesn't carry
+// leaflet (PostShipment), the heavier Service / Build / Stock / Customers
+// trees, or the audit-log code unless the operator actually navigates there.
+const Dashboard   = lazy(() => import('./modules/Dashboard'));
+const Fulfillment = lazy(() => import('./modules/Fulfillment'));
+const Build       = lazy(() => import('./modules/Build'));
+const PostShipment = lazy(() => import('./modules/PostShipment'));
+const Service     = lazy(() => import('./modules/Service'));
+const Stock       = lazy(() => import('./modules/Stock'));
+const Customers   = lazy(() => import('./modules/Customers'));
+const Templates   = lazy(() => import('./modules/Templates'));
+const ActivityLog = lazy(() => import('./modules/ActivityLog'));
+
+function LazyRoute({ children }: { children: React.ReactNode }) {
+  return (
+    <Suspense fallback={<div style={{ padding: 24, color: '#4a5568' }}>Loading…</div>}>
+      {children}
+    </Suspense>
+  );
+}
 
 function DashboardRoute() {
   if (!isTelemetryConfigured) {
@@ -65,15 +75,15 @@ export default function App() {
             <Route index element={<Navigate to="order-review" replace />} />
             <Route path="order-review"          element={<OrderReview />} />
             <Route path="order-review/:orderId" element={<OrderReview />} />
-            <Route path="fulfillment"       element={<Fulfillment />} />
-            <Route path="fulfillment/:tab"  element={<Fulfillment />} />
-            <Route path="build"         element={<Build />} />
-            <Route path="post-shipment" element={<PostShipment />} />
-            <Route path="service"       element={<Service />} />
-            <Route path="stock"         element={<Stock />} />
-            <Route path="customers"     element={<Customers />} />
-            <Route path="templates"     element={<Templates />} />
-            <Route path="activity-log"  element={<ActivityLog />} />
+            <Route path="fulfillment"       element={<LazyRoute><Fulfillment /></LazyRoute>} />
+            <Route path="fulfillment/:tab"  element={<LazyRoute><Fulfillment /></LazyRoute>} />
+            <Route path="build"         element={<LazyRoute><Build /></LazyRoute>} />
+            <Route path="post-shipment" element={<LazyRoute><PostShipment /></LazyRoute>} />
+            <Route path="service"       element={<LazyRoute><Service /></LazyRoute>} />
+            <Route path="stock"         element={<LazyRoute><Stock /></LazyRoute>} />
+            <Route path="customers"     element={<LazyRoute><Customers /></LazyRoute>} />
+            <Route path="templates"     element={<LazyRoute><Templates /></LazyRoute>} />
+            <Route path="activity-log"  element={<LazyRoute><ActivityLog /></LazyRoute>} />
             <Route path="dashboard"     element={<DashboardRoute />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
