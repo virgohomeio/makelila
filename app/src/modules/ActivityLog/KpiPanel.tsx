@@ -2,7 +2,8 @@ import { useMemo } from 'react';
 import { useActivityKpis, type ActivityLogEntry } from '../../lib/activityLog';
 import styles from './ActivityLog.module.css';
 
-/** Right-side KPI panel for the Activity Log module (backlog #56 V2).
+/** Right-side KPI panel for the Activity Log module (backlog #56 V2 +
+ *  #76 tile-type refresh).
  *
  *  Layout — per the 2026-04-16 design brief:
  *    • Top row: 5 "Today" KPI tiles
@@ -10,9 +11,12 @@ import styles from './ActivityLog.module.css';
  *    • Customer-ops row: 3 cards (7-day window)
  *    • Team contribution: 2 columns (Top contributors / By module)
  *
- *  Data: queries activity_log directly over the last 7 days via
- *  useActivityKpis(). The 200-entry feed cap from V1 led to flat-lining
- *  tiles on busy days, so we go past the feed for aggregates. */
+ *  Tile-to-action-type mapping is driven by the TILE_DEFS array below.
+ *  When the panel reads zero, the empty-state hint shows the action
+ *  types the tile expects — that way the next time we evolve a logged
+ *  action type (e.g. rename `fq_test_ok` → `qc_pass`), the mismatch is
+ *  visible on the panel instead of months later when someone notices
+ *  the number is wrong. */
 export function KpiPanel() {
   const { entries, loading } = useActivityKpis(7);
   const stats = useMemo(() => compute(entries), [entries]);
@@ -25,25 +29,23 @@ export function KpiPanel() {
     <aside className={styles.kpiPanel}>
       <h3 className={styles.kpiSection}>Today</h3>
       <div className={styles.kpiTopRow}>
-        <KpiTile label="Total entries"    value={stats.today.total} />
-        <KpiTile label="Orders shipped"   value={stats.today.shipped} />
-        <KpiTile label="Replacements"     value={stats.today.replacements} />
-        <KpiTile label="Refunds approved" value={stats.today.refunds} />
-        <KpiTile label="Tickets closed"   value={stats.today.ticketsClosed} />
+        {TODAY_TILES.map(t => (
+          <KpiTile key={t.key} def={t} value={stats.today[t.key]} />
+        ))}
       </div>
 
       <h3 className={styles.kpiSection}>Fulfillment — last 7 days</h3>
       <div className={styles.kpiCardRow}>
-        <KpiCard label="Tests passed"  value={stats.week.testsPassed} hint="fq_test_ok" />
-        <KpiCard label="Released to FQ" value={stats.week.releasedToFq} hint="released_to_fulfillment" />
-        <KpiCard label="Orders shipped" value={stats.week.ordersShipped} hint="order_shipped + order_delivered" />
+        {FULFILLMENT_CARDS.map(c => (
+          <KpiCard key={c.key} def={c} value={stats.week[c.key]} />
+        ))}
       </div>
 
       <h3 className={styles.kpiSection}>Customer ops — last 7 days</h3>
       <div className={styles.kpiCardRow}>
-        <KpiCard label="Tickets created"     value={stats.week.ticketsCreated} hint="ticket_created" />
-        <KpiCard label="Replacement orders"  value={stats.week.replacements}   hint="replacement_create" />
-        <KpiCard label="Refunds approved"    value={stats.week.refunds}        hint="refund_finance_approved" />
+        {CUSTOMER_OPS_CARDS.map(c => (
+          <KpiCard key={c.key} def={c} value={stats.week[c.key]} />
+        ))}
       </div>
 
       <h3 className={styles.kpiSection}>Team contribution — last 7 days</h3>
@@ -85,34 +87,77 @@ export function KpiPanel() {
   );
 }
 
-function KpiTile({ label, value }: { label: string; value: number }) {
+function KpiTile({ def, value }: { def: TileDef<TodayKey>; value: number }) {
   return (
-    <div className={styles.kpiTile}>
+    <div className={styles.kpiTile} title={emptyHint(def, value)}>
       <div className={styles.kpiTileValue}>{value}</div>
-      <div className={styles.kpiTileLabel}>{label}</div>
+      <div className={styles.kpiTileLabel}>{def.label}</div>
     </div>
   );
 }
 
-function KpiCard({ label, value, hint }: { label: string; value: number; hint?: string }) {
+function KpiCard({ def, value }: { def: TileDef<WeekKey>; value: number }) {
   return (
-    <div className={styles.kpiCard} title={hint}>
+    <div className={styles.kpiCard} title={emptyHint(def, value)}>
       <div className={styles.kpiCardValue}>{value}</div>
-      <div className={styles.kpiCardLabel}>{label}</div>
+      <div className={styles.kpiCardLabel}>{def.label}</div>
     </div>
   );
 }
 
-type TodayStats = {
-  total: number; shipped: number; replacements: number; refunds: number; ticketsClosed: number;
+function emptyHint(def: { types: readonly string[] }, value: number): string {
+  if (value > 0) return def.types.join(' + ');
+  return `0 in last 7d — expected types: ${def.types.join(', ')}`;
+}
+
+// ── Tile definitions ─────────────────────────────────────────────────────────
+// Each tile names the action-type strings it counts. Adding a new tile is
+// one entry here + one field on the stats type. When ops processes evolve
+// and someone renames a logged action type, the hover tooltip on a 0-tile
+// surfaces the gap immediately.
+
+type TodayKey =
+  | 'total' | 'qcReports' | 'addressesVerified' | 'statusSms' | 'ticketsResolved';
+
+type WeekKey =
+  | 'qcReports' | 'testsPassed' | 'stockFlips'
+  | 'addressesVerified' | 'autoFollowups' | 'ticketsCreated';
+
+type TileDef<K extends string> = {
+  key: K;
+  label: string;
+  types: readonly string[];
+  /** Optional: when set, the entry must also have `detail` matching this regex */
+  detailMatch?: RegExp;
 };
-type WeekStats = {
-  testsPassed: number; releasedToFq: number; ordersShipped: number;
-  ticketsCreated: number; replacements: number; refunds: number;
-};
+
+// "Today" tiles — chosen for high-volume operator actions per backlog #76.
+// "Total entries" is just every row; others count specific action types.
+const TODAY_TILES: readonly TileDef<TodayKey>[] = [
+  { key: 'total',             label: 'Total entries',     types: ['*'] },
+  { key: 'qcReports',         label: 'QC reports filed',  types: ['unit_test_report'] },
+  { key: 'addressesVerified', label: 'Addresses verified',types: ['address_verified'] },
+  { key: 'statusSms',         label: 'Status SMS sent',   types: ['dashboard_status_sms'] },
+  { key: 'ticketsResolved',   label: 'Tickets resolved',  types: ['ticket_auto_closed', 'ticket_status_changed'], detailMatch: /closed|resolved/i },
+];
+
+const FULFILLMENT_CARDS: readonly TileDef<WeekKey>[] = [
+  { key: 'qcReports',   label: 'QC reports filed',   types: ['unit_test_report'] },
+  { key: 'testsPassed', label: 'FQ tests passed',    types: ['fq_test_ok'] },
+  { key: 'stockFlips',  label: 'Stock status flips', types: ['stock_status', 'stock_edit'] },
+];
+
+const CUSTOMER_OPS_CARDS: readonly TileDef<WeekKey>[] = [
+  { key: 'addressesVerified', label: 'Addresses verified', types: ['address_verified'] },
+  { key: 'autoFollowups',     label: 'Auto follow-ups',    types: ['auto_followup_sent', 'followup_recorded'] },
+  { key: 'ticketsCreated',    label: 'Tickets created',    types: ['ticket_created', 'promoted_to_ticket'] },
+];
+
+// ── Aggregator ───────────────────────────────────────────────────────────────
+
 type Stats = {
-  today: TodayStats;
-  week: WeekStats;
+  today: Record<TodayKey, number>;
+  week:  Record<WeekKey, number>;
   byUser: { user_id: string; name: string; count: number }[];
   byModule: { module: string; count: number }[];
 };
@@ -128,7 +173,8 @@ const MODULE_OF: Record<string, string> = {
   stock_: 'Stock', part_: 'Stock', unit_: 'Stock',
   template_: 'Templates',
   followup_: 'Customers', customer_: 'Customers', klaviyo_: 'Customers', hubspot_: 'Customers',
-  dataset_: 'Dashboard',
+  auto_followup_sent: 'Customers',
+  dataset_: 'Dashboard', dashboard_status_sms: 'Dashboard',
 };
 
 function moduleFor(type: string): string {
@@ -138,16 +184,31 @@ function moduleFor(type: string): string {
   return 'Other';
 }
 
+function matchesTile<K extends string>(def: TileDef<K>, entry: ActivityLogEntry): boolean {
+  if (def.types.includes('*')) return true;
+  if (!def.types.includes(entry.type)) return false;
+  if (def.detailMatch && !def.detailMatch.test(entry.detail)) return false;
+  return true;
+}
+
+function emptyTodayCounts(): Record<TodayKey, number> {
+  return { total: 0, qcReports: 0, addressesVerified: 0, statusSms: 0, ticketsResolved: 0 };
+}
+function emptyWeekCounts(): Record<WeekKey, number> {
+  return { qcReports: 0, testsPassed: 0, stockFlips: 0, addressesVerified: 0, autoFollowups: 0, ticketsCreated: 0 };
+}
+
 function compute(entries: ActivityLogEntry[]): Stats {
+  // "Today" boundary uses the browser's local timezone — the only timezone
+  // an operator can directly perceive. If we ever add a server-side
+  // aggregator, it should also honor America/Toronto explicitly rather
+  // than defaulting to UTC.
   const startOfToday = new Date();
   startOfToday.setHours(0, 0, 0, 0);
   const todayMs = startOfToday.getTime();
 
-  const today: TodayStats = { total: 0, shipped: 0, replacements: 0, refunds: 0, ticketsClosed: 0 };
-  const week:  WeekStats  = {
-    testsPassed: 0, releasedToFq: 0, ordersShipped: 0,
-    ticketsCreated: 0, replacements: 0, refunds: 0,
-  };
+  const today = emptyTodayCounts();
+  const week  = emptyWeekCounts();
   const userCounts   = new Map<string, { name: string; count: number }>();
   const moduleCounts = new Map<string, number>();
 
@@ -155,23 +216,19 @@ function compute(entries: ActivityLogEntry[]): Stats {
     const t = Date.parse(e.ts);
     const isToday = t >= todayMs;
 
-    // Today tiles.
     if (isToday) {
-      today.total++;
-      if (e.type === 'order_shipped') today.shipped++;
-      if (e.type === 'replacement_create') today.replacements++;
-      if (e.type === 'refund_finance_approved') today.refunds++;
-      if (e.type === 'ticket_auto_closed') today.ticketsClosed++;
-      if (e.type === 'ticket_status_changed' && /closed|resolved/i.test(e.detail)) today.ticketsClosed++;
+      for (const def of TODAY_TILES) {
+        if (matchesTile(def, e)) today[def.key]++;
+      }
     }
 
     // 7-day cards (every entry is already inside the window per the hook).
-    if (e.type === 'fq_test_ok') week.testsPassed++;
-    if (e.type === 'released_to_fulfillment') week.releasedToFq++;
-    if (e.type === 'order_shipped' || e.type === 'order_delivered') week.ordersShipped++;
-    if (e.type === 'ticket_created') week.ticketsCreated++;
-    if (e.type === 'replacement_create') week.replacements++;
-    if (e.type === 'refund_finance_approved') week.refunds++;
+    for (const def of FULFILLMENT_CARDS) {
+      if (matchesTile(def, e)) week[def.key]++;
+    }
+    for (const def of CUSTOMER_OPS_CARDS) {
+      if (matchesTile(def, e)) week[def.key]++;
+    }
 
     // Team contribution.
     const existing = userCounts.get(e.user_id);
