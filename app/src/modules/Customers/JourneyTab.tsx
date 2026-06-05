@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react';
-import { useCustomers, sendNameCollectionRequest, type Customer } from '../../lib/customers';
+import { useCustomers, sendNameCollectionRequest, setJourneyStageOverride, type Customer } from '../../lib/customers';
 import { useOrders, type Order } from '../../lib/orders';
 import { useServiceTickets, useCustomerLifecycle, type ServiceTicket, type CustomerLifecycle } from '../../lib/service';
 import { useReturns, type ReturnRow } from '../../lib/postShipment';
+import { useUnits, type Unit } from '../../lib/stock';
 import styles from './Customers.module.css';
 
 // ─── CJM stages, mirrors CJM/makeLILA_CJM_v2.html (10 stages) ─────────────────
@@ -54,6 +55,9 @@ type StageScore = {
 type Journey = {
   customer: Customer;
   currentStage: StageKey;
+  // true when currentStage came from journey_stage_override (operator-set);
+  // false when it was inferred from data signals.
+  isManualStage: boolean;
   overallSatisfaction: Satisfaction;
   stages: StageScore[];
   signals: {
@@ -63,6 +67,8 @@ type Journey = {
     returns: ReturnRow[];
   };
 };
+
+const STAGE_KEYS = new Set<StageKey>(STAGES.map(s => s.key));
 
 const SATISFACTION_EMOJI: Record<Satisfaction, string> = {
   0: '😞', 1: '😟', 2: '😕', 3: '😐', 4: '🙂', 5: '🤩',
@@ -74,12 +80,29 @@ const SATISFACTION_LABEL: Record<Satisfaction, string> = {
   0: 'abandoned', 1: 'frustrated', 2: 'concerned', 3: 'neutral', 4: 'satisfied', 5: 'delighted',
 };
 
+// Fuzzy customer-name match: same first + last token (case-insensitive).
+// Catches "Annie Wu" ↔ "Annie Chunli Wu", "Amila & Rob Smith" ↔ "Amila Smith",
+// "Audrey St John" ↔ "Audrey BALANAY-ST JOHN", etc. Not perfect, but
+// significantly reduces the false-classification rate per operator
+// feedback (2026-06-05).
+function namesLooseMatch(a: string, b: string): boolean {
+  if (!a || !b) return false;
+  const A = a.toLowerCase().trim();
+  const B = b.toLowerCase().trim();
+  if (A === B) return true;
+  const ta = A.split(/[\s&-]+/).filter(Boolean);
+  const tb = B.split(/[\s&-]+/).filter(Boolean);
+  if (ta.length === 0 || tb.length === 0) return false;
+  return ta[0] === tb[0] && ta[ta.length - 1] === tb[tb.length - 1];
+}
+
 function inferJourney(
   c: Customer,
   allOrders: Order[],
   allLifecycle: CustomerLifecycle[],
   allTickets: ServiceTicket[],
   allReturns: ReturnRow[],
+  allUnits: Unit[],
 ): Journey {
   const lcEmail = c.email?.toLowerCase() ?? '';
   const lcName  = c.full_name.toLowerCase();
@@ -97,39 +120,64 @@ function inferJourney(
     (r.customer_email?.toLowerCase() === lcEmail && lcEmail !== '')
     || r.customer_name?.toLowerCase() === lcName
   );
+  // Units linked by exact OR fuzzy name match (handles spouse-joined +
+  // middle-name + alt-capitalization variants seen in the fulfillment
+  // sheet).
+  const matchingUnits = allUnits.filter(u =>
+    u.customer_name != null && namesLooseMatch(u.customer_name, c.full_name)
+  );
 
   const saleOrders   = orders.filter(o => o.kind === 'sale');
+  const replOrders   = orders.filter(o => o.kind === 'replacement');
   const hasSale      = saleOrders.length > 0;
+  const hasReplacement = replOrders.length > 0;
   const hasShipped   = lifecycle.some(l => l.shipped_at != null);
   const hasDelivered = saleOrders.some(o => o.delivered_at != null);
   const hasOnboardingScheduled = lifecycle.some(l => l.onboarding_status === 'scheduled');
   const hasOnboardingCompleted = lifecycle.some(l => l.onboarding_status === 'completed');
-  // Per operator (2026-06-05): any customer with onboard_date set has
-  // received their unit and is using it. Use this as the primary
-  // "they've been onboarded" signal — `customer_lifecycle` is too
-  // sparse (only ~half of onboarded customers have a lifecycle row).
-  const hasBeenOnboarded = !!c.onboard_date || hasOnboardingCompleted;
+  // Per operator (2026-06-05): a customer who's received their unit
+  // should never read as "consideration." Combine every available
+  // signal — the previous rule (onboard_date only) missed customers
+  // whose only signal was a synced serial, a units-table match, an
+  // operator follow-up, or a replacement-order history.
+  const hasReceivedUnit =
+    !!c.onboard_date
+    || hasOnboardingCompleted
+    || (c.serials != null && c.serials.length > 0)
+    || matchingUnits.length > 0
+    || c.fu1_status != null
+    || c.fu2_status != null
+    || hasReplacement;   // can't get a replacement without an original
   // Per operator (2026-06-05): for an onboarded customer, ANY open
   // ticket (not just warranty/defect) puts them in Failure & Support
   // — represents active operator touch, regardless of the topic.
+  // Junaid (2026-06-05): "resolved" stays counted as still-open until
+  // the operator explicitly marks 'closed' — keeps recently-resolved
+  // tickets visible in the failure category.
   const openTickets = tickets.filter(t => t.status !== 'closed');
   const hasActiveReturn = returns.some(r =>
     r.status !== 'closed' && r.status !== 'denied' && r.status !== 'refunded'
   );
-  const fu2Reviewed = c.fu2_status === 'reviewed';   // customer mentioned leaving a review
+  const fu2Reviewed = c.fu2_status === 'reviewed';
 
   // Walk backward through the stage order. First match wins as "current".
-  let currentStage: StageKey = 'awareness';
-  if (fu2Reviewed)                              currentStage = 'promotion';
-  else if (hasActiveReturn)                     currentStage = 'eol';
-  else if (hasBeenOnboarded && openTickets.length > 0) currentStage = 'failure';
-  else if (hasBeenOnboarded)                    currentStage = 'routine';
-  else if (hasOnboardingScheduled)              currentStage = 'setup';
-  else if (hasDelivered)                        currentStage = 'unboxing';
-  else if (hasShipped)                          currentStage = 'shipping';
-  else if (hasSale)                             currentStage = 'conversion';
-  else if (c.email || c.phone)                  currentStage = 'consideration';
+  let inferredStage: StageKey = 'awareness';
+  if (fu2Reviewed)                              inferredStage = 'promotion';
+  else if (hasActiveReturn)                     inferredStage = 'eol';
+  else if (hasReceivedUnit && openTickets.length > 0) inferredStage = 'failure';
+  else if (hasReceivedUnit)                     inferredStage = 'routine';
+  else if (hasOnboardingScheduled)              inferredStage = 'setup';
+  else if (hasDelivered)                        inferredStage = 'unboxing';
+  else if (hasShipped)                          inferredStage = 'shipping';
+  else if (hasSale)                             inferredStage = 'conversion';
+  else if (c.email || c.phone)                  inferredStage = 'consideration';
 
+  // Operator override wins when set + valid.
+  const isManualStage = c.journey_stage_override != null
+    && STAGE_KEYS.has(c.journey_stage_override as StageKey);
+  const currentStage: StageKey = isManualStage
+    ? (c.journey_stage_override as StageKey)
+    : inferredStage;
   const currentIdx = STAGE_INDEX[currentStage];
 
   // ─── Score each reached stage ─────────────────────────────────────────────
@@ -190,11 +238,22 @@ function inferJourney(
         break;
       case 'routine': {
         score = 4;  // routine = "they're using it without issue"
-        if (c.fu1_status === 'completed' || c.fu1_status === 'reviewed') {
-          sig.push(`FU1 logged as ${c.fu1_status}.`);
-        }
         if (c.onboard_date) {
           sig.push(`Onboarded on ${c.onboard_date}.`);
+        }
+        if (c.fu1_status) {
+          sig.push(`FU1 logged as ${c.fu1_status}.`);
+        }
+        if (c.fu2_status) {
+          sig.push(`FU2 logged as ${c.fu2_status}.`);
+        }
+        if (c.serials && c.serials.length > 0) {
+          sig.push(`Serial${c.serials.length === 1 ? '' : 's'}: ${c.serials.join(', ')}.`);
+        } else if (matchingUnits.length > 0) {
+          sig.push(`Unit on file: ${matchingUnits.map(u => u.serial).join(', ')}.`);
+        }
+        if (hasReplacement) {
+          sig.push(`${replOrders.length} replacement order${replOrders.length === 1 ? '' : 's'} on file (has the original).`);
         }
         if (openTickets.length === 0) {
           sig.push('No open tickets.');
@@ -243,6 +302,7 @@ function inferJourney(
   return {
     customer: c,
     currentStage,
+    isManualStage,
     overallSatisfaction,
     stages,
     signals: { orders, lifecycle, tickets, returns },
@@ -268,6 +328,7 @@ export function JourneyTab() {
   const { tickets } = useServiceTickets();
   const { rows: lifecycle } = useCustomerLifecycle();
   const { returns } = useReturns();
+  const { units } = useUnits();
   const [search, setSearch] = useState('');
   const [stageFilter, setStageFilter] = useState<StageFilter>('all');
   const [satFilter, setSatFilter] = useState<SatisfactionFilter>('all');
@@ -300,8 +361,8 @@ export function JourneyTab() {
   }, [customers]);
 
   const journeys = useMemo(() => {
-    return namedCustomers.map(c => inferJourney(c, orders, lifecycle, tickets, returns));
-  }, [namedCustomers, orders, lifecycle, tickets, returns]);
+    return namedCustomers.map(c => inferJourney(c, orders, lifecycle, tickets, returns, units));
+  }, [namedCustomers, orders, lifecycle, tickets, returns, units]);
 
   const stageCounts = useMemo(() => {
     const m: Record<StageKey, number> = {} as Record<StageKey, number>;
@@ -484,7 +545,26 @@ function JourneyCard({ journey, onOpen }: { journey: Journey; onOpen: () => void
 }
 
 function JourneyDetailPanel({ journey, onClose }: { journey: Journey; onClose: () => void }) {
-  const { customer, signals, overallSatisfaction } = journey;
+  const { customer, signals, overallSatisfaction, isManualStage, currentStage } = journey;
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [pendingStage, setPendingStage] = useState<string>(isManualStage ? currentStage : '');
+
+  async function handleSetStage(next: string | null) {
+    setBusy(true); setErr(null);
+    try {
+      await setJourneyStageOverride(customer.id, next);
+      // Realtime sub on customers will refresh the panel; close on clear
+      // so the operator sees the inferred stage they reverted to.
+      if (next === null) setPendingStage('');
+      else setPendingStage(next);
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div className={styles.panelBackdrop} onClick={onClose}>
       <div className={styles.journeyPanel} onClick={e => e.stopPropagation()}>
@@ -499,6 +579,11 @@ function JourneyDetailPanel({ journey, onClose }: { journey: Journey; onClose: (
               >
                 {SATISFACTION_EMOJI[overallSatisfaction]} {SATISFACTION_LABEL[overallSatisfaction]}
               </span>
+              {isManualStage && (
+                <span className={styles.journeyManualBadge} title="Stage was manually set by an operator">
+                  manual
+                </span>
+              )}
             </h2>
             <div className={styles.panelSubtitle}>{customer.email ?? 'no email'}</div>
           </div>
@@ -506,10 +591,36 @@ function JourneyDetailPanel({ journey, onClose }: { journey: Journey; onClose: (
         </div>
 
         <div className={styles.panelBody}>
+          <div className={styles.journeyStagePicker}>
+            <label className={styles.journeyStagePickerLabel}>Override stage:</label>
+            <select
+              value={pendingStage}
+              onChange={e => void handleSetStage(e.target.value === '' ? null : e.target.value)}
+              disabled={busy}
+              className={styles.journeyStagePickerSelect}
+            >
+              <option value="">— inferred ({currentStage}) —</option>
+              {STAGES.map(s => (
+                <option key={s.key} value={s.key}>{s.emoji} {s.label}</option>
+              ))}
+            </select>
+            {isManualStage && (
+              <button
+                type="button"
+                className={styles.journeyStagePickerClear}
+                onClick={() => void handleSetStage(null)}
+                disabled={busy}
+              >
+                Revert to inferred
+              </button>
+            )}
+            {err && <span className={styles.journeyStagePickerErr}>{err}</span>}
+          </div>
+
           <div className={styles.journeyPanelHint}>
             10-stage CJM from <code>CJM/makeLILA_CJM_v2.html</code>. Bars below a stage are scored 0–5
             from real ops data — orders, lifecycle, tickets, returns. Click a bar to see the signals
-            feeding it.
+            feeding it. Use the override above when the heuristics get it wrong.
           </div>
 
           <div className={styles.journeyTimeline}>

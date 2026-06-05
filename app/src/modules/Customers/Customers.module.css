@@ -1062,6 +1062,58 @@
   text-transform: uppercase;
   letter-spacing: .03em;
 }
+.journeyManualBadge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: #fefcbf;
+  color: #744210;
+  border: 1px solid #d69e2e;
+  font-size: .65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+.journeyStagePicker {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  background: #f7fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  margin-bottom: 12px;
+}
+.journeyStagePickerLabel {
+  font-size: .8rem;
+  font-weight: 700;
+  color: #2d3748;
+}
+.journeyStagePickerSelect {
+  padding: 5px 10px;
+  font-size: .85rem;
+  border: 1px solid #cbd5e0;
+  border-radius: 6px;
+  background: #fff;
+  font-family: inherit;
+}
+.journeyStagePickerClear {
+  padding: 5px 12px;
+  font-size: .75rem;
+  background: #fff;
+  border: 1px solid #cbd5e0;
+  border-radius: 6px;
+  cursor: pointer;
+  color: #4a5568;
+}
+.journeyStagePickerClear:hover:not(:disabled) { background: #edf2f7; }
+.journeyStagePickerClear:disabled { opacity: .6; cursor: not-allowed; }
+.journeyStagePickerErr {
+  font-size: .75rem;
+  color: #c53030;
+}
 .journeyPanelHint {
   font-size: .75rem;
   color: #4a5568;

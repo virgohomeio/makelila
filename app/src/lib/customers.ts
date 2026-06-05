@@ -30,6 +30,11 @@ export type Customer = {
   // (Customer module → Journey). NULL = never sent. Used to dedupe so
   // operators don't accidentally double-spam the same nameless customer.
   name_request_sent_at: string | null;
+  // Journey tab: operator-set CJM stage override. NULL = use the
+  // auto-inferred stage. See JourneyTab's StageKey union for valid values.
+  journey_stage_override: string | null;
+  journey_stage_override_at: string | null;
+  journey_stage_override_by: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -431,6 +436,29 @@ export async function sendFollowupSms(input: { customer_id: string; message: str
   const body = await res.json();
   if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
   return body;
+}
+
+/** Manually pin a customer to a CJM stage in the Journey tab, overriding
+ *  the auto-inference. Pass `null` to clear the override and revert to
+ *  inference. Stamps the actor + timestamp for audit. */
+export async function setJourneyStageOverride(
+  customerId: string,
+  stage: string | null,
+): Promise<void> {
+  const { data: { user } } = await supabase.auth.getUser();
+  const patch = stage === null
+    ? { journey_stage_override: null, journey_stage_override_at: null, journey_stage_override_by: null }
+    : {
+        journey_stage_override: stage,
+        journey_stage_override_at: new Date().toISOString(),
+        journey_stage_override_by: user?.id ?? null,
+      };
+  const { error } = await supabase
+    .from('customers')
+    .update(patch)
+    .eq('id', customerId);
+  if (error) throw error;
+  await logAction('journey_stage_override', customerId, stage ?? '(cleared)');
 }
 
 /** Send the "what's your name?" email to a customer who has an email
