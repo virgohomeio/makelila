@@ -90,6 +90,8 @@ export function SupportTab() {
   // KPIs
   const dayAgo = Date.now() - 86400_000;
   const weekAgo = Date.now() - 7 * 86400_000;
+  // Open = anything not yet closed (the only terminal status).
+  const openCount = tickets.filter(t => t.status !== 'closed').length;
   const newTodayCount = tickets.filter(t => new Date(t.created_at).getTime() > dayAgo).length;
   const inProgressCount = tickets.filter(t => t.status === 'in_progress').length;
   const waitingCount = tickets.filter(t => t.status === 'waiting_on_us').length;
@@ -102,6 +104,7 @@ export function SupportTab() {
   return (
     <>
       <div className={styles.kpiStrip}>
+        <Kpi label="Open"           value={openCount} />
         <Kpi label="New (24h)"      value={newTodayCount} />
         <Kpi label="In progress"    value={inProgressCount} />
         <Kpi label="Waiting on us"  value={waitingCount} />

@@ -88,4 +88,18 @@ describe('SupportTab status resilience', () => {
     // "Closed (7d)" KPI card label.
     expect(screen.queryByText(/^Closed \d/)).not.toBeInTheDocument();
   });
+
+  it('Open KPI counts every ticket that is not closed', () => {
+    ticketsToReturn = [
+      mkTicket({ id: 'o1', status: 'in_progress' }),
+      mkTicket({ id: 'o2', status: 'waiting_on_us' }),
+      mkTicket({ id: 'o3', status: 'waiting_on_customer' }),
+      mkTicket({ id: 'c1', status: 'closed', closed_at: '2026-06-03T00:00:00Z' }),
+    ];
+    render(<SupportTab />);
+    // Kpi renders <div.kpiCard><div>label</div><div>value</div></div>, so the
+    // label's parent is the card holding both label and value.
+    const openCard = screen.getByText('Open').parentElement;
+    expect(openCard).toHaveTextContent('3');
+  });
 });
