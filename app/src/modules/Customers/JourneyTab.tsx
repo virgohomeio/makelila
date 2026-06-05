@@ -112,9 +112,7 @@ function inferJourney(
   // Per operator (2026-06-05): for an onboarded customer, ANY open
   // ticket (not just warranty/defect) puts them in Failure & Support
   // — represents active operator touch, regardless of the topic.
-  const openTickets = tickets.filter(t =>
-    t.status !== 'resolved' && t.status !== 'closed'
-  );
+  const openTickets = tickets.filter(t => t.status !== 'closed');
   const hasActiveReturn = returns.some(r =>
     r.status !== 'closed' && r.status !== 'denied' && r.status !== 'refunded'
   );
