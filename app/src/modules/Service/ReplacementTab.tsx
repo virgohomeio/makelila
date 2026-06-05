@@ -20,15 +20,40 @@ function stageFor(o: Order): Stage {
 }
 
 function summarize(line_items: Order['line_items']): string {
-  let parts = 0, units = 0;
+  // Defensive: line_items can come from two paths:
+  //   1. The in-app #55 replacement workflow — full schema (qty, cost_*, sku).
+  //   2. The Excel backfill (migration 20260605080000) — looser shape:
+  //      `{kind:'part',description}` / `{kind:'unit',batch,unit_serial}` /
+  //      `{kind:'unit_pending',batch}` (serial not yet assigned).
+  // We count both shapes + surface descriptions for part rows so the
+  // table reads "1 unit + Hopper" instead of "1 unit + 1 part".
+  let parts = 0;
+  let units = 0;
+  let unitsPending = 0;
+  const partDescs: string[] = [];
   for (const li of line_items) {
-    if (!isReplacementLine(li)) continue;
-    if (li.kind === 'part') parts += li.qty;
-    if (li.kind === 'unit') units += 1;
+    const k = (li as { kind?: string }).kind;
+    if (k === 'part') {
+      parts += isReplacementLine(li) ? li.qty : 1;
+      const desc = (li as { description?: string; name?: string }).description
+                ?? (li as { name?: string }).name;
+      if (desc) partDescs.push(desc);
+    } else if (k === 'unit') {
+      units += 1;
+    } else if (k === 'unit_pending') {
+      unitsPending += 1;
+    }
   }
-  const parts_s = parts === 0 ? '' : `${parts} part${parts !== 1 ? 's' : ''}`;
-  const units_s = units === 0 ? '' : `${units} unit${units !== 1 ? 's' : ''}`;
-  return [parts_s, units_s].filter(Boolean).join(' + ') || '—';
+  const segs: string[] = [];
+  if (units > 0)        segs.push(`${units} unit${units !== 1 ? 's' : ''}`);
+  if (unitsPending > 0) segs.push(`${unitsPending} unit${unitsPending !== 1 ? 's' : ''} (pending)`);
+  if (partDescs.length > 0) {
+    const joined = partDescs.join(', ');
+    segs.push(joined.length > 50 ? joined.slice(0, 47) + '…' : joined);
+  } else if (parts > 0) {
+    segs.push(`${parts} part${parts !== 1 ? 's' : ''}`);
+  }
+  return segs.join(' + ') || '—';
 }
 
 const STAGES: { key: Stage | 'all'; label: string }[] = [
@@ -170,7 +195,7 @@ export default function ReplacementTab() {
           <thead>
             <tr>
               <th>Order #</th><th>Ticket</th><th>Customer</th><th>Items</th>
-              <th>COGS</th><th>Stage</th><th>Days open</th>
+              <th>Tracking</th><th>COGS</th><th>Stage</th><th>Days open</th>
             </tr>
           </thead>
           <tbody>
@@ -199,6 +224,13 @@ export default function ReplacementTab() {
                     ) : (
                       summarize(o.line_items)
                     )}
+                  </td>
+                  <td>
+                    {o.tracking_num
+                      ? <span title={o.carrier ?? ''} style={{ fontFamily: 'ui-monospace, monospace', fontSize: 11 }}>
+                          {o.carrier ? `${o.carrier} · ` : ''}{o.tracking_num}
+                        </span>
+                      : <span className={styles.muted} title="No tracking yet — still to be shipped">—</span>}
                   </td>
                   <td>${(o.cogs_usd ?? 0).toFixed(2)}</td>
                   <td>{stage === 'awaiting_batch' ? (

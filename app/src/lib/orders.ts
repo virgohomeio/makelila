@@ -42,6 +42,11 @@ export type Order = {
   shipping_cost_usd: number | null;
   shipped_at: string | null;
   delivered_at: string | null;
+  // Backlog #55 follow-up — carrier tracking. Populated by the Fulfillment
+  // step OR backfilled from the fulfillment Excel for replacement orders.
+  // Per operator: tracking_num IS NOT NULL ⇒ shipped, NULL ⇒ to be shipped.
+  tracking_num: string | null;
+  carrier: string | null;
   customer_name: string;
   customer_email: string | null;
   customer_phone: string | null;

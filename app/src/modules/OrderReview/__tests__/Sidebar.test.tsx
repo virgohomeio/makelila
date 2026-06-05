@@ -28,6 +28,8 @@ function mkOrder(partial: Partial<Order> & { id: string; status: Order['status']
     freight_estimate_usd: 89.5,
     freight_threshold_usd: 200,
     customer_paid_shipping_usd: 89.5,
+    tracking_num: null,
+    carrier: null,
     customer_id: null,
     awaiting_batch_id: null,
     freight_estimate_source: 'shopify',
