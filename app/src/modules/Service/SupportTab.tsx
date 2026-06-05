@@ -508,7 +508,12 @@ function TicketRow({ t, selected, onClick }: { t: ServiceTicket; selected: boole
       <td>{t.topic ? <span className={styles.topicPill}>{topicLabel(t.topic)}</span> : '—'}</td>
       <td>{sourceLabel(t.source)}</td>
       <td><span className={styles.pill} style={{ background: '#f7fafc', color: p.color }}>{p.label}</span></td>
-      <td><span className={styles.pill} style={{ background: s.bg, color: s.color }}>{s.label}</span></td>
+      <td>
+        <span className={styles.pill} style={{ background: s.bg, color: s.color }}>{s.label}</span>
+        {t.status === 'closed' && t.closed_at && (
+          <div className={styles.closedDate}>Closed {new Date(t.closed_at).toLocaleDateString()}</div>
+        )}
+      </td>
       <td>{t.owner_email ? t.owner_email.split('@')[0] : '—'}</td>
       <td onClick={e => e.stopPropagation()}>
         {gmailLink && (

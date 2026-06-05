@@ -73,4 +73,19 @@ describe('SupportTab status resilience', () => {
     render(<SupportTab />);
     expect(() => fireEvent.click(screen.getByText('help me'))).not.toThrow();
   });
+
+  it('shows the close date in the row for a closed ticket', () => {
+    const closedAt = '2026-06-03T15:00:00Z';
+    ticketsToReturn = [mkTicket({ id: 't4', status: 'closed', closed_at: closedAt })];
+    render(<SupportTab />);
+    expect(screen.getByText(`Closed ${new Date(closedAt).toLocaleDateString()}`)).toBeInTheDocument();
+  });
+
+  it('does not show a close date for a non-closed ticket', () => {
+    ticketsToReturn = [mkTicket({ id: 't5', status: 'in_progress', closed_at: null })];
+    render(<SupportTab />);
+    // /^Closed \d/ targets the row "Closed <date>" without matching the
+    // "Closed (7d)" KPI card label.
+    expect(screen.queryByText(/^Closed \d/)).not.toBeInTheDocument();
+  });
 });

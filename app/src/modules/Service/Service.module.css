@@ -650,6 +650,7 @@
 /* ============================================================ Row enhancements */
 .age { color: var(--color-ink-muted); font-size: 11px; }
 .ageStale { color: var(--color-crimson); font-size: 11px; font-weight: 700; }
+.closedDate { color: var(--color-ink-subtle); font-size: 10px; margin-top: 2px; white-space: nowrap; }
 .rowSummary {
   font-size: 10px;
   color: var(--color-ink-subtle);

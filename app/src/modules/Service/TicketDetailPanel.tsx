@@ -211,6 +211,12 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
             <span className={styles.detailFieldValue}>{ticket.order_ref ?? '—'}</span>
             <span className={styles.detailFieldLabel}>Created</span>
             <span className={styles.detailFieldValue}>{new Date(ticket.created_at).toLocaleString()}</span>
+            {ticket.status === 'closed' && ticket.closed_at && (
+              <>
+                <span className={styles.detailFieldLabel}>Closed</span>
+                <span className={styles.detailFieldValue}>{new Date(ticket.closed_at).toLocaleString()}</span>
+              </>
+            )}
           </div>
         </div>
 
