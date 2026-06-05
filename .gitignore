@@ -37,3 +37,16 @@ lila-bot.json
 
 # Generated SQL output (contains customer PII)
 scripts/out/
+
+# Customer data — spreadsheets, docs, and seed/prototype dumps (PII, never commit).
+# Kept on disk for local ops use; just not tracked.
+*.xlsx
+*.docx
+fulfillment records/
+/seeds.sql
+/seed_data.json
+/seeds_js.json
+# Legacy prototype HTML dumps with rendered customer PII (root only;
+# app/index.html — the Vite entry — is still tracked).
+/index.html
+/makelila-app.html

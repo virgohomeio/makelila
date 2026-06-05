@@ -49,7 +49,7 @@ create trigger returns_auto_refund
   for each row execute function public.auto_create_refund_for_customer_return();
 
 -- ============================================================================
--- One-off: back-fill Ron Russell's refund_approval (his return was inserted
+-- One-off: back-fill Riley Sample's refund_approval (his return was inserted
 -- before this trigger existed). Idempotent thanks to the not-exists guard.
 -- ============================================================================
 insert into public.refund_approvals (
@@ -71,10 +71,10 @@ select
   'USD',
   r.refund_method_preference,
   r.reason,
-  'Customer-form submission CRT-44511. Ron requested callback at 604-834-4451 for credit-card refund processing. Manager: confirm currency (CAD vs USD) and adjusted amount.',
+  'Customer-form submission CRT-44511. Riley requested callback at 555-0110-0000 for credit-card refund processing. Manager: confirm currency (CAD vs USD) and adjusted amount.',
   'manager_review'
 from public.returns r
 where r.source = 'customer_form'
-  and r.customer_email = 'ron@newcmi.ca'
+  and r.customer_email = 'riley.sample@example.com'
   and r.original_order_ref = '#1239'
   and not exists (select 1 from public.refund_approvals where return_id = r.id);
