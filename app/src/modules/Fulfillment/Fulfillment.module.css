@@ -403,3 +403,58 @@
 .error {
   color: var(--color-error, #c53030); font-size: 11px; margin: 4px 0 0;
 }
+
+/* ─── History tab ──────────────────────────────────────────────────────── */
+.histTab { padding: 16px 24px; display: flex; flex-direction: column; gap: 12px; }
+.histLoading { padding: 24px; color: var(--color-ink-subtle, #718096); font-size: .9rem; }
+.histHeader { display: flex; flex-direction: column; gap: 4px; }
+.histTitle { font-size: 1.1rem; font-weight: 700; color: #1a202c; margin: 0; }
+.histHint { font-size: .75rem; color: #4a5568; }
+.histHint code { background: #edf2f7; padding: 1px 5px; border-radius: 3px; font-size: .7rem; }
+
+.histControls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.histChips { display: flex; gap: 5px; flex-wrap: wrap; }
+.histChip {
+  padding: 4px 10px; border: 1px solid #cbd5e0; background: #fff; border-radius: 14px;
+  font-size: .78rem; cursor: pointer; color: #2d3748; font-family: inherit;
+}
+.histChip:hover { background: #f7fafc; }
+.histChipActive { background: #2b6cb0; color: #fff; border-color: #2b6cb0; }
+.histChipCount {
+  display: inline-block; margin-left: 4px; font-size: .7rem;
+  background: rgba(0,0,0,0.08); padding: 1px 6px; border-radius: 8px;
+}
+.histChipActive .histChipCount { background: rgba(255,255,255,0.25); }
+.histSearch {
+  flex: 1; min-width: 200px; padding: 5px 10px; font-size: .85rem;
+  border: 1px solid #cbd5e0; border-radius: 6px;
+}
+.histResultCount { font-size: .75rem; color: #718096; }
+.histEmpty {
+  padding: 24px; text-align: center; color: var(--color-ink-subtle, #a0aec0); font-size: .85rem;
+  border: 1px dashed #cbd5e0; border-radius: 6px;
+}
+
+.histTable { width: 100%; border-collapse: collapse; font-size: .8rem; }
+.histTable thead th {
+  text-align: left; padding: 8px 10px; background: #f7fafc;
+  border-bottom: 2px solid #e2e8f0; color: #4a5568; font-size: .7rem;
+  text-transform: uppercase; letter-spacing: 0.04em;
+}
+.histTable tbody td { padding: 8px 10px; border-bottom: 1px solid #edf2f7; vertical-align: top; }
+.histRow:hover { background: #fafbfc; }
+.histMono { font-family: ui-monospace, monospace; font-size: .75rem; }
+.histMuted { color: #cbd5e0; }
+.histSubtext { font-size: .7rem; color: #718096; }
+.histSourceTag {
+  display: inline-block; padding: 2px 8px; background: #ebf8ff;
+  color: #2b6cb0; border-radius: 10px; font-size: .7rem; font-weight: 600;
+}
+.histStatusShipped {
+  display: inline-block; padding: 2px 8px; background: #f0fff4;
+  color: #276749; border-radius: 4px; font-size: .7rem; font-weight: 600;
+}
+.histStatusPending {
+  display: inline-block; padding: 2px 8px; background: #fffaf0;
+  color: #c05621; border-radius: 4px; font-size: .7rem; font-weight: 600;
+}

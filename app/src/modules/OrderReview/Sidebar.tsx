@@ -4,7 +4,7 @@ import { supabase } from '../../lib/supabase';
 import { OrderRow } from './OrderRow';
 import styles from './OrderReview.module.css';
 
-type Tab = 'pending' | 'held' | 'flagged' | 'approved' | 'all';
+type Tab = 'pending' | 'held' | 'flagged' | 'approved' | 'replacement' | 'all';
 
 type SyncState =
   | { kind: 'idle' }
@@ -13,7 +13,7 @@ type SyncState =
   | { kind: 'error'; message: string };
 
 export function Sidebar({
-  pending, held, flagged, approved, all,
+  pending, held, flagged, approved, replacement, all,
   selectedId,
   onSelect,
 }: {
@@ -21,6 +21,7 @@ export function Sidebar({
   held: Order[];
   flagged: Order[];
   approved: Order[];
+  replacement: Order[];
   all: Order[];
   selectedId: string | null;
   onSelect: (id: string) => void;
@@ -29,10 +30,11 @@ export function Sidebar({
   const [query, setQuery] = useState('');
   const [sync, setSync] = useState<SyncState>({ kind: 'idle' });
 
-  const source = tab === 'pending'  ? pending
-               : tab === 'held'     ? held
-               : tab === 'flagged'  ? flagged
-               : tab === 'approved' ? approved
+  const source = tab === 'pending'     ? pending
+               : tab === 'held'        ? held
+               : tab === 'flagged'     ? flagged
+               : tab === 'approved'    ? approved
+               : tab === 'replacement' ? replacement
                : all;
 
   const visible = useMemo(() => {
@@ -48,11 +50,12 @@ export function Sidebar({
   }, [source, query]);
 
   const tabs: Array<{ key: Tab; label: string; count: number }> = [
-    { key: 'pending',  label: 'Pending',   count: pending.length },
-    { key: 'held',     label: 'Held',      count: held.length },
-    { key: 'flagged',  label: 'Flagged',   count: flagged.length },
-    { key: 'approved', label: 'Confirmed', count: approved.length },
-    { key: 'all',      label: 'All',       count: all.length },
+    { key: 'pending',     label: 'Pending',     count: pending.length },
+    { key: 'held',        label: 'Held',        count: held.length },
+    { key: 'flagged',     label: 'Flagged',     count: flagged.length },
+    { key: 'approved',    label: 'Confirmed',   count: approved.length },
+    { key: 'replacement', label: 'Replacement', count: replacement.length },
+    { key: 'all',         label: 'All',         count: all.length },
   ];
 
   const runSync = async () => {

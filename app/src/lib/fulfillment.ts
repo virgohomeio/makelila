@@ -554,3 +554,57 @@ export async function resolveRework(
   if (slotErr) throw slotErr;
   await logAction('rework_resolved', serial, notes ?? 'Resolved');
 }
+
+// ─── fulfillment_log (historical Excel-imported records) ────────────────────
+
+export type FulfillmentLogRow = {
+  id: string;
+  source_tab: string;       // 'Canada Shipping' | 'US Shipping' | 'Replacement' | 'Personal Delivery'
+  source_row: number | null;
+  shipping_date: string | null;
+  ticket_date: string | null;
+  order_date: string | null;
+  delivery_window: string | null;
+  customer_name: string | null;
+  address: string | null;
+  phone: string | null;
+  email: string | null;
+  batch: string | null;
+  color: string | null;
+  serial_number: string | null;
+  tracking_number: string | null;
+  carrier: string | null;
+  price: number | null;
+  update_status: string | null;
+  replacement_batch: string | null;
+  starter_ordered: string | null;
+  amazon_tracking_id: string | null;
+  starter_delivery: string | null;
+  notes: string | null;
+  imported_at: string;
+};
+
+/** Historical fulfillment records imported from the LILA customer
+ *  fulfillment Excel. Used by the Fulfillment module's History tab to
+ *  show shipped orders that don't go through the in-app
+ *  approval/queue/ship workflow (e.g. older sales, personal-delivery
+ *  replacements, anything already shipped before makelila existed). */
+export function useFulfillmentLog(): { rows: FulfillmentLogRow[]; loading: boolean } {
+  const [rows, setRows] = useState<FulfillmentLogRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await supabase
+        .from('fulfillment_log')
+        .select('*')
+        .order('shipping_date', { ascending: false, nullsFirst: false })
+        .order('customer_name', { ascending: true });
+      if (cancelled) return;
+      if (!error && data) setRows(data as FulfillmentLogRow[]);
+      setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+  return { rows, loading };
+}

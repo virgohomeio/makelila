@@ -239,6 +239,10 @@ export function useOrders(): {
   held: Order[];
   flagged: Order[];
   approved: Order[];
+  /** All kind='replacement' orders in the active set. Surfaced in
+   *  Order Review's "Replacement" tab so they don't dilute the
+   *  Pending/Held/Flagged/Confirmed sales tabs. */
+  replacement: Order[];
   loading: boolean;
 } {
   const [cache, setCache] = useState<Order[]>([]);
@@ -362,12 +366,18 @@ export function useOrders(): {
       if (o.kind !== 'replacement' && shippedCustomers.has(o.customer_name.toLowerCase().trim())) return false;
       return true;
     });
+    // Replacement orders get their own tab in the Sidebar so the
+    // Pending/Held/Flagged/Confirmed sales tabs don't include them.
+    // The Service module still has its dedicated Replacement view via
+    // useReplacementOrders().
+    const sales = active.filter(o => o.kind !== 'replacement');
     return {
-      all:      active,
-      pending:  active.filter(o => o.status === 'pending'),
-      held:     active.filter(o => o.status === 'held'),
-      flagged:  active.filter(o => o.status === 'flagged'),
-      approved: active.filter(o => o.status === 'approved'),
+      all:         active,
+      pending:     sales.filter(o => o.status === 'pending'),
+      held:        sales.filter(o => o.status === 'held'),
+      flagged:     sales.filter(o => o.status === 'flagged'),
+      approved:    sales.filter(o => o.status === 'approved'),
+      replacement: active.filter(o => o.kind === 'replacement'),
       loading,
     };
   }, [cache, fulfilledOrderIds, shippedCustomers, loading]);

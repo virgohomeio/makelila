@@ -8,7 +8,7 @@ import styles from './OrderReview.module.css';
 export default function OrderReview() {
   const { orderId } = useParams<{ orderId: string }>();
   const navigate = useNavigate();
-  const { all, pending, held, flagged, approved, loading } = useOrders();
+  const { all, pending, held, flagged, approved, replacement, loading } = useOrders();
   const selected = orderId ? all.find(o => o.id === orderId) ?? null : null;
 
   useEffect(() => {
@@ -34,6 +34,7 @@ export default function OrderReview() {
         held={held}
         flagged={flagged}
         approved={approved}
+        replacement={replacement}
         selectedId={orderId ?? null}
         onSelect={(id) => navigate(`/order-review/${id}`)}
       />
