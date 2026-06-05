@@ -16,7 +16,7 @@ import styles from './Customers.module.css';
 type Tab = 'directory' | 'profitability' | 'journey';
 
 export default function Customers() {
-  const [tab, setTab] = useState<Tab>('directory');
+  const [tab, setTab] = useState<Tab>('journey');
   const { customers, loading } = useCustomers();
   const { units } = useUnits();
   // Pre-build a lowercase-name → serial[] map so each row can render its
@@ -731,10 +731,12 @@ function FollowUpCalendar({
 
 
 function CustomersTabs({ tab, onChange }: { tab: Tab; onChange: (t: Tab) => void }) {
+  // Order per operator (2026-06-05): Journey first (default), Profitability,
+  // Directory last.
   const tabs: { key: Tab; label: string }[] = [
-    { key: 'directory',     label: 'Directory' },
-    { key: 'profitability', label: 'Profitability' },
     { key: 'journey',       label: 'Journey' },
+    { key: 'profitability', label: 'Profitability' },
+    { key: 'directory',     label: 'Directory' },
   ];
   return (
     <div className={styles.customersTabs}>

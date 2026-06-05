@@ -26,6 +26,10 @@ export type Customer = {
   // public.sync_customer_serials_from_fulfillment(); see scripts/import-fulfillment-sheet.mjs.
   serials: string[] | null;
   serials_synced_at: string | null;
+  // Set by the Journey tab when it sends the name-collection email
+  // (Customer module → Journey). NULL = never sent. Used to dedupe so
+  // operators don't accidentally double-spam the same nameless customer.
+  name_request_sent_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -427,4 +431,39 @@ export async function sendFollowupSms(input: { customer_id: string; message: str
   const body = await res.json();
   if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
   return body;
+}
+
+/** Send the "what's your name?" email to a customer who has an email
+ *  but no full_name on file. Used by the Journey tab to clear nameless
+ *  customers off the board. Reuses the existing send-template-email
+ *  edge function + the seeded `name_collection_request` template
+ *  (migration 20260605060000). Stamps `customers.name_request_sent_at`
+ *  on success so the operator's UI can dedupe re-sends. */
+export async function sendNameCollectionRequest(customer: Customer): Promise<void> {
+  if (!customer.email) throw new Error(`${customer.full_name || 'Customer'} has no email on file.`);
+  const { data: { session } } = await supabase.auth.getSession();
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/send-template-email`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      apikey: SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${session?.access_token ?? SUPABASE_ANON_KEY}`,
+    },
+    body: JSON.stringify({
+      template_key: 'name_collection_request',
+      to: customer.email,
+      variables: {},
+    }),
+  });
+  const text = await res.text();
+  if (!res.ok) {
+    let detail = text;
+    try { detail = (JSON.parse(text) as { error?: string }).error ?? text; } catch { /* keep raw */ }
+    throw new Error(`Name request failed (${res.status}): ${detail}`);
+  }
+  await supabase
+    .from('customers')
+    .update({ name_request_sent_at: new Date().toISOString() })
+    .eq('id', customer.id);
+  await logAction('name_request_sent', customer.id, customer.email);
 }

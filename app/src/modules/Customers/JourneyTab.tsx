@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { useCustomers, type Customer } from '../../lib/customers';
+import { useCustomers, sendNameCollectionRequest, type Customer } from '../../lib/customers';
 import { useOrders, type Order } from '../../lib/orders';
 import { useServiceTickets, useCustomerLifecycle, type ServiceTicket, type CustomerLifecycle } from '../../lib/service';
 import { useReturns, type ReturnRow } from '../../lib/postShipment';
@@ -104,14 +104,16 @@ function inferJourney(
   const hasDelivered = saleOrders.some(o => o.delivered_at != null);
   const hasOnboardingScheduled = lifecycle.some(l => l.onboarding_status === 'scheduled');
   const hasOnboardingCompleted = lifecycle.some(l => l.onboarding_status === 'completed');
-  const completedOnboardOldEnough = lifecycle.some(l => {
-    if (l.onboarding_status !== 'completed' || !l.onboarding_completed_at) return false;
-    const completed = new Date(l.onboarding_completed_at).getTime();
-    return Date.now() - completed > 30 * 86400_000;   // >30d post-onboard = "routine"
-  });
-  const openWarrantyTickets = tickets.filter(t =>
-    (t.topic === 'return_hardware_defect' || t.topic === 'warranty_replacement')
-    && t.status !== 'resolved' && t.status !== 'closed'
+  // Per operator (2026-06-05): any customer with onboard_date set has
+  // received their unit and is using it. Use this as the primary
+  // "they've been onboarded" signal — `customer_lifecycle` is too
+  // sparse (only ~half of onboarded customers have a lifecycle row).
+  const hasBeenOnboarded = !!c.onboard_date || hasOnboardingCompleted;
+  // Per operator (2026-06-05): for an onboarded customer, ANY open
+  // ticket (not just warranty/defect) puts them in Failure & Support
+  // — represents active operator touch, regardless of the topic.
+  const openTickets = tickets.filter(t =>
+    t.status !== 'resolved' && t.status !== 'closed'
   );
   const hasActiveReturn = returns.some(r =>
     r.status !== 'closed' && r.status !== 'denied' && r.status !== 'refunded'
@@ -120,16 +122,15 @@ function inferJourney(
 
   // Walk backward through the stage order. First match wins as "current".
   let currentStage: StageKey = 'awareness';
-  if (fu2Reviewed)                       currentStage = 'promotion';
-  else if (hasActiveReturn)              currentStage = 'eol';
-  else if (openWarrantyTickets.length > 0) currentStage = 'failure';
-  else if (completedOnboardOldEnough)    currentStage = 'routine';
-  else if (hasOnboardingCompleted)       currentStage = 'setup';
-  else if (hasOnboardingScheduled)       currentStage = 'setup';
-  else if (hasDelivered)                 currentStage = 'unboxing';
-  else if (hasShipped)                   currentStage = 'shipping';
-  else if (hasSale)                      currentStage = 'conversion';
-  else if (c.email || c.phone)           currentStage = 'consideration';   // in the system but no order
+  if (fu2Reviewed)                              currentStage = 'promotion';
+  else if (hasActiveReturn)                     currentStage = 'eol';
+  else if (hasBeenOnboarded && openTickets.length > 0) currentStage = 'failure';
+  else if (hasBeenOnboarded)                    currentStage = 'routine';
+  else if (hasOnboardingScheduled)              currentStage = 'setup';
+  else if (hasDelivered)                        currentStage = 'unboxing';
+  else if (hasShipped)                          currentStage = 'shipping';
+  else if (hasSale)                             currentStage = 'conversion';
+  else if (c.email || c.phone)                  currentStage = 'consideration';
 
   const currentIdx = STAGE_INDEX[currentStage];
 
@@ -190,26 +191,26 @@ function inferJourney(
         }
         break;
       case 'routine': {
-        // Look at FU1/FU2 responses + open tickets
-        const openTickets = tickets.filter(t => t.status !== 'resolved' && t.status !== 'closed');
+        score = 4;  // routine = "they're using it without issue"
         if (c.fu1_status === 'completed' || c.fu1_status === 'reviewed') {
-          score = 4;
           sig.push(`FU1 logged as ${c.fu1_status}.`);
         }
-        if (openTickets.length > 0) {
-          score = 2;
-          sig.push(`${openTickets.length} open ticket${openTickets.length === 1 ? '' : 's'}.`);
+        if (c.onboard_date) {
+          sig.push(`Onboarded on ${c.onboard_date}.`);
+        }
+        if (openTickets.length === 0) {
+          sig.push('No open tickets.');
         }
         break;
       }
       case 'failure':
-        // Score on count + age of open warranty tickets
-        if (openWarrantyTickets.length >= 2) {
+        // Open tickets put them here regardless of topic. Count drives severity.
+        if (openTickets.length >= 2) {
           score = 1;
-          sig.push(`${openWarrantyTickets.length} open warranty/defect tickets.`);
-        } else if (openWarrantyTickets.length === 1) {
+          sig.push(`${openTickets.length} open tickets.`);
+        } else if (openTickets.length === 1) {
           score = 2;
-          sig.push('1 open warranty/defect ticket.');
+          sig.push('1 open ticket.');
         } else {
           score = 3;
           sig.push('Tickets resolved.');
@@ -255,6 +256,14 @@ function inferJourney(
 type StageFilter = 'all' | StageKey;
 type SatisfactionFilter = 'all' | 'unhappy' | 'happy';
 
+// Per operator (2026-06-05): card order is green (happy) → red (unhappy)
+// → neutral (3). Within each group, name-sort for stable presentation.
+function satisfactionGroup(s: Satisfaction): 0 | 1 | 2 {
+  if (s >= 4) return 0;   // green / happy first
+  if (s <= 2) return 1;   // red / unhappy second
+  return 2;                // neutral (3) last
+}
+
 export function JourneyTab() {
   const { customers, loading: lc } = useCustomers();
   const { all: orders } = useOrders();
@@ -265,10 +274,36 @@ export function JourneyTab() {
   const [stageFilter, setStageFilter] = useState<StageFilter>('all');
   const [satFilter, setSatFilter] = useState<SatisfactionFilter>('all');
   const [openId, setOpenId] = useState<string | null>(null);
+  const [sendingNames, setSendingNames] = useState(false);
+  const [nameRequestResult, setNameRequestResult] = useState<{ sent: number; failed: number } | null>(null);
+
+  // Per operator: skip customers with no name on file — the card can't
+  // render meaningfully without a name. The name-request banner above
+  // the funnel lists those customers and offers a one-click send.
+  const namedCustomers = useMemo(
+    () => customers.filter(c => c.full_name && c.full_name.trim() !== ''),
+    [customers],
+  );
+
+  // Nameless customers with an email we can reach. Already-sent within
+  // the last 30d are hidden from the actionable list so operators don't
+  // re-spam — the count badge still tells the full story.
+  const namelessWithEmail = useMemo(() => {
+    const cutoff = Date.now() - 30 * 86400_000;
+    return customers.filter(c => {
+      if (c.full_name && c.full_name.trim() !== '') return false;
+      if (!c.email || c.email.trim() === '') return false;
+      if (c.name_request_sent_at) {
+        const sentAt = new Date(c.name_request_sent_at).getTime();
+        if (sentAt > cutoff) return false;
+      }
+      return true;
+    });
+  }, [customers]);
 
   const journeys = useMemo(() => {
-    return customers.map(c => inferJourney(c, orders, lifecycle, tickets, returns));
-  }, [customers, orders, lifecycle, tickets, returns]);
+    return namedCustomers.map(c => inferJourney(c, orders, lifecycle, tickets, returns));
+  }, [namedCustomers, orders, lifecycle, tickets, returns]);
 
   const stageCounts = useMemo(() => {
     const m: Record<StageKey, number> = {} as Record<StageKey, number>;
@@ -287,11 +322,44 @@ export function JourneyTab() {
           !(j.customer.email ?? '').toLowerCase().includes(q)) return false;
       return true;
     }).sort((a, b) => {
-      // Unhappy first within each stage
-      if (a.overallSatisfaction !== b.overallSatisfaction) return a.overallSatisfaction - b.overallSatisfaction;
+      // Group: green → red → neutral (per operator request).
+      const ga = satisfactionGroup(a.overallSatisfaction);
+      const gb = satisfactionGroup(b.overallSatisfaction);
+      if (ga !== gb) return ga - gb;
+      // Within group: within green, most-delighted first; within red,
+      // most-frustrated first; within neutral, name-sort.
+      if (ga === 0 && a.overallSatisfaction !== b.overallSatisfaction) {
+        return b.overallSatisfaction - a.overallSatisfaction;
+      }
+      if (ga === 1 && a.overallSatisfaction !== b.overallSatisfaction) {
+        return a.overallSatisfaction - b.overallSatisfaction;
+      }
       return a.customer.full_name.localeCompare(b.customer.full_name);
     });
   }, [journeys, search, stageFilter, satFilter]);
+
+  async function handleSendNameRequests() {
+    if (namelessWithEmail.length === 0) return;
+    const ok = window.confirm(
+      `Send name-request email to ${namelessWithEmail.length} customer${namelessWithEmail.length === 1 ? '' : 's'}?`,
+    );
+    if (!ok) return;
+    setSendingNames(true);
+    setNameRequestResult(null);
+    let sent = 0, failed = 0;
+    for (const c of namelessWithEmail) {
+      try {
+        await sendNameCollectionRequest(c);
+        sent++;
+      } catch (e) {
+        failed++;
+        // eslint-disable-next-line no-console
+        console.error('name-request failed for', c.email, e);
+      }
+    }
+    setSendingNames(false);
+    setNameRequestResult({ sent, failed });
+  }
 
   if (lc) return <div className={styles.loading}>Loading journey…</div>;
 
@@ -299,6 +367,29 @@ export function JourneyTab() {
 
   return (
     <div className={styles.journeyTab}>
+      {namelessWithEmail.length > 0 && (
+        <div className={styles.journeyNamelessBanner}>
+          <div>
+            <strong>{namelessWithEmail.length} customer{namelessWithEmail.length === 1 ? '' : 's'} with no name on file.</strong>
+            <span className={styles.journeyNamelessHint}>
+              {' '}Hidden from the cards below. Send them a short email asking for their name so they can be tracked.
+            </span>
+          </div>
+          <button
+            className={styles.journeyNamelessBtn}
+            onClick={() => void handleSendNameRequests()}
+            disabled={sendingNames}
+          >
+            {sendingNames ? 'Sending…' : `Send name request to ${namelessWithEmail.length}`}
+          </button>
+        </div>
+      )}
+      {nameRequestResult && (
+        <div className={styles.journeyNamelessResult}>
+          ✓ Sent {nameRequestResult.sent}{nameRequestResult.failed > 0 ? ` · ${nameRequestResult.failed} failed (see console)` : ''}
+        </div>
+      )}
+
       {/* Stage funnel — counts per stage, click to filter */}
       <div className={styles.journeyFunnel}>
         <button

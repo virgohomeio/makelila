@@ -894,6 +894,46 @@
   padding: 16px 24px;
 }
 
+.journeyNamelessBanner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: #fffaf0;
+  border: 1px solid #fbd38d;
+  color: #744210;
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin-bottom: 12px;
+  font-size: .85rem;
+}
+.journeyNamelessHint {
+  color: #975a16;
+  font-size: .8rem;
+}
+.journeyNamelessBtn {
+  background: #c05621;
+  color: #fff;
+  border: none;
+  padding: 6px 14px;
+  border-radius: 6px;
+  font-size: .8rem;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.journeyNamelessBtn:hover:not(:disabled) { background: #9c4221; }
+.journeyNamelessBtn:disabled { opacity: .6; cursor: not-allowed; }
+.journeyNamelessResult {
+  background: #f0fff4;
+  border: 1px solid #9ae6b4;
+  color: #276749;
+  padding: 8px 14px;
+  border-radius: 6px;
+  font-size: .8rem;
+  margin-bottom: 12px;
+}
+
 .journeyFunnel {
   display: grid;
   grid-template-columns: repeat(11, minmax(0, 1fr));

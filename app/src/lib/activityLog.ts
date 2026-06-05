@@ -113,7 +113,12 @@ export function useActivityKpis(days: number = 7) {
         .order('ts', { ascending: false })
         .limit(5000);
       if (cancelled) return;
-      if (!error && data) {
+      if (error) {
+        // Surface the failure so future silent breaks (FK drift, RLS
+        // change, etc.) don't quietly flatten the KPI tiles to zero.
+        // eslint-disable-next-line no-console
+        console.error('useActivityKpis: activity_log query failed', error);
+      } else if (data) {
         setEntries((data as Array<Record<string, unknown>>).map(toEntry));
       }
       setLoading(false);
