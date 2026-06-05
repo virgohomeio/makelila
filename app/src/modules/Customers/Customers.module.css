@@ -664,7 +664,90 @@
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 12px;
-  margin-bottom: 20px;
+  margin-bottom: 6px;
+}
+.profCurrencyNote {
+  font-size: .7rem;
+  color: #718096;
+  font-style: italic;
+  margin-bottom: 16px;
+}
+
+/* Backlog #58 V2 — insights panel */
+.profInsights {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 14px 16px;
+  margin-bottom: 16px;
+}
+.profInsightsHeader {
+  font-size: .8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #4a5568;
+  margin-bottom: 10px;
+}
+.profInsightsGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 14px;
+}
+.profInsightCard {
+  background: #f7fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+.profInsightTitle {
+  font-size: .75rem;
+  font-weight: 700;
+  color: #2d3748;
+  margin-bottom: 8px;
+}
+.profInsightEmpty {
+  font-size: .8rem;
+  color: #a0aec0;
+  font-style: italic;
+}
+.profInsightTable {
+  width: 100%;
+  font-size: .8rem;
+  border-collapse: collapse;
+}
+.profInsightTable th {
+  text-align: left;
+  font-weight: 600;
+  font-size: .7rem;
+  text-transform: uppercase;
+  color: #4a5568;
+  padding: 4px 6px;
+  border-bottom: 1px solid #e2e8f0;
+}
+.profInsightTable td {
+  padding: 4px 6px;
+  color: #2d3748;
+}
+.profInsightStats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.profInsightStats > div {
+  display: flex;
+  flex-direction: column;
+}
+.profInsightStatValue {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #2b6cb0;
+}
+.profInsightStatLabel {
+  font-size: .65rem;
+  text-transform: uppercase;
+  color: #718096;
+  margin-top: 2px;
 }
 .profStat {
   background: #fff;
