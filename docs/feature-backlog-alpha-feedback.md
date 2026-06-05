@@ -376,6 +376,35 @@ Alpha feedback collection window is **closed**. The 11 items above plus the meet
   **Source:** #67 follow-up surfaced 2026-06-04 — `customer_profitability` view (#58) still joins orders↔customers via fuzzy email/name match because Shopify-imported orders don't carry a `customer_id`. Same class of false-positive risk that #67 fixed for units.
   **Description:** Add `orders.customer_id uuid REFERENCES customers(id) ON DELETE SET NULL`. Backfill by running the same exact + token cascade we now have in `resolve_customer_id_from_name()` (already exposed as a Postgres function), but matching on the order's `customer_email` first (more reliable than name on the orders side), falling back to name. Update `sync-shopify-orders` to set `customer_id` at INSERT/refresh time using the same resolver. Migrate the profitability view's `order_match` CTE to prefer the FK and fall back to email/name only when null. Once readers are migrated, drop or strictly-cache `orders.customer_name`/`customer_email`.
 
+- **#76** Activity Log KPI panel: tiles all read zero — re-pick tile types to match the action-type strings actually being written + fix "today" timezone.
+  **Source:** Huayi (2026-06-04, observed after #56 V2 shipped — the new 5-tile / 3-card layout renders but most tiles show 0 even though operators have been working).
+  **Why:** The KPI aggregator in `app/src/modules/ActivityLog/KpiPanel.tsx` counts a *specific* list of action types per tile (e.g. `order_shipped` → "Orders shipped", `refund_finance_approved` → "Refunds approved", `released_to_fulfillment` → "Released to FQ"). Ground-truth from `activity_log` over the last 7 days at observation time shows almost none of those types are present — the high-volume ops actions are completely different:
+    | Action type written | 7-day count | Counted by V2 panel? |
+    |---|---|---|
+    | `unit_test_report` | 45 | ❌ |
+    | `address_verified` | 22 | ❌ |
+    | `ticket_status_changed` | 20 | partial (only when detail matches "closed"/"resolved") |
+    | `auto_followup_sent` | 9 | ❌ |
+    | `dashboard_status_sms` | 9 | ❌ |
+    | `stock_status` / `stock_edit` | 10 combined | ❌ |
+    | `gmail_sync_manual` | 4 | ❌ |
+    | `ticket_created` | 2 | ✅ |
+    | `replacement_create` | 1 | ✅ |
+    | `fq_test_ok` | 1 | ✅ |
+    | `order_shipped` / `order_delivered` / `refund_finance_approved` / `released_to_fulfillment` | **0 each** | ✅ (but no data) |
+  Secondary bug: the "today" bucket uses `date_trunc('day', now() at time zone 'UTC')` semantics in the client aggregator. At observation time (~23:03 UTC = ~19:03 ET on the same calendar day), no entry had landed in "today" because the UTC day rolls over while operators are still working ET hours. Operators see "Total entries: 0" until ~5am ET the next morning.
+  No data backfill is needed — every operator action of the last few weeks IS in `activity_log`. The fix is purely picking the right action types per tile + using the right TZ for "today".
+  **Description / acceptance:**
+    1. **Re-pick the tile types** to favor what operators actually do. Suggested mapping (operator-tunable later):
+       - Today: Total entries · QC reports filed (`unit_test_report`) · Addresses verified (`address_verified`) · Status SMS sent (`dashboard_status_sms`) · Tickets resolved (`ticket_status_changed` detail ~ resolved/closed)
+       - Fulfillment 7d: QC reports (`unit_test_report`) · Tests passed (`fq_test_ok`) · Stock status flips (`stock_status`)
+       - Customer ops 7d: Addresses verified (`address_verified`) · Auto-followup SMSes (`auto_followup_sent`) · Tickets created (`ticket_created`) — keep replacements + refunds in a secondary view so they don't render as flat zero when they happen monthly.
+    2. **Timezone fix.** Use `America/Toronto` (or the user's profile-stored timezone if we add it) for the "today" bucket boundary so it matches when operators are working. The KpiPanel aggregator currently runs `startOfToday.setHours(0, 0, 0, 0)` which uses the browser's local time — so this might already be fine in practice; the bug surfaces if the server-side aggregator we add later runs in UTC. Add a regression test pinning the expected start-of-day for an ET-based operator at 8pm ET.
+    3. **"By module" histogram already works** — it groups by the type-prefix table in `KpiPanel.tsx`. No change needed but should be sanity-checked once the tile changes ship.
+    4. **Stretch:** a small "what's logged" debug surface in the empty-state of each card ("0 in last 7d — expected types: foo, bar") so the next time we evolve action-type strings, the gap is obvious immediately instead of three weeks later.
+  **Why not just write more action types?** That's a separate, larger task (sweep every mutation in `lib/` to ensure it logs to `activity_log`). For now, accept that operator-action coverage is partial and at least surface what IS being logged.
+  **Likely touch:** `app/src/modules/ActivityLog/KpiPanel.tsx` (compute(), tile labels), `lib/activityLog.ts` (no change unless we add a server-side aggregate RPC). Add a focused unit test that feeds synthetic `ActivityLogEntry[]` representative of the real ground-truth above and asserts the tiles non-zero.
+
 - **#75** Diagnosis-call booking link on customer tickets + auto-invite Reina/Junaid to the resulting call. — **SHIPPED** (2026-06-04: `lib/cannedSms.ts` exports `DIAGNOSIS_CALL_BOOKING_URL` + `diagnosis_call_request` template; "Send diagnosis link" button on `Service/TicketDetailPanel` opens a confirm modal with the canned body, sends via existing `sendFollowupSms` SMS path, stamps `service_tickets.diagnosis_link_sent_at`; cron-fanout shipped jointly with #74 below).
   **Source:** Huayi (2026-06-04 in-session note, follow-up to #44 once that auto-invite pattern was established)
   **Description:** Two coupled pieces — a customer-facing booking flow and the internal co-host auto-invite that runs once the customer books.
