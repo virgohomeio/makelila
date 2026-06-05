@@ -27,7 +27,8 @@ export type MachineStatus =
   | 'SOAKED_SOIL'
   | 'DIAGNOSE'
   | 'NOT_MIXING'
-  | 'OPEN_LID';
+  | 'OPEN_LID'
+  | 'NO_BME_DATA';
 
 export interface EventRow {
   created_at: string;
@@ -151,23 +152,25 @@ export const LID_OPEN_STATE = 1;
 export const RECENT_RECEIVING_WINDOW_MINUTES = 10;
 
 export const STATUS_COLORS: Record<MachineStatus, string> = {
-  OK:          '#27ae60',
-  NEW_FOOD:    '#1abc9c',
-  DRY_SOIL:    '#e67e22',
-  SOAKED_SOIL: '#2980b9',
-  DIAGNOSE:    '#e74c3c',
-  NOT_MIXING:  '#9b59b6',
-  OPEN_LID:    '#f39c12',
+  OK:           '#27ae60',
+  NEW_FOOD:     '#1abc9c',
+  DRY_SOIL:     '#e67e22',
+  SOAKED_SOIL:  '#2980b9',
+  DIAGNOSE:     '#e74c3c',
+  NOT_MIXING:   '#9b59b6',
+  OPEN_LID:     '#f39c12',
+  NO_BME_DATA:  '#7f8c8d',
 };
 
 export const STATUS_DESCRIPTIONS: Record<MachineStatus, string> = {
-  OK:          'Machine operating normally.',
-  NEW_FOOD:    'Rapid humidity rise detected — food likely just added.',
-  DRY_SOIL:    'Humidity below 15% or dropping faster than 10%/hr.',
-  SOAKED_SOIL: 'Humidity above 60% sustained for 12+ hours.',
-  DIAGNOSE:    'No data received in the last 10 minutes.',
-  NOT_MIXING:  'Chamber motors not running as expected.',
-  OPEN_LID:    'Lid open condition detected.',
+  OK:           'Machine operating normally.',
+  NEW_FOOD:     'Rapid humidity rise detected — food likely just added.',
+  DRY_SOIL:     'Humidity sustained below 15% (or dropping faster than 10%/hr).',
+  SOAKED_SOIL:  'Humidity above 60% sustained for 12+ hours.',
+  DIAGNOSE:     'No data received in the last 10 minutes.',
+  NOT_MIXING:   'Chamber motors not running as expected.',
+  OPEN_LID:     'Lid open condition detected.',
+  NO_BME_DATA:  'Telemetry is arriving but BME humidity readings are missing or stuck at zero — sensor likely faulty.',
 };
 
 export type MixingVerdict = 'BOTH' | 'LEFT_ONLY' | 'RIGHT_ONLY' | 'NEITHER' | 'NO_DATA';
@@ -353,12 +356,27 @@ function humidityAboveThresholdForPeriod(
   return above / recent.length > 0.5;
 }
 
+// How many of the most recent valid points must all sit below
+// DRY_SOIL_LOW_HUMIDITY before we flag DRY_SOIL on the threshold rule.
+// Previously this checked only the single latest point, which produced
+// false positives when one sensor was glitching but the chamber was
+// actually moist (e.g. Ronald Hatch 2026-06-05 — sensor 2 dropped from
+// ~62% to 3% for a few readings, then recovered; the customer confirmed
+// the compost was fine).
+export const DRY_SOIL_SUSTAINED_POINTS = 5;
+
 export function isDrySoilFromBme(
   bySensor: Partial<Record<1 | 2, Array<[Date, number]>>>,
 ): boolean {
   for (const series of Object.values(bySensor)) {
     if (!series || !series.length) continue;
-    if (series[series.length - 1][1] < DRY_SOIL_LOW_HUMIDITY) return true;
+    const tail = series.slice(-DRY_SOIL_SUSTAINED_POINTS);
+    if (
+      tail.length >= DRY_SOIL_SUSTAINED_POINTS
+      && tail.every(([, h]) => h < DRY_SOIL_LOW_HUMIDITY)
+    ) {
+      return true;
+    }
     if (
       gradientCrossesThreshold(
         humidityGradientMetrics(series, DRY_SOIL_DROP_LOOKBACK_HOURS, DRY_SOIL_DROP_MIN_SEGMENT_MINUTES),
@@ -572,7 +590,11 @@ export function classifyMachineStatus(args: {
     if (!hasRecentHumidityActivity(bySensor)) return 'NOT_MIXING';
     // Else fall through to BME-based status.
   }
-  if (!bySensor[1] && !bySensor[2]) return 'OK';
+  // Telemetry is arriving (we got past isReceiving) but both BME series
+  // are empty after validBmeHumidity filtering — sensors are dead/stuck
+  // at zero. Don't green-light this as OK; surface as NO_BME_DATA so
+  // operators can investigate instead of trusting a silent verdict.
+  if (!bySensor[1] && !bySensor[2]) return 'NO_BME_DATA';
   if (isDrySoilFromBme(bySensor)) return 'DRY_SOIL';
   const { wetSoil, newFood } = wetSoilNewFoodFromBme(bySensor);
   if (wetSoil) return 'SOAKED_SOIL';
@@ -879,13 +901,16 @@ export function useUnitCustomerMap() {
 export type StatusSmsKind = 'wellness' | 'lid' | null;
 
 export const STATUS_SMS_KIND: Record<MachineStatus, StatusSmsKind> = {
-  OK:          null,
-  NEW_FOOD:    null,
-  DRY_SOIL:    'wellness',
-  SOAKED_SOIL: 'wellness',
-  NOT_MIXING:  'wellness',
-  OPEN_LID:    'lid',
-  DIAGNOSE:    null,
+  OK:           null,
+  NEW_FOOD:     null,
+  DRY_SOIL:     'wellness',
+  SOAKED_SOIL:  'wellness',
+  NOT_MIXING:   'wellness',
+  OPEN_LID:     'lid',
+  DIAGNOSE:     null,
+  // NO_BME_DATA is an operator-attention signal (broken sensor), not a
+  // customer-facing one. No SMS template — operator should diagnose.
+  NO_BME_DATA:  null,
 };
 
 export const STATUS_SMS_TEMPLATES: Record<NonNullable<StatusSmsKind>, {
