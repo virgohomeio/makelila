@@ -164,17 +164,17 @@ Alpha feedback collection window is **closed**. The 11 items above plus the meet
 
 ### Customer Service — Reina
 
-- **#31** Onboarding tab: split into "needs onboarding — not yet scheduled" vs. "onboarding scheduled" sections so Reina can see who to chase.
+- **#31** Onboarding tab: split into "needs onboarding — not yet scheduled" vs. "onboarding scheduled" sections so Reina can see who to chase. — **SHIPPED** (OnboardingTab filter chips at lines 112-141, default view picks the cohort with the larger backlog).
 - **#32** Calendly sync delay. Reina scheduled an onboarding session with Huayi (using Pedrum's test profile) and Pedrum accepted it, but the booking didn't appear in makeLILA promptly. Tighten the sync cadence or webhook.
-- **#33** Onboarding detail panel currently reuses the ticket layout. Needs an onboarding-specific view with a "Mark complete" button instead of ticket fields.
+- **#33** Onboarding detail panel currently reuses the ticket layout. Needs an onboarding-specific view with a "Mark complete" button instead of ticket fields. — **SHIPPED** (inline `LifecycleActions` row in OnboardingTab lines 174-210 — Mark complete / No-show / Skip buttons on each row, no need to open the ticket panel).
 - **#34** Customer picker for new tickets didn't surface Pedrum's secondary profile (`pedruma71@gmail.com`). That profile is also missing from the Customers tab. Customer-sync gap.
 - **#35** *(Note for later — strategic.)* If we rule HubSpot out as a customer source, we'll need a robust Shopify → customer sync. Today there's a rare Shopify import path that fails to create the customer profile on order arrival. *Ties to #8 system-of-record decision.*
 - **#36** "Create support ticket" form: once a customer is selected, auto-populate their unit serial number(s).
 - **#37** Ticket status labels need refresh — action-oriented terms like "Complete", "Needs to reach out", etc.
 - **#38** Add a Category field on tickets so we can report issue volume per area (electrical, mechanical, onboarding, billing, etc.).
 - **#39** Owner-email list is stale: Aaron and Ashwini still appear (both left); Reina is missing.
-- **#40** Follow-up calendar based on onboarding date — auto-schedule 1-week / 1-month check-ins after onboarding completes.
-- **#41** Define the support-ticket → Repair tab pipeline. Today it's ambiguous how a defect-flagged ticket moves into the repair queue.
+- **#40** Follow-up calendar based on onboarding date — auto-schedule 1-week / 1-month check-ins after onboarding completes. — **SHIPPED** (OnboardingTab "Check-ins" filter view lines 379-454; FU1=7d / FU2=30d cadence in lib/customers FU1_DAYS/FU2_DAYS; inline Called/Messaged/Reviewed action buttons per row).
+- **#41** Define the support-ticket → Repair tab pipeline. Today it's ambiguous how a defect-flagged ticket moves into the repair queue. — **SHIPPED** (Replacement tab now has a default-open "Triage candidates" section listing service tickets where topic ∈ return_hardware_defect/warranty_replacement AND status not closed/resolved AND replacement_order_id is null; click → ticket panel → "Send replacement" creates the order via #55 flow; row drops off automatically once linked).
 - **#42** Customers tab: data sync is incomplete — fields missing on some customers. Likely linked to #34.
 - **#43** Add unit serial number to the customer profile card in the Customers tab (currently you have to cross-reference Stock).
 - **#44** Auto-invite Reina to every customer onboarding call when it is scheduled in Calendly.
