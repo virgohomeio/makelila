@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   useServiceTickets, createTicket, syncGmailTickets,
-  STATUS_META, TICKET_STATUSES, PRIORITY_META, SOURCE_LABEL, TOPIC_LABEL,
+  STATUS_META, TICKET_STATUSES, TOPIC_LABEL,
+  statusMeta, priorityMeta, sourceLabel, topicLabel,
   ISSUE_AREAS, ISSUE_AREA_LABEL,
   type TicketStatus, type TicketPriority, type TicketTopic, type ServiceTicket,
   type IssueArea,
@@ -475,8 +476,8 @@ function Kpi({ label, value }: { label: string; value: number }) {
 }
 
 function TicketRow({ t, selected, onClick }: { t: ServiceTicket; selected: boolean; onClick: () => void }) {
-  const s = STATUS_META[t.status];
-  const p = PRIORITY_META[t.priority];
+  const s = statusMeta(t.status);
+  const p = priorityMeta(t.priority);
   // Age: prefer last_message_at (gmail-aware) then created_at.
   const lastTs = t.last_message_at ?? t.created_at;
   const ageHours = (Date.now() - new Date(lastTs).getTime()) / 3_600_000;
@@ -504,8 +505,8 @@ function TicketRow({ t, selected, onClick }: { t: ServiceTicket; selected: boole
         <div>{t.subject}</div>
         {t.summary && <div className={styles.rowSummary}>{t.summary}</div>}
       </td>
-      <td>{t.topic ? <span className={styles.topicPill}>{TOPIC_LABEL[t.topic]}</span> : '—'}</td>
-      <td>{SOURCE_LABEL[t.source]}</td>
+      <td>{t.topic ? <span className={styles.topicPill}>{topicLabel(t.topic)}</span> : '—'}</td>
+      <td>{sourceLabel(t.source)}</td>
       <td><span className={styles.pill} style={{ background: '#f7fafc', color: p.color }}>{p.label}</span></td>
       <td><span className={styles.pill} style={{ background: s.bg, color: s.color }}>{s.label}</span></td>
       <td>{t.owner_email ? t.owner_email.split('@')[0] : '—'}</td>

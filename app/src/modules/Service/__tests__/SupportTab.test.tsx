@@ -1,0 +1,73 @@
+import { describe, it, expect, vi } from 'vitest';
+import { render, screen, fireEvent } from '@testing-library/react';
+import { SupportTab } from '../SupportTab';
+import type { ServiceTicket } from '../../../lib/service';
+
+function mkTicket(partial: Partial<ServiceTicket> & { id: string }): ServiceTicket {
+  return {
+    ticket_number: 'TKT-1',
+    category: 'support',
+    source: 'gmail',
+    status: 'waiting_on_us',
+    priority: 'normal',
+    customer_id: null, customer_name: 'Alice', customer_email: 'a@x.com',
+    customer_phone: null, unit_serial: null, order_ref: null,
+    subject: 'help me', description: null, internal_notes: null,
+    defect_category: null, parts_needed: null,
+    calendly_event_uri: null, calendly_event_start: null, calendly_host_email: null,
+    hubspot_ticket_id: null, fulfillment_queue_id: null,
+    owner_email: null, resolved_at: null, closed_at: null,
+    created_at: '2026-06-01T00:00:00Z', updated_at: '2026-06-01T00:00:00Z',
+    gmail_thread_id: null, gmail_account: null,
+    topic: null, summary: null, suggested_next_action: null,
+    last_classified_at: null, classification_confidence: null,
+    message_count: 1,
+    first_message_at: '2026-06-01T00:00:00Z',
+    last_message_at: '2026-06-01T00:00:00Z',
+    is_manually_overridden: false,
+    issue_area: null,
+    kind: 'ticket',
+    inbox_disposition: null,
+    ...partial,
+  };
+}
+
+let ticketsToReturn: ServiceTicket[] = [];
+vi.mock('../../../lib/service', async () => {
+  const actual = await vi.importActual<typeof import('../../../lib/service')>('../../../lib/service');
+  return {
+    ...actual,
+    useServiceTickets: vi.fn(() => ({ tickets: ticketsToReturn, loading: false })),
+  };
+});
+vi.mock('../../../lib/customers', async () => {
+  const actual = await vi.importActual<typeof import('../../../lib/customers')>('../../../lib/customers');
+  return { ...actual, useCustomers: vi.fn(() => ({ customers: [] })) };
+});
+vi.mock('../../../lib/stock', async () => {
+  const actual = await vi.importActual<typeof import('../../../lib/stock')>('../../../lib/stock');
+  return { ...actual, useUnits: vi.fn(() => ({ units: [] })) };
+});
+
+describe('SupportTab status resilience', () => {
+  it('renders cleanly with a canonical status', () => {
+    ticketsToReturn = [mkTicket({ id: 't1' })];
+    render(<SupportTab />);
+    expect(screen.getByText('help me')).toBeInTheDocument();
+  });
+
+  it('does not crash when a ticket has an unexpected status value', () => {
+    // Simulates a row delivered by realtime / a sync edge function whose
+    // status is not in the frontend's known 7-state set.
+    ticketsToReturn = [mkTicket({ id: 't2', status: 'triaging' as never })];
+    expect(() => render(<SupportTab />)).not.toThrow();
+    // The unknown status degrades to a humanized label rather than a blank cell.
+    expect(screen.getByText('Triaging')).toBeInTheDocument();
+  });
+
+  it('does not crash opening the detail panel for an unexpected status', () => {
+    ticketsToReturn = [mkTicket({ id: 't3', status: 'escalated' as never })];
+    render(<SupportTab />);
+    expect(() => fireEvent.click(screen.getByText('help me'))).not.toThrow();
+  });
+});
