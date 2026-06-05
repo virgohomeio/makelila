@@ -203,6 +203,36 @@ export const SOURCE_LABEL: Record<TicketSource, string> = {
   quo:              'Quo',
 };
 
+// Safe accessors for the display metadata above. A ticket's status / priority /
+// source can legitimately fall outside the known sets — a sync edge function
+// that hasn't been redeployed yet, a manual DB edit, or a server-side value
+// added before the frontend ships. Indexing the bare record then yields
+// `undefined`, and reading `.label`/`.bg` off it throws *during render*, which
+// white-screens the entire tab (there is no error boundary). These helpers
+// degrade an unknown value to a neutral chip showing the raw (humanized) value
+// instead of crashing. Use them anywhere the value comes from row data.
+function humanizeToken(raw: string): string {
+  return raw.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+export function statusMeta(status: string): { label: string; color: string; bg: string } {
+  return STATUS_META[status as TicketStatus]
+    ?? { label: humanizeToken(status), color: '#718096', bg: '#edf2f7' };
+}
+
+export function priorityMeta(priority: string): { label: string; color: string } {
+  return PRIORITY_META[priority as TicketPriority]
+    ?? { label: humanizeToken(priority), color: '#718096' };
+}
+
+export function sourceLabel(source: string): string {
+  return SOURCE_LABEL[source as TicketSource] ?? humanizeToken(source);
+}
+
+export function topicLabel(topic: string): string {
+  return TOPIC_LABEL[topic as TicketTopic] ?? humanizeToken(topic);
+}
+
 // Allowed next-states for the state machine (UI gating). Any status can move
 // to any other — ops decides; we don't impose a rigid flow across the seven.
 export const NEXT_STATUSES: Record<TicketStatus, TicketStatus[]> = Object.fromEntries(

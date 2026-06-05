@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import {
   type ServiceTicket, type TicketStatus, type IssueArea, type TicketCategory,
-  STATUS_META, CATEGORY_META, PRIORITY_META, SOURCE_LABEL, TOPIC_LABEL, NEXT_STATUSES,
+  STATUS_META, CATEGORY_META, PRIORITY_META, NEXT_STATUSES, TICKET_STATUSES,
+  statusMeta, priorityMeta, sourceLabel, topicLabel,
   ISSUE_AREAS, ISSUE_AREA_LABEL,
   updateTicketStatus, assignTicketOwner, setTicketPriority, setTicketIssueArea, setTicketCategory,
   setRepairFields, reclassifyTicket, deleteTicket, updateTicketSubject,
@@ -69,8 +70,8 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
   );
 
   const cat = CATEGORY_META[ticket.category];
-  const status = STATUS_META[ticket.status];
-  const prio = PRIORITY_META[ticket.priority];
+  const status = statusMeta(ticket.status);
+  const prio = priorityMeta(ticket.priority);
 
   async function run<T>(p: Promise<T>) {
     setBusy(true); setError(null);
@@ -119,7 +120,7 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
             <span className={styles.pill} style={{ background: status.bg, color: status.color }}>{status.label}</span>
             <span className={styles.pill} style={{ background: '#f7fafc', color: prio.color }}>{prio.label}</span>
             <span className={styles.pill} style={{ background: '#edf2f7', color: '#4a5568' }}>
-              {SOURCE_LABEL[ticket.source]}
+              {sourceLabel(ticket.source)}
             </span>
             <span
               className={`${styles.warrantyPill} ${
@@ -169,7 +170,7 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
             </div>
             <div className={styles.detailFieldGrid}>
               <span className={styles.detailFieldLabel}>Topic</span>
-              <span className={styles.detailFieldValue}>{ticket.topic ? TOPIC_LABEL[ticket.topic] : '—'}</span>
+              <span className={styles.detailFieldValue}>{ticket.topic ? topicLabel(ticket.topic) : '—'}</span>
               <span className={styles.detailFieldLabel}>Summary</span>
               <span className={styles.detailFieldValue}>{ticket.summary ?? '—'}</span>
               <span className={styles.detailFieldLabel}>Suggested action</span>
@@ -306,7 +307,7 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
         <div className={styles.detailSection}>
           <div className={styles.detailSectionLabel}>Status — transition</div>
           <div className={styles.actionsRow}>
-            {NEXT_STATUSES[ticket.status].map(next => (
+            {(NEXT_STATUSES[ticket.status] ?? TICKET_STATUSES).map(next => (
               <button
                 key={next}
                 className={styles.btnPrimary}

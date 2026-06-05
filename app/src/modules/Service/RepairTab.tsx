@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { useServiceTickets, STATUS_META, TICKET_STATUSES, type TicketStatus, type ServiceTicket } from '../../lib/service';
+import { useServiceTickets, STATUS_META, TICKET_STATUSES, statusMeta, type TicketStatus, type ServiceTicket } from '../../lib/service';
 import { TicketDetailPanel } from './TicketDetailPanel';
 import styles from './Service.module.css';
 
@@ -98,7 +98,7 @@ function Kpi({ label, value }: { label: string; value: number | string }) {
 }
 
 function RepairRow({ t, selected, onClick }: { t: ServiceTicket; selected: boolean; onClick: () => void }) {
-  const s = STATUS_META[t.status];
+  const s = statusMeta(t.status);
   const daysOpen = Math.floor((Date.now() - new Date(t.created_at).getTime()) / 86400_000);
   return (
     <tr className={`${styles.row} ${selected ? styles.rowSelected : ''}`} onClick={onClick}>
