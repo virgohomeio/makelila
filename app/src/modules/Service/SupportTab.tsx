@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   useServiceTickets, createTicket, syncGmailTickets,
-  STATUS_META, PRIORITY_META, SOURCE_LABEL, TOPIC_LABEL,
+  STATUS_META, TICKET_STATUSES, PRIORITY_META, SOURCE_LABEL, TOPIC_LABEL,
   ISSUE_AREAS, ISSUE_AREA_LABEL,
   type TicketStatus, type TicketPriority, type TicketTopic, type ServiceTicket,
   type IssueArea,
@@ -12,15 +12,8 @@ import { TicketDetailPanel } from './TicketDetailPanel';
 import styles from './Service.module.css';
 
 const STATUS_FILTERS: { key: TicketStatus | 'all'; label: string }[] = [
-  { key: 'all',              label: 'All' },
-  { key: 'new',              label: 'New' },
-  { key: 'triaging',         label: 'Triaging' },
-  { key: 'needs_outreach',   label: 'Needs to reach out' },
-  { key: 'scheduled',        label: 'Scheduled' },
-  { key: 'in_progress',      label: 'In progress' },
-  { key: 'on_hold',          label: 'On hold' },
-  { key: 'waiting_customer', label: 'Waiting customer' },
-  { key: 'resolved',         label: 'Resolved' },
+  { key: 'all', label: 'All' },
+  ...TICKET_STATUSES.map(s => ({ key: s, label: STATUS_META[s].label })),
 ];
 
 export function SupportTab() {
@@ -98,9 +91,9 @@ export function SupportTab() {
   const weekAgo = Date.now() - 7 * 86400_000;
   const newTodayCount = tickets.filter(t => new Date(t.created_at).getTime() > dayAgo).length;
   const inProgressCount = tickets.filter(t => t.status === 'in_progress').length;
-  const waitingCount = tickets.filter(t => t.status === 'waiting_customer').length;
-  const resolvedWeekCount = tickets.filter(t =>
-    t.status === 'resolved' && t.resolved_at && new Date(t.resolved_at).getTime() > weekAgo
+  const waitingCount = tickets.filter(t => t.status === 'waiting_on_us').length;
+  const closedWeekCount = tickets.filter(t =>
+    t.status === 'closed' && t.closed_at && new Date(t.closed_at).getTime() > weekAgo
   ).length;
 
   if (loading) return <div className={styles.loading}>Loading…</div>;
@@ -108,10 +101,10 @@ export function SupportTab() {
   return (
     <>
       <div className={styles.kpiStrip}>
-        <Kpi label="New (24h)"     value={newTodayCount} />
-        <Kpi label="In progress"   value={inProgressCount} />
-        <Kpi label="Waiting cust." value={waitingCount} />
-        <Kpi label="Resolved (7d)" value={resolvedWeekCount} />
+        <Kpi label="New (24h)"      value={newTodayCount} />
+        <Kpi label="In progress"    value={inProgressCount} />
+        <Kpi label="Waiting on us"  value={waitingCount} />
+        <Kpi label="Closed (7d)"    value={closedWeekCount} />
       </div>
 
       <div className={styles.filterRow}>

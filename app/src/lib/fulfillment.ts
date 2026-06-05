@@ -343,7 +343,7 @@ export async function flagRework(
         .insert({
           category:             'repair',
           source:               'fulfillment_flag',
-          status:               'new',
+          status:               'waiting_on_us',
           priority:             'high',
           unit_serial:          serial,
           subject:              `QC flag: ${issue}`,

@@ -66,7 +66,7 @@ describe('classifier — fixtures from the brief', () => {
     const r = classify(t);
     expect(r.priority).toBe('low');
     expect(r.category).toBe('closed_acknowledgment');
-    expect(r.status).toBe('resolved');
+    expect(r.status).toBe('closed');
     expect(r.ruleId).toBe('closed-ack');
   });
 

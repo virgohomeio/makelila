@@ -8,7 +8,7 @@ function mkConv(partial: Partial<ServiceTicket> & { id: string }): ServiceTicket
     ticket_number: 'CONV-1',
     category: 'support',
     source: 'quo',
-    status: 'new',
+    status: 'waiting_on_us',
     priority: 'normal',
     customer_id: null, customer_name: null, customer_email: null,
     customer_phone: '+15551234567', unit_serial: null, order_ref: null,

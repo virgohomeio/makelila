@@ -6,11 +6,11 @@
 // Env: HUBSPOT_ACCESS_TOKEN (private app token, scope: tickets.read)
 //
 // Pipeline stage → status mapping (HubSpot defaults):
-//   1 (New)              → new
-//   2 (Waiting on contact)→ waiting_customer
-//   3 (Waiting on us)    → in_progress
-//   4 (Closed)           → resolved
-// Other stage ids fall through to 'new'.
+//   1 (New)               → waiting_on_us
+//   2 (Waiting on contact)→ waiting_on_customer
+//   3 (Waiting on us)     → waiting_on_us
+//   4 (Closed)            → closed
+// Other stage ids fall through to 'waiting_on_us'.
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { corsHeaders } from '../_shared/cors.ts';
@@ -38,12 +38,11 @@ const PROPERTIES = [
 const PAGE_SIZE = 100;
 const MAX_PAGES = 20; // soft cap = 2,000 tickets per run
 
-function mapStage(stage: string | null | undefined): 'new' | 'waiting_customer' | 'in_progress' | 'resolved' {
+function mapStage(stage: string | null | undefined): 'waiting_on_us' | 'waiting_on_customer' | 'closed' {
   switch (stage) {
-    case '2': return 'waiting_customer';
-    case '3': return 'in_progress';
-    case '4': return 'resolved';
-    default:  return 'new';
+    case '2': return 'waiting_on_customer';
+    case '4': return 'closed';
+    default:  return 'waiting_on_us';   // 1 (New), 3 (Waiting on us), unknown
   }
 }
 function mapPriority(p: string | null | undefined): 'low' | 'normal' | 'high' | 'urgent' {

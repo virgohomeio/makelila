@@ -200,7 +200,7 @@ async function handle(req: Request): Promise<Response> {
       const row = {
         category,
         source: 'calendly' as const,
-        status: 'new' as const,
+        status: 'call_scheduled' as const,
         priority: 'normal' as const,
         customer_id,
         customer_name: invitee?.name ?? null,

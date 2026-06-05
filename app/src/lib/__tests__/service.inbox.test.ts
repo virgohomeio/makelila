@@ -79,7 +79,7 @@ describe('promoteToTicket', () => {
       inbox_disposition: 'promoted',
       category: 'support',
       owner_email: 'reina@virgohome.io',
-      status: 'triaging',
+      status: 'waiting_on_us',
     }));
     expect(eqMock).toHaveBeenCalledWith('id', 'row-1');
   });

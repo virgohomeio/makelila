@@ -28,9 +28,9 @@ export type Category =
   | 'closed_acknowledgment'
   | 'other';
 
-// Subset of statuses the classifier may suggest. 'resolved' is the only
+// Subset of statuses the classifier may suggest. 'closed' is the only
 // auto-status; everything else is left to staff progression.
-export type SuggestedStatus = 'resolved';
+export type SuggestedStatus = 'closed';
 
 export type ThreadMessage = {
   direction: 'inbound' | 'outbound';
@@ -132,7 +132,7 @@ const RULES: Rule[] = [
       if (!txt || txt.length > 40) return null;
       const pat = /^(thanks?|thank you|thx|ty|ok(ay)?|k|cool|got it|sounds good|appreciate(d)? it|perfect|will do|noted)[\s!?.,]*[\u{1F642}\u{1F60A}\u{1F44D}❤\u{1F970}]*\s*$/iu;
       if (!pat.test(txt)) return null;
-      return { priority: 'low', category: 'closed_acknowledgment', status: 'resolved' };
+      return { priority: 'low', category: 'closed_acknowledgment', status: 'closed' };
     },
   },
 
