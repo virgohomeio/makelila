@@ -1,5 +1,5 @@
 -- Walkthrough #34: auto-sync HubSpot customers on a 30-minute cron so new
--- contacts (like Pedrum's secondary pedruma71@gmail.com profile) appear in
+-- contacts (like Pedrum's secondary team.member@example.com profile) appear in
 -- the makelila customer picker without an operator clicking "Sync now"
 -- mid-call. 30-min interval is a compromise: HubSpot sync is a full-pull
 -- (no incremental), so going faster wastes API quota; going slower leaves

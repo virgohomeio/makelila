@@ -1,4 +1,4 @@
--- Promote Ron Russell's return record into the new structured columns.
+-- Promote Riley Sample's return record into the new structured columns.
 -- Migration 20260421120000 stuffed everything into description; now that
 -- we have proper columns (usage_duration, return_reasons[], rating, etc.)
 -- we update his row in place so the Returns table on the ops side reads
@@ -20,10 +20,10 @@ update public.returns
      packaging_status       = 'Partial — some packaging materials',
      alternative_composting = 'None — not composting anymore',
      refund_method_preference = 'Credit Card (Enter phone number below, we will call you)',
-     refund_contact         = '604-834-4451',
+     refund_contact         = '555-0110-0000',
      additional_comments    = null,
      -- Tidy description down to just the prose the customer wrote
      description            = 'Software glitch. Keeps showing errors. Starts to smell.'
  where source = 'customer_form'
-   and customer_email = 'ron@newcmi.ca'
+   and customer_email = 'riley.sample@example.com'
    and original_order_ref = '#1239';
