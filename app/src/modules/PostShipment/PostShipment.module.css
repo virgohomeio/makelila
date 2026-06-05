@@ -1062,3 +1062,11 @@
   height: 10px;
   border-radius: 2px;
 }
+
+/* Fulfillment-log section embedded in PostShipment History tab — separates
+ * the Excel-imported shipping log from the units-based table above. */
+.logSection {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--color-border);
+}

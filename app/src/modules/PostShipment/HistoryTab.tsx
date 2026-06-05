@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { useUnits } from '../../lib/stock';
 import { useShippedOrders, markOrderDelivered } from '../../lib/orders';
 import { supabase } from '../../lib/supabase';
+import FulfillmentHistory from '../Fulfillment/history';
 import styles from './PostShipment.module.css';
 
 type ShopifyPushResult = {
@@ -228,6 +229,10 @@ export function HistoryTab() {
             ))}
           </tbody>
         </table>
+      </div>
+
+      <div className={styles.logSection}>
+        <FulfillmentHistory />
       </div>
     </div>
   );
