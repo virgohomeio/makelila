@@ -870,6 +870,11 @@ export function useUnitCustomerMap() {
 // Three statuses get a discovery (wellness-check) template, OPEN_LID gets a
 // prescriptive template, the rest are no-op. A 48h same-status cooldown
 // prevents accidental spam if the status flickers.
+//
+// For canned bodies that are NOT status-keyed (Trustpilot review request,
+// generic compost-drying tip, etc.), see lib/cannedSms.ts. Don't paste raw
+// SMS bodies into modules — keep verified URLs centralized to avoid the
+// #72 bug (guessed Trustpilot URL went out to a customer).
 
 export type StatusSmsKind = 'wellness' | 'lid' | null;
 

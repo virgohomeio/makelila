@@ -614,6 +614,16 @@
   font-size: 12px;
   color: var(--color-ink-subtle, #718096);
 }
+.draftCannedPicker {
+  margin-left: auto;
+  padding: 4px 6px;
+  font-size: 11px;
+  border-radius: 4px;
+  border: 1px solid var(--color-border, #cbd5e0);
+  background: #fff;
+  color: var(--color-ink-subtle, #4a5568);
+  cursor: pointer;
+}
 
 /* Customers module tabs (Directory / Profitability) */
 .titleRow {

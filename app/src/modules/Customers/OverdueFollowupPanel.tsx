@@ -3,6 +3,9 @@ import {
   generateFollowupDrafts, sendFollowupSms,
   type FollowupDraft,
 } from '../../lib/customers';
+import {
+  CANNED_SMS_TEMPLATES, CANNED_SMS_OPTIONS, type CannedSmsKey,
+} from '../../lib/cannedSms';
 import styles from './Customers.module.css';
 
 type Props = {
@@ -160,6 +163,9 @@ function DraftCard({
   onSkip: () => void;
   onEdit: (text: string) => void;
 }) {
+  function insertCanned(key: CannedSmsKey, firstName: string) {
+    onEdit(CANNED_SMS_TEMPLATES[key].body(firstName));
+  }
   const d = state.draft;
   const header = `${d.customer_name} · ${d.fu_kind.toUpperCase()} · ${d.days_overdue}d overdue`;
   if (state.status === 'sent') {
@@ -212,6 +218,23 @@ function DraftCard({
           ✓ Approve &amp; send
         </button>
         <button onClick={onSkip}>Skip</button>
+        <select
+          className={styles.draftCannedPicker}
+          value=""
+          onChange={e => {
+            const key = e.target.value as CannedSmsKey;
+            if (key) {
+              const firstName = d.customer_name.split(/\s+/)[0] || 'there';
+              insertCanned(key, firstName);
+            }
+          }}
+          title="Replace draft with a canned template"
+        >
+          <option value="">Insert canned…</option>
+          {CANNED_SMS_OPTIONS.map(opt => (
+            <option key={opt.key} value={opt.key} title={opt.description}>{opt.label}</option>
+          ))}
+        </select>
       </div>
     </div>
   );
