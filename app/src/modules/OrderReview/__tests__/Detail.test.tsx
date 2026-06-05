@@ -42,6 +42,7 @@ const order: Order = {
   customer_phone: '+1-555-0100',
   quo_thread_url: null,
   address_line: '2847 SW Corbett',
+  address_line2: null,
   city: 'Portland', region_state: 'OR', country: 'US',
   address_verdict: 'house',
   address_verified_at: null,

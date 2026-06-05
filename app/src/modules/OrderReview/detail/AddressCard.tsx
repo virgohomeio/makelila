@@ -75,6 +75,12 @@ export function AddressCard({ order }: { order: Order }) {
             ? <span>{order.address_line}</span>
             : <MissingField />}
         </div>
+        {order.address_line2 && (
+          <div className={styles.contactLine}>
+            <span className={styles.contactLabel}>Apartment/Unit #</span>
+            <span>{order.address_line2}</span>
+          </div>
+        )}
         <div className={styles.contactLine}>
           <span className={styles.contactLabel}>City</span>
           <span>{order.city}</span>

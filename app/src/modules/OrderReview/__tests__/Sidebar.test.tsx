@@ -13,6 +13,7 @@ function mkOrder(partial: Partial<Order> & { id: string; status: Order['status']
     customer_phone: null,
     quo_thread_url: null,
     address_line: '1 Way',
+    address_line2: null,
     city: 'Portland',
     region_state: 'OR',
     country: 'US',

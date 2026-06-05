@@ -5,6 +5,7 @@ import { authenticate } from '../_shared/auth.ts';
 
 type ShopifyAddress = {
   address1?: string | null;
+  address2?: string | null;
   city?: string | null;
   province_code?: string | null;
   country_code?: string | null;
@@ -58,6 +59,7 @@ type MappedOrder = {
   customer_phone: string | null;
   quo_thread_url: null;
   address_line: string | null;
+  address_line2: string | null;
   city: string;
   region_state: string | null;
   country: 'US' | 'CA';
@@ -144,6 +146,9 @@ function mapOrder(
     customer_phone: phone,
     quo_thread_url: null,
     address_line: addr.address1 ?? null,
+    // Apartment / unit / suite — Shopify's second address line. Shown in Order
+    // Review only when the customer actually provided one.
+    address_line2: addr.address2?.trim() || null,
     city: addr.city,
     region_state: addr.province_code ?? null,
     country,
@@ -300,6 +305,7 @@ serve(async (req: Request) => {
       refreshPatch.customer_email = m.customer_email;
       refreshPatch.customer_phone = m.customer_phone;
       refreshPatch.address_line   = m.address_line;
+      refreshPatch.address_line2  = m.address_line2;
       refreshPatch.city           = m.city;
       refreshPatch.region_state   = m.region_state;
       refreshPatch.country        = m.country;
