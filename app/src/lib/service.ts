@@ -12,9 +12,11 @@ export type TicketSource =
 
 export type TicketKind = 'conversation' | 'ticket';
 export type InboxDisposition = 'promoted' | 'sales' | 'follow_up' | 'dismissed';
-export type TicketStatus =
-  | 'new' | 'triaging' | 'in_progress' | 'waiting_customer'
-  | 'resolved' | 'closed' | 'escalated';
+export const TICKET_STATUSES = [
+  'waiting_on_us', 'in_progress', 'waiting_on_customer',
+  'queued_for_replacement', 'call_scheduled', 'on_hold', 'closed',
+] as const;
+export type TicketStatus = (typeof TICKET_STATUSES)[number];
 export type TicketPriority = 'low' | 'normal' | 'high' | 'urgent';
 export type OnboardingStatus =
   | 'not_scheduled' | 'scheduled' | 'completed' | 'no_show' | 'skipped';
@@ -175,13 +177,13 @@ export const TOPIC_LABEL: Record<TicketTopic, string> = {
 };
 
 export const STATUS_META: Record<TicketStatus, { label: string; color: string; bg: string }> = {
-  new:              { label: 'New',              color: '#2b6cb0', bg: '#ebf8ff' },
-  triaging:         { label: 'Triaging',         color: '#553c9a', bg: '#faf5ff' },
-  in_progress:      { label: 'In progress',      color: '#c05621', bg: '#fffaf0' },
-  waiting_customer: { label: 'Waiting customer', color: '#718096', bg: '#f7fafc' },
-  resolved:         { label: 'Resolved',         color: '#276749', bg: '#f0fff4' },
-  closed:           { label: 'Closed',           color: '#a0aec0', bg: '#edf2f7' },
-  escalated:        { label: 'Escalated',        color: '#c53030', bg: '#fff5f5' },
+  waiting_on_us:          { label: 'Waiting on Us',          color: '#2b6cb0', bg: '#ebf8ff' },
+  in_progress:            { label: 'In Progress',            color: '#c05621', bg: '#fffaf0' },
+  waiting_on_customer:    { label: 'Waiting on Customer',    color: '#718096', bg: '#f7fafc' },
+  queued_for_replacement: { label: 'Queued for Replacement', color: '#553c9a', bg: '#faf5ff' },
+  call_scheduled:         { label: 'Call Scheduled',         color: '#2c7a7b', bg: '#e6fffa' },
+  on_hold:                { label: 'On Hold',                color: '#b7791f', bg: '#fffff0' },
+  closed:                 { label: 'Closed',                 color: '#a0aec0', bg: '#edf2f7' },
 };
 
 export const PRIORITY_META: Record<TicketPriority, { label: string; color: string }> = {
@@ -201,16 +203,11 @@ export const SOURCE_LABEL: Record<TicketSource, string> = {
   quo:              'Quo',
 };
 
-// Allowed next-states for the state machine (UI gating)
-export const NEXT_STATUSES: Record<TicketStatus, TicketStatus[]> = {
-  new:              ['triaging', 'in_progress', 'escalated'],
-  triaging:         ['in_progress', 'waiting_customer', 'escalated', 'resolved'],
-  in_progress:      ['waiting_customer', 'resolved', 'escalated'],
-  waiting_customer: ['in_progress', 'resolved'],
-  resolved:         ['closed', 'in_progress'],   // re-open if needed
-  closed:           ['in_progress'],              // re-open
-  escalated:        ['in_progress', 'resolved'],
-};
+// Allowed next-states for the state machine (UI gating). Any status can move
+// to any other — ops decides; we don't impose a rigid flow across the seven.
+export const NEXT_STATUSES: Record<TicketStatus, TicketStatus[]> = Object.fromEntries(
+  TICKET_STATUSES.map(s => [s, TICKET_STATUSES.filter(x => x !== s)]),
+) as Record<TicketStatus, TicketStatus[]>;
 
 // Warranty helpers
 export function warrantyState(lifecycle: Pick<CustomerLifecycle, 'warranty_expires_at'> | null | undefined):
@@ -348,7 +345,7 @@ export async function promoteToTicket(
       inbox_disposition: 'promoted',
       category: fields.category,
       owner_email: fields.owner_email,
-      status: 'triaging',
+      status: 'waiting_on_us',
     })
     .eq('id', ticketId);
   if (error) throw error;

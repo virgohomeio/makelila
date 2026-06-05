@@ -122,9 +122,9 @@ async function handle(req: Request): Promise<Response> {
     is_manually_overridden: false,
     classification_confidence: llmConfidence,
   };
-  if (finalStatus === 'resolved' && ['new','triaging','waiting_customer'].includes(ticket.status)) {
-    update.status = 'resolved';
-    update.resolved_at = new Date().toISOString();
+  if (finalStatus === 'closed' && ['waiting_on_us','in_progress','waiting_on_customer'].includes(ticket.status)) {
+    update.status = 'closed';
+    update.closed_at = new Date().toISOString();
   }
 
   const { error: updErr } = await admin.from('service_tickets').update(update).eq('id', body.ticket_id);

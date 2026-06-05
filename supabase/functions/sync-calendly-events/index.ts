@@ -122,7 +122,7 @@ async function handle(): Promise<Response> {
       const row = {
         category: 'onboarding' as const,
         source: 'calendly' as const,
-        status: 'new' as const,
+        status: 'call_scheduled' as const,
         priority: 'normal' as const,
         customer_id,
         customer_name: invitee?.name ?? null,

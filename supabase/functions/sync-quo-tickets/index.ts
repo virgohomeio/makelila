@@ -310,7 +310,7 @@ async function upsertConversation(
     source:              'quo' as const,
     kind:                'conversation' as const,
     category:            'support',
-    status:              'new',
+    status:              'waiting_on_us',
     priority:            'normal',
     subject,
     description:         msgText || null,

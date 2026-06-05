@@ -41,7 +41,7 @@ export function ReplacementsTab() {
   // We don't auto-create replacement_queue rows — ops triages manually
   // after reading the full ticket.
   const replacementTickets = useMemo(() => {
-    const open = tickets.filter(t => t.status !== 'resolved' && t.status !== 'closed');
+    const open = tickets.filter(t => t.status !== 'closed');
     return open
       .map(t => ({ ticket: t, kind: classifyReplacement(t) }))
       .filter((x): x is { ticket: ServiceTicket; kind: ReplacementKind } => x.kind !== null)

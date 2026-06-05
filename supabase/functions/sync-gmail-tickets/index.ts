@@ -291,13 +291,13 @@ async function upsertThread(
   }
 
   // If the most recent message is staff-side, flip an "open" status to
-  // waiting_customer. Per brief: open = new | triaging | in_progress.
-  // Don't touch escalated/resolved/closed.
+  // waiting_on_customer once we've replied. Open = waiting_on_us | in_progress.
+  // Don't touch on_hold/closed/already-waiting.
   const lastDirection = rows[rows.length - 1]?.direction;
-  const OPEN_STATUSES = new Set(['new', 'triaging', 'in_progress']);
+  const OPEN_STATUSES = new Set(['waiting_on_us', 'in_progress']);
   if (lastDirection === 'outbound' && OPEN_STATUSES.has(ticket.status)) {
     await admin.from('service_tickets')
-      .update({ status: 'waiting_customer' })
+      .update({ status: 'waiting_on_customer' })
       .eq('id', ticket.id);
   }
 
@@ -373,9 +373,9 @@ async function classifyAndApply(
     update.summary = finalSummary;
     update.suggested_next_action = finalNextAction;
     if (llmConfidence != null) update.classification_confidence = llmConfidence;
-    if (finalStatus === 'resolved' && ['new','triaging','waiting_customer'].includes(ticket.status)) {
-      update.status = 'resolved';
-      update.resolved_at = new Date().toISOString();
+    if (finalStatus === 'closed' && ['waiting_on_us','in_progress','waiting_on_customer'].includes(ticket.status)) {
+      update.status = 'closed';
+      update.closed_at = new Date().toISOString();
     }
   }
 

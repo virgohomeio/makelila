@@ -1,15 +1,11 @@
 import { useMemo, useState } from 'react';
-import { useServiceTickets, STATUS_META, type TicketStatus, type ServiceTicket } from '../../lib/service';
+import { useServiceTickets, STATUS_META, TICKET_STATUSES, type TicketStatus, type ServiceTicket } from '../../lib/service';
 import { TicketDetailPanel } from './TicketDetailPanel';
 import styles from './Service.module.css';
 
 const STATUS_FILTERS: { key: TicketStatus | 'all'; label: string }[] = [
-  { key: 'all',         label: 'All' },
-  { key: 'new',         label: 'New' },
-  { key: 'triaging',    label: 'Diagnosing' },
-  { key: 'in_progress', label: 'In repair' },
-  { key: 'waiting_customer', label: 'Waiting parts/customer' },
-  { key: 'resolved',    label: 'Resolved' },
+  { key: 'all', label: 'All' },
+  ...TICKET_STATUSES.map(s => ({ key: s, label: STATUS_META[s].label })),
 ];
 
 export function RepairTab() {
@@ -23,21 +19,21 @@ export function RepairTab() {
   const selected = tickets.find(t => t.id === selectedId) ?? null;
 
   // KPIs
-  const openCount = tickets.filter(t => t.status !== 'closed' && t.status !== 'resolved').length;
+  const openCount = tickets.filter(t => t.status !== 'closed').length;
   const inRepairCount = tickets.filter(t => t.status === 'in_progress').length;
   const monthAgo = Date.now() - 30 * 86400_000;
-  const resolvedMonthCount = tickets.filter(t =>
-    t.status === 'resolved' && t.resolved_at && new Date(t.resolved_at).getTime() > monthAgo
+  const closedMonthCount = tickets.filter(t =>
+    t.status === 'closed' && t.closed_at && new Date(t.closed_at).getTime() > monthAgo
   ).length;
 
   const avgRepairDays = useMemo(() => {
-    const resolved = tickets.filter(t => t.status === 'resolved' && t.resolved_at);
-    if (resolved.length === 0) return null;
-    const totalDays = resolved.reduce((sum, t) => {
-      const days = (new Date(t.resolved_at!).getTime() - new Date(t.created_at).getTime()) / 86400_000;
+    const done = tickets.filter(t => t.status === 'closed' && t.closed_at);
+    if (done.length === 0) return null;
+    const totalDays = done.reduce((sum, t) => {
+      const days = (new Date(t.closed_at!).getTime() - new Date(t.created_at).getTime()) / 86400_000;
       return sum + days;
     }, 0);
-    return Math.round(totalDays / resolved.length);
+    return Math.round(totalDays / done.length);
   }, [tickets]);
 
   if (loading) return <div className={styles.loading}>Loading…</div>;
@@ -47,7 +43,7 @@ export function RepairTab() {
       <div className={styles.kpiStrip}>
         <Kpi label="Open"          value={openCount} />
         <Kpi label="In repair"     value={inRepairCount} />
-        <Kpi label="Resolved (30d)" value={resolvedMonthCount} />
+        <Kpi label="Closed (30d)" value={closedMonthCount} />
         <Kpi label="Avg repair days" value={avgRepairDays !== null ? `${avgRepairDays}d` : '—'} />
       </div>
 
