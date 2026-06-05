@@ -19,12 +19,25 @@ export default function Customers() {
   const [tab, setTab] = useState<Tab>('journey');
   const { customers, loading } = useCustomers();
   const { units } = useUnits();
-  // Pre-build a lowercase-name → serial[] map so each row can render its
-  // serial(s) without re-filtering the full units list.
+  // Pre-build serial lookups so each row can render its serial(s) without
+  // re-filtering the full units list. The canonical units.customer_id FK
+  // (populated by the fulfillment-sheet sync, same link the Dashboard uses)
+  // is preferred; the lowercase-name map is a fallback for any unit not yet
+  // FK-linked.
+  const serialsByCustomerId = useMemo(() => {
+    const m = new Map<string, string[]>();
+    for (const u of units) {
+      if (!u.customer_id) continue;
+      const arr = m.get(u.customer_id);
+      if (arr) arr.push(u.serial);
+      else m.set(u.customer_id, [u.serial]);
+    }
+    return m;
+  }, [units]);
   const serialsByCustomerName = useMemo(() => {
     const m = new Map<string, string[]>();
     for (const u of units) {
-      if (!u.customer_name) continue;
+      if (u.customer_id || !u.customer_name) continue;
       const key = u.customer_name.toLowerCase();
       const arr = m.get(key);
       if (arr) arr.push(u.serial);
@@ -324,10 +337,13 @@ export default function Customers() {
                   fu={fu}
                   serials={
                     // Sheet is the source of truth: prefer the synced serials,
-                    // fall back to the units-derived list when none are synced.
+                    // then the canonical units.customer_id link, and only fall
+                    // back to name-matching for units not yet FK-linked.
                     (c.serials && c.serials.length > 0)
                       ? c.serials
-                      : (serialsByCustomerName.get(c.full_name?.toLowerCase() ?? '') ?? [])
+                      : (serialsByCustomerId.get(c.id)
+                          ?? serialsByCustomerName.get(c.full_name?.toLowerCase() ?? '')
+                          ?? [])
                   }
                   onSelect={() => setSelectedCustomerId(c.id)}
                 />
@@ -413,7 +429,14 @@ function CustomerDetailPanel({ customer, onClose }: { customer: Customer; onClos
   const myOrders = lcEmail
     ? orders.filter(o => o.customer_email?.toLowerCase() === lcEmail)
     : [];
-  const myUnits = units.filter(u => u.customer_name?.toLowerCase() === lcName);
+  // Prefer the canonical units.customer_id link (populated by the
+  // fulfillment-sheet sync, same association the Dashboard uses); fall back to
+  // name-matching only for units not yet FK-linked, so a unit with a known FK
+  // never shows up under the wrong customer.
+  const myUnits = units.filter(u =>
+    u.customer_id
+      ? u.customer_id === customer.id
+      : u.customer_name?.toLowerCase() === lcName);
   const myTickets = lcEmail
     ? tickets.filter(t => t.customer_email?.toLowerCase() === lcEmail)
     : [];

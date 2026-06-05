@@ -264,7 +264,7 @@ async function syncCustomerSerials() {
   });
   if (!res.ok) throw new Error(`serial sync ${res.status}: ${(await res.text()).slice(0, 400)}`);
   const report = await res.json();
-  console.error(`  customer serials: ${report.customers_updated} updated, ${report.unmatched_count} unmatched`);
+  console.error(`  customer serials: ${report.customers_updated} updated, ${report.units_updated} units linked, ${report.unmatched_count} unmatched`);
   if (report.unmatched_count > 0) console.error('  unmatched:', JSON.stringify(report.unmatched));
 }
 
