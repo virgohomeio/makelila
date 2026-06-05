@@ -54,9 +54,9 @@ function EditFreight({ order }: { order: Order }) {
           type="number" step="0.01" min="0"
           value={amount}
           onChange={e => setAmount(e.target.value)}
-          // Backlog #18 — placeholder shows the order's actual currency so
-          // CAD orders don't look like USD quotes.
-          placeholder={order.currency || 'USD'}
+          // Freight is always quoted in CAD (ClickShip/Freightcom), so the
+          // placeholder is CAD regardless of the order's own currency.
+          placeholder={FREIGHT_CURRENCY}
         />
         <button onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>
         <button className={styles.cancelBtn} onClick={() => setEditing(false)} disabled={busy}>Cancel</button>
@@ -68,6 +68,11 @@ function EditFreight({ order }: { order: Order }) {
     </div>
   );
 }
+
+// Freight is always quoted in Canadian dollars — ClickShip/Freightcom price in
+// CAD regardless of whether the customer's order is US or CA. So the estimate
+// and its threshold are displayed in CAD, never the order's own currency.
+const FREIGHT_CURRENCY = 'CAD';
 
 export function FreightCard({ order }: { order: Order }) {
   // Backlog #15 — total unit count across all line items, so the operator
@@ -106,9 +111,9 @@ export function FreightCard({ order }: { order: Order }) {
       </div>
       <div className={styles.cardBody}>
         <div>
-          <strong>{formatMoney(order.freight_estimate_usd, order.currency)}</strong>
+          <strong>{formatMoney(order.freight_estimate_usd, FREIGHT_CURRENCY)}</strong>
           <span className={styles.muted}>
-            &nbsp;· threshold {formatMoney(threshold, order.currency)}
+            &nbsp;· threshold {formatMoney(threshold, FREIGHT_CURRENCY)}
             {over && <strong style={{ color: 'var(--color-error)' }}> · OVER</strong>}
             {unitCount > 1 && <> · for {unitCount} units</>}
           </span>
