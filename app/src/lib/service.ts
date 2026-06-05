@@ -5,10 +5,13 @@ import { logAction } from './activityLog';
 
 // ============================================================ Types
 
-export type TicketCategory = 'onboarding' | 'support' | 'repair';
+// Backlog #75 — 'diagnosis_call' is a new category for tickets created
+// when a customer books on Huayi's Google appointment schedule via the
+// link sent from the ticket detail panel.
+export type TicketCategory = 'onboarding' | 'support' | 'repair' | 'diagnosis_call';
 export type TicketSource =
   | 'calendly' | 'customer_form' | 'hubspot' | 'fulfillment_flag'
-  | 'ops_manual' | 'gmail' | 'quo';
+  | 'ops_manual' | 'gmail' | 'quo' | 'google_calendar';
 
 export type TicketKind = 'conversation' | 'ticket';
 export type InboxDisposition = 'promoted' | 'sales' | 'follow_up' | 'dismissed';
@@ -88,6 +91,10 @@ export type ServiceTicket = {
   last_message_at: string | null;
   is_manually_overridden: boolean;
   issue_area: IssueArea | null;
+  // Backlog #75 — diagnosis-call dedupe stamps.
+  diagnosis_link_sent_at: string | null;
+  diag_cohost_invited_at: string | null;
+  google_calendar_event_id: string | null;
 };
 
 export type CustomerLifecycle = {
@@ -152,9 +159,10 @@ export type TicketNote = {
 // ============================================================ Display metadata
 
 export const CATEGORY_META: Record<TicketCategory, { label: string; color: string; bg: string }> = {
-  onboarding: { label: 'Onboarding', color: '#276749', bg: '#f0fff4' },
-  support:    { label: 'Support',    color: '#2b6cb0', bg: '#ebf8ff' },
-  repair:     { label: 'Repair',     color: '#c05621', bg: '#fffaf0' },
+  onboarding:     { label: 'Onboarding',     color: '#276749', bg: '#f0fff4' },
+  support:        { label: 'Support',        color: '#2b6cb0', bg: '#ebf8ff' },
+  repair:         { label: 'Repair',         color: '#c05621', bg: '#fffaf0' },
+  diagnosis_call: { label: 'Diagnosis call', color: '#805ad5', bg: '#faf5ff' },
 };
 
 export const TOPIC_LABEL: Record<TicketTopic, string> = {
@@ -203,6 +211,7 @@ export const SOURCE_LABEL: Record<TicketSource, string> = {
   ops_manual:       'Manual',
   gmail:            'Gmail',
   quo:              'Quo',
+  google_calendar:  'Calendar',
 };
 
 // Allowed next-states for the state machine (UI gating)
@@ -798,6 +807,19 @@ export async function setRepairFields(
 ): Promise<void> {
   const { error } = await supabase.from('service_tickets').update(patch).eq('id', id);
   if (error) throw error;
+}
+
+/** Backlog #75 — record that the diagnosis-call booking link was sent.
+ *  The actual SMS / email send happens via sendFollowupSms() in the
+ *  caller; this stamp is for dedupe + audit so operators don't double-send. */
+export async function markDiagnosisLinkSent(ticketId: string): Promise<void> {
+  const sentAt = new Date().toISOString();
+  const { error } = await supabase
+    .from('service_tickets')
+    .update({ diagnosis_link_sent_at: sentAt })
+    .eq('id', ticketId);
+  if (error) throw error;
+  await logAction('diagnosis_link_sent', ticketId, sentAt);
 }
 
 export async function markOnboardingComplete(lifecycleId: string): Promise<void> {

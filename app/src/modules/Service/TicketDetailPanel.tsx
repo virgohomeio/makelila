@@ -1,15 +1,17 @@
 import { useState, useMemo } from 'react';
 import ReplacementPickerModal from './ReplacementPickerModal';
-import { useCustomers } from '../../lib/customers';
+import { useCustomers, sendFollowupSms } from '../../lib/customers';
 import {
   type ServiceTicket, type TicketStatus, type IssueArea, type TicketCategory,
   STATUS_META, CATEGORY_META, PRIORITY_META, SOURCE_LABEL, TOPIC_LABEL, NEXT_STATUSES,
   ISSUE_AREAS, ISSUE_AREA_LABEL,
   updateTicketStatus, assignTicketOwner, setTicketPriority, setTicketIssueArea, setTicketCategory,
   setRepairFields, reclassifyTicket, deleteTicket, updateTicketSubject,
+  markDiagnosisLinkSent,
   useCustomerLifecycle, warrantyState,
   useTicketMessages, useClassificationLog,
 } from '../../lib/service';
+import { CANNED_SMS_TEMPLATES } from '../../lib/cannedSms';
 import { AttachmentStrip } from './AttachmentStrip';
 import { TicketNotes } from './TicketNotes';
 import styles from './Service.module.css';
@@ -44,6 +46,9 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
   const [editingSubject, setEditingSubject] = useState(false);
   const [subjectDraft, setSubjectDraft] = useState(ticket.subject);
   const [pickerOpen, setPickerOpen] = useState(false);
+  // Backlog #75 — diagnosis-link send dialog state.
+  const [diagOpen, setDiagOpen] = useState(false);
+  const [diagSending, setDiagSending] = useState(false);
   const { customers } = useCustomers();
   const linkedCustomer = useMemo(() =>
     ticket.customer_id ? customers.find(c => c.id === ticket.customer_id) : null,
@@ -67,6 +72,36 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
       setError((e as Error).message);
     } finally {
       setBusy(false);
+    }
+  }
+
+  // Backlog #75 — default body interpolates the customer's first name
+  // from customer_name; falls back to "there" when name is missing so
+  // the message still reads naturally. Operator can edit before sending.
+  const diagDefaultBody = useMemo(() => {
+    const fn = (ticket.customer_name ?? '').trim().split(/\s+/)[0] || 'there';
+    return CANNED_SMS_TEMPLATES.diagnosis_call_request.body(fn);
+  }, [ticket.customer_name]);
+  const [diagBody, setDiagBody] = useState(diagDefaultBody);
+
+  async function onSendDiagnosisLink() {
+    if (!ticket.customer_id) {
+      setError('Ticket is not linked to a customer record — cannot send SMS.');
+      return;
+    }
+    if (!ticket.customer_phone) {
+      setError('Customer has no phone number on file.');
+      return;
+    }
+    setDiagSending(true); setError(null);
+    try {
+      await sendFollowupSms({ customer_id: ticket.customer_id, message: diagBody });
+      await markDiagnosisLinkSent(ticket.id);
+      setDiagOpen(false);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setDiagSending(false);
     }
   }
 
@@ -178,7 +213,7 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
           </div>
         </div>
 
-        <div className={styles.detailSection}>
+        <div className={styles.detailSection} style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
           {ticket.replacement_order_id && ticket.replacement_order_id.length > 0 ? (
             <div className={styles.replacementLink}>
               Replacement order:&nbsp;
@@ -194,7 +229,60 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
               Send replacement
             </button>
           )}
+          {/* Backlog #75 — diagnosis-call booking link via SMS. Disabled
+              when the ticket has no customer FK or no phone on file
+              (covered in onSendDiagnosisLink with an error message). */}
+          {ticket.diagnosis_link_sent_at ? (
+            <span className={styles.replacementLink} title={ticket.diagnosis_link_sent_at}>
+              Diagnosis link sent {new Date(ticket.diagnosis_link_sent_at).toLocaleDateString()}
+            </span>
+          ) : (
+            <button
+              type="button"
+              className={styles.replacementBtn}
+              disabled={busy}
+              onClick={() => { setDiagBody(diagDefaultBody); setDiagOpen(true); }}
+              title="Send the customer a diagnosis-call booking link via SMS"
+            >
+              Send diagnosis link
+            </button>
+          )}
         </div>
+
+        {diagOpen && (
+          <div className={styles.diagModalBackdrop} onClick={() => !diagSending && setDiagOpen(false)}>
+            <div className={styles.diagModal} onClick={e => e.stopPropagation()}>
+              <div className={styles.diagModalTitle}>Send diagnosis-call link</div>
+              <div className={styles.diagModalMeta}>
+                To: {ticket.customer_name ?? '—'} ({ticket.customer_phone ?? 'no phone on file'})
+              </div>
+              <textarea
+                className={styles.diagModalTextarea}
+                value={diagBody}
+                onChange={e => setDiagBody(e.target.value)}
+                rows={5}
+                disabled={diagSending}
+              />
+              <div className={styles.diagModalActions}>
+                <button
+                  type="button"
+                  className={styles.replacementBtn}
+                  disabled={diagSending || !ticket.customer_id || !ticket.customer_phone || !diagBody.trim()}
+                  onClick={() => void onSendDiagnosisLink()}
+                >
+                  {diagSending ? 'Sending…' : 'Send SMS'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDiagOpen(false)}
+                  disabled={diagSending}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {pickerOpen && (
           <ReplacementPickerModal

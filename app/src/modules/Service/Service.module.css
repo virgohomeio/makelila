@@ -799,6 +799,37 @@
 }
 .replacementLink a { color: #2b6cb0; text-decoration: underline; }
 
+/* Backlog #75 — diagnosis-link send modal */
+.diagModalBackdrop {
+  position: fixed; inset: 0; z-index: 60;
+  background: rgba(26, 32, 44, 0.55);
+  display: flex; align-items: center; justify-content: center;
+}
+.diagModal {
+  background: #fff; border-radius: 8px; padding: 18px 22px;
+  width: min(520px, 92vw); box-shadow: 0 20px 50px rgba(0,0,0,.25);
+  display: flex; flex-direction: column; gap: 10px;
+}
+.diagModalTitle {
+  font-size: 14px; font-weight: 700; color: #1a202c;
+}
+.diagModalMeta {
+  font-size: 12px; color: #4a5568;
+}
+.diagModalTextarea {
+  width: 100%; padding: 8px 10px; font-size: 13px; font-family: inherit;
+  border: 1px solid #cbd5e0; border-radius: 6px; resize: vertical;
+  line-height: 1.5;
+}
+.diagModalActions {
+  display: flex; gap: 8px; justify-content: flex-end;
+}
+.diagModalActions button {
+  padding: 6px 14px; border-radius: 6px; font-size: .85rem; cursor: pointer;
+  border: 1px solid #cbd5e0; background: #fff; color: #2d3748;
+}
+.diagModalActions button:disabled { opacity: .6; cursor: not-allowed; }
+
 /* Backlog #71 — awaiting-inbound-batch tag in the Replacement table */
 .awaitingBatchTag {
   display: inline-block;

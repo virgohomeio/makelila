@@ -19,7 +19,16 @@
 
 export const TRUSTPILOT_REVIEW_URL = 'https://www.trustpilot.com/review/lilacomposter.com';
 
-export type CannedSmsKey = 'trustpilot_review_request' | 'compost_drying_tip' | 'phone_verification';
+// Backlog #75 — Huayi's Google Calendar appointment schedule for
+// customer diagnosis calls. Centralized here so the "Send diagnosis
+// link" button (Service/TicketDetailPanel) can never paste a typo'd URL.
+export const DIAGNOSIS_CALL_BOOKING_URL = 'https://calendar.app.google/fB7amKsS8ekase689';
+
+export type CannedSmsKey =
+  | 'trustpilot_review_request'
+  | 'compost_drying_tip'
+  | 'phone_verification'
+  | 'diagnosis_call_request';
 
 export const CANNED_SMS_TEMPLATES: Record<CannedSmsKey, {
   label: string;
@@ -40,6 +49,11 @@ export const CANNED_SMS_TEMPLATES: Record<CannedSmsKey, {
     label: 'Phone number verification',
     description: 'Ask customer to confirm the cell number on file when SMS is bouncing.',
     body: (n) => `Hi ${n} — this is LILA Composter support. We've been trying to reach you with a quick check-in but the SMS isn't going through. Could you confirm this is still the best mobile number for you? Thanks!`,
+  },
+  diagnosis_call_request: {
+    label: 'Diagnosis call booking link',
+    description: 'Invite the customer to book a hardware-diagnosis call with the VCycene engineering team.',
+    body: (n) => `Hi ${n} — let's get on a quick diagnosis call so we can dig into what's happening with your LILA. Pick a time that works for you here: ${DIAGNOSIS_CALL_BOOKING_URL}. Talk soon — VCycene support.`,
   },
 };
 

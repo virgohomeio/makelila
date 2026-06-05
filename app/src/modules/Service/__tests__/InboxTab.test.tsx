@@ -29,6 +29,9 @@ function mkConv(partial: Partial<ServiceTicket> & { id: string }): ServiceTicket
     kind: 'conversation',
     inbox_disposition: null,
     replacement_order_id: null,
+    diagnosis_link_sent_at: null,
+    diag_cohost_invited_at: null,
+    google_calendar_event_id: null,
     ...partial,
   };
 }
