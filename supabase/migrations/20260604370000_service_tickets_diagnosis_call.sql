@@ -63,9 +63,13 @@ begin
   end if;
 end $$;
 
+-- Full source enum: includes gmail + quo (added by later migrations
+-- after the original 20260513 schema). Listing them here keeps the
+-- constraint from rejecting existing rows when the migration is replayed
+-- against an env that already has those sources in use.
 alter table public.service_tickets
   add constraint service_tickets_source_check
-  check (source in ('calendly','customer_form','hubspot','fulfillment_flag','ops_manual','google_calendar'));
+  check (source in ('calendly','customer_form','hubspot','fulfillment_flag','ops_manual','gmail','quo','google_calendar'));
 
 comment on column public.service_tickets.diagnosis_link_sent_at is
   'Backlog #75: set when an operator sent the customer the diagnosis-call booking link from the ticket detail panel.';
