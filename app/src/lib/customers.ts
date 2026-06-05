@@ -105,22 +105,38 @@ export async function recordFollowUp(
 // public.customer_profitability SQL view (migration 20260604260000). The
 // view does the heavy joining server-side so the browser doesn't have
 // to pull thousands of orders/returns/tickets.
+// Backlog #58 V3 — 4-bucket cost model. See migration
+// 20260605010000_customer_profitability_v3.sql for the SQL view.
 export type CustomerProfitability = {
   id: string;
   full_name: string;
   email: string | null;
   country: string | null;
   onboard_date: string | null;
+  // Revenue
   revenue_usd: number;
-  cogs_usd: number;
-  shipping_cost_usd: number;
-  warranty_cost_usd: number;
-  refund_usd: number;
+  // 4 cost buckets — sale_cogs + sale_shipping are sales-only;
+  // expected_warranty covers ALL non-cancelled replacement orders;
+  // expected_refund covers ALL non-denied refund approvals.
+  sale_cogs_usd: number;
+  sale_shipping_usd: number;
+  expected_warranty_cost_usd: number;
+  expected_refund_usd: number;
+  // Margin = revenue - all 4 buckets (no double-count)
   net_margin_usd: number;
+  // Settled-refund subset (status='refunded' only) — shown alongside
+  // expected so operators can see in-flight vs booked.
+  settled_refund_usd: number;
+  // Counts
   order_count: number;
   replacement_count: number;
+  open_replacement_count: number;
   refund_count: number;
+  in_flight_refund_count: number;
   ticket_count: number;
+  // Leading indicator: open warranty/defect tickets with no replacement
+  // order yet — expected_warranty will grow when these convert.
+  open_warranty_ticket_count: number;
   is_team_member: boolean;
 };
 
@@ -150,12 +166,13 @@ export function useCustomerProfitability(): {
       // can do arithmetic without string juggling.
       const coerced = (data ?? []).map((r: Record<string, unknown>) => ({
         ...r,
-        revenue_usd:       Number(r.revenue_usd ?? 0),
-        cogs_usd:          Number(r.cogs_usd ?? 0),
-        shipping_cost_usd: Number(r.shipping_cost_usd ?? 0),
-        warranty_cost_usd: Number(r.warranty_cost_usd ?? 0),
-        refund_usd:        Number(r.refund_usd ?? 0),
-        net_margin_usd:    Number(r.net_margin_usd ?? 0),
+        revenue_usd:                Number(r.revenue_usd ?? 0),
+        sale_cogs_usd:              Number(r.sale_cogs_usd ?? 0),
+        sale_shipping_usd:          Number(r.sale_shipping_usd ?? 0),
+        expected_warranty_cost_usd: Number(r.expected_warranty_cost_usd ?? 0),
+        expected_refund_usd:        Number(r.expected_refund_usd ?? 0),
+        settled_refund_usd:         Number(r.settled_refund_usd ?? 0),
+        net_margin_usd:             Number(r.net_margin_usd ?? 0),
       })) as CustomerProfitability[];
       setRows(coerced);
       setLoading(false);

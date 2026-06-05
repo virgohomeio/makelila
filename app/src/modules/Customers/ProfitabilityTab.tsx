@@ -47,14 +47,15 @@ export function ProfitabilityTab() {
   return (
     <div className={styles.profitabilityTab}>
       <div className={styles.profSummary}>
-        <SummaryStat label="Customers" value={String(filtered.length)} />
-        <SummaryStat label="Total revenue"  value={fmt(totals.revenue)} />
-        <SummaryStat label="Total warranty" value={fmt(totals.warranty)} variant="warn" />
-        <SummaryStat label="Total refunds"  value={fmt(totals.refund)}   variant="warn" />
-        <SummaryStat label="Net margin"     value={fmt(totals.margin)}   variant={totals.margin < 0 ? 'bad' : 'good'} />
+        <SummaryStat label="Customers"            value={String(filtered.length)} />
+        <SummaryStat label="Revenue"              value={fmt(totals.revenue)} />
+        <SummaryStat label="COGS + shipping"      value={fmt(totals.salesCost)} variant="warn" />
+        <SummaryStat label="Expected warranty"    value={fmt(totals.warranty)}  variant="warn" />
+        <SummaryStat label="Expected refunds"     value={fmt(totals.refund)}    variant="warn" />
+        <SummaryStat label="Net margin"           value={fmt(totals.margin)}    variant={totals.margin < 0 ? 'bad' : 'good'} />
       </div>
       <div className={styles.profCurrencyNote}>
-        Amounts shown per-order in the order's native currency (CAD for most rows) — not currency-converted. See #65 for the conversion follow-up.
+        "Expected warranty" sums COGS + shipping for every non-cancelled replacement order. "Expected refunds" sums every refund approval that isn't denied (covers in-flight + settled). Amounts shown in the order's native currency (CAD for most rows) — see #65 for the FX conversion follow-up.
       </div>
 
       <InsightsPanel insights={insights} />
@@ -69,7 +70,7 @@ export function ProfitabilityTab() {
         <select value={sort} onChange={e => setSort(e.target.value as SortKey)}>
           <option value="margin_desc">Most profitable</option>
           <option value="margin_asc">Losing money first</option>
-          <option value="warranty_desc">Highest warranty cost</option>
+          <option value="warranty_desc">Highest expected warranty</option>
           <option value="revenue_desc">Highest revenue</option>
         </select>
         <select value={country} onChange={e => setCountry(e.target.value as CountryFilter)}>
@@ -108,6 +109,15 @@ export function ProfitabilityTab() {
 function ProfitCard({ row }: { row: CustomerProfitability }) {
   const margin = row.net_margin_usd;
   const tone = margin < 0 ? styles.profCardLoss : margin === 0 ? styles.profCardFlat : styles.profCardWin;
+
+  const refundLine = row.expected_refund_usd === row.settled_refund_usd
+    ? fmt(row.expected_refund_usd)
+    : `${fmt(row.expected_refund_usd)} (${fmt(row.settled_refund_usd)} settled)`;
+
+  const warrantyLine = row.open_replacement_count === 0
+    ? fmt(row.expected_warranty_cost_usd)
+    : `${fmt(row.expected_warranty_cost_usd)} (${row.open_replacement_count} in-flight)`;
+
   return (
     <div className={`${styles.profCard} ${tone}`}>
       <div className={styles.profCardHead}>
@@ -124,16 +134,25 @@ function ProfitCard({ row }: { row: CustomerProfitability }) {
       <div className={styles.profCardLabel}>net margin</div>
       <dl className={styles.profCardBreakdown}>
         <div><dt>Revenue</dt><dd>{fmt(row.revenue_usd)}</dd></div>
-        <div><dt>COGS</dt><dd>{fmt(row.cogs_usd)}</dd></div>
-        <div><dt>Shipping</dt><dd>{fmt(row.shipping_cost_usd)}</dd></div>
-        <div><dt>Warranty</dt><dd>{fmt(row.warranty_cost_usd)}</dd></div>
-        <div><dt>Refunds</dt><dd>{fmt(row.refund_usd)}</dd></div>
+        <div><dt>COGS</dt><dd>{fmt(row.sale_cogs_usd)}</dd></div>
+        <div><dt>Shipping</dt><dd>{fmt(row.sale_shipping_usd)}</dd></div>
+        <div title="cogs + shipping on all non-cancelled replacement orders">
+          <dt>Exp. warranty</dt><dd>{warrantyLine}</dd>
+        </div>
+        <div title="all refund approvals that haven't been denied">
+          <dt>Exp. refunds</dt><dd>{refundLine}</dd>
+        </div>
       </dl>
       <div className={styles.profCardCounts}>
         <span>{row.order_count} orders</span>
         <span>{row.replacement_count} replacements</span>
         <span>{row.refund_count} refunds</span>
         <span>{row.ticket_count} tickets</span>
+        {row.open_warranty_ticket_count > 0 && (
+          <span className={styles.profStatWarn} title="Open warranty/defect tickets with no replacement order yet — expected warranty will likely grow when these convert">
+            ⚠ {row.open_warranty_ticket_count} open warranty
+          </span>
+        )}
       </div>
     </div>
   );
@@ -153,14 +172,19 @@ function SummaryStat({ label, value, variant }: { label: string; value: string; 
 }
 
 function hasActivity(r: CustomerProfitability): boolean {
-  return r.order_count > 0 || r.replacement_count > 0 || r.refund_count > 0 || r.warranty_cost_usd > 0;
+  return r.order_count > 0
+      || r.replacement_count > 0
+      || r.refund_count > 0
+      || r.expected_warranty_cost_usd > 0
+      || r.expected_refund_usd > 0
+      || r.open_warranty_ticket_count > 0;
 }
 
 function sortFn(key: SortKey): (a: CustomerProfitability, b: CustomerProfitability) => number {
   switch (key) {
     case 'margin_desc':   return (a, b) => b.net_margin_usd - a.net_margin_usd;
     case 'margin_asc':    return (a, b) => a.net_margin_usd - b.net_margin_usd;
-    case 'warranty_desc': return (a, b) => b.warranty_cost_usd - a.warranty_cost_usd;
+    case 'warranty_desc': return (a, b) => b.expected_warranty_cost_usd - a.expected_warranty_cost_usd;
     case 'revenue_desc':  return (a, b) => b.revenue_usd - a.revenue_usd;
   }
 }
@@ -168,28 +192,23 @@ function sortFn(key: SortKey): (a: CustomerProfitability, b: CustomerProfitabili
 function aggregate(rs: CustomerProfitability[]) {
   return rs.reduce(
     (acc, r) => ({
-      revenue:  acc.revenue + r.revenue_usd,
-      warranty: acc.warranty + r.warranty_cost_usd,
-      refund:   acc.refund + r.refund_usd,
-      margin:   acc.margin + r.net_margin_usd,
+      revenue:   acc.revenue   + r.revenue_usd,
+      salesCost: acc.salesCost + r.sale_cogs_usd + r.sale_shipping_usd,
+      warranty:  acc.warranty  + r.expected_warranty_cost_usd,
+      refund:    acc.refund    + r.expected_refund_usd,
+      margin:    acc.margin    + r.net_margin_usd,
     }),
-    { revenue: 0, warranty: 0, refund: 0, margin: 0 },
+    { revenue: 0, salesCost: 0, warranty: 0, refund: 0, margin: 0 },
   );
 }
 
 function fmt(n: number): string {
-  // Treat everything as USD-denominated for the summary numbers. The
-  // underlying `*_usd` fields actually hold the order's `currency` (CAD
-  // for most rows), but mixing currencies in a roll-up is a bigger
-  // problem (#65 follow-up); for now we surface the numbers as-is.
   return formatMoney(n, 'USD');
 }
 
 // ── Backlog #58 V2 — insights panel + cohort helpers ────────────────────────
 
 function cohortOf(r: CustomerProfitability): string {
-  // YYYY-MM from onboard_date. Customers without an onboard_date land
-  // in a single "Unknown" bucket so we can still filter them.
   if (!r.onboard_date) return 'unknown';
   return r.onboard_date.slice(0, 7);
 }
@@ -207,7 +226,7 @@ function buildCohortOptions(rows: CustomerProfitability[]):
       label: key === 'unknown' ? 'Unknown' : key,
       count,
     }))
-    .sort((a, b) => b.key.localeCompare(a.key));   // newest first
+    .sort((a, b) => b.key.localeCompare(a.key));
 }
 
 type Insights = {
@@ -219,7 +238,6 @@ type Insights = {
 function computeInsights(rows: CustomerProfitability[]): Insights {
   const active = rows.filter(hasActivity);
 
-  // ── By-country comparison ─────────────────────────────────────────────────
   const buckets = new Map<string, CustomerProfitability[]>();
   for (const r of active) {
     const k = r.country === 'CA' || r.country === 'US' ? r.country : 'Other';
@@ -233,12 +251,11 @@ function computeInsights(rows: CustomerProfitability[]): Insights {
       const n = arr.length;
       if (n === 0) return { country, n, avgMargin: 0, avgWarranty: 0 };
       const avgMargin   = arr.reduce((s, r) => s + r.net_margin_usd, 0) / n;
-      const avgWarranty = arr.reduce((s, r) => s + r.warranty_cost_usd, 0) / n;
+      const avgWarranty = arr.reduce((s, r) => s + r.expected_warranty_cost_usd, 0) / n;
       return { country, n, avgMargin, avgWarranty };
     })
     .filter(b => b.n > 0);
 
-  // ── Repeat-warranty cohort ────────────────────────────────────────────────
   const repeaters = active.filter(r => r.replacement_count >= 2);
   const baselineActive = active;
   const repeatWarranty = {
@@ -251,10 +268,6 @@ function computeInsights(rows: CustomerProfitability[]): Insights {
       : 0,
   };
 
-  // ── Worst-cohort warranty leaderboard ─────────────────────────────────────
-  // Group by onboard month; show top 5 cohorts by warranty rate. A cohort
-  // needs ≥3 customers to qualify so a single-customer month doesn't show
-  // up at 100%.
   const cohortBuckets = new Map<string, CustomerProfitability[]>();
   for (const r of active) {
     const k = cohortOf(r);
@@ -267,7 +280,7 @@ function computeInsights(rows: CustomerProfitability[]): Insights {
     .filter(([, arr]) => arr.length >= 3)
     .map(([cohort, arr]) => {
       const n = arr.length;
-      const withWarranty = arr.filter(r => r.warranty_cost_usd > 0).length;
+      const withWarranty = arr.filter(r => r.expected_warranty_cost_usd > 0).length;
       return {
         cohort,
         n,
@@ -293,7 +306,7 @@ function InsightsPanel({ insights }: { insights: Insights }) {
             <div className={styles.profInsightEmpty}>No active customers.</div>
           ) : (
             <table className={styles.profInsightTable}>
-              <thead><tr><th>Country</th><th>N</th><th>Avg margin</th><th>Avg warranty</th></tr></thead>
+              <thead><tr><th>Country</th><th>N</th><th>Avg margin</th><th>Avg exp. warranty</th></tr></thead>
               <tbody>
                 {byCountry.map(b => (
                   <tr key={b.country}>
