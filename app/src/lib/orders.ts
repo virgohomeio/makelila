@@ -65,6 +65,10 @@ export type Order = {
   // freight_estimate_usd (the operator-editable carrier-quote field).
   // Editing the estimate must NOT change this. Backlog #65.
   customer_paid_shipping_usd: number | null;
+  // Where the freight estimate value came from (backlog #17): 'shopify'
+  // on initial sync, flips to 'manual' on operator edit. Future: 'clickship'
+  // / 'freightcom' once those integrations land (#19).
+  freight_estimate_source: string;
   // *_usd fields hold the amount in the order's own `currency`, despite the historical `_usd` naming — CAD orders are NOT in USD.
   currency: string;
   total_usd: number;
@@ -180,7 +184,13 @@ export async function setSalesConfirmedFit(id: string, value: boolean): Promise<
 }
 
 export async function updateFreightEstimate(id: string, amount: number): Promise<void> {
-  const { error } = await supabase.from('orders').update({ freight_estimate_usd: amount }).eq('id', id);
+  // Backlog #17 — operator edit flips the source to 'manual' so the FreightCard
+  // can render a "(operator edit)" tag and reporting can distinguish synced
+  // values from manual overrides.
+  const { error } = await supabase
+    .from('orders')
+    .update({ freight_estimate_usd: amount, freight_estimate_source: 'manual' })
+    .eq('id', id);
   if (error) throw error;
 }
 

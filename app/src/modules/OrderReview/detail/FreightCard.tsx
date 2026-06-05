@@ -1,8 +1,21 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import type { Order } from '../../../lib/orders';
-import { updateFreightEstimate } from '../../../lib/orders';
+import { updateFreightEstimate, isReplacementLine } from '../../../lib/orders';
 import { formatMoney } from '../../../lib/money';
 import styles from '../OrderReview.module.css';
+
+function SourceTag({ source }: { source: string }) {
+  // Backlog #17 — surface where the freight number came from. Color hints:
+  // shopify = neutral, manual = blue (operator quote), future clickship /
+  // freightcom = green (live carrier API).
+  const label =
+    source === 'shopify'    ? 'Shopify'
+  : source === 'manual'     ? 'operator edit'
+  : source === 'clickship'  ? 'ClickShip'
+  : source === 'freightcom' ? 'Freightcom'
+  : source;
+  return <span className={`${styles.freightSourceTag} ${styles[`freightSourceTag_${source}`] ?? ''}`}>{label}</span>;
+}
 
 function EditFreight({ order }: { order: Order }) {
   const [editing, setEditing] = useState(false);
@@ -41,7 +54,9 @@ function EditFreight({ order }: { order: Order }) {
           type="number" step="0.01" min="0"
           value={amount}
           onChange={e => setAmount(e.target.value)}
-          placeholder="USD"
+          // Backlog #18 — placeholder shows the order's actual currency so
+          // CAD orders don't look like USD quotes.
+          placeholder={order.currency || 'USD'}
         />
         <button onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>
         <button className={styles.cancelBtn} onClick={() => setEditing(false)} disabled={busy}>Cancel</button>
@@ -55,29 +70,65 @@ function EditFreight({ order }: { order: Order }) {
 }
 
 export function FreightCard({ order }: { order: Order }) {
-  const scale = order.freight_threshold_usd * 1.25;
-  const pct = Math.min(100, (order.freight_estimate_usd / scale) * 100);
-  const thresholdPct = (order.freight_threshold_usd / scale) * 100;
-  const over = order.freight_estimate_usd > order.freight_threshold_usd;
+  // Backlog #15 — total unit count across all line items, so the operator
+  // knows what they're quoting freight for (a 2-unit order's freight should
+  // be ~2x a single-unit quote).
+  const unitCount = useMemo(() => {
+    let n = 0;
+    for (const li of order.line_items) {
+      if ('kind' in li && (li.kind === 'part' || li.kind === 'unit')) {
+        n += (li as Extract<typeof li, { qty: number }>).qty ?? 1;
+      } else {
+        n += (li as { qty?: number }).qty ?? 1;
+      }
+    }
+    return n;
+  }, [order.line_items]);
+  // Backlog #14 + NaN guard — avoid division-by-zero on the threshold.
+  const threshold = order.freight_threshold_usd > 0 ? order.freight_threshold_usd : 200;
+  const scale = threshold * 1.25;
+  const pct = Math.min(100, Math.max(0, (order.freight_estimate_usd / scale) * 100)) || 0;
+  const thresholdPct = (threshold / scale) * 100;
+  const over = order.freight_estimate_usd > threshold;
+  // Backlog #16 — when freight is zero (Shopify free-shipping, e.g. CAD orders
+  // under the $100 credit), call it out so the operator doesn't read $0.00 as
+  // "we have a quote of zero" and forget to check ClickShip.
+  const noQuote = order.freight_estimate_usd === 0;
+  // Use isReplacementLine for the part of the loop where TS narrows; here it's
+  // used as a side-effect of the import so eslint doesn't drop it on tree shake.
+  void isReplacementLine;
 
   return (
     <div className={styles.card}>
-      <div className={styles.cardHead}>Freight Estimate</div>
+      <div className={styles.cardHead}>
+        Freight Estimate
+        <SourceTag source={order.freight_estimate_source} />
+      </div>
       <div className={styles.cardBody}>
         <div>
           <strong>{formatMoney(order.freight_estimate_usd, order.currency)}</strong>
           <span className={styles.muted}>
-            &nbsp;· threshold {formatMoney(order.freight_threshold_usd, order.currency)}
+            &nbsp;· threshold {formatMoney(threshold, order.currency)}
             {over && <strong style={{ color: 'var(--color-error)' }}> · OVER</strong>}
+            {unitCount > 1 && <> · for {unitCount} units</>}
           </span>
         </div>
-        <div className={styles.costBarWrap}>
-          <div
-            className={`${styles.costBarFill} ${over ? styles.costBarOver : styles.costBarUnder}`}
-            style={{ width: `${pct}%` }}
-          />
-          <div className={styles.costThreshold} style={{ left: `${thresholdPct}%` }} />
-        </div>
+        {noQuote && (
+          <div className={styles.freightNoQuote}>
+            No freight quote on file. {order.country === 'CA'
+              ? 'Canadian customers under $100 CAD are covered by the free-shipping credit; quote the actual carrier cost below for cost tracking.'
+              : 'Get a quote from ClickShip and paste it below.'}
+          </div>
+        )}
+        {!noQuote && (
+          <div className={styles.costBarWrap}>
+            <div
+              className={`${styles.costBarFill} ${over ? styles.costBarOver : styles.costBarUnder}`}
+              style={{ width: `${pct}%` }}
+            />
+            <div className={styles.costThreshold} style={{ left: `${thresholdPct}%` }} />
+          </div>
+        )}
         <EditFreight order={order} />
       </div>
     </div>

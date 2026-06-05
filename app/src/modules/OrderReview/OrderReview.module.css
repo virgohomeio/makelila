@@ -537,3 +537,33 @@
   font-size: 10px;
   color: var(--color-ink-muted);
 }
+
+/* Backlog #14-#18 — freight UX bundle */
+.freightSourceTag {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 0.65rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  background: #edf2f7;
+  color: #4a5568;
+  vertical-align: middle;
+}
+.freightSourceTag_shopify { background: #edf2f7; color: #4a5568; }
+.freightSourceTag_manual { background: #bee3f8; color: #2b6cb0; }
+.freightSourceTag_clickship,
+.freightSourceTag_freightcom { background: #c6f6d5; color: #22543d; }
+
+.freightNoQuote {
+  margin: 8px 0;
+  padding: 6px 10px;
+  background: #fefcbf;
+  border-left: 3px solid #d69e2e;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  color: #744210;
+  line-height: 1.4;
+}

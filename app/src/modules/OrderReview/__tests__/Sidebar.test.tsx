@@ -30,6 +30,7 @@ function mkOrder(partial: Partial<Order> & { id: string; status: Order['status']
     customer_paid_shipping_usd: 89.5,
     customer_id: null,
     awaiting_batch_id: null,
+    freight_estimate_source: 'shopify',
     currency: 'USD',
     total_usd: 1149,
     subtotal_usd: null, tax_usd: null, discount_total_usd: null,

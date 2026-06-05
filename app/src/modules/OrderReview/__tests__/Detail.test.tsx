@@ -54,7 +54,7 @@ const order: Order = {
   address_claude_postal: null,
   freight_estimate_usd: 89.5, freight_threshold_usd: 200,
   customer_paid_shipping_usd: 89.5, currency: 'USD',
-  customer_id: null, awaiting_batch_id: null,
+  customer_id: null, awaiting_batch_id: null, freight_estimate_source: 'shopify',
   total_usd: 1149,
   subtotal_usd: null, tax_usd: null, discount_total_usd: null,
   discount_codes: null, payment_methods: null, financial_status: null,
