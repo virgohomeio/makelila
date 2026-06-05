@@ -1,0 +1,503 @@
+import { useMemo, useState } from 'react';
+import { useCustomers, type Customer } from '../../lib/customers';
+import { useOrders, type Order } from '../../lib/orders';
+import { useServiceTickets, useCustomerLifecycle, type ServiceTicket, type CustomerLifecycle } from '../../lib/service';
+import { useReturns, type ReturnRow } from '../../lib/postShipment';
+import styles from './Customers.module.css';
+
+// ─── CJM stages, mirrors CJM/makeLILA_CJM_v2.html (10 stages) ─────────────────
+// The descriptions + emojis are pulled verbatim from the CJM doc so the
+// visualization stays anchored to the canonical source.
+
+type StageKey =
+  | 'awareness' | 'consideration' | 'conversion' | 'shipping' | 'unboxing'
+  | 'setup' | 'routine' | 'failure' | 'eol' | 'promotion';
+
+type StageDef = {
+  key: StageKey;
+  label: string;
+  description: string;
+  emoji: string;          // CJM "Customer Feeling" emoji at this stage
+  emotionLabel: string;   // CJM verbatim emotion text
+  color: string;
+};
+
+const STAGES: readonly StageDef[] = [
+  { key: 'awareness',    label: 'Awareness',           description: 'Why do they start the journey?',     emoji: '😬', emotionLabel: 'Skeptical — ugly? too expensive? really compost?', color: '#a0aec0' },
+  { key: 'consideration',label: 'Consideration',        description: 'Why should they care about LILA?',   emoji: '🤔', emotionLabel: 'Cautiously interested but lots of doubts',           color: '#d69e2e' },
+  { key: 'conversion',   label: 'Conversion',           description: 'Why would they trust us?',           emoji: '😊', emotionLabel: 'Committed but anxious about the price',              color: '#2b6cb0' },
+  { key: 'shipping',     label: 'Shipping',             description: 'Comfortable while waiting?',         emoji: '😶', emotionLabel: 'Anticipating — reassured by onboarding outreach',    color: '#3182ce' },
+  { key: 'unboxing',     label: 'Unboxing',             description: 'First impression?',                  emoji: '😍', emotionLabel: 'Excited — first impression (packaging waste concern)', color: '#805ad5' },
+  { key: 'setup',        label: 'Setup',                description: 'How do they start using LILA?',      emoji: '😌', emotionLabel: 'Guided onboarding helps — tech barriers for some',  color: '#6b46c1' },
+  { key: 'routine',      label: 'Routine Use',          description: 'How can they feel successful?',      emoji: '🌱', emotionLabel: 'Satisfied — seeing real compost output',             color: '#276749' },
+  { key: 'failure',      label: 'Failure & Support',    description: 'How can they navigate failures?',    emoji: '😡', emotionLabel: 'Frustrated — speed of fix = will I recommend?',     color: '#c53030' },
+  { key: 'eol',          label: 'End of Life',          description: 'Feel good with end of life?',        emoji: '😔', emotionLabel: 'Reluctant — don\'t want to start over',              color: '#a0522d' },
+  { key: 'promotion',    label: 'Promotion',            description: 'Why recommend to others?',           emoji: '🥰', emotionLabel: 'Proud advocate — "tech expert" to friends',         color: '#38a169' },
+];
+
+const STAGE_INDEX: Record<StageKey, number> = STAGES.reduce(
+  (acc, s, i) => { acc[s.key] = i; return acc; },
+  {} as Record<StageKey, number>,
+);
+
+// ─── Per-customer journey snapshot ────────────────────────────────────────────
+
+type Satisfaction = 0 | 1 | 2 | 3 | 4 | 5;   // 0=abandoned, 5=delighted
+
+type StageScore = {
+  key: StageKey;
+  reached: boolean;          // has the customer arrived at this stage yet?
+  satisfaction: Satisfaction | null;  // null when not reached
+  signals: string[];          // human-readable reasons feeding the score
+};
+
+type Journey = {
+  customer: Customer;
+  currentStage: StageKey;
+  overallSatisfaction: Satisfaction;
+  stages: StageScore[];
+  signals: {
+    orders: Order[];
+    lifecycle: CustomerLifecycle[];
+    tickets: ServiceTicket[];
+    returns: ReturnRow[];
+  };
+};
+
+const SATISFACTION_EMOJI: Record<Satisfaction, string> = {
+  0: '😞', 1: '😟', 2: '😕', 3: '😐', 4: '🙂', 5: '🤩',
+};
+const SATISFACTION_COLOR: Record<Satisfaction, string> = {
+  0: '#742a2a', 1: '#c53030', 2: '#dd6b20', 3: '#a0aec0', 4: '#38a169', 5: '#276749',
+};
+const SATISFACTION_LABEL: Record<Satisfaction, string> = {
+  0: 'abandoned', 1: 'frustrated', 2: 'concerned', 3: 'neutral', 4: 'satisfied', 5: 'delighted',
+};
+
+function inferJourney(
+  c: Customer,
+  allOrders: Order[],
+  allLifecycle: CustomerLifecycle[],
+  allTickets: ServiceTicket[],
+  allReturns: ReturnRow[],
+): Journey {
+  const lcEmail = c.email?.toLowerCase() ?? '';
+  const lcName  = c.full_name.toLowerCase();
+
+  const orders    = allOrders.filter(o =>
+    (o.customer_email?.toLowerCase() === lcEmail && lcEmail !== '')
+    || o.customer_name?.toLowerCase() === lcName
+  );
+  const lifecycle = allLifecycle.filter(l => l.customer_id === c.id);
+  const tickets   = allTickets.filter(t =>
+    (t.customer_email?.toLowerCase() === lcEmail && lcEmail !== '')
+    || t.customer_id === c.id
+  );
+  const returns   = allReturns.filter(r =>
+    (r.customer_email?.toLowerCase() === lcEmail && lcEmail !== '')
+    || r.customer_name?.toLowerCase() === lcName
+  );
+
+  const saleOrders   = orders.filter(o => o.kind === 'sale');
+  const hasSale      = saleOrders.length > 0;
+  const hasShipped   = lifecycle.some(l => l.shipped_at != null);
+  const hasDelivered = saleOrders.some(o => o.delivered_at != null);
+  const hasOnboardingScheduled = lifecycle.some(l => l.onboarding_status === 'scheduled');
+  const hasOnboardingCompleted = lifecycle.some(l => l.onboarding_status === 'completed');
+  const completedOnboardOldEnough = lifecycle.some(l => {
+    if (l.onboarding_status !== 'completed' || !l.onboarding_completed_at) return false;
+    const completed = new Date(l.onboarding_completed_at).getTime();
+    return Date.now() - completed > 30 * 86400_000;   // >30d post-onboard = "routine"
+  });
+  const openWarrantyTickets = tickets.filter(t =>
+    (t.topic === 'return_hardware_defect' || t.topic === 'warranty_replacement')
+    && t.status !== 'resolved' && t.status !== 'closed'
+  );
+  const hasActiveReturn = returns.some(r =>
+    r.status !== 'closed' && r.status !== 'denied' && r.status !== 'refunded'
+  );
+  const fu2Reviewed = c.fu2_status === 'reviewed';   // customer mentioned leaving a review
+
+  // Walk backward through the stage order. First match wins as "current".
+  let currentStage: StageKey = 'awareness';
+  if (fu2Reviewed)                       currentStage = 'promotion';
+  else if (hasActiveReturn)              currentStage = 'eol';
+  else if (openWarrantyTickets.length > 0) currentStage = 'failure';
+  else if (completedOnboardOldEnough)    currentStage = 'routine';
+  else if (hasOnboardingCompleted)       currentStage = 'setup';
+  else if (hasOnboardingScheduled)       currentStage = 'setup';
+  else if (hasDelivered)                 currentStage = 'unboxing';
+  else if (hasShipped)                   currentStage = 'shipping';
+  else if (hasSale)                      currentStage = 'conversion';
+  else if (c.email || c.phone)           currentStage = 'consideration';   // in the system but no order
+
+  const currentIdx = STAGE_INDEX[currentStage];
+
+  // ─── Score each reached stage ─────────────────────────────────────────────
+  const stages: StageScore[] = STAGES.map(stage => {
+    const reached = STAGE_INDEX[stage.key] <= currentIdx;
+    if (!reached) return { key: stage.key, reached, satisfaction: null, signals: [] };
+
+    const sig: string[] = [];
+    let score: Satisfaction = 3;   // start at neutral
+
+    switch (stage.key) {
+      case 'awareness':
+      case 'consideration':
+        // We don't have pre-purchase signals; default neutral
+        sig.push('No upstream marketing signals tracked yet.');
+        break;
+      case 'conversion':
+        score = 4;
+        sig.push(`Placed ${saleOrders.length} sale order${saleOrders.length === 1 ? '' : 's'}.`);
+        break;
+      case 'shipping':
+        score = 4;
+        if (hasDelivered) {
+          sig.push('Delivered without issue.');
+        } else if (hasShipped) {
+          sig.push('In transit.');
+        }
+        break;
+      case 'unboxing': {
+        // Negative signal: very early ticket (within first 7d of delivery)
+        const earlyTicket = tickets.find(t => {
+          const delivered = saleOrders.find(o => o.delivered_at)?.delivered_at;
+          if (!delivered) return false;
+          const dt = new Date(delivered).getTime();
+          const created = new Date(t.created_at).getTime();
+          return created - dt < 7 * 86400_000 && created > dt;
+        });
+        if (earlyTicket) {
+          score = 2;
+          sig.push('Opened a ticket within 7 days of delivery — likely unboxing issue.');
+        } else {
+          score = 4;
+          sig.push('No immediate post-delivery complaints.');
+        }
+        break;
+      }
+      case 'setup':
+        if (hasOnboardingCompleted) {
+          score = 4;
+          sig.push('Onboarding call completed.');
+        } else if (hasOnboardingScheduled) {
+          score = 3;
+          sig.push('Onboarding call scheduled but not yet completed.');
+        } else {
+          score = 2;
+          sig.push('No onboarding call on the calendar.');
+        }
+        break;
+      case 'routine': {
+        // Look at FU1/FU2 responses + open tickets
+        const openTickets = tickets.filter(t => t.status !== 'resolved' && t.status !== 'closed');
+        if (c.fu1_status === 'completed' || c.fu1_status === 'reviewed') {
+          score = 4;
+          sig.push(`FU1 logged as ${c.fu1_status}.`);
+        }
+        if (openTickets.length > 0) {
+          score = 2;
+          sig.push(`${openTickets.length} open ticket${openTickets.length === 1 ? '' : 's'}.`);
+        }
+        break;
+      }
+      case 'failure':
+        // Score on count + age of open warranty tickets
+        if (openWarrantyTickets.length >= 2) {
+          score = 1;
+          sig.push(`${openWarrantyTickets.length} open warranty/defect tickets.`);
+        } else if (openWarrantyTickets.length === 1) {
+          score = 2;
+          sig.push('1 open warranty/defect ticket.');
+        } else {
+          score = 3;
+          sig.push('Tickets resolved.');
+        }
+        break;
+      case 'eol': {
+        // Use return.experience_rating if customer filled the return form
+        const returnWithRating = returns.find(r => r.experience_rating != null);
+        if (returnWithRating?.experience_rating != null) {
+          const r = returnWithRating.experience_rating;
+          score = (Math.max(0, Math.min(5, r)) as Satisfaction);
+          sig.push(`Return-form experience rating: ${r}/5.`);
+        } else if (hasActiveReturn) {
+          score = 1;
+          sig.push('Active return in flight.');
+        }
+        break;
+      }
+      case 'promotion':
+        score = 5;
+        if (fu2Reviewed) sig.push('FU2 logged customer left a review.');
+        break;
+    }
+
+    return { key: stage.key, reached, satisfaction: score, signals: sig };
+  });
+
+  // Overall = current stage's satisfaction (with sensible fallbacks).
+  const currentStageScore = stages.find(s => s.key === currentStage)?.satisfaction ?? 3;
+  const overallSatisfaction: Satisfaction = currentStageScore;
+
+  return {
+    customer: c,
+    currentStage,
+    overallSatisfaction,
+    stages,
+    signals: { orders, lifecycle, tickets, returns },
+  };
+}
+
+// ─── UI ───────────────────────────────────────────────────────────────────────
+
+type StageFilter = 'all' | StageKey;
+type SatisfactionFilter = 'all' | 'unhappy' | 'happy';
+
+export function JourneyTab() {
+  const { customers, loading: lc } = useCustomers();
+  const { all: orders } = useOrders();
+  const { tickets } = useServiceTickets();
+  const { rows: lifecycle } = useCustomerLifecycle();
+  const { returns } = useReturns();
+  const [search, setSearch] = useState('');
+  const [stageFilter, setStageFilter] = useState<StageFilter>('all');
+  const [satFilter, setSatFilter] = useState<SatisfactionFilter>('all');
+  const [openId, setOpenId] = useState<string | null>(null);
+
+  const journeys = useMemo(() => {
+    return customers.map(c => inferJourney(c, orders, lifecycle, tickets, returns));
+  }, [customers, orders, lifecycle, tickets, returns]);
+
+  const stageCounts = useMemo(() => {
+    const m: Record<StageKey, number> = {} as Record<StageKey, number>;
+    for (const s of STAGES) m[s.key] = 0;
+    for (const j of journeys) m[j.currentStage]++;
+    return m;
+  }, [journeys]);
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return journeys.filter(j => {
+      if (stageFilter !== 'all' && j.currentStage !== stageFilter) return false;
+      if (satFilter === 'unhappy' && j.overallSatisfaction > 2) return false;
+      if (satFilter === 'happy' && j.overallSatisfaction < 4) return false;
+      if (q && !j.customer.full_name.toLowerCase().includes(q) &&
+          !(j.customer.email ?? '').toLowerCase().includes(q)) return false;
+      return true;
+    }).sort((a, b) => {
+      // Unhappy first within each stage
+      if (a.overallSatisfaction !== b.overallSatisfaction) return a.overallSatisfaction - b.overallSatisfaction;
+      return a.customer.full_name.localeCompare(b.customer.full_name);
+    });
+  }, [journeys, search, stageFilter, satFilter]);
+
+  if (lc) return <div className={styles.loading}>Loading journey…</div>;
+
+  const open = openId ? journeys.find(j => j.customer.id === openId) ?? null : null;
+
+  return (
+    <div className={styles.journeyTab}>
+      {/* Stage funnel — counts per stage, click to filter */}
+      <div className={styles.journeyFunnel}>
+        <button
+          className={`${styles.journeyFunnelStage} ${stageFilter === 'all' ? styles.journeyFunnelActive : ''}`}
+          onClick={() => setStageFilter('all')}
+          style={{ borderColor: '#cbd5e0' }}
+        >
+          <div className={styles.journeyFunnelLabel}>All</div>
+          <div className={styles.journeyFunnelCount}>{journeys.length}</div>
+        </button>
+        {STAGES.map(s => (
+          <button
+            key={s.key}
+            className={`${styles.journeyFunnelStage} ${stageFilter === s.key ? styles.journeyFunnelActive : ''}`}
+            onClick={() => setStageFilter(stageFilter === s.key ? 'all' : s.key)}
+            style={{ borderColor: s.color }}
+            title={`${s.label} — ${s.description}`}
+          >
+            <div className={styles.journeyFunnelLabel}>{s.emoji} {s.label}</div>
+            <div className={styles.journeyFunnelCount} style={{ color: s.color }}>{stageCounts[s.key]}</div>
+          </button>
+        ))}
+      </div>
+
+      <div className={styles.journeyControls}>
+        <input
+          className={styles.profSearch}
+          placeholder="Search customer…"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+        />
+        <select value={satFilter} onChange={e => setSatFilter(e.target.value as SatisfactionFilter)}>
+          <option value="all">All satisfaction</option>
+          <option value="unhappy">Unhappy (≤2)</option>
+          <option value="happy">Happy (≥4)</option>
+        </select>
+        <span className={styles.journeyResultCount}>{filtered.length} customers</span>
+      </div>
+
+      {filtered.length === 0 ? (
+        <div className={styles.empty}>No customers match these filters.</div>
+      ) : (
+        <div className={styles.journeyGrid}>
+          {filtered.map(j => (
+            <JourneyCard key={j.customer.id} journey={j} onOpen={() => setOpenId(j.customer.id)} />
+          ))}
+        </div>
+      )}
+
+      {open && <JourneyDetailPanel journey={open} onClose={() => setOpenId(null)} />}
+    </div>
+  );
+}
+
+function JourneyCard({ journey, onOpen }: { journey: Journey; onOpen: () => void }) {
+  const stage = STAGES[STAGE_INDEX[journey.currentStage]];
+  const s = journey.overallSatisfaction;
+  return (
+    <button className={styles.journeyCard} onClick={onOpen}>
+      <div className={styles.journeyCardHead}>
+        <div className={styles.journeyCardName}>{journey.customer.full_name}</div>
+        <div
+          className={styles.journeyCardMood}
+          title={SATISFACTION_LABEL[s]}
+          style={{ background: SATISFACTION_COLOR[s] }}
+        >
+          {SATISFACTION_EMOJI[s]}
+        </div>
+      </div>
+      <div className={styles.journeyCardStage} style={{ color: stage.color, borderColor: stage.color }}>
+        {stage.emoji} {stage.label}
+      </div>
+      <div className={styles.journeyCardEmotion}>{stage.emotionLabel}</div>
+      <div className={styles.journeyCardMini}>
+        {STAGES.map(st => {
+          const reached = STAGE_INDEX[st.key] <= STAGE_INDEX[journey.currentStage];
+          return (
+            <span
+              key={st.key}
+              className={styles.journeyCardMiniDot}
+              style={{
+                background: reached ? st.color : '#edf2f7',
+                opacity: reached ? 1 : 0.35,
+                outline: st.key === journey.currentStage ? `2px solid ${st.color}` : 'none',
+                outlineOffset: 1,
+              }}
+              title={st.label}
+            />
+          );
+        })}
+      </div>
+    </button>
+  );
+}
+
+function JourneyDetailPanel({ journey, onClose }: { journey: Journey; onClose: () => void }) {
+  const { customer, signals, overallSatisfaction } = journey;
+  return (
+    <div className={styles.panelBackdrop} onClick={onClose}>
+      <div className={styles.journeyPanel} onClick={e => e.stopPropagation()}>
+        <div className={styles.panelHeader}>
+          <div>
+            <h2 className={styles.panelTitle}>
+              {customer.full_name}
+              <span
+                className={styles.journeyPanelMood}
+                title={SATISFACTION_LABEL[overallSatisfaction]}
+                style={{ background: SATISFACTION_COLOR[overallSatisfaction] }}
+              >
+                {SATISFACTION_EMOJI[overallSatisfaction]} {SATISFACTION_LABEL[overallSatisfaction]}
+              </span>
+            </h2>
+            <div className={styles.panelSubtitle}>{customer.email ?? 'no email'}</div>
+          </div>
+          <button onClick={onClose} className={styles.panelClose} aria-label="Close">×</button>
+        </div>
+
+        <div className={styles.panelBody}>
+          <div className={styles.journeyPanelHint}>
+            10-stage CJM from <code>CJM/makeLILA_CJM_v2.html</code>. Bars below a stage are scored 0–5
+            from real ops data — orders, lifecycle, tickets, returns. Click a bar to see the signals
+            feeding it.
+          </div>
+
+          <div className={styles.journeyTimeline}>
+            {journey.stages.map(ss => {
+              const def = STAGES[STAGE_INDEX[ss.key]];
+              const current = ss.key === journey.currentStage;
+              return (
+                <div
+                  key={ss.key}
+                  className={`${styles.journeyTimelineStage} ${current ? styles.journeyTimelineCurrent : ''}`}
+                  style={{ borderTopColor: def.color }}
+                >
+                  <div className={styles.journeyTimelineHead} style={{ background: def.color }}>
+                    <div className={styles.journeyTimelineEmoji}>{def.emoji}</div>
+                    <div className={styles.journeyTimelineLabel}>{def.label}</div>
+                  </div>
+                  <div className={styles.journeyTimelineBody}>
+                    {!ss.reached ? (
+                      <div className={styles.journeyTimelineNotYet}>not yet reached</div>
+                    ) : (
+                      <>
+                        <div className={styles.journeyTimelineScore}>
+                          <span
+                            className={styles.journeyTimelineScoreVal}
+                            style={{ color: SATISFACTION_COLOR[ss.satisfaction ?? 3] }}
+                          >
+                            {SATISFACTION_EMOJI[ss.satisfaction ?? 3]} {ss.satisfaction ?? '—'}/5
+                          </span>
+                          <span className={styles.journeyTimelineScoreLabel}>
+                            {SATISFACTION_LABEL[ss.satisfaction ?? 3]}
+                          </span>
+                        </div>
+                        <ul className={styles.journeyTimelineSignals}>
+                          {ss.signals.length === 0
+                            ? <li className={styles.journeyTimelineNoSignal}>—</li>
+                            : ss.signals.map((s, i) => <li key={i}>{s}</li>)}
+                        </ul>
+                      </>
+                    )}
+                    <div className={styles.journeyTimelineEmotion}>{def.emotionLabel}</div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className={styles.journeyDataDump}>
+            <div>
+              <div className={styles.journeyDataDumpTitle}>Orders ({signals.orders.length})</div>
+              {signals.orders.length === 0 ? <div className={styles.muted}>—</div> :
+                signals.orders.map(o => (
+                  <div key={o.id} className={styles.journeyDataDumpRow}>
+                    {o.order_ref} · {o.kind} · {o.status} · {o.placed_at?.slice(0, 10) ?? '—'}
+                  </div>
+                ))}
+            </div>
+            <div>
+              <div className={styles.journeyDataDumpTitle}>Tickets ({signals.tickets.length})</div>
+              {signals.tickets.length === 0 ? <div className={styles.muted}>—</div> :
+                signals.tickets.map(t => (
+                  <div key={t.id} className={styles.journeyDataDumpRow}>
+                    {t.subject?.slice(0, 36)} · {t.topic ?? '—'} · {t.status}
+                  </div>
+                ))}
+            </div>
+            <div>
+              <div className={styles.journeyDataDumpTitle}>Returns ({signals.returns.length})</div>
+              {signals.returns.length === 0 ? <div className={styles.muted}>—</div> :
+                signals.returns.map(r => (
+                  <div key={r.id} className={styles.journeyDataDumpRow}>
+                    {r.unit_serial ?? '—'} · {r.status} · rated {r.experience_rating ?? '—'}/5
+                  </div>
+                ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

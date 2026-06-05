@@ -888,3 +888,237 @@
   padding-top: 6px;
   border-top: 1px solid #f1f5f9;
 }
+
+/* ─── Journey tab ──────────────────────────────────────────────────────────── */
+.journeyTab {
+  padding: 16px 24px;
+}
+
+.journeyFunnel {
+  display: grid;
+  grid-template-columns: repeat(11, minmax(0, 1fr));
+  gap: 6px;
+  margin-bottom: 14px;
+}
+.journeyFunnelStage {
+  background: #fff;
+  border: 2px solid #cbd5e0;
+  border-radius: 6px;
+  padding: 8px 4px;
+  cursor: pointer;
+  text-align: center;
+  transition: transform .1s, background .1s;
+}
+.journeyFunnelStage:hover { transform: translateY(-1px); background: #f7fafc; }
+.journeyFunnelActive { background: #f7fafc; box-shadow: inset 0 -3px 0 currentColor; }
+.journeyFunnelLabel { font-size: .7rem; color: #2d3748; font-weight: 600; }
+.journeyFunnelCount { font-size: 1.1rem; font-weight: 700; color: #1a202c; margin-top: 2px; }
+
+.journeyControls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 16px;
+}
+.journeyResultCount {
+  margin-left: auto;
+  font-size: .8rem;
+  color: #718096;
+}
+
+.journeyGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+.journeyCard {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 12px 14px;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  transition: transform .1s, box-shadow .1s;
+}
+.journeyCard:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(0,0,0,.08);
+}
+.journeyCardHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.journeyCardName {
+  font-weight: 700;
+  font-size: .95rem;
+  color: #1a202c;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.journeyCardMood {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  color: #fff;
+  flex-shrink: 0;
+}
+.journeyCardStage {
+  display: inline-block;
+  font-size: .75rem;
+  font-weight: 700;
+  padding: 3px 8px;
+  border: 1px solid;
+  border-radius: 4px;
+  align-self: flex-start;
+}
+.journeyCardEmotion {
+  font-size: .75rem;
+  color: #4a5568;
+  font-style: italic;
+  line-height: 1.35;
+}
+.journeyCardMini {
+  display: flex;
+  gap: 4px;
+  margin-top: 4px;
+}
+.journeyCardMiniDot {
+  flex: 1;
+  height: 6px;
+  border-radius: 3px;
+}
+
+/* ─── Journey detail panel ──────────────────────────────────────────────── */
+.journeyPanel {
+  background: #fff;
+  width: min(1200px, 96vw);
+  max-height: 92vh;
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.journeyPanelMood {
+  display: inline-block;
+  margin-left: 12px;
+  padding: 3px 10px;
+  border-radius: 12px;
+  color: #fff;
+  font-size: .75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .03em;
+}
+.journeyPanelHint {
+  font-size: .75rem;
+  color: #4a5568;
+  background: #f7fafc;
+  padding: 8px 12px;
+  border-radius: 6px;
+  margin-bottom: 14px;
+}
+.journeyPanelHint code {
+  background: #edf2f7;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: .7rem;
+}
+
+.journeyTimeline {
+  display: grid;
+  grid-template-columns: repeat(10, minmax(0, 1fr));
+  gap: 6px;
+  margin-bottom: 18px;
+}
+.journeyTimelineStage {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-top: 4px solid;
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  min-height: 200px;
+}
+.journeyTimelineCurrent {
+  box-shadow: 0 0 0 2px #2b6cb0;
+}
+.journeyTimelineHead {
+  color: #fff;
+  padding: 8px 6px;
+  text-align: center;
+}
+.journeyTimelineEmoji { font-size: 18px; }
+.journeyTimelineLabel { font-size: .7rem; font-weight: 700; margin-top: 2px; }
+.journeyTimelineBody {
+  padding: 8px;
+  font-size: .7rem;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+}
+.journeyTimelineNotYet {
+  color: #a0aec0;
+  font-style: italic;
+  text-align: center;
+}
+.journeyTimelineScore {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 6px 0;
+  border-bottom: 1px dashed #e2e8f0;
+}
+.journeyTimelineScoreVal { font-size: 1rem; font-weight: 700; }
+.journeyTimelineScoreLabel { font-size: .65rem; color: #718096; text-transform: uppercase; }
+.journeyTimelineSignals {
+  list-style: disc;
+  margin: 0;
+  padding-left: 14px;
+  color: #2d3748;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.journeyTimelineNoSignal { color: #a0aec0; }
+.journeyTimelineEmotion {
+  margin-top: auto;
+  padding-top: 6px;
+  border-top: 1px dotted #e2e8f0;
+  color: #4a5568;
+  font-style: italic;
+  font-size: .65rem;
+  line-height: 1.35;
+}
+
+.journeyDataDump {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 14px;
+  margin-top: 8px;
+}
+.journeyDataDumpTitle {
+  font-size: .75rem;
+  font-weight: 700;
+  color: #2d3748;
+  margin-bottom: 6px;
+}
+.journeyDataDumpRow {
+  font-size: .7rem;
+  color: #4a5568;
+  padding: 3px 0;
+  border-bottom: 1px dotted #edf2f7;
+}

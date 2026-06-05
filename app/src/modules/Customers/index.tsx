@@ -10,9 +10,10 @@ import { useUnits } from '../../lib/stock';
 import { useServiceTickets } from '../../lib/service';
 import { OverdueFollowupPanel } from './OverdueFollowupPanel';
 import { ProfitabilityTab } from './ProfitabilityTab';
+import { JourneyTab } from './JourneyTab';
 import styles from './Customers.module.css';
 
-type Tab = 'directory' | 'profitability';
+type Tab = 'directory' | 'profitability' | 'journey';
 
 export default function Customers() {
   const [tab, setTab] = useState<Tab>('directory');
@@ -188,6 +189,20 @@ export default function Customers() {
           </div>
         </div>
         <ProfitabilityTab />
+      </div>
+    );
+  }
+
+  if (tab === 'journey') {
+    return (
+      <div className={styles.layout}>
+        <div className={styles.header}>
+          <div className={styles.titleRow}>
+            <h2 className={styles.title}>Customers</h2>
+            <CustomersTabs tab={tab} onChange={setTab} />
+          </div>
+        </div>
+        <JourneyTab />
       </div>
     );
   }
@@ -719,6 +734,7 @@ function CustomersTabs({ tab, onChange }: { tab: Tab; onChange: (t: Tab) => void
   const tabs: { key: Tab; label: string }[] = [
     { key: 'directory',     label: 'Directory' },
     { key: 'profitability', label: 'Profitability' },
+    { key: 'journey',       label: 'Journey' },
   ];
   return (
     <div className={styles.customersTabs}>
