@@ -81,6 +81,13 @@ describe('SupportTab status resilience', () => {
     expect(screen.getByText(`Closed ${new Date(closedAt).toLocaleDateString()}`)).toBeInTheDocument();
   });
 
+  it('shows each ticket\'s created date in its row', () => {
+    const createdAt = '2026-05-20T12:00:00Z';
+    ticketsToReturn = [mkTicket({ id: 'cr1', created_at: createdAt })];
+    render(<SupportTab />);
+    expect(screen.getByText(new Date(createdAt).toLocaleDateString())).toBeInTheDocument();
+  });
+
   it('does not show a close date for a non-closed ticket', () => {
     ticketsToReturn = [mkTicket({ id: 't5', status: 'in_progress', closed_at: null })];
     render(<SupportTab />);

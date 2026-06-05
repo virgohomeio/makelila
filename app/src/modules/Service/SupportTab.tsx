@@ -207,6 +207,7 @@ export function SupportTab() {
             <tr>
               <th>#</th>
               <th>Age</th>
+              <th>Created</th>
               <th>Customer</th>
               <th>Subject</th>
               <th>Topic</th>
@@ -503,6 +504,7 @@ function TicketRow({ t, selected, onClick }: { t: ServiceTicket; selected: boole
           {formatAge(ageHours)}
         </span>
       </td>
+      <td title={new Date(t.created_at).toLocaleString()}>{new Date(t.created_at).toLocaleDateString()}</td>
       <td>{t.customer_name ?? t.customer_email ?? '—'}</td>
       <td>
         <div>{t.subject}</div>
