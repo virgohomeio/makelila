@@ -195,9 +195,19 @@ export function useCustomerProfitability(): {
   return { rows, loading, error };
 }
 
-export function useCustomers(): { customers: Customer[]; loading: boolean } {
+export function useCustomers(): {
+  customers: Customer[];
+  loading: boolean;
+  /** Force-refetch the full customers list. Realtime doesn't fire
+   *  reliably for in-app writes (Journey override, follow-up record,
+   *  etc.) — components that mutate customer rows should call this
+   *  to refresh local state. */
+  refresh: () => Promise<void>;
+} {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);
+  // Bumped by refresh() to re-run the effect.
+  const [refreshTick, setRefreshTick] = useState(0);
 
   useEffect(() => {
     let channel: RealtimeChannel | null = null;
@@ -230,9 +240,11 @@ export function useCustomers(): { customers: Customer[]; loading: boolean } {
         .subscribe();
     })();
     return () => { cancelled = true; if (channel) void channel.unsubscribe(); };
-  }, []);
+  }, [refreshTick]);
 
-  return { customers, loading };
+  const refresh = async () => { setRefreshTick(t => t + 1); };
+
+  return { customers, loading, refresh };
 }
 
 /** Build a CSV export of customers who have ever purchased (have any row in

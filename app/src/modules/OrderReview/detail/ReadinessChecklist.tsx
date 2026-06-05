@@ -1,14 +1,18 @@
 import type { Order } from '../../../lib/orders';
-import { formatMoney } from '../../../lib/money';
 import styles from '../OrderReview.module.css';
 
+// Per Pedrum (2026-06-05): drop the freight readiness check. With the
+// $100 CAD shipping credit policy in place (#65), the freight estimate
+// is no longer a gating concern at order-confirm time — operators
+// still see it on the FreightCard for informational purposes, but a
+// missing/high freight quote no longer blocks the confirm.
+//
+// The check was: freight 0 < freight_estimate ≤ freight_threshold_usd.
 export function evaluateReadiness(order: Order): {
   contact: boolean;
   address: boolean;
-  freight: boolean;
   reason1: string;
   reason2: string;
-  reason3: string;
 } {
   const emailOk = !!order.customer_email;
   const phoneOk = !!order.customer_phone;
@@ -29,31 +33,22 @@ export function evaluateReadiness(order: Order): {
         : `${order.address_verdict} address — sales confirmed fit`)
     : `${order.address_verdict} address — sales must confirm fit with customer`;
 
-  const freightValue = Number(order.freight_estimate_usd) || 0;
-  const threshold = Number(order.freight_threshold_usd) || 200;
-  const freightOk = freightValue > 0 && freightValue <= threshold;
-  const reason3 = freightValue <= 0
-    ? 'Freight not synced — get quote from ClickShip'
-    : freightValue > threshold
-      ? `Freight ${formatMoney(freightValue, order.currency)} exceeds ${formatMoney(threshold, order.currency)} threshold`
-      : `Freight ${formatMoney(freightValue, order.currency)} within ${formatMoney(threshold, order.currency)} threshold`;
-
-  return { contact, address: addressOk, freight: freightOk, reason1, reason2, reason3 };
+  return { contact, address: addressOk, reason1, reason2 };
 }
 
 export function canConfirm(order: Order): boolean {
   const r = evaluateReadiness(order);
-  return r.contact && r.address && r.freight;
+  return r.contact && r.address;
 }
 
 export function ReadinessChecklist({ order }: { order: Order }) {
   const r = evaluateReadiness(order);
-  const allOk = r.contact && r.address && r.freight;
+  const allOk = r.contact && r.address;
 
   return (
     <div className={styles.card}>
       <div className={styles.cardHead} style={{ color: allOk ? 'var(--color-success)' : 'var(--color-warning)' }}>
-        Ready to confirm? — {[r.contact, r.address, r.freight].filter(Boolean).length} of 3 met
+        Ready to confirm? — {[r.contact, r.address].filter(Boolean).length} of 2 met
       </div>
       <div className={styles.cardBody}>
         <div className={styles.readinessRow}>
@@ -67,12 +62,6 @@ export function ReadinessChecklist({ order }: { order: Order }) {
             {r.address ? '✓' : '✗'}
           </span>
           <span><strong>Address fit:</strong> {r.reason2}</span>
-        </div>
-        <div className={styles.readinessRow}>
-          <span className={r.freight ? styles.readinessOk : styles.readinessFail}>
-            {r.freight ? '✓' : '✗'}
-          </span>
-          <span><strong>Freight:</strong> {r.reason3}</span>
         </div>
       </div>
     </div>

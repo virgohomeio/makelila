@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useCustomers, sendNameCollectionRequest, setJourneyStageOverride, type Customer } from '../../lib/customers';
 import { useOrders, type Order } from '../../lib/orders';
 import { useServiceTickets, useCustomerLifecycle, type ServiceTicket, type CustomerLifecycle } from '../../lib/service';
@@ -323,7 +323,7 @@ function satisfactionGroup(s: Satisfaction): 0 | 1 | 2 {
 }
 
 export function JourneyTab() {
-  const { customers, loading: lc } = useCustomers();
+  const { customers, loading: lc, refresh: refreshCustomers } = useCustomers();
   const { all: orders } = useOrders();
   const { tickets } = useServiceTickets();
   const { rows: lifecycle } = useCustomerLifecycle();
@@ -498,7 +498,13 @@ export function JourneyTab() {
         </div>
       )}
 
-      {open && <JourneyDetailPanel journey={open} onClose={() => setOpenId(null)} />}
+      {open && (
+        <JourneyDetailPanel
+          journey={open}
+          onClose={() => setOpenId(null)}
+          onChanged={refreshCustomers}
+        />
+      )}
     </div>
   );
 }
@@ -544,20 +550,34 @@ function JourneyCard({ journey, onOpen }: { journey: Journey; onOpen: () => void
   );
 }
 
-function JourneyDetailPanel({ journey, onClose }: { journey: Journey; onClose: () => void }) {
+function JourneyDetailPanel({
+  journey, onClose, onChanged,
+}: {
+  journey: Journey;
+  onClose: () => void;
+  /** Called after a successful mutation so the parent re-fetches the
+   *  customers list. Realtime alone isn't reliable for in-app writes. */
+  onChanged: () => Promise<void> | void;
+}) {
   const { customer, signals, overallSatisfaction, isManualStage, currentStage } = journey;
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  // Local control state for the dropdown. Re-sync when the upstream
+  // journey prop changes (after onChanged → useCustomers refetch →
+  // inferJourney re-runs) so the selection reflects the source of truth.
   const [pendingStage, setPendingStage] = useState<string>(isManualStage ? currentStage : '');
+  useEffect(() => {
+    setPendingStage(isManualStage ? currentStage : '');
+  }, [isManualStage, currentStage]);
 
   async function handleSetStage(next: string | null) {
     setBusy(true); setErr(null);
     try {
       await setJourneyStageOverride(customer.id, next);
-      // Realtime sub on customers will refresh the panel; close on clear
-      // so the operator sees the inferred stage they reverted to.
-      if (next === null) setPendingStage('');
-      else setPendingStage(next);
+      // Optimistic UI update; useEffect above will re-sync once the
+      // refetch lands and the prop changes.
+      setPendingStage(next ?? '');
+      await onChanged();
     } catch (e) {
       setErr((e as Error).message);
     } finally {
