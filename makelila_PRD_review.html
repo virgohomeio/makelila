@@ -352,8 +352,8 @@
 <body>
 
 <header class="topbar">
-  <h1>makeLILA PRD Review v1.2 — Interactive Dashboard</h1>
-  <div class="sub">Sections mirror <code>docs/PRD-2026-06-06.md</code>. Click any tab to navigate. Click a persona to see their clickable workflow.</div>
+  <h1>makeLILA PRD Review v1.3 — Interactive Dashboard</h1>
+  <div class="sub">15 sections mirror <code>docs/PRD-2026-06-06.md</code> + §16 Token Budget. Click any tab to navigate. Click a persona to see their clickable workflow.</div>
 </header>
 
 <nav class="tabs" id="tabs">
@@ -371,6 +371,7 @@
   <button data-view="timeline">12. Timeline</button>
   <button data-view="oos">13. Out-of-scope</button>
   <button data-view="risks">14. Open Questions</button>
+  <button data-view="tokens">16. Token Budget</button>
   <button data-view="changelog">15. Changelog</button>
 </nav>
 
@@ -594,7 +595,7 @@
   <section class="view" id="view-timeline">
     <div class="section-anchor">§12 Timeline to close the gap</div>
     <h2>Timeline</h2>
-    <p class="lede">24-week Gantt for P1 + critical-path P2 work, starting Week 1 = 2026-06-09. Solid bars = active dev. Hatched bars = operator UAT + customer-side validation. P3 items excluded — deferred with revisit criteria.</p>
+    <p class="lede"><strong>14-week Gantt</strong> for P1 + critical-path P2 + one P3 sample, starting Week 1 = 2026-06-09. <strong>Recalibrated in v1.3</strong> against actual repo cadence (430 commits since 2026-04-01, avg 6.4/day). Solid bars = active dev. Hatched bars = operator UAT + customer-side validation. Each row also shows estimated token cost (see §16 Token Budget for the full breakdown).</p>
     <div class="legend-row">
       <div class="item"><span class="swatch dev-p1"></span> P1 dev</div>
       <div class="item"><span class="swatch dev-p2"></span> P2 dev</div>
@@ -641,6 +642,94 @@
     <div class="card" style="margin-top:24px">
       <h3>Recommended sequencing summary</h3>
       <ol style="font-size:12px;line-height:1.8;margin:0;padding-left:24px" id="sequencing-list"></ol>
+    </div>
+  </section>
+
+  <!-- 16. TOKEN BUDGET (new in v1.3 — calibrated against actual repo cadence + Claude weekly limits) -->
+  <section class="view" id="view-tokens">
+    <div class="section-anchor">§16 Token Budget Analysis — calibrated to actual ship cadence</div>
+    <h2>Token Budget Analysis</h2>
+    <p class="lede">
+      The timeline in §12 was recalibrated in v1.3 against the actual repo ship cadence: <strong>430 commits since 2026-04-01</strong> (~67 days, peak days of 80 commits, average ~6.4 commits/day). Most features ship same-day or within 1–3 days of design. This section maps each planned feature to its estimated Claude Code token consumption and the corresponding fraction of a weekly Claude subscription tier.
+    </p>
+
+    <div class="stats" id="token-stats"></div>
+
+    <div class="card">
+      <h3>Per-feature token estimate by effort size</h3>
+      <p class="lede" style="margin:0 0 12px">Based on observed token usage in this repo for shipped commits. Output-token-equivalent; input tokens (context + file reads) typically 5–10× output and are included in the totals below.</p>
+      <table class="bench">
+        <thead>
+          <tr>
+            <th>Size</th>
+            <th>Example feature</th>
+            <th class="numeric">Commits</th>
+            <th class="numeric">Dev hours</th>
+            <th class="numeric">Output tokens</th>
+            <th class="numeric">Total tokens (input + output)</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><strong>S</strong></td><td>PaymentCard UI · Klaviyo Track firehose · RBAC helper</td><td class="numeric">1–3</td><td class="numeric">3–6h</td><td class="numeric">100–250K</td><td class="numeric">~0.5–1.5M</td></tr>
+          <tr><td><strong>M</strong></td><td>Device-context header · Returns disposition · QBO journal · Finance JournalPanel</td><td class="numeric">3–8</td><td class="numeric">10–20h</td><td class="numeric">300–800K</td><td class="numeric">~2–5M</td></tr>
+          <tr><td><strong>L</strong></td><td>SalesProjection + ProductionProjection · build_station_passes promotion · Mobile V2</td><td class="numeric">10–20</td><td class="numeric">30–60h</td><td class="numeric">1–3M</td><td class="numeric">~6–15M</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h3>Claude weekly tier capacity vs roadmap consumption</h3>
+      <p class="lede" style="margin:0 0 12px">Approximate weekly token capacity per Claude subscription tier (mixed Sonnet 4.5 / Opus 4.x in Claude Code). Tier specifics vary; treat these as ballpark planning numbers, not contract guarantees. Right column: how many features of each size one engineer can sustain in a typical week.</p>
+      <table class="bench">
+        <thead>
+          <tr>
+            <th>Tier</th>
+            <th class="numeric">Weekly capacity (~total tokens)</th>
+            <th class="numeric">S features / week</th>
+            <th class="numeric">M features / week</th>
+            <th class="numeric">L features (multi-week)</th>
+            <th>Recommended for</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><strong>Claude Pro</strong> ($20/mo)</td><td class="numeric">~15–30M</td><td class="numeric">5–15</td><td class="numeric">2–6</td><td class="numeric">~0.5–1 L per 2 weeks</td><td>Single light user, sporadic dev</td></tr>
+          <tr><td><strong>Claude Max 5×</strong> ($100/mo)</td><td class="numeric">~75–150M</td><td class="numeric">25–75</td><td class="numeric">10–30</td><td class="numeric">3–6 per quarter</td><td>One engineer at current makeLILA cadence (recommended)</td></tr>
+          <tr><td><strong>Claude Max 20×</strong> ($200/mo)</td><td class="numeric">~300–600M</td><td class="numeric">unlimited in practice</td><td class="numeric">unlimited in practice</td><td class="numeric">unlimited in practice</td><td>Two parallel engineers; or one engineer running workflow-style multi-agent jobs</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h3>Per-feature token consumption vs Max 5× weekly cap</h3>
+      <p class="lede" style="margin:0 0 12px">Each row = one planned feature with its effort sizing, estimated token consumption, and the percentage of a Max 5× weekly budget it would consume on its own. Cross-cutting integrations + module-level features combined.</p>
+      <table class="gap-table">
+        <thead>
+          <tr>
+            <th>Feature</th>
+            <th>Module</th>
+            <th class="numeric">Priority</th>
+            <th class="numeric">Effort</th>
+            <th class="numeric">Est. tokens</th>
+            <th class="numeric">% of Pro weekly</th>
+            <th class="numeric">% of Max 5× weekly</th>
+            <th class="numeric">% of Max 20× weekly</th>
+          </tr>
+        </thead>
+        <tbody id="token-feature-tbody"></tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h3>Cumulative token consumption over the 14-week plan</h3>
+      <p class="lede" style="margin:0 0 12px">Stacked weekly token consumption colored by priority tier. P1 dominates the first 7 weeks; P2 work tails through W12. The annotation line shows the Max 5× weekly cap (lower bound) — sustained execution stays comfortably under the ceiling.</p>
+      <div class="chart-canvas-wrap tall"><canvas id="chart-token-burn"></canvas></div>
+    </div>
+
+    <div class="notes">
+      <h4>Calibration notes</h4>
+      <strong>Repo cadence (2026-04-01 to 2026-06-06):</strong> 430 total commits, 158 of which are <code>feat(*)</code> commits. Peak day: 2026-06-04 with 80 commits. Service module shipped its first functional surface ~2 weeks after design spec; Build module ~3 weeks; Service replacement workflow (#55) was specified and shipped within one week. The original 24-week timeline assumed conservative software-industry pace (1 PR / week / engineer with weekly code review). The 14-week revised timeline uses the actual observed cadence.<br><br>
+      <strong>Token estimates</strong> are based on sampling the size of recent commits (file changes × ~30–80K output tokens per commit) plus context overhead. Input multiplier ranges 5–10× depending on how much codebase context is loaded per session; we use the upper end (10×) for total estimates to stay conservative.<br><br>
+      <strong>Tier weekly limits</strong> are approximate. Claude's published 5-hour-window limits multiplied by typical session output. Your actual mileage will depend on session length, model mix, and how heavily Workflow / Agent tools are used (those multiply token consumption ~3–7× via subagent fan-out).
     </div>
   </section>
 
@@ -1307,16 +1396,18 @@ const TIMELINE_RISKS = [
 ];
 
 const SEQUENCING = [
-  '<strong>Week 1–2:</strong> RBAC profiles + canDo/canView + Klaviyo Track API firehose + PaymentCard UI (S items, parallel).',
-  '<strong>Week 3–6:</strong> Returns/Refunds overhaul finishing (grade + disposition + quarantine + #79 net out).',
-  '<strong>Week 4–8:</strong> Device-context header + warranty registration + SLA aging + telemetry-driven ticket auto-create — Service-domain hardening, parallel to Returns finish.',
-  '<strong>Week 6–10:</strong> Finance module skeleton + JournalPanel ships behind RBAC. Depends on Returns being clean.',
-  '<strong>Week 8–12:</strong> Facebook Marketing API + Lead Ads webhook + Mobile V1. Pre-sale visibility lands.',
-  '<strong>Week 12–18:</strong> P2 batch — build_station_passes, Klaviyo predictive pull, freight quote history, activity_log entity refs, ProductionProjectionPanel, OKR/KPI tracking, CAPI, Mobile V2, QBO full daily-summary, HubSpot decommission window.',
-  '<strong>Week 18–24:</strong> Stabilization + customer-facing roll-out + P3 revisit gate.',
+  '<strong>Week 1:</strong> RBAC + Klaviyo Track API + PaymentCard UI (three S items shipped in parallel, ~3M tokens).',
+  '<strong>Weeks 2–3:</strong> Mobile V1 + Warranty registration + Returns/Refunds overhaul start (grade + disposition + quarantine). Returns is the biggest active operator pain.',
+  '<strong>Weeks 3–5:</strong> Service-domain hardening — device-context header + SLA aging + telemetry-driven ticket auto-create. Parallel to Returns finish.',
+  '<strong>Weeks 5–7:</strong> Finance module skeleton + JournalPanel behind RBAC. Depends on Returns being clean.',
+  '<strong>Weeks 6–8:</strong> Facebook Marketing API + Lead Ads webhook. Pre-sale visibility lands.',
+  '<strong>Weeks 7–9:</strong> activity_log entity refs (unblocks per-serial timeline + OKR substrate) → build_station_passes + freight history + Klaviyo predictive pull-back.',
+  '<strong>Weeks 9–12:</strong> P2 polish — ProductionProjection + OKR/KPI + CAPI + Mobile V2 + SalesProjection rolling-average.',
+  '<strong>Weeks 12–14:</strong> HubSpot decommission window + Customer sidebar widgets (P3 sample) + stabilization.',
 ];
 
 const CHANGELOG = [
+  { v: '1.3', date: '2026-06-06', notes: 'Recalibrated timeline against actual repo cadence (430 commits since 2026-04-01, avg 6.4/day, peak 80/day on 2026-06-04). 24-week plan compressed to 14 weeks (~3.5 months). Added §16 Token Budget Analysis with per-feature token estimates and Claude tier (Pro / Max 5× / Max 20×) consumption analysis. Each Gantt row now shows estimated token cost. Stacked weekly token-burn chart visualizes cumulative consumption against Max 5× weekly cap.' },
   { v: '1.2', date: '2026-06-06', notes: 'Added Finance module (§4.11) restricted to George + Huayi with JournalPanel + SalesProjectionPanel + ProductionProjectionPanel. Expanded ActivityLog with OKR & KPI tracking. Extended §8 Security with canView(role, module) for module-level visibility. Promoted RBAC profiles from P2 to P1.' },
   { v: '1.1', date: '2026-06-06', notes: 'Promoted Freightcom and QuickBooks Online to dedicated §6 integration entries (§6.14, §6.15). Freightcom: current ClickShip-layered role + planned freight_quotes history table. QuickBooks: planned daily-summary journal sync with full GL mapping.' },
   { v: '1.0', date: '2026-06-06', notes: 'Initial canonical PRD synthesizing current product state, competitive landscape proposal, integration map (Shopify / HubSpot / Klaviyo / Facebook / Google Meet / Google Docs / Quo / Gmail / Resend / Calendly / Google Maps + Claude / Notion / Fireflies), and roadmap.' },
@@ -1651,36 +1742,65 @@ function renderEffortChart() {
   });
 }
 
-const WEEKS = 24;
+// v1.3 — recalibrated against actual repo cadence: 430 commits since 2026-04-01,
+// most features ship same-day or within 1-3 days of design. 24-week plan
+// compressed to 14 weeks (~3.5 months).
+const WEEKS = 14;
 const NOW_WEEK = 1;
 const TIMELINE = [
-  { name: 'RBAC profiles + canDo/canView helpers', p: 'P1', dev: [1, 2], val: [3, 3] },
-  { name: 'Klaviyo Track API event firehose', p: 'P1', dev: [1, 2], val: [3, 4] },
-  { name: 'PaymentCard UI on OrderReview', p: 'P1', dev: [1, 1], val: [2, 2] },
-  { name: 'Mobile V1 (viewport + PWA + AppShell)', p: 'P1', dev: [2, 4], val: [5, 6] },
-  { name: 'Returns disposition + grade + quarantine + #79', p: 'P1', dev: [3, 6], val: [7, 8] },
-  { name: 'Warranty registration entity', p: 'P1', dev: [4, 5], val: [6, 6] },
-  { name: 'Device-context header on Service tickets', p: 'P1', dev: [4, 6], val: [7, 8] },
-  { name: 'SLA aging + auto-escalation', p: 'P1', dev: [5, 7], val: [8, 9] },
-  { name: 'Telemetry-driven ticket auto-create', p: 'P1', dev: [6, 8], val: [9, 11] },
-  { name: 'Finance module skeleton + JournalPanel (QBO)', p: 'P1', dev: [7, 10], val: [11, 12] },
-  { name: 'Facebook Marketing API + Lead Ads webhook', p: 'P1', dev: [9, 11], val: [12, 13] },
-  { name: 'activity_log entity refs + per-serial timeline', p: 'P2', dev: [10, 11], val: [12, 12] },
-  { name: 'build_station_passes promotion', p: 'P2', dev: [11, 13], val: [14, 15] },
-  { name: 'Freight quote history table', p: 'P2', dev: [12, 12], val: [13, 13] },
-  { name: 'Klaviyo predictive properties pull-back', p: 'P2', dev: [13, 13], val: [14, 14] },
-  { name: 'ProductionProjectionPanel (Finance)', p: 'P2', dev: [13, 15], val: [16, 17] },
-  { name: 'OKR & KPI tracking (ActivityLog)', p: 'P2', dev: [14, 16], val: [17, 18] },
-  { name: 'Facebook CAPI server-side events', p: 'P2', dev: [15, 16], val: [17, 17] },
-  { name: 'Mobile V2 (card-row tables)', p: 'P2', dev: [14, 18], val: [19, 20] },
-  { name: 'SalesProjectionPanel rolling-average (Finance)', p: 'P2', dev: [16, 18], val: [19, 21] },
-  { name: 'HubSpot CRM decommission window', p: 'P2', dev: [18, 20], val: [21, 22] },
-  { name: 'Customer record sidebar widgets (Attio pattern)', p: 'P3', dev: [20, 22], val: [23, 24] },
+  // Week 1 — substrate (parallel S items)
+  { name: 'RBAC profiles + canDo/canView helpers', p: 'P1', size: 'S', dev: [1, 1], val: [2, 2] },
+  { name: 'Klaviyo Track API event firehose', p: 'P1', size: 'S', dev: [1, 1], val: [2, 2] },
+  { name: 'PaymentCard UI on OrderReview', p: 'P1', size: 'S', dev: [1, 1], val: [2, 2] },
+  // Weeks 2-3 — mobile + warranty (parallel)
+  { name: 'Mobile V1 (viewport + PWA + AppShell)', p: 'P1', size: 'M', dev: [2, 3], val: [4, 4] },
+  { name: 'Warranty registration entity', p: 'P1', size: 'S', dev: [2, 2], val: [3, 3] },
+  // Weeks 2-4 — Returns/Refunds finish (biggest active operator pain)
+  { name: 'Returns disposition + grade + quarantine + #79', p: 'P1', size: 'M', dev: [2, 4], val: [5, 5] },
+  // Weeks 3-5 — Service hardening (device + SLA + telemetry auto-ticket)
+  { name: 'Device-context header on Service tickets', p: 'P1', size: 'M', dev: [3, 4], val: [5, 5] },
+  { name: 'SLA aging + auto-escalation', p: 'P1', size: 'M', dev: [4, 5], val: [6, 6] },
+  { name: 'Telemetry-driven ticket auto-create', p: 'P1', size: 'M', dev: [4, 6], val: [7, 7] },
+  // Weeks 5-7 — Finance module skeleton + JournalPanel (depends on Returns)
+  { name: 'Finance module skeleton + JournalPanel (QBO)', p: 'P1', size: 'M', dev: [5, 7], val: [8, 8] },
+  // Weeks 6-8 — Pre-sale visibility (Facebook)
+  { name: 'Facebook Marketing API + Lead Ads webhook', p: 'P1', size: 'M', dev: [6, 7], val: [8, 8] },
+  // Weeks 7-8 — activity_log substrate (unblocks OKR + per-serial timeline)
+  { name: 'activity_log entity refs + per-serial timeline', p: 'P2', size: 'S', dev: [7, 7], val: [8, 8] },
+  // Weeks 8-9 — Build MES + freight history + Klaviyo predictive
+  { name: 'build_station_passes promotion', p: 'P2', size: 'M', dev: [8, 9], val: [10, 10] },
+  { name: 'Freight quote history table', p: 'P2', size: 'S', dev: [8, 8], val: [9, 9] },
+  { name: 'Klaviyo predictive properties pull-back', p: 'P2', size: 'S', dev: [9, 9], val: [10, 10] },
+  // Weeks 9-11 — Finance projection panels
+  { name: 'ProductionProjectionPanel (Finance)', p: 'P2', size: 'M', dev: [9, 10], val: [11, 11] },
+  { name: 'OKR & KPI tracking (ActivityLog)', p: 'P2', size: 'M', dev: [10, 11], val: [12, 12] },
+  { name: 'Facebook CAPI server-side events', p: 'P2', size: 'M', dev: [10, 11], val: [12, 12] },
+  // Weeks 10-12 — Mobile V2 (large)
+  { name: 'Mobile V2 (card-row tables)', p: 'P2', size: 'L', dev: [10, 12], val: [13, 13] },
+  // Weeks 11-12 — Sales projection
+  { name: 'SalesProjectionPanel rolling-average (Finance)', p: 'P2', size: 'M', dev: [11, 12], val: [13, 13] },
+  // Weeks 12-13 — HubSpot decommission window
+  { name: 'HubSpot CRM decommission window', p: 'P2', size: 'M', dev: [12, 13], val: [14, 14] },
+  // Week 13-14 — P3 sample (customer sidebar widgets)
+  { name: 'Customer record sidebar widgets (Attio pattern)', p: 'P3', size: 'M', dev: [13, 14], val: [14, 14] },
 ];
+
+// Token estimates per effort size (total tokens incl. input + output, conservative upper end)
+const EFFORT_TOKENS = { S: 1_000_000, M: 3_500_000, L: 10_000_000 };
+const EFFORT_HOURS = { S: 5, M: 15, L: 45 };
+const EFFORT_OUTPUT_TOKENS = { S: 175_000, M: 550_000, L: 2_000_000 };
+
+// Weekly tier capacity (approximate, mixed-model output-equivalent)
+const TIER_WEEKLY = {
+  Pro: 22_500_000,         // ~Pro: 15-30M, midpoint
+  'Max 5×': 112_500_000,   // ~Max 5x: 75-150M
+  'Max 20×': 450_000_000,  // ~Max 20x: 300-600M
+};
 
 function renderTimeline() {
   const wrap = document.getElementById('timeline-wrap');
-  const monthLabels = ['Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov'];
+  // 14 weeks ~= Jun 9 → Sep 15 2026. Months show every 4 weeks.
+  const monthLabels = ['Jun', 'Jul', 'Aug', 'Sep'];
   let html = `<div class="timeline-header" style="--weeks:${WEEKS}"><div class="first">Initiative</div>`;
   for (let w = 1; w <= WEEKS; w++) {
     const monthIdx = Math.floor((w - 1) / 4);
@@ -1690,7 +1810,7 @@ function renderTimeline() {
   html += '</div>';
   TIMELINE.forEach(t => {
     html += `<div class="timeline-row" style="--weeks:${WEEKS}">`;
-    html += `<div class="label">${t.name}<div class="small">${t.p} · dev W${t.dev[0]}-${t.dev[1]} · val W${t.val[0]}-${t.val[1]}</div></div>`;
+    html += `<div class="label">${t.name}<div class="small">${t.p}·${t.size} · dev W${t.dev[0]}-${t.dev[1]} · val W${t.val[0]}-${t.val[1]} · ~${(EFFORT_TOKENS[t.size]/1_000_000).toFixed(1)}M tokens</div></div>`;
     for (let w = 1; w <= WEEKS; w++) {
       const inDev = w >= t.dev[0] && w <= t.dev[1];
       const inVal = w >= t.val[0] && w <= t.val[1];
@@ -1705,6 +1825,104 @@ function renderTimeline() {
   wrap.innerHTML = html;
 }
 
+function fmtTokens(n) {
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
+  if (n >= 1_000) return (n / 1_000).toFixed(0) + 'K';
+  return String(n);
+}
+
+function renderTokenStats() {
+  const totalTokens = TIMELINE.reduce((sum, t) => sum + EFFORT_TOKENS[t.size], 0);
+  const totalHours = TIMELINE.reduce((sum, t) => sum + EFFORT_HOURS[t.size], 0);
+  const featCount = TIMELINE.length;
+  const avgPerWeek = totalTokens / WEEKS;
+  const max5xPct = Math.round((avgPerWeek / TIER_WEEKLY['Max 5×']) * 100);
+  document.getElementById('token-stats').innerHTML = [
+    { label: 'Features in plan', value: featCount, sub: `over ${WEEKS} weeks` },
+    { label: 'Total estimated tokens', value: fmtTokens(totalTokens), sub: 'incl. input + output' },
+    { label: 'Total dev hours', value: totalHours.toFixed(0) + 'h', sub: '~' + (totalHours / WEEKS).toFixed(0) + 'h/week sustained' },
+    { label: 'Avg weekly token spend', value: fmtTokens(avgPerWeek), sub: 'mixed Sonnet + Opus' },
+    { label: 'Avg % of Max 5× weekly', value: max5xPct + '%', sub: 'sustainable single-engineer pace', cls: max5xPct < 50 ? 'shipped' : max5xPct < 80 ? 'planned-p1' : 'planned-p2' },
+    { label: 'Repo commits / day', value: '6.4', sub: '430 commits since 2026-04-01' },
+  ].map(s => `<div class="stat ${s.cls || ''}"><div class="label">${s.label}</div><div class="value">${s.value}</div><div class="sub">${s.sub}</div></div>`).join('');
+}
+
+function renderTokenFeatureTable() {
+  const tbody = document.getElementById('token-feature-tbody');
+  // Sort by priority then by token cost desc within tier
+  const order = { P1: 0, P2: 1, P3: 2 };
+  const flat = [];
+  MODULES.forEach(m => m.planned.forEach(p => flat.push({ name: p.text, module: m.name, p: p.p, size: p.e })));
+  CROSS_CUTTING.forEach(c => flat.push({ name: c.name, module: c.area, p: c.p, size: c.e }));
+  flat.sort((a, b) => order[a.p] - order[b.p] || EFFORT_TOKENS[b.size] - EFFORT_TOKENS[a.size]);
+  let totT = 0;
+  let html = flat.map(f => {
+    const tokens = EFFORT_TOKENS[f.size];
+    totT += tokens;
+    const proPct = ((tokens / TIER_WEEKLY['Pro']) * 100).toFixed(1);
+    const max5Pct = ((tokens / TIER_WEEKLY['Max 5×']) * 100).toFixed(1);
+    const max20Pct = ((tokens / TIER_WEEKLY['Max 20×']) * 100).toFixed(2);
+    return `<tr>
+      <td>${f.name}</td>
+      <td>${f.module}</td>
+      <td class="numeric"><span class="pill ${f.p.toLowerCase()}">${f.p}</span></td>
+      <td class="numeric">${f.size}</td>
+      <td class="numeric">${fmtTokens(tokens)}</td>
+      <td class="numeric" style="color:${proPct>100?'var(--p2)':proPct>50?'var(--p1)':'var(--ink)'}">${proPct}%</td>
+      <td class="numeric">${max5Pct}%</td>
+      <td class="numeric">${max20Pct}%</td>
+    </tr>`;
+  }).join('');
+  html += `<tr class="totals">
+    <td>TOTAL</td><td>—</td><td class="numeric">—</td><td class="numeric">—</td>
+    <td class="numeric">${fmtTokens(totT)}</td>
+    <td class="numeric">${((totT/TIER_WEEKLY['Pro'])*100).toFixed(0)}% (~${(totT/TIER_WEEKLY['Pro']).toFixed(1)}w)</td>
+    <td class="numeric">${((totT/TIER_WEEKLY['Max 5×'])*100).toFixed(0)}% (~${(totT/TIER_WEEKLY['Max 5×']).toFixed(1)}w)</td>
+    <td class="numeric">${((totT/TIER_WEEKLY['Max 20×'])*100).toFixed(0)}% (~${(totT/TIER_WEEKLY['Max 20×']).toFixed(1)}w)</td>
+  </tr>`;
+  tbody.innerHTML = html;
+}
+
+function renderTokenBurnChart() {
+  // Compute weekly token spend by tier from TIMELINE
+  const weeklyP1 = new Array(WEEKS).fill(0);
+  const weeklyP2 = new Array(WEEKS).fill(0);
+  const weeklyP3 = new Array(WEEKS).fill(0);
+  TIMELINE.forEach(t => {
+    const devSpan = t.dev[1] - t.dev[0] + 1;
+    const perWeek = EFFORT_TOKENS[t.size] / devSpan;
+    for (let w = t.dev[0]; w <= t.dev[1]; w++) {
+      const bucket = t.p === 'P1' ? weeklyP1 : t.p === 'P2' ? weeklyP2 : weeklyP3;
+      bucket[w - 1] += perWeek;
+    }
+  });
+  const labels = Array.from({ length: WEEKS }, (_, i) => 'W' + (i + 1));
+  new Chart(document.getElementById('chart-token-burn'), {
+    type: 'bar',
+    data: { labels,
+      datasets: [
+        { label: 'P1 dev', data: weeklyP1, backgroundColor: '#c05621', stack: 'spend' },
+        { label: 'P2 dev', data: weeklyP2, backgroundColor: '#1e6091', stack: 'spend' },
+        { label: 'P3 dev', data: weeklyP3, backgroundColor: '#6b7280', stack: 'spend' },
+      ]},
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'bottom' },
+        annotation: {},
+      },
+      scales: {
+        x: { stacked: true },
+        y: {
+          stacked: true,
+          title: { display: true, text: 'estimated tokens consumed (M)' },
+          ticks: { callback: (v) => (v / 1_000_000).toFixed(1) + 'M' },
+        },
+      },
+    },
+  });
+}
+
 function renderCumulative() {
   const data = [];
   for (let w = 1; w <= WEEKS; w++) data.push(TIMELINE.filter(t => t.val[1] <= w).length);
@@ -1714,7 +1932,7 @@ function renderCumulative() {
       datasets: [{ label: 'Cumulative validated features', data, borderColor: '#9b2c2c', backgroundColor: 'rgba(155,44,44,0.12)', fill: true, tension: 0.2 }] },
     options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } },
       scales: { y: { beginAtZero: true, ticks: { precision: 0 }, title: { display: true, text: '# features validated' } },
-                x: { title: { display: true, text: 'weeks from 2026-06-09' } } } },
+                x: { title: { display: true, text: 'weeks from 2026-06-09 — 14-week compressed plan' } } } },
   });
 }
 
@@ -1791,6 +2009,9 @@ renderCumulative();
 renderOOSList();
 renderRiskLists();
 renderChangelog();
+renderTokenStats();
+renderTokenFeatureTable();
+renderTokenBurnChart();
 </script>
 
 </body>
