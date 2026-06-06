@@ -461,8 +461,8 @@
 <body>
 
 <header class="topbar">
-  <h1>makeLILA PRD Review v1.4 — Interactive Dashboard</h1>
-  <div class="sub">Timeline switched to hours-per-task with per-shipper allocation. 15 PRD sections + §16 Token Budget. Click any tab; click a persona for clickable workflows; click a swimlane block for assignment detail.</div>
+  <h1>makeLILA PRD Review v1.4.1 — Interactive Dashboard</h1>
+  <div class="sub">Hours-per-task timeline with per-shipper allocation. 15 PRD sections + §16 Token Budget. Click any tab; click a persona for clickable workflows; click a swimlane block for assignment detail.</div>
 </header>
 
 <nav class="tabs" id="tabs">
@@ -1553,7 +1553,8 @@ const SEQUENCING = [
 ];
 
 const CHANGELOG = [
-  { v: '1.4', date: '2026-06-06', notes: 'Switched timeline from calendar weeks to hours-per-task with explicit owner allocation across the four current shippers (Pedrum, Junaid, Reina, Huayi). New SHIPPERS array + ASSIGNMENTS data model. Replaced calendar Gantt with per-shipper swimlane (interactive — click a block for assignment detail). Added shipper workload table + cumulative-completion-by-hours chart + future-handoff section showing items that move to George + Lezhong once they join. Hour sizing: S = 5h, M = 15h, L = 45h. Weekly capacity assumed: Huayi 25h, Pedrum/Junaid 15h, Reina 10h — bottleneck stream finishes in ~5 weeks. Token Budget §16 now breaks down per shipper.' },
+  { v: '1.4.1', date: '2026-06-06', notes: 'Bugfix + assignment rebalance. (1) Fixed Timeline tab rendering empty due to stale TIMELINE references in renderTokenStats throwing ReferenceError and breaking the rest of the init chain. (2) Rebalanced ownership per explicit domain rules: Customer Service work split across Huayi + Reina + Junaid (not Pedrum); Junaid also owns Stock module work (UnitTimeline + units.status quarantine); Pedrum owns Sales + Pre-sale modules only (no CS work). Added missing items (CAC view, AI-drafted reply suggestions, Templates RAG corpus, UnitTimeline component, units.status quarantine, Linear/GitHub linking). Reina now owns the full Service AI-drafts + Templates substrate path.' },
+  { v: '1.4', date: '2026-06-06', notes: 'Switched timeline from calendar weeks to hours-per-task with explicit owner allocation across the four current shippers (Pedrum, Junaid, Reina, Huayi). New SHIPPERS array + ASSIGNMENTS data model. Replaced calendar Gantt with per-shipper swimlane (interactive — click a block for assignment detail). Added shipper workload table + cumulative-completion-by-hours chart + future-handoff section showing items that move to George + Lezhong once they join. Hour sizing: S = 5h, M = 15h, L = 45h.' },
   { v: '1.3', date: '2026-06-06', notes: 'Recalibrated timeline against actual repo cadence (430 commits since 2026-04-01, avg 6.4/day, peak 80/day on 2026-06-04). 24-week plan compressed to 14 weeks (~3.5 months). Added §16 Token Budget Analysis with per-feature token estimates and Claude tier (Pro / Max 5× / Max 20×) consumption analysis.' },
   { v: '1.2', date: '2026-06-06', notes: 'Added Finance module (§4.11) restricted to George + Huayi with JournalPanel + SalesProjectionPanel + ProductionProjectionPanel. Expanded ActivityLog with OKR & KPI tracking. Extended §8 Security with canView(role, module) for module-level visibility. Promoted RBAC profiles from P2 to P1.' },
   { v: '1.1', date: '2026-06-06', notes: 'Promoted Freightcom and QuickBooks Online to dedicated §6 integration entries (§6.14, §6.15). Freightcom: current ClickShip-layered role + planned freight_quotes history table. QuickBooks: planned daily-summary journal sync with full GL mapping.' },
@@ -1915,38 +1916,53 @@ const SHIPPERS = [
 // Master assignment list — every planned feature with owner + hours.
 // "dep" = features that should ship first inside the same person's queue.
 // "futureMoveTo" = candidate to reassign once George / Lezhong come online.
+//
+// Domain ownership rules (per user spec):
+//   - Customer Service work split across Huayi + Reina + Junaid
+//   - Junaid → Stock module work in addition to Service
+//   - Pedrum → Sales + Pre-sale modules only (no CS work)
+//   - Huayi → cross-cutting + restricted Finance + Mobile + one CS item
+//   - George + Lezhong are future shippers
 const ASSIGNMENTS = [
   // ── Substrate (Week 1) ────────────────────────────────────────────
   { name: 'RBAC profiles + canDo/canView helpers',         p: 'P1', size: 'S', hours: 5,  owner: 'huayi',  why: 'Cross-cutting; blocks Finance module visibility model + Returns approver gate refactor' },
-  { name: 'Klaviyo Track API event firehose',              p: 'P1', size: 'S', hours: 5,  owner: 'pedrum', why: 'Marketing/lifecycle domain — Pedrum already owns Klaviyo integration' },
-  { name: 'PaymentCard UI on OrderReview',                 p: 'P1', size: 'S', hours: 5,  owner: 'pedrum', why: 'Pure UI on existing payment columns; OrderReview is Pedrum\'s daily flow' },
-
-  // ── P1 backbone ───────────────────────────────────────────────────
-  { name: 'Mobile V1 (viewport + PWA + AppShell)',         p: 'P1', size: 'M', hours: 15, owner: 'huayi',  why: 'Cross-cutting AppShell + GlobalNav; Huayi owns the product chrome' },
-  { name: 'Warranty registration entity',                  p: 'P1', size: 'S', hours: 5,  owner: 'junaid', dep: ['RBAC profiles + canDo/canView helpers'], why: 'Service domain — Junaid owns ticket/warranty workflow' },
-  { name: 'Returns disposition + grade + quarantine + #79', p: 'P1', size: 'M', hours: 15, owner: 'reina',  dep: ['RBAC profiles + canDo/canView helpers'], why: 'PostShipment Returns is the biggest CX-adjacent operator pain right now; Reina handles inspection workflow end-to-end' },
-  { name: 'Device-context header on Service tickets',      p: 'P1', size: 'M', hours: 15, owner: 'junaid', dep: ['Warranty registration entity'], why: 'Service module surface — Junaid uses it daily' },
-  { name: 'SLA aging + auto-escalation',                   p: 'P1', size: 'M', hours: 15, owner: 'junaid', why: 'Service queue management — Junaid feels the pain when SLA aging is invisible' },
-  { name: 'Telemetry-driven ticket auto-create',           p: 'P1', size: 'M', hours: 15, owner: 'junaid', dep: ['Device-context header on Service tickets'], why: 'Service + Dashboard intersection; Junaid validates the false-positive thresholds' },
-  { name: 'Finance module skeleton + JournalPanel (QBO)',  p: 'P1', size: 'M', hours: 15, owner: 'huayi',  dep: ['RBAC profiles + canDo/canView helpers', 'Returns disposition + grade + quarantine + #79'], why: 'Restricted Finance module; Huayi has access + product context' },
-  { name: 'Facebook Marketing API + Lead Ads webhook',     p: 'P1', size: 'M', hours: 15, owner: 'pedrum', why: 'Pre-sale visibility lives in Pedrum\'s daily flow' },
-  { name: 'Lead attribution fields (first_touch / last_touch)', p: 'P1', size: 'S', hours: 5, owner: 'pedrum', why: 'JourneyTab chip Pedrum scans daily' },
-  { name: 'CampaignsTab aggregating FB + Klaviyo + HubSpot', p: 'P1', size: 'M', hours: 15, owner: 'pedrum', dep: ['Facebook Marketing API + Lead Ads webhook'], why: 'Marketing module entry — Pedrum\'s weekly review surface' },
-
-  // ── P2 ──────────────────────────────────────────────────────────────
+  { name: 'Klaviyo Track API event firehose',              p: 'P1', size: 'S', hours: 5,  owner: 'pedrum', why: 'Pre-sale + lifecycle domain — Pedrum owns the Klaviyo integration' },
+  { name: 'PaymentCard UI on OrderReview',                 p: 'P1', size: 'S', hours: 5,  owner: 'pedrum', why: 'Sales module (OrderReview) — Pedrum\'s daily flow' },
   { name: 'activity_log entity refs + per-serial timeline', p: 'P2', size: 'S', hours: 5,  owner: 'huayi',  why: 'Substrate; unblocks Junaid\'s telemetry auto-ticket richness + Reina\'s OKR module' },
-  { name: 'build_station_passes promotion',                p: 'P2', size: 'M', hours: 15, owner: 'junaid', futureMoveTo: 'lezhong', why: 'Build module — Junaid until Lezhong joins, then natural handoff' },
-  { name: 'Freight quote history table',                   p: 'P2', size: 'S', hours: 5,  owner: 'pedrum', why: 'OrderReview enhancement Pedrum sees daily' },
-  { name: 'Klaviyo predictive properties pull-back',       p: 'P2', size: 'S', hours: 5,  owner: 'pedrum', dep: ['Klaviyo Track API event firehose'], why: 'Klaviyo domain; Pedrum scans churn-risk chips for at-risk customers' },
-  { name: 'ProductionProjectionPanel (Finance)',           p: 'P2', size: 'M', hours: 15, owner: 'huayi',  dep: ['Finance module skeleton + JournalPanel (QBO)'], why: 'Finance restricted module + Huayi has product context for stock-out modeling' },
-  { name: 'OKR & KPI tracking (ActivityLog)',              p: 'P2', size: 'M', hours: 15, owner: 'reina',  dep: ['activity_log entity refs + per-serial timeline'], why: 'ActivityLog enhancement; Reina has reliable daily flow → good UAT fit + lower-stakes module for new ship pattern' },
-  { name: 'Facebook CAPI server-side events',              p: 'P2', size: 'M', hours: 15, owner: 'pedrum', dep: ['Facebook Marketing API + Lead Ads webhook'], why: 'Marketing domain extension' },
-  { name: 'Mobile V2 (card-row tables)',                   p: 'P2', size: 'L', hours: 45, owner: 'huayi',  dep: ['Mobile V1 (viewport + PWA + AppShell)'], why: 'Largest single item — Huayi owns CSS strategy; could pair on individual modules' },
-  { name: 'SalesProjectionPanel rolling-average',          p: 'P2', size: 'M', hours: 15, owner: 'huayi',  dep: ['ProductionProjectionPanel (Finance)'], why: 'Finance restricted — Huayi has the marketing data context' },
-  { name: 'HubSpot CRM decommission window',               p: 'P2', size: 'M', hours: 15, owner: 'pedrum', dep: ['Klaviyo Track API event firehose'], why: 'Sequence migration is Pedrum\'s domain knowledge' },
 
-  // ── P3 (sample) ─────────────────────────────────────────────────────
-  { name: 'Customer record sidebar widgets (Attio pattern)', p: 'P3', size: 'M', hours: 15, owner: 'reina',  why: 'Customers module enhancement — Reina lives in JourneyTab' },
+  // ── Pedrum: Sales + Pre-sale only ─────────────────────────────────
+  { name: 'Lead attribution fields (first_touch / last_touch)', p: 'P1', size: 'S', hours: 5, owner: 'pedrum', why: 'Pre-sale — JourneyTab attribution chip Pedrum scans daily' },
+  { name: 'Freight quote history table',                   p: 'P2', size: 'S', hours: 5,  owner: 'pedrum', why: 'Sales — OrderReview enhancement Pedrum sees daily' },
+  { name: 'Klaviyo predictive properties pull-back',       p: 'P2', size: 'S', hours: 5,  owner: 'pedrum', dep: ['Klaviyo Track API event firehose'], why: 'Pre-sale + lifecycle — Pedrum scans EDNO / churn-risk chips for at-risk customers' },
+  { name: 'CAC by channel view',                           p: 'P2', size: 'S', hours: 5,  owner: 'pedrum', dep: ['Facebook Marketing API + Lead Ads webhook'], why: 'Pre-sale — joins customers.first_touch_campaign_id to Facebook spend for Pedrum\'s weekly CAC review' },
+  { name: 'Facebook Marketing API + Lead Ads webhook',     p: 'P1', size: 'M', hours: 15, owner: 'pedrum', why: 'Pre-sale — Facebook is the largest ad channel; Pedrum owns the integration' },
+  { name: 'CampaignsTab aggregating FB + Klaviyo + HubSpot', p: 'P1', size: 'M', hours: 15, owner: 'pedrum', dep: ['Facebook Marketing API + Lead Ads webhook'], why: 'Pre-sale — Marketing module entry; Pedrum\'s weekly review surface' },
+  { name: 'Facebook CAPI server-side events',              p: 'P2', size: 'M', hours: 15, owner: 'pedrum', dep: ['Facebook Marketing API + Lead Ads webhook'], why: 'Pre-sale — iOS-14 ATT recovery; Marketing domain extension' },
+  { name: 'HubSpot CRM decommission window',               p: 'P2', size: 'M', hours: 15, owner: 'pedrum', dep: ['Klaviyo Track API event firehose'], why: 'Pre-sale CRM — sequence migration is Pedrum\'s domain knowledge' },
+
+  // ── Junaid: Customer Service + Stock ───────────────────────────────
+  { name: 'Warranty registration entity',                  p: 'P1', size: 'S', hours: 5,  owner: 'junaid', dep: ['RBAC profiles + canDo/canView helpers'], why: 'Customer Service — Junaid owns the ticket/warranty workflow' },
+  { name: 'units.status quarantine enum value',            p: 'P1', size: 'S', hours: 5,  owner: 'junaid', dep: ['RBAC profiles + canDo/canView helpers'], why: 'Stock module — paired with Returns disposition; prevents quarantine units from re-entering Available-to-Promise' },
+  { name: 'UnitTimeline.tsx component (per-serial audit)',  p: 'P2', size: 'S', hours: 5,  owner: 'junaid', dep: ['activity_log entity refs + per-serial timeline'], why: 'Stock module — per-serial audit timeline lives inside Stock unit detail; Junaid uses it for repair history lookups' },
+  { name: 'Device-context header on Service tickets',      p: 'P1', size: 'M', hours: 15, owner: 'junaid', dep: ['Warranty registration entity'], why: 'Customer Service — chip header surfaces firmware + QC + telemetry on every Service ticket' },
+  { name: 'SLA aging + auto-escalation',                   p: 'P1', size: 'M', hours: 15, owner: 'junaid', why: 'Customer Service — Junaid feels the pain when SLA aging is invisible in his queue' },
+  { name: 'Telemetry-driven ticket auto-create',           p: 'P1', size: 'M', hours: 15, owner: 'junaid', dep: ['Device-context header on Service tickets'], why: 'Customer Service + Dashboard intersection; Junaid validates the false-positive thresholds' },
+  { name: 'build_station_passes promotion',                p: 'P2', size: 'M', hours: 15, owner: 'junaid', futureMoveTo: 'lezhong', why: 'Build module (Stock-adjacent) — Junaid until Lezhong joins, then natural handoff to the engineering owner' },
+
+  // ── Reina: Customer Service ────────────────────────────────────────
+  { name: 'Templates as RAG corpus for AI drafts',         p: 'P2', size: 'S', hours: 5,  owner: 'reina',  why: 'Customer Service — Templates module surface; Reina uses templates daily for onboarding outreach' },
+  { name: 'Returns disposition + grade + quarantine + #79', p: 'P1', size: 'M', hours: 15, owner: 'reina',  dep: ['RBAC profiles + canDo/canView helpers'], why: 'Customer Service / PostShipment — Returns is the biggest CX-adjacent operator pain right now; Reina handles inspection workflow end-to-end' },
+  { name: 'AI-drafted reply suggestions (Service)',        p: 'P2', size: 'M', hours: 15, owner: 'reina',  dep: ['Templates as RAG corpus for AI drafts'], why: 'Customer Service — RAG-grounded ticket replies; Reina + Junaid share Service workload, this is Reina\'s slice' },
+  { name: 'OKR & KPI tracking (ActivityLog)',              p: 'P2', size: 'M', hours: 15, owner: 'reina',  dep: ['activity_log entity refs + per-serial timeline'], why: 'ActivityLog substrate — Reina has reliable daily flow → good UAT fit; lower-stakes module for ship-pattern learning' },
+  { name: 'Customer record sidebar widgets (Attio pattern)', p: 'P3', size: 'M', hours: 15, owner: 'reina',  why: 'Customer Service / Customers — open tickets + returns + machines + health surfaced on customer detail; Reina lives in JourneyTab' },
+
+  // ── Huayi: cross-cutting + Finance + Mobile + one Service P3 ───────
+  { name: 'Mobile V1 (viewport + PWA + AppShell)',         p: 'P1', size: 'M', hours: 15, owner: 'huayi',  why: 'Cross-cutting AppShell + GlobalNav; Huayi owns the product chrome' },
+  { name: 'Finance module skeleton + JournalPanel (QBO)',  p: 'P1', size: 'M', hours: 15, owner: 'huayi',  dep: ['RBAC profiles + canDo/canView helpers', 'Returns disposition + grade + quarantine + #79'], why: 'Restricted Finance module; Huayi has access + product context' },
+  { name: 'ProductionProjectionPanel (Finance)',           p: 'P2', size: 'M', hours: 15, owner: 'huayi',  dep: ['Finance module skeleton + JournalPanel (QBO)'], why: 'Finance restricted + Huayi has stock-out modeling context' },
+  { name: 'SalesProjectionPanel rolling-average',          p: 'P2', size: 'M', hours: 15, owner: 'huayi',  dep: ['ProductionProjectionPanel (Finance)'], why: 'Finance restricted; Huayi has the marketing-data context' },
+  { name: 'Mobile V2 (card-row tables)',                   p: 'P2', size: 'L', hours: 45, owner: 'huayi',  dep: ['Mobile V1 (viewport + PWA + AppShell)'], why: 'Largest single item — Huayi owns CSS strategy; could pair on individual modules' },
+  { name: 'Bidirectional Linear/GitHub issue linking',     p: 'P3', size: 'S', hours: 5,  owner: 'huayi',  why: 'Customer Service / Service module — Plain/Linear pattern; Huayi\'s engineering touchpoint to the CS workflow' },
 ];
 
 // Effort tier definitions
@@ -2153,17 +2169,20 @@ function fmtTokens(n) {
 }
 
 function renderTokenStats() {
-  const totalTokens = TIMELINE.reduce((sum, t) => sum + EFFORT_TOKENS[t.size], 0);
-  const totalHours = TIMELINE.reduce((sum, t) => sum + EFFORT_HOURS[t.size], 0);
-  const featCount = TIMELINE.length;
-  const avgPerWeek = totalTokens / WEEKS;
-  const max5xPct = Math.round((avgPerWeek / TIER_WEEKLY['Max 5×']) * 100);
+  // v1.4 — drives off ASSIGNMENTS (per-shipper) instead of the removed TIMELINE constant.
+  const totalTokens = ASSIGNMENTS.reduce((sum, a) => sum + EFFORT_TOKENS[a.size], 0);
+  const totalHours = ASSIGNMENTS.reduce((sum, a) => sum + a.hours, 0);
+  const featCount = ASSIGNMENTS.length;
+  const totalWeeklyCap = SHIPPERS.filter(s => s.current).reduce((sum, s) => sum + s.weekly_hours, 0);
+  const calendarWeeks = Math.ceil(totalHours / totalWeeklyCap);
+  const avgTokensPerShipper = totalTokens / SHIPPERS.filter(s => s.current).length;
+  const avgPctMax5 = Math.round((avgTokensPerShipper / (TIER_WEEKLY['Max 5×'] * calendarWeeks)) * 100);
   document.getElementById('token-stats').innerHTML = [
-    { label: 'Features in plan', value: featCount, sub: `over ${WEEKS} weeks` },
-    { label: 'Total estimated tokens', value: fmtTokens(totalTokens), sub: 'incl. input + output' },
-    { label: 'Total dev hours', value: totalHours.toFixed(0) + 'h', sub: '~' + (totalHours / WEEKS).toFixed(0) + 'h/week sustained' },
-    { label: 'Avg weekly token spend', value: fmtTokens(avgPerWeek), sub: 'mixed Sonnet + Opus' },
-    { label: 'Avg % of Max 5× weekly', value: max5xPct + '%', sub: 'sustainable single-engineer pace', cls: max5xPct < 50 ? 'shipped' : max5xPct < 80 ? 'planned-p1' : 'planned-p2' },
+    { label: 'Features in plan', value: featCount, sub: 'across 4 current shippers' },
+    { label: 'Total estimated tokens', value: fmtTokens(totalTokens), sub: 'incl. input + output, all shippers' },
+    { label: 'Total dev hours', value: totalHours + 'h', sub: `~${calendarWeeks} wks parallel at ${totalWeeklyCap}h/wk team capacity` },
+    { label: 'Avg tokens / shipper', value: fmtTokens(avgTokensPerShipper), sub: 'over the full plan' },
+    { label: 'Avg shipper % of Max 5× over plan', value: avgPctMax5 + '%', sub: `~${calendarWeeks}-wk plan × Max 5× cap`, cls: avgPctMax5 < 50 ? 'shipped' : avgPctMax5 < 80 ? 'planned-p1' : 'planned-p2' },
     { label: 'Repo commits / day', value: '6.4', sub: '430 commits since 2026-04-01' },
   ].map(s => `<div class="stat ${s.cls || ''}"><div class="label">${s.label}</div><div class="value">${s.value}</div><div class="sub">${s.sub}</div></div>`).join('');
 }
