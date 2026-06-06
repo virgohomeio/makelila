@@ -376,6 +376,37 @@ Alpha feedback collection window is **closed**. The 11 items above plus the meet
   **Source:** #67 follow-up surfaced 2026-06-04 — `customer_profitability` view (#58) still joins orders↔customers via fuzzy email/name match because Shopify-imported orders don't carry a `customer_id`. Same class of false-positive risk that #67 fixed for units.
   **Description:** Add `orders.customer_id uuid REFERENCES customers(id) ON DELETE SET NULL`. Backfill by running the same exact + token cascade we now have in `resolve_customer_id_from_name()` (already exposed as a Postgres function), but matching on the order's `customer_email` first (more reliable than name on the orders side), falling back to name. Update `sync-shopify-orders` to set `customer_id` at INSERT/refresh time using the same resolver. Migrate the profitability view's `order_match` CTE to prefer the FK and fall back to email/name only when null. Once readers are migrated, drop or strictly-cache `orders.customer_name`/`customer_email`.
 
+- **#80** Mobile / responsive layout across every module.
+  **Source:** Huayi (2026-06-05, after installing makeLILA to an iPhone home screen and trying to operate it on-device).
+  **Symptom:** Once added to the home screen as a PWA-style icon, the app loads and the tab buttons at the top of a module respond to taps (e.g. swapping between Pending / Out / Flagged / Confirmed / Replacement / All on Order Review). But nothing else works: tables don't scroll horizontally to reveal the rest of the columns, side panels can't be opened or dismissed by drag, and the page itself doesn't scroll vertically past the first viewport. The desktop layout assumes a wide viewport + cursor; on iPhone widths the operator is stuck on the first screen of every module.
+  **Why this matters:** Operators (Raymond / Junaid on the floor, Pedrum / George traveling, Huayi for after-hours triage) increasingly want to glance at the queues, mark a ticket, or sanity-check an order from their phone without booting a laptop. Today the app is effectively desktop-only despite being a web app installable to home screen.
+  **Scope — every module needs a responsive treatment:**
+    - **Dashboard** — sidebar machine list collapses to a top sheet on narrow widths; chart area takes full width; status SMS modal becomes a bottom sheet.
+    - **Order Review** — left order list collapses to a sliding drawer; detail cards stack single-column; readiness checklist + address card / line items / payment summary become accordion sections instead of side-by-side.
+    - **Fulfillment** — Queue / Shelf / History tabs each need to stack their dense tables into card-style rows on phone widths; step controls (assign → test → dock → label → email) should be vertical with full-width buttons.
+    - **PostShipment** — Returns / Refunds / Replacements / Cancellations / History tabs use the same dense tables as Fulfillment; same card-row treatment + bottom-sheet detail.
+    - **Service** — Inbox / Onboarding / Support Tickets / Replacement tabs all use a table + side detail panel pattern; on phone the detail panel should be a full-screen takeover with an explicit back button.
+    - **Stock** — Units / Parts / Batch tables need horizontal scroll *or* a card-row mode; serial-detail panel becomes a bottom sheet.
+    - **Customers** — directory list + Journey tab + detail panel — same drawer/takeover pattern as Service.
+    - **Build** — pipeline board doesn't fit on mobile at all today; needs a stacked-list fallback layout under ~700px.
+    - **Templates / ActivityLog** — read-only enough that a single-column stack with wider tap targets should be sufficient.
+  **Cross-cutting fixes:**
+    1. **Viewport meta + safe-area insets** — confirm `<meta name="viewport" ...>` is set with `viewport-fit=cover`; use `env(safe-area-inset-*)` on the AppShell + GlobalNav so the iPhone notch / home indicator doesn't clip controls.
+    2. **PWA manifest** — add `manifest.json` (display: standalone, theme + background colors matching the crimson brand, full-bleed icons for iOS) so the home-screen install behaves like an app rather than a clipped Safari window. This is what was used to install today and explains why the user sees the chrome-less broken layout.
+    3. **GlobalNav** — collapse the module switcher into a hamburger menu or bottom tab bar on narrow widths so the active module label is visible without consuming the full top row.
+    4. **Touch targets** — bump minimum interactive size to 44px (Apple HIG); replace hover-only affordances (e.g. the new attachment delete X that only appears on `:hover`) with always-visible controls on coarse-pointer devices (`@media (hover: none)`).
+    5. **Modals & lightboxes** — the existing CSS-module modal pattern uses fixed widths; switch to `max-width: 100vw` + `max-height: 100dvh` with `dvh` (dynamic viewport units) so the iOS URL bar doesn't crop the bottom controls.
+    6. **Tables — pick one strategy per module and apply consistently.** Either (a) wrap in a horizontally-scrollable container with sticky first column, or (b) at narrow widths re-render the same data as stacked cards. Mixing both within one module is the most likely source of inconsistent "I can't scroll" complaints.
+  **Suggested phasing (so this doesn't have to ship as one giant PR):**
+    1. **V1 — make every module *survivable* on phone:** add the viewport meta + manifest, fix `dvh` units in modals, make the AppShell + GlobalNav narrow-aware. After V1 operators can at least scroll and reach every control even if it's ugly.
+    2. **V2 — module-specific table layouts:** convert the highest-traffic tables (Order Review list, Fulfillment Queue, Support Tickets) to card-row mode under a breakpoint. Lower-traffic modules can keep horizontal scroll.
+    3. **V3 — sheet / drawer patterns for detail panels** so opening a ticket / order takes over the full screen on mobile with a clear back affordance.
+  **Out of scope:**
+    - Native iOS / Android apps. PWA installable to home screen is sufficient.
+    - Offline-first / sync-when-online. The operator UX explicitly assumes a live connection (Supabase realtime).
+    - Tablet-specific layout (iPad in landscape behaves close enough to desktop today).
+  **Likely touch:** every `*.module.css` (responsive breakpoints), `components/AppShell.tsx` + `components/GlobalNav.tsx` (narrow-aware navigation), `index.html` (viewport meta + manifest link), new `public/manifest.json` + icons, and a follow-up audit pass per module for the table strategy in V2.
+
 - **#79** Profitability: net out returned-unit recoverable value from `expected_refund_usd`.
   **Source:** Huayi (2026-06-05, follow-up after V4 tax-split shipped).
   **Why:** Today `expected_refund_usd` treats every refund approval as pure unrecoverable cost. In practice, when a customer returns the unit:
