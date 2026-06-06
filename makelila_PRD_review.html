@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>makeLILA PRD Review — Gap Analysis &amp; Timeline (v1.2)</title>
+<title>makeLILA PRD Review v1.2 — Interactive Dashboard</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style>
   :root {
@@ -14,6 +14,7 @@
     --ink-muted: #52606d;
     --ink-subtle: #7b8794;
     --surface: #f7f8fa;
+    --surface-2: #eef0f3;
     --border: #d9dde2;
     --shipped: #2f855a;
     --shipped-bg: #f0fdf4;
@@ -23,6 +24,11 @@
     --p2-bg: #eff8ff;
     --p3: #6b7280;
     --p3-bg: #f3f4f6;
+    --domain-crm: #6b46c1;
+    --domain-service: #047857;
+    --domain-erp: #b45309;
+    --domain-finance: #b91c1c;
+    --domain-marketing: #db2777;
     --radius-sm: 4px;
     --radius-md: 8px;
     --radius-lg: 12px;
@@ -43,118 +49,87 @@
     box-shadow: var(--shadow-card);
     position: sticky; top: 0; z-index: 50;
   }
-  header.topbar h1 {
-    margin: 0 0 4px; font-size: 18px; font-weight: 800; letter-spacing: -0.01em;
-  }
-  header.topbar .sub {
-    font-size: 11px; opacity: 0.85;
-  }
+  header.topbar h1 { margin: 0 0 4px; font-size: 18px; font-weight: 800; letter-spacing: -0.01em; }
+  header.topbar .sub { font-size: 11px; opacity: 0.9; }
   nav.tabs {
     background: #fff;
     border-bottom: 1px solid var(--border);
     padding: 0 24px;
     display: flex;
-    gap: 4px;
+    gap: 2px;
     position: sticky; top: 60px; z-index: 49;
+    overflow-x: auto;
+    flex-wrap: nowrap;
   }
   nav.tabs button {
     background: none; border: none;
-    padding: 14px 18px;
-    font-size: 12px;
+    padding: 13px 14px;
+    font-size: 11.5px;
     font-weight: 700;
     color: var(--ink-muted);
     cursor: pointer;
     border-bottom: 3px solid transparent;
     transition: all 0.15s;
+    white-space: nowrap;
   }
   nav.tabs button:hover { color: var(--crimson); }
-  nav.tabs button.active {
-    color: var(--crimson);
-    border-bottom-color: var(--crimson);
-  }
-  main { padding: 24px; max-width: 1400px; margin: 0 auto; }
+  nav.tabs button.active { color: var(--crimson); border-bottom-color: var(--crimson); }
+  main { padding: 24px; max-width: 1500px; margin: 0 auto; }
   section.view { display: none; }
   section.view.active { display: block; }
-  h2 {
-    margin: 0 0 8px;
-    font-size: 22px;
-    letter-spacing: -0.015em;
-  }
+  h2 { margin: 0 0 8px; font-size: 24px; letter-spacing: -0.015em; }
   h3 { margin: 24px 0 12px; font-size: 16px; }
-  .lede { color: var(--ink-muted); font-size: 13px; margin: 0 0 24px; max-width: 800px; }
+  h4 { margin: 20px 0 8px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-muted); }
+  .lede { color: var(--ink-muted); font-size: 13px; margin: 0 0 24px; max-width: 900px; }
+  p { margin: 8px 0; font-size: 13px; }
+  code { background: var(--surface-2); padding: 1px 5px; border-radius: 3px; font-size: 11px; font-family: 'Monaco', 'Menlo', monospace; }
+  .section-anchor { font-size: 10px; color: var(--crimson); font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
 
   /* Stat grid */
-  .stats {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-    gap: 12px;
-    margin-bottom: 24px;
-  }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 24px; }
   .stat {
-    background: #fff;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    padding: 14px 16px;
-    box-shadow: var(--shadow-card);
+    background: #fff; border: 1px solid var(--border); border-radius: var(--radius-md);
+    padding: 14px 16px; box-shadow: var(--shadow-card);
   }
-  .stat .label {
-    font-size: 10px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--ink-subtle);
-  }
-  .stat .value {
-    font-size: 28px;
-    font-weight: 800;
-    color: var(--ink);
-    line-height: 1.2;
-    margin: 4px 0;
-  }
-  .stat .sub {
-    font-size: 11px;
-    color: var(--ink-muted);
-  }
+  .stat .label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-subtle); }
+  .stat .value { font-size: 28px; font-weight: 800; color: var(--ink); line-height: 1.2; margin: 4px 0; }
+  .stat .sub { font-size: 11px; color: var(--ink-muted); }
   .stat.shipped .value { color: var(--shipped); }
   .stat.planned-p1 .value { color: var(--p1); }
   .stat.planned-p2 .value { color: var(--p2); }
   .stat.planned-p3 .value { color: var(--p3); }
 
-  /* Chart container */
-  .chart-card {
-    background: #fff;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    padding: 20px;
-    margin-bottom: 24px;
-    box-shadow: var(--shadow-card);
+  /* Cards */
+  .card {
+    background: #fff; border: 1px solid var(--border); border-radius: var(--radius-md);
+    padding: 20px; margin-bottom: 20px; box-shadow: var(--shadow-card);
   }
-  .chart-card h3 { margin-top: 0; }
+  .card h3 { margin-top: 0; }
   .chart-canvas-wrap { height: 320px; position: relative; }
   .chart-canvas-wrap.tall { height: 480px; }
 
-  /* Module cards */
-  .filter-row {
-    display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
-    align-items: center;
-    margin-bottom: 16px;
-  }
+  /* Pills + chips */
+  .pill { display: inline-block; font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 999px; text-transform: uppercase; letter-spacing: 0.03em; }
+  .pill.shipped { background: var(--shipped-bg); color: var(--shipped); }
+  .pill.p1 { background: var(--p1-bg); color: var(--p1); }
+  .pill.p2 { background: var(--p2-bg); color: var(--p2); }
+  .pill.p3 { background: var(--p3-bg); color: var(--p3); }
+  .pill.restricted { background: var(--crimson); color: #fff; }
+  .pill.domain-crm { background: #ede9fe; color: var(--domain-crm); }
+  .pill.domain-service { background: #d1fae5; color: var(--domain-service); }
+  .pill.domain-erp { background: #fef3c7; color: var(--domain-erp); }
+  .pill.domain-finance { background: #fee2e2; color: var(--domain-finance); }
+  .pill.domain-marketing { background: #fce7f3; color: var(--domain-marketing); }
+  .pill.domain-supporting { background: var(--surface-2); color: var(--ink-muted); }
+
+  .filter-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 16px; }
   .filter-row label { font-size: 11px; font-weight: 700; color: var(--ink-muted); margin-right: 4px; }
   .chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    padding: 4px 10px;
-    border-radius: 999px;
-    font-size: 10px;
-    font-weight: 700;
-    border: 1px solid var(--border);
-    background: #fff;
-    color: var(--ink-muted);
-    cursor: pointer;
-    transition: all 0.1s;
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 4px 10px; border-radius: 999px;
+    font-size: 10px; font-weight: 700;
+    border: 1px solid var(--border); background: #fff; color: var(--ink-muted);
+    cursor: pointer; transition: all 0.1s;
   }
   .chip:hover { border-color: var(--crimson); }
   .chip.active { background: var(--crimson); color: #fff; border-color: var(--crimson); }
@@ -163,148 +138,54 @@
   .chip.status-p2 { background: var(--p2-bg); color: var(--p2); border-color: var(--p2); }
   .chip.status-p3 { background: var(--p3-bg); color: var(--p3); border-color: var(--p3); }
 
-  .module-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
-    gap: 16px;
-  }
+  /* Module grid */
+  .module-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 16px; }
   .module-card {
-    background: #fff;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    padding: 18px;
-    box-shadow: var(--shadow-card);
+    background: #fff; border: 1px solid var(--border); border-radius: var(--radius-md);
+    padding: 18px; box-shadow: var(--shadow-card);
   }
-  .module-card .head {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    gap: 12px;
-    margin-bottom: 12px;
-    padding-bottom: 12px;
-    border-bottom: 1px solid var(--border);
-  }
-  .module-card .head h3 {
-    margin: 0;
-    font-size: 15px;
-    font-weight: 800;
-  }
-  .module-card .head .domain {
-    font-size: 9px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--ink-subtle);
-    margin-top: 2px;
-  }
-  .module-card .head .counts {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-    gap: 2px;
-    font-size: 10px;
-    font-weight: 700;
-  }
+  .module-card .head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+  .module-card .head h3 { margin: 0; font-size: 15px; font-weight: 800; }
+  .module-card .head .domain { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-subtle); margin-top: 2px; }
+  .module-card .head .counts { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; font-size: 10px; font-weight: 700; }
   .module-card .head .counts .c-shipped { color: var(--shipped); }
   .module-card .head .counts .c-planned { color: var(--ink-subtle); }
   .module-card .restricted-badge {
-    display: inline-block;
-    background: var(--crimson);
-    color: #fff;
-    font-size: 8px;
-    font-weight: 800;
-    padding: 2px 6px;
-    border-radius: 3px;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    margin-left: 6px;
+    display: inline-block; background: var(--crimson); color: #fff;
+    font-size: 8px; font-weight: 800; padding: 2px 6px; border-radius: 3px;
+    text-transform: uppercase; letter-spacing: 0.05em; margin-left: 6px;
   }
-  .feature-list {
-    margin: 0; padding: 0; list-style: none;
-  }
-  .feature-list li {
-    padding: 8px 0;
-    border-bottom: 1px dashed #eee;
-    display: flex;
-    gap: 10px;
-    align-items: flex-start;
-  }
+  .feature-list { margin: 0; padding: 0; list-style: none; }
+  .feature-list li { padding: 8px 0; border-bottom: 1px dashed #eee; display: flex; gap: 10px; align-items: flex-start; }
   .feature-list li:last-child { border-bottom: none; }
-  .feature-list .marker {
-    font-size: 10px;
-    font-weight: 800;
-    padding: 2px 6px;
-    border-radius: 3px;
-    flex-shrink: 0;
-    margin-top: 1px;
-    min-width: 36px;
-    text-align: center;
-  }
+  .feature-list .marker { font-size: 10px; font-weight: 800; padding: 2px 6px; border-radius: 3px; flex-shrink: 0; margin-top: 1px; min-width: 36px; text-align: center; }
   .feature-list .marker.s { background: var(--shipped-bg); color: var(--shipped); }
   .feature-list .marker.p1 { background: var(--p1-bg); color: var(--p1); }
   .feature-list .marker.p2 { background: var(--p2-bg); color: var(--p2); }
   .feature-list .marker.p3 { background: var(--p3-bg); color: var(--p3); }
   .feature-list .text { font-size: 12px; line-height: 1.45; color: var(--ink); }
-  .feature-list .text .meta {
-    font-size: 10px;
-    color: var(--ink-subtle);
-    margin-top: 2px;
-  }
-  .effort-badge {
-    display: inline-block;
-    background: #fff;
-    border: 1px solid var(--border);
-    padding: 1px 5px;
-    border-radius: 3px;
-    font-size: 9px;
-    font-weight: 700;
-    color: var(--ink-muted);
-    margin-left: 4px;
-  }
+  .feature-list .text .meta { font-size: 10px; color: var(--ink-subtle); margin-top: 2px; }
 
-  /* Gap analysis table */
+  /* Gap table */
   table.gap-table {
-    width: 100%;
-    border-collapse: collapse;
-    background: #fff;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    overflow: hidden;
-    box-shadow: var(--shadow-card);
-    font-size: 12px;
+    width: 100%; border-collapse: collapse; background: #fff;
+    border: 1px solid var(--border); border-radius: var(--radius-md);
+    overflow: hidden; box-shadow: var(--shadow-card); font-size: 12px;
   }
   table.gap-table th {
-    background: var(--surface);
-    text-align: left;
-    padding: 10px 12px;
-    font-size: 10px;
-    font-weight: 800;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--ink-subtle);
+    background: var(--surface); text-align: left; padding: 10px 12px;
+    font-size: 10px; font-weight: 800; text-transform: uppercase;
+    letter-spacing: 0.05em; color: var(--ink-subtle);
     border-bottom: 1px solid var(--border);
   }
   table.gap-table th.numeric { text-align: right; }
-  table.gap-table td {
-    padding: 10px 12px;
-    border-bottom: 1px solid #eee;
-    vertical-align: top;
-  }
+  table.gap-table td { padding: 10px 12px; border-bottom: 1px solid #eee; vertical-align: top; }
   table.gap-table td.numeric { text-align: right; font-variant-numeric: tabular-nums; font-weight: 700; }
   table.gap-table tr:last-child td { border-bottom: none; }
   table.gap-table tr.totals { background: var(--crimson-soft); }
   table.gap-table tr.totals td { font-weight: 800; color: var(--crimson-dark); border-top: 2px solid var(--crimson); }
 
-  /* Stacked bar (gap viz inline) */
-  .gap-bar {
-    display: flex;
-    height: 16px;
-    border-radius: 3px;
-    overflow: hidden;
-    border: 1px solid var(--border);
-    background: #eee;
-    min-width: 120px;
-  }
+  .gap-bar { display: flex; height: 16px; border-radius: 3px; overflow: hidden; border: 1px solid var(--border); background: #eee; min-width: 120px; }
   .gap-bar .seg { display: block; }
   .gap-bar .seg.s { background: var(--shipped); }
   .gap-bar .seg.p1 { background: var(--p1); }
@@ -313,196 +194,239 @@
 
   /* Timeline */
   .timeline-wrap {
-    background: #fff;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    padding: 20px;
-    box-shadow: var(--shadow-card);
-    overflow-x: auto;
+    background: #fff; border: 1px solid var(--border); border-radius: var(--radius-md);
+    padding: 20px; box-shadow: var(--shadow-card); overflow-x: auto;
   }
-  .timeline-header {
+  .timeline-header, .timeline-row {
     display: grid;
     grid-template-columns: 320px repeat(var(--weeks, 24), minmax(28px, 1fr));
     gap: 2px;
-    margin-bottom: 4px;
-    padding-bottom: 6px;
-    border-bottom: 1px solid var(--border);
     min-width: 1000px;
   }
-  .timeline-header > * {
-    font-size: 9px;
-    font-weight: 700;
-    color: var(--ink-subtle);
-    text-align: center;
-    padding: 4px 0;
-  }
+  .timeline-header { margin-bottom: 4px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+  .timeline-header > * { font-size: 9px; font-weight: 700; color: var(--ink-subtle); text-align: center; padding: 4px 0; }
   .timeline-header .first { text-align: left; padding-left: 4px; font-size: 10px; }
-  .timeline-row {
-    display: grid;
-    grid-template-columns: 320px repeat(var(--weeks, 24), minmax(28px, 1fr));
-    gap: 2px;
-    margin: 3px 0;
-    align-items: center;
-    min-width: 1000px;
-  }
-  .timeline-row .label {
-    font-size: 11px;
-    padding: 6px 4px;
-    color: var(--ink);
-  }
-  .timeline-row .label .small {
-    font-size: 9px;
-    color: var(--ink-subtle);
-    margin-top: 1px;
-  }
-  .timeline-row .week {
-    height: 18px;
-    border-radius: 2px;
-    background: transparent;
-  }
-  .timeline-row .week.dev { background: var(--crimson); }
+  .timeline-row { margin: 3px 0; align-items: center; }
+  .timeline-row .label { font-size: 11px; padding: 6px 4px; color: var(--ink); }
+  .timeline-row .label .small { font-size: 9px; color: var(--ink-subtle); margin-top: 1px; }
+  .timeline-row .week { height: 18px; border-radius: 2px; background: transparent; }
   .timeline-row .week.dev.p1 { background: var(--p1); }
   .timeline-row .week.dev.p2 { background: var(--p2); }
   .timeline-row .week.dev.p3 { background: var(--p3); }
-  .timeline-row .week.validate {
-    background-image: repeating-linear-gradient(45deg, rgba(0,0,0,0.18) 0 4px, transparent 4px 8px);
-  }
+  .timeline-row .week.validate { background-image: repeating-linear-gradient(45deg, rgba(0,0,0,0.18) 0 4px, transparent 4px 8px); }
   .timeline-row .week.validate.p1 { background-color: var(--p1-bg); }
   .timeline-row .week.validate.p2 { background-color: var(--p2-bg); }
   .timeline-row .week.validate.p3 { background-color: var(--p3-bg); }
   .timeline-row .week.now { border-left: 2px solid var(--crimson); }
-  .legend-row {
-    display: flex;
-    gap: 16px;
-    flex-wrap: wrap;
-    font-size: 11px;
-    color: var(--ink-muted);
-    margin-bottom: 16px;
-  }
+  .legend-row { display: flex; gap: 16px; flex-wrap: wrap; font-size: 11px; color: var(--ink-muted); margin-bottom: 16px; }
   .legend-row .item { display: flex; align-items: center; gap: 6px; }
-  .legend-row .swatch {
-    display: inline-block;
-    width: 18px;
-    height: 14px;
-    border-radius: 2px;
-    border: 1px solid var(--border);
-  }
+  .legend-row .swatch { display: inline-block; width: 18px; height: 14px; border-radius: 2px; border: 1px solid var(--border); }
   .legend-row .swatch.dev-p1 { background: var(--p1); }
   .legend-row .swatch.dev-p2 { background: var(--p2); }
   .legend-row .swatch.dev-p3 { background: var(--p3); }
   .legend-row .swatch.val { background-image: repeating-linear-gradient(45deg, rgba(0,0,0,0.18) 0 4px, transparent 4px 8px); background-color: #f5f5f5; }
 
-  /* Notes */
+  /* Notes box */
   .notes {
-    background: var(--crimson-soft);
-    border-left: 4px solid var(--crimson);
-    padding: 14px 16px;
-    border-radius: 0 var(--radius-md) var(--radius-md) 0;
-    margin: 24px 0;
-    font-size: 12px;
-    color: var(--ink);
+    background: var(--crimson-soft); border-left: 4px solid var(--crimson);
+    padding: 14px 16px; border-radius: 0 var(--radius-md) var(--radius-md) 0;
+    margin: 24px 0; font-size: 12px; color: var(--ink);
   }
-  .notes h4 {
-    margin: 0 0 4px;
-    font-size: 11px;
-    font-weight: 800;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--crimson-dark);
-  }
+  .notes h4 { margin: 0 0 4px; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; color: var(--crimson-dark); }
 
-  .pill {
-    display: inline-block;
-    font-size: 9px;
-    font-weight: 700;
-    padding: 2px 6px;
-    border-radius: 999px;
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
+  /* Persona picker */
+  .persona-picker {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 10px; margin-bottom: 24px;
   }
-  .pill.shipped { background: var(--shipped-bg); color: var(--shipped); }
-  .pill.p1 { background: var(--p1-bg); color: var(--p1); }
-  .pill.p2 { background: var(--p2-bg); color: var(--p2); }
-  .pill.p3 { background: var(--p3-bg); color: var(--p3); }
-  .pill.restricted { background: var(--crimson); color: #fff; }
+  .persona-tile {
+    background: #fff; border: 2px solid var(--border); border-radius: var(--radius-md);
+    padding: 14px 16px; cursor: pointer; transition: all 0.15s;
+  }
+  .persona-tile:hover { border-color: var(--crimson); transform: translateY(-2px); box-shadow: var(--shadow-card); }
+  .persona-tile.active { border-color: var(--crimson); background: var(--crimson-soft); }
+  .persona-tile .avatar {
+    width: 32px; height: 32px; border-radius: 50%;
+    background: var(--crimson); color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 800; font-size: 14px; margin-bottom: 8px;
+  }
+  .persona-tile .name { font-weight: 800; font-size: 13px; }
+  .persona-tile .role { font-size: 10px; color: var(--ink-muted); margin-top: 2px; }
 
-  /* Two-column for cross-cutting */
-  .two-col {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 16px;
+  .persona-detail {
+    background: #fff; border: 1px solid var(--border); border-radius: var(--radius-md);
+    padding: 24px; box-shadow: var(--shadow-card); margin-bottom: 24px;
   }
-  @media (max-width: 800px) {
-    .two-col { grid-template-columns: 1fr; }
-    nav.tabs { overflow-x: auto; }
+  .persona-header {
+    display: flex; gap: 18px; align-items: center; padding-bottom: 16px; border-bottom: 2px solid var(--crimson-soft); margin-bottom: 18px;
   }
+  .persona-header .avatar-lg {
+    width: 56px; height: 56px; border-radius: 50%;
+    background: var(--crimson); color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 800; font-size: 22px;
+  }
+  .persona-header h3 { margin: 0; font-size: 20px; }
+  .persona-header .role { font-size: 12px; color: var(--ink-muted); margin-top: 2px; }
+  .persona-modules { margin-top: 6px; }
+  .persona-modules .pill { margin-right: 4px; }
 
-  footer {
-    margin-top: 48px;
-    padding: 24px;
-    text-align: center;
-    font-size: 11px;
-    color: var(--ink-subtle);
+  /* User flow */
+  .flow-section { margin: 24px 0; }
+  .flow-section h4 { color: var(--crimson); border-left: 3px solid var(--crimson); padding-left: 10px; margin-top: 28px; }
+  .flow-steps { display: flex; flex-direction: column; gap: 8px; }
+  .flow-step {
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md);
+    padding: 12px 16px; cursor: pointer; transition: all 0.15s;
   }
+  .flow-step:hover { background: #fff; border-color: var(--crimson); }
+  .flow-step.expanded { background: #fff; border-color: var(--crimson); box-shadow: var(--shadow-card); }
+  .flow-step-head { display: flex; align-items: center; gap: 12px; }
+  .flow-step-num {
+    background: var(--crimson); color: #fff;
+    width: 26px; height: 26px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 800; font-size: 12px; flex-shrink: 0;
+  }
+  .flow-step-title { flex: 1; font-weight: 700; font-size: 13px; }
+  .flow-step-module {
+    font-size: 9px; font-weight: 700; text-transform: uppercase;
+    background: var(--crimson-soft); color: var(--crimson-dark);
+    padding: 2px 8px; border-radius: 3px;
+  }
+  .flow-step-toggle { color: var(--ink-subtle); font-size: 14px; }
+  .flow-step-detail {
+    display: none; margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--border);
+    font-size: 12px; line-height: 1.55; color: var(--ink-muted);
+  }
+  .flow-step.expanded .flow-step-detail { display: block; }
+  .flow-step-detail strong { color: var(--ink); }
+  .flow-step-detail ul { margin: 4px 0 4px 18px; padding: 0; }
+  .flow-step-detail li { margin: 2px 0; }
+  .flow-step-detail .kv { display: grid; grid-template-columns: 110px 1fr; gap: 4px 12px; margin-top: 8px; }
+  .flow-step-detail .kv .k { font-weight: 700; color: var(--ink); }
+  .flow-step-detail .pill { margin-right: 3px; }
+
+  /* Benchmark table */
+  table.bench {
+    width: 100%; border-collapse: collapse; background: #fff;
+    border: 1px solid var(--border); border-radius: var(--radius-md);
+    overflow: hidden; box-shadow: var(--shadow-card); font-size: 11.5px; margin-bottom: 20px;
+  }
+  table.bench th {
+    background: var(--surface); padding: 9px 10px; font-size: 10px;
+    font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em;
+    color: var(--ink-subtle); border-bottom: 1px solid var(--border); text-align: left;
+  }
+  table.bench th.makelila { background: var(--crimson); color: #fff; }
+  table.bench td { padding: 8px 10px; border-bottom: 1px solid #eee; vertical-align: top; }
+  table.bench td.cap { font-weight: 700; color: var(--ink); }
+  table.bench td.makelila { background: var(--crimson-soft); color: var(--crimson-dark); font-weight: 600; }
+  table.bench td.yes { color: var(--shipped); font-weight: 600; }
+  table.bench td.no { color: var(--ink-subtle); }
+  table.bench td.partial { color: var(--p1); font-weight: 600; }
+
+  /* Integration card */
+  .integration-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); gap: 14px; }
+  .integration-card {
+    background: #fff; border: 1px solid var(--border); border-radius: var(--radius-md);
+    padding: 16px; box-shadow: var(--shadow-card);
+  }
+  .integration-card.live { border-left: 4px solid var(--shipped); }
+  .integration-card.partial { border-left: 4px solid var(--p1); }
+  .integration-card.planned { border-left: 4px solid var(--p2); }
+  .integration-card.decision { border-left: 4px solid var(--crimson); }
+  .integration-card .head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  .integration-card h4 { margin: 0; font-size: 14px; text-transform: none; letter-spacing: 0; color: var(--ink); }
+  .integration-card .role-line { font-size: 10px; color: var(--ink-subtle); margin-bottom: 8px; }
+  .integration-card p { font-size: 12px; margin: 6px 0; color: var(--ink-muted); }
+
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 800px) { .two-col { grid-template-columns: 1fr; } }
+
+  footer { margin-top: 48px; padding: 24px; text-align: center; font-size: 11px; color: var(--ink-subtle); }
   footer a { color: var(--crimson); }
 </style>
 </head>
 <body>
 
 <header class="topbar">
-  <h1>makeLILA PRD Review — Gap Analysis &amp; Timeline</h1>
-  <div class="sub">Based on PRD v1.2 (2026-06-06) and the 2026-06-06 competitive landscape proposal. Click a tab to navigate.</div>
+  <h1>makeLILA PRD Review v1.2 — Interactive Dashboard</h1>
+  <div class="sub">Sections mirror <code>docs/PRD-2026-06-06.md</code>. Click any tab to navigate. Click a persona to see their clickable workflow.</div>
 </header>
 
 <nav class="tabs" id="tabs">
-  <button data-view="overview" class="active">Overview</button>
-  <button data-view="modules">Modules &amp; Features</button>
-  <button data-view="gap">Gap Analysis</button>
-  <button data-view="timeline">Timeline</button>
-  <button data-view="risks">Risks &amp; Open Questions</button>
+  <button data-view="overview" class="active">1. Overview</button>
+  <button data-view="vision">2. Vision</button>
+  <button data-view="users">3. Users &amp; Flows</button>
+  <button data-view="modules">4. Modules</button>
+  <button data-view="presale">5. Pre-sale</button>
+  <button data-view="integrations">6. Integrations</button>
+  <button data-view="recommended">7. Recommended</button>
+  <button data-view="benchmark">8. Benchmark</button>
+  <button data-view="architecture">9. Architecture</button>
+  <button data-view="roadmap">10. Roadmap</button>
+  <button data-view="gap">11. Gap Analysis</button>
+  <button data-view="timeline">12. Timeline</button>
+  <button data-view="oos">13. Out-of-scope</button>
+  <button data-view="risks">14. Open Questions</button>
+  <button data-view="changelog">15. Changelog</button>
 </nav>
 
 <main>
 
-  <!-- OVERVIEW -->
+  <!-- 1. OVERVIEW -->
   <section class="view active" id="view-overview">
+    <div class="section-anchor">§1 Executive Summary</div>
     <h2>Overview</h2>
     <p class="lede">
-      This dashboard reviews what makeLILA has shipped and validated as of 2026-06-06 against
-      the planned features in PRD v1.2. The gap is the work to bring makeLILA from a hardware-ops
-      tool into the unified CRM + Service + ERP + Lifecycle &amp; Finance + Pre-sale Marketing
-      platform the PRD describes.
+      makeLILA is the unified internal operations platform for VCycene's LILA Composter business. It replaces what the market would otherwise stitch together as five separate SaaS subscriptions — a CRM, a customer service desk, a lightweight ERP, a finance / lifecycle marketing stack, and a pre-sale campaign manager — with one React + TypeScript + Supabase application owned by the team and built around hardware-product specifics that off-the-shelf tools do not model natively.
     </p>
 
     <div class="stats" id="overview-stats"></div>
 
-    <div class="chart-card">
+    <div class="card">
       <h3>Shipped vs Planned by Module</h3>
-      <p class="lede" style="margin:0 0 12px">
-        Each bar shows shipped features (validated and in production) versus planned features broken down by priority tier.
-        Modules with all-blue bars are the ones with the biggest delta between today's state and the PRD vision.
-      </p>
+      <p class="lede" style="margin:0 0 12px">Each bar shows shipped features (validated, in production) versus planned features by priority tier. Modules with all-blue bars (Finance, Marketing) are the net-new domains in v1.2; modules with mostly green bars (Service, Stock, Build) are mature.</p>
       <div class="chart-canvas-wrap tall"><canvas id="chart-stack-modules"></canvas></div>
     </div>
 
-    <div class="chart-card">
+    <div class="card">
       <h3>Planned-Feature Distribution by Priority</h3>
       <div class="chart-canvas-wrap"><canvas id="chart-priority-dough"></canvas></div>
     </div>
 
     <div class="notes">
-      <h4>How to read this dashboard</h4>
-      Counts treat each first-class feature as one unit; "feature" maps to roughly one component / panel / data-model promotion / integration endpoint. Status options: <span class="pill shipped">shipped</span> in production and operator-validated, <span class="pill p1">P1</span> next 90 days, <span class="pill p2">P2</span> next 2 quarters, <span class="pill p3">P3</span> strategic with revisit criteria.
+      <h4>Strategic posture</h4>
+      Per <code>docs/system-of-record.md</code>: <strong>makeLILA is the system of record for internal operational data; every external platform is either an input that seeds records or an event sink that receives state changes.</strong> No external system should ever overwrite operator-curated data after the initial sync. This posture drives every integration decision in §6 and §7.
     </div>
   </section>
 
-  <!-- MODULES -->
+  <!-- 2. VISION -->
+  <section class="view" id="view-vision">
+    <div class="section-anchor">§2 Vision: Five-Domain Unified Platform</div>
+    <h2>Vision — five operational domains</h2>
+    <p class="lede">makeLILA must serve five distinct operational domains. Each has a strategic question. The PRD ratifies the answer.</p>
+    <div class="module-grid" id="vision-grid"></div>
+  </section>
+
+  <!-- 3. USERS & FLOWS -->
+  <section class="view" id="view-users">
+    <div class="section-anchor">§3 Personas + interactive user flows</div>
+    <h2>Users &amp; Clickable Workflows</h2>
+    <p class="lede">Click any persona below to see their full clickable workflow through makeLILA. Each step expands to show the module, the specific actions, the data they see, and the KPIs they track. All seven operator personas are internal (read + write); customer-facing personas use the public Forms surface.</p>
+
+    <div class="persona-picker" id="persona-picker"></div>
+
+    <div id="persona-detail-wrap"></div>
+  </section>
+
+  <!-- 4. MODULES -->
   <section class="view" id="view-modules">
+    <div class="section-anchor">§4 Functional surface — module by module</div>
     <h2>Modules &amp; Features</h2>
-    <p class="lede">
-      Every module from the PRD with shipped features (validated and in production today) plus planned features.
-      Click a chip below to filter by status. The Finance module is restricted to George + Huayi per §4.11.
-    </p>
+    <p class="lede">Every module from PRD §4. Click a chip below to filter by status. Finance is restricted to George + Huayi per §4.11 (three-layer enforcement: nav-hide + route guard + RLS).</p>
     <div class="filter-row" id="module-filter">
       <label>Filter:</label>
       <span class="chip active" data-filter="all">All</span>
@@ -514,58 +438,163 @@
     <div class="module-grid" id="module-grid"></div>
   </section>
 
-  <!-- GAP ANALYSIS -->
-  <section class="view" id="view-gap">
-    <h2>Gap Analysis</h2>
-    <p class="lede">
-      Per-module quantification of the gap between shipped and planned. Each row shows the current shipped count,
-      the planned count broken down by priority, the total feature ambition, and a visual bar showing the
-      proportion. The bottom rows include the two NEW modules from PRD v1.2 (Finance, Marketing) which exist
-      only as planned scope today.
-    </p>
+  <!-- 5. PRE-SALE -->
+  <section class="view" id="view-presale">
+    <div class="section-anchor">§5 Pre-sale marketing &amp; campaigns — the missing domain</div>
+    <h2>Pre-sale Marketing &amp; Campaigns</h2>
+    <p class="lede">The lifecycle from "first ad impression" to "first order shipped" is invisible inside makeLILA today. This domain is the largest functional gap in v1.2. Four product surfaces close it.</p>
+    <div class="two-col" id="presale-grid"></div>
+  </section>
 
+  <!-- 6. INTEGRATIONS -->
+  <section class="view" id="view-integrations">
+    <div class="section-anchor">§6 Integration strategy — all 15 surfaces</div>
+    <h2>Integrations</h2>
+    <p class="lede">All integrations classified by <strong>role</strong> (Input / Event Sink / Bidirectional / Decision Pending) and <strong>status</strong> (Live / Partial / Planned). Left border color: green = live, amber = partial, blue = planned, crimson = decision pending.</p>
+    <div class="filter-row" id="integration-filter">
+      <label>Filter:</label>
+      <span class="chip active" data-ifilter="all">All</span>
+      <span class="chip" data-ifilter="live">Live</span>
+      <span class="chip" data-ifilter="partial">Partial</span>
+      <span class="chip" data-ifilter="planned">Planned</span>
+      <span class="chip" data-ifilter="decision">Decision pending</span>
+    </div>
+    <div class="integration-grid" id="integration-grid"></div>
+  </section>
+
+  <!-- 7. RECOMMENDED -->
+  <section class="view" id="view-recommended">
+    <div class="section-anchor">§7 Recommended additional integrations</div>
+    <h2>Recommended Additional Integrations</h2>
+    <p class="lede">Not yet in scope but should be evaluated against the roadmap. Ranked P1 / P2 / P3 with effort + decision criteria.</p>
+    <table class="gap-table">
+      <thead><tr><th>Integration</th><th>Use case</th><th class="numeric">Priority</th><th class="numeric">Effort</th><th>Decision criteria</th></tr></thead>
+      <tbody id="recommended-tbody"></tbody>
+    </table>
+    <div class="notes">
+      <h4>Explicitly NOT recommended</h4>
+      Salesforce · Zendesk · NetSuite · Katana · Cin7 · Twilio (Quo covers SMS) · Avalara · Synder (we own the journaling logic per proposal P1 #5) · Pendo (no customer-facing app yet). The benchmark comparison in §8 explains why for each.
+    </div>
+  </section>
+
+  <!-- 8. BENCHMARK -->
+  <section class="view" id="view-benchmark">
+    <div class="section-anchor">§8 Benchmark — makeLILA vs industry tools</div>
+    <h2>Benchmark Comparison</h2>
+    <p class="lede">For each of the five domains, makeLILA's approach is compared to the leading tools researched in the <a href="docs/competitive-landscape-and-proposal-2026-06-06.md">2026-06-06 competitive landscape proposal</a>. The makeLILA column is highlighted; <span class="pill shipped">YES</span> = shipped, <span class="pill p1">PLANNED</span> = on the roadmap, <span class="pill p3">NO</span> = not in scope.</p>
+
+    <h3>CRM &amp; customer lifecycle</h3>
+    <p class="lede">Reference vendors: Salesforce, HubSpot (incumbents), Attio, Folk, Pipedrive (modern challengers).</p>
+    <div id="bench-crm"></div>
+
+    <h3>Customer service &amp; support</h3>
+    <p class="lede">Reference vendors: Zendesk, Intercom (incumbents), Plain, Pylon, Front, Salesforce Field Service (hardware-specific).</p>
+    <div id="bench-service"></div>
+
+    <h3>ERP / inventory / fulfillment</h3>
+    <p class="lede">Reference vendors: NetSuite, SAP B1, Katana, Cin7, ShipHero, Loop Returns, EasyPost (modern lightweight tier).</p>
+    <div id="bench-erp"></div>
+
+    <h3>Lifecycle marketing + customer health</h3>
+    <p class="lede">Reference vendors: Klaviyo, Customer.io, Iterable, Braze, Vitally, ChurnZero.</p>
+    <div id="bench-lifecycle"></div>
+
+    <h3>Finance / billing / spend</h3>
+    <p class="lede">Reference vendors: QuickBooks Online, Stripe Billing, Synder/A2X, Ramp, Brex, Triple Whale.</p>
+    <div id="bench-finance"></div>
+
+    <h3>Pre-sale marketing &amp; campaigns</h3>
+    <p class="lede">Reference vendors: Meta Business Manager (Facebook Ads), Google Ads, Klaviyo (lifecycle overlap), HubSpot Marketing Hub.</p>
+    <div id="bench-presale"></div>
+  </section>
+
+  <!-- 9. ARCHITECTURE -->
+  <section class="view" id="view-architecture">
+    <div class="section-anchor">§9 Architecture &amp; non-functional requirements</div>
+    <h2>Architecture &amp; NFRs</h2>
+    <div class="card">
+      <h3>Stack (live)</h3>
+      <p><strong>Frontend:</strong> React 18 + TypeScript + Vite + CSS Modules.<br>
+      <strong>Backend:</strong> Supabase (Postgres + Auth + Realtime + Storage + Edge Functions).<br>
+      <strong>Testing:</strong> Vitest (unit) + Playwright (e2e).<br>
+      <strong>Hosting:</strong> GitHub Pages (virgohomeio/makelila) via deploy.yml workflow.<br>
+      <strong>Auth:</strong> Supabase Google OAuth restricted to <code>@virgohome.io</code>.</p>
+    </div>
+    <div class="card">
+      <h3>Two-Supabase-project posture</h3>
+      <p><strong>Main project</strong> <code>txeftbbzeflequvrmjjr</code> (LILA-Pro-Inventory): operational system of record. All ops modules read/write here.<br>
+      <strong>Telemetry project</strong> <code>arfdopgbvlfmhmcfghhl</code> ("Lovely"): hosts device telemetry — events, ac_current, bme_sensors, temperature_sensors, machine_health, lila. Dashboard reads via <code>lib/supabaseTelemetry.ts</code>; read-only with separate auth.</p>
+    </div>
+    <div class="card">
+      <h3>Non-functional requirements</h3>
+      <p><strong>Performance:</strong> Realtime subscriptions on hot tables (orders, service_tickets, units, fulfillment_queue, ticket_notes, service_ticket_attachments). Pagination not currently required at 50–200 orders/mo + ~1000 lifetime units; revisit at 5× volume.<br><br>
+      <strong>Security:</strong> Supabase RLS in place, currently permissive for authenticated <code>@virgohome.io</code> users. P1 hardening: <code>profiles.role</code> enum (operator / manager / finance / admin) seeded from <code>MANAGER_EMAILS</code> / <code>FINANCE_EMAILS</code>; central <code>canDo(role, action)</code> for write gating; <code>canView(role, module)</code> for module-level visibility (drives Finance module nav-hide + route guard + RLS). Finance role = George + Huayi.<br><br>
+      <strong>Mobile:</strong> Backlog #80 — app today is desktop-only despite installable to iPhone home screen. P1 V1: viewport meta + safe-area-insets + PWA manifest + AppShell narrow-aware. P2 V2: per-module table → card-row treatment under ~700px.<br><br>
+      <strong>Observability:</strong> Every mutation writes <code>activity_log</code> via <code>logAction()</code>. KPI panel surfaces volumes per action type. P2: <code>entity_type</code> / <code>entity_id</code> / <code>unit_serial</code> columns + per-serial timeline UI; this also unblocks the OKR/KPI tracking in §4.9.<br><br>
+      <strong>Backup + audit:</strong> Supabase nightly backups. Activity log = audit trail.</p>
+    </div>
+  </section>
+
+  <!-- 10. ROADMAP -->
+  <section class="view" id="view-roadmap">
+    <div class="section-anchor">§10 Roadmap — P1 / P2 / P3</div>
+    <h2>Roadmap</h2>
+    <p class="lede">PRD priority tiers map to the <a href="docs/competitive-landscape-and-proposal-2026-06-06.md">2026-06-06 competitive proposal</a>. P1 = next 90 days, P2 = next 2 quarters, P3 = strategic with revisit criteria.</p>
+
+    <div class="card" style="border-left: 4px solid var(--p1)">
+      <h3 style="color:var(--p1)">P1 — Next 90 days</h3>
+      <p>Klaviyo Track API firehose · telemetry-driven ticket auto-creation · device-context header on Service tickets · finish Returns/Refunds overhaul with grade + disposition + quarantine · QBO daily-summary journal sync · PaymentCard UI on OrderReview · warranty registration as a first-class entity · SLA aging + auto-escalation.</p>
+      <p><strong>New P1 from this PRD:</strong> Mobile V1 (viewport + manifest + AppShell narrow-aware — backlog #80) · Facebook Marketing API spend + performance pull + Meta Lead Ads webhook · <strong>RBAC profiles + canDo + canView helpers (promoted from P2)</strong> · <strong>Finance module skeleton + JournalPanel sub-surface (the visibility-gated home for QBO daily-summary work)</strong>.</p>
+    </div>
+
+    <div class="card" style="border-left: 4px solid var(--p2)">
+      <h3 style="color:var(--p2)">P2 — Next 2 quarters</h3>
+      <p>build_station_passes promotion · Klaviyo predictive properties pull · freight quote history · activity_log entity refs + per-serial timeline.</p>
+      <p><strong>New P2 from this PRD:</strong> Facebook CAPI server-side events · mobile V2 (per-module card-row treatment) · QuickBooks integration (full daily-summary scope) · HubSpot CRM decommission decision + execution if approved · <strong>Finance module ProductionProjectionPanel (depends on backlog #71 + freight history)</strong> · <strong>ActivityLog OKR &amp; KPI tracking (depends on activity_log entity refs)</strong>.</p>
+    </div>
+
+    <div class="card" style="border-left: 4px solid var(--p3)">
+      <h3 style="color:var(--p3)">P3 — Strategic, deferred with revisit criteria</h3>
+      <p>Component-lot genealogy · unified customer timeline · per-unit COGS · customer-facing portal · Linear/GitHub bug linking · Okendo/Junip reviews → CRM loop · Slack alert sink · Notion-backed public status page · n8n self-host automation tier · Stripe Tax.</p>
+      <p><strong>New P3 from this PRD:</strong> Finance module SalesProjectionPanel pipeline-driven variant (depends on Facebook Marketing API stabilizing + Klaviyo predictive baseline; rolling-average variant ships in P2).</p>
+    </div>
+  </section>
+
+  <!-- 11. GAP -->
+  <section class="view" id="view-gap">
+    <div class="section-anchor">§11 Gap analysis</div>
+    <h2>Gap Analysis</h2>
+    <p class="lede">Per-module quantification of shipped vs planned. Each row shows current shipped count, planned count by priority, total feature ambition, and a stacked bar visualization. The bottom rows include the two NEW modules from v1.2 (Finance, Marketing) that exist only as planned scope today.</p>
     <table class="gap-table" id="gap-table">
       <thead>
         <tr>
-          <th>Module</th>
-          <th>Domain</th>
+          <th>Module</th><th>Domain</th>
           <th class="numeric">Shipped</th>
-          <th class="numeric">P1</th>
-          <th class="numeric">P2</th>
-          <th class="numeric">P3</th>
-          <th class="numeric">Total</th>
-          <th class="numeric">% Complete</th>
+          <th class="numeric">P1</th><th class="numeric">P2</th><th class="numeric">P3</th>
+          <th class="numeric">Total</th><th class="numeric">% Complete</th>
           <th>Distribution</th>
         </tr>
       </thead>
       <tbody id="gap-tbody"></tbody>
     </table>
 
-    <div class="chart-card" style="margin-top:24px">
-      <h3>Effort vs Validation Budget (dev weeks + validation weeks per priority tier)</h3>
-      <p class="lede" style="margin:0 0 12px">
-        Effort sizes (S/M/L) from the PRD converted into calendar weeks using the convention below.
-        Validation budget assumes one cycle of operator UAT + one cycle of customer-side observation
-        per feature before it's considered shipped-and-validated.
-      </p>
+    <div class="card" style="margin-top:24px">
+      <h3>Effort vs Validation Budget (S/M/L → calendar weeks)</h3>
       <div class="chart-canvas-wrap"><canvas id="chart-effort"></canvas></div>
-      <table style="width:100%;margin-top:12px;font-size:11px;color:var(--ink-muted)" >
-        <tr><td><strong>S (small):</strong> 0.5–1 week dev + 1 week validation = ~2 calendar weeks</td>
-            <td><strong>M (medium):</strong> 1.5–2 weeks dev + 1.5 weeks validation = ~3.5 calendar weeks</td>
-            <td><strong>L (large):</strong> 3–4 weeks dev + 2.5 weeks validation = ~6.5 calendar weeks</td>
+      <table style="width:100%;margin-top:12px;font-size:11px;color:var(--ink-muted)">
+        <tr><td><strong>S:</strong> 0.5–1 wk dev + 1 wk validation = ~2 wks</td>
+            <td><strong>M:</strong> 1.5–2 wks dev + 1.5 wks validation = ~3.5 wks</td>
+            <td><strong>L:</strong> 3–4 wks dev + 2.5 wks validation = ~6.5 wks</td>
         </tr>
       </table>
     </div>
   </section>
 
-  <!-- TIMELINE -->
+  <!-- 12. TIMELINE -->
   <section class="view" id="view-timeline">
-    <h2>Timeline to Close the Gap</h2>
-    <p class="lede">
-      24-week Gantt for the P1 + critical-path P2 work, starting Week 1 = 2026-06-09 (the Monday after PRD v1.2 ships).
-      Solid bars = active development. Hatched bars = operator UAT + customer-side validation. Dependencies are encoded
-      via start-week offsets. P3 items are excluded as they are deferred with revisit criteria.
-    </p>
+    <div class="section-anchor">§12 Timeline to close the gap</div>
+    <h2>Timeline</h2>
+    <p class="lede">24-week Gantt for P1 + critical-path P2 work, starting Week 1 = 2026-06-09. Solid bars = active dev. Hatched bars = operator UAT + customer-side validation. P3 items excluded — deferred with revisit criteria.</p>
     <div class="legend-row">
       <div class="item"><span class="swatch dev-p1"></span> P1 dev</div>
       <div class="item"><span class="swatch dev-p2"></span> P2 dev</div>
@@ -577,76 +606,65 @@
 
     <div class="notes">
       <h4>Resourcing assumption</h4>
-      The timeline assumes ~2 parallel engineering streams (the current build-cadence pattern in the repo). Single-engineer execution doubles the calendar; three-engineer execution compresses by ~30%. Validation cycles assume Junaid + Raymond + George + Huayi available for UAT during their normal workflows — no separate QA headcount is assumed.
+      ~2 parallel engineering streams (current build cadence). Single-engineer execution doubles the calendar; three-engineer execution compresses by ~30%. Validation cycles assume Junaid + Raymond + George + Huayi available for UAT during normal workflows — no separate QA headcount.
     </div>
 
-    <div class="chart-card" style="margin-top:24px">
+    <div class="card" style="margin-top:24px">
       <h3>Cumulative validated-feature count over time</h3>
       <div class="chart-canvas-wrap"><canvas id="chart-cumulative"></canvas></div>
     </div>
   </section>
 
-  <!-- RISKS -->
+  <!-- 13. OUT OF SCOPE -->
+  <section class="view" id="view-oos">
+    <div class="section-anchor">§13 Explicit out-of-scope</div>
+    <h2>Out-of-scope</h2>
+    <p class="lede">Items considered and rejected, with rationale. Preserved here so the next reader doesn't relitigate them.</p>
+    <ul style="font-size:13px;line-height:1.8" id="oos-list"></ul>
+  </section>
+
+  <!-- 14. OPEN QUESTIONS / RISKS -->
   <section class="view" id="view-risks">
-    <h2>Risks &amp; Open Questions</h2>
-    <p class="lede">
-      Items where the gap analysis surfaced decisions or risks the team should resolve before committing to the timeline.
-    </p>
-
+    <div class="section-anchor">§14 Open questions + risks</div>
+    <h2>Open Questions &amp; Risks</h2>
     <div class="two-col">
-      <div class="module-card">
-        <h3 style="margin-top:0">Open product decisions</h3>
-        <ul style="font-size:12px;line-height:1.6;padding-left:20px;margin:0">
-          <li><strong>HubSpot decommission timing.</strong> Depends on Klaviyo Track API firehose being live first (P1). Pedrum sign-off required on sequence-migration feasibility.</li>
-          <li><strong>Klaviyo SMS adoption.</strong> Klaviyo for sequence-driven SMS vs Quo as sole SMS surface. Recommendation: split (Klaviyo for sequence, Quo for 1-on-1).</li>
-          <li><strong>Pre-sale ad-spend scope.</strong> Facebook only for V1, or include Google Ads + TikTok? Affects §5 Campaign dashboard data model.</li>
-          <li><strong>Customer-facing portal.</strong> Deferred to P3 — revisit when "where is my order" volume exceeds 20/week.</li>
-          <li><strong>Lead-form ownership post-HubSpot.</strong> Recommendation: lila.vip forms post to makeLILA endpoint, with optional Klaviyo profile creation downstream.</li>
-          <li><strong>Sezzle direct integration.</strong> P3 candidate — inferred via Shopify today, may be worth direct API for QBO reconciliation.</li>
-        </ul>
+      <div class="card">
+        <h3>Open product decisions</h3>
+        <ul style="font-size:12px;line-height:1.7;padding-left:20px;margin:0" id="open-questions"></ul>
       </div>
-      <div class="module-card">
-        <h3 style="margin-top:0">Timeline risks</h3>
-        <ul style="font-size:12px;line-height:1.6;padding-left:20px;margin:0">
-          <li><strong>QBO API multi-currency.</strong> CAD/USD ledger discipline is a known gotcha. Add 1 week of validation cycle for refund + replacement edge cases.</li>
-          <li><strong>Facebook Marketing API auth.</strong> Meta Business System User access tokens have a separate approval flow. Add 1–2 weeks lead time before P1 work can start.</li>
-          <li><strong>Telemetry-driven ticket auto-creation false-positive rate.</strong> Backlog #70 documented 75% false positive on NOT_MIXING. Need to validate auto-create thresholds with a 2-week shadow run before flipping the switch.</li>
-          <li><strong>RBAC migration on live DB.</strong> Promoting from email-list checks to <code>profiles.role</code> with RLS tightening is single-shot. Schedule the migration window with operator notice.</li>
-          <li><strong>Mobile V1 PWA install testing on iOS.</strong> Safari PWA behaviors require physical-device testing; allow 1 extra validation week.</li>
-          <li><strong>Sales projection model accuracy.</strong> Rolling-average baseline has no validation cohort until ~30 days of data accumulates. Pipeline-driven variant defers to P3 specifically to give the rolling-average a chance to calibrate first.</li>
-        </ul>
+      <div class="card">
+        <h3>Timeline risks</h3>
+        <ul style="font-size:12px;line-height:1.7;padding-left:20px;margin:0" id="timeline-risks"></ul>
       </div>
     </div>
 
-    <div class="chart-card" style="margin-top:24px">
+    <div class="card" style="margin-top:24px">
       <h3>Recommended sequencing summary</h3>
-      <ol style="font-size:12px;line-height:1.8;margin:0;padding-left:24px">
-        <li><strong>Week 1–2:</strong> RBAC profiles + canDo/canView + Klaviyo Track API firehose + PaymentCard UI (S items, parallel).</li>
-        <li><strong>Week 3–6:</strong> Returns/Refunds overhaul finishing (grade + disposition + quarantine + #79 net out) — closes the biggest active operator pain.</li>
-        <li><strong>Week 4–8:</strong> Device-context header + warranty registration + SLA aging + telemetry-driven ticket auto-create — Service-domain hardening, runs parallel to Returns finish.</li>
-        <li><strong>Week 6–10:</strong> Finance module skeleton + JournalPanel ships behind RBAC. Depends on Returns being clean.</li>
-        <li><strong>Week 8–12:</strong> Facebook Marketing API + Lead Ads webhook + mobile V1. Pre-sale visibility lands.</li>
-        <li><strong>Week 12–18:</strong> P2 batch — build_station_passes, Klaviyo predictive pull, freight quote history, activity_log entity refs, ProductionProjectionPanel, OKR/KPI tracking, CAPI, mobile V2, QBO full daily-summary, HubSpot decommission window.</li>
-        <li><strong>Week 18–24:</strong> Stabilization + customer-facing roll-out + P3 revisit gate.</li>
-      </ol>
+      <ol style="font-size:12px;line-height:1.8;margin:0;padding-left:24px" id="sequencing-list"></ol>
     </div>
+  </section>
+
+  <!-- 15. CHANGELOG -->
+  <section class="view" id="view-changelog">
+    <div class="section-anchor">§15 Changelog</div>
+    <h2>Document Changelog</h2>
+    <div id="changelog-list"></div>
   </section>
 
 </main>
 
 <footer>
-  Source: <a href="docs/PRD-2026-06-06.md">docs/PRD-2026-06-06.md</a> (v1.2) and <a href="docs/competitive-landscape-and-proposal-2026-06-06.md">2026-06-06 competitive landscape proposal</a>.
-  Generated 2026-06-06. <a href="docs/feature-backlog-alpha-feedback.md">Feature backlog</a>.
+  Source: <a href="docs/PRD-2026-06-06.md">docs/PRD-2026-06-06.md</a> (v1.2) and <a href="docs/competitive-landscape-and-proposal-2026-06-06.md">2026-06-06 competitive landscape proposal</a>. Generated 2026-06-06.
 </footer>
 
 <script>
-// ─── Data: modules + features extracted from PRD v1.2 ───────────────────────
+/* ──────────────────────────────────────────────────────────────────────────
+   DATA — extracted from PRD v1.2
+   ────────────────────────────────────────────────────────────────────────── */
 
 const MODULES = [
   {
-    name: 'OrderReview',
-    domain: 'ERP',
-    restricted: false,
+    name: 'OrderReview', domain: 'ERP', domainClass: 'erp', restricted: false,
     shipped: [
       'Shopify-synced order intake (sync-shopify-orders)',
       'Tab pipeline: Pending / Out / Flagged / Confirmed / Replacement / All',
@@ -664,9 +682,7 @@ const MODULES = [
     ],
   },
   {
-    name: 'Fulfillment',
-    domain: 'ERP',
-    restricted: false,
+    name: 'Fulfillment', domain: 'ERP', domainClass: 'erp', restricted: false,
     shipped: [
       '6-step queue: assign serial → test → dock → label → email → fulfilled',
       'Shelf view tracking 25-unit skids',
@@ -680,9 +696,7 @@ const MODULES = [
     ],
   },
   {
-    name: 'Build',
-    domain: 'ERP',
-    restricted: false,
+    name: 'Build', domain: 'ERP', domainClass: 'erp', restricted: false,
     shipped: [
       'Pipeline board for production batches (P50 retired, P150, P50N, P100, P100X)',
       'Per-unit detail: firmware version, technician, electrical/mechanical check, defect notes',
@@ -694,9 +708,7 @@ const MODULES = [
     ],
   },
   {
-    name: 'PostShipment',
-    domain: 'ERP + Finance',
-    restricted: false,
+    name: 'PostShipment', domain: 'ERP + Finance', domainClass: 'erp', restricted: false,
     shipped: [
       'Returns / Refunds / Replacements / Cancellations / History tabs',
       'refund_method enum (Shopify / Sezzle / QBO CC / e-transfer / store credit)',
@@ -712,9 +724,7 @@ const MODULES = [
     ],
   },
   {
-    name: 'Service',
-    domain: 'Service',
-    restricted: false,
+    name: 'Service', domain: 'Service', domainClass: 'service', restricted: false,
     shipped: [
       'Inbox tab (Gmail-synced + classifier)',
       'Support Tickets tab — FSM, priority, owner, notes audit feed, classification log',
@@ -734,9 +744,7 @@ const MODULES = [
     ],
   },
   {
-    name: 'Stock',
-    domain: 'ERP',
-    restricted: false,
+    name: 'Stock', domain: 'ERP', domainClass: 'erp', restricted: false,
     shipped: [
       'Units (serial-level with status enum, batch FK, customer_id FK via #67)',
       'Parts inventory',
@@ -746,13 +754,11 @@ const MODULES = [
     ],
     planned: [
       { p: 'P2', e: 'S', text: 'UnitTimeline.tsx component (per-serial audit timeline)', meta: 'Proposal P2 #12 — depends on activity_log entity refs' },
-      { p: 'P1', e: 'S', text: 'units.status quarantine enum value (paired with Returns disposition work)', meta: 'Prevents quarantine units from re-entering Available-to-Promise' },
+      { p: 'P1', e: 'S', text: 'units.status quarantine enum value (paired with Returns disposition)', meta: 'Prevents quarantine units from re-entering Available-to-Promise' },
     ],
   },
   {
-    name: 'Customers',
-    domain: 'CRM',
-    restricted: false,
+    name: 'Customers', domain: 'CRM', domainClass: 'crm', restricted: false,
     shipped: [
       'Directory listing',
       'JourneyTab with lifecycle stage inference',
@@ -767,9 +773,7 @@ const MODULES = [
     ],
   },
   {
-    name: 'Templates',
-    domain: 'supporting',
-    restricted: false,
+    name: 'Templates', domain: 'Supporting', domainClass: 'supporting', restricted: false,
     shipped: [
       'Editable email/SMS templates with variable interpolation',
       'Status-keyed SMS pickers integrated with Dashboard',
@@ -780,9 +784,7 @@ const MODULES = [
     ],
   },
   {
-    name: 'ActivityLog',
-    domain: 'supporting + OKR/KPI',
-    restricted: false,
+    name: 'ActivityLog', domain: 'Supporting + OKR/KPI', domainClass: 'supporting', restricted: false,
     shipped: [
       'Audit trail via activity_log table',
       'logAction(action_type, ref_id, detail) called from every lib/*.ts mutation',
@@ -795,9 +797,7 @@ const MODULES = [
     ],
   },
   {
-    name: 'Dashboard',
-    domain: 'Service + Product',
-    restricted: false,
+    name: 'Dashboard', domain: 'Service + Product', domainClass: 'service', restricted: false,
     shipped: [
       'Machine-telemetry classifier (8 states incl. NO_BME_DATA added 2026-06-05)',
       'DRY_SOIL trigger tightened to require sustained low humidity (2026-06-05)',
@@ -811,9 +811,7 @@ const MODULES = [
     ],
   },
   {
-    name: 'Finance',
-    domain: 'Finance (NEW, restricted to George + Huayi)',
-    restricted: true,
+    name: 'Finance', domain: 'Finance (NEW)', domainClass: 'finance', restricted: true,
     shipped: [],
     planned: [
       { p: 'P1', e: 'M', text: 'JournalPanel — QBO daily-summary journal sync', meta: 'Proposal P1 #5 — relocated from PostShipment to restricted Finance module' },
@@ -824,9 +822,7 @@ const MODULES = [
     ],
   },
   {
-    name: 'Marketing',
-    domain: 'Pre-sale (NEW)',
-    restricted: false,
+    name: 'Marketing', domain: 'Pre-sale (NEW)', domainClass: 'marketing', restricted: false,
     shipped: [],
     planned: [
       { p: 'P1', e: 'M', text: 'CampaignsTab aggregating Facebook + Klaviyo + HubSpot performance', meta: 'New module per §5 — UTM-tag + email-match resolution to internal orders' },
@@ -838,19 +834,497 @@ const MODULES = [
 ];
 
 const CROSS_CUTTING = [
-  { area: 'Integrations', name: 'Klaviyo Track API event firehose', p: 'P1', e: 'S', meta: 'Proposal P1 #1 — substrate for everything else' },
-  { area: 'Integrations', name: 'Facebook Marketing API spend + performance pull', p: 'P1', e: 'M', meta: 'NEW — closes pre-sale visibility gap' },
-  { area: 'Integrations', name: 'Meta Lead Ads webhook → makeLILA customer create', p: 'P1', e: 'S', meta: 'NEW — pre-sale lead capture' },
-  { area: 'Integrations', name: 'Facebook CAPI server-side conversion events', p: 'P2', e: 'M', meta: 'iOS-14 attribution recovery' },
-  { area: 'Integrations', name: 'QuickBooks Online OAuth + daily-summary journal sync', p: 'P1', e: 'M', meta: '§6.15 — eliminates George\'s Monday reconciliation' },
-  { area: 'Integrations', name: 'HubSpot CRM decommission (sequences → Klaviyo)', p: 'P2', e: 'M', meta: 'Depends on Klaviyo Track API + Pedrum sign-off' },
-  { area: 'Cross-cutting', name: 'RBAC profiles + canDo + canView helpers', p: 'P1', e: 'S', meta: 'Promoted from P2 — Finance module depends on this' },
-  { area: 'Cross-cutting', name: 'Mobile V1: viewport + PWA manifest + AppShell narrow-aware', p: 'P1', e: 'M', meta: 'Backlog #80 — iPhone home-screen install survives' },
-  { area: 'Cross-cutting', name: 'Mobile V2: per-module card-row tables', p: 'P2', e: 'L', meta: 'Backlog #80 — high-traffic tables convert to card-row mode' },
-  { area: 'Cross-cutting', name: 'Warranty registrations as first-class entity', p: 'P1', e: 'S', meta: 'Proposal P1 #7 — closes chain-abuse vector' },
+  { area: 'Integrations', name: 'Klaviyo Track API event firehose', p: 'P1', e: 'S' },
+  { area: 'Integrations', name: 'Facebook Marketing API spend + performance pull', p: 'P1', e: 'M' },
+  { area: 'Integrations', name: 'Meta Lead Ads webhook → makeLILA customer create', p: 'P1', e: 'S' },
+  { area: 'Integrations', name: 'Facebook CAPI server-side conversion events', p: 'P2', e: 'M' },
+  { area: 'Integrations', name: 'QuickBooks Online OAuth + daily-summary journal sync', p: 'P1', e: 'M' },
+  { area: 'Integrations', name: 'HubSpot CRM decommission (sequences → Klaviyo)', p: 'P2', e: 'M' },
+  { area: 'Cross-cutting', name: 'RBAC profiles + canDo + canView helpers', p: 'P1', e: 'S' },
+  { area: 'Cross-cutting', name: 'Mobile V1: viewport + PWA manifest + AppShell narrow-aware', p: 'P1', e: 'M' },
+  { area: 'Cross-cutting', name: 'Mobile V2: per-module card-row tables', p: 'P2', e: 'L' },
+  { area: 'Cross-cutting', name: 'Warranty registrations as first-class entity', p: 'P1', e: 'S' },
 ];
 
-// ─── Render: overview stats ─────────────────────────────────────────────────
+const VISION = [
+  { domain: 'CRM', class: 'crm', short: 'Lead → customer lifecycle',
+    today: 'HubSpot owns pre-sale; makeLILA Customers module is post-sale system of record. Bridge is fragile — manual sync from HubSpot.',
+    vision: 'Continuous lifecycle from first touch to churn. HubSpot contact becomes makeLILA customer at order-creation; journey stage evolves via telemetry + ticket signals.',
+    decision: 'HubSpot CRM decommission under consideration (§6.2) once Klaviyo Track API firehose ships and sequences are migration-ready.' },
+  { domain: 'Service', class: 'service', short: 'Support, repair, replacement',
+    today: 'Fully owned by makeLILA. Inbox + Tickets + Onboarding + Replacement + Calendly + attachments + classifier.',
+    vision: 'Every ticket device-aware (firmware, QC, telemetry, repair history in a header). Auto-create tickets from persistent non-OK telemetry. AI-draft replies grounded in Templates.',
+    decision: 'No vendor swap. Pattern borrowing from Salesforce Field Service / Aquant / Intercom Fin without buying.' },
+  { domain: 'ERP', class: 'erp', short: 'Orders, inventory, fulfillment, build, returns',
+    today: 'Fully owned. OrderReview + Fulfillment + Build + Stock + PostShipment.',
+    vision: 'Finish Returns/Refunds overhaul (grade + disposition + responsible_team + quarantine). Promote build station passes from columns to event rows. Persist freight quote history.',
+    decision: 'No vendor swap. NetSuite / SAP / Katana / Cin7 ruled out as exceeding entire ops headcount budget at 50–200 units/mo.' },
+  { domain: 'Lifecycle &amp; Finance', class: 'finance', short: 'Marketing automation + accounting',
+    today: 'Partially owned. Klaviyo broadcast email wired one-way (Shopify → Klaviyo, not makeLILA → Klaviyo). QBO reconciled manually.',
+    vision: 'Klaviyo Track API firehose for every internal state change. Daily-summary QBO journal sync. Finance-review approver gate (active in Returns overhaul).',
+    decision: 'Keep Klaviyo for marketing; reject Synder/A2X (own the journaling logic).' },
+  { domain: 'Pre-sale marketing', class: 'marketing', short: 'Campaigns, lead attribution, CAC',
+    today: 'Invisible inside makeLILA. Facebook Ads, Klaviyo, HubSpot sequences live outside.',
+    vision: 'CampaignsTab aggregating Facebook + Klaviyo + HubSpot. Lead attribution fields per customer. CAC view per channel. CAPI server-side events.',
+    decision: 'Net-new domain in v1.2. Facebook integration scoped as four sub-integrations (§6.4).' },
+];
+
+const PRESALE = [
+  { title: 'Campaign performance dashboard',
+    body: 'New <code>modules/Marketing/CampaignsTab.tsx</code> aggregating Facebook Ads spend + reach + clicks + conversions, Klaviyo campaign opens + clicks + conversions, HubSpot sequence touches (or replacement if decommissioned). Tied to internal <code>orders</code> via UTM-tag + email-match resolution.',
+    pill: 'P1·M' },
+  { title: 'Lead attribution per customer',
+    body: 'Add <code>customers.first_touch_source</code>, <code>customers.first_touch_campaign_id</code>, <code>customers.first_touch_at</code>, <code>customers.last_touch_source</code>, <code>customers.last_touch_campaign_id</code> populated at customer-create time. Chip on JourneyTab so Pedrum sees "originated from FB-2026-Spring-P100" at a glance.',
+    pill: 'P1·S' },
+  { title: 'Cost-per-acquisition (CAC) view',
+    body: 'Joins <code>customers.first_touch_campaign_id</code> to Facebook Ads spend (Meta Marketing API) and Klaviyo campaign cost. Powers contribution-margin-by-channel report for Pedrum\'s weekly review.',
+    pill: 'P2·S' },
+  { title: 'Conversion API (CAPI) server-side events',
+    body: 'iOS-14-era requirement — client-side Pixel events lose accuracy due to ATT opt-outs and ad blockers. 2026 best practice: server-side CAPI events fired from backend on order creation, lead form submission, key lifecycle moments. makeLILA already has the events (via <code>logAction</code>); a thin edge function reformats them for CAPI.',
+    pill: 'P2·M' },
+];
+
+const INTEGRATIONS = [
+  { name: 'Shopify', status: 'live', role: 'Input + Event Sink',
+    body: 'Authoritative for ecommerce checkout. Inputs: orders, customers, line items, payment summary, refunds. Event sink: fulfillment push, $0 draft replacement orders. Edge functions: <code>sync-shopify-orders</code>, <code>push-shopify-fulfillments</code>, <code>sync-shopify-customers</code>.' },
+  { name: 'HubSpot', status: 'decision', role: 'Input — decommission under consideration',
+    body: 'Today: lead capture (lila.vip forms), sales sequences, contact CRM. Decision framework: keep through Q3 2026 for lead forms; decommission CRM + sequence layer when (1) Klaviyo Track API firehose lives, (2) sequences are migration-ready, (3) Pedrum signs off.' },
+  { name: 'Klaviyo', status: 'partial', role: 'Event Sink + Predictive Source',
+    body: 'Today: email broadcasts triggered by Shopify events. makeLILA does not push events. P1: <code>klaviyo-track</code> firehose for every internal state change. P2: nightly <code>klaviyo-pull-predictive</code> pulls EDNO + CLV + churn risk back to <code>customers</code>.' },
+  { name: 'Facebook (Meta)', status: 'planned', role: 'Input + Event Sink (NEW)',
+    body: 'Four sub-integrations: (a) Meta Marketing API — campaign spend + performance pull (P1, M); (b) Meta Lead Ads webhook — lead capture (P1, S); (c) Conversion API (CAPI) — server-side conversion events (P2, M); (d) Catalog / Product Feed — for DPAs (deferred).' },
+  { name: 'Google Meet', status: 'live', role: 'Operator scheduling',
+    body: 'Calendly-booked diagnosis calls use Google Meet as conferencing. Future: pull Meet attendance + transcript metadata back into the ticket via Calendly + Meet webhooks.' },
+  { name: 'Google Docs', status: 'live', role: 'Operator collaboration',
+    body: 'Ad-hoc operator docs (call notes, post-mortems, customer issue write-ups). No programmatic integration today. Optional future: per-ticket <code>service_tickets.gdoc_url</code>.' },
+  { name: 'Quo (OpenPhone)', status: 'live', role: 'SMS — bidirectional',
+    body: 'Operator-sent canned SMS via <code>cannedSms.ts</code>. Inbound SMS replies flow into Service Inbox via Quo webhook. Future P2: bidirectional thread linking to unit timelines.' },
+  { name: 'Gmail', status: 'live', role: 'Input — bidirectional via Service Inbox',
+    body: 'Service Inbox tab consumes Gmail via <code>sync-gmail-threads</code>. Operators can reply via <code>support@virgohome.io</code> per backlog #12.' },
+  { name: 'Resend', status: 'live', role: 'Event Sink — transactional email',
+    body: 'Fulfillment notifications, refund confirmations, return-label sends. Triggered from edge functions.' },
+  { name: 'Calendly', status: 'live', role: 'Bidirectional — booking',
+    body: 'Diagnosis call booking links via Service/TicketDetailPanel. <code>sync-calendly-events</code> upserts events as <code>service_tickets</code> with <code>category=\'diagnosis_call\'</code>.' },
+  { name: 'Google Maps + Anthropic (Claude)', status: 'live', role: 'Input — address verification',
+    body: 'Address verification on order sync. Google Maps geocoding first; Claude haiku-4-5 plausibility judgment fallback per <code>verify-address</code> edge function (backlog #13).' },
+  { name: 'Notion', status: 'live', role: 'Reference — no automation',
+    body: 'Master index for VCycene credentials, API keys, team docs. Future: API as backing store for "known issues" public status page (P3 candidate).' },
+  { name: 'Fireflies', status: 'live', role: 'External — no automation',
+    body: 'Meeting transcription for sales + customer calls. Future: attach transcript URLs to <code>service_tickets.fireflies_url</code> + pull AI summary into notes feed.' },
+  { name: 'Freightcom (via ClickShip)', status: 'partial', role: 'Input + Event Sink — freight + labels',
+    body: 'Authoritative carrier-rate + label provider for Canadian LTL. Quotes pulled to <code>orders.freight_estimate_usd</code>; label print + tracking push at Fulfillment label step. P2: <code>freight_quotes</code> child table for re-quote history. Dual-call posture: keep Freightcom for CA LTL discount, evaluate EasyPost for US parcel only.' },
+  { name: 'QuickBooks Online', status: 'planned', role: 'Event Sink — Planned P1',
+    body: 'Today: not integrated; weekly manual reconciliation. P1: <code>qbo-daily-summary</code> nightly edge function aggregates day\'s orders + refunds + Sezzle payouts by <code>(currency, payment_channel)</code>, posts one journal per group via OAuth 2.0, writes <code>qbo_daily_journals</code> audit table. Replacement orders routed to <code>warranty_reserve</code> GL — never double-counts revenue.' },
+];
+
+const RECOMMENDED = [
+  { name: 'EasyPost or Shippo', use: 'US parcel rate-shop layer alongside Freightcom (CA LTL stays on ClickShip)', p: 'P2', e: 'M', why: 'Vendor-lock-in hedge; bring-your-own-account economics win for US parcel only' },
+  { name: 'Ramp', use: 'Spend management + corp cards; pull transactions for per-unit COGS truth', p: 'P2', e: 'M', why: 'Strongest QBO integration in spend-management category; real-time GL coding suggestions' },
+  { name: 'Linear or GitHub Issues', use: 'Bidirectional bug-link from Service tickets to engineering tracker', p: 'P2', e: 'S', why: 'Plain / Linear pattern. Closes "we fixed it but never told the customer" gap' },
+  { name: 'Stripe Tax', use: 'Multi-jurisdiction sales tax (CA HST/GST/PST + US sales tax)', p: 'P3', e: 'S', why: 'Sufficient up to ~$5M ARR; lower integration cost than Avalara' },
+  { name: 'Slack', use: 'Team alerts: refund approval requests, SLA breaches, telemetry anomalies', p: 'P3', e: 'S', why: 'Operator notifications without leaving the desktop they already have open' },
+  { name: 'Okendo or Junip (reviews)', use: '5-star → referral flow / 1-2-star → CS ticket auto-creation', p: 'P3', e: 'S', why: 'Closes review-to-CRM loop; events fire into Klaviyo + makeLILA' },
+  { name: 'Sezzle API', use: 'Direct sync of Sezzle payment + refund events (inferred via Shopify today)', p: 'P3', e: 'S', why: 'Removes Sezzle reconciliation guesswork in QBO daily journal' },
+  { name: 'Notion API', use: 'Knowledge base + public status page backing store', p: 'P3', e: 'M', why: 'Ops can publish known-issues + FAQ without a deploy' },
+  { name: 'Fireflies API', use: 'Auto-attach transcript URL + summary to service tickets after diagnosis call', p: 'P3', e: 'S', why: 'Closes the loop with §6.13' },
+  { name: 'n8n (self-hosted)', use: 'Thin automation layer for cross-system rules (vs in-app workflow editor)', p: 'P3', e: 'M', why: 'n8n self-host is the right tier when in-app rules grow complex. Defer until demand exists' },
+];
+
+/* ──────────────────────────────────────────────────────────────────────────
+   PERSONAS + CLICKABLE FLOWS
+   ────────────────────────────────────────────────────────────────────────── */
+
+const PERSONAS = [
+  {
+    id: 'pedrum', name: 'Pedrum Amin', role: 'Sales Lead',
+    initials: 'PA',
+    modules: ['OrderReview', 'Customers', 'Marketing', 'Templates'],
+    daily: ['Validate Pending orders pre-fulfillment', 'Monitor lead attribution chips on JourneyTab', 'Review Klaviyo + Facebook campaign performance'],
+    weekly: ['CAC by channel review', 'HubSpot sequence performance', 'Conversion funnel'],
+    flow: [
+      { title: 'Morning standup — Pending orders triage', module: 'OrderReview',
+        what: 'Open OrderReview, Pending tab. New Shopify-synced orders from overnight.',
+        looks_for: ['Orders flagged red on the readiness checklist', 'Orders with address-verification mismatches (Google Maps + Claude verdict)', 'Replacement orders awaiting confirmation'],
+        actions: ['Click each row to review AddressCard + LineItemsCard + FreightCard', 'Confirm or flag — flagged items go to "Out" tab for downstream resolution', 'For US shipments, glance at freight estimate vs threshold'],
+        kpis: ['Time from Shopify sync to confirmation', 'Flag rate per week', '% requiring address correction'] },
+      { title: 'Mid-morning — campaign performance review', module: 'Marketing',
+        what: 'Open Marketing → CampaignsTab. View overnight Facebook Ads + Klaviyo + HubSpot performance.',
+        looks_for: ['Cost-per-click trending up week-over-week', 'Conversion rate by campaign', 'CAC vs LTV ratio per channel'],
+        actions: ['Drill into a campaign to see lead → customer conversion funnel', 'Identify under-performing creatives for swap-out', 'Flag campaigns where CAC > 0.4 × LTV for review'],
+        kpis: ['Facebook spend / orders attributed', 'Klaviyo conversion rate by flow', 'HubSpot sequence touch → close ratio'],
+        note: 'PLANNED P1 — module ships in Q3 2026' },
+      { title: 'Customer review — at-risk accounts', module: 'Customers',
+        what: 'Open Customers → JourneyTab. Filter by "at_risk" stage + Klaviyo churn-risk chip.',
+        looks_for: ['Customers in routine_use stage with declining telemetry', 'Customers with 30+ days since last positive contact', 'Repeat-return customers (replacement chain)'],
+        actions: ['Click a customer to open detail panel', 'Open the right-side widgets sidebar — open tickets + recent orders + linked machines + churn risk', 'Manually override journey stage if inference is wrong'],
+        kpis: ['# at-risk customers contacted this week', 'Manual override rate (indicator of classifier drift)'],
+        note: 'Sidebar widgets PLANNED P2; lead attribution chips PLANNED P1' },
+      { title: 'Outreach via Templates', module: 'Templates',
+        what: 'For each at-risk customer or pending replacement, send templated comms.',
+        looks_for: ['Customer phone + email present', 'Right template for the scenario (missing phone, address verify, replacement shipped, status update)'],
+        actions: ['Select template, autofill variables, send via Resend (email) or Quo (SMS)', 'Log goes to activity_log automatically'],
+        kpis: ['# customer touchpoints per week', 'Template usage breakdown'] },
+      { title: 'Weekly close — CAC + revenue forecast', module: 'Finance (restricted) / Marketing',
+        what: 'End-of-week: review SalesProjectionPanel (Finance, restricted access). Cross-check pipeline-driven vs rolling-average forecast.',
+        looks_for: ['Projected revenue vs company OKR pace', 'Pipeline-driven model delta from baseline (over/under-delivering)'],
+        actions: ['Adjust seasonality_curve if needed (manual input)', 'Flag projection gaps to George + Huayi'],
+        kpis: ['Quarter-to-date revenue vs OKR', 'Projection accuracy vs prior-quarter actuals'],
+        note: 'Finance restricted to George + Huayi today; Pedrum reads via SalesProjection only when given temp access. Open question (§14).' },
+    ],
+  },
+  {
+    id: 'reina', name: 'Reina', role: 'Onboarding &amp; Customer Experience',
+    initials: 'RE',
+    modules: ['Service', 'Customers', 'Templates'],
+    daily: ['Send welcome SMS to new customers', 'Book welcome calls via Calendly', 'Track Day 1 / 3 / 7 / 14 / 30 onboarding signals', 'Resolve onboarding-tab tickets'],
+    weekly: ['Onboarding completion rate', 'Day-7 troubleshooting volume', 'Day-21 review-request response rate'],
+    flow: [
+      { title: 'Morning — new customer queue', module: 'Service → Onboarding',
+        what: 'Open Service → Onboarding tab. Customers whose units shipped in the last 7 days.',
+        looks_for: ['New customers without a Day 1 unbox SMS sent', 'Customers who haven\'t opened a Klaviyo welcome email', 'Customers with first-use telemetry signals (machine powered on for the first time)'],
+        actions: ['Send Day 1 unbox SMS via Templates', 'Book a 15-min welcome call via Calendly link', 'Mark onboarding step complete; activity_log captures the flow'],
+        kpis: ['# Day 1 SMS sent within 24h of unit_shipped event', 'Welcome call booking rate'] },
+      { title: 'Day 7 signal check', module: 'Service → Onboarding + Dashboard',
+        what: 'Filter Onboarding tab for customers at Day 7 post-ship. Cross-check Dashboard for first-use telemetry.',
+        looks_for: ['Customers with no first-use telemetry by Day 7 (likely not set up)', 'Customers with NO_BME_DATA or DIAGNOSE status', 'Customers who haven\'t responded to Day 3 first-use tips SMS'],
+        actions: ['Reach out via Quo SMS using "compost_drying_tip" or "first_use_check_in" canned template', 'For NO_BME_DATA: open a Service ticket with category=onboarding_diagnose', 'For unresponsive customers: schedule a phone follow-up'],
+        kpis: ['Day 7 telemetry-active rate', 'Day 7 → Day 14 first-use success rate'] },
+      { title: 'Inbox triage — onboarding-tagged threads', module: 'Service → Inbox',
+        what: 'Open Service → Inbox. Filter by topic=onboarding or recent customer (< 30 days post-ship).',
+        looks_for: ['"How do I add scraps?" / "Where do I plug it in?" / "Why is the lid not closing?" — classic onboarding questions', 'Classifier-flagged topics: onboarding_setup / onboarding_diagnose'],
+        actions: ['Promote inbox thread to a Service ticket via Promote modal', 'Assign owner = Reina, priority = P3', 'Respond using a Templates-grounded reply (AI draft planned P2)'],
+        kpis: ['Inbox response time (median)', 'Onboarding ticket resolution time'] },
+      { title: 'Day 21 review request + Day 30 routine_use transition', module: 'Customers + Templates',
+        what: 'Day 21 cohort: send review-request SMS (Trustpilot link from Templates). Day 30: confirm transition from onboarding → routine_use stage.',
+        looks_for: ['Customers with 5-star reviews → trigger referral flow', 'Customers without telemetry activity by Day 30 → flag for re-engagement'],
+        actions: ['Send review request via Templates (Trustpilot link, NEVER guessed URL per backlog #72)', 'Manually advance journey stage if needed', 'Open ticket if Day 30 telemetry shows trouble'],
+        kpis: ['Review submission rate', 'Day 30 routine_use rate'] },
+      { title: 'OKR check-in (My KPIs)', module: 'ActivityLog → OKRs',
+        what: 'End of day: open ActivityLog → My OKRs tab. Review individual KPIs derived from activity_log.',
+        looks_for: ['Onboarding SMS sent count (target: 100% of unit_shipped events within 24h)', 'Welcome calls booked', 'Tickets resolved'],
+        actions: ['If pace is behind, batch-send pending Day 1 messages', 'Flag missing data if classifier missed a thread'],
+        kpis: ['Individual KPIs derived from action_types: onboarding_sms_sent, calendly_booked, ticket_resolved'],
+        note: 'OKR module PLANNED P2 — depends on activity_log entity refs' },
+    ],
+  },
+  {
+    id: 'george', name: 'George Yin', role: 'Operations Lead',
+    initials: 'GY',
+    modules: ['PostShipment', 'Finance (restricted)', 'ActivityLog', 'OrderReview'],
+    daily: ['Approve refunds in PostShipment', 'Sign off on returns disposition', 'Watch activity stream for anomalies', 'Review SLA-aging tickets'],
+    weekly: ['QBO daily-summary journal reconciliation', 'Returns Pareto by responsible team', 'Finance: review SalesProjection vs OKR pace'],
+    flow: [
+      { title: 'Morning — activity stream + KPI scan', module: 'ActivityLog',
+        what: 'Open ActivityLog. Review yesterday\'s activity counts + KPI tiles + company OKR progress.',
+        looks_for: ['Anomalies: a quiet day for a high-volume action_type indicates an outage', 'Refunds pending finance review (his queue)', 'SLA-breach events overnight'],
+        actions: ['Open the Company OKRs view — pace per OKR', 'Drill into any tile to see underlying activity_log rows', 'Note flags for the team standup'],
+        kpis: ['Company OKR progress (revenue, units shipped, ticket SLA hit-rate)'] },
+      { title: 'Refund approval queue', module: 'PostShipment → Refunds',
+        what: 'Open PostShipment → Refunds. Filter status=pending_finance_review.',
+        looks_for: ['Refund amount correctness vs original payment summary', 'Refund method selection (Shopify, Sezzle, QBO CC, e-transfer, store credit)', 'Partial refund justification (correction_notes)', 'Returned-unit grade + recoverable_value_usd'],
+        actions: ['Click approveRefund() — gated by MANAGER/FINANCE_EMAILS (planned: profiles.role)', 'Add correction note for partial refunds', 'For replacement-not-refund cases: confirm $0 draft order pattern, NOT refund + reorder'],
+        kpis: ['Approval median latency', 'Total refund volume CAD/USD per week', 'Recoverable-value % per return'] },
+      { title: 'Returns disposition signoff', module: 'PostShipment → Returns',
+        what: 'Open PostShipment → Returns. Review InspectionPanel for newly-received units.',
+        looks_for: ['Grade (A_resale / B_refurbish / C_secondary / D_scrap)', 'Disposition routing (restock / refurbish / RTV / scrap / parts_harvest)', 'Responsible team (manufacturing / shipping / CX / software / financing)'],
+        actions: ['Confirm scan-verified serial + grade + disposition before refund unlocks', 'Route restock units back to Stock ready pool; route refurbish to Build', 'Open a Build defect ticket if responsible_team = manufacturing'],
+        kpis: ['Returns by responsible team Pareto', 'Grade distribution', 'Time from receive → inspect → disposition'],
+        note: 'Disposition + grade columns PLANNED P1 — closes backlog #2 + #79' },
+      { title: 'Finance — QBO daily-summary review', module: 'Finance (restricted)',
+        what: 'Open Finance → JournalPanel (restricted: George + Huayi). Review last night\'s journal posts.',
+        looks_for: ['Failed posts → exception rows', 'Daily summary by (currency, payment_channel) groups', 'Replacement-order rows correctly routed to warranty_reserve GL (not double-counted revenue)'],
+        actions: ['Click Repost for any failures', 'Click View-in-QBO to verify the journal landed correctly', 'Reconcile against bank deposit'],
+        kpis: ['Daily summary post success rate', 'Reconciliation variance', 'Time savings vs prior manual process'],
+        note: 'Finance module PLANNED P1 — three-layer RBAC enforcement' },
+      { title: 'Finance — sales + production projection', module: 'Finance (restricted)',
+        what: 'Open Finance → SalesProjectionPanel + ProductionProjectionPanel.',
+        looks_for: ['Projected revenue vs company OKR pace', 'P100X stock-out forecast vs replacement queue (Kristen + Cheryl + future)', 'Risk chips on any batch < 30 days from stock-out'],
+        actions: ['If projection < OKR pace: discuss with Pedrum (campaigns) + Raymond (fulfillment)', 'If stock-out risk: discuss expedited shipping with manufacturer'],
+        kpis: ['QTD revenue vs OKR', 'Days-of-supply per batch', 'Stock-out forecast accuracy'],
+        note: 'SalesProjectionPanel PLANNED P2; ProductionProjectionPanel PLANNED P2' },
+      { title: 'OKR ownership (Company OKRs)', module: 'ActivityLog → OKRs',
+        what: 'Weekly: review Company OKRs tab. Edit targets, mark on-track/behind/ahead.',
+        looks_for: ['Q3 2026 OKRs: ship 200 units, resolve 95% P1 tickets w/in 24h SLA, revenue 250k CAD, net churn < 5%', 'Pace projection — extrapolate to EOQ'],
+        actions: ['Edit targets if scope changed', 'Surface gaps to team standup'],
+        kpis: ['OKR completion at EOQ'],
+        note: 'OKR module PLANNED P2' },
+    ],
+  },
+  {
+    id: 'junaid', name: 'Junaid Siddiqui', role: 'Service Lead',
+    initials: 'JS',
+    modules: ['Service', 'Dashboard', 'Customers'],
+    daily: ['Triage Service Inbox', 'Manage Support Tickets queue', 'Book diagnosis calls', 'Run Repair workflow', 'Respond to inbound Quo SMS'],
+    weekly: ['Resolution time SLA review', 'Topic classifier accuracy check', 'Open ticket aging report'],
+    flow: [
+      { title: 'Morning — Inbox triage', module: 'Service → Inbox',
+        what: 'Open Service → Inbox. Gmail-synced threads + classifier topic + suggested action.',
+        looks_for: ['Classifier confidence < 70% (manual review needed)', 'Topic = "return_hardware_defect" or "warranty_replacement" → flag for repair flow', 'Replies on existing tickets → auto-link via conversation threading'],
+        actions: ['Promote inbox thread → Service ticket via PromoteToTicketModal', 'Assign owner + priority based on classifier hints', 'Override classification if wrong'],
+        kpis: ['Inbox → ticket conversion rate', 'Classifier accuracy %', 'Average triage time'] },
+      { title: 'Support Tickets queue management', module: 'Service → Support Tickets',
+        what: 'Open Support Tickets. Default view = open tickets sorted by SLA breach risk.',
+        looks_for: ['P1 tickets > 1h since first response (breach imminent)', 'P2 tickets > 4h', 'Tickets with telemetry-auto source (auto-created from non-OK states)', 'Tickets with new attachments (auto-noted in feed)'],
+        actions: ['Open ticket → view device-context header (firmware + QC + telemetry + repair history chips)', 'Send reply via Templates (AI-grounded draft suggested)', 'Update status: open → waiting_on_us → waiting_on_customer → closed'],
+        kpis: ['First response time (P50, P95)', 'Resolution time by priority', 'SLA hit rate'],
+        note: 'Device-context header PLANNED P1; SLA aging + auto-escalation PLANNED P1' },
+      { title: 'Telemetry-auto ticket review', module: 'Service + Dashboard',
+        what: 'Filter Support Tickets by source=telemetry_auto. Cross-check Dashboard for the unit.',
+        looks_for: ['Persistent DRY_SOIL > 48h (real signal — operator needs to advise customer)', 'NO_BME_DATA > 24h (sensor fault, advance-exchange candidate)', 'NOT_MIXING > 48h (cross-check humidity activity to rule out current-sensor drift, per backlog #70)'],
+        actions: ['Review the auto-created ticket\'s device-context header', 'Confirm or close-as-false-positive', 'For real signals: book diagnosis call via Calendly link, ship replacement, or send canned tip SMS'],
+        kpis: ['Auto-ticket false-positive rate', 'Time from telemetry signal → operator action'],
+        note: 'Telemetry-auto creation PLANNED P1; depends on Klaviyo Track API' },
+      { title: 'Repair / Replacement workflow', module: 'Service → Support Tickets (category=repair)',
+        what: 'Click ticket category=repair. Use ReplacementPickerModal if a replacement is needed.',
+        looks_for: ['Warranty registration (is unit in coverage? — PLANNED P1)', 'Available parts kits for the defect', 'awaiting_batch_id status if no ready unit for the SKU (Kristen P100X pattern)'],
+        actions: ['Open ReplacementPickerModal → select parts kit or full unit', 'Trigger $0 draft replacement order tagged kind=replacement, linked_ticket_id set', 'For batch-blocked: queue the replacement with awaiting_batch_id', 'Update parent ticket status'],
+        kpis: ['Replacement turnaround time', 'Awaiting-batch queue depth', 'Parts kit usage by defect category'],
+        note: 'Warranty registration entity PLANNED P1; parts_kit objects P3' },
+      { title: 'End of day — open ticket aging review', module: 'Service + ActivityLog',
+        what: 'Review open tickets sorted by age. Cross-check My OKRs for ticket-resolution velocity.',
+        looks_for: ['Tickets in waiting_on_customer > 14d (close-or-nudge candidates)', 'Tickets blocked on engineering (Linear/GitHub link planned P3)', 'My weekly ticket-resolution count vs target'],
+        actions: ['Send Day 14 nudge SMS for waiting_on_customer', 'Close stale tickets with auto-close note', 'Update team standup notes'],
+        kpis: ['Open ticket median age', 'Stale ticket count > 14d', 'Personal weekly resolution count'] },
+    ],
+  },
+  {
+    id: 'raymond', name: 'Raymond Zhu', role: 'Fulfillment Lead',
+    initials: 'RZ',
+    modules: ['Fulfillment', 'Build', 'Stock', 'OrderReview'],
+    daily: ['Process Fulfillment Queue', 'Manage Shelf', 'Check Stock for available inventory', 'QC defects in Build'],
+    weekly: ['Fulfillment throughput', 'First-pass-yield by station', 'Inventory accuracy audit'],
+    flow: [
+      { title: 'Morning — Fulfillment Queue', module: 'Fulfillment → Queue',
+        what: 'Open Fulfillment → Queue. Orders ready to ship (confirmed in OrderReview).',
+        looks_for: ['Priority orders (sales-flagged in OrderReview)', 'Replacements queued for shipping', 'Orders with carrier preference (CA LTL vs US parcel)'],
+        actions: ['Step 1 — assign serial from Stock available pool', 'Step 2 — confirm test report URL or upload test PDF', 'Step 3 — confirm shipping label (Freightcom / ClickShip / other carrier)', 'Step 4 — confirm dock checklist (printed / affixed / docked / notified / picked up)', 'Step 5 — send fulfillment email via Resend', 'Step 6 — auto-marked fulfilled, Shopify push fires'],
+        kpis: ['Daily throughput (units fulfilled)', 'Step latency (P50)', 'Backfill rate (units shipped without going through queue)'] },
+      { title: 'Shelf management', module: 'Fulfillment → Shelf',
+        what: 'Open Fulfillment → Shelf. 25-unit skid layout.',
+        looks_for: ['Available slots for next batch', 'Reserved slots for queued orders', 'Rework slots (units flagged in QC)'],
+        actions: ['Swap slots via swap_shelf_slots RPC', 'Mark layout reviewed (confirmShelfLayout)', 'Resolve reworks once Build fixes'],
+        kpis: ['Skid utilization %', 'Rework resolution time'] },
+      { title: 'Stock inventory check', module: 'Stock → Units',
+        what: 'Open Stock → Units. Filter status=ready.',
+        looks_for: ['Ready count by batch (P150, P50N, P100, P100X)', 'Reserved count (units assigned to orders in queue)', 'Quarantine count (returns under inspection)'],
+        actions: ['If ready < threshold for a batch: alert George + Huayi via Slack (planned P3) / activity_log', 'If quarantine units cleared inspection: route to ready via PostShipment Returns disposition'],
+        kpis: ['Days-of-supply by batch', 'Ready vs reserved ratio'],
+        note: 'Quarantine status PLANNED P1' },
+      { title: 'Build pipeline monitoring', module: 'Build',
+        what: 'Open Build → pipeline board.',
+        looks_for: ['Units in-production by batch', 'QC stations with high defect rate', 'Firmware version distribution per batch'],
+        actions: ['Log station passes (planned: StationPassLogger.tsx with photo upload)', 'Flag defects with photo evidence', 'Update technician + firmware version on completion'],
+        kpis: ['First-pass yield by station', 'Defects by technician', 'Build velocity per batch'],
+        note: 'build_station_passes promotion PLANNED P2' },
+      { title: 'End of day — Fulfillment History audit', module: 'Fulfillment → History',
+        what: 'Open Fulfillment → History. Cross-check shipped units against Shopify push status.',
+        looks_for: ['Push failures (re-queue)', 'Tracking number missing for shipped orders', 'Pre-imported Excel rows not yet matched to Shopify orders (backlog #77)'],
+        actions: ['Manually push failed Shopify fulfillments', 'Backfill tracking numbers from Freightcom', 'Flag mystery rows to George'],
+        kpis: ['Push success rate', 'Tracking attach %'] },
+    ],
+  },
+  {
+    id: 'huayi', name: 'Huayi Gao', role: 'Product',
+    initials: 'HG',
+    modules: ['All modules (read)', 'Dashboard', 'ActivityLog', 'Finance (restricted)'],
+    daily: ['Review Dashboard machine telemetry', 'Triage feature backlog', 'Monitor activity_log for product signals'],
+    weekly: ['Company OKR progress', 'Customer feedback synthesis', 'Roadmap re-prioritization'],
+    flow: [
+      { title: 'Morning — Dashboard telemetry sweep', module: 'Dashboard',
+        what: 'Open Dashboard. Scan live machines across all customers.',
+        looks_for: ['New customers in the sidebar (recently shipped)', 'Units in non-OK states (DRY_SOIL / SOAKED_SOIL / NOT_MIXING / OPEN_LID / NO_BME_DATA / DIAGNOSE)', 'Telemetry anomalies (sudden drops, classifier flickering)'],
+        actions: ['Spot-check 3-5 random units for classifier accuracy', 'Label dataset windows for ML training', 'For known false-positive patterns: tune thresholds via lib/dashboard.ts'],
+        kpis: ['Classifier accuracy per status', 'False-positive rate per classifier', 'Telemetry coverage (% of shipped units transmitting)'] },
+      { title: 'ActivityLog — company OKR + product signals', module: 'ActivityLog → OKRs',
+        what: 'Open ActivityLog → Company OKRs.',
+        looks_for: ['Pace per OKR (units shipped, revenue, SLA hit-rate, NPS)', 'Action-type anomalies (a quiet category = something broken)', 'Backlog item completion velocity'],
+        actions: ['Update company OKRs if scope changed', 'Drill into anomalies via activity_log entity refs (planned P2)', 'Synthesize for weekly product review'],
+        kpis: ['Quarterly OKR completion %', 'Feature delivery velocity'],
+        note: 'OKR module PLANNED P2' },
+      { title: 'Finance — sales + production projection', module: 'Finance (restricted)',
+        what: 'Open Finance. Same access as George.',
+        looks_for: ['Projected revenue vs annual plan', 'Stock-out forecast — match production roadmap with sales projection', 'Replacement queue depth per batch'],
+        actions: ['Adjust seasonality_curve manual input', 'Flag production bottlenecks to manufacturer (Lezhong has factory contacts)', 'Tune SalesProjection model inputs'],
+        kpis: ['Model accuracy (planned vs actual)', 'Forecast lead time vs reality'],
+        note: 'Finance module PLANNED P1/P2' },
+      { title: 'Cross-module feature audit', module: 'All',
+        what: 'Walk through each module from a fresh user POV. Backlog identification.',
+        looks_for: ['UI friction (operators complaining)', 'Data inconsistencies (e.g., units.customer_name vs customers.full_name divergence from #67)', 'Missing affordances (e.g., per-serial timeline missing → backlog #12)'],
+        actions: ['Open new backlog entries in docs/feature-backlog-alpha-feedback.md', 'Sequence into P1/P2/P3 with proposal alignment', 'Communicate to engineering'],
+        kpis: ['Backlog throughput', 'Backlog → ship cycle time'] },
+      { title: 'Strategic review — competitive proposal alignment', module: 'External + docs/',
+        what: 'Reference docs/competitive-landscape-and-proposal-2026-06-06.md.',
+        looks_for: ['New market entrants / vendor pricing changes', 'Industry patterns worth borrowing', 'HubSpot decommission trigger conditions'],
+        actions: ['Update PRD if positioning shifts', 'Reschedule P1/P2/P3 if vendor calculus changes', 'Update changelog'],
+        kpis: ['PRD versioning velocity', 'Decision-to-action latency'] },
+    ],
+  },
+  {
+    id: 'lezhong', name: 'Lezhong', role: 'Engineering (Hardware + Firmware)',
+    initials: 'LZ',
+    modules: ['Build', 'Dashboard', 'Stock'],
+    daily: ['Review QC defects in Build', 'Telemetry anomaly review', 'Firmware version tracking'],
+    weekly: ['Defect Pareto by component', 'Firmware rollout monitoring', 'Manufacturer communication'],
+    flow: [
+      { title: 'Morning — Build defect review', module: 'Build',
+        what: 'Open Build → pipeline board. Filter for in-production with logged defects.',
+        looks_for: ['Defects by station (electrical vs mechanical vs firmware vs cosmetic)', 'Repeat defects same station across units (pattern indicates systemic issue)', 'Firmware versions failing QC vs passing'],
+        actions: ['Open UnitDetail for any flagged unit', 'Review defect notes + technician + photo evidence', 'If pattern: flag to manufacturer + open backlog item for hardware fix'],
+        kpis: ['First-pass yield by station', 'Defect Pareto by component', 'Firmware version pass rate'],
+        note: 'build_station_passes promotion PLANNED P2 — unlocks per-station first-pass yield' },
+      { title: 'Telemetry anomaly scan', module: 'Dashboard',
+        what: 'Open Dashboard. Filter by recent firmware version + unusual patterns.',
+        looks_for: ['NOT_MIXING false-positives (backlog #70 — current-sensor drift)', 'NO_BME_DATA clusters (BME sensor failure pattern)', 'Firmware-version-specific issues'],
+        actions: ['Tune classifier thresholds in lib/dashboard.ts', 'Flag known-defective firmware versions for rework', 'Coordinate OTA firmware push with manufacturer'],
+        kpis: ['Classifier false-positive rate per firmware version', 'OTA success rate'] },
+      { title: 'Stock — quarantine inspection', module: 'Stock + PostShipment',
+        what: 'For units in quarantine (returned for hardware defect), inspect with Lezhong\'s hardware lens.',
+        looks_for: ['Reproduce defect described in return reason', 'Firmware version + serial → trace via genealogy (planned P3) if multi-unit pattern', 'Component-lot identification (which lot of augers / motors / BMEs is implicated)'],
+        actions: ['Confirm disposition (refurbish vs scrap vs RTV)', 'Document defect for manufacturer', 'Add to Build defect Pareto'],
+        kpis: ['Diagnosed defect rate', 'Time-to-diagnose'],
+        note: 'Component-lot genealogy PLANNED P3 — strategic deferred' },
+      { title: 'Manufacturer communication', module: 'External (WeChat + Fireflies + Google Docs)',
+        what: 'Weekly status with the manufacturer in China.',
+        looks_for: ['P100X batch production progress (end-of-July target)', 'Component lot updates', 'OTA firmware coordination'],
+        actions: ['Update Batch.notes in Stock with manufacturer feedback', 'Record meeting via Fireflies; attach summary to Stock batch detail (planned)', 'Sync ETA changes back to OrderReview replacement queue (Kristen + Cheryl etc)'],
+        kpis: ['Batch ETA accuracy', 'Manufacturer response time'] },
+    ],
+  },
+];
+
+/* ──────────────────────────────────────────────────────────────────────────
+   BENCHMARK COMPARISON
+   ────────────────────────────────────────────────────────────────────────── */
+
+const BENCHMARK = {
+  crm: {
+    columns: ['Capability', 'makeLILA', 'Salesforce', 'HubSpot', 'Attio', 'Folk', 'Pipedrive'],
+    rows: [
+      ['Custom data model', { v: 'YES — typed Postgres', c: 'yes' }, { v: 'Junction tables for M2M', c: 'partial' }, { v: 'Enterprise-only', c: 'partial' }, { v: 'YES — graph data model (best)', c: 'yes' }, { v: 'NO', c: 'no' }, { v: 'Deals-pipeline only', c: 'no' }],
+      ['Customer 360 record page', { v: 'PLANNED P2 — sidebar widgets', c: 'partial' }, { v: 'YES', c: 'yes' }, { v: 'YES', c: 'yes' }, { v: 'YES — configurable', c: 'yes' }, { v: 'Limited', c: 'partial' }, { v: 'NO', c: 'no' }],
+      ['Unified activity timeline', { v: 'PLANNED — per-serial timeline via activity_log (P2)', c: 'partial' }, { v: 'YES', c: 'yes' }, { v: 'YES', c: 'yes' }, { v: 'YES', c: 'yes' }, { v: 'Limited', c: 'partial' }, { v: 'Activities-only', c: 'partial' }],
+      ['Customer health scoring', { v: 'PLANNED — Klaviyo predictive pull P2', c: 'partial' }, { v: 'Einstein', c: 'yes' }, { v: 'Limited', c: 'partial' }, { v: 'Limited', c: 'partial' }, { v: 'NO', c: 'no' }, { v: 'NO', c: 'no' }],
+      ['Lifecycle stages w/ overrides', { v: 'YES — journey_stage + override', c: 'yes' }, { v: 'YES', c: 'yes' }, { v: 'YES (manual)', c: 'yes' }, { v: 'YES (configurable)', c: 'yes' }, { v: 'Limited', c: 'partial' }, { v: 'NO', c: 'no' }],
+      ['AI auto-summarization', { v: 'PLANNED P2 (Service + Customers)', c: 'partial' }, { v: 'Agentforce (Unlimited tier only)', c: 'yes' }, { v: 'Breeze (all tiers)', c: 'yes' }, { v: 'Attio AI', c: 'yes' }, { v: 'NO', c: 'no' }, { v: 'NO', c: 'no' }],
+      ['Workflow automation', { v: 'Klaviyo + Supabase cron; n8n P3', c: 'partial' }, { v: 'Salesforce Flow (powerful, hard)', c: 'yes' }, { v: 'HubSpot Workflows (best mid-market)', c: 'yes' }, { v: 'Limited — uses n8n', c: 'partial' }, { v: 'NO', c: 'no' }, { v: 'Limited', c: 'partial' }],
+      ['Cost (annual, 5-7 users)', { v: '$0 (self-built on Supabase)', c: 'yes' }, { v: '~$15K+', c: 'no' }, { v: '~$3-7K', c: 'partial' }, { v: '~$3-5K', c: 'partial' }, { v: '~$1-2K', c: 'partial' }, { v: '~$2-4K', c: 'partial' }],
+    ],
+  },
+  service: {
+    columns: ['Capability', 'makeLILA', 'Zendesk', 'Intercom', 'Plain', 'Pylon', 'Front', 'Salesforce FSL'],
+    rows: [
+      ['Ticket FSM (status + owner + priority)', { v: 'YES', c: 'yes' }, { v: 'YES', c: 'yes' }, { v: 'YES (conversations)', c: 'yes' }, { v: 'YES', c: 'yes' }, { v: 'YES', c: 'yes' }, { v: 'YES', c: 'yes' }, { v: 'YES', c: 'yes' }],
+      ['Photo/video attachments', { v: 'YES (with auto-note feed)', c: 'yes' }, { v: 'YES', c: 'yes' }, { v: 'YES', c: 'yes' }, { v: 'YES', c: 'yes' }, { v: 'YES', c: 'yes' }, { v: 'YES', c: 'yes' }, { v: 'YES', c: 'yes' }],
+      ['SLA aging + auto-escalation', { v: 'PLANNED P1', c: 'partial' }, { v: 'YES (best)', c: 'yes' }, { v: 'Limited', c: 'partial' }, { v: 'API-driven', c: 'partial' }, { v: 'YES', c: 'yes' }, { v: 'YES', c: 'yes' }, { v: 'YES', c: 'yes' }],
+      ['Device-record join on ticket', { v: 'PLANNED P1 (firmware + QC + telemetry chip header)', c: 'partial' }, { v: 'Custom fields only', c: 'no' }, { v: 'NO', c: 'no' }, { v: 'NO', c: 'no' }, { v: 'NO', c: 'no' }, { v: 'NO', c: 'no' }, { v: 'YES — Asset object', c: 'yes' }],
+      ['Telemetry-driven auto-ticket', { v: 'PLANNED P1', c: 'partial' }, { v: 'Field Service only', c: 'partial' }, { v: 'NO', c: 'no' }, { v: 'NO', c: 'no' }, { v: 'NO', c: 'no' }, { v: 'NO', c: 'no' }, { v: 'YES — Connected', c: 'yes' }],
+      ['AI draft replies (RAG over KB)', { v: 'PLANNED P2 (Templates as corpus)', c: 'partial' }, { v: 'Copilot ($100+/agent)', c: 'yes' }, { v: 'Fin AI ($0.99/resolution)', c: 'yes' }, { v: 'Plain AI', c: 'yes' }, { v: 'Pylon AI', c: 'yes' }, { v: 'Front AI', c: 'yes' }, { v: 'Agentforce', c: 'yes' }],
+      ['Engineering linkage (Linear/GitHub)', { v: 'PLANNED P3', c: 'partial' }, { v: 'Apps available', c: 'partial' }, { v: 'Apps available', c: 'partial' }, { v: 'YES (best — bidirectional)', c: 'yes' }, { v: 'YES', c: 'yes' }, { v: 'Apps available', c: 'partial' }, { v: 'YES', c: 'yes' }],
+      ['Diagnosis call booking (Calendly + Meet)', { v: 'YES (#75 shipped)', c: 'yes' }, { v: 'Apps available', c: 'partial' }, { v: 'YES', c: 'yes' }, { v: 'YES', c: 'yes' }, { v: 'YES', c: 'yes' }, { v: 'YES', c: 'yes' }, { v: 'YES', c: 'yes' }],
+      ['Cost (annual, 5-7 users)', { v: '$0', c: 'yes' }, { v: '~$5-12K + AI add-ons', c: 'no' }, { v: '~$5-10K + Fin per-resolution', c: 'no' }, { v: '~$5-8K (API-priced)', c: 'partial' }, { v: '~$7-15K (Slack-first)', c: 'no' }, { v: '~$4-8K', c: 'partial' }, { v: '~$15K+ Connected, ~$45K Asset', c: 'no' }],
+    ],
+  },
+  erp: {
+    columns: ['Capability', 'makeLILA', 'NetSuite', 'SAP B1', 'Katana', 'Cin7 Core', 'ShipHero', 'Loop Returns'],
+    rows: [
+      ['Serial-level unit tracking', { v: 'YES', c: 'yes' }, { v: 'YES', c: 'yes' }, { v: 'YES', c: 'yes' }, { v: 'YES (best for makers)', c: 'yes' }, { v: 'YES', c: 'yes' }, { v: 'YES (at pack step)', c: 'yes' }, { v: 'NO', c: 'no' }],
+      ['Manufacturing pipeline board (Build)', { v: 'YES', c: 'yes' }, { v: 'YES (add-on)', c: 'partial' }, { v: 'YES (mature BOM)', c: 'yes' }, { v: 'YES (best self-serve)', c: 'yes' }, { v: 'Limited', c: 'partial' }, { v: 'NO', c: 'no' }, { v: 'NO', c: 'no' }],
+      ['MES-grade station passes', { v: 'PLANNED P2', c: 'partial' }, { v: 'Add-on (WIP+Routings)', c: 'partial' }, { v: 'YES (mature)', c: 'yes' }, { v: 'YES (Pro tier)', c: 'yes' }, { v: 'Limited', c: 'partial' }, { v: 'NO', c: 'no' }, { v: 'NO', c: 'no' }],
+      ['Returns FSM + grade + disposition', { v: 'PLANNED P1 (overhauling)', c: 'partial' }, { v: 'YES', c: 'yes' }, { v: 'YES', c: 'yes' }, { v: 'NO', c: 'no' }, { v: 'YES', c: 'yes' }, { v: 'Limited', c: 'partial' }, { v: 'YES (best — Shopify-native)', c: 'yes' }],
+      ['Quarantine receiving location', { v: 'PLANNED P1', c: 'partial' }, { v: 'YES', c: 'yes' }, { v: 'YES', c: 'yes' }, { v: 'Limited', c: 'partial' }, { v: 'YES', c: 'yes' }, { v: 'YES (scan-verified)', c: 'yes' }, { v: 'NO', c: 'no' }],
+      ['Multi-carrier freight rate-shop', { v: 'Partial (Freightcom only)', c: 'partial' }, { v: 'YES (add-on)', c: 'partial' }, { v: 'YES (add-on)', c: 'partial' }, { v: 'NO', c: 'no' }, { v: 'NO', c: 'no' }, { v: 'YES', c: 'yes' }, { v: 'NO', c: 'no' }],
+      ['Awaiting-batch queue (replacement)', { v: 'YES (#71 — awaiting_batch_id)', c: 'yes' }, { v: 'YES (Demand Planning)', c: 'yes' }, { v: 'YES (MRP)', c: 'yes' }, { v: 'YES', c: 'yes' }, { v: 'YES', c: 'yes' }, { v: 'NO', c: 'no' }, { v: 'NO', c: 'no' }],
+      ['Cost (annual, 5-7 users)', { v: '$0', c: 'yes' }, { v: '~$60-120K', c: 'no' }, { v: '~$30-70K + impl', c: 'no' }, { v: '~$2.5-7K', c: 'partial' }, { v: '~$4-10K', c: 'partial' }, { v: '~$2-5K', c: 'partial' }, { v: '~$2K', c: 'partial' }],
+    ],
+  },
+  lifecycle: {
+    columns: ['Capability', 'makeLILA', 'Klaviyo', 'Customer.io', 'Iterable', 'Braze', 'Vitally'],
+    rows: [
+      ['Event-driven sequences (server-side)', { v: 'PLANNED P1 — Klaviyo Track firehose', c: 'partial' }, { v: 'YES (best for ecom)', c: 'yes' }, { v: 'YES (best for SaaS/B2B)', c: 'yes' }, { v: 'YES (batch-oriented)', c: 'partial' }, { v: 'YES (enterprise)', c: 'yes' }, { v: 'YES (CS-focused)', c: 'yes' }],
+      ['Predictive CLV / EDNO / churn', { v: 'PLANNED P2 — Klaviyo pull-back', c: 'partial' }, { v: 'YES (best — native)', c: 'yes' }, { v: 'Limited', c: 'partial' }, { v: 'Limited', c: 'partial' }, { v: 'YES', c: 'yes' }, { v: 'Composite health score', c: 'yes' }],
+      ['Multi-channel (email + SMS + push)', { v: 'Email (Resend) + SMS (Quo), Klaviyo email partial', c: 'partial' }, { v: 'YES (best ecom — incl. native reviews)', c: 'yes' }, { v: 'YES', c: 'yes' }, { v: 'YES', c: 'yes' }, { v: 'YES', c: 'yes' }, { v: 'No customer comms', c: 'no' }],
+      ['Lifecycle stage health score', { v: 'PLANNED — lean on Klaviyo predictive', c: 'partial' }, { v: 'Limited', c: 'partial' }, { v: 'Limited', c: 'partial' }, { v: 'Limited', c: 'partial' }, { v: 'Limited', c: 'partial' }, { v: 'YES (best — stage-conditional)', c: 'yes' }],
+      ['Native review collection', { v: 'NO (Trustpilot manual)', c: 'no' }, { v: 'YES (Klaviyo Reviews)', c: 'yes' }, { v: 'NO', c: 'no' }, { v: 'NO', c: 'no' }, { v: 'NO', c: 'no' }, { v: 'NO', c: 'no' }],
+      ['Warehouse data sync', { v: 'PLANNED — Klaviyo Track firehose', c: 'partial' }, { v: 'CDP-light', c: 'partial' }, { v: 'YES', c: 'yes' }, { v: 'YES', c: 'yes' }, { v: 'YES (Currents — bidirectional)', c: 'yes' }, { v: 'YES', c: 'yes' }],
+      ['Cost (annual, 5-7 users / DTC scale)', { v: '$0 self-built — pays Klaviyo only', c: 'yes' }, { v: '~$1.5-12K (volume-based)', c: 'partial' }, { v: '~$1.2-6K', c: 'partial' }, { v: '~$15K+', c: 'no' }, { v: '~$60K+', c: 'no' }, { v: '~$10-20K', c: 'no' }],
+    ],
+  },
+  finance: {
+    columns: ['Capability', 'makeLILA', 'QuickBooks Online', 'Stripe Billing', 'Synder / A2X', 'Ramp', 'Triple Whale'],
+    rows: [
+      ['Daily-summary GL journals (Shopify→QBO)', { v: 'PLANNED P1', c: 'partial' }, { v: 'Manual / per-order', c: 'partial' }, { v: 'NO', c: 'no' }, { v: 'YES (best vendor approach)', c: 'yes' }, { v: 'NO', c: 'no' }, { v: 'NO (analytics only)', c: 'no' }],
+      ['Multi-currency ledger (CAD/USD)', { v: 'PLANNED P1 — per-currency discipline', c: 'partial' }, { v: 'YES (gotcha — credit isolation)', c: 'yes' }, { v: 'YES', c: 'yes' }, { v: 'YES', c: 'yes' }, { v: 'YES', c: 'yes' }, { v: 'YES', c: 'yes' }],
+      ['Per-currency credit isolation', { v: 'PLANNED P1 — discipline pattern', c: 'partial' }, { v: 'YES (Stripe-style)', c: 'yes' }, { v: 'YES (the gotcha source)', c: 'yes' }, { v: 'YES', c: 'yes' }, { v: 'N/A', c: 'no' }, { v: 'N/A', c: 'no' }],
+      ['$0 replacement order pattern (no double-count)', { v: 'YES (Kristen + Cheryl)', c: 'yes' }, { v: 'Manual workaround', c: 'no' }, { v: 'NO', c: 'no' }, { v: 'Workaround needed', c: 'partial' }, { v: 'N/A', c: 'no' }, { v: 'YES (cost-of-goods)', c: 'partial' }],
+      ['Real-time sales projection w/ confidence bands', { v: 'PLANNED P2 (rolling-avg) / P3 (pipeline)', c: 'partial' }, { v: 'NO', c: 'no' }, { v: 'NO', c: 'no' }, { v: 'NO', c: 'no' }, { v: 'NO', c: 'no' }, { v: 'YES (best)', c: 'yes' }],
+      ['Production projection / stock-out forecast', { v: 'PLANNED P2', c: 'partial' }, { v: 'NO', c: 'no' }, { v: 'NO', c: 'no' }, { v: 'NO', c: 'no' }, { v: 'NO', c: 'no' }, { v: 'NO', c: 'no' }],
+      ['Per-unit COGS view (BOM + freight + warranty)', { v: 'PLANNED P3', c: 'partial' }, { v: 'NO', c: 'no' }, { v: 'NO', c: 'no' }, { v: 'NO', c: 'no' }, { v: 'YES (transaction-tagged)', c: 'yes' }, { v: 'YES (best — DTC-tuned)', c: 'yes' }],
+      ['Cost (annual)', { v: '$0', c: 'yes' }, { v: '~$1.5K (QBO + Bench)', c: 'partial' }, { v: '0.5% of recurring + fees', c: 'partial' }, { v: '~$600-1.5K', c: 'partial' }, { v: '$0 (rebate model)', c: 'yes' }, { v: '~$10-25K', c: 'no' }],
+    ],
+  },
+  presale: {
+    columns: ['Capability', 'makeLILA', 'Meta Business Manager', 'Google Ads', 'Klaviyo', 'HubSpot Marketing Hub'],
+    rows: [
+      ['Campaign performance dashboard (in-app)', { v: 'PLANNED P1 — CampaignsTab', c: 'partial' }, { v: 'YES (Meta-only)', c: 'yes' }, { v: 'YES (Google-only)', c: 'yes' }, { v: 'Partial (email campaigns)', c: 'partial' }, { v: 'YES (multi-channel)', c: 'yes' }],
+      ['Lead attribution per customer', { v: 'PLANNED P1 — first_touch / last_touch fields', c: 'partial' }, { v: 'UTM-only', c: 'partial' }, { v: 'UTM-only', c: 'partial' }, { v: 'Partial', c: 'partial' }, { v: 'YES', c: 'yes' }],
+      ['Server-side conversion events (CAPI)', { v: 'PLANNED P2', c: 'partial' }, { v: 'Source — direct', c: 'yes' }, { v: 'GA4 CAPI', c: 'yes' }, { v: 'Via Klaviyo integration', c: 'partial' }, { v: 'Via integration', c: 'partial' }],
+      ['Cost-per-acquisition (CAC) by channel', { v: 'PLANNED P2', c: 'partial' }, { v: 'Meta-only', c: 'partial' }, { v: 'Google-only', c: 'partial' }, { v: 'Partial', c: 'partial' }, { v: 'YES', c: 'yes' }],
+      ['Multi-channel rollup (FB + Google + TikTok)', { v: 'P3 (open question — §14)', c: 'partial' }, { v: 'NO', c: 'no' }, { v: 'NO', c: 'no' }, { v: 'NO', c: 'no' }, { v: 'Limited', c: 'partial' }],
+      ['Lead form → CRM sync', { v: 'PLANNED P1 — Meta Lead Ads webhook', c: 'partial' }, { v: 'YES (direct → CRM)', c: 'yes' }, { v: 'YES', c: 'yes' }, { v: 'YES', c: 'yes' }, { v: 'YES', c: 'yes' }],
+      ['Cost (annual)', { v: '$0 (uses Meta API directly)', c: 'yes' }, { v: '$0 platform', c: 'yes' }, { v: '$0 platform', c: 'yes' }, { v: 'Bundled with Klaviyo lifecycle', c: 'yes' }, { v: '~$10-50K Marketing Hub', c: 'no' }],
+    ],
+  },
+};
+
+const OOS = [
+  '<strong>Replace makeLILA with any incumbent ERP/CRM</strong> (NetSuite, SAP B1, Salesforce, Zendesk, Katana, Cin7) — at 50-200 units/mo the licensing + implementation cost exceeds the entire ops headcount budget. All four research domains agreed independently.',
+  '<strong>Salesforce Field Service Lightning or Aquant install.</strong> Built for fleets of dispatched technicians; VCycene is depot-only. Pattern borrowing (device-record join, asset health score) is in scope at zero install cost.',
+  '<strong>Full Tulip / 21 CFR Part 11 MES compliance.</strong> Non-regulated consumer hardware; 10× Build UX cost for no compliance return.',
+  '<strong>Native iOS / Android apps.</strong> PWA installable to home screen is sufficient. Backlog #80 mobile V1/V2 covers the responsive web tier.',
+  '<strong>Offline-first / sync-when-online.</strong> Operator UX explicitly assumes a live Supabase realtime connection.',
+  '<strong>In-app workflow editor (n8n-style GUI in app).</strong> Klaviyo + Supabase scheduled functions cover all 90-day automation; n8n self-host (P3) is the right tier when complexity grows.',
+  '<strong>Conversation-merging omnichannel inbox across Gmail + Quo + Resend.</strong> Quarter-long rewrite of the messaging spine for marginal triage benefit over per-serial timeline + device-context header.',
+  '<strong>Per-order Shopify-to-QBO sync.</strong> Daily-summary journal (proposal P1 #5) gives better grouping control at zero vendor cost.',
+  '<strong>Homegrown weighted customer health score.</strong> Klaviyo\'s predictive properties are trained on richer data; weights chosen without a validation cohort become operator wallpaper within a sprint.',
+];
+
+const OPEN_QUESTIONS = [
+  '<strong>HubSpot decommission timing.</strong> Pedrum sign-off required on sequence-migration feasibility; depends on Klaviyo Track API firehose being live first.',
+  '<strong>Klaviyo SMS adoption.</strong> Do we move broadcast SMS from Quo to Klaviyo SMS, or keep Quo as the sole SMS surface? Recommendation: Klaviyo for sequence-driven, Quo for 1-on-1.',
+  '<strong>Facebook ad-spend budget visibility.</strong> Does Pedrum want a view that includes Google Ads + TikTok Ads alongside Facebook, or is Facebook sufficient for V1?',
+  '<strong>Customer-facing portal scope.</strong> Deferred; revisit timing tied to alpha-feedback window closing and "where is my order" volume exceeding 20/week.',
+  '<strong>Lead-form ownership.</strong> When HubSpot CRM is decommissioned, do lila.vip lead forms post to makeLILA\'s public form endpoint or to Klaviyo? Recommendation: makeLILA endpoint with optional Klaviyo profile creation downstream.',
+  '<strong>Sezzle reconciliation.</strong> Sezzle events inferred from Shopify. Should we integrate the Sezzle API directly?',
+];
+
+const TIMELINE_RISKS = [
+  '<strong>QBO API multi-currency.</strong> CAD/USD ledger discipline is a known gotcha. Add 1 week of validation for refund + replacement edge cases.',
+  '<strong>Facebook Marketing API auth.</strong> Meta Business System User access tokens have a separate approval flow. Add 1–2 weeks lead time before P1 work can start.',
+  '<strong>Telemetry-driven ticket auto-create false-positive rate.</strong> Backlog #70 documented 75% false positive on NOT_MIXING. Need 2-week shadow run before flipping the switch.',
+  '<strong>RBAC migration on live DB.</strong> Promoting from email-list checks to <code>profiles.role</code> with RLS tightening is single-shot. Schedule with operator notice.',
+  '<strong>Mobile V1 PWA install testing on iOS.</strong> Safari PWA behaviors require physical-device testing; allow 1 extra validation week.',
+  '<strong>Sales projection model accuracy.</strong> Rolling-average has no validation cohort until ~30 days of data accumulates. Pipeline-driven variant deferred to P3 specifically to give rolling-average a chance to calibrate first.',
+];
+
+const SEQUENCING = [
+  '<strong>Week 1–2:</strong> RBAC profiles + canDo/canView + Klaviyo Track API firehose + PaymentCard UI (S items, parallel).',
+  '<strong>Week 3–6:</strong> Returns/Refunds overhaul finishing (grade + disposition + quarantine + #79 net out).',
+  '<strong>Week 4–8:</strong> Device-context header + warranty registration + SLA aging + telemetry-driven ticket auto-create — Service-domain hardening, parallel to Returns finish.',
+  '<strong>Week 6–10:</strong> Finance module skeleton + JournalPanel ships behind RBAC. Depends on Returns being clean.',
+  '<strong>Week 8–12:</strong> Facebook Marketing API + Lead Ads webhook + Mobile V1. Pre-sale visibility lands.',
+  '<strong>Week 12–18:</strong> P2 batch — build_station_passes, Klaviyo predictive pull, freight quote history, activity_log entity refs, ProductionProjectionPanel, OKR/KPI tracking, CAPI, Mobile V2, QBO full daily-summary, HubSpot decommission window.',
+  '<strong>Week 18–24:</strong> Stabilization + customer-facing roll-out + P3 revisit gate.',
+];
+
+const CHANGELOG = [
+  { v: '1.2', date: '2026-06-06', notes: 'Added Finance module (§4.11) restricted to George + Huayi with JournalPanel + SalesProjectionPanel + ProductionProjectionPanel. Expanded ActivityLog with OKR & KPI tracking. Extended §8 Security with canView(role, module) for module-level visibility. Promoted RBAC profiles from P2 to P1.' },
+  { v: '1.1', date: '2026-06-06', notes: 'Promoted Freightcom and QuickBooks Online to dedicated §6 integration entries (§6.14, §6.15). Freightcom: current ClickShip-layered role + planned freight_quotes history table. QuickBooks: planned daily-summary journal sync with full GL mapping.' },
+  { v: '1.0', date: '2026-06-06', notes: 'Initial canonical PRD synthesizing current product state, competitive landscape proposal, integration map (Shopify / HubSpot / Klaviyo / Facebook / Google Meet / Google Docs / Quo / Gmail / Resend / Calendly / Google Maps + Claude / Notion / Fireflies), and roadmap.' },
+];
+
+/* ──────────────────────────────────────────────────────────────────────────
+   RENDER
+   ────────────────────────────────────────────────────────────────────────── */
 
 function countAll(filter) {
   let total = 0;
@@ -858,9 +1332,7 @@ function countAll(filter) {
     if (filter === 'shipped') total += m.shipped.length;
     else total += m.planned.filter(p => filter === 'all' || p.p === filter.toUpperCase()).length;
   });
-  if (filter !== 'shipped') {
-    total += CROSS_CUTTING.filter(c => filter === 'all' || c.p === filter.toUpperCase()).length;
-  }
+  if (filter !== 'shipped') total += CROSS_CUTTING.filter(c => filter === 'all' || c.p === filter.toUpperCase()).length;
   return total;
 }
 
@@ -871,20 +1343,33 @@ function renderOverviewStats() {
     { label: 'P1 planned', value: countAll('p1'), sub: 'Next 90 days', cls: 'planned-p1' },
     { label: 'P2 planned', value: countAll('p2'), sub: 'Next 2 quarters', cls: 'planned-p2' },
     { label: 'P3 planned', value: countAll('p3'), sub: 'Strategic, deferred', cls: 'planned-p3' },
-    { label: 'Integrations live', value: 10, sub: 'Shopify, HubSpot, Klaviyo, Quo, Gmail, Calendly, Google Maps, Resend, Notion, Fireflies' },
-    { label: 'Integrations planned', value: 3, sub: 'Facebook, QBO, EasyPost' },
+    { label: 'Integrations live', value: 13, sub: 'See §6' },
+    { label: 'Integrations planned', value: 2, sub: 'Facebook + QBO (§6.4 + §6.15)' },
+    { label: 'Personas', value: PERSONAS.length, sub: 'Operator workflows' },
   ];
-  const el = document.getElementById('overview-stats');
-  el.innerHTML = stats.map(s => `
+  document.getElementById('overview-stats').innerHTML = stats.map(s => `
     <div class="stat ${s.cls || ''}">
       <div class="label">${s.label}</div>
       <div class="value">${s.value}</div>
       <div class="sub">${s.sub}</div>
-    </div>
-  `).join('');
+    </div>`).join('');
 }
 
-// ─── Render: stacked bar chart by module ────────────────────────────────────
+function renderVisionGrid() {
+  document.getElementById('vision-grid').innerHTML = VISION.map(v => `
+    <div class="module-card">
+      <div class="head">
+        <div>
+          <h3>${v.domain}</h3>
+          <div class="domain">${v.short}</div>
+        </div>
+        <span class="pill domain-${v.class}">${v.domain.replace(/&amp;/g,'&').toUpperCase()}</span>
+      </div>
+      <p style="font-size:12px;color:var(--ink-muted);margin:6px 0"><strong>Today:</strong> ${v.today}</p>
+      <p style="font-size:12px;color:var(--ink-muted);margin:6px 0"><strong>Vision:</strong> ${v.vision}</p>
+      <p style="font-size:12px;color:var(--ink-muted);margin:6px 0"><strong>Decision:</strong> ${v.decision}</p>
+    </div>`).join('');
+}
 
 function renderModuleStackChart() {
   const ctx = document.getElementById('chart-stack-modules');
@@ -895,65 +1380,40 @@ function renderModuleStackChart() {
   const p3 = MODULES.map(m => m.planned.filter(p => p.p === 'P3').length);
   new Chart(ctx, {
     type: 'bar',
-    data: {
-      labels,
-      datasets: [
-        { label: 'Shipped', data: shipped, backgroundColor: '#2f855a' },
-        { label: 'Planned P1', data: p1, backgroundColor: '#c05621' },
-        { label: 'Planned P2', data: p2, backgroundColor: '#1e6091' },
-        { label: 'Planned P3', data: p3, backgroundColor: '#6b7280' },
-      ],
-    },
-    options: {
-      indexAxis: 'y',
-      responsive: true,
-      maintainAspectRatio: false,
+    data: { labels, datasets: [
+      { label: 'Shipped', data: shipped, backgroundColor: '#2f855a' },
+      { label: 'Planned P1', data: p1, backgroundColor: '#c05621' },
+      { label: 'Planned P2', data: p2, backgroundColor: '#1e6091' },
+      { label: 'Planned P3', data: p3, backgroundColor: '#6b7280' },
+    ]},
+    options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false,
       plugins: { legend: { position: 'bottom' } },
       scales: { x: { stacked: true, ticks: { precision: 0 } }, y: { stacked: true } },
     },
   });
 }
 
-// ─── Render: priority doughnut ──────────────────────────────────────────────
-
 function renderPriorityDoughnut() {
-  const ctx = document.getElementById('chart-priority-dough');
-  const data = [countAll('shipped'), countAll('p1'), countAll('p2'), countAll('p3')];
-  new Chart(ctx, {
+  new Chart(document.getElementById('chart-priority-dough'), {
     type: 'doughnut',
     data: {
       labels: ['Shipped (validated)', 'P1 planned (90d)', 'P2 planned (2 quarters)', 'P3 planned (deferred)'],
-      datasets: [{ data, backgroundColor: ['#2f855a', '#c05621', '#1e6091', '#6b7280'] }],
+      datasets: [{ data: [countAll('shipped'), countAll('p1'), countAll('p2'), countAll('p3')], backgroundColor: ['#2f855a', '#c05621', '#1e6091', '#6b7280'] }],
     },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: { legend: { position: 'right' } },
-    },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right' } } },
   });
 }
 
-// ─── Render: modules grid ───────────────────────────────────────────────────
-
 let currentFilter = 'all';
-function matchesFilter(item, filter) {
-  if (filter === 'all') return true;
-  if (filter === 'shipped') return item.status === 'shipped';
-  return item.p && item.p.toLowerCase() === filter;
-}
-
 function renderModules() {
   const grid = document.getElementById('module-grid');
   grid.innerHTML = MODULES.map(m => {
     const shippedItems = currentFilter === 'all' || currentFilter === 'shipped'
-      ? m.shipped.map(s => `<li><span class="marker s">SHIP</span><div class="text">${s}</div></li>`).join('')
-      : '';
+      ? m.shipped.map(s => `<li><span class="marker s">SHIP</span><div class="text">${s}</div></li>`).join('') : '';
     const plannedItems = m.planned
       .filter(p => currentFilter === 'all' || currentFilter === p.p.toLowerCase())
-      .map(p => `<li><span class="marker ${p.p.toLowerCase()}">${p.p}·${p.e}</span><div class="text">${p.text}<div class="meta">${p.meta || ''}</div></div></li>`)
-      .join('');
+      .map(p => `<li><span class="marker ${p.p.toLowerCase()}">${p.p}·${p.e}</span><div class="text">${p.text}<div class="meta">${p.meta || ''}</div></div></li>`).join('');
     if (!shippedItems && !plannedItems) return '';
-
     return `
       <div class="module-card">
         <div class="head">
@@ -966,20 +1426,146 @@ function renderModules() {
             <div class="c-planned">${m.planned.length} planned</div>
           </div>
         </div>
-        <ul class="feature-list">
-          ${shippedItems}${plannedItems}
-        </ul>
-      </div>
-    `;
+        <ul class="feature-list">${shippedItems}${plannedItems}</ul>
+      </div>`;
   }).join('');
 }
 
-// ─── Render: gap analysis table ─────────────────────────────────────────────
+function renderPresaleGrid() {
+  document.getElementById('presale-grid').innerHTML = PRESALE.map(p => {
+    const [pi, ef] = p.pill.split('·');
+    return `<div class="module-card">
+      <div class="head"><h3>${p.title}</h3><span class="pill ${pi.toLowerCase()}">${pi}·${ef}</span></div>
+      <p style="font-size:12px;color:var(--ink-muted);margin:6px 0">${p.body}</p>
+    </div>`;
+  }).join('');
+}
+
+let iFilter = 'all';
+function renderIntegrations() {
+  const grid = document.getElementById('integration-grid');
+  grid.innerHTML = INTEGRATIONS.filter(i => iFilter === 'all' || iFilter === i.status).map(i => {
+    const statusLabel = { live: 'LIVE', partial: 'PARTIAL', planned: 'PLANNED', decision: 'DECISION PENDING' }[i.status];
+    return `<div class="integration-card ${i.status}">
+      <div class="head"><h4>${i.name}</h4><span class="pill ${i.status === 'live' ? 'shipped' : i.status === 'partial' ? 'p1' : i.status === 'planned' ? 'p2' : 'restricted'}">${statusLabel}</span></div>
+      <div class="role-line">${i.role}</div>
+      <p>${i.body}</p>
+    </div>`;
+  }).join('');
+}
+
+function renderRecommended() {
+  document.getElementById('recommended-tbody').innerHTML = RECOMMENDED.map(r => `
+    <tr>
+      <td><strong>${r.name}</strong></td>
+      <td>${r.use}</td>
+      <td class="numeric"><span class="pill ${r.p.toLowerCase()}">${r.p}</span></td>
+      <td class="numeric">${r.e}</td>
+      <td>${r.why}</td>
+    </tr>`).join('');
+}
+
+function renderBenchTable(domain, target) {
+  const data = BENCHMARK[domain];
+  let html = '<table class="bench"><thead><tr>';
+  data.columns.forEach((c, idx) => {
+    html += `<th${idx === 1 ? ' class="makelila"' : ''}>${c}</th>`;
+  });
+  html += '</tr></thead><tbody>';
+  data.rows.forEach(row => {
+    html += '<tr>';
+    html += `<td class="cap">${row[0]}</td>`;
+    for (let i = 1; i < row.length; i++) {
+      const cell = row[i];
+      const classes = [];
+      if (i === 1) classes.push('makelila');
+      if (cell.c) classes.push(cell.c);
+      html += `<td class="${classes.join(' ')}">${cell.v}</td>`;
+    }
+    html += '</tr>';
+  });
+  html += '</tbody></table>';
+  document.getElementById(target).innerHTML = html;
+}
+
+function renderPersonaPicker() {
+  document.getElementById('persona-picker').innerHTML = PERSONAS.map(p => `
+    <div class="persona-tile" data-persona="${p.id}">
+      <div class="avatar">${p.initials}</div>
+      <div class="name">${p.name}</div>
+      <div class="role">${p.role}</div>
+    </div>`).join('');
+  document.querySelectorAll('.persona-tile').forEach(tile => {
+    tile.addEventListener('click', () => selectPersona(tile.getAttribute('data-persona')));
+  });
+}
+
+function selectPersona(id) {
+  document.querySelectorAll('.persona-tile').forEach(t => t.classList.toggle('active', t.getAttribute('data-persona') === id));
+  const p = PERSONAS.find(x => x.id === id);
+  if (!p) return;
+  const wrap = document.getElementById('persona-detail-wrap');
+  wrap.innerHTML = `
+    <div class="persona-detail">
+      <div class="persona-header">
+        <div class="avatar-lg">${p.initials}</div>
+        <div>
+          <h3>${p.name}</h3>
+          <div class="role">${p.role}</div>
+          <div class="persona-modules">${p.modules.map(m => `<span class="pill domain-supporting">${m}</span>`).join('')}</div>
+        </div>
+      </div>
+
+      <div class="flow-section">
+        <h4>Daily rhythm</h4>
+        <ul style="font-size:12px;color:var(--ink-muted);padding-left:18px">${p.daily.map(d => `<li>${d}</li>`).join('')}</ul>
+      </div>
+
+      <div class="flow-section">
+        <h4>Weekly checkpoints</h4>
+        <ul style="font-size:12px;color:var(--ink-muted);padding-left:18px">${p.weekly.map(d => `<li>${d}</li>`).join('')}</ul>
+      </div>
+
+      <div class="flow-section">
+        <h4>Click any step to expand → see modules, actions, KPIs, planned vs shipped status</h4>
+        <div class="flow-steps">
+          ${p.flow.map((s, idx) => `
+            <div class="flow-step" data-step="${idx}">
+              <div class="flow-step-head">
+                <div class="flow-step-num">${idx + 1}</div>
+                <div class="flow-step-title">${s.title}</div>
+                <div class="flow-step-module">${s.module}</div>
+                <div class="flow-step-toggle">▸</div>
+              </div>
+              <div class="flow-step-detail">
+                <p><strong>What:</strong> ${s.what}</p>
+                <p><strong>Looks for:</strong></p>
+                <ul>${s.looks_for.map(l => `<li>${l}</li>`).join('')}</ul>
+                <p><strong>Actions:</strong></p>
+                <ul>${s.actions.map(a => `<li>${a}</li>`).join('')}</ul>
+                <div class="kv">
+                  <div class="k">KPIs:</div><div>${s.kpis.join(' · ')}</div>
+                  ${s.note ? `<div class="k">Status:</div><div><span class="pill p1">PLANNED</span> ${s.note}</div>` : ''}
+                </div>
+              </div>
+            </div>`).join('')}
+        </div>
+      </div>
+    </div>
+  `;
+  // Wire up step expansion
+  document.querySelectorAll('.flow-step').forEach(step => {
+    step.addEventListener('click', () => {
+      step.classList.toggle('expanded');
+      const toggle = step.querySelector('.flow-step-toggle');
+      if (toggle) toggle.textContent = step.classList.contains('expanded') ? '▾' : '▸';
+    });
+  });
+}
 
 function renderGapTable() {
   const tbody = document.getElementById('gap-tbody');
   let totShipped = 0, totP1 = 0, totP2 = 0, totP3 = 0;
-
   let rows = MODULES.map(m => {
     const s = m.shipped.length;
     const p1 = m.planned.filter(p => p.p === 'P1').length;
@@ -989,13 +1575,12 @@ function renderGapTable() {
     const pct = total === 0 ? 0 : Math.round((s / total) * 100);
     totShipped += s; totP1 += p1; totP2 += p2; totP3 += p3;
     const maxW = 200;
-    const bar = `
-      <div class="gap-bar" title="${s} shipped, ${p1+p2+p3} planned">
-        ${s > 0 ? `<span class="seg s" style="width:${(s/total)*maxW}px"></span>` : ''}
-        ${p1 > 0 ? `<span class="seg p1" style="width:${(p1/total)*maxW}px"></span>` : ''}
-        ${p2 > 0 ? `<span class="seg p2" style="width:${(p2/total)*maxW}px"></span>` : ''}
-        ${p3 > 0 ? `<span class="seg p3" style="width:${(p3/total)*maxW}px"></span>` : ''}
-      </div>`;
+    const bar = `<div class="gap-bar" title="${s} shipped, ${p1+p2+p3} planned">
+      ${s > 0 ? `<span class="seg s" style="width:${(s/total)*maxW}px"></span>` : ''}
+      ${p1 > 0 ? `<span class="seg p1" style="width:${(p1/total)*maxW}px"></span>` : ''}
+      ${p2 > 0 ? `<span class="seg p2" style="width:${(p2/total)*maxW}px"></span>` : ''}
+      ${p3 > 0 ? `<span class="seg p3" style="width:${(p3/total)*maxW}px"></span>` : ''}
+    </div>`;
     return `<tr>
       <td><strong>${m.name}</strong>${m.restricted ? ' <span class="pill restricted">restricted</span>' : ''}</td>
       <td>${m.domain}</td>
@@ -1009,16 +1594,10 @@ function renderGapTable() {
     </tr>`;
   }).join('');
 
-  // Cross-cutting row
   const ccP1 = CROSS_CUTTING.filter(c => c.p === 'P1').length;
   const ccP2 = CROSS_CUTTING.filter(c => c.p === 'P2').length;
   const ccP3 = CROSS_CUTTING.filter(c => c.p === 'P3').length;
   const ccTotal = ccP1 + ccP2 + ccP3;
-  const ccBar = `<div class="gap-bar">
-    ${ccP1 ? `<span class="seg p1" style="width:${(ccP1/ccTotal)*200}px"></span>` : ''}
-    ${ccP2 ? `<span class="seg p2" style="width:${(ccP2/ccTotal)*200}px"></span>` : ''}
-    ${ccP3 ? `<span class="seg p3" style="width:${(ccP3/ccTotal)*200}px"></span>` : ''}
-  </div>`;
   rows += `<tr>
     <td><strong>Cross-cutting</strong></td>
     <td>integrations + platform</td>
@@ -1028,16 +1607,17 @@ function renderGapTable() {
     <td class="numeric">${ccP3 || ''}</td>
     <td class="numeric">${ccTotal}</td>
     <td class="numeric">0%</td>
-    <td>${ccBar}</td>
+    <td><div class="gap-bar">
+      ${ccP1 ? `<span class="seg p1" style="width:${(ccP1/ccTotal)*200}px"></span>` : ''}
+      ${ccP2 ? `<span class="seg p2" style="width:${(ccP2/ccTotal)*200}px"></span>` : ''}
+      ${ccP3 ? `<span class="seg p3" style="width:${(ccP3/ccTotal)*200}px"></span>` : ''}
+    </div></td>
   </tr>`;
   totP1 += ccP1; totP2 += ccP2; totP3 += ccP3;
-
-  // Totals
   const grandTotal = totShipped + totP1 + totP2 + totP3;
   const grandPct = Math.round((totShipped / grandTotal) * 100);
   rows += `<tr class="totals">
-    <td>TOTAL</td>
-    <td>—</td>
+    <td>TOTAL</td><td>—</td>
     <td class="numeric">${totShipped}</td>
     <td class="numeric">${totP1}</td>
     <td class="numeric">${totP2}</td>
@@ -1049,17 +1629,10 @@ function renderGapTable() {
   tbody.innerHTML = rows;
 }
 
-// ─── Render: effort budget chart ────────────────────────────────────────────
-
-function effortToWeeks(e) {
-  return e === 'S' ? 1 : e === 'M' ? 2 : e === 'L' ? 3.5 : 0;
-}
-function validationToWeeks(e) {
-  return e === 'S' ? 1 : e === 'M' ? 1.5 : e === 'L' ? 2.5 : 0;
-}
+function effortToWeeks(e) { return e === 'S' ? 1 : e === 'M' ? 2 : e === 'L' ? 3.5 : 0; }
+function validationToWeeks(e) { return e === 'S' ? 1 : e === 'M' ? 1.5 : e === 'L' ? 2.5 : 0; }
 
 function renderEffortChart() {
-  const ctx = document.getElementById('chart-effort');
   function tot(p, fn) {
     let sum = 0;
     MODULES.forEach(m => m.planned.filter(x => x.p === p).forEach(x => sum += fn(x.e)));
@@ -1067,52 +1640,31 @@ function renderEffortChart() {
     return sum;
   }
   const labels = ['P1', 'P2', 'P3'];
-  const dev = labels.map(p => tot(p, effortToWeeks));
-  const val = labels.map(p => tot(p, validationToWeeks));
-  new Chart(ctx, {
+  new Chart(document.getElementById('chart-effort'), {
     type: 'bar',
-    data: {
-      labels,
-      datasets: [
-        { label: 'Dev weeks (cumulative if single-stream)', data: dev, backgroundColor: '#9b2c2c' },
-        { label: 'Validation weeks', data: val, backgroundColor: '#f3a683' },
-      ],
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { position: 'bottom' } },
-      scales: {
-        x: { stacked: true },
-        y: { stacked: true, title: { display: true, text: 'cumulative weeks (if single-engineer)' } }
-      },
-    },
+    data: { labels, datasets: [
+      { label: 'Dev weeks (single-stream)', data: labels.map(p => tot(p, effortToWeeks)), backgroundColor: '#9b2c2c' },
+      { label: 'Validation weeks', data: labels.map(p => tot(p, validationToWeeks)), backgroundColor: '#f3a683' },
+    ]},
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } },
+      scales: { x: { stacked: true }, y: { stacked: true, title: { display: true, text: 'cumulative weeks (if single-engineer)' } } } },
   });
 }
 
-// ─── Render: Gantt timeline ─────────────────────────────────────────────────
-
 const WEEKS = 24;
-const NOW_WEEK = 1; // 2026-06-09 week 1
-
-// Hand-curated dependency-aware schedule (drives the Gantt). dev = block of weeks during dev, val = block during validation
+const NOW_WEEK = 1;
 const TIMELINE = [
-  // Foundations (Week 1-4)
   { name: 'RBAC profiles + canDo/canView helpers', p: 'P1', dev: [1, 2], val: [3, 3] },
   { name: 'Klaviyo Track API event firehose', p: 'P1', dev: [1, 2], val: [3, 4] },
   { name: 'PaymentCard UI on OrderReview', p: 'P1', dev: [1, 1], val: [2, 2] },
   { name: 'Mobile V1 (viewport + PWA + AppShell)', p: 'P1', dev: [2, 4], val: [5, 6] },
-  // Returns/Refunds finish
   { name: 'Returns disposition + grade + quarantine + #79', p: 'P1', dev: [3, 6], val: [7, 8] },
   { name: 'Warranty registration entity', p: 'P1', dev: [4, 5], val: [6, 6] },
-  // Service hardening (Service Week 4-10)
   { name: 'Device-context header on Service tickets', p: 'P1', dev: [4, 6], val: [7, 8] },
   { name: 'SLA aging + auto-escalation', p: 'P1', dev: [5, 7], val: [8, 9] },
   { name: 'Telemetry-driven ticket auto-create', p: 'P1', dev: [6, 8], val: [9, 11] },
-  // Finance module skeleton (Week 6-10)
   { name: 'Finance module skeleton + JournalPanel (QBO)', p: 'P1', dev: [7, 10], val: [11, 12] },
-  // Pre-sale (Week 8-12)
   { name: 'Facebook Marketing API + Lead Ads webhook', p: 'P1', dev: [9, 11], val: [12, 13] },
-  // P2 batch starts mid-quarter
   { name: 'activity_log entity refs + per-serial timeline', p: 'P2', dev: [10, 11], val: [12, 12] },
   { name: 'build_station_passes promotion', p: 'P2', dev: [11, 13], val: [14, 15] },
   { name: 'Freight quote history table', p: 'P2', dev: [12, 12], val: [13, 13] },
@@ -1123,13 +1675,11 @@ const TIMELINE = [
   { name: 'Mobile V2 (card-row tables)', p: 'P2', dev: [14, 18], val: [19, 20] },
   { name: 'SalesProjectionPanel rolling-average (Finance)', p: 'P2', dev: [16, 18], val: [19, 21] },
   { name: 'HubSpot CRM decommission window', p: 'P2', dev: [18, 20], val: [21, 22] },
-  // P3 strategic items shown faded
   { name: 'Customer record sidebar widgets (Attio pattern)', p: 'P3', dev: [20, 22], val: [23, 24] },
 ];
 
 function renderTimeline() {
   const wrap = document.getElementById('timeline-wrap');
-  // Header
   const monthLabels = ['Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov'];
   let html = `<div class="timeline-header" style="--weeks:${WEEKS}"><div class="first">Initiative</div>`;
   for (let w = 1; w <= WEEKS; w++) {
@@ -1138,7 +1688,6 @@ function renderTimeline() {
     html += `<div>${showMonth ? '<strong>' + monthLabels[monthIdx] + '</strong>' : 'W' + w}</div>`;
   }
   html += '</div>';
-  // Rows
   TIMELINE.forEach(t => {
     html += `<div class="timeline-row" style="--weeks:${WEEKS}">`;
     html += `<div class="label">${t.name}<div class="small">${t.p} · dev W${t.dev[0]}-${t.dev[1]} · val W${t.val[0]}-${t.val[1]}</div></div>`;
@@ -1156,43 +1705,39 @@ function renderTimeline() {
   wrap.innerHTML = html;
 }
 
-// ─── Render: cumulative completion curve ────────────────────────────────────
-
 function renderCumulative() {
-  const ctx = document.getElementById('chart-cumulative');
-  // For each week, count items whose validation END falls at or before that week
   const data = [];
-  for (let w = 1; w <= WEEKS; w++) {
-    const done = TIMELINE.filter(t => t.val[1] <= w).length;
-    data.push(done);
-  }
-  const labels = Array.from({ length: WEEKS }, (_, i) => 'W' + (i + 1));
-  new Chart(ctx, {
+  for (let w = 1; w <= WEEKS; w++) data.push(TIMELINE.filter(t => t.val[1] <= w).length);
+  new Chart(document.getElementById('chart-cumulative'), {
     type: 'line',
-    data: {
-      labels,
-      datasets: [{
-        label: 'Cumulative validated features',
-        data,
-        borderColor: '#9b2c2c',
-        backgroundColor: 'rgba(155,44,44,0.12)',
-        fill: true,
-        tension: 0.2,
-      }],
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: { legend: { position: 'bottom' } },
-      scales: {
-        y: { beginAtZero: true, ticks: { precision: 0 }, title: { display: true, text: '# features validated' } },
-        x: { title: { display: true, text: 'weeks from 2026-06-09' } },
-      },
-    },
+    data: { labels: Array.from({ length: WEEKS }, (_, i) => 'W' + (i + 1)),
+      datasets: [{ label: 'Cumulative validated features', data, borderColor: '#9b2c2c', backgroundColor: 'rgba(155,44,44,0.12)', fill: true, tension: 0.2 }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } },
+      scales: { y: { beginAtZero: true, ticks: { precision: 0 }, title: { display: true, text: '# features validated' } },
+                x: { title: { display: true, text: 'weeks from 2026-06-09' } } } },
   });
 }
 
-// ─── Tab switching ──────────────────────────────────────────────────────────
+function renderOOSList() { document.getElementById('oos-list').innerHTML = OOS.map(i => `<li>${i}</li>`).join(''); }
+function renderRiskLists() {
+  document.getElementById('open-questions').innerHTML = OPEN_QUESTIONS.map(q => `<li>${q}</li>`).join('');
+  document.getElementById('timeline-risks').innerHTML = TIMELINE_RISKS.map(r => `<li>${r}</li>`).join('');
+  document.getElementById('sequencing-list').innerHTML = SEQUENCING.map(s => `<li>${s}</li>`).join('');
+}
+function renderChangelog() {
+  document.getElementById('changelog-list').innerHTML = CHANGELOG.map(c => `
+    <div class="card" style="border-left:4px solid var(--crimson)">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px">
+        <h3 style="margin:0;color:var(--crimson)">v${c.v}</h3>
+        <span style="font-size:11px;color:var(--ink-subtle)">${c.date}</span>
+      </div>
+      <p style="margin:0;font-size:12px;color:var(--ink-muted)">${c.notes}</p>
+    </div>`).join('');
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   EVENT WIRING + INIT
+   ────────────────────────────────────────────────────────────────────────── */
 
 document.querySelectorAll('nav.tabs button').forEach(btn => {
   btn.addEventListener('click', () => {
@@ -1204,7 +1749,6 @@ document.querySelectorAll('nav.tabs button').forEach(btn => {
   });
 });
 
-// Filter chips on Modules tab
 document.querySelectorAll('#module-filter .chip').forEach(chip => {
   chip.addEventListener('click', () => {
     document.querySelectorAll('#module-filter .chip').forEach(c => c.classList.remove('active'));
@@ -1214,16 +1758,39 @@ document.querySelectorAll('#module-filter .chip').forEach(chip => {
   });
 });
 
-// ─── Init ──────────────────────────────────────────────────────────────────
+document.querySelectorAll('#integration-filter .chip').forEach(chip => {
+  chip.addEventListener('click', () => {
+    document.querySelectorAll('#integration-filter .chip').forEach(c => c.classList.remove('active'));
+    chip.classList.add('active');
+    iFilter = chip.getAttribute('data-ifilter');
+    renderIntegrations();
+  });
+});
 
+// Init
 renderOverviewStats();
+renderVisionGrid();
 renderModuleStackChart();
 renderPriorityDoughnut();
 renderModules();
+renderPresaleGrid();
+renderIntegrations();
+renderRecommended();
+renderBenchTable('crm', 'bench-crm');
+renderBenchTable('service', 'bench-service');
+renderBenchTable('erp', 'bench-erp');
+renderBenchTable('lifecycle', 'bench-lifecycle');
+renderBenchTable('finance', 'bench-finance');
+renderBenchTable('presale', 'bench-presale');
+renderPersonaPicker();
+selectPersona('pedrum');  // default selection
 renderGapTable();
 renderEffortChart();
 renderTimeline();
 renderCumulative();
+renderOOSList();
+renderRiskLists();
+renderChangelog();
 </script>
 
 </body>
