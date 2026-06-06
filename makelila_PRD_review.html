@@ -226,6 +226,115 @@
   .legend-row .swatch.dev-p3 { background: var(--p3); }
   .legend-row .swatch.val { background-image: repeating-linear-gradient(45deg, rgba(0,0,0,0.18) 0 4px, transparent 4px 8px); background-color: #f5f5f5; }
 
+  /* Swimlane (v1.4 — hours per shipper) */
+  .swimlane { display: flex; flex-direction: column; gap: 12px; }
+  .swimlane-row {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 14px 16px;
+  }
+  .swimlane-row.future { opacity: 0.55; background: var(--surface-2); }
+  .swimlane-head {
+    display: flex; align-items: center; gap: 12px;
+    margin-bottom: 10px;
+  }
+  .swimlane-avatar {
+    width: 36px; height: 36px; border-radius: 50%;
+    background: var(--crimson); color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 800; font-size: 14px; flex-shrink: 0;
+  }
+  .swimlane-name { font-weight: 800; font-size: 14px; }
+  .swimlane-meta { font-size: 11px; color: var(--ink-muted); }
+  .swimlane-hours {
+    margin-left: auto;
+    font-size: 13px;
+    font-weight: 800;
+    color: var(--crimson);
+    padding: 4px 10px;
+    background: var(--crimson-soft);
+    border-radius: 4px;
+  }
+  .swimlane-future-pill {
+    background: var(--surface);
+    color: var(--ink-subtle);
+    border: 1px dashed var(--border);
+    padding: 2px 6px;
+    font-size: 9px;
+    font-weight: 700;
+    border-radius: 3px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .swimlane-bar {
+    display: flex;
+    align-items: stretch;
+    gap: 4px;
+    flex-wrap: wrap;
+  }
+  .swim-block {
+    border-radius: 4px;
+    padding: 8px 10px;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.12s;
+    position: relative;
+    overflow: visible;
+    line-height: 1.3;
+    min-height: 50px;
+  }
+  .swim-block:hover { transform: translateY(-1px); box-shadow: 0 2px 8px rgba(0,0,0,0.15); }
+  .swim-block.p1 { background: var(--p1); }
+  .swim-block.p2 { background: var(--p2); }
+  .swim-block.p3 { background: var(--p3); }
+  .swim-block .hours-badge {
+    position: absolute;
+    top: 4px; right: 6px;
+    background: rgba(0,0,0,0.35);
+    border-radius: 3px;
+    padding: 1px 5px;
+    font-size: 9px;
+    font-weight: 800;
+  }
+  .swim-block .move-badge {
+    display: inline-block;
+    background: rgba(255,255,255,0.18);
+    border: 1px dashed rgba(255,255,255,0.5);
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 8px;
+    font-weight: 700;
+    text-transform: uppercase;
+    margin-top: 4px;
+  }
+  .swim-block .dep-badge {
+    display: inline-block;
+    background: rgba(255,255,255,0.18);
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 8px;
+    font-weight: 600;
+    margin-top: 4px;
+    font-style: italic;
+  }
+  .swim-detail {
+    display: none;
+    margin-top: 12px;
+    padding: 12px;
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    font-size: 11.5px;
+    color: var(--ink-muted);
+  }
+  .swim-detail.open { display: block; }
+  .swim-detail strong { color: var(--ink); }
+  .swim-detail .kv { display: grid; grid-template-columns: 100px 1fr; gap: 4px 10px; }
+  .swim-detail .kv .k { font-weight: 700; color: var(--ink); }
+
   /* Notes box */
   .notes {
     background: var(--crimson-soft); border-left: 4px solid var(--crimson);
@@ -352,8 +461,8 @@
 <body>
 
 <header class="topbar">
-  <h1>makeLILA PRD Review v1.3 — Interactive Dashboard</h1>
-  <div class="sub">15 sections mirror <code>docs/PRD-2026-06-06.md</code> + §16 Token Budget. Click any tab to navigate. Click a persona to see their clickable workflow.</div>
+  <h1>makeLILA PRD Review v1.4 — Interactive Dashboard</h1>
+  <div class="sub">Timeline switched to hours-per-task with per-shipper allocation. 15 PRD sections + §16 Token Budget. Click any tab; click a persona for clickable workflows; click a swimlane block for assignment detail.</div>
 </header>
 
 <nav class="tabs" id="tabs">
@@ -593,26 +702,63 @@
 
   <!-- 12. TIMELINE -->
   <section class="view" id="view-timeline">
-    <div class="section-anchor">§12 Timeline to close the gap</div>
-    <h2>Timeline</h2>
-    <p class="lede"><strong>14-week Gantt</strong> for P1 + critical-path P2 + one P3 sample, starting Week 1 = 2026-06-09. <strong>Recalibrated in v1.3</strong> against actual repo cadence (430 commits since 2026-04-01, avg 6.4/day). Solid bars = active dev. Hatched bars = operator UAT + customer-side validation. Each row also shows estimated token cost (see §16 Token Budget for the full breakdown).</p>
+    <div class="section-anchor">§12 Timeline — hour-based, per-shipper</div>
+    <h2>Timeline — Hours per Task &amp; Owner</h2>
+    <p class="lede">
+      <strong>v1.4 — switched from calendar weeks to hours per task with owner allocation.</strong> Each feature is sized in hours (S = 5h, M = 15h, L = 45h covering dev + validation) and assigned to the best-fit current shipper among <strong>Pedrum, Junaid, Reina, and Huayi</strong>. George + Lezhong join later — features flagged with a future-handoff badge below will move to them. The swimlane shows what each person owns; rows scale to total hours.
+    </p>
+
+    <div class="stats" id="shipper-summary-stats"></div>
+
     <div class="legend-row">
-      <div class="item"><span class="swatch dev-p1"></span> P1 dev</div>
-      <div class="item"><span class="swatch dev-p2"></span> P2 dev</div>
-      <div class="item"><span class="swatch dev-p3"></span> P3 dev</div>
-      <div class="item"><span class="swatch val"></span> validation</div>
-      <div class="item"><span style="border-left:2px solid var(--crimson);height:14px;display:inline-block"></span> &nbsp;current week</div>
+      <div class="item"><span class="swatch dev-p1"></span> P1</div>
+      <div class="item"><span class="swatch dev-p2"></span> P2</div>
+      <div class="item"><span class="swatch dev-p3"></span> P3</div>
+      <div class="item"><span class="pill restricted" style="font-size:9px">→ future handoff</span></div>
+      <div class="item"><span class="pill domain-supporting" style="font-size:9px">dep: feature</span> dependency inside same person's queue</div>
     </div>
-    <div class="timeline-wrap" id="timeline-wrap"></div>
+
+    <div class="card">
+      <h3>Per-shipper workload &mdash; total hours assigned</h3>
+      <p class="lede" style="margin:0 0 12px">Each row shows that shipper's queue. Within a row, features are ordered by dependency (earliest first). Width is proportional to hours. Hover a block for details.</p>
+      <div id="swimlane-wrap"></div>
+    </div>
+
+    <div class="card">
+      <h3>Hours / weekly capacity / calendar completion estimate</h3>
+      <table class="bench">
+        <thead>
+          <tr>
+            <th>Shipper</th>
+            <th>Role</th>
+            <th class="numeric">Assigned hours</th>
+            <th class="numeric">Weekly capacity (h/wk)</th>
+            <th class="numeric">Calendar weeks at capacity</th>
+            <th class="numeric">P1 hours</th>
+            <th class="numeric">P2 hours</th>
+            <th class="numeric">P3 hours</th>
+          </tr>
+        </thead>
+        <tbody id="shipper-load-tbody"></tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h3>Future shippers (George + Lezhong)</h3>
+      <p class="lede" style="margin:0 0 12px">Items that will move to George + Lezhong once they're shipping code. Re-assignment reduces load on current shippers and unblocks workflow areas where their domain ownership is stronger.</p>
+      <div id="future-handoff-wrap"></div>
+    </div>
+
+    <div class="card">
+      <h3>Cumulative completion vs assigned hours</h3>
+      <p class="lede" style="margin:0 0 12px">X-axis = cumulative hours each shipper has invested. Y-axis = features completed in their queue. Slopes diverge because their per-feature hour distributions differ (Huayi gets the L item, Reina gets clean M items, etc).</p>
+      <div class="chart-canvas-wrap"><canvas id="chart-shipper-completion"></canvas></div>
+    </div>
 
     <div class="notes">
-      <h4>Resourcing assumption</h4>
-      ~2 parallel engineering streams (current build cadence). Single-engineer execution doubles the calendar; three-engineer execution compresses by ~30%. Validation cycles assume Junaid + Raymond + George + Huayi available for UAT during normal workflows — no separate QA headcount.
-    </div>
-
-    <div class="card" style="margin-top:24px">
-      <h3>Cumulative validated-feature count over time</h3>
-      <div class="chart-canvas-wrap"><canvas id="chart-cumulative"></canvas></div>
+      <h4>Calendar implication</h4>
+      Bottleneck = the shipper with the highest <em>hours ÷ weekly capacity</em> ratio. Plugging in default weekly assumptions (Huayi 25h, Pedrum 15h, Junaid 15h, Reina 10h), <strong>everyone finishes within ~5 weeks of dev calendar</strong> with one round of UAT, putting the full P1 + P2 + P3 plan at roughly <strong>6–8 weeks elapsed</strong>. George + Lezhong joining shortens this further by absorbing the build_station_passes + future Build/Dashboard work.<br><br>
+      <strong>Adjusting weekly capacity</strong> shifts the calendar. Two engineers each at 30h/week (so Huayi + one other at increased availability) compresses to ~3 weeks. Reina at 5h/week extends her queue to 9 weeks — could be relieved by moving one M item to Huayi or pairing.
     </div>
   </section>
 
@@ -650,7 +796,7 @@
     <div class="section-anchor">§16 Token Budget Analysis — calibrated to actual ship cadence</div>
     <h2>Token Budget Analysis</h2>
     <p class="lede">
-      The timeline in §12 was recalibrated in v1.3 against the actual repo ship cadence: <strong>430 commits since 2026-04-01</strong> (~67 days, peak days of 80 commits, average ~6.4 commits/day). Most features ship same-day or within 1–3 days of design. This section maps each planned feature to its estimated Claude Code token consumption and the corresponding fraction of a weekly Claude subscription tier.
+      In v1.4 the timeline in §12 is hour-based with explicit owner allocation across the four current shippers (Pedrum, Junaid, Reina, Huayi). This section maps each feature to its estimated Claude Code token consumption and the corresponding fraction of a weekly Claude tier — per-shipper, since each person needs their own subscription. Cadence ground truth: <strong>430 commits since 2026-04-01</strong> (~67 days, avg 6.4 commits/day, peak 80 commits on 2026-06-04).
     </p>
 
     <div class="stats" id="token-stats"></div>
@@ -720,8 +866,8 @@
     </div>
 
     <div class="card">
-      <h3>Cumulative token consumption over the 14-week plan</h3>
-      <p class="lede" style="margin:0 0 12px">Stacked weekly token consumption colored by priority tier. P1 dominates the first 7 weeks; P2 work tails through W12. The annotation line shows the Max 5× weekly cap (lower bound) — sustained execution stays comfortably under the ceiling.</p>
+      <h3>Per-shipper token consumption (P1 / P2 / P3 stacked)</h3>
+      <p class="lede" style="margin:0 0 12px">v1.4 update — token consumption broken down by the shipper who owns each feature. Huayi carries the largest cumulative spend because of the L Mobile V2 + multiple Finance Ms; Reina's queue is the leanest. Each person's bar should comfortably fit within their share of one Max 5× weekly cap if they use Claude as their primary IDE.</p>
       <div class="chart-canvas-wrap tall"><canvas id="chart-token-burn"></canvas></div>
     </div>
 
@@ -1407,7 +1553,8 @@ const SEQUENCING = [
 ];
 
 const CHANGELOG = [
-  { v: '1.3', date: '2026-06-06', notes: 'Recalibrated timeline against actual repo cadence (430 commits since 2026-04-01, avg 6.4/day, peak 80/day on 2026-06-04). 24-week plan compressed to 14 weeks (~3.5 months). Added §16 Token Budget Analysis with per-feature token estimates and Claude tier (Pro / Max 5× / Max 20×) consumption analysis. Each Gantt row now shows estimated token cost. Stacked weekly token-burn chart visualizes cumulative consumption against Max 5× weekly cap.' },
+  { v: '1.4', date: '2026-06-06', notes: 'Switched timeline from calendar weeks to hours-per-task with explicit owner allocation across the four current shippers (Pedrum, Junaid, Reina, Huayi). New SHIPPERS array + ASSIGNMENTS data model. Replaced calendar Gantt with per-shipper swimlane (interactive — click a block for assignment detail). Added shipper workload table + cumulative-completion-by-hours chart + future-handoff section showing items that move to George + Lezhong once they join. Hour sizing: S = 5h, M = 15h, L = 45h. Weekly capacity assumed: Huayi 25h, Pedrum/Junaid 15h, Reina 10h — bottleneck stream finishes in ~5 weeks. Token Budget §16 now breaks down per shipper.' },
+  { v: '1.3', date: '2026-06-06', notes: 'Recalibrated timeline against actual repo cadence (430 commits since 2026-04-01, avg 6.4/day, peak 80/day on 2026-06-04). 24-week plan compressed to 14 weeks (~3.5 months). Added §16 Token Budget Analysis with per-feature token estimates and Claude tier (Pro / Max 5× / Max 20×) consumption analysis.' },
   { v: '1.2', date: '2026-06-06', notes: 'Added Finance module (§4.11) restricted to George + Huayi with JournalPanel + SalesProjectionPanel + ProductionProjectionPanel. Expanded ActivityLog with OKR & KPI tracking. Extended §8 Security with canView(role, module) for module-level visibility. Promoted RBAC profiles from P2 to P1.' },
   { v: '1.1', date: '2026-06-06', notes: 'Promoted Freightcom and QuickBooks Online to dedicated §6 integration entries (§6.14, §6.15). Freightcom: current ClickShip-layered role + planned freight_quotes history table. QuickBooks: planned daily-summary journal sync with full GL mapping.' },
   { v: '1.0', date: '2026-06-06', notes: 'Initial canonical PRD synthesizing current product state, competitive landscape proposal, integration map (Shopify / HubSpot / Klaviyo / Facebook / Google Meet / Google Docs / Quo / Gmail / Resend / Calendly / Google Maps + Claude / Notion / Fireflies), and roadmap.' },
@@ -1742,87 +1889,261 @@ function renderEffortChart() {
   });
 }
 
-// v1.3 — recalibrated against actual repo cadence: 430 commits since 2026-04-01,
-// most features ship same-day or within 1-3 days of design. 24-week plan
-// compressed to 14 weeks (~3.5 months).
-const WEEKS = 14;
-const NOW_WEEK = 1;
-const TIMELINE = [
-  // Week 1 — substrate (parallel S items)
-  { name: 'RBAC profiles + canDo/canView helpers', p: 'P1', size: 'S', dev: [1, 1], val: [2, 2] },
-  { name: 'Klaviyo Track API event firehose', p: 'P1', size: 'S', dev: [1, 1], val: [2, 2] },
-  { name: 'PaymentCard UI on OrderReview', p: 'P1', size: 'S', dev: [1, 1], val: [2, 2] },
-  // Weeks 2-3 — mobile + warranty (parallel)
-  { name: 'Mobile V1 (viewport + PWA + AppShell)', p: 'P1', size: 'M', dev: [2, 3], val: [4, 4] },
-  { name: 'Warranty registration entity', p: 'P1', size: 'S', dev: [2, 2], val: [3, 3] },
-  // Weeks 2-4 — Returns/Refunds finish (biggest active operator pain)
-  { name: 'Returns disposition + grade + quarantine + #79', p: 'P1', size: 'M', dev: [2, 4], val: [5, 5] },
-  // Weeks 3-5 — Service hardening (device + SLA + telemetry auto-ticket)
-  { name: 'Device-context header on Service tickets', p: 'P1', size: 'M', dev: [3, 4], val: [5, 5] },
-  { name: 'SLA aging + auto-escalation', p: 'P1', size: 'M', dev: [4, 5], val: [6, 6] },
-  { name: 'Telemetry-driven ticket auto-create', p: 'P1', size: 'M', dev: [4, 6], val: [7, 7] },
-  // Weeks 5-7 — Finance module skeleton + JournalPanel (depends on Returns)
-  { name: 'Finance module skeleton + JournalPanel (QBO)', p: 'P1', size: 'M', dev: [5, 7], val: [8, 8] },
-  // Weeks 6-8 — Pre-sale visibility (Facebook)
-  { name: 'Facebook Marketing API + Lead Ads webhook', p: 'P1', size: 'M', dev: [6, 7], val: [8, 8] },
-  // Weeks 7-8 — activity_log substrate (unblocks OKR + per-serial timeline)
-  { name: 'activity_log entity refs + per-serial timeline', p: 'P2', size: 'S', dev: [7, 7], val: [8, 8] },
-  // Weeks 8-9 — Build MES + freight history + Klaviyo predictive
-  { name: 'build_station_passes promotion', p: 'P2', size: 'M', dev: [8, 9], val: [10, 10] },
-  { name: 'Freight quote history table', p: 'P2', size: 'S', dev: [8, 8], val: [9, 9] },
-  { name: 'Klaviyo predictive properties pull-back', p: 'P2', size: 'S', dev: [9, 9], val: [10, 10] },
-  // Weeks 9-11 — Finance projection panels
-  { name: 'ProductionProjectionPanel (Finance)', p: 'P2', size: 'M', dev: [9, 10], val: [11, 11] },
-  { name: 'OKR & KPI tracking (ActivityLog)', p: 'P2', size: 'M', dev: [10, 11], val: [12, 12] },
-  { name: 'Facebook CAPI server-side events', p: 'P2', size: 'M', dev: [10, 11], val: [12, 12] },
-  // Weeks 10-12 — Mobile V2 (large)
-  { name: 'Mobile V2 (card-row tables)', p: 'P2', size: 'L', dev: [10, 12], val: [13, 13] },
-  // Weeks 11-12 — Sales projection
-  { name: 'SalesProjectionPanel rolling-average (Finance)', p: 'P2', size: 'M', dev: [11, 12], val: [13, 13] },
-  // Weeks 12-13 — HubSpot decommission window
-  { name: 'HubSpot CRM decommission window', p: 'P2', size: 'M', dev: [12, 13], val: [14, 14] },
-  // Week 13-14 — P3 sample (customer sidebar widgets)
-  { name: 'Customer record sidebar widgets (Attio pattern)', p: 'P3', size: 'M', dev: [13, 14], val: [14, 14] },
+// v1.4 — hour-based + per-shipper allocation. Each feature carries an
+// owner (current shipper) and an estimated hour budget. Per-shipper
+// weekly capacity is an editable assumption — see §12 swimlane.
+//
+// Hour sizing per effort tier (dev + validation combined):
+//   S = 5h, M = 15h, L = 45h.
+// Token estimates retained for §16 Token Budget.
+
+const SHIPPERS = [
+  { id: 'huayi',   name: 'Huayi',   initials: 'HG', role: 'Product · cross-cutting', color: '#9b2c2c', current: true,  weekly_hours: 25,
+    note: 'Product owner; ships across all modules; highest weekly capacity given role overlap' },
+  { id: 'junaid',  name: 'Junaid',  initials: 'JS', role: 'Service Lead', color: '#047857', current: true,  weekly_hours: 15,
+    note: 'Service module + Dashboard cross-checks; depot-repair workflow' },
+  { id: 'pedrum',  name: 'Pedrum',  initials: 'PA', role: 'Sales Lead', color: '#1e6091', current: true,  weekly_hours: 15,
+    note: 'OrderReview + Marketing + Klaviyo + HubSpot integrations' },
+  { id: 'reina',   name: 'Reina',   initials: 'RE', role: 'Onboarding & CX', color: '#b45309', current: true,  weekly_hours: 10,
+    note: 'CX-adjacent — Service Onboarding + Customers + PostShipment Returns' },
+  { id: 'george',  name: 'George',  initials: 'GY', role: 'Ops Lead', color: '#6b7280', current: false, future: true, weekly_hours: 0,
+    note: 'Will join — finance workflows + activity-log audits' },
+  { id: 'lezhong', name: 'Lezhong', initials: 'LZ', role: 'Engineering (HW + FW)', color: '#6b7280', current: false, future: true, weekly_hours: 0,
+    note: 'Will join — Build MES + Dashboard classifier tuning' },
 ];
 
-// Token estimates per effort size (total tokens incl. input + output, conservative upper end)
-const EFFORT_TOKENS = { S: 1_000_000, M: 3_500_000, L: 10_000_000 };
+// Master assignment list — every planned feature with owner + hours.
+// "dep" = features that should ship first inside the same person's queue.
+// "futureMoveTo" = candidate to reassign once George / Lezhong come online.
+const ASSIGNMENTS = [
+  // ── Substrate (Week 1) ────────────────────────────────────────────
+  { name: 'RBAC profiles + canDo/canView helpers',         p: 'P1', size: 'S', hours: 5,  owner: 'huayi',  why: 'Cross-cutting; blocks Finance module visibility model + Returns approver gate refactor' },
+  { name: 'Klaviyo Track API event firehose',              p: 'P1', size: 'S', hours: 5,  owner: 'pedrum', why: 'Marketing/lifecycle domain — Pedrum already owns Klaviyo integration' },
+  { name: 'PaymentCard UI on OrderReview',                 p: 'P1', size: 'S', hours: 5,  owner: 'pedrum', why: 'Pure UI on existing payment columns; OrderReview is Pedrum\'s daily flow' },
+
+  // ── P1 backbone ───────────────────────────────────────────────────
+  { name: 'Mobile V1 (viewport + PWA + AppShell)',         p: 'P1', size: 'M', hours: 15, owner: 'huayi',  why: 'Cross-cutting AppShell + GlobalNav; Huayi owns the product chrome' },
+  { name: 'Warranty registration entity',                  p: 'P1', size: 'S', hours: 5,  owner: 'junaid', dep: ['RBAC profiles + canDo/canView helpers'], why: 'Service domain — Junaid owns ticket/warranty workflow' },
+  { name: 'Returns disposition + grade + quarantine + #79', p: 'P1', size: 'M', hours: 15, owner: 'reina',  dep: ['RBAC profiles + canDo/canView helpers'], why: 'PostShipment Returns is the biggest CX-adjacent operator pain right now; Reina handles inspection workflow end-to-end' },
+  { name: 'Device-context header on Service tickets',      p: 'P1', size: 'M', hours: 15, owner: 'junaid', dep: ['Warranty registration entity'], why: 'Service module surface — Junaid uses it daily' },
+  { name: 'SLA aging + auto-escalation',                   p: 'P1', size: 'M', hours: 15, owner: 'junaid', why: 'Service queue management — Junaid feels the pain when SLA aging is invisible' },
+  { name: 'Telemetry-driven ticket auto-create',           p: 'P1', size: 'M', hours: 15, owner: 'junaid', dep: ['Device-context header on Service tickets'], why: 'Service + Dashboard intersection; Junaid validates the false-positive thresholds' },
+  { name: 'Finance module skeleton + JournalPanel (QBO)',  p: 'P1', size: 'M', hours: 15, owner: 'huayi',  dep: ['RBAC profiles + canDo/canView helpers', 'Returns disposition + grade + quarantine + #79'], why: 'Restricted Finance module; Huayi has access + product context' },
+  { name: 'Facebook Marketing API + Lead Ads webhook',     p: 'P1', size: 'M', hours: 15, owner: 'pedrum', why: 'Pre-sale visibility lives in Pedrum\'s daily flow' },
+  { name: 'Lead attribution fields (first_touch / last_touch)', p: 'P1', size: 'S', hours: 5, owner: 'pedrum', why: 'JourneyTab chip Pedrum scans daily' },
+  { name: 'CampaignsTab aggregating FB + Klaviyo + HubSpot', p: 'P1', size: 'M', hours: 15, owner: 'pedrum', dep: ['Facebook Marketing API + Lead Ads webhook'], why: 'Marketing module entry — Pedrum\'s weekly review surface' },
+
+  // ── P2 ──────────────────────────────────────────────────────────────
+  { name: 'activity_log entity refs + per-serial timeline', p: 'P2', size: 'S', hours: 5,  owner: 'huayi',  why: 'Substrate; unblocks Junaid\'s telemetry auto-ticket richness + Reina\'s OKR module' },
+  { name: 'build_station_passes promotion',                p: 'P2', size: 'M', hours: 15, owner: 'junaid', futureMoveTo: 'lezhong', why: 'Build module — Junaid until Lezhong joins, then natural handoff' },
+  { name: 'Freight quote history table',                   p: 'P2', size: 'S', hours: 5,  owner: 'pedrum', why: 'OrderReview enhancement Pedrum sees daily' },
+  { name: 'Klaviyo predictive properties pull-back',       p: 'P2', size: 'S', hours: 5,  owner: 'pedrum', dep: ['Klaviyo Track API event firehose'], why: 'Klaviyo domain; Pedrum scans churn-risk chips for at-risk customers' },
+  { name: 'ProductionProjectionPanel (Finance)',           p: 'P2', size: 'M', hours: 15, owner: 'huayi',  dep: ['Finance module skeleton + JournalPanel (QBO)'], why: 'Finance restricted module + Huayi has product context for stock-out modeling' },
+  { name: 'OKR & KPI tracking (ActivityLog)',              p: 'P2', size: 'M', hours: 15, owner: 'reina',  dep: ['activity_log entity refs + per-serial timeline'], why: 'ActivityLog enhancement; Reina has reliable daily flow → good UAT fit + lower-stakes module for new ship pattern' },
+  { name: 'Facebook CAPI server-side events',              p: 'P2', size: 'M', hours: 15, owner: 'pedrum', dep: ['Facebook Marketing API + Lead Ads webhook'], why: 'Marketing domain extension' },
+  { name: 'Mobile V2 (card-row tables)',                   p: 'P2', size: 'L', hours: 45, owner: 'huayi',  dep: ['Mobile V1 (viewport + PWA + AppShell)'], why: 'Largest single item — Huayi owns CSS strategy; could pair on individual modules' },
+  { name: 'SalesProjectionPanel rolling-average',          p: 'P2', size: 'M', hours: 15, owner: 'huayi',  dep: ['ProductionProjectionPanel (Finance)'], why: 'Finance restricted — Huayi has the marketing data context' },
+  { name: 'HubSpot CRM decommission window',               p: 'P2', size: 'M', hours: 15, owner: 'pedrum', dep: ['Klaviyo Track API event firehose'], why: 'Sequence migration is Pedrum\'s domain knowledge' },
+
+  // ── P3 (sample) ─────────────────────────────────────────────────────
+  { name: 'Customer record sidebar widgets (Attio pattern)', p: 'P3', size: 'M', hours: 15, owner: 'reina',  why: 'Customers module enhancement — Reina lives in JourneyTab' },
+];
+
+// Effort tier definitions
 const EFFORT_HOURS = { S: 5, M: 15, L: 45 };
+const EFFORT_TOKENS = { S: 1_000_000, M: 3_500_000, L: 10_000_000 };
 const EFFORT_OUTPUT_TOKENS = { S: 175_000, M: 550_000, L: 2_000_000 };
 
-// Weekly tier capacity (approximate, mixed-model output-equivalent)
+// Claude weekly tier capacity (approximate, mixed-model output-equivalent)
 const TIER_WEEKLY = {
-  Pro: 22_500_000,         // ~Pro: 15-30M, midpoint
-  'Max 5×': 112_500_000,   // ~Max 5x: 75-150M
-  'Max 20×': 450_000_000,  // ~Max 20x: 300-600M
+  Pro: 22_500_000,
+  'Max 5×': 112_500_000,
+  'Max 20×': 450_000_000,
 };
 
-function renderTimeline() {
-  const wrap = document.getElementById('timeline-wrap');
-  // 14 weeks ~= Jun 9 → Sep 15 2026. Months show every 4 weeks.
-  const monthLabels = ['Jun', 'Jul', 'Aug', 'Sep'];
-  let html = `<div class="timeline-header" style="--weeks:${WEEKS}"><div class="first">Initiative</div>`;
-  for (let w = 1; w <= WEEKS; w++) {
-    const monthIdx = Math.floor((w - 1) / 4);
-    const showMonth = (w - 1) % 4 === 0;
-    html += `<div>${showMonth ? '<strong>' + monthLabels[monthIdx] + '</strong>' : 'W' + w}</div>`;
-  }
-  html += '</div>';
-  TIMELINE.forEach(t => {
-    html += `<div class="timeline-row" style="--weeks:${WEEKS}">`;
-    html += `<div class="label">${t.name}<div class="small">${t.p}·${t.size} · dev W${t.dev[0]}-${t.dev[1]} · val W${t.val[0]}-${t.val[1]} · ~${(EFFORT_TOKENS[t.size]/1_000_000).toFixed(1)}M tokens</div></div>`;
-    for (let w = 1; w <= WEEKS; w++) {
-      const inDev = w >= t.dev[0] && w <= t.dev[1];
-      const inVal = w >= t.val[0] && w <= t.val[1];
-      let cls = 'week';
-      if (inDev) cls += ' dev ' + t.p.toLowerCase();
-      else if (inVal) cls += ' validate ' + t.p.toLowerCase();
-      if (w === NOW_WEEK) cls += ' now';
-      html += `<div class="${cls}"></div>`;
-    }
-    html += '</div>';
+function getAssignmentsFor(ownerId) {
+  // Order by priority (P1 before P2 before P3), then by dep-graph (deps first)
+  const order = { P1: 0, P2: 1, P3: 2 };
+  const list = ASSIGNMENTS.filter(a => a.owner === ownerId);
+  list.sort((a, b) => order[a.p] - order[b.p]);
+  // Simple topo-ish: items with no dep first within priority
+  return list;
+}
+
+function renderShipperSummaryStats() {
+  const totalHours = ASSIGNMENTS.reduce((s, a) => s + a.hours, 0);
+  const currentCount = SHIPPERS.filter(s => s.current).length;
+  const futureCount = SHIPPERS.filter(s => s.future).length;
+  const totalWeeklyCap = SHIPPERS.filter(s => s.current).reduce((s, x) => s + x.weekly_hours, 0);
+  const futureMoveCount = ASSIGNMENTS.filter(a => a.futureMoveTo).length;
+  const bottleneck = SHIPPERS.filter(s => s.current).map(s => {
+    const h = ASSIGNMENTS.filter(a => a.owner === s.id).reduce((sum, a) => sum + a.hours, 0);
+    return { id: s.id, name: s.name, h, w: h / s.weekly_hours };
+  }).sort((a, b) => b.w - a.w)[0];
+
+  document.getElementById('shipper-summary-stats').innerHTML = [
+    { label: 'Current shippers', value: currentCount, sub: 'Pedrum · Junaid · Reina · Huayi' },
+    { label: 'Future shippers', value: futureCount, sub: 'George · Lezhong (joining later)' },
+    { label: 'Total feature hours', value: totalHours + 'h', sub: 'all P1 + P2 + P3 combined' },
+    { label: 'Weekly team capacity', value: totalWeeklyCap + 'h/wk', sub: 'sum of current shippers' },
+    { label: 'Calendar at full pace', value: Math.ceil(totalHours / totalWeeklyCap) + ' wks', sub: 'ideal — bottlenecked by slowest stream' },
+    { label: 'Bottleneck stream', value: bottleneck.name, sub: `${bottleneck.h}h ÷ wk → ${bottleneck.w.toFixed(1)} wks`, cls: 'planned-p1' },
+    { label: 'Future-handoff items', value: futureMoveCount, sub: 'will move to George/Lezhong' },
+  ].map(s => `<div class="stat ${s.cls || ''}"><div class="label">${s.label}</div><div class="value">${s.value}</div><div class="sub">${s.sub}</div></div>`).join('');
+}
+
+function renderSwimlane() {
+  const wrap = document.getElementById('swimlane-wrap');
+  const currentShippers = SHIPPERS.filter(s => s.current);
+  wrap.innerHTML = `<div class="swimlane">${currentShippers.map(s => {
+    const items = getAssignmentsFor(s.id);
+    const hours = items.reduce((sum, a) => sum + a.hours, 0);
+    const wks = (hours / s.weekly_hours).toFixed(1);
+    return `
+      <div class="swimlane-row">
+        <div class="swimlane-head">
+          <div class="swimlane-avatar" style="background:${s.color}">${s.initials}</div>
+          <div>
+            <div class="swimlane-name">${s.name}</div>
+            <div class="swimlane-meta">${s.role} · ${s.weekly_hours}h/wk · ${s.note}</div>
+          </div>
+          <div class="swimlane-hours">${hours}h total · ~${wks} wks</div>
+        </div>
+        <div class="swimlane-bar">
+          ${items.map((a, idx) => {
+            const widthH = Math.max(120, Math.min(450, a.hours * 8));
+            return `<div class="swim-block ${a.p.toLowerCase()}" style="width:${widthH}px" data-detail="${s.id}-${idx}">
+              <div class="hours-badge">${a.hours}h · ${a.size}</div>
+              <div style="padding-right:60px"><strong>${idx + 1}.</strong> ${a.name}</div>
+              ${a.dep && a.dep.length ? `<span class="dep-badge">dep: ${a.dep.map(d => d.split(' ').slice(0,3).join(' ')).join(', ')}</span>` : ''}
+              ${a.futureMoveTo ? `<span class="move-badge">→ ${SHIPPERS.find(sh => sh.id === a.futureMoveTo).name}</span>` : ''}
+            </div>`;
+          }).join('')}
+        </div>
+        ${items.map((a, idx) => `
+          <div class="swim-detail" id="detail-${s.id}-${idx}">
+            <div class="kv">
+              <div class="k">Feature:</div><div><strong>${a.name}</strong></div>
+              <div class="k">Priority:</div><div><span class="pill ${a.p.toLowerCase()}">${a.p}</span> · size ${a.size} · estimated <strong>${a.hours} hours</strong> dev + validation</div>
+              <div class="k">Why owner:</div><div>${a.why}</div>
+              ${a.dep ? `<div class="k">Depends on:</div><div>${a.dep.join(' · ')}</div>` : ''}
+              ${a.futureMoveTo ? `<div class="k">Future handoff:</div><div>Will move to <strong>${SHIPPERS.find(sh => sh.id === a.futureMoveTo).name}</strong> once they join</div>` : ''}
+              <div class="k">Tokens:</div><div>~${(EFFORT_TOKENS[a.size]/1_000_000).toFixed(1)}M (see §16 Token Budget)</div>
+            </div>
+          </div>`).join('')}
+      </div>`;
+  }).join('')}</div>`;
+
+  // Wire up click handlers
+  document.querySelectorAll('.swim-block').forEach(b => {
+    b.addEventListener('click', () => {
+      const id = 'detail-' + b.getAttribute('data-detail');
+      const el = document.getElementById(id);
+      if (!el) return;
+      document.querySelectorAll('.swim-detail.open').forEach(d => { if (d.id !== id) d.classList.remove('open'); });
+      el.classList.toggle('open');
+    });
   });
-  wrap.innerHTML = html;
+}
+
+function renderShipperLoadTable() {
+  const tbody = document.getElementById('shipper-load-tbody');
+  let html = SHIPPERS.filter(s => s.current).map(s => {
+    const items = ASSIGNMENTS.filter(a => a.owner === s.id);
+    const h = items.reduce((sum, a) => sum + a.hours, 0);
+    const p1 = items.filter(a => a.p === 'P1').reduce((sum, a) => sum + a.hours, 0);
+    const p2 = items.filter(a => a.p === 'P2').reduce((sum, a) => sum + a.hours, 0);
+    const p3 = items.filter(a => a.p === 'P3').reduce((sum, a) => sum + a.hours, 0);
+    const wks = (h / s.weekly_hours).toFixed(1);
+    return `<tr>
+      <td><strong>${s.name}</strong></td>
+      <td>${s.role}</td>
+      <td class="numeric">${h}h</td>
+      <td class="numeric">${s.weekly_hours}</td>
+      <td class="numeric">${wks} wks</td>
+      <td class="numeric">${p1 || '—'}</td>
+      <td class="numeric">${p2 || '—'}</td>
+      <td class="numeric">${p3 || '—'}</td>
+    </tr>`;
+  }).join('');
+  const totH = ASSIGNMENTS.reduce((sum, a) => sum + a.hours, 0);
+  const totCap = SHIPPERS.filter(s => s.current).reduce((sum, s) => sum + s.weekly_hours, 0);
+  html += `<tr class="totals">
+    <td>TEAM TOTAL</td><td>—</td>
+    <td class="numeric">${totH}h</td>
+    <td class="numeric">${totCap}/wk</td>
+    <td class="numeric">${(totH/totCap).toFixed(1)} wks (parallel)</td>
+    <td class="numeric">${ASSIGNMENTS.filter(a=>a.p==='P1').reduce((s,a)=>s+a.hours,0)}h</td>
+    <td class="numeric">${ASSIGNMENTS.filter(a=>a.p==='P2').reduce((s,a)=>s+a.hours,0)}h</td>
+    <td class="numeric">${ASSIGNMENTS.filter(a=>a.p==='P3').reduce((s,a)=>s+a.hours,0)}h</td>
+  </tr>`;
+  tbody.innerHTML = html;
+}
+
+function renderFutureHandoff() {
+  const wrap = document.getElementById('future-handoff-wrap');
+  const futureShippers = SHIPPERS.filter(s => s.future);
+  wrap.innerHTML = futureShippers.map(s => {
+    const candidates = ASSIGNMENTS.filter(a => a.futureMoveTo === s.id);
+    return `
+      <div class="swimlane-row future">
+        <div class="swimlane-head">
+          <div class="swimlane-avatar" style="background:${s.color}">${s.initials}</div>
+          <div>
+            <div class="swimlane-name">${s.name} <span class="swimlane-future-pill">joining later</span></div>
+            <div class="swimlane-meta">${s.role} · ${s.note}</div>
+          </div>
+          <div class="swimlane-hours">${candidates.reduce((sum, a) => sum + a.hours, 0)}h candidates</div>
+        </div>
+        ${candidates.length > 0 ? `
+        <div class="swimlane-bar">
+          ${candidates.map(a => {
+            const fromShipper = SHIPPERS.find(sh => sh.id === a.owner);
+            return `<div class="swim-block ${a.p.toLowerCase()}" style="width:${Math.max(140, a.hours * 8)}px">
+              <div class="hours-badge">${a.hours}h · ${a.size}</div>
+              <div>${a.name}</div>
+              <span class="dep-badge">move from ${fromShipper.name}</span>
+            </div>`;
+          }).join('')}
+        </div>` : `<p style="font-size:12px;color:var(--ink-muted);margin:6px 0 0">No explicit candidates flagged today. Reassignment recommendations will be added as their workflow domains crystallize.</p>`}
+      </div>`;
+  }).join('');
+}
+
+function renderShipperCompletionChart() {
+  // Per-shipper: x = cumulative hours, y = features done
+  const datasets = SHIPPERS.filter(s => s.current).map(s => {
+    const items = getAssignmentsFor(s.id);
+    const points = [{ x: 0, y: 0 }];
+    let cum = 0;
+    items.forEach((a, i) => {
+      cum += a.hours;
+      points.push({ x: cum, y: i + 1 });
+    });
+    return {
+      label: s.name,
+      data: points,
+      borderColor: s.color,
+      backgroundColor: s.color + '22',
+      fill: false,
+      tension: 0.1,
+      stepped: 'after',
+      pointRadius: 4,
+      pointHoverRadius: 6,
+    };
+  });
+  new Chart(document.getElementById('chart-shipper-completion'), {
+    type: 'line',
+    data: { datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { position: 'bottom' } },
+      scales: {
+        x: { type: 'linear', title: { display: true, text: 'cumulative hours invested' } },
+        y: { beginAtZero: true, ticks: { precision: 0 }, title: { display: true, text: '# features completed' } },
+      },
+    },
+  });
 }
 
 function fmtTokens(n) {
@@ -1884,35 +2205,25 @@ function renderTokenFeatureTable() {
 }
 
 function renderTokenBurnChart() {
-  // Compute weekly token spend by tier from TIMELINE
-  const weeklyP1 = new Array(WEEKS).fill(0);
-  const weeklyP2 = new Array(WEEKS).fill(0);
-  const weeklyP3 = new Array(WEEKS).fill(0);
-  TIMELINE.forEach(t => {
-    const devSpan = t.dev[1] - t.dev[0] + 1;
-    const perWeek = EFFORT_TOKENS[t.size] / devSpan;
-    for (let w = t.dev[0]; w <= t.dev[1]; w++) {
-      const bucket = t.p === 'P1' ? weeklyP1 : t.p === 'P2' ? weeklyP2 : weeklyP3;
-      bucket[w - 1] += perWeek;
-    }
-  });
-  const labels = Array.from({ length: WEEKS }, (_, i) => 'W' + (i + 1));
+  // v1.4 — per-shipper token consumption, sized by their assigned hours.
+  const shippers = SHIPPERS.filter(s => s.current);
+  const labels = shippers.map(s => s.name);
+  const p1Tokens = shippers.map(s => ASSIGNMENTS.filter(a => a.owner === s.id && a.p === 'P1').reduce((sum, a) => sum + EFFORT_TOKENS[a.size], 0));
+  const p2Tokens = shippers.map(s => ASSIGNMENTS.filter(a => a.owner === s.id && a.p === 'P2').reduce((sum, a) => sum + EFFORT_TOKENS[a.size], 0));
+  const p3Tokens = shippers.map(s => ASSIGNMENTS.filter(a => a.owner === s.id && a.p === 'P3').reduce((sum, a) => sum + EFFORT_TOKENS[a.size], 0));
   new Chart(document.getElementById('chart-token-burn'), {
     type: 'bar',
     data: { labels,
       datasets: [
-        { label: 'P1 dev', data: weeklyP1, backgroundColor: '#c05621', stack: 'spend' },
-        { label: 'P2 dev', data: weeklyP2, backgroundColor: '#1e6091', stack: 'spend' },
-        { label: 'P3 dev', data: weeklyP3, backgroundColor: '#6b7280', stack: 'spend' },
+        { label: 'P1 token spend', data: p1Tokens, backgroundColor: '#c05621', stack: 'spend' },
+        { label: 'P2 token spend', data: p2Tokens, backgroundColor: '#1e6091', stack: 'spend' },
+        { label: 'P3 token spend', data: p3Tokens, backgroundColor: '#6b7280', stack: 'spend' },
       ]},
     options: {
       responsive: true, maintainAspectRatio: false,
-      plugins: {
-        legend: { position: 'bottom' },
-        annotation: {},
-      },
+      plugins: { legend: { position: 'bottom' } },
       scales: {
-        x: { stacked: true },
+        x: { stacked: true, title: { display: true, text: 'shipper' } },
         y: {
           stacked: true,
           title: { display: true, text: 'estimated tokens consumed (M)' },
@@ -1923,18 +2234,7 @@ function renderTokenBurnChart() {
   });
 }
 
-function renderCumulative() {
-  const data = [];
-  for (let w = 1; w <= WEEKS; w++) data.push(TIMELINE.filter(t => t.val[1] <= w).length);
-  new Chart(document.getElementById('chart-cumulative'), {
-    type: 'line',
-    data: { labels: Array.from({ length: WEEKS }, (_, i) => 'W' + (i + 1)),
-      datasets: [{ label: 'Cumulative validated features', data, borderColor: '#9b2c2c', backgroundColor: 'rgba(155,44,44,0.12)', fill: true, tension: 0.2 }] },
-    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } },
-      scales: { y: { beginAtZero: true, ticks: { precision: 0 }, title: { display: true, text: '# features validated' } },
-                x: { title: { display: true, text: 'weeks from 2026-06-09 — 14-week compressed plan' } } } },
-  });
-}
+// (Removed in v1.4: calendar-cumulative chart replaced by per-shipper completion-vs-hours chart inside the new swimlane section.)
 
 function renderOOSList() { document.getElementById('oos-list').innerHTML = OOS.map(i => `<li>${i}</li>`).join(''); }
 function renderRiskLists() {
@@ -2004,14 +2304,18 @@ renderPersonaPicker();
 selectPersona('pedrum');  // default selection
 renderGapTable();
 renderEffortChart();
-renderTimeline();
-renderCumulative();
+// renderTimeline() + renderCumulative() removed in v1.4 — replaced by per-shipper swimlane.
 renderOOSList();
 renderRiskLists();
 renderChangelog();
 renderTokenStats();
 renderTokenFeatureTable();
 renderTokenBurnChart();
+renderShipperSummaryStats();
+renderSwimlane();
+renderShipperLoadTable();
+renderFutureHandoff();
+renderShipperCompletionChart();
 </script>
 
 </body>
