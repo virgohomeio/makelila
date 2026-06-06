@@ -1,0 +1,1230 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>makeLILA PRD Review — Gap Analysis &amp; Timeline (v1.2)</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --crimson: #9b2c2c;
+    --crimson-dark: #7c1d1d;
+    --crimson-soft: #fef1f0;
+    --ink: #1f2933;
+    --ink-muted: #52606d;
+    --ink-subtle: #7b8794;
+    --surface: #f7f8fa;
+    --border: #d9dde2;
+    --shipped: #2f855a;
+    --shipped-bg: #f0fdf4;
+    --p1: #c05621;
+    --p1-bg: #fff7ed;
+    --p2: #1e6091;
+    --p2-bg: #eff8ff;
+    --p3: #6b7280;
+    --p3-bg: #f3f4f6;
+    --radius-sm: 4px;
+    --radius-md: 8px;
+    --radius-lg: 12px;
+    --shadow-card: 0 1px 2px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.04);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "Segoe UI", system-ui, sans-serif;
+    color: var(--ink);
+    background: var(--surface);
+    line-height: 1.5;
+  }
+  header.topbar {
+    background: var(--crimson);
+    color: #fff;
+    padding: 14px 24px;
+    box-shadow: var(--shadow-card);
+    position: sticky; top: 0; z-index: 50;
+  }
+  header.topbar h1 {
+    margin: 0 0 4px; font-size: 18px; font-weight: 800; letter-spacing: -0.01em;
+  }
+  header.topbar .sub {
+    font-size: 11px; opacity: 0.85;
+  }
+  nav.tabs {
+    background: #fff;
+    border-bottom: 1px solid var(--border);
+    padding: 0 24px;
+    display: flex;
+    gap: 4px;
+    position: sticky; top: 60px; z-index: 49;
+  }
+  nav.tabs button {
+    background: none; border: none;
+    padding: 14px 18px;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--ink-muted);
+    cursor: pointer;
+    border-bottom: 3px solid transparent;
+    transition: all 0.15s;
+  }
+  nav.tabs button:hover { color: var(--crimson); }
+  nav.tabs button.active {
+    color: var(--crimson);
+    border-bottom-color: var(--crimson);
+  }
+  main { padding: 24px; max-width: 1400px; margin: 0 auto; }
+  section.view { display: none; }
+  section.view.active { display: block; }
+  h2 {
+    margin: 0 0 8px;
+    font-size: 22px;
+    letter-spacing: -0.015em;
+  }
+  h3 { margin: 24px 0 12px; font-size: 16px; }
+  .lede { color: var(--ink-muted); font-size: 13px; margin: 0 0 24px; max-width: 800px; }
+
+  /* Stat grid */
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
+    margin-bottom: 24px;
+  }
+  .stat {
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 14px 16px;
+    box-shadow: var(--shadow-card);
+  }
+  .stat .label {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--ink-subtle);
+  }
+  .stat .value {
+    font-size: 28px;
+    font-weight: 800;
+    color: var(--ink);
+    line-height: 1.2;
+    margin: 4px 0;
+  }
+  .stat .sub {
+    font-size: 11px;
+    color: var(--ink-muted);
+  }
+  .stat.shipped .value { color: var(--shipped); }
+  .stat.planned-p1 .value { color: var(--p1); }
+  .stat.planned-p2 .value { color: var(--p2); }
+  .stat.planned-p3 .value { color: var(--p3); }
+
+  /* Chart container */
+  .chart-card {
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 20px;
+    margin-bottom: 24px;
+    box-shadow: var(--shadow-card);
+  }
+  .chart-card h3 { margin-top: 0; }
+  .chart-canvas-wrap { height: 320px; position: relative; }
+  .chart-canvas-wrap.tall { height: 480px; }
+
+  /* Module cards */
+  .filter-row {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+    margin-bottom: 16px;
+  }
+  .filter-row label { font-size: 11px; font-weight: 700; color: var(--ink-muted); margin-right: 4px; }
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 700;
+    border: 1px solid var(--border);
+    background: #fff;
+    color: var(--ink-muted);
+    cursor: pointer;
+    transition: all 0.1s;
+  }
+  .chip:hover { border-color: var(--crimson); }
+  .chip.active { background: var(--crimson); color: #fff; border-color: var(--crimson); }
+  .chip.status-shipped { background: var(--shipped-bg); color: var(--shipped); border-color: var(--shipped); }
+  .chip.status-p1 { background: var(--p1-bg); color: var(--p1); border-color: var(--p1); }
+  .chip.status-p2 { background: var(--p2-bg); color: var(--p2); border-color: var(--p2); }
+  .chip.status-p3 { background: var(--p3-bg); color: var(--p3); border-color: var(--p3); }
+
+  .module-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+    gap: 16px;
+  }
+  .module-card {
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 18px;
+    box-shadow: var(--shadow-card);
+  }
+  .module-card .head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+    margin-bottom: 12px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .module-card .head h3 {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 800;
+  }
+  .module-card .head .domain {
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--ink-subtle);
+    margin-top: 2px;
+  }
+  .module-card .head .counts {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 2px;
+    font-size: 10px;
+    font-weight: 700;
+  }
+  .module-card .head .counts .c-shipped { color: var(--shipped); }
+  .module-card .head .counts .c-planned { color: var(--ink-subtle); }
+  .module-card .restricted-badge {
+    display: inline-block;
+    background: var(--crimson);
+    color: #fff;
+    font-size: 8px;
+    font-weight: 800;
+    padding: 2px 6px;
+    border-radius: 3px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-left: 6px;
+  }
+  .feature-list {
+    margin: 0; padding: 0; list-style: none;
+  }
+  .feature-list li {
+    padding: 8px 0;
+    border-bottom: 1px dashed #eee;
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+  }
+  .feature-list li:last-child { border-bottom: none; }
+  .feature-list .marker {
+    font-size: 10px;
+    font-weight: 800;
+    padding: 2px 6px;
+    border-radius: 3px;
+    flex-shrink: 0;
+    margin-top: 1px;
+    min-width: 36px;
+    text-align: center;
+  }
+  .feature-list .marker.s { background: var(--shipped-bg); color: var(--shipped); }
+  .feature-list .marker.p1 { background: var(--p1-bg); color: var(--p1); }
+  .feature-list .marker.p2 { background: var(--p2-bg); color: var(--p2); }
+  .feature-list .marker.p3 { background: var(--p3-bg); color: var(--p3); }
+  .feature-list .text { font-size: 12px; line-height: 1.45; color: var(--ink); }
+  .feature-list .text .meta {
+    font-size: 10px;
+    color: var(--ink-subtle);
+    margin-top: 2px;
+  }
+  .effort-badge {
+    display: inline-block;
+    background: #fff;
+    border: 1px solid var(--border);
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 9px;
+    font-weight: 700;
+    color: var(--ink-muted);
+    margin-left: 4px;
+  }
+
+  /* Gap analysis table */
+  table.gap-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    box-shadow: var(--shadow-card);
+    font-size: 12px;
+  }
+  table.gap-table th {
+    background: var(--surface);
+    text-align: left;
+    padding: 10px 12px;
+    font-size: 10px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--ink-subtle);
+    border-bottom: 1px solid var(--border);
+  }
+  table.gap-table th.numeric { text-align: right; }
+  table.gap-table td {
+    padding: 10px 12px;
+    border-bottom: 1px solid #eee;
+    vertical-align: top;
+  }
+  table.gap-table td.numeric { text-align: right; font-variant-numeric: tabular-nums; font-weight: 700; }
+  table.gap-table tr:last-child td { border-bottom: none; }
+  table.gap-table tr.totals { background: var(--crimson-soft); }
+  table.gap-table tr.totals td { font-weight: 800; color: var(--crimson-dark); border-top: 2px solid var(--crimson); }
+
+  /* Stacked bar (gap viz inline) */
+  .gap-bar {
+    display: flex;
+    height: 16px;
+    border-radius: 3px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    background: #eee;
+    min-width: 120px;
+  }
+  .gap-bar .seg { display: block; }
+  .gap-bar .seg.s { background: var(--shipped); }
+  .gap-bar .seg.p1 { background: var(--p1); }
+  .gap-bar .seg.p2 { background: var(--p2); }
+  .gap-bar .seg.p3 { background: var(--p3); }
+
+  /* Timeline */
+  .timeline-wrap {
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 20px;
+    box-shadow: var(--shadow-card);
+    overflow-x: auto;
+  }
+  .timeline-header {
+    display: grid;
+    grid-template-columns: 320px repeat(var(--weeks, 24), minmax(28px, 1fr));
+    gap: 2px;
+    margin-bottom: 4px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--border);
+    min-width: 1000px;
+  }
+  .timeline-header > * {
+    font-size: 9px;
+    font-weight: 700;
+    color: var(--ink-subtle);
+    text-align: center;
+    padding: 4px 0;
+  }
+  .timeline-header .first { text-align: left; padding-left: 4px; font-size: 10px; }
+  .timeline-row {
+    display: grid;
+    grid-template-columns: 320px repeat(var(--weeks, 24), minmax(28px, 1fr));
+    gap: 2px;
+    margin: 3px 0;
+    align-items: center;
+    min-width: 1000px;
+  }
+  .timeline-row .label {
+    font-size: 11px;
+    padding: 6px 4px;
+    color: var(--ink);
+  }
+  .timeline-row .label .small {
+    font-size: 9px;
+    color: var(--ink-subtle);
+    margin-top: 1px;
+  }
+  .timeline-row .week {
+    height: 18px;
+    border-radius: 2px;
+    background: transparent;
+  }
+  .timeline-row .week.dev { background: var(--crimson); }
+  .timeline-row .week.dev.p1 { background: var(--p1); }
+  .timeline-row .week.dev.p2 { background: var(--p2); }
+  .timeline-row .week.dev.p3 { background: var(--p3); }
+  .timeline-row .week.validate {
+    background-image: repeating-linear-gradient(45deg, rgba(0,0,0,0.18) 0 4px, transparent 4px 8px);
+  }
+  .timeline-row .week.validate.p1 { background-color: var(--p1-bg); }
+  .timeline-row .week.validate.p2 { background-color: var(--p2-bg); }
+  .timeline-row .week.validate.p3 { background-color: var(--p3-bg); }
+  .timeline-row .week.now { border-left: 2px solid var(--crimson); }
+  .legend-row {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+    font-size: 11px;
+    color: var(--ink-muted);
+    margin-bottom: 16px;
+  }
+  .legend-row .item { display: flex; align-items: center; gap: 6px; }
+  .legend-row .swatch {
+    display: inline-block;
+    width: 18px;
+    height: 14px;
+    border-radius: 2px;
+    border: 1px solid var(--border);
+  }
+  .legend-row .swatch.dev-p1 { background: var(--p1); }
+  .legend-row .swatch.dev-p2 { background: var(--p2); }
+  .legend-row .swatch.dev-p3 { background: var(--p3); }
+  .legend-row .swatch.val { background-image: repeating-linear-gradient(45deg, rgba(0,0,0,0.18) 0 4px, transparent 4px 8px); background-color: #f5f5f5; }
+
+  /* Notes */
+  .notes {
+    background: var(--crimson-soft);
+    border-left: 4px solid var(--crimson);
+    padding: 14px 16px;
+    border-radius: 0 var(--radius-md) var(--radius-md) 0;
+    margin: 24px 0;
+    font-size: 12px;
+    color: var(--ink);
+  }
+  .notes h4 {
+    margin: 0 0 4px;
+    font-size: 11px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--crimson-dark);
+  }
+
+  .pill {
+    display: inline-block;
+    font-size: 9px;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 999px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  .pill.shipped { background: var(--shipped-bg); color: var(--shipped); }
+  .pill.p1 { background: var(--p1-bg); color: var(--p1); }
+  .pill.p2 { background: var(--p2-bg); color: var(--p2); }
+  .pill.p3 { background: var(--p3-bg); color: var(--p3); }
+  .pill.restricted { background: var(--crimson); color: #fff; }
+
+  /* Two-column for cross-cutting */
+  .two-col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+  @media (max-width: 800px) {
+    .two-col { grid-template-columns: 1fr; }
+    nav.tabs { overflow-x: auto; }
+  }
+
+  footer {
+    margin-top: 48px;
+    padding: 24px;
+    text-align: center;
+    font-size: 11px;
+    color: var(--ink-subtle);
+  }
+  footer a { color: var(--crimson); }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <h1>makeLILA PRD Review — Gap Analysis &amp; Timeline</h1>
+  <div class="sub">Based on PRD v1.2 (2026-06-06) and the 2026-06-06 competitive landscape proposal. Click a tab to navigate.</div>
+</header>
+
+<nav class="tabs" id="tabs">
+  <button data-view="overview" class="active">Overview</button>
+  <button data-view="modules">Modules &amp; Features</button>
+  <button data-view="gap">Gap Analysis</button>
+  <button data-view="timeline">Timeline</button>
+  <button data-view="risks">Risks &amp; Open Questions</button>
+</nav>
+
+<main>
+
+  <!-- OVERVIEW -->
+  <section class="view active" id="view-overview">
+    <h2>Overview</h2>
+    <p class="lede">
+      This dashboard reviews what makeLILA has shipped and validated as of 2026-06-06 against
+      the planned features in PRD v1.2. The gap is the work to bring makeLILA from a hardware-ops
+      tool into the unified CRM + Service + ERP + Lifecycle &amp; Finance + Pre-sale Marketing
+      platform the PRD describes.
+    </p>
+
+    <div class="stats" id="overview-stats"></div>
+
+    <div class="chart-card">
+      <h3>Shipped vs Planned by Module</h3>
+      <p class="lede" style="margin:0 0 12px">
+        Each bar shows shipped features (validated and in production) versus planned features broken down by priority tier.
+        Modules with all-blue bars are the ones with the biggest delta between today's state and the PRD vision.
+      </p>
+      <div class="chart-canvas-wrap tall"><canvas id="chart-stack-modules"></canvas></div>
+    </div>
+
+    <div class="chart-card">
+      <h3>Planned-Feature Distribution by Priority</h3>
+      <div class="chart-canvas-wrap"><canvas id="chart-priority-dough"></canvas></div>
+    </div>
+
+    <div class="notes">
+      <h4>How to read this dashboard</h4>
+      Counts treat each first-class feature as one unit; "feature" maps to roughly one component / panel / data-model promotion / integration endpoint. Status options: <span class="pill shipped">shipped</span> in production and operator-validated, <span class="pill p1">P1</span> next 90 days, <span class="pill p2">P2</span> next 2 quarters, <span class="pill p3">P3</span> strategic with revisit criteria.
+    </div>
+  </section>
+
+  <!-- MODULES -->
+  <section class="view" id="view-modules">
+    <h2>Modules &amp; Features</h2>
+    <p class="lede">
+      Every module from the PRD with shipped features (validated and in production today) plus planned features.
+      Click a chip below to filter by status. The Finance module is restricted to George + Huayi per §4.11.
+    </p>
+    <div class="filter-row" id="module-filter">
+      <label>Filter:</label>
+      <span class="chip active" data-filter="all">All</span>
+      <span class="chip status-shipped" data-filter="shipped">Shipped only</span>
+      <span class="chip status-p1" data-filter="p1">P1 planned</span>
+      <span class="chip status-p2" data-filter="p2">P2 planned</span>
+      <span class="chip status-p3" data-filter="p3">P3 planned</span>
+    </div>
+    <div class="module-grid" id="module-grid"></div>
+  </section>
+
+  <!-- GAP ANALYSIS -->
+  <section class="view" id="view-gap">
+    <h2>Gap Analysis</h2>
+    <p class="lede">
+      Per-module quantification of the gap between shipped and planned. Each row shows the current shipped count,
+      the planned count broken down by priority, the total feature ambition, and a visual bar showing the
+      proportion. The bottom rows include the two NEW modules from PRD v1.2 (Finance, Marketing) which exist
+      only as planned scope today.
+    </p>
+
+    <table class="gap-table" id="gap-table">
+      <thead>
+        <tr>
+          <th>Module</th>
+          <th>Domain</th>
+          <th class="numeric">Shipped</th>
+          <th class="numeric">P1</th>
+          <th class="numeric">P2</th>
+          <th class="numeric">P3</th>
+          <th class="numeric">Total</th>
+          <th class="numeric">% Complete</th>
+          <th>Distribution</th>
+        </tr>
+      </thead>
+      <tbody id="gap-tbody"></tbody>
+    </table>
+
+    <div class="chart-card" style="margin-top:24px">
+      <h3>Effort vs Validation Budget (dev weeks + validation weeks per priority tier)</h3>
+      <p class="lede" style="margin:0 0 12px">
+        Effort sizes (S/M/L) from the PRD converted into calendar weeks using the convention below.
+        Validation budget assumes one cycle of operator UAT + one cycle of customer-side observation
+        per feature before it's considered shipped-and-validated.
+      </p>
+      <div class="chart-canvas-wrap"><canvas id="chart-effort"></canvas></div>
+      <table style="width:100%;margin-top:12px;font-size:11px;color:var(--ink-muted)" >
+        <tr><td><strong>S (small):</strong> 0.5–1 week dev + 1 week validation = ~2 calendar weeks</td>
+            <td><strong>M (medium):</strong> 1.5–2 weeks dev + 1.5 weeks validation = ~3.5 calendar weeks</td>
+            <td><strong>L (large):</strong> 3–4 weeks dev + 2.5 weeks validation = ~6.5 calendar weeks</td>
+        </tr>
+      </table>
+    </div>
+  </section>
+
+  <!-- TIMELINE -->
+  <section class="view" id="view-timeline">
+    <h2>Timeline to Close the Gap</h2>
+    <p class="lede">
+      24-week Gantt for the P1 + critical-path P2 work, starting Week 1 = 2026-06-09 (the Monday after PRD v1.2 ships).
+      Solid bars = active development. Hatched bars = operator UAT + customer-side validation. Dependencies are encoded
+      via start-week offsets. P3 items are excluded as they are deferred with revisit criteria.
+    </p>
+    <div class="legend-row">
+      <div class="item"><span class="swatch dev-p1"></span> P1 dev</div>
+      <div class="item"><span class="swatch dev-p2"></span> P2 dev</div>
+      <div class="item"><span class="swatch dev-p3"></span> P3 dev</div>
+      <div class="item"><span class="swatch val"></span> validation</div>
+      <div class="item"><span style="border-left:2px solid var(--crimson);height:14px;display:inline-block"></span> &nbsp;current week</div>
+    </div>
+    <div class="timeline-wrap" id="timeline-wrap"></div>
+
+    <div class="notes">
+      <h4>Resourcing assumption</h4>
+      The timeline assumes ~2 parallel engineering streams (the current build-cadence pattern in the repo). Single-engineer execution doubles the calendar; three-engineer execution compresses by ~30%. Validation cycles assume Junaid + Raymond + George + Huayi available for UAT during their normal workflows — no separate QA headcount is assumed.
+    </div>
+
+    <div class="chart-card" style="margin-top:24px">
+      <h3>Cumulative validated-feature count over time</h3>
+      <div class="chart-canvas-wrap"><canvas id="chart-cumulative"></canvas></div>
+    </div>
+  </section>
+
+  <!-- RISKS -->
+  <section class="view" id="view-risks">
+    <h2>Risks &amp; Open Questions</h2>
+    <p class="lede">
+      Items where the gap analysis surfaced decisions or risks the team should resolve before committing to the timeline.
+    </p>
+
+    <div class="two-col">
+      <div class="module-card">
+        <h3 style="margin-top:0">Open product decisions</h3>
+        <ul style="font-size:12px;line-height:1.6;padding-left:20px;margin:0">
+          <li><strong>HubSpot decommission timing.</strong> Depends on Klaviyo Track API firehose being live first (P1). Pedrum sign-off required on sequence-migration feasibility.</li>
+          <li><strong>Klaviyo SMS adoption.</strong> Klaviyo for sequence-driven SMS vs Quo as sole SMS surface. Recommendation: split (Klaviyo for sequence, Quo for 1-on-1).</li>
+          <li><strong>Pre-sale ad-spend scope.</strong> Facebook only for V1, or include Google Ads + TikTok? Affects §5 Campaign dashboard data model.</li>
+          <li><strong>Customer-facing portal.</strong> Deferred to P3 — revisit when "where is my order" volume exceeds 20/week.</li>
+          <li><strong>Lead-form ownership post-HubSpot.</strong> Recommendation: lila.vip forms post to makeLILA endpoint, with optional Klaviyo profile creation downstream.</li>
+          <li><strong>Sezzle direct integration.</strong> P3 candidate — inferred via Shopify today, may be worth direct API for QBO reconciliation.</li>
+        </ul>
+      </div>
+      <div class="module-card">
+        <h3 style="margin-top:0">Timeline risks</h3>
+        <ul style="font-size:12px;line-height:1.6;padding-left:20px;margin:0">
+          <li><strong>QBO API multi-currency.</strong> CAD/USD ledger discipline is a known gotcha. Add 1 week of validation cycle for refund + replacement edge cases.</li>
+          <li><strong>Facebook Marketing API auth.</strong> Meta Business System User access tokens have a separate approval flow. Add 1–2 weeks lead time before P1 work can start.</li>
+          <li><strong>Telemetry-driven ticket auto-creation false-positive rate.</strong> Backlog #70 documented 75% false positive on NOT_MIXING. Need to validate auto-create thresholds with a 2-week shadow run before flipping the switch.</li>
+          <li><strong>RBAC migration on live DB.</strong> Promoting from email-list checks to <code>profiles.role</code> with RLS tightening is single-shot. Schedule the migration window with operator notice.</li>
+          <li><strong>Mobile V1 PWA install testing on iOS.</strong> Safari PWA behaviors require physical-device testing; allow 1 extra validation week.</li>
+          <li><strong>Sales projection model accuracy.</strong> Rolling-average baseline has no validation cohort until ~30 days of data accumulates. Pipeline-driven variant defers to P3 specifically to give the rolling-average a chance to calibrate first.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="chart-card" style="margin-top:24px">
+      <h3>Recommended sequencing summary</h3>
+      <ol style="font-size:12px;line-height:1.8;margin:0;padding-left:24px">
+        <li><strong>Week 1–2:</strong> RBAC profiles + canDo/canView + Klaviyo Track API firehose + PaymentCard UI (S items, parallel).</li>
+        <li><strong>Week 3–6:</strong> Returns/Refunds overhaul finishing (grade + disposition + quarantine + #79 net out) — closes the biggest active operator pain.</li>
+        <li><strong>Week 4–8:</strong> Device-context header + warranty registration + SLA aging + telemetry-driven ticket auto-create — Service-domain hardening, runs parallel to Returns finish.</li>
+        <li><strong>Week 6–10:</strong> Finance module skeleton + JournalPanel ships behind RBAC. Depends on Returns being clean.</li>
+        <li><strong>Week 8–12:</strong> Facebook Marketing API + Lead Ads webhook + mobile V1. Pre-sale visibility lands.</li>
+        <li><strong>Week 12–18:</strong> P2 batch — build_station_passes, Klaviyo predictive pull, freight quote history, activity_log entity refs, ProductionProjectionPanel, OKR/KPI tracking, CAPI, mobile V2, QBO full daily-summary, HubSpot decommission window.</li>
+        <li><strong>Week 18–24:</strong> Stabilization + customer-facing roll-out + P3 revisit gate.</li>
+      </ol>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  Source: <a href="docs/PRD-2026-06-06.md">docs/PRD-2026-06-06.md</a> (v1.2) and <a href="docs/competitive-landscape-and-proposal-2026-06-06.md">2026-06-06 competitive landscape proposal</a>.
+  Generated 2026-06-06. <a href="docs/feature-backlog-alpha-feedback.md">Feature backlog</a>.
+</footer>
+
+<script>
+// ─── Data: modules + features extracted from PRD v1.2 ───────────────────────
+
+const MODULES = [
+  {
+    name: 'OrderReview',
+    domain: 'ERP',
+    restricted: false,
+    shipped: [
+      'Shopify-synced order intake (sync-shopify-orders)',
+      'Tab pipeline: Pending / Out / Flagged / Confirmed / Replacement / All',
+      'AddressCard with Google Maps + Claude verification (backlog #1, #13)',
+      'LineItemsCard surface',
+      'ReadinessChecklist (contact + address — freight check dropped 2026-06-04)',
+      'FreightCard pulling ClickShip / Freightcom quotes',
+      'Replacement tab with awaiting_batch_id queue (R-0001 Kristen, R-0032 Cheryl on P100X)',
+      'Status pipeline FSM with audit on every transition',
+    ],
+    planned: [
+      { p: 'P1', e: 'S', text: 'PaymentCard UI (subtotal/tax/discount/payment chips)', meta: 'Backlog #4 substrate shipped; UI is pure read-only on existing columns' },
+      { p: 'P2', e: 'S', text: 'freight_quotes child table preserving every re-quote', meta: 'Proposal backlog #11 — wrap ClickShip/Freightcom behind lib/freight.ts' },
+      { p: 'P1', e: 'S', text: 'Lead attribution fields (first_touch_source, first_touch_campaign_id)', meta: 'Surfaced on JourneyTab — see Customers module' },
+    ],
+  },
+  {
+    name: 'Fulfillment',
+    domain: 'ERP',
+    restricted: false,
+    shipped: [
+      '6-step queue: assign serial → test → dock → label → email → fulfilled',
+      'Shelf view tracking 25-unit skids',
+      'History tab with in-app fulfilled + 157-row Excel-imported fulfillment_log',
+      'Carrier enum: UPS / FedEx / Purolator / Canada Post / Canpar / GLS',
+      'Shopify fulfillment push (push-shopify-fulfillments)',
+      'fulfillment_log re-import + queue cleanup migration (2026-06-05)',
+    ],
+    planned: [
+      { p: 'P2', e: 'S', text: 'Real-time supply signal feed into ProductionProjectionPanel', meta: 'Reservation velocity computed nightly from queue movements' },
+    ],
+  },
+  {
+    name: 'Build',
+    domain: 'ERP',
+    restricted: false,
+    shipped: [
+      'Pipeline board for production batches (P50 retired, P150, P50N, P100, P100X)',
+      'Per-unit detail: firmware version, technician, electrical/mechanical check, defect notes',
+      'units QC columns (migration 20260527180000_units_qc_fields)',
+      'P100X batch tracking with "in-production" status',
+    ],
+    planned: [
+      { p: 'P2', e: 'M', text: 'build_station_passes event-row promotion + BuildQCDashboard', meta: 'Proposal P2 #9 — Tulip MES station-pass pattern; first-pass yield by station' },
+    ],
+  },
+  {
+    name: 'PostShipment',
+    domain: 'ERP + Finance',
+    restricted: false,
+    shipped: [
+      'Returns / Refunds / Replacements / Cancellations / History tabs',
+      'refund_method enum (Shopify / Sezzle / QBO CC / e-transfer / store credit)',
+      'finance_review FSM',
+      'Approver gates via MANAGER_EMAILS / FINANCE_EMAILS',
+      'Refund dashboard tiles (returns by channel, monthly trend)',
+      'Replacement orders + linked tickets',
+      'FulfillmentHistory section showing fulfillment_log',
+    ],
+    planned: [
+      { p: 'P1', e: 'M', text: 'Returns grade + disposition + responsible_team + quarantine receiving', meta: 'Closes backlog #2 + #79 — A/B/C/D grades, restock/refurbish/RTV/scrap dispositions, units.status quarantine value' },
+      { p: 'P2', e: 'M', text: 'Move JournalPanel to new Finance module (re-scope)', meta: 'Visibility-restricted to George + Huayi per §4.11' },
+    ],
+  },
+  {
+    name: 'Service',
+    domain: 'Service',
+    restricted: false,
+    shipped: [
+      'Inbox tab (Gmail-synced + classifier)',
+      'Support Tickets tab — FSM, priority, owner, notes audit feed, classification log',
+      'Onboarding tab',
+      'Replacement tab',
+      'Calendly diagnosis-call booking via SMS',
+      'Photo/video attachments with auto-note feed entries',
+      'Realtime conversation threading',
+      'Photo/video attachment refresh + audit-note system (2026-06-05)',
+    ],
+    planned: [
+      { p: 'P1', e: 'M', text: 'Device-context header (firmware + QC + telemetry + repair history chips)', meta: 'Proposal P1 #3 — Salesforce Field Service / Aquant pattern' },
+      { p: 'P1', e: 'M', text: 'Telemetry-driven ticket auto-creation from persistent non-OK states', meta: 'Proposal P1 #2 — pg_cron every 30min, source=telemetry_auto' },
+      { p: 'P1', e: 'M', text: 'SLA aging + auto-escalation', meta: 'Proposal P1 #8 — sla_policies table + 15min pg_cron escalation_notify' },
+      { p: 'P2', e: 'M', text: 'AI-drafted reply suggestions grounded in Templates corpus', meta: 'Intercom Fin / Plain AI pattern' },
+      { p: 'P3', e: 'S', text: 'Bidirectional Linear / GitHub issue linking', meta: 'Plain / Linear pattern from competitive proposal' },
+    ],
+  },
+  {
+    name: 'Stock',
+    domain: 'ERP',
+    restricted: false,
+    shipped: [
+      'Units (serial-level with status enum, batch FK, customer_id FK via #67)',
+      'Parts inventory',
+      'Batch inventory with in-production / ready states',
+      'orders.awaiting_batch_id via backlog #71',
+      'P100X batch with documented end-of-July ETA',
+    ],
+    planned: [
+      { p: 'P2', e: 'S', text: 'UnitTimeline.tsx component (per-serial audit timeline)', meta: 'Proposal P2 #12 — depends on activity_log entity refs' },
+      { p: 'P1', e: 'S', text: 'units.status quarantine enum value (paired with Returns disposition work)', meta: 'Prevents quarantine units from re-entering Available-to-Promise' },
+    ],
+  },
+  {
+    name: 'Customers',
+    domain: 'CRM',
+    restricted: false,
+    shipped: [
+      'Directory listing',
+      'JourneyTab with lifecycle stage inference',
+      'Manual journey_stage_override',
+      'Customer ↔ unit linking via #67 customer_id FK',
+      'Activity preview per customer',
+    ],
+    planned: [
+      { p: 'P2', e: 'M', text: 'Customer record page with right-side widgets sidebar', meta: 'Attio / Vitally record-page pattern — open tickets, returns, orders, machines, health' },
+      { p: 'P2', e: 'S', text: 'Klaviyo predictive properties pull-back (EDNO, CLV, churn risk)', meta: 'Proposal P2 #10 — nightly klaviyo-pull-predictive edge function' },
+      { p: 'P1', e: 'S', text: 'Lead attribution fields (first_touch_source / last_touch_campaign_id)', meta: 'Powers §5 marketing-attribution view' },
+    ],
+  },
+  {
+    name: 'Templates',
+    domain: 'supporting',
+    restricted: false,
+    shipped: [
+      'Editable email/SMS templates with variable interpolation',
+      'Status-keyed SMS pickers integrated with Dashboard',
+      'Template usage from Order Review + PostShipment flows',
+    ],
+    planned: [
+      { p: 'P2', e: 'S', text: 'Become the RAG corpus for AI-drafted ticket replies', meta: 'Inkeep / Plain pattern — depends on Service AI draft work' },
+    ],
+  },
+  {
+    name: 'ActivityLog',
+    domain: 'supporting + OKR/KPI',
+    restricted: false,
+    shipped: [
+      'Audit trail via activity_log table',
+      'logAction(action_type, ref_id, detail) called from every lib/*.ts mutation',
+      'KPI panel with daily / 7d / 30d counts per action type',
+      'TILE_DEFS-driven configurable KPI tiles',
+    ],
+    planned: [
+      { p: 'P2', e: 'S', text: 'activity_log entity refs (entity_type, entity_id, unit_serial)', meta: 'Proposal P2 #12 — unblocks per-serial timeline + OKR substrate' },
+      { p: 'P2', e: 'M', text: 'OKR & KPI tracking — company + individual', meta: 'NEW in PRD v1.2 — okrs table + okr_progress view, two views (Company / My OKRs), privacy-gated individual scoring' },
+    ],
+  },
+  {
+    name: 'Dashboard',
+    domain: 'Service + Product',
+    restricted: false,
+    shipped: [
+      'Machine-telemetry classifier (8 states incl. NO_BME_DATA added 2026-06-05)',
+      'DRY_SOIL trigger tightened to require sustained low humidity (2026-06-05)',
+      'Status-keyed SMS (wellness / lid / no-action) with 48h cooldown',
+      'Charts: BME humidity / temperature, AC current, machine health, events',
+      'Dataset labeling for ML training',
+    ],
+    planned: [
+      { p: 'P3', e: 'S', text: 'Explicit SENSOR_DIAGNOSE state', meta: 'Backlog #73 — distinguish sensor unreliable from machine broken' },
+      { p: 'P1', e: 'M', text: 'Telemetry-driven ticket auto-creation (cross-listed with Service)', meta: 'Proposal P1 #2' },
+    ],
+  },
+  {
+    name: 'Finance',
+    domain: 'Finance (NEW, restricted to George + Huayi)',
+    restricted: true,
+    shipped: [],
+    planned: [
+      { p: 'P1', e: 'M', text: 'JournalPanel — QBO daily-summary journal sync', meta: 'Proposal P1 #5 — relocated from PostShipment to restricted Finance module' },
+      { p: 'P2', e: 'M', text: 'ProductionProjectionPanel — per-batch burn-down + stock-out forecast', meta: 'NEW in PRD v1.2 — feeds off awaiting_batch_id demand' },
+      { p: 'P2', e: 'M', text: 'SalesProjectionPanel (rolling-average model)', meta: 'NEW in PRD v1.2 — last-90d velocity × AOV × seasonality with confidence bands' },
+      { p: 'P3', e: 'M', text: 'SalesProjectionPanel pipeline-driven variant', meta: 'Depends on Facebook Marketing API stabilizing + Klaviyo predictive baseline' },
+      { p: 'P1', e: 'S', text: 'Three-layer RBAC enforcement (nav hide + route guard + RLS)', meta: 'Uses canView helper from §8 — finance role seeded with George + Huayi' },
+    ],
+  },
+  {
+    name: 'Marketing',
+    domain: 'Pre-sale (NEW)',
+    restricted: false,
+    shipped: [],
+    planned: [
+      { p: 'P1', e: 'M', text: 'CampaignsTab aggregating Facebook + Klaviyo + HubSpot performance', meta: 'New module per §5 — UTM-tag + email-match resolution to internal orders' },
+      { p: 'P2', e: 'M', text: 'CAPI server-side conversion events to Meta', meta: 'iOS-14 ATT recovery — events from logAction reformatted for CAPI' },
+      { p: 'P2', e: 'S', text: 'Cost-per-acquisition (CAC) by channel view', meta: 'Joins customers.first_touch_campaign_id to Facebook spend' },
+      { p: 'P3', e: 'S', text: 'Google Ads + TikTok Ads inclusion', meta: 'Open question — depends on whether Pedrum wants multi-channel V1' },
+    ],
+  },
+];
+
+const CROSS_CUTTING = [
+  { area: 'Integrations', name: 'Klaviyo Track API event firehose', p: 'P1', e: 'S', meta: 'Proposal P1 #1 — substrate for everything else' },
+  { area: 'Integrations', name: 'Facebook Marketing API spend + performance pull', p: 'P1', e: 'M', meta: 'NEW — closes pre-sale visibility gap' },
+  { area: 'Integrations', name: 'Meta Lead Ads webhook → makeLILA customer create', p: 'P1', e: 'S', meta: 'NEW — pre-sale lead capture' },
+  { area: 'Integrations', name: 'Facebook CAPI server-side conversion events', p: 'P2', e: 'M', meta: 'iOS-14 attribution recovery' },
+  { area: 'Integrations', name: 'QuickBooks Online OAuth + daily-summary journal sync', p: 'P1', e: 'M', meta: '§6.15 — eliminates George\'s Monday reconciliation' },
+  { area: 'Integrations', name: 'HubSpot CRM decommission (sequences → Klaviyo)', p: 'P2', e: 'M', meta: 'Depends on Klaviyo Track API + Pedrum sign-off' },
+  { area: 'Cross-cutting', name: 'RBAC profiles + canDo + canView helpers', p: 'P1', e: 'S', meta: 'Promoted from P2 — Finance module depends on this' },
+  { area: 'Cross-cutting', name: 'Mobile V1: viewport + PWA manifest + AppShell narrow-aware', p: 'P1', e: 'M', meta: 'Backlog #80 — iPhone home-screen install survives' },
+  { area: 'Cross-cutting', name: 'Mobile V2: per-module card-row tables', p: 'P2', e: 'L', meta: 'Backlog #80 — high-traffic tables convert to card-row mode' },
+  { area: 'Cross-cutting', name: 'Warranty registrations as first-class entity', p: 'P1', e: 'S', meta: 'Proposal P1 #7 — closes chain-abuse vector' },
+];
+
+// ─── Render: overview stats ─────────────────────────────────────────────────
+
+function countAll(filter) {
+  let total = 0;
+  MODULES.forEach(m => {
+    if (filter === 'shipped') total += m.shipped.length;
+    else total += m.planned.filter(p => filter === 'all' || p.p === filter.toUpperCase()).length;
+  });
+  if (filter !== 'shipped') {
+    total += CROSS_CUTTING.filter(c => filter === 'all' || c.p === filter.toUpperCase()).length;
+  }
+  return total;
+}
+
+function renderOverviewStats() {
+  const stats = [
+    { label: 'Modules', value: MODULES.length, sub: '2 NEW (Finance + Marketing)' },
+    { label: 'Shipped features', value: countAll('shipped'), sub: 'Validated + in production', cls: 'shipped' },
+    { label: 'P1 planned', value: countAll('p1'), sub: 'Next 90 days', cls: 'planned-p1' },
+    { label: 'P2 planned', value: countAll('p2'), sub: 'Next 2 quarters', cls: 'planned-p2' },
+    { label: 'P3 planned', value: countAll('p3'), sub: 'Strategic, deferred', cls: 'planned-p3' },
+    { label: 'Integrations live', value: 10, sub: 'Shopify, HubSpot, Klaviyo, Quo, Gmail, Calendly, Google Maps, Resend, Notion, Fireflies' },
+    { label: 'Integrations planned', value: 3, sub: 'Facebook, QBO, EasyPost' },
+  ];
+  const el = document.getElementById('overview-stats');
+  el.innerHTML = stats.map(s => `
+    <div class="stat ${s.cls || ''}">
+      <div class="label">${s.label}</div>
+      <div class="value">${s.value}</div>
+      <div class="sub">${s.sub}</div>
+    </div>
+  `).join('');
+}
+
+// ─── Render: stacked bar chart by module ────────────────────────────────────
+
+function renderModuleStackChart() {
+  const ctx = document.getElementById('chart-stack-modules');
+  const labels = MODULES.map(m => m.name);
+  const shipped = MODULES.map(m => m.shipped.length);
+  const p1 = MODULES.map(m => m.planned.filter(p => p.p === 'P1').length);
+  const p2 = MODULES.map(m => m.planned.filter(p => p.p === 'P2').length);
+  const p3 = MODULES.map(m => m.planned.filter(p => p.p === 'P3').length);
+  new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        { label: 'Shipped', data: shipped, backgroundColor: '#2f855a' },
+        { label: 'Planned P1', data: p1, backgroundColor: '#c05621' },
+        { label: 'Planned P2', data: p2, backgroundColor: '#1e6091' },
+        { label: 'Planned P3', data: p3, backgroundColor: '#6b7280' },
+      ],
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { position: 'bottom' } },
+      scales: { x: { stacked: true, ticks: { precision: 0 } }, y: { stacked: true } },
+    },
+  });
+}
+
+// ─── Render: priority doughnut ──────────────────────────────────────────────
+
+function renderPriorityDoughnut() {
+  const ctx = document.getElementById('chart-priority-dough');
+  const data = [countAll('shipped'), countAll('p1'), countAll('p2'), countAll('p3')];
+  new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels: ['Shipped (validated)', 'P1 planned (90d)', 'P2 planned (2 quarters)', 'P3 planned (deferred)'],
+      datasets: [{ data, backgroundColor: ['#2f855a', '#c05621', '#1e6091', '#6b7280'] }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { position: 'right' } },
+    },
+  });
+}
+
+// ─── Render: modules grid ───────────────────────────────────────────────────
+
+let currentFilter = 'all';
+function matchesFilter(item, filter) {
+  if (filter === 'all') return true;
+  if (filter === 'shipped') return item.status === 'shipped';
+  return item.p && item.p.toLowerCase() === filter;
+}
+
+function renderModules() {
+  const grid = document.getElementById('module-grid');
+  grid.innerHTML = MODULES.map(m => {
+    const shippedItems = currentFilter === 'all' || currentFilter === 'shipped'
+      ? m.shipped.map(s => `<li><span class="marker s">SHIP</span><div class="text">${s}</div></li>`).join('')
+      : '';
+    const plannedItems = m.planned
+      .filter(p => currentFilter === 'all' || currentFilter === p.p.toLowerCase())
+      .map(p => `<li><span class="marker ${p.p.toLowerCase()}">${p.p}·${p.e}</span><div class="text">${p.text}<div class="meta">${p.meta || ''}</div></div></li>`)
+      .join('');
+    if (!shippedItems && !plannedItems) return '';
+
+    return `
+      <div class="module-card">
+        <div class="head">
+          <div>
+            <h3>${m.name}${m.restricted ? '<span class="restricted-badge">restricted</span>' : ''}</h3>
+            <div class="domain">${m.domain}</div>
+          </div>
+          <div class="counts">
+            <div class="c-shipped">${m.shipped.length} shipped</div>
+            <div class="c-planned">${m.planned.length} planned</div>
+          </div>
+        </div>
+        <ul class="feature-list">
+          ${shippedItems}${plannedItems}
+        </ul>
+      </div>
+    `;
+  }).join('');
+}
+
+// ─── Render: gap analysis table ─────────────────────────────────────────────
+
+function renderGapTable() {
+  const tbody = document.getElementById('gap-tbody');
+  let totShipped = 0, totP1 = 0, totP2 = 0, totP3 = 0;
+
+  let rows = MODULES.map(m => {
+    const s = m.shipped.length;
+    const p1 = m.planned.filter(p => p.p === 'P1').length;
+    const p2 = m.planned.filter(p => p.p === 'P2').length;
+    const p3 = m.planned.filter(p => p.p === 'P3').length;
+    const total = s + p1 + p2 + p3;
+    const pct = total === 0 ? 0 : Math.round((s / total) * 100);
+    totShipped += s; totP1 += p1; totP2 += p2; totP3 += p3;
+    const maxW = 200;
+    const bar = `
+      <div class="gap-bar" title="${s} shipped, ${p1+p2+p3} planned">
+        ${s > 0 ? `<span class="seg s" style="width:${(s/total)*maxW}px"></span>` : ''}
+        ${p1 > 0 ? `<span class="seg p1" style="width:${(p1/total)*maxW}px"></span>` : ''}
+        ${p2 > 0 ? `<span class="seg p2" style="width:${(p2/total)*maxW}px"></span>` : ''}
+        ${p3 > 0 ? `<span class="seg p3" style="width:${(p3/total)*maxW}px"></span>` : ''}
+      </div>`;
+    return `<tr>
+      <td><strong>${m.name}</strong>${m.restricted ? ' <span class="pill restricted">restricted</span>' : ''}</td>
+      <td>${m.domain}</td>
+      <td class="numeric">${s}</td>
+      <td class="numeric">${p1 || ''}</td>
+      <td class="numeric">${p2 || ''}</td>
+      <td class="numeric">${p3 || ''}</td>
+      <td class="numeric">${total}</td>
+      <td class="numeric">${pct}%</td>
+      <td>${bar}</td>
+    </tr>`;
+  }).join('');
+
+  // Cross-cutting row
+  const ccP1 = CROSS_CUTTING.filter(c => c.p === 'P1').length;
+  const ccP2 = CROSS_CUTTING.filter(c => c.p === 'P2').length;
+  const ccP3 = CROSS_CUTTING.filter(c => c.p === 'P3').length;
+  const ccTotal = ccP1 + ccP2 + ccP3;
+  const ccBar = `<div class="gap-bar">
+    ${ccP1 ? `<span class="seg p1" style="width:${(ccP1/ccTotal)*200}px"></span>` : ''}
+    ${ccP2 ? `<span class="seg p2" style="width:${(ccP2/ccTotal)*200}px"></span>` : ''}
+    ${ccP3 ? `<span class="seg p3" style="width:${(ccP3/ccTotal)*200}px"></span>` : ''}
+  </div>`;
+  rows += `<tr>
+    <td><strong>Cross-cutting</strong></td>
+    <td>integrations + platform</td>
+    <td class="numeric">—</td>
+    <td class="numeric">${ccP1 || ''}</td>
+    <td class="numeric">${ccP2 || ''}</td>
+    <td class="numeric">${ccP3 || ''}</td>
+    <td class="numeric">${ccTotal}</td>
+    <td class="numeric">0%</td>
+    <td>${ccBar}</td>
+  </tr>`;
+  totP1 += ccP1; totP2 += ccP2; totP3 += ccP3;
+
+  // Totals
+  const grandTotal = totShipped + totP1 + totP2 + totP3;
+  const grandPct = Math.round((totShipped / grandTotal) * 100);
+  rows += `<tr class="totals">
+    <td>TOTAL</td>
+    <td>—</td>
+    <td class="numeric">${totShipped}</td>
+    <td class="numeric">${totP1}</td>
+    <td class="numeric">${totP2}</td>
+    <td class="numeric">${totP3}</td>
+    <td class="numeric">${grandTotal}</td>
+    <td class="numeric">${grandPct}%</td>
+    <td></td>
+  </tr>`;
+  tbody.innerHTML = rows;
+}
+
+// ─── Render: effort budget chart ────────────────────────────────────────────
+
+function effortToWeeks(e) {
+  return e === 'S' ? 1 : e === 'M' ? 2 : e === 'L' ? 3.5 : 0;
+}
+function validationToWeeks(e) {
+  return e === 'S' ? 1 : e === 'M' ? 1.5 : e === 'L' ? 2.5 : 0;
+}
+
+function renderEffortChart() {
+  const ctx = document.getElementById('chart-effort');
+  function tot(p, fn) {
+    let sum = 0;
+    MODULES.forEach(m => m.planned.filter(x => x.p === p).forEach(x => sum += fn(x.e)));
+    CROSS_CUTTING.filter(x => x.p === p).forEach(x => sum += fn(x.e));
+    return sum;
+  }
+  const labels = ['P1', 'P2', 'P3'];
+  const dev = labels.map(p => tot(p, effortToWeeks));
+  const val = labels.map(p => tot(p, validationToWeeks));
+  new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        { label: 'Dev weeks (cumulative if single-stream)', data: dev, backgroundColor: '#9b2c2c' },
+        { label: 'Validation weeks', data: val, backgroundColor: '#f3a683' },
+      ],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { position: 'bottom' } },
+      scales: {
+        x: { stacked: true },
+        y: { stacked: true, title: { display: true, text: 'cumulative weeks (if single-engineer)' } }
+      },
+    },
+  });
+}
+
+// ─── Render: Gantt timeline ─────────────────────────────────────────────────
+
+const WEEKS = 24;
+const NOW_WEEK = 1; // 2026-06-09 week 1
+
+// Hand-curated dependency-aware schedule (drives the Gantt). dev = block of weeks during dev, val = block during validation
+const TIMELINE = [
+  // Foundations (Week 1-4)
+  { name: 'RBAC profiles + canDo/canView helpers', p: 'P1', dev: [1, 2], val: [3, 3] },
+  { name: 'Klaviyo Track API event firehose', p: 'P1', dev: [1, 2], val: [3, 4] },
+  { name: 'PaymentCard UI on OrderReview', p: 'P1', dev: [1, 1], val: [2, 2] },
+  { name: 'Mobile V1 (viewport + PWA + AppShell)', p: 'P1', dev: [2, 4], val: [5, 6] },
+  // Returns/Refunds finish
+  { name: 'Returns disposition + grade + quarantine + #79', p: 'P1', dev: [3, 6], val: [7, 8] },
+  { name: 'Warranty registration entity', p: 'P1', dev: [4, 5], val: [6, 6] },
+  // Service hardening (Service Week 4-10)
+  { name: 'Device-context header on Service tickets', p: 'P1', dev: [4, 6], val: [7, 8] },
+  { name: 'SLA aging + auto-escalation', p: 'P1', dev: [5, 7], val: [8, 9] },
+  { name: 'Telemetry-driven ticket auto-create', p: 'P1', dev: [6, 8], val: [9, 11] },
+  // Finance module skeleton (Week 6-10)
+  { name: 'Finance module skeleton + JournalPanel (QBO)', p: 'P1', dev: [7, 10], val: [11, 12] },
+  // Pre-sale (Week 8-12)
+  { name: 'Facebook Marketing API + Lead Ads webhook', p: 'P1', dev: [9, 11], val: [12, 13] },
+  // P2 batch starts mid-quarter
+  { name: 'activity_log entity refs + per-serial timeline', p: 'P2', dev: [10, 11], val: [12, 12] },
+  { name: 'build_station_passes promotion', p: 'P2', dev: [11, 13], val: [14, 15] },
+  { name: 'Freight quote history table', p: 'P2', dev: [12, 12], val: [13, 13] },
+  { name: 'Klaviyo predictive properties pull-back', p: 'P2', dev: [13, 13], val: [14, 14] },
+  { name: 'ProductionProjectionPanel (Finance)', p: 'P2', dev: [13, 15], val: [16, 17] },
+  { name: 'OKR & KPI tracking (ActivityLog)', p: 'P2', dev: [14, 16], val: [17, 18] },
+  { name: 'Facebook CAPI server-side events', p: 'P2', dev: [15, 16], val: [17, 17] },
+  { name: 'Mobile V2 (card-row tables)', p: 'P2', dev: [14, 18], val: [19, 20] },
+  { name: 'SalesProjectionPanel rolling-average (Finance)', p: 'P2', dev: [16, 18], val: [19, 21] },
+  { name: 'HubSpot CRM decommission window', p: 'P2', dev: [18, 20], val: [21, 22] },
+  // P3 strategic items shown faded
+  { name: 'Customer record sidebar widgets (Attio pattern)', p: 'P3', dev: [20, 22], val: [23, 24] },
+];
+
+function renderTimeline() {
+  const wrap = document.getElementById('timeline-wrap');
+  // Header
+  const monthLabels = ['Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov'];
+  let html = `<div class="timeline-header" style="--weeks:${WEEKS}"><div class="first">Initiative</div>`;
+  for (let w = 1; w <= WEEKS; w++) {
+    const monthIdx = Math.floor((w - 1) / 4);
+    const showMonth = (w - 1) % 4 === 0;
+    html += `<div>${showMonth ? '<strong>' + monthLabels[monthIdx] + '</strong>' : 'W' + w}</div>`;
+  }
+  html += '</div>';
+  // Rows
+  TIMELINE.forEach(t => {
+    html += `<div class="timeline-row" style="--weeks:${WEEKS}">`;
+    html += `<div class="label">${t.name}<div class="small">${t.p} · dev W${t.dev[0]}-${t.dev[1]} · val W${t.val[0]}-${t.val[1]}</div></div>`;
+    for (let w = 1; w <= WEEKS; w++) {
+      const inDev = w >= t.dev[0] && w <= t.dev[1];
+      const inVal = w >= t.val[0] && w <= t.val[1];
+      let cls = 'week';
+      if (inDev) cls += ' dev ' + t.p.toLowerCase();
+      else if (inVal) cls += ' validate ' + t.p.toLowerCase();
+      if (w === NOW_WEEK) cls += ' now';
+      html += `<div class="${cls}"></div>`;
+    }
+    html += '</div>';
+  });
+  wrap.innerHTML = html;
+}
+
+// ─── Render: cumulative completion curve ────────────────────────────────────
+
+function renderCumulative() {
+  const ctx = document.getElementById('chart-cumulative');
+  // For each week, count items whose validation END falls at or before that week
+  const data = [];
+  for (let w = 1; w <= WEEKS; w++) {
+    const done = TIMELINE.filter(t => t.val[1] <= w).length;
+    data.push(done);
+  }
+  const labels = Array.from({ length: WEEKS }, (_, i) => 'W' + (i + 1));
+  new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        label: 'Cumulative validated features',
+        data,
+        borderColor: '#9b2c2c',
+        backgroundColor: 'rgba(155,44,44,0.12)',
+        fill: true,
+        tension: 0.2,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { position: 'bottom' } },
+      scales: {
+        y: { beginAtZero: true, ticks: { precision: 0 }, title: { display: true, text: '# features validated' } },
+        x: { title: { display: true, text: 'weeks from 2026-06-09' } },
+      },
+    },
+  });
+}
+
+// ─── Tab switching ──────────────────────────────────────────────────────────
+
+document.querySelectorAll('nav.tabs button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('nav.tabs button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    const v = btn.getAttribute('data-view');
+    document.querySelectorAll('section.view').forEach(s => s.classList.remove('active'));
+    document.getElementById('view-' + v).classList.add('active');
+  });
+});
+
+// Filter chips on Modules tab
+document.querySelectorAll('#module-filter .chip').forEach(chip => {
+  chip.addEventListener('click', () => {
+    document.querySelectorAll('#module-filter .chip').forEach(c => c.classList.remove('active'));
+    chip.classList.add('active');
+    currentFilter = chip.getAttribute('data-filter');
+    renderModules();
+  });
+});
+
+// ─── Init ──────────────────────────────────────────────────────────────────
+
+renderOverviewStats();
+renderModuleStackChart();
+renderPriorityDoughnut();
+renderModules();
+renderGapTable();
+renderEffortChart();
+renderTimeline();
+renderCumulative();
+</script>
+
+</body>
+</html>
