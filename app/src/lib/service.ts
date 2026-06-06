@@ -435,9 +435,15 @@ export function useCustomerLifecycle(): { rows: CustomerLifecycle[]; loading: bo
 export function useTicketAttachments(ticketId: string | null): {
   attachments: TicketAttachment[];
   loading: boolean;
+  /** Force a re-fetch of the attachment list. Caller should invoke after
+   *  mutations (upload/delete) so the UI updates even if the realtime
+   *  subscription dropped or raced the INSERT — observed on iPhone PWA
+   *  installs where the realtime websocket can stall after sleep/wake. */
+  refresh: () => void;
 } {
   const [attachments, setAttachments] = useState<TicketAttachment[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshTick, setRefreshTick] = useState(0);
 
   useEffect(() => {
     if (!ticketId) { setAttachments([]); setLoading(false); return; }
@@ -455,7 +461,7 @@ export function useTicketAttachments(ticketId: string | null): {
       setLoading(false);
 
       channel = supabase
-        .channel(`attachments:${ticketId}`)
+        .channel(`attachments:${ticketId}:${refreshTick}`)
         .on('postgres_changes',
           { event: '*', schema: 'public', table: 'service_ticket_attachments', filter: `ticket_id=eq.${ticketId}` },
           (payload) => {
@@ -475,9 +481,9 @@ export function useTicketAttachments(ticketId: string | null): {
         .subscribe();
     })();
     return () => { cancelled = true; if (channel) void channel.unsubscribe(); };
-  }, [ticketId]);
+  }, [ticketId, refreshTick]);
 
-  return { attachments, loading };
+  return { attachments, loading, refresh: () => setRefreshTick(t => t + 1) };
 }
 
 export function useTicketNotes(ticketId: string | null): {
@@ -957,7 +963,17 @@ export async function uploadTicketAttachment(
     await supabase.storage.from(ATTACHMENT_BUCKET).remove([path]);
     throw new Error(`Attachment record failed: ${rowErr?.message ?? 'no row returned'}`);
   }
-  await logAction('ticket_attachment_added', ticketId, `${file.name} (${Math.round(file.size / 1000)} KB)`);
+  // Auto-write a note so the upload appears in the Notes feed where the
+  // operator is already looking. logAction is invoked downstream by
+  // addTicketNote so the activity_log still records it (don't double-log).
+  await addTicketNote(
+    ticketId,
+    `📎 Added ${file.type.startsWith('image/') ? 'photo' : file.type.startsWith('video/') ? 'video' : 'file'}: ${file.name} (${formatBytes(file.size)})`,
+  ).catch((e: Error) => {
+    // Non-fatal: the attachment itself succeeded. Surface to console so
+    // the missing audit note is debuggable but don't block the upload.
+    console.warn('Auto-note for attachment upload failed (non-fatal):', e.message);
+  });
   return row as TicketAttachment;
 }
 
@@ -974,5 +990,18 @@ export async function deleteTicketAttachment(att: TicketAttachment): Promise<voi
     .delete()
     .eq('id', att.id);
   if (rowErr) throw new Error(`Failed to delete attachment record: ${rowErr.message}`);
-  await logAction('ticket_attachment_deleted', att.ticket_id, att.file_name);
+  // Auto-write a note so the delete appears in the Notes feed alongside
+  // the original upload note.
+  await addTicketNote(
+    att.ticket_id,
+    `🗑 Removed ${att.mime_type.startsWith('image/') ? 'photo' : att.mime_type.startsWith('video/') ? 'video' : 'file'}: ${att.file_name}`,
+  ).catch((e: Error) => {
+    console.warn('Auto-note for attachment delete failed (non-fatal):', e.message);
+  });
+}
+
+function formatBytes(n: number): string {
+  return n > 1_000_000
+    ? `${(n / 1_000_000).toFixed(1)} MB`
+    : `${Math.round(n / 1000)} KB`;
 }

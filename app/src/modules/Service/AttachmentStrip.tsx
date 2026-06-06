@@ -12,7 +12,7 @@ import styles from './Service.module.css';
 type Props = { ticketId: string };
 
 export function AttachmentStrip({ ticketId }: Props) {
-  const { attachments, loading } = useTicketAttachments(ticketId);
+  const { attachments, loading, refresh } = useTicketAttachments(ticketId);
   const [lightbox, setLightbox] = useState<TicketAttachment | null>(null);
   const [uploadingNames, setUploadingNames] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -35,6 +35,10 @@ export function AttachmentStrip({ ticketId }: Props) {
     } finally {
       setUploadingNames([]);
       if (fileInput.current) fileInput.current.value = '';
+      // Force a re-fetch in case the realtime subscription didn't
+      // propagate the INSERT (observed on iPhone PWA installs where the
+      // websocket can stall after the device sleeps).
+      refresh();
     }
   }
 
@@ -43,6 +47,7 @@ export function AttachmentStrip({ ticketId }: Props) {
     setError(null);
     try { await deleteTicketAttachment(att); }
     catch (e) { setError((e as Error).message); }
+    finally { refresh(); }
   }
 
   return (
