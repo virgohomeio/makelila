@@ -24,6 +24,8 @@ Each file is self-contained — an agent shouldn't need to read the others.
 
 Total: 30 features (1 duplicate Lead-attribution counted on both sides) · ~350h team load · ~5.4 weeks parallel at default capacity.
 
+**Living tracker:** [timeline-tracker.md](timeline-tracker.md) — projected vs actual hours per feature, updated on every ship so we calibrate the S/M/L sizing against observed reality.
+
 > **Future shippers** — George and Lezhong will join later. Their files will be added once their initial assignments are scoped. Today the only explicit future-handoff candidate is `build_station_passes promotion` (currently with Junaid → Lezhong).
 
 ## Structure inside each file
