@@ -42,7 +42,12 @@ body {
 
 #app-shell {
   width: 100%;
-  overflow: hidden;
+  /* Mobile V1 fix-up (2026-06-07): overflow was 'hidden' which silently
+     killed every horizontal table scroll + vertical scroll past the
+     shell's natural height on phone. Switch to 'visible' so the body
+     becomes the natural scroll container; the border-radius still clips
+     the corners on desktop via overflow on .page if needed. */
+  overflow: visible;
   border-radius: var(--radius-lg);
 }
 
@@ -75,13 +80,19 @@ body {
   }
 }
 
-/* Grid overflow guard — from mockup */
-[style*="display:grid"] > *,
-.grid > * {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+/* Grid overflow guard — from mockup. Only applies on desktop widths
+   where dense sidebar+main grids fit; on phone the white-space:nowrap +
+   overflow:hidden combination prevents content from wrapping AND from
+   scrolling, leaving the operator unable to read OR pan past the
+   visible column. (Mobile V1 fix-up 2026-06-07.) */
+@media (min-width: 700px) {
+  [style*="display:grid"] > *,
+  .grid > * {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 }
 
 a { color: inherit; text-decoration: none; }
