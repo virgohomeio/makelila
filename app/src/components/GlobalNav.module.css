@@ -61,3 +61,64 @@
 }
 
 .spacer { flex: 1; }
+
+/* ============================================================
+ * Mobile V1 (backlog #80) — narrow viewport layout
+ * Under 700px the desktop module bar doesn't fit horizontally
+ * and operators get stuck on the first viewport. Two changes:
+ *   1. Collapse the brand to logo-only (drop "make lila" wordmark)
+ *      to save horizontal space.
+ *   2. Make the module strip horizontally scrollable with snap
+ *      points so the operator can swipe through modules while
+ *      keeping the active one in view.
+ *   3. Bump touch targets to 44px (Apple HIG minimum) so links
+ *      are reliably tap-able with a thumb.
+ * Page-content scroll is preserved (parent doesn't lock).
+ * ============================================================ */
+@media (max-width: 700px) {
+  .nav {
+    padding: 0 12px;
+    border-radius: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scroll-snap-type: x proximity;
+    -webkit-overflow-scrolling: touch;
+    /* iOS notch breathing room on the left edge of the strip. */
+    padding-left: max(12px, env(safe-area-inset-left));
+    padding-right: max(12px, env(safe-area-inset-right));
+  }
+
+  .brand {
+    padding-right: 12px;
+    margin-right: 4px;
+    flex-shrink: 0;
+  }
+
+  .brandWordmark {
+    display: none;
+  }
+
+  .item {
+    min-height: 44px;
+    padding: 0 12px;
+    font-size: 12px;
+    scroll-snap-align: center;
+    flex-shrink: 0;
+  }
+
+  .active {
+    /* On narrow screens the bottom border can collide with the scroll
+     * bar; thicken the bar and brighten so it's unmissable when swiping. */
+    border-bottom-width: 3px;
+  }
+
+  .spacer { display: none; }
+}
+
+/* Coarse-pointer (touch) devices — hover styles never trigger, so the
+ * "inactive item" color stays at #888 forever. Bump it brighter so
+ * inactive items are still legible at arm's length. */
+@media (hover: none) {
+  .item { color: #b0b0b0; }
+  .item:hover { color: #b0b0b0; }
+}

@@ -25,6 +25,13 @@ body {
   background: var(--color-page);
   color: var(--color-ink);
   padding: 20px;
+  /* Mobile V1 (backlog #80) — let safe-area cover the body padding on
+     iPhone so the page doesn't bleed under the notch. Stacks correctly
+     with desktop's 20px outer margin via max(). */
+  padding-top: max(20px, env(safe-area-inset-top));
+  padding-bottom: max(20px, env(safe-area-inset-bottom));
+  padding-left: max(20px, env(safe-area-inset-left));
+  padding-right: max(20px, env(safe-area-inset-right));
 }
 
 .page {
@@ -37,6 +44,35 @@ body {
   width: 100%;
   overflow: hidden;
   border-radius: var(--radius-lg);
+}
+
+/* Mobile V1 (backlog #80) — page-level narrow-viewport adjustments.
+   Under 700px:
+     - drop body padding (every pixel of horizontal real estate counts on
+       a 375px-wide iPhone SE viewport)
+     - drop the shell's border-radius (it bites into the small viewport)
+     - safe-area still respected so the iPhone notch + home indicator
+       don't crop content */
+@media (max-width: 700px) {
+  body {
+    padding: 0;
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+  }
+  #app-shell { border-radius: 0; }
+}
+
+/* Mobile V1 — coarse-pointer (touch) devices: bump up the minimum
+   interactive size to ~44px per Apple HIG so buttons/links are reliably
+   tap-able with a thumb. Per-component CSS can still override when a
+   control is intentionally compact (e.g. dense table action icons inside
+   a card that has its own large tap surface). */
+@media (hover: none) {
+  button, [role="button"], a.button, .button {
+    min-height: 44px;
+  }
 }
 
 /* Grid overflow guard — from mockup */

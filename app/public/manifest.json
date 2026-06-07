@@ -1,0 +1,25 @@
+{
+  "name": "makeLILA — VCycene Operations",
+  "short_name": "makeLILA",
+  "description": "Internal operations app for VCycene's LILA Composter — orders, fulfillment, build, post-shipment, service, stock, customers.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#FAF8F5",
+  "theme_color": "#CC2D30",
+  "icons": [
+    {
+      "src": "/vcycene-logo-square.png",
+      "sizes": "any",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/vcycene-logo-square.png",
+      "sizes": "any",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
