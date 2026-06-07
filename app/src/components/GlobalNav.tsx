@@ -1,4 +1,4 @@
-import { NavLink } from 'react-router-dom';
+import { Link, NavLink } from 'react-router-dom';
 import styles from './GlobalNav.module.css';
 import { UserBadge } from './UserBadge';
 
@@ -18,14 +18,14 @@ const MODULES = [
 export function GlobalNav() {
   return (
     <nav className={styles.nav}>
-      <div className={styles.brand}>
+      <Link to="/" className={styles.brand} aria-label="Home">
         <img
           src={`${import.meta.env.BASE_URL}vcycene-logo-square.png`}
           alt="VCycene"
           className={styles.brandLogo}
         />
-        <span className={styles.brandWordmark}>make lila</span>
-      </div>
+        <span className={styles.brandWordmark}>makelila</span>
+      </Link>
       {MODULES.map(m => (
         <NavLink
           key={m.path}

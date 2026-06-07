@@ -17,6 +17,12 @@
   border-right: 1px solid var(--color-dark-3);
   margin-right: 8px;
   color: #fff;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.brand:hover .brandWordmark {
+  color: var(--color-crimson-dark);
 }
 
 .brandLogo {
@@ -63,56 +69,41 @@
 .spacer { flex: 1; }
 
 /* ============================================================
- * Mobile V1 (backlog #80) — narrow viewport layout
- * Under 700px the desktop module bar doesn't fit horizontally
- * and operators get stuck on the first viewport. Two changes:
- *   1. Collapse the brand to logo-only (drop "make lila" wordmark)
- *      to save horizontal space.
- *   2. Make the module strip horizontally scrollable with snap
- *      points so the operator can swipe through modules while
- *      keeping the active one in view.
- *   3. Bump touch targets to 44px (Apple HIG minimum) so links
- *      are reliably tap-able with a thumb.
- * Page-content scroll is preserved (parent doesn't lock).
+ * Mobile drilldown nav (2026-06-07 redesign, backlog #80)
+ * Under 700px the desktop horizontal module strip is replaced
+ * by the MobileHome card list at `/`. The nav bar shrinks to
+ * brand-link-home + UserBadge. Module links are hidden — users
+ * navigate via the home card list and the brand-as-back-link.
+ *
+ *   .brandWordmark visible (user wants "makelila" prominent on phone)
+ *   .item hidden (drilldown replaces in-nav module switching)
  * ============================================================ */
 @media (max-width: 700px) {
   .nav {
     padding: 0 12px;
     border-radius: 0;
-    overflow-x: auto;
-    overflow-y: hidden;
-    scroll-snap-type: x proximity;
-    -webkit-overflow-scrolling: touch;
-    /* iOS notch breathing room on the left edge of the strip. */
+    /* iOS notch breathing room. */
     padding-left: max(12px, env(safe-area-inset-left));
     padding-right: max(12px, env(safe-area-inset-right));
   }
 
   .brand {
     padding-right: 12px;
-    margin-right: 4px;
+    margin-right: 0;
     flex-shrink: 0;
+    border-right: none;
   }
 
   .brandWordmark {
-    display: none;
+    display: inline;
+    font-size: 18px;
   }
 
   .item {
-    min-height: 44px;
-    padding: 0 12px;
-    font-size: 12px;
-    scroll-snap-align: center;
-    flex-shrink: 0;
+    display: none;
   }
 
-  .active {
-    /* On narrow screens the bottom border can collide with the scroll
-     * bar; thicken the bar and brighten so it's unmissable when swiping. */
-    border-bottom-width: 3px;
-  }
-
-  .spacer { display: none; }
+  .spacer { flex: 1; }
 }
 
 /* Coarse-pointer (touch) devices — hover styles never trigger, so the

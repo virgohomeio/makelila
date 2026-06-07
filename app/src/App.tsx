@@ -2,6 +2,8 @@ import { lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
 import { AuthProvider, ProtectedRoute } from './lib/auth';
 import { AppShell } from './components/AppShell';
+import { MobileHome } from './components/MobileHome';
+import { useIsMobile } from './lib/useMediaQuery';
 import { isTelemetryConfigured } from './lib/supabaseTelemetry';
 // Eager: OrderReview is the default landing route + Login is on the auth
 // path. Everything else loads on demand so first-paint is fast.
@@ -31,6 +33,12 @@ function LazyRoute({ children }: { children: React.ReactNode }) {
       {children}
     </Suspense>
   );
+}
+
+function HomeRoute() {
+  const isMobile = useIsMobile();
+  if (isMobile) return <MobileHome />;
+  return <Navigate to="/order-review" replace />;
 }
 
 function DashboardRoute() {
@@ -72,7 +80,7 @@ export default function App() {
               </ProtectedRoute>
             }
           >
-            <Route index element={<Navigate to="order-review" replace />} />
+            <Route index element={<HomeRoute />} />
             <Route path="order-review"          element={<OrderReview />} />
             <Route path="order-review/:orderId" element={<OrderReview />} />
             <Route path="fulfillment"       element={<LazyRoute><Fulfillment /></LazyRoute>} />

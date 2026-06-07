@@ -1,0 +1,1275 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>makeLILA — Mobile View Preview v2 (card-drilldown pattern)</title>
+<style>
+  :root {
+    --crimson: #CC2D30;
+    --crimson-dark: #991B1E;
+    --crimson-soft: #fef1f0;
+    --ink: #2C2A25;
+    --ink-muted: #5C564E;
+    --ink-subtle: #A39B8F;
+    --border: #E8E0D4;
+    --surface: #F5F1EB;
+    --page: #FAF8F5;
+    --dark-0: #111;
+    --shipped: #2f855a;
+    --warn: #c05621;
+    --danger: #c53030;
+    --info: #1e6091;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { font-family: -apple-system, "Segoe UI", system-ui, sans-serif; background: var(--page); color: var(--ink); }
+  body { padding: 20px; line-height: 1.4; }
+
+  header.top {
+    background: var(--crimson); color: #fff; padding: 14px 20px;
+    border-radius: 8px; margin-bottom: 18px;
+  }
+  header.top h1 { font-size: 17px; margin-bottom: 4px; }
+  header.top .sub { font-size: 12px; opacity: 0.92; max-width: 920px; }
+
+  .pattern-summary {
+    background: #fff; border: 1px solid var(--border); border-radius: 8px;
+    padding: 14px 18px; margin-bottom: 22px;
+  }
+  .pattern-summary h2 { font-size: 14px; margin-bottom: 8px; color: var(--crimson-dark); }
+  .pattern-summary ol { padding-left: 22px; font-size: 12px; line-height: 1.6; color: var(--ink); }
+  .pattern-summary code {
+    background: var(--surface); padding: 1px 5px; border-radius: 3px;
+    font-family: Monaco, monospace; font-size: 10px;
+  }
+
+  nav.chips {
+    display: flex; gap: 6px; flex-wrap: wrap; padding: 12px 0;
+    margin-bottom: 18px; border-bottom: 1px solid var(--border);
+  }
+  nav.chips button {
+    border: 1px solid var(--border); background: #fff; color: var(--ink-muted);
+    padding: 6px 12px; border-radius: 999px; font-size: 11px; font-weight: 600;
+    cursor: pointer; transition: all 0.12s;
+  }
+  nav.chips button:hover { border-color: var(--crimson); }
+  nav.chips button.active { background: var(--crimson); color: #fff; border-color: var(--crimson); }
+
+  section.module { display: none; }
+  section.module.active { display: block; }
+  section.module h2 { font-size: 18px; margin-bottom: 4px; }
+  section.module .lede { color: var(--ink-muted); font-size: 12px; margin-bottom: 16px; max-width: 920px; }
+
+  .frames-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+    gap: 24px;
+    margin-bottom: 28px;
+  }
+
+  .frame-wrap { background: #fff; border-radius: 12px; padding: 16px; border: 1px solid var(--border); }
+  .frame-label { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  .frame-label .name { font-weight: 800; font-size: 13px; }
+  .frame-label .tag {
+    font-size: 9px; font-weight: 800; padding: 3px 7px; border-radius: 3px;
+    text-transform: uppercase; letter-spacing: 0.05em;
+  }
+  .tag.broken { background: #fde7e7; color: var(--danger); }
+  .tag.proposed { background: #e6f4ea; color: var(--shipped); }
+  .tag.shipped { background: #e6f4ea; color: var(--shipped); }
+
+  .iphone {
+    width: 375px;
+    max-width: 100%;
+    margin: 0 auto;
+    border: 1px solid #444;
+    border-radius: 20px;
+    overflow: hidden;
+    background: var(--page);
+    box-shadow: 0 6px 24px rgba(0,0,0,0.15);
+  }
+  .iphone .notch {
+    background: #000; height: 28px;
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-size: 10px; font-weight: 700; gap: 4px;
+  }
+  .iphone .viewport {
+    height: 620px;
+    overflow: auto;
+    background: var(--page);
+    -webkit-overflow-scrolling: touch;
+  }
+  .iphone .home-indicator {
+    background: #000; height: 18px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .iphone .home-indicator::after {
+    content: ''; width: 100px; height: 3px; background: #fff; border-radius: 2px;
+  }
+
+  /* BROKEN: today's global nav (horizontal strip) */
+  .gnav {
+    background: var(--dark-0); height: 48px;
+    display: flex; align-items: center; padding: 0 12px;
+    overflow-x: auto; gap: 0;
+  }
+  .gnav-brand {
+    color: var(--crimson); font-weight: 700; font-size: 14px;
+    padding-right: 10px; margin-right: 8px;
+    border-right: 1px solid #333; flex-shrink: 0;
+  }
+  .gnav-brand-logo {
+    display: inline-block; width: 18px; height: 18px;
+    background: var(--crimson); border-radius: 3px;
+    vertical-align: middle;
+  }
+  .gnav-item {
+    color: #b0b0b0; font-size: 11px; font-weight: 600;
+    padding: 0 11px; min-height: 44px; display: flex; align-items: center;
+    white-space: nowrap; flex-shrink: 0;
+    border-bottom: 2px solid transparent;
+  }
+  .gnav-item.active { color: #fff; border-bottom-color: var(--crimson); border-bottom-width: 3px; }
+  .mcontent { background: #fff; padding: 12px; min-height: calc(100% - 48px); }
+
+  /* PROPOSED: card-drilldown pattern */
+  .mhead {
+    background: #fff; padding: 14px 16px;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 12px;
+    position: sticky; top: 0; z-index: 5;
+  }
+  .mhead .back-btn {
+    color: var(--crimson); font-size: 22px; font-weight: 400;
+    padding: 4px 6px; margin-left: -6px; min-width: 32px;
+    cursor: pointer; line-height: 1;
+  }
+  .mhead .title { flex: 1; font-weight: 700; font-size: 17px; }
+  .mhead .right-action { color: var(--crimson); font-size: 13px; font-weight: 600; }
+  .mhead.home {
+    background: var(--crimson); color: #fff;
+    border-bottom: none;
+  }
+  .mhead.home .title { font-size: 18px; font-weight: 800; }
+  .mhead.home .right-action { color: #fff; }
+
+  .card-list {
+    padding: 12px;
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  .card-list .group-label {
+    font-size: 10px; font-weight: 800; color: var(--ink-subtle);
+    text-transform: uppercase; letter-spacing: 0.06em;
+    padding: 8px 4px 0;
+  }
+
+  .nav-card {
+    background: #fff; border: 1px solid var(--border); border-radius: 12px;
+    padding: 14px 16px;
+    display: flex; align-items: center; gap: 12px;
+    min-height: 64px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+    cursor: pointer;
+  }
+  .nav-card:active { background: var(--surface); }
+  .nav-card .icon {
+    width: 36px; height: 36px; flex-shrink: 0;
+    border-radius: 8px;
+    background: var(--crimson-soft);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px;
+  }
+  .nav-card .body { flex: 1; min-width: 0; }
+  .nav-card .body .title {
+    font-weight: 700; font-size: 15px; color: var(--ink);
+    margin-bottom: 2px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .nav-card .body .subtitle {
+    font-size: 12px; color: var(--ink-muted); line-height: 1.35;
+  }
+  .nav-card .right {
+    display: flex; align-items: center; gap: 8px; flex-shrink: 0;
+  }
+  .nav-card .count-pill {
+    background: var(--surface); color: var(--ink-muted);
+    border-radius: 999px; padding: 3px 10px;
+    font-size: 12px; font-weight: 700; min-width: 28px; text-align: center;
+  }
+  .nav-card .count-pill.alert { background: var(--crimson); color: #fff; }
+  .nav-card .count-pill.warn { background: #fde7b8; color: var(--warn); }
+  .nav-card .chevron {
+    color: var(--ink-subtle); font-size: 22px; line-height: 1; font-weight: 400;
+  }
+
+  .row-cards { display: flex; flex-direction: column; gap: 8px; padding: 12px; }
+  .row-card {
+    background: #fff; border: 1px solid var(--border); border-radius: 10px;
+    padding: 12px 14px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+    min-height: 56px;
+  }
+  .row-card .card-top {
+    display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;
+    margin-bottom: 4px;
+  }
+  .row-card .primary { font-weight: 700; font-size: 14px; flex: 1; }
+  .row-card .meta { font-size: 12px; color: var(--ink-muted); margin-top: 2px; }
+  .row-card .footer {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-top: 8px; padding-top: 8px; border-top: 1px dashed #eee;
+    font-size: 11px; color: var(--ink-subtle);
+  }
+  .row-card .chevron { font-size: 18px; color: var(--ink-subtle); }
+  .pill {
+    display: inline-block; padding: 2px 8px; border-radius: 999px;
+    font-size: 10px; font-weight: 700; text-transform: uppercase;
+  }
+  .pill.pending  { background: #fff3e0; color: var(--warn); }
+  .pill.confirmed{ background: #e6f4ea; color: var(--shipped); }
+  .pill.flagged  { background: #fde7e7; color: var(--danger); }
+  .pill.waiting  { background: #e3f0fb; color: var(--info); }
+  .pill.p1       { background: #fef1f0; color: var(--crimson); }
+  .pill.p2       { background: #e3f0fb; color: var(--info); }
+
+  .sticky-actions {
+    position: sticky; bottom: 0; background: #fff;
+    border-top: 1px solid var(--border);
+    padding: 10px 12px; display: flex; gap: 8px;
+  }
+  .sticky-actions button {
+    flex: 1; min-height: 44px; border-radius: 6px;
+    font-size: 12px; font-weight: 700; border: 1px solid var(--border);
+    background: #fff; color: var(--ink);
+  }
+  .sticky-actions button.primary {
+    background: var(--crimson); color: #fff; border-color: var(--crimson);
+  }
+
+  .findings {
+    background: #fff; border: 1px solid var(--border); border-radius: 8px;
+    padding: 16px 20px; margin-top: 4px;
+  }
+  .findings h3 { font-size: 14px; margin-bottom: 10px; color: var(--crimson-dark); }
+  .findings ol { padding-left: 22px; }
+  .findings li { font-size: 12px; line-height: 1.55; margin-bottom: 8px; color: var(--ink); }
+  .findings li code {
+    background: var(--surface); padding: 1px 5px; border-radius: 3px;
+    font-family: Monaco, monospace; font-size: 10px;
+  }
+
+  .detail-mock { background: #fff; }
+  .detail-mock .body { padding: 14px; font-size: 12px; line-height: 1.6; }
+  .detail-mock .section {
+    margin-bottom: 14px; padding-bottom: 12px;
+    border-bottom: 1px dashed #eee;
+  }
+  .detail-mock .section-label {
+    font-size: 10px; text-transform: uppercase;
+    color: var(--ink-subtle); letter-spacing: 0.05em;
+    font-weight: 700; margin-bottom: 6px;
+  }
+
+  .search-bar { padding: 10px 12px 0; }
+  .search-bar input {
+    width: 100%; height: 40px; padding: 8px 12px;
+    border: 1px solid var(--border); border-radius: 10px;
+    font-size: 14px; background: var(--page);
+  }
+
+  footer {
+    margin-top: 32px; padding: 16px; text-align: center;
+    font-size: 11px; color: var(--ink-subtle);
+  }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <h1>makeLILA — Mobile View Preview v2 (card-drilldown pattern)</h1>
+  <div class="sub">Vertical scrollable list of clickable module cards on the home screen. Tap a module to drill in — that screen shows tab cards (also clickable). Tap a tab to see its content. Each level uses the iOS-native "back ‹" pattern. Three levels deep: <strong>Home → Module → Tab → Content</strong>.</div>
+</header>
+
+<div class="pattern-summary">
+  <h2>The new mobile navigation model</h2>
+  <ol>
+    <li><strong>Home</strong> — instead of a desktop top-nav strip, the home screen is a vertical scrollable list of <strong>module cards</strong>. Each card shows the module icon, name, a one-line description, and a count pill on the right (number of items that need attention). Tap → drill into module.</li>
+    <li><strong>Module screen</strong> — instead of a horizontal tab strip, tabs become <strong>tab cards</strong> stacked vertically. Same card design as home. Tap → drill into tab.</li>
+    <li><strong>Tab screen</strong> — the actual records (orders, tickets, customers) as content cards. Tap → opens the detail takeover.</li>
+    <li><strong>Detail takeover</strong> — full-screen, sticky header (back + title), sticky bottom action bar (Approve / Reject / etc.).</li>
+    <li>Navigation primitives: <code>‹ back</code> button top-left on every non-home screen wires to the browser back stack, so iOS swipe-back works natively. Right-side header slot reserved for context actions (Filter / Add / etc.).</li>
+  </ol>
+</div>
+
+<nav class="chips" id="chips">
+  <button class="active" data-module="home">Home (module list)</button>
+  <button data-module="order">OrderReview drill</button>
+  <button data-module="service">Service drill</button>
+  <button data-module="postship">PostShipment drill</button>
+  <button data-module="fulfillment">Fulfillment drill</button>
+  <button data-module="customers">Customers drill</button>
+  <button data-module="detail">Detail panel</button>
+</nav>
+
+<section class="module active" id="home">
+  <h2>Home screen — module picker</h2>
+  <p class="lede">First screen after login. Instead of cramming 10 module names into a horizontal top strip, each module gets a full-width card with icon, name, description, and attention count. Cards are stacked top-to-bottom and scroll vertically — the most natural mobile gesture.</p>
+  <div class="frames-row">
+
+    <div class="frame-wrap">
+      <div class="frame-label"><span class="name">Today (horizontal top strip)</span><span class="tag broken">DENSE + EASY TO MISS</span></div>
+      <div class="iphone">
+        <div class="notch"><span>●</span>9:41<span>●</span></div>
+        <div class="viewport">
+          <div class="gnav">
+            <div class="gnav-brand"><span class="gnav-brand-logo"></span></div>
+            <div class="gnav-item active">Dashboard</div>
+            <div class="gnav-item">Order Review</div>
+            <div class="gnav-item">Fulfillment</div>
+            <div class="gnav-item">Build</div>
+            <div class="gnav-item">Post-Ship</div>
+            <div class="gnav-item">Service</div>
+            <div class="gnav-item">Stock</div>
+            <div class="gnav-item">Customers</div>
+            <div class="gnav-item">Templ</div>
+          </div>
+          <div class="mcontent">
+            <div style="color:var(--ink-subtle);font-size:11px;padding:8px;font-style:italic;">Operator has to horizontally swipe through 10 micro-targets just to switch modules. Count badges have nowhere to live. No room for "what needs attention" hints.</div>
+          </div>
+        </div>
+        <div class="home-indicator"></div>
+      </div>
+    </div>
+
+    <div class="frame-wrap">
+      <div class="frame-label"><span class="name">New — module cards</span><span class="tag proposed">PROPOSED</span></div>
+      <div class="iphone">
+        <div class="notch"><span>●</span>9:41<span>●</span></div>
+        <div class="viewport">
+          <div class="mhead home">
+            <div class="title">make lila</div>
+            <div class="right-action">Huayi ›</div>
+          </div>
+          <div class="card-list">
+            <div class="group-label">Today's attention</div>
+
+            <div class="nav-card">
+              <div class="icon" style="background:#fef1f0;">🛒</div>
+              <div class="body">
+                <div class="title">Order Review</div>
+                <div class="subtitle">7 pending · 2 flagged</div>
+              </div>
+              <div class="right"><span class="count-pill alert">9</span><span class="chevron">›</span></div>
+            </div>
+
+            <div class="nav-card">
+              <div class="icon" style="background:#fff3e0;">🎫</div>
+              <div class="body">
+                <div class="title">Service</div>
+                <div class="subtitle">24 open tickets · 3 SLA breach</div>
+              </div>
+              <div class="right"><span class="count-pill alert">24</span><span class="chevron">›</span></div>
+            </div>
+
+            <div class="nav-card">
+              <div class="icon" style="background:#e3f0fb;">📦</div>
+              <div class="body">
+                <div class="title">Fulfillment</div>
+                <div class="subtitle">12 in queue · 4 ready to ship</div>
+              </div>
+              <div class="right"><span class="count-pill warn">12</span><span class="chevron">›</span></div>
+            </div>
+
+            <div class="nav-card">
+              <div class="icon" style="background:#fef1f0;">↩️</div>
+              <div class="body">
+                <div class="title">Post-Shipment</div>
+                <div class="subtitle">3 refunds awaiting your approval</div>
+              </div>
+              <div class="right"><span class="count-pill alert">3</span><span class="chevron">›</span></div>
+            </div>
+
+            <div class="group-label">Workspace</div>
+
+            <div class="nav-card">
+              <div class="icon" style="background:#e6f4ea;">🏗️</div>
+              <div class="body">
+                <div class="title">Build</div>
+                <div class="subtitle">Manufacturing pipeline · 8 units in test</div>
+              </div>
+              <div class="right"><span class="chevron">›</span></div>
+            </div>
+
+            <div class="nav-card">
+              <div class="icon" style="background:#e6f4ea;">📊</div>
+              <div class="body">
+                <div class="title">Stock</div>
+                <div class="subtitle">Units, parts, batches</div>
+              </div>
+              <div class="right"><span class="chevron">›</span></div>
+            </div>
+
+            <div class="nav-card">
+              <div class="icon" style="background:#f5f1eb;">👥</div>
+              <div class="body">
+                <div class="title">Customers</div>
+                <div class="subtitle">312 active · 8 at-risk</div>
+              </div>
+              <div class="right"><span class="chevron">›</span></div>
+            </div>
+
+            <div class="nav-card">
+              <div class="icon" style="background:#f5f1eb;">📝</div>
+              <div class="body">
+                <div class="title">Templates</div>
+                <div class="subtitle">Email & SMS template editor</div>
+              </div>
+              <div class="right"><span class="chevron">›</span></div>
+            </div>
+
+            <div class="nav-card">
+              <div class="icon" style="background:#f5f1eb;">📜</div>
+              <div class="body">
+                <div class="title">Activity Log</div>
+                <div class="subtitle">Audit trail</div>
+              </div>
+              <div class="right"><span class="chevron">›</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="home-indicator"></div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="findings">
+    <h3>Why this works better on phone</h3>
+    <ol>
+      <li>Every card is &gt;60px tall — Apple HIG-compliant tap target with room to spare.</li>
+      <li>Count pills surface "what needs me right now" — operator doesn't have to drill in just to check.</li>
+      <li>Two visual groups ("Today's attention" / "Workspace") let high-priority modules float to the top of the list.</li>
+      <li>Module description line gives newcomers (e.g., Julie on her first phone session) context that the desktop nav assumes you've memorised.</li>
+      <li>On desktop the same React component renders the existing horizontal nav — the card-drilldown only kicks in under <code>@media (max-width: 700px)</code>.</li>
+    </ol>
+  </div>
+</section>
+
+<section class="module" id="order">
+  <h2>Order Review — drilldown flow</h2>
+  <p class="lede">Two screens stacked left → right show the drill path: Module screen (tab cards) → Tab screen (content rows). Each level keeps the same card pattern.</p>
+  <div class="frames-row">
+
+    <div class="frame-wrap">
+      <div class="frame-label"><span class="name">1. Module screen — tab cards</span><span class="tag proposed">PROPOSED</span></div>
+      <div class="iphone">
+        <div class="notch"><span>●</span>9:41<span>●</span></div>
+        <div class="viewport">
+          <div class="mhead">
+            <span class="back-btn">‹</span>
+            <div class="title">Order Review</div>
+            <div class="right-action">Sync</div>
+          </div>
+          <div class="card-list">
+            <div class="group-label">Active</div>
+
+            <div class="nav-card">
+              <div class="icon" style="background:#fff3e0;">⏳</div>
+              <div class="body">
+                <div class="title">Pending</div>
+                <div class="subtitle">New orders awaiting confirmation</div>
+              </div>
+              <div class="right"><span class="count-pill alert">7</span><span class="chevron">›</span></div>
+            </div>
+
+            <div class="nav-card">
+              <div class="icon" style="background:#fde7e7;">⚠️</div>
+              <div class="body">
+                <div class="title">Flagged</div>
+                <div class="subtitle">Address mismatch · freight over $75</div>
+              </div>
+              <div class="right"><span class="count-pill alert">2</span><span class="chevron">›</span></div>
+            </div>
+
+            <div class="nav-card">
+              <div class="icon" style="background:#e3f0fb;">📤</div>
+              <div class="body">
+                <div class="title">Out</div>
+                <div class="subtitle">Sent to Fulfillment</div>
+              </div>
+              <div class="right"><span class="count-pill">12</span><span class="chevron">›</span></div>
+            </div>
+
+            <div class="group-label">Reference</div>
+
+            <div class="nav-card">
+              <div class="icon" style="background:#e6f4ea;">✓</div>
+              <div class="body">
+                <div class="title">Confirmed</div>
+                <div class="subtitle">This month: 47 orders</div>
+              </div>
+              <div class="right"><span class="chevron">›</span></div>
+            </div>
+
+            <div class="nav-card">
+              <div class="icon" style="background:#fef1f0;">🔁</div>
+              <div class="body">
+                <div class="title">Replacement</div>
+                <div class="subtitle">Tied to warranty tickets</div>
+              </div>
+              <div class="right"><span class="count-pill">3</span><span class="chevron">›</span></div>
+            </div>
+
+            <div class="nav-card">
+              <div class="icon" style="background:#f5f1eb;">📋</div>
+              <div class="body">
+                <div class="title">All orders</div>
+                <div class="subtitle">Full history · searchable</div>
+              </div>
+              <div class="right"><span class="chevron">›</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="home-indicator"></div>
+      </div>
+    </div>
+
+    <div class="frame-wrap">
+      <div class="frame-label"><span class="name">2. Tab screen — content rows</span><span class="tag proposed">PROPOSED</span></div>
+      <div class="iphone">
+        <div class="notch"><span>●</span>9:41<span>●</span></div>
+        <div class="viewport">
+          <div class="mhead">
+            <span class="back-btn">‹</span>
+            <div class="title">Pending <span style="color:var(--ink-subtle);font-weight:400;">(7)</span></div>
+            <div class="right-action">Filter</div>
+          </div>
+          <div class="search-bar"><input placeholder="Search orders…" /></div>
+          <div class="row-cards">
+            <div class="row-card">
+              <div class="card-top">
+                <div>
+                  <div class="primary">Jane Doe</div>
+                  <div class="meta">#1182 · $1,299 CAD · Toronto ON</div>
+                </div>
+                <span class="pill pending">Pending</span>
+              </div>
+              <div class="footer">
+                <span>📅 2026-06-07 · 🚚 $48 freight</span>
+                <span class="chevron">›</span>
+              </div>
+            </div>
+            <div class="row-card">
+              <div class="card-top">
+                <div>
+                  <div class="primary">John Schmidt</div>
+                  <div class="meta">#1181 · $1,299 CAD · Whitby ON</div>
+                </div>
+                <span class="pill pending">Pending</span>
+              </div>
+              <div class="footer">
+                <span>📅 2026-06-07 · 🚚 $52 freight</span>
+                <span class="chevron">›</span>
+              </div>
+            </div>
+            <div class="row-card">
+              <div class="card-top">
+                <div>
+                  <div class="primary">Maria Lopez</div>
+                  <div class="meta">#1180 · $1,149 USD · Houston TX</div>
+                </div>
+                <span class="pill pending">Pending</span>
+              </div>
+              <div class="footer">
+                <span>📅 2026-06-07 · 🚚 $95 freight</span>
+                <span class="chevron">›</span>
+              </div>
+            </div>
+            <div class="row-card">
+              <div class="card-top">
+                <div>
+                  <div class="primary">David Kowalski</div>
+                  <div class="meta">#1179 · $1,299 CAD · Calgary AB</div>
+                </div>
+                <span class="pill pending">Pending</span>
+              </div>
+              <div class="footer">
+                <span>📅 2026-06-06 · 🚚 $78 freight</span>
+                <span class="chevron">›</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="home-indicator"></div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="findings">
+    <h3>How the drill works for OrderReview</h3>
+    <ol>
+      <li>From Home, tap "Order Review" card → land on Module screen (left frame).</li>
+      <li>Tap a tab card (e.g., "Pending") → land on Tab screen (right frame) showing the 7 pending orders as content rows.</li>
+      <li>Tap a row → opens Detail takeover (see "Detail panel" chip above).</li>
+      <li>Each tab card surfaces its own count + a description, so the operator knows what's behind the door without tapping.</li>
+      <li>Search bar appears on the Tab screen for tabs with &gt;15 rows.</li>
+    </ol>
+  </div>
+</section>
+
+<section class="module" id="service">
+  <h2>Service — drilldown flow</h2>
+  <p class="lede">Service has 4 tabs (Inbox, Onboarding, Support, Replacement) and a much larger inbox count. The tab cards make the priority immediately legible — Inbox is huge (70 conversations) so it gets the alert-style count pill.</p>
+  <div class="frames-row">
+
+    <div class="frame-wrap">
+      <div class="frame-label"><span class="name">1. Module screen — Service tabs</span><span class="tag proposed">PROPOSED</span></div>
+      <div class="iphone">
+        <div class="notch"><span>●</span>9:41<span>●</span></div>
+        <div class="viewport">
+          <div class="mhead">
+            <span class="back-btn">‹</span>
+            <div class="title">Service</div>
+            <div class="right-action">New</div>
+          </div>
+          <div class="card-list">
+            <div class="nav-card">
+              <div class="icon" style="background:#fff3e0;">📥</div>
+              <div class="body">
+                <div class="title">Inbox</div>
+                <div class="subtitle">Untriaged conversations · Quo + email</div>
+              </div>
+              <div class="right"><span class="count-pill alert">70</span><span class="chevron">›</span></div>
+            </div>
+
+            <div class="nav-card">
+              <div class="icon" style="background:#fef1f0;">🎫</div>
+              <div class="body">
+                <div class="title">Support tickets</div>
+                <div class="subtitle">24 open · 3 SLA breach · 8 waiting on us</div>
+              </div>
+              <div class="right"><span class="count-pill alert">24</span><span class="chevron">›</span></div>
+            </div>
+
+            <div class="nav-card">
+              <div class="icon" style="background:#e6f4ea;">🚀</div>
+              <div class="body">
+                <div class="title">Onboarding</div>
+                <div class="subtitle">12 in progress · 4 awaiting customer</div>
+              </div>
+              <div class="right"><span class="count-pill warn">12</span><span class="chevron">›</span></div>
+            </div>
+
+            <div class="nav-card">
+              <div class="icon" style="background:#fef1f0;">🔁</div>
+              <div class="body">
+                <div class="title">Replacement</div>
+                <div class="subtitle">6 chambers queued · 2 batches incoming</div>
+              </div>
+              <div class="right"><span class="count-pill">6</span><span class="chevron">›</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="home-indicator"></div>
+      </div>
+    </div>
+
+    <div class="frame-wrap">
+      <div class="frame-label"><span class="name">2. Tab screen — Support tickets</span><span class="tag proposed">PROPOSED</span></div>
+      <div class="iphone">
+        <div class="notch"><span>●</span>9:41<span>●</span></div>
+        <div class="viewport">
+          <div class="mhead">
+            <span class="back-btn">‹</span>
+            <div class="title">Support <span style="color:var(--ink-subtle);font-weight:400;">(24)</span></div>
+            <div class="right-action">Filter</div>
+          </div>
+          <div class="search-bar"><input placeholder="Search tickets…" /></div>
+          <div class="row-cards">
+            <div class="row-card">
+              <div class="card-top">
+                <div>
+                  <div class="primary">Christine Reese</div>
+                  <div class="meta">ST-0301 · 1h ago · customer_form</div>
+                </div>
+                <span class="pill p2">P2</span>
+              </div>
+              <div style="font-size:12px;color:var(--ink);margin-top:4px;">Support page blank + onboarding stuck</div>
+              <div class="footer">
+                <span>👤 Reina · ⏳ waiting on customer</span>
+                <span class="chevron">›</span>
+              </div>
+            </div>
+            <div class="row-card">
+              <div class="card-top">
+                <div>
+                  <div class="primary">Cheryl Lemieux</div>
+                  <div class="meta">ST-0277 · 2d ago · quo</div>
+                </div>
+                <span class="pill p1">P1</span>
+              </div>
+              <div style="font-size:12px;color:var(--ink);margin-top:4px;">Cracked chamber · R-0032 queued on P100X</div>
+              <div class="footer">
+                <span>👤 Junaid · ⏰ waiting on us</span>
+                <span class="chevron">›</span>
+              </div>
+            </div>
+            <div class="row-card">
+              <div class="card-top">
+                <div>
+                  <div class="primary">Kristen Pimentel</div>
+                  <div class="meta">ST-0248 · 3d ago · quo</div>
+                </div>
+                <span class="pill p1">P1</span>
+              </div>
+              <div style="font-size:12px;color:var(--ink);margin-top:4px;">P100X replacement queued (R-0001)</div>
+              <div class="footer">
+                <span>👤 Junaid · ⏰ waiting on us</span>
+                <span class="chevron">›</span>
+              </div>
+            </div>
+            <div class="row-card">
+              <div class="card-top">
+                <div>
+                  <div class="primary">Audrey Sandford</div>
+                  <div class="meta">ST-0175 · 5d ago · email</div>
+                </div>
+                <span class="pill p2">P2</span>
+              </div>
+              <div style="font-size:12px;color:var(--ink);margin-top:4px;">Onboarding question — sensor calibration</div>
+              <div class="footer">
+                <span>👤 Junaid · ✓ resolved-pending</span>
+                <span class="chevron">›</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="home-indicator"></div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="findings">
+    <h3>Service drill notes</h3>
+    <ol>
+      <li>The 70-conversation inbox is the loudest card — operator can't miss it.</li>
+      <li>SLA breach + waiting-on-us counts appear in the tab card subtitle so the operator can decide whether to drill in or skip.</li>
+      <li>Replacement tab is the linkage point for Junaid's warranty workflow + Reina's at-risk customer follow-ups.</li>
+    </ol>
+  </div>
+</section>
+
+<section class="module" id="postship">
+  <h2>Post-Shipment — drilldown flow</h2>
+  <p class="lede">Today's Refunds tab is a 4-column kanban (Manager review / Finance review / Refunded / Denied) that only shows one column on phone. The drill replaces the kanban with a tab card per stage — same pattern as every other module.</p>
+  <div class="frames-row">
+
+    <div class="frame-wrap">
+      <div class="frame-label"><span class="name">1. Module screen</span><span class="tag proposed">PROPOSED</span></div>
+      <div class="iphone">
+        <div class="notch"><span>●</span>9:41<span>●</span></div>
+        <div class="viewport">
+          <div class="mhead">
+            <span class="back-btn">‹</span>
+            <div class="title">Post-Shipment</div>
+            <div class="right-action">New</div>
+          </div>
+          <div class="card-list">
+            <div class="nav-card">
+              <div class="icon" style="background:#fff3e0;">↩️</div>
+              <div class="body">
+                <div class="title">Returns</div>
+                <div class="subtitle">5 in transit · 2 awaiting inspection</div>
+              </div>
+              <div class="right"><span class="count-pill warn">7</span><span class="chevron">›</span></div>
+            </div>
+
+            <div class="nav-card">
+              <div class="icon" style="background:#fef1f0;">💵</div>
+              <div class="body">
+                <div class="title">Refunds</div>
+                <div class="subtitle">3 awaiting George · 2 awaiting Julie</div>
+              </div>
+              <div class="right"><span class="count-pill alert">5</span><span class="chevron">›</span></div>
+            </div>
+
+            <div class="nav-card">
+              <div class="icon" style="background:#e3f0fb;">🔁</div>
+              <div class="body">
+                <div class="title">Replacements</div>
+                <div class="subtitle">4 queued · 1 batch incoming this week</div>
+              </div>
+              <div class="right"><span class="count-pill">4</span><span class="chevron">›</span></div>
+            </div>
+
+            <div class="nav-card">
+              <div class="icon" style="background:#f5f1eb;">❌</div>
+              <div class="body">
+                <div class="title">Cancellations</div>
+                <div class="subtitle">This month: 2</div>
+              </div>
+              <div class="right"><span class="chevron">›</span></div>
+            </div>
+
+            <div class="nav-card">
+              <div class="icon" style="background:#f5f1eb;">📜</div>
+              <div class="body">
+                <div class="title">History</div>
+                <div class="subtitle">All resolved cases</div>
+              </div>
+              <div class="right"><span class="chevron">›</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="home-indicator"></div>
+      </div>
+    </div>
+
+    <div class="frame-wrap">
+      <div class="frame-label"><span class="name">2. Refunds tab — stage cards</span><span class="tag proposed">PROPOSED</span></div>
+      <div class="iphone">
+        <div class="notch"><span>●</span>9:41<span>●</span></div>
+        <div class="viewport">
+          <div class="mhead">
+            <span class="back-btn">‹</span>
+            <div class="title">Refunds <span style="color:var(--ink-subtle);font-weight:400;">(8)</span></div>
+            <div class="right-action">Filter</div>
+          </div>
+          <div class="card-list">
+            <div class="group-label">By stage</div>
+
+            <div class="nav-card">
+              <div class="icon" style="background:#fef1f0;">👨‍💼</div>
+              <div class="body">
+                <div class="title">Manager review</div>
+                <div class="subtitle">Awaiting George approval</div>
+              </div>
+              <div class="right"><span class="count-pill alert">3</span><span class="chevron">›</span></div>
+            </div>
+
+            <div class="nav-card">
+              <div class="icon" style="background:#fff3e0;">💰</div>
+              <div class="body">
+                <div class="title">Finance review</div>
+                <div class="subtitle">Awaiting Julie · amount + method</div>
+              </div>
+              <div class="right"><span class="count-pill warn">2</span><span class="chevron">›</span></div>
+            </div>
+
+            <div class="nav-card">
+              <div class="icon" style="background:#e6f4ea;">✓</div>
+              <div class="body">
+                <div class="title">Refunded</div>
+                <div class="subtitle">Posted this month</div>
+              </div>
+              <div class="right"><span class="count-pill">3</span><span class="chevron">›</span></div>
+            </div>
+
+            <div class="nav-card">
+              <div class="icon" style="background:#f5f1eb;">⛔</div>
+              <div class="body">
+                <div class="title">Denied</div>
+                <div class="subtitle">Out of policy · with reason</div>
+              </div>
+              <div class="right"><span class="count-pill">2</span><span class="chevron">›</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="home-indicator"></div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="findings">
+    <h3>Refunds drill notes</h3>
+    <ol>
+      <li>The 4-column kanban becomes 4 stage cards stacked vertically. Each card surfaces the bottleneck owner ("Awaiting George" / "Awaiting Julie") in the subtitle, so the operator knows who's holding up the queue.</li>
+      <li>Tapping a stage card opens a Tab screen with the refund row-cards (same as OrderReview content rows).</li>
+      <li>Tapping a refund row opens the Detail takeover with sticky-bottom Approve / Deny buttons.</li>
+    </ol>
+  </div>
+</section>
+
+<section class="module" id="fulfillment">
+  <h2>Fulfillment — drilldown flow</h2>
+  <p class="lede">Queue is the focus — Raymond steps through 6 stages per order. Each queue row includes a progress bar showing current step + step name so he can see where each order is without drilling in.</p>
+  <div class="frames-row">
+
+    <div class="frame-wrap">
+      <div class="frame-label"><span class="name">1. Module screen</span><span class="tag proposed">PROPOSED</span></div>
+      <div class="iphone">
+        <div class="notch"><span>●</span>9:41<span>●</span></div>
+        <div class="viewport">
+          <div class="mhead">
+            <span class="back-btn">‹</span>
+            <div class="title">Fulfillment</div>
+            <div class="right-action">Sync</div>
+          </div>
+          <div class="card-list">
+            <div class="nav-card">
+              <div class="icon" style="background:#fff3e0;">📦</div>
+              <div class="body">
+                <div class="title">Queue</div>
+                <div class="subtitle">12 in queue · 4 ready to label</div>
+              </div>
+              <div class="right"><span class="count-pill warn">12</span><span class="chevron">›</span></div>
+            </div>
+
+            <div class="nav-card">
+              <div class="icon" style="background:#e3f0fb;">🪜</div>
+              <div class="body">
+                <div class="title">Shelf</div>
+                <div class="subtitle">Skid assignments · 3 skids active</div>
+              </div>
+              <div class="right"><span class="count-pill">3</span><span class="chevron">›</span></div>
+            </div>
+
+            <div class="nav-card">
+              <div class="icon" style="background:#e6f4ea;">📜</div>
+              <div class="body">
+                <div class="title">History</div>
+                <div class="subtitle">Fulfilled · last 30 days: 47</div>
+              </div>
+              <div class="right"><span class="chevron">›</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="home-indicator"></div>
+      </div>
+    </div>
+
+    <div class="frame-wrap">
+      <div class="frame-label"><span class="name">2. Queue tab — content rows</span><span class="tag proposed">PROPOSED</span></div>
+      <div class="iphone">
+        <div class="notch"><span>●</span>9:41<span>●</span></div>
+        <div class="viewport">
+          <div class="mhead">
+            <span class="back-btn">‹</span>
+            <div class="title">Queue <span style="color:var(--ink-subtle);font-weight:400;">(12)</span></div>
+            <div class="right-action">Filter</div>
+          </div>
+          <div class="row-cards">
+            <div class="row-card">
+              <div class="card-top">
+                <div>
+                  <div class="primary">#1182 · Jane Doe</div>
+                  <div class="meta">P150 · Toronto ON · Step 1 of 6</div>
+                </div>
+                <span class="pill pending">Assign serial</span>
+              </div>
+              <div style="background:var(--surface);height:6px;border-radius:3px;margin:8px 0;overflow:hidden;">
+                <div style="background:var(--crimson);width:16%;height:100%;"></div>
+              </div>
+              <div class="footer">
+                <span>Due Mon · Raymond</span>
+                <span class="chevron">›</span>
+              </div>
+            </div>
+            <div class="row-card">
+              <div class="card-top">
+                <div>
+                  <div class="primary">#1180 · Maria Lopez</div>
+                  <div class="meta">P100 · Houston TX · Step 3 of 6</div>
+                </div>
+                <span class="pill waiting">Test</span>
+              </div>
+              <div style="background:var(--surface);height:6px;border-radius:3px;margin:8px 0;overflow:hidden;">
+                <div style="background:var(--crimson);width:50%;height:100%;"></div>
+              </div>
+              <div class="footer">
+                <span>Test report uploaded · Raymond</span>
+                <span class="chevron">›</span>
+              </div>
+            </div>
+            <div class="row-card">
+              <div class="card-top">
+                <div>
+                  <div class="primary">#1181 · John Schmidt</div>
+                  <div class="meta">P150 · Whitby ON · Step 4 of 6</div>
+                </div>
+                <span class="pill confirmed">Label</span>
+              </div>
+              <div style="background:var(--surface);height:6px;border-radius:3px;margin:8px 0;overflow:hidden;">
+                <div style="background:var(--crimson);width:66%;height:100%;"></div>
+              </div>
+              <div class="footer">
+                <span>Canpar · D420352…</span>
+                <span class="chevron">›</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="home-indicator"></div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="findings">
+    <h3>Fulfillment drill notes</h3>
+    <ol>
+      <li>Tapping into a queue row opens the Detail takeover that shows the 6-step UI (Assign serial → Test → Dock → Label → Email → Fulfilled) — each step is its own collapsible panel inside the takeover.</li>
+      <li>The step actions (Confirm test, Print label, Send email) land in the sticky bottom action bar so Raymond's thumb can reach them.</li>
+    </ol>
+  </div>
+</section>
+
+<section class="module" id="customers">
+  <h2>Customers — drilldown flow</h2>
+  <p class="lede">Today's Customers / Journey tab is a 10-column grid that needs horizontal panning. The drill replaces it with a Journey-stage picker — one tap = one CJM stage's customer list.</p>
+  <div class="frames-row">
+
+    <div class="frame-wrap">
+      <div class="frame-label"><span class="name">1. Module screen</span><span class="tag proposed">PROPOSED</span></div>
+      <div class="iphone">
+        <div class="notch"><span>●</span>9:41<span>●</span></div>
+        <div class="viewport">
+          <div class="mhead">
+            <span class="back-btn">‹</span>
+            <div class="title">Customers</div>
+            <div class="right-action">+ Add</div>
+          </div>
+          <div class="card-list">
+            <div class="nav-card">
+              <div class="icon" style="background:#f5f1eb;">👥</div>
+              <div class="body">
+                <div class="title">Directory</div>
+                <div class="subtitle">All customers · 312 active</div>
+              </div>
+              <div class="right"><span class="count-pill">312</span><span class="chevron">›</span></div>
+            </div>
+
+            <div class="nav-card">
+              <div class="icon" style="background:#fef1f0;">🛤️</div>
+              <div class="body">
+                <div class="title">Journey</div>
+                <div class="subtitle">10-stage CJM · drill by stage</div>
+              </div>
+              <div class="right"><span class="chevron">›</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="home-indicator"></div>
+      </div>
+    </div>
+
+    <div class="frame-wrap">
+      <div class="frame-label"><span class="name">2. Journey tab — stage cards</span><span class="tag proposed">PROPOSED</span></div>
+      <div class="iphone">
+        <div class="notch"><span>●</span>9:41<span>●</span></div>
+        <div class="viewport">
+          <div class="mhead">
+            <span class="back-btn">‹</span>
+            <div class="title">Journey</div>
+            <div class="right-action">Filter</div>
+          </div>
+          <div class="card-list">
+            <div class="group-label">Needs attention</div>
+
+            <div class="nav-card">
+              <div class="icon" style="background:#fde7e7;">⚠️</div>
+              <div class="body">
+                <div class="title">At-risk</div>
+                <div class="subtitle">Dashboard alerts · low engagement</div>
+              </div>
+              <div class="right"><span class="count-pill alert">8</span><span class="chevron">›</span></div>
+            </div>
+
+            <div class="nav-card">
+              <div class="icon" style="background:#fff3e0;">🔁</div>
+              <div class="body">
+                <div class="title">Replacement</div>
+                <div class="subtitle">Parts/units queued</div>
+              </div>
+              <div class="right"><span class="count-pill warn">6</span><span class="chevron">›</span></div>
+            </div>
+
+            <div class="group-label">In progress</div>
+
+            <div class="nav-card">
+              <div class="icon" style="background:#e6f4ea;">🚀</div>
+              <div class="body">
+                <div class="title">Onboarding</div>
+                <div class="subtitle">First 30 days post-delivery</div>
+              </div>
+              <div class="right"><span class="count-pill">12</span><span class="chevron">›</span></div>
+            </div>
+
+            <div class="nav-card">
+              <div class="icon" style="background:#e3f0fb;">⚙️</div>
+              <div class="body">
+                <div class="title">Routine use</div>
+                <div class="subtitle">Healthy active customers</div>
+              </div>
+              <div class="right"><span class="count-pill">47</span><span class="chevron">›</span></div>
+            </div>
+
+            <div class="group-label">Reference</div>
+
+            <div class="nav-card">
+              <div class="icon" style="background:#f5f1eb;">🛒</div>
+              <div class="body">
+                <div class="title">Pre-sale</div>
+                <div class="subtitle">Inquiries · not yet ordered</div>
+              </div>
+              <div class="right"><span class="count-pill">23</span><span class="chevron">›</span></div>
+            </div>
+
+            <div class="nav-card">
+              <div class="icon" style="background:#f5f1eb;">📦</div>
+              <div class="body">
+                <div class="title">In transit</div>
+                <div class="subtitle">Order placed · awaiting delivery</div>
+              </div>
+              <div class="right"><span class="count-pill">9</span><span class="chevron">›</span></div>
+            </div>
+
+            <div class="nav-card">
+              <div class="icon" style="background:#f5f1eb;">💤</div>
+              <div class="body">
+                <div class="title">Churned</div>
+                <div class="subtitle">Returned · refunded · disengaged</div>
+              </div>
+              <div class="right"><span class="count-pill">3</span><span class="chevron">›</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="home-indicator"></div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="findings">
+    <h3>Customers / Journey drill notes</h3>
+    <ol>
+      <li>The 10-stage grid becomes 7 stage cards (collapsed where it makes sense — pre-sale combines pre-sale + inquiry, etc.).</li>
+      <li>Stage cards are grouped: "Needs attention" floats at-risk + replacement up; "In progress" + "Reference" sink below.</li>
+      <li>Tap a stage → Tab screen shows customers in that stage as row-cards (same primitives).</li>
+    </ol>
+  </div>
+</section>
+
+<section class="module" id="detail">
+  <h2>Detail panel — full-screen takeover</h2>
+  <p class="lede">Bottom of the drill stack: Home → Module → Tab → <strong>Detail</strong>. Same back-button pattern, but with a sticky bottom action bar carrying the primary verbs (Confirm / Approve / Reject / Ship).</p>
+  <div class="frames-row">
+
+    <div class="frame-wrap">
+      <div class="frame-label"><span class="name">Order Review detail</span><span class="tag proposed">PROPOSED</span></div>
+      <div class="iphone">
+        <div class="notch"><span>●</span>9:41<span>●</span></div>
+        <div class="viewport" style="display:flex;flex-direction:column;">
+          <div class="mhead">
+            <span class="back-btn">‹</span>
+            <div class="title">#1182 · Jane Doe</div>
+          </div>
+          <div class="detail-mock" style="flex:1;">
+            <div class="body">
+              <div class="section">
+                <div class="section-label">Readiness</div>
+                <div>✓ Phone + email on file</div>
+                <div>✓ Address verified (Google + Claude)</div>
+                <div>⚠️ Freight estimate: $48 (within $75 threshold)</div>
+              </div>
+              <div class="section">
+                <div class="section-label">Address</div>
+                <div>123 Main Street, Apt 4B</div>
+                <div>Toronto, ON M5V 2H1, CA</div>
+              </div>
+              <div class="section">
+                <div class="section-label">Line items</div>
+                <div>1 × LILA Composter P150 · $1,299</div>
+              </div>
+              <div class="section" style="border-bottom:none;">
+                <div class="section-label">Payment</div>
+                <div>$1,299 paid via Shopify Pay (Visa ····2143)</div>
+                <div>Subtotal $1,199 · Tax $156 · Discount −$56</div>
+              </div>
+            </div>
+          </div>
+          <div class="sticky-actions">
+            <button>Flag</button>
+            <button class="primary">Confirm order</button>
+          </div>
+        </div>
+        <div class="home-indicator"></div>
+      </div>
+    </div>
+
+    <div class="frame-wrap">
+      <div class="frame-label"><span class="name">Service ticket detail</span><span class="tag proposed">PROPOSED</span></div>
+      <div class="iphone">
+        <div class="notch"><span>●</span>9:41<span>●</span></div>
+        <div class="viewport" style="display:flex;flex-direction:column;">
+          <div class="mhead">
+            <span class="back-btn">‹</span>
+            <div class="title">ST-0277 · Cheryl L</div>
+          </div>
+          <div class="detail-mock" style="flex:1;">
+            <div class="body">
+              <div class="section">
+                <div class="section-label">Status</div>
+                <div><span class="pill p1">P1</span> &nbsp; <span class="pill waiting">waiting on us</span></div>
+                <div style="margin-top:6px;">Owner: Junaid · Opened 2d ago · Source: Quo</div>
+              </div>
+              <div class="section">
+                <div class="section-label">Unit context</div>
+                <div>P100 · LL01-296 · Shipped 2025-11-14</div>
+                <div>Warranty: in coverage · Dashboard: 2 OK</div>
+              </div>
+              <div class="section">
+                <div class="section-label">Issue</div>
+                <div>Cracked chamber on left side. Replacement P100X queued under R-0032.</div>
+              </div>
+              <div class="section" style="border-bottom:none;">
+                <div class="section-label">Recent activity</div>
+                <div>· 2d Reina logged Quo message thread</div>
+                <div>· 1d Junaid created R-0032 replacement</div>
+                <div>· 4h Auto: R-0032 awaiting batch delivery</div>
+              </div>
+            </div>
+          </div>
+          <div class="sticky-actions">
+            <button>Reply</button>
+            <button class="primary">Resolve</button>
+          </div>
+        </div>
+        <div class="home-indicator"></div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="findings">
+    <h3>Detail takeover notes</h3>
+    <ol>
+      <li>Reusable <code>MobileDetailTakeover.tsx</code> primitive — every module's detail panel uses the same shell.</li>
+      <li>Sticky-bottom button bar honours <code>env(safe-area-inset-bottom)</code> so the iOS home indicator never overlaps tap targets.</li>
+      <li>Back button + iOS swipe-back both wired to <code>navigate(-1)</code>, so the drill stack feels native.</li>
+      <li>Wrapped in <code>position: fixed; inset: 0; height: 100dvh</code> with body-scroll-lock so the takeover always covers the screen exactly.</li>
+    </ol>
+  </div>
+</section>
+
+<footer>
+  Generated for in-session validation. Source: makelila_PRD_review.html v1.4.1 · backlog #80. Card-drilldown pattern. Open this file in your iPhone Safari to feel the gesture at real size.
+</footer>
+
+<script>
+  document.querySelectorAll('#chips button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#chips button').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      const m = btn.getAttribute('data-module');
+      document.querySelectorAll('section.module').forEach(s => s.classList.remove('active'));
+      document.getElementById(m).classList.add('active');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+  });
+</script>
+</body>
+</html>

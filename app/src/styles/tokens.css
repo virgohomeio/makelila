@@ -45,9 +45,12 @@
   --color-dark-2: #232323;
   --color-dark-3: #2a2a2a;
 
-  /* Typography — LILA brand uses Inter for UI/body and Brolink for the
-     "LILA" wordmark (logo use only — never for body copy). */
-  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont,
+  /* Typography — UI now uses Brolink as the primary face (operator request
+     2026-06-07) with Inter retained as a safe fallback while the woff2 loads
+     and as the system fallback chain for environments where Brolink hasn't
+     resolved yet. --font-logo continues to point at Brolink for the wordmark
+     uses elsewhere in the codebase. */
+  --font-sans: 'Brolink DEMO', 'Brolink', 'Inter', -apple-system, BlinkMacSystemFont,
                'SF Pro Display', 'SF Pro Text', 'Helvetica Neue', sans-serif;
   --font-logo: 'Brolink DEMO', 'Brolink', 'Inter', sans-serif;
 
