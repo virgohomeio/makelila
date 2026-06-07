@@ -2,11 +2,11 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   useRefundApprovals, useReturns,
   submitRefundRequest, managerApprove, financeApprove, denyRefund, closeRefund,
-  canApproveManager, canApproveFinance,
   REFUND_STATUS_META, REFUND_METHODS, REFUND_METHOD_META,
   type RefundApproval, type ReturnRow, type RefundMethod,
 } from '../../lib/postShipment';
 import { useAuth } from '../../lib/auth';
+import { canDo } from '../../lib/permissions';
 import { supabase } from '../../lib/supabase';
 import styles from './PostShipment.module.css';
 
@@ -16,7 +16,7 @@ type ColKey = 'manager_review' | 'finance_review' | 'refunded' | 'denied';
 
 const COLUMNS: { key: ColKey; label: string; helper: string }[] = [
   { key: 'manager_review', label: 'Manager review',  helper: 'Awaiting George' },
-  { key: 'finance_review', label: 'Finance review',  helper: 'Awaiting Julie' },
+  { key: 'finance_review', label: 'Finance review',  helper: 'Awaiting Julie / Huayi' },
   { key: 'refunded',       label: 'Refunded',        helper: 'Payment processed' },
   { key: 'denied',         label: 'Denied',          helper: 'Rejected at any stage' },
 ];
@@ -24,7 +24,7 @@ const COLUMNS: { key: ColKey; label: string; helper: string }[] = [
 export function RefundsTab() {
   const { approvals, loading: aLoading } = useRefundApprovals();
   const { returns, loading: rLoading } = useReturns();
-  const { user } = useAuth();
+  const { user, role } = useAuth();
   const userEmail = user?.email;
 
   const [showRequestModal, setShowRequestModal] = useState(false);
@@ -32,8 +32,8 @@ export function RefundsTab() {
   const [financeModalId, setFinanceModalId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const isManager = canApproveManager(userEmail);
-  const isFinance = canApproveFinance(userEmail);
+  const isManager = canDo(role, 'approve_refund_manager');
+  const isFinance = canDo(role, 'approve_refund_finance');
 
   const returnsById = useMemo(() => {
     const m = new Map<string, ReturnRow>();

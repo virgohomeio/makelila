@@ -312,18 +312,11 @@ export type RefundApproval = {
   updated_at: string;
 };
 
-// Role allowlist for the two approval stages. Once we ship proper RBAC
-// these move to a profiles.role column, but for 8 named users a simple
-// email list is fine and visible in code review.
-export const MANAGER_EMAILS = ['george@virgohome.io', 'huayi@virgohome.io'];
-export const FINANCE_EMAILS = ['yueli@virgohome.io',  'huayi@virgohome.io'];
-
-export function canApproveManager(email: string | null | undefined): boolean {
-  return !!email && MANAGER_EMAILS.includes(email.toLowerCase());
-}
-export function canApproveFinance(email: string | null | undefined): boolean {
-  return !!email && FINANCE_EMAILS.includes(email.toLowerCase());
-}
+// Refund approval gating moved to lib/permissions.ts canDo() helpers
+// (Huayi RBAC Phase A, migration 20260607020000). Call sites import
+// from 'lib/permissions': canDo(role, 'approve_refund_manager') etc.
+// profiles.role enum is the source of truth; RLS on refund_approvals
+// enforces is_manager() in WITH CHECK as a backstop.
 
 export function useRefundApprovals(): { approvals: RefundApproval[]; loading: boolean } {
   const [approvals, setApprovals] = useState<RefundApproval[]>([]);
