@@ -136,7 +136,8 @@ export async function updateReturnStatus(id: string, newStatus: ReturnStatus): P
   }
   const { error } = await supabase.from('returns').update(patch).eq('id', id);
   if (error) throw error;
-  await logAction('return_status', id, `→ ${newStatus}`);
+  await logAction('return_status', id, `→ ${newStatus}`,
+    { entityType: 'return', entityId: id });
 }
 
 export async function updateReturnCategory(id: string, category: ReturnCategory | null): Promise<void> {
@@ -145,7 +146,8 @@ export async function updateReturnCategory(id: string, category: ReturnCategory 
     .update({ return_category: category })
     .eq('id', id);
   if (error) throw error;
-  await logAction('return_category', id, category ?? 'cleared');
+  await logAction('return_category', id, category ?? 'cleared',
+    { entityType: 'return', entityId: id });
 }
 
 async function hasField(id: string, field: string): Promise<boolean> {

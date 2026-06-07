@@ -372,7 +372,8 @@ export async function assignSerial(input: {
     status: 'ca-test',
   });
   if (error) throw error;
-  await logAction('serial_assigned', input.serial, input.batch);
+  await logAction('serial_assigned', input.serial, input.batch,
+    { entityType: 'unit', unitSerial: input.serial });
 }
 
 export async function logDefect(input: {
@@ -398,7 +399,8 @@ export async function logDefect(input: {
     .select('id')
     .single();
   if (error || !data) throw error ?? new Error('logDefect failed');
-  await logAction('defect_logged', input.unit_serial, input.subject);
+  await logAction('defect_logged', input.unit_serial, input.subject,
+    { entityType: 'unit', unitSerial: input.unit_serial });
   return { id: data.id as string };
 }
 
@@ -427,7 +429,8 @@ export async function startBurnIn(unit_serial: string, duration_target_hours = 2
     .select('id')
     .single();
   if (error || !data) throw error ?? new Error('startBurnIn failed');
-  await logAction('burnin_started', unit_serial, `${duration_target_hours}h target`);
+  await logAction('burnin_started', unit_serial, `${duration_target_hours}h target`,
+    { entityType: 'unit', unitSerial: unit_serial });
   return { id: data.id as string };
 }
 
@@ -456,7 +459,8 @@ export async function releaseToFulfillment(unit_serial: string): Promise<void> {
     .update({ status: 'available', updated_at: new Date().toISOString() })
     .eq('serial', unit_serial);
   if (sErr) throw sErr;
-  await logAction('released_to_fulfillment', unit_serial, 'unit ready for fulfillment');
+  await logAction('released_to_fulfillment', unit_serial, 'unit ready for fulfillment',
+    { entityType: 'unit', unitSerial: unit_serial });
 }
 
 export async function attachmentSignedUrl(file_path: string): Promise<string | null> {

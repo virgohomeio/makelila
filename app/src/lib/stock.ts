@@ -253,7 +253,8 @@ export async function updateUnitStatus(
     .update({ status: newStatus, status_updated_by: userId, notes: nextNotes })
     .eq('serial', serial);
   if (error) throw error;
-  await logAction('stock_status', serial, `${existing?.status ?? '?'} → ${newStatus}`);
+  await logAction('stock_status', serial, `${existing?.status ?? '?'} → ${newStatus}`,
+    { entityType: 'unit', unitSerial: serial });
 }
 
 /** Backlog #69 — explicitly link an unmatched unit to a canonical customer
@@ -264,7 +265,8 @@ export async function linkUnitToCustomer(serial: string, customerId: string): Pr
   await currentUserId();
   const { error } = await supabase.from('units').update({ customer_id: customerId }).eq('serial', serial);
   if (error) throw error;
-  await logAction('stock_link_customer', serial, `customer_id=${customerId}`);
+  await logAction('stock_link_customer', serial, `customer_id=${customerId}`,
+    { entityType: 'unit', unitSerial: serial });
 }
 
 export async function updateUnitFields(
@@ -278,5 +280,6 @@ export async function updateUnitFields(
   await currentUserId();
   const { error } = await supabase.from('units').update(patch).eq('serial', serial);
   if (error) throw error;
-  await logAction('stock_edit', serial, Object.keys(patch).join(', '));
+  await logAction('stock_edit', serial, Object.keys(patch).join(', '),
+    { entityType: 'unit', unitSerial: serial });
 }

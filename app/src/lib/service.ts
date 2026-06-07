@@ -685,7 +685,8 @@ export async function createTicket(input: NewTicketInput): Promise<ServiceTicket
     .single();
   if (error) throw error;
   const row = data as ServiceTicket;
-  await logAction('ticket_created', row.id, `${row.ticket_number} ${input.subject}`);
+  await logAction('ticket_created', row.id, `${row.ticket_number} ${input.subject}`,
+    { entityType: 'ticket', entityId: row.id, unitSerial: input.unit_serial ?? undefined });
   return row;
 }
 
@@ -706,19 +707,22 @@ export async function deleteTicket(id: string): Promise<void> {
   if (!data || data.length === 0) {
     throw new Error('Ticket was not deleted (no permission or already removed).');
   }
-  await logAction('ticket_deleted', id, 'Ticket deleted');
+  await logAction('ticket_deleted', id, 'Ticket deleted',
+    { entityType: 'ticket', entityId: id });
 }
 
 export async function updateTicketStatus(id: string, status: TicketStatus): Promise<void> {
   const { error } = await supabase.from('service_tickets').update({ status }).eq('id', id);
   if (error) throw error;
-  await logAction('ticket_status_changed', id, status);
+  await logAction('ticket_status_changed', id, status,
+    { entityType: 'ticket', entityId: id });
 }
 
 export async function assignTicketOwner(id: string, owner_email: string | null): Promise<void> {
   const { error } = await supabase.from('service_tickets').update({ owner_email }).eq('id', id);
   if (error) throw error;
-  await logAction('ticket_owner_assigned', id, owner_email ?? '(unassigned)');
+  await logAction('ticket_owner_assigned', id, owner_email ?? '(unassigned)',
+    { entityType: 'ticket', entityId: id });
 }
 
 // Walkthrough #41: defines the support → repair pipeline. Operators flip a
@@ -731,7 +735,8 @@ export async function assignTicketOwner(id: string, owner_email: string | null):
 export async function setTicketCategory(id: string, category: TicketCategory): Promise<void> {
   const { error } = await supabase.from('service_tickets').update({ category }).eq('id', id);
   if (error) throw error;
-  await logAction('ticket_category_changed', id, category);
+  await logAction('ticket_category_changed', id, category,
+    { entityType: 'ticket', entityId: id });
 }
 
 export async function setTicketPriority(id: string, priority: TicketPriority): Promise<void> {
@@ -742,7 +747,8 @@ export async function setTicketPriority(id: string, priority: TicketPriority): P
     .update({ priority, is_manually_overridden: true })
     .eq('id', id);
   if (error) throw error;
-  await logAction('ticket_priority_set', id, priority);
+  await logAction('ticket_priority_set', id, priority,
+    { entityType: 'ticket', entityId: id });
 }
 
 export async function setTicketTopic(id: string, topic: TicketTopic): Promise<void> {
