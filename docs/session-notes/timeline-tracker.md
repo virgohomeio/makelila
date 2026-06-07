@@ -24,13 +24,13 @@ Status: `planned` / `in_flight` / `shipped` / `blocked` / `dropped`.
 | 1 | RBAC profiles + canDo/canView helpers | P1 | S | 5h | **~1.5h** | **shipped** | 2026-06-07 (commits `6cf6f1e` → `5d10e5f`) | Migration + lib + refactor + tests + coordination notes done in a single short session. **Variance: −70%** (3.5h under projection). Why: small surface, well-scoped session-notes spec, no surprises. |
 | 2 | activity_log entity refs + per-serial timeline | P2 | S | 5h | **~1h** | **shipped** | 2026-06-07 (commits `8d7f630` → `7326f64`) | Single migration (no CONCURRENTLY needed at 312 rows), straightforward lib extension, targeted refactor at 12 call sites. **Variance: −80%**. Why: tiny table, no backfill, opt-in pattern keeps blast radius small. |
 | 3 | Bidirectional Linear/GitHub linking | P3 | S | 5h | — | planned | — | Webhook plumbing is the unknown. Both Linear + GitHub need separate auth setup (~1h overhead each). |
-| 4 | Mobile V1 (viewport + PWA + AppShell) | P1 | M | 15h | — | planned | — | Backlog #80. iPhone PWA testing requires physical device → add 1 validation week. |
+| 4 | Mobile V1 (viewport + PWA + AppShell) | P1 | M | 15h | **~2h** | **shipped** | 2026-06-07 (commit `2ebe867`) | Five-file change: viewport-fit=cover + theme-color/apple-mobile-web-app metas, new public/manifest.json (standalone + crimson theme), GlobalNav narrow-aware (700px breakpoint, scroll-snap module strip, 44px touch targets, hover:none color bump), AppShell main padding with env(safe-area-inset-*) + 100dvh, globals.css body safe-area + 44px button floor. **Variance: −87%** (13h under projection). Why: no operator workflow rewiring — pure layout adjustments, no new components, existing CSS Modules architecture absorbed it cleanly. Physical iPhone UAT still TBD; that's the 1-week validation cycle the spec called out. |
 | 5 | Finance module skeleton + JournalPanel (QBO) | P1 | M | 15h | — | planned | — | QBO OAuth2 setup is the front-loaded cost (~2h). Multi-currency edge cases are the validation cost (~2h). |
 | 6 | ProductionProjectionPanel (Finance) | P2 | M | 15h | — | planned | — | Depends on #5 (Finance module shell). Snapshot table + burn-down chart logic. |
 | 7 | SalesProjectionPanel rolling-average | P2 | M | 15h | — | planned | — | Depends on #6 (Finance module shape stabilized). Pipeline-driven variant deferred to P3. |
 | 8 | Mobile V2 (per-module card-row tables) | P2 | L | 45h | — | planned | — | Largest item. Could pair on individual modules — Junaid on Service, Reina on PostShipment, Pedrum on OrderReview — but Huayi owns the CSS strategy + breakpoint logic. |
 
-**Huayi running total:** 2.5h actual / 120h projected · **2 of 8 features shipped (25%)** · variance trending −75% (S items shipping ~80% under).
+**Huayi running total:** 4.5h actual / 120h projected · **3 of 8 features shipped (38%)** · variance trending −80% (first M item came in at −87%, confirming the under-projection pattern extends past S items).
 
 ## Pedrum — 10 features, projected 90h, actual TBD
 
@@ -92,7 +92,7 @@ Compute weekly. Two of the eight Huayi P1+P2 substrate features shipped today; b
 | Size | Projected hours | Actual hours so far | n | Variance | Trend |
 |---|---|---|---|---|---|
 | S | 5h | 1.25h average (2.5h / 2) | 2 | **−75%** | Re-calibrate S → ~3h once n ≥ 5 |
-| M | 15h | — | 0 | — | — |
+| M | 15h | 2h (single sample — Mobile V1) | 1 | **−87%** | Need n ≥ 3 before re-calibrating; if pattern holds, M → ~3–5h |
 | L | 45h | — | 0 | — | — |
 
 **Why S items are running so far under projection:**
