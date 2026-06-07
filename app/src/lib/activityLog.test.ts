@@ -30,7 +30,7 @@ describe('logAction', () => {
     fromMock.mockClear();
   });
 
-  it('inserts row with current user_id, type, entity, detail', async () => {
+  it('inserts row with current user_id, type, entity, detail (entity refs null when omitted)', async () => {
     await logAction('order_approve', 'Test Order', '#ORD-0001');
     expect(fromMock).toHaveBeenCalledWith('activity_log');
     expect(insertMock).toHaveBeenCalledWith({
@@ -38,6 +38,9 @@ describe('logAction', () => {
       type: 'order_approve',
       entity: 'Test Order',
       detail: '#ORD-0001',
+      entity_type: null,
+      entity_id: null,
+      unit_serial: null,
     });
   });
 
@@ -49,5 +52,29 @@ describe('logAction', () => {
   it('throws if no authenticated user', async () => {
     getUserMock.mockResolvedValueOnce({ data: { user: null } });
     await expect(logAction('x', 'y')).rejects.toThrow(/not authenticated/i);
+  });
+
+  it('passes entity refs to the insert when supplied', async () => {
+    await logAction('stock_status', 'LL01-00000000123', 'ready → reserved', {
+      entityType: 'unit',
+      unitSerial: 'LL01-00000000123',
+    });
+    expect(insertMock).toHaveBeenCalledWith(expect.objectContaining({
+      entity_type: 'unit',
+      unit_serial: 'LL01-00000000123',
+      entity_id: null,
+    }));
+  });
+
+  it('passes entity refs for entity_id-keyed events (return / ticket / order)', async () => {
+    await logAction('return_status', 'ret-uuid', '→ received', {
+      entityType: 'return',
+      entityId: 'ret-uuid',
+    });
+    expect(insertMock).toHaveBeenCalledWith(expect.objectContaining({
+      entity_type: 'return',
+      entity_id: 'ret-uuid',
+      unit_serial: null,
+    }));
   });
 });
