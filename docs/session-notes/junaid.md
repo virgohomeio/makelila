@@ -2,7 +2,11 @@
 
 > Reference for Junaid's Claude Code sessions. Owner: Customer Service (Service module) + Stock module work.
 > Read this at session start. Each feature below is a complete shipping brief.
-> Last updated 2026-06-06 (PRD v1.2 / interactive review v1.4.1).
+> Last updated 2026-06-07.
+
+## Recent substrate landings (Huayi)
+
+- **2026-06-07 — RBAC substrate landed** (commits `6cf6f1e` → `5d10e5f`, migration `20260607020000_profiles_role_enum_and_canDo_canView.sql`). `profiles.role` enum is live; `canDo(role, action)` and `canView(role, module)` available from [lib/permissions.ts](../../app/src/lib/permissions.ts); `useAuth()` now exposes `role`. **For your Warranty registration write path:** gate via `canDo(role, 'edit_warranty_registration')` (currently allowed for every operator — symmetric placeholder, tighten if you want manager-only edits). RLS helpers `is_manager()` and `is_finance()` are available for any new table policies you write (e.g. tightening `service_tickets` UPDATE later). Finance role seed is George + Huayi + Julie (yueli@virgohome.io).
 
 ## Quick links
 - PRD: `docs/PRD-2026-06-06.md`
