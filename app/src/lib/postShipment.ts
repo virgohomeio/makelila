@@ -316,7 +316,7 @@ export type RefundApproval = {
 // these move to a profiles.role column, but for 8 named users a simple
 // email list is fine and visible in code review.
 export const MANAGER_EMAILS = ['george@virgohome.io', 'huayi@virgohome.io'];
-export const FINANCE_EMAILS = ['julie@virgohome.io',  'huayi@virgohome.io'];
+export const FINANCE_EMAILS = ['yueli@virgohome.io',  'huayi@virgohome.io'];
 
 export function canApproveManager(email: string | null | undefined): boolean {
   return !!email && MANAGER_EMAILS.includes(email.toLowerCase());

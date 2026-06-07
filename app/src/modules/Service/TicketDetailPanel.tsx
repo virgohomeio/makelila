@@ -19,10 +19,10 @@ import styles from './Service.module.css';
 
 // Backlog #39 — keep in sync with public.team_invite_list. Aaron/Ashwini
 // were removed earlier (left the company); Lezhong + Pedrum added
-// 2026-06-04 matching the invite list. Julie was retired in the same pass —
-// re-add if she rejoins. Long-term this should query the invite list
-// directly instead of hard-coding (see also #72 — central template /
-// config store).
+// 2026-06-04 matching the invite list. Julie rejoined 2026-06-07 under
+// yueli@virgohome.io (her actual account — the prior julie@ guess never
+// existed). Long-term this should query the invite list directly instead
+// of hard-coding (see also #72 — central template / config store).
 const OPS_OWNERS = [
   'george@virgohome.io',
   'huayi@virgohome.io',
@@ -31,6 +31,7 @@ const OPS_OWNERS = [
   'pedrum@virgohome.io',
   'raymond@virgohome.io',
   'reina@virgohome.io',
+  'yueli@virgohome.io',
 ];
 
 type Props = {
