@@ -4,18 +4,22 @@ import {
 import type { Session, User } from '@supabase/supabase-js';
 import { Navigate, useLocation } from 'react-router-dom';
 import { supabase } from './supabase';
+import type { Role } from './permissions';
 
 export function requireInternalDomain(email: string | undefined | null): boolean {
   if (!email) return false;
   return email.toLowerCase().endsWith('@virgohome.io');
 }
 
-type Profile = { id: string; display_name: string; role: string };
+type Profile = { id: string; display_name: string; role: Role };
 
 type AuthState = {
   session: Session | null;
   user: User | null;
   profile: Profile | null;
+  /** Convenience: profile?.role (or null while loading). Pair with
+   *  canDo/canView from lib/permissions.ts. */
+  role: Role | null;
   loading: boolean;
   signInWithGoogle: () => Promise<void>;
   signOut: () => Promise<void>;
@@ -61,6 +65,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     session,
     user: session?.user ?? null,
     profile,
+    role: profile?.role ?? null,
     loading,
     signInWithGoogle: async () => {
       await supabase.auth.signInWithOAuth({
