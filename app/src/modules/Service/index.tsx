@@ -3,6 +3,8 @@ import { InboxTab } from './InboxTab';
 import { OnboardingTab } from './OnboardingTab';
 import { SupportTab } from './SupportTab';
 import ReplacementTab from './ReplacementTab';
+import { useIsMobile } from '../../lib/useMediaQuery';
+import { MobileTabbedModule, type MobileTab } from '../../components/MobileTabbedModule';
 import styles from './Service.module.css';
 
 type Tab = 'inbox' | 'onboarding' | 'support' | 'replacement';
@@ -14,8 +16,36 @@ const TABS: { key: Tab; label: string }[] = [
   { key: 'replacement', label: 'Replacement' },
 ];
 
+// Mobile-specific tab metadata. Subtitle + icon make each card scannable
+// without drilling in; lined up against `TABS` above by .key.
+const MOBILE_TAB_META: Record<Tab, { subtitle: string; icon: string; iconBg: string }> = {
+  inbox:       { subtitle: 'Untriaged Quo + email conversations',         icon: '📥', iconBg: '#fff3e0' },
+  onboarding:  { subtitle: 'Customers in their first 30 days',            icon: '🚀', iconBg: '#e6f4ea' },
+  support:     { subtitle: 'Open tickets needing follow-up or reply',     icon: '🎫', iconBg: '#fef1f0' },
+  replacement: { subtitle: 'Warranty replacements + parts queue',         icon: '🔁', iconBg: '#fef1f0' },
+};
+
 export default function Service() {
   const [tab, setTab] = useState<Tab>('inbox');
+  const isMobile = useIsMobile();
+
+  if (isMobile) {
+    const mobileTabs: MobileTab<Tab>[] = TABS.map(t => ({
+      key: t.key,
+      label: t.label,
+      ...MOBILE_TAB_META[t.key],
+      content:
+        t.key === 'inbox'       ? <InboxTab /> :
+        t.key === 'onboarding'  ? <OnboardingTab /> :
+        t.key === 'support'     ? <SupportTab /> :
+                                  <ReplacementTab />,
+    }));
+    return (
+      <div className={styles.layout}>
+        <MobileTabbedModule tabs={mobileTabs} />
+      </div>
+    );
+  }
 
   return (
     <div className={styles.layout}>
