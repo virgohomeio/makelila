@@ -28,7 +28,7 @@ vi.mock('./activityLog', () => ({
   logAction: logActionMock,
 }));
 
-import { disposition, needInfo, nextReplacementOrderRef, createReplacementOrder, markOrderShipped, markOrderDelivered } from './orders';
+import { disposition, needInfo, nextReplacementOrderRef, createReplacementOrder, createPendingReplacement, hasPendingLine, markOrderShipped, markOrderDelivered } from './orders';
 
 describe('disposition', () => {
   beforeEach(() => {
@@ -161,6 +161,7 @@ describe('createReplacementOrder', () => {
     expect(insertArg.order_ref).toBe('R-0007');
     expect(insertArg.linked_ticket_id).toBe('t1');
     expect(insertArg.cogs_usd).toBeCloseTo(4.2 * 2 + 312, 2);
+    expect(insertArg.replacement_state).toBe('ready');
     expect(ticketUpdate).toHaveBeenCalled();
     expect(rpcMock).toHaveBeenCalledWith('decrement_part_on_hand', { p_part_id: 'p1', p_qty: 2 });
     expect(unitsUpdate).toHaveBeenCalled();
@@ -170,6 +171,75 @@ describe('createReplacementOrder', () => {
     await expect(createReplacementOrder({
       ticket_id: 't1',
       customer_name: 'X',
+      address: { address_line: null, city: '', region_state: null, country: 'CA', postal_code: null },
+      line_items: [],
+    })).rejects.toThrow(/at least one line item/i);
+  });
+});
+
+describe('hasPendingLine', () => {
+  it('is true when any line is part_pending or unit_pending', () => {
+    expect(hasPendingLine([{ kind: 'unit_pending', batch: 'P100X', name: 'P100X', qty: 1, cost_usd: 314 }])).toBe(true);
+    expect(hasPendingLine([
+      { kind: 'part', part_id: 'p1', sku: 'S', name: 'N', qty: 1, cost_per_unit_usd: 1 },
+      { kind: 'part_pending', part_id: 'p2', sku: 'S2', name: 'N2', qty: 1, cost_per_unit_usd: 2 },
+    ])).toBe(true);
+  });
+  it('is false when every line is in stock / ready', () => {
+    expect(hasPendingLine([
+      { kind: 'part', part_id: 'p1', sku: 'S', name: 'N', qty: 1, cost_per_unit_usd: 1 },
+      { kind: 'unit', unit_serial: 'LL01-1', batch: 'P100', name: 'U', qty: 1, cost_usd: 300 },
+    ])).toBe(false);
+  });
+});
+
+describe('createPendingReplacement', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('creates an awaiting order WITHOUT decrementing stock or reserving units', async () => {
+    rpcMock.mockImplementation((name: string) =>
+      name === 'next_replacement_order_ref'
+        ? Promise.resolve({ data: 'R-0050', error: null })
+        : Promise.resolve({ data: null, error: { message: `unexpected rpc ${name}` } }));
+    const insertSingle = vi.fn().mockResolvedValue({ data: { id: 'o9', order_ref: 'R-0050' }, error: null });
+    const insert = vi.fn().mockReturnValue({ select: vi.fn().mockReturnValue({ single: insertSingle }) });
+    const ticketUpdateFn = vi.fn().mockReturnValue({ eq: vi.fn().mockResolvedValue({ error: null }) });
+    const unitsUpdate = vi.fn().mockReturnValue({ eq: vi.fn().mockResolvedValue({ error: null }) });
+
+    fromMock.mockImplementation(((table: string) => {
+      if (table === 'orders') return { insert };
+      if (table === 'service_tickets') return { update: ticketUpdateFn };
+      if (table === 'units') return { update: unitsUpdate };
+      throw new Error(`unexpected table ${table}`);
+    }) as any);
+    logActionMock.mockResolvedValue(undefined);
+
+    const result = await createPendingReplacement({
+      ticket_id: 't1',
+      customer_name: 'Pat Pending',
+      address: { address_line: '1 A St', city: 'Toronto', region_state: 'ON', country: 'CA', postal_code: 'M1M 1M1' },
+      line_items: [
+        { kind: 'unit_pending', batch: 'P100X', name: 'LILA (P100X)', qty: 1, cost_usd: 314 },
+        { kind: 'part_pending', part_id: 'p2', sku: 'LILA-HOPPER', name: 'Hopper', qty: 1, cost_per_unit_usd: 12 },
+      ],
+    });
+
+    expect(result.order_ref).toBe('R-0050');
+    const insertArg = insert.mock.calls[0][0];
+    expect(insertArg.replacement_state).toBe('awaiting');
+    expect(insertArg.awaiting_batch_id).toBe('P100X');
+    // Ticket gets queued_for_replacement.
+    expect(ticketUpdateFn).toHaveBeenCalledWith(expect.objectContaining({
+      replacement_order_id: 'o9', status: 'queued_for_replacement',
+    }));
+    // Crucially: NO stock decrement and NO unit reservation for a pending order.
+    expect(rpcMock).not.toHaveBeenCalledWith('decrement_part_on_hand', expect.anything());
+    expect(unitsUpdate).not.toHaveBeenCalled();
+  });
+
+  it('throws when line_items is empty', async () => {
+    await expect(createPendingReplacement({
+      ticket_id: 't1', customer_name: 'X',
       address: { address_line: null, city: '', region_state: null, country: 'CA', postal_code: null },
       line_items: [],
     })).rejects.toThrow(/at least one line item/i);

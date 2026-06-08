@@ -1,7 +1,10 @@
 import { useMemo, useState } from 'react';
 import { useParts } from '../../lib/parts';
 import { useBatches, useUnits } from '../../lib/stock';
-import { createReplacementOrder, type ReplacementLineItem } from '../../lib/orders';
+import {
+  createReplacementOrder, createPendingReplacement, hasPendingLine,
+  type ReplacementLineItem,
+} from '../../lib/orders';
 import styles from './Service.module.css';
 
 // Backlog #64 — fallback when batches.unit_cost_usd is null (cost not
@@ -35,57 +38,71 @@ export default function ReplacementPickerModal({ ticket, address, onClose, onCre
   const { parts, loading: partsLoading } = useParts();
   const { units, loading: unitsLoading } = useUnits();
   const { batches } = useBatches();
-  // Backlog #64 — resolve per-unit landed cost from batches.unit_cost_usd
-  // instead of hard-coding. Falls back to a global default when the batch
-  // has no cost recorded yet (e.g. P100X is still in production).
   const batchCost = useMemo(() => {
     const m = new Map<string, number | null>();
     for (const b of batches) m.set(b.id, b.unit_cost_usd);
     return m;
   }, [batches]);
   const [cart, setCart] = useState<CartLine[]>([]);
-  // addr is seeded from the prop once. Callers must unmount-and-remount the
-  // modal (e.g., {open && <Modal />}) if they change the address — otherwise
-  // the operator's edits would be silently overwritten.
   const [addr, setAddr] = useState(address);
   const [search, setSearch] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const availableParts = useMemo(
+  const matches = (s: string) => search === '' || s.toLowerCase().includes(search.toLowerCase());
+
+  // Section 1 — replacement parts in stock.
+  const partsInStock = useMemo(
     () => parts.filter(p => p.category === 'replacement' && p.on_hand > 0
-      && (search === ''
-          || p.name.toLowerCase().includes(search.toLowerCase())
-          || p.sku.toLowerCase().includes(search.toLowerCase()))),
+      && (matches(p.name) || matches(p.sku))),
     [parts, search],
   );
+  // Section 3 — replacement parts we're out of (on_hand = 0).
+  const partsOutOfStock = useMemo(
+    () => parts.filter(p => p.category === 'replacement' && p.on_hand <= 0
+      && (matches(p.name) || matches(p.sku))),
+    [parts, search],
+  );
+  // Section 2 — ready units.
   const cartUnitSerials = useMemo(
     () => new Set(cart.filter(l => l.kind === 'unit').map(l => (l as Extract<CartLine, { kind: 'unit' }>).unit_serial)),
     [cart],
   );
-  const availableUnits = useMemo(
+  const unitsReady = useMemo(
     () => units.filter(u => u.status === 'ready'
-      && (search === ''
-          || u.serial.toLowerCase().includes(search.toLowerCase())
-          || u.batch.toLowerCase().includes(search.toLowerCase())
-          || (u.color ?? '').toLowerCase().includes(search.toLowerCase()))),
+      && (matches(u.serial) || matches(u.batch) || matches(u.color ?? ''))),
     [units, search],
+  );
+  // Section 4 — pending batches: batches not yet arrived (P100X + future).
+  const cartPendingBatches = useMemo(
+    () => new Set(cart.filter(l => l.kind === 'unit_pending').map(l => (l as Extract<CartLine, { kind: 'unit_pending' }>).batch)),
+    [cart],
+  );
+  const pendingBatches = useMemo(
+    () => batches.filter(b => b.arrived_at == null && matches(b.id)),
+    [batches, search],
   );
 
   const cogs = cart.reduce((sum, li) =>
-    li.kind === 'part' ? sum + li.cost_per_unit_usd * li.qty : sum + li.cost_usd, 0);
+    (li.kind === 'part' || li.kind === 'part_pending')
+      ? sum + li.cost_per_unit_usd * li.qty
+      : sum + li.cost_usd, 0);
 
-  function addPart(p: typeof parts[number]) {
+  const pending = hasPendingLine(cart);
+
+  function addPart(p: typeof parts[number], kind: 'part' | 'part_pending') {
     setCart(prev => {
-      const existing = prev.findIndex(l => l.kind === 'part' && l.part_id === p.id);
+      const existing = prev.findIndex(l => (l.kind === 'part' || l.kind === 'part_pending') && l.part_id === p.id);
       if (existing >= 0) {
         const next = [...prev];
-        const cur = next[existing] as Extract<CartLine, { kind: 'part' }>;
-        next[existing] = { ...cur, qty: Math.min(p.on_hand, cur.qty + 1) };
+        const cur = next[existing] as Extract<CartLine, { kind: 'part' | 'part_pending' }>;
+        // In-stock parts cap at on_hand; out-of-stock pending parts have no cap.
+        const cap = kind === 'part' ? p.on_hand : Infinity;
+        next[existing] = { ...cur, qty: Math.min(cap, cur.qty + 1) };
         return next;
       }
       return [...prev, {
-        kind: 'part', part_id: p.id, sku: p.sku, name: p.name,
+        kind, part_id: p.id, sku: p.sku, name: p.name,
         qty: 1, cost_per_unit_usd: p.cost_per_unit_usd ?? 0,
       }];
     });
@@ -102,12 +119,22 @@ export default function ReplacementPickerModal({ ticket, address, onClose, onCre
     });
   }
 
+  function addPendingBatch(b: typeof batches[number]) {
+    setCart(prev => {
+      if (prev.some(l => l.kind === 'unit_pending' && l.batch === b.id)) return prev;
+      const cost = batchCost.get(b.id) ?? FALLBACK_UNIT_COST_USD;
+      return [...prev, {
+        kind: 'unit_pending', batch: b.id, name: `LILA (${b.id}, awaiting batch)`, qty: 1, cost_usd: cost,
+      }];
+    });
+  }
+
   function setQty(idx: number, qty: number) {
     setCart(prev => {
       const next = [...prev];
       const li = next[idx];
-      if (li.kind !== 'part') return prev;
-      const cap = parts.find(p => p.id === li.part_id)?.on_hand ?? li.qty;
+      if (li.kind !== 'part' && li.kind !== 'part_pending') return prev;
+      const cap = li.kind === 'part' ? (parts.find(p => p.id === li.part_id)?.on_hand ?? li.qty) : Infinity;
       next[idx] = { ...li, qty: Math.max(1, Math.min(cap, qty)) };
       return next;
     });
@@ -121,14 +148,17 @@ export default function ReplacementPickerModal({ ticket, address, onClose, onCre
     if (cart.length === 0) { setError('Pick at least one item.'); return; }
     setBusy(true); setError(null);
     try {
-      const result = await createReplacementOrder({
+      const payload = {
         ticket_id: ticket.id,
         customer_name: ticket.customer_name ?? 'Unknown',
         customer_email: ticket.customer_email,
         customer_phone: ticket.customer_phone,
         address: addr,
         line_items: cart,
-      });
+      };
+      const result = pending
+        ? await createPendingReplacement(payload)
+        : await createReplacementOrder(payload);
       onCreated(result);
     } catch (e) {
       setError((e as Error).message);
@@ -138,7 +168,6 @@ export default function ReplacementPickerModal({ ticket, address, onClose, onCre
 
   return (
     <div className={styles.modalBackdrop} onClick={() => {
-      // Guard against losing cart contents on accidental backdrop clicks.
       if (cart.length > 0) {
         if (!window.confirm('Discard the replacement order in progress?')) return;
       }
@@ -176,7 +205,7 @@ export default function ReplacementPickerModal({ ticket, address, onClose, onCre
           </section>
 
           <input className={styles.modalInput}
-            placeholder="Search parts or units…"
+            placeholder="Search parts, units, or batches…"
             value={search}
             onChange={e => setSearch(e.target.value)} />
 
@@ -184,17 +213,17 @@ export default function ReplacementPickerModal({ ticket, address, onClose, onCre
             {(partsLoading || unitsLoading) && (
               <p style={{ padding: '8px 12px', color: '#888' }}>Loading inventory…</p>
             )}
-            {availableParts.length > 0 && <h4 className={styles.rpPickerHeading}>Parts</h4>}
-            {availableParts.map(p => (
-              <button key={p.id} className={styles.rpPickerRow} onClick={() => addPart(p)}>
+
+            {partsInStock.length > 0 && <h4 className={styles.rpPickerHeading}>Parts (In Stock)</h4>}
+            {partsInStock.map(p => (
+              <button key={`is-${p.id}`} className={styles.rpPickerRow} onClick={() => addPart(p, 'part')}>
                 <span>{p.name}</span>
-                <span className={styles.rpPickerMeta}>
-                  {p.on_hand} on hand · ${(p.cost_per_unit_usd ?? 0).toFixed(2)}
-                </span>
+                <span className={styles.rpPickerMeta}>{p.on_hand} on hand · ${(p.cost_per_unit_usd ?? 0).toFixed(2)}</span>
               </button>
             ))}
-            {availableUnits.length > 0 && <h4 className={styles.rpPickerHeading}>Replacement Unit</h4>}
-            {availableUnits.map(u => {
+
+            {unitsReady.length > 0 && <h4 className={styles.rpPickerHeading}>Replacement Units Available</h4>}
+            {unitsReady.map(u => {
               const inCart = cartUnitSerials.has(u.serial);
               return (
                 <button key={u.serial} className={styles.rpPickerRow} onClick={() => addUnit(u)} disabled={inCart}>
@@ -203,30 +232,64 @@ export default function ReplacementPickerModal({ ticket, address, onClose, onCre
                 </button>
               );
             })}
+
+            {partsOutOfStock.length > 0 && <h4 className={styles.rpPickerHeading}>Parts (Out of Stock)</h4>}
+            {partsOutOfStock.map(p => (
+              <button key={`oos-${p.id}`} className={styles.rpPickerRow} onClick={() => addPart(p, 'part_pending')}>
+                <span>{p.name}</span>
+                <span className={styles.rpPickerMeta}>0 on hand · pending</span>
+              </button>
+            ))}
+
+            {pendingBatches.length > 0 && <h4 className={styles.rpPickerHeading}>Pending Batch</h4>}
+            {pendingBatches.map(b => {
+              const inCart = cartPendingBatches.has(b.id);
+              return (
+                <button key={`pb-${b.id}`} className={styles.rpPickerRow} onClick={() => addPendingBatch(b)} disabled={inCart}>
+                  <span>{b.id}{inCart ? ' ✓' : ''}</span>
+                  <span className={styles.rpPickerMeta}>awaiting batch{b.arrived_at ? '' : ' · not arrived'}</span>
+                </button>
+              );
+            })}
           </div>
 
           <ul className={styles.rpCartList}>
-            {cart.map((li, i) => (
-              <li key={li.kind === 'part' ? `p-${li.part_id}` : `u-${li.unit_serial}`}>
-                {li.kind === 'part' ? (
-                  <>
-                    <span>{li.qty}× {li.name}</span>
-                    <span>${(li.cost_per_unit_usd * li.qty).toFixed(2)}</span>
-                    <button aria-label={`Decrease ${li.name} qty`} onClick={() => setQty(i, li.qty - 1)}>−</button>
-                    <button aria-label={`Increase ${li.name} qty`} onClick={() => setQty(i, li.qty + 1)}>+</button>
-                  </>
-                ) : (
-                  <>
-                    <span>{li.unit_serial}</span>
-                    <span>${li.cost_usd.toFixed(2)}</span>
-                  </>
-                )}
-                <button aria-label="Remove line" onClick={() => removeLine(i)}>✕</button>
-              </li>
-            ))}
+            {cart.map((li, i) => {
+              const isPartLike = li.kind === 'part' || li.kind === 'part_pending';
+              const pendingTag = (li.kind === 'part_pending' || li.kind === 'unit_pending') ? ' (pending)' : '';
+              return (
+                <li key={
+                  li.kind === 'part' || li.kind === 'part_pending' ? `p-${li.part_id}`
+                  : li.kind === 'unit' ? `u-${li.unit_serial}`
+                  : `pb-${li.batch}`
+                }>
+                  {isPartLike ? (
+                    <>
+                      <span>{(li as Extract<CartLine, { kind: 'part' | 'part_pending' }>).qty}× {li.name}{pendingTag}</span>
+                      <span>${((li as Extract<CartLine, { kind: 'part' | 'part_pending' }>).cost_per_unit_usd * (li as Extract<CartLine, { kind: 'part' | 'part_pending' }>).qty).toFixed(2)}</span>
+                      <button aria-label={`Decrease ${li.name} qty`} onClick={() => setQty(i, (li as Extract<CartLine, { kind: 'part' | 'part_pending' }>).qty - 1)}>−</button>
+                      <button aria-label={`Increase ${li.name} qty`} onClick={() => setQty(i, (li as Extract<CartLine, { kind: 'part' | 'part_pending' }>).qty + 1)}>+</button>
+                    </>
+                  ) : (
+                    <>
+                      <span>{li.kind === 'unit' ? li.unit_serial : li.name}{pendingTag}</span>
+                      <span>${(li as Extract<CartLine, { kind: 'unit' | 'unit_pending' }>).cost_usd.toFixed(2)}</span>
+                    </>
+                  )}
+                  <button aria-label="Remove line" onClick={() => removeLine(i)}>✕</button>
+                </li>
+              );
+            })}
           </ul>
 
           <div className={styles.rpCogs}>COGS total: ${cogs.toFixed(2)}</div>
+
+          {pending && cart.length > 0 && (
+            <p className={styles.rpPickerMeta} style={{ padding: '0 12px' }}>
+              Cart has out-of-stock / pending-batch items — this will create a <strong>pending</strong> replacement
+              under Awaiting Stock / Batch.
+            </p>
+          )}
 
           {error && <p className={styles.modalError}>{error}</p>}
         </div>
@@ -234,7 +297,7 @@ export default function ReplacementPickerModal({ ticket, address, onClose, onCre
         <footer className={styles.modalFoot}>
           <button className={styles.modalSecondary} onClick={onClose} disabled={busy}>Cancel</button>
           <button className={styles.modalPrimary} onClick={confirm} disabled={busy || cart.length === 0}>
-            {busy ? 'Creating…' : 'Create replacement order'}
+            {busy ? 'Creating…' : pending ? 'Create pending replacement' : 'Create replacement order'}
           </button>
         </footer>
       </div>

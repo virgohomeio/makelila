@@ -38,6 +38,11 @@ export type Order = {
   // in the Replacement tab under "Awaiting batch" with the batch's
   // expected arrival.
   awaiting_batch_id: string | null;
+  // Replacement tagging + pending replacements (spec 2026-06-08). 'ready' =
+  // every line item is in stock / a unit is ready; 'awaiting' = blocked on an
+  // out-of-stock part or a pending unit batch. Drives the Ready / Awaiting
+  // Stock-Batch split in Order Review > Replacement. Null for non-replacement.
+  replacement_state: 'ready' | 'awaiting' | null;
   cogs_usd: number | null;
   shipping_cost_usd: number | null;
   shipped_at: string | null;
@@ -453,7 +458,19 @@ export async function nextReplacementOrderRef(): Promise<string> {
 
 export type ReplacementLineItem =
   | { kind: 'part'; part_id: string; sku: string; name: string; qty: number; cost_per_unit_usd: number }
-  | { kind: 'unit'; unit_serial: string; batch: string; name: string; qty: 1; cost_usd: number };
+  // Out-of-stock part (on_hand = 0 at selection). Same shape as 'part' but does
+  // NOT decrement stock — the order is created as 'awaiting'.
+  | { kind: 'part_pending'; part_id: string; sku: string; name: string; qty: number; cost_per_unit_usd: number }
+  | { kind: 'unit'; unit_serial: string; batch: string; name: string; qty: 1; cost_usd: number }
+  // Unit from a batch with no ready stock yet (e.g. P100X in production). No
+  // serial assigned; sets awaiting_batch_id; does NOT reserve a unit.
+  | { kind: 'unit_pending'; batch: string; name: string; qty: 1; cost_usd: number };
+
+/** True if any line is unfulfillable now (out-of-stock part or pending batch),
+ *  which means the order must be created as 'awaiting' rather than 'ready'. */
+export function hasPendingLine(items: ReplacementLineItem[]): boolean {
+  return items.some(li => li.kind === 'part_pending' || li.kind === 'unit_pending');
+}
 
 export type ReplacementOrderInput = {
   ticket_id: string;
@@ -472,8 +489,8 @@ export type ReplacementOrderInput = {
 
 function computeCogs(items: ReplacementLineItem[]): number {
   return items.reduce((sum, li) => {
-    if (li.kind === 'part') return sum + li.cost_per_unit_usd * li.qty;
-    return sum + li.cost_usd;
+    if (li.kind === 'part' || li.kind === 'part_pending') return sum + li.cost_per_unit_usd * li.qty;
+    return sum + li.cost_usd; // unit | unit_pending
   }, 0);
 }
 
@@ -524,6 +541,7 @@ export async function createReplacementOrder(input: ReplacementOrderInput):
       order_ref,
       kind: 'replacement',
       status: 'pending',
+      replacement_state: 'ready',
       linked_ticket_id: input.ticket_id,
       cogs_usd,
       customer_name: input.customer_name,
@@ -542,10 +560,11 @@ export async function createReplacementOrder(input: ReplacementOrderInput):
     .single();
   if (insErr || !row) throw new Error(`Create order: ${insErr?.message ?? 'no row'}`);
 
-  // 2. Back-link the ticket.
+  // 2. Back-link the ticket and mark it queued_for_replacement so it surfaces
+  //    with that status in Support Tickets while the replacement is in flight.
   const { error: tErr } = await supabase
     .from('service_tickets')
-    .update({ replacement_order_id: row.id })
+    .update({ replacement_order_id: row.id, status: 'queued_for_replacement' })
     .eq('id', input.ticket_id);
   if (tErr) throw new Error(`Link ticket: ${tErr.message}`);
 
@@ -576,6 +595,64 @@ export async function createReplacementOrder(input: ReplacementOrderInput):
     'replacement_create',
     row.order_ref,
     `from ticket ${input.ticket_id} · ${input.line_items.length} items · COGS $${cogs_usd.toFixed(2)}`,
+  );
+  return { id: row.id, order_ref: row.order_ref };
+}
+
+/** Creates a PENDING replacement (replacement_state='awaiting') for a cart that
+ *  contains at least one out-of-stock part or pending-batch unit. Unlike
+ *  createReplacementOrder this does NOT decrement parts or reserve units — the
+ *  order is waiting on stock/batch and gets fulfilled (and stock consumed) when
+ *  it's promoted to 'ready' later. Sets awaiting_batch_id from the first
+ *  pending-batch unit so the Replacement queue groups it (backlog #71). Lands
+ *  in Order Review > Replacement > "Awaiting Stock / Batch". */
+export async function createPendingReplacement(input: ReplacementOrderInput):
+  Promise<{ id: string; order_ref: string }> {
+  if (input.line_items.length === 0) throw new Error('At least one line item required');
+  const order_ref = await nextReplacementOrderRef();
+  const cogs_usd = computeCogs(input.line_items);
+  const pendingBatch = input.line_items.find(
+    (li): li is Extract<ReplacementLineItem, { kind: 'unit_pending' }> => li.kind === 'unit_pending',
+  );
+
+  const { data: row, error: insErr } = await supabase
+    .from('orders')
+    .insert({
+      order_ref,
+      kind: 'replacement',
+      status: 'pending',
+      replacement_state: 'awaiting',
+      awaiting_batch_id: pendingBatch?.batch ?? null,
+      linked_ticket_id: input.ticket_id,
+      cogs_usd,
+      customer_name: input.customer_name,
+      customer_email: input.customer_email ?? null,
+      customer_phone: input.customer_phone ?? null,
+      address_line: input.address.address_line,
+      city: input.address.city,
+      region_state: input.address.region_state,
+      country: input.address.country,
+      postal_code: input.address.postal_code,
+      address_customer_postal: input.address.postal_code,
+      ...REPLACEMENT_ORDER_DEFAULTS,
+      line_items: input.line_items,
+    })
+    .select('id, order_ref')
+    .single();
+  if (insErr || !row) throw new Error(`Create pending replacement: ${insErr?.message ?? 'no row'}`);
+
+  // Back-link + queue the ticket. No stock decrement / unit reservation —
+  // the order is awaiting stock/batch and consumes nothing until promoted.
+  const { error: tErr } = await supabase
+    .from('service_tickets')
+    .update({ replacement_order_id: row.id, status: 'queued_for_replacement' })
+    .eq('id', input.ticket_id);
+  if (tErr) throw new Error(`Link ticket: ${tErr.message}`);
+
+  await logAction(
+    'replacement_create',
+    row.order_ref,
+    `PENDING from ticket ${input.ticket_id} · ${input.line_items.length} items · awaiting ${pendingBatch?.batch ?? 'stock'}`,
   );
   return { id: row.id, order_ref: row.order_ref };
 }
