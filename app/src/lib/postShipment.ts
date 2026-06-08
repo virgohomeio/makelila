@@ -48,6 +48,37 @@ export const RETURN_CATEGORIES: ReturnCategory[] = [
   'customer_service','financing','other',
 ];
 
+// Responsible-team accountability mapping (PostShipment dashboard, George's
+// ask). Derived from return_category — no separate column. A return with no
+// category counts toward 'Unassigned' alongside the 'other' category.
+export const CATEGORY_TEAM: Record<ReturnCategory, string> = {
+  product_defect:   'Engineering',
+  software_issue:   'Software',
+  shipping_damage:  'Logistics',
+  customer_service: 'Customer Service',
+  financing:        'Finance',
+  other:            'Unassigned',
+};
+
+export const RETURN_TEAMS: string[] = [
+  'Engineering', 'Software', 'Logistics', 'Customer Service', 'Finance', 'Unassigned',
+];
+
+/** Counts returns per responsible team, ordered by RETURN_TEAMS, dropping
+ *  teams with zero returns. Null/unknown category → 'Unassigned'. */
+export function returnTeamCounts(
+  rows: Array<Pick<ReturnRow, 'return_category'>>,
+): Array<{ label: string; value: number }> {
+  const counts: Record<string, number> = {};
+  for (const r of rows) {
+    const team = r.return_category ? CATEGORY_TEAM[r.return_category] : 'Unassigned';
+    counts[team] = (counts[team] ?? 0) + 1;
+  }
+  return RETURN_TEAMS
+    .filter(t => (counts[t] ?? 0) > 0)
+    .map(t => ({ label: t, value: counts[t] }));
+}
+
 export type ReturnRow = {
   id: string;
   return_ref: string | null;
