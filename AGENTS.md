@@ -2,6 +2,22 @@
 
 Internal fulfillment management app for VCycene / LILA Composter.
 
+This file is the single source of truth for "how to work in this repo" for ALL AI coding agents (Claude Code, Cursor, Codex, Gemini CLI, etc.). `CLAUDE.md` exists for tooling that looks for that filename and points to this file.
+
+## Session notes — READ THIS FIRST when shipping a feature
+
+Each of the four current shippers has a dedicated session-notes file at [docs/session-notes/](docs/session-notes/) covering all features assigned to them with goal / work / validation / watch-outs / files-to-load for each. At session start:
+
+1. Identify the operator (`git config user.email` or first user message).
+2. Read the matching file:
+   - **Pedrum** (Sales + Pre-sale) → [docs/session-notes/pedrum.md](docs/session-notes/pedrum.md)
+   - **Junaid** (Customer Service + Stock) → [docs/session-notes/junaid.md](docs/session-notes/junaid.md)
+   - **Reina** (Customer Service) → [docs/session-notes/reina.md](docs/session-notes/reina.md)
+   - **Huayi** (cross-cutting + Finance + Mobile) → [docs/session-notes/huayi.md](docs/session-notes/huayi.md)
+3. For the specific feature being shipped, follow its brief — file paths, schema, validation steps, and watch-outs are all there.
+
+Index + structure: [docs/session-notes/README.md](docs/session-notes/README.md). Interactive review of the full PRD + per-shipper swimlane: open [makelila_PRD_review.html](makelila_PRD_review.html) in a browser.
+
 ## Tech Stack
 
 - **Frontend:** React 18 + TypeScript, Vite, React Router DOM
