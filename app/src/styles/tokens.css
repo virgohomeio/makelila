@@ -45,12 +45,11 @@
   --color-dark-2: #232323;
   --color-dark-3: #2a2a2a;
 
-  /* Typography — UI now uses Brolink as the primary face (operator request
-     2026-06-07) with Inter retained as a safe fallback while the woff2 loads
-     and as the system fallback chain for environments where Brolink hasn't
-     resolved yet. --font-logo continues to point at Brolink for the wordmark
-     uses elsewhere in the codebase. */
-  --font-sans: 'Brolink DEMO', 'Brolink', 'Inter', -apple-system, BlinkMacSystemFont,
+  /* Typography — Inter for UI/body. Brolink is reserved for the "makelila"
+     wordmark only (logo use), per operator instruction 2026-06-07 after a
+     brief experiment with Brolink across the UI. --font-logo is the only
+     token that points at Brolink. */
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont,
                'SF Pro Display', 'SF Pro Text', 'Helvetica Neue', sans-serif;
   --font-logo: 'Brolink DEMO', 'Brolink', 'Inter', sans-serif;
 
