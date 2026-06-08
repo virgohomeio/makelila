@@ -582,6 +582,53 @@ Alpha feedback collection window is **closed**. The 11 items above plus the meet
   **Why now:** the longer we wait, the more code paths get written against the fuzzy join. Doing the FK + backfill now is a small migration; redoing five tabs later is a bigger one.
   **Likely touch:** SQL migration (column + FK + backfill); `lib/stock.ts` Unit type; `lib/dashboard.ts` `customerForSerial` to prefer `customer_id`; `Fulfillment/queue/StepAssign.tsx` (or wherever assignment writes the unit) to populate the FK; reviews of every `units.customer_name` reader for migration.
 
+---
+
+## CJM signals — Jun 2026
+
+> Source: customer journey analysis grounded in live Gmail signals (Jotform return forms, Fireflies call recaps, Zipchat AI inquiry log, Calendly booking patterns). Surfaced 2026-06-07.
+
+- **#83** Fill Zipchat AI's 15 unanswered customer questions (operational — no code).
+  **Source:** Zipchat dashboard notification (2026-06-07). 15 unresolved questions in "Pending Corrections" as of Jun 1.
+  **Description:** Go to app.zipchat.ai → LILA AI → Training → Pending Corrections and answer every open question. Confirmed gaps: country of manufacture, official phone support hours (365-825-3070), and compost output mass per full 22L chamber. Answering all 15 stops customers from hitting dead ends on the chatbot and reduces inbound DMs/tickets for questions the AI should handle.
+  **Owner:** Huayi / Edward (product facts); Reina (copy review). **Effort:** ~30 min operational, no code.
+
+- **#84** Post-order address confirmation email — prevent Phayvanh-type returns.
+  **Source:** CJM analysis 2026-06-07 — Phayvanh's return (#1110) was caused entirely by Shopify defaulting the wrong shipping address at checkout with no recovery path.
+  **Description:** When `sync-shopify-orders` pulls in a new order, trigger a `send-template-email` call within 1 hour of order placement with a new `address_confirmation` template. The email shows the address on file and two CTAs: "This is correct ✓" (no-op, logs confirmed timestamp to `orders.address_confirmed_at`) and "I need to change this →" (links to `support@virgohome.io` or a short Jotform). Fires before the fulfillment queue picks up the order. If `address_confirmed_at` is null after 48h, surface a yellow badge "Address unconfirmed" on the OrderReview card.
+  **Likely touch:** `supabase/functions/sync-shopify-orders/index.ts` (call `send-template-email` post-upsert); new `address_confirmation` template row; `orders` migration adding `address_confirmed_at TIMESTAMPTZ`; OrderReview address card badge.
+
+- **#85** Shipping exception → proactive customer notification.
+  **Source:** CJM analysis 2026-06-07 — Phayvanh: "UPS is slow to respond." Customers left to chase carriers alone when a shipment hits Exception status.
+  **Description:** In the Freightcom/ClickShip tracking poll, when a shipment's `status` changes to `exception`, immediately trigger `send-template-email` with a new `shipping_exception` template. Copy: "We noticed a delivery delay on your LILA order. Here's what we know: {carrier_last_event}. Our team is on it — you don't need to contact the carrier yourself." Stamp `fulfillment_queue.exception_notified_at` for dedupe (fires once per exception episode).
+  **Likely touch:** the edge function that polls carrier tracking; new `shipping_exception` template row; `fulfillment_queue` migration adding `exception_notified_at TIMESTAMPTZ`.
+
+- **#86** Pre-call primer document + Calendly call routing to Reina (process, no code).
+  **Source:** CJM analysis 2026-06-07 — onboarding calls running 45–52 questions because customers arrive cold; Edward's calendar is the only booking option.
+  **Description:** Two process changes:
+    1. **Pre-call primer document.** Write a 1-page "Before your LILA Pro onboarding" doc (Notion or PDF): what LILA Pro composes (and doesn't — no citrus, no meat), realistic first-cycle timeline (2–3 weeks per chamber), what "moist" means in the chamber, the 3 things to check if it smells. Attach to the Calendly booking confirmation email 24h before the call.
+    2. **Add Reina's Calendly event type.** Create "LILA Pro Onboarding with Reina (CS)" alongside Edward's. Update the fulfillment step-5 email template's booking link to default to Reina's calendar; reserve the Edward link for B2B or escalation cases.
+  **Owner:** Reina (write the primer); Huayi (update booking link + Calendly setup). **Effort:** ~2h, no code.
+
+- **#87** Post-call follow-up email template — close the 48-hour drop-off after onboarding.
+  **Source:** CJM analysis 2026-06-07 — Fireflies recaps show calls end with a verbal summary only; customers have no written reference for the first 48h when they need it most.
+  **Description:** 1 hour after an onboarding call ends (based on `service_tickets.onboarding_completed_at`), trigger `send-template-email` with a new `post_onboarding_followup` template. Content: "Here's what we covered: {call_summary_bullets}" — three points (first food load, when to expect the first batch, moisture check). Until Fireflies API integration is built, the summary bullets are a static editable block; show a "Review and send" modal in the Service Onboarding tab before sending. Log to `service_tickets.followup_email_sent_at`.
+  **Likely touch:** `sync-calendly-events/index.ts` (schedule 1h delayed call on event completion); new `post_onboarding_followup` template; `service_tickets` migration adding `followup_email_sent_at TIMESTAMPTZ`; "Review and send" modal on Onboarding tab.
+
+- **#88** Day 3 + Day 7 first-week drip emails — prevent Brent-style returns.
+  **Source:** CJM analysis 2026-06-07 — both of Brent's return reasons (messy chamber access, output below expectations) were directly addressable with expectations-setting content before frustration set in. He returned without ever contacting support.
+  **Description:** Two automated Klaviyo emails triggered by `customer_events.event_type = 'first_use'` (captured via the lilalovely integration):
+    - **Day 3:** "Your first week with LILA — what's normal." Content: chamber moisture/damp = active composting; smell tips (lid closed, dry layer on top); what goes in vs. what doesn't; CTA → book a diagnosis chat if concerned.
+    - **Day 7:** "Your first batch is on its way." Content: first tray takes 2–3 weeks; volume per tray ~{X cups} — ideal for plants, not bulk gardening; how to empty the tray cleanly (specifically addresses the wet/messy access pain Brent reported).
+  Klaviyo flow: trigger on `first_use`, delay 3d → email 1, delay 4d → email 2. Content to be drafted by Reina. Flow setup ~2h once copy is approved. No makelila code changes.
+
+- **#89** Win-back email 30 days post-return — recover "Maybe / Unsure" returners.
+  **Source:** CJM analysis 2026-06-07 — both 2026 returners (Brent Neave, Phayvanh Xayasane) left "Maybe / Unsure" on next-gen consideration. ~$2.8k recoverable pipeline.
+  **Description:** When `returns.status` changes to `refunded`, schedule a Klaviyo email for T+30 days. Subject: "We heard your feedback." Content: acknowledge the specific return reason (pull `return_category` to personalize the opening sentence), brief note on what's being worked on for the next generation, soft CTA → "Want first access? Join the waitlist: {waitlist_link}." No discount, no hard sell — reopen the door. Requires a Typeform/Jotform waitlist form first.
+  **Klaviyo trigger:** `refunded` event with `return_category` as a property. Flow setup ~1h. No makelila code changes beyond emitting the Klaviyo event on refund completion.
+
+---
+
 ## Reference
 
 - Email thread: "makeLILA app beta release, VCycene, Huayi" (started Apr 21, 2026)
