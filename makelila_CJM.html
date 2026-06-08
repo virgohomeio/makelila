@@ -154,6 +154,7 @@
 <!-- TAB BAR -->
 <div class="tab-bar">
   <button class="tab-btn active" onclick="switchTab('make', this)"><span class="tab-icon">🛠️</span>makelila — VCycene Team CJM</button>
+  <button class="tab-btn" onclick="switchTab('customer', this)"><span class="tab-icon">🪴</span>Customer Journey (Live Signals — Jun 2026)</button>
 </div>
 
 <!-- ==================== TAB: MAKELILA ==================== -->
@@ -686,6 +687,437 @@
 </div><!-- end main -->
 </div><!-- end layout -->
 </div><!-- end tab-make -->
+
+<!-- ==================== TAB: CUSTOMER JOURNEY ==================== -->
+<div id="tab-customer" class="tab-panel">
+
+<style>
+  /* Customer CJM stage colors */
+  .hdr-discovery   { background: #dfe6fd; }
+  .hdr-purchase    { background: #ffeaa7; }
+  .hdr-shipping    { background: #74b9ff; color: #fff; }
+  .hdr-unboxing    { background: #55efc4; }
+  .hdr-callsetup   { background: #fab1a0; }
+  .hdr-firstweek  { background: #fdcb6e; }
+  .hdr-regularuse  { background: #a29bfe; color: #fff; }
+  .hdr-outcome     { background: #e17055; color: #fff; }
+  .journey-grid-customer { grid-template-columns: 195px repeat(8, minmax(270px, 1fr)); }
+  .signal-badge { display: inline-block; font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 10px; margin-left: 4px; vertical-align: middle; }
+  .sig-email  { background: #dfe6fd; color: #0984e3; }
+  .sig-return { background: #fab1a0; color: #c0392b; }
+  .sig-ai     { background: #ffeaa7; color: #8B6914; }
+  .sig-cal    { background: #55efc4; color: #00875a; }
+  .data-callout { background: #fff9e6; border-left: 3px solid #f9ca24; border-radius: 0 6px 6px 0; padding: 8px 10px; font-size: 11px; color: #5a4a00; margin: 8px 0 4px 0; }
+  .data-callout strong { display: block; font-size: 10px; text-transform: uppercase; letter-spacing: .5px; color: #b8860b; margin-bottom: 3px; }
+</style>
+
+<div class="scroll-hint">← Scroll horizontally to see all 8 customer journey stages · Signals sourced from Gmail, Jotform returns, Zipchat AI, Calendly — Jun 2026 →</div>
+
+<div class="layout">
+<aside class="persona">
+  <div class="persona-avatar" style="background: linear-gradient(135deg, #00b894, #00cec9);">🪴</div>
+  <h2 style="color: #00875a;">Customer</h2>
+  <h3>LILA Pro Owner</h3>
+  <div class="persona-section">
+    <h4>Who are they?</h4>
+    <p>Environmentally-motivated urban or suburban household. Bought LILA Pro online ($800–$920 CAD/USD). Typically: professional, 30–55, interested in sustainability. Often first time using a countertop composter.</p>
+  </div>
+  <div class="persona-section">
+    <h4>Recent Buyers (Jun 2026)</h4>
+    <div class="team-grid">
+      <div><b>Sherry Tang</b><br>Order #1183</div>
+      <div><b>Ann Nock</b><br>Order #1182</div>
+      <div><b>Sahar Alhusseini</b><br>Order #1181</div>
+      <div><b>Dennis Rice</b><br>Order #1180</div>
+    </div>
+  </div>
+  <div class="persona-section">
+    <h4>Recent Onboarding Calls</h4>
+    <p style="font-size: 11px; line-height: 1.6;">
+      ✅ Shirley Chan · Rob Hatch · Xiaowen Ni<br>
+      ✅ Albert Salvatote · Candace Chan · Kyle Fong<br>
+      ✅ Tammy Saville · Shay Adeniran · Roxana Felipe<br>
+      ❌ Alberino Salvatore (canceled)
+    </p>
+  </div>
+  <div class="persona-section">
+    <h4>Returns Received (60d)</h4>
+    <p style="font-size: 11px; line-height: 1.6;">
+      <strong>Brent Neave</strong> (#1093, 1–4 wk)<br>
+      Odor + wet/messy access + volume below expected<br>
+      ★★☆☆☆ — "support was excellent"<br><br>
+      <strong>Phayvanh Nanthavongdouangsy</strong> (#1110, &lt;1 wk)<br>
+      Checkout default address wrong → returned to sender<br>
+      ★★★★☆ — "never received the package"
+    </p>
+  </div>
+  <div class="persona-section">
+    <h4>LILA AI Gaps (Jun 1)</h4>
+    <p style="font-size: 11px; line-height: 1.6; color: #8B6914;">
+      15 unanswered questions this week:<br>
+      • Compost output mass per week<br>
+      • Phone support hours<br>
+      • Country of manufacture<br>
+      + 12 more pending corrections
+    </p>
+  </div>
+  <div class="persona-section">
+    <h4>Signal Sources</h4>
+    <p style="font-size: 11px; line-height: 1.6;">
+      📧 Gmail — Shopify orders, Calendly, Fireflies<br>
+      📋 Jotform — Return form submissions<br>
+      🤖 Zipchat AI — Unanswered chatbot questions<br>
+      📅 Calendly — Onboarding booking volume
+    </p>
+  </div>
+</aside>
+
+<div class="main">
+<div class="journey-grid journey-grid-customer">
+
+  <!-- STAGE HEADERS -->
+  <div class="stage-header" style="background:#fff; border-bottom:3px solid #ddd;"><h3>Row</h3></div>
+  <div class="stage-header hdr-discovery"><h3>🌱 Discovery</h3><p>Finding LILA Pro</p></div>
+  <div class="stage-header hdr-purchase"><h3>🛒 Purchase &amp; Checkout</h3><p>Shopify order placement</p></div>
+  <div class="stage-header hdr-shipping"><h3>📦 Shipping &amp; Tracking</h3><p>Waiting for delivery</p></div>
+  <div class="stage-header hdr-unboxing"><h3>🎁 Delivery &amp; Unboxing</h3><p>First physical touch</p></div>
+  <div class="stage-header hdr-callsetup"><h3>📞 Onboarding Call</h3><p>Setup call with Edward</p></div>
+  <div class="stage-header hdr-firstweek"><h3>🌀 First Week</h3><p>Days 1–7 of use</p></div>
+  <div class="stage-header hdr-regularuse"><h3>♻️ Regular Use</h3><p>Weeks 2–8</p></div>
+  <div class="stage-header hdr-outcome"><h3>📣 Outcome</h3><p>Return, continue, or advocate</p></div>
+
+  <!-- ROW 1: ACTIONS -->
+  <div class="row-label"><h4>Actions</h4><p>What does the customer do?</p></div>
+
+  <div class="cell">
+    <div class="note note-action">Sees LILA Pro via social ad, word of mouth, or environmental content</div>
+    <div class="note note-action">Visits lilacomposter.com or VCycene Shopify — reads specs, reviews</div>
+    <div class="note note-action">Asks LILA AI chatbot questions before buying</div>
+    <div class="data-callout"><strong>🤖 Signal — Zipchat AI Jun 1</strong>15 questions AI couldn't answer: compost mass, country of origin, phone support hours</div>
+    <div class="note note-action suggested">Reads comparison: LILA Pro vs outdoor bin vs Lomi</div>
+  </div>
+
+  <div class="cell">
+    <div class="note note-action">Adds to cart; applies discount code (WELCOMELILA, CHECKOUTFIVE)</div>
+    <div class="note note-action">Enters shipping address — may use checkout default</div>
+    <div class="note note-action">Selects payment: credit card, Sezzle (financing), or e-transfer</div>
+    <div class="note note-action">Receives Shopify order confirmation email</div>
+    <div class="data-callout"><strong>🚨 Signal — Return #1110 (Phayvanh)</strong>"Checkout default incorrect address. Tried to change address unsuccessfully. Product sent back to sender." — 100% avoidable return.</div>
+  </div>
+
+  <div class="cell">
+    <div class="note note-action">Receives shipping confirmation with tracking number</div>
+    <div class="note note-action">Monitors carrier tracking (UPS, Canada Post, FedEx)</div>
+    <div class="note note-action">Waits — no proactive updates unless they check manually</div>
+    <div class="data-callout"><strong>📧 Signal — Return #1110</strong>"UPS is slow to respond and their AI help wasn't great." Exception cases go silent — customers chase the carrier alone.</div>
+    <div class="note note-action suggested">Contacts support if tracking shows Exception or stops updating</div>
+  </div>
+
+  <div class="cell">
+    <div class="note note-action">Receives delivery; unboxes unit</div>
+    <div class="note note-action">Reads quick-start guide; places unit on counter</div>
+    <div class="note note-action">Downloads LILA app (beta-lovely) to register</div>
+    <div class="note note-action">Adds first kitchen scraps</div>
+    <div class="note note-action">Receives Calendly booking link for onboarding call</div>
+    <div class="data-callout"><strong>🚨 Critical gap</strong>Onboarding confirmation emails still in TEST MODE — customers booking calls but NOT receiving email confirmations.</div>
+  </div>
+
+  <div class="cell">
+    <div class="note note-action">Books 15-min onboarding call via Calendly</div>
+    <div class="note note-action">Joins Google Meet with Edward (Co-founder &amp; CTO)</div>
+    <div class="note note-action">Asks setup questions, troubleshooting questions</div>
+    <div class="data-callout"><strong>📅 Signal — Calendly volume</strong>15+ onboarding calls booked in last 2 weeks. Xiaowen Ni: 45+ questions. Rob Hatch: 48+ questions. Cheryl Lemieux: 52+ notes. Alberino Salvatore: CANCELED.</div>
+    <div class="note note-action">Reina joins as CS backup on most calls</div>
+    <div class="note note-action suggested">Receives follow-up email with tips and FAQ after call</div>
+  </div>
+
+  <div class="cell">
+    <div class="note note-action">Adds kitchen scraps daily; observes first composting cycle</div>
+    <div class="note note-action">Empties first completed tray of compost</div>
+    <div class="note note-action">Troubleshoots questions via LILA AI chatbot</div>
+    <div class="note note-action">May contact support if odor, output, or hardware issues arise</div>
+    <div class="data-callout"><strong>📋 Signal — Return #1093 (Brent, 1–4 wk)</strong>"Does not handle the volume I expected and is wet/messy to access." Brent rated ★★☆☆☆ — expectation mismatch driven by pre-sale marketing gap.</div>
+    <div class="note note-action suggested">Books a "LILA Diagnosis Chat" if something seems off</div>
+  </div>
+
+  <div class="cell">
+    <div class="note note-action">Develops a composting routine (kitchen scrap collection, batch timing)</div>
+    <div class="note note-action">Registers unit in LILA app; checks dashboard stats</div>
+    <div class="note note-action">Monitors compost output; applies to garden</div>
+    <div class="note note-action">May share on social or tell friends — or quietly stop using if disappointed</div>
+    <div class="data-callout"><strong>📧 Signal — Diagnosis Chats</strong>"LILA Diagnosis Chat (1 of 2 spots filled)" — Albert Jacquay Jun 9. Ongoing support need persists into regular use phase.</div>
+    <div class="note note-action suggested">Receives monthly usage nudge / tips email via Klaviyo</div>
+  </div>
+
+  <div class="cell">
+    <div class="note note-action"><strong>If returning:</strong> Fills Jotform return form → waits for return label</div>
+    <div class="note note-action"><strong>If continuing:</strong> Becomes habitual user; tells friends</div>
+    <div class="note note-action"><strong>If advocate:</strong> Leaves review, joins community, refers others</div>
+    <div class="data-callout"><strong>📋 Signal — Both returners</strong>"Maybe / Unsure" on considering LILA again. Brent: "support was excellent" — brand goodwill survives even failed units. Phayvanh: 4★ despite never receiving the product.</div>
+    <div class="note note-action suggested">Receives win-back email 30d post-return for next-gen model waitlist</div>
+  </div>
+
+  <!-- ROW 2: THOUGHT PROCESS -->
+  <div class="row-label"><h4>Customer Thoughts</h4><p>What is the customer thinking?</p></div>
+
+  <div class="cell">
+    <div class="note note-thought">"I want to compost but don't have outdoor space — this could actually work"</div>
+    <div class="note note-thought">"$800 is a lot — is this really going to handle my kitchen waste volume?"</div>
+    <div class="note note-thought">"The AI chatbot couldn't tell me how much compost it actually produces per week"</div>
+    <div class="note note-thought feedback fb-ops">"Which country is this made in? The site doesn't say" <span class="signal-badge sig-ai">LILA AI gap</span></div>
+    <div class="note note-thought">"The Calendly to book onboarding with the co-founder is a nice touch — feels premium"</div>
+  </div>
+
+  <div class="cell">
+    <div class="note note-thought">"WELCOMELILA code worked — feels like I got a good deal"</div>
+    <div class="note note-thought feedback fb-ops">"Wait, the shipping address it defaulted to isn't right — how do I change this?" <span class="signal-badge sig-return">Return #1110</span></div>
+    <div class="note note-thought">"OK payment went through — I should get a tracking number soon"</div>
+    <div class="note note-thought">"Sezzle splits this into manageable payments — that helped me justify it"</div>
+  </div>
+
+  <div class="cell">
+    <div class="note note-thought">"Tracking says In Transit — exciting!"</div>
+    <div class="note note-thought">"It's been 4 days with no scan update — is it lost?"</div>
+    <div class="note note-thought feedback fb-ops">"UPS just shows Exception — what does that mean? I can't get a straight answer" <span class="signal-badge sig-return">Return #1110</span></div>
+    <div class="note note-thought">"I called support and they're trying to help, but UPS isn't responding"</div>
+  </div>
+
+  <div class="cell">
+    <div class="note note-thought">"The packaging is really nice — feels like a premium product"</div>
+    <div class="note note-thought">"The setup seems straightforward — I'll try adding some scraps today"</div>
+    <div class="note note-thought">"I got a Calendly booking link for an onboarding call — cool, I'll book it"</div>
+    <div class="note note-thought feedback fb-ops">"I booked the call but never got a confirmation email — did it go through?" <span class="signal-badge sig-email">TEST MODE bug</span></div>
+  </div>
+
+  <div class="cell">
+    <div class="note note-thought">"Edward actually answered personally — that's impressive for a company this size"</div>
+    <div class="note note-thought">"I had way more questions than I expected — good thing this call existed"</div>
+    <div class="note note-thought">"Now I know what I can and can't compost — this will make a difference"</div>
+    <div class="note note-thought">"I wonder what happens if I have problems after the call — can I reach out again?"</div>
+  </div>
+
+  <div class="cell">
+    <div class="note note-thought">"The cycle is slower than I expected — when does the compost actually come out ready?"</div>
+    <div class="note note-thought feedback fb-ops">"Accessing the chamber is messier than I thought — wet and hard to open cleanly" <span class="signal-badge sig-return">Return #1093</span></div>
+    <div class="note note-thought">"I put in more than the recommended batch — now it smells a bit"</div>
+    <div class="note note-thought">"The LILA AI can't answer my question about compost output weight — I had to guess"</div>
+  </div>
+
+  <div class="cell">
+    <div class="note note-thought">"I've got the rhythm now — scraps go in every 2–3 days"</div>
+    <div class="note note-thought">"My garden loves this compost — I'm actually saving money on fertilizer"</div>
+    <div class="note note-thought feedback fb-ops">"The volume per batch isn't what I expected from the marketing materials" <span class="signal-badge sig-return">Return #1093</span></div>
+    <div class="note note-thought suggested">"I wish there was a community or tips newsletter — I'm figuring this out alone"</div>
+  </div>
+
+  <div class="cell">
+    <div class="note note-thought feedback fb-ops">"The support team was great — I'm just disappointed the product wasn't right for me" <span class="signal-badge sig-return">Brent</span></div>
+    <div class="note note-thought">"I never even got to use it — I'd consider trying again if the next version fixes the checkout issue"</div>
+    <div class="note note-thought">"I told my neighbour about LILA — even though mine had issues, I still believe in the concept"</div>
+    <div class="note note-thought suggested">"If there's a next-gen version that's higher capacity, I'd be interested"</div>
+  </div>
+
+  <!-- ROW 3: NEEDS & PAINS -->
+  <div class="row-label"><h4>Needs &amp; Pains</h4><p>What does the customer need / struggle with?</p></div>
+
+  <div class="cell">
+    <div class="note note-need">"I need to know the real compost output volume before committing $800"</div>
+    <div class="note note-pain">"The AI chatbot can't answer basic pre-purchase questions — I almost didn't buy"</div>
+    <div class="note note-need">"I need to know where it's made and if parts are available"</div>
+    <div class="note note-pain">"Support hours not published anywhere — I don't know when to call"</div>
+  </div>
+
+  <div class="cell">
+    <div class="note note-need">"I need a clear way to correct a default shipping address at checkout"</div>
+    <div class="note note-pain feedback fb-ops">"Checkout defaulted to wrong address — I couldn't fix it before placing the order" <span class="signal-badge sig-return">Return #1110 — 100% avoidable</span></div>
+    <div class="note note-need">"I want address confirmation before the order is locked"</div>
+    <div class="note note-pain">"I paid but don't have certainty that my product is going to the right place"</div>
+  </div>
+
+  <div class="cell">
+    <div class="note note-need">"I want proactive tracking updates — don't make me chase the carrier"</div>
+    <div class="note note-pain">"Exception status with no explanation — no one reached out proactively"</div>
+    <div class="note note-need">"If there's a delay, tell me what happened and give me an ETA"</div>
+    <div class="note note-pain">"The AI chatbot can't help with shipping issues either"</div>
+  </div>
+
+  <div class="cell">
+    <div class="note note-need">"I need a clear quick-start guide that sets realistic expectations"</div>
+    <div class="note note-need">"I want to know the onboarding call was booked — a confirmation email"</div>
+    <div class="note note-pain feedback fb-ops">"I booked a call but got no email confirmation — wasn't sure it worked" <span class="signal-badge sig-email">TEST MODE — critical fix needed</span></div>
+    <div class="note note-need">"I want to understand what I can and can't compost from day 1"</div>
+  </div>
+
+  <div class="cell">
+    <div class="note note-need">"I need someone patient who can walk me through the full first cycle"</div>
+    <div class="note note-need">"I want to know what to do if something goes wrong between calls"</div>
+    <div class="note note-pain">"45–52 questions per call means I wasn't ready — pre-call materials would help"</div>
+    <div class="note note-need">"I want a call recording or written summary I can refer back to"</div>
+    <div class="note note-pain">"If I cancel my call (like Alberino), there's no safety net to catch me"</div>
+  </div>
+
+  <div class="cell">
+    <div class="note note-need">"I want realistic week-1 expectations: what does a full cycle look like?"</div>
+    <div class="note note-pain feedback fb-ops">"The volume per batch is much less than I imagined from the marketing photos" <span class="signal-badge sig-return">Return #1093</span></div>
+    <div class="note note-pain">"Accessing the inner chamber is messier than any demo video showed"</div>
+    <div class="note note-need">"If something smells or looks wrong, I need quick self-diagnostic help"</div>
+  </div>
+
+  <div class="cell">
+    <div class="note note-need">"I want to track my composting impact — kg diverted, CO₂ saved — in the LILA app"</div>
+    <div class="note note-need">"Tips on what to compost in summer vs winter would help"</div>
+    <div class="note note-pain">"No community or newsletter — I'm figuring out advanced use alone"</div>
+    <div class="note note-need suggested">"I'd like a 30-day check-in from the team — shows they still care"</div>
+  </div>
+
+  <div class="cell">
+    <div class="note note-need">"If I return, I want a clear, fast return label — no extra friction"</div>
+    <div class="note note-need">"I want to feel heard, not processed — a personal follow-up goes a long way"</div>
+    <div class="note note-pain">"Both returners contacted support first but issues weren't resolved — escalation path unclear"</div>
+    <div class="note note-need suggested">"I'd come back for a next-gen model if it fixed the capacity and access issues"</div>
+  </div>
+
+  <!-- ROW 4: TOUCHPOINTS -->
+  <div class="row-label"><h4>Touchpoints</h4><p>Which surfaces do they interact with?</p></div>
+
+  <div class="cell">
+    <div class="note note-touch">Social ads, word of mouth, sustainability content</div>
+    <div class="note note-touch">lilacomposter.com product page</div>
+    <div class="note note-touch">LILA AI Zipchat chatbot (pre-purchase questions)</div>
+    <div class="note note-touch">Shopify reviews + product descriptions</div>
+  </div>
+
+  <div class="cell">
+    <div class="note note-touch">Shopify checkout — address entry, payment, discount codes</div>
+    <div class="note note-touch">Shopify order confirmation email</div>
+    <div class="note note-touch">support@virgohome.io (if address issue arises)</div>
+  </div>
+
+  <div class="cell">
+    <div class="note note-touch">Carrier tracking page (UPS, Canada Post, FedEx)</div>
+    <div class="note note-touch">Shopify shipping confirmation email with tracking</div>
+    <div class="note note-touch">Phone: 365-825-3070 (support hours unknown to LILA AI)</div>
+    <div class="note note-touch">support@virgohome.io (exception escalation)</div>
+  </div>
+
+  <div class="cell">
+    <div class="note note-touch">Physical LILA Pro unit + packaging</div>
+    <div class="note note-touch">Quick-start guide (in-box)</div>
+    <div class="note note-touch">Calendly onboarding booking link</div>
+    <div class="note note-touch feedback fb-ops">Onboarding confirmation email — <strong>NOT DELIVERED</strong> (TEST MODE active) <span class="signal-badge sig-email">Fix needed</span></div>
+    <div class="note note-touch">beta-lovely app (registration, dashboard)</div>
+  </div>
+
+  <div class="cell">
+    <div class="note note-touch">Google Meet (15-min call with Edward + Reina)</div>
+    <div class="note note-touch">Calendly booking system</div>
+    <div class="note note-touch">Fireflies.ai meeting notes (auto-recorded)</div>
+    <div class="note note-touch">LILA Diagnosis Chat slot (Calendly — 2 spots per session)</div>
+  </div>
+
+  <div class="cell">
+    <div class="note note-touch">LILA Pro physical unit (daily composting)</div>
+    <div class="note note-touch">beta-lovely app (dashboard_open, batch_complete_seen events)</div>
+    <div class="note note-touch">LILA AI chatbot (troubleshooting questions)</div>
+    <div class="note note-touch">support@virgohome.io or phone for escalations</div>
+  </div>
+
+  <div class="cell">
+    <div class="note note-touch">LILA Pro + beta-lovely app (long-term tracking)</div>
+    <div class="note note-touch">Klaviyo email (if tips/newsletter shipped)</div>
+    <div class="note note-touch">LILA Diagnosis Chat (ongoing troubleshooting)</div>
+    <div class="note note-touch suggested">Community / ambassador program (not yet built)</div>
+  </div>
+
+  <div class="cell">
+    <div class="note note-touch">Jotform LILA Pro Return Form</div>
+    <div class="note note-touch">support@virgohome.io (return label, refund coordination)</div>
+    <div class="note note-touch">makelila Returns &amp; Refunds module (internal team processes)</div>
+    <div class="note note-touch">Shopify / Sezzle / e-transfer refund</div>
+    <div class="note note-touch suggested">Win-back email 30d post-return (not yet built)</div>
+  </div>
+
+  <!-- EMOTION CURVE -->
+  <div class="emotion-row">
+    <div class="emotion-title">😊 Customer Emotional Journey — Grounded in Live Signals (Jun 2026)</div>
+    <div class="emotion-track">
+      <div class="emotion-bar" style="margin-bottom: 55px;"><div class="emotion-dot e-mid-high">🌱</div><div class="emotion-label">Hopeful — environmental motivation, premium feel</div></div>
+      <div class="emotion-bar" style="margin-bottom: 45px;"><div class="emotion-dot e-mid">😐</div><div class="emotion-label">Cautious — address default risk; anticipation tempered</div></div>
+      <div class="emotion-bar" style="margin-bottom: 30px;"><div class="emotion-dot e-mid-low">😟</div><div class="emotion-label">Anxious — exceptions go silent, no proactive contact</div></div>
+      <div class="emotion-bar" style="margin-bottom: 70px;"><div class="emotion-dot e-high">🎉</div><div class="emotion-label">Peak excitement — unboxing, premium packaging</div></div>
+      <div class="emotion-bar" style="margin-bottom: 60px;"><div class="emotion-dot e-mid-high">📞</div><div class="emotion-label">Reassured — founder call is high-touch, impressive</div></div>
+      <div class="emotion-bar" style="margin-bottom: 40px;"><div class="emotion-dot e-mid">🤔</div><div class="emotion-label">Uncertain — real use vs marketing expectation gap emerges</div></div>
+      <div class="emotion-bar" style="margin-bottom: 35px;"><div class="emotion-dot e-mid-low">😬</div><div class="emotion-label">Diverging — satisfied users stay quiet; struggling users escalate</div></div>
+      <div class="emotion-bar" style="margin-bottom: 20px;"><div class="emotion-dot e-mid">😌</div><div class="emotion-label">"Maybe/Unsure" — both returners left door open for next-gen</div></div>
+    </div>
+  </div>
+
+  <!-- OPPORTUNITIES (DATA-BACKED) -->
+  <div class="opportunities">
+    <h3>🚀 Customer-Backed Opportunities — Sourced from Live Email &amp; Return Signals (Jun 2026)</h3>
+    <div class="opp-grid">
+
+      <div class="opp-card" style="background:#fff0f0; border-color:#e74c3c;">
+        <span class="opp-stage" style="background:#e74c3c;">🚨 CRITICAL — Checkout</span>
+        <h4>Address verification at Shopify checkout</h4>
+        <p>Phayvanh's return (#1110) was 100% avoidable. She couldn't change the checkout-defaulted address. The unit was returned to sender — she never received it, rated 4★ anyway. <strong>Fix: add a "confirm your shipping address" modal step at Shopify checkout, or a 24h post-order address confirmation email with an edit link.</strong> This one fix would have saved a full return, refund, and re-ship.</p>
+      </div>
+
+      <div class="opp-card" style="background:#fff0f0; border-color:#e74c3c;">
+        <span class="opp-stage" style="background:#e74c3c;">🚨 CRITICAL — Onboarding</span>
+        <h4>Turn off TEST MODE on onboarding confirmation emails</h4>
+        <p>All onboarding booking confirmation emails from <code>support@lilacomposter.com</code> are tagged <code>*** TEST MODE ***</code> and routed to Huayi, not the customer. Customers booking calls receive no email confirmation. Alberino canceled — possibly related. <strong>Fix: unset <code>EMAIL_TEST_RECIPIENT</code> on the onboarding edge function immediately.</strong></p>
+      </div>
+
+      <div class="opp-card" style="background:#fff8e1; border-color:#f9ca24;">
+        <span class="opp-stage" style="background:#f9ca24; color:#000;">⚠️ HIGH — Pre-Purchase</span>
+        <h4>Fill LILA AI knowledge gaps — 15 unanswered questions per week</h4>
+        <p>Zipchat AI flagged 15 unanswerable questions (Jun 1). Examples: compost output mass per week, country of manufacture, exact phone support hours. These are basic pre-purchase and first-week questions. <strong>Fix: answer the 15 pending corrections in Zipchat dashboard. Add a published FAQ covering output volume, materials, manufacturing, and support hours.</strong></p>
+      </div>
+
+      <div class="opp-card" style="background:#fff8e1; border-color:#f9ca24;">
+        <span class="opp-stage" style="background:#f9ca24; color:#000;">⚠️ HIGH — Shipping</span>
+        <h4>Proactive shipping exception notifications to customers</h4>
+        <p>Customers with Exception status are left to chase UPS alone. Phayvanh: "UPS is slow to respond and their AI help wasn't great." <strong>Fix: when makelila's Freightcom poll detects an Exception status, automatically trigger an outbound email (via Templates) to the customer explaining the situation and next steps.</strong> This is the shipping equivalent of being ghosted.</p>
+      </div>
+
+      <div class="opp-card" style="background:#fff8e1; border-color:#f9ca24;">
+        <span class="opp-stage" style="background:#f9ca24; color:#000;">⚠️ HIGH — First Week</span>
+        <h4>Expectation reset on volume, access, and odor — before they return</h4>
+        <p>Brent (#1093, 1–4 weeks) returned for "volume below expected, wet/messy access, odor." These are product characteristics, not defects — he was never told. <strong>Fix: add a Day 3 and Day 7 automated email with realistic expectations: "your first tray takes 2–3 weeks," "the chamber will feel moist — that's normal," "here's how to manage odor." Sets context before frustration sets in.</strong></p>
+      </div>
+
+      <div class="opp-card">
+        <span class="opp-stage">Onboarding</span>
+        <h4>Scale onboarding beyond the founder — pre-call primer to reduce call length</h4>
+        <p>15+ calls in 2 weeks, all with Edward (Co-founder &amp; CTO). Calls run 45–52 questions long. This is not scalable past 30 units/month. <strong>Fix: send a pre-call primer (3-min video + FAQ) 24h before each booked call. Redirect basic calls to Reina; reserve Edward for complex cases. Target: &lt;20 questions/call average.</strong></p>
+      </div>
+
+      <div class="opp-card">
+        <span class="opp-stage">Onboarding</span>
+        <h4>Post-call summary email with tips + next-step checklist</h4>
+        <p>After 45-question calls, customers leave with knowledge they'll forget by tomorrow. Fireflies already captures the transcript. <strong>Fix: send a post-call summary 1h after each onboarding: 5 key things to know, what's normal week 1, how to reach us. Reduces Day 3–7 support volume.</strong></p>
+      </div>
+
+      <div class="opp-card">
+        <span class="opp-stage">Post-Return</span>
+        <h4>Win-back email for next-gen model — both returners said "Maybe / Unsure"</h4>
+        <p>Both Brent and Phayvanh left the door open. Neither is permanently lost — Brent praised the support; Phayvanh's issue was a logistics failure, not a product failure. <strong>Fix: send a win-back email 30d post-return: "We're working on [capacity / checkout improvements]. Want early access to the next-gen model?" Converts loss to future pipeline.</strong></p>
+      </div>
+
+      <div class="opp-card">
+        <span class="opp-stage">Regular Use</span>
+        <h4>30-day check-in email → feeds Diagnosis Chat demand</h4>
+        <p>Diagnosis Chats are being booked (Albert Jacquay, Jun 9) suggesting ongoing support need into regular use. Currently it's reactive. <strong>Fix: send a proactive 30-day check-in email: "How's your LILA doing? Here's what your usage data shows. Book a 15-min check-in if anything feels off." Converts silent frustration into manageable CS volume.</strong></p>
+      </div>
+
+    </div>
+  </div>
+
+</div><!-- end journey-grid -->
+</div><!-- end main -->
+</div><!-- end layout -->
+</div><!-- end tab-customer -->
 
 <script>
 function switchTab(tabName, btn) {
