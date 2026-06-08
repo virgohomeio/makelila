@@ -14,6 +14,7 @@ import { JourneyTab } from './JourneyTab';
 import { useIsMobile } from '../../lib/useMediaQuery';
 import { NavCard } from '../../components/NavCard';
 import { MobileBackHeader } from '../../components/MobileBackHeader';
+import { useCustomerEvents, useCustomerEngagement, eventMeta, dormancyBadge } from '../../lib/customerEvents';
 import styles from './Customers.module.css';
 
 type Tab = 'directory' | 'profitability' | 'journey';
@@ -520,6 +521,8 @@ function CustomerDetailPanel({ customer, onClose }: { customer: Customer; onClos
             <PanelRow label="Address" value={fullAddress} multiline />
           </PanelSection>
 
+          <LilaAppActivitySection customerId={customer.id} />
+
           <FollowUpSection customer={customer} />
 
           <PanelSection title={`Orders (${myOrders.length})`}>
@@ -581,6 +584,82 @@ function PanelSection({ title, children }: { title: string; children: React.Reac
     <div className={styles.section}>
       <div className={styles.sectionTitle}>{title}</div>
       <div className={styles.sectionBody}>{children}</div>
+    </div>
+  );
+}
+
+// Customer-side signals from the lilalovely app (beta-lovely). Backed by
+// customer_events + customer_engagement_summary; populated by the
+// ingest-lovely-event edge function. Renders engagement summary + the last
+// 8 events as a compact timeline. Empty state covers two cases:
+//   - customer hasn't signed up for the lilalovely app yet (no link row)
+//   - customer signed up but hasn't generated any events yet
+// Spec: docs/integration-lilalovely-2026-06-07.md
+function LilaAppActivitySection({ customerId }: { customerId: string }) {
+  const { summary, loading: sLoading } = useCustomerEngagement(customerId);
+  const { events, loading: eLoading } = useCustomerEvents(customerId);
+  const loading = sLoading || eLoading;
+  const badge = dormancyBadge(summary?.dormancy_days ?? null);
+
+  return (
+    <div className={styles.section}>
+      <div className={styles.sectionTitle} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span>Lila app activity</span>
+        {badge && (
+          <span style={{
+            fontSize: 10, padding: '2px 8px', borderRadius: 999,
+            fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.3,
+            color:
+              badge.tone === 'good'  ? 'var(--color-success)' :
+              badge.tone === 'warn'  ? 'var(--color-warning)' :
+                                       'var(--color-error)',
+            background:
+              badge.tone === 'good'  ? 'var(--color-success-bg)' :
+              badge.tone === 'warn'  ? 'var(--color-warning-bg)' :
+                                       'var(--color-error-bg)',
+          }}>{badge.label}</span>
+        )}
+      </div>
+      <div className={styles.sectionBody}>
+        {loading ? (
+          <div className={styles.emptyRow}>Loading app activity…</div>
+        ) : !summary?.lovely_user_id ? (
+          <div className={styles.emptyRow}>
+            Not yet signed up for the lilalovely app.
+          </div>
+        ) : (
+          <>
+            <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 12, fontSize: 12 }}>
+              <span><strong>{summary.events_7d}</strong> <span className={styles.muted}>events (7d)</span></span>
+              <span><strong>{summary.events_30d}</strong> <span className={styles.muted}>events (30d)</span></span>
+              {summary.app_last_seen_at && (
+                <span>
+                  <span className={styles.muted}>Last seen </span>
+                  <strong>{new Date(summary.app_last_seen_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' })}</strong>
+                </span>
+              )}
+            </div>
+            {events.length === 0 ? (
+              <div className={styles.emptyRow}>No events recorded yet.</div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {events.slice(0, 8).map(e => {
+                  const meta = eventMeta(e.event_type);
+                  return (
+                    <div key={e.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
+                      <span style={{ width: 8, height: 8, borderRadius: '50%', background: meta.color, flexShrink: 0 }} />
+                      <span style={{ flex: 1 }}>{meta.label}</span>
+                      <span className={styles.muted} style={{ fontSize: 11 }}>
+                        {new Date(e.occurred_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </>
+        )}
+      </div>
     </div>
   );
 }
