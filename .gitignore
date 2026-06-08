@@ -11,6 +11,10 @@ build/
 .env.local
 .env.*.local
 
+# Local MCP server registrations (project-scoped Claude Code config).
+# Contains machine-local absolute paths so doesn't belong in git.
+.mcp.json
+
 # Supabase
 supabase/.temp/
 supabase/.branches/
