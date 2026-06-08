@@ -654,20 +654,23 @@ function FinanceApproveModal({
   const amount = Number(amountStr);
   const amountChanged = !Number.isNaN(amount) && Number(amount.toFixed(2)) !== Number(original.toFixed(2));
 
-  const [shipping, setShipping] = useState<{ total: number; freight: number } | null>(null);
+  const [shipping, setShipping] = useState<{ total: number; paidShipping: number } | null>(null);
   useEffect(() => {
     const ref = linkedReturn?.original_order_ref;
     if (!ref) { setShipping(null); return; }
     (async () => {
       const { data } = await supabase
         .from('orders')
-        .select('total_usd, freight_estimate_usd')
+        .select('total_usd, customer_paid_shipping_usd')
         .eq('order_ref', ref)
         .maybeSingle();
-      if (data) setShipping({
-        total: Number((data as { total_usd: number; freight_estimate_usd: number }).total_usd),
-        freight: Number((data as { total_usd: number; freight_estimate_usd: number }).freight_estimate_usd),
-      });
+      if (data) {
+        const d = data as { total_usd: number; customer_paid_shipping_usd: number | null };
+        setShipping({
+          total: Number(d.total_usd),
+          paidShipping: Number(d.customer_paid_shipping_usd ?? 0),
+        });
+      }
     })();
   }, [linkedReturn?.original_order_ref]);
 
@@ -722,7 +725,7 @@ function FinanceApproveModal({
           <div className={styles.modalHint}>
             Original request: ${original.toFixed(2)}
             {shipping && (
-              <> · Order total: ${shipping.total.toFixed(2)} · Shipping (non-refundable): ${shipping.freight.toFixed(2)} · Max refundable: ${(shipping.total - shipping.freight).toFixed(2)}</>
+              <> · Order total: ${shipping.total.toFixed(2)} · Shipping (customer-paid, non-refundable): ${shipping.paidShipping.toFixed(2)} · Max refundable: ${(shipping.total - shipping.paidShipping).toFixed(2)}</>
             )}
           </div>
         </div>
