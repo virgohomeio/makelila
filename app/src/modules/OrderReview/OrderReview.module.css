@@ -9,6 +9,21 @@
   overflow: hidden;
 }
 
+/* Mobile single-column drill (2026-06-07).
+ * The desktop grid (sidebar | detail) is too wide for a phone. On mobile we
+ * render a single column, controlled by the parent: sidebar visible when no
+ * order is selected, detail visible (with a back header) when one is. */
+@media (max-width: 700px) {
+  .layout {
+    display: block;
+    height: auto;
+    min-height: calc(100dvh - var(--nav-height));
+    border-radius: 0;
+    border-left: none;
+    border-right: none;
+  }
+}
+
 .empty {
   display: flex;
   align-items: center;

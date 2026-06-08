@@ -11,12 +11,20 @@ import { useServiceTickets } from '../../lib/service';
 import { OverdueFollowupPanel } from './OverdueFollowupPanel';
 import { ProfitabilityTab } from './ProfitabilityTab';
 import { JourneyTab } from './JourneyTab';
+import { useIsMobile } from '../../lib/useMediaQuery';
+import { NavCard } from '../../components/NavCard';
+import { MobileBackHeader } from '../../components/MobileBackHeader';
 import styles from './Customers.module.css';
 
 type Tab = 'directory' | 'profitability' | 'journey';
 
 export default function Customers() {
   const [tab, setTab] = useState<Tab>('journey');
+  const isMobile = useIsMobile();
+  // On mobile, start with the tab picker visible. Tapping a card flips this
+  // to `true` and the existing branches render the tab content with a
+  // MobileBackHeader replacing the horizontal tab strip.
+  const [mobileTabPicked, setMobileTabPicked] = useState(false);
   const { customers, loading } = useCustomers();
   const { units } = useUnits();
   // Pre-build serial lookups so each row can render its serial(s) without
@@ -192,15 +200,60 @@ export default function Customers() {
 
   if (loading) return <div className={styles.loading}>Loading customers…</div>;
 
-  if (tab === 'profitability') {
+  // Mobile: until a tab is picked, render a NavCard picker for the three
+  // sub-views. After pick, fall through to the existing render branches with
+  // a back affordance threaded in via MobileBackHeader. The Directory view is
+  // dense (table + filters) — for V1 it just renders inside the existing
+  // single-column layout.
+  if (isMobile && !mobileTabPicked) {
+    const pickerTabs: { key: Tab; label: string; subtitle: string; icon: string; iconBg: string }[] = [
+      { key: 'journey',       label: 'Journey',       subtitle: '10-stage CJM · health per customer',           icon: '🛤️', iconBg: '#fef1f0' },
+      { key: 'profitability', label: 'Profitability', subtitle: 'Revenue · returns · margin per customer',      icon: '💰', iconBg: '#fff3e0' },
+      { key: 'directory',     label: 'Directory',     subtitle: 'All customers · search · follow-up state',     icon: '👥', iconBg: '#e3f0fb' },
+    ];
     return (
       <div className={styles.layout}>
         <div className={styles.header}>
-          <div className={styles.titleRow}>
-            <h2 className={styles.title}>Customers</h2>
-            <CustomersTabs tab={tab} onChange={setTab} />
-          </div>
+          <h2 className={styles.title}>Customers</h2>
         </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: 4 }}>
+          {pickerTabs.map(t => (
+            <NavCard
+              key={t.key}
+              onClick={() => { setTab(t.key); setMobileTabPicked(true); }}
+              title={t.label}
+              subtitle={t.subtitle}
+              icon={t.icon}
+              iconBg={t.iconBg}
+            />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // After picking on mobile, render MobileBackHeader at the top of each
+  // branch instead of the desktop title-row + tabs strip. Tap the chevron
+  // to return to the tab picker.
+  const tabLabel =
+    tab === 'journey'       ? 'Journey' :
+    tab === 'profitability' ? 'Profitability' :
+                              'Directory';
+  const onMobileBack = () => setMobileTabPicked(false);
+
+  if (tab === 'profitability') {
+    return (
+      <div className={styles.layout}>
+        {isMobile ? (
+          <MobileBackHeader label={tabLabel} onBack={onMobileBack} />
+        ) : (
+          <div className={styles.header}>
+            <div className={styles.titleRow}>
+              <h2 className={styles.title}>Customers</h2>
+              <CustomersTabs tab={tab} onChange={setTab} />
+            </div>
+          </div>
+        )}
         <ProfitabilityTab />
       </div>
     );
@@ -209,12 +262,16 @@ export default function Customers() {
   if (tab === 'journey') {
     return (
       <div className={styles.layout}>
-        <div className={styles.header}>
-          <div className={styles.titleRow}>
-            <h2 className={styles.title}>Customers</h2>
-            <CustomersTabs tab={tab} onChange={setTab} />
+        {isMobile ? (
+          <MobileBackHeader label={tabLabel} onBack={onMobileBack} />
+        ) : (
+          <div className={styles.header}>
+            <div className={styles.titleRow}>
+              <h2 className={styles.title}>Customers</h2>
+              <CustomersTabs tab={tab} onChange={setTab} />
+            </div>
           </div>
-        </div>
+        )}
         <JourneyTab />
       </div>
     );
@@ -223,10 +280,11 @@ export default function Customers() {
   return (
     <>
     <div className={styles.layout}>
+      {isMobile && <MobileBackHeader label={tabLabel} onBack={onMobileBack} />}
       <div className={styles.header}>
         <div className={styles.titleRow}>
           <h2 className={styles.title}>Customers</h2>
-          <CustomersTabs tab={tab} onChange={setTab} />
+          {isMobile ? null : <CustomersTabs tab={tab} onChange={setTab} />}
         </div>
         <div className={styles.headerActions}>
           {stats.lastSync && (

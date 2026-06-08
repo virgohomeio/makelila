@@ -7,6 +7,8 @@ import { useUnits } from '../../lib/stock';
 import { PipelineBoard } from './PipelineBoard';
 import { TableView } from './TableView';
 import { NewPOModal } from './NewPOModal';
+import { useIsMobile } from '../../lib/useMediaQuery';
+import { MobileTabbedModule, type MobileTab } from '../../components/MobileTabbedModule';
 import styles from './Build.module.css';
 
 type View = 'board' | 'table';
@@ -22,6 +24,7 @@ export default function Build() {
   const [view, setView] = useState<View>('board');
   const [batchFilter, setBatchFilter] = useState<BatchFilter>('all');
   const [search, setSearch] = useState('');
+  const isMobile = useIsMobile();
   const [showNewPO, setShowNewPO] = useState(false);
   const [showClaimSerial, setShowClaimSerial] = useState<{ batch: string } | null>(null);
   const [claimSerial, setClaimSerial] = useState('');
@@ -60,6 +63,58 @@ export default function Build() {
   }, [orders, units, defects, tests]);
 
   const loading = oLoading || sLoading || dLoading || tLoading || uLoading;
+
+  // Mobile: hide the KPI strip + filter row (they wrap awkwardly on 375px)
+  // and present the Pipeline Board / Table View toggle as two NavCards.
+  // Search lives in each tab's own header.
+  if (isMobile) {
+    const mobileTabs: MobileTab<View>[] = [
+      {
+        key: 'board',
+        label: 'Pipeline Board',
+        subtitle: 'Kanban across PO → production → ship → CA-test',
+        icon: '🏗️',
+        iconBg: '#e6f4ea',
+        content: loading
+          ? <div className={styles.loading}>Loading Build pipeline…</div>
+          : <PipelineBoard
+              orders={orders}
+              shipments={shipments}
+              defects={defects}
+              tests={tests}
+              units={units}
+              batchFilter={batchFilter}
+              search={search}
+            />,
+      },
+      {
+        key: 'table',
+        label: 'Table View',
+        subtitle: 'Sortable list of all units in-flight',
+        icon: '📋',
+        iconBg: '#e3f0fb',
+        content: loading
+          ? <div className={styles.loading}>Loading Build pipeline…</div>
+          : <TableView
+              orders={orders}
+              shipments={shipments}
+              defects={defects}
+              tests={tests}
+              units={units}
+              batchFilter={batchFilter}
+              search={search}
+            />,
+      },
+    ];
+    return (
+      <>
+        <div className={styles.layout}>
+          <MobileTabbedModule tabs={mobileTabs} />
+        </div>
+        {showNewPO && <NewPOModal onClose={() => setShowNewPO(false)} />}
+      </>
+    );
+  }
 
   return (
     <>

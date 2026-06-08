@@ -1,6 +1,8 @@
 import { useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useOrders } from '../../lib/orders';
+import { useIsMobile } from '../../lib/useMediaQuery';
+import { MobileBackHeader } from '../../components/MobileBackHeader';
 import { Sidebar } from './Sidebar';
 import { Detail } from './Detail';
 import styles from './OrderReview.module.css';
@@ -8,14 +10,19 @@ import styles from './OrderReview.module.css';
 export default function OrderReview() {
   const { orderId } = useParams<{ orderId: string }>();
   const navigate = useNavigate();
+  const isMobile = useIsMobile();
   const { all, pending, held, flagged, approved, replacement, loading } = useOrders();
   const selected = orderId ? all.find(o => o.id === orderId) ?? null : null;
 
+  // Desktop auto-loads the first pending order so the right pane isn't empty
+  // on first paint. On mobile we keep the sidebar visible (no order selected)
+  // so the operator chooses what to drill into — same primitive as the home
+  // module picker. Tapping a row navigates to /order-review/:id.
   useEffect(() => {
-    if (!loading && !orderId && pending.length > 0) {
+    if (!isMobile && !loading && !orderId && pending.length > 0) {
       navigate(`/order-review/${pending[0].id}`, { replace: true });
     }
-  }, [loading, orderId, pending, navigate]);
+  }, [isMobile, loading, orderId, pending, navigate]);
 
   const afterDisposition = () => {
     const remaining = pending.filter(o => o.id !== orderId);
@@ -25,6 +32,36 @@ export default function OrderReview() {
       navigate('/order-review');
     }
   };
+
+  // Mobile: single column. Sidebar (filter strip + order list) when no
+  // selection; Detail with a back header when an order is selected.
+  if (isMobile) {
+    if (selected) {
+      return (
+        <div className={styles.layout}>
+          <MobileBackHeader
+            label={`#${selected.order_ref} · ${selected.customer_name}`}
+            onBack={() => navigate('/order-review')}
+          />
+          <Detail order={selected} onAfterDisposition={afterDisposition} />
+        </div>
+      );
+    }
+    return (
+      <div className={styles.layout}>
+        <Sidebar
+          all={all}
+          pending={pending}
+          held={held}
+          flagged={flagged}
+          approved={approved}
+          replacement={replacement}
+          selectedId={null}
+          onSelect={(id) => navigate(`/order-review/${id}`)}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className={styles.layout}>

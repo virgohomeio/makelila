@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { NavCard } from './NavCard';
+import { MobileBackHeader } from './MobileBackHeader';
 import styles from './MobileTabbedModule.module.css';
 
 type CountTone = 'default' | 'alert' | 'warn';
@@ -68,15 +69,7 @@ export function MobileTabbedModule<K extends string>({
 
   return (
     <>
-      <button
-        type="button"
-        className={styles.backHeader}
-        onClick={() => setActiveKey(null)}
-        aria-label="Back to tab picker"
-      >
-        <span className={styles.backChevron}>‹</span>
-        <span className={styles.backTitle}>{active.label}</span>
-      </button>
+      <MobileBackHeader label={active.label} onBack={() => setActiveKey(null)} />
       {active.content}
     </>
   );
