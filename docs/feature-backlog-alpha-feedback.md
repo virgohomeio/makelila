@@ -15,9 +15,11 @@
 **Description:** Auto-check customer addresses against Google Maps API on order sync. Detect postal/ZIP mismatches between what the customer entered and what Google Maps returns. Trigger automated email asking the customer to confirm the correct version.
 **Flow:** Order synced → address validated → mismatch detected → email sent to customer with both versions → customer confirms → address updated in makeLILA + Shopify.
 
-### 2. Returns & Refunds Module (move from Google Sheets to makeLILA)
+### 2. Returns & Refunds Module (move from Google Sheets to makeLILA) — **SHIPPED** (2026-06-08)
 **Source:** Pedrum (Apr 29), George (May 24)
 **Description:** Full returns workflow inside makeLILA, replacing the current Google Sheets process.
+
+**SHIPPED status (2026-06-08):** The module (`lib/postShipment.ts` + `PostShipment/` tabs) implements the full spec — `return_category` 6-value dropdown, Returns & Refund Dashboard (`DashboardTab`), dual sign-off finance review (`submitted → manager_review (George) → finance_review (Julie) → refunded`, RBAC-gated via `lib/permissions.ts`), `refund_method` selection (shopify/sezzle/quickbooks_cc/bank_etransfer/original_card), partial-refund amount correction with required note (`financeApprove`), the "no refund before unit received" guard, and cancellations. Two remaining spec gaps were closed on branch `feat/postshipment-returns-gaps`: (a) the dashboard's **Responsible Team** chart (derived from `return_category` via `returnTeamCounts()`), and (b) the finance modal's "non-refundable shipping" hint now reads `customer_paid_shipping_usd` (customer's actual payment) instead of `freight_estimate_usd`, per #65. Open follow-on: **#79** (net out recoverable value of returned units) — separate item.
 
 **Requirements from George:**
 - Add "Reason for Return" field with dropdown: Product Defect, Software Issue, Shipping Damage, Customer Service Issue, Financing Issue, Other
