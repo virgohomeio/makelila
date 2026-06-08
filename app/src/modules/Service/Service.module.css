@@ -156,6 +156,20 @@
   flex-direction: column;
   overflow: hidden;
 }
+
+/* Mobile: 480px doesn't fit on a 375px phone. Take the full viewport so the
+ * ticket detail isn't clipped, drop the left border + shadow that look wrong
+ * at edge-to-edge, and respect safe-area-inset-top so the header doesn't
+ * crowd the iPhone notch. */
+@media (max-width: 700px) {
+  .detailOverlay {
+    width: 100%;
+    left: 0;
+    border-left: none;
+    box-shadow: none;
+    padding-top: env(safe-area-inset-top);
+  }
+}
 .detailHead {
   padding: 14px 18px;
   border-bottom: 1px solid var(--color-border);
