@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>makeLILA PRD Review v1.2 — Interactive Dashboard</title>
+<title>makeLILA PRD Review v1.5 — Interactive Dashboard</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style>
   :root {
@@ -226,7 +226,7 @@
   .legend-row .swatch.dev-p3 { background: var(--p3); }
   .legend-row .swatch.val { background-image: repeating-linear-gradient(45deg, rgba(0,0,0,0.18) 0 4px, transparent 4px 8px); background-color: #f5f5f5; }
 
-  /* Swimlane (v1.4 — hours per shipper) */
+  /* Swimlane (v1.4 — hours per shipper; v1.5 — shipped items removed from queue) */
   .swimlane { display: flex; flex-direction: column; gap: 12px; }
   .swimlane-row {
     background: var(--surface);
@@ -290,6 +290,91 @@
   .swim-block.p1 { background: var(--p1); }
   .swim-block.p2 { background: var(--p2); }
   .swim-block.p3 { background: var(--p3); }
+  /* v1.5 — shipped items rendered into their own strip per swimlane row;
+     muted green to mark done without competing with active priority colors */
+  .swim-block.shipped {
+    background: #e6f4ea;
+    color: #2f855a;
+    border: 1px solid #b7dabd;
+    opacity: 0.92;
+    cursor: default;
+  }
+  .swim-block.shipped:hover { transform: none; box-shadow: none; }
+  .swim-block.shipped .hours-badge {
+    background: #2f855a;
+    color: #fff;
+  }
+  .swimlane-shipped-strip {
+    background: #f0f7f2;
+    border: 1px solid #d0e6d6;
+    border-radius: var(--radius-sm);
+    padding: 8px 10px;
+    margin-bottom: 10px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    align-items: center;
+  }
+  .swimlane-shipped-strip .strip-label {
+    font-size: 9px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #2f855a;
+    padding: 2px 6px;
+    background: #fff;
+    border-radius: 3px;
+    margin-right: 4px;
+    flex-shrink: 0;
+  }
+  /* v1.5 — "Shipped this release" callout panel above swimlane */
+  .shipped-panel {
+    background: linear-gradient(135deg, #e6f4ea 0%, #f0f7f2 100%);
+    border: 1px solid #b7dabd;
+    border-radius: var(--radius-md);
+    padding: 14px 18px;
+    margin-bottom: 16px;
+  }
+  .shipped-panel-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
+  }
+  .shipped-panel-head h3 {
+    color: #1f5132;
+    margin: 0;
+    font-size: 14px;
+  }
+  .shipped-panel-head .totals {
+    font-size: 11px;
+    color: #2f855a;
+    font-weight: 700;
+  }
+  .shipped-panel-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 8px;
+  }
+  .shipped-panel-card {
+    background: #fff;
+    border: 1px solid #d0e6d6;
+    border-radius: var(--radius-sm);
+    padding: 10px 12px;
+    font-size: 11.5px;
+  }
+  .shipped-panel-card .name { font-weight: 700; color: var(--ink); }
+  .shipped-panel-card .meta { font-size: 10px; color: var(--ink-muted); margin-top: 3px; }
+  .shipped-panel-card .delta {
+    display: inline-block;
+    background: #2f855a;
+    color: #fff;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-weight: 800;
+    font-size: 10px;
+    margin-left: 4px;
+  }
   .swim-block .hours-badge {
     position: absolute;
     top: 4px; right: 6px;
@@ -461,8 +546,8 @@
 <body>
 
 <header class="topbar">
-  <h1>makeLILA PRD Review v1.4.1 — Interactive Dashboard</h1>
-  <div class="sub">Hours-per-task timeline with per-shipper allocation. 15 PRD sections + §16 Token Budget. Click any tab; click a persona for clickable workflows; click a swimlane block for assignment detail.</div>
+  <h1>makeLILA PRD Review v1.5 — Interactive Dashboard</h1>
+  <div class="sub">v1.5 — Mobile V1 + V2 + Lovely integration substrate shipped (2026-06-07/08). Hours-per-task timeline with per-shipper allocation. 15 PRD sections + §16 Token Budget. Click any tab; click a persona for clickable workflows; click a swimlane block for assignment detail.</div>
 </header>
 
 <nav class="tabs" id="tabs">
@@ -495,6 +580,15 @@
     </p>
 
     <div class="stats" id="overview-stats"></div>
+
+    <div class="notes">
+      <h4>What's new in v1.5</h4>
+      <strong>Mobile V1 + Mobile V2 shipped 2026-06-07/08</strong> — V1 (viewport + PWA manifest + safe-area + narrow-aware nav) shipped in ~2h (vs 15h projection); V2 (per-module card-row treatment + MobileHome + NavCard drilldown across all modules) closed out under the L budget. Both flip from P1/P2 queued to shipped in §4 / §10. ·
+      <strong>lilalovely customer-events substrate shipped + end-to-end verified 2026-06-08 02:06 UTC</strong> — new first-class integration (§6 / §7): Next.js 16 PWA at <code>virgohomeio/beta-lovely</code> on its own Supabase project (<code>arfdopgbvlfmhmcfghhl</code>) fires customer-events (signup, serial pairing, onboarding step transitions, damage reports, OTA acceptances, push opt-ins) into makelila via pg_net → <code>ingest-lovely-event</code> edge fn → <code>customer_events</code> + <code>customer_app_links</code> tables. Resolution model: serial → email → unresolved. ~700ms round trip. ·
+      <strong>New tables</strong>: <code>customer_events</code>, <code>customer_app_links</code>, <code>external_email_allowlist</code>, plus <code>app_config</code> on the lovely side. ·
+      <strong>External user policy</strong> — Julie Li (yueli@virgohome.io, finance approver) added to the team; first external user Ryan Yuan (ryanyuan32@gmail.com) admitted via <code>external_email_allowlist</code> table + <code>auth.tsx</code> exception. ·
+      <strong>New P2 items unlocked</strong> by today's substrate: UnitTimeline (single <code>useActivityForEntity</code> call), OKR/KPI on ActivityLog, dormancy-driven at-risk filter, operator-fires-push, onboarding funnel report. See §10.
+    </div>
 
     <div class="card">
       <h3>Shipped vs Planned by Module</h3>
@@ -633,14 +727,16 @@
     <div class="card">
       <h3>Two-Supabase-project posture</h3>
       <p><strong>Main project</strong> <code>txeftbbzeflequvrmjjr</code> (LILA-Pro-Inventory): operational system of record. All ops modules read/write here.<br>
-      <strong>Telemetry project</strong> <code>arfdopgbvlfmhmcfghhl</code> ("Lovely"): hosts device telemetry — events, ac_current, bme_sensors, temperature_sensors, machine_health, lila. Dashboard reads via <code>lib/supabaseTelemetry.ts</code>; read-only with separate auth.</p>
+      <strong>Lovely project</strong> <code>arfdopgbvlfmhmcfghhl</code>: hosts device telemetry (events, ac_current, bme_sensors, temperature_sensors, machine_health, lila — read by Dashboard via <code>lib/supabaseTelemetry.ts</code>) AND, as of v1.5, the lilalovely customer-facing PWA owned by Ryan Yuan (own <code>auth.users</code> + <code>public.users</code> + <code>compost_batches</code> + <code>damage_reports</code> + <code>ota_acceptances</code> + <code>push_subscriptions</code> + <code>app_config</code>). Same Postgres, separate concern.</p>
+      <p><strong>Cross-project edge function pattern (v1.5):</strong> lovely-side pg triggers call <code>fire_makelila_event()</code> SECURITY DEFINER helper that reads a shared secret from <code>public.app_config</code> (hosted Supabase blocks <code>ALTER DATABASE ... SET</code> for custom GUCs) and POSTs to makelila's <code>ingest-lovely-event</code> edge function with <code>X-Lovely-Secret</code> header. Same posture will be reused for makelila → lovely reverse direction (operator-fires-push) — POST to <code>/api/admin/push</code> with the same shared secret.</p>
+      <p><strong>New tables (v1.5):</strong> <code>customer_events</code> (append-only event stream, indexed by <code>(customer_id, occurred_at desc)</code>) · <code>customer_app_links</code> (lovely_user_id ↔ customers.id via resolution = 'serial' | 'email' | 'unresolved') · <code>customer_engagement_summary</code> view (dormancy_days + events_7d + events_30d roll-up) · <code>external_email_allowlist</code> (non-@virgohome.io users opt-in via <code>auth.tsx</code> EXTERNAL_ALLOWLIST + patched <code>handle_new_user</code> trigger) · lovely-side <code>app_config</code> (key/value with no RLS, service_role + SECURITY DEFINER only).</p>
     </div>
     <div class="card">
       <h3>Non-functional requirements</h3>
       <p><strong>Performance:</strong> Realtime subscriptions on hot tables (orders, service_tickets, units, fulfillment_queue, ticket_notes, service_ticket_attachments). Pagination not currently required at 50–200 orders/mo + ~1000 lifetime units; revisit at 5× volume.<br><br>
-      <strong>Security:</strong> Supabase RLS in place, currently permissive for authenticated <code>@virgohome.io</code> users. P1 hardening: <code>profiles.role</code> enum (operator / manager / finance / admin) seeded from <code>MANAGER_EMAILS</code> / <code>FINANCE_EMAILS</code>; central <code>canDo(role, action)</code> for write gating; <code>canView(role, module)</code> for module-level visibility (drives Finance module nav-hide + route guard + RLS). Finance role = George + Huayi.<br><br>
-      <strong>Mobile:</strong> Backlog #80 — app today is desktop-only despite installable to iPhone home screen. P1 V1: viewport meta + safe-area-insets + PWA manifest + AppShell narrow-aware. P2 V2: per-module table → card-row treatment under ~700px.<br><br>
-      <strong>Observability:</strong> Every mutation writes <code>activity_log</code> via <code>logAction()</code>. KPI panel surfaces volumes per action type. P2: <code>entity_type</code> / <code>entity_id</code> / <code>unit_serial</code> columns + per-serial timeline UI; this also unblocks the OKR/KPI tracking in §4.9.<br><br>
+      <strong>Security:</strong> Supabase RLS in place. <strong>v1.5:</strong> <code>profiles.role</code> enum + <code>canDo</code>/<code>canView</code> helpers shipped (Phase A substrate); self-privilege-escalation hole on <code>profiles</code> closed. Finance role = George + Huayi + Julie (yueli@virgohome.io, finance approver added 2026-06-07). <strong>External access policy:</strong> Google OAuth still restricted to <code>@virgohome.io</code> by default, but non-@virgohome.io users can be admitted via the <code>external_email_allowlist</code> table + <code>auth.tsx</code> EXTERNAL_ALLOWLIST + patched <code>handle_new_user</code>. First external user: Ryan Yuan (ryanyuan32@gmail.com — needs makelila access while shipping the lovely-side integration).<br><br>
+      <strong>Mobile:</strong> Backlog #80 — <strong>SHIPPED v1.5</strong>. V1 (2026-06-07, ~2h actual vs 15h projected): viewport-fit=cover, theme-color/apple-mobile-web-app metas, PWA manifest, GlobalNav narrow-aware (700px breakpoint, scroll-snap module strip, 44px touch targets), AppShell safe-area-inset padding + 100dvh. V2 (2026-06-08, ~12h actual vs 45h projected): per-module table → card-row treatment across all modules + MobileHome + NavCard drilldown + Brolink wordmark UI + Inbox tap-to-read. Physical iPhone UAT ongoing.<br><br>
+      <strong>Observability:</strong> Every mutation writes <code>activity_log</code> via <code>logAction()</code>. KPI panel surfaces volumes per action type. <strong>v1.5 (shipped):</strong> <code>entity_type</code> / <code>entity_id</code> / <code>unit_serial</code> columns + <code>useActivityForEntity</code> hook + 12 call-sites refactored to pass entity refs. Unblocks UnitTimeline + OKR/KPI tracking + dormancy-driven at-risk filter.<br><br>
       <strong>Backup + audit:</strong> Supabase nightly backups. Activity log = audit trail.</p>
     </div>
   </section>
@@ -651,16 +747,20 @@
     <h2>Roadmap</h2>
     <p class="lede">PRD priority tiers map to the <a href="docs/competitive-landscape-and-proposal-2026-06-06.md">2026-06-06 competitive proposal</a>. P1 = next 90 days, P2 = next 2 quarters, P3 = strategic with revisit criteria.</p>
 
+    <div class="card" style="border-left: 4px solid var(--shipped)">
+      <h3 style="color:var(--shipped)">Shipped in v1.5 (2026-06-07 / 2026-06-08)</h3>
+      <p><strong>RBAC profiles + canDo + canView helpers</strong> (Huayi, ~1.5h vs 5h projected) · <strong>activity_log entity refs + useActivityForEntity hook</strong> (Huayi, ~1h vs 5h) · <strong>Mobile V1</strong> — viewport-fit, PWA manifest, AppShell narrow-aware, GlobalNav 700px breakpoint (Huayi, ~2h vs 15h) · <strong>Mobile V2</strong> — per-module card-row + MobileHome + NavCard drilldown + Inbox tap-to-read across all modules (Huayi, ~12h vs 45h) · <strong>lilalovely customer-events substrate</strong> — ingest edge fn + customer_events / customer_app_links / customer_engagement_summary + JourneyTab dormancy pill + customer-detail Lila app activity section, end-to-end verified 2026-06-08 02:06 UTC (Huayi, ~5h + Ryan ~3h).</p>
+    </div>
+
     <div class="card" style="border-left: 4px solid var(--p1)">
       <h3 style="color:var(--p1)">P1 — Next 90 days</h3>
-      <p>Klaviyo Track API firehose · telemetry-driven ticket auto-creation · device-context header on Service tickets · finish Returns/Refunds overhaul with grade + disposition + quarantine · QBO daily-summary journal sync · PaymentCard UI on OrderReview · warranty registration as a first-class entity · SLA aging + auto-escalation.</p>
-      <p><strong>New P1 from this PRD:</strong> Mobile V1 (viewport + manifest + AppShell narrow-aware — backlog #80) · Facebook Marketing API spend + performance pull + Meta Lead Ads webhook · <strong>RBAC profiles + canDo + canView helpers (promoted from P2)</strong> · <strong>Finance module skeleton + JournalPanel sub-surface (the visibility-gated home for QBO daily-summary work)</strong>.</p>
+      <p>Klaviyo Track API firehose · telemetry-driven ticket auto-creation · device-context header on Service tickets · finish Returns/Refunds overhaul with grade + disposition + quarantine · QBO daily-summary journal sync · PaymentCard UI on OrderReview · warranty registration as a first-class entity · SLA aging + auto-escalation · Facebook Marketing API spend + performance pull + Meta Lead Ads webhook · <strong>Finance module skeleton + JournalPanel sub-surface (the visibility-gated home for QBO daily-summary work)</strong>.</p>
     </div>
 
     <div class="card" style="border-left: 4px solid var(--p2)">
       <h3 style="color:var(--p2)">P2 — Next 2 quarters</h3>
-      <p>build_station_passes promotion · Klaviyo predictive properties pull · freight quote history · activity_log entity refs + per-serial timeline.</p>
-      <p><strong>New P2 from this PRD:</strong> Facebook CAPI server-side events · mobile V2 (per-module card-row treatment) · QuickBooks integration (full daily-summary scope) · HubSpot CRM decommission decision + execution if approved · <strong>Finance module ProductionProjectionPanel (depends on backlog #71 + freight history)</strong> · <strong>ActivityLog OKR &amp; KPI tracking (depends on activity_log entity refs)</strong>.</p>
+      <p>build_station_passes promotion · Klaviyo predictive properties pull · freight quote history · Facebook CAPI server-side events · QuickBooks integration (full daily-summary scope) · HubSpot CRM decommission decision + execution if approved · <strong>Finance module ProductionProjectionPanel (depends on backlog #71 + freight history)</strong>.</p>
+      <p><strong>New P2 unblocked by v1.5 substrate:</strong> <strong>UnitTimeline.tsx</strong> (Junaid, S, ~3h) — single <code>useActivityForEntity({ unitSerial })</code> call thanks to Phase B · <strong>OKR &amp; KPI tracking on ActivityLog</strong> (Reina, M) — okrs table + okr_progress view, drives off activity_log entity refs · <strong>Dormancy-driven at-risk filter on JourneyTab</strong> (Huayi/Reina, S, ~2h) — at-risk computed from lovely.dormancy_30d/60d events + last_login_at instead of operator-curated · <strong>Operator-fires-push</strong> (Huayi + Ryan, M, ~4h split) — "Send push" button on Service ticket + Customer detail panel → POST /api/admin/push on lovely → web-push to customer · <strong>Onboarding funnel report</strong> (Pedrum, S, ~3h) — query customer_events for lovely.onboarding_step transitions, funnel chart for first "pairing → tour" conversion metric.</p>
     </div>
 
     <div class="card" style="border-left: 4px solid var(--p3)">
@@ -705,7 +805,7 @@
     <div class="section-anchor">§12 Timeline — hour-based, per-shipper</div>
     <h2>Timeline — Hours per Task &amp; Owner</h2>
     <p class="lede">
-      <strong>v1.4 — switched from calendar weeks to hours per task with owner allocation.</strong> Each feature is sized in hours (S = 5h, M = 15h, L = 45h covering dev + validation) and assigned to the best-fit current shipper among <strong>Pedrum, Junaid, Reina, and Huayi</strong>. George + Lezhong join later — features flagged with a future-handoff badge below will move to them. The swimlane shows what each person owns; rows scale to total hours.
+      <strong>v1.5 — five Huayi items shipped (RBAC, activity_log entity refs, Mobile V1, Mobile V2, Lovely integration substrate).</strong> Cumulative actual: ~21.5h vs ~85h projected — sustained ~75% under projection across S and M items, and the L (Mobile V2) came in at ~12h vs 45h. Per timeline-tracker.md the swimlane below now shows the remaining queue only; shipped items are listed under §10 Roadmap. Sizing convention unchanged: S = 5h, M = 15h, L = 45h. George + Lezhong still upcoming; future-handoff badges retained.
     </p>
 
     <div class="stats" id="shipper-summary-stats"></div>
@@ -718,9 +818,11 @@
       <div class="item"><span class="pill domain-supporting" style="font-size:9px">dep: feature</span> dependency inside same person's queue</div>
     </div>
 
+    <div id="shipped-this-release"></div>
+
     <div class="card">
       <h3>Per-shipper workload &mdash; total hours assigned</h3>
-      <p class="lede" style="margin:0 0 12px">Each row shows that shipper's queue. Within a row, features are ordered by dependency (earliest first). Width is proportional to hours. Hover a block for details.</p>
+      <p class="lede" style="margin:0 0 12px">Each row shows that shipper's queue. Within a row, features are ordered by dependency (earliest first). Width is proportional to hours. Shipped items appear in a separate green strip per row and don't count toward remaining hours. Hover a block for details.</p>
       <div id="swimlane-wrap"></div>
     </div>
 
@@ -756,9 +858,10 @@
     </div>
 
     <div class="notes">
-      <h4>Calendar implication</h4>
-      Bottleneck = the shipper with the highest <em>hours ÷ weekly capacity</em> ratio. Plugging in default weekly assumptions (Huayi 25h, Pedrum 15h, Junaid 15h, Reina 10h), <strong>everyone finishes within ~5 weeks of dev calendar</strong> with one round of UAT, putting the full P1 + P2 + P3 plan at roughly <strong>6–8 weeks elapsed</strong>. George + Lezhong joining shortens this further by absorbing the build_station_passes + future Build/Dashboard work.<br><br>
-      <strong>Adjusting weekly capacity</strong> shifts the calendar. Two engineers each at 30h/week (so Huayi + one other at increased availability) compresses to ~3 weeks. Reina at 5h/week extends her queue to 9 weeks — could be relieved by moving one M item to Huayi or pairing.
+      <h4>Calendar implication + v1.5 calibration</h4>
+      <strong>v1.5 actuals (Huayi):</strong> 5 of 8 features shipped (RBAC, activity_log entity refs, Mobile V1, Mobile V2, Lovely integration substrate). Cumulative ~21.5h actual vs ~85h projected — sustained ~75% under projection. S items averaged ~1.25h (vs 5h); the two M items came in at ~2h (Mobile V1) and ~5h (Lovely substrate); the L (Mobile V2) at ~12h vs 45h. Per <code>docs/session-notes/timeline-tracker.md</code> the S → ~3h re-calibration recommendation now has n ≥ 4 evidence; M → ~5h is forming with n = 3.<br><br>
+      <strong>Calendar with v1.5 calibration applied to the remaining queue:</strong> Huayi remaining = 4 items × revised sizing (~35h projected, ~10h likely actual at the observed variance) → <strong>finish within 1 week at 25h/wk</strong>. Other shippers haven't started yet, so their queues remain unvalidated against this calibration — Pedrum/Junaid/Reina still planned at the original S/M/L numbers. Bottleneck if everyone shipped at the original projection: still Reina at 10h/wk capacity. If the v1.5 variance pattern holds for them too, the full plan collapses to ~3 weeks elapsed.<br><br>
+      <strong>George + Lezhong</strong> joining still shortens the build_station_passes + future Build/Dashboard work as previously noted.
     </div>
   </section>
 
@@ -796,7 +899,7 @@
     <div class="section-anchor">§16 Token Budget Analysis — calibrated to actual ship cadence</div>
     <h2>Token Budget Analysis</h2>
     <p class="lede">
-      In v1.4 the timeline in §12 is hour-based with explicit owner allocation across the four current shippers (Pedrum, Junaid, Reina, Huayi). This section maps each feature to its estimated Claude Code token consumption and the corresponding fraction of a weekly Claude tier — per-shipper, since each person needs their own subscription. Cadence ground truth: <strong>430 commits since 2026-04-01</strong> (~67 days, avg 6.4 commits/day, peak 80 commits on 2026-06-04).
+      As of v1.5 the timeline in §12 remains hour-based with explicit owner allocation across the four current shippers (Pedrum, Junaid, Reina, Huayi); five Huayi items now shipped (RBAC, activity_log entity refs, Mobile V1, Mobile V2, Lovely substrate) and are removed from the per-shipper queues. This section maps each remaining feature to its estimated Claude Code token consumption and the corresponding fraction of a weekly Claude tier — per-shipper, since each person needs their own subscription. Cadence ground truth: <strong>430 commits since 2026-04-01</strong> (~67 days, avg 6.4 commits/day, peak 80 commits on 2026-06-04) — extended to ~480 commits including the v1.5 ship-burst on 2026-06-07/08.
     </p>
 
     <div class="stats" id="token-stats"></div>
@@ -867,7 +970,7 @@
 
     <div class="card">
       <h3>Per-shipper token consumption (P1 / P2 / P3 stacked)</h3>
-      <p class="lede" style="margin:0 0 12px">v1.4 update — token consumption broken down by the shipper who owns each feature. Huayi carries the largest cumulative spend because of the L Mobile V2 + multiple Finance Ms; Reina's queue is the leanest. Each person's bar should comfortably fit within their share of one Max 5× weekly cap if they use Claude as their primary IDE.</p>
+      <p class="lede" style="margin:0 0 12px">v1.5 update — token consumption broken down by the shipper who owns each remaining feature. Huayi's L Mobile V2 + RBAC + activity_log + Lovely substrate all shipped at well under projection, so her remaining queue (Finance + Operator-fires-push + Linear/GitHub link) is now leaner than the original projection. Reina's queue remains the lightest. Each person's bar should comfortably fit within their share of one Max 5× weekly cap if they use Claude as their primary IDE.</p>
       <div class="chart-canvas-wrap tall"><canvas id="chart-token-burn"></canvas></div>
     </div>
 
@@ -889,7 +992,7 @@
 </main>
 
 <footer>
-  Source: <a href="docs/PRD-2026-06-06.md">docs/PRD-2026-06-06.md</a> (v1.2) and <a href="docs/competitive-landscape-and-proposal-2026-06-06.md">2026-06-06 competitive landscape proposal</a>. Generated 2026-06-06.
+  Source: <a href="docs/PRD-2026-06-06.md">docs/PRD-2026-06-06.md</a> (v1.2) and <a href="docs/competitive-landscape-and-proposal-2026-06-06.md">2026-06-06 competitive landscape proposal</a>. v1.5 also pulls from <a href="docs/integration-lilalovely-2026-06-07.md">docs/integration-lilalovely-2026-06-07.md</a>, <a href="docs/handoff-ryan-lovely-integration.md">docs/handoff-ryan-lovely-integration.md</a>, and <a href="docs/session-notes/timeline-tracker.md">docs/session-notes/timeline-tracker.md</a>. Generated 2026-06-06, last revised 2026-06-08.
 </footer>
 
 <script>
@@ -975,6 +1078,7 @@ const MODULES = [
       { p: 'P1', e: 'M', text: 'Telemetry-driven ticket auto-creation from persistent non-OK states', meta: 'Proposal P1 #2 — pg_cron every 30min, source=telemetry_auto' },
       { p: 'P1', e: 'M', text: 'SLA aging + auto-escalation', meta: 'Proposal P1 #8 — sla_policies table + 15min pg_cron escalation_notify' },
       { p: 'P2', e: 'M', text: 'AI-drafted reply suggestions grounded in Templates corpus', meta: 'Intercom Fin / Plain AI pattern' },
+      { p: 'P2', e: 'M', text: 'Operator-fires-push (lovely V2)', meta: 'NEW v1.5 — Service ticket "Send push" button → POSTs to /api/admin/push on lovely → web-push to the customer. Split: ~4h Huayi + ~2h Ryan.' },
       { p: 'P3', e: 'S', text: 'Bidirectional Linear / GitHub issue linking', meta: 'Plain / Linear pattern from competitive proposal' },
     ],
   },
@@ -988,7 +1092,7 @@ const MODULES = [
       'P100X batch with documented end-of-July ETA',
     ],
     planned: [
-      { p: 'P2', e: 'S', text: 'UnitTimeline.tsx component (per-serial audit timeline)', meta: 'Proposal P2 #12 — depends on activity_log entity refs' },
+      { p: 'P2', e: 'S', text: 'UnitTimeline.tsx component (per-serial audit timeline)', meta: 'Proposal P2 #12 — unblocked v1.5: substrate shipped, now a single useActivityForEntity({ unitSerial }) call' },
       { p: 'P1', e: 'S', text: 'units.status quarantine enum value (paired with Returns disposition)', meta: 'Prevents quarantine units from re-entering Available-to-Promise' },
     ],
   },
@@ -1000,11 +1104,15 @@ const MODULES = [
       'Manual journey_stage_override',
       'Customer ↔ unit linking via #67 customer_id FK',
       'Activity preview per customer',
+      'Lila app activity section (per-customer lovely event timeline + engagement summary + dormancy badge, v1.5)',
+      'JourneyTab dormancy pill (active / Nd quiet / Nd dormant, v1.5)',
     ],
     planned: [
       { p: 'P2', e: 'M', text: 'Customer record page with right-side widgets sidebar', meta: 'Attio / Vitally record-page pattern — open tickets, returns, orders, machines, health' },
       { p: 'P2', e: 'S', text: 'Klaviyo predictive properties pull-back (EDNO, CLV, churn risk)', meta: 'Proposal P2 #10 — nightly klaviyo-pull-predictive edge function' },
       { p: 'P1', e: 'S', text: 'Lead attribution fields (first_touch_source / last_touch_campaign_id)', meta: 'Powers §5 marketing-attribution view' },
+      { p: 'P2', e: 'S', text: 'Dormancy-driven at-risk JourneyTab filter', meta: 'NEW v1.5 — drives at-risk from lovely.dormancy_30d/60d events + last_login_at instead of operator-curated' },
+      { p: 'P2', e: 'S', text: 'Onboarding funnel report (lovely.onboarding_step transitions)', meta: 'NEW v1.5 — first "we converted N% from pairing → tour" metric, ~3h Pedrum' },
     ],
   },
   {
@@ -1025,10 +1133,10 @@ const MODULES = [
       'logAction(action_type, ref_id, detail) called from every lib/*.ts mutation',
       'KPI panel with daily / 7d / 30d counts per action type',
       'TILE_DEFS-driven configurable KPI tiles',
+      'activity_log entity refs (entity_type, entity_id, unit_serial) + useActivityForEntity hook (v1.5 — Phase B substrate)',
     ],
     planned: [
-      { p: 'P2', e: 'S', text: 'activity_log entity refs (entity_type, entity_id, unit_serial)', meta: 'Proposal P2 #12 — unblocks per-serial timeline + OKR substrate' },
-      { p: 'P2', e: 'M', text: 'OKR & KPI tracking — company + individual', meta: 'NEW in PRD v1.2 — okrs table + okr_progress view, two views (Company / My OKRs), privacy-gated individual scoring' },
+      { p: 'P2', e: 'M', text: 'OKR & KPI tracking — company + individual', meta: 'NEW in PRD v1.2 — okrs table + okr_progress view, two views (Company / My OKRs), privacy-gated individual scoring. Unblocked v1.5 by entity refs.' },
     ],
   },
   {
@@ -1076,9 +1184,20 @@ const CROSS_CUTTING = [
   { area: 'Integrations', name: 'QuickBooks Online OAuth + daily-summary journal sync', p: 'P1', e: 'M' },
   { area: 'Integrations', name: 'HubSpot CRM decommission (sequences → Klaviyo)', p: 'P2', e: 'M' },
   { area: 'Cross-cutting', name: 'RBAC profiles + canDo + canView helpers', p: 'P1', e: 'S' },
-  { area: 'Cross-cutting', name: 'Mobile V1: viewport + PWA manifest + AppShell narrow-aware', p: 'P1', e: 'M' },
-  { area: 'Cross-cutting', name: 'Mobile V2: per-module card-row tables', p: 'P2', e: 'L' },
   { area: 'Cross-cutting', name: 'Warranty registrations as first-class entity', p: 'P1', e: 'S' },
+  // SHIPPED v1.5 — Mobile V1 (2026-06-07) + Mobile V2 (2026-06-08) + Lovely substrate (2026-06-08)
+  // No longer counted in CROSS_CUTTING planned totals; surfaced as shipped items in their owning
+  // modules / integrations + flagged in §10 Roadmap. See SHIPPED_V15 below.
+];
+
+// v1.5 — shipped items pulled out of CROSS_CUTTING / module .planned arrays so the
+// stats / charts / swimlane drive off the still-planned queue only.
+const SHIPPED_V15 = [
+  { name: 'Mobile V1: viewport + PWA manifest + AppShell narrow-aware', area: 'Cross-cutting', shipped_on: '2026-06-07', owner: 'huayi', hours_actual: 2, hours_projected: 15 },
+  { name: 'Mobile V2: per-module card-row tables + MobileHome + NavCard drilldown', area: 'Cross-cutting', shipped_on: '2026-06-08', owner: 'huayi', hours_actual: 12, hours_projected: 45 },
+  { name: 'Lovely customer-events substrate (ingest edge fn + customer_events + customer_app_links + UI)', area: 'Integrations', shipped_on: '2026-06-08', owner: 'huayi', hours_actual: 5, hours_projected: 15 },
+  { name: 'RBAC profiles + canDo + canView helpers', area: 'Cross-cutting', shipped_on: '2026-06-07', owner: 'huayi', hours_actual: 1.5, hours_projected: 5 },
+  { name: 'activity_log entity refs + per-serial substrate', area: 'Cross-cutting', shipped_on: '2026-06-07', owner: 'huayi', hours_actual: 1, hours_projected: 5 },
 ];
 
 const VISION = [
@@ -1150,6 +1269,12 @@ const INTEGRATIONS = [
     body: 'Authoritative carrier-rate + label provider for Canadian LTL. Quotes pulled to <code>orders.freight_estimate_usd</code>; label print + tracking push at Fulfillment label step. P2: <code>freight_quotes</code> child table for re-quote history. Dual-call posture: keep Freightcom for CA LTL discount, evaluate EasyPost for US parcel only.' },
   { name: 'QuickBooks Online', status: 'planned', role: 'Event Sink — Planned P1',
     body: 'Today: not integrated; weekly manual reconciliation. P1: <code>qbo-daily-summary</code> nightly edge function aggregates day\'s orders + refunds + Sezzle payouts by <code>(currency, payment_channel)</code>, posts one journal per group via OAuth 2.0, writes <code>qbo_daily_journals</code> audit table. Replacement orders routed to <code>warranty_reserve</code> GL — never double-counts revenue.' },
+  { name: 'lilalovely (customer app)', status: 'live', role: 'Bidirectional — customer-events substrate (NEW v1.5)',
+    body: 'Next.js 16 PWA at <code>virgohomeio/beta-lovely</code> (Ryan Yuan), own Supabase project <code>arfdopgbvlfmhmcfghhl</code>. <strong>Live direction (lovely → makelila):</strong> pg_net AFTER triggers on <code>users</code>, <code>damage_reports</code>, <code>ota_acceptances</code>, <code>push_subscriptions</code> fire <code>lovely.*</code> events through <code>fire_makelila_event()</code> SECURITY DEFINER helper to <code>ingest-lovely-event</code> edge fn (X-Lovely-Secret header auth). Resolution: serial → email → unresolved (link row created either way). Tables: <code>customer_events</code> + <code>customer_app_links</code> + <code>customer_engagement_summary</code> view. End-to-end verified 2026-06-08 02:06 UTC, ~700ms round trip. <strong>V1.1 outstanding:</strong> push_opt_out trigger; client-side dashboard_open + batch_complete_seen events; pg_cron dormancy_30d/60d scan. <strong>V2:</strong> reverse direction — makelila operator clicks "Send push" → POST /api/admin/push on lovely → web-push to customer.' },
+  { name: 'WhatsApp MCP (operator tool)', status: 'live', role: 'Operator-side messaging via MCP (NEW v1.5)',
+    body: 'Connected via <code>verygoodplugins/whatsapp-mcp</code> for operator-side outreach + history reads. Not embedded in the makelila web app — used by operators (Huayi initially) via Claude Code MCP. No customer data flows into makelila DB.' },
+  { name: 'WeChat MCP (operator tool)', status: 'live', role: 'Operator-side messaging via ClawBot bridge (NEW v1.5)',
+    body: 'Connected via <code>@paean-ai/claude-code-wechat</code> (ClawBot bridge, iOS-only). Resolves the previously-flagged WeChat send-tool gap. Used by operators for manufacturer + China-side contact conversations (Lezhong workflow). Operator-side only — no customer data sync into makelila.' },
 ];
 
 const RECOMMENDED = [
@@ -1553,6 +1678,7 @@ const SEQUENCING = [
 ];
 
 const CHANGELOG = [
+  { v: '1.5', date: '2026-06-08', notes: 'Five Huayi items shipped between 2026-06-07 and 2026-06-08: (1) RBAC profiles + canDo/canView helpers (~1.5h vs 5h projected) + closed self-privilege-escalation hole on profiles. (2) activity_log entity refs + useActivityForEntity hook (~1h vs 5h) — Phase B substrate that unblocks UnitTimeline + OKR/KPI tracking. (3) Mobile V1 — viewport-fit, PWA manifest, AppShell narrow-aware, GlobalNav 700px breakpoint (~2h vs 15h). (4) Mobile V2 — per-module card-row + MobileHome + NavCard drilldown + Brolink wordmark + Inbox tap-to-read across all modules (~12h vs 45h). (5) lilalovely customer-events substrate — new first-class integration with Ryan Yuan\'s Next.js PWA at virgohomeio/beta-lovely on its own Supabase project; pg_net triggers → ingest-lovely-event edge fn with X-Lovely-Secret header auth → customer_events + customer_app_links + customer_engagement_summary; end-to-end verified 2026-06-08 02:06 UTC, ~700ms round trip. New tables noted in §9. WhatsApp MCP + WeChat MCP (ClawBot) added as operator-side tooling integrations (resolves previously-flagged WeChat send-tool gap). Julie Li (yueli@virgohome.io) added as finance approver; Ryan Yuan (ryanyuan32@gmail.com) admitted as first external user via external_email_allowlist + auth.tsx exception. New P2 items unlocked by substrate: UnitTimeline, OKR/KPI on ActivityLog, dormancy-driven at-risk filter, operator-fires-push, onboarding funnel report. Timeline calibration: S items running 75% under projection (n=4), M items forming similar pattern (n=3), L item came in at 27% of projection (n=1).' },
   { v: '1.4.1', date: '2026-06-06', notes: 'Bugfix + assignment rebalance. (1) Fixed Timeline tab rendering empty due to stale TIMELINE references in renderTokenStats throwing ReferenceError and breaking the rest of the init chain. (2) Rebalanced ownership per explicit domain rules: Customer Service work split across Huayi + Reina + Junaid (not Pedrum); Junaid also owns Stock module work (UnitTimeline + units.status quarantine); Pedrum owns Sales + Pre-sale modules only (no CS work). Added missing items (CAC view, AI-drafted reply suggestions, Templates RAG corpus, UnitTimeline component, units.status quarantine, Linear/GitHub linking). Reina now owns the full Service AI-drafts + Templates substrate path.' },
   { v: '1.4', date: '2026-06-06', notes: 'Switched timeline from calendar weeks to hours-per-task with explicit owner allocation across the four current shippers (Pedrum, Junaid, Reina, Huayi). New SHIPPERS array + ASSIGNMENTS data model. Replaced calendar Gantt with per-shipper swimlane (interactive — click a block for assignment detail). Added shipper workload table + cumulative-completion-by-hours chart + future-handoff section showing items that move to George + Lezhong once they join. Hour sizing: S = 5h, M = 15h, L = 45h.' },
   { v: '1.3', date: '2026-06-06', notes: 'Recalibrated timeline against actual repo cadence (430 commits since 2026-04-01, avg 6.4/day, peak 80/day on 2026-06-04). 24-week plan compressed to 14 weeks (~3.5 months). Added §16 Token Budget Analysis with per-feature token estimates and Claude tier (Pro / Max 5× / Max 20×) consumption analysis.' },
@@ -1582,7 +1708,7 @@ function renderOverviewStats() {
     { label: 'P1 planned', value: countAll('p1'), sub: 'Next 90 days', cls: 'planned-p1' },
     { label: 'P2 planned', value: countAll('p2'), sub: 'Next 2 quarters', cls: 'planned-p2' },
     { label: 'P3 planned', value: countAll('p3'), sub: 'Strategic, deferred', cls: 'planned-p3' },
-    { label: 'Integrations live', value: 13, sub: 'See §6' },
+    { label: 'Integrations live', value: 16, sub: 'See §6 — +3 in v1.5 (lovely, WhatsApp MCP, WeChat MCP)' },
     { label: 'Integrations planned', value: 2, sub: 'Facebook + QBO (§6.4 + §6.15)' },
     { label: 'Personas', value: PERSONAS.length, sub: 'Operator workflows' },
   ];
@@ -1925,10 +2051,10 @@ const SHIPPERS = [
 //   - George + Lezhong are future shippers
 const ASSIGNMENTS = [
   // ── Substrate (Week 1) ────────────────────────────────────────────
-  { name: 'RBAC profiles + canDo/canView helpers',         p: 'P1', size: 'S', hours: 5,  owner: 'huayi',  why: 'Cross-cutting; blocks Finance module visibility model + Returns approver gate refactor' },
+  // SHIPPED v1.5 (2026-06-07): RBAC profiles + canDo/canView helpers (Huayi, ~1.5h) — removed from queue.
+  // SHIPPED v1.5 (2026-06-07): activity_log entity refs + per-serial substrate (Huayi, ~1h) — removed from queue.
   { name: 'Klaviyo Track API event firehose',              p: 'P1', size: 'S', hours: 5,  owner: 'pedrum', why: 'Pre-sale + lifecycle domain — Pedrum owns the Klaviyo integration' },
   { name: 'PaymentCard UI on OrderReview',                 p: 'P1', size: 'S', hours: 5,  owner: 'pedrum', why: 'Sales module (OrderReview) — Pedrum\'s daily flow' },
-  { name: 'activity_log entity refs + per-serial timeline', p: 'P2', size: 'S', hours: 5,  owner: 'huayi',  why: 'Substrate; unblocks Junaid\'s telemetry auto-ticket richness + Reina\'s OKR module' },
 
   // ── Pedrum: Sales + Pre-sale only ─────────────────────────────────
   { name: 'Lead attribution fields (first_touch / last_touch)', p: 'P1', size: 'S', hours: 5, owner: 'pedrum', why: 'Pre-sale — JourneyTab attribution chip Pedrum scans daily' },
@@ -1941,9 +2067,9 @@ const ASSIGNMENTS = [
   { name: 'HubSpot CRM decommission window',               p: 'P2', size: 'M', hours: 15, owner: 'pedrum', dep: ['Klaviyo Track API event firehose'], why: 'Pre-sale CRM — sequence migration is Pedrum\'s domain knowledge' },
 
   // ── Junaid: Customer Service + Stock ───────────────────────────────
-  { name: 'Warranty registration entity',                  p: 'P1', size: 'S', hours: 5,  owner: 'junaid', dep: ['RBAC profiles + canDo/canView helpers'], why: 'Customer Service — Junaid owns the ticket/warranty workflow' },
-  { name: 'units.status quarantine enum value',            p: 'P1', size: 'S', hours: 5,  owner: 'junaid', dep: ['RBAC profiles + canDo/canView helpers'], why: 'Stock module — paired with Returns disposition; prevents quarantine units from re-entering Available-to-Promise' },
-  { name: 'UnitTimeline.tsx component (per-serial audit)',  p: 'P2', size: 'S', hours: 5,  owner: 'junaid', dep: ['activity_log entity refs + per-serial timeline'], why: 'Stock module — per-serial audit timeline lives inside Stock unit detail; Junaid uses it for repair history lookups' },
+  { name: 'Warranty registration entity',                  p: 'P1', size: 'S', hours: 5,  owner: 'junaid', why: 'Customer Service — Junaid owns the ticket/warranty workflow (RBAC substrate shipped v1.5)' },
+  { name: 'units.status quarantine enum value',            p: 'P1', size: 'S', hours: 5,  owner: 'junaid', why: 'Stock module — paired with Returns disposition; prevents quarantine units from re-entering Available-to-Promise (RBAC substrate shipped v1.5)' },
+  { name: 'UnitTimeline.tsx component (per-serial audit)',  p: 'P2', size: 'S', hours: 5,  owner: 'junaid', why: 'Stock module — per-serial audit timeline lives inside Stock unit detail; activity_log entity refs substrate SHIPPED v1.5, now a single useActivityForEntity({ unitSerial }) call' },
   { name: 'Device-context header on Service tickets',      p: 'P1', size: 'M', hours: 15, owner: 'junaid', dep: ['Warranty registration entity'], why: 'Customer Service — chip header surfaces firmware + QC + telemetry on every Service ticket' },
   { name: 'SLA aging + auto-escalation',                   p: 'P1', size: 'M', hours: 15, owner: 'junaid', why: 'Customer Service — Junaid feels the pain when SLA aging is invisible in his queue' },
   { name: 'Telemetry-driven ticket auto-create',           p: 'P1', size: 'M', hours: 15, owner: 'junaid', dep: ['Device-context header on Service tickets'], why: 'Customer Service + Dashboard intersection; Junaid validates the false-positive thresholds' },
@@ -1951,17 +2077,21 @@ const ASSIGNMENTS = [
 
   // ── Reina: Customer Service ────────────────────────────────────────
   { name: 'Templates as RAG corpus for AI drafts',         p: 'P2', size: 'S', hours: 5,  owner: 'reina',  why: 'Customer Service — Templates module surface; Reina uses templates daily for onboarding outreach' },
-  { name: 'Returns disposition + grade + quarantine + #79', p: 'P1', size: 'M', hours: 15, owner: 'reina',  dep: ['RBAC profiles + canDo/canView helpers'], why: 'Customer Service / PostShipment — Returns is the biggest CX-adjacent operator pain right now; Reina handles inspection workflow end-to-end' },
+  { name: 'Returns disposition + grade + quarantine + #79', p: 'P1', size: 'M', hours: 15, owner: 'reina',  why: 'Customer Service / PostShipment — Returns is the biggest CX-adjacent operator pain right now; Reina handles inspection workflow end-to-end (RBAC substrate shipped v1.5)' },
   { name: 'AI-drafted reply suggestions (Service)',        p: 'P2', size: 'M', hours: 15, owner: 'reina',  dep: ['Templates as RAG corpus for AI drafts'], why: 'Customer Service — RAG-grounded ticket replies; Reina + Junaid share Service workload, this is Reina\'s slice' },
-  { name: 'OKR & KPI tracking (ActivityLog)',              p: 'P2', size: 'M', hours: 15, owner: 'reina',  dep: ['activity_log entity refs + per-serial timeline'], why: 'ActivityLog substrate — Reina has reliable daily flow → good UAT fit; lower-stakes module for ship-pattern learning' },
+  { name: 'OKR & KPI tracking (ActivityLog)',              p: 'P2', size: 'M', hours: 15, owner: 'reina',  why: 'ActivityLog substrate — activity_log entity refs SHIPPED v1.5; Reina has reliable daily flow → good UAT fit; lower-stakes module for ship-pattern learning' },
+  { name: 'Dormancy-driven at-risk filter (JourneyTab)',   p: 'P2', size: 'S', hours: 2,  owner: 'reina',  why: 'NEW v1.5 — at-risk computed from lovely.dormancy_30d/60d events + last_login_at instead of operator-curated; small UI on existing customer_engagement_summary view' },
   { name: 'Customer record sidebar widgets (Attio pattern)', p: 'P3', size: 'M', hours: 15, owner: 'reina',  why: 'Customer Service / Customers — open tickets + returns + machines + health surfaced on customer detail; Reina lives in JourneyTab' },
 
   // ── Huayi: cross-cutting + Finance + Mobile + one Service P3 ───────
-  { name: 'Mobile V1 (viewport + PWA + AppShell)',         p: 'P1', size: 'M', hours: 15, owner: 'huayi',  why: 'Cross-cutting AppShell + GlobalNav; Huayi owns the product chrome' },
-  { name: 'Finance module skeleton + JournalPanel (QBO)',  p: 'P1', size: 'M', hours: 15, owner: 'huayi',  dep: ['RBAC profiles + canDo/canView helpers', 'Returns disposition + grade + quarantine + #79'], why: 'Restricted Finance module; Huayi has access + product context' },
+  // SHIPPED v1.5 (2026-06-07): Mobile V1 (~2h actual vs 15h projected) — removed from queue.
+  // SHIPPED v1.5 (2026-06-08): Mobile V2 (~12h actual vs 45h projected) — removed from queue.
+  // SHIPPED v1.5 (2026-06-08): Lovely customer-events substrate (~5h actual + Ryan ~3h) — removed from queue.
+  { name: 'Finance module skeleton + JournalPanel (QBO)',  p: 'P1', size: 'M', hours: 15, owner: 'huayi',  dep: ['Returns disposition + grade + quarantine + #79'], why: 'Restricted Finance module; Huayi has access + product context (RBAC substrate shipped v1.5)' },
   { name: 'ProductionProjectionPanel (Finance)',           p: 'P2', size: 'M', hours: 15, owner: 'huayi',  dep: ['Finance module skeleton + JournalPanel (QBO)'], why: 'Finance restricted + Huayi has stock-out modeling context' },
   { name: 'SalesProjectionPanel rolling-average',          p: 'P2', size: 'M', hours: 15, owner: 'huayi',  dep: ['ProductionProjectionPanel (Finance)'], why: 'Finance restricted; Huayi has the marketing-data context' },
-  { name: 'Mobile V2 (card-row tables)',                   p: 'P2', size: 'L', hours: 45, owner: 'huayi',  dep: ['Mobile V1 (viewport + PWA + AppShell)'], why: 'Largest single item — Huayi owns CSS strategy; could pair on individual modules' },
+  { name: 'Operator-fires-push (lovely V2)',               p: 'P2', size: 'M', hours: 4,  owner: 'huayi',  why: 'NEW v1.5 — Service ticket + Customer-detail "Send push" button POSTs to /api/admin/push on lovely → web-push to customer. ~4h Huayi + ~2h Ryan split.' },
+  { name: 'Onboarding funnel report',                      p: 'P2', size: 'S', hours: 3,  owner: 'pedrum', why: 'NEW v1.5 — query customer_events for lovely.onboarding_step transitions, funnel chart for first pairing → tour conversion metric' },
   { name: 'Bidirectional Linear/GitHub issue linking',     p: 'P3', size: 'S', hours: 5,  owner: 'huayi',  why: 'Customer Service / Service module — Plain/Linear pattern; Huayi\'s engineering touchpoint to the CS workflow' },
 ];
 
@@ -2008,11 +2138,38 @@ function renderShipperSummaryStats() {
   ].map(s => `<div class="stat ${s.cls || ''}"><div class="label">${s.label}</div><div class="value">${s.value}</div><div class="sub">${s.sub}</div></div>`).join('');
 }
 
+function renderShippedThisRelease() {
+  const wrap = document.getElementById('shipped-this-release');
+  if (!wrap || !SHIPPED_V15.length) return;
+  const totalActual = SHIPPED_V15.reduce((s, x) => s + x.hours_actual, 0);
+  const totalProjected = SHIPPED_V15.reduce((s, x) => s + x.hours_projected, 0);
+  const savedPct = Math.round(((totalProjected - totalActual) / totalProjected) * 100);
+  wrap.innerHTML = `
+    <div class="shipped-panel">
+      <div class="shipped-panel-head">
+        <h3>Shipped in v1.5 (${SHIPPED_V15.length} items)</h3>
+        <div class="totals">${totalActual}h actual vs ${totalProjected}h projected · <span class="delta" style="margin-left:6px">−${savedPct}% under projection</span></div>
+      </div>
+      <div class="shipped-panel-list">
+        ${SHIPPED_V15.map(x => {
+          const owner = SHIPPERS.find(sh => sh.id === x.owner);
+          const delta = Math.round(((x.hours_projected - x.hours_actual) / x.hours_projected) * 100);
+          return `<div class="shipped-panel-card">
+            <div class="name">${x.name}</div>
+            <div class="meta">${x.area} · ${owner ? owner.name : x.owner} · ${x.shipped_on} · ${x.hours_actual}h vs ${x.hours_projected}h proj <span class="delta">−${delta}%</span></div>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>
+  `;
+}
+
 function renderSwimlane() {
   const wrap = document.getElementById('swimlane-wrap');
   const currentShippers = SHIPPERS.filter(s => s.current);
   wrap.innerHTML = `<div class="swimlane">${currentShippers.map(s => {
     const items = getAssignmentsFor(s.id);
+    const shipped = SHIPPED_V15.filter(x => x.owner === s.id);
     const hours = items.reduce((sum, a) => sum + a.hours, 0);
     const wks = (hours / s.weekly_hours).toFixed(1);
     return `
@@ -2023,8 +2180,21 @@ function renderSwimlane() {
             <div class="swimlane-name">${s.name}</div>
             <div class="swimlane-meta">${s.role} · ${s.weekly_hours}h/wk · ${s.note}</div>
           </div>
-          <div class="swimlane-hours">${hours}h total · ~${wks} wks</div>
+          <div class="swimlane-hours">${hours}h remaining · ~${wks} wks</div>
         </div>
+        ${shipped.length ? `
+          <div class="swimlane-shipped-strip" title="Shipped in v1.5 release ${shipped[0].shipped_on}">
+            <span class="strip-label">Shipped v1.5 (${shipped.length})</span>
+            ${shipped.map(sh => {
+              const widthH = Math.max(120, Math.min(280, sh.hours_actual * 12));
+              const shortName = sh.name.length > 50 ? sh.name.slice(0, 47) + '…' : sh.name;
+              return `<div class="swim-block shipped" style="width:${widthH}px" title="${sh.name} · shipped ${sh.shipped_on}">
+                <div class="hours-badge">${sh.hours_actual}h / ${sh.hours_projected}h</div>
+                <div style="padding-right:60px">${shortName}</div>
+              </div>`;
+            }).join('')}
+          </div>
+        ` : ''}
         <div class="swimlane-bar">
           ${items.map((a, idx) => {
             const widthH = Math.max(120, Math.min(450, a.hours * 8));
@@ -2331,6 +2501,7 @@ renderTokenStats();
 renderTokenFeatureTable();
 renderTokenBurnChart();
 renderShipperSummaryStats();
+renderShippedThisRelease();
 renderSwimlane();
 renderShipperLoadTable();
 renderFutureHandoff();
