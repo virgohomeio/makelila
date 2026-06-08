@@ -1,0 +1,799 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LILA Customer Follow-Up Calendar</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js" integrity="sha512-8Q6Y9XnTbOE+JNvjBQwJ2H8S+UV4uA6hiRykhdtIyDYZ2TprdNmWOUaKdGzOhyr4dCyk287OejbPvwl7lrfqrQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js" integrity="sha512-MOCpqoRoisCTwJ8vQQiciZv0qcpROCidek3GTFS6KTk2+y7munJIlKCVkFCYY+p3ErYFXCjmFjnfTTRSC1OHWQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js" integrity="sha512-OG8Ewzlpr7HnTHwrXzN256M6xbPdDJdurFYIRh0vRHOeFsL0S9yIwHiWSA2kopUevhG/ta4qyVVc2hCRSJy2MQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,'SF Pro Display','SF Pro Text','Helvetica Neue',sans-serif;background:#f5f5f7;color:#1d1d1f;-webkit-font-smoothing:antialiased}
+.app{max-width:1400px;margin:0 auto;padding:24px}
+.header{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px}
+.header h1{font-size:28px;font-weight:700;letter-spacing:-0.5px}
+.header h1 span{color:#951B1E}
+.header-right{display:flex;gap:12px;align-items:center}
+.today-btn{padding:8px 16px;background:#1d1d1f;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer}
+.today-btn:hover{background:#333}
+.stats-row{display:grid;grid-template-columns:repeat(8,1fr);gap:12px;margin-bottom:24px}
+.stat-card{background:#fff;border-radius:12px;padding:16px;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,0.06)}
+.stat-card .num{font-size:32px;font-weight:700;letter-spacing:-1px}
+.stat-card .label{font-size:12px;color:#86868b;margin-top:4px;text-transform:uppercase;letter-spacing:0.5px}
+.stat-overdue .num{color:#951B1E}
+.stat-today .num{color:#0071e3}
+.stat-upcoming .num{color:#bf5af2}
+.stat-done .num{color:#30d158}
+.stat-total .num{color:#1d1d1f}
+.tabs{display:flex;gap:4px;margin-bottom:20px;background:#e8e8ed;border-radius:10px;padding:3px;width:fit-content}
+.tab{padding:8px 20px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;border:none;background:transparent;color:#86868b;transition:all .2s}
+.tab.active{background:#fff;color:#1d1d1f;box-shadow:0 1px 3px rgba(0,0,0,0.1)}
+.view-container{display:flex;gap:20px}
+.calendar-panel{flex:1;background:#fff;border-radius:16px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,0.06)}
+.cal-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
+.cal-header h2{font-size:18px;font-weight:700}
+.cal-nav{display:flex;gap:8px}
+.cal-nav button{width:32px;height:32px;border-radius:8px;border:1px solid #d2d2d7;background:#fff;cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center}
+.cal-nav button:hover{background:#f5f5f7}
+.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:1px;background:#e8e8ed;border-radius:8px;overflow:hidden}
+.cal-day-header{background:#f5f5f7;padding:8px 4px;text-align:center;font-size:11px;font-weight:600;color:#86868b;text-transform:uppercase}
+.cal-day{background:#fff;min-height:90px;padding:6px;position:relative;cursor:pointer}
+.cal-day:hover{background:#f5f5f7}
+.cal-day.other-month{background:#fafafa}
+.cal-day.other-month .day-num{color:#c7c7cc}
+.cal-day.today{background:#e8f4fd}
+.cal-day .day-num{font-size:12px;font-weight:600;margin-bottom:4px}
+.cal-day.today .day-num{color:#0071e3;font-weight:700}
+.cal-dot{display:inline-block;width:6px;height:6px;border-radius:50%;margin:1px}
+.dot-fu1-overdue{background:#951B1E}
+.dot-fu1-due{background:#ff9f0a}
+.dot-fu2-overdue{background:#951B1E}
+.dot-fu2-due{background:#bf5af2}
+.dot-fu1-done{background:#30d158}
+.dot-fu2-done{background:#30d158}
+.cal-event{font-size:9px;line-height:1.3;padding:2px 4px;border-radius:3px;margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer}
+.cal-event.fu1{background:#fff3e0;color:#e65100;border-left:2px solid #ff9f0a}
+.cal-event.fu2{background:#f3e5f5;color:#7b1fa2;border-left:2px solid #bf5af2}
+.cal-event.overdue{background:#fce4ec;color:#951B1E;border-left:2px solid #951B1E}
+.cal-event.done{background:#e8f5e9;color:#2e7d32;border-left:2px solid #30d158;opacity:0.6}
+.cal-event.onboard{background:#e3f2fd;color:#0071e3;border-left:2px solid #0071e3}
+.cal-event.connect{background:#e8f5e9;color:#2e7d32;border-left:2px solid #30d158}
+.side-panel{width:380px;flex-shrink:0}
+.list-panel{background:#fff;border-radius:16px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,0.06)}
+.list-panel h3{font-size:16px;font-weight:700;margin-bottom:12px}
+.search-box{width:100%;padding:10px 12px;border-radius:8px;border:1px solid #d2d2d7;font-size:13px;margin-bottom:12px;outline:none}
+.search-box:focus{border-color:#0071e3;box-shadow:0 0 0 3px rgba(0,113,227,0.15)}
+.filter-row{display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap}
+.filter-btn{padding:5px 10px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid #d2d2d7;background:#fff;color:#86868b}
+.filter-btn.active{background:#1d1d1f;color:#fff;border-color:#1d1d1f}
+.customer-list{max-height:calc(100vh - 400px);overflow-y:auto}
+.customer-card{padding:12px;border-radius:10px;border:1px solid #e8e8ed;margin-bottom:8px;cursor:pointer;transition:all .15s}
+.customer-card:hover{border-color:#0071e3;box-shadow:0 0 0 2px rgba(0,113,227,0.1)}
+.customer-card.selected{border-color:#0071e3;background:#f0f7ff}
+.cc-name{font-size:14px;font-weight:600}
+.cc-email{font-size:11px;color:#86868b;margin-top:2px}
+.cc-date{font-size:11px;color:#86868b;margin-top:2px}
+.cc-badges{display:flex;gap:4px;margin-top:6px;flex-wrap:wrap}
+.badge{padding:3px 8px;border-radius:4px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.3px}
+.badge-overdue{background:#fce4ec;color:#951B1E}
+.badge-due-today{background:#e3f2fd;color:#0071e3}
+.badge-upcoming{background:#f3e5f5;color:#7b1fa2}
+.badge-done{background:#e8f5e9;color:#2e7d32}
+.badge-fu1{background:#fff3e0;color:#e65100}
+.badge-fu2{background:#f3e5f5;color:#7b1fa2}
+.badge-return{background:#fce4ec;color:#951B1E}
+.modal-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;z-index:100}
+.modal{background:#fff;border-radius:16px;padding:24px;width:480px;max-height:80vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.3)}
+.modal h3{font-size:18px;font-weight:700;margin-bottom:16px}
+.modal-close{position:absolute;top:16px;right:16px;background:none;border:none;font-size:20px;cursor:pointer;color:#86868b}
+.form-group{margin-bottom:14px}
+.form-group label{display:block;font-size:12px;font-weight:600;color:#86868b;margin-bottom:4px;text-transform:uppercase;letter-spacing:0.3px}
+.form-group select,.form-group input{width:100%;padding:8px 12px;border-radius:8px;border:1px solid #d2d2d7;font-size:13px}
+.form-group select:focus,.form-group input:focus{outline:none;border-color:#0071e3}
+.fu-row{padding:12px;border-radius:8px;margin-bottom:8px}
+.fu-row.fu1-row{background:#fff3e0}
+.fu-row.fu2-row{background:#f3e5f5}
+.fu-label{font-size:12px;font-weight:700;margin-bottom:4px}
+.fu-date{font-size:14px;font-weight:600}
+.fu-status{margin-top:6px}
+.status-select{padding:6px 10px;border-radius:6px;border:1px solid #d2d2d7;font-size:12px;font-weight:600}
+.action-btns{display:flex;gap:8px;margin-top:16px}
+.btn{padding:10px 20px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;border:none}
+.btn-primary{background:#0071e3;color:#fff}
+.btn-primary:hover{background:#0077ed}
+.btn-secondary{background:#e8e8ed;color:#1d1d1f}
+.btn-review{background:#30d158;color:#fff}
+.btn-review:hover{background:#28b84c}
+.legend{display:flex;gap:16px;margin-bottom:16px;flex-wrap:wrap}
+.legend-item{display:flex;align-items:center;gap:4px;font-size:11px;color:#86868b}
+.legend-dot{width:10px;height:10px;border-radius:50%}
+.full-list{background:#fff;border-radius:16px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,0.06)}
+table{width:100%;border-collapse:collapse}
+th{text-align:left;padding:10px 12px;font-size:11px;font-weight:700;color:#86868b;text-transform:uppercase;letter-spacing:0.5px;border-bottom:2px solid #e8e8ed}
+td{padding:10px 12px;font-size:13px;border-bottom:1px solid #f0f0f5}
+tr:hover td{background:#f5f5f7}
+.hh-select{padding:4px 8px;border-radius:4px;border:1px solid #d2d2d7;font-size:12px}
+.status-badge{padding:3px 8px;border-radius:4px;font-size:10px;font-weight:700;text-transform:uppercase;display:inline-block}
+.sb-pending{background:#f5f5f7;color:#86868b}
+.sb-messaged{background:#fff3e0;color:#e65100}
+.sb-called{background:#e3f2fd;color:#0071e3}
+.sb-completed{background:#e8f5e9;color:#2e7d32}
+.sb-review{background:#f3e5f5;color:#7b1fa2}
+.sb-reviewed{background:#e0f7e9;color:#00b67a}
+.sb-overdue{background:#fce4ec;color:#951B1E}
+.badge-issue{background:#fff3e0;color:#e65100;border:1px solid #ffcc80}
+.issue-panel{padding:12px;border-radius:8px;background:#fff8e1;border:1px solid #ffcc80;margin-bottom:12px}
+.issue-card{padding:8px 10px;border-radius:6px;background:#fff;border:1px solid #ffe0b2;margin-top:6px}
+.issue-card .ic-id{font-size:10px;font-weight:700;color:#e65100;text-transform:uppercase}
+.issue-card .ic-subj{font-size:13px;font-weight:600;margin:2px 0}
+.issue-card .ic-meta{font-size:11px;color:#86868b}
+.issue-stage{display:inline-block;padding:2px 6px;border-radius:4px;font-size:10px;font-weight:700;text-transform:uppercase}
+.is-new{background:#e3f2fd;color:#0071e3}
+.is-waiting-contact{background:#fff3e0;color:#e65100}
+.is-waiting-us{background:#fce4ec;color:#951B1E}
+.cal-event.has-issue{border-right:3px solid #e65100}
+.stat-issues .num{color:#e65100}
+.stat-replace .num{color:#5856d6}
+.badge-replace{background:#ede7f6;color:#5856d6;border:1px solid #b39ddb}
+.replace-panel{padding:12px;border-radius:8px;background:#ede7f6;border:1px solid #b39ddb;margin-bottom:12px}
+.replace-card{padding:8px 10px;border-radius:6px;background:#fff;border:1px solid #d1c4e9;margin-top:6px}
+.replace-card .rc-item{font-size:13px;font-weight:600;margin:2px 0}
+.replace-card .rc-meta{font-size:11px;color:#86868b}
+.rs-received{background:#e8f5e9;color:#2e7d32;padding:2px 6px;border-radius:4px;font-size:10px;font-weight:700;text-transform:uppercase}
+.rs-sent{background:#e3f2fd;color:#0071e3;padding:2px 6px;border-radius:4px;font-size:10px;font-weight:700;text-transform:uppercase}
+.rs-dropped{background:#f3e5f5;color:#7b1fa2;padding:2px 6px;border-radius:4px;font-size:10px;font-weight:700;text-transform:uppercase}
+.rs-pending{background:#fff3e0;color:#e65100;padding:2px 6px;border-radius:4px;font-size:10px;font-weight:700;text-transform:uppercase}
+.stat-return .num{color:#951B1E}
+.return-panel{padding:12px;border-radius:8px;background:#fce4ec;border:1px solid #ef9a9a;margin-bottom:12px}
+.return-card{padding:8px 10px;border-radius:6px;background:#fff;border:1px solid #ffcdd2;margin-top:6px}
+.return-card .ret-item{font-size:13px;font-weight:600;margin:2px 0}
+.return-card .ret-meta{font-size:11px;color:#86868b}
+.ret-refunded{background:#e8f5e9;color:#2e7d32;padding:2px 6px;border-radius:4px;font-size:10px;font-weight:700;text-transform:uppercase}
+.ret-received{background:#e3f2fd;color:#0071e3;padding:2px 6px;border-radius:4px;font-size:10px;font-weight:700;text-transform:uppercase}
+.ret-form-filed{background:#fff3e0;color:#e65100;padding:2px 6px;border-radius:4px;font-size:10px;font-weight:700;text-transform:uppercase}
+.ret-shipped{background:#f3e5f5;color:#7b1fa2;padding:2px 6px;border-radius:4px;font-size:10px;font-weight:700;text-transform:uppercase}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const {useState,useMemo,useCallback,useEffect}=React;
+
+/* ── Raw customer data from Calendly/Gmail/Fireflies + Quo contacts (past 3 months) ── */
+const RAW_CUSTOMERS=[
+{name:"Tamara Martin",email:"tamara.yukon@gmail.com",onboard:"2026-01-19",phone:"+16047804170",_fu1:"called",_fu2:"reviewed",_notes:"[Ash] FU1 Jan 19; FU2 Jan 26; compost made; 5★ review sent Jan 26, reminded Feb 4"},
+{name:"Don Saldana",email:"donsaldana@yahoo.com",onboard:"2026-01-23",phone:"+14389282997",_fu1:"messaged",_fu2:"called",_notes:"[Ash] FU1 Feb 5: smell from machine (soy). FU2: wanted return, had call Feb 10"},
+{name:"Jeff Mottle",email:"jmottle@lightscape.ca",onboard:"2026-01-28",phone:"+14036804907",_fu1:"called",_fu2:"messaged",_notes:"[Ash] FU1 Feb 4; FU2 Feb 11 chat — happy, asked about chamber maintenance"},
+{name:"Sharai Mustatia",email:"shreddersharai@gmail.com",onboard:"2026-01-31",phone:"+16046191537",_fu1:"completed",_notes:"[Ash] Refunded"},
+{name:"Amanda McCordic",email:"a.mccordic@mccordiclaw.ca",onboard:"2026-02-05",phone:"+15064784711"},
+{name:"Jason Kemp",email:"j.kemp@jwkutilities.com",onboard:"2026-02-16",phone:"+16137917734",_fu1:"messaged",_fu2:"review",_notes:"[Ash] FU1 Feb 23 done; FU2 Mar 10 call — compost made, OTA done; review asked Mar 23, no reply yet"},
+{name:"Lynda South Simoneau",email:"southlynda@hotmail.com",onboard:"2026-03-03",phone:"+15149955897"},
+{name:"Rod Smith",email:"pikespeakgold@gmail.com",onboard:"2026-03-04",phone:"+18055881172"},
+{name:"Rodney Richards",email:"2015golffreak@gmail.com",onboard:"2026-03-07",phone:"+18164568317",_fu1:"messaged",_notes:"[Ash] Reached out Apr 2+16; filled one side, using 2nd side as of Apr 19. FU2 due Apr 27"},
+{name:"Michael Just",email:"mikeandtj@msn.com",onboard:"2026-03-09",phone:"+18014337124"},
+{name:"Elizabeth Antony",email:"eantony2400@gmail.com",onboard:"2026-03-12",phone:"+12047823029",_fu1:"called",_fu2:"reviewed",_notes:"[Ash] FU1 call rescheduled to Mar 26; FU2 Apr 1 compost made; Trustpilot link sent Apr 1, reminded Apr 22"},
+{name:"Tricia Bowling",email:"triciab12@gmail.com",onboard:"2026-03-15",phone:"+12513486873",_fu1:"called",_fu2:"called",_notes:"[Ash] FU1 call Mar 23; FU2 call Mar 30 — flashing green light, ticket opened. Lives alone, slow fill"},
+{name:"Jeffrey Van Dyke",email:"jeffreyvandyke@comcast.net",onboard:"2026-03-16",phone:"+19713442438",_fu1:"called",_notes:"[Ash] FU1 msg Mar 23 — upset re unanswered emails; video diagnosis call booked"},
+{name:"Frank Nikolaidis",email:"foti12@aol.com",onboard:"2026-03-18",phone:"+13307050764",_fu1:"messaged",_fu2:"completed",_notes:"[Ash] FU1 msg Mar 18-30; FU2 Apr 21 asked OTA+connect; made compost"},
+{name:"Jefy Chacko",email:"jefy@outlook.in",onboard:"2026-03-18",phone:"+17636703926"},
+{name:"Justin Plumley",email:"jplumley6@yahoo.com",onboard:"2026-03-19",phone:"+18644151243",_fu1:"called",_fu2:"reviewed",_notes:"[Ash] FU1 call Mar 30; FU2 Apr 14-17 text — composting going well, good compost made; will do OTA+review"},
+{name:"Heather Hall",email:"heathercasehall@gmail.com",onboard:"2026-03-19",phone:"+17752973381",_fu1:"called",_fu2:"messaged",_notes:"[Ash] FU1 call Mar 26; [Quo] odour check May 13. HS-0080: odour + moved outside"},
+{name:"Dhruv Dhruv",email:"dhruvtalwar002@gmail.com",onboard:"2026-03-19",phone:"+12893060616"},
+{name:"Suzan Jackovatz",email:"suzan@jackovatz.com",onboard:"2026-03-20",phone:"+16789977421",_fu1:"messaged",_notes:"[Ash] FU1 booked Apr 3 2:30pm; [Quo] rescheduled; connected to dashboard"},
+{name:"Sandra Colligan",email:"slyoung5@verizon.net",onboard:"2026-03-21",phone:"+15083803307"},
+{name:"Anthony Kurt",email:"tnykurt313@yahoo.com",onboard:"2026-03-21",phone:"+13135023452",_fu1:"messaged",_notes:"[Ash] FU1 msg Mar 23; latch broken Mar 28 — repair part sent. FU2 due Apr 29"},
+{name:"Dixie Bean’s",email:"dixbean@yahoo.com",onboard:"2026-03-21",phone:"+13042577716",_fu1:"messaged",_fu2:"messaged",_notes:"[Ash] FU1 msg Mar 23+31; [Quo] FU2 checks Apr 13, Apr 21, May 25. Responded May 26 needing help"},
+{name:"Doug Hanson",email:"dhanson7298@gmail.com",onboard:"2026-03-24",phone:"+16056607298",_fu1:"called",_fu2:"review",_notes:"[Ash] FU1 call Apr 7 — diagnosis, replacement top lid sent; FU2 Apr 22 compost made; asked for 5★, Trustpilot link pending"},
+{name:"Karon Plasha",email:"kfplasha@icloud.com",onboard:"2026-03-24",phone:"+17035346858",_fu1:"called",_fu2:"messaged",_notes:"[Ash] FU1 Apr 6-13 text, then call — chamber ~70%; FU2 booked May 4 11am EST"},
+{name:"Fred Rice",email:"ricefj50@yahoo.com",onboard:"2026-03-25",phone:"+18146887182",_fu1:"messaged",_notes:"[Ash] FU1 booked Apr 1 rescheduled; asked to connect machine Apr 9"},
+{name:"Esmeralda Burgess",email:"patricia31gon@gmail.com",onboard:"2026-03-27",phone:"+14438205971",_fu1:"called",_fu2:"reviewed",_notes:"[Ash] FU1 call Apr 8; FU2 Apr 16 all is well, compost made; Trustpilot link sent Apr 16"},
+{name:"Robert Buckley",email:"robert.daniel.buckley@gmail.com",onboard:"2026-03-28",phone:"+18506963184"},
+{name:"Frederick Whittington",email:"fawjr61@gmail.com",onboard:"2026-03-29",phone:"+14436181651",_fu1:"called",_notes:"[Ash] FU1 msg Mar 30, text Apr 6; Apr 14 white flashing lights issue"},
+{name:"Michael Romans",email:"michael.c.romans@gmail.com",onboard:"2026-03-29",phone:"+18317600031"},
+{name:"Joan Teichroeb",email:"off--the-grid@outlook.com",onboard:"2026-04-02",phone:"+12509618667"},
+{name:"Jean Cotis",email:"designerjeanssalon@yahoo.com",onboard:"2026-04-04",phone:"+19732249459",_fu1:"called",_notes:"[Ash] FU1 contacted Apr 6+13, no response; reach out Apr 27"},
+{name:"Rashida Crosswaite",email:"happy1today@gmail.com",onboard:"2026-04-10",phone:"+17138198539"},
+{name:"Joy Seargeant",email:"thejosierave@hotmail.com",onboard:"2026-04-13",phone:"+18076307618",_fu1:"messaged",_notes:"[Ash] FU1 booked Apr 27 4:30pm"},
+{name:"Vicki Crooke",email:"vickic487@gmail.com",onboard:"2026-04-15",phone:"+19056861526"},
+{name:"Marilynne Oskamp",email:"oskampm@mac.com",onboard:"2026-04-19",phone:"+19055366985"},
+{name:"Audrey St John",email:"rhoa@tds.net",onboard:"2026-04-19",phone:"+19042080720"},
+{name:"Tara Dupper",email:"tarajdupper@gmail.com",onboard:"2026-04-20",phone:"+13159568380",_fu1:"messaged",_notes:"[Ash] FU1 booked Apr 27 4:40pm"},
+{name:"Antonio Cernuto",email:"antonio@pur2o.com",onboard:"2026-04-22",phone:"+19736472939"},
+{name:"Rebecca Campbell",email:"campbellra652@gmail.com",onboard:"2026-04-24",phone:"+19028188352"},
+{name:"Rick Stauffer",email:"rick@freshveggie.com",onboard:"2026-04-24",phone:"+14074170530"},
+{name:"Scott Iles",email:"buffthestuff690@gmail.com",onboard:"2026-04-26",phone:"+16472842703"},
+{name:"Chantelle Wenger",email:"chantellewenger@gmail.com",onboard:"2026-04-26",phone:"+12183014249"},
+{name:"Ron Russell",email:"ron@newcmi.ca",onboard:"2026-04-26",flagReturn:true,phone:"+16048344451"},
+{name:"Dale Bober",email:"dalebober@gmail.com",onboard:"2026-04-26",phone:"+17607999286"},
+{name:"RJ Dowd",email:"latinrj69@gmail.com",onboard:"2026-04-26",flagReturn:true,phone:"+18134925113"},
+{name:"Cole Perkins",email:"cperkins39741@gmail.com",onboard:"2026-04-28",phone:"+16199167732"},
+{name:"Sarah Harris",email:"smphharris@gmail.com",onboard:"2026-04-29",phone:"+17132492443"},
+{name:"Louise Leonard",email:"louise.leonard@renoassistance.ca",onboard:"2026-04-30",phone:"+15143476995"},
+{name:"Cathy Lin",email:"clin3206@gmail.com",onboard:"2026-04-30",phone:"+14169704101"},
+{name:"Annmarie Kennedy",email:"anmarik@comcast.net",onboard:"2026-05-01",phone:"+12038952263"},
+{name:"Lawrence Hou",email:"lawrencejhou@gmail.com",onboard:"2026-05-01",phone:"+16472619055"},
+{name:"Hyrum Beal",email:"hyby456@gmail.com",onboard:"2026-05-01"},
+{name:"Mike & Lisa Clarke",email:"lisaclarkewell@gmail.com",onboard:"2026-05-01",phone:"+12894042364"},
+{name:"Lou DiPalma",email:"ljdpdm@me.com",onboard:"2026-05-02",phone:"+13039199498"},
+{name:"Mauro Varela",email:"maurojr81@yahoo.com",onboard:"2026-05-02",phone:"+13233504722"},
+{name:"Brent Neave",email:"brent@baker-neave.com",onboard:"2026-05-06",phone:"+16043292421"},
+{name:"Erika Turner",email:"turnerboci@gmail.com",onboard:"2026-05-07",phone:"+17075853985"},
+{name:"Ron Hatch",email:"rdhridgeback@gmail.com",onboard:"2026-05-07",phone:"+16077696475"},
+{name:"Jeff Carnahan",email:"worldcoast@gmail.com",onboard:"2026-05-07",phone:"+12363336787"},
+{name:"Ashley Parker",email:"ashley@crossfitbirchbender.ca",onboard:"2026-05-08",phone:"+14169483922"},
+{name:"Jeff Carnahan (Dayforce)",email:"jeff.carnahan@dayforce.com",onboard:"2026-05-08"},
+{name:"Ted Dochau",email:"tchau1982@gmail.com",onboard:"2026-05-08",phone:"+16476773044"},
+{name:"Sandra Sweet",email:"necshs1@gmail.com",onboard:"2026-05-09",phone:"+18479179141"},
+{name:"Antonio Gonsalves",email:"antogonsalves@gmail.com",onboard:"2026-05-10"},
+{name:"Jony Fang",email:"zhou_fang@hotmail.com",onboard:"2026-05-10"},
+{name:"Myles Straga",email:"myles@avividedgesalonspa.ca",onboard:"2026-05-10",phone:"+12502689022"},
+{name:"Donna Wood",email:"smilesarefree6@gmail.com",onboard:"2026-05-11",phone:"+19053305289"},
+{name:"Leen Schafer",email:"leenschafer@gmail.com",onboard:"2026-05-11",phone:"+19495549788"},
+{name:"Dwayne Binkley",email:"dbinkley@hotmail.ca",onboard:"2026-05-13",phone:"+15198317626"},
+{name:"Ann Prendergast",email:"evirdhgih@gmail.com",onboard:"2026-05-13",phone:"+16042507085"},
+{name:"Christopher Livingston",email:"clivingston82@gmail.com",onboard:"2026-05-14",phone:"+17789977718"},
+{name:"Brittany Hemenway",email:"bnhemenway@gmail.com",onboard:"2026-05-15",phone:"+17752508351"},
+{name:"Sarrah Anne",email:"sarahmeecham87@icloud.com",onboard:"2026-05-15"},
+{name:"Mindy McCann",email:"mindybethe@comcast.net",onboard:"2026-05-17"},
+{name:"Vie Ng",email:"ng.vivif@gmail.com",onboard:"2026-05-18"},
+{name:"Dania Shalabi",email:"dania.shalabi@gmail.com",onboard:"2026-05-21"},
+{name:"Patrick Taylor",email:"taylor34601@gmail.com",onboard:"2026-05-22",phone:"+13523451703"},
+{name:"Kerriann Fitzpatrick",email:"fitzpatrickkerriann@gmail.com",onboard:"2026-05-24",phone:"+14079281901"},
+{name:"Paul Ethier",email:"pethier1@me.com",onboard:"2026-05-25",phone:"+15149448348"},
+{name:"Fred Rice (2nd call)",email:"fjrice1950@gmail.com",onboard:"2026-05-25"},
+{name:"Paul Tindall",email:"paul.tindall@sandler.com",onboard:"2026-05-25"},
+{name:"Shay Ade",email:"adefam@att.net",onboard:"2026-05-26"},
+{name:"Shearries Moseley Lafontaine",email:"shearries@gmail.com",onboard:"2026-05-25",_notes:"[Gmail 05/26] Unit cracked on arrival Order #1155. Asked for packaging photos for insurance claim."},
+{name:"Suzanne McRae",email:"suemmcrae@gmail.com",onboard:"2026-05-04",_notes:"[Gmail 05/07] Bin broken again - needs replacement chamber (right side). Told to stop using that side. Raymond asked for ETA. [05/13] Ran out of replacement chambers, emergency flying in."},
+{name:"Chris Grant",email:"cb.grant@hotmail.com",onboard:"2026-05-06",_notes:"[Gmail 05/06] Main body cracking (~15% cosmetic issue). Queued for replacement. Away until May 19, has original box for return."},
+{name:"Jill Washington",email:"jillwashington@gmail.com",onboard:"2026-05-15",_notes:"[Gmail 05/15] Water accumulation - told normal behavior. [Quo 05/22] Water leaking, told normal. [Quo 05/26] Follow-up urging diagnosis call."},
+{name:"Kevin Cheng",email:"kjmcheng@gmail.com",onboard:"2026-05-27",future:true,_notes:"[Quo 05/20-23] Personal delivery of replacement unit. Old unit was moldy."},
+{name:"Rob Hatch",email:"rdhridgeback@gmail.com",onboard:"2026-05-27",future:true},
+{name:"Alberino Salvatore",email:"asalvatore@sprintmechanical.com",onboard:"2026-06-02",future:true},
+{name:"Kelly Dyment",email:"kelly@kellybeans.com",onboard:"2026-06-06",future:true,phone:"+16476882767"},
+];
+
+/* ── Open HubSpot tickets (stage ≠ 4/Closed) mapped to customer emails ── */
+const TICKETS=[
+{email:"rick@freshveggie.com",id:"197260812279",ref:"HS-0114",subject:"v18 firmware bug",stage:3,priority:"HIGH"},
+{email:"ashley@crossfitbirchbender.ca",id:"197264444352",ref:"HS-0114",subject:"v18 firmware bug",stage:3,priority:"HIGH"},
+{email:"worldcoast@gmail.com",id:"197262969829",ref:"HS-0113",subject:"Plastic split on unit",stage:3,priority:"HIGH"},
+{email:"worldcoast@gmail.com",id:"196310388670",ref:"HS-0103",subject:"Plastic bowed out",stage:2,priority:"MED"},
+{email:"ricefj50@yahoo.com",id:"197262960623",ref:"HS-0112",subject:"Lid latch not working",stage:2,priority:"MED"},
+{email:"taylor34601@gmail.com",id:"197261521913",ref:"HS-0111",subject:"Shipping damage + broken latch",stage:3,priority:"HIGH"},
+{email:"latinrj69@gmail.com",id:"196670718915",ref:"HS-0107",subject:"Crack + water accumulation",stage:3,priority:"HIGH"},
+{email:"thejosierave@hotmail.com",id:"196473572326",ref:"HS-0105",subject:"Cracks in top body",stage:2,priority:"MED"},
+{email:"smilesarefree6@gmail.com",id:"196472841192",ref:"HS-0105",subject:"Needs starter bags",stage:3,priority:"HIGH"},
+{email:"leenschafer@gmail.com",id:"196482201539",ref:"HS-0104",subject:"Filtration screen broke",stage:3,priority:"HIGH"},
+{email:"tchau1982@gmail.com",id:"196287537128",ref:"HS-0102",subject:"Missing water tray",stage:3,priority:"HIGH"},
+{email:"smphharris@gmail.com",id:"196287537113",ref:"HS-0101",subject:"Rancid odour + water accumulation",stage:2,priority:"MED"},
+{email:"brent@baker-neave.com",id:"195705811923",ref:"HS-0098",subject:"Right latch broken",stage:3,priority:"MED"},
+{email:"bnhemenway@gmail.com",id:"196094021614",ref:"HS-0096",subject:"Shipping damage",stage:2,priority:"HIGH"},
+{email:"anmarik@comcast.net",id:"196094741467",ref:"HS-0095",subject:"Shipping damage + latch + filter screen",stage:3,priority:"HIGH"},
+{email:"campbellra652@gmail.com",id:"195957414903",ref:"HS-0094",subject:"Shipping damage",stage:2,priority:"HIGH"},
+{email:"ron@newcmi.ca",id:"196061087699",ref:"HS-0092",subject:"Firmware bug + wants return",stage:2,priority:"HIGH"},
+{email:"dalebober@gmail.com",id:"195238770625",ref:"HS-0087",subject:"Broken left latch",stage:3,priority:"MED"},
+{email:"chantellewenger@gmail.com",id:"195082014695",ref:"HS-0086",subject:"Shipping damage",stage:3,priority:"MED"},
+{email:"heathercasehall@gmail.com",id:"193730209733",ref:"HS-0080",subject:"Odour + moved machine outside",stage:2,priority:"MED"},
+{email:"tnykurt313@yahoo.com",id:"192426027969",ref:"HS-0075",subject:"Cracked top + broken latch",stage:2,priority:"MED"},
+{email:"jeffreyvandyke@comcast.net",id:"191730226114",ref:"HS-0072",subject:"Broken chamber",stage:3,priority:"MED"},
+{email:"jefy@outlook.in",id:"191074426849",ref:"HS-0070",subject:"Expecting crusher",stage:3,priority:"MED"},
+{email:"vickic487@gmail.com",id:"153922175950",ref:"HS-0024",subject:"Too dry",stage:3,priority:"MED"},
+{email:"tamara.yukon@gmail.com",id:"170009252835",ref:"HS-0046",subject:"Main body crack + crusher crack + rusted screws",stage:3,priority:"MED"},
+{email:"a.mccordic@mccordiclaw.ca",id:"170627598276",ref:"HS-0045",subject:"Shipping damage",stage:2,priority:"MED"},
+{email:"shearries@gmail.com",id:"NEW-001",ref:"NEW",subject:"Cracked unit on arrival (Order #1155)",stage:3,priority:"HIGH"},
+{email:"suemmcrae@gmail.com",id:"NEW-002",ref:"NEW",subject:"Broken bin — needs replacement chamber",stage:3,priority:"HIGH"},
+{email:"cb.grant@hotmail.com",id:"NEW-003",ref:"NEW",subject:"Main body cracking — replacement queued",stage:3,priority:"MED"},
+];
+const TICKET_MAP=(()=>{const m={};TICKETS.forEach(t=>{if(!m[t.email])m[t.email]=[];m[t.email].push(t);});return m;})();
+const HS_URL="https://app.hubspot.com/contacts/341724674/record/0-5/";
+const STAGE_LABELS={1:"New",2:"Waiting on contact",3:"Waiting on us"};
+const STAGE_CSS={1:"is-new",2:"is-waiting-contact",3:"is-waiting-us"};
+
+/* ── Replacement tracking from fulfillment spreadsheet ── */
+/* status: "received"=delivered+confirmed, "sent"=has tracking#, "dropped"=personal delivery, "pending"=no tracking yet */
+const REPLACEMENTS=[
+{email:"bnhemenway@gmail.com",item:"P100 unit",shipDate:"2026-05-07",tracking:"1ZV56D26DK26632644",carrier:"UPS",status:"received",update:"Received 05/14/2026"},
+{email:"campbellra652@gmail.com",item:"P100 unit",shipDate:"2026-05-07",tracking:"D42035247000215268500",carrier:"Canpar",status:"received",update:"Received 05/12/2026"},
+{email:"anmarik@comcast.net",item:"Side latch + filter cup",shipDate:null,tracking:null,carrier:null,status:"pending",update:null},
+{email:"dalebober@gmail.com",item:"Side latch",shipDate:null,tracking:null,carrier:null,status:"pending",update:null},
+{email:"brent@baker-neave.com",item:"Right side latch",shipDate:null,tracking:"104504378910343",carrier:"Canada Post",status:"sent",update:null},
+{email:"leenschafer@gmail.com",item:"Left side chamber",shipDate:null,tracking:null,carrier:null,status:"pending",update:null},
+{email:"smilesarefree6@gmail.com",item:"Starter bags",shipDate:null,tracking:"104504378991342",carrier:"Canada Post",status:"sent",update:null},
+{email:"jeffreyvandyke@comcast.net",item:"P100 unit",shipDate:"2026-05-15",tracking:"1ZV56D26DK26566350",carrier:"UPS",status:"sent",update:"Shipped 5/22/2026"},
+{email:"tamara.yukon@gmail.com",item:"P100 unit",shipDate:null,tracking:null,carrier:null,status:"pending",update:null},
+{email:"ricefj50@yahoo.com",item:"Replacement top lid",shipDate:null,tracking:null,carrier:null,status:"pending",update:null},
+{email:"taylor34601@gmail.com",item:"Right side latch",shipDate:null,tracking:null,carrier:null,status:"pending",update:null},
+{email:"shearries@gmail.com",item:"Full replacement unit",shipDate:null,tracking:null,carrier:null,status:"pending",update:"Awaiting insurance claim photos"},
+{email:"suemmcrae@gmail.com",item:"Replacement compost chamber (right side)",shipDate:null,tracking:null,carrier:null,status:"pending",update:"Out of stock — emergency flying in"},
+{email:"cb.grant@hotmail.com",item:"Replacement unit (main body crack)",shipDate:null,tracking:null,carrier:null,status:"pending",update:"Customer away until May 19, has box for return"},
+{email:"worldcoast@gmail.com",item:"Replacement unit (plastic split)",shipDate:null,tracking:null,carrier:null,status:"pending",update:"Scheduled with next batch (May 25)"},
+];
+const REPLACEMENT_MAP=(()=>{const m={};REPLACEMENTS.forEach(r=>{if(!m[r.email])m[r.email]=[];m[r.email].push(r);});return m;})();
+
+/* ── Return/Refund tracking from fulfillment spreadsheet ── */
+/* status: "refunded"=received+money back, "received"=unit received back, "form-filed"=return form submitted, "shipped"=return in transit */
+const RETURNS=[
+{email:"issaceven8231@gmail.com",name:"Matthew Lypkie",item:"P150 White",serial:"LL01-00000000019",tracking:"D420352470001752666001",carrier:"Canpar",price:61.80,update:"Received (02/2/2026)",status:"refunded"},
+{email:"shreddersharai@gmail.com",name:"Sharai Mustatia",item:"P150 White",serial:"LL01-00000000043",tracking:"D420352470001790865001",carrier:"Canpar",price:55.29,update:"Received (02/11/2026)",status:"refunded"},
+{email:"donsaldana@yahoo.com",name:"Don Saldana",item:"P150 White",serial:"LL01-00000000021",tracking:"D420352470001836227001",carrier:"Canpar",price:39.52,update:"Received (02/19/2026)",status:"refunded"},
+{email:"shelley.small63@yahoo.com",name:"Shelley M Small",item:"P150 White",serial:"LL01-00000000023",tracking:"D55627679000041560001",carrier:"Canpar",price:95.91,update:"Received (03/30/2026)",status:"received"},
+{email:"off--the-grid@outlook.com",name:"Joan Teichroeb",item:"P50N White",serial:"LL01-00000000239",tracking:"D55627679000042110001",carrier:"Canpar",price:95.91,update:"Received (03/26/2026)",status:"received"},
+{email:"mhaywood@rogers.com",name:"Michael Haywood",item:"P150 White — Broken compost chamber",serial:"N/A",tracking:"1ZV56D262028313910",carrier:"Canpar",price:17.74,update:"Received (03/30/2026)",status:"received"},
+{email:"off--the-grid@outlook.com",name:"Joan Teichroeb",item:"P150 Black",serial:"LL01-00000000071",tracking:"D55627679000050341001",carrier:"Canpar",price:95.91,update:null,status:"shipped"},
+{email:"ron@newcmi.ca",name:"Ron Russell",item:"P100 White",serial:"LL01-00000000302",tracking:null,carrier:null,price:null,update:"Return form filled out",status:"form-filed"},
+{email:"katrinadowd83@gmail.com",name:"Katrina Dowd",item:"P100 White",serial:"LL01-00000000291",tracking:null,carrier:null,price:null,update:"Return form filled out",status:"form-filed"},
+{email:"matthewmossey@gmail.com",name:"Matthew Mossey",item:"P100 White",serial:"LL01-00000000280",tracking:null,carrier:null,price:null,update:"Received (05/20/2026)",status:"received"},
+];
+const RETURN_MAP=(()=>{const m={};RETURNS.forEach(r=>{if(!m[r.email])m[r.email]=[];m[r.email].push(r);});return m;})();
+
+const TODAY=new Date(2026,4,26); // May 26 2026
+const KEY="lila_followup_v8"; // bumped: added return/refund tracking data
+
+function addDays(d,n){const r=new Date(d);r.setDate(r.getDate()+n);return r;}
+function fmtDate(d){return d.toISOString().slice(0,10);}
+function parseD(s){const p=s.split("-");return new Date(+p[0],+p[1]-1,+p[2]);}
+function isSameDay(a,b){return a.getFullYear()===b.getFullYear()&&a.getMonth()===b.getMonth()&&a.getDate()===b.getDate();}
+function daysBetween(a,b){return Math.round((b-a)/86400000);}
+const MONTHS=["January","February","March","April","May","June","July","August","September","October","November","December"];
+const DAYS=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+
+function initCustomers(){
+  try{const saved=localStorage.getItem(KEY);if(saved)return JSON.parse(saved);}catch(e){}
+  return RAW_CUSTOMERS.map((c,i)=>({
+    ...c,id:i,
+    hhSize:c.hhSize||"1-2",
+    connectStatus:c._connect||"pending",
+    fu1Status:c._fu1||"pending",
+    fu2Status:c._fu2||"pending",
+    notes:c._notes||"",
+    phone:c.phone||"",
+  }));
+}
+
+function calcFollowUps(c){
+  const ob=parseD(c.onboard);
+  const days1=c.hhSize==="3-5"?7:14;
+  const days2=c.hhSize==="3-5"?14:28;
+  return{fu1Date:addDays(ob,days1),fu2Date:addDays(ob,days2)};
+}
+
+function App(){
+  const[customers,setCustomers]=useState(initCustomers);
+  const[view,setView]=useState("calendar");
+  const[calMonth,setCalMonth]=useState(TODAY.getMonth());
+  const[calYear,setCalYear]=useState(TODAY.getFullYear());
+  const[search,setSearch]=useState("");
+  const[filter,setFilter]=useState("all");
+  const[selected,setSelected]=useState(null);
+  const[dayDetail,setDayDetail]=useState(null);
+
+  useEffect(()=>{try{localStorage.setItem(KEY,JSON.stringify(customers));}catch(e){}},[customers]);
+
+  const updateCustomer=useCallback((id,patch)=>{
+    setCustomers(prev=>prev.map(c=>c.id===id?{...c,...patch}:c));
+  },[]);
+
+  /* ── Computed follow-ups ── */
+  const enriched=useMemo(()=>customers.map(c=>{
+    const{fu1Date,fu2Date}=calcFollowUps(c);
+    const connectDone=(c.connectStatus||"pending")!=="pending";
+    const fu1Overdue=c.fu1Status==="pending"&&fu1Date<TODAY;
+    const fu2Overdue=c.fu2Status==="pending"&&fu2Date<TODAY;
+    const fu1DueToday=isSameDay(fu1Date,TODAY)&&c.fu1Status==="pending";
+    const fu2DueToday=isSameDay(fu2Date,TODAY)&&c.fu2Status==="pending";
+    const tickets=TICKET_MAP[c.email]||[];
+    const hasIssue=tickets.length>0;
+    const replacements=REPLACEMENT_MAP[c.email]||[];
+    const hasReplacement=replacements.length>0;
+    const returns=RETURN_MAP[c.email]||[];
+    const hasReturn=returns.length>0||c.flagReturn;
+    return{...c,connectDone,fu1Date,fu2Date,fu1Overdue,fu2Overdue,fu1DueToday,fu2DueToday,tickets,hasIssue,replacements,hasReplacement,returns,hasReturn};
+  }),[customers]);
+
+  /* ── Stats ── */
+  const stats=useMemo(()=>{
+    let overdue=0,dueToday=0,upcoming=0,done=0,issues=0,replacePending=0,returnCount=0;
+    enriched.forEach(c=>{
+      if(c.fu1Overdue)overdue++;
+      if(c.fu2Overdue)overdue++;
+      if(c.fu1DueToday)dueToday++;
+      if(c.fu2DueToday)dueToday++;
+      if(c.fu1Status==="pending"&&!c.fu1Overdue&&!c.fu1DueToday&&c.fu1Date>TODAY)upcoming++;
+      if(c.fu2Status==="pending"&&!c.fu2Overdue&&!c.fu2DueToday&&c.fu2Date>TODAY)upcoming++;
+      if(c.fu1Status==="completed"||c.fu1Status==="review"||c.fu1Status==="reviewed")done++;
+      if(c.fu2Status==="completed"||c.fu2Status==="review"||c.fu2Status==="reviewed")done++;
+      if(c.hasIssue)issues++;
+      if(c.hasReplacement)replacePending++;
+      if(c.hasReturn)returnCount++;
+    });
+    return{overdue,dueToday,upcoming,done,issues,replacePending,returnCount,total:enriched.length};
+  },[enriched]);
+
+  /* ── Filtered list ── */
+  const filtered=useMemo(()=>{
+    let list=enriched;
+    if(search){
+      const q=search.toLowerCase();
+      list=list.filter(c=>c.name.toLowerCase().includes(q)||c.email.toLowerCase().includes(q));
+    }
+    if(filter==="overdue")list=list.filter(c=>c.fu1Overdue||c.fu2Overdue);
+    else if(filter==="today")list=list.filter(c=>c.fu1DueToday||c.fu2DueToday);
+    else if(filter==="upcoming")list=list.filter(c=>!c.fu1Overdue&&!c.fu2Overdue&&(c.fu1Status==="pending"||c.fu2Status==="pending"));
+    else if(filter==="done")list=list.filter(c=>(c.fu1Status==="completed"||c.fu1Status==="review"||c.fu1Status==="reviewed")&&(c.fu2Status==="completed"||c.fu2Status==="review"||c.fu2Status==="reviewed"));
+    else if(filter==="return")list=list.filter(c=>c.hasReturn);
+    else if(filter==="issues")list=list.filter(c=>c.hasIssue);
+    else if(filter==="replace")list=list.filter(c=>c.hasReplacement);
+    return list;
+  },[enriched,search,filter]);
+
+  /* ── Calendar helpers ── */
+  const calDays=useMemo(()=>{
+    const first=new Date(calYear,calMonth,1);
+    const startDay=first.getDay();
+    const daysInMonth=new Date(calYear,calMonth+1,0).getDate();
+    const prevMonthDays=new Date(calYear,calMonth,0).getDate();
+    const cells=[];
+    for(let i=startDay-1;i>=0;i--)cells.push({day:prevMonthDays-i,month:calMonth-1,other:true});
+    for(let i=1;i<=daysInMonth;i++)cells.push({day:i,month:calMonth,other:false});
+    const rem=42-cells.length;
+    for(let i=1;i<=rem;i++)cells.push({day:i,month:calMonth+1,other:true});
+    return cells;
+  },[calMonth,calYear]);
+
+  function getEventsForDay(day,month){
+    const d=new Date(calYear,month,day);
+    const events=[];
+    enriched.forEach(c=>{
+      if(isSameDay(parseD(c.onboard),d))events.push({type:"onboard",status:"completed",customer:c,overdue:false});
+      if(isSameDay(c.fu1Date,d))events.push({type:"fu1",status:c.fu1Status,customer:c,overdue:c.fu1Overdue});
+      if(isSameDay(c.fu2Date,d))events.push({type:"fu2",status:c.fu2Status,customer:c,overdue:c.fu2Overdue});
+    });
+    return events;
+  }
+
+  const prevMonth=()=>{if(calMonth===0){setCalMonth(11);setCalYear(y=>y-1);}else setCalMonth(m=>m-1);};
+  const nextMonth=()=>{if(calMonth===11){setCalMonth(0);setCalYear(y=>y+1);}else setCalMonth(m=>m+1);};
+  const goToday=()=>{setCalMonth(TODAY.getMonth());setCalYear(TODAY.getFullYear());};
+
+  function StatusBadge({status,overdue}){
+    if(overdue&&status==="pending")return <span className="status-badge sb-overdue">Overdue</span>;
+    const cls={pending:"sb-pending",messaged:"sb-messaged",called:"sb-called",completed:"sb-completed",review:"sb-review",reviewed:"sb-reviewed"};
+    const labels={pending:"Pending",messaged:"Messaged on Quo",called:"Called on Quo",completed:"Completed",review:"Review Requested",reviewed:"Reviewed ★"};
+    return <span className={`status-badge ${cls[status]||"sb-pending"}`}>{labels[status]||status}</span>;
+  }
+
+  /* ── Modal ── */
+  function CustomerModal({c,onClose}){
+    const{fu1Date,fu2Date}=c;
+    return(
+      <div className="modal-overlay" onClick={onClose}>
+        <div className="modal" onClick={e=>e.stopPropagation()} style={{position:"relative"}}>
+          <button className="modal-close" onClick={onClose}>&times;</button>
+          <h3>{c.name}</h3>
+          <p style={{fontSize:13,color:"#86868b",marginBottom:4}}>{c.email}</p>
+          {c.phone&&<p style={{fontSize:13,color:"#86868b",marginBottom:16}}>📱 <a href={"tel:"+c.phone} style={{color:"#0071e3",textDecoration:"none"}}>{c.phone}</a> <span style={{fontSize:10,color:"#bf5af2",fontWeight:600,marginLeft:4}}>Quo</span></p>}
+          {!c.phone&&<p style={{fontSize:11,color:"#c7c7cc",marginBottom:16}}>No Quo phone on file</p>}
+          {c.hasReturn&&c.returns.length===0&&<div style={{padding:"8px 12px",background:"#fce4ec",borderRadius:8,marginBottom:12,fontSize:12,fontWeight:600,color:"#951B1E"}}>⚠ Return requested — verify before follow-up</div>}
+          {c.returns&&c.returns.length>0&&(
+            <div className="return-panel">
+              <div style={{fontSize:12,fontWeight:700,color:"#951B1E",marginBottom:4}}>📦 RETURN/REFUND ({c.returns.length})</div>
+              <div style={{fontSize:11,color:"#86868b",marginBottom:6}}>Tracking return shipments for this customer</div>
+              {c.returns.map((r,ri)=>(
+                <div key={ri} className="return-card">
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    <div className="ret-item">{r.item}</div>
+                    <span className={`ret-${r.status}`}>{r.status==="form-filed"?"form filed":r.status}</span>
+                  </div>
+                  {r.serial&&<div className="ret-meta">Serial: {r.serial}</div>}
+                  {r.tracking&&<div className="ret-meta">Tracking: {r.tracking} ({r.carrier})</div>}
+                  {r.price&&<div className="ret-meta">Return shipping: ${r.price.toFixed(2)}</div>}
+                  {r.update&&<div className="ret-meta">{r.update}</div>}
+                  {!r.tracking&&r.status==="form-filed"&&<div className="ret-meta" style={{color:"#e65100"}}>Awaiting return label / shipment</div>}
+                </div>
+              ))}
+            </div>
+          )}
+          {c.tickets&&c.tickets.length>0&&(
+            <div className="issue-panel">
+              <div style={{fontSize:12,fontWeight:700,color:"#e65100",marginBottom:4}}>⚠ OPEN ISSUES ({c.tickets.length})</div>
+              <div style={{fontSize:11,color:"#86868b",marginBottom:6}}>Resolve issues before proceeding with follow-ups</div>
+              {c.tickets.map((t,ti)=>(
+                <div key={ti} className="issue-card">
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    <span className="ic-id">{t.ref}</span>
+                    <span className={`issue-stage ${STAGE_CSS[t.stage]||""}`}>{STAGE_LABELS[t.stage]||"Unknown"}</span>
+                  </div>
+                  <div className="ic-subj">{t.subject}</div>
+                  <div className="ic-meta">
+                    Priority: <strong>{t.priority}</strong>
+                    {" · "}
+                    <a href={HS_URL+t.id} target="_blank" rel="noopener" style={{color:"#0071e3",fontSize:11}}>Open in HubSpot →</a>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          {c.replacements&&c.replacements.length>0&&(
+            <div className="replace-panel">
+              <div style={{fontSize:12,fontWeight:700,color:"#5856d6",marginBottom:4}}>🔧 REPLACEMENTS ({c.replacements.length})</div>
+              <div style={{fontSize:11,color:"#86868b",marginBottom:6}}>Tracking replacement parts for this customer</div>
+              {c.replacements.map((r,ri)=>(
+                <div key={ri} className="replace-card">
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    <div className="rc-item">{r.item}</div>
+                    <span className={`rs-${r.status}`}>{r.status}</span>
+                  </div>
+                  {r.tracking&&<div className="rc-meta">Tracking: {r.tracking} ({r.carrier})</div>}
+                  {r.shipDate&&<div className="rc-meta">Shipped: {r.shipDate}</div>}
+                  {r.update&&<div className="rc-meta">{r.update}</div>}
+                  {!r.tracking&&<div className="rc-meta" style={{color:"#e65100"}}>No tracking yet — pending shipment</div>}
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="form-group">
+            <label>Household Size</label>
+            <select value={c.hhSize} onChange={e=>updateCustomer(c.id,{hhSize:e.target.value})}>
+              <option value="1-2">1–2 members (2-week cycle)</option>
+              <option value="3-5">3–5 members (1-week cycle)</option>
+            </select>
+          </div>
+          <div className="form-group">
+            <label>Onboarding Date</label>
+            <input type="date" value={c.onboard} onChange={e=>updateCustomer(c.id,{onboard:e.target.value})}/>
+          </div>
+          <div className="fu-row fu1-row">
+            <div className="fu-label" style={{color:"#e65100"}}>Follow-Up 1 — First Left Chamber Cycle Complete</div>
+            <div className="fu-date">{fu1Date.toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"})}</div>
+            <div style={{fontSize:11,color:"#86868b"}}>Message on Quo first, then call if no response</div>
+            <div style={{margin:"8px 0",padding:"8px 12px",background:"#fff",borderRadius:8,border:"1px solid #c8e6c9",fontSize:12,lineHeight:1.6}}>
+              <div style={{fontWeight:700,color:"#2e7d32",marginBottom:6}}>📶 CONNECT TO DASHBOARD</div>
+              <div style={{fontSize:11,color:"#86868b",marginBottom:4}}>During FU1 call, walk customer through connecting their LILA to our backend dashboard:</div>
+              <div><strong>1.</strong> Ensure power is on — light should be <strong>Solid Green</strong></div>
+              <div><strong>2.</strong> On phone WiFi → connect to <strong>"LL01-[Serial#]"</strong> → password <strong>"12345678"</strong> → "Connect without Internet"</div>
+              <div><strong>3.</strong> Open browser → go to <strong>192.168.4.1</strong></div>
+              <div><strong>4.</strong> Enter home WiFi name in SSID + password → click <strong>Connect</strong></div>
+              <div style={{marginTop:6,fontSize:11,color:"#86868b"}}>After connect: wait for STA state "Connected" → click "Start Update" → wait 30-35 min for green light → power cycle</div>
+              <div style={{marginTop:6}}>
+                <select className="status-select" value={c.connectStatus||"pending"} onChange={e=>updateCustomer(c.id,{connectStatus:e.target.value})} style={{fontSize:11}}>
+                  <option value="pending">⬜ Not Connected</option>
+                  <option value="sent">📤 Instructions Sent</option>
+                  <option value="connected">✅ Connected + OTA Done</option>
+                </select>
+              </div>
+            </div>
+            <div className="fu-status">
+              <select className="status-select" value={c.fu1Status} onChange={e=>updateCustomer(c.id,{fu1Status:e.target.value})}>
+                <option value="pending">Pending</option>
+                <option value="messaged">Messaged on Quo</option>
+                <option value="called">Called on Quo</option>
+                <option value="completed">Completed</option>
+              </select>
+            </div>
+          </div>
+          <div className="fu-row fu2-row">
+            <div className="fu-label" style={{color:"#7b1fa2"}}>Follow-Up 2 — 1st Mature Compost Ready</div>
+            <div className="fu-date">{fu2Date.toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"})}</div>
+            <div style={{fontSize:11,color:"#86868b"}}>If compost is good → ask for 5★ Trustpilot review + brand ambassador invite</div>
+            <div style={{margin:"8px 0",padding:"8px 12px",background:"#fff",borderRadius:8,border:"1px solid #d2d2d7"}}>
+              <div style={{fontSize:11,fontWeight:700,color:"#00b67a",marginBottom:4}}>★ TRUSTPILOT REVIEW LINK</div>
+              <a href="https://www.trustpilot.com/review/lilacomposter.com" target="_blank" rel="noopener" style={{fontSize:12,color:"#0071e3",wordBreak:"break-all"}}>trustpilot.com/review/lilacomposter.com</a>
+              <div style={{fontSize:10,color:"#86868b",marginTop:2}}>Send this link to customer when compost is good. Mark "Reviewed on Trustpilot" once submitted.</div>
+            </div>
+            <div className="fu-status">
+              <select className="status-select" value={c.fu2Status} onChange={e=>updateCustomer(c.id,{fu2Status:e.target.value})}>
+                <option value="pending">Pending</option>
+                <option value="messaged">Messaged on Quo</option>
+                <option value="called">Called on Quo</option>
+                <option value="review">5★ Review Requested</option>
+                <option value="reviewed">✓ Reviewed on Trustpilot</option>
+              </select>
+            </div>
+          </div>
+          <div className="form-group" style={{marginTop:12}}>
+            <label>Notes</label>
+            <textarea style={{width:"100%",padding:8,borderRadius:8,border:"1px solid #d2d2d7",fontSize:13,minHeight:60,resize:"vertical"}} value={c.notes||""} onChange={e=>updateCustomer(c.id,{notes:e.target.value})} placeholder="Add notes about this customer..."/>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  /* ── Day detail popup ── */
+  function DayPopup({day,month,onClose}){
+    const events=getEventsForDay(day,month);
+    const d=new Date(calYear,month,day);
+    if(!events.length)return null;
+    return(
+      <div className="modal-overlay" onClick={onClose}>
+        <div className="modal" onClick={e=>e.stopPropagation()} style={{position:"relative",width:420}}>
+          <button className="modal-close" onClick={onClose}>&times;</button>
+          <h3>{d.toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric",year:"numeric"})}</h3>
+          <p style={{fontSize:12,color:"#86868b",marginBottom:16}}>{events.length} follow-up{events.length>1?"s":""} scheduled</p>
+          {events.map((ev,i)=>{
+            const colors={onboard:{bg:"#e3f2fd",label:"#0071e3"},connect:{bg:"#e8f5e9",label:"#2e7d32"},fu1:{bg:"#fff3e0",label:"#e65100"},fu2:{bg:"#f3e5f5",label:"#7b1fa2"}};
+            const labels={onboard:"Onboarding Session",connect:"📶 Send Connect Instructions",fu1:"FU1 — Chamber Switch",fu2:"FU2 — Compost Ready"};
+            const c=colors[ev.type]||colors.fu1;
+            return(
+            <div key={i} style={{padding:12,borderRadius:8,marginBottom:8,background:c.bg,cursor:"pointer"}} onClick={()=>{onClose();setSelected(ev.customer);}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <div>
+                  <div className="fu-label" style={{color:c.label}}>{labels[ev.type]}</div>
+                  <div style={{fontWeight:600,fontSize:14}}>{ev.customer.name}</div>
+                  <div style={{fontSize:11,color:"#86868b"}}>{ev.customer.email}{ev.customer.phone&&<span style={{marginLeft:6,color:"#bf5af2"}}>{ev.customer.phone}</span>}</div>
+                  {ev.customer.hasIssue&&<div style={{fontSize:10,color:"#e65100",fontWeight:600,marginTop:2}}>⚠ {ev.customer.tickets.length} open issue{ev.customer.tickets.length>1?"s":""}: {ev.customer.tickets.map(t=>t.ref).join(", ")}</div>}
+                </div>
+                {ev.type!=="onboard"&&ev.type!=="connect"&&<StatusBadge status={ev.status} overdue={ev.overdue}/>}
+                {ev.type==="connect"&&<span className={`status-badge ${ev.status==="connected"?"sb-completed":ev.status==="sent"?"sb-messaged":ev.overdue?"sb-overdue":"sb-pending"}`}>{ev.status==="connected"?"Connected":ev.status==="sent"?"Sent":"Pending"}</span>}
+                {ev.type==="onboard"&&<span className="status-badge sb-completed">Onboarded</span>}
+              </div>
+            </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
+  return(
+    <div className="app">
+      <div className="header">
+        <div><h1 style={{marginBottom:2}}><span>LILA</span> Customer Follow-Up Calendar</h1><div style={{fontSize:11,color:"#86868b"}}>Sources: Calendly · Gmail · Fireflies · Quo · HubSpot · Ashwini's FU Sheet · Replacement Sheet · Return&Refund Sheet · Gmail/Quo Scan (May 26)</div></div>
+        <div className="header-right">
+          <span style={{fontSize:13,color:"#86868b"}}>{TODAY.toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric",year:"numeric"})}</span>
+          <button className="today-btn" onClick={goToday}>Today</button>
+        </div>
+      </div>
+
+      <div className="stats-row">
+        <div className="stat-card stat-overdue"><div className="num">{stats.overdue}</div><div className="label">Overdue</div></div>
+        <div className="stat-card stat-today"><div className="num">{stats.dueToday}</div><div className="label">Due Today</div></div>
+        <div className="stat-card stat-upcoming"><div className="num">{stats.upcoming}</div><div className="label">Upcoming</div></div>
+        <div className="stat-card stat-done"><div className="num">{stats.done}</div><div className="label">Completed</div></div>
+        <div className="stat-card stat-issues"><div className="num">{stats.issues}</div><div className="label">Open Issues</div></div>
+        <div className="stat-card stat-replace"><div className="num">{stats.replacePending}</div><div className="label">Replacements</div></div>
+        <div className="stat-card stat-return"><div className="num">{stats.returnCount}</div><div className="label">Returns</div></div>
+        <div className="stat-card stat-total"><div className="num">{stats.total}</div><div className="label">Customers</div></div>
+      </div>
+
+      <div className="tabs">
+        <button className={`tab ${view==="calendar"?"active":""}`} onClick={()=>setView("calendar")}>Calendar</button>
+        <button className={`tab ${view==="list"?"active":""}`} onClick={()=>setView("list")}>Full List</button>
+      </div>
+
+      {view==="calendar"?(
+        <div className="view-container">
+          <div className="calendar-panel">
+            <div className="legend">
+              <div className="legend-item"><div className="legend-dot" style={{background:"#0071e3"}}/> Onboarding</div>
+              <div className="legend-item"><div className="legend-dot" style={{background:"#ff9f0a"}}/> FU1 — Chamber Switch</div>
+              <div className="legend-item"><div className="legend-dot" style={{background:"#bf5af2"}}/> FU2 — Compost Ready</div>
+              <div className="legend-item"><div className="legend-dot" style={{background:"#e65100"}}/> Has Issue</div>
+              <div className="legend-item"><div className="legend-dot" style={{background:"#951B1E"}}/> Overdue</div>
+              <div className="legend-item"><div className="legend-dot" style={{background:"#30d158"}}/> Done</div>
+            </div>
+            <div className="cal-header">
+              <h2>{MONTHS[calMonth]} {calYear}</h2>
+              <div className="cal-nav">
+                <button onClick={prevMonth}>‹</button>
+                <button onClick={nextMonth}>›</button>
+              </div>
+            </div>
+            <div className="cal-grid">
+              {DAYS.map(d=><div key={d} className="cal-day-header">{d}</div>)}
+              {calDays.map((cell,i)=>{
+                const events=getEventsForDay(cell.day,cell.month);
+                const isToday=!cell.other&&isSameDay(new Date(calYear,cell.month,cell.day),TODAY);
+                return(
+                  <div key={i} className={`cal-day ${cell.other?"other-month":""} ${isToday?"today":""}`} onClick={()=>{if(events.length)setDayDetail(cell);}}>
+                    <div className="day-num">{cell.day}</div>
+                    {events.slice(0,3).map((ev,j)=>{
+                      const done=ev.type!=="onboard"&&(ev.status==="completed"||ev.status==="review"||ev.status==="reviewed");
+                      const cls=ev.type==="onboard"?"onboard":done?"done":ev.overdue?"overdue":ev.type==="fu1"?"fu1":"fu2";
+                      const icon=ev.type==="onboard"?"📋":ev.type==="fu1"?"🔄":"🌱";
+                      const issueCls=ev.customer.hasIssue?" has-issue":"";
+                      return <div key={j} className={`cal-event ${cls}${issueCls}`}>{icon}{ev.customer.hasIssue?"⚠":""} {ev.customer.name.split(" ")[0]}</div>;
+                    })}
+                    {events.length>3&&<div style={{fontSize:9,color:"#86868b",textAlign:"center"}}>+{events.length-3} more</div>}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="side-panel">
+            <div className="list-panel">
+              <h3>Customers</h3>
+              <input className="search-box" placeholder="Search by name or email..." value={search} onChange={e=>setSearch(e.target.value)}/>
+              <div className="filter-row">
+                {[["all","All"],["overdue","Overdue"],["today","Today"],["upcoming","Upcoming"],["done","Done"],["issues","Issues"],["replace","Replacements"],["return","Returns"]].map(([k,l])=>(
+                  <button key={k} className={`filter-btn ${filter===k?"active":""}`} onClick={()=>setFilter(k)}>{l}</button>
+                ))}
+              </div>
+              <div className="customer-list">
+                {filtered.map(c=>(
+                  <div key={c.id} className={`customer-card ${selected&&selected.id===c.id?"selected":""}`} onClick={()=>setSelected(c)}>
+                    <div className="cc-name">{c.name}</div>
+                    <div className="cc-email">{c.email}{c.phone&&<span style={{marginLeft:6,color:"#bf5af2",fontSize:10,fontWeight:600}}>Quo ✓</span>}</div>
+                    <div className="cc-date">Onboarded: {parseD(c.onboard).toLocaleDateString("en-US",{month:"short",day:"numeric"})}&ensp;·&ensp;HH: {c.hhSize}</div>
+                    <div className="cc-badges">
+                      {c.hasIssue&&<span className="badge badge-issue">⚠ {c.tickets.length} Issue{c.tickets.length>1?"s":""}</span>}
+                      {c.hasReplacement&&<span className="badge badge-replace">🔧 Replacement</span>}
+                      {c.hasReturn&&<span className="badge badge-return">📦 Return{c.returns.length>0?` (${c.returns.length})`:""}</span>}
+                      {c.fu1Overdue&&<span className="badge badge-overdue">FU1 Overdue</span>}
+                      {c.fu2Overdue&&<span className="badge badge-overdue">FU2 Overdue</span>}
+                      {c.fu1DueToday&&<span className="badge badge-due-today">FU1 Today</span>}
+                      {c.fu2DueToday&&<span className="badge badge-due-today">FU2 Today</span>}
+                      {c.fu1Status==="completed"&&<span className="badge badge-done">FU1 ✓</span>}
+                      {c.fu2Status==="completed"&&<span className="badge badge-done">FU2 ✓</span>}
+                      {c.fu2Status==="review"&&<span className="badge badge-done">Review ✓</span>}
+                      {c.fu2Status==="reviewed"&&<span className="badge badge-done">Trustpilot ★</span>}
+                      {c.future&&<span className="badge badge-upcoming">Upcoming</span>}
+                    </div>
+                  </div>
+                ))}
+                {filtered.length===0&&<div style={{textAlign:"center",padding:20,color:"#86868b",fontSize:13}}>No customers match</div>}
+              </div>
+            </div>
+          </div>
+        </div>
+      ):(
+        <div className="full-list">
+          <table>
+            <thead>
+              <tr>
+                <th>Customer</th>
+                <th>Email</th>
+                <th>Quo Phone</th>
+                <th>Onboarded</th>
+                <th>HH Size</th>
+                <th>Connect</th>
+                <th>FU1 Date</th>
+                <th>FU1 Status</th>
+                <th>FU2 Date</th>
+                <th>FU2 Status</th>
+                <th>Issues</th>
+                <th>Replacement</th>
+                <th>Return</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map(c=>(
+                <tr key={c.id} onClick={()=>setSelected(c)} style={{cursor:"pointer"}}>
+                  <td style={{fontWeight:600}}>{c.name}{c.hasReturn?" ⚠":""}</td>
+                  <td style={{fontSize:11,color:"#86868b"}}>{c.email}</td>
+                  <td style={{fontSize:11,color:c.phone?"#bf5af2":"#c7c7cc"}}>{c.phone||"—"}</td>
+                  <td>{parseD(c.onboard).toLocaleDateString("en-US",{month:"short",day:"numeric"})}</td>
+                  <td>
+                    <select className="hh-select" value={c.hhSize} onChange={e=>{e.stopPropagation();updateCustomer(c.id,{hhSize:e.target.value});}}>
+                      <option value="1-2">1–2</option>
+                      <option value="3-5">3–5</option>
+                    </select>
+                  </td>
+                  <td><span className={`status-badge ${c.connectDone?"sb-completed":"sb-pending"}`} style={{fontSize:9}}>{(c.connectStatus||"pending")==="connected"?"✓ OTA":(c.connectStatus||"pending")==="sent"?"Sent":"—"}</span></td>
+                  <td>{c.fu1Date.toLocaleDateString("en-US",{month:"short",day:"numeric"})}</td>
+                  <td><StatusBadge status={c.fu1Status} overdue={c.fu1Overdue}/></td>
+                  <td>{c.fu2Date.toLocaleDateString("en-US",{month:"short",day:"numeric"})}</td>
+                  <td><StatusBadge status={c.fu2Status} overdue={c.fu2Overdue}/></td>
+                  <td>{c.hasIssue?<span style={{fontSize:10,fontWeight:700,color:"#e65100"}}>⚠ {c.tickets.length}</span>:<span style={{color:"#c7c7cc",fontSize:11}}>—</span>}</td>
+                  <td>{c.hasReplacement?<span style={{fontSize:10,fontWeight:700,color:"#5856d6"}}>🔧 {c.replacements.length}</span>:<span style={{color:"#c7c7cc",fontSize:11}}>—</span>}</td>
+                  <td>{c.hasReturn?<span style={{fontSize:10,fontWeight:700,color:"#951B1E"}}>📦 {c.returns.length||"⚠"}</span>:<span style={{color:"#c7c7cc",fontSize:11}}>—</span>}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {selected&&<CustomerModal c={enriched.find(x=>x.id===selected.id)||selected} onClose={()=>setSelected(null)}/>}
+      {dayDetail&&<DayPopup day={dayDetail.day} month={dayDetail.month} onClose={()=>setDayDetail(null)}/>}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>

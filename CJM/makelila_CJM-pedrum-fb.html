@@ -1,0 +1,701 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>makelila — Internal Fulfillment App · Customer Journey Map (VCycene)</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background: #f5f3f0; color: #2d2d2d; }
+
+  /* ===== TOP BAR ===== */
+  .top-bar { background: #1a1a2e; color: #fff; padding: 12px 28px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 200; }
+  .top-bar-left h1 { font-size: 17px; font-weight: 700; letter-spacing: .3px; }
+  .top-bar-left .subtitle { font-size: 10px; opacity: .65; margin-top: 2px; }
+  .legend { display: flex; gap: 16px; font-size: 11px; align-items: center; flex-wrap: wrap; }
+  .legend-dot { width: 12px; height: 12px; border-radius: 3px; display: inline-block; margin-right: 4px; vertical-align: middle; }
+  .dot-original { background: #fff; border: 1.5px solid #bbb; }
+  .dot-suggested { background: #ffe066; border: 1.5px dashed #c9a800; }
+  .dot-feedback { background: #74b9ff; border: 1.5px solid #0984e3; }
+
+  /* ===== TAB BAR ===== */
+  .tab-bar { background: #12122a; display: flex; align-items: center; padding: 0 20px; position: sticky; top: 56px; z-index: 190; border-bottom: 2px solid #2d2d4e; gap: 4px; }
+  .tab-btn {
+    padding: 11px 22px;
+    border: none;
+    background: transparent;
+    color: rgba(255,255,255,0.5);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    border-bottom: 3px solid transparent;
+    margin-bottom: -2px;
+    transition: all 0.2s;
+    letter-spacing: .3px;
+    white-space: nowrap;
+  }
+  .tab-btn:hover { color: rgba(255,255,255,0.8); }
+  .tab-btn.active { color: #fff; border-bottom-color: #8B1A1A; }
+  .tab-icon { margin-right: 7px; }
+
+  /* ===== TAB PANELS ===== */
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+
+  /* ===== SHARED LAYOUT ===== */
+  .scroll-hint { text-align: center; padding: 7px; font-size: 11px; color: #999; background: #f5f3f0; border-bottom: 1px solid #eee; }
+  .layout { display: flex; min-height: calc(100vh - 90px); }
+
+  /* ===== PERSONA SIDEBAR ===== */
+  .persona { width: 280px; min-width: 280px; background: #fff; border-right: 1px solid #ddd; padding: 22px 18px; position: sticky; top: 90px; height: calc(100vh - 90px); overflow-y: auto; }
+  .persona h2 { font-size: 14px; margin-bottom: 5px; }
+  .persona h3 { font-size: 18px; margin-bottom: 12px; }
+  .persona-section { margin-bottom: 14px; }
+  .persona-section h4 { font-size: 10px; text-transform: uppercase; letter-spacing: .8px; color: #888; margin-bottom: 5px; }
+  .persona-section p, .persona-section li { font-size: 12.5px; line-height: 1.5; color: #444; }
+  .persona-section ul { padding-left: 15px; }
+  .persona-avatar { width: 58px; height: 58px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 26px; margin-bottom: 10px; }
+  .avatar-make { background: linear-gradient(135deg, #8B1A1A, #3C3B6E); }
+  .team-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 8px; font-size: 11px; }
+  .team-grid div { line-height: 1.4; }
+  .team-grid b { color: #2d3436; }
+
+  /* ===== MAIN JOURNEY GRID ===== */
+  .main { flex: 1; overflow-x: auto; padding: 0; }
+  .journey-grid { display: grid; min-width: 2900px; }
+  .journey-grid-make { grid-template-columns: 195px repeat(10, minmax(270px, 1fr)); }
+
+  /* ===== STAGE HEADERS ===== */
+  .stage-header { padding: 13px 10px; text-align: center; border-bottom: 3px solid rgba(0,0,0,.1); }
+  .stage-header h3 { font-size: 12px; font-weight: 700; margin-bottom: 3px; }
+  .stage-header p { font-size: 9.5px; opacity: .78; line-height: 1.3; }
+
+  /* makelila stage colors — using app palette */
+  .hdr-awareness { background: #ffeaa7; }
+  .hdr-onboarding { background: #fab1a0; }
+  .hdr-orderreview { background: #8B1A1A; color: #fff; }
+  .hdr-shelf { background: #fdcb6e; }
+  .hdr-queue { background: #74b9ff; color: #fff; }
+  .hdr-postship { background: #3C3B6E; color: #fff; }
+  .hdr-stock { background: #55efc4; }
+  .hdr-rework { background: #e17055; color: #fff; }
+  .hdr-activity { background: #6c5ce7; color: #fff; }
+  .hdr-advocacy { background: #00b894; color: #fff; }
+
+  /* ===== ROW LABELS ===== */
+  .row-label { background: #fff; padding: 10px 9px; border-bottom: 1px solid #eee; border-right: 2px solid #ddd; position: sticky; left: 0; z-index: 5; overflow-wrap: break-word; }
+  .row-label h4 { font-size: 11.5px; font-weight: 700; color: #2d3436; margin-bottom: 2px; }
+  .row-label p { font-size: 9.5px; color: #888; line-height: 1.3; }
+
+  /* ===== CELLS ===== */
+  .cell { padding: 9px 7px; border-bottom: 1px solid #eee; border-right: 1px solid #f0f0f0; background: #fafaf8; min-height: 85px; overflow: visible; }
+  .cell:hover { background: #f0eee8; }
+
+  /* ===== NOTES ===== */
+  .note { padding: 7px 9px; border-radius: 4px; font-size: 11.5px; line-height: 1.45; margin-bottom: 5px; box-shadow: 1px 1px 3px rgba(0,0,0,.08); position: relative; cursor: default; word-wrap: break-word; }
+  .note:last-child { margin-bottom: 0; }
+  .note-action { background: #ffeaa7; border-left: 3px solid #f9ca24; }
+  .note-thought { background: #dfe6e9; border-left: 3px solid #74b9ff; }
+  .note-need { background: #c8f7c5; border-left: 3px solid #27ae60; }
+  .note-pain { background: #fab1a0; border-left: 3px solid #e74c3c; }
+  .note-touch { background: #e8daef; border-left: 3px solid #8e44ad; }
+
+  .suggested { border-style: dashed !important; opacity: .88; padding-right: 22px !important; }
+  .suggested::after { content: "💡"; position: absolute; top: 3px; right: 4px; font-size: 10px; }
+  .feedback { background: #dfe6fd !important; border-left-color: #0984e3 !important; padding-right: 22px !important; }
+  .feedback::after { content: "📣"; position: absolute; top: 3px; right: 4px; font-size: 10px; }
+  .fb-ash { border-right: 2px solid #6c5ce7; }
+  .fb-ops { border-right: 2px solid #e17055; }
+  .fb-junaid { border-right: 2px solid #00b894; }
+  .fb-pedrum { border-right: 2px solid #00b8d9; }
+  .src { font-size: 9px; color: #666; font-style: italic; display: block; margin-top: 3px; }
+  .mono { font-family: 'SF Mono', Menlo, monospace; font-size: 10.5px; }
+
+  /* ===== EMOTION ROW ===== */
+  .emotion-row { grid-column: 1 / -1; background: #fff; padding: 18px 18px 10px 18px; border-top: 2px solid #ddd; }
+  .emotion-title { font-size: 12px; font-weight: 700; margin-bottom: 9px; padding-left: 175px; }
+  .emotion-track { display: flex; align-items: flex-end; height: 115px; padding-left: 195px; position: relative; }
+  .emotion-track::before { content: ""; position: absolute; left: 195px; right: 18px; top: 50%; border-top: 1px dashed #ccc; }
+  .emotion-bar { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; position: relative; z-index: 1; }
+  .emotion-dot { width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 16px; box-shadow: 0 2px 6px rgba(0,0,0,.12); transition: transform .2s; cursor: default; }
+  .emotion-dot:hover { transform: scale(1.25); }
+  .emotion-label { font-size: 9.5px; color: #888; text-align: center; max-width: 110px; margin-top: 3px; }
+  .e-high { background: #27ae60; }
+  .e-mid-high { background: #2ecc71; }
+  .e-mid { background: #f1c40f; }
+  .e-mid-low { background: #e67e22; }
+  .e-low { background: #e74c3c; }
+
+  /* ===== OPPORTUNITIES ===== */
+  .opportunities { grid-column: 1 / -1; background: #fff; padding: 18px; border-top: 2px solid #8B1A1A; }
+  .opportunities h3 { font-size: 14px; font-weight: 700; color: #8B1A1A; margin-bottom: 10px; }
+  .opp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 10px; }
+  .opp-card { background: #fff5f5; border: 1px solid #fc8181; border-radius: 8px; padding: 12px; }
+  .opp-card h4 { font-size: 11.5px; font-weight: 700; color: #8B1A1A; margin-bottom: 3px; }
+  .opp-card p { font-size: 11.5px; color: #444; line-height: 1.4; }
+  .opp-stage { font-size: 10px; background: #8B1A1A; color: #fff; padding: 2px 7px; border-radius: 10px; display: inline-block; margin-bottom: 5px; }
+</style>
+</head>
+<body>
+
+<!-- TOP BAR -->
+<div class="top-bar">
+  <div class="top-bar-left">
+    <h1>🛠️ makelila — Internal Fulfillment App · Customer Journey Map</h1>
+    <div class="subtitle">VCycene · Replacing the Virgo Operations Hub spreadsheet · Supabase + React · lila.vip · v2 incorporates Pedrum review (sync · automation · returns approval)</div>
+  </div>
+  <div class="legend">
+    <span><span class="legend-dot dot-original"></span> Original</span>
+    <span><span class="legend-dot dot-feedback"></span> 📣 Stakeholder feedback</span>
+    <span><span class="legend-dot dot-suggested"></span> 💡 AI suggested</span>
+  </div>
+</div>
+
+<!-- TAB BAR -->
+<div class="tab-bar">
+  <button class="tab-btn active" onclick="switchTab('make', this)"><span class="tab-icon">🛠️</span>makelila — VCycene Team CJM</button>
+</div>
+
+<!-- ==================== TAB: MAKELILA ==================== -->
+<div id="tab-make" class="tab-panel active">
+
+<div class="scroll-hint">← Scroll horizontally to see all 10 internal-user journey stages →</div>
+
+<div class="layout">
+<aside class="persona">
+  <div class="persona-avatar avatar-make">🧑‍🔧</div>
+  <h2 style="color: #8B1A1A;">Internal User</h2>
+  <h3>VCycene Teammate</h3>
+  <div class="persona-section">
+    <h4>Who are they?</h4>
+    <p>One of seven named team members fulfilling LILA Pro composters out of the MicroArt warehouse in Markham, ON. Comes from a workflow that lived across <span class="mono">Virgo_Operations_Hub_MRP.xlsx</span>, MaxxUs sheets, P150 Notion logs, and Junaid's text messages.</p>
+  </div>
+  <div class="persona-section">
+    <h4>The Team</h4>
+    <div class="team-grid">
+      <div><b>Pedrum</b><br>Marketing</div>
+      <div><b>Raymond</b><br>Fulfillment</div>
+      <div><b>Aaron</b><br>Fulfillment / QA</div>
+      <div><b>Ashwini</b><br>Customer Service</div>
+      <div><b>Junaid</b><br>Repair / Rework</div>
+      <div><b>Huayi</b><br>Product / PM</div>
+      <div><b>George</b><br>Founder · Approver</div>
+      <div><b>Julie</b><br>Returns / Finance</div>
+    </div>
+  </div>
+  <div class="persona-section">
+    <h4>Goals & Motivations</h4>
+    <ul>
+      <li>Replace 5+ scattered spreadsheets with one trusted app</li>
+      <li>Walk every order through Assign → Test → Label → Dock → Email cleanly</li>
+      <li>Know exactly which serial is where, in what state, for which customer</li>
+      <li>Catch the P150 35% defect rate before it reaches customers</li>
+      <li>Stop briefing colleagues over Slack DMs and free-text cells</li>
+    </ul>
+  </div>
+  <div class="persona-section">
+    <h4>Struggles & Frustrations</h4>
+    <ul>
+      <li>Fulfillment was split across CA / US / Personal / Hold / Returns tabs</li>
+      <li>Replacements buried in Notes columns; no structured field</li>
+      <li>Customer follow-up calendar lived in a separate sheet (Ash)</li>
+      <li>Rework requests came as text messages to Junaid</li>
+      <li>No SO → campaign attribution (Pedrum)</li>
+      <li>Two users editing the file = corrupted state</li>
+      <li>Status changes had no audit trail — "who changed this and when?"</li>
+    </ul>
+  </div>
+  <div class="persona-section">
+    <h4>Context</h4>
+    <p>Inventory: 350 units produced across 5 batches (P50, P150, P50N, P100, P100X). Heavy serial-number tracking (<span class="mono">LL01-XXXXXXXXXXX</span>). Active rework backlog from P150. ~20 P100 replacements queued. Real customers, real money — VCycene has refunded ~$16K across 32 returns.</p>
+  </div>
+  <hr style="margin: 16px 0; border: none; border-top: 1px solid #eee;">
+  <div class="persona-section">
+    <h4>Outcome</h4>
+    <p style="font-size: 12px; color: #8B1A1A; font-weight: 600;">makelila becomes the system of record for every LILA unit, every order, and every team handoff — and the spreadsheets become read-only history.</p>
+  </div>
+  <hr style="margin: 16px 0; border: none; border-top: 1px solid #eee;">
+  <div class="persona-section">
+    <h4 style="color: #0984e3;">Feedback Sources</h4>
+    <p style="font-size: 11px;"><span style="color: #6c5ce7; font-weight: 700;">■</span> Ashwini — CS &amp; team-coverage audit (2026-04-12)<br>(Identified 9 gaps in MRP coverage, drove team_tasks / customer_followups / campaigns / repair_tickets schemas)</p>
+    <p style="font-size: 11px; margin-top: 6px;"><span style="color: #e17055; font-weight: 700;">■</span> Aaron / Raymond — Fulfillment Ops<br>(5-step queue UX, drag-drop shelf rearrangement, dock checklist)</p>
+    <p style="font-size: 11px; margin-top: 6px;"><span style="color: #00b894; font-weight: 700;">■</span> Junaid — Repair / Rework<br>(P150 defect log, rework flagging, parts BOM)</p>
+    <p style="font-size: 11px; margin-top: 6px;"><span style="color: #00b8d9; font-weight: 700;">■</span> Pedrum — Marketing (review round 1)<br>(Shopify ↔ makelila sync semantics, HubSpot positioning, ClickShip + Freightcom dedup, address-verification automation, email/SMS templates, returns approval layer with George + Julie)</p>
+  </div>
+  <hr style="margin: 16px 0; border: none; border-top: 1px solid #eee;">
+  <div class="persona-section">
+    <h4>Module Map</h4>
+    <p style="font-size: 11px; line-height: 1.6;">
+      🔴 <strong>Order Review</strong> — Triage approve/flag/hold<br>
+      🟠 <strong>Fulfillment</strong> — Queue · Shelf · History · Replacements · Returns<br>
+      🔵 <strong>Post-Shipment</strong> — Carrier tracking, geo dashboard<br>
+      🟢 <strong>Stock</strong> — 15-status unit lifecycle + OTA<br>
+      🟣 <strong>Activity Log</strong> — Audit trail + KPIs
+    </p>
+  </div>
+  <div class="persona-section">
+    <h4>Build Status</h4>
+    <p style="font-size: 11px; line-height: 1.6;">
+      ✅ <strong>v0.1.0-infra</strong> — Auth + shell + activity log<br>
+      ✅ <strong>v0.2.0-order-review</strong> — Order Review live<br>
+      🟡 <strong>v0.3.0-fulfillment</strong> — Queue + Shelf in build<br>
+      ⬜ Post-Shipment · Stock · Returns · History · Replacements
+    </p>
+  </div>
+</aside>
+
+<div class="main">
+<div class="journey-grid journey-grid-make">
+
+  <!-- STAGE HEADERS -->
+  <div class="stage-header" style="background:#fff; border-bottom: 3px solid #ddd;"><h3>Row</h3></div>
+  <div class="stage-header hdr-awareness"><h3>Awareness</h3><p>Why does the team need a real app?</p></div>
+  <div class="stage-header hdr-onboarding"><h3>Onboarding & Sign-In</h3><p>How do they get into makelila?</p></div>
+  <div class="stage-header hdr-orderreview"><h3>Order Review</h3><p>How do they triage incoming orders?</p></div>
+  <div class="stage-header hdr-shelf"><h3>Shelf Layout</h3><p>How do they organise 30 skids × 5 slots?</p></div>
+  <div class="stage-header hdr-queue"><h3>Fulfillment Queue (5 Steps)</h3><p>Assign → Test → Label → Dock → Email</p></div>
+  <div class="stage-header hdr-postship"><h3>Post-Shipment</h3><p>How do they track delivery and exceptions?</p></div>
+  <div class="stage-header hdr-stock"><h3>Stock & OTA</h3><p>How do they manage 350-unit lifecycle?</p></div>
+  <div class="stage-header hdr-rework"><h3>Rework / Replacements / Returns &amp; Refunds</h3><p>P150 defect tail + dual-approval refund flow (George + Julie)</p></div>
+  <div class="stage-header hdr-activity"><h3>Activity Log & Reporting</h3><p>How do they see team & weekly KPIs?</p></div>
+  <div class="stage-header hdr-advocacy"><h3>Adoption & Advocacy</h3><p>How does makelila replace the spreadsheets?</p></div>
+
+  <!-- ROW 1: ACTIONS -->
+  <div class="row-label"><h4>Actions</h4><p>What does the teammate do at this stage?</p></div>
+
+  <div class="cell">
+    <div class="note note-action">They open <span class="mono">Virgo_Operations_Hub_MRP.xlsx</span> for the daily review and find conflicting numbers</div>
+    <div class="note note-action feedback fb-ops">They juggle CA / US / Personal / Hold / Returns tabs to find one order<span class="src">— Raymond &amp; Aaron</span></div>
+    <div class="note note-action feedback fb-ash">They open the customer follow-up calendar in a separate sheet (Ash's)<span class="src">— Ashwini audit gap #3</span></div>
+    <div class="note note-action feedback fb-junaid">Junaid receives a rework request as a text message — no structured intake<span class="src">— Junaid</span></div>
+    <div class="note note-action feedback fb-pedrum">CS tracks refunds in a Google Sheet; George + Julie approve over Slack — no audit trail<span class="src">— Pedrum</span></div>
+    <div class="note note-action feedback fb-pedrum">Fulfillment team manually re-keys carrier + tracking into Freightcom even though ClickShip already has Shopify's data<span class="src">— Pedrum: dedup pain</span></div>
+    <div class="note note-action feedback fb-pedrum">Pedrum manually opens Google Maps to verify each address — sometimes finds a different ZIP than the customer entered<span class="src">— Pedrum</span></div>
+    <div class="note note-action">They notice MaxxUs records, P150 Notion docs, and Shopify all out of sync</div>
+  </div>
+
+  <div class="cell">
+    <div class="note note-action">They visit <span class="mono">lila.vip</span> and click "Sign in with Google"</div>
+    <div class="note note-action">Google OAuth limits sign-in to <span class="mono">@virgohome.io</span> accounts</div>
+    <div class="note note-action">They land on the Activity Log + 5-module shell</div>
+    <div class="note note-action feedback fb-ash">They confirm their identity in the "I am" dropdown (persisted in localStorage)<span class="src">— Ashwini: 7-person team</span></div>
+    <div class="note note-action feedback fb-pedrum">They check the in-app "Tools we use" page: makelila is the system of record for ops; HubSpot remains the CRM/marketing tool, Shopify remains the storefront — clear boundaries published<span class="src">— Pedrum: avoid duplication</span></div>
+    <div class="note note-action suggested">They watch the embedded onboarding Loom (90 sec) and skip if confident</div>
+  </div>
+
+  <div class="cell">
+    <div class="note note-action">They open Order Review — Pending tab loads first</div>
+    <div class="note note-action">They click an order row → right panel shows customer, address verdict, freight bar, line items, notes</div>
+    <div class="note note-action feedback fb-ops">They check the address verdict pill (house · apt · condo · remote)<span class="src">— Aaron: condo / remote = warn</span></div>
+    <div class="note note-action feedback fb-pedrum">They manually open Google Maps to cross-check the address — sometimes finds a different ZIP / postal than the customer entered<span class="src">— Pedrum: round 1 review</span></div>
+    <div class="note note-action feedback fb-pedrum">If contact info is missing or address mismatch is detected, they trigger a templated email/SMS asking the customer to confirm<span class="src">— Pedrum: automation upside</span></div>
+    <div class="note note-action">They press <strong>Confirm</strong> (green), or expand <strong>Flag / Hold / Need Info</strong> to add a reason</div>
+    <div class="note note-action">Confirmed orders auto-enqueue into Fulfillment Queue (DB trigger on <span class="mono">orders.status='approved'</span>)</div>
+    <div class="note note-action feedback fb-pedrum">If the customer updates address/contact in Shopify after the SO was created, makelila auto-refreshes the order via continuous webhook sync<span class="src">— Pedrum: not first-sync-only</span></div>
+    <div class="note note-action suggested">Address-mismatch confirmation email shows both versions side-by-side; customer one-tap picks the correct one</div>
+    <div class="note note-action suggested">They open the QUO thread externally to clarify with the customer</div>
+  </div>
+
+  <div class="cell">
+    <div class="note note-action">They open Fulfillment → Shelf — see 30 skid cards (A1–A30) × 5 slots = 150 P100 positions</div>
+    <div class="note note-action feedback fb-ops">They drag a unit between slots to reflect physical rearrangement<span class="src">— Aaron: warehouse mirrors UI</span></div>
+    <div class="note note-action">They check the auto-assign preview ("next → <span class="mono">LL01-…0354</span>") — front-row-first heuristic</div>
+    <div class="note note-action">They click <strong>Confirm layout</strong> — green when modified, faded "Saved ✓" after</div>
+    <div class="note note-action feedback fb-junaid">They look at the Reworks panel below the grid to see units flagged red<span class="src">— Junaid</span></div>
+  </div>
+
+  <div class="cell">
+    <div class="note note-action"><strong>Step 1 (Assign):</strong> They pick an available serial from the shelf grid; slot flips amber (reserved)</div>
+    <div class="note note-action"><strong>Step 2 (Test):</strong> They paste a test-report URL and click "Test passed", OR flag rework to Junaid</div>
+    <div class="note note-action"><strong>Step 3 (Label):</strong> They pick carrier (UPS/FedEx/Purolator/Canada Post) + tracking#, optional PDF upload</div>
+    <div class="note note-action feedback fb-pedrum">ClickShip already syncs Shopify orders — makelila pulls carrier + tracking back from ClickShip via API instead of asking the team to re-enter in Freightcom<span class="src">— Pedrum: kill duplicate entry</span></div>
+    <div class="note note-action feedback fb-pedrum">If the order is missing phone or email, Step 3 surfaces a one-click <span class="mono">missing_contact</span> template to nudge the customer before label print<span class="src">— Pedrum: template library</span></div>
+    <div class="note note-action"><strong>Step 4 (Dock):</strong> 4-checkbox checklist — printed · affixed · docked · notified</div>
+    <div class="note note-action"><strong>Step 5 (Email):</strong> US orders enter starter-kit tracking; click Send → Resend API delivers from <span class="mono">support@lilacomposter.com</span></div>
+    <div class="note note-action">Order moves to Step 6 — terminal "Fulfilled" view; copy handoff ref for Service team</div>
+  </div>
+
+  <div class="cell">
+    <div class="note note-action">They open Post-Shipment — left list of all in-flight + recently delivered shipments</div>
+    <div class="note note-action">They scan status chips: In Transit · Picked Up · Delivered · Exception · Onboarding</div>
+    <div class="note note-action">Right dashboard shows CA vs US tiles (Avg Freight, Avg Duration, Avg Distance, Cost/km)</div>
+    <div class="note note-action">SVG map renders dashed lines from MicroArt Markham, ON to each destination city</div>
+    <div class="note note-action feedback fb-ash">They notice an Exception status — open the row to see carrier last update<span class="src">— Ashwini: needs follow-up</span></div>
+    <div class="note note-action suggested">They click a shipment to drill into per-customer onboarding status</div>
+  </div>
+
+  <div class="cell">
+    <div class="note note-action">They open Stock → History — full table of every serial with batch, status, customer, tracking, notes</div>
+    <div class="note note-action">They filter by batch (P50 / P150 / P50N / P100 / P100X) or by category (working / returned / shipping / warehouse / production / other)</div>
+    <div class="note note-action">They change a unit's status via dropdown (15 statuses); "Update" button appears, click to commit</div>
+    <div class="note note-action">They open Stock → Add to Inventory — 3-step OCR + OTA flow for moving CA-Test → Ready</div>
+    <div class="note note-action">They sync OTA version from Supabase (auto), or pick V14/V16/V17 manually</div>
+    <div class="note note-action feedback fb-ash">They confirm the unit's <span class="mono">software_version</span> + <span class="mono">on_dashboard</span> flags<span class="src">— Ashwini: gap #8</span></div>
+  </div>
+
+  <div class="cell">
+    <div class="note note-action feedback fb-junaid">Junaid sees flagged units in the Reworks panel; opens repair_ticket with parts BOM<span class="src">— Junaid: P150 defect log</span></div>
+    <div class="note note-action">They open Fulfillment → Replacements — 9 rows: Top Lid (5) / Filter Cup / LILA Pad / Chamber+Tray</div>
+    <div class="note note-action feedback fb-ops">They mark a replacement as Shipped — links back to the original SO via <span class="mono">replacement_serial_id</span><span class="src">— Raymond: gap #2</span></div>
+    <div class="note note-action feedback fb-pedrum">They open Returns &amp; Refunds inside makelila — entire workflow lives here, no more Google Sheets<span class="src">— Pedrum</span></div>
+    <div class="note note-action feedback fb-pedrum">CS submits a refund request → enters the <strong>Approval queue</strong> (status: <span class="mono">submitted → manager_review → finance_review → approved → refunded</span>)<span class="src">— Pedrum: approval layer</span></div>
+    <div class="note note-action feedback fb-pedrum">George reviews + approves on the manager step; Julie processes the financial side on the finance step — both sign-offs logged to activity log<span class="src">— Pedrum: George + Julie</span></div>
+    <div class="note note-action">They process a return: in-progress → approved; logs <span class="mono">return_process</span> + <span class="mono">return_approve</span></div>
+    <div class="note note-action suggested">They auto-flag the return reason against the campaign that drove the SO</div>
+  </div>
+
+  <div class="cell">
+    <div class="note note-action">They open Activity Log — left feed grouped by user session (≤90 min apart)</div>
+    <div class="note note-action">Right dashboard shows 5 KPI tiles: Actions Today, Orders This Week, Returns Resolved, Stock Added, Untested Units</div>
+    <div class="note note-action">Row 2: Orders Shipping Speed · Replacements Shipping Speed · Queue Health (target ≥90%)</div>
+    <div class="note note-action">Row 3: Warehouse Inventory · Reworks · Shipping Risk (placeholder — address validator)</div>
+    <div class="note note-action">Bottom: Team Contributions cards — per-user tally bucketed by orders / returns / shelf / replacements</div>
+    <div class="note note-action suggested">They subscribe to a weekly digest of activity log highlights</div>
+  </div>
+
+  <div class="cell">
+    <div class="note note-action">They build a saved view (e.g. "P100 ready in A1-A6") and pin it for their team</div>
+    <div class="note note-action">They retire the corresponding spreadsheet tab — makelila becomes source of truth</div>
+    <div class="note note-action">They train a new hire by handing them the "I am" dropdown and the Loom</div>
+    <div class="note note-action feedback fb-ash">They submit a new gap via in-app feedback (see Ashwini's audit pattern)<span class="src">— Ashwini</span></div>
+    <div class="note note-action suggested">They request a mobile shelf-pick view for warehouse-floor use</div>
+    <div class="note note-action suggested">They publish their saved views to a team gallery for cloning</div>
+  </div>
+
+  <!-- ROW 2: THOUGHT PROCESS -->
+  <div class="row-label"><h4>User Thought Process</h4><p>What is the teammate thinking at this stage?</p></div>
+
+  <div class="cell">
+    <div class="note note-thought">"This is the third time this week the SO and Inventory tabs disagree"</div>
+    <div class="note note-thought feedback fb-ops">"I just spent 15 minutes looking for one order across 5 tabs"<span class="src">— Raymond</span></div>
+    <div class="note note-thought feedback fb-ash">"My follow-up calendar is in a sheet no one else can see"<span class="src">— Ashwini</span></div>
+    <div class="note note-thought feedback fb-junaid">"Last week's rework requests are scattered across my texts and a Notion doc"<span class="src">— Junaid</span></div>
+    <div class="note note-thought">"If two of us edit at the same time, the file corrupts"</div>
+  </div>
+
+  <div class="cell">
+    <div class="note note-thought">"I hope SSO just works — I don't want to remember another password"</div>
+    <div class="note note-thought">"Good — only @virgohome.io can sign in. That's safe"</div>
+    <div class="note note-thought feedback fb-ash">"The 'I am' dropdown is faster than waiting for proper roles"<span class="src">— Ashwini: pragmatic</span></div>
+    <div class="note note-thought feedback fb-pedrum">"Is makelila replacing HubSpot or sitting alongside? I don't want platform overload"<span class="src">— Pedrum</span></div>
+    <div class="note note-thought">"Five modules, clean nav. I can navigate this"</div>
+    <div class="note note-thought suggested">"What's the unread count on Order Review? Where do I start?"</div>
+  </div>
+
+  <div class="cell">
+    <div class="note note-thought">"How risky is this address? Condo addresses fail at the dock more often"</div>
+    <div class="note note-thought feedback fb-ops">"Freight estimate is over the threshold — flag for re-quote"<span class="src">— Aaron</span></div>
+    <div class="note note-thought feedback fb-pedrum">"Customer-entered ZIP doesn't match Google Maps' standardised one — which is right?"<span class="src">— Pedrum</span></div>
+    <div class="note note-thought feedback fb-pedrum">"If they edit the address in Shopify tomorrow, will makelila pick that up or am I shipping to a stale address?"<span class="src">— Pedrum: continuous sync</span></div>
+    <div class="note note-thought">"I'll add notes — but other reviewers need to see them too"</div>
+    <div class="note note-thought">"If I confirm, it auto-creates a Fulfillment Queue row in 1 second"</div>
+    <div class="note note-thought feedback fb-ash">"Need Info isn't a status change — it's a nudge to ask the customer"<span class="src">— Ashwini</span></div>
+    <div class="note note-thought feedback fb-pedrum">"I shouldn't have to write the same 'please confirm your address' email three times a week"<span class="src">— Pedrum: template library</span></div>
+  </div>
+
+  <div class="cell">
+    <div class="note note-thought">"The shelf in the warehouse and the shelf on screen need to match exactly"</div>
+    <div class="note note-thought feedback fb-ops">"If I move a P100 to A1 slot 3, the auto-assign needs to pick that next"<span class="src">— Aaron: front-row-first</span></div>
+    <div class="note note-thought">"Confirm layout is a checkpoint, not a save — swaps already persist"</div>
+    <div class="note note-thought feedback fb-junaid">"3 units are still in rework — those slots stay red until I resolve them"<span class="src">— Junaid</span></div>
+  </div>
+
+  <div class="cell">
+    <div class="note note-thought">"Step 1: which serial is closest to ready? Front-row preferred"</div>
+    <div class="note note-thought feedback fb-junaid">"Step 2: if it failed test, I flag to Junaid — order drops back to Step 1"<span class="src">— Junaid: rework loop</span></div>
+    <div class="note note-thought">"Step 3: tracking# format must match the carrier — UPS starts 1Z, Canpar starts D…"</div>
+    <div class="note note-thought feedback fb-pedrum">"ClickShip already has the order — why am I retyping carrier and tracking into Freightcom?"<span class="src">— Pedrum: dedup</span></div>
+    <div class="note note-thought">"Step 4: I can't proceed until all 4 dock items are checked"</div>
+    <div class="note note-thought">"Step 5: US orders won't send without starter-kit tracking. CA orders skip it"</div>
+    <div class="note note-thought">"Step 6: copy handoff ref to brief Service team"</div>
+  </div>
+
+  <div class="cell">
+    <div class="note note-thought">"Where is unit <span class="mono">LL01-…0085</span> right now? Carrier last scanned where?"</div>
+    <div class="note note-thought">"Cost/km is high to remote BC — should we negotiate freight there?"</div>
+    <div class="note note-thought feedback fb-ash">"Ashwini's onboarding checks happen here — once delivered, it's her queue"<span class="src">— Ashwini</span></div>
+    <div class="note note-thought">"This unit hit Exception — the customer might be calling soon"</div>
+    <div class="note note-thought suggested">"If a unit is delivered, status should auto-flip to 'visible' in Stock"</div>
+  </div>
+
+  <div class="cell">
+    <div class="note note-thought">"P50 is decommissioned (all 50 with -p suffix); P100X is still in production in China"</div>
+    <div class="note note-thought">"P100 has 100 units, ~53 available for new orders after replacements queued"</div>
+    <div class="note note-thought">"Should this unit be 'in-transit' or 'visible'? Cross-ref Post-Shipment"</div>
+    <div class="note note-thought">"The Update button pattern means I won't lose mid-edit state if someone else triggers a re-render"</div>
+    <div class="note note-thought feedback fb-ash">"OTA V17 is the latest — I always sync from Supabase before applying"<span class="src">— Ashwini</span></div>
+  </div>
+
+  <div class="cell">
+    <div class="note note-thought feedback fb-junaid">"P150 had 35% defect rate — about 30–35 reworkable, 5–8 scrap"<span class="src">— Junaid: from Notion test log</span></div>
+    <div class="note note-thought">"Top Lid replacements — 5 of 9. We know lid is the weak point"</div>
+    <div class="note note-thought">"Returns: $9,214 refunded across 32; 4 still pending approval"</div>
+    <div class="note note-thought feedback fb-ash">"Why are units coming back? 6 product defect, 3 financing, 3 shipping damage, 2 software"<span class="src">— Ashwini: pattern</span></div>
+    <div class="note note-thought feedback fb-pedrum">"Tracking refunds in a Google Sheet means there's no audit trail of who approved what when"<span class="src">— Pedrum</span></div>
+    <div class="note note-thought feedback fb-pedrum">"George and Julie should both have a clear queue and sign-off — not a back-and-forth in Slack"<span class="src">— Pedrum</span></div>
+    <div class="note note-thought suggested">"If a return reason maps to a campaign, marketing should hear it"</div>
+  </div>
+
+  <div class="cell">
+    <div class="note note-thought">"What did the team get done today?"</div>
+    <div class="note note-thought">"Queue health: 86% (14 cancelled of 97). We need ≥90%"</div>
+    <div class="note note-thought feedback fb-ops">"Untested units = shelfData slots with status 'not-tested' — that's the bottleneck"<span class="src">— Aaron</span></div>
+    <div class="note note-thought">"Who's contributing? Bar chart shows it. No more 'I did most of it' arguments"</div>
+    <div class="note note-thought suggested">"An AI-generated weekly summary on Friday at 5pm would save George the recap meeting"</div>
+  </div>
+
+  <div class="cell">
+    <div class="note note-thought">"I haven't opened the spreadsheet in a week. That's the real adoption signal"</div>
+    <div class="note note-thought feedback fb-ash">"My audit gaps from April 12 are now structured fields. That's the loop closing"<span class="src">— Ashwini</span></div>
+    <div class="note note-thought">"I want to clone Pedrum's campaign attribution view"</div>
+    <div class="note note-thought suggested">"On the warehouse floor, my phone screen is where I want the shelf"</div>
+  </div>
+
+  <!-- ROW 3: NEEDS & PAINS -->
+  <div class="row-label"><h4>Needs & Pains</h4><p>What does the teammate want? 1st person.</p></div>
+
+  <div class="cell">
+    <div class="note note-need">"I need one place that combines orders, units, shelf, and customers"</div>
+    <div class="note note-pain feedback fb-ops">"Five fulfillment tabs is unmanageable — I miss orders"<span class="src">— Raymond &amp; Aaron</span></div>
+    <div class="note note-pain feedback fb-ash">"My follow-ups are invisible to the rest of the team"<span class="src">— Ashwini gap #3</span></div>
+    <div class="note note-pain feedback fb-junaid">"Rework requests should be a structured ticket, not a text message"<span class="src">— Junaid</span></div>
+    <div class="note note-pain">"No audit trail — I can't tell who changed an order to Delivered or when"</div>
+  </div>
+
+  <div class="cell">
+    <div class="note note-need">"I want SSO with my @virgohome.io Google account — nothing else"</div>
+    <div class="note note-need">"I want a clear identity picker until role-based perms ship"</div>
+    <div class="note note-pain">"If sign-in takes me to a blank screen with empty modules, I'll go back to the spreadsheet"</div>
+    <div class="note note-need feedback fb-pedrum">"I need a clear, published 'sources of truth' map — what lives in makelila vs HubSpot vs Shopify — so I'm not guessing"<span class="src">— Pedrum: avoid platform overload</span></div>
+    <div class="note note-pain feedback fb-pedrum">"If the same customer profile lives in both HubSpot and makelila with different data, we'll waste hours reconciling"<span class="src">— Pedrum</span></div>
+    <div class="note note-need suggested">"I want a 60-second onboarding Loom embedded in-app for new hires"</div>
+  </div>
+
+  <div class="cell">
+    <div class="note note-need">"I want the Pending list sorted by oldest-first; the dispositioned list to drop off in &lt;1s realtime"</div>
+    <div class="note note-need">"I want clear address verdicts — house / apt / condo / remote — with colour banners"</div>
+    <div class="note note-pain feedback fb-ops">"If freight estimate doesn't show against threshold, I'll miss expensive orders"<span class="src">— Aaron</span></div>
+    <div class="note note-need feedback fb-ash">"Need Info should ping the customer — not flip status"<span class="src">— Ashwini</span></div>
+    <div class="note note-need feedback fb-pedrum">"I want auto address verification (Google Maps Geocoding) → if customer-entered ZIP differs from standardised, ping the customer to confirm — end-to-end automated"<span class="src">— Pedrum: biggest automation win</span></div>
+    <div class="note note-need feedback fb-pedrum">"I want a templated email/SMS library: missing-phone, missing-email, address-mismatch — one click to send"<span class="src">— Pedrum</span></div>
+    <div class="note note-pain feedback fb-pedrum">"If first-sync-only, makelila ships to a stale address when the customer updates Shopify after order placement"<span class="src">— Pedrum</span></div>
+    <div class="note note-pain">"If notes don't autosave on blur, I'll lose them switching orders"</div>
+  </div>
+
+  <div class="cell">
+    <div class="note note-need">"I want drag-drop with no jank — desktop today, mobile later for the floor"</div>
+    <div class="note note-need feedback fb-ops">"Auto-assign preview must follow the front-row-first rule we use in real life"<span class="src">— Aaron</span></div>
+    <div class="note note-pain">"If a 'reserved' slot is draggable, I might break a queue assignment"</div>
+    <div class="note note-pain feedback fb-junaid">"Rework slots must be unmissable — red, not amber"<span class="src">— Junaid</span></div>
+    <div class="note note-need suggested">"I want to print a shelf snapshot for the warehouse wall"</div>
+  </div>
+
+  <div class="cell">
+    <div class="note note-need">"I want each step under ~80 lines of UI — no scrolling to find buttons"</div>
+    <div class="note note-need feedback fb-junaid">"Flagging rework should drop the order to Step 1 and pop the unit to red on Shelf"<span class="src">— Junaid</span></div>
+    <div class="note note-pain">"If Step 5 sends an email but Resend fails silently, the customer thinks we ghosted them"</div>
+    <div class="note note-need">"Step 4 must require all 4 boxes — no shortcut to email"</div>
+    <div class="note note-need feedback fb-ops">"US orders need a starter-kit tracking field; CA orders must skip it cleanly"<span class="src">— Raymond</span></div>
+    <div class="note note-need feedback fb-pedrum">"I want makelila to read tracking + carrier from ClickShip's API directly — never re-key the same data"<span class="src">— Pedrum</span></div>
+    <div class="note note-pain feedback fb-pedrum">"Three tools (Shopify · ClickShip · Freightcom) holding the same shipment data is duplication waiting to break"<span class="src">— Pedrum</span></div>
+  </div>
+
+  <div class="cell">
+    <div class="note note-need">"I want carrier status pulled hourly via Freightcom poll"</div>
+    <div class="note note-need">"I want CA vs US tiles I can compare at a glance"</div>
+    <div class="note note-pain">"Cost/km hidden in a column means we never optimise freight to remote BC"</div>
+    <div class="note note-pain feedback fb-ash">"Without an Onboarding status, I can't tell which delivered units I've called"<span class="src">— Ashwini</span></div>
+    <div class="note note-need suggested">"I want the SVG map to colour CA crimson and US navy — matches our flag tags"</div>
+  </div>
+
+  <div class="cell">
+    <div class="note note-need">"I want 15 statuses grouped into the 6 categories I already think in"</div>
+    <div class="note note-need">"Update button pattern keeps me from losing mid-edit state on a re-render"</div>
+    <div class="note note-pain">"If I bulk-import P100X units, I shouldn't have to enter 100 rows by hand"</div>
+    <div class="note note-need feedback fb-ash">"OTA version is per-unit — I need the field, not a free-text Notes entry"<span class="src">— Ashwini gap #8</span></div>
+    <div class="note note-need suggested">"A unit_status_history audit table so I can answer 'when did this go from ca-test to ready?'"</div>
+  </div>
+
+  <div class="cell">
+    <div class="note note-need feedback fb-junaid">"I want the rework panel to show flagged_by, issue, and the SO that triggered it"<span class="src">— Junaid</span></div>
+    <div class="note note-need">"Replacements need a structured part type — Top Lid / Filter / Pad / Chamber"</div>
+    <div class="note note-pain">"Returns logged by reason without campaign attribution = blind spot for marketing"</div>
+    <div class="note note-need feedback fb-ash">"I want a parts BOM linked to repair_tickets so we know what to reorder"<span class="src">— Ashwini gap #6</span></div>
+    <div class="note note-need feedback fb-pedrum">"I want the entire returns/refunds workflow inside makelila — Google Sheets has no approval audit trail"<span class="src">— Pedrum</span></div>
+    <div class="note note-need feedback fb-pedrum">"I want a 2-stage approval: George (manager review) → Julie (finance review) — each a queue, each a timestamped sign-off"<span class="src">— Pedrum</span></div>
+    <div class="note note-pain feedback fb-pedrum">"Refunds processed without dual sign-off = audit/compliance risk we can't afford as we scale"<span class="src">— Pedrum</span></div>
+    <div class="note note-pain suggested">"Without a 'return-to-stock' workflow, the unit's status is ambiguous"</div>
+  </div>
+
+  <div class="cell">
+    <div class="note note-need">"I want session-grouped activity (≤90min) so the feed reads like a story, not a wall"</div>
+    <div class="note note-need">"I want KPI thresholds (≥90% queue health) coloured green/red automatically"</div>
+    <div class="note note-pain">"Activity log unbounded in memory will degrade — needs archival rules"</div>
+    <div class="note note-need suggested">"A weekly Friday email to George with the top 3 things that changed"</div>
+  </div>
+
+  <div class="cell">
+    <div class="note note-need">"I want my saved views to be cloneable by the rest of the team"</div>
+    <div class="note note-need feedback fb-ash">"I want my submitted gaps to be publicly tracked (submitted → in-review → shipped)"<span class="src">— Ashwini</span></div>
+    <div class="note note-pain">"If feedback dies in a private DM, I stop submitting"</div>
+    <div class="note note-pain suggested">"Without a mobile shelf view, warehouse staff fall back to the printout"</div>
+    <div class="note note-need suggested">"A monthly 'makelila Power User' shoutout in Slack"</div>
+  </div>
+
+  <!-- ROW 4: TOUCHPOINTS -->
+  <div class="row-label"><h4>Touchpoints</h4><p>Which surfaces / features do they interact with?</p></div>
+
+  <div class="cell">
+    <div class="note note-touch"><span class="mono">Virgo_Operations_Hub_MRP.xlsx</span> (11 tabs, 174 formulas)</div>
+    <div class="note note-touch">MaxxUs shipping log + P150 Notion + Junaid's text messages</div>
+    <div class="note note-touch feedback fb-ash">Ashwini's team-coverage audit doc (2026-04-12, 9 gaps)<span class="src">— Ashwini</span></div>
+    <div class="note note-touch">Standup pain conversations</div>
+  </div>
+
+  <div class="cell">
+    <div class="note note-touch"><span class="mono">lila.vip</span> sign-in page (Google OAuth)</div>
+    <div class="note note-touch">Global nav: 5 module links + "I am" dropdown (top right)</div>
+    <div class="note note-touch">App shell — fixed 1200px width, dark <span class="mono">#111</span> bar</div>
+    <div class="note note-touch feedback fb-ash">Identity picker (8 team members; persisted in localStorage <span class="mono">makelila_user</span>)<span class="src">— Ashwini · Julie added</span></div>
+    <div class="note note-touch feedback fb-pedrum">"Tools we use" page — published source-of-truth boundaries (makelila = ops · HubSpot = CRM/marketing · Shopify = storefront · ClickShip = labels · QuickBooks = finance)<span class="src">— Pedrum</span></div>
+    <div class="note note-touch suggested">Embedded onboarding Loom (90 sec)</div>
+  </div>
+
+  <div class="cell">
+    <div class="note note-touch">Order Review sidebar — Pending / Held / Flagged / All tabs + search</div>
+    <div class="note note-touch">Detail panel cards: Customer · Address (with verdict) · Freight bar · Line Items · Notes · ActionBar</div>
+    <div class="note note-touch">Action buttons: Confirm (green) · Flag (red) · Hold (amber) · Need Info (grey)</div>
+    <div class="note note-touch">Realtime via Supabase <span class="mono">postgres_changes</span> on the orders table</div>
+    <div class="note note-touch">Auto-enqueue trigger on <span class="mono">orders.status='approved'</span> → <span class="mono">fulfillment_queue</span></div>
+    <div class="note note-touch feedback fb-pedrum">Continuous Shopify webhook sync (<span class="mono">orders/updated</span>) — refreshes address/contact on every customer edit, not just first sync<span class="src">— Pedrum</span></div>
+    <div class="note note-touch feedback fb-pedrum">Google Maps Geocoding API → flags ZIP/postal mismatch on the AddressCard<span class="src">— Pedrum</span></div>
+    <div class="note note-touch feedback fb-pedrum">Email/SMS template library (Resend + Twilio): <span class="mono">missing_phone</span> · <span class="mono">missing_email</span> · <span class="mono">address_mismatch</span> · <span class="mono">confirm_address</span><span class="src">— Pedrum</span></div>
+  </div>
+
+  <div class="cell">
+    <div class="note note-touch">Shelf grid — 30 skid cards in 5 cols × 6 rows</div>
+    <div class="note note-touch">Slot statuses: <span class="mono">available</span> green · <span class="mono">reserved</span> amber · <span class="mono">rework</span> red · <span class="mono">empty</span> dashed</div>
+    <div class="note note-touch">HTML5 drag-drop API (no library)</div>
+    <div class="note note-touch">Confirm-layout button (3 states: disabled / active / saved)</div>
+    <div class="note note-touch feedback fb-junaid">Reworks panel below grid — flagged units with "Mark resolved"<span class="src">— Junaid</span></div>
+  </div>
+
+  <div class="cell">
+    <div class="note note-touch">5-step composer: StepAssign · StepTest · StepLabel · StepDock · StepEmail · StepFulfilled</div>
+    <div class="note note-touch">Sidebar sorted by due_date asc — red border if Due Today, amber if ≤2d</div>
+    <div class="note note-touch">Step badges <span class="mono">1/6</span> … <span class="mono">6/6</span></div>
+    <div class="note note-touch">Resend transactional email from <span class="mono">support@lilacomposter.com</span></div>
+    <div class="note note-touch">Activity log writes: <span class="mono">fq_assign</span> · <span class="mono">fq_test_ok</span> · <span class="mono">fq_test_flagged</span> · <span class="mono">fq_label_confirmed</span> · <span class="mono">fq_dock_confirmed</span> · <span class="mono">fq_email_sent</span> · <span class="mono">fq_fulfilled</span></div>
+    <div class="note note-touch feedback fb-pedrum">ClickShip API integration → Step 3 auto-fills carrier + tracking from ClickShip's existing Shopify-synced data<span class="src">— Pedrum: kill manual Freightcom entry</span></div>
+    <div class="note note-touch feedback fb-pedrum">Inline "Send template" picker on Step 3: <span class="mono">missing_phone</span> · <span class="mono">missing_email</span> · <span class="mono">address_confirm</span> (Resend + Twilio SMS)<span class="src">— Pedrum</span></div>
+  </div>
+
+  <div class="cell">
+    <div class="note note-touch">Post-Shipment list — country flag, status chip, city, freight, cost/km, duration</div>
+    <div class="note note-touch">Right dashboard: 4 KPI tiles + CA/US side-by-side cards + best/worst freight efficiency</div>
+    <div class="note note-touch">SVG map — Markham ON origin (<span class="mono">PS_ORIGIN_X/Y</span>) → dashed lines to each destination</div>
+    <div class="note note-touch">Status catalogue: in-transit · picked-up · delivered · exception · onboarding</div>
+    <div class="note note-touch suggested">Hourly Freightcom poll edge function (<span class="mono">jobs-freightcom-track</span>)</div>
+  </div>
+
+  <div class="cell">
+    <div class="note note-touch">Stock tabs: History · Inventory · Add to Inventory</div>
+    <div class="note note-touch">15 statuses × 6 categories (working / returned / shipping / warehouse / production / other)</div>
+    <div class="note note-touch">"Update" button pattern (preview → commit) — preserves mid-edit state</div>
+    <div class="note note-touch">3-step Add flow: Select unit → OCR test log (1.8s sim) → OTA Apply (1.5s sim)</div>
+    <div class="note note-touch feedback fb-ash">OTA version sync from Supabase (1.2s sim) — V14 / V16 / V17<span class="src">— Ashwini gap #8</span></div>
+  </div>
+
+  <div class="cell">
+    <div class="note note-touch feedback fb-junaid"><span class="mono">unit_reworks</span> table + Reworks panel<span class="src">— Junaid</span></div>
+    <div class="note note-touch">Replacements sub-tab: 9 records, part-type filter, links to original SO</div>
+    <div class="note note-touch">Returns sub-tab: 30 records, Defect / Tariff / Cancelled / Other filters</div>
+    <div class="note note-touch">Activity log writes: <span class="mono">replace_ship</span> · <span class="mono">return_process</span> · <span class="mono">return_approve</span> · <span class="mono">rework_resolved</span></div>
+    <div class="note note-touch feedback fb-ash"><span class="mono">repair_tickets</span> table linked to <span class="mono">serial_numbers</span><span class="src">— Ashwini gap #6</span></div>
+    <div class="note note-touch feedback fb-pedrum">Refund Approval queue UI: 4 columns (CS Submitted · George Review · Julie Finance · Refunded) — drag-progresses and timestamps each transition<span class="src">— Pedrum</span></div>
+    <div class="note note-touch feedback fb-pedrum">New table <span class="mono">refund_approvals</span> (status, manager_approved_by, manager_approved_at, finance_approved_by, finance_approved_at, refund_amount, payment_method, notes)<span class="src">— Pedrum</span></div>
+    <div class="note note-touch feedback fb-pedrum">Activity log writes: <span class="mono">refund_submitted</span> · <span class="mono">refund_manager_approved</span> · <span class="mono">refund_finance_approved</span> · <span class="mono">refund_paid</span><span class="src">— Pedrum</span></div>
+  </div>
+
+  <div class="cell">
+    <div class="note note-touch">Activity feed grouped by user session (≤90min apart)</div>
+    <div class="note note-touch">5 KPI tiles + 3-card "Fulfillment" row + 3-card secondary row + 2-col Team Contributions</div>
+    <div class="note note-touch">User colours (<span class="mono">USER_COLORS</span>) + initial avatars</div>
+    <div class="note note-touch">Per-user contribution buckets: orders / returns / shelf-test / replacements</div>
+    <div class="note note-touch suggested">AI-generated weekly executive summary on every report</div>
+  </div>
+
+  <div class="cell">
+    <div class="note note-touch">Personal saved views &amp; pinned filters</div>
+    <div class="note note-touch">In-app feedback panel (extends Ashwini's audit pattern)</div>
+    <div class="note note-touch">"Starter pack" share link for new hires</div>
+    <div class="note note-touch suggested">Mobile shelf-pick view for warehouse-floor tablets</div>
+    <div class="note note-touch suggested">Team gallery for cloning saved views</div>
+  </div>
+
+  <!-- EMOTION CURVE -->
+  <div class="emotion-row">
+    <div class="emotion-title">😊 VCycene Teammate Feeling</div>
+    <div class="emotion-track">
+      <div class="emotion-bar" style="margin-bottom: 18px;"><div class="emotion-dot e-low">😩</div><div class="emotion-label">Spreadsheet fatigue — five tabs, three text threads</div></div>
+      <div class="emotion-bar" style="margin-bottom: 50px;"><div class="emotion-dot e-mid">😌</div><div class="emotion-label">Relieved — SSO works, modules load fast</div></div>
+      <div class="emotion-bar" style="margin-bottom: 60px;"><div class="emotion-dot e-mid-high">✅</div><div class="emotion-label">Confident — order triage feels safe</div></div>
+      <div class="emotion-bar" style="margin-bottom: 55px;"><div class="emotion-dot e-mid-high">🟦</div><div class="emotion-label">Productive — drag-drop matches the warehouse</div></div>
+      <div class="emotion-bar" style="margin-bottom: 70px;"><div class="emotion-dot e-high">⚡</div><div class="emotion-label">In flow — 5 steps, no tab switches</div></div>
+      <div class="emotion-bar" style="margin-bottom: 60px;"><div class="emotion-dot e-mid-high">📦</div><div class="emotion-label">Calm — I can see every shipment in one map</div></div>
+      <div class="emotion-bar" style="margin-bottom: 55px;"><div class="emotion-dot e-mid-high">🟢</div><div class="emotion-label">In control — 350 units, one source of truth</div></div>
+      <div class="emotion-bar" style="margin-bottom: 25px;"><div class="emotion-dot e-mid-low">😬</div><div class="emotion-label">Heavy — P150 defect tail still needs work</div></div>
+      <div class="emotion-bar" style="margin-bottom: 65px;"><div class="emotion-dot e-high">📈</div><div class="emotion-label">Validated — KPIs show real progress</div></div>
+      <div class="emotion-bar" style="margin-bottom: 75px;"><div class="emotion-dot e-high">🥳</div><div class="emotion-label">Champion — "we don't open the spreadsheet anymore"</div></div>
+    </div>
+  </div>
+
+  <!-- OPPORTUNITIES -->
+  <div class="opportunities">
+    <h3>🚀 Opportunities — makelila</h3>
+    <div class="opp-grid">
+      <div class="opp-card"><span class="opp-stage">Awareness</span><h4>Make the migration visible — kill one tab at a time</h4><p>Each shipped module retires a specific spreadsheet tab. Publish a Slack-pinned scoreboard: "Order Review live → Shopify orders import tab retired"; "Fulfillment Queue live → CA/US/Personal/Hold/Returns tabs retired." Adoption is faster when teammates see real wins, not roadmap promises. <em>(Source: Ashwini audit · architecture.md)</em></p></div>
+      <div class="opp-card"><span class="opp-stage">Onboarding</span><h4>Identity dropdown is fine for now — but ship roles before P200</h4><p>The "I am" localStorage picker works for 7 people who all see the same screens. The moment external partners (factory, freight) need limited views — or finance needs cost-only access — the RLS roles defined in <span class="mono">makelila-architecture.md §7</span> become unblocking. Plan to ship role gates before headcount or partner integrations grow. <em>(Source: app-design §10 open question · architecture §7)</em></p></div>
+      <div class="opp-card"><span class="opp-stage">Order Review</span><h4>Surface campaign attribution at triage time</h4><p>Pedrum's gap — no SO → campaign attribution — is solved by the <span class="mono">campaigns</span> table and <span class="mono">orders.campaign_id</span> FK. Surface the source campaign as a chip on the OrderRow so reviewers immediately see "Holiday Sale 2025 · 12mo Sezzle" and can flag low-quality acquisition before fulfillment. Closes the loop on returns reasons too. <em>(Source: Ashwini gap #5/#7 · Pedrum)</em></p></div>
+      <div class="opp-card"><span class="opp-stage">Shelf</span><h4>Print-ready shelf snapshot for the warehouse wall</h4><p>Aaron and Raymond still print the layout. Add a "Print shelf" button that exports an A3 PDF of the current grid with serial last-5, batch chip, and status colour. One click. Eliminates the hand-drawn layout sheet that walks the floor today. <em>(Source: Aaron · Raymond)</em></p></div>
+      <div class="opp-card"><span class="opp-stage">Fulfillment Queue</span><h4>Hard-block Step 5 send when starter-kit field is empty (US only)</h4><p>The single highest-cost bug in fulfillment is shipping a US LILA Pro without the starter kit. The Step 5 design already requires <span class="mono">starter_tracking_num</span> for US orders, but the validation must live both in the UI and in the <span class="mono">send-fulfillment-email</span> edge function — never trust the client. Add a 502 path with a clear error banner. <em>(Source: fulfillment-design §6 step 5)</em></p></div>
+      <div class="opp-card"><span class="opp-stage">Fulfillment Queue</span><h4>Resend webhook → email_delivery_status table</h4><p>Right now the queue marks <span class="mono">email_sent_at</span> on Resend's 2xx response, but doesn't track delivery, opens, or bounces. Subscribe to Resend webhook events into a <span class="mono">email_delivery_status</span> table; surface bounces as an Activity Log alert. Bounced shipping confirmations to wrong customer email are how disputes start. <em>(Source: AI suggested)</em></p></div>
+      <div class="opp-card"><span class="opp-stage">Post-Shipment</span><h4>Cost-per-km outlier flag — drives carrier renegotiation</h4><p>The Post-Shipment dashboard already computes cost/km. Flag the top-decile outliers in red (e.g. remote BC, rural US states) and feed a monthly "renegotiation candidates" view. Currently those costs hide as line items; surfacing them is leverage at carrier-contract renewal. <em>(Source: psShipments dataset)</em></p></div>
+      <div class="opp-card"><span class="opp-stage">Stock</span><h4>Bulk-import flow for incoming batches (P100X next)</h4><p>P100 was seeded via a SQL migration. P100X arrives in ~Sep 2026 and shouldn't require a developer. Build a CSV-upload flow on Stock → Add that ingests serial range + batch + manufacture date and creates <span class="mono">stockData</span> rows in <span class="mono">ordered</span> status. Required before next batch arrival. <em>(Source: app-design §12 open question · inventory-status)</em></p></div>
+      <div class="opp-card"><span class="opp-stage">Stock</span><h4>Add unit_status_history table for full lineage</h4><p>The Update button pattern commits status changes but only writes the latest state to <span class="mono">stockData</span>. The architecture doc lists <span class="mono">unit_status_history (unit_id, from_status, to_status, user, ts)</span> as inferred — promote it to a real migration. This is the only way to answer "when did <span class="mono">LL01-…0354</span> go from ca-test to ready" 6 months from now. <em>(Source: makelila-architecture §10)</em></p></div>
+      <div class="opp-card"><span class="opp-stage">Rework / Returns</span><h4>Defect-to-campaign attribution loop</h4><p>P150's 35% defect rate is known internally but not visible at marketing review. Tag every <span class="mono">unit_reworks</span> row + every <span class="mono">return_process</span> with the originating <span class="mono">campaign_id</span> via the SO chain. Pedrum's marketing review can then see "this campaign's customers had 2× the return rate" and decide whether to repeat it. <em>(Source: Ashwini gap #5/#7 · Junaid)</em></p></div>
+      <div class="opp-card"><span class="opp-stage">Rework / Returns</span><h4>Parts BOM on repair_tickets — drives reorder POs</h4><p>Junaid's rework requests should each carry a <span class="mono">parts_needed</span> field that aggregates into a "parts to reorder" rollup. Top Lid replacements are 5 of 9 — that signal should auto-trigger a draft PO when the in-stock spare count hits the reorder point. <em>(Source: Junaid · Ashwini gap #6)</em></p></div>
+      <div class="opp-card"><span class="opp-stage">Activity Log</span><h4>AI weekly digest to George — Friday 5pm</h4><p>Activity Log already aggregates by session and contribution. Add an Edge Function that runs every Friday at 5pm, generates a 5-bullet "what changed this week" summary using the OpenAI API, and emails it to George via Resend. Replaces the standup recap and gives the founder ground truth without needing to log in. <em>(Source: AI suggested)</em></p></div>
+      <div class="opp-card"><span class="opp-stage">Adoption</span><h4>Mobile shelf-pick view for warehouse floor</h4><p>Desktop-only is fine for the office today. Aaron and Raymond on the floor want a phone-sized read-only Shelf view with auto-assign serial visible. Build as a responsive /shelf-mobile route — same data, simpler layout. The fastest path to "they never reopen the spreadsheet" is meeting them where they actually work. <em>(Source: Aaron · Raymond · app-design §12 open question)</em></p></div>
+
+      <div class="opp-card" style="background:#e6f9fd; border-color:#00b8d9;"><span class="opp-stage" style="background:#00b8d9;">Order Review</span><h4>Continuous bidirectional Shopify sync — not first-sync-only</h4><p>Subscribe to Shopify <span class="mono">orders/updated</span> and <span class="mono">customers/updated</span> webhooks (not just <span class="mono">orders/create</span>). When a customer edits their address or contact in Shopify after the SO was placed, makelila refreshes the order in &lt;5s. Conflict resolution: Shopify wins for storefront fields (address, contact); makelila wins for ops fields (status, notes). <em>(Source: Pedrum review round 1)</em></p></div>
+
+      <div class="opp-card" style="background:#e6f9fd; border-color:#00b8d9;"><span class="opp-stage" style="background:#00b8d9;">Order Review</span><h4>Auto address verification → confirmation email loop</h4><p>The single highest-leverage automation in Pedrum's review. On every new SO: call Google Maps Geocoding API → compare standardised ZIP/postal vs customer-entered → if mismatch, auto-send a templated email showing both versions side-by-side with a one-tap "this one is correct" button. End-to-end automated. Estimated saving: 15–20 min per ambiguous order × ~5 orders/week. <em>(Source: Pedrum)</em></p></div>
+
+      <div class="opp-card" style="background:#e6f9fd; border-color:#00b8d9;"><span class="opp-stage" style="background:#00b8d9;">Order Review · Fulfillment</span><h4>Email/SMS template library — no more retyping</h4><p>Ship a templates module with the four highest-frequency scenarios first: <span class="mono">missing_phone</span>, <span class="mono">missing_email</span>, <span class="mono">address_mismatch</span>, <span class="mono">confirm_address</span>. Send via Resend (email) and Twilio (SMS). Inline picker on Order Review and Fulfillment Step 3. Templates editable per-team without dev involvement. <em>(Source: Pedrum)</em></p></div>
+
+      <div class="opp-card" style="background:#e6f9fd; border-color:#00b8d9;"><span class="opp-stage" style="background:#00b8d9;">Onboarding · Adoption</span><h4>Position makelila alongside HubSpot — not replacing</h4><p>Publish a "Tools we use" page in-app that draws explicit boundaries: makelila = ops system of record (orders, fulfillment, units, returns); HubSpot = CRM + marketing automation (lead lifecycle, email campaigns, ticketing); Shopify = storefront; ClickShip = labels; QuickBooks = finance. Add a one-line "where does X live?" search to head off duplication. Critical for adoption — Pedrum's concern is real and shared. <em>(Source: Pedrum)</em></p></div>
+
+      <div class="opp-card" style="background:#e6f9fd; border-color:#00b8d9;"><span class="opp-stage" style="background:#00b8d9;">Fulfillment Queue</span><h4>ClickShip API integration — kill duplicate Freightcom entry</h4><p>ClickShip already syncs Shopify orders end-to-end. Have makelila pull carrier + tracking from ClickShip's API at Step 3 instead of asking the team to re-enter into Freightcom. Net: one less manual step in every shipment, one less place for transcription errors. Phase 2: write back to ClickShip (e.g. shelf-confirmed serial → label note) for full bidirectional sync. <em>(Source: Pedrum)</em></p></div>
+
+      <div class="opp-card" style="background:#e6f9fd; border-color:#00b8d9;"><span class="opp-stage" style="background:#00b8d9;">Returns &amp; Refunds</span><h4>Move returns workflow off Google Sheets — dual-approval queue with George + Julie</h4><p>Build a Refund Approval queue inside makelila with a 4-column Kanban: <strong>CS Submitted</strong> → <strong>Manager Review (George)</strong> → <strong>Finance Review (Julie)</strong> → <strong>Refunded</strong>. Each transition timestamps and stamps the approver; activity log writes <span class="mono">refund_submitted</span> · <span class="mono">refund_manager_approved</span> · <span class="mono">refund_finance_approved</span> · <span class="mono">refund_paid</span>. New table <span class="mono">refund_approvals</span> with FK to <span class="mono">orders</span> and <span class="mono">serial_numbers</span>. Eliminates the Slack-thread approval loop and gives full audit lineage. <em>(Source: Pedrum · George · Julie)</em></p></div>
+    </div>
+  </div>
+
+</div><!-- end journey-grid -->
+</div><!-- end main -->
+</div><!-- end layout -->
+</div><!-- end tab-make -->
+
+<script>
+function switchTab(tabName, btn) {
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.getElementById('tab-' + tabName).classList.add('active');
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+</script>
+
+</body>
+</html>
