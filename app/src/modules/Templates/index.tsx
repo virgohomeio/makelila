@@ -4,6 +4,9 @@ import {
   CATEGORY_META,
   type EmailTemplate, type TemplateCategory,
 } from '../../lib/templates';
+import { useIsMobile } from '../../lib/useMediaQuery';
+import { NavCard } from '../../components/NavCard';
+import { MobileBackHeader } from '../../components/MobileBackHeader';
 import styles from './Templates.module.css';
 
 const CATEGORIES: TemplateCategory[] = [
@@ -16,6 +19,10 @@ export default function Templates() {
   const { messages } = useEmailMessages();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [filter, setFilter] = useState<'all' | TemplateCategory>('all');
+  const isMobile = useIsMobile();
+  // Mobile drill: null = category picker, set = showing templates in this
+  // category. Tap a template card → setSelectedId opens detail full-screen.
+  const [mobileCategory, setMobileCategory] = useState<TemplateCategory | null>(null);
   const [search, setSearch] = useState('');
   const [error, setError] = useState<string | null>(null);
 
@@ -53,6 +60,81 @@ export default function Templates() {
   );
 
   if (loading) return <div className={styles.loading}>Loading templates…</div>;
+
+  // Mobile: 3-level drill — category picker → templates in category → detail.
+  if (isMobile) {
+    if (selected) {
+      return (
+        <div className={styles.layout}>
+          <MobileBackHeader
+            label={selected.name}
+            onBack={() => setSelectedId(null)}
+          />
+          <section className={styles.detail}>
+            <TemplateDetail
+              template={selected}
+              recentSends={recentSendsForSelected}
+              onError={setError}
+            />
+            {error && <div className={styles.errorBar}>{error}</div>}
+          </section>
+        </div>
+      );
+    }
+    if (mobileCategory) {
+      const categoryMeta = CATEGORY_META[mobileCategory];
+      const rows = templates.filter(t => t.category === mobileCategory);
+      return (
+        <div className={styles.layout}>
+          <MobileBackHeader
+            label={categoryMeta.label}
+            onBack={() => setMobileCategory(null)}
+          />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: 4 }}>
+            {rows.length === 0 ? (
+              <div style={{ padding: 24, color: 'var(--color-ink-subtle)', fontSize: 13 }}>
+                No templates in this category yet.
+              </div>
+            ) : rows.map(t => (
+              <NavCard
+                key={t.id}
+                onClick={() => setSelectedId(t.id)}
+                title={t.name}
+                subtitle={`${t.key}${t.active ? '' : ' · inactive'}`}
+                icon="📧"
+                iconBg={categoryMeta.bg}
+              />
+            ))}
+          </div>
+        </div>
+      );
+    }
+    // Category picker
+    return (
+      <div className={styles.layout}>
+        <div style={{ padding: '12px 4px 4px', color: 'var(--color-ink-muted)', fontSize: 13 }}>
+          {templates.length} templates · {messages.length} sends
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: 4 }}>
+          {CATEGORIES.map(cat => {
+            const meta = CATEGORY_META[cat];
+            const count = templates.filter(t => t.category === cat).length;
+            return (
+              <NavCard
+                key={cat}
+                onClick={() => setMobileCategory(cat)}
+                title={meta.label}
+                subtitle={count === 1 ? '1 template' : `${count} templates`}
+                icon="📧"
+                iconBg={meta.bg}
+                count={count > 0 ? count : undefined}
+              />
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className={styles.layout}>
