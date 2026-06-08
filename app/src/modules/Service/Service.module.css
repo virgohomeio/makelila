@@ -857,6 +857,33 @@
   cursor: help;
 }
 
+/* Replacement item + stage tags (spec 2026-06-08) */
+.tagRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+.itemTag {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: #edf2f7;
+  color: #2d3748;
+  font-size: 0.7rem;
+  font-weight: 500;
+}
+.stageTag {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+.stageTag[data-stage='Unit'] { background: #e6fffa; color: #2c7a7b; }
+.stageTag[data-stage='awaiting batch'] { background: #fef3c7; color: #b7791f; }
+.stageTag[data-stage='Parts/Consumables'] { background: #ebf8ff; color: #2b6cb0; }
+
 /* Backlog #41 — triage candidates section on the Replacement tab */
 .triageSection {
   background: #fffbeb;

@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useReplacementOrders, type Order } from '../../lib/orders';
 import { isReplacementLine } from '../../lib/orders';
+import { replacementItemTags, replacementStageTag } from '../../lib/replacementTags';
 import { useBatches, type Batch } from '../../lib/stock';
 import { useServiceTickets, type TicketTopic } from '../../lib/service';
 import { TicketDetailPanel } from './TicketDetailPanel';
@@ -203,6 +204,8 @@ export default function ReplacementTab() {
               const daysOpen = Math.floor((now - new Date(o.created_at).getTime()) / 86400_000);
               const stage = stageFor(o);
               const batch = o.awaiting_batch_id ? batchById.get(o.awaiting_batch_id) : null;
+              const tags = replacementItemTags(o);
+              const stageTag = replacementStageTag(o, tags);
               return (
                 <tr key={o.id} className={styles.row}>
                   <td><a href="#/order-review">{o.order_ref}</a></td>
@@ -216,14 +219,15 @@ export default function ReplacementTab() {
                     ) : '—'}
                   </td>
                   <td>{o.customer_name}</td>
-                  <td>
-                    {stage === 'awaiting_batch' ? (
-                      <span className={styles.awaitingBatchTag} title={batch?.notes ?? ''}>
-                        Awaiting {o.awaiting_batch_id}
-                      </span>
-                    ) : (
-                      summarize(o.line_items)
-                    )}
+                  <td title={batch?.notes ?? undefined}>
+                    <div className={styles.tagRow}>
+                      {tags.length > 0
+                        ? tags.map(t => <span key={t} className={styles.itemTag}>{t}</span>)
+                        : <span className={styles.muted}>{summarize(o.line_items)}</span>}
+                      {stageTag && (
+                        <span className={styles.stageTag} data-stage={stageTag}>{stageTag}</span>
+                      )}
+                    </div>
                   </td>
                   <td>
                     {o.tracking_num
