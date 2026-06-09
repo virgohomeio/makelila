@@ -691,6 +691,34 @@ export async function createTicket(input: NewTicketInput): Promise<ServiceTicket
 }
 
 export async function deleteTicket(id: string): Promise<void> {
+  // First, remove any QUEUED replacement orders linked to this ticket (not yet
+  // shipped) so deleting the ticket also clears its replacement from Order
+  // Review. Shipped / delivered replacements are real fulfilled orders and are
+  // left intact (the orders.linked_ticket_id FK just nulls on ticket delete).
+  const { data: linkedRepl, error: lrErr } = await supabase
+    .from('orders')
+    .select('id, order_ref')
+    .eq('kind', 'replacement')
+    .eq('linked_ticket_id', id)
+    .is('shipped_at', null)
+    .is('delivered_at', null);
+  if (lrErr) throw new Error(`Failed to look up linked replacements: ${lrErr.message}`);
+
+  for (const o of linkedRepl ?? []) {
+    // Free any units this replacement had reserved so they return to stock.
+    // (Pending/awaiting replacements reserve nothing → this is a no-op.)
+    await supabase
+      .from('units')
+      .update({ status: 'ready', customer_order_ref: null })
+      .eq('customer_order_ref', o.order_ref)
+      .eq('status', 'reserved');
+    const { error: delErr } = await supabase.from('orders').delete().eq('id', o.id);
+    if (delErr) {
+      throw new Error(`Failed to delete linked replacement ${o.order_ref}: ${delErr.message}`);
+    }
+    await logAction('replacement_deleted', o.order_ref, `Removed with ticket ${id}`);
+  }
+
   // Child rows (messages, attachments, classification log) are removed by the
   // `on delete cascade` FKs. Realtime fires a DELETE event that drops the row
   // from any open `useServiceTickets`/`useInbox` list.
