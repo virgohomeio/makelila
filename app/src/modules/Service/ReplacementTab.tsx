@@ -210,7 +210,7 @@ export default function ReplacementTab() {
           <thead>
             <tr>
               <th>Order #</th><th>Ticket</th><th>Customer</th><th>Items</th>
-              <th>Tracking</th><th>COGS</th><th>Stage</th><th>Days open</th>
+              <th>Tracking</th><th>COGS</th><th>Item Type</th><th>Days open</th>
             </tr>
           </thead>
           <tbody>
