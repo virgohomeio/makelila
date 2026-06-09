@@ -567,6 +567,7 @@
   <button data-view="risks">14. Open Questions</button>
   <button data-view="tokens">16. Token Budget</button>
   <button data-view="changelog">15. Changelog</button>
+  <button data-view="team-okr">17. Team OKR/KPI</button>
 </nav>
 
 <main>
@@ -987,6 +988,532 @@
     <div class="section-anchor">§15 Changelog</div>
     <h2>Document Changelog</h2>
     <div id="changelog-list"></div>
+  </section>
+
+  <!-- 17. TEAM OKR/KPI -->
+  <section class="view" id="view-team-okr">
+    <div class="section-anchor">§17 Team OKR/KPI Vision Module — People Operations</div>
+    <h2>Team OKR &amp; KPI Vision</h2>
+    <p class="lede">A dedicated internal module for managing each team member's responsibilities, weekly progression, mental state, performance rating, and personal OKRs — aligned to VCycene's quarterly company objectives. Goals are designed to be ambitious but forgiving: mistakes are how the team stays innovative.</p>
+
+    <style>
+      /* ── Team OKR section styles ── */
+      .okr-principle-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; margin: 20px 0 28px; }
+      .okr-principle { background:#fff; border:1px solid var(--border); border-radius:var(--radius-md); padding:16px 18px; }
+      .okr-principle .p-icon { font-size:22px; margin-bottom:8px; }
+      .okr-principle h4 { margin:0 0 6px; font-size:13px; font-weight:700; }
+      .okr-principle p { margin:0; font-size:12px; color:var(--ink-muted); line-height:1.5; }
+
+      .member-grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap:18px; margin: 24px 0; }
+      .member-card { background:#fff; border:1px solid var(--border); border-radius:var(--radius-lg); overflow:hidden; box-shadow:var(--shadow-card); }
+      .member-card .mc-header { padding:16px 18px 12px; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:12px; }
+      .member-avatar { width:40px; height:40px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-weight:800; font-size:15px; color:#fff; flex-shrink:0; }
+      .mc-meta h3 { margin:0 0 2px; font-size:14px; font-weight:800; }
+      .mc-meta .mc-role { font-size:11px; color:var(--ink-muted); }
+      .mc-meta .mc-domain { display:inline-block; font-size:10px; font-weight:700; padding:1px 6px; border-radius:3px; margin-top:3px; }
+      .member-card .mc-body { padding:14px 18px; }
+      .mc-section-label { font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:.06em; color:var(--ink-subtle); margin:12px 0 5px; }
+      .mc-section-label:first-child { margin-top:0; }
+      .mc-pill-row { display:flex; flex-wrap:wrap; gap:5px; margin-bottom:4px; }
+      .mc-pill { font-size:11px; background:var(--surface-2); border:1px solid var(--border); border-radius:12px; padding:2px 9px; color:var(--ink-muted); }
+      .perf-badge { display:inline-flex; align-items:center; gap:5px; font-size:12px; font-weight:700; padding:4px 10px; border-radius:20px; }
+      .perf-strong  { background:#f0fdf4; color:#1a7840; border:1px solid #bbf7d0; }
+      .perf-meeting { background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe; }
+      .perf-growing { background:#fffbeb; color:#92400e; border:1px solid #fde68a; }
+      .perf-needs   { background:#fff1f2; color:#be123c; border:1px solid #fecdd3; }
+
+      .okr-table { width:100%; border-collapse:collapse; font-size:12px; margin-top:6px; }
+      .okr-table th { text-align:left; font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:.05em; color:var(--ink-subtle); padding:5px 8px; border-bottom:2px solid var(--border); }
+      .okr-table td { padding:7px 8px; border-bottom:1px solid var(--border); vertical-align:top; }
+      .okr-table tr:last-child td { border-bottom:none; }
+      .kpi-progress { display:flex; align-items:center; gap:8px; }
+      .kpi-bar-track { flex:1; height:5px; background:var(--surface-2); border-radius:3px; overflow:hidden; }
+      .kpi-bar-fill { height:100%; border-radius:3px; background:var(--crimson); }
+      .kpi-val { font-size:11px; font-weight:700; white-space:nowrap; color:var(--ink-muted); }
+
+      .weekly-log { font-size:12px; }
+      .week-row { display:flex; gap:12px; align-items:baseline; padding:6px 0; border-bottom:1px solid var(--surface-2); }
+      .week-row:last-child { border-bottom:none; }
+      .week-label { font-size:10px; font-weight:700; color:var(--ink-subtle); white-space:nowrap; min-width:54px; }
+      .week-entry { color:var(--ink-muted); line-height:1.4; }
+
+      .mental-chip { display:inline-flex; align-items:center; gap:5px; padding:4px 10px; border-radius:20px; font-size:12px; font-weight:600; }
+      .mental-energized { background:#f0fdf4; color:#166534; border:1px solid #bbf7d0; }
+      .mental-focused   { background:#eff6ff; color:#1e40af; border:1px solid #bfdbfe; }
+      .mental-stretched { background:#fffbeb; color:#92400e; border:1px solid #fde68a; }
+      .mental-overloaded{ background:#fff1f2; color:#be123c; border:1px solid #fecdd3; }
+
+      .help-list { list-style:none; padding:0; margin:0; }
+      .help-list li { font-size:12px; color:var(--ink-muted); padding:4px 0; padding-left:16px; position:relative; }
+      .help-list li::before { content:'→'; position:absolute; left:0; color:var(--crimson); font-weight:700; }
+
+      .company-okr-box { background:var(--crimson-soft); border:1px solid #f5c6c6; border-radius:var(--radius-md); padding:18px 20px; margin:20px 0 28px; }
+      .company-okr-box h3 { margin:0 0 10px; font-size:15px; color:var(--crimson-dark); }
+      .okr-obj { margin-bottom:14px; }
+      .okr-obj:last-child { margin-bottom:0; }
+      .okr-obj-label { font-size:12px; font-weight:800; color:var(--crimson); margin-bottom:4px; }
+      .okr-obj-krs { list-style:none; padding:0; margin:0; }
+      .okr-obj-krs li { font-size:12px; color:var(--ink-muted); padding:2px 0 2px 16px; position:relative; }
+      .okr-obj-krs li::before { content:'KR:'; position:absolute; left:0; font-size:9px; font-weight:800; color:var(--ink-subtle); top:4px; }
+
+      .innovation-note { background:#fff7ed; border-left:3px solid #f97316; border-radius:0 var(--radius-md) var(--radius-md) 0; padding:12px 16px; margin:20px 0; font-size:12.5px; color:var(--ink); }
+      .innovation-note strong { color:#c2410c; }
+
+      .module-spec-card { background:#fff; border:1px solid var(--border); border-radius:var(--radius-lg); padding:20px 22px; margin-bottom:20px; }
+      .module-spec-card h3 { margin:0 0 12px; font-size:15px; font-weight:800; }
+      .spec-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:12px; }
+      @media(max-width:640px){ .spec-grid{grid-template-columns:1fr;} }
+      .spec-item h4 { margin:0 0 5px; font-size:12px; font-weight:700; color:var(--ink-muted); text-transform:uppercase; letter-spacing:.04em; }
+      .spec-item ul { margin:0; padding-left:16px; font-size:12px; color:var(--ink-muted); line-height:1.6; }
+
+      .review-cadence { display:grid; grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); gap:12px; margin:16px 0; }
+      .cadence-card { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-md); padding:12px 14px; text-align:center; }
+      .cadence-card .cad-freq { font-size:18px; font-weight:800; color:var(--crimson); margin-bottom:2px; }
+      .cadence-card .cad-label { font-size:11px; font-weight:700; margin-bottom:4px; }
+      .cadence-card .cad-desc { font-size:11px; color:var(--ink-muted); line-height:1.4; }
+    </style>
+
+    <!-- Innovation Principle -->
+    <div class="innovation-note">
+      <strong>Core philosophy:</strong> Goals should be ambitious but not punishing. A team that fears failure stops experimenting. Targets are set at 70–80% stretch — reaching 70% of an ambitious OKR beats 100% of a safe one. Mistakes are logged, discussed, and turned into learning entries in the weekly progression log — never used against a team member's performance score.
+    </div>
+
+    <!-- Company Quarterly OKRs -->
+    <div class="company-okr-box">
+      <h3>VCycene Company OKRs — Q3 2026 (Jul – Sep)</h3>
+      <div class="okr-obj">
+        <div class="okr-obj-label">O1: Reach $2M ARR and 500 active LILA units</div>
+        <ul class="okr-obj-krs">
+          <li>Ship 80 new units in Q3 (from current ~160 lifetime)</li>
+          <li>Reduce average order-to-ship time to &lt; 5 business days</li>
+          <li>Achieve 90-day churn &lt; 8%</li>
+        </ul>
+      </div>
+      <div class="okr-obj">
+        <div class="okr-obj-label">O2: Deliver a customer experience that earns 4.5★ on Trustpilot</div>
+        <ul class="okr-obj-krs">
+          <li>First-week onboarding completion rate &gt; 85%</li>
+          <li>Support ticket first-response time &lt; 4 hours (business hours)</li>
+          <li>Net Promoter Score ≥ 50 from post-onboarding survey</li>
+        </ul>
+      </div>
+      <div class="okr-obj">
+        <div class="okr-obj-label">O3: Build an operations platform that scales to 10× without adding headcount</div>
+        <ul class="okr-obj-krs">
+          <li>Ship all P1 backlog items in makelila by end of Q3</li>
+          <li>Reduce manual data-entry ops time by 40% via automation</li>
+          <li>Zero customer-data incidents (PII, wrong email recipient)</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Design Principles -->
+    <h3 style="margin:0 0 4px;">Module design principles</h3>
+    <p style="font-size:13px;color:var(--ink-muted);margin:0 0 12px;">Six pillars that define how the Team OKR/KPI module behaves.</p>
+    <div class="okr-principle-grid">
+      <div class="okr-principle">
+        <div class="p-icon">🎯</div>
+        <h4>Alignment cascade</h4>
+        <p>Every personal KPI traces to a company KR. The UI shows the link explicitly so team members understand why their goal matters.</p>
+      </div>
+      <div class="okr-principle">
+        <div class="p-icon">🌱</div>
+        <h4>Forgiving targets</h4>
+        <p>Targets set at 70–80% stretch. 70% of an ambitious goal is reported as on-track. Full misses trigger a retrospective, not a reprimand.</p>
+      </div>
+      <div class="okr-principle">
+        <div class="p-icon">📅</div>
+        <h4>Week-by-week log</h4>
+        <p>Each member records a brief weekly entry. Progression becomes visible over time — growth, pivots, and recoveries are all part of the record.</p>
+      </div>
+      <div class="okr-principle">
+        <div class="p-icon">🧠</div>
+        <h4>Mental state tracking</h4>
+        <p>A simple weekly self-report (Energized / Focused / Stretched / Overloaded) surfaces workload signals before they become burnout.</p>
+      </div>
+      <div class="okr-principle">
+        <div class="p-icon">📈</div>
+        <h4>Performance transparency</h4>
+        <p>Performance ratings are visible to George + Huayi. Team members see their own. Ratings inform coaching conversations, not compensation directly.</p>
+      </div>
+      <div class="okr-principle">
+        <div class="p-icon">🤝</div>
+        <h4>Career growth first</h4>
+        <p>Strengths and development areas are documented as coaching inputs. The module surfaces "needs help" flags so managers can unblock people early.</p>
+      </div>
+    </div>
+
+    <!-- Team member roster -->
+    <h3 style="margin:0 0 4px;">Team member profiles</h3>
+    <p style="font-size:13px;color:var(--ink-muted);margin:0 0 12px;">Current roster — click a card to expand OKRs &amp; KPIs (in the full module). Data shown here is illustrative placeholder; real data lives in Supabase <code>team_members</code> and <code>weekly_logs</code> tables.</p>
+
+    <div class="member-grid">
+
+      <!-- Pedrum -->
+      <div class="member-card">
+        <div class="mc-header">
+          <div class="member-avatar" style="background:#6b46c1;">P</div>
+          <div class="mc-meta">
+            <h3>Pedrum Amin</h3>
+            <div class="mc-role">Sales &amp; Pre-sale</div>
+            <span class="mc-domain" style="background:#ede9fe;color:#5b21b6;">CRM + Marketing</span>
+          </div>
+        </div>
+        <div class="mc-body">
+          <div class="mc-section-label">Responsibilities</div>
+          <div class="mc-pill-row">
+            <span class="mc-pill">Inbound leads</span>
+            <span class="mc-pill">Demo calls</span>
+            <span class="mc-pill">Order review</span>
+            <span class="mc-pill">Address verification</span>
+            <span class="mc-pill">Pre-sale email campaigns</span>
+          </div>
+
+          <div class="mc-section-label">Performance</div>
+          <span class="perf-badge perf-strong">⬆ Outperforming</span>
+
+          <div class="mc-section-label">Mental state this week</div>
+          <span class="mental-chip mental-focused">🧠 Focused</span>
+
+          <div class="mc-section-label">Personal OKRs — Q3 2026</div>
+          <table class="okr-table">
+            <thead><tr><th>Objective</th><th>Key result</th><th>Progress</th></tr></thead>
+            <tbody>
+              <tr>
+                <td>Convert more demos to orders</td>
+                <td>Demo → order rate ≥ 35%</td>
+                <td><div class="kpi-progress"><div class="kpi-bar-track"><div class="kpi-bar-fill" style="width:60%"></div></div><span class="kpi-val">21% → 35%</span></div></td>
+              </tr>
+              <tr>
+                <td>Reduce order-entry errors</td>
+                <td>Address verification pass rate &gt; 90%</td>
+                <td><div class="kpi-progress"><div class="kpi-bar-track"><div class="kpi-bar-fill" style="width:78%"></div></div><span class="kpi-val">78%</span></div></td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div class="mc-section-label">Recent weekly log</div>
+          <div class="weekly-log">
+            <div class="week-row"><span class="week-label">Jun 2</span><span class="week-entry">Ran 3 demos; 2 converted same-day. Flagged freight estimate bug (#14) during Joseph's order review.</span></div>
+            <div class="week-row"><span class="week-label">May 26</span><span class="week-entry">Submitted alpha feedback — 4 product requests, all logged in backlog.</span></div>
+          </div>
+
+          <div class="mc-section-label">Strengths &amp; development areas</div>
+          <ul class="help-list">
+            <li><strong>Strength:</strong> Customer rapport — very high conversion on calls he personally handles</li>
+            <li><strong>Develop:</strong> Technical depth on LILA hardware so demo conversations go deeper</li>
+            <li><strong>Needs help:</strong> Pre-sale Klaviyo flow setup — would benefit from a 1-hour session with Huayi</li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- Junaid -->
+      <div class="member-card">
+        <div class="mc-header">
+          <div class="member-avatar" style="background:#047857;">J</div>
+          <div class="mc-meta">
+            <h3>Junaid Siddiqui</h3>
+            <div class="mc-role">Customer Service &amp; Stock</div>
+            <span class="mc-domain" style="background:#ecfdf5;color:#065f46;">ERP + Service</span>
+          </div>
+        </div>
+        <div class="mc-body">
+          <div class="mc-section-label">Responsibilities</div>
+          <div class="mc-pill-row">
+            <span class="mc-pill">Stock management</span>
+            <span class="mc-pill">Serial tracking</span>
+            <span class="mc-pill">Fulfillment QC</span>
+            <span class="mc-pill">Support tickets</span>
+            <span class="mc-pill">Diagnosis call co-host</span>
+          </div>
+
+          <div class="mc-section-label">Performance</div>
+          <span class="perf-badge perf-meeting">✓ Meeting expectations</span>
+
+          <div class="mc-section-label">Mental state this week</div>
+          <span class="mental-chip mental-stretched">⚡ Stretched</span>
+
+          <div class="mc-section-label">Personal OKRs — Q3 2026</div>
+          <table class="okr-table">
+            <thead><tr><th>Objective</th><th>Key result</th><th>Progress</th></tr></thead>
+            <tbody>
+              <tr>
+                <td>Keep stock accuracy high</td>
+                <td>Inventory sync error rate &lt; 2%</td>
+                <td><div class="kpi-progress"><div class="kpi-bar-track"><div class="kpi-bar-fill" style="width:85%"></div></div><span class="kpi-val">~3% now</span></div></td>
+              </tr>
+              <tr>
+                <td>Reduce QC failure rate</td>
+                <td>Electrical pass rate &gt; 95% on first attempt</td>
+                <td><div class="kpi-progress"><div class="kpi-bar-track"><div class="kpi-bar-fill" style="width:72%"></div></div><span class="kpi-val">89% → 95%</span></div></td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div class="mc-section-label">Recent weekly log</div>
+          <div class="weekly-log">
+            <div class="week-row"><span class="week-label">Jun 2</span><span class="week-entry">Walked through full walkthrough with Raymond. Flagged 5 stock discrepancies (#22); started Feishu migration into Build module.</span></div>
+            <div class="week-row"><span class="week-label">May 26</span><span class="week-entry">Submitted machine-level QC tracking request (#5); noted serial 284 double-assignment issue.</span></div>
+          </div>
+
+          <div class="mc-section-label">Strengths &amp; development areas</div>
+          <ul class="help-list">
+            <li><strong>Strength:</strong> Methodical — catches stock discrepancies before they become shipping errors</li>
+            <li><strong>Develop:</strong> Speed on ticket triage; currently stretched across stock + service simultaneously</li>
+            <li><strong>Needs help:</strong> Clearer handoff protocol when stock discrepancies touch an in-flight order</li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- Reina -->
+      <div class="member-card">
+        <div class="mc-header">
+          <div class="member-avatar" style="background:#b45309;">R</div>
+          <div class="mc-meta">
+            <h3>Reina George</h3>
+            <div class="mc-role">Customer Service</div>
+            <span class="mc-domain" style="background:#fff7ed;color:#92400e;">Service + Onboarding</span>
+          </div>
+        </div>
+        <div class="mc-body">
+          <div class="mc-section-label">Responsibilities</div>
+          <div class="mc-pill-row">
+            <span class="mc-pill">Onboarding calls</span>
+            <span class="mc-pill">Support ticket triage</span>
+            <span class="mc-pill">Follow-up scheduling</span>
+            <span class="mc-pill">Return coordination</span>
+            <span class="mc-pill">Diagnosis call co-host</span>
+          </div>
+
+          <div class="mc-section-label">Performance</div>
+          <span class="perf-badge perf-strong">⬆ Outperforming</span>
+
+          <div class="mc-section-label">Mental state this week</div>
+          <span class="mental-chip mental-energized">✨ Energized</span>
+
+          <div class="mc-section-label">Personal OKRs — Q3 2026</div>
+          <table class="okr-table">
+            <thead><tr><th>Objective</th><th>Key result</th><th>Progress</th></tr></thead>
+            <tbody>
+              <tr>
+                <td>Deliver excellent onboarding</td>
+                <td>Post-call NPS ≥ 8.0 / 10</td>
+                <td><div class="kpi-progress"><div class="kpi-bar-track"><div class="kpi-bar-fill" style="width:80%"></div></div><span class="kpi-val">No survey yet</span></div></td>
+              </tr>
+              <tr>
+                <td>Scale CS without bottlenecking Edward</td>
+                <td>Handle ≥ 80% of standard onboarding calls solo by Aug</td>
+                <td><div class="kpi-progress"><div class="kpi-bar-track"><div class="kpi-bar-fill" style="width:40%"></div></div><span class="kpi-val">Ramping</span></div></td>
+              </tr>
+              <tr>
+                <td>Keep first-response fast</td>
+                <td>Ticket first-response &lt; 4h (business hrs)</td>
+                <td><div class="kpi-progress"><div class="kpi-bar-track"><div class="kpi-bar-fill" style="width:70%"></div></div><span class="kpi-val">~6h avg now</span></div></td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div class="mc-section-label">Recent weekly log</div>
+          <div class="weekly-log">
+            <div class="week-row"><span class="week-label">Jun 2</span><span class="week-entry">Led Huayi's test onboarding session (Pedrum's profile). Flagged Calendly sync delay (#32) and onboarding panel UX gap (#33) — both shipped.</span></div>
+            <div class="week-row"><span class="week-label">May 28</span><span class="week-entry">Attended in-person walkthrough; provided CS feedback on 8 items (#31–#43).</span></div>
+          </div>
+
+          <div class="mc-section-label">Strengths &amp; development areas</div>
+          <ul class="help-list">
+            <li><strong>Strength:</strong> Empathy-driven — customers consistently feel heard and cared for</li>
+            <li><strong>Develop:</strong> Technical knowledge of LILA hardware to reduce call escalations to Edward</li>
+            <li><strong>Needs help:</strong> Pre-call primer document and a bank of canned FAQ answers for common questions</li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- Huayi -->
+      <div class="member-card">
+        <div class="mc-header">
+          <div class="member-avatar" style="background:#b91c1c;">H</div>
+          <div class="mc-meta">
+            <h3>Huayi Gao</h3>
+            <div class="mc-role">Cross-cutting · Finance · Mobile</div>
+            <span class="mc-domain" style="background:#fef2f2;color:#991b1b;">Platform + Finance</span>
+          </div>
+        </div>
+        <div class="mc-body">
+          <div class="mc-section-label">Responsibilities</div>
+          <div class="mc-pill-row">
+            <span class="mc-pill">makeLILA architecture</span>
+            <span class="mc-pill">Finance module</span>
+            <span class="mc-pill">Mobile/PWA</span>
+            <span class="mc-pill">Supabase infra</span>
+            <span class="mc-pill">Cross-module integrations</span>
+            <span class="mc-pill">Edge functions</span>
+          </div>
+
+          <div class="mc-section-label">Performance</div>
+          <span class="perf-badge perf-strong">⬆ Outperforming</span>
+
+          <div class="mc-section-label">Mental state this week</div>
+          <span class="mental-chip mental-stretched">⚡ Stretched</span>
+
+          <div class="mc-section-label">Personal OKRs — Q3 2026</div>
+          <table class="okr-table">
+            <thead><tr><th>Objective</th><th>Key result</th><th>Progress</th></tr></thead>
+            <tbody>
+              <tr>
+                <td>Ship all P1 backlog items</td>
+                <td>All 4 P1 items closed by Aug 31</td>
+                <td><div class="kpi-progress"><div class="kpi-bar-track"><div class="kpi-bar-fill" style="width:50%"></div></div><span class="kpi-val">2/4 shipped</span></div></td>
+              </tr>
+              <tr>
+                <td>Make ops mobile-usable</td>
+                <td>V1 responsive layout across all modules (backlog #80)</td>
+                <td><div class="kpi-progress"><div class="kpi-bar-track"><div class="kpi-bar-fill" style="width:5%"></div></div><span class="kpi-val">Not started</span></div></td>
+              </tr>
+              <tr>
+                <td>Zero customer PII incidents</td>
+                <td>0 unintended PII commits or leaks in Q3</td>
+                <td><div class="kpi-progress"><div class="kpi-bar-track"><div class="kpi-bar-fill" style="width:100%;background:#2f855a;"></div></div><span class="kpi-val">Clean ✓</span></div></td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div class="mc-section-label">Recent weekly log</div>
+          <div class="weekly-log">
+            <div class="week-row"><span class="week-label">Jun 9</span><span class="week-entry">Shipped CJM customer tab; added backlog #83–#89 from Jun signals; unset EMAIL_TEST_RECIPIENT (emails live).</span></div>
+            <div class="week-row"><span class="week-label">Jun 4</span><span class="week-entry">Shipped replacement workflow (#55), diagnosis call auto-invite (#75), customer profitability view, dataset labels spec (#61).</span></div>
+          </div>
+
+          <div class="mc-section-label">Strengths &amp; development areas</div>
+          <ul class="help-list">
+            <li><strong>Strength:</strong> Full-stack breadth — can ship from DB migration to React UI to edge function in one session</li>
+            <li><strong>Develop:</strong> Delegation — currently single point of failure for all technical decisions</li>
+            <li><strong>Needs help:</strong> Second technical contributor to pair on architecture decisions as the codebase scales</li>
+          </ul>
+        </div>
+      </div>
+
+    </div><!-- end member-grid -->
+
+    <!-- Module specification -->
+    <h3 style="margin:24px 0 4px;">Module specification</h3>
+
+    <div class="module-spec-card">
+      <h3>Data model</h3>
+      <div class="spec-grid">
+        <div class="spec-item">
+          <h4>Core tables</h4>
+          <ul>
+            <li><code>team_members</code> — id, profile_id FK, role, domain, manager_id, start_date</li>
+            <li><code>team_okrs</code> — id, member_id, quarter, objective, status (draft/active/closed)</li>
+            <li><code>team_key_results</code> — id, okr_id, description, target, unit, current_value, company_kr_id FK (nullable)</li>
+            <li><code>weekly_logs</code> — id, member_id, week_start, summary, mental_state enum, shipped_items text[], blockers text[]</li>
+            <li><code>performance_ratings</code> — id, member_id, period, rating enum (outperforming/meeting/growing/needs_support), notes, rated_by</li>
+            <li><code>career_notes</code> — id, member_id, type (strength/development/help_needed), body, logged_by, created_at</li>
+          </ul>
+        </div>
+        <div class="spec-item">
+          <h4>Access control</h4>
+          <ul>
+            <li>George + Huayi: full read/write on all members</li>
+            <li>Team members: read/write own record; read-only own performance rating</li>
+            <li>Performance ratings and career notes: write-restricted to managers only</li>
+            <li>Weekly logs: writable by the member themselves + managers</li>
+            <li>Company OKRs: read-only for all; write-restricted to George only</li>
+          </ul>
+        </div>
+        <div class="spec-item">
+          <h4>KPI alignment</h4>
+          <ul>
+            <li>Each <code>team_key_results</code> row carries an optional <code>company_kr_id</code> FK linking it to the company-level KR it supports</li>
+            <li>The UI shows this link as a trace line: personal KPI → company KR → company Objective</li>
+            <li>A quarterly alignment check flags any team member with &lt; 1 KR linked to each active company Objective</li>
+          </ul>
+        </div>
+        <div class="spec-item">
+          <h4>Performance enum</h4>
+          <ul>
+            <li><strong>Outperforming</strong> — consistently exceeds KRs; actively raises the bar for others</li>
+            <li><strong>Meeting expectations</strong> — delivers reliably; KRs on track; no active blockers</li>
+            <li><strong>Growing</strong> — newer to the role or working through a challenge; on an active coaching plan</li>
+            <li><strong>Needs support</strong> — KRs significantly off-track; immediate manager intervention required</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="module-spec-card">
+      <h3>UI surfaces</h3>
+      <div class="spec-grid">
+        <div class="spec-item">
+          <h4>Team overview tab</h4>
+          <ul>
+            <li>Card grid — one card per member with avatar, role, performance badge, mental state chip</li>
+            <li>Manager quick-view: total outperforming / meeting / growing / needs-support count at the top</li>
+            <li>Filter by domain (CRM / ERP / Service / Finance / Platform)</li>
+          </ul>
+        </div>
+        <div class="spec-item">
+          <h4>Member detail panel</h4>
+          <ul>
+            <li>Responsibilities (editable pill list)</li>
+            <li>OKR/KPI table with inline progress bars + company alignment trace</li>
+            <li>Weekly progression log (newest first, collapsible)</li>
+            <li>Performance history chart (last 4 quarters)</li>
+            <li>Career notes section (strengths / development / help-needed)</li>
+          </ul>
+        </div>
+        <div class="spec-item">
+          <h4>Weekly log modal</h4>
+          <ul>
+            <li>Opens every Monday (soft nudge, not forced)</li>
+            <li>Fields: What I shipped, What I'm working on, Mental state (4-option radio), Blockers</li>
+            <li>Submitting stamps the record and updates the member card's mental state chip</li>
+          </ul>
+        </div>
+        <div class="spec-item">
+          <h4>OKR editor</h4>
+          <ul>
+            <li>Quarter selector; company OKR alignment picker (dropdown of active company KRs)</li>
+            <li>Target + unit fields; manual current-value update or formula (e.g. COUNT from activity_log)</li>
+            <li>Draft → Active → Closed state machine; managers must approve activation</li>
+            <li>Innovation guard: system warns if every KR has a &lt; 20% stretch factor</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- Review cadence -->
+    <h3 style="margin:0 0 12px;">Review cadence</h3>
+    <div class="review-cadence">
+      <div class="cadence-card">
+        <div class="cad-freq">Weekly</div>
+        <div class="cad-label">Log entry</div>
+        <div class="cad-desc">Each member posts a brief weekly log. Mental state auto-refreshes the card chip.</div>
+      </div>
+      <div class="cadence-card">
+        <div class="cad-freq">Bi-weekly</div>
+        <div class="cad-label">1:1 check-in</div>
+        <div class="cad-desc">Manager reviews the member's KR progress and career notes. Blockers surfaced here, not in Slack.</div>
+      </div>
+      <div class="cadence-card">
+        <div class="cad-freq">Monthly</div>
+        <div class="cad-label">Performance rating</div>
+        <div class="cad-desc">George or Huayi sets the performance badge. Ratings inform coaching conversations only.</div>
+      </div>
+      <div class="cadence-card">
+        <div class="cad-freq">Quarterly</div>
+        <div class="cad-label">OKR cycle</div>
+        <div class="cad-desc">Close the quarter's OKRs, review scores, set new OKRs aligned to the next company cycle.</div>
+      </div>
+    </div>
+
+    <div class="notes" style="margin-top:24px;">
+      <h4>Implementation path</h4>
+      <strong>Phase 1 (makelila module):</strong> Static data entry — team_members + team_okrs + weekly_logs tables, read/write UI for managers and members.<br>
+      <strong>Phase 2 (auto-KPI):</strong> Wire KR current_value to live makelila data sources (e.g. ticket count, onboarding completion rate from service_tickets).<br>
+      <strong>Phase 3 (notifications):</strong> Weekly log nudge via Quo SMS on Monday morning; missed-log flag surfaced on the manager overview.
+    </div>
+
   </section>
 
 </main>
