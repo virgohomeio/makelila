@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useReplacementOrders, type Order } from '../../lib/orders';
 import { isReplacementLine } from '../../lib/orders';
-import { replacementItemTags, replacementStageTag } from '../../lib/replacementTags';
+import { replacementItemTags, replacementStageTag, type StageTag } from '../../lib/replacementTags';
 import { useBatches, type Batch } from '../../lib/stock';
 import { useServiceTickets, type TicketTopic } from '../../lib/service';
 import { TicketDetailPanel } from './TicketDetailPanel';
@@ -57,14 +57,14 @@ function summarize(line_items: Order['line_items']): string {
   return segs.join(' + ') || '—';
 }
 
-const STAGES: { key: Stage | 'all'; label: string }[] = [
-  { key: 'all',             label: 'All' },
-  { key: 'pending',         label: 'Pending' },
-  { key: 'awaiting_batch',  label: 'Awaiting batch' },
-  { key: 'fulfilling',      label: 'Fulfilling' },
-  { key: 'shipped',         label: 'Shipped' },
-  { key: 'delivered',       label: 'Delivered' },
-  { key: 'closed',          label: 'Closed' },
+// Filter by the operator-facing item stage (spec 2026-06-08), not the pipeline
+// status. Every replacement is a unit (ready→Unit / pending→awaiting batch) or
+// parts/consumables.
+const STAGE_FILTERS: { key: 'all' | StageTag; label: string }[] = [
+  { key: 'all',                label: 'All' },
+  { key: 'Unit',               label: 'Unit' },
+  { key: 'awaiting batch',     label: 'awaiting batch' },
+  { key: 'Parts/Consumables',  label: 'Parts/Consumables' },
 ];
 
 // Backlog #41 — topics that signal "this ticket is asking for a replacement"
@@ -82,7 +82,7 @@ export default function ReplacementTab() {
   // Pull every support/repair ticket so we can filter for triage candidates.
   // useServiceTickets() with no arg returns all categories; we filter below.
   const { tickets } = useServiceTickets();
-  const [filter, setFilter] = useState<Stage | 'all'>('all');
+  const [filter, setFilter] = useState<'all' | StageTag>('all');
   const [openTicketId, setOpenTicketId] = useState<string | null>(null);
 
   const batchById = useMemo(() => {
@@ -116,10 +116,14 @@ export default function ReplacementTab() {
       .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
   }, [tickets]);
 
-  const filtered = useMemo(
-    () => orders.filter(o => filter === 'all' || stageFor(o) === filter),
-    [orders, filter],
-  );
+  const filtered = useMemo(() => {
+    if (filter === 'all') return orders;
+    return orders.filter(o => {
+      const tags = replacementItemTags(o);
+      const st = replacementStageTag(o, tags, b => pendingBatchIds.has(b) || !batchById.has(b));
+      return st === filter;
+    });
+  }, [orders, filter, pendingBatchIds, batchById]);
 
   const openTicket = useMemo(
     () => openTicketId ? tickets.find(t => t.id === openTicketId) ?? null : null,
@@ -192,7 +196,7 @@ export default function ReplacementTab() {
       <h3 className={styles.sectionHeading}>Replacement orders</h3>
 
       <div className={styles.filterRow}>
-        {STAGES.map(s => (
+        {STAGE_FILTERS.map(s => (
           <button key={s.key}
             className={`${styles.chip} ${filter === s.key ? styles.chipActive : ''}`}
             onClick={() => setFilter(s.key)}>{s.label}</button>
