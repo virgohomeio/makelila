@@ -86,18 +86,25 @@ export function replacementItemTags(
   return [...new Set(tags)];
 }
 
-/** Operator-facing stage tag (spec 2026-06-08):
- *   - any unit + awaiting (out-of-stock batch) → "awaiting batch"  (e.g. P100X)
- *   - any unit, ready                          → "Unit"            (e.g. P100, P150)
- *   - parts/consumables only                   → "Parts/Consumables" */
+/** Operator-facing stage tag (spec 2026-06-08). Derived from the items, not
+ *  from replacement_state (which can be stale on free-text-imported rows):
+ *   - unit whose batch hasn't arrived → "awaiting batch"   (e.g. P100X)
+ *   - unit whose batch is available   → "Unit"             (e.g. P100, P150)
+ *   - any other / unnamed parts       → "Parts/Consumables"
+ *  `isPendingBatch(batch)` is true when that batch has no arrived stock yet
+ *  (caller derives it from batches.arrived_at). Every order with line_items —
+ *  even "unspecified parts" — gets a stage; only a truly empty row is null. */
 export function replacementStageTag(
-  o: Pick<Order, 'replacement_state' | 'awaiting_batch_id'>,
+  o: Pick<Order, 'line_items'>,
   tags: string[],
+  isPendingBatch: (batch: string) => boolean,
 ): StageTag | null {
-  const hasUnit = tags.some(isUnitTag);
-  if (hasUnit) {
-    return (o.awaiting_batch_id || o.replacement_state === 'awaiting') ? 'awaiting batch' : 'Unit';
+  const unitTags = tags.filter(isUnitTag);
+  if (unitTags.length > 0) {
+    return unitTags.some(isPendingBatch) ? 'awaiting batch' : 'Unit';
   }
-  if (tags.length > 0) return 'Parts/Consumables';
+  // No unit → it's parts/consumables (covers unnamed "unspecified parts" rows
+  // that yield no specific vocab tag but clearly aren't a unit).
+  if (tags.length > 0 || (o.line_items?.length ?? 0) > 0) return 'Parts/Consumables';
   return null;
 }

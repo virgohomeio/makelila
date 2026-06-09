@@ -91,6 +91,16 @@ export default function ReplacementTab() {
     return m;
   }, [batches]);
 
+  // A batch is "pending" (→ stage tag "awaiting batch") when it has no arrived
+  // stock yet, e.g. P100X. Unknown batches default to pending so a not-yet-
+  // synced future batch never mislabels as a ready Unit. (spec 2026-06-08)
+  const pendingBatchIds = useMemo(
+    () => new Set(batches.filter(b => b.arrived_at == null).map(b => b.id)),
+    [batches],
+  );
+  const isPendingBatch = (batch: string) =>
+    pendingBatchIds.has(batch) || !batchById.has(batch);
+
   // Backlog #41 — triage candidates: open service tickets whose topic flags
   // them as a likely replacement, and that don't yet have a replacement
   // order linked. Sorted by oldest-first so longest-waiting tickets surface
@@ -205,7 +215,7 @@ export default function ReplacementTab() {
               const stage = stageFor(o);
               const batch = o.awaiting_batch_id ? batchById.get(o.awaiting_batch_id) : null;
               const tags = replacementItemTags(o);
-              const stageTag = replacementStageTag(o, tags);
+              const stageTag = replacementStageTag(o, tags, isPendingBatch);
               return (
                 <tr key={o.id} className={styles.row}>
                   <td><a href="#/order-review">{o.order_ref}</a></td>
@@ -224,9 +234,6 @@ export default function ReplacementTab() {
                       {tags.length > 0
                         ? tags.map(t => <span key={t} className={styles.itemTag}>{t}</span>)
                         : <span className={styles.muted}>{summarize(o.line_items)}</span>}
-                      {stageTag && (
-                        <span className={styles.stageTag} data-stage={stageTag}>{stageTag}</span>
-                      )}
                     </div>
                   </td>
                   <td>
@@ -237,9 +244,11 @@ export default function ReplacementTab() {
                       : <span className={styles.muted} title="No tracking yet — still to be shipped">—</span>}
                   </td>
                   <td>${(o.cogs_usd ?? 0).toFixed(2)}</td>
-                  <td>{stage === 'awaiting_batch' ? (
-                    <span className={styles.awaitingBatchTag}>awaiting batch</span>
-                  ) : stage}</td>
+                  <td>
+                    {stageTag
+                      ? <span className={styles.stageTag} data-stage={stageTag}>{stageTag}</span>
+                      : <span className={styles.muted}>{stage}</span>}
+                  </td>
                   <td>{daysOpen}</td>
                 </tr>
               );

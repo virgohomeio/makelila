@@ -30,18 +30,23 @@ describe('replacementItemTags', () => {
 });
 
 describe('replacementStageTag', () => {
-  it('ready unit → Unit', () => {
-    expect(replacementStageTag(order([], { replacement_state: 'ready' }), ['P100'])).toBe('Unit');
-    expect(replacementStageTag(order([]), ['P150'])).toBe('Unit');
+  const isPending = (b: string) => b === 'P100X'; // P100X not yet arrived
+  it('unit on an available batch → Unit', () => {
+    expect(replacementStageTag(order([{ kind: 'unit', batch: 'P100' }]), ['P100'], isPending)).toBe('Unit');
+    expect(replacementStageTag(order([{ kind: 'unit', batch: 'P150' }]), ['P150'], isPending)).toBe('Unit');
   });
-  it('awaiting / batch-blocked unit → awaiting batch', () => {
-    expect(replacementStageTag(order([], { awaiting_batch_id: 'P100X' }), ['P100X'])).toBe('awaiting batch');
-    expect(replacementStageTag(order([], { replacement_state: 'awaiting' }), ['P100'])).toBe('awaiting batch');
+  it('unit on a pending batch → awaiting batch (regardless of replacement_state)', () => {
+    expect(replacementStageTag(order([], { awaiting_batch_id: 'P100X' }), ['P100X'], isPending)).toBe('awaiting batch');
+    // free-text "P100 X" row imported as replacement_state='ready' still resolves correctly
+    expect(replacementStageTag(order([{ kind: 'part', description: 'P100 X' }], { replacement_state: 'ready' }), ['P100X'], isPending)).toBe('awaiting batch');
   });
   it('parts only → Parts/Consumables', () => {
-    expect(replacementStageTag(order([]), ['chamber-L', 'hopper'])).toBe('Parts/Consumables');
+    expect(replacementStageTag(order([{ kind: 'part', sku: 'LILA-HOPPER' }]), ['chamber-L', 'hopper'], isPending)).toBe('Parts/Consumables');
   });
-  it('no tags → null', () => {
-    expect(replacementStageTag(order([]), [])).toBeNull();
+  it('unnamed parts (no vocab tag) still → Parts/Consumables', () => {
+    expect(replacementStageTag(order([{ kind: 'part', description: 'unspecified parts' }]), [], isPending)).toBe('Parts/Consumables');
+  });
+  it('truly empty → null', () => {
+    expect(replacementStageTag(order([]), [], isPending)).toBeNull();
   });
 });
