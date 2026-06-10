@@ -1040,3 +1040,83 @@ function formatBytes(n: number): string {
     ? `${(n / 1_000_000).toFixed(1)} MB`
     : `${Math.round(n / 1000)} KB`;
 }
+
+// ============================================================ Warranty Registrations (Feature J1)
+
+export type CoverageState = 'in_warranty' | 'expired' | 'voided' | 'no_registration';
+
+export interface WarrantyRegistration {
+  id: string;
+  unit_serial: string;
+  customer_id: string;
+  original_order_id: string | null;
+  coverage_tier: 'standard_1y' | 'extended_2y' | 'replacement_no_warranty' | 'lifetime_legacy';
+  coverage_start: string; // date string YYYY-MM-DD
+  coverage_end: string;   // date string YYYY-MM-DD
+  parent_registration_id: string | null;
+  voided_reason: string | null;
+  voided_at: string | null;
+  registered_at: string;
+}
+
+export function computeCoverageState(reg: WarrantyRegistration | null): CoverageState {
+  if (!reg) return 'no_registration';
+  if (reg.voided_at) return 'voided';
+  const now = new Date();
+  const end = new Date(reg.coverage_end);
+  if (end < now) return 'expired';
+  return 'in_warranty';
+}
+
+export function daysRemainingWarranty(reg: WarrantyRegistration): number {
+  const now = new Date(); now.setHours(0, 0, 0, 0);
+  const end = new Date(reg.coverage_end); end.setHours(0, 0, 0, 0);
+  return Math.ceil((end.getTime() - now.getTime()) / 86_400_000);
+}
+
+export function useWarrantyRegistration(unitSerial: string | null): {
+  registration: WarrantyRegistration | null;
+  loading: boolean;
+} {
+  const [registration, setRegistration] = useState<WarrantyRegistration | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!unitSerial) { setRegistration(null); setLoading(false); return; }
+    let cancelled = false;
+    setLoading(true);
+    (async () => {
+      const { data, error } = await supabase
+        .from('warranty_registrations')
+        .select('*')
+        .eq('unit_serial', unitSerial)
+        .maybeSingle();
+      if (cancelled) return;
+      if (!error) setRegistration(data as WarrantyRegistration | null);
+      setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [unitSerial]);
+
+  return { registration, loading };
+}
+
+export async function voidWarranty(id: string, reason: string): Promise<void> {
+  const { error } = await supabase
+    .from('warranty_registrations')
+    .update({ voided_at: new Date().toISOString(), voided_reason: reason })
+    .eq('id', id);
+  if (error) throw error;
+  await logAction('warranty_voided', id, reason,
+    { entityType: 'warranty_registration', entityId: id });
+}
+
+export async function extendWarranty(id: string, newTier: 'extended_2y' | 'lifetime_legacy'): Promise<void> {
+  const { error } = await supabase
+    .from('warranty_registrations')
+    .update({ coverage_tier: newTier })
+    .eq('id', id);
+  if (error) throw error;
+  await logAction('warranty_extended', id, newTier,
+    { entityType: 'warranty_registration', entityId: id });
+}
