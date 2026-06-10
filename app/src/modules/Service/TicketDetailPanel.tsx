@@ -15,6 +15,7 @@ import {
 import { CANNED_SMS_TEMPLATES } from '../../lib/cannedSms';
 import { AttachmentStrip } from './AttachmentStrip';
 import { TicketNotes } from './TicketNotes';
+import { DeviceContextHeader } from '../../components/DeviceContextHeader';
 import styles from './Service.module.css';
 
 // Backlog #39 — keep in sync with public.team_invite_list. Aaron/Ashwini
@@ -195,6 +196,8 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
         </div>
         <button className={styles.detailClose} onClick={onClose}>✕</button>
       </div>
+
+      <DeviceContextHeader unitSerial={ticket.unit_serial} currentTicketId={ticket.id} />
 
       <div className={styles.detailBody}>
         <div className={styles.detailSection}>
