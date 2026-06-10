@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase } from './supabase';
 import { logAction, useActivityForEntity } from './activityLog';
@@ -301,7 +301,7 @@ export interface TimelineEvent {
 
 /** Merge and sort a flat array of timeline events descending by ts. */
 export function mergeTimelineEvents(events: TimelineEvent[]): TimelineEvent[] {
-  return [...events].sort((a, b) => b.ts.localeCompare(a.ts));
+  return [...events].sort((a, b) => (b.ts ?? '').localeCompare(a.ts ?? ''));
 }
 
 /** Telemetry cache: shared across all hook instances for the same serial.
@@ -325,53 +325,12 @@ export function useUnitTimeline(unitSerial: string): { events: TimelineEvent[]; 
   const [telemetryEvents, setTelemetryEvents] = useState<TimelineEvent[]>([]);
   const telemetryFetchedRef = useRef(false);
 
-  const fetchTelemetry = useCallback(async () => {
-    if (!isTelemetryConfigured || !supabaseTelemetry) return;
-
-    const cached = telemetryCache.get(unitSerial);
-    if (cached && Date.now() - cached.fetchedAt < TELEMETRY_TTL_MS) {
-      setTelemetryEvents(cached.events);
-      return;
-    }
-
-    const since = new Date(Date.now() - 14 * 24 * 3600_000).toISOString();
-    try {
-      const { data, error } = await supabaseTelemetry
-        .from('events')
-        .select('created_at, event_code, event_value')
-        .eq('serial_number', unitSerial)
-        .neq('event_code', 'OK')
-        .gte('created_at', since)
-        .order('created_at', { ascending: false })
-        .limit(50);
-      if (error) {
-        console.warn('UnitTimeline: telemetry fetch failed', error);
-        return;
-      }
-      if (!data) return;
-
-      const evts: TimelineEvent[] = (data as Array<{
-        created_at: string;
-        event_code: string | null;
-        event_value: string | number | null;
-      }>).map((row, idx) => ({
-        id: `telemetry-${idx}-${row.created_at}`,
-        ts: row.created_at,
-        kind: 'telemetry_event',
-        label: row.event_code ?? 'Telemetry event',
-        detail: row.event_value != null ? String(row.event_value) : undefined,
-        source: 'telemetry',
-      }));
-
-      telemetryCache.set(unitSerial, { events: evts, fetchedAt: Date.now() });
-      setTelemetryEvents(evts);
-    } catch (e) {
-      console.warn('UnitTimeline: telemetry fetch threw', e);
-    }
-  }, [unitSerial]);
-
   useEffect(() => {
     if (!unitSerial) { setOtherLoading(false); return; }
+
+    // Clear stale telemetry from a previous serial immediately so the
+    // previous unit's events don't flash while the new serial loads.
+    setTelemetryEvents([]);
 
     let cancelled = false;
     telemetryFetchedRef.current = false;
@@ -379,13 +338,19 @@ export function useUnitTimeline(unitSerial: string): { events: TimelineEvent[]; 
     (async () => {
       const collected: TimelineEvent[] = [];
 
+      // Fetch all 4 sources in parallel — each is independent.
+      const [ticketsResult, returnsResult, unitRowResult, fulfillmentResult] = await Promise.all([
+        supabase.from('service_tickets').select('id, created_at, category, status, closed_at').eq('unit_serial', unitSerial),
+        supabase.from('returns').select('id, created_at, received_at, reason, status').eq('unit_serial', unitSerial),
+        supabase.from('units').select('created_at, electrical_check, mechanical_check, shipped_at, status, status_updated_at, test_report_uploaded_at').eq('serial', unitSerial).maybeSingle(),
+        supabase.from('fulfillment_log').select('id, shipping_date, source_tab').eq('serial_number', unitSerial),
+      ]);
+
+      if (cancelled) return;
+
       // ── 2. service_tickets ───────────────────────────────────────────────
-      const { data: tickets } = await supabase
-        .from('service_tickets')
-        .select('id, created_at, category, status, closed_at')
-        .eq('unit_serial', unitSerial);
-      if (!cancelled && tickets) {
-        for (const t of tickets as Array<{
+      if (ticketsResult.data) {
+        for (const t of ticketsResult.data as Array<{
           id: string;
           created_at: string;
           category: string | null;
@@ -414,12 +379,8 @@ export function useUnitTimeline(unitSerial: string): { events: TimelineEvent[]; 
       }
 
       // ── 3. returns ───────────────────────────────────────────────────────
-      const { data: returns } = await supabase
-        .from('returns')
-        .select('id, created_at, received_at, reason, status')
-        .eq('unit_serial', unitSerial);
-      if (!cancelled && returns) {
-        for (const r of returns as Array<{
+      if (returnsResult.data) {
+        for (const r of returnsResult.data as Array<{
           id: string;
           created_at: string;
           received_at: string | null;
@@ -442,12 +403,8 @@ export function useUnitTimeline(unitSerial: string): { events: TimelineEvent[]; 
       // The unit_test_reports migration added columns to the units table,
       // not a separate table. We derive built / qc_passed / qc_failed /
       // shipped / quarantined events from the units row itself.
-      const { data: unitRow } = await supabase
-        .from('units')
-        .select('created_at, electrical_check, mechanical_check, shipped_at, status, status_updated_at, test_report_uploaded_at')
-        .eq('serial', unitSerial)
-        .maybeSingle();
-      if (!cancelled && unitRow) {
+      const unitRow = unitRowResult.data;
+      if (unitRow) {
         const u = unitRow as {
           created_at: string;
           electrical_check: string | null;
@@ -515,13 +472,9 @@ export function useUnitTimeline(unitSerial: string): { events: TimelineEvent[]; 
         }
       }
 
-      // ── 5. fulfillment_log ───────────────────────────────────────────────
-      const { data: fulfillment } = await supabase
-        .from('fulfillment_log')
-        .select('id, shipping_date, source_tab')
-        .eq('serial_number', unitSerial);
-      if (!cancelled && fulfillment) {
-        for (const f of fulfillment as Array<{
+      // ── 5. fulfillment_log (result from Promise.all) ─────────────────────
+      if (fulfillmentResult.data) {
+        for (const f of fulfillmentResult.data as Array<{
           id: string;
           shipping_date: string | null;
           source_tab: string | null;
@@ -540,20 +493,52 @@ export function useUnitTimeline(unitSerial: string): { events: TimelineEvent[]; 
         }
       }
 
-      if (!cancelled) {
-        setOtherEvents(collected);
-        setOtherLoading(false);
-      }
+      setOtherEvents(collected);
+      setOtherLoading(false);
 
-      // Fetch telemetry after the main data (non-blocking)
-      if (!cancelled && !telemetryFetchedRef.current) {
+      // Fetch telemetry after the main data (non-blocking, 60s cache)
+      if (!telemetryFetchedRef.current && isTelemetryConfigured && supabaseTelemetry) {
         telemetryFetchedRef.current = true;
-        void fetchTelemetry();
+        const cached = telemetryCache.get(unitSerial);
+        if (cached && Date.now() - cached.fetchedAt < TELEMETRY_TTL_MS) {
+          setTelemetryEvents(cached.events);
+        } else {
+          const since = new Date(Date.now() - 14 * 24 * 3600_000).toISOString();
+          supabaseTelemetry
+            .from('events')
+            .select('created_at, event_code, event_value')
+            .eq('serial_number', unitSerial)
+            .neq('event_code', 'OK')
+            .gte('created_at', since)
+            .order('created_at', { ascending: false })
+            .limit(50)
+            .then(({ data, error }) => {
+              if (cancelled || error || !data) {
+                if (error) console.warn('UnitTimeline: telemetry fetch failed', error);
+                return;
+              }
+              const evts: TimelineEvent[] = (data as Array<{
+                created_at: string;
+                event_code: string | null;
+                event_value: string | number | null;
+              }>).map((row) => ({
+                id: `telemetry-${row.created_at}-${row.event_code ?? 'evt'}`,
+                ts: row.created_at,
+                kind: 'telemetry_event' as const,
+                label: row.event_code ?? 'Telemetry event',
+                detail: row.event_value != null ? String(row.event_value) : undefined,
+                source: 'telemetry' as const,
+              }));
+              telemetryCache.set(unitSerial, { events: evts, fetchedAt: Date.now() });
+              if (!cancelled) setTelemetryEvents(evts);
+            })
+            .catch(e => console.warn('UnitTimeline: telemetry fetch threw', e));
+        }
       }
     })();
 
     return () => { cancelled = true; };
-  }, [unitSerial, fetchTelemetry]);
+  }, [unitSerial]);
 
   // ── Map activity log entries to TimelineEvents ───────────────────────────
   const activityEvents = useMemo<TimelineEvent[]>(() =>
