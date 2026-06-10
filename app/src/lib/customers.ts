@@ -35,9 +35,52 @@ export type Customer = {
   journey_stage_override: string | null;
   journey_stage_override_at: string | null;
   journey_stage_override_by: string | null;
+  first_touch_source: string | null;
+  first_touch_campaign_id: string | null;
+  first_touch_at: string | null;
+  last_touch_source: string | null;
+  last_touch_campaign_id: string | null;
+  last_touch_at: string | null;
   created_at: string;
   updated_at: string;
 };
+
+export function parseUtm(
+  landingUrl: string | null | undefined,
+): { source: string | null; campaign: string | null } {
+  if (!landingUrl) return { source: null, campaign: null };
+  try {
+    const url = new URL(landingUrl);
+    const source = url.searchParams.get('utm_source');
+    const campaign = url.searchParams.get('utm_campaign');
+    if (!source) return { source: 'shopify_direct', campaign: null };
+    return { source, campaign };
+  } catch {
+    return { source: null, campaign: null };
+  }
+}
+
+export async function updateLastTouch(
+  customerId: string,
+  source: string,
+  campaignId: string | null,
+): Promise<void> {
+  const { error } = await supabase
+    .from('customers')
+    .update({
+      last_touch_source: source,
+      last_touch_campaign_id: campaignId,
+      last_touch_at: new Date().toISOString(),
+    })
+    .eq('id', customerId);
+  if (error) throw error;
+  await logAction(
+    'customer_last_touch_updated',
+    customerId,
+    `source=${source} campaign=${campaignId ?? 'none'}`,
+    { entityType: 'customer', entityId: customerId },
+  );
+}
 
 export type FuState =
   | 'overdue_fu1' | 'overdue_fu2'
