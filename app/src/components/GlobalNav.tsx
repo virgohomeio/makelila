@@ -1,6 +1,7 @@
 import { Link, NavLink } from 'react-router-dom';
 import styles from './GlobalNav.module.css';
 import { UserBadge } from './UserBadge';
+import { useAuth } from '../lib/auth';
 
 const MODULES = [
   { path: '/dashboard',     label: 'Dashboard' },
@@ -12,10 +13,20 @@ const MODULES = [
   { path: '/stock',         label: 'Stock' },
   { path: '/customers',     label: 'Customers' },
   { path: '/templates',     label: 'Templates' },
+  { path: '/marketing',     label: 'Marketing' },
   { path: '/activity-log',  label: 'Activity Log' },
 ];
 
+const MARKETING_ROLES = ['pedrum@virgohome.io', 'huayi@virgohome.io', 'george@virgohome.io'];
+
 export function GlobalNav() {
+  const { user } = useAuth();
+  const userEmail = user?.email ?? '';
+
+  const visibleModules = MODULES.filter(m =>
+    m.path !== '/marketing' || MARKETING_ROLES.includes(userEmail.toLowerCase())
+  );
+
   return (
     <nav className={styles.nav}>
       <Link to="/" className={styles.brand} aria-label="Home">
@@ -26,7 +37,7 @@ export function GlobalNav() {
         />
         <span className={styles.brandWordmark}>makelila</span>
       </Link>
-      {MODULES.map(m => (
+      {visibleModules.map(m => (
         <NavLink
           key={m.path}
           to={m.path}
