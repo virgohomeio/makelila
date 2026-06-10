@@ -32,6 +32,8 @@ type ShopifyOrder = {
   email?: string | null;
   phone?: string | null;
   created_at?: string | null;
+  landing_site?: string | null;
+  landing_site_ref?: string | null;
   currency?: string | null;           // shop/settlement currency, e.g. "USD"
   presentment_currency?: string | null; // what the customer was charged in, e.g. "CAD"
   total_price?: string | null;
@@ -182,6 +184,19 @@ function mapOrder(
   };
 }
 
+function parseUtm(landingUrl: string | null | undefined): { source: string | null; campaign: string | null } {
+  if (!landingUrl) return { source: null, campaign: null };
+  try {
+    const url = new URL(landingUrl);
+    const source = url.searchParams.get('utm_source');
+    const campaign = url.searchParams.get('utm_campaign');
+    if (!source) return { source: 'shopify_direct', campaign: null };
+    return { source, campaign };
+  } catch {
+    return { source: null, campaign: null };
+  }
+}
+
 serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -237,10 +252,12 @@ serve(async (req: Request) => {
   // 3. Map + split mapped vs. skipped
   const mapped: MappedOrder[] = [];
   const skipped: Array<{ order_ref: string; error: string }> = [];
+  // Keep the raw Shopify order by ref so we can access landing_site for UTM backfill.
+  const rawByRef = new Map<string, ShopifyOrder>();
   for (const o of orders ?? []) {
     const result = mapOrder(o, remotePrefixes);
     if ('error' in result) skipped.push(result);
-    else mapped.push(result);
+    else { mapped.push(result); rawByRef.set(o.name, o); }
   }
 
   // 4. Insert new orders (ignore dupes), then refresh Shopify-sourced fields
@@ -275,6 +292,20 @@ serve(async (req: Request) => {
     }
     if (data && data.length > 0) {
       imported++;
+      // Backfill first_touch attribution on the customer row (only when not yet set).
+      const raw = rawByRef.get(m.order_ref);
+      const utm = parseUtm(raw?.landing_site ?? raw?.landing_site_ref ?? null);
+      if (utm.source && m.customer_email) {
+        await admin
+          .from('customers')
+          .update({
+            first_touch_source: utm.source,
+            first_touch_campaign_id: utm.campaign,
+            first_touch_at: raw?.created_at ?? new Date().toISOString(),
+          })
+          .eq('email', m.customer_email.toLowerCase())
+          .is('first_touch_source', null);
+      }
       continue;
     }
 
