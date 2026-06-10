@@ -56,6 +56,17 @@ describe('computeCoverageState', () => {
     expect(computeCoverageState(reg)).toBe('expired');
   });
 
+  it('returns in_warranty for replacement_no_warranty shipped today (same-day coverage_end)', () => {
+    const todayStr = new Date().toLocaleDateString('en-CA');
+    const reg = makeReg({
+      coverage_tier: 'replacement_no_warranty',
+      coverage_start: todayStr,
+      coverage_end: todayStr,
+    });
+    // A unit shipped today should not show as expired the same day
+    expect(computeCoverageState(reg)).toBe('in_warranty');
+  });
+
   it('returns voided when voided_at is set', () => {
     const reg = makeReg({ voided_at: new Date().toISOString(), voided_reason: 'test' });
     expect(computeCoverageState(reg)).toBe('voided');

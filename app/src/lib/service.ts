@@ -1057,14 +1057,16 @@ export interface WarrantyRegistration {
   voided_reason: string | null;
   voided_at: string | null;
   registered_at: string;
+  registered_by: string | null;
 }
 
 export function computeCoverageState(reg: WarrantyRegistration | null): CoverageState {
   if (!reg) return 'no_registration';
   if (reg.voided_at) return 'voided';
-  const now = new Date();
-  const end = new Date(reg.coverage_end);
-  if (end < now) return 'expired';
+  // Compare date strings directly — coverage_end is YYYY-MM-DD and new Date() parses
+  // date-only strings as UTC midnight, which appears "past" in any non-UTC+ timezone.
+  const todayStr = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD in local time
+  if (reg.coverage_end < todayStr) return 'expired';
   return 'in_warranty';
 }
 
