@@ -3,6 +3,7 @@ import {
   useParts, usePartShipments, adjustPartStock, recordPartShipment,
   type Part, type PartCategory,
 } from '../../lib/parts';
+import { useReplacementOrders } from '../../lib/orders';
 import { useCustomers, type Customer } from '../../lib/customers';
 import styles from './Stock.module.css';
 
@@ -12,6 +13,7 @@ export function PartsTab() {
   const { parts, loading: pLoading } = useParts();
   const { shipments, loading: sLoading } = usePartShipments();
   const { customers, loading: cLoading } = useCustomers();
+  const { orders: replacementOrders } = useReplacementOrders();
   const [catFilter, setCatFilter] = useState<CatFilter>('all');
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -29,6 +31,24 @@ export function PartsTab() {
     }
     return m;
   }, [shipments]);
+
+  // Demand = quantity of each part queued up across un-shipped replacement
+  // orders (Service > Replacement). Drawn from line_items that reference a
+  // part_id; description-only legacy rows can't be attributed to a SKU.
+  const demandByPart = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const o of replacementOrders) {
+      if (o.shipped_at || o.delivered_at) continue; // only still-queued orders
+      for (const li of (o.line_items ?? []) as Array<Record<string, unknown>>) {
+        const kind = li.kind as string | undefined;
+        if (kind === 'part' || kind === 'part_pending') {
+          const pid = li.part_id as string | undefined;
+          if (pid) m.set(pid, (m.get(pid) ?? 0) + ((li.qty as number) ?? 1));
+        }
+      }
+    }
+    return m;
+  }, [replacementOrders]);
 
   const stats = useMemo(() => {
     const replacement = parts.filter(p => p.category === 'replacement');
@@ -97,6 +117,7 @@ export function PartsTab() {
               <th>Category</th>
               <th>Supplier</th>
               <th className={styles.numCol}>On hand</th>
+              <th className={styles.numCol}>Demand</th>
               <th className={styles.numCol}>Reorder at</th>
               <th className={styles.numCol}>Cost</th>
               <th className={styles.numCol}>Shipped</th>
@@ -121,6 +142,15 @@ export function PartsTab() {
                     {p.category === 'replacement'
                       ? <strong className={low ? styles.lowText : ''}>{p.on_hand}</strong>
                       : <span className={styles.muted}>n/a</span>}
+                  </td>
+                  <td className={styles.numCol}>
+                    {(() => {
+                      const demand = demandByPart.get(p.id) ?? 0;
+                      if (demand === 0) return <span className={styles.muted}>—</span>;
+                      // Flag a shortfall: more queued than on hand (replacement parts).
+                      const short = p.category === 'replacement' && demand > p.on_hand;
+                      return <strong className={short ? styles.lowText : ''} title={short ? 'Queued demand exceeds on-hand stock' : 'Queued for replacement'}>{demand}</strong>;
+                    })()}
                   </td>
                   <td className={styles.numCol}>{p.reorder_point > 0 ? p.reorder_point : <span className={styles.muted}>—</span>}</td>
                   <td className={styles.numCol}>
