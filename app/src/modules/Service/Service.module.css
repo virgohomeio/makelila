@@ -1004,3 +1004,31 @@
   position: relative;
   display: inline-block;
 }
+
+/* J6: Telemetry auto badge — amber pill shown in source column */
+.telemetryAutoBadge {
+  display: inline-block;
+  background: #fffaf0;
+  color: #c05621;
+  border: 1px solid #fbd38d;
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.telemetryAutoBanner {
+  margin: 8px 0;
+  padding: 10px 14px;
+  background: #fffaf0;
+  border-left: 4px solid #c05621;
+  border-radius: 4px;
+  font-size: 13px;
+  color: #7b341e;
+}
+.telemetryAutoBannerDetail {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #9c4221;
+  opacity: 0.85;
+}

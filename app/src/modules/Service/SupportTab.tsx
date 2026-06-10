@@ -21,7 +21,7 @@ export function SupportTab() {
   const { tickets, loading } = useServiceTickets('support');
   const { customers } = useCustomers();
   const [statusFilter, setStatusFilter] = useState<TicketStatus | 'all'>('all');
-  const [sourceFilter, setSourceFilter] = useState<'all' | 'customer_form' | 'hubspot' | 'gmail' | 'quo'>('all');
+  const [sourceFilter, setSourceFilter] = useState<'all' | 'customer_form' | 'hubspot' | 'gmail' | 'quo' | 'telemetry_auto'>('all');
   const [topicFilter, setTopicFilter] = useState<TicketTopic | 'all'>('all');
   const [areaFilter, setAreaFilter] = useState<IssueArea | 'all' | 'none'>('all');
   const [q, setQ] = useState('');
@@ -135,6 +135,10 @@ export function SupportTab() {
           className={`${styles.chip} ${sourceFilter === 'hubspot' ? styles.chipActive : ''}`}
           onClick={() => setSourceFilter('hubspot')}
         >HubSpot</button>
+        <button
+          className={`${styles.chip} ${sourceFilter === 'telemetry_auto' ? styles.chipActive : ''}`}
+          onClick={() => setSourceFilter('telemetry_auto')}
+        >Telemetry-auto</button>
         <input
           className={styles.search}
           placeholder="Search ticket #, subject, customer, summary…"
@@ -513,7 +517,12 @@ function TicketRow({ t, selected, onClick }: { t: ServiceTicket; selected: boole
         {t.summary && <div className={styles.rowSummary}>{t.summary}</div>}
       </td>
       <td>{t.topic ? <span className={styles.topicPill}>{topicLabel(t.topic)}</span> : '—'}</td>
-      <td>{sourceLabel(t.source)}</td>
+      <td>
+        {t.source === 'telemetry_auto'
+          ? <span className={styles.telemetryAutoBadge}>Telemetry auto</span>
+          : sourceLabel(t.source)
+        }
+      </td>
       <td><span className={styles.pill} style={{ background: '#f7fafc', color: p.color }}>{p.label}</span></td>
       <td><SlaChipPill label={sla.label} color={sla.color} /></td>
       <td>

@@ -11,6 +11,8 @@ import styles from './Service.module.css';
 
 type DispositionFilter = 'all' | 'untriaged' | InboxDisposition;
 
+type InboxSourceFilter = 'all_sources' | 'telemetry_auto';
+
 const FILTERS: { key: DispositionFilter; label: string }[] = [
   { key: 'untriaged', label: 'Untriaged' },
   { key: 'all',       label: 'All' },
@@ -19,9 +21,15 @@ const FILTERS: { key: DispositionFilter; label: string }[] = [
   { key: 'dismissed', label: 'Dismissed' },
 ];
 
+const SOURCE_FILTERS: { key: InboxSourceFilter; label: string }[] = [
+  { key: 'all_sources',    label: 'Any source' },
+  { key: 'telemetry_auto', label: 'Telemetry-auto' },
+];
+
 function channelIcon(source: ServiceTicket['source']): string {
   if (source === 'quo') return '☎';
   if (source === 'gmail') return '✉';
+  if (source === 'telemetry_auto') return '⚡';
   return '?';
 }
 
@@ -38,7 +46,11 @@ function relativeAge(iso: string | null): string {
 
 export function InboxTab() {
   const [filter, setFilter] = useState<DispositionFilter>('untriaged');
-  const { rows, loading } = useInbox(filter);
+  const [sourceFilter, setSourceFilter] = useState<InboxSourceFilter>('all_sources');
+  const { rows: allRows, loading } = useInbox(filter);
+  const rows = sourceFilter === 'telemetry_auto'
+    ? allRows.filter(r => r.source === 'telemetry_auto')
+    : allRows;
   const [promoteId, setPromoteId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const isMobile = useIsMobile();
@@ -180,6 +192,14 @@ export function InboxTab() {
             aria-label={`Filter: ${f.label}`}
           >{f.label}</button>
         ))}
+        {SOURCE_FILTERS.map(f => (
+          <button
+            key={f.key}
+            className={`${styles.chip} ${sourceFilter === f.key ? styles.chipActive : ''}`}
+            onClick={() => setSourceFilter(f.key)}
+            aria-label={`Source filter: ${f.label}`}
+          >{f.label}</button>
+        ))}
       </div>
 
       {error && <div className={styles.syncMessage}>{error}</div>}
@@ -221,7 +241,12 @@ export function InboxTab() {
                   )}
                 </td>
                 <td>{relativeAge(r.last_message_at)}</td>
-                <td>{SOURCE_LABEL[r.source]}</td>
+                <td>
+                  {r.source === 'telemetry_auto'
+                    ? <span style={{ background: '#fffaf0', color: '#c05621', borderRadius: 4, padding: '1px 6px', fontSize: 11, fontWeight: 600 }}>Telemetry auto</span>
+                    : SOURCE_LABEL[r.source]
+                  }
+                </td>
                 <td><InboxSlaChip label={sla.label} color={sla.color} /></td>
                 <td>{r.inbox_disposition ?? '—'}</td>
                 <td style={{ textAlign: 'right' }}>
