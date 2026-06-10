@@ -410,6 +410,52 @@ export async function pushToKlaviyo(opts: {
   return json;
 }
 
+/** Upsert a single HubSpot contact into makelila.customers with insert-only
+ *  semantics for operator-curated fields:
+ *  - If the customer does NOT exist: insert name + phone + email + attribution.
+ *  - If the customer DOES exist: only write attribution fields (first_touch_source)
+ *    when they are currently null — never overwrite name or phone.
+ *
+ *  This is the authoritative client-side path for the HubSpot decommission
+ *  (Feature 10). The edge function `sync-hubspot-customers` applies the same
+ *  logic server-side. */
+export async function upsertHubSpotContact(hubspotContact: {
+  email: string;
+  name?: string | null;
+  phone?: string | null;
+  hs_analytics_source?: string | null;
+}): Promise<void> {
+  const { data: existing } = await supabase
+    .from('customers')
+    .select('id, name, phone')
+    .eq('email', hubspotContact.email)
+    .maybeSingle();
+
+  const safeFields: Record<string, unknown> = {
+    email: hubspotContact.email,
+    ...(hubspotContact.hs_analytics_source != null
+      ? { first_touch_source: hubspotContact.hs_analytics_source }
+      : {}),
+  };
+
+  if (!existing) {
+    if (hubspotContact.name) safeFields['name'] = hubspotContact.name;
+    if (hubspotContact.phone) safeFields['phone'] = hubspotContact.phone;
+  }
+
+  const { error } = await supabase
+    .from('customers')
+    .upsert(safeFields, { onConflict: 'email', ignoreDuplicates: false });
+
+  if (error) throw new Error(error.message);
+
+  await logAction(
+    'hubspot_contact_synced',
+    hubspotContact.email,
+    existing ? 'updated (attribution only)' : 'inserted (new customer)',
+  );
+}
+
 /** Trigger the sync-hubspot-customers edge function. Returns the response
  *  body so the UI can show a "N new, M fields filled" toast. The sync inserts
  *  net-new customers, fills blank columns on existing rows, and refreshes
