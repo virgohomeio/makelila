@@ -26,6 +26,7 @@ const Stock       = lazy(() => import('./modules/Stock'));
 const Customers   = lazy(() => import('./modules/Customers'));
 const Templates   = lazy(() => import('./modules/Templates'));
 const ActivityLog = lazy(() => import('./modules/ActivityLog'));
+const Marketing   = lazy(() => import('./modules/Marketing'));
 
 function LazyRoute({ children }: { children: React.ReactNode }) {
   return (
@@ -91,6 +92,7 @@ export default function App() {
             <Route path="stock"         element={<LazyRoute><Stock /></LazyRoute>} />
             <Route path="customers"     element={<LazyRoute><Customers /></LazyRoute>} />
             <Route path="templates"     element={<LazyRoute><Templates /></LazyRoute>} />
+            <Route path="marketing"     element={<LazyRoute><Marketing /></LazyRoute>} />
             <Route path="activity-log"  element={<LazyRoute><ActivityLog /></LazyRoute>} />
             <Route path="dashboard"     element={<DashboardRoute />} />
           </Route>
