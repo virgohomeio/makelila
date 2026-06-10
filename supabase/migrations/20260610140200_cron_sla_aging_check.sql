@@ -49,11 +49,13 @@ select cron.schedule(
          and now() > first_response_due_at
       returning id, ticket_number, priority, sla_policy_id
     )
-    insert into public.activity_log (entity_type, entity_id, action, detail, created_at)
+    insert into public.activity_log (user_id, type, entity, entity_type, entity_id, detail, ts)
     select
-      'ticket',
-      nb.id,
+      null,
       'sla_first_response_breached',
+      nb.ticket_number,
+      'ticket',
+      nb.id::text,
       'SLA first-response deadline breached; priority bumped to ' || nb.priority,
       now()
     from newly_breached nb;
@@ -72,11 +74,13 @@ select cron.schedule(
          and now() > resolution_due_at
       returning id, ticket_number, priority
     )
-    insert into public.activity_log (entity_type, entity_id, action, detail, created_at)
+    insert into public.activity_log (user_id, type, entity, entity_type, entity_id, detail, ts)
     select
-      'ticket',
-      rb.id,
+      null,
       'sla_resolution_breached',
+      rb.ticket_number,
+      'ticket',
+      rb.id::text,
       'SLA resolution deadline breached; priority bumped to ' || rb.priority,
       now()
     from resolution_breached rb;
