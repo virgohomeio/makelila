@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   useServiceTickets, createTicket, syncGmailTickets,
   STATUS_META, TICKET_STATUSES, TOPIC_LABEL,
-  statusMeta, priorityMeta, sourceLabel, topicLabel,
+  statusMeta, priorityMeta, sourceLabel, topicLabel, slaChip,
   ISSUE_AREAS, ISSUE_AREA_LABEL,
   type TicketStatus, type TicketPriority, type TicketTopic, type ServiceTicket,
   type IssueArea,
@@ -213,6 +213,7 @@ export function SupportTab() {
               <th>Topic</th>
               <th>Source</th>
               <th>Priority</th>
+              <th>SLA</th>
               <th>Status</th>
               <th>Owner</th>
               <th></th>
@@ -482,6 +483,7 @@ function Kpi({ label, value }: { label: string; value: number }) {
 function TicketRow({ t, selected, onClick }: { t: ServiceTicket; selected: boolean; onClick: () => void }) {
   const s = statusMeta(t.status);
   const p = priorityMeta(t.priority);
+  const sla = slaChip(t);
   // Age: prefer last_message_at (gmail-aware) then created_at.
   const lastTs = t.last_message_at ?? t.created_at;
   const ageHours = (Date.now() - new Date(lastTs).getTime()) / 3_600_000;
@@ -513,6 +515,7 @@ function TicketRow({ t, selected, onClick }: { t: ServiceTicket; selected: boole
       <td>{t.topic ? <span className={styles.topicPill}>{topicLabel(t.topic)}</span> : '—'}</td>
       <td>{sourceLabel(t.source)}</td>
       <td><span className={styles.pill} style={{ background: '#f7fafc', color: p.color }}>{p.label}</span></td>
+      <td><SlaChipPill label={sla.label} color={sla.color} /></td>
       <td>
         <span className={styles.pill} style={{ background: s.bg, color: s.color }}>{s.label}</span>
         {t.status === 'closed' && t.closed_at && (
@@ -527,6 +530,18 @@ function TicketRow({ t, selected, onClick }: { t: ServiceTicket; selected: boole
       </td>
     </tr>
   );
+}
+
+const SLA_CHIP_STYLE: Record<string, { background: string; color: string }> = {
+  green: { background: '#f0fff4', color: '#276749' },
+  amber: { background: '#fffaf0', color: '#c05621' },
+  red:   { background: '#fff5f5', color: '#c53030' },
+  grey:  { background: '#edf2f7', color: '#718096' },
+};
+
+function SlaChipPill({ label, color }: { label: string; color: 'green' | 'amber' | 'red' | 'grey' }) {
+  const style = SLA_CHIP_STYLE[color];
+  return <span className={styles.pill} style={style}>{label}</span>;
 }
 
 function formatAge(hours: number): string {
