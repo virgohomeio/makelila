@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { CacDashboard } from './CacDashboard';
+import { SystemOfRecordCard } from './SystemOfRecordCard';
 import { useFbCampaigns, triggerFbSync } from '../../lib/marketing/facebook';
 import { useKlaviyoSyncStatus, triggerKlaviyoSync } from '../../lib/marketing/klaviyo';
 import styles from './Marketing.module.css';
@@ -167,6 +168,7 @@ export default function Marketing() {
               </tbody>
             </table>
           )}
+          <SystemOfRecordCard />
         </>
       )}
     </div>
