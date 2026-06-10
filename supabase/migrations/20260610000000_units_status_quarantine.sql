@@ -8,7 +8,7 @@
 
 alter table public.units drop constraint if exists units_status_check;
 alter table public.units add constraint units_status_check check (status in (
-  'in-production','inbound','ca-test',
+  'in-production','inbound','ca-test','cn-test',
   'ready','reserved','rework',
   'shipped','team-test','scrap','lost','quarantine'
 ));
