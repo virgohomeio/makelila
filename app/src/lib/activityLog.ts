@@ -117,6 +117,9 @@ export async function logAction(
     entityId?: string;
     unitSerial?: string;
   },
+  opts?: {
+    klaviyoEvent?: string;
+  },
 ): Promise<void> {
   const { data } = await supabase.auth.getUser();
   const user = data.user;
@@ -132,6 +135,12 @@ export async function logAction(
     unit_serial: refs?.unitSerial ?? null,
   });
   if (error) throw error;
+
+  if (opts?.klaviyoEvent) {
+    void supabase.functions.invoke('klaviyo-track', {
+      body: { event: opts.klaviyoEvent, email: entity },
+    }).catch((e: unknown) => console.error('klaviyo-track fire-and-forget failed', e));
+  }
 }
 
 /** Per-entity timeline — backs Junaid's UnitTimeline.tsx and any

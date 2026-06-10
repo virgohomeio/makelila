@@ -1,18 +1,20 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { insertMock, fromMock, getUserMock } = vi.hoisted(() => {
+const { insertMock, fromMock, getUserMock, invokeMock } = vi.hoisted(() => {
   const insertMock = vi.fn();
   const fromMock = vi.fn(() => ({ insert: insertMock }));
   const getUserMock = vi.fn<() => Promise<{ data: { user: { id: string } | null } }>>(
     () => Promise.resolve({ data: { user: { id: 'user-1' } } }),
   );
-  return { insertMock, fromMock, getUserMock };
+  const invokeMock = vi.fn().mockResolvedValue({ data: {}, error: null });
+  return { insertMock, fromMock, getUserMock, invokeMock };
 });
 
 vi.mock('./supabase', () => ({
   supabase: {
     from: fromMock,
     auth: { getUser: getUserMock },
+    functions: { invoke: invokeMock },
     channel: vi.fn(() => ({
       on: vi.fn().mockReturnThis(),
       subscribe: vi.fn().mockReturnThis(),
@@ -28,6 +30,8 @@ describe('logAction', () => {
     insertMock.mockReset();
     insertMock.mockResolvedValue({ data: null, error: null });
     fromMock.mockClear();
+    invokeMock.mockClear();
+    invokeMock.mockResolvedValue({ data: {}, error: null });
   });
 
   it('inserts row with current user_id, type, entity, detail (entity refs null when omitted)', async () => {
@@ -76,5 +80,32 @@ describe('logAction', () => {
       entity_id: 'ret-uuid',
       unit_serial: null,
     }));
+  });
+
+  it('fires klaviyo-track edge function when opts.klaviyoEvent is provided', async () => {
+    await logAction('order_fulfilled', 'customer@example.com', 'shipped', undefined, {
+      klaviyoEvent: 'Order Fulfilled',
+    });
+    expect(invokeMock).toHaveBeenCalledWith(
+      'klaviyo-track',
+      expect.objectContaining({
+        body: expect.objectContaining({ event: 'Order Fulfilled', email: 'customer@example.com' }),
+      }),
+    );
+  });
+
+  it('does NOT call klaviyo-track when opts.klaviyoEvent is absent', async () => {
+    await logAction('order_created', 'customer@example.com', 'new order');
+    const klaviyoCalls = invokeMock.mock.calls.filter(c => c[0] === 'klaviyo-track');
+    expect(klaviyoCalls).toHaveLength(0);
+  });
+
+  it('does NOT throw when klaviyo-track invocation fails', async () => {
+    invokeMock.mockRejectedValueOnce(new Error('Klaviyo down'));
+    await expect(
+      logAction('order_fulfilled', 'customer@example.com', 'shipped', undefined, {
+        klaviyoEvent: 'Order Fulfilled',
+      }),
+    ).resolves.not.toThrow();
   });
 });
