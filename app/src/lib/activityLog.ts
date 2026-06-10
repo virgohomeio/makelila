@@ -120,6 +120,17 @@ export async function logAction(
   opts?: {
     klaviyoEvent?: string;
     klaviyoEmail?: string;  // if provided, used instead of entity as the Klaviyo profile email
+    facebookEvent?: {
+      event_name: string;
+      event_time: number;
+      email?: string;
+      phone?: string;
+      name?: string;
+      value?: number;
+      currency?: string;
+      order_id?: string;
+      event_id?: string;
+    };
   },
 ): Promise<void> {
   const { data } = await supabase.auth.getUser();
@@ -141,6 +152,11 @@ export async function logAction(
     void supabase.functions.invoke('klaviyo-track', {
       body: { event: opts.klaviyoEvent, email: opts.klaviyoEmail ?? entity },
     }).catch((e: unknown) => console.error('klaviyo-track fire-and-forget failed', e));
+  }
+
+  if (opts?.facebookEvent) {
+    void supabase.functions.invoke('facebook-capi', { body: opts.facebookEvent })
+      .catch((e: unknown) => console.error('facebook-capi fire-and-forget failed', e));
   }
 }
 

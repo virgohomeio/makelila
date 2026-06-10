@@ -416,7 +416,17 @@ export async function submitRefundRequest(input: {
   if (error) throw error;
   await logAction('refund_submitted', input.customer_name, `$${input.refund_amount_usd} (${input.reason ?? 'no reason'})`,
     undefined,
-    { klaviyoEvent: 'Refund Submitted', ...(input.customer_email ? { klaviyoEmail: input.customer_email } : {}) });
+    {
+      klaviyoEvent: 'Refund Submitted',
+      ...(input.customer_email ? { klaviyoEmail: input.customer_email } : {}),
+      facebookEvent: {
+        event_name: 'StartTrial',
+        event_time: Math.floor(Date.now() / 1000),
+        email: input.customer_email ?? undefined,
+        order_id: input.order_id,
+        event_id: `return-${input.order_id ?? Date.now()}`,
+      },
+    });
 }
 
 export async function managerApprove(id: string, note?: string): Promise<void> {

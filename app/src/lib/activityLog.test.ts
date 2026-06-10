@@ -122,3 +122,35 @@ describe('logAction', () => {
     );
   });
 });
+
+describe('logAction — facebookEvent', () => {
+  it('invokes facebook-capi when opts.facebookEvent is provided', async () => {
+    invokeMock.mockResolvedValueOnce({ data: { events_received: 1 }, error: null });
+
+    await logAction('order_fulfilled', 'customer@example.com', 'order shipped', undefined, {
+      facebookEvent: {
+        event_name: 'Purchase',
+        event_time: 1717776000,
+        email: 'customer@example.com',
+        value: 1396,
+        currency: 'CAD',
+        order_id: 'ord-1',
+        event_id: 'evt-1',
+      },
+    });
+
+    expect(invokeMock).toHaveBeenCalledWith(
+      'facebook-capi',
+      expect.objectContaining({
+        body: expect.objectContaining({ event_name: 'Purchase' }),
+      }),
+    );
+  });
+
+  it('does not invoke facebook-capi when facebookEvent is absent', async () => {
+    invokeMock.mockClear();
+    await logAction('order_created', 'customer@example.com', 'new order');
+    const capiCalls = invokeMock.mock.calls.filter((c: unknown[]) => c[0] === 'facebook-capi');
+    expect(capiCalls).toHaveLength(0);
+  });
+});
