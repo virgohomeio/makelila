@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useReplacementOrders, type Order } from '../../lib/orders';
 import { isReplacementLine } from '../../lib/orders';
+import { replacementItemTags, replacementStageTag, type StageTag } from '../../lib/replacementTags';
 import { useBatches, type Batch } from '../../lib/stock';
 import { useServiceTickets, type TicketTopic } from '../../lib/service';
 import { TicketDetailPanel } from './TicketDetailPanel';
@@ -56,14 +57,14 @@ function summarize(line_items: Order['line_items']): string {
   return segs.join(' + ') || '—';
 }
 
-const STAGES: { key: Stage | 'all'; label: string }[] = [
-  { key: 'all',             label: 'All' },
-  { key: 'pending',         label: 'Pending' },
-  { key: 'awaiting_batch',  label: 'Awaiting batch' },
-  { key: 'fulfilling',      label: 'Fulfilling' },
-  { key: 'shipped',         label: 'Shipped' },
-  { key: 'delivered',       label: 'Delivered' },
-  { key: 'closed',          label: 'Closed' },
+// Filter by the operator-facing item stage (spec 2026-06-08), not the pipeline
+// status. Every replacement is a unit (ready→Unit / pending→awaiting batch) or
+// parts/consumables.
+const STAGE_FILTERS: { key: 'all' | StageTag; label: string }[] = [
+  { key: 'all',                label: 'All' },
+  { key: 'Unit',               label: 'Unit' },
+  { key: 'awaiting batch',     label: 'awaiting batch' },
+  { key: 'Parts/Consumables',  label: 'Parts/Consumables' },
 ];
 
 // Backlog #41 — topics that signal "this ticket is asking for a replacement"
@@ -81,7 +82,7 @@ export default function ReplacementTab() {
   // Pull every support/repair ticket so we can filter for triage candidates.
   // useServiceTickets() with no arg returns all categories; we filter below.
   const { tickets } = useServiceTickets();
-  const [filter, setFilter] = useState<Stage | 'all'>('all');
+  const [filter, setFilter] = useState<'all' | StageTag>('all');
   const [openTicketId, setOpenTicketId] = useState<string | null>(null);
 
   const batchById = useMemo(() => {
@@ -89,6 +90,16 @@ export default function ReplacementTab() {
     for (const b of batches) m.set(b.id, b);
     return m;
   }, [batches]);
+
+  // A batch is "pending" (→ stage tag "awaiting batch") when it has no arrived
+  // stock yet, e.g. P100X. Unknown batches default to pending so a not-yet-
+  // synced future batch never mislabels as a ready Unit. (spec 2026-06-08)
+  const pendingBatchIds = useMemo(
+    () => new Set(batches.filter(b => b.arrived_at == null).map(b => b.id)),
+    [batches],
+  );
+  const isPendingBatch = (batch: string) =>
+    pendingBatchIds.has(batch) || !batchById.has(batch);
 
   // Backlog #41 — triage candidates: open service tickets whose topic flags
   // them as a likely replacement, and that don't yet have a replacement
@@ -105,10 +116,14 @@ export default function ReplacementTab() {
       .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
   }, [tickets]);
 
-  const filtered = useMemo(
-    () => orders.filter(o => filter === 'all' || stageFor(o) === filter),
-    [orders, filter],
-  );
+  const filtered = useMemo(() => {
+    if (filter === 'all') return orders;
+    return orders.filter(o => {
+      const tags = replacementItemTags(o);
+      const st = replacementStageTag(o, tags, b => pendingBatchIds.has(b) || !batchById.has(b));
+      return st === filter;
+    });
+  }, [orders, filter, pendingBatchIds, batchById]);
 
   const openTicket = useMemo(
     () => openTicketId ? tickets.find(t => t.id === openTicketId) ?? null : null,
@@ -181,7 +196,7 @@ export default function ReplacementTab() {
       <h3 className={styles.sectionHeading}>Replacement orders</h3>
 
       <div className={styles.filterRow}>
-        {STAGES.map(s => (
+        {STAGE_FILTERS.map(s => (
           <button key={s.key}
             className={`${styles.chip} ${filter === s.key ? styles.chipActive : ''}`}
             onClick={() => setFilter(s.key)}>{s.label}</button>
@@ -195,7 +210,7 @@ export default function ReplacementTab() {
           <thead>
             <tr>
               <th>Order #</th><th>Ticket</th><th>Customer</th><th>Items</th>
-              <th>Tracking</th><th>COGS</th><th>Stage</th><th>Days open</th>
+              <th>Tracking</th><th>COGS</th><th>Item Type</th><th>Days open</th>
             </tr>
           </thead>
           <tbody>
@@ -203,6 +218,8 @@ export default function ReplacementTab() {
               const daysOpen = Math.floor((now - new Date(o.created_at).getTime()) / 86400_000);
               const stage = stageFor(o);
               const batch = o.awaiting_batch_id ? batchById.get(o.awaiting_batch_id) : null;
+              const tags = replacementItemTags(o);
+              const stageTag = replacementStageTag(o, tags, isPendingBatch);
               return (
                 <tr key={o.id} className={styles.row}>
                   <td><a href="#/order-review">{o.order_ref}</a></td>
@@ -216,14 +233,12 @@ export default function ReplacementTab() {
                     ) : '—'}
                   </td>
                   <td>{o.customer_name}</td>
-                  <td>
-                    {stage === 'awaiting_batch' ? (
-                      <span className={styles.awaitingBatchTag} title={batch?.notes ?? ''}>
-                        Awaiting {o.awaiting_batch_id}
-                      </span>
-                    ) : (
-                      summarize(o.line_items)
-                    )}
+                  <td title={batch?.notes ?? undefined}>
+                    <div className={styles.tagRow}>
+                      {tags.length > 0
+                        ? tags.map(t => <span key={t} className={styles.itemTag}>{t}</span>)
+                        : <span className={styles.muted}>{summarize(o.line_items)}</span>}
+                    </div>
                   </td>
                   <td>
                     {o.tracking_num
@@ -233,9 +248,11 @@ export default function ReplacementTab() {
                       : <span className={styles.muted} title="No tracking yet — still to be shipped">—</span>}
                   </td>
                   <td>${(o.cogs_usd ?? 0).toFixed(2)}</td>
-                  <td>{stage === 'awaiting_batch' ? (
-                    <span className={styles.awaitingBatchTag}>awaiting batch</span>
-                  ) : stage}</td>
+                  <td>
+                    {stageTag
+                      ? <span className={styles.stageTag} data-stage={stageTag}>{stageTag}</span>
+                      : <span className={styles.muted}>{stage}</span>}
+                  </td>
                   <td>{daysOpen}</td>
                 </tr>
               );
