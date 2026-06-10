@@ -5,6 +5,7 @@ import {
   type Unit, type UnitStatus, type QcCheck,
 } from '../../lib/stock';
 import { signedReportUrl } from '../../lib/testReports';
+import { UnitTimeline } from '../../components/UnitTimeline';
 import styles from './Stock.module.css';
 
 export function UnitTable({ units }: { units: Unit[] }) {
@@ -386,6 +387,11 @@ function QcEditorModal({
             className={styles.modalInput}
             rows={4}
           />
+        </div>
+
+        <div className={styles.modalField}>
+          <label className={styles.modalLabel}>Unit history</label>
+          <UnitTimeline unitSerial={unit.serial} density="compact" />
         </div>
 
         <div className={styles.modalActions}>

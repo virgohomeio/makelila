@@ -33,9 +33,16 @@ vi.mock('./supabase', () => ({
     },
   },
 }));
-vi.mock('./activityLog', () => ({ logAction: logActionMock }));
+vi.mock('./activityLog', () => ({
+  logAction: logActionMock,
+  useActivityForEntity: vi.fn(() => ({ entries: [], loading: false })),
+}));
+vi.mock('./supabaseTelemetry', () => ({
+  isTelemetryConfigured: false,
+  supabaseTelemetry: null,
+}));
 
-import { updateUnitStatus } from './stock';
+import { updateUnitStatus, mergeTimelineEvents, type TimelineEvent } from './stock';
 
 // ── assignUnit quarantine guard (via fulfillment.ts) ─────────────────────────
 // Import separately so we can mock the units select independently.
@@ -193,5 +200,37 @@ describe('quarantine status metadata', () => {
     // Should NOT use the same red tones as rework/scrap/lost
     expect(STATUS_META['quarantine'].color).not.toBe(STATUS_META['rework'].color);
     expect(STATUS_META['quarantine'].bg).not.toBe(STATUS_META['rework'].bg);
+  });
+});
+
+// ── mergeTimelineEvents sort order ───────────────────────────────────────────
+
+describe('mergeTimelineEvents', () => {
+  function makeEvent(id: string, ts: string): TimelineEvent {
+    return { id, ts, kind: 'activity', label: id, source: 'activity_log' };
+  }
+
+  it('returns events sorted descending by ts', () => {
+    const input: TimelineEvent[] = [
+      makeEvent('a', '2026-01-01T00:00:00Z'),
+      makeEvent('c', '2026-03-01T00:00:00Z'),
+      makeEvent('b', '2026-02-01T00:00:00Z'),
+    ];
+    const result = mergeTimelineEvents(input);
+    expect(result.map(e => e.id)).toEqual(['c', 'b', 'a']);
+  });
+
+  it('does not mutate the input array', () => {
+    const input: TimelineEvent[] = [
+      makeEvent('x', '2026-01-01T00:00:00Z'),
+      makeEvent('y', '2026-06-01T00:00:00Z'),
+    ];
+    const originalOrder = input.map(e => e.id);
+    mergeTimelineEvents(input);
+    expect(input.map(e => e.id)).toEqual(originalOrder);
+  });
+
+  it('handles an empty array', () => {
+    expect(mergeTimelineEvents([])).toEqual([]);
   });
 });
