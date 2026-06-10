@@ -4,7 +4,7 @@ import { useCustomers, sendFollowupSms } from '../../lib/customers';
 import {
   type ServiceTicket, type TicketStatus, type IssueArea, type TicketCategory,
   STATUS_META, CATEGORY_META, PRIORITY_META, NEXT_STATUSES, TICKET_STATUSES,
-  statusMeta, priorityMeta, sourceLabel, topicLabel,
+  statusMeta, priorityMeta, sourceLabel, topicLabel, slaChip,
   ISSUE_AREAS, ISSUE_AREA_LABEL,
   updateTicketStatus, assignTicketOwner, setTicketPriority, setTicketIssueArea, setTicketCategory,
   setRepairFields, reclassifyTicket, deleteTicket, updateTicketSubject,
@@ -198,6 +198,10 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
       </div>
 
       <DeviceContextHeader unitSerial={ticket.unit_serial} currentTicketId={ticket.id} />
+
+      {ticket.sla_policy_id && (
+        <SlaDeadlines ticket={ticket} />
+      )}
 
       <div className={styles.detailBody}>
         <div className={styles.detailSection}>
@@ -563,6 +567,80 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
 
         {error && <div style={{ color: 'var(--color-error)', fontSize: 11 }}>{error}</div>}
       </div>
+    </div>
+  );
+}
+
+// ============================================================ SLA deadlines block
+// Shown below DeviceContextHeader when a ticket has an SLA policy attached.
+
+const SLA_DEADLINE_COLORS: Record<string, { color: string; bg: string }> = {
+  green:  { color: '#276749', bg: '#f0fff4' },
+  amber:  { color: '#c05621', bg: '#fffaf0' },
+  red:    { color: '#c53030', bg: '#fff5f5' },
+  grey:   { color: '#718096', bg: '#edf2f7' },
+};
+
+function slaDeadlineColor(dueAt: string | null, respondedAt: string | null): 'green' | 'amber' | 'red' | 'grey' {
+  if (!dueAt) return 'grey';
+  if (respondedAt) return 'green';
+  const msRemaining = new Date(dueAt).getTime() - Date.now();
+  if (msRemaining < 0) return 'red';
+  if (msRemaining < 15 * 60 * 1000) return 'amber';
+  return 'green';
+}
+
+function relativeDeadline(isoStr: string | null): string {
+  if (!isoStr) return '—';
+  const ms = new Date(isoStr).getTime() - Date.now();
+  const absMin = Math.abs(ms) / 60_000;
+  const past = ms < 0;
+  const label = absMin < 60
+    ? `${Math.round(absMin)}m`
+    : absMin < 1440
+      ? `${Math.round(absMin / 60)}h`
+      : `${Math.round(absMin / 1440)}d`;
+  return past ? `${label} ago` : `in ${label}`;
+}
+
+function SlaDeadlines({ ticket }: { ticket: ServiceTicket }) {
+  const chip = slaChip(ticket);
+  const chipStyle = SLA_DEADLINE_COLORS[chip.color];
+  const frColor = SLA_DEADLINE_COLORS[slaDeadlineColor(ticket.first_response_due_at, ticket.first_responded_at)];
+  const resColor = SLA_DEADLINE_COLORS[slaDeadlineColor(ticket.resolution_due_at, ticket.sla_resolved_at)];
+
+  return (
+    <div style={{
+      display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center',
+      padding: '8px 16px', borderBottom: '1px solid var(--color-border)',
+      background: '#fafafa', fontSize: 12,
+    }}>
+      <span style={{
+        fontWeight: 700, padding: '2px 8px', borderRadius: 4,
+        background: chipStyle.bg, color: chipStyle.color,
+      }}>SLA: {chip.label}</span>
+
+      {ticket.first_response_due_at && (
+        <span style={{ color: frColor.color }}>
+          First response due:{' '}
+          <strong title={new Date(ticket.first_response_due_at).toLocaleString()}>
+            {new Date(ticket.first_response_due_at).toLocaleString()}
+          </strong>{' '}
+          <span style={{ fontStyle: 'italic' }}>({relativeDeadline(ticket.first_response_due_at)})</span>
+          {ticket.first_responded_at && ' ✓'}
+        </span>
+      )}
+
+      {ticket.resolution_due_at && (
+        <span style={{ color: resColor.color }}>
+          Resolution due:{' '}
+          <strong title={new Date(ticket.resolution_due_at).toLocaleString()}>
+            {new Date(ticket.resolution_due_at).toLocaleString()}
+          </strong>{' '}
+          <span style={{ fontStyle: 'italic' }}>({relativeDeadline(ticket.resolution_due_at)})</span>
+          {ticket.sla_resolved_at && ' ✓'}
+        </span>
+      )}
     </div>
   );
 }

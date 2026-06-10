@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import {
-  useInbox, setInboxDisposition, SOURCE_LABEL,
+  useInbox, setInboxDisposition, SOURCE_LABEL, slaChip,
   type InboxDisposition, type ServiceTicket,
 } from '../../lib/service';
 import { useIsMobile } from '../../lib/useMediaQuery';
@@ -196,12 +196,15 @@ export function InboxTab() {
               <th>Last message</th>
               <th>Age</th>
               <th>Source</th>
+              <th>SLA</th>
               <th>Disposition</th>
               <th style={{ textAlign: 'right' }}>Actions</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map(r => (
+            {rows.map(r => {
+              const sla = slaChip(r);
+              return (
               <tr key={r.id}>
                 <td>
                   <span aria-label={SOURCE_LABEL[r.source]} title={SOURCE_LABEL[r.source]}>
@@ -219,6 +222,7 @@ export function InboxTab() {
                 </td>
                 <td>{relativeAge(r.last_message_at)}</td>
                 <td>{SOURCE_LABEL[r.source]}</td>
+                <td><InboxSlaChip label={sla.label} color={sla.color} /></td>
                 <td>{r.inbox_disposition ?? '—'}</td>
                 <td style={{ textAlign: 'right' }}>
                   <button onClick={() => setPromoteId(r.id)}>→ Ticket</button>
@@ -227,7 +231,8 @@ export function InboxTab() {
                   <button onClick={() => handleDisposition(r.id, 'dismissed')}>Dismiss</button>
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       )}
@@ -247,3 +252,14 @@ const mobileBtnStyle: React.CSSProperties = {
   border: '1px solid var(--color-border)', background: '#fff',
   color: 'var(--color-ink)', borderRadius: 6, cursor: 'pointer',
 };
+
+const INBOX_SLA_STYLE: Record<string, React.CSSProperties> = {
+  green: { background: '#f0fff4', color: '#276749', borderRadius: 4, padding: '1px 6px', fontSize: 11, fontWeight: 600 },
+  amber: { background: '#fffaf0', color: '#c05621', borderRadius: 4, padding: '1px 6px', fontSize: 11, fontWeight: 600 },
+  red:   { background: '#fff5f5', color: '#c53030', borderRadius: 4, padding: '1px 6px', fontSize: 11, fontWeight: 600 },
+  grey:  { background: '#edf2f7', color: '#718096', borderRadius: 4, padding: '1px 6px', fontSize: 11, fontWeight: 600 },
+};
+
+function InboxSlaChip({ label, color }: { label: string; color: 'green' | 'amber' | 'red' | 'grey' }) {
+  return <span style={INBOX_SLA_STYLE[color]}>{label}</span>;
+}

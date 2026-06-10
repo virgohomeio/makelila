@@ -97,6 +97,13 @@ export type ServiceTicket = {
   diagnosis_link_sent_at: string | null;
   diag_cohost_invited_at: string | null;
   google_calendar_event_id: string | null;
+  // J5 — SLA aging
+  sla_policy_id: string | null;
+  first_response_due_at: string | null;
+  resolution_due_at: string | null;
+  first_responded_at: string | null;
+  sla_resolved_at: string | null;
+  sla_status: 'ok' | 'warning' | 'breached' | 'met' | null;
 };
 
 export type CustomerLifecycle = {
@@ -257,6 +264,20 @@ export function warrantyState(lifecycle: Pick<CustomerLifecycle, 'warranty_expir
   const nowMs = Date.now();
   const days = Math.round((expiresMs - nowMs) / 86400000);
   return { state: days >= 0 ? 'active' : 'expired', daysFromNow: days };
+}
+
+// SLA chip — compact colored status pill for ticket list rows and detail panel.
+export function slaChip(ticket: Pick<ServiceTicket, 'sla_status'>): {
+  label: string;
+  color: 'green' | 'amber' | 'red' | 'grey';
+} {
+  switch (ticket.sla_status) {
+    case 'ok':      return { label: 'On track', color: 'green' };
+    case 'warning': return { label: 'At risk',  color: 'amber' };
+    case 'breached':return { label: 'Breached', color: 'red'   };
+    case 'met':     return { label: 'Met',       color: 'grey'  };
+    default:        return { label: 'No SLA',   color: 'grey'  };
+  }
 }
 
 // ============================================================ Hooks
