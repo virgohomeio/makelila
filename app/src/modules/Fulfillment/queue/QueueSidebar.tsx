@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { FulfillmentQueueRow } from '../../../lib/fulfillment';
 import type { OrderStatus } from '../../../lib/orders';
 import styles from '../Fulfillment.module.css';
@@ -36,21 +37,41 @@ function dueLabel(dueDate: string | null, fulfilled: boolean): string {
 }
 
 export function QueueSidebar({
-  rows,
+  readyRows,
+  shippedRows,
   orderLookup,
   selectedId,
   onSelect,
 }: {
-  rows: FulfillmentQueueRow[];
+  readyRows: FulfillmentQueueRow[];
+  shippedRows: FulfillmentQueueRow[];
   orderLookup: Map<string, { order_ref: string; customer_name: string; city: string; country: 'US'|'CA'; status?: OrderStatus; kind?: 'sale' | 'replacement' }>;
   selectedId: string | null;
   onSelect: (id: string) => void;
 }) {
+  const [tab, setTab] = useState<'ready' | 'shipped'>('ready');
+  const rows = tab === 'ready' ? readyRows : shippedRows;
+
   return (
     <aside className={styles.sidebar}>
-      <div className={styles.sidebarHeader}>READY TO SHIP ({rows.length})</div>
+      <div className={styles.sidebarTabs}>
+        <button
+          className={`${styles.sidebarTab} ${tab === 'ready' ? styles.activeTab : ''}`}
+          onClick={() => setTab('ready')}
+        >
+          READY TO SHIP ({readyRows.length})
+        </button>
+        <button
+          className={`${styles.sidebarTab} ${tab === 'shipped' ? styles.activeTab : ''}`}
+          onClick={() => setTab('shipped')}
+        >
+          SHIPPED ({shippedRows.length})
+        </button>
+      </div>
       {rows.length === 0 ? (
-        <div className={styles.emptyList}>No queued orders.</div>
+        <div className={styles.emptyList}>
+          {tab === 'ready' ? 'No queued orders.' : 'No shipped orders.'}
+        </div>
       ) : rows.map(r => {
         const o = orderLookup.get(r.order_id);
         const fulfilled = r.step === 6;
@@ -60,7 +81,9 @@ export function QueueSidebar({
           styles.queueRow,
           r.id === selectedId ? styles.selected : '',
           overdue ? styles.overdue : '',
-          fulfilled ? styles.fulfilled : '',
+          // Only fade as fulfilled in the ready tab (where they'd appear mixed in);
+          // in the shipped tab every row is fulfilled so no need to de-emphasise.
+          fulfilled && tab === 'ready' ? styles.fulfilled : '',
           r.priority && !fulfilled ? styles.priority : '',
           paused ? styles.paused : '',
         ].filter(Boolean).join(' ');

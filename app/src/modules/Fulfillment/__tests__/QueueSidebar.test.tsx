@@ -25,14 +25,15 @@ describe('QueueSidebar', () => {
   const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   const row1 = mkRow({ id: 'q1', order_id: 'o1', step: 1, due_date: today });
   const row2 = mkRow({ id: 'q2', order_id: 'o2', step: 3, due_date: '2099-01-01' });
+  const shippedRow = mkRow({ id: 'q3', order_id: 'o2', step: 6, fulfilled_at: '2026-06-01T00:00:00Z' });
 
   const orders = new Map([
     ['o1', { order_ref: '#1001', customer_name: 'Alice', city: 'Portland', country: 'US' as const }],
     ['o2', { order_ref: '#1002', customer_name: 'Bob',   city: 'Toronto',  country: 'CA' as const }],
   ]);
 
-  it('renders each row with customer name and step badge', () => {
-    render(<QueueSidebar rows={[row1, row2]} orderLookup={orders} selectedId={null} onSelect={vi.fn()} />);
+  it('renders ready rows with customer name and step badge', () => {
+    render(<QueueSidebar readyRows={[row1, row2]} shippedRows={[]} orderLookup={orders} selectedId={null} onSelect={vi.fn()} />);
     expect(screen.getByText('Alice')).toBeInTheDocument();
     expect(screen.getByText('Bob')).toBeInTheDocument();
     expect(screen.getByText('1/6')).toBeInTheDocument();
@@ -40,25 +41,38 @@ describe('QueueSidebar', () => {
   });
 
   it('shows "Due TODAY" for today\'s deadline', () => {
-    render(<QueueSidebar rows={[row1]} orderLookup={orders} selectedId={null} onSelect={vi.fn()} />);
+    render(<QueueSidebar readyRows={[row1]} shippedRows={[]} orderLookup={orders} selectedId={null} onSelect={vi.fn()} />);
     expect(screen.getByText(/Due TODAY/i)).toBeInTheDocument();
   });
 
   it('calls onSelect with the row id', () => {
     const onSelect = vi.fn();
-    render(<QueueSidebar rows={[row1, row2]} orderLookup={orders} selectedId={null} onSelect={onSelect} />);
+    render(<QueueSidebar readyRows={[row1, row2]} shippedRows={[]} orderLookup={orders} selectedId={null} onSelect={onSelect} />);
     fireEvent.click(screen.getByText('Alice'));
     expect(onSelect).toHaveBeenCalledWith('q1');
   });
 
-  it('shows empty-state when no rows', () => {
-    render(<QueueSidebar rows={[]} orderLookup={orders} selectedId={null} onSelect={vi.fn()} />);
+  it('shows empty-state when no ready rows', () => {
+    render(<QueueSidebar readyRows={[]} shippedRows={[]} orderLookup={orders} selectedId={null} onSelect={vi.fn()} />);
     expect(screen.getByText(/No queued orders/i)).toBeInTheDocument();
   });
 
   it('renders a ⭐ priority badge for prioritized rows', () => {
-    const pri = mkRow({ id: 'q3', order_id: 'o1', step: 1, priority: true });
-    render(<QueueSidebar rows={[pri]} orderLookup={orders} selectedId={null} onSelect={vi.fn()} />);
+    const pri = mkRow({ id: 'q4', order_id: 'o1', step: 1, priority: true });
+    render(<QueueSidebar readyRows={[pri]} shippedRows={[]} orderLookup={orders} selectedId={null} onSelect={vi.fn()} />);
     expect(screen.getByTitle(/Priority/i)).toBeInTheDocument();
+  });
+
+  it('shows tab buttons with counts', () => {
+    render(<QueueSidebar readyRows={[row1]} shippedRows={[shippedRow]} orderLookup={orders} selectedId={null} onSelect={vi.fn()} />);
+    expect(screen.getByText(/READY TO SHIP \(1\)/i)).toBeInTheDocument();
+    expect(screen.getByText(/SHIPPED \(1\)/i)).toBeInTheDocument();
+  });
+
+  it('switches to shipped tab and shows shipped orders', () => {
+    render(<QueueSidebar readyRows={[row1]} shippedRows={[shippedRow]} orderLookup={orders} selectedId={null} onSelect={vi.fn()} />);
+    fireEvent.click(screen.getByText(/SHIPPED \(1\)/i));
+    expect(screen.getByText('Bob')).toBeInTheDocument();
+    expect(screen.getByText('6/6')).toBeInTheDocument();
   });
 });
