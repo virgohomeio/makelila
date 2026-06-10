@@ -670,6 +670,43 @@ function JourneyDetailPanel({
             {err && <span className={styles.journeyStagePickerErr}>{err}</span>}
           </div>
 
+          {/* Attribution chips — Feature 3 */}
+          {(() => {
+            const first = customer.first_touch_source;
+            const last  = customer.last_touch_source;
+            if (!first && !last) {
+              return (
+                <div style={{ marginBottom: 12 }}>
+                  <span style={{ fontSize: 11, color: 'var(--color-ink-subtle)', fontStyle: 'italic' }}>
+                    Attribution unknown
+                  </span>
+                </div>
+              );
+            }
+            return (
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
+                {first && (
+                  <span style={{
+                    fontSize: 10, padding: '3px 8px', borderRadius: 4,
+                    background: '#ebf8ff', color: '#2c5282', border: '1px solid #90cdf4',
+                    fontWeight: 600,
+                  }}>
+                    First touch: {first}{customer.first_touch_campaign_id ? ` · ${customer.first_touch_campaign_id}` : ''}
+                  </span>
+                )}
+                {last && (
+                  <span style={{
+                    fontSize: 10, padding: '3px 8px', borderRadius: 4,
+                    background: '#f0fff4', color: '#276749', border: '1px solid #9ae6b4',
+                    fontWeight: 600,
+                  }}>
+                    Last touch: {last}{customer.last_touch_campaign_id ? ` · ${customer.last_touch_campaign_id}` : ''}
+                  </span>
+                )}
+              </div>
+            );
+          })()}
+
           <div className={styles.journeyPanelHint}>
             10-stage CJM from <code>CJM/makeLILA_CJM_v2.html</code>. Bars below a stage are scored 0–5
             from real ops data — orders, lifecycle, tickets, returns. Click a bar to see the signals
