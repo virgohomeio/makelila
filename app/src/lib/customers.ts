@@ -505,5 +505,7 @@ export async function sendNameCollectionRequest(customer: Customer): Promise<voi
     .from('customers')
     .update({ name_request_sent_at: new Date().toISOString() })
     .eq('id', customer.id);
-  await logAction('name_request_sent', customer.id, customer.email);
+  await logAction('name_request_sent', customer.id, customer.email,
+    undefined,
+    { klaviyoEvent: 'Name Request Sent', klaviyoEmail: customer.email });
 }

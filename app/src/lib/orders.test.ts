@@ -261,7 +261,7 @@ describe('markOrderShipped', () => {
       shipping_cost_usd: 42.75,
       shipped_at: expect.any(String),
     }));
-    expect(logActionMock).toHaveBeenCalledWith('order_shipped', 'R-0001', expect.any(String));
+    expect(logActionMock).toHaveBeenCalledWith('order_shipped', 'R-0001', expect.any(String), undefined, expect.objectContaining({ klaviyoEvent: 'Order Shipped' }));
   });
 
   it('throws on negative shipping cost', async () => {

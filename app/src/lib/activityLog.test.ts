@@ -108,4 +108,17 @@ describe('logAction', () => {
       }),
     ).resolves.not.toThrow();
   });
+
+  it('uses opts.klaviyoEmail instead of entity when both are provided', async () => {
+    await logAction('refund_submitted', 'Customer Name', 'refund', undefined, {
+      klaviyoEvent: 'Refund Submitted',
+      klaviyoEmail: 'customer@example.com',
+    });
+    expect(invokeMock).toHaveBeenCalledWith(
+      'klaviyo-track',
+      expect.objectContaining({
+        body: expect.objectContaining({ email: 'customer@example.com' }),
+      }),
+    );
+  });
 });

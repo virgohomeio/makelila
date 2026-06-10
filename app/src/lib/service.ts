@@ -686,7 +686,8 @@ export async function createTicket(input: NewTicketInput): Promise<ServiceTicket
   if (error) throw error;
   const row = data as ServiceTicket;
   await logAction('ticket_created', row.id, `${row.ticket_number} ${input.subject}`,
-    { entityType: 'ticket', entityId: row.id, unitSerial: input.unit_serial ?? undefined });
+    { entityType: 'ticket', entityId: row.id, unitSerial: input.unit_serial ?? undefined },
+    { klaviyoEvent: 'Support Ticket Opened', ...(input.customer_email ? { klaviyoEmail: input.customer_email } : {}) });
   return row;
 }
 

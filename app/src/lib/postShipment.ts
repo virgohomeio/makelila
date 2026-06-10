@@ -414,7 +414,9 @@ export async function submitRefundRequest(input: {
     submitted_by: userId,
   });
   if (error) throw error;
-  await logAction('refund_submitted', input.customer_name, `$${input.refund_amount_usd} (${input.reason ?? 'no reason'})`);
+  await logAction('refund_submitted', input.customer_name, `$${input.refund_amount_usd} (${input.reason ?? 'no reason'})`,
+    undefined,
+    { klaviyoEvent: 'Refund Submitted', ...(input.customer_email ? { klaviyoEmail: input.customer_email } : {}) });
 }
 
 export async function managerApprove(id: string, note?: string): Promise<void> {
@@ -442,7 +444,7 @@ export async function financeApprove(id: string, opts: FinanceApproveOpts): Prom
   // 1. Fetch the approval row to validate + read original amount
   const { data: approval, error: aErr } = await supabase
     .from('refund_approvals')
-    .select('id, return_id, original_amount_usd, refund_amount_usd, status')
+    .select('id, return_id, original_amount_usd, refund_amount_usd, status, customer_email')
     .eq('id', id)
     .single();
   if (aErr || !approval) throw new Error(`Refund approval not found: ${aErr?.message}`);
@@ -488,7 +490,9 @@ export async function financeApprove(id: string, opts: FinanceApproveOpts): Prom
     .eq('id', id);
   if (upErr) throw upErr;
 
-  await logAction('refund_finance_approved', id, `${opts.method} $${adjusted.toFixed(2)}`);
+  await logAction('refund_finance_approved', id, `${opts.method} $${adjusted.toFixed(2)}`,
+    undefined,
+    { klaviyoEvent: 'Refund Processed', ...(approval.customer_email ? { klaviyoEmail: approval.customer_email as string } : {}) });
 }
 
 export async function denyRefund(id: string, stage: 'manager_review' | 'finance_review', reason: string): Promise<void> {

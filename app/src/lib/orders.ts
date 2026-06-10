@@ -704,7 +704,7 @@ export async function markOrderShipped(orderId: string, shippingCostUsd: number)
   }
   const { data: row, error: rErr } = await supabase
     .from('orders')
-    .select('order_ref')
+    .select('order_ref, customer_email')
     .eq('id', orderId)
     .single();
   if (rErr || !row) throw new Error(`Read order: ${rErr?.message ?? 'not found'}`);
@@ -714,7 +714,9 @@ export async function markOrderShipped(orderId: string, shippingCostUsd: number)
     .update({ shipped_at: new Date().toISOString(), shipping_cost_usd: shippingCostUsd })
     .eq('id', orderId);
   if (error) throw new Error(error.message);
-  await logAction('order_shipped', row.order_ref, `shipping $${shippingCostUsd.toFixed(2)}`);
+  await logAction('order_shipped', row.order_ref, `shipping $${shippingCostUsd.toFixed(2)}`,
+    undefined,
+    { klaviyoEvent: 'Order Shipped', ...((row.customer_email as string | null) ? { klaviyoEmail: row.customer_email as string } : {}) });
 }
 
 /** Shipped orders that have not yet been marked delivered.
@@ -767,7 +769,7 @@ export function useShippedOrders(): { orders: Order[]; loading: boolean } {
 export async function markOrderDelivered(orderId: string): Promise<void> {
   const { data: row, error: rErr } = await supabase
     .from('orders')
-    .select('kind, linked_ticket_id, order_ref, delivered_at, shipped_at')
+    .select('kind, linked_ticket_id, order_ref, delivered_at, shipped_at, customer_email')
     .eq('id', orderId)
     .single();
   if (rErr || !row) throw new Error(`Read order: ${rErr?.message ?? 'not found'}`);
@@ -782,7 +784,9 @@ export async function markOrderDelivered(orderId: string): Promise<void> {
     .update({ delivered_at: deliveredAt })
     .eq('id', orderId);
   if (uErr) throw new Error(uErr.message);
-  await logAction('order_delivered', row.order_ref, 'delivery confirmed');
+  await logAction('order_delivered', row.order_ref, 'delivery confirmed',
+    undefined,
+    { klaviyoEvent: 'Order Delivered', ...((row.customer_email as string | null) ? { klaviyoEmail: row.customer_email as string } : {}) });
 
   if (row.kind === 'replacement' && row.linked_ticket_id) {
     const { error: tErr } = await supabase
