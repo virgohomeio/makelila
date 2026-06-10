@@ -4,6 +4,7 @@ import {
   type Part, type PartCategory,
 } from '../../lib/parts';
 import { useReplacementOrders } from '../../lib/orders';
+import { replacementDemandBySku } from '../../lib/replacementTags';
 import { useCustomers, type Customer } from '../../lib/customers';
 import styles from './Stock.module.css';
 
@@ -32,23 +33,14 @@ export function PartsTab() {
     return m;
   }, [shipments]);
 
-  // Demand = quantity of each part queued up across un-shipped replacement
-  // orders (Service > Replacement). Drawn from line_items that reference a
-  // part_id; description-only legacy rows can't be attributed to a SKU.
-  const demandByPart = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const o of replacementOrders) {
-      if (o.shipped_at || o.delivered_at) continue; // only still-queued orders
-      for (const li of (o.line_items ?? []) as Array<Record<string, unknown>>) {
-        const kind = li.kind as string | undefined;
-        if (kind === 'part' || kind === 'part_pending') {
-          const pid = li.part_id as string | undefined;
-          if (pid) m.set(pid, (m.get(pid) ?? 0) + ((li.qty as number) ?? 1));
-        }
-      }
-    }
-    return m;
-  }, [replacementOrders]);
+  // Demand = count of each part queued across un-shipped replacement orders
+  // (Service > Replacement), keyed by SKU. Uses the SAME item-tag derivation
+  // the Replacement tab shows — so description rows like "both side latch" map
+  // to side latch-L + side latch-R — keeping Demand consistent with the chips.
+  const demandBySku = useMemo(
+    () => replacementDemandBySku(replacementOrders),
+    [replacementOrders],
+  );
 
   const stats = useMemo(() => {
     const replacement = parts.filter(p => p.category === 'replacement');
@@ -145,7 +137,7 @@ export function PartsTab() {
                   </td>
                   <td className={styles.numCol}>
                     {(() => {
-                      const demand = demandByPart.get(p.id) ?? 0;
+                      const demand = demandBySku.get(p.sku) ?? 0;
                       if (demand === 0) return <span className={styles.muted}>—</span>;
                       // Flag a shortfall: more queued than on hand (replacement parts).
                       const short = p.category === 'replacement' && demand > p.on_hand;

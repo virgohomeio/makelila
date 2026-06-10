@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { replacementItemTags, replacementStageTag } from './replacementTags';
+import { replacementItemTags, replacementStageTag, replacementDemandBySku } from './replacementTags';
 
 const order = (line_items: unknown[], extra: Partial<{ awaiting_batch_id: string | null; replacement_state: string | null }> = {}) =>
   ({ line_items, awaiting_batch_id: null, replacement_state: 'ready', ...extra }) as never;
@@ -48,5 +48,38 @@ describe('replacementStageTag', () => {
   });
   it('truly empty → null', () => {
     expect(replacementStageTag(order([]), [], isPending)).toBeNull();
+  });
+});
+
+describe('replacementDemandBySku', () => {
+  const o = (line_items: unknown[], extra: any = {}) =>
+    ({ line_items, awaiting_batch_id: null, shipped_at: null, delivered_at: null, ...extra });
+
+  it('counts queued part demand by SKU from descriptions AND structured rows', () => {
+    const m = replacementDemandBySku([
+      o([{ kind: 'part', description: 'both side latch' }]),                 // L + R
+      o([{ kind: 'part', description: 'Right side latch' }]),                // R
+      o([{ kind: 'part', description: 'broken compost chamber (right side)' }]), // chamber-R
+      o([{ kind: 'part', description: 'both compost chambers cracked' }]),   // chamber-L + R
+      o([{ kind: 'part', description: 'left side chamber' }]),               // chamber-L
+      o([{ kind: 'part', description: 'Replacement top lid' }]),             // lid
+      o([{ kind: 'part_pending', sku: 'LILA-CHAMBER-L', part_id: 'P-CHAMBER-L' },
+         { kind: 'part_pending', sku: 'LILA-CHAMBER-R', part_id: 'P-CHAMBER-R' }]), // L + R (structured)
+    ]);
+    expect(m.get('LILA-CHAMBER-L')).toBe(3);
+    expect(m.get('LILA-CHAMBER-R')).toBe(3);
+    expect(m.get('LILA-LATCH-SIDE-L')).toBe(1);
+    expect(m.get('LILA-LATCH-SIDE-R')).toBe(2);
+    expect(m.get('LILA-LID-V36')).toBe(1);
+  });
+
+  it('excludes shipped/delivered orders, units, ambiguous-side, and unspecified parts', () => {
+    const m = replacementDemandBySku([
+      o([{ kind: 'part', description: 'left side chamber' }], { shipped_at: '2026-06-01' }), // shipped → skip
+      o([{ kind: 'unit_pending', batch: 'P100X' }]),            // unit → not a part
+      o([{ kind: 'part', description: 'side latch (? side)' }]), // ambiguous → no SKU
+      o([{ kind: 'part', description: 'unspecified parts' }]),   // no tag → nothing
+    ]);
+    expect(m.size).toBe(0);
   });
 });

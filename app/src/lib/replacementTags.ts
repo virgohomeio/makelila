@@ -16,6 +16,17 @@ export type ItemTag = (typeof ITEM_TAGS)[number] | string; // string allows ambi
 
 export type StageTag = 'Unit' | 'awaiting batch' | 'Parts/Consumables';
 
+// tag → part SKU (active parts only). Inverse of SKU_TAG, minus the retired
+// generic rows. Ambiguous tags ("chamber", "side latch" with no L/R) and unit
+// tags (P100…) intentionally have no entry — they can't be attributed to a
+// specific stocked SKU, so they don't roll into part demand.
+export const PART_SKU_BY_TAG: Record<string, string> = {
+  'chamber-L': 'LILA-CHAMBER-L', 'chamber-R': 'LILA-CHAMBER-R',
+  'side latch-L': 'LILA-LATCH-SIDE-L', 'side latch-R': 'LILA-LATCH-SIDE-R',
+  'filter': 'LILA-FILTER', 'hopper': 'LILA-HOPPER', 'lid': 'LILA-LID-V36',
+  'starter kit': 'LILA-STARTER-KIT', 'manual': 'LILA-MANUAL-EN',
+};
+
 // SKU → tag for the structured part line items.
 const SKU_TAG: Record<string, string> = {
   'LILA-CHAMBER-L': 'chamber-L', 'LILA-CHAMBER-R': 'chamber-R', 'LILA-CHAMBER': 'chamber',
@@ -107,4 +118,24 @@ export function replacementStageTag(
   // that yield no specific vocab tag but clearly aren't a unit).
   if (tags.length > 0 || (o.line_items?.length ?? 0) > 0) return 'Parts/Consumables';
   return null;
+}
+
+/** Per-SKU replacement demand for the Stock > Parts "Demand" column: the count
+ *  of each part queued across un-shipped replacement orders. Uses the SAME
+ *  item-tag derivation the Service > Replacement tab shows (so Demand matches
+ *  the chips), mapping each part tag back to its SKU. Each derived part tag on
+ *  an order counts as 1 (replacement orders are qty-1-per-part in practice).
+ *  Ambiguous tags (no L/R side) and unit tags don't map to a SKU → not counted. */
+export function replacementDemandBySku(
+  orders: Array<Pick<Order, 'line_items' | 'awaiting_batch_id' | 'shipped_at' | 'delivered_at'>>,
+): Map<string, number> {
+  const m = new Map<string, number>();
+  for (const o of orders) {
+    if (o.shipped_at || o.delivered_at) continue; // only still-queued
+    for (const tag of replacementItemTags(o)) {
+      const sku = PART_SKU_BY_TAG[tag];
+      if (sku) m.set(sku, (m.get(sku) ?? 0) + 1);
+    }
+  }
+  return m;
 }
