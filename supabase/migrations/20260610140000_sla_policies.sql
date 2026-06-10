@@ -2,7 +2,7 @@
 -- Stores per-priority first_response and resolution SLA targets.
 -- Cron breach logic reads from this table every 15 minutes.
 
-create table public.sla_policies (
+create table if not exists public.sla_policies (
   id                    uuid primary key default gen_random_uuid(),
   priority              text not null check (priority in ('p1', 'p2', 'p3')),
   first_response_minutes int not null,
@@ -13,24 +13,48 @@ create table public.sla_policies (
 );
 
 -- Unique active policy per priority so triggers can do a simple lookup.
-create unique index sla_policies_active_priority
+create unique index if not exists sla_policies_active_priority
   on public.sla_policies (priority)
   where is_active = true;
 
 -- RLS: internal users only (mirrors is_internal_user() from 20260604200000)
 alter table public.sla_policies enable row level security;
 
-create policy "sla_policies_select" on public.sla_policies
-  for select to authenticated
-  using (public.is_internal_user());
+do $$
+begin
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public'
+      and tablename   = 'sla_policies'
+      and policyname  = 'sla_policies_select'
+  ) then
+    create policy "sla_policies_select" on public.sla_policies
+      for select to authenticated
+      using (public.is_internal_user());
+  end if;
 
-create policy "sla_policies_insert" on public.sla_policies
-  for insert to authenticated
-  with check (public.is_internal_user());
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public'
+      and tablename   = 'sla_policies'
+      and policyname  = 'sla_policies_insert'
+  ) then
+    create policy "sla_policies_insert" on public.sla_policies
+      for insert to authenticated
+      with check (public.is_internal_user());
+  end if;
 
-create policy "sla_policies_update" on public.sla_policies
-  for update to authenticated
-  using (public.is_internal_user()) with check (public.is_internal_user());
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public'
+      and tablename   = 'sla_policies'
+      and policyname  = 'sla_policies_update'
+  ) then
+    create policy "sla_policies_update" on public.sla_policies
+      for update to authenticated
+      using (public.is_internal_user()) with check (public.is_internal_user());
+  end if;
+end $$;
 
 -- Seed: P1 = 1h response / 24h resolution
 --       P2 = 4h response / 72h resolution
