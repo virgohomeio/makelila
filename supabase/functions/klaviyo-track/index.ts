@@ -16,6 +16,11 @@ function klaviyoHeaders(): Record<string, string> {
 
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
+  if (!KLAVIYO_KEY) {
+    return new Response(JSON.stringify({ error: 'KLAVIYO_PRIVATE_KEY not configured' }), {
+      status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
   if (req.method !== 'POST') return new Response('Method not allowed', { status: 405, headers: corsHeaders });
 
   const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
@@ -43,13 +48,24 @@ Deno.serve(async (req: Request) => {
 
   // 2. If not cached, resolve via Klaviyo Profiles API.
   if (!profileId) {
+    // Validate email format before interpolating into Klaviyo filter string
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return new Response(JSON.stringify({ error: 'Invalid email format' }), {
+        status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+    const safeEmail = email.replace(/"/g, '\\"');
     const url = new URL('https://a.klaviyo.com/api/profiles/');
-    url.searchParams.set('filter', `equals(email,"${email}")`);
+    url.searchParams.set('filter', `equals(email,"${safeEmail}")`);
     const profileRes = await fetch(url.toString(), {
       method: 'GET',
       headers: klaviyoHeaders(),
     });
-    if (profileRes.ok) {
+    if (!profileRes.ok) {
+      const errText = await profileRes.text();
+      console.error('Klaviyo profiles lookup error:', profileRes.status, errText);
+      // Continue without profileId — let Klaviyo create a new profile by email
+    } else {
       const profileData = await profileRes.json() as { data?: Array<{ id: string }> };
       profileId = profileData.data?.[0]?.id ?? null;
     }
@@ -57,10 +73,12 @@ Deno.serve(async (req: Request) => {
 
   // 3. If profile found, write back the klaviyo_profile_id to customers table.
   if (profileId && customer?.id && !customer.klaviyo_profile_id) {
-    await admin
+    const { error: upErr } = await admin
       .from('customers')
       .update({ klaviyo_profile_id: profileId })
       .eq('id', customer.id);
+    if (upErr) console.error('Failed to write klaviyo_profile_id back to customers:', upErr.message);
+    // Non-fatal: proceed with event POST even if write-back failed
   }
 
   // 4. Post the event to Klaviyo Events API.
