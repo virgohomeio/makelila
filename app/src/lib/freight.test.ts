@@ -72,7 +72,7 @@ describe('selectQuote', () => {
     await selectQuote('ord-1', 'q-target');
 
     expect(fromMock).toHaveBeenCalledWith('freight_quotes');
-    const calls = updateMock.mock.calls;
+    const calls = updateMock.mock.calls as any[][];
     expect(calls[0][0]).toEqual({ selected: false });
     expect(calls[1][0]).toEqual({ selected: true });
   });

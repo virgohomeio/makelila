@@ -123,7 +123,7 @@ describe('upsertHubSpotContact — insert-only guard', () => {
       hs_analytics_source: 'hubspot',
     });
 
-    const upsertArg = upsertMock.mock.calls[0][0] as Record<string, unknown>;
+    const upsertArg = (upsertMock.mock.calls as any[][])[0][0] as Record<string, unknown>;
     expect(upsertArg).not.toHaveProperty('name');
     expect(upsertArg).not.toHaveProperty('phone');
   });
@@ -141,7 +141,7 @@ describe('upsertHubSpotContact — insert-only guard', () => {
       hs_analytics_source: 'facebook_ad',
     });
 
-    const upsertArg = upsertMock.mock.calls[0][0] as Record<string, unknown>;
+    const upsertArg = (upsertMock.mock.calls as any[][])[0][0] as Record<string, unknown>;
     expect(upsertArg).toMatchObject({
       email: 'existing@example.com',
       first_touch_source: 'facebook_ad',
@@ -157,7 +157,7 @@ describe('upsertHubSpotContact — insert-only guard', () => {
       hs_analytics_source: null,
     });
 
-    const upsertArg = upsertMock.mock.calls[0][0] as Record<string, unknown>;
+    const upsertArg = (upsertMock.mock.calls as any[][])[0][0] as Record<string, unknown>;
     expect(upsertArg).not.toHaveProperty('first_touch_source');
   });
 
@@ -190,7 +190,7 @@ describe('upsertHubSpotContact — insert-only guard', () => {
 
   it('throws when upsert returns an error', async () => {
     maybeSingleMock.mockResolvedValue({ data: null, error: null });
-    upsertMock.mockResolvedValue({ error: { message: 'DB error' } });
+    upsertMock.mockResolvedValue({ error: { message: 'DB error' } as any });
 
     await expect(
       upsertHubSpotContact({ email: 'fail@example.com' }),
