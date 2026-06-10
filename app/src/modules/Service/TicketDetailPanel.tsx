@@ -11,6 +11,7 @@ import {
   markDiagnosisLinkSent,
   useCustomerLifecycle, warrantyState,
   useTicketMessages, useClassificationLog,
+  autoTicketDescription,
 } from '../../lib/service';
 import { CANNED_SMS_TEMPLATES } from '../../lib/cannedSms';
 import { AttachmentStrip } from './AttachmentStrip';
@@ -198,6 +199,10 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
       </div>
 
       <DeviceContextHeader unitSerial={ticket.unit_serial} currentTicketId={ticket.id} />
+
+      {ticket.source === 'telemetry_auto' && (
+        <TelemetryAutoBanner ticket={ticket} />
+      )}
 
       {ticket.sla_policy_id && (
         <SlaDeadlines ticket={ticket} />
@@ -640,6 +645,51 @@ function SlaDeadlines({ ticket }: { ticket: ServiceTicket }) {
           <span style={{ fontStyle: 'italic' }}>({relativeDeadline(ticket.resolution_due_at)})</span>
           {ticket.sla_resolved_at && ' ✓'}
         </span>
+      )}
+    </div>
+  );
+}
+
+// ---- TelemetryAutoBanner ----
+// Shown at the top of the detail panel when ticket.source === 'telemetry_auto'.
+// Extracts the state and duration from the ticket description; falls back to
+// a generic banner if the description does not match the auto-generated format.
+
+function TelemetryAutoBanner({ ticket }: { ticket: ServiceTicket }) {
+  // The auto-create cron writes the description in a known format:
+  // "Auto-created by telemetry monitor. Unit X has been in state STATE since ..."
+  const stateMatch = ticket.description?.match(/state\s+(\S+)\s+since/);
+  const classifiedState = stateMatch?.[1] ?? 'UNKNOWN';
+
+  // Compute the hold duration from created_at (best proxy when no state_held_since
+  // is stored on the ticket row itself).
+  const createdMs = new Date(ticket.created_at).getTime();
+  const heldHours = Math.round((Date.now() - createdMs) / 3_600_000);
+  const durationStr = heldHours >= 24
+    ? `${Math.floor(heldHours / 24)}d ${heldHours % 24}h`
+    : `${heldHours}h`;
+
+  const desc = ticket.description
+    ? autoTicketDescription(classifiedState, ticket.created_at)
+    : `Auto-created from telemetry — unit held ${classifiedState}.`;
+
+  return (
+    <div style={{
+      margin: '8px 0',
+      padding: '10px 14px',
+      background: '#fffaf0',
+      borderLeft: '4px solid #c05621',
+      borderRadius: 4,
+      fontSize: 13,
+      color: '#7b341e',
+    }}>
+      <strong>Telemetry auto-created</strong>
+      {' — '}unit held <strong>{classifiedState}</strong> for{' '}
+      <strong>{durationStr}</strong>.
+      {ticket.description && (
+        <div style={{ marginTop: 4, fontSize: 12, color: '#9c4221', opacity: 0.85 }}>
+          {desc}
+        </div>
       )}
     </div>
   );

@@ -11,7 +11,7 @@ import { logAction } from './activityLog';
 export type TicketCategory = 'onboarding' | 'support' | 'repair' | 'diagnosis_call';
 export type TicketSource =
   | 'calendly' | 'customer_form' | 'hubspot' | 'fulfillment_flag'
-  | 'ops_manual' | 'gmail' | 'quo' | 'google_calendar';
+  | 'ops_manual' | 'gmail' | 'quo' | 'google_calendar' | 'telemetry_auto';
 
 export type TicketKind = 'conversation' | 'ticket';
 export type InboxDisposition = 'promoted' | 'sales' | 'follow_up' | 'dismissed';
@@ -218,6 +218,7 @@ export const SOURCE_LABEL: Record<TicketSource, string> = {
   gmail:            'Gmail',
   quo:              'Quo',
   google_calendar:  'Calendar',
+  telemetry_auto:   'Telemetry auto',
 };
 
 // Safe accessors for the display metadata above. A ticket's status / priority /
@@ -1275,4 +1276,99 @@ export function useDeviceContext(unitSerial: string | null): DeviceContext {
   }, [unitSerial]);
 
   return { unit, telemetry, openTicketCount, returnCount, warranty, loading: loading || warranty.loading };
+}
+
+// ============================================================ Feature J6: Telemetry auto-ticket
+
+// Per-state hold thresholds in milliseconds.
+// NOT_MIXING is intentionally absent: 75% false positive rate, see backlog #70.
+const AUTOTICKET_THRESHOLDS_MS: Partial<Record<string, number>> = {
+  DIAGNOSE:    6  * 3_600_000,
+  NO_BME_DATA: 24 * 3_600_000,
+  DRY_SOIL:    48 * 3_600_000,
+  SOAKED_SOIL: 48 * 3_600_000,
+  OPEN_LID:    4  * 3_600_000,
+  // NOT_MIXING: DISABLED — do not add
+};
+
+/** Returns true if a telemetry state has been held long enough to warrant
+ *  auto-creating a service ticket.
+ *
+ *  Rules:
+ *  - OK / NEW_FOOD → never trigger (healthy states)
+ *  - NOT_MIXING    → never trigger (75% false positive rate, backlog #70)
+ *  - Any other state → true when (now - state_held_since) >= threshold
+ */
+export function shouldAutoCreate(
+  classified_state: string,
+  state_held_since: Date | string,
+): boolean {
+  const thresholdMs = AUTOTICKET_THRESHOLDS_MS[classified_state];
+  if (thresholdMs === undefined) return false; // OK, NEW_FOOD, NOT_MIXING, UNKNOWN, etc.
+  const heldMs = Date.now() - new Date(state_held_since).getTime();
+  return heldMs >= thresholdMs;
+}
+
+/** Returns the human-readable description string that would be written
+ *  on an auto-created ticket. */
+export function autoTicketDescription(
+  classified_state: string,
+  state_held_since: Date | string,
+): string {
+  const heldHours = Math.round(
+    (Date.now() - new Date(state_held_since).getTime()) / 3_600_000,
+  );
+  return (
+    `Auto-created from telemetry — unit held ${classified_state} for ${heldHours}h. ` +
+    `State held since ${new Date(state_held_since).toLocaleString()}.`
+  );
+}
+
+// ---- Telemetry auto-config types + hooks ----
+
+export type TelemetryAutoConfig = {
+  id: number;
+  shadow_mode: boolean;
+  enabled: boolean;
+  updated_at: string;
+};
+
+/** Returns the singleton telemetry_autoticket_config row. */
+export function useTelemetryAutoConfig(): {
+  config: TelemetryAutoConfig | null;
+  loading: boolean;
+} {
+  const [config, setConfig] = useState<TelemetryAutoConfig | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await supabase
+        .from('telemetry_autoticket_config')
+        .select('*')
+        .eq('id', 1)
+        .maybeSingle();
+      if (cancelled) return;
+      if (!error && data) setConfig(data as TelemetryAutoConfig);
+      setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  return { config, loading };
+}
+
+/** Update the singleton telemetry auto-ticket config row. */
+export async function setTelemetryAutoConfig(
+  shadow_mode: boolean,
+  enabled: boolean,
+): Promise<void> {
+  const { error } = await supabase
+    .from('telemetry_autoticket_config')
+    .update({ shadow_mode, enabled, updated_at: new Date().toISOString() })
+    .eq('id', 1);
+  if (error) throw error;
+  await logAction('telemetry_autoconfig_updated', 'telemetry_autoticket_config',
+    `shadow_mode=${shadow_mode} enabled=${enabled}`);
 }

@@ -41,6 +41,8 @@ export type Customer = {
   last_touch_source: string | null;
   last_touch_campaign_id: string | null;
   last_touch_at: string | null;
+  // J6: when true, the telemetry auto-ticket cron skips all units for this customer.
+  telemetry_autoticket_suppress: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -597,4 +599,23 @@ export async function sendNameCollectionRequest(customer: Customer): Promise<voi
   await logAction('name_request_sent', customer.id, customer.email,
     undefined,
     { klaviyoEvent: 'Name Request Sent', klaviyoEmail: customer.email });
+}
+
+/** J6: Toggle the telemetry auto-ticket suppress flag for a customer.
+ *  When suppress=true the cron job will skip all units owned by this customer. */
+export async function setTelemetryAutoticketSuppress(
+  customerId: string,
+  suppress: boolean,
+): Promise<void> {
+  const { error } = await supabase
+    .from('customers')
+    .update({ telemetry_autoticket_suppress: suppress })
+    .eq('id', customerId);
+  if (error) throw error;
+  await logAction(
+    'telemetry_autoticket_suppress_set',
+    customerId,
+    suppress ? 'suppressed' : 'enabled',
+    { entityType: 'customer', entityId: customerId },
+  );
 }
