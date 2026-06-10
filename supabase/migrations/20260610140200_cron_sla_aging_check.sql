@@ -55,7 +55,7 @@ select cron.schedule(
       'sla_first_response_breached',
       nb.ticket_number,
       'ticket',
-      nb.id::text,
+      nb.id,
       'SLA first-response deadline breached; priority bumped to ' || nb.priority,
       now()
     from newly_breached nb;
@@ -80,7 +80,7 @@ select cron.schedule(
       'sla_resolution_breached',
       rb.ticket_number,
       'ticket',
-      rb.id::text,
+      rb.id,
       'SLA resolution deadline breached; priority bumped to ' || rb.priority,
       now()
     from resolution_breached rb;

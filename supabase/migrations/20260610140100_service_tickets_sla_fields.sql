@@ -7,7 +7,7 @@ alter table public.service_tickets
   add column if not exists resolution_due_at     timestamptz,
   add column if not exists first_responded_at    timestamptz,
   add column if not exists sla_resolved_at       timestamptz,
-  add column if not exists sla_status            text default 'ok'
+  add column if not exists sla_status            text default null
     check (sla_status in ('ok', 'warning', 'breached', 'met'));
 
 create index if not exists idx_tickets_sla_status on public.service_tickets (sla_status)
