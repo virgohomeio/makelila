@@ -581,9 +581,17 @@ export async function createReplacementOrder(input: ReplacementOrderInput):
     if (pErr) throw new Error(`Decrement part ${li.part_id}: ${pErr.message}`);
   }
 
-  // 4. Reserve units.
+  // 4. Reserve units — quarantine excluded: do not pick quarantined units.
   for (const li of input.line_items) {
     if (li.kind !== 'unit') continue;
+    const { data: unitRow } = await supabase
+      .from('units')
+      .select('status')
+      .eq('serial', li.unit_serial)
+      .single();
+    if (unitRow?.status === 'quarantine') {
+      throw new Error(`Unit ${li.unit_serial} is quarantined and cannot be reserved for a replacement order`);
+    }
     const { error: uErr } = await supabase
       .from('units')
       .update({ status: 'reserved', customer_order_ref: row.order_ref, customer_name: input.customer_name })

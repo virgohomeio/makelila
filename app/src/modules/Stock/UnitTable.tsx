@@ -84,9 +84,20 @@ export function UnitTable({ units }: { units: Unit[] }) {
                   ?? u.defect_notes
                   ?? (u.electrical_check === 'incomplete' ? 'Electrical test incomplete' : null);
             const primaryNote = realNote ?? u.notes;
+            const isQuarantined = u.status === 'quarantine';
+            const quarantinedSince = isQuarantined
+              ? new Date(u.status_updated_at).toLocaleDateString('en-US', { year: '2-digit', month: 'short', day: 'numeric' })
+              : null;
             return (
-              <tr key={u.serial}>
-                <td className={styles.serial}>{u.serial}</td>
+              <tr key={u.serial} className={isQuarantined ? styles.rowQuarantine : undefined}>
+                <td className={styles.serial}>
+                  {u.serial}
+                  {isQuarantined && (
+                    <span className={styles.pillQuarantine}>
+                      Quarantined{quarantinedSince ? ` · ${quarantinedSince}` : ''}
+                    </span>
+                  )}
+                </td>
                 <td className={styles.batch}>{u.batch}</td>
                 <td>
                   {u.color ? (

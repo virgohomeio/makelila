@@ -6,7 +6,7 @@ import { logAction } from './activityLog';
 export type UnitStatus =
   | 'in-production' | 'inbound' | 'cn-test' | 'ca-test'
   | 'ready' | 'reserved' | 'rework'
-  | 'shipped' | 'team-test' | 'scrap' | 'lost';
+  | 'shipped' | 'team-test' | 'scrap' | 'lost' | 'quarantine';
 
 export type StatusCategory = 'inbound' | 'warehouse' | 'out';
 
@@ -28,12 +28,13 @@ export const STATUS_META: Record<UnitStatus, {
   'team-test':     { label: 'Team Test',     category: 'out',       color: '#744210', bg: '#fffbeb', border: '#f6ad55' },
   'scrap':         { label: 'Scrap',         category: 'out',       color: '#9b2c2c', bg: '#fff5f5', border: '#fc8181' },
   'lost':          { label: 'Lost',          category: 'out',       color: '#c53030', bg: '#fff5f5', border: '#fc8181' },
+  'quarantine':    { label: 'Quarantined',   category: 'warehouse', color: '#702459', bg: '#fff5f7', border: '#f687b3' },
 };
 
 export const STATUS_ORDER: UnitStatus[] = [
   'in-production','inbound','cn-test','ca-test',
   'ready','reserved','rework',
-  'shipped','team-test','scrap','lost',
+  'shipped','team-test','scrap','lost','quarantine',
 ];
 
 /** Defensive lookup: if a unit somehow has a status that isn't in
@@ -220,7 +221,7 @@ export function useStatusCountsByBatch(units: Unit[]): Map<string, Record<UnitSt
       if (!row) {
         row = { 'in-production':0,'inbound':0,'cn-test':0,'ca-test':0,
           'ready':0,'reserved':0,'rework':0,
-          'shipped':0,'team-test':0,'scrap':0,'lost':0 };
+          'shipped':0,'team-test':0,'scrap':0,'lost':0,'quarantine':0 };
         m.set(u.batch, row);
       }
       row[u.status]++;

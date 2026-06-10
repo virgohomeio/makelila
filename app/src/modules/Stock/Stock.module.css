@@ -573,6 +573,22 @@
 
 .muted { color: var(--color-ink-faint); }
 
+/* Quarantine row highlight (Feature J2) */
+.rowQuarantine td { border-left: 3px solid #f687b3 !important; background: #fff5f7 !important; }
+.pillQuarantine {
+  display: inline-block;
+  margin-left: 6px;
+  font-size: 9px;
+  font-weight: 700;
+  color: #702459;
+  background: #fff5f7;
+  border: 1px solid #f687b3;
+  padding: 1px 6px;
+  border-radius: 10px;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+}
+
 .statusSelect {
   font-size: 10px;
   padding: 3px 6px;
