@@ -674,20 +674,12 @@ function TelemetryAutoBanner({ ticket }: { ticket: ServiceTicket }) {
     : `Auto-created from telemetry — unit held ${classifiedState}.`;
 
   return (
-    <div style={{
-      margin: '8px 0',
-      padding: '10px 14px',
-      background: '#fffaf0',
-      borderLeft: '4px solid #c05621',
-      borderRadius: 4,
-      fontSize: 13,
-      color: '#7b341e',
-    }}>
+    <div className={styles.telemetryAutoBanner}>
       <strong>Telemetry auto-created</strong>
       {' — '}unit held <strong>{classifiedState}</strong> for{' '}
       <strong>{durationStr}</strong>.
       {ticket.description && (
-        <div style={{ marginTop: 4, fontSize: 12, color: '#9c4221', opacity: 0.85 }}>
+        <div className={styles.telemetryAutoBannerDetail}>
           {desc}
         </div>
       )}
