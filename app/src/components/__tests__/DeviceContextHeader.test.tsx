@@ -222,4 +222,15 @@ describe('DeviceContextHeader', () => {
     fireEvent.click(chips[0]); // close
     expect(screen.queryByTestId('unit-timeline')).toBeNull();
   });
+
+  it('NOT_MIXING telemetry chip has false-positive tooltip', () => {
+    mockCtx.current = {
+      ...mockCtx.current,
+      telemetry: { classified_state: 'NOT_MIXING', classified_at: new Date().toISOString(), is_stale: false },
+    };
+    render(<DeviceContextHeader unitSerial="LL01-001" />);
+    const telChip = screen.getByText(/NOT_MIXING/i).closest('button');
+    expect(telChip).toBeTruthy();
+    expect(telChip?.title).toMatch(/false positive/i);
+  });
 });

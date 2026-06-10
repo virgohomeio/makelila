@@ -1253,5 +1253,5 @@ export function useDeviceContext(unitSerial: string | null): DeviceContext {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [unitSerial]);
 
-  return { unit, telemetry, openTicketCount, returnCount, warranty, loading };
+  return { unit, telemetry, openTicketCount, returnCount, warranty, loading: loading || warranty.loading };
 }
