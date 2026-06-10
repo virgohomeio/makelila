@@ -245,6 +245,10 @@ export async function assignUnit(queueId: string, serial: string, orderId: strin
   const { data: existing, error: rErr } = await supabase
     .from('units').select('status').eq('serial', serial).single();
   if (rErr) throw rErr;
+  // quarantine excluded — do not pick quarantined units
+  if (existing?.status === 'quarantine') {
+    throw new Error(`Unit ${serial} is quarantined and cannot be assigned to a fulfillment order.`);
+  }
   const isBackfill = existing?.status === 'shipped';
   const patch: Record<string, unknown> = isBackfill
     ? {
