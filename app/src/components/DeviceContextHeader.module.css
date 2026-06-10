@@ -1,0 +1,114 @@
+/* DeviceContextHeader — chip strip at the top of a Service ticket panel.
+   Collapsed height: ~80px. Matches the pill palette from Fulfillment.module.css. */
+
+.header {
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+  padding: 10px 16px 8px;
+}
+
+/* ── "No unit linked" banner ─────────────────────────────────────────── */
+.noBanner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: #f7fafc;
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  color: var(--color-ink-muted);
+}
+.linkUnitBtn {
+  margin-left: auto;
+  padding: 4px 10px;
+  font-size: 10px;
+  font-weight: 600;
+  background: #fff;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-ink-subtle);
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+/* ── Chip row ────────────────────────────────────────────────────────── */
+.chipRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+/* Base chip — small pill button */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 9px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 700;
+  border: none;
+  cursor: pointer;
+  line-height: 1.3;
+  transition: filter 0.1s;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.chip:hover { filter: brightness(0.94); }
+
+/* Loading shimmer */
+.chipLoading {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  color: var(--color-ink-subtle);
+}
+
+/* Green — good / in_warranty / OK */
+.chipGreen {
+  background: #f0fff4;
+  color: #276749;
+  border: 1px solid #9ae6b4;
+}
+/* Amber — warning */
+.chipAmber {
+  background: #fffbeb;
+  color: #975a16;
+  border: 1px solid #f6e05e;
+}
+/* Red — error / expired */
+.chipRed {
+  background: #fff5f5;
+  color: #9b2c2c;
+  border: 1px solid #fc8181;
+}
+/* Grey — unknown / no data / 0 count */
+.chipGrey {
+  background: #f7fafc;
+  color: #718096;
+  border: 1px solid #e2e8f0;
+}
+
+/* ── Tech line (below chips) ─────────────────────────────────────────── */
+.techLine {
+  margin-top: 5px;
+  font-size: 10px;
+  color: var(--color-ink-subtle);
+}
+
+/* ── Expansion drawer ────────────────────────────────────────────────── */
+.drawer {
+  overflow: hidden;
+  max-height: 0;
+  transition: max-height 0.22s ease-out;
+}
+.drawerOpen {
+  max-height: 400px;
+  transition: max-height 0.3s ease-in;
+}
+.drawerInner {
+  padding: 10px 0 4px;
+  border-top: 1px solid var(--color-border);
+  margin-top: 8px;
+}

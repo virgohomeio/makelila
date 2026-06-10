@@ -1122,3 +1122,136 @@ export async function extendWarranty(id: string, newTier: 'extended_2y' | 'lifet
   await logAction('warranty_extended', id, newTier,
     { entityType: 'warranty_registration', entityId: id });
 }
+
+// ============================================================ Feature J4: Device Context
+
+export interface DeviceContextUnit {
+  firmware_version: string | null;
+  electrical_check: string | null;
+  mechanical_check: string | null;
+  defect_notes: string | null;
+  technician: string | null;
+  status_updated_at: string | null;
+  test_report_uploaded_at: string | null;
+}
+
+export interface DeviceContextTelemetry {
+  classified_state: string;
+  classified_at: string;
+  is_stale: boolean; // true if > 24h old
+}
+
+export interface DeviceContext {
+  unit: DeviceContextUnit | null;
+  telemetry: DeviceContextTelemetry | null;
+  openTicketCount: number;
+  returnCount: number;
+  warranty: ReturnType<typeof useWarrantyRegistration>;
+  loading: boolean;
+}
+
+// Module-level telemetry cache: keyed by unit_serial, 60s TTL.
+const _telemetryCache = new Map<string, { data: DeviceContextTelemetry | null; fetchedAt: number }>();
+const TELEMETRY_CACHE_TTL_MS = 60_000;
+
+async function fetchDeviceContextTelemetry(unitSerial: string): Promise<DeviceContextTelemetry | null> {
+  const cached = _telemetryCache.get(unitSerial);
+  if (cached && Date.now() - cached.fetchedAt < TELEMETRY_CACHE_TTL_MS) {
+    return cached.data;
+  }
+
+  // Lazy import to avoid breaking if telemetry env vars are missing.
+  const { supabaseTelemetry, isTelemetryConfigured } = await import('./supabaseTelemetry');
+  if (!isTelemetryConfigured || !supabaseTelemetry) {
+    _telemetryCache.set(unitSerial, { data: null, fetchedAt: Date.now() });
+    return null;
+  }
+
+  // Pull the most recent telemetry event for this serial from the `lila` table.
+  // The `lila` table stores the latest known state per serial_number.
+  const { data, error } = await supabaseTelemetry
+    .from('lila')
+    .select('serial_number, updated_at, status')
+    .eq('serial_number', unitSerial)
+    .maybeSingle();
+
+  if (error || !data) {
+    _telemetryCache.set(unitSerial, { data: null, fetchedAt: Date.now() });
+    return null;
+  }
+
+  const lila = data as { serial_number: string; updated_at: string | null; status: string | null };
+  const classifiedAt = lila.updated_at ?? new Date(0).toISOString();
+  const ageMs = Date.now() - new Date(classifiedAt).getTime();
+  const result: DeviceContextTelemetry = {
+    classified_state: lila.status ?? 'UNKNOWN',
+    classified_at: classifiedAt,
+    is_stale: ageMs > 24 * 3_600_000,
+  };
+  _telemetryCache.set(unitSerial, { data: result, fetchedAt: Date.now() });
+  return result;
+}
+
+/** Hook that aggregates device context for a unit serial:
+ *  unit QC fields, latest telemetry state, open ticket count,
+ *  return count, and warranty registration. Used by DeviceContextHeader. */
+export function useDeviceContext(unitSerial: string | null): DeviceContext {
+  const warranty = useWarrantyRegistration(unitSerial);
+  const [unit, setUnit] = useState<DeviceContextUnit | null>(null);
+  const [telemetry, setTelemetry] = useState<DeviceContextTelemetry | null>(null);
+  const [openTicketCount, setOpenTicketCount] = useState(0);
+  const [returnCount, setReturnCount] = useState(0);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!unitSerial) {
+      setUnit(null);
+      setTelemetry(null);
+      setOpenTicketCount(0);
+      setReturnCount(0);
+      setLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setLoading(true);
+
+    (async () => {
+      const [unitResult, ticketResult, returnResult, telemetryResult] = await Promise.all([
+        supabase
+          .from('units')
+          .select('firmware_version, electrical_check, mechanical_check, defect_notes, technician, status_updated_at, test_report_uploaded_at')
+          .eq('serial', unitSerial)
+          .maybeSingle(),
+        supabase
+          .from('service_tickets')
+          .select('id', { count: 'exact', head: true })
+          .eq('unit_serial', unitSerial)
+          .not('status', 'eq', 'closed'),
+        supabase
+          .from('returns')
+          .select('id', { count: 'exact', head: true })
+          .eq('unit_serial', unitSerial),
+        fetchDeviceContextTelemetry(unitSerial).catch(() => null),
+      ]);
+
+      if (cancelled) return;
+
+      if (!unitResult.error && unitResult.data) {
+        setUnit(unitResult.data as DeviceContextUnit);
+      } else {
+        setUnit(null);
+      }
+
+      setOpenTicketCount(ticketResult.count ?? 0);
+      setReturnCount(returnResult.count ?? 0);
+      setTelemetry(telemetryResult);
+      setLoading(false);
+    })();
+
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [unitSerial]);
+
+  return { unit, telemetry, openTicketCount, returnCount, warranty, loading };
+}
