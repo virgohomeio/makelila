@@ -9,9 +9,11 @@ import type { Role } from './permissions';
 // External (non-@virgohome.io) emails permitted to sign in. Keep this set
 // tiny — every entry bypasses the domain check below + needs a matching
 // row in public.external_email_allowlist so handle_new_user sets
-// profiles.is_internal=true on first sign-in. Adds: 2026-06-07 Ryan Yuan.
+// profiles.is_internal=true on first sign-in. Adds: 2026-06-07 Ryan Yuan,
+// 2026-06-10 John (john@lila.vip, Microsoft 365).
 const EXTERNAL_ALLOWLIST = new Set<string>([
   'ryanyuan32@gmail.com',
+  'john@lila.vip',
 ]);
 
 export function requireInternalDomain(email: string | undefined | null): boolean {
@@ -32,6 +34,7 @@ type AuthState = {
   role: Role | null;
   loading: boolean;
   signInWithGoogle: () => Promise<void>;
+  signInWithMicrosoft: () => Promise<void>;
   signOut: () => Promise<void>;
 };
 
@@ -86,6 +89,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         provider: 'google',
         options: {
           redirectTo: window.location.origin + import.meta.env.BASE_URL,
+        },
+      });
+    },
+    signInWithMicrosoft: async () => {
+      await supabase.auth.signInWithOAuth({
+        provider: 'azure',
+        options: {
+          redirectTo: window.location.origin + import.meta.env.BASE_URL,
+          scopes: 'email openid profile',
         },
       });
     },
