@@ -1,0 +1,116 @@
+.timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.empty {
+  font-size: 11px;
+  color: var(--color-ink-subtle);
+  padding: 12px 0;
+}
+
+.loading {
+  font-size: 11px;
+  color: var(--color-ink-subtle);
+  padding: 12px 0;
+}
+
+/* ── Individual event row ─────────────────────────────────────────── */
+.event {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  position: relative;
+  padding: 8px 0;
+}
+
+/* Vertical connector line between events */
+.event::before {
+  content: '';
+  position: absolute;
+  left: 11px;
+  top: 28px;
+  bottom: -8px;
+  width: 2px;
+  background: var(--color-border);
+}
+.event:last-child::before {
+  display: none;
+}
+
+/* ── Dot / icon ───────────────────────────────────────────────────── */
+.dot {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  position: relative;
+  z-index: 1;
+}
+
+.dotBuilt        { background: #e6fffa; color: #2c7a7b; border: 1.5px solid #81e6d9; }
+.dotQcPassed     { background: #f0fff4; color: #276749; border: 1.5px solid #9ae6b4; }
+.dotQcFailed     { background: #fff5f5; color: #9b2c2c; border: 1.5px solid #fc8181; }
+.dotShipped      { background: #ebf8ff; color: #2b6cb0; border: 1.5px solid #bee3f8; }
+.dotReturned     { background: #fffbeb; color: #b7791f; border: 1.5px solid #f6e05e; }
+.dotQuarantined  { background: #fff5f7; color: #702459; border: 1.5px solid #f687b3; }
+.dotTicketOpened { background: #ebf8ff; color: #2c5282; border: 1.5px solid #90cdf4; }
+.dotTicketResolved { background: #f0fff4; color: #276749; border: 1.5px solid #9ae6b4; }
+.dotTelemetry    { background: #fffbeb; color: #975a16; border: 1.5px solid #ecc94b; }
+.dotActivity     { background: var(--color-surface); color: var(--color-ink-muted); border: 1.5px solid var(--color-border); }
+
+/* ── Event body ───────────────────────────────────────────────────── */
+.body {
+  flex: 1;
+  min-width: 0;
+  padding-top: 4px;
+}
+
+.label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--color-ink);
+  line-height: 1.3;
+}
+
+.detail {
+  font-size: 11px;
+  color: var(--color-ink-muted);
+  margin-top: 1px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.time {
+  font-size: 10px;
+  color: var(--color-ink-subtle);
+  margin-top: 2px;
+  flex-shrink: 0;
+  white-space: nowrap;
+  padding-top: 6px;
+}
+
+/* ── Show more button (compact mode) ─────────────────────────────── */
+.showMore {
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-ink-muted);
+  font-size: 10px;
+  font-weight: 600;
+  padding: 4px 10px;
+  cursor: pointer;
+  margin-top: 4px;
+  align-self: flex-start;
+}
+.showMore:hover {
+  border-color: var(--color-crimson);
+  color: var(--color-crimson);
+}
