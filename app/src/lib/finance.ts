@@ -105,6 +105,22 @@ export function useQboOAuthStatus(): {
   return { refreshExpiresAt, accessExpiresAt, loading };
 }
 
+// ============================================================ Pure helpers
+
+/**
+ * Returns true if the given ISO date string is within 14 days of now
+ * (or already past), so the UI can warn that a QBO OAuth token is expiring.
+ * Returns false for null (token not yet fetched / no expiry recorded).
+ */
+export function isTokenExpiringSoon(expiresAt: string | null): boolean {
+  if (expiresAt === null) return false;
+  const expiresMs = Date.parse(expiresAt);
+  if (isNaN(expiresMs)) return false;
+  const nowMs = Date.now();
+  const fourteenDaysMs = 14 * 24 * 60 * 60 * 1000;
+  return expiresMs - nowMs <= fourteenDaysMs;
+}
+
 // ============================================================ Mutations
 
 export async function repostJournal(id: string): Promise<void> {
@@ -113,7 +129,5 @@ export async function repostJournal(id: string): Promise<void> {
   });
   if (error) throw error;
   if (data?.error) throw new Error(data.error ?? 'Repost failed');
-  // entityType 'qbo_daily_journals' is not yet in the EntityType union;
-  // pass entityId only so the row is still queryable by id.
-  await logAction('repost_journal', 'qbo_journal', id, { entityId: id });
+  await logAction('repost_journal', 'qbo_journal', id, { entityType: 'qbo_daily_journals', entityId: id });
 }
