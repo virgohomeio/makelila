@@ -385,3 +385,55 @@
   font-size: 10px;
   font-variant-numeric: tabular-nums;
 }
+
+/* To-Build column — replacement units still needed (no stock) */
+.buildDemandCard {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-left: 3px solid #c05621;
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+}
+.buildDemandCard[data-next='true'] {
+  border-left-color: #6b46c1;
+  background: #faf5ff;
+}
+.buildDemandTop {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+.buildDemandNext {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #6b46c1;
+  background: #e9d8fd;
+  border-radius: 999px;
+  padding: 1px 6px;
+}
+.buildDemandQty {
+  font-size: 12px;
+  font-weight: 600;
+  color: #c05621;
+  margin-top: 3px;
+}
+.buildDemandCard[data-next='true'] .buildDemandQty { color: #6b46c1; }
+.buildDemandSub {
+  font-size: 10px;
+  color: #718096;
+  margin-bottom: 6px;
+}
+.buildDemandBtn {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border: 1px solid #cbd5e0;
+  border-radius: 4px;
+  background: #fff;
+  cursor: pointer;
+}
+.buildDemandBtn:hover { background: #f7fafc; }

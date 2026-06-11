@@ -2,13 +2,18 @@ import { useState } from 'react';
 import { createPO } from '../../lib/build';
 import styles from './Build.module.css';
 
-type Props = { onClose: () => void; onCreated?: () => void; };
+type Props = {
+  onClose: () => void;
+  onCreated?: () => void;
+  // Seed the form from a "Start a PO" action on the To-Build column.
+  prefill?: { batch?: string; qty_ordered?: number };
+};
 
-export function NewPOModal({ onClose, onCreated }: Props) {
+export function NewPOModal({ onClose, onCreated, prefill }: Props) {
   const [form, setForm] = useState({
     po_number: '',
-    batch: 'P100',
-    qty_ordered: 100,
+    batch: prefill?.batch ?? 'P100',
+    qty_ordered: prefill?.qty_ordered ?? 100,
     unit_cost_usd: '',
     manufacturer: 'Benliang',
     ship_target_date: '',
