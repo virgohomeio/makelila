@@ -21,7 +21,7 @@ const WORKSPACE = [
   { to: '/stock',        title: 'Stock',        subtitle: 'Units, parts, batches',                 icon: '📊', iconBg: '#e6f4ea' },
   { to: '/customers',    title: 'Customers',    subtitle: 'Directory & journey stages',            icon: '👥', iconBg: '#f5f1eb' },
   { to: '/marketing',    title: 'Marketing',    subtitle: 'Campaign attribution, CAC dashboard',   icon: '📣', iconBg: '#fef9f0' },
-  { to: '/activity-log', title: 'Activity Log', subtitle: 'Audit trail',                           icon: '📜', iconBg: '#f5f1eb' },
+  { to: '/team',         title: 'Team',         subtitle: 'Activity log & team tools',             icon: '👤', iconBg: '#f5f1eb' },
 ];
 
 const MARKETING_ROLES = ['pedrum@virgohome.io', 'huayi@virgohome.io', 'george@virgohome.io'];

@@ -11,7 +11,7 @@ const MODULES = [
   { path: '/stock',         label: 'Stock' },
   { path: '/customers',     label: 'Customers' },
   { path: '/marketing',     label: 'Marketing' },
-  { path: '/activity-log',  label: 'Activity Log' },
+  { path: '/team',          label: 'Team' },
   { path: '/finance',       label: 'Finance' },
 ];
 

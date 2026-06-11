@@ -26,6 +26,7 @@ const Stock       = lazy(() => import('./modules/Stock'));
 const Customers   = lazy(() => import('./modules/Customers'));
 const Templates   = lazy(() => import('./modules/Templates'));
 const ActivityLog = lazy(() => import('./modules/ActivityLog'));
+const Team        = lazy(() => import('./modules/Team'));
 const Marketing   = lazy(() => import('./modules/Marketing'));
 const Finance     = lazy(() => import('./modules/Finance'));
 
@@ -101,7 +102,8 @@ export default function App() {
             <Route path="customers"     element={<LazyRoute><Customers /></LazyRoute>} />
             <Route path="templates"     element={<Navigate to="/order-review" replace />} />
             <Route path="marketing"     element={<LazyRoute><Marketing /></LazyRoute>} />
-            <Route path="activity-log"  element={<LazyRoute><ActivityLog /></LazyRoute>} />
+            <Route path="activity-log"  element={<Navigate to="/team" replace />} />
+            <Route path="team"          element={<LazyRoute><Team /></LazyRoute>} />
             <Route path="dashboard"     element={<Navigate to="/customers" replace />} />
             <Route path="finance" element={
               <RequireRole role="finance">
