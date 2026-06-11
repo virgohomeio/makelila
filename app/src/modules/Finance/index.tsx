@@ -1,16 +1,24 @@
 import { useState } from 'react';
 import { JournalPanel } from './JournalPanel';
+import { ProductionProjectionPanel } from './ProductionProjectionPanel';
 import styles from './Finance.module.css';
 
 type Tab = 'journals' | 'projections';
+type ProjectionsSubTab = 'production' | 'sales';
 
 const TABS: { key: Tab; label: string }[] = [
   { key: 'journals',    label: 'Journals' },
   { key: 'projections', label: 'Projections' },
 ];
 
+const PROJECTIONS_SUB_TABS: { key: ProjectionsSubTab; label: string }[] = [
+  { key: 'production', label: 'Production' },
+  { key: 'sales',      label: 'Sales' },
+];
+
 export default function Finance() {
   const [tab, setTab] = useState<Tab>('journals');
+  const [projectionsSubTab, setProjectionsSubTab] = useState<ProjectionsSubTab>('production');
 
   return (
     <div className={styles.layout}>
@@ -23,10 +31,26 @@ export default function Finance() {
           >{t.label}</button>
         ))}
       </div>
+
+      {tab === 'projections' && (
+        <div className={styles.subTabs}>
+          {PROJECTIONS_SUB_TABS.map(s => (
+            <button
+              key={s.key}
+              className={`${styles.subTab} ${projectionsSubTab === s.key ? styles.subTabActive : ''}`}
+              onClick={() => setProjectionsSubTab(s.key)}
+            >{s.label}</button>
+          ))}
+        </div>
+      )}
+
       <div className={styles.panel}>
         {tab === 'journals' && <JournalPanel />}
-        {tab === 'projections' && (
-          <div className={styles.empty}>Production &amp; Sales Projections — coming soon</div>
+        {tab === 'projections' && projectionsSubTab === 'production' && (
+          <ProductionProjectionPanel />
+        )}
+        {tab === 'projections' && projectionsSubTab === 'sales' && (
+          <div className={styles.empty}>Sales Projections — coming soon</div>
         )}
       </div>
     </div>

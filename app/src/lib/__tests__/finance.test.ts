@@ -16,7 +16,7 @@ vi.mock('../supabase', () => ({
 
 vi.mock('../activityLog', () => ({ logAction: logActionMock }));
 
-import { repostJournal, isTokenExpiringSoon } from '../finance';
+import { repostJournal, isTokenExpiringSoon, projectStockout, computeRiskLevel } from '../finance';
 
 // ------------------------------------------------------------------ helpers
 
@@ -100,5 +100,51 @@ describe('isTokenExpiringSoon', () => {
 
   it('returns false for null', () => {
     expect(isTokenExpiringSoon(null)).toBe(false);
+  });
+});
+
+// ================================================================== projectStockout
+
+describe('projectStockout', () => {
+  it('returns null when velocity is 0', () => {
+    expect(projectStockout({ ready: 10, velocity: 0, replacementQueue: 0, today: '2026-06-11' })).toBeNull();
+  });
+
+  it('returns today when demand already exceeds ready stock with no inbound', () => {
+    expect(projectStockout({ ready: 5, velocity: 1, replacementQueue: 10, inboundUnits: 0, today: '2026-06-11' })).toBe('2026-06-11');
+  });
+
+  it('projects stockout date at correct future date', () => {
+    // 10 ready, 2/week velocity, no replacement queue, no inbound → runs out in 5 weeks = ~35 days
+    const result = projectStockout({ ready: 10, velocity: 2, replacementQueue: 0, today: '2026-06-11' });
+    expect(result).not.toBeNull();
+    const daysOut = (Date.parse(result!) - Date.parse('2026-06-11')) / (24 * 3600_000);
+    expect(daysOut).toBeGreaterThan(30);
+    expect(daysOut).toBeLessThan(40);
+  });
+
+  it('extends stockout when inbound batch arrives', () => {
+    // Without inbound: 4 ready, 2/week → 2 weeks
+    const withoutInbound = projectStockout({ ready: 4, velocity: 2, replacementQueue: 0, today: '2026-06-11' });
+    // With inbound of 20 units arriving in 1 week: much later
+    const withInbound = projectStockout({ ready: 4, velocity: 2, replacementQueue: 0, inboundUnits: 20, inboundArrivalDate: '2026-06-18', today: '2026-06-11' });
+    expect(Date.parse(withInbound!)).toBeGreaterThan(Date.parse(withoutInbound!));
+  });
+});
+
+// ================================================================== computeRiskLevel
+
+describe('computeRiskLevel', () => {
+  it('returns green for null stockout date', () => {
+    expect(computeRiskLevel(null, '2026-06-11')).toBe('green');
+  });
+  it('returns red for stockout within 30 days', () => {
+    expect(computeRiskLevel('2026-06-20', '2026-06-11')).toBe('red');
+  });
+  it('returns amber for stockout 30-90 days away', () => {
+    expect(computeRiskLevel('2026-08-11', '2026-06-11')).toBe('amber');
+  });
+  it('returns green for stockout > 90 days away', () => {
+    expect(computeRiskLevel('2027-01-01', '2026-06-11')).toBe('green');
   });
 });

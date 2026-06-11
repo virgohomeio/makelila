@@ -66,6 +66,7 @@ export type Batch = {
   invoice_no: string | null;
   invoice_date: string | null;
   arrived_at: string | null;
+  expected_arrival_date: string | null;
   destination: string | null;
   notes: string | null;
   phases: Array<{ phase: string; start: string; end: string; label: string }>;

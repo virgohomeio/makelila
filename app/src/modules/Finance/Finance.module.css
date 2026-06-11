@@ -211,3 +211,16 @@
   .panel { padding: 12px; }
   .tableWrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 }
+
+/* ── Production Projection ── */
+.projectionPanel { padding: 0 20px 20px; }
+.projectionTitle { font-size: 15px; font-weight: 600; color: var(--color-ink); margin: 16px 0 2px; }
+.projectionSubtitle { font-size: 11px; color: var(--color-ink-muted); margin: 0 0 16px; }
+.riskBanner { padding: 10px 14px; background: #fff5f5; border: 1px solid #fc8181; border-radius: var(--radius-sm); color: #9b2c2c; font-size: 12px; margin-bottom: 16px; }
+.riskGreen { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; color: #276749; background: #f0fff4; border: 1px solid #9ae6b4; }
+.riskAmber { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; color: #c05621; background: #fffaf0; border: 1px solid #fbd38d; }
+.riskRed   { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; color: #9b2c2c; background: #fff5f5; border: 1px solid #fc8181; }
+.subTabs { display: flex; gap: 4px; padding: 12px 20px 0; border-bottom: 1px solid var(--color-border); background: var(--color-surface); }
+.subTab { padding: 8px 14px; font-size: 11px; font-weight: 600; color: var(--color-ink-muted); background: transparent; border: none; border-bottom: 2px solid transparent; cursor: pointer; white-space: nowrap; }
+.subTab:hover { color: var(--color-ink); }
+.subTabActive { color: var(--color-ink); border-bottom-color: var(--color-crimson); }
