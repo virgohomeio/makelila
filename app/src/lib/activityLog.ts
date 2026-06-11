@@ -14,7 +14,8 @@ export type EntityType =
   | 'depot_repair'
   | 'warranty_registration'
   | 'customer'
-  | 'parts_kit_shipment';
+  | 'parts_kit_shipment'
+  | 'qbo_daily_journals';
 
 // PostgREST returns embedded relations as either an object or an array.
 function toEntry(row: Record<string, unknown>): ActivityLogEntry {
