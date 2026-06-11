@@ -41,3 +41,81 @@
   flex: 1;
   overflow: hidden;
 }
+
+/* ── Team tab ── */
+.teamGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 16px;
+  padding: 24px;
+}
+
+.memberCard {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: #fff;
+}
+
+.avatar {
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: var(--color-crimson);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  letter-spacing: 0.5px;
+}
+
+.memberInfo {
+  flex: 1;
+  min-width: 0;
+}
+
+.memberName {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-ink);
+  margin-bottom: 2px;
+}
+
+.memberEmail {
+  font-size: 11px;
+  color: var(--color-ink-muted);
+  margin-bottom: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.moduleList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.moduleBadge {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--color-surface);
+  color: var(--color-crimson);
+  border: 1px solid var(--color-border);
+  text-decoration: none;
+  transition: background 0.1s, border-color 0.1s;
+}
+.moduleBadge:hover {
+  background: var(--color-crimson);
+  color: #fff;
+  border-color: var(--color-crimson);
+}

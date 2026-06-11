@@ -48,7 +48,7 @@ function LazyRoute({ children }: { children: React.ReactNode }) {
 function HomeRoute() {
   const isMobile = useIsMobile();
   if (isMobile) return <MobileHome />;
-  return <Navigate to="/order-review" replace />;
+  return <Navigate to="/team" replace />;
 }
 
 function DashboardRoute() {

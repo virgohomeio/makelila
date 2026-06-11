@@ -5,13 +5,13 @@ import { useAuth } from '../lib/auth';
 import { canView } from '../lib/permissions';
 
 const MODULES = [
+  { path: '/team',          label: 'Team' },
+  { path: '/marketing',     label: 'Marketing' },
   { path: '/order-review',  label: 'Sales' },
   { path: '/fulfillment',   label: 'Fulfillment' },
-  { path: '/service',       label: 'Service' },
   { path: '/stock',         label: 'Stock' },
+  { path: '/service',       label: 'Service' },
   { path: '/customers',     label: 'Customers' },
-  { path: '/marketing',     label: 'Marketing' },
-  { path: '/team',          label: 'Team' },
   { path: '/finance',       label: 'Finance' },
 ];
 
