@@ -1,12 +1,10 @@
-import { useMemo, useEffect, useState } from 'react';
 import {
   useBuildQCStat,
+  useDailyPassTrend,
   type StationPassStation,
   type BuildQCStat,
   type TechnicianStat,
-  type StationPass,
 } from '../../lib/build';
-import { supabase } from '../../lib/supabase';
 import styles from './Build.module.css';
 
 const STATION_LABELS: Record<StationPassStation, string> = {
@@ -28,51 +26,6 @@ function defaultDateRange(): { from: string; to: string } {
     from: from.toISOString().slice(0, 10),
     to: to.toISOString().slice(0, 10),
   };
-}
-
-/** Fetch all passes in range for day-level FPY trend (last 30 days). */
-function useDailyPassTrend(date_from: string, date_to: string): {
-  days: { date: string; fpy: number; total: number }[];
-  loading: boolean;
-} {
-  const [rows, setRows] = useState<StationPass[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      setLoading(true);
-      const { data, error } = await supabase
-        .from('build_station_passes')
-        .select('unit_serial, station, pass_status, attempt_seq, created_at')
-        .gte('created_at', date_from)
-        .lte('created_at', date_to);
-      if (cancelled) return;
-      if (!error && data) setRows(data as StationPass[]);
-      setLoading(false);
-    })();
-    return () => { cancelled = true; };
-  }, [date_from, date_to]);
-
-  const days = useMemo(() => {
-    // Group by calendar day
-    const byDay = new Map<string, StationPass[]>();
-    for (const row of rows) {
-      const day = row.created_at.slice(0, 10);
-      if (!byDay.has(day)) byDay.set(day, []);
-      byDay.get(day)!.push(row);
-    }
-    return [...byDay.entries()]
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([date, dayRows]) => {
-        const units = [...new Set(dayRows.map(r => r.unit_serial))];
-        const firstAttemptPasses = dayRows.filter(r => r.attempt_seq === 1 && r.pass_status === 'pass');
-        const fpy = units.length > 0 ? (firstAttemptPasses.length / units.length) * 100 : 0;
-        return { date, fpy, total: dayRows.length };
-      });
-  }, [rows]);
-
-  return { days, loading };
 }
 
 export function BuildQCDashboard({ batch, dateRange }: Props) {

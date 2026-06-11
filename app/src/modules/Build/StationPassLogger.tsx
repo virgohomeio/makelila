@@ -1,10 +1,10 @@
 import { useState } from 'react';
-import { supabase } from '../../lib/supabase';
 import {
   type StationPassStation,
   type StationPassStatus,
   type StationPassDefectCategory,
   recordStationPass,
+  uploadStationPassPhotos,
 } from '../../lib/build';
 import styles from './Build.module.css';
 
@@ -55,24 +55,19 @@ export function StationPassLogger({ unitSerial, onClose }: Props) {
   async function handleSubmit() {
     if (!station) { setError('Select a station'); return; }
     if (!passStatus) { setError('Select a result'); return; }
+    if (files && files.length > 5) { setError('Maximum 5 photos per pass'); return; }
+    if (files) {
+      for (const file of Array.from(files)) {
+        if (file.size > 10 * 1024 * 1024) { setError(`${file.name} exceeds the 10 MB limit`); return; }
+      }
+    }
     setBusy(true);
     setError(null);
     try {
       // Upload photos first
-      const photoUrls: string[] = [];
-      if (files && files.length > 0) {
-        for (let i = 0; i < files.length; i++) {
-          const file = files[i];
-          const timestamp = Date.now();
-          const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-          const path = `${unitSerial}/${timestamp}-${i}-${safeName}`;
-          const { error: uploadErr } = await supabase.storage
-            .from('build-attachments')
-            .upload(path, file, { cacheControl: '3600', upsert: false });
-          if (uploadErr) throw uploadErr;
-          photoUrls.push(path);
-        }
-      }
+      const photoUrls = files && files.length > 0
+        ? await uploadStationPassPhotos(unitSerial, Array.from(files))
+        : [];
 
       await recordStationPass({
         unit_serial: unitSerial,

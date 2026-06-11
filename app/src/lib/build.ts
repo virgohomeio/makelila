@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase } from './supabase';
 import { logAction } from './activityLog';
@@ -471,6 +471,19 @@ export async function attachmentSignedUrl(file_path: string): Promise<string | n
   return data.signedUrl;
 }
 
+export async function uploadStationPassPhotos(unitSerial: string, files: File[]): Promise<string[]> {
+  const paths: string[] = [];
+  for (const file of files) {
+    const path = `${unitSerial}/${Date.now()}-${file.name}`;
+    const { error } = await supabase.storage
+      .from('build-attachments')
+      .upload(path, file, { cacheControl: '3600', upsert: false });
+    if (error) throw error;
+    paths.push(path);
+  }
+  return paths;
+}
+
 // ============================================================ Station Pass Types
 
 export type StationPassStation = 'electrical' | 'mechanical' | 'firmware_flash' | 'final_qa';
@@ -576,17 +589,19 @@ export function useBuildQCStat(
     let cancelled = false;
     (async () => {
       setLoading(true);
+      const dateTo = date_to.endsWith('Z') ? date_to : date_to + 'T23:59:59Z';
       let q = supabase
         .from('build_station_passes')
         .select('station, pass_status, defect_category, technician_id, unit_serial, attempt_seq, created_at')
         .gte('created_at', date_from)
-        .lte('created_at', date_to);
+        .lte('created_at', dateTo);
       if (batch) {
         // Join to units to filter by batch
         const { data: unitSerials } = await supabase
           .from('units')
           .select('serial')
           .eq('batch', batch);
+        if (cancelled) return;
         if (unitSerials && unitSerials.length > 0) {
           const serials = (unitSerials as { serial: string }[]).map(u => u.serial);
           q = q.in('unit_serial', serials);
@@ -642,6 +657,50 @@ export function useBuildQCStat(
   return { qcStats, techStats, loading };
 }
 
+export function useDailyPassTrend(date_from: string, date_to: string): {
+  days: { date: string; fpy: number; total: number }[];
+  loading: boolean;
+} {
+  const [rows, setRows] = useState<StationPass[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      const dateTo = date_to.endsWith('Z') ? date_to : date_to + 'T23:59:59Z';
+      const { data, error } = await supabase
+        .from('build_station_passes')
+        .select('unit_serial, station, pass_status, attempt_seq, created_at')
+        .gte('created_at', date_from)
+        .lte('created_at', dateTo);
+      if (cancelled) return;
+      if (!error && data) setRows(data as StationPass[]);
+      setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [date_from, date_to]);
+
+  const days = useMemo(() => {
+    const byDay = new Map<string, StationPass[]>();
+    for (const row of rows) {
+      const day = row.created_at.slice(0, 10);
+      if (!byDay.has(day)) byDay.set(day, []);
+      byDay.get(day)!.push(row);
+    }
+    return [...byDay.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, dayRows]) => {
+        const units = [...new Set(dayRows.map(r => r.unit_serial))];
+        const firstAttemptPasses = dayRows.filter(r => r.attempt_seq === 1 && r.pass_status === 'pass');
+        const fpy = units.length > 0 ? (firstAttemptPasses.length / units.length) * 100 : 0;
+        return { date, fpy, total: dayRows.length };
+      });
+  }, [rows]);
+
+  return { days, loading };
+}
+
 // ============================================================ Station Pass Mutations
 
 export async function recordStationPass(input: {
@@ -655,44 +714,52 @@ export async function recordStationPass(input: {
 }): Promise<{ id: string }> {
   const { unit_serial, station } = input;
 
-  // Compute next attempt_seq
-  const { data: maxRow } = await supabase
-    .from('build_station_passes')
-    .select('attempt_seq')
-    .eq('unit_serial', unit_serial)
-    .eq('station', station)
-    .order('attempt_seq', { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  const attempt_seq = nextAttemptSeq((maxRow as { attempt_seq: number } | null)?.attempt_seq);
-
   const { data: authData } = await supabase.auth.getUser();
   const technician_id = authData.user?.id ?? null;
 
-  const { data, error } = await supabase
-    .from('build_station_passes')
-    .insert({
-      unit_serial,
-      station,
-      pass_status: input.pass_status,
-      attempt_seq,
-      defect_category: input.defect_category ?? null,
-      defect_notes: input.defect_notes ?? null,
-      technician_id,
-      firmware_version: input.firmware_version ?? null,
-      photo_urls: input.photo_urls ?? [],
-    })
-    .select('id')
-    .single();
+  // attempt_seq race: unique constraint (unit_serial, station, attempt_seq) serializes
+  // concurrent inserts; retry on conflict (Postgres error code 23505).
+  let retries = 3;
+  while (retries-- > 0) {
+    const { data: maxRow } = await supabase
+      .from('build_station_passes')
+      .select('attempt_seq')
+      .eq('unit_serial', unit_serial)
+      .eq('station', station)
+      .order('attempt_seq', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const attempt_seq = nextAttemptSeq((maxRow as { attempt_seq: number } | null)?.attempt_seq);
 
-  if (error || !data) throw error ?? new Error('recordStationPass failed');
+    const { data, error } = await supabase
+      .from('build_station_passes')
+      .insert({
+        unit_serial,
+        station,
+        pass_status: input.pass_status,
+        attempt_seq,
+        defect_category: input.defect_category ?? null,
+        defect_notes: input.defect_notes ?? null,
+        technician_id,
+        firmware_version: input.firmware_version ?? null,
+        photo_urls: input.photo_urls ?? [],
+      })
+      .select('id')
+      .single();
 
-  await logAction(
-    'station_pass_recorded',
-    unit_serial,
-    `${station}: ${input.pass_status} (attempt ${attempt_seq})`,
-    { entityType: 'unit', entityId: unit_serial, unitSerial: unit_serial },
-  );
+    if (!error && data) {
+      await logAction(
+        'station_pass_recorded',
+        unit_serial,
+        `${station}: ${input.pass_status} (attempt ${attempt_seq})`,
+        { entityType: 'unit', entityId: unit_serial, unitSerial: unit_serial },
+      );
+      return { id: (data as { id: string }).id };
+    }
+    if (error && (error as { code?: string }).code !== '23505') throw error;
+    if (retries === 0) throw new Error('Failed to compute attempt_seq after 3 retries');
+  }
 
-  return { id: (data as { id: string }).id };
+  // TypeScript requires a return path here; the loop above always throws or returns.
+  throw new Error('recordStationPass: unexpected exit');
 }

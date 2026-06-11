@@ -93,4 +93,29 @@ create trigger station_pass_sync
   for each row execute function public.sync_unit_from_station_pass();
 
 -- ============================================================ realtime
-alter publication supabase_realtime add table public.build_station_passes;
+-- Wrapped in DO block to make it idempotent (re-running migration won't fail if
+-- the table is already in the publication).
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and tablename = 'build_station_passes'
+  ) then
+    alter publication supabase_realtime add table public.build_station_passes;
+  end if;
+end $$;
+
+-- ============================================================ DELETE protection
+-- build_station_passes rows are permanent events. There is intentionally no
+-- DELETE RLS policy; the trigger below enforces immutability at the DB level.
+create or replace function public.deny_station_pass_delete() returns trigger language plpgsql as $$
+begin
+  raise exception 'build_station_passes rows are permanent — they cannot be deleted';
+  return null;
+end $$;
+
+drop trigger if exists station_pass_no_delete on public.build_station_passes;
+create trigger station_pass_no_delete
+  before delete on public.build_station_passes
+  for each row execute function public.deny_station_pass_delete();
