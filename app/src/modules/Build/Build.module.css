@@ -60,7 +60,7 @@
 
 .board {
   display: grid;
-  grid-template-columns: repeat(6, 1fr);
+  grid-template-columns: repeat(7, minmax(160px, 1fr));
   gap: 8px;
   padding: 12px;
   flex: 1;
@@ -72,7 +72,7 @@
   border-radius: var(--radius-sm);
   display: flex;
   flex-direction: column;
-  min-width: 180px;
+  min-width: 0;
 }
 .columnHead {
   padding: 10px 12px;
