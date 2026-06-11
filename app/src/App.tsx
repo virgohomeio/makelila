@@ -1,6 +1,7 @@
 import { lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
-import { AuthProvider, ProtectedRoute } from './lib/auth';
+import { AuthProvider, ProtectedRoute, useAuth } from './lib/auth';
+import { canView, type Role } from './lib/permissions';
 import { AppShell } from './components/AppShell';
 import { MobileHome } from './components/MobileHome';
 import { useIsMobile } from './lib/useMediaQuery';
@@ -27,6 +28,14 @@ const Customers   = lazy(() => import('./modules/Customers'));
 const Templates   = lazy(() => import('./modules/Templates'));
 const ActivityLog = lazy(() => import('./modules/ActivityLog'));
 const Marketing   = lazy(() => import('./modules/Marketing'));
+const Finance     = lazy(() => import('./modules/Finance'));
+
+function RequireRole({ children }: { role: Role; children: React.ReactNode }) {
+  const { role: userRole, loading } = useAuth();
+  if (loading) return <div style={{ padding: 24 }}>Loading…</div>;
+  if (!userRole || !canView(userRole, 'finance')) return <Navigate to="/" replace />;
+  return <>{children}</>;
+}
 
 function LazyRoute({ children }: { children: React.ReactNode }) {
   return (
@@ -95,6 +104,11 @@ export default function App() {
             <Route path="marketing"     element={<LazyRoute><Marketing /></LazyRoute>} />
             <Route path="activity-log"  element={<LazyRoute><ActivityLog /></LazyRoute>} />
             <Route path="dashboard"     element={<DashboardRoute />} />
+            <Route path="finance" element={
+              <RequireRole role="finance">
+                <LazyRoute><Finance /></LazyRoute>
+              </RequireRole>
+            } />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

@@ -2,6 +2,7 @@ import { Link, NavLink } from 'react-router-dom';
 import styles from './GlobalNav.module.css';
 import { UserBadge } from './UserBadge';
 import { useAuth } from '../lib/auth';
+import { canView } from '../lib/permissions';
 
 const MODULES = [
   { path: '/dashboard',     label: 'Dashboard' },
@@ -15,17 +16,20 @@ const MODULES = [
   { path: '/templates',     label: 'Templates' },
   { path: '/marketing',     label: 'Marketing' },
   { path: '/activity-log',  label: 'Activity Log' },
+  { path: '/finance',       label: 'Finance' },
 ];
 
 const MARKETING_ROLES = ['pedrum@virgohome.io', 'huayi@virgohome.io', 'george@virgohome.io'];
 
 export function GlobalNav() {
-  const { user } = useAuth();
+  const { user, role } = useAuth();
   const userEmail = user?.email ?? '';
 
-  const visibleModules = MODULES.filter(m =>
-    m.path !== '/marketing' || MARKETING_ROLES.includes(userEmail.toLowerCase())
-  );
+  const visibleModules = MODULES.filter(m => {
+    if (m.path === '/marketing') return MARKETING_ROLES.includes(userEmail.toLowerCase());
+    if (m.path === '/finance') return canView(role, 'finance');
+    return true;
+  });
 
   return (
     <nav className={styles.nav}>

@@ -20,7 +20,8 @@ export type Action =
   | 'approve_refund_finance'
   | 'deny_refund'
   | 'dispose_unit'                  // Reina's Returns disposition writes
-  | 'edit_warranty_registration';   // Junaid's warranty write path
+  | 'edit_warranty_registration'    // Junaid's warranty write path
+  | 'repost_journal';               // Finance QBO journal repost
 
 export type Module =
   | 'finance'      // restricted to finance + admin only
@@ -41,6 +42,7 @@ const ACTION_ROLES: Record<Action, Role[]> = {
   deny_refund:                ['manager', 'finance', 'admin'],
   dispose_unit:               ['manager', 'finance', 'admin'],
   edit_warranty_registration: ['operator', 'manager', 'finance', 'admin'],
+  repost_journal:             ['finance', 'admin'],
 };
 
 const RESTRICTED_MODULES: Module[] = ['finance'];

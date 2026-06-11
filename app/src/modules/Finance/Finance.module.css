@@ -1,0 +1,205 @@
+/* ============================================================ Layout */
+.layout {
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  min-height: calc(100vh - 200px);
+  overflow: hidden;
+}
+.header {
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+
+/* ============================================================ Tabs */
+.tabs {
+  display: flex;
+  gap: 2px;
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+  padding: 0 12px;
+}
+.tab {
+  background: transparent;
+  border: none;
+  padding: 12px 18px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  color: var(--color-ink-muted);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+}
+.tab:hover { color: var(--color-ink); }
+.tab.active {
+  color: var(--color-crimson);
+  border-bottom-color: var(--color-crimson);
+}
+.panel { padding: 18px 20px; }
+
+/* ============================================================ Filter row */
+.filterRow {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+/* ============================================================ Chips */
+.chip {
+  border: 1px solid var(--color-border);
+  background: #fff;
+  color: var(--color-ink-muted);
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.chip:hover { border-color: var(--color-ink-subtle); color: var(--color-ink); }
+.chipActive {
+  background: var(--color-crimson);
+  color: #fff;
+  border-color: var(--color-crimson);
+}
+
+/* ============================================================ Table */
+.tableWrap {
+  overflow-x: auto;
+}
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+.table th {
+  text-align: left;
+  background: var(--color-surface);
+  padding: 7px 10px;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--color-ink-subtle);
+  border-bottom: 1px solid var(--color-border);
+  white-space: nowrap;
+}
+.table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid #f0eee8;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+.row { cursor: default; }
+.row:hover { background: rgba(204, 45, 48, 0.04); }
+
+/* ============================================================ Pills */
+.pill {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 800;
+  padding: 2px 7px;
+  border-radius: 10px;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
+
+/* ============================================================ Status chips */
+.statusChip {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 800;
+  padding: 2px 8px;
+  border-radius: 10px;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
+.statusPosted  { color: #276749; background: #f0fff4; }
+.statusPending { color: #856a0a; background: #fffbeb; }
+.statusError   { color: #a51b1b; background: #fff5f5; }
+
+/* ============================================================ QBO token warning */
+.tokenWarning {
+  margin-bottom: 12px;
+  padding: 10px 14px;
+  background: #fffaf0;
+  border-left: 4px solid #c05621;
+  border-radius: 4px;
+  font-size: 13px;
+  color: #7b341e;
+}
+
+/* ============================================================ Amounts */
+.netDeposit { font-variant-numeric: tabular-nums; font-weight: 700; }
+.amountNeg  { color: #a51b1b; }
+.amountPos  { color: #276749; }
+
+/* ============================================================ Empty / loading */
+.empty {
+  padding: 40px 20px;
+  text-align: center;
+  color: var(--color-ink-subtle);
+  font-size: 13px;
+}
+.loading {
+  padding: 40px;
+  text-align: center;
+  color: var(--color-ink-subtle);
+  font-size: 13px;
+}
+
+/* ============================================================ Buttons */
+.btnPrimary {
+  background: var(--color-crimson);
+  color: #fff;
+  border: none;
+  padding: 7px 14px;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.btnPrimary:hover { background: var(--color-crimson-dark); }
+.btnPrimary:disabled { opacity: 0.5; cursor: not-allowed; }
+.btnSecondary {
+  background: #fff;
+  color: var(--color-ink-muted);
+  border: 1px solid var(--color-border);
+  padding: 7px 14px;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btnSecondary:hover { border-color: var(--color-ink-subtle); color: var(--color-ink); }
+
+/* ============================================================ Inputs */
+.input {
+  padding: 6px 9px;
+  font-size: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+  background: #fff;
+}
+.input:focus { outline: none; border-color: var(--color-crimson); }
+
+.select {
+  padding: 6px 9px;
+  font-size: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+  background: #fff;
+}
+.select:focus { outline: none; border-color: var(--color-crimson); }
+
+/* ============================================================ Mobile */
+@media (max-width: 700px) {
+  .panel { padding: 12px; }
+  .tableWrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+}
