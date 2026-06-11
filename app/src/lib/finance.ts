@@ -107,6 +107,8 @@ export function useQboOAuthStatus(): {
 
 // ============================================================ Pure helpers
 
+export const QBO_TOKEN_WARNING_DAYS = 14;
+
 /**
  * Returns true if the given ISO date string is within 14 days of now
  * (or already past), so the UI can warn that a QBO OAuth token is expiring.
@@ -117,8 +119,8 @@ export function isTokenExpiringSoon(expiresAt: string | null): boolean {
   const expiresMs = Date.parse(expiresAt);
   if (isNaN(expiresMs)) return false;
   const nowMs = Date.now();
-  const fourteenDaysMs = 14 * 24 * 60 * 60 * 1000;
-  return expiresMs - nowMs <= fourteenDaysMs;
+  const thresholdMs = QBO_TOKEN_WARNING_DAYS * 24 * 60 * 60 * 1000;
+  return expiresMs - nowMs <= thresholdMs;
 }
 
 // ============================================================ Mutations

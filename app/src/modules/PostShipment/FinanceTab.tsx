@@ -1,9 +1,9 @@
+import { useState } from 'react';
 import { useQboJournals } from '../../lib/finance';
 import { useAuth } from '../../lib/auth';
 import { canView } from '../../lib/permissions';
 import styles from './PostShipment.module.css';
 
-// Compute once per session — these don't change while the app is open.
 function getDateRange(): { from: string; to: string } {
   const to = new Date();
   const from = new Date(to);
@@ -12,9 +12,8 @@ function getDateRange(): { from: string; to: string } {
   return { from: fmt(from), to: fmt(to) };
 }
 
-const { from, to } = getDateRange();
-
 export function FinanceTab() {
+  const [{ from, to }] = useState(() => getDateRange());
   const { role } = useAuth();
   const { journals, loading, error } = useQboJournals(from, to);
 

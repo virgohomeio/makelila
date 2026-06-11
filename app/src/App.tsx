@@ -1,7 +1,7 @@
 import { lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
 import { AuthProvider, ProtectedRoute, useAuth } from './lib/auth';
-import { canView, type Role } from './lib/permissions';
+import { canView, type Role, type Module } from './lib/permissions';
 import { AppShell } from './components/AppShell';
 import { MobileHome } from './components/MobileHome';
 import { useIsMobile } from './lib/useMediaQuery';
@@ -30,10 +30,10 @@ const ActivityLog = lazy(() => import('./modules/ActivityLog'));
 const Marketing   = lazy(() => import('./modules/Marketing'));
 const Finance     = lazy(() => import('./modules/Finance'));
 
-function RequireRole({ children }: { role: Role; children: React.ReactNode }) {
+function RequireRole({ role, children }: { role: Module; children: React.ReactNode }) {
   const { role: userRole, loading } = useAuth();
   if (loading) return <div style={{ padding: 24 }}>Loading…</div>;
-  if (!userRole || !canView(userRole, 'finance')) return <Navigate to="/" replace />;
+  if (!canView(userRole, role)) return <Navigate to="/" replace />;
   return <>{children}</>;
 }
 

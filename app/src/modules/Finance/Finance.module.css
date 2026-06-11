@@ -198,6 +198,14 @@
 }
 .select:focus { outline: none; border-color: var(--color-crimson); }
 
+/* ============================================================ Inline-style replacements */
+.fieldLabel    { font-size: 11px; color: var(--color-ink-muted); font-weight: 600; }
+.sectionLabel  { margin-left: 8px; font-size: 11px; color: var(--color-ink-subtle); font-weight: 600; }
+.repostError   { margin-bottom: 8px; padding: 6px 10px; background: #fff5f5; border: 1px solid #fed7d7; border-radius: 4px; font-size: 12px; color: #a51b1b; }
+.errorDetail   { display: block; font-size: 10px; color: #a51b1b; margin-top: 2px; }
+.qboLink       { font-size: 11px; color: var(--color-crimson); }
+.dash          { color: var(--color-ink-subtle); font-size: 11px; }
+
 /* ============================================================ Mobile */
 @media (max-width: 700px) {
   .panel { padding: 12px; }

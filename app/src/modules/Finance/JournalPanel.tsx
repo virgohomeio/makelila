@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useQboJournals, repostJournal, useQboOAuthStatus } from '../../lib/finance';
+import { useQboJournals, repostJournal, useQboOAuthStatus, isTokenExpiringSoon } from '../../lib/finance';
 import { useAuth } from '../../lib/auth';
 import { canDo } from '../../lib/permissions';
 import styles from './Finance.module.css';
@@ -50,15 +50,9 @@ export function JournalPanel() {
   });
 
   // QBO token warning: show if refreshExpiresAt is within 14 days of today
-  let tokenWarning: string | null = null;
-  if (refreshExpiresAt) {
-    const expiresMs = new Date(refreshExpiresAt).getTime();
-    const nowMs = Date.now();
-    const daysLeft = (expiresMs - nowMs) / (1000 * 60 * 60 * 24);
-    if (daysLeft <= 14) {
-      tokenWarning = `QBO refresh token expires on ${fmtDate(refreshExpiresAt)}. Re-authenticate via the Finance settings to avoid disruption.`;
-    }
-  }
+  const tokenWarning = isTokenExpiringSoon(refreshExpiresAt)
+    ? `QBO refresh token expires on ${fmtDate(refreshExpiresAt!)}. Re-authenticate via the Finance settings to avoid disruption.`
+    : null;
 
   async function handleRepost(id: string) {
     setReposting(id);
@@ -80,7 +74,7 @@ export function JournalPanel() {
 
       {/* Date range + filter controls */}
       <div className={styles.filterRow}>
-        <label style={{ fontSize: 11, color: 'var(--color-ink-muted)', fontWeight: 600 }}>From</label>
+        <label className={styles.fieldLabel}>From</label>
         <input
           type="date"
           className={styles.input}
@@ -88,7 +82,7 @@ export function JournalPanel() {
           max={to}
           onChange={e => setFrom(e.target.value)}
         />
-        <label style={{ fontSize: 11, color: 'var(--color-ink-muted)', fontWeight: 600 }}>To</label>
+        <label className={styles.fieldLabel}>To</label>
         <input
           type="date"
           className={styles.input}
@@ -107,7 +101,7 @@ export function JournalPanel() {
             onClick={() => setCurrencyFilter(c)}
           >{c}</button>
         ))}
-        <span style={{ marginLeft: 8, fontSize: 11, color: 'var(--color-ink-subtle)', fontWeight: 600 }}>Channel:</span>
+        <span className={styles.sectionLabel}>Channel:</span>
         {channels.map(ch => (
           <button
             key={ch}
@@ -118,7 +112,7 @@ export function JournalPanel() {
       </div>
 
       {repostError && (
-        <div style={{ marginBottom: 8, padding: '6px 10px', background: '#fff5f5', border: '1px solid #fed7d7', borderRadius: 4, fontSize: 12, color: '#a51b1b' }}>
+        <div className={styles.repostError}>
           {repostError}
         </div>
       )}
@@ -173,7 +167,7 @@ export function JournalPanel() {
                     <td>
                       <span className={`${styles.statusChip} ${statusClass}`}>{statusLabel}</span>
                       {j.error && (
-                        <span style={{ display: 'block', fontSize: 10, color: '#a51b1b', marginTop: 2 }} title={j.error}>
+                        <span className={styles.errorDetail} title={j.error}>
                           {j.error.slice(0, 40)}{j.error.length > 40 ? '…' : ''}
                         </span>
                       )}
@@ -184,12 +178,12 @@ export function JournalPanel() {
                           href={`https://app.qbo.intuit.com/app/journal?txnId=${j.qbo_journal_id}`}
                           target="_blank"
                           rel="noopener noreferrer"
-                          style={{ fontSize: 11, color: 'var(--color-crimson)' }}
+                          className={styles.qboLink}
                         >
                           View in QBO
                         </a>
                       ) : (
-                        <span style={{ color: 'var(--color-ink-subtle)', fontSize: 11 }}>—</span>
+                        <span className={styles.dash}>—</span>
                       )}
                     </td>
                     {canRepost && (
