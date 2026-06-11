@@ -1,4 +1,6 @@
-import React, { useMemo, useState } from 'react';
+import React, { lazy, Suspense, useMemo, useState } from 'react';
+import { isTelemetryConfigured } from '../../lib/supabaseTelemetry';
+const Dashboard = lazy(() => import('../Dashboard'));
 import {
   useCustomers, syncCustomersFromHubspot, exportPurchasers, pushToKlaviyo,
   computeFuState, recordFollowUp, FU_STATE_META, FU1_DAYS, FU2_DAYS,
@@ -17,7 +19,7 @@ import { MobileBackHeader } from '../../components/MobileBackHeader';
 import { useCustomerEvents, useCustomerEngagement, eventMeta, dormancyBadge } from '../../lib/customerEvents';
 import styles from './Customers.module.css';
 
-type Tab = 'directory' | 'profitability' | 'journey';
+type Tab = 'directory' | 'profitability' | 'journey' | 'fleet';
 
 export default function Customers() {
   const [tab, setTab] = useState<Tab>('journey');
@@ -211,6 +213,7 @@ export default function Customers() {
       { key: 'journey',       label: 'Journey',       subtitle: '10-stage CJM · health per customer',           icon: '🛤️', iconBg: '#fef1f0' },
       { key: 'profitability', label: 'Profitability', subtitle: 'Revenue · returns · margin per customer',      icon: '💰', iconBg: '#fff3e0' },
       { key: 'directory',     label: 'Directory',     subtitle: 'All customers · search · follow-up state',     icon: '👥', iconBg: '#e3f0fb' },
+      { key: 'fleet',         label: 'Fleet',         subtitle: 'Live device telemetry · machine health',         icon: '📡', iconBg: '#e3f0fb' },
     ];
     return (
       <div className={styles.layout}>
@@ -239,8 +242,49 @@ export default function Customers() {
   const tabLabel =
     tab === 'journey'       ? 'Journey' :
     tab === 'profitability' ? 'Profitability' :
+    tab === 'fleet'         ? 'Fleet' :
                               'Directory';
   const onMobileBack = () => setMobileTabPicked(false);
+
+  if (tab === 'fleet') {
+    if (!isTelemetryConfigured) {
+      return (
+        <div className={styles.layout}>
+          {isMobile ? (
+            <MobileBackHeader label={tabLabel} onBack={onMobileBack} />
+          ) : (
+            <div className={styles.header}>
+              <div className={styles.titleRow}>
+                <h2 className={styles.title}>Customers</h2>
+                <CustomersTabs tab={tab} onChange={setTab} />
+              </div>
+            </div>
+          )}
+          <div style={{ padding: 24, color: '#4a5568' }}>
+            <h2 style={{ marginTop: 0 }}>Telemetry not configured</h2>
+            <p>Set <code>VITE_TELEMETRY_SUPABASE_URL</code> and <code>VITE_TELEMETRY_SUPABASE_ANON_KEY</code> in <code>.env</code> and reload.</p>
+          </div>
+        </div>
+      );
+    }
+    return (
+      <div className={styles.layout}>
+        {isMobile ? (
+          <MobileBackHeader label={tabLabel} onBack={onMobileBack} />
+        ) : (
+          <div className={styles.header}>
+            <div className={styles.titleRow}>
+              <h2 className={styles.title}>Customers</h2>
+              <CustomersTabs tab={tab} onChange={setTab} />
+            </div>
+          </div>
+        )}
+        <Suspense fallback={<div style={{ padding: 24 }}>Loading fleet…</div>}>
+          <Dashboard />
+        </Suspense>
+      </div>
+    );
+  }
 
   if (tab === 'profitability') {
     return (
@@ -897,6 +941,7 @@ function CustomersTabs({ tab, onChange }: { tab: Tab; onChange: (t: Tab) => void
     { key: 'journey',       label: 'Journey' },
     { key: 'profitability', label: 'Profitability' },
     { key: 'directory',     label: 'Directory' },
+    { key: 'fleet',         label: 'Fleet' },
   ];
   return (
     <div className={styles.customersTabs}>
