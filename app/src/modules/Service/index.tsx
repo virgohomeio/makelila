@@ -11,11 +11,11 @@ import styles from './Service.module.css';
 type Tab = 'inbox' | 'onboarding' | 'followups' | 'support' | 'replacement';
 
 const TABS: { key: Tab; label: string }[] = [
-  { key: 'inbox',       label: 'Inbox' },
   { key: 'onboarding',  label: 'Onboarding' },
   { key: 'followups',   label: 'Follow-ups' },
   { key: 'support',     label: 'Support Tickets' },
   { key: 'replacement', label: 'Replacement' },
+  { key: 'inbox',       label: 'Inbox' },
 ];
 
 const MOBILE_TAB_META: Record<Tab, { subtitle: string; icon: string; iconBg: string }> = {
@@ -27,7 +27,7 @@ const MOBILE_TAB_META: Record<Tab, { subtitle: string; icon: string; iconBg: str
 };
 
 export default function Service() {
-  const [tab, setTab] = useState<Tab>('inbox');
+  const [tab, setTab] = useState<Tab>('onboarding');
   const isMobile = useIsMobile();
 
   if (isMobile) {

@@ -1086,3 +1086,15 @@
   border-bottom: 1px solid #edf2f7;
 }
 .replSupplyTable th { font-weight: 600; color: #718096; }
+
+/* Side-by-side LILA Units / Parts & Consumables in the demand panel */
+.replSupplyCols {
+  display: flex;
+  gap: 40px;
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+.replSupplyCol {
+  flex: 1;
+  min-width: 260px;
+}

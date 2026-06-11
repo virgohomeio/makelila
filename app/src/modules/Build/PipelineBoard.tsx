@@ -7,6 +7,8 @@ import { BatchDetail } from './panels/BatchDetail';
 import { UnitDetail } from './panels/UnitDetail';
 import styles from './Build.module.css';
 
+export type BuildDemandRow = { batch: string; toBuild: number; isNextBatch: boolean };
+
 type Props = {
   orders: FactoryOrder[];
   shipments: FreightShipment[];
@@ -15,9 +17,14 @@ type Props = {
   units: Unit[];
   batchFilter: string;
   search: string;
+  // Replacement units still needed that we have no stock of (queued demand −
+  // ready). Surfaced as the left-most "To Build" column. P100X / pending
+  // batches are flagged isNextBatch so they queue separately.
+  buildDemand: BuildDemandRow[];
+  onStartPO: (batch: string, qty: number) => void;
 };
 
-export function PipelineBoard({ orders, shipments, defects, tests, units, batchFilter, search }: Props) {
+export function PipelineBoard({ orders, shipments, defects, tests, units, batchFilter, search, buildDemand, onStartPO }: Props) {
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const [selectedUnitSerial, setSelectedUnitSerial] = useState<string | null>(null);
 
@@ -50,9 +57,14 @@ export function PipelineBoard({ orders, shipments, defects, tests, units, batchF
       .map(t => ({ t, u: filteredUnits.find(u => u.serial === t.unit_serial) }))
       .filter(x => x.u) as { t: BurnInTest; u: Unit }[];
 
-    return { inProduction, inFreight, iqc, rework, inBurnIn, ready };
+    const toBuild = buildDemand
+      .filter(r => (batchFilter === 'all' || r.batch === batchFilter) && filterMatch(r.batch))
+      // current batches first, next-batch (P100X) queued separately at the end
+      .sort((a, b) => Number(a.isNextBatch) - Number(b.isNextBatch) || a.batch.localeCompare(b.batch));
+
+    return { toBuild, inProduction, inFreight, iqc, rework, inBurnIn, ready };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [orders, shipments, units, tests, batchFilter, search]);
+  }, [orders, shipments, units, tests, batchFilter, search, buildDemand]);
 
   const defectsBySerial = useMemo(() => {
     const m = new Map<string, BuildDefect[]>();
@@ -70,6 +82,19 @@ export function PipelineBoard({ orders, shipments, defects, tests, units, batchF
   return (
     <>
       <div className={styles.board}>
+        <Column title="To Build" count={cols.toBuild.length}>
+          {cols.toBuild.map(r => (
+            <div key={r.batch} className={styles.buildDemandCard} data-next={r.isNextBatch ? 'true' : undefined}>
+              <div className={styles.buildDemandTop}>
+                <strong>{r.batch}</strong>
+                {r.isNextBatch && <span className={styles.buildDemandNext}>next batch</span>}
+              </div>
+              <div className={styles.buildDemandQty}>{r.toBuild} unit{r.toBuild !== 1 ? 's' : ''} to build</div>
+              <div className={styles.buildDemandSub}>for queued replacements</div>
+              <button className={styles.buildDemandBtn} onClick={() => onStartPO(r.batch, r.toBuild)}>Start a PO</button>
+            </div>
+          ))}
+        </Column>
         <Column title="PO / Production" count={cols.inProduction.length}>
           {cols.inProduction.map(o => (
             <BatchCard key={o.id} mode="po" order={o}
