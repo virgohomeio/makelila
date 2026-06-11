@@ -63,6 +63,7 @@ export function NewPOModal({ onClose, onCreated, prefill }: Props) {
               <option value="P50N">P50N</option>
               <option value="P100">P100</option>
               <option value="P100X">P100X</option>
+              <option value="P150">P150</option>
               <option value="P200">P200</option>
             </select>
           </label>
