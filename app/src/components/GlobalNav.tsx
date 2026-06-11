@@ -5,15 +5,11 @@ import { useAuth } from '../lib/auth';
 import { canView } from '../lib/permissions';
 
 const MODULES = [
-  { path: '/dashboard',     label: 'Fleet' },
   { path: '/order-review',  label: 'Sales' },
   { path: '/fulfillment',   label: 'Fulfillment' },
-  { path: '/post-shipment', label: 'Post-Shipment' },
   { path: '/service',       label: 'Service' },
-  { path: '/build',         label: 'Build' },
   { path: '/stock',         label: 'Stock' },
   { path: '/customers',     label: 'Customers' },
-  { path: '/templates',     label: 'Templates' },
   { path: '/marketing',     label: 'Marketing' },
   { path: '/activity-log',  label: 'Activity Log' },
   { path: '/finance',       label: 'Finance' },

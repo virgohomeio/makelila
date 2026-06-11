@@ -15,17 +15,13 @@ const ATTENTION = [
   { to: '/order-review',  title: 'Sales',         subtitle: 'Pending orders, address verification, flags',     icon: '🛒', iconBg: '#fef1f0' },
   { to: '/service',       title: 'Service',        subtitle: 'Support tickets, onboarding, replacements',       icon: '🎫', iconBg: '#fff3e0' },
   { to: '/fulfillment',   title: 'Fulfillment',    subtitle: 'Queue, shelf, label & ship',                      icon: '📦', iconBg: '#e3f0fb' },
-  { to: '/post-shipment', title: 'Post-Shipment',  subtitle: 'Returns, refunds, replacements, cancellations',   icon: '↩️', iconBg: '#fef1f0' },
 ];
 
 const WORKSPACE = [
-  { to: '/build',        title: 'Build',        subtitle: 'Manufacturing pipeline · per-unit QC',  icon: '🏗️', iconBg: '#e6f4ea' },
   { to: '/stock',        title: 'Stock',        subtitle: 'Units, parts, batches',                 icon: '📊', iconBg: '#e6f4ea' },
   { to: '/customers',    title: 'Customers',    subtitle: 'Directory & journey stages',            icon: '👥', iconBg: '#f5f1eb' },
-  { to: '/templates',    title: 'Templates',    subtitle: 'Email & SMS template editor',           icon: '📝', iconBg: '#f5f1eb' },
   { to: '/marketing',    title: 'Marketing',    subtitle: 'Campaign attribution, CAC dashboard',   icon: '📣', iconBg: '#fef9f0' },
   { to: '/activity-log', title: 'Activity Log', subtitle: 'Audit trail',                           icon: '📜', iconBg: '#f5f1eb' },
-  { to: '/dashboard',    title: 'Fleet',        subtitle: 'Live device telemetry',                 icon: '📈', iconBg: '#e3f0fb' },
 ];
 
 const MARKETING_ROLES = ['pedrum@virgohome.io', 'huayi@virgohome.io', 'george@virgohome.io'];

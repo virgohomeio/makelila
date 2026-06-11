@@ -95,15 +95,15 @@ export default function App() {
             <Route path="order-review/:orderId" element={<OrderReview />} />
             <Route path="fulfillment"       element={<LazyRoute><Fulfillment /></LazyRoute>} />
             <Route path="fulfillment/:tab"  element={<LazyRoute><Fulfillment /></LazyRoute>} />
-            <Route path="build"         element={<LazyRoute><Build /></LazyRoute>} />
-            <Route path="post-shipment" element={<LazyRoute><PostShipment /></LazyRoute>} />
+            <Route path="build"         element={<Navigate to="/stock" replace />} />
+            <Route path="post-shipment" element={<Navigate to="/fulfillment" replace />} />
             <Route path="service"       element={<LazyRoute><Service /></LazyRoute>} />
             <Route path="stock"         element={<LazyRoute><Stock /></LazyRoute>} />
             <Route path="customers"     element={<LazyRoute><Customers /></LazyRoute>} />
-            <Route path="templates"     element={<LazyRoute><Templates /></LazyRoute>} />
+            <Route path="templates"     element={<Navigate to="/order-review" replace />} />
             <Route path="marketing"     element={<LazyRoute><Marketing /></LazyRoute>} />
             <Route path="activity-log"  element={<LazyRoute><ActivityLog /></LazyRoute>} />
-            <Route path="dashboard"     element={<DashboardRoute />} />
+            <Route path="dashboard"     element={<Navigate to="/customers" replace />} />
             <Route path="finance" element={
               <RequireRole role="finance">
                 <LazyRoute><Finance /></LazyRoute>
