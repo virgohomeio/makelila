@@ -52,8 +52,8 @@ describe('replacementStageTag', () => {
 });
 
 describe('replacementDemandBySku', () => {
-  const o = (line_items: unknown[], extra: any = {}) =>
-    ({ line_items, awaiting_batch_id: null, shipped_at: null, delivered_at: null, ...extra });
+  const o = (line_items: unknown[], extra: Record<string, unknown> = {}) =>
+    ({ line_items, awaiting_batch_id: null, shipped_at: null, delivered_at: null, ...extra }) as Parameters<typeof replacementDemandBySku>[0][number];
 
   it('counts queued part demand by SKU from descriptions AND structured rows', () => {
     const m = replacementDemandBySku([

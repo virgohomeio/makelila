@@ -44,37 +44,8 @@ vi.mock('./supabaseTelemetry', () => ({
 
 import { updateUnitStatus, mergeTimelineEvents, type TimelineEvent } from './stock';
 
-// ── assignUnit quarantine guard (via fulfillment.ts) ─────────────────────────
-// Import separately so we can mock the units select independently.
-const { assignFromMock, assignSingleResult } = vi.hoisted(() => {
-  const assignSingleResult: { data: { status: string } | null; error: null | { message: string } } =
-    { data: { status: 'ready' }, error: null };
-
-  const eqAfterOrderSelect = vi.fn(() => ({
-    single: vi.fn(() => Promise.resolve({ data: { order_ref: '#1', customer_name: 'Test' }, error: null })),
-  }));
-  const eqAfterUnitSelect = vi.fn(() => ({
-    single: vi.fn(() => Promise.resolve(assignSingleResult)),
-  }));
-
-  let selectCallCount = 0;
-  const selectSwitcher = vi.fn(() => {
-    selectCallCount++;
-    // First call → orders select, second call → units select
-    return { eq: selectCallCount === 1 ? eqAfterOrderSelect : eqAfterUnitSelect };
-  });
-
-  const eqAfterUpdate = vi.fn(() => Promise.resolve({ error: null }));
-  const updateSwitcher = vi.fn(() => ({ eq: eqAfterUpdate }));
-
-  const assignFromMock = vi.fn((_table: string) => ({
-    select: selectSwitcher,
-    update: updateSwitcher,
-  }));
-
-  return { assignFromMock, assignSingleResult };
-});
-
+// assignUnit's quarantine guard is covered end-to-end in fulfillment.test.ts;
+// here we only verify the 'quarantine' UnitStatus + its STATUS_META entry exist.
 vi.mock('./fulfillment', async (importOriginal) => {
   // Re-use the real module but swap the supabase client so select returns
   // our controlled assignSingleResult.  We only test assignUnit here.
@@ -130,26 +101,6 @@ describe('assignUnit quarantine guard', () => {
   // We need a fresh mock context for fulfillment.ts — use a separate dynamic
   // import that re-creates the module with our controlled supabase.
   it('throws when the unit status is quarantine', async () => {
-    // Build a minimal supabase fake where the units.select returns quarantine.
-    const eqOrderSingle = vi.fn().mockResolvedValue({
-      data: { order_ref: '#1', customer_name: 'Test' }, error: null,
-    });
-    const eqUnitSingle = vi.fn().mockResolvedValue({
-      data: { status: 'quarantine' }, error: null,
-    });
-
-    let selectCall = 0;
-    const fakeSingle = vi.fn(() => {
-      selectCall++;
-      return selectCall === 1 ? eqOrderSingle() : eqUnitSingle();
-    });
-
-    const fakeEq = vi.fn(() => ({ single: fakeSingle }));
-    const fakeSelect = vi.fn(() => ({ eq: fakeEq }));
-    const fakeEqUpdate = vi.fn(() => Promise.resolve({ error: null }));
-    const fakeUpdate = vi.fn(() => ({ eq: fakeEqUpdate }));
-    const fakeFrom = vi.fn(() => ({ select: fakeSelect, update: fakeUpdate }));
-
     // Dynamically import with a fresh module resolution context is not
     // straightforward in Vitest without unstable_mockModule.  Instead, test
     // the guard logic directly by calling the real function through the mocked

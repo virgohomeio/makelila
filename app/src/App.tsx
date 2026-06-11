@@ -1,7 +1,7 @@
 import { lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
 import { AuthProvider, ProtectedRoute, useAuth } from './lib/auth';
-import { canView, type Role, type Module } from './lib/permissions';
+import { canView, type Module } from './lib/permissions';
 import { AppShell } from './components/AppShell';
 import { MobileHome } from './components/MobileHome';
 import { useIsMobile } from './lib/useMediaQuery';

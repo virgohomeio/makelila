@@ -3,7 +3,6 @@ import {
   useDailyPassTrend,
   type StationPassStation,
   type BuildQCStat,
-  type TechnicianStat,
 } from '../../lib/build';
 import styles from './Build.module.css';
 

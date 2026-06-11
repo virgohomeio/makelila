@@ -14,7 +14,7 @@ const { mockCtx } = vi.hoisted(() => ({
       returnCount: 0,
       warranty: { registration: null, loading: false },
       loading: false,
-    } satisfies DeviceContext,
+    } as DeviceContext,
   },
 }));
 

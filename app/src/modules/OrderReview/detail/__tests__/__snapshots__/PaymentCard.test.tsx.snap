@@ -1,0 +1,205 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`PaymentCard > renders Sezzle partial payment with discount 1`] = `
+<div>
+  <div
+    class="_card_2e6e74"
+  >
+    <div
+      class="_cardHead_2e6e74"
+    >
+      Payment Summary
+    </div>
+    <div
+      class="_cardBody_2e6e74"
+    >
+      <div
+        style="display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 12px;"
+      >
+        <span
+          style="font-size: 22px; font-weight: 700; letter-spacing: -0.5px;"
+        >
+          $1,100.00 USD
+        </span>
+        <span
+          style="font-size: 11px; color: var(--color-ink-subtle);"
+        >
+          USD
+        </span>
+      </div>
+      <div
+        style="display: grid; grid-template-columns: 1fr auto; gap: 4px 16px; font-size: 12px; margin-bottom: 12px;"
+      >
+        <span
+          style="color: var(--color-ink-subtle);"
+        >
+          Subtotal
+        </span>
+        <span
+          style="text-align: right;"
+        >
+          $1,299.00 USD
+        </span>
+        <span
+          style="color: var(--color-ink-subtle);"
+        >
+          Discount
+           (
+          SAVE200
+          )
+        </span>
+        <span
+          style="text-align: right; color: rgb(42, 140, 74);"
+        >
+          −
+          $199.00 USD
+        </span>
+      </div>
+      <div
+        style="display: flex; gap: 6px; flex-wrap: wrap; align-items: center;"
+      >
+        <span
+          style="font-size: 10px; padding: 2px 8px; border-radius: 4px; background: var(--color-surface); border: 1px solid var(--color-border); color: var(--color-ink-muted); font-family: var(--font-mono, monospace);"
+        >
+          sezzle
+        </span>
+        <span
+          style="font-size: 10px; font-weight: 700; letter-spacing: 0.4px; text-transform: uppercase; padding: 2px 8px; border-radius: 4px; background: rgb(255, 250, 240); color: rgb(192, 86, 33); border: 1px solid rgb(251, 211, 141);"
+        >
+          Partially paid
+        </span>
+      </div>
+    </div>
+  </div>
+</div>
+`;
+
+exports[`PaymentCard > renders full Shopify Payments breakdown 1`] = `
+<div>
+  <div
+    class="_card_2e6e74"
+  >
+    <div
+      class="_cardHead_2e6e74"
+    >
+      Payment Summary
+    </div>
+    <div
+      class="_cardBody_2e6e74"
+    >
+      <div
+        style="display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 12px;"
+      >
+        <span
+          style="font-size: 22px; font-weight: 700; letter-spacing: -0.5px;"
+        >
+          $1,396.00 CAD
+        </span>
+        <span
+          style="font-size: 11px; color: var(--color-ink-subtle);"
+        >
+          CAD
+        </span>
+      </div>
+      <div
+        style="display: grid; grid-template-columns: 1fr auto; gap: 4px 16px; font-size: 12px; margin-bottom: 12px;"
+      >
+        <span
+          style="color: var(--color-ink-subtle);"
+        >
+          Subtotal
+        </span>
+        <span
+          style="text-align: right;"
+        >
+          $1,299.00 CAD
+        </span>
+        <span
+          style="color: var(--color-ink-subtle);"
+        >
+          Tax
+        </span>
+        <span
+          style="text-align: right;"
+        >
+          $97.00 CAD
+        </span>
+      </div>
+      <div
+        style="display: flex; gap: 6px; flex-wrap: wrap; align-items: center;"
+      >
+        <span
+          style="font-size: 10px; padding: 2px 8px; border-radius: 4px; background: var(--color-surface); border: 1px solid var(--color-border); color: var(--color-ink-muted); font-family: var(--font-mono, monospace);"
+        >
+          shopify payments
+        </span>
+        <span
+          style="font-size: 10px; font-weight: 700; letter-spacing: 0.4px; text-transform: uppercase; padding: 2px 8px; border-radius: 4px; background: rgb(240, 255, 244); color: rgb(39, 103, 73); border: 1px solid rgb(154, 230, 180);"
+        >
+          Paid
+        </span>
+      </div>
+    </div>
+  </div>
+</div>
+`;
+
+exports[`PaymentCard > renders refunded status and hides zero-discount row 1`] = `
+<div>
+  <div
+    class="_card_2e6e74"
+  >
+    <div
+      class="_cardHead_2e6e74"
+    >
+      Payment Summary
+    </div>
+    <div
+      class="_cardBody_2e6e74"
+    >
+      <div
+        style="display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 12px;"
+      >
+        <span
+          style="font-size: 22px; font-weight: 700; letter-spacing: -0.5px;"
+        >
+          $0.00 CAD
+        </span>
+        <span
+          style="font-size: 11px; color: var(--color-ink-subtle);"
+        >
+          CAD
+        </span>
+      </div>
+      <div
+        style="display: grid; grid-template-columns: 1fr auto; gap: 4px 16px; font-size: 12px; margin-bottom: 12px;"
+      >
+        <span
+          style="color: var(--color-ink-subtle);"
+        >
+          Subtotal
+        </span>
+        <span
+          style="text-align: right;"
+        >
+          $1,299.00 CAD
+        </span>
+      </div>
+      <div
+        style="display: flex; gap: 6px; flex-wrap: wrap; align-items: center;"
+      >
+        <span
+          style="font-size: 10px; padding: 2px 8px; border-radius: 4px; background: var(--color-surface); border: 1px solid var(--color-border); color: var(--color-ink-muted); font-family: var(--font-mono, monospace);"
+        >
+          shopify payments
+        </span>
+        <span
+          style="font-size: 10px; font-weight: 700; letter-spacing: 0.4px; text-transform: uppercase; padding: 2px 8px; border-radius: 4px; background: rgb(235, 248, 255); color: rgb(44, 82, 130); border: 1px solid rgb(144, 205, 244);"
+        >
+          Refunded
+        </span>
+      </div>
+    </div>
+  </div>
+</div>
+`;
