@@ -21,6 +21,7 @@ function makeReg(overrides: Partial<WarrantyRegistration> = {}): WarrantyRegistr
     voided_reason: null,
     voided_at: null,
     registered_at: today.toISOString(),
+    registered_by: null,
     ...overrides,
   };
 }

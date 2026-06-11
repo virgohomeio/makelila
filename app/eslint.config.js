@@ -43,6 +43,13 @@ export default defineConfig([
       'react-hooks/set-state-in-effect': 'warn',
       'react-hooks/purity': 'warn',
       'react-refresh/only-export-components': 'warn',
+      // Honor the `_`-prefix convention for intentionally-unused args/vars
+      // (e.g. callback signatures that ignore a param) — standard ts-eslint setting.
+      '@typescript-eslint/no-unused-vars': ['error', {
+        argsIgnorePattern: '^_',
+        varsIgnorePattern: '^_',
+        caughtErrorsIgnorePattern: '^_',
+      }],
     },
   },
 ])

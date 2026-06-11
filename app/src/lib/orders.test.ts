@@ -137,7 +137,11 @@ describe('createReplacementOrder', () => {
     fromMock.mockImplementation(((table: string) => {
       if (table === 'orders') return { insert };
       if (table === 'service_tickets') return { update: () => ({ eq: ticketUpdate }) };
-      if (table === 'units') return { update: () => ({ eq: unitsUpdate }) };
+      if (table === 'units') return {
+        // createReplacementOrder now checks the unit isn't quarantined before reserving.
+        select: () => ({ eq: () => ({ single: () => Promise.resolve({ data: { status: 'ready' }, error: null }) }) }),
+        update: () => ({ eq: unitsUpdate }),
+      };
       throw new Error(`unexpected table ${table}`);
     }) as any);
 

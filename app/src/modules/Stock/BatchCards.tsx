@@ -257,7 +257,7 @@ function aggregateAll(countsByBatch: Map<string, Record<UnitStatus, number>>): R
   const out: Record<UnitStatus, number> = {
     'in-production':0,'inbound':0,'cn-test':0,'ca-test':0,
     'ready':0,'reserved':0,'rework':0,
-    'shipped':0,'team-test':0,'scrap':0,'lost':0,
+    'shipped':0,'team-test':0,'scrap':0,'lost':0,'quarantine':0,
   };
   for (const counts of countsByBatch.values()) {
     for (const k of Object.keys(counts) as UnitStatus[]) out[k] += counts[k];

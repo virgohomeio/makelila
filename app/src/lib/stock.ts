@@ -504,14 +504,14 @@ export function useUnitTimeline(unitSerial: string): { events: TimelineEvent[]; 
           setTelemetryEvents(cached.events);
         } else {
           const since = new Date(Date.now() - 14 * 24 * 3600_000).toISOString();
-          supabaseTelemetry
+          Promise.resolve(supabaseTelemetry
             .from('events')
             .select('created_at, event_code, event_value')
             .eq('serial_number', unitSerial)
             .neq('event_code', 'OK')
             .gte('created_at', since)
             .order('created_at', { ascending: false })
-            .limit(50)
+            .limit(50))
             .then(({ data, error }) => {
               if (cancelled || error || !data) {
                 if (error) console.warn('UnitTimeline: telemetry fetch failed', error);
@@ -532,7 +532,7 @@ export function useUnitTimeline(unitSerial: string): { events: TimelineEvent[]; 
               telemetryCache.set(unitSerial, { events: evts, fetchedAt: Date.now() });
               if (!cancelled) setTelemetryEvents(evts);
             })
-            .catch(e => console.warn('UnitTimeline: telemetry fetch threw', e));
+            .catch((e: unknown) => console.warn('UnitTimeline: telemetry fetch threw', e));
         }
       }
     })();
