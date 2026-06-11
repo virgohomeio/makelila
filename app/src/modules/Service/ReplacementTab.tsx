@@ -116,8 +116,14 @@ export default function ReplacementTab() {
         return { sku, name: p?.name ?? sku, onHand, demand: d, toGet: Math.max(0, d - onHand) };
       })
       .sort((a, b) => b.demand - a.demand || a.name.localeCompare(b.name));
+    const partsOnHand = partRows.reduce((n, r) => n + r.onHand, 0);
+    const partsQueued = partRows.reduce((n, r) => n + r.demand, 0);
+    const partsToGet = partRows.reduce((n, r) => n + r.toGet, 0);
 
-    return { unitRows, totalReady, totalToBuild, p100x: unitDemand.get('P100X') ?? 0, partRows };
+    return {
+      unitRows, totalReady, totalToBuild, p100x: unitDemand.get('P100X') ?? 0,
+      partRows, partsOnHand, partsQueued, partsToGet,
+    };
   }, [orders, units, parts]);
   const [filter, setFilter] = useState<'all' | StageTag>('all');
   const [openTicketId, setOpenTicketId] = useState<string | null>(null);
@@ -220,6 +226,20 @@ export default function ReplacementTab() {
 
         <div className={styles.replSupplyCol}>
         <div className={styles.replSupplySub}>Parts &amp; Consumables</div>
+        <div className={styles.replSupplyKpis}>
+          <div className={styles.replSupplyKpi}>
+            <div className={styles.replSupplyKpiValue}>{demand.partsOnHand}</div>
+            <div className={styles.replSupplyKpiLabel}>In stock</div>
+          </div>
+          <div className={styles.replSupplyKpi}>
+            <div className={`${styles.replSupplyKpiValue} ${demand.partsToGet > 0 ? styles.replSupplyWarn : ''}`}>{demand.partsToGet}</div>
+            <div className={styles.replSupplyKpiLabel}>Need to get / restock</div>
+          </div>
+          <div className={styles.replSupplyKpi}>
+            <div className={styles.replSupplyKpiValue}>{demand.partsQueued}</div>
+            <div className={styles.replSupplyKpiLabel}>Queued</div>
+          </div>
+        </div>
         {demand.partRows.length > 0 ? (
           <table className={styles.replSupplyTable}>
             <thead><tr><th>Part / consumable</th><th>On hand</th><th>Queued</th><th>To get</th></tr></thead>
