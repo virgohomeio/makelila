@@ -103,11 +103,15 @@ export const FU_STATE_META: Record<FuState, { label: string; color: string; bg: 
 
 // Days from onboard completion until each follow-up is due. Reina's "1-week,
 // 1-month" framing (walkthrough #40): one check-in at a week, one at a month.
-export const FU1_DAYS = 7;
-export const FU2_DAYS = 30;
+// Call-anchored follow-up cadence (spec 2026-06-11): FU1 two weeks, FU2 four
+// weeks after the onboarding call. customers.onboard_date is mirrored from the
+// onboarding-call-complete date by markOnboardingComplete(), so it's the call
+// anchor. (Was 7 / 30 days under the prior onboard-date cadence.)
+export const FU1_DAYS = 14;
+export const FU2_DAYS = 28;
 
 /** Compute the follow-up state for a customer. FU1 cadence: FU1_DAYS after
- *  onboard. FU2 cadence: FU2_DAYS after onboard. "Today" = same calendar day. */
+ *  the onboarding call. FU2 cadence: FU2_DAYS after the call. "Today" = same calendar day. */
 export function computeFuState(c: Customer, today: Date = new Date()): FuState {
   if (!c.onboard_date) return 'unscheduled';
   const onboard = new Date(c.onboard_date + 'T00:00:00');

@@ -3,16 +3,18 @@ import { InboxTab } from './InboxTab';
 import { OnboardingTab } from './OnboardingTab';
 import { SupportTab } from './SupportTab';
 import ReplacementTab from './ReplacementTab';
+import { FollowUpsTab } from './FollowUpsTab';
 import { useIsMobile } from '../../lib/useMediaQuery';
 import { MobileTabbedModule, type MobileTab } from '../../components/MobileTabbedModule';
 import styles from './Service.module.css';
 
-type Tab = 'inbox' | 'onboarding' | 'support' | 'replacement';
+type Tab = 'inbox' | 'onboarding' | 'support' | 'replacement' | 'followups';
 
 const TABS: { key: Tab; label: string }[] = [
   { key: 'onboarding',  label: 'Onboarding' },
   { key: 'support',     label: 'Support Tickets' },
   { key: 'replacement', label: 'Replacement' },
+  { key: 'followups',   label: 'Follow-Ups' },
   { key: 'inbox',       label: 'Inbox' },
 ];
 
@@ -23,6 +25,7 @@ const MOBILE_TAB_META: Record<Tab, { subtitle: string; icon: string; iconBg: str
   onboarding:  { subtitle: 'Customers in their first 30 days',            icon: '🚀', iconBg: '#e6f4ea' },
   support:     { subtitle: 'Open tickets needing follow-up or reply',     icon: '🎫', iconBg: '#fef1f0' },
   replacement: { subtitle: 'Warranty replacements + parts queue',         icon: '🔁', iconBg: '#fef1f0' },
+  followups:   { subtitle: 'Calendar of onboarding calls + FU1/FU2',      icon: '🗓️', iconBg: '#e6f4ea' },
 };
 
 export default function Service() {
@@ -38,6 +41,7 @@ export default function Service() {
         t.key === 'inbox'       ? <InboxTab /> :
         t.key === 'onboarding'  ? <OnboardingTab /> :
         t.key === 'support'     ? <SupportTab /> :
+        t.key === 'followups'   ? <FollowUpsTab /> :
                                   <ReplacementTab />,
     }));
     return (
@@ -63,6 +67,7 @@ export default function Service() {
         {tab === 'onboarding'  && <OnboardingTab />}
         {tab === 'support'     && <SupportTab />}
         {tab === 'replacement' && <ReplacementTab />}
+        {tab === 'followups'   && <FollowUpsTab />}
       </div>
     </div>
   );
