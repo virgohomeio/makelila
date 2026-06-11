@@ -93,6 +93,7 @@ export type ServiceTicket = {
   last_message_at: string | null;
   is_manually_overridden: boolean;
   issue_area: IssueArea | null;
+  root_cause: string | null;
   // Backlog #75 — diagnosis-call dedupe stamps.
   diagnosis_link_sent_at: string | null;
   diag_cohost_invited_at: string | null;

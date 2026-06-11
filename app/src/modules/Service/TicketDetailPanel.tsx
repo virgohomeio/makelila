@@ -351,6 +351,12 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
             <div className={styles.detailFieldGrid}>
               <span className={styles.detailFieldLabel}>Topic</span>
               <span className={styles.detailFieldValue}>{ticket.topic ? topicLabel(ticket.topic) : '—'}</span>
+              {ticket.root_cause && (
+                <>
+                  <span className={styles.detailFieldLabel}>Root cause</span>
+                  <span className={styles.detailFieldValue}>{ticket.root_cause}</span>
+                </>
+              )}
               <span className={styles.detailFieldLabel}>Summary</span>
               <span className={styles.detailFieldValue}>{ticket.summary ?? '—'}</span>
               <span className={styles.detailFieldLabel}>Suggested action</span>
