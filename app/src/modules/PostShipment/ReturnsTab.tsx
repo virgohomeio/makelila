@@ -5,17 +5,20 @@ import {
   RETURN_CATEGORIES, RETURN_CATEGORY_META,
   type ReturnStatus, type ReturnCategory,
 } from '../../lib/postShipment';
+import { useQueuedReplacements, holdReplacement } from '../../lib/orders';
 import styles from './PostShipment.module.css';
 
 type StatusFilter = 'all' | 'open' | 'closed';
 
 export function ReturnsTab() {
   const { returns, loading } = useReturns();
+  const { replacements: queuedRepls } = useQueuedReplacements();
   const [filter, setFilter] = useState<StatusFilter>('all');
   const [search, setSearch] = useState('');
   const [pending, setPending] = useState<Record<string, ReturnStatus>>({});
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [holdBusy, setHoldBusy] = useState<string | null>(null);
 
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -65,6 +68,27 @@ export function ReturnsTab() {
       canada, usa, conditions, topReason, avgRefund,
     };
   }, [returns]);
+
+  // Map email → queued replacements for cross-flow warning (#83).
+  const replsByEmail = useMemo(() => {
+    const m = new Map<string, typeof queuedRepls>();
+    for (const r of queuedRepls) {
+      const key = (r.customer_email ?? '').toLowerCase().trim();
+      if (!key) continue;
+      const prev = m.get(key) ?? [];
+      m.set(key, [...prev, r]);
+    }
+    return m;
+  }, [queuedRepls]);
+
+  // Open returns whose customer also has a queued replacement.
+  const openReturnsWithRepls = useMemo(() =>
+    returns.filter(r => {
+      if (r.status === 'refunded' || r.status === 'closed' || r.status === 'denied') return false;
+      const key = (r.customer_email ?? '').toLowerCase().trim();
+      return key ? replsByEmail.has(key) : false;
+    }),
+  [returns, replsByEmail]);
 
   const commit = async (id: string) => {
     const next = pending[id];
@@ -116,6 +140,47 @@ export function ReturnsTab() {
       </div>
 
       {error && <div className={styles.errorBar}>{error}</div>}
+
+      {openReturnsWithRepls.length > 0 && (
+        <div className={styles.replWarnBanner}>
+          <span className={styles.replWarnIcon}>⚠</span>
+          <div className={styles.replWarnBody}>
+            <strong>
+              {openReturnsWithRepls.length === 1
+                ? '1 open return has a queued replacement'
+                : `${openReturnsWithRepls.length} open returns have queued replacements`}
+              — hold before refunding
+            </strong>
+            {openReturnsWithRepls.map(ret => {
+              const repls = replsByEmail.get((ret.customer_email ?? '').toLowerCase().trim()) ?? [];
+              return (
+                <div key={ret.id} className={styles.replWarnRow}>
+                  <span>{ret.customer_name}</span>
+                  {repls.map(rpl => (
+                    <span key={rpl.id} className={styles.replWarnRef}>{rpl.order_ref}</span>
+                  ))}
+                  {repls.filter(rpl => rpl.replacement_state !== 'held').map(rpl => (
+                    <button
+                      key={rpl.id}
+                      className={styles.replWarnHoldBtn}
+                      disabled={holdBusy === rpl.id}
+                      onClick={() => {
+                        setHoldBusy(rpl.id);
+                        void holdReplacement(
+                          rpl.id,
+                          `Held: return in progress for ${ret.customer_name}`,
+                        ).finally(() => setHoldBusy(null));
+                      }}
+                    >
+                      {holdBusy === rpl.id ? '…' : `Hold ${rpl.order_ref}`}
+                    </button>
+                  ))}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       <div className={styles.tableWrap}>
         <table className={styles.table}>

@@ -40,9 +40,11 @@ export type Order = {
   awaiting_batch_id: string | null;
   // Replacement tagging + pending replacements (spec 2026-06-08). 'ready' =
   // every line item is in stock / a unit is ready; 'awaiting' = blocked on an
-  // out-of-stock part or a pending unit batch. Drives the Ready / Awaiting
-  // Stock-Batch split in Order Review > Replacement. Null for non-replacement.
-  replacement_state: 'ready' | 'awaiting' | null;
+  // out-of-stock part or a pending unit batch; 'held' = paused by an operator
+  // while a refund/return is in progress (#83). Drives the Ready / Awaiting /
+  // Held split in Order Review > Replacement. Null for non-replacement.
+  replacement_state: 'ready' | 'awaiting' | 'held' | null;
+  held_reason: string | null;
   cogs_usd: number | null;
   shipping_cost_usd: number | null;
   shipped_at: string | null;
@@ -393,6 +395,86 @@ export function useOrder(id: string | null): { order: Order | null; loading: boo
   const { all, loading } = useOrders();
   const order = id ? all.find(o => o.id === id) ?? null : null;
   return { order, loading: loading && !order };
+}
+
+/** All un-shipped replacement orders in 'ready' or 'awaiting' state.
+ * Used by ReturnsTab/RefundsTab (#83) to warn when a customer has a queued
+ * replacement that should be held before their refund is processed. */
+export function useQueuedReplacements(): { replacements: Order[]; loading: boolean } {
+  const [replacements, setReplacements] = useState<Order[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let channel: RealtimeChannel | null = null;
+    let cancelled = false;
+
+    (async () => {
+      const { data, error } = await supabase
+        .from('orders')
+        .select('*')
+        .eq('kind', 'replacement')
+        .in('replacement_state', ['ready', 'awaiting'])
+        .is('shipped_at', null)
+        .order('created_at', { ascending: true });
+      if (cancelled) return;
+      if (!error && data) setReplacements(data as Order[]);
+      setLoading(false);
+
+      channel = supabase
+        .channel('orders:queued_replacements')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' },
+          (payload) => {
+            setReplacements(prev => {
+              const updated = payload.new as Order | undefined;
+              const deleted = payload.old as { id: string } | undefined;
+              if (payload.eventType === 'DELETE' && deleted) {
+                return prev.filter(r => r.id !== deleted.id);
+              }
+              if (updated) {
+                const isQueued =
+                  updated.kind === 'replacement' &&
+                  (updated.replacement_state === 'ready' || updated.replacement_state === 'awaiting') &&
+                  !updated.shipped_at;
+                const idx = prev.findIndex(r => r.id === updated.id);
+                if (!isQueued) return prev.filter(r => r.id !== updated.id);
+                if (idx >= 0) { const next = [...prev]; next[idx] = updated; return next; }
+                return [...prev, updated];
+              }
+              return prev;
+            });
+          })
+        .subscribe();
+    })();
+
+    return () => {
+      cancelled = true;
+      if (channel) void channel.unsubscribe();
+    };
+  }, []);
+
+  return { replacements, loading };
+}
+
+/** Mark a queued replacement as held while a refund is in progress. Reversible
+ * via resumeReplacement. Does NOT free reserved units — units stay reserved
+ * so the replacement can be resumed if the refund is later denied. */
+export async function holdReplacement(orderId: string, reason?: string): Promise<void> {
+  const { error } = await supabase
+    .from('orders')
+    .update({ replacement_state: 'held', held_reason: reason ?? null })
+    .eq('id', orderId);
+  if (error) throw error;
+  await logAction('repl_held', orderId, reason ?? 'held pending refund review');
+}
+
+/** Resume a previously held replacement, restoring it to 'ready' or 'awaiting'. */
+export async function resumeReplacement(orderId: string, state: 'ready' | 'awaiting'): Promise<void> {
+  const { error } = await supabase
+    .from('orders')
+    .update({ replacement_state: state, held_reason: null })
+    .eq('id', orderId);
+  if (error) throw error;
+  await logAction('repl_resumed', orderId, `resumed → ${state}`);
 }
 
 export function useOrderNotes(orderId: string | null): {
