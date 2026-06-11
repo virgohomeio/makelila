@@ -5,7 +5,6 @@ import { canView, type Module } from './lib/permissions';
 import { AppShell } from './components/AppShell';
 import { MobileHome } from './components/MobileHome';
 import { useIsMobile } from './lib/useMediaQuery';
-import { isTelemetryConfigured } from './lib/supabaseTelemetry';
 // Eager: OrderReview is the default landing route + Login is on the auth
 // path. Everything else loads on demand so first-paint is fast.
 import OrderReview from './modules/OrderReview';
@@ -18,14 +17,10 @@ import ServiceRequestForm from './modules/Forms/ServiceRequestForm';
 // modules below get the same treatment so the main chunk doesn't carry
 // leaflet (PostShipment), the heavier Service / Build / Stock / Customers
 // trees, or the audit-log code unless the operator actually navigates there.
-const Dashboard   = lazy(() => import('./modules/Dashboard'));
 const Fulfillment = lazy(() => import('./modules/Fulfillment'));
-const Build       = lazy(() => import('./modules/Build'));
 const Service     = lazy(() => import('./modules/Service'));
 const Stock       = lazy(() => import('./modules/Stock'));
 const Customers   = lazy(() => import('./modules/Customers'));
-const Templates   = lazy(() => import('./modules/Templates'));
-const ActivityLog = lazy(() => import('./modules/ActivityLog'));
 const Team        = lazy(() => import('./modules/Team'));
 const Marketing   = lazy(() => import('./modules/Marketing'));
 const Finance     = lazy(() => import('./modules/Finance'));
@@ -49,27 +44,6 @@ function HomeRoute() {
   const isMobile = useIsMobile();
   if (isMobile) return <MobileHome />;
   return <Navigate to="/order-review" replace />;
-}
-
-function DashboardRoute() {
-  if (!isTelemetryConfigured) {
-    return (
-      <div style={{ padding: 24, color: '#4a5568' }}>
-        <h2 style={{ marginTop: 0 }}>Telemetry not configured</h2>
-        <p>
-          The Dashboard reads from the device-telemetry Supabase project.
-          Set <code>VITE_TELEMETRY_SUPABASE_URL</code> and{' '}
-          <code>VITE_TELEMETRY_SUPABASE_ANON_KEY</code> in <code>.env</code> (see{' '}
-          <code>.env.example</code>) and reload.
-        </p>
-      </div>
-    );
-  }
-  return (
-    <Suspense fallback={<div style={{ padding: 24 }}>Loading dashboard…</div>}>
-      <Dashboard />
-    </Suspense>
-  );
 }
 
 export default function App() {
