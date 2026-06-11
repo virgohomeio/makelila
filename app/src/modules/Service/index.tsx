@@ -10,10 +10,10 @@ import styles from './Service.module.css';
 type Tab = 'inbox' | 'onboarding' | 'support' | 'replacement';
 
 const TABS: { key: Tab; label: string }[] = [
-  { key: 'inbox',       label: 'Inbox' },
   { key: 'onboarding',  label: 'Onboarding' },
   { key: 'support',     label: 'Support Tickets' },
   { key: 'replacement', label: 'Replacement' },
+  { key: 'inbox',       label: 'Inbox' },
 ];
 
 // Mobile-specific tab metadata. Subtitle + icon make each card scannable
@@ -26,7 +26,7 @@ const MOBILE_TAB_META: Record<Tab, { subtitle: string; icon: string; iconBg: str
 };
 
 export default function Service() {
-  const [tab, setTab] = useState<Tab>('inbox');
+  const [tab, setTab] = useState<Tab>('onboarding');
   const isMobile = useIsMobile();
 
   if (isMobile) {
