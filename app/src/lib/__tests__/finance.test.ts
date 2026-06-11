@@ -16,7 +16,7 @@ vi.mock('../supabase', () => ({
 
 vi.mock('../activityLog', () => ({ logAction: logActionMock }));
 
-import { repostJournal, isTokenExpiringSoon, projectStockout, computeRiskLevel } from '../finance';
+import { repostJournal, isTokenExpiringSoon, projectStockout, computeRiskLevel, getProductFamily, projectRevenue, type SeasonalityConfig } from '../finance';
 
 // ------------------------------------------------------------------ helpers
 
@@ -146,5 +146,65 @@ describe('computeRiskLevel', () => {
   });
   it('returns green for stockout > 90 days away', () => {
     expect(computeRiskLevel('2027-01-01', '2026-06-11')).toBe('green');
+  });
+});
+
+// ================================================================== getProductFamily
+
+describe('getProductFamily', () => {
+  it('identifies P100X before P100', () => {
+    expect(getProductFamily([{ sku: 'LILA-P100X-WHITE', name: 'LILA P100X' }])).toBe('P100X');
+  });
+  it('identifies P100', () => {
+    expect(getProductFamily([{ sku: 'P100-BLK' }])).toBe('P100');
+  });
+  it('identifies P50N', () => {
+    expect(getProductFamily([{ name: 'P-50N Composter' }])).toBe('P50N');
+  });
+  it('identifies P150', () => {
+    expect(getProductFamily([{ sku: 'P150' }])).toBe('P150');
+  });
+  it('returns other for unknown SKU', () => {
+    expect(getProductFamily([{ sku: 'ACCESSORY-BAG' }])).toBe('other');
+  });
+  it('returns other for empty array', () => {
+    expect(getProductFamily([])).toBe('other');
+  });
+});
+
+// ================================================================== projectRevenue
+
+describe('projectRevenue', () => {
+  const flatSeasonality: SeasonalityConfig = Object.fromEntries(
+    Array.from({ length: 12 }, (_, i) => [String(i + 1), 1.0])
+  );
+
+  it('returns zero when velocity is 0', () => {
+    const result = projectRevenue({ weeklyVelocity: 0, aov: 5000, seasonality: flatSeasonality, horizon: 30 });
+    expect(result.projected).toBe(0);
+    expect(result.lower).toBe(0);
+    expect(result.upper).toBe(0);
+  });
+
+  it('30d projection: velocity=2/wk, aov=5000, flat seasonality = ~42857', () => {
+    const result = projectRevenue({ weeklyVelocity: 2, aov: 5000, seasonality: flatSeasonality, horizon: 30, today: '2026-06-11' });
+    // 2 * 5000 * (30/7) * 1.0 ≈ 42857
+    expect(result.projected).toBeCloseTo(42857, -2);
+  });
+
+  it('confidence band is ±15%', () => {
+    const result = projectRevenue({ weeklyVelocity: 2, aov: 5000, seasonality: flatSeasonality, horizon: 30, today: '2026-06-11' });
+    expect(result.lower).toBeCloseTo(result.projected * 0.85, 0);
+    expect(result.upper).toBeCloseTo(result.projected * 1.15, 0);
+  });
+
+  it('applies seasonality multiplier', () => {
+    // December is 2x season (all months in a 30d horizon crossing Dec)
+    const highSeason: SeasonalityConfig = Object.fromEntries(
+      Array.from({ length: 12 }, (_, i) => [String(i + 1), i === 11 ? 2.0 : 1.0])
+    );
+    const lowResult = projectRevenue({ weeklyVelocity: 2, aov: 5000, seasonality: flatSeasonality, horizon: 30, today: '2026-12-01' });
+    const highResult = projectRevenue({ weeklyVelocity: 2, aov: 5000, seasonality: highSeason, horizon: 30, today: '2026-12-01' });
+    expect(highResult.projected).toBeGreaterThan(lowResult.projected);
   });
 });

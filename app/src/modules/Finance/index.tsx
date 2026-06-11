@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { JournalPanel } from './JournalPanel';
 import { ProductionProjectionPanel } from './ProductionProjectionPanel';
+import { SalesProjectionPanel } from './SalesProjectionPanel';
 import styles from './Finance.module.css';
 
 type Tab = 'journals' | 'projections';
@@ -50,7 +51,7 @@ export default function Finance() {
           <ProductionProjectionPanel />
         )}
         {tab === 'projections' && projectionsSubTab === 'sales' && (
-          <div className={styles.empty}>Sales Projections — coming soon</div>
+          <SalesProjectionPanel />
         )}
       </div>
     </div>

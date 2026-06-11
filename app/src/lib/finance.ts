@@ -261,3 +261,141 @@ export function useProductionSnapshots(batchId: string): {
 
   return { snapshots, loading };
 }
+
+// ============================================================ Sales Projection
+
+export type SalesSnapshot = {
+  id: string;
+  as_of: string;
+  horizon_days: 30 | 60 | 90;
+  model: string;
+  projected_revenue_cad: number;
+  projected_revenue_usd: number;
+  lower_bound_cad: number;
+  upper_bound_cad: number;
+  breakdown: SkuProjection[];
+  inputs: Record<string, unknown>;
+  created_at: string;
+};
+
+export type SkuProjection = {
+  sku: string;           // 'P150' | 'P50N' | 'P100' | 'P100X' | 'other'
+  currency: string;
+  weeklyVelocity: number;
+  aov: number;
+  projectedRevenue: number;
+};
+
+export type SeasonalityConfig = Record<string, number>; // key "1".."12"
+
+export const PRODUCT_FAMILIES = ['P150', 'P50N', 'P100', 'P100X'] as const;
+export type ProductFamily = typeof PRODUCT_FAMILIES[number] | 'other';
+
+/**
+ * Identify product family from an order's line items.
+ * Checks SKU and name fields for known product strings.
+ */
+export function getProductFamily(lineItems: Array<{ sku?: string; name?: string }>): ProductFamily {
+  for (const li of lineItems) {
+    const text = `${li.sku ?? ''} ${li.name ?? ''}`.toUpperCase();
+    if (text.includes('P100X')) return 'P100X';
+    if (text.includes('P100')) return 'P100';
+    if (text.includes('P50N') || text.includes('P-50N')) return 'P50N';
+    if (text.includes('P150') || text.includes('P-150')) return 'P150';
+  }
+  return 'other';
+}
+
+/**
+ * Project revenue for a given horizon.
+ * Returns projected amount and ±15% confidence band (illustrative, not statistical).
+ * Applies seasonality multiplier for the months covered by the horizon.
+ */
+export function projectRevenue(params: {
+  weeklyVelocity: number;
+  aov: number;
+  seasonality: SeasonalityConfig;
+  horizon: 30 | 60 | 90;
+  today?: string;  // ISO date, defaults to new Date().toISOString().slice(0,10)
+}): { projected: number; lower: number; upper: number } {
+  const { weeklyVelocity, aov, seasonality, horizon } = params;
+  const todayStr = params.today ?? new Date().toISOString().slice(0, 10);
+  const todayDate = new Date(todayStr + 'T00:00:00Z');
+
+  // Compute average seasonality multiplier across the horizon period
+  let totalMultiplier = 0;
+  for (let d = 0; d < horizon; d++) {
+    const day = new Date(todayDate);
+    day.setUTCDate(day.getUTCDate() + d);
+    const month = String(day.getUTCMonth() + 1);
+    totalMultiplier += seasonality[month] ?? 1.0;
+  }
+  const avgMultiplier = totalMultiplier / horizon;
+
+  const weeks = horizon / 7;
+  const projected = weeklyVelocity * aov * weeks * avgMultiplier;
+  return {
+    projected,
+    lower: projected * 0.85,
+    upper: projected * 1.15,
+  };
+}
+
+/** Fetch last N weeks of shipped/approved sale orders for revenue computation.
+ *  Uses a direct date-ranged query instead of loading all orders. */
+export function useSalesOrders(fromIso: string): {
+  orders: Array<{ id: string; currency: string; total_usd: number; line_items: Array<{ sku?: string; name?: string; [key: string]: unknown }>; placed_at: string | null; shipped_at: string | null; kind: string }>;
+  loading: boolean;
+  error: string | null;
+} {
+  const [orders, setOrders] = useState<Array<{ id: string; currency: string; total_usd: number; line_items: Array<{ sku?: string; name?: string; [key: string]: unknown }>; placed_at: string | null; shipped_at: string | null; kind: string }>>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data, error: err } = await supabase
+        .from('orders')
+        .select('id, currency, total_usd, line_items, placed_at, shipped_at, kind')
+        .eq('kind', 'sale')
+        .gte('placed_at', fromIso)
+        .order('placed_at', { ascending: false });
+      if (!cancelled) {
+        if (err) setError(err.message);
+        else setOrders((data ?? []) as typeof orders);
+        setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [fromIso]);
+
+  return { orders, loading, error };
+}
+
+/** Load the finance_config row for a given key. */
+export function useFinanceConfig(configKey: string): {
+  value: unknown;
+  loading: boolean;
+} {
+  const [value, setValue] = useState<unknown>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from('finance_config')
+        .select('value')
+        .eq('config_key', configKey)
+        .maybeSingle();
+      if (!cancelled) {
+        setValue(data?.value ?? null);
+        setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [configKey]);
+
+  return { value, loading };
+}
