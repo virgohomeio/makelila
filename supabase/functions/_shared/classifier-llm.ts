@@ -35,6 +35,12 @@ export type UnitContext = {
   batch_label?: string | null;
 };
 
+export type QuoMessage = {
+  direction: 'incoming' | 'outgoing';
+  text: string;
+  createdAt: string; // ISO 8601
+};
+
 export type LLMClassification = {
   priority: Priority;
   category: Category;
@@ -53,13 +59,14 @@ export type LLMClassification = {
  */
 export async function llmClassify(
   thread: ThreadInput,
-  opts: { model?: string; unit?: UnitContext | null } = {},
+  opts: { model?: string; unit?: UnitContext | null; quoMessages?: QuoMessage[] } = {},
 ): Promise<LLMClassification | null> {
   const apiKey = Deno.env.get('ANTHROPIC_API_KEY');
   if (!apiKey) return null;
 
   const model = opts.model ?? LLM_MODEL_DEFAULT;
   const unit = opts.unit ?? null;
+  const quoMessages = opts.quoMessages ?? [];
 
   const recent = thread.messages.slice(-30);
   const transcript = recent.map(m => {
@@ -109,7 +116,13 @@ Subject: ${thread.subject}
 
 Transcript (oldest first, max 30 messages):
 ${transcript || '(no messages)'}
-
+${quoMessages.length > 0 ? `
+Live Quo SMS (not yet synced, oldest first):
+${quoMessages.map(m => {
+  const who = m.direction === 'outgoing' ? 'staff' : 'customer';
+  const when = m.createdAt.slice(0, 16).replace('T', ' ');
+  return `[${who} SMS ${when}] ${m.text.slice(0, 500)}`;
+}).join('\n\n')}` : ''}
 Respond with JSON only. No markdown, no preamble.`;
 
   const res = await fetch('https://api.anthropic.com/v1/messages', {

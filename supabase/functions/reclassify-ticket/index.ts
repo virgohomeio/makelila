@@ -9,7 +9,57 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { corsHeaders } from '../_shared/cors.ts';
 import { authenticate } from '../_shared/auth.ts';
 import type { Priority } from '../_shared/classifier.ts';
-import { llmClassify, sha256Hex, type UnitContext } from '../_shared/classifier-llm.ts';
+import { llmClassify, sha256Hex, type UnitContext, type QuoMessage } from '../_shared/classifier-llm.ts';
+
+const OPENPHONE_BASE = 'https://api.openphone.com/v1';
+
+type OPMessage = {
+  id: string;
+  direction: 'incoming' | 'outgoing';
+  text: string;
+  body?: string;
+  createdAt: string;
+};
+
+/** Fetch the last 20 Quo SMS messages for a customer phone across all configured
+ *  phone number IDs. Returns newest-first from the API, we reverse to oldest-first. */
+async function fetchLiveQuoMessages(
+  customerPhone: string,
+  knownIds: Set<string>,
+): Promise<QuoMessage[]> {
+  const apiKey         = Deno.env.get('OPENPHONE_API_KEY');
+  const phoneNumberIds = (Deno.env.get('OPENPHONE_PHONE_NUMBER_IDS') ?? '')
+    .split(',').map(s => s.trim()).filter(Boolean);
+  if (!apiKey || phoneNumberIds.length === 0) return [];
+
+  const all: OPMessage[] = [];
+  for (const phoneNumberId of phoneNumberIds) {
+    try {
+      const url = new URL(`${OPENPHONE_BASE}/messages`);
+      url.searchParams.set('phoneNumberId', phoneNumberId);
+      url.searchParams.append('participants[]', customerPhone);
+      url.searchParams.set('maxResults', '20');
+      const res = await fetch(url.toString(), {
+        headers: { Authorization: apiKey, 'Content-Type': 'application/json' },
+      });
+      if (!res.ok) continue;
+      const data = await res.json() as { data?: OPMessage[] };
+      for (const m of data.data ?? []) {
+        if (!knownIds.has(`quo:${m.id}`)) all.push(m);
+      }
+    } catch {
+      // best-effort — don't fail the whole reclassify if Quo is unreachable
+    }
+  }
+
+  // Sort oldest-first for the transcript
+  all.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  return all.map(m => ({
+    direction: m.direction,
+    text: m.text || m.body || '',
+    createdAt: m.createdAt,
+  }));
+}
 
 const PRIORITY_TO_DB: Record<Priority, 'urgent' | 'high' | 'normal' | 'low'> = {
   urgent: 'urgent',
@@ -52,7 +102,7 @@ async function handle(req: Request): Promise<Response> {
   const [ticketRes, messagesRes] = await Promise.all([
     admin
       .from('service_tickets')
-      .select('id, subject, customer_name, unit_serial, status, is_manually_overridden')
+      .select('id, subject, customer_name, customer_phone, unit_serial, status, is_manually_overridden')
       .eq('id', body.ticket_id)
       .single(),
     admin
@@ -93,6 +143,12 @@ async function handle(req: Request): Promise<Response> {
     }
   }
 
+  // Fetch live Quo messages (messages not yet flushed to DB by sync-quo-tickets).
+  const knownQuoIds = new Set(messages.map(m => m.gmail_message_id ?? '').filter(id => id.startsWith('quo:')));
+  const quoMessages = ticket.customer_phone
+    ? await fetchLiveQuoMessages(ticket.customer_phone, knownQuoIds)
+    : [];
+
   const threadInput = {
     subject: ticket.subject ?? '',
     customer_name: ticket.customer_name,
@@ -106,7 +162,7 @@ async function handle(req: Request): Promise<Response> {
 
   const lastMsgId = messages.at(-1)?.gmail_message_id ?? '';
   const llmHash   = await sha256Hex(`${body.ticket_id}|${lastMsgId}`);
-  const llm       = await llmClassify(threadInput, { unit: unitCtx });
+  const llm       = await llmClassify(threadInput, { unit: unitCtx, quoMessages });
 
   if (!llm) {
     return json({ error: 'Claude classification failed — check ANTHROPIC_API_KEY secret' }, 500);
