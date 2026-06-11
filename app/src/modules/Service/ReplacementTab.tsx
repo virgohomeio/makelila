@@ -186,6 +186,8 @@ export default function ReplacementTab() {
       <div className={styles.replSupplyPanel}>
         <div className={styles.replSupplyHeader}>Queued replacement demand</div>
 
+        <div className={styles.replSupplyCols}>
+        <div className={styles.replSupplyCol}>
         <div className={styles.replSupplySub}>LILA Units</div>
         <div className={styles.replSupplyKpis}>
           <div className={styles.replSupplyKpi}>
@@ -214,7 +216,9 @@ export default function ReplacementTab() {
             </tbody>
           </table>
         )}
+        </div>
 
+        <div className={styles.replSupplyCol}>
         <div className={styles.replSupplySub}>Parts &amp; Consumables</div>
         {demand.partRows.length > 0 ? (
           <table className={styles.replSupplyTable}>
@@ -231,6 +235,8 @@ export default function ReplacementTab() {
         ) : (
           <div className={styles.muted} style={{ fontSize: 12 }}>No parts or consumables queued for replacement.</div>
         )}
+        </div>
+        </div>
       </div>
 
       <div className={styles.kpiStrip}>
