@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { replacementItemTags, replacementStageTag, replacementDemandBySku } from './replacementTags';
+import { replacementItemTags, replacementStageTag, replacementDemandBySku, replacementUnitDemandByBatch } from './replacementTags';
 
 const order = (line_items: unknown[], extra: Partial<{ awaiting_batch_id: string | null; replacement_state: string | null }> = {}) =>
   ({ line_items, awaiting_batch_id: null, replacement_state: 'ready', ...extra }) as never;
@@ -71,6 +71,22 @@ describe('replacementDemandBySku', () => {
     expect(m.get('LILA-LATCH-SIDE-L')).toBe(1);
     expect(m.get('LILA-LATCH-SIDE-R')).toBe(2);
     expect(m.get('LILA-LID-V36')).toBe(1);
+  });
+
+  it('unit demand groups by batch and excludes parts/shipped', () => {
+    const m = replacementUnitDemandByBatch([
+      o([{ kind: 'unit_pending', batch: 'P150' }]),
+      o([{ kind: 'unit_pending', batch: 'P150' }]),
+      o([{ kind: 'unit_pending', batch: 'P100' }]),
+      o([], { awaiting_batch_id: 'P100X' }),               // empty line_items, batch-blocked
+      o([{ kind: 'part', description: 'P100 X' }]),         // free-text unit → P100X
+      o([{ kind: 'part', description: 'both side latch' }]), // a part → not counted
+      o([{ kind: 'unit_pending', batch: 'P100X' }], { shipped_at: '2026-06-01' }), // shipped → skip
+    ]);
+    expect(m.get('P150')).toBe(2);
+    expect(m.get('P100')).toBe(1);
+    expect(m.get('P100X')).toBe(2);
+    expect(m.has('side latch-L')).toBe(false);
   });
 
   it('excludes shipped/delivered orders, units, ambiguous-side, and unspecified parts', () => {

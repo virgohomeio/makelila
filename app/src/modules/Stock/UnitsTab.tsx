@@ -7,6 +7,8 @@ import {
 import { BatchCards } from './BatchCards';
 import { UnitTable } from './UnitTable';
 import { TestReportUploader } from './TestReportUploader';
+import { useReplacementOrders } from '../../lib/orders';
+import { replacementUnitDemandByBatch } from '../../lib/replacementTags';
 import styles from './Stock.module.css';
 
 type CategoryFilter = 'all' | StatusCategory;
@@ -14,8 +16,30 @@ type CategoryFilter = 'all' | StatusCategory;
 export function UnitsTab() {
   const { batches, loading: bLoading } = useBatches();
   const { units, loading: uLoading } = useUnits();
+  const { orders: replacementOrders } = useReplacementOrders();
   const countsByBatch = useStatusCountsByBatch(units);
   const validSerials = useMemo(() => new Set(units.map(u => u.serial)), [units]);
+
+  // Replacement demand for whole units (Service > Replacement) vs ready supply.
+  // toBuild = queued unit demand not yet covered by ready stock for that batch.
+  const unitSupplyDemand = useMemo(() => {
+    const demandByBatch = replacementUnitDemandByBatch(replacementOrders);
+    const totalReady = units.filter(u => u.status === 'ready').length;
+    // Show every batch that has ready stock or queued demand, plus always P100X.
+    const batchIds = new Set<string>([...demandByBatch.keys(), 'P100X']);
+    for (const b of batches) if ((countsByBatch.get(b.id)?.ready ?? 0) > 0) batchIds.add(b.id);
+    const order = (id: string) => ({ P100: 0, P100X: 1, P150: 2 } as Record<string, number>)[id] ?? 9;
+    const rows = [...batchIds]
+      .map(id => {
+        const ready = countsByBatch.get(id)?.ready ?? 0;
+        const demand = demandByBatch.get(id) ?? 0;
+        return { batch: id, ready, demand, toBuild: Math.max(0, demand - ready) };
+      })
+      .filter(r => r.ready > 0 || r.demand > 0)
+      .sort((a, b) => order(a.batch) - order(b.batch) || a.batch.localeCompare(b.batch));
+    const totalToBuild = rows.reduce((n, r) => n + r.toBuild, 0);
+    return { rows, totalReady, totalToBuild, p100x: demandByBatch.get('P100X') ?? 0 };
+  }, [replacementOrders, units, batches, countsByBatch]);
 
   const [batchFilter, setBatchFilter] = useState<string | null>(null);
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>('all');
@@ -43,6 +67,42 @@ export function UnitsTab() {
 
   return (
     <div className={styles.stockLayout}>
+      {/* Replacement demand ↔ unit supply (Service > Replacement). Read-only summary. */}
+      <div className={styles.unitDemandPanel}>
+        <div className={styles.unitDemandHeader}>Replacement demand — units ready vs needed</div>
+        <div className={styles.unitDemandKpis}>
+          <div className={styles.unitDemandKpi}>
+            <div className={styles.unitDemandKpiValue}>{unitSupplyDemand.totalReady}</div>
+            <div className={styles.unitDemandKpiLabel}>Ready now</div>
+          </div>
+          <div className={styles.unitDemandKpi}>
+            <div className={`${styles.unitDemandKpiValue} ${unitSupplyDemand.totalToBuild > 0 ? styles.unitDemandWarn : ''}`}>{unitSupplyDemand.totalToBuild}</div>
+            <div className={styles.unitDemandKpiLabel}>Need to build / get ready</div>
+          </div>
+          <div className={styles.unitDemandKpi}>
+            <div className={`${styles.unitDemandKpiValue} ${unitSupplyDemand.p100x > 0 ? styles.unitDemandWarn : ''}`}>{unitSupplyDemand.p100x}</div>
+            <div className={styles.unitDemandKpiLabel}>Next batch (P100X)</div>
+          </div>
+        </div>
+        {unitSupplyDemand.rows.length > 0 && (
+          <table className={styles.unitDemandTable}>
+            <thead>
+              <tr><th>Model / batch</th><th>Ready</th><th>Queued (replacements)</th><th>To build / get ready</th></tr>
+            </thead>
+            <tbody>
+              {unitSupplyDemand.rows.map(r => (
+                <tr key={r.batch}>
+                  <td>{r.batch}</td>
+                  <td>{r.ready}</td>
+                  <td>{r.demand}</td>
+                  <td>{r.toBuild > 0 ? <strong className={styles.unitDemandWarn}>{r.toBuild}</strong> : 0}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
       <BatchCards
         batches={batches}
         countsByBatch={countsByBatch}
