@@ -7,7 +7,7 @@ import {
   statusMeta, priorityMeta, sourceLabel, topicLabel, slaChip,
   ISSUE_AREAS, ISSUE_AREA_LABEL,
   updateTicketStatus, assignTicketOwner, setTicketPriority, setTicketIssueArea, setTicketCategory,
-  setRepairFields, reclassifyTicket, deleteTicket, updateTicketSubject,
+  setRepairFields, reclassifyTicket, deleteTicket, updateTicketSubject, setTicketDescription,
   markDiagnosisLinkSent,
   useCustomerLifecycle, warrantyState,
   useTicketMessages, useClassificationLog,
@@ -49,6 +49,8 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [editingSubject, setEditingSubject] = useState(false);
   const [subjectDraft, setSubjectDraft] = useState(ticket.subject);
+  const [editingDescription, setEditingDescription] = useState(false);
+  const [descriptionDraft, setDescriptionDraft] = useState(ticket.description ?? '');
   const [pickerOpen, setPickerOpen] = useState(false);
   // Backlog #75 — diagnosis-link send dialog state.
   const [diagOpen, setDiagOpen] = useState(false);
@@ -72,6 +74,20 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
     try {
       await updateTicketSubject(ticket.id, next);
       setEditingSubject(false);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveDescription() {
+    const next = descriptionDraft.trim();
+    if (next === (ticket.description ?? '')) { setEditingDescription(false); return; }
+    setBusy(true); setError(null);
+    try {
+      await setTicketDescription(ticket.id, next);
+      setEditingDescription(false);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -364,12 +380,41 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
           </div>
         )}
 
-        {ticket.description && (
-          <div className={styles.detailSection}>
-            <div className={styles.detailSectionLabel}>Description</div>
-            <div className={styles.detailValue}>{ticket.description}</div>
-          </div>
-        )}
+        <div className={styles.detailSection}>
+          <div className={styles.detailSectionLabel}>Description</div>
+          {editingDescription ? (
+            <div className={styles.subjectEditRow} style={{ flexDirection: 'column', alignItems: 'stretch', gap: 6 }}>
+              <textarea
+                className={styles.subjectEditInput}
+                value={descriptionDraft}
+                autoFocus
+                disabled={busy}
+                rows={4}
+                placeholder="Add a description…"
+                onChange={e => setDescriptionDraft(e.target.value)}
+              />
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button className={styles.btnPrimary} disabled={busy} onClick={() => void saveDescription()}>Save</button>
+                <button
+                  className={styles.btnSecondary}
+                  disabled={busy}
+                  onClick={() => { setDescriptionDraft(ticket.description ?? ''); setEditingDescription(false); }}
+                >Cancel</button>
+              </div>
+            </div>
+          ) : (
+            <div className={styles.detailValue}>
+              {ticket.description
+                ? ticket.description
+                : <span className={styles.muted}>No description yet</span>}
+              <button
+                className={styles.subjectEditBtn}
+                title={ticket.description ? 'Edit description' : 'Add description'}
+                onClick={() => { setDescriptionDraft(ticket.description ?? ''); setEditingDescription(true); }}
+              >✎</button>
+            </div>
+          )}
+        </div>
 
         {messages.length > 0 && (
           <div className={styles.detailSection}>

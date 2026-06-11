@@ -885,6 +885,24 @@ export async function updateTicketSubject(id: string, subject: string): Promise<
   await logAction('ticket_subject_updated', id, trimmed);
 }
 
+/** Set (or clear) a ticket's description. Unlike subject, empty is allowed —
+ *  it clears the field. Lets operators add a description after creation
+ *  (the intake/classifier sets it at creation, but backfilled / manual
+ *  tickets often have none). */
+export async function setTicketDescription(id: string, description: string): Promise<void> {
+  const trimmed = description.trim();
+  const { data, error } = await supabase
+    .from('service_tickets')
+    .update({ description: trimmed || null })
+    .eq('id', id)
+    .select('id');
+  if (error) throw error;
+  if (!data || data.length === 0) {
+    throw new Error('Description was not updated (no permission or ticket removed).');
+  }
+  await logAction('ticket_description_updated', id, trimmed.slice(0, 100) || '(cleared)');
+}
+
 export async function setRepairFields(
   id: string,
   patch: { defect_category?: string | null; parts_needed?: string | null },
