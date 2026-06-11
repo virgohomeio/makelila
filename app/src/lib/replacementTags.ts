@@ -120,6 +120,23 @@ export function replacementStageTag(
   return null;
 }
 
+/** Per-batch replacement demand for whole LILA units, queued across un-shipped
+ *  replacement orders (Service > Replacement). Uses the same item-tag
+ *  derivation the Replacement tab shows, keeping only the unit tags (P100,
+ *  P100X, P150 …). Powers the Stock > LILA Units supply-vs-demand section. */
+export function replacementUnitDemandByBatch(
+  orders: Array<Pick<Order, 'line_items' | 'awaiting_batch_id' | 'shipped_at' | 'delivered_at'>>,
+): Map<string, number> {
+  const m = new Map<string, number>();
+  for (const o of orders) {
+    if (o.shipped_at || o.delivered_at) continue; // only still-queued
+    for (const tag of replacementItemTags(o)) {
+      if (isUnitTag(tag)) m.set(tag, (m.get(tag) ?? 0) + 1);
+    }
+  }
+  return m;
+}
+
 /** Per-SKU replacement demand for the Stock > Parts "Demand" column: the count
  *  of each part queued across un-shipped replacement orders. Uses the SAME
  *  item-tag derivation the Service > Replacement tab shows (so Demand matches

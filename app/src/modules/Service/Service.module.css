@@ -1032,3 +1032,57 @@
   color: #9c4221;
   opacity: 0.85;
 }
+
+/* Queued replacement demand vs supply (Service > Replacement, top section) */
+.replSupplyPanel {
+  margin: 0 0 16px 0;
+  padding: 12px 14px;
+  background: #f7fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+}
+.replSupplyHeader {
+  font-size: 13px;
+  font-weight: 700;
+  color: #1a202c;
+  margin-bottom: 8px;
+}
+.replSupplySub {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #718096;
+  margin: 10px 0 6px;
+}
+.replSupplyKpis {
+  display: flex;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+.replSupplyKpi { min-width: 120px; }
+.replSupplyKpiValue {
+  font-size: 22px;
+  font-weight: 700;
+  color: #1a202c;
+  line-height: 1.1;
+}
+.replSupplyKpiLabel {
+  font-size: 11px;
+  color: #718096;
+  margin-top: 2px;
+}
+.replSupplyWarn { color: #c53030; }
+.replSupplyTable {
+  width: auto;
+  border-collapse: collapse;
+  font-size: 12px;
+  margin-top: 4px;
+}
+.replSupplyTable th,
+.replSupplyTable td {
+  text-align: left;
+  padding: 4px 18px 4px 0;
+  border-bottom: 1px solid #edf2f7;
+}
+.replSupplyTable th { font-weight: 600; color: #718096; }
