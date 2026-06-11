@@ -470,3 +470,229 @@ export async function attachmentSignedUrl(file_path: string): Promise<string | n
   if (error || !data) return null;
   return data.signedUrl;
 }
+
+// ============================================================ Station Pass Types
+
+export type StationPassStation = 'electrical' | 'mechanical' | 'firmware_flash' | 'final_qa';
+export type StationPassStatus = 'pass' | 'fail' | 'incomplete' | 'rework';
+export type StationPassDefectCategory =
+  | 'solder_issue' | 'loose_connection' | 'firmware_flash_failed'
+  | 'display_issue' | 'motor_issue' | 'sensor_issue' | 'mechanical_alignment' | 'other';
+
+export type StationPass = {
+  id: string;
+  unit_serial: string;
+  station: StationPassStation;
+  pass_status: StationPassStatus;
+  attempt_seq: number;
+  defect_category: StationPassDefectCategory | null;
+  defect_notes: string | null;
+  technician_id: string | null;
+  firmware_version: string | null;
+  photo_urls: string[];
+  created_at: string;
+};
+
+export type BuildQCStat = {
+  station: StationPassStation;
+  total: number;
+  pass: number;
+  fail: number;
+  rework: number;
+  first_pass_yield: number; // pct 0-100
+};
+
+export type TechnicianStat = {
+  technician_id: string;
+  technician_name: string | null;
+  total: number;
+  pass: number;
+  fail: number;
+  by_category: Record<string, number>;
+};
+
+// ============================================================ Pure helpers (exported for tests)
+
+/** first_pass_yield = units that passed on attempt_seq=1 / total units that attempted */
+export function computeFirstPassYield(passes: StationPass[], station: StationPassStation): number {
+  const stationPasses = passes.filter(p => p.station === station);
+  if (stationPasses.length === 0) return 0;
+  const unitSerials = [...new Set(stationPasses.map(p => p.unit_serial))];
+  const firstAttempts = stationPasses.filter(p => p.attempt_seq === 1);
+  const firstPassCount = firstAttempts.filter(p => p.pass_status === 'pass').length;
+  return unitSerials.length === 0 ? 0 : (firstPassCount / unitSerials.length) * 100;
+}
+
+/** Pure: compute next attempt_seq given the current max (null if no prior attempts). */
+export function nextAttemptSeq(currentMax: number | null | undefined): number {
+  return (currentMax ?? 0) + 1;
+}
+
+// ============================================================ Station Pass Hooks
+
+export function useStationPasses(unit_serial: string): { passes: StationPass[]; loading: boolean } {
+  const [passes, setPasses] = useState<StationPass[]>([]);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    if (!unit_serial) { setPasses([]); setLoading(false); return; }
+    let cancelled = false;
+    let ch: RealtimeChannel | null = null;
+    (async () => {
+      const { data, error } = await supabase
+        .from('build_station_passes')
+        .select('*')
+        .eq('unit_serial', unit_serial)
+        .order('created_at', { ascending: false });
+      if (cancelled) return;
+      if (!error && data) setPasses(data as StationPass[]);
+      setLoading(false);
+      ch = supabase
+        .channel(`station_passes:${unit_serial}`)
+        .on('postgres_changes',
+          { event: 'INSERT', schema: 'public', table: 'build_station_passes', filter: `unit_serial=eq.${unit_serial}` },
+          (p) => {
+            if (p.new) {
+              const row = p.new as StationPass;
+              setPasses(prev => [row, ...prev]);
+            }
+          })
+        .subscribe();
+    })();
+    return () => { cancelled = true; if (ch) void ch.unsubscribe(); };
+  }, [unit_serial]);
+  return { passes, loading };
+}
+
+export function useBuildQCStat(
+  date_from: string,
+  date_to: string,
+  batch?: string,
+): { qcStats: BuildQCStat[]; techStats: TechnicianStat[]; loading: boolean } {
+  const [qcStats, setQcStats] = useState<BuildQCStat[]>([]);
+  const [techStats, setTechStats] = useState<TechnicianStat[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      let q = supabase
+        .from('build_station_passes')
+        .select('station, pass_status, defect_category, technician_id, unit_serial, attempt_seq, created_at')
+        .gte('created_at', date_from)
+        .lte('created_at', date_to);
+      if (batch) {
+        // Join to units to filter by batch
+        const { data: unitSerials } = await supabase
+          .from('units')
+          .select('serial')
+          .eq('batch', batch);
+        if (unitSerials && unitSerials.length > 0) {
+          const serials = (unitSerials as { serial: string }[]).map(u => u.serial);
+          q = q.in('unit_serial', serials);
+        }
+      }
+      const { data, error } = await q;
+      if (cancelled) return;
+      if (error || !data) { setLoading(false); return; }
+
+      const rows = data as StationPass[];
+
+      // QC stats by station
+      const stations: StationPassStation[] = ['electrical', 'mechanical', 'firmware_flash', 'final_qa'];
+      const computed: BuildQCStat[] = stations.map(station => {
+        const stationRows = rows.filter(r => r.station === station);
+        const total = stationRows.length;
+        const pass = stationRows.filter(r => r.pass_status === 'pass').length;
+        const fail = stationRows.filter(r => r.pass_status === 'fail').length;
+        const rework = stationRows.filter(r => r.pass_status === 'rework').length;
+        const fpy = computeFirstPassYield(rows, station);
+        return { station, total, pass, fail, rework, first_pass_yield: fpy };
+      });
+      setQcStats(computed);
+
+      // Technician stats
+      const techMap = new Map<string, TechnicianStat>();
+      for (const row of rows) {
+        const tid = row.technician_id ?? 'unknown';
+        if (!techMap.has(tid)) {
+          techMap.set(tid, {
+            technician_id: tid,
+            technician_name: null,
+            total: 0,
+            pass: 0,
+            fail: 0,
+            by_category: {},
+          });
+        }
+        const stat = techMap.get(tid)!;
+        stat.total++;
+        if (row.pass_status === 'pass') stat.pass++;
+        if (row.pass_status === 'fail') stat.fail++;
+        if (row.defect_category) {
+          stat.by_category[row.defect_category] = (stat.by_category[row.defect_category] ?? 0) + 1;
+        }
+      }
+      setTechStats([...techMap.values()]);
+      setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [date_from, date_to, batch]);
+
+  return { qcStats, techStats, loading };
+}
+
+// ============================================================ Station Pass Mutations
+
+export async function recordStationPass(input: {
+  unit_serial: string;
+  station: StationPassStation;
+  pass_status: StationPassStatus;
+  defect_category?: StationPassDefectCategory | null;
+  defect_notes?: string | null;
+  firmware_version?: string | null;
+  photo_urls?: string[];
+}): Promise<{ id: string }> {
+  const { unit_serial, station } = input;
+
+  // Compute next attempt_seq
+  const { data: maxRow } = await supabase
+    .from('build_station_passes')
+    .select('attempt_seq')
+    .eq('unit_serial', unit_serial)
+    .eq('station', station)
+    .order('attempt_seq', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const attempt_seq = nextAttemptSeq((maxRow as { attempt_seq: number } | null)?.attempt_seq);
+
+  const { data: authData } = await supabase.auth.getUser();
+  const technician_id = authData.user?.id ?? null;
+
+  const { data, error } = await supabase
+    .from('build_station_passes')
+    .insert({
+      unit_serial,
+      station,
+      pass_status: input.pass_status,
+      attempt_seq,
+      defect_category: input.defect_category ?? null,
+      defect_notes: input.defect_notes ?? null,
+      technician_id,
+      firmware_version: input.firmware_version ?? null,
+      photo_urls: input.photo_urls ?? [],
+    })
+    .select('id')
+    .single();
+
+  if (error || !data) throw error ?? new Error('recordStationPass failed');
+
+  await logAction(
+    'station_pass_recorded',
+    unit_serial,
+    `${station}: ${input.pass_status} (attempt ${attempt_seq})`,
+    { entityType: 'unit', entityId: unit_serial, unitSerial: unit_serial },
+  );
+
+  return { id: (data as { id: string }).id };
+}
