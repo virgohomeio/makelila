@@ -7,13 +7,20 @@ import { useUnits } from '../../lib/stock';
 import { PipelineBoard } from './PipelineBoard';
 import { TableView } from './TableView';
 import { NewPOModal } from './NewPOModal';
+import { BuildQCDashboard } from './BuildQCDashboard';
 import { useIsMobile } from '../../lib/useMediaQuery';
 import { MobileTabbedModule, type MobileTab } from '../../components/MobileTabbedModule';
 import styles from './Build.module.css';
 
-type View = 'board' | 'table';
+type View = 'board' | 'table' | 'qc';
 const BATCH_FILTERS = ['all', 'P50N', 'P100', 'P100X', 'P200'] as const;
 type BatchFilter = typeof BATCH_FILTERS[number];
+
+function qcDateRange(days = 30) {
+  const to = new Date();
+  const from = new Date(to.getTime() - days * 24 * 60 * 60 * 1000);
+  return { from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10) };
+}
 
 export default function Build() {
   const { orders, loading: oLoading } = useFactoryOrders();
@@ -105,6 +112,17 @@ export default function Build() {
               search={search}
             />,
       },
+      {
+        key: 'qc' as View,
+        label: 'QC Dashboard',
+        subtitle: 'First-pass yield, defects by station and technician',
+        icon: '🔬',
+        iconBg: '#f0fff4',
+        content: <BuildQCDashboard
+          batch={batchFilter !== 'all' ? batchFilter : undefined}
+          dateRange={qcDateRange()}
+        />,
+      },
     ];
     return (
       <>
@@ -152,12 +170,16 @@ export default function Build() {
               className={`${styles.chip} ${view === 'table' ? styles.chipActive : ''}`}
               onClick={() => setView('table')}
             >Table</button>
+            <button
+              className={`${styles.chip} ${view === 'qc' ? styles.chipActive : ''}`}
+              onClick={() => setView('qc')}
+            >QC Dashboard</button>
           </div>
           <button className={styles.btnPrimary} onClick={() => setShowNewPO(true)}>+ New PO</button>
           <button className={styles.btnSecondary} onClick={() => { setShowClaimSerial({ batch: 'P100' }); setClaimSerial(''); setClaimError(null); }}>+ Claim serial</button>
         </div>
       </div>
-      {loading ? (
+      {loading && view !== 'qc' ? (
         <div className={styles.loading}>Loading Build pipeline…</div>
       ) : view === 'board' ? (
         <PipelineBoard
@@ -169,7 +191,7 @@ export default function Build() {
           batchFilter={batchFilter}
           search={search}
         />
-      ) : (
+      ) : view === 'table' ? (
         <TableView
           orders={orders}
           shipments={shipments}
@@ -178,6 +200,11 @@ export default function Build() {
           units={units}
           batchFilter={batchFilter}
           search={search}
+        />
+      ) : (
+        <BuildQCDashboard
+          batch={batchFilter !== 'all' ? batchFilter : undefined}
+          dateRange={qcDateRange()}
         />
       )}
     </div>
