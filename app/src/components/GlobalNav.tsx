@@ -5,8 +5,8 @@ import { useAuth } from '../lib/auth';
 import { canView } from '../lib/permissions';
 
 const MODULES = [
-  { path: '/dashboard',     label: 'Dashboard' },
-  { path: '/order-review',  label: 'Order Review' },
+  { path: '/dashboard',     label: 'Fleet' },
+  { path: '/order-review',  label: 'Sales' },
   { path: '/fulfillment',   label: 'Fulfillment' },
   { path: '/post-shipment', label: 'Post-Shipment' },
   { path: '/service',       label: 'Service' },
