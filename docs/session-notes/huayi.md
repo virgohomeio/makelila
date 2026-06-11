@@ -40,7 +40,8 @@ Your second hat is the **visibility-restricted Finance module** — a new top-le
 
 ---
 
-### Feature 1: RBAC profiles + canDo + canView helpers
+### Feature 1: RBAC profiles + canDo + canView helpers — **SHIPPED** (2026-06-07)
+**Commits:** `6cf6f1e` (profiles.role enum + is_finance/is_manager RLS) · `7c6cf77` (canDo/canView + useAuth role) · `5d10e5f` (replace MANAGER_EMAILS/FINANCE_EMAILS) · `6ed2660` (close self-privilege-escalation)
 **Priority:** P1 · **Effort:** S (~5h) · **Tokens:** ~0.6M
 **Files to touch:** `supabase/migrations/<ts>_profiles_role.sql`, `app/src/lib/permissions.ts` (new), `app/src/lib/auth.tsx`, `app/src/lib/postShipment.ts`, plus call-sites where `MANAGER_EMAILS` / `FINANCE_EMAILS` checks currently live.
 **Depends on:** nothing.
@@ -77,7 +78,8 @@ Today, write-action gating in makeLILA is implemented via hardcoded email allow-
 
 ---
 
-### Feature 2: activity_log entity refs + per-serial timeline (substrate)
+### Feature 2: activity_log entity refs + per-serial timeline (substrate) — **SHIPPED** (2026-06-07)
+**Commits:** `8d7f630` (entity_type/entity_id/unit_serial columns + indexes) · `e08fc1e` (logAction opts + useActivityForEntity hook) · `7326f64` (wire entity refs at unit/return/ticket call-sites)
 **Priority:** P2 · **Effort:** S (~5h) · **Tokens:** ~0.6M
 **Files to touch:** `supabase/migrations/<ts>_activity_log_entity_refs.sql`, `app/src/lib/activityLog.ts`, every call-site of `logAction()` (update gradually — new fields are nullable).
 **Depends on:** nothing (Feature 1 is parallel-safe).
@@ -150,7 +152,8 @@ Hardware-plus-software teams chronically have the "we fixed it but never told th
 
 ---
 
-### Feature 4: Mobile V1 (viewport + PWA manifest + AppShell narrow-aware)
+### Feature 4: Mobile V1 (viewport + PWA manifest + AppShell narrow-aware) — **SHIPPED** (2026-06-07, ~2h actual)
+**Commits:** `2ebe867` (V1 — viewport-fit + PWA manifest + safe-area insets + bottom tab bar) · `fbad3bd` (scroll-blocking CSS fix + CI unblock)
 **Priority:** P1 · **Effort:** M (~15h) · **Tokens:** ~1.8M
 **Files to touch:** `app/index.html` (viewport meta), `app/public/manifest.json` (new), `app/public/icons/` (new — full-bleed iOS icons), `app/src/components/AppShell.tsx` + `AppShell.module.css`, `app/src/components/GlobalNav.tsx` + `GlobalNav.module.css`, global CSS for `dvh` migration in modals.
 **Depends on:** Feature 1 (so the collapsed nav can use `canView()` to decide what to render).
@@ -190,7 +193,8 @@ Backlog #80. Today the app is desktop-only despite being installable to an iPhon
 
 ---
 
-### Feature 5: Finance module skeleton + JournalPanel (QBO)
+### Feature 5: Finance module skeleton + JournalPanel (QBO) — **SHIPPED** (2026-06-11)
+**Commits:** `055723a` (qbo_daily_journals + qbo_oauth + cron) · `4812e1f` (lib/finance.ts) · `f9eab96` (Finance module + JournalPanel + route guard) · `5a8fcb6` (qbo-daily-summary edge fn) · `7a024fb` (PostShipment FinanceTab) · `c48103d` (EntityType extension) · `ef3cd00` (finance.test.ts) · `c60b65d` / `f0638fc` (fixes)
 **Priority:** P1 · **Effort:** M (~15h) · **Tokens:** ~1.8M
 **Files to touch:** `app/src/modules/Finance/` (new directory — `index.tsx`, `JournalPanel.tsx`, module CSS), `app/src/App.tsx` (add route + guard), `app/src/components/GlobalNav.tsx` (conditional render), `supabase/migrations/<ts>_qbo_daily_journals.sql`, `supabase/functions/qbo-daily-summary/` (new edge function), `app/src/lib/finance.ts` (new), `app/src/modules/PostShipment/FinanceTab.tsx` (the embedded view of the last 30 days of journals).
 **Depends on:** Feature 1 (RBAC), Reina's Returns disposition work (clean refund data flowing in before QBO sees it).
@@ -258,7 +262,8 @@ Finance work today is a manual QBO journal entry per day per currency per paymen
 
 ---
 
-### Feature 6: ProductionProjectionPanel (Finance)
+### Feature 6: ProductionProjectionPanel (Finance) — **SHIPPED** (2026-06-11)
+**Commits:** `f16f284` (ProductionProjectionPanel + production-projection-snapshot edge fn) · `4851fbf` (migration fix: batch_id text + is_finance() signature)
 **Priority:** P2 · **Effort:** M (~15h) · **Tokens:** ~1.8M
 **Files to touch:** `app/src/modules/Finance/ProductionProjectionPanel.tsx` (new), `app/src/lib/finance.ts` (extend), `supabase/migrations/<ts>_production_projection_snapshots.sql`, `supabase/functions/production-projection-snapshot/` (new — scheduled).
 **Depends on:** Feature 5 (Finance module shell + RBAC enforcement pattern).
@@ -292,7 +297,8 @@ George and Huayi need a forward-looking view of unit availability per batch (P15
 
 ---
 
-### Feature 7: SalesProjectionPanel rolling-average (Finance)
+### Feature 7: SalesProjectionPanel rolling-average (Finance) — **SHIPPED** (2026-06-11)
+**Commits:** `c5fc9a5` (SalesProjectionPanel + sales-projection-snapshot edge fn)
 **Priority:** P2 · **Effort:** M (~15h) · **Tokens:** ~1.8M
 **Files to touch:** `app/src/modules/Finance/SalesProjectionPanel.tsx` (new), `app/src/lib/finance.ts` (extend), `supabase/migrations/<ts>_sales_projection_snapshots.sql`, `supabase/functions/sales-projection-snapshot/` (new — scheduled).
 **Depends on:** Feature 5 (Finance module shell), Feature 6 (proves the snapshot pattern).
@@ -327,7 +333,8 @@ Forward-looking revenue projection for the next 30/60/90 days vs the company rev
 
 ---
 
-### Feature 8: Mobile V2 (per-module card-row tables) — LARGEST SINGLE ITEM
+### Feature 8: Mobile V2 (per-module card-row tables) — **SHIPPED** (2026-06-07)
+**Commits:** `24d968d` (MobileHome + NavCard + Brolink UI + makelila wordmark) · `4ab795d` (Service/PostShipment/Fulfillment tab-cards) · `3db2b3b` (Customers/Stock/Build/OrderReview card views) · `acb3181` (Dashboard/ActivityLog/Templates card views) · `910c529` (row→detail drill + Inbox tap-to-read)
 **Priority:** P2 · **Effort:** L (~45h) · **Tokens:** ~5.4M
 **Files to touch:** `app/src/modules/OrderReview/` (list view), `app/src/modules/Fulfillment/QueuePanel.tsx`, `app/src/modules/Service/TicketsTable.tsx`, `app/src/modules/PostShipment/` (Returns/Refunds/Replacements/Cancellations tables), `app/src/modules/Stock/UnitTable.tsx`, and the CSS Modules for each. Plus a shared `components/CardRowTable/` if a reusable component pattern emerges (it likely will).
 **Depends on:** Feature 4 (Mobile V1 — the breakpoint constant + safe-area-insets + AppShell already exist).

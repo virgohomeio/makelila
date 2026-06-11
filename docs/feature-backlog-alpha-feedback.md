@@ -8,6 +8,24 @@
 
 ---
 
+## New capabilities shipped (not from alpha feedback — full log for reference)
+
+| Date | Feature | Commits |
+|------|---------|---------|
+| 2026-06-07 | **RBAC** — `profiles.role` enum, `canDo`/`canView` helpers, `is_finance`/`is_manager` RLS, replaced MANAGER/FINANCE email allow-lists | `6cf6f1e` `7c6cf77` `5d10e5f` `6ed2660` |
+| 2026-06-07 | **activity_log entity refs** — `entity_type`/`entity_id`/`unit_serial` columns + indexes; `useActivityForEntity()` hook; entity refs at unit/return/ticket call-sites | `8d7f630` `e08fc1e` `7326f64` |
+| 2026-06-07 | **Mobile V1 + V2** — viewport-fit, PWA manifest, safe-area insets, bottom tab bar; MobileHome card-drilldown per module | `2ebe867` `24d968d` `4ab795d` `3db2b3b` `acb3181` `910c529` |
+| 2026-06-07 | **lilalovely integration V1** — customer-events substrate (makelila side); lovely-side triggers deployed end-to-end | `622c40c` |
+| 2026-06-10 | **Marketing module** — Facebook ads sync + CAPI, Klaviyo track + profile sync, CAC dashboard, attribution chips on Customers, HubSpot insert-only, System of Record card | `69d4865`–`ec2535c` (13 commits) |
+| 2026-06-10 | **Junaid J1–J7** — warranty_registrations (J1), units.status quarantine (J2), UnitTimeline per-serial (J3), DeviceContextHeader (J4), SLA aging + auto-escalation (J5), telemetry-driven ticket auto-create (J6), build_station_passes QC dashboard (J7) | `37ac060`–`a72c83e` (11 commits) |
+| 2026-06-10 | **Freight quotes** — `freight_quotes` table + quote history table in FreightCard; carrier chip on OrderRow | `14a6ae7` `9798547` `baf1109` `a0de9aa` |
+| 2026-06-10 | **Shopify PaymentCard** — subtotal/tax/shipping/discounts/total/method on OrderReview detail | `6e47f59` `c76ee41` |
+| 2026-06-11 | **Finance module F5–F7** — QBO journal automation, ProductionProjectionPanel, SalesProjectionPanel; 3-layer enforcement (nav-hide + RequireRole + RLS) | `055723a`–`c5fc9a5` (10 commits) |
+| 2026-06-11 | **Module restructure** — Team module (first tab: member cards), Fleet tab absorbed into Customers, Manufacturing tab absorbed into Stock, PostShipment absorbed into Fulfillment, nav reorder | `818b78d` `e699960` `bababa4` `173393a` `07c548f` |
+| 2026-06-11 | **Claude classifier** — Sonnet-powered `reclassify-ticket` edge fn; auto-assigns `status`/`issue_area`/`root_cause`; fetches live Quo SMS for context | `e90630e` `e5de4b3` |
+
+---
+
 ## P1 — High Priority (multiple requestors or CEO-mandated)
 
 ### 1. Google Maps Address Verification
@@ -47,8 +65,9 @@
 
 Should support both email and SMS channels. Templates should be editable by the team.
 
-### 4. Shopify Order/Payment Summary Sync
+### 4. Shopify Order/Payment Summary Sync — **SHIPPED** (2026-06-10)
 **Source:** Pedrum (May 26)
+**SHIPPED status (2026-06-10):** `PaymentCard.tsx` added to OrderReview detail panel between LineItems and Notes; shows subtotal, tax, shipping, discounts, total, and payment method sourced from Shopify — `6e47f59` / `c76ee41`. Currency-per-line (#20) still pending.
 **Description:** Sync the full Shopify order financial breakdown into makeLILA:
 - Product subtotal
 - Tax amount (if any)
@@ -96,8 +115,9 @@ These fields should live on the Serial Tracker and be visible/editable during th
 **Source:** Pedrum (Apr 29)
 **Description:** Define whether makeLILA replaces HubSpot for support ticketing or sits alongside it. Current concern: platform overload and data duplication across HubSpot + makeLILA + Shopify. Need a clear "system of record" decision per data type.
 
-### 9. Klaviyo Integration for Email Automation
+### 9. Klaviyo Integration for Email Automation — **SHIPPED** (2026-06-10, core infrastructure)
 **Source:** Huayi (May 26, in reply to Pedrum)
+**SHIPPED status (2026-06-10):** `klaviyo-track` edge function (`0f7ee31`), `sync-klaviyo-profiles` bulk-upsert cron (`e447903`), `klaviyo_sync_log` table + daily pg_cron (`2204ee4`), `klaviyo_profile_id` on customers (`a9de1f9`), `logAction()` Klaviyo fire-and-forget at 6 lifecycle call-sites (`c6d0dec`). Remaining: using Klaviyo to drive outbound email flows — drip emails (#88), win-back (#89), Templates module integration (#3).
 **Description:** Integrate with Klaviyo for automated email flows. Could power the email templates (feature #3) and address verification outreach (feature #1) through Klaviyo's infrastructure rather than building email sending from scratch.
 
 ---
@@ -239,8 +259,9 @@ Alpha feedback collection window is **closed**. The 11 items above plus the meet
     2. Flow through the same downstream pipeline as a regular customer order: Order Review → Fulfillment → Post-Shipment (so it gets address review, freight/label generation, tracking email, and any return handling for free, instead of being a parallel one-off process).
   Implementation considerations: the replacement order likely needs a flag so Order Review / Fulfillment can distinguish replacement vs. paid sales (no Shopify charge, no Sezzle, just an internal order). Decide whether replacement orders write into the existing `orders` table with a `kind = 'replacement'` discriminator or into a new `replacement_orders` table that joins to `service_tickets`. Either way, link bidirectionally: the ticket shows the resulting replacement order; the order shows the originating ticket. Activity log on creation. Also clarify: does a "send replacement unit" (whole machine) follow the same workflow, or only parts? Probably yes — same flow, just different line items.
 
-- **#56** Activity Log: identify the actor on every entry + add a right-side KPI panel.
+- **#56** Activity Log: identify the actor on every entry + add a right-side KPI panel. — **SHIPPED** (entity refs 2026-06-07; KPI panel 2026-06-04 via #76)
   **Source:** Huayi (2026-06-04 in-session note)
+  **SHIPPED status:** `activity_log` columns `entity_type`, `entity_id`, `unit_serial` + composite indexes (`8d7f630` 2026-06-07); `logAction()` signature extended with optional entity opts + `useActivityForEntity()` hook (`e08fc1e`); entity refs wired at unit/return/ticket call-sites (`7326f64`). KPI panel re-mapped to real action types + timezone fix shipped 2026-06-04 (see #76). Activity Log tab now lives inside the Team module (`818b78d` 2026-06-11).
   **Description:** Two linked enhancements to the Activity Log module:
     1. **Actor identity on every entry.** `logAction()` already attaches `user_id`, but the feed currently renders entries chronologically without the operator's name surfaced prominently. Show the user (full name + initial avatar) on each row so we can track who is doing what over time. Group consecutive entries by the same user into "sessions" (≤90 min gap) per the original design. This sets up cross-time behavioral analysis — e.g. "Reina handled 12 tickets this week", "Pedrum's order-review throughput is X/day".
     2. **Right-side KPI panel.** Add a dashboard panel to the right of the audit feed that surfaces the most critical operational metrics. The original brief in [docs/2026-04-16-make-lila-app-design.md](2026-04-16-make-lila-app-design.md) (§ Activity Log module) specifies the layout: a 5-tile top KPI row + a 3-card "KPI Overview — Fulfillment" row + a 3-card second KPI row + a 2-column team contribution section. Use that as the starting spec; today's traffic patterns (returns/refunds, replacement parts, follow-up SMS volume, address-verify pass rate, etc.) probably warrant tile re-selection during implementation. KPIs should be derived from `activity_log` rows directly so no separate aggregation pipeline is needed.
@@ -255,8 +276,9 @@ Alpha feedback collection window is **closed**. The 11 items above plus the meet
   **Why temporary:** Once the historical Sheet is fully imported, this UI should be hidden again — otherwise it becomes a permanent backdoor that lets ops re-assign already-shipped serials, which is exactly the kind of state drift #22 is trying to prevent. Add a TODO/cleanup ticket inline. *Related: #21 (reverse assign-serial), #22 (stock-state re-sync), #29 (tracking-link email auto-send).*
   **Likely touch:** Fulfillment serial picker (`Fulfillment/Queue/SerialPicker.tsx` or similar) — extend the status filter to include `shipped` when the backfill flag is set; new "Backfill" tab or hidden route in Fulfillment; reuse existing `updateUnitFields` for the pairing write; light log entry per backfill via `activity_log`.
 
-- **#58** Customers: per-customer profitability tab with filter/search + insights.
+- **#58** Customers: per-customer profitability tab with filter/search + insights. — **SHIPPED** (V4 as of 2026-06-05)
   **Source:** Huayi (2026-06-04 in-session note, mid-brainstorming for #55)
+  **SHIPPED status (V1–V4 2026-06-04–05):** `ProfitabilityTab.tsx` with per-customer cards — lifetime revenue, COGS, shipping, warranty cost, refunds issued, net margin, counts (orders / replacements / returns / tickets). `customer_profitability` SQL view. Insights panel (CA/US avg margin + high-warranty-cost cohort). 4-bucket cost model (COGS + shipping + expected warranty + expected refunds) — `56d2d1f`. Shipping backfill + tax split out of revenue — `e5db157`. Filter/sort (Most profitable / Losing money / country / cohort). Remaining: #79 (net out returned-unit recovered value for V5); #59 (exclude team-test units from rollups).
   **Description:** Add a "Profitability" tab to the Customers module that surfaces which customers we're making money on and which we're losing money on. One card per customer; filterable + searchable.
   Per-customer card surfaces:
     1. Lifetime revenue (sum of `orders.total_usd` where `kind='sale'`).
@@ -374,8 +396,9 @@ Alpha feedback collection window is **closed**. The 11 items above plus the meet
   Reuses #60's machinery (template in Templates module, `send-followup-sms` edge fn, activity log entry, 48h cooldown). Replies route back via Quo and land as a ticket in the Service Inbox.
   **Likely touch:** see #60 — same surface. Add a fourth template + status mapping. **Ship #66 together with #60** rather than as a separate effort; it's just one more entry in the status→template table.
 
-- **#68** `orders.customer_id` FK + Shopify-sync resolver (mirror #67 on the orders side).
+- **#68** `orders.customer_id` FK + Shopify-sync resolver (mirror #67 on the orders side). — **SHIPPED** (2026-06-04)
   **Source:** #67 follow-up surfaced 2026-06-04 — `customer_profitability` view (#58) still joins orders↔customers via fuzzy email/name match because Shopify-imported orders don't carry a `customer_id`. Same class of false-positive risk that #67 fixed for units.
+  **SHIPPED status (2026-06-04):** `orders.customer_id uuid REFERENCES customers(id) ON DELETE SET NULL`; auto-resolve trigger + `sync-shopify-orders` sets FK at upsert time; `customer_profitability` view migrated to prefer FK — `11fa8ef`.
   **Description:** Add `orders.customer_id uuid REFERENCES customers(id) ON DELETE SET NULL`. Backfill by running the same exact + token cascade we now have in `resolve_customer_id_from_name()` (already exposed as a Postgres function), but matching on the order's `customer_email` first (more reliable than name on the orders side), falling back to name. Update `sync-shopify-orders` to set `customer_id` at INSERT/refresh time using the same resolver. Migrate the profitability view's `order_match` CTE to prefer the FK and fall back to email/name only when null. Once readers are migrated, drop or strictly-cache `orders.customer_name`/`customer_email`.
 
 - **#83** Return/refund must hold or void any queued replacement for that customer.
@@ -412,8 +435,9 @@ Alpha feedback collection window is **closed**. The 11 items above plus the meet
   **Likely touch:** website (Shopify storefront or HubSpot CMS — depends on where lilacomposter.com lives today), `support@lilacomposter.com` template emails to add the new URL, possibly a new `lib/canonicalUrls.ts` constant in makelila so any future operator comms reference the same canonical setup link (mirrors backlog #72's pattern of centralizing customer-facing URLs).
   **Pairs with:** #72 (Trustpilot URL + canned SMS centralization), #3 (Email/SMS templates — the new setup URL should be a template variable), #80 mobile V1 (the setup page must render correctly on the phone Christine is unboxing with).
 
-- **#80** Mobile / responsive layout across every module.
+- **#80** Mobile / responsive layout across every module. — **SHIPPED** (V1 2026-06-07; V2 2026-06-07)
   **Source:** Huayi (2026-06-05, after installing makeLILA to an iPhone home screen and trying to operate it on-device).
+  **SHIPPED status:** V1 — viewport `viewport-fit=cover`, PWA `manifest.json`, safe-area insets on AppShell + GlobalNav, `dvh` in modals, narrow-aware bottom tab bar (`2ebe867` 2026-06-07 — ~2h actual vs 15h projected). V2 — `MobileHome` landing page with `NavCard` tiles per module, card-drilldown pattern across Service/PostShipment/Fulfillment/Customers/Stock/Build/OrderReview/Dashboard/ActivityLog/Templates, row → detail drill + Inbox tap-to-read (`24d968d`, `4ab795d`, `3db2b3b`, `acb3181`, `910c529` 2026-06-07). CSS scroll-blocking fix + CI unblock (`fbad3bd`). V3 (sheet/drawer detail panels) deferred.
   **Symptom:** Once added to the home screen as a PWA-style icon, the app loads and the tab buttons at the top of a module respond to taps (e.g. swapping between Pending / Out / Flagged / Confirmed / Replacement / All on Order Review). But nothing else works: tables don't scroll horizontally to reveal the rest of the columns, side panels can't be opened or dismissed by drag, and the page itself doesn't scroll vertically past the first viewport. The desktop layout assumes a wide viewport + cursor; on iPhone widths the operator is stuck on the first screen of every module.
   **Why this matters:** Operators (Raymond / Junaid on the floor, Pedrum / George traveling, Huayi for after-hours triage) increasingly want to glance at the queues, mark a ticket, or sanity-check an order from their phone without booting a laptop. Today the app is effectively desktop-only despite being a web app installable to home screen.
   **Scope — every module needs a responsive treatment:**
@@ -534,8 +558,9 @@ Alpha feedback collection window is **closed**. The 11 items above plus the meet
     5. **Per-unit threshold tuning** for `NOT_MIXING_CURRENT_THRESHOLD` (#70 path 3). Once we have per-unit history, calibrate the threshold against each unit's baseline current rather than the global 0.05 A floor.
   **Why deferred to follow-up:** #70 V1 fixes the most visible problem (NOT_MIXING false positives flooding wellness-check SMS) without paying for the bigger investment. The rest can ship incrementally as the operator team collects more validation data.
 
-- **#72** Centralize Trustpilot review link + canned SMS / email templates in one source of truth.
+- **#72** Centralize Trustpilot review link + canned SMS / email templates in one source of truth. — **SHIPPED** (2026-06-04)
   **Source:** Surfaced 2026-06-04 — an SMS to Michael Romans went out with `trustpilot.com/review/vcycene.com` (a guessed URL). The actual link is `trustpilot.com/review/lilacomposter.com`. Operator had to send a correction SMS. Today there's no central place where the review URL lives; each operator typing a customer-facing message has to remember the right link.
+  **SHIPPED status (2026-06-04):** `lib/cannedSms.ts` centralizes `TRUSTPILOT_REVIEW_URL`, `DIAGNOSIS_CALL_BOOKING_URL`, and all SMS templates (`10d3237`). Remaining: surfacing templates from DB (editable via Templates module) rather than hard-coded constants — planned but deferred.
   **Description:** Build a `templates` table (or extend an existing config table) holding:
     - **External URLs:** Trustpilot review (`https://www.trustpilot.com/review/lilacomposter.com`), Google review link, support email signature URL, etc.
     - **Canned message bodies:** wellness-check (already inline in `lib/dashboard.ts STATUS_SMS_TEMPLATES`), lid alert, review-request SMS, defective-unit acknowledgment, etc. — all parameterized on `{first_name}`, `{order_ref}`, etc.
@@ -545,8 +570,9 @@ Alpha feedback collection window is **closed**. The 11 items above plus the meet
   This also resolves the Quo-reply-via-template gap in #3 / #12 (the existing Templates module was scoped to Order Review email templates only).
   **Likely touch:** new `templates` table migration; `lib/templates.ts` extension with non-tab-specific templates; `Dashboard/StatusSmsModal.tsx` to pull templates from the DB instead of `STATUS_SMS_TEMPLATES`; future Templates-module UI for ops to edit.
 
-- **#71** Replacement orders: first-class "awaiting inbound batch" state + visible queue.
+- **#71** Replacement orders: first-class "awaiting inbound batch" state + visible queue. — **SHIPPED** (2026-06-04, extended 2026-06-09)
   **Source:** Surfaced 2026-06-04 — Kristen Pimentel's cracked-shell replacement (R-0001) needs a P100X unit, but no P100X units are `ready` yet (batch is in production in China, expected end of July). Today the only signal is `orders.line_items = []` + `cogs_usd = null` on a `status='pending'` row, plus a free-text note in `batches.notes`. Operators have no list view of "what's waiting on which batch", and customers get vague "we'll queue it" replies.
+  **SHIPPED status:** `orders.awaiting_batch_id` column + `awaiting_inventory` status — `c4c50fe` (2026-06-04). Replacement tab "Awaiting batch" filter chip + item/stage tags (Unit / Awaiting batch / Parts-Consumables) — `364d465`, `58a6540`, `081f495`, `8b51a9e` (2026-06-09). Order Review Ready/Awaiting sub-tabs also added. Remaining: batch-arrival "promote to fulfillment" sweep (step 3 in original spec).
   **Description:**
     1. Add an explicit signal to `orders` — either a new status enum value `awaiting_inventory`, or a `awaiting_batch_id` text/FK column referencing `batches.id`. The latter is more informative (lets the UI render "Awaiting P100X · expected late July" without a join).
     2. In the Replacement tab (Service module), add a filter chip / section "Awaiting batch" that groups these orders by `awaiting_batch_id` and shows each batch's expected `arrived_at` / notes.
@@ -581,8 +607,9 @@ Alpha feedback collection window is **closed**. The 11 items above plus the meet
   **Source:** #67 backfill leftover. The original backfill + parenthetical-strip pass linked 132/181 customer-assigned units; the rest are mostly customers that exist in Shopify or HubSpot but were never imported into the makelila `customers` table.
   **Description:** Operator-driven cleanup: present an "Unlinked units" view that shows each orphan with its customer_name and a "Find or create customer" picker. Let the operator either link to an existing customer (via the same search the Replacement picker uses) or create a new customer record from the unit's known data. Updates `units.customer_id` and any other refs. Lower-priority than #68 since #67 V1 + the auto-resolve trigger already fix forward; this is just historical cleanup.
 
-- **#67** Canonicalize the units → customers link (replace free-text `units.customer_name` with a proper FK).
+- **#67** Canonicalize the units → customers link (replace free-text `units.customer_name` with a proper FK). — **SHIPPED** (2026-06-04)
   **Source:** Surfaced during #60/#66 SMS send — operator hit "no customer linked" for unit LL01-00000000236 because `units.customer_name = "Amila Smith"` while the canonical customer record is `"Amila & Rob Smith"` (joint account). Patched 2026-06-04 with a tolerant last-name + first-name-starts-with cascade in `customerForSerial()`, but the underlying schema is the actual bug.
+  **SHIPPED status (2026-06-04):** `units.customer_id uuid REFERENCES customers(id)` added; backfill via fuzzy resolver; FK-preferring `customerForSerial()` cascade; `lib/stock.ts` Unit type updated; fulfillment assignment flow sets FK — `c2026ff`. ~132/181 customer-assigned units linked; ~47 orphans remain (#69).
   **Description:** Today `units.customer_name` is a free-text column populated at fulfillment time. The corresponding `customers.full_name` may differ (spouse appended, nickname vs. legal, typos, Shopify-imported vs. HubSpot-imported representation). Every cross-module lookup that wants "the customer record for this unit" has to do fuzzy resolution. This will keep biting us as more features (#58 profitability rollups, #60/#66 status SMS, #54 Dashboard click-to-assign, etc.) cross from units → customers.
   Fix path:
     1. **Add `units.customer_id uuid REFERENCES customers(id) ON DELETE SET NULL`** as the new authoritative link. Index it.
