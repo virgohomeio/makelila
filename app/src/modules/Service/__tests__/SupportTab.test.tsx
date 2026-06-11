@@ -37,6 +37,7 @@ function mkTicket(partial: Partial<ServiceTicket> & { id: string }): ServiceTick
     first_responded_at: null,
     sla_resolved_at: null,
     sla_status: null,
+    root_cause: null,
     ...partial,
   };
 }
