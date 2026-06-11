@@ -8,9 +8,9 @@ CREATE TABLE IF NOT EXISTS finance_config (
 );
 ALTER TABLE finance_config ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "finance_select" ON finance_config
-  FOR SELECT USING (is_finance(auth.uid()));
+  FOR SELECT USING (is_finance());
 CREATE POLICY "finance_update" ON finance_config
-  FOR UPDATE USING (is_finance(auth.uid()));
+  FOR UPDATE USING (is_finance());
 
 -- Seed default seasonality (all months = 1.0)
 INSERT INTO finance_config (config_key, value) VALUES
@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS sales_projection_snapshots (
 );
 ALTER TABLE sales_projection_snapshots ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "finance_select" ON sales_projection_snapshots
-  FOR SELECT USING (is_finance(auth.uid()));
+  FOR SELECT USING (is_finance());
 
 -- Add to realtime publication
 DO $$ BEGIN

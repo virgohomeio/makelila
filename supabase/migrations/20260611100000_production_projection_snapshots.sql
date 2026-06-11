@@ -5,7 +5,7 @@ ALTER TABLE batches ADD COLUMN IF NOT EXISTS expected_arrival_date date;
 CREATE TABLE IF NOT EXISTS production_projection_snapshots (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   as_of timestamptz NOT NULL DEFAULT now(),
-  batch_id uuid NOT NULL REFERENCES batches(id),
+  batch_id text NOT NULL REFERENCES batches(id),
   ready_count int NOT NULL,
   reserved_count int NOT NULL,
   weekly_velocity numeric(10,2) NOT NULL,
@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS production_projection_snapshots (
 
 ALTER TABLE production_projection_snapshots ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "finance_select" ON production_projection_snapshots
-  FOR SELECT USING (is_finance(auth.uid()));
+  FOR SELECT USING (is_finance());
 
 -- Add to realtime publication idempotently
 DO $$ BEGIN
