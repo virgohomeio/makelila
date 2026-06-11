@@ -17,6 +17,7 @@
   background: var(--color-surface);
   overflow-x: auto;
   scrollbar-width: none;
+  flex-shrink: 0;
 }
 .tabs::-webkit-scrollbar { display: none; }
 
@@ -40,14 +41,27 @@
 .panel {
   flex: 1;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 /* ── Team tab ── */
+.teamContent {
+  display: flex;
+  height: 100%;
+  overflow: hidden;
+  flex: 1;
+}
+
 .teamGrid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
   gap: 16px;
   padding: 24px;
+  align-content: start;
+  overflow-y: auto;
+  flex: 1;
+  min-width: 0;
 }
 
 .memberCard {
@@ -58,6 +72,21 @@
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   background: #fff;
+  cursor: pointer;
+  transition: border-color 0.1s, box-shadow 0.1s;
+  outline: none;
+}
+.memberCard:hover {
+  border-color: var(--color-crimson);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.07);
+}
+.memberCardSelected {
+  border-color: var(--color-crimson);
+  box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.12);
+}
+.memberCard:focus-visible {
+  outline: 2px solid var(--color-crimson);
+  outline-offset: 2px;
 }
 
 .avatar {
@@ -90,10 +119,17 @@
 .memberEmail {
   font-size: 11px;
   color: var(--color-ink-muted);
-  margin-bottom: 10px;
+  margin-bottom: 4px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.memberResp {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-crimson);
+  margin-bottom: 10px;
 }
 
 .moduleList {
@@ -118,4 +154,99 @@
   background: var(--color-crimson);
   color: #fff;
   border-color: var(--color-crimson);
+}
+
+/* ── Member detail panel ── */
+.detailPanel {
+  width: 380px;
+  flex-shrink: 0;
+  border-left: 1px solid var(--color-border);
+  overflow-y: auto;
+  background: #fafafa;
+  display: flex;
+  flex-direction: column;
+}
+
+.detailHeader {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 20px 20px 16px;
+  border-bottom: 1px solid var(--color-border);
+  background: #fff;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  flex-shrink: 0;
+}
+
+.detailAvatar {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--color-crimson);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.detailHeaderInfo {
+  flex: 1;
+  min-width: 0;
+}
+
+.detailName {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-ink);
+}
+
+.detailEmail {
+  font-size: 11px;
+  color: var(--color-ink-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.detailClose {
+  background: none;
+  border: none;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--color-ink-muted);
+  padding: 0 2px;
+  flex-shrink: 0;
+}
+.detailClose:hover { color: var(--color-ink); }
+
+.detailSection {
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.detailLabel {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--color-ink-subtle);
+  margin-bottom: 6px;
+}
+
+.detailValue {
+  font-size: 13px;
+  color: var(--color-ink);
+  line-height: 1.6;
+}
+
+.detailEmpty {
+  font-size: 12px;
+  color: var(--color-ink-muted);
+  padding: 4px 0;
 }

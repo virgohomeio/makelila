@@ -31,7 +31,7 @@ export default function Stock() {
         countTone: orphanCount > 0 ? 'warn' : 'default',
         content: <OrphanUnitsTab />,
       },
-      { key: 'manufacturing', label: 'Manufacturing', subtitle: 'Build pipeline · QC dashboard · station passes', icon: '🏗️', iconBg: '#e6f4ea', content: <Build /> },
+      { key: 'manufacturing', label: 'Build', subtitle: 'Build pipeline · QC dashboard · station passes', icon: '🏗️', iconBg: '#e6f4ea', content: <Build /> },
     ];
     return (
       <div className={styles.stockShell}>
@@ -61,7 +61,7 @@ export default function Stock() {
         <button
           className={`${styles.stockTab} ${tab === 'manufacturing' ? styles.active : ''}`}
           onClick={() => setTab('manufacturing')}
-        >Manufacturing</button>
+        >Build</button>
       </div>
       {tab === 'units' && <UnitsTab />}
       {tab === 'parts' && <PartsTab />}
