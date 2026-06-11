@@ -2,12 +2,13 @@ import { useMemo, useState } from 'react';
 import { UnitsTab } from './UnitsTab';
 import { PartsTab } from './PartsTab';
 import { OrphanUnitsTab } from './OrphanUnitsTab';
+import Build from '../Build';
 import { useUnits } from '../../lib/stock';
 import { useIsMobile } from '../../lib/useMediaQuery';
 import { MobileTabbedModule, type MobileTab } from '../../components/MobileTabbedModule';
 import styles from './Stock.module.css';
 
-type Tab = 'units' | 'parts' | 'orphans';
+type Tab = 'units' | 'parts' | 'orphans' | 'manufacturing';
 
 export default function Stock() {
   const [tab, setTab] = useState<Tab>('units');
@@ -30,6 +31,7 @@ export default function Stock() {
         countTone: orphanCount > 0 ? 'warn' : 'default',
         content: <OrphanUnitsTab />,
       },
+      { key: 'manufacturing', label: 'Manufacturing', subtitle: 'Build pipeline · QC dashboard · station passes', icon: '🏗️', iconBg: '#e6f4ea', content: <Build /> },
     ];
     return (
       <div className={styles.stockShell}>
@@ -56,10 +58,15 @@ export default function Stock() {
         >
           Unlinked{orphanCount > 0 && <span className={styles.orphanBadge}>{orphanCount}</span>}
         </button>
+        <button
+          className={`${styles.stockTab} ${tab === 'manufacturing' ? styles.active : ''}`}
+          onClick={() => setTab('manufacturing')}
+        >Manufacturing</button>
       </div>
       {tab === 'units' && <UnitsTab />}
       {tab === 'parts' && <PartsTab />}
       {tab === 'orphans' && <OrphanUnitsTab />}
+      {tab === 'manufacturing' && <Build />}
     </div>
   );
 }
