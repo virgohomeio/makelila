@@ -1,0 +1,184 @@
+.wrap {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
+}
+
+/* ── Calendar ── */
+.calWrap {
+  background: #fff;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 14px;
+}
+.calHeader {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.calMonth {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  flex: 1;
+  text-align: center;
+}
+.calNavBtn {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
+  background: #fff;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+}
+.calNavBtn:hover { background: var(--color-surface); }
+.calTodayBtn {
+  padding: 4px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  border: 1px solid var(--color-border);
+  background: #fff;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.calLegend {
+  display: flex;
+  gap: 14px;
+  margin-bottom: 8px;
+  font-size: 10px;
+  color: var(--color-ink-subtle);
+}
+.calLegendItem { display: inline-flex; align-items: center; gap: 4px; }
+.calDot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.calDotFu1 { background: #c05621; }
+.calDotFu2 { background: #553c9a; }
+.calDotOverdue { background: #9b2c2c; }
+.calGrid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 1px;
+  background: var(--color-border);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.calDayHeader {
+  background: var(--color-surface);
+  padding: 6px 4px;
+  text-align: center;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--color-ink-subtle);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.calDay {
+  background: #fff;
+  min-height: 90px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.calDayOther { background: #fafafa; }
+.calDayOther .calDayNum { color: #c7c7cc; }
+.calDayToday { background: #eaf4ff; }
+.calDayToday .calDayNum { color: #0071e3; font-weight: 700; }
+.calDayNum {
+  font-size: 11px;
+  font-weight: 600;
+  margin-bottom: 2px;
+  text-align: right;
+  padding-right: 2px;
+}
+.calEvent {
+  font-size: 9px;
+  line-height: 1.2;
+  padding: 2px 4px;
+  border-radius: 2px;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 600;
+}
+.calEventFu1 { background: #fff3e0; color: #c05621; border-left: 2px solid #c05621; }
+.calEventFu2 { background: #f3e5f5; color: #553c9a; border-left: 2px solid #553c9a; }
+.calEventOverdue { background: #fff5f5; color: #9b2c2c; border-left: 2px solid #9b2c2c; }
+.calEvent:hover { opacity: 0.8; }
+
+/* ── Selected customer panel ── */
+.selectedPanel {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: #fff;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.selectedHeader {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.selectedHeader strong {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-ink);
+  flex: 1;
+}
+.selectedKind {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--color-surface);
+  color: var(--color-ink-muted);
+  border: 1px solid var(--color-border);
+}
+.closeBtn {
+  background: none;
+  border: none;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--color-ink-muted);
+  padding: 0 2px;
+}
+.closeBtn:hover { color: var(--color-ink); }
+.selectedMeta {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--color-ink-muted);
+}
+.selectedActions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.actionBtn {
+  padding: 5px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: #fff;
+  cursor: pointer;
+}
+.actionBtn:hover { background: var(--color-crimson); color: #fff; border-color: var(--color-crimson); }
+.actionBtn:disabled { opacity: 0.5; cursor: default; }

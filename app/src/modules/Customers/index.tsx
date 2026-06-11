@@ -59,10 +59,6 @@ export default function Customers() {
   const [search, setSearch] = useState('');
   const [country, setCountry] = useState<'all' | 'CA' | 'US' | 'other'>('all');
   const [fuFilter, setFuFilter] = useState<'all' | 'needs_action' | FuState>('all');
-  const [view, setView] = useState<'table' | 'calendar'>('table');
-  const [calendarMonth, setCalendarMonth] = useState<Date>(() => {
-    const d = new Date(); d.setDate(1); d.setHours(0, 0, 0, 0); return d;
-  });
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -403,71 +399,49 @@ export default function Customers() {
           placeholder="Search name, email, phone, city…"
           className={styles.searchInput}
         />
-        <div className={styles.viewToggle}>
-          <button
-            onClick={() => setView('table')}
-            className={`${styles.chip} ${view === 'table' ? styles.chipActive : ''}`}
-          >Table</button>
-          <button
-            onClick={() => setView('calendar')}
-            className={`${styles.chip} ${view === 'calendar' ? styles.chipActive : ''}`}
-          >Calendar</button>
-        </div>
         <div className={styles.resultCount}>
           {filtered.length} {filtered.length === 1 ? 'row' : 'rows'}
         </div>
       </div>
 
-      {view === 'table' ? (
-        <div className={styles.tableWrap}>
-          <table className={styles.table}>
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Email</th>
-                <th>Phone</th>
-                <th>Serial(s)</th>
-                <th>Address</th>
-                <th>Follow-up</th>
-                <th>Last sync</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map(({ c, fu }) => (
-                <CustomerRow
-                  key={c.id}
-                  c={c}
-                  fu={fu}
-                  serials={
-                    // Sheet is the source of truth: prefer the synced serials,
-                    // then the canonical units.customer_id link, and only fall
-                    // back to name-matching for units not yet FK-linked.
-                    (c.serials && c.serials.length > 0)
-                      ? c.serials
-                      : (serialsByCustomerId.get(c.id)
-                          ?? serialsByCustomerName.get(c.full_name?.toLowerCase() ?? '')
-                          ?? [])
-                  }
-                  onSelect={() => setSelectedCustomerId(c.id)}
-                />
-              ))}
-              {filtered.length === 0 && (
-                <tr><td colSpan={7} className={styles.empty}>No customers match the filter.</td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      ) : (
-        <FollowUpCalendar
-          month={calendarMonth}
-          today={today}
-          customers={customers}
-          onPrev={() => setCalendarMonth(d => { const n = new Date(d); n.setMonth(n.getMonth() - 1); return n; })}
-          onNext={() => setCalendarMonth(d => { const n = new Date(d); n.setMonth(n.getMonth() + 1); return n; })}
-          onToday={() => setCalendarMonth(() => { const n = new Date(); n.setDate(1); n.setHours(0,0,0,0); return n; })}
-          onCustomerClick={id => setSelectedCustomerId(id)}
-        />
-      )}
+      <div className={styles.tableWrap}>
+        <table className={styles.table}>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Email</th>
+              <th>Phone</th>
+              <th>Serial(s)</th>
+              <th>Address</th>
+              <th>Follow-up</th>
+              <th>Last sync</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map(({ c, fu }) => (
+              <CustomerRow
+                key={c.id}
+                c={c}
+                fu={fu}
+                serials={
+                  // Sheet is the source of truth: prefer the synced serials,
+                  // then the canonical units.customer_id link, and only fall
+                  // back to name-matching for units not yet FK-linked.
+                  (c.serials && c.serials.length > 0)
+                    ? c.serials
+                    : (serialsByCustomerId.get(c.id)
+                        ?? serialsByCustomerName.get(c.full_name?.toLowerCase() ?? '')
+                        ?? [])
+                }
+                onSelect={() => setSelectedCustomerId(c.id)}
+              />
+            ))}
+            {filtered.length === 0 && (
+              <tr><td colSpan={7} className={styles.empty}>No customers match the filter.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
     </div>
 
     {selectedCustomer && (
