@@ -21,7 +21,6 @@ import ServiceRequestForm from './modules/Forms/ServiceRequestForm';
 const Dashboard   = lazy(() => import('./modules/Dashboard'));
 const Fulfillment = lazy(() => import('./modules/Fulfillment'));
 const Build       = lazy(() => import('./modules/Build'));
-const PostShipment = lazy(() => import('./modules/PostShipment'));
 const Service     = lazy(() => import('./modules/Service'));
 const Stock       = lazy(() => import('./modules/Stock'));
 const Customers   = lazy(() => import('./modules/Customers'));

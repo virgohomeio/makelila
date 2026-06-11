@@ -31,6 +31,13 @@
   min-height: calc(100vh - 200px);
 }
 
+.tabDivider {
+  width: 1px;
+  background: var(--color-dark-3, #333);
+  margin: 8px 4px;
+  align-self: stretch;
+}
+
 .queueLayout {
   display: grid;
   grid-template-columns: 280px 1fr;
