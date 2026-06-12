@@ -167,8 +167,24 @@ export async function updateReturnStatus(id: string, newStatus: ReturnStatus): P
   }
   const { error } = await supabase.from('returns').update(patch).eq('id', id);
   if (error) throw error;
+
+  // #89: emit Klaviyo win-back event when a return is fully refunded so
+  // Klaviyo can trigger the 30-day re-engagement flow.
+  let klaviyoEmail: string | undefined;
+  if (newStatus === 'refunded') {
+    const { data: ret } = await supabase
+      .from('returns')
+      .select('customer_email')
+      .eq('id', id)
+      .maybeSingle();
+    klaviyoEmail = (ret as { customer_email?: string | null } | null)?.customer_email ?? undefined;
+  }
+
   await logAction('return_status', id, `→ ${newStatus}`,
-    { entityType: 'return', entityId: id });
+    { entityType: 'return', entityId: id },
+    newStatus === 'refunded' && klaviyoEmail
+      ? { klaviyoEvent: 'Return Refunded', klaviyoEmail }
+      : undefined);
 }
 
 export async function updateReturnCategory(id: string, category: ReturnCategory | null): Promise<void> {
