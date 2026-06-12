@@ -106,6 +106,10 @@ export type ServiceTicket = {
   first_responded_at: string | null;
   sla_resolved_at: string | null;
   sla_status: 'ok' | 'warning' | 'breached' | 'met' | null;
+  // Feature 3 — bidirectional Linear/GitHub issue linking
+  linear_issue_url: string | null;
+  github_issue_url: string | null;
+  engineering_resolved_at: string | null;
 };
 
 export type CustomerLifecycle = {
@@ -912,6 +916,27 @@ export async function setRepairFields(
 ): Promise<void> {
   const { error } = await supabase.from('service_tickets').update(patch).eq('id', id);
   if (error) throw error;
+}
+
+/** Feature 3 — record the Linear issue URL on the ticket row.
+ *  Called after the linear-create-issue edge function succeeds. */
+export async function setLinearIssueUrl(ticketId: string, url: string): Promise<void> {
+  const { error } = await supabase
+    .from('service_tickets')
+    .update({ linear_issue_url: url })
+    .eq('id', ticketId);
+  if (error) throw error;
+  await logAction('linear_issue_linked', ticketId, url);
+}
+
+/** Feature 3 — record the GitHub issue URL on the ticket row. */
+export async function setGitHubIssueUrl(ticketId: string, url: string): Promise<void> {
+  const { error } = await supabase
+    .from('service_tickets')
+    .update({ github_issue_url: url })
+    .eq('id', ticketId);
+  if (error) throw error;
+  await logAction('github_issue_linked', ticketId, url);
 }
 
 /** Backlog #75 — record that the diagnosis-call booking link was sent.
