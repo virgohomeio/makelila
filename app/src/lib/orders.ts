@@ -72,6 +72,8 @@ export type Order = {
   address_claude_verdict: 'plausible' | 'implausible' | 'unknown' | null;
   address_claude_notes: string | null;
   address_claude_postal: string | null;
+  address_confirmed_at: string | null;
+  address_confirmation_sent_at: string | null;
   freight_estimate_usd: number;
   freight_threshold_usd: number;
   // What Shopify recorded the customer paying for shipping. Distinct from
@@ -213,6 +215,16 @@ export type VerifyAddressResult = {
   google_postal: string | null;
   google_formatted: string | null;
 };
+
+export async function confirmAddress(orderId: string): Promise<{ order_ref: string }> {
+  const { data, error } = await supabase.functions.invoke<{ order_ref: string }>(
+    'confirm-address',
+    { body: { order_id: orderId } },
+  );
+  if (error) throw new Error(error.message);
+  if (!data) throw new Error('Empty response from confirm-address');
+  return data;
+}
 
 export async function verifyAddress(orderId: string): Promise<VerifyAddressResult> {
   const { data, error } = await supabase.functions.invoke<VerifyAddressResult>(

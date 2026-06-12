@@ -26,6 +26,8 @@ function mkOrder(partial: Partial<Order> & { id: string; status: Order['status']
     address_claude_verdict: null,
     address_claude_notes: null,
     address_claude_postal: null,
+    address_confirmed_at: null,
+    address_confirmation_sent_at: null,
     freight_estimate_usd: 89.5,
     freight_threshold_usd: 200,
     customer_paid_shipping_usd: 89.5,

@@ -124,6 +124,27 @@ export function AddressCard({ order }: { order: Order }) {
           </div>
         )}
 
+        {order.address_confirmation_sent_at && !order.address_confirmed_at && (
+          <div style={{
+            marginTop: 10, padding: '6px 10px', borderRadius: 4,
+            background: '#fffbeb', border: '1px solid #f59e0b', fontSize: 11,
+            color: '#92400e', display: 'flex', alignItems: 'center', gap: 6,
+          }}>
+            <span>⚠</span>
+            <span>Awaiting customer address confirmation</span>
+          </div>
+        )}
+        {order.address_confirmed_at && (
+          <div style={{
+            marginTop: 10, padding: '6px 10px', borderRadius: 4,
+            background: '#f0fff4', border: '1px solid #9ae6b4', fontSize: 11,
+            color: '#276749', display: 'flex', alignItems: 'center', gap: 6,
+          }}>
+            <span>✓</span>
+            <span>Customer confirmed address {new Date(order.address_confirmed_at).toLocaleDateString()}</span>
+          </div>
+        )}
+
         <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--color-border)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <button
