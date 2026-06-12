@@ -402,13 +402,46 @@ export async function confirmLabel(
  *  Data already saved (test report, label, etc.) is preserved; only the step
  *  counter moves back so the corresponding step UI is shown again. When
  *  rewinding from step 6 (fulfilled), email_sent_at and fulfilled_at are
- *  cleared so Send email can be retried without "email already sent" 409. */
+ *  cleared so Send email can be retried without "email already sent" 409.
+ *  When rewinding from step 2 (assign), the reserved unit is released back
+ *  to 'ready' so it becomes available for other orders (#26). */
 export async function goBackStep(queueId: string, currentStep: FulfillmentStep): Promise<void> {
   await currentUserId();
   if (currentStep <= 1) throw new Error('already at the first step');
   if (currentStep > 6) throw new Error('invalid step');
   const prev = (currentStep - 1) as FulfillmentStep;
   const update: Record<string, unknown> = { step: prev };
+
+  if (currentStep === 2) {
+    // Undo the unit assignment: re-read assigned_serial, then release the
+    // unit back to 'ready'. Backfilled (already-shipped) units are left alone —
+    // they were never flipped to 'reserved' in the first place.
+    const { data: qRow } = await supabase
+      .from('fulfillment_queue')
+      .select('assigned_serial')
+      .eq('id', queueId)
+      .single();
+    const serial = qRow?.assigned_serial as string | null;
+    if (serial) {
+      const { data: unit } = await supabase
+        .from('units')
+        .select('status')
+        .eq('serial', serial)
+        .single();
+      if (unit?.status === 'reserved') {
+        await supabase
+          .from('units')
+          .update({ status: 'ready', customer_order_ref: null, customer_name: null })
+          .eq('serial', serial);
+        await supabase
+          .from('shelf_slots')
+          .update({ status: 'available', updated_at: new Date().toISOString() })
+          .eq('serial', serial);
+      }
+    }
+    update.assigned_serial = null;
+  }
+
   if (currentStep === 6) {
     update.email_sent_at = null;
     update.email_sent_by = null;

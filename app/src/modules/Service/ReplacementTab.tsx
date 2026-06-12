@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useReplacementOrders, type Order } from '../../lib/orders';
 import { isReplacementLine } from '../../lib/orders';
 import {
@@ -336,7 +337,7 @@ export default function ReplacementTab() {
               const stageTag = replacementStageTag(o, tags, isPendingBatch);
               return (
                 <tr key={o.id} className={styles.row}>
-                  <td><a href="#/order-review">{o.order_ref}</a></td>
+                  <td><Link to={`/order-review/${o.id}`}>{o.order_ref}</Link></td>
                   <td>
                     {o.linked_ticket_id ? (
                       <button

@@ -196,13 +196,13 @@ export const TOPIC_LABEL: Record<TicketTopic, string> = {
 };
 
 export const STATUS_META: Record<TicketStatus, { label: string; color: string; bg: string }> = {
-  waiting_on_us:          { label: 'Waiting on Us',          color: '#2b6cb0', bg: '#ebf8ff' },
+  waiting_on_us:          { label: 'Needs Response',         color: '#2b6cb0', bg: '#ebf8ff' },
   in_progress:            { label: 'In Progress',            color: '#c05621', bg: '#fffaf0' },
-  waiting_on_customer:    { label: 'Waiting on Customer',    color: '#718096', bg: '#f7fafc' },
+  waiting_on_customer:    { label: 'Needs to Reach Out',     color: '#718096', bg: '#f7fafc' },
   queued_for_replacement: { label: 'Queued for Replacement', color: '#553c9a', bg: '#faf5ff' },
   call_scheduled:         { label: 'Call Scheduled',         color: '#2c7a7b', bg: '#e6fffa' },
   on_hold:                { label: 'On Hold',                color: '#b7791f', bg: '#fffff0' },
-  closed:                 { label: 'Closed',                 color: '#a0aec0', bg: '#edf2f7' },
+  closed:                 { label: 'Complete',               color: '#a0aec0', bg: '#edf2f7' },
 };
 
 export const PRIORITY_META: Record<TicketPriority, { label: string; color: string }> = {

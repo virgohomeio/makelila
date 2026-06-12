@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import ReplacementPickerModal from './ReplacementPickerModal';
 import { useCustomers, sendFollowupSms } from '../../lib/customers';
 import {
@@ -42,6 +43,7 @@ type Props = {
 };
 
 export function TicketDetailPanel({ ticket, onClose }: Props) {
+  const navigate = useNavigate();
   const [defectCat, setDefectCat] = useState(ticket.defect_category ?? '');
   const [parts, setParts] = useState(ticket.parts_needed ?? '');
   const [busy, setBusy] = useState(false);
@@ -253,7 +255,10 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
           {ticket.replacement_order_id && ticket.replacement_order_id.length > 0 ? (
             <div className={styles.replacementLink}>
               Replacement order:&nbsp;
-              <a href="#/order-review">open in Order Review</a>
+              <a
+                href={`/order-review/${ticket.replacement_order_id}`}
+                onClick={e => { e.preventDefault(); navigate(`/order-review/${ticket.replacement_order_id}`); }}
+              >open in Order Review</a>
             </div>
           ) : (
             <button
@@ -331,9 +336,9 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
             }}
             address={pickerAddress}
             onClose={() => setPickerOpen(false)}
-            onCreated={() => {
+            onCreated={(result) => {
               setPickerOpen(false);
-              window.location.hash = '#/order-review';
+              navigate(`/order-review/${result.id}`);
             }}
           />
         )}
