@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from './supabase';
 import { logAction } from './activityLog';
+import { sendTemplate } from './templates';
 
 // ============================================================ Types
 
@@ -114,6 +115,7 @@ export type CustomerLifecycle = {
   shipped_at: string;
   onboarding_status: OnboardingStatus;
   onboarding_completed_at: string | null;
+  followup_email_sent_at: string | null;
   warranty_months: number;
   warranty_expires_at: string;
   notes: string | null;
@@ -957,6 +959,21 @@ export async function markOnboardingComplete(lifecycleId: string): Promise<void>
   }
 
   await logAction('onboarding_completed', lifecycleId);
+}
+
+export async function sendPostOnboardingFollowup(
+  lifecycleId: string,
+  to: string,
+  toName: string,
+  variables: Record<string, string>,
+): Promise<void> {
+  await sendTemplate({ template_key: 'post_onboarding_followup', to, to_name: toName, variables });
+  const { error } = await supabase
+    .from('customer_lifecycle')
+    .update({ followup_email_sent_at: new Date().toISOString() })
+    .eq('id', lifecycleId);
+  if (error) throw error;
+  await logAction('followup_email_sent', lifecycleId, `→ ${to}`);
 }
 
 export async function markOnboardingNoShow(lifecycleId: string): Promise<void> {
