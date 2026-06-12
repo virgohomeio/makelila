@@ -39,7 +39,7 @@ export default function ConfirmAddressPage() {
       )}
       {state === 'error' && (
         <p style={{ color: '#c53030' }}>
-          {errMsg ?? 'Something went wrong. Please reply to your confirmation email and we'll help.'}
+          {errMsg ?? "Something went wrong. Please reply to your confirmation email and we'll help."}
         </p>
       )}
     </FormLayout>
