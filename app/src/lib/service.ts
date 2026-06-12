@@ -947,18 +947,29 @@ export async function markOnboardingComplete(lifecycleId: string): Promise<void>
   if (error) throw error;
 
   // Only set onboard_date when it's still null — preserves manually-set
-  // values from prior CSV imports.
+  // values from prior CSV imports. Also fetch email for the Klaviyo 'First Use'
+  // event (#88) that triggers the Day 3 + Day 7 first-week drip.
+  let customerEmail: string | null = null;
   if (lc?.customer_id) {
     const onboardDate = completedAt.slice(0, 10); // YYYY-MM-DD
-    const { error: cErr } = await supabase
+    const { error: cErr, data: cust } = await supabase
       .from('customers')
-      .update({ onboard_date: onboardDate })
+      .select('email, onboard_date')
       .eq('id', lc.customer_id)
-      .is('onboard_date', null);
+      .maybeSingle();
     if (cErr) throw cErr;
+    customerEmail = (cust as { email?: string | null; onboard_date?: string | null } | null)?.email ?? null;
+    if (!(cust as { onboard_date?: string | null } | null)?.onboard_date) {
+      const { error: upErr } = await supabase
+        .from('customers')
+        .update({ onboard_date: onboardDate })
+        .eq('id', lc.customer_id);
+      if (upErr) throw upErr;
+    }
   }
 
-  await logAction('onboarding_completed', lifecycleId);
+  await logAction('onboarding_completed', lifecycleId, '', undefined,
+    customerEmail ? { klaviyoEvent: 'First Use', klaviyoEmail: customerEmail } : undefined);
 }
 
 export async function sendPostOnboardingFollowup(
