@@ -48,7 +48,7 @@ describe('computeCoverageState', () => {
   it('returns expired for replacement_no_warranty where coverage_end equals coverage_start (yesterday)', () => {
     const yesterday = new Date();
     yesterday.setDate(yesterday.getDate() - 1);
-    const dateStr = yesterday.toISOString().slice(0, 10);
+    const dateStr = yesterday.toLocaleDateString('en-CA');
     const reg = makeReg({
       coverage_tier: 'replacement_no_warranty',
       coverage_start: dateStr,

@@ -3,7 +3,7 @@ import { isTelemetryConfigured } from '../../lib/supabaseTelemetry';
 const Dashboard = lazy(() => import('../Dashboard'));
 import {
   useCustomers, syncCustomersFromHubspot, exportPurchasers, pushToKlaviyo,
-  computeFuState, recordFollowUp, FU_STATE_META, FU1_DAYS, FU2_DAYS,
+  computeFuState, recordFollowUp, FU_STATE_META,
   type Customer, type FuState,
 } from '../../lib/customers';
 import { useOrders } from '../../lib/orders';
@@ -771,139 +771,6 @@ function FollowUpSection({ customer }: { customer: Customer }) {
       )}
       {err && <div style={{ marginTop: 6, fontSize: 11, color: 'var(--color-error, #c53030)' }}>Error: {err}</div>}
     </PanelSection>
-  );
-}
-
-// ────────────────────────────────────────────────────────────────────────
-// Monthly calendar grid (mirror of the standalone HTML calendar's view)
-// ────────────────────────────────────────────────────────────────────────
-const WEEK_DAYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-
-type CalEvent = {
-  customer: Customer;
-  kind: 'fu1' | 'fu2';
-  dueDate: Date;     // onboard + FU1_DAYS or FU2_DAYS
-  state: FuState;    // current state of this customer's overall FU
-};
-
-function FollowUpCalendar({
-  month, today, customers,
-  onPrev, onNext, onToday, onCustomerClick,
-}: {
-  month: Date;
-  today: Date;
-  customers: Customer[];
-  onPrev: () => void;
-  onNext: () => void;
-  onToday: () => void;
-  onCustomerClick: (id: string) => void;
-}) {
-  // Compute the visible 6-week window
-  const monthStart = new Date(month);
-  const gridStart = new Date(monthStart);
-  gridStart.setDate(1 - monthStart.getDay()); // back up to Sunday
-  const gridEnd = new Date(gridStart);
-  gridEnd.setDate(gridStart.getDate() + 42); // 6 weeks
-
-  // Bucket events by yyyy-mm-dd
-  const eventsByDay = useMemo(() => {
-    const m = new Map<string, CalEvent[]>();
-    const key = (d: Date) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-    for (const c of customers) {
-      if (!c.onboard_date) continue;
-      const onboard = new Date(c.onboard_date + 'T00:00:00');
-      const fu1 = new Date(onboard); fu1.setDate(fu1.getDate() + FU1_DAYS);
-      const fu2 = new Date(onboard); fu2.setDate(fu2.getDate() + FU2_DAYS);
-      const state = computeFuState(c, today);
-      // Only include events whose due date falls within the visible window
-      for (const [kind, dueDate] of [['fu1', fu1], ['fu2', fu2]] as const) {
-        if (dueDate < gridStart || dueDate >= gridEnd) continue;
-        // Skip if this FU is already completed
-        if (kind === 'fu1' && c.fu1_status) continue;
-        if (kind === 'fu2' && !c.fu1_status) continue;  // FU2 only relevant after FU1 done
-        if (kind === 'fu2' && c.fu2_status) continue;
-        const k = key(dueDate);
-        if (!m.has(k)) m.set(k, []);
-        m.get(k)!.push({ customer: c, kind, dueDate, state });
-      }
-    }
-    return m;
-  }, [customers, today, gridStart, gridEnd]);
-
-  const todayKey = (() => {
-    const d = today;
-    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-  })();
-
-  const days: Date[] = [];
-  for (let i = 0; i < 42; i++) {
-    const d = new Date(gridStart);
-    d.setDate(gridStart.getDate() + i);
-    days.push(d);
-  }
-
-  return (
-    <div className={styles.calWrap}>
-      <div className={styles.calHeader}>
-        <button className={styles.calNavBtn} onClick={onPrev} aria-label="Previous month">‹</button>
-        <h3 className={styles.calMonth}>
-          {month.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
-        </h3>
-        <button className={styles.calNavBtn} onClick={onNext} aria-label="Next month">›</button>
-        <button className={styles.calTodayBtn} onClick={onToday}>Today</button>
-      </div>
-      <div className={styles.calLegend}>
-        <span className={styles.calLegendItem}>
-          <span className={`${styles.calDot} ${styles.calDotFu1}`} /> FU1
-        </span>
-        <span className={styles.calLegendItem}>
-          <span className={`${styles.calDot} ${styles.calDotFu2}`} /> FU2
-        </span>
-        <span className={styles.calLegendItem}>
-          <span className={`${styles.calDot} ${styles.calDotOverdue}`} /> Overdue
-        </span>
-      </div>
-      <div className={styles.calGrid}>
-        {WEEK_DAYS.map(d => (
-          <div key={d} className={styles.calDayHeader}>{d}</div>
-        ))}
-        {days.map(d => {
-          const k = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-          const events = eventsByDay.get(k) ?? [];
-          const isOtherMonth = d.getMonth() !== month.getMonth();
-          const isToday = k === todayKey;
-          const isPast = d < today && k !== todayKey;
-          return (
-            <div
-              key={k}
-              className={[
-                styles.calDay,
-                isOtherMonth ? styles.calDayOther : '',
-                isToday ? styles.calDayToday : '',
-              ].join(' ')}
-            >
-              <div className={styles.calDayNum}>{d.getDate()}</div>
-              {events.map((ev, i) => {
-                const overdue = isPast && !(ev.kind === 'fu1' ? ev.customer.fu1_status : ev.customer.fu2_status);
-                return (
-                  <button
-                    key={i}
-                    onClick={() => onCustomerClick(ev.customer.id)}
-                    className={[
-                      styles.calEvent,
-                      overdue ? styles.calEventOverdue : (ev.kind === 'fu1' ? styles.calEventFu1 : styles.calEventFu2),
-                    ].join(' ')}
-                    title={`${ev.customer.full_name} — ${ev.kind.toUpperCase()} ${overdue ? 'overdue' : 'due'}`}
-                  >
-                    {ev.kind.toUpperCase()}: {ev.customer.full_name}
-                  </button>
-                );
-              })}
-            </div>
-          );
-        })}
-      </div>
-    </div>
   );
 }
 
