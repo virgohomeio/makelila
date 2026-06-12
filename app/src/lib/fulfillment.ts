@@ -612,3 +612,32 @@ export function useFulfillmentLog(): { rows: FulfillmentLogRow[]; loading: boole
   }, []);
   return { rows, loading };
 }
+
+// ---- Stock-side "Assign to Order" support ----
+
+export type QueueItemForAssignment = {
+  queueId: string;
+  orderId: string;
+  orderRef: string;
+  customerName: string | null;
+};
+
+/** Returns fulfillment queue rows at step 1 (awaiting unit assignment).
+ *  Used by the Stock UnitTable to let operators start from the physical unit. */
+export async function fetchUnassignedQueueItems(): Promise<QueueItemForAssignment[]> {
+  const { data, error } = await supabase
+    .from('fulfillment_queue')
+    .select('id, order_id, orders(order_ref, customer_name)')
+    .eq('step', 1)
+    .is('assigned_serial', null);
+  if (error) throw error;
+  return (data ?? []).map((r: Record<string, unknown>) => {
+    const ord = r.orders as { order_ref: string; customer_name: string | null } | null;
+    return {
+      queueId:      r.id as string,
+      orderId:      r.order_id as string,
+      orderRef:     ord?.order_ref ?? (r.order_id as string),
+      customerName: ord?.customer_name ?? null,
+    };
+  });
+}
