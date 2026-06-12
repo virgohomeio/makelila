@@ -74,20 +74,26 @@ async function handle(req: Request): Promise<Response> {
   const telemetry = createClient(telemetryUrl, telemetryKey);
 
   // Step 1: Fetch all known unit serials from the telemetry `lila` table.
-  const { data: lilaRows, error: lilaErr } = await telemetry
-    .from('lila')
-    .select('serial_number, status, updated_at')
-    .range(0, 9999);
-
-  if (lilaErr) {
-    return jsonResponse({ error: `Failed to fetch lila table: ${lilaErr.message}` }, 500);
+  // Paginate: PostgREST caps each response at max_rows (default 1000 on
+  // Supabase hosted). Without looping, a fleet > max_rows is silently
+  // truncated on every sync cycle.
+  type LilaRow = { serial_number: string; status: string | null; updated_at: string | null };
+  const rows: LilaRow[] = [];
+  const LILA_PAGE = 1_000;
+  let lilaOffset = 0;
+  while (true) {
+    const { data: page, error: lilaErr } = await telemetry
+      .from('lila')
+      .select('serial_number, status, updated_at')
+      .range(lilaOffset, lilaOffset + LILA_PAGE - 1);
+    if (lilaErr) {
+      return jsonResponse({ error: `Failed to fetch lila table: ${lilaErr.message}` }, 500);
+    }
+    const batch = (page ?? []) as LilaRow[];
+    rows.push(...batch);
+    if (batch.length < LILA_PAGE) break;
+    lilaOffset += batch.length;
   }
-
-  const rows = (lilaRows ?? []) as Array<{
-    serial_number: string;
-    status: string | null;
-    updated_at: string | null;
-  }>;
 
   if (rows.length === 0) {
     return jsonResponse({ synced: 0, updated_state: 0, stale_marked: 0 }, 200);
