@@ -391,6 +391,67 @@
 .fuBtn:hover { background: var(--color-surface); border-color: var(--color-ink-muted); }
 .fuBtn:disabled { opacity: 0.5; cursor: not-allowed; }
 
+/* Invoice rows */
+.invoiceRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 0;
+  border-bottom: 1px solid #f4f4f4;
+  font-size: 12px;
+  flex-wrap: wrap;
+}
+.invoiceRow:last-of-type { border-bottom: none; }
+.invoiceTypeBadge {
+  font-size: 9px;
+  font-weight: 700;
+  padding: 2px 5px;
+  border-radius: 3px;
+  letter-spacing: 0.4px;
+  flex-shrink: 0;
+}
+.invoiceActions {
+  margin-left: auto;
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+.linkBtn {
+  background: none;
+  border: none;
+  padding: 0 4px;
+  font-size: 11px;
+  color: var(--color-crimson);
+  cursor: pointer;
+  text-decoration: underline;
+  font-weight: 600;
+}
+.linkBtn:hover { opacity: 0.75; }
+.linkBtn:disabled { opacity: 0.4; cursor: not-allowed; }
+.invoiceUploadForm {
+  margin-top: 10px;
+  padding: 10px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+.invoiceFormRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: 12px;
+}
+.invoiceFormRow label { width: 58px; flex-shrink: 0; color: var(--color-ink-subtle); }
+.invoiceInput {
+  flex: 1;
+  font-size: 12px;
+  padding: 4px 6px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: #fff;
+}
+
 /* Calendar view (Customers module follow-up calendar grid) */
 .viewToggle {
   display: inline-flex;

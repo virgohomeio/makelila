@@ -10,6 +10,10 @@ import { useOrders } from '../../lib/orders';
 import { formatMoney } from '../../lib/money';
 import { useUnits } from '../../lib/stock';
 import { useServiceTickets, useCustomerLifecycle, type CustomerLifecycle } from '../../lib/service';
+import {
+  useCustomerInvoices, uploadInvoice, getInvoiceSignedUrl, deleteInvoice,
+  type CustomerInvoice, type InvoiceDocType,
+} from '../../lib/invoices';
 import { OverdueFollowupPanel } from './OverdueFollowupPanel';
 import { ProfitabilityTab } from './ProfitabilityTab';
 import { JourneyTab } from './JourneyTab';
@@ -545,6 +549,8 @@ function CustomerDetailPanel({ customer, onClose }: { customer: Customer; onClos
 
           <FollowUpSection customer={customer} lifecycle={lifecycle} />
 
+          <InvoicesSection customerId={customer.id} />
+
           <PanelSection title={`Orders (${myOrders.length})`}>
             {myOrders.length === 0
               ? <div className={styles.emptyRow}>No orders on file.</div>
@@ -706,6 +712,137 @@ function KPI({ label, value, sub }: { label: string; value: number | string; sub
 // ────────────────────────────────────────────────────────────────────────
 // Follow-up section in the customer detail panel
 // ────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────
+// Invoices section in the customer detail panel
+// ────────────────────────────────────────────────────────────────────────
+function InvoicesSection({ customerId }: { customerId: string }) {
+  const { invoices, loading, reload } = useCustomerInvoices(customerId);
+  const [showForm, setShowForm] = useState(false);
+  const [file, setFile] = useState<File | null>(null);
+  const [invoiceNum, setInvoiceNum] = useState('');
+  const [docType, setDocType] = useState<InvoiceDocType>('invoice');
+  const [uploading, setUploading] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
+
+  const resetForm = () => { setFile(null); setInvoiceNum(''); setDocType('invoice'); setErr(null); setShowForm(false); };
+
+  const handleUpload = async () => {
+    if (!file || !invoiceNum.trim()) return;
+    setUploading(true); setErr(null);
+    try {
+      await uploadInvoice({ customerId, file, invoiceNumber: invoiceNum, documentType: docType });
+      resetForm();
+      void reload();
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleOpen = async (inv: CustomerInvoice) => {
+    try {
+      const url = await getInvoiceSignedUrl(inv.storage_path);
+      window.open(url, '_blank', 'noopener');
+    } catch (e) {
+      alert(`Could not open PDF: ${(e as Error).message}`);
+    }
+  };
+
+  const handleDelete = async (inv: CustomerInvoice) => {
+    if (!window.confirm(`Remove ${inv.file_name} from this customer? The file will be permanently deleted.`)) return;
+    setDeleting(inv.id);
+    try {
+      await deleteInvoice(inv.id, inv.storage_path);
+      void reload();
+    } catch (e) {
+      alert((e as Error).message);
+    } finally {
+      setDeleting(null);
+    }
+  };
+
+  const DOC_LABEL: Record<InvoiceDocType, string> = { invoice: 'INV', refund_receipt: 'REF' };
+
+  return (
+    <PanelSection title={`Invoices & Receipts${invoices.length > 0 ? ` (${invoices.length})` : ''}`}>
+      {loading
+        ? <div className={styles.emptyRow}>Loading…</div>
+        : invoices.length === 0
+          ? <div className={styles.emptyRow}>No invoices attached.</div>
+          : invoices.map(inv => (
+              <div key={inv.id} className={styles.invoiceRow}>
+                <span
+                  className={styles.invoiceTypeBadge}
+                  style={{ background: inv.document_type === 'refund_receipt' ? '#fed7d7' : '#ebf8ff',
+                           color:      inv.document_type === 'refund_receipt' ? '#9b2c2c'  : '#2b6cb0' }}
+                >{DOC_LABEL[inv.document_type]}</span>
+                <span className={styles.mono}>#{inv.invoice_number}</span>
+                {inv.bill_to_name && <span className={styles.muted}>{inv.bill_to_name}</span>}
+                {inv.invoice_date && (
+                  <span className={styles.muted}>
+                    {new Date(inv.invoice_date + 'T00:00:00').toLocaleDateString('en-US', { year: '2-digit', month: 'short', day: 'numeric' })}
+                  </span>
+                )}
+                {inv.total_cad != null && (
+                  <span className={styles.itemAmount}>CAD {inv.total_cad.toFixed(2)}</span>
+                )}
+                <span className={styles.invoiceActions}>
+                  <button className={styles.linkBtn} onClick={() => void handleOpen(inv)}>Open ↗</button>
+                  <button
+                    className={styles.linkBtn}
+                    style={{ color: 'var(--color-error, #c53030)' }}
+                    onClick={() => void handleDelete(inv)}
+                    disabled={deleting === inv.id}
+                  >{deleting === inv.id ? '…' : '✕'}</button>
+                </span>
+              </div>
+            ))
+      }
+
+      {showForm ? (
+        <div className={styles.invoiceUploadForm}>
+          <div className={styles.invoiceFormRow}>
+            <label>Invoice #</label>
+            <input
+              type="text"
+              value={invoiceNum}
+              onChange={e => setInvoiceNum(e.target.value)}
+              placeholder="e.g. 1234"
+              className={styles.invoiceInput}
+            />
+          </div>
+          <div className={styles.invoiceFormRow}>
+            <label>Type</label>
+            <select value={docType} onChange={e => setDocType(e.target.value as InvoiceDocType)} className={styles.invoiceInput}>
+              <option value="invoice">Invoice</option>
+              <option value="refund_receipt">Refund Receipt</option>
+            </select>
+          </div>
+          <div className={styles.invoiceFormRow}>
+            <label>File</label>
+            <input type="file" accept=".pdf,application/pdf" onChange={e => setFile(e.target.files?.[0] ?? null)} />
+          </div>
+          {err && <div style={{ fontSize: 11, color: 'var(--color-error, #c53030)', marginTop: 4 }}>{err}</div>}
+          <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+            <button
+              className={styles.fuBtn}
+              onClick={() => void handleUpload()}
+              disabled={uploading || !file || !invoiceNum.trim()}
+            >{uploading ? 'Uploading…' : 'Upload'}</button>
+            <button className={styles.fuBtn} onClick={resetForm} disabled={uploading}>Cancel</button>
+          </div>
+        </div>
+      ) : (
+        <button className={styles.fuBtn} style={{ marginTop: 8 }} onClick={() => setShowForm(true)}>
+          + Attach invoice
+        </button>
+      )}
+    </PanelSection>
+  );
+}
+
 const ONBOARDING_LABEL: Record<string, string> = {
   not_scheduled: 'Not scheduled',
   scheduled: 'Scheduled',
