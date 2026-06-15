@@ -484,6 +484,8 @@
 .labelChip_no_smell,
 .labelChip_mixing { background: #c6f6d5; color: #22543d; }
 .labelChip_not_mixing { background: #fed7d7; color: #c53030; }
+.labelChip_moldy_composter,
+.labelChip_moldy_chamber { background: #e9d8fd; color: #553c9a; }
 .labelMeta { color: #718096; }
 .labelNotes {
   grid-column: 1 / -1;

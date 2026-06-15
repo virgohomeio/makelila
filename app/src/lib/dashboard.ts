@@ -434,7 +434,7 @@ export function wetSoilNewFoodFromBme(
 // exceeds 5% the chamber has been actively turned over. Slope smoothing
 // is intentionally NOT used here — smoothing washes out the oscillations
 // that mixing produces (rise + fall + rise cancels under a 5-pt mean).
-export const MIXING_HUMIDITY_LOOKBACK_HOURS = 12;
+export const MIXING_HUMIDITY_LOOKBACK_HOURS = 24;
 export const MIXING_HUMIDITY_NOISE_FLOOR_PCT = 0.5;
 export const MIXING_HUMIDITY_MIN_TOTAL_ABS_PCT = 5.0;
 
@@ -1043,7 +1043,7 @@ export async function lastStatusSmsAt(serial: string, status: MachineStatus): Pr
 
 // ── Backlog #61: dataset labels (ML training pairs) ─────────────────────────
 
-export type DatasetLabelKind = 'smelly' | 'no_smell' | 'dry' | 'wet' | 'mixing' | 'not_mixing' | 'other';
+export type DatasetLabelKind = 'smelly' | 'no_smell' | 'dry' | 'wet' | 'mixing' | 'not_mixing' | 'moldy_composter' | 'moldy_chamber' | 'other';
 export type DatasetLabelSource = 'sms' | 'phone' | 'ticket' | 'in_person' | 'operator_inferred';
 export type DatasetLabelConfidence = 'customer_reported' | 'operator_inferred';
 

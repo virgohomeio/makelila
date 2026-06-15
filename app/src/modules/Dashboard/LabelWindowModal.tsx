@@ -19,8 +19,10 @@ const LABELS: { value: DatasetLabelKind; description: string }[] = [
   { value: 'dry',        description: 'Compost is dry (paired with bme_sensors.humidity)' },
   { value: 'wet',        description: 'Compost is too wet' },
   { value: 'mixing',     description: 'Mixing/turnover is working' },
-  { value: 'not_mixing', description: 'Mixing appears stuck' },
-  { value: 'other',      description: 'Other (capture context in notes)' },
+  { value: 'not_mixing',       description: 'Mixing appears stuck' },
+  { value: 'moldy_composter', description: 'Mold visible inside the composter body' },
+  { value: 'moldy_chamber',   description: 'Mold visible inside the mixing chamber' },
+  { value: 'other',           description: 'Other (capture context in notes)' },
 ];
 
 function toLocalInput(d: Date): string {
