@@ -9,7 +9,7 @@ import {
 import { useOrders } from '../../lib/orders';
 import { formatMoney } from '../../lib/money';
 import { useUnits } from '../../lib/stock';
-import { useServiceTickets } from '../../lib/service';
+import { useServiceTickets, useCustomerLifecycle, type CustomerLifecycle } from '../../lib/service';
 import { OverdueFollowupPanel } from './OverdueFollowupPanel';
 import { ProfitabilityTab } from './ProfitabilityTab';
 import { JourneyTab } from './JourneyTab';
@@ -499,6 +499,8 @@ function CustomerDetailPanel({ customer, onClose }: { customer: Customer; onClos
   const { all: orders } = useOrders();
   const { units } = useUnits();
   const { tickets } = useServiceTickets();
+  const { rows: lifecycleRows } = useCustomerLifecycle();
+  const lifecycle = lifecycleRows.find(l => l.customer_id === customer.id) ?? null;
 
   const lcEmail = customer.email?.toLowerCase() ?? '';
   const lcName = customer.full_name.toLowerCase();
@@ -541,7 +543,7 @@ function CustomerDetailPanel({ customer, onClose }: { customer: Customer; onClos
 
           <LilaAppActivitySection customerId={customer.id} />
 
-          <FollowUpSection customer={customer} />
+          <FollowUpSection customer={customer} lifecycle={lifecycle} />
 
           <PanelSection title={`Orders (${myOrders.length})`}>
             {myOrders.length === 0
@@ -704,11 +706,22 @@ function KPI({ label, value, sub }: { label: string; value: number | string; sub
 // ────────────────────────────────────────────────────────────────────────
 // Follow-up section in the customer detail panel
 // ────────────────────────────────────────────────────────────────────────
-function FollowUpSection({ customer }: { customer: Customer }) {
+const ONBOARDING_LABEL: Record<string, string> = {
+  not_scheduled: 'Not scheduled',
+  scheduled: 'Scheduled',
+  completed: 'Completed',
+  no_show: 'No-show',
+  skipped: 'Skipped',
+};
+
+function FollowUpSection({ customer, lifecycle }: { customer: Customer; lifecycle: CustomerLifecycle | null }) {
   const fu = computeFuState(customer);
   const meta = FU_STATE_META[fu];
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  const fmtDate = (iso: string) =>
+    new Date(iso).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
 
   const onboardFormatted = customer.onboard_date
     ? new Date(customer.onboard_date + 'T00:00:00').toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
@@ -728,10 +741,21 @@ function FollowUpSection({ customer }: { customer: Customer }) {
 
   return (
     <PanelSection title="Follow-up">
-      <PanelRow
-        label="Onboarded"
-        value={onboardFormatted}
-      />
+      <PanelRow label="Onboarded" value={onboardFormatted} />
+      {lifecycle && (
+        <>
+          <PanelRow
+            label="Onboarding call"
+            value={ONBOARDING_LABEL[lifecycle.onboarding_status] ?? lifecycle.onboarding_status}
+          />
+          {lifecycle.onboarding_completed_at && (
+            <PanelRow label="Call completed" value={fmtDate(lifecycle.onboarding_completed_at)} />
+          )}
+          {lifecycle.followup_email_sent_at && (
+            <PanelRow label="FU email sent" value={fmtDate(lifecycle.followup_email_sent_at)} />
+          )}
+        </>
+      )}
       <div className={styles.kvRow}>
         <span className={styles.kvLabel}>State</span>
         <span className={styles.kvValue}>
