@@ -1084,3 +1084,57 @@
   font-size: 13px;
   font-style: italic;
 }
+
+/* ── #83 queued-replacement warning banner ── */
+.replWarnBanner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 14px;
+  background: #fffbeb;
+  border: 1px solid #f59e0b;
+  border-radius: var(--radius-md);
+  font-size: 12px;
+  color: #92400e;
+}
+.replWarnIcon {
+  flex-shrink: 0;
+  font-size: 15px;
+  line-height: 1.4;
+}
+.replWarnBody {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.replWarnRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.replWarnRef {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #fef3c7;
+  border: 1px solid #f59e0b;
+  font-size: 11px;
+  font-weight: 600;
+  font-family: var(--font-mono, monospace);
+  color: #78350f;
+}
+.replWarnHoldBtn {
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid #d97706;
+  background: #f59e0b;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.replWarnHoldBtn:hover:not(:disabled) { background: #d97706; }
+.replWarnHoldBtn:disabled { opacity: 0.6; cursor: not-allowed; }

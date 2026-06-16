@@ -1099,33 +1099,25 @@
   min-width: 260px;
 }
 
-/* Follow-Ups calendar (spec 2026-06-11) */
-.calHeader { display: flex; align-items: center; gap: 12px; margin: 4px 0 12px; flex-wrap: wrap; }
-.calTitle { margin: 0; font-size: 16px; font-weight: 700; min-width: 160px; text-align: center; }
-.calNav {
-  width: 28px; height: 28px; border: 1px solid #cbd5e0; background: #fff;
-  border-radius: 6px; font-size: 16px; cursor: pointer; line-height: 1;
+/* ── #87 post-onboarding follow-up email form ── */
+.followupForm {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  background: #f7fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: var(--radius-md, 6px);
+  font-size: 12px;
+  max-width: 360px;
 }
-.calToday { padding: 4px 10px; border: 1px solid #cbd5e0; background: #fff; border-radius: 6px; font-size: 12px; cursor: pointer; }
-.calLegend { margin-left: auto; display: flex; gap: 14px; font-size: 11px; }
-.calLegCall { color: #276749; }
-.calLegFu1 { color: #b7791f; }
-.calLegFu2 { color: #6b46c1; }
-.calGrid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
-.calDow { font-size: 11px; font-weight: 700; color: #718096; text-transform: uppercase; padding: 2px 4px; text-align: left; }
-.calCell {
-  min-height: 92px; border: 1px solid #e2e8f0; border-radius: 6px; padding: 4px;
-  background: #fff; display: flex; flex-direction: column; gap: 2px; overflow: hidden;
+.followupTo { color: var(--color-ink-muted); margin-bottom: 2px; }
+.followupBullet {
+  width: 100%;
+  padding: 3px 6px;
+  font-size: 12px;
+  border: 1px solid #cbd5e0;
+  border-radius: 4px;
+  background: #fff;
+  box-sizing: border-box;
 }
-.calCellOut { background: #f7fafc; }
-.calCellToday { border-color: #c53030; box-shadow: inset 0 0 0 1px #c53030; }
-.calDayNum { font-size: 11px; font-weight: 600; color: #4a5568; }
-.calEvent {
-  display: block; width: 100%; text-align: left; font-size: 10px; line-height: 1.3;
-  padding: 2px 5px; border-radius: 4px; border: none; cursor: default;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.calEventCall { background: #f0fff4; color: #276749; cursor: pointer; }
-.calEventCall:hover { background: #c6f6d5; }
-.calEventFu1 { background: #fffaf0; color: #b7791f; }
-.calEventFu2 { background: #faf5ff; color: #6b46c1; }

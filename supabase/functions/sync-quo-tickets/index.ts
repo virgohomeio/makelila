@@ -30,6 +30,15 @@ const OPENPHONE_BASE = 'https://api.openphone.com/v1';
 const DEFAULT_LOOKBACK_DAYS = 7;
 const DEFAULT_OWNER_EMAIL = 'junaid@virgohome.io';
 
+// Our own OpenPhone inbox numbers — never use these as the "customer" phone.
+// If otherParties[0] is somehow one of these, it means the conversation data
+// is malformed and we should fall back to the inbound message sender.
+const OWN_INBOX_PHONES = new Set([
+  '2899012997',   // Primary inbox
+  '8445695452',   // 844-Joy-LILA
+  '3658253070',   // LILA Pro Service
+]);
+
 // ---- OpenPhone API types ----
 
 type OPMessage = {
@@ -256,7 +265,7 @@ async function syncPhoneNumber(
       msgs.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 
       const outcome = await upsertConversation(
-        admin, convo.id, msgs,
+        admin, convo.id, msgs, otherParties,
         customersByPhone, unitsByCustomerName, ordersByEmail,
       );
       if (outcome === 'created')   result.tickets_created++;
@@ -280,6 +289,7 @@ async function upsertConversation(
   admin: SupabaseClient,
   conversationId: string,
   msgs: OPMessage[],
+  otherParties: string[],
   customersByPhone: Map<string, CustomerLite>,
   unitsByCustomerName: Map<string, string>,
   ordersByEmail: Map<string, string>,
@@ -288,8 +298,15 @@ async function upsertConversation(
 
   const firstMsg = msgs[0];
   const lastMsg  = msgs[msgs.length - 1];
-  const inboundMsg = msgs.find(m => m.direction === 'incoming') ?? firstMsg;
-  const customerPhone = inboundMsg.from;
+
+  // Prefer otherParties[0] — it is always the "other party" phone number
+  // as OpenPhone understands it, regardless of message direction. Only fall
+  // back to inboundMsg.from if otherParties is empty or matches one of our
+  // own inbox lines (shouldn't happen, but guard against malformed data).
+  const quoContactPhone = otherParties.find(p => !OWN_INBOX_PHONES.has(digitsOnly(p).slice(-10)))
+    ?? msgs.find(m => m.direction === 'incoming')?.from
+    ?? firstMsg.from;
+  const customerPhone = quoContactPhone;
   const customer = customersByPhone.get(phoneKey(customerPhone)) ?? null;
 
   const subject = buildSubject(firstMsg, customerPhone);
@@ -339,6 +356,7 @@ async function upsertConversation(
                            : null,
     owner_email:         DEFAULT_OWNER_EMAIL,
     quo_conversation_id: conversationId,
+    quo_contact_id:      quoContactPhone,
     quo_last_message_id: lastMsg.id,
     first_message_at:    firstMsg.createdAt,
     last_message_at:     lastMsg.createdAt,

@@ -12,6 +12,7 @@ import Login from './modules/Login';
 import ReturnForm from './modules/Forms/ReturnForm';
 import CancelOrderForm from './modules/Forms/CancelOrderForm';
 import ServiceRequestForm from './modules/Forms/ServiceRequestForm';
+import ConfirmAddressPage from './modules/Forms/ConfirmAddressPage';
 
 // Backlog #51 — Dashboard pulls in Plotly (~1MB) and telemetry. The other
 // modules below get the same treatment so the main chunk doesn't carry
@@ -53,9 +54,10 @@ export default function App() {
         <Routes>
           <Route path="/login" element={<Login />} />
           {/* Public customer-facing forms — no auth required */}
-          <Route path="/return"       element={<ReturnForm />} />
-          <Route path="/cancel-order" element={<CancelOrderForm />} />
+          <Route path="/return"          element={<ReturnForm />} />
+          <Route path="/cancel-order"    element={<CancelOrderForm />} />
           <Route path="/service-request" element={<ServiceRequestForm />} />
+          <Route path="/confirm-address" element={<ConfirmAddressPage />} />
           <Route
             path="/"
             element={

@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import ReplacementPickerModal from './ReplacementPickerModal';
 import { useCustomers, sendFollowupSms } from '../../lib/customers';
 import {
@@ -8,12 +9,13 @@ import {
   ISSUE_AREAS, ISSUE_AREA_LABEL,
   updateTicketStatus, assignTicketOwner, setTicketPriority, setTicketIssueArea, setTicketCategory,
   setRepairFields, reclassifyTicket, deleteTicket, updateTicketSubject, setTicketDescription,
-  markDiagnosisLinkSent,
+  markDiagnosisLinkSent, setLinearIssueUrl, setGitHubIssueUrl,
   useCustomerLifecycle, warrantyState,
   useTicketMessages, useClassificationLog,
   autoTicketDescription,
 } from '../../lib/service';
 import { CANNED_SMS_TEMPLATES } from '../../lib/cannedSms';
+import { createLinearIssue, createGitHubIssue } from '../../lib/githubLinear';
 import { AttachmentStrip } from './AttachmentStrip';
 import { TicketNotes } from './TicketNotes';
 import { DeviceContextHeader } from '../../components/DeviceContextHeader';
@@ -42,6 +44,7 @@ type Props = {
 };
 
 export function TicketDetailPanel({ ticket, onClose }: Props) {
+  const navigate = useNavigate();
   const [defectCat, setDefectCat] = useState(ticket.defect_category ?? '');
   const [parts, setParts] = useState(ticket.parts_needed ?? '');
   const [busy, setBusy] = useState(false);
@@ -103,6 +106,47 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
     return CANNED_SMS_TEMPLATES.diagnosis_call_request.body(fn);
   }, [ticket.customer_name]);
   const [diagBody, setDiagBody] = useState(diagDefaultBody);
+
+  // Feature 3 — "Link to engineering" dialog state.
+  const [linkOpen, setLinkOpen] = useState(false);
+  const [linkTarget, setLinkTarget] = useState<'linear' | 'github'>('linear');
+  const [linkTeamKey, setLinkTeamKey] = useState('VCY');
+  const [linkRepo, setLinkRepo] = useState('virgohomeio/lila-firmware');
+  const [linkTitle, setLinkTitle] = useState('');
+  const [linkBody, setLinkBody] = useState('');
+  const [linkSubmitting, setLinkSubmitting] = useState(false);
+
+  async function onOpenLinkDialog() {
+    setLinkTitle(ticket.subject);
+    setLinkBody(ticket.description ?? '');
+    setLinkOpen(true);
+  }
+
+  async function onSubmitLink() {
+    setLinkSubmitting(true); setError(null);
+    try {
+      if (linkTarget === 'linear') {
+        const { url } = await createLinearIssue(ticket, {
+          teamKey: linkTeamKey.trim(),
+          title: linkTitle.trim(),
+          description: linkBody.trim(),
+        });
+        await setLinearIssueUrl(ticket.id, url);
+      } else {
+        const { url } = await createGitHubIssue(ticket, {
+          repo: linkRepo.trim(),
+          title: linkTitle.trim(),
+          body: linkBody.trim(),
+        });
+        await setGitHubIssueUrl(ticket.id, url);
+      }
+      setLinkOpen(false);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setLinkSubmitting(false);
+    }
+  }
 
   async function onSendDiagnosisLink() {
     if (!ticket.customer_id) {
@@ -253,7 +297,10 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
           {ticket.replacement_order_id && ticket.replacement_order_id.length > 0 ? (
             <div className={styles.replacementLink}>
               Replacement order:&nbsp;
-              <a href="#/order-review">open in Order Review</a>
+              <a
+                href={`/order-review/${ticket.replacement_order_id}`}
+                onClick={e => { e.preventDefault(); navigate(`/order-review/${ticket.replacement_order_id}`); }}
+              >open in Order Review</a>
             </div>
           ) : (
             <button
@@ -282,6 +329,47 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
             >
               Send diagnosis link
             </button>
+          )}
+          {/* Feature 3 — engineering issue linking */}
+          {ticket.linear_issue_url ? (
+            <a
+              className={styles.replacementLink}
+              href={ticket.linear_issue_url}
+              target="_blank"
+              rel="noreferrer"
+              title="Open Linear issue"
+            >
+              Linear issue ↗
+            </a>
+          ) : ticket.github_issue_url ? (
+            <a
+              className={styles.replacementLink}
+              href={ticket.github_issue_url}
+              target="_blank"
+              rel="noreferrer"
+              title="Open GitHub issue"
+            >
+              GitHub issue ↗
+            </a>
+          ) : (
+            <button
+              type="button"
+              className={styles.replacementBtn}
+              disabled={busy}
+              onClick={() => void onOpenLinkDialog()}
+              title="Create a Linear or GitHub engineering issue from this ticket"
+            >
+              Link to engineering
+            </button>
+          )}
+          {ticket.engineering_resolved_at && !ticket.closed_at && (
+            <span
+              className={styles.replacementLink}
+              style={{ background: '#f0fff4', color: '#276749', padding: '2px 8px', borderRadius: 4, fontWeight: 600 }}
+              title={`Engineering resolved at ${new Date(ticket.engineering_resolved_at).toLocaleString()}`}
+            >
+              Engineering fixed — follow up with customer
+            </span>
           )}
         </div>
 
@@ -331,11 +419,103 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
             }}
             address={pickerAddress}
             onClose={() => setPickerOpen(false)}
-            onCreated={() => {
+            onCreated={(result) => {
               setPickerOpen(false);
-              window.location.hash = '#/order-review';
+              navigate(`/order-review/${result.id}`);
             }}
           />
+        )}
+
+        {linkOpen && (
+          <div className={styles.diagModalBackdrop} onClick={() => !linkSubmitting && setLinkOpen(false)}>
+            <div className={styles.diagModal} onClick={e => e.stopPropagation()}>
+              <div className={styles.diagModalTitle}>Link to engineering issue</div>
+              <div className={styles.diagModalMeta} style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+                  <input
+                    type="radio"
+                    name="linkTarget"
+                    value="linear"
+                    checked={linkTarget === 'linear'}
+                    onChange={() => setLinkTarget('linear')}
+                    disabled={linkSubmitting}
+                  />
+                  Linear
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+                  <input
+                    type="radio"
+                    name="linkTarget"
+                    value="github"
+                    checked={linkTarget === 'github'}
+                    onChange={() => setLinkTarget('github')}
+                    disabled={linkSubmitting}
+                  />
+                  GitHub
+                </label>
+              </div>
+              {linkTarget === 'linear' ? (
+                <div className={styles.diagModalMeta} style={{ marginBottom: 8 }}>
+                  <label style={{ display: 'block', fontSize: 11, marginBottom: 2 }}>Linear team key</label>
+                  <input
+                    className={styles.subjectEditInput}
+                    value={linkTeamKey}
+                    onChange={e => setLinkTeamKey(e.target.value)}
+                    disabled={linkSubmitting}
+                    placeholder="e.g. VCY"
+                    style={{ width: 100 }}
+                  />
+                </div>
+              ) : (
+                <div className={styles.diagModalMeta} style={{ marginBottom: 8 }}>
+                  <label style={{ display: 'block', fontSize: 11, marginBottom: 2 }}>GitHub repo (owner/repo)</label>
+                  <input
+                    className={styles.subjectEditInput}
+                    value={linkRepo}
+                    onChange={e => setLinkRepo(e.target.value)}
+                    disabled={linkSubmitting}
+                    placeholder="virgohomeio/lila-firmware"
+                    style={{ width: 260 }}
+                  />
+                </div>
+              )}
+              <div className={styles.diagModalMeta} style={{ marginBottom: 4 }}>
+                <label style={{ display: 'block', fontSize: 11, marginBottom: 2 }}>Issue title</label>
+                <input
+                  className={styles.subjectEditInput}
+                  value={linkTitle}
+                  onChange={e => setLinkTitle(e.target.value)}
+                  disabled={linkSubmitting}
+                  style={{ width: '100%' }}
+                />
+              </div>
+              <textarea
+                className={styles.diagModalTextarea}
+                value={linkBody}
+                onChange={e => setLinkBody(e.target.value)}
+                rows={4}
+                disabled={linkSubmitting}
+                placeholder="Description (optional — ticket number is always appended)"
+              />
+              <div className={styles.diagModalActions}>
+                <button
+                  type="button"
+                  className={styles.replacementBtn}
+                  disabled={linkSubmitting || !linkTitle.trim()}
+                  onClick={() => void onSubmitLink()}
+                >
+                  {linkSubmitting ? 'Creating…' : `Create ${linkTarget === 'linear' ? 'Linear' : 'GitHub'} issue`}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLinkOpen(false)}
+                  disabled={linkSubmitting}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
         )}
 
         {(ticket.topic || ticket.summary || ticket.suggested_next_action) && (

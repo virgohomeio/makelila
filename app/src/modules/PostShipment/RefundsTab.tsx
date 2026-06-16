@@ -5,6 +5,7 @@ import {
   REFUND_STATUS_META, REFUND_METHODS, REFUND_METHOD_META,
   type RefundApproval, type ReturnRow, type RefundMethod,
 } from '../../lib/postShipment';
+import { useQueuedReplacements, holdReplacement, type Order } from '../../lib/orders';
 import { useAuth } from '../../lib/auth';
 import { canDo } from '../../lib/permissions';
 import { supabase } from '../../lib/supabase';
@@ -24,6 +25,7 @@ const COLUMNS: { key: ColKey; label: string; helper: string }[] = [
 export function RefundsTab() {
   const { approvals, loading: aLoading } = useRefundApprovals();
   const { returns, loading: rLoading } = useReturns();
+  const { replacements: queuedRepls } = useQueuedReplacements();
   const { user, role } = useAuth();
   const userEmail = user?.email;
 
@@ -40,6 +42,17 @@ export function RefundsTab() {
     for (const r of returns) m.set(r.id, r);
     return m;
   }, [returns]);
+
+  const replsByEmail = useMemo(() => {
+    const m = new Map<string, Order[]>();
+    for (const r of queuedRepls) {
+      const key = (r.customer_email ?? '').toLowerCase().trim();
+      if (!key) continue;
+      const prev = m.get(key) ?? [];
+      m.set(key, [...prev, r]);
+    }
+    return m;
+  }, [queuedRepls]);
 
   const selectedRefund = useMemo(
     () => approvals.find(a => a.id === selectedId) ?? null,
@@ -146,6 +159,7 @@ export function RefundsTab() {
         <RefundDetailPanel
           refund={selectedRefund}
           linkedReturn={selectedReturn}
+          queuedReplacements={replsByEmail.get((selectedRefund.customer_email ?? '').toLowerCase().trim()) ?? []}
           canManager={isManager}
           canFinance={isFinance}
           onClose={() => setSelectedId(null)}
@@ -309,10 +323,11 @@ function RefundCard({
 // Renders the linked return-form data + approve / deny actions.
 // ============================================================================
 function RefundDetailPanel({
-  refund, linkedReturn, canManager, canFinance, onClose, onError, onOpenFinanceModal,
+  refund, linkedReturn, queuedReplacements, canManager, canFinance, onClose, onError, onOpenFinanceModal,
 }: {
   refund: RefundApproval;
   linkedReturn: ReturnRow | null;
+  queuedReplacements: Order[];
   canManager: boolean;
   canFinance: boolean;
   onClose: () => void;
@@ -320,6 +335,7 @@ function RefundDetailPanel({
   onOpenFinanceModal: (id: string) => void;
 }) {
   const [busy, setBusy] = useState(false);
+  const [holdBusy, setHoldBusy] = useState<string | null>(null);
   const meta = REFUND_STATUS_META[refund.status];
 
   const canActManager = (refund.status === 'manager_review' || refund.status === 'submitted') && canManager;
@@ -373,6 +389,42 @@ function RefundDetailPanel({
         </div>
         <button onClick={onClose} className={styles.refundDetailClose} title="Close detail">✕</button>
       </div>
+
+      {queuedReplacements.length > 0 && (
+        <div className={styles.replWarnBanner}>
+          <span className={styles.replWarnIcon}>⚠</span>
+          <div className={styles.replWarnBody}>
+            <strong>
+              {queuedReplacements.length === 1
+                ? 'This customer has a queued replacement'
+                : `This customer has ${queuedReplacements.length} queued replacements`}
+              — hold before refunding
+            </strong>
+            <div className={styles.replWarnRow}>
+              {queuedReplacements.map(rpl => (
+                <span key={rpl.id} className={styles.replWarnRef}>{rpl.order_ref} ({rpl.replacement_state})</span>
+              ))}
+              {queuedReplacements.filter(rpl => rpl.replacement_state !== 'held').map(rpl => (
+                <button
+                  key={rpl.id}
+                  className={styles.replWarnHoldBtn}
+                  disabled={holdBusy === rpl.id}
+                  onClick={() => {
+                    setHoldBusy(rpl.id);
+                    void holdReplacement(
+                      rpl.id,
+                      `Held: refund in progress for ${refund.customer_name}`,
+                    ).catch(e => onError((e as Error).message))
+                      .finally(() => setHoldBusy(null));
+                  }}
+                >
+                  {holdBusy === rpl.id ? '…' : `Hold ${rpl.order_ref}`}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {!linkedReturn ? (
         <div className={styles.refundDetailEmpty}>

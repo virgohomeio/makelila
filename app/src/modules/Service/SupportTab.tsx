@@ -515,6 +515,14 @@ function TicketRow({ t, selected, onClick }: { t: ServiceTicket; selected: boole
       <td>
         <div>{t.subject}</div>
         {t.summary && <div className={styles.rowSummary}>{t.summary}</div>}
+        {t.engineering_resolved_at && !t.closed_at && (
+          <div
+            title={`Engineering resolved ${new Date(t.engineering_resolved_at).toLocaleString()}`}
+            style={{ marginTop: 2, fontSize: 10, fontWeight: 700, color: '#276749' }}
+          >
+            Engineering fixed — follow up
+          </div>
+        )}
       </td>
       <td>{t.topic ? <span className={styles.topicPill}>{topicLabel(t.topic)}</span> : '—'}</td>
       <td>

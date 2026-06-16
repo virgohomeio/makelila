@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from './supabase';
 import { logAction } from './activityLog';
+import { sendTemplate } from './templates';
 
 // ============================================================ Types
 
@@ -105,6 +106,10 @@ export type ServiceTicket = {
   first_responded_at: string | null;
   sla_resolved_at: string | null;
   sla_status: 'ok' | 'warning' | 'breached' | 'met' | null;
+  // Feature 3 — bidirectional Linear/GitHub issue linking
+  linear_issue_url: string | null;
+  github_issue_url: string | null;
+  engineering_resolved_at: string | null;
 };
 
 export type CustomerLifecycle = {
@@ -114,6 +119,7 @@ export type CustomerLifecycle = {
   shipped_at: string;
   onboarding_status: OnboardingStatus;
   onboarding_completed_at: string | null;
+  followup_email_sent_at: string | null;
   warranty_months: number;
   warranty_expires_at: string;
   notes: string | null;
@@ -194,13 +200,13 @@ export const TOPIC_LABEL: Record<TicketTopic, string> = {
 };
 
 export const STATUS_META: Record<TicketStatus, { label: string; color: string; bg: string }> = {
-  waiting_on_us:          { label: 'Waiting on Us',          color: '#2b6cb0', bg: '#ebf8ff' },
+  waiting_on_us:          { label: 'Needs Response',         color: '#2b6cb0', bg: '#ebf8ff' },
   in_progress:            { label: 'In Progress',            color: '#c05621', bg: '#fffaf0' },
-  waiting_on_customer:    { label: 'Waiting on Customer',    color: '#718096', bg: '#f7fafc' },
+  waiting_on_customer:    { label: 'Needs to Reach Out',     color: '#718096', bg: '#f7fafc' },
   queued_for_replacement: { label: 'Queued for Replacement', color: '#553c9a', bg: '#faf5ff' },
   call_scheduled:         { label: 'Call Scheduled',         color: '#2c7a7b', bg: '#e6fffa' },
   on_hold:                { label: 'On Hold',                color: '#b7791f', bg: '#fffff0' },
-  closed:                 { label: 'Closed',                 color: '#a0aec0', bg: '#edf2f7' },
+  closed:                 { label: 'Complete',               color: '#a0aec0', bg: '#edf2f7' },
 };
 
 export const PRIORITY_META: Record<TicketPriority, { label: string; color: string }> = {
@@ -912,6 +918,27 @@ export async function setRepairFields(
   if (error) throw error;
 }
 
+/** Feature 3 — record the Linear issue URL on the ticket row.
+ *  Called after the linear-create-issue edge function succeeds. */
+export async function setLinearIssueUrl(ticketId: string, url: string): Promise<void> {
+  const { error } = await supabase
+    .from('service_tickets')
+    .update({ linear_issue_url: url })
+    .eq('id', ticketId);
+  if (error) throw error;
+  await logAction('linear_issue_linked', ticketId, url);
+}
+
+/** Feature 3 — record the GitHub issue URL on the ticket row. */
+export async function setGitHubIssueUrl(ticketId: string, url: string): Promise<void> {
+  const { error } = await supabase
+    .from('service_tickets')
+    .update({ github_issue_url: url })
+    .eq('id', ticketId);
+  if (error) throw error;
+  await logAction('github_issue_linked', ticketId, url);
+}
+
 /** Backlog #75 — record that the diagnosis-call booking link was sent.
  *  The actual SMS / email send happens via sendFollowupSms() in the
  *  caller; this stamp is for dedupe + audit so operators don't double-send. */
@@ -945,18 +972,44 @@ export async function markOnboardingComplete(lifecycleId: string): Promise<void>
   if (error) throw error;
 
   // Only set onboard_date when it's still null — preserves manually-set
-  // values from prior CSV imports.
+  // values from prior CSV imports. Also fetch email for the Klaviyo 'First Use'
+  // event (#88) that triggers the Day 3 + Day 7 first-week drip.
+  let customerEmail: string | null = null;
   if (lc?.customer_id) {
     const onboardDate = completedAt.slice(0, 10); // YYYY-MM-DD
-    const { error: cErr } = await supabase
+    const { error: cErr, data: cust } = await supabase
       .from('customers')
-      .update({ onboard_date: onboardDate })
+      .select('email, onboard_date')
       .eq('id', lc.customer_id)
-      .is('onboard_date', null);
+      .maybeSingle();
     if (cErr) throw cErr;
+    customerEmail = (cust as { email?: string | null; onboard_date?: string | null } | null)?.email ?? null;
+    if (!(cust as { onboard_date?: string | null } | null)?.onboard_date) {
+      const { error: upErr } = await supabase
+        .from('customers')
+        .update({ onboard_date: onboardDate })
+        .eq('id', lc.customer_id);
+      if (upErr) throw upErr;
+    }
   }
 
-  await logAction('onboarding_completed', lifecycleId);
+  await logAction('onboarding_completed', lifecycleId, '', undefined,
+    customerEmail ? { klaviyoEvent: 'First Use', klaviyoEmail: customerEmail } : undefined);
+}
+
+export async function sendPostOnboardingFollowup(
+  lifecycleId: string,
+  to: string,
+  toName: string,
+  variables: Record<string, string>,
+): Promise<void> {
+  await sendTemplate({ template_key: 'post_onboarding_followup', to, to_name: toName, variables });
+  const { error } = await supabase
+    .from('customer_lifecycle')
+    .update({ followup_email_sent_at: new Date().toISOString() })
+    .eq('id', lifecycleId);
+  if (error) throw error;
+  await logAction('followup_email_sent', lifecycleId, `→ ${to}`);
 }
 
 export async function markOnboardingNoShow(lifecycleId: string): Promise<void> {

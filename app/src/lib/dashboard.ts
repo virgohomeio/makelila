@@ -813,6 +813,29 @@ export function useDashboardData(serialNumber: string | null, hours = DATA_RETEN
   return { data, loading, error, refresh };
 }
 
+// Paginate through the `lila` master table (one row per machine).
+// PostgREST caps each response at max_rows (default 1000 on Supabase hosted).
+// Without looping, any fleet > max_rows gets silently truncated.
+const LILA_PAGE = 1_000;
+async function fetchAllLilaRows(
+  columns: string,
+): Promise<Array<Record<string, unknown>>> {
+  const all: Array<Record<string, unknown>> = [];
+  let offset = 0;
+  while (true) {
+    const { data, error } = await supabase
+      .from('lila')
+      .select(columns)
+      .range(offset, offset + LILA_PAGE - 1);
+    if (error) throw error;
+    const rows = (data ?? []) as Array<Record<string, unknown>>;
+    all.push(...rows);
+    if (rows.length < LILA_PAGE) break;
+    offset += rows.length;
+  }
+  return all;
+}
+
 export function useAvailableSerials() {
   const [data, setData] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
@@ -821,22 +844,22 @@ export function useAvailableSerials() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const { data: rows, error: err } = await supabase.from('lila').select('serial_number');
-      if (cancelled) return;
-      if (err) {
-        setError(err as unknown as Error);
-        setLoading(false);
-        return;
+      try {
+        const rows = await fetchAllLilaRows('serial_number');
+        if (cancelled) return;
+        const serials = Array.from(
+          new Set(
+            rows
+              .map((r) => r.serial_number)
+              .filter((s): s is string => typeof s === 'string' && s.length > 0),
+          ),
+        ).sort();
+        setData(serials);
+      } catch (err) {
+        if (!cancelled) setError(err as Error);
+      } finally {
+        if (!cancelled) setLoading(false);
       }
-      const serials = Array.from(
-        new Set(
-          (rows ?? [])
-            .map((r) => (r as { serial_number: unknown }).serial_number)
-            .filter((s): s is string => typeof s === 'string' && s.length > 0),
-        ),
-      ).sort();
-      setData(serials);
-      setLoading(false);
     })();
     return () => {
       cancelled = true;
@@ -1160,21 +1183,21 @@ export function useSerialToUser() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const { data: rows, error: err } = await supabase.from('lila').select('serial_number, user');
-      if (cancelled) return;
-      if (err) {
-        setError(err as unknown as Error);
-        setLoading(false);
-        return;
-      }
-      const map: Record<string, string> = {};
-      for (const r of (rows ?? []) as Array<{ serial_number?: string; user?: string }>) {
-        if (typeof r.serial_number === 'string') {
-          map[r.serial_number] = r.user && typeof r.user === 'string' ? r.user : r.serial_number;
+      try {
+        const rows = await fetchAllLilaRows('serial_number, user');
+        if (cancelled) return;
+        const map: Record<string, string> = {};
+        for (const r of rows as Array<{ serial_number?: string; user?: string }>) {
+          if (typeof r.serial_number === 'string') {
+            map[r.serial_number] = r.user && typeof r.user === 'string' ? r.user : r.serial_number;
+          }
         }
+        setData(map);
+      } catch (err) {
+        if (!cancelled) setError(err as Error);
+      } finally {
+        if (!cancelled) setLoading(false);
       }
-      setData(map);
-      setLoading(false);
     })();
     return () => {
       cancelled = true;
