@@ -1,6 +1,12 @@
 import type { Order } from '../../lib/orders';
-import { orderUrgency } from '../../lib/orders';
+import { orderUrgency, AREA_TYPE_TAG } from '../../lib/orders';
 import styles from './OrderReview.module.css';
+
+const AREA_TAG_CLASS: Record<NonNullable<Order['area_type']>, string> = {
+  urban:    styles.tagUrban,
+  suburban: styles.tagSuburban,
+  rural:    styles.tagRural,
+};
 
 export function OrderRow({
   order,
@@ -27,6 +33,9 @@ export function OrderRow({
         <span className={`${styles.tag} ${countryTag}`}>{order.country}</span>
         {isRiskAddress && (
           <span className={`${styles.tag} ${styles.tagWarn}`}>{order.address_verdict}</span>
+        )}
+        {order.area_type && (
+          <span className={`${styles.tag} ${AREA_TAG_CLASS[order.area_type]}`}>{AREA_TYPE_TAG[order.area_type]}</span>
         )}
         {order.order_ref}
         {order.kind === 'replacement' && (

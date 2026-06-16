@@ -152,6 +152,10 @@
 .tagCa { background: var(--color-crimson); color: #fff; }
 .tagUs { background: var(--color-us-navy); color: #fff; }
 .tagWarn { background: #742a2a; color: #feb2b2; }
+/* Area-type tags — urban/suburban/rural classification. */
+.tagUrban    { background: #2a4365; color: #bee3f8; }
+.tagSuburban { background: #22543d; color: #9ae6b4; }
+.tagRural    { background: #744210; color: #fbd38d; }
 
 .detail {
   display: flex;

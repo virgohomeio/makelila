@@ -64,6 +64,8 @@ type MappedOrder = {
   region_state: string | null;
   country: 'US' | 'CA';
   address_verdict: 'house' | 'apt' | 'remote';
+  area_type: 'urban' | 'suburban' | 'rural';
+  area_type_source: string;
   freight_estimate_usd: number;
   freight_threshold_usd: number;
   freight_estimate_source: string;
@@ -107,6 +109,25 @@ function verdictFor(
   const s = (addressLine ?? '').toLowerCase();
   if (/\bapt\b|\bapartment\b|\bsuite\b|\bunit\b|#\s*\d/.test(s)) return 'apt';
   return 'house';
+}
+
+// Auto-guess whether the delivery address is in an urban / suburban or a
+// rural/remote area, from the postal code alone (no geocoding). Rural is the
+// only bucket we can detect reliably: a known remote-zone prefix, or the
+// Canada-Post convention where the 2nd char of the FSA is 0 (rural delivery).
+// Urban vs suburban can't be told apart from a postal code, so the non-rural
+// remainder defaults to 'suburban' for the operator to refine via the override.
+function areaTypeFor(
+  postalCode: string | null,
+  country: 'US' | 'CA',
+  remotePrefixes: string[],
+): 'urban' | 'suburban' | 'rural' {
+  if (postalCode) {
+    const p = postalCode.toUpperCase().replace(/\s/g, '');
+    if (remotePrefixes.some(prefix => p.startsWith(prefix))) return 'rural';
+    if (country === 'CA' && /^[A-Z]0/.test(p)) return 'rural';
+  }
+  return 'suburban';
 }
 
 function parseShippingFreight(order: ShopifyOrder): number {
@@ -153,6 +174,10 @@ function mapOrder(
     region_state: addr.province_code ?? null,
     country,
     address_verdict: verdict,
+    // Urban/suburban vs rural area type, auto-guessed from the postal code.
+    // Operator can override in Order Review; a re-sync won't clobber that.
+    area_type: areaTypeFor(postal, country, remotePrefixes),
+    area_type_source: 'auto',
     // Freight estimate is the operator's carrier quote (ClickShip/Freightcom)
     // and is NOT sourced from Shopify. New orders start with no quote (0 =>
     // "No freight quote on file" in the UI) for the operator to fill in
@@ -255,10 +280,10 @@ serve(async (req: Request) => {
   const orderRefs = mapped.map(m => m.order_ref);
   const { data: existingOrders } = await admin
     .from('orders')
-    .select('order_ref, status, address_line, postal_code')
+    .select('order_ref, status, address_line, postal_code, area_type_source')
     .in('order_ref', orderRefs);
   const existingByRef = new Map(
-    (existingOrders ?? []).map(o => [o.order_ref, o as { order_ref: string; status: string; address_line: string | null; postal_code: string | null }]),
+    (existingOrders ?? []).map(o => [o.order_ref, o as { order_ref: string; status: string; address_line: string | null; postal_code: string | null; area_type_source: string | null }]),
   );
 
   let imported = 0;
@@ -310,6 +335,12 @@ serve(async (req: Request) => {
       refreshPatch.region_state   = m.region_state;
       refreshPatch.country        = m.country;
       refreshPatch.address_verdict = m.address_verdict;
+      // Re-guess area type from the (possibly updated) postal code, but never
+      // overwrite an operator's manual override.
+      if (existing?.area_type_source !== 'manual') {
+        refreshPatch.area_type = m.area_type;
+        refreshPatch.area_type_source = 'auto';
+      }
       // Escalate pending → flagged if the new verdict isn't 'house'
       // (mirrors the new-order auto-flag rule; covers apt + remote)
       if (existing?.status === 'pending' && m.address_verdict !== 'house') {

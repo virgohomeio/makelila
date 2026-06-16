@@ -18,6 +18,8 @@ function mkOrder(partial: Partial<Order> & { id: string; status: Order['status']
     region_state: 'OR',
     country: 'US',
     address_verdict: 'house',
+    area_type: 'suburban',
+    area_type_source: 'auto',
     address_verified_at: null,
     address_match: null,
     address_google_formatted: null,
