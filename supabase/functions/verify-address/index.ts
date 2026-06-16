@@ -166,15 +166,21 @@ Deno.serve(async (req: Request) => {
     match = 'mismatch';
   }
 
-  // ─── Claude fallback (walkthrough #13) ──────────────────────────────
-  // Only run when Google said "unverifiable" AND the Anthropic key is set.
-  // We never call Claude for orders Google already verified — Google's data
-  // is authoritative when it returns a real granularity.
+  // ─── Claude pass (walkthrough #13 + area classification) ────────────
+  // Claude does two jobs here:
+  //   1. Area-type classification (urban/suburban/rural) — runs on EVERY
+  //      verify so the operator gets it automatically. Google's validation
+  //      API doesn't expose density, so Claude (geography-aware) is the
+  //      reliable source; a postal heuristic backs it up below.
+  //   2. Plausibility fallback — its verdict is only USED to upgrade an
+  //      'unverifiable' result; Google stays authoritative when it returned a
+  //      real granularity.
   let claudeVerdict: 'plausible' | 'implausible' | 'unknown' | null = null;
   let claudeNotes: string | null = null;
   let claudePostal: string | null = null;
+  let areaType: 'urban' | 'suburban' | 'rural' | null = null;
   const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY');
-  if (match === 'unverifiable' && anthropicKey) {
+  if (anthropicKey) {
     try {
       const llm = await claudeJudgeAddress(anthropicKey, {
         address_line: order.address_line,
@@ -183,35 +189,49 @@ Deno.serve(async (req: Request) => {
         postal: order.postal_code,
         country: order.country,
       });
-      claudeVerdict = llm.verdict;
-      claudeNotes = llm.notes;
-      claudePostal = llm.inferred_postal;
-      // Upgrade the match verdict when Claude returns a usable answer:
-      //   plausible + postal matches → 'match'
-      //   plausible + postal differs → 'mismatch' (Claude inferred a different postal)
-      //   implausible                → 'mismatch' (the address itself is bogus)
-      //   unknown                    → leave as 'unverifiable'
-      const normClaudePostal = normalizePostal(claudePostal, order.country);
-      if (claudeVerdict === 'plausible' && normClaudePostal && customerPostal) {
-        match = normClaudePostal === customerPostal ? 'match' : 'mismatch';
-      } else if (claudeVerdict === 'plausible' && customerPostal && !normClaudePostal) {
-        // Claude says plausible but couldn't infer a postal — take the
-        // customer's postal at face value and call it a match.
-        match = 'match';
-      } else if (claudeVerdict === 'plausible' && !customerPostal) {
-        // Shopify didn't capture the customer's postal at our end (common
-        // for older orders before we started recording postal_code). Google
-        // returned a usable granularity AND Claude judged the address
-        // plausible — the order is deliverable, treat as match.
-        match = 'match';
-      } else if (claudeVerdict === 'implausible') {
-        match = 'mismatch';
+      areaType = llm.area_type;
+      if (match === 'unverifiable') {
+        claudeVerdict = llm.verdict;
+        claudeNotes = llm.notes;
+        claudePostal = llm.inferred_postal;
+        // Upgrade the match verdict when Claude returns a usable answer:
+        //   plausible + postal matches → 'match'
+        //   plausible + postal differs → 'mismatch' (Claude inferred a different postal)
+        //   implausible                → 'mismatch' (the address itself is bogus)
+        //   unknown                    → leave as 'unverifiable'
+        const normClaudePostal = normalizePostal(claudePostal, order.country);
+        if (claudeVerdict === 'plausible' && normClaudePostal && customerPostal) {
+          match = normClaudePostal === customerPostal ? 'match' : 'mismatch';
+        } else if (claudeVerdict === 'plausible' && customerPostal && !normClaudePostal) {
+          // Claude says plausible but couldn't infer a postal — take the
+          // customer's postal at face value and call it a match.
+          match = 'match';
+        } else if (claudeVerdict === 'plausible' && !customerPostal) {
+          // Shopify didn't capture the customer's postal at our end (common
+          // for older orders before we started recording postal_code). Google
+          // returned a usable granularity AND Claude judged the address
+          // plausible — the order is deliverable, treat as match.
+          match = 'match';
+        } else if (claudeVerdict === 'implausible') {
+          match = 'mismatch';
+        }
       }
     } catch (e) {
-      // Fallback failure is non-fatal — keep Google's "unverifiable" verdict
-      // and record the error in notes for the operator.
-      claudeNotes = `Claude fallback errored: ${(e as Error).message}`;
+      // Non-fatal — keep Google's verdict and (when unverifiable) record the
+      // error in notes for the operator. Area type falls back below.
+      if (match === 'unverifiable') {
+        claudeNotes = `Claude fallback errored: ${(e as Error).message}`;
+      }
     }
+  }
+
+  // Heuristic backup for area type when Claude didn't give one (no key, error,
+  // or 'unknown'): the Canada-Post rural rule (FSA 2nd char 0). Urban vs
+  // suburban can't be told from a postal alone, so we leave it unset rather
+  // than guess — the operator can still pick it manually.
+  if (!areaType) {
+    const p = (order.postal_code ?? '').toUpperCase().replace(/\s/g, '');
+    if (order.country === 'CA' && /^[A-Z]0/.test(p)) areaType = 'rural';
   }
 
   const patch: Record<string, unknown> = {
@@ -224,6 +244,12 @@ Deno.serve(async (req: Request) => {
     address_claude_notes:   claudeNotes,
     address_claude_postal:  claudePostal,
   };
+  // Only write area_type when we determined one, so a verify never blanks a
+  // value. Source 'verified' marks it as set by this step (vs 'auto'/'manual').
+  if (areaType) {
+    patch.area_type = areaType;
+    patch.area_type_source = 'verified';
+  }
   if (match === 'mismatch' && order.status !== 'flagged') {
     patch.status = 'flagged';
   }
@@ -238,6 +264,7 @@ Deno.serve(async (req: Request) => {
     claude_verdict: claudeVerdict,
     claude_notes: claudeNotes,
     claude_postal: claudePostal,
+    area_type: areaType,
   });
 });
 
@@ -247,6 +274,7 @@ Deno.serve(async (req: Request) => {
 type ClaudeJudgement = {
   verdict: 'plausible' | 'implausible' | 'unknown';
   inferred_postal: string | null;
+  area_type: 'urban' | 'suburban' | 'rural' | null;
   notes: string;
 };
 
@@ -262,9 +290,10 @@ async function claudeJudgeAddress(
   const composed = parts.join(', ');
 
   const prompt =
-`You are validating a shipping address. Reply with ONLY a JSON object, no prose, with three fields:
+`You are validating a shipping address. Reply with ONLY a JSON object, no prose, with four fields:
 - "verdict": one of "plausible" (the address looks like a real, deliverable place), "implausible" (the address contains contradictions, typos, or is obviously fake), or "unknown" (you cannot tell).
 - "inferred_postal": the postal/ZIP code you would expect for this address, or null if you cannot infer one. Use the country's standard format (CA: A1A 1A1, US: 12345).
+- "area_type": classify the delivery area as one of "urban" (dense city core / major-city neighbourhood), "suburban" (residential area around a city or a mid-size town), or "rural" (countryside, small village, or remote/low-density area). Use null only if you genuinely cannot tell.
 - "notes": one sentence explaining your judgment.
 
 Address to validate:
@@ -274,9 +303,10 @@ Customer-supplied postal: ${addr.postal ?? '(none)'}
 Country: ${addr.country}
 
 Examples:
-- "123 Main St, Toronto, ON M5V 2T6, CA" → {"verdict":"plausible","inferred_postal":"M5V 2T6","notes":"Standard downtown Toronto address with matching postal code."}
-- "PO Box 14, Whitehorse, YT Y1A 0C4, CA" → {"verdict":"plausible","inferred_postal":"Y1A 0C4","notes":"Valid Yukon PO box with correct Y1A prefix."}
-- "999 Elm, Springfield, ON 99999 9X9, CA" → {"verdict":"implausible","inferred_postal":null,"notes":"Postal code does not match Canadian format."}`;
+- "123 Main St, Toronto, ON M5V 2T6, CA" → {"verdict":"plausible","inferred_postal":"M5V 2T6","area_type":"urban","notes":"Standard downtown Toronto address with matching postal code."}
+- "47 Maple Cres, Oakville, ON L6H 3R1, CA" → {"verdict":"plausible","inferred_postal":"L6H 3R1","area_type":"suburban","notes":"Residential street in a suburb west of Toronto."}
+- "PO Box 14, Whitehorse, YT Y1A 0C4, CA" → {"verdict":"plausible","inferred_postal":"Y1A 0C4","area_type":"rural","notes":"Valid Yukon PO box with correct Y1A prefix; remote territory."}
+- "999 Elm, Springfield, ON 99999 9X9, CA" → {"verdict":"implausible","inferred_postal":null,"area_type":null,"notes":"Postal code does not match Canadian format."}`;
 
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -303,15 +333,22 @@ Examples:
   const parsed = JSON.parse(jsonMatch[0]) as {
     verdict?: string;
     inferred_postal?: string | null;
+    area_type?: string | null;
     notes?: string;
   };
   const verdict: ClaudeJudgement['verdict'] =
     parsed.verdict === 'plausible'   ? 'plausible'
   : parsed.verdict === 'implausible' ? 'implausible'
   : 'unknown';
+  const area_type: ClaudeJudgement['area_type'] =
+    parsed.area_type === 'urban'    ? 'urban'
+  : parsed.area_type === 'suburban' ? 'suburban'
+  : parsed.area_type === 'rural'    ? 'rural'
+  : null;
   return {
     verdict,
     inferred_postal: parsed.inferred_postal ?? null,
+    area_type,
     notes: parsed.notes ?? '(no notes)',
   };
 }

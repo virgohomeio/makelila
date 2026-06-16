@@ -65,8 +65,9 @@ export type Order = {
   country: 'US' | 'CA';
   address_verdict: 'house' | 'apt' | 'remote' | 'condo';
   // Urban/suburban vs rural area classification (separate from address_verdict's
-  // dwelling type). Auto-guessed from postal code on sync; area_type_source
-  // flips to 'manual' when an operator overrides it. null = unclassified.
+  // dwelling type). area_type_source tracks provenance: 'auto' (postal-code
+  // guess on sync), 'verified' (set by the Verify-address step via Claude), or
+  // 'manual' (operator override). null = unclassified.
   area_type: 'urban' | 'suburban' | 'rural' | null;
   area_type_source: string;
   address_verified_at: string | null;
@@ -247,6 +248,9 @@ export type VerifyAddressResult = {
   customer_postal: string | null;
   google_postal: string | null;
   google_formatted: string | null;
+  // Area type the verify step classified (urban/suburban/rural), written back
+  // to the order with source 'verified'. null if it couldn't be determined.
+  area_type: 'urban' | 'suburban' | 'rural' | null;
 };
 
 export async function confirmAddress(orderId: string): Promise<{ order_ref: string; already_confirmed: boolean }> {

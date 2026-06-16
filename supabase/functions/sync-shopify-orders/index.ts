@@ -366,9 +366,10 @@ serve(async (req: Request) => {
       refreshPatch.region_state   = m.region_state;
       refreshPatch.country        = m.country;
       refreshPatch.address_verdict = m.address_verdict;
-      // Re-guess area type from the (possibly updated) postal code, but never
-      // overwrite an operator's manual override.
-      if (existing?.area_type_source !== 'manual') {
+      // Re-guess area type from the (possibly updated) postal code only while
+      // it's still an auto guess — never overwrite a 'verified' (Claude) or
+      // 'manual' (operator) value.
+      if ((existing?.area_type_source ?? 'auto') === 'auto') {
         refreshPatch.area_type = m.area_type;
         refreshPatch.area_type_source = 'auto';
       }

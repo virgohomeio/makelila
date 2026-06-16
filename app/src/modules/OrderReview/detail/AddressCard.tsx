@@ -30,11 +30,11 @@ export function AddressCard({ order }: { order: Order }) {
     setBusy(true); setMsg(null);
     try {
       const r = await verifyAddress(order.id);
-      setMsg(
+      const base =
         r.match === 'match'      ? 'Address verified.' :
         r.match === 'mismatch'   ? 'Postal code mismatch — see below.' :
-                                   'Could not verify.'
-      );
+                                   'Could not verify.';
+      setMsg(r.area_type ? `${base} Area: ${AREA_TYPE_LABEL[r.area_type]}.` : base);
     } catch (e) {
       setMsg(`Error: ${(e as Error).message}`);
     } finally {
@@ -123,6 +123,9 @@ export function AddressCard({ order }: { order: Order }) {
           </select>
           {order.area_type && order.area_type_source === 'auto' && (
             <span className={styles.muted} style={{ fontSize: 10 }}>auto-guess</span>
+          )}
+          {order.area_type && order.area_type_source === 'verified' && (
+            <span className={styles.muted} style={{ fontSize: 10 }}>from address verification</span>
           )}
         </div>
 
