@@ -1,4 +1,4 @@
-import { TICKET_STATUSES, type ServiceTicket, type TicketStatus } from '../../lib/service';
+import type { ServiceTicket, TicketStatus } from '../../lib/service';
 
 // One customer = one ticket "profile" (backlog: merge tickets per customer).
 // Grouping is derived at read time — no ticket is destructively merged, so
@@ -13,7 +13,7 @@ export type CustomerGroup = {
   tickets: ServiceTicket[];         // sorted open-first, then most-recent
   total: number;
   openCount: number;
-  rollupStatus: TicketStatus;       // most-urgent open status (or latest if all closed)
+  rollupStatus: TicketStatus;       // status of the most recently CREATED ticket
   lastActivity: string;             // ISO ts — newest activity across the tickets
 };
 
@@ -21,11 +21,6 @@ export type GroupedTickets = {
   groups: CustomerGroup[];          // open profiles first, then by recency
   unassigned: ServiceTicket[];      // tickets with no customer_id (sorted by recency)
 };
-
-// Urgency order = the canonical status order; lower index = more urgent.
-const STATUS_RANK: Record<string, number> = Object.fromEntries(
-  TICKET_STATUSES.map((s, i) => [s, i]),
-);
 
 function activityTs(t: ServiceTicket): string {
   return t.last_message_at ?? t.created_at;
@@ -60,10 +55,10 @@ export function groupTicketsByCustomer(tickets: ServiceTicket[]): GroupedTickets
     });
 
     const openTickets = sorted.filter(isOpen);
-    const rollupPool = openTickets.length > 0 ? openTickets : sorted;
-    const rollupStatus = rollupPool.reduce((best, t) =>
-      (STATUS_RANK[t.status] ?? 99) < (STATUS_RANK[best.status] ?? 99) ? t : best,
-    rollupPool[0]).status;
+    // Profile status follows the most recently CREATED ticket.
+    const newestCreated = sorted.reduce((newest, t) =>
+      t.created_at > newest.created_at ? t : newest, sorted[0]);
+    const rollupStatus = newestCreated.status;
 
     const first = sorted[0];
     groups.push({

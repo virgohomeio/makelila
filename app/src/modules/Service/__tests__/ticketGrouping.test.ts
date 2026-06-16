@@ -41,24 +41,24 @@ describe('groupTicketsByCustomer', () => {
     expect(unassigned.map(t => t.id).sort()).toEqual(['t2', 't3']);
   });
 
-  it('counts open tickets and rolls up the most-urgent open status', () => {
+  it('counts open tickets and rolls up the most recently created ticket status', () => {
     const { groups } = groupTicketsByCustomer([
-      mk({ id: 't1', customer_id: 'c1', status: 'closed' }),
-      mk({ id: 't2', customer_id: 'c1', status: 'waiting_on_customer' }),
-      mk({ id: 't3', customer_id: 'c1', status: 'waiting_on_us' }),
+      mk({ id: 't1', customer_id: 'c1', status: 'waiting_on_us', created_at: '2026-06-01T00:00:00Z' }),
+      mk({ id: 't2', customer_id: 'c1', status: 'waiting_on_customer', created_at: '2026-06-05T00:00:00Z' }),
+      mk({ id: 't3', customer_id: 'c1', status: 'closed', created_at: '2026-06-03T00:00:00Z' }),
     ]);
     const g = groups[0];
     expect(g.openCount).toBe(2);
-    expect(g.rollupStatus).toBe('waiting_on_us'); // more urgent than waiting_on_customer
+    expect(g.rollupStatus).toBe('waiting_on_customer'); // status of the newest-created ticket (t2)
   });
 
-  it('rolls up to closed when every ticket is closed', () => {
+  it('rollup follows the newest ticket even when it is closed', () => {
     const { groups } = groupTicketsByCustomer([
-      mk({ id: 't1', customer_id: 'c1', status: 'closed' }),
-      mk({ id: 't2', customer_id: 'c1', status: 'closed' }),
+      mk({ id: 't1', customer_id: 'c1', status: 'waiting_on_us', created_at: '2026-06-01T00:00:00Z' }),
+      mk({ id: 't2', customer_id: 'c1', status: 'closed', created_at: '2026-06-09T00:00:00Z' }),
     ]);
-    expect(groups[0].openCount).toBe(0);
-    expect(groups[0].rollupStatus).toBe('closed');
+    expect(groups[0].openCount).toBe(1);
+    expect(groups[0].rollupStatus).toBe('closed'); // newest-created ticket is closed
   });
 
   it('sorts open profiles before all-closed profiles', () => {
