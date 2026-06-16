@@ -216,8 +216,8 @@ export type VerifyAddressResult = {
   google_formatted: string | null;
 };
 
-export async function confirmAddress(orderId: string): Promise<{ order_ref: string }> {
-  const { data, error } = await supabase.functions.invoke<{ order_ref: string }>(
+export async function confirmAddress(orderId: string): Promise<{ order_ref: string; already_confirmed: boolean }> {
+  const { data, error } = await supabase.functions.invoke<{ order_ref: string; already_confirmed: boolean }>(
     'confirm-address',
     { body: { order_id: orderId } },
   );

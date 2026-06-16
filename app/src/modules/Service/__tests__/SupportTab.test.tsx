@@ -1,6 +1,12 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render as rtlRender, screen, fireEvent } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
+import type { ReactElement } from 'react';
 import { SupportTab } from '../SupportTab';
+
+// SupportTab uses useNavigate (deep-link to replacement orders), so every
+// render needs a Router context.
+const render = (ui: ReactElement) => rtlRender(<MemoryRouter>{ui}</MemoryRouter>);
 import type { ServiceTicket } from '../../../lib/service';
 
 function mkTicket(partial: Partial<ServiceTicket> & { id: string }): ServiceTicket {
@@ -38,6 +44,9 @@ function mkTicket(partial: Partial<ServiceTicket> & { id: string }): ServiceTick
     sla_resolved_at: null,
     sla_status: null,
     root_cause: null,
+    linear_issue_url: null,
+    github_issue_url: null,
+    engineering_resolved_at: null,
     ...partial,
   };
 }

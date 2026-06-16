@@ -23,7 +23,7 @@ export default function ConfirmAddressPage() {
   }, [orderId]);
 
   return (
-    <FormLayout title="Address Confirmation">
+    <FormLayout title="Address Confirmation" intro="Confirming the shipping address on your LILA order.">
       {state === 'loading' && <p>Confirming your address…</p>}
       {state === 'confirmed' && (
         <>
