@@ -1,28 +1,32 @@
 import { useState, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import ReplacementPickerModal from './ReplacementPickerModal';
 import { useCustomers, sendFollowupSms } from '../../lib/customers';
 import {
   type ServiceTicket, type TicketStatus, type IssueArea, type TicketCategory,
   STATUS_META, CATEGORY_META, PRIORITY_META, NEXT_STATUSES, TICKET_STATUSES,
-  statusMeta, priorityMeta, sourceLabel, topicLabel,
+  statusMeta, priorityMeta, sourceLabel, topicLabel, slaChip,
   ISSUE_AREAS, ISSUE_AREA_LABEL,
   updateTicketStatus, assignTicketOwner, setTicketPriority, setTicketIssueArea, setTicketCategory,
-  setRepairFields, reclassifyTicket, deleteTicket, updateTicketSubject,
-  markDiagnosisLinkSent,
+  setRepairFields, reclassifyTicket, deleteTicket, updateTicketSubject, setTicketDescription,
+  markDiagnosisLinkSent, setLinearIssueUrl, setGitHubIssueUrl,
   useCustomerLifecycle, warrantyState,
   useTicketMessages, useClassificationLog,
+  autoTicketDescription,
 } from '../../lib/service';
 import { CANNED_SMS_TEMPLATES } from '../../lib/cannedSms';
+import { createLinearIssue, createGitHubIssue } from '../../lib/githubLinear';
 import { AttachmentStrip } from './AttachmentStrip';
 import { TicketNotes } from './TicketNotes';
+import { DeviceContextHeader } from '../../components/DeviceContextHeader';
 import styles from './Service.module.css';
 
 // Backlog #39 — keep in sync with public.team_invite_list. Aaron/Ashwini
 // were removed earlier (left the company); Lezhong + Pedrum added
-// 2026-06-04 matching the invite list. Julie was retired in the same pass —
-// re-add if she rejoins. Long-term this should query the invite list
-// directly instead of hard-coding (see also #72 — central template /
-// config store).
+// 2026-06-04 matching the invite list. Julie rejoined 2026-06-07 under
+// yueli@virgohome.io (her actual account — the prior julie@ guess never
+// existed). Long-term this should query the invite list directly instead
+// of hard-coding (see also #72 — central template / config store).
 const OPS_OWNERS = [
   'george@virgohome.io',
   'huayi@virgohome.io',
@@ -31,6 +35,7 @@ const OPS_OWNERS = [
   'pedrum@virgohome.io',
   'raymond@virgohome.io',
   'reina@virgohome.io',
+  'yueli@virgohome.io',
 ];
 
 type Props = {
@@ -39,6 +44,7 @@ type Props = {
 };
 
 export function TicketDetailPanel({ ticket, onClose }: Props) {
+  const navigate = useNavigate();
   const [defectCat, setDefectCat] = useState(ticket.defect_category ?? '');
   const [parts, setParts] = useState(ticket.parts_needed ?? '');
   const [busy, setBusy] = useState(false);
@@ -46,6 +52,8 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [editingSubject, setEditingSubject] = useState(false);
   const [subjectDraft, setSubjectDraft] = useState(ticket.subject);
+  const [editingDescription, setEditingDescription] = useState(false);
+  const [descriptionDraft, setDescriptionDraft] = useState(ticket.description ?? '');
   const [pickerOpen, setPickerOpen] = useState(false);
   // Backlog #75 — diagnosis-link send dialog state.
   const [diagOpen, setDiagOpen] = useState(false);
@@ -76,6 +84,20 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
     }
   }
 
+  async function saveDescription() {
+    const next = descriptionDraft.trim();
+    if (next === (ticket.description ?? '')) { setEditingDescription(false); return; }
+    setBusy(true); setError(null);
+    try {
+      await setTicketDescription(ticket.id, next);
+      setEditingDescription(false);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   // Backlog #75 — default body interpolates the customer's first name
   // from customer_name; falls back to "there" when name is missing so
   // the message still reads naturally. Operator can edit before sending.
@@ -84,6 +106,47 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
     return CANNED_SMS_TEMPLATES.diagnosis_call_request.body(fn);
   }, [ticket.customer_name]);
   const [diagBody, setDiagBody] = useState(diagDefaultBody);
+
+  // Feature 3 — "Link to engineering" dialog state.
+  const [linkOpen, setLinkOpen] = useState(false);
+  const [linkTarget, setLinkTarget] = useState<'linear' | 'github'>('linear');
+  const [linkTeamKey, setLinkTeamKey] = useState('VCY');
+  const [linkRepo, setLinkRepo] = useState('virgohomeio/lila-firmware');
+  const [linkTitle, setLinkTitle] = useState('');
+  const [linkBody, setLinkBody] = useState('');
+  const [linkSubmitting, setLinkSubmitting] = useState(false);
+
+  async function onOpenLinkDialog() {
+    setLinkTitle(ticket.subject);
+    setLinkBody(ticket.description ?? '');
+    setLinkOpen(true);
+  }
+
+  async function onSubmitLink() {
+    setLinkSubmitting(true); setError(null);
+    try {
+      if (linkTarget === 'linear') {
+        const { url } = await createLinearIssue(ticket, {
+          teamKey: linkTeamKey.trim(),
+          title: linkTitle.trim(),
+          description: linkBody.trim(),
+        });
+        await setLinearIssueUrl(ticket.id, url);
+      } else {
+        const { url } = await createGitHubIssue(ticket, {
+          repo: linkRepo.trim(),
+          title: linkTitle.trim(),
+          body: linkBody.trim(),
+        });
+        await setGitHubIssueUrl(ticket.id, url);
+      }
+      setLinkOpen(false);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setLinkSubmitting(false);
+    }
+  }
 
   async function onSendDiagnosisLink() {
     if (!ticket.customer_id) {
@@ -195,6 +258,16 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
         <button className={styles.detailClose} onClick={onClose}>✕</button>
       </div>
 
+      <DeviceContextHeader unitSerial={ticket.unit_serial} currentTicketId={ticket.id} />
+
+      {ticket.source === 'telemetry_auto' && (
+        <TelemetryAutoBanner ticket={ticket} />
+      )}
+
+      {ticket.sla_policy_id && (
+        <SlaDeadlines ticket={ticket} />
+      )}
+
       <div className={styles.detailBody}>
         <div className={styles.detailSection}>
           <div className={styles.detailSectionLabel}>Customer</div>
@@ -224,7 +297,10 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
           {ticket.replacement_order_id && ticket.replacement_order_id.length > 0 ? (
             <div className={styles.replacementLink}>
               Replacement order:&nbsp;
-              <a href="#/order-review">open in Order Review</a>
+              <a
+                href={`/order-review/${ticket.replacement_order_id}`}
+                onClick={e => { e.preventDefault(); navigate(`/order-review/${ticket.replacement_order_id}`); }}
+              >open in Order Review</a>
             </div>
           ) : (
             <button
@@ -253,6 +329,47 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
             >
               Send diagnosis link
             </button>
+          )}
+          {/* Feature 3 — engineering issue linking */}
+          {ticket.linear_issue_url ? (
+            <a
+              className={styles.replacementLink}
+              href={ticket.linear_issue_url}
+              target="_blank"
+              rel="noreferrer"
+              title="Open Linear issue"
+            >
+              Linear issue ↗
+            </a>
+          ) : ticket.github_issue_url ? (
+            <a
+              className={styles.replacementLink}
+              href={ticket.github_issue_url}
+              target="_blank"
+              rel="noreferrer"
+              title="Open GitHub issue"
+            >
+              GitHub issue ↗
+            </a>
+          ) : (
+            <button
+              type="button"
+              className={styles.replacementBtn}
+              disabled={busy}
+              onClick={() => void onOpenLinkDialog()}
+              title="Create a Linear or GitHub engineering issue from this ticket"
+            >
+              Link to engineering
+            </button>
+          )}
+          {ticket.engineering_resolved_at && !ticket.closed_at && (
+            <span
+              className={styles.replacementLink}
+              style={{ background: '#f0fff4', color: '#276749', padding: '2px 8px', borderRadius: 4, fontWeight: 600 }}
+              title={`Engineering resolved at ${new Date(ticket.engineering_resolved_at).toLocaleString()}`}
+            >
+              Engineering fixed — follow up with customer
+            </span>
           )}
         </div>
 
@@ -302,11 +419,103 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
             }}
             address={pickerAddress}
             onClose={() => setPickerOpen(false)}
-            onCreated={() => {
+            onCreated={(result) => {
               setPickerOpen(false);
-              window.location.hash = '#/order-review';
+              navigate(`/order-review/${result.id}`);
             }}
           />
+        )}
+
+        {linkOpen && (
+          <div className={styles.diagModalBackdrop} onClick={() => !linkSubmitting && setLinkOpen(false)}>
+            <div className={styles.diagModal} onClick={e => e.stopPropagation()}>
+              <div className={styles.diagModalTitle}>Link to engineering issue</div>
+              <div className={styles.diagModalMeta} style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+                  <input
+                    type="radio"
+                    name="linkTarget"
+                    value="linear"
+                    checked={linkTarget === 'linear'}
+                    onChange={() => setLinkTarget('linear')}
+                    disabled={linkSubmitting}
+                  />
+                  Linear
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+                  <input
+                    type="radio"
+                    name="linkTarget"
+                    value="github"
+                    checked={linkTarget === 'github'}
+                    onChange={() => setLinkTarget('github')}
+                    disabled={linkSubmitting}
+                  />
+                  GitHub
+                </label>
+              </div>
+              {linkTarget === 'linear' ? (
+                <div className={styles.diagModalMeta} style={{ marginBottom: 8 }}>
+                  <label style={{ display: 'block', fontSize: 11, marginBottom: 2 }}>Linear team key</label>
+                  <input
+                    className={styles.subjectEditInput}
+                    value={linkTeamKey}
+                    onChange={e => setLinkTeamKey(e.target.value)}
+                    disabled={linkSubmitting}
+                    placeholder="e.g. VCY"
+                    style={{ width: 100 }}
+                  />
+                </div>
+              ) : (
+                <div className={styles.diagModalMeta} style={{ marginBottom: 8 }}>
+                  <label style={{ display: 'block', fontSize: 11, marginBottom: 2 }}>GitHub repo (owner/repo)</label>
+                  <input
+                    className={styles.subjectEditInput}
+                    value={linkRepo}
+                    onChange={e => setLinkRepo(e.target.value)}
+                    disabled={linkSubmitting}
+                    placeholder="virgohomeio/lila-firmware"
+                    style={{ width: 260 }}
+                  />
+                </div>
+              )}
+              <div className={styles.diagModalMeta} style={{ marginBottom: 4 }}>
+                <label style={{ display: 'block', fontSize: 11, marginBottom: 2 }}>Issue title</label>
+                <input
+                  className={styles.subjectEditInput}
+                  value={linkTitle}
+                  onChange={e => setLinkTitle(e.target.value)}
+                  disabled={linkSubmitting}
+                  style={{ width: '100%' }}
+                />
+              </div>
+              <textarea
+                className={styles.diagModalTextarea}
+                value={linkBody}
+                onChange={e => setLinkBody(e.target.value)}
+                rows={4}
+                disabled={linkSubmitting}
+                placeholder="Description (optional — ticket number is always appended)"
+              />
+              <div className={styles.diagModalActions}>
+                <button
+                  type="button"
+                  className={styles.replacementBtn}
+                  disabled={linkSubmitting || !linkTitle.trim()}
+                  onClick={() => void onSubmitLink()}
+                >
+                  {linkSubmitting ? 'Creating…' : `Create ${linkTarget === 'linear' ? 'Linear' : 'GitHub'} issue`}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLinkOpen(false)}
+                  disabled={linkSubmitting}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
         )}
 
         {(ticket.topic || ticket.summary || ticket.suggested_next_action) && (
@@ -322,6 +531,12 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
             <div className={styles.detailFieldGrid}>
               <span className={styles.detailFieldLabel}>Topic</span>
               <span className={styles.detailFieldValue}>{ticket.topic ? topicLabel(ticket.topic) : '—'}</span>
+              {ticket.root_cause && (
+                <>
+                  <span className={styles.detailFieldLabel}>Root cause</span>
+                  <span className={styles.detailFieldValue}>{ticket.root_cause}</span>
+                </>
+              )}
               <span className={styles.detailFieldLabel}>Summary</span>
               <span className={styles.detailFieldValue}>{ticket.summary ?? '—'}</span>
               <span className={styles.detailFieldLabel}>Suggested action</span>
@@ -351,12 +566,41 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
           </div>
         )}
 
-        {ticket.description && (
-          <div className={styles.detailSection}>
-            <div className={styles.detailSectionLabel}>Description</div>
-            <div className={styles.detailValue}>{ticket.description}</div>
-          </div>
-        )}
+        <div className={styles.detailSection}>
+          <div className={styles.detailSectionLabel}>Description</div>
+          {editingDescription ? (
+            <div className={styles.subjectEditRow} style={{ flexDirection: 'column', alignItems: 'stretch', gap: 6 }}>
+              <textarea
+                className={styles.subjectEditInput}
+                value={descriptionDraft}
+                autoFocus
+                disabled={busy}
+                rows={4}
+                placeholder="Add a description…"
+                onChange={e => setDescriptionDraft(e.target.value)}
+              />
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button className={styles.btnPrimary} disabled={busy} onClick={() => void saveDescription()}>Save</button>
+                <button
+                  className={styles.btnSecondary}
+                  disabled={busy}
+                  onClick={() => { setDescriptionDraft(ticket.description ?? ''); setEditingDescription(false); }}
+                >Cancel</button>
+              </div>
+            </div>
+          ) : (
+            <div className={styles.detailValue}>
+              {ticket.description
+                ? ticket.description
+                : <span className={styles.muted}>No description yet</span>}
+              <button
+                className={styles.subjectEditBtn}
+                title={ticket.description ? 'Edit description' : 'Add description'}
+                onClick={() => { setDescriptionDraft(ticket.description ?? ''); setEditingDescription(true); }}
+              >✎</button>
+            </div>
+          )}
+        </div>
 
         {messages.length > 0 && (
           <div className={styles.detailSection}>
@@ -559,6 +803,117 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
 
         {error && <div style={{ color: 'var(--color-error)', fontSize: 11 }}>{error}</div>}
       </div>
+    </div>
+  );
+}
+
+// ============================================================ SLA deadlines block
+// Shown below DeviceContextHeader when a ticket has an SLA policy attached.
+
+const SLA_DEADLINE_COLORS: Record<string, { color: string; bg: string }> = {
+  green:  { color: '#276749', bg: '#f0fff4' },
+  amber:  { color: '#c05621', bg: '#fffaf0' },
+  red:    { color: '#c53030', bg: '#fff5f5' },
+  grey:   { color: '#718096', bg: '#edf2f7' },
+};
+
+function slaDeadlineColor(dueAt: string | null, respondedAt: string | null): 'green' | 'amber' | 'red' | 'grey' {
+  if (!dueAt) return 'grey';
+  if (respondedAt) return 'green';
+  const msRemaining = new Date(dueAt).getTime() - Date.now();
+  if (msRemaining < 0) return 'red';
+  if (msRemaining < 15 * 60 * 1000) return 'amber';
+  return 'green';
+}
+
+function relativeDeadline(isoStr: string | null): string {
+  if (!isoStr) return '—';
+  const ms = new Date(isoStr).getTime() - Date.now();
+  const absMin = Math.abs(ms) / 60_000;
+  const past = ms < 0;
+  const label = absMin < 60
+    ? `${Math.round(absMin)}m`
+    : absMin < 1440
+      ? `${Math.round(absMin / 60)}h`
+      : `${Math.round(absMin / 1440)}d`;
+  return past ? `${label} ago` : `in ${label}`;
+}
+
+function SlaDeadlines({ ticket }: { ticket: ServiceTicket }) {
+  const chip = slaChip(ticket);
+  const chipStyle = SLA_DEADLINE_COLORS[chip.color];
+  const frColor = SLA_DEADLINE_COLORS[slaDeadlineColor(ticket.first_response_due_at, ticket.first_responded_at)];
+  const resColor = SLA_DEADLINE_COLORS[slaDeadlineColor(ticket.resolution_due_at, ticket.sla_resolved_at)];
+
+  return (
+    <div style={{
+      display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center',
+      padding: '8px 16px', borderBottom: '1px solid var(--color-border)',
+      background: '#fafafa', fontSize: 12,
+    }}>
+      <span style={{
+        fontWeight: 700, padding: '2px 8px', borderRadius: 4,
+        background: chipStyle.bg, color: chipStyle.color,
+      }}>SLA: {chip.label}</span>
+
+      {ticket.first_response_due_at && (
+        <span style={{ color: frColor.color }}>
+          First response due:{' '}
+          <strong title={new Date(ticket.first_response_due_at).toLocaleString()}>
+            {new Date(ticket.first_response_due_at).toLocaleString()}
+          </strong>{' '}
+          <span style={{ fontStyle: 'italic' }}>({relativeDeadline(ticket.first_response_due_at)})</span>
+          {ticket.first_responded_at && ' ✓'}
+        </span>
+      )}
+
+      {ticket.resolution_due_at && (
+        <span style={{ color: resColor.color }}>
+          Resolution due:{' '}
+          <strong title={new Date(ticket.resolution_due_at).toLocaleString()}>
+            {new Date(ticket.resolution_due_at).toLocaleString()}
+          </strong>{' '}
+          <span style={{ fontStyle: 'italic' }}>({relativeDeadline(ticket.resolution_due_at)})</span>
+          {ticket.sla_resolved_at && ' ✓'}
+        </span>
+      )}
+    </div>
+  );
+}
+
+// ---- TelemetryAutoBanner ----
+// Shown at the top of the detail panel when ticket.source === 'telemetry_auto'.
+// Extracts the state and duration from the ticket description; falls back to
+// a generic banner if the description does not match the auto-generated format.
+
+function TelemetryAutoBanner({ ticket }: { ticket: ServiceTicket }) {
+  // The auto-create cron writes the description in a known format:
+  // "Auto-created by telemetry monitor. Unit X has been in state STATE since ..."
+  const stateMatch = ticket.description?.match(/state\s+(\S+)\s+since/);
+  const classifiedState = stateMatch?.[1] ?? 'UNKNOWN';
+
+  // Compute the hold duration from created_at (best proxy when no state_held_since
+  // is stored on the ticket row itself).
+  const createdMs = new Date(ticket.created_at).getTime();
+  const heldHours = Math.round((Date.now() - createdMs) / 3_600_000);
+  const durationStr = heldHours >= 24
+    ? `${Math.floor(heldHours / 24)}d ${heldHours % 24}h`
+    : `${heldHours}h`;
+
+  const desc = ticket.description
+    ? autoTicketDescription(classifiedState, ticket.created_at)
+    : `Auto-created from telemetry — unit held ${classifiedState}.`;
+
+  return (
+    <div className={styles.telemetryAutoBanner}>
+      <strong>Telemetry auto-created</strong>
+      {' — '}unit held <strong>{classifiedState}</strong> for{' '}
+      <strong>{durationStr}</strong>.
+      {ticket.description && (
+        <div className={styles.telemetryAutoBannerDetail}>
+          {desc}
+        </div>
+      )}
     </div>
   );
 }

@@ -21,10 +21,19 @@ export function UnitsTab() {
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>('all');
   const [statusFilter, setStatusFilter] = useState<UnitStatus | null>(null);
   const [search, setSearch] = useState('');
+  const [suspectFilter, setSuspectFilter] = useState(false);
+
+  // Suspect: ready units with a customer name stamped — likely a state mismatch
+  // (unit was assigned/shipped but status wasn't updated in makelila).
+  const suspectCount = useMemo(
+    () => units.filter(u => u.status === 'ready' && !!u.customer_name).length,
+    [units],
+  );
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return units.filter(u => {
+      if (suspectFilter && !(u.status === 'ready' && !!u.customer_name)) return false;
       if (batchFilter && u.batch !== batchFilter) return false;
       if (statusFilter && u.status !== statusFilter) return false;
       if (categoryFilter !== 'all' && getStatusMeta(u.status).category !== categoryFilter) return false;
@@ -37,7 +46,7 @@ export function UnitsTab() {
       )) return false;
       return true;
     });
-  }, [units, batchFilter, statusFilter, categoryFilter, search]);
+  }, [units, batchFilter, statusFilter, categoryFilter, search, suspectFilter]);
 
   if (bLoading || uLoading) return <div className={styles.loading}>Loading stock…</div>;
 
@@ -86,6 +95,19 @@ export function UnitsTab() {
             );
           })}
         </div>
+
+        {suspectCount > 0 && (
+          <div className={styles.filterGroup}>
+            <span className={styles.filterLabel}>Alerts:</span>
+            <button
+              onClick={() => setSuspectFilter(prev => !prev)}
+              className={`${styles.chip} ${suspectFilter ? styles.chipSuspect : ''}`}
+              title="Ready units with a customer name — likely state mismatch. Correct status via the dropdown."
+            >
+              ⚠ Suspect ({suspectCount})
+            </button>
+          </div>
+        )}
 
         <input
           type="search"

@@ -3,15 +3,26 @@ import {
   useFactoryOrders, useFreightShipments, useBuildDefects, useBurnInTests,
   assignSerial,
 } from '../../lib/build';
-import { useUnits } from '../../lib/stock';
+import { useUnits, useBatches } from '../../lib/stock';
+import { useReplacementOrders } from '../../lib/orders';
+import { replacementUnitDemandByBatch } from '../../lib/replacementTags';
 import { PipelineBoard } from './PipelineBoard';
 import { TableView } from './TableView';
 import { NewPOModal } from './NewPOModal';
+import { BuildQCDashboard } from './BuildQCDashboard';
+import { useIsMobile } from '../../lib/useMediaQuery';
+import { MobileTabbedModule, type MobileTab } from '../../components/MobileTabbedModule';
 import styles from './Build.module.css';
 
-type View = 'board' | 'table';
-const BATCH_FILTERS = ['all', 'P50N', 'P100', 'P100X', 'P200'] as const;
+type View = 'board' | 'table' | 'qc';
+const BATCH_FILTERS = ['all', 'P50N', 'P100', 'P100X', 'P150', 'P200'] as const;
 type BatchFilter = typeof BATCH_FILTERS[number];
+
+function qcDateRange(days = 30) {
+  const to = new Date();
+  const from = new Date(to.getTime() - days * 24 * 60 * 60 * 1000);
+  return { from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10) };
+}
 
 export default function Build() {
   const { orders, loading: oLoading } = useFactoryOrders();
@@ -19,10 +30,41 @@ export default function Build() {
   const { defects, loading: dLoading } = useBuildDefects();
   const { tests, loading: tLoading } = useBurnInTests();
   const { units, loading: uLoading } = useUnits();
+  const { batches } = useBatches();
+  const { orders: replacementOrders } = useReplacementOrders();
   const [view, setView] = useState<View>('board');
   const [batchFilter, setBatchFilter] = useState<BatchFilter>('all');
   const [search, setSearch] = useState('');
+  const isMobile = useIsMobile();
   const [showNewPO, setShowNewPO] = useState(false);
+  const [poPrefill, setPoPrefill] = useState<{ batch: string; qty_ordered: number } | null>(null);
+
+  // Replacement units still needed that we have no stock of → "To Build".
+  // toBuild = queued unit demand (Service > Replacement) − ready stock, per
+  // batch. P100X / not-yet-arrived batches are flagged so they queue separately.
+  const buildDemand = useMemo(() => {
+    const demand = replacementUnitDemandByBatch(replacementOrders);
+    const readyByBatch = new Map<string, number>();
+    for (const u of units) if (u.status === 'ready') readyByBatch.set(u.batch, (readyByBatch.get(u.batch) ?? 0) + 1);
+    const pending = new Set(batches.filter(b => b.arrived_at == null).map(b => b.id));
+    const known = new Set(batches.map(b => b.id));
+    return [...demand.entries()]
+      .map(([batch, d]) => ({
+        batch,
+        toBuild: Math.max(0, d - (readyByBatch.get(batch) ?? 0)),
+        isNextBatch: pending.has(batch) || !known.has(batch),
+      }))
+      .filter(r => r.toBuild > 0);
+  }, [replacementOrders, units, batches]);
+
+  function startPO(batch: string, qty: number) {
+    setPoPrefill({ batch, qty_ordered: qty });
+    setShowNewPO(true);
+  }
+  function closeNewPO() {
+    setShowNewPO(false);
+    setPoPrefill(null);
+  }
   const [showClaimSerial, setShowClaimSerial] = useState<{ batch: string } | null>(null);
   const [claimSerial, setClaimSerial] = useState('');
   const [claimBusy, setClaimBusy] = useState(false);
@@ -61,6 +103,71 @@ export default function Build() {
 
   const loading = oLoading || sLoading || dLoading || tLoading || uLoading;
 
+  // Mobile: hide the KPI strip + filter row (they wrap awkwardly on 375px)
+  // and present the Pipeline Board / Table View toggle as two NavCards.
+  // Search lives in each tab's own header.
+  if (isMobile) {
+    const mobileTabs: MobileTab<View>[] = [
+      {
+        key: 'board',
+        label: 'Pipeline Board',
+        subtitle: 'Kanban across PO → production → ship → CA-test',
+        icon: '🏗️',
+        iconBg: '#e6f4ea',
+        content: loading
+          ? <div className={styles.loading}>Loading Build pipeline…</div>
+          : <PipelineBoard
+              orders={orders}
+              shipments={shipments}
+              defects={defects}
+              tests={tests}
+              units={units}
+              batchFilter={batchFilter}
+              search={search}
+              buildDemand={buildDemand}
+              onStartPO={startPO}
+            />,
+      },
+      {
+        key: 'table',
+        label: 'Table View',
+        subtitle: 'Sortable list of all units in-flight',
+        icon: '📋',
+        iconBg: '#e3f0fb',
+        content: loading
+          ? <div className={styles.loading}>Loading Build pipeline…</div>
+          : <TableView
+              orders={orders}
+              shipments={shipments}
+              defects={defects}
+              tests={tests}
+              units={units}
+              batchFilter={batchFilter}
+              search={search}
+            />,
+      },
+      {
+        key: 'qc' as View,
+        label: 'QC Dashboard',
+        subtitle: 'First-pass yield, defects by station and technician',
+        icon: '🔬',
+        iconBg: '#f0fff4',
+        content: <BuildQCDashboard
+          batch={batchFilter !== 'all' ? batchFilter : undefined}
+          dateRange={qcDateRange()}
+        />,
+      },
+    ];
+    return (
+      <>
+        <div className={styles.layout}>
+          <MobileTabbedModule tabs={mobileTabs} />
+        </div>
+        {showNewPO && <NewPOModal prefill={poPrefill ?? undefined} onClose={closeNewPO} />}
+      </>
+    );
+  }
+
   return (
     <>
     <div className={styles.layout}>
@@ -97,12 +204,16 @@ export default function Build() {
               className={`${styles.chip} ${view === 'table' ? styles.chipActive : ''}`}
               onClick={() => setView('table')}
             >Table</button>
+            <button
+              className={`${styles.chip} ${view === 'qc' ? styles.chipActive : ''}`}
+              onClick={() => setView('qc')}
+            >QC Dashboard</button>
           </div>
-          <button className={styles.btnPrimary} onClick={() => setShowNewPO(true)}>+ New PO</button>
+          <button className={styles.btnPrimary} onClick={() => { setPoPrefill(null); setShowNewPO(true); }}>+ New PO</button>
           <button className={styles.btnSecondary} onClick={() => { setShowClaimSerial({ batch: 'P100' }); setClaimSerial(''); setClaimError(null); }}>+ Claim serial</button>
         </div>
       </div>
-      {loading ? (
+      {loading && view !== 'qc' ? (
         <div className={styles.loading}>Loading Build pipeline…</div>
       ) : view === 'board' ? (
         <PipelineBoard
@@ -113,8 +224,10 @@ export default function Build() {
           units={units}
           batchFilter={batchFilter}
           search={search}
+          buildDemand={buildDemand}
+          onStartPO={startPO}
         />
-      ) : (
+      ) : view === 'table' ? (
         <TableView
           orders={orders}
           shipments={shipments}
@@ -124,9 +237,14 @@ export default function Build() {
           batchFilter={batchFilter}
           search={search}
         />
+      ) : (
+        <BuildQCDashboard
+          batch={batchFilter !== 'all' ? batchFilter : undefined}
+          dateRange={qcDateRange()}
+        />
       )}
     </div>
-    {showNewPO && <NewPOModal onClose={() => setShowNewPO(false)} />}
+    {showNewPO && <NewPOModal prefill={poPrefill ?? undefined} onClose={closeNewPO} />}
     {showClaimSerial && (
       <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
            onClick={() => setShowClaimSerial(null)}>
@@ -140,7 +258,7 @@ export default function Build() {
               value={showClaimSerial.batch}
               onChange={e => setShowClaimSerial({ batch: e.target.value })}
             >
-              {(['P50N', 'P100', 'P100X', 'P200'] as const).map(b => (
+              {(['P50N', 'P100', 'P100X', 'P150', 'P200'] as const).map(b => (
                 <option key={b} value={b}>{b}</option>
               ))}
             </select>

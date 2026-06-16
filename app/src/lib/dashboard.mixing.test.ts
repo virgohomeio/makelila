@@ -8,7 +8,14 @@ import {
   type LiveSample,
 } from './dashboard';
 
-const NOW = new Date('2026-06-04T12:00:00Z').getTime();
+// NOW is anchored to runtime instead of a hardcoded date so the 48h
+// MIX_WINDOW_HOURS filter in detectSideMixing keeps the test fixtures
+// in-window as wall-clock time advances. Previously hardcoded to
+// 2026-06-04T12:00:00Z which silently rotted into the past and broke
+// the NOT_MIXING cross-check test once real-now moved >48h past that
+// date — blocked the CI deploy pipeline 2026-06-07 (8 consecutive
+// failed deploys until this fix).
+const NOW = Date.now();
 const MIN = 60_000;
 const HOUR = 3_600_000;
 

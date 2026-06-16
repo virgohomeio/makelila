@@ -38,7 +38,7 @@ export default function Queue() {
     return m;
   }, [orders]);
 
-  const rows = useMemo(() => {
+  const { readyRows, shippedRows } = useMemo(() => {
     const byRef = (a: FulfillmentQueueRow, b: FulfillmentQueueRow) => {
       const refA = orderLookup.get(a.order_id)?.order_ref ?? '';
       const refB = orderLookup.get(b.order_id)?.order_ref ?? '';
@@ -49,8 +49,10 @@ export default function Queue() {
       if (a.priority !== b.priority) return a.priority ? -1 : 1;
       return byRef(a, b);
     });
-    return [...readySorted, ...[...fulfilled].sort(byRef)];
+    return { readyRows: readySorted, shippedRows: [...fulfilled].sort(byRef) };
   }, [ready, fulfilled, orderLookup]);
+
+  const allRows = useMemo(() => [...readyRows, ...shippedRows], [readyRows, shippedRows]);
 
   // Fetch orders referenced by the queue rows (one-shot; orders rarely change once approved)
   useEffect(() => {
@@ -73,13 +75,14 @@ export default function Queue() {
     if (!selectedId && ready.length > 0) setSelectedId(ready[0].id);
   }, [ready, selectedId]);
 
-  const selected = rows.find(r => r.id === selectedId) ?? null;
+  const selected = allRows.find(r => r.id === selectedId) ?? null;
   const selectedOrder = selected ? orderLookup.get(selected.order_id) : null;
 
   return (
     <div className={styles.queueLayout}>
       <QueueSidebar
-        rows={rows}
+        readyRows={readyRows}
+        shippedRows={shippedRows}
         orderLookup={orderLookup}
         selectedId={selectedId}
         onSelect={setSelectedId}

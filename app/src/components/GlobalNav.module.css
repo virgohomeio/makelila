@@ -7,7 +7,11 @@
   border-radius: var(--radius-lg) var(--radius-lg) 0 0;
   height: var(--nav-height);
   width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
 }
+.nav::-webkit-scrollbar { display: none; }
 
 .brand {
   display: flex;
@@ -17,6 +21,12 @@
   border-right: 1px solid var(--color-dark-3);
   margin-right: 8px;
   color: #fff;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.brand:hover .brandWordmark {
+  color: var(--color-crimson-dark);
 }
 
 .brandLogo {
@@ -61,3 +71,49 @@
 }
 
 .spacer { flex: 1; }
+
+/* ============================================================
+ * Mobile drilldown nav (2026-06-07 redesign, backlog #80)
+ * Under 700px the desktop horizontal module strip is replaced
+ * by the MobileHome card list at `/`. The nav bar shrinks to
+ * brand-link-home + UserBadge. Module links are hidden — users
+ * navigate via the home card list and the brand-as-back-link.
+ *
+ *   .brandWordmark visible (user wants "makelila" prominent on phone)
+ *   .item hidden (drilldown replaces in-nav module switching)
+ * ============================================================ */
+@media (max-width: 700px) {
+  .nav {
+    padding: 0 12px;
+    border-radius: 0;
+    /* iOS notch breathing room. */
+    padding-left: max(12px, env(safe-area-inset-left));
+    padding-right: max(12px, env(safe-area-inset-right));
+  }
+
+  .brand {
+    padding-right: 12px;
+    margin-right: 0;
+    flex-shrink: 0;
+    border-right: none;
+  }
+
+  .brandWordmark {
+    display: inline;
+    font-size: 18px;
+  }
+
+  .item {
+    display: none;
+  }
+
+  .spacer { flex: 1; }
+}
+
+/* Coarse-pointer (touch) devices — hover styles never trigger, so the
+ * "inactive item" color stays at #888 forever. Bump it brighter so
+ * inactive items are still legible at arm's length. */
+@media (hover: none) {
+  .item { color: #b0b0b0; }
+  .item:hover { color: #b0b0b0; }
+}

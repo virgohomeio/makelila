@@ -8,8 +8,13 @@ build/
 *.tsbuildinfo
 
 # Environment
+.env
 .env.local
 .env.*.local
+
+# Local MCP server registrations (project-scoped Claude Code config).
+# Contains machine-local absolute paths so doesn't belong in git.
+.mcp.json
 
 # Supabase
 supabase/.temp/
@@ -50,3 +55,8 @@ fulfillment records/
 # app/index.html — the Vite entry — is still tracked).
 /index.html
 /makelila-app.html
+# 2026-06-08: lila-follow-up-calendar.html bundles 100+ customer names,
+# emails, phones, and operator notes inline. Removed from HEAD but persists
+# in commit 27668ce — a future history-scrub PR can purge if compliance
+# posture requires it.
+/lila-follow-up-calendar.html

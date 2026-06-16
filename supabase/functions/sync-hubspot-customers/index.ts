@@ -22,6 +22,9 @@ type HubspotContact = {
     state?: string | null;
     zip?: string | null;
     country?: string | null;
+    hs_analytics_source?: string | null;
+    hs_analytics_source_data_1?: string | null;
+    createdate?: string | null;
     [k: string]: string | null | undefined;
   };
 };
@@ -29,6 +32,7 @@ type HubspotContact = {
 const PROPERTIES = [
   'email', 'firstname', 'lastname', 'phone',
   'address', 'city', 'state', 'zip', 'country',
+  'hs_analytics_source', 'hs_analytics_source_data_1', 'createdate',
 ];
 const PAGE_SIZE = 100;
 const MAX_PAGES = 50; // soft cap = 5,000 contacts per run
@@ -148,6 +152,19 @@ function parseAddress(addr: string | null | undefined): {
   }
 
   return { city: null, region: null, postal_code: null, country: null };
+}
+
+function mapHubspotSource(hsSource: string | null): string | null {
+  if (!hsSource) return null;
+  const MAP: Record<string, string> = {
+    PAID_SOCIAL:      'facebook',
+    ORGANIC_SEARCH:   'organic_search',
+    EMAIL_MARKETING:  'email',
+    DIRECT_TRAFFIC:   'direct',
+    PAID_SEARCH:      'google_ads',
+    REFERRALS:        'referral',
+  };
+  return MAP[hsSource] ?? hsSource.toLowerCase();
 }
 
 Deno.serve(async (req: Request) => {
@@ -307,11 +324,41 @@ async function handle(req: Request): Promise<Response> {
           byHubspot.set(c.id, row);
           if (row.email) byEmail.set(row.email.toLowerCase(), row);
         }
+        // Backfill first_touch attribution for newly-inserted customer.
+        const hsSource = p.hs_analytics_source ?? null;
+        const hsCampaign = p.hs_analytics_source_data_1 ?? null;
+        const hsCreatedAt = p.createdate ?? null;
+        if (hsSource && row?.id) {
+          await admin
+            .from('customers')
+            .update({
+              first_touch_source: mapHubspotSource(hsSource),
+              first_touch_campaign_id: hsCampaign,
+              first_touch_at: hsCreatedAt,
+            })
+            .eq('id', row.id)
+            .is('first_touch_source', null);
+        }
         continue;
       }
 
       // Existing row: fill only blank columns, adopt hubspot_id if missing,
       // always refresh last_synced_at so the UI reflects a live sync.
+      // Also backfill first_touch attribution if not yet set.
+      const hsSource = p.hs_analytics_source ?? null;
+      const hsCampaign = p.hs_analytics_source_data_1 ?? null;
+      const hsCreatedAt = p.createdate ?? null;
+      if (hsSource) {
+        await admin
+          .from('customers')
+          .update({
+            first_touch_source: mapHubspotSource(hsSource),
+            first_touch_campaign_id: hsCampaign,
+            first_touch_at: hsCreatedAt,
+          })
+          .eq('id', existing.id)
+          .is('first_touch_source', null);
+      }
       const patch: Record<string, string | null> = { last_synced_at: now };
       let fillCount = 0;
       for (const col of FILLABLE) {

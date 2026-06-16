@@ -31,6 +31,13 @@
   min-height: calc(100vh - 200px);
 }
 
+.tabDivider {
+  width: 1px;
+  background: var(--color-dark-3, #333);
+  margin: 8px 4px;
+  align-self: stretch;
+}
+
 .queueLayout {
   display: grid;
   grid-template-columns: 280px 1fr;
@@ -41,6 +48,17 @@
   border-radius: var(--radius-sm);
   overflow: hidden;
   background: #fff;
+}
+
+/* Mobile: stack sidebar above detail. Borders dropped at edge-to-edge. */
+@media (max-width: 700px) {
+  .queueLayout {
+    display: block;
+    height: auto;
+    min-height: 0;
+    border: none;
+    border-radius: 0;
+  }
 }
 
 .sidebar {
@@ -57,6 +75,35 @@
   color: #aaa;
   letter-spacing: 0.5px;
   border-bottom: 1px solid var(--color-dark-3);
+}
+
+.sidebarTabs {
+  display: flex;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--color-dark-3);
+}
+
+.sidebarTab {
+  flex: 1;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: #888;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  padding: 11px 6px;
+  cursor: pointer;
+  text-align: center;
+  transition: color 0.12s;
+  margin-bottom: -1px;
+}
+
+.sidebarTab:hover { color: #ccc; }
+
+.sidebarTab.activeTab {
+  color: #fff;
+  border-bottom: 2px solid var(--color-crimson);
 }
 
 .queueRow {

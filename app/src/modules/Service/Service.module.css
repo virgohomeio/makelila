@@ -156,6 +156,20 @@
   flex-direction: column;
   overflow: hidden;
 }
+
+/* Mobile: 480px doesn't fit on a 375px phone. Take the full viewport so the
+ * ticket detail isn't clipped, drop the left border + shadow that look wrong
+ * at edge-to-edge, and respect safe-area-inset-top so the header doesn't
+ * crowd the iPhone notch. */
+@media (max-width: 700px) {
+  .detailOverlay {
+    width: 100%;
+    left: 0;
+    border-left: none;
+    box-shadow: none;
+    padding-top: env(safe-area-inset-top);
+  }
+}
 .detailHead {
   padding: 14px 18px;
   border-bottom: 1px solid var(--color-border);
@@ -843,6 +857,33 @@
   cursor: help;
 }
 
+/* Replacement item + stage tags (spec 2026-06-08) */
+.tagRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+.itemTag {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: #edf2f7;
+  color: #2d3748;
+  font-size: 0.7rem;
+  font-weight: 500;
+}
+.stageTag {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+.stageTag[data-stage='Unit'] { background: #e6fffa; color: #2c7a7b; }
+.stageTag[data-stage='awaiting batch'] { background: #fef3c7; color: #b7791f; }
+.stageTag[data-stage='Parts/Consumables'] { background: #ebf8ff; color: #2b6cb0; }
+
 /* Backlog #41 — triage candidates section on the Replacement tab */
 .triageSection {
   background: #fffbeb;
@@ -962,4 +1003,121 @@
 .attachFileWrap {
   position: relative;
   display: inline-block;
+}
+
+/* J6: Telemetry auto badge — amber pill shown in source column */
+.telemetryAutoBadge {
+  display: inline-block;
+  background: #fffaf0;
+  color: #c05621;
+  border: 1px solid #fbd38d;
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.telemetryAutoBanner {
+  margin: 8px 0;
+  padding: 10px 14px;
+  background: #fffaf0;
+  border-left: 4px solid #c05621;
+  border-radius: 4px;
+  font-size: 13px;
+  color: #7b341e;
+}
+.telemetryAutoBannerDetail {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #9c4221;
+  opacity: 0.85;
+}
+
+/* Queued replacement demand vs supply (Service > Replacement, top section) */
+.replSupplyPanel {
+  margin: 0 0 16px 0;
+  padding: 12px 14px;
+  background: #f7fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+}
+.replSupplyHeader {
+  font-size: 13px;
+  font-weight: 700;
+  color: #1a202c;
+  margin-bottom: 8px;
+}
+.replSupplySub {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #718096;
+  margin: 10px 0 6px;
+}
+.replSupplyKpis {
+  display: flex;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+.replSupplyKpi { min-width: 120px; }
+.replSupplyKpiValue {
+  font-size: 22px;
+  font-weight: 700;
+  color: #1a202c;
+  line-height: 1.1;
+}
+.replSupplyKpiLabel {
+  font-size: 11px;
+  color: #718096;
+  margin-top: 2px;
+}
+.replSupplyWarn { color: #c53030; }
+.replSupplyTable {
+  width: auto;
+  border-collapse: collapse;
+  font-size: 12px;
+  margin-top: 4px;
+}
+.replSupplyTable th,
+.replSupplyTable td {
+  text-align: left;
+  padding: 4px 18px 4px 0;
+  border-bottom: 1px solid #edf2f7;
+}
+.replSupplyTable th { font-weight: 600; color: #718096; }
+
+/* Side-by-side LILA Units / Parts & Consumables in the demand panel */
+.replSupplyCols {
+  display: flex;
+  gap: 40px;
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+.replSupplyCol {
+  flex: 1;
+  min-width: 260px;
+}
+
+/* ── #87 post-onboarding follow-up email form ── */
+.followupForm {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  background: #f7fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: var(--radius-md, 6px);
+  font-size: 12px;
+  max-width: 360px;
+}
+.followupTo { color: var(--color-ink-muted); margin-bottom: 2px; }
+.followupBullet {
+  width: 100%;
+  padding: 3px 6px;
+  font-size: 12px;
+  border: 1px solid #cbd5e0;
+  border-radius: 4px;
+  background: #fff;
+  box-sizing: border-box;
 }

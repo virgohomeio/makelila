@@ -1,0 +1,1071 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LILA Pro & Lovely App — Customer Journey Maps</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background: #f5f3f0; color: #2d2d2d; }
+
+  /* ===== TOP BAR ===== */
+  .top-bar { background: #1a1a2e; color: #fff; padding: 12px 28px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 200; }
+  .top-bar-left h1 { font-size: 17px; font-weight: 700; letter-spacing: .3px; }
+  .top-bar-left .subtitle { font-size: 10px; opacity: .65; margin-top: 2px; }
+  .legend { display: flex; gap: 16px; font-size: 11px; align-items: center; flex-wrap: wrap; }
+  .legend-dot { width: 12px; height: 12px; border-radius: 3px; display: inline-block; margin-right: 4px; vertical-align: middle; }
+  .dot-original { background: #fff; border: 1.5px solid #bbb; }
+  .dot-suggested { background: #ffe066; border: 1.5px dashed #c9a800; }
+  .dot-feedback { background: #74b9ff; border: 1.5px solid #0984e3; }
+
+  /* ===== TAB BAR ===== */
+  .tab-bar { background: #12122a; display: flex; align-items: center; padding: 0 20px; position: sticky; top: 56px; z-index: 190; border-bottom: 2px solid #2d2d4e; gap: 4px; }
+  .tab-btn {
+    padding: 11px 22px;
+    border: none;
+    background: transparent;
+    color: rgba(255,255,255,0.5);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    border-bottom: 3px solid transparent;
+    margin-bottom: -2px;
+    transition: all 0.2s;
+    letter-spacing: .3px;
+    white-space: nowrap;
+  }
+  .tab-btn:hover { color: rgba(255,255,255,0.8); }
+  .tab-btn.active { color: #fff; border-bottom-color: #27ae60; }
+  .tab-btn.active.app-tab { border-bottom-color: #a29bfe; }
+  .tab-icon { margin-right: 7px; }
+
+  /* ===== TAB PANELS ===== */
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+
+  /* ===== SHARED LAYOUT ===== */
+  .scroll-hint { text-align: center; padding: 7px; font-size: 11px; color: #999; background: #f5f3f0; border-bottom: 1px solid #eee; }
+  .layout { display: flex; min-height: calc(100vh - 90px); }
+
+  /* ===== PERSONA SIDEBAR ===== */
+  .persona { width: 270px; min-width: 270px; background: #fff; border-right: 1px solid #ddd; padding: 22px 18px; position: sticky; top: 90px; height: calc(100vh - 90px); overflow-y: auto; }
+  .persona h2 { font-size: 14px; margin-bottom: 5px; }
+  .persona h3 { font-size: 18px; margin-bottom: 12px; }
+  .persona-section { margin-bottom: 14px; }
+  .persona-section h4 { font-size: 10px; text-transform: uppercase; letter-spacing: .8px; color: #888; margin-bottom: 5px; }
+  .persona-section p, .persona-section li { font-size: 12.5px; line-height: 1.5; color: #444; }
+  .persona-section ul { padding-left: 15px; }
+  .persona-avatar { width: 58px; height: 58px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 26px; margin-bottom: 10px; }
+  .avatar-lila { background: linear-gradient(135deg, #27ae60, #6c5ce7); }
+  .avatar-lovely { background: linear-gradient(135deg, #a29bfe, #fd79a8); }
+
+  /* ===== MAIN JOURNEY GRID ===== */
+  .main { flex: 1; overflow-x: auto; padding: 0; }
+  .journey-grid { display: grid; min-width: 2900px; }
+  .journey-grid-lila { grid-template-columns: 195px repeat(10, minmax(270px, 1fr)); }
+  .journey-grid-lovely { grid-template-columns: 195px repeat(10, minmax(270px, 1fr)); }
+
+  /* ===== STAGE HEADERS ===== */
+  .stage-header { padding: 13px 10px; text-align: center; border-bottom: 3px solid rgba(0,0,0,.1); }
+  .stage-header h3 { font-size: 12px; font-weight: 700; margin-bottom: 3px; }
+  .stage-header p { font-size: 9.5px; opacity: .78; line-height: 1.3; }
+
+  /* LILA Pro stage colors */
+  .hdr-awareness { background: #ffeaa7; }
+  .hdr-consideration { background: #fab1a0; }
+  .hdr-conversion { background: #ff7675; color: #fff; }
+  .hdr-shipping { background: #74b9ff; color: #fff; }
+  .hdr-unboxing { background: #a29bfe; color: #fff; }
+  .hdr-setup { background: #55efc4; }
+  .hdr-routine { background: #81ecec; }
+  .hdr-failure { background: #e17055; color: #fff; }
+  .hdr-eol { background: #636e72; color: #fff; }
+  .hdr-promotion { background: #00b894; color: #fff; }
+
+  /* Lovely App stage colors */
+  .hdr-discovery { background: #fdcb6e; }
+  .hdr-onboarding { background: #a29bfe; color: #fff; }
+  .hdr-daily { background: #00cec9; color: #fff; }
+  .hdr-impact { background: #55efc4; }
+  .hdr-referral { background: #ffeaa7; }
+  .hdr-buyback { background: #27ae60; color: #fff; }
+  .hdr-genai { background: #6c5ce7; color: #fff; }
+  .hdr-local { background: #badc58; }
+  .hdr-subscription { background: #fd9644; color: #fff; }
+  .hdr-advocacy { background: #fd79a8; color: #fff; }
+
+  /* ===== ROW LABELS ===== */
+  .row-label { background: #fff; padding: 10px 9px; border-bottom: 1px solid #eee; border-right: 2px solid #ddd; position: sticky; left: 0; z-index: 5; overflow-wrap: break-word; }
+  .row-label h4 { font-size: 11.5px; font-weight: 700; color: #2d3436; margin-bottom: 2px; }
+  .row-label p { font-size: 9.5px; color: #888; line-height: 1.3; }
+
+  /* ===== CELLS ===== */
+  .cell { padding: 9px 7px; border-bottom: 1px solid #eee; border-right: 1px solid #f0f0f0; background: #fafaf8; min-height: 85px; overflow: visible; }
+  .cell:hover { background: #f0eee8; }
+
+  /* ===== NOTES ===== */
+  .note { padding: 7px 9px; border-radius: 4px; font-size: 11.5px; line-height: 1.45; margin-bottom: 5px; box-shadow: 1px 1px 3px rgba(0,0,0,.08); position: relative; cursor: default; word-wrap: break-word; }
+  .note:last-child { margin-bottom: 0; }
+  .note-action { background: #ffeaa7; border-left: 3px solid #f9ca24; }
+  .note-thought { background: #dfe6e9; border-left: 3px solid #74b9ff; }
+  .note-need { background: #c8f7c5; border-left: 3px solid #27ae60; }
+  .note-pain { background: #fab1a0; border-left: 3px solid #e74c3c; }
+  .note-touch { background: #e8daef; border-left: 3px solid #8e44ad; }
+
+  /* Lovely App note accents */
+  .note-action-a { background: #ffeaa7; border-left: 3px solid #fdcb6e; }
+  .note-touch-a { background: #dfe6fd; border-left: 3px solid #a29bfe; }
+  .note-need-a { background: #d4f4e8; border-left: 3px solid #00b894; }
+  .note-pain-a { background: #ffe0e8; border-left: 3px solid #fd79a8; }
+  .note-thought-a { background: #e8e4f9; border-left: 3px solid #6c5ce7; }
+
+  .suggested { border-style: dashed !important; opacity: .88; padding-right: 22px !important; }
+  .suggested::after { content: "💡"; position: absolute; top: 3px; right: 4px; font-size: 10px; }
+  .feedback { background: #dfe6fd !important; border-left-color: #0984e3 !important; padding-right: 22px !important; }
+  .feedback::after { content: "📣"; position: absolute; top: 3px; right: 4px; font-size: 10px; }
+  .fb-pedrum { border-right: 2px solid #e17055; }
+  .fb-ashwini { border-right: 2px solid #6c5ce7; }
+  .src { font-size: 9px; color: #666; font-style: italic; display: block; margin-top: 3px; }
+
+  /* ===== EMOTION ROW ===== */
+  .emotion-row { grid-column: 1 / -1; background: #fff; padding: 18px 18px 10px 18px; border-top: 2px solid #ddd; }
+  .emotion-title { font-size: 12px; font-weight: 700; margin-bottom: 9px; padding-left: 175px; }
+  .emotion-track { display: flex; align-items: flex-end; height: 115px; padding-left: 195px; position: relative; }
+  .emotion-track::before { content: ""; position: absolute; left: 195px; right: 18px; top: 50%; border-top: 1px dashed #ccc; }
+  .emotion-bar { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; position: relative; z-index: 1; }
+  .emotion-dot { width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 16px; box-shadow: 0 2px 6px rgba(0,0,0,.12); transition: transform .2s; cursor: default; }
+  .emotion-dot:hover { transform: scale(1.25); }
+  .emotion-label { font-size: 9.5px; color: #888; text-align: center; max-width: 110px; margin-top: 3px; }
+  .e-high { background: #27ae60; }
+  .e-mid-high { background: #2ecc71; }
+  .e-mid { background: #f1c40f; }
+  .e-mid-low { background: #e67e22; }
+  .e-low { background: #e74c3c; }
+
+  /* ===== OPPORTUNITIES ===== */
+  .opportunities { grid-column: 1 / -1; background: #fff; padding: 18px; border-top: 2px solid #00b894; }
+  .opportunities-lovely { border-top-color: #a29bfe; }
+  .opportunities h3 { font-size: 14px; font-weight: 700; color: #00b894; margin-bottom: 10px; }
+  .opportunities-lovely h3 { color: #6c5ce7; }
+  .opp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 10px; }
+  .opp-card { background: #e6fff7; border: 1px solid #00b894; border-radius: 8px; padding: 12px; }
+  .opp-card-lovely { background: #f0eeff; border-color: #a29bfe; }
+  .opp-card h4 { font-size: 11.5px; font-weight: 700; color: #00b894; margin-bottom: 3px; }
+  .opp-card-lovely h4 { color: #6c5ce7; }
+  .opp-card p { font-size: 11.5px; color: #444; line-height: 1.4; }
+  .opp-stage { font-size: 10px; background: #00b894; color: #fff; padding: 2px 7px; border-radius: 10px; display: inline-block; margin-bottom: 5px; }
+  .opp-stage-lovely { background: #6c5ce7; }
+</style>
+</head>
+<body>
+
+<!-- TOP BAR -->
+<div class="top-bar">
+  <div class="top-bar-left">
+    <h1>🎱 LILA Pro & 📱 Lovely App — Customer Journey Maps</h1>
+    <div class="subtitle">VCycene · G1 · Smart Composter + Companion App</div>
+  </div>
+  <div class="legend">
+    <span><span class="legend-dot dot-original"></span> Original</span>
+    <span><span class="legend-dot dot-feedback"></span> 📣 Stakeholder feedback</span>
+    <span><span class="legend-dot dot-suggested"></span> 💡 AI suggested</span>
+  </div>
+</div>
+
+<!-- TAB BAR -->
+<div class="tab-bar">
+  <button class="tab-btn active" onclick="switchTab('lila', this)"><span class="tab-icon">🪱</span>LILA Pro — Hardware CJM</button>
+  <button class="tab-btn app-tab" onclick="switchTab('lovely', this)"><span class="tab-icon">📱</span>Lovely App — Software CJM</button>
+</div>
+
+<!-- ==================== TAB 1: LILA PRO ==================== -->
+<div id="tab-lila" class="tab-panel active">
+
+<div class="scroll-hint">← Scroll horizontally to see all 10 journey stages →</div>
+
+<div class="layout">
+<aside class="persona">
+  <div class="persona-avatar avatar-lila">🌱</div>
+  <h2 style="color: #6c5ce7;">Ideal User</h2>
+  <h3>LILA Pro User</h3>
+  <div class="persona-section">
+    <h4>Who are they?</h4>
+    <p>Environmentally-conscious homeowner (30–55) who wants to reduce food waste but finds traditional composting messy, slow, or impractical. Interested in sustainability tech but price-sensitive for high-ticket items.</p>
+  </div>
+  <div class="persona-section">
+    <h4>Goals & Motivations</h4>
+    <ul>
+      <li>Reduce household food waste guilt-free</li>
+      <li>Produce high-quality compost for garden/plants</li>
+      <li>Feel like they're making a tangible environmental impact</li>
+      <li>Have a clean, odor-free composting solution indoors</li>
+    </ul>
+  </div>
+  <div class="persona-section">
+    <h4>Struggles & Frustrations</h4>
+    <ul>
+      <li>Burned by competitor products (dehydrators marketed as composters)</li>
+      <li>Strong price sensitivity — compares to free backyard composting</li>
+      <li>Worried about odor, size, energy use, and ongoing costs</li>
+      <li>Confused by "AI" claims — associates with negative environmental impact</li>
+      <li>Skeptical: "Does it actually compost or just dehydrate?"</li>
+    </ul>
+  </div>
+  <div class="persona-section">
+    <h4>Context</h4>
+    <p>May have tried backyard composting or a cheaper countertop device. Follows sustainability content on social media. Needs convincing that LILA Pro is different — real composting, not dehydrating. Often researches for weeks before purchasing.</p>
+  </div>
+  <hr style="margin: 16px 0; border: none; border-top: 1px solid #eee;">
+  <div class="persona-section">
+    <h4>Outcome</h4>
+    <p style="font-size: 12px; color: #6c5ce7; font-weight: 600;">The customer feels that LILA Pro genuinely reduces their food waste, produces real compost, and was worth the investment — and proudly tells others about it.</p>
+  </div>
+  <hr style="margin: 16px 0; border: none; border-top: 1px solid #eee;">
+  <div class="persona-section">
+    <h4 style="color: #0984e3;">Feedback Sources</h4>
+    <p style="font-size: 11px;"><span style="color: #e17055; font-weight: 700;">■</span> Pedrum Amin — Marketing Lead<br>(Social media comments, emails, conversion data)</p>
+    <p style="font-size: 11px; margin-top: 6px;"><span style="color: #6c5ce7; font-weight: 700;">■</span> Ashwini — Customer Service<br>(Support interactions, onboarding calls)</p>
+  </div>
+</aside>
+
+<div class="main">
+<div class="journey-grid journey-grid-lila">
+
+  <!-- STAGE HEADERS -->
+  <div class="stage-header" style="background:#fff; border-bottom: 3px solid #ddd;"><h3>Row</h3></div>
+  <div class="stage-header hdr-awareness"><h3>Awareness</h3><p>Why do they start the journey?</p></div>
+  <div class="stage-header hdr-consideration"><h3>Consideration</h3><p>Why should they care about LILA?</p></div>
+  <div class="stage-header hdr-conversion"><h3>Conversion & Acquisition</h3><p>Why would they trust us?</p></div>
+  <div class="stage-header hdr-shipping"><h3>Shipping</h3><p>How do they feel comfortable while waiting?</p></div>
+  <div class="stage-header hdr-unboxing"><h3>Packaging & Unboxing</h3><p>What is their first impression?</p></div>
+  <div class="stage-header hdr-setup"><h3>Setup</h3><p>How do they start using LILA?</p></div>
+  <div class="stage-header hdr-routine"><h3>Routine Use</h3><p>How can they feel successful?</p></div>
+  <div class="stage-header hdr-failure"><h3>Failure, Anomalies & Support</h3><p>How can they navigate failures?</p></div>
+  <div class="stage-header hdr-eol"><h3>End of Life</h3><p>How can they feel good with end of product life?</p></div>
+  <div class="stage-header hdr-promotion"><h3>Promotion</h3><p>Why would they recommend to others?</p></div>
+
+  <!-- ROW 1: ACTIONS -->
+  <div class="row-label"><h4>Actions</h4><p>What different actions can the customer do at this stage?</p></div>
+  <div class="cell">
+    <div class="note note-action">They see LILA Pro ads on social media (organic + paid)</div>
+    <div class="note note-action">They hear about LILA from a friend or family member</div>
+    <div class="note note-action">They see LILA featured in a sustainability blog or review</div>
+    <div class="note note-action feedback fb-pedrum">They comment on ads questioning design, size, or "AI" claims<span class="src">— Pedrum: &gt;75% of ad comments</span></div>
+    <div class="note note-action feedback fb-pedrum">They compare LILA to backyard composting or cheaper alternatives<span class="src">— Pedrum: strong price pushback</span></div>
+  </div>
+  <div class="cell">
+    <div class="note note-action">They visit the LILA product page and browse features</div>
+    <div class="note note-action">They compare LILA Pro with competitor products (dehydrators vs composters)</div>
+    <div class="note note-action">They read online reviews and check TrustPilot</div>
+    <div class="note note-action feedback fb-pedrum">They email asking what materials LILA can handle (bones, compostable packaging, etc.)<span class="src">— Pedrum: common inquiry</span></div>
+    <div class="note note-action feedback fb-pedrum">They ask about ongoing costs — filters, starter, energy<span class="src">— Pedrum: continuous cost concern</span></div>
+  </div>
+  <div class="cell">
+    <div class="note note-action">They add to cart (many do, but don't convert immediately)</div>
+    <div class="note note-action feedback fb-pedrum">They visit the site multiple times over weeks, discuss with family, then eventually buy<span class="src">— Pedrum: long consideration cycle</span></div>
+    <div class="note note-action feedback fb-pedrum">They use the $20 CAD gift box widget or "CHECKOUTFIVE" 5% stackable discount<span class="src">— Pedrum: 50%+ of conversions use gift box</span></div>
+    <div class="note note-action">They receive order confirmation email</div>
+    <div class="note note-action feedback fb-pedrum">Some email shortly after purchase asking for a refund or cancellation<span class="src">— Pedrum: buyer's remorse due to high price</span></div>
+  </div>
+  <div class="cell">
+    <div class="note note-action">They receive shipping confirmation with tracking link</div>
+    <div class="note note-action">They track the package status</div>
+    <div class="note note-action feedback fb-ashwini">Service team contacts customer to book an onboarding call<span class="src">— Ashwini: post-delivery outreach</span></div>
+    <div class="note note-action feedback fb-ashwini">Customer may download the LILA app early after learning product has shipped<span class="src">— Ashwini</span></div>
+  </div>
+  <div class="cell">
+    <div class="note note-action">They receive and open the packaging</div>
+    <div class="note note-action">They examine the product and accessories</div>
+    <div class="note note-action">They check the contents against what was listed</div>
+    <div class="note note-action feedback fb-ashwini">They sort, dispose of, or recycle the packaging materials<span class="src">— Ashwini</span></div>
+  </div>
+  <div class="cell">
+    <div class="note note-action">They download the LILA app and create an account</div>
+    <div class="note note-action">They connect LILA Pro to WiFi</div>
+    <div class="note note-action feedback fb-ashwini">They attend a guided onboarding call with the service team (walked through machine parts & usage)<span class="src">— Ashwini: live onboarding</span></div>
+    <div class="note note-action feedback fb-ashwini">Service team books a follow-up call for 1 week later (10–15 min phone call)<span class="src">— Ashwini</span></div>
+    <div class="note note-action feedback fb-ashwini">Customer receives a composting quiz after onboarding to reinforce learning<span class="src">— Ashwini</span></div>
+    <div class="note note-action">They place the device in their desired kitchen location</div>
+  </div>
+  <div class="cell">
+    <div class="note note-action suggested">They add food scraps throughout the day (or save up and add at end of day)</div>
+    <div class="note note-action suggested">They monitor composting progress via the app</div>
+    <div class="note note-action feedback fb-ashwini">They set up "Guest Access" for other family members to monitor via app<span class="src">— Ashwini</span></div>
+    <div class="note note-action suggested">They harvest finished compost and use it in their garden</div>
+    <div class="note note-action suggested">They replace filters and add starter as needed</div>
+    <div class="note note-action suggested">They receive and install firmware/app updates</div>
+  </div>
+  <div class="cell">
+    <div class="note note-action">They notice the device isn't responding or behaving unexpectedly</div>
+    <div class="note note-action">They try basic troubleshooting (restart, reconnect)</div>
+    <div class="note note-action feedback fb-ashwini">They use the in-app "Self-Diagnosis" tool to identify the issue<span class="src">— Ashwini</span></div>
+    <div class="note note-action suggested">They search the help center / FAQ for answers</div>
+    <div class="note note-action suggested">They contact customer support (chat, email, or phone)</div>
+    <div class="note note-action suggested">They receive a firmware update or replacement if needed</div>
+  </div>
+  <div class="cell">
+    <div class="note note-action suggested">They notice the product is aging or a newer model is available</div>
+    <div class="note note-action suggested">They receive an end-of-support notification</div>
+    <div class="note note-action suggested">They evaluate trade-in or recycling options</div>
+    <div class="note note-action suggested">They migrate settings/data to a new device</div>
+    <div class="note note-action suggested">They decide to upgrade or discontinue use</div>
+  </div>
+  <div class="cell">
+    <div class="note note-action">They recommend LILA Pro to friends and family</div>
+    <div class="note note-action">They leave a positive review online</div>
+    <div class="note note-action feedback fb-ashwini">They contact support asking to become an affiliate<span class="src">— Ashwini</span></div>
+    <div class="note note-action suggested">They share their composting results on social media</div>
+  </div>
+
+  <!-- ROW 2: THOUGHT PROCESS -->
+  <div class="row-label"><h4>User Thought Process</h4><p>What information do they look for? What is their context?</p></div>
+  <div class="cell">
+    <div class="note note-thought">"I want to reduce my food waste — there must be a better way"</div>
+    <div class="note note-thought feedback fb-pedrum">"This looks bulky/ugly — will it fit in my kitchen?"<span class="src">— Pedrum: &gt;75% perception</span></div>
+    <div class="note note-thought feedback fb-pedrum">"AI in a composter? Isn't that bad for the environment?"<span class="src">— Pedrum: AI confusion</span></div>
+    <div class="note note-thought feedback fb-pedrum">"Why would I pay for this when I can compost in my backyard for free?"<span class="src">— Pedrum: price pushback</span></div>
+    <div class="note note-thought feedback fb-pedrum">"Won't this smell? Other products like this smelled terrible"<span class="src">— Pedrum: odor concern</span></div>
+  </div>
+  <div class="cell">
+    <div class="note note-thought feedback fb-pedrum">"Is this actually composting, or just another dehydrator like [competitor]?"<span class="src">— Pedrum: #1 skepticism point</span></div>
+    <div class="note note-thought feedback fb-pedrum">"What can it actually handle? Can I put in hard bones? Compostable packaging?"<span class="src">— Pedrum: material uncertainty</span></div>
+    <div class="note note-thought feedback fb-pedrum">"How much will filters, starter, and energy cost me ongoing?"<span class="src">— Pedrum: continuous cost concern</span></div>
+    <div class="note note-thought feedback fb-pedrum">"TrustPilot says 4.4 but all reviews are 5 stars — are they hiding bad reviews?"<span class="src">— Pedrum: trust concern</span></div>
+    <div class="note note-thought">"What do real users say about it after months of use?"</div>
+  </div>
+  <div class="cell">
+    <div class="note note-thought feedback fb-pedrum">"I've been looking at this for weeks — I think I'm ready, but it's a lot of money"<span class="src">— Pedrum: long decision cycle</span></div>
+    <div class="note note-thought feedback fb-pedrum">"What if I don't like it? What's the refund and warranty policy?"<span class="src">— Pedrum: policy concern</span></div>
+    <div class="note note-thought">"Can I get a discount? Let me check for codes"</div>
+    <div class="note note-thought feedback fb-pedrum">"Wait — did I just spend too much? Maybe I should cancel..."<span class="src">— Pedrum: post-purchase remorse</span></div>
+  </div>
+  <div class="cell">
+    <div class="note note-thought">"When will it arrive?"</div>
+    <div class="note note-thought">"I should start thinking about where to put it in my kitchen"</div>
+    <div class="note note-thought feedback fb-ashwini">"They're calling to book an onboarding — that's reassuring, they care about setup"<span class="src">— Ashwini</span></div>
+  </div>
+  <div class="cell">
+    <div class="note note-thought">"Does it look and feel premium in person?"</div>
+    <div class="note note-thought">"Is everything included that I need to get started?"</div>
+    <div class="note note-thought feedback fb-ashwini">"Is there too much plastic waste in this packaging?"<span class="src">— Ashwini</span></div>
+  </div>
+  <div class="cell">
+    <div class="note note-thought">"Is this going to be complicated?"</div>
+    <div class="note note-thought feedback fb-ashwini">"Should I save up scraps throughout the day and throw them in at the end, or drop in bits throughout?"<span class="src">— Ashwini: common question</span></div>
+    <div class="note note-thought">"How long will setup take?"</div>
+    <div class="note note-thought suggested">"Where's the best place in my kitchen for this?"</div>
+  </div>
+  <div class="cell">
+    <div class="note note-thought suggested">"Is it actually composting or just sitting there?"</div>
+    <div class="note note-thought suggested">"When will I have usable compost?"</div>
+    <div class="note note-thought suggested">"Can I put [this item] in? I'm not sure what's allowed"</div>
+    <div class="note note-thought suggested">"I wonder how much waste I've diverted from landfill"</div>
+  </div>
+  <div class="cell">
+    <div class="note note-thought">"Why isn't this working?"</div>
+    <div class="note note-thought feedback fb-ashwini">"If they fix this quickly, I can consider recommending this — or else I will not"<span class="src">— Ashwini: support = loyalty gate</span></div>
+    <div class="note note-thought suggested">"Is this a known issue or just me?"</div>
+    <div class="note note-thought suggested">"Will they take responsibility or blame me?"</div>
+    <div class="note note-thought suggested">"Do I regret this purchase?"</div>
+  </div>
+  <div class="cell">
+    <div class="note note-thought suggested">"My device is getting slow / parts are wearing out"</div>
+    <div class="note note-thought suggested">"Is there a newer model worth upgrading to?"</div>
+    <div class="note note-thought suggested">"What happens to my composting data and settings?"</div>
+    <div class="note note-thought suggested">"Can I recycle this responsibly?"</div>
+  </div>
+  <div class="cell">
+    <div class="note note-thought">"This genuinely reduced my food waste — my friend would love this"</div>
+    <div class="note note-thought feedback fb-ashwini">"I look like a tech expert to my friends"<span class="src">— Ashwini: identity/status motivation</span></div>
+    <div class="note note-thought suggested">"Is there an incentive if I refer someone?"</div>
+  </div>
+
+  <!-- ROW 3: NEEDS & PAINS -->
+  <div class="row-label"><h4>Needs & Pains</h4><p>What does the customer want? Use 1st person narrative.</p></div>
+  <div class="cell">
+    <div class="note note-need">"I want to reduce my food waste without the mess of backyard composting"</div>
+    <div class="note note-pain feedback fb-pedrum">"It looks too bulky/ugly for my kitchen"<span class="src">— Pedrum: &gt;75% perception</span></div>
+    <div class="note note-pain feedback fb-pedrum">"I'm worried it doesn't actually compost — just dehydrates"<span class="src">— Pedrum: competitor distrust</span></div>
+    <div class="note note-pain feedback fb-pedrum">"I'm concerned about odor, energy use, and indoor emissions"<span class="src">— Pedrum</span></div>
+    <div class="note note-pain feedback fb-pedrum">"The price is way too high compared to free backyard composting"<span class="src">— Pedrum: strong pushback</span></div>
+  </div>
+  <div class="cell">
+    <div class="note note-need">"I need proof this is real composting, not just dehydrating"</div>
+    <div class="note note-need feedback fb-pedrum">"I need a clear list of what it can and can't handle"<span class="src">— Pedrum: material uncertainty</span></div>
+    <div class="note note-need feedback fb-pedrum">"I need to know the total cost of ownership — not just the purchase price"<span class="src">— Pedrum</span></div>
+    <div class="note note-pain feedback fb-pedrum">"The TrustPilot score seems suspicious — 5-star reviews but 4.4 overall?"<span class="src">— Pedrum</span></div>
+    <div class="note note-pain">"I don't want to invest in something I'll regret"</div>
+  </div>
+  <div class="cell">
+    <div class="note note-need feedback fb-pedrum">"I need reassurance on refund, shipping, and warranty policies"<span class="src">— Pedrum: policy concern</span></div>
+    <div class="note note-need">"I want a smooth, trustworthy purchase experience"</div>
+    <div class="note note-pain feedback fb-pedrum">"This is a huge purchase — I'm anxious even after clicking buy"<span class="src">— Pedrum: some cancel right after buying</span></div>
+    <div class="note note-pain feedback fb-pedrum">"I added to cart weeks ago but can't pull the trigger on this price"<span class="src">— Pedrum: high cart abandonment</span></div>
+  </div>
+  <div class="cell">
+    <div class="note note-need">"I want to know when exactly my order will arrive"</div>
+    <div class="note note-need">"I want to feel excited, not anxious, about the wait"</div>
+    <div class="note note-pain">"Lack of shipping updates makes me nervous"</div>
+  </div>
+  <div class="cell">
+    <div class="note note-need">"I want it to feel premium and well-made"</div>
+    <div class="note note-need">"I want clear, simple instructions included"</div>
+    <div class="note note-pain feedback fb-ashwini">"There's too much plastic waste in this packaging — I thought this was a sustainability product"<span class="src">— Ashwini</span></div>
+    <div class="note note-pain">"I'd feel let down if the product looks cheap in person"</div>
+  </div>
+  <div class="cell">
+    <div class="note note-need">"I want a setup that takes minutes, not hours"</div>
+    <div class="note note-need">"I want to feel guided step by step"</div>
+    <div class="note note-pain feedback fb-ashwini">"I'm not tech-savvy enough for a Google Meet onboarding — I don't want to deal with the technology"<span class="src">— Ashwini: tech barrier</span></div>
+    <div class="note note-pain">"I don't want to deal with WiFi connection issues"</div>
+  </div>
+  <div class="cell">
+    <div class="note note-need suggested">"I want to see how much waste I've diverted and compost I've made"</div>
+    <div class="note note-need suggested">"I want the device to reliably compost without babysitting"</div>
+    <div class="note note-need suggested">"I want clear guidance on what I can and can't put in"</div>
+    <div class="note note-pain suggested">"I'm unsure if what I'm putting in is okay — the uncertainty is stressful"</div>
+    <div class="note note-pain suggested">"I'm only using the basics — I forget about other features"</div>
+  </div>
+  <div class="cell">
+    <div class="note note-need">"I need to know what went wrong — clearly"</div>
+    <div class="note note-need suggested">"I want a fast resolution, not a runaround"</div>
+    <div class="note note-need suggested">"I want to feel like the company has my back"</div>
+    <div class="note note-pain">"I feel frustrated and let down when it fails"</div>
+    <div class="note note-pain feedback fb-ashwini">"I don't want to repeat my problem to multiple support agents"<span class="src">— Ashwini: confirmed pain</span></div>
+    <div class="note note-pain suggested">"I worry this will happen again"</div>
+  </div>
+  <div class="cell">
+    <div class="note note-need suggested">"I want a clear upgrade path — not to start from scratch"</div>
+    <div class="note note-need suggested">"I want my composting data and settings to transfer seamlessly"</div>
+    <div class="note note-need suggested">"I want to dispose of my old device responsibly"</div>
+    <div class="note note-pain suggested">"I don't want to feel forced into buying a replacement"</div>
+    <div class="note note-pain suggested">"I'd hate to lose all my history and configurations"</div>
+  </div>
+  <div class="cell">
+    <div class="note note-need">"I want to help others discover a great product"</div>
+    <div class="note note-need suggested">"I'd appreciate being rewarded for my referral"</div>
+    <div class="note note-pain suggested">"I won't recommend something that gave me trouble"</div>
+  </div>
+
+  <!-- ROW 4: TOUCHPOINTS -->
+  <div class="row-label"><h4>Touchpoints</h4><p>What do we provide that they interact with?</p></div>
+  <div class="cell">
+    <div class="note note-touch">Social media ads — organic + paid (Instagram, YouTube, TikTok)</div>
+    <div class="note note-touch feedback fb-pedrum">Social media comments section (high engagement — mostly objections)<span class="src">— Pedrum</span></div>
+    <div class="note note-touch">PR / sustainability blog coverage</div>
+    <div class="note note-touch">Word of mouth</div>
+  </div>
+  <div class="cell">
+    <div class="note note-touch">LILA website — product page</div>
+    <div class="note note-touch feedback fb-pedrum">TrustPilot reviews (helps reputation, but scoring raises questions)<span class="src">— Pedrum</span></div>
+    <div class="note note-touch feedback fb-pedrum">Email inquiries (materials, costs, composting vs dehydrating)<span class="src">— Pedrum</span></div>
+    <div class="note note-touch">Product comparison pages / YouTube reviews</div>
+  </div>
+  <div class="cell">
+    <div class="note note-touch">Website checkout / e-commerce</div>
+    <div class="note note-touch feedback fb-pedrum">$20 CAD gift box widget on website (used in 50%+ of conversions)<span class="src">— Pedrum</span></div>
+    <div class="note note-touch feedback fb-pedrum">"CHECKOUTFIVE" 5% stackable discount for abandoned cart emails<span class="src">— Pedrum</span></div>
+    <div class="note note-touch">Order confirmation email</div>
+  </div>
+  <div class="cell">
+    <div class="note note-touch">Shipping confirmation email</div>
+    <div class="note note-touch">Tracking page / carrier app</div>
+    <div class="note note-touch feedback fb-ashwini">Service team outreach call (to book onboarding)<span class="src">— Ashwini</span></div>
+    <div class="note note-touch feedback fb-ashwini">In-app "Welcome" screen for users who downloaded app but haven't paired a device<span class="src">— Ashwini</span></div>
+  </div>
+  <div class="cell">
+    <div class="note note-touch">Physical packaging</div>
+    <div class="note note-touch">Quick start guide / manual</div>
+    <div class="note note-touch">Product hardware</div>
+    <div class="note note-touch feedback fb-ashwini">Sustainable, frustration-free packaging materials<span class="src">— Ashwini: need identified</span></div>
+  </div>
+  <div class="cell">
+    <div class="note note-touch">LILA mobile app</div>
+    <div class="note note-touch feedback fb-ashwini">Live onboarding call with service team (Google Meet)<span class="src">— Ashwini</span></div>
+    <div class="note note-touch feedback fb-ashwini">Follow-up phone call 1 week after onboarding (10–15 min)<span class="src">— Ashwini</span></div>
+    <div class="note note-touch feedback fb-ashwini">Post-onboarding composting quiz<span class="src">— Ashwini</span></div>
+    <div class="note note-touch">Support email / phone number on website</div>
+  </div>
+  <div class="cell">
+    <div class="note note-touch">LILA mobile app (daily)</div>
+    <div class="note note-touch feedback fb-ashwini">Monthly Value Report email (e.g. "LILA generated 3 kg of high-quality compost this month")<span class="src">— Ashwini</span></div>
+    <div class="note note-touch suggested">Push notifications & alerts</div>
+    <div class="note note-touch suggested">Firmware & app updates</div>
+    <div class="note note-touch suggested">Filter/starter reorder reminders</div>
+  </div>
+  <div class="cell">
+    <div class="note note-touch feedback fb-ashwini">In-app "Self-Diagnosis" troubleshooting tool<span class="src">— Ashwini</span></div>
+    <div class="note note-touch">In-app error messages</div>
+    <div class="note note-touch">Help center / FAQ</div>
+    <div class="note note-touch suggested">Live chat / email / phone support</div>
+    <div class="note note-touch feedback fb-ashwini">Automatic firmware rollback to previous stable version if update causes issues<span class="src">— Ashwini</span></div>
+  </div>
+  <div class="cell">
+    <div class="note note-touch suggested">End-of-support email notification</div>
+    <div class="note note-touch suggested">Upgrade offers / loyalty discounts</div>
+    <div class="note note-touch suggested">Trade-in / recycling program page</div>
+    <div class="note note-touch suggested">Data migration tool in app</div>
+  </div>
+  <div class="cell">
+    <div class="note note-touch">Social media (user-generated content)</div>
+    <div class="note note-touch">Review platforms (TrustPilot, Amazon)</div>
+    <div class="note note-touch">Word of mouth</div>
+    <div class="note note-touch feedback fb-ashwini">Affiliate program (customers ask support to join)<span class="src">— Ashwini</span></div>
+  </div>
+
+  <!-- EMOTION CURVE -->
+  <div class="emotion-row">
+    <div class="emotion-title">😊 Customer Feeling</div>
+    <div class="emotion-track">
+      <div class="emotion-bar" style="margin-bottom: 28px;"><div class="emotion-dot e-mid-low">😬</div><div class="emotion-label">Skeptical — ugly? too expensive? really compost?</div></div>
+      <div class="emotion-bar" style="margin-bottom: 35px;"><div class="emotion-dot e-mid">🤔</div><div class="emotion-label">Cautiously interested but lots of doubts</div></div>
+      <div class="emotion-bar" style="margin-bottom: 45px;"><div class="emotion-dot e-mid-high">😊</div><div class="emotion-label">Committed but anxious about the price</div></div>
+      <div class="emotion-bar" style="margin-bottom: 50px;"><div class="emotion-dot e-mid">😶</div><div class="emotion-label">Anticipating — reassured by onboarding outreach</div></div>
+      <div class="emotion-bar" style="margin-bottom: 60px;"><div class="emotion-dot e-mid-high">😍</div><div class="emotion-label">Excited — first impression (but packaging waste concern)</div></div>
+      <div class="emotion-bar" style="margin-bottom: 40px;"><div class="emotion-dot e-mid">😌</div><div class="emotion-label">Guided onboarding helps — but tech barriers for some</div></div>
+      <div class="emotion-bar" style="margin-bottom: 60px;"><div class="emotion-dot e-mid-high">🌱</div><div class="emotion-label">Satisfied — seeing real compost output</div></div>
+      <div class="emotion-bar" style="margin-bottom: 10px;"><div class="emotion-dot e-low">😡</div><div class="emotion-label">Frustrated — speed of fix = will I recommend or not</div></div>
+      <div class="emotion-bar" style="margin-bottom: 20px;"><div class="emotion-dot e-mid-low">😔</div><div class="emotion-label">Reluctant — don't want to start over</div></div>
+      <div class="emotion-bar" style="margin-bottom: 70px;"><div class="emotion-dot e-high">🥰</div><div class="emotion-label">Proud advocate — "tech expert" to friends</div></div>
+    </div>
+  </div>
+
+  <!-- OPPORTUNITIES -->
+  <div class="opportunities">
+    <h3>🚀 Opportunities</h3>
+    <div class="opp-grid">
+      <div class="opp-card"><span class="opp-stage">Awareness</span><h4>Address the "ugly/bulky" perception head-on</h4><p>75%+ of ad comments mention design concerns. Create content showing LILA Pro in real kitchens of different sizes and styles. Consider a "LILA in your kitchen" AR/visualization tool. <em>(Source: Pedrum)</em></p></div>
+      <div class="opp-card"><span class="opp-stage">Awareness</span><h4>Clarify "AI" and emissions messaging</h4><p>Reframe AI as "sensors + optimization" not a buzzword. Directly address emission myths with science-backed content. Create a clear "LILA vs Landfill" comparison. <em>(Source: Pedrum)</em></p></div>
+      <div class="opp-card"><span class="opp-stage">Awareness → Consideration</span><h4>Composting vs Dehydrating — prove the difference</h4><p>This is the #1 trust barrier. Create transparent side-by-side comparisons, lab-tested results, and "real compost" evidence content. Show the science. <em>(Source: Pedrum)</em></p></div>
+      <div class="opp-card"><span class="opp-stage">Consideration</span><h4>Publish a Total Cost of Ownership calculator</h4><p>Address ongoing cost anxiety (filters, starter, energy) upfront. A transparent TCO tool that compares to alternatives could convert skeptics. <em>(Source: Pedrum)</em></p></div>
+      <div class="opp-card"><span class="opp-stage">Consideration</span><h4>Create a definitive "What Can LILA Handle?" guide</h4><p>Customers email asking about specific materials. A searchable, visual materials guide would reduce uncertainty and support load. <em>(Source: Pedrum)</em></p></div>
+      <div class="opp-card"><span class="opp-stage">Conversion</span><h4>Reduce post-purchase remorse</h4><p>Some customers cancel right after buying. Immediately reinforce the decision with a "Why you made a great choice" email featuring impact stats, testimonials, and a warm welcome. <em>(Source: Pedrum)</em></p></div>
+      <div class="opp-card"><span class="opp-stage">Shipping</span><h4>Turn waiting into engagement + onboarding prep</h4><p>Service team already reaches out to book onboarding — combine this with a "Get Ready for LILA" email series (placement tips, what to expect, pre-download app). <em>(Source: Ashwini)</em></p></div>
+      <div class="opp-card"><span class="opp-stage">Unboxing</span><h4>Align packaging with sustainability brand promise</h4><p>Customers notice packaging waste — a sustainability product should have sustainable packaging. Frustration-free, minimal-plastic packaging reinforces the brand. <em>(Source: Ashwini)</em></p></div>
+      <div class="opp-card"><span class="opp-stage">Setup</span><h4>Offer phone-based onboarding alternative</h4><p>Some customers can't handle Google Meet. Offer phone-only onboarding as a fallback to remove the tech barrier. <em>(Source: Ashwini)</em></p></div>
+      <div class="opp-card"><span class="opp-stage">Routine Use</span><h4>Monthly Value Reports as retention driver</h4><p>Ashwini's "LILA generated 3 kg of compost this month" email is powerful. Expand with waste diverted, CO₂ saved, and garden impact to continuously reinforce value vs. price. <em>(Source: Ashwini)</em></p></div>
+      <div class="opp-card"><span class="opp-stage">Failure & Support</span><h4>Self-diagnosis + auto-rollback = trust</h4><p>In-app self-diagnosis and automatic firmware rollback reduce support burden and build confidence. Customers explicitly say: fix it fast or I won't recommend. <em>(Source: Ashwini)</em></p></div>
+      <div class="opp-card"><span class="opp-stage">Promotion</span><h4>Formalize the affiliate program</h4><p>Customers are proactively asking to become affiliates. Formalize this with a proper portal, commission structure, and easy signup flow — don't make them go through support. <em>(Source: Ashwini)</em></p></div>
+    </div>
+  </div>
+
+</div><!-- end journey-grid -->
+</div><!-- end main -->
+</div><!-- end layout -->
+</div><!-- end tab-lila -->
+
+
+<!-- ==================== TAB 2: LOVELY APP ==================== -->
+<div id="tab-lovely" class="tab-panel">
+
+<div class="scroll-hint">← Scroll horizontally to see all 10 app journey stages →</div>
+
+<div class="layout">
+<aside class="persona">
+  <div class="persona-avatar avatar-lovely">📱</div>
+  <h2 style="color: #6c5ce7;">Same ICP — App Context</h2>
+  <h3>Lovely App User</h3>
+  <div class="persona-section">
+    <h4>Who are they?</h4>
+    <p>The same environmentally-conscious LILA Pro owner (30–55) — now engaging with the companion app. They've made the $999 commitment and want to feel validated through tangible impact, smart tools, and community connection.</p>
+  </div>
+  <div class="persona-section">
+    <h4>App-Specific Goals</h4>
+    <ul>
+      <li>See real-time proof that their composting is working</li>
+      <li>Quantify and share their environmental impact</li>
+      <li>Reduce food waste before it even happens (grocery AI)</li>
+      <li>Earn value back from their $999 investment (credits, buy-back)</li>
+      <li>Feel part of a sustainability community</li>
+    </ul>
+  </div>
+  <div class="persona-section">
+    <h4>App-Specific Anxieties</h4>
+    <ul>
+      <li>"Is this app just a basic remote control, or does it actually add value?"</li>
+      <li>"Another app I'll use once and forget?"</li>
+      <li>"Will premium features justify the added cost on top of $999?"</li>
+      <li>"Will my data be used responsibly?"</li>
+      <li>"Are the GenAI features actually accurate?"</li>
+    </ul>
+  </div>
+  <div class="persona-section">
+    <h4>Upgrade Mindset</h4>
+    <p>Already on FREE tier with LILA purchase. Needs a clear, felt value moment to consider GROW ($6.99/mo) or CIRCLE ($69/yr). The 3-month GROW trial included with purchase is the key activation window.</p>
+  </div>
+  <hr style="margin: 14px 0; border: none; border-top: 1px solid #eee;">
+  <div class="persona-section">
+    <h4>Outcome</h4>
+    <p style="font-size: 12px; color: #6c5ce7; font-weight: 600;">The user feels Lovely is an indispensable part of their sustainable lifestyle — not just a device companion — and actively shares their impact tree with their network.</p>
+  </div>
+  <hr style="margin: 14px 0; border: none; border-top: 1px solid #eee;">
+  <div class="persona-section">
+    <h4>App Tier Journey</h4>
+    <p style="font-size: 11px; line-height: 1.6;">
+      🟢 <strong>FREE</strong> — Comes with device purchase<br>
+      🌿 <strong>GROW</strong> $6.99/mo — 3-month trial included<br>
+      🌎 <strong>CIRCLE</strong> $69/yr — For engaged advocates
+    </p>
+  </div>
+</aside>
+
+<div class="main">
+<div class="journey-grid journey-grid-lovely">
+
+  <!-- STAGE HEADERS -->
+  <div class="stage-header" style="background:#fff; border-bottom: 3px solid #ddd;"><h3>Row</h3></div>
+  <div class="stage-header hdr-discovery"><h3>Discovery</h3><p>How do they first encounter the Lovely App?</p></div>
+  <div class="stage-header hdr-onboarding"><h3>Onboarding</h3><p>First-time app setup & device pairing</p></div>
+  <div class="stage-header hdr-daily"><h3>Daily Composting</h3><p>Core routine tracking & monitoring</p></div>
+  <div class="stage-header hdr-impact"><h3>Impact & Insights</h3><p>Carbon data, reports, and environmental proof</p></div>
+  <div class="stage-header hdr-referral"><h3>Referral Program</h3><p>Sharing, carbon tree, and earning credits</p></div>
+  <div class="stage-header hdr-buyback"><h3>Buy-Back Program</h3><p>Compost quality, credit redemption, collection</p></div>
+  <div class="stage-header hdr-genai"><h3>GenAI Features</h3><p>Grocery scan, recipes, health log (GROW)</p></div>
+  <div class="stage-header hdr-local"><h3>Local Ecosystem</h3><p>Farm matchmaking, loyalty perks (CIRCLE)</p></div>
+  <div class="stage-header hdr-subscription"><h3>Subscription Decision</h3><p>FREE → GROW → CIRCLE upgrade moment</p></div>
+  <div class="stage-header hdr-advocacy"><h3>Advocacy</h3><p>Power user, affiliate, social ambassador</p></div>
+
+  <!-- ROW 1: ACTIONS -->
+  <div class="row-label"><h4>Actions</h4><p>What does the user do at each stage?</p></div>
+
+  <!-- Discovery -->
+  <div class="cell">
+    <div class="note note-action-a">They see the app QR code on the LILA Pro quick-start guide in the box</div>
+    <div class="note note-action-a">They're told about the app during the onboarding call with Ashwini's team</div>
+    <div class="note note-action-a">They search "LILA app" in the App Store / Play Store after receiving the device</div>
+    <div class="note note-action-a suggested">They see a friend's Lovely impact share card on Instagram</div>
+    <div class="note note-action-a suggested">They receive a post-purchase email with a "Download Lovely" CTA and 3-month GROW trial offer</div>
+  </div>
+
+  <!-- Onboarding -->
+  <div class="cell">
+    <div class="note note-action-a">They create a Lovely account (email/Apple/Google sign-in)</div>
+    <div class="note note-action-a">They pair their LILA device via Bluetooth/WiFi in-app</div>
+    <div class="note note-action-a">They complete a short composting preference quiz (goals, garden, diet type)</div>
+    <div class="note note-action-a">They set their composting goals (reduce waste, grow garden, earn credits)</div>
+    <div class="note note-action-a suggested">They watch a 60-second animated tour of the dashboard</div>
+    <div class="note note-action-a suggested">They activate their 3-month GROW trial (prompted immediately post-pairing)</div>
+  </div>
+
+  <!-- Daily Composting -->
+  <div class="cell">
+    <div class="note note-action-a">They open the dashboard to check chamber status and compost progress</div>
+    <div class="note note-action-a">They receive and respond to push notifications (moisture alert, chamber full, compost ready)</div>
+    <div class="note note-action-a">They log what they added to the composter (optional food scrap log)</div>
+    <div class="note note-action-a">They check LED indicator meaning via the in-app LED decoder</div>
+    <div class="note note-action-a suggested">They add family members as "guest users" to share monitoring access</div>
+    <div class="note note-action-a suggested">They tap the "What can I add?" guide when unsure about a food item</div>
+  </div>
+
+  <!-- Impact & Insights -->
+  <div class="cell">
+    <div class="note note-action-a">They view their running CO₂ offset total on the home dashboard</div>
+    <div class="note note-action-a">They open the "Carbon Tree" screen to see their personal impact network</div>
+    <div class="note note-action-a">They read the monthly AI-generated sustainability summary</div>
+    <div class="note note-action-a suggested">They download or share a "This Month I Saved X kg CO₂" impact card</div>
+    <div class="note note-action-a suggested">They compare their CO₂ impact against the global leaderboard</div>
+    <div class="note note-action-a suggested">They check batch-by-batch compost history and quality scores</div>
+  </div>
+
+  <!-- Referral -->
+  <div class="cell">
+    <div class="note note-action-a">They copy and share their personal referral link ($200 off for friend, $100 credit for them)</div>
+    <div class="note note-action-a">They watch new nodes appear on their Carbon Tree as referred users activate LILA</div>
+    <div class="note note-action-a">They check the referral credit wallet balance</div>
+    <div class="note note-action-a suggested">They send the referral link directly via iMessage, WhatsApp, or email from in-app</div>
+    <div class="note note-action-a suggested">They apply accumulated referral credits toward accessories or filter refills</div>
+    <div class="note note-action-a suggested">They see "Your network has offset 1.2 tons of CO₂" — a community milestone notification</div>
+  </div>
+
+  <!-- Buy-Back -->
+  <div class="cell">
+    <div class="note note-action-a">They receive a "Compost Ready — check quality" push notification at day 14</div>
+    <div class="note note-action-a">They photograph the finished compost using VisionAI quality scan in the app</div>
+    <div class="note note-action-a">They see their compost graded (e.g. "Tier 2 — $3/lb credit") with NPK and moisture info</div>
+    <div class="note note-action-a">They schedule a buy-back collection or arrange drop-off via the app</div>
+    <div class="note note-action-a suggested">They redeem earned credit toward LILA accessories or partner store purchases</div>
+    <div class="note note-action-a suggested">They review their buy-back history and cumulative earnings dashboard</div>
+  </div>
+
+  <!-- GenAI (GROW) -->
+  <div class="cell">
+    <div class="note note-action-a">They photograph their grocery receipt — app predicts which items will likely become waste</div>
+    <div class="note note-action-a">They scan cart items before checkout — app flags likely overbuys and suggests swaps</div>
+    <div class="note note-action-a">They tap "Scrap-to-Recipe" and the app turns their current scraps into a recipe suggestion</div>
+    <div class="note note-action-a">They log meals/groceries in the diet health tracker</div>
+    <div class="note note-action-a suggested">They receive a weekly AI summary: "You avoided $24 in food waste this week"</div>
+    <div class="note note-action-a suggested">They share their monthly AI sustainability PDF report on social media</div>
+  </div>
+
+  <!-- Local Ecosystem (CIRCLE) -->
+  <div class="cell">
+    <div class="note note-action-a">They open the "Local Farms" tab and see nearby organic producers on a map</div>
+    <div class="note note-action-a">They order a CSA bundle recommended based on their compost profile and diet</div>
+    <div class="note note-action-a">They apply a loyalty discount at a partner local grocer via in-app QR code</div>
+    <div class="note note-action-a suggested">They sync their compost collection schedule with their preferred farm pickup day</div>
+    <div class="note note-action-a suggested">They earn loyalty points from farm purchases and redeem against CIRCLE subscription cost</div>
+    <div class="note note-action-a suggested">They opt into a "compost-to-farm" loop — their compost is collected and used by the matched farm</div>
+  </div>
+
+  <!-- Subscription Decision -->
+  <div class="cell">
+    <div class="note note-action-a">They hit a GROW feature paywall (e.g. grocery scan) — prompted to upgrade or see trial status</div>
+    <div class="note note-action-a">They review the FREE vs GROW vs CIRCLE tier comparison screen</div>
+    <div class="note note-action-a">Their 3-month GROW trial ends — they decide to subscribe or revert to FREE</div>
+    <div class="note note-action-a suggested">They activate CIRCLE annual plan after discovering the farm matchmaking and health tracking features</div>
+    <div class="note note-action-a suggested">They apply a referral credit or loyalty points to offset the subscription cost</div>
+    <div class="note note-action-a suggested">They receive an "Early LILA G2 Beta Access" offer as a CIRCLE renewal perk</div>
+  </div>
+
+  <!-- Advocacy -->
+  <div class="cell">
+    <div class="note note-action-a">They share a "Your Year in Composting" impact card to Instagram or Twitter</div>
+    <div class="note note-action-a">They leave a 5-star App Store review prompted by in-app milestone badge</div>
+    <div class="note note-action-a">They apply to the Lovely affiliate/ambassador program directly from the app</div>
+    <div class="note note-action-a suggested">They post their Carbon Tree screenshot showing their referral network impact</div>
+    <div class="note note-action-a suggested">They create UGC content (recipe cards, waste stats) using the in-app shareable builder</div>
+    <div class="note note-action-a suggested">They get featured on the Lovely leaderboard and receive a badge (e.g. "Top 1% Composter")</div>
+  </div>
+
+  <!-- ROW 2: THOUGHT PROCESS -->
+  <div class="row-label"><h4>User Thought Process</h4><p>What is the user thinking and feeling at this stage?</p></div>
+
+  <!-- Discovery -->
+  <div class="cell">
+    <div class="note note-thought-a">"Is this app actually useful, or just a basic remote control?"</div>
+    <div class="note note-thought-a">"Another app I have to download and probably forget about..."</div>
+    <div class="note note-thought-a suggested">"Oh — my friend shared a cool impact card from this app. That's interesting."</div>
+    <div class="note note-thought-a suggested">"The email says there's a 3-month premium trial included. I should at least try it."</div>
+  </div>
+
+  <!-- Onboarding -->
+  <div class="cell">
+    <div class="note note-thought-a">"I hope this pairing process isn't complicated"</div>
+    <div class="note note-thought-a">"The quiz is actually personalizing my experience — this feels thoughtful"</div>
+    <div class="note note-thought-a suggested">"Ok, the dashboard looks clean. I can see moisture and temperature — that's reassuring."</div>
+    <div class="note note-thought-a suggested">"3 months of premium free? I'll actually explore this properly."</div>
+    <div class="note note-thought-a suggested">"I had no idea the app could do grocery scanning. That's way more than I expected."</div>
+  </div>
+
+  <!-- Daily Composting -->
+  <div class="cell">
+    <div class="note note-thought-a">"Good — I can actually see it's working inside. I'm not just guessing."</div>
+    <div class="note note-thought-a">"When is the compost going to be ready? I need to know how long the cycle is."</div>
+    <div class="note note-thought-a">"I got a moisture alert — does that mean something's wrong or is it normal?"</div>
+    <div class="note note-thought-a suggested">"I'm not sure if I can put citrus peels in. I should check the guide."</div>
+    <div class="note note-thought-a suggested">"The notification badge keeps appearing — I should figure out what each LED color means."</div>
+  </div>
+
+  <!-- Impact & Insights -->
+  <div class="cell">
+    <div class="note note-thought-a">"580 kg of CO₂ saved per year? That's like not driving for a month. Wow."</div>
+    <div class="note note-thought-a">"I can see everyone I've referred on this Carbon Tree — that's really motivating."</div>
+    <div class="note note-thought-a">"I want to share this — my friends should see I've diverted 45 kg of food waste."</div>
+    <div class="note note-thought-a suggested">"I'm ranked 847th globally. I wonder how I can move up the leaderboard."</div>
+    <div class="note note-thought-a suggested">"The monthly report says my compost quality is improving batch over batch. I'm getting better at this."</div>
+  </div>
+
+  <!-- Referral -->
+  <div class="cell">
+    <div class="note note-thought-a">"My sister has been wanting to reduce waste — I should send her the referral."</div>
+    <div class="note note-thought-a">"I get $100 credit? That's almost a filter replacement. Definitely sharing."</div>
+    <div class="note note-thought-a">"My Carbon Tree grew — two more people joined through my referral link."</div>
+    <div class="note note-thought-a suggested">"I wonder if I share the link on my Instagram story, how many will click."</div>
+    <div class="note note-thought-a suggested">"My network has already offset 0.8 tons together — this feels bigger than just me."</div>
+  </div>
+
+  <!-- Buy-Back -->
+  <div class="cell">
+    <div class="note note-thought-a">"I can actually get paid for my compost? That makes the $999 feel more worth it."</div>
+    <div class="note note-thought-a">"Tier 2 compost — I wonder what I need to do to hit Tier 3 next batch."</div>
+    <div class="note note-thought-a">"The photo scan said my compost is high quality. I want to prove it to my garden."</div>
+    <div class="note note-thought-a suggested">"Collection pickup is easy — I don't want to have to drive it anywhere myself."</div>
+    <div class="note note-thought-a suggested">"I've earned $47 in buy-back credits so far. That covers two months of GROW subscription."</div>
+  </div>
+
+  <!-- GenAI -->
+  <div class="cell">
+    <div class="note note-thought-a">"This actually predicted that my spinach would go bad before I used it. It was right."</div>
+    <div class="note note-thought-a">"The scrap-to-recipe gave me a carrot top pesto suggestion. I never would have thought of that."</div>
+    <div class="note note-thought-a">"I avoided $24 in food waste this week. That more than pays for the subscription."</div>
+    <div class="note note-thought-a suggested">"The grocery scan is a little slow. I hope it gets faster."</div>
+    <div class="note note-thought-a suggested">"I want to share my monthly sustainability report but it feels too detailed — I need the simple version."</div>
+  </div>
+
+  <!-- Local Ecosystem -->
+  <div class="cell">
+    <div class="note note-thought-a">"There's a certified organic farm 4km from me? I didn't know that existed."</div>
+    <div class="note note-thought-a">"The bundle recommendations actually match what I composted this week. That's smart."</div>
+    <div class="note note-thought-a">"I feel like I'm part of a real local food loop — my scraps come back as farm produce."</div>
+    <div class="note note-thought-a suggested">"There aren't many partner farms in my area yet. I hope more join soon."</div>
+    <div class="note note-thought-a suggested">"The loyalty points from farm purchases — can I use them to offset my CIRCLE subscription?"</div>
+  </div>
+
+  <!-- Subscription Decision -->
+  <div class="cell">
+    <div class="note note-thought-a">"My 3-month trial is ending. Is $6.99/month actually worth it?"</div>
+    <div class="note note-thought-a">"I already paid $999 for the device. Why am I paying more for app features?"</div>
+    <div class="note note-thought-a">"The grocery scan saved me $24 this week. That's nearly 4 months of GROW paid back."</div>
+    <div class="note note-thought-a suggested">"CIRCLE is $69/year — if I get the farm perks and health tracking, that's worth it."</div>
+    <div class="note note-thought-a suggested">"I have $30 in referral credits — that almost covers a year of CIRCLE."</div>
+  </div>
+
+  <!-- Advocacy -->
+  <div class="cell">
+    <div class="note note-thought-a">"My 'Year in Composting' card shows I diverted 180 kg of waste. I have to share this."</div>
+    <div class="note note-thought-a">"I want to be an affiliate — this product actually works and I genuinely recommend it."</div>
+    <div class="note note-thought-a suggested">"I got a 'Top 1% Composter' badge — that's something I'd actually put in my bio."</div>
+    <div class="note note-thought-a suggested">"The shareable impact card looks great on Instagram. It's clean and not preachy."</div>
+  </div>
+
+  <!-- ROW 3: NEEDS & PAINS -->
+  <div class="row-label"><h4>Needs & Pains</h4><p>What does the user want or struggle with?</p></div>
+
+  <!-- Discovery -->
+  <div class="cell">
+    <div class="note note-need-a">"I need to quickly understand why this app is worth downloading beyond just controlling my device"</div>
+    <div class="note note-pain-a">"If the app looks basic in the App Store, I'll assume it's an afterthought and not download it"</div>
+    <div class="note note-pain-a suggested">"I don't want to download yet another app that just sits unused on my phone"</div>
+    <div class="note note-need-a suggested">"I need to see the 3-month GROW trial offer clearly — that removes my hesitation"</div>
+  </div>
+
+  <!-- Onboarding -->
+  <div class="cell">
+    <div class="note note-need-a">"I need device pairing to work in under 2 minutes or I'll lose patience"</div>
+    <div class="note note-need-a">"I want the app to feel personalized immediately — not generic"</div>
+    <div class="note note-pain-a">"Bluetooth pairing failures are a trust-killer before I've even started"</div>
+    <div class="note note-pain-a suggested">"If I'm bombarded with permission requests upfront, I'll feel surveilled"</div>
+    <div class="note note-need-a suggested">"I need to understand all premium features during the trial — not discover them after it ends"</div>
+  </div>
+
+  <!-- Daily Composting -->
+  <div class="cell">
+    <div class="note note-need-a">"I need real-time visibility — I want to know it's actually working without opening the fridge"</div>
+    <div class="note note-need-a">"I want smart, targeted notifications — not noise"</div>
+    <div class="note note-pain-a">"Too many push notifications and I'll mute the app entirely"</div>
+    <div class="note note-pain-a">"If the dashboard can't explain what a sensor reading means, it's useless data"</div>
+    <div class="note note-pain-a suggested">"I'm not sure what's allowed in the composter — the ambiguity makes me anxious about ruining a batch"</div>
+  </div>
+
+  <!-- Impact & Insights -->
+  <div class="cell">
+    <div class="note note-need-a">"I need the CO₂ impact numbers to be contextualized — not just raw kg figures I can't relate to"</div>
+    <div class="note note-need-a">"I want shareable impact cards that look good and don't feel like an ad"</div>
+    <div class="note note-pain-a">"Abstract numbers without context don't validate my $999 investment"</div>
+    <div class="note note-pain-a suggested">"If my compost quality declines batch over batch, I need the app to explain why — not just show a bad score"</div>
+    <div class="note note-need-a suggested">"I want a 'year in review' summary I'm proud to share — not a data dump"</div>
+  </div>
+
+  <!-- Referral -->
+  <div class="cell">
+    <div class="note note-need-a">"I need the referral link to be one tap away — not buried 3 menus deep"</div>
+    <div class="note note-need-a">"I want to see my Carbon Tree grow in real time when friends sign up"</div>
+    <div class="note note-pain-a">"If the $100 credit process is confusing or delayed, I'll feel cheated"</div>
+    <div class="note note-pain-a">"I won't refer someone unless I'm confident the product will work well for them"</div>
+    <div class="note note-need-a suggested">"I want to share not just a link but a compelling visual — my Carbon Tree, my impact stats"</div>
+  </div>
+
+  <!-- Buy-Back -->
+  <div class="cell">
+    <div class="note note-need-a">"I need the quality grading to be transparent — I want to understand why I got Tier 2 vs Tier 3"</div>
+    <div class="note note-need-a">"I want the collection logistics to be easy and reliable — I'll stop participating if pickup is complicated"</div>
+    <div class="note note-pain-a">"If my compost quality scan is wrong or inconsistent, I'll lose trust in the system"</div>
+    <div class="note note-pain-a suggested">"If credit redemption is hard to apply to a real purchase, it feels hollow"</div>
+    <div class="note note-need-a suggested">"I want to know how to improve my compost quality tier — actionable tips, not just a score"</div>
+  </div>
+
+  <!-- GenAI -->
+  <div class="cell">
+    <div class="note note-need-a">"I need the grocery scan to be fast and accurate — slowness kills the habit"</div>
+    <div class="note note-need-a">"I want recipe suggestions that are actually practical and use what I already have"</div>
+    <div class="note note-pain-a">"If the AI recommendations are generic or wrong, I'll stop using the feature entirely"</div>
+    <div class="note note-pain-a">"Health tracking feels invasive if I don't understand what data is being stored"</div>
+    <div class="note note-need-a suggested">"I want a clear weekly number: how much money/waste I've saved — make it real"</div>
+  </div>
+
+  <!-- Local Ecosystem -->
+  <div class="cell">
+    <div class="note note-need-a">"I need farm recommendations to be genuinely close and high-quality — not just partners who paid to be listed"</div>
+    <div class="note note-need-a">"I want the compost-to-farm loop to feel effortless — the app should coordinate it for me"</div>
+    <div class="note note-pain-a">"If there are no partner farms near me, this feature has zero value and CIRCLE feels overpriced"</div>
+    <div class="note note-pain-a suggested">"Loyalty points that expire or are hard to apply feel like a gimmick"</div>
+    <div class="note note-need-a suggested">"I want to feel like my compost is being used locally — closed loop satisfaction"</div>
+  </div>
+
+  <!-- Subscription Decision -->
+  <div class="cell">
+    <div class="note note-need-a">"I need to feel that the ROI of upgrading is real and calculable — not vague benefits"</div>
+    <div class="note note-need-a">"I want to use referral credits or buy-back earnings to partially pay for subscription"</div>
+    <div class="note note-pain-a">"Charging more on top of a $999 purchase feels tone-deaf without a clear value story"</div>
+    <div class="note note-pain-a">"If my trial ends without a clear upsell moment, I'll default to FREE without considering GROW"</div>
+    <div class="note note-need-a suggested">"A clear 'You saved $X with GROW this month' metric at trial-end is the most powerful upsell"</div>
+  </div>
+
+  <!-- Advocacy -->
+  <div class="cell">
+    <div class="note note-need-a">"I want a formal affiliate program — not to be told to 'go through support'"</div>
+    <div class="note note-need-a">"I want shareable content tools built into the app — not to screenshot and crop myself"</div>
+    <div class="note note-pain-a">"If my advocacy isn't recognized or rewarded, my enthusiasm fades"</div>
+    <div class="note note-need-a suggested">"I want a 'Lovely Ambassador' badge and small perks for my network size or compost impact"</div>
+    <div class="note note-pain-a suggested">"I won't advocate for a product that had unresolved app bugs or inaccurate AI features"</div>
+  </div>
+
+  <!-- ROW 4: TOUCHPOINTS -->
+  <div class="row-label"><h4>Touchpoints</h4><p>What Lovely App surfaces/features does the user interact with?</p></div>
+
+  <!-- Discovery -->
+  <div class="cell">
+    <div class="note note-touch-a">QR code on LILA Pro quick-start guide</div>
+    <div class="note note-touch-a">App Store / Google Play listing (screenshots, ratings, description)</div>
+    <div class="note note-touch-a">Post-purchase "Download Lovely" email with 3-month GROW trial offer</div>
+    <div class="note note-touch-a">Onboarding call mention by Ashwini's service team</div>
+    <div class="note note-touch-a suggested">Social impact cards shared by existing Lovely users</div>
+    <div class="note note-touch-a suggested">VCycene Instagram story featuring the Lovely App dashboard</div>
+  </div>
+
+  <!-- Onboarding -->
+  <div class="cell">
+    <div class="note note-touch-a">Account creation screen (email / Apple / Google)</div>
+    <div class="note note-touch-a">Bluetooth/WiFi device pairing flow</div>
+    <div class="note note-touch-a">Personalization quiz (goals, garden, diet type)</div>
+    <div class="note note-touch-a">Animated 60-second feature tour</div>
+    <div class="note note-touch-a">GROW trial activation modal ("3 months free — explore everything")</div>
+    <div class="note note-touch-a suggested">In-app welcome message with first scrap-adding guide</div>
+  </div>
+
+  <!-- Daily Composting -->
+  <div class="cell">
+    <div class="note note-touch-a">Home dashboard (chamber status, moisture, temp, odor, fill level)</div>
+    <div class="note note-touch-a">Compost readiness countdown timer</div>
+    <div class="note note-touch-a">Push notifications (smart alerts — moisture, chamber full, compost ready)</div>
+    <div class="note note-touch-a">LED indicator decoder screen</div>
+    <div class="note note-touch-a">"What can I add?" searchable food guide</div>
+    <div class="note note-touch-a suggested">Food scrap logging screen (optional — ties into GenAI waste prediction)</div>
+  </div>
+
+  <!-- Impact & Insights -->
+  <div class="cell">
+    <div class="note note-touch-a">CO₂ impact dashboard (running total with contextualized comparisons)</div>
+    <div class="note note-touch-a">Carbon Tree visualization (personal network impact map)</div>
+    <div class="note note-touch-a">Monthly AI sustainability summary (push + in-app)</div>
+    <div class="note note-touch-a">Batch history & compost quality timeline</div>
+    <div class="note note-touch-a suggested">Shareable impact card builder ("I saved X kg CO₂ this month")</div>
+    <div class="note note-touch-a suggested">Global CO₂ leaderboard with city/month filters</div>
+  </div>
+
+  <!-- Referral -->
+  <div class="cell">
+    <div class="note note-touch-a">Referral tab with personal link and one-tap share sheet</div>
+    <div class="note note-touch-a">Carbon Tree — live-updating referral network visualization</div>
+    <div class="note note-touch-a">Referral credit wallet and redemption screen</div>
+    <div class="note note-touch-a">Network impact milestone notifications ("Your network just hit 1 ton CO₂!")</div>
+    <div class="note note-touch-a suggested">In-app message composer for sending referrals to contacts</div>
+    <div class="note note-touch-a suggested">Referral leaderboard (top referrers of the month)</div>
+  </div>
+
+  <!-- Buy-Back -->
+  <div class="cell">
+    <div class="note note-touch-a">"Compost Ready" push notification at day 14</div>
+    <div class="note note-touch-a">VisionAI compost quality scan (photo → tier grade + NPK analysis)</div>
+    <div class="note note-touch-a">Buy-back credit summary and tier explanation (Tier 1–3, $1–$5/lb)</div>
+    <div class="note note-touch-a">Collection scheduler (pickup booking or drop-off location map)</div>
+    <div class="note note-touch-a suggested">Buy-back history dashboard (cumulative earnings, batch-by-batch tracking)</div>
+    <div class="note note-touch-a suggested">Credit wallet — apply toward accessories, filters, or partner purchases</div>
+  </div>
+
+  <!-- GenAI (GROW) -->
+  <div class="cell">
+    <div class="note note-touch-a">Grocery receipt photo scan → waste prediction (GROW feature)</div>
+    <div class="note note-touch-a">In-store cart scanner → overbuying alerts + swap suggestions</div>
+    <div class="note note-touch-a">Scrap-to-Recipe engine (turns current scraps into recipe suggestions)</div>
+    <div class="note note-touch-a">Diet & health log (grocery-based nutrition tracking)</div>
+    <div class="note note-touch-a">Monthly AI sustainability report (downloadable PDF, shareable card)</div>
+    <div class="note note-touch-a suggested">Weekly "You saved $X in food waste" notification</div>
+  </div>
+
+  <!-- Local Ecosystem (CIRCLE) -->
+  <div class="cell">
+    <div class="note note-touch-a">Local Farms map and directory (CIRCLE feature)</div>
+    <div class="note note-touch-a">CSA bundle recommendations (matched to compost profile + diet)</div>
+    <div class="note note-touch-a">In-app loyalty QR code for partner farm / grocer discounts</div>
+    <div class="note note-touch-a">Compost-to-farm loop scheduler (pickup sync with partner farm calendar)</div>
+    <div class="note note-touch-a suggested">Loyalty points dashboard (earned from farm purchases, redeemable on subscription)</div>
+    <div class="note note-touch-a suggested">Farm impact stats ("Your compost helped grow X kg of organic produce")</div>
+  </div>
+
+  <!-- Subscription Decision -->
+  <div class="cell">
+    <div class="note note-touch-a">Feature paywall modal (with clear tier benefit breakdown)</div>
+    <div class="note note-touch-a">Trial-end notification (with personalized "You saved $X with GROW" summary)</div>
+    <div class="note note-touch-a">Tier comparison screen (FREE / GROW / CIRCLE side-by-side)</div>
+    <div class="note note-touch-a">Credit & points offset on subscription payment screen</div>
+    <div class="note note-touch-a suggested">"What you'd lose" downgrade warning (bookmarked recipes, scan history, farm matches)</div>
+    <div class="note note-touch-a suggested">CIRCLE perk highlight: "Early access to LILA G2 Beta" offer</div>
+  </div>
+
+  <!-- Advocacy -->
+  <div class="cell">
+    <div class="note note-touch-a">"Year in Composting" annual impact card (shareable)</div>
+    <div class="note note-touch-a">App Store review prompt (triggered after milestone badge)</div>
+    <div class="note note-touch-a">Affiliate/Ambassador program portal (in-app application)</div>
+    <div class="note note-touch-a suggested">Social share builder (Instagram, Twitter card with impact stats)</div>
+    <div class="note note-touch-a suggested">Milestone badges (Top 1% Composter, 1-Ton Club, 10-Referral Tree)</div>
+    <div class="note note-touch-a suggested">Community feed or ambassador spotlight (in-app or newsletter)</div>
+  </div>
+
+  <!-- EMOTION CURVE -->
+  <div class="emotion-row">
+    <div class="emotion-title">😊 App User Feeling</div>
+    <div class="emotion-track">
+      <div class="emotion-bar" style="margin-bottom: 38px;"><div class="emotion-dot e-mid">🤔</div><div class="emotion-label">Skeptical — "just another app?"</div></div>
+      <div class="emotion-bar" style="margin-bottom: 52px;"><div class="emotion-dot e-mid-high">😊</div><div class="emotion-label">Pleasantly surprised by personalization & clean UX</div></div>
+      <div class="emotion-bar" style="margin-bottom: 60px;"><div class="emotion-dot e-mid-high">😌</div><div class="emotion-label">Reassured — I can see it's actually working</div></div>
+      <div class="emotion-bar" style="margin-bottom: 68px;"><div class="emotion-dot e-high">🤩</div><div class="emotion-label">Delighted — CO₂ impact is bigger than expected</div></div>
+      <div class="emotion-bar" style="margin-bottom: 55px;"><div class="emotion-dot e-mid-high">😄</div><div class="emotion-label">Motivated — referral tree is growing</div></div>
+      <div class="emotion-bar" style="margin-bottom: 65px;"><div class="emotion-dot e-high">🥳</div><div class="emotion-label">Validated — earning real credit for my compost</div></div>
+      <div class="emotion-bar" style="margin-bottom: 50px;"><div class="emotion-dot e-mid-high">😲</div><div class="emotion-label">Impressed but skeptical of AI accuracy</div></div>
+      <div class="emotion-bar" style="margin-bottom: 60px;"><div class="emotion-dot e-high">🌍</div><div class="emotion-label">Fulfilled — part of a real local food loop</div></div>
+      <div class="emotion-bar" style="margin-bottom: 30px;"><div class="emotion-dot e-mid-low">😬</div><div class="emotion-label">Conflicted — "pay more on top of $999?"</div></div>
+      <div class="emotion-bar" style="margin-bottom: 72px;"><div class="emotion-dot e-high">🥰</div><div class="emotion-label">Proud advocate — "I'm the sustainability person"</div></div>
+    </div>
+  </div>
+
+  <!-- OPPORTUNITIES -->
+  <div class="opportunities opportunities-lovely">
+    <h3>🚀 Opportunities — Lovely App</h3>
+    <div class="opp-grid">
+      <div class="opp-card opp-card-lovely"><span class="opp-stage opp-stage-lovely">Discovery</span><h4>Make the App Store listing do the heavy lifting</h4><p>The listing is the first impression. Screenshots should showcase the Carbon Tree, impact stats, and grocery scan — not just the device dashboard. A video preview showing real composting data + AI features could dramatically increase download rate.</p></div>
+      <div class="opp-card opp-card-lovely"><span class="opp-stage opp-stage-lovely">Discovery</span><h4>Embed the 3-month GROW trial offer prominently</h4><p>The trial included with every LILA purchase is the most powerful acquisition tool for premium. Make it impossible to miss — bold placement in the post-purchase email, the unboxing guide QR landing page, and the App Store description.</p></div>
+      <div class="opp-card opp-card-lovely"><span class="opp-stage opp-stage-lovely">Onboarding</span><h4>Solve device pairing anxiety before it happens</h4><p>Bluetooth/WiFi pairing is the highest-risk moment for first impressions. Build an animated troubleshooting guide that auto-detects issues and resolves them without contacting support. Offer a "Skip pairing — browse features first" fallback to keep users in the app.</p></div>
+      <div class="opp-card opp-card-lovely"><span class="opp-stage opp-stage-lovely">Daily Composting</span><h4>Smart notification tuning — less is more</h4><p>Users will mute the app if notifications are noisy. Allow granular notification preferences from day one (e.g. "Critical alerts only" vs "Full updates"). Use adaptive delivery: send the right alert at the right moment, not all alerts all the time.</p></div>
+      <div class="opp-card opp-card-lovely"><span class="opp-stage opp-stage-lovely">Impact & Insights</span><h4>Contextualize impact numbers to make them tangible</h4><p>Raw CO₂ kg figures mean nothing to most people. Always pair the number with a real-world analogy: "580 kg CO₂ = not driving your car for 2,400 km." This transforms a metric into an emotional win that people want to share.</p></div>
+      <div class="opp-card opp-card-lovely"><span class="opp-stage opp-stage-lovely">Referral</span><h4>Make the Carbon Tree the hero share moment</h4><p>The Carbon Tree is the app's most unique and viral feature. Build a one-tap "Share my tree" flow that generates a beautiful, personalized graphic — not a raw screenshot. This is the app's best organic acquisition channel.</p></div>
+      <div class="opp-card opp-card-lovely"><span class="opp-stage opp-stage-lovely">Buy-Back</span><h4>Turn compost quality improvement into a game</h4><p>Show users why they got Tier 2 vs Tier 3, and give actionable tips for next batch (e.g. "Add 10% more brown matter"). A "compost quality progression" chart across batches builds pride and repeat engagement.</p></div>
+      <div class="opp-card opp-card-lovely"><span class="opp-stage opp-stage-lovely">GenAI</span><h4>Lead with the weekly savings number</h4><p>The most compelling GROW value prop is financial: "You avoided $24 in food waste this week." Make this a weekly push notification and the first thing shown on the GROW upgrade modal. People respond to money saved more than sustainability data.</p></div>
+      <div class="opp-card opp-card-lovely"><span class="opp-stage opp-stage-lovely">Local Ecosystem</span><h4>Prioritize farm partner density before launching CIRCLE</h4><p>CIRCLE's biggest churn risk is "no farms near me." Before launching broadly, seed the farm network in the top 5–10 cities with highest LILA density. CIRCLE should only be marketed in markets where ≥3 partner farms are available within 20km.</p></div>
+      <div class="opp-card opp-card-lovely"><span class="opp-stage opp-stage-lovely">Subscription Decision</span><h4>Personalized ROI summary at trial end = best upsell</h4><p>The trial-end moment must show a personalized "You saved $X in food waste with GROW this month" summary before asking for payment. Generic "here's what you'll lose" messages don't convert; personal impact data does.</p></div>
+      <div class="opp-card opp-card-lovely"><span class="opp-stage opp-stage-lovely">Subscription Decision</span><h4>Allow referral credits + buy-back earnings to offset subscription</h4><p>Let users apply their earned credits directly to GROW or CIRCLE payment. This turns the referral and buy-back loops into a virtuous cycle: earn credits → offset subscription → stay subscribed. Makes the premium tier feel earned, not just paid.</p></div>
+      <div class="opp-card opp-card-lovely"><span class="opp-stage opp-stage-lovely">Advocacy</span><h4>Build the affiliate portal into the app — not support</h4><p>Users are already asking to become affiliates. An in-app ambassador portal (application, commission tracker, content tools) would convert brand advocates into a structured growth channel. Don't gatekeep advocacy through customer service.</p></div>
+    </div>
+  </div>
+
+</div><!-- end journey-grid-lovely -->
+</div><!-- end main -->
+</div><!-- end layout -->
+</div><!-- end tab-lovely -->
+
+<script>
+function switchTab(tabName, btn) {
+  // Update panels
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.getElementById('tab-' + tabName).classList.add('active');
+  // Update buttons
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  // Scroll to top
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+</script>
+
+</body>
+</html>

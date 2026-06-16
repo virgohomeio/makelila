@@ -2,11 +2,12 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   useRefundApprovals, useReturns,
   submitRefundRequest, managerApprove, financeApprove, denyRefund, closeRefund,
-  canApproveManager, canApproveFinance,
   REFUND_STATUS_META, REFUND_METHODS, REFUND_METHOD_META,
   type RefundApproval, type ReturnRow, type RefundMethod,
 } from '../../lib/postShipment';
+import { useQueuedReplacements, holdReplacement, type Order } from '../../lib/orders';
 import { useAuth } from '../../lib/auth';
+import { canDo } from '../../lib/permissions';
 import { supabase } from '../../lib/supabase';
 import styles from './PostShipment.module.css';
 
@@ -16,7 +17,7 @@ type ColKey = 'manager_review' | 'finance_review' | 'refunded' | 'denied';
 
 const COLUMNS: { key: ColKey; label: string; helper: string }[] = [
   { key: 'manager_review', label: 'Manager review',  helper: 'Awaiting George' },
-  { key: 'finance_review', label: 'Finance review',  helper: 'Awaiting Julie' },
+  { key: 'finance_review', label: 'Finance review',  helper: 'Awaiting Julie / Huayi' },
   { key: 'refunded',       label: 'Refunded',        helper: 'Payment processed' },
   { key: 'denied',         label: 'Denied',          helper: 'Rejected at any stage' },
 ];
@@ -24,7 +25,8 @@ const COLUMNS: { key: ColKey; label: string; helper: string }[] = [
 export function RefundsTab() {
   const { approvals, loading: aLoading } = useRefundApprovals();
   const { returns, loading: rLoading } = useReturns();
-  const { user } = useAuth();
+  const { replacements: queuedRepls } = useQueuedReplacements();
+  const { user, role } = useAuth();
   const userEmail = user?.email;
 
   const [showRequestModal, setShowRequestModal] = useState(false);
@@ -32,14 +34,25 @@ export function RefundsTab() {
   const [financeModalId, setFinanceModalId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const isManager = canApproveManager(userEmail);
-  const isFinance = canApproveFinance(userEmail);
+  const isManager = canDo(role, 'approve_refund_manager');
+  const isFinance = canDo(role, 'approve_refund_finance');
 
   const returnsById = useMemo(() => {
     const m = new Map<string, ReturnRow>();
     for (const r of returns) m.set(r.id, r);
     return m;
   }, [returns]);
+
+  const replsByEmail = useMemo(() => {
+    const m = new Map<string, Order[]>();
+    for (const r of queuedRepls) {
+      const key = (r.customer_email ?? '').toLowerCase().trim();
+      if (!key) continue;
+      const prev = m.get(key) ?? [];
+      m.set(key, [...prev, r]);
+    }
+    return m;
+  }, [queuedRepls]);
 
   const selectedRefund = useMemo(
     () => approvals.find(a => a.id === selectedId) ?? null,
@@ -146,6 +159,7 @@ export function RefundsTab() {
         <RefundDetailPanel
           refund={selectedRefund}
           linkedReturn={selectedReturn}
+          queuedReplacements={replsByEmail.get((selectedRefund.customer_email ?? '').toLowerCase().trim()) ?? []}
           canManager={isManager}
           canFinance={isFinance}
           onClose={() => setSelectedId(null)}
@@ -309,10 +323,11 @@ function RefundCard({
 // Renders the linked return-form data + approve / deny actions.
 // ============================================================================
 function RefundDetailPanel({
-  refund, linkedReturn, canManager, canFinance, onClose, onError, onOpenFinanceModal,
+  refund, linkedReturn, queuedReplacements, canManager, canFinance, onClose, onError, onOpenFinanceModal,
 }: {
   refund: RefundApproval;
   linkedReturn: ReturnRow | null;
+  queuedReplacements: Order[];
   canManager: boolean;
   canFinance: boolean;
   onClose: () => void;
@@ -320,6 +335,7 @@ function RefundDetailPanel({
   onOpenFinanceModal: (id: string) => void;
 }) {
   const [busy, setBusy] = useState(false);
+  const [holdBusy, setHoldBusy] = useState<string | null>(null);
   const meta = REFUND_STATUS_META[refund.status];
 
   const canActManager = (refund.status === 'manager_review' || refund.status === 'submitted') && canManager;
@@ -373,6 +389,42 @@ function RefundDetailPanel({
         </div>
         <button onClick={onClose} className={styles.refundDetailClose} title="Close detail">✕</button>
       </div>
+
+      {queuedReplacements.length > 0 && (
+        <div className={styles.replWarnBanner}>
+          <span className={styles.replWarnIcon}>⚠</span>
+          <div className={styles.replWarnBody}>
+            <strong>
+              {queuedReplacements.length === 1
+                ? 'This customer has a queued replacement'
+                : `This customer has ${queuedReplacements.length} queued replacements`}
+              — hold before refunding
+            </strong>
+            <div className={styles.replWarnRow}>
+              {queuedReplacements.map(rpl => (
+                <span key={rpl.id} className={styles.replWarnRef}>{rpl.order_ref} ({rpl.replacement_state})</span>
+              ))}
+              {queuedReplacements.filter(rpl => rpl.replacement_state !== 'held').map(rpl => (
+                <button
+                  key={rpl.id}
+                  className={styles.replWarnHoldBtn}
+                  disabled={holdBusy === rpl.id}
+                  onClick={() => {
+                    setHoldBusy(rpl.id);
+                    void holdReplacement(
+                      rpl.id,
+                      `Held: refund in progress for ${refund.customer_name}`,
+                    ).catch(e => onError((e as Error).message))
+                      .finally(() => setHoldBusy(null));
+                  }}
+                >
+                  {holdBusy === rpl.id ? '…' : `Hold ${rpl.order_ref}`}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {!linkedReturn ? (
         <div className={styles.refundDetailEmpty}>
@@ -654,20 +706,23 @@ function FinanceApproveModal({
   const amount = Number(amountStr);
   const amountChanged = !Number.isNaN(amount) && Number(amount.toFixed(2)) !== Number(original.toFixed(2));
 
-  const [shipping, setShipping] = useState<{ total: number; freight: number } | null>(null);
+  const [shipping, setShipping] = useState<{ total: number; paidShipping: number } | null>(null);
   useEffect(() => {
     const ref = linkedReturn?.original_order_ref;
     if (!ref) { setShipping(null); return; }
     (async () => {
       const { data } = await supabase
         .from('orders')
-        .select('total_usd, freight_estimate_usd')
+        .select('total_usd, customer_paid_shipping_usd')
         .eq('order_ref', ref)
         .maybeSingle();
-      if (data) setShipping({
-        total: Number((data as { total_usd: number; freight_estimate_usd: number }).total_usd),
-        freight: Number((data as { total_usd: number; freight_estimate_usd: number }).freight_estimate_usd),
-      });
+      if (data) {
+        const d = data as { total_usd: number; customer_paid_shipping_usd: number | null };
+        setShipping({
+          total: Number(d.total_usd),
+          paidShipping: Number(d.customer_paid_shipping_usd ?? 0),
+        });
+      }
     })();
   }, [linkedReturn?.original_order_ref]);
 
@@ -722,7 +777,7 @@ function FinanceApproveModal({
           <div className={styles.modalHint}>
             Original request: ${original.toFixed(2)}
             {shipping && (
-              <> · Order total: ${shipping.total.toFixed(2)} · Shipping (non-refundable): ${shipping.freight.toFixed(2)} · Max refundable: ${(shipping.total - shipping.freight).toFixed(2)}</>
+              <> · Order total: ${shipping.total.toFixed(2)} · Shipping (customer-paid, non-refundable): ${shipping.paidShipping.toFixed(2)} · Max refundable: ${(shipping.total - shipping.paidShipping).toFixed(2)}</>
             )}
           </div>
         </div>

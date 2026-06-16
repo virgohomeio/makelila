@@ -2,7 +2,7 @@ import { useAuth } from '../lib/auth';
 import { Navigate } from 'react-router-dom';
 
 export default function Login() {
-  const { session, signInWithGoogle, loading } = useAuth();
+  const { session, signInWithGoogle, signInWithMicrosoft, loading } = useAuth();
   if (loading) return <div style={{ padding: 24 }}>Loading…</div>;
   if (session) return <Navigate to="/order-review" replace />;
 
@@ -25,22 +25,32 @@ export default function Login() {
           letterSpacing: '0.1em',
           color: 'var(--color-crimson)',
           marginBottom: 2,
-        }}>make lila</h1>
+        }}>makelila</h1>
         <p style={{ fontSize: 12, color: 'var(--color-ink-subtle)', marginTop: 8 }}>
           Internal operations tool for VCycene Inc.
         </p>
       </div>
       <p style={{ fontSize: 12, color: 'var(--color-ink-subtle)' }}>
-        Sign in with your @virgohome.io account.
+        Sign in with your @virgohome.io or @lila.vip account.
       </p>
-      <button
-        onClick={() => void signInWithGoogle()}
-        style={{
-          background: 'var(--color-crimson)', color: '#fff', border: 'none',
-          padding: '10px 22px', borderRadius: 6, fontSize: 13, fontWeight: 600,
-          letterSpacing: '0.3px', cursor: 'pointer',
-        }}
-      >Sign in with Google</button>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'center' }}>
+        <button
+          onClick={() => void signInWithGoogle()}
+          style={{
+            background: 'var(--color-crimson)', color: '#fff', border: 'none',
+            padding: '10px 22px', borderRadius: 6, fontSize: 13, fontWeight: 600,
+            letterSpacing: '0.3px', cursor: 'pointer', width: 200,
+          }}
+        >Sign in with Google</button>
+        <button
+          onClick={() => void signInWithMicrosoft()}
+          style={{
+            background: '#0078d4', color: '#fff', border: 'none',
+            padding: '10px 22px', borderRadius: 6, fontSize: 13, fontWeight: 600,
+            letterSpacing: '0.3px', cursor: 'pointer', width: 200,
+          }}
+        >Sign in with Microsoft</button>
+      </div>
     </div>
   );
 }

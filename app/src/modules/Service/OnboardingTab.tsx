@@ -3,6 +3,7 @@ import {
   useServiceTickets, useCustomerLifecycle,
   STATUS_META, warrantyState,
   markOnboardingComplete, markOnboardingNoShow, markOnboardingSkipped,
+  sendPostOnboardingFollowup,
   type ServiceTicket, type CustomerLifecycle,
 } from '../../lib/service';
 import {
@@ -18,7 +19,7 @@ import styles from './Service.module.css';
 // view because it's the actionable cohort; everything else is reference.
 // "check_ins" surfaces the 1-week / 1-month follow-up cadence (#40) here in
 // the onboarding flow; the schedule is derived from customers.onboard_date.
-type ViewMode = 'not_scheduled' | 'scheduled' | 'all_units' | 'check_ins';
+type ViewMode = 'not_scheduled' | 'scheduled' | 'call_complete' | 'all_units' | 'check_ins';
 
 // FU states that represent a pending check-in (FU1 or FU2 not yet recorded).
 const PENDING_FU: FuState[] = [
@@ -46,6 +47,10 @@ export function OnboardingTab() {
   );
   const scheduled = useMemo(
     () => lifecycle.filter(l => l.onboarding_status === 'scheduled'),
+    [lifecycle],
+  );
+  const callComplete = useMemo(
+    () => lifecycle.filter(l => l.onboarding_status === 'completed'),
     [lifecycle],
   );
 
@@ -121,10 +126,18 @@ export function OnboardingTab() {
         <button
           className={`${styles.chip} ${view === 'scheduled' ? styles.chipActive : ''}`}
           onClick={() => setView('scheduled')}
-          title="Customers with a booked Calendly onboarding session"
+          title="Customers with a booked onboarding call"
         >
-          Scheduled
+          Call scheduled
           {scheduled.length > 0 && <span className={styles.chipBadge}>{scheduled.length}</span>}
+        </button>
+        <button
+          className={`${styles.chip} ${view === 'call_complete' ? styles.chipActive : ''}`}
+          onClick={() => setView('call_complete')}
+          title="Customers whose onboarding call is complete — FU1 (+2wk) / FU2 (+4wk) scheduled"
+        >
+          Call complete
+          {callComplete.length > 0 && <span className={styles.chipBadge}>{callComplete.length}</span>}
         </button>
         <button
           className={`${styles.chip} ${view === 'check_ins' ? styles.chipActive : ''}`}
@@ -154,6 +167,10 @@ export function OnboardingTab() {
         />
       )}
 
+      {view === 'call_complete' && (
+        <AllUnitsView rows={callComplete} customerById={customerById} />
+      )}
+
       {view === 'check_ins' && (
         <CheckInsView rows={checkIns} today={today} />
       )}
@@ -171,9 +188,19 @@ export function OnboardingTab() {
 // Helper: inline action row (walkthrough #33 — a "Mark complete" button
 // on the row itself, no need to open the ticket panel just to disposition).
 // ───────────────────────────────────────────────────────────────────────
-function LifecycleActions({ row }: { row: CustomerLifecycle }) {
+const DEFAULT_BULLETS = [
+  "Your first batch takes 10–14 days — that's completely normal",
+  'Keep the lid closed and avoid adding non-food scraps',
+  'Reply to this email anytime — we\'re always happy to help',
+];
+
+function LifecycleActions({ row, customer }: { row: CustomerLifecycle; customer?: Customer | null }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [showFollowup, setShowFollowup] = useState(false);
+  const [bullets, setBullets] = useState(DEFAULT_BULLETS);
+  const [sendBusy, setSendBusy] = useState(false);
+  const [sendErr, setSendErr] = useState<string | null>(null);
 
   async function run(fn: () => Promise<void>) {
     setBusy(true); setErr(null);
@@ -182,27 +209,77 @@ function LifecycleActions({ row }: { row: CustomerLifecycle }) {
     finally { setBusy(false); }
   }
 
+  const isCompleted = row.onboarding_status === 'completed';
+
   return (
-    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-      <button
-        className={styles.btnGhost}
-        disabled={busy}
-        onClick={(e) => { e.stopPropagation(); void run(() => markOnboardingComplete(row.id)); }}
-      >Mark complete</button>
-      {row.onboarding_status === 'scheduled' && (
-        <button
-          className={styles.btnGhost}
-          disabled={busy}
-          onClick={(e) => { e.stopPropagation(); void run(() => markOnboardingNoShow(row.id)); }}
-        >No-show</button>
-      )}
-      {row.onboarding_status === 'not_scheduled' && (
-        <button
-          className={styles.btnGhost}
-          disabled={busy}
-          onClick={(e) => { e.stopPropagation(); void run(() => markOnboardingSkipped(row.id)); }}
-          title="Customer opted out of onboarding"
-        >Skip</button>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        {!isCompleted && (
+          <>
+            <button
+              className={styles.btnGhost}
+              disabled={busy}
+              onClick={(e) => { e.stopPropagation(); void run(() => markOnboardingComplete(row.id)); }}
+            >Mark complete</button>
+            {row.onboarding_status === 'scheduled' && (
+              <button
+                className={styles.btnGhost}
+                disabled={busy}
+                onClick={(e) => { e.stopPropagation(); void run(() => markOnboardingNoShow(row.id)); }}
+              >No-show</button>
+            )}
+            {row.onboarding_status === 'not_scheduled' && (
+              <button
+                className={styles.btnGhost}
+                disabled={busy}
+                onClick={(e) => { e.stopPropagation(); void run(() => markOnboardingSkipped(row.id)); }}
+                title="Customer opted out of onboarding"
+              >Skip</button>
+            )}
+          </>
+        )}
+        {isCompleted && customer?.email && !row.followup_email_sent_at && !showFollowup && (
+          <button
+            className={styles.btnGhost}
+            onClick={(e) => { e.stopPropagation(); setShowFollowup(true); setSendErr(null); setBullets(DEFAULT_BULLETS); }}
+          >Send follow-up email</button>
+        )}
+        {isCompleted && row.followup_email_sent_at && (
+          <span className={styles.muted} style={{ fontSize: 11 }}>Follow-up sent ✓</span>
+        )}
+      </div>
+      {showFollowup && customer?.email && (
+        <div className={styles.followupForm} onClick={e => e.stopPropagation()}>
+          <div className={styles.followupTo}>To: {customer.email}</div>
+          {bullets.map((b, i) => (
+            <input
+              key={i}
+              className={styles.followupBullet}
+              value={b}
+              onChange={e => setBullets(prev => prev.map((v, j) => j === i ? e.target.value : v))}
+              placeholder={`Bullet ${i + 1}`}
+            />
+          ))}
+          <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
+            <button
+              className={styles.btnPrimary}
+              disabled={sendBusy}
+              onClick={() => {
+                setSendBusy(true); setSendErr(null);
+                const firstName = (customer.full_name ?? '').split(' ')[0] || 'there';
+                void sendPostOnboardingFollowup(
+                  row.id, customer.email!, customer.full_name ?? '',
+                  { customer_first_name: firstName, bullet_1: bullets[0], bullet_2: bullets[1], bullet_3: bullets[2] },
+                ).then(() => setShowFollowup(false))
+                  .catch(e => setSendErr((e as Error).message))
+                  .finally(() => setSendBusy(false));
+              }}
+            >{sendBusy ? '…' : 'Send'}</button>
+            <button className={styles.btnGhost} disabled={sendBusy}
+              onClick={() => setShowFollowup(false)}>Cancel</button>
+          </div>
+          {sendErr && <div style={{ fontSize: 11, color: 'var(--color-error)' }}>{sendErr}</div>}
+        </div>
       )}
       {err && <span style={{ color: 'var(--color-error)', fontSize: 11 }}>{err}</span>}
     </div>
@@ -245,7 +322,7 @@ function NotScheduledView({ rows, customerById }: {
                 {c && <div style={{ fontSize: 10, color: 'var(--color-ink-subtle)' }}>{c.email ?? c.phone ?? ''}</div>}
               </td>
               <td style={{ fontFamily: 'ui-monospace, monospace', fontSize: 10 }}>{l.unit_serial}</td>
-              <td><LifecycleActions row={l} /></td>
+              <td><LifecycleActions row={l} customer={c} /></td>
             </tr>
           );
         })}
@@ -303,7 +380,7 @@ function ScheduledView({
               <td style={{ fontFamily: 'ui-monospace, monospace', fontSize: 10 }}>{t.unit_serial ?? '—'}</td>
               <td>{t.calendly_host_email ?? '—'}</td>
               <td><span className={styles.pill} style={{ background: s.bg, color: s.color }}>{s.label}</span></td>
-              <td>{lc ? <LifecycleActions row={lc} /> : <span className={styles.muted}>—</span>}</td>
+              <td>{lc ? <LifecycleActions row={lc} customer={c} /> : <span className={styles.muted}>—</span>}</td>
             </tr>
           );
         })}
@@ -351,9 +428,7 @@ function AllUnitsView({ rows, customerById }: {
                   {w.state === 'na'      && 'N/A'}
                 </span>
               </td>
-              <td>
-                {l.onboarding_status !== 'completed' && <LifecycleActions row={l} />}
-              </td>
+              <td><LifecycleActions row={l} customer={c} /></td>
             </tr>
           );
         })}

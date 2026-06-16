@@ -1,7 +1,9 @@
-import React, { useMemo, useState } from 'react';
+import React, { lazy, Suspense, useMemo, useState } from 'react';
+import { isTelemetryConfigured } from '../../lib/supabaseTelemetry';
+const Dashboard = lazy(() => import('../Dashboard'));
 import {
   useCustomers, syncCustomersFromHubspot, exportPurchasers, pushToKlaviyo,
-  computeFuState, recordFollowUp, FU_STATE_META, FU1_DAYS, FU2_DAYS,
+  computeFuState, recordFollowUp, FU_STATE_META,
   type Customer, type FuState,
 } from '../../lib/customers';
 import { useOrders } from '../../lib/orders';
@@ -11,12 +13,21 @@ import { useServiceTickets } from '../../lib/service';
 import { OverdueFollowupPanel } from './OverdueFollowupPanel';
 import { ProfitabilityTab } from './ProfitabilityTab';
 import { JourneyTab } from './JourneyTab';
+import { useIsMobile } from '../../lib/useMediaQuery';
+import { NavCard } from '../../components/NavCard';
+import { MobileBackHeader } from '../../components/MobileBackHeader';
+import { useCustomerEvents, useCustomerEngagement, eventMeta, dormancyBadge } from '../../lib/customerEvents';
 import styles from './Customers.module.css';
 
-type Tab = 'directory' | 'profitability' | 'journey';
+type Tab = 'directory' | 'profitability' | 'journey' | 'fleet';
 
 export default function Customers() {
   const [tab, setTab] = useState<Tab>('journey');
+  const isMobile = useIsMobile();
+  // On mobile, start with the tab picker visible. Tapping a card flips this
+  // to `true` and the existing branches render the tab content with a
+  // MobileBackHeader replacing the horizontal tab strip.
+  const [mobileTabPicked, setMobileTabPicked] = useState(false);
   const { customers, loading } = useCustomers();
   const { units } = useUnits();
   // Pre-build serial lookups so each row can render its serial(s) without
@@ -48,10 +59,6 @@ export default function Customers() {
   const [search, setSearch] = useState('');
   const [country, setCountry] = useState<'all' | 'CA' | 'US' | 'other'>('all');
   const [fuFilter, setFuFilter] = useState<'all' | 'needs_action' | FuState>('all');
-  const [view, setView] = useState<'table' | 'calendar'>('table');
-  const [calendarMonth, setCalendarMonth] = useState<Date>(() => {
-    const d = new Date(); d.setDate(1); d.setHours(0, 0, 0, 0); return d;
-  });
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -192,15 +199,102 @@ export default function Customers() {
 
   if (loading) return <div className={styles.loading}>Loading customers…</div>;
 
-  if (tab === 'profitability') {
+  // Mobile: until a tab is picked, render a NavCard picker for the three
+  // sub-views. After pick, fall through to the existing render branches with
+  // a back affordance threaded in via MobileBackHeader. The Directory view is
+  // dense (table + filters) — for V1 it just renders inside the existing
+  // single-column layout.
+  if (isMobile && !mobileTabPicked) {
+    const pickerTabs: { key: Tab; label: string; subtitle: string; icon: string; iconBg: string }[] = [
+      { key: 'journey',       label: 'Journey',       subtitle: '10-stage CJM · health per customer',           icon: '🛤️', iconBg: '#fef1f0' },
+      { key: 'profitability', label: 'Profitability', subtitle: 'Revenue · returns · margin per customer',      icon: '💰', iconBg: '#fff3e0' },
+      { key: 'directory',     label: 'Directory',     subtitle: 'All customers · search · follow-up state',     icon: '👥', iconBg: '#e3f0fb' },
+      { key: 'fleet',         label: 'Fleet',         subtitle: 'Live device telemetry · machine health',         icon: '📡', iconBg: '#e3f0fb' },
+    ];
     return (
       <div className={styles.layout}>
         <div className={styles.header}>
-          <div className={styles.titleRow}>
-            <h2 className={styles.title}>Customers</h2>
-            <CustomersTabs tab={tab} onChange={setTab} />
+          <h2 className={styles.title}>Customers</h2>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: 4 }}>
+          {pickerTabs.map(t => (
+            <NavCard
+              key={t.key}
+              onClick={() => { setTab(t.key); setMobileTabPicked(true); }}
+              title={t.label}
+              subtitle={t.subtitle}
+              icon={t.icon}
+              iconBg={t.iconBg}
+            />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // After picking on mobile, render MobileBackHeader at the top of each
+  // branch instead of the desktop title-row + tabs strip. Tap the chevron
+  // to return to the tab picker.
+  const tabLabel =
+    tab === 'journey'       ? 'Journey' :
+    tab === 'profitability' ? 'Profitability' :
+    tab === 'fleet'         ? 'Fleet' :
+                              'Directory';
+  const onMobileBack = () => setMobileTabPicked(false);
+
+  if (tab === 'fleet') {
+    if (!isTelemetryConfigured) {
+      return (
+        <div className={styles.layout}>
+          {isMobile ? (
+            <MobileBackHeader label={tabLabel} onBack={onMobileBack} />
+          ) : (
+            <div className={styles.header}>
+              <div className={styles.titleRow}>
+                <h2 className={styles.title}>Customers</h2>
+                <CustomersTabs tab={tab} onChange={setTab} />
+              </div>
+            </div>
+          )}
+          <div style={{ padding: 24, color: '#4a5568' }}>
+            <h2 style={{ marginTop: 0 }}>Telemetry not configured</h2>
+            <p>Set <code>VITE_TELEMETRY_SUPABASE_URL</code> and <code>VITE_TELEMETRY_SUPABASE_ANON_KEY</code> in <code>.env</code> and reload.</p>
           </div>
         </div>
+      );
+    }
+    return (
+      <div className={styles.layout}>
+        {isMobile ? (
+          <MobileBackHeader label={tabLabel} onBack={onMobileBack} />
+        ) : (
+          <div className={styles.header}>
+            <div className={styles.titleRow}>
+              <h2 className={styles.title}>Customers</h2>
+              <CustomersTabs tab={tab} onChange={setTab} />
+            </div>
+          </div>
+        )}
+        <Suspense fallback={<div style={{ padding: 24 }}>Loading fleet…</div>}>
+          <Dashboard />
+        </Suspense>
+      </div>
+    );
+  }
+
+  if (tab === 'profitability') {
+    return (
+      <div className={styles.layout}>
+        {isMobile ? (
+          <MobileBackHeader label={tabLabel} onBack={onMobileBack} />
+        ) : (
+          <div className={styles.header}>
+            <div className={styles.titleRow}>
+              <h2 className={styles.title}>Customers</h2>
+              <CustomersTabs tab={tab} onChange={setTab} />
+            </div>
+          </div>
+        )}
         <ProfitabilityTab />
       </div>
     );
@@ -209,12 +303,16 @@ export default function Customers() {
   if (tab === 'journey') {
     return (
       <div className={styles.layout}>
-        <div className={styles.header}>
-          <div className={styles.titleRow}>
-            <h2 className={styles.title}>Customers</h2>
-            <CustomersTabs tab={tab} onChange={setTab} />
+        {isMobile ? (
+          <MobileBackHeader label={tabLabel} onBack={onMobileBack} />
+        ) : (
+          <div className={styles.header}>
+            <div className={styles.titleRow}>
+              <h2 className={styles.title}>Customers</h2>
+              <CustomersTabs tab={tab} onChange={setTab} />
+            </div>
           </div>
-        </div>
+        )}
         <JourneyTab />
       </div>
     );
@@ -223,10 +321,11 @@ export default function Customers() {
   return (
     <>
     <div className={styles.layout}>
+      {isMobile && <MobileBackHeader label={tabLabel} onBack={onMobileBack} />}
       <div className={styles.header}>
         <div className={styles.titleRow}>
           <h2 className={styles.title}>Customers</h2>
-          <CustomersTabs tab={tab} onChange={setTab} />
+          {isMobile ? null : <CustomersTabs tab={tab} onChange={setTab} />}
         </div>
         <div className={styles.headerActions}>
           {stats.lastSync && (
@@ -300,71 +399,49 @@ export default function Customers() {
           placeholder="Search name, email, phone, city…"
           className={styles.searchInput}
         />
-        <div className={styles.viewToggle}>
-          <button
-            onClick={() => setView('table')}
-            className={`${styles.chip} ${view === 'table' ? styles.chipActive : ''}`}
-          >Table</button>
-          <button
-            onClick={() => setView('calendar')}
-            className={`${styles.chip} ${view === 'calendar' ? styles.chipActive : ''}`}
-          >Calendar</button>
-        </div>
         <div className={styles.resultCount}>
           {filtered.length} {filtered.length === 1 ? 'row' : 'rows'}
         </div>
       </div>
 
-      {view === 'table' ? (
-        <div className={styles.tableWrap}>
-          <table className={styles.table}>
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Email</th>
-                <th>Phone</th>
-                <th>Serial(s)</th>
-                <th>Address</th>
-                <th>Follow-up</th>
-                <th>Last sync</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map(({ c, fu }) => (
-                <CustomerRow
-                  key={c.id}
-                  c={c}
-                  fu={fu}
-                  serials={
-                    // Sheet is the source of truth: prefer the synced serials,
-                    // then the canonical units.customer_id link, and only fall
-                    // back to name-matching for units not yet FK-linked.
-                    (c.serials && c.serials.length > 0)
-                      ? c.serials
-                      : (serialsByCustomerId.get(c.id)
-                          ?? serialsByCustomerName.get(c.full_name?.toLowerCase() ?? '')
-                          ?? [])
-                  }
-                  onSelect={() => setSelectedCustomerId(c.id)}
-                />
-              ))}
-              {filtered.length === 0 && (
-                <tr><td colSpan={7} className={styles.empty}>No customers match the filter.</td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      ) : (
-        <FollowUpCalendar
-          month={calendarMonth}
-          today={today}
-          customers={customers}
-          onPrev={() => setCalendarMonth(d => { const n = new Date(d); n.setMonth(n.getMonth() - 1); return n; })}
-          onNext={() => setCalendarMonth(d => { const n = new Date(d); n.setMonth(n.getMonth() + 1); return n; })}
-          onToday={() => setCalendarMonth(() => { const n = new Date(); n.setDate(1); n.setHours(0,0,0,0); return n; })}
-          onCustomerClick={id => setSelectedCustomerId(id)}
-        />
-      )}
+      <div className={styles.tableWrap}>
+        <table className={styles.table}>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Email</th>
+              <th>Phone</th>
+              <th>Serial(s)</th>
+              <th>Address</th>
+              <th>Follow-up</th>
+              <th>Last sync</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map(({ c, fu }) => (
+              <CustomerRow
+                key={c.id}
+                c={c}
+                fu={fu}
+                serials={
+                  // Sheet is the source of truth: prefer the synced serials,
+                  // then the canonical units.customer_id link, and only fall
+                  // back to name-matching for units not yet FK-linked.
+                  (c.serials && c.serials.length > 0)
+                    ? c.serials
+                    : (serialsByCustomerId.get(c.id)
+                        ?? serialsByCustomerName.get(c.full_name?.toLowerCase() ?? '')
+                        ?? [])
+                }
+                onSelect={() => setSelectedCustomerId(c.id)}
+              />
+            ))}
+            {filtered.length === 0 && (
+              <tr><td colSpan={7} className={styles.empty}>No customers match the filter.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
     </div>
 
     {selectedCustomer && (
@@ -462,6 +539,8 @@ function CustomerDetailPanel({ customer, onClose }: { customer: Customer; onClos
             <PanelRow label="Address" value={fullAddress} multiline />
           </PanelSection>
 
+          <LilaAppActivitySection customerId={customer.id} />
+
           <FollowUpSection customer={customer} />
 
           <PanelSection title={`Orders (${myOrders.length})`}>
@@ -523,6 +602,82 @@ function PanelSection({ title, children }: { title: string; children: React.Reac
     <div className={styles.section}>
       <div className={styles.sectionTitle}>{title}</div>
       <div className={styles.sectionBody}>{children}</div>
+    </div>
+  );
+}
+
+// Customer-side signals from the lilalovely app (beta-lovely). Backed by
+// customer_events + customer_engagement_summary; populated by the
+// ingest-lovely-event edge function. Renders engagement summary + the last
+// 8 events as a compact timeline. Empty state covers two cases:
+//   - customer hasn't signed up for the lilalovely app yet (no link row)
+//   - customer signed up but hasn't generated any events yet
+// Spec: docs/integration-lilalovely-2026-06-07.md
+function LilaAppActivitySection({ customerId }: { customerId: string }) {
+  const { summary, loading: sLoading } = useCustomerEngagement(customerId);
+  const { events, loading: eLoading } = useCustomerEvents(customerId);
+  const loading = sLoading || eLoading;
+  const badge = dormancyBadge(summary?.dormancy_days ?? null);
+
+  return (
+    <div className={styles.section}>
+      <div className={styles.sectionTitle} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span>Lila app activity</span>
+        {badge && (
+          <span style={{
+            fontSize: 10, padding: '2px 8px', borderRadius: 999,
+            fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.3,
+            color:
+              badge.tone === 'good'  ? 'var(--color-success)' :
+              badge.tone === 'warn'  ? 'var(--color-warning)' :
+                                       'var(--color-error)',
+            background:
+              badge.tone === 'good'  ? 'var(--color-success-bg)' :
+              badge.tone === 'warn'  ? 'var(--color-warning-bg)' :
+                                       'var(--color-error-bg)',
+          }}>{badge.label}</span>
+        )}
+      </div>
+      <div className={styles.sectionBody}>
+        {loading ? (
+          <div className={styles.emptyRow}>Loading app activity…</div>
+        ) : !summary?.lovely_user_id ? (
+          <div className={styles.emptyRow}>
+            Not yet signed up for the lilalovely app.
+          </div>
+        ) : (
+          <>
+            <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 12, fontSize: 12 }}>
+              <span><strong>{summary.events_7d}</strong> <span className={styles.muted}>events (7d)</span></span>
+              <span><strong>{summary.events_30d}</strong> <span className={styles.muted}>events (30d)</span></span>
+              {summary.app_last_seen_at && (
+                <span>
+                  <span className={styles.muted}>Last seen </span>
+                  <strong>{new Date(summary.app_last_seen_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' })}</strong>
+                </span>
+              )}
+            </div>
+            {events.length === 0 ? (
+              <div className={styles.emptyRow}>No events recorded yet.</div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {events.slice(0, 8).map(e => {
+                  const meta = eventMeta(e.event_type);
+                  return (
+                    <div key={e.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
+                      <span style={{ width: 8, height: 8, borderRadius: '50%', background: meta.color, flexShrink: 0 }} />
+                      <span style={{ flex: 1 }}>{meta.label}</span>
+                      <span className={styles.muted} style={{ fontSize: 11 }}>
+                        {new Date(e.occurred_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </>
+        )}
+      </div>
     </div>
   );
 }
@@ -619,139 +774,6 @@ function FollowUpSection({ customer }: { customer: Customer }) {
   );
 }
 
-// ────────────────────────────────────────────────────────────────────────
-// Monthly calendar grid (mirror of the standalone HTML calendar's view)
-// ────────────────────────────────────────────────────────────────────────
-const WEEK_DAYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-
-type CalEvent = {
-  customer: Customer;
-  kind: 'fu1' | 'fu2';
-  dueDate: Date;     // onboard + FU1_DAYS or FU2_DAYS
-  state: FuState;    // current state of this customer's overall FU
-};
-
-function FollowUpCalendar({
-  month, today, customers,
-  onPrev, onNext, onToday, onCustomerClick,
-}: {
-  month: Date;
-  today: Date;
-  customers: Customer[];
-  onPrev: () => void;
-  onNext: () => void;
-  onToday: () => void;
-  onCustomerClick: (id: string) => void;
-}) {
-  // Compute the visible 6-week window
-  const monthStart = new Date(month);
-  const gridStart = new Date(monthStart);
-  gridStart.setDate(1 - monthStart.getDay()); // back up to Sunday
-  const gridEnd = new Date(gridStart);
-  gridEnd.setDate(gridStart.getDate() + 42); // 6 weeks
-
-  // Bucket events by yyyy-mm-dd
-  const eventsByDay = useMemo(() => {
-    const m = new Map<string, CalEvent[]>();
-    const key = (d: Date) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-    for (const c of customers) {
-      if (!c.onboard_date) continue;
-      const onboard = new Date(c.onboard_date + 'T00:00:00');
-      const fu1 = new Date(onboard); fu1.setDate(fu1.getDate() + FU1_DAYS);
-      const fu2 = new Date(onboard); fu2.setDate(fu2.getDate() + FU2_DAYS);
-      const state = computeFuState(c, today);
-      // Only include events whose due date falls within the visible window
-      for (const [kind, dueDate] of [['fu1', fu1], ['fu2', fu2]] as const) {
-        if (dueDate < gridStart || dueDate >= gridEnd) continue;
-        // Skip if this FU is already completed
-        if (kind === 'fu1' && c.fu1_status) continue;
-        if (kind === 'fu2' && !c.fu1_status) continue;  // FU2 only relevant after FU1 done
-        if (kind === 'fu2' && c.fu2_status) continue;
-        const k = key(dueDate);
-        if (!m.has(k)) m.set(k, []);
-        m.get(k)!.push({ customer: c, kind, dueDate, state });
-      }
-    }
-    return m;
-  }, [customers, today, gridStart, gridEnd]);
-
-  const todayKey = (() => {
-    const d = today;
-    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-  })();
-
-  const days: Date[] = [];
-  for (let i = 0; i < 42; i++) {
-    const d = new Date(gridStart);
-    d.setDate(gridStart.getDate() + i);
-    days.push(d);
-  }
-
-  return (
-    <div className={styles.calWrap}>
-      <div className={styles.calHeader}>
-        <button className={styles.calNavBtn} onClick={onPrev} aria-label="Previous month">‹</button>
-        <h3 className={styles.calMonth}>
-          {month.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
-        </h3>
-        <button className={styles.calNavBtn} onClick={onNext} aria-label="Next month">›</button>
-        <button className={styles.calTodayBtn} onClick={onToday}>Today</button>
-      </div>
-      <div className={styles.calLegend}>
-        <span className={styles.calLegendItem}>
-          <span className={`${styles.calDot} ${styles.calDotFu1}`} /> FU1
-        </span>
-        <span className={styles.calLegendItem}>
-          <span className={`${styles.calDot} ${styles.calDotFu2}`} /> FU2
-        </span>
-        <span className={styles.calLegendItem}>
-          <span className={`${styles.calDot} ${styles.calDotOverdue}`} /> Overdue
-        </span>
-      </div>
-      <div className={styles.calGrid}>
-        {WEEK_DAYS.map(d => (
-          <div key={d} className={styles.calDayHeader}>{d}</div>
-        ))}
-        {days.map(d => {
-          const k = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-          const events = eventsByDay.get(k) ?? [];
-          const isOtherMonth = d.getMonth() !== month.getMonth();
-          const isToday = k === todayKey;
-          const isPast = d < today && k !== todayKey;
-          return (
-            <div
-              key={k}
-              className={[
-                styles.calDay,
-                isOtherMonth ? styles.calDayOther : '',
-                isToday ? styles.calDayToday : '',
-              ].join(' ')}
-            >
-              <div className={styles.calDayNum}>{d.getDate()}</div>
-              {events.map((ev, i) => {
-                const overdue = isPast && !(ev.kind === 'fu1' ? ev.customer.fu1_status : ev.customer.fu2_status);
-                return (
-                  <button
-                    key={i}
-                    onClick={() => onCustomerClick(ev.customer.id)}
-                    className={[
-                      styles.calEvent,
-                      overdue ? styles.calEventOverdue : (ev.kind === 'fu1' ? styles.calEventFu1 : styles.calEventFu2),
-                    ].join(' ')}
-                    title={`${ev.customer.full_name} — ${ev.kind.toUpperCase()} ${overdue ? 'overdue' : 'due'}`}
-                  >
-                    {ev.kind.toUpperCase()}: {ev.customer.full_name}
-                  </button>
-                );
-              })}
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
 
 function CustomersTabs({ tab, onChange }: { tab: Tab; onChange: (t: Tab) => void }) {
   // Order per operator (2026-06-05): Journey first (default), Profitability,
@@ -760,6 +782,7 @@ function CustomersTabs({ tab, onChange }: { tab: Tab; onChange: (t: Tab) => void
     { key: 'journey',       label: 'Journey' },
     { key: 'profitability', label: 'Profitability' },
     { key: 'directory',     label: 'Directory' },
+    { key: 'fleet',         label: 'Fleet' },
   ];
   return (
     <div className={styles.customersTabs}>

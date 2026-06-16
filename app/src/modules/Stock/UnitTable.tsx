@@ -1,10 +1,16 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   STATUS_META, STATUS_ORDER, getStatusMeta, updateUnitStatus, updateUnitFields,
   QC_CHECK_META,
   type Unit, type UnitStatus, type QcCheck,
 } from '../../lib/stock';
+import {
+  assignUnit as fulfillmentAssignUnit,
+  fetchUnassignedQueueItems,
+  type QueueItemForAssignment,
+} from '../../lib/fulfillment';
 import { signedReportUrl } from '../../lib/testReports';
+import { UnitTimeline } from '../../components/UnitTimeline';
 import styles from './Stock.module.css';
 
 export function UnitTable({ units }: { units: Unit[] }) {
@@ -17,6 +23,7 @@ export function UnitTable({ units }: { units: Unit[] }) {
   const qcUnit = units.find(u => u.serial === qcSerial) ?? null;
   const [assignSerial, setAssignSerial] = useState<string | null>(null);
   const assignUnit = units.find(u => u.serial === assignSerial) ?? null;
+  const [orderAssignSerial, setOrderAssignSerial] = useState<string | null>(null);
 
   const commit = async (serial: string) => {
     const next = pending[serial];
@@ -84,9 +91,20 @@ export function UnitTable({ units }: { units: Unit[] }) {
                   ?? u.defect_notes
                   ?? (u.electrical_check === 'incomplete' ? 'Electrical test incomplete' : null);
             const primaryNote = realNote ?? u.notes;
+            const isQuarantined = u.status === 'quarantine';
+            const quarantinedSince = isQuarantined
+              ? new Date(u.status_updated_at).toLocaleDateString('en-US', { year: '2-digit', month: 'short', day: 'numeric' })
+              : null;
             return (
-              <tr key={u.serial}>
-                <td className={styles.serial}>{u.serial}</td>
+              <tr key={u.serial} className={isQuarantined ? styles.rowQuarantine : undefined}>
+                <td className={styles.serial}>
+                  {u.serial}
+                  {isQuarantined && (
+                    <span className={styles.pillQuarantine}>
+                      Quarantined{quarantinedSince ? ` · ${quarantinedSince}` : ''}
+                    </span>
+                  )}
+                </td>
                 <td className={styles.batch}>{u.batch}</td>
                 <td>
                   {u.color ? (
@@ -158,7 +176,7 @@ export function UnitTable({ units }: { units: Unit[] }) {
                   ) : <span className={styles.muted}>—</span>}
                 </td>
                 <td>
-                  {changed && (
+                  {changed ? (
                     <button
                       className={styles.updateBtn}
                       onClick={() => void commit(u.serial)}
@@ -166,7 +184,15 @@ export function UnitTable({ units }: { units: Unit[] }) {
                     >
                       {busySerial === u.serial ? '…' : 'Update'}
                     </button>
-                  )}
+                  ) : u.status === 'ready' && !u.customer_name ? (
+                    <button
+                      className={styles.assignOrderBtn}
+                      onClick={() => setOrderAssignSerial(u.serial)}
+                      title="Assign this unit to a queued order"
+                    >
+                      Assign
+                    </button>
+                  ) : null}
                 </td>
               </tr>
             );
@@ -184,6 +210,13 @@ export function UnitTable({ units }: { units: Unit[] }) {
         <AssignEditorModal
           unit={assignUnit}
           onClose={() => setAssignSerial(null)}
+          onError={setError}
+        />
+      )}
+      {orderAssignSerial && (
+        <AssignToOrderModal
+          serial={orderAssignSerial}
+          onClose={() => setOrderAssignSerial(null)}
           onError={setError}
         />
       )}
@@ -258,6 +291,106 @@ function AssignEditorModal({
           <button onClick={onClose} disabled={busy} className={styles.btnSecondary}>Cancel</button>
           <button onClick={() => void save()} disabled={busy} className={styles.btnPrimary}>
             {busy ? 'Saving…' : 'Save'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AssignToOrderModal({
+  serial, onClose, onError,
+}: {
+  serial: string;
+  onClose: () => void;
+  onError: (msg: string | null) => void;
+}) {
+  const [items, setItems] = useState<QueueItemForAssignment[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [picked, setPicked] = useState<QueueItemForAssignment | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [search, setSearch] = useState('');
+
+  useEffect(() => {
+    fetchUnassignedQueueItems()
+      .then(setItems)
+      .catch(e => onError((e as Error).message))
+      .finally(() => setLoading(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const filtered = items.filter(item => {
+    const q = search.trim().toLowerCase();
+    if (!q) return true;
+    return item.orderRef.toLowerCase().includes(q)
+      || (item.customerName?.toLowerCase().includes(q) ?? false);
+  });
+
+  const confirm = async () => {
+    if (!picked) return;
+    setBusy(true); onError(null);
+    try {
+      await fulfillmentAssignUnit(picked.queueId, serial, picked.orderId);
+      onClose();
+    } catch (e) {
+      onError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className={styles.modalBackdrop} onClick={onClose}>
+      <div className={styles.modalCard} onClick={e => e.stopPropagation()}>
+        <h3 className={styles.modalTitle}>Assign {serial} to an Order</h3>
+        <p style={{ fontSize: 11, color: 'var(--color-ink-muted)', marginBottom: 12 }}>
+          Pick a queued order waiting for a unit. This advances the order to step 2 (test).
+        </p>
+
+        {loading ? (
+          <p style={{ fontSize: 12, color: 'var(--color-ink-muted)' }}>Loading orders…</p>
+        ) : items.length === 0 ? (
+          <p style={{ fontSize: 12, color: 'var(--color-ink-muted)' }}>
+            No orders are waiting for unit assignment right now.
+          </p>
+        ) : (
+          <>
+            <input
+              type="search"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Search by order ref or customer…"
+              className={styles.modalInput}
+              style={{ marginBottom: 10 }}
+            />
+            <div style={{ maxHeight: 240, overflowY: 'auto', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)' }}>
+              {filtered.map(item => (
+                <button
+                  key={item.queueId}
+                  onClick={() => setPicked(item)}
+                  style={{
+                    display: 'block', width: '100%', textAlign: 'left',
+                    padding: '10px 14px', border: 'none', borderBottom: '1px solid var(--color-border)',
+                    background: picked?.queueId === item.queueId ? 'var(--color-surface)' : '#fff',
+                    cursor: 'pointer',
+                    outline: picked?.queueId === item.queueId ? '2px solid var(--color-crimson)' : 'none',
+                  }}
+                >
+                  <div style={{ fontSize: 13, fontWeight: 700 }}>{item.orderRef}</div>
+                  <div style={{ fontSize: 11, color: 'var(--color-ink-muted)' }}>{item.customerName ?? 'Unknown customer'}</div>
+                </button>
+              ))}
+              {filtered.length === 0 && (
+                <p style={{ padding: '10px 14px', fontSize: 11, color: 'var(--color-ink-muted)' }}>No matches</p>
+              )}
+            </div>
+          </>
+        )}
+
+        <div className={styles.modalActions}>
+          <button onClick={onClose} disabled={busy} className={styles.btnSecondary}>Cancel</button>
+          <button onClick={() => void confirm()} disabled={!picked || busy} className={styles.btnPrimary}>
+            {busy ? 'Assigning…' : picked ? `Assign to ${picked.orderRef}` : 'Select an order'}
           </button>
         </div>
       </div>
@@ -375,6 +508,11 @@ function QcEditorModal({
             className={styles.modalInput}
             rows={4}
           />
+        </div>
+
+        <div className={styles.modalField}>
+          <label className={styles.modalLabel}>Unit history</label>
+          <UnitTimeline unitSerial={unit.serial} density="compact" />
         </div>
 
         <div className={styles.modalActions}>

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   useServiceTickets, createTicket, syncGmailTickets,
   STATUS_META, TICKET_STATUSES, TOPIC_LABEL,
-  statusMeta, priorityMeta, sourceLabel, topicLabel,
+  statusMeta, priorityMeta, sourceLabel, topicLabel, slaChip,
   ISSUE_AREAS, ISSUE_AREA_LABEL,
   type TicketStatus, type TicketPriority, type TicketTopic, type ServiceTicket,
   type IssueArea,
@@ -21,7 +21,7 @@ export function SupportTab() {
   const { tickets, loading } = useServiceTickets('support');
   const { customers } = useCustomers();
   const [statusFilter, setStatusFilter] = useState<TicketStatus | 'all'>('all');
-  const [sourceFilter, setSourceFilter] = useState<'all' | 'customer_form' | 'hubspot' | 'gmail' | 'quo'>('all');
+  const [sourceFilter, setSourceFilter] = useState<'all' | 'customer_form' | 'hubspot' | 'gmail' | 'quo' | 'telemetry_auto'>('all');
   const [topicFilter, setTopicFilter] = useState<TicketTopic | 'all'>('all');
   const [areaFilter, setAreaFilter] = useState<IssueArea | 'all' | 'none'>('all');
   const [q, setQ] = useState('');
@@ -135,6 +135,10 @@ export function SupportTab() {
           className={`${styles.chip} ${sourceFilter === 'hubspot' ? styles.chipActive : ''}`}
           onClick={() => setSourceFilter('hubspot')}
         >HubSpot</button>
+        <button
+          className={`${styles.chip} ${sourceFilter === 'telemetry_auto' ? styles.chipActive : ''}`}
+          onClick={() => setSourceFilter('telemetry_auto')}
+        >Telemetry-auto</button>
         <input
           className={styles.search}
           placeholder="Search ticket #, subject, customer, summary…"
@@ -213,6 +217,7 @@ export function SupportTab() {
               <th>Topic</th>
               <th>Source</th>
               <th>Priority</th>
+              <th>SLA</th>
               <th>Status</th>
               <th>Owner</th>
               <th></th>
@@ -482,6 +487,7 @@ function Kpi({ label, value }: { label: string; value: number }) {
 function TicketRow({ t, selected, onClick }: { t: ServiceTicket; selected: boolean; onClick: () => void }) {
   const s = statusMeta(t.status);
   const p = priorityMeta(t.priority);
+  const sla = slaChip(t);
   // Age: prefer last_message_at (gmail-aware) then created_at.
   const lastTs = t.last_message_at ?? t.created_at;
   const ageHours = (Date.now() - new Date(lastTs).getTime()) / 3_600_000;
@@ -509,10 +515,24 @@ function TicketRow({ t, selected, onClick }: { t: ServiceTicket; selected: boole
       <td>
         <div>{t.subject}</div>
         {t.summary && <div className={styles.rowSummary}>{t.summary}</div>}
+        {t.engineering_resolved_at && !t.closed_at && (
+          <div
+            title={`Engineering resolved ${new Date(t.engineering_resolved_at).toLocaleString()}`}
+            style={{ marginTop: 2, fontSize: 10, fontWeight: 700, color: '#276749' }}
+          >
+            Engineering fixed — follow up
+          </div>
+        )}
       </td>
       <td>{t.topic ? <span className={styles.topicPill}>{topicLabel(t.topic)}</span> : '—'}</td>
-      <td>{sourceLabel(t.source)}</td>
+      <td>
+        {t.source === 'telemetry_auto'
+          ? <span className={styles.telemetryAutoBadge}>Telemetry auto</span>
+          : sourceLabel(t.source)
+        }
+      </td>
       <td><span className={styles.pill} style={{ background: '#f7fafc', color: p.color }}>{p.label}</span></td>
+      <td><SlaChipPill label={sla.label} color={sla.color} /></td>
       <td>
         <span className={styles.pill} style={{ background: s.bg, color: s.color }}>{s.label}</span>
         {t.status === 'closed' && t.closed_at && (
@@ -527,6 +547,18 @@ function TicketRow({ t, selected, onClick }: { t: ServiceTicket; selected: boole
       </td>
     </tr>
   );
+}
+
+const SLA_CHIP_STYLE: Record<string, { background: string; color: string }> = {
+  green: { background: '#f0fff4', color: '#276749' },
+  amber: { background: '#fffaf0', color: '#c05621' },
+  red:   { background: '#fff5f5', color: '#c53030' },
+  grey:  { background: '#edf2f7', color: '#718096' },
+};
+
+function SlaChipPill({ label, color }: { label: string; color: 'green' | 'amber' | 'red' | 'grey' }) {
+  const style = SLA_CHIP_STYLE[color];
+  return <span className={styles.pill} style={style}>{label}</span>;
 }
 
 function formatAge(hours: number): string {

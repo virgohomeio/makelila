@@ -4,20 +4,37 @@ import {
 import type { Session, User } from '@supabase/supabase-js';
 import { Navigate, useLocation } from 'react-router-dom';
 import { supabase } from './supabase';
+import type { Role } from './permissions';
+
+// External (non-@virgohome.io) emails permitted to sign in. Keep this set
+// tiny — every entry bypasses the domain check below + needs a matching
+// row in public.external_email_allowlist so handle_new_user sets
+// profiles.is_internal=true on first sign-in. Adds: 2026-06-07 Ryan Yuan,
+// 2026-06-10 John (john@lila.vip, Microsoft 365).
+const EXTERNAL_ALLOWLIST = new Set<string>([
+  'ryanyuan32@gmail.com',
+  'john@lila.vip',
+]);
 
 export function requireInternalDomain(email: string | undefined | null): boolean {
   if (!email) return false;
-  return email.toLowerCase().endsWith('@virgohome.io');
+  const lower = email.toLowerCase();
+  if (lower.endsWith('@virgohome.io')) return true;
+  return EXTERNAL_ALLOWLIST.has(lower);
 }
 
-type Profile = { id: string; display_name: string; role: string };
+type Profile = { id: string; display_name: string; role: Role };
 
 type AuthState = {
   session: Session | null;
   user: User | null;
   profile: Profile | null;
+  /** Convenience: profile?.role (or null while loading). Pair with
+   *  canDo/canView from lib/permissions.ts. */
+  role: Role | null;
   loading: boolean;
   signInWithGoogle: () => Promise<void>;
+  signInWithMicrosoft: () => Promise<void>;
   signOut: () => Promise<void>;
 };
 
@@ -45,7 +62,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     if (!requireInternalDomain(user.email)) {
       supabase.auth.signOut();
-      alert('Access restricted to @virgohome.io accounts.');
+      alert('Access restricted. Use your @virgohome.io account, or contact George if you need access.');
       return;
     }
 
@@ -61,13 +78,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     session,
     user: session?.user ?? null,
     profile,
+    role: profile?.role ?? null,
     loading,
     signInWithGoogle: async () => {
+      // No `hd: 'virgohome.io'` pin — that would block the EXTERNAL_ALLOWLIST
+      // (e.g. ryanyuan32@gmail.com) from reaching the OAuth flow at all.
+      // The post-signin requireInternalDomain check still rejects every
+      // address that isn't either @virgohome.io or in the allowlist.
       await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
           redirectTo: window.location.origin + import.meta.env.BASE_URL,
-          queryParams: { hd: 'virgohome.io' },
+        },
+      });
+    },
+    signInWithMicrosoft: async () => {
+      await supabase.auth.signInWithOAuth({
+        provider: 'azure',
+        options: {
+          redirectTo: window.location.origin + import.meta.env.BASE_URL,
+          scopes: 'email openid profile',
         },
       });
     },

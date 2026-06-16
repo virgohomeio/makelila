@@ -38,6 +38,13 @@ export type Order = {
   // in the Replacement tab under "Awaiting batch" with the batch's
   // expected arrival.
   awaiting_batch_id: string | null;
+  // Replacement tagging + pending replacements (spec 2026-06-08). 'ready' =
+  // every line item is in stock / a unit is ready; 'awaiting' = blocked on an
+  // out-of-stock part or a pending unit batch; 'held' = paused by an operator
+  // while a refund/return is in progress (#83). Drives the Ready / Awaiting /
+  // Held split in Order Review > Replacement. Null for non-replacement.
+  replacement_state: 'ready' | 'awaiting' | 'held' | null;
+  held_reason: string | null;
   cogs_usd: number | null;
   shipping_cost_usd: number | null;
   shipped_at: string | null;
@@ -70,6 +77,8 @@ export type Order = {
   address_claude_verdict: 'plausible' | 'implausible' | 'unknown' | null;
   address_claude_notes: string | null;
   address_claude_postal: string | null;
+  address_confirmed_at: string | null;
+  address_confirmation_sent_at: string | null;
   freight_estimate_usd: number;
   freight_threshold_usd: number;
   // What Shopify recorded the customer paying for shipping. Distinct from
@@ -239,6 +248,16 @@ export type VerifyAddressResult = {
   google_postal: string | null;
   google_formatted: string | null;
 };
+
+export async function confirmAddress(orderId: string): Promise<{ order_ref: string }> {
+  const { data, error } = await supabase.functions.invoke<{ order_ref: string }>(
+    'confirm-address',
+    { body: { order_id: orderId } },
+  );
+  if (error) throw new Error(error.message);
+  if (!data) throw new Error('Empty response from confirm-address');
+  return data;
+}
 
 export async function verifyAddress(orderId: string): Promise<VerifyAddressResult> {
   const { data, error } = await supabase.functions.invoke<VerifyAddressResult>(
@@ -423,6 +442,86 @@ export function useOrder(id: string | null): { order: Order | null; loading: boo
   return { order, loading: loading && !order };
 }
 
+/** All un-shipped replacement orders in 'ready' or 'awaiting' state.
+ * Used by ReturnsTab/RefundsTab (#83) to warn when a customer has a queued
+ * replacement that should be held before their refund is processed. */
+export function useQueuedReplacements(): { replacements: Order[]; loading: boolean } {
+  const [replacements, setReplacements] = useState<Order[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let channel: RealtimeChannel | null = null;
+    let cancelled = false;
+
+    (async () => {
+      const { data, error } = await supabase
+        .from('orders')
+        .select('*')
+        .eq('kind', 'replacement')
+        .in('replacement_state', ['ready', 'awaiting'])
+        .is('shipped_at', null)
+        .order('created_at', { ascending: true });
+      if (cancelled) return;
+      if (!error && data) setReplacements(data as Order[]);
+      setLoading(false);
+
+      channel = supabase
+        .channel('orders:queued_replacements')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' },
+          (payload) => {
+            setReplacements(prev => {
+              const updated = payload.new as Order | undefined;
+              const deleted = payload.old as { id: string } | undefined;
+              if (payload.eventType === 'DELETE' && deleted) {
+                return prev.filter(r => r.id !== deleted.id);
+              }
+              if (updated) {
+                const isQueued =
+                  updated.kind === 'replacement' &&
+                  (updated.replacement_state === 'ready' || updated.replacement_state === 'awaiting') &&
+                  !updated.shipped_at;
+                const idx = prev.findIndex(r => r.id === updated.id);
+                if (!isQueued) return prev.filter(r => r.id !== updated.id);
+                if (idx >= 0) { const next = [...prev]; next[idx] = updated; return next; }
+                return [...prev, updated];
+              }
+              return prev;
+            });
+          })
+        .subscribe();
+    })();
+
+    return () => {
+      cancelled = true;
+      if (channel) void channel.unsubscribe();
+    };
+  }, []);
+
+  return { replacements, loading };
+}
+
+/** Mark a queued replacement as held while a refund is in progress. Reversible
+ * via resumeReplacement. Does NOT free reserved units — units stay reserved
+ * so the replacement can be resumed if the refund is later denied. */
+export async function holdReplacement(orderId: string, reason?: string): Promise<void> {
+  const { error } = await supabase
+    .from('orders')
+    .update({ replacement_state: 'held', held_reason: reason ?? null })
+    .eq('id', orderId);
+  if (error) throw error;
+  await logAction('repl_held', orderId, reason ?? 'held pending refund review');
+}
+
+/** Resume a previously held replacement, restoring it to 'ready' or 'awaiting'. */
+export async function resumeReplacement(orderId: string, state: 'ready' | 'awaiting'): Promise<void> {
+  const { error } = await supabase
+    .from('orders')
+    .update({ replacement_state: state, held_reason: null })
+    .eq('id', orderId);
+  if (error) throw error;
+  await logAction('repl_resumed', orderId, `resumed → ${state}`);
+}
+
 export function useOrderNotes(orderId: string | null): {
   notes: OrderNote[];
   loading: boolean;
@@ -486,7 +585,19 @@ export async function nextReplacementOrderRef(): Promise<string> {
 
 export type ReplacementLineItem =
   | { kind: 'part'; part_id: string; sku: string; name: string; qty: number; cost_per_unit_usd: number }
-  | { kind: 'unit'; unit_serial: string; batch: string; name: string; qty: 1; cost_usd: number };
+  // Out-of-stock part (on_hand = 0 at selection). Same shape as 'part' but does
+  // NOT decrement stock — the order is created as 'awaiting'.
+  | { kind: 'part_pending'; part_id: string; sku: string; name: string; qty: number; cost_per_unit_usd: number }
+  | { kind: 'unit'; unit_serial: string; batch: string; name: string; qty: 1; cost_usd: number }
+  // Unit from a batch with no ready stock yet (e.g. P100X in production). No
+  // serial assigned; sets awaiting_batch_id; does NOT reserve a unit.
+  | { kind: 'unit_pending'; batch: string; name: string; qty: 1; cost_usd: number };
+
+/** True if any line is unfulfillable now (out-of-stock part or pending batch),
+ *  which means the order must be created as 'awaiting' rather than 'ready'. */
+export function hasPendingLine(items: ReplacementLineItem[]): boolean {
+  return items.some(li => li.kind === 'part_pending' || li.kind === 'unit_pending');
+}
 
 export type ReplacementOrderInput = {
   ticket_id: string;
@@ -505,8 +616,8 @@ export type ReplacementOrderInput = {
 
 function computeCogs(items: ReplacementLineItem[]): number {
   return items.reduce((sum, li) => {
-    if (li.kind === 'part') return sum + li.cost_per_unit_usd * li.qty;
-    return sum + li.cost_usd;
+    if (li.kind === 'part' || li.kind === 'part_pending') return sum + li.cost_per_unit_usd * li.qty;
+    return sum + li.cost_usd; // unit | unit_pending
   }, 0);
 }
 
@@ -557,6 +668,7 @@ export async function createReplacementOrder(input: ReplacementOrderInput):
       order_ref,
       kind: 'replacement',
       status: 'pending',
+      replacement_state: 'ready',
       linked_ticket_id: input.ticket_id,
       cogs_usd,
       customer_name: input.customer_name,
@@ -575,10 +687,11 @@ export async function createReplacementOrder(input: ReplacementOrderInput):
     .single();
   if (insErr || !row) throw new Error(`Create order: ${insErr?.message ?? 'no row'}`);
 
-  // 2. Back-link the ticket.
+  // 2. Back-link the ticket and mark it queued_for_replacement so it surfaces
+  //    with that status in Support Tickets while the replacement is in flight.
   const { error: tErr } = await supabase
     .from('service_tickets')
-    .update({ replacement_order_id: row.id })
+    .update({ replacement_order_id: row.id, status: 'queued_for_replacement' })
     .eq('id', input.ticket_id);
   if (tErr) throw new Error(`Link ticket: ${tErr.message}`);
 
@@ -595,9 +708,17 @@ export async function createReplacementOrder(input: ReplacementOrderInput):
     if (pErr) throw new Error(`Decrement part ${li.part_id}: ${pErr.message}`);
   }
 
-  // 4. Reserve units.
+  // 4. Reserve units — quarantine excluded: do not pick quarantined units.
   for (const li of input.line_items) {
     if (li.kind !== 'unit') continue;
+    const { data: unitRow } = await supabase
+      .from('units')
+      .select('status')
+      .eq('serial', li.unit_serial)
+      .single();
+    if (unitRow?.status === 'quarantine') {
+      throw new Error(`Unit ${li.unit_serial} is quarantined and cannot be reserved for a replacement order`);
+    }
     const { error: uErr } = await supabase
       .from('units')
       .update({ status: 'reserved', customer_order_ref: row.order_ref, customer_name: input.customer_name })
@@ -609,6 +730,64 @@ export async function createReplacementOrder(input: ReplacementOrderInput):
     'replacement_create',
     row.order_ref,
     `from ticket ${input.ticket_id} · ${input.line_items.length} items · COGS $${cogs_usd.toFixed(2)}`,
+  );
+  return { id: row.id, order_ref: row.order_ref };
+}
+
+/** Creates a PENDING replacement (replacement_state='awaiting') for a cart that
+ *  contains at least one out-of-stock part or pending-batch unit. Unlike
+ *  createReplacementOrder this does NOT decrement parts or reserve units — the
+ *  order is waiting on stock/batch and gets fulfilled (and stock consumed) when
+ *  it's promoted to 'ready' later. Sets awaiting_batch_id from the first
+ *  pending-batch unit so the Replacement queue groups it (backlog #71). Lands
+ *  in Order Review > Replacement > "Awaiting Stock / Batch". */
+export async function createPendingReplacement(input: ReplacementOrderInput):
+  Promise<{ id: string; order_ref: string }> {
+  if (input.line_items.length === 0) throw new Error('At least one line item required');
+  const order_ref = await nextReplacementOrderRef();
+  const cogs_usd = computeCogs(input.line_items);
+  const pendingBatch = input.line_items.find(
+    (li): li is Extract<ReplacementLineItem, { kind: 'unit_pending' }> => li.kind === 'unit_pending',
+  );
+
+  const { data: row, error: insErr } = await supabase
+    .from('orders')
+    .insert({
+      order_ref,
+      kind: 'replacement',
+      status: 'pending',
+      replacement_state: 'awaiting',
+      awaiting_batch_id: pendingBatch?.batch ?? null,
+      linked_ticket_id: input.ticket_id,
+      cogs_usd,
+      customer_name: input.customer_name,
+      customer_email: input.customer_email ?? null,
+      customer_phone: input.customer_phone ?? null,
+      address_line: input.address.address_line,
+      city: input.address.city,
+      region_state: input.address.region_state,
+      country: input.address.country,
+      postal_code: input.address.postal_code,
+      address_customer_postal: input.address.postal_code,
+      ...REPLACEMENT_ORDER_DEFAULTS,
+      line_items: input.line_items,
+    })
+    .select('id, order_ref')
+    .single();
+  if (insErr || !row) throw new Error(`Create pending replacement: ${insErr?.message ?? 'no row'}`);
+
+  // Back-link + queue the ticket. No stock decrement / unit reservation —
+  // the order is awaiting stock/batch and consumes nothing until promoted.
+  const { error: tErr } = await supabase
+    .from('service_tickets')
+    .update({ replacement_order_id: row.id, status: 'queued_for_replacement' })
+    .eq('id', input.ticket_id);
+  if (tErr) throw new Error(`Link ticket: ${tErr.message}`);
+
+  await logAction(
+    'replacement_create',
+    row.order_ref,
+    `PENDING from ticket ${input.ticket_id} · ${input.line_items.length} items · awaiting ${pendingBatch?.batch ?? 'stock'}`,
   );
   return { id: row.id, order_ref: row.order_ref };
 }
@@ -660,7 +839,7 @@ export async function markOrderShipped(orderId: string, shippingCostUsd: number)
   }
   const { data: row, error: rErr } = await supabase
     .from('orders')
-    .select('order_ref')
+    .select('order_ref, customer_email')
     .eq('id', orderId)
     .single();
   if (rErr || !row) throw new Error(`Read order: ${rErr?.message ?? 'not found'}`);
@@ -670,7 +849,9 @@ export async function markOrderShipped(orderId: string, shippingCostUsd: number)
     .update({ shipped_at: new Date().toISOString(), shipping_cost_usd: shippingCostUsd })
     .eq('id', orderId);
   if (error) throw new Error(error.message);
-  await logAction('order_shipped', row.order_ref, `shipping $${shippingCostUsd.toFixed(2)}`);
+  await logAction('order_shipped', row.order_ref, `shipping $${shippingCostUsd.toFixed(2)}`,
+    undefined,
+    { klaviyoEvent: 'Order Shipped', ...((row.customer_email as string | null) ? { klaviyoEmail: row.customer_email as string } : {}) });
 }
 
 /** Shipped orders that have not yet been marked delivered.
@@ -723,7 +904,7 @@ export function useShippedOrders(): { orders: Order[]; loading: boolean } {
 export async function markOrderDelivered(orderId: string): Promise<void> {
   const { data: row, error: rErr } = await supabase
     .from('orders')
-    .select('kind, linked_ticket_id, order_ref, delivered_at, shipped_at')
+    .select('kind, linked_ticket_id, order_ref, delivered_at, shipped_at, customer_email')
     .eq('id', orderId)
     .single();
   if (rErr || !row) throw new Error(`Read order: ${rErr?.message ?? 'not found'}`);
@@ -738,7 +919,9 @@ export async function markOrderDelivered(orderId: string): Promise<void> {
     .update({ delivered_at: deliveredAt })
     .eq('id', orderId);
   if (uErr) throw new Error(uErr.message);
-  await logAction('order_delivered', row.order_ref, 'delivery confirmed');
+  await logAction('order_delivered', row.order_ref, 'delivery confirmed',
+    undefined,
+    { klaviyoEvent: 'Order Delivered', ...((row.customer_email as string | null) ? { klaviyoEmail: row.customer_email as string } : {}) });
 
   if (row.kind === 'replacement' && row.linked_ticket_id) {
     const { error: tErr } = await supabase

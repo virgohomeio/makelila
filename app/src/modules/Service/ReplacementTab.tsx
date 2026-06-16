@@ -1,7 +1,13 @@
 import { useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useReplacementOrders, type Order } from '../../lib/orders';
 import { isReplacementLine } from '../../lib/orders';
-import { useBatches, type Batch } from '../../lib/stock';
+import {
+  replacementItemTags, replacementStageTag, type StageTag,
+  replacementUnitDemandByBatch, replacementDemandBySku,
+} from '../../lib/replacementTags';
+import { useBatches, useUnits, type Batch } from '../../lib/stock';
+import { useParts } from '../../lib/parts';
 import { useServiceTickets, type TicketTopic } from '../../lib/service';
 import { TicketDetailPanel } from './TicketDetailPanel';
 import styles from './Service.module.css';
@@ -56,14 +62,14 @@ function summarize(line_items: Order['line_items']): string {
   return segs.join(' + ') || '—';
 }
 
-const STAGES: { key: Stage | 'all'; label: string }[] = [
-  { key: 'all',             label: 'All' },
-  { key: 'pending',         label: 'Pending' },
-  { key: 'awaiting_batch',  label: 'Awaiting batch' },
-  { key: 'fulfilling',      label: 'Fulfilling' },
-  { key: 'shipped',         label: 'Shipped' },
-  { key: 'delivered',       label: 'Delivered' },
-  { key: 'closed',          label: 'Closed' },
+// Filter by the operator-facing item stage (spec 2026-06-08), not the pipeline
+// status. Every replacement is a unit (ready→Unit / pending→awaiting batch) or
+// parts/consumables.
+const STAGE_FILTERS: { key: 'all' | StageTag; label: string }[] = [
+  { key: 'all',                label: 'All' },
+  { key: 'Unit',               label: 'Unit' },
+  { key: 'awaiting batch',     label: 'awaiting batch' },
+  { key: 'Parts/Consumables',  label: 'Parts/Consumables' },
 ];
 
 // Backlog #41 — topics that signal "this ticket is asking for a replacement"
@@ -78,10 +84,49 @@ const CLOSED_TICKET_STATUSES = new Set(['resolved', 'closed']);
 export default function ReplacementTab() {
   const { orders, loading } = useReplacementOrders();
   const { batches } = useBatches();
+  const { units } = useUnits();
+  const { parts } = useParts();
   // Pull every support/repair ticket so we can filter for triage candidates.
   // useServiceTickets() with no arg returns all categories; we filter below.
   const { tickets } = useServiceTickets();
-  const [filter, setFilter] = useState<Stage | 'all'>('all');
+
+  // Queued replacement demand vs supply — units (ready vs needed, by batch)
+  // and parts/consumables (on-hand vs queued). Drawn from un-shipped
+  // replacement orders, same tag derivation used by the rows below.
+  const demand = useMemo(() => {
+    const unitDemand = replacementUnitDemandByBatch(orders);
+    const readyByBatch = new Map<string, number>();
+    for (const u of units) if (u.status === 'ready') readyByBatch.set(u.batch, (readyByBatch.get(u.batch) ?? 0) + 1);
+    const rank = (id: string) => ({ P100: 0, P100X: 1, P150: 2 } as Record<string, number>)[id] ?? 9;
+    const unitRows = [...new Set<string>([...unitDemand.keys(), 'P100X'])]
+      .map(id => {
+        const ready = readyByBatch.get(id) ?? 0;
+        const d = unitDemand.get(id) ?? 0;
+        return { batch: id, ready, demand: d, toBuild: Math.max(0, d - ready) };
+      })
+      .filter(r => r.ready > 0 || r.demand > 0)
+      .sort((a, b) => rank(a.batch) - rank(b.batch) || a.batch.localeCompare(b.batch));
+    const totalReady = units.filter(u => u.status === 'ready').length;
+    const totalToBuild = unitRows.reduce((n, r) => n + r.toBuild, 0);
+
+    const partDemand = replacementDemandBySku(orders);
+    const partRows = [...partDemand.entries()]
+      .map(([sku, d]) => {
+        const p = parts.find(pp => pp.sku === sku);
+        const onHand = p && p.category === 'replacement' ? p.on_hand : 0;
+        return { sku, name: p?.name ?? sku, onHand, demand: d, toGet: Math.max(0, d - onHand) };
+      })
+      .sort((a, b) => b.demand - a.demand || a.name.localeCompare(b.name));
+    const partsOnHand = partRows.reduce((n, r) => n + r.onHand, 0);
+    const partsQueued = partRows.reduce((n, r) => n + r.demand, 0);
+    const partsToGet = partRows.reduce((n, r) => n + r.toGet, 0);
+
+    return {
+      unitRows, totalReady, totalToBuild, p100x: unitDemand.get('P100X') ?? 0,
+      partRows, partsOnHand, partsQueued, partsToGet,
+    };
+  }, [orders, units, parts]);
+  const [filter, setFilter] = useState<'all' | StageTag>('all');
   const [openTicketId, setOpenTicketId] = useState<string | null>(null);
 
   const batchById = useMemo(() => {
@@ -89,6 +134,16 @@ export default function ReplacementTab() {
     for (const b of batches) m.set(b.id, b);
     return m;
   }, [batches]);
+
+  // A batch is "pending" (→ stage tag "awaiting batch") when it has no arrived
+  // stock yet, e.g. P100X. Unknown batches default to pending so a not-yet-
+  // synced future batch never mislabels as a ready Unit. (spec 2026-06-08)
+  const pendingBatchIds = useMemo(
+    () => new Set(batches.filter(b => b.arrived_at == null).map(b => b.id)),
+    [batches],
+  );
+  const isPendingBatch = (batch: string) =>
+    pendingBatchIds.has(batch) || !batchById.has(batch);
 
   // Backlog #41 — triage candidates: open service tickets whose topic flags
   // them as a likely replacement, and that don't yet have a replacement
@@ -105,10 +160,14 @@ export default function ReplacementTab() {
       .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
   }, [tickets]);
 
-  const filtered = useMemo(
-    () => orders.filter(o => filter === 'all' || stageFor(o) === filter),
-    [orders, filter],
-  );
+  const filtered = useMemo(() => {
+    if (filter === 'all') return orders;
+    return orders.filter(o => {
+      const tags = replacementItemTags(o);
+      const st = replacementStageTag(o, tags, b => pendingBatchIds.has(b) || !batchById.has(b));
+      return st === filter;
+    });
+  }, [orders, filter, pendingBatchIds, batchById]);
 
   const openTicket = useMemo(
     () => openTicketId ? tickets.find(t => t.id === openTicketId) ?? null : null,
@@ -130,6 +189,77 @@ export default function ReplacementTab() {
 
   return (
     <>
+      {/* Queued replacement demand vs supply — units + parts/consumables. */}
+      <div className={styles.replSupplyPanel}>
+        <div className={styles.replSupplyHeader}>Queued replacement demand</div>
+
+        <div className={styles.replSupplyCols}>
+        <div className={styles.replSupplyCol}>
+        <div className={styles.replSupplySub}>LILA Units</div>
+        <div className={styles.replSupplyKpis}>
+          <div className={styles.replSupplyKpi}>
+            <div className={styles.replSupplyKpiValue}>{demand.totalReady}</div>
+            <div className={styles.replSupplyKpiLabel}>Ready now</div>
+          </div>
+          <div className={styles.replSupplyKpi}>
+            <div className={`${styles.replSupplyKpiValue} ${demand.totalToBuild > 0 ? styles.replSupplyWarn : ''}`}>{demand.totalToBuild}</div>
+            <div className={styles.replSupplyKpiLabel}>Need to build / get ready</div>
+          </div>
+          <div className={styles.replSupplyKpi}>
+            <div className={`${styles.replSupplyKpiValue} ${demand.p100x > 0 ? styles.replSupplyWarn : ''}`}>{demand.p100x}</div>
+            <div className={styles.replSupplyKpiLabel}>Next batch (P100X)</div>
+          </div>
+        </div>
+        {demand.unitRows.length > 0 && (
+          <table className={styles.replSupplyTable}>
+            <thead><tr><th>Model / batch</th><th>Ready</th><th>Queued</th><th>To build / get ready</th></tr></thead>
+            <tbody>
+              {demand.unitRows.map(r => (
+                <tr key={r.batch}>
+                  <td>{r.batch}</td><td>{r.ready}</td><td>{r.demand}</td>
+                  <td>{r.toBuild > 0 ? <strong className={styles.replSupplyWarn}>{r.toBuild}</strong> : 0}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        </div>
+
+        <div className={styles.replSupplyCol}>
+        <div className={styles.replSupplySub}>Parts &amp; Consumables</div>
+        <div className={styles.replSupplyKpis}>
+          <div className={styles.replSupplyKpi}>
+            <div className={styles.replSupplyKpiValue}>{demand.partsOnHand}</div>
+            <div className={styles.replSupplyKpiLabel}>In stock</div>
+          </div>
+          <div className={styles.replSupplyKpi}>
+            <div className={`${styles.replSupplyKpiValue} ${demand.partsToGet > 0 ? styles.replSupplyWarn : ''}`}>{demand.partsToGet}</div>
+            <div className={styles.replSupplyKpiLabel}>Need to get / restock</div>
+          </div>
+          <div className={styles.replSupplyKpi}>
+            <div className={styles.replSupplyKpiValue}>{demand.partsQueued}</div>
+            <div className={styles.replSupplyKpiLabel}>Queued</div>
+          </div>
+        </div>
+        {demand.partRows.length > 0 ? (
+          <table className={styles.replSupplyTable}>
+            <thead><tr><th>Part / consumable</th><th>On hand</th><th>Queued</th><th>To get</th></tr></thead>
+            <tbody>
+              {demand.partRows.map(r => (
+                <tr key={r.sku}>
+                  <td>{r.name}</td><td>{r.onHand}</td><td>{r.demand}</td>
+                  <td>{r.toGet > 0 ? <strong className={styles.replSupplyWarn}>{r.toGet}</strong> : 0}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : (
+          <div className={styles.muted} style={{ fontSize: 12 }}>No parts or consumables queued for replacement.</div>
+        )}
+        </div>
+        </div>
+      </div>
+
       <div className={styles.kpiStrip}>
         <div className={styles.kpiCard}><div className={styles.kpiLabel}>Open</div><div className={styles.kpiValue}>{open}</div></div>
         <div className={styles.kpiCard}><div className={styles.kpiLabel}>Triage candidates</div><div className={styles.kpiValue}>{triageCandidates.length}</div></div>
@@ -181,7 +311,7 @@ export default function ReplacementTab() {
       <h3 className={styles.sectionHeading}>Replacement orders</h3>
 
       <div className={styles.filterRow}>
-        {STAGES.map(s => (
+        {STAGE_FILTERS.map(s => (
           <button key={s.key}
             className={`${styles.chip} ${filter === s.key ? styles.chipActive : ''}`}
             onClick={() => setFilter(s.key)}>{s.label}</button>
@@ -195,7 +325,7 @@ export default function ReplacementTab() {
           <thead>
             <tr>
               <th>Order #</th><th>Ticket</th><th>Customer</th><th>Items</th>
-              <th>Tracking</th><th>COGS</th><th>Stage</th><th>Days open</th>
+              <th>Tracking</th><th>COGS</th><th>Item Type</th><th>Days open</th>
             </tr>
           </thead>
           <tbody>
@@ -203,9 +333,11 @@ export default function ReplacementTab() {
               const daysOpen = Math.floor((now - new Date(o.created_at).getTime()) / 86400_000);
               const stage = stageFor(o);
               const batch = o.awaiting_batch_id ? batchById.get(o.awaiting_batch_id) : null;
+              const tags = replacementItemTags(o);
+              const stageTag = replacementStageTag(o, tags, isPendingBatch);
               return (
                 <tr key={o.id} className={styles.row}>
-                  <td><a href="#/order-review">{o.order_ref}</a></td>
+                  <td><Link to={`/order-review/${o.id}`}>{o.order_ref}</Link></td>
                   <td>
                     {o.linked_ticket_id ? (
                       <button
@@ -216,14 +348,12 @@ export default function ReplacementTab() {
                     ) : '—'}
                   </td>
                   <td>{o.customer_name}</td>
-                  <td>
-                    {stage === 'awaiting_batch' ? (
-                      <span className={styles.awaitingBatchTag} title={batch?.notes ?? ''}>
-                        Awaiting {o.awaiting_batch_id}
-                      </span>
-                    ) : (
-                      summarize(o.line_items)
-                    )}
+                  <td title={batch?.notes ?? undefined}>
+                    <div className={styles.tagRow}>
+                      {tags.length > 0
+                        ? tags.map(t => <span key={t} className={styles.itemTag}>{t}</span>)
+                        : <span className={styles.muted}>{summarize(o.line_items)}</span>}
+                    </div>
                   </td>
                   <td>
                     {o.tracking_num
@@ -233,9 +363,11 @@ export default function ReplacementTab() {
                       : <span className={styles.muted} title="No tracking yet — still to be shipped">—</span>}
                   </td>
                   <td>${(o.cogs_usd ?? 0).toFixed(2)}</td>
-                  <td>{stage === 'awaiting_batch' ? (
-                    <span className={styles.awaitingBatchTag}>awaiting batch</span>
-                  ) : stage}</td>
+                  <td>
+                    {stageTag
+                      ? <span className={styles.stageTag} data-stage={stageTag}>{stageTag}</span>
+                      : <span className={styles.muted}>{stage}</span>}
+                  </td>
                   <td>{daysOpen}</td>
                 </tr>
               );

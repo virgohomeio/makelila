@@ -1,0 +1,12 @@
+-- Allow null user_id on activity_log for system-generated events.
+-- Automated processes (pg_cron SLA breach detection, telemetry auto-tickets,
+-- trigger-based audit events) have no human actor. Previously all logAction()
+-- callers were operator sessions with a valid auth.uid(), but pg_cron jobs
+-- run as the service role outside any session context.
+--
+-- The existing NOT NULL constraint and RLS check-policy (user_id = auth.uid())
+-- covered the interactive case. We keep the RLS policy: any row a human inserts
+-- must have user_id = auth.uid(). System inserts use the service role which
+-- bypasses RLS entirely, so null user_id is only reachable from service-role
+-- callers (edge functions, cron jobs) — not from browser sessions.
+alter table public.activity_log alter column user_id drop not null;

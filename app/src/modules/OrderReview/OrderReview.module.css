@@ -1,3 +1,26 @@
+.viewChips {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.viewChip {
+  border: 1px solid var(--color-border);
+  background: #fff;
+  color: var(--color-ink-muted);
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.viewChipActive {
+  background: var(--color-crimson);
+  color: #fff;
+  border-color: var(--color-crimson);
+}
+
 .layout {
   display: grid;
   grid-template-columns: 320px 1fr;
@@ -7,6 +30,21 @@
   border-radius: var(--radius-md);
   border: 1px solid var(--color-border);
   overflow: hidden;
+}
+
+/* Mobile single-column drill (2026-06-07).
+ * The desktop grid (sidebar | detail) is too wide for a phone. On mobile we
+ * render a single column, controlled by the parent: sidebar visible when no
+ * order is selected, detail visible (with a back header) when one is. */
+@media (max-width: 700px) {
+  .layout {
+    display: block;
+    height: auto;
+    min-height: calc(100dvh - var(--nav-height));
+    border-radius: 0;
+    border-left: none;
+    border-right: none;
+  }
 }
 
 .empty {

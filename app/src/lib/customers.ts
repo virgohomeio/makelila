@@ -35,9 +35,54 @@ export type Customer = {
   journey_stage_override: string | null;
   journey_stage_override_at: string | null;
   journey_stage_override_by: string | null;
+  first_touch_source: string | null;
+  first_touch_campaign_id: string | null;
+  first_touch_at: string | null;
+  last_touch_source: string | null;
+  last_touch_campaign_id: string | null;
+  last_touch_at: string | null;
+  // J6: when true, the telemetry auto-ticket cron skips all units for this customer.
+  telemetry_autoticket_suppress: boolean;
   created_at: string;
   updated_at: string;
 };
+
+export function parseUtm(
+  landingUrl: string | null | undefined,
+): { source: string | null; campaign: string | null } {
+  if (!landingUrl) return { source: null, campaign: null };
+  try {
+    const url = new URL(landingUrl);
+    const source = url.searchParams.get('utm_source');
+    const campaign = url.searchParams.get('utm_campaign');
+    if (!source) return { source: 'shopify_direct', campaign: null };
+    return { source, campaign };
+  } catch {
+    return { source: null, campaign: null };
+  }
+}
+
+export async function updateLastTouch(
+  customerId: string,
+  source: string,
+  campaignId: string | null,
+): Promise<void> {
+  const { error } = await supabase
+    .from('customers')
+    .update({
+      last_touch_source: source,
+      last_touch_campaign_id: campaignId,
+      last_touch_at: new Date().toISOString(),
+    })
+    .eq('id', customerId);
+  if (error) throw error;
+  await logAction(
+    'customer_last_touch_updated',
+    customerId,
+    `source=${source} campaign=${campaignId ?? 'none'}`,
+    { entityType: 'customer', entityId: customerId },
+  );
+}
 
 export type FuState =
   | 'overdue_fu1' | 'overdue_fu2'
@@ -58,11 +103,15 @@ export const FU_STATE_META: Record<FuState, { label: string; color: string; bg: 
 
 // Days from onboard completion until each follow-up is due. Reina's "1-week,
 // 1-month" framing (walkthrough #40): one check-in at a week, one at a month.
-export const FU1_DAYS = 7;
-export const FU2_DAYS = 30;
+// Call-anchored follow-up cadence (spec 2026-06-11): FU1 two weeks, FU2 four
+// weeks after the onboarding call. customers.onboard_date is mirrored from the
+// onboarding-call-complete date by markOnboardingComplete(), so it's the call
+// anchor. (Was 7 / 30 days under the prior onboard-date cadence.)
+export const FU1_DAYS = 14;
+export const FU2_DAYS = 28;
 
 /** Compute the follow-up state for a customer. FU1 cadence: FU1_DAYS after
- *  onboard. FU2 cadence: FU2_DAYS after onboard. "Today" = same calendar day. */
+ *  the onboarding call. FU2 cadence: FU2_DAYS after the call. "Today" = same calendar day. */
 export function computeFuState(c: Customer, today: Date = new Date()): FuState {
   if (!c.onboard_date) return 'unscheduled';
   const onboard = new Date(c.onboard_date + 'T00:00:00');
@@ -367,6 +416,52 @@ export async function pushToKlaviyo(opts: {
   return json;
 }
 
+/** Upsert a single HubSpot contact into makelila.customers with insert-only
+ *  semantics for operator-curated fields:
+ *  - If the customer does NOT exist: insert name + phone + email + attribution.
+ *  - If the customer DOES exist: only write attribution fields (first_touch_source)
+ *    when they are currently null — never overwrite name or phone.
+ *
+ *  This is the authoritative client-side path for the HubSpot decommission
+ *  (Feature 10). The edge function `sync-hubspot-customers` applies the same
+ *  logic server-side. */
+export async function upsertHubSpotContact(hubspotContact: {
+  email: string;
+  name?: string | null;
+  phone?: string | null;
+  hs_analytics_source?: string | null;
+}): Promise<void> {
+  const { data: existing } = await supabase
+    .from('customers')
+    .select('id, name, phone')
+    .eq('email', hubspotContact.email)
+    .maybeSingle();
+
+  const safeFields: Record<string, unknown> = {
+    email: hubspotContact.email,
+    ...(hubspotContact.hs_analytics_source != null
+      ? { first_touch_source: hubspotContact.hs_analytics_source }
+      : {}),
+  };
+
+  if (!existing) {
+    if (hubspotContact.name) safeFields['name'] = hubspotContact.name;
+    if (hubspotContact.phone) safeFields['phone'] = hubspotContact.phone;
+  }
+
+  const { error } = await supabase
+    .from('customers')
+    .upsert(safeFields, { onConflict: 'email', ignoreDuplicates: false });
+
+  if (error) throw new Error(error.message);
+
+  await logAction(
+    'hubspot_contact_synced',
+    hubspotContact.email,
+    existing ? 'updated (attribution only)' : 'inserted (new customer)',
+  );
+}
+
 /** Trigger the sync-hubspot-customers edge function. Returns the response
  *  body so the UI can show a "N new, M fields filled" toast. The sync inserts
  *  net-new customers, fills blank columns on existing rows, and refreshes
@@ -505,5 +600,26 @@ export async function sendNameCollectionRequest(customer: Customer): Promise<voi
     .from('customers')
     .update({ name_request_sent_at: new Date().toISOString() })
     .eq('id', customer.id);
-  await logAction('name_request_sent', customer.id, customer.email);
+  await logAction('name_request_sent', customer.id, customer.email,
+    undefined,
+    { klaviyoEvent: 'Name Request Sent', klaviyoEmail: customer.email });
+}
+
+/** J6: Toggle the telemetry auto-ticket suppress flag for a customer.
+ *  When suppress=true the cron job will skip all units owned by this customer. */
+export async function setTelemetryAutoticketSuppress(
+  customerId: string,
+  suppress: boolean,
+): Promise<void> {
+  const { error } = await supabase
+    .from('customers')
+    .update({ telemetry_autoticket_suppress: suppress })
+    .eq('id', customerId);
+  if (error) throw error;
+  await logAction(
+    'telemetry_autoticket_suppress_set',
+    customerId,
+    suppress ? 'suppressed' : 'enabled',
+    { entityType: 'customer', entityId: customerId },
+  );
 }

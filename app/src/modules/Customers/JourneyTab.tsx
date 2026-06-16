@@ -4,6 +4,7 @@ import { useOrders, type Order } from '../../lib/orders';
 import { useServiceTickets, useCustomerLifecycle, type ServiceTicket, type CustomerLifecycle } from '../../lib/service';
 import { useReturns, type ReturnRow } from '../../lib/postShipment';
 import { useUnits, type Unit } from '../../lib/stock';
+import { useCustomerEngagementMap, dormancyBadge } from '../../lib/customerEvents';
 import styles from './Customers.module.css';
 
 // ─── CJM stages, mirrors CJM/makeLILA_CJM_v2.html (10 stages) ─────────────────
@@ -397,6 +398,12 @@ export function JourneyTab() {
     });
   }, [journeys, search, stageFilter, satFilter]);
 
+  // lilalovely engagement summary keyed by customer_id — drives the
+  // dormancy badge on each JourneyCard. Batched single fetch; rendered
+  // O(1) per card via .get().
+  const filteredIds = useMemo(() => filtered.map(j => j.customer.id), [filtered]);
+  const engagementMap = useCustomerEngagementMap(filteredIds);
+
   async function handleSendNameRequests() {
     if (namelessWithEmail.length === 0) return;
     const ok = window.confirm(
@@ -493,7 +500,12 @@ export function JourneyTab() {
       ) : (
         <div className={styles.journeyGrid}>
           {filtered.map(j => (
-            <JourneyCard key={j.customer.id} journey={j} onOpen={() => setOpenId(j.customer.id)} />
+            <JourneyCard
+              key={j.customer.id}
+              journey={j}
+              dormancyDays={engagementMap.get(j.customer.id)?.dormancy_days ?? null}
+              hasLovely={engagementMap.get(j.customer.id)?.lovely_user_id != null}
+              onOpen={() => setOpenId(j.customer.id)} />
           ))}
         </div>
       )}
@@ -509,9 +521,15 @@ export function JourneyTab() {
   );
 }
 
-function JourneyCard({ journey, onOpen }: { journey: Journey; onOpen: () => void }) {
+function JourneyCard({ journey, dormancyDays, hasLovely, onOpen }: {
+  journey: Journey;
+  dormancyDays: number | null;
+  hasLovely: boolean;
+  onOpen: () => void;
+}) {
   const stage = STAGES[STAGE_INDEX[journey.currentStage]];
   const s = journey.overallSatisfaction;
+  const badge = dormancyBadge(dormancyDays);
   return (
     <button className={styles.journeyCard} onClick={onOpen}>
       <div className={styles.journeyCardHead}>
@@ -524,6 +542,21 @@ function JourneyCard({ journey, onOpen }: { journey: Journey; onOpen: () => void
           {SATISFACTION_EMOJI[s]}
         </div>
       </div>
+      {hasLovely && badge && (
+        <div style={{
+          display: 'inline-block', marginTop: 4,
+          fontSize: 9, padding: '1px 6px', borderRadius: 999,
+          fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.3,
+          color:
+            badge.tone === 'good'  ? 'var(--color-success)' :
+            badge.tone === 'warn'  ? 'var(--color-warning)' :
+                                     'var(--color-error)',
+          background:
+            badge.tone === 'good'  ? 'var(--color-success-bg)' :
+            badge.tone === 'warn'  ? 'var(--color-warning-bg)' :
+                                     'var(--color-error-bg)',
+        }} title="lilalovely engagement">{badge.label}</div>
+      )}
       <div className={styles.journeyCardStage} style={{ color: stage.color, borderColor: stage.color }}>
         {stage.emoji} {stage.label}
       </div>
@@ -636,6 +669,43 @@ function JourneyDetailPanel({
             )}
             {err && <span className={styles.journeyStagePickerErr}>{err}</span>}
           </div>
+
+          {/* Attribution chips — Feature 3 */}
+          {(() => {
+            const first = customer.first_touch_source;
+            const last  = customer.last_touch_source;
+            if (!first && !last) {
+              return (
+                <div style={{ marginBottom: 12 }}>
+                  <span style={{ fontSize: 11, color: 'var(--color-ink-subtle)', fontStyle: 'italic' }}>
+                    Attribution unknown
+                  </span>
+                </div>
+              );
+            }
+            return (
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
+                {first && (
+                  <span style={{
+                    fontSize: 10, padding: '3px 8px', borderRadius: 4,
+                    background: '#ebf8ff', color: '#2c5282', border: '1px solid #90cdf4',
+                    fontWeight: 600,
+                  }}>
+                    First touch: {first}{customer.first_touch_campaign_id ? ` · ${customer.first_touch_campaign_id}` : ''}
+                  </span>
+                )}
+                {last && (
+                  <span style={{
+                    fontSize: 10, padding: '3px 8px', borderRadius: 4,
+                    background: '#f0fff4', color: '#276749', border: '1px solid #9ae6b4',
+                    fontWeight: 600,
+                  }}>
+                    Last touch: {last}{customer.last_touch_campaign_id ? ` · ${customer.last_touch_campaign_id}` : ''}
+                  </span>
+                )}
+              </div>
+            );
+          })()}
 
           <div className={styles.journeyPanelHint}>
             10-stage CJM from <code>CJM/makeLILA_CJM_v2.html</code>. Bars below a stage are scored 0–5

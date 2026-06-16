@@ -1,0 +1,1932 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VCycene — Profitability Timeline & $5M Fundraising Roadmap</title>
+<link href="https://fonts.googleapis.com/css2?family=Raleway:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root {
+  --vc-red: #961b1e;
+  --vc-red-light: #c4393d;
+  --vc-grey: #444444;
+  --vc-black: #231f20;
+  --vc-cream: #f8e4c7;
+  --vc-green: #2e7d32;
+  --vc-green-light: #4caf50;
+  --vc-blue: #1565c0;
+  --vc-amber: #f57f17;
+  --vc-bg: #fafafa;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: 'Raleway', sans-serif;
+  background: var(--vc-bg);
+  color: var(--vc-black);
+  line-height: 1.6;
+}
+
+.header {
+  background: linear-gradient(135deg, var(--vc-black) 0%, #3a1011 100%);
+  color: white;
+  padding: 40px 32px 32px;
+  position: relative;
+  overflow: hidden;
+}
+.header::after {
+  content: '';
+  position: absolute;
+  top: -50%;
+  right: -10%;
+  width: 400px;
+  height: 400px;
+  background: radial-gradient(circle, rgba(150,27,30,0.3) 0%, transparent 70%);
+  border-radius: 50%;
+}
+.header h1 {
+  font-size: 28px;
+  font-weight: 700;
+  margin-bottom: 6px;
+  position: relative;
+  z-index: 1;
+}
+.header p {
+  font-size: 14px;
+  opacity: 0.8;
+  font-weight: 300;
+  position: relative;
+  z-index: 1;
+}
+.header .tag {
+  display: inline-block;
+  background: var(--vc-red);
+  color: white;
+  padding: 3px 12px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  margin-top: 10px;
+  position: relative;
+  z-index: 1;
+}
+
+.container { max-width: 1100px; margin: 0 auto; padding: 24px 16px; }
+
+/* Tabs */
+.tabs {
+  display: flex;
+  gap: 4px;
+  background: #e8e8e8;
+  border-radius: 10px;
+  padding: 4px;
+  margin-bottom: 24px;
+  overflow-x: auto;
+}
+.tab {
+  flex: 1;
+  padding: 10px 16px;
+  border: none;
+  background: transparent;
+  font-family: 'Raleway', sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--vc-grey);
+  cursor: pointer;
+  border-radius: 8px;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+.tab.active {
+  background: white;
+  color: var(--vc-red);
+  box-shadow: 0 1px 4px rgba(0,0,0,0.1);
+}
+.tab:hover:not(.active) { background: rgba(255,255,255,0.5); }
+
+.panel { display: none; }
+.panel.active { display: block; }
+
+/* Cards */
+.card {
+  background: white;
+  border-radius: 12px;
+  padding: 24px;
+  margin-bottom: 16px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+  border: 1px solid #eee;
+}
+.card h3 {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--vc-black);
+  margin-bottom: 12px;
+}
+.card h3 .icon { margin-right: 8px; }
+
+/* KPI row */
+.kpi-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.kpi {
+  background: white;
+  border-radius: 10px;
+  padding: 18px;
+  text-align: center;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+  border: 1px solid #eee;
+}
+.kpi .value {
+  font-size: 28px;
+  font-weight: 800;
+  color: var(--vc-red);
+}
+.kpi .label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-top: 2px;
+}
+.kpi.green .value { color: var(--vc-green); }
+.kpi.blue .value { color: var(--vc-blue); }
+.kpi.amber .value { color: var(--vc-amber); }
+
+/* Timeline */
+.timeline { position: relative; padding-left: 28px; }
+.timeline::before {
+  content: '';
+  position: absolute;
+  left: 10px;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: linear-gradient(to bottom, var(--vc-red), var(--vc-green));
+  border-radius: 2px;
+}
+.tl-item {
+  position: relative;
+  margin-bottom: 24px;
+  padding: 16px 20px;
+  background: white;
+  border-radius: 10px;
+  border: 1px solid #eee;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.tl-item:hover {
+  border-color: var(--vc-red);
+  box-shadow: 0 2px 8px rgba(150,27,30,0.12);
+}
+.tl-item::before {
+  content: '';
+  position: absolute;
+  left: -24px;
+  top: 20px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 3px solid var(--vc-red);
+  background: white;
+}
+.tl-item.done::before { background: var(--vc-green); border-color: var(--vc-green); }
+.tl-item.active-now::before { background: var(--vc-amber); border-color: var(--vc-amber); animation: pulse 1.5s infinite; }
+.tl-item.future::before { background: #ddd; border-color: #bbb; }
+
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(245,127,23,0.4); }
+  50% { box-shadow: 0 0 0 6px rgba(245,127,23,0); }
+}
+
+.tl-date {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--vc-red);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.tl-title {
+  font-size: 15px;
+  font-weight: 700;
+  margin: 4px 0;
+}
+.tl-desc {
+  font-size: 13px;
+  color: #666;
+  line-height: 1.5;
+}
+.tl-metrics {
+  display: flex;
+  gap: 16px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+.tl-metric {
+  font-size: 12px;
+  padding: 3px 10px;
+  background: #f5f5f5;
+  border-radius: 6px;
+  font-weight: 600;
+}
+.tl-metric.rev { color: var(--vc-green); background: #e8f5e9; }
+.tl-metric.units { color: var(--vc-blue); background: #e3f2fd; }
+.tl-metric.fund { color: var(--vc-red); background: #fce4ec; }
+
+.tl-detail {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.3s ease;
+  font-size: 13px;
+  color: #555;
+  line-height: 1.6;
+}
+.tl-item.expanded .tl-detail { max-height: 600px; margin-top: 12px; padding-top: 12px; border-top: 1px solid #eee; }
+
+/* Financial table */
+.fin-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  margin-top: 12px;
+}
+.fin-table th {
+  background: var(--vc-black);
+  color: white;
+  padding: 10px 12px;
+  text-align: right;
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+.fin-table th:first-child { text-align: left; border-radius: 8px 0 0 0; }
+.fin-table th:last-child { border-radius: 0 8px 0 0; }
+.fin-table td {
+  padding: 9px 12px;
+  text-align: right;
+  border-bottom: 1px solid #f0f0f0;
+}
+.fin-table td:first-child { text-align: left; font-weight: 600; }
+.fin-table tr:hover td { background: #fafafa; }
+.fin-table .total td { font-weight: 700; border-top: 2px solid var(--vc-black); background: #f9f9f9; }
+.fin-table .profit td { color: var(--vc-green); font-weight: 700; }
+.fin-table .loss td { color: var(--vc-red); }
+.fin-table .highlight { background: #fff8e1 !important; }
+
+/* Scenario toggle */
+.scenario-toggle {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.scenario-btn {
+  padding: 8px 16px;
+  border: 2px solid #ddd;
+  background: white;
+  border-radius: 8px;
+  font-family: 'Raleway', sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.scenario-btn.active {
+  border-color: var(--vc-red);
+  background: #fce4ec;
+  color: var(--vc-red);
+}
+
+/* Bar chart */
+.bar-chart { margin-top: 16px; }
+.bar-row {
+  display: flex;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.bar-label {
+  width: 60px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #666;
+  flex-shrink: 0;
+}
+.bar-track {
+  flex: 1;
+  height: 28px;
+  background: #f0f0f0;
+  border-radius: 6px;
+  overflow: hidden;
+  position: relative;
+}
+.bar-fill {
+  height: 100%;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding-right: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  color: white;
+  transition: width 0.8s ease;
+  min-width: 40px;
+}
+.bar-fill.revenue { background: linear-gradient(90deg, var(--vc-green), #43a047); }
+.bar-fill.expense { background: linear-gradient(90deg, var(--vc-red), var(--vc-red-light)); }
+.bar-fill.profit { background: linear-gradient(90deg, #1565c0, #1e88e5); }
+
+/* Fundraising funnel */
+.funnel-stage {
+  padding: 14px 20px;
+  margin-bottom: 8px;
+  border-radius: 8px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+  font-weight: 600;
+}
+.funnel-stage .stage-name { flex: 1; }
+.funnel-stage .stage-val { font-size: 14px; font-weight: 700; }
+.f1 { background: #e3f2fd; color: #0d47a1; }
+.f2 { background: #e8f5e9; color: #1b5e20; }
+.f3 { background: #fff8e1; color: #f57f17; }
+.f4 { background: #fce4ec; color: #b71c1c; }
+.f5 { background: #ede7f6; color: #4527a0; }
+
+.note {
+  font-size: 12px;
+  color: #888;
+  font-style: italic;
+  margin-top: 12px;
+  padding: 10px;
+  background: #f9f9f9;
+  border-radius: 6px;
+  border-left: 3px solid var(--vc-red);
+}
+
+/* Assumptions sidebar */
+.assumptions {
+  background: #f5f0ea;
+  border-radius: 10px;
+  padding: 18px;
+  margin-bottom: 16px;
+  font-size: 12px;
+}
+.assumptions h4 {
+  font-size: 13px;
+  font-weight: 700;
+  margin-bottom: 8px;
+  color: var(--vc-red);
+}
+.assumptions li {
+  margin-bottom: 4px;
+  margin-left: 16px;
+  color: #555;
+}
+
+/* Slider controls */
+.slider-group {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.slider-item label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  color: #888;
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+.slider-item input[type="range"] {
+  width: 100%;
+  accent-color: var(--vc-red);
+}
+.slider-item .slider-val {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--vc-red);
+}
+
+@media (max-width: 900px) {
+  .kpi-row { grid-template-columns: 1fr 1fr; }
+  .slider-group { grid-template-columns: 1fr; }
+  .tabs { flex-wrap: nowrap; }
+  .tab { font-size: 11px; padding: 8px 10px; }
+  .threshold-row { grid-template-columns: repeat(3, 1fr) !important; }
+}
+@media (max-width: 600px) {
+  .threshold-row { grid-template-columns: 1fr 1fr !important; }
+}
+
+/* Bilingual toggle */
+.zh-only { display: none; }
+body.lang-zh .en-only { display: none !important; }
+body.lang-zh .zh-only { display: block !important; }
+body.lang-zh span.zh-only { display: inline !important; }
+body.lang-zh td.zh-only { display: table-cell !important; }
+body.lang-zh tr.zh-only { display: table-row !important; }
+body.lang-zh thead.zh-only { display: table-header-group !important; }
+
+#lang-toggle {
+  position: absolute;
+  top: 16px;
+  right: 24px;
+  z-index: 10;
+  background: rgba(255,255,255,0.15);
+  border: 1px solid rgba(255,255,255,0.4);
+  color: white;
+  padding: 6px 14px;
+  border-radius: 6px;
+  font-family: 'Raleway', sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+#lang-toggle:hover {
+  background: rgba(255,255,255,0.25);
+  border-color: rgba(255,255,255,0.7);
+}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <button id="lang-toggle" onclick="setLang()">中文</button>
+  <h1><span class="en-only">VCycene — Path to Profitability & $5M Raise</span><span class="zh-only">VCycene — 盈利路径与$5M融资计划</span></h1>
+  <p><span class="en-only">Financial model, timeline, and fundraising campaign plan synced to profitability milestones</span><span class="zh-only">财务模型、时间线与融资计划 — 以盈利里程碑为核心</span></p>
+  <span class="tag"><span class="en-only">CONFIDENTIAL — May 2026</span><span class="zh-only">机密文件 — 2026年5月</span></span>
+</div>
+
+<div class="container">
+
+<!-- KPI Summary -->
+<div class="kpi-row">
+  <div class="kpi"><div class="value" id="kpi-profit-date">Q4 2026</div><div class="label" data-zh="预计盈利时间 (EBITDA+)">Est. Profitability (EBITDA+)</div></div>
+  <div class="kpi green"><div class="value" id="kpi-rev-target">$4.05M</div><div class="label" data-zh="2026年收入目标">2026 Revenue Target</div></div>
+  <div class="kpi blue"><div class="value">$5M USD</div><div class="label" data-zh="目标融资额">Target Raise</div></div>
+  <div class="kpi amber"><div class="value" id="kpi-raise-window">H1 2027</div><div class="label" data-zh="最佳融资窗口">Optimal Raise Window</div></div>
+</div>
+
+<!-- KPI Threshold Cards — Row 1: Unit Economics & Profitability -->
+<div class="threshold-row" style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:10px;">
+  <div style="background:white;border-radius:10px;padding:14px 16px;box-shadow:0 1px 4px rgba(0,0,0,0.06);border:1px solid #eee;border-top:3px solid var(--vc-green);">
+    <div style="font-size:11px;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:0.3px;" data-zh="盈亏平衡量">Break-Even Volume</div>
+    <div style="font-size:24px;font-weight:800;color:var(--vc-green);margin:4px 0;">~2,905</div>
+    <div style="font-size:11px;color:#666;" data-zh="台 — 净利润为正">units — net income positive</div>
+  </div>
+  <div style="background:white;border-radius:10px;padding:14px 16px;box-shadow:0 1px 4px rgba(0,0,0,0.06);border:1px solid #eee;border-top:3px solid var(--vc-green);">
+    <div style="font-size:11px;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:0.3px;" data-zh="毛利率">Gross Margin</div>
+    <div style="font-size:24px;font-weight:800;color:var(--vc-green);margin:4px 0;">61.8%</div>
+    <div style="font-size:11px;color:#666;" data-zh="2026年 — 向67%+扩展">2026 — expanding to 67%+</div>
+  </div>
+  <div style="background:white;border-radius:10px;padding:14px 16px;box-shadow:0 1px 4px rgba(0,0,0,0.06);border:1px solid #eee;border-top:3px solid var(--vc-green);">
+    <div style="font-size:11px;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:0.3px;" data-zh="2026年净利润">2026 Net Income</div>
+    <div style="font-size:24px;font-weight:800;color:var(--vc-green);margin:4px 0;">$118K</div>
+    <div style="font-size:11px;color:#666;" data-zh="融资前已盈利">profitable pre-raise</div>
+  </div>
+  <div style="background:white;border-radius:10px;padding:14px 16px;box-shadow:0 1px 4px rgba(0,0,0,0.06);border:1px solid #eee;border-top:3px solid var(--vc-red);">
+    <div style="font-size:11px;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:0.3px;" data-zh="成本降幅">COGS Reduction</div>
+    <div style="font-size:24px;font-weight:800;color:var(--vc-red);margin:4px 0;">54%</div>
+    <div style="font-size:11px;color:#666;" data-zh="$658 → $300 (2027年底)">$658 → $300 by end '27</div>
+  </div>
+  <div style="background:white;border-radius:10px;padding:14px 16px;box-shadow:0 1px 4px rgba(0,0,0,0.06);border:1px solid #eee;border-top:3px solid var(--vc-blue);">
+    <div style="font-size:11px;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:0.3px;" data-zh="12月产能">Dec '26 Prod Rate</div>
+    <div style="font-size:24px;font-weight:800;color:var(--vc-blue);margin:4px 0;">749/mo</div>
+    <div style="font-size:11px;color:#666;" data-zh="量产能力验证">mass production proven</div>
+  </div>
+</div>
+<!-- KPI Threshold Cards — Row 2: Cash & Valuation -->
+<div class="threshold-row" style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:20px;">
+  <div style="background:white;border-radius:10px;padding:14px 16px;box-shadow:0 1px 4px rgba(0,0,0,0.06);border:1px solid #eee;border-top:3px solid var(--vc-blue);">
+    <div style="font-size:11px;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:0.3px;" data-zh="融资时现金 (27年1月)">Cash at Raise (Jan '27)</div>
+    <div style="font-size:24px;font-weight:800;color:var(--vc-blue);margin:4px 0;">$1.87M</div>
+    <div style="font-size:11px;color:#666;" data-zh="12月销售回款后">after Dec sales collected</div>
+  </div>
+  <div style="background:white;border-radius:10px;padding:14px 16px;box-shadow:0 1px 4px rgba(0,0,0,0.06);border:1px solid #eee;border-top:3px solid var(--vc-green);">
+    <div style="font-size:11px;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:0.3px;" data-zh="外部融资">External Financing</div>
+    <div style="font-size:24px;font-weight:800;color:var(--vc-green);margin:4px 0;">$0</div>
+    <div style="font-size:11px;color:#666;" data-zh="自筹资金至盈利">self-funded to profitability</div>
+  </div>
+  <div style="background:white;border-radius:10px;padding:14px 16px;box-shadow:0 1px 4px rgba(0,0,0,0.06);border:1px solid #eee;border-top:3px solid var(--vc-amber);">
+    <div style="font-size:11px;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:0.3px;" data-zh="现金最低点 (5月)">Cash Low Point (May)</div>
+    <div style="font-size:24px;font-weight:800;color:var(--vc-amber);margin:4px 0;">$109K</div>
+    <div style="font-size:11px;color:#666;" data-zh="安全缓冲充裕">comfortable buffer</div>
+  </div>
+  <div style="background:white;border-radius:10px;padding:14px 16px;box-shadow:0 1px 4px rgba(0,0,0,0.06);border:1px solid #eee;border-top:3px solid var(--vc-red);">
+    <div style="font-size:11px;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:0.3px;" data-zh="投前估值">Pre-Money Valuation</div>
+    <div style="font-size:24px;font-weight:800;color:var(--vc-red);margin:4px 0;">$20M</div>
+    <div style="font-size:11px;color:#666;" data-zh="定价轮 — 5×收入">priced round — 5× rev</div>
+  </div>
+  <div style="background:white;border-radius:10px;padding:14px 16px;box-shadow:0 1px 4px rgba(0,0,0,0.06);border:1px solid #eee;border-top:3px solid var(--vc-green);">
+    <div style="font-size:11px;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:0.3px;" data-zh="本轮稀释">This-Round Dilution</div>
+    <div style="font-size:24px;font-weight:800;color:var(--vc-green);margin:4px 0;">≤20%</div>
+    <div style="font-size:11px;color:#666;" data-zh="$5M投前$20M = $25M投后">$5M on $20M pre = $25M post</div>
+  </div>
+</div>
+
+<!-- Tabs -->
+<div class="tabs">
+  <button class="tab active" onclick="showTab('snapshot')" data-zh="当前概况">Current Snapshot</button>
+  <button class="tab" onclick="showTab('production')" data-zh="生产计划">Production Plan</button>
+  <button class="tab" onclick="showTab('model')" data-zh="财务模型">Financial Model</button>
+  <button class="tab" onclick="showTab('timeline')" data-zh="融资时间线">Fundraise Timeline</button>
+  <button class="tab" onclick="showTab('campaign')" data-zh="融资方案">Campaign Plan</button>
+  <button class="tab" onclick="showTab('valuation')" data-zh="公司估值">Company Valuation</button>
+  <button class="tab" onclick="showTab('exit')" data-zh="退出策略">Exit Strategy</button>
+</div>
+
+<!-- TAB 1: CURRENT SNAPSHOT -->
+<div class="panel active" id="panel-snapshot">
+
+<div class="card">
+<h3><span class="icon">📊</span> <span class="en-only">Actual Sales Data (Dec 2025 – Mar 2026)</span><span class="zh-only">实际销售数据 (2025年12月 – 2026年3月)</span></h3>
+<table class="fin-table">
+<tr><th data-zh="广告计划">Campaign</th><th data-zh="时间段">Period</th><th data-zh="销售台数">Units Sold</th><th data-zh="广告支出 (加元)">Ad Spend (CAD)</th><th data-zh="CAC (加元)">CAC (CAD)</th><th data-zh="ROAS">ROAS</th></tr>
+<tr><td data-zh="2025假日促销">Holiday Sale 2025</td><td data-zh="12月12–31日">Dec 12–31</td><td>18</td><td>$5,727</td><td>$318</td><td>3.14×</td></tr>
+<tr><td data-zh="2026冬季促销">Winter Sale 2026</td><td data-zh="1月16日–3月13日">Jan 16–Mar 13</td><td>50</td><td>$8,594</td><td>$172</td><td>5.35×</td></tr>
+<tr class="total"><td data-zh="合计">Total</td><td data-zh="约3个月">~3 months</td><td>68</td><td>$14,321</td><td data-zh="$211均值">$211 avg</td><td>4.56×</td></tr>
+</table>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:16px;">
+<div class="note"><span class="en-only">🇨🇦 Canada: 32 units (47%) — Avg CAC dropping as brand builds<br>🇺🇸 US: 36 units (53%) — US market opened Jan 2026, strong initial pull</span><span class="zh-only">🇨🇦 加拿大：32台 (47%) — 品牌建设中，平均CAC持续下降<br>🇺🇸 美国：36台 (53%) — 2026年1月进入美国市场，初期表现强劲</span></div>
+<div class="note"><span class="en-only">💰 Revenue est: ~$68K CAD ($1K/unit avg ASP)<br>📈 MoM growth: Dec→Jan +60%, Jan→Feb +40%<br>🔁 100% outright purchases (no financing in this window)</span><span class="zh-only">💰 预估收入：~$68K加元（$1K/台平均ASP）<br>📈 月环比增长：12月→1月 +60%，1月→2月 +40%<br>🔁 100%全款购买（此期间无分期付款）</span></div>
+</div>
+</div>
+
+<div class="card">
+<h3><span class="icon">🏭</span> <span class="en-only">BenLiang OEM Partnership — COGS Roadmap</span><span class="zh-only">本量电子OEM合作 — 成本路线图</span></h3>
+<p style="font-size:13px;color:#666;margin-bottom:12px;"><span class="en-only">本量电子 (BenLiang Electronics) is VCycene's sole OEM partner under Mode 1: Finished Product Procurement. Tiered profit-sharing on cost savings (50/30/20/0%) with volume thresholds converging at 10K/35K/100K PCS.</span><span class="zh-only">本量电子是VCycene的唯一OEM合作伙伴，采用模式一：成品采购。成本节省的分级利润共享(50/30/20/0%)，量级阈值为10K/35K/100K台。</span></p>
+<table class="fin-table">
+<tr><th data-zh="生产批次">Production Batch</th><th data-zh="数量">Units</th><th data-zh="单位成本 (美元)">COGS/Unit (USD)</th><th data-zh="发货日期">Ship Date</th><th data-zh="关键变更">Key Changes</th></tr>
+<tr><td data-zh="P100X (当前)">P100X (current)</td><td>100</td><td style="color:var(--vc-red);font-weight:700;">$658</td><td data-zh="2026年5月">May 2026</td><td data-zh="物料到位。基线成本。">Materials arriving. Baseline cost.</td></tr>
+<tr><td data-zh="P500第二批">P500 Part 2</td><td>100</td><td>$410</td><td data-zh="2026年6月">Jun 2026</td><td data-zh="齿轮箱/电机改型或去除">Gearbox/motor redesign or removal</td></tr>
+<tr><td data-zh="P500第三批">P500 Part 3</td><td>300</td><td>$380</td><td data-zh="2026年8月">Aug 2026</td><td data-zh="进一步结构+供应商优化">Further structural + supplier optimization</td></tr>
+<tr><td data-zh="目标 — 2026年底">Target — End 2026</td><td>—</td><td>$380 (VC) / $420 (BL)</td><td data-zh="2026年12月">Dec 2026</td><td data-zh="差距缩小至$40">Gap narrowed to $40</td></tr>
+<tr><td data-zh="目标 — 2027年中">Target — Mid 2027</td><td>—</td><td>$320</td><td data-zh="2027年中">Mid 2027</td><td data-zh="批量定价+BOM优化">Volume pricing + BOM optimization</td></tr>
+<tr class="total"><td data-zh="目标 — 2027年底">Target — End 2027</td><td>—</td><td style="color:var(--vc-green);font-weight:700;">$300</td><td data-zh="2027年12月">Dec 2027</td><td><strong data-zh="从基线成本降低54%">54% cost reduction from baseline</strong></td></tr>
+</table>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:16px;">
+<div class="note">🔧 <strong data-zh="关键成本杠杆:">Key cost levers:</strong> Gearbox/motor redesign (#1 priority), paint cost reduction (already started in P100X), BL supplier network pricing, assembly efficiency vs. Longchang, 8 parts removed in P100X design.</div>
+<div class="note">📊 <strong data-zh="利润分成阶梯 (约定50/30/20/0%):">Profit sharing tiers (agreed 50/30/20/0%):</strong><br>0–10K units: BL keeps 50% of savings<br>10K–35K: BL keeps 30%<br>35K–100K: BL keeps 20%<br>100K+: All savings flow to VC</div>
+</div>
+</div>
+
+<div class="card">
+<h3><span class="icon">📊</span> <span class="en-only">VCycene Financial Model v13 — P&L Projection</span><span class="zh-only">VCycene 财务模型v13 — 损益预测</span></h3>
+<p style="font-size:13px;color:#666;margin-bottom:12px;"><span class="en-only">Source: VCycene Financial Model v13 (from BenLiang OEM Proposal). All values in <strong>USD</strong>. Includes both LILA Pro and LILA Mini. <strong data-zh="2026年为盈亏平衡年。">2026 is the breakeven year.</strong></span><span class="zh-only">来源：VCycene财务模型v13（基于本量OEM方案）。所有金额单位为<strong>美元</strong>。包含LILA Pro和LILA Mini。<strong>2026年为盈亏平衡年。</strong></span></p>
+<div style="background:linear-gradient(135deg,#f0faf0,#e8f5e9);border:2px solid var(--vc-green);border-radius:10px;padding:16px 20px;margin-bottom:16px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;text-align:center;">
+  <div><div style="font-size:28px;font-weight:700;color:var(--vc-green);">~2,718</div><div style="font-size:12px;color:#666;margin-top:4px;" data-zh="EBITDA盈亏平衡量">EBITDA Breakeven Units</div></div>
+  <div><div style="font-size:28px;font-weight:700;color:var(--vc-green);">~2,905</div><div style="font-size:12px;color:#666;margin-top:4px;" data-zh="净利润盈亏平衡量">Net Income Breakeven Units</div></div>
+  <div><div style="font-size:28px;font-weight:700;color:#961b1e;">3,049</div><div style="font-size:12px;color:#666;margin-top:4px;" data-zh="FM v13目标 (5%安全边际)">FM v13 Target (5% margin)</div></div>
+</div>
+<table class="fin-table">
+<tr><th data-zh="指标">Metric</th><th data-zh="2025 (实际)">2025 (Actual)</th><th data-zh="2026">2026</th><th data-zh="2027">2027</th><th data-zh="2028">2028</th><th data-zh="2029">2029</th></tr>
+<tr><td data-zh="总收入">Total Revenue</td><td>$384K</td><td style="font-weight:700;">$4.05M</td><td>$7.11M</td><td>$11.49M</td><td>$17.93M</td></tr>
+<tr><td data-zh="总销量">Total Units Sold</td><td>302</td><td><strong>3,049</strong></td><td>5,492</td><td>9,241</td><td>14,433</td></tr>
+<tr><td style="font-size:12px;color:var(--vc-green);"><span class="en-only">↳ Breakeven Units (Net Income)</span><span class="zh-only">↳ 盈亏平衡台数（净利润）</span></td><td>—</td><td style="color:var(--vc-green);font-weight:600;">~2,905</td><td data-zh="已盈利——超越盈亏平衡点" colspan="3" style="font-size:12px;color:#999;">Already profitable — breakeven exceeded</td></tr>
+<tr><td data-zh="销货成本">COGS</td><td>$235K</td><td>$1.55M</td><td>$2.79M</td><td>$4.69M</td><td>$7.33M</td></tr>
+<tr><td data-zh="毛利率">Gross Margin</td><td>38.6%</td><td style="color:var(--vc-green);">61.8%</td><td>60.8%</td><td>59.2%</td><td>59.1%</td></tr>
+<tr><td>EBITDA</td><td style="color:var(--vc-red);">-$639K</td><td style="color:var(--vc-green);font-weight:700;">$271K</td><td>$750K</td><td>$1.14M</td><td>$2.49M</td></tr>
+<tr class="total profit"><td data-zh="净利润">Net Income</td><td style="color:var(--vc-red);">-$749K</td><td style="color:var(--vc-green);font-weight:700;">$118K</td><td>$471K</td><td>$761K</td><td>$1.70M</td></tr>
+</table>
+</div>
+
+<div class="card">
+<h3><span class="icon">📈</span> <span class="en-only">LILA Pro Revenue Channel Mix (USD)</span><span class="zh-only">LILA Pro 收入渠道组合 (美元)</span></h3>
+<table class="fin-table">
+<tr><th data-zh="渠道">Channel</th><th data-zh="均价">ASP</th><th data-zh="2026">2026</th><th data-zh="2027">2027</th><th data-zh="2028">2028</th><th data-zh="2029">2029</th></tr>
+<tr><td>D2C (B2C)</td><td>$1,100</td><td>$2.25M</td><td>$4.12M</td><td>$6.00M</td><td>$8.99M</td></tr>
+<tr><td data-zh="B2G (政府)">B2G (Municipal)</td><td>$1,000</td><td>$0.88M</td><td>$1.25M</td><td>$2.45M</td><td>$4.20M</td></tr>
+<tr><td data-zh="B2B (机构)">B2B (Institutional)</td><td>$750–1,000</td><td>$1.25M</td><td>$2.14M</td><td>$3.52M</td><td>$5.30M</td></tr>
+<tr class="total"><td data-zh="合计">Total</td><td>—</td><td>$4.05M</td><td>$7.11M</td><td>$11.49M</td><td>$17.93M</td></tr>
+</table>
+</div>
+
+<div class="card">
+<h3><span class="icon">🏗️</span> <span class="en-only">Operating Cost Structure</span><span class="zh-only">运营成本结构</span></h3>
+<p style="font-size:12px;color:#888;margin-bottom:8px;"><span class="en-only">All payroll and operating costs are in <strong>CAD</strong> (source: QuickBooks). Revenue and sales figures elsewhere are in <strong>USD</strong>. FX rate used: 1 CAD ≈ 0.72 USD.</span><span class="zh-only">所有薪资和运营成本单位为<strong>加元</strong>（来源：QuickBooks）。其他收入和销售数据单位为<strong>美元</strong>。汇率：1 CAD ≈ 0.72 USD。</span></p>
+<table class="fin-table">
+<tr><th data-zh="成本项目">Cost Item</th><th data-zh="月度 (加元)">Monthly (CAD)</th><th data-zh="年度 (加元)">Annual (CAD)</th><th data-zh="备注">Notes</th></tr>
+<tr><td colspan="4" style="font-weight:700;background:#f5f0ea;font-size:12px;"><span class="en-only">PAYROLL — Core Team (4 salaried, from QB)</span><span class="zh-only">薪资 — 核心团队（4名正式员工，源自QB）</span></td></tr>
+<tr><td style="padding-left:24px;">Pedrum Amin</td><td>$6,477</td><td>$77.7K</td><td data-zh="核心">Core</td></tr>
+<tr><td style="padding-left:24px;">Huayi Gao</td><td>$5,280</td><td>$63.4K</td><td data-zh="核心">Core</td></tr>
+<tr><td style="padding-left:24px;">George (Yin Xiangdong)</td><td>$5,280</td><td>$63.4K</td><td data-zh="核心">Core</td></tr>
+<tr><td style="padding-left:24px;">Junaid Siddiqui</td><td>$7,424</td><td>$89.1K</td><td data-zh="核心">Core</td></tr>
+<tr><td colspan="4" style="font-weight:700;background:#f5f0ea;font-size:12px;"><span class="en-only">PAYROLL — Co-ops (3 hourly)</span><span class="zh-only">薪资 — 实习生（3名按时薪）</span></td></tr>
+<tr><td style="padding-left:24px;">Reina George</td><td>$3,284</td><td>$39.4K</td><td>Co-op, $22/hr</td></tr>
+<tr><td style="padding-left:24px;">Raqual Meneses</td><td>$2,834</td><td>$34.0K</td><td>Co-op, $19/hr</td></tr>
+<tr><td style="padding-left:24px;">Ryan (est.)</td><td>$3,145</td><td>$37.7K</td><td>Co-op, $21/hr</td></tr>
+<tr style="font-weight:600;"><td><span class="en-only">Subtotal Payroll (incl. employer taxes)</span><span class="zh-only">薪资小计（含雇主税）</span></td><td>$33,724</td><td>$404.7K</td><td data-zh="6月后7人（不含Raymond）">7 people post-June (excl. Raymond)</td></tr>
+<tr><td data-zh="其他运营成本" colspan="4" style="font-weight:700;background:#f5f0ea;font-size:12px;">OTHER OPERATING COSTS</td></tr>
+<tr><td data-zh="办公/实验室/SaaS" style="padding-left:24px;">Office / Lab / SaaS</td><td>~$3,000</td><td>$36K</td><td data-zh="Microart实验室、Shopify、HubSpot等">Microart Lab, Shopify, HubSpot, etc.</td></tr>
+<tr><td data-zh="法律、会计、保险" style="padding-left:24px;">Legal, Accounting, Insurance</td><td>~$2,000</td><td>$24K</td><td data-zh="IP申请、记账、企业法律顾问">IP filings, bookkeeping, corp counsel</td></tr>
+<tr><td style="padding-left:24px;"><span class="en-only">Misc (R&amp;D consumables, travel)</span><span class="zh-only">其他（研发耗材、差旅）</span></td><td>~$1,276</td><td>$15.3K</td><td></td></tr>
+<tr class="total"><td><span class="en-only">Total Fixed Burn (excl. COGS &amp; ad spend)</span><span class="zh-only">固定支出总计（不含COGS和广告费）</span></td><td data-zh="~$40,000加元">~$40,000 CAD</td><td data-zh="~$480K加元">~$480K CAD</td><td data-zh="来源：QB薪资汇总 2026年5月">Source: QB Payroll Summary May 2026</td></tr>
+<tr class="total" style="color:var(--vc-blue);"><td><span class="en-only">→ USD Equivalent (×0.72)</span><span class="zh-only">→ 美元等值（×0.72）</span></td><td data-zh="~$28,800美元">~$28,800 USD</td><td data-zh="~$346K美元">~$346K USD</td><td data-zh="用于财务模型标签页">Used in Financial Model tab</td></tr>
+</table>
+</div>
+</div>
+
+
+<!-- TAB 2: PRODUCTION PLAN -->
+<div class="panel" id="panel-production">
+
+<div class="card">
+<h3><span class="icon">🏭</span> <span class="en-only">2026 Production Ramp — BenLiang OEM (本量电子)</span><span class="zh-only">2026年产能爬坡 — 本量电子OEM</span></h3>
+<p style="font-size:13px;color:#666;margin-bottom:12px;"><span class="en-only">Source: VC第三次附注 (2026-05-08). P500 order split into 3 batches. Mass production begins Sep 2026 to hit profitability threshold of <strong>~2,905 units</strong> (net income breakeven). All COGS in <strong>USD</strong>.</span><span class="zh-only">来源：VC第三次附注 (2026-05-08)。P500订单分3批交付。量产于2026年9月启动，目标达到盈利阈值<strong>~2,905台</strong>（净利润盈亏平衡）。所有COGS单位为<strong>美元</strong>。</span></p>
+
+<div style="background:linear-gradient(135deg,#f0faf0,#e8f5e9);border:2px solid var(--vc-green);border-radius:10px;padding:16px 20px;margin-bottom:16px;display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px;text-align:center;">
+  <div><div style="font-size:24px;font-weight:700;color:var(--vc-red);">500</div><div style="font-size:11px;color:#666;margin-top:2px;" data-zh="P500订单 (5-8月)">P500 Order (May–Aug)</div></div>
+  <div><div style="font-size:24px;font-weight:700;color:var(--vc-blue);">~2,549</div><div style="font-size:11px;color:#666;margin-top:2px;" data-zh="量产 (9-12月)">Mass Prod (Sep–Dec)</div></div>
+  <div><div style="font-size:24px;font-weight:700;color:var(--vc-green);">3,049</div><div style="font-size:11px;color:#666;margin-top:2px;">FM v13 Target</div></div>
+  <div><div style="font-size:24px;font-weight:700;color:var(--vc-green);">~2,905</div><div style="font-size:11px;color:#666;margin-top:2px;">Breakeven Units</div></div>
+</div>
+
+<table class="fin-table">
+<tr><th data-zh="月份">Month</th><th data-zh="批次">Batch</th><th data-zh="数量">Units</th><th data-zh="COGS/台">COGS/Unit</th><th data-zh="累计">Cumulative</th><th data-zh="状态/关键变更">Status / Key Changes</th></tr>
+<tr style="background:#fff8e1;"><td data-zh="2026年5月"><strong>May 2026</strong></td><td data-zh="P100X（第一批）">P100X (Part 1)</td><td>100</td><td style="color:var(--vc-red);font-weight:600;">$658</td><td>100</td><td data-zh="物料到货。移除8个零件，更换油漆供应商。BL组装取代隆昌。">Materials arriving. 8 parts removed, paint vendor changed. BL assembly replaces Longchang.</td></tr>
+<tr style="background:#fff8e1;"><td data-zh="2026年6月"><strong>Jun 2026</strong></td><td data-zh="P500第二批">P500 Part 2</td><td>100</td><td style="font-weight:600;">$410</td><td>200</td><td data-zh="电机/变速箱重新设计完成。加热器重新设计。组装效率提升。">Motor/gearbox redesign complete. Heater redesign. Assembly efficiency gains.</td></tr>
+<tr><td data-zh="2026年7月"><strong>Jul 2026</strong></td><td data-zh="设计定型">Design finalization</td><td>—</td><td>—</td><td>200</td><td data-zh="结构优化。重新寻源供应商。为300台批次准备产线。">Structural optimization. Supplier re-sourcing. Production line prep for 300-unit batch.</td></tr>
+<tr style="background:#fff8e1;"><td data-zh="2026年8月"><strong>Aug 2026</strong></td><td data-zh="P500第三批">P500 Part 3</td><td>300</td><td style="font-weight:600;">$380</td><td>500</td><td data-zh="结构+供应商优化。组装效率。P500订单完成。">Structural + supplier optimization. Assembly efficiency. <strong>P500 order complete.</strong></td></tr>
+<tr style="background:#e8f5e9;"><td colspan="6" style="text-align:center;font-weight:700;color:var(--vc-green);padding:8px;"><span class="en-only">▼ MASS PRODUCTION RAMP — Target: ~2,549 additional units (Sep–Dec) ▼</span><span class="zh-only">▼ 量产爬坡 — 目标：额外~2,549台（9-12月）▼</span></td></tr>
+<tr style="background:#f0faf0;"><td data-zh="2026年9月"><strong>Sep 2026</strong></td><td data-zh="量产批次1">Mass Prod Batch 1</td><td>~500</td><td style="font-weight:600;">$380</td><td>~1,000</td><td data-zh="首次量产运行。产线已在300台规模验证。爬坡至500台/月。">First mass production run. Line proven at 300-unit scale. Ramp to 500/mo.</td></tr>
+<tr style="background:#f0faf0;"><td data-zh="2026年10月"><strong>Oct 2026</strong></td><td data-zh="量产批次2">Mass Prod Batch 2</td><td>~600</td><td style="font-weight:600;">$370</td><td>~1,600</td><td data-zh="旺季（6-10月）。批量定价生效。扩展至600台/月。">Peak season (Jun–Oct). Volume pricing kicks in. Scale to 600/mo.</td></tr>
+<tr style="background:#f0faf0;"><td data-zh="2026年11月"><strong>Nov 2026</strong></td><td data-zh="量产批次3">Mass Prod Batch 3</td><td>~700</td><td style="font-weight:600;">$360</td><td>~2,300</td><td data-zh="假日预备生产。持续成本优化。BL目标$420→接近$380。">Holiday pre-build. Continuous cost optimization. BL target $420→approaching $380.</td></tr>
+<tr style="background:#f0faf0;"><td data-zh="2026年12月"><strong>Dec 2026</strong></td><td data-zh="量产批次4">Mass Prod Batch 4</td><td>~749</td><td style="color:var(--vc-green);font-weight:600;">$350</td><td style="color:var(--vc-green);font-weight:700;">~3,049</td><td data-zh="FM v13目标达成。EBITDA+ $271K，净利润$118K。VC目标：$380，BL目标：$420。"><strong>FM v13 target hit. EBITDA+ $271K, Net Income $118K.</strong> VC target: $380, BL target: $420.</td></tr>
+</table>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:16px;">
+<div class="note"><span class="en-only">📈 <strong data-zh="爬坡逻辑:">Ramp logic:</strong> Sep–Dec production must average ~637 units/mo to hit 3,049 total. Schedule starts conservative (500 in Sep) and accelerates to ~750 by Dec as production line matures and BL supply chain stabilizes.</span><span class="zh-only">📈 <strong>爬坡逻辑:</strong> 9-12月产量需平均~637台/月才能达到3,049台总量。计划从保守起步（9月500台）并逐月爬坡。本量产能上限为1,000台/月。</span></div>
+<div class="note"><span class="en-only">⚠️ <strong data-zh="旺季风险:">Peak season risk:</strong> Jun–Oct is market peak (旺期). VC cannot afford stockouts. P500 Part 2 (100 units in Jun) and Part 3 (300 units in Aug) are critical for maintaining supply during this window.</span><span class="zh-only">⚠️ <strong>旺季风险:</strong> 6-10月为市场旺季。VC不能断货。P500第二批（6月100台）确保有现货可售，同时产线为8月300台批次做准备。</span></div>
+</div>
+</div>
+
+<div class="card">
+<h3><span class="icon">📊</span> <span class="en-only">2026 Production vs. Profitability Milestones</span><span class="zh-only">2026年产能 vs. 盈利里程碑</span></h3>
+<div id="prod-chart" style="padding:8px 0;"></div>
+<div style="display:flex;gap:16px;margin-top:8px;font-size:12px;color:#666;">
+  <span>🟥 COGS/Unit (USD)</span>
+  <span>🟩 Cumulative Units</span>
+  <span style="border-bottom:2px dashed var(--vc-green);">--- Net Income Breakeven (2,905)</span>
+  <span style="border-bottom:2px dashed var(--vc-red);">--- FM v13 Target (3,049)</span>
+</div>
+</div>
+
+<div class="card">
+<h3><span class="icon">💰</span> <span class="en-only">Cash Flow Model — With Pre-Raise Capital Injections</span><span class="zh-only">现金流模型 — 含融资前资金注入</span></h3>
+<p style="font-size:13px;color:#666;margin-bottom:12px;"><span class="en-only">Monthly cash flow with BenLiang 30/70 payment terms + three confirmed capital injections: <strong>BL investment $100K USD (Jun)</strong>, <strong>OCI reimbursement $100K CAD (Jun–Jul)</strong>, <strong>SR&amp;ED rebate $435K CAD (Jun–Jul)</strong>. Revenue collected with 1-month lag. 100-unit safety stock maintained. Starting cash: <strong>$300K CAD (~$216K USD)</strong>. FX: 1 CAD ≈ 0.72 USD.</span><span class="zh-only">基于本量30/70付款条款的月度现金流 + 三笔已确认资金注入：<strong>BL投资$100K美元（6月）</strong>、<strong>OCI报销$100K加元（6-7月）</strong>、<strong>SR&amp;ED退税$435K加元（6-7月）</strong>。收入延迟1个月入账。维持100台安全库存。起始资金：<strong>$300K加元（~$216K美元）</strong>。</span></p>
+
+<div style="background:linear-gradient(135deg,#e8f5e9,#c8e6c9);border:2px solid var(--vc-green);border-radius:10px;padding:16px 20px;margin-bottom:16px;display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px;text-align:center;">
+  <div><div style="font-size:26px;font-weight:700;color:var(--vc-green);">$216K</div><div style="font-size:11px;color:#666;margin-top:4px;" data-zh="初始现金 (300K加元)">Starting Cash (300K CAD)</div></div>
+  <div><div style="font-size:26px;font-weight:700;color:var(--vc-green);">+$485K</div><div style="font-size:11px;color:#666;margin-top:4px;" data-zh="注入资金 (6-7月)">Injections (Jun–Jul)</div></div>
+  <div><div style="font-size:26px;font-weight:700;color:var(--vc-green);">$0</div><div style="font-size:11px;color:#666;margin-top:4px;" data-zh="所需外部融资">External Financing Needed</div></div>
+  <div><div style="font-size:26px;font-weight:700;color:var(--vc-green);">$1.13M</div><div style="font-size:11px;color:#666;margin-top:4px;" data-zh="26年12月现金">Dec '26 Cash Position</div></div>
+</div>
+
+<table class="fin-table" style="font-size:12px;">
+<tr><th data-zh="月份">Month</th><th data-zh="产量">Prod</th><th data-zh="BL定金(下月)">BL Deposit<br><span style="font-size:10px;color:#888;">(next mo)</span></th><th data-zh="BL尾款(70%)">BL Balance<br><span style="font-size:10px;color:#888;">(70%)</span></th><th data-zh="销量">Sold</th><th data-zh="回款(延迟1月)">Rev Collected<br><span style="font-size:10px;color:#888;">(1-mo lag)</span></th><th data-zh="广告+运营">Ad + OpEx</th><th data-zh="注资" style="color:var(--vc-green);font-weight:600;">Injections</th><th data-zh="净现金流" style="white-space:nowrap;">Net CF</th><th data-zh="累计现金">Cum. Cash</th><th data-zh="库存">Inv</th></tr>
+<tr style="background:#f5f5f5;"><td data-zh="4月">Apr</td><td>—</td><td style="color:var(--vc-red);">-$19.7K</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td style="color:var(--vc-red);">-$19.7K</td><td>$196.3K</td><td>—</td></tr>
+<tr style="background:#fff8e1;"><td><strong>May</strong></td><td>100</td><td style="color:var(--vc-red);">-$12.3K</td><td style="color:var(--vc-red);">-$46.1K</td><td>0</td><td>$0</td><td>-$29K</td><td>—</td><td style="color:var(--vc-red);font-weight:600;">-$87.4K</td><td style="color:var(--vc-green);">$108.9K</td><td>100</td></tr>
+<tr style="background:#e8f5e9;"><td><strong>Jun</strong></td><td>100</td><td>$0</td><td style="color:var(--vc-red);">-$28.7K</td><td>100</td><td>$0</td><td>-$46K</td><td style="color:var(--vc-green);font-weight:700;">+$136K</td><td style="color:var(--vc-green);font-weight:600;">+$61.3K</td><td style="color:var(--vc-green);">$170.2K</td><td>100</td></tr>
+<tr style="background:#e8f5e9;"><td><strong>Jul</strong></td><td>0</td><td style="color:var(--vc-red);">-$34.2K</td><td>$0</td><td>0</td><td style="color:var(--vc-green);">+$105K</td><td>-$29K</td><td style="color:var(--vc-green);font-weight:700;">+$349.2K</td><td style="color:var(--vc-green);font-weight:700;">+$391K</td><td style="color:var(--vc-green);font-weight:600;">$561.2K</td><td>100</td></tr>
+<tr style="background:#fff8e1;"><td><strong>Aug</strong></td><td>300</td><td style="color:var(--vc-red);">-$57K</td><td style="color:var(--vc-red);">-$79.8K</td><td>300</td><td>$0</td><td>-$80K</td><td>—</td><td style="color:var(--vc-red);">-$216.8K</td><td style="color:var(--vc-green);">$344.4K</td><td>100</td></tr>
+<tr style="background:#f0faf0;"><td><strong>Sep</strong></td><td>500</td><td style="color:var(--vc-red);">-$66.6K</td><td style="color:var(--vc-red);">-$133K</td><td>500</td><td style="color:var(--vc-green);">+$315K</td><td>-$114K</td><td>—</td><td style="color:var(--vc-green);">+$1.4K</td><td style="color:var(--vc-green);">$345.8K</td><td>100</td></tr>
+<tr style="background:#f0faf0;"><td><strong>Oct</strong></td><td>600</td><td style="color:var(--vc-red);">-$75.6K</td><td style="color:var(--vc-red);">-$155.4K</td><td>600</td><td style="color:var(--vc-green);">+$525K</td><td>-$131K</td><td>—</td><td style="color:var(--vc-green);font-weight:600;">+$163K</td><td style="color:var(--vc-green);">$508.8K</td><td>100</td></tr>
+<tr style="background:#e8f5e9;"><td><strong>Nov</strong></td><td>700</td><td style="color:var(--vc-red);">-$78.6K</td><td style="color:var(--vc-red);">-$176.4K</td><td>700</td><td style="color:var(--vc-green);">+$630K</td><td>-$148K</td><td>—</td><td style="color:var(--vc-green);font-weight:600;">+$227K</td><td style="color:var(--vc-green);font-weight:600;">$735.8K</td><td>100</td></tr>
+<tr style="background:#e8f5e9;"><td><strong>Dec</strong></td><td>749</td><td>$0</td><td style="color:var(--vc-red);">-$183.5K</td><td>749</td><td style="color:var(--vc-green);">+$735K</td><td>-$156.3K</td><td>—</td><td style="color:var(--vc-green);font-weight:600;">+$395.2K</td><td style="color:var(--vc-green);font-weight:700;">$1,130.9K</td><td>100</td></tr>
+<tr class="total"><td data-zh="1月'27">Jan '27</td><td>—</td><td data-zh="12月销售回款" colspan="2" style="font-size:12px;">Dec sales collected</td><td>—</td><td style="color:var(--vc-green);">+$786.5K</td><td>-$48K</td><td>—</td><td style="color:var(--vc-green);font-weight:700;">+$738.5K</td><td style="color:var(--vc-green);font-weight:700;">$1,869.4K</td><td>100</td></tr>
+</table>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:16px;">
+<div class="note" style="border-left-color:var(--vc-green);"><span class="en-only">✅ <strong>Cash never goes negative.</strong> With $300K CAD starting capital plus $485K USD in injections, VCycene maintains a positive cash position throughout the entire production ramp. The May low point ($109K) still has a comfortable buffer. No credit lines, no bridge financing, no debt of any kind required.</span><span class="zh-only">✅ <strong>现金流始终为正。</strong> 凭借$300K加元启动资金加上$485K美元注资，VCycene在整个产能爬坡期间保持正向现金头寸。5月最低点（$109K）仍有舒适缓冲。无需信用额度、过桥融资或任何形式的债务。</span></div>
+<div class="note" style="border-left-color:var(--vc-green);"><span class="en-only">💰 <strong>Ends 2026 with $1.13M cash — $1.87M after Jan '27 collection.</strong> VCycene self-funds the entire journey from P100X prototype to 749-unit/month mass production using only starting capital, strategic partner investment, and government programs. The $5M raise in H1 2027 is purely for growth acceleration (US market, LILA Mini, team expansion), not working capital. This is the strongest possible fundraising position.</span><span class="zh-only">💰 <strong>2026年底现金$1.13M — 2027年1月收款后达$1.87M。</strong> VCycene完全自筹资金完成从P100X原型到月产749台的量产之旅，仅依靠启动资金、战略合作伙伴投资和政府项目。2027上半年的$5M融资纯粹用于加速增长（美国市场、LILA Mini、团队扩张），而非运营资金。这是最强的融资谈判地位。</span></div>
+</div>
+</div>
+
+<div class="card">
+<h3><span class="icon">📊</span> <span class="en-only">Cash Position Waterfall</span><span class="zh-only">现金瀑布图</span></h3>
+<div id="cashflow-chart" style="padding:8px 0;"></div>
+<div style="display:flex;gap:16px;margin-top:8px;font-size:12px;color:#666;">
+  <span>🟩 Positive cash (with injections)</span>
+  <span>🟥 Negative cash</span>
+  <span>🟦 Capital injection months</span>
+</div>
+</div>
+
+<div class="card">
+<h3><span class="icon">🏦</span> <span class="en-only">Pre-Raise Capital Injections &amp; Financing Analysis</span><span class="zh-only">融资前资金注入与融资需求分析</span></h3>
+
+<p style="font-size:13px;color:#666;margin-bottom:16px;"><span class="en-only">Three confirmed capital events eliminate the need for external debt financing. VCycene reaches mass production and profitability using only existing commitments.</span><span class="zh-only">三笔已确认的资金事件消除了外部债务融资需求。VCycene仅通过现有承诺即可实现量产和盈利。</span></p>
+
+<table class="fin-table">
+<tr><th data-zh="资金事件">Capital Event</th><th data-zh="金额">Amount</th><th data-zh="时间">Timing</th><th data-zh="来源/状态">Source / Status</th></tr>
+<tr style="background:#e8f5e9;"><td data-zh="1. 本量战略投资" style="font-weight:700;">1. BenLiang Strategic Investment</td><td style="color:var(--vc-green);font-weight:700;">$100K USD</td><td data-zh="2026年6月">June 2026</td><td data-zh="根据OEM协议。BL作为战略合作伙伴投资——使制造与财务利益一致。">Per OEM agreement. BL invests as strategic partner — aligns manufacturing + financial interests. Potential to advance $60K to late May to bridge the 1-month gap.</td></tr>
+<tr style="background:#e8f5e9;"><td data-zh="2. OCI报销" style="font-weight:700;">2. OCI Reimbursement</td><td style="color:var(--vc-green);font-weight:700;">$100K CAD<br><span style="font-size:11px;color:#888;">~$72K USD</span></td><td data-zh="2026年6-7月">June–July 2026</td><td data-zh="安大略省创新中心拨款报销。已提交申请，等待拨付。">Ontario Centre of Innovation grant reimbursement. Application filed, awaiting disbursement.</td></tr>
+<tr style="background:#e8f5e9;"><td data-zh="3. SR&amp;ED退税" style="font-weight:700;">3. SR&amp;ED Tax Rebate</td><td style="color:var(--vc-green);font-weight:700;">$435K CAD<br><span style="font-size:11px;color:#888;">~$313K USD</span></td><td data-zh="2026年6-7月">June–July 2026</td><td data-zh="科学研究与实验发展退税。已向CRA申报。最大单笔注资。">Scientific Research &amp; Experimental Development tax credit. Filed with CRA. Largest single injection — covers the bulk of production scaling costs.</td></tr>
+<tr class="total"><td data-zh="注资总额">Total Injections</td><td data-zh="~$485K美元" style="color:var(--vc-green);font-weight:700;">~$485K USD</td><td data-zh="2026年6-7月">Jun–Jul 2026</td><td data-zh="合计注资超出基础模型$277K最高融资需求75%。无需外部贷款。">Combined injections exceed the $277K peak financing need from the base model by 75%. <strong>No external loans required.</strong></td></tr>
+</table>
+
+<div style="background:linear-gradient(135deg,#e8f5e9,#c8e6c9);border:2px solid var(--vc-green);border-radius:10px;padding:16px 20px;margin-top:16px;margin-bottom:16px;">
+<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px;text-align:center;">
+  <div>
+    <div style="font-size:13px;font-weight:600;color:#666;margin-bottom:4px;" data-zh="初始资金">Starting Capital</div>
+    <div style="font-size:22px;font-weight:700;color:var(--vc-green);">$300K CAD</div>
+    <div style="font-size:11px;color:#888;">~$216K USD</div>
+  </div>
+  <div>
+    <div style="font-size:13px;font-weight:600;color:#666;margin-bottom:4px;" data-zh="+ 注入资金">+ Injections</div>
+    <div style="font-size:22px;font-weight:700;color:var(--vc-green);">+$485K USD</div>
+    <div style="font-size:11px;color:#888;">BL + OCI + SR&amp;ED</div>
+  </div>
+  <div>
+    <div style="font-size:13px;font-weight:600;color:#666;margin-bottom:4px;" data-zh="外部贷款">External Loans</div>
+    <div style="font-size:22px;font-weight:700;color:var(--vc-green);">$0</div>
+    <div style="font-size:11px;color:#888;" data-zh="无需债务融资">No debt financing needed</div>
+  </div>
+  <div>
+    <div style="font-size:13px;font-weight:600;color:#666;margin-bottom:4px;" data-zh="5月最低点">May Low Point</div>
+    <div style="font-size:22px;font-weight:700;color:var(--vc-green);">$109K</div>
+    <div style="font-size:11px;color:#888;" data-zh="安全缓冲充裕">Comfortable buffer</div>
+  </div>
+</div>
+</div>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+<div class="note" style="border-left-color:var(--vc-green);"><span class="en-only">✅ <strong>Zero debt, zero dilution pre-raise.</strong> VCycene scales from P100X prototype to 749-unit/month mass production entirely through starting capital ($300K CAD), a strategic partner investment (BL $100K), and non-dilutive government programs (OCI $100K CAD, SR&amp;ED $435K CAD). Cash never goes negative. No credit lines, no convertible notes, no bridge rounds.</span><span class="zh-only">✅ <strong>融资前零债务、零稀释。</strong> VCycene完全通过启动资金($300K加元)、战略合作伙伴投资(BL $100K)和非稀释性政府项目(OCI $100K加元、SR&amp;ED $435K加元)实现从P100X原型到月产749台的规模化。现金流始终为正。无信用额度、无可转债、无过桥轮。</span></div>
+<div class="note" style="border-left-color:var(--vc-green);"><span class="en-only">📐 <strong>Investor narrative:</strong> VCycene enters the $5M raise with <strong>$1.13M+ in cash reserves</strong>, proven unit economics at scale (749 units/mo, $350 COGS), and zero debt on the balance sheet. The raise is purely for growth acceleration — US retail expansion, LILA Mini development, and team scaling. This is the "raise from abundance" story that de-risks the investment for Series A / institutional investors.</span><span class="zh-only">📐 <strong>投资者叙事：</strong> VCycene带着<strong>$1.13M+现金储备</strong>、经验证的规模化单位经济（月产749台，COGS $350）和零负债资产负债表进入$5M融资。融资纯粹用于加速增长——美国零售扩张、LILA Mini开发和团队扩充。这是"从充裕中融资"的故事，为A轮/机构投资者降低风险。</span></div>
+</div>
+</div>
+
+<div class="card">
+<h3><span class="icon">📈</span> <span class="en-only">2027 Cash Flow — Quarterly (Post-Raise Scenario)</span><span class="zh-only">2027年季度现金流 (融资后场景)</span></h3>
+<p style="font-size:13px;color:#666;margin-bottom:12px;"><span class="en-only">2027 projections with and without the $5M raise. Starting from $1.87M cash (Jan '27 after Dec sales collected). Even without external capital, VCycene is deeply cash-flow positive throughout 2027.</span><span class="zh-only">含/不含$5M融资的2027年预测。起始现金$1.87M（2027年1月收齐12月销售款后）。即使没有外部资金，VCycene在整个2027年也保持强劲正现金流。</span></p>
+<table class="fin-table">
+<tr><th data-zh="季度">Quarter</th><th data-zh="产量">Prod Units</th><th data-zh="平均COGS">Avg COGS</th><th data-zh="生产成本">Prod Cost</th><th data-zh="营收">Revenue</th><th data-zh="运营费+广告">OpEx + Ads</th><th data-zh="净现金流">Net CF</th><th data-zh="累计现金(无融资)">Cum. Cash<br><span style="font-size:10px;color:#888;">(no raise)</span></th><th data-zh="累计现金(+$5M融资)">Cum. Cash<br><span style="font-size:10px;color:var(--vc-green);">(+$5M raise)</span></th></tr>
+<tr><td><strong>Q1 2027</strong></td><td>1,100</td><td>$345</td><td>$380K</td><td>$1.16M</td><td>$221K</td><td style="color:var(--vc-green);font-weight:600;">+$555K</td><td>$2.42M</td><td style="color:var(--vc-green);font-weight:600;">$7.42M</td></tr>
+<tr><td><strong>Q2 2027</strong></td><td>1,400</td><td>$330</td><td>$462K</td><td>$1.47M</td><td>$242K</td><td style="color:var(--vc-green);font-weight:600;">+$766K</td><td>$3.19M</td><td style="color:var(--vc-green);font-weight:600;">$8.19M</td></tr>
+<tr><td><strong>Q3 2027</strong></td><td>1,500</td><td>$315</td><td>$473K</td><td>$1.58M</td><td>$249K</td><td style="color:var(--vc-green);font-weight:600;">+$854K</td><td>$4.04M</td><td style="color:var(--vc-green);font-weight:600;">$9.04M</td></tr>
+<tr><td><strong>Q4 2027</strong></td><td>1,492</td><td>$300</td><td>$448K</td><td>$1.57M</td><td>$248K</td><td style="color:var(--vc-green);font-weight:600;">+$871K</td><td>$4.92M</td><td style="color:var(--vc-green);font-weight:600;">$9.92M</td></tr>
+<tr class="total"><td data-zh="2027年合计">2027 Total</td><td>5,492</td><td data-zh="平均$323">$323 avg</td><td>$1.76M</td><td>$5.77M</td><td>$960K</td><td style="color:var(--vc-green);font-weight:700;">+$3.05M</td><td style="color:var(--vc-green);font-weight:700;">$4.92M</td><td style="color:var(--vc-green);font-weight:700;">$9.92M</td></tr>
+</table>
+<div class="note" style="margin-top:12px;"><span class="en-only">📊 <strong>Inventory management:</strong> 100-unit buffer maintained throughout. Monthly production cycles mean orders placed 4–6 weeks ahead. BenLiang MOQ is set per batch, not per SKU. At 500+ units/month, BL has dedicated production capacity and 2-week lead time for repeat orders.</span><span class="zh-only">📊 <strong>库存管理：</strong> 全程维持100台安全库存。月度生产周期意味着提前4-6周下单。本量MOQ按批次而非按SKU设定。月产500+台时，BL配备专用产线，复购订单交期2周。</span></div>
+</div>
+
+<div class="card">
+<h3><span class="icon">🔮</span> <span class="en-only">2027 Production Outlook</span><span class="zh-only">2027年生产展望</span></h3>
+<p style="font-size:13px;color:#666;margin-bottom:12px;"><span class="en-only">FM v13 projects 5,492 units in 2027 (~458/mo avg). BenLiang COGS trajectory continues downward as volume pricing and design optimization mature.</span><span class="zh-only">FM v13预测2027年产出5,492台（月均~458台）。随着量价优势和设计优化成熟，本量COGS持续下降。</span></p>
+<table class="fin-table">
+<tr><th data-zh="时间段">Period</th><th data-zh="预估台数">Est. Units</th><th data-zh="COGS目标">COGS Target</th><th data-zh="累计（从2026起）">Cumulative (from 2026)</th><th data-zh="关键里程碑">Key Milestones</th></tr>
+<tr><td>Q1 2027</td><td>~1,100</td><td>$340–350</td><td>~4,149</td><td data-zh="盈利验证完成。融资前数据室准备。">Post-profitability proof. Pre-raise data room prep.</td></tr>
+<tr><td data-zh="Q2 2027">Q2 2027</td><td>~1,400</td><td>$320–340</td><td>~5,549</td><td><strong data-zh="2027上半年融资窗口开启。">H1 2027 fundraise window opens.</strong> <span class="en-only">$5M raise from strength.</span><span class="zh-only">从优势地位融$5M。</span></td></tr>
+<tr><td data-zh="Q3 2027">Q3 2027</td><td>~1,500</td><td>$310–320</td><td>~7,049</td><td data-zh="融资后扩张。新渠道（B2B机构）。">Post-raise scaling. New channels (B2B institutional).</td></tr>
+<tr><td data-zh="Q4 2027">Q4 2027</td><td>~1,492</td><td style="color:var(--vc-green);font-weight:600;">$300</td><td>~8,541</td><td data-zh="BL成本目标$300达成。较$658基准降低54%。">BL cost target $300 achieved. 54% reduction from $658 baseline.</td></tr>
+<tr class="total"><td data-zh="2027年合计">2027 Total</td><td>5,492</td><td data-zh="平均$300–350">$300–350 avg</td><td>8,541</td><td><span class="en-only">Profit-sharing threshold: approaching 10K units (50%→30% tier)</span><span class="zh-only">利润分成阈值：接近10K台（50%→30%阶梯）</span></td></tr>
+</table>
+<div class="note" style="margin-top:12px;"><span class="en-only">📊 <strong>Profit-sharing milestones:</strong> At 10,001 cumulative units (est. Q1 2028), BenLiang's cost-optimization share drops from 50% to 30%. At 35,001 units it drops to 20%, and at 100,001+ units all savings flow to VCycene (0% to BL). This accelerates margin expansion as volume grows.</span><span class="zh-only">📊 <strong>利润分成里程碑：</strong> 累计达10,001台（预计2028年Q1）时，本量的成本优化分成从50%降至30%。达35,001台时降至20%，100,001台以上所有节省归VCycene（BL为0%）。随产量增长，利润率扩张加速。</span></div>
+</div>
+
+<div class="card">
+<h3><span class="icon">🔧</span> <span class="en-only">Cost Optimization Drivers (from BL Agreement)</span><span class="zh-only">成本优化驱动因素 (源自BL协议)</span></h3>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+<div>
+<h4 style="font-size:14px;color:var(--vc-red);margin-bottom:8px;"><span class="en-only">1. Procurement (采购降本)</span><span class="zh-only">1. 采购降本</span></h4>
+<p style="font-size:13px;"><span class="en-only">Leverage BL's existing supplier network and domestic market pricing. Replace suppliers while maintaining quality. Already quoting alternatives for: plastics, shafts, PCBA, wire harnesses, fasteners.</span><span class="zh-only">利用BL现有供应商网络和国内市场定价。在保持质量的同时更换供应商。已开始询价替代方案：塑料件、轴、PCBA、线束、紧固件。</span></p>
+</div>
+<div>
+<h4 style="font-size:14px;color:var(--vc-red);margin-bottom:8px;"><span class="en-only">2. Design (设计降本)</span><span class="zh-only">2. 设计降本</span></h4>
+<p style="font-size:13px;"><span class="en-only"><strong>Phase 1 (Jun '26):</strong> Gearbox/motor redesign or removal — #1 cost driver. Already have optimization plan.<br><strong>Phase 2 (Aug+ '26):</strong> Structural cost optimization for high-cost components.</span><span class="zh-only"><strong>第一阶段（2026年6月）：</strong> 变速箱/电机重新设计或移除——第一大成本驱动因素。已有优化方案。<br><strong>第二阶段（2026年8月+）：</strong> 高成本组件结构优化。</span></p>
+</div>
+<div>
+<h4 style="font-size:14px;color:var(--vc-red);margin-bottom:8px;"><span class="en-only">3. Volume Pricing</span><span class="zh-only">3. 批量定价</span></h4>
+<p style="font-size:13px;"><span class="en-only">As monthly production scales from 100→700+ units, BL negotiates bulk material pricing. MOQ requirements set by BL to achieve economies of scale.</span><span class="zh-only">随月产量从100台扩展到700+台，BL谈判批量采购价格。BL设定MOQ以实现规模经济。</span></p>
+</div>
+<div>
+<h4 style="font-size:14px;color:var(--vc-red);margin-bottom:8px;"><span class="en-only">4. Assembly Efficiency</span><span class="zh-only">4. 装配效率</span></h4>
+<p style="font-size:13px;"><span class="en-only">BL assembly replaces Longchang (previous assembler with above-market rates). Continuous process improvement as production line matures through P500 batches.</span><span class="zh-only">BL组装取代隆昌（此前组装商收费高于市场价）。随P500批次产线成熟，持续工艺改进。</span></p>
+</div>
+</div>
+<div class="note" style="margin-top:12px;"><span class="en-only">⚠️ <strong>Risk factor:</strong> Raw material price spikes (e.g. plastics up 40–60% due to geopolitical events). For accepted orders, BL absorbs the cost. For new orders with >10% single-material increase, BL and VC negotiate shared absorption (50:50 or 40:60).</span><span class="zh-only">⚠️ <strong>风险因素：</strong> 原材料价格飙升（如地缘政治导致塑料涨价40-60%）。已接订单由BL承担成本。新订单中单一材料涨幅>10%时，BL和VC协商共同承担（50:50或40:60）。</span></div>
+</div>
+
+</div>
+
+<!-- TAB 3: FINANCIAL MODEL -->
+<div class="panel" id="panel-model">
+
+<div class="card">
+<h3><span class="icon">🎛️</span> <span class="en-only">Adjust Assumptions (Sensitivity Analysis)</span><span class="zh-only">调整假设 (敏感性分析)</span></h3>
+<p style="font-size:12px;color:#888;margin-bottom:12px;"><span class="en-only">Base case uses FM v13 actuals. Drag sliders to stress-test scenarios. Revenue is blended USD across D2C ($1,100), B2G ($1,000), and B2B ($750–1,000). <strong>DTC discount rate</strong> reduces DTC net revenue (default 20% — reflects promotional pricing that drives acquisition).</span><span class="zh-only">基础场景使用FM v13实际数据。拖动滑块进行压力测试。收入为各渠道综合美元收入：D2C（$1,100）、B2G（$1,000）、B2B（$750-1,000）。<strong>DTC折扣率</strong>调整DTC净收入以反映退货和促销。</span></p>
+<div class="slider-group">
+  <div class="slider-item">
+    <label data-zh="混合ASP (美元)">Blended ASP (USD)</label>
+    <input type="range" min="700" max="1300" value="1050" id="sl-asp" oninput="recalc()">
+    <span class="slider-val" id="v-asp">$1,050</span>
+  </div>
+  <div class="slider-item">
+    <label data-zh="平均COGS/台 (美元)">Avg COGS per Unit (USD)</label>
+    <input type="range" min="250" max="700" value="510" id="sl-cogs" oninput="recalc()">
+    <span class="slider-val" id="v-cogs">$510</span>
+  </div>
+  <div class="slider-item">
+    <label data-zh="月固定成本 (美元$K)">Monthly Fixed Costs (USD $K)</label>
+    <input type="range" min="15" max="60" value="29" id="sl-fixed" oninput="recalc()">
+    <span class="slider-val" id="v-fixed">$29K</span>
+  </div>
+  <div class="slider-item">
+    <label data-zh="DTC折扣率">DTC Discount Rate</label>
+    <input type="range" min="0" max="40" value="20" id="sl-disc" oninput="recalc()">
+    <span class="slider-val" id="v-disc">20%</span>
+  </div>
+  <div class="slider-item">
+    <label data-zh="DTC获客成本 (美元)">DTC CAC (USD)</label>
+    <input type="range" min="80" max="350" value="170" id="sl-cac" oninput="recalc()">
+    <span class="slider-val" id="v-cac">$170</span>
+  </div>
+</div>
+</div>
+
+<div class="card">
+<h3><span class="icon">📈</span> <span class="en-only">Projected P&L by Year — FM v13 Base Case</span><span class="zh-only">年度损益预测 — FM v13 基准情景</span></h3>
+<table class="fin-table" id="pl-table">
+<tr><th data-zh="指标">Metric</th><th data-zh="2026">2026</th><th data-zh="2027">2027</th><th data-zh="2028">2028</th><th data-zh="2029">2029</th></tr>
+</table>
+<div id="profit-note" class="note" style="margin-top:12px;"></div>
+</div>
+
+<div class="card">
+<h3><span class="icon">📊</span> <span class="en-only">Revenue vs. Expenses (Visual)</span><span class="zh-only">收入 vs. 费用 (可视化)</span></h3>
+<div id="bar-chart-area"></div>
+</div>
+
+<div class="assumptions">
+<h4><span class="en-only">Key Assumptions (FM v13 + BenLiang OEM Agreement)</span><span class="zh-only">核心假设 (FM v13 + 本量OEM协议)</span></h4>
+<ul>
+<li><span class="en-only">Unit volumes: 3,049 (2026) → 5,492 (2027) → 9,241 (2028) → 14,433 (2029) per FM v13</span><span class="zh-only">产量：3,049 (2026) → 5,492 (2027) → 9,241 (2028) → 14,433 (2029) 依据FM v13</span></li>
+<li><span class="en-only">BenLiang COGS trajectory: $658 (P100X) → $410 (Jun '26) → $380 (Aug '26) → $320 (mid '27) → $300 (end '27)</span><span class="zh-only">BenLiang COGS轨迹：$658 (P100X) → $410 (2026年6月) → $380 (2026年8月) → $320 (2026年底) → $300 (2027年底目标)</span></li>
+<li><span class="en-only">Blended ASP ~$1,050 USD across D2C ($1,100), B2G ($1,000), B2B ($750–1,000)</span><span class="zh-only">混合均价约$1,050美元，涵盖D2C ($1,100)、B2G ($1,000)、B2B ($750–1,000)</span></li>
+<li><span class="en-only">Profit-sharing tiers: BL keeps 50% savings (0–10K), 30% (10K–35K), 20% (35K–100K), 0% (100K+)</span><span class="zh-only">利润分成阶梯：BL保留50%节省（0-10K）、30%（10K-35K）、20%（35K-100K）、0%（100K+）</span></li>
+<li><span class="en-only">Fixed costs ~$40K CAD/mo (~$29K USD/mo) in 2026, scaling with headcount: team grows from 7 (2026) → 12 (2027) → 16 (2028) → 22 (2029)</span><span class="zh-only">固定成本~$40K加元/月（~$29K美元/月），2026年随团队扩张：7人（6月后）→融资后10-12人</span></li>
+<li><span class="en-only">DTC CAC declining from $170 → $120 as brand awareness + organic traffic grow; B2G/B2B channels have near-zero CAC</span><span class="zh-only">DTC获客成本从$170降至$120（品牌知名度+自然流量增长）；B2G渠道CAC更低但销售周期更长</span></li>
+<li><span class="en-only">Marketplace revenue (Shopify Collective) not modeled — upside optionality</span><span class="zh-only">商城收入 (Shopify Collective) 未建模 — 额外增长空间</span></li>
+<li><span class="en-only">Grant income (OAFRI, IRAP, etc.) treated as one-time offsets, not recurring revenue</span><span class="zh-only">政府补贴 (OAFRI, IRAP等) 视为一次性抵扣，非经常性收入</span></li>
+</ul>
+</div>
+</div>
+
+<!-- TAB 4: FUNDRAISE TIMELINE -->
+<div class="panel" id="panel-timeline">
+
+<div class="card">
+<h3><span class="icon">🎯</span> <span class="en-only">Fundraising Roadmap Synced to Profitability</span><span class="zh-only">与盈利节点同步的融资路线图</span></h3>
+<p style="font-size:13px;color:#666;margin-bottom:20px;"><span class="en-only">VCycene reaches <strong>EBITDA-positive in Q4 2026</strong> ($118K net income) powered by BenLiang OEM production ramp. The $5M USD raise is timed for <strong>H1 2027</strong> — when profitability is proven and capital accelerates scale. Click each milestone for details.</span><span class="zh-only">VCycene于<strong>2026年Q4实现EBITDA盈利</strong>（净利润$118K），由本量电子OEM产能爬坡驱动。$5M美元融资定于<strong>2027年上半年</strong>——盈利验证后，资金加速扩张。点击查看详情。</span></p>
+
+<div class="timeline">
+
+<div class="tl-item done" onclick="toggleDetail(this)">
+  <div class="tl-date"><span class="en-only">Q4 2025 – Q1 2026 ✓ COMPLETED</span><span class="zh-only">Q4 2025 – Q1 2026 ✓ 已完成</span></div>
+  <div class="tl-title"><span class="en-only">US Market Entry & DTC Validation</span><span class="zh-only">美国市场进入与DTC验证</span></div>
+  <div class="tl-desc"><span class="en-only">68 units sold across 2 campaigns. US market proved viable. CAC dropped from $318 → $172.</span><span class="zh-only">两次营销活动售出68台。美国市场验证可行。CAC从$318降至$172。</span></div>
+  <div class="tl-metrics">
+    <span class="tl-metric rev" data-zh="$68K营收">$68K rev</span>
+    <span class="tl-metric units" data-zh="68台"">68 units</span>
+  </div>
+  <div class="tl-detail">
+    <span class="en-only">Proved: product-market fit in both CA and US. Meta ads are scalable acquisition channel. 5.35× ROAS on Winter campaign. US customers willing to pay duties for premium composter. Repeat/referral purchases emerging. Camp Jubilee B2B order (3 units) validates institutional demand.</span><span class="zh-only">已验证：加美两地PMF。Meta广告为可扩展获客渠道。冬季活动5.35× ROAS。美国客户愿为优质堆肥机支付关税。复购/推荐购买显现。Camp Jubilee B2B订单(3台)验证机构需求。</span>
+  </div>
+</div>
+
+<div class="tl-item done" onclick="toggleDetail(this)">
+  <div class="tl-date"><span class="en-only">Q1–Q2 2026 ✓ COMPLETED</span><span class="zh-only">Q1–Q2 2026 ✓ 已完成</span></div>
+  <div class="tl-title"><span class="en-only">BenLiang OEM Partnership Signed</span><span class="zh-only">本量电子OEM合作签约</span></div>
+  <div class="tl-desc"><span class="en-only">Signed Mode 1: Finished Product Procurement agreement with 本量电子. Tiered profit-sharing (50/30/20/0%) aligned to volume growth.</span><span class="zh-only">签署Mode 1成品采购协议。分级利润分成(50/30/20/0%)与产量增长挂钩。</span></div>
+  <div class="tl-metrics">
+    <span class="tl-metric units" data-zh="OEM已锁定">OEM locked in</span>
+    <span class="tl-metric rev" data-zh="COGS降幅54%路径">54% COGS reduction path</span>
+  </div>
+  <div class="tl-detail">
+    <span class="en-only">BenLiang (本量电子) takes over full production from pilot to mass manufacturing. Key terms: Finished Product Procurement model (Mode 1), COGS target from $658 → $300 by end 2027, profit-sharing tiers on cost savings (50% at 0-10K units, 30% at 10K-35K, 20% at 35K-100K, 0% at 100K+). BL contacts: Pengfei Zhu (hardware), Fengguo Chen (PM).</span><span class="zh-only">本量电子接管从试产到量产的全部生产。核心条款：成品采购模式(Mode 1)，COGS目标从$658→$300 (2027年底)，成本节省分成阶梯(0-10K台50%、1K-35K 30%、35K-100K 20%、100K+无)。联系人：朱鹏飞(硬件)、陈峰国(项目管理)。</span>
+  </div>
+</div>
+
+<div class="tl-item active-now" onclick="toggleDetail(this)">
+  <div class="tl-date"><span class="en-only">MAY 2026 ← NOW</span><span class="zh-only">MAY 2026 ← 当前</span></div>
+  <div class="tl-title"><span class="en-only">P100X Production Batch — 100 Units</span><span class="zh-only">P100X生产批次 — 100台</span></div>
+  <div class="tl-desc"><span class="en-only">First BenLiang production run. Materials arriving. COGS baseline: $658/unit. 8 parts removed from prior design.</span><span class="zh-only">首批本量生产。物料到货中。COGS基线：$658/台。较前代设计减少8个零件。</span></div>
+  <div class="tl-metrics">
+    <span class="tl-metric units">100 units</span>
+    <span class="tl-metric rev">$658 COGS</span>
+  </div>
+  <div class="tl-detail">
+    <span class="en-only">P100X is the baseline batch establishing BenLiang's production line. Key changes from prior Longchang builds: 8 parts removed, paint cost reduction already started. Materials are arriving now. This batch validates BL's assembly process and quality standards before scaling. Units fulfill existing backlog and spring DTC demand.</span><span class="zh-only">P100X是建立本量生产线的基准批次。相比前期龙昌生产的主要变化：减少8个零件，已开始降低喷漆成本。物料正在到货。该批次验证BL的组装流程和质量标准。产品满足现有积压订单和春季DTC需求。</span>
+  </div>
+</div>
+
+<div class="tl-item future" onclick="toggleDetail(this)">
+  <div class="tl-date">JUN 2026</div>
+  <div class="tl-title"><span class="en-only">P500 Part 2 — Gearbox/Motor Redesign (100 units)</span><span class="zh-only">P500第二批 — 齿轮箱/电机改型 (100台)</span></div>
+  <div class="tl-desc"><span class="en-only">Major cost reduction: gearbox/motor redesign or removal drops COGS to $410/unit (38% reduction).</span><span class="zh-only">重大成本优化：齿轮箱/电机改型或移除，COGS降至$410/台 (38%降幅)。</span></div>
+  <div class="tl-metrics">
+    <span class="tl-metric units">100 units</span>
+    <span class="tl-metric rev">$410 COGS</span>
+  </div>
+  <div class="tl-detail">
+    <span class="en-only">The gearbox/motor redesign is the #1 cost lever identified in the BenLiang partnership. Removing or simplifying this assembly saves ~$248/unit. This batch also benefits from BL's supplier network pricing vs. VCycene's direct sourcing. 100 units test the redesigned mechanism at scale before committing to the larger Part 3 run.</span><span class="zh-only">齿轮箱/电机改型是本量合作中确定的第一成本杠杆。移除或简化该组件可节省~$248/台。该批次还受益oBL供应商网络定价。100台测试重新设计的机构后再批量生产。</span>
+  </div>
+</div>
+
+<div class="tl-item future" onclick="toggleDetail(this)">
+  <div class="tl-date"><span class="en-only">AUG 2026</span><span class="zh-only">2026年8月</span></div>
+  <div class="tl-title"><span class="en-only">P500 Part 3 — Full Cost Optimization (300 units)</span><span class="zh-only">P500第三批 — 全面成本优化 (300台)</span></div>
+  <div class="tl-desc"><span class="en-only">Full BenLiang supplier network pricing: COGS drops to $380/unit. Largest single batch validates mass production readiness.</span><span class="zh-only">全面使用本量供应商网络定价：COGS降至$380/台。最大单批次验证量产就绪。</span></div>
+  <div class="tl-metrics">
+    <span class="tl-metric units">300 units</span>
+    <span class="tl-metric rev">$380 COGS</span>
+  </div>
+  <div class="tl-detail">
+    <span class="en-only">300 units at $380 COGS — full BenLiang supplier pricing on all components. This batch proves the production line can handle volume. Combined P500 total: 500 units (100+100+300). Revenue from these units ($525K at $1,050 ASP) begins flowing in September, funding the mass production ramp.</span><span class="zh-only">300台$380 COGS——全部组件使用本量供应商定价。该批次验证产线可处理批量生产。P500累计：500台(100+100+300)。收入($525K按$1,050均价)于9月开始回流，支撑量产爬坡。</span>
+  </div>
+</div>
+
+<div class="tl-item milestone" onclick="toggleDetail(this)">
+  <div class="tl-date"><span class="en-only">Q4 2026</span><span class="zh-only">2026年Q4</span></div>
+  <div class="tl-title"><span class="en-only">🎯 Profitability Milestone — EBITDA+ $271K</span><span class="zh-only">🎯 盈利里程碑 — EBITDA+ $271K</span></div>
+  <div class="tl-desc"><span class="en-only">VCycene crosses EBITDA-positive with $4.05M revenue, 3,049 units sold, 61.8% gross margins. Net income: $118K.</span><span class="zh-only">VCycene实现EBITDA转正，$4.05M营收，3,049台销售，61.8%毛利率。净利润：$118K。</span></div>
+  <div class="tl-metrics">
+    <span class="tl-metric rev">$4.05M revenue</span>
+    <span class="tl-metric units">3,049 units</span>
+    <span class="tl-metric fund">$118K net income</span>
+  </div>
+  <div class="tl-detail">
+    <span class="en-only">FM v13 projects Q4 2026 as the inflection point. Mass production at 500→749 units/mo drives volume past the ~2,905-unit breakeven threshold. BenLiang COGS averages ~$350 across the year (blended $658/$410/$380 early + $350 mass production). This is the single most important milestone for fundraising — proving profitability BEFORE raising converts the $5M from survival capital to growth capital.</span><span class="zh-only">FM v13预测Q4 2026为拐点。量产500→749台/月使销量超过~2,905台盈亏平衡点。本量COGS全年平均~$350（混合$658/$410/$380+$350量产）。这是融资最关键的里程碑——融资前证明盈利将$5M从生存资本转化为增长资本。</span>
+  </div>
+</div>
+
+<div class="tl-item future" onclick="toggleDetail(this)">
+  <div class="tl-date"><span class="en-only">Q4 2026</span><span class="zh-only">2026年Q4</span></div>
+  <div class="tl-title"><span class="en-only">Pre-Raise Preparation</span><span class="zh-only">融资前准备</span></div>
+  <div class="tl-desc"><span class="en-only">Data room, pitch deck, fractional CFO, warm investor intros. Build on proven profitability numbers.</span><span class="zh-only">数据室、路演材料、兼职CFO、投资人引荐。以已验证的盈利数据为基础。</span></div>
+  <div class="tl-metrics">
+    <span class="tl-metric fund" data-zh="数据房就绪">Data room ready</span>
+    <span class="tl-metric rev" data-zh="$4M+营收已验证">$4M+ ARR proven</span>
+  </div>
+  <div class="tl-detail">
+    <span class="en-only">(1) Engage fractional CFO to prepare investor-grade financials from QuickBooks data. (2) Build data room: cap table, BenLiang OEM agreement, IP portfolio, municipal contracts, customer metrics (NPS, retention, compost output data). (3) Warm relationships with 30–50 target investors through ventureLAB, MaRS, existing network. (4) Commission third-party compost quality study. (5) Patent filings on CompostAI. (6) Pitch deck with actual profitability proof — not projections.</span><span class="zh-only">(1) 聘请兼职CFO准备投资级财务报表。(2) 搭建数据房：股权表、本量OEM协议、IP组合、市政合同、客户指标。(3) 与30-50位目标投资人建立关系。(4) 委托第三方堆肥质量研究。(5) CompostAI专利申请。(6) 以实际盈利证据而非预测的路演材料。</span>
+  </div>
+</div>
+
+<div class="tl-item future" onclick="toggleDetail(this)">
+  <div class="tl-date"><span class="en-only">H1 2027</span><span class="zh-only">2027年上半年</span></div>
+  <div class="tl-title"><span class="en-only">🚀 $5M USD Raise — Series Seed / Pre-A</span><span class="zh-only">🚀 $5M美元融资 — 种子轮/Pre-A</span></div>
+  <div class="tl-desc"><span class="en-only">Raise from a position of strength: proven profitability, BenLiang production at scale, 3,000+ units sold, $4M+ revenue.</span><span class="zh-only">以强势姿态融资：已验证盈利能力、本量规模化生产、3,000+台销售、$4M+营收。</span></div>
+  <div class="tl-metrics">
+    <span class="tl-metric fund" data-zh="$5M美元目标">$5M USD target</span>
+    <span class="tl-metric rev" data-zh="$7.11M 2027目标">$7.11M 2027 target</span>
+    <span class="tl-metric units" data-zh="5,492台 (2027)">5,492 units (2027)</span>
+  </div>
+  <div class="tl-detail">
+    <strong data-zh="为何选择2027上半年：">Why H1 2027:</strong> <span class="en-only">VCycene enters the raise with Q4 2026 profitability proven (not projected), $4.05M trailing revenue, 61.8% gross margins, and a clear BenLiang COGS trajectory to $320 by mid-2027. Prior angel round closed at $12M post-money; the step-up to $20M pre-money is justified by proven profitability and signed OEM. $5M on $20M pre = 20% dilution (priced round). The $5M accelerates: (1) US retail expansion (Target, Home Depot), (2) LILA Mini mass production (pilot already underway Q1–Q2 '27), (3) commercial/institutional sales team (3–4 hires), (4) BenLiang ramp to $320 COGS. Raising AFTER profitability — not before — follows the capital-efficient playbook of FoodCycler and Reencle.</span><span class="zh-only">VCycene以Q4 2026已验证盈利（非预测）、$4.05M过去12月营收、61.8%毛利率、本量COGS明确降至$320的路径进入融资。天使轮$12M投后；提升至$20M Pre基于已证盈利和已签OEM。$5M/$20M Pre = 20%稀释。资金加速：(1) 美国零售扩展 (2) LILA Mini量产 (3) 商业/机构销售团队 (4) 本量COGS降至$320。盈利后融资而非融资后盈利。</span>
+  </div>
+</div>
+
+<div class="tl-item future" onclick="toggleDetail(this)">
+  <div class="tl-date"><span class="en-only">H2 2027</span><span class="zh-only">2027年下半年</span></div>
+  <div class="tl-title"><span class="en-only">Deploy Capital — Scale to 5,492 Units</span><span class="zh-only">资金部署 — 扩产至5,492台</span></div>
+  <div class="tl-desc"><span class="en-only">$5M deployed across US retail, BenLiang production ramp, team expansion, LILA Mini R&D. COGS target: $320.</span><span class="zh-only">$5M部署于美国零售、本量产能扩张、团队扩充、LILA Mini研发。COGS目标：$320。</span></div>
+  <div class="tl-metrics">
+    <span class="tl-metric rev" data-zh="$7.11M营收 (2027)">$7.11M rev (2027)</span>
+    <span class="tl-metric units">5,492 units</span>
+    <span class="tl-metric fund" data-zh="$471K净利润">$471K net income</span>
+  </div>
+  <div class="tl-detail">
+    <span class="en-only">FM v13 projects 2027 at $7.11M revenue, $2.79M COGS (60.8% GM), $750K EBITDA, $471K net income. BenLiang COGS reaches $320/unit at mid-2027 volume pricing. Team grows from 3 → 8. US retail channel opens. Municipal program expands to 10+ Ontario municipalities. Marketplace commissions add upside not modeled in base case.</span><span class="zh-only">FM v13预测2027年$7.11M营收、$2.79M COGS (60.8%毛利)、$750K EBITDA、$471K净利润。本量COGS于2027年中达到$320/台。团队从3人扩至8人。美国零售渠道开放。市政项目扩展至10+个安大略省城市。商城佣金提供未建模的额外增长。</span>
+  </div>
+</div>
+
+<div class="tl-item future" onclick="toggleDetail(this)">
+  <div class="tl-date"><span class="en-only">2028–2029</span><span class="zh-only">2028–2029年</span></div>
+  <div class="tl-title"><span class="en-only">Scale to $11–18M Revenue</span><span class="zh-only">营收扩展至$11–18M</span></div>
+  <div class="tl-desc"><span class="en-only">US retail rollout, LILA Mini launch, 20+ municipal programs, BenLiang COGS at $300. Net income $761K → $1.7M.</span><span class="zh-only">美国零售铺开、LILA Mini上市、20+市政项目、本量COGS降至$300。净利润$761K → $1.7M。</span></div>
+  <div class="tl-metrics">
+    <span class="tl-metric rev">$11.5–17.9M</span>
+    <span class="tl-metric units">9,241–14,433 units</span>
+  </div>
+  <div class="tl-detail">
+    <span class="en-only">FM v13: 2028 revenue $11.49M (9,241 units, $761K net income), 2029 revenue $17.93M (14,433 units, $1.70M net income). BenLiang COGS reaches $300/unit end-2027 — a 54% reduction from baseline. All profit-sharing tiers exhausted above 100K cumulative units (all savings flow to VCycene). LILA Marketplace generates 15–20% of revenue through Shopify Collective commissions. Optional Series A ($15–20M) only if international expansion warrants it.</span><span class="zh-only">FM v13：2028年$11.49M营收(9,241台、$761K净利润)，2029年$17.93M(14,433台、$1.70M净利润)。本量COGS于2027年底达$300/台——较基线降低54%。累计100K台以上分成归零（全部节省归VCycene）。LILA商城通过Shopify Collective佣金贡献15-20%营收。可选A轮($15-20M)仅在国际扩展需要时。</span>
+  </div>
+</div>
+
+</div><!-- /timeline -->
+</div>
+</div>
+
+<!-- TAB 5: CAMPAIGN PLAN -->
+<div class="panel" id="panel-campaign">
+
+<div class="card">
+<h3><span class="icon">🎯</span> <span class="en-only">$5M USD Fundraising Campaign Plan</span><span class="zh-only">$5M美元融资方案</span></h3>
+<p style="font-size:13px;color:#666;margin-bottom:16px;"><span class="en-only">Raise timed to H1 2027 — immediately after Q4 2026 profitability is proven. BenLiang production ramp provides the operational foundation investors need to see.</span><span class="zh-only">融资时间锁定H1 2027 — 紧随Q4 2026盈利验证后。本量生产爬坡提供投资者需要看到的运营基础。</span></p>
+
+<div class="funnel-stage f1">
+  <span class="stage-name" data-zh="1. 投资者列表 — 建立80–100位目标投资者名单">1. Investor Universe — Build target list of 80–100 investors</span>
+  <span class="stage-val">Q4 2026</span>
+</div>
+<div class="funnel-stage f2">
+  <span class="stage-name" data-zh="2. 初步接触 — 介绍会、路演日、行业活动">2. Warm Outreach — Intro meetings, demo days, industry events</span>
+  <span class="stage-val">Q4 2026 – Q1 2027</span>
+</div>
+<div class="funnel-stage f3">
+  <span class="stage-name" data-zh="3. 正式融资 — 向40–50位投资者展示盈利证据">3. Active Raise — Pitch 40–50 investors with profitability proof</span>
+  <span class="stage-val">Q1–Q2 2027</span>
+</div>
+<div class="funnel-stage f4">
+  <span class="stage-name" data-zh="4. 条款与签约 — 谈判、法律、打款">4. Term Sheet & Close — Negotiate, legal, wire</span>
+  <span class="stage-val">Q2 2027</span>
+</div>
+<div class="funnel-stage f5">
+  <span class="stage-name" data-zh="5. 资金部署 — 扩展本量生产、美国零售、团队">5. Deploy Capital — Scale BenLiang production, US retail, team</span>
+  <span class="stage-val">H2 2027</span>
+</div>
+</div>
+
+<div class="card">
+<h3><span class="icon">🏦</span> <span class="en-only">Target Investor Profile</span><span class="zh-only">目标投资者画像</span></h3>
+<table class="fin-table">
+<tr><th data-zh="投资者类型">Investor Type</th><th data-zh="分配金额">Allocation</th><th data-zh="原因">Why</th><th data-zh="目标举例">Examples / Targets</th></tr>
+<tr><td data-zh="清洁科技/气候VC">CleanTech / Climate VCs</td><td data-zh="$2–2.5M (领投)">$2–2.5M (lead)</td><td data-zh="行业专长、政府关系">Sector expertise, municipal connections</td><td data-zh="Arctern Ventures、MaRS IAF、BDC Climate Fund、Cycle Capital">Arctern Ventures, MaRS IAF, BDC Climate Fund, Cycle Capital</td></tr>
+<tr><td data-zh="硬件/消费VC">Hardware / Consumer VCs</td><td data-zh="$1–1.5M">$1–1.5M</td><td data-zh="DTC扩展、零售合作">DTC scaling, retail partnerships</td><td data-zh="Garage Capital、Panache Ventures、Golden Ventures">Garage Capital, Panache Ventures, Golden Ventures</td></tr>
+<tr><td data-zh="战略/企业投资">Strategic / Corporate</td><td data-zh="$500K–1M">$500K–1M</td><td data-zh="渠道获取、联合开发">Channel access, co-development</td><td data-zh="Best Buy Ventures、Loblaw Innovation、Waste Connections">Best Buy Ventures, Loblaw Innovation, Waste Connections</td></tr>
+<tr><td data-zh="天使/联合体">Angels / Syndicates</td><td>$500K–1M</td><td data-zh="决策快、董事会灵活">Quick decisions, board flexibility</td><td data-zh="ventureLAB网络、MaRS校友、现有LILA客户">ventureLAB network, MaRS alumni, existing LILA customers</td></tr>
+</table>
+</div>
+
+<div class="card">
+<h3><span class="icon">📋</span> <span class="en-only">Pre-Raise Checklist (Start Q4 2026)</span><span class="zh-only">融资前检查清单 (Q4 2026启动)</span></h3>
+<div id="checklist">
+</div>
+</div>
+
+<div class="card">
+<h3><span class="icon">💡</span> <span class="en-only">Use of Funds — $5M USD</span><span class="zh-only">资金用途 — $5M美元</span></h3>
+<div class="bar-chart">
+  <div class="bar-row">
+    <div class="bar-label" data-zh="销售">Sales</div>
+    <div class="bar-track"><div class="bar-fill revenue" style="width:35%;">$1.75M (35%)</div></div>
+  </div>
+  <div class="bar-row">
+    <div class="bar-label" data-zh="生产">Prod.</div>
+    <div class="bar-track"><div class="bar-fill expense" style="width:25%;">$1.25M (25%)</div></div>
+  </div>
+  <div class="bar-row">
+    <div class="bar-label" data-zh="研发">R&D</div>
+    <div class="bar-track"><div class="bar-fill profit" style="width:20%;">$1.0M (20%)</div></div>
+  </div>
+  <div class="bar-row">
+    <div class="bar-label" data-zh="运营">Ops</div>
+    <div class="bar-track"><div class="bar-fill revenue" style="width:12%;">$600K (12%)</div></div>
+  </div>
+  <div class="bar-row">
+    <div class="bar-label" data-zh="储备">Reserve</div>
+    <div class="bar-track"><div class="bar-fill expense" style="width:8%;">$400K (8%)</div></div>
+  </div>
+</div>
+<div style="margin-top:16px;font-size:13px;color:#555;">
+<strong data-zh="销售与营销 ($1.75M):">Sales & Marketing ($1.75M):</strong> <span class="en-only">US retail entry (Target, Home Depot listing fees), Meta/Google ad scaling to $30K/mo, 3 sales hires for institutional/B2G channel.</span><span class="zh-only">进入美国零售（Target、Home Depot上架费）、Meta/Google广告扩至$30K/月、3名销售人员拓展B2G渠道。</span><br>
+<strong data-zh="生产 ($1.25M):">Production ($1.25M):</strong> <span class="en-only">BenLiang mass production ramp to $320 COGS (5,492 units in 2027), LILA Mini tooling, retail inventory buffer.</span><span class="zh-only">本量量产爬坡至$320 COGS（2027年5,492台）、LILA Mini模具、零售库存缓冲。</span><br>
+<strong data-zh="研发 ($1.0M):">R&D ($1.0M):</strong> <span class="en-only">LILA Mini development, CompostAI v2, subscription sensor module, patent filings.</span><span class="zh-only">LILA Mini开发、CompostAI v2、订阅传感器模块、专利申请。</span><br>
+<strong data-zh="运营 ($600K):">Operations ($600K):</strong> <span class="en-only">US warehouse/3PL setup, Shopify Plus migration, customer support scaling (team 3 → 8).</span><span class="zh-only">美国仓库/3PL搭建、Shopify Plus迁移、客服团队扩展（3→8人）。</span><br>
+<strong data-zh="储备金 ($400K):">Reserve ($400K):</strong> <span class="en-only">6-month safety buffer — note VCycene is already profitable, so this is true reserve, not runway.</span><span class="zh-only">6个月安全缓冲——VCycene已盈利，这是真正的储备金而非生存资金。</span>
+</div>
+</div>
+
+<div class="card">
+<h3><span class="icon">📐</span> <span class="en-only">Valuation Framework</span><span class="zh-only">估值框架</span></h3>
+<table class="fin-table">
+<tr><th data-zh="指标">Metric</th><th data-zh="融资时 (2027上半年)">At Time of Raise (H1 2027)</th><th data-zh="可比参照">Comparable</th></tr>
+<tr><td data-zh="上轮融资">Prior Round</td><td data-zh="天使轮$3.1M / $12M投后估值">$3.1M angel at $12M post-money</td><td data-zh="确立估值底线">Establishes valuation floor</td></tr>
+<tr><td data-zh="过往收入（2026）">Trailing Revenue (2026)</td><td data-zh="$4.05M美元">$4.05M USD</td><td data-zh="FoodCycler同阶段：约$12M营收">FoodCycler at similar stage: ~$12M rev</td></tr>
+<tr><td data-zh="毛利率">Gross Margin</td><td data-zh="61.8%（随COGS降至$320将改善至70%+）">61.8% (improving to 70%+ at $320 COGS)</td><td data-zh="Lomi目标：80%">Lomi target: 80%</td></tr>
+<tr><td data-zh="盈利能力">Profitability</td><td data-zh="EBITDA+ $271K，净利润$118K（2026实际）">EBITDA+ $271K, Net $118K (2026 actual)</td><td data-zh="Reencle：自力更生至盈利">Reencle: bootstrapped to profitability</td></tr>
+<tr><td data-zh="收入倍数">Revenue Multiple</td><td data-zh="5×过去12月营收">5× trailing revenue</td><td data-zh="硬件+软件混合型（盈利）">Hardware + software hybrid (profitable)</td></tr>
+<tr class="highlight"><td data-zh="投前估值"><strong>Pre-Money Valuation</strong></td><td data-zh="$20M美元"><strong>$20M USD</strong></td><td data-zh="从天使轮投后估值提升67%">67% step-up from angel post-money</td></tr>
+<tr><td data-zh="投后估值">Post-Money</td><td data-zh="$25M美元">$25M USD</td><td data-zh="$5M / $20M投前 = 20%稀释">$5M on $20M pre = 20% dilution</td></tr>
+</table>
+<div class="note"><span class="en-only">Raising post-profitability is the key differentiator. Unlike Mill ($110M raised, still scaling) or Lomi ($100M+ val but heavy capital), VCycene approaches investors as a profitable business seeking growth capital &mdash; not survival funding. Prior angel round at $12M post-money establishes the floor; BenLiang OEM, proven unit economics, and $4.05M revenue justify the step-up to $20M pre. See the <strong>Company Valuation</strong> tab for full scenario analysis.</span><span class="zh-only">盈利后融资是关键差异化因素。不同于Mill（已融$110M仍在扩张）或Lomi（估值$100M+但资本消耗大），VCycene以盈利企业身份寻求增长资本——而非生存融资。天使轮$12M投后估值奠定底价；本量OEM、经验证的单位经济和$4.05M收入支撑估值提升至$20M pre。详见<strong>公司估值</strong>标签页的完整场景分析。</span></div>
+</div>
+</div>
+
+<!-- TAB 6: COMPANY VALUATION -->
+<div class="panel" id="panel-valuation">
+
+<div class="card">
+<h3><span class="icon">💰</span> <span class="en-only">Raise Scenario Analysis — $3M to $6M at $20M Pre-Money</span><span class="zh-only">融资方案分析 — $3M至$6M / $20M Pre估值</span></h3>
+<p style="font-size:13px;color:#666;margin-bottom:16px;"><span class="en-only">Pre-money valuation: <strong>$20M USD</strong> (priced round). VCycene's angel round closed at <strong>$12M post-money</strong> on $3.1M raised. Since then: BenLiang OEM signed, production scaling to 3,049 units, $4.05M revenue, EBITDA-positive — justifying a step-up to $20M pre. Target dilution: <strong>≤20%</strong>.</span><span class="zh-only">Pre估值：<strong>$20M美元</strong>（定价轮）。VCycene天使轮以<strong>$12M投后估值</strong>完成$3.1M融资。此后：本量OEM签约、产量扩至3,049台、$4.05M营收、EBITDA转正 — 支撑$20M Pre估值提升。目标稀释：<strong>≤20%</strong>。</span></p>
+
+<table class="fin-table">
+<tr><th data-zh="融资金额">Raise Amount</th><th data-zh="投后估值">Post-Money</th><th data-zh="稀释比例">Dilution</th><th data-zh="总现金 (融资+$1.87M)">Total Cash<br><span style="font-size:10px;color:#888;">(raise + $1.87M)</span></th><th data-zh="可运营时间">Runway at Burn</th><th data-zh="增长模式">Growth Mode</th></tr>
+<tr><td style="font-weight:700;">$3M USD</td><td>$23M</td><td style="color:var(--vc-green);">13.0%</td><td>$4.87M</td><td data-zh="∞（已盈利）">∞ (already profitable)</td><td data-zh="保守 — 自然DTC + 1–2个B2G试点">Conservative — organic DTC + 1–2 B2G pilots</td></tr>
+<tr style="background:#fff8e1;"><td style="font-weight:700;">$4M USD</td><td>$24M</td><td style="color:var(--vc-green);">16.7%</td><td>$5.87M</td><td data-zh="∞（已盈利）">∞ (already profitable)</td><td data-zh="平衡 — 进入美国零售 + B2G扩展">Balanced — US retail entry + B2G expansion</td></tr>
+<tr style="background:#e8f5e9;"><td style="font-weight:700;color:var(--vc-green);">$5M USD ★</td><td style="color:var(--vc-green);font-weight:700;">$25M</td><td style="color:var(--vc-green);font-weight:700;">20.0%</td><td>$6.87M</td><td data-zh="∞（已盈利）">∞ (already profitable)</td><td><strong data-zh="最优 — 全面美国零售 + Mini量产 + 团队">Optimal — full US retail + Mini mass prod + team</strong></td></tr>
+<tr><td style="font-weight:700;">$6M USD</td><td>$26M</td><td style="color:var(--vc-red);">23.1%</td><td>$7.87M</td><td data-zh="∞（已盈利）">∞ (already profitable)</td><td data-zh="超过20%稀释目标 — 不推荐">Exceeds 20% dilution target — avoid</td></tr>
+</table>
+
+<div class="note" style="border-left-color:var(--vc-green);"><span class="en-only">★ <strong data-zh="$5M / $20M Pre估值为推荐融资方案。">$5M at $20M pre-money is the recommended raise.</strong> It hits exactly 20% dilution — the maximum acceptable for this priced round. VCycene's prior angel round closed at $12M post-money; the step-up to $20M pre reflects proven profitability, a locked OEM partnership, and $4.05M trailing revenue. The $6M scenario breaches the 20% dilution ceiling and should be avoided unless pre-money is negotiated higher.</span><span class="zh-only">★ <strong>$5M / $20M Pre估值为推荐融资方案。</strong> 恰好达到20%稀释目标，提供$5M增长资金（美国零售、LILA Mini、团队扩张），同时保持创始人多数控制权。</span></div>
+</div>
+
+<div class="card">
+<h3><span class="icon">📈</span> <span class="en-only">Financial Projections by Raise Amount</span><span class="zh-only">各融资金额财务预测</span></h3>
+<p style="font-size:13px;color:#666;margin-bottom:16px;"><span class="en-only">How each raise amount impacts 2027–2029 growth. <strong>LILA Mini pilot production begins Q1–Q2 2027 regardless of raise</strong> (funded from existing cash). The raise determines how fast Mini reaches mass production and how aggressively LILA Pro scales US retail.</span><span class="zh-only">各融资金额对2027–2029增长的影响。<strong>LILA Mini试产于Q1–Q2 2027启动（不受融资影响）</strong>（使用现有现金）。融资决定Mini多快实现量产以及LILA Pro多积极拓展美国零售。</span></p>
+
+<table class="fin-table" style="font-size:12px;">
+<tr><th data-zh="指标">Metric</th><th data-zh="$3M融资">$3M Raise</th><th data-zh="$4M融资">$4M Raise</th><th data-zh="$5M融资 ★" style="background:#2e7d32;">$5M Raise ★</th><th data-zh="$6M融资">$6M Raise</th></tr>
+<tr><td data-zh="2027年预测" colspan="5" style="font-weight:700;background:#f5f0ea;font-size:11px;">2027 PROJECTIONS</td></tr>
+<tr><td data-zh="营收">Revenue</td><td>$5.8M</td><td>$6.5M</td><td style="font-weight:700;">$7.1M</td><td>$7.5M</td></tr>
+<tr><td data-zh="销售台数">Units Sold</td><td>4,200</td><td>4,850</td><td style="font-weight:700;">5,492</td><td>5,900</td></tr>
+<tr><td data-zh="团队规模">Team Size</td><td>9</td><td>10</td><td style="font-weight:700;">12</td><td>14</td></tr>
+<tr><td data-zh="月广告支出">Ad Spend / Mo</td><td>$15K</td><td>$22K</td><td style="font-weight:700;">$30K</td><td>$38K</td></tr>
+<tr><td data-zh="美国零售">US Retail</td><td data-zh="仅线上">Online only</td><td data-zh="1–2个连锁">1–2 chains</td><td data-zh="Target + HD" style="font-weight:700;">Target + HD</td><td data-zh="3+个连锁">3+ chains</td></tr>
+<tr><td data-zh="Mini试产 (Q1–Q2)">Mini Pilot (Q1–Q2)</td><td colspan="4" style="text-align:center;color:var(--vc-green);font-weight:600;"><span data-zh="✓ 使用现有现金 — 所有方案均适用">✓ Funded from existing cash — all scenarios</span></td></tr>
+<tr><td data-zh="Mini量产">Mini Mass Prod</td><td data-zh="延期至2028">Delayed to 2028</td><td>Q4 2027</td><td style="font-weight:700;">Q3 2027</td><td>Q2 2027</td></tr>
+<tr><td data-zh="净利润">Net Income</td><td style="color:var(--vc-green);">$380K</td><td style="color:var(--vc-green);">$420K</td><td style="color:var(--vc-green);font-weight:700;">$471K</td><td style="color:var(--vc-green);">$440K</td></tr>
+
+<tr><td data-zh="2028年预测" colspan="5" style="font-weight:700;background:#f5f0ea;font-size:11px;">2028 PROJECTIONS</td></tr>
+<tr><td data-zh="营收">Revenue</td><td>$8.5M</td><td>$10.0M</td><td style="font-weight:700;">$11.5M</td><td>$13.0M</td></tr>
+<tr><td data-zh="销售台数">Units Sold</td><td>6,800</td><td>8,000</td><td style="font-weight:700;">9,241</td><td>10,500</td></tr>
+<tr><td data-zh="净利润">Net Income</td><td style="color:var(--vc-green);">$550K</td><td style="color:var(--vc-green);">$680K</td><td style="color:var(--vc-green);font-weight:700;">$761K</td><td style="color:var(--vc-green);">$720K</td></tr>
+
+<tr><td data-zh="2029年预测" colspan="5" style="font-weight:700;background:#f5f0ea;font-size:11px;">2029 PROJECTIONS</td></tr>
+<tr><td data-zh="营收">Revenue</td><td>$12.5M</td><td>$15.0M</td><td style="font-weight:700;">$17.9M</td><td>$20.5M</td></tr>
+<tr><td data-zh="销售台数">Units Sold</td><td>10,200</td><td>12,000</td><td style="font-weight:700;">14,433</td><td>16,800</td></tr>
+<tr class="total"><td data-zh="净利润">Net Income</td><td style="color:var(--vc-green);">$1.1M</td><td style="color:var(--vc-green);">$1.4M</td><td style="color:var(--vc-green);font-weight:700;">$1.7M</td><td style="color:var(--vc-green);">$1.5M</td></tr>
+</table>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:16px;">
+<div class="note" style="border-left-color:var(--vc-amber);"><span class="en-only">⚠️ <strong data-zh="$6M方案在2029年净利润低于$5M方案">$6M shows lower net income than $5M in 2029</strong> due to higher burn from aggressive hiring and multi-geography expansion. The additional $1M drives topline growth but compresses margins. The $5M scenario achieves the best capital efficiency — maximum growth per dollar raised.</span><span class="zh-only">⚠️ <strong>$6M方案在2029年净利润低于$5M方案</strong>，因加速扩张导致更高支出。额外$1M在2028-2029年未产生足够增量收入来抵消成本。</span></div>
+<div class="note" style="border-left-color:var(--vc-green);"><span class="en-only">✅ <strong data-zh="所有方案从第一天起即盈利。">All scenarios are profitable from day one.</strong> Unlike most hardware startups that raise to extend runway, VCycene raises to accelerate growth. Even the $3M scenario generates $1.1M net income by 2029. The question isn't survival — it's how fast to scale.</span><span class="zh-only">✅ <strong>所有方案从第一天起即盈利。</strong> 与大多数需融资维持运营的硬件初创不同，VCycene即使无外部资金也能增长。融资加速增长但非生存所需。</span></div>
+</div>
+</div>
+
+<div class="card">
+<h3><span class="icon">🏢</span> <span class="en-only">Competitor Comparable Raises & Valuations</span><span class="zh-only">竞品融资与估值对比</span></h3>
+<p style="font-size:13px;color:#666;margin-bottom:16px;"><span class="en-only">Smart composter / food waste industry fundraising benchmarks. VCycene's $20M pre-money reflects a justified step-up from the $12M post-money angel round, given proven profitability, signed OEM, and $4.05M revenue.</span><span class="zh-only">智能堆肥机/厨余处理行业融资基准。VCycene的$20M Pre估值反映了从$12M投后天使轮的合理提升，基于已验证的盈利能力、已签OEM和$4.05M营收。</span></p>
+
+<table class="fin-table" style="font-size:12px;">
+<tr><th data-zh="公司">Company</th><th data-zh="总部">HQ</th><th data-zh="技术路线">Approach</th><th data-zh="总融资额">Total Raised</th><th data-zh="最近一轮/估值">Last Round / Valuation</th><th data-zh="主要投资人">Key Investors</th></tr>
+<tr><td data-zh="Mill" style="font-weight:700;">Mill</td><td data-zh="加州圣布鲁诺">San Bruno, CA</td><td data-zh="脱水机+订阅">Dehydrator + subscription</td><td style="color:var(--vc-red);font-weight:700;">~$110M</td><td>$70M Series C (Sep '23)<br><span style="font-size:11px;color:#888;">Est. $400–500M val</span></td><td data-zh="Breakthrough Energy、GV、Lowercarbon、Amazon">Breakthrough Energy, GV, Lowercarbon, Amazon</td></tr>
+<tr><td data-zh="Pela / Lomi" style="font-weight:700;">Pela / Lomi</td><td data-zh="BC省基洛纳">Kelowna, BC</td><td data-zh="脱水机DTC">Dehydrator DTC</td><td style="font-weight:700;">$6.8M crowd + VC</td><td>$100M valuation (est.)<br><span style="font-size:11px;color:#888;">18K+ Indiegogo backers</span></td><td data-zh="Jay-Z（Marcy Venture）、众筹">Jay-Z (Marcy Venture), crowd</td></tr>
+<tr><td data-zh="Food Cycle Science" style="font-weight:700;">Food Cycle Science</td><td data-zh="安大略省渥太华">Ottawa, ON</td><td data-zh="脱水机B2G">Dehydrator B2G</td><td data-zh="~$2M拨款+战略投资" style="font-weight:700;">~$2M grants + strategic</td><td>$1.65M CFIN grant (2023)<br><span style="font-size:11px;color:#888;">Power Sustainable Lios inv.</span></td><td data-zh="CFIN、FedDev Ontario、战略投资">CFIN, FedDev Ontario, strategic</td></tr>
+<tr><td data-zh="Reencle" style="font-weight:700;">Reencle</td><td data-zh="韩国金海">Gimhae, Korea</td><td data-zh="生物微生物">Bio-microbe</td><td data-zh="自举融资" style="font-weight:700;">Bootstrapped</td><td data-zh="22万台已售（2024年1月），隶属Hanmi Flexible">220K units sold (Jan '24)<br><span style="font-size:11px;color:#888;">Owned by Hanmi Flexible</span></td><td data-zh="母公司：Hanmi（LG合作伙伴）">Parent co: Hanmi (LG partner)</td></tr>
+<tr><td data-zh="GEME" style="font-weight:700;">GEME</td><td data-zh="比利时布鲁塞尔">Brussels, BE</td><td data-zh="生物微生物（Kobold）">Bio-microbe (Kobold)</td><td data-zh="€30K+众筹" style="font-weight:700;">€30K+ crowd</td><td data-zh="Kickstarter（2022），ROKH SRL支持">Kickstarter (2022)<br><span style="font-size:11px;color:#888;">Backed by ROKH SRL</span></td><td data-zh="自举/早期">Bootstrapped / early</td></tr>
+<tr><td data-zh="SmartCara" style="font-weight:700;">SmartCara</td><td data-zh="韩国首尔">Seoul, Korea</td><td data-zh="脱水机">Dehydrator</td><td data-zh="未公开" style="font-weight:700;">Undisclosed</td><td data-zh="韩国市场第一，10年研发，~50人团队">#1 Korea market<br><span style="font-size:11px;color:#888;">10yr R&D, ~50 team</span></td><td data-zh="未公开">Undisclosed</td></tr>
+<tr style="background:#e8f5e9;"><td data-zh="VCycene (LILA)" style="font-weight:700;color:var(--vc-red);">VCycene (LILA)</td><td data-zh="安大略省多伦多">Toronto, ON</td><td data-zh="真正堆肥+AI">True composting + AI</td><td style="font-weight:700;color:var(--vc-red);">$3.1M angel</td><td>$12M post-money (angel)<br><span style="font-size:11px;color:var(--vc-green);">→ $20M pre target (next round)</span></td><td data-zh="天使投资人→BL战略投资">Angel investors → BL strategic</td></tr>
+</table>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:16px;">
+<div class="note" style="border-left-color:var(--vc-red);"><span class="en-only">🔑 <strong data-zh="VCycene优势：">VCycene's edge:</strong> Only company raising a priced round AFTER proving profitability. Mill raised $110M before achieving sustainable unit economics. Lomi raised on crowdfunding hype. FoodCycler relies on grants. Reencle bootstrapped but backed by a $500M+ parent company. VCycene has already raised $3.1M angel at $12M post-money — and now brings proven unit economics, a locked OEM cost trajectory, and $4.05M revenue to justify the step-up.</span><span class="zh-only">🔑 <strong>VCycene优势：</strong> 唯一在证明盈利后进行定价轮融资的公司。Mill无盈利以$400-500M估值融资。Lomi靠众筹炒作达$100M估值。VCycene用真实利润证明商业模式。</span></div>
+<div class="note" style="border-left-color:var(--vc-blue);"><span class="en-only">📐 <strong data-zh="估值提升依据：">Step-up justification:</strong> $12M post (angel) → $20M pre (priced round) = 67% step-up. Since the angel close, VCycene has: (1) signed the BenLiang OEM partnership locking COGS from $658→$300, (2) scaled to 3,049 units and $4.05M revenue, (3) reached EBITDA-positive ($271K), (4) proven 61.8% gross margins. At 5× trailing revenue ($4.05M), VCycene would justify $20.25M — right at the target. For 2029 at $17.9M revenue and a 5× multiple, investors see a $90M+ exit path — a 3.6× return on a $25M post-money entry.</span><span class="zh-only">📐 <strong>估值提升依据：</strong> $12M投后（天使）→ $20M投前（定价轮）= 67%提升。依据：OEM已签约、量产已验证、收入从$0到$4.05M、已实现盈利。</span></div>
+</div>
+</div>
+
+<div class="card">
+<h3><span class="icon">📐</span> <span class="en-only">Valuation Models — $20M Pre-Money Justification</span><span class="zh-only">估值模型 — $20M Pre估值论证</span></h3>
+<p style="font-size:13px;color:#666;margin-bottom:16px;"><span class="en-only">Four valuation approaches support $20M pre-money. The angel round closed at $12M post — the 67% step-up is justified by proven profitability, signed OEM, and 10× revenue growth since that round.</span><span class="zh-only">四种估值方法支撑$20M Pre估值。天使轮以$12M投后完成 — 67%估值提升基于已验证盈利、已签OEM和自该轮以来10×的营收增长。</span></p>
+
+<table class="fin-table">
+<tr><th data-zh="估值方法">Valuation Method</th><th data-zh="计算方式">Calculation</th><th data-zh="隐含价值">Implied Value</th><th data-zh="备注">Notes</th></tr>
+<tr><td style="font-weight:700;" data-zh="上一轮估值提升">Prior Round Step-Up</td><td data-zh="$12M投后（天使）× 1.67×提升">$12M post (angel) × 1.67× step-up</td><td style="color:var(--vc-green);font-weight:700;">$20.0M</td><td><span class="en-only">Standard 1.5–2× step-up between rounds. VCycene's milestones since angel close (OEM signed, profitable, $4M rev) justify upper range.</span><span class="zh-only">标准轮次间1.5-2×提升。天使轮后里程碑（OEM签约、盈利、$4M营收）支撑上限。</span></td></tr>
+<tr><td style="font-weight:700;" data-zh="营收倍数">Revenue Multiple</td><td data-zh="$4.05M过往收入 × 5.0×">$4.05M trailing × 5.0×</td><td style="font-weight:700;">$20.3M</td><td><span class="en-only">5× for profitable hardware + software hybrid. CleanTech SaaS gets 8–12×. Pure hardware 3–4×. VCycene's 62% GM + CompostAI warrants 5×.</span><span class="zh-only">5×适用于盈利的硬件+软件混合。清洁SaaS 8-12×，纯硬件3-4×。VCycene 62%毛利率+CompostAI支撑5×。</span></td></tr>
+<tr><td style="font-weight:700;" data-zh="远期营收">Forward Revenue</td><td>$7.11M 2027E × 3.0×</td><td style="font-weight:700;">$21.3M</td><td><span class="en-only">Discounted forward multiple on credible 2027 plan. BenLiang production capacity is already proven — this isn't a projection, it's a ramp.</span><span class="zh-only">基于可信2027计划的折现前瞻倍数。本量产能已验证——这不是预测，而是实际爬坡。</span></td></tr>
+<tr><td style="font-weight:700;" data-zh="可比交易">Comparable Transaction</td><td data-zh="FoodCycler类似阶段~$15-20M，Lomi众筹热度~$100M">FoodCycler ~$15–20M at similar stage<br>Lomi ~$100M on crowd hype</td><td style="font-weight:700;">$15–25M</td><td><span class="en-only">VCycene at $20M is mid-range of comps. Stronger fundamentals than FCS (profitable vs. grant-dependent). Far more capital-efficient than Lomi/Mill.</span><span class="zh-only">VCycene $20M处于可比公司中间。基本面优于FCS（盈利vs依赖补贴），资本效率远超Lomi/Mill。</span></td></tr>
+<tr><td style="font-weight:700;" data-zh="DCF (简化)">DCF (simplified)</td><td>2029 NI $1.7M × 15× PE ÷ (1.25)³</td><td style="font-weight:700;">$13.1M</td><td><span class="en-only">PE 15× for profitable small-cap hardware, 25% discount rate (lower than typical — VCycene is already profitable). DCF sets the floor.</span><span class="zh-only">PE 15×适用于盈利小型硬件公司，25%折现率（低于常规——VCycene已盈利）。DCF设定估值底线。</span></td></tr>
+<tr class="total"><td><strong data-zh="选定Pre估值">Selected Pre-Money</strong></td><td colspan="2" style="color:var(--vc-red);font-weight:700;font-size:16px;">$20M USD</td><td><span class="en-only">Convergence of revenue multiple and prior round step-up. DCF floor at $13M provides downside protection.</span><span class="zh-only">收入倍数和上轮提升的收敛。DCF底线$13M提供下行保护。</span></td></tr>
+</table>
+
+<div class="note" style="border-left-color:var(--vc-red);margin-top:12px;"><span class="en-only">📐 <strong data-zh="投资者回报测算：">Investor return math:</strong> $5M at $20M pre = $25M post. At 2029 revenue of $17.9M and a conservative 5× exit multiple, implied valuation is $89.5M. Investor's $5M stake (20%) is worth $17.9M — a </span><span class="zh-only">📐 <strong>投资者回报测算：</strong> $5M / $20M投前 = $25M投后。2029年收入$17.9M按5×乘数 = $89.5M。$5M→$17.9M = 3.58×回报（3年）。IRR约53%。</span><strong>3.6× return in 3 years</strong>. At 7× exit multiple (if SaaS/subscription revenue grows): $125M valuation, investor stake worth $25M — a <strong>5.0× return</strong>.</div>
+</div>
+
+<div class="card">
+<h3><span class="icon">🎯</span> <span class="en-only">Optimal Raise Recommendation</span><span class="zh-only">最优融资建议</span></h3>
+
+<div style="background:linear-gradient(135deg,#e8f5e9,#c8e6c9);border:2px solid var(--vc-green);border-radius:10px;padding:20px 24px;margin-bottom:16px;">
+<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:16px;text-align:center;">
+  <div>
+    <div style="font-size:13px;font-weight:600;color:#666;margin-bottom:4px;" data-zh="推荐融资额">Recommended Raise</div>
+    <div style="font-size:28px;font-weight:800;color:var(--vc-green);">$5M USD</div>
+  </div>
+  <div>
+    <div style="font-size:13px;font-weight:600;color:#666;margin-bottom:4px;" data-zh="Pre估值">Pre-Money</div>
+    <div style="font-size:28px;font-weight:800;color:var(--vc-red);">$20M</div>
+  </div>
+  <div>
+    <div style="font-size:13px;font-weight:600;color:#666;margin-bottom:4px;" data-zh="投后估值">Post-Money</div>
+    <div style="font-size:28px;font-weight:800;color:var(--vc-blue);">$25M</div>
+  </div>
+  <div>
+    <div style="font-size:13px;font-weight:600;color:#666;margin-bottom:4px;" data-zh="本轮稀释">This-Round Dilution</div>
+    <div style="font-size:28px;font-weight:800;color:var(--vc-green);">20.0%</div>
+  </div>
+</div>
+</div>
+
+<div style="font-size:13px;color:#555;line-height:1.7;">
+<strong data-zh="为何$5M / $20M Pre最优：">Why $5M at $20M pre-money is optimal:</strong><br><br>
+<strong data-zh="1. 天使轮至今估值提升有据可依。">1. Justified step-up from angel round.</strong> <span class="en-only">VCycene raised $3.1M angel at $12M post-money. Since then: BenLiang OEM signed (locking COGS from $658→$300), production scaled to 3,049 units, revenue grew to $4.05M, and EBITDA turned positive ($271K). A 67% step-up to $20M pre is conservative given these milestones — typical step-ups for comparable progress are 1.5–2×.</span><span class="zh-only">VCycene天使轮融资$3.1M，$12M投后。此后：本量OEM签约(COGS从$658→$300)、产量扩至3,049台、营收增至$4.05M、EBITDA转正($271K)。提升至$20M Pre属于保守估计——同类进展通常提升1.5-2×。</span><br><br>
+<strong data-zh="2. 稀释比例恰在20%上限。">2. Dilution at the 20% ceiling.</strong> <span class="en-only">$5M on $20M pre = exactly 20% dilution — the maximum acceptable for this priced round. This preserves founder ownership while giving investors a meaningful stake. The $6M scenario breaches 20% (23.1%) and should only be considered at a higher pre-money ($25M+).</span><span class="zh-only">$5M / $20M Pre = 恰好20%稀释——本轮最大可接受稀释。保留创始人控制权同时给予投资人有意义的股份。$6M方案突码20%(23.1%)，仅在更高Pre估值($25M+)时考虑。</span><br><br>
+<strong data-zh="3. 资本效率最优点。">3. Capital efficiency sweet spot.</strong> <span class="en-only">$5M funds full US retail entry (Target, Home Depot), LILA Mini mass production (pilot already funded from existing cash), and team scaling from 7→12. The $3M and $4M scenarios delay Mini mass production; the $6M scenario over-hires and compresses margins. $5M maximizes 2029 net income ($1.7M) per dollar raised.</span><span class="zh-only">$5M资助美国零售全面进入(Target、Home Depot)、LILA Mini量产(试产已用现有资金)、团队从7人扩至12人。$3M/$4M方案延迟Mini量产；$6M方案招人过多压缩利润。$5M每美元融资的2029年净利润($1.7M)最大化。</span><br><br>
+<strong data-zh="4. 投资者回报前景良好。">4. Strong investor return profile.</strong> <span class="en-only">At $25M post-money entry, investors see a clear path to 3.6× return (at 5× revenue multiple on 2029's $17.9M = $89.5M valuation) or 5.0× return (at 7× multiple if subscription/SaaS revenue grows = $125M). VCycene is already profitable — this is growth equity, not venture risk.</span><span class="zh-only">以$25M投后估值进入，投资人有明确回报路径：3.6×回报(5×营收倍数×$17.9M=估值$89.5M)或5.0×回报(7×倍数×SaaS营收增长=$125M)。VCycene已盈利——这是增长股权，非风险投资。</span><br><br>
+<strong data-zh="5. 以强势姿态融资，非出于需求。">5. Raise from strength, not need.</strong> <span class="en-only">VCycene enters with $1.87M cash, zero debt, proven profitability ($118K net income in 2026), and LILA Mini pilot production already underway. The raise accelerates what's already working — it doesn't fund experimentation.</span><span class="zh-only">VCycene以$1.87M现金、零债务、已验证盈利($118K净利润)、LILA Mini试产已启动进入融资。融资加速已被验证的业务——而非资助实验。</span>
+</div>
+
+<div class="assumptions" style="margin-top:16px;">
+<h4><span class="en-only">Key Assumptions</span><span class="zh-only">核心假设</span></h4>
+<ul>
+<li><strong data-zh="Pre估值：">Pre-money valuation:</strong> <span class="en-only">$20M USD — 5× trailing revenue ($4.05M), 67% step-up from $12M post-money angel round</span><span class="zh-only">$20M美元 — 5×过去12月营收 ($4.05M)，从$12M投后天使轮提升67%</span></li>
+<li><strong data-zh="上一轮：">Prior round:</strong> <span class="en-only">$3.1M angel investment at $12M post-money valuation</span><span class="zh-only">天使轮$3.1M投资，$12M投后估值</span></li>
+<li><strong data-zh="轮次类型：">Round type:</strong> <span class="en-only">Priced round — target dilution ≤20%</span><span class="zh-only">定价轮 — 目标稀释≤20%</span></li>
+<li><strong data-zh="时间：">Timing:</strong> <span class="en-only">H1 2027 close — after Q4 2026 profitability is confirmed in audited financials</span><span class="zh-only">2027上半年交割 — Q4 2026盈利经审计确认后</span></li>
+<li><strong data-zh="现有现金：">Existing cash:</strong> <span class="en-only">$1.87M entering the raise (Jan '27 after Dec collections, no external debt)</span><span class="zh-only">进入融资时持有$1.87M (27年1月收回12月回款后，无外部债务)</span></li>
+<li><strong data-zh="LILA Mini：">LILA Mini:</strong> <span class="en-only">Pilot production Q1–Q2 2027 funded from existing cash; raise accelerates mass production to Q3 2027</span><span class="zh-only">Q1–Q2 2027试产使用现有现金；融资加速量产至Q3 2027</span></li>
+<li><strong data-zh="本量成本：">BenLiang COGS:</strong> <span class="en-only">$350 at Dec '26, trajectory to $320 mid-2027, $300 end-2027</span><span class="zh-only">26年12月$350，2027年中降至$320，2027年底$300</span></li>
+<li><strong data-zh="增长率：">Growth rate:</strong> <span class="en-only">80% YoY revenue growth (2026→2027), decelerating to 62% (2027→2028) and 56% (2028→2029)</span><span class="zh-only">营收同比增长80% (2026→2027)，减速至62% (2027→2028) 和56% (2028→2029)</span></li>
+<li><strong data-zh="毛利率：">Gross margins:</strong> <span class="en-only">Expanding from 61.8% (2026) to 67%+ by 2029 as COGS drops and ASP holds</span><span class="zh-only">从61.8% (2026) 扩展至2029年67%+，随成本下降和均价稳定</span></li>
+<li><strong data-zh="未建模额外股权融资。">No additional equity raises modeled.</strong> <span class="en-only">Optional Series A ($15–20M) only if international expansion warrants it (2028+)</span><span class="zh-only">可选A轮 ($15–20M) 仅在国际扩展需要时 (2028+)</span></li>
+</ul>
+</div>
+</div>
+
+</div>
+
+
+<!-- TAB 7: EXIT STRATEGY -->
+<div class="panel" id="panel-exit">
+
+<div class="card">
+<h3><span class="icon">🚪</span> <span class="en-only">Exit Strategy Overview</span><span class="zh-only">退出策略概述</span></h3>
+<p class="en-only">VCycene's exit strategy is designed to maximize returns for all stakeholder classes — from early angel investors seeking 5–7 year liquidity to founders building long-term equity value. Based on comparable transactions in smart home, IoT, and cleantech hardware, we project a <strong>primary exit window of 2029–2031</strong> via strategic acquisition, with an IPO pathway available if the company reaches $50M+ ARR.</p>
+<p class="zh-only">VCycene的退出策略旨在为所有利益相关方实现回报最大化——从寻求5-7年流动性的早期天使投资人，到积累长期股权价值的创始人。基于智能家居、物联网和清洁技术硬件领域的可比交易，我们预计<strong>主要退出窗口为2029-2031年</strong>，通过战略收购实现，若公司达到$50M+年度经常性收入，IPO路径亦可行。</p>
+
+<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-top:16px;">
+<div style="background:linear-gradient(135deg,#e8f5e9,#c8e6c9);border-radius:10px;padding:16px;text-align:center;">
+<div style="font-size:2em;font-weight:700;color:#2e7d32;" data-zh="2029–2031">2029–2031</div>
+<div style="font-size:0.85em;color:#555;" data-zh="目标退出窗口">Target Exit Window</div>
+</div>
+<div style="background:linear-gradient(135deg,#e3f2fd,#bbdefb);border-radius:10px;padding:16px;text-align:center;">
+<div style="font-size:2em;font-weight:700;color:#1565c0;" data-zh="3–5×收入">3–5× Revenue</div>
+<div style="font-size:0.85em;color:#555;" data-zh="预期收购倍数">Expected Acq. Multiple</div>
+</div>
+<div style="background:linear-gradient(135deg,#fce4ec,#f8bbd0);border-radius:10px;padding:16px;text-align:center;">
+<div style="font-size:2em;font-weight:700;color:#c62828;" data-zh="$36M–$60M">$36M–$60M</div>
+<div style="font-size:0.85em;color:#555;" data-zh="预期退出估值">Projected Exit Valuation</div>
+</div>
+</div>
+</div>
+
+<div class="card">
+<h3><span class="icon">🏢</span> <span class="en-only">Exit Path 1: Strategic Acquisition (Primary)</span><span class="zh-only">退出路径一：战略收购（首选）</span></h3>
+<p class="en-only">Acquisition is the most likely and statistically dominant exit path — over 90% of VC-backed exits are acquisitions. For IoT/smart home hardware, median EV/Revenue multiples range from 2–4× with strategic premiums up to 7×+ for companies with ecosystem lock-in, recurring revenue, or proprietary technology.</p>
+<p class="zh-only">收购是最可能且统计上最主要的退出路径——超过90%的风投支持退出为收购。对于物联网/智能家居硬件，中位数EV/收入倍数为2-4×，对于拥有生态锁定、经常性收入或专有技术的公司，战略溢价可达7×+。</p>
+
+<h4 style="margin-top:20px;"><span class="en-only">Comparable Transactions</span><span class="zh-only">可比交易</span></h4>
+<div style="overflow-x:auto;">
+<table style="width:100%;border-collapse:collapse;font-size:0.9em;margin-top:8px;">
+<thead><tr style="background:var(--vc-red);color:white;">
+<th style="padding:10px 12px;text-align:left;"><span class="en-only">Deal</span><span class="zh-only">交易</span></th>
+<th style="padding:10px 12px;text-align:left;"><span class="en-only">Year</span><span class="zh-only">年份</span></th>
+<th style="padding:10px 12px;text-align:right;"><span class="en-only">Value</span><span class="zh-only">价值</span></th>
+<th style="padding:10px 12px;text-align:right;"><span class="en-only">EV/Rev</span><span class="zh-only">EV/收入</span></th>
+<th style="padding:10px 12px;text-align:left;"><span class="en-only">Relevance</span><span class="zh-only">参考意义</span></th>
+</tr></thead>
+<tbody>
+<tr style="border-bottom:1px solid #eee;">
+<td style="padding:10px 12px;"><strong>Resideo → Snap One</strong></td>
+<td style="padding:10px 12px;">2024</td>
+<td style="padding:10px 12px;text-align:right;">$1.4B</td>
+<td style="padding:10px 12px;text-align:right;">~7.4× EBITDA</td>
+<td style="padding:10px 12px;"><span class="en-only">Smart home products & distribution; ecosystem play</span><span class="zh-only">智能家居产品与分销；生态布局</span></td>
+</tr>
+<tr style="border-bottom:1px solid #eee;background:#f9f9f9;">
+<td style="padding:10px 12px;"><strong>GTCR → SimpliSafe</strong></td>
+<td style="padding:10px 12px;">2025</td>
+<td style="padding:10px 12px;text-align:right;">$2.5B</td>
+<td style="padding:10px 12px;text-align:right;">~3.3× Rev</td>
+<td style="padding:10px 12px;"><span class="en-only">Home security hardware + subscription; 5M households</span><span class="zh-only">家庭安防硬件+订阅；500万家庭</span></td>
+</tr>
+<tr style="border-bottom:1px solid #eee;">
+<td style="padding:10px 12px;"><strong>Legrand → Cogelec</strong></td>
+<td style="padding:10px 12px;">2025</td>
+<td style="padding:10px 12px;text-align:right;">€254M</td>
+<td style="padding:10px 12px;text-align:right;">~3–4× Rev</td>
+<td style="padding:10px 12px;"><span class="en-only">Smart access control; European strategic bolt-on</span><span class="zh-only">智能门禁；欧洲战略并购</span></td>
+</tr>
+<tr style="border-bottom:1px solid #eee;background:#f9f9f9;">
+<td style="padding:10px 12px;"><strong>Denali → SMART Recycling</strong></td>
+<td style="padding:10px 12px;">2025</td>
+<td style="padding:10px 12px;text-align:right;"><span class="en-only">Undisclosed</span><span class="zh-only">未披露</span></td>
+<td style="padding:10px 12px;text-align:right;">—</td>
+<td style="padding:10px 12px;"><span class="en-only">Food waste/composting consolidation play</span><span class="zh-only">食品废弃物/堆肥整合</span></td>
+</tr>
+<tr style="border-bottom:1px solid #eee;">
+<td style="padding:10px 12px;"><strong>Mill Industries</strong> <span style="font-size:0.8em;color:#888;">(comp)</span></td>
+<td style="padding:10px 12px;">2025</td>
+<td style="padding:10px 12px;text-align:right;"><span class="en-only">$232M raised</span><span class="zh-only">已融$232M</span></td>
+<td style="padding:10px 12px;text-align:right;">~11× Rev</td>
+<td style="padding:10px 12px;"><span class="en-only">Smart food recycler; $20M ARR; GV, Amazon, Breakthrough Energy</span><span class="zh-only">智能食物回收；$20M年收入；GV、亚马逊、突破能源基金</span></td>
+</tr>
+<tr>
+<td style="padding:10px 12px;"><strong><span class="en-only">IoT Sector Median</span><span class="zh-only">物联网行业中位数</span></strong></td>
+<td style="padding:10px 12px;">Q4 2023</td>
+<td style="padding:10px 12px;text-align:right;">—</td>
+<td style="padding:10px 12px;text-align:right;">3.4× Rev</td>
+<td style="padding:10px 12px;"><span class="en-only">50% above pre-pandemic; range 2–4× for middle cohort</span><span class="zh-only">较疫情前高50%；中间组2-4×</span></td>
+</tr>
+</tbody>
+</table>
+</div>
+
+<h4 style="margin-top:20px;"><span class="en-only">Potential Acquirers</span><span class="zh-only">潜在收购方</span></h4>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:8px;">
+<div style="background:#f5f5f5;border-radius:8px;padding:14px;">
+<strong data-zh="家电/智能家居巨头">Appliance / Smart Home Giants</strong><br>
+<span class="en-only" style="font-size:0.9em;color:#555;">Whirlpool, Samsung, LG, Haier — seeking sustainable product lines to meet ESG mandates and enter the circular economy appliance space.</span>
+<span class="zh-only" style="font-size:0.9em;color:#555;">惠而浦、三星、LG、海尔——寻求可持续产品线以满足ESG要求并进入循环经济家电领域。</span>
+</div>
+<div style="background:#f5f5f5;border-radius:8px;padding:14px;">
+<strong data-zh="废弃物管理/环保服务">Waste Management / Environmental Services</strong><br>
+<span class="en-only" style="font-size:0.9em;color:#555;">Waste Management, Republic Services, Denali — consolidating organic waste solutions; LILA provides household-level diversion.</span>
+<span class="zh-only" style="font-size:0.9em;color:#555;">Waste Management、Republic Services、Denali——整合有机废弃物解决方案；LILA提供家庭端分流。</span>
+</div>
+<div style="background:#f5f5f5;border-radius:8px;padding:14px;">
+<strong data-zh="智能家居平台">Smart Home Platforms</strong><br>
+<span class="en-only" style="font-size:0.9em;color:#555;">Amazon (Ring/Alexa), Google (Nest), Apple (HomeKit) — seeking differentiated hardware to expand connected-home ecosystems.</span>
+<span class="zh-only" style="font-size:0.9em;color:#555;">亚马逊 (Ring/Alexa)、谷歌 (Nest)、苹果 (HomeKit)——寻求差异化硬件以扩展智能家居生态。</span>
+</div>
+<div style="background:#f5f5f5;border-radius:8px;padding:14px;">
+<strong data-zh="PE基金/产业整合方">PE Funds / Platform Consolidators</strong><br>
+<span class="en-only" style="font-size:0.9em;color:#555;">GTCR, Hellman & Friedman, KKR — active in smart home roll-ups (SimpliSafe, ADT); seek EBITDA-positive platforms.</span>
+<span class="zh-only" style="font-size:0.9em;color:#555;">GTCR、Hellman & Friedman、KKR——活跃于智能家居并购 (SimpliSafe, ADT)；寻求EBITDA为正的平台。</span>
+</div>
+</div>
+</div>
+
+<div class="card">
+<h3><span class="icon">📈</span> <span class="en-only">Exit Path 2: IPO (Secondary)</span><span class="zh-only">退出路径二：IPO（备选）</span></h3>
+<p class="en-only">An IPO becomes viable if VCycene reaches $50M+ ARR with sustained profitability — projected by 2030–2031 under the FM v13 aggressive scenario. The 2025 U.S. IPO market saw 201 IPOs, with SPACs accounting for 40% of deal count. Cleantech SPACs raised $3.1B in Q1 2025 alone.</p>
+<p class="zh-only">若VCycene达到$50M+年度经常性收入并保持持续盈利——FM v13积极情景下预计2030-2031年可实现——则IPO变为可行。2025年美国IPO市场共201起，SPAC占交易数量的40%。清洁技术SPAC仅2025年Q1就筹集了$31亿。</p>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:12px;">
+<div style="border:2px solid #1565c0;border-radius:10px;padding:16px;">
+<h4 style="color:#1565c0;margin:0 0 8px;" data-zh="传统IPO">Traditional IPO</h4>
+<ul style="margin:0;padding-left:18px;font-size:0.9em;">
+<li><span class="en-only">Requires $50M+ revenue, 2+ years profitability</span><span class="zh-only">需$50M+收入，2年+盈利</span></li>
+<li><span class="en-only">18-month preparation timeline</span><span class="zh-only">18个月准备周期</span></li>
+<li><span class="en-only">Best for: Founders, employees, late-stage investors</span><span class="zh-only">最适合：创始人、员工、后期投资人</span></li>
+<li><span class="en-only">Earliest feasible: 2031</span><span class="zh-only">最早可行：2031年</span></li>
+</ul>
+</div>
+<div style="border:2px solid #7b1fa2;border-radius:10px;padding:16px;">
+<h4 style="color:#7b1fa2;margin:0 0 8px;" data-zh="SPAC合并">SPAC Merger</h4>
+<ul style="margin:0;padding-left:18px;font-size:0.9em;">
+<li><span class="en-only">Lower revenue bar ($20–30M), faster timeline</span><span class="zh-only">收入门槛较低 ($20-30M)，更快</span></li>
+<li><span class="en-only">6–9 month process</span><span class="zh-only">6-9个月流程</span></li>
+<li><span class="en-only">Best for: Early liquidity if acquisition doesn't materialize</span><span class="zh-only">最适合：收购未成时的早期流动性</span></li>
+<li><span class="en-only">Earliest feasible: 2029</span><span class="zh-only">最早可行：2029年</span></li>
+</ul>
+</div>
+</div>
+</div>
+
+<div class="card">
+<h3><span class="icon">👥</span> <span class="en-only">Exit by Stakeholder Class</span><span class="zh-only">按利益相关方类别退出</span></h3>
+
+<div style="overflow-x:auto;">
+<table style="width:100%;border-collapse:collapse;font-size:0.9em;margin-top:8px;">
+<thead><tr style="background:#444;color:white;">
+<th style="padding:10px 12px;text-align:left;"><span class="en-only">Stakeholder</span><span class="zh-only">利益相关方</span></th>
+<th style="padding:10px 12px;text-align:left;"><span class="en-only">Exit Mechanism</span><span class="zh-only">退出机制</span></th>
+<th style="padding:10px 12px;text-align:left;"><span class="en-only">Timeline</span><span class="zh-only">时间线</span></th>
+<th style="padding:10px 12px;text-align:left;"><span class="en-only">Expected Return</span><span class="zh-only">预期回报</span></th>
+<th style="padding:10px 12px;text-align:left;"><span class="en-only">Key Considerations</span><span class="zh-only">关键考量</span></th>
+</tr></thead>
+<tbody>
+<tr style="border-bottom:1px solid #eee;">
+<td style="padding:10px 12px;"><strong data-zh="天使投资人（$50K–$250K）">Angel Investors ($50K–$250K)</strong></td>
+<td style="padding:10px 12px;">
+<span class="en-only">1. Secondary sale at Series A/B<br>2. Pro-rata acquisition payout<br>3. Buyback program</span>
+<span class="zh-only">1. A/B轮二级市场出售<br>2. 按比例收购分配<br>3. 回购计划</span>
+</td>
+<td style="padding:10px 12px;">
+<span class="en-only">3–5 yrs (secondary)<br>5–7 yrs (acquisition)</span>
+<span class="zh-only">3-5年（二级市场）<br>5-7年（收购）</span>
+</td>
+<td style="padding:10px 12px;">
+<span class="en-only">5–10× at acquisition<br>2–3× at secondary</span>
+<span class="zh-only">收购时5-10×<br>二级市场2-3×</span>
+</td>
+<td style="padding:10px 12px;font-size:0.85em;">
+<span class="en-only">Secondary markets (Forge, EquityZen) typically yield 50–70¢ on the dollar vs. full exit. Best to hold for acquisition unless liquidity needed.</span>
+<span class="zh-only">二级市场（Forge、EquityZen）通常只能获得完全退出价的50-70%。若无流动性需求，最好持有至收购。</span>
+</td>
+</tr>
+<tr style="border-bottom:1px solid #eee;background:#f9f9f9;">
+<td style="padding:10px 12px;"><strong data-zh="种子轮/A轮投资人（$500K–$2M）">Seed / Series A Investors ($500K–$2M)</strong></td>
+<td style="padding:10px 12px;">
+<span class="en-only">1. Acquisition payout (preferred)<br>2. IPO / SPAC liquidity<br>3. Secondary in later rounds</span>
+<span class="zh-only">1. 收购分配（优先）<br>2. IPO/SPAC流动性<br>3. 后续轮次二级出售</span>
+</td>
+<td style="padding:10px 12px;">
+<span class="en-only">5–7 yrs</span>
+<span class="zh-only">5-7年</span>
+</td>
+<td style="padding:10px 12px;">
+<span class="en-only">3–7× with liquidation preference</span>
+<span class="zh-only">3-7×（含清算优先权）</span>
+</td>
+<td style="padding:10px 12px;font-size:0.85em;">
+<span class="en-only">1× non-participating preferred provides downside protection. Pro-rata rights in follow-on rounds maintain ownership.</span>
+<span class="zh-only">1×非参与型优先股提供下行保护。后续轮次的比例分配权维持持股比例。</span>
+</td>
+</tr>
+<tr style="border-bottom:1px solid #eee;">
+<td style="padding:10px 12px;"><strong data-zh="创始人/联合创始人">Founders / Co-founders</strong></td>
+<td style="padding:10px 12px;">
+<span class="en-only">1. Acquisition (cash + earnout)<br>2. IPO + lockup expiry<br>3. Partial secondary at Series B+</span>
+<span class="zh-only">1. 收购（现金+业绩对赌）<br>2. IPO + 锁定期届满<br>3. B轮+部分二级出售</span>
+</td>
+<td style="padding:10px 12px;">
+<span class="en-only">5–8 yrs<br>(+ 2-yr earnout typical)</span>
+<span class="zh-only">5-8年<br>（+典型2年业绩对赌）</span>
+</td>
+<td style="padding:10px 12px;">
+<span class="en-only">10–30× on common equity<br>$10M–$30M+ each</span>
+<span class="zh-only">普通股10-30×<br>每人$10M-$30M+</span>
+</td>
+<td style="padding:10px 12px;font-size:0.85em;">
+<span class="en-only">Double-trigger acceleration recommended. 2-yr earnout standard for strategic acquirers. Founders typically retain operational roles post-acquisition.</span>
+<span class="zh-only">建议设置双触发加速条款。战略收购方通常要求2年业绩对赌。创始人通常在收购后保留运营职务。</span>
+</td>
+</tr>
+<tr style="background:#f9f9f9;">
+<td style="padding:10px 12px;"><strong data-zh="C级高管/关键员工">C-Level / Key Employees</strong></td>
+<td style="padding:10px 12px;">
+<span class="en-only">1. Options exercised at acquisition<br>2. IPO + 180-day lockup<br>3. Retention bonus from acquirer</span>
+<span class="zh-only">1. 收购时行权<br>2. IPO + 180天锁定期<br>3. 收购方留任奖金</span>
+</td>
+<td style="padding:10px 12px;">
+<span class="en-only">4-yr vesting + exit<br>(~6–8 yrs total)</span>
+<span class="zh-only">4年归属+退出<br>（共约6-8年）</span>
+</td>
+<td style="padding:10px 12px;">
+<span class="en-only">Varies by grant size<br>Typically 1–5× base comp</span>
+<span class="zh-only">因授予规模而异<br>通常为基本薪酬的1-5×</span>
+</td>
+<td style="padding:10px 12px;font-size:0.85em;">
+<span class="en-only">4-yr vesting with 1-yr cliff standard. Single-trigger acceleration uncommon; double-trigger protects acquirer. Post-closing retention packages common.</span>
+<span class="zh-only">标准为4年归属+1年悬崖。单触发加速不常见；双触发保护收购方。收购完成后留任激励常见。</span>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+
+<div class="card">
+<h3><span class="icon">📅</span> <span class="en-only">Exit Timeline & Milestones</span><span class="zh-only">退出时间线与里程碑</span></h3>
+
+<div class="timeline">
+<div class="tl-item" onclick="toggleDetail(this)">
+<div class="tl-dot"></div>
+<div class="tl-date" data-zh="2026年下半年–2027年">H2 2026 – 2027</div>
+<div class="tl-title" data-zh="奠定退出基础">Build Exit Foundations</div>
+<div class="tl-desc"><span class="en-only">Achieve EBITDA-positive operations. Secure IP portfolio (patents filed). Establish board with independent directors. Begin building acquirer relationships.</span><span class="zh-only">实现EBITDA盈利。保障知识产权组合（专利申请）。设立含独立董事的董事会。开始建立潜在收购方关系。</span></div>
+<div class="tl-detail">
+<span class="en-only"><strong>Key actions:</strong> File provisional patents on composting technology, heating algorithms, and IoT integration. Hire CFO with exit experience. Join industry conferences (CES, KBIS) to build visibility with strategic acquirers. Engage advisory board members with M&A connections.</span>
+<span class="zh-only"><strong>关键行动：</strong>提交堆肥技术、加热算法和物联网集成的临时专利。招聘有退出经验的CFO。参加行业会议（CES、KBIS）以提升在战略收购方中的知名度。引入有并购资源的顾问委员会成员。</span>
+</div>
+</div>
+
+<div class="tl-item" onclick="toggleDetail(this)">
+<div class="tl-dot"></div>
+<div class="tl-date" data-zh="2028年">2028</div>
+<div class="tl-title" data-zh="规模化增长 + 早期流动性">Scale Growth + Early Liquidity</div>
+<div class="tl-desc"><span class="en-only">Target $7.8M revenue, 64% gross margin. Offer angel secondary window at Series B. Formalize acquirer outreach through investment bank.</span><span class="zh-only">目标$7.8M收入，64%毛利率。在B轮为天使投资人提供二级市场窗口。通过投行正式化收购方接触。</span></div>
+<div class="tl-detail">
+<span class="en-only"><strong>Key actions:</strong> Engage boutique investment bank (e.g., Raymond James, Piper Sandler) for strategic advisory. Offer structured secondary at Series B allowing angels to sell 25–50% of position at 2–3× entry price. Ensure audited financials (GAAP) are in place for 2+ years.</span>
+<span class="zh-only"><strong>关键行动：</strong>聘请精品投行（如Raymond James、Piper Sandler）提供战略顾问服务。在B轮提供结构化二级出售，允许天使投资人以入场价2-3×出售25-50%持仓。确保GAAP审计财务报表覆盖2年以上。</span>
+</div>
+</div>
+
+<div class="tl-item" onclick="toggleDetail(this)">
+<div class="tl-dot"></div>
+<div class="tl-date" data-zh="2029年">2029</div>
+<div class="tl-title" data-zh="退出窗口开启">Exit Window Opens</div>
+<div class="tl-desc"><span class="en-only">Target $12M+ revenue, $4.8M net income. At 3–5× revenue, exit valuation = $36M–$60M. Begin formal process or evaluate SPAC options.</span><span class="zh-only">目标$12M+收入，$4.8M净利润。按3-5×收入，退出估值=$36M-$60M。启动正式流程或评估SPAC方案。</span></div>
+<div class="tl-detail">
+<span class="en-only"><strong>Key actions:</strong> Run dual-track process — simultaneously explore strategic acquisition and IPO/SPAC. If strategic premium is 4×+ revenue, pursue acquisition. If public market comparables are higher, pursue IPO track. This window also aligns with typical 5–7 year angel holding period from 2027 Series A.</span>
+<span class="zh-only"><strong>关键行动：</strong>运行双轨流程——同时探索战略收购和IPO/SPAC。若战略溢价达4×+收入，推进收购。若公开市场可比估值更高，推进IPO。此窗口也与2027年A轮后典型5-7年天使持有期一致。</span>
+</div>
+</div>
+
+<div class="tl-item" onclick="toggleDetail(this)">
+<div class="tl-dot"></div>
+<div class="tl-date" data-zh="2030–2031年">2030–2031</div>
+<div class="tl-title" data-zh="最优退出执行">Optimal Exit Execution</div>
+<div class="tl-desc"><span class="en-only">With $20M+ revenue and sustained profitability, pursue acquisition at 4–5× ($80M–$100M+) or prepare IPO at $50M+ ARR. Full liquidity for all stakeholder classes.</span><span class="zh-only">在$20M+收入和持续盈利下，推进4-5×收购（$80M-$100M+）或在$50M+ ARR时准备IPO。所有利益相关方获得完全流动性。</span></div>
+<div class="tl-detail">
+<span class="en-only"><strong>Key actions:</strong> Execute acquisition close (typical 6–9 months from LOI to close). Structure deal as cash + earnout to maximize founder value. Negotiate retention packages for key employees. Ensure double-trigger acceleration for all equity holders. For IPO: file S-1, complete roadshow, target Nasdaq listing.</span>
+<span class="zh-only"><strong>关键行动：</strong>执行收购交割（从LOI到完成通常6-9个月）。交易结构为现金+业绩对赌以最大化创始人价值。为关键员工谈判留任方案。确保所有股权持有人的双触发加速条款。IPO路径：提交S-1，完成路演，目标纳斯达克上市。</span>
+</div>
+</div>
+</div>
+</div>
+
+<div class="card">
+<h3><span class="icon">🔑</span> <span class="en-only">Exit Readiness Checklist</span><span class="zh-only">退出准备清单</span></h3>
+<p class="en-only" style="font-size:0.9em;color:#666;">Actions to maximize exit value — start now, not at exit time. Preparation should begin 2–3 years before target exit.</p>
+<p class="zh-only" style="font-size:0.9em;color:#666;">最大化退出价值的行动——现在开始，而非退出时。准备工作应在目标退出前2-3年开始。</p>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px;">
+<div style="border-left:4px solid #2e7d32;padding:12px 16px;background:#f5f5f5;border-radius:0 8px 8px 0;">
+<strong data-zh="知识产权保护">IP Protection</strong><br>
+<span class="en-only" style="font-size:0.85em;">File utility + design patents on composting tech, IoT integration, and industrial design. Build patent moat — acquirers pay 1.5–2× premium for defensible IP.</span>
+<span class="zh-only" style="font-size:0.85em;">申请堆肥技术、物联网集成和工业设计的实用+外观专利。建立专利护城河——收购方对可防御IP支付1.5-2×溢价。</span>
+</div>
+<div style="border-left:4px solid #1565c0;padding:12px 16px;background:#f5f5f5;border-radius:0 8px 8px 0;">
+<strong data-zh="经常性收入">Recurring Revenue</strong><br>
+<span class="en-only" style="font-size:0.85em;">Launch subscription tier (e.g., premium app features, filter refills, compost marketplace). Recurring revenue commands 2–3× higher multiples than one-time hardware sales.</span>
+<span class="zh-only" style="font-size:0.85em;">推出订阅层级（如高级App功能、滤芯更换、堆肥市场）。经常性收入相比一次性硬件销售可获2-3×更高倍数。</span>
+</div>
+<div style="border-left:4px solid #c62828;padding:12px 16px;background:#f5f5f5;border-radius:0 8px 8px 0;">
+<strong data-zh="数据资产">Data Moat</strong><br>
+<span class="en-only" style="font-size:0.85em;">Build proprietary dataset from IoT sensors — composting behavior, waste patterns, carbon offset metrics. Data assets are highly valued in sustainability acquisitions.</span>
+<span class="zh-only" style="font-size:0.85em;">通过物联网传感器构建专有数据集——堆肥行为、废弃物模式、碳抵消指标。数据资产在可持续发展收购中高度受重视。</span>
+</div>
+<div style="border-left:4px solid #f57c00;padding:12px 16px;background:#f5f5f5;border-radius:0 8px 8px 0;">
+<strong data-zh="公司治理">Corporate Governance</strong><br>
+<span class="en-only" style="font-size:0.85em;">2+ independent board directors, GAAP-audited financials, clean cap table, drag-along rights. These reduce due diligence friction and accelerate close by 2–3 months.</span>
+<span class="zh-only" style="font-size:0.85em;">2+名独立董事、GAAP审计财务报表、清晰股权结构表、强制随售权。减少尽职调查摩擦，加快2-3个月交割。</span>
+</div>
+</div>
+</div>
+
+<div class="card">
+<h3><span class="icon">💰</span> <span class="en-only">Exit Valuation Scenarios</span><span class="zh-only">退出估值情景</span></h3>
+
+<div style="overflow-x:auto;">
+<table style="width:100%;border-collapse:collapse;font-size:0.9em;margin-top:8px;">
+<thead><tr style="background:var(--vc-red);color:white;">
+<th style="padding:10px 12px;text-align:left;"><span class="en-only">Scenario</span><span class="zh-only">情景</span></th>
+<th style="padding:10px 12px;text-align:right;"><span class="en-only">Exit Year</span><span class="zh-only">退出年份</span></th>
+<th style="padding:10px 12px;text-align:right;"><span class="en-only">Revenue</span><span class="zh-only">收入</span></th>
+<th style="padding:10px 12px;text-align:right;"><span class="en-only">Multiple</span><span class="zh-only">倍数</span></th>
+<th style="padding:10px 12px;text-align:right;"><span class="en-only">Exit Value</span><span class="zh-only">退出价值</span></th>
+<th style="padding:10px 12px;text-align:right;"><span class="en-only">Angel Return (on $5M)</span><span class="zh-only">天使回报（基于$5M）</span></th>
+<th style="padding:10px 12px;text-align:right;"><span class="en-only">Founder Value</span><span class="zh-only">创始人价值</span></th>
+</tr></thead>
+<tbody>
+<tr style="border-bottom:1px solid #eee;">
+<td style="padding:10px 12px;"><strong data-zh="保守">Conservative</strong></td>
+<td style="padding:10px 12px;text-align:right;">2029</td>
+<td style="padding:10px 12px;text-align:right;">$12M</td>
+<td style="padding:10px 12px;text-align:right;">3×</td>
+<td style="padding:10px 12px;text-align:right;">$36M</td>
+<td style="padding:10px 12px;text-align:right;"><span class="en-only">$7.2M (1.4×)</span><span class="zh-only">$7.2M (1.4×)</span></td>
+<td style="padding:10px 12px;text-align:right;">~$25M</td>
+</tr>
+<tr style="border-bottom:1px solid #eee;background:#f9f9f9;">
+<td style="padding:10px 12px;"><strong data-zh="基准">Base Case</strong></td>
+<td style="padding:10px 12px;text-align:right;">2030</td>
+<td style="padding:10px 12px;text-align:right;">$20M</td>
+<td style="padding:10px 12px;text-align:right;">4×</td>
+<td style="padding:10px 12px;text-align:right;">$80M</td>
+<td style="padding:10px 12px;text-align:right;"><span class="en-only">$16M (3.2×)</span><span class="zh-only">$16M (3.2×)</span></td>
+<td style="padding:10px 12px;text-align:right;">~$55M</td>
+</tr>
+<tr style="border-bottom:1px solid #eee;">
+<td style="padding:10px 12px;"><strong data-zh="乐观（含订阅收入）">Upside (w/ Subscriptions)</strong></td>
+<td style="padding:10px 12px;text-align:right;">2030</td>
+<td style="padding:10px 12px;text-align:right;">$25M</td>
+<td style="padding:10px 12px;text-align:right;">5×</td>
+<td style="padding:10px 12px;text-align:right;">$125M</td>
+<td style="padding:10px 12px;text-align:right;"><span class="en-only">$25M (5.0×)</span><span class="zh-only">$25M (5.0×)</span></td>
+<td style="padding:10px 12px;text-align:right;">~$85M</td>
+</tr>
+<tr style="background:#e8f5e9;">
+<td style="padding:10px 12px;"><strong data-zh="IPO路径">IPO Path</strong></td>
+<td style="padding:10px 12px;text-align:right;">2031</td>
+<td style="padding:10px 12px;text-align:right;">$50M+</td>
+<td style="padding:10px 12px;text-align:right;">6–8×</td>
+<td style="padding:10px 12px;text-align:right;">$300M–$400M</td>
+<td style="padding:10px 12px;text-align:right;"><span class="en-only">$60M–$80M (12–16×)</span><span class="zh-only">$60M-$80M (12-16×)</span></td>
+<td style="padding:10px 12px;text-align:right;">~$200M+</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p style="font-size:0.8em;color:#888;margin-top:8px;"><span class="en-only">* Angel return assumes 20% stake from $5M at $20M pre-money, with no further dilution. Actual returns depend on follow-on round dilution (typically 15–20% per round). Founder value assumes ~70% ownership at exit after all dilution.</span><span class="zh-only">* 天使回报假设以$20M投前估值的$5M获得20%股份，无进一步稀释。实际回报取决于后续轮次稀释（通常每轮15-20%）。创始人价值假设经所有稀释后退出时持股约70%。</span></p>
+</div>
+
+<div class="card" style="background:linear-gradient(135deg,#fff3e0,#ffe0b2);border:2px solid #f57c00;">
+<h3 style="color:#e65100;"><span class="icon">⚡</span> <span class="en-only">Recommended Strategy</span><span class="zh-only">推荐策略</span></h3>
+<div style="display:grid;grid-template-columns:auto 1fr;gap:12px 16px;align-items:start;">
+<div style="background:#e65100;color:white;border-radius:50%;width:32px;height:32px;display:flex;align-items:center;justify-content:center;font-weight:700;">1</div>
+<div><strong data-zh="现在开始布局">Start positioning now.</strong> <span class="en-only">File patents, build acquirer relationships at CES/KBIS 2027, add independent board members.</span><span class="zh-only">申请专利，在CES/KBIS 2027建立收购方关系，增加独立董事。</span></div>
+
+<div style="background:#e65100;color:white;border-radius:50%;width:32px;height:32px;display:flex;align-items:center;justify-content:center;font-weight:700;">2</div>
+<div><strong data-zh="为天使投资人提供流动性窗口">Provide angel liquidity windows.</strong> <span class="en-only">Structure Series B (est. 2028) to include a secondary component, letting early angels de-risk at 2–3× while keeping skin in the game.</span><span class="zh-only">在B轮（预计2028年）中设置二级出售窗口，让早期天使投资人以2-3×降低风险，同时保留利益参与。</span></div>
+
+<div style="background:#e65100;color:white;border-radius:50%;width:32px;height:32px;display:flex;align-items:center;justify-content:center;font-weight:700;">3</div>
+<div><strong data-zh="双轨流程2029-2030年">Run dual-track 2029–2030.</strong> <span class="en-only">Engage investment bank to simultaneously explore strategic acquisition and IPO/SPAC. The competitive tension between tracks maximizes valuation — dual-track exits achieve 15–20% higher valuations on average.</span><span class="zh-only">聘请投行同时探索战略收购和IPO/SPAC。双轨之间的竞争张力使估值最大化——双轨退出平均获得15-20%更高估值。</span></div>
+
+<div style="background:#e65100;color:white;border-radius:50%;width:32px;height:32px;display:flex;align-items:center;justify-content:center;font-weight:700;">4</div>
+<div><strong data-zh="首选战略收购">Favor strategic acquisition.</strong> <span class="en-only">Given VCycene's hardware-centric model, acquisition by a major appliance maker or waste management company at 4–5× revenue ($80M–$100M) is the highest-probability, highest-certainty exit — and aligns with the 5–7 year angel timeline from a 2027 raise.</span><span class="zh-only">鉴于VCycene的硬件核心模式，被大型家电制造商或废弃物管理公司以4-5×收入（$80M-$100M）收购是概率最高、确定性最强的退出——与2027年融资后5-7年天使持有期一致。</span></div>
+</div>
+</div>
+
+</div>
+
+</div><!-- /container -->
+
+<script>
+// Bilingual toggle
+function setLang() {
+  const isZh = document.body.classList.toggle('lang-zh');
+  document.getElementById('lang-toggle').textContent = isZh ? 'EN' : '中文';
+  document.documentElement.lang = isZh ? 'zh' : 'en';
+  document.querySelectorAll('[data-zh]').forEach(el => {
+    if (!el.dataset.en) el.dataset.en = el.textContent;
+    el.textContent = isZh ? el.dataset.zh : el.dataset.en;
+  });
+  if (typeof recalc === 'function') recalc();
+  if (typeof renderChecklist === 'function') renderChecklist();
+}
+
+// Tab switching
+function showTab(id) {
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('panel-' + id).classList.add('active');
+  event.target.classList.add('active');
+  if (id === 'model') recalc();
+}
+
+// Timeline expand
+function toggleDetail(el) {
+  el.classList.toggle('expanded');
+}
+
+// Financial model recalculation aligned to FM v13 + BenLiang OEM
+function recalc() {
+  var asp = +document.getElementById('sl-asp').value;
+  var cogsVal = +document.getElementById('sl-cogs').value;
+  var fixedK = +document.getElementById('sl-fixed').value;
+  var disc = +document.getElementById('sl-disc').value;
+  var cac = +document.getElementById('sl-cac').value;
+
+  document.getElementById('v-asp').textContent = '$' + asp.toLocaleString();
+  document.getElementById('v-cogs').textContent = '$' + cogsVal;
+  document.getElementById('v-fixed').textContent = '$' + fixedK + 'K';
+  document.getElementById('v-disc').textContent = disc + '%';
+  document.getElementById('v-cac').textContent = '$' + cac;
+
+  /* ── Slider defaults (FM v13 calibration point) ── */
+  var D_ASP = 1050, D_COGS = 510, D_FIXED = 29, D_DISC = 20, D_CAC = 170;
+  var defNetAsp = D_ASP * (1 - D_DISC / 100); /* 840 */
+
+  /* ── Adjustment ratios from slider positions ── */
+  var netAsp = asp * (1 - disc / 100);
+  var rRev   = netAsp / defNetAsp;   /* revenue scales with net ASP */
+  var rCogs  = cogsVal / D_COGS;     /* COGS scales with unit cost  */
+  var rCac   = cac / D_CAC;          /* ad spend scales with CAC    */
+  var rFixed = fixedK / D_FIXED;     /* SG&A+R&D scales with fixed  */
+
+  /* ── FM v13 baseline values (authoritative source) ──
+     rev/cogs/ad/otherOp match the static financial table.
+     otherOp = Total OpEx − Ad Spend (salaries, R&D, SG&A, overhead).
+     netRatio = Net Income / EBITDA from FM v13 (captures D&A + tax). */
+  var B = [
+    {label:'2026',units:3049, rev:4050000,cogs:1550000,ad:290000,otherOp:1939000,netRatio:0.4354},
+    {label:'2027',units:5492, rev:7110000,cogs:2790000,ad:383000,otherOp:3187000,netRatio:0.6280},
+    {label:'2028',units:9241, rev:11490000,cogs:4690000,ad:481000,otherOp:5179000,netRatio:0.6675},
+    {label:'2029',units:14433,rev:17930000,cogs:7330000,ad:550000,otherOp:7560000,netRatio:0.6827}
+  ];
+
+  var isZhTbl = document.body.classList.contains('lang-zh');
+  var tableHTML = '<tr><th data-en="Metric" data-zh="指标">' +
+    (isZhTbl ? '指标' : 'Metric') + '</th>';
+  B.forEach(function(b){ tableHTML += '<th>' + b.label + '</th>'; });
+  tableHTML += '</tr>';
+
+  var rows = [];
+  var firstProfitYear = null;
+
+  B.forEach(function(b){
+    var revenue    = Math.round(b.rev * rRev);
+    var totalCogs  = Math.round(b.cogs * rCogs);
+    var grossProfit = revenue - totalCogs;
+    var grossMargin = (grossProfit / revenue * 100).toFixed(1);
+    var adSpend    = Math.round(b.ad * rCac);
+    var otherOpex  = Math.round(b.otherOp * rFixed);
+    var totalOpex  = adSpend + otherOpex;
+    var ebitda     = grossProfit - totalOpex;
+    var netProfit  = ebitda > 0 ? Math.round(ebitda * b.netRatio) : ebitda;
+    rows.push({
+      units:b.units, revenue:revenue, totalCogs:totalCogs,
+      grossProfit:grossProfit, grossMargin:grossMargin,
+      adSpend:adSpend, otherOpex:otherOpex,
+      ebitda:ebitda, netProfit:netProfit
+    });
+    if (ebitda > 0 && !firstProfitYear) firstProfitYear = b.label;
+  });
+
+  var fmt = function(n){
+    if(Math.abs(n)>=1e6) return '$'+(n/1e6).toFixed(2)+'M';
+    if(Math.abs(n)>=1e3) return '$'+(n/1e3).toFixed(0)+'K';
+    return '$'+n.toFixed(0);
+  };
+
+  var metrics = [
+    {name:'Units Sold',zh:'销售台数',key:'units',
+     format:function(n){return n.toLocaleString();}},
+    {name:'Revenue',zh:'营收',key:'revenue',format:fmt},
+    {name:'COGS',zh:'销售成本',key:'totalCogs',format:fmt},
+    {name:'Gross Profit',zh:'毛利润',key:'grossProfit',format:fmt},
+    {name:'Gross Margin',zh:'毛利率',key:'grossMargin',
+     format:function(n){return n+'%';}},
+    {name:'Ad / Acquisition',zh:'广告/获客',key:'adSpend',format:fmt},
+    {name:'SG&A + R&D',zh:'管销研发',key:'otherOpex',format:fmt},
+    {name:'EBITDA',zh:'EBITDA',key:'ebitda',format:fmt,cls:'profit-loss'},
+    {name:'Net Income (est.)',zh:'净利润（预估）',
+     key:'netProfit',format:fmt,cls:'profit-loss'}
+  ];
+
+  metrics.forEach(function(m){
+    var cls = (m.name === 'Net Income (est.)') ? 'total' : '';
+    var label = isZhTbl ? m.zh : m.name;
+    tableHTML += '<tr class="'+cls+'"><td data-en="'+m.name+'" data-zh="'+m.zh+'">'+label+'</td>';
+    rows.forEach(function(r){
+      var cellCls = '';
+      if(m.cls==='profit-loss') cellCls = r[m.key]>=0 ? 'profit' : 'loss';
+      tableHTML += '<td class="'+cellCls+'">'+m.format(r[m.key])+'</td>';
+    });
+    tableHTML += '</tr>';
+  });
+
+  document.getElementById('pl-table').innerHTML = tableHTML;
+
+  /* ── Profit note (dynamic) ── */
+  var fpEn = firstProfitYear || 'Not reached by 2029';
+  var fpZh = firstProfitYear || '2029年内未达到';
+  if(firstProfitYear){
+    var fpIdx = B.map(function(b){return b.label;}).indexOf(firstProfitYear);
+    var fpE = fpIdx>=0 ? fmt(rows[fpIdx].ebitda) : '';
+    var fpN = fpIdx>=0 ? fmt(rows[fpIdx].netProfit) : '';
+    document.getElementById('profit-note').innerHTML =
+      '<span class="en-only">FM v13 base case: <strong>EBITDA-positive in '+fpEn+'</strong> ('+fpE+') with net income of '+fpN+'. '+
+      'The $5M raise in H1 2027 accelerates growth from proven profitability. '+
+      'First profitable year (slider-adjusted): <strong>'+fpEn+'</strong></span>'+
+      '<span class="zh-only">FM v13基准情景：<strong>'+fpZh+'年EBITDA转正</strong>（'+fpE+'），净利润'+fpN+'。'+
+      '$5M融资于2027上半年进行，在盈利基础上加速增长。'+
+      '首个盈利年份（滑块调整后）：<strong>'+fpZh+'</strong></span>';
+  } else {
+    document.getElementById('profit-note').innerHTML =
+      '<span class="en-only">Slider-adjusted: <strong>EBITDA does not turn positive by 2029</strong> under these assumptions.</span>'+
+      '<span class="zh-only">滑块调整后：在当前假设下<strong>EBITDA在2029年内未能转正</strong>。</span>';
+  }
+
+  /* ── Bar chart ── */
+  var barHTML = '';
+  var maxRev = Math.max.apply(null, rows.map(function(x){return x.revenue;}));
+  rows.forEach(function(r,i){
+    var revW  = (r.revenue/maxRev*90).toFixed(0);
+    var costT = r.totalCogs+r.adSpend+r.otherOpex;
+    var expW  = (costT/maxRev*90).toFixed(0);
+    var profW = Math.max(0,(r.ebitda/maxRev*90)).toFixed(0);
+    barHTML += '<div style="font-size:12px;font-weight:700;color:#666;margin:12px 0 4px;">'+B[i].label+'</div>';
+    barHTML += '<div class="bar-row"><div class="bar-label" data-en="Rev" data-zh="收入">'+(isZhTbl?'收入':'Rev')+'</div><div class="bar-track"><div class="bar-fill revenue" style="width:'+revW+'%;">'+fmt(r.revenue)+'</div></div></div>';
+    barHTML += '<div class="bar-row"><div class="bar-label" data-en="Cost" data-zh="成本">'+(isZhTbl?'成本':'Cost')+'</div><div class="bar-track"><div class="bar-fill expense" style="width:'+expW+'%;">'+fmt(costT)+'</div></div></div>';
+    if(r.ebitda>0){
+      barHTML += '<div class="bar-row"><div class="bar-label" data-en="EBITDA" data-zh="EBITDA">EBITDA</div><div class="bar-track"><div class="bar-fill profit" style="width:'+profW+'%;">'+fmt(r.ebitda)+'</div></div></div>';
+    }
+  });
+  document.getElementById('bar-chart-area').innerHTML = barHTML;
+}
+
+
+// Checklist
+const checks = [
+  ['Q4 2026 profitability confirmed', 'Audited financials showing $118K+ net income, $271K EBITDA', 'Q4 2026盈利确认', '审计财务报表，净利润$118K+，EBITDA $271K'],
+  ['BenLiang production metrics documented', 'P100X to P500 COGS trajectory, quality data, delivery reliability', '本量生产数据文档化', 'P100X到P500 COGS轨迹、质量数据、交付可靠性'],
+  ['Fractional CFO engaged', 'Clean QuickBooks, build investor-grade financials from FM v13', '聘请兼职CFO', '清理QuickBooks，基于FM v13构建投资级财务报表'],
+  ['Data room assembled', 'Cap table, IP, BenLiang OEM agreement, municipal contracts, metrics', '数据房搭建完成', '股权表、知识产权、本量OEM协议、市政合同、运营指标'],
+  ['Pitch deck updated', 'Lead with profitability proof + BenLiang COGS roadmap to $300', '路演PPT更新', '以盈利证明+本量COGS降至$300路线图为核心'],
+  ['Financial model audited', 'FM v13 with scenario analysis - show path to $17.9M by 2029', '财务模型审核', 'FM v13含情景分析——展示2029年$17.9M营收路径'],
+  ['Legal counsel retained', 'Term sheet review, corporate governance, US entity structure', '法律顾问聘请', '条款清单审核、公司治理、美国实体架构'],
+  ['Target investor list (80-100)', 'CleanTech VCs, hardware funds, strategic corporates', '目标投资人名单 (80-100)', '清洁技术VC、硬件基金、战略企业'],
+  ['30+ warm intros scheduled', 'Through ventureLAB, MaRS, existing investors, industry events', '30+暖引荐已安排', '通过ventureLAB、MaRS、现有投资人、行业活动'],
+  ['Patent filings current', 'CompostAI provisional, LILA mechanical design, BOM IP protections', '专利申请保持最新', 'CompostAI临时专利、LILA机械设计、BOM知识产权保护'],
+  ['Customer references ready', '5-10 municipal contacts, institutional buyers, NPS data', '客户推荐准备就绪', '5-10个市政联系人、机构买家、NPS数据'],
+  ['Board/advisors formalized', 'Independent directors with cleantech or retail experience', '董事会/顾问正式化', '具有清洁技术或零售经验的独立董事']
+];
+
+function renderChecklist() {
+let checkHTML = '';
+const isZhCheck = document.body.classList.contains('lang-zh');
+checks.forEach((c, i) => {
+  const title = isZhCheck ? c[2] : c[0];
+  const desc = isZhCheck ? c[3] : c[1];
+  checkHTML += '<div style="display:flex;align-items:flex-start;gap:10px;padding:8px 0;border-bottom:1px solid #f0f0f0;">' +
+    '<input type="checkbox" id="ck' + i + '" style="margin-top:3px;accent-color:#961b1e;">' +
+    '<label for="ck' + i + '" style="font-size:13px;cursor:pointer;"><strong data-en="' + c[0] + '" data-zh="' + c[2] + '">' + title + '</strong><br><span style="color:#888;font-size:12px;" data-en="' + c[1] + '" data-zh="' + c[3] + '">' + desc + '</span></label></div>';
+});
+document.getElementById('checklist').innerHTML = checkHTML;
+}
+renderChecklist();
+
+// Cash Flow Waterfall Chart
+function renderCashChart() {
+  const data = [
+    { m: 'Apr', cash: 196.3, inj: false },
+    { m: 'May', cash: 108.9, inj: false },
+    { m: 'Jun', cash: 170.2, inj: true },
+    { m: 'Jul', cash: 561.2, inj: true },
+    { m: 'Aug', cash: 344.4, inj: false },
+    { m: 'Sep', cash: 345.8, inj: false },
+    { m: 'Oct', cash: 508.8, inj: false },
+    { m: 'Nov', cash: 735.8, inj: false },
+    { m: 'Dec', cash: 1130.9, inj: false },
+    { m: "Jan'27", cash: 1869.4, inj: false }
+  ];
+  var maxVal = 0;
+  data.forEach(function(d) { if (d.cash > maxVal) maxVal = d.cash; });
+  var barAreaH = 240; // px available for bars
+  var html = '<div style="margin:8px 0;"><div style="display:flex;align-items:flex-end;gap:6px;padding:0 4px;height:' + (barAreaH + 40) + 'px;">';
+  data.forEach(function(d) {
+    var color = d.inj ? 'linear-gradient(180deg,#42a5f5,#1565c0)' : 'linear-gradient(180deg,#4caf50,#2e7d32)';
+    var barH = Math.max(4, Math.round(d.cash / maxVal * barAreaH));
+    html += '<div style="flex:1;text-align:center;">';
+    html += '<div style="font-size:9px;font-weight:600;color:#555;margin-bottom:3px;">$' + Math.round(d.cash) + 'K</div>';
+    html += '<div style="margin:0 auto;width:70%;height:' + barH + 'px;background:' + color + ';border-radius:4px 4px 0 0;"></div>';
+    html += '<div style="font-size:11px;font-weight:600;color:var(--vc-grey);margin-top:5px;">' + d.m + '</div>';
+    html += '</div>';
+  });
+  html += '</div></div>';
+  var el = document.getElementById('cashflow-chart');
+  if (el) el.innerHTML = html;
+}
+renderCashChart();
+
+// Production Chart
+function renderProdChart() {
+  const months = [
+    { m: 'May', units: 100, cogs: 658, cum: 100 },
+    { m: 'Jun', units: 100, cogs: 410, cum: 200 },
+    { m: 'Jul', units: 0, cogs: 0, cum: 200 },
+    { m: 'Aug', units: 300, cogs: 380, cum: 500 },
+    { m: 'Sep', units: 500, cogs: 380, cum: 1000 },
+    { m: 'Oct', units: 600, cogs: 370, cum: 1600 },
+    { m: 'Nov', units: 700, cogs: 360, cum: 2300 },
+    { m: 'Dec', units: 749, cogs: 350, cum: 3049 }
+  ];
+  const maxCum = 3200;
+  const maxCogs = 700;
+  let html = '<div style="position:relative;height:260px;margin:8px 0;">';
+  // Breakeven line
+  const bePct = (2905 / maxCum * 100).toFixed(1);
+  html += '<div style="position:absolute;bottom:' + bePct + '%;left:0;right:0;border-bottom:2px dashed var(--vc-green);z-index:1;"><span style="position:absolute;right:0;top:-16px;font-size:10px;color:var(--vc-green);font-weight:600;">BE: 2,905</span></div>';
+  // FM target line
+  const fmPct = (3049 / maxCum * 100).toFixed(1);
+  html += '<div style="position:absolute;bottom:' + fmPct + '%;left:0;right:0;border-bottom:2px dashed var(--vc-red);z-index:1;"><span style="position:absolute;right:0;top:-16px;font-size:10px;color:var(--vc-red);font-weight:600;">Target: 3,049</span></div>';
+  // Bars
+  html += '<div style="display:flex;align-items:flex-end;height:100%;gap:4px;padding-bottom:24px;">';
+  months.forEach(function(d) {
+    const cumH = (d.cum / maxCum * 100).toFixed(1);
+    const cogsH = d.cogs ? (d.cogs / maxCogs * 40).toFixed(1) : '0';
+    html += '<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;">';
+    html += '<div style="font-size:10px;font-weight:600;color:#666;">' + (d.units || '—') + '</div>';
+    html += '<div style="display:flex;gap:2px;align-items:flex-end;width:100%;height:200px;">';
+    if (d.cogs) html += '<div style="width:40%;background:linear-gradient(180deg,#c4393d,#961b1e);height:' + cogsH + '%;border-radius:3px 3px 0 0;display:flex;align-items:flex-end;justify-content:center;"><span style="font-size:9px;color:white;padding:2px;">$' + d.cogs + '</span></div>';
+    else html += '<div style="width:40%;"></div>';
+    html += '<div style="width:55%;background:linear-gradient(180deg,#4caf50,#2e7d32);height:' + cumH + '%;border-radius:3px 3px 0 0;display:flex;align-items:flex-end;justify-content:center;"><span style="font-size:9px;color:white;padding:2px;">' + d.cum.toLocaleString() + '</span></div>';
+    html += '</div>';
+    html += '<div style="font-size:11px;font-weight:600;color:var(--vc-grey);margin-top:4px;">' + d.m + '</div>';
+    html += '</div>';
+  });
+  html += '</div></div>';
+  document.getElementById('prod-chart').innerHTML = html;
+}
+renderProdChart();
+
+// Init
+recalc();
+</script>
+</body>
+</html>
+

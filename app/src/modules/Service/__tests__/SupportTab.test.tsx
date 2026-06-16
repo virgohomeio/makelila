@@ -31,6 +31,13 @@ function mkTicket(partial: Partial<ServiceTicket> & { id: string }): ServiceTick
     issue_area: null,
     kind: 'ticket',
     inbox_disposition: null,
+    sla_policy_id: null,
+    first_response_due_at: null,
+    resolution_due_at: null,
+    first_responded_at: null,
+    sla_resolved_at: null,
+    sla_status: null,
+    root_cause: null,
     ...partial,
   };
 }

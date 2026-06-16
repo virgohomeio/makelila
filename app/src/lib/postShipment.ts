@@ -48,6 +48,37 @@ export const RETURN_CATEGORIES: ReturnCategory[] = [
   'customer_service','financing','other',
 ];
 
+// Responsible-team accountability mapping (PostShipment dashboard, George's
+// ask). Derived from return_category — no separate column. A return with no
+// category counts toward 'Unassigned' alongside the 'other' category.
+export const CATEGORY_TEAM: Record<ReturnCategory, string> = {
+  product_defect:   'Engineering',
+  software_issue:   'Software',
+  shipping_damage:  'Logistics',
+  customer_service: 'Customer Service',
+  financing:        'Finance',
+  other:            'Unassigned',
+};
+
+export const RETURN_TEAMS: string[] = [
+  'Engineering', 'Software', 'Logistics', 'Customer Service', 'Finance', 'Unassigned',
+];
+
+/** Counts returns per responsible team, ordered by RETURN_TEAMS, dropping
+ *  teams with zero returns. Null/unknown category → 'Unassigned'. */
+export function returnTeamCounts(
+  rows: Array<Pick<ReturnRow, 'return_category'>>,
+): Array<{ label: string; value: number }> {
+  const counts: Record<string, number> = {};
+  for (const r of rows) {
+    const team = r.return_category ? CATEGORY_TEAM[r.return_category] : 'Unassigned';
+    counts[team] = (counts[team] ?? 0) + 1;
+  }
+  return RETURN_TEAMS
+    .filter(t => (counts[t] ?? 0) > 0)
+    .map(t => ({ label: t, value: counts[t] }));
+}
+
 export type ReturnRow = {
   id: string;
   return_ref: string | null;
@@ -136,7 +167,24 @@ export async function updateReturnStatus(id: string, newStatus: ReturnStatus): P
   }
   const { error } = await supabase.from('returns').update(patch).eq('id', id);
   if (error) throw error;
-  await logAction('return_status', id, `→ ${newStatus}`);
+
+  // #89: emit Klaviyo win-back event when a return is fully refunded so
+  // Klaviyo can trigger the 30-day re-engagement flow.
+  let klaviyoEmail: string | undefined;
+  if (newStatus === 'refunded') {
+    const { data: ret } = await supabase
+      .from('returns')
+      .select('customer_email')
+      .eq('id', id)
+      .maybeSingle();
+    klaviyoEmail = (ret as { customer_email?: string | null } | null)?.customer_email ?? undefined;
+  }
+
+  await logAction('return_status', id, `→ ${newStatus}`,
+    { entityType: 'return', entityId: id },
+    newStatus === 'refunded' && klaviyoEmail
+      ? { klaviyoEvent: 'Return Refunded', klaviyoEmail }
+      : undefined);
 }
 
 export async function updateReturnCategory(id: string, category: ReturnCategory | null): Promise<void> {
@@ -145,7 +193,8 @@ export async function updateReturnCategory(id: string, category: ReturnCategory 
     .update({ return_category: category })
     .eq('id', id);
   if (error) throw error;
-  await logAction('return_category', id, category ?? 'cleared');
+  await logAction('return_category', id, category ?? 'cleared',
+    { entityType: 'return', entityId: id });
 }
 
 async function hasField(id: string, field: string): Promise<boolean> {
@@ -312,18 +361,11 @@ export type RefundApproval = {
   updated_at: string;
 };
 
-// Role allowlist for the two approval stages. Once we ship proper RBAC
-// these move to a profiles.role column, but for 8 named users a simple
-// email list is fine and visible in code review.
-export const MANAGER_EMAILS = ['george@virgohome.io', 'huayi@virgohome.io'];
-export const FINANCE_EMAILS = ['julie@virgohome.io',  'huayi@virgohome.io'];
-
-export function canApproveManager(email: string | null | undefined): boolean {
-  return !!email && MANAGER_EMAILS.includes(email.toLowerCase());
-}
-export function canApproveFinance(email: string | null | undefined): boolean {
-  return !!email && FINANCE_EMAILS.includes(email.toLowerCase());
-}
+// Refund approval gating moved to lib/permissions.ts canDo() helpers
+// (Huayi RBAC Phase A, migration 20260607020000). Call sites import
+// from 'lib/permissions': canDo(role, 'approve_refund_manager') etc.
+// profiles.role enum is the source of truth; RLS on refund_approvals
+// enforces is_manager() in WITH CHECK as a backstop.
 
 export function useRefundApprovals(): { approvals: RefundApproval[]; loading: boolean } {
   const [approvals, setApprovals] = useState<RefundApproval[]>([]);
@@ -388,7 +430,19 @@ export async function submitRefundRequest(input: {
     submitted_by: userId,
   });
   if (error) throw error;
-  await logAction('refund_submitted', input.customer_name, `$${input.refund_amount_usd} (${input.reason ?? 'no reason'})`);
+  await logAction('refund_submitted', input.customer_name, `$${input.refund_amount_usd} (${input.reason ?? 'no reason'})`,
+    undefined,
+    {
+      klaviyoEvent: 'Refund Submitted',
+      ...(input.customer_email ? { klaviyoEmail: input.customer_email } : {}),
+      facebookEvent: {
+        event_name: 'StartTrial',
+        event_time: Math.floor(Date.now() / 1000),
+        email: input.customer_email ?? undefined,
+        order_id: input.order_id,
+        event_id: `return-${input.order_id ?? Date.now()}`,
+      },
+    });
 }
 
 export async function managerApprove(id: string, note?: string): Promise<void> {
@@ -416,7 +470,7 @@ export async function financeApprove(id: string, opts: FinanceApproveOpts): Prom
   // 1. Fetch the approval row to validate + read original amount
   const { data: approval, error: aErr } = await supabase
     .from('refund_approvals')
-    .select('id, return_id, original_amount_usd, refund_amount_usd, status')
+    .select('id, return_id, original_amount_usd, refund_amount_usd, status, customer_email')
     .eq('id', id)
     .single();
   if (aErr || !approval) throw new Error(`Refund approval not found: ${aErr?.message}`);
@@ -462,7 +516,9 @@ export async function financeApprove(id: string, opts: FinanceApproveOpts): Prom
     .eq('id', id);
   if (upErr) throw upErr;
 
-  await logAction('refund_finance_approved', id, `${opts.method} $${adjusted.toFixed(2)}`);
+  await logAction('refund_finance_approved', id, `${opts.method} $${adjusted.toFixed(2)}`,
+    undefined,
+    { klaviyoEvent: 'Refund Processed', ...(approval.customer_email ? { klaviyoEmail: approval.customer_email as string } : {}) });
 }
 
 export async function denyRefund(id: string, stage: 'manager_review' | 'finance_review', reason: string): Promise<void> {

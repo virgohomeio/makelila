@@ -1,0 +1,240 @@
+/* ============================================================ Layout */
+.layout {
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  min-height: calc(100vh - 200px);
+  overflow: hidden;
+}
+.header {
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+
+/* ============================================================ Tabs */
+.tabs {
+  display: flex;
+  gap: 2px;
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+  padding: 0 12px;
+}
+.tab {
+  background: transparent;
+  border: none;
+  padding: 12px 18px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  color: var(--color-ink-muted);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+}
+.tab:hover { color: var(--color-ink); }
+.tab.active {
+  color: var(--color-crimson);
+  border-bottom-color: var(--color-crimson);
+}
+.panel { padding: 18px 20px; }
+
+/* ============================================================ Filter row */
+.filterRow {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+/* ============================================================ Chips */
+.chip {
+  border: 1px solid var(--color-border);
+  background: #fff;
+  color: var(--color-ink-muted);
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.chip:hover { border-color: var(--color-ink-subtle); color: var(--color-ink); }
+.chipActive {
+  background: var(--color-crimson);
+  color: #fff;
+  border-color: var(--color-crimson);
+}
+
+/* ============================================================ Table */
+.tableWrap {
+  overflow-x: auto;
+}
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+.table th {
+  text-align: left;
+  background: var(--color-surface);
+  padding: 7px 10px;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--color-ink-subtle);
+  border-bottom: 1px solid var(--color-border);
+  white-space: nowrap;
+}
+.table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid #f0eee8;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+.row { cursor: default; }
+.row:hover { background: rgba(204, 45, 48, 0.04); }
+
+/* ============================================================ Pills */
+.pill {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 800;
+  padding: 2px 7px;
+  border-radius: 10px;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
+
+/* ============================================================ Status chips */
+.statusChip {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 800;
+  padding: 2px 8px;
+  border-radius: 10px;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
+.statusPosted  { color: #276749; background: #f0fff4; }
+.statusPending { color: #856a0a; background: #fffbeb; }
+.statusError   { color: #a51b1b; background: #fff5f5; }
+
+/* ============================================================ QBO token warning */
+.tokenWarning {
+  margin-bottom: 12px;
+  padding: 10px 14px;
+  background: #fffaf0;
+  border-left: 4px solid #c05621;
+  border-radius: 4px;
+  font-size: 13px;
+  color: #7b341e;
+}
+
+/* ============================================================ Amounts */
+.netDeposit { font-variant-numeric: tabular-nums; font-weight: 700; }
+.amountNeg  { color: #a51b1b; }
+.amountPos  { color: #276749; }
+
+/* ============================================================ Empty / loading */
+.empty {
+  padding: 40px 20px;
+  text-align: center;
+  color: var(--color-ink-subtle);
+  font-size: 13px;
+}
+.loading {
+  padding: 40px;
+  text-align: center;
+  color: var(--color-ink-subtle);
+  font-size: 13px;
+}
+
+/* ============================================================ Buttons */
+.btnPrimary {
+  background: var(--color-crimson);
+  color: #fff;
+  border: none;
+  padding: 7px 14px;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.btnPrimary:hover { background: var(--color-crimson-dark); }
+.btnPrimary:disabled { opacity: 0.5; cursor: not-allowed; }
+.btnSecondary {
+  background: #fff;
+  color: var(--color-ink-muted);
+  border: 1px solid var(--color-border);
+  padding: 7px 14px;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btnSecondary:hover { border-color: var(--color-ink-subtle); color: var(--color-ink); }
+
+/* ============================================================ Inputs */
+.input {
+  padding: 6px 9px;
+  font-size: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+  background: #fff;
+}
+.input:focus { outline: none; border-color: var(--color-crimson); }
+
+.select {
+  padding: 6px 9px;
+  font-size: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+  background: #fff;
+}
+.select:focus { outline: none; border-color: var(--color-crimson); }
+
+/* ============================================================ Inline-style replacements */
+.fieldLabel    { font-size: 11px; color: var(--color-ink-muted); font-weight: 600; }
+.sectionLabel  { margin-left: 8px; font-size: 11px; color: var(--color-ink-subtle); font-weight: 600; }
+.repostError   { margin-bottom: 8px; padding: 6px 10px; background: #fff5f5; border: 1px solid #fed7d7; border-radius: 4px; font-size: 12px; color: #a51b1b; }
+.errorDetail   { display: block; font-size: 10px; color: #a51b1b; margin-top: 2px; }
+.qboLink       { font-size: 11px; color: var(--color-crimson); }
+.dash          { color: var(--color-ink-subtle); font-size: 11px; }
+
+/* ============================================================ Mobile */
+@media (max-width: 700px) {
+  .panel { padding: 12px; }
+  .tableWrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+}
+
+/* ── Production Projection ── */
+.projectionPanel { padding: 0 20px 20px; }
+.projectionTitle { font-size: 15px; font-weight: 600; color: var(--color-ink); margin: 16px 0 2px; }
+.projectionSubtitle { font-size: 11px; color: var(--color-ink-muted); margin: 0 0 16px; }
+.riskBanner { padding: 10px 14px; background: #fff5f5; border: 1px solid #fc8181; border-radius: var(--radius-sm); color: #9b2c2c; font-size: 12px; margin-bottom: 16px; }
+.riskGreen { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; color: #276749; background: #f0fff4; border: 1px solid #9ae6b4; }
+.riskAmber { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; color: #c05621; background: #fffaf0; border: 1px solid #fbd38d; }
+.riskRed   { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; color: #9b2c2c; background: #fff5f5; border: 1px solid #fc8181; }
+.subTabs { display: flex; gap: 4px; padding: 12px 20px 0; border-bottom: 1px solid var(--color-border); background: var(--color-surface); }
+.subTab { padding: 8px 14px; font-size: 11px; font-weight: 600; color: var(--color-ink-muted); background: transparent; border: none; border-bottom: 2px solid transparent; cursor: pointer; white-space: nowrap; }
+.subTab:hover { color: var(--color-ink); }
+.subTabActive { color: var(--color-ink); border-bottom-color: var(--color-crimson); }
+
+/* ── Sales Projection ── */
+.kpiRow { display: flex; gap: 12px; margin: 16px 0; flex-wrap: wrap; }
+.kpiTile { flex: 1; min-width: 140px; padding: 14px 16px; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-md); }
+.kpiLabel { font-size: 11px; color: var(--color-ink-muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 4px; }
+.kpiValue { font-size: 22px; font-weight: 700; color: var(--color-ink); margin-bottom: 2px; }
+.kpiRange { font-size: 11px; color: var(--color-ink-muted); }
+.chartWrap { margin: 16px 0; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-md); padding: 12px; overflow: hidden; }
+.chartLegend { display: flex; gap: 16px; margin-bottom: 8px; font-size: 11px; color: var(--color-ink-muted); }
+.legendDotHistorical { display: inline-block; width: 10px; height: 10px; border-radius: 2px; background: var(--color-crimson); opacity: 0.7; margin-right: 4px; }
+.legendDotProjected { display: inline-block; width: 10px; height: 10px; border-radius: 2px; background: var(--color-crimson); opacity: 0.25; margin-right: 4px; }
+.confidenceNote { font-size: 11px; color: var(--color-ink-muted); font-style: italic; margin: 8px 0 16px; }
+.sectionLabelSpaced { font-size: 11px; font-weight: 600; color: var(--color-ink-muted); text-transform: uppercase; letter-spacing: 0.04em; margin: 16px 0 8px; }
+.okrBanner { padding: 10px 14px; background: #fff5f5; border: 1px solid #fc8181; border-radius: var(--radius-sm); color: #9b2c2c; font-size: 12px; margin-bottom: 16px; }

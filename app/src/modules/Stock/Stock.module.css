@@ -468,6 +468,11 @@
   color: #fff;
   border-color: var(--color-crimson);
 }
+.chipSuspect {
+  background: #744210;
+  color: #fff;
+  border-color: #744210;
+}
 
 .searchInput {
   flex: 1;
@@ -573,6 +578,22 @@
 
 .muted { color: var(--color-ink-faint); }
 
+/* Quarantine row highlight (Feature J2) */
+.rowQuarantine td { border-left: 3px solid #f687b3 !important; background: #fff5f7 !important; }
+.pillQuarantine {
+  display: inline-block;
+  margin-left: 6px;
+  font-size: 9px;
+  font-weight: 700;
+  color: #702459;
+  background: #fff5f7;
+  border: 1px solid #f687b3;
+  padding: 1px 6px;
+  border-radius: 10px;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+}
+
 .statusSelect {
   font-size: 10px;
   padding: 3px 6px;
@@ -596,6 +617,19 @@
 }
 .updateBtn:hover { background: var(--color-crimson-dark); }
 .updateBtn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.assignOrderBtn {
+  background: #fff;
+  color: var(--color-crimson);
+  border: 1px solid var(--color-crimson);
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.assignOrderBtn:hover { background: var(--color-crimson); color: #fff; }
 
 .empty {
   padding: 40px;

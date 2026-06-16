@@ -1,0 +1,6 @@
+.screen {
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}

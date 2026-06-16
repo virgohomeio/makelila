@@ -31,6 +31,9 @@ import {
   buildMachineHealthChart,
   buildTemperaturesChart,
 } from '../../lib/charts';
+import { useIsMobile } from '../../lib/useMediaQuery';
+import { NavCard } from '../../components/NavCard';
+import { MobileBackHeader } from '../../components/MobileBackHeader';
 import styles from './Dashboard.module.css';
 
 export default function Dashboard() {
@@ -73,6 +76,86 @@ export default function Dashboard() {
     setAssignTarget(null);
     refreshUnits();
   };
+
+  const isMobile = useIsMobile();
+
+  // Mobile: one NavCard per live unit. Tap a card → MachineDetail in a
+  // full-screen takeover with a back chevron returning to the unit list.
+  // The team-units toggle + header live above the cards so the operator can
+  // still filter without drilling in.
+  if (isMobile) {
+    if (selected) {
+      const { name, assigned } = resolveDisplay(selected);
+      return (
+        <div className={styles.dashboard}>
+          <MobileBackHeader label={`${name} · ${selected}`} onBack={() => setSelected(null)} />
+          <MachineDetail
+            serialNumber={selected}
+            displayName={name}
+            assigned={assigned}
+            onAssign={() => setAssignTarget(selected)}
+          />
+          {assignTarget && (
+            <AssignCustomerModal
+              serialNumber={assignTarget}
+              telemetryHint={telemetryUserMap[assignTarget] && telemetryUserMap[assignTarget] !== assignTarget ? telemetryUserMap[assignTarget] : null}
+              onClose={() => setAssignTarget(null)}
+              onAssigned={handleAssigned}
+            />
+          )}
+        </div>
+      );
+    }
+    return (
+      <div className={styles.dashboard}>
+        <header className={styles.sidebarHeader} style={{ background: 'transparent', padding: '12px 4px' }}>
+          <h1 style={{ color: 'var(--color-ink)', fontSize: 17 }}>LILA Dashboard</h1>
+          <p className={styles.subtitle} style={{ color: 'var(--color-ink-muted)' }}>
+            {checked ? `${liveSerials.length} live / ${serials.length} total` : 'checking…'}
+          </p>
+          <label className={styles.teamToggle} style={{ color: 'var(--color-ink-muted)' }}>
+            <input
+              type="checkbox"
+              checked={showTeamUnits}
+              onChange={(e) => setShowTeamUnits(e.target.checked)}
+            />
+            <span>
+              Show team test units
+              {hiddenTeamCount > 0 && <em> ({hiddenTeamCount} hidden)</em>}
+            </span>
+          </label>
+        </header>
+        {serialsErr && <p className={styles.error}>Failed to load: {serialsErr.message}</p>}
+        {serialsLoading && <p className={styles.muted}>Loading machines…</p>}
+        {checked && liveSerials.length === 0 && (
+          <p className={styles.muted}>No machines have transmitted in the last 10 minutes.</p>
+        )}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: 4 }}>
+          {liveSerials.map((sn) => {
+            const { name, assigned } = resolveDisplay(sn);
+            return (
+              <MobileMachineCard
+                key={sn}
+                serialNumber={sn}
+                displayName={name}
+                assigned={assigned}
+                onSelect={() => setSelected(sn)}
+                onAssign={() => setAssignTarget(sn)}
+              />
+            );
+          })}
+        </div>
+        {assignTarget && (
+          <AssignCustomerModal
+            serialNumber={assignTarget}
+            telemetryHint={telemetryUserMap[assignTarget] && telemetryUserMap[assignTarget] !== assignTarget ? telemetryUserMap[assignTarget] : null}
+            onClose={() => setAssignTarget(null)}
+            onAssigned={handleAssigned}
+          />
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className={styles.dashboard}>
@@ -145,6 +228,65 @@ export default function Dashboard() {
           onClose={() => setAssignTarget(null)}
           onAssigned={handleAssigned}
         />
+      )}
+    </div>
+  );
+}
+
+// Mobile-only NavCard variant. Status color resolved here (one hook per row)
+// so the unit list can show the live dot without re-reading the giant
+// telemetry payload at the module level.
+function MobileMachineCard({
+  serialNumber,
+  displayName,
+  assigned,
+  onSelect,
+  onAssign,
+}: {
+  serialNumber: string;
+  displayName: string;
+  assigned: boolean;
+  onSelect: () => void;
+  onAssign: () => void;
+}) {
+  const { status, color } = useMachineStatus(serialNumber);
+  const subtitle = assigned ? `${serialNumber} · ${status ?? 'classifying…'}` : `${serialNumber} · unassigned`;
+  return (
+    <div style={{ position: 'relative' }}>
+      <NavCard
+        onClick={onSelect}
+        title={displayName}
+        subtitle={subtitle}
+        icon={
+          <span
+            style={{
+              display: 'inline-block',
+              width: 12,
+              height: 12,
+              borderRadius: '50%',
+              background: color ?? '#bbb',
+            }}
+          />
+        }
+        iconBg="transparent"
+      />
+      {!assigned && (
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onAssign(); }}
+          style={{
+            position: 'absolute',
+            top: 10, right: 56,
+            background: 'var(--color-warning-bg)',
+            color: 'var(--color-warning)',
+            border: '1px solid var(--color-warning-border)',
+            borderRadius: 999,
+            padding: '4px 10px',
+            fontSize: 11,
+            fontWeight: 700,
+            cursor: 'pointer',
+          }}
+        >+ assign</button>
       )}
     </div>
   );

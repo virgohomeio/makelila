@@ -1,13 +1,14 @@
 import { useMemo } from 'react';
 import {
   useReturns, useRefundApprovals,
-  RETURN_CATEGORIES, RETURN_CATEGORY_META,
+  RETURN_CATEGORIES, RETURN_CATEGORY_META, returnTeamCounts,
   type ReturnRow, type RefundApproval,
 } from '../../lib/postShipment';
 import styles from './PostShipment.module.css';
 
 const THIS_YEAR = new Date().getFullYear();
 const MONTH_LABELS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const TEAM_COLORS = ['#9b2c2c', '#2b6cb0', '#c05621', '#553c9a', '#276749', '#718096'];
 
 type Aggregates = {
   totalYTD: number;
@@ -15,6 +16,7 @@ type Aggregates = {
   avgDaysToRefund: number | null;
   denialRate: number;
   byCategory: Array<{ label: string; value: number; color: string }>;
+  byTeam: Array<{ label: string; value: number }>;
   byChannel: Array<{ label: string; value: number }>;
   byCondition: Array<{ label: string; value: number }>;
   byMonth: Array<{ label: string; value: number }>;
@@ -84,7 +86,10 @@ function computeStats(returns: ReturnRow[], approvals: RefundApproval[]): Aggreg
   const currentMonth = new Date().getMonth();
   const byMonth = MONTH_LABELS.slice(0, currentMonth + 1).map((label, i) => ({ label, value: monthCounts[i] }));
 
-  return { totalYTD, refundedYTD, avgDaysToRefund, denialRate, byCategory, byChannel, byCondition, byMonth };
+  // Chart 5: responsible team (derived from category)
+  const byTeam = returnTeamCounts(returnsYTD);
+
+  return { totalYTD, refundedYTD, avgDaysToRefund, denialRate, byCategory, byTeam, byChannel, byCondition, byMonth };
 }
 
 // ─── Charts (inline SVG; no chart-lib dep) ─────────────────────────────────
@@ -198,6 +203,7 @@ export function DashboardTab() {
         <ChartCard title="By Category"><BarChart data={stats.byCategory} /></ChartCard>
         <ChartCard title="By Channel"><DonutChart data={stats.byChannel} colors={['#2b6cb0', '#c53030', '#718096']} /></ChartCard>
         <ChartCard title="By Condition"><BarChart data={stats.byCondition} /></ChartCard>
+        <ChartCard title="Responsible Team"><DonutChart data={stats.byTeam} colors={TEAM_COLORS} /></ChartCard>
         <ChartCard title={`Monthly Trend ${THIS_YEAR}`}><LineChart data={stats.byMonth} color="#276749" /></ChartCard>
       </div>
     </div>

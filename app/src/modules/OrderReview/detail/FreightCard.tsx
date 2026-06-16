@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react';
 import type { Order } from '../../../lib/orders';
 import { updateFreightEstimate, isReplacementLine } from '../../../lib/orders';
 import { formatMoney } from '../../../lib/money';
+import { useQuotes, selectQuote } from '../../../lib/freight';
 import styles from '../OrderReview.module.css';
 
 function SourceTag({ source }: { source: string }) {
@@ -75,6 +76,8 @@ function EditFreight({ order }: { order: Order }) {
 const FREIGHT_CURRENCY = 'CAD';
 
 export function FreightCard({ order }: { order: Order }) {
+  const { quotes } = useQuotes(order.id);
+
   // Backlog #15 — total unit count across all line items, so the operator
   // knows what they're quoting freight for (a 2-unit order's freight should
   // be ~2x a single-unit quote).
@@ -135,6 +138,61 @@ export function FreightCard({ order }: { order: Order }) {
           </div>
         )}
         <EditFreight order={order} />
+        {quotes.length > 0 && (
+          <div style={{ marginTop: 16 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-ink-muted)', marginBottom: 6 }}>
+              Quote history
+            </div>
+            <table style={{ width: '100%', fontSize: 11, borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ color: 'var(--color-ink-subtle)' }}>
+                  <th style={{ textAlign: 'left', paddingBottom: 4 }}>Provider</th>
+                  <th style={{ textAlign: 'left' }}>Service</th>
+                  <th style={{ textAlign: 'right' }}>Rate (CAD)</th>
+                  <th style={{ textAlign: 'right' }}>Transit</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {quotes.map(q => (
+                  <tr
+                    key={q.id}
+                    style={{
+                      background: q.selected ? 'var(--color-surface)' : 'transparent',
+                      fontWeight: q.selected ? 600 : 400,
+                    }}
+                  >
+                    <td style={{ padding: '3px 0' }}>{q.provider}</td>
+                    <td>{q.service_level}</td>
+                    <td style={{ textAlign: 'right' }}>
+                      {q.rate_cad != null ? `$${q.rate_cad.toFixed(2)}` : q.rate_usd != null ? `$${q.rate_usd.toFixed(2)} USD` : '—'}
+                    </td>
+                    <td style={{ textAlign: 'right' }}>{q.transit_days != null ? `${q.transit_days}d` : '—'}</td>
+                    <td style={{ textAlign: 'right' }}>
+                      {!q.selected && (
+                        <button
+                          onClick={() => void selectQuote(order.id, q.id)}
+                          style={{
+                            fontSize: 10, padding: '2px 8px', cursor: 'pointer',
+                            background: 'none', border: '1px solid var(--color-border)',
+                            borderRadius: 4, color: 'var(--color-ink-muted)',
+                          }}
+                        >
+                          Select
+                        </button>
+                      )}
+                      {q.selected && (
+                        <span style={{ fontSize: 10, color: '#276749', fontWeight: 700 }}>
+                          ✓ Selected
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );

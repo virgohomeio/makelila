@@ -27,14 +27,26 @@ export function Sidebar({
   onSelect: (id: string) => void;
 }) {
   const [tab, setTab] = useState<Tab>('pending');
+  // Replacement sub-tab: ready-to-ship vs waiting on out-of-stock parts / a
+  // pending unit batch (spec 2026-06-08).
+  const [replSub, setReplSub] = useState<'ready' | 'awaiting'>('ready');
   const [query, setQuery] = useState('');
+
+  const replReady = useMemo(
+    () => replacement.filter(o => o.replacement_state !== 'awaiting'),
+    [replacement],
+  );
+  const replAwaiting = useMemo(
+    () => replacement.filter(o => o.replacement_state === 'awaiting'),
+    [replacement],
+  );
   const [sync, setSync] = useState<SyncState>({ kind: 'idle' });
 
   const source = tab === 'pending'     ? pending
                : tab === 'held'        ? held
                : tab === 'flagged'     ? flagged
                : tab === 'approved'    ? approved
-               : tab === 'replacement' ? replacement
+               : tab === 'replacement' ? (replSub === 'awaiting' ? replAwaiting : replReady)
                : all;
 
   const visible = useMemo(() => {
@@ -107,6 +119,22 @@ export function Sidebar({
             </button>
           ))}
         </div>
+        {tab === 'replacement' && (
+          <div className={styles.tabBar}>
+            <button
+              className={`${styles.tab} ${replSub === 'ready' ? styles.activeTab : ''}`}
+              onClick={() => setReplSub('ready')}
+            >
+              Replacement Orders (Ready) ({replReady.length})
+            </button>
+            <button
+              className={`${styles.tab} ${replSub === 'awaiting' ? styles.activeTab : ''}`}
+              onClick={() => setReplSub('awaiting')}
+            >
+              Awaiting Stock / Batch ({replAwaiting.length})
+            </button>
+          </div>
+        )}
         <input
           className={styles.search}
           placeholder="Search name, email, order #"

@@ -23,7 +23,7 @@ export function FormLayout({
             className={styles.logo}
           />
           <div className={styles.brandLockup}>
-            <div className={styles.wordmark}>make lila</div>
+            <div className={styles.wordmark}>makelila</div>
             <div className={styles.subwordmark}>VCycene Inc.</div>
           </div>
         </header>

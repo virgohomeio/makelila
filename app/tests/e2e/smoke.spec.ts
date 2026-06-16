@@ -10,5 +10,5 @@ test('unauthenticated user is redirected to login', async ({ page }) => {
 
 test('login page shows brand heading', async ({ page }) => {
   await page.goto('login');
-  await expect(page.getByRole('heading', { name: /make lila/i })).toBeVisible();
+  await expect(page.getByRole('heading', { name: /makelila/i })).toBeVisible();
 });

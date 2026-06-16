@@ -3,6 +3,8 @@ import {
   useParts, usePartShipments, adjustPartStock, recordPartShipment,
   type Part, type PartCategory,
 } from '../../lib/parts';
+import { useReplacementOrders } from '../../lib/orders';
+import { replacementDemandBySku } from '../../lib/replacementTags';
 import { useCustomers, type Customer } from '../../lib/customers';
 import styles from './Stock.module.css';
 
@@ -12,6 +14,7 @@ export function PartsTab() {
   const { parts, loading: pLoading } = useParts();
   const { shipments, loading: sLoading } = usePartShipments();
   const { customers, loading: cLoading } = useCustomers();
+  const { orders: replacementOrders } = useReplacementOrders();
   const [catFilter, setCatFilter] = useState<CatFilter>('all');
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -29,6 +32,15 @@ export function PartsTab() {
     }
     return m;
   }, [shipments]);
+
+  // Demand = count of each part queued across un-shipped replacement orders
+  // (Service > Replacement), keyed by SKU. Uses the SAME item-tag derivation
+  // the Replacement tab shows — so description rows like "both side latch" map
+  // to side latch-L + side latch-R — keeping Demand consistent with the chips.
+  const demandBySku = useMemo(
+    () => replacementDemandBySku(replacementOrders),
+    [replacementOrders],
+  );
 
   const stats = useMemo(() => {
     const replacement = parts.filter(p => p.category === 'replacement');
@@ -97,6 +109,7 @@ export function PartsTab() {
               <th>Category</th>
               <th>Supplier</th>
               <th className={styles.numCol}>On hand</th>
+              <th className={styles.numCol}>Demand</th>
               <th className={styles.numCol}>Reorder at</th>
               <th className={styles.numCol}>Cost</th>
               <th className={styles.numCol}>Shipped</th>
@@ -121,6 +134,15 @@ export function PartsTab() {
                     {p.category === 'replacement'
                       ? <strong className={low ? styles.lowText : ''}>{p.on_hand}</strong>
                       : <span className={styles.muted}>n/a</span>}
+                  </td>
+                  <td className={styles.numCol}>
+                    {(() => {
+                      const demand = demandBySku.get(p.sku) ?? 0;
+                      if (demand === 0) return <span className={styles.muted}>—</span>;
+                      // Flag a shortfall: more queued than on hand (replacement parts).
+                      const short = p.category === 'replacement' && demand > p.on_hand;
+                      return <strong className={short ? styles.lowText : ''} title={short ? 'Queued demand exceeds on-hand stock' : 'Queued for replacement'}>{demand}</strong>;
+                    })()}
                   </td>
                   <td className={styles.numCol}>{p.reorder_point > 0 ? p.reorder_point : <span className={styles.muted}>—</span>}</td>
                   <td className={styles.numCol}>

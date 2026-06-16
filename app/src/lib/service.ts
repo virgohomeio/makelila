@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from './supabase';
 import { logAction } from './activityLog';
+import { sendTemplate } from './templates';
 
 // ============================================================ Types
 
@@ -11,7 +12,7 @@ import { logAction } from './activityLog';
 export type TicketCategory = 'onboarding' | 'support' | 'repair' | 'diagnosis_call';
 export type TicketSource =
   | 'calendly' | 'customer_form' | 'hubspot' | 'fulfillment_flag'
-  | 'ops_manual' | 'gmail' | 'quo' | 'google_calendar';
+  | 'ops_manual' | 'gmail' | 'quo' | 'google_calendar' | 'telemetry_auto';
 
 export type TicketKind = 'conversation' | 'ticket';
 export type InboxDisposition = 'promoted' | 'sales' | 'follow_up' | 'dismissed';
@@ -93,10 +94,22 @@ export type ServiceTicket = {
   last_message_at: string | null;
   is_manually_overridden: boolean;
   issue_area: IssueArea | null;
+  root_cause: string | null;
   // Backlog #75 — diagnosis-call dedupe stamps.
   diagnosis_link_sent_at: string | null;
   diag_cohost_invited_at: string | null;
   google_calendar_event_id: string | null;
+  // J5 — SLA aging
+  sla_policy_id: string | null;
+  first_response_due_at: string | null;
+  resolution_due_at: string | null;
+  first_responded_at: string | null;
+  sla_resolved_at: string | null;
+  sla_status: 'ok' | 'warning' | 'breached' | 'met' | null;
+  // Feature 3 — bidirectional Linear/GitHub issue linking
+  linear_issue_url: string | null;
+  github_issue_url: string | null;
+  engineering_resolved_at: string | null;
 };
 
 export type CustomerLifecycle = {
@@ -106,6 +119,7 @@ export type CustomerLifecycle = {
   shipped_at: string;
   onboarding_status: OnboardingStatus;
   onboarding_completed_at: string | null;
+  followup_email_sent_at: string | null;
   warranty_months: number;
   warranty_expires_at: string;
   notes: string | null;
@@ -186,13 +200,13 @@ export const TOPIC_LABEL: Record<TicketTopic, string> = {
 };
 
 export const STATUS_META: Record<TicketStatus, { label: string; color: string; bg: string }> = {
-  waiting_on_us:          { label: 'Waiting on Us',          color: '#2b6cb0', bg: '#ebf8ff' },
+  waiting_on_us:          { label: 'Needs Response',         color: '#2b6cb0', bg: '#ebf8ff' },
   in_progress:            { label: 'In Progress',            color: '#c05621', bg: '#fffaf0' },
-  waiting_on_customer:    { label: 'Waiting on Customer',    color: '#718096', bg: '#f7fafc' },
+  waiting_on_customer:    { label: 'Needs to Reach Out',     color: '#718096', bg: '#f7fafc' },
   queued_for_replacement: { label: 'Queued for Replacement', color: '#553c9a', bg: '#faf5ff' },
   call_scheduled:         { label: 'Call Scheduled',         color: '#2c7a7b', bg: '#e6fffa' },
   on_hold:                { label: 'On Hold',                color: '#b7791f', bg: '#fffff0' },
-  closed:                 { label: 'Closed',                 color: '#a0aec0', bg: '#edf2f7' },
+  closed:                 { label: 'Complete',               color: '#a0aec0', bg: '#edf2f7' },
 };
 
 export const PRIORITY_META: Record<TicketPriority, { label: string; color: string }> = {
@@ -211,6 +225,7 @@ export const SOURCE_LABEL: Record<TicketSource, string> = {
   gmail:            'Gmail',
   quo:              'Quo',
   google_calendar:  'Calendar',
+  telemetry_auto:   'Telemetry auto',
 };
 
 // Safe accessors for the display metadata above. A ticket's status / priority /
@@ -257,6 +272,20 @@ export function warrantyState(lifecycle: Pick<CustomerLifecycle, 'warranty_expir
   const nowMs = Date.now();
   const days = Math.round((expiresMs - nowMs) / 86400000);
   return { state: days >= 0 ? 'active' : 'expired', daysFromNow: days };
+}
+
+// SLA chip — compact colored status pill for ticket list rows and detail panel.
+export function slaChip(ticket: Pick<ServiceTicket, 'sla_status'>): {
+  label: string;
+  color: 'green' | 'amber' | 'red' | 'grey';
+} {
+  switch (ticket.sla_status) {
+    case 'ok':      return { label: 'On track', color: 'green' };
+    case 'warning': return { label: 'At risk',  color: 'amber' };
+    case 'breached':return { label: 'Breached', color: 'red'   };
+    case 'met':     return { label: 'Met',       color: 'grey'  };
+    default:        return { label: 'No SLA',   color: 'grey'  };
+  }
 }
 
 // ============================================================ Hooks
@@ -435,9 +464,15 @@ export function useCustomerLifecycle(): { rows: CustomerLifecycle[]; loading: bo
 export function useTicketAttachments(ticketId: string | null): {
   attachments: TicketAttachment[];
   loading: boolean;
+  /** Force a re-fetch of the attachment list. Caller should invoke after
+   *  mutations (upload/delete) so the UI updates even if the realtime
+   *  subscription dropped or raced the INSERT — observed on iPhone PWA
+   *  installs where the realtime websocket can stall after sleep/wake. */
+  refresh: () => void;
 } {
   const [attachments, setAttachments] = useState<TicketAttachment[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshTick, setRefreshTick] = useState(0);
 
   useEffect(() => {
     if (!ticketId) { setAttachments([]); setLoading(false); return; }
@@ -455,7 +490,7 @@ export function useTicketAttachments(ticketId: string | null): {
       setLoading(false);
 
       channel = supabase
-        .channel(`attachments:${ticketId}`)
+        .channel(`attachments:${ticketId}:${refreshTick}`)
         .on('postgres_changes',
           { event: '*', schema: 'public', table: 'service_ticket_attachments', filter: `ticket_id=eq.${ticketId}` },
           (payload) => {
@@ -475,9 +510,9 @@ export function useTicketAttachments(ticketId: string | null): {
         .subscribe();
     })();
     return () => { cancelled = true; if (channel) void channel.unsubscribe(); };
-  }, [ticketId]);
+  }, [ticketId, refreshTick]);
 
-  return { attachments, loading };
+  return { attachments, loading, refresh: () => setRefreshTick(t => t + 1) };
 }
 
 export function useTicketNotes(ticketId: string | null): {
@@ -679,11 +714,41 @@ export async function createTicket(input: NewTicketInput): Promise<ServiceTicket
     .single();
   if (error) throw error;
   const row = data as ServiceTicket;
-  await logAction('ticket_created', row.id, `${row.ticket_number} ${input.subject}`);
+  await logAction('ticket_created', row.id, `${row.ticket_number} ${input.subject}`,
+    { entityType: 'ticket', entityId: row.id, unitSerial: input.unit_serial ?? undefined },
+    { klaviyoEvent: 'Support Ticket Opened', ...(input.customer_email ? { klaviyoEmail: input.customer_email } : {}) });
   return row;
 }
 
 export async function deleteTicket(id: string): Promise<void> {
+  // First, remove any QUEUED replacement orders linked to this ticket (not yet
+  // shipped) so deleting the ticket also clears its replacement from Order
+  // Review. Shipped / delivered replacements are real fulfilled orders and are
+  // left intact (the orders.linked_ticket_id FK just nulls on ticket delete).
+  const { data: linkedRepl, error: lrErr } = await supabase
+    .from('orders')
+    .select('id, order_ref')
+    .eq('kind', 'replacement')
+    .eq('linked_ticket_id', id)
+    .is('shipped_at', null)
+    .is('delivered_at', null);
+  if (lrErr) throw new Error(`Failed to look up linked replacements: ${lrErr.message}`);
+
+  for (const o of linkedRepl ?? []) {
+    // Free any units this replacement had reserved so they return to stock.
+    // (Pending/awaiting replacements reserve nothing → this is a no-op.)
+    await supabase
+      .from('units')
+      .update({ status: 'ready', customer_order_ref: null })
+      .eq('customer_order_ref', o.order_ref)
+      .eq('status', 'reserved');
+    const { error: delErr } = await supabase.from('orders').delete().eq('id', o.id);
+    if (delErr) {
+      throw new Error(`Failed to delete linked replacement ${o.order_ref}: ${delErr.message}`);
+    }
+    await logAction('replacement_deleted', o.order_ref, `Removed with ticket ${id}`);
+  }
+
   // Child rows (messages, attachments, classification log) are removed by the
   // `on delete cascade` FKs. Realtime fires a DELETE event that drops the row
   // from any open `useServiceTickets`/`useInbox` list.
@@ -700,19 +765,22 @@ export async function deleteTicket(id: string): Promise<void> {
   if (!data || data.length === 0) {
     throw new Error('Ticket was not deleted (no permission or already removed).');
   }
-  await logAction('ticket_deleted', id, 'Ticket deleted');
+  await logAction('ticket_deleted', id, 'Ticket deleted',
+    { entityType: 'ticket', entityId: id });
 }
 
 export async function updateTicketStatus(id: string, status: TicketStatus): Promise<void> {
   const { error } = await supabase.from('service_tickets').update({ status }).eq('id', id);
   if (error) throw error;
-  await logAction('ticket_status_changed', id, status);
+  await logAction('ticket_status_changed', id, status,
+    { entityType: 'ticket', entityId: id });
 }
 
 export async function assignTicketOwner(id: string, owner_email: string | null): Promise<void> {
   const { error } = await supabase.from('service_tickets').update({ owner_email }).eq('id', id);
   if (error) throw error;
-  await logAction('ticket_owner_assigned', id, owner_email ?? '(unassigned)');
+  await logAction('ticket_owner_assigned', id, owner_email ?? '(unassigned)',
+    { entityType: 'ticket', entityId: id });
 }
 
 // Walkthrough #41: defines the support → repair pipeline. Operators flip a
@@ -725,7 +793,8 @@ export async function assignTicketOwner(id: string, owner_email: string | null):
 export async function setTicketCategory(id: string, category: TicketCategory): Promise<void> {
   const { error } = await supabase.from('service_tickets').update({ category }).eq('id', id);
   if (error) throw error;
-  await logAction('ticket_category_changed', id, category);
+  await logAction('ticket_category_changed', id, category,
+    { entityType: 'ticket', entityId: id });
 }
 
 export async function setTicketPriority(id: string, priority: TicketPriority): Promise<void> {
@@ -736,7 +805,8 @@ export async function setTicketPriority(id: string, priority: TicketPriority): P
     .update({ priority, is_manually_overridden: true })
     .eq('id', id);
   if (error) throw error;
-  await logAction('ticket_priority_set', id, priority);
+  await logAction('ticket_priority_set', id, priority,
+    { entityType: 'ticket', entityId: id });
 }
 
 export async function setTicketTopic(id: string, topic: TicketTopic): Promise<void> {
@@ -822,12 +892,51 @@ export async function updateTicketSubject(id: string, subject: string): Promise<
   await logAction('ticket_subject_updated', id, trimmed);
 }
 
+/** Set (or clear) a ticket's description. Unlike subject, empty is allowed —
+ *  it clears the field. Lets operators add a description after creation
+ *  (the intake/classifier sets it at creation, but backfilled / manual
+ *  tickets often have none). */
+export async function setTicketDescription(id: string, description: string): Promise<void> {
+  const trimmed = description.trim();
+  const { data, error } = await supabase
+    .from('service_tickets')
+    .update({ description: trimmed || null })
+    .eq('id', id)
+    .select('id');
+  if (error) throw error;
+  if (!data || data.length === 0) {
+    throw new Error('Description was not updated (no permission or ticket removed).');
+  }
+  await logAction('ticket_description_updated', id, trimmed.slice(0, 100) || '(cleared)');
+}
+
 export async function setRepairFields(
   id: string,
   patch: { defect_category?: string | null; parts_needed?: string | null },
 ): Promise<void> {
   const { error } = await supabase.from('service_tickets').update(patch).eq('id', id);
   if (error) throw error;
+}
+
+/** Feature 3 — record the Linear issue URL on the ticket row.
+ *  Called after the linear-create-issue edge function succeeds. */
+export async function setLinearIssueUrl(ticketId: string, url: string): Promise<void> {
+  const { error } = await supabase
+    .from('service_tickets')
+    .update({ linear_issue_url: url })
+    .eq('id', ticketId);
+  if (error) throw error;
+  await logAction('linear_issue_linked', ticketId, url);
+}
+
+/** Feature 3 — record the GitHub issue URL on the ticket row. */
+export async function setGitHubIssueUrl(ticketId: string, url: string): Promise<void> {
+  const { error } = await supabase
+    .from('service_tickets')
+    .update({ github_issue_url: url })
+    .eq('id', ticketId);
+  if (error) throw error;
+  await logAction('github_issue_linked', ticketId, url);
 }
 
 /** Backlog #75 — record that the diagnosis-call booking link was sent.
@@ -863,18 +972,44 @@ export async function markOnboardingComplete(lifecycleId: string): Promise<void>
   if (error) throw error;
 
   // Only set onboard_date when it's still null — preserves manually-set
-  // values from prior CSV imports.
+  // values from prior CSV imports. Also fetch email for the Klaviyo 'First Use'
+  // event (#88) that triggers the Day 3 + Day 7 first-week drip.
+  let customerEmail: string | null = null;
   if (lc?.customer_id) {
     const onboardDate = completedAt.slice(0, 10); // YYYY-MM-DD
-    const { error: cErr } = await supabase
+    const { error: cErr, data: cust } = await supabase
       .from('customers')
-      .update({ onboard_date: onboardDate })
+      .select('email, onboard_date')
       .eq('id', lc.customer_id)
-      .is('onboard_date', null);
+      .maybeSingle();
     if (cErr) throw cErr;
+    customerEmail = (cust as { email?: string | null; onboard_date?: string | null } | null)?.email ?? null;
+    if (!(cust as { onboard_date?: string | null } | null)?.onboard_date) {
+      const { error: upErr } = await supabase
+        .from('customers')
+        .update({ onboard_date: onboardDate })
+        .eq('id', lc.customer_id);
+      if (upErr) throw upErr;
+    }
   }
 
-  await logAction('onboarding_completed', lifecycleId);
+  await logAction('onboarding_completed', lifecycleId, '', undefined,
+    customerEmail ? { klaviyoEvent: 'First Use', klaviyoEmail: customerEmail } : undefined);
+}
+
+export async function sendPostOnboardingFollowup(
+  lifecycleId: string,
+  to: string,
+  toName: string,
+  variables: Record<string, string>,
+): Promise<void> {
+  await sendTemplate({ template_key: 'post_onboarding_followup', to, to_name: toName, variables });
+  const { error } = await supabase
+    .from('customer_lifecycle')
+    .update({ followup_email_sent_at: new Date().toISOString() })
+    .eq('id', lifecycleId);
+  if (error) throw error;
+  await logAction('followup_email_sent', lifecycleId, `→ ${to}`);
 }
 
 export async function markOnboardingNoShow(lifecycleId: string): Promise<void> {
@@ -957,7 +1092,17 @@ export async function uploadTicketAttachment(
     await supabase.storage.from(ATTACHMENT_BUCKET).remove([path]);
     throw new Error(`Attachment record failed: ${rowErr?.message ?? 'no row returned'}`);
   }
-  await logAction('ticket_attachment_added', ticketId, `${file.name} (${Math.round(file.size / 1000)} KB)`);
+  // Auto-write a note so the upload appears in the Notes feed where the
+  // operator is already looking. logAction is invoked downstream by
+  // addTicketNote so the activity_log still records it (don't double-log).
+  await addTicketNote(
+    ticketId,
+    `📎 Added ${file.type.startsWith('image/') ? 'photo' : file.type.startsWith('video/') ? 'video' : 'file'}: ${file.name} (${formatBytes(file.size)})`,
+  ).catch((e: Error) => {
+    // Non-fatal: the attachment itself succeeded. Surface to console so
+    // the missing audit note is debuggable but don't block the upload.
+    console.warn('Auto-note for attachment upload failed (non-fatal):', e.message);
+  });
   return row as TicketAttachment;
 }
 
@@ -974,5 +1119,328 @@ export async function deleteTicketAttachment(att: TicketAttachment): Promise<voi
     .delete()
     .eq('id', att.id);
   if (rowErr) throw new Error(`Failed to delete attachment record: ${rowErr.message}`);
-  await logAction('ticket_attachment_deleted', att.ticket_id, att.file_name);
+  // Auto-write a note so the delete appears in the Notes feed alongside
+  // the original upload note.
+  await addTicketNote(
+    att.ticket_id,
+    `🗑 Removed ${att.mime_type.startsWith('image/') ? 'photo' : att.mime_type.startsWith('video/') ? 'video' : 'file'}: ${att.file_name}`,
+  ).catch((e: Error) => {
+    console.warn('Auto-note for attachment delete failed (non-fatal):', e.message);
+  });
+}
+
+function formatBytes(n: number): string {
+  return n > 1_000_000
+    ? `${(n / 1_000_000).toFixed(1)} MB`
+    : `${Math.round(n / 1000)} KB`;
+}
+
+// ============================================================ Warranty Registrations (Feature J1)
+
+export type CoverageState = 'in_warranty' | 'expired' | 'voided' | 'no_registration';
+
+export interface WarrantyRegistration {
+  id: string;
+  unit_serial: string;
+  customer_id: string;
+  original_order_id: string | null;
+  coverage_tier: 'standard_1y' | 'extended_2y' | 'replacement_no_warranty' | 'lifetime_legacy';
+  coverage_start: string; // date string YYYY-MM-DD
+  coverage_end: string;   // date string YYYY-MM-DD
+  parent_registration_id: string | null;
+  voided_reason: string | null;
+  voided_at: string | null;
+  registered_at: string;
+  registered_by: string | null;
+}
+
+export function computeCoverageState(reg: WarrantyRegistration | null): CoverageState {
+  if (!reg) return 'no_registration';
+  if (reg.voided_at) return 'voided';
+  // Compare date strings directly — coverage_end is YYYY-MM-DD and new Date() parses
+  // date-only strings as UTC midnight, which appears "past" in any non-UTC+ timezone.
+  const todayStr = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD in local time
+  if (reg.coverage_end < todayStr) return 'expired';
+  return 'in_warranty';
+}
+
+export function daysRemainingWarranty(reg: WarrantyRegistration): number {
+  const now = new Date(); now.setHours(0, 0, 0, 0);
+  const end = new Date(reg.coverage_end); end.setHours(0, 0, 0, 0);
+  return Math.ceil((end.getTime() - now.getTime()) / 86_400_000);
+}
+
+export function useWarrantyRegistration(unitSerial: string | null): {
+  registration: WarrantyRegistration | null;
+  loading: boolean;
+} {
+  const [registration, setRegistration] = useState<WarrantyRegistration | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!unitSerial) { setRegistration(null); setLoading(false); return; }
+    let cancelled = false;
+    setLoading(true);
+    (async () => {
+      const { data, error } = await supabase
+        .from('warranty_registrations')
+        .select('*')
+        .eq('unit_serial', unitSerial)
+        .maybeSingle();
+      if (cancelled) return;
+      if (!error) setRegistration(data as WarrantyRegistration | null);
+      setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [unitSerial]);
+
+  return { registration, loading };
+}
+
+export async function voidWarranty(id: string, reason: string): Promise<void> {
+  const { error } = await supabase
+    .from('warranty_registrations')
+    .update({ voided_at: new Date().toISOString(), voided_reason: reason })
+    .eq('id', id);
+  if (error) throw error;
+  await logAction('warranty_voided', id, reason,
+    { entityType: 'warranty_registration', entityId: id });
+}
+
+export async function extendWarranty(id: string, newTier: 'extended_2y' | 'lifetime_legacy'): Promise<void> {
+  const { error } = await supabase
+    .from('warranty_registrations')
+    .update({ coverage_tier: newTier })
+    .eq('id', id);
+  if (error) throw error;
+  await logAction('warranty_extended', id, newTier,
+    { entityType: 'warranty_registration', entityId: id });
+}
+
+// ============================================================ Feature J4: Device Context
+
+export interface DeviceContextUnit {
+  firmware_version: string | null;
+  electrical_check: string | null;
+  mechanical_check: string | null;
+  defect_notes: string | null;
+  technician: string | null;
+  status_updated_at: string | null;
+  test_report_uploaded_at: string | null;
+}
+
+export interface DeviceContextTelemetry {
+  classified_state: string;
+  classified_at: string;
+  is_stale: boolean; // true if > 24h old
+}
+
+export interface DeviceContext {
+  unit: DeviceContextUnit | null;
+  telemetry: DeviceContextTelemetry | null;
+  openTicketCount: number;
+  returnCount: number;
+  warranty: ReturnType<typeof useWarrantyRegistration>;
+  loading: boolean;
+}
+
+// Module-level telemetry cache: keyed by unit_serial, 60s TTL.
+const _telemetryCache = new Map<string, { data: DeviceContextTelemetry | null; fetchedAt: number }>();
+const TELEMETRY_CACHE_TTL_MS = 60_000;
+
+async function fetchDeviceContextTelemetry(unitSerial: string): Promise<DeviceContextTelemetry | null> {
+  const cached = _telemetryCache.get(unitSerial);
+  if (cached && Date.now() - cached.fetchedAt < TELEMETRY_CACHE_TTL_MS) {
+    return cached.data;
+  }
+
+  // Lazy import to avoid breaking if telemetry env vars are missing.
+  const { supabaseTelemetry, isTelemetryConfigured } = await import('./supabaseTelemetry');
+  if (!isTelemetryConfigured || !supabaseTelemetry) {
+    _telemetryCache.set(unitSerial, { data: null, fetchedAt: Date.now() });
+    return null;
+  }
+
+  // Pull the most recent telemetry event for this serial from the `lila` table.
+  // The `lila` table stores the latest known state per serial_number.
+  const { data, error } = await supabaseTelemetry
+    .from('lila')
+    .select('serial_number, updated_at, status')
+    .eq('serial_number', unitSerial)
+    .maybeSingle();
+
+  if (error || !data) {
+    _telemetryCache.set(unitSerial, { data: null, fetchedAt: Date.now() });
+    return null;
+  }
+
+  const lila = data as { serial_number: string; updated_at: string | null; status: string | null };
+  const classifiedAt = lila.updated_at ?? new Date(0).toISOString();
+  const ageMs = Date.now() - new Date(classifiedAt).getTime();
+  const result: DeviceContextTelemetry = {
+    classified_state: lila.status ?? 'UNKNOWN',
+    classified_at: classifiedAt,
+    is_stale: ageMs > 24 * 3_600_000,
+  };
+  _telemetryCache.set(unitSerial, { data: result, fetchedAt: Date.now() });
+  return result;
+}
+
+/** Hook that aggregates device context for a unit serial:
+ *  unit QC fields, latest telemetry state, open ticket count,
+ *  return count, and warranty registration. Used by DeviceContextHeader. */
+export function useDeviceContext(unitSerial: string | null): DeviceContext {
+  const warranty = useWarrantyRegistration(unitSerial);
+  const [unit, setUnit] = useState<DeviceContextUnit | null>(null);
+  const [telemetry, setTelemetry] = useState<DeviceContextTelemetry | null>(null);
+  const [openTicketCount, setOpenTicketCount] = useState(0);
+  const [returnCount, setReturnCount] = useState(0);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!unitSerial) {
+      setUnit(null);
+      setTelemetry(null);
+      setOpenTicketCount(0);
+      setReturnCount(0);
+      setLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setLoading(true);
+
+    (async () => {
+      const [unitResult, ticketResult, returnResult, telemetryResult] = await Promise.all([
+        supabase
+          .from('units')
+          .select('firmware_version, electrical_check, mechanical_check, defect_notes, technician, status_updated_at, test_report_uploaded_at')
+          .eq('serial', unitSerial)
+          .maybeSingle(),
+        supabase
+          .from('service_tickets')
+          .select('id', { count: 'exact', head: true })
+          .eq('unit_serial', unitSerial)
+          .not('status', 'eq', 'closed'),
+        supabase
+          .from('returns')
+          .select('id', { count: 'exact', head: true })
+          .eq('unit_serial', unitSerial),
+        fetchDeviceContextTelemetry(unitSerial).catch(() => null),
+      ]);
+
+      if (cancelled) return;
+
+      if (!unitResult.error && unitResult.data) {
+        setUnit(unitResult.data as DeviceContextUnit);
+      } else {
+        setUnit(null);
+      }
+
+      setOpenTicketCount(ticketResult.count ?? 0);
+      setReturnCount(returnResult.count ?? 0);
+      setTelemetry(telemetryResult);
+      setLoading(false);
+    })();
+
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [unitSerial]);
+
+  return { unit, telemetry, openTicketCount, returnCount, warranty, loading: loading || warranty.loading };
+}
+
+// ============================================================ Feature J6: Telemetry auto-ticket
+
+// Per-state hold thresholds in milliseconds.
+// NOT_MIXING is intentionally absent: 75% false positive rate, see backlog #70.
+const AUTOTICKET_THRESHOLDS_MS: Partial<Record<string, number>> = {
+  DIAGNOSE:    6  * 3_600_000,
+  NO_BME_DATA: 24 * 3_600_000,
+  DRY_SOIL:    48 * 3_600_000,
+  SOAKED_SOIL: 48 * 3_600_000,
+  OPEN_LID:    4  * 3_600_000,
+  // NOT_MIXING: DISABLED — do not add
+};
+
+/** Returns true if a telemetry state has been held long enough to warrant
+ *  auto-creating a service ticket.
+ *
+ *  Rules:
+ *  - OK / NEW_FOOD → never trigger (healthy states)
+ *  - NOT_MIXING    → never trigger (75% false positive rate, backlog #70)
+ *  - Any other state → true when (now - state_held_since) >= threshold
+ */
+export function shouldAutoCreate(
+  classified_state: string,
+  state_held_since: Date | string,
+): boolean {
+  const thresholdMs = AUTOTICKET_THRESHOLDS_MS[classified_state];
+  if (thresholdMs === undefined) return false; // OK, NEW_FOOD, NOT_MIXING, UNKNOWN, etc.
+  const heldMs = Date.now() - new Date(state_held_since).getTime();
+  return heldMs >= thresholdMs;
+}
+
+/** Returns the human-readable description string that would be written
+ *  on an auto-created ticket. */
+export function autoTicketDescription(
+  classified_state: string,
+  state_held_since: Date | string,
+): string {
+  const heldHours = Math.round(
+    (Date.now() - new Date(state_held_since).getTime()) / 3_600_000,
+  );
+  return (
+    `Auto-created from telemetry — unit held ${classified_state} for ${heldHours}h. ` +
+    `State held since ${new Date(state_held_since).toLocaleString()}.`
+  );
+}
+
+// ---- Telemetry auto-config types + hooks ----
+
+export type TelemetryAutoConfig = {
+  id: number;
+  shadow_mode: boolean;
+  enabled: boolean;
+  updated_at: string;
+};
+
+/** Returns the singleton telemetry_autoticket_config row. */
+export function useTelemetryAutoConfig(): {
+  config: TelemetryAutoConfig | null;
+  loading: boolean;
+} {
+  const [config, setConfig] = useState<TelemetryAutoConfig | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await supabase
+        .from('telemetry_autoticket_config')
+        .select('*')
+        .eq('id', 1)
+        .maybeSingle();
+      if (cancelled) return;
+      if (!error && data) setConfig(data as TelemetryAutoConfig);
+      setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  return { config, loading };
+}
+
+/** Update the singleton telemetry auto-ticket config row. */
+export async function setTelemetryAutoConfig(
+  shadow_mode: boolean,
+  enabled: boolean,
+): Promise<void> {
+  const { error } = await supabase
+    .from('telemetry_autoticket_config')
+    .update({ shadow_mode, enabled, updated_at: new Date().toISOString() })
+    .eq('id', 1);
+  if (error) throw error;
+  await logAction('telemetry_autoconfig_updated', 'telemetry_autoticket_config',
+    `shadow_mode=${shadow_mode} enabled=${enabled}`);
 }

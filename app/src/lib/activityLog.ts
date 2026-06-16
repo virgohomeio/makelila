@@ -2,6 +2,21 @@ import { useEffect, useState } from 'react';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase } from './supabase';
 
+// Typed entity classifier (mirrors public.activity_entity_type enum from
+// migration 20260607030000). Pair with entityId for orders/returns/tickets/
+// customers/etc; pair with unitSerial for unit-scoped events.
+export type EntityType =
+  | 'order'
+  | 'unit'
+  | 'return'
+  | 'ticket'
+  | 'build_station_pass'
+  | 'depot_repair'
+  | 'warranty_registration'
+  | 'customer'
+  | 'parts_kit_shipment'
+  | 'qbo_daily_journals';
+
 // PostgREST returns embedded relations as either an object or an array.
 function toEntry(row: Record<string, unknown>): ActivityLogEntry {
   const p = row.profiles as { display_name?: string | null } | Array<{ display_name?: string | null }> | null;
@@ -13,6 +28,9 @@ function toEntry(row: Record<string, unknown>): ActivityLogEntry {
     type: row.type as string,
     entity: row.entity as string,
     detail: (row.detail as string) ?? '',
+    entity_type: (row.entity_type as EntityType | null) ?? null,
+    entity_id: (row.entity_id as string | null) ?? null,
+    unit_serial: (row.unit_serial as string | null) ?? null,
     actor_name: profile?.display_name ?? null,
   };
 }
@@ -24,6 +42,12 @@ export type ActivityLogEntry = {
   type: string;
   entity: string;
   detail: string;
+  // Typed entity refs (Huayi Phase B substrate). Null on legacy rows
+  // written before migration 20260607030000 and on call sites that
+  // haven't opted in yet.
+  entity_type: EntityType | null;
+  entity_id: string | null;
+  unit_serial: string | null;
   // Joined from public.profiles via the embed below. May be null for
   // entries written before the profiles row existed.
   actor_name: string | null;
@@ -71,11 +95,44 @@ export function sessionize(entries: ActivityLogEntry[]): ActivitySession[] {
   return out;
 }
 
-/** Insert an audit entry stamped with the current authenticated user. */
+/** Insert an audit entry stamped with the current authenticated user.
+ *
+ *  `refs` is optional — existing call sites work unchanged. New call sites
+ *  should pass entity refs so per-serial / per-order timelines (Junaid's
+ *  UnitTimeline, Reina's OKR rollups) hit indexed columns instead of
+ *  text-pattern matching across `entity` / `detail`.
+ *
+ *  Convention:
+ *   - orders / returns / tickets / customers / etc. → entityType + entityId
+ *   - units → entityType='unit' + unitSerial (entityId left null; the
+ *     units table keys on serial text not uuid)
+ *   - cross-cutting unit lookups → unitSerial alone (no entityType
+ *     required — the partial index on unit_serial still covers it)
+ */
 export async function logAction(
   type: string,
   entity: string,
   detail: string = '',
+  refs?: {
+    entityType?: EntityType;
+    entityId?: string;
+    unitSerial?: string;
+  },
+  opts?: {
+    klaviyoEvent?: string;
+    klaviyoEmail?: string;  // if provided, used instead of entity as the Klaviyo profile email
+    facebookEvent?: {
+      event_name: string;
+      event_time: number;
+      email?: string;
+      phone?: string;
+      name?: string;
+      value?: number;
+      currency?: string;
+      order_id?: string;
+      event_id?: string;
+    };
+  },
 ): Promise<void> {
   const { data } = await supabase.auth.getUser();
   const user = data.user;
@@ -86,8 +143,92 @@ export async function logAction(
     type,
     entity,
     detail,
+    entity_type: refs?.entityType ?? null,
+    entity_id: refs?.entityId ?? null,
+    unit_serial: refs?.unitSerial ?? null,
   });
   if (error) throw error;
+
+  if (opts?.klaviyoEvent) {
+    void supabase.functions.invoke('klaviyo-track', {
+      body: { event: opts.klaviyoEvent, email: opts.klaviyoEmail ?? entity },
+    }).catch((e: unknown) => console.error('klaviyo-track fire-and-forget failed', e));
+  }
+
+  if (opts?.facebookEvent) {
+    void supabase.functions.invoke('facebook-capi', { body: opts.facebookEvent })
+      .catch((e: unknown) => console.error('facebook-capi fire-and-forget failed', e));
+  }
+}
+
+/** Per-entity timeline — backs Junaid's UnitTimeline.tsx and any
+ *  Reina OKR drilldown that wants "all activity for this thing".
+ *  Returns newest-first, joined with profiles.display_name.
+ *  Filter by exactly one of (entityType+entityId) for non-unit
+ *  entities, or unitSerial (with or without entityType='unit') for
+ *  units. Realtime INSERTs scoped to the same filter are prepended. */
+export function useActivityForEntity(args: {
+  entityType?: EntityType;
+  entityId?: string;
+  unitSerial?: string;
+  limit?: number;
+}): { entries: ActivityLogEntry[]; loading: boolean } {
+  const { entityType, entityId, unitSerial, limit = 200 } = args;
+  const [entries, setEntries] = useState<ActivityLogEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!unitSerial && !(entityType && entityId)) {
+      setEntries([]); setLoading(false); return;
+    }
+    let cancelled = false;
+    let channel: RealtimeChannel | null = null;
+    (async () => {
+      let q = supabase
+        .from('activity_log')
+        .select('id, user_id, ts, type, entity, detail, entity_type, entity_id, unit_serial, profiles(display_name)')
+        .order('ts', { ascending: false })
+        .limit(limit);
+      if (unitSerial) q = q.eq('unit_serial', unitSerial);
+      if (entityType) q = q.eq('entity_type', entityType);
+      if (entityId)   q = q.eq('entity_id',   entityId);
+
+      const { data, error } = await q;
+      if (cancelled) return;
+      if (!error && data) {
+        setEntries((data as Array<Record<string, unknown>>).map(toEntry));
+      }
+      setLoading(false);
+
+      // Realtime: filter server-side on whichever discriminator we have.
+      const filterStr = unitSerial
+        ? `unit_serial=eq.${unitSerial}`
+        : entityId
+          ? `entity_id=eq.${entityId}`
+          : '';
+      channel = supabase
+        .channel(`activity_log:entity:${entityType ?? 'any'}:${entityId ?? unitSerial ?? ''}`)
+        .on('postgres_changes',
+          { event: 'INSERT', schema: 'public', table: 'activity_log', filter: filterStr || undefined },
+          (payload) => {
+            const raw = payload.new as Record<string, unknown>;
+            void (async () => {
+              const { data: pRow } = await supabase
+                .from('profiles')
+                .select('display_name')
+                .eq('id', raw.user_id as string)
+                .maybeSingle();
+              const enriched = toEntry({ ...raw, profiles: pRow });
+              setEntries(prev => [enriched, ...prev].slice(0, limit));
+            })();
+          },
+        )
+        .subscribe();
+    })();
+    return () => { cancelled = true; if (channel) void channel.unsubscribe(); };
+  }, [entityType, entityId, unitSerial, limit]);
+
+  return { entries, loading };
 }
 
 /** Backlog #56 V2 — server-aggregated KPI window for the side panel.
@@ -108,7 +249,7 @@ export function useActivityKpis(days: number = 7) {
       const sinceIso = new Date(Date.now() - days * 24 * 3600_000).toISOString();
       const { data, error } = await supabase
         .from('activity_log')
-        .select('id, user_id, ts, type, entity, detail, profiles(display_name)')
+        .select('id, user_id, ts, type, entity, detail, entity_type, entity_id, unit_serial, profiles(display_name)')
         .gte('ts', sinceIso)
         .order('ts', { ascending: false })
         .limit(5000);
@@ -159,7 +300,7 @@ export function useActivityLog(limit: number = 100) {
       // the FK from activity_log.user_id → profiles.id makes this implicit.
       const { data, error } = await supabase
         .from('activity_log')
-        .select('id, user_id, ts, type, entity, detail, profiles(display_name)')
+        .select('id, user_id, ts, type, entity, detail, entity_type, entity_id, unit_serial, profiles(display_name)')
         .order('ts', { ascending: false })
         .limit(limit);
 

@@ -245,6 +245,19 @@
   flex-direction: column;
   overflow: hidden;
 }
+
+/* Mobile: full viewport, no left-border (it's edge-to-edge). The backdrop
+ * stays so tapping outside still dismisses the panel, but on phone the
+ * panel covers the screen entirely. */
+@media (max-width: 700px) {
+  .panel {
+    width: 100%;
+    max-width: 100%;
+    border-left: none;
+    height: 100dvh;
+    padding-top: env(safe-area-inset-top);
+  }
+}
 .panelHeader {
   display: flex;
   align-items: flex-start;
