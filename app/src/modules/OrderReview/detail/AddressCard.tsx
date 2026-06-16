@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import type { Order } from '../../../lib/orders';
-import { setSalesConfirmedFit, verifyAddress } from '../../../lib/orders';
+import type { Order, AreaType } from '../../../lib/orders';
+import { setSalesConfirmedFit, verifyAddress, setAreaType, AREA_TYPE_LABEL } from '../../../lib/orders';
 import { sendTemplate } from '../../../lib/templates';
 import styles from '../OrderReview.module.css';
 
@@ -75,12 +75,12 @@ export function AddressCard({ order }: { order: Order }) {
             ? <span>{order.address_line}</span>
             : <MissingField />}
         </div>
-        {order.address_line2 && (
-          <div className={styles.contactLine}>
-            <span className={styles.contactLabel}>Apartment/Unit #</span>
-            <span>{order.address_line2}</span>
-          </div>
-        )}
+        <div className={styles.contactLine}>
+          <span className={styles.contactLabel}>Apartment/Unit #</span>
+          {/* Always shown alongside the rest of the address; blank when the
+              customer didn't provide an apartment/unit. */}
+          <span>{order.address_line2 ?? ''}</span>
+        </div>
         <div className={styles.contactLine}>
           <span className={styles.contactLabel}>City</span>
           <span>{order.city}</span>
@@ -100,6 +100,30 @@ export function AddressCard({ order }: { order: Order }) {
         <div className={styles.contactLine}>
           <span className={styles.contactLabel}>Country</span>
           <span>{order.country}</span>
+        </div>
+        <div className={styles.contactLine}>
+          <span className={styles.contactLabel}>Area type</span>
+          <select
+            value={order.area_type ?? ''}
+            onChange={async e => {
+              const v = (e.target.value || null) as AreaType | null;
+              try { await setAreaType(order.id, v); }
+              catch (err) { alert((err as Error).message); }
+            }}
+            style={{
+              fontSize: 11, padding: '2px 6px', borderRadius: 'var(--radius-sm)',
+              border: '1px solid var(--color-border)', background: '#fff',
+              color: 'var(--color-ink)', cursor: 'pointer',
+            }}
+          >
+            <option value="">Unclassified</option>
+            <option value="urban">{AREA_TYPE_LABEL.urban}</option>
+            <option value="suburban">{AREA_TYPE_LABEL.suburban}</option>
+            <option value="rural">{AREA_TYPE_LABEL.rural}</option>
+          </select>
+          {order.area_type && order.area_type_source === 'auto' && (
+            <span className={styles.muted} style={{ fontSize: 10 }}>auto-guess</span>
+          )}
         </div>
 
         <div className={`${styles.verdict} ${VERDICT_CLASS[order.address_verdict]}`} style={{ marginTop: 12 }}>

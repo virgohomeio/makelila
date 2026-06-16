@@ -1121,3 +1121,80 @@
   background: #fff;
   box-sizing: border-box;
 }
+
+/* ── Customer-grouped support tickets (one row per customer) ── */
+.unassignedHead {
+  margin: 18px 0 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #718096;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Customer ticket-profile panel */
+.profileContact {
+  font-size: 12px;
+  color: #718096;
+  margin: 2px 0 6px;
+}
+.profileTicketsHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 16px 0 8px;
+}
+.profileAddBtn {
+  border: 1px solid #cbd5e0;
+  background: #fff;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.profileAddBtn:hover { background: #f7fafc; }
+.profileTicketList {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.profileTicketRow {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #fff;
+  cursor: pointer;
+}
+.profileTicketRow:hover { background: #f7fafc; }
+.profileTicketNum {
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  color: #718096;
+}
+.profileTicketSubject {
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.profileTicketTopic {
+  font-size: 10px;
+  color: #4a5568;
+  background: #edf2f7;
+  border-radius: 4px;
+  padding: 1px 6px;
+  align-self: flex-start;
+}
+.profileTicketMeta {
+  font-size: 11px;
+  color: #a0aec0;
+  white-space: nowrap;
+}

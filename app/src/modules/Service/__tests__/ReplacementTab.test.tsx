@@ -1,6 +1,11 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render as rtlRender, screen } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
+import type { ReactElement } from 'react';
 import ReplacementTab from '../ReplacementTab';
+
+// ReplacementTab deep-links to orders (useNavigate/Link), so renders need a Router.
+const render = (ui: ReactElement) => rtlRender(<MemoryRouter>{ui}</MemoryRouter>);
 
 vi.mock('../../../lib/orders', async () => {
   const actual = await vi.importActual<typeof import('../../../lib/orders')>('../../../lib/orders');

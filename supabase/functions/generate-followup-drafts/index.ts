@@ -26,8 +26,10 @@ type Draft = {
   context_summary: string;
 };
 
-const FU1_DAYS = 7;
-const FU2_DAYS = 30;
+// Call-anchored cadence (spec 2026-06-11): FU1 two weeks, FU2 four weeks after
+// the onboarding call. onboard_date mirrors the call-complete date. (Was 7/30.)
+const FU1_DAYS = 14;
+const FU2_DAYS = 28;
 const RECENT_TOUCH_DAYS = 7;
 const MAX_QUO_MESSAGES = 20;
 

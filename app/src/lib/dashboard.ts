@@ -828,7 +828,7 @@ async function fetchAllLilaRows(
       .select(columns)
       .range(offset, offset + LILA_PAGE - 1);
     if (error) throw error;
-    const rows = (data ?? []) as Array<Record<string, unknown>>;
+    const rows = (data ?? []) as unknown as Array<Record<string, unknown>>;
     all.push(...rows);
     if (rows.length < LILA_PAGE) break;
     offset += rows.length;

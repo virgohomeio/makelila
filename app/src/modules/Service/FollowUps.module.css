@@ -60,6 +60,7 @@
   height: 8px;
   border-radius: 50%;
 }
+.calDotCall { background: #276749; }
 .calDotFu1 { background: #c05621; }
 .calDotFu2 { background: #553c9a; }
 .calDotOverdue { background: #9b2c2c; }
@@ -114,6 +115,7 @@
   text-overflow: ellipsis;
   font-weight: 600;
 }
+.calEventCall { background: #f0fff4; color: #276749; border-left: 2px solid #276749; }
 .calEventFu1 { background: #fff3e0; color: #c05621; border-left: 2px solid #c05621; }
 .calEventFu2 { background: #f3e5f5; color: #553c9a; border-left: 2px solid #553c9a; }
 .calEventOverdue { background: #fff5f5; color: #9b2c2c; border-left: 2px solid #9b2c2c; }
