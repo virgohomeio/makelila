@@ -1,0 +1,22 @@
+-- Security fix: make customer_profitability run with the INVOKER's permissions.
+--
+-- A Postgres view executes as its OWNER by default. The owner here is the
+-- migration/superuser role, which BYPASSES RLS on the underlying tables
+-- (customers, orders, returns, refund_approvals, service_tickets,
+-- team_invite_list). So the original migration's claim that the view "inherits
+-- the is_internal_user() gating automatically" was wrong: any authenticated
+-- user holding SELECT on the view could read every customer's revenue, margin,
+-- email, and name — regardless of is_internal.
+--
+-- security_invoker = true makes the view evaluate underlying-table access as
+-- the querying user, so the existing `... using (public.is_internal_user())`
+-- SELECT policies (20260604200000) apply: internal users see all rows;
+-- non-internal authenticated users see none. authenticated already holds the
+-- table-level SELECT grants security_invoker also requires.
+--
+-- The view has been redefined several times (v3, use_fk, v4_tax_split); this
+-- runs after the latest definition, and CREATE [OR REPLACE] VIEW resets view
+-- options, so this is the authoritative place to set it. Requires Postgres 15+
+-- (Supabase provides it).
+
+alter view public.customer_profitability set (security_invoker = true);

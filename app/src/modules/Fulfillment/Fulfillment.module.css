@@ -402,6 +402,7 @@
 .slot.reserved  { background: var(--color-warning-bg); border-color: var(--color-warning-border); color: var(--color-warning); }
 .slot.rework    { background: var(--color-error-bg); border-color: var(--color-error-border); color: var(--color-error); }
 .slot.empty     { background: transparent; border-style: dashed; color: var(--color-ink-faint); }
+.slot.held      { background: #fffbeb; border-color: #f6ad55; color: #744210; }
 .slot.dragging  { opacity: 0.3; }
 .slot.dropTarget { outline: 2px dashed var(--color-crimson); outline-offset: 2px; }
 

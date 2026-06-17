@@ -39,7 +39,7 @@ export default function Shelf() {
 
   const skidKeys = useMemo(() => Array.from({ length: 30 }, (_, i) => `A${i + 1}`), []);
   const stats = useMemo(() => {
-    const out = { available: 0, reserved: 0, rework: 0, empty: 0 };
+    const out = { available: 0, reserved: 0, rework: 0, empty: 0, held: 0 };
     for (const s of slots) out[s.status]++;
     return out;
   }, [slots]);
@@ -91,7 +91,7 @@ export default function Shelf() {
     <div className={styles.shelfLayout}>
       <div className={styles.shelfBar}>
         <div className={styles.shelfStats}>
-          <strong>150 slots</strong> · {stats.available} available · {stats.reserved} reserved · {stats.rework} rework · {stats.empty} empty
+          <strong>150 slots</strong> · {stats.available} available · {stats.reserved} reserved · {stats.rework} rework · {stats.held} held · {stats.empty} empty
         </div>
         <div className={styles.shelfStats}>
           Auto-assign next → <strong>{nextSerial ?? '—'}</strong>

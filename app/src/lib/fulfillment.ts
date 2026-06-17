@@ -4,7 +4,7 @@ import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from './supabase';
 import { logAction } from './activityLog';
 
 export type FulfillmentStep = 1 | 2 | 3 | 4 | 5 | 6;
-export type ShelfSlotStatus = 'available' | 'reserved' | 'rework' | 'empty';
+export type ShelfSlotStatus = 'available' | 'reserved' | 'rework' | 'empty' | 'held';
 
 export type FulfillmentQueueRow = {
   id: string;
@@ -49,6 +49,10 @@ export type ShelfSlot = {
   batch: string | null;
   status: ShelfSlotStatus;
   updated_at: string;
+  // The underlying units.status, merged in by useShelf so the shelf tooltip
+  // can explain *why* a slot is its colour (e.g. a 'held' slot because the
+  // machine is in team-test vs. quarantine). Not a shelf_slots column.
+  unit_status?: string | null;
 };
 
 export type UnitRework = {
@@ -129,11 +133,25 @@ export function useFulfillmentQueue(): {
 
 export function useShelf(): { slots: ShelfSlot[]; loading: boolean } {
   const [slots, setSlots] = useState<ShelfSlot[]>([]);
+  const [unitStatus, setUnitStatus] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let channel: RealtimeChannel | null = null;
     let cancelled = false;
+
+    // Merge units.status in by hand (no FK from shelf_slots.serial -> units)
+    // so the tooltip can report the machine's actual state.
+    const loadUnitStatuses = async (serials: string[]) => {
+      if (!serials.length) return;
+      const { data } = await supabase.from('units').select('serial, status').in('serial', serials);
+      if (cancelled || !data) return;
+      setUnitStatus(prev => {
+        const next = { ...prev };
+        for (const u of data as { serial: string; status: string }[]) next[u.serial] = u.status;
+        return next;
+      });
+    };
 
     (async () => {
       const { data, error } = await supabase
@@ -142,7 +160,9 @@ export function useShelf(): { slots: ShelfSlot[]; loading: boolean } {
         .order('skid', { ascending: true })
         .order('slot_index', { ascending: true });
       if (cancelled) return;
-      if (!error && data) setSlots(data as ShelfSlot[]);
+      const rows = (!error && data) ? data as ShelfSlot[] : [];
+      setSlots(rows);
+      await loadUnitStatuses(rows.map(r => r.serial).filter(Boolean) as string[]);
       setLoading(false);
 
       channel = supabase
@@ -151,13 +171,17 @@ export function useShelf(): { slots: ShelfSlot[]; loading: boolean } {
           'postgres_changes',
           { event: '*', schema: 'public', table: 'shelf_slots' },
           (payload) => {
+            const row = payload.new as ShelfSlot | null;
             setSlots(prev => {
-              const row = payload.new as ShelfSlot | null;
               if (!row) return prev;
               const idx = prev.findIndex(s => s.skid === row.skid && s.slot_index === row.slot_index);
               if (idx >= 0) { const next = [...prev]; next[idx] = row; return next; }
               return [...prev, row];
             });
+            // The status-sync trigger flips the slot whenever units.status
+            // changes, so a shelf event is our cue to refresh the machine
+            // status that drives the tooltip.
+            if (row?.serial) void loadUnitStatuses([row.serial]);
           },
         )
         .subscribe();
@@ -166,7 +190,12 @@ export function useShelf(): { slots: ShelfSlot[]; loading: boolean } {
     return () => { cancelled = true; if (channel) void channel.unsubscribe(); };
   }, []);
 
-  return { slots, loading };
+  const merged = useMemo(
+    () => slots.map(s => (s.serial ? { ...s, unit_status: unitStatus[s.serial] ?? null } : s)),
+    [slots, unitStatus],
+  );
+
+  return { slots: merged, loading };
 }
 
 // --- useOpenReworks ---
@@ -245,11 +274,17 @@ export async function assignUnit(queueId: string, serial: string, orderId: strin
   const { data: existing, error: rErr } = await supabase
     .from('units').select('status').eq('serial', serial).single();
   if (rErr) throw rErr;
-  // quarantine excluded — do not pick quarantined units
-  if (existing?.status === 'quarantine') {
-    throw new Error(`Unit ${serial} is quarantined and cannot be assigned to a fulfillment order.`);
+  // Only 'ready' units are pickable; 'shipped' is allowed for the backfill
+  // flow (pairing a unit that left before makelila was the system of record).
+  // Everything else — team-test, quarantine, scrap, lost, in-production, etc. —
+  // is out of circulation and must not be reserved onto an order.
+  const PICKABLE: ReadonlyArray<string> = ['ready', 'shipped'];
+  if (!existing || !PICKABLE.includes(existing.status)) {
+    throw new Error(
+      `Unit ${serial} is '${existing?.status ?? 'unknown'}' and cannot be assigned to a fulfillment order.`,
+    );
   }
-  const isBackfill = existing?.status === 'shipped';
+  const isBackfill = existing.status === 'shipped';
   const patch: Record<string, unknown> = isBackfill
     ? {
         customer_order_ref: order.order_ref,
