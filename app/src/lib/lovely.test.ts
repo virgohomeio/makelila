@@ -2,9 +2,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, waitFor } from '@testing-library/react';
 
-const { invokeMock, getSessionMock } = vi.hoisted(() => ({
-  invokeMock: vi.fn(),
+const { getSessionMock, fetchMock } = vi.hoisted(() => ({
   getSessionMock: vi.fn(),
+  fetchMock: vi.fn(),
 }));
 
 vi.mock('./supabase', () => ({
@@ -13,30 +13,37 @@ vi.mock('./supabase', () => ({
 
 vi.mock('./supabaseTelemetry', () => ({
   isTelemetryConfigured: true,
-  supabaseTelemetry: { functions: { invoke: invokeMock } },
+  TELEMETRY_URL: 'https://lovely.supabase.co',
+  TELEMETRY_ANON_KEY: 'lovely-anon',
 }));
+
+vi.stubGlobal('fetch', fetchMock);
 
 import { useLovelyUsers } from './lovely';
 
+function okResponse(body: unknown) {
+  return { ok: true, status: 200, text: () => Promise.resolve(JSON.stringify(body)) };
+}
+function errResponse(status: number, body: unknown) {
+  return { ok: false, status, text: () => Promise.resolve(JSON.stringify(body)) };
+}
+
 beforeEach(() => {
-  invokeMock.mockReset();
   getSessionMock.mockReset();
+  fetchMock.mockReset();
   getSessionMock.mockResolvedValue({ data: { session: { access_token: 'tok' } } });
 });
 
 describe('useLovelyUsers', () => {
-  it('loads users from the lovely-users function with the operator token', async () => {
-    invokeMock.mockResolvedValue({
-      data: {
-        users: [{
-          id: '1', email: 'a@x.com', first_name: 'A', last_name: null,
-          serial_number: 'LL01', onboarding_step: 'done', is_verified: true,
-          verified_at: null, mailing_list: false, last_login_at: null,
-          login_count: 3, created_at: null, updated_at: null,
-        }],
-      },
-      error: null,
-    });
+  it('loads users via the lovely-users function, passing the operator token + anon apikey', async () => {
+    fetchMock.mockResolvedValue(okResponse({
+      users: [{
+        id: '1', email: 'a@x.com', first_name: 'A', last_name: null,
+        serial_number: 'LL01', onboarding_step: 'done', is_verified: true,
+        verified_at: null, mailing_list: false, last_login_at: null,
+        login_count: 3, created_at: null, updated_at: null,
+      }],
+    }));
 
     const { result } = renderHook(() => useLovelyUsers());
 
@@ -44,18 +51,37 @@ describe('useLovelyUsers', () => {
     expect(result.current.users).toHaveLength(1);
     expect(result.current.users[0].email).toBe('a@x.com');
     expect(result.current.error).toBeNull();
-    expect(invokeMock).toHaveBeenCalledWith('lovely-users', {
-      headers: { Authorization: 'Bearer tok' },
-    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://lovely.supabase.co/functions/v1/lovely-users',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          apikey: 'lovely-anon',
+          Authorization: 'Bearer tok',
+        }),
+      }),
+    );
   });
 
-  it('surfaces an error when the function fails', async () => {
-    invokeMock.mockResolvedValue({ data: null, error: new Error('boom') });
+  it('surfaces the function error body (and status) on a non-2xx response', async () => {
+    fetchMock.mockResolvedValue(errResponse(401, { error: 'Unauthorized' }));
 
     const { result } = renderHook(() => useLovelyUsers());
 
     await waitFor(() => expect(result.current.loading).toBe(false));
-    expect(result.current.error).toBe('boom');
+    expect(result.current.error).toContain('Unauthorized');
+    expect(result.current.error).toContain('401');
+    expect(result.current.users).toHaveLength(0);
+  });
+
+  it('errors with "Not signed in." and does not call the function when there is no session', async () => {
+    getSessionMock.mockResolvedValue({ data: { session: null } });
+
+    const { result } = renderHook(() => useLovelyUsers());
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.error).toBe('Not signed in.');
+    expect(fetchMock).not.toHaveBeenCalled();
     expect(result.current.users).toHaveLength(0);
   });
 });
