@@ -4,7 +4,7 @@ import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from './supabase';
 import { logAction } from './activityLog';
 
 export type FulfillmentStep = 1 | 2 | 3 | 4 | 5 | 6;
-export type ShelfSlotStatus = 'available' | 'reserved' | 'rework' | 'empty';
+export type ShelfSlotStatus = 'available' | 'reserved' | 'rework' | 'empty' | 'held';
 
 export type FulfillmentQueueRow = {
   id: string;
@@ -245,11 +245,17 @@ export async function assignUnit(queueId: string, serial: string, orderId: strin
   const { data: existing, error: rErr } = await supabase
     .from('units').select('status').eq('serial', serial).single();
   if (rErr) throw rErr;
-  // quarantine excluded — do not pick quarantined units
-  if (existing?.status === 'quarantine') {
-    throw new Error(`Unit ${serial} is quarantined and cannot be assigned to a fulfillment order.`);
+  // Only 'ready' units are pickable; 'shipped' is allowed for the backfill
+  // flow (pairing a unit that left before makelila was the system of record).
+  // Everything else — team-test, quarantine, scrap, lost, in-production, etc. —
+  // is out of circulation and must not be reserved onto an order.
+  const PICKABLE: ReadonlyArray<string> = ['ready', 'shipped'];
+  if (!existing || !PICKABLE.includes(existing.status)) {
+    throw new Error(
+      `Unit ${serial} is '${existing?.status ?? 'unknown'}' and cannot be assigned to a fulfillment order.`,
+    );
   }
-  const isBackfill = existing?.status === 'shipped';
+  const isBackfill = existing.status === 'shipped';
   const patch: Record<string, unknown> = isBackfill
     ? {
         customer_order_ref: order.order_ref,

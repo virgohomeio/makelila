@@ -30,7 +30,9 @@ export function Slot({
     isDropTarget ? styles.dropTarget : '',
   ].filter(Boolean).join(' ');
 
-  const draggable = slot.status !== 'empty';
+  // 'held' units (team-test / quarantine) are physically present but out of
+  // circulation — don't let an operator drag one onto an order.
+  const draggable = slot.status !== 'empty' && slot.status !== 'held';
 
   return (
     <div
