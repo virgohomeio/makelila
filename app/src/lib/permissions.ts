@@ -32,6 +32,7 @@ export type Module =
   | 'service'
   | 'stock'
   | 'customers'
+  | 'lovely'
   | 'templates'
   | 'activityLog'
   | 'dashboard';

@@ -28,3 +28,10 @@ export const supabaseTelemetry = isTelemetryConfigured
       },
     })
   : null;
+
+// Exposed for callers that need to hit the telemetry project's edge functions
+// with a direct `fetch` (e.g. lib/lovely.ts, which passes a makelila operator
+// token as Authorization while using this anon key as the gateway `apikey`).
+// `undefined` when telemetry isn't configured — guard on isTelemetryConfigured.
+export const TELEMETRY_URL = url;
+export const TELEMETRY_ANON_KEY = anonKey;

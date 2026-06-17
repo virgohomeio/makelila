@@ -22,6 +22,7 @@ const Fulfillment = lazy(() => import('./modules/Fulfillment'));
 const Service     = lazy(() => import('./modules/Service'));
 const Stock       = lazy(() => import('./modules/Stock'));
 const Customers   = lazy(() => import('./modules/Customers'));
+const Lovely      = lazy(() => import('./modules/Lovely'));
 const Team        = lazy(() => import('./modules/Team'));
 const Marketing   = lazy(() => import('./modules/Marketing'));
 const Finance     = lazy(() => import('./modules/Finance'));
@@ -76,6 +77,7 @@ export default function App() {
             <Route path="service"       element={<LazyRoute><Service /></LazyRoute>} />
             <Route path="stock"         element={<LazyRoute><Stock /></LazyRoute>} />
             <Route path="customers"     element={<LazyRoute><Customers /></LazyRoute>} />
+            <Route path="lovely"        element={<LazyRoute><Lovely /></LazyRoute>} />
             <Route path="templates"     element={<Navigate to="/order-review" replace />} />
             <Route path="marketing"     element={<LazyRoute><Marketing /></LazyRoute>} />
             <Route path="activity-log"  element={<Navigate to="/team" replace />} />

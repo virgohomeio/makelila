@@ -20,6 +20,7 @@ const ATTENTION = [
 const WORKSPACE = [
   { to: '/stock',        title: 'Stock',        subtitle: 'Units, parts, batches',                 icon: '📊', iconBg: '#e6f4ea' },
   { to: '/customers',    title: 'Customers',    subtitle: 'Directory & journey stages',            icon: '👥', iconBg: '#f5f1eb' },
+  { to: '/lovely',       title: 'Lovely',       subtitle: 'Lovely app users',                      icon: '🌱', iconBg: '#e6f4ea' },
   { to: '/marketing',    title: 'Marketing',    subtitle: 'Campaign attribution, CAC dashboard',   icon: '📣', iconBg: '#fef9f0' },
   { to: '/team',         title: 'Team',         subtitle: 'Activity log & team tools',             icon: '👤', iconBg: '#f5f1eb' },
 ];
