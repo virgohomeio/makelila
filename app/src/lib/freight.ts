@@ -2,6 +2,14 @@ import { useEffect, useState } from 'react';
 import { supabase } from './supabase';
 import { logAction } from './activityLog';
 
+export type FreightcomPackageInput = {
+  weight_kg: number;
+  length_cm: number;
+  width_cm: number;
+  height_cm: number;
+  description?: string;
+};
+
 export type FreightQuote = {
   id: string;
   order_id: string;
@@ -92,4 +100,21 @@ export async function insertQuote(
   );
 
   return data as FreightQuote;
+}
+
+export async function fetchFreightcomQuotes(
+  orderId: string,
+  packages?: FreightcomPackageInput[],
+): Promise<FreightQuote[]> {
+  const { data, error } = await supabase.functions.invoke('freightcom-quote', {
+    body: { order_id: orderId, ...(packages ? { packages } : {}) },
+  });
+  if (error) throw new Error(error.message);
+  await logAction(
+    'freightcom_quotes_fetched',
+    orderId,
+    `count=${(data as { count?: number })?.count ?? 0}`,
+    { entityType: 'order', entityId: orderId },
+  );
+  return (data as { quotes: FreightQuote[] }).quotes;
 }
