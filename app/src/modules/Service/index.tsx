@@ -12,9 +12,9 @@ type Tab = 'inbox' | 'onboarding' | 'support' | 'replacement' | 'followups';
 
 const TABS: { key: Tab; label: string }[] = [
   { key: 'onboarding',  label: 'Onboarding' },
+  { key: 'followups',   label: 'Follow-Ups' },
   { key: 'support',     label: 'Support Tickets' },
   { key: 'replacement', label: 'Replacement' },
-  { key: 'followups',   label: 'Follow-Ups' },
   { key: 'inbox',       label: 'Inbox' },
 ];
 
