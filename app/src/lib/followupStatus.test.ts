@@ -3,6 +3,7 @@ import {
   computeCustomerStatuses, STATUS_FILTERS, type CustomerStatusContext,
 } from './followupStatus';
 import type { Customer } from './customers';
+import type { ServiceTicket } from './service';
 
 const base: Customer = {
   id: 'c1', hubspot_id: null, email: 'a@b.com', first_name: null, last_name: null,
@@ -60,8 +61,8 @@ describe('computeCustomerStatuses', () => {
     expect(s.has('returned')).toBe(true);
   });
   it('derives ticket-based statuses', () => {
-    const t = (status: string, category = 'support') => ({ status, category } as any);
-    const ctx = { ...emptyCtx, openTickets: [t('on_hold'), t('waiting_on_customer'), t('queued_for_replacement'), { status: 'call_scheduled', category: 'diagnosis_call' } as any] };
+    const t = (status: ServiceTicket['status'], category: ServiceTicket['category'] = 'support') => ({ status, category });
+    const ctx = { ...emptyCtx, openTickets: [t('on_hold'), t('waiting_on_customer'), t('queued_for_replacement'), t('call_scheduled', 'diagnosis_call')] };
     const s = computeCustomerStatuses({ ...base }, ctx, today);
     expect(s.has('on_hold')).toBe(true);
     expect(s.has('awaiting_response')).toBe(true);
