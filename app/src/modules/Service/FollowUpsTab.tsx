@@ -7,6 +7,7 @@ import { useServiceTickets } from '../../lib/service';
 import { useFollowUpDirectory } from '../../lib/followupStatus';
 import { TicketDetailPanel } from './TicketDetailPanel';
 import { FollowUpDirectory } from './FollowUpDirectory';
+import { OverdueFollowupPanel } from './OverdueFollowupPanel';
 import { useIsMobile } from '../../lib/useMediaQuery';
 import styles from './FollowUps.module.css';
 
@@ -183,6 +184,20 @@ export function FollowUpsTab() {
   const { tickets } = useServiceTickets();
   const today = useMemo(() => new Date(), []);
   const { rows, counts, overdueCount } = useFollowUpDirectory(today);
+
+  // Overdue draft+send queue: customers needing action (overdue or due today),
+  // most-overdue first (oldest onboard date). Mirrors the set the panel was
+  // fed from the Customers tab.
+  const overdueCustomerIds = useMemo(
+    () => rows
+      .filter(r => r.statuses.has('overdue') || r.statuses.has('due_today'))
+      .sort((a, b) =>
+        Number(b.statuses.has('overdue')) - Number(a.statuses.has('overdue'))
+        || (a.customer.onboard_date ?? '').localeCompare(b.customer.onboard_date ?? ''))
+      .map(r => r.customer.id),
+    [rows],
+  );
+
   const isMobile = useIsMobile();
   const [calendarMonth, setCalendarMonth] = useState<Date>(() => {
     const d = new Date(); d.setDate(1); d.setHours(0, 0, 0, 0); return d;
@@ -216,6 +231,10 @@ export function FollowUpsTab() {
 
   return (
     <div className={styles.wrap}>
+      <OverdueFollowupPanel
+        overdueCount={overdueCustomerIds.length}
+        overdueCustomerIds={overdueCustomerIds}
+      />
       <div className={isMobile ? styles.layoutStack : styles.layoutSplit}>
         <div className={styles.calCol}>
           <FollowUpCalendar
