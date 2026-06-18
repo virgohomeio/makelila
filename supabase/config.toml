@@ -445,6 +445,14 @@ verify_jwt = false
 [functions.sync-calendly-events]
 verify_jwt = false
 
+# sync-google-calendar-diagnosis: cron-only (CRON_SHARED_SECRET via shared
+# authenticate()). Reads Huayi's Google Calendar for "LILA Diagnosis Chat"
+# events and upserts them as diagnosis_call service_tickets. Uses the
+# service-role key + GOOGLE_SERVICE_ACCOUNT_KEY, so caller identity isn't
+# needed for correctness.
+[functions.sync-google-calendar-diagnosis]
+verify_jwt = false
+
 # sync-hubspot-tickets: same ES256 gateway workaround. Function uses the
 # service-role key internally and HUBSPOT_ACCESS_TOKEN for outbound calls,
 # so caller identity isn't needed for correctness.
