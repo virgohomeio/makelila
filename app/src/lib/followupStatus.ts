@@ -72,3 +72,37 @@ export function computeCustomerStatuses(
 
   return s;
 }
+
+/** A row (ticket/order/return) that may attribute to a customer. */
+export type Matchable = {
+  customer_id?: string | null;
+  customer_email?: string | null;
+  customer_name?: string | null;
+};
+
+/** Candidate keys for matching a row to a customer, in precedence order:
+ *  customer_id, then lowercased email, then lowercased name. */
+export function matchKeysFor(m: Matchable): string[] {
+  const keys: string[] = [];
+  if (m.customer_id) keys.push(`id:${m.customer_id}`);
+  if (m.customer_email) keys.push(`email:${m.customer_email.toLowerCase().trim()}`);
+  if (m.customer_name) keys.push(`name:${m.customer_name.toLowerCase().trim()}`);
+  return keys;
+}
+
+/** Build a Map from every match-key of a customer to that customer id. */
+export function buildCustomerKeyIndex(customers: Customer[]): Map<string, string> {
+  const idx = new Map<string, string>();
+  for (const c of customers) {
+    idx.set(`id:${c.id}`, c.id);
+    if (c.email) idx.set(`email:${c.email.toLowerCase().trim()}`, c.id);
+    if (c.full_name) idx.set(`name:${c.full_name.toLowerCase().trim()}`, c.id);
+  }
+  return idx;
+}
+
+/** Resolve a matchable row to a customer id using key precedence, or null. */
+export function resolveCustomerId(m: Matchable, idx: Map<string, string>): string | null {
+  for (const k of matchKeysFor(m)) { const id = idx.get(k); if (id) return id; }
+  return null;
+}

@@ -80,3 +80,15 @@ describe('computeCustomerStatuses', () => {
     ]);
   });
 });
+
+import { matchKeysFor, type Matchable } from './followupStatus';
+
+describe('matchKeysFor', () => {
+  it('emits id, lowercased email, and lowercased name keys', () => {
+    const m: Matchable = { customer_id: 'abc', customer_email: 'A@B.com', customer_name: 'Jane Doe' };
+    expect(matchKeysFor(m)).toEqual(['id:abc', 'email:a@b.com', 'name:jane doe']);
+  });
+  it('skips missing fields', () => {
+    expect(matchKeysFor({ customer_id: null, customer_email: null, customer_name: 'X' })).toEqual(['name:x']);
+  });
+});
