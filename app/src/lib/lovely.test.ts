@@ -18,7 +18,7 @@ vi.mock('./supabaseTelemetry', () => ({
 
 vi.stubGlobal('fetch', fetchMock);
 
-import { useLovelyUsers } from './lovely';
+import { useLovelyUsers, onboardingFunnel, approveLovelyUser, type LovelyUser } from './lovely';
 
 function okResponse(body: unknown) {
   return { ok: true, status: 200, text: () => Promise.resolve(JSON.stringify(body)) };
@@ -82,5 +82,47 @@ describe('useLovelyUsers', () => {
     expect(result.current.error).toBe('Not signed in.');
     expect(fetchMock).not.toHaveBeenCalled();
     expect(result.current.users).toHaveLength(0);
+  });
+});
+
+describe('onboardingFunnel', () => {
+  const mk = (step: string | null): LovelyUser => ({
+    id: step ?? 'x', email: 'a@x.com', first_name: null, last_name: null,
+    serial_number: null, onboarding_step: step, is_verified: true, verified_at: null,
+    mailing_list: null, last_login_at: null, login_count: null, created_at: null, updated_at: null,
+  });
+
+  it('returns canonical steps in order with counts and percentages', () => {
+    const rows = onboardingFunnel([mk('tour_done'), mk('tour_done'), mk('pairing'), mk('hardware_done')]);
+    expect(rows.slice(0, 2).map(r => r.code)).toEqual(['pairing', 'welcome_done']);
+    const tour = rows.find(r => r.code === 'tour_done')!;
+    expect(tour.count).toBe(2);
+    expect(tour.pct).toBe(50);
+    expect(rows.find(r => r.code === 'pairing')!.count).toBe(1);
+  });
+
+  it('appends unknown step codes after the canonical ones', () => {
+    const rows = onboardingFunnel([mk('mystery_step')]);
+    expect(rows[rows.length - 1]).toMatchObject({ code: 'mystery_step', count: 1 });
+  });
+});
+
+describe('approveLovelyUser', () => {
+  it('POSTs user_id with the operator token and resolves on 2xx', async () => {
+    fetchMock.mockResolvedValue(okResponse({ user: {} }));
+    await approveLovelyUser('u-1');
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://lovely.supabase.co/functions/v1/lovely-verify-user',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({ apikey: 'lovely-anon', Authorization: 'Bearer tok' }),
+        body: JSON.stringify({ user_id: 'u-1' }),
+      }),
+    );
+  });
+
+  it('throws the function error body on a non-2xx response', async () => {
+    fetchMock.mockResolvedValue(errResponse(403, { error: 'Forbidden — leadership only' }));
+    await expect(approveLovelyUser('u-1')).rejects.toThrow(/Forbidden/);
   });
 });

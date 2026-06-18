@@ -73,3 +73,71 @@ export function useLovelyUsers() {
 
   return { users, loading, error, configured: isTelemetryConfigured, refetch };
 }
+
+// ── Onboarding funnel ───────────────────────────────────────────────────────
+// Canonical onboarding order, mirrored from the Lovely app
+// (app/onboarding/page.tsx + app/api/onboarding/route.ts). 'pairing' is the
+// initial DB default (just signed up); 'tour_done' = fully onboarded.
+export const ONBOARDING_STEPS: { code: string; label: string }[] = [
+  { code: 'pairing',          label: 'Signed up' },
+  { code: 'welcome_done',     label: 'Welcome' },
+  { code: 'quiz_done',        label: 'Preference quiz' },
+  { code: 'customizing_done', label: 'Customizing' },
+  { code: 'checklist_done',   label: 'Unboxing checklist' },
+  { code: 'hardware_done',    label: 'Hardware walkthrough' },
+  { code: 'pairing_done',     label: 'Paired device' },
+  { code: 'tour_done',        label: 'Completed' },
+];
+
+export type FunnelRow = { code: string; label: string; count: number; pct: number };
+
+// Counts users per onboarding_step, returned in canonical order with % of total.
+// Unknown step codes are appended after the canonical ones.
+export function onboardingFunnel(users: LovelyUser[]): FunnelRow[] {
+  const total = users.length;
+  const counts = new Map<string, number>();
+  for (const u of users) {
+    const k = u.onboarding_step || '(none)';
+    counts.set(k, (counts.get(k) ?? 0) + 1);
+  }
+  const pct = (n: number) => (total ? Math.round((n / total) * 100) : 0);
+  const rows: FunnelRow[] = ONBOARDING_STEPS.map(s => {
+    const count = counts.get(s.code) ?? 0;
+    counts.delete(s.code);
+    return { code: s.code, label: s.label, count, pct: pct(count) };
+  });
+  for (const [code, count] of counts) {
+    rows.push({ code, label: code, count, pct: pct(count) });
+  }
+  return rows;
+}
+
+// ── Approve (admin write) ───────────────────────────────────────────────────
+// Calls the lovely-verify-user edge function (leadership-gated server-side).
+// Resolves on success; throws with the function's error body on a non-2xx.
+export async function approveLovelyUser(userId: string): Promise<void> {
+  if (!isTelemetryConfigured || !TELEMETRY_URL || !TELEMETRY_ANON_KEY) {
+    throw new Error('Lovely telemetry not configured.');
+  }
+  const { data: { session } } = await supabase.auth.getSession();
+  const token = session?.access_token;
+  if (!token) throw new Error('Not signed in.');
+  const res = await fetch(`${TELEMETRY_URL}/functions/v1/lovely-verify-user`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      apikey: TELEMETRY_ANON_KEY,
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ user_id: userId }),
+  });
+  const text = await res.text();
+  if (!res.ok) {
+    let detail = text;
+    try {
+      const parsed = JSON.parse(text) as { error?: string };
+      if (parsed.error) detail = parsed.error;
+    } catch { /* keep raw */ }
+    throw new Error(`Approve failed (${res.status}): ${detail}`);
+  }
+}

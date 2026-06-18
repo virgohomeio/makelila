@@ -62,3 +62,10 @@ export function canView(role: Role | null | undefined, module: Module): boolean 
   // (the @virgohome.io domain check in auth.tsx is the outer gate).
   return true;
 }
+
+// Leadership tier = the de-facto admins today (finance) plus the future admin
+// role. Used to gate admin-only surfaces (e.g. the Lovely verification queue +
+// onboarding funnel) without needing a dedicated restricted-module flag.
+export function isLeadership(role: Role | null | undefined): boolean {
+  return role === 'finance' || role === 'admin';
+}
