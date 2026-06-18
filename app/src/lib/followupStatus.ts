@@ -1,5 +1,8 @@
-import { computeFuState, FU1_DAYS, FU2_DAYS, type Customer } from './customers';
-import type { ServiceTicket } from './service';
+import { useEffect, useMemo, useState } from 'react';
+import { supabase } from './supabase';
+import { useCustomers, computeFuState, FU1_DAYS, FU2_DAYS, type FuState, type Customer } from './customers';
+import { useServiceTickets, type ServiceTicket } from './service';
+import { useQueuedReplacements } from './orders';
 
 export type FollowUpStatusKey =
   | 'overdue' | 'due_today' | 'due_7d'
@@ -105,4 +108,92 @@ export function buildCustomerKeyIndex(customers: Customer[]): Map<string, string
 export function resolveCustomerId(m: Matchable, idx: Map<string, string>): string | null {
   for (const k of matchKeysFor(m)) { const id = idx.get(k); if (id) return id; }
   return null;
+}
+
+export type DirectoryRow = {
+  customer: Customer;
+  statuses: Set<FollowUpStatusKey>;
+  fuState: FuState;
+};
+
+export function useFollowUpDirectory(today: Date = new Date()): {
+  rows: DirectoryRow[];
+  counts: Record<FollowUpStatusKey, number>;
+  overdueCount: number;
+  loading: boolean;
+} {
+  const { customers, loading: lc } = useCustomers();
+  const { tickets, loading: lt } = useServiceTickets();
+  const { replacements, loading: lr } = useQueuedReplacements();
+  const [returnedKeys, setReturnedKeys] = useState<Set<string>>(new Set());
+  const [awaitingOnboardingIds, setAwaitingOnboardingIds] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const [{ data: refunds }, { data: lifecycle }] = await Promise.all([
+        supabase.from('refund_approvals')
+          .select('status, returns(customer_email, customer_name)')
+          .eq('status', 'refunded'),
+        supabase.from('customer_lifecycle')
+          .select('customer_id, onboarding_status'),
+      ]);
+      if (cancelled) return;
+      const rk = new Set<string>();
+      for (const r of (refunds ?? []) as Array<{ returns: Array<{ customer_email: string | null; customer_name: string | null }> | { customer_email: string | null; customer_name: string | null } | null }>) {
+        const rets = Array.isArray(r.returns) ? r.returns : r.returns ? [r.returns] : [];
+        for (const ret of rets) {
+          if (ret?.customer_email) rk.add(`email:${ret.customer_email.toLowerCase().trim()}`);
+          if (ret?.customer_name) rk.add(`name:${ret.customer_name.toLowerCase().trim()}`);
+        }
+      }
+      setReturnedKeys(rk);
+      const ao = new Set<string>();
+      for (const l of (lifecycle ?? []) as Array<{ customer_id: string | null; onboarding_status: string }>) {
+        if (l.customer_id && l.onboarding_status !== 'completed') ao.add(l.customer_id);
+      }
+      setAwaitingOnboardingIds(ao);
+    })().catch(() => { /* best-effort; leave sets empty */ });
+    return () => { cancelled = true; };
+  }, []);
+
+  return useMemo(() => {
+    const idx = buildCustomerKeyIndex(customers);
+    const ticketsByCustomer = new Map<string, Pick<ServiceTicket, 'status' | 'category'>[]>();
+    for (const t of tickets) {
+      if (t.status === 'closed') continue;
+      const cid = resolveCustomerId(t, idx);
+      if (!cid) continue;
+      const arr = ticketsByCustomer.get(cid);
+      if (arr) arr.push(t); else ticketsByCustomer.set(cid, [t]);
+    }
+    const queuedIds = new Set<string>();
+    for (const o of replacements) {
+      const cid = resolveCustomerId(o as unknown as Matchable, idx);
+      if (cid) queuedIds.add(cid);
+    }
+    const returnedIds = new Set<string>();
+    for (const c of customers) {
+      if (returnedKeys.has(`email:${(c.email ?? '').toLowerCase().trim()}`)
+        || returnedKeys.has(`name:${(c.full_name ?? '').toLowerCase().trim()}`)) returnedIds.add(c.id);
+    }
+
+    const counts = Object.fromEntries(STATUS_FILTERS.map(f => [f.key, 0])) as Record<FollowUpStatusKey, number>;
+    const rows: DirectoryRow[] = customers.map(c => {
+      const ctx: CustomerStatusContext = {
+        openTickets: ticketsByCustomer.get(c.id) ?? [],
+        queuedReplacement: queuedIds.has(c.id),
+        returned: returnedIds.has(c.id),
+        awaitingOnboarding: awaitingOnboardingIds.has(c.id),
+      };
+      const statuses = computeCustomerStatuses(c, ctx, today);
+      for (const k of statuses) counts[k] += 1;
+      return { customer: c, statuses, fuState: computeFuState(c, today) };
+    });
+    rows.sort((a, b) =>
+      Number(b.statuses.has('overdue')) - Number(a.statuses.has('overdue'))
+      || a.customer.full_name.localeCompare(b.customer.full_name));
+
+    return { rows, counts, overdueCount: counts.overdue, loading: lc || lt || lr };
+  }, [customers, tickets, replacements, returnedKeys, awaitingOnboardingIds, today, lc, lt, lr]);
 }
