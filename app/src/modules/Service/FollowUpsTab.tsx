@@ -1,10 +1,13 @@
 import { useMemo, useState } from 'react';
 import {
-  useCustomers, computeFuState, recordFollowUp, FU1_DAYS, FU2_DAYS,
+  useCustomers, computeFuState, recordFollowUp, setReviewStatus, FU1_DAYS, FU2_DAYS,
   type Customer, type FuState,
 } from '../../lib/customers';
 import { useServiceTickets } from '../../lib/service';
+import { useFollowUpDirectory } from '../../lib/followupStatus';
 import { TicketDetailPanel } from './TicketDetailPanel';
+import { FollowUpDirectory } from './FollowUpDirectory';
+import { useIsMobile } from '../../lib/useMediaQuery';
 import styles from './FollowUps.module.css';
 
 const WEEK_DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -13,7 +16,7 @@ const WEEK_DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 // per-customer from onboard_date) and onboarding calls (from onboarding tickets
 // with a booked Calendly time). Clicking a call opens its ticket.
 type FuEvent = { type: 'fu'; customer: Customer; kind: 'fu1' | 'fu2'; dueDate: Date; state: FuState };
-type CallEvent = { type: 'call'; label: string; time: string; ticketId: string };
+type CallEvent = { type: 'call'; callKind: 'onboarding' | 'diagnosis'; label: string; time: string; ticketId: string };
 type CalEvent = FuEvent | CallEvent;
 
 function dayKey(d: Date): string {
@@ -49,10 +52,19 @@ function FollowUpCalendar({
     for (const t of tickets) {
       if (t.category === 'onboarding' && t.calendly_event_start) {
         add(t.calendly_event_start.slice(0, 10), {
-          type: 'call',
+          type: 'call', callKind: 'onboarding',
           label: t.customer_name ?? t.subject,
           time: t.calendly_event_start,
           ticketId: t.id,
+        });
+      }
+    }
+    // Diagnosis calls — from diagnosis_call tickets with a booked time.
+    for (const t of tickets) {
+      if (t.category === 'diagnosis_call' && t.calendly_event_start) {
+        add(t.calendly_event_start.slice(0, 10), {
+          type: 'call', callKind: 'diagnosis',
+          label: t.customer_name ?? t.subject, time: t.calendly_event_start, ticketId: t.id,
         });
       }
     }
@@ -99,6 +111,9 @@ function FollowUpCalendar({
           <span className={`${styles.calDot} ${styles.calDotCall}`} /> Onboarding call
         </span>
         <span className={styles.calLegendItem}>
+          <span className={`${styles.calDot} ${styles.calDotDiagnosis}`} /> Diagnosis call
+        </span>
+        <span className={styles.calLegendItem}>
           <span className={`${styles.calDot} ${styles.calDotFu1}`} /> FU1 — 2-week check-in
         </span>
         <span className={styles.calLegendItem}>
@@ -131,13 +146,10 @@ function FollowUpCalendar({
               {events.map((ev, i) => {
                 if (ev.type === 'call') {
                   return (
-                    <button
-                      key={`c${i}`}
-                      onClick={() => onCallClick(ev.ticketId)}
-                      className={`${styles.calEvent} ${styles.calEventCall}`}
-                      title={`Onboarding call — ${ev.label} · ${new Date(ev.time).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`}
-                    >
-                      🚀 {ev.label}
+                    <button key={`c${i}`} onClick={() => onCallClick(ev.ticketId)}
+                      className={`${styles.calEvent} ${ev.callKind === 'diagnosis' ? styles.calEventDiagnosis : styles.calEventCall}`}
+                      title={`${ev.callKind === 'diagnosis' ? 'Diagnosis call' : 'Onboarding call'} — ${ev.label} · ${new Date(ev.time).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`}>
+                      {ev.callKind === 'diagnosis' ? '🩺' : '🚀'} {ev.label}
                     </button>
                   );
                 }
@@ -170,6 +182,8 @@ export function FollowUpsTab() {
   const { customers } = useCustomers();
   const { tickets } = useServiceTickets();
   const today = useMemo(() => new Date(), []);
+  const { rows, counts, overdueCount } = useFollowUpDirectory(today);
+  const isMobile = useIsMobile();
   const [calendarMonth, setCalendarMonth] = useState<Date>(() => {
     const d = new Date(); d.setDate(1); d.setHours(0, 0, 0, 0); return d;
   });
@@ -202,17 +216,25 @@ export function FollowUpsTab() {
 
   return (
     <div className={styles.wrap}>
-      <FollowUpCalendar
-        month={calendarMonth}
-        today={today}
-        customers={scheduledCustomers}
-        tickets={tickets}
-        onPrev={() => setCalendarMonth(d => { const n = new Date(d); n.setMonth(n.getMonth() - 1); return n; })}
-        onNext={() => setCalendarMonth(d => { const n = new Date(d); n.setMonth(n.getMonth() + 1); return n; })}
-        onToday={() => setCalendarMonth(() => { const n = new Date(); n.setDate(1); n.setHours(0, 0, 0, 0); return n; })}
-        onCustomerClick={(id, kind) => setSelected({ customerId: id, kind })}
-        onCallClick={(ticketId) => setOpenTicketId(ticketId)}
-      />
+      <div className={isMobile ? styles.layoutStack : styles.layoutSplit}>
+        <div className={styles.calCol}>
+          <FollowUpCalendar
+            month={calendarMonth}
+            today={today}
+            customers={scheduledCustomers}
+            tickets={tickets}
+            onPrev={() => setCalendarMonth(d => { const n = new Date(d); n.setMonth(n.getMonth() - 1); return n; })}
+            onNext={() => setCalendarMonth(d => { const n = new Date(d); n.setMonth(n.getMonth() + 1); return n; })}
+            onToday={() => setCalendarMonth(() => { const n = new Date(); n.setDate(1); n.setHours(0, 0, 0, 0); return n; })}
+            onCustomerClick={(id, kind) => setSelected({ customerId: id, kind })}
+            onCallClick={(ticketId) => setOpenTicketId(ticketId)}
+          />
+        </div>
+        <FollowUpDirectory
+          rows={rows} counts={counts} overdueCount={overdueCount}
+          onSelect={(id) => setSelected({ customerId: id, kind: 'fu1' })}
+        />
+      </div>
       {selectedCustomer && selected && (
         <div className={styles.selectedPanel}>
           <div className={styles.selectedHeader}>
@@ -235,6 +257,14 @@ export function FollowUpsTab() {
             <button className={styles.actionBtn} disabled={busy} onClick={() => void handleAction('called')}>Called</button>
             <button className={styles.actionBtn} disabled={busy} onClick={() => void handleAction('messaged')}>Messaged</button>
             <button className={styles.actionBtn} disabled={busy} onClick={() => void handleAction('reviewed')}>Reviewed</button>
+            <button className={styles.actionBtn} disabled={busy}
+              onClick={() => void (async () => { setBusy(true); try { await setReviewStatus(selectedCustomer.id, 'requested'); } finally { setBusy(false); } })()}>
+              Mark review requested
+            </button>
+            <button className={styles.actionBtn} disabled={busy}
+              onClick={() => void (async () => { setBusy(true); try { await setReviewStatus(selectedCustomer.id, 'received'); } finally { setBusy(false); } })()}>
+              Mark review received
+            </button>
           </div>
         </div>
       )}
