@@ -9,7 +9,7 @@ import {
   ISSUE_AREAS, ISSUE_AREA_LABEL,
   updateTicketStatus, assignTicketOwner, setTicketPriority, setTicketIssueArea, setTicketCategory,
   setRepairFields, reclassifyTicket, deleteTicket, updateTicketSubject, setTicketDescription,
-  markDiagnosisLinkSent, setLinearIssueUrl, setGitHubIssueUrl,
+  markDiagnosisLinkSent, markDiagnosisFollowupDone, setLinearIssueUrl, setGitHubIssueUrl,
   useCustomerLifecycle, warrantyState,
   useTicketMessages, useClassificationLog,
   autoTicketDescription,
@@ -329,6 +329,24 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
             >
               Send diagnosis link
             </button>
+          )}
+          {/* Diagnosis follow-up — due 14 days after the diagnosis call. */}
+          {ticket.category === 'diagnosis_call' && ticket.calendly_event_start && (
+            ticket.diagnosis_followup_done_at ? (
+              <span className={styles.replacementLink} title={ticket.diagnosis_followup_done_at}>
+                Diagnosis follow-up done {new Date(ticket.diagnosis_followup_done_at).toLocaleDateString()}
+              </span>
+            ) : (
+              <button
+                type="button"
+                className={styles.replacementBtn}
+                disabled={busy}
+                title={`Diagnosis follow-up due ${new Date(new Date(ticket.calendly_event_start).getTime() + 14 * 86_400_000).toLocaleDateString()}`}
+                onClick={() => { setBusy(true); void markDiagnosisFollowupDone(ticket.id).finally(() => setBusy(false)); }}
+              >
+                Mark diagnosis follow-up done
+              </button>
+            )
           )}
           {/* Feature 3 — engineering issue linking */}
           {ticket.linear_issue_url ? (
