@@ -184,3 +184,26 @@
 }
 .actionBtn:hover { background: var(--color-crimson); color: #fff; border-color: var(--color-crimson); }
 .actionBtn:disabled { opacity: 0.5; cursor: default; }
+
+/* ── Directory sidebar ── */
+.directory { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.dirOverdue { font-weight: 700; padding: 10px 12px; border-radius: 8px; background: #f7fafc; color: #2d3748; }
+.dirOverdue[data-warn='true'] { background: #fff5f5; color: #9b2c2c; }
+.dirChips { display: flex; flex-wrap: wrap; gap: 6px; }
+.dirChip { font-size: 12px; padding: 4px 10px; border: 1px solid #e2e8f0; border-radius: 999px; background: #fff; cursor: pointer; color: #4a5568; }
+.dirChipActive { background: #2b6cb0; color: #fff; border-color: #2b6cb0; }
+.dirChipCount { opacity: 0.7; margin-left: 4px; }
+.dirList { display: flex; flex-direction: column; gap: 8px; max-height: 70vh; overflow-y: auto; }
+.dirEmpty { color: #718096; font-size: 13px; padding: 16px; text-align: center; }
+.dirRow { text-align: left; background: #fff; border: 1px solid #edf2f7; border-radius: 8px; padding: 10px 12px; cursor: pointer; }
+.dirRow:hover { border-color: #cbd5e0; }
+.dirRowName { font-weight: 600; color: #2d3748; }
+.dirRowMeta { display: flex; gap: 10px; font-size: 11px; color: #718096; margin: 2px 0 6px; flex-wrap: wrap; }
+.dirTags { display: flex; flex-wrap: wrap; gap: 4px; }
+.dirTag { font-size: 10px; padding: 2px 6px; border-radius: 4px; background: #edf2f7; color: #4a5568; }
+.dirFuState { font-size: 10px; padding: 2px 6px; border-radius: 4px; }
+
+/* ── Layout (split / stack) ── */
+.layoutSplit { display: grid; grid-template-columns: minmax(0, 3fr) minmax(280px, 2fr); gap: 16px; align-items: start; }
+.layoutStack { display: flex; flex-direction: column; gap: 16px; }
+.calCol { min-width: 0; }
