@@ -5,7 +5,7 @@ import { useServiceTickets, type ServiceTicket } from './service';
 import { useQueuedReplacements } from './orders';
 
 export type FollowUpStatusKey =
-  | 'overdue' | 'due_today' | 'due_7d' | 'fu_on_hold'
+  | 'overdue' | 'due_today' | 'due_7d' | 'fu_on_hold' | 'diag_followup_due'
   | 'in_followup' | 'awaiting_onboarding' | 'awaiting_response'
   | 'awaiting_diagnosis' | 'queued_replacement' | 'on_hold'
   | 'awaiting_review' | 'active' | 'returned';
@@ -15,6 +15,7 @@ export const STATUS_FILTERS: { key: FollowUpStatusKey; label: string }[] = [
   { key: 'due_today',           label: 'Due today' },
   { key: 'due_7d',              label: 'Due in 7 days' },
   { key: 'fu_on_hold',          label: 'Follow-up on hold' },
+  { key: 'diag_followup_due',   label: 'Diagnosis follow-up due' },
   { key: 'in_followup',         label: 'In follow-up' },
   { key: 'awaiting_onboarding', label: 'Awaiting onboarding' },
   { key: 'awaiting_response',   label: 'Awaiting response' },
@@ -31,6 +32,7 @@ export type CustomerStatusContext = {
   queuedReplacement: boolean;
   returned: boolean;
   awaitingOnboarding: boolean;
+  diagnosisCalls: { startIso: string | null; followupDoneAt: string | null }[];
 };
 
 /** Days until the customer's next still-pending follow-up, or null if none
@@ -53,17 +55,32 @@ export function computeCustomerStatuses(
   const s = new Set<FollowUpStatusKey>();
   const fu = computeFuState(c, today);
 
-  // A pending follow-up is put ON HOLD while the customer has an unresolved
-  // issue — a queued replacement or an open support/repair/diagnosis ticket.
-  // Onboarding-call tickets don't block. Resumes automatically once resolved.
-  const BLOCKING_TICKET_CATEGORIES = ['support', 'repair', 'diagnosis_call'];
+  // A diagnosis call (had or scheduled) SUPERSEDES the normal cadence: hold
+  // FU1/FU2 and run a dedicated diagnosis follow-up due 14 days after the call.
+  // Once that follow-up is stamped done the customer is resolved (no resume).
+  const DIAG_FOLLOWUP_DAYS = 14;
+  const activeDiag = ctx.diagnosisCalls.filter(d => d.startIso && !d.followupDoneAt);
+  const hasAnyDiag = ctx.diagnosisCalls.length > 0;
+  const midToday = new Date(today); midToday.setHours(0, 0, 0, 0);
+  const latestActiveStart = activeDiag.map(d => d.startIso as string).sort().at(-1);
+  const diagDue = latestActiveStart != null
+    && midToday.getTime() >= new Date(latestActiveStart).getTime() + DIAG_FOLLOWUP_DAYS * 86_400_000;
+
+  // Otherwise, a pending follow-up is put ON HOLD while the customer has an
+  // unresolved issue — a queued replacement or an open support/repair ticket.
+  const BLOCKING_TICKET_CATEGORIES = ['support', 'repair'];
   const blockingCondition =
     ctx.queuedReplacement
     || ctx.openTickets.some(t => BLOCKING_TICKET_CATEGORIES.includes(t.category as string));
   const pendingFu = !!c.onboard_date && fu !== 'complete' && fu !== 'unscheduled';
-  const fuBlocked = pendingFu && blockingCondition;
 
-  if (fuBlocked) {
+  if (hasAnyDiag) {
+    if (activeDiag.length > 0) {
+      if (diagDue) s.add('diag_followup_due');
+      else s.add('fu_on_hold');
+    }
+    // all diagnosis follow-ups done → resolved: normal cadence stays suppressed
+  } else if (pendingFu && blockingCondition) {
     s.add('fu_on_hold');
   } else {
     if (fu === 'overdue_fu1' || fu === 'overdue_fu2') s.add('overdue');
@@ -181,6 +198,16 @@ export function useFollowUpDirectory(today: Date = new Date()): {
       const arr = ticketsByCustomer.get(cid);
       if (arr) arr.push(t); else ticketsByCustomer.set(cid, [t]);
     }
+    // All diagnosis-call tickets (any status — diagnosis history matters), per customer.
+    const diagnosisCallsByCustomer = new Map<string, { startIso: string | null; followupDoneAt: string | null }[]>();
+    for (const t of tickets) {
+      if (t.category !== 'diagnosis_call') continue;
+      const cid = resolveCustomerId(t, idx);
+      if (!cid) continue;
+      const entry = { startIso: t.calendly_event_start, followupDoneAt: t.diagnosis_followup_done_at };
+      const arr = diagnosisCallsByCustomer.get(cid);
+      if (arr) arr.push(entry); else diagnosisCallsByCustomer.set(cid, [entry]);
+    }
     const queuedIds = new Set<string>();
     for (const o of replacements) {
       const cid = resolveCustomerId(o as unknown as Matchable, idx);
@@ -199,6 +226,7 @@ export function useFollowUpDirectory(today: Date = new Date()): {
         queuedReplacement: queuedIds.has(c.id),
         returned: returnedIds.has(c.id),
         awaitingOnboarding: awaitingOnboardingIds.has(c.id),
+        diagnosisCalls: diagnosisCallsByCustomer.get(c.id) ?? [],
       };
       const statuses = computeCustomerStatuses(c, ctx, today);
       for (const k of statuses) counts[k] += 1;
