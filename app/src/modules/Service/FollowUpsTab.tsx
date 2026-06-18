@@ -1,10 +1,13 @@
 import { useMemo, useState } from 'react';
 import {
-  useCustomers, computeFuState, recordFollowUp, FU1_DAYS, FU2_DAYS,
+  useCustomers, computeFuState, recordFollowUp, setReviewStatus, FU1_DAYS, FU2_DAYS,
   type Customer, type FuState,
 } from '../../lib/customers';
 import { useServiceTickets } from '../../lib/service';
+import { useFollowUpDirectory } from '../../lib/followupStatus';
 import { TicketDetailPanel } from './TicketDetailPanel';
+import { FollowUpDirectory } from './FollowUpDirectory';
+import { useIsMobile } from '../../lib/useMediaQuery';
 import styles from './FollowUps.module.css';
 
 const WEEK_DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -170,6 +173,8 @@ export function FollowUpsTab() {
   const { customers } = useCustomers();
   const { tickets } = useServiceTickets();
   const today = useMemo(() => new Date(), []);
+  const { rows, counts, overdueCount } = useFollowUpDirectory(today);
+  const isMobile = useIsMobile();
   const [calendarMonth, setCalendarMonth] = useState<Date>(() => {
     const d = new Date(); d.setDate(1); d.setHours(0, 0, 0, 0); return d;
   });
@@ -202,17 +207,25 @@ export function FollowUpsTab() {
 
   return (
     <div className={styles.wrap}>
-      <FollowUpCalendar
-        month={calendarMonth}
-        today={today}
-        customers={scheduledCustomers}
-        tickets={tickets}
-        onPrev={() => setCalendarMonth(d => { const n = new Date(d); n.setMonth(n.getMonth() - 1); return n; })}
-        onNext={() => setCalendarMonth(d => { const n = new Date(d); n.setMonth(n.getMonth() + 1); return n; })}
-        onToday={() => setCalendarMonth(() => { const n = new Date(); n.setDate(1); n.setHours(0, 0, 0, 0); return n; })}
-        onCustomerClick={(id, kind) => setSelected({ customerId: id, kind })}
-        onCallClick={(ticketId) => setOpenTicketId(ticketId)}
-      />
+      <div className={isMobile ? styles.layoutStack : styles.layoutSplit}>
+        <div className={styles.calCol}>
+          <FollowUpCalendar
+            month={calendarMonth}
+            today={today}
+            customers={scheduledCustomers}
+            tickets={tickets}
+            onPrev={() => setCalendarMonth(d => { const n = new Date(d); n.setMonth(n.getMonth() - 1); return n; })}
+            onNext={() => setCalendarMonth(d => { const n = new Date(d); n.setMonth(n.getMonth() + 1); return n; })}
+            onToday={() => setCalendarMonth(() => { const n = new Date(); n.setDate(1); n.setHours(0, 0, 0, 0); return n; })}
+            onCustomerClick={(id, kind) => setSelected({ customerId: id, kind })}
+            onCallClick={(ticketId) => setOpenTicketId(ticketId)}
+          />
+        </div>
+        <FollowUpDirectory
+          rows={rows} counts={counts} overdueCount={overdueCount}
+          onSelect={(id) => setSelected({ customerId: id, kind: 'fu1' })}
+        />
+      </div>
       {selectedCustomer && selected && (
         <div className={styles.selectedPanel}>
           <div className={styles.selectedHeader}>
@@ -235,6 +248,14 @@ export function FollowUpsTab() {
             <button className={styles.actionBtn} disabled={busy} onClick={() => void handleAction('called')}>Called</button>
             <button className={styles.actionBtn} disabled={busy} onClick={() => void handleAction('messaged')}>Messaged</button>
             <button className={styles.actionBtn} disabled={busy} onClick={() => void handleAction('reviewed')}>Reviewed</button>
+            <button className={styles.actionBtn} disabled={busy}
+              onClick={() => void (async () => { setBusy(true); try { await setReviewStatus(selectedCustomer.id, 'requested'); } finally { setBusy(false); } })()}>
+              Mark review requested
+            </button>
+            <button className={styles.actionBtn} disabled={busy}
+              onClick={() => void (async () => { setBusy(true); try { await setReviewStatus(selectedCustomer.id, 'received'); } finally { setBusy(false); } })()}>
+              Mark review received
+            </button>
           </div>
         </div>
       )}
