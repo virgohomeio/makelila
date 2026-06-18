@@ -18,7 +18,10 @@ vi.mock('./supabaseTelemetry', () => ({
 
 vi.stubGlobal('fetch', fetchMock);
 
-import { useLovelyUsers, onboardingFunnel, approveLovelyUser, type LovelyUser } from './lovely';
+import {
+  useLovelyUsers, onboardingFunnel, approveLovelyUser, upsertLovelyOta, liveOtaId,
+  type LovelyUser, type LovelyOtaUpdate,
+} from './lovely';
 
 function okResponse(body: unknown) {
   return { ok: true, status: 200, text: () => Promise.resolve(JSON.stringify(body)) };
@@ -124,5 +127,42 @@ describe('approveLovelyUser', () => {
   it('throws the function error body on a non-2xx response', async () => {
     fetchMock.mockResolvedValue(errResponse(403, { error: 'Forbidden — leadership only' }));
     await expect(approveLovelyUser('u-1')).rejects.toThrow(/Forbidden/);
+  });
+});
+
+describe('liveOtaId', () => {
+  const mk = (id: string, is_active: boolean, created_at: string): LovelyOtaUpdate => ({
+    id, version: id, description: null, release_notes: null, is_active, created_at, updated_at: null,
+  });
+
+  it('returns the newest active update id, or null when none active', () => {
+    expect(liveOtaId([])).toBeNull();
+    expect(liveOtaId([mk('a', false, '2026-01-01T00:00:00Z')])).toBeNull();
+    expect(liveOtaId([
+      mk('old', true, '2026-01-01T00:00:00Z'),
+      mk('new', true, '2026-02-01T00:00:00Z'),
+      mk('draft', false, '2026-03-01T00:00:00Z'),
+    ])).toBe('new');
+  });
+});
+
+describe('upsertLovelyOta', () => {
+  it('POSTs an upsert action with the input and returns the update', async () => {
+    fetchMock.mockResolvedValue(okResponse({ update: { id: 'o1', version: '1.2.3' } }));
+    const out = await upsertLovelyOta({ version: '1.2.3', is_active: false });
+    expect(out).toMatchObject({ id: 'o1', version: '1.2.3' });
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://lovely.supabase.co/functions/v1/lovely-ota',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({ apikey: 'lovely-anon', Authorization: 'Bearer tok' }),
+        body: JSON.stringify({ action: 'upsert', version: '1.2.3', is_active: false }),
+      }),
+    );
+  });
+
+  it('throws the function error body on a non-2xx (e.g. duplicate version)', async () => {
+    fetchMock.mockResolvedValue(errResponse(409, { error: 'duplicate key value violates unique constraint' }));
+    await expect(upsertLovelyOta({ version: 'dup' })).rejects.toThrow(/409|duplicate/);
   });
 });

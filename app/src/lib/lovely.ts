@@ -141,3 +141,96 @@ export async function approveLovelyUser(userId: string): Promise<void> {
     throw new Error(`Approve failed (${res.status}): ${detail}`);
   }
 }
+
+// ── OTA / firmware updates (admin) ──────────────────────────────────────────
+// Backed by the lovely-ota edge function (leadership-gated, service role). The
+// admin view needs inactive drafts too, which the public RLS hides — so all
+// reads/writes go through the function.
+export type LovelyOtaUpdate = {
+  id: string;
+  version: string;
+  description: string | null;
+  release_notes: string | null;
+  is_active: boolean | null;
+  created_at: string | null;
+  updated_at: string | null;
+};
+
+export type OtaUpsertInput = {
+  id?: string;
+  version: string;
+  description?: string | null;
+  release_notes?: string | null;
+  is_active?: boolean;
+};
+
+// Shared POST to the lovely-ota function with the operator token + Lovely anon
+// apikey; surfaces the function's JSON error body on a non-2xx.
+async function callLovelyOta(payload: Record<string, unknown>): Promise<unknown> {
+  if (!isTelemetryConfigured || !TELEMETRY_URL || !TELEMETRY_ANON_KEY) {
+    throw new Error('Lovely telemetry not configured.');
+  }
+  const { data: { session } } = await supabase.auth.getSession();
+  const token = session?.access_token;
+  if (!token) throw new Error('Not signed in.');
+  const res = await fetch(`${TELEMETRY_URL}/functions/v1/lovely-ota`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      apikey: TELEMETRY_ANON_KEY,
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(payload),
+  });
+  const text = await res.text();
+  if (!res.ok) {
+    let detail = text;
+    try {
+      const parsed = JSON.parse(text) as { error?: string };
+      if (parsed.error) detail = parsed.error;
+    } catch { /* keep raw */ }
+    throw new Error(`Lovely OTA request failed (${res.status}): ${detail}`);
+  }
+  try { return JSON.parse(text); } catch { return {}; }
+}
+
+export function useLovelyOta() {
+  const [updates, setUpdates] = useState<LovelyOtaUpdate[]>([]);
+  const [loading, setLoading] = useState<boolean>(isTelemetryConfigured);
+  const [error, setError] = useState<string | null>(null);
+
+  const refetch = useCallback(async () => {
+    if (!isTelemetryConfigured) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await callLovelyOta({ action: 'list' });
+      setUpdates(((data as { updates?: LovelyOtaUpdate[] }).updates) ?? []);
+    } catch (e) {
+      setError((e as Error).message);
+      setUpdates([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refetch();
+  }, [refetch]);
+
+  return { updates, loading, error, refetch };
+}
+
+export async function upsertLovelyOta(input: OtaUpsertInput): Promise<LovelyOtaUpdate> {
+  const data = await callLovelyOta({ action: 'upsert', ...input });
+  return (data as { update: LovelyOtaUpdate }).update;
+}
+
+// The update the app currently serves = newest active one (matches the app's
+// ota/check). Returns its id, or null when nothing is active.
+export function liveOtaId(updates: LovelyOtaUpdate[]): string | null {
+  const active = updates
+    .filter(u => u.is_active)
+    .sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? ''));
+  return active[0]?.id ?? null;
+}

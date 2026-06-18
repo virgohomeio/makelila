@@ -5,9 +5,10 @@ import { useLovelyUsers } from '../../lib/lovely';
 import { UsersTab } from './UsersTab';
 import { VerificationTab } from './VerificationTab';
 import { OnboardingTab } from './OnboardingTab';
+import { FirmwareTab } from './FirmwareTab';
 import styles from './Lovely.module.css';
 
-type Tab = 'users' | 'verification' | 'onboarding';
+type Tab = 'users' | 'verification' | 'onboarding' | 'firmware';
 
 export default function Lovely() {
   const { role } = useAuth();
@@ -36,6 +37,7 @@ export default function Lovely() {
       ? ([
           { key: 'verification', label: 'Verification' },
           { key: 'onboarding', label: 'Onboarding' },
+          { key: 'firmware', label: 'Firmware' },
         ] as { key: Tab; label: string }[])
       : []),
   ];
@@ -71,6 +73,7 @@ export default function Lovely() {
       {activeTab === 'onboarding' && admin && (
         <OnboardingTab onGoToVerification={() => setTab('verification')} />
       )}
+      {activeTab === 'firmware' && admin && <FirmwareTab />}
     </div>
   );
 }
