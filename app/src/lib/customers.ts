@@ -21,6 +21,7 @@ export type Customer = {
   fu1_status: string | null;
   fu2_status: string | null;
   fu_notes: string | null;
+  review_status: string | null;
   last_synced_at: string | null;
   // Unit serials from the fulfillment sheet (source of truth). Synced by
   // public.sync_customer_serials_from_fulfillment(); see scripts/import-fulfillment-sheet.mjs.
@@ -157,6 +158,22 @@ export async function recordFollowUp(
   const { error } = await supabase.from('customers').update(patch).eq('id', customerId);
   if (error) throw error;
   await logAction('followup_recorded', customerId, `${kind} = ${status}`);
+}
+
+/** Set the review state used by the Follow-Ups directory "awaiting review"
+ *  filter. Pass 'requested' when a review ask is sent, 'received' when it's in
+ *  hand, or null to clear. */
+export async function setReviewStatus(
+  customerId: string,
+  status: 'requested' | 'received' | null,
+): Promise<void> {
+  const { error } = await supabase
+    .from('customers')
+    .update({ review_status: status })
+    .eq('id', customerId);
+  if (error) throw error;
+  await logAction('review_status_set', customerId, status ?? '(cleared)',
+    { entityType: 'customer', entityId: customerId });
 }
 
 // Backlog #58 — aggregated per-customer profitability sourced from the
