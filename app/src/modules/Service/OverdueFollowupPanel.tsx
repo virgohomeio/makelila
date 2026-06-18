@@ -6,7 +6,7 @@ import {
 import {
   CANNED_SMS_TEMPLATES, CANNED_SMS_OPTIONS, type CannedSmsKey,
 } from '../../lib/cannedSms';
-import styles from './Customers.module.css';
+import styles from './FollowUps.module.css';
 
 type Props = {
   overdueCount: number;

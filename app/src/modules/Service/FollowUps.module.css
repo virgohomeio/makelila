@@ -211,3 +211,133 @@
 
 .calEventDiagnosis { background: #faf5ff; color: #6b46c1; border-left: 3px solid #805ad5; }
 .calDotDiagnosis { background: #805ad5; }
+
+/* ── OverdueFollowupPanel (moved from Customers) ── */
+.followupPanel {
+  margin: 0 0 16px 0;
+  padding: 12px 14px;
+  background: #fffaf0;
+  border: 1px solid #fbd38d;
+  border-radius: 4px;
+}
+.followupHeader {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 13px;
+  color: var(--color-ink, #1a202c);
+}
+.followupHeader select,
+.followupHeader button {
+  padding: 4px 10px;
+  font-size: 12px;
+  border: 1px solid #cbd5e0;
+  border-radius: 4px;
+  background: #fff;
+  cursor: pointer;
+}
+.followupHeader button {
+  background: var(--color-crimson, #c53030);
+  color: #fff;
+  border-color: var(--color-crimson, #c53030);
+  font-weight: 600;
+}
+.followupHeader button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.followupHint {
+  font-size: 11px;
+  color: var(--color-ink-subtle, #718096);
+  margin-left: auto;
+}
+.followupError {
+  margin-top: 6px;
+  padding: 6px 10px;
+  background: #fff5f5;
+  color: #9b2c2c;
+  border: 1px solid #fc8181;
+  border-radius: 4px;
+  font-size: 12px;
+}
+.followupList {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.draftCard {
+  padding: 10px 12px;
+  background: #fff;
+  border: 1px solid var(--color-border, #e2e8f0);
+  border-radius: 4px;
+}
+.draftHeader {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-ink, #1a202c);
+  margin-bottom: 4px;
+}
+.draftContext {
+  font-size: 11px;
+  color: var(--color-ink-subtle, #718096);
+  margin-bottom: 6px;
+  font-style: italic;
+}
+.draftTextarea {
+  width: 100%;
+  padding: 6px 8px;
+  font-size: 12px;
+  font-family: inherit;
+  border: 1px solid #cbd5e0;
+  border-radius: 4px;
+  resize: vertical;
+}
+.draftActions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+.draftActions button {
+  padding: 5px 12px;
+  font-size: 11px;
+  border-radius: 4px;
+  cursor: pointer;
+  border: 1px solid var(--color-border, #cbd5e0);
+  background: #fff;
+}
+.draftPrimary {
+  background: var(--color-crimson, #c53030) !important;
+  color: #fff !important;
+  border-color: var(--color-crimson, #c53030) !important;
+  font-weight: 600;
+}
+.draftActions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.draftSent {
+  font-size: 12px;
+  color: #276749;
+  font-weight: 600;
+}
+.draftSkipped {
+  font-size: 12px;
+  color: var(--color-ink-subtle, #718096);
+  font-style: italic;
+}
+.draftSending {
+  font-size: 12px;
+  color: var(--color-ink-subtle, #718096);
+}
+.draftCannedPicker {
+  margin-left: auto;
+  padding: 4px 6px;
+  font-size: 11px;
+  border-radius: 4px;
+  border: 1px solid var(--color-border, #cbd5e0);
+  background: #fff;
+  color: var(--color-ink-subtle, #4a5568);
+  cursor: pointer;
+}
