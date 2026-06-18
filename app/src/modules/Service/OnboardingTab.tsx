@@ -366,6 +366,10 @@ function ScheduledView({
       <tbody>
         {tickets.map(t => {
           const s = STATUS_META[t.status];
+          // An onboarding call whose date/time has passed reads as completed,
+          // regardless of the raw ticket status (display-only).
+          const callPast = t.calendly_event_start != null
+            && new Date(t.calendly_event_start).getTime() < Date.now();
           const lc = t.unit_serial ? lifecycleBySerial.get(t.unit_serial) : null;
           const c = t.customer_id ? customerById.get(t.customer_id) : null;
           const customerLabel = t.customer_name ?? c?.full_name ?? t.customer_email ?? '—';
@@ -379,7 +383,9 @@ function ScheduledView({
               <td>{customerLabel}</td>
               <td style={{ fontFamily: 'ui-monospace, monospace', fontSize: 10 }}>{t.unit_serial ?? '—'}</td>
               <td>{t.calendly_host_email ?? '—'}</td>
-              <td><span className={styles.pill} style={{ background: s.bg, color: s.color }}>{s.label}</span></td>
+              <td>{callPast
+                ? <span className={styles.pill} style={{ background: '#f0fff4', color: '#276749' }}>Call Completed</span>
+                : <span className={styles.pill} style={{ background: s.bg, color: s.color }}>{s.label}</span>}</td>
               <td>{lc ? <LifecycleActions row={lc} customer={c} /> : <span className={styles.muted}>—</span>}</td>
             </tr>
           );
