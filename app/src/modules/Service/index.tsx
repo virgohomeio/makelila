@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { InboxTab } from './InboxTab';
 import { OnboardingTab } from './OnboardingTab';
 import { SupportTab } from './SupportTab';
@@ -29,7 +29,15 @@ const MOBILE_TAB_META: Record<Tab, { subtitle: string; icon: string; iconBg: str
 };
 
 export default function Service() {
-  const [tab, setTab] = useState<Tab>('onboarding');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const TAB_KEYS: Tab[] = ['inbox', 'onboarding', 'support', 'replacement', 'followups'];
+  const paramTab = searchParams.get('tab');
+  const tab: Tab = (TAB_KEYS as string[]).includes(paramTab ?? '') ? (paramTab as Tab) : 'onboarding';
+  const setTab = (next: Tab) => setSearchParams(prev => { prev.set('tab', next); return prev; }, { replace: true });
+  // Mobile uses null to mean "show the picker"; valid tab key shows content.
+  const mobileActiveKey: Tab | null = (TAB_KEYS as string[]).includes(paramTab ?? '') ? (paramTab as Tab) : null;
+  const setMobileTab = (next: Tab | null) =>
+    setSearchParams(prev => { if (next) { prev.set('tab', next); } else { prev.delete('tab'); } return prev; }, { replace: true });
   const isMobile = useIsMobile();
 
   if (isMobile) {
@@ -46,7 +54,7 @@ export default function Service() {
     }));
     return (
       <div className={styles.layout}>
-        <MobileTabbedModule tabs={mobileTabs} />
+        <MobileTabbedModule tabs={mobileTabs} activeKey={mobileActiveKey} onChange={setMobileTab} />
       </div>
     );
   }
