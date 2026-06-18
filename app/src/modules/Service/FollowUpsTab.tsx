@@ -25,12 +25,13 @@ function dayKey(d: Date): string {
 }
 
 function FollowUpCalendar({
-  month, today, customers, tickets, onPrev, onNext, onToday, onCustomerClick, onCallClick,
+  month, today, customers, tickets, blockedCustomerIds, onPrev, onNext, onToday, onCustomerClick, onCallClick,
 }: {
   month: Date;
   today: Date;
   customers: Customer[];
   tickets: { id: string; category: string; calendly_event_start: string | null; customer_name: string | null; subject: string }[];
+  blockedCustomerIds: Set<string>;
   onPrev: () => void;
   onNext: () => void;
   onToday: () => void;
@@ -73,6 +74,7 @@ function FollowUpCalendar({
     // that hasn't had that follow-up done yet.
     for (const c of customers) {
       if (!c.onboard_date) continue;
+      if (blockedCustomerIds.has(c.id)) continue; // follow-up on hold — skip FU markers
       const onboard = new Date(c.onboard_date + 'T00:00:00');
       const fu1 = new Date(onboard); fu1.setDate(fu1.getDate() + FU1_DAYS);
       const fu2 = new Date(onboard); fu2.setDate(fu2.getDate() + FU2_DAYS);
@@ -86,7 +88,7 @@ function FollowUpCalendar({
       }
     }
     return m;
-  }, [customers, tickets, today, gridStart, gridEnd]);
+  }, [customers, tickets, blockedCustomerIds, today, gridStart, gridEnd]);
 
   const todayKey = dayKey(today);
 
@@ -198,6 +200,13 @@ export function FollowUpsTab() {
     [rows],
   );
 
+  // Customers whose follow-up is on hold (queued replacement / open ticket) —
+  // their FU markers are suppressed on the calendar.
+  const blockedCustomerIds = useMemo(
+    () => new Set(rows.filter(r => r.statuses.has('fu_on_hold')).map(r => r.customer.id)),
+    [rows],
+  );
+
   const isMobile = useIsMobile();
   const [calendarMonth, setCalendarMonth] = useState<Date>(() => {
     const d = new Date(); d.setDate(1); d.setHours(0, 0, 0, 0); return d;
@@ -242,6 +251,7 @@ export function FollowUpsTab() {
             today={today}
             customers={scheduledCustomers}
             tickets={tickets}
+            blockedCustomerIds={blockedCustomerIds}
             onPrev={() => setCalendarMonth(d => { const n = new Date(d); n.setMonth(n.getMonth() - 1); return n; })}
             onNext={() => setCalendarMonth(d => { const n = new Date(d); n.setMonth(n.getMonth() + 1); return n; })}
             onToday={() => setCalendarMonth(() => { const n = new Date(); n.setDate(1); n.setHours(0, 0, 0, 0); return n; })}
