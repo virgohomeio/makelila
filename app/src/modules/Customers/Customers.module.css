@@ -1098,3 +1098,7 @@
   padding: 3px 0;
   border-bottom: 1px dotted #edf2f7;
 }
+
+.followupMoved { font-size: 13px; color: var(--color-ink-subtle); padding: 8px 0; }
+.followupMoved a { color: #2b6cb0; font-weight: 600; text-decoration: none; }
+.followupMoved a:hover { text-decoration: underline; }
