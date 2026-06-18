@@ -16,7 +16,7 @@ const WEEK_DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 // per-customer from onboard_date) and onboarding calls (from onboarding tickets
 // with a booked Calendly time). Clicking a call opens its ticket.
 type FuEvent = { type: 'fu'; customer: Customer; kind: 'fu1' | 'fu2'; dueDate: Date; state: FuState };
-type CallEvent = { type: 'call'; label: string; time: string; ticketId: string };
+type CallEvent = { type: 'call'; callKind: 'onboarding' | 'diagnosis'; label: string; time: string; ticketId: string };
 type CalEvent = FuEvent | CallEvent;
 
 function dayKey(d: Date): string {
@@ -52,10 +52,19 @@ function FollowUpCalendar({
     for (const t of tickets) {
       if (t.category === 'onboarding' && t.calendly_event_start) {
         add(t.calendly_event_start.slice(0, 10), {
-          type: 'call',
+          type: 'call', callKind: 'onboarding',
           label: t.customer_name ?? t.subject,
           time: t.calendly_event_start,
           ticketId: t.id,
+        });
+      }
+    }
+    // Diagnosis calls — from diagnosis_call tickets with a booked time.
+    for (const t of tickets) {
+      if (t.category === 'diagnosis_call' && t.calendly_event_start) {
+        add(t.calendly_event_start.slice(0, 10), {
+          type: 'call', callKind: 'diagnosis',
+          label: t.customer_name ?? t.subject, time: t.calendly_event_start, ticketId: t.id,
         });
       }
     }
@@ -102,6 +111,9 @@ function FollowUpCalendar({
           <span className={`${styles.calDot} ${styles.calDotCall}`} /> Onboarding call
         </span>
         <span className={styles.calLegendItem}>
+          <span className={`${styles.calDot} ${styles.calDotDiagnosis}`} /> Diagnosis call
+        </span>
+        <span className={styles.calLegendItem}>
           <span className={`${styles.calDot} ${styles.calDotFu1}`} /> FU1 — 2-week check-in
         </span>
         <span className={styles.calLegendItem}>
@@ -134,13 +146,10 @@ function FollowUpCalendar({
               {events.map((ev, i) => {
                 if (ev.type === 'call') {
                   return (
-                    <button
-                      key={`c${i}`}
-                      onClick={() => onCallClick(ev.ticketId)}
-                      className={`${styles.calEvent} ${styles.calEventCall}`}
-                      title={`Onboarding call — ${ev.label} · ${new Date(ev.time).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`}
-                    >
-                      🚀 {ev.label}
+                    <button key={`c${i}`} onClick={() => onCallClick(ev.ticketId)}
+                      className={`${styles.calEvent} ${ev.callKind === 'diagnosis' ? styles.calEventDiagnosis : styles.calEventCall}`}
+                      title={`${ev.callKind === 'diagnosis' ? 'Diagnosis call' : 'Onboarding call'} — ${ev.label} · ${new Date(ev.time).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`}>
+                      {ev.callKind === 'diagnosis' ? '🩺' : '🚀'} {ev.label}
                     </button>
                   );
                 }

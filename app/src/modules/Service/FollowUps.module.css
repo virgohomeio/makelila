@@ -207,3 +207,6 @@
 .layoutSplit { display: grid; grid-template-columns: minmax(0, 3fr) minmax(280px, 2fr); gap: 16px; align-items: start; }
 .layoutStack { display: flex; flex-direction: column; gap: 16px; }
 .calCol { min-width: 0; }
+
+.calEventDiagnosis { background: #faf5ff; color: #6b46c1; border-left: 3px solid #805ad5; }
+.calDotDiagnosis { background: #805ad5; }
