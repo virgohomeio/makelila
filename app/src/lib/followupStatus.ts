@@ -5,7 +5,7 @@ import { useServiceTickets, type ServiceTicket } from './service';
 import { useQueuedReplacements } from './orders';
 
 export type FollowUpStatusKey =
-  | 'overdue' | 'due_today' | 'due_7d'
+  | 'overdue' | 'due_today' | 'due_7d' | 'fu_on_hold'
   | 'in_followup' | 'awaiting_onboarding' | 'awaiting_response'
   | 'awaiting_diagnosis' | 'queued_replacement' | 'on_hold'
   | 'awaiting_review' | 'active' | 'returned';
@@ -14,6 +14,7 @@ export const STATUS_FILTERS: { key: FollowUpStatusKey; label: string }[] = [
   { key: 'overdue',             label: 'Overdue' },
   { key: 'due_today',           label: 'Due today' },
   { key: 'due_7d',              label: 'Due in 7 days' },
+  { key: 'fu_on_hold',          label: 'Follow-up on hold' },
   { key: 'in_followup',         label: 'In follow-up' },
   { key: 'awaiting_onboarding', label: 'Awaiting onboarding' },
   { key: 'awaiting_response',   label: 'Awaiting response' },
@@ -52,12 +53,25 @@ export function computeCustomerStatuses(
   const s = new Set<FollowUpStatusKey>();
   const fu = computeFuState(c, today);
 
-  if (fu === 'overdue_fu1' || fu === 'overdue_fu2') s.add('overdue');
-  if (fu === 'due_fu1' || fu === 'due_fu2') s.add('due_today');
-  const dnext = daysToNextFu(c, today);
-  if (dnext !== null && dnext > 0 && dnext <= 7) s.add('due_7d');
+  // A pending follow-up is put ON HOLD while the customer has an unresolved
+  // issue — a queued replacement or an open support/repair/diagnosis ticket.
+  // Onboarding-call tickets don't block. Resumes automatically once resolved.
+  const BLOCKING_TICKET_CATEGORIES = ['support', 'repair', 'diagnosis_call'];
+  const blockingCondition =
+    ctx.queuedReplacement
+    || ctx.openTickets.some(t => BLOCKING_TICKET_CATEGORIES.includes(t.category as string));
+  const pendingFu = !!c.onboard_date && fu !== 'complete' && fu !== 'unscheduled';
+  const fuBlocked = pendingFu && blockingCondition;
 
-  if (c.onboard_date && fu !== 'complete' && fu !== 'unscheduled') s.add('in_followup');
+  if (fuBlocked) {
+    s.add('fu_on_hold');
+  } else {
+    if (fu === 'overdue_fu1' || fu === 'overdue_fu2') s.add('overdue');
+    if (fu === 'due_fu1' || fu === 'due_fu2') s.add('due_today');
+    const dnext = daysToNextFu(c, today);
+    if (dnext !== null && dnext > 0 && dnext <= 7) s.add('due_7d');
+    if (c.onboard_date && fu !== 'complete' && fu !== 'unscheduled') s.add('in_followup');
+  }
 
   const hasTicket = (pred: (t: { status: string; category: string }) => boolean) =>
     ctx.openTickets.some(t => pred(t as { status: string; category: string }));

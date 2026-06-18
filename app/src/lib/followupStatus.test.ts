@@ -73,12 +73,64 @@ describe('computeCustomerStatuses', () => {
     const c = { ...base, review_status: 'requested' };
     expect(computeCustomerStatuses(c, emptyCtx, today).has('awaiting_review')).toBe(true);
   });
-  it('STATUS_FILTERS covers all 12 keys in display order', () => {
+  it('STATUS_FILTERS covers all 13 keys in display order', () => {
     expect(STATUS_FILTERS.map(f => f.key)).toEqual([
-      'overdue', 'due_today', 'due_7d', 'in_followup', 'awaiting_onboarding',
+      'overdue', 'due_today', 'due_7d', 'fu_on_hold', 'in_followup', 'awaiting_onboarding',
       'awaiting_response', 'awaiting_diagnosis', 'queued_replacement',
       'on_hold', 'awaiting_review', 'active', 'returned',
     ]);
+  });
+});
+
+describe('follow-up hold on open issues', () => {
+  const ticket = (category: ServiceTicket['category'], status: ServiceTicket['status'] = 'waiting_on_us') =>
+    ({ status, category });
+
+  it('holds FU when a replacement is queued (suppresses overdue, adds fu_on_hold)', () => {
+    const c = { ...base, onboard_date: daysAgo(20) }; // would be FU1 overdue
+    const s = computeCustomerStatuses(c, { ...emptyCtx, queuedReplacement: true }, today);
+    expect(s.has('fu_on_hold')).toBe(true);
+    expect(s.has('overdue')).toBe(false);
+    expect(s.has('in_followup')).toBe(false);
+    expect(s.has('queued_replacement')).toBe(true);
+  });
+
+  it('holds FU when an open support ticket exists', () => {
+    const c = { ...base, onboard_date: daysAgo(20) };
+    const s = computeCustomerStatuses(c, { ...emptyCtx, openTickets: [ticket('support')] }, today);
+    expect(s.has('fu_on_hold')).toBe(true);
+    expect(s.has('overdue')).toBe(false);
+  });
+
+  it('holds FU for an open repair or diagnosis ticket', () => {
+    const c = { ...base, onboard_date: daysAgo(20) };
+    expect(computeCustomerStatuses(c, { ...emptyCtx, openTickets: [ticket('repair')] }, today).has('fu_on_hold')).toBe(true);
+    expect(computeCustomerStatuses(c, { ...emptyCtx, openTickets: [ticket('diagnosis_call')] }, today).has('fu_on_hold')).toBe(true);
+  });
+
+  it('does NOT hold FU for an onboarding-category ticket', () => {
+    const c = { ...base, onboard_date: daysAgo(20) };
+    const s = computeCustomerStatuses(c, { ...emptyCtx, openTickets: [ticket('onboarding')] }, today);
+    expect(s.has('fu_on_hold')).toBe(false);
+    expect(s.has('overdue')).toBe(true);
+  });
+
+  it('does NOT mark fu_on_hold when the follow-up is already complete', () => {
+    const c = { ...base, onboard_date: daysAgo(40), fu1_status: 'called', fu2_status: 'called' };
+    const s = computeCustomerStatuses(c, { ...emptyCtx, openTickets: [ticket('support')] }, today);
+    expect(s.has('fu_on_hold')).toBe(false);
+  });
+
+  it('does NOT mark fu_on_hold for an unscheduled customer (no onboard date)', () => {
+    const s = computeCustomerStatuses({ ...base, onboard_date: null }, { ...emptyCtx, queuedReplacement: true }, today);
+    expect(s.has('fu_on_hold')).toBe(false);
+  });
+
+  it('auto-resumes: no blocking condition -> overdue returns', () => {
+    const c = { ...base, onboard_date: daysAgo(20) };
+    const s = computeCustomerStatuses(c, emptyCtx, today);
+    expect(s.has('fu_on_hold')).toBe(false);
+    expect(s.has('overdue')).toBe(true);
   });
 });
 
