@@ -211,6 +211,8 @@
 
 .calEventDiagnosis { background: #faf5ff; color: #6b46c1; border-left: 3px solid #805ad5; }
 .calDotDiagnosis { background: #805ad5; }
+.calEventDiagFollowup { background: #e6fffa; color: #234e52; border-left: 3px solid #319795; }
+.calDotDiagFollowup { background: #319795; }
 
 /* ── OverdueFollowupPanel (moved from Customers) ── */
 .followupPanel {

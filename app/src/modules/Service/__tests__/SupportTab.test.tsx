@@ -25,6 +25,7 @@ function mkTicket(partial: Partial<ServiceTicket> & { id: string }): ServiceTick
     owner_email: null, resolved_at: null, closed_at: null,
     replacement_order_id: null,
     diagnosis_link_sent_at: null, diag_cohost_invited_at: null,
+    diagnosis_followup_done_at: null,
     google_calendar_event_id: null,
     created_at: '2026-06-01T00:00:00Z', updated_at: '2026-06-01T00:00:00Z',
     gmail_thread_id: null, gmail_account: null,
