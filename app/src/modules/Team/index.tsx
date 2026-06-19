@@ -79,6 +79,24 @@ const MEMBERS: Member[] = [
       { label: 'Finance', path: '/finance' },
     ],
   },
+  {
+    name: 'Ryan',
+    email: 'ryanyuan32@gmail.com',
+    responsibility: 'Lovely App Engineering',
+    jobDescription: 'Owns the customer-facing Lovely PWA (Next.js 16) and the MakeLila ↔ Lovely integration. Responsible for connecting live device telemetry, onboarding event tracking, OTA firmware delivery, and surfacing customer app health in MakeLila\'s Lovely module.',
+    modules: [
+      { label: 'Lovely', path: '/lovely' },
+    ],
+  },
+  {
+    name: 'Julie',
+    email: 'yueli@virgohome.io',
+    responsibility: 'Accounting & Financial Operations',
+    jobDescription: 'Manages bookkeeping, GST/HST filings, SR&ED tax credit preparation, and general accounting. Approves refunds at the finance stage, oversees bank reconciliation, and maintains the QuickBooks chart of accounts.',
+    modules: [
+      { label: 'Finance', path: '/finance' },
+    ],
+  },
 ];
 
 function initials(name: string): string {
@@ -204,6 +222,42 @@ const DEFAULT_WORKFLOWS: WorkflowDef[] = [
     ],
   },
   {
+    memberName: 'Ryan',
+    moduleLabel: 'Lovely — User Verification',
+    steps: [
+      'Open Lovely → Users tab: scan overnight signups — confirm the email matches a MakeLila order',
+      'Open Lovely → Verification tab: review users in the pending-approval queue',
+      'For each pending user: check their serial number exists in MakeLila Stock (status = fulfilled) before approving',
+      'If serial is missing or unrecognised, hold approval and message the customer via Quo to confirm their unit',
+      'Click Approve once the serial is confirmed — this lets the customer through the app\'s verification gate',
+      'Log the approval in the activity log note field if anything unusual (e.g. email mismatch) was resolved',
+    ],
+  },
+  {
+    memberName: 'Ryan',
+    moduleLabel: 'Lovely — Onboarding Funnel',
+    steps: [
+      'Open Lovely → Onboarding tab to view the funnel chart by step',
+      'Identify the step with the highest drop-off (most users stuck there)',
+      'Filter for users who have been on the same step for >48 hours — these are at risk of churning before activation',
+      'Share the stuck-user list with Reina: she will make a proactive call or send a Quo message',
+      'Note: users still at "pairing" (signed up but never paired a device) are the highest-risk group — flag them weekly',
+      'Track funnel completion rate week-over-week and report to George on the Monday call',
+    ],
+  },
+  {
+    memberName: 'Ryan',
+    moduleLabel: 'Lovely — Firmware Releases',
+    steps: [
+      'Open Lovely → Firmware tab and review the current active firmware version + acceptance rate',
+      'To release a new version: click "+ New version", enter the version string (e.g. 1.3.0), description, and release notes',
+      'Set is_active = true — this automatically deactivates the previous live version and serves the new one to all paired devices',
+      'Monitor acceptance rate over the first 48 hours: target >80% acceptance within 3 days of release',
+      'For devices with no acceptance after 5 days: compile the list (serial + customer email) and share with Reina for follow-up',
+      'Do not release a new version while another is still <50% accepted unless there is a critical bug fix',
+    ],
+  },
+  {
     memberName: 'George',
     moduleLabel: 'Finance — Refunds',
     steps: [
@@ -214,6 +268,33 @@ const DEFAULT_WORKFLOWS: WorkflowDef[] = [
       'If approved: record the refund method (Shopify / Sezzle / QBO / e-transfer)',
       'Confirm the refund has been processed in the relevant payment platform',
       'Export the monthly refund summary for reconciliation',
+    ],
+  },
+  {
+    memberName: 'Julie',
+    moduleLabel: 'Finance — Journal Review',
+    steps: [
+      'Open Finance → Journal tab to see the last 30 days of QBO entries',
+      'Review each row: date, currency, payment channel, and net deposit amount',
+      'Check entries flagged as "Error" — note the issue and surface to George or Huayi',
+      'For "Pending" entries: confirm the underlying transaction has cleared in the bank',
+      'If an entry needs reposting, use the repost action and add a brief note explaining why',
+      'At month-end: export the journal summary and cross-reference with QBO for reconciliation',
+    ],
+  },
+  {
+    memberName: 'Julie',
+    moduleLabel: 'Finance — Refund Approvals',
+    steps: [
+      'Open Finance → Refunds and find cards in the "Finance review" column — those are yours to action',
+      'Click a card to open the full detail panel: read the return reason, unit condition, and original order',
+      'Business rule: do not approve any refund until the unit is confirmed received back',
+      'Review the refund amount — subtract non-refundable customer-paid shipping if applicable',
+      'If you adjust the amount, enter a correction note explaining the change',
+      'Select the correct payment method: Shopify refund, Sezzle, e-transfer, or cheque',
+      'Click "Approve (finance, paid)" to record the payment decision in MakeLila',
+      'Complete the actual payment in the relevant platform (Shopify admin, Sezzle portal, or your bank)',
+      'Record the confirmation or transaction ID in the note field before closing the card',
     ],
   },
 ];
@@ -243,6 +324,13 @@ export default function Team() {
       ? entries.filter(e => e.actor_name === selectedMember.name)
       : [],
     [entries, selectedMember],
+  );
+
+  const memberWorkflows = useMemo(
+    () => selectedMember
+      ? DEFAULT_WORKFLOWS.filter(w => w.memberName === selectedMember.name)
+      : [],
+    [selectedMember],
   );
 
   // Workflow tab state
@@ -360,6 +448,22 @@ export default function Team() {
                   <div className={styles.detailLabel}>Job Description</div>
                   <div className={styles.detailValue}>{selectedMember.jobDescription}</div>
                 </div>
+
+                {memberWorkflows.length > 0 && (
+                  <div className={styles.detailSection}>
+                    <div className={styles.detailLabel}>Use Flow</div>
+                    {memberWorkflows.map(wf => (
+                      <div key={wf.moduleLabel} className={styles.wfInlineBlock}>
+                        <div className={styles.wfInlineModuleLabel}>{wf.moduleLabel}</div>
+                        <ol className={styles.wfInlineList}>
+                          {stepsFor(wf).map((step, i) => (
+                            <li key={i} className={styles.wfInlineStep}>{step}</li>
+                          ))}
+                        </ol>
+                      </div>
+                    ))}
+                  </div>
+                )}
 
                 <div className={styles.detailSection}>
                   <div className={styles.detailLabel}>Activity Log</div>

@@ -17,7 +17,7 @@ const MODULES = [
   { path: '/finance',       label: 'Finance' },
 ];
 
-const MARKETING_ROLES = ['pedrum@virgohome.io', 'huayi@virgohome.io', 'george@virgohome.io'];
+const MARKETING_ROLES = ['pedrum@virgohome.io', 'huayi@virgohome.io', 'george@virgohome.io', 'yueli@virgohome.io'];
 
 export function GlobalNav() {
   const { user, role } = useAuth();

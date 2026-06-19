@@ -678,6 +678,59 @@ Alpha feedback collection window is **closed**. The 11 items above plus the meet
 
 ---
 
+## George × Huayi strategy meeting — 2026-06-18
+
+> Source: Plaud Notes recording [06-18 Meeting: Product Defect Management, Customer Support Troubleshooting, and MakeLila System Development Strategy](https://drive.google.com/drive/folders/1Z1DaCRHEHN3GtICQZUkgj7b8hBLiJA6f).
+> Attendees: Huayi, George (Speaker 3). Key decisions: ship current 50-unit batch despite known cracking risk; implement stricter water-test QC for future batches; establish roadmap for QB ↔ MakeLila finance integration.
+
+- **#91** Finance: onboard Julie to the refund approval workflow. ✅ *Role already correct — action needed is training only.*
+  **Source:** George (2026-06-18 — "Julie can only review, not approve")
+  **Investigated 2026-06-19:** Julie's Supabase profile (`yueli@virgohome.io`) already has `role = 'finance'`. The permissions code (`canDo(role, 'approve_refund_finance')`) correctly gates the finance-approval buttons on that role. The "Approve (finance, paid)" button and the finance amount-correction modal are fully implemented in `PostShipment/RefundsTab.tsx`. **No code or DB change needed.**
+  **Root cause:** Julie hasn't been shown the interface. When a refund reaches the Finance review column, she sees her role displayed as "Finance" in the KPI chip and the "Approve (finance, paid)" button appears on the card. She's never been walked through this.
+  **Remaining action (Huayi + Julie):** 30-minute walkthrough — show Julie the Refunds tab, walk through a real refund card in `finance_review` status, and demo the amount-correction modal (where she can adjust the amount before confirming payment). Also write a one-page reference doc for her covering: how a refund reaches her queue, how to change the amount if needed, which payment method to choose for each channel, and what "Deny" does.
+
+- **#92** Finance: QuickBooks sales invoice integration — resolve zero-refund-amount bug.
+  **Source:** George (2026-06-18 — spotted a $0 refund entry and immediately questioned the system's reliability)
+  **Description:** MakeLila currently cannot calculate accurate refund amounts because it has no access to QuickBooks sales invoices. Invoices contain customer-specific details — tax rates (vary by region), discount codes, promotional adjustments, Sezzle vs. Shopify payment splits — that aren't fully captured in Shopify's transaction record. Without them, refund fields default to $0. This was the first thing George noticed and it immediately eroded his trust in the system.
+  **Interim (until integration ships):** Patrick manually inputs invoice data prepared by Julie from QuickBooks into MakeLila. Julie prepares → Patrick enters → MakeLila shows accurate amounts. This is the exact process previously used with HubSpot.
+  **Long-term:** Build a read-only QuickBooks API integration that pulls sales invoices directly into MakeLila on order sync. Treat QuickBooks as a **read-only data source** — MakeLila never writes to QB without George's explicit approval. Prioritize one platform at a time (Freightcom first, then Shopify, then QuickBooks — don't do them simultaneously).
+  **Constraint:** Any new QuickBooks categories or data flows require George's review before implementation. Reference incident: Linda's team accidentally deleted QB invoices and Julie's team spent two weeks recovering them.
+  **Likely touch:** new edge function `supabase/functions/sync-qb-invoices/index.ts` (read-only QB API via OAuth); `lib/orders.ts` — add invoice fields; `PostShipment/FinanceReview.tsx` — populate refund amount from invoice data; interim: document the Patrick-entry workflow in the Julie instruction doc (#91).
+
+- **#93** Fulfillment: handle multi-unit orders spanning multiple order IDs.
+  **Source:** Huayi (2026-06-18 — live example: customer ordered 3 machines, split as 2+1 across two Shopify orders)
+  **Description:** The fulfillment module assumes one unit per order. An edge case arose where a single customer had two linked Shopify orders for the same delivery (a 2-machine order and a 1-machine order). MakeLila treated them as independent, making it impossible to coordinate fulfillment (e.g. ship all three on the same skid, generate a single tracking communication). George and Huayi agreed this is an "R&D phase" workflow — it hasn't happened enough to warrant premature codification. **Do not build this yet.** Track it here so Raymond (fulfillment module owner) can flag when the edge case recurs and request the feature once the workflow is understood. When it does ship: link orders by `customer_id` + delivery window; surface linked orders on the fulfillment queue row; allow a single serial-picker session to assign units to multiple linked orders.
+  **Status:** Deferred (R&D phase — workflow not yet stable enough to codify).
+
+- **#94** Stock QC gate — block fulfillment of units with failed or incomplete tests.
+  **Source:** Huayi (2026-06-18 — a unit with an incomplete test record was inadvertently shipped to Kevin)
+  **Description:** The fulfillment serial picker currently surfaces all units with `status = 'ready'`, regardless of QC test results. Because Janet's stock data has gaps (missing test reports, incomplete entries), units with failed or untested QC fields slip through. Operators have no visual warning that they're assigning a problematic unit.
+  **What this should do:**
+    1. In the fulfillment serial picker, evaluate each candidate unit's QC fields (Electrical Pass/Fail/Incomplete, Mechanical Pass/Fail/Incomplete — per #5). If any required field is `fail` or `incomplete`, mark the unit non-selectable with a "QC incomplete" badge and a tooltip listing the failing fields. Only units where all required QC fields are `pass` can be assigned.
+    2. If an operator needs to override (rare, deliberate decision), require a manager-level confirmation with a required note.
+    3. Surface a "Units with QC gaps" count on the Stock module header so Janet can see her backlog at a glance.
+  **Prerequisite:** #5 (Machine-Level QC Tracking fields) must be populated — gate is only as good as the data. Janet needs to be the responsible owner for keeping QC data current.
+  **Likely touch:** `Fulfillment/Queue/SerialPicker.tsx` — add QC field evaluation + non-selectable state; `lib/stock.ts` — QC status helper; `Stock/index.tsx` — "QC gaps" count chip.
+
+- **#95** Finance: QuickBooks backup protocol — snapshot QB data within MakeLila.
+  **Source:** George (2026-06-18 — recounted incident where Linda's team deleted QB invoices; recovery took Julie's team two weeks of late nights)
+  **Description:** MakeLila already reads from QuickBooks (once #92 ships). Each read-sync is an opportunity to also snapshot the pulled data into a `qb_backups` table, giving VCycene a local recovery point if QB data is accidentally modified or deleted. George agreed this is worth building as a safety net.
+  **Scope:** Read-only snapshot of imported invoice/payment records at sync time. Not a full QB mirror — only the records MakeLila pulls. Backups keyed by `(record_type, qb_record_id, snapshot_at)`. Operators can view the snapshot history on the Finance module for any record. In a recovery scenario, the snapshot gives Julie a reference to reconstruct deleted entries manually. Full automated push-back to QB is out of scope (too risky without strict change control).
+  **Prerequisite:** #92 (QB invoice integration) must ship first — this is a bolt-on to that sync.
+  **Likely touch:** new `qb_backups` table (migration); append snapshot write to the QB sync edge function; light read view in `Finance/` module.
+
+- **#96** Finance: AI-driven bookkeeping auto-classification. *(P3 — strategic)*
+  **Source:** Huayi (2026-06-18)
+  **Description:** Julie currently categorizes every QuickBooks transaction manually, assigning expenses to tax codes, SR&ED-eligible buckets, and account categories. Once MakeLila has access to QB data (#92), a classifier trained on Julie's historical categorization patterns could auto-assign categories for new transactions and present them to Julie as suggested classifications. Her role reduces from manual data entry to review-and-approve ("click yes / no"). George acknowledged the value; agreed it's a later-phase effort once the foundational QB integration is stable.
+  **Out of scope for now:** building or hosting the model. The immediate prerequisite is #92 (QB invoice data in MakeLila) and a sufficient history of labeled transactions.
+
+- **#97** Finance: SR&ED report automation. *(P3 — strategic)*
+  **Source:** Huayi (2026-06-18)
+  **Description:** VCycene currently relies on external consultants to prepare SR&ED (Scientific Research and Experimental Development) tax credit filings. Once MakeLila integrates QB bookkeeping data (#92) and the AI classifier (#96) can identify SR&ED-eligible expenses, MakeLila could auto-generate the filing report from historical data — reducing or eliminating the consultant dependency. George is responsible for SR&ED alongside Julie managing the accounting. Huayi confirmed Julie also handles this area (he had assumed George was managing it directly).
+  **Out of scope for now:** this is a long-horizon item. No implementation until #92 and #96 are stable and Julie has validated the categorization accuracy.
+
+---
+
 ## Reference
 
 - Email thread: "makeLILA app beta release, VCycene, Huayi" (started Apr 21, 2026)
