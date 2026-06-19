@@ -76,9 +76,10 @@ export type FreightcomInvoice = {
  * Returns all orders at fulfillment step >= 3, annotated with their
  * shipment status (null = not booked yet). Used by the left panel.
  */
-export function useShippingOrders(): { orders: ShippingOrderRow[]; loading: boolean } {
+export function useShippingOrders(): { orders: ShippingOrderRow[]; loading: boolean; error: string | null } {
   const [orders, setOrders] = useState<ShippingOrderRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -94,6 +95,17 @@ export function useShippingOrders(): { orders: ShippingOrderRow[]; loading: bool
       ]);
 
       if (cancelled) return;
+
+      if (queueRes.error) {
+        setError(queueRes.error.message);
+        setLoading(false);
+        return;
+      }
+      if (shipmentRes.error) {
+        setError(shipmentRes.error.message);
+        setLoading(false);
+        return;
+      }
 
       const shipmentMap = new Map<string, { id: string; status: ShipmentStatus }>(
         ((shipmentRes.data ?? []) as Array<{ order_id: string; id: string; status: ShipmentStatus }>)
@@ -128,7 +140,7 @@ export function useShippingOrders(): { orders: ShippingOrderRow[]; loading: bool
     return () => { cancelled = true; };
   }, []);
 
-  return { orders, loading };
+  return { orders, loading, error };
 }
 
 /** Returns the single shipment for an order (null if not booked). */
@@ -147,7 +159,10 @@ export function useShipment(orderId: string | null): { shipment: Shipment | null
         .maybeSingle();
       if (!cancelled) {
         if (!error && data) setShipment(data as Shipment);
-        else setShipment(null);
+        else {
+          if (error) console.error('useShipment error:', error.message);
+          setShipment(null);
+        }
         setLoading(false);
       }
     })();
@@ -173,6 +188,7 @@ export function useClaims(orderId: string | null): { claims: Claim[]; loading: b
         .order('filed_at', { ascending: false });
       if (!cancelled) {
         if (!error && data) setClaims(data as Claim[]);
+        else if (error) console.error('useClaims error:', error.message);
         setLoading(false);
       }
     })();
@@ -190,7 +206,8 @@ export async function bookShipment(orderId: string, quoteId: string): Promise<Sh
     body: { order_id: orderId, quote_id: quoteId },
   });
   if (error) throw new Error(error.message);
-  const shipment = (data as { shipment: Shipment }).shipment;
+  const shipment = (data as { shipment?: Shipment }).shipment;
+  if (!shipment) throw new Error('freightcom-book: unexpected response shape');
   await logAction(
     'shipment_booked',
     orderId,
@@ -209,6 +226,7 @@ export async function fileClaim(
   notes: string | null,
 ): Promise<Claim> {
   const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('Not authenticated');
   const { data, error } = await supabase
     .from('claims')
     .insert({
@@ -217,7 +235,7 @@ export async function fileClaim(
       reason,
       amount_cad: amountCad,
       notes,
-      filed_by: user?.id ?? null,
+      filed_by: user.id,
     })
     .select()
     .single();
