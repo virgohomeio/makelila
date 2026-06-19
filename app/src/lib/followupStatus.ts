@@ -229,6 +229,10 @@ export function useFollowUpDirectory(today: Date = new Date()): {
         diagnosisCalls: diagnosisCallsByCustomer.get(c.id) ?? [],
       };
       const statuses = computeCustomerStatuses(c, ctx, today);
+      // Fold in operator-applied manual tags (additive to the derived ones).
+      for (const t of c.manual_status_tags ?? []) {
+        if (STATUS_FILTERS.some(f => f.key === t)) statuses.add(t as FollowUpStatusKey);
+      }
       for (const k of statuses) counts[k] += 1;
       return { customer: c, statuses, fuState: computeFuState(c, today) };
     });
