@@ -138,48 +138,48 @@ This is what VCycene's warranty should say once formalized. Propose this structu
 ## 6. Draft Email to Attendees
 
 > **To:** george@virgohome.io, pedrum@virgohome.io, raymond@virgohome.io, soumya.r@surebright.com
-> **Subject:** Prep for Tuesday's Surebright call — warranty structure + questions
+> **Subject:** Prep for Tuesday's Surebright call — LILA warranty plan + agenda
 > **From:** huayi@virgohome.io
 
 ---
 
 Hi Soumya, George, Pedrum, Raymond,
 
-Looking forward to our call on Tuesday June 24 at 2 PM ET. Wanted to share a quick agenda and some prep ahead of time so we can make the most of the 30 minutes.
+Looking forward to our call on Tuesday June 24 at 2 PM ET. Wanted to share our prep ahead of time so we can hit the ground running in our 30 minutes.
 
-**What we're hoping to walk away with:**
-- Clarity on how Surebright's coverage layers onto our existing 3-year manufacturer warranty
-- Specific coverage confirmation for the LILA Composter's key failure modes (motor, heating element, PCB, firmware)
-- Revenue share structure and whether VCycene qualifies
-- Agreed warranty term options to offer customers (+1/+2/+3 years, accidental, shipping)
-- Next steps and timeline to go live
+We've done a full review of our current warranty structure and how Surebright would layer on top. Here's what we're bringing to the table and what we need to nail down on the call.
 
-**Our current warranty:** LILA comes with a 3-year manufacturer warranty. We handle all claims via support@lilacomposter.com today — no self-serve portal, no accidental or shipping coverage. We'd like Surebright to extend that experience post-year-3 and potentially add accidental and shipping protection from day one.
+**Our current warranty:** LILA Composter ships with a 3-year manufacturer warranty covering motor, heating element, PCB, firmware defects, and structural failures under normal use. All claims go through VCycene support today — no self-serve portal, and no accidental or shipping coverage. We want Surebright to extend coverage post-year-3 and add accidental + shipping protection from day one.
 
-**A few questions we'd like answered on the call:**
+**We qualify for your merchant program** and are ready to move forward. Here's what we'd like to confirm on the call:
 
-1. Does Surebright coverage start from purchase date (alongside our 3-year mfr warranty) or only after our warranty expires — and if both are active, who adjudicates years 1–3?
-2. Are motor, heating element, and PCB failures explicitly covered under your mechanical/electrical plan for a kitchen composting appliance? Can we see the product-specific T&Cs before signing?
-3. What is the revenue share %, and does VCycene's current Shopify volume qualify us?
-4. For a replacement outcome: does Surebright hold replacement inventory, or does VCycene ship the replacement unit?
-5. Do you offer a merchant API or webhook so we can sync claim status into our internal ops system?
+1. **Coverage overlap (years 1–3):** Does Surebright coverage start from purchase date alongside our manufacturer warranty, or only post-expiry? If both are active, who adjudicates — and how do we keep VCycene as the primary for manufacturer warranty claims during years 1–3?
 
-We have ~50% Canadian customers so we'll also want to quickly touch on PIPEDA handling.
+2. **Product-specific T&Cs:** We'd like to see the exact customer-facing plan terms for a kitchen composting appliance before signing — specifically confirming motor, heating element, PCB, and firmware failures are covered under the mechanical/electrical plan.
 
-Please send the meeting link if anything changes — we have the Teams link from the invite. See you Tuesday.
+3. **Claims logistics:** For a replacement outcome, who ships the unit — Surebright from held inventory, or VCycene from our own stock? And for a repair outcome, does the customer send the unit to VCycene or to a Surebright service center?
+
+4. **Merchant API / webhook:** We run an internal operations system and want warranty claim events (filed, approved, denied, closed) pushed to us automatically. Do you offer a merchant API or webhook for this?
+
+5. **Revenue share + contract terms:** We'd like the revenue share % in writing and want to confirm what happens to active customer warranties if either party exits the agreement. Coverage continuity for customers is a hard requirement for us.
+
+We also have ~50% Canadian customers and will need to confirm PIPEDA / Quebec Law 25 compliance.
+
+Happy to adjust the agenda if Soumya has specific items to cover on your end. See you Tuesday.
 
 Best,
-Huayi
+Huayi Gao
 VCycene / LILA Composter
+huayi@virgohome.io
 
 ---
 
 ## 7. Internal Pre-Meeting Alignment (George + Huayi)
 
 Before Tuesday, align internally on:
-- **D7:** Confirm annual Shopify GMV so we know if we meet the $100K–$1M revenue threshold
-- **D5 (coverage during years 1–3):** Decide if we want Surebright actively during the mfr warranty period. If yes, they may want to co-adjudicate or defer to VCycene — this needs a clear boundary.
-- **D10:** George's view on what we need contractually for warranty continuity on exit
+- **D6:** ✅ Revenue threshold confirmed — VCycene qualifies. Remove from call agenda.
+- **D4 (coverage during years 1–3):** Decide if we want Surebright actively during the mfr warranty period. If yes, they may want to co-adjudicate or defer to VCycene — this needs a clear boundary. VCycene must remain primary adjudicator for years 1–3.
+- **D9:** George's view on what we need contractually for warranty continuity on exit — this is a hard requirement before signing.
 
 ---
 

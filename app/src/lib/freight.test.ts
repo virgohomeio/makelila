@@ -7,15 +7,21 @@ const { fromMock, updateMock, updateEqResults } = vi.hoisted(() => {
   const updateEqResults: Array<{ error: null | { message: string } }> = [];
   let callIdx = 0;
 
-  const makeEqAfterUpdate = () => ({
-    eq: vi.fn(() => {
+  // Thenable builder: every .eq() chains back to the same object so that
+  // .update().eq(a).eq(b) works. The result is consumed once when awaited.
+  const makeUpdateBuilder = () => {
+    const b: any = {};
+    b.eq = vi.fn(() => b);
+    b.then = (resolve: any, reject: any) => {
       const result = updateEqResults[callIdx] ?? { error: null };
       callIdx++;
-      return Promise.resolve(result);
-    }),
-  });
+      return Promise.resolve(result).then(resolve, reject);
+    };
+    b.catch = (reject: any) => b.then(undefined, reject);
+    return b;
+  };
 
-  const updateMock = vi.fn(() => makeEqAfterUpdate());
+  const updateMock = vi.fn(() => makeUpdateBuilder());
 
   const eqMock: ReturnType<typeof vi.fn> = vi.fn();
   eqMock.mockImplementation(() => ({
@@ -57,15 +63,19 @@ describe('selectQuote', () => {
     fromMock.mockClear();
     updateMock.mockClear();
     updateEqResults.length = 0;
-    // Reset call index by re-assigning a fresh counter inside updateMock
+    // Reset call index with a fresh counter; use same builder pattern as above.
     let callIdx = 0;
-    updateMock.mockImplementation(() => ({
-      eq: vi.fn(() => {
+    updateMock.mockImplementation(() => {
+      const b: any = {};
+      b.eq = vi.fn(() => b);
+      b.then = (resolve: any, reject: any) => {
         const result = updateEqResults[callIdx] ?? { error: null };
         callIdx++;
-        return Promise.resolve(result);
-      }),
-    }));
+        return Promise.resolve(result).then(resolve, reject);
+      };
+      b.catch = (reject: any) => b.then(undefined, reject);
+      return b;
+    });
   });
 
   it('sets selected=false on all sibling rows then selected=true on the target', async () => {
