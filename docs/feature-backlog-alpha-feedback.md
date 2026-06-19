@@ -729,6 +729,24 @@ Alpha feedback collection window is **closed**. The 11 items above plus the meet
   **Description:** VCycene currently relies on external consultants to prepare SR&ED (Scientific Research and Experimental Development) tax credit filings. Once MakeLila integrates QB bookkeeping data (#92) and the AI classifier (#96) can identify SR&ED-eligible expenses, MakeLila could auto-generate the filing report from historical data — reducing or eliminating the consultant dependency. George is responsible for SR&ED alongside Julie managing the accounting. Huayi confirmed Julie also handles this area (he had assumed George was managing it directly).
   **Out of scope for now:** this is a long-horizon item. No implementation until #92 and #96 are stable and Julie has validated the categorization accuracy.
 
+## Surebright warranty management integration — 2026-06-19
+
+- **#98** Service: integrate MakeLila with Surebright (Shopify warranty management app).
+  **Source:** Huayi (2026-06-19)
+  **Description:** Surebright is a Shopify-native warranty management app that handles warranty registration, claim submission, and claim adjudication on behalf of merchants. VCycene sells the LILA Composter through Shopify; Surebright sits on top of that to manage the extended warranty product. Currently, warranty claims submitted through Surebright are invisible to MakeLila — operators learn about them via email or manually. This creates a gap in the PostShipment module where returns, refunds, and replacements exist but warranty claims do not.
+  **What this should do:**
+    1. **Inbound sync:** Pull warranty registrations and claim events from Surebright into MakeLila. A new `warranty_claims` table (or extension of `warranty_registrations`) stores claim ID, Shopify order ID, claim type (repair/replacement/refund), status (open/approved/denied/closed), decision date, and payout amount. Sync cadence: webhook-driven on claim status change, with a polling fallback.
+    2. **PostShipment visibility:** Surface active warranty claims in a new "Warranty Claims" tab alongside Returns, Refunds, and Replacements. Operators can see claim status without leaving MakeLila. Read-only initially — MakeLila does not write back to Surebright.
+    3. **Customer linkage:** Join warranty claims to MakeLila customers by Shopify order ID → `orders.shopify_order_id`. Link from the Customers module detail panel ("Active warranty claim" chip → claim detail).
+    4. **Service ticket bridging:** When a warranty claim is approved and requires physical repair/return, auto-create or link a Service ticket so the Reina/Junaid support flow can track fulfillment.
+  **Open questions before implementation:**
+    - Surebright API availability: confirm whether Surebright exposes a merchant-facing REST or webhook API, or whether sync must go through Shopify metafields/order tags that Surebright writes.
+    - Auth model: API key per shop vs. OAuth.
+    - Write-back scope: determine if MakeLila should ever push claim decisions back to Surebright (likely out of scope for V1 — Surebright adjudicates, MakeLila observes).
+  **Likely touch:** new `warranty_claims` table (migration); new edge function `supabase/functions/sync-surebright/index.ts`; `lib/postShipment.ts` — add warranty claim types and hook; `PostShipment/` — new `WarrantyClaimsTab.tsx`; `Customers/` — warranty chip in detail panel; `Service/` — auto-link claim → ticket.
+  **Prerequisite:** confirm Surebright API access with George/Shopify admin before starting.
+  **Priority:** P2 — clear operational gap, single owner (PostShipment), no competing requestors yet.
+
 ---
 
 ## Reference
