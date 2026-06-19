@@ -22,6 +22,7 @@ export type Customer = {
   fu2_status: string | null;
   fu_notes: string | null;
   review_status: string | null;
+  manual_status_tags: string[] | null;
   last_synced_at: string | null;
   // Unit serials from the fulfillment sheet (source of truth). Synced by
   // public.sync_customer_serials_from_fulfillment(); see scripts/import-fulfillment-sheet.mjs.
