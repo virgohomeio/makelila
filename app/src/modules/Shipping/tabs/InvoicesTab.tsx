@@ -29,10 +29,14 @@ function InvoiceTable({ invoices, loading, error, emptyMsg }: {
           <tr key={inv.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
             <td style={{ padding: '7px 12px' }}>{inv.number}</td>
             <td style={{ padding: '7px 12px', color: '#4a5568', textTransform: 'capitalize' }}>{inv.type}</td>
-            <td style={{ padding: '7px 12px', color: '#4a5568' }}>{inv.date}</td>
-            <td style={{ padding: '7px 12px', textAlign: 'right' }}>{inv.amount}</td>
+            <td style={{ padding: '7px 12px', color: '#4a5568' }}>
+              {inv.date ? new Date(inv.date).toLocaleDateString() : '—'}
+            </td>
+            <td style={{ padding: '7px 12px', textAlign: 'right' }}>
+              {Number.isFinite(Number(inv.amount)) ? `$${Number(inv.amount).toFixed(2)}` : inv.amount}
+            </td>
             <td style={{ padding: '7px 12px', textAlign: 'right', color: Number(inv.owing) > 0 ? '#c53030' : '#276749' }}>
-              {inv.owing}
+              {Number.isFinite(Number(inv.owing)) ? `$${Number(inv.owing).toFixed(2)}` : inv.owing}
             </td>
           </tr>
         ))}
@@ -75,7 +79,7 @@ export function InvoicesTab({ orderId }: Props) {
 
   return (
     <div>
-      {shipment && (
+      {shipment?.freightcom_shipment_id && (
         <section style={{ marginBottom: 32 }}>
           <h3 style={{ margin: '0 0 12px', fontSize: 15 }}>This Shipment</h3>
           <InvoiceTable
