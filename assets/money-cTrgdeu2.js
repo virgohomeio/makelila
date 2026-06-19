@@ -1,0 +1,1 @@
+function e(e,t){return e==null?`—`:`$${e.toFixed(2)} ${t||`USD`}`}export{e as t};
