@@ -57,7 +57,8 @@ export async function selectQuote(orderId: string, quoteId: string): Promise<voi
   const { error: e2 } = await supabase
     .from('freight_quotes')
     .update({ selected: true })
-    .eq('id', quoteId);
+    .eq('id', quoteId)
+    .eq('order_id', orderId);
   if (e2) throw new Error(e2.message);
 
   await logAction(

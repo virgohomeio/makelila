@@ -47,6 +47,7 @@ async function handle(req: Request): Promise<Response> {
 
   const { freightcom_shipment_id } = await req.json() as { freightcom_shipment_id?: string };
   if (!freightcom_shipment_id) return json({ error: 'freightcom_shipment_id required' }, 400);
+  if (!/^\w[\w-]*$/.test(freightcom_shipment_id)) return json({ error: 'Invalid freightcom_shipment_id' }, 400);
 
   const res = await fetch(`${baseUrl}/shipment/${freightcom_shipment_id}/tracking-events`, {
     headers: { Authorization: apiKey },
