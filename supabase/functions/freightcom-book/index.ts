@@ -135,12 +135,13 @@ async function handle(req: Request): Promise<Response> {
     body: JSON.stringify(bookReq),
   });
 
+  const bookBody = await bookRes.json().catch(() => ({}) as { id?: string });
   if (bookRes.status !== 202) {
-    const errBody = await bookRes.json().catch(() => ({}));
-    return json({ error: 'Freightcom booking failed', details: errBody }, 502);
+    return json({ error: 'Freightcom booking failed', details: bookBody }, 502);
   }
 
-  const { id: fcShipmentId } = await bookRes.json() as { id: string };
+  const fcShipmentId = (bookBody as { id?: string }).id;
+  if (!fcShipmentId) return json({ error: 'Freightcom did not return a shipment id' }, 502);
 
   // Poll GET /shipment/{id} until HTTP 200 (202 = still processing)
   let shipmentData: Record<string, unknown> | null = null;
@@ -150,9 +151,16 @@ async function handle(req: Request): Promise<Response> {
       headers: { Authorization: apiKey },
     });
     if (pollRes.status === 200) {
-      const body = await pollRes.json() as { shipment: Record<string, unknown> };
-      shipmentData = body.shipment ?? null;
+      const body = await pollRes.json() as { shipment?: Record<string, unknown> };
+      if (!body.shipment) {
+        return json({ error: 'Freightcom returned empty shipment on 200' }, 502);
+      }
+      shipmentData = body.shipment;
       break;
+    }
+    if (pollRes.status !== 202) {
+      const errBody = await pollRes.json().catch(() => ({}));
+      return json({ error: `Freightcom poll error ${pollRes.status}`, details: errBody }, 502);
     }
     // 202 = still processing, keep polling
   }
