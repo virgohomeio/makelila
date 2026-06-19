@@ -96,16 +96,16 @@ export function ShippingTab({ orderId }: Props) {
         >
           {fetching ? 'Fetching…' : quotes.length > 0 ? 'Refresh Quotes' : 'Fetch Quotes'}
         </button>
-        {selectedQuote && !booking && (
+        {selectedQuote && (
           <button
             onClick={handleBook}
+            disabled={booking}
             style={{ fontSize: 13, padding: '6px 14px', background: '#276749', color: '#fff',
-                     border: 'none', borderRadius: 4, cursor: 'pointer' }}
+                     border: 'none', borderRadius: 4, cursor: booking ? 'not-allowed' : 'pointer', opacity: booking ? 0.6 : 1 }}
           >
-            Book & Print Label
+            {booking ? 'Booking…' : 'Book & Print Label'}
           </button>
         )}
-        {booking && <span style={{ fontSize: 13, color: '#718096' }}>Booking…</span>}
       </div>
 
       {error && (
