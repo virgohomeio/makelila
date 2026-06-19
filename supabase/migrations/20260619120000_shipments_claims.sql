@@ -24,20 +24,9 @@ create table if not exists public.shipments (
 
 alter table public.shipments enable row level security;
 
-do $$ begin
-  if not exists (
-    select 1 from pg_policies
-    where tablename = 'shipments' and policyname = 'internal only'
-  ) then
-    create policy "internal only" on public.shipments
-      using (
-        exists (
-          select 1 from public.profiles
-          where id = auth.uid() and is_internal = true
-        )
-      );
-  end if;
-end $$;
+create policy "internal only" on public.shipments
+  using (public.is_internal_user())
+  with check (public.is_internal_user());
 
 create index if not exists shipments_order_id_idx on public.shipments(order_id);
 
@@ -60,20 +49,9 @@ create table if not exists public.claims (
 
 alter table public.claims enable row level security;
 
-do $$ begin
-  if not exists (
-    select 1 from pg_policies
-    where tablename = 'claims' and policyname = 'internal only'
-  ) then
-    create policy "internal only" on public.claims
-      using (
-        exists (
-          select 1 from public.profiles
-          where id = auth.uid() and is_internal = true
-        )
-      );
-  end if;
-end $$;
+create policy "internal only" on public.claims
+  using (public.is_internal_user())
+  with check (public.is_internal_user());
 
 create index if not exists claims_order_id_idx on public.claims(order_id);
 create index if not exists claims_shipment_id_idx on public.claims(shipment_id);
