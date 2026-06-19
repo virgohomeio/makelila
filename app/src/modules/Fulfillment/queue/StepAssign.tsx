@@ -1,7 +1,16 @@
 import { useMemo, useState } from 'react';
 import { assignUnit, type FulfillmentQueueRow } from '../../../lib/fulfillment';
-import { useUnits } from '../../../lib/stock';
+import { useUnits, type Unit } from '../../../lib/stock';
 import styles from '../Fulfillment.module.css';
+
+function qcIssues(u: Unit): string[] {
+  const issues: string[] = [];
+  if (u.electrical_check === 'fail') issues.push('Electrical FAIL');
+  else if (u.electrical_check === 'incomplete') issues.push('Electrical incomplete');
+  if (u.mechanical_check === 'fail') issues.push('Mechanical FAIL');
+  else if (u.mechanical_check === 'incomplete') issues.push('Mechanical incomplete');
+  return issues;
+}
 
 export function StepAssign({ row }: { row: FulfillmentQueueRow }) {
   const { units, loading } = useUnits();
@@ -107,21 +116,38 @@ export function StepAssign({ row }: { row: FulfillmentQueueRow }) {
         </div>
       )}
       <div className={styles.slotGrid}>
-        {filtered.map(u => (
-          <div
-            key={u.serial}
-            className={[styles.slotPick, picked === u.serial ? styles.selected : ''].filter(Boolean).join(' ')}
-            onClick={() => setPicked(u.serial)}
-          >
-            <div className={styles.slotPickTop}>
-              {u.serial.slice(-5)}
-              <span className={styles.slotPickBatch}>{u.batch}</span>
+        {filtered.map(u => {
+          const issues = qcIssues(u);
+          const blocked = issues.length > 0;
+          return (
+            <div
+              key={u.serial}
+              className={[
+                styles.slotPick,
+                picked === u.serial ? styles.selected : '',
+                blocked ? styles.slotPickQcWarn : '',
+              ].filter(Boolean).join(' ')}
+              title={blocked ? `QC issues: ${issues.join(', ')} — manager override required` : undefined}
+              onClick={() => {
+                if (!blocked) { setPicked(u.serial); return; }
+                if (window.confirm(`⚠ QC issues on ${u.serial}:\n• ${issues.join('\n• ')}\n\nOverride and assign anyway? (Manager confirmation required)`)) {
+                  setPicked(u.serial);
+                }
+              }}
+            >
+              <div className={styles.slotPickTop}>
+                {u.serial.slice(-5)}
+                <span className={styles.slotPickBatch}>{u.batch}</span>
+              </div>
+              {blocked && (
+                <div className={styles.slotPickQcBadge}>⚠ QC</div>
+              )}
+              <div className={styles.slotPickBottom}>
+                {u.location ?? 'no location'}
+              </div>
             </div>
-            <div className={styles.slotPickBottom}>
-              {u.location ?? 'no location'}
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
       <div className={styles.stepBar}>
         <button className={styles.confirmBtn} onClick={handleConfirm} disabled={!picked || busy}>
