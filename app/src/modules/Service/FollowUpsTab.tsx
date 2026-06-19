@@ -1,12 +1,13 @@
 import { useMemo, useState } from 'react';
 import {
-  useCustomers, computeFuState, recordFollowUp, setReviewStatus, FU1_DAYS, FU2_DAYS,
+  useCustomers, computeFuState, FU1_DAYS, FU2_DAYS,
   type Customer, type FuState,
 } from '../../lib/customers';
 import { useServiceTickets } from '../../lib/service';
 import { useFollowUpDirectory } from '../../lib/followupStatus';
 import { TicketDetailPanel } from './TicketDetailPanel';
 import { FollowUpDirectory } from './FollowUpDirectory';
+import { FollowUpDetailPanel } from './FollowUpDetailPanel';
 import { OverdueFollowupPanel } from './OverdueFollowupPanel';
 import { useIsMobile } from '../../lib/useMediaQuery';
 import styles from './FollowUps.module.css';
@@ -196,7 +197,7 @@ function FollowUpCalendar({
 }
 
 export function FollowUpsTab() {
-  const { customers } = useCustomers();
+  const { customers, refresh } = useCustomers();
   const { tickets } = useServiceTickets();
   const today = useMemo(() => new Date(), []);
   const { rows, counts, overdueCount } = useFollowUpDirectory(today);
@@ -227,7 +228,6 @@ export function FollowUpsTab() {
   });
   const [selected, setSelected] = useState<{ customerId: string; kind: 'fu1' | 'fu2' } | null>(null);
   const [openTicketId, setOpenTicketId] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
 
   const scheduledCustomers = useMemo(
     () => customers.filter(c => !!c.onboard_date),
@@ -240,17 +240,6 @@ export function FollowUpsTab() {
   );
 
   const openTicket = openTicketId ? tickets.find(t => t.id === openTicketId) ?? null : null;
-
-  async function handleAction(action: string) {
-    if (!selectedCustomer || !selected) return;
-    setBusy(true);
-    try {
-      await recordFollowUp(selectedCustomer.id, selected.kind, action);
-      setSelected(null);
-    } finally {
-      setBusy(false);
-    }
-  }
 
   return (
     <div className={styles.wrap}>
@@ -278,38 +267,18 @@ export function FollowUpsTab() {
           onSelect={(id) => setSelected({ customerId: id, kind: 'fu1' })}
         />
       </div>
-      {selectedCustomer && selected && (
-        <div className={styles.selectedPanel}>
-          <div className={styles.selectedHeader}>
-            <strong>{selectedCustomer.full_name}</strong>
-            <span className={styles.selectedKind}>
-              {selected.kind === 'fu1' ? '2-week check-in' : '4-week check-in'}
-            </span>
-            <button className={styles.closeBtn} onClick={() => setSelected(null)}>×</button>
-          </div>
-          <div className={styles.selectedMeta}>
-            {selectedCustomer.email && <span>{selectedCustomer.email}</span>}
-            {selectedCustomer.phone && <span>{selectedCustomer.phone}</span>}
-            {selectedCustomer.onboard_date && (
-              <span>
-                Onboarded {new Date(selectedCustomer.onboard_date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-              </span>
-            )}
-          </div>
-          <div className={styles.selectedActions}>
-            <button className={styles.actionBtn} disabled={busy} onClick={() => void handleAction('called')}>Called</button>
-            <button className={styles.actionBtn} disabled={busy} onClick={() => void handleAction('messaged')}>Messaged</button>
-            <button className={styles.actionBtn} disabled={busy} onClick={() => void handleAction('reviewed')}>Reviewed</button>
-            <button className={styles.actionBtn} disabled={busy}
-              onClick={() => void (async () => { setBusy(true); try { await setReviewStatus(selectedCustomer.id, 'requested'); } finally { setBusy(false); } })()}>
-              Mark review requested
-            </button>
-            <button className={styles.actionBtn} disabled={busy}
-              onClick={() => void (async () => { setBusy(true); try { await setReviewStatus(selectedCustomer.id, 'received'); } finally { setBusy(false); } })()}>
-              Mark review received
-            </button>
-          </div>
-        </div>
+      {selectedCustomer && (
+        <FollowUpDetailPanel
+          customer={selectedCustomer}
+          diagnosisTicketId={
+            tickets.find(t => t.category === 'diagnosis_call' && !t.diagnosis_followup_done_at
+              && t.calendly_event_start != null
+              && (t.customer_id === selectedCustomer.id
+                  || (!!t.customer_email && t.customer_email.toLowerCase() === (selectedCustomer.email ?? '').toLowerCase())))?.id ?? null
+          }
+          onClose={() => setSelected(null)}
+          onChanged={() => void refresh()}
+        />
       )}
       {openTicket && <TicketDetailPanel ticket={openTicket} onClose={() => setOpenTicketId(null)} />}
     </div>
