@@ -747,6 +747,32 @@ Alpha feedback collection window is **closed**. The 11 items above plus the meet
   **Prerequisite:** confirm Surebright API access with George/Shopify admin before starting.
   **Priority:** P2 — clear operational gap, single owner (PostShipment), no competing requestors yet.
 
+- **#99** Shipping: replace Freightcom damage claim workflow with Surebright shipping protection.
+  **Source:** Huayi (2026-06-19 — raised in Surebright pre-meeting prep)
+  **Current pain:** Shipping damage claims through Freightcom are a multi-step, weeks-long process entirely owned by VCycene operations:
+    1. Customer reports damage to VCycene support via email
+    2. Operator logs an internal claim in MakeLila (Shipping → Claims tab), linked to `freightcom_shipment_id`
+    3. VCycene separately files a formal claim through Freightcom's own portal — gathering damage photos, original invoice, packing list, proof of declared value, and sometimes a carrier inspection report
+    4. Freightcom adjudicates on their timeline (typically several weeks; longer for high-value claims)
+    5. If approved, Freightcom reimburses VCycene. VCycene then reshipsthe replacement or issues a refund to the customer separately — out of pocket until the claim resolves
+  The customer has no visibility and waits weeks. VCycene carries the documentation burden, back-and-forth with Freightcom, and upfront reshipment cost while the claim is pending.
+  **With Surebright shipping protection:**
+    1. Customer self-files at customer.surebright.com in under 5 minutes
+    2. Surebright adjudicates directly with the insurer — typically resolved in 24 hours
+    3. Customer receives repair, replacement, or refund without VCycene support involvement
+    4. VCycene sees claim status in MakeLila automatically via webhook (once #98 integration ships)
+    5. VCycene earns revenue share on shipping protection sold at checkout — no claim cost exposure
+  **Open questions (to confirm with Surebright on 2026-06-24 call):**
+    - For shipping damage specifically: does the customer go directly to Surebright, or does VCycene need to initiate anything?
+    - Does Surebright shipping protection apply from when the label is booked, or only when the customer purchases it at checkout?
+    - Does this replace Freightcom's native claims process entirely, or run in parallel?
+  **What this means for MakeLila (post-Surebright integration):**
+    - The Claims tab in `Shipping/tabs/ClaimsTab.tsx` currently files claims against `claims` table linked to `freightcom_shipment_id`. Once Surebright shipping protection is live, transit damage claims will flow through Surebright (#98 webhook), not the internal Freightcom claim form.
+    - Likely outcome: MakeLila Claims tab becomes read-only for Surebright-covered orders; Freightcom claim form retained only for orders without Surebright coverage or for delay/late claims Surebright doesn't cover.
+  **Likely touch:** `Shipping/tabs/ClaimsTab.tsx` — add coverage indicator (Surebright vs. Freightcom) and suppress internal claim form for Surebright-covered shipments; `lib/shipping.ts` — check warranty_claims for existing Surebright shipping claim before showing the Freightcom form.
+  **Prerequisite:** #98 (Surebright integration) must ship first; Surebright shipping protection confirmed active for VCycene account.
+  **Priority:** P2 — significant ops time saved per damaged shipment; prerequisite on #98.
+
 ---
 
 ## Reference
