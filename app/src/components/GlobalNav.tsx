@@ -9,6 +9,7 @@ const MODULES = [
   { path: '/marketing',     label: 'Marketing' },
   { path: '/order-review',  label: 'Sales' },
   { path: '/fulfillment',   label: 'Fulfillment' },
+  { path: '/shipping',      label: 'Shipping' },
   { path: '/stock',         label: 'Stock' },
   { path: '/service',       label: 'Service' },
   { path: '/customers',     label: 'Customers' },
