@@ -21,6 +21,8 @@ export type Customer = {
   fu1_status: string | null;
   fu2_status: string | null;
   fu_notes: string | null;
+  review_status: string | null;
+  manual_status_tags: string[] | null;
   last_synced_at: string | null;
   // Unit serials from the fulfillment sheet (source of truth). Synced by
   // public.sync_customer_serials_from_fulfillment(); see scripts/import-fulfillment-sheet.mjs.
@@ -103,11 +105,15 @@ export const FU_STATE_META: Record<FuState, { label: string; color: string; bg: 
 
 // Days from onboard completion until each follow-up is due. Reina's "1-week,
 // 1-month" framing (walkthrough #40): one check-in at a week, one at a month.
-export const FU1_DAYS = 7;
-export const FU2_DAYS = 30;
+// Call-anchored follow-up cadence (spec 2026-06-11): FU1 two weeks, FU2 four
+// weeks after the onboarding call. customers.onboard_date is mirrored from the
+// onboarding-call-complete date by markOnboardingComplete(), so it's the call
+// anchor. (Was 7 / 30 days under the prior onboard-date cadence.)
+export const FU1_DAYS = 14;
+export const FU2_DAYS = 28;
 
 /** Compute the follow-up state for a customer. FU1 cadence: FU1_DAYS after
- *  onboard. FU2 cadence: FU2_DAYS after onboard. "Today" = same calendar day. */
+ *  the onboarding call. FU2 cadence: FU2_DAYS after the call. "Today" = same calendar day. */
 export function computeFuState(c: Customer, today: Date = new Date()): FuState {
   if (!c.onboard_date) return 'unscheduled';
   const onboard = new Date(c.onboard_date + 'T00:00:00');
@@ -153,6 +159,22 @@ export async function recordFollowUp(
   const { error } = await supabase.from('customers').update(patch).eq('id', customerId);
   if (error) throw error;
   await logAction('followup_recorded', customerId, `${kind} = ${status}`);
+}
+
+/** Set the review state used by the Follow-Ups directory "awaiting review"
+ *  filter. Pass 'requested' when a review ask is sent, 'received' when it's in
+ *  hand, or null to clear. */
+export async function setReviewStatus(
+  customerId: string,
+  status: 'requested' | 'received' | null,
+): Promise<void> {
+  const { error } = await supabase
+    .from('customers')
+    .update({ review_status: status })
+    .eq('id', customerId);
+  if (error) throw error;
+  await logAction('review_status_set', customerId, status ?? '(cleared)',
+    { entityType: 'customer', entityId: customerId });
 }
 
 // Backlog #58 — aggregated per-customer profitability sourced from the

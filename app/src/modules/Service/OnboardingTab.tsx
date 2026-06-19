@@ -19,7 +19,7 @@ import styles from './Service.module.css';
 // view because it's the actionable cohort; everything else is reference.
 // "check_ins" surfaces the 1-week / 1-month follow-up cadence (#40) here in
 // the onboarding flow; the schedule is derived from customers.onboard_date.
-type ViewMode = 'not_scheduled' | 'scheduled' | 'all_units' | 'check_ins';
+type ViewMode = 'not_scheduled' | 'scheduled' | 'call_complete' | 'all_units' | 'check_ins';
 
 // FU states that represent a pending check-in (FU1 or FU2 not yet recorded).
 const PENDING_FU: FuState[] = [
@@ -47,6 +47,10 @@ export function OnboardingTab() {
   );
   const scheduled = useMemo(
     () => lifecycle.filter(l => l.onboarding_status === 'scheduled'),
+    [lifecycle],
+  );
+  const callComplete = useMemo(
+    () => lifecycle.filter(l => l.onboarding_status === 'completed'),
     [lifecycle],
   );
 
@@ -122,10 +126,18 @@ export function OnboardingTab() {
         <button
           className={`${styles.chip} ${view === 'scheduled' ? styles.chipActive : ''}`}
           onClick={() => setView('scheduled')}
-          title="Customers with a booked Calendly onboarding session"
+          title="Customers with a booked onboarding call"
         >
-          Scheduled
+          Call scheduled
           {scheduled.length > 0 && <span className={styles.chipBadge}>{scheduled.length}</span>}
+        </button>
+        <button
+          className={`${styles.chip} ${view === 'call_complete' ? styles.chipActive : ''}`}
+          onClick={() => setView('call_complete')}
+          title="Customers whose onboarding call is complete — FU1 (+2wk) / FU2 (+4wk) scheduled"
+        >
+          Call complete
+          {callComplete.length > 0 && <span className={styles.chipBadge}>{callComplete.length}</span>}
         </button>
         <button
           className={`${styles.chip} ${view === 'check_ins' ? styles.chipActive : ''}`}
@@ -153,6 +165,10 @@ export function OnboardingTab() {
           selectedId={selectedTicketId}
           onSelect={setSelectedTicketId}
         />
+      )}
+
+      {view === 'call_complete' && (
+        <AllUnitsView rows={callComplete} customerById={customerById} />
       )}
 
       {view === 'check_ins' && (
@@ -350,6 +366,10 @@ function ScheduledView({
       <tbody>
         {tickets.map(t => {
           const s = STATUS_META[t.status];
+          // An onboarding call whose date/time has passed reads as completed,
+          // regardless of the raw ticket status (display-only).
+          const callPast = t.calendly_event_start != null
+            && new Date(t.calendly_event_start).getTime() < Date.now();
           const lc = t.unit_serial ? lifecycleBySerial.get(t.unit_serial) : null;
           const c = t.customer_id ? customerById.get(t.customer_id) : null;
           const customerLabel = t.customer_name ?? c?.full_name ?? t.customer_email ?? '—';
@@ -363,7 +383,9 @@ function ScheduledView({
               <td>{customerLabel}</td>
               <td style={{ fontFamily: 'ui-monospace, monospace', fontSize: 10 }}>{t.unit_serial ?? '—'}</td>
               <td>{t.calendly_host_email ?? '—'}</td>
-              <td><span className={styles.pill} style={{ background: s.bg, color: s.color }}>{s.label}</span></td>
+              <td>{callPast
+                ? <span className={styles.pill} style={{ background: '#f0fff4', color: '#276749' }}>Call Completed</span>
+                : <span className={styles.pill} style={{ background: s.bg, color: s.color }}>{s.label}</span>}</td>
               <td>{lc ? <LifecycleActions row={lc} customer={c} /> : <span className={styles.muted}>—</span>}</td>
             </tr>
           );

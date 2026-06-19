@@ -1,5 +1,25 @@
 import type { ShelfSlot } from '../../../lib/fulfillment';
+import { getStatusMeta } from '../../../lib/stock';
 import styles from '../Fulfillment.module.css';
+
+// Why each slot colour shows — keyed by shelf_slots.status.
+const SHELF_STATUS_REASON: Record<string, string> = {
+  available: 'Available — ready to assign (green)',
+  reserved:  'Reserved for an order (orange)',
+  rework:    'Failed QC — pending rework (red)',
+  held:      'Held — out of circulation (amber)',
+  empty:     'Empty',
+};
+
+function slotTooltip(slot: ShelfSlot): string {
+  if (!slot.serial) return `Empty · Skid ${slot.skid} · slot ${slot.slot_index}`;
+  return [
+    slot.serial,
+    `Shelf: ${SHELF_STATUS_REASON[slot.status] ?? slot.status}`,
+    slot.unit_status ? `Machine: ${getStatusMeta(slot.unit_status).label}` : null,
+    `Skid ${slot.skid} · slot ${slot.slot_index}`,
+  ].filter(Boolean).join('\n');
+}
 
 type DragHandlers = {
   onDragStart: (e: React.DragEvent, slot: ShelfSlot) => void;
@@ -30,7 +50,9 @@ export function Slot({
     isDropTarget ? styles.dropTarget : '',
   ].filter(Boolean).join(' ');
 
-  const draggable = slot.status !== 'empty';
+  // 'held' units (team-test / quarantine) are physically present but out of
+  // circulation — don't let an operator drag one onto an order.
+  const draggable = slot.status !== 'empty' && slot.status !== 'held';
 
   return (
     <div
@@ -41,7 +63,7 @@ export function Slot({
       onDragOver={e => handlers.onDragOver(e, slot)}
       onDragLeave={e => handlers.onDragLeave(e, slot)}
       onDrop={e => handlers.onDrop(e, slot)}
-      title={slot.serial ? `${slot.serial} (${slot.skid} · ${slot.slot_index})` : `empty ${slot.skid} · ${slot.slot_index}`}
+      title={slotTooltip(slot)}
     >
       {slot.serial ? (
         <>

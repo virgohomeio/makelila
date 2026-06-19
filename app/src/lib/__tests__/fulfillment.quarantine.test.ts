@@ -41,7 +41,7 @@ vi.mock('../activityLog', () => ({ logAction: vi.fn().mockResolvedValue(undefine
 
 import { assignUnit } from '../fulfillment';
 
-describe('assignUnit — quarantine guard', () => {
+describe('assignUnit — pickable guard', () => {
   beforeEach(() => {
     fromMock.mockClear();
     unitStatus.value = 'ready';
@@ -50,7 +50,14 @@ describe('assignUnit — quarantine guard', () => {
   it('throws when the target unit is quarantined', async () => {
     unitStatus.value = 'quarantine';
     await expect(assignUnit('queue-1', 'LL01-TEST-001', 'order-1')).rejects.toThrow(
-      /quarantined and cannot be assigned/i,
+      /cannot be assigned/i,
+    );
+  });
+
+  it('throws when the target unit is in team-test', async () => {
+    unitStatus.value = 'team-test';
+    await expect(assignUnit('queue-1', 'LL01-TEST-001', 'order-1')).rejects.toThrow(
+      /cannot be assigned/i,
     );
   });
 

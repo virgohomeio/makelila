@@ -10,6 +10,8 @@ import {
 import { useCustomers, syncCustomersFromHubspot, type Customer } from '../../lib/customers';
 import { useUnits } from '../../lib/stock';
 import { TicketDetailPanel } from './TicketDetailPanel';
+import { CustomerProfilePanel } from './CustomerProfilePanel';
+import { groupTicketsByCustomer, type CustomerGroup } from './ticketGrouping';
 import styles from './Service.module.css';
 
 const STATUS_FILTERS: { key: TicketStatus | 'all'; label: string }[] = [
@@ -26,7 +28,9 @@ export function SupportTab() {
   const [areaFilter, setAreaFilter] = useState<IssueArea | 'all' | 'none'>('all');
   const [q, setQ] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
   const [showNew, setShowNew] = useState(false);
+  const [newPreset, setNewPreset] = useState<Customer | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
 
@@ -50,6 +54,11 @@ export function SupportTab() {
       return true;
     });
   }, [tickets, statusFilter, sourceFilter, topicFilter, areaFilter, q]);
+
+  // One row per customer (a "ticket profile"); customer-less tickets fall into
+  // the Unassigned group. Filters above narrow the ticket pool first, so a
+  // profile appears when *any* of its tickets match.
+  const grouped = useMemo(() => groupTicketsByCustomer(filtered), [filtered]);
 
   // Volume per issue area, computed over the *unfiltered* support-ticket
   // pool so the chip counts don't shift when other filters narrow the view.
@@ -151,7 +160,7 @@ export function SupportTab() {
           disabled={syncing}
           title="Manually trigger the Gmail sync edge function"
         >{syncing ? 'Syncing…' : 'Sync now'}</button>
-        <button className={styles.addBtn} onClick={() => setShowNew(true)}>
+        <button className={styles.addBtn} onClick={() => { setNewPreset(null); setShowNew(true); }}>
           + Add ticket
         </button>
       </div>
@@ -203,53 +212,119 @@ export function SupportTab() {
 
       {syncMessage && <div className={styles.syncMessage}>{syncMessage}</div>}
 
-      {filtered.length === 0 ? (
+      {grouped.groups.length === 0 && grouped.unassigned.length === 0 ? (
         <div className={styles.empty}>No tickets match these filters.</div>
       ) : (
-        <table className={styles.table}>
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>Age</th>
-              <th>Created</th>
-              <th>Customer</th>
-              <th>Subject</th>
-              <th>Topic</th>
-              <th>Source</th>
-              <th>Priority</th>
-              <th>SLA</th>
-              <th>Status</th>
-              <th>Owner</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map(t => (
-              <TicketRow key={t.id} t={t}
-                selected={selectedId === t.id}
-                onClick={() => setSelectedId(t.id)} />
-            ))}
-          </tbody>
-        </table>
+        <>
+          {grouped.groups.length > 0 && (
+            <table className={styles.table}>
+              <thead>
+                <tr>
+                  <th>Customer</th>
+                  <th>Tickets</th>
+                  <th>Open</th>
+                  <th>Last activity</th>
+                  <th>Status</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {grouped.groups.map(g => (
+                  <CustomerGroupRow key={g.customerId} g={g}
+                    selected={selectedCustomerId === g.customerId}
+                    onClick={() => setSelectedCustomerId(g.customerId)} />
+                ))}
+              </tbody>
+            </table>
+          )}
+
+          {grouped.unassigned.length > 0 && (
+            <>
+              <div className={styles.unassignedHead}>
+                Unassigned ({grouped.unassigned.length}) — no customer linked
+              </div>
+              <table className={styles.table}>
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>Age</th>
+                    <th>Created</th>
+                    <th>Customer</th>
+                    <th>Subject</th>
+                    <th>Topic</th>
+                    <th>Source</th>
+                    <th>Priority</th>
+                    <th>SLA</th>
+                    <th>Status</th>
+                    <th>Owner</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {grouped.unassigned.map(t => (
+                    <TicketRow key={t.id} t={t}
+                      selected={selectedId === t.id}
+                      onClick={() => setSelectedId(t.id)} />
+                  ))}
+                </tbody>
+              </table>
+            </>
+          )}
+        </>
       )}
+
+      {selectedCustomerId && (() => {
+        const g = grouped.groups.find(x => x.customerId === selectedCustomerId);
+        if (!g) return null;
+        const cust = customers.find(c => c.id === selectedCustomerId);
+        return (
+          <CustomerProfilePanel
+            group={g}
+            customer={cust}
+            onClose={() => setSelectedCustomerId(null)}
+            onOpenTicket={(t) => setSelectedId(t.id)}
+            onAddTicket={() => { setNewPreset(cust ?? null); setShowNew(true); }}
+          />
+        );
+      })()}
 
       {selected && <TicketDetailPanel ticket={selected} onClose={() => setSelectedId(null)} />}
 
       {showNew && (
         <NewTicketModal
           customers={customers}
-          onClose={() => setShowNew(false)}
-          onCreated={(t) => { setShowNew(false); setSelectedId(t.id); }}
+          presetCustomer={newPreset}
+          onClose={() => { setShowNew(false); setNewPreset(null); }}
+          onCreated={(t) => { setShowNew(false); setNewPreset(null); setSelectedId(t.id); }}
         />
       )}
     </>
   );
 }
 
+function CustomerGroupRow({ g, selected, onClick }: { g: CustomerGroup; selected: boolean; onClick: () => void }) {
+  const s = statusMeta(g.rollupStatus);
+  const ageHours = (Date.now() - new Date(g.lastActivity).getTime()) / 3_600_000;
+  return (
+    <tr className={`${styles.row} ${selected ? styles.rowSelected : ''}`} onClick={onClick}>
+      <td>
+        <div>{g.customerName}</div>
+        {g.customerEmail && <div className={styles.rowSummary}>{g.customerEmail}</div>}
+      </td>
+      <td>{g.total}</td>
+      <td>{g.openCount > 0 ? <strong>{g.openCount}</strong> : '—'}</td>
+      <td>{formatAge(ageHours)}</td>
+      <td><span className={styles.pill} style={{ background: s.bg, color: s.color }}>{s.label}</span></td>
+      <td style={{ textAlign: 'right', color: '#a0aec0' }}>›</td>
+    </tr>
+  );
+}
+
 function NewTicketModal({
-  customers, onClose, onCreated,
+  customers, presetCustomer, onClose, onCreated,
 }: {
   customers: Customer[];
+  presetCustomer?: Customer | null;
   onClose: () => void;
   onCreated: (t: ServiceTicket) => void;
 }) {
@@ -258,7 +333,8 @@ function NewTicketModal({
   const [description, setDescription] = useState('');
   const [priority, setPriority] = useState<TicketPriority>('normal');
   const [customerSearch, setCustomerSearch] = useState('');
-  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
+  // Pre-seed the customer when opened from a profile's "+ Add ticket".
+  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(presetCustomer ?? null);
   const [resyncing, setResyncing] = useState(false);
   const [resyncMsg, setResyncMsg] = useState<string | null>(null);
 

@@ -1,33 +1,43 @@
-import { useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { InboxTab } from './InboxTab';
 import { OnboardingTab } from './OnboardingTab';
-import { FollowUpsTab } from './FollowUpsTab';
 import { SupportTab } from './SupportTab';
 import ReplacementTab from './ReplacementTab';
+import { FollowUpsTab } from './FollowUpsTab';
 import { useIsMobile } from '../../lib/useMediaQuery';
 import { MobileTabbedModule, type MobileTab } from '../../components/MobileTabbedModule';
 import styles from './Service.module.css';
 
-type Tab = 'inbox' | 'onboarding' | 'followups' | 'support' | 'replacement';
+type Tab = 'inbox' | 'onboarding' | 'support' | 'replacement' | 'followups';
 
 const TABS: { key: Tab; label: string }[] = [
   { key: 'onboarding',  label: 'Onboarding' },
-  { key: 'followups',   label: 'Follow-ups' },
+  { key: 'followups',   label: 'Follow-Ups' },
   { key: 'support',     label: 'Support Tickets' },
   { key: 'replacement', label: 'Replacement' },
   { key: 'inbox',       label: 'Inbox' },
 ];
 
+// Mobile-specific tab metadata. Subtitle + icon make each card scannable
+// without drilling in; lined up against `TABS` above by .key.
 const MOBILE_TAB_META: Record<Tab, { subtitle: string; icon: string; iconBg: string }> = {
   inbox:       { subtitle: 'Untriaged Quo + email conversations',         icon: '📥', iconBg: '#fff3e0' },
   onboarding:  { subtitle: 'Customers in their first 30 days',            icon: '🚀', iconBg: '#e6f4ea' },
-  followups:   { subtitle: 'FU1 (7-day) + FU2 (30-day) check-in calendar', icon: '📅', iconBg: '#f0f4ff' },
   support:     { subtitle: 'Open tickets needing follow-up or reply',     icon: '🎫', iconBg: '#fef1f0' },
   replacement: { subtitle: 'Warranty replacements + parts queue',         icon: '🔁', iconBg: '#fef1f0' },
+  followups:   { subtitle: 'Calendar of onboarding calls + FU1/FU2',      icon: '🗓️', iconBg: '#e6f4ea' },
 };
 
 export default function Service() {
-  const [tab, setTab] = useState<Tab>('onboarding');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const TAB_KEYS: Tab[] = ['inbox', 'onboarding', 'support', 'replacement', 'followups'];
+  const paramTab = searchParams.get('tab');
+  const tab: Tab = (TAB_KEYS as string[]).includes(paramTab ?? '') ? (paramTab as Tab) : 'onboarding';
+  const setTab = (next: Tab) => setSearchParams(prev => { prev.set('tab', next); return prev; }, { replace: true });
+  // Mobile uses null to mean "show the picker"; valid tab key shows content.
+  const mobileActiveKey: Tab | null = (TAB_KEYS as string[]).includes(paramTab ?? '') ? (paramTab as Tab) : null;
+  const setMobileTab = (next: Tab | null) =>
+    setSearchParams(prev => { if (next) { prev.set('tab', next); } else { prev.delete('tab'); } return prev; }, { replace: true });
   const isMobile = useIsMobile();
 
   if (isMobile) {
@@ -38,13 +48,13 @@ export default function Service() {
       content:
         t.key === 'inbox'       ? <InboxTab /> :
         t.key === 'onboarding'  ? <OnboardingTab /> :
-        t.key === 'followups'   ? <FollowUpsTab /> :
         t.key === 'support'     ? <SupportTab /> :
+        t.key === 'followups'   ? <FollowUpsTab /> :
                                   <ReplacementTab />,
     }));
     return (
       <div className={styles.layout}>
-        <MobileTabbedModule tabs={mobileTabs} />
+        <MobileTabbedModule tabs={mobileTabs} activeKey={mobileActiveKey} onChange={setMobileTab} />
       </div>
     );
   }
@@ -63,9 +73,9 @@ export default function Service() {
       <div className={styles.panel}>
         {tab === 'inbox'       && <InboxTab />}
         {tab === 'onboarding'  && <OnboardingTab />}
-        {tab === 'followups'   && <FollowUpsTab />}
         {tab === 'support'     && <SupportTab />}
         {tab === 'replacement' && <ReplacementTab />}
+        {tab === 'followups'   && <FollowUpsTab />}
       </div>
     </div>
   );

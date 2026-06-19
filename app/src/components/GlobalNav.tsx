@@ -13,6 +13,7 @@ const MODULES = [
   { path: '/stock',         label: 'Stock' },
   { path: '/service',       label: 'Service' },
   { path: '/customers',     label: 'Customers' },
+  { path: '/lovely',        label: 'Lovely' },
   { path: '/finance',       label: 'Finance' },
 ];
 

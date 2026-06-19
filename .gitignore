@@ -8,6 +8,7 @@ build/
 *.tsbuildinfo
 
 # Environment
+.env
 .env.local
 .env.*.local
 
@@ -59,3 +60,6 @@ fulfillment records/
 # in commit 27668ce — a future history-scrub PR can purge if compliance
 # posture requires it.
 /lila-follow-up-calendar.html
+.claude/settings.json
+Claude.md
+

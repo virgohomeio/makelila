@@ -31,6 +31,7 @@ function mkConv(partial: Partial<ServiceTicket> & { id: string }): ServiceTicket
     replacement_order_id: null,
     diagnosis_link_sent_at: null,
     diag_cohost_invited_at: null,
+    diagnosis_followup_done_at: null,
     google_calendar_event_id: null,
     sla_policy_id: null,
     first_response_due_at: null,
@@ -39,6 +40,9 @@ function mkConv(partial: Partial<ServiceTicket> & { id: string }): ServiceTicket
     sla_resolved_at: null,
     sla_status: null,
     root_cause: null,
+    linear_issue_url: null,
+    github_issue_url: null,
+    engineering_resolved_at: null,
     ...partial,
   };
 }

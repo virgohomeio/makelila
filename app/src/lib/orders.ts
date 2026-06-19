@@ -64,6 +64,12 @@ export type Order = {
   region_state: string | null;
   country: 'US' | 'CA';
   address_verdict: 'house' | 'apt' | 'remote' | 'condo';
+  // Urban/suburban vs rural area classification (separate from address_verdict's
+  // dwelling type). area_type_source tracks provenance: 'auto' (postal-code
+  // guess on sync), 'verified' (set by the Verify-address step via Claude), or
+  // 'manual' (operator override). null = unclassified.
+  area_type: 'urban' | 'suburban' | 'rural' | null;
+  area_type_source: string;
   address_verified_at: string | null;
   address_match: 'match' | 'mismatch' | 'unverifiable' | null;
   address_google_formatted: string | null;
@@ -198,6 +204,34 @@ export async function setSalesConfirmedFit(id: string, value: boolean): Promise<
   if (error) throw error;
 }
 
+export type AreaType = 'urban' | 'suburban' | 'rural';
+
+/** Full labels for the detail card dropdown. */
+export const AREA_TYPE_LABEL: Record<AreaType, string> = {
+  urban:    'Urban',
+  suburban: 'Suburban',
+  rural:    'Rural / Remote',
+};
+
+/** Short labels for the compact list-row tag. */
+export const AREA_TYPE_TAG: Record<AreaType, string> = {
+  urban:    'Urban',
+  suburban: 'Suburban',
+  rural:    'Rural',
+};
+
+/** Operator override of the auto-guessed area type. Flips the source to
+ *  'manual' so a later Shopify re-sync won't clobber the choice. Passing null
+ *  clears it back to unclassified (and back to auto provenance). */
+export async function setAreaType(id: string, value: AreaType | null): Promise<void> {
+  const { error } = await supabase
+    .from('orders')
+    .update({ area_type: value, area_type_source: value ? 'manual' : 'auto' })
+    .eq('id', id);
+  if (error) throw error;
+  await logAction('area_type_set', id, value ?? 'unclassified');
+}
+
 export async function updateFreightEstimate(id: string, amount: number): Promise<void> {
   // Backlog #17 — operator edit flips the source to 'manual' so the FreightCard
   // can render a "(operator edit)" tag and reporting can distinguish synced
@@ -214,10 +248,13 @@ export type VerifyAddressResult = {
   customer_postal: string | null;
   google_postal: string | null;
   google_formatted: string | null;
+  // Area type the verify step classified (urban/suburban/rural), written back
+  // to the order with source 'verified'. null if it couldn't be determined.
+  area_type: 'urban' | 'suburban' | 'rural' | null;
 };
 
-export async function confirmAddress(orderId: string): Promise<{ order_ref: string }> {
-  const { data, error } = await supabase.functions.invoke<{ order_ref: string }>(
+export async function confirmAddress(orderId: string): Promise<{ order_ref: string; already_confirmed: boolean }> {
+  const { data, error } = await supabase.functions.invoke<{ order_ref: string; already_confirmed: boolean }>(
     'confirm-address',
     { body: { order_id: orderId } },
   );

@@ -21,17 +21,14 @@
 // won't re-fire. Missing env = soft no-op (no invite sent, sync proceeds).
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
-import { SignJWT, importPKCS8 } from 'https://esm.sh/jose@5.9.6';
 import { corsHeaders } from '../_shared/cors.ts';
 import { authenticate } from '../_shared/auth.ts';
-
-const CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.events';
-
-type ServiceAccountKey = {
-  client_email: string;
-  private_key: string;
-  token_uri: string;
-};
+import {
+  getCalendarAccessToken,
+  findCalendlyEventOnCalendar,
+  addAttendeesToCalendarEvent,
+  type ServiceAccountKey,
+} from '../_shared/google-calendar.ts';
 
 type CalendlyEvent = {
   uri: string;
@@ -327,40 +324,8 @@ async function handle(req: Request): Promise<Response> {
 }
 
 // ============================================================ Google Calendar
-// (Backlog #44 — kept inline rather than extracted to _shared/ to limit
-// the blast radius of this change. If/when more functions need Calendar,
-// promote getCalendarAccessToken + createCalendarInvite into a shared
-// helper alongside sync-gmail-tickets' getAccessToken.)
-
-async function getCalendarAccessToken(
-  saKey: ServiceAccountKey, delegatedSubject: string,
-): Promise<string> {
-  const now = Math.floor(Date.now() / 1000);
-  const privateKey = await importPKCS8(saKey.private_key, 'RS256');
-  const assertion = await new SignJWT({ scope: CALENDAR_SCOPE })
-    .setProtectedHeader({ alg: 'RS256', typ: 'JWT' })
-    .setIssuer(saKey.client_email)
-    .setSubject(delegatedSubject)
-    .setAudience(saKey.token_uri)
-    .setIssuedAt(now)
-    .setExpirationTime(now + 3600)
-    .sign(privateKey);
-
-  const res = await fetch(saKey.token_uri, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
-      assertion,
-    }),
-  });
-  if (!res.ok) {
-    throw new Error(`Google token endpoint ${res.status}: ${(await res.text()).slice(0, 300)}`);
-  }
-  const json = await res.json() as { access_token?: string };
-  if (!json.access_token) throw new Error('Google token endpoint returned no access_token');
-  return json.access_token;
-}
+// Auth + event helpers live in ../_shared/google-calendar.ts. Only the
+// Reina-specific weekend rule stays local since it's not a Calendar helper.
 
 /** Returns true when the given ISO timestamp falls on a Sat/Sun in the
  *  given IANA timezone. Used to skip Reina's co-host invite for weekend
@@ -372,109 +337,5 @@ function isWeekendInTimezone(isoTs: string, timezone: string): boolean {
   });
   const wd = fmt.format(new Date(isoTs));
   return wd === 'Sat' || wd === 'Sun';
-}
-
-type CalendarAttendee = {
-  email?: string;
-  displayName?: string;
-  responseStatus?: string;
-  organizer?: boolean;
-  self?: boolean;
-};
-
-type CalendarEvent = {
-  id: string;
-  summary?: string;
-  description?: string;
-  start?: { dateTime?: string };
-  end?:   { dateTime?: string };
-  attendees?: CalendarAttendee[];
-  status?: string;
-};
-
-/** Locate the Google Calendar event Calendly created for a given
- *  scheduled-event start time + invitee email. We list events in a
- *  ±2 minute window around the Calendly start time and pick the first
- *  one whose attendee list contains the customer's email. ±2 min covers
- *  small clock skew between Calendly's stored time and Google's stored
- *  time without grabbing adjacent bookings. */
-async function findCalendlyEventOnCalendar(
-  accessToken: string,
-  calendarId: string,
-  calendlyStartIso: string,
-  customerEmail: string | null,
-): Promise<CalendarEvent | null> {
-  const startMs = Date.parse(calendlyStartIso);
-  const timeMin = new Date(startMs - 2 * 60 * 1000).toISOString();
-  const timeMax = new Date(startMs + 2 * 60 * 1000).toISOString();
-
-  const url = new URL(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`);
-  url.searchParams.set('timeMin', timeMin);
-  url.searchParams.set('timeMax', timeMax);
-  url.searchParams.set('singleEvents', 'true');
-  url.searchParams.set('orderBy', 'startTime');
-  url.searchParams.set('maxResults', '20');
-
-  const res = await fetch(url.toString(), {
-    headers: { Authorization: `Bearer ${accessToken}` },
-  });
-  if (!res.ok) {
-    throw new Error(`Calendar events.list ${res.status}: ${(await res.text()).slice(0, 300)}`);
-  }
-  const json = await res.json() as { items?: CalendarEvent[] };
-  const items = (json.items ?? []).filter(e => e.status !== 'cancelled');
-
-  if (customerEmail) {
-    const target = customerEmail.toLowerCase();
-    const match = items.find(e =>
-      (e.attendees ?? []).some(a => (a.email ?? '').toLowerCase() === target)
-    );
-    if (match) return match;
-  }
-
-  // No customer email available, or no attendee match: fall back to the
-  // single closest event by start-time delta (only safe when there's
-  // exactly one event in the window).
-  if (items.length === 1) return items[0];
-  return null;
-}
-
-/** PATCH the event's attendees array to include the new attendees. Any
- *  emails already on the list are silently de-duped. sendUpdates=all
- *  fires the standard Google Calendar invite email to the *added*
- *  attendees only. */
-async function addAttendeesToCalendarEvent(
-  accessToken: string,
-  calendarId: string,
-  eventId: string,
-  existingAttendees: CalendarAttendee[],
-  newAttendeeEmails: string[],
-): Promise<void> {
-  const existingLower = new Set(
-    existingAttendees.map(a => (a.email ?? '').toLowerCase()).filter(Boolean)
-  );
-  const toAdd: CalendarAttendee[] = newAttendeeEmails
-    .filter(e => !existingLower.has(e.toLowerCase()))
-    .map(email => ({ email }));
-  if (toAdd.length === 0) return;  // already on the event — no-op
-
-  // Strip fields Google rejects on write (organizer/self echo back is
-  // fine; responseStatus would force a reset of the customer's response).
-  const cleanAttendees = [...existingAttendees, ...toAdd]
-    .filter(a => a.email)
-    .map(a => ({ email: a.email!, displayName: a.displayName, responseStatus: a.responseStatus }));
-
-  const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}?sendUpdates=all`;
-  const res = await fetch(url, {
-    method: 'PATCH',
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ attendees: cleanAttendees }),
-  });
-  if (!res.ok) {
-    throw new Error(`Calendar events.patch ${res.status}: ${(await res.text()).slice(0, 300)}`);
-  }
 }
 

@@ -3,18 +3,13 @@ import { isTelemetryConfigured } from '../../lib/supabaseTelemetry';
 const Dashboard = lazy(() => import('../Dashboard'));
 import {
   useCustomers, syncCustomersFromHubspot, exportPurchasers, pushToKlaviyo,
-  computeFuState, recordFollowUp, FU_STATE_META,
-  type Customer, type FuState,
+  type Customer,
 } from '../../lib/customers';
 import { useOrders } from '../../lib/orders';
 import { formatMoney } from '../../lib/money';
 import { useUnits } from '../../lib/stock';
-import { useServiceTickets, useCustomerLifecycle, type CustomerLifecycle } from '../../lib/service';
-import {
-  useCustomerInvoices, uploadInvoice, getInvoiceSignedUrl, deleteInvoice,
-  type CustomerInvoice, type InvoiceDocType,
-} from '../../lib/invoices';
-import { OverdueFollowupPanel } from './OverdueFollowupPanel';
+import { useServiceTickets } from '../../lib/service';
+import { Link } from 'react-router-dom';
 import { ProfitabilityTab } from './ProfitabilityTab';
 import { JourneyTab } from './JourneyTab';
 import { useIsMobile } from '../../lib/useMediaQuery';
@@ -62,54 +57,21 @@ export default function Customers() {
   }, [units]);
   const [search, setSearch] = useState('');
   const [country, setCountry] = useState<'all' | 'CA' | 'US' | 'other'>('all');
-  const [fuFilter, setFuFilter] = useState<'all' | 'needs_action' | FuState>('all');
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
-  const today = useMemo(() => new Date(), []);
   const selectedCustomer = useMemo(
     () => customers.find(c => c.id === selectedCustomerId) ?? null,
     [customers, selectedCustomerId],
   );
 
-  // Compute fu state once per customer; reused by filter + render
-  const withFu = useMemo(
-    () => customers.map(c => ({ c, fu: computeFuState(c, today) })),
-    [customers, today],
-  );
-
-  const overdueIds = useMemo(() => {
-    return withFu
-      .filter(({ fu }) => fu === 'overdue_fu1' || fu === 'overdue_fu2')
-      .sort((a, b) => {
-        const ao = a.c.onboard_date ?? '9999-12-31';
-        const bo = b.c.onboard_date ?? '9999-12-31';
-        return ao.localeCompare(bo);
-      })
-      .map(({ c }) => c.id);
-  }, [withFu]);
-
-  const fuCounts = useMemo(() => {
-    const counts: Partial<Record<FuState, number>> = {};
-    for (const { fu } of withFu) counts[fu] = (counts[fu] ?? 0) + 1;
-    const needsAction =
-      (counts.overdue_fu1 ?? 0) + (counts.overdue_fu2 ?? 0) +
-      (counts.due_fu1 ?? 0) + (counts.due_fu2 ?? 0);
-    return { ...counts, needsAction };
-  }, [withFu]);
-
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return withFu.filter(({ c, fu }) => {
+    return customers.filter(c => {
       if (country === 'CA' && c.country !== 'CA') return false;
       if (country === 'US' && c.country !== 'US') return false;
       if (country === 'other' && (c.country === 'CA' || c.country === 'US')) return false;
-      if (fuFilter === 'needs_action') {
-        if (!['overdue_fu1','overdue_fu2','due_fu1','due_fu2'].includes(fu)) return false;
-      } else if (fuFilter !== 'all') {
-        if (fu !== fuFilter) return false;
-      }
       if (q && !(
         c.full_name.toLowerCase().includes(q) ||
         c.email?.toLowerCase().includes(q) ||
@@ -118,16 +80,8 @@ export default function Customers() {
         c.region?.toLowerCase().includes(q)
       )) return false;
       return true;
-    }).sort((a, b) => {
-      // Sort by FU urgency first when an FU filter is active or when viewing
-      // 'needs_action'; otherwise keep the existing alphabetical order
-      if (fuFilter !== 'all' && fuFilter !== 'needs_action') return 0;
-      if (fuFilter === 'needs_action') {
-        return FU_STATE_META[a.fu].sortKey - FU_STATE_META[b.fu].sortKey;
-      }
-      return a.c.full_name.localeCompare(b.c.full_name);
-    });
-  }, [withFu, country, search, fuFilter]);
+    }).sort((a, b) => a.full_name.localeCompare(b.full_name));
+  }, [customers, country, search]);
 
   const stats = useMemo(() => {
     const s = { total: 0, ca: 0, us: 0, other: 0, withEmail: 0, withPhone: 0, withAddress: 0 };
@@ -212,7 +166,7 @@ export default function Customers() {
     const pickerTabs: { key: Tab; label: string; subtitle: string; icon: string; iconBg: string }[] = [
       { key: 'journey',       label: 'Journey',       subtitle: '10-stage CJM · health per customer',           icon: '🛤️', iconBg: '#fef1f0' },
       { key: 'profitability', label: 'Profitability', subtitle: 'Revenue · returns · margin per customer',      icon: '💰', iconBg: '#fff3e0' },
-      { key: 'directory',     label: 'Directory',     subtitle: 'All customers · search · follow-up state',     icon: '👥', iconBg: '#e3f0fb' },
+      { key: 'directory',     label: 'Directory',     subtitle: 'All customers · search',     icon: '👥', iconBg: '#e3f0fb' },
       { key: 'fleet',         label: 'Fleet',         subtitle: 'Live device telemetry · machine health',         icon: '📡', iconBg: '#e3f0fb' },
     ];
     return (
@@ -365,10 +319,10 @@ export default function Customers() {
         <KPI label="With address" value={stats.withAddress} sub={stats.total > 0 ? `${Math.round((stats.withAddress / stats.total) * 100)}% coverage` : undefined} />
       </div>
 
-      <OverdueFollowupPanel
-        overdueCount={overdueIds.length}
-        overdueCustomerIds={overdueIds}
-      />
+      <div className={styles.followupMoved}>
+        Follow-ups now live in{' '}
+        <Link to="/service?tab=followups">Service → Follow-Ups →</Link>
+      </div>
 
       <div className={styles.filterBar}>
         {(['all','CA','US','other'] as const).map(c => (
@@ -378,24 +332,6 @@ export default function Customers() {
             className={`${styles.chip} ${country === c ? styles.chipActive : ''}`}
           >{c === 'all' ? 'All' : c === 'other' ? 'Other' : c}</button>
         ))}
-        <span className={styles.filterDivider} />
-        <button
-          onClick={() => setFuFilter('all')}
-          className={`${styles.chip} ${fuFilter === 'all' ? styles.chipActive : ''}`}
-        >Any FU</button>
-        <button
-          onClick={() => setFuFilter('needs_action')}
-          className={`${styles.chip} ${fuFilter === 'needs_action' ? styles.chipActive : ''}`}
-          title="Overdue + due today, both FU1 and FU2"
-        >Needs action {fuCounts.needsAction > 0 && <span className={styles.chipBadge}>{fuCounts.needsAction}</span>}</button>
-        <button
-          onClick={() => setFuFilter('overdue_fu1')}
-          className={`${styles.chip} ${fuFilter === 'overdue_fu1' ? styles.chipActive : ''}`}
-        >FU1 overdue {(fuCounts.overdue_fu1 ?? 0) > 0 && <span className={styles.chipBadge}>{fuCounts.overdue_fu1}</span>}</button>
-        <button
-          onClick={() => setFuFilter('overdue_fu2')}
-          className={`${styles.chip} ${fuFilter === 'overdue_fu2' ? styles.chipActive : ''}`}
-        >FU2 overdue {(fuCounts.overdue_fu2 ?? 0) > 0 && <span className={styles.chipBadge}>{fuCounts.overdue_fu2}</span>}</button>
         <input
           type="search"
           value={search}
@@ -417,16 +353,14 @@ export default function Customers() {
               <th>Phone</th>
               <th>Serial(s)</th>
               <th>Address</th>
-              <th>Follow-up</th>
               <th>Last sync</th>
             </tr>
           </thead>
           <tbody>
-            {filtered.map(({ c, fu }) => (
+            {filtered.map(c => (
               <CustomerRow
                 key={c.id}
                 c={c}
-                fu={fu}
                 serials={
                   // Sheet is the source of truth: prefer the synced serials,
                   // then the canonical units.customer_id link, and only fall
@@ -441,7 +375,7 @@ export default function Customers() {
               />
             ))}
             {filtered.length === 0 && (
-              <tr><td colSpan={7} className={styles.empty}>No customers match the filter.</td></tr>
+              <tr><td colSpan={6} className={styles.empty}>No customers match the filter.</td></tr>
             )}
           </tbody>
         </table>
@@ -458,11 +392,10 @@ export default function Customers() {
   );
 }
 
-function CustomerRow({ c, fu, serials, onSelect }: { c: Customer; fu: FuState; serials: string[]; onSelect: () => void }) {
+function CustomerRow({ c, serials, onSelect }: { c: Customer; serials: string[]; onSelect: () => void }) {
   const cityRegion = [c.city, c.region].filter(Boolean).join(', ');
   const fullAddrParts = [c.address_line, cityRegion, c.postal_code, c.country].filter(Boolean);
   const addr = fullAddrParts.join(' · ');
-  const fuMeta = FU_STATE_META[fu];
   const serialsLabel = serials.length === 0
     ? null
     : serials.length === 1
@@ -477,19 +410,6 @@ function CustomerRow({ c, fu, serials, onSelect }: { c: Customer; fu: FuState; s
         {serialsLabel ?? <span className={styles.muted}>—</span>}
       </td>
       <td title={addr}>{addr || <span className={styles.muted}>—</span>}</td>
-      <td>
-        {fu === 'unscheduled' ? (
-          <span className={styles.muted}>—</span>
-        ) : (
-          <span
-            style={{
-              fontSize: 10, padding: '2px 8px', borderRadius: 4,
-              color: fuMeta.color, background: fuMeta.bg, border: `1px solid ${fuMeta.color}33`,
-              fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.3,
-            }}
-          >{fuMeta.label}</span>
-        )}
-      </td>
       <td className={styles.mono}>
         {c.last_synced_at
           ? new Date(c.last_synced_at).toLocaleDateString('en-US', { year: '2-digit', month: 'short', day: 'numeric' })
@@ -503,9 +423,6 @@ function CustomerDetailPanel({ customer, onClose }: { customer: Customer; onClos
   const { all: orders } = useOrders();
   const { units } = useUnits();
   const { tickets } = useServiceTickets();
-  const { rows: lifecycleRows } = useCustomerLifecycle();
-  const lifecycle = lifecycleRows.find(l => l.customer_id === customer.id) ?? null;
-
   const lcEmail = customer.email?.toLowerCase() ?? '';
   const lcName = customer.full_name.toLowerCase();
 
@@ -546,10 +463,6 @@ function CustomerDetailPanel({ customer, onClose }: { customer: Customer; onClos
           </PanelSection>
 
           <LilaAppActivitySection customerId={customer.id} />
-
-          <FollowUpSection customer={customer} lifecycle={lifecycle} />
-
-          <InvoicesSection customerId={customer.id} />
 
           <PanelSection title={`Orders (${myOrders.length})`}>
             {myOrders.length === 0
@@ -708,233 +621,6 @@ function KPI({ label, value, sub }: { label: string; value: number | string; sub
     </div>
   );
 }
-
-// ────────────────────────────────────────────────────────────────────────
-// Follow-up section in the customer detail panel
-// ────────────────────────────────────────────────────────────────────────
-// ────────────────────────────────────────────────────────────────────────
-// Invoices section in the customer detail panel
-// ────────────────────────────────────────────────────────────────────────
-function InvoicesSection({ customerId }: { customerId: string }) {
-  const { invoices, loading, reload } = useCustomerInvoices(customerId);
-  const [showForm, setShowForm] = useState(false);
-  const [file, setFile] = useState<File | null>(null);
-  const [invoiceNum, setInvoiceNum] = useState('');
-  const [docType, setDocType] = useState<InvoiceDocType>('invoice');
-  const [uploading, setUploading] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-  const [deleting, setDeleting] = useState<string | null>(null);
-
-  const resetForm = () => { setFile(null); setInvoiceNum(''); setDocType('invoice'); setErr(null); setShowForm(false); };
-
-  const handleUpload = async () => {
-    if (!file || !invoiceNum.trim()) return;
-    setUploading(true); setErr(null);
-    try {
-      await uploadInvoice({ customerId, file, invoiceNumber: invoiceNum, documentType: docType });
-      resetForm();
-      void reload();
-    } catch (e) {
-      setErr((e as Error).message);
-    } finally {
-      setUploading(false);
-    }
-  };
-
-  const handleOpen = async (inv: CustomerInvoice) => {
-    try {
-      const url = await getInvoiceSignedUrl(inv.storage_path);
-      window.open(url, '_blank', 'noopener');
-    } catch (e) {
-      alert(`Could not open PDF: ${(e as Error).message}`);
-    }
-  };
-
-  const handleDelete = async (inv: CustomerInvoice) => {
-    if (!window.confirm(`Remove ${inv.file_name} from this customer? The file will be permanently deleted.`)) return;
-    setDeleting(inv.id);
-    try {
-      await deleteInvoice(inv.id, inv.storage_path);
-      void reload();
-    } catch (e) {
-      alert((e as Error).message);
-    } finally {
-      setDeleting(null);
-    }
-  };
-
-  const DOC_LABEL: Record<InvoiceDocType, string> = { invoice: 'INV', refund_receipt: 'REF' };
-
-  return (
-    <PanelSection title={`Invoices & Receipts${invoices.length > 0 ? ` (${invoices.length})` : ''}`}>
-      {loading
-        ? <div className={styles.emptyRow}>Loading…</div>
-        : invoices.length === 0
-          ? <div className={styles.emptyRow}>No invoices attached.</div>
-          : invoices.map(inv => (
-              <div key={inv.id} className={styles.invoiceRow}>
-                <span
-                  className={styles.invoiceTypeBadge}
-                  style={{ background: inv.document_type === 'refund_receipt' ? '#fed7d7' : '#ebf8ff',
-                           color:      inv.document_type === 'refund_receipt' ? '#9b2c2c'  : '#2b6cb0' }}
-                >{DOC_LABEL[inv.document_type]}</span>
-                <span className={styles.mono}>#{inv.invoice_number}</span>
-                {inv.bill_to_name && <span className={styles.muted}>{inv.bill_to_name}</span>}
-                {inv.invoice_date && (
-                  <span className={styles.muted}>
-                    {new Date(inv.invoice_date + 'T00:00:00').toLocaleDateString('en-US', { year: '2-digit', month: 'short', day: 'numeric' })}
-                  </span>
-                )}
-                {inv.total_cad != null && (
-                  <span className={styles.itemAmount}>CAD {inv.total_cad.toFixed(2)}</span>
-                )}
-                <span className={styles.invoiceActions}>
-                  <button className={styles.linkBtn} onClick={() => void handleOpen(inv)}>Open ↗</button>
-                  <button
-                    className={styles.linkBtn}
-                    style={{ color: 'var(--color-error, #c53030)' }}
-                    onClick={() => void handleDelete(inv)}
-                    disabled={deleting === inv.id}
-                  >{deleting === inv.id ? '…' : '✕'}</button>
-                </span>
-              </div>
-            ))
-      }
-
-      {showForm ? (
-        <div className={styles.invoiceUploadForm}>
-          <div className={styles.invoiceFormRow}>
-            <label>Invoice #</label>
-            <input
-              type="text"
-              value={invoiceNum}
-              onChange={e => setInvoiceNum(e.target.value)}
-              placeholder="e.g. 1234"
-              className={styles.invoiceInput}
-            />
-          </div>
-          <div className={styles.invoiceFormRow}>
-            <label>Type</label>
-            <select value={docType} onChange={e => setDocType(e.target.value as InvoiceDocType)} className={styles.invoiceInput}>
-              <option value="invoice">Invoice</option>
-              <option value="refund_receipt">Refund Receipt</option>
-            </select>
-          </div>
-          <div className={styles.invoiceFormRow}>
-            <label>File</label>
-            <input type="file" accept=".pdf,application/pdf" onChange={e => setFile(e.target.files?.[0] ?? null)} />
-          </div>
-          {err && <div style={{ fontSize: 11, color: 'var(--color-error, #c53030)', marginTop: 4 }}>{err}</div>}
-          <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
-            <button
-              className={styles.fuBtn}
-              onClick={() => void handleUpload()}
-              disabled={uploading || !file || !invoiceNum.trim()}
-            >{uploading ? 'Uploading…' : 'Upload'}</button>
-            <button className={styles.fuBtn} onClick={resetForm} disabled={uploading}>Cancel</button>
-          </div>
-        </div>
-      ) : (
-        <button className={styles.fuBtn} style={{ marginTop: 8 }} onClick={() => setShowForm(true)}>
-          + Attach invoice
-        </button>
-      )}
-    </PanelSection>
-  );
-}
-
-const ONBOARDING_LABEL: Record<string, string> = {
-  not_scheduled: 'Not scheduled',
-  scheduled: 'Scheduled',
-  completed: 'Completed',
-  no_show: 'No-show',
-  skipped: 'Skipped',
-};
-
-function FollowUpSection({ customer, lifecycle }: { customer: Customer; lifecycle: CustomerLifecycle | null }) {
-  const fu = computeFuState(customer);
-  const meta = FU_STATE_META[fu];
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-
-  const fmtDate = (iso: string) =>
-    new Date(iso).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
-
-  const onboardFormatted = customer.onboard_date
-    ? new Date(customer.onboard_date + 'T00:00:00').toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
-    : null;
-
-  const handleRecord = async (kind: 'fu1' | 'fu2', status: string) => {
-    setBusy(true); setErr(null);
-    try {
-      const note = window.prompt(`Optional note for ${kind.toUpperCase()} (${status}):`) ?? undefined;
-      await recordFollowUp(customer.id, kind, status, note?.trim() || undefined);
-    } catch (e) {
-      setErr((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <PanelSection title="Follow-up">
-      <PanelRow label="Onboarded" value={onboardFormatted} />
-      {lifecycle && (
-        <>
-          <PanelRow
-            label="Onboarding call"
-            value={ONBOARDING_LABEL[lifecycle.onboarding_status] ?? lifecycle.onboarding_status}
-          />
-          {lifecycle.onboarding_completed_at && (
-            <PanelRow label="Call completed" value={fmtDate(lifecycle.onboarding_completed_at)} />
-          )}
-          {lifecycle.followup_email_sent_at && (
-            <PanelRow label="FU email sent" value={fmtDate(lifecycle.followup_email_sent_at)} />
-          )}
-        </>
-      )}
-      <div className={styles.kvRow}>
-        <span className={styles.kvLabel}>State</span>
-        <span className={styles.kvValue}>
-          <span
-            style={{
-              fontSize: 10, padding: '2px 8px', borderRadius: 4,
-              color: meta.color, background: meta.bg, border: `1px solid ${meta.color}33`,
-              fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.3,
-            }}
-          >{meta.label}</span>
-        </span>
-      </div>
-      <PanelRow label="FU1" value={customer.fu1_status} />
-      <PanelRow label="FU2" value={customer.fu2_status} />
-      {customer.fu_notes && (
-        <PanelRow label="Notes" value={customer.fu_notes} multiline />
-      )}
-
-      {customer.onboard_date && (
-        <div style={{ marginTop: 10, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          {!customer.fu1_status && (
-            <>
-              <button onClick={() => void handleRecord('fu1', 'called')}    disabled={busy} className={styles.fuBtn}>FU1: Called</button>
-              <button onClick={() => void handleRecord('fu1', 'messaged')}  disabled={busy} className={styles.fuBtn}>FU1: Messaged</button>
-              <button onClick={() => void handleRecord('fu1', 'completed')} disabled={busy} className={styles.fuBtn}>FU1: Done</button>
-            </>
-          )}
-          {customer.fu1_status && !customer.fu2_status && (
-            <>
-              <button onClick={() => void handleRecord('fu2', 'called')}    disabled={busy} className={styles.fuBtn}>FU2: Called</button>
-              <button onClick={() => void handleRecord('fu2', 'messaged')}  disabled={busy} className={styles.fuBtn}>FU2: Messaged</button>
-              <button onClick={() => void handleRecord('fu2', 'reviewed')}  disabled={busy} className={styles.fuBtn}>FU2: Reviewed</button>
-              <button onClick={() => void handleRecord('fu2', 'completed')} disabled={busy} className={styles.fuBtn}>FU2: Done</button>
-            </>
-          )}
-        </div>
-      )}
-      {err && <div style={{ marginTop: 6, fontSize: 11, color: 'var(--color-error, #c53030)' }}>Error: {err}</div>}
-    </PanelSection>
-  );
-}
-
 
 function CustomersTabs({ tab, onChange }: { tab: Tab; onChange: (t: Tab) => void }) {
   // Order per operator (2026-06-05): Journey first (default), Profitability,
