@@ -72,7 +72,7 @@ export function ClaimsTab({ orderId }: Props) {
               </tr>
             </thead>
             <tbody>
-              {(claims as Claim[]).map(c => (
+              {claims.map(c => (
                 <tr key={c.id} style={{ borderBottom: '1px solid #f7fafc' }}>
                   <td style={{ padding: '8px 12px 8px 0', fontFamily: 'monospace', fontSize: 11, color: '#718096' }}>
                     {c.id.slice(0, 8)}
