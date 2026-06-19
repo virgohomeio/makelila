@@ -13,7 +13,10 @@ export default function Shipping() {
   const { orderId, tab } = useParams<{ orderId?: string; tab?: string }>();
   const navigate = useNavigate();
 
-  const activeTab: Tab = (VALID_TABS.includes(tab as Tab) ? tab : 'shipping') as Tab;
+  function isTab(t: string | undefined): t is Tab {
+    return VALID_TABS.includes(t as Tab);
+  }
+  const activeTab: Tab = isTab(tab) ? tab : 'shipping';
 
   function handleOrderSelect(id: string) {
     navigate(`/shipping/${id}/shipping`);

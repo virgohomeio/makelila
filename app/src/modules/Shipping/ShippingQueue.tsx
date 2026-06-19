@@ -35,7 +35,7 @@ type Props = {
 };
 
 export function ShippingQueue({ selectedOrderId, onSelect }: Props) {
-  const { orders, loading } = useShippingOrders();
+  const { orders, loading, error } = useShippingOrders();
   const [filter, setFilter] = useState<Filter>('ready');
 
   const visible = filterOrders(orders, filter);
@@ -62,7 +62,8 @@ export function ShippingQueue({ selectedOrderId, onSelect }: Props) {
       </div>
       <div className={styles.orderList}>
         {loading && <div className={styles.empty}>Loading…</div>}
-        {!loading && visible.length === 0 && (
+        {error && <div className={styles.empty} style={{ color: '#c53030' }}>Failed to load orders</div>}
+        {!loading && !error && visible.length === 0 && (
           <div className={styles.empty}>No orders</div>
         )}
         {visible.map(o => (
