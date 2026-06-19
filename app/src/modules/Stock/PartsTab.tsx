@@ -49,6 +49,7 @@ export function PartsTab() {
     const inventoryValue = replacement.reduce(
       (sum, p) => sum + (p.on_hand * Number(p.cost_per_unit_usd ?? 0)), 0,
     );
+    // eslint-disable-next-line react-hooks/purity
     const now = Date.now();
     const d30 = now - 30 * 86_400_000;
     const recentShips = shipments.filter(s => {

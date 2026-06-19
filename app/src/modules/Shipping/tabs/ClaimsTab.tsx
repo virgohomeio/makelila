@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useShipment, useClaims, fileClaim, type ClaimReason, type Claim } from '../../../lib/shipping';
+import { useShipment, useClaims, fileClaim, type ClaimReason } from '../../../lib/shipping';
 
 type Props = { orderId: string };
 

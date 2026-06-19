@@ -113,7 +113,7 @@ export function useShippingOrders(): { orders: ShippingOrderRow[]; loading: bool
       );
 
       const rows: ShippingOrderRow[] = (
-        (queueRes.data ?? []) as Array<{
+        (queueRes.data ?? []) as unknown as Array<{
           order_id: string;
           step: number;
           orders: { id: string; order_ref: string; customer_name: string; city: string; region_state: string | null; country: string } | null;
