@@ -3,7 +3,7 @@
 //   mode=shipment: GET /finance/invoices-for-shipment-id/{id}
 //   mode=date_range: GET /finance/documents with a date range
 //
-// POST body: { mode: 'shipment'|'date_range', freightcomShipmentId?: string, days?: number }
+// POST body: { mode: 'shipment'|'date_range', freightcom_shipment_id?: string, days?: number }
 // Returns:   { invoices: FreightcomInvoice[] }
 
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
@@ -49,16 +49,23 @@ async function handle(req: Request): Promise<Response> {
   const admin = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
   await authenticate(req, admin);
 
-  const { mode, freightcomShipmentId, days = 90 } = await req.json() as {
+  const body = await req.json() as {
     mode?: string;
-    freightcomShipmentId?: string;
+    freightcom_shipment_id?: string;
     days?: number;
   };
+  const { mode, freightcom_shipment_id } = body;
+  const rawDays = body.days ?? 90;
+  if (typeof rawDays !== 'number' || !Number.isFinite(rawDays) || rawDays < 1 || rawDays > 365) {
+    return json({ error: 'days must be a number between 1 and 365' }, 400);
+  }
+  const days = rawDays;
 
   if (mode === 'shipment') {
-    if (!freightcomShipmentId) return json({ error: 'freightcomShipmentId required for mode=shipment' }, 400);
+    if (!freightcom_shipment_id) return json({ error: 'freightcom_shipment_id required for mode=shipment' }, 400);
+    if (!/^\w[\w-]*$/.test(freightcom_shipment_id)) return json({ error: 'Invalid freightcom_shipment_id' }, 400);
 
-    const res = await fetch(`${baseUrl}/finance/invoices-for-shipment-id/${freightcomShipmentId}`, {
+    const res = await fetch(`${baseUrl}/finance/invoices-for-shipment-id/${freightcom_shipment_id}`, {
       headers: { Authorization: apiKey },
     });
     if (!res.ok) {
