@@ -18,6 +18,7 @@ const ATTENTION = [
 ];
 
 const WORKSPACE = [
+  { to: '/shipping',     title: 'Shipping',     subtitle: 'Book, track, invoices & claims',        icon: '🚚', iconBg: '#e3f0fb' },
   { to: '/stock',        title: 'Stock',        subtitle: 'Units, parts, batches',                 icon: '📊', iconBg: '#e6f4ea' },
   { to: '/customers',    title: 'Customers',    subtitle: 'Directory & journey stages',            icon: '👥', iconBg: '#f5f1eb' },
   { to: '/lovely',       title: 'Lovely',       subtitle: 'Lovely app users',                      icon: '🌱', iconBg: '#e6f4ea' },
