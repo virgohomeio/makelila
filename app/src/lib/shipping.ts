@@ -198,6 +198,101 @@ export function useClaims(orderId: string | null): { claims: Claim[]; loading: b
   return { claims, loading };
 }
 
+export type AllShipmentRow = {
+  id: string;
+  order_id: string;
+  order_ref: string;
+  customer_name: string;
+  carrier: string;
+  service: string;
+  rate_cad: number | null;
+  primary_tracking_number: string | null;
+  status: ShipmentStatus;
+  booked_at: string;
+  label_url: string | null;
+  freightcom_shipment_id: string;
+};
+
+export type AllClaimRow = Claim & {
+  order_ref: string;
+  customer_name: string;
+};
+
+/** Returns all shipments across all orders, joined with order_ref + customer_name. */
+export function useAllShipments(): { shipments: AllShipmentRow[]; loading: boolean; error: string | null } {
+  const [shipments, setShipments] = useState<AllShipmentRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data, error: err } = await supabase
+        .from('shipments')
+        .select('id, order_id, carrier, service, rate_cad, primary_tracking_number, status, booked_at, label_url, freightcom_shipment_id, orders(order_ref, customer_name)')
+        .order('booked_at', { ascending: false });
+      if (cancelled) return;
+      if (err) { setError(err.message); setLoading(false); return; }
+      const rows: AllShipmentRow[] = ((data ?? []) as unknown as Array<{
+        id: string; order_id: string; carrier: string; service: string;
+        rate_cad: number | null; primary_tracking_number: string | null;
+        status: string; booked_at: string; label_url: string | null;
+        freightcom_shipment_id: string;
+        orders: { order_ref: string; customer_name: string } | null;
+      }>).map(s => ({
+        id: s.id,
+        order_id: s.order_id,
+        order_ref: s.orders?.order_ref ?? '',
+        customer_name: s.orders?.customer_name ?? '',
+        carrier: s.carrier,
+        service: s.service,
+        rate_cad: s.rate_cad,
+        primary_tracking_number: s.primary_tracking_number,
+        status: s.status as ShipmentStatus,
+        booked_at: s.booked_at,
+        label_url: s.label_url,
+        freightcom_shipment_id: s.freightcom_shipment_id,
+      }));
+      setShipments(rows);
+      setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  return { shipments, loading, error };
+}
+
+/** Returns all claims across all orders, joined with order_ref + customer_name. */
+export function useAllClaims(): { claims: AllClaimRow[]; loading: boolean; error: string | null } {
+  const [claims, setClaims] = useState<AllClaimRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data, error: err } = await supabase
+        .from('claims')
+        .select('*, orders(order_ref, customer_name)')
+        .order('filed_at', { ascending: false });
+      if (cancelled) return;
+      if (err) { setError(err.message); setLoading(false); return; }
+      const rows: AllClaimRow[] = ((data ?? []) as unknown as Array<Claim & {
+        orders: { order_ref: string; customer_name: string } | null;
+      }>).map(c => ({
+        ...c,
+        order_ref: c.orders?.order_ref ?? '',
+        customer_name: c.orders?.customer_name ?? '',
+      }));
+      setClaims(rows);
+      setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  return { claims, loading, error };
+}
+
 // ── Mutations ──────────────────────────────────────────────────────────────
 
 /** Books a shipment via the freightcom-book edge function. Returns the new Shipment row. */

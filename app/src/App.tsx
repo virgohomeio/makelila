@@ -73,9 +73,8 @@ export default function App() {
             <Route path="order-review/:orderId" element={<OrderReview />} />
             <Route path="fulfillment"       element={<LazyRoute><Fulfillment /></LazyRoute>} />
             <Route path="fulfillment/:tab"  element={<LazyRoute><Fulfillment /></LazyRoute>} />
-            <Route path="shipping"                element={<LazyRoute><Shipping /></LazyRoute>} />
-            <Route path="shipping/:orderId"       element={<LazyRoute><Shipping /></LazyRoute>} />
-            <Route path="shipping/:orderId/:tab"  element={<LazyRoute><Shipping /></LazyRoute>} />
+            <Route path="shipping"      element={<LazyRoute><Shipping /></LazyRoute>} />
+            <Route path="shipping/:tab" element={<LazyRoute><Shipping /></LazyRoute>} />
             <Route path="build"         element={<Navigate to="/stock" replace />} />
             <Route path="post-shipment" element={<Navigate to="/fulfillment" replace />} />
             <Route path="service"       element={<LazyRoute><Service /></LazyRoute>} />
