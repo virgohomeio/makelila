@@ -124,17 +124,30 @@ Deno.serve(async (req: Request) => {
     },
   };
 
-  const url = `https://addressvalidation.googleapis.com/v1:validateAddress?key=${apiKey}`;
-  const gRes = await fetch(url, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(reqBody),
-  });
-  if (!gRes.ok) {
-    const body = await gRes.text();
-    return j({ error: `Google Address Validation ${gRes.status}: ${body.slice(0, 400)}` }, 502);
+  // Google Address Validation is the primary verdict source, but it must NOT be
+  // a hard dependency. When Google errors (quota, billing, API disabled, or a
+  // network blip) we degrade to 'unverifiable' and still run the Claude
+  // area-type + plausibility pass below — rather than failing the whole verify
+  // with a non-2xx. Pre-fix this returned 502 and the operator saw only the
+  // opaque "Edge Function returned a non-2xx status code", with the address
+  // never getting an area-type classification.
+  let gJson: AVResponse | null = null;
+  let googleError: string | null = null;
+  try {
+    const url = `https://addressvalidation.googleapis.com/v1:validateAddress?key=${apiKey}`;
+    const gRes = await fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(reqBody),
+    });
+    if (!gRes.ok) {
+      googleError = `Google Address Validation ${gRes.status}: ${(await gRes.text()).slice(0, 300)}`;
+    } else {
+      gJson = (await gRes.json()) as AVResponse;
+    }
+  } catch (e) {
+    googleError = `Google Address Validation request failed: ${(e as Error).message}`;
   }
-  const gJson = (await gRes.json()) as AVResponse;
 
   // Prefer the postal_code column (populated from Shopify shipping_address.zip);
   // fall back to regex on address_line for orders synced before that field
@@ -144,7 +157,7 @@ Deno.serve(async (req: Request) => {
     order.country,
   );
 
-  const result = gJson.result;
+  const result = gJson?.result;
   // Validated postal: prefer the standardized postalAddress, fall back to the
   // postal_code address component.
   const validatedPostalRaw =
@@ -230,8 +243,14 @@ Deno.serve(async (req: Request) => {
   // suburban can't be told from a postal alone, so we leave it unset rather
   // than guess — the operator can still pick it manually.
   if (!areaType) {
-    const p = (order.postal_code ?? '').toUpperCase().replace(/\s/g, '');
-    if (order.country === 'CA' && /^[A-Z]0/.test(p)) areaType = 'rural';
+    areaType = areaTypeFromPostal(order.postal_code, order.country);
+  }
+
+  // When Google was the reason we couldn't verify, surface that to the operator
+  // (there's no dedicated column, so it rides on the claude_notes free-text
+  // field — the only verdict-context surface the AddressCard already renders).
+  if (googleError && match === 'unverifiable' && !claudeNotes) {
+    claudeNotes = `Address validation unavailable: ${googleError}`;
   }
 
   const patch: Record<string, unknown> = {
@@ -265,8 +284,24 @@ Deno.serve(async (req: Request) => {
     claude_notes: claudeNotes,
     claude_postal: claudePostal,
     area_type: areaType,
+    google_error: googleError,
   });
 });
+
+// Deterministic area-type backup from the postal code, used when Claude is
+// unavailable (no ANTHROPIC_API_KEY, an error, or an 'unknown' verdict). Only
+// returns a value we can assert from the postal alone: Canadian rural FSAs
+// (second character '0'). US ZIPs and urban-vs-suburban can't be told apart
+// from the code alone, so we return null and let Claude (or the operator) decide
+// rather than guess.
+function areaTypeFromPostal(
+  postal: string | null | undefined,
+  country: 'US' | 'CA' | string,
+): 'urban' | 'suburban' | 'rural' | null {
+  const p = (postal ?? '').toUpperCase().replace(/\s/g, '');
+  if (country === 'CA' && /^[A-Z]0/.test(p)) return 'rural';
+  return null;
+}
 
 // ────────────────────────────────────────────────────────────────────────
 // Claude fallback (walkthrough #13)
