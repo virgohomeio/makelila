@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 import {
-  bulkUploadAndMatch, useReviewQueueInvoices, assignInvoice, getInvoiceSignedUrl,
+  bulkUploadAndMatch, useReviewQueueInvoices, assignInvoice, getInvoiceSignedUrl, deleteInvoice,
   type BulkUploadResult, type CustomerInvoice, type InvoiceDocType, type InvoiceMatchStatus,
 } from '../../lib/invoices';
 import { useCustomers } from '../../lib/customers';
@@ -246,6 +246,20 @@ function ReviewRow({
     }
   };
 
+  // Cancel/remove a mistakenly-uploaded invoice: deletes the row + the stored
+  // PDF so it leaves the queue entirely.
+  const remove = async () => {
+    if (!window.confirm(`Remove "${inv.file_name}"? This deletes the uploaded file.`)) return;
+    setBusy(true); setErr(null);
+    try {
+      await deleteInvoice(inv.id, inv.storage_path);
+      onAssigned();
+    } catch (e) {
+      setErr((e as Error).message);
+      setBusy(false);
+    }
+  };
+
   return (
     <tr>
       <td className={styles.fileCell} title={inv.file_name}>{inv.file_name}</td>
@@ -266,6 +280,7 @@ function ReviewRow({
           {busy ? '…' : 'Assign'}
         </button>
         <ViewLink path={inv.storage_path} />
+        <button className={styles.removeBtn} disabled={busy} onClick={() => void remove()}>Remove</button>
         {err && <div className={styles.errText}>{err}</div>}
       </td>
     </tr>
