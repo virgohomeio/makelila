@@ -16,6 +16,7 @@ import { useIsMobile } from '../../lib/useMediaQuery';
 import { NavCard } from '../../components/NavCard';
 import { MobileBackHeader } from '../../components/MobileBackHeader';
 import { useCustomerEvents, useCustomerEngagement, eventMeta, dormancyBadge } from '../../lib/customerEvents';
+import { useCustomerInvoices, getInvoiceSignedUrl } from '../../lib/invoices';
 import styles from './Customers.module.css';
 
 type Tab = 'directory' | 'profitability' | 'journey' | 'fleet';
@@ -586,6 +587,8 @@ function CustomerDetailPanel({ customer, onClose }: { customer: Customer; onClos
                 ))
             }
           </PanelSection>
+
+          <CustomerInvoicesSection customerId={customer.id} />
         </div>
       </div>
     </div>
@@ -674,6 +677,50 @@ function LilaAppActivitySection({ customerId }: { customerId: string }) {
         )}
       </div>
     </div>
+  );
+}
+
+// Invoices & refund receipts filed against this customer by the Upload module.
+// Auto-matched from the Shopify order # on the PDF (or assigned manually from
+// the Upload review queue).
+function CustomerInvoicesSection({ customerId }: { customerId: string }) {
+  const { invoices, loading } = useCustomerInvoices(customerId);
+
+  const view = async (path: string) => {
+    try {
+      const url = await getInvoiceSignedUrl(path);
+      window.open(url, '_blank', 'noopener');
+    } catch (e) { alert((e as Error).message); }
+  };
+
+  return (
+    <PanelSection title={`Invoices (${invoices.length})`}>
+      {loading ? (
+        <div className={styles.emptyRow}>Loading invoices…</div>
+      ) : invoices.length === 0 ? (
+        <div className={styles.emptyRow}>No invoices on file. Upload them in the Upload tab.</div>
+      ) : (
+        invoices.map(inv => (
+          <div key={inv.id} className={styles.itemRow}>
+            <span className={styles.mono}>#{inv.invoice_number}</span>
+            <span className={styles.muted}>
+              {inv.document_type === 'refund_receipt' ? 'Refund receipt' : 'Invoice'}
+            </span>
+            {inv.order_ref && <span className={styles.mono}>{inv.order_ref}</span>}
+            <span className={styles.muted}>
+              {inv.invoice_date ? new Date(inv.invoice_date).toLocaleDateString('en-US') : '—'}
+            </span>
+            <span className={styles.itemAmount}>
+              {inv.total_cad != null ? formatMoney(inv.total_cad, 'CAD') : '—'}
+            </span>
+            <button
+              onClick={() => void view(inv.storage_path)}
+              style={{ background: 'none', border: 'none', color: 'var(--color-crimson)', cursor: 'pointer', textDecoration: 'underline', fontSize: 12, padding: 0 }}
+            >View</button>
+          </div>
+        ))
+      )}
+    </PanelSection>
   );
 }
 
