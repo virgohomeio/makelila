@@ -18,6 +18,7 @@ const ATTENTION = [
 ];
 
 const WORKSPACE = [
+  { to: '/upload',       title: 'Upload',       subtitle: 'Bulk-upload invoices & files, auto-filed', icon: '⬆️', iconBg: '#eef2ff' },
   { to: '/shipping',     title: 'Shipping',     subtitle: 'Book, track, invoices & claims',        icon: '🚚', iconBg: '#e3f0fb' },
   { to: '/stock',        title: 'Stock',        subtitle: 'Units, parts, batches',                 icon: '📊', iconBg: '#e6f4ea' },
   { to: '/customers',    title: 'Customers',    subtitle: 'Directory & journey stages',            icon: '👥', iconBg: '#f5f1eb' },

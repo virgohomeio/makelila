@@ -28,6 +28,7 @@ const Team        = lazy(() => import('./modules/Team'));
 const Marketing   = lazy(() => import('./modules/Marketing'));
 const Finance     = lazy(() => import('./modules/Finance'));
 const Shipping    = lazy(() => import('./modules/Shipping'));
+const Upload      = lazy(() => import('./modules/Upload'));
 
 function RequireRole({ role, children }: { role: Module; children: React.ReactNode }) {
   const { role: userRole, loading } = useAuth();
@@ -71,6 +72,7 @@ export default function App() {
             }
           >
             <Route index element={<HomeRoute />} />
+            <Route path="upload"            element={<LazyRoute><Upload /></LazyRoute>} />
             <Route path="order-review"          element={<OrderReview />} />
             <Route path="order-review/:orderId" element={<OrderReview />} />
             <Route path="fulfillment"       element={<LazyRoute><Fulfillment /></LazyRoute>} />
