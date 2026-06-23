@@ -63,15 +63,25 @@ export default function ReplacementPickerModal({ ticket, address, onClose, onCre
       && (matches(p.name) || matches(p.sku))),
     [parts, search],
   );
-  // Section 2 — ready units.
+  // Section 2 — ready units (excludes base batches).
   const cartUnitSerials = useMemo(
     () => new Set(cart.filter(l => l.kind === 'unit').map(l => (l as Extract<CartLine, { kind: 'unit' }>).unit_serial)),
     [cart],
   );
   const unitsReady = useMemo(
-    () => units.filter(u => u.status === 'ready'
+    () => units.filter(u => u.status === 'ready' && !u.batch.toUpperCase().startsWith('BASE')
       && (matches(u.serial) || matches(u.batch) || matches(u.color ?? ''))),
     [units, search],
+  );
+  // Section 2b — replacement base units (batch starts with 'BASE', #90).
+  const baseUnitsReady = useMemo(
+    () => units.filter(u => u.status === 'ready' && u.batch.toUpperCase().startsWith('BASE')
+      && (matches(u.serial) || matches(u.batch))),
+    [units, search],
+  );
+  const cartBaseSerials = useMemo(
+    () => new Set(cart.filter(l => l.kind === 'base').map(l => (l as Extract<CartLine, { kind: 'base' }>).unit_serial)),
+    [cart],
   );
   // Section 4 — pending batches: batches not yet arrived (P100X + future).
   const cartPendingBatches = useMemo(
@@ -126,6 +136,21 @@ export default function ReplacementPickerModal({ ticket, address, onClose, onCre
       return [...prev, {
         kind: 'unit_pending', batch: b.id, name: `LILA (${b.id}, awaiting batch)`, qty: 1, cost_usd: cost,
       }];
+    });
+  }
+
+  function addBase(u: typeof units[number]) {
+    setCart(prev => {
+      if (prev.some(l => l.kind === 'base' && (l as Extract<CartLine, { kind: 'base' }>).unit_serial === u.serial)) return prev;
+      const cost = batchCost.get(u.batch) ?? FALLBACK_UNIT_COST_USD;
+      return [...prev, { kind: 'base', unit_serial: u.serial, batch: u.batch, name: 'Replacement Base', qty: 1, cost_usd: cost }];
+    });
+  }
+
+  function addBasePending() {
+    setCart(prev => {
+      if (prev.some(l => l.kind === 'base_pending')) return prev;
+      return [...prev, { kind: 'base_pending', batch: 'BASE', name: 'Replacement Base (Build)', qty: 1, cost_usd: FALLBACK_UNIT_COST_USD }];
     });
   }
 
@@ -233,6 +258,26 @@ export default function ReplacementPickerModal({ ticket, address, onClose, onCre
               );
             })}
 
+            <h4 className={styles.rpPickerHeading}>Replacement Base</h4>
+            {baseUnitsReady.length > 0 ? baseUnitsReady.map(u => {
+              const inCart = cartBaseSerials.has(u.serial);
+              return (
+                <button key={u.serial} className={styles.rpPickerRow} onClick={() => addBase(u)} disabled={inCart}>
+                  <span>{u.serial}{inCart ? ' ✓' : ''}</span>
+                  <span className={styles.rpPickerMeta}>{u.batch} · {u.color ?? '—'} · ready</span>
+                </button>
+              );
+            }) : (
+              <button
+                className={styles.rpPickerRow}
+                onClick={addBasePending}
+                disabled={cart.some(l => l.kind === 'base_pending')}
+              >
+                <span>Request Base Build{cart.some(l => l.kind === 'base_pending') ? ' ✓' : ''}</span>
+                <span className={styles.rpPickerMeta}>No base in stock · routes to Manufacturing</span>
+              </button>
+            )}
+
             {partsOutOfStock.length > 0 && <h4 className={styles.rpPickerHeading}>Parts (Out of Stock)</h4>}
             {partsOutOfStock.map(p => (
               <button key={`oos-${p.id}`} className={styles.rpPickerRow} onClick={() => addPart(p, 'part_pending')}>
@@ -256,11 +301,13 @@ export default function ReplacementPickerModal({ ticket, address, onClose, onCre
           <ul className={styles.rpCartList}>
             {cart.map((li, i) => {
               const isPartLike = li.kind === 'part' || li.kind === 'part_pending';
-              const pendingTag = (li.kind === 'part_pending' || li.kind === 'unit_pending') ? ' (pending)' : '';
+              const pendingTag = (li.kind === 'part_pending' || li.kind === 'unit_pending' || li.kind === 'base_pending') ? ' (pending)' : '';
               return (
                 <li key={
                   li.kind === 'part' || li.kind === 'part_pending' ? `p-${li.part_id}`
                   : li.kind === 'unit' ? `u-${li.unit_serial}`
+                  : li.kind === 'base' ? `b-${li.unit_serial}`
+                  : li.kind === 'base_pending' ? 'base-pending'
                   : `pb-${li.batch}`
                 }>
                   {isPartLike ? (
@@ -272,8 +319,13 @@ export default function ReplacementPickerModal({ ticket, address, onClose, onCre
                     </>
                   ) : (
                     <>
-                      <span>{li.kind === 'unit' ? li.unit_serial : li.name}{pendingTag}</span>
-                      <span>${(li as Extract<CartLine, { kind: 'unit' | 'unit_pending' }>).cost_usd.toFixed(2)}</span>
+                      <span>
+                        {li.kind === 'unit' ? li.unit_serial
+                          : li.kind === 'base' ? `Base: ${(li as Extract<CartLine, { kind: 'base' }>).unit_serial}`
+                          : li.name}
+                        {pendingTag}
+                      </span>
+                      <span>${(li as Extract<CartLine, { kind: 'unit' | 'unit_pending' | 'base' | 'base_pending' }>).cost_usd.toFixed(2)}</span>
                     </>
                   )}
                   <button aria-label="Remove line" onClick={() => removeLine(i)}>✕</button>

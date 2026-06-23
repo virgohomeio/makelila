@@ -1,66 +1,38 @@
 import { useNavigate, useParams } from 'react-router-dom';
-import { ShippingQueue } from './ShippingQueue';
-import { ShippingTab }   from './tabs/ShippingTab';
-import { TrackingTab }   from './tabs/TrackingTab';
-import { InvoicesTab }   from './tabs/InvoicesTab';
-import { ClaimsTab }     from './tabs/ClaimsTab';
+import { ShippingTab } from './tabs/ShippingTab';
+import { InvoicesTab } from './tabs/InvoicesTab';
+import { ClaimsTab }   from './tabs/ClaimsTab';
 import styles from './Shipping.module.css';
 
-type Tab = 'shipping' | 'tracking' | 'invoices' | 'claims';
-const VALID_TABS: Tab[] = ['shipping', 'tracking', 'invoices', 'claims'];
+type Tab = 'shipping' | 'invoices' | 'claims';
+const TABS: { id: Tab; label: string }[] = [
+  { id: 'shipping', label: 'Shipping' },
+  { id: 'invoices', label: 'Invoices' },
+  { id: 'claims',   label: 'Claims'   },
+];
 
 export default function Shipping() {
-  const { orderId, tab } = useParams<{ orderId?: string; tab?: string }>();
+  const { tab } = useParams<{ tab?: string }>();
   const navigate = useNavigate();
-
-  function isTab(t: string | undefined): t is Tab {
-    return VALID_TABS.includes(t as Tab);
-  }
-  const activeTab: Tab = isTab(tab) ? tab : 'shipping';
-
-  function handleOrderSelect(id: string) {
-    navigate(`/shipping/${id}/shipping`);
-  }
-
-  function handleTabChange(t: Tab) {
-    if (!orderId) return;
-    navigate(`/shipping/${orderId}/${t}`);
-  }
-
-  const tabContent: Record<Tab, React.ReactNode> = {
-    shipping: orderId ? <ShippingTab orderId={orderId} /> : null,
-    tracking: orderId ? <TrackingTab orderId={orderId} /> : null,
-    invoices: orderId ? <InvoicesTab orderId={orderId} /> : null,
-    claims:   orderId ? <ClaimsTab   orderId={orderId} /> : null,
-  };
+  const activeTab: Tab = TABS.some(t => t.id === tab) ? (tab as Tab) : 'shipping';
 
   return (
     <div className={styles.layout}>
-      <ShippingQueue selectedOrderId={orderId ?? null} onSelect={handleOrderSelect} />
-
-      <div className={styles.main}>
-        {!orderId ? (
-          <div className={styles.empty}>
-            <span>← Select an order to get started</span>
-          </div>
-        ) : (
-          <>
-            <div className={styles.tabs}>
-              {VALID_TABS.map(t => (
-                <button
-                  key={t}
-                  className={`${styles.tab} ${activeTab === t ? styles.tabActive : ''}`}
-                  onClick={() => handleTabChange(t)}
-                >
-                  {t.charAt(0).toUpperCase() + t.slice(1)}
-                </button>
-              ))}
-            </div>
-            <div className={styles.tabContent}>
-              {tabContent[activeTab]}
-            </div>
-          </>
-        )}
+      <div className={styles.tabs}>
+        {TABS.map(t => (
+          <button
+            key={t.id}
+            className={`${styles.tab} ${activeTab === t.id ? styles.tabActive : ''}`}
+            onClick={() => navigate(`/shipping/${t.id}`)}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+      <div className={styles.tabContent}>
+        {activeTab === 'shipping' && <ShippingTab />}
+        {activeTab === 'invoices' && <InvoicesTab />}
+        {activeTab === 'claims'   && <ClaimsTab />}
       </div>
     </div>
   );

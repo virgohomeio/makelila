@@ -324,6 +324,9 @@
 .slotPickTop { font-family: ui-monospace, monospace; color: var(--color-ink); font-weight: 600; }
 .slotPickBottom { font-size: 9px; color: var(--color-ink-subtle); margin-top: 2px; }
 .slotPickBatch { display: inline-block; background: var(--color-info-bg); color: var(--color-info); font-size: 8px; padding: 1px 5px; border-radius: 3px; margin-left: 4px; }
+.slotPickQcWarn { border-color: #f6ad55; background: #fffbeb; opacity: 0.8; }
+.slotPickQcWarn:hover { border-color: #dd6b20; }
+.slotPickQcBadge { font-size: 8px; color: #c05621; font-weight: 700; margin-top: 2px; }
 
 .stepBar { margin-top: 14px; display: flex; gap: 8px; align-items: center; }
 .confirmBtn {

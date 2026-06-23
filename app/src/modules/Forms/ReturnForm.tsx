@@ -65,6 +65,15 @@ const REFUND_METHOD_OPTIONS = [
   'Credit Card (Enter phone number below, we will call you)',
 ] as const;
 
+const RETURN_CATEGORY_OPTIONS = [
+  { value: 'product_defect',      label: 'Product Defect — hardware or mechanical problem' },
+  { value: 'software_issue',      label: 'Software Issue — app, firmware, or connectivity' },
+  { value: 'shipping_damage',     label: 'Shipping Damage — arrived damaged in transit' },
+  { value: 'customer_service',    label: 'Customer Service Issue — unresolved support experience' },
+  { value: 'financing',           label: 'Financing Issue — payment, financing, or billing problem' },
+  { value: 'other',               label: 'Other' },
+] as const;
+
 export default function ReturnForm() {
   // 1. Name
   const [firstName, setFirstName] = useState('');
@@ -76,8 +85,9 @@ export default function ReturnForm() {
   const [orderRef,  setOrderRef]  = useState('');
   // 5. Usage duration
   const [usage,     setUsage]     = useState<string>('');
-  // 6. Return reasons (multi-select)
-  const [reasons,   setReasons]   = useState<string[]>([]);
+  // 6. Return reasons (multi-select) + structured category
+  const [reasons,       setReasons]       = useState<string[]>([]);
+  const [returnCategory, setReturnCategory] = useState<string>('');
   // 7. Description
   const [description, setDescription] = useState('');
   // 8. Support contacted
@@ -126,6 +136,7 @@ export default function ReturnForm() {
     if (!orderRef.trim()) { setError('Please include your order number.'); return; }
     if (!usage)     { setError('Please tell us how long you\'ve been using the unit.'); return; }
     if (reasons.length === 0) { setError('Please select at least one return reason.'); return; }
+    if (!returnCategory) { setError('Please select the primary category for your return.'); return; }
     if (!description.trim())  { setError('Please describe the issue in more detail.'); return; }
     if (!support)   { setError('Please tell us whether you contacted support.'); return; }
     if (!rating)    { setError('Please rate your overall experience.'); return; }
@@ -148,6 +159,7 @@ export default function ReturnForm() {
         original_order_ref: orderRef.trim(),
         condition,
         reason: reasons[0] ?? null,           // primary reason for the legacy reason column
+        return_category: returnCategory || null,
         description: description.trim(),
         notes: `Customer reference: ${ref}`,
         status: 'created',
@@ -253,6 +265,19 @@ export default function ReturnForm() {
         <SectionHeader text="Why you're returning" />
         <Field label="Why are you returning your LILA Pro? (Select all that apply)" required>
           <CheckboxGroup options={RETURN_REASONS} values={reasons} onToggle={toggleReason} />
+        </Field>
+
+        <Field label="What best describes the primary reason for your return?" required>
+          <select
+            value={returnCategory}
+            onChange={e => setReturnCategory(e.target.value)}
+            className={styles.input}
+          >
+            <option value="">Select a category…</option>
+            {RETURN_CATEGORY_OPTIONS.map(opt => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
         </Field>
 
         {/* 7. Description */}

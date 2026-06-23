@@ -1,111 +1,18 @@
 .layout {
   display: flex;
+  flex-direction: column;
   height: 100%;
   overflow: hidden;
 }
 
-.queue {
-  width: 260px;
-  min-width: 260px;
-  border-right: 1px solid #e2e8f0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.queueHeader {
-  padding: 16px 16px 8px;
-  font-size: 13px;
-  font-weight: 600;
-  color: #1a202c;
-  border-bottom: 1px solid #e2e8f0;
-}
-
-.chips {
-  display: flex;
-  gap: 6px;
-  padding: 10px 16px;
-  border-bottom: 1px solid #f0f0f0;
-}
-
-.chip {
-  font-size: 11px;
-  padding: 3px 10px;
-  border-radius: 12px;
-  border: 1px solid #e2e8f0;
-  background: #fff;
-  cursor: pointer;
-  color: #4a5568;
-  white-space: nowrap;
-}
-
-.chipActive {
-  background: #1a202c;
-  color: #fff;
-  border-color: #1a202c;
-}
-
-.orderList {
-  flex: 1;
-  overflow-y: auto;
-}
-
-.orderItem {
-  padding: 10px 16px;
-  cursor: pointer;
-  border-bottom: 1px solid #f7fafc;
-}
-
-.orderItem:hover {
-  background: #f7fafc;
-}
-
-.orderItemActive {
-  background: #edf2f7;
-}
-
-.orderRef {
-  font-size: 12px;
-  font-weight: 600;
-  color: #1a202c;
-}
-
-.orderMeta {
-  font-size: 11px;
-  color: #718096;
-  margin-top: 2px;
-}
-
-.statusBadge {
-  display: inline-block;
-  font-size: 10px;
-  padding: 1px 6px;
-  border-radius: 8px;
-  margin-top: 3px;
-  text-transform: capitalize;
-}
-
-.statusReady     { background: #e6fffa; color: #276749; }
-.statusBooked    { background: #ebf8ff; color: #2b6cb0; }
-.statusInTransit { background: #fefcbf; color: #744210; }
-.statusDelivered { background: #f0fff4; color: #276749; }
-.statusException { background: #fff5f5; color: #c53030; }
-.statusMissing   { background: #fff5f5; color: #c53030; }
-.statusCancelled { background: #f7fafc; color: #718096; }
-
-.main {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
+/* ── Tab bar ── */
 .tabs {
   display: flex;
   gap: 0;
   border-bottom: 1px solid #e2e8f0;
   padding: 0 24px;
   background: #fff;
+  flex-shrink: 0;
 }
 
 .tab {
@@ -131,13 +38,56 @@
   padding: 24px;
 }
 
-.empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  height: 100%;
-  color: #a0aec0;
-  font-size: 14px;
-  gap: 8px;
+/* ── Sections ── */
+.section {
+  margin-bottom: 40px;
 }
+
+.sectionTitle {
+  font-size: 15px;
+  font-weight: 600;
+  color: #1a202c;
+  margin: 0 0 16px;
+}
+
+/* ── Filter chips ── */
+.chips {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.chip {
+  font-size: 11px;
+  padding: 3px 10px;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  cursor: pointer;
+  color: #4a5568;
+  white-space: nowrap;
+}
+
+.chipActive {
+  background: #1a202c;
+  color: #fff;
+  border-color: #1a202c;
+}
+
+/* ── Status badges ── */
+.statusBadge {
+  display: inline-block;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.statusBooked    { background: #ebf8ff; color: #2b6cb0; }
+.statusInTransit { background: #fefcbf; color: #744210; }
+.statusDelivered { background: #f0fff4; color: #276749; }
+.statusException { background: #fff5f5; color: #c53030; }
+.statusMissing   { background: #fff5f5; color: #c53030; }
+.statusCancelled { background: #f7fafc; color: #718096; }

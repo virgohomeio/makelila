@@ -595,12 +595,17 @@ export type ReplacementLineItem =
   | { kind: 'unit'; unit_serial: string; batch: string; name: string; qty: 1; cost_usd: number }
   // Unit from a batch with no ready stock yet (e.g. P100X in production). No
   // serial assigned; sets awaiting_batch_id; does NOT reserve a unit.
-  | { kind: 'unit_pending'; batch: string; name: string; qty: 1; cost_usd: number };
+  | { kind: 'unit_pending'; batch: string; name: string; qty: 1; cost_usd: number }
+  // Replacement base (backlog #90) — serialized like a full unit but ships only
+  // the base body. Batch must start with 'BASE' so the picker can identify it.
+  | { kind: 'base'; unit_serial: string; batch: string; name: string; qty: 1; cost_usd: number }
+  // Base with no ready serial yet — routes to Manufacturing for a new build.
+  | { kind: 'base_pending'; batch: string; name: string; qty: 1; cost_usd: number };
 
 /** True if any line is unfulfillable now (out-of-stock part or pending batch),
  *  which means the order must be created as 'awaiting' rather than 'ready'. */
 export function hasPendingLine(items: ReplacementLineItem[]): boolean {
-  return items.some(li => li.kind === 'part_pending' || li.kind === 'unit_pending');
+  return items.some(li => li.kind === 'part_pending' || li.kind === 'unit_pending' || li.kind === 'base_pending');
 }
 
 export type ReplacementOrderInput = {
@@ -712,9 +717,9 @@ export async function createReplacementOrder(input: ReplacementOrderInput):
     if (pErr) throw new Error(`Decrement part ${li.part_id}: ${pErr.message}`);
   }
 
-  // 4. Reserve units — quarantine excluded: do not pick quarantined units.
+  // 4. Reserve units and bases — quarantine excluded: do not pick quarantined units.
   for (const li of input.line_items) {
-    if (li.kind !== 'unit') continue;
+    if (li.kind !== 'unit' && li.kind !== 'base') continue;
     const { data: unitRow } = await supabase
       .from('units')
       .select('status')
@@ -751,7 +756,8 @@ export async function createPendingReplacement(input: ReplacementOrderInput):
   const order_ref = await nextReplacementOrderRef();
   const cogs_usd = computeCogs(input.line_items);
   const pendingBatch = input.line_items.find(
-    (li): li is Extract<ReplacementLineItem, { kind: 'unit_pending' }> => li.kind === 'unit_pending',
+    (li): li is Extract<ReplacementLineItem, { kind: 'unit_pending' | 'base_pending' }> =>
+      li.kind === 'unit_pending' || li.kind === 'base_pending',
   );
 
   const { data: row, error: insErr } = await supabase

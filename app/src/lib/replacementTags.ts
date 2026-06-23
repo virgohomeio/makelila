@@ -36,9 +36,9 @@ const SKU_TAG: Record<string, string> = {
 };
 
 /** A tag refers to a whole unit (vs. a part/consumable) when it's a batch code
- *  like P100 / P100X / P150. */
+ *  like P100 / P100X / P150, or a BASE batch for replacement bases (#90). */
 export function isUnitTag(tag: string): boolean {
-  return /^P\d/i.test(tag);
+  return /^P\d/i.test(tag) || /^BASE/i.test(tag);
 }
 
 /** Keyword map for the looser Excel-backfill descriptions. Side-ambiguous
@@ -81,7 +81,7 @@ export function replacementItemTags(
   const tags: string[] = [];
   for (const raw of (o.line_items ?? []) as Array<Record<string, unknown>>) {
     const kind = raw.kind as string | undefined;
-    if (kind === 'unit' || kind === 'unit_pending') {
+    if (kind === 'unit' || kind === 'unit_pending' || kind === 'base' || kind === 'base_pending') {
       if (typeof raw.batch === 'string') tags.push(raw.batch);
     } else if (kind === 'part' || kind === 'part_pending') {
       const sku = raw.sku as string | undefined;

@@ -6,6 +6,7 @@ import { ReturnsTab } from '../PostShipment/ReturnsTab';
 import { RefundsTab } from '../PostShipment/RefundsTab';
 import { ReplacementsTab } from '../PostShipment/ReplacementsTab';
 import { CancellationsTab } from '../PostShipment/CancellationsTab';
+import { ClaimsTab } from '../PostShipment/ClaimsTab';
 import { DeliveryMapTab } from '../PostShipment/DeliveryMapTab';
 import { useIsMobile } from '../../lib/useMediaQuery';
 import { MobileTabbedModule, type MobileTab } from '../../components/MobileTabbedModule';
@@ -13,12 +14,12 @@ import styles from './Fulfillment.module.css';
 
 type Tab =
   | 'queue' | 'shelf' | 'history'
-  | 'returns' | 'refunds' | 'replacements' | 'cancellations'
+  | 'returns' | 'refunds' | 'replacements' | 'cancellations' | 'claims'
   | 'map';
 
 const VALID_TABS: Tab[] = [
   'queue', 'shelf', 'history',
-  'returns', 'refunds', 'replacements', 'cancellations',
+  'returns', 'refunds', 'replacements', 'cancellations', 'claims',
   'map',
 ];
 
@@ -39,6 +40,7 @@ export default function Fulfillment() {
       { key: 'refunds',       label: 'Refunds',           subtitle: 'Awaiting manager + finance approval',        icon: '💵', iconBg: '#fef1f0', content: <RefundsTab /> },
       { key: 'replacements',  label: 'Replacements',      subtitle: 'Internal replacement orders + parts',        icon: '🔁', iconBg: '#fef1f0', content: <ReplacementsTab /> },
       { key: 'cancellations', label: 'Cancellations',     subtitle: 'Customer-initiated cancellations',           icon: '❌', iconBg: '#f5f1eb', content: <CancellationsTab /> },
+      { key: 'claims',        label: 'Claims',            subtitle: 'Shipping-damage claims + photos',            icon: '📸', iconBg: '#fffaf0', content: <ClaimsTab /> },
     ];
     return (
       <div className={styles.layout}>
@@ -89,6 +91,10 @@ export default function Fulfillment() {
           className={`${styles.tab} ${active === 'cancellations' ? styles.active : ''}`}
           onClick={() => navigate('/fulfillment/cancellations')}
         >Cancellations</button>
+        <button
+          className={`${styles.tab} ${active === 'claims' ? styles.active : ''}`}
+          onClick={() => navigate('/fulfillment/claims')}
+        >Claims</button>
       </div>
       <div className={styles.tabPanel}>
         {active === 'queue'         ? <Queue /> :
@@ -99,6 +105,7 @@ export default function Fulfillment() {
          active === 'refunds'       ? <RefundsTab /> :
          active === 'replacements'  ? <ReplacementsTab /> :
          active === 'cancellations' ? <CancellationsTab /> :
+         active === 'claims'        ? <ClaimsTab /> :
          <Queue />}
       </div>
     </div>

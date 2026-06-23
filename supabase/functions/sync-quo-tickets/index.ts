@@ -140,20 +140,32 @@ async function handle(req: Request): Promise<Response> {
 
   // ---- Build in-memory lookup caches (once per invocation) ----
 
-  // 1. All customers with non-null phone, keyed by digits-only phone.
+  // 1. All customers (phone and email), keyed for 3-tier cascade (#82).
   const { data: allCustomers } = await admin
     .from('customers')
     .select('id, full_name, email, phone')
-    .not('phone', 'is', null)
     .range(0, 9999);
-  const customersByPhone = new Map<string, CustomerLite>();
+  const customersByPhone   = new Map<string, CustomerLite>(); // last-10 → customer
+  const customersByPhone7  = new Map<string, CustomerLite>(); // last-7, unambiguous only
+  const customersByEmail   = new Map<string, CustomerLite>(); // lower email → customer
+  const phone7Counts       = new Map<string, number>();
+
   for (const c of (allCustomers ?? []) as Array<CustomerLite & { phone: string | null }>) {
     if (c.phone) {
-      customersByPhone.set(phoneKey(c.phone), {
-        id: c.id,
-        full_name: c.full_name,
-        email: c.email,
-      });
+      customersByPhone.set(phoneKey(c.phone), { id: c.id, full_name: c.full_name, email: c.email });
+      const key7 = digitsOnly(c.phone).slice(-7);
+      phone7Counts.set(key7, (phone7Counts.get(key7) ?? 0) + 1);
+    }
+    if (c.email) {
+      customersByEmail.set(c.email.toLowerCase().trim(), { id: c.id, full_name: c.full_name, email: c.email });
+    }
+  }
+  // Only populate last-7 map for unambiguous entries (avoids false positives).
+  for (const c of (allCustomers ?? []) as Array<CustomerLite & { phone: string | null }>) {
+    if (!c.phone) continue;
+    const key7 = digitsOnly(c.phone).slice(-7);
+    if (phone7Counts.get(key7) === 1) {
+      customersByPhone7.set(key7, { id: c.id, full_name: c.full_name, email: c.email });
     }
   }
 
@@ -203,7 +215,8 @@ async function handle(req: Request): Promise<Response> {
   for (const phoneNumberId of phoneNumberIds) {
     const r = await syncPhoneNumber(
       admin, apiKey, phoneNumberId, since,
-      customersByPhone, unitsByCustomerName, ordersByEmail,
+      customersByPhone, customersByPhone7, customersByEmail,
+      unitsByCustomerName, ordersByEmail,
     );
     results.push(r);
   }
@@ -220,6 +233,8 @@ async function syncPhoneNumber(
   phoneNumberId: string,
   since: string,
   customersByPhone: Map<string, CustomerLite>,
+  customersByPhone7: Map<string, CustomerLite>,
+  customersByEmail: Map<string, CustomerLite>,
   unitsByCustomerName: Map<string, string>,
   ordersByEmail: Map<string, string>,
 ): Promise<RunResult> {
@@ -266,7 +281,8 @@ async function syncPhoneNumber(
 
       const outcome = await upsertConversation(
         admin, convo.id, msgs, otherParties,
-        customersByPhone, unitsByCustomerName, ordersByEmail,
+        customersByPhone, customersByPhone7, customersByEmail,
+        unitsByCustomerName, ordersByEmail,
       );
       if (outcome === 'created')   result.tickets_created++;
       else if (outcome === 'appended') result.tickets_appended++;
@@ -291,6 +307,8 @@ async function upsertConversation(
   msgs: OPMessage[],
   otherParties: string[],
   customersByPhone: Map<string, CustomerLite>,
+  customersByPhone7: Map<string, CustomerLite>,
+  customersByEmail: Map<string, CustomerLite>,
   unitsByCustomerName: Map<string, string>,
   ordersByEmail: Map<string, string>,
 ): Promise<'created' | 'appended' | 'skipped'> {
@@ -299,17 +317,23 @@ async function upsertConversation(
   const firstMsg = msgs[0];
   const lastMsg  = msgs[msgs.length - 1];
 
-  // Prefer otherParties[0] — it is always the "other party" phone number
-  // as OpenPhone understands it, regardless of message direction. Only fall
-  // back to inboundMsg.from if otherParties is empty or matches one of our
-  // own inbox lines (shouldn't happen, but guard against malformed data).
-  const quoContactPhone = otherParties.find(p => !OWN_INBOX_PHONES.has(digitsOnly(p).slice(-10)))
-    ?? msgs.find(m => m.direction === 'incoming')?.from
-    ?? firstMsg.from;
-  const customerPhone = quoContactPhone;
-  const customer = customersByPhone.get(phoneKey(customerPhone)) ?? null;
+  // Prefer otherParties[0] — always the "other party" per OpenPhone. Fall
+  // back to inbound message sender. Guard: if every candidate is one of our
+  // own inbox numbers, set customerPhone = null so we never store our number
+  // as the customer phone (#82).
+  const rawContactPhone = otherParties.find(p => !OWN_INBOX_PHONES.has(digitsOnly(p).slice(-10)))
+    ?? msgs.find(m => m.direction === 'incoming')?.from ?? firstMsg.from;
+  const isOwnNumber = OWN_INBOX_PHONES.has(digitsOnly(rawContactPhone).slice(-10));
+  const customerPhone: string | null = isOwnNumber ? null : rawContactPhone;
 
-  const subject = buildSubject(firstMsg, customerPhone);
+  // 3-tier customer resolution cascade (#82):
+  //   Tier 1 — exact email (no email from Quo conversations yet; reserved for
+  //             future contact-API enrichment)
+  //   Tier 2a — exact phone last-10
+  //   Tier 2b — phone last-7, only when unambiguous
+  const customer = resolveCustomer(customerPhone, customersByPhone, customersByPhone7, customersByEmail);
+
+  const subject = buildSubject(firstMsg, customerPhone ?? rawContactPhone);
   const msgText = firstMsg.text ?? firstMsg.body ?? '';
 
   // Existing-row lookup. Safe to use .maybeSingle() now that the partial
@@ -356,7 +380,7 @@ async function upsertConversation(
                            : null,
     owner_email:         DEFAULT_OWNER_EMAIL,
     quo_conversation_id: conversationId,
-    quo_contact_id:      quoContactPhone,
+    quo_contact_id:      rawContactPhone,
     quo_last_message_id: lastMsg.id,
     first_message_at:    firstMsg.createdAt,
     last_message_at:     lastMsg.createdAt,
@@ -531,6 +555,35 @@ async function opFetch<T>(apiKey: string, url: string): Promise<T> {
     throw new Error(`OpenPhone ${res.status}: ${text.slice(0, 300)} (GET ${url})`);
   }
   throw new Error(`OpenPhone retries exhausted (GET ${url})`);
+}
+
+// ============================================================ Contact resolution (#82)
+
+/** 3-tier customer cascade. Returns the first match, or null.
+ *  Tier 1 (email) is a no-op until Quo contact enrichment supplies an email.
+ *  Tier 2a: exact phone last-10 digits.
+ *  Tier 2b: phone last-7, only populated for unambiguous entries. */
+function resolveCustomer(
+  phone: string | null,
+  byPhone10: Map<string, CustomerLite>,
+  byPhone7: Map<string, CustomerLite>,
+  byEmail: Map<string, CustomerLite>,
+  email?: string | null,
+): CustomerLite | null {
+  // Tier 1: email (only when caller supplies one, e.g. future contact-API enrichment)
+  if (email) {
+    const hit = byEmail.get(email.toLowerCase().trim());
+    if (hit) return hit;
+  }
+  if (!phone) return null;
+  // Tier 2a: exact last-10
+  const hit10 = byPhone10.get(phoneKey(phone));
+  if (hit10) return hit10;
+  // Tier 2b: last-7 (unambiguous)
+  const digits = digitsOnly(phone);
+  const hit7 = byPhone7.get(digits.slice(-7));
+  if (hit7) return hit7;
+  return null;
 }
 
 // ============================================================ Helpers

@@ -12,6 +12,7 @@ import Login from './modules/Login';
 import ReturnForm from './modules/Forms/ReturnForm';
 import CancelOrderForm from './modules/Forms/CancelOrderForm';
 import ServiceRequestForm from './modules/Forms/ServiceRequestForm';
+import ShippingDamageForm from './modules/Forms/ShippingDamageForm';
 import ConfirmAddressPage from './modules/Forms/ConfirmAddressPage';
 
 // Backlog #51 — Dashboard pulls in Plotly (~1MB) and telemetry. The other
@@ -59,6 +60,7 @@ export default function App() {
           <Route path="/return"          element={<ReturnForm />} />
           <Route path="/cancel-order"    element={<CancelOrderForm />} />
           <Route path="/service-request" element={<ServiceRequestForm />} />
+          <Route path="/shipping-damage" element={<ShippingDamageForm />} />
           <Route path="/confirm-address" element={<ConfirmAddressPage />} />
           <Route
             path="/"
@@ -73,9 +75,8 @@ export default function App() {
             <Route path="order-review/:orderId" element={<OrderReview />} />
             <Route path="fulfillment"       element={<LazyRoute><Fulfillment /></LazyRoute>} />
             <Route path="fulfillment/:tab"  element={<LazyRoute><Fulfillment /></LazyRoute>} />
-            <Route path="shipping"                element={<LazyRoute><Shipping /></LazyRoute>} />
-            <Route path="shipping/:orderId"       element={<LazyRoute><Shipping /></LazyRoute>} />
-            <Route path="shipping/:orderId/:tab"  element={<LazyRoute><Shipping /></LazyRoute>} />
+            <Route path="shipping"      element={<LazyRoute><Shipping /></LazyRoute>} />
+            <Route path="shipping/:tab" element={<LazyRoute><Shipping /></LazyRoute>} />
             <Route path="build"         element={<Navigate to="/stock" replace />} />
             <Route path="post-shipment" element={<Navigate to="/fulfillment" replace />} />
             <Route path="service"       element={<LazyRoute><Service /></LazyRoute>} />
