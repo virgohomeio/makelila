@@ -146,6 +146,7 @@ export default function Upload() {
       <ReviewQueue
         invoices={reviewQueue}
         loading={queueLoading}
+        customers={customers}
         customerName={customerName}
         onAssigned={reloadQueue}
       />
@@ -172,11 +173,14 @@ function ViewLink({ path }: { path: string }) {
 // The review queue: invoices the matcher couldn't confidently file. Operator
 // types the Shopify order # — we resolve it against the loaded orders list to
 // get the order + its customer in one step (every invoice carries an order #).
+const CUST_DATALIST_ID = 'upload-customer-list';
+
 function ReviewQueue({
-  invoices, loading, customerName, onAssigned,
+  invoices, loading, customers, customerName, onAssigned,
 }: {
   invoices: CustomerInvoice[];
   loading: boolean;
+  customers: { id: string; full_name: string; email: string | null }[];
   customerName: Map<string, string>;
   onAssigned: () => void;
 }) {
@@ -189,17 +193,39 @@ function ReviewQueue({
     return m;
   }, [orders]);
 
+  // Datalist options + a resolver so the operator can type a customer name and
+  // we can map it back to an id. Keyed by label, email and full_name so a typed
+  // name, an email, or a picked-from-list label all resolve.
+  const custLabel = (c: { full_name: string; email: string | null }) =>
+    c.email ? `${c.full_name} (${c.email})` : c.full_name;
+  const custOptions = useMemo(
+    () => customers.map(c => custLabel(c)).filter(Boolean).sort(),
+    [customers],
+  );
+  const custResolve = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const c of customers) {
+      if (c.full_name) m.set(custLabel(c).toLowerCase(), c.id);
+      if (c.full_name) m.set(c.full_name.toLowerCase(), c.id);
+      if (c.email) m.set(c.email.toLowerCase(), c.id);
+    }
+    return m;
+  }, [customers]);
+
   if (loading) return <div className={styles.queueCard}><div className={styles.queueTitle}>Needs review</div><div className={styles.emptyRow}>Loading…</div></div>;
 
   return (
     <div className={styles.queueCard}>
       <div className={styles.queueTitle}>Needs review ({invoices.length})</div>
+      <datalist id={CUST_DATALIST_ID}>
+        {custOptions.map(o => <option key={o} value={o} />)}
+      </datalist>
       {invoices.length === 0 ? (
         <div className={styles.emptyRow}>Nothing waiting — every uploaded invoice has been filed.</div>
       ) : (
         <table className={styles.table}>
           <thead>
-            <tr><th>File</th><th>Invoice #</th><th>Bill to</th><th>Parsed order</th><th>Current customer</th><th>Assign to order #</th><th></th></tr>
+            <tr><th>File</th><th>Invoice #</th><th>Bill to</th><th>Parsed order</th><th>Current customer</th><th>Assign to order # and/or customer</th><th></th></tr>
           </thead>
           <tbody>
             {invoices.map(inv => (
@@ -207,6 +233,7 @@ function ReviewQueue({
                 key={inv.id}
                 inv={inv}
                 ordersByRef={ordersByRef}
+                custResolve={custResolve}
                 customerName={customerName}
                 onAssigned={onAssigned}
               />
@@ -219,25 +246,46 @@ function ReviewQueue({
 }
 
 function ReviewRow({
-  inv, ordersByRef, customerName, onAssigned,
+  inv, ordersByRef, custResolve, customerName, onAssigned,
 }: {
   inv: CustomerInvoice;
   ordersByRef: Map<string, { id: string; ref: string; customerId: string | null }>;
+  custResolve: Map<string, string>;
   customerName: Map<string, string>;
   onAssigned: () => void;
 }) {
   const [orderRef, setOrderRef] = useState(inv.order_ref?.replace(/^#/, '') ?? '');
+  const [custText, setCustText] = useState(inv.customer_id ? (customerName.get(inv.customer_id) ?? '') : '');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+  // Order # and customer are independent. Fill either or both: an order # links
+  // the order (and defaults the customer to that order's customer); a typed
+  // customer overrides it — for the husband-ordered / wife-owns-it case, put the
+  // husband's order # AND the wife's name and it files under both.
   const assign = async () => {
-    const digits = orderRef.replace(/\D/g, '');
-    if (!digits) { setErr('Enter an order number'); return; }
-    const match = ordersByRef.get(digits);
-    if (!match) { setErr(`No order #${digits}`); return; }
+    const orderTyped = orderRef.trim();
+    const custTyped = custText.trim();
+    if (!orderTyped && !custTyped) { setErr('Enter an order # or a customer'); return; }
+
+    const params: { orderId?: string; orderRef?: string; customerId?: string } = {};
+    if (orderTyped) {
+      const digits = orderTyped.replace(/\D/g, '');
+      const match = digits ? ordersByRef.get(digits) : null;
+      if (!match) { setErr(`No order #${digits}`); return; }
+      params.orderId = match.id;
+      params.orderRef = match.ref;
+      if (match.customerId) params.customerId = match.customerId;
+    }
+    if (custTyped) {
+      const cid = custResolve.get(custTyped.toLowerCase());
+      if (!cid) { setErr('Pick a customer from the list'); return; }
+      params.customerId = cid;   // overrides the order's customer
+    }
+
     setBusy(true); setErr(null);
     try {
-      await assignInvoice(inv.id, { orderId: match.id, orderRef: match.ref, customerId: match.customerId });
+      await assignInvoice(inv.id, params);
       onAssigned();
     } catch (e) {
       setErr((e as Error).message);
@@ -268,12 +316,21 @@ function ReviewRow({
       <td className={styles.mono}>{inv.order_ref ?? '—'}</td>
       <td>{inv.customer_id ? (customerName.get(inv.customer_id) ?? '—') : <span className={styles.muted}>unassigned</span>}</td>
       <td>
-        <input
-          className={styles.orderInput}
-          value={orderRef}
-          onChange={e => setOrderRef(e.target.value)}
-          placeholder="e.g. 1192"
-        />
+        <div className={styles.assignFields}>
+          <input
+            className={styles.orderInput}
+            value={orderRef}
+            onChange={e => setOrderRef(e.target.value)}
+            placeholder="order # e.g. 1192"
+          />
+          <input
+            className={styles.custInput}
+            list={CUST_DATALIST_ID}
+            value={custText}
+            onChange={e => setCustText(e.target.value)}
+            placeholder="customer name"
+          />
+        </div>
       </td>
       <td>
         <button className={styles.assignBtn} disabled={busy} onClick={() => void assign()}>
