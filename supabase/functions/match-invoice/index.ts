@@ -9,8 +9,10 @@
 //      (e.g. "Shopify order# 1192"), plus invoice number / date / total /
 //      bill-to name.
 //   4. Match cascade: order number → orders row → its customer; else resolve
-//      the bill-to name to a customer. Confident order match → 'matched';
-//      customer-only (no order) → 'needs_review'; nothing → 'unassigned'.
+//      the bill-to name to a customer. Order match OR a customer-name match
+//      (even with no order #, common for pre-Shopify / in-person / financing
+//      invoices) → 'matched' and filed under the profile; only a complete miss
+//      (no order AND no customer) → 'unassigned' for the review queue.
 //   5. Insert the customer_invoices row with whatever we resolved and return it.
 //
 // Extraction/match failures are non-fatal: the row is still inserted (status
@@ -140,10 +142,13 @@ Deno.serve(async (req: Request) => {
     }
   }
 
-  // Status: a resolved order is a confident match. A customer-only resolution
-  // (no order) or anything weaker needs an operator to confirm.
+  // Status: a resolved order is a confident match. A customer-name resolution
+  // (even with NO order #) is also enough to file the invoice under that
+  // profile — many pre-Shopify / in-person sales and Sharpei-financing invoices
+  // have no order number at all, but the bill-to name matches an existing
+  // customer. Only a complete miss (no order AND no customer) stays in review.
   if (matchStatus !== 'matched') {
-    matchStatus = customerId ? 'needs_review' : 'unassigned';
+    matchStatus = customerId ? 'matched' : 'unassigned';
   }
 
   // ── Insert the row ─────────────────────────────────────────────────────

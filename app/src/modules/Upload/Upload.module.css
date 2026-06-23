@@ -72,5 +72,11 @@
   width: 90px; padding: 4px 8px; font-size: 12px;
   border: 1px solid var(--color-border); border-radius: var(--radius-sm, 6px);
 }
+.removeBtn {
+  margin-left: 8px; padding: 4px 10px; font-size: 12px; font-weight: 600;
+  background: #fff; color: #9b2c2c; border: 1px solid #fc8181;
+  border-radius: var(--radius-sm, 6px); cursor: pointer;
+}
+.removeBtn:disabled { opacity: 0.5; cursor: not-allowed; }
 .errText { color: var(--color-error, #c53030); font-size: 11px; margin-top: 4px; }
 .emptyRow { font-size: 13px; color: var(--color-ink-muted); padding: 8px 0; }
