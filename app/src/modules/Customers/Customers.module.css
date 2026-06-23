@@ -337,6 +337,41 @@
   font-size: 12px;
 }
 .itemRow:last-child { border-bottom: none; }
+
+.orderCard {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  background: var(--color-surface);
+}
+.orderCard:last-child { margin-bottom: 0; }
+.orderCardHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+.orderCardRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  padding: 2px 0;
+  font-size: 12px;
+}
+.orderFinancials {
+  margin-top: 6px;
+  border-top: 1px solid #f4f4f4;
+  padding-top: 4px;
+}
+.orderLineItems {
+  margin-top: 6px;
+  border-top: 1px solid #f4f4f4;
+  padding-top: 4px;
+  opacity: 0.8;
+}
 .itemAmount {
   font-variant-numeric: tabular-nums;
   font-weight: 600;

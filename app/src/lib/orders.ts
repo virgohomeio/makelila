@@ -95,10 +95,12 @@ export type Order = {
   total_usd: number;
   subtotal_usd: number | null;
   tax_usd: number | null;
+  tax_lines: Array<{ title: string; rate: number; amount_usd: number }> | null;
   discount_total_usd: number | null;
   discount_codes: string[] | null;
   payment_methods: string[] | null;
   financial_status: string | null;
+  shipping_line_title: string | null;
   line_items: LineItem[];
   sales_confirmed_fit: boolean;
   dispositioned_by: string | null;
