@@ -245,6 +245,8 @@ export type AllShipmentRow = {
   booked_at: string;
   label_url: string | null;
   freightcom_shipment_id: string;
+  freightcom_status: string | null;
+  status_synced_at: string | null;
 };
 
 export type AllClaimRow = Claim & {
@@ -263,7 +265,7 @@ export function useAllShipments(): { shipments: AllShipmentRow[]; loading: boole
     (async () => {
       const { data, error: err } = await supabase
         .from('shipments')
-        .select('id, order_id, carrier, service, rate_cad, primary_tracking_number, status, booked_at, label_url, freightcom_shipment_id, orders(order_ref, customer_name)')
+        .select('id, order_id, carrier, service, rate_cad, primary_tracking_number, status, booked_at, label_url, freightcom_shipment_id, freightcom_status, status_synced_at, orders(order_ref, customer_name)')
         .order('booked_at', { ascending: false });
       if (cancelled) return;
       if (err) { setError(err.message); setLoading(false); return; }
@@ -272,6 +274,7 @@ export function useAllShipments(): { shipments: AllShipmentRow[]; loading: boole
         rate_cad: number | null; primary_tracking_number: string | null;
         status: string; booked_at: string; label_url: string | null;
         freightcom_shipment_id: string;
+        freightcom_status: string | null; status_synced_at: string | null;
         orders: { order_ref: string; customer_name: string } | null;
       }>).map(s => ({
         id: s.id,
@@ -286,6 +289,8 @@ export function useAllShipments(): { shipments: AllShipmentRow[]; loading: boole
         booked_at: s.booked_at,
         label_url: s.label_url,
         freightcom_shipment_id: s.freightcom_shipment_id,
+        freightcom_status: s.freightcom_status ?? null,
+        status_synced_at: s.status_synced_at ?? null,
       }));
       setShipments(rows);
       setLoading(false);
@@ -404,6 +409,26 @@ export async function fetchTrackingEvents(freightcomShipmentId: string): Promise
   });
   if (error) throw new Error(error.message);
   return (data as { events: TrackingEvent[] }).events ?? [];
+}
+
+/**
+ * Pulls live Freightcom status for the given shipments and persists it.
+ * Returns the per-shipment results from the edge function.
+ */
+export async function refreshFreightcomStatuses(
+  rows: Array<{ id: string; freightcom_shipment_id: string }>,
+): Promise<Array<{ id: string; freightcom_status: string | null; error?: string }>> {
+  const payload = rows
+    .filter(r => r.freightcom_shipment_id)
+    .map(r => ({ id: r.id, freightcom_shipment_id: r.freightcom_shipment_id }));
+  if (payload.length === 0) return [];
+  const { data, error } = await supabase.functions.invoke('freightcom-status', {
+    body: { shipments: payload },
+  });
+  if (error) throw new Error(error.message);
+  const results = (data as { results?: Array<{ id: string; freightcom_status: string | null; error?: string }> }).results ?? [];
+  await logAction('shipment_status_refreshed', 'shipments', `count=${payload.length}`);
+  return results;
 }
 
 /** Fetches Freightcom invoices. Mode 'shipment' = for one shipment; 'date_range' = last N days. */
