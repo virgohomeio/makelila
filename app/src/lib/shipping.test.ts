@@ -4,6 +4,7 @@ import {
   displayFreightcomStatus,
   isKnownFreightcomStatus,
   isMissingColumnError,
+  deriveShipmentParty,
 } from './shipping';
 
 describe('displayFreightcomStatus', () => {
@@ -45,6 +46,38 @@ describe('isKnownFreightcomStatus', () => {
       'waiting-for-transit', 'in-transit', 'delivered',
       'exception', 'missing', 'cancelled',
     ]);
+  });
+});
+
+describe('deriveShipmentParty', () => {
+  it('outbound: uses ship_to_name (the recipient/customer)', () => {
+    const r = deriveShipmentParty({
+      raw_payload: { direction: 'outbound', ship_to_name: 'Esmeralda Burgess', ship_from_name: 'VCycene Inc.' },
+      order_customer_name: null,
+    });
+    expect(r).toEqual({ direction: 'outbound', counterparty_name: 'Esmeralda Burgess' });
+  });
+
+  it('return: uses ship_from_name (the customer sending it back)', () => {
+    const r = deriveShipmentParty({
+      raw_payload: { direction: 'return', ship_to_name: 'VCycene Inc.', ship_from_name: 'Brent Neave' },
+      order_customer_name: null,
+    });
+    expect(r).toEqual({ direction: 'return', counterparty_name: 'Brent Neave' });
+  });
+
+  it('no raw_payload: defaults to outbound and falls back to the order customer', () => {
+    const r = deriveShipmentParty({ raw_payload: null, order_customer_name: 'Ann Nock' });
+    expect(r).toEqual({ direction: 'outbound', counterparty_name: 'Ann Nock' });
+  });
+
+  it('raw_payload without names: falls back to the order customer', () => {
+    const r = deriveShipmentParty({ raw_payload: { direction: 'outbound' }, order_customer_name: 'Fred Rice' });
+    expect(r).toEqual({ direction: 'outbound', counterparty_name: 'Fred Rice' });
+  });
+
+  it('no name anywhere: empty string', () => {
+    expect(deriveShipmentParty({ raw_payload: null, order_customer_name: null }).counterparty_name).toBe('');
   });
 });
 

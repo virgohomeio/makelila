@@ -17,7 +17,7 @@ const FC_BADGE_CLASS: Record<string, string> = {
   'cancelled':           styles.statusCancelled,
 };
 
-type Filter = 'all' | typeof FREIGHTCOM_STATUSES[number] | 'other';
+type Filter = 'all' | typeof FREIGHTCOM_STATUSES[number] | 'other' | 'returns';
 const FILTERS: { id: Filter; label: string }[] = [
   { id: 'all',                 label: 'All'                 },
   { id: 'waiting-for-transit', label: 'Waiting for transit' },
@@ -27,6 +27,7 @@ const FILTERS: { id: Filter; label: string }[] = [
   { id: 'missing',             label: 'Missing'             },
   { id: 'cancelled',           label: 'Cancelled'           },
   { id: 'other',               label: 'Other'               },
+  { id: 'returns',             label: '↩ Returns'           },
 ];
 
 export function ShippingTab() {
@@ -49,6 +50,7 @@ export function ShippingTab() {
 
   const matchesFilter = (s: AllShipmentRow) => {
     if (filter === 'all') return true;
+    if (filter === 'returns') return s.direction === 'return';
     const fc = displayFreightcomStatus(s);
     if (filter === 'other') return !isKnownFreightcomStatus(fc);
     return fc === filter;
@@ -237,6 +239,8 @@ export function ShippingTab() {
           {FILTERS.map(f => {
             const count = f.id === 'all'
               ? shipments.length
+              : f.id === 'returns'
+              ? shipments.filter(s => s.direction === 'return').length
               : shipments.filter(s => {
                   const fc = displayFreightcomStatus(s);
                   return f.id === 'other' ? !isKnownFreightcomStatus(fc) : fc === f.id;
@@ -265,6 +269,7 @@ export function ShippingTab() {
               <tr style={{ background: '#f7fafc' }}>
                 <th style={{ padding: '7px 12px', textAlign: 'left', fontWeight: 600 }}>Order</th>
                 <th style={{ padding: '7px 12px', textAlign: 'left', fontWeight: 600 }}>Customer</th>
+                <th style={{ padding: '7px 12px', textAlign: 'left', fontWeight: 600 }}>Direction</th>
                 <th style={{ padding: '7px 12px', textAlign: 'left', fontWeight: 600 }}>Carrier</th>
                 <th style={{ padding: '7px 12px', textAlign: 'left', fontWeight: 600 }}>Service</th>
                 <th style={{ padding: '7px 12px', textAlign: 'right', fontWeight: 600 }}>Rate (CAD)</th>
@@ -278,8 +283,21 @@ export function ShippingTab() {
             <tbody>
               {filteredShipments.map(s => (
                 <tr key={s.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
-                  <td style={{ padding: '7px 12px', fontWeight: 600, fontSize: 12 }}>{s.order_ref}</td>
-                  <td style={{ padding: '7px 12px', color: '#4a5568' }}>{s.customer_name}</td>
+                  <td style={{ padding: '7px 12px', fontWeight: 600, fontSize: 12 }}>{s.order_ref || '—'}</td>
+                  <td style={{ padding: '7px 12px', color: '#4a5568' }}>{s.counterparty_name || '—'}</td>
+                  <td style={{ padding: '7px 12px' }}>
+                    {s.direction === 'return' ? (
+                      <span style={{ fontSize: 11, fontWeight: 600, color: '#9c4221',
+                                     background: '#feebc8', borderRadius: 4, padding: '2px 7px' }}>
+                        ↩ Return
+                      </span>
+                    ) : (
+                      <span style={{ fontSize: 11, color: '#718096',
+                                     background: '#edf2f7', borderRadius: 4, padding: '2px 7px' }}>
+                        ↑ Outbound
+                      </span>
+                    )}
+                  </td>
                   <td style={{ padding: '7px 12px' }}>{s.carrier}</td>
                   <td style={{ padding: '7px 12px', color: '#4a5568' }}>{s.service}</td>
                   <td style={{ padding: '7px 12px', textAlign: 'right' }}>

@@ -23,11 +23,13 @@ vi.mock('../../../../lib/shipping', async (importOriginal) => {
         { id: 's1', order_id: 'o1', order_ref: '#1134', customer_name: 'Jeff',
           carrier: 'FedEx', service: 'Ground', rate_cad: 20, primary_tracking_number: '77',
           status: 'booked', booked_at: '2026-06-01T00:00:00Z', label_url: null,
-          freightcom_shipment_id: 'fc1', freightcom_status: 'in-transit', status_synced_at: '2026-06-02T00:00:00Z' },
+          freightcom_shipment_id: 'fc1', freightcom_status: 'in-transit', status_synced_at: '2026-06-02T00:00:00Z',
+          direction: 'outbound', counterparty_name: 'Esmeralda Burgess' },
         { id: 's2', order_id: 'o2', order_ref: '#1140', customer_name: 'Ann',
           carrier: 'Purolator', service: 'Express', rate_cad: 30, primary_tracking_number: '88',
           status: 'booked', booked_at: '2026-06-01T00:00:00Z', label_url: null,
-          freightcom_shipment_id: 'fc2', freightcom_status: 'out-for-delivery', status_synced_at: null },
+          freightcom_shipment_id: 'fc2', freightcom_status: 'out-for-delivery', status_synced_at: null,
+          direction: 'return', counterparty_name: 'Brent Neave' },
       ],
     }),
     refreshFreightcomStatuses: refreshMock,
@@ -60,5 +62,19 @@ describe('ShippingTab — Freightcom statuses', () => {
     render(<ShippingTab />);
     fireEvent.click(screen.getByText(/Refresh from Freightcom/));
     expect(refreshMock).toHaveBeenCalledOnce();
+  });
+
+  it('shows the counterparty name as the Customer for every row', () => {
+    render(<ShippingTab />);
+    expect(screen.getByText('Esmeralda Burgess')).toBeTruthy(); // outbound recipient
+    expect(screen.getByText('Brent Neave')).toBeTruthy();       // return sender
+  });
+
+  it('marks returns and filters to them via the Returns chip', () => {
+    render(<ShippingTab />);
+    expect(screen.getByText('↩ Return')).toBeTruthy();
+    fireEvent.click(screen.getByText(/Returns/));
+    expect(screen.getByText('Brent Neave')).toBeTruthy();       // the return row stays
+    expect(screen.queryByText('Esmeralda Burgess')).toBeNull(); // outbound filtered out
   });
 });

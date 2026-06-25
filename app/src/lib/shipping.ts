@@ -21,6 +21,36 @@ export function isKnownFreightcomStatus(v: string): v is FreightcomStatus {
   return (FREIGHTCOM_STATUSES as readonly string[]).includes(v);
 }
 
+// ── Shipment direction + counterparty name ─────────────────────────────────
+
+export type ShipmentDirection = 'outbound' | 'return';
+
+/** Provenance blob stored on imported shipments (subset we read). */
+export type ShipmentRawPayload = {
+  direction?: string;
+  ship_to_name?: string;
+  ship_from_name?: string;
+} | null;
+
+export type ShipmentParty = { direction: ShipmentDirection; counterparty_name: string };
+
+/**
+ * Derives the shipment's direction and the "other party" name to show as the
+ * Customer. Outbound → the recipient (ship_to_name); return → the sender
+ * (ship_from_name). Falls back to the linked order's customer name for
+ * makelila-booked shipments that carry no raw_payload.
+ */
+export function deriveShipmentParty(args: {
+  raw_payload: ShipmentRawPayload;
+  order_customer_name: string | null;
+}): ShipmentParty {
+  const rp = args.raw_payload ?? {};
+  const direction: ShipmentDirection = rp.direction === 'return' ? 'return' : 'outbound';
+  const fromRaw = direction === 'return' ? rp.ship_from_name : rp.ship_to_name;
+  const counterparty_name = (fromRaw || args.order_customer_name || '').trim();
+  return { direction, counterparty_name };
+}
+
 /** Reverse-map the internal enum to Freightcom's vocabulary for never-synced rows. */
 const INTERNAL_TO_FREIGHTCOM: Record<ShipmentStatus, string> = {
   booked:     'waiting-for-transit',
@@ -247,6 +277,8 @@ export type AllShipmentRow = {
   freightcom_shipment_id: string;
   freightcom_status: string | null;
   status_synced_at: string | null;
+  direction: ShipmentDirection;
+  counterparty_name: string;
 };
 
 export type AllClaimRow = Claim & {
@@ -256,7 +288,7 @@ export type AllClaimRow = Claim & {
 
 // Columns that exist regardless of whether the freightcom_status migration ran.
 const SHIPMENT_BASE_COLS =
-  'id, order_id, carrier, service, rate_cad, primary_tracking_number, status, booked_at, label_url, freightcom_shipment_id';
+  'id, order_id, carrier, service, rate_cad, primary_tracking_number, status, booked_at, label_url, freightcom_shipment_id, raw_payload';
 
 /** True for a Postgres "undefined column" error (42703) — the migration isn't applied. */
 export function isMissingColumnError(err: { code?: string; message?: string } | null): boolean {
@@ -297,23 +329,32 @@ export function useAllShipments(): { shipments: AllShipmentRow[]; loading: boole
         status: string; booked_at: string; label_url: string | null;
         freightcom_shipment_id: string;
         freightcom_status?: string | null; status_synced_at?: string | null;
+        raw_payload?: ShipmentRawPayload;
         orders: { order_ref: string; customer_name: string } | null;
-      }>).map(s => ({
-        id: s.id,
-        order_id: s.order_id,
-        order_ref: s.orders?.order_ref ?? '',
-        customer_name: s.orders?.customer_name ?? '',
-        carrier: s.carrier,
-        service: s.service,
-        rate_cad: s.rate_cad,
-        primary_tracking_number: s.primary_tracking_number,
-        status: s.status as ShipmentStatus,
-        booked_at: s.booked_at,
-        label_url: s.label_url,
-        freightcom_shipment_id: s.freightcom_shipment_id,
-        freightcom_status: s.freightcom_status ?? null,
-        status_synced_at: s.status_synced_at ?? null,
-      }));
+      }>).map(s => {
+        const party = deriveShipmentParty({
+          raw_payload: s.raw_payload ?? null,
+          order_customer_name: s.orders?.customer_name ?? null,
+        });
+        return {
+          id: s.id,
+          order_id: s.order_id,
+          order_ref: s.orders?.order_ref ?? '',
+          customer_name: s.orders?.customer_name ?? '',
+          carrier: s.carrier,
+          service: s.service,
+          rate_cad: s.rate_cad,
+          primary_tracking_number: s.primary_tracking_number,
+          status: s.status as ShipmentStatus,
+          booked_at: s.booked_at,
+          label_url: s.label_url,
+          freightcom_shipment_id: s.freightcom_shipment_id,
+          freightcom_status: s.freightcom_status ?? null,
+          status_synced_at: s.status_synced_at ?? null,
+          direction: party.direction,
+          counterparty_name: party.counterparty_name,
+        };
+      });
       setShipments(rows);
       setLoading(false);
     })();
