@@ -29,9 +29,11 @@ export type JourneyTouch = {
 
 export type CustomerTouchData = {
   first_touch_source: string | null;
+  first_touch_medium: string | null;
   first_touch_campaign_id: string | null;
   first_touch_at: string | null;
   last_touch_source: string | null;
+  last_touch_medium: string | null;
   last_touch_campaign_id: string | null;
   last_touch_at: string | null;
   klaviyo_profile_id: string | null;
@@ -49,9 +51,11 @@ export type JourneyOrder = {
 
 export type CustomerJourney = {
   firstSource: string | null;
+  firstChannel: string;
   firstCampaign: string | null;
   firstTouchAt: string | null;
   lastSource: string | null;
+  lastChannel: string | null;
   lastCampaign: string | null;
   lastTouchAt: string | null;
   firstOrderAt: string | null;
@@ -63,20 +67,50 @@ export type CustomerJourney = {
   touches: JourneyTouch[];
 };
 
-/** Normalize the many raw source strings (UTM free-text from Shopify, HubSpot
- *  enums, etc.) into a small set of human channel labels. */
+const PAID_MEDIUMS = ['cpc', 'ppc', 'paid', 'paidsocial', 'paid_social', 'paid-social', 'cpm', 'display', 'sem'];
+
+/** Classify a (utm_source, utm_medium) pair into a canonical attribution
+ *  channel that splits paid vs organic per platform — "Facebook Paid",
+ *  "Facebook Organic", "Google Paid", "Google Organic", "Direct", "Referral",
+ *  "Email", etc. Source alone can't tell paid from organic; the medium does.
+ *  Also maps HubSpot's legacy enum sources (PAID_SOCIAL, ORGANIC_SEARCH, …). */
+export function classifyChannel(source: string | null | undefined, medium?: string | null): string {
+  if (!source) return 'Unknown';
+  const s = source.toLowerCase().trim();
+  const m = (medium ?? '').toLowerCase().trim();
+  const paid = PAID_MEDIUMS.some(p => m === p || m.includes(p));
+
+  // HubSpot legacy enum sources carry their own paid/organic distinction.
+  if (s === 'paid_social') return 'Paid Social';
+  if (s === 'social_media' || s === 'organic_social') return 'Organic Social';
+  if (s === 'paid_search') return 'Paid Search';
+  if (s === 'organic_search') return 'Organic Search';
+  if (s === 'direct_traffic') return 'Direct';
+  if (s === 'email_marketing') return 'Email';
+  if (s === 'referrals') return 'Referral';
+
+  const platform =
+    (s.includes('facebook') || s === 'fb' || s.includes('meta')) ? 'Facebook' :
+    (s.includes('insta') || s === 'ig')                          ? 'Instagram' :
+    s.includes('google')                                         ? 'Google' :
+    s.includes('tiktok')                                         ? 'TikTok' :
+    s.includes('youtube')                                        ? 'YouTube' :
+    (s.includes('bing') || s.includes('microsoft'))              ? 'Bing' :
+    s.includes('linkedin')                                       ? 'LinkedIn' :
+    null;
+  if (platform) return `${platform} ${paid ? 'Paid' : 'Organic'}`;
+
+  if (s.includes('klaviyo') || s.includes('email') || m === 'email') return 'Email';
+  if (s.includes('hubspot')) return 'HubSpot (legacy)';
+  if (m === 'referral' || s.includes('referral')) return 'Referral';
+  if (s.includes('shopify') || s.includes('direct') || m === 'direct' || m === 'none') return 'Direct';
+  return paid ? `${source} (Paid)` : source;
+}
+
+/** Source-only label (kept for places without a medium). Prefer classifyChannel
+ *  when the medium is available. */
 export function prettySource(s: string | null | undefined): string {
-  if (!s) return 'Unknown';
-  const x = s.toLowerCase();
-  if (x.includes('facebook') || x === 'fb' || x.includes('meta') || x.includes('paid_social')) return 'Facebook / Meta';
-  if (x.includes('insta') || x === 'ig') return 'Instagram';
-  if (x.includes('google') || x.includes('organic_search')) return 'Google';
-  if (x.includes('tiktok')) return 'TikTok';
-  if (x.includes('klaviyo') || x.includes('email')) return 'Email (Klaviyo)';
-  if (x.includes('shopify') || x.includes('direct')) return 'Direct / Shopify';
-  if (x.includes('hubspot')) return 'HubSpot (legacy)';
-  if (x.includes('referral')) return 'Referral';
-  return s;
+  return classifyChannel(s, null);
 }
 
 function formatAmount(n: number, currency: string | null): string {
@@ -99,11 +133,14 @@ export function buildJourney(
 ): CustomerJourney {
   const touches: JourneyTouch[] = [];
 
+  const firstChannel = classifyChannel(touch?.first_touch_source, touch?.first_touch_medium);
+  const lastChannel = touch?.last_touch_source ? classifyChannel(touch.last_touch_source, touch.last_touch_medium) : null;
+
   if (touch?.first_touch_source) {
     touches.push({
       at: touch.first_touch_at,
       kind: 'acquisition',
-      label: `First touch · ${prettySource(touch.first_touch_source)}`,
+      label: `First touch · ${firstChannel}`,
       sub: touch.first_touch_campaign_id,
       color: '#2b6cb0',
     });
@@ -116,7 +153,7 @@ export function buildJourney(
     touches.push({
       at: touch.last_touch_at,
       kind: 'last_touch',
-      label: `Last touch before order · ${prettySource(touch.last_touch_source)}`,
+      label: `Last touch before order · ${lastChannel}`,
       sub: touch.last_touch_campaign_id,
       color: '#805ad5',
     });
@@ -155,9 +192,11 @@ export function buildJourney(
 
   return {
     firstSource: touch?.first_touch_source ?? null,
+    firstChannel,
     firstCampaign: touch?.first_touch_campaign_id ?? null,
     firstTouchAt: touch?.first_touch_at ?? null,
     lastSource: touch?.last_touch_source ?? null,
+    lastChannel,
     lastCampaign: touch?.last_touch_campaign_id ?? null,
     lastTouchAt: touch?.last_touch_at ?? null,
     firstOrderAt,
@@ -182,7 +221,7 @@ export function useCustomerTouch(customerId: string | null) {
     setLoading(true);
     void supabase
       .from('customers')
-      .select('first_touch_source, first_touch_campaign_id, first_touch_at, last_touch_source, last_touch_campaign_id, last_touch_at, klaviyo_profile_id, created_at')
+      .select('first_touch_source, first_touch_medium, first_touch_campaign_id, first_touch_at, last_touch_source, last_touch_medium, last_touch_campaign_id, last_touch_at, klaviyo_profile_id, created_at')
       .eq('id', customerId)
       .maybeSingle()
       .then(({ data }) => {
@@ -208,12 +247,12 @@ export function useAcquisitionOverview() {
     let cancelled = false;
     void supabase
       .from('customers')
-      .select('first_touch_source')
+      .select('first_touch_source, first_touch_medium')
       .then(({ data }) => {
         if (cancelled) return;
         const m = new Map<string, number>();
-        for (const r of (data ?? []) as { first_touch_source: string | null }[]) {
-          const ch = r.first_touch_source ? prettySource(r.first_touch_source) : 'Unknown';
+        for (const r of (data ?? []) as { first_touch_source: string | null; first_touch_medium: string | null }[]) {
+          const ch = r.first_touch_source ? classifyChannel(r.first_touch_source, r.first_touch_medium) : 'Unknown';
           m.set(ch, (m.get(ch) ?? 0) + 1);
         }
         setRows(
