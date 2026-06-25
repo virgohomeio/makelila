@@ -8,6 +8,40 @@ export type ShipmentStatus =
   | 'booked' | 'in_transit' | 'delivered'
   | 'exception' | 'missing' | 'cancelled';
 
+// ── Freightcom status vocabulary (dashboard source of truth) ────────────────
+
+export const FREIGHTCOM_STATUSES = [
+  'waiting-for-transit', 'in-transit', 'delivered',
+  'exception', 'missing', 'cancelled',
+] as const;
+export type FreightcomStatus = typeof FREIGHTCOM_STATUSES[number];
+
+/** True when a raw value is one of the 6 known statuses (else grouped as "other"). */
+export function isKnownFreightcomStatus(v: string): v is FreightcomStatus {
+  return (FREIGHTCOM_STATUSES as readonly string[]).includes(v);
+}
+
+/** Reverse-map the internal enum to Freightcom's vocabulary for never-synced rows. */
+const INTERNAL_TO_FREIGHTCOM: Record<ShipmentStatus, string> = {
+  booked:     'waiting-for-transit',
+  in_transit: 'in-transit',
+  delivered:  'delivered',
+  exception:  'exception',
+  missing:    'missing',
+  cancelled:  'cancelled',
+};
+
+/**
+ * Resolves the Freightcom-vocabulary status to show for a row:
+ * stored raw value wins; otherwise reverse-map the internal status.
+ */
+export function displayFreightcomStatus(
+  row: { status: ShipmentStatus; freightcom_status: string | null },
+): string {
+  if (row.freightcom_status) return row.freightcom_status;
+  return INTERNAL_TO_FREIGHTCOM[row.status] ?? row.status;
+}
+
 export type Shipment = {
   id: string;
   order_id: string;
