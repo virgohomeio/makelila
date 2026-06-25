@@ -254,6 +254,16 @@ export type AllClaimRow = Claim & {
   customer_name: string;
 };
 
+// Columns that exist regardless of whether the freightcom_status migration ran.
+const SHIPMENT_BASE_COLS =
+  'id, order_id, carrier, service, rate_cad, primary_tracking_number, status, booked_at, label_url, freightcom_shipment_id';
+
+/** True for a Postgres "undefined column" error (42703) — the migration isn't applied. */
+export function isMissingColumnError(err: { code?: string; message?: string } | null): boolean {
+  if (!err) return false;
+  return err.code === '42703' || /column .* does not exist/i.test(err.message ?? '');
+}
+
 /** Returns all shipments across all orders, joined with order_ref + customer_name. */
 export function useAllShipments(): { shipments: AllShipmentRow[]; loading: boolean; error: string | null } {
   const [shipments, setShipments] = useState<AllShipmentRow[]>([]);
@@ -263,10 +273,22 @@ export function useAllShipments(): { shipments: AllShipmentRow[]; loading: boole
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const { data, error: err } = await supabase
+      // Try the full select (with the Freightcom-status columns). If the
+      // migration that adds them hasn't been applied yet, Postgres returns
+      // 42703 "column does not exist" — fall back to the base columns so the
+      // dashboard still renders (statuses come from the reverse-mapping).
+      let { data, error: err } = await supabase
         .from('shipments')
-        .select('id, order_id, carrier, service, rate_cad, primary_tracking_number, status, booked_at, label_url, freightcom_shipment_id, freightcom_status, status_synced_at, orders(order_ref, customer_name)')
+        .select(`${SHIPMENT_BASE_COLS}, freightcom_status, status_synced_at, orders(order_ref, customer_name)`)
         .order('booked_at', { ascending: false });
+
+      if (!cancelled && err && isMissingColumnError(err)) {
+        ({ data, error: err } = await supabase
+          .from('shipments')
+          .select(`${SHIPMENT_BASE_COLS}, orders(order_ref, customer_name)`)
+          .order('booked_at', { ascending: false }));
+      }
+
       if (cancelled) return;
       if (err) { setError(err.message); setLoading(false); return; }
       const rows: AllShipmentRow[] = ((data ?? []) as unknown as Array<{
@@ -274,7 +296,7 @@ export function useAllShipments(): { shipments: AllShipmentRow[]; loading: boole
         rate_cad: number | null; primary_tracking_number: string | null;
         status: string; booked_at: string; label_url: string | null;
         freightcom_shipment_id: string;
-        freightcom_status: string | null; status_synced_at: string | null;
+        freightcom_status?: string | null; status_synced_at?: string | null;
         orders: { order_ref: string; customer_name: string } | null;
       }>).map(s => ({
         id: s.id,

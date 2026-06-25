@@ -3,6 +3,7 @@ import {
   FREIGHTCOM_STATUSES,
   displayFreightcomStatus,
   isKnownFreightcomStatus,
+  isMissingColumnError,
 } from './shipping';
 
 describe('displayFreightcomStatus', () => {
@@ -44,5 +45,18 @@ describe('isKnownFreightcomStatus', () => {
       'waiting-for-transit', 'in-transit', 'delivered',
       'exception', 'missing', 'cancelled',
     ]);
+  });
+});
+
+describe('isMissingColumnError', () => {
+  it('detects Postgres 42703 by code', () => {
+    expect(isMissingColumnError({ code: '42703', message: 'whatever' })).toBe(true);
+  });
+  it('detects "column ... does not exist" by message', () => {
+    expect(isMissingColumnError({ message: 'column shipments.freightcom_status does not exist' })).toBe(true);
+  });
+  it('is false for unrelated errors and null', () => {
+    expect(isMissingColumnError({ code: '500', message: 'boom' })).toBe(false);
+    expect(isMissingColumnError(null)).toBe(false);
   });
 });
