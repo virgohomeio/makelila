@@ -3,7 +3,7 @@ import { useCustomers } from '../../lib/customers';
 import { useOrders } from '../../lib/orders';
 import { useCustomerEvents } from '../../lib/customerEvents';
 import {
-  buildJourney, prettySource, useCustomerTouch, useAcquisitionOverview,
+  buildJourney, useCustomerTouch, useAcquisitionOverview,
 } from '../../lib/marketing/journey';
 
 const subtle = 'var(--color-ink-subtle)';
@@ -142,8 +142,8 @@ function JourneyDetail({
 
       {/* Summary tiles */}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 14 }}>
-        <Tile label="Came from (first touch)" value={prettySource(journey.firstSource)} sub={journey.firstCampaign ?? undefined} />
-        <Tile label="Last touch before order" value={journey.lastSource ? prettySource(journey.lastSource) : '—'} sub={journey.lastCampaign ?? undefined} />
+        <Tile label="Came from (first touch)" value={journey.firstChannel} sub={journey.firstCampaign ?? undefined} />
+        <Tile label="Last touch before order" value={journey.lastChannel ?? '—'} sub={journey.lastCampaign ?? undefined} />
         <Tile label="Days first touch → purchase" value={journey.daysFirstTouchToOrder != null ? `${journey.daysFirstTouchToOrder}d` : '—'} />
         <Tile label="Orders" value={String(journey.orderCount)} />
         <Tile label="Lifetime spend" value={journey.totalSpend ? fmt(journey.totalSpend, journey.currency) : '—'} />

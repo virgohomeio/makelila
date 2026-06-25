@@ -211,16 +211,20 @@ function mapOrder(
   };
 }
 
-function parseUtm(landingUrl: string | null | undefined): { source: string | null; campaign: string | null } {
-  if (!landingUrl) return { source: null, campaign: null };
+function parseUtm(landingUrl: string | null | undefined): { source: string | null; medium: string | null; campaign: string | null } {
+  if (!landingUrl) return { source: null, medium: null, campaign: null };
   try {
     const url = new URL(landingUrl);
     const source = url.searchParams.get('utm_source');
+    const medium = url.searchParams.get('utm_medium');
     const campaign = url.searchParams.get('utm_campaign');
-    if (!source) return { source: 'shopify_direct', campaign: null };
-    return { source, campaign };
+    // No utm_source on the landing URL = the visitor came in directly (typed
+    // the URL, bookmark, etc.). Tag medium 'direct' so the classifier reads it
+    // as Direct rather than Unknown.
+    if (!source) return { source: 'shopify_direct', medium: medium ?? 'direct', campaign: null };
+    return { source, medium, campaign };
   } catch {
-    return { source: null, campaign: null };
+    return { source: null, medium: null, campaign: null };
   }
 }
 
@@ -345,15 +349,30 @@ serve(async (req: Request) => {
       const raw = rawByRef.get(m.order_ref);
       const utm = parseUtm(raw?.landing_site ?? raw?.landing_site_ref ?? null);
       if (utm.source && m.customer_email) {
+        const email = m.customer_email.toLowerCase();
+        const at = raw?.created_at ?? new Date().toISOString();
+        // First touch — insert-only (never overwrite the original acquisition).
         await admin
           .from('customers')
           .update({
             first_touch_source: utm.source,
+            first_touch_medium: utm.medium,
             first_touch_campaign_id: utm.campaign,
-            first_touch_at: raw?.created_at ?? new Date().toISOString(),
+            first_touch_at: at,
           })
-          .eq('email', m.customer_email.toLowerCase())
+          .eq('email', email)
           .is('first_touch_source', null);
+        // Last touch — reflects the most recent order's landing, so the journey
+        // shows the channel that actually drove the latest purchase.
+        await admin
+          .from('customers')
+          .update({
+            last_touch_source: utm.source,
+            last_touch_medium: utm.medium,
+            last_touch_campaign_id: utm.campaign,
+            last_touch_at: at,
+          })
+          .eq('email', email);
       }
     } else {
       // Refresh Shopify source-of-truth fields on existing order

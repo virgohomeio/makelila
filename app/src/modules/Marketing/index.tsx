@@ -2,12 +2,13 @@ import { useState } from 'react';
 import { CacDashboard } from './CacDashboard';
 import { DashboardTab } from './DashboardTab';
 import { JourneyTab } from './JourneyTab';
+import { SocialTab } from './SocialTab';
 import { SystemOfRecordCard } from './SystemOfRecordCard';
 import { useFbCampaigns, triggerFbSync } from '../../lib/marketing/facebook';
 import { useKlaviyoSyncStatus, triggerKlaviyoSync } from '../../lib/marketing/klaviyo';
 import styles from './Marketing.module.css';
 
-type Tab = 'dashboard' | 'campaigns' | 'attribution' | 'journey' | 'sync';
+type Tab = 'dashboard' | 'campaigns' | 'social' | 'attribution' | 'journey' | 'sync';
 
 export default function Marketing() {
   const [tab, setTab] = useState<Tab>('dashboard');
@@ -50,7 +51,7 @@ export default function Marketing() {
       </div>
 
       <div className={styles.tabs}>
-        {(['dashboard', 'campaigns', 'attribution', 'journey', 'sync'] as Tab[]).map(t => (
+        {(['dashboard', 'campaigns', 'social', 'attribution', 'journey', 'sync'] as Tab[]).map(t => (
           <button
             key={t}
             className={`${styles.tab} ${tab === t ? styles.tabActive : ''}`}
@@ -128,6 +129,8 @@ export default function Marketing() {
       )}
 
       {tab === 'dashboard' && <DashboardTab />}
+
+      {tab === 'social' && <SocialTab />}
 
       {tab === 'attribution' && <CacDashboard />}
 
