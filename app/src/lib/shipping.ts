@@ -309,20 +309,28 @@ export function useAllShipments(): { shipments: AllShipmentRow[]; loading: boole
       // migration that adds them hasn't been applied yet, Postgres returns
       // 42703 "column does not exist" — fall back to the base columns so the
       // dashboard still renders (statuses come from the reverse-mapping).
-      let { data, error: err } = await supabase
-        .from('shipments')
-        .select(`${SHIPMENT_BASE_COLS}, freightcom_status, status_synced_at, orders(order_ref, customer_name)`)
-        .order('booked_at', { ascending: false });
+      // `data`/`err` are widened so the two differently-shaped selects share them.
+      let data: unknown[] | null = null;
+      let err: { code?: string; message?: string } | null = null;
+
+      {
+        const r = await supabase
+          .from('shipments')
+          .select(`${SHIPMENT_BASE_COLS}, freightcom_status, status_synced_at, orders(order_ref, customer_name)`)
+          .order('booked_at', { ascending: false });
+        data = r.data; err = r.error;
+      }
 
       if (!cancelled && err && isMissingColumnError(err)) {
-        ({ data, error: err } = await supabase
+        const r = await supabase
           .from('shipments')
           .select(`${SHIPMENT_BASE_COLS}, orders(order_ref, customer_name)`)
-          .order('booked_at', { ascending: false }));
+          .order('booked_at', { ascending: false });
+        data = r.data; err = r.error;
       }
 
       if (cancelled) return;
-      if (err) { setError(err.message); setLoading(false); return; }
+      if (err) { setError(err.message ?? 'Failed to load shipments'); setLoading(false); return; }
       const rows: AllShipmentRow[] = ((data ?? []) as unknown as Array<{
         id: string; order_id: string; carrier: string; service: string;
         rate_cad: number | null; primary_tracking_number: string | null;
