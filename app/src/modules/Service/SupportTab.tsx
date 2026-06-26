@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  useServiceTickets, createTicket, syncGmailTickets,
+  useServiceTickets, useTicketsClosedSince, createTicket, syncGmailTickets,
   STATUS_META, TICKET_STATUSES, TOPIC_LABEL,
   statusMeta, priorityMeta, sourceLabel, topicLabel, slaChip,
   ISSUE_AREAS, ISSUE_AREA_LABEL,
@@ -21,6 +21,7 @@ const STATUS_FILTERS: { key: TicketStatus | 'all'; label: string }[] = [
 
 export function SupportTab() {
   const { tickets, loading } = useServiceTickets('support');
+  const { closedIds: closedSinceIds } = useTicketsClosedSince(7);
   const { customers } = useCustomers();
   const [statusFilter, setStatusFilter] = useState<TicketStatus | 'all'>('all');
   const [sourceFilter, setSourceFilter] = useState<'all' | 'customer_form' | 'hubspot' | 'gmail' | 'quo' | 'telemetry_auto'>('all');
@@ -104,8 +105,13 @@ export function SupportTab() {
   const newTodayCount = tickets.filter(t => new Date(t.created_at).getTime() > dayAgo).length;
   const inProgressCount = tickets.filter(t => t.status === 'in_progress').length;
   const waitingCount = tickets.filter(t => t.status === 'waiting_on_us').length;
+  // Closed (7d) = throughput: support tickets closed at least once in the window,
+  // counting reopened ones too. A ticket qualifies if it has a close event in the
+  // activity log within 7d, OR its current closed_at falls in the window (covers
+  // closes made outside the app, e.g. synced from HubSpot).
   const closedWeekCount = tickets.filter(t =>
-    t.status === 'closed' && t.closed_at && new Date(t.closed_at).getTime() > weekAgo
+    closedSinceIds.has(t.id) ||
+    (t.closed_at != null && new Date(t.closed_at).getTime() > weekAgo)
   ).length;
 
   if (loading) return <div className={styles.loading}>Loading…</div>;
@@ -612,7 +618,9 @@ function TicketRow({ t, selected, onClick }: { t: ServiceTicket; selected: boole
       <td>
         <span className={styles.pill} style={{ background: s.bg, color: s.color }}>{s.label}</span>
         {t.status === 'closed' && t.closed_at && (
-          <div className={styles.closedDate}>Closed {new Date(t.closed_at).toLocaleDateString()}</div>
+          <div className={styles.closedDate} title={`Closed ${new Date(t.closed_at).toLocaleString()}`}>
+            Closed {new Date(t.closed_at).toLocaleDateString()}
+          </div>
         )}
       </td>
       <td>{t.owner_email ? t.owner_email.split('@')[0] : '—'}</td>

@@ -339,6 +339,42 @@ export function useServiceTickets(category?: TicketCategory): {
   return { tickets, loading };
 }
 
+/**
+ * Set of ticket ids that had a close event (ticket_status_changed → closed) in
+ * the last `days`, read from the activity log. Used for the "closed in the last
+ * N days" throughput KPI — counts a ticket even if it was reopened afterward,
+ * which the current-status-based count would miss.
+ */
+export function useTicketsClosedSince(days: number): { closedIds: Set<string>; loading: boolean } {
+  const [closedIds, setClosedIds] = useState<Set<string>>(new Set());
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const cutoff = new Date(Date.now() - days * 86_400_000).toISOString();
+      const { data, error } = await supabase
+        .from('activity_log')
+        .select('entity_id, ts')
+        .eq('type', 'ticket_status_changed')
+        .eq('detail', 'closed')
+        .gte('ts', cutoff);
+      if (cancelled) return;
+      if (!error && data) {
+        setClosedIds(new Set(
+          (data as { entity_id: string | null }[])
+            .map(r => r.entity_id)
+            .filter((id): id is string => !!id),
+        ));
+      }
+      setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [days]);
+
+  return { closedIds, loading };
+}
+
 export function useInbox(disposition?: InboxDisposition | 'untriaged' | 'all'): {
   rows: ServiceTicket[];
   loading: boolean;
@@ -771,7 +807,12 @@ export async function deleteTicket(id: string): Promise<void> {
 }
 
 export async function updateTicketStatus(id: string, status: TicketStatus): Promise<void> {
-  const { error } = await supabase.from('service_tickets').update({ status }).eq('id', id);
+  // Stamp closed_at on close, and CLEAR it on reopen so a later re-close gets a
+  // fresh timestamp (the DB trigger only coalesces, so without clearing, a
+  // reopened-then-reclosed ticket would keep its stale original close date).
+  const patch: Record<string, unknown> = { status };
+  patch.closed_at = status === 'closed' ? new Date().toISOString() : null;
+  const { error } = await supabase.from('service_tickets').update(patch).eq('id', id);
   if (error) throw error;
   await logAction('ticket_status_changed', id, status,
     { entityType: 'ticket', entityId: id });

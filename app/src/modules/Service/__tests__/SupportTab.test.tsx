@@ -58,6 +58,7 @@ vi.mock('../../../lib/service', async () => {
   return {
     ...actual,
     useServiceTickets: vi.fn(() => ({ tickets: ticketsToReturn, loading: false })),
+    useTicketsClosedSince: vi.fn(() => ({ closedIds: new Set<string>(), loading: false })),
   };
 });
 vi.mock('../../../lib/customers', async () => {
