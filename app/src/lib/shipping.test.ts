@@ -5,32 +5,30 @@ import {
   isKnownFreightcomStatus,
   isMissingColumnError,
   deriveShipmentParty,
+  type ShipmentStatus,
 } from './shipping';
+
+const row = (status: ShipmentStatus, freightcom_status: string | null) => ({ status, freightcom_status });
 
 describe('displayFreightcomStatus', () => {
   it('uses the stored raw freightcom_status when present', () => {
-    const row = { status: 'booked', freightcom_status: 'in-transit' } as any;
-    expect(displayFreightcomStatus(row)).toBe('in-transit');
+    expect(displayFreightcomStatus(row('booked', 'in-transit'))).toBe('in-transit');
   });
 
   it('reverse-maps internal booked -> waiting-for-transit when not yet synced', () => {
-    const row = { status: 'booked', freightcom_status: null } as any;
-    expect(displayFreightcomStatus(row)).toBe('waiting-for-transit');
+    expect(displayFreightcomStatus(row('booked', null))).toBe('waiting-for-transit');
   });
 
   it('reverse-maps internal in_transit -> in-transit when not yet synced', () => {
-    const row = { status: 'in_transit', freightcom_status: null } as any;
-    expect(displayFreightcomStatus(row)).toBe('in-transit');
+    expect(displayFreightcomStatus(row('in_transit', null))).toBe('in-transit');
   });
 
   it('passes through 1:1 internal statuses when not yet synced', () => {
-    const row = { status: 'delivered', freightcom_status: null } as any;
-    expect(displayFreightcomStatus(row)).toBe('delivered');
+    expect(displayFreightcomStatus(row('delivered', null))).toBe('delivered');
   });
 
   it('returns an unknown raw value verbatim', () => {
-    const row = { status: 'booked', freightcom_status: 'out-for-delivery' } as any;
-    expect(displayFreightcomStatus(row)).toBe('out-for-delivery');
+    expect(displayFreightcomStatus(row('booked', 'out-for-delivery'))).toBe('out-for-delivery');
   });
 });
 
