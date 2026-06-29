@@ -6,6 +6,7 @@ import { MobileBackHeader } from '../../components/MobileBackHeader';
 import { Sidebar } from './Sidebar';
 import { Detail } from './Detail';
 import Templates from '../Templates';
+import Upload from '../Upload';
 import styles from './OrderReview.module.css';
 
 export default function OrderReview() {
@@ -14,7 +15,7 @@ export default function OrderReview() {
   const isMobile = useIsMobile();
   const { all, pending, held, flagged, approved, replacement, loading } = useOrders();
   const selected = orderId ? all.find(o => o.id === orderId) ?? null : null;
-  const [view, setView] = useState<'orders' | 'templates'>('orders');
+  const [view, setView] = useState<'orders' | 'templates' | 'upload'>('orders');
 
   // Desktop auto-loads the first pending order so the right pane isn't empty
   // on first paint. On mobile we keep the sidebar visible (no order selected)
@@ -45,6 +46,10 @@ export default function OrderReview() {
         className={`${styles.viewChip} ${view === 'templates' ? styles.viewChipActive : ''}`}
         onClick={() => setView('templates')}
       >Templates</button>
+      <button
+        className={`${styles.viewChip} ${view === 'upload' ? styles.viewChipActive : ''}`}
+        onClick={() => setView('upload')}
+      >Upload</button>
     </div>
   );
 
@@ -53,6 +58,15 @@ export default function OrderReview() {
       <div>
         {viewChips}
         <Templates />
+      </div>
+    );
+  }
+
+  if (view === 'upload') {
+    return (
+      <div>
+        {viewChips}
+        <Upload />
       </div>
     );
   }
