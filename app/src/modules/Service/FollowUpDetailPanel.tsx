@@ -72,13 +72,13 @@ export function FollowUpDetailPanel({
           <button className={styles.closeBtn} onClick={onClose} title="Close">×</button>
         </div>
         <div className={styles.profHeaderRow}>
-          {customer.email && <span>{customer.email}</span>}
+          <span>{customer.email ?? '—'}</span>
           {customer.hubspot_id && (
             <a className={styles.profHubspot} target="_blank" rel="noreferrer"
                href={`https://app.hubspot.com/contacts/_/contact/${customer.hubspot_id}`}>HubSpot ↗</a>
           )}
         </div>
-        {customer.phone && <div className={styles.profHeaderRow}><span className={styles.profQuo}>Quo</span> {customer.phone}</div>}
+        <div className={styles.profHeaderRow}><span className={styles.profQuo}>Quo</span> {customer.phone ?? '—'}</div>
       </div>
 
       {/* ── Status tags ────────────────────────────────────────── */}
@@ -114,7 +114,7 @@ export function FollowUpDetailPanel({
         <EditableRow label="Dashboard" value={customer.dashboard ?? ''}    placeholder="yes / no / etc." onSave={v => saveProfile({ dashboard: v })} />
         <EditableRow label="Software"  value={customer.software ?? ''}     placeholder="V17 / V18 / …" onSave={v => saveProfile({ software: v })} />
         <EditableRow label="Timezone"  value={customer.timezone ?? ''}     placeholder="EST / PST / …" onSave={v => saveProfile({ timezone: v })} />
-        <EditableRow label="Address"   value={customer.address_line ?? ''} placeholder="Street, City, State" onSave={v => saveProfile({ address_line: v })} />
+        <ReadOnlyRow label="Address"   value={[customer.address_line, customer.city, customer.region].filter(Boolean).join(', ') || '—'} />
       </div>
 
       {/* ── Open HubSpot tickets + pause banner ────────────────── */}
@@ -273,6 +273,15 @@ export function FollowUpDetailPanel({
         <button className={styles.actionBtn} disabled={busy}
           onClick={() => void run(() => setReviewStatus(customer.id, 'received'))}>Mark review received</button>
       </div>
+    </div>
+  );
+}
+
+function ReadOnlyRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className={styles.profRow}>
+      <span className={styles.profRowLabel}>{label}</span>
+      <span className={styles.profRowValue}>{value}</span>
     </div>
   );
 }
