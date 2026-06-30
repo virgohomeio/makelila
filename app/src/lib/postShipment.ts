@@ -438,6 +438,61 @@ export function useRefundApprovals(): { approvals: RefundApproval[]; loading: bo
   return { approvals, loading };
 }
 
+// ── Refund notes (collaborative, approver-visible) ──────────────────────────
+
+export type RefundNote = {
+  id: string;
+  refund_id: string;
+  body: string;
+  author_id: string | null;
+  author_name: string | null;
+  created_at: string;
+};
+
+export function useRefundNotes(refundId: string | null): {
+  notes: RefundNote[]; loading: boolean; refresh: () => void;
+} {
+  const [notes, setNotes] = useState<RefundNote[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [tick, setTick] = useState(0);
+
+  useEffect(() => {
+    if (!refundId) { setNotes([]); setLoading(false); return; }
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      const { data } = await supabase
+        .from('refund_notes')
+        .select('*')
+        .eq('refund_id', refundId)
+        .order('created_at', { ascending: true });
+      if (!cancelled) { setNotes((data ?? []) as RefundNote[]); setLoading(false); }
+    })();
+    return () => { cancelled = true; };
+  }, [refundId, tick]);
+
+  return { notes, loading, refresh: () => setTick(t => t + 1) };
+}
+
+export async function addRefundNote(refundId: string, body: string): Promise<void> {
+  const { data: { user } } = await supabase.auth.getUser();
+  let authorName: string | null = null;
+  if (user) {
+    const { data: prof } = await supabase.from('profiles').select('display_name').eq('id', user.id).maybeSingle();
+    authorName = (prof as { display_name?: string } | null)?.display_name ?? user.email ?? null;
+  }
+  const { error } = await supabase.from('refund_notes')
+    .insert({ refund_id: refundId, body: body.trim(), author_id: user?.id ?? null, author_name: authorName });
+  if (error) throw error;
+  await logAction('refund_note_added', refundId, body.trim().slice(0, 120));
+}
+
+export async function deleteRefundNote(noteId: string, refundId: string): Promise<void> {
+  const { error } = await supabase.from('refund_notes').delete().eq('id', noteId);
+  if (error) throw error;
+  await logAction('refund_note_deleted', refundId, noteId);
+}
+
 async function currentUserId(): Promise<string> {
   const { data } = await supabase.auth.getUser();
   if (!data.user) throw new Error('refund: not authenticated');

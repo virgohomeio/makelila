@@ -3,6 +3,7 @@ import {
   useRefundApprovals, useReturns,
   submitRefundRequest, managerApprove, financeApprove, denyRefund, closeRefund,
   setReturnDisposition, updateReturnStatus,
+  useRefundNotes, addRefundNote, deleteRefundNote,
   REFUND_STATUS_META, REFUND_METHODS, REFUND_METHOD_META,
   UNIT_STATUS_LABEL, RETURN_DISPOSITION_META,
   type RefundApproval, type ReturnRow, type RefundMethod, type ReturnDisposition, type ReturnStatus,
@@ -367,11 +368,27 @@ function RefundDetailPanel({
 }) {
   const [busy, setBusy] = useState(false);
   const [holdBusy, setHoldBusy] = useState<string | null>(null);
+  const { notes, refresh: refreshNotes } = useRefundNotes(refund.id);
+  const [newNote, setNewNote] = useState('');
   const meta = REFUND_STATUS_META[refund.status];
 
   const canActManager = (refund.status === 'manager_review' || refund.status === 'submitted') && canManager;
   const canActFinance = refund.status === 'finance_review' && canFinance;
   const canAct = canActManager || canActFinance;
+
+  const runAddNote = async () => {
+    if (!newNote.trim()) return;
+    setBusy(true); onError(null);
+    try { await addRefundNote(refund.id, newNote); setNewNote(''); refreshNotes(); }
+    catch (e) { onError((e as Error).message); }
+    finally { setBusy(false); }
+  };
+  const runDeleteNote = async (noteId: string) => {
+    setBusy(true); onError(null);
+    try { await deleteRefundNote(noteId, refund.id); refreshNotes(); }
+    catch (e) { onError((e as Error).message); }
+    finally { setBusy(false); }
+  };
 
   const runDisposition = async (d: ReturnDisposition | null) => {
     if (!linkedReturn) return;
@@ -571,6 +588,36 @@ function RefundDetailPanel({
         </div>
         </>
       )}
+
+      {/* Notes for approvers (George/Julie) — collaborative, timestamped, attributed. */}
+      <div style={{ margin: '12px 0', borderTop: '1px solid #edf2f7', paddingTop: 12 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: '#4a5568', marginBottom: 6 }}>
+          Notes for approvers ({notes.length})
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 }}>
+          {notes.length === 0 && <div style={{ fontSize: 12, color: '#a0aec0' }}>No notes yet — add context for the approver here.</div>}
+          {notes.map(n => (
+            <div key={n.id} style={{ fontSize: 13, background: '#f7fafc', borderRadius: 6, padding: '6px 9px' }}>
+              <div style={{ whiteSpace: 'pre-wrap' }}>{n.body}</div>
+              <div style={{ fontSize: 10, color: '#a0aec0', marginTop: 3, display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                <span>{n.author_name ?? 'Unknown'} · {new Date(n.created_at).toLocaleString()}</span>
+                <button onClick={() => void runDeleteNote(n.id)} disabled={busy} title="Delete note"
+                  style={{ border: 'none', background: 'none', color: '#cbd5e0', cursor: 'pointer', fontSize: 13, lineHeight: 1 }}>×</button>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <textarea value={newNote} onChange={e => setNewNote(e.target.value)} rows={2}
+            placeholder="Add a note for approvers (extra details on the refund/return)…"
+            style={{ flex: 1, fontSize: 13, padding: '6px 9px', border: '1px solid #e2e8f0', borderRadius: 6, resize: 'vertical' }} />
+          <button onClick={() => void runAddNote()} disabled={busy || !newNote.trim()}
+            style={{ fontSize: 12, fontWeight: 600, padding: '0 14px', borderRadius: 6, border: '1px solid #2b6cb0',
+                     color: '#fff', background: '#2b6cb0', cursor: busy || !newNote.trim() ? 'default' : 'pointer', opacity: busy || !newNote.trim() ? 0.6 : 1 }}>
+            Add note
+          </button>
+        </div>
+      </div>
 
       <div className={styles.refundDetailActions}>
         <div className={styles.refundDetailRolePill}>
