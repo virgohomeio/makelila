@@ -81,7 +81,7 @@ export function FollowUpDetailPanel({
       <div className={styles.profHeader}>
         <div className={styles.profHeaderTop}>
           <strong className={styles.profName}>{customer.full_name}</strong>
-          <button className={styles.closeBtn} onClick={onClose} title="Close">🗑</button>
+          <button className={styles.closeBtn} onClick={onClose} title="Close">×</button>
         </div>
         <div className={styles.profHeaderRow}>
           {customer.email && <span>{customer.email}</span>}
