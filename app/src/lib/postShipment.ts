@@ -30,6 +30,25 @@ export const RETURN_STATUS_ORDER: ReturnStatus[] = [
   'created','pickup_scheduled','picked_up','received','inspected','refunded','denied','closed',
 ];
 
+// Plain-language unit status for the Refunds tab — where is the physical unit?
+export const UNIT_STATUS_LABEL: Record<ReturnStatus, string> = {
+  'created':          'Return form submitted',
+  'pickup_scheduled': 'Pickup scheduled',
+  'picked_up':        'Picked up',
+  'received':         'Received',
+  'inspected':        'Received · inspected',
+  'refunded':         'Received · refunded',
+  'denied':           'Denied',
+  'closed':           'Closed',
+};
+
+// What the customer was told to do with the unit being returned.
+export type ReturnDisposition = 'discard' | 'ship_back';
+export const RETURN_DISPOSITION_META: Record<ReturnDisposition, { label: string; color: string; bg: string }> = {
+  discard:   { label: 'Discard unit',  color: '#9b2c2c', bg: '#fff5f5' },
+  ship_back: { label: 'Ship unit back', color: '#2b6cb0', bg: '#ebf8ff' },
+};
+
 export type ReturnCategory =
   | 'product_defect' | 'software_issue' | 'shipping_damage'
   | 'customer_service' | 'financing' | 'other';
@@ -91,6 +110,7 @@ export type ReturnRow = {
   condition: ReturnCondition | null;
   reason: string | null;
   return_category: ReturnCategory | null;
+  disposition: ReturnDisposition | null;
   refund_amount_usd: number | null;
   status: ReturnStatus;
   pickup_carrier: string | null;
@@ -194,6 +214,17 @@ export async function updateReturnCategory(id: string, category: ReturnCategory 
     .eq('id', id);
   if (error) throw error;
   await logAction('return_category', id, category ?? 'cleared',
+    { entityType: 'return', entityId: id });
+}
+
+/** Sets whether the customer was told to discard the unit or ship it back. */
+export async function setReturnDisposition(id: string, disposition: ReturnDisposition | null): Promise<void> {
+  const { error } = await supabase
+    .from('returns')
+    .update({ disposition })
+    .eq('id', id);
+  if (error) throw error;
+  await logAction('return_disposition', id, disposition ?? 'cleared',
     { entityType: 'return', entityId: id });
 }
 

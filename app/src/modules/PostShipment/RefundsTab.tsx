@@ -2,8 +2,10 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   useRefundApprovals, useReturns,
   submitRefundRequest, managerApprove, financeApprove, denyRefund, closeRefund,
+  setReturnDisposition,
   REFUND_STATUS_META, REFUND_METHODS, REFUND_METHOD_META,
-  type RefundApproval, type ReturnRow, type RefundMethod,
+  UNIT_STATUS_LABEL, RETURN_DISPOSITION_META,
+  type RefundApproval, type ReturnRow, type RefundMethod, type ReturnDisposition,
 } from '../../lib/postShipment';
 import { useQueuedReplacements, holdReplacement, type Order } from '../../lib/orders';
 import { useAuth } from '../../lib/auth';
@@ -141,6 +143,7 @@ export function RefundsTab() {
                   <RefundCard
                     key={r.id}
                     refund={r}
+                    linkedReturn={r.return_id ? returnsById.get(r.return_id) ?? null : null}
                     canManager={isManager}
                     canFinance={isFinance}
                     selected={selectedId === r.id}
@@ -197,9 +200,10 @@ export function RefundsTab() {
 // Refund card
 // ============================================================================
 function RefundCard({
-  refund, canManager, canFinance, selected, onSelect, onError, onOpenFinanceModal,
+  refund, linkedReturn, canManager, canFinance, selected, onSelect, onError, onOpenFinanceModal,
 }: {
   refund: RefundApproval;
+  linkedReturn: ReturnRow | null;
   canManager: boolean;
   canFinance: boolean;
   selected: boolean;
@@ -261,6 +265,26 @@ function RefundCard({
       </div>
       {refund.reason && <div className={styles.refundReason}>{refund.reason}</div>}
       {refund.payment_method && <div className={styles.refundMeta}>via {refund.payment_method}</div>}
+      {linkedReturn && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, margin: '6px 0' }}>
+          <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 999,
+                         color: '#2d3748', background: '#edf2f7' }}>
+            📦 {UNIT_STATUS_LABEL[linkedReturn.status]}
+          </span>
+          {linkedReturn.disposition ? (
+            <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 999,
+                           color: RETURN_DISPOSITION_META[linkedReturn.disposition].color,
+                           background: RETURN_DISPOSITION_META[linkedReturn.disposition].bg }}>
+              {RETURN_DISPOSITION_META[linkedReturn.disposition].label}
+            </span>
+          ) : (
+            <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 999,
+                           color: '#975a16', background: '#fffbeb' }}>
+              ⚠ Disposition not set
+            </span>
+          )}
+        </div>
+      )}
       <div className={styles.refundTimeline}>
         <RefundStep
           label="Submitted"
@@ -341,6 +365,14 @@ function RefundDetailPanel({
   const canActManager = (refund.status === 'manager_review' || refund.status === 'submitted') && canManager;
   const canActFinance = refund.status === 'finance_review' && canFinance;
   const canAct = canActManager || canActFinance;
+
+  const runDisposition = async (d: ReturnDisposition | null) => {
+    if (!linkedReturn) return;
+    setBusy(true); onError(null);
+    try { await setReturnDisposition(linkedReturn.id, d); }
+    catch (e) { onError((e as Error).message); }
+    finally { setBusy(false); }
+  };
 
   const runApprove = async () => {
     if (canActFinance) {
@@ -431,6 +463,30 @@ function RefundDetailPanel({
           This refund isn't linked to a return record. No customer form data to display.
         </div>
       ) : (
+        <>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', margin: '4px 0 12px' }}>
+          <span style={{ fontSize: 12, fontWeight: 600, color: '#4a5568' }}>Unit status:</span>
+          <span style={{ fontSize: 12, fontWeight: 600, padding: '3px 10px', borderRadius: 999, color: '#2d3748', background: '#edf2f7' }}>
+            📦 {UNIT_STATUS_LABEL[linkedReturn.status]}
+          </span>
+          <span style={{ fontSize: 12, fontWeight: 600, color: '#4a5568', marginLeft: 8 }}>Instruction:</span>
+          {(['ship_back', 'discard'] as ReturnDisposition[]).map(d => {
+            const on = linkedReturn.disposition === d;
+            const dm = RETURN_DISPOSITION_META[d];
+            return (
+              <button key={d} disabled={busy}
+                onClick={() => void runDisposition(on ? null : d)}
+                style={{ fontSize: 11, fontWeight: 600, padding: '3px 10px', borderRadius: 999, cursor: 'pointer',
+                         border: `1px solid ${on ? dm.color : '#e2e8f0'}`,
+                         color: on ? dm.color : '#718096', background: on ? dm.bg : '#fff' }}>
+                {on ? '✓ ' : ''}{dm.label}
+              </button>
+            );
+          })}
+          {!linkedReturn.disposition && (
+            <span style={{ fontSize: 11, color: '#975a16' }}>⚠ not set</span>
+          )}
+        </div>
         <div className={styles.refundDetailGrid}>
           <DetailField label="Order #" value={linkedReturn.original_order_ref ?? '—'} mono />
           <DetailField label="Unit serial" value={linkedReturn.unit_serial ?? '—'} mono />
@@ -480,6 +536,7 @@ function RefundDetailPanel({
             </DetailField>
           )}
         </div>
+        </>
       )}
 
       <div className={styles.refundDetailActions}>
