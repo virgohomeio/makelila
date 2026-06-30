@@ -123,14 +123,24 @@
 .calEvent:hover { opacity: 0.8; }
 
 /* ── Selected customer panel ── */
+/* Right-side slide-over drawer (matches Service .detailOverlay) so the customer
+ * profile opens beside the dashboard instead of stacking underneath it. */
 .selectedPanel {
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
+  position: fixed;
+  top: 0; right: 0; bottom: 0;
+  width: 480px;
   background: #fff;
+  border-left: 1px solid var(--color-border);
+  box-shadow: -4px 0 16px rgba(0,0,0,0.08);
+  z-index: 80;
   padding: 14px 16px;
   display: flex;
   flex-direction: column;
   gap: 8px;
+  overflow-y: auto;
+}
+@media (max-width: 700px) {
+  .selectedPanel { width: 100%; left: 0; }
 }
 .selectedHeader {
   display: flex;
