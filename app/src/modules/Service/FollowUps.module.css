@@ -388,7 +388,7 @@
 .profHubspot { margin-left: auto; color: #2b6cb0; font-weight: 600; text-decoration: none; }
 .profQuo { color: #6b46c1; font-weight: 700; }
 
-.profCard { border: 1px solid #ececec; border-radius: 8px; padding: 12px 14px; margin-bottom: 12px; background: #fbfbfb; overflow-wrap: break-word; word-break: break-word; }
+.profCard { border: 1px solid #ececec; border-radius: 8px; padding: 14px 20px; margin-bottom: 12px; background: #fbfbfb; overflow-wrap: break-word; word-break: break-word; }
 .profCardLabel { font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--color-ink-subtle); margin-bottom: 8px; }
 .profCardWarn { background: #fffaf0; border-color: #f6d68a; }
 .profCardRepl { background: #f5f3ff; border-color: #d6ccf5; }
@@ -408,8 +408,8 @@
 .profTicketStatus { font-size: 10px; font-weight: 700; text-transform: uppercase; color: #c53030; background: #fff5f5; border-radius: 4px; padding: 2px 7px; }
 .profTicketSubj { font-size: 13px; font-weight: 600; }
 
-.profSteps { margin: 0; padding-left: 20px; font-size: 13px; line-height: 1.45; overflow-wrap: break-word; word-break: break-word; }
-.profSteps li { margin-bottom: 4px; }
+.profSteps { margin: 0; padding-left: 22px; padding-right: 8px; font-size: 13px; line-height: 1.45; overflow-wrap: break-word; word-break: break-word; }
+.profSteps li { margin-bottom: 4px; padding-left: 4px; }
 
 .fuItem { border-left: 3px solid #e2e8f0; background: #fff; border-radius: 4px; padding: 8px 10px; margin-bottom: 6px; }
 .fuItemPaused { border-left-color: #ed8936; background: #fffaf0; }
