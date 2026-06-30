@@ -239,6 +239,22 @@ export function FollowUpsTab() {
     [customers, selected],
   );
 
+  // The selected customer's open (non-closed) tickets + whether their
+  // follow-ups are on hold (open ticket / queued replacement / returned).
+  const selectedOpenTickets = useMemo(() => {
+    if (!selectedCustomer) return [];
+    const lc = (selectedCustomer.email ?? '').toLowerCase();
+    return tickets.filter(t => t.status !== 'closed'
+      && (t.customer_id === selectedCustomer.id
+          || (!!t.customer_email && t.customer_email.toLowerCase() === lc)));
+  }, [tickets, selectedCustomer]);
+
+  const selectedPaused = useMemo(() => {
+    if (!selectedCustomer) return false;
+    const row = rows.find(r => r.customer.id === selectedCustomer.id);
+    return selectedOpenTickets.length > 0 || (row?.statuses.has('fu_on_hold') ?? false);
+  }, [rows, selectedCustomer, selectedOpenTickets]);
+
   const openTicket = openTicketId ? tickets.find(t => t.id === openTicketId) ?? null : null;
 
   return (
@@ -270,6 +286,8 @@ export function FollowUpsTab() {
       {selectedCustomer && (
         <FollowUpDetailPanel
           customer={selectedCustomer}
+          openTickets={selectedOpenTickets}
+          isPaused={selectedPaused}
           diagnosisTicketId={
             tickets.find(t => t.category === 'diagnosis_call' && !t.diagnosis_followup_done_at
               && t.calendly_event_start != null

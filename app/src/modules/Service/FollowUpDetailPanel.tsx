@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import {
   recordFollowUp, setReviewStatus, computeFuState, FU_STATE_META, type Customer,
 } from '../../lib/customers';
-import { markDiagnosisFollowupDone } from '../../lib/service';
+import { markDiagnosisFollowupDone, type ServiceTicket, priorityMeta } from '../../lib/service';
+import { useReplacementQueue } from '../../lib/postShipment';
 import {
   useActionItems, useCustomerNotes, addActionItem, toggleActionItem, deleteActionItem,
   addCustomerNote, setCustomerManualTags, MANUAL_TAGS,
@@ -12,16 +13,36 @@ import styles from './FollowUps.module.css';
 
 const labelOf = (k: FollowUpStatusKey) => STATUS_FILTERS.find(f => f.key === k)?.label ?? k;
 
+// First-draft Profile fields that have no backing column yet — rendered as
+// editable-looking placeholders that don't persist. We wire these to real
+// data as the feature iterates.
+const STUB_FIELDS = [
+  { label: 'Color',    placeholder: 'White / Black' },
+  { label: 'Shipped',  placeholder: 'yyyy-mm-dd' },
+  { label: 'Received', placeholder: 'yyyy-mm-dd' },
+  { label: 'Diagnosis', placeholder: 'yyyy-mm-dd' },
+  { label: 'Dashboard', placeholder: 'yes / no / etc.' },
+  { label: 'Software',  placeholder: 'V17 / V18 / …' },
+  { label: 'Timezone',  placeholder: 'EST / PST / …' },
+] as const;
+
+const REPL_STATUS_LABEL: Record<string, string> = {
+  queued: 'Pending', assigned: 'Assigned', shipped: 'Shipped', closed: 'Closed',
+};
+
 export function FollowUpDetailPanel({
-  customer, diagnosisTicketId, onClose, onChanged,
+  customer, openTickets, isPaused, diagnosisTicketId, onClose, onChanged,
 }: {
   customer: Customer;
+  openTickets: ServiceTicket[];
+  isPaused: boolean;
   diagnosisTicketId: string | null;
   onClose: () => void;
   onChanged: () => void;
 }) {
   const { items, refresh: refreshItems } = useActionItems(customer.id);
   const { notes, refresh: refreshNotes } = useCustomerNotes(customer.id);
+  const { queue } = useReplacementQueue();
   const [busy, setBusy] = useState(false);
   const [tags, setTags] = useState<string[]>(customer.manual_status_tags ?? []);
   const [newItem, setNewItem] = useState('');
@@ -42,61 +63,156 @@ export function FollowUpDetailPanel({
     void run(() => setCustomerManualTags(customer.id, next));
   };
 
+  const lcEmail = (customer.email ?? '').toLowerCase();
+  const replacements = queue.filter(r =>
+    (r.customer_email && r.customer_email.toLowerCase() === lcEmail)
+    || r.customer_name === customer.full_name,
+  );
+
+  const serial = customer.serials?.[0] ?? null;
+  const address = [customer.address_line, customer.city, customer.region].filter(Boolean).join(', ');
+  const availableTags = MANUAL_TAGS.filter(k => !tags.includes(k));
+
+  const pausedNote = 'Paused because of an open HubSpot ticket. Will resume 14/28 days after the ticket is resolved.';
+
   return (
     <div className={styles.selectedPanel}>
-      <div className={styles.selectedHeader}>
-        <strong>{customer.full_name}</strong>
-        <span className={styles.selectedKind} style={{ color: FU_STATE_META[fu].color, background: FU_STATE_META[fu].bg }}>
-          {FU_STATE_META[fu].label}
-        </span>
-        <button className={styles.closeBtn} onClick={onClose}>×</button>
+      {/* ── Header ─────────────────────────────────────────────── */}
+      <div className={styles.profHeader}>
+        <div className={styles.profHeaderTop}>
+          <strong className={styles.profName}>{customer.full_name}</strong>
+          <button className={styles.closeBtn} onClick={onClose} title="Close">🗑</button>
+        </div>
+        <div className={styles.profHeaderRow}>
+          {customer.email && <span>{customer.email}</span>}
+          {customer.hubspot_id && (
+            <a className={styles.profHubspot} target="_blank" rel="noreferrer"
+               href={`https://app.hubspot.com/contacts/_/contact/${customer.hubspot_id}`}>HubSpot ↗</a>
+          )}
+        </div>
+        {customer.phone && <div className={styles.profHeaderRow}><span className={styles.profQuo}>Quo</span> {customer.phone}</div>}
       </div>
 
-      <div className={styles.selectedMeta}>
-        {customer.email && <span>{customer.email}</span>}
-        {customer.phone && <span>{customer.phone}</span>}
-        {customer.onboard_date && (
-          <span>Onboarded {new Date(customer.onboard_date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
-        )}
-      </div>
-
-      {/* Manual status tags (additive to the auto-derived ones in the directory). */}
-      <div className={styles.detailSection}>
-        <div className={styles.detailLabel}>Tags</div>
+      {/* ── Status tags ────────────────────────────────────────── */}
+      <div className={styles.profCard}>
+        <div className={styles.profCardLabel}>Status Tags</div>
         <div className={styles.detailTags}>
-          {MANUAL_TAGS.map(k => (
-            <button key={k} disabled={busy}
-              className={`${styles.detailTag} ${tags.includes(k) ? styles.detailTagOn : ''}`}
-              onClick={() => toggleTag(k)}>
-              {labelOf(k)}
+          {tags.length === 0 && <span className={styles.profMuted}>No tags yet</span>}
+          {tags.map(k => (
+            <button key={k} disabled={busy} className={`${styles.detailTag} ${styles.detailTagOn}`}
+              onClick={() => toggleTag(k as FollowUpStatusKey)} title="Remove tag">
+              {labelOf(k as FollowUpStatusKey)} ✕
             </button>
           ))}
         </div>
+        {availableTags.length > 0 && (
+          <select className={styles.profSelect} disabled={busy} value=""
+            onChange={e => { if (e.target.value) toggleTag(e.target.value as FollowUpStatusKey); }}>
+            <option value="">+ Add another status tag…</option>
+            {availableTags.map(k => <option key={k} value={k}>{labelOf(k)}</option>)}
+          </select>
+        )}
       </div>
 
-      {/* Checklist: FU1/FU2, diagnosis follow-up, manual action items. */}
-      <div className={styles.detailSection}>
-        <div className={styles.detailLabel}>Checklist</div>
-        <div className={styles.checkRow}>
-          <span>{customer.fu1_status ? '☑' : '☐'} FU1 · 2-week check-in {customer.fu1_status ? `(${customer.fu1_status})` : ''}</span>
-          {!customer.fu1_status && (
-            <span className={styles.checkBtns}>
-              <button disabled={busy} onClick={() => void run(() => recordFollowUp(customer.id, 'fu1', 'called'))}>Called</button>
-              <button disabled={busy} onClick={() => void run(() => recordFollowUp(customer.id, 'fu1', 'messaged'))}>Messaged</button>
-              <button disabled={busy} onClick={() => void run(() => recordFollowUp(customer.id, 'fu1', 'reviewed'))}>Reviewed</button>
-            </span>
+      {/* ── Profile ────────────────────────────────────────────── */}
+      <div className={styles.profCard}>
+        <div className={styles.profCardLabel}>Profile <span className={styles.profMuted}>— first draft; some fields not saved yet</span></div>
+        <ProfileRow label="Serial"   value={serial ?? '—'} readOnly />
+        {STUB_FIELDS.slice(0, 1).map(f => <StubRow key={f.label} {...f} />)}
+        {STUB_FIELDS.slice(1, 3).map(f => <StubRow key={f.label} {...f} />)}
+        <ProfileRow label="Onboarded" value={customer.onboard_date ?? '—'} readOnly />
+        {STUB_FIELDS.slice(3).map(f => <StubRow key={f.label} {...f} />)}
+        <ProfileRow label="Address" value={address || '—'} readOnly />
+      </div>
+
+      {/* ── Open HubSpot tickets + pause banner ────────────────── */}
+      {openTickets.length > 0 && (
+        <div className={`${styles.profCard} ${styles.profCardWarn}`}>
+          <div className={styles.profCardLabel}>⚠ Open HubSpot Tickets ({openTickets.length})</div>
+          {isPaused && (
+            <div className={styles.profPauseBanner}>
+              <strong>⏸ Follow-ups paused</strong> — pending follow-ups for this customer are on hold until the
+              ticket is resolved. They'll auto-reschedule to 14/28 days after the ticket close date.
+            </div>
           )}
+          {openTickets.map(t => (
+            <div key={t.id} className={styles.profTicket}>
+              <div className={styles.profTicketTop}>
+                <span className={styles.profTicketNo}>{t.ticket_number}</span>
+                <span className={styles.profTicketStatus}>{t.status.replace(/_/g, ' ')}</span>
+              </div>
+              <div className={styles.profTicketSubj}>{t.subject}</div>
+              <div className={styles.profMuted}>
+                Priority: <strong>{priorityMeta(t.priority).label}</strong>
+                {t.hubspot_ticket_id && (
+                  <> · <a target="_blank" rel="noreferrer"
+                    href={`https://app.hubspot.com/contacts/_/tickets/${t.hubspot_ticket_id}`}>Open in HubSpot →</a></>
+                )}
+              </div>
+            </div>
+          ))}
         </div>
-        <div className={styles.checkRow}>
-          <span>{customer.fu2_status ? '☑' : '☐'} FU2 · 4-week check-in {customer.fu2_status ? `(${customer.fu2_status})` : ''}</span>
-          {customer.fu1_status && !customer.fu2_status && (
-            <span className={styles.checkBtns}>
-              <button disabled={busy} onClick={() => void run(() => recordFollowUp(customer.id, 'fu2', 'called'))}>Called</button>
-              <button disabled={busy} onClick={() => void run(() => recordFollowUp(customer.id, 'fu2', 'messaged'))}>Messaged</button>
-              <button disabled={busy} onClick={() => void run(() => recordFollowUp(customer.id, 'fu2', 'reviewed'))}>Reviewed</button>
-            </span>
-          )}
+      )}
+
+      {/* ── Replacements ───────────────────────────────────────── */}
+      {replacements.length > 0 && (
+        <div className={`${styles.profCard} ${styles.profCardRepl}`}>
+          <div className={styles.profCardLabel}>🔧 Replacements ({replacements.length})</div>
+          {replacements.map(r => (
+            <div key={r.id} className={styles.profTicket}>
+              <div className={styles.profTicketTop}>
+                <span className={styles.profTicketSubj}>{r.notes || r.original_unit_serial || 'Replacement'}</span>
+                <span className={styles.profTicketStatus}>{REPL_STATUS_LABEL[r.status] ?? r.status}</span>
+              </div>
+              <div className={styles.profMuted}>
+                {r.assigned_serial ? `Assigned ${r.assigned_serial}` : 'No tracking yet — pending'}
+              </div>
+            </div>
+          ))}
         </div>
+      )}
+
+      {/* ── Connect to dashboard (static) ──────────────────────── */}
+      <div className={styles.profCard}>
+        <div className={styles.profCardLabel}>📊 Connect to Dashboard</div>
+        <ol className={styles.profSteps}>
+          <li>Ensure power is on — light should be <strong>Solid Green</strong></li>
+          <li>On phone WiFi → connect to <strong>"LL01-[Serial#]"</strong> → password <strong>"12345678"</strong> → "Connect without Internet"</li>
+          <li>Open browser → go to <strong>192.168.4.1</strong></li>
+          <li>Enter home WiFi name in SSID + password → click <strong>Connect</strong></li>
+        </ol>
+        <div className={styles.profMuted}>
+          After connect: wait for STA state "Connected" → click "Start Update" → wait 30-35 min for green light → power cycle
+        </div>
+      </div>
+
+      {/* ── Trustpilot (static) ────────────────────────────────── */}
+      <div className={styles.profCard}>
+        <div className={styles.profCardLabel}>★ Trustpilot Review Link</div>
+        <a target="_blank" rel="noreferrer" href="https://trustpilot.com/review/lilacomposter.com">
+          trustpilot.com/review/lilacomposter.com
+        </a>
+        <div className={styles.profMuted}>Send when compost is good — mark status "Review Done" once submitted.</div>
+      </div>
+
+      {/* ── Action items (FU1/FU2 + manual), pause-aware ───────── */}
+      <div className={styles.profCard}>
+        <div className={styles.profCardLabel}>🗒 Action Items</div>
+
+        <FollowUpItem
+          label="1st follow-up (2 weeks after onboarding)" tag="1ST FU"
+          done={!!customer.fu1_status} doneLabel={customer.fu1_status}
+          paused={isPaused} pausedNote={pausedNote} busy={busy}
+          onAction={(m) => void run(() => recordFollowUp(customer.id, 'fu1', m))}
+        />
+        <FollowUpItem
+          label="2nd follow-up (2 weeks after 1st follow-up)" tag="2ND FU"
+          done={!!customer.fu2_status} doneLabel={customer.fu2_status}
+          paused={isPaused} pausedNote={pausedNote} busy={busy}
+          locked={!customer.fu1_status}
+          onAction={(m) => void run(() => recordFollowUp(customer.id, 'fu2', m))}
+        />
+
         {diagnosisTicketId && (
           <div className={styles.checkRow}>
             <span>☐ Diagnosis follow-up (2 weeks after call)</span>
@@ -105,6 +221,7 @@ export function FollowUpDetailPanel({
             </span>
           </div>
         )}
+
         {items.map(it => (
           <div key={it.id} className={styles.checkRow}>
             <label className={it.done ? styles.checkDone : ''}>
@@ -116,8 +233,9 @@ export function FollowUpDetailPanel({
               onClick={() => void run(() => deleteActionItem(it.id), refreshItems)} title="Delete">×</button>
           </div>
         ))}
+
         <div className={styles.addRow}>
-          <input className={styles.addInput} placeholder="New action item…" value={newItem}
+          <input className={styles.addInput} placeholder="+ Add new action item…" value={newItem}
             onChange={e => setNewItem(e.target.value)} />
           <input className={styles.addDate} type="date" value={newItemDue}
             onChange={e => setNewItemDue(e.target.value)} />
@@ -129,9 +247,9 @@ export function FollowUpDetailPanel({
         </div>
       </div>
 
-      {/* Notes log. */}
-      <div className={styles.detailSection}>
-        <div className={styles.detailLabel}>Notes</div>
+      {/* ── Notes + review actions ─────────────────────────────── */}
+      <div className={styles.profCard}>
+        <div className={styles.profCardLabel}>Notes</div>
         <div className={styles.addRow}>
           <input className={styles.addInput} placeholder="Add a note…" value={newNote}
             onChange={e => setNewNote(e.target.value)} />
@@ -147,18 +265,65 @@ export function FollowUpDetailPanel({
               <span className={styles.noteDate}>{new Date(n.created_at).toLocaleDateString()}</span> {n.body}
             </div>
           ))}
-          {customer.fu_notes && (
-            <div className={`${styles.noteRow} ${styles.noteLegacy}`}>{customer.fu_notes}</div>
-          )}
+          {customer.fu_notes && <div className={`${styles.noteRow} ${styles.noteLegacy}`}>{customer.fu_notes}</div>}
         </div>
       </div>
 
       <div className={styles.selectedActions}>
+        <span className={styles.selectedKind} style={{ color: FU_STATE_META[fu].color, background: FU_STATE_META[fu].bg }}>
+          {FU_STATE_META[fu].label}
+        </span>
         <button className={styles.actionBtn} disabled={busy}
           onClick={() => void run(() => setReviewStatus(customer.id, 'requested'))}>Mark review requested</button>
         <button className={styles.actionBtn} disabled={busy}
           onClick={() => void run(() => setReviewStatus(customer.id, 'received'))}>Mark review received</button>
       </div>
+    </div>
+  );
+}
+
+function ProfileRow({ label, value, readOnly }: { label: string; value: string; readOnly?: boolean }) {
+  return (
+    <div className={styles.profRow}>
+      <span className={styles.profRowLabel}>{label}</span>
+      <span className={readOnly ? styles.profRowValue : styles.profRowValueEdit}>{value}</span>
+    </div>
+  );
+}
+
+function StubRow({ label, placeholder }: { label: string; placeholder: string }) {
+  return (
+    <div className={styles.profRow}>
+      <span className={styles.profRowLabel}>{label}</span>
+      <input className={styles.profStubInput} placeholder={placeholder} disabled title="Not saved yet (first draft)" />
+    </div>
+  );
+}
+
+function FollowUpItem({
+  label, tag, done, doneLabel, paused, pausedNote, locked, busy, onAction,
+}: {
+  label: string; tag: string; done: boolean; doneLabel: string | null;
+  paused: boolean; pausedNote: string; locked?: boolean; busy: boolean;
+  onAction: (method: 'called' | 'messaged' | 'reviewed') => void;
+}) {
+  return (
+    <div className={`${styles.fuItem} ${paused && !done ? styles.fuItemPaused : ''}`}>
+      <div className={styles.fuItemTop}>
+        <span>{done ? '☑' : '☐'} {label} {done && doneLabel ? `(${doneLabel})` : ''}</span>
+        <span className={styles.fuItemTags}>
+          <span className={styles.fuTag}>{tag}</span>
+          {paused && !done && <span className={styles.fuOnHold}>⏸ ON HOLD</span>}
+        </span>
+      </div>
+      {paused && !done && <div className={styles.profMuted}>{pausedNote}</div>}
+      {!done && !locked && !paused && (
+        <span className={styles.checkBtns}>
+          <button disabled={busy} onClick={() => onAction('called')}>Called</button>
+          <button disabled={busy} onClick={() => onAction('messaged')}>Messaged</button>
+          <button disabled={busy} onClick={() => onAction('reviewed')}>Reviewed</button>
+        </span>
+      )}
     </div>
   );
 }
