@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, type CSSProperties } from 'react';
 import { useFbCampaigns } from '../../lib/marketing/facebook';
 import { useKlaviyoSyncStatus } from '../../lib/marketing/klaviyo';
 import { useCacByChannel } from '../../lib/marketing/cac';
@@ -173,7 +173,7 @@ function SourceRow({ name, ok, detail }: { name: string; ok: boolean; detail: st
   );
 }
 
-const notice: React.CSSProperties = {
+const notice: CSSProperties = {
   fontSize: 12, color: muted, background: 'var(--color-surface)',
   borderRadius: 6, padding: '10px 12px', marginBottom: 8, lineHeight: 1.5,
 };
