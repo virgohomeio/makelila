@@ -106,6 +106,13 @@ export async function addCustomerNote(customerId: string, body: string): Promise
     { entityType: 'customer', entityId: customerId });
 }
 
+export async function deleteCustomerNote(noteId: string, customerId: string): Promise<void> {
+  const { error } = await supabase.from('customer_notes').delete().eq('id', noteId);
+  if (error) throw error;
+  await logAction('customer_note_deleted', customerId, noteId,
+    { entityType: 'customer', entityId: customerId });
+}
+
 export async function setCustomerManualTags(customerId: string, tags: string[]): Promise<void> {
   const clean = [...new Set(tags.filter(t => VALID_KEYS.has(t)))];
   const { error } = await supabase.from('customers').update({ manual_status_tags: clean }).eq('id', customerId);

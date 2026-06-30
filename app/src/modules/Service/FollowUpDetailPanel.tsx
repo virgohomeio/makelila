@@ -6,7 +6,7 @@ import { markDiagnosisFollowupDone, type ServiceTicket, priorityMeta } from '../
 import { useReplacementQueue } from '../../lib/postShipment';
 import {
   useActionItems, useCustomerNotes, addActionItem, toggleActionItem, deleteActionItem,
-  addCustomerNote, setCustomerManualTags, MANUAL_TAGS,
+  addCustomerNote, deleteCustomerNote, setCustomerManualTags, MANUAL_TAGS,
 } from '../../lib/followups';
 import { STATUS_FILTERS, type FollowUpStatusKey } from '../../lib/followupStatus';
 import styles from './FollowUps.module.css';
@@ -262,7 +262,10 @@ export function FollowUpDetailPanel({
         <div className={styles.notesLog}>
           {notes.map(n => (
             <div key={n.id} className={styles.noteRow}>
-              <span className={styles.noteDate}>{new Date(n.created_at).toLocaleDateString()}</span> {n.body}
+              <span className={styles.noteDate}>{new Date(n.created_at).toLocaleDateString()}</span>
+              <span className={styles.noteBody}>{n.body}</span>
+              <button className={styles.checkDelete} disabled={busy} title="Delete note"
+                onClick={() => void run(() => deleteCustomerNote(n.id, customer.id), refreshNotes)}>×</button>
             </div>
           ))}
           {customer.fu_notes && <div className={`${styles.noteRow} ${styles.noteLegacy}`}>{customer.fu_notes}</div>}

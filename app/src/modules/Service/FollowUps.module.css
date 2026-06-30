@@ -375,7 +375,8 @@
 .addRow button { font-size: 12px; padding: 4px 12px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: #fff; cursor: pointer; font-weight: 600; }
 .addRow button:disabled { opacity: 0.5; cursor: default; }
 .notesLog { display: flex; flex-direction: column; gap: 4px; max-height: 200px; overflow-y: auto; }
-.noteRow { font-size: 12px; color: var(--color-ink); padding: 3px 0; border-bottom: 1px solid #f7f7f7; }
+.noteRow { display: flex; align-items: baseline; gap: 6px; font-size: 12px; color: var(--color-ink); padding: 3px 0; border-bottom: 1px solid #f7f7f7; }
+.noteBody { flex: 1; }
 .noteDate { font-size: 10px; color: var(--color-ink-subtle); font-weight: 600; margin-right: 6px; }
 .noteLegacy { color: var(--color-ink-subtle); font-style: italic; white-space: pre-wrap; }
 
