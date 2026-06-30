@@ -2,11 +2,18 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   useRefundApprovals, useReturns,
   submitRefundRequest, managerApprove, financeApprove, denyRefund, closeRefund,
-  setReturnDisposition,
+  setReturnDisposition, updateReturnStatus,
   REFUND_STATUS_META, REFUND_METHODS, REFUND_METHOD_META,
   UNIT_STATUS_LABEL, RETURN_DISPOSITION_META,
-  type RefundApproval, type ReturnRow, type RefundMethod, type ReturnDisposition,
+  type RefundApproval, type ReturnRow, type RefundMethod, type ReturnDisposition, type ReturnStatus,
 } from '../../lib/postShipment';
+
+// Operator-facing unit-status stages, editable from the refund detail panel.
+const UNIT_STAGES: { value: ReturnStatus; label: string }[] = [
+  { value: 'created',          label: 'Return form submitted' },
+  { value: 'pickup_scheduled', label: 'Pickup scheduled' },
+  { value: 'received',         label: 'Unit returned' },
+];
 import { useQueuedReplacements, holdReplacement, type Order } from '../../lib/orders';
 import { useAuth } from '../../lib/auth';
 import { canDo } from '../../lib/permissions';
@@ -374,6 +381,14 @@ function RefundDetailPanel({
     finally { setBusy(false); }
   };
 
+  const runStatus = async (s: ReturnStatus) => {
+    if (!linkedReturn || linkedReturn.status === s) return;
+    setBusy(true); onError(null);
+    try { await updateReturnStatus(linkedReturn.id, s); }
+    catch (e) { onError((e as Error).message); }
+    finally { setBusy(false); }
+  };
+
   const runApprove = async () => {
     if (canActFinance) {
       onOpenFinanceModal(refund.id);
@@ -464,12 +479,30 @@ function RefundDetailPanel({
         </div>
       ) : (
         <>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', margin: '4px 0 12px' }}>
-          <span style={{ fontSize: 12, fontWeight: 600, color: '#4a5568' }}>Unit status:</span>
-          <span style={{ fontSize: 12, fontWeight: 600, padding: '3px 10px', borderRadius: 999, color: '#2d3748', background: '#edf2f7' }}>
-            📦 {UNIT_STATUS_LABEL[linkedReturn.status]}
-          </span>
-          <span style={{ fontSize: 12, fontWeight: 600, color: '#4a5568', marginLeft: 8 }}>Instruction:</span>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', margin: '4px 0 8px' }}>
+          <span style={{ fontSize: 12, fontWeight: 600, color: '#4a5568', marginRight: 2 }}>Unit status:</span>
+          {UNIT_STAGES.map((st, i) => {
+            const on = linkedReturn.status === st.value;
+            return (
+              <span key={st.value} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                {i > 0 && <span style={{ color: '#cbd5e0' }}>→</span>}
+                <button disabled={busy} onClick={() => void runStatus(st.value)}
+                  style={{ fontSize: 11, fontWeight: 600, padding: '3px 10px', borderRadius: 999, cursor: 'pointer',
+                           border: `1px solid ${on ? '#2b6cb0' : '#e2e8f0'}`,
+                           color: on ? '#2b6cb0' : '#718096', background: on ? '#ebf8ff' : '#fff' }}>
+                  {on ? '✓ ' : ''}{st.label}
+                </button>
+              </span>
+            );
+          })}
+          {!UNIT_STAGES.some(st => st.value === linkedReturn.status) && (
+            <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 999, color: '#2d3748', background: '#edf2f7' }}>
+              {UNIT_STATUS_LABEL[linkedReturn.status]}
+            </span>
+          )}
+        </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', margin: '0 0 12px' }}>
+          <span style={{ fontSize: 12, fontWeight: 600, color: '#4a5568' }}>Instruction:</span>
           {(['ship_back', 'discard'] as ReturnDisposition[]).map(d => {
             const on = linkedReturn.disposition === d;
             const dm = RETURN_DISPOSITION_META[d];
