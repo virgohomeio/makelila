@@ -16,7 +16,7 @@ function mkConv(partial: Partial<ServiceTicket> & { id: string }): ServiceTicket
     defect_category: null, parts_needed: null,
     calendly_event_uri: null, calendly_event_start: null, calendly_host_email: null,
     hubspot_ticket_id: null, fulfillment_queue_id: null,
-    owner_email: null, resolved_at: null, closed_at: null,
+    owner_email: null, resolved_at: null, closed_at: null, post_close_followup_done_at: null,
     created_at: '2026-05-28T00:00:00Z', updated_at: '2026-05-28T00:00:00Z',
     gmail_thread_id: null, gmail_account: null,
     topic: null, summary: null, suggested_next_action: null,

@@ -4,7 +4,7 @@ import {
   type Customer, type FuState,
 } from '../../lib/customers';
 import { useServiceTickets } from '../../lib/service';
-import { useFollowUpDirectory } from '../../lib/followupStatus';
+import { useFollowUpDirectory, type TicketFollowup } from '../../lib/followupStatus';
 import { TicketDetailPanel } from './TicketDetailPanel';
 import { FollowUpDirectory } from './FollowUpDirectory';
 import { FollowUpDetailPanel } from './FollowUpDetailPanel';
@@ -18,7 +18,7 @@ const WEEK_DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 // per-customer from onboard_date) and onboarding calls (from onboarding tickets
 // with a booked Calendly time). Clicking a call opens its ticket.
 type FuEvent = { type: 'fu'; customer: Customer; kind: 'fu1' | 'fu2'; dueDate: Date; state: FuState };
-type CallEvent = { type: 'call'; callKind: 'onboarding' | 'diagnosis' | 'diag_followup'; label: string; time: string; ticketId: string };
+type CallEvent = { type: 'call'; callKind: 'onboarding' | 'diagnosis' | 'diag_followup' | 'ticket_followup'; label: string; time: string; ticketId: string };
 type CalEvent = FuEvent | CallEvent;
 
 function dayKey(d: Date): string {
@@ -26,12 +26,13 @@ function dayKey(d: Date): string {
 }
 
 function FollowUpCalendar({
-  month, today, customers, tickets, blockedCustomerIds, onPrev, onNext, onToday, onCustomerClick, onCallClick,
+  month, today, customers, tickets, ticketFollowups, blockedCustomerIds, onPrev, onNext, onToday, onCustomerClick, onCallClick,
 }: {
   month: Date;
   today: Date;
   customers: Customer[];
   tickets: { id: string; category: string; calendly_event_start: string | null; customer_name: string | null; subject: string; diagnosis_followup_done_at: string | null }[];
+  ticketFollowups: TicketFollowup[];
   blockedCustomerIds: Set<string>;
   onPrev: () => void;
   onNext: () => void;
@@ -82,6 +83,14 @@ function FollowUpCalendar({
         });
       }
     }
+    // Ticket follow-ups — 14 days after a ticket closed (all tickets closed),
+    // until marked done. Clicking opens the closed ticket.
+    for (const tf of ticketFollowups) {
+      add(tf.dueDate.slice(0, 10), {
+        type: 'call', callKind: 'ticket_followup',
+        label: tf.customerName, time: tf.dueDate, ticketId: tf.ticketId,
+      });
+    }
     // Follow-ups — FU1 = onboard_date + FU1_DAYS, FU2 = +FU2_DAYS, per customer
     // that hasn't had that follow-up done yet.
     for (const c of customers) {
@@ -100,7 +109,7 @@ function FollowUpCalendar({
       }
     }
     return m;
-  }, [customers, tickets, blockedCustomerIds, today, gridStart, gridEnd]);
+  }, [customers, tickets, ticketFollowups, blockedCustomerIds, today, gridStart, gridEnd]);
 
   const todayKey = dayKey(today);
 
@@ -163,11 +172,17 @@ function FollowUpCalendar({
               <div className={styles.calDayNum}>{d.getDate()}</div>
               {events.map((ev, i) => {
                 if (ev.type === 'call') {
+                  const meta = {
+                    onboarding:      { icon: '🚀', name: 'Onboarding call',     cls: styles.calEventCall },
+                    diagnosis:       { icon: '🩺', name: 'Diagnosis call',      cls: styles.calEventDiagnosis },
+                    diag_followup:   { icon: '🔁', name: 'Diagnosis follow-up', cls: styles.calEventDiagFollowup },
+                    ticket_followup: { icon: '🎫', name: 'Ticket follow-up',    cls: styles.calEventDiagFollowup },
+                  }[ev.callKind];
                   return (
                     <button key={`c${i}`} onClick={() => onCallClick(ev.ticketId)}
-                      className={`${styles.calEvent} ${ev.callKind === 'diag_followup' ? styles.calEventDiagFollowup : ev.callKind === 'diagnosis' ? styles.calEventDiagnosis : styles.calEventCall}`}
-                      title={`${ev.callKind === 'diag_followup' ? 'Diagnosis follow-up' : ev.callKind === 'diagnosis' ? 'Diagnosis call' : 'Onboarding call'} — ${ev.label}`}>
-                      {ev.callKind === 'diag_followup' ? '🔁' : ev.callKind === 'diagnosis' ? '🩺' : '🚀'} {ev.label}
+                      className={`${styles.calEvent} ${meta.cls}`}
+                      title={`${meta.name} — ${ev.label}`}>
+                      {meta.icon} {ev.label}
                     </button>
                   );
                 }
@@ -200,7 +215,7 @@ export function FollowUpsTab() {
   const { customers, refresh } = useCustomers();
   const { tickets } = useServiceTickets();
   const today = useMemo(() => new Date(), []);
-  const { rows, counts, overdueCount } = useFollowUpDirectory(today);
+  const { rows, counts, overdueCount, excludedCustomerIds, ticketFollowups } = useFollowUpDirectory(today);
 
   // Overdue draft+send queue: customers needing action (overdue or due today),
   // most-overdue first (oldest onboard date). Mirrors the set the panel was
@@ -230,8 +245,8 @@ export function FollowUpsTab() {
   const [openTicketId, setOpenTicketId] = useState<string | null>(null);
 
   const scheduledCustomers = useMemo(
-    () => customers.filter(c => !!c.onboard_date),
-    [customers],
+    () => customers.filter(c => !!c.onboard_date && !excludedCustomerIds.has(c.id)),
+    [customers, excludedCustomerIds],
   );
 
   const selectedCustomer = useMemo(
@@ -270,6 +285,7 @@ export function FollowUpsTab() {
             today={today}
             customers={scheduledCustomers}
             tickets={tickets}
+            ticketFollowups={ticketFollowups}
             blockedCustomerIds={blockedCustomerIds}
             onPrev={() => setCalendarMonth(d => { const n = new Date(d); n.setMonth(n.getMonth() - 1); return n; })}
             onNext={() => setCalendarMonth(d => { const n = new Date(d); n.setMonth(n.getMonth() + 1); return n; })}
@@ -288,6 +304,7 @@ export function FollowUpsTab() {
           customer={selectedCustomer}
           openTickets={selectedOpenTickets}
           isPaused={selectedPaused}
+          ticketFollowup={ticketFollowups.find(tf => tf.customerId === selectedCustomer.id) ?? null}
           diagnosisTicketId={
             tickets.find(t => t.category === 'diagnosis_call' && !t.diagnosis_followup_done_at
               && t.calendly_event_start != null
