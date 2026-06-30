@@ -24,14 +24,14 @@
 body {
   background: var(--color-page);
   color: var(--color-ink);
-  padding: 20px;
-  /* Mobile V1 (backlog #80) — let safe-area cover the body padding on
-     iPhone so the page doesn't bleed under the notch. Stacks correctly
-     with desktop's 20px outer margin via max(). */
-  padding-top: max(20px, env(safe-area-inset-top));
-  padding-bottom: max(20px, env(safe-area-inset-bottom));
-  padding-left: max(20px, env(safe-area-inset-left));
-  padding-right: max(20px, env(safe-area-inset-right));
+  /* Full-bleed: no outer margin so the app fills the whole viewport edge to
+     edge (operator request 2026-06-30). Safe-area insets still respected so
+     content doesn't crop under the iPhone notch / home indicator. */
+  padding: 0;
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
 }
 
 .page {
@@ -48,7 +48,8 @@ body {
      becomes the natural scroll container; the border-radius still clips
      the corners on desktop via overflow on .page if needed. */
   overflow: visible;
-  border-radius: var(--radius-lg);
+  /* Full-bleed: no corner radius now the shell meets the viewport edges. */
+  border-radius: 0;
 }
 
 /* Mobile V1 (backlog #80) — page-level narrow-viewport adjustments.

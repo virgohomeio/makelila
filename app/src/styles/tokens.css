@@ -54,7 +54,9 @@
   --font-logo: 'Brolink DEMO', 'Brolink', 'Inter', sans-serif;
 
   /* Sizing */
-  --page-max: 1200px;
+  /* Full-bleed: the app fills the whole viewport width rather than sitting
+     in a centered 1200px column (operator request 2026-06-30). */
+  --page-max: 100%;
   --nav-height: 48px;
   --radius-sm: 4px;
   --radius-md: 6px;
