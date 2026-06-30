@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import {
-  recordFollowUp, setReviewStatus, computeFuState, FU_STATE_META, type Customer,
+  recordFollowUp, setReviewStatus, computeFuState, FU_STATE_META,
+  updateCustomerProfile, type Customer, type CustomerProfilePatch,
 } from '../../lib/customers';
 import { markDiagnosisFollowupDone, type ServiceTicket, priorityMeta } from '../../lib/service';
 import { useReplacementQueue } from '../../lib/postShipment';
@@ -12,19 +13,6 @@ import { STATUS_FILTERS, type FollowUpStatusKey } from '../../lib/followupStatus
 import styles from './FollowUps.module.css';
 
 const labelOf = (k: FollowUpStatusKey) => STATUS_FILTERS.find(f => f.key === k)?.label ?? k;
-
-// First-draft Profile fields that have no backing column yet — rendered as
-// editable-looking placeholders that don't persist. We wire these to real
-// data as the feature iterates.
-const STUB_FIELDS = [
-  { label: 'Color',    placeholder: 'White / Black' },
-  { label: 'Shipped',  placeholder: 'yyyy-mm-dd' },
-  { label: 'Received', placeholder: 'yyyy-mm-dd' },
-  { label: 'Diagnosis', placeholder: 'yyyy-mm-dd' },
-  { label: 'Dashboard', placeholder: 'yes / no / etc.' },
-  { label: 'Software',  placeholder: 'V17 / V18 / …' },
-  { label: 'Timezone',  placeholder: 'EST / PST / …' },
-] as const;
 
 const REPL_STATUS_LABEL: Record<string, string> = {
   queued: 'Pending', assigned: 'Assigned', shipped: 'Shipped', closed: 'Closed',
@@ -63,14 +51,14 @@ export function FollowUpDetailPanel({
     void run(() => setCustomerManualTags(customer.id, next));
   };
 
+  const saveProfile = (patch: CustomerProfilePatch) => void run(() => updateCustomerProfile(customer.id, patch));
+
   const lcEmail = (customer.email ?? '').toLowerCase();
   const replacements = queue.filter(r =>
     (r.customer_email && r.customer_email.toLowerCase() === lcEmail)
     || r.customer_name === customer.full_name,
   );
 
-  const serial = customer.serials?.[0] ?? null;
-  const address = [customer.address_line, customer.city, customer.region].filter(Boolean).join(', ');
   const availableTags = MANUAL_TAGS.filter(k => !tags.includes(k));
 
   const pausedNote = 'Paused because of an open HubSpot ticket. Will resume 14/28 days after the ticket is resolved.';
@@ -114,15 +102,19 @@ export function FollowUpDetailPanel({
         )}
       </div>
 
-      {/* ── Profile ────────────────────────────────────────────── */}
+      {/* ── Profile (all fields editable) ──────────────────────── */}
       <div className={styles.profCard}>
-        <div className={styles.profCardLabel}>Profile <span className={styles.profMuted}>— first draft; some fields not saved yet</span></div>
-        <ProfileRow label="Serial"   value={serial ?? '—'} readOnly />
-        {STUB_FIELDS.slice(0, 1).map(f => <StubRow key={f.label} {...f} />)}
-        {STUB_FIELDS.slice(1, 3).map(f => <StubRow key={f.label} {...f} />)}
-        <ProfileRow label="Onboarded" value={customer.onboard_date ?? '—'} readOnly />
-        {STUB_FIELDS.slice(3).map(f => <StubRow key={f.label} {...f} />)}
-        <ProfileRow label="Address" value={address || '—'} readOnly />
+        <div className={styles.profCardLabel}>Profile <span className={styles.profMuted}>— click any field to edit</span></div>
+        <EditableRow label="Serial"    value={customer.serials?.[0] ?? ''} placeholder="LL01-…" onSave={v => saveProfile({ serial: v })} />
+        <EditableRow label="Color"     value={customer.color ?? ''}        placeholder="White / Black" onSave={v => saveProfile({ color: v })} />
+        <EditableRow label="Shipped"   value={customer.shipped_on ?? ''}   type="date" onSave={v => saveProfile({ shipped_on: v })} />
+        <EditableRow label="Received"  value={customer.received_on ?? ''}  type="date" onSave={v => saveProfile({ received_on: v })} />
+        <EditableRow label="Onboarded" value={customer.onboard_date ?? ''} type="date" onSave={v => saveProfile({ onboard_date: v })} />
+        <EditableRow label="Diagnosis" value={customer.diagnosis_on ?? ''} type="date" onSave={v => saveProfile({ diagnosis_on: v })} />
+        <EditableRow label="Dashboard" value={customer.dashboard ?? ''}    placeholder="yes / no / etc." onSave={v => saveProfile({ dashboard: v })} />
+        <EditableRow label="Software"  value={customer.software ?? ''}     placeholder="V17 / V18 / …" onSave={v => saveProfile({ software: v })} />
+        <EditableRow label="Timezone"  value={customer.timezone ?? ''}     placeholder="EST / PST / …" onSave={v => saveProfile({ timezone: v })} />
+        <EditableRow label="Address"   value={customer.address_line ?? ''} placeholder="Street, City, State" onSave={v => saveProfile({ address_line: v })} />
       </div>
 
       {/* ── Open HubSpot tickets + pause banner ────────────────── */}
@@ -285,20 +277,25 @@ export function FollowUpDetailPanel({
   );
 }
 
-function ProfileRow({ label, value, readOnly }: { label: string; value: string; readOnly?: boolean }) {
+function EditableRow({
+  label, value, type, placeholder, onSave,
+}: {
+  label: string; value: string; type?: 'text' | 'date'; placeholder?: string; onSave: (v: string) => void;
+}) {
+  const [v, setV] = useState(value);
+  useEffect(() => { setV(value); }, [value]);
   return (
     <div className={styles.profRow}>
       <span className={styles.profRowLabel}>{label}</span>
-      <span className={readOnly ? styles.profRowValue : styles.profRowValueEdit}>{value}</span>
-    </div>
-  );
-}
-
-function StubRow({ label, placeholder }: { label: string; placeholder: string }) {
-  return (
-    <div className={styles.profRow}>
-      <span className={styles.profRowLabel}>{label}</span>
-      <input className={styles.profStubInput} placeholder={placeholder} disabled title="Not saved yet (first draft)" />
+      <input
+        className={styles.profEditInput}
+        type={type ?? 'text'}
+        value={v}
+        placeholder={placeholder}
+        onChange={e => setV(e.target.value)}
+        onBlur={() => { if (v !== value) onSave(v); }}
+        onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+      />
     </div>
   );
 }

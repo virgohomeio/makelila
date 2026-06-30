@@ -9,6 +9,8 @@ const base: Customer = {
   id: 'c1', hubspot_id: null, email: 'a@b.com', first_name: null, last_name: null,
   full_name: 'Test User', phone: null, address_line: null, city: null, region: null,
   postal_code: null, country: null, notes: null, onboard_date: null,
+  color: null, shipped_on: null, received_on: null, diagnosis_on: null,
+  dashboard: null, software: null, timezone: null,
   fu1_status: null, fu2_status: null, fu_notes: null, review_status: null, manual_status_tags: null,
   last_synced_at: null, serials: null, serials_synced_at: null,
   name_request_sent_at: null, journey_stage_override: null,

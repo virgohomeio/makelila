@@ -400,6 +400,9 @@
 .profRowValue { font-size: 13px; font-family: ui-monospace, monospace; }
 .profRowValueEdit { font-size: 13px; }
 .profStubInput { flex: 1; padding: 4px 8px; font-size: 12px; color: #a0aec0; border: 1px solid #eee; border-radius: 5px; background: #fff; }
+.profEditInput { flex: 1; min-width: 0; padding: 5px 8px; font-size: 13px; color: var(--color-ink); border: 1px solid #e2e2e2; border-radius: 5px; background: #fff; }
+.profEditInput:focus { outline: none; border-color: #90cdf4; box-shadow: 0 0 0 2px rgba(144,205,244,0.3); }
+.profEditInput::placeholder { color: #cbd5e0; }
 
 .profPauseBanner { background: #fff; border: 1px solid #f6d68a; border-radius: 6px; padding: 8px 10px; font-size: 12px; color: #9c4221; margin-bottom: 8px; }
 .profTicket { background: #fff; border: 1px solid #eee; border-radius: 6px; padding: 8px 10px; margin-bottom: 6px; }
