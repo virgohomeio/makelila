@@ -220,9 +220,18 @@ function RefundCard({
   onOpenFinanceModal: (id: string) => void;
 }) {
   const [busy, setBusy] = useState(false);
+  const [statusBusy, setStatusBusy] = useState(false);
   const [confirmMode, setConfirmMode] = useState<'approve' | 'deny' | null>(null);
   const [inputVal, setInputVal] = useState('');
   const meta = REFUND_STATUS_META[refund.status];
+
+  const runStatus = async (s: ReturnStatus) => {
+    if (!linkedReturn || linkedReturn.status === s) return;
+    setStatusBusy(true); onError(null);
+    try { await updateReturnStatus(linkedReturn.id, s); }
+    catch (e) { onError((e as Error).message); }
+    finally { setStatusBusy(false); }
+  };
 
   const openApprove = () => {
     if (refund.status === 'finance_review') { onOpenFinanceModal(refund.id); return; }
@@ -273,11 +282,25 @@ function RefundCard({
       {refund.reason && <div className={styles.refundReason}>{refund.reason}</div>}
       {refund.payment_method && <div className={styles.refundMeta}>via {refund.payment_method}</div>}
       {linkedReturn && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, margin: '6px 0' }}>
-          <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 999,
-                         color: '#2d3748', background: '#edf2f7' }}>
-            📦 {UNIT_STATUS_LABEL[linkedReturn.status]}
-          </span>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, margin: '6px 0', alignItems: 'center' }}
+             onClick={e => e.stopPropagation()}>
+          <select
+            value={linkedReturn.status}
+            onChange={e => void runStatus(e.target.value as ReturnStatus)}
+            disabled={statusBusy}
+            style={{ fontSize: 11, fontWeight: 600, padding: '2px 6px', borderRadius: 4,
+                     border: '1px solid #cbd5e0', background: '#edf2f7', color: '#2d3748',
+                     cursor: 'pointer', maxWidth: 160 }}
+          >
+            {!UNIT_STAGES.some(st => st.value === linkedReturn.status) && (
+              <option value={linkedReturn.status} disabled>
+                📦 {UNIT_STATUS_LABEL[linkedReturn.status]}
+              </option>
+            )}
+            {UNIT_STAGES.map(st => (
+              <option key={st.value} value={st.value}>📦 {st.label}</option>
+            ))}
+          </select>
           {linkedReturn.disposition ? (
             <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 999,
                            color: RETURN_DISPOSITION_META[linkedReturn.disposition].color,
