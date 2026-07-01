@@ -52,6 +52,18 @@ const EVENT_META: Record<string, { label: string; color: string }> = {
   'lovely.dormancy_30d':        { label: 'No login for 30 days',    color: '#c05621' },
   'lovely.dormancy_60d':        { label: 'No login for 60 days',    color: '#c53030' },
   'lovely.churn_signal':        { label: 'Churn signal',            color: '#c53030' },
+  // Klaviyo email + onsite events (pulled by klaviyo-pull-events) — the email
+  // leg of the buying journey.
+  'klaviyo.opened_email':       { label: 'Opened email',            color: '#3182ce' },
+  'klaviyo.clicked_email':      { label: 'Clicked email',           color: '#2b6cb0' },
+  'klaviyo.received_email':     { label: 'Received email',          color: '#90cdf4' },
+  'klaviyo.active_on_site':     { label: 'Active on site',          color: '#5C564E' },
+  'klaviyo.viewed_product':     { label: 'Viewed product',          color: '#805ad5' },
+  'klaviyo.added_to_cart':      { label: 'Added to cart',           color: '#c05621' },
+  'klaviyo.started_checkout':   { label: 'Started checkout',        color: '#dd6b20' },
+  'klaviyo.placed_order':       { label: 'Placed order',            color: '#276749' },
+  'klaviyo.ordered_product':    { label: 'Ordered product',         color: '#276749' },
+  'klaviyo.subscribed_to_list': { label: 'Subscribed to email',     color: '#2f855a' },
 };
 
 export function eventMeta(eventType: string): { label: string; color: string } {

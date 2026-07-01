@@ -6,7 +6,7 @@ import { JourneyTab } from './JourneyTab';
 import { SocialTab } from './SocialTab';
 import { SystemOfRecordCard } from './SystemOfRecordCard';
 import { useFbCampaigns, triggerFbSync } from '../../lib/marketing/facebook';
-import { useKlaviyoSyncStatus, triggerKlaviyoSync } from '../../lib/marketing/klaviyo';
+import { useKlaviyoSyncStatus, triggerKlaviyoSync, triggerKlaviyoEventsSync } from '../../lib/marketing/klaviyo';
 import styles from './Marketing.module.css';
 
 type Tab = 'dashboard' | 'report' | 'campaigns' | 'social' | 'attribution' | 'journey' | 'sync';
@@ -40,6 +40,19 @@ export default function Marketing() {
       setSyncMsg(`Synced ${result.profiles_sent} Klaviyo profiles.`);
     } catch (e) {
       setSyncMsg(`Klaviyo sync failed: ${String(e)}`);
+    } finally {
+      setSyncing(false);
+    }
+  }
+
+  async function handleKlaviyoEventsSync() {
+    setSyncing(true);
+    setSyncMsg('');
+    try {
+      const r = await triggerKlaviyoEventsSync();
+      setSyncMsg(r.note ?? `Pulled ${r.synced} Klaviyo events across ${r.profiles ?? 0} profiles into customer journeys.`);
+    } catch (e) {
+      setSyncMsg(`Klaviyo events sync failed: ${String(e)}`);
     } finally {
       setSyncing(false);
     }
@@ -148,6 +161,13 @@ export default function Marketing() {
               disabled={syncing}
             >
               {syncing ? 'Syncing…' : 'Sync Klaviyo Profiles'}
+            </button>
+            <button
+              className={styles.syncBtn}
+              onClick={() => void handleKlaviyoEventsSync()}
+              disabled={syncing}
+            >
+              {syncing ? 'Syncing…' : 'Sync Klaviyo Events'}
             </button>
             {syncMsg && <span className={styles.syncStatus}>{syncMsg}</span>}
           </div>
