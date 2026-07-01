@@ -220,30 +220,29 @@ function RefundCard({
   onOpenFinanceModal: (id: string) => void;
 }) {
   const [busy, setBusy] = useState(false);
+  const [confirmMode, setConfirmMode] = useState<'approve' | 'deny' | null>(null);
+  const [inputVal, setInputVal] = useState('');
   const meta = REFUND_STATUS_META[refund.status];
 
-  const runApprove = async () => {
-    if (refund.status === 'finance_review') {
-      onOpenFinanceModal(refund.id);
-      return;
-    }
-    setBusy(true); onError(null);
-    try {
-      if (refund.status === 'manager_review' || refund.status === 'submitted') {
-        const note = window.prompt('Manager approval note (optional):') ?? undefined;
-        await managerApprove(refund.id, note);
-      }
-    } catch (e) { onError((e as Error).message); }
-    finally { setBusy(false); }
+  const openApprove = () => {
+    if (refund.status === 'finance_review') { onOpenFinanceModal(refund.id); return; }
+    setInputVal(''); setConfirmMode('approve');
   };
+  const openDeny = () => { setInputVal(''); setConfirmMode('deny'); };
+  const cancelConfirm = () => setConfirmMode(null);
 
-  const runDeny = async () => {
-    const reason = window.prompt('Reason for denial (required):');
-    if (!reason) return;
+  const runConfirm = async () => {
+    if (confirmMode === 'deny' && !inputVal.trim()) return;
     setBusy(true); onError(null);
     try {
-      const stage = refund.status === 'finance_review' ? 'finance_review' : 'manager_review';
-      await denyRefund(refund.id, stage, reason);
+      if (confirmMode === 'approve') {
+        await managerApprove(refund.id, inputVal.trim() || undefined);
+      } else {
+        const stage: 'manager_review' | 'finance_review' =
+          refund.status === 'finance_review' ? 'finance_review' : 'manager_review';
+        await denyRefund(refund.id, stage, inputVal.trim());
+      }
+      setConfirmMode(null);
     } catch (e) { onError((e as Error).message); }
     finally { setBusy(false); }
   };
@@ -326,21 +325,41 @@ function RefundCard({
         )}
       </div>
       <div className={styles.refundActions} onClick={e => e.stopPropagation()}>
-        {(canActManager || canActFinance) && (
-          <button onClick={() => void runApprove()} disabled={busy}
-                  className={styles.refundApproveBtn}>
-            {busy ? '…' : canActManager ? 'Approve (manager)' : 'Approve (finance, paid)'}
-          </button>
-        )}
-        {canDeny && (
-          <button onClick={() => void runDeny()} disabled={busy} className={styles.refundDenyBtn}>
-            Deny
-          </button>
-        )}
-        {refund.status === 'refunded' && (
-          <button onClick={() => void runClose()} disabled={busy} className={styles.refundCloseBtn}>
-            Close
-          </button>
+        {confirmMode ? (
+          <div className={styles.refundConfirmInline}>
+            <input
+              autoFocus
+              type="text"
+              placeholder={confirmMode === 'deny' ? 'Reason for denial (required)' : 'Note (optional)'}
+              value={inputVal}
+              onChange={e => setInputVal(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') void runConfirm(); if (e.key === 'Escape') cancelConfirm(); }}
+              className={styles.refundConfirmInput}
+              disabled={busy}
+            />
+            <div className={styles.refundConfirmBtns}>
+              <button
+                onClick={() => void runConfirm()}
+                disabled={busy || (confirmMode === 'deny' && !inputVal.trim())}
+                className={confirmMode === 'approve' ? styles.refundApproveBtn : styles.refundDenyBtn}
+              >{busy ? '…' : 'Confirm'}</button>
+              <button onClick={cancelConfirm} disabled={busy} className={styles.refundCloseBtn}>✕</button>
+            </div>
+          </div>
+        ) : (
+          <>
+            {(canActManager || canActFinance) && (
+              <button onClick={openApprove} disabled={busy} className={styles.refundApproveBtn}>
+                {canActManager ? 'Approve (manager)' : 'Approve (finance, paid)'}
+              </button>
+            )}
+            {canDeny && (
+              <button onClick={openDeny} disabled={busy} className={styles.refundDenyBtn}>Deny</button>
+            )}
+            {refund.status === 'refunded' && (
+              <button onClick={() => void runClose()} disabled={busy} className={styles.refundCloseBtn}>Close</button>
+            )}
+          </>
         )}
       </div>
       {!selected && (
@@ -406,30 +425,30 @@ function RefundDetailPanel({
     finally { setBusy(false); }
   };
 
-  const runApprove = async () => {
-    if (canActFinance) {
-      onOpenFinanceModal(refund.id);
-      return;
-    }
+  const [confirmMode, setConfirmMode] = useState<'approve' | 'deny' | null>(null);
+  const [inputVal, setInputVal] = useState('');
+
+  const openApprove = () => {
+    if (canActFinance) { onOpenFinanceModal(refund.id); return; }
+    setInputVal(''); setConfirmMode('approve');
+  };
+  const openDeny = () => { setInputVal(''); setConfirmMode('deny'); };
+  const cancelConfirm = () => setConfirmMode(null);
+
+  const runConfirm = async () => {
+    if (confirmMode === 'deny' && !inputVal.trim()) return;
     setBusy(true); onError(null);
     try {
-      if (canActManager) {
-        const note = window.prompt('Manager approval note (optional):') ?? undefined;
-        await managerApprove(refund.id, note);
+      if (confirmMode === 'approve') {
+        await managerApprove(refund.id, inputVal.trim() || undefined);
+        onClose();
+      } else {
+        const stage: 'manager_review' | 'finance_review' =
+          refund.status === 'finance_review' ? 'finance_review' : 'manager_review';
+        await denyRefund(refund.id, stage, inputVal.trim());
         onClose();
       }
-    } catch (e) { onError((e as Error).message); }
-    finally { setBusy(false); }
-  };
-
-  const runDeny = async () => {
-    const reason = window.prompt('Reason for denial (required):');
-    if (!reason) return;
-    setBusy(true); onError(null);
-    try {
-      const stage = refund.status === 'finance_review' ? 'finance_review' : 'manager_review';
-      await denyRefund(refund.id, stage, reason);
-      onClose();
+      setConfirmMode(null);
     } catch (e) { onError((e as Error).message); }
     finally { setBusy(false); }
   };
@@ -628,20 +647,41 @@ function RefundDetailPanel({
            refund.status === 'closed'   ? 'Closed — no action needed' :
                                           'Not your stage — view only'}
         </div>
-        <div className={styles.refundDetailButtons}>
-          {canAct && (
-            <button onClick={() => void runApprove()} disabled={busy}
-                    className={styles.refundDetailApproveBtn}>
-              {busy ? '…' : canActManager ? '✓ Approve as Manager' : '✓ Approve as Finance (paid)'}
-            </button>
-          )}
-          {canAct && (
-            <button onClick={() => void runDeny()} disabled={busy}
-                    className={styles.refundDetailDenyBtn}>
-              ✕ Deny
-            </button>
-          )}
-        </div>
+        {confirmMode ? (
+          <div className={styles.refundConfirmInline}>
+            <textarea
+              autoFocus
+              rows={2}
+              placeholder={confirmMode === 'deny' ? 'Reason for denial (required)' : 'Note (optional)'}
+              value={inputVal}
+              onChange={e => setInputVal(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Escape') cancelConfirm(); }}
+              className={styles.refundConfirmInput}
+              disabled={busy}
+            />
+            <div className={styles.refundConfirmBtns}>
+              <button
+                onClick={() => void runConfirm()}
+                disabled={busy || (confirmMode === 'deny' && !inputVal.trim())}
+                className={confirmMode === 'approve' ? styles.refundDetailApproveBtn : styles.refundDetailDenyBtn}
+              >{busy ? '…' : 'Confirm'}</button>
+              <button onClick={cancelConfirm} disabled={busy} className={styles.refundCloseBtn}>Cancel</button>
+            </div>
+          </div>
+        ) : (
+          <div className={styles.refundDetailButtons}>
+            {canAct && (
+              <button onClick={openApprove} disabled={busy} className={styles.refundDetailApproveBtn}>
+                {canActManager ? '✓ Approve as Manager' : '✓ Approve as Finance (paid)'}
+              </button>
+            )}
+            {canAct && (
+              <button onClick={openDeny} disabled={busy} className={styles.refundDetailDenyBtn}>
+                ✕ Deny
+              </button>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -839,6 +879,10 @@ function FinanceApproveModal({
   const [note, setNote] = useState('');
   const [correctionNote, setCorrectionNote] = useState('');
   const [busy, setBusy] = useState(false);
+  const [localError, setLocalError] = useState<string | null>(null);
+
+  const FINANCE_OK_STATUSES = ['received', 'inspected', 'refunded', 'closed'];
+  const returnNotReceived = linkedReturn != null && !FINANCE_OK_STATUSES.includes(linkedReturn.status);
 
   const amount = Number(amountStr);
   const amountChanged = !Number.isNaN(amount) && Number(amount.toFixed(2)) !== Number(original.toFixed(2));
@@ -865,10 +909,10 @@ function FinanceApproveModal({
 
   const run = async () => {
     if (amountChanged && !correctionNote.trim()) {
-      onError('Correction note required when changing amount.');
+      setLocalError('Correction note required when changing amount.');
       return;
     }
-    setBusy(true); onError(null);
+    setBusy(true); onError(null); setLocalError(null);
     try {
       await financeApprove(refund.id, {
         method,
@@ -878,7 +922,9 @@ function FinanceApproveModal({
       });
       onClose();
     } catch (e) {
-      onError((e as Error).message);
+      const msg = (e as Error).message;
+      setLocalError(msg);
+      onError(msg);
     } finally {
       setBusy(false);
     }
@@ -888,6 +934,14 @@ function FinanceApproveModal({
     <div className={styles.modalBackdrop} onClick={onClose}>
       <div className={styles.modalCard} onClick={e => e.stopPropagation()}>
         <h3 className={styles.modalTitle}>Process refund</h3>
+
+        {returnNotReceived && (
+          <div className={styles.financeModalWarn}>
+            ⚠ Linked return is in "<strong>{linkedReturn!.status}</strong>" status — refund can only
+            be processed after the unit is received and issues are confirmed.
+          </div>
+        )}
+        {localError && <div className={styles.financeModalError}>{localError}</div>}
 
         <div className={styles.modalField}>
           <label className={styles.modalLabel}>Method</label>
@@ -946,7 +1000,7 @@ function FinanceApproveModal({
           <button onClick={onClose} disabled={busy} className={styles.btnSecondary}>Cancel</button>
           <button
             onClick={() => void run()}
-            disabled={busy || Number.isNaN(amount) || amount < 0}
+            disabled={busy || Number.isNaN(amount) || amount < 0 || returnNotReceived}
             className={styles.btnPrimary}
           >
             {busy ? 'Processing…' : `Refund $${Number.isNaN(amount) ? '?' : amount.toFixed(2)}`}

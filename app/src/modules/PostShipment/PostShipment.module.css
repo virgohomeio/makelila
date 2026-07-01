@@ -1138,3 +1138,12 @@
 }
 .replWarnHoldBtn:hover:not(:disabled) { background: #d97706; }
 .replWarnHoldBtn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+/* Inline confirm form (approve/deny without window.prompt) */
+.refundConfirmInline { display: flex; flex-direction: column; gap: 5px; width: 100%; }
+.refundConfirmInput { width: 100%; font-size: 11px; padding: 4px 7px; border: 1px solid var(--color-border, #d1d5db); border-radius: 4px; font-family: inherit; box-sizing: border-box; resize: vertical; }
+.refundConfirmBtns { display: flex; gap: 5px; }
+
+/* Finance modal banners */
+.financeModalWarn { background: #fffaf0; border: 1px solid #fbd38d; color: #c05621; padding: 10px 12px; border-radius: 6px; font-size: 13px; margin-bottom: 12px; }
+.financeModalError { background: var(--color-error-bg, #fff5f5); border: 1px solid #fc8181; color: var(--color-error, #9b2c2c); padding: 10px 12px; border-radius: 6px; font-size: 13px; margin-bottom: 12px; }
