@@ -22,7 +22,7 @@ function mkTicket(partial: Partial<ServiceTicket> & { id: string }): ServiceTick
     defect_category: null, parts_needed: null,
     calendly_event_uri: null, calendly_event_start: null, calendly_host_email: null,
     hubspot_ticket_id: null, fulfillment_queue_id: null,
-    owner_email: null, resolved_at: null, closed_at: null,
+    owner_email: null, resolved_at: null, closed_at: null, post_close_followup_done_at: null,
     replacement_order_id: null,
     diagnosis_link_sent_at: null, diag_cohost_invited_at: null,
     diagnosis_followup_done_at: null,
@@ -58,6 +58,7 @@ vi.mock('../../../lib/service', async () => {
   return {
     ...actual,
     useServiceTickets: vi.fn(() => ({ tickets: ticketsToReturn, loading: false })),
+    useTicketsClosedSince: vi.fn(() => ({ closedIds: new Set<string>(), loading: false })),
   };
 });
 vi.mock('../../../lib/customers', async () => {

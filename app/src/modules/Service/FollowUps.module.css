@@ -123,14 +123,24 @@
 .calEvent:hover { opacity: 0.8; }
 
 /* ── Selected customer panel ── */
+/* Right-side slide-over drawer (matches Service .detailOverlay) so the customer
+ * profile opens beside the dashboard instead of stacking underneath it. */
 .selectedPanel {
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
+  position: fixed;
+  top: 0; right: 0; bottom: 0;
+  width: 480px;
   background: #fff;
+  border-left: 1px solid var(--color-border);
+  box-shadow: -4px 0 16px rgba(0,0,0,0.08);
+  z-index: 80;
   padding: 14px 16px;
   display: flex;
   flex-direction: column;
   gap: 8px;
+  overflow-y: auto;
+}
+@media (max-width: 700px) {
+  .selectedPanel { width: 100%; left: 0; }
 }
 .selectedHeader {
   display: flex;
@@ -365,6 +375,48 @@
 .addRow button { font-size: 12px; padding: 4px 12px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: #fff; cursor: pointer; font-weight: 600; }
 .addRow button:disabled { opacity: 0.5; cursor: default; }
 .notesLog { display: flex; flex-direction: column; gap: 4px; max-height: 200px; overflow-y: auto; }
-.noteRow { font-size: 12px; color: var(--color-ink); padding: 3px 0; border-bottom: 1px solid #f7f7f7; }
+.noteRow { display: flex; align-items: baseline; gap: 6px; font-size: 12px; color: var(--color-ink); padding: 3px 0; border-bottom: 1px solid #f7f7f7; }
+.noteBody { flex: 1; }
 .noteDate { font-size: 10px; color: var(--color-ink-subtle); font-weight: 600; margin-right: 6px; }
 .noteLegacy { color: var(--color-ink-subtle); font-style: italic; white-space: pre-wrap; }
+
+/* ── Rich customer profile panel (Follow-Up detail) ───────────────────────── */
+.profHeader { padding-bottom: 10px; border-bottom: 1px solid #eee; margin-bottom: 12px; }
+.profHeaderTop { display: flex; align-items: center; justify-content: space-between; }
+.profName { font-size: 20px; }
+.profHeaderRow { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--color-ink-subtle); margin-top: 4px; }
+.profHubspot { margin-left: auto; color: #2b6cb0; font-weight: 600; text-decoration: none; }
+.profQuo { color: #6b46c1; font-weight: 700; }
+
+.profCard { border: 1px solid #ececec; border-radius: 8px; padding: 14px 20px; margin-bottom: 12px; background: #fbfbfb; overflow-wrap: break-word; word-break: break-word; }
+.profCardLabel { font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--color-ink-subtle); margin-bottom: 8px; }
+.profCardWarn { background: #fffaf0; border-color: #f6d68a; }
+.profCardRepl { background: #f5f3ff; border-color: #d6ccf5; }
+.profMuted { font-size: 12px; color: var(--color-ink-subtle); }
+.profSelect { margin-top: 8px; width: 100%; padding: 7px 9px; font-size: 13px; border: 1px solid #ddd; border-radius: 6px; }
+
+.profRow { display: flex; align-items: center; gap: 10px; padding: 5px 0; border-bottom: 1px solid #f3f3f3; }
+.profRowLabel { width: 90px; flex-shrink: 0; font-size: 12px; font-weight: 600; color: var(--color-ink-subtle); }
+.profRowValue { font-size: 13px; font-family: ui-monospace, monospace; }
+.profRowValueEdit { font-size: 13px; }
+.profStubInput { flex: 1; padding: 4px 8px; font-size: 12px; color: #a0aec0; border: 1px solid #eee; border-radius: 5px; background: #fff; }
+.profEditInput { flex: 1; min-width: 0; padding: 5px 8px; font-size: 13px; color: var(--color-ink); border: 1px solid #e2e2e2; border-radius: 5px; background: #fff; }
+.profEditInput:focus { outline: none; border-color: #90cdf4; box-shadow: 0 0 0 2px rgba(144,205,244,0.3); }
+.profEditInput::placeholder { color: #cbd5e0; }
+
+.profPauseBanner { background: #fff; border: 1px solid #f6d68a; border-radius: 6px; padding: 8px 10px; font-size: 12px; color: #9c4221; margin-bottom: 8px; }
+.profTicket { background: #fff; border: 1px solid #eee; border-radius: 6px; padding: 8px 10px; margin-bottom: 6px; }
+.profTicketTop { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.profTicketNo { font-size: 11px; font-weight: 700; color: #c05621; }
+.profTicketStatus { font-size: 10px; font-weight: 700; text-transform: uppercase; color: #c53030; background: #fff5f5; border-radius: 4px; padding: 2px 7px; }
+.profTicketSubj { font-size: 13px; font-weight: 600; }
+
+.profSteps { margin: 0; padding-left: 22px; padding-right: 8px; font-size: 13px; line-height: 1.45; overflow-wrap: break-word; word-break: break-word; }
+.profSteps li { margin-bottom: 4px; padding-left: 4px; }
+
+.fuItem { border-left: 3px solid #e2e8f0; background: #fff; border-radius: 4px; padding: 8px 10px; margin-bottom: 6px; }
+.fuItemPaused { border-left-color: #ed8936; background: #fffaf0; }
+.fuItemTop { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; }
+.fuItemTags { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.fuTag { font-size: 10px; font-weight: 700; color: #6b46c1; background: #f0ebff; border-radius: 4px; padding: 2px 6px; }
+.fuOnHold { font-size: 10px; font-weight: 700; color: #9c4221; background: #feebc8; border-radius: 4px; padding: 2px 6px; }

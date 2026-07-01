@@ -13,11 +13,15 @@ type ShopifyAddress = {
   phone?: string | null;
 };
 
-// Shopify money_set: amounts in both the shop's base currency (shop_money)
-// and what the customer was charged/shown (presentment_money). We use
-// presentment everywhere so a CAD customer's summary shows CAD amounts.
 type Money = { amount?: string | null; currency_code?: string | null };
 type MoneySet = { shop_money?: Money | null; presentment_money?: Money | null };
+
+type ShopifyTaxLine = {
+  title?: string | null;
+  rate?: number | null;
+  price_set?: MoneySet | null;
+  price?: string | null;
+};
 
 type ShopifyLineItem = {
   sku?: string | null;
@@ -28,14 +32,14 @@ type ShopifyLineItem = {
 };
 
 type ShopifyOrder = {
-  name: string;                       // e.g. "#1113"
+  name: string;
   email?: string | null;
   phone?: string | null;
   created_at?: string | null;
   landing_site?: string | null;
   landing_site_ref?: string | null;
-  currency?: string | null;           // shop/settlement currency, e.g. "USD"
-  presentment_currency?: string | null; // what the customer was charged in, e.g. "CAD"
+  currency?: string | null;
+  presentment_currency?: string | null;
   total_price?: string | null;
   subtotal_price?: string | null;
   total_tax?: string | null;
@@ -47,9 +51,20 @@ type ShopifyOrder = {
   discount_codes?: Array<{ code?: string | null }> | null;
   payment_gateway_names?: string[] | null;
   financial_status?: string | null;
-  shipping_lines?: Array<{ price?: string | null; price_set?: MoneySet | null }>;
+  tax_lines?: ShopifyTaxLine[] | null;
+  shipping_lines?: Array<{
+    title?: string | null;
+    price?: string | null;
+    price_set?: MoneySet | null;
+  }> | null;
   shipping_address?: ShopifyAddress | null;
-  customer?: { first_name?: string | null; last_name?: string | null; email?: string | null; phone?: string | null } | null;
+  customer?: {
+    id?: number | null;
+    first_name?: string | null;
+    last_name?: string | null;
+    email?: string | null;
+    phone?: string | null;
+  } | null;
   line_items?: ShopifyLineItem[];
 };
 
@@ -72,11 +87,13 @@ type MappedOrder = {
   freight_threshold_usd: number;
   freight_estimate_source: string;
   customer_paid_shipping_usd: number;
+  shipping_line_title: string | null;
   total_usd: number;
   currency: string;
   postal_code: string | null;
   subtotal_usd: number | null;
   tax_usd: number | null;
+  tax_lines: Array<{ title: string; rate: number; amount_usd: number }> | null;
   discount_total_usd: number | null;
   discount_codes: string[] | null;
   payment_methods: string[] | null;
@@ -91,8 +108,6 @@ function num(v: string | null | undefined): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-// Amount the customer was actually charged: prefer presentment_money, fall back
-// to shop_money, then to the legacy flat string.
 function presentmentNum(set: MoneySet | null | undefined, fallback?: string | null): number | null {
   return num(set?.presentment_money?.amount) ?? num(set?.shop_money?.amount) ?? num(fallback);
 }
@@ -102,8 +117,6 @@ function verdictFor(
   postalCode: string | null,
   remotePrefixes: string[],
 ): 'house' | 'apt' | 'remote' {
-  // Postal-prefix match wins over the apt heuristic — remote zone is the
-  // hardest-to-recover-from problem (carrier surcharge or refuses delivery).
   if (postalCode) {
     const p = postalCode.toUpperCase().replace(/\s/g, '');
     if (remotePrefixes.some(prefix => p.startsWith(prefix))) return 'remote';
@@ -113,12 +126,6 @@ function verdictFor(
   return 'house';
 }
 
-// Auto-guess whether the delivery address is in an urban / suburban or a
-// rural/remote area, from the postal code alone (no geocoding). Rural is the
-// only bucket we can detect reliably: a known remote-zone prefix, or the
-// Canada-Post convention where the 2nd char of the FSA is 0 (rural delivery).
-// Urban vs suburban can't be told apart from a postal code, so the non-rural
-// remainder defaults to 'suburban' for the operator to refine via the override.
 function areaTypeFor(
   postalCode: string | null,
   country: 'US' | 'CA',
@@ -130,12 +137,6 @@ function areaTypeFor(
     if (country === 'CA' && /^[A-Z]0/.test(p)) return 'rural';
   }
   return 'suburban';
-}
-
-function parseShippingFreight(order: ShopifyOrder): number {
-  const line = order.shipping_lines?.[0];
-  if (!line) return 0;
-  return presentmentNum(line.price_set, line.price) ?? 0;
 }
 
 function mapOrder(
@@ -151,15 +152,24 @@ function mapOrder(
     return { error: 'missing city', order_ref: o.name };
   }
 
-  const name = [o.customer?.first_name, o.customer?.last_name].filter(Boolean).join(' ') || (o.customer?.email ?? 'Unknown');
+  const name = [o.customer?.first_name, o.customer?.last_name].filter(Boolean).join(' ')
+    || (o.customer?.email ?? 'Unknown');
   const email = o.customer?.email ?? o.email ?? null;
   const phone = o.customer?.phone ?? o.phone ?? addr.phone ?? null;
-  const freight = parseShippingFreight(o);
+  const shippingLine = o.shipping_lines?.[0] ?? null;
+  const freight = shippingLine ? (presentmentNum(shippingLine.price_set, shippingLine.price) ?? 0) : 0;
   const total = presentmentNum(o.total_price_set, o.total_price) ?? 0;
   const postal = addr.zip?.trim() || null;
   const verdict = verdictFor(addr.address1, postal, remotePrefixes);
-  // Anything non-house (apt OR remote) gets auto-flagged for ops review.
   const initialStatus: 'pending' | 'flagged' = verdict === 'house' ? 'pending' : 'flagged';
+
+  const taxLines = (o.tax_lines ?? [])
+    .map(tl => ({
+      title: tl.title ?? 'Tax',
+      rate: tl.rate ?? 0,
+      amount_usd: presentmentNum(tl.price_set, tl.price) ?? 0,
+    }))
+    .filter(tl => tl.amount_usd > 0);
 
   return {
     order_ref: o.name,
@@ -169,32 +179,24 @@ function mapOrder(
     customer_phone: phone,
     quo_thread_url: null,
     address_line: addr.address1 ?? null,
-    // Apartment / unit / suite — Shopify's second address line. Shown in Order
-    // Review only when the customer actually provided one.
     address_line2: addr.address2?.trim() || null,
     city: addr.city,
     region_state: addr.province_code ?? null,
     country,
     address_verdict: verdict,
-    // Urban/suburban vs rural area type, auto-guessed from the postal code.
-    // Operator can override in Order Review; a re-sync won't clobber that.
     area_type: areaTypeFor(postal, country, remotePrefixes),
     area_type_source: 'auto',
-    // Freight estimate is the operator's carrier quote (ClickShip/Freightcom)
-    // and is NOT sourced from Shopify. New orders start with no quote (0 =>
-    // "No freight quote on file" in the UI) for the operator to fill in
-    // manually. The customer-paid shipping amount Shopify recorded lives in its
-    // own column (customer_paid_shipping_usd) and feeds the payment summary.
     freight_estimate_usd: 0,
     freight_threshold_usd: 200.00,
     freight_estimate_source: 'manual',
     customer_paid_shipping_usd: freight,
+    shipping_line_title: shippingLine?.title?.trim() || null,
     total_usd: total,
-    // Currency the customer was charged in (presentment); falls back to shop currency.
     currency: o.presentment_currency ?? o.currency ?? 'USD',
     postal_code: postal,
     subtotal_usd: presentmentNum(o.subtotal_price_set, o.subtotal_price),
     tax_usd: presentmentNum(o.total_tax_set, o.total_tax),
+    tax_lines: taxLines.length > 0 ? taxLines : null,
     discount_total_usd: presentmentNum(o.total_discounts_set, o.total_discounts),
     discount_codes: o.discount_codes?.map(d => d.code).filter((c): c is string => !!c) ?? null,
     payment_methods: o.payment_gateway_names ?? null,
@@ -209,16 +211,20 @@ function mapOrder(
   };
 }
 
-function parseUtm(landingUrl: string | null | undefined): { source: string | null; campaign: string | null } {
-  if (!landingUrl) return { source: null, campaign: null };
+function parseUtm(landingUrl: string | null | undefined): { source: string | null; medium: string | null; campaign: string | null } {
+  if (!landingUrl) return { source: null, medium: null, campaign: null };
   try {
     const url = new URL(landingUrl);
     const source = url.searchParams.get('utm_source');
+    const medium = url.searchParams.get('utm_medium');
     const campaign = url.searchParams.get('utm_campaign');
-    if (!source) return { source: 'shopify_direct', campaign: null };
-    return { source, campaign };
+    // No utm_source on the landing URL = the visitor came in directly (typed
+    // the URL, bookmark, etc.). Tag medium 'direct' so the classifier reads it
+    // as Direct rather than Unknown.
+    if (!source) return { source: 'shopify_direct', medium: medium ?? 'direct', campaign: null };
+    return { source, medium, campaign };
   } catch {
-    return { source: null, campaign: null };
+    return { source: null, medium: null, campaign: null };
   }
 }
 
@@ -230,54 +236,65 @@ serve(async (req: Request) => {
     return new Response('Method not allowed', { status: 405, headers: corsHeaders });
   }
 
-  const shop = Deno.env.get('SHOPIFY_SHOP_DOMAIN');    // e.g. "virgohome.myshopify.com"
+  const shop = Deno.env.get('SHOPIFY_SHOP_DOMAIN');
   const token = Deno.env.get('SHOPIFY_ADMIN_TOKEN');
   const supabaseUrl = Deno.env.get('SUPABASE_URL');
   const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
 
   if (!shop || !token || !supabaseUrl || !serviceKey) {
     return new Response(
-      JSON.stringify({ error: 'Missing SHOPIFY_SHOP_DOMAIN / SHOPIFY_ADMIN_TOKEN / SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY' }),
+      JSON.stringify({ error: 'Missing env vars' }),
       { status: 500, headers: { ...corsHeaders, 'content-type': 'application/json' } },
     );
   }
 
   const admin = createClient(supabaseUrl, serviceKey);
 
-  // Accept both pg_cron (X-Cron-Secret) and operator JWT (Order Review's
-  // manual "Sync from Shopify" button). The security pass briefly gated this
-  // as cron-only, which broke that UI affordance.
   try { await authenticate(req, admin); }
   catch (e) { if (e instanceof Response) return e; throw e; }
 
-  // 1. Fetch Shopify orders
-  const shopUrl = `https://${shop}/admin/api/2024-10/orders.json?status=open&fulfillment_status=unfulfilled&limit=50`;
-  const shopRes = await fetch(shopUrl, {
-    headers: {
-      'X-Shopify-Access-Token': token,
-      'Accept': 'application/json',
-    },
-  });
-  if (!shopRes.ok) {
-    const body = await shopRes.text();
-    return new Response(
-      JSON.stringify({ error: `Shopify ${shopRes.status}: ${body.slice(0, 400)}` }),
-      { status: 502, headers: { ...corsHeaders, 'content-type': 'application/json' } },
-    );
-  }
-  const { orders } = await shopRes.json() as { orders: ShopifyOrder[] };
+  // Incremental mode: only fetch orders updated in the last 10 minutes.
+  // pg_cron passes {"incremental": true}; manual sync omits it (full sync).
+  let reqBody: Record<string, unknown> = {};
+  try { reqBody = await req.json(); } catch { /* no body */ }
+  const incremental = reqBody?.incremental === true;
+  const updatedAtMin = incremental
+    ? new Date(Date.now() - 10 * 60 * 1000).toISOString()
+    : null;
 
-  // 2. Load remote-postal prefixes once (used by verdictFor)
+  const shopHeaders = {
+    'X-Shopify-Access-Token': token,
+    'Accept': 'application/json',
+  };
+  const orders: ShopifyOrder[] = [];
+  let nextUrl: string | null =
+    `https://${shop}/admin/api/2024-10/orders.json?status=any&limit=250` +
+    (updatedAtMin ? `&updated_at_min=${encodeURIComponent(updatedAtMin)}` : '');
+
+  while (nextUrl) {
+    const shopRes = await fetch(nextUrl, { headers: shopHeaders });
+    if (!shopRes.ok) {
+      const errBody = await shopRes.text();
+      return new Response(
+        JSON.stringify({ error: `Shopify ${shopRes.status}: ${errBody.slice(0, 400)}` }),
+        { status: 502, headers: { ...corsHeaders, 'content-type': 'application/json' } },
+      );
+    }
+    const { orders: page } = await shopRes.json() as { orders: ShopifyOrder[] };
+    orders.push(...(page ?? []));
+    const link = shopRes.headers.get('Link') ?? '';
+    const nextMatch = link.match(/<([^>]+)>;\s*rel="next"/);
+    nextUrl = nextMatch ? nextMatch[1] : null;
+  }
+
   const { data: prefixRows } = await admin
     .from('remote_postal_prefixes')
     .select('prefix');
   const remotePrefixes: string[] = (prefixRows ?? [])
     .map((r: { prefix: string }) => r.prefix.toUpperCase());
 
-  // 3. Map + split mapped vs. skipped
   const mapped: MappedOrder[] = [];
   const skipped: Array<{ order_ref: string; error: string }> = [];
-  // Keep the raw Shopify order by ref so we can access landing_site for UTM backfill.
   const rawByRef = new Map<string, ShopifyOrder>();
   for (const o of orders ?? []) {
     const result = mapOrder(o, remotePrefixes);
@@ -285,132 +302,199 @@ serve(async (req: Request) => {
     else { mapped.push(result); rawByRef.set(o.name, o); }
   }
 
-  // 4. Insert new orders (ignore dupes), then refresh Shopify-sourced fields
-  //    (placed_at, customer_paid_shipping_usd, financial breakdown) on existing
-  //    rows so historical syncs that happened before those were mapped get
-  //    corrected. We never overwrite internal/operator-owned fields like
-  //    status/dispositioned_* or freight_estimate_usd here.
-
-  // Pre-fetch existing orders so the refresh path can decide whether to also
-  // pull contact/address updates (only safe when the operator hasn't yet
-  // approved/held the order, i.e. status is pending or flagged).
   const orderRefs = mapped.map(m => m.order_ref);
   const { data: existingOrders } = await admin
     .from('orders')
     .select('order_ref, status, address_line, postal_code, area_type_source')
     .in('order_ref', orderRefs);
   const existingByRef = new Map(
-    (existingOrders ?? []).map(o => [o.order_ref, o as { order_ref: string; status: string; address_line: string | null; postal_code: string | null; area_type_source: string | null }]),
+    (existingOrders ?? []).map(o => [o.order_ref, o as {
+      order_ref: string; status: string;
+      address_line: string | null; postal_code: string | null; area_type_source: string | null;
+    }]),
+  );
+
+  // Batch-fetch existing customers to avoid N+1 on upsert
+  const emailsToCheck = [...new Set(
+    mapped.map(m => m.customer_email?.toLowerCase()).filter((e): e is string => !!e),
+  )];
+  type CustRow = { id: string; email: string; shopify_id: string | null; first_name: string | null; last_name: string | null; phone: string | null };
+  const { data: existingCustomers } = await admin
+    .from('customers')
+    .select('id, email, shopify_id, first_name, last_name, phone')
+    .in('email', emailsToCheck);
+  const customerByEmail = new Map<string, CustRow>(
+    (existingCustomers ?? []).map(c => [(c as CustRow).email?.toLowerCase(), c as CustRow]),
   );
 
   let imported = 0;
   let refreshed = 0;
   let addressUpdated = 0;
+  let customersUpserted = 0;
+
   for (const m of mapped) {
     const { data, error } = await admin
       .from('orders')
       .upsert(m, { onConflict: 'order_ref', ignoreDuplicates: true })
       .select('id');
+
     if (error) {
       skipped.push({ order_ref: m.order_ref, error: `db: ${error.message}` });
       continue;
     }
-    if (data && data.length > 0) {
+
+    const isNew = data && data.length > 0;
+    if (isNew) {
       imported++;
-      // Backfill first_touch attribution on the customer row (only when not yet set).
       const raw = rawByRef.get(m.order_ref);
       const utm = parseUtm(raw?.landing_site ?? raw?.landing_site_ref ?? null);
       if (utm.source && m.customer_email) {
+        const email = m.customer_email.toLowerCase();
+        const at = raw?.created_at ?? new Date().toISOString();
+        // First touch — insert-only (never overwrite the original acquisition).
         await admin
           .from('customers')
           .update({
             first_touch_source: utm.source,
+            first_touch_medium: utm.medium,
             first_touch_campaign_id: utm.campaign,
-            first_touch_at: raw?.created_at ?? new Date().toISOString(),
+            first_touch_at: at,
           })
-          .eq('email', m.customer_email.toLowerCase())
+          .eq('email', email)
           .is('first_touch_source', null);
+        // Last touch — reflects the most recent order's landing, so the journey
+        // shows the channel that actually drove the latest purchase.
+        await admin
+          .from('customers')
+          .update({
+            last_touch_source: utm.source,
+            last_touch_medium: utm.medium,
+            last_touch_campaign_id: utm.campaign,
+            last_touch_at: at,
+          })
+          .eq('email', email);
       }
-      continue;
+    } else {
+      // Refresh Shopify source-of-truth fields on existing order
+      const existing = existingByRef.get(m.order_ref);
+      const operatorTouched = existing && !['pending', 'flagged'].includes(existing.status);
+
+      const refreshPatch: Record<string, unknown> = {
+        placed_at: m.placed_at,
+        customer_paid_shipping_usd: m.customer_paid_shipping_usd,
+        shipping_line_title: m.shipping_line_title,
+        currency: m.currency,
+        postal_code: m.postal_code,
+        subtotal_usd: m.subtotal_usd,
+        tax_usd: m.tax_usd,
+        tax_lines: m.tax_lines,
+        discount_total_usd: m.discount_total_usd,
+        discount_codes: m.discount_codes,
+        payment_methods: m.payment_methods,
+        financial_status: m.financial_status,
+        line_items: m.line_items,
+      };
+
+      let addressChanged = false;
+      if (!operatorTouched) {
+        refreshPatch.customer_email = m.customer_email;
+        refreshPatch.customer_phone = m.customer_phone;
+        refreshPatch.address_line   = m.address_line;
+        refreshPatch.address_line2  = m.address_line2;
+        refreshPatch.city           = m.city;
+        refreshPatch.region_state   = m.region_state;
+        refreshPatch.country        = m.country;
+        refreshPatch.address_verdict = m.address_verdict;
+        if ((existing?.area_type_source ?? 'auto') === 'auto') {
+          refreshPatch.area_type = m.area_type;
+          refreshPatch.area_type_source = 'auto';
+        }
+        if (existing?.status === 'pending' && m.address_verdict !== 'house') {
+          refreshPatch.status = 'flagged';
+        }
+        if (
+          (existing?.postal_code ?? null) !== (m.postal_code ?? null) ||
+          (existing?.address_line ?? null) !== (m.address_line ?? null)
+        ) {
+          refreshPatch.address_verified_at = null;
+          refreshPatch.address_match = null;
+          refreshPatch.address_google_formatted = null;
+          refreshPatch.address_google_postal = null;
+          refreshPatch.address_customer_postal = null;
+          addressChanged = true;
+        }
+      }
+
+      const { error: upErr } = await admin
+        .from('orders')
+        .update(refreshPatch)
+        .eq('order_ref', m.order_ref);
+      if (upErr) {
+        skipped.push({ order_ref: m.order_ref, error: `refresh: ${upErr.message}` });
+        continue;
+      }
+      refreshed++;
+      if (addressChanged) addressUpdated++;
     }
 
-    // Already existed — refresh Shopify source-of-truth fields. Always-safe
-    // fields update unconditionally. Contact + address only update for orders
-    // still in pending/flagged status (operator hasn't validated yet).
-    const existing = existingByRef.get(m.order_ref);
-    const operatorTouched = existing && !['pending', 'flagged'].includes(existing.status);
+    // Customer upsert: sync phone + address always; fill name only if blank.
+    // Never touches operator-curated fields (notes, journey, follow-up statuses).
+    if (!m.customer_email) continue;
+    const emailKey = m.customer_email.toLowerCase();
+    const raw = rawByRef.get(m.order_ref);
+    const shopifyCustomerId = raw?.customer?.id ? String(raw.customer.id) : null;
+    const addr = raw?.shipping_address ?? null;
 
-    const refreshPatch: Record<string, unknown> = {
-      placed_at: m.placed_at,
-      // NOTE: freight_estimate_usd is intentionally NOT refreshed here. It's an
-      // operator-owned manual quote and must never be clobbered by a sync. The
-      // Shopify shipping amount is still refreshed into customer_paid_shipping_usd.
-      customer_paid_shipping_usd: m.customer_paid_shipping_usd,
-      currency: m.currency,
-      postal_code: m.postal_code,
-      subtotal_usd: m.subtotal_usd,
-      tax_usd: m.tax_usd,
-      discount_total_usd: m.discount_total_usd,
-      discount_codes: m.discount_codes,
-      payment_methods: m.payment_methods,
-      financial_status: m.financial_status,
-    };
-
-    let addressChanged = false;
-    if (!operatorTouched) {
-      refreshPatch.customer_email = m.customer_email;
-      refreshPatch.customer_phone = m.customer_phone;
-      refreshPatch.address_line   = m.address_line;
-      refreshPatch.address_line2  = m.address_line2;
-      refreshPatch.city           = m.city;
-      refreshPatch.region_state   = m.region_state;
-      refreshPatch.country        = m.country;
-      refreshPatch.address_verdict = m.address_verdict;
-      // Re-guess area type from the (possibly updated) postal code only while
-      // it's still an auto guess — never overwrite a 'verified' (Claude) or
-      // 'manual' (operator) value.
-      if ((existing?.area_type_source ?? 'auto') === 'auto') {
-        refreshPatch.area_type = m.area_type;
-        refreshPatch.area_type_source = 'auto';
-      }
-      // Escalate pending → flagged if the new verdict isn't 'house'
-      // (mirrors the new-order auto-flag rule; covers apt + remote)
-      if (existing?.status === 'pending' && m.address_verdict !== 'house') {
-        refreshPatch.status = 'flagged';
-      }
-      // If postal or street changed, the prior verification verdict is stale
-      // — clear it so operator re-verifies
-      if (
-        (existing?.postal_code ?? null) !== (m.postal_code ?? null) ||
-        (existing?.address_line ?? null) !== (m.address_line ?? null)
-      ) {
-        refreshPatch.address_verified_at = null;
-        refreshPatch.address_match = null;
-        refreshPatch.address_google_formatted = null;
-        refreshPatch.address_google_postal = null;
-        refreshPatch.address_customer_postal = null;
-        addressChanged = true;
+    const existingCust = customerByEmail.get(emailKey);
+    if (existingCust) {
+      const patch: Record<string, unknown> = {
+        phone:        m.customer_phone,
+        address_line: addr?.address1 ?? null,
+        city:         addr?.city ?? null,
+        region:       addr?.province_code ?? null,
+        postal_code:  addr?.zip?.trim() || null,
+        country:      addr?.country_code ?? null,
+        last_synced_at: new Date().toISOString(),
+      };
+      if (shopifyCustomerId && !existingCust.shopify_id) patch.shopify_id = shopifyCustomerId;
+      if (!existingCust.first_name && raw?.customer?.first_name) patch.first_name = raw.customer.first_name;
+      if (!existingCust.last_name && raw?.customer?.last_name) patch.last_name = raw.customer.last_name;
+      const { error: custErr } = await admin.from('customers').update(patch).eq('id', existingCust.id);
+      if (!custErr) customersUpserted++;
+    } else {
+      const { error: custErr } = await admin.from('customers').insert({
+        email:        emailKey,
+        shopify_id:   shopifyCustomerId,
+        first_name:   raw?.customer?.first_name ?? null,
+        last_name:    raw?.customer?.last_name ?? null,
+        phone:        m.customer_phone,
+        address_line: addr?.address1 ?? null,
+        city:         addr?.city ?? null,
+        region:       addr?.province_code ?? null,
+        postal_code:  addr?.zip?.trim() || null,
+        country:      addr?.country_code ?? null,
+        last_synced_at: new Date().toISOString(),
+      });
+      if (!custErr) {
+        customersUpserted++;
+        customerByEmail.set(emailKey, {
+          id: '', email: emailKey, shopify_id: shopifyCustomerId,
+          first_name: raw?.customer?.first_name ?? null,
+          last_name: raw?.customer?.last_name ?? null,
+          phone: m.customer_phone,
+        });
       }
     }
-
-    const { error: upErr } = await admin
-      .from('orders')
-      .update(refreshPatch)
-      .eq('order_ref', m.order_ref);
-    if (upErr) {
-      skipped.push({ order_ref: m.order_ref, error: `refresh: ${upErr.message}` });
-      continue;
-    }
-    refreshed++;
-    if (addressChanged) addressUpdated++;
   }
 
   return new Response(
     JSON.stringify({
+      mode: incremental ? 'incremental' : 'full',
       fetched: orders?.length ?? 0,
       imported,
       refreshed,
       addressUpdated,
+      customersUpserted,
       skipped: skipped.length,
       skippedDetails: skipped,
     }),

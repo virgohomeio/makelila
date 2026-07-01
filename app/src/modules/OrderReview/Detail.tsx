@@ -8,6 +8,7 @@ import { FreightCard }  from './detail/FreightCard';
 import { LineItemsCard } from './detail/LineItemsCard';
 import { NotesCard }    from './detail/NotesCard';
 import { PaymentCard } from './detail/PaymentCard';
+import { InvoicesCard } from './detail/InvoicesCard';
 import { ActionBar }    from './detail/ActionBar';
 import { ConfirmBanner } from './detail/ConfirmBanner';
 import { ReadinessChecklist, canConfirm } from './detail/ReadinessChecklist';
@@ -92,6 +93,7 @@ export function Detail({
         {order.kind === 'sale' && <FreightCard order={order} />}
         <LineItemsCard order={order} />
         {order.kind === 'sale' && <PaymentCard order={order} />}
+        {order.kind === 'sale' && <InvoicesCard order={order} />}
         <NotesCard order={order} />
       </div>
     </section>

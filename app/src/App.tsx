@@ -71,6 +71,9 @@ export default function App() {
             }
           >
             <Route index element={<HomeRoute />} />
+            {/* Upload moved into the Sales module as a sub-tab; keep the old
+                path working by redirecting into it. */}
+            <Route path="upload"            element={<Navigate to="/order-review" replace />} />
             <Route path="order-review"          element={<OrderReview />} />
             <Route path="order-review/:orderId" element={<OrderReview />} />
             <Route path="fulfillment"       element={<LazyRoute><Fulfillment /></LazyRoute>} />

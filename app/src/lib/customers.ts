@@ -18,6 +18,14 @@ export type Customer = {
   country: string | null;
   notes: string | null;
   onboard_date: string | null;
+  // Editable profile fields surfaced in the Follow-Up customer panel.
+  color: string | null;
+  shipped_on: string | null;
+  received_on: string | null;
+  diagnosis_on: string | null;
+  dashboard: string | null;
+  software: string | null;
+  timezone: string | null;
   fu1_status: string | null;
   fu2_status: string | null;
   fu_notes: string | null;
@@ -174,6 +182,32 @@ export async function setReviewStatus(
     .eq('id', customerId);
   if (error) throw error;
   await logAction('review_status_set', customerId, status ?? '(cleared)',
+    { entityType: 'customer', entityId: customerId });
+}
+
+// Editable profile fields from the Follow-Up customer panel. `serial` writes
+// to the serials[] array (single entry); everything else maps 1:1 to a column.
+export type CustomerProfilePatch = {
+  serial?: string;
+  color?: string;
+  shipped_on?: string;
+  received_on?: string;
+  onboard_date?: string;
+  diagnosis_on?: string;
+  dashboard?: string;
+  software?: string;
+  timezone?: string;
+  address_line?: string;
+};
+
+export async function updateCustomerProfile(customerId: string, patch: CustomerProfilePatch): Promise<void> {
+  const { serial, ...rest } = patch;
+  const update: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(rest)) update[k] = v === '' ? null : v;
+  if (serial !== undefined) update.serials = serial.trim() ? [serial.trim()] : [];
+  const { error } = await supabase.from('customers').update(update).eq('id', customerId);
+  if (error) throw error;
+  await logAction('customer_profile_updated', customerId, Object.keys(patch).join(', '),
     { entityType: 'customer', entityId: customerId });
 }
 

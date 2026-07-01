@@ -2,9 +2,19 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   useRefundApprovals, useReturns,
   submitRefundRequest, managerApprove, financeApprove, denyRefund, closeRefund,
+  setReturnDisposition, updateReturnStatus,
+  useRefundNotes, addRefundNote, deleteRefundNote,
   REFUND_STATUS_META, REFUND_METHODS, REFUND_METHOD_META,
-  type RefundApproval, type ReturnRow, type RefundMethod,
+  UNIT_STATUS_LABEL, RETURN_DISPOSITION_META,
+  type RefundApproval, type ReturnRow, type RefundMethod, type ReturnDisposition, type ReturnStatus,
 } from '../../lib/postShipment';
+
+// Operator-facing unit-status stages, editable from the refund detail panel.
+const UNIT_STAGES: { value: ReturnStatus; label: string }[] = [
+  { value: 'created',          label: 'Return form submitted' },
+  { value: 'pickup_scheduled', label: 'Pickup scheduled' },
+  { value: 'received',         label: 'Unit returned' },
+];
 import { useQueuedReplacements, holdReplacement, type Order } from '../../lib/orders';
 import { useAuth } from '../../lib/auth';
 import { canDo } from '../../lib/permissions';
@@ -141,6 +151,7 @@ export function RefundsTab() {
                   <RefundCard
                     key={r.id}
                     refund={r}
+                    linkedReturn={r.return_id ? returnsById.get(r.return_id) ?? null : null}
                     canManager={isManager}
                     canFinance={isFinance}
                     selected={selectedId === r.id}
@@ -197,9 +208,10 @@ export function RefundsTab() {
 // Refund card
 // ============================================================================
 function RefundCard({
-  refund, canManager, canFinance, selected, onSelect, onError, onOpenFinanceModal,
+  refund, linkedReturn, canManager, canFinance, selected, onSelect, onError, onOpenFinanceModal,
 }: {
   refund: RefundApproval;
+  linkedReturn: ReturnRow | null;
   canManager: boolean;
   canFinance: boolean;
   selected: boolean;
@@ -261,6 +273,26 @@ function RefundCard({
       </div>
       {refund.reason && <div className={styles.refundReason}>{refund.reason}</div>}
       {refund.payment_method && <div className={styles.refundMeta}>via {refund.payment_method}</div>}
+      {linkedReturn && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, margin: '6px 0' }}>
+          <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 999,
+                         color: '#2d3748', background: '#edf2f7' }}>
+            📦 {UNIT_STATUS_LABEL[linkedReturn.status]}
+          </span>
+          {linkedReturn.disposition ? (
+            <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 999,
+                           color: RETURN_DISPOSITION_META[linkedReturn.disposition].color,
+                           background: RETURN_DISPOSITION_META[linkedReturn.disposition].bg }}>
+              {RETURN_DISPOSITION_META[linkedReturn.disposition].label}
+            </span>
+          ) : (
+            <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 999,
+                           color: '#975a16', background: '#fffbeb' }}>
+              ⚠ Disposition not set
+            </span>
+          )}
+        </div>
+      )}
       <div className={styles.refundTimeline}>
         <RefundStep
           label="Submitted"
@@ -336,11 +368,43 @@ function RefundDetailPanel({
 }) {
   const [busy, setBusy] = useState(false);
   const [holdBusy, setHoldBusy] = useState<string | null>(null);
+  const { notes, refresh: refreshNotes } = useRefundNotes(refund.id);
+  const [newNote, setNewNote] = useState('');
   const meta = REFUND_STATUS_META[refund.status];
 
   const canActManager = (refund.status === 'manager_review' || refund.status === 'submitted') && canManager;
   const canActFinance = refund.status === 'finance_review' && canFinance;
   const canAct = canActManager || canActFinance;
+
+  const runAddNote = async () => {
+    if (!newNote.trim()) return;
+    setBusy(true); onError(null);
+    try { await addRefundNote(refund.id, newNote); setNewNote(''); refreshNotes(); }
+    catch (e) { onError((e as Error).message); }
+    finally { setBusy(false); }
+  };
+  const runDeleteNote = async (noteId: string) => {
+    setBusy(true); onError(null);
+    try { await deleteRefundNote(noteId, refund.id); refreshNotes(); }
+    catch (e) { onError((e as Error).message); }
+    finally { setBusy(false); }
+  };
+
+  const runDisposition = async (d: ReturnDisposition | null) => {
+    if (!linkedReturn) return;
+    setBusy(true); onError(null);
+    try { await setReturnDisposition(linkedReturn.id, d); }
+    catch (e) { onError((e as Error).message); }
+    finally { setBusy(false); }
+  };
+
+  const runStatus = async (s: ReturnStatus) => {
+    if (!linkedReturn || linkedReturn.status === s) return;
+    setBusy(true); onError(null);
+    try { await updateReturnStatus(linkedReturn.id, s); }
+    catch (e) { onError((e as Error).message); }
+    finally { setBusy(false); }
+  };
 
   const runApprove = async () => {
     if (canActFinance) {
@@ -431,6 +495,48 @@ function RefundDetailPanel({
           This refund isn't linked to a return record. No customer form data to display.
         </div>
       ) : (
+        <>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', margin: '4px 0 8px' }}>
+          <span style={{ fontSize: 12, fontWeight: 600, color: '#4a5568', marginRight: 2 }}>Unit status:</span>
+          {UNIT_STAGES.map((st, i) => {
+            const on = linkedReturn.status === st.value;
+            return (
+              <span key={st.value} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                {i > 0 && <span style={{ color: '#cbd5e0' }}>→</span>}
+                <button disabled={busy} onClick={() => void runStatus(st.value)}
+                  style={{ fontSize: 11, fontWeight: 600, padding: '3px 10px', borderRadius: 999, cursor: 'pointer',
+                           border: `1px solid ${on ? '#2b6cb0' : '#e2e8f0'}`,
+                           color: on ? '#2b6cb0' : '#718096', background: on ? '#ebf8ff' : '#fff' }}>
+                  {on ? '✓ ' : ''}{st.label}
+                </button>
+              </span>
+            );
+          })}
+          {!UNIT_STAGES.some(st => st.value === linkedReturn.status) && (
+            <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 999, color: '#2d3748', background: '#edf2f7' }}>
+              {UNIT_STATUS_LABEL[linkedReturn.status]}
+            </span>
+          )}
+        </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', margin: '0 0 12px' }}>
+          <span style={{ fontSize: 12, fontWeight: 600, color: '#4a5568' }}>Instruction:</span>
+          {(['ship_back', 'discard'] as ReturnDisposition[]).map(d => {
+            const on = linkedReturn.disposition === d;
+            const dm = RETURN_DISPOSITION_META[d];
+            return (
+              <button key={d} disabled={busy}
+                onClick={() => void runDisposition(on ? null : d)}
+                style={{ fontSize: 11, fontWeight: 600, padding: '3px 10px', borderRadius: 999, cursor: 'pointer',
+                         border: `1px solid ${on ? dm.color : '#e2e8f0'}`,
+                         color: on ? dm.color : '#718096', background: on ? dm.bg : '#fff' }}>
+                {on ? '✓ ' : ''}{dm.label}
+              </button>
+            );
+          })}
+          {!linkedReturn.disposition && (
+            <span style={{ fontSize: 11, color: '#975a16' }}>⚠ not set</span>
+          )}
+        </div>
         <div className={styles.refundDetailGrid}>
           <DetailField label="Order #" value={linkedReturn.original_order_ref ?? '—'} mono />
           <DetailField label="Unit serial" value={linkedReturn.unit_serial ?? '—'} mono />
@@ -480,7 +586,38 @@ function RefundDetailPanel({
             </DetailField>
           )}
         </div>
+        </>
       )}
+
+      {/* Notes for approvers (George/Julie) — collaborative, timestamped, attributed. */}
+      <div style={{ margin: '12px 0', borderTop: '1px solid #edf2f7', paddingTop: 12 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: '#4a5568', marginBottom: 6 }}>
+          Notes for approvers ({notes.length})
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 }}>
+          {notes.length === 0 && <div style={{ fontSize: 12, color: '#a0aec0' }}>No notes yet — add context for the approver here.</div>}
+          {notes.map(n => (
+            <div key={n.id} style={{ fontSize: 13, background: '#f7fafc', borderRadius: 6, padding: '6px 9px' }}>
+              <div style={{ whiteSpace: 'pre-wrap' }}>{n.body}</div>
+              <div style={{ fontSize: 10, color: '#a0aec0', marginTop: 3, display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                <span>{n.author_name ?? 'Unknown'} · {new Date(n.created_at).toLocaleString()}</span>
+                <button onClick={() => void runDeleteNote(n.id)} disabled={busy} title="Delete note"
+                  style={{ border: 'none', background: 'none', color: '#cbd5e0', cursor: 'pointer', fontSize: 13, lineHeight: 1 }}>×</button>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <textarea value={newNote} onChange={e => setNewNote(e.target.value)} rows={2}
+            placeholder="Add a note for approvers (extra details on the refund/return)…"
+            style={{ flex: 1, fontSize: 13, padding: '6px 9px', border: '1px solid #e2e8f0', borderRadius: 6, resize: 'vertical' }} />
+          <button onClick={() => void runAddNote()} disabled={busy || !newNote.trim()}
+            style={{ fontSize: 12, fontWeight: 600, padding: '0 14px', borderRadius: 6, border: '1px solid #2b6cb0',
+                     color: '#fff', background: '#2b6cb0', cursor: busy || !newNote.trim() ? 'default' : 'pointer', opacity: busy || !newNote.trim() ? 0.6 : 1 }}>
+            Add note
+          </button>
+        </div>
+      </div>
 
       <div className={styles.refundDetailActions}>
         <div className={styles.refundDetailRolePill}>

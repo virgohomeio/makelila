@@ -16,6 +16,7 @@ import { useIsMobile } from '../../lib/useMediaQuery';
 import { NavCard } from '../../components/NavCard';
 import { MobileBackHeader } from '../../components/MobileBackHeader';
 import { useCustomerEvents, useCustomerEngagement, eventMeta, dormancyBadge } from '../../lib/customerEvents';
+import { useCustomerInvoices, getInvoiceSignedUrl } from '../../lib/invoices';
 import styles from './Customers.module.css';
 
 type Tab = 'directory' | 'profitability' | 'journey' | 'fleet';
@@ -468,11 +469,85 @@ function CustomerDetailPanel({ customer, onClose }: { customer: Customer; onClos
             {myOrders.length === 0
               ? <div className={styles.emptyRow}>No orders on file.</div>
               : myOrders.map(o => (
-                  <div key={o.id} className={styles.itemRow}>
-                    <span className={styles.mono}>{o.order_ref}</span>
-                    <span className={styles.statusPill}>{o.status}</span>
-                    <span className={styles.muted}>{o.placed_at ? new Date(o.placed_at).toLocaleDateString('en-US') : '—'}</span>
-                    <span className={styles.itemAmount}>{formatMoney(o.total_usd, o.currency)}</span>
+                  <div key={o.id} className={styles.orderCard}>
+                    <div className={styles.orderCardHeader}>
+                      <span className={styles.mono}>{o.order_ref}</span>
+                      <span className={styles.statusPill}>{o.status}</span>
+                      {o.financial_status && (
+                        <span className={styles.muted} style={{ fontSize: 11 }}>{o.financial_status}</span>
+                      )}
+                      <span className={styles.muted}>{o.placed_at ? new Date(o.placed_at).toLocaleDateString('en-US') : '—'}</span>
+                    </div>
+                    {o.payment_methods && o.payment_methods.length > 0 && (
+                      <div className={styles.orderCardRow}>
+                        <span className={styles.kvLabel}>Payment</span>
+                        <span>{o.payment_methods.join(', ')}</span>
+                      </div>
+                    )}
+                    {o.shipping_line_title && (
+                      <div className={styles.orderCardRow}>
+                        <span className={styles.kvLabel}>Shipping method</span>
+                        <span>{o.shipping_line_title}</span>
+                      </div>
+                    )}
+                    <div className={styles.orderFinancials}>
+                      {o.subtotal_usd != null && (
+                        <div className={styles.orderCardRow}>
+                          <span className={styles.kvLabel}>Subtotal</span>
+                          <span>{formatMoney(o.subtotal_usd, o.currency)}</span>
+                        </div>
+                      )}
+                      {o.discount_total_usd != null && o.discount_total_usd > 0 && (
+                        <div className={styles.orderCardRow}>
+                          <span className={styles.kvLabel}>
+                            Discount
+                            {o.discount_codes && o.discount_codes.length > 0
+                              ? ` (${o.discount_codes.join(', ')})`
+                              : ''}
+                          </span>
+                          <span style={{ color: 'var(--color-success)' }}>
+                            −{formatMoney(o.discount_total_usd, o.currency)}
+                          </span>
+                        </div>
+                      )}
+                      {o.customer_paid_shipping_usd != null && (
+                        <div className={styles.orderCardRow}>
+                          <span className={styles.kvLabel}>Shipping paid</span>
+                          <span>{formatMoney(o.customer_paid_shipping_usd, o.currency)}</span>
+                        </div>
+                      )}
+                      {o.tax_lines && o.tax_lines.length > 0
+                        ? o.tax_lines.map((tl, i) => (
+                            <div key={i} className={styles.orderCardRow}>
+                              <span className={styles.kvLabel}>{tl.title} ({Math.round(tl.rate * 100)}%)</span>
+                              <span>{formatMoney(tl.amount_usd, o.currency)}</span>
+                            </div>
+                          ))
+                        : o.tax_usd != null && o.tax_usd > 0 && (
+                            <div className={styles.orderCardRow}>
+                              <span className={styles.kvLabel}>Tax</span>
+                              <span>{formatMoney(o.tax_usd, o.currency)}</span>
+                            </div>
+                          )
+                      }
+                      <div className={styles.orderCardRow} style={{ fontWeight: 600, borderTop: '1px solid var(--border)' }}>
+                        <span className={styles.kvLabel}>Total</span>
+                        <span>{formatMoney(o.total_usd, o.currency)}</span>
+                      </div>
+                    </div>
+                    {o.line_items && o.line_items.length > 0 && (
+                      <div className={styles.orderLineItems}>
+                        {o.line_items.map((li, i) => {
+                          const unitPrice = 'price_usd' in li ? li.price_usd : ('cost_per_unit_usd' in li ? li.cost_per_unit_usd : ('cost_usd' in li ? li.cost_usd : 0));
+                          return (
+                            <div key={i} className={styles.orderCardRow} style={{ fontSize: 11 }}>
+                              <span className={styles.muted}>{li.qty}× {li.name}</span>
+                              <span className={styles.muted}>{formatMoney(unitPrice * li.qty, o.currency)}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 ))
             }
@@ -512,6 +587,8 @@ function CustomerDetailPanel({ customer, onClose }: { customer: Customer; onClos
                 ))
             }
           </PanelSection>
+
+          <CustomerInvoicesSection customerId={customer.id} />
         </div>
       </div>
     </div>
@@ -600,6 +677,50 @@ function LilaAppActivitySection({ customerId }: { customerId: string }) {
         )}
       </div>
     </div>
+  );
+}
+
+// Invoices & refund receipts filed against this customer by the Upload module.
+// Auto-matched from the Shopify order # on the PDF (or assigned manually from
+// the Upload review queue).
+function CustomerInvoicesSection({ customerId }: { customerId: string }) {
+  const { invoices, loading } = useCustomerInvoices(customerId);
+
+  const view = async (path: string) => {
+    try {
+      const url = await getInvoiceSignedUrl(path);
+      window.open(url, '_blank', 'noopener');
+    } catch (e) { alert((e as Error).message); }
+  };
+
+  return (
+    <PanelSection title={`Invoices (${invoices.length})`}>
+      {loading ? (
+        <div className={styles.emptyRow}>Loading invoices…</div>
+      ) : invoices.length === 0 ? (
+        <div className={styles.emptyRow}>No invoices on file. Upload them in the Upload tab.</div>
+      ) : (
+        invoices.map(inv => (
+          <div key={inv.id} className={styles.itemRow}>
+            <span className={styles.mono}>#{inv.invoice_number}</span>
+            <span className={styles.muted}>
+              {inv.document_type === 'refund_receipt' ? 'Refund receipt' : 'Invoice'}
+            </span>
+            {inv.order_ref && <span className={styles.mono}>{inv.order_ref}</span>}
+            <span className={styles.muted}>
+              {inv.invoice_date ? new Date(inv.invoice_date).toLocaleDateString('en-US') : '—'}
+            </span>
+            <span className={styles.itemAmount}>
+              {inv.total_cad != null ? formatMoney(inv.total_cad, 'CAD') : '—'}
+            </span>
+            <button
+              onClick={() => void view(inv.storage_path)}
+              style={{ background: 'none', border: 'none', color: 'var(--color-crimson)', cursor: 'pointer', textDecoration: 'underline', fontSize: 12, padding: 0 }}
+            >View</button>
+          </div>
+        ))
+      )}
+    </PanelSection>
   );
 }
 

@@ -1,24 +1,33 @@
 import { useState } from 'react';
-import { useShippingOrders, useAllShipments, bookShipment, type ShipmentStatus } from '../../../lib/shipping';
+import {
+  useShippingOrders, useAllShipments, bookShipment,
+  refreshFreightcomStatuses, displayFreightcomStatus, isKnownFreightcomStatus,
+  FREIGHTCOM_STATUSES, type AllShipmentRow,
+} from '../../../lib/shipping';
 import { useQuotes, fetchFreightcomQuotes, selectQuote, type FreightQuote } from '../../../lib/freight';
 import styles from '../Shipping.module.css';
 
-const STATUS_BADGE_CLASS: Partial<Record<ShipmentStatus, string>> = {
-  booked:     styles.statusBooked,
-  in_transit: styles.statusInTransit,
-  delivered:  styles.statusDelivered,
-  exception:  styles.statusException,
-  missing:    styles.statusMissing,
-  cancelled:  styles.statusCancelled,
+// Map Freightcom's raw status vocabulary to the existing badge colour classes.
+const FC_BADGE_CLASS: Record<string, string> = {
+  'waiting-for-transit': styles.statusBooked,
+  'in-transit':          styles.statusInTransit,
+  'delivered':           styles.statusDelivered,
+  'exception':           styles.statusException,
+  'missing':             styles.statusMissing,
+  'cancelled':           styles.statusCancelled,
 };
 
-type Filter = 'all' | 'booked' | 'in_transit' | 'delivered' | 'exception';
+type Filter = 'all' | typeof FREIGHTCOM_STATUSES[number] | 'other' | 'returns';
 const FILTERS: { id: Filter; label: string }[] = [
-  { id: 'all',        label: 'All'        },
-  { id: 'booked',     label: 'Booked'     },
-  { id: 'in_transit', label: 'In Transit' },
-  { id: 'delivered',  label: 'Delivered'  },
-  { id: 'exception',  label: 'Exception'  },
+  { id: 'all',                 label: 'All'                 },
+  { id: 'waiting-for-transit', label: 'Waiting for transit' },
+  { id: 'in-transit',          label: 'In transit'          },
+  { id: 'delivered',           label: 'Delivered'           },
+  { id: 'exception',           label: 'Exception'           },
+  { id: 'missing',             label: 'Missing'             },
+  { id: 'cancelled',           label: 'Cancelled'           },
+  { id: 'other',               label: 'Other'               },
+  { id: 'returns',             label: '↩ Returns'           },
 ];
 
 export function ShippingTab() {
@@ -33,12 +42,38 @@ export function ShippingTab() {
   // Dashboard
   const { shipments, loading: shipmentsLoading } = useAllShipments();
   const [filter, setFilter] = useState<Filter>('all');
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshErr, setRefreshErr] = useState<string | null>(null);
 
   const unshippedOrders = orders.filter(o => o.shipment_status === null);
   const selectedQuote   = quotes.find(q => q.selected) ?? null;
-  const filteredShipments = filter === 'all'
-    ? shipments
-    : shipments.filter(s => s.status === filter);
+
+  const matchesFilter = (s: AllShipmentRow) => {
+    if (filter === 'all') return true;
+    if (filter === 'returns') return s.direction === 'return';
+    const fc = displayFreightcomStatus(s);
+    if (filter === 'other') return !isKnownFreightcomStatus(fc);
+    return fc === filter;
+  };
+  const filteredShipments = shipments.filter(matchesFilter);
+
+  async function handleRefreshStatuses() {
+    setRefreshErr(null);
+    setRefreshing(true);
+    try {
+      const results = await refreshFreightcomStatuses(
+        filteredShipments.map(s => ({ id: s.id, freightcom_shipment_id: s.freightcom_shipment_id })),
+      );
+      const failed = results.filter(r => r.error).length;
+      if (failed > 0) setRefreshErr(`${failed} shipment(s) could not be refreshed.`);
+      // useAllShipments has no refetch fn; reload to pull the persisted statuses.
+      window.location.reload();
+    } catch (e) {
+      setRefreshErr((e as Error).message);
+    } finally {
+      setRefreshing(false);
+    }
+  }
 
   async function handleFetchQuotes() {
     if (!selectedOrderId) return;
@@ -187,9 +222,29 @@ export function ShippingTab() {
       <div className={styles.section}>
         <h3 className={styles.sectionTitle}>All Shipments</h3>
 
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '8px 0' }}>
+          <button
+            onClick={handleRefreshStatuses}
+            disabled={refreshing || filteredShipments.length === 0}
+            style={{ fontSize: 13, padding: '5px 12px', cursor: refreshing ? 'not-allowed' : 'pointer' }}
+          >
+            {refreshing ? 'Refreshing…' : '↻ Refresh from Freightcom'}
+          </button>
+          {refreshErr && (
+            <span style={{ fontSize: 12, color: '#c53030' }}>{refreshErr}</span>
+          )}
+        </div>
+
         <div className={styles.chips}>
           {FILTERS.map(f => {
-            const count = f.id !== 'all' ? shipments.filter(s => s.status === f.id).length : shipments.length;
+            const count = f.id === 'all'
+              ? shipments.length
+              : f.id === 'returns'
+              ? shipments.filter(s => s.direction === 'return').length
+              : shipments.filter(s => {
+                  const fc = displayFreightcomStatus(s);
+                  return f.id === 'other' ? !isKnownFreightcomStatus(fc) : fc === f.id;
+                }).length;
             return (
               <button
                 key={f.id}
@@ -206,7 +261,7 @@ export function ShippingTab() {
           <p style={{ color: '#718096', fontSize: 13 }}>Loading…</p>
         ) : filteredShipments.length === 0 ? (
           <p style={{ color: '#a0aec0', fontSize: 13 }}>
-            No {filter !== 'all' ? `"${filter.replace('_', ' ')}" ` : ''}shipments yet.
+            No {filter !== 'all' ? `"${filter}" ` : ''}shipments yet.
           </p>
         ) : (
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
@@ -214,20 +269,35 @@ export function ShippingTab() {
               <tr style={{ background: '#f7fafc' }}>
                 <th style={{ padding: '7px 12px', textAlign: 'left', fontWeight: 600 }}>Order</th>
                 <th style={{ padding: '7px 12px', textAlign: 'left', fontWeight: 600 }}>Customer</th>
+                <th style={{ padding: '7px 12px', textAlign: 'left', fontWeight: 600 }}>Direction</th>
                 <th style={{ padding: '7px 12px', textAlign: 'left', fontWeight: 600 }}>Carrier</th>
                 <th style={{ padding: '7px 12px', textAlign: 'left', fontWeight: 600 }}>Service</th>
                 <th style={{ padding: '7px 12px', textAlign: 'right', fontWeight: 600 }}>Rate (CAD)</th>
                 <th style={{ padding: '7px 12px', textAlign: 'left', fontWeight: 600 }}>Tracking</th>
-                <th style={{ padding: '7px 12px', textAlign: 'left', fontWeight: 600 }}>Status</th>
+                <th style={{ padding: '7px 12px', textAlign: 'left', fontWeight: 600 }}>Freightcom status</th>
                 <th style={{ padding: '7px 12px', textAlign: 'left', fontWeight: 600 }}>Booked</th>
+                <th style={{ padding: '7px 12px', textAlign: 'left', fontWeight: 600 }}>Synced</th>
                 <th style={{ padding: '7px 12px' }}></th>
               </tr>
             </thead>
             <tbody>
               {filteredShipments.map(s => (
                 <tr key={s.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
-                  <td style={{ padding: '7px 12px', fontWeight: 600, fontSize: 12 }}>{s.order_ref}</td>
-                  <td style={{ padding: '7px 12px', color: '#4a5568' }}>{s.customer_name}</td>
+                  <td style={{ padding: '7px 12px', fontWeight: 600, fontSize: 12 }}>{s.order_ref || '—'}</td>
+                  <td style={{ padding: '7px 12px', color: '#4a5568' }}>{s.counterparty_name || '—'}</td>
+                  <td style={{ padding: '7px 12px' }}>
+                    {s.direction === 'return' ? (
+                      <span style={{ fontSize: 11, fontWeight: 600, color: '#9c4221',
+                                     background: '#feebc8', borderRadius: 4, padding: '2px 7px' }}>
+                        ↩ Return
+                      </span>
+                    ) : (
+                      <span style={{ fontSize: 11, color: '#718096',
+                                     background: '#edf2f7', borderRadius: 4, padding: '2px 7px' }}>
+                        ↑ Outbound
+                      </span>
+                    )}
+                  </td>
                   <td style={{ padding: '7px 12px' }}>{s.carrier}</td>
                   <td style={{ padding: '7px 12px', color: '#4a5568' }}>{s.service}</td>
                   <td style={{ padding: '7px 12px', textAlign: 'right' }}>
@@ -237,12 +307,20 @@ export function ShippingTab() {
                     {s.primary_tracking_number ?? '—'}
                   </td>
                   <td style={{ padding: '7px 12px' }}>
-                    <span className={`${styles.statusBadge} ${STATUS_BADGE_CLASS[s.status] ?? ''}`}>
-                      {s.status.replace('_', ' ')}
-                    </span>
+                    {(() => {
+                      const fc = displayFreightcomStatus(s);
+                      return (
+                        <span className={`${styles.statusBadge} ${FC_BADGE_CLASS[fc] ?? ''}`}>
+                          {fc}
+                        </span>
+                      );
+                    })()}
                   </td>
                   <td style={{ padding: '7px 12px', color: '#718096', fontSize: 12 }}>
                     {new Date(s.booked_at).toLocaleDateString()}
+                  </td>
+                  <td style={{ padding: '7px 12px', color: '#a0aec0', fontSize: 12 }}>
+                    {s.status_synced_at ? new Date(s.status_synced_at).toLocaleString() : '—'}
                   </td>
                   <td style={{ padding: '7px 12px', textAlign: 'right' }}>
                     {s.label_url && (

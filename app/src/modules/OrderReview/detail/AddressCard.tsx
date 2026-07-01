@@ -33,6 +33,7 @@ export function AddressCard({ order }: { order: Order }) {
       const base =
         r.match === 'match'      ? 'Address verified.' :
         r.match === 'mismatch'   ? 'Postal code mismatch — see below.' :
+        r.google_error           ? 'Address validation service unavailable — classified what we could.' :
                                    'Could not verify.';
       setMsg(r.area_type ? `${base} Area: ${AREA_TYPE_LABEL[r.area_type]}.` : base);
     } catch (e) {

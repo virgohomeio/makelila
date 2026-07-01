@@ -76,6 +76,8 @@ export type ServiceTicket = {
   owner_email: string | null;
   resolved_at: string | null;
   closed_at: string | null;
+  // Completion of the follow-up scheduled 14 days after the ticket closed.
+  post_close_followup_done_at: string | null;
   replacement_order_id: string | null;
   kind: TicketKind;
   inbox_disposition: InboxDisposition | null;
@@ -337,6 +339,42 @@ export function useServiceTickets(category?: TicketCategory): {
   }, [category]);
 
   return { tickets, loading };
+}
+
+/**
+ * Set of ticket ids that had a close event (ticket_status_changed → closed) in
+ * the last `days`, read from the activity log. Used for the "closed in the last
+ * N days" throughput KPI — counts a ticket even if it was reopened afterward,
+ * which the current-status-based count would miss.
+ */
+export function useTicketsClosedSince(days: number): { closedIds: Set<string>; loading: boolean } {
+  const [closedIds, setClosedIds] = useState<Set<string>>(new Set());
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const cutoff = new Date(Date.now() - days * 86_400_000).toISOString();
+      const { data, error } = await supabase
+        .from('activity_log')
+        .select('entity_id, ts')
+        .eq('type', 'ticket_status_changed')
+        .eq('detail', 'closed')
+        .gte('ts', cutoff);
+      if (cancelled) return;
+      if (!error && data) {
+        setClosedIds(new Set(
+          (data as { entity_id: string | null }[])
+            .map(r => r.entity_id)
+            .filter((id): id is string => !!id),
+        ));
+      }
+      setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [days]);
+
+  return { closedIds, loading };
 }
 
 export function useInbox(disposition?: InboxDisposition | 'untriaged' | 'all'): {
@@ -771,7 +809,12 @@ export async function deleteTicket(id: string): Promise<void> {
 }
 
 export async function updateTicketStatus(id: string, status: TicketStatus): Promise<void> {
-  const { error } = await supabase.from('service_tickets').update({ status }).eq('id', id);
+  // Stamp closed_at on close, and CLEAR it on reopen so a later re-close gets a
+  // fresh timestamp (the DB trigger only coalesces, so without clearing, a
+  // reopened-then-reclosed ticket would keep its stale original close date).
+  const patch: Record<string, unknown> = { status };
+  patch.closed_at = status === 'closed' ? new Date().toISOString() : null;
+  const { error } = await supabase.from('service_tickets').update(patch).eq('id', id);
   if (error) throw error;
   await logAction('ticket_status_changed', id, status,
     { entityType: 'ticket', entityId: id });
@@ -962,6 +1005,17 @@ export async function markDiagnosisFollowupDone(ticketId: string): Promise<void>
     .eq('id', ticketId);
   if (error) throw error;
   await logAction('diagnosis_followup_done', ticketId, doneAt);
+}
+
+/** Marks the post-close follow-up (scheduled 14 days after a ticket closed) done. */
+export async function markTicketPostCloseFollowupDone(ticketId: string): Promise<void> {
+  const doneAt = new Date().toISOString();
+  const { error } = await supabase
+    .from('service_tickets')
+    .update({ post_close_followup_done_at: doneAt })
+    .eq('id', ticketId);
+  if (error) throw error;
+  await logAction('ticket_post_close_followup_done', ticketId, doneAt);
 }
 
 export async function markOnboardingComplete(lifecycleId: string): Promise<void> {

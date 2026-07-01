@@ -8,6 +8,70 @@ export type ShipmentStatus =
   | 'booked' | 'in_transit' | 'delivered'
   | 'exception' | 'missing' | 'cancelled';
 
+// ── Freightcom status vocabulary (dashboard source of truth) ────────────────
+
+export const FREIGHTCOM_STATUSES = [
+  'waiting-for-transit', 'in-transit', 'delivered',
+  'exception', 'missing', 'cancelled',
+] as const;
+export type FreightcomStatus = typeof FREIGHTCOM_STATUSES[number];
+
+/** True when a raw value is one of the 6 known statuses (else grouped as "other"). */
+export function isKnownFreightcomStatus(v: string): v is FreightcomStatus {
+  return (FREIGHTCOM_STATUSES as readonly string[]).includes(v);
+}
+
+// ── Shipment direction + counterparty name ─────────────────────────────────
+
+export type ShipmentDirection = 'outbound' | 'return';
+
+/** Provenance blob stored on imported shipments (subset we read). */
+export type ShipmentRawPayload = {
+  direction?: string;
+  ship_to_name?: string;
+  ship_from_name?: string;
+} | null;
+
+export type ShipmentParty = { direction: ShipmentDirection; counterparty_name: string };
+
+/**
+ * Derives the shipment's direction and the "other party" name to show as the
+ * Customer. Outbound → the recipient (ship_to_name); return → the sender
+ * (ship_from_name). Falls back to the linked order's customer name for
+ * makelila-booked shipments that carry no raw_payload.
+ */
+export function deriveShipmentParty(args: {
+  raw_payload: ShipmentRawPayload;
+  order_customer_name: string | null;
+}): ShipmentParty {
+  const rp = args.raw_payload ?? {};
+  const direction: ShipmentDirection = rp.direction === 'return' ? 'return' : 'outbound';
+  const fromRaw = direction === 'return' ? rp.ship_from_name : rp.ship_to_name;
+  const counterparty_name = (fromRaw || args.order_customer_name || '').trim();
+  return { direction, counterparty_name };
+}
+
+/** Reverse-map the internal enum to Freightcom's vocabulary for never-synced rows. */
+const INTERNAL_TO_FREIGHTCOM: Record<ShipmentStatus, string> = {
+  booked:     'waiting-for-transit',
+  in_transit: 'in-transit',
+  delivered:  'delivered',
+  exception:  'exception',
+  missing:    'missing',
+  cancelled:  'cancelled',
+};
+
+/**
+ * Resolves the Freightcom-vocabulary status to show for a row:
+ * stored raw value wins; otherwise reverse-map the internal status.
+ */
+export function displayFreightcomStatus(
+  row: { status: ShipmentStatus; freightcom_status: string | null },
+): string {
+  if (row.freightcom_status) return row.freightcom_status;
+  return INTERNAL_TO_FREIGHTCOM[row.status] ?? row.status;
+}
+
 export type Shipment = {
   id: string;
   order_id: string;
@@ -211,12 +275,26 @@ export type AllShipmentRow = {
   booked_at: string;
   label_url: string | null;
   freightcom_shipment_id: string;
+  freightcom_status: string | null;
+  status_synced_at: string | null;
+  direction: ShipmentDirection;
+  counterparty_name: string;
 };
 
 export type AllClaimRow = Claim & {
   order_ref: string;
   customer_name: string;
 };
+
+// Columns that exist regardless of whether the freightcom_status migration ran.
+const SHIPMENT_BASE_COLS =
+  'id, order_id, carrier, service, rate_cad, primary_tracking_number, status, booked_at, label_url, freightcom_shipment_id, raw_payload';
+
+/** True for a Postgres "undefined column" error (42703) — the migration isn't applied. */
+export function isMissingColumnError(err: { code?: string; message?: string } | null): boolean {
+  if (!err) return false;
+  return err.code === '42703' || /column .* does not exist/i.test(err.message ?? '');
+}
 
 /** Returns all shipments across all orders, joined with order_ref + customer_name. */
 export function useAllShipments(): { shipments: AllShipmentRow[]; loading: boolean; error: string | null } {
@@ -227,32 +305,64 @@ export function useAllShipments(): { shipments: AllShipmentRow[]; loading: boole
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const { data, error: err } = await supabase
-        .from('shipments')
-        .select('id, order_id, carrier, service, rate_cad, primary_tracking_number, status, booked_at, label_url, freightcom_shipment_id, orders(order_ref, customer_name)')
-        .order('booked_at', { ascending: false });
+      // Try the full select (with the Freightcom-status columns). If the
+      // migration that adds them hasn't been applied yet, Postgres returns
+      // 42703 "column does not exist" — fall back to the base columns so the
+      // dashboard still renders (statuses come from the reverse-mapping).
+      // `data`/`err` are widened so the two differently-shaped selects share them.
+      let data: unknown[] | null = null;
+      let err: { code?: string; message?: string } | null = null;
+
+      {
+        const r = await supabase
+          .from('shipments')
+          .select(`${SHIPMENT_BASE_COLS}, freightcom_status, status_synced_at, orders(order_ref, customer_name)`)
+          .order('booked_at', { ascending: false });
+        data = r.data; err = r.error;
+      }
+
+      if (!cancelled && err && isMissingColumnError(err)) {
+        const r = await supabase
+          .from('shipments')
+          .select(`${SHIPMENT_BASE_COLS}, orders(order_ref, customer_name)`)
+          .order('booked_at', { ascending: false });
+        data = r.data; err = r.error;
+      }
+
       if (cancelled) return;
-      if (err) { setError(err.message); setLoading(false); return; }
+      if (err) { setError(err.message ?? 'Failed to load shipments'); setLoading(false); return; }
       const rows: AllShipmentRow[] = ((data ?? []) as unknown as Array<{
         id: string; order_id: string; carrier: string; service: string;
         rate_cad: number | null; primary_tracking_number: string | null;
         status: string; booked_at: string; label_url: string | null;
         freightcom_shipment_id: string;
+        freightcom_status?: string | null; status_synced_at?: string | null;
+        raw_payload?: ShipmentRawPayload;
         orders: { order_ref: string; customer_name: string } | null;
-      }>).map(s => ({
-        id: s.id,
-        order_id: s.order_id,
-        order_ref: s.orders?.order_ref ?? '',
-        customer_name: s.orders?.customer_name ?? '',
-        carrier: s.carrier,
-        service: s.service,
-        rate_cad: s.rate_cad,
-        primary_tracking_number: s.primary_tracking_number,
-        status: s.status as ShipmentStatus,
-        booked_at: s.booked_at,
-        label_url: s.label_url,
-        freightcom_shipment_id: s.freightcom_shipment_id,
-      }));
+      }>).map(s => {
+        const party = deriveShipmentParty({
+          raw_payload: s.raw_payload ?? null,
+          order_customer_name: s.orders?.customer_name ?? null,
+        });
+        return {
+          id: s.id,
+          order_id: s.order_id,
+          order_ref: s.orders?.order_ref ?? '',
+          customer_name: s.orders?.customer_name ?? '',
+          carrier: s.carrier,
+          service: s.service,
+          rate_cad: s.rate_cad,
+          primary_tracking_number: s.primary_tracking_number,
+          status: s.status as ShipmentStatus,
+          booked_at: s.booked_at,
+          label_url: s.label_url,
+          freightcom_shipment_id: s.freightcom_shipment_id,
+          freightcom_status: s.freightcom_status ?? null,
+          status_synced_at: s.status_synced_at ?? null,
+          direction: party.direction,
+          counterparty_name: party.counterparty_name,
+        };
+      });
       setShipments(rows);
       setLoading(false);
     })();
@@ -370,6 +480,26 @@ export async function fetchTrackingEvents(freightcomShipmentId: string): Promise
   });
   if (error) throw new Error(error.message);
   return (data as { events: TrackingEvent[] }).events ?? [];
+}
+
+/**
+ * Pulls live Freightcom status for the given shipments and persists it.
+ * Returns the per-shipment results from the edge function.
+ */
+export async function refreshFreightcomStatuses(
+  rows: Array<{ id: string; freightcom_shipment_id: string }>,
+): Promise<Array<{ id: string; freightcom_status: string | null; error?: string }>> {
+  const payload = rows
+    .filter(r => r.freightcom_shipment_id)
+    .map(r => ({ id: r.id, freightcom_shipment_id: r.freightcom_shipment_id }));
+  if (payload.length === 0) return [];
+  const { data, error } = await supabase.functions.invoke('freightcom-status', {
+    body: { shipments: payload },
+  });
+  if (error) throw new Error(error.message);
+  const results = (data as { results?: Array<{ id: string; freightcom_status: string | null; error?: string }> }).results ?? [];
+  await logAction('shipment_status_refreshed', 'shipments', `count=${payload.length}`);
+  return results;
 }
 
 /** Fetches Freightcom invoices. Mode 'shipment' = for one shipment; 'date_range' = last N days. */

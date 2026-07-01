@@ -95,10 +95,12 @@ export type Order = {
   total_usd: number;
   subtotal_usd: number | null;
   tax_usd: number | null;
+  tax_lines: Array<{ title: string; rate: number; amount_usd: number }> | null;
   discount_total_usd: number | null;
   discount_codes: string[] | null;
   payment_methods: string[] | null;
   financial_status: string | null;
+  shipping_line_title: string | null;
   line_items: LineItem[];
   sales_confirmed_fit: boolean;
   dispositioned_by: string | null;
@@ -251,7 +253,30 @@ export type VerifyAddressResult = {
   // Area type the verify step classified (urban/suburban/rural), written back
   // to the order with source 'verified'. null if it couldn't be determined.
   area_type: 'urban' | 'suburban' | 'rural' | null;
+  // Set when Google Address Validation failed (quota/billing/network) and we
+  // degraded to 'unverifiable' rather than aborting. Lets the operator see the
+  // verdict was downgraded for an infra reason, not a bad address.
+  google_error?: string | null;
 };
+
+/** supabase-js collapses any non-2xx edge-function response into a generic
+ *  "Edge Function returned a non-2xx status code"; the real `{ error }` JSON the
+ *  function returned is on error.context (a Response). Pull it out so operators
+ *  see the actual cause instead of the opaque default. */
+async function functionErrorMessage(error: unknown): Promise<string> {
+  const ctx = (error as { context?: unknown }).context;
+  if (ctx instanceof Response) {
+    try {
+      const body = (await ctx.clone().json()) as { error?: string };
+      if (body?.error) return body.error;
+    } catch { /* body wasn't JSON — fall through to text */ }
+    try {
+      const text = await ctx.text();
+      if (text) return text.slice(0, 400);
+    } catch { /* ignore */ }
+  }
+  return (error as Error)?.message ?? 'Edge function call failed';
+}
 
 export async function confirmAddress(orderId: string): Promise<{ order_ref: string; already_confirmed: boolean }> {
   const { data, error } = await supabase.functions.invoke<{ order_ref: string; already_confirmed: boolean }>(
@@ -268,7 +293,7 @@ export async function verifyAddress(orderId: string): Promise<VerifyAddressResul
     'verify-address',
     { body: { order_id: orderId } },
   );
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(await functionErrorMessage(error));
   if (!data) throw new Error('Empty response from verify-address');
   await logAction('address_verified', orderId, data.match);
   return data;

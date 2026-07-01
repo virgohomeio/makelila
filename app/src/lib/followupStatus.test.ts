@@ -9,6 +9,8 @@ const base: Customer = {
   id: 'c1', hubspot_id: null, email: 'a@b.com', first_name: null, last_name: null,
   full_name: 'Test User', phone: null, address_line: null, city: null, region: null,
   postal_code: null, country: null, notes: null, onboard_date: null,
+  color: null, shipped_on: null, received_on: null, diagnosis_on: null,
+  dashboard: null, software: null, timezone: null,
   fu1_status: null, fu2_status: null, fu_notes: null, review_status: null, manual_status_tags: null,
   last_synced_at: null, serials: null, serials_synced_at: null,
   name_request_sent_at: null, journey_stage_override: null,
@@ -74,10 +76,10 @@ describe('computeCustomerStatuses', () => {
     const c = { ...base, review_status: 'requested' };
     expect(computeCustomerStatuses(c, emptyCtx, today).has('awaiting_review')).toBe(true);
   });
-  it('STATUS_FILTERS covers all 14 keys in display order', () => {
+  it('STATUS_FILTERS covers all 15 keys in display order', () => {
     expect(STATUS_FILTERS.map(f => f.key)).toEqual([
-      'overdue', 'due_today', 'due_7d', 'fu_on_hold', 'diag_followup_due', 'in_followup',
-      'awaiting_onboarding', 'awaiting_response', 'awaiting_diagnosis', 'queued_replacement',
+      'overdue', 'due_today', 'due_7d', 'fu_on_hold', 'diag_followup_due', 'ticket_followup_due',
+      'in_followup', 'awaiting_onboarding', 'awaiting_response', 'awaiting_diagnosis', 'queued_replacement',
       'on_hold', 'awaiting_review', 'active', 'returned',
     ]);
   });
@@ -179,6 +181,30 @@ describe('follow-up hold on open issues', () => {
     const s = computeCustomerStatuses(c, emptyCtx, today);
     expect(s.has('fu_on_hold')).toBe(false);
     expect(s.has('overdue')).toBe(true);
+  });
+});
+
+describe('post-close ticket follow-up', () => {
+  const closed = (closedAgoDays: number, followupDoneAt: string | null = null) =>
+    ({ id: 'tk1', closedAt: daysAgo(closedAgoDays) + 'T00:00:00', followupDoneAt });
+
+  it('marks ticket_followup_due 14+ days after close when not done', () => {
+    const s = computeCustomerStatuses({ ...base }, { ...emptyCtx, lastClosedTicket: closed(14) }, today);
+    expect(s.has('ticket_followup_due')).toBe(true);
+  });
+  it('does NOT mark before 14 days', () => {
+    const s = computeCustomerStatuses({ ...base }, { ...emptyCtx, lastClosedTicket: closed(5) }, today);
+    expect(s.has('ticket_followup_due')).toBe(false);
+  });
+  it('does NOT mark once the follow-up is done', () => {
+    const s = computeCustomerStatuses({ ...base }, { ...emptyCtx, lastClosedTicket: closed(30, daysAgo(1) + 'T00:00:00') }, today);
+    expect(s.has('ticket_followup_due')).toBe(false);
+  });
+  it('does NOT mark while an open issue ticket still exists', () => {
+    const s = computeCustomerStatuses({ ...base }, {
+      ...emptyCtx, openTickets: [{ status: 'waiting_on_us', category: 'support' }], lastClosedTicket: closed(30),
+    }, today);
+    expect(s.has('ticket_followup_due')).toBe(false);
   });
 });
 

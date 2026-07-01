@@ -63,7 +63,7 @@ const order: Order = {
   customer_id: null, awaiting_batch_id: null, replacement_state: null, held_reason: null, freight_estimate_source: 'shopify',
   total_usd: 1149,
   subtotal_usd: null, tax_usd: null, discount_total_usd: null,
-  discount_codes: null, payment_methods: null, financial_status: null,
+  discount_codes: null, payment_methods: null, financial_status: null, tax_lines: null, shipping_line_title: null,
   line_items: [{ sku: 'LL01', name: 'Lila 01', qty: 1, price_usd: 1149 }],
   sales_confirmed_fit: false,
   dispositioned_by: null, dispositioned_at: null,
