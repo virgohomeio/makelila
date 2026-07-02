@@ -214,10 +214,14 @@ describe('upsertHubSpotContact — insert-only guard', () => {
 });
 
 describe('followUpDueDates', () => {
+  // Dates are built at LOCAL midnight, so compare local calendar dates (not UTC)
+  // to stay robust across timezones.
+  const fmtLocal = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   it('returns FU1 at +14d and FU2 at +28d from the anchor', () => {
     const { fu1Due, fu2Due } = followUpDueDates('2026-06-01');
-    expect(fu1Due.toISOString().slice(0, 10)).toBe('2026-06-15');
-    expect(fu2Due.toISOString().slice(0, 10)).toBe('2026-06-29');
+    expect(fmtLocal(fu1Due)).toBe('2026-06-15');
+    expect(fmtLocal(fu2Due)).toBe('2026-06-29');
   });
 });
 
