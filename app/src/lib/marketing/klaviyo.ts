@@ -37,3 +37,11 @@ export async function triggerKlaviyoSync(): Promise<{ profiles_sent: number; err
   if (error) throw error;
   return data as { profiles_sent: number; errors: number };
 }
+
+/** Pull each customer's Klaviyo email/engagement events into customer_events so
+ *  the per-customer Journey shows the email leg (opens, clicks, cart, order). */
+export async function triggerKlaviyoEventsSync(): Promise<{ synced: number; scanned?: number; profiles?: number; note?: string }> {
+  const { data, error } = await supabase.functions.invoke('klaviyo-pull-events');
+  if (error) throw error;
+  return data as { synced: number; scanned?: number; profiles?: number; note?: string };
+}
