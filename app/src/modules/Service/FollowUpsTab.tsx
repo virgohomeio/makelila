@@ -4,7 +4,7 @@ import {
   type Customer, type FuState,
 } from '../../lib/customers';
 import { useServiceTickets } from '../../lib/service';
-import { useFollowUpDirectory, type TicketFollowup } from '../../lib/followupStatus';
+import { useFollowUpDirectory } from '../../lib/followupStatus';
 import { TicketDetailPanel } from './TicketDetailPanel';
 import { FollowUpDirectory } from './FollowUpDirectory';
 import { FollowUpDetailPanel } from './FollowUpDetailPanel';
@@ -18,7 +18,7 @@ const WEEK_DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 // per-customer from onboard_date) and onboarding calls (from onboarding tickets
 // with a booked Calendly time). Clicking a call opens its ticket.
 type FuEvent = { type: 'fu'; customer: Customer; kind: 'fu1' | 'fu2'; dueDate: Date; state: FuState };
-type CallEvent = { type: 'call'; callKind: 'onboarding' | 'diagnosis' | 'ticket_followup'; label: string; time: string; ticketId: string };
+type CallEvent = { type: 'call'; callKind: 'onboarding' | 'diagnosis'; label: string; time: string; ticketId: string };
 type CalEvent = FuEvent | CallEvent;
 
 function dayKey(d: Date): string {
@@ -26,13 +26,12 @@ function dayKey(d: Date): string {
 }
 
 function FollowUpCalendar({
-  month, today, customers, tickets, ticketFollowups, blockedCustomerIds, anchorByCustomer, onPrev, onNext, onToday, onCustomerClick, onCallClick,
+  month, today, customers, tickets, blockedCustomerIds, anchorByCustomer, onPrev, onNext, onToday, onCustomerClick, onCallClick,
 }: {
   month: Date;
   today: Date;
   customers: Customer[];
   tickets: { id: string; category: string; calendly_event_start: string | null; customer_name: string | null; subject: string }[];
-  ticketFollowups: TicketFollowup[];
   blockedCustomerIds: Set<string>;
   anchorByCustomer: Map<string, string | null>;
   onPrev: () => void;
@@ -73,14 +72,6 @@ function FollowUpCalendar({
         });
       }
     }
-    // Ticket follow-ups — 14 days after a ticket closed (all tickets closed),
-    // until marked done. Clicking opens the closed ticket.
-    for (const tf of ticketFollowups) {
-      add(tf.dueDate.slice(0, 10), {
-        type: 'call', callKind: 'ticket_followup',
-        label: tf.customerName, time: tf.dueDate, ticketId: tf.ticketId,
-      });
-    }
     // Follow-ups — FU1 = onboard_date + FU1_DAYS, FU2 = +FU2_DAYS, per customer
     // that hasn't had that follow-up done yet.
     for (const c of customers) {
@@ -98,7 +89,7 @@ function FollowUpCalendar({
       }
     }
     return m;
-  }, [customers, tickets, ticketFollowups, blockedCustomerIds, anchorByCustomer, today, gridStart, gridEnd]);
+  }, [customers, tickets, blockedCustomerIds, anchorByCustomer, today, gridStart, gridEnd]);
 
   const todayKey = dayKey(today);
 
@@ -164,7 +155,6 @@ function FollowUpCalendar({
                   const meta = {
                     onboarding:      { icon: '🚀', name: 'Onboarding call',     cls: styles.calEventCall },
                     diagnosis:       { icon: '🩺', name: 'Diagnosis call',      cls: styles.calEventDiagnosis },
-                    ticket_followup: { icon: '🎫', name: 'Ticket follow-up',    cls: styles.calEventDiagFollowup },
                   }[ev.callKind];
                   return (
                     <button key={`c${i}`} onClick={() => onCallClick(ev.ticketId)}
@@ -203,7 +193,7 @@ export function FollowUpsTab() {
   const { customers, refresh } = useCustomers();
   const { tickets } = useServiceTickets();
   const today = useMemo(() => new Date(), []);
-  const { rows, counts, overdueCount, excludedCustomerIds, ticketFollowups } = useFollowUpDirectory(today);
+  const { rows, counts, overdueCount, excludedCustomerIds } = useFollowUpDirectory(today);
 
   // Overdue draft+send queue: customers needing action (overdue or due today),
   // most-overdue first (oldest onboard date). Mirrors the set the panel was
@@ -278,7 +268,6 @@ export function FollowUpsTab() {
             today={today}
             customers={scheduledCustomers}
             tickets={tickets}
-            ticketFollowups={ticketFollowups}
             blockedCustomerIds={blockedCustomerIds}
             anchorByCustomer={anchorByCustomer}
             onPrev={() => setCalendarMonth(d => { const n = new Date(d); n.setMonth(n.getMonth() - 1); return n; })}
@@ -299,7 +288,6 @@ export function FollowUpsTab() {
           anchorDate={anchorByCustomer.get(selectedCustomer.id) ?? null}
           openTickets={selectedOpenTickets}
           isPaused={selectedPaused}
-          ticketFollowup={ticketFollowups.find(tf => tf.customerId === selectedCustomer.id) ?? null}
           onClose={() => setSelected(null)}
           onChanged={() => void refresh()}
         />
