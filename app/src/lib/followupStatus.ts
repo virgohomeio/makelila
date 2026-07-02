@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from './supabase';
-import { useCustomers, computeFuState, FU1_DAYS, FU2_DAYS, type FuState, type Customer } from './customers';
+import { useCustomers, computeFuState, followUpDueDates, FU1_DAYS, FU2_DAYS, type FuState, type Customer } from './customers';
 import { useServiceTickets, type ServiceTicket } from './service';
 import { useQueuedReplacements } from './orders';
 
@@ -78,15 +78,15 @@ export function effectiveFollowUpAnchor(c: Customer, ctx: CustomerStatusContext)
 }
 
 /** Days until the customer's next still-pending follow-up, or null if none
- *  pending (unscheduled or both complete). Negative = overdue. */
-function daysToNextFu(c: Customer, today: Date): number | null {
+ *  pending (unscheduled or both complete). Negative = overdue. Counts from
+ *  `anchorIso` when given, otherwise `onboard_date`. */
+function daysToNextFu(c: Customer, today: Date, anchorIso?: string | null): number | null {
   if (!c.onboard_date) return null;
-  const onboard = new Date(c.onboard_date + 'T00:00:00');
+  const { fu1Due, fu2Due } = followUpDueDates(anchorIso ?? c.onboard_date);
   const mid = new Date(today); mid.setHours(0, 0, 0, 0);
-  const due = (days: number) => { const d = new Date(onboard); d.setDate(d.getDate() + days); return d; };
   const dayDiff = (d: Date) => Math.round((d.getTime() - mid.getTime()) / 86_400_000);
-  if (!c.fu1_status) return dayDiff(due(FU1_DAYS));
-  if (!c.fu2_status) return dayDiff(due(FU2_DAYS));
+  if (!c.fu1_status) return dayDiff(fu1Due);
+  if (!c.fu2_status) return dayDiff(fu2Due);
   return null;
 }
 
@@ -95,7 +95,8 @@ export function computeCustomerStatuses(
   c: Customer, ctx: CustomerStatusContext, today: Date = new Date(),
 ): Set<FollowUpStatusKey> {
   const s = new Set<FollowUpStatusKey>();
-  const fu = computeFuState(c, today);
+  const anchor = effectiveFollowUpAnchor(c, ctx);
+  const fu = computeFuState(c, today, anchor);
 
   // A diagnosis call (had or scheduled) SUPERSEDES the normal cadence: hold
   // FU1/FU2 and run a dedicated diagnosis follow-up due 14 days after the call.
@@ -109,11 +110,13 @@ export function computeCustomerStatuses(
     && midToday.getTime() >= new Date(latestActiveStart).getTime() + DIAG_FOLLOWUP_DAYS * 86_400_000;
 
   // Otherwise, a pending follow-up is put ON HOLD while the customer has an
-  // unresolved issue — a queued replacement or ANY open issue ticket (excludes
-  // onboarding + diagnosis_call). Held customers never show as overdue (the hold
-  // branch below skips the overdue/due markers).
+  // unresolved issue — a queued replacement or ANY open ticket (any category).
+  // Held customers never show as overdue (the hold branch below skips the
+  // overdue/due markers).
   const openIssueTickets = ctx.openTickets.filter(t => isIssueTicket(t as { category: string }));
-  const blockingCondition = ctx.queuedReplacement || openIssueTickets.length > 0;
+  // Any open ticket (any category) holds a pending follow-up — not just issue
+  // tickets. openIssueTickets is still used below for the post-close follow-up.
+  const blockingCondition = ctx.queuedReplacement || ctx.openTickets.length > 0;
   const pendingFu = !!c.onboard_date && fu !== 'complete' && fu !== 'unscheduled';
 
   if (hasAnyDiag) {
@@ -127,7 +130,7 @@ export function computeCustomerStatuses(
   } else {
     if (fu === 'overdue_fu1' || fu === 'overdue_fu2') s.add('overdue');
     if (fu === 'due_fu1' || fu === 'due_fu2') s.add('due_today');
-    const dnext = daysToNextFu(c, today);
+    const dnext = daysToNextFu(c, today, anchor);
     if (dnext !== null && dnext > 0 && dnext <= 7) s.add('due_7d');
     if (c.onboard_date && fu !== 'complete' && fu !== 'unscheduled') s.add('in_followup');
   }
