@@ -75,9 +75,9 @@ describe('computeCustomerStatuses', () => {
     const c = { ...base, review_status: 'requested' };
     expect(computeCustomerStatuses(c, emptyCtx, today).has('awaiting_review')).toBe(true);
   });
-  it('STATUS_FILTERS covers all 14 keys in display order', () => {
+  it('STATUS_FILTERS covers all 13 keys in display order', () => {
     expect(STATUS_FILTERS.map(f => f.key)).toEqual([
-      'overdue', 'due_today', 'due_7d', 'fu_on_hold', 'ticket_followup_due',
+      'overdue', 'due_today', 'due_7d', 'fu_on_hold',
       'in_followup', 'awaiting_onboarding', 'awaiting_response', 'awaiting_diagnosis', 'queued_replacement',
       'on_hold', 'awaiting_review', 'active', 'returned',
     ]);
@@ -165,30 +165,6 @@ describe('follow-up hold on open issues', () => {
     const s = computeCustomerStatuses(c, emptyCtx, today);
     expect(s.has('fu_on_hold')).toBe(false);
     expect(s.has('overdue')).toBe(true);
-  });
-});
-
-describe('post-close ticket follow-up', () => {
-  const closed = (closedAgoDays: number, followupDoneAt: string | null = null) =>
-    ({ id: 'tk1', closedAt: daysAgo(closedAgoDays) + 'T00:00:00', followupDoneAt });
-
-  it('marks ticket_followup_due 14+ days after close when not done', () => {
-    const s = computeCustomerStatuses({ ...base }, { ...emptyCtx, lastClosedTicket: closed(14) }, today);
-    expect(s.has('ticket_followup_due')).toBe(true);
-  });
-  it('does NOT mark before 14 days', () => {
-    const s = computeCustomerStatuses({ ...base }, { ...emptyCtx, lastClosedTicket: closed(5) }, today);
-    expect(s.has('ticket_followup_due')).toBe(false);
-  });
-  it('does NOT mark once the follow-up is done', () => {
-    const s = computeCustomerStatuses({ ...base }, { ...emptyCtx, lastClosedTicket: closed(30, daysAgo(1) + 'T00:00:00') }, today);
-    expect(s.has('ticket_followup_due')).toBe(false);
-  });
-  it('does NOT mark while an open issue ticket still exists', () => {
-    const s = computeCustomerStatuses({ ...base }, {
-      ...emptyCtx, openTickets: [{ status: 'waiting_on_us', category: 'support', source: 'hubspot' }], lastClosedTicket: closed(30),
-    }, today);
-    expect(s.has('ticket_followup_due')).toBe(false);
   });
 });
 

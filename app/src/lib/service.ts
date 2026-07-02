@@ -76,8 +76,6 @@ export type ServiceTicket = {
   owner_email: string | null;
   resolved_at: string | null;
   closed_at: string | null;
-  // Completion of the follow-up scheduled 14 days after the ticket closed.
-  post_close_followup_done_at: string | null;
   replacement_order_id: string | null;
   kind: TicketKind;
   inbox_disposition: InboxDisposition | null;
@@ -996,16 +994,6 @@ export async function markDiagnosisLinkSent(ticketId: string): Promise<void> {
 }
 
 
-/** Marks the post-close follow-up (scheduled 14 days after a ticket closed) done. */
-export async function markTicketPostCloseFollowupDone(ticketId: string): Promise<void> {
-  const doneAt = new Date().toISOString();
-  const { error } = await supabase
-    .from('service_tickets')
-    .update({ post_close_followup_done_at: doneAt })
-    .eq('id', ticketId);
-  if (error) throw error;
-  await logAction('ticket_post_close_followup_done', ticketId, doneAt);
-}
 
 /** Pick the follow-up anchor date (`YYYY-MM-DD`) for a completed onboarding:
  *  the date of the customer's most-recent onboarding call

@@ -3,8 +3,7 @@ import {
   recordFollowUp, setReviewStatus, computeFuState, FU_STATE_META,
   updateCustomerProfile, type Customer, type CustomerProfilePatch,
 } from '../../lib/customers';
-import { markTicketPostCloseFollowupDone, type ServiceTicket, priorityMeta } from '../../lib/service';
-import { type TicketFollowup } from '../../lib/followupStatus';
+import { type ServiceTicket, priorityMeta } from '../../lib/service';
 import { useReplacementQueue } from '../../lib/postShipment';
 import {
   useActionItems, useCustomerNotes, addActionItem, toggleActionItem, deleteActionItem,
@@ -20,13 +19,12 @@ const REPL_STATUS_LABEL: Record<string, string> = {
 };
 
 export function FollowUpDetailPanel({
-  customer, anchorDate, openTickets, isPaused, ticketFollowup, onClose, onChanged,
+  customer, anchorDate, openTickets, isPaused, onClose, onChanged,
 }: {
   customer: Customer;
   anchorDate: string | null;
   openTickets: ServiceTicket[];
   isPaused: boolean;
-  ticketFollowup: TicketFollowup | null;
   onClose: () => void;
   onChanged: () => void;
 }) {
@@ -206,17 +204,6 @@ export function FollowUpDetailPanel({
           locked={!customer.fu1_status}
           onAction={(m) => void run(() => recordFollowUp(customer.id, 'fu2', m))}
         />
-
-        {ticketFollowup && (
-          <div className={`${styles.fuItem} ${styles.fuItemPaused}`}>
-            <div className={styles.fuItemTop}>
-              <span>☐ Ticket follow-up — due {new Date(ticketFollowup.dueDate).toLocaleDateString()} (2 weeks after ticket closed)</span>
-              <span className={styles.checkBtns}>
-                <button disabled={busy} onClick={() => void run(() => markTicketPostCloseFollowupDone(ticketFollowup.ticketId))}>Mark done</button>
-              </span>
-            </div>
-          </div>
-        )}
 
         {items.map(it => (
           <div key={it.id} className={styles.checkRow}>

@@ -6,7 +6,6 @@ import { useQueuedReplacements } from './orders';
 
 export type FollowUpStatusKey =
   | 'overdue' | 'due_today' | 'due_7d' | 'fu_on_hold'
-  | 'ticket_followup_due'
   | 'in_followup' | 'awaiting_onboarding' | 'awaiting_response'
   | 'awaiting_diagnosis' | 'queued_replacement' | 'on_hold'
   | 'awaiting_review' | 'active' | 'returned';
@@ -16,7 +15,6 @@ export const STATUS_FILTERS: { key: FollowUpStatusKey; label: string }[] = [
   { key: 'due_today',           label: 'Due today' },
   { key: 'due_7d',              label: 'Due in 7 days' },
   { key: 'fu_on_hold',          label: 'Follow-up on hold' },
-  { key: 'ticket_followup_due', label: 'Ticket follow-up due' },
   { key: 'in_followup',         label: 'In follow-up' },
   { key: 'awaiting_onboarding', label: 'Awaiting onboarding' },
   { key: 'awaiting_response',   label: 'Awaiting response' },
@@ -33,23 +31,14 @@ export type CustomerStatusContext = {
   queuedReplacement: boolean;
   returned: boolean;
   awaitingOnboarding: boolean;
-  // The customer's most-recent CLOSED ticket (null if none). Drives the
-  // ticket-specific follow-up scheduled 14 days after the ticket closed.
-  lastClosedTicket?: { id: string; closedAt: string | null; followupDoneAt: string | null } | null;
-  // Most-recent close date (ISO timestamp) across ALL ticket categories — not
-  // just issue tickets. Anchors the FU1/FU2 reschedule once a hold lifts.
-  // Distinct from lastClosedTicket, which is issue-only and drives the separate
-  // post-close ticket follow-up.
+  // Most-recent close date (ISO timestamp) across ALL ticket categories.
+  // Anchors the FU1/FU2 reschedule once a hold lifts.
   lastClosedAnyTicketAt?: string | null;
 };
 
-// Days after a ticket closes that its follow-up is due.
-export const TICKET_FOLLOWUP_DAYS = 14;
-
 // Ticket categories that are NOT "issue" tickets: onboarding is a pre-follow-up
-// workflow, and diagnosis_call has its own dedicated follow-up handling. Open
-// tickets in these categories do not hold follow-ups, and they don't anchor a
-// post-close follow-up.
+// workflow, and diagnosis_call has its own handling. Open tickets in these
+// categories do not hold follow-ups.
 export const NON_ISSUE_TICKET_CATEGORIES = new Set(['onboarding', 'diagnosis_call']);
 export const isIssueTicket = (t: { category: string }) => !NON_ISSUE_TICKET_CATEGORIES.has(t.category);
 
@@ -64,16 +53,6 @@ export const AUTO_SYNC_TICKET_SOURCES = new Set(['quo', 'gmail']);
  *  Quo/Gmail message thread. */
 export const isHoldingTicket = (t: { category: string; source: string }) =>
   isIssueTicket(t) && !AUTO_SYNC_TICKET_SOURCES.has(t.source);
-
-/** Due date (ISO) for the post-close ticket follow-up, or null if N/A. */
-export function ticketFollowupDueDate(
-  lastClosed: { closedAt: string | null; followupDoneAt: string | null } | null | undefined,
-): Date | null {
-  if (!lastClosed?.closedAt || lastClosed.followupDoneAt) return null;
-  const due = new Date(lastClosed.closedAt);
-  due.setDate(due.getDate() + TICKET_FOLLOWUP_DAYS);
-  return due;
-}
 
 /** The date FU1/FU2 count from: `onboard_date`, shifted forward to a later
  *  ticket-close date when the customer had a blocking ticket that has since
@@ -113,8 +92,6 @@ export function computeCustomerStatuses(
   // that isn't an auto-synced Quo/Gmail message thread. Onboarding /
   // diagnosis-call tickets and message-thread tickets never hold. Held
   // customers never show as overdue (the hold branch below skips the markers).
-  // openIssueTickets is still used below for the post-close follow-up.
-  const openIssueTickets = ctx.openTickets.filter(t => isIssueTicket(t as { category: string }));
   const blockingCondition = ctx.queuedReplacement || ctx.openTickets.some(isHoldingTicket);
   const pendingFu = !!c.onboard_date && fu !== 'complete' && fu !== 'unscheduled';
 
@@ -138,14 +115,6 @@ export function computeCustomerStatuses(
   if (ctx.awaitingOnboarding) s.add('awaiting_onboarding');
   if (c.review_status === 'requested') s.add('awaiting_review');
   if (ctx.returned) s.add('returned');
-
-  // Ticket-specific follow-up: once all issue tickets are closed, a follow-up
-  // falls due 14 days after the most-recent close (until marked done).
-  if (openIssueTickets.length === 0) {
-    const due = ticketFollowupDueDate(ctx.lastClosedTicket);
-    const midToday = new Date(today); midToday.setHours(0, 0, 0, 0);
-    if (due && midToday.getTime() >= due.getTime()) s.add('ticket_followup_due');
-  }
 
   const hasOpenIssue = ctx.openTickets.length > 0 || ctx.queuedReplacement || ctx.returned;
   if (c.onboard_date && fu === 'complete' && !hasOpenIssue) s.add('active');
@@ -196,17 +165,12 @@ export type DirectoryRow = {
   anchorDate: string | null;
 };
 
-/** Calendar marker for a post-close ticket follow-up. */
-export type TicketFollowup = { customerId: string; customerName: string; ticketId: string; dueDate: string };
-
 export function useFollowUpDirectory(today: Date = new Date()): {
   rows: DirectoryRow[];
   counts: Record<FollowUpStatusKey, number>;
   overdueCount: number;
   // Customers in the return/refund workflow — excluded from follow-up entirely.
   excludedCustomerIds: Set<string>;
-  // Post-close ticket follow-up markers (for the calendar).
-  ticketFollowups: TicketFollowup[];
   loading: boolean;
 } {
   const { customers, loading: lc } = useCustomers();
@@ -248,8 +212,6 @@ export function useFollowUpDirectory(today: Date = new Date()): {
   return useMemo(() => {
     const idx = buildCustomerKeyIndex(customers);
     const ticketsByCustomer = new Map<string, Pick<ServiceTicket, 'status' | 'category' | 'source'>[]>();
-    // Most-recent CLOSED ticket per customer (anchors the post-close follow-up).
-    const lastClosedByCustomer = new Map<string, { id: string; closedAt: string | null; followupDoneAt: string | null }>();
     // Most-recent close (ISO) across ALL categories — anchors the FU reschedule.
     const lastClosedAnyByCustomer = new Map<string, string>();
     for (const t of tickets) {
@@ -259,11 +221,6 @@ export function useFollowUpDirectory(today: Date = new Date()): {
         if (t.closed_at) {
           const prevAny = lastClosedAnyByCustomer.get(cid);
           if (!prevAny || t.closed_at > prevAny) lastClosedAnyByCustomer.set(cid, t.closed_at);
-        }
-        if (!isIssueTicket(t)) continue; // onboarding/diagnosis don't anchor a post-close follow-up
-        const prev = lastClosedByCustomer.get(cid);
-        if (!prev || (t.closed_at ?? '') > (prev.closedAt ?? '')) {
-          lastClosedByCustomer.set(cid, { id: t.id, closedAt: t.closed_at, followupDoneAt: t.post_close_followup_done_at });
         }
         continue;
       }
@@ -283,18 +240,15 @@ export function useFollowUpDirectory(today: Date = new Date()): {
     }
 
     const counts = Object.fromEntries(STATUS_FILTERS.map(f => [f.key, 0])) as Record<FollowUpStatusKey, number>;
-    const ticketFollowups: TicketFollowup[] = [];
     const rows: DirectoryRow[] = [];
     for (const c of customers) {
       if (excludedCustomerIds.has(c.id)) continue; // removed from the follow-up workflow
       const openTickets = ticketsByCustomer.get(c.id) ?? [];
-      const lastClosedTicket = lastClosedByCustomer.get(c.id) ?? null;
       const ctx: CustomerStatusContext = {
         openTickets,
         queuedReplacement: queuedIds.has(c.id),
         returned: false,
         awaitingOnboarding: awaitingOnboardingIds.has(c.id),
-        lastClosedTicket,
         lastClosedAnyTicketAt: lastClosedAnyByCustomer.get(c.id) ?? null,
       };
       const statuses = computeCustomerStatuses(c, ctx, today);
@@ -305,20 +259,11 @@ export function useFollowUpDirectory(today: Date = new Date()): {
       for (const k of statuses) counts[k] += 1;
       const anchorDate = effectiveFollowUpAnchor(c, ctx);
       rows.push({ customer: c, statuses, fuState: computeFuState(c, today, anchorDate), anchorDate });
-
-      // Calendar marker for the post-close ticket follow-up (close + 14d) —
-      // only once the customer has no open issue tickets.
-      if (openTickets.filter(t => isIssueTicket(t as { category: string })).length === 0) {
-        const due = ticketFollowupDueDate(lastClosedTicket);
-        if (due && lastClosedTicket) {
-          ticketFollowups.push({ customerId: c.id, customerName: c.full_name, ticketId: lastClosedTicket.id, dueDate: due.toISOString() });
-        }
-      }
     }
     rows.sort((a, b) =>
       Number(b.statuses.has('overdue')) - Number(a.statuses.has('overdue'))
       || a.customer.full_name.localeCompare(b.customer.full_name));
 
-    return { rows, counts, overdueCount: counts.overdue, excludedCustomerIds, ticketFollowups, loading: lc || lt || lr };
+    return { rows, counts, overdueCount: counts.overdue, excludedCustomerIds, loading: lc || lt || lr };
   }, [customers, tickets, replacements, excludedKeys, awaitingOnboardingIds, today, lc, lt, lr]);
 }
