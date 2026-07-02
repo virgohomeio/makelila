@@ -120,13 +120,20 @@ export const FU_STATE_META: Record<FuState, { label: string; color: string; bg: 
 export const FU1_DAYS = 14;
 export const FU2_DAYS = 28;
 
-/** Compute the follow-up state for a customer. FU1 cadence: FU1_DAYS after
- *  the onboarding call. FU2 cadence: FU2_DAYS after the call. "Today" = same calendar day. */
-export function computeFuState(c: Customer, today: Date = new Date()): FuState {
+/** FU1/FU2 due dates computed from an anchor date (ISO `YYYY-MM-DD`). */
+export function followUpDueDates(anchorIso: string): { fu1Due: Date; fu2Due: Date } {
+  const anchor = new Date(anchorIso.slice(0, 10) + 'T00:00:00');
+  const fu1Due = new Date(anchor); fu1Due.setDate(fu1Due.getDate() + FU1_DAYS);
+  const fu2Due = new Date(anchor); fu2Due.setDate(fu2Due.getDate() + FU2_DAYS);
+  return { fu1Due, fu2Due };
+}
+
+/** Compute the follow-up state for a customer. Due dates count from `anchorIso`
+ *  when supplied (the effective anchor after a ticket-close reschedule),
+ *  otherwise from `onboard_date`. "Today" = same calendar day. */
+export function computeFuState(c: Customer, today: Date = new Date(), anchorIso?: string | null): FuState {
   if (!c.onboard_date) return 'unscheduled';
-  const onboard = new Date(c.onboard_date + 'T00:00:00');
-  const fu1Due = new Date(onboard); fu1Due.setDate(fu1Due.getDate() + FU1_DAYS);
-  const fu2Due = new Date(onboard); fu2Due.setDate(fu2Due.getDate() + FU2_DAYS);
+  const { fu1Due, fu2Due } = followUpDueDates(anchorIso ?? c.onboard_date);
   const todayMid = new Date(today); todayMid.setHours(0, 0, 0, 0);
 
   if (c.fu1_status && c.fu2_status) return 'complete';

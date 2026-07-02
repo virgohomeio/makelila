@@ -48,7 +48,22 @@ vi.mock('./activityLog', () => ({
 }));
 
 // ── import after mocks ──────────────────────────────────────────────────────
-import { parseUtm, upsertHubSpotContact } from './customers';
+import { parseUtm, upsertHubSpotContact, followUpDueDates, computeFuState, type Customer } from './customers';
+
+const base: Customer = {
+  id: 'c1', hubspot_id: null, email: 'a@b.com', first_name: null, last_name: null,
+  full_name: 'Test User', phone: null, address_line: null, city: null, region: null,
+  postal_code: null, country: null, notes: null, onboard_date: null,
+  color: null, shipped_on: null, received_on: null, diagnosis_on: null,
+  dashboard: null, software: null, timezone: null,
+  fu1_status: null, fu2_status: null, fu_notes: null, review_status: null, manual_status_tags: null,
+  last_synced_at: null, serials: null, serials_synced_at: null,
+  name_request_sent_at: null, journey_stage_override: null,
+  journey_stage_override_at: null, journey_stage_override_by: null,
+  first_touch_source: null, first_touch_campaign_id: null, first_touch_at: null,
+  last_touch_source: null, last_touch_campaign_id: null, last_touch_at: null,
+  telemetry_autoticket_suppress: false, created_at: '', updated_at: '',
+};
 
 // ── parseUtm (existing tests) ───────────────────────────────────────────────
 describe('parseUtm', () => {
@@ -195,5 +210,30 @@ describe('upsertHubSpotContact — insert-only guard', () => {
     await expect(
       upsertHubSpotContact({ email: 'fail@example.com' }),
     ).rejects.toThrow('DB error');
+  });
+});
+
+describe('followUpDueDates', () => {
+  // Dates are built at LOCAL midnight, so compare local calendar dates (not UTC)
+  // to stay robust across timezones.
+  const fmtLocal = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  it('returns FU1 at +14d and FU2 at +28d from the anchor', () => {
+    const { fu1Due, fu2Due } = followUpDueDates('2026-06-01');
+    expect(fmtLocal(fu1Due)).toBe('2026-06-15');
+    expect(fmtLocal(fu2Due)).toBe('2026-06-29');
+  });
+});
+
+describe('computeFuState anchor override', () => {
+  const today = new Date('2026-07-01T12:00:00');
+  it('uses onboard_date when no anchor is passed', () => {
+    const c = { ...base, onboard_date: '2026-05-01' }; // FU1 due 05-15 → overdue by 07-01
+    expect(computeFuState(c, today)).toBe('overdue_fu1');
+  });
+  it('uses the anchor override instead of onboard_date', () => {
+    const c = { ...base, onboard_date: '2026-05-01' };
+    // Anchor 06-25 → FU1 due 07-09 → still upcoming on 07-01
+    expect(computeFuState(c, today, '2026-06-25')).toBe('upcoming_fu1');
   });
 });

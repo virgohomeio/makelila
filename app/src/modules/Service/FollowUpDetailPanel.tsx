@@ -20,9 +20,10 @@ const REPL_STATUS_LABEL: Record<string, string> = {
 };
 
 export function FollowUpDetailPanel({
-  customer, openTickets, isPaused, diagnosisTicketId, ticketFollowup, onClose, onChanged,
+  customer, anchorDate, openTickets, isPaused, diagnosisTicketId, ticketFollowup, onClose, onChanged,
 }: {
   customer: Customer;
+  anchorDate: string | null;
   openTickets: ServiceTicket[];
   isPaused: boolean;
   diagnosisTicketId: string | null;
@@ -38,7 +39,7 @@ export function FollowUpDetailPanel({
   const [newItem, setNewItem] = useState('');
   const [newItemDue, setNewItemDue] = useState('');
   const [newNote, setNewNote] = useState('');
-  const fu = computeFuState(customer);
+  const fu = computeFuState(customer, new Date(), anchorDate);
 
   useEffect(() => { setTags(customer.manual_status_tags ?? []); }, [customer.id, customer.manual_status_tags]);
 

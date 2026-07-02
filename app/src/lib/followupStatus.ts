@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from './supabase';
-import { useCustomers, computeFuState, FU1_DAYS, FU2_DAYS, type FuState, type Customer } from './customers';
+import { useCustomers, computeFuState, followUpDueDates, type FuState, type Customer } from './customers';
 import { useServiceTickets, type ServiceTicket } from './service';
 import { useQueuedReplacements } from './orders';
 
@@ -38,6 +38,11 @@ export type CustomerStatusContext = {
   // The customer's most-recent CLOSED ticket (null if none). Drives the
   // ticket-specific follow-up scheduled 14 days after the ticket closed.
   lastClosedTicket?: { id: string; closedAt: string | null; followupDoneAt: string | null } | null;
+  // Most-recent close date (ISO timestamp) across ALL ticket categories — not
+  // just issue tickets. Anchors the FU1/FU2 reschedule once a hold lifts.
+  // Distinct from lastClosedTicket, which is issue-only and drives the separate
+  // post-close ticket follow-up.
+  lastClosedAnyTicketAt?: string | null;
 };
 
 // Days after a ticket closes that its follow-up is due.
@@ -60,16 +65,28 @@ export function ticketFollowupDueDate(
   return due;
 }
 
-/** Days until the customer's next still-pending follow-up, or null if none
- *  pending (unscheduled or both complete). Negative = overdue. */
-function daysToNextFu(c: Customer, today: Date): number | null {
+/** The date FU1/FU2 count from: `onboard_date`, shifted forward to a later
+ *  ticket-close date when the customer had a blocking ticket that has since
+ *  closed. Returns ISO `YYYY-MM-DD`, or null when unscheduled. */
+export function effectiveFollowUpAnchor(c: Customer, ctx: CustomerStatusContext): string | null {
   if (!c.onboard_date) return null;
-  const onboard = new Date(c.onboard_date + 'T00:00:00');
+  // While any ticket is open the customer is on hold; the anchor isn't surfaced.
+  if (ctx.openTickets.length > 0) return c.onboard_date;
+  const closed = ctx.lastClosedAnyTicketAt?.slice(0, 10);
+  if (closed && closed > c.onboard_date) return closed;
+  return c.onboard_date;
+}
+
+/** Days until the customer's next still-pending follow-up, or null if none
+ *  pending (unscheduled or both complete). Negative = overdue. Counts from
+ *  `anchorIso` when given, otherwise `onboard_date`. */
+function daysToNextFu(c: Customer, today: Date, anchorIso?: string | null): number | null {
+  if (!c.onboard_date) return null;
+  const { fu1Due, fu2Due } = followUpDueDates(anchorIso ?? c.onboard_date);
   const mid = new Date(today); mid.setHours(0, 0, 0, 0);
-  const due = (days: number) => { const d = new Date(onboard); d.setDate(d.getDate() + days); return d; };
   const dayDiff = (d: Date) => Math.round((d.getTime() - mid.getTime()) / 86_400_000);
-  if (!c.fu1_status) return dayDiff(due(FU1_DAYS));
-  if (!c.fu2_status) return dayDiff(due(FU2_DAYS));
+  if (!c.fu1_status) return dayDiff(fu1Due);
+  if (!c.fu2_status) return dayDiff(fu2Due);
   return null;
 }
 
@@ -78,7 +95,8 @@ export function computeCustomerStatuses(
   c: Customer, ctx: CustomerStatusContext, today: Date = new Date(),
 ): Set<FollowUpStatusKey> {
   const s = new Set<FollowUpStatusKey>();
-  const fu = computeFuState(c, today);
+  const anchor = effectiveFollowUpAnchor(c, ctx);
+  const fu = computeFuState(c, today, anchor);
 
   // A diagnosis call (had or scheduled) SUPERSEDES the normal cadence: hold
   // FU1/FU2 and run a dedicated diagnosis follow-up due 14 days after the call.
@@ -92,11 +110,12 @@ export function computeCustomerStatuses(
     && midToday.getTime() >= new Date(latestActiveStart).getTime() + DIAG_FOLLOWUP_DAYS * 86_400_000;
 
   // Otherwise, a pending follow-up is put ON HOLD while the customer has an
-  // unresolved issue — a queued replacement or ANY open issue ticket (excludes
-  // onboarding + diagnosis_call). Held customers never show as overdue (the hold
-  // branch below skips the overdue/due markers).
+  // unresolved issue — a queued replacement or ANY open ticket (any category).
+  // Held customers never show as overdue (the hold branch below skips the
+  // overdue/due markers).
+  // openIssueTickets is still used below for the post-close follow-up.
   const openIssueTickets = ctx.openTickets.filter(t => isIssueTicket(t as { category: string }));
-  const blockingCondition = ctx.queuedReplacement || openIssueTickets.length > 0;
+  const blockingCondition = ctx.queuedReplacement || ctx.openTickets.length > 0;
   const pendingFu = !!c.onboard_date && fu !== 'complete' && fu !== 'unscheduled';
 
   if (hasAnyDiag) {
@@ -110,7 +129,7 @@ export function computeCustomerStatuses(
   } else {
     if (fu === 'overdue_fu1' || fu === 'overdue_fu2') s.add('overdue');
     if (fu === 'due_fu1' || fu === 'due_fu2') s.add('due_today');
-    const dnext = daysToNextFu(c, today);
+    const dnext = daysToNextFu(c, today, anchor);
     if (dnext !== null && dnext > 0 && dnext <= 7) s.add('due_7d');
     if (c.onboard_date && fu !== 'complete' && fu !== 'unscheduled') s.add('in_followup');
   }
@@ -177,6 +196,9 @@ export type DirectoryRow = {
   customer: Customer;
   statuses: Set<FollowUpStatusKey>;
   fuState: FuState;
+  // Effective FU anchor (onboard_date, shifted after a ticket-close reschedule),
+  // ISO YYYY-MM-DD or null. Used by the calendar to place FU1/FU2 markers.
+  anchorDate: string | null;
 };
 
 /** Calendar marker for a post-close ticket follow-up. */
@@ -233,10 +255,16 @@ export function useFollowUpDirectory(today: Date = new Date()): {
     const ticketsByCustomer = new Map<string, Pick<ServiceTicket, 'status' | 'category'>[]>();
     // Most-recent CLOSED ticket per customer (anchors the post-close follow-up).
     const lastClosedByCustomer = new Map<string, { id: string; closedAt: string | null; followupDoneAt: string | null }>();
+    // Most-recent close (ISO) across ALL categories — anchors the FU reschedule.
+    const lastClosedAnyByCustomer = new Map<string, string>();
     for (const t of tickets) {
       const cid = resolveCustomerId(t, idx);
       if (!cid) continue;
       if (t.status === 'closed') {
+        if (t.closed_at) {
+          const prevAny = lastClosedAnyByCustomer.get(cid);
+          if (!prevAny || t.closed_at > prevAny) lastClosedAnyByCustomer.set(cid, t.closed_at);
+        }
         if (!isIssueTicket(t)) continue; // onboarding/diagnosis don't anchor a post-close follow-up
         const prev = lastClosedByCustomer.get(cid);
         if (!prev || (t.closed_at ?? '') > (prev.closedAt ?? '')) {
@@ -283,6 +311,7 @@ export function useFollowUpDirectory(today: Date = new Date()): {
         awaitingOnboarding: awaitingOnboardingIds.has(c.id),
         diagnosisCalls: diagnosisCallsByCustomer.get(c.id) ?? [],
         lastClosedTicket,
+        lastClosedAnyTicketAt: lastClosedAnyByCustomer.get(c.id) ?? null,
       };
       const statuses = computeCustomerStatuses(c, ctx, today);
       // Fold in operator-applied manual tags (additive to the derived ones).
@@ -290,7 +319,8 @@ export function useFollowUpDirectory(today: Date = new Date()): {
         if (STATUS_FILTERS.some(f => f.key === t)) statuses.add(t as FollowUpStatusKey);
       }
       for (const k of statuses) counts[k] += 1;
-      rows.push({ customer: c, statuses, fuState: computeFuState(c, today) });
+      const anchorDate = effectiveFollowUpAnchor(c, ctx);
+      rows.push({ customer: c, statuses, fuState: computeFuState(c, today, anchorDate), anchorDate });
 
       // Calendar marker for the post-close ticket follow-up (close + 14d) —
       // only once the customer has no open issue tickets.

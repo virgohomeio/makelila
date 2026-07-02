@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  computeCustomerStatuses, STATUS_FILTERS, type CustomerStatusContext,
+  computeCustomerStatuses, STATUS_FILTERS, effectiveFollowUpAnchor, type CustomerStatusContext,
 } from './followupStatus';
 import type { Customer } from './customers';
 import type { ServiceTicket } from './service';
@@ -158,13 +158,6 @@ describe('follow-up hold on open issues', () => {
     //  diagnosis_call ticket — see the 'diagnosis-call follow-up' suite.)
   });
 
-  it('does NOT hold FU for an onboarding-category ticket', () => {
-    const c = { ...base, onboard_date: daysAgo(20) };
-    const s = computeCustomerStatuses(c, { ...emptyCtx, openTickets: [ticket('onboarding')] }, today);
-    expect(s.has('fu_on_hold')).toBe(false);
-    expect(s.has('overdue')).toBe(true);
-  });
-
   it('does NOT mark fu_on_hold when the follow-up is already complete', () => {
     const c = { ...base, onboard_date: daysAgo(40), fu1_status: 'called', fu2_status: 'called' };
     const s = computeCustomerStatuses(c, { ...emptyCtx, openTickets: [ticket('support')] }, today);
@@ -205,6 +198,69 @@ describe('post-close ticket follow-up', () => {
       ...emptyCtx, openTickets: [{ status: 'waiting_on_us', category: 'support' }], lastClosedTicket: closed(30),
     }, today);
     expect(s.has('ticket_followup_due')).toBe(false);
+  });
+});
+
+describe('follow-up hold + reschedule on ticket close', () => {
+  const openT = (category: ServiceTicket['category'] = 'support') => ({ status: 'in_progress' as ServiceTicket['status'], category });
+
+  it('holds pending FU while ANY open ticket exists (incl. non-issue categories)', () => {
+    const c = { ...base, onboard_date: daysAgo(20) }; // FU1 overdue by onboard math
+    const ctx = { ...emptyCtx, openTickets: [openT('onboarding')] };
+    const s = computeCustomerStatuses(c, ctx, today);
+    expect(s.has('fu_on_hold')).toBe(true);
+    expect(s.has('overdue')).toBe(false);
+  });
+
+  it('reschedules FU1 to close+14d after all tickets close', () => {
+    const c = { ...base, onboard_date: daysAgo(40) }; // long overdue by onboard math
+    // Ticket closed 5 days ago → FU1 due close+14 → 9 days out → not overdue/not due_today
+    const ctx = { ...emptyCtx, lastClosedAnyTicketAt: daysAgo(5) + 'T00:00:00Z' };
+    const s = computeCustomerStatuses(c, ctx, today);
+    expect(s.has('overdue')).toBe(false);
+    expect(s.has('due_today')).toBe(false);
+    expect(s.has('in_followup')).toBe(true);
+  });
+
+  it('marks FU1 due_today exactly 14 days after close', () => {
+    const c = { ...base, onboard_date: daysAgo(40) };
+    const ctx = { ...emptyCtx, lastClosedAnyTicketAt: daysAgo(14) + 'T00:00:00Z' };
+    expect(computeCustomerStatuses(c, ctx, today).has('due_today')).toBe(true);
+  });
+
+  it('reschedules only the pending touch (FU1 done → FU2 at close+28d)', () => {
+    const c = { ...base, onboard_date: daysAgo(40), fu1_status: 'called' };
+    // Closed 10 days ago → FU2 due close+28 → 18 days out → upcoming, not due_7d
+    const ctx = { ...emptyCtx, lastClosedAnyTicketAt: daysAgo(10) + 'T00:00:00Z' };
+    const s = computeCustomerStatuses(c, ctx, today);
+    expect(s.has('overdue')).toBe(false);
+    expect(s.has('due_7d')).toBe(false);
+    expect(s.has('in_followup')).toBe(true);
+  });
+});
+
+describe('effectiveFollowUpAnchor', () => {
+  it('returns null when onboard_date is null', () => {
+    expect(effectiveFollowUpAnchor({ ...base }, emptyCtx)).toBeNull();
+  });
+  it('returns onboard_date when there is no closed ticket', () => {
+    const c = { ...base, onboard_date: '2026-05-01' };
+    expect(effectiveFollowUpAnchor(c, emptyCtx)).toBe('2026-05-01');
+  });
+  it('shifts the anchor to a ticket that closed after onboarding', () => {
+    const c = { ...base, onboard_date: '2026-05-01' };
+    const ctx = { ...emptyCtx, lastClosedAnyTicketAt: '2026-06-10T09:30:00Z' };
+    expect(effectiveFollowUpAnchor(c, ctx)).toBe('2026-06-10');
+  });
+  it('keeps onboard_date when the closed ticket predates onboarding', () => {
+    const c = { ...base, onboard_date: '2026-05-01' };
+    const ctx = { ...emptyCtx, lastClosedAnyTicketAt: '2026-04-01T00:00:00Z' };
+    expect(effectiveFollowUpAnchor(c, ctx)).toBe('2026-05-01');
+  });
+  it('keeps the base anchor while a ticket is still open', () => {
+    const c = { ...base, onboard_date: '2026-05-01' };
+    const ctx = { ...emptyCtx, openTickets: [{ status: 'in_progress' as ServiceTicket['status'], category: 'support' as ServiceTicket['category'] }], lastClosedAnyTicketAt: '2026-06-10T00:00:00Z' };
+    expect(effectiveFollowUpAnchor(c, ctx)).toBe('2026-05-01');
   });
 });
 
