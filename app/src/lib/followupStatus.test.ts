@@ -21,7 +21,6 @@ const base: Customer = {
 };
 const emptyCtx: CustomerStatusContext = {
   openTickets: [], queuedReplacement: false, returned: false, awaitingOnboarding: false,
-  diagnosisCalls: [],
 };
 const today = new Date('2026-06-18T12:00:00');
 const daysAgo = (n: number) => { const d = new Date(today); d.setDate(d.getDate() - n); return d.toISOString().slice(0, 10); };
@@ -76,58 +75,25 @@ describe('computeCustomerStatuses', () => {
     const c = { ...base, review_status: 'requested' };
     expect(computeCustomerStatuses(c, emptyCtx, today).has('awaiting_review')).toBe(true);
   });
-  it('STATUS_FILTERS covers all 15 keys in display order', () => {
+  it('STATUS_FILTERS covers all 14 keys in display order', () => {
     expect(STATUS_FILTERS.map(f => f.key)).toEqual([
-      'overdue', 'due_today', 'due_7d', 'fu_on_hold', 'diag_followup_due', 'ticket_followup_due',
+      'overdue', 'due_today', 'due_7d', 'fu_on_hold', 'ticket_followup_due',
       'in_followup', 'awaiting_onboarding', 'awaiting_response', 'awaiting_diagnosis', 'queued_replacement',
       'on_hold', 'awaiting_review', 'active', 'returned',
     ]);
   });
 });
 
-describe('diagnosis-call follow-up', () => {
-  const call = (startIso: string, followupDoneAt: string | null = null) => ({ startIso, followupDoneAt });
-
-  it('holds normal FU when a diagnosis call is scheduled in the future', () => {
-    const c = { ...base, onboard_date: daysAgo(20) }; // would be FU1 overdue
-    const s = computeCustomerStatuses(c, { ...emptyCtx, diagnosisCalls: [call(daysAhead(3))] }, today);
-    expect(s.has('fu_on_hold')).toBe(true);
-    expect(s.has('overdue')).toBe(false);
-    expect(s.has('diag_followup_due')).toBe(false);
-  });
-
-  it('holds when a past diagnosis call is < 14 days ago', () => {
-    const c = { ...base, onboard_date: daysAgo(20) };
-    const s = computeCustomerStatuses(c, { ...emptyCtx, diagnosisCalls: [call(daysAgo(5))] }, today);
-    expect(s.has('fu_on_hold')).toBe(true);
-    expect(s.has('diag_followup_due')).toBe(false);
-  });
-
-  it('marks diag_followup_due once the call is >= 14 days ago and not done', () => {
-    const c = { ...base, onboard_date: daysAgo(40) };
-    const s = computeCustomerStatuses(c, { ...emptyCtx, diagnosisCalls: [call(daysAgo(14))] }, today);
-    expect(s.has('diag_followup_due')).toBe(true);
-    expect(s.has('overdue')).toBe(false);
-    expect(s.has('fu_on_hold')).toBe(false);
-  });
-
-  it('resolves (no diag/normal FU statuses) once the follow-up is done', () => {
-    const c = { ...base, onboard_date: daysAgo(40) }; // FU would be overdue
-    const s = computeCustomerStatuses(c, { ...emptyCtx, diagnosisCalls: [call(daysAgo(20), daysAgo(1) + 'T00:00:00Z')] }, today);
-    expect(s.has('diag_followup_due')).toBe(false);
-    expect(s.has('fu_on_hold')).toBe(false);
-    expect(s.has('overdue')).toBe(false);
-  });
-
-  it('gives a diagnosis follow-up even with no onboard date', () => {
-    const s = computeCustomerStatuses({ ...base, onboard_date: null }, { ...emptyCtx, diagnosisCalls: [call(daysAgo(20))] }, today);
-    expect(s.has('diag_followup_due')).toBe(true);
-  });
-
-  it('still holds on an open support ticket when there is no diagnosis call', () => {
-    const c = { ...base, onboard_date: daysAgo(20) };
-    const s = computeCustomerStatuses(c, { ...emptyCtx, openTickets: [{ status: 'waiting_on_us', category: 'support', source: 'hubspot' }] }, today);
-    expect(s.has('fu_on_hold')).toBe(true);
+describe('diagnosis calls no longer affect follow-ups', () => {
+  it('a customer with an open diagnosis_call ticket still gets normal FU1/FU2 (not held/superseded)', () => {
+    const c = { ...base, onboard_date: daysAgo(20) }; // FU1 overdue by onboard math
+    const s = computeCustomerStatuses(c, {
+      ...emptyCtx,
+      openTickets: [{ status: 'call_scheduled', category: 'diagnosis_call', source: 'google_calendar' }],
+    }, today);
+    expect(s.has('overdue')).toBe(true);            // normal cadence applies
+    expect(s.has('fu_on_hold')).toBe(false);        // diagnosis calls don't hold
+    expect(s.has('awaiting_diagnosis')).toBe(true); // the diagnosis-call status still shows
   });
 });
 
@@ -157,8 +123,6 @@ describe('follow-up hold on open issues', () => {
   it('holds FU for an open repair ticket', () => {
     const c = { ...base, onboard_date: daysAgo(20) };
     expect(computeCustomerStatuses(c, { ...emptyCtx, openTickets: [ticket('repair')] }, today).has('fu_on_hold')).toBe(true);
-    // (diagnosis-call blocking is driven by ctx.diagnosisCalls, not an open
-    //  diagnosis_call ticket — see the 'diagnosis-call follow-up' suite.)
   });
 
   it('does NOT hold FU for an open onboarding-call ticket', () => {

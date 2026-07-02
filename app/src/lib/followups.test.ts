@@ -4,7 +4,7 @@ import type { FollowUpStatusKey } from './followupStatus';
 
 describe('MANUAL_TAGS', () => {
   it('excludes the date-derived keys', () => {
-    for (const k of ['overdue', 'due_today', 'due_7d', 'fu_on_hold', 'diag_followup_due'] as FollowUpStatusKey[]) {
+    for (const k of ['overdue', 'due_today', 'due_7d', 'fu_on_hold'] as FollowUpStatusKey[]) {
       expect(MANUAL_TAGS.includes(k)).toBe(false);
     }
   });

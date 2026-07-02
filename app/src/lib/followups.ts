@@ -4,7 +4,7 @@ import { logAction } from './activityLog';
 import { STATUS_FILTERS, type FollowUpStatusKey } from './followupStatus';
 
 // Status keys that are purely date-derived — never operator-applied.
-const DATE_DERIVED: FollowUpStatusKey[] = ['overdue', 'due_today', 'due_7d', 'fu_on_hold', 'diag_followup_due'];
+const DATE_DERIVED: FollowUpStatusKey[] = ['overdue', 'due_today', 'due_7d', 'fu_on_hold'];
 
 /** Status keys an operator may apply manually (additive to the derived ones). */
 export const MANUAL_TAGS: FollowUpStatusKey[] = STATUS_FILTERS
