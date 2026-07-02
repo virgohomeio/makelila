@@ -308,6 +308,7 @@ export function FollowUpsTab() {
       {selectedCustomer && (
         <FollowUpDetailPanel
           customer={selectedCustomer}
+          anchorDate={anchorByCustomer.get(selectedCustomer.id) ?? null}
           openTickets={selectedOpenTickets}
           isPaused={selectedPaused}
           ticketFollowup={ticketFollowups.find(tf => tf.customerId === selectedCustomer.id) ?? null}
