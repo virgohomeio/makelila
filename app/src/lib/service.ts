@@ -1018,6 +1018,24 @@ export async function markTicketPostCloseFollowupDone(ticketId: string): Promise
   await logAction('ticket_post_close_followup_done', ticketId, doneAt);
 }
 
+/** Pick the follow-up anchor date (`YYYY-MM-DD`) for a completed onboarding:
+ *  the date of the customer's most-recent onboarding call
+ *  (`calendly_event_start`), or `fallbackIso` (the completion timestamp) when
+ *  the customer has no Calendly-booked onboarding call. FU1/FU2 count from this
+ *  date (call + 14d / + 28d), so anchoring to the actual call — not the day the
+ *  operator marked it complete — keeps the cadence tied to the call itself. */
+export function onboardingAnchorDate(
+  onboardingTickets: { calendly_event_start: string | null }[],
+  fallbackIso: string,
+): string {
+  const latestCall = onboardingTickets
+    .map(t => t.calendly_event_start)
+    .filter((s): s is string => !!s)
+    .sort()
+    .at(-1);
+  return (latestCall ?? fallbackIso).slice(0, 10);
+}
+
 export async function markOnboardingComplete(lifecycleId: string): Promise<void> {
   const completedAt = new Date().toISOString();
   // Fetch the lifecycle row first so we can mirror onboarding_completed_at
@@ -1042,7 +1060,6 @@ export async function markOnboardingComplete(lifecycleId: string): Promise<void>
   // event (#88) that triggers the Day 3 + Day 7 first-week drip.
   let customerEmail: string | null = null;
   if (lc?.customer_id) {
-    const onboardDate = completedAt.slice(0, 10); // YYYY-MM-DD
     const { error: cErr, data: cust } = await supabase
       .from('customers')
       .select('email, onboard_date')
@@ -1051,6 +1068,17 @@ export async function markOnboardingComplete(lifecycleId: string): Promise<void>
     if (cErr) throw cErr;
     customerEmail = (cust as { email?: string | null; onboard_date?: string | null } | null)?.email ?? null;
     if (!(cust as { onboard_date?: string | null } | null)?.onboard_date) {
+      // Anchor FU1/FU2 to the actual onboarding call date, falling back to the
+      // completion timestamp when the customer has no Calendly-booked call.
+      const { data: obTickets } = await supabase
+        .from('service_tickets')
+        .select('calendly_event_start')
+        .eq('customer_id', lc.customer_id)
+        .eq('category', 'onboarding');
+      const onboardDate = onboardingAnchorDate(
+        (obTickets ?? []) as { calendly_event_start: string | null }[],
+        completedAt,
+      );
       const { error: upErr } = await supabase
         .from('customers')
         .update({ onboard_date: onboardDate })
