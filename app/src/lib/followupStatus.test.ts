@@ -202,7 +202,7 @@ describe('post-close ticket follow-up', () => {
 });
 
 describe('follow-up hold + reschedule on ticket close', () => {
-  const openT = (category = 'support') => ({ status: 'in_progress', category });
+  const openT = (category: ServiceTicket['category'] = 'support') => ({ status: 'in_progress' as ServiceTicket['status'], category });
 
   it('holds pending FU while ANY open ticket exists (incl. non-issue categories)', () => {
     const c = { ...base, onboard_date: daysAgo(20) }; // FU1 overdue by onboard math
@@ -259,7 +259,7 @@ describe('effectiveFollowUpAnchor', () => {
   });
   it('keeps the base anchor while a ticket is still open', () => {
     const c = { ...base, onboard_date: '2026-05-01' };
-    const ctx = { ...emptyCtx, openTickets: [{ status: 'in_progress', category: 'support' }], lastClosedAnyTicketAt: '2026-06-10T00:00:00Z' };
+    const ctx = { ...emptyCtx, openTickets: [{ status: 'in_progress' as ServiceTicket['status'], category: 'support' as ServiceTicket['category'] }], lastClosedAnyTicketAt: '2026-06-10T00:00:00Z' };
     expect(effectiveFollowUpAnchor(c, ctx)).toBe('2026-05-01');
   });
 });
