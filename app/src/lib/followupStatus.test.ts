@@ -64,7 +64,7 @@ describe('computeCustomerStatuses', () => {
     expect(s.has('returned')).toBe(true);
   });
   it('derives ticket-based statuses', () => {
-    const t = (status: ServiceTicket['status'], category: ServiceTicket['category'] = 'support') => ({ status, category });
+    const t = (status: ServiceTicket['status'], category: ServiceTicket['category'] = 'support') => ({ status, category, source: 'hubspot' as ServiceTicket['source'] });
     const ctx = { ...emptyCtx, openTickets: [t('on_hold'), t('waiting_on_customer'), t('queued_for_replacement'), t('call_scheduled', 'diagnosis_call')] };
     const s = computeCustomerStatuses({ ...base }, ctx, today);
     expect(s.has('on_hold')).toBe(true);
@@ -126,14 +126,17 @@ describe('diagnosis-call follow-up', () => {
 
   it('still holds on an open support ticket when there is no diagnosis call', () => {
     const c = { ...base, onboard_date: daysAgo(20) };
-    const s = computeCustomerStatuses(c, { ...emptyCtx, openTickets: [{ status: 'waiting_on_us', category: 'support' }] }, today);
+    const s = computeCustomerStatuses(c, { ...emptyCtx, openTickets: [{ status: 'waiting_on_us', category: 'support', source: 'hubspot' }] }, today);
     expect(s.has('fu_on_hold')).toBe(true);
   });
 });
 
 describe('follow-up hold on open issues', () => {
-  const ticket = (category: ServiceTicket['category'], status: ServiceTicket['status'] = 'waiting_on_us') =>
-    ({ status, category });
+  const ticket = (
+    category: ServiceTicket['category'],
+    status: ServiceTicket['status'] = 'waiting_on_us',
+    source: ServiceTicket['source'] = 'hubspot',
+  ) => ({ status, category, source });
 
   it('holds FU when a replacement is queued (suppresses overdue, adds fu_on_hold)', () => {
     const c = { ...base, onboard_date: daysAgo(20) }; // would be FU1 overdue
@@ -156,6 +159,30 @@ describe('follow-up hold on open issues', () => {
     expect(computeCustomerStatuses(c, { ...emptyCtx, openTickets: [ticket('repair')] }, today).has('fu_on_hold')).toBe(true);
     // (diagnosis-call blocking is driven by ctx.diagnosisCalls, not an open
     //  diagnosis_call ticket — see the 'diagnosis-call follow-up' suite.)
+  });
+
+  it('does NOT hold FU for an open onboarding-call ticket', () => {
+    const c = { ...base, onboard_date: daysAgo(20) };
+    const s = computeCustomerStatuses(c, { ...emptyCtx, openTickets: [ticket('onboarding')] }, today);
+    expect(s.has('fu_on_hold')).toBe(false);
+    expect(s.has('overdue')).toBe(true);
+  });
+
+  it('does NOT hold FU for an auto-synced Quo message-thread support ticket', () => {
+    const c = { ...base, onboard_date: daysAgo(20) };
+    const s = computeCustomerStatuses(c, { ...emptyCtx, openTickets: [ticket('support', 'waiting_on_us', 'quo')] }, today);
+    expect(s.has('fu_on_hold')).toBe(false);
+    expect(s.has('overdue')).toBe(true);
+  });
+
+  it('does NOT hold FU for a Gmail-synced support ticket', () => {
+    const c = { ...base, onboard_date: daysAgo(20) };
+    expect(computeCustomerStatuses(c, { ...emptyCtx, openTickets: [ticket('support', 'waiting_on_us', 'gmail')] }, today).has('fu_on_hold')).toBe(false);
+  });
+
+  it('holds FU for a genuine ops-created support ticket (source ops_manual)', () => {
+    const c = { ...base, onboard_date: daysAgo(20) };
+    expect(computeCustomerStatuses(c, { ...emptyCtx, openTickets: [ticket('support', 'waiting_on_us', 'ops_manual')] }, today).has('fu_on_hold')).toBe(true);
   });
 
   it('does NOT mark fu_on_hold when the follow-up is already complete', () => {
@@ -195,18 +222,19 @@ describe('post-close ticket follow-up', () => {
   });
   it('does NOT mark while an open issue ticket still exists', () => {
     const s = computeCustomerStatuses({ ...base }, {
-      ...emptyCtx, openTickets: [{ status: 'waiting_on_us', category: 'support' }], lastClosedTicket: closed(30),
+      ...emptyCtx, openTickets: [{ status: 'waiting_on_us', category: 'support', source: 'hubspot' }], lastClosedTicket: closed(30),
     }, today);
     expect(s.has('ticket_followup_due')).toBe(false);
   });
 });
 
 describe('follow-up hold + reschedule on ticket close', () => {
-  const openT = (category: ServiceTicket['category'] = 'support') => ({ status: 'in_progress' as ServiceTicket['status'], category });
+  const openT = (category: ServiceTicket['category'] = 'support', source: ServiceTicket['source'] = 'ops_manual') =>
+    ({ status: 'in_progress' as ServiceTicket['status'], category, source });
 
-  it('holds pending FU while ANY open ticket exists (incl. non-issue categories)', () => {
+  it('holds a pending FU while a genuine open support ticket exists', () => {
     const c = { ...base, onboard_date: daysAgo(20) }; // FU1 overdue by onboard math
-    const ctx = { ...emptyCtx, openTickets: [openT('onboarding')] };
+    const ctx = { ...emptyCtx, openTickets: [openT('support', 'ops_manual')] };
     const s = computeCustomerStatuses(c, ctx, today);
     expect(s.has('fu_on_hold')).toBe(true);
     expect(s.has('overdue')).toBe(false);
@@ -259,7 +287,7 @@ describe('effectiveFollowUpAnchor', () => {
   });
   it('keeps the base anchor while a ticket is still open', () => {
     const c = { ...base, onboard_date: '2026-05-01' };
-    const ctx = { ...emptyCtx, openTickets: [{ status: 'in_progress' as ServiceTicket['status'], category: 'support' as ServiceTicket['category'] }], lastClosedAnyTicketAt: '2026-06-10T00:00:00Z' };
+    const ctx = { ...emptyCtx, openTickets: [{ status: 'in_progress' as ServiceTicket['status'], category: 'support' as ServiceTicket['category'], source: 'ops_manual' as ServiceTicket['source'] }], lastClosedAnyTicketAt: '2026-06-10T00:00:00Z' };
     expect(effectiveFollowUpAnchor(c, ctx)).toBe('2026-05-01');
   });
 });

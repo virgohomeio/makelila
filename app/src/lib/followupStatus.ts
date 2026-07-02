@@ -30,7 +30,7 @@ export const STATUS_FILTERS: { key: FollowUpStatusKey; label: string }[] = [
 ];
 
 export type CustomerStatusContext = {
-  openTickets: Pick<ServiceTicket, 'status' | 'category'>[];
+  openTickets: Pick<ServiceTicket, 'status' | 'category' | 'source'>[];
   queuedReplacement: boolean;
   returned: boolean;
   awaitingOnboarding: boolean;
@@ -54,6 +54,18 @@ export const TICKET_FOLLOWUP_DAYS = 14;
 // post-close follow-up.
 export const NON_ISSUE_TICKET_CATEGORIES = new Set(['onboarding', 'diagnosis_call']);
 export const isIssueTicket = (t: { category: string }) => !NON_ISSUE_TICKET_CATEGORIES.has(t.category);
+
+// Sources that are auto-synced message threads (Quo texts, Gmail) — these get
+// logged as tickets (often category 'support') but are not genuine support
+// cases, so they never hold follow-ups. A real complaint from these channels
+// must be converted to a non-synced ticket to hold.
+export const AUTO_SYNC_TICKET_SOURCES = new Set(['quo', 'gmail']);
+
+/** A ticket that HOLDS a customer's follow-ups: a genuine open issue
+ *  (support/repair — not onboarding/diagnosis) that isn't an auto-synced
+ *  Quo/Gmail message thread. */
+export const isHoldingTicket = (t: { category: string; source: string }) =>
+  isIssueTicket(t) && !AUTO_SYNC_TICKET_SOURCES.has(t.source);
 
 /** Due date (ISO) for the post-close ticket follow-up, or null if N/A. */
 export function ticketFollowupDueDate(
@@ -109,13 +121,14 @@ export function computeCustomerStatuses(
   const diagDue = latestActiveStart != null
     && midToday.getTime() >= new Date(latestActiveStart).getTime() + DIAG_FOLLOWUP_DAYS * 86_400_000;
 
-  // Otherwise, a pending follow-up is put ON HOLD while the customer has an
-  // unresolved issue — a queued replacement or ANY open ticket (any category).
-  // Held customers never show as overdue (the hold branch below skips the
-  // overdue/due markers).
+  // Otherwise, a pending follow-up is put ON HOLD while the customer has a
+  // GENUINE unresolved issue — a queued replacement, or an open support/repair
+  // ticket that isn't an auto-synced Quo/Gmail message thread. Onboarding /
+  // diagnosis-call tickets and message-thread tickets never hold. Held
+  // customers never show as overdue (the hold branch below skips the markers).
   // openIssueTickets is still used below for the post-close follow-up.
   const openIssueTickets = ctx.openTickets.filter(t => isIssueTicket(t as { category: string }));
-  const blockingCondition = ctx.queuedReplacement || ctx.openTickets.length > 0;
+  const blockingCondition = ctx.queuedReplacement || ctx.openTickets.some(isHoldingTicket);
   const pendingFu = !!c.onboard_date && fu !== 'complete' && fu !== 'unscheduled';
 
   if (hasAnyDiag) {
@@ -252,7 +265,7 @@ export function useFollowUpDirectory(today: Date = new Date()): {
 
   return useMemo(() => {
     const idx = buildCustomerKeyIndex(customers);
-    const ticketsByCustomer = new Map<string, Pick<ServiceTicket, 'status' | 'category'>[]>();
+    const ticketsByCustomer = new Map<string, Pick<ServiceTicket, 'status' | 'category' | 'source'>[]>();
     // Most-recent CLOSED ticket per customer (anchors the post-close follow-up).
     const lastClosedByCustomer = new Map<string, { id: string; closedAt: string | null; followupDoneAt: string | null }>();
     // Most-recent close (ISO) across ALL categories — anchors the FU reschedule.
