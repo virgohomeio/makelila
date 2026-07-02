@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from './supabase';
-import { useCustomers, computeFuState, followUpDueDates, FU1_DAYS, FU2_DAYS, type FuState, type Customer } from './customers';
+import { useCustomers, computeFuState, followUpDueDates, type FuState, type Customer } from './customers';
 import { useServiceTickets, type ServiceTicket } from './service';
 import { useQueuedReplacements } from './orders';
 
@@ -113,9 +113,8 @@ export function computeCustomerStatuses(
   // unresolved issue — a queued replacement or ANY open ticket (any category).
   // Held customers never show as overdue (the hold branch below skips the
   // overdue/due markers).
+  // openIssueTickets is still used below for the post-close follow-up.
   const openIssueTickets = ctx.openTickets.filter(t => isIssueTicket(t as { category: string }));
-  // Any open ticket (any category) holds a pending follow-up — not just issue
-  // tickets. openIssueTickets is still used below for the post-close follow-up.
   const blockingCondition = ctx.queuedReplacement || ctx.openTickets.length > 0;
   const pendingFu = !!c.onboard_date && fu !== 'complete' && fu !== 'unscheduled';
 
