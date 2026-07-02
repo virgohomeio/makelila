@@ -38,6 +38,11 @@ export type CustomerStatusContext = {
   // The customer's most-recent CLOSED ticket (null if none). Drives the
   // ticket-specific follow-up scheduled 14 days after the ticket closed.
   lastClosedTicket?: { id: string; closedAt: string | null; followupDoneAt: string | null } | null;
+  // Most-recent close date (ISO timestamp) across ALL ticket categories — not
+  // just issue tickets. Anchors the FU1/FU2 reschedule once a hold lifts.
+  // Distinct from lastClosedTicket, which is issue-only and drives the separate
+  // post-close ticket follow-up.
+  lastClosedAnyTicketAt?: string | null;
 };
 
 // Days after a ticket closes that its follow-up is due.
@@ -58,6 +63,18 @@ export function ticketFollowupDueDate(
   const due = new Date(lastClosed.closedAt);
   due.setDate(due.getDate() + TICKET_FOLLOWUP_DAYS);
   return due;
+}
+
+/** The date FU1/FU2 count from: `onboard_date`, shifted forward to a later
+ *  ticket-close date when the customer had a blocking ticket that has since
+ *  closed. Returns ISO `YYYY-MM-DD`, or null when unscheduled. */
+export function effectiveFollowUpAnchor(c: Customer, ctx: CustomerStatusContext): string | null {
+  if (!c.onboard_date) return null;
+  // While any ticket is open the customer is on hold; the anchor isn't surfaced.
+  if (ctx.openTickets.length > 0) return c.onboard_date;
+  const closed = ctx.lastClosedAnyTicketAt?.slice(0, 10);
+  if (closed && closed > c.onboard_date) return closed;
+  return c.onboard_date;
 }
 
 /** Days until the customer's next still-pending follow-up, or null if none

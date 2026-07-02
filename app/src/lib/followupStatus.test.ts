@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  computeCustomerStatuses, STATUS_FILTERS, type CustomerStatusContext,
+  computeCustomerStatuses, STATUS_FILTERS, effectiveFollowUpAnchor, type CustomerStatusContext,
 } from './followupStatus';
 import type { Customer } from './customers';
 import type { ServiceTicket } from './service';
@@ -205,6 +205,31 @@ describe('post-close ticket follow-up', () => {
       ...emptyCtx, openTickets: [{ status: 'waiting_on_us', category: 'support' }], lastClosedTicket: closed(30),
     }, today);
     expect(s.has('ticket_followup_due')).toBe(false);
+  });
+});
+
+describe('effectiveFollowUpAnchor', () => {
+  it('returns null when onboard_date is null', () => {
+    expect(effectiveFollowUpAnchor({ ...base }, emptyCtx)).toBeNull();
+  });
+  it('returns onboard_date when there is no closed ticket', () => {
+    const c = { ...base, onboard_date: '2026-05-01' };
+    expect(effectiveFollowUpAnchor(c, emptyCtx)).toBe('2026-05-01');
+  });
+  it('shifts the anchor to a ticket that closed after onboarding', () => {
+    const c = { ...base, onboard_date: '2026-05-01' };
+    const ctx = { ...emptyCtx, lastClosedAnyTicketAt: '2026-06-10T09:30:00Z' };
+    expect(effectiveFollowUpAnchor(c, ctx)).toBe('2026-06-10');
+  });
+  it('keeps onboard_date when the closed ticket predates onboarding', () => {
+    const c = { ...base, onboard_date: '2026-05-01' };
+    const ctx = { ...emptyCtx, lastClosedAnyTicketAt: '2026-04-01T00:00:00Z' };
+    expect(effectiveFollowUpAnchor(c, ctx)).toBe('2026-05-01');
+  });
+  it('keeps the base anchor while a ticket is still open', () => {
+    const c = { ...base, onboard_date: '2026-05-01' };
+    const ctx = { ...emptyCtx, openTickets: [{ status: 'in_progress', category: 'support' }], lastClosedAnyTicketAt: '2026-06-10T00:00:00Z' };
+    expect(effectiveFollowUpAnchor(c, ctx)).toBe('2026-05-01');
   });
 });
 
