@@ -3,7 +3,7 @@ import {
   recordFollowUp, setReviewStatus, computeFuState, FU_STATE_META,
   updateCustomerProfile, type Customer, type CustomerProfilePatch,
 } from '../../lib/customers';
-import { markDiagnosisFollowupDone, markTicketPostCloseFollowupDone, type ServiceTicket, priorityMeta } from '../../lib/service';
+import { markTicketPostCloseFollowupDone, type ServiceTicket, priorityMeta } from '../../lib/service';
 import { type TicketFollowup } from '../../lib/followupStatus';
 import { useReplacementQueue } from '../../lib/postShipment';
 import {
@@ -20,13 +20,12 @@ const REPL_STATUS_LABEL: Record<string, string> = {
 };
 
 export function FollowUpDetailPanel({
-  customer, anchorDate, openTickets, isPaused, diagnosisTicketId, ticketFollowup, onClose, onChanged,
+  customer, anchorDate, openTickets, isPaused, ticketFollowup, onClose, onChanged,
 }: {
   customer: Customer;
   anchorDate: string | null;
   openTickets: ServiceTicket[];
   isPaused: boolean;
-  diagnosisTicketId: string | null;
   ticketFollowup: TicketFollowup | null;
   onClose: () => void;
   onChanged: () => void;
@@ -207,15 +206,6 @@ export function FollowUpDetailPanel({
           locked={!customer.fu1_status}
           onAction={(m) => void run(() => recordFollowUp(customer.id, 'fu2', m))}
         />
-
-        {diagnosisTicketId && (
-          <div className={styles.checkRow}>
-            <span>☐ Diagnosis follow-up (2 weeks after call)</span>
-            <span className={styles.checkBtns}>
-              <button disabled={busy} onClick={() => void run(() => markDiagnosisFollowupDone(diagnosisTicketId))}>Mark done</button>
-            </span>
-          </div>
-        )}
 
         {ticketFollowup && (
           <div className={`${styles.fuItem} ${styles.fuItemPaused}`}>

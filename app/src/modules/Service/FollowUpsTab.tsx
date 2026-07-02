@@ -18,7 +18,7 @@ const WEEK_DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 // per-customer from onboard_date) and onboarding calls (from onboarding tickets
 // with a booked Calendly time). Clicking a call opens its ticket.
 type FuEvent = { type: 'fu'; customer: Customer; kind: 'fu1' | 'fu2'; dueDate: Date; state: FuState };
-type CallEvent = { type: 'call'; callKind: 'onboarding' | 'diagnosis' | 'diag_followup' | 'ticket_followup'; label: string; time: string; ticketId: string };
+type CallEvent = { type: 'call'; callKind: 'onboarding' | 'diagnosis' | 'ticket_followup'; label: string; time: string; ticketId: string };
 type CalEvent = FuEvent | CallEvent;
 
 function dayKey(d: Date): string {
@@ -31,7 +31,7 @@ function FollowUpCalendar({
   month: Date;
   today: Date;
   customers: Customer[];
-  tickets: { id: string; category: string; calendly_event_start: string | null; customer_name: string | null; subject: string; diagnosis_followup_done_at: string | null }[];
+  tickets: { id: string; category: string; calendly_event_start: string | null; customer_name: string | null; subject: string }[];
   ticketFollowups: TicketFollowup[];
   blockedCustomerIds: Set<string>;
   anchorByCustomer: Map<string, string | null>;
@@ -70,17 +70,6 @@ function FollowUpCalendar({
         add(t.calendly_event_start.slice(0, 10), {
           type: 'call', callKind: 'diagnosis',
           label: t.customer_name ?? t.subject, time: t.calendly_event_start, ticketId: t.id,
-        });
-      }
-    }
-    // Diagnosis follow-ups — 14 days after a diagnosis call, until marked done.
-    for (const t of tickets) {
-      if (t.category === 'diagnosis_call' && t.calendly_event_start && !t.diagnosis_followup_done_at) {
-        const due = new Date(t.calendly_event_start);
-        due.setDate(due.getDate() + 14);
-        add(dayKey(due), {
-          type: 'call', callKind: 'diag_followup',
-          label: t.customer_name ?? t.subject, time: due.toISOString(), ticketId: t.id,
         });
       }
     }
@@ -175,7 +164,6 @@ function FollowUpCalendar({
                   const meta = {
                     onboarding:      { icon: '🚀', name: 'Onboarding call',     cls: styles.calEventCall },
                     diagnosis:       { icon: '🩺', name: 'Diagnosis call',      cls: styles.calEventDiagnosis },
-                    diag_followup:   { icon: '🔁', name: 'Diagnosis follow-up', cls: styles.calEventDiagFollowup },
                     ticket_followup: { icon: '🎫', name: 'Ticket follow-up',    cls: styles.calEventDiagFollowup },
                   }[ev.callKind];
                   return (
@@ -312,12 +300,6 @@ export function FollowUpsTab() {
           openTickets={selectedOpenTickets}
           isPaused={selectedPaused}
           ticketFollowup={ticketFollowups.find(tf => tf.customerId === selectedCustomer.id) ?? null}
-          diagnosisTicketId={
-            tickets.find(t => t.category === 'diagnosis_call' && !t.diagnosis_followup_done_at
-              && t.calendly_event_start != null
-              && (t.customer_id === selectedCustomer.id
-                  || (!!t.customer_email && t.customer_email.toLowerCase() === (selectedCustomer.email ?? '').toLowerCase())))?.id ?? null
-          }
           onClose={() => setSelected(null)}
           onChanged={() => void refresh()}
         />

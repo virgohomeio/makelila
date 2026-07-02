@@ -100,7 +100,6 @@ export type ServiceTicket = {
   // Backlog #75 — diagnosis-call dedupe stamps.
   diagnosis_link_sent_at: string | null;
   diag_cohost_invited_at: string | null;
-  diagnosis_followup_done_at: string | null;
   google_calendar_event_id: string | null;
   // J5 — SLA aging
   sla_policy_id: string | null;
@@ -996,16 +995,6 @@ export async function markDiagnosisLinkSent(ticketId: string): Promise<void> {
   await logAction('diagnosis_link_sent', ticketId, sentAt);
 }
 
-/** Mark the 2-week post-diagnosis-call follow-up complete (stamps now). */
-export async function markDiagnosisFollowupDone(ticketId: string): Promise<void> {
-  const doneAt = new Date().toISOString();
-  const { error } = await supabase
-    .from('service_tickets')
-    .update({ diagnosis_followup_done_at: doneAt })
-    .eq('id', ticketId);
-  if (error) throw error;
-  await logAction('diagnosis_followup_done', ticketId, doneAt);
-}
 
 /** Marks the post-close follow-up (scheduled 14 days after a ticket closed) done. */
 export async function markTicketPostCloseFollowupDone(ticketId: string): Promise<void> {

@@ -5,7 +5,7 @@ import { useServiceTickets, type ServiceTicket } from './service';
 import { useQueuedReplacements } from './orders';
 
 export type FollowUpStatusKey =
-  | 'overdue' | 'due_today' | 'due_7d' | 'fu_on_hold' | 'diag_followup_due'
+  | 'overdue' | 'due_today' | 'due_7d' | 'fu_on_hold'
   | 'ticket_followup_due'
   | 'in_followup' | 'awaiting_onboarding' | 'awaiting_response'
   | 'awaiting_diagnosis' | 'queued_replacement' | 'on_hold'
@@ -16,7 +16,6 @@ export const STATUS_FILTERS: { key: FollowUpStatusKey; label: string }[] = [
   { key: 'due_today',           label: 'Due today' },
   { key: 'due_7d',              label: 'Due in 7 days' },
   { key: 'fu_on_hold',          label: 'Follow-up on hold' },
-  { key: 'diag_followup_due',   label: 'Diagnosis follow-up due' },
   { key: 'ticket_followup_due', label: 'Ticket follow-up due' },
   { key: 'in_followup',         label: 'In follow-up' },
   { key: 'awaiting_onboarding', label: 'Awaiting onboarding' },
@@ -34,7 +33,6 @@ export type CustomerStatusContext = {
   queuedReplacement: boolean;
   returned: boolean;
   awaitingOnboarding: boolean;
-  diagnosisCalls: { startIso: string | null; followupDoneAt: string | null }[];
   // The customer's most-recent CLOSED ticket (null if none). Drives the
   // ticket-specific follow-up scheduled 14 days after the ticket closed.
   lastClosedTicket?: { id: string; closedAt: string | null; followupDoneAt: string | null } | null;
@@ -110,20 +108,9 @@ export function computeCustomerStatuses(
   const anchor = effectiveFollowUpAnchor(c, ctx);
   const fu = computeFuState(c, today, anchor);
 
-  // A diagnosis call (had or scheduled) SUPERSEDES the normal cadence: hold
-  // FU1/FU2 and run a dedicated diagnosis follow-up due 14 days after the call.
-  // Once that follow-up is stamped done the customer is resolved (no resume).
-  const DIAG_FOLLOWUP_DAYS = 14;
-  const activeDiag = ctx.diagnosisCalls.filter(d => d.startIso && !d.followupDoneAt);
-  const hasAnyDiag = ctx.diagnosisCalls.length > 0;
-  const midToday = new Date(today); midToday.setHours(0, 0, 0, 0);
-  const latestActiveStart = activeDiag.map(d => d.startIso as string).sort().at(-1);
-  const diagDue = latestActiveStart != null
-    && midToday.getTime() >= new Date(latestActiveStart).getTime() + DIAG_FOLLOWUP_DAYS * 86_400_000;
-
-  // Otherwise, a pending follow-up is put ON HOLD while the customer has a
-  // GENUINE unresolved issue — a queued replacement, or an open support/repair
-  // ticket that isn't an auto-synced Quo/Gmail message thread. Onboarding /
+  // A pending follow-up is put ON HOLD while the customer has a GENUINE
+  // unresolved issue — a queued replacement, or an open support/repair ticket
+  // that isn't an auto-synced Quo/Gmail message thread. Onboarding /
   // diagnosis-call tickets and message-thread tickets never hold. Held
   // customers never show as overdue (the hold branch below skips the markers).
   // openIssueTickets is still used below for the post-close follow-up.
@@ -131,13 +118,7 @@ export function computeCustomerStatuses(
   const blockingCondition = ctx.queuedReplacement || ctx.openTickets.some(isHoldingTicket);
   const pendingFu = !!c.onboard_date && fu !== 'complete' && fu !== 'unscheduled';
 
-  if (hasAnyDiag) {
-    if (activeDiag.length > 0) {
-      if (diagDue) s.add('diag_followup_due');
-      else s.add('fu_on_hold');
-    }
-    // all diagnosis follow-ups done → resolved: normal cadence stays suppressed
-  } else if (pendingFu && blockingCondition) {
+  if (pendingFu && blockingCondition) {
     s.add('fu_on_hold');
   } else {
     if (fu === 'overdue_fu1' || fu === 'overdue_fu2') s.add('overdue');
@@ -162,6 +143,7 @@ export function computeCustomerStatuses(
   // falls due 14 days after the most-recent close (until marked done).
   if (openIssueTickets.length === 0) {
     const due = ticketFollowupDueDate(ctx.lastClosedTicket);
+    const midToday = new Date(today); midToday.setHours(0, 0, 0, 0);
     if (due && midToday.getTime() >= due.getTime()) s.add('ticket_followup_due');
   }
 
@@ -288,16 +270,6 @@ export function useFollowUpDirectory(today: Date = new Date()): {
       const arr = ticketsByCustomer.get(cid);
       if (arr) arr.push(t); else ticketsByCustomer.set(cid, [t]);
     }
-    // All diagnosis-call tickets (any status — diagnosis history matters), per customer.
-    const diagnosisCallsByCustomer = new Map<string, { startIso: string | null; followupDoneAt: string | null }[]>();
-    for (const t of tickets) {
-      if (t.category !== 'diagnosis_call') continue;
-      const cid = resolveCustomerId(t, idx);
-      if (!cid) continue;
-      const entry = { startIso: t.calendly_event_start, followupDoneAt: t.diagnosis_followup_done_at };
-      const arr = diagnosisCallsByCustomer.get(cid);
-      if (arr) arr.push(entry); else diagnosisCallsByCustomer.set(cid, [entry]);
-    }
     const queuedIds = new Set<string>();
     for (const o of replacements) {
       const cid = resolveCustomerId(o as unknown as Matchable, idx);
@@ -322,7 +294,6 @@ export function useFollowUpDirectory(today: Date = new Date()): {
         queuedReplacement: queuedIds.has(c.id),
         returned: false,
         awaitingOnboarding: awaitingOnboardingIds.has(c.id),
-        diagnosisCalls: diagnosisCallsByCustomer.get(c.id) ?? [],
         lastClosedTicket,
         lastClosedAnyTicketAt: lastClosedAnyByCustomer.get(c.id) ?? null,
       };
