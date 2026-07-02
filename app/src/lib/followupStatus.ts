@@ -196,6 +196,9 @@ export type DirectoryRow = {
   customer: Customer;
   statuses: Set<FollowUpStatusKey>;
   fuState: FuState;
+  // Effective FU anchor (onboard_date, shifted after a ticket-close reschedule),
+  // ISO YYYY-MM-DD or null. Used by the calendar to place FU1/FU2 markers.
+  anchorDate: string | null;
 };
 
 /** Calendar marker for a post-close ticket follow-up. */
@@ -252,10 +255,16 @@ export function useFollowUpDirectory(today: Date = new Date()): {
     const ticketsByCustomer = new Map<string, Pick<ServiceTicket, 'status' | 'category'>[]>();
     // Most-recent CLOSED ticket per customer (anchors the post-close follow-up).
     const lastClosedByCustomer = new Map<string, { id: string; closedAt: string | null; followupDoneAt: string | null }>();
+    // Most-recent close (ISO) across ALL categories — anchors the FU reschedule.
+    const lastClosedAnyByCustomer = new Map<string, string>();
     for (const t of tickets) {
       const cid = resolveCustomerId(t, idx);
       if (!cid) continue;
       if (t.status === 'closed') {
+        if (t.closed_at) {
+          const prevAny = lastClosedAnyByCustomer.get(cid);
+          if (!prevAny || t.closed_at > prevAny) lastClosedAnyByCustomer.set(cid, t.closed_at);
+        }
         if (!isIssueTicket(t)) continue; // onboarding/diagnosis don't anchor a post-close follow-up
         const prev = lastClosedByCustomer.get(cid);
         if (!prev || (t.closed_at ?? '') > (prev.closedAt ?? '')) {
@@ -302,6 +311,7 @@ export function useFollowUpDirectory(today: Date = new Date()): {
         awaitingOnboarding: awaitingOnboardingIds.has(c.id),
         diagnosisCalls: diagnosisCallsByCustomer.get(c.id) ?? [],
         lastClosedTicket,
+        lastClosedAnyTicketAt: lastClosedAnyByCustomer.get(c.id) ?? null,
       };
       const statuses = computeCustomerStatuses(c, ctx, today);
       // Fold in operator-applied manual tags (additive to the derived ones).
@@ -309,7 +319,8 @@ export function useFollowUpDirectory(today: Date = new Date()): {
         if (STATUS_FILTERS.some(f => f.key === t)) statuses.add(t as FollowUpStatusKey);
       }
       for (const k of statuses) counts[k] += 1;
-      rows.push({ customer: c, statuses, fuState: computeFuState(c, today) });
+      const anchorDate = effectiveFollowUpAnchor(c, ctx);
+      rows.push({ customer: c, statuses, fuState: computeFuState(c, today, anchorDate), anchorDate });
 
       // Calendar marker for the post-close ticket follow-up (close + 14d) —
       // only once the customer has no open issue tickets.
