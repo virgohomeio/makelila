@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import {
-  useCustomers, computeFuState, FU1_DAYS, FU2_DAYS,
+  useCustomers, computeFuState, followUpDueDates,
   type Customer, type FuState,
 } from '../../lib/customers';
 import { useServiceTickets } from '../../lib/service';
@@ -26,7 +26,7 @@ function dayKey(d: Date): string {
 }
 
 function FollowUpCalendar({
-  month, today, customers, tickets, ticketFollowups, blockedCustomerIds, onPrev, onNext, onToday, onCustomerClick, onCallClick,
+  month, today, customers, tickets, ticketFollowups, blockedCustomerIds, anchorByCustomer, onPrev, onNext, onToday, onCustomerClick, onCallClick,
 }: {
   month: Date;
   today: Date;
@@ -34,6 +34,7 @@ function FollowUpCalendar({
   tickets: { id: string; category: string; calendly_event_start: string | null; customer_name: string | null; subject: string; diagnosis_followup_done_at: string | null }[];
   ticketFollowups: TicketFollowup[];
   blockedCustomerIds: Set<string>;
+  anchorByCustomer: Map<string, string | null>;
   onPrev: () => void;
   onNext: () => void;
   onToday: () => void;
@@ -96,10 +97,9 @@ function FollowUpCalendar({
     for (const c of customers) {
       if (!c.onboard_date) continue;
       if (blockedCustomerIds.has(c.id)) continue; // follow-up on hold — skip FU markers
-      const onboard = new Date(c.onboard_date + 'T00:00:00');
-      const fu1 = new Date(onboard); fu1.setDate(fu1.getDate() + FU1_DAYS);
-      const fu2 = new Date(onboard); fu2.setDate(fu2.getDate() + FU2_DAYS);
-      const state = computeFuState(c, today);
+      const anchor = anchorByCustomer.get(c.id) ?? c.onboard_date;
+      const { fu1Due: fu1, fu2Due: fu2 } = followUpDueDates(anchor);
+      const state = computeFuState(c, today, anchor);
       for (const [kind, dueDate] of [['fu1', fu1], ['fu2', fu2]] as const) {
         if (dueDate < gridStart || dueDate >= gridEnd) continue;
         if (kind === 'fu1' && c.fu1_status) continue;
@@ -109,7 +109,7 @@ function FollowUpCalendar({
       }
     }
     return m;
-  }, [customers, tickets, ticketFollowups, blockedCustomerIds, today, gridStart, gridEnd]);
+  }, [customers, tickets, ticketFollowups, blockedCustomerIds, anchorByCustomer, today, gridStart, gridEnd]);
 
   const todayKey = dayKey(today);
 
@@ -237,6 +237,11 @@ export function FollowUpsTab() {
     [rows],
   );
 
+  const anchorByCustomer = useMemo(
+    () => new Map(rows.map(r => [r.customer.id, r.anchorDate])),
+    [rows],
+  );
+
   const isMobile = useIsMobile();
   const [calendarMonth, setCalendarMonth] = useState<Date>(() => {
     const d = new Date(); d.setDate(1); d.setHours(0, 0, 0, 0); return d;
@@ -287,6 +292,7 @@ export function FollowUpsTab() {
             tickets={tickets}
             ticketFollowups={ticketFollowups}
             blockedCustomerIds={blockedCustomerIds}
+            anchorByCustomer={anchorByCustomer}
             onPrev={() => setCalendarMonth(d => { const n = new Date(d); n.setMonth(n.getMonth() - 1); return n; })}
             onNext={() => setCalendarMonth(d => { const n = new Date(d); n.setMonth(n.getMonth() + 1); return n; })}
             onToday={() => setCalendarMonth(() => { const n = new Date(); n.setDate(1); n.setHours(0, 0, 0, 0); return n; })}
