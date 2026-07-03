@@ -52,7 +52,7 @@
 .muted { color: #a0aec0; }
 .empty { text-align: center; color: #a0aec0; padding: 24px; }
 
-.badgeOk, .badgeWarn {
+.badgeOk, .badgeWarn, .badgeErr {
   font-size: 10px; padding: 2px 8px; border-radius: 4px; font-weight: 700;
   text-transform: uppercase; letter-spacing: 0.3px;
 }
@@ -102,3 +102,11 @@
 .toggleBtn:disabled { opacity: 0.6; cursor: default; }
 .badgeNeutral { font-size: 10px; padding: 2px 8px; border-radius: 4px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.3px; color: #4a5568; background: #edf2f7; }
 .liveBadge { font-size: 10px; padding: 2px 8px; border-radius: 4px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.3px; color: #2b6cb0; background: #ebf8ff; margin-left: 6px; }
+
+/* Verification tab diagnosis */
+.badgeErr { color: #9b2c2c; background: #fed7d7; }
+.diagCell { display: flex; align-items: center; gap: 8px; }
+.diagDetailRow td { background: #f7fafc; padding: 10px 12px; }
+.diagDetail { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: #4a5568; }
+.fixBtn { border: 1px solid #2b6cb0; background: #2b6cb0; color: #fff; border-radius: 6px; padding: 5px 12px; font-size: 13px; cursor: pointer; }
+.fixBtn:disabled { opacity: 0.6; cursor: default; }
