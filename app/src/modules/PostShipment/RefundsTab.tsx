@@ -6,7 +6,7 @@ import {
   useRefundNotes, addRefundNote, deleteRefundNote,
   REFUND_STATUS_META, REFUND_METHODS, REFUND_METHOD_META,
   UNIT_STATUS_LABEL, RETURN_DISPOSITION_META,
-  type RefundApproval, type ReturnRow, type RefundMethod, type ReturnDisposition, type ReturnStatus,
+  type RefundApproval, type ReturnRow, type RefundMethod, type ReturnDisposition, type ReturnStatus, type ReturnCategory,
 } from '../../lib/postShipment';
 
 // Operator-facing unit-status stages, editable from the refund detail panel.
@@ -14,6 +14,7 @@ const UNIT_STAGES: { value: ReturnStatus; label: string }[] = [
   { value: 'created',          label: 'Return form submitted' },
   { value: 'pickup_scheduled', label: 'Pickup scheduled' },
   { value: 'received',         label: 'Unit returned' },
+  { value: 'discarded',        label: 'Unit discarded by customer' },
 ];
 import { useQueuedReplacements, holdReplacement, type Order } from '../../lib/orders';
 import { useAuth } from '../../lib/auth';
@@ -905,7 +906,13 @@ function FinanceApproveModal({
   const [localError, setLocalError] = useState<string | null>(null);
 
   const FINANCE_OK_STATUSES = ['received', 'inspected', 'refunded', 'closed'];
-  const returnNotReceived = linkedReturn != null && !FINANCE_OK_STATUSES.includes(linkedReturn.status);
+  const DEFECTIVE_CATEGORIES: ReturnCategory[] = ['product_defect', 'shipping_damage'];
+  const isDefectiveDiscard =
+    linkedReturn?.status === 'discarded' && (
+      (linkedReturn.return_category != null && DEFECTIVE_CATEGORIES.includes(linkedReturn.return_category)) ||
+      linkedReturn.return_reasons.some(r => /defect|crack|malfunction|hardware|broken|damag/i.test(r))
+    );
+  const returnNotReceived = linkedReturn != null && !FINANCE_OK_STATUSES.includes(linkedReturn.status) && !isDefectiveDiscard;
 
   const amount = Number(amountStr);
   const amountChanged = !Number.isNaN(amount) && Number(amount.toFixed(2)) !== Number(original.toFixed(2));
@@ -961,7 +968,7 @@ function FinanceApproveModal({
         {returnNotReceived && (
           <div className={styles.financeModalWarn}>
             ⚠ Linked return is in "<strong>{linkedReturn!.status}</strong>" status — refund can only
-            be processed after the unit is received and issues are confirmed.
+            be processed after the unit is received, or marked as discarded due to a confirmed defect or damage.
           </div>
         )}
         {localError && <div className={styles.financeModalError}>{localError}</div>}

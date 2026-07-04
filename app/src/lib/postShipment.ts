@@ -9,7 +9,7 @@ import { logAction } from './activityLog';
 
 export type ReturnStatus =
   | 'created' | 'pickup_scheduled' | 'picked_up' | 'received'
-  | 'inspected' | 'refunded' | 'denied' | 'closed';
+  | 'inspected' | 'refunded' | 'denied' | 'closed' | 'discarded';
 
 export type ReturnCondition =
   | 'unused' | 'used' | 'damaged'           // legacy / coarse
@@ -24,10 +24,11 @@ export const RETURN_STATUS_META: Record<ReturnStatus, { label: string; color: st
   'refunded':         { label: 'Refunded',   color: '#276749', bg: '#f0fff4', border: '#9ae6b4' },
   'denied':           { label: 'Denied',     color: '#9b2c2c', bg: '#fff5f5', border: '#fc8181' },
   'closed':           { label: 'Closed',     color: '#718096', bg: '#edf2f7', border: '#cbd5e1' },
+  'discarded':        { label: 'Discarded',  color: '#744210', bg: '#fffff0', border: '#f6e05e' },
 };
 
 export const RETURN_STATUS_ORDER: ReturnStatus[] = [
-  'created','pickup_scheduled','picked_up','received','inspected','refunded','denied','closed',
+  'created','pickup_scheduled','picked_up','received','inspected','refunded','denied','closed','discarded',
 ];
 
 // Plain-language unit status for the Refunds tab — where is the physical unit?
@@ -40,6 +41,7 @@ export const UNIT_STATUS_LABEL: Record<ReturnStatus, string> = {
   'refunded':         'Received · refunded',
   'denied':           'Denied',
   'closed':           'Closed',
+  'discarded':        'Unit discarded by customer',
 };
 
 // What the customer was told to do with the unit being returned.
