@@ -199,7 +199,7 @@ export default function ReturnForm() {
 
       const fullName = `${firstName.trim()} ${lastName.trim()}`;
       const ref = `CRT-${Math.floor(Math.random() * 90000 + 10000)}`;
-      const { error: insErr } = await supabase.from('returns').insert({
+      const { data: inserted, error: insErr } = await supabase.from('returns').insert({
         customer_name: fullName,
         customer_email: email.trim(),
         customer_phone: phone.trim() || null,
@@ -226,8 +226,14 @@ export default function ReturnForm() {
         refund_contact: refundContact.trim() || null,
         additional_comments: additional.trim() || null,
         purchase_proof: filePath,
-      });
+      }).select('id').single();
       if (insErr) throw insErr;
+
+      // Fire-and-forget: send confirmation to customer + review email to Reina/George
+      if (inserted?.id) {
+        supabase.functions.invoke('send-return-emails', { body: { return_id: inserted.id } }).catch(() => {});
+      }
+
       setReturnRef(ref);
     } catch (err) {
       setError(`Could not submit: ${(err as Error).message}. Please email support@lilacomposter.com if this persists.`);

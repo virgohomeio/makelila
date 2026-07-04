@@ -428,6 +428,12 @@ verify_jwt = false
 [functions.send-fulfillment-email]
 verify_jwt = false
 
+# send-return-emails: called from the public /return form (no user JWT).
+# Uses service-role key internally; sends confirmation to customer + review
+# email to reina + george.
+[functions.send-return-emails]
+verify_jwt = false
+
 # sync-hubspot-customers: same ES256 gateway workaround. Function uses the
 # service-role key internally and HUBSPOT_ACCESS_TOKEN for outbound calls,
 # so caller identity isn't needed for correctness.
