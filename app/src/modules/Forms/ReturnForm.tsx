@@ -147,6 +147,7 @@ export default function ReturnForm() {
     if (!packaging) { setError('Please tell us about the packaging.'); return; }
     if (!alternative) { setError('Please select an alternative composting plan.'); return; }
     if (!refundMethod) { setError('Please select a refund method.'); return; }
+    if (!purchaseProof.trim()) { setError('Please provide proof of purchase (receipt, invoice, or order confirmation).'); return; }
 
     setSubmitting(true);
     try {
@@ -211,7 +212,7 @@ export default function ReturnForm() {
 
   return (
     <FormLayout
-      title="LILA Pro Return Form"
+      title="LILA Pro Return Application"
       intro="Sorry it didn't work out. Please share a few details so our team can process your return. Required fields are marked with *."
     >
       {error && <div className={styles.errorBanner}>{error}</div>}
@@ -355,7 +356,7 @@ export default function ReturnForm() {
         )}
 
         {/* 18. Purchase proof */}
-        <Field label="Proof of purchase (optional)" help="If you have a receipt, invoice, or order confirmation number — especially if the unit was purchased as a gift — please share it here. This helps us verify the refund amount.">
+        <Field label="Proof of purchase" required help="Please provide your receipt, invoice number, or order confirmation details. If the unit was purchased as a gift, include the original purchaser's receipt or order reference.">
           <textarea value={purchaseProof} onChange={e => setPurchaseProof(e.target.value)}
                     className={styles.textarea} rows={3}
                     placeholder="e.g. Order #1234, confirmation email details, store name and date of purchase, or any other purchase reference" />
