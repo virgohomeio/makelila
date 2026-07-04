@@ -4,12 +4,13 @@ import { DashboardTab } from './DashboardTab';
 import { ReportTab } from './ReportTab';
 import { JourneyTab } from './JourneyTab';
 import { SocialTab } from './SocialTab';
+import { WebTab } from './WebTab';
 import { SystemOfRecordCard } from './SystemOfRecordCard';
 import { useFbCampaigns, triggerFbSync } from '../../lib/marketing/facebook';
 import { useKlaviyoSyncStatus, triggerKlaviyoSync, triggerKlaviyoEventsSync } from '../../lib/marketing/klaviyo';
 import styles from './Marketing.module.css';
 
-type Tab = 'dashboard' | 'report' | 'campaigns' | 'social' | 'attribution' | 'journey' | 'sync';
+type Tab = 'dashboard' | 'report' | 'campaigns' | 'social' | 'web' | 'attribution' | 'journey' | 'sync';
 
 export default function Marketing() {
   const [tab, setTab] = useState<Tab>('dashboard');
@@ -65,7 +66,7 @@ export default function Marketing() {
       </div>
 
       <div className={styles.tabs}>
-        {(['dashboard', 'report', 'campaigns', 'social', 'attribution', 'journey', 'sync'] as Tab[]).map(t => (
+        {(['dashboard', 'report', 'campaigns', 'social', 'web', 'attribution', 'journey', 'sync'] as Tab[]).map(t => (
           <button
             key={t}
             className={`${styles.tab} ${tab === t ? styles.tabActive : ''}`}
@@ -147,6 +148,8 @@ export default function Marketing() {
       {tab === 'report' && <ReportTab />}
 
       {tab === 'social' && <SocialTab />}
+
+      {tab === 'web' && <WebTab />}
 
       {tab === 'attribution' && <CacDashboard />}
 
