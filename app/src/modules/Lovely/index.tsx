@@ -47,25 +47,23 @@ export default function Lovely() {
   return (
     <div className={styles.layout}>
       <div className={styles.header}>
-        <div className={styles.titleRow}>
-          <h2 className={styles.title}>Lovely</h2>
-          <div className={styles.subTabs}>
-            {tabs.map(t => (
-              <button
-                key={t.key}
-                className={`${styles.subTab} ${activeTab === t.key ? styles.subTabActive : ''}`}
-                onClick={() => setTab(t.key)}
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
-        </div>
+        <h2 className={styles.title}>Lovely</h2>
         <div className={styles.headerActions}>
           <button onClick={() => void refetch()} disabled={loading} className={styles.refreshBtn}>
-            {loading ? 'Loading…' : '⟳ Refresh'}
+            {loading ? 'Refreshing…' : 'Refresh'}
           </button>
         </div>
+      </div>
+      <div className={styles.subTabs}>
+        {tabs.map(t => (
+          <button
+            key={t.key}
+            className={`${styles.subTab} ${activeTab === t.key ? styles.subTabActive : ''}`}
+            onClick={() => setTab(t.key)}
+          >
+            {t.label}
+          </button>
+        ))}
       </div>
 
       {activeTab === 'users' && <UsersTab />}
