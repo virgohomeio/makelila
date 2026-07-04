@@ -74,6 +74,11 @@ const RETURN_CATEGORY_OPTIONS = [
   { value: 'other',               label: 'Other' },
 ] as const;
 
+function normalizeOrderRef(raw: string): string {
+  const t = raw.trim();
+  return t && !t.startsWith('#') ? `#${t}` : t;
+}
+
 export default function ReturnForm() {
   // 1. Name
   const [firstName, setFirstName] = useState('');
@@ -110,8 +115,11 @@ export default function ReturnForm() {
   const [refundContact, setRefundContact] = useState('');
   // 17. Anything else
   const [additional, setAdditional] = useState('');
-  // 18. Purchase proof (invoice / receipt / order confirmation)
-  const [purchaseProof, setPurchaseProof] = useState('');
+  // 18. Purchase proof file upload
+  const [purchaseProofFile, setPurchaseProofFile] = useState<File | null>(null);
+  // Order number validation
+  const [orderValidating, setOrderValidating] = useState(false);
+  const [orderFound, setOrderFound] = useState<boolean | null>(null);
 
   // Hidden / inferred
   const [country, setCountry] = useState<'Canada' | 'USA'>('Canada');
@@ -125,6 +133,22 @@ export default function ReturnForm() {
     setReasons(prev => prev.includes(r) ? prev.filter(x => x !== r) : [...prev, r]);
   };
 
+  const validateOrderRef = async () => {
+    const normalized = normalizeOrderRef(orderRef);
+    if (!normalized) return;
+    setOrderRef(normalized);
+    setOrderValidating(true);
+    setOrderFound(null);
+    try {
+      const { data } = await supabase.from('orders').select('id').eq('order_ref', normalized).maybeSingle();
+      setOrderFound(data !== null);
+    } catch {
+      setOrderFound(null);
+    } finally {
+      setOrderValidating(false);
+    }
+  };
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (submitting) return;
@@ -136,6 +160,23 @@ export default function ReturnForm() {
       return;
     }
     if (!orderRef.trim()) { setError('Please include your order number.'); return; }
+    if (orderFound !== true) {
+      const normalized = normalizeOrderRef(orderRef);
+      setOrderRef(normalized);
+      setOrderValidating(true);
+      try {
+        const { data } = await supabase.from('orders').select('id').eq('order_ref', normalized).maybeSingle();
+        setOrderFound(data !== null);
+        if (!data) {
+          setError(`${normalized} was not found in our system — please check the number (e.g. #1107). If you received the unit as a gift or have a different reference, contact us at support@lilacomposter.com.`);
+          return;
+        }
+      } catch {
+        // Don't block on network error
+      } finally {
+        setOrderValidating(false);
+      }
+    }
     if (!usage)     { setError('Please tell us how long you\'ve been using the unit.'); return; }
     if (reasons.length === 0) { setError('Please select at least one return reason.'); return; }
     if (!returnCategory) { setError('Please select the primary category for your return.'); return; }
@@ -147,10 +188,15 @@ export default function ReturnForm() {
     if (!packaging) { setError('Please tell us about the packaging.'); return; }
     if (!alternative) { setError('Please select an alternative composting plan.'); return; }
     if (!refundMethod) { setError('Please select a refund method.'); return; }
-    if (!purchaseProof.trim()) { setError('Please provide proof of purchase (receipt, invoice, or order confirmation).'); return; }
+    if (!purchaseProofFile) { setError('Please upload your proof of purchase (receipt, invoice, or order confirmation as PDF or image).'); return; }
 
     setSubmitting(true);
     try {
+      const normalizedRef = normalizeOrderRef(orderRef);
+      const filePath = `${normalizedRef.replace('#', '')}/${Date.now()}-${purchaseProofFile.name}`;
+      const { error: uploadErr } = await supabase.storage.from('return-documents').upload(filePath, purchaseProofFile);
+      if (uploadErr) throw uploadErr;
+
       const fullName = `${firstName.trim()} ${lastName.trim()}`;
       const ref = `CRT-${Math.floor(Math.random() * 90000 + 10000)}`;
       const { error: insErr } = await supabase.from('returns').insert({
@@ -159,7 +205,7 @@ export default function ReturnForm() {
         customer_phone: phone.trim() || null,
         channel: country,
         unit_serial: serial.trim() || null,
-        original_order_ref: orderRef.trim(),
+        original_order_ref: normalizedRef,
         condition,
         reason: reasons[0] ?? null,           // primary reason for the legacy reason column
         return_category: returnCategory || null,
@@ -179,7 +225,7 @@ export default function ReturnForm() {
         refund_method_preference: refundMethod,
         refund_contact: refundContact.trim() || null,
         additional_comments: additional.trim() || null,
-        purchase_proof: purchaseProof.trim() || null,
+        purchase_proof: filePath,
       });
       if (insErr) throw insErr;
       setReturnRef(ref);
@@ -251,8 +297,13 @@ export default function ReturnForm() {
         <SectionHeader text="About your order" />
         <div className={styles.fieldGrid2}>
           <Field label="Order number" required>
-            <input value={orderRef} onChange={e => setOrderRef(e.target.value)}
+            <input value={orderRef}
+                   onChange={e => { setOrderRef(e.target.value); setOrderFound(null); }}
+                   onBlur={validateOrderRef}
                    className={styles.input} placeholder="#1107" required />
+            {orderValidating && <div className={styles.fieldHelp} style={{color:'#718096'}}>Checking…</div>}
+            {!orderValidating && orderFound === true && <div className={styles.fieldHelp} style={{color:'#276749'}}>✓ Order found</div>}
+            {!orderValidating && orderFound === false && <div className={styles.fieldHelp} style={{color:'#c53030'}}>Order not found — please check the number (e.g. #1107).</div>}
           </Field>
           <Field label="Unit serial number" help="Stamped on the bottom of your unit. Optional.">
             <input value={serial} onChange={e => setSerial(e.target.value)}
@@ -356,10 +407,18 @@ export default function ReturnForm() {
         )}
 
         {/* 18. Purchase proof */}
-        <Field label="Proof of purchase" required help="Please provide your receipt, invoice number, or order confirmation details. If the unit was purchased as a gift, include the original purchaser's receipt or order reference.">
-          <textarea value={purchaseProof} onChange={e => setPurchaseProof(e.target.value)}
-                    className={styles.textarea} rows={3}
-                    placeholder="e.g. Order #1234, confirmation email details, store name and date of purchase, or any other purchase reference" />
+        <Field label="Proof of purchase" required help="Upload a PDF or photo of your receipt, invoice, or order confirmation (max 10 MB). If the unit was a gift, upload the original purchaser's receipt or order confirmation.">
+          <input
+            type="file"
+            accept="application/pdf,image/jpeg,image/png,image/webp,image/gif,image/heic"
+            className={styles.input}
+            onChange={e => setPurchaseProofFile(e.target.files?.[0] ?? null)}
+          />
+          {purchaseProofFile && (
+            <div className={styles.fieldHelp}>
+              Selected: {purchaseProofFile.name} ({(purchaseProofFile.size / 1024).toFixed(0)} KB)
+            </div>
+          )}
         </Field>
 
         {/* 17. Anything else */}
