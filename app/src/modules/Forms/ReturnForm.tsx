@@ -110,6 +110,8 @@ export default function ReturnForm() {
   const [refundContact, setRefundContact] = useState('');
   // 17. Anything else
   const [additional, setAdditional] = useState('');
+  // 18. Purchase proof (invoice / receipt / order confirmation)
+  const [purchaseProof, setPurchaseProof] = useState('');
 
   // Hidden / inferred
   const [country, setCountry] = useState<'Canada' | 'USA'>('Canada');
@@ -176,6 +178,7 @@ export default function ReturnForm() {
         refund_method_preference: refundMethod,
         refund_contact: refundContact.trim() || null,
         additional_comments: additional.trim() || null,
+        purchase_proof: purchaseProof.trim() || null,
       });
       if (insErr) throw insErr;
       setReturnRef(ref);
@@ -350,6 +353,13 @@ export default function ReturnForm() {
                    placeholder={refundMethod.startsWith('Email') ? 'you@example.com' : '(000) 000-0000'} />
           </Field>
         )}
+
+        {/* 18. Purchase proof */}
+        <Field label="Proof of purchase (optional)" help="If you have a receipt, invoice, or order confirmation number — especially if the unit was purchased as a gift — please share it here. This helps us verify the refund amount.">
+          <textarea value={purchaseProof} onChange={e => setPurchaseProof(e.target.value)}
+                    className={styles.textarea} rows={3}
+                    placeholder="e.g. Order #1234, confirmation email details, store name and date of purchase, or any other purchase reference" />
+        </Field>
 
         {/* 17. Anything else */}
         <Field label="Is there anything else you would like to share with us?">

@@ -135,6 +135,7 @@ export type ReturnRow = {
   refund_method_preference: string | null;
   refund_contact: string | null;
   additional_comments: string | null;
+  purchase_proof: string | null;
   created_at: string;
   updated_at: string;
 };
