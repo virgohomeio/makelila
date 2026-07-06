@@ -19,7 +19,10 @@ const UNIT_STAGES: { value: ReturnStatus; label: string }[] = [
 import { useQueuedReplacements, holdReplacement, type Order } from '../../lib/orders';
 import { useOnboardDates, refundUsageWindow, type RefundUsageWindow } from '../../lib/customers';
 import { useInvoicesByCustomerEmail, getInvoiceSignedUrl, type CustomerInvoice } from '../../lib/invoices';
-import { useServiceTickets, STATUS_META as TICKET_STATUS_META, type ServiceTicket } from '../../lib/service';
+import {
+  useServiceTickets, useTicketMessages, STATUS_META as TICKET_STATUS_META,
+  sourceLabel, topicLabel, type ServiceTicket,
+} from '../../lib/service';
 import { useAuth } from '../../lib/auth';
 import { canDo } from '../../lib/permissions';
 import { supabase } from '../../lib/supabase';
@@ -49,7 +52,12 @@ export function RefundsTab() {
   const [showRequestModal, setShowRequestModal] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [financeModalId, setFinanceModalId] = useState<string | null>(null);
+  const [openTicketId, setOpenTicketId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Ticket opened from a refund card's history — resolved from the live list
+  // so realtime edits keep it fresh.
+  const openTicket = openTicketId ? allTickets.find(t => t.id === openTicketId) ?? null : null;
 
   const isManager = canDo(role, 'approve_refund_manager');
   const isFinance = canDo(role, 'approve_refund_finance');
@@ -194,6 +202,7 @@ export function RefundsTab() {
                     usage={usageFor(r, r.return_id ? returnsById.get(r.return_id) ?? null : null)}
                     invoices={invoicesFor(r, r.return_id ? returnsById.get(r.return_id) ?? null : null)}
                     tickets={ticketsFor(r, r.return_id ? returnsById.get(r.return_id) ?? null : null)}
+                    onOpenTicket={setOpenTicketId}
                     canManager={isManager}
                     canFinance={isFinance}
                     selected={selectedId === r.id}
@@ -215,6 +224,7 @@ export function RefundsTab() {
           usage={usageFor(selectedRefund, selectedReturn)}
           invoices={invoicesFor(selectedRefund, selectedReturn)}
           tickets={ticketsFor(selectedRefund, selectedReturn)}
+          onOpenTicket={setOpenTicketId}
           queuedReplacements={replsByEmail.get((selectedRefund.customer_email ?? '').toLowerCase().trim()) ?? []}
           canManager={isManager}
           canFinance={isFinance}
@@ -245,6 +255,10 @@ export function RefundsTab() {
           />
         );
       })()}
+
+      {openTicket && (
+        <TicketQuickView ticket={openTicket} onClose={() => setOpenTicketId(null)} />
+      )}
     </div>
   );
 }
@@ -323,10 +337,11 @@ function RefundInvoices({ invoices, fallbackOrderRef }: {
 // ============================================================================
 // Customer ticket history — collapsible list of the customer's service
 // tickets (matched by email, same as the customer directory), with status
-// badges. Click the header to open/close.
+// badges. Click the header to open/close; click a row to open the ticket.
 // ============================================================================
-function CustomerTicketHistory({ tickets, defaultOpen = false }: {
+function CustomerTicketHistory({ tickets, onOpenTicket, defaultOpen = false }: {
   tickets: ServiceTicket[];
+  onOpenTicket: (ticketId: string) => void;
   defaultOpen?: boolean;
 }) {
   const [open, setOpen] = useState(defaultOpen);
@@ -352,7 +367,13 @@ function CustomerTicketHistory({ tickets, defaultOpen = false }: {
             {tickets.map(t => {
               const sm = TICKET_STATUS_META[t.status];
               return (
-                <div key={t.id} className={styles.ticketRow}>
+                <button
+                  key={t.id}
+                  type="button"
+                  className={styles.ticketRow}
+                  onClick={() => onOpenTicket(t.id)}
+                  title="Open ticket"
+                >
                   <span className={styles.ticketNum}>{t.ticket_number}</span>
                   <span className={styles.ticketSubject} title={t.subject}>{t.subject}</span>
                   <span className={styles.ticketStatus} style={{ color: sm.color, background: sm.bg }}>
@@ -361,7 +382,7 @@ function CustomerTicketHistory({ tickets, defaultOpen = false }: {
                   <span className={styles.ticketDate}>
                     {new Date(t.created_at).toLocaleDateString('en-US')}
                   </span>
-                </div>
+                </button>
               );
             })}
           </div>
@@ -372,16 +393,71 @@ function CustomerTicketHistory({ tickets, defaultOpen = false }: {
 }
 
 // ============================================================================
+// Ticket quick-view — read-only modal opened from a refund card's ticket
+// history. Shows the ticket's key fields + message thread, using lib/service
+// hooks (keeps the PostShipment module free of cross-module imports).
+// ============================================================================
+function TicketQuickView({ ticket, onClose }: { ticket: ServiceTicket; onClose: () => void }) {
+  const { messages, loading } = useTicketMessages(ticket.id);
+  const sm = TICKET_STATUS_META[ticket.status];
+  const body = ticket.summary ?? ticket.description;
+
+  return (
+    <div className={styles.modalBackdrop} onClick={onClose}>
+      <div className={styles.modalCard} onClick={e => e.stopPropagation()}>
+        <div className={styles.modalHead}>
+          <div className={styles.ticketQvTitle}>
+            <span className={styles.ticketNum}>{ticket.ticket_number}</span>
+            <strong>{ticket.subject}</strong>
+          </div>
+          <button onClick={onClose} className={styles.modalClose}>✕</button>
+        </div>
+        <div className={styles.modalBody}>
+          <div className={styles.ticketQvMeta}>
+            <span className={styles.ticketStatus} style={{ color: sm.color, background: sm.bg }}>{sm.label}</span>
+            <span>{ticket.category}</span>
+            <span>via {sourceLabel(ticket.source)}</span>
+            {ticket.topic && <span>{topicLabel(ticket.topic)}</span>}
+            <span>Opened {new Date(ticket.created_at).toLocaleDateString('en-US')}</span>
+            <span>{ticket.message_count} msg{ticket.message_count === 1 ? '' : 's'}</span>
+          </div>
+          {body && <div className={styles.ticketQvDesc}>{body}</div>}
+          <div className={styles.ticketQvThreadLabel}>Conversation</div>
+          {loading ? (
+            <div className={styles.ticketEmpty}>Loading messages…</div>
+          ) : messages.length === 0 ? (
+            <div className={styles.ticketEmpty}>No messages on this ticket.</div>
+          ) : (
+            <div className={styles.ticketQvThread}>
+              {messages.map(m => (
+                <div key={m.id} className={m.direction === 'outbound' ? styles.ticketMsgOut : styles.ticketMsgIn}>
+                  <div className={styles.ticketMsgHead}>
+                    <span>{m.direction === 'outbound' ? '↩ ' : ''}{m.sender ?? (m.direction === 'outbound' ? 'Us' : 'Customer')}</span>
+                    <span>{m.sent_at ? new Date(m.sent_at).toLocaleString('en-US') : ''}</span>
+                  </div>
+                  <div className={styles.ticketMsgBody}>{m.body_text ?? m.snippet ?? '—'}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
 // Refund card
 // ============================================================================
 function RefundCard({
-  refund, linkedReturn, usage, invoices, tickets, canManager, canFinance, selected, onSelect, onError, onOpenFinanceModal,
+  refund, linkedReturn, usage, invoices, tickets, onOpenTicket, canManager, canFinance, selected, onSelect, onError, onOpenFinanceModal,
 }: {
   refund: RefundApproval;
   linkedReturn: ReturnRow | null;
   usage: RefundUsageWindow;
   invoices: CustomerInvoice[];
   tickets: ServiceTicket[];
+  onOpenTicket: (ticketId: string) => void;
   canManager: boolean;
   canFinance: boolean;
   selected: boolean;
@@ -453,7 +529,7 @@ function RefundCard({
       {refund.payment_method && <div className={styles.refundMeta}>via {refund.payment_method}</div>}
       <UsageWindowBadge usage={usage} />
       <RefundInvoices invoices={invoices} fallbackOrderRef={linkedReturn?.original_order_ref} />
-      <CustomerTicketHistory tickets={tickets} />
+      <CustomerTicketHistory tickets={tickets} onOpenTicket={onOpenTicket} />
       {linkedReturn && (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, margin: '6px 0', alignItems: 'center' }}
              onClick={e => e.stopPropagation()}>
@@ -570,13 +646,14 @@ function RefundCard({
 // Renders the linked return-form data + approve / deny actions.
 // ============================================================================
 function RefundDetailPanel({
-  refund, linkedReturn, usage, invoices, tickets, queuedReplacements, canManager, canFinance, onClose, onError, onOpenFinanceModal,
+  refund, linkedReturn, usage, invoices, tickets, onOpenTicket, queuedReplacements, canManager, canFinance, onClose, onError, onOpenFinanceModal,
 }: {
   refund: RefundApproval;
   linkedReturn: ReturnRow | null;
   usage: RefundUsageWindow;
   invoices: CustomerInvoice[];
   tickets: ServiceTicket[];
+  onOpenTicket: (ticketId: string) => void;
   queuedReplacements: Order[];
   canManager: boolean;
   canFinance: boolean;
@@ -675,7 +752,7 @@ function RefundDetailPanel({
             <RefundInvoices invoices={invoices} fallbackOrderRef={linkedReturn?.original_order_ref} />
           </div>
           <div style={{ marginTop: 6, maxWidth: 520 }}>
-            <CustomerTicketHistory tickets={tickets} defaultOpen />
+            <CustomerTicketHistory tickets={tickets} onOpenTicket={onOpenTicket} defaultOpen />
           </div>
         </div>
         <button onClick={onClose} className={styles.refundDetailClose} title="Close detail">✕</button>
