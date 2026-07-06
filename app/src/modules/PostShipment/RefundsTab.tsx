@@ -19,6 +19,7 @@ const UNIT_STAGES: { value: ReturnStatus; label: string }[] = [
 import { useQueuedReplacements, holdReplacement, type Order } from '../../lib/orders';
 import { useOnboardDates, refundUsageWindow, type RefundUsageWindow } from '../../lib/customers';
 import { useInvoicesByCustomerEmail, getInvoiceSignedUrl, type CustomerInvoice } from '../../lib/invoices';
+import { useServiceTickets, STATUS_META as TICKET_STATUS_META, type ServiceTicket } from '../../lib/service';
 import { useAuth } from '../../lib/auth';
 import { canDo } from '../../lib/permissions';
 import { supabase } from '../../lib/supabase';
@@ -41,6 +42,7 @@ export function RefundsTab() {
   const { replacements: queuedRepls } = useQueuedReplacements();
   const { byEmail: onboardByEmail } = useOnboardDates();
   const { byEmail: invoicesByEmail } = useInvoicesByCustomerEmail();
+  const { tickets: allTickets } = useServiceTickets();
   const { user, role } = useAuth();
   const userEmail = user?.email;
 
@@ -81,6 +83,24 @@ export function RefundsTab() {
   const invoicesFor = (refund: RefundApproval, linkedReturn: ReturnRow | null): CustomerInvoice[] => {
     const email = (refund.customer_email ?? linkedReturn?.customer_email ?? '').toLowerCase().trim();
     return email ? invoicesByEmail.get(email) ?? [] : [];
+  };
+
+  // The customer's service tickets, keyed by email (same match as the customer
+  // directory's "Service tickets" section). Newest first (hook order preserved).
+  const ticketsByEmail = useMemo(() => {
+    const m = new Map<string, ServiceTicket[]>();
+    for (const t of allTickets) {
+      const key = (t.customer_email ?? '').toLowerCase().trim();
+      if (!key) continue;
+      const prev = m.get(key) ?? [];
+      m.set(key, [...prev, t]);
+    }
+    return m;
+  }, [allTickets]);
+
+  const ticketsFor = (refund: RefundApproval, linkedReturn: ReturnRow | null): ServiceTicket[] => {
+    const email = (refund.customer_email ?? linkedReturn?.customer_email ?? '').toLowerCase().trim();
+    return email ? ticketsByEmail.get(email) ?? [] : [];
   };
 
   const selectedRefund = useMemo(
@@ -173,6 +193,7 @@ export function RefundsTab() {
                     linkedReturn={r.return_id ? returnsById.get(r.return_id) ?? null : null}
                     usage={usageFor(r, r.return_id ? returnsById.get(r.return_id) ?? null : null)}
                     invoices={invoicesFor(r, r.return_id ? returnsById.get(r.return_id) ?? null : null)}
+                    tickets={ticketsFor(r, r.return_id ? returnsById.get(r.return_id) ?? null : null)}
                     canManager={isManager}
                     canFinance={isFinance}
                     selected={selectedId === r.id}
@@ -193,6 +214,7 @@ export function RefundsTab() {
           linkedReturn={selectedReturn}
           usage={usageFor(selectedRefund, selectedReturn)}
           invoices={invoicesFor(selectedRefund, selectedReturn)}
+          tickets={ticketsFor(selectedRefund, selectedReturn)}
           queuedReplacements={replsByEmail.get((selectedRefund.customer_email ?? '').toLowerCase().trim()) ?? []}
           canManager={isManager}
           canFinance={isFinance}
@@ -299,15 +321,67 @@ function RefundInvoices({ invoices, fallbackOrderRef }: {
 }
 
 // ============================================================================
+// Customer ticket history — collapsible list of the customer's service
+// tickets (matched by email, same as the customer directory), with status
+// badges. Click the header to open/close.
+// ============================================================================
+function CustomerTicketHistory({ tickets, defaultOpen = false }: {
+  tickets: ServiceTicket[];
+  defaultOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  const openCount = tickets.filter(t => t.status !== 'closed').length;
+
+  return (
+    <div className={styles.ticketBlock} onClick={e => e.stopPropagation()}>
+      <button
+        type="button"
+        className={styles.ticketToggle}
+        onClick={() => setOpen(o => !o)}
+        aria-expanded={open}
+      >
+        <span className={styles.ticketToggleChevron}>{open ? '▾' : '▸'}</span>
+        Ticket history ({tickets.length})
+        {openCount > 0 && <span className={styles.ticketOpenPill}>{openCount} open</span>}
+      </button>
+      {open && (
+        tickets.length === 0 ? (
+          <div className={styles.ticketEmpty}>No tickets on file for this customer.</div>
+        ) : (
+          <div className={styles.ticketList}>
+            {tickets.map(t => {
+              const sm = TICKET_STATUS_META[t.status];
+              return (
+                <div key={t.id} className={styles.ticketRow}>
+                  <span className={styles.ticketNum}>{t.ticket_number}</span>
+                  <span className={styles.ticketSubject} title={t.subject}>{t.subject}</span>
+                  <span className={styles.ticketStatus} style={{ color: sm.color, background: sm.bg }}>
+                    {sm.label}
+                  </span>
+                  <span className={styles.ticketDate}>
+                    {new Date(t.created_at).toLocaleDateString('en-US')}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )
+      )}
+    </div>
+  );
+}
+
+// ============================================================================
 // Refund card
 // ============================================================================
 function RefundCard({
-  refund, linkedReturn, usage, invoices, canManager, canFinance, selected, onSelect, onError, onOpenFinanceModal,
+  refund, linkedReturn, usage, invoices, tickets, canManager, canFinance, selected, onSelect, onError, onOpenFinanceModal,
 }: {
   refund: RefundApproval;
   linkedReturn: ReturnRow | null;
   usage: RefundUsageWindow;
   invoices: CustomerInvoice[];
+  tickets: ServiceTicket[];
   canManager: boolean;
   canFinance: boolean;
   selected: boolean;
@@ -379,6 +453,7 @@ function RefundCard({
       {refund.payment_method && <div className={styles.refundMeta}>via {refund.payment_method}</div>}
       <UsageWindowBadge usage={usage} />
       <RefundInvoices invoices={invoices} fallbackOrderRef={linkedReturn?.original_order_ref} />
+      <CustomerTicketHistory tickets={tickets} />
       {linkedReturn && (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, margin: '6px 0', alignItems: 'center' }}
              onClick={e => e.stopPropagation()}>
@@ -495,12 +570,13 @@ function RefundCard({
 // Renders the linked return-form data + approve / deny actions.
 // ============================================================================
 function RefundDetailPanel({
-  refund, linkedReturn, usage, invoices, queuedReplacements, canManager, canFinance, onClose, onError, onOpenFinanceModal,
+  refund, linkedReturn, usage, invoices, tickets, queuedReplacements, canManager, canFinance, onClose, onError, onOpenFinanceModal,
 }: {
   refund: RefundApproval;
   linkedReturn: ReturnRow | null;
   usage: RefundUsageWindow;
   invoices: CustomerInvoice[];
+  tickets: ServiceTicket[];
   queuedReplacements: Order[];
   canManager: boolean;
   canFinance: boolean;
@@ -597,6 +673,9 @@ function RefundDetailPanel({
           </div>
           <div style={{ marginTop: 6, maxWidth: 520 }}>
             <RefundInvoices invoices={invoices} fallbackOrderRef={linkedReturn?.original_order_ref} />
+          </div>
+          <div style={{ marginTop: 6, maxWidth: 520 }}>
+            <CustomerTicketHistory tickets={tickets} defaultOpen />
           </div>
         </div>
         <button onClick={onClose} className={styles.refundDetailClose} title="Close detail">✕</button>
