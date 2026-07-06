@@ -20,7 +20,7 @@ import { useQueuedReplacements, holdReplacement, type Order } from '../../lib/or
 import { useOnboardDates, useCustomerIdByEmail, refundUsageWindow, type RefundUsageWindow } from '../../lib/customers';
 import { useInvoicesByCustomerEmail, getInvoiceSignedUrl, type CustomerInvoice } from '../../lib/invoices';
 import {
-  useServiceTickets, useTicketMessages, STATUS_META as TICKET_STATUS_META,
+  useServiceTickets, useTicketMessages, useTicketNotes, STATUS_META as TICKET_STATUS_META,
   sourceLabel, topicLabel, type ServiceTicket,
 } from '../../lib/service';
 import { useAuth } from '../../lib/auth';
@@ -433,6 +433,7 @@ export function CustomerTicketHistory({ tickets, onOpenTicket, defaultOpen = fal
 // ============================================================================
 function TicketQuickView({ ticket, onClose }: { ticket: ServiceTicket; onClose: () => void }) {
   const { messages, loading } = useTicketMessages(ticket.id);
+  const { notes, loading: notesLoading } = useTicketNotes(ticket.id);
   const sm = TICKET_STATUS_META[ticket.status];
   const body = ticket.summary ?? ticket.description;
 
@@ -456,6 +457,28 @@ function TicketQuickView({ ticket, onClose }: { ticket: ServiceTicket; onClose: 
             <span>{ticket.message_count} msg{ticket.message_count === 1 ? '' : 's'}</span>
           </div>
           {body && <div className={styles.ticketQvDesc}>{body}</div>}
+
+          <div className={styles.ticketQvThreadLabel}>
+            Internal notes{!notesLoading && notes.length > 0 ? ` (${notes.length})` : ''}
+          </div>
+          {notesLoading ? (
+            <div className={styles.ticketEmpty}>Loading notes…</div>
+          ) : notes.length === 0 ? (
+            <div className={styles.ticketEmpty}>No notes on this ticket.</div>
+          ) : (
+            <div className={styles.ticketQvNotes}>
+              {notes.map(n => (
+                <div key={n.id} className={styles.ticketNote}>
+                  <div className={styles.ticketNoteBody}>{n.body}</div>
+                  <div className={styles.ticketNoteMeta}>
+                    <span>{n.author_email ?? 'Unknown'}</span>
+                    <span>{new Date(n.created_at).toLocaleString('en-US')}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
           <div className={styles.ticketQvThreadLabel}>Conversation</div>
           {loading ? (
             <div className={styles.ticketEmpty}>Loading messages…</div>

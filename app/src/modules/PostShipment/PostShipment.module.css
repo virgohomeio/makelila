@@ -475,6 +475,34 @@
   word-break: break-word;
 }
 
+/* Internal notes in the ticket quick-view */
+.ticketQvNotes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.ticketNote {
+  background: #fffbeb;
+  border: 1px solid #f6ad55;
+  border-radius: var(--radius-sm);
+  padding: 6px 9px;
+  font-size: 12px;
+}
+.ticketNoteBody {
+  color: var(--color-ink);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.ticketNoteMeta {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 10px;
+  color: var(--color-ink-subtle);
+  margin-top: 3px;
+}
+
 .refundTimeline {
   border-top: 1px dashed var(--color-border);
   padding-top: 6px;
