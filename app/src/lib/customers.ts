@@ -353,6 +353,32 @@ export function useOnboardDates(): { byEmail: Map<string, string | null>; loadin
   return { byEmail, loading };
 }
 
+/** Map of lowercased customer email → customer id. Lets the Refunds tab group
+ *  a household's records (tickets, etc.) by customer even when they span
+ *  multiple emails — e.g. a couple where one partner's tickets carry a second
+ *  email but all attach to one customer record. Read-only snapshot. */
+export function useCustomerIdByEmail(): { byEmail: Map<string, string>; loading: boolean } {
+  const [byEmail, setByEmail] = useState<Map<string, string>>(new Map());
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase.from('customers').select('id, email');
+      if (cancelled) return;
+      const m = new Map<string, string>();
+      for (const c of (data ?? []) as { id: string; email: string | null }[]) {
+        if (c.email) m.set(c.email.toLowerCase().trim(), c.id);
+      }
+      setByEmail(m);
+      setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  return { byEmail, loading };
+}
+
 export function useCustomers(): {
   customers: Customer[];
   loading: boolean;

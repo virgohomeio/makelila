@@ -17,7 +17,7 @@ const UNIT_STAGES: { value: ReturnStatus; label: string }[] = [
   { value: 'discarded',        label: 'Unit discarded by customer' },
 ];
 import { useQueuedReplacements, holdReplacement, type Order } from '../../lib/orders';
-import { useOnboardDates, refundUsageWindow, type RefundUsageWindow } from '../../lib/customers';
+import { useOnboardDates, useCustomerIdByEmail, refundUsageWindow, type RefundUsageWindow } from '../../lib/customers';
 import { useInvoicesByCustomerEmail, getInvoiceSignedUrl, type CustomerInvoice } from '../../lib/invoices';
 import {
   useServiceTickets, useTicketMessages, STATUS_META as TICKET_STATUS_META,
@@ -45,6 +45,7 @@ export function RefundsTab() {
   const { replacements: queuedRepls } = useQueuedReplacements();
   const { byEmail: onboardByEmail } = useOnboardDates();
   const { byEmail: invoicesByEmail } = useInvoicesByCustomerEmail();
+  const { byEmail: customerIdByEmail } = useCustomerIdByEmail();
   const { tickets: allTickets } = useServiceTickets();
   const { user, role } = useAuth();
   const userEmail = user?.email;
@@ -93,22 +94,52 @@ export function RefundsTab() {
     return email ? invoicesByEmail.get(email) ?? [] : [];
   };
 
-  // The customer's service tickets, keyed by email (same match as the customer
-  // directory's "Service tickets" section). Newest first (hook order preserved).
-  const ticketsByEmail = useMemo(() => {
-    const m = new Map<string, ServiceTicket[]>();
+  // Ticket indexes for matching a refund to its customer's tickets. We match by
+  // customer_id — not just email — so a household whose tickets span two emails
+  // (e.g. a couple under one customer record) shows ALL their tickets. Falls
+  // back to email for tickets that have no customer_id.
+  const ticketIndex = useMemo(() => {
+    const byEmail = new Map<string, ServiceTicket[]>();
+    const byCustomerId = new Map<string, ServiceTicket[]>();
+    const emailToCustomerId = new Map<string, string>();
     for (const t of allTickets) {
-      const key = (t.customer_email ?? '').toLowerCase().trim();
-      if (!key) continue;
-      const prev = m.get(key) ?? [];
-      m.set(key, [...prev, t]);
+      const email = (t.customer_email ?? '').toLowerCase().trim();
+      if (email) {
+        (byEmail.get(email) ?? byEmail.set(email, []).get(email)!).push(t);
+        if (t.customer_id) emailToCustomerId.set(email, t.customer_id);
+      }
+      if (t.customer_id) {
+        (byCustomerId.get(t.customer_id) ?? byCustomerId.set(t.customer_id, []).get(t.customer_id)!).push(t);
+      }
     }
-    return m;
+    return { byEmail, byCustomerId, emailToCustomerId };
   }, [allTickets]);
 
   const ticketsFor = (refund: RefundApproval, linkedReturn: ReturnRow | null): ServiceTicket[] => {
-    const email = (refund.customer_email ?? linkedReturn?.customer_email ?? '').toLowerCase().trim();
-    return email ? ticketsByEmail.get(email) ?? [] : [];
+    const emails = [refund.customer_email, linkedReturn?.customer_email]
+      .map(e => (e ?? '').toLowerCase().trim())
+      .filter(Boolean);
+    if (emails.length === 0) return [];
+
+    // Resolve the customer id(s) these emails belong to — from the customer
+    // master (authoritative) and from the tickets themselves (covers a customer
+    // with no master row). Then union tickets by customer id + by direct email.
+    const custIds = new Set<string>();
+    for (const email of emails) {
+      const fromMaster = customerIdByEmail.get(email);
+      if (fromMaster) custIds.add(fromMaster);
+      const fromTicket = ticketIndex.emailToCustomerId.get(email);
+      if (fromTicket) custIds.add(fromTicket);
+    }
+
+    const out = new Map<string, ServiceTicket>();
+    for (const cid of custIds) {
+      for (const t of ticketIndex.byCustomerId.get(cid) ?? []) out.set(t.id, t);
+    }
+    for (const email of emails) {
+      for (const t of ticketIndex.byEmail.get(email) ?? []) out.set(t.id, t);
+    }
+    return [...out.values()].sort((a, b) => b.created_at.localeCompare(a.created_at));
   };
 
   const selectedRefund = useMemo(
