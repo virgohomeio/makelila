@@ -358,6 +358,8 @@
   display: flex;
   flex-direction: column;
   gap: 3px;
+  max-height: 132px;
+  overflow-y: auto;
 }
 .ticketRow {
   display: flex;

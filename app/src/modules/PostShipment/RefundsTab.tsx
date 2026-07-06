@@ -339,7 +339,7 @@ function RefundInvoices({ invoices, fallbackOrderRef }: {
 // tickets (matched by email, same as the customer directory), with status
 // badges. Click the header to open/close; click a row to open the ticket.
 // ============================================================================
-function CustomerTicketHistory({ tickets, onOpenTicket, defaultOpen = false }: {
+export function CustomerTicketHistory({ tickets, onOpenTicket, defaultOpen = false }: {
   tickets: ServiceTicket[];
   onOpenTicket: (ticketId: string) => void;
   defaultOpen?: boolean;
@@ -365,7 +365,10 @@ function CustomerTicketHistory({ tickets, onOpenTicket, defaultOpen = false }: {
         ) : (
           <div className={styles.ticketList}>
             {tickets.map(t => {
-              const sm = TICKET_STATUS_META[t.status];
+              // Defensive: an unknown status (taxonomy drift) must not crash the
+              // whole tab — fall back to a neutral badge. See memory note on the
+              // 7-vs-10 state white-screen.
+              const sm = TICKET_STATUS_META[t.status] ?? { label: t.status, color: '#4a5568', bg: '#edf2f7' };
               return (
                 <button
                   key={t.id}
@@ -529,7 +532,7 @@ function RefundCard({
       {refund.payment_method && <div className={styles.refundMeta}>via {refund.payment_method}</div>}
       <UsageWindowBadge usage={usage} />
       <RefundInvoices invoices={invoices} fallbackOrderRef={linkedReturn?.original_order_ref} />
-      <CustomerTicketHistory tickets={tickets} onOpenTicket={onOpenTicket} />
+      <CustomerTicketHistory tickets={tickets} onOpenTicket={onOpenTicket} defaultOpen />
       {linkedReturn && (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, margin: '6px 0', alignItems: 'center' }}
              onClick={e => e.stopPropagation()}>
