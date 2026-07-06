@@ -57,9 +57,18 @@ export type ClaimInput = {
 /** Insert a claim (anon), upload its photos, record photo rows. Returns the claim_ref. */
 export async function submitShippingDamageClaim(input: ClaimInput, files: File[]): Promise<string> {
   const claim_ref = generateClaimRef();
-  const { data: row, error: insErr } = await supabase
+  // Generate the id client-side instead of reading it back with .select().
+  // Customers submit anonymously (anon role), which has an INSERT policy on
+  // shipping_damage_claims but NO SELECT policy — so `.insert().select()` fails
+  // for them even though the insert itself is allowed (the row can't be read
+  // back). A client-side UUID avoids the read-back entirely, and also satisfies
+  // the anon storage policy, which requires the upload path's first folder to
+  // be a UUID.
+  const claimId = crypto.randomUUID();
+  const { error: insErr } = await supabase
     .from('shipping_damage_claims')
     .insert({
+      id: claimId,
       claim_ref,
       customer_name: input.customer_name.trim(),
       customer_email: input.customer_email?.trim().toLowerCase() || null,
@@ -68,11 +77,8 @@ export async function submitShippingDamageClaim(input: ClaimInput, files: File[]
       description: input.description.trim(),
       status: 'submitted',
       source: 'customer_form',
-    })
-    .select('id')
-    .single();
-  if (insErr || !row) throw new Error(insErr?.message ?? 'Failed to submit claim');
-  const claimId = row.id as string;
+    });
+  if (insErr) throw new Error(insErr.message ?? 'Failed to submit claim');
 
   for (const f of files) {
     const path = `${claimId}/${crypto.randomUUID()}-${f.name}`;

@@ -199,7 +199,13 @@ export default function ReturnForm() {
 
       const fullName = `${firstName.trim()} ${lastName.trim()}`;
       const ref = `CRT-${Math.floor(Math.random() * 90000 + 10000)}`;
-      const { data: inserted, error: insErr } = await supabase.from('returns').insert({
+      // Generate the id client-side so we don't read the row back with
+      // .select() — customers submit anonymously (anon role), which has INSERT
+      // but no SELECT policy on `returns`, so insert().select() would fail for
+      // them even though the insert is allowed.
+      const returnId = crypto.randomUUID();
+      const { error: insErr } = await supabase.from('returns').insert({
+        id: returnId,
         customer_name: fullName,
         customer_email: email.trim(),
         customer_phone: phone.trim() || null,
@@ -226,13 +232,11 @@ export default function ReturnForm() {
         refund_contact: refundContact.trim() || null,
         additional_comments: additional.trim() || null,
         purchase_proof: filePath,
-      }).select('id').single();
+      });
       if (insErr) throw insErr;
 
       // Fire-and-forget: send confirmation to customer + review email to Reina/George
-      if (inserted?.id) {
-        supabase.functions.invoke('send-return-emails', { body: { return_id: inserted.id } }).catch(() => {});
-      }
+      supabase.functions.invoke('send-return-emails', { body: { return_id: returnId } }).catch(() => {});
 
       setReturnRef(ref);
     } catch (err) {
