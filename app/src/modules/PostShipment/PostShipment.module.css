@@ -224,6 +224,34 @@
   font-style: italic;
 }
 
+/* 30-day refund usage window badge (anchored on onboarding date). */
+.usageBadgeOver,
+.usageBadgeUnder,
+.usageBadgeUnknown {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  align-self: flex-start;
+}
+.usageBadgeOver {
+  color: #975a16;
+  background: #fffbeb;
+  border-color: #f6ad55;
+}
+.usageBadgeUnder {
+  color: #276749;
+  background: #f0fff4;
+  border-color: #9ae6b4;
+}
+.usageBadgeUnknown {
+  color: var(--color-ink-subtle);
+  background: #f7fafc;
+  border-color: var(--color-border);
+  font-style: italic;
+}
+
 .refundTimeline {
   border-top: 1px dashed var(--color-border);
   padding-top: 6px;

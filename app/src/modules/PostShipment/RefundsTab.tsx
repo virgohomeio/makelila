@@ -17,6 +17,7 @@ const UNIT_STAGES: { value: ReturnStatus; label: string }[] = [
   { value: 'discarded',        label: 'Unit discarded by customer' },
 ];
 import { useQueuedReplacements, holdReplacement, type Order } from '../../lib/orders';
+import { useOnboardDates, refundUsageWindow, type RefundUsageWindow } from '../../lib/customers';
 import { useAuth } from '../../lib/auth';
 import { canDo } from '../../lib/permissions';
 import { supabase } from '../../lib/supabase';
@@ -37,6 +38,7 @@ export function RefundsTab() {
   const { approvals, loading: aLoading } = useRefundApprovals();
   const { returns, loading: rLoading } = useReturns();
   const { replacements: queuedRepls } = useQueuedReplacements();
+  const { byEmail: onboardByEmail } = useOnboardDates();
   const { user, role } = useAuth();
   const userEmail = user?.email;
 
@@ -64,6 +66,13 @@ export function RefundsTab() {
     }
     return m;
   }, [queuedRepls]);
+
+  // 30-day usage window per refund, anchored on the customer's onboarding date.
+  // Prefer the refund's own email, fall back to the linked return's email.
+  const usageFor = (refund: RefundApproval, linkedReturn: ReturnRow | null): RefundUsageWindow => {
+    const email = (refund.customer_email ?? linkedReturn?.customer_email ?? '').toLowerCase().trim();
+    return refundUsageWindow(email ? onboardByEmail.get(email) : null);
+  };
 
   const selectedRefund = useMemo(
     () => approvals.find(a => a.id === selectedId) ?? null,
@@ -153,6 +162,7 @@ export function RefundsTab() {
                     key={r.id}
                     refund={r}
                     linkedReturn={r.return_id ? returnsById.get(r.return_id) ?? null : null}
+                    usage={usageFor(r, r.return_id ? returnsById.get(r.return_id) ?? null : null)}
                     canManager={isManager}
                     canFinance={isFinance}
                     selected={selectedId === r.id}
@@ -171,6 +181,7 @@ export function RefundsTab() {
         <RefundDetailPanel
           refund={selectedRefund}
           linkedReturn={selectedReturn}
+          usage={usageFor(selectedRefund, selectedReturn)}
           queuedReplacements={replsByEmail.get((selectedRefund.customer_email ?? '').toLowerCase().trim()) ?? []}
           canManager={isManager}
           canFinance={isFinance}
@@ -206,13 +217,38 @@ export function RefundsTab() {
 }
 
 // ============================================================================
+// 30-day usage window badge — shows whether the customer has had the unit for
+// 30+ days (case-by-case refund) or under 30 days, anchored on onboarding date.
+// ============================================================================
+function UsageWindowBadge({ usage }: { usage: RefundUsageWindow }) {
+  if (usage.over30 === null) {
+    return (
+      <div className={styles.usageBadgeUnknown} title="No onboarding date on file for this customer">
+        ⏱ Usage window unknown — no onboarding date
+      </div>
+    );
+  }
+  const dayLabel = usage.days === 1 ? '1 day' : `${usage.days} days`;
+  return usage.over30 ? (
+    <div className={styles.usageBadgeOver} title="30+ days of use — refund is not automatic; evaluate case-by-case">
+      ⏱ {dayLabel} since onboarding · <strong>30+ days</strong> — review case-by-case
+    </div>
+  ) : (
+    <div className={styles.usageBadgeUnder} title="Under 30 days of use">
+      ⏱ {dayLabel} since onboarding · under 30 days
+    </div>
+  );
+}
+
+// ============================================================================
 // Refund card
 // ============================================================================
 function RefundCard({
-  refund, linkedReturn, canManager, canFinance, selected, onSelect, onError, onOpenFinanceModal,
+  refund, linkedReturn, usage, canManager, canFinance, selected, onSelect, onError, onOpenFinanceModal,
 }: {
   refund: RefundApproval;
   linkedReturn: ReturnRow | null;
+  usage: RefundUsageWindow;
   canManager: boolean;
   canFinance: boolean;
   selected: boolean;
@@ -282,6 +318,7 @@ function RefundCard({
       </div>
       {refund.reason && <div className={styles.refundReason}>{refund.reason}</div>}
       {refund.payment_method && <div className={styles.refundMeta}>via {refund.payment_method}</div>}
+      <UsageWindowBadge usage={usage} />
       {linkedReturn && (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, margin: '6px 0', alignItems: 'center' }}
              onClick={e => e.stopPropagation()}>
@@ -398,10 +435,11 @@ function RefundCard({
 // Renders the linked return-form data + approve / deny actions.
 // ============================================================================
 function RefundDetailPanel({
-  refund, linkedReturn, queuedReplacements, canManager, canFinance, onClose, onError, onOpenFinanceModal,
+  refund, linkedReturn, usage, queuedReplacements, canManager, canFinance, onClose, onError, onOpenFinanceModal,
 }: {
   refund: RefundApproval;
   linkedReturn: ReturnRow | null;
+  usage: RefundUsageWindow;
   queuedReplacements: Order[];
   canManager: boolean;
   canFinance: boolean;
@@ -492,6 +530,9 @@ function RefundDetailPanel({
             {linkedReturn?.original_order_ref ?? '—'} ·
             {' '}{linkedReturn?.customer_email ?? refund.customer_email ?? '—'} ·
             {' '}{linkedReturn?.customer_phone ?? '—'}
+          </div>
+          <div style={{ marginTop: 6 }}>
+            <UsageWindowBadge usage={usage} />
           </div>
         </div>
         <button onClick={onClose} className={styles.refundDetailClose} title="Close detail">✕</button>

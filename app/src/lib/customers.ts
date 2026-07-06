@@ -303,6 +303,56 @@ export function useCustomerProfitability(): {
   return { rows, loading, error };
 }
 
+// ── 30-day refund window (anchored on onboarding date) ──────────────────────
+// Business rule: a customer who has been using the LILA composter for 30+ days
+// without any issues is not automatically eligible for a refund — those are
+// evaluated case-by-case by Finance. The Refunds tab surfaces this on each
+// refund card. The clock starts from the customer's onboarding date
+// (customers.onboard_date), not the delivery date.
+
+export type RefundUsageWindow = {
+  days: number | null;      // whole days since onboarding; null when unknown
+  over30: boolean | null;   // true = 30+ days, false = under 30, null = unknown
+};
+
+/** Days since onboarding + whether the customer has passed the 30-day window.
+ *  Returns nulls when there's no valid onboarding date on file. */
+export function refundUsageWindow(
+  onboardDate: string | null | undefined,
+  now: Date = new Date(),
+): RefundUsageWindow {
+  if (!onboardDate) return { days: null, over30: null };
+  const t = new Date(onboardDate).getTime();
+  if (Number.isNaN(t)) return { days: null, over30: null };
+  const days = Math.floor((now.getTime() - t) / 86_400_000);
+  return { days, over30: days >= 30 };
+}
+
+/** Map of lowercased customer email → onboard_date, for the Refunds tab's
+ *  30-day usage-window badge. Read-only snapshot (no realtime — onboarding
+ *  dates change rarely and the tab already refetches on mount). */
+export function useOnboardDates(): { byEmail: Map<string, string | null>; loading: boolean } {
+  const [byEmail, setByEmail] = useState<Map<string, string | null>>(new Map());
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase.from('customers').select('email, onboard_date');
+      if (cancelled) return;
+      const m = new Map<string, string | null>();
+      for (const r of (data ?? []) as { email: string | null; onboard_date: string | null }[]) {
+        if (r.email) m.set(r.email.toLowerCase().trim(), r.onboard_date);
+      }
+      setByEmail(m);
+      setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  return { byEmail, loading };
+}
+
 export function useCustomers(): {
   customers: Customer[];
   loading: boolean;

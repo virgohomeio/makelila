@@ -48,7 +48,7 @@ vi.mock('./activityLog', () => ({
 }));
 
 // ── import after mocks ──────────────────────────────────────────────────────
-import { parseUtm, upsertHubSpotContact, followUpDueDates, computeFuState, type Customer } from './customers';
+import { parseUtm, upsertHubSpotContact, followUpDueDates, computeFuState, refundUsageWindow, type Customer } from './customers';
 
 const base: Customer = {
   id: 'c1', hubspot_id: null, email: 'a@b.com', first_name: null, last_name: null,
@@ -64,6 +64,39 @@ const base: Customer = {
   last_touch_source: null, last_touch_campaign_id: null, last_touch_at: null,
   telemetry_autoticket_suppress: false, created_at: '', updated_at: '',
 };
+
+// ── refundUsageWindow (30-day refund eligibility window) ────────────────────
+describe('refundUsageWindow', () => {
+  const now = new Date('2026-07-06T12:00:00Z');
+
+  it('returns nulls when there is no onboarding date', () => {
+    expect(refundUsageWindow(null, now)).toEqual({ days: null, over30: null });
+    expect(refundUsageWindow(undefined, now)).toEqual({ days: null, over30: null });
+  });
+
+  it('returns nulls for an unparseable date', () => {
+    expect(refundUsageWindow('not-a-date', now)).toEqual({ days: null, over30: null });
+  });
+
+  it('flags 30+ days of use as over30', () => {
+    // onboarded 40 days ago
+    const r = refundUsageWindow('2026-05-27T12:00:00Z', now);
+    expect(r.days).toBe(40);
+    expect(r.over30).toBe(true);
+  });
+
+  it('treats exactly 30 days as over30 (30+ label)', () => {
+    const r = refundUsageWindow('2026-06-06T12:00:00Z', now);
+    expect(r.days).toBe(30);
+    expect(r.over30).toBe(true);
+  });
+
+  it('flags under-30-day use as not over30', () => {
+    const r = refundUsageWindow('2026-06-20T12:00:00Z', now);
+    expect(r.days).toBe(16);
+    expect(r.over30).toBe(false);
+  });
+});
 
 // ── parseUtm (existing tests) ───────────────────────────────────────────────
 describe('parseUtm', () => {
