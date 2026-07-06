@@ -18,6 +18,7 @@ const UNIT_STAGES: { value: ReturnStatus; label: string }[] = [
 ];
 import { useQueuedReplacements, holdReplacement, type Order } from '../../lib/orders';
 import { useOnboardDates, refundUsageWindow, type RefundUsageWindow } from '../../lib/customers';
+import { useInvoicesByCustomerEmail, getInvoiceSignedUrl, type CustomerInvoice } from '../../lib/invoices';
 import { useAuth } from '../../lib/auth';
 import { canDo } from '../../lib/permissions';
 import { supabase } from '../../lib/supabase';
@@ -39,6 +40,7 @@ export function RefundsTab() {
   const { returns, loading: rLoading } = useReturns();
   const { replacements: queuedRepls } = useQueuedReplacements();
   const { byEmail: onboardByEmail } = useOnboardDates();
+  const { byEmail: invoicesByEmail } = useInvoicesByCustomerEmail();
   const { user, role } = useAuth();
   const userEmail = user?.email;
 
@@ -72,6 +74,13 @@ export function RefundsTab() {
   const usageFor = (refund: RefundApproval, linkedReturn: ReturnRow | null): RefundUsageWindow => {
     const email = (refund.customer_email ?? linkedReturn?.customer_email ?? '').toLowerCase().trim();
     return refundUsageWindow(email ? onboardByEmail.get(email) : null);
+  };
+
+  // The customer's sales invoice(s) — resolved by email, the same way the
+  // customer directory surfaces them (both key off the customer record).
+  const invoicesFor = (refund: RefundApproval, linkedReturn: ReturnRow | null): CustomerInvoice[] => {
+    const email = (refund.customer_email ?? linkedReturn?.customer_email ?? '').toLowerCase().trim();
+    return email ? invoicesByEmail.get(email) ?? [] : [];
   };
 
   const selectedRefund = useMemo(
@@ -163,6 +172,7 @@ export function RefundsTab() {
                     refund={r}
                     linkedReturn={r.return_id ? returnsById.get(r.return_id) ?? null : null}
                     usage={usageFor(r, r.return_id ? returnsById.get(r.return_id) ?? null : null)}
+                    invoices={invoicesFor(r, r.return_id ? returnsById.get(r.return_id) ?? null : null)}
                     canManager={isManager}
                     canFinance={isFinance}
                     selected={selectedId === r.id}
@@ -182,6 +192,7 @@ export function RefundsTab() {
           refund={selectedRefund}
           linkedReturn={selectedReturn}
           usage={usageFor(selectedRefund, selectedReturn)}
+          invoices={invoicesFor(selectedRefund, selectedReturn)}
           queuedReplacements={replsByEmail.get((selectedRefund.customer_email ?? '').toLowerCase().trim()) ?? []}
           canManager={isManager}
           canFinance={isFinance}
@@ -241,14 +252,62 @@ function UsageWindowBadge({ usage }: { usage: RefundUsageWindow }) {
 }
 
 // ============================================================================
+// Sales invoice + order number — the customer's original invoice(s) on file,
+// surfaced the same way as the customer directory (invoice #, order #, date,
+// amount, View link to the stored PDF).
+// ============================================================================
+function RefundInvoices({ invoices, fallbackOrderRef }: {
+  invoices: CustomerInvoice[];
+  fallbackOrderRef?: string | null;
+}) {
+  const view = async (path: string) => {
+    try {
+      const url = await getInvoiceSignedUrl(path);
+      window.open(url, '_blank', 'noopener');
+    } catch (e) { alert((e as Error).message); }
+  };
+
+  return (
+    <div className={styles.invoiceBlock} onClick={e => e.stopPropagation()}>
+      <div className={styles.invoiceBlockLabel}>Sales invoice &amp; order #</div>
+      {invoices.length === 0 ? (
+        <div className={styles.invoiceEmpty}>
+          {fallbackOrderRef
+            ? <>Order <span className={styles.invoiceOrder}>{fallbackOrderRef}</span> · no invoice on file</>
+            : 'No sales invoice on file'}
+        </div>
+      ) : (
+        invoices.map(inv => (
+          <div key={inv.id} className={styles.invoiceRow}>
+            <span className={styles.invoiceNum}>#{inv.invoice_number}</span>
+            <span className={styles.invoiceType}>
+              {inv.document_type === 'refund_receipt' ? 'Refund receipt' : 'Invoice'}
+            </span>
+            {inv.order_ref && <span className={styles.invoiceOrder}>{inv.order_ref}</span>}
+            <span className={styles.invoiceDate}>
+              {inv.invoice_date ? new Date(inv.invoice_date).toLocaleDateString('en-US') : '—'}
+            </span>
+            {inv.total_cad != null && (
+              <span className={styles.invoiceAmount}>${Number(inv.total_cad).toFixed(2)} CAD</span>
+            )}
+            <button className={styles.invoiceView} onClick={() => void view(inv.storage_path)}>View</button>
+          </div>
+        ))
+      )}
+    </div>
+  );
+}
+
+// ============================================================================
 // Refund card
 // ============================================================================
 function RefundCard({
-  refund, linkedReturn, usage, canManager, canFinance, selected, onSelect, onError, onOpenFinanceModal,
+  refund, linkedReturn, usage, invoices, canManager, canFinance, selected, onSelect, onError, onOpenFinanceModal,
 }: {
   refund: RefundApproval;
   linkedReturn: ReturnRow | null;
   usage: RefundUsageWindow;
+  invoices: CustomerInvoice[];
   canManager: boolean;
   canFinance: boolean;
   selected: boolean;
@@ -319,6 +378,7 @@ function RefundCard({
       {refund.reason && <div className={styles.refundReason}>{refund.reason}</div>}
       {refund.payment_method && <div className={styles.refundMeta}>via {refund.payment_method}</div>}
       <UsageWindowBadge usage={usage} />
+      <RefundInvoices invoices={invoices} fallbackOrderRef={linkedReturn?.original_order_ref} />
       {linkedReturn && (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, margin: '6px 0', alignItems: 'center' }}
              onClick={e => e.stopPropagation()}>
@@ -435,11 +495,12 @@ function RefundCard({
 // Renders the linked return-form data + approve / deny actions.
 // ============================================================================
 function RefundDetailPanel({
-  refund, linkedReturn, usage, queuedReplacements, canManager, canFinance, onClose, onError, onOpenFinanceModal,
+  refund, linkedReturn, usage, invoices, queuedReplacements, canManager, canFinance, onClose, onError, onOpenFinanceModal,
 }: {
   refund: RefundApproval;
   linkedReturn: ReturnRow | null;
   usage: RefundUsageWindow;
+  invoices: CustomerInvoice[];
   queuedReplacements: Order[];
   canManager: boolean;
   canFinance: boolean;
@@ -533,6 +594,9 @@ function RefundDetailPanel({
           </div>
           <div style={{ marginTop: 6 }}>
             <UsageWindowBadge usage={usage} />
+          </div>
+          <div style={{ marginTop: 6, maxWidth: 520 }}>
+            <RefundInvoices invoices={invoices} fallbackOrderRef={linkedReturn?.original_order_ref} />
           </div>
         </div>
         <button onClick={onClose} className={styles.refundDetailClose} title="Close detail">✕</button>

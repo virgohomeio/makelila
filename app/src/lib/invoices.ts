@@ -59,6 +59,51 @@ export function useCustomerInvoices(customerId: string) {
   return { invoices, loading, reload: load };
 }
 
+/** All invoices grouped by lowercased customer email, for surfacing a
+ *  customer's original sales invoice + order number on the Refunds tab
+ *  (mirrors the customer directory, which keys off customer_id). Joined in
+ *  JS via customers.id → email so it doesn't depend on a PostgREST FK embed.
+ *  Read-only snapshot (invoices change rarely; the tab refetches on mount). */
+export function useInvoicesByCustomerEmail(): {
+  byEmail: Map<string, CustomerInvoice[]>;
+  loading: boolean;
+} {
+  const [byEmail, setByEmail] = useState<Map<string, CustomerInvoice[]>>(new Map());
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const [{ data: custs }, { data: invs }] = await Promise.all([
+        supabase.from('customers').select('id, email'),
+        supabase
+          .from('customer_invoices')
+          .select('*')
+          .order('invoice_date', { ascending: false, nullsFirst: false })
+          .order('created_at', { ascending: false }),
+      ]);
+      if (cancelled) return;
+
+      const idToEmail = new Map<string, string>();
+      for (const c of (custs ?? []) as { id: string; email: string | null }[]) {
+        if (c.email) idToEmail.set(c.id, c.email.toLowerCase().trim());
+      }
+      const m = new Map<string, CustomerInvoice[]>();
+      for (const inv of (invs ?? []) as CustomerInvoice[]) {
+        const email = inv.customer_id ? idToEmail.get(inv.customer_id) : undefined;
+        if (!email) continue;
+        const prev = m.get(email) ?? [];
+        m.set(email, [...prev, inv]);
+      }
+      setByEmail(m);
+      setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  return { byEmail, loading };
+}
+
 export async function uploadInvoice(params: {
   customerId: string;
   file: File;
