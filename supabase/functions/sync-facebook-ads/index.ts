@@ -98,7 +98,8 @@ Deno.serve(async (req: Request) => {
           impressions: ins.impressions != null ? Number(ins.impressions) : null,
           clicks: ins.clicks != null ? Number(ins.clicks) : null,
           leads,
-          cpl_cad: spend != null && leads ? +(spend / leads).toFixed(2) : null,
+          // cpl_cad is a generated column (spend / leads) — the DB computes it,
+          // so we must NOT send a value or the upsert is rejected.
           synced_at: now,
         });
       }
