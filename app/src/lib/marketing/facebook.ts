@@ -1,6 +1,38 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../supabase';
 
+export type FbMetrics = {
+  delivery?: string;
+  budget?: string;
+  results?: number | null;
+  result_label?: string;
+  cost_per_result?: number | null;
+  result_rate?: number | null;
+  adds_to_cart?: number;
+  add_payment_info?: number;
+  checkouts_initiated?: number;
+  ctr?: number | null;
+  cpm?: number | null;
+  reach?: number | null;
+  frequency?: number | null;
+  leads?: number;
+  link_clicks?: number;
+  landing_page_views?: number;
+  post_comments?: number;
+  post_reactions?: number;
+  post_shares?: number;
+  page_likes?: number;
+  post_saves?: number;
+  website_purchases?: number;
+  bid_strategy?: string | null;
+  campaign_start?: string | null;
+  campaign_end?: string | null;
+  attribution_setting?: string | null;
+  video_3s?: number;
+  video_p75?: number;
+  video_p100?: number;
+};
+
 export type FbCampaign = {
   campaign_id: string;
   campaign_name: string;
@@ -12,7 +44,9 @@ export type FbCampaign = {
   impressions: number | null;
   clicks: number | null;
   leads: number | null;
+  reach: number | null;
   cpl_cad: number | null;
+  metrics: FbMetrics | null;
   synced_at: string;
 };
 
