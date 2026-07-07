@@ -34,6 +34,10 @@ export type CustomerStatusContext = {
   // Most-recent close date (ISO timestamp) across ALL ticket categories.
   // Anchors the FU1/FU2 reschedule once a hold lifts.
   lastClosedAnyTicketAt?: string | null;
+  // Scheduled onboarding call date (ISO timestamp) from the customer's
+  // onboarding ticket, used to queue follow-ups BEFORE onboarding is marked
+  // complete (i.e. as soon as the call is booked).
+  onboardingCallDate?: string | null;
 };
 
 // Ticket categories that are NOT "issue" tickets: onboarding is a pre-follow-up
@@ -54,24 +58,30 @@ export const AUTO_SYNC_TICKET_SOURCES = new Set(['quo', 'gmail']);
 export const isHoldingTicket = (t: { category: string; source: string }) =>
   isIssueTicket(t) && !AUTO_SYNC_TICKET_SOURCES.has(t.source);
 
-/** The date FU1/FU2 count from: `onboard_date`, shifted forward to a later
- *  ticket-close date when the customer had a blocking ticket that has since
- *  closed. Returns ISO `YYYY-MM-DD`, or null when unscheduled. */
+/** The date FU1/FU2 count from. Base anchor is the completed `onboard_date`,
+ *  or — when the customer hasn't completed onboarding yet — the SCHEDULED
+ *  onboarding call date, so follow-ups queue as soon as a call is booked. The
+ *  base is then shifted forward to a later ticket-close date when the customer
+ *  had a blocking ticket that has since closed. Returns ISO `YYYY-MM-DD`, or
+ *  null when there's neither an onboard date nor a scheduled call. */
 export function effectiveFollowUpAnchor(c: Customer, ctx: CustomerStatusContext): string | null {
-  if (!c.onboard_date) return null;
+  const base = c.onboard_date
+    ?? (ctx.onboardingCallDate ? ctx.onboardingCallDate.slice(0, 10) : null);
+  if (!base) return null;
   // While any ticket is open the customer is on hold; the anchor isn't surfaced.
-  if (ctx.openTickets.length > 0) return c.onboard_date;
+  if (ctx.openTickets.length > 0) return base;
   const closed = ctx.lastClosedAnyTicketAt?.slice(0, 10);
-  if (closed && closed > c.onboard_date) return closed;
-  return c.onboard_date;
+  if (closed && closed > base) return closed;
+  return base;
 }
 
 /** Days until the customer's next still-pending follow-up, or null if none
  *  pending (unscheduled or both complete). Negative = overdue. Counts from
  *  `anchorIso` when given, otherwise `onboard_date`. */
 function daysToNextFu(c: Customer, today: Date, anchorIso?: string | null): number | null {
-  if (!c.onboard_date) return null;
-  const { fu1Due, fu2Due } = followUpDueDates(anchorIso ?? c.onboard_date);
+  const anchor = anchorIso ?? c.onboard_date;
+  if (!anchor) return null;
+  const { fu1Due, fu2Due } = followUpDueDates(anchor);
   const mid = new Date(today); mid.setHours(0, 0, 0, 0);
   const dayDiff = (d: Date) => Math.round((d.getTime() - mid.getTime()) / 86_400_000);
   if (!c.fu1_status) return dayDiff(fu1Due);
@@ -93,7 +103,7 @@ export function computeCustomerStatuses(
   // diagnosis-call tickets and message-thread tickets never hold. Held
   // customers never show as overdue (the hold branch below skips the markers).
   const blockingCondition = ctx.queuedReplacement || ctx.openTickets.some(isHoldingTicket);
-  const pendingFu = !!c.onboard_date && fu !== 'complete' && fu !== 'unscheduled';
+  const pendingFu = !!anchor && fu !== 'complete' && fu !== 'unscheduled';
 
   if (pendingFu && blockingCondition) {
     s.add('fu_on_hold');
@@ -102,7 +112,7 @@ export function computeCustomerStatuses(
     if (fu === 'due_fu1' || fu === 'due_fu2') s.add('due_today');
     const dnext = daysToNextFu(c, today, anchor);
     if (dnext !== null && dnext > 0 && dnext <= 7) s.add('due_7d');
-    if (c.onboard_date && fu !== 'complete' && fu !== 'unscheduled') s.add('in_followup');
+    if (anchor && fu !== 'complete' && fu !== 'unscheduled') s.add('in_followup');
   }
 
   const hasTicket = (pred: (t: { status: string; category: string }) => boolean) =>
@@ -117,7 +127,7 @@ export function computeCustomerStatuses(
   if (ctx.returned) s.add('returned');
 
   const hasOpenIssue = ctx.openTickets.length > 0 || ctx.queuedReplacement || ctx.returned;
-  if (c.onboard_date && fu === 'complete' && !hasOpenIssue) s.add('active');
+  if (anchor && fu === 'complete' && !hasOpenIssue) s.add('active');
 
   return s;
 }
@@ -214,9 +224,18 @@ export function useFollowUpDirectory(today: Date = new Date()): {
     const ticketsByCustomer = new Map<string, Pick<ServiceTicket, 'status' | 'category' | 'source'>[]>();
     // Most-recent close (ISO) across ALL categories — anchors the FU reschedule.
     const lastClosedAnyByCustomer = new Map<string, string>();
+    // Latest scheduled onboarding call (ISO) per customer — anchors follow-ups
+    // as soon as a call is booked, before onboarding is marked complete.
+    const onboardingCallByCustomer = new Map<string, string>();
     for (const t of tickets) {
       const cid = resolveCustomerId(t, idx);
       if (!cid) continue;
+      if (t.category === 'onboarding' && t.calendly_event_start) {
+        const prevCall = onboardingCallByCustomer.get(cid);
+        if (!prevCall || t.calendly_event_start > prevCall) {
+          onboardingCallByCustomer.set(cid, t.calendly_event_start);
+        }
+      }
       if (t.status === 'closed') {
         if (t.closed_at) {
           const prevAny = lastClosedAnyByCustomer.get(cid);
@@ -250,6 +269,7 @@ export function useFollowUpDirectory(today: Date = new Date()): {
         returned: false,
         awaitingOnboarding: awaitingOnboardingIds.has(c.id),
         lastClosedAnyTicketAt: lastClosedAnyByCustomer.get(c.id) ?? null,
+        onboardingCallDate: onboardingCallByCustomer.get(c.id) ?? null,
       };
       const statuses = computeCustomerStatuses(c, ctx, today);
       // Fold in operator-applied manual tags (additive to the derived ones).
