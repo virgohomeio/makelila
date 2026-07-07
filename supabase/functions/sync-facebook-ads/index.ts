@@ -76,7 +76,9 @@ Deno.serve(async (req: Request) => {
   const now = new Date().toISOString();
   try {
     let url: string | null =
-      `${base}/${acct}/insights?level=campaign&fields=campaign_id,campaign_name,spend,impressions,clicks,actions,date_start,date_stop&date_preset=last_90d&limit=200&access_token=${encodeURIComponent(token)}`;
+      // date_preset=maximum → lifetime spend for EVERY campaign (one row each),
+      // so older campaigns aren't dropped the way last_90d did.
+      `${base}/${acct}/insights?level=campaign&fields=campaign_id,campaign_name,spend,impressions,clicks,actions,date_start,date_stop&date_preset=maximum&limit=500&access_token=${encodeURIComponent(token)}`;
     let pages = 0;
     while (url && pages < 20) {
       const res = await fetch(url);
