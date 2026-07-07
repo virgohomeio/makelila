@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase } from './supabase';
 import { logAction } from './activityLog';
+import { adjustPartStock } from './parts';
 
 export type OrderStatus = 'pending' | 'approved' | 'flagged' | 'held';
 
@@ -549,6 +550,91 @@ export async function resumeReplacement(orderId: string, state: 'ready' | 'await
     .eq('id', orderId);
   if (error) throw error;
   await logAction('repl_resumed', orderId, `resumed → ${state}`);
+}
+
+/** Cancel a pending (un-shipped) replacement order.
+ *
+ *  Guardrails:
+ *    - Only replacement orders (kind='replacement') that have NOT shipped.
+ *    - Only when the associated support ticket is CLOSED (or there is no
+ *      linked ticket). Throws with a clear message otherwise.
+ *
+ *  Effect — releases reserved stock, then deletes the order so it drops off
+ *  both the Sales (Order Review › Replacement) and Service › Replacement lists
+ *  via realtime:
+ *    - Units reserved for this order → back to 'ready' (safe for any state;
+ *      no-op when nothing was reserved, e.g. an 'awaiting' order).
+ *    - Parts decremented at creation → restored to on_hand. Only done for a
+ *      'ready' order, the state in which createReplacementOrder decremented
+ *      them; 'awaiting' never decremented and 'held' can't be disambiguated,
+ *      so parts aren't auto-restored there (units are still freed).
+ */
+export async function cancelReplacementOrder(orderId: string): Promise<void> {
+  const { data: order, error: oErr } = await supabase
+    .from('orders')
+    .select('id, order_ref, kind, replacement_state, linked_ticket_id, shipped_at, delivered_at, line_items')
+    .eq('id', orderId)
+    .single();
+  if (oErr || !order) throw new Error(`Replacement not found: ${oErr?.message ?? 'no row'}`);
+  if (order.kind !== 'replacement') throw new Error('This is not a replacement order.');
+  if (order.shipped_at || order.delivered_at) {
+    throw new Error('This replacement has already shipped and cannot be cancelled.');
+  }
+
+  // Gate: the associated support ticket must be closed.
+  if (order.linked_ticket_id) {
+    const { data: ticket, error: tErr } = await supabase
+      .from('service_tickets')
+      .select('status, ticket_number')
+      .eq('id', order.linked_ticket_id)
+      .maybeSingle();
+    if (tErr) throw new Error(`Could not check the linked ticket: ${tErr.message}`);
+    if (ticket && ticket.status !== 'closed') {
+      throw new Error(
+        `Cannot cancel — the associated support ticket ${ticket.ticket_number ?? ''} is not closed yet `
+        + `(status: ${ticket.status}). Close the ticket first.`,
+      );
+    }
+  }
+
+  // Release reserved units (conditional → safe for every state).
+  const { error: uErr } = await supabase
+    .from('units')
+    .update({ status: 'ready', customer_order_ref: null, customer_name: null })
+    .eq('customer_order_ref', order.order_ref)
+    .eq('status', 'reserved');
+  if (uErr) throw new Error(`Failed to release reserved units: ${uErr.message}`);
+
+  // Restore decremented parts — only for a 'ready' order.
+  if (order.replacement_state === 'ready') {
+    const lineItems = (order.line_items ?? []) as ReplacementLineItem[];
+    for (const li of lineItems) {
+      if (li.kind === 'part') {
+        await adjustPartStock(li.part_id, li.qty, `Replacement ${order.order_ref} cancelled`);
+      }
+    }
+  }
+
+  // Drop the ticket back-link so nothing dangles once the order is gone.
+  if (order.linked_ticket_id) {
+    await supabase.from('service_tickets')
+      .update({ replacement_order_id: null })
+      .eq('id', order.linked_ticket_id);
+  }
+
+  // Delete the order. select() back so an RLS-blocked delete (0 rows, no error)
+  // surfaces as a failure instead of silently leaving it in place.
+  const { data: del, error: delErr } = await supabase
+    .from('orders').delete().eq('id', orderId).select('id');
+  if (delErr) throw new Error(`Cancel failed: ${delErr.message}`);
+  if (!del || del.length === 0) {
+    throw new Error('Replacement was not cancelled (no permission or already removed).');
+  }
+
+  await logAction('replacement_cancelled', order.order_ref,
+    order.linked_ticket_id
+      ? `ticket closed · stock released`
+      : `no linked ticket · stock released`);
 }
 
 export function useOrderNotes(orderId: string | null): {

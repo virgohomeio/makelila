@@ -805,6 +805,51 @@ export async function deleteTicket(id: string): Promise<void> {
     { entityType: 'ticket', entityId: id });
 }
 
+/** Minimal live status + number of a single ticket, for gating actions on
+ *  ticket state (e.g. only cancel a replacement once its ticket is closed).
+ *  Subscribes to that row so closing the ticket elsewhere enables the action
+ *  without a reload. */
+export function useTicketBrief(ticketId: string | null): {
+  status: TicketStatus | null; ticketNumber: string | null; loading: boolean;
+} {
+  const [status, setStatus] = useState<TicketStatus | null>(null);
+  const [ticketNumber, setTicketNumber] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!ticketId) { setStatus(null); setTicketNumber(null); setLoading(false); return; }
+    let channel: RealtimeChannel | null = null;
+    let cancelled = false;
+    setLoading(true);
+    (async () => {
+      const { data } = await supabase
+        .from('service_tickets')
+        .select('status, ticket_number')
+        .eq('id', ticketId)
+        .maybeSingle();
+      if (cancelled) return;
+      const row = data as { status: TicketStatus; ticket_number: string | null } | null;
+      setStatus(row?.status ?? null);
+      setTicketNumber(row?.ticket_number ?? null);
+      setLoading(false);
+
+      channel = supabase
+        .channel(`service_tickets:brief:${ticketId}`)
+        .on('postgres_changes',
+          { event: 'UPDATE', schema: 'public', table: 'service_tickets', filter: `id=eq.${ticketId}` },
+          (payload) => {
+            const r = payload.new as { status?: TicketStatus; ticket_number?: string | null };
+            if (r.status) setStatus(r.status);
+            if (r.ticket_number !== undefined) setTicketNumber(r.ticket_number ?? null);
+          })
+        .subscribe();
+    })();
+    return () => { cancelled = true; if (channel) void channel.unsubscribe(); };
+  }, [ticketId]);
+
+  return { status, ticketNumber, loading };
+}
+
 export async function updateTicketStatus(id: string, status: TicketStatus): Promise<void> {
   // Stamp closed_at on close, and CLEAR it on reopen so a later re-close gets a
   // fresh timestamp (the DB trigger only coalesces, so without clearing, a

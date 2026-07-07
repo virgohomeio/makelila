@@ -10,6 +10,7 @@ import { NotesCard }    from './detail/NotesCard';
 import { PaymentCard } from './detail/PaymentCard';
 import { InvoicesCard } from './detail/InvoicesCard';
 import { ActionBar }    from './detail/ActionBar';
+import { ReplacementCancel } from './detail/ReplacementCancel';
 import { ConfirmBanner } from './detail/ConfirmBanner';
 import { ReadinessChecklist, canConfirm } from './detail/ReadinessChecklist';
 import styles from './OrderReview.module.css';
@@ -74,6 +75,11 @@ export function Detail({
               </>
             )}
             {order.cogs_usd != null && <>&nbsp;·&nbsp;COGS ${order.cogs_usd.toFixed(2)}</>}
+            <ReplacementCancel
+              order={order}
+              onCancelled={onAfterDisposition}
+              onError={(message) => setBanner({ variant: 'error', message: `Failed: ${message}` })}
+            />
           </div>
         )}
         {order.kind === 'sale' && (() => {
