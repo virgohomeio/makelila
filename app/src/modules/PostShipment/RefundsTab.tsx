@@ -786,7 +786,7 @@ function RefundCard({
         )}
       </div>
       {!selected && (
-        <div className={styles.refundCardHint}>Click to review full return form ↓</div>
+        <div className={styles.refundCardHint}>Click to open the full case ↗</div>
       )}
     </div>
   );
@@ -889,7 +889,8 @@ function RefundDetailPanel({
   };
 
   return (
-    <div className={styles.refundDetail}>
+    <div className={styles.modalBackdrop} onClick={onClose}>
+      <div className={`${styles.refundDetail} ${styles.refundDetailModal}`} onClick={e => e.stopPropagation()}>
       <div className={styles.refundDetailHead}>
         <div>
           <div className={styles.refundDetailTitleRow}>
@@ -1133,6 +1134,7 @@ function RefundDetailPanel({
           </div>
         )}
       </div>
+    </div>
     </div>
   );
 }
