@@ -167,6 +167,17 @@ export function RefundsTab() {
     return m;
   }, [approvals]);
 
+  // Pre-George stage (CEO 2026-07): before a refund even reaches manager review,
+  // the unit has to be returned and inspected, then compiled. Surface returns
+  // that are physically back ('received') and don't yet have a refund request as
+  // the first column of the queue, so the inspection step is visible.
+  const inspectionReturns = useMemo(() => {
+    const withApproval = new Set(approvals.map(a => a.return_id).filter(Boolean) as string[]);
+    return returns
+      .filter(r => r.status === 'received' && !withApproval.has(r.id))
+      .sort((a, b) => b.created_at.localeCompare(a.created_at));
+  }, [returns, approvals]);
+
   const stats = useMemo(() => {
     let totalRefunded = 0;
     let totalPending = 0;
@@ -213,6 +224,41 @@ export function RefundsTab() {
       </div>
 
       <div className={styles.kanban}>
+        {/* Pre-George: unit returned & being inspected, before it's compiled
+            and sent to manager review. */}
+        <div className={styles.kanbanCol}>
+          <div className={styles.kanbanColHead}>
+            <span className={styles.kanbanColLabel}>Return &amp; inspection</span>
+            <span className={styles.kanbanColCount}>{inspectionReturns.length}</span>
+          </div>
+          <div className={styles.kanbanColSub}>Unit returned &amp; inspected — before George</div>
+          <div className={styles.kanbanList}>
+            {inspectionReturns.length === 0 ? (
+              <div className={styles.kanbanEmpty}>—</div>
+            ) : inspectionReturns.map(r => (
+              <div key={r.id} className={styles.refundCard} style={{ borderLeftColor: '#805ad5' }}>
+                <div className={styles.refundCardHead}>
+                  <strong>{r.customer_name}</strong>
+                  {r.refund_amount_usd != null && (
+                    <span className={styles.refundAmount}>${Number(r.refund_amount_usd).toLocaleString('en-US')}</span>
+                  )}
+                </div>
+                {(r.original_order_ref || r.unit_serial) && (
+                  <div className={styles.refundMeta}>
+                    {[r.original_order_ref, r.unit_serial].filter(Boolean).join(' · ')}
+                  </div>
+                )}
+                {r.reason && <div className={styles.refundReason}>{r.reason}</div>}
+                <div className={styles.refundMeta}>Unit returned — inspect, then compile for George</div>
+                <div className={styles.refundActions}>
+                  <button className={styles.refundApproveBtn} onClick={() => setShowRequestModal(true)}>
+                    Compile → George
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
         {COLUMNS.map(col => {
           const rows = byColumn.get(col.key) ?? [];
           return (
