@@ -8,8 +8,8 @@ const muted = 'var(--color-ink-muted)';
 // Google service account (see the Web setup checklist). Cards show "not connected"
 // until the first sync returns rows.
 export function WebTab() {
-  const { totals: ga, byChannel, loading: gaLoading } = useGa4();
-  const { totals: gsc, loading: gscLoading } = useGsc();
+  const { totals: ga, byChannel, lastSynced: gaSynced, loading: gaLoading, reload: reloadGa } = useGa4();
+  const { totals: gsc, lastSynced: gscSynced, loading: gscLoading, reload: reloadGsc } = useGsc();
   const [syncing, setSyncing] = useState<'ga4' | 'gsc' | null>(null);
   const [msg, setMsg] = useState('');
 
@@ -17,7 +17,8 @@ export function WebTab() {
     setSyncing(which); setMsg('');
     try {
       const r = which === 'ga4' ? await triggerGa4Sync() : await triggerGscSync();
-      setMsg(r.note ?? `Synced ${r.synced} ${which === 'ga4' ? 'GA4' : 'Search Console'} rows. Reload to see totals.`);
+      setMsg(r.note ?? `Synced ${r.synced} ${which === 'ga4' ? 'GA4' : 'Search Console'} rows.`);
+      if (which === 'ga4') await reloadGa(); else await reloadGsc();
     } catch (e) {
       setMsg(`${which === 'ga4' ? 'GA4' : 'Search Console'} sync failed: ${String(e)}`);
     } finally {
@@ -30,14 +31,20 @@ export function WebTab() {
 
   return (
     <div>
-      <div style={{ display: 'flex', gap: 10, marginBottom: 14, flexWrap: 'wrap', alignItems: 'center' }}>
-        <button style={btn} disabled={syncing !== null} onClick={() => void run('ga4')}>
-          {syncing === 'ga4' ? 'Syncing…' : 'Sync GA4'}
-        </button>
-        <button style={btn} disabled={syncing !== null} onClick={() => void run('gsc')}>
-          {syncing === 'gsc' ? 'Syncing…' : 'Sync Search Console'}
-        </button>
-        {msg && <span style={{ fontSize: 12, color: muted }}>{msg}</span>}
+      <div style={{ display: 'flex', gap: 16, marginBottom: 14, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+        <div>
+          <button style={btn} disabled={syncing !== null} onClick={() => void run('ga4')}>
+            {syncing === 'ga4' ? 'Syncing…' : 'Sync GA4'}
+          </button>
+          <div style={syncedCaption}>{gaSynced ? `Last synced ${fmtDT(gaSynced)}` : 'Never synced'}</div>
+        </div>
+        <div>
+          <button style={btn} disabled={syncing !== null} onClick={() => void run('gsc')}>
+            {syncing === 'gsc' ? 'Syncing…' : 'Sync Search Console'}
+          </button>
+          <div style={syncedCaption}>{gscSynced ? `Last synced ${fmtDT(gscSynced)}` : 'Never synced'}</div>
+        </div>
+        {msg && <span style={{ fontSize: 12, color: muted, alignSelf: 'center' }}>{msg}</span>}
       </div>
 
       {/* GA4 */}
@@ -101,3 +108,9 @@ const notice = {
   fontSize: 12, color: muted, background: 'var(--color-surface)',
   borderRadius: 6, padding: '10px 12px', marginBottom: 14, lineHeight: 1.5,
 } as const;
+
+const syncedCaption = { fontSize: 11, color: subtle, marginTop: 4 } as const;
+
+function fmtDT(iso: string): string {
+  return new Date(iso).toLocaleString('en-CA', { dateStyle: 'medium', timeStyle: 'short' });
+}
