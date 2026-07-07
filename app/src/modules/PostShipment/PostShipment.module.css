@@ -142,12 +142,24 @@
 
 .kanban {
   display: grid;
-  /* minmax(0, 1fr) — not plain 1fr — so a column never grows past its equal
-     share to fit wide content (e.g. long ticket subjects). Content truncates
-     inside instead of widening the column. */
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  /* All stages stay in ONE horizontal row — no wrapping to a second line like
+     the old repeat(4) did (which pushed Denied underneath). Columns share the
+     width when there's room and scroll horizontally when there isn't; the synced
+     top + bottom scrollbars drive that scroll. */
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(230px, 1fr);
   gap: 12px;
+  overflow-x: auto;
+  padding-bottom: 4px;
 }
+/* Thin proxy scrollbar rendered above the kanban and kept in sync, so the
+   operator can scroll the columns from the top as well as the bottom. */
+.kanbanScrollTop {
+  overflow-x: auto;
+  overflow-y: hidden;
+  margin-bottom: 4px;
+}
+.kanbanScrollTop > div { height: 1px; }
 
 .kanbanCol {
   background: var(--color-surface);
@@ -573,7 +585,7 @@
 }
 
 @media (max-width: 1200px) {
-  .kanban { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .kanban { grid-auto-columns: minmax(220px, 82vw); }
 }
 
 .refundCard {

@@ -337,12 +337,14 @@ export async function updateReplStatus(id: string, newStatus: ReplQueueStatus): 
 
 export type RefundStatus =
   | 'submitted' | 'manager_review' | 'finance_review'
-  | 'refunded' | 'denied' | 'closed';
+  | 'refund_queue' | 'refunded' | 'denied' | 'closed';
 
 export const REFUND_STATUS_META: Record<RefundStatus, { label: string; color: string; bg: string; border: string }> = {
   submitted:       { label: 'Submitted',        color: '#4a5568', bg: '#f7fafc', border: '#cbd5e1' },
   manager_review:  { label: 'Manager review',   color: '#2b6cb0', bg: '#ebf8ff', border: '#bee3f8' },
   finance_review:  { label: 'Finance review',   color: '#c05621', bg: '#fffaf0', border: '#fbd38d' },
+  // Case + amount approved; awaiting the operator to actually execute the payout.
+  refund_queue:    { label: 'Refund Queue',     color: '#553c9a', bg: '#faf5ff', border: '#d6bcfa' },
   refunded:        { label: 'Refunded',         color: '#276749', bg: '#f0fff4', border: '#9ae6b4' },
   denied:          { label: 'Denied',           color: '#9b2c2c', bg: '#fff5f5', border: '#fc8181' },
   closed:          { label: 'Closed',           color: '#718096', bg: '#edf2f7', border: '#cbd5e1' },
@@ -588,16 +590,17 @@ export async function financeApprove(id: string, opts: FinanceApproveOpts): Prom
     throw new Error('Correction note is required when changing the refund amount.');
   }
 
-  // 4. Update the approval row → status='refunded'
+  // 4. Update the approval row → status='refund_queue'. Finance has approved the
+  //    case + amount + method here; the payout itself is executed later from the
+  //    Refund Queue (executeRefund), so we don't set refunded_at yet.
   const updatePatch: Record<string, unknown> = {
-    status: 'refunded',
+    status: 'refund_queue',
     refund_method: opts.method,
     refund_amount_usd: adjusted,
     amount_correction_note: amountChanged ? opts.correction_note!.trim() : null,
     finance_approved_by: userId,
     finance_approved_at: new Date().toISOString(),
     finance_decision_note: opts.note?.trim() || null,
-    refunded_at: new Date().toISOString(),
   };
   const { error: upErr } = await supabase
     .from('refund_approvals')
@@ -605,7 +608,29 @@ export async function financeApprove(id: string, opts: FinanceApproveOpts): Prom
     .eq('id', id);
   if (upErr) throw upErr;
 
-  await logAction('refund_finance_approved', id, `${opts.method} $${adjusted.toFixed(2)}`,
+  await logAction('refund_finance_approved', id, `${opts.method} $${adjusted.toFixed(2)}`);
+}
+
+/** Refund Queue → Refunded. Finance has already approved the case + amount; this
+ *  is the operator actually executing the payout and marking it done. The Klaviyo
+ *  "Refund Processed" event fires here — the moment money actually moves — not at
+ *  finance approval. */
+export async function executeRefund(id: string, note?: string): Promise<void> {
+  const { data: approval, error: aErr } = await supabase
+    .from('refund_approvals')
+    .select('id, status, customer_email')
+    .eq('id', id)
+    .single();
+  if (aErr || !approval) throw new Error(`Refund approval not found: ${aErr?.message}`);
+  if (approval.status !== 'refund_queue') {
+    throw new Error(`Cannot execute a refund from status: ${approval.status}`);
+  }
+  const { error } = await supabase.from('refund_approvals').update({
+    status: 'refunded',
+    refunded_at: new Date().toISOString(),
+  }).eq('id', id);
+  if (error) throw error;
+  await logAction('refund_executed', id, note?.trim() || 'paid out',
     undefined,
     { klaviyoEvent: 'Refund Processed', ...(approval.customer_email ? { klaviyoEmail: approval.customer_email as string } : {}) });
 }
