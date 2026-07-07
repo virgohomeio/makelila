@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import type * as React from 'react';
 import {
   useTicketAttachments,
   attachmentSignedUrl,
@@ -11,17 +12,48 @@ import styles from './Service.module.css';
 
 type Props = { ticketId: string };
 
+/** Pull image blobs out of a clipboard/drag DataTransfer. Pasted screenshots
+ *  arrive as a blob (often unnamed or "image.png"), so give them a unique,
+ *  meaningful filename before they go through the upload path. */
+function imageFilesFrom(dt: DataTransfer | null): File[] {
+  if (!dt) return [];
+  const out: File[] = [];
+  for (const item of Array.from(dt.items ?? [])) {
+    if (item.kind === 'file' && item.type.startsWith('image/')) {
+      const blob = item.getAsFile();
+      if (blob) out.push(toNamedFile(blob));
+    }
+  }
+  if (out.length === 0) {
+    for (const f of Array.from(dt.files ?? [])) {
+      if (f.type.startsWith('image/')) out.push(toNamedFile(f));
+    }
+  }
+  return out;
+}
+
+function toNamedFile(blob: File | Blob): File {
+  const type = blob.type || 'image/png';
+  const name = (blob as File).name;
+  const generic = !name || name === 'image.png';
+  if (!generic) return blob as File;
+  const ext = (type.split('/')[1] ?? 'png').replace('jpeg', 'jpg');
+  return new File([blob], `pasted-${Date.now()}.${ext}`, { type });
+}
+
 export function AttachmentStrip({ ticketId }: Props) {
   const { attachments, loading, refresh } = useTicketAttachments(ticketId);
   const [lightbox, setLightbox] = useState<TicketAttachment | null>(null);
   const [uploadingNames, setUploadingNames] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
 
-  async function handleFiles(files: FileList | null) {
-    if (!files || files.length === 0) return;
-    setError(null);
+  async function handleFiles(files: FileList | File[] | null) {
+    if (!files) return;
     const list = Array.from(files);
+    if (list.length === 0) return;
+    setError(null);
     setUploadingNames(list.map(f => f.name));
     try {
       // Upload sequentially so a partial failure leaves earlier uploads
@@ -40,6 +72,36 @@ export function AttachmentStrip({ ticketId }: Props) {
       // websocket can stall after the device sleeps).
       refresh();
     }
+  }
+
+  // Paste (⌘/Ctrl+V) anywhere while a ticket is open: pull image blobs out of
+  // the clipboard and route them through the SAME uploadTicketAttachment path
+  // as the file picker, so a pasted screenshot is stored identically to an
+  // upload. A window listener is used (not a div onPaste) because paste only
+  // fires on focused editable elements — Safari never fires it on a plain div.
+  // Text pastes are ignored (no image in the clipboard), so typing in the
+  // notes/subject fields is unaffected.
+  useEffect(() => {
+    function onWindowPaste(e: ClipboardEvent) {
+      const files = imageFilesFrom(e.clipboardData);
+      if (files.length > 0) {
+        e.preventDefault();
+        void handleFiles(files);
+      }
+    }
+    window.addEventListener('paste', onWindowPaste);
+    return () => window.removeEventListener('paste', onWindowPaste);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ticketId]);
+
+  function handleDrop(e: React.DragEvent) {
+    e.preventDefault();
+    setDragOver(false);
+    // Prefer clipboard-style image extraction; fall back to any dropped files
+    // (uploadTicketAttachment validates type/size and surfaces errors).
+    const imgs = imageFilesFrom(e.dataTransfer);
+    const files = imgs.length > 0 ? imgs : Array.from(e.dataTransfer.files ?? []);
+    if (files.length > 0) void handleFiles(files);
   }
 
   async function handleDelete(att: TicketAttachment) {
@@ -71,10 +133,20 @@ export function AttachmentStrip({ ticketId }: Props) {
             ? `Uploading ${uploadingNames.length}…`
             : '+ Photo / video'}
         </button>
-        <span className={styles.attachHint}>
-          JPEG · PNG · WebP · HEIC · MP4 · MOV · WebM · max 25 MB
-        </span>
+        <div
+          className={`${styles.attachPasteZone} ${dragOver ? styles.attachPasteZoneOver : ''}`}
+          aria-label="Paste an image (Cmd/Ctrl+V) or drop a file here"
+          title="Paste an image (⌘/Ctrl+V) while this ticket is open, or drop a file here"
+          onDrop={handleDrop}
+          onDragOver={e => { e.preventDefault(); setDragOver(true); }}
+          onDragLeave={() => setDragOver(false)}
+        >
+          📋 Paste image (⌘/Ctrl+V) or drop here
+        </div>
       </div>
+      <span className={styles.attachHint}>
+        JPEG · PNG · WebP · HEIC · MP4 · MOV · WebM · max 25 MB
+      </span>
       {error && <div className={styles.attachError}>{error}</div>}
 
       {loading
