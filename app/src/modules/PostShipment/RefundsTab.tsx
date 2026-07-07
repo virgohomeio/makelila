@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   useRefundApprovals, useReturns,
-  submitRefundRequest, managerApprove, financeApprove, denyRefund, closeRefund,
+  submitRefundRequest, managerApprove, financeApprove, executeRefund, denyRefund, closeRefund,
   setReturnDisposition, updateReturnStatus,
   useRefundNotes, addRefundNote, deleteRefundNote,
   REFUND_STATUS_META, REFUND_METHODS, REFUND_METHOD_META,
@@ -30,13 +30,14 @@ import styles from './PostShipment.module.css';
 
 const STAR = '★';
 
-type ColKey = 'manager_review' | 'finance_review' | 'refunded' | 'denied';
+type ColKey = 'manager_review' | 'finance_review' | 'refund_queue' | 'refunded' | 'denied';
 
 const COLUMNS: { key: ColKey; label: string; helper: string }[] = [
   { key: 'manager_review', label: 'Manager review',  helper: 'Awaiting George' },
-  { key: 'finance_review', label: 'Finance review',  helper: 'Awaiting Julie / Huayi' },
-  { key: 'refunded',       label: 'Refunded',        helper: 'Payment processed' },
-  { key: 'denied',         label: 'Denied',          helper: 'Rejected at any stage' },
+  { key: 'finance_review', label: 'Finance review',  helper: 'Awaiting Julie / Huayi (amount)' },
+  { key: 'refund_queue',   label: 'Refund Queue',    helper: 'Approved — execute the payout' },
+  { key: 'refunded',       label: 'Refunded',        helper: 'Payment executed' },
+  { key: 'denied',         label: 'Denied',          helper: 'Rejected — shows which stage' },
 ];
 
 export function RefundsTab() {
@@ -159,6 +160,7 @@ export function RefundsTab() {
       const k: ColKey | null =
         a.status === 'submitted' || a.status === 'manager_review' ? 'manager_review' :
         a.status === 'finance_review' ? 'finance_review' :
+        a.status === 'refund_queue' ? 'refund_queue' :
         a.status === 'refunded' ? 'refunded' :
         a.status === 'denied' ? 'denied' :
         null;
@@ -200,6 +202,28 @@ export function RefundsTab() {
     };
   }, [approvals, byColumn]);
 
+  // Synced top scrollbar: the kanban is one horizontal row (no wrapping), so a
+  // proxy scrollbar above mirrors the native one below and lets the operator
+  // scroll the columns from either end.
+  const kanbanRef = useRef<HTMLDivElement>(null);
+  const topScrollRef = useRef<HTMLDivElement>(null);
+  const [scrollW, setScrollW] = useState(0);
+  useEffect(() => {
+    const el = kanbanRef.current;
+    if (!el) return;
+    const update = () => setScrollW(el.scrollWidth);
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [approvals, inspectionReturns]);
+  const syncFromTop = () => {
+    if (kanbanRef.current && topScrollRef.current) kanbanRef.current.scrollLeft = topScrollRef.current.scrollLeft;
+  };
+  const syncFromKanban = () => {
+    if (kanbanRef.current && topScrollRef.current) topScrollRef.current.scrollLeft = kanbanRef.current.scrollLeft;
+  };
+
   if (aLoading || rLoading) return <div className={styles.loading}>Loading refunds…</div>;
 
   return (
@@ -223,7 +247,10 @@ export function RefundsTab() {
         {error && <span className={styles.refundsError}>{error}</span>}
       </div>
 
-      <div className={styles.kanban}>
+      <div ref={topScrollRef} className={styles.kanbanScrollTop} onScroll={syncFromTop}>
+        <div style={{ width: scrollW }} />
+      </div>
+      <div ref={kanbanRef} className={styles.kanban} onScroll={syncFromKanban}>
         {/* Pre-George: unit returned & being inspected, before it's compiled
             and sent to manager review. */}
         <div className={styles.kanbanCol}>
@@ -612,8 +639,17 @@ function RefundCard({
     finally { setBusy(false); }
   };
 
+  const runExecute = async () => {
+    setBusy(true); onError(null);
+    try { await executeRefund(refund.id); }
+    catch (e) { onError((e as Error).message); }
+    finally { setBusy(false); }
+  };
+
   const canActManager = (refund.status === 'manager_review' || refund.status === 'submitted') && canManager;
   const canActFinance = refund.status === 'finance_review' && canFinance;
+  // Refund Queue → execute the payout. Finance role (Julie / Huayi) does it.
+  const canActExecute = refund.status === 'refund_queue' && canFinance;
   const canDeny = canActManager || canActFinance;
 
   return (
@@ -683,15 +719,22 @@ function RefundCard({
         )}
         {refund.finance_approved_at && (
           <RefundStep
-            label="Finance ✓ Paid"
+            label="Finance ✓ amount"
             ts={refund.finance_approved_at}
             note={refund.finance_decision_note}
             active
           />
         )}
+        {refund.refunded_at && (
+          <RefundStep
+            label="Refunded ✓ paid"
+            ts={refund.refunded_at}
+            active
+          />
+        )}
         {refund.denied_at && (
           <RefundStep
-            label={`Denied @ ${refund.denied_at_stage}`}
+            label={`Denied @ ${refund.denied_at_stage ? REFUND_STATUS_META[refund.denied_at_stage].label : 'review'}`}
             ts={refund.denied_at}
             note={refund.denied_reason}
             negative
@@ -725,7 +768,12 @@ function RefundCard({
           <>
             {(canActManager || canActFinance) && (
               <button onClick={openApprove} disabled={busy} className={styles.refundApproveBtn}>
-                {canActManager ? 'Approve (manager)' : 'Approve (finance, paid)'}
+                {canActManager ? 'Approve (manager)' : 'Approve amount → queue'}
+              </button>
+            )}
+            {canActExecute && (
+              <button onClick={() => void runExecute()} disabled={busy} className={styles.refundApproveBtn}>
+                {busy ? '…' : '✓ Mark refunded (executed)'}
               </button>
             )}
             {canDeny && (
@@ -772,7 +820,15 @@ function RefundDetailPanel({
 
   const canActManager = (refund.status === 'manager_review' || refund.status === 'submitted') && canManager;
   const canActFinance = refund.status === 'finance_review' && canFinance;
+  const canActExecute = refund.status === 'refund_queue' && canFinance;
   const canAct = canActManager || canActFinance;
+
+  const runExecute = async () => {
+    setBusy(true); onError(null);
+    try { await executeRefund(refund.id); onClose(); }
+    catch (e) { onError((e as Error).message); }
+    finally { setBusy(false); }
+  };
 
   const runAddNote = async () => {
     if (!newNote.trim()) return;
@@ -1030,6 +1086,7 @@ function RefundDetailPanel({
         <div className={styles.refundDetailRolePill}>
           {canActManager ? 'You can act as Manager for this case' :
            canActFinance ? 'You can act as Finance for this case' :
+           canActExecute ? 'Approved — execute the payout, then mark refunded' :
            refund.status === 'refunded' ? 'Refunded — no action needed' :
            refund.status === 'denied'   ? 'Denied — no action needed' :
            refund.status === 'closed'   ? 'Closed — no action needed' :
@@ -1060,7 +1117,12 @@ function RefundDetailPanel({
           <div className={styles.refundDetailButtons}>
             {canAct && (
               <button onClick={openApprove} disabled={busy} className={styles.refundDetailApproveBtn}>
-                {canActManager ? '✓ Approve as Manager' : '✓ Approve as Finance (paid)'}
+                {canActManager ? '✓ Approve as Manager' : '✓ Approve amount → Refund Queue'}
+              </button>
+            )}
+            {canActExecute && (
+              <button onClick={() => void runExecute()} disabled={busy} className={styles.refundDetailApproveBtn}>
+                {busy ? '…' : '✓ Mark refunded (executed)'}
               </button>
             )}
             {canAct && (
@@ -1327,7 +1389,7 @@ function FinanceApproveModal({
   return (
     <div className={styles.modalBackdrop} onClick={onClose}>
       <div className={styles.modalCard} onClick={e => e.stopPropagation()}>
-        <h3 className={styles.modalTitle}>Process refund</h3>
+        <h3 className={styles.modalTitle}>Approve refund amount</h3>
 
         {returnNotReceived && (
           <div className={styles.financeModalWarn}>
@@ -1397,7 +1459,7 @@ function FinanceApproveModal({
             disabled={busy || Number.isNaN(amount) || amount < 0 || returnNotReceived}
             className={styles.btnPrimary}
           >
-            {busy ? 'Processing…' : `Refund $${Number.isNaN(amount) ? '?' : amount.toFixed(2)}`}
+            {busy ? 'Processing…' : `Approve $${Number.isNaN(amount) ? '?' : amount.toFixed(2)} → Refund Queue`}
           </button>
         </div>
       </div>
