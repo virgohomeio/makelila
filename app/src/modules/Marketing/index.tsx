@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { CacDashboard } from './CacDashboard';
+import { CampaignsTable } from './CampaignsTable';
 import { DashboardTab } from './DashboardTab';
 import { ReportTab } from './ReportTab';
 import { JourneyTab } from './JourneyTab';
@@ -97,48 +98,7 @@ export default function Marketing() {
               No campaigns yet. Click "Sync Facebook Ads" to pull data.
             </p>
           ) : (
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-              <thead>
-                <tr style={{ color: 'var(--color-ink-subtle)', fontSize: 11 }}>
-                  <th style={{ textAlign: 'left', paddingBottom: 8 }}>Campaign</th>
-                  <th style={{ textAlign: 'left' }}>Status</th>
-                  <th style={{ textAlign: 'right' }}>Spend (CAD)</th>
-                  <th style={{ textAlign: 'right' }}>Impressions</th>
-                  <th style={{ textAlign: 'right' }}>Clicks</th>
-                  <th style={{ textAlign: 'right' }}>Leads</th>
-                  <th style={{ textAlign: 'right' }}>CPL</th>
-                </tr>
-              </thead>
-              <tbody>
-                {campaigns.map(c => (
-                  <tr key={c.campaign_id + c.date_start} style={{ borderTop: '1px solid var(--color-border)' }}>
-                    <td style={{ padding: '8px 0', fontWeight: 500, maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {c.campaign_name}
-                    </td>
-                    <td>
-                      <span style={{
-                        fontSize: 10, padding: '2px 7px', borderRadius: 4,
-                        background: c.status === 'ACTIVE' ? '#f0fff4' : 'var(--color-surface)',
-                        color: c.status === 'ACTIVE' ? '#276749' : 'var(--color-ink-muted)',
-                        border: `1px solid ${c.status === 'ACTIVE' ? '#9ae6b4' : 'var(--color-border)'}`,
-                        fontWeight: 700, textTransform: 'uppercase' as const,
-                      }}>
-                        {c.status}
-                      </span>
-                    </td>
-                    <td style={{ textAlign: 'right' }}>
-                      {c.spend_cad != null ? `$${c.spend_cad.toFixed(0)}` : '—'}
-                    </td>
-                    <td style={{ textAlign: 'right' }}>{c.impressions?.toLocaleString() ?? '—'}</td>
-                    <td style={{ textAlign: 'right' }}>{c.clicks?.toLocaleString() ?? '—'}</td>
-                    <td style={{ textAlign: 'right' }}>{c.leads ?? '—'}</td>
-                    <td style={{ textAlign: 'right' }}>
-                      {c.cpl_cad != null ? `$${c.cpl_cad.toFixed(0)}` : '—'}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <CampaignsTable campaigns={campaigns} />
           )}
         </>
       )}
