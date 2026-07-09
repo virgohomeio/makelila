@@ -47,6 +47,20 @@ const money2 = (n: number | null) => (n == null ? '—' : `$${n.toLocaleString(u
 const pct    = (n: number | null) => (n == null ? '—' : `${n.toFixed(2)}%`);
 const num    = (n: number) => n.toLocaleString();
 
+// Friendly description per creative, keyed off the m<N> prefix of the ad name
+// (m1a, m2b… → m1, m2…). LILA Mini July creative test.
+const CREATIVE_MAP: Record<string, string> = {
+  m1: 'Pedrum Images',
+  m2: 'LaunchBoom Images',
+  m3: 'Pro Performer Videos',
+  m4: 'LaunchBoom Videos',
+  m5: 'IAS Render Video',
+};
+function creativeLabel(name: string): string {
+  const m = name.toLowerCase().match(/m\s*(\d+)/);
+  return m ? CREATIVE_MAP[`m${m[1]}`] ?? '—' : '—';
+}
+
 export function MiniTab() {
   const { ads, loading } = useFbAds();
 
@@ -89,7 +103,7 @@ export function MiniTab() {
 
       <Section title="Overall campaign" rows={[overall]} firstCol="Campaign" />
       <Section title="By ad set (audience)" rows={byAdset} firstCol="Ad set" />
-      <Section title="By ad creative (compiled across ad sets)" rows={byCreative} firstCol="Creative" />
+      <Section title="By ad creative (compiled across ad sets)" rows={byCreative} firstCol="Ad name" describe={creativeLabel} />
 
       <div style={{ fontSize: 11, color: muted, marginTop: 8 }}>
         "Creative" groups by ad name (m1a, m2a…), summing that creative across all its ad sets. Lead rate = leads ÷ impressions.
@@ -98,7 +112,10 @@ export function MiniTab() {
   );
 }
 
-function Section({ title, rows, firstCol }: { title: string; rows: Agg[]; firstCol: string }) {
+function Section({ title, rows, firstCol, describe }: {
+  title: string; rows: Agg[]; firstCol: string; describe?: (name: string) => string;
+}) {
+  const leftTh = { textAlign: 'left', padding: '8px 10px', background: 'var(--color-surface)' } as const;
   return (
     <div style={{ marginBottom: 22 }}>
       <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>{title}</div>
@@ -106,7 +123,8 @@ function Section({ title, rows, firstCol }: { title: string; rows: Agg[]; firstC
         <table style={{ borderCollapse: 'collapse', fontSize: 12, width: '100%', whiteSpace: 'nowrap' }}>
           <thead>
             <tr style={{ color: subtle, fontSize: 11 }}>
-              <th style={{ textAlign: 'left', padding: '8px 10px', background: 'var(--color-surface)' }}>{firstCol}</th>
+              {describe && <th style={leftTh}>Creative</th>}
+              <th style={leftTh}>{firstCol}</th>
               <th style={th}>Leads</th>
               <th style={th}>Cost / lead</th>
               <th style={th}>Lead rate</th>
@@ -120,6 +138,7 @@ function Section({ title, rows, firstCol }: { title: string; rows: Agg[]; firstC
           <tbody>
             {rows.map(r => (
               <tr key={r.name} style={{ borderTop: '1px solid var(--color-border)' }}>
+                {describe && <td style={{ padding: '7px 10px', fontWeight: 600 }}>{describe(r.name)}</td>}
                 <td style={{ padding: '7px 10px', fontWeight: 500, maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis' }} title={r.name}>{r.name}</td>
                 <td style={td}>{num(r.leads)}</td>
                 <td style={td}>{money2(r.cpl)}</td>
@@ -131,7 +150,7 @@ function Section({ title, rows, firstCol }: { title: string; rows: Agg[]; firstC
                 <td style={td}>{money(r.spend)}</td>
               </tr>
             ))}
-            {rows.length === 0 && <tr><td colSpan={9} style={{ padding: 12, color: subtle }}>No ads.</td></tr>}
+            {rows.length === 0 && <tr><td colSpan={describe ? 10 : 9} style={{ padding: 12, color: subtle }}>No ads.</td></tr>}
           </tbody>
         </table>
       </div>
