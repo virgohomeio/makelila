@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { supabase } from '../supabase';
+import { subscribeReload } from './realtime';
 
 export type SocialChannel = 'facebook' | 'instagram' | 'youtube' | 'linkedin' | 'tiktok';
 
@@ -21,23 +22,23 @@ export function useSocialLatest() {
   const [byChannel, setByChannel] = useState<Map<SocialChannel, SocialMetric>>(new Map());
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    let cancelled = false;
-    void supabase
+  const load = useCallback(async () => {
+    const { data } = await supabase
       .from('social_metrics')
       .select('*')
-      .order('as_of', { ascending: false })
-      .then(({ data }) => {
-        if (cancelled) return;
-        const m = new Map<SocialChannel, SocialMetric>();
-        for (const r of (data ?? []) as SocialMetric[]) {
-          if (!m.has(r.channel)) m.set(r.channel, r); // desc order → first seen is latest
-        }
-        setByChannel(m);
-        setLoading(false);
-      });
-    return () => { cancelled = true; };
+      .order('as_of', { ascending: false });
+    const m = new Map<SocialChannel, SocialMetric>();
+    for (const r of (data ?? []) as SocialMetric[]) {
+      if (!m.has(r.channel)) m.set(r.channel, r); // desc order → first seen is latest
+    }
+    setByChannel(m);
+    setLoading(false);
   }, []);
+
+  useEffect(() => {
+    void load();
+    return subscribeReload('social_metrics:realtime', ['social_metrics'], () => void load());
+  }, [load]);
 
   return { byChannel, loading };
 }

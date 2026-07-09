@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { supabase } from '../supabase';
+import { subscribeReload } from './realtime';
 
 export type KlaviyoSyncLog = {
   id: string;
@@ -13,21 +14,20 @@ export function useKlaviyoSyncStatus(limit = 10): { logs: KlaviyoSyncLog[]; load
   const [logs, setLogs] = useState<KlaviyoSyncLog[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const { data, error } = await supabase
-        .from('klaviyo_sync_log')
-        .select('*')
-        .order('synced_at', { ascending: false })
-        .limit(limit);
-      if (!cancelled) {
-        if (!error && data) setLogs(data as KlaviyoSyncLog[]);
-        setLoading(false);
-      }
-    })();
-    return () => { cancelled = true; };
+  const load = useCallback(async () => {
+    const { data, error } = await supabase
+      .from('klaviyo_sync_log')
+      .select('*')
+      .order('synced_at', { ascending: false })
+      .limit(limit);
+    if (!error && data) setLogs(data as KlaviyoSyncLog[]);
+    setLoading(false);
   }, [limit]);
+
+  useEffect(() => {
+    void load();
+    return subscribeReload('klaviyo_sync_log:realtime', ['klaviyo_sync_log'], () => void load());
+  }, [load]);
 
   return { logs, loading };
 }

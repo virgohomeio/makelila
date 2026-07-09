@@ -28,12 +28,20 @@ const { fromMock, invokeMock } = vi.hoisted(() => {
   return { fromMock, invokeMock };
 });
 
-vi.mock('../supabase', () => ({
-  supabase: {
-    from: fromMock,
-    functions: { invoke: invokeMock },
-  },
-}));
+vi.mock('../supabase', () => {
+  const channelMock = () => {
+    const ch = { on: () => ch, subscribe: () => ch };
+    return ch;
+  };
+  return {
+    supabase: {
+      from: fromMock,
+      functions: { invoke: invokeMock },
+      channel: channelMock,
+      removeChannel: vi.fn(),
+    },
+  };
+});
 
 import { useFbCampaigns, triggerFbSync } from './facebook';
 
