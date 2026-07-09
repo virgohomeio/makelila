@@ -10,15 +10,45 @@ import { WebTab } from './WebTab';
 import { SystemOfRecordCard } from './SystemOfRecordCard';
 import { useFbCampaigns, triggerFbSync } from '../../lib/marketing/facebook';
 import { useKlaviyoSyncStatus, triggerKlaviyoSync, triggerKlaviyoEventsSync } from '../../lib/marketing/klaviyo';
+import { triggerGa4Sync, triggerGscSync } from '../../lib/marketing/google';
+import { triggerFbIgSync } from '../../lib/marketing/social';
 import styles from './Marketing.module.css';
 
 type Tab = 'dashboard' | 'report' | 'campaigns' | 'social' | 'web' | 'attribution' | 'journey' | 'sync';
+
+// Every inbound analytics source, fired together by the "Sync All Sources"
+// button. Each returns a short human summary for the status panel.
+const SYNC_ALL_TASKS: { label: string; run: () => Promise<string> }[] = [
+  { label: 'Meta Ads', run: async () => `${(await triggerFbSync()).synced} campaign rows` },
+  { label: 'Klaviyo email', run: async () => { const r = await triggerKlaviyoEventsSync(); return r.note ?? `${r.synced} events`; } },
+  { label: 'Google Analytics', run: async () => `${(await triggerGa4Sync()).synced} rows` },
+  { label: 'Search Console', run: async () => `${(await triggerGscSync()).synced} rows` },
+  { label: 'Organic social', run: async () => { const r = await triggerFbIgSync(); return `${r.synced} rows (${r.channels.join(', ')})`; } },
+];
+
+type SyncAllRow = { label: string; state: 'pending' | 'ok' | 'err'; msg: string };
 
 export default function Marketing() {
   const [tab, setTab] = useState<Tab>('dashboard');
   const [campaignsSub, setCampaignsSub] = useState<'all' | 'mini'>('all');
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState('');
+  const [syncingAll, setSyncingAll] = useState(false);
+  const [syncAll, setSyncAll] = useState<SyncAllRow[]>([]);
+
+  async function handleSyncAll() {
+    setSyncingAll(true);
+    setSyncAll(SYNC_ALL_TASKS.map(t => ({ label: t.label, state: 'pending', msg: 'Syncing…' })));
+    await Promise.all(SYNC_ALL_TASKS.map(async (t, i) => {
+      try {
+        const msg = await t.run();
+        setSyncAll(prev => prev.map((r, j) => (j === i ? { ...r, state: 'ok', msg } : r)));
+      } catch (e) {
+        setSyncAll(prev => prev.map((r, j) => (j === i ? { ...r, state: 'err', msg: String(e).replace(/^Error:\s*/, '') } : r)));
+      }
+    }));
+    setSyncingAll(false);
+  }
 
   const { campaigns, loading: campsLoading } = useFbCampaigns(90);
   const { logs, loading: logsLoading } = useKlaviyoSyncStatus(5);
@@ -66,7 +96,28 @@ export default function Marketing() {
     <div className={styles.page}>
       <div className={styles.header}>
         <div className={styles.title}>Marketing</div>
+        <button
+          className={styles.syncAllBtn}
+          onClick={() => void handleSyncAll()}
+          disabled={syncingAll}
+        >
+          {syncingAll ? 'Syncing all sources…' : 'Sync All Sources'}
+        </button>
       </div>
+
+      {syncAll.length > 0 && (
+        <div className={styles.syncAllPanel}>
+          {syncAll.map(r => (
+            <div key={r.label} className={styles.syncAllRow}>
+              <span className={`${styles.dot} ${r.state === 'ok' ? styles.dotOk : r.state === 'err' ? styles.dotErr : styles.dotPending}`}>
+                {r.state === 'ok' ? '✓' : r.state === 'err' ? '✕' : '…'}
+              </span>
+              <span className={styles.label}>{r.label}</span>
+              <span className={styles.msg}>{r.msg}</span>
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className={styles.tabs}>
         {(['dashboard', 'report', 'campaigns', 'social', 'web', 'attribution', 'journey', 'sync'] as Tab[]).map(t => (

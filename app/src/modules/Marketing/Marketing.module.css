@@ -69,3 +69,41 @@
   font-size: 11px;
   color: var(--color-ink-subtle);
 }
+
+.syncAllBtn {
+  font-size: 13px;
+  padding: 8px 16px;
+  background: var(--color-crimson);
+  border: 1px solid var(--color-crimson);
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 600;
+  color: #fff;
+}
+
+.syncAllBtn:hover { filter: brightness(0.94); }
+.syncAllBtn:disabled { opacity: 0.6; cursor: default; }
+
+.syncAllPanel {
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+  margin-bottom: 20px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-surface);
+}
+
+.syncAllRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.syncAllRow .label { font-weight: 600; min-width: 130px; }
+.syncAllRow .msg { color: var(--color-ink-subtle); }
+.syncAllRow .dot { font-size: 12px; }
+.dotPending { color: var(--color-ink-subtle); }
+.dotOk { color: #2e7d32; }
+.dotErr { color: var(--color-crimson); }
