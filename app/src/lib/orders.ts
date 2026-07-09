@@ -472,6 +472,47 @@ export function useOrder(id: string | null): { order: Order | null; loading: boo
   return { order, loading: loading && !order };
 }
 
+/** What a customer is queued up for on a single replacement order — its items,
+ *  batch, and fulfillment state. A lightweight per-id fetch (not the whole
+ *  orders list) so a ticket panel can show the queued replacement inline.
+ *  Live-updates when the order changes (state promotion, ship, item edit). */
+export type ReplacementSummary = {
+  order_ref: string | null;
+  awaiting_batch_id: string | null;
+  replacement_state: 'ready' | 'awaiting' | 'held' | null;
+  shipped_at: string | null;
+  delivered_at: string | null;
+  line_items: Array<{ kind?: string; name?: string; batch?: string }>;
+};
+
+export function useReplacementSummary(orderId: string | null): { summary: ReplacementSummary | null; loading: boolean } {
+  const [summary, setSummary] = useState<ReplacementSummary | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!orderId) { setSummary(null); setLoading(false); return; }
+    let channel: RealtimeChannel | null = null;
+    let cancelled = false;
+    setLoading(true);
+    const cols = 'order_ref, awaiting_batch_id, replacement_state, shipped_at, delivered_at, line_items';
+    (async () => {
+      const { data } = await supabase.from('orders').select(cols).eq('id', orderId).maybeSingle();
+      if (cancelled) return;
+      setSummary((data as ReplacementSummary | null) ?? null);
+      setLoading(false);
+      channel = supabase
+        .channel(`order:summary:${orderId}`)
+        .on('postgres_changes',
+          { event: 'UPDATE', schema: 'public', table: 'orders', filter: `id=eq.${orderId}` },
+          (payload) => setSummary(payload.new as ReplacementSummary))
+        .subscribe();
+    })();
+    return () => { cancelled = true; if (channel) void channel.unsubscribe(); };
+  }, [orderId]);
+
+  return { summary, loading };
+}
+
 /** All un-shipped replacement orders in 'ready' or 'awaiting' state.
  * Used by ReturnsTab/RefundsTab (#83) to warn when a customer has a queued
  * replacement that should be held before their refund is processed. */

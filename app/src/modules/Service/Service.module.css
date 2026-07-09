@@ -814,6 +814,53 @@
 }
 .replacementLink a { color: #2b6cb0; text-decoration: underline; }
 
+/* Queued replacement summary (items + batch/state) shown inside the ticket. */
+.queuedRepl {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 8px 10px;
+  background: #fff;
+  border: 1px solid #bee3f8;
+  border-radius: 6px;
+}
+.queuedReplHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.queuedReplLabel {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #4a5568;
+}
+.queuedReplStatus {
+  font-size: 11px;
+  font-weight: 700;
+}
+.queuedReplItems {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.queuedReplChip {
+  font-size: 11px;
+  font-weight: 600;
+  color: #2c5282;
+  background: #ebf8ff;
+  border: 1px solid #bee3f8;
+  border-radius: 999px;
+  padding: 2px 9px;
+}
+.queuedReplEmpty {
+  font-size: 11px;
+  font-style: italic;
+  color: #718096;
+}
+
 /* Backlog #75 — diagnosis-link send modal */
 .diagModalBackdrop {
   position: fixed; inset: 0; z-index: 60;

@@ -16,6 +16,7 @@ import {
 } from '../../lib/service';
 import { CANNED_SMS_TEMPLATES } from '../../lib/cannedSms';
 import { createLinearIssue, createGitHubIssue } from '../../lib/githubLinear';
+import { useReplacementSummary } from '../../lib/orders';
 import { AttachmentStrip } from './AttachmentStrip';
 import { TicketNotes } from './TicketNotes';
 import { DeviceContextHeader } from '../../components/DeviceContextHeader';
@@ -42,6 +43,54 @@ type Props = {
   ticket: ServiceTicket;
   onClose: () => void;
 };
+
+// Shows what the customer is queued up for on the linked replacement order —
+// the items (units/parts) and the batch/fulfillment state — right in the
+// ticket, so an operator doesn't have to click through to Order Review.
+function QueuedReplacementDetails({ orderId }: { orderId: string }) {
+  const { summary, loading } = useReplacementSummary(orderId);
+  if (loading || !summary) return null;
+
+  const items = (summary.line_items ?? [])
+    .map(li => li?.name)
+    .filter((n): n is string => !!n);
+  // Batch-blocked orders can carry the batch in awaiting_batch_id with empty
+  // line_items (e.g. a straight "awaiting P100X / LILA-Mini" queue).
+  if (items.length === 0 && summary.awaiting_batch_id) {
+    items.push(`LILA (${summary.awaiting_batch_id})`);
+  }
+
+  const shipped = !!(summary.shipped_at || summary.delivered_at);
+  const status = shipped
+    ? { label: 'Shipped', color: '#2b6cb0' }
+    : summary.awaiting_batch_id
+      ? { label: `Awaiting batch · ${summary.awaiting_batch_id}`, color: '#c05621' }
+      : summary.replacement_state === 'awaiting'
+        ? { label: 'Awaiting stock', color: '#c05621' }
+        : summary.replacement_state === 'held'
+          ? { label: 'Held', color: '#9b2c2c' }
+          : { label: 'Ready to ship', color: '#276749' };
+
+  return (
+    <div className={styles.queuedRepl}>
+      <div className={styles.queuedReplHead}>
+        <span className={styles.queuedReplLabel}>
+          Queued for{summary.order_ref ? ` · ${summary.order_ref}` : ''}
+        </span>
+        <span className={styles.queuedReplStatus} style={{ color: status.color }}>{status.label}</span>
+      </div>
+      {items.length > 0 ? (
+        <div className={styles.queuedReplItems}>
+          {items.map((name, i) => (
+            <span key={i} className={styles.queuedReplChip}>{name}</span>
+          ))}
+        </div>
+      ) : (
+        <div className={styles.queuedReplEmpty}>No items recorded on this replacement.</div>
+      )}
+    </div>
+  );
+}
 
 export function TicketDetailPanel({ ticket, onClose }: Props) {
   const navigate = useNavigate();
@@ -295,12 +344,15 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
 
         <div className={styles.detailSection} style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
           {ticket.replacement_order_id && ticket.replacement_order_id.length > 0 ? (
-            <div className={styles.replacementLink}>
-              Replacement order:&nbsp;
-              <a
-                href={`/order-review/${ticket.replacement_order_id}`}
-                onClick={e => { e.preventDefault(); navigate(`/order-review/${ticket.replacement_order_id}`); }}
-              >open in Order Review</a>
+            <div className={styles.replacementLink} style={{ flexBasis: '100%', display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <div>
+                Replacement order:&nbsp;
+                <a
+                  href={`/order-review/${ticket.replacement_order_id}`}
+                  onClick={e => { e.preventDefault(); navigate(`/order-review/${ticket.replacement_order_id}`); }}
+                >open in Order Review</a>
+              </div>
+              <QueuedReplacementDetails orderId={ticket.replacement_order_id} />
             </div>
           ) : (
             <button
