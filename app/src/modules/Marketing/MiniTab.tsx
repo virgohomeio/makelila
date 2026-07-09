@@ -123,8 +123,8 @@ function Section({ title, rows, firstCol, describe }: {
         <table style={{ borderCollapse: 'collapse', fontSize: 12, width: '100%', whiteSpace: 'nowrap' }}>
           <thead>
             <tr style={{ color: subtle, fontSize: 11 }}>
-              {describe && <th style={leftTh}>Creative</th>}
               <th style={leftTh}>{firstCol}</th>
+              {describe && <th style={leftTh}>Type</th>}
               <th style={th}>Leads</th>
               <th style={th}>Cost / lead</th>
               <th style={th}>Lead rate</th>
@@ -138,8 +138,8 @@ function Section({ title, rows, firstCol, describe }: {
           <tbody>
             {rows.map(r => (
               <tr key={r.name} style={{ borderTop: '1px solid var(--color-border)' }}>
-                {describe && <td style={{ padding: '7px 10px', fontWeight: 600 }}>{describe(r.name)}</td>}
                 <td style={{ padding: '7px 10px', fontWeight: 500, maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis' }} title={r.name}>{r.name}</td>
+                {describe && <td style={{ padding: '7px 10px', fontWeight: 600 }}>{describe(r.name)}</td>}
                 <td style={td}>{num(r.leads)}</td>
                 <td style={td}>{money2(r.cpl)}</td>
                 <td style={td}>{pct(r.leadRate)}</td>
