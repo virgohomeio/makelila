@@ -1230,11 +1230,18 @@ export async function deleteTicketAttachment(att: TicketAttachment): Promise<voi
     .from(ATTACHMENT_BUCKET)
     .remove([att.file_path]);
   if (storageErr) console.warn('Attachment storage delete failed (non-fatal):', storageErr.message);
-  const { error: rowErr } = await supabase
+  const { data: deleted, error: rowErr } = await supabase
     .from('service_ticket_attachments')
     .delete()
-    .eq('id', att.id);
+    .eq('id', att.id)
+    .select('id');
   if (rowErr) throw new Error(`Failed to delete attachment record: ${rowErr.message}`);
+  // select() the deleted rows back so an RLS-blocked delete — which returns
+  // success with zero rows rather than an error — surfaces as a failure
+  // instead of silently leaving the attachment in place.
+  if (!deleted || deleted.length === 0) {
+    throw new Error('Attachment was not deleted (no permission or already removed).');
+  }
   // Auto-write a note so the delete appears in the Notes feed alongside
   // the original upload note.
   await addTicketNote(
