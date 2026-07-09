@@ -72,6 +72,25 @@
   border-color: #c1d4f7;
 }
 
+/* Offline machines — dimmed so live ones read first, but still visible. */
+.machineRowOffline {
+  opacity: 0.62;
+}
+.machineRowOffline:hover {
+  opacity: 1;
+}
+
+/* "Offline · N" separator between the live and offline groups. */
+.machineListDivider {
+  list-style: none;
+  margin: 8px 4px 2px;
+  font-size: 0.7em;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #a0aec0;
+}
+
 .statusDot {
   width: 10px;
   height: 10px;
