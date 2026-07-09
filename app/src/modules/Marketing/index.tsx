@@ -12,12 +12,11 @@ import { useFbCampaigns, triggerFbSync } from '../../lib/marketing/facebook';
 import { useKlaviyoSyncStatus, triggerKlaviyoSync, triggerKlaviyoEventsSync } from '../../lib/marketing/klaviyo';
 import styles from './Marketing.module.css';
 
-type Tab = 'dashboard' | 'report' | 'campaigns' | 'mini' | 'social' | 'web' | 'attribution' | 'journey' | 'sync';
-
-const TAB_LABEL: Partial<Record<Tab, string>> = { mini: 'LILA Mini' };
+type Tab = 'dashboard' | 'report' | 'campaigns' | 'social' | 'web' | 'attribution' | 'journey' | 'sync';
 
 export default function Marketing() {
   const [tab, setTab] = useState<Tab>('dashboard');
+  const [campaignsSub, setCampaignsSub] = useState<'all' | 'mini'>('all');
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState('');
 
@@ -70,13 +69,13 @@ export default function Marketing() {
       </div>
 
       <div className={styles.tabs}>
-        {(['dashboard', 'report', 'campaigns', 'mini', 'social', 'web', 'attribution', 'journey', 'sync'] as Tab[]).map(t => (
+        {(['dashboard', 'report', 'campaigns', 'social', 'web', 'attribution', 'journey', 'sync'] as Tab[]).map(t => (
           <button
             key={t}
             className={`${styles.tab} ${tab === t ? styles.tabActive : ''}`}
             onClick={() => setTab(t)}
           >
-            {TAB_LABEL[t] ?? t.charAt(0).toUpperCase() + t.slice(1)}
+            {t.charAt(0).toUpperCase() + t.slice(1)}
           </button>
         ))}
       </div>
@@ -89,16 +88,30 @@ export default function Marketing() {
               onClick={() => void handleFbSync()}
               disabled={syncing}
             >
-              {syncing ? 'Syncing…' : 'Sync Facebook Ads'}
+              {syncing ? 'Syncing…' : 'Sync Meta Ads'}
             </button>
             {syncMsg && <span className={styles.syncStatus}>{syncMsg}</span>}
           </div>
 
-          {campsLoading ? (
+          <div className={styles.tabs} style={{ marginBottom: 12 }}>
+            {(['all', 'mini'] as const).map(s => (
+              <button
+                key={s}
+                className={`${styles.tab} ${campaignsSub === s ? styles.tabActive : ''}`}
+                onClick={() => setCampaignsSub(s)}
+              >
+                {s === 'all' ? 'All campaigns' : 'LILA Mini'}
+              </button>
+            ))}
+          </div>
+
+          {campaignsSub === 'mini' ? (
+            <MiniTab />
+          ) : campsLoading ? (
             <p style={{ color: 'var(--color-ink-subtle)', fontSize: 13 }}>Loading campaigns…</p>
           ) : campaigns.length === 0 ? (
             <p style={{ color: 'var(--color-ink-subtle)', fontSize: 13 }}>
-              No campaigns yet. Click "Sync Facebook Ads" to pull data.
+              No campaigns yet. Click "Sync Meta Ads" to pull data.
             </p>
           ) : (
             <CampaignsTable campaigns={campaigns} />
@@ -109,8 +122,6 @@ export default function Marketing() {
       {tab === 'dashboard' && <DashboardTab />}
 
       {tab === 'report' && <ReportTab />}
-
-      {tab === 'mini' && <MiniTab />}
 
       {tab === 'social' && <SocialTab />}
 
