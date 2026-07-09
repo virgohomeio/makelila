@@ -35,6 +35,7 @@ export default function Marketing() {
   const [syncMsg, setSyncMsg] = useState('');
   const [syncingAll, setSyncingAll] = useState(false);
   const [syncAll, setSyncAll] = useState<SyncAllRow[]>([]);
+  const [lastSyncAt, setLastSyncAt] = useState<string | null>(() => localStorage.getItem('marketing_last_sync_all'));
 
   async function handleSyncAll() {
     setSyncingAll(true);
@@ -47,6 +48,9 @@ export default function Marketing() {
         setSyncAll(prev => prev.map((r, j) => (j === i ? { ...r, state: 'err', msg: String(e).replace(/^Error:\s*/, '') } : r)));
       }
     }));
+    const now = new Date().toISOString();
+    localStorage.setItem('marketing_last_sync_all', now);
+    setLastSyncAt(now);
     setSyncingAll(false);
   }
 
@@ -96,13 +100,20 @@ export default function Marketing() {
     <div className={styles.page}>
       <div className={styles.header}>
         <div className={styles.title}>Marketing</div>
-        <button
-          className={styles.syncAllBtn}
-          onClick={() => void handleSyncAll()}
-          disabled={syncingAll}
-        >
-          {syncingAll ? 'Syncing all sources…' : 'Sync All Sources'}
-        </button>
+        <div className={styles.syncAllHeader}>
+          <button
+            className={styles.syncAllBtn}
+            onClick={() => void handleSyncAll()}
+            disabled={syncingAll}
+          >
+            {syncingAll ? 'Syncing all sources…' : 'Sync All Sources'}
+          </button>
+          <span className={styles.syncStatus}>
+            {lastSyncAt
+              ? `Last synced ${new Date(lastSyncAt).toLocaleString('en-CA', { dateStyle: 'medium', timeStyle: 'short' })}`
+              : 'Not synced yet'}
+          </span>
+        </div>
       </div>
 
       {syncAll.length > 0 && (
