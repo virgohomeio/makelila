@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { CacDashboard } from './CacDashboard';
 import { CampaignsTable } from './CampaignsTable';
+import { MiniTab } from './MiniTab';
 import { DashboardTab } from './DashboardTab';
 import { ReportTab } from './ReportTab';
 import { JourneyTab } from './JourneyTab';
@@ -11,7 +12,9 @@ import { useFbCampaigns, triggerFbSync } from '../../lib/marketing/facebook';
 import { useKlaviyoSyncStatus, triggerKlaviyoSync, triggerKlaviyoEventsSync } from '../../lib/marketing/klaviyo';
 import styles from './Marketing.module.css';
 
-type Tab = 'dashboard' | 'report' | 'campaigns' | 'social' | 'web' | 'attribution' | 'journey' | 'sync';
+type Tab = 'dashboard' | 'report' | 'campaigns' | 'mini' | 'social' | 'web' | 'attribution' | 'journey' | 'sync';
+
+const TAB_LABEL: Partial<Record<Tab, string>> = { mini: 'LILA Mini' };
 
 export default function Marketing() {
   const [tab, setTab] = useState<Tab>('dashboard');
@@ -67,13 +70,13 @@ export default function Marketing() {
       </div>
 
       <div className={styles.tabs}>
-        {(['dashboard', 'report', 'campaigns', 'social', 'web', 'attribution', 'journey', 'sync'] as Tab[]).map(t => (
+        {(['dashboard', 'report', 'campaigns', 'mini', 'social', 'web', 'attribution', 'journey', 'sync'] as Tab[]).map(t => (
           <button
             key={t}
             className={`${styles.tab} ${tab === t ? styles.tabActive : ''}`}
             onClick={() => setTab(t)}
           >
-            {t.charAt(0).toUpperCase() + t.slice(1)}
+            {TAB_LABEL[t] ?? t.charAt(0).toUpperCase() + t.slice(1)}
           </button>
         ))}
       </div>
@@ -106,6 +109,8 @@ export default function Marketing() {
       {tab === 'dashboard' && <DashboardTab />}
 
       {tab === 'report' && <ReportTab />}
+
+      {tab === 'mini' && <MiniTab />}
 
       {tab === 'social' && <SocialTab />}
 

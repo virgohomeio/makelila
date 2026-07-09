@@ -73,6 +73,39 @@ export function useFbCampaigns(limit = 90): { campaigns: FbCampaign[]; loading: 
   return { campaigns, loading };
 }
 
+export type FbAd = {
+  ad_id: string;
+  ad_name: string;
+  adset_id: string | null;
+  adset_name: string | null;
+  campaign_id: string | null;
+  campaign_name: string | null;
+  spend_cad: number | null;
+  impressions: number | null;
+  clicks: number | null;
+  ctr: number | null;
+  leads: number | null;
+};
+
+/** Ad-level rows (one per ad) for per-ad-set + per-creative analysis. */
+export function useFbAds(): { ads: FbAd[]; loading: boolean } {
+  const [ads, setAds] = useState<FbAd[]>([]);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    let cancelled = false;
+    void supabase
+      .from('fb_ads')
+      .select('ad_id, ad_name, adset_id, adset_name, campaign_id, campaign_name, spend_cad, impressions, clicks, ctr, leads')
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (!error && data) setAds(data as FbAd[]);
+        setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, []);
+  return { ads, loading };
+}
+
 export async function triggerFbSync(): Promise<{ synced: number }> {
   const { data, error } = await supabase.functions.invoke('sync-facebook-ads');
   if (error) throw error;
