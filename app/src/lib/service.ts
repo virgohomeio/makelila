@@ -3,6 +3,7 @@ import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from './supabase';
 import { logAction } from './activityLog';
 import { sendTemplate } from './templates';
+import { cancelPendingReplacementsForTicket } from './orders';
 
 // ============================================================ Types
 
@@ -860,6 +861,18 @@ export async function updateTicketStatus(id: string, status: TicketStatus): Prom
   if (error) throw error;
   await logAction('ticket_status_changed', id, status,
     { entityType: 'ticket', entityId: id });
+
+  // Marking a ticket complete (closed) means an 'awaiting' replacement queued
+  // for it is no longer needed — cancel it so it drops out of the replacement
+  // workflow. Scoped to 'awaiting' only: a 'ready' replacement has a unit
+  // reserved and may be about to ship, so it's left intact. Best-effort: the
+  // ticket is already closed, so a failure here shouldn't fail the status
+  // change (the operator can still cancel manually from Order Review).
+  if (status === 'closed') {
+    await cancelPendingReplacementsForTicket(id).catch((e: Error) => {
+      console.warn('Auto-cancel of queued replacement on ticket close failed (non-fatal):', e.message);
+    });
+  }
 }
 
 export async function assignTicketOwner(id: string, owner_email: string | null): Promise<void> {
