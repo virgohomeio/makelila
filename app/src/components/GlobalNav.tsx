@@ -1,5 +1,6 @@
 import { Link, NavLink } from 'react-router-dom';
 import styles from './GlobalNav.module.css';
+import { NotificationBell } from './NotificationBell';
 import { UserBadge } from './UserBadge';
 import { useAuth } from '../lib/auth';
 import { canView } from '../lib/permissions';
@@ -40,6 +41,7 @@ export function GlobalNav() {
         />
         <span className={styles.brandWordmark}>makelila</span>
       </Link>
+      <NotificationBell />
       {visibleModules.map(m => (
         <NavLink
           key={m.path}

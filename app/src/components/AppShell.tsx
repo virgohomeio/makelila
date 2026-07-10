@@ -1,5 +1,6 @@
 import type { CSSProperties, ReactNode } from 'react';
 import { GlobalNav } from './GlobalNav';
+import { NotificationsProvider } from '../lib/notifications';
 
 // Inline style on <main> kept (no module CSS for the shell yet) but uses
 // CSS env() + dvh so the iPhone notch + home indicator don't crop content.
@@ -21,13 +22,15 @@ const mainStyle: CSSProperties = {
 
 export function AppShell({ children }: { children: ReactNode }) {
   return (
-    <div className="page">
-      <div id="app-shell">
-        <GlobalNav />
-        <main style={mainStyle}>
-          {children}
-        </main>
+    <NotificationsProvider>
+      <div className="page">
+        <div id="app-shell">
+          <GlobalNav />
+          <main style={mainStyle}>
+            {children}
+          </main>
+        </div>
       </div>
-    </div>
+    </NotificationsProvider>
   );
 }

@@ -1,4 +1,4 @@
-import React, { lazy, Suspense, useMemo, useState } from 'react';
+import React, { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { isTelemetryConfigured } from '../../lib/supabaseTelemetry';
 const Dashboard = lazy(() => import('../Dashboard'));
 import {
@@ -9,7 +9,7 @@ import { useOrders } from '../../lib/orders';
 import { formatMoney } from '../../lib/money';
 import { useUnits } from '../../lib/stock';
 import { useServiceTickets } from '../../lib/service';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { ProfitabilityTab } from './ProfitabilityTab';
 import { JourneyTab } from './JourneyTab';
 import { useIsMobile } from '../../lib/useMediaQuery';
@@ -21,13 +21,28 @@ import styles from './Customers.module.css';
 
 type Tab = 'directory' | 'profitability' | 'journey' | 'fleet';
 
+const TAB_KEYS: Tab[] = ['directory', 'profitability', 'journey', 'fleet'];
+
 export default function Customers() {
-  const [tab, setTab] = useState<Tab>('journey');
+  const [searchParams] = useSearchParams();
+  const [tab, setTab] = useState<Tab>(() => {
+    const p = searchParams.get('tab');
+    return (TAB_KEYS as string[]).includes(p ?? '') ? (p as Tab) : 'journey';
+  });
   const isMobile = useIsMobile();
   // On mobile, start with the tab picker visible. Tapping a card flips this
   // to `true` and the existing branches render the tab content with a
   // MobileBackHeader replacing the horizontal tab strip.
   const [mobileTabPicked, setMobileTabPicked] = useState(false);
+  // Honour deep-links like /customers?tab=fleet&serial=… (e.g. from the header
+  // notification bell) even when Customers is already mounted.
+  const paramTab = searchParams.get('tab');
+  useEffect(() => {
+    if (paramTab && (TAB_KEYS as string[]).includes(paramTab)) {
+      setTab(paramTab as Tab);
+      setMobileTabPicked(true);
+    }
+  }, [paramTab]);
   const { customers, loading } = useCustomers();
   const { units } = useUnits();
   // Pre-build serial lookups so each row can render its serial(s) without
