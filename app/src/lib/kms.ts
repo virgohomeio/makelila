@@ -22,6 +22,8 @@ export function useKmsPages(): { pages: KmsPageMeta[]; loading: boolean; error: 
     supabase
       .from('kms_pages')
       .select('*')
+      .order('section')
+      .order('label')
       .then(({ data, error: e }) => {
         if (e) setError(e.message);
         else setPages((data ?? []) as KmsPageMeta[]);

@@ -1,6 +1,7 @@
 // supabase/functions/sync-notion-kms-metadata/index.ts
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { authenticate } from '../_shared/auth.ts';
+import { corsHeaders } from '../_shared/cors.ts';
 
 const NOTION_API = 'https://api.notion.com/v1';
 const NOTION_VERSION = '2022-06-28';
@@ -37,10 +38,7 @@ export function extractTitle(page: Record<string, unknown>): string {
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
-    return new Response(null, {
-      status: 204,
-      headers: { 'Access-Control-Allow-Origin': '*' },
-    });
+    return new Response(null, { status: 204, headers: corsHeaders });
   }
 
   const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
@@ -116,7 +114,7 @@ Deno.serve(async (req) => {
         .update({
           title: extractTitle(page),
           last_edited_by_name: lastEditedByName,
-          last_edited_time: page.last_edited_time as string,
+          last_edited_time: (page.last_edited_time as string | null | undefined) ?? null,
           synced_at: new Date().toISOString(),
         })
         .eq('id', row.id);

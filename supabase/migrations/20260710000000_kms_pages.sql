@@ -24,21 +24,14 @@ create policy "internal users can read kms_pages"
     )
   );
 
--- Initial registry: add the Notion pages to track.
--- How to find a page ID: open the page in Notion → Share → Copy link.
+-- Initial registry: one real row is seeded here.
+-- To add more pages: open the Notion page → Share → Copy link.
 -- The URL looks like https://www.notion.so/Title-{32-char-id-without-dashes}
 -- Strip dashes from the ID before inserting (e.g. c9f63b89... not c9f6-3b89-...).
--- Share each page with the 'makeLILA KMS Sync' integration before syncing.
+-- Share each page with the 'makeLILA KMS Sync' integration, then add rows via
+-- Supabase Dashboard → SQL Editor → INSERT INTO public.kms_pages ...
 
 insert into public.kms_pages (notion_page_id, section, label, notion_url)
 values
-  -- Replace these IDs with real ones from Notion URLs.
-  -- Engineering Hub (find from Notion sidebar → Engineering Hub → each child page URL)
-  ('REPLACE_lila_pro_lovely_prd',   'Engineering', 'LILA Pro + Lovely PRD',    'https://www.notion.so/'),
-  ('REPLACE_lila_mini_prd',         'Engineering', 'LILA Mini PRD',            'https://www.notion.so/'),
-  ('REPLACE_lila_p50n_prd',         'Engineering', 'LILA P50N PRD',            'https://www.notion.so/'),
-  ('REPLACE_mrd',                   'Engineering', 'Market Requirements Doc',   'https://www.notion.so/'),
-  ('REPLACE_design_process_matrix', 'Engineering', 'Design Process Matrix',     'https://www.notion.so/'),
-  -- Operations / top-level
   ('c9f63b8915b14a5f976b1716b6d153f9', 'Company', 'VCycene Workspace Root', 'https://www.notion.so/VCycene-c9f63b8915b14a5f976b1716b6d153f9')
 on conflict (notion_page_id) do nothing;
