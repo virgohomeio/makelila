@@ -166,22 +166,22 @@ function OverviewTab({ prod, d }: { prod: string; d: Product }) {
 }
 
 /* ── Issues ───────────────────────────────────────────────────────────────── */
-function IssuesTab({ d }: { d: Product }) {
-  const [expanded, setExpanded] = useState<Set<number>>(new Set());
-  if (!d.issues.length) return <div className={styles.empty}>No open issues.</div>;
+function IssueRows({ issues, offset = 0, expanded, onToggle }: {
+  issues: Product['issues'];
+  offset?: number;
+  expanded: Set<number>;
+  onToggle: (i: number) => void;
+}) {
   return (
     <div className={styles.issueList}>
-      {d.issues.map((issue, i) => {
+      {issues.map((issue, idx) => {
+        const i = offset + idx;
         const isOpen = expanded.has(i);
         return (
           <div
             key={i}
             className={`${styles.issueRow} ${isOpen ? styles.expanded : ''}`}
-            onClick={() => setExpanded(prev => {
-              const next = new Set(prev);
-              if (next.has(i)) { next.delete(i); } else { next.add(i); }
-              return next;
-            })}
+            onClick={() => onToggle(i)}
           >
             <div className={styles.issueHeader}>
               <div className={`${styles.issueSev} ${SEV_CLASS[issue.sev] ?? ''}`}>
@@ -203,6 +203,42 @@ function IssuesTab({ d }: { d: Product }) {
       })}
     </div>
   );
+}
+
+function IssuesTab({ prod, d }: { prod: string; d: Product }) {
+  const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  const toggle = (i: number) => setExpanded(prev => {
+    const next = new Set(prev);
+    if (next.has(i)) { next.delete(i); } else { next.add(i); }
+    return next;
+  });
+
+  if (!d.issues.length) return <div className={styles.empty}>No open issues.</div>;
+
+  if (prod === 'pro') {
+    const vcIssues  = d.issues.filter(i => i.team !== 'Ben Liang');
+    const odmIssues = d.issues.filter(i => i.team === 'Ben Liang');
+    return (
+      <div className={styles.issueTwoCols}>
+        <div>
+          <div className={styles.issueColHead}>
+            <span className={styles.issueColLabel}>VCycene</span>
+            <span className={styles.issueColCount}>{vcIssues.length} tickets</span>
+          </div>
+          <IssueRows issues={vcIssues} offset={0} expanded={expanded} onToggle={toggle} />
+        </div>
+        <div>
+          <div className={styles.issueColHead}>
+            <span className={styles.issueColLabel}>ODM (Ben Liang)</span>
+            <span className={styles.issueColCount}>{odmIssues.length} tickets</span>
+          </div>
+          <IssueRows issues={odmIssues} offset={vcIssues.length} expanded={expanded} onToggle={toggle} />
+        </div>
+      </div>
+    );
+  }
+
+  return <IssueRows issues={d.issues} expanded={expanded} onToggle={toggle} />;
 }
 
 /* ── Timeline ─────────────────────────────────────────────────────────────── */
@@ -693,7 +729,7 @@ function ProductPage({ prod, view, onViewChange }: {
       {view === 'PRD'          && <PRDTab d={d} />}
       {view === 'User Journey' && <JourneyTab d={d} />}
       {view === 'PMF'          && <PMFTab d={d} />}
-      {view === 'Issues'       && <IssuesTab d={d} />}
+      {view === 'Issues'       && <IssuesTab prod={prod} d={d} />}
       {view === 'Timeline'     && <TimelineTab d={d} />}
       {view === 'Volumes'      && <VolumesTab prod={prod} d={d} />}
       {view === 'BOM'          && <BOMTab d={d} />}

@@ -351,6 +351,31 @@
 /* ── Issue list ──────────────────────────────────────────────────────────── */
 .issueList { display: flex; flex-direction: column; gap: 8px; }
 
+.issueTwoCols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  align-items: start;
+}
+@media (max-width: 800px) { .issueTwoCols { grid-template-columns: 1fr; } }
+
+.issueColHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 0 8px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 8px;
+}
+.issueColLabel {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--ink-3);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.issueColCount { font-size: 11px; color: var(--ink-4); }
+
 .issueRow {
   background: var(--surface-up);
   border: 1px solid var(--border);
