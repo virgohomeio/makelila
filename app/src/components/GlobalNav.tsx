@@ -15,6 +15,7 @@ const MODULES = [
   { path: '/customers',     label: 'Customers' },
   { path: '/lovely',        label: 'Lovely' },
   { path: '/finance',       label: 'Finance' },
+  { path: '/products',      label: 'Products' },
 ];
 
 const MARKETING_ROLES = ['pedrum@virgohome.io', 'huayi@virgohome.io', 'george@virgohome.io', 'yueli@virgohome.io'];
