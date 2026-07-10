@@ -22,6 +22,7 @@ import {
   useUnitCustomerMap,
   deleteDatasetLabel,
   RecordType,
+  type MachineStatus,
 } from '../../lib/dashboard';
 import {
   buildBmeHumidityChart,
@@ -490,7 +491,10 @@ function MachineDetail({
 }) {
   const { data, loading, error, refresh } = useDashboardData(serialNumber);
   const { status, color } = useMachineStatus(serialNumber);
-  const [smsOpen, setSmsOpen] = useState(false);
+  // The status the SMS modal was opened for. Usually the live machine status,
+  // but partial-mixing (LEFT_ONLY / RIGHT_ONLY) opens it as NOT_MIXING so it
+  // reuses the wellness template + 48h cooldown (see the mixing-wellness button).
+  const [smsStatus, setSmsStatus] = useState<MachineStatus | null>(null);
   const [labelOpen, setLabelOpen] = useState(false);
   const smsKind = status ? STATUS_SMS_KIND[status] : null;
   const { labels: existingLabels, refresh: refreshLabels } = useDatasetLabels(serialNumber);
@@ -499,6 +503,15 @@ function MachineDetail({
   const seen = lastReceived(data);
   const mixing = useMemo(() => classifyMixing(data.liveData), [data.liveData]);
   const mixMeta = MIXING_VERDICT_META[mixing.verdict];
+
+  // Partial mixing (one chamber side stalled) warrants the same wellness
+  // check-in as NEITHER — which already surfaces via the NOT_MIXING status
+  // button. Only offer the extra button when the live status isn't already
+  // offering a wellness SMS, so a machine never shows two identical buttons.
+  const showMixingWellness =
+    assigned &&
+    smsKind !== 'wellness' &&
+    (mixing.verdict === 'LEFT_ONLY' || mixing.verdict === 'RIGHT_ONLY');
 
   const eventCharts = useMemo(() => buildEventCharts(data.events), [data.events]);
   const currents = useMemo(() => buildCurrentsChart(data.liveData), [data.liveData]);
@@ -526,6 +539,15 @@ function MachineDetail({
             >
               {mixMeta.label}
             </span>
+            {showMixingWellness && (
+              <button
+                type="button"
+                className={styles.statusSmsBtn}
+                onClick={() => setSmsStatus('NOT_MIXING')}
+              >
+                ✉️ {STATUS_SMS_TEMPLATES.wellness.label}
+              </button>
+            )}
           </div>
           <p className={styles.muted}>{serialNumber}</p>
         </div>
@@ -545,7 +567,7 @@ function MachineDetail({
         <div className={styles.statusBanner} style={{ borderLeftColor: color ?? '#bbb' }}>
           <strong>{status}</strong> — {STATUS_DESCRIPTIONS[status]}
           {smsKind && assigned && (
-            <button type="button" className={styles.statusSmsBtn} onClick={() => setSmsOpen(true)}>
+            <button type="button" className={styles.statusSmsBtn} onClick={() => setSmsStatus(status)}>
               ✉️ {STATUS_SMS_TEMPLATES[smsKind].label}
             </button>
           )}
@@ -586,11 +608,11 @@ function MachineDetail({
         />
       )}
 
-      {smsOpen && status && (
+      {smsStatus && (
         <StatusSmsModal
           serialNumber={serialNumber}
-          status={status}
-          onClose={() => setSmsOpen(false)}
+          status={smsStatus}
+          onClose={() => setSmsStatus(null)}
         />
       )}
 
