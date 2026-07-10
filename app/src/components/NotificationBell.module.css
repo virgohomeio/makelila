@@ -16,7 +16,7 @@
   border: none;
   border-radius: 8px;
   background: transparent;
-  color: #eee;
+  color: var(--color-crimson);
   font-size: 18px;
   line-height: 1;
   cursor: pointer;
@@ -53,10 +53,12 @@
   z-index: 40;
 }
 
+/* Fixed, not absolute: the nav sets overflow-x:auto (→ computed overflow-y:auto)
+   which would clip a dropdown extending below the 48px bar. Fixed escapes it. */
 .panel {
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 0;
+  position: fixed;
+  top: calc(var(--nav-height) + 6px);
+  left: 12px;
   z-index: 41;
   width: 340px;
   max-width: 92vw;
