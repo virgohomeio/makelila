@@ -179,7 +179,7 @@ function IssuesTab({ d }: { d: Product }) {
             className={`${styles.issueRow} ${isOpen ? styles.expanded : ''}`}
             onClick={() => setExpanded(prev => {
               const next = new Set(prev);
-              next.has(i) ? next.delete(i) : next.add(i);
+              if (next.has(i)) { next.delete(i); } else { next.add(i); }
               return next;
             })}
           >
@@ -395,7 +395,7 @@ function BOMTab({ d }: { d: Product }) {
                 className={styles.bomGroupHead}
                 onClick={() => setOpenGroups(prev => {
                   const next = new Set(prev);
-                  next.has(gi) ? next.delete(gi) : next.add(gi);
+                  if (next.has(gi)) { next.delete(gi); } else { next.add(gi); }
                   return next;
                 })}
               >
