@@ -1,4 +1,6 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import { useNotifications, type FleetNotification } from '../../lib/notifications';
 import PlotlyChart from './PlotlyChart';
 import AssignCustomerModal from './AssignCustomerModal';
 import StatusSmsModal from './StatusSmsModal';
@@ -22,6 +24,7 @@ import {
   useUnitCustomerMap,
   deleteDatasetLabel,
   RecordType,
+  type MachineStatus,
 } from '../../lib/dashboard';
 import {
   buildBmeHumidityChart,
@@ -42,7 +45,11 @@ export default function Dashboard() {
   const { data: unitCustomerMap, refresh: refreshUnits } = useUnitCustomerMap();
   const { data: teamSerials } = useTeamTestSerials();
   const { live, checked } = useLiveSerials(serials);
-  const [selected, setSelected] = useState<string | null>(null);
+  // A notification click deep-links to /customers?tab=fleet&serial=… — honour
+  // it as the initial + reactive selection so the flagged machine opens.
+  const [searchParams] = useSearchParams();
+  const serialParam = searchParams.get('serial');
+  const [selected, setSelected] = useState<string | null>(serialParam);
   const [assignTarget, setAssignTarget] = useState<string | null>(null);
   // Backlog #59 — team test units default-hidden so internal noise doesn't
   // distort what an operator scanning the sidebar sees.
@@ -86,6 +93,57 @@ export default function Dashboard() {
     setAssignTarget(null);
     refreshUnits();
   };
+
+  // ── Notification feed (Customers → Fleet is the producer) ─────────────────
+  // Each rendered machine row computes its own status via useMachineStatus;
+  // rows report it up here so we can flag every customer machine that isn't
+  // OK. Offline assigned machines are DIAGNOSE by definition (no data in the
+  // live window) — flagged without an extra fetch. Published to the global
+  // NotificationsProvider so the header bell shows them across the app.
+  const { setFleetNotifications } = useNotifications();
+  const [liveStatuses, setLiveStatuses] = useState<Record<string, MachineStatus>>({});
+  const reportStatus = useCallback((sn: string, status: MachineStatus | null) => {
+    setLiveStatuses((prev) => {
+      if (status == null) {
+        if (!(sn in prev)) return prev;
+        const next = { ...prev }; delete next[sn]; return next;
+      }
+      if (prev[sn] === status) return prev;
+      return { ...prev, [sn]: status };
+    });
+  }, []);
+
+  const notifications = useMemo<FleetNotification[]>(() => {
+    const nameFor = (sn: string): string | null => {
+      const fromUnits = unitCustomerMap[sn];
+      if (fromUnits) return fromUnits;
+      const fromTelemetry = telemetryUserMap[sn];
+      if (fromTelemetry && fromTelemetry !== sn) return fromTelemetry;
+      return null; // unassigned — not "a customer's machine"
+    };
+    const out: FleetNotification[] = [];
+    for (const sn of liveSerials) {
+      const name = nameFor(sn);
+      const status = liveStatuses[sn];
+      if (name && status && status !== 'OK') out.push({ serial: sn, customerName: name, status });
+    }
+    for (const sn of offlineSerials) {
+      const name = nameFor(sn);
+      if (name) out.push({ serial: sn, customerName: name, status: 'DIAGNOSE' });
+    }
+    out.sort((a, b) => a.customerName.localeCompare(b.customerName));
+    return out;
+  }, [liveSerials, offlineSerials, liveStatuses, unitCustomerMap, telemetryUserMap]);
+
+  useEffect(() => {
+    setFleetNotifications(notifications);
+  }, [notifications, setFleetNotifications]);
+
+  // React to deep-link ?serial= changes (e.g. a second bell click while the
+  // Fleet tab is already open).
+  useEffect(() => {
+    if (serialParam) setSelected(serialParam);
+  }, [serialParam]);
 
   const isMobile = useIsMobile();
 
@@ -151,6 +209,7 @@ export default function Dashboard() {
                 assigned={assigned}
                 onSelect={() => setSelected(sn)}
                 onAssign={() => setAssignTarget(sn)}
+                onStatus={reportStatus}
               />
             );
           })}
@@ -227,6 +286,7 @@ export default function Dashboard() {
                 active={selected === sn}
                 onSelect={() => setSelected(sn)}
                 onAssign={() => setAssignTarget(sn)}
+                onStatus={reportStatus}
               />
             );
           })}
@@ -308,14 +368,17 @@ function MobileMachineCard({
   assigned,
   onSelect,
   onAssign,
+  onStatus,
 }: {
   serialNumber: string;
   displayName: string;
   assigned: boolean;
   onSelect: () => void;
   onAssign: () => void;
+  onStatus?: (serial: string, status: MachineStatus | null) => void;
 }) {
   const { status, color } = useMachineStatus(serialNumber);
+  useEffect(() => { onStatus?.(serialNumber, status); }, [serialNumber, status, onStatus]);
   const subtitle = assigned ? `${serialNumber} · ${status ?? 'classifying…'}` : `${serialNumber} · unassigned`;
   return (
     <div style={{ position: 'relative' }}>
@@ -407,6 +470,7 @@ function MachineRow({
   active,
   onSelect,
   onAssign,
+  onStatus,
 }: {
   serialNumber: string;
   displayName: string;
@@ -414,8 +478,10 @@ function MachineRow({
   active: boolean;
   onSelect: () => void;
   onAssign: () => void;
+  onStatus?: (serial: string, status: MachineStatus | null) => void;
 }) {
   const { status, color } = useMachineStatus(serialNumber);
+  useEffect(() => { onStatus?.(serialNumber, status); }, [serialNumber, status, onStatus]);
   return (
     <li>
       <button
@@ -490,7 +556,10 @@ function MachineDetail({
 }) {
   const { data, loading, error, refresh } = useDashboardData(serialNumber);
   const { status, color } = useMachineStatus(serialNumber);
-  const [smsOpen, setSmsOpen] = useState(false);
+  // The status the SMS modal was opened for. Usually the live machine status,
+  // but partial-mixing (LEFT_ONLY / RIGHT_ONLY) opens it as NOT_MIXING so it
+  // reuses the wellness template + 48h cooldown (see the mixing-wellness button).
+  const [smsStatus, setSmsStatus] = useState<MachineStatus | null>(null);
   const [labelOpen, setLabelOpen] = useState(false);
   const smsKind = status ? STATUS_SMS_KIND[status] : null;
   const { labels: existingLabels, refresh: refreshLabels } = useDatasetLabels(serialNumber);
@@ -499,6 +568,15 @@ function MachineDetail({
   const seen = lastReceived(data);
   const mixing = useMemo(() => classifyMixing(data.liveData), [data.liveData]);
   const mixMeta = MIXING_VERDICT_META[mixing.verdict];
+
+  // Partial mixing (one chamber side stalled) warrants the same wellness
+  // check-in as NEITHER — which already surfaces via the NOT_MIXING status
+  // button. Only offer the extra button when the live status isn't already
+  // offering a wellness SMS, so a machine never shows two identical buttons.
+  const showMixingWellness =
+    assigned &&
+    smsKind !== 'wellness' &&
+    (mixing.verdict === 'LEFT_ONLY' || mixing.verdict === 'RIGHT_ONLY');
 
   const eventCharts = useMemo(() => buildEventCharts(data.events), [data.events]);
   const currents = useMemo(() => buildCurrentsChart(data.liveData), [data.liveData]);
@@ -526,6 +604,15 @@ function MachineDetail({
             >
               {mixMeta.label}
             </span>
+            {showMixingWellness && (
+              <button
+                type="button"
+                className={styles.statusSmsBtn}
+                onClick={() => setSmsStatus('NOT_MIXING')}
+              >
+                ✉️ {STATUS_SMS_TEMPLATES.wellness.label}
+              </button>
+            )}
           </div>
           <p className={styles.muted}>{serialNumber}</p>
         </div>
@@ -545,7 +632,7 @@ function MachineDetail({
         <div className={styles.statusBanner} style={{ borderLeftColor: color ?? '#bbb' }}>
           <strong>{status}</strong> — {STATUS_DESCRIPTIONS[status]}
           {smsKind && assigned && (
-            <button type="button" className={styles.statusSmsBtn} onClick={() => setSmsOpen(true)}>
+            <button type="button" className={styles.statusSmsBtn} onClick={() => setSmsStatus(status)}>
               ✉️ {STATUS_SMS_TEMPLATES[smsKind].label}
             </button>
           )}
@@ -586,11 +673,11 @@ function MachineDetail({
         />
       )}
 
-      {smsOpen && status && (
+      {smsStatus && (
         <StatusSmsModal
           serialNumber={serialNumber}
-          status={status}
-          onClose={() => setSmsOpen(false)}
+          status={smsStatus}
+          onClose={() => setSmsStatus(null)}
         />
       )}
 
