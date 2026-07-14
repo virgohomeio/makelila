@@ -617,6 +617,17 @@ function TicketRow({ t, selected, onClick }: { t: ServiceTicket; selected: boole
       <td><SlaChipPill label={sla.label} color={sla.color} /></td>
       <td>
         <span className={styles.pill} style={{ background: s.bg, color: s.color }}>{s.label}</span>
+        {(t.tags ?? []).map(tag => {
+          const m = statusMeta(tag);
+          return (
+            <span
+              key={tag}
+              className={styles.pill}
+              style={{ background: '#fff', color: m.color, border: `1px solid ${m.color}` }}
+              title="Status tag"
+            >🏷 {m.label}</span>
+          );
+        })}
         {t.status === 'closed' && t.closed_at && (
           <div className={styles.closedDate} title={`Closed ${new Date(t.closed_at).toLocaleString()}`}>
             Closed {new Date(t.closed_at).toLocaleDateString()}

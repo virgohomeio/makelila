@@ -7,7 +7,7 @@ import {
   STATUS_META, CATEGORY_META, PRIORITY_META, NEXT_STATUSES, TICKET_STATUSES,
   statusMeta, priorityMeta, sourceLabel, topicLabel, slaChip,
   ISSUE_AREAS, ISSUE_AREA_LABEL,
-  updateTicketStatus, assignTicketOwner, setTicketPriority, setTicketIssueArea, setTicketCategory,
+  updateTicketStatus, updateTicketTags, assignTicketOwner, setTicketPriority, setTicketIssueArea, setTicketCategory,
   setRepairFields, reclassifyTicket, deleteTicket, updateTicketSubject, setTicketDescription,
   markDiagnosisLinkSent, setLinearIssueUrl, setGitHubIssueUrl,
   useCustomerLifecycle, warrantyState,
@@ -286,6 +286,17 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
           <div className={styles.detailMetaRow}>
             <span className={styles.pill} style={{ background: cat.bg, color: cat.color }}>{cat.label}</span>
             <span className={styles.pill} style={{ background: status.bg, color: status.color }}>{status.label}</span>
+            {(ticket.tags ?? []).map(tag => {
+              const m = statusMeta(tag);
+              return (
+                <span
+                  key={tag}
+                  className={styles.pill}
+                  style={{ background: '#fff', color: m.color, border: `1px solid ${m.color}` }}
+                  title="Status tag"
+                >🏷 {m.label}</span>
+              );
+            })}
             <span className={styles.pill} style={{ background: '#f7fafc', color: prio.color }}>{prio.label}</span>
             <span className={styles.pill} style={{ background: '#edf2f7', color: '#4a5568' }}>
               {sourceLabel(ticket.source)}
@@ -762,6 +773,29 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
                 onClick={() => run(updateTicketStatus(ticket.id, next as TicketStatus))}
               >→ {STATUS_META[next].label}</button>
             ))}
+          </div>
+        </div>
+
+        <div className={styles.detailSection}>
+          <div className={styles.detailSectionLabel}>Status tags — multi-select</div>
+          <div className={styles.actionsRow}>
+            {TICKET_STATUSES.map(tag => {
+              const active = (ticket.tags ?? []).includes(tag);
+              const m = STATUS_META[tag];
+              return (
+                <button
+                  key={tag}
+                  className={active ? styles.btnPrimary : styles.btnSecondary}
+                  disabled={busy}
+                  style={active ? { background: m.color, borderColor: m.color } : { color: m.color }}
+                  onClick={() => {
+                    const current = ticket.tags ?? [];
+                    const next = active ? current.filter(t => t !== tag) : [...current, tag];
+                    void run(updateTicketTags(ticket.id, next));
+                  }}
+                >{active ? '✓ ' : ''}{m.label}</button>
+              );
+            })}
           </div>
         </div>
 

@@ -57,6 +57,10 @@ export type ServiceTicket = {
   category: TicketCategory;
   source: TicketSource;
   status: TicketStatus;
+  // Multi-select status tags — separate from the single workflow `status`.
+  // Reuses the status vocabulary (TicketStatus keys). Optional: undefined on
+  // rows read before the `tags` column migration lands; treat as [] on read.
+  tags?: TicketStatus[];
   priority: TicketPriority;
   customer_id: string | null;
   customer_name: string | null;
@@ -873,6 +877,14 @@ export async function updateTicketStatus(id: string, status: TicketStatus): Prom
       console.warn('Auto-cancel of queued replacement on ticket close failed (non-fatal):', e.message);
     });
   }
+}
+
+/** Replace a ticket's status tags (multi-select, separate from `status`). */
+export async function updateTicketTags(id: string, tags: TicketStatus[]): Promise<void> {
+  const { error } = await supabase.from('service_tickets').update({ tags }).eq('id', id);
+  if (error) throw error;
+  await logAction('ticket_tags_changed', id, tags.length ? tags.join(', ') : '(none)',
+    { entityType: 'ticket', entityId: id });
 }
 
 export async function assignTicketOwner(id: string, owner_email: string | null): Promise<void> {
