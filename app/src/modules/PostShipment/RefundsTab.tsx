@@ -1333,6 +1333,26 @@ function FinanceApproveModal({
   const [busy, setBusy] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
 
+  // Collaborative "Notes for approvers" — saved immediately, independent of the
+  // Approve action. Fixes the case where the linked return isn't received yet
+  // (Approve button disabled) but Julie/Huayi still need to record context.
+  const { notes: approverNotes, refresh: refreshNotes } = useRefundNotes(refund.id);
+  const [newNote, setNewNote] = useState('');
+  const [noteBusy, setNoteBusy] = useState(false);
+  const runAddNote = async () => {
+    if (!newNote.trim()) return;
+    setNoteBusy(true); setLocalError(null); onError(null);
+    try { await addRefundNote(refund.id, newNote); setNewNote(''); refreshNotes(); }
+    catch (e) { const m = (e as Error).message; setLocalError(m); onError(m); }
+    finally { setNoteBusy(false); }
+  };
+  const runDeleteNote = async (noteId: string) => {
+    setNoteBusy(true); setLocalError(null);
+    try { await deleteRefundNote(noteId, refund.id); refreshNotes(); }
+    catch (e) { const m = (e as Error).message; setLocalError(m); onError(m); }
+    finally { setNoteBusy(false); }
+  };
+
   const FINANCE_OK_STATUSES = ['received', 'inspected', 'refunded', 'closed'];
   const DEFECTIVE_CATEGORIES: ReturnCategory[] = ['product_defect', 'shipping_damage'];
   const isDefectiveDiscard =
@@ -1452,6 +1472,39 @@ function FinanceApproveModal({
             placeholder="Stripe refund ID, etc."
             className={styles.modalInput}
           />
+        </div>
+
+        <div className={styles.modalField}>
+          <label className={styles.modalLabel}>Notes for approvers ({approverNotes.length})</label>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 }}>
+            {approverNotes.length === 0 && (
+              <div style={{ fontSize: 12, color: '#a0aec0' }}>No notes yet — save context here without approving.</div>
+            )}
+            {approverNotes.map(n => (
+              <div key={n.id} style={{ fontSize: 13, background: '#f7fafc', borderRadius: 6, padding: '6px 9px' }}>
+                <div style={{ whiteSpace: 'pre-wrap' }}>{n.body}</div>
+                <div style={{ fontSize: 10, color: '#a0aec0', marginTop: 3, display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                  <span>{n.author_name ?? 'Unknown'} · {new Date(n.created_at).toLocaleString()}</span>
+                  <button onClick={() => void runDeleteNote(n.id)} disabled={noteBusy} title="Delete note"
+                    style={{ border: 'none', background: 'none', color: '#cbd5e0', cursor: 'pointer', fontSize: 13, lineHeight: 1 }}>×</button>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <textarea
+              value={newNote}
+              onChange={e => setNewNote(e.target.value)}
+              rows={2}
+              placeholder="Add a note for approvers (saved immediately, no approval needed)…"
+              className={styles.modalInput}
+              style={{ resize: 'vertical' }}
+            />
+            <button onClick={() => void runAddNote()} disabled={noteBusy || !newNote.trim()}
+              className={styles.btnPrimary} style={{ whiteSpace: 'nowrap' }}>
+              {noteBusy ? 'Saving…' : 'Add note'}
+            </button>
+          </div>
         </div>
 
         <div className={styles.modalActions}>
