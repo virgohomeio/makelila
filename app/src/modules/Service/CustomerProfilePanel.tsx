@@ -63,7 +63,20 @@ export function CustomerProfilePanel({
                 <span className={styles.profileTicketMeta}>
                   {sourceLabel(t.source)} · {new Date(ts).toLocaleDateString()}
                 </span>
-                <span className={styles.pill} style={{ background: s.bg, color: s.color }}>{s.label}</span>
+                <span style={{ display: 'flex', flexWrap: 'wrap', gap: 4, justifyContent: 'flex-end' }}>
+                  <span className={styles.pill} style={{ background: s.bg, color: s.color }}>{s.label}</span>
+                  {(t.tags ?? []).map(tag => {
+                    const m = statusMeta(tag);
+                    return (
+                      <span
+                        key={tag}
+                        className={styles.pill}
+                        style={{ background: '#fff', color: m.color, border: `1px solid ${m.color}` }}
+                        title="Status tag"
+                      >🏷 {m.label}</span>
+                    );
+                  })}
+                </span>
               </button>
             );
           })}
