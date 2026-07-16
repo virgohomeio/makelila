@@ -542,6 +542,18 @@ export async function submitRefundRequest(input: {
     });
 }
 
+/** Edit a refund's dollar amount directly from the card, at any stage.
+ *  Approvers (manager/finance) use this to correct the amount without having
+ *  to advance the refund through the approval action. */
+export async function updateRefundAmount(id: string, amount: number): Promise<void> {
+  if (!Number.isFinite(amount) || amount < 0) throw new Error('Amount must be a non-negative number');
+  const rounded = Math.round(amount * 100) / 100;
+  const { error } = await supabase.from('refund_approvals')
+    .update({ refund_amount_usd: rounded }).eq('id', id);
+  if (error) throw error;
+  await logAction('refund_amount_edited', id, `$${rounded.toFixed(2)}`);
+}
+
 export async function managerApprove(id: string, note?: string): Promise<void> {
   const userId = await currentUserId();
   const { error } = await supabase.from('refund_approvals').update({

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   useRefundApprovals, useReturns,
-  submitRefundRequest, managerApprove, financeApprove, executeRefund, denyRefund, closeRefund,
+  submitRefundRequest, updateRefundAmount, managerApprove, financeApprove, executeRefund, denyRefund, closeRefund,
   setReturnDisposition, updateReturnStatus,
   useRefundNotes, addRefundNote, deleteRefundNote,
   REFUND_STATUS_META, REFUND_METHODS, REFUND_METHOD_META,
@@ -623,6 +623,21 @@ function RefundCard({
   const [inputVal, setInputVal] = useState('');
   const meta = REFUND_STATUS_META[refund.status];
 
+  // Approvers can correct the dollar amount inline at any stage.
+  const canEditAmount = canManager || canFinance;
+  const [editingAmount, setEditingAmount] = useState(false);
+  const [amountDraft, setAmountDraft] = useState('');
+  const startEditAmount = () => { setAmountDraft(String(refund.refund_amount_usd ?? '')); setEditingAmount(true); };
+  const saveAmount = async () => {
+    const next = Number(amountDraft);
+    if (!Number.isFinite(next) || next < 0) { setEditingAmount(false); return; }
+    if (next === Number(refund.refund_amount_usd)) { setEditingAmount(false); return; }
+    setBusy(true); onError(null);
+    try { await updateRefundAmount(refund.id, next); setEditingAmount(false); }
+    catch (e) { onError((e as Error).message); }
+    finally { setBusy(false); }
+  };
+
   const runStatus = async (s: ReturnStatus) => {
     if (!linkedReturn || linkedReturn.status === s) return;
     setStatusBusy(true); onError(null);
@@ -684,7 +699,31 @@ function RefundCard({
     >
       <div className={styles.refundCardHead}>
         <strong>{refund.customer_name}</strong>
-        <span className={styles.refundAmount}>${Number(refund.refund_amount_usd).toLocaleString('en-US')}</span>
+        {editingAmount ? (
+          <span onClick={e => e.stopPropagation()} style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+            <span style={{ fontWeight: 700 }}>$</span>
+            <input
+              autoFocus
+              type="number" step="0.01" min="0"
+              value={amountDraft}
+              onChange={e => setAmountDraft(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') void saveAmount(); if (e.key === 'Escape') setEditingAmount(false); }}
+              onBlur={() => void saveAmount()}
+              disabled={busy}
+              style={{ width: 90, fontSize: 13, fontWeight: 700, padding: '2px 4px',
+                       border: '1px solid #2b6cb0', borderRadius: 4, textAlign: 'right' }}
+            />
+          </span>
+        ) : (
+          <span
+            className={styles.refundAmount}
+            onClick={canEditAmount ? (e) => { e.stopPropagation(); startEditAmount(); } : undefined}
+            style={canEditAmount ? { cursor: 'pointer' } : undefined}
+            title={canEditAmount ? 'Click to edit the refund amount' : undefined}
+          >
+            ${Number(refund.refund_amount_usd).toLocaleString('en-US')}{canEditAmount && ' ✎'}
+          </span>
+        )}
       </div>
       {refund.reason && <div className={styles.refundReason}>{refund.reason}</div>}
       {refund.payment_method && <div className={styles.refundMeta}>via {refund.payment_method}</div>}
