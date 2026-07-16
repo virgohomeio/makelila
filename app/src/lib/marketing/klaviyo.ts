@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../supabase';
+import { fnErrorMessage } from './fnError';
 
 export type KlaviyoSyncLog = {
   id: string;
@@ -34,7 +35,7 @@ export function useKlaviyoSyncStatus(limit = 10): { logs: KlaviyoSyncLog[]; load
 
 export async function triggerKlaviyoSync(): Promise<{ profiles_sent: number; errors: number }> {
   const { data, error } = await supabase.functions.invoke('sync-klaviyo-profiles');
-  if (error) throw error;
+  if (error) throw new Error(await fnErrorMessage(error));
   return data as { profiles_sent: number; errors: number };
 }
 
@@ -42,6 +43,6 @@ export async function triggerKlaviyoSync(): Promise<{ profiles_sent: number; err
  *  the per-customer Journey shows the email leg (opens, clicks, cart, order). */
 export async function triggerKlaviyoEventsSync(): Promise<{ synced: number; scanned?: number; profiles?: number; note?: string }> {
   const { data, error } = await supabase.functions.invoke('klaviyo-pull-events');
-  if (error) throw error;
+  if (error) throw new Error(await fnErrorMessage(error));
   return data as { synced: number; scanned?: number; profiles?: number; note?: string };
 }
