@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import ReplacementPickerModal from './ReplacementPickerModal';
 import { useCustomers, sendFollowupSms } from '../../lib/customers';
 import {
-  type ServiceTicket, type IssueArea, type TicketCategory, type TicketStatus,
+  type ServiceTicket, type IssueArea, type TicketCategory,
   STATUS_META, CATEGORY_META, PRIORITY_META, TICKET_STATUSES,
   statusMeta, priorityMeta, sourceLabel, topicLabel, slaChip,
   ISSUE_AREAS, ISSUE_AREA_LABEL,
@@ -764,31 +764,22 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
         </div>
 
         <div className={styles.detailSection}>
-          <div className={styles.detailSectionLabel}>Status</div>
-          <select
-            className={styles.select}
-            value={ticket.status}
-            disabled={busy}
-            onChange={(e) => void run(updateTicketStatus(ticket.id, e.target.value as TicketStatus))}
-          >
-            {TICKET_STATUSES.map(s => (
-              <option key={s} value={s}>{STATUS_META[s].label}</option>
-            ))}
-          </select>
-        </div>
-
-        <div className={styles.detailSection}>
           <div className={styles.detailSectionLabel}>Status tags — multi-select</div>
           <div className={styles.actionsRow}>
             {TICKET_STATUSES.map(tag => {
-              // The Complete tag is terminal: it drives the ticket's real
-              // `status` column (and closed_at, the OPEN KPI, and replacement
-              // auto-cancel) instead of being a plain annotation. Every other
-              // tag is a free-form multi-select annotation stored in `tags`.
+              // Two tags mirror the ticket's real `status` column instead of
+              // being plain annotations:
+              //   • Complete (closed) — closes / reopens the ticket.
+              //   • Action Needed (waiting_on_us) — the default status, so it's
+              //     auto-selected; clicking it deselects → moves to In Progress.
+              // Every other tag is a free-form multi-select annotation in `tags`.
               const isCloseTag = tag === 'closed';
+              const isActionNeeded = tag === 'waiting_on_us';
               const active = isCloseTag
                 ? ticket.status === 'closed'
-                : (ticket.tags ?? []).includes(tag);
+                : isActionNeeded
+                  ? ticket.status === 'waiting_on_us'
+                  : (ticket.tags ?? []).includes(tag);
               const m = STATUS_META[tag];
               return (
                 <button
@@ -808,6 +799,9 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
                         }
                         await updateTicketStatus(ticket.id, active ? 'waiting_on_us' : 'closed');
                       })());
+                    } else if (isActionNeeded) {
+                      // Select → status becomes Action Needed; deselect → In Progress.
+                      void run(updateTicketStatus(ticket.id, active ? 'in_progress' : 'waiting_on_us'));
                     } else {
                       const current = ticket.tags ?? [];
                       const next = active ? current.filter(t => t !== tag) : [...current, tag];
