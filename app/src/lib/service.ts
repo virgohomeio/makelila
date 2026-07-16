@@ -710,25 +710,27 @@ export function useTicketActionItems(ticketId: string | null): {
 export async function addTicketActionItem(ticketId: string, body: string): Promise<void> {
   const trimmed = body.trim();
   if (!trimmed) throw new Error('Action item cannot be empty.');
-  const { data: { user } } = await supabase.auth.getUser();
+  // getSession() reads the cached session locally (no network); getUser() hits
+  // the auth server on every call, which slowed each interaction.
+  const { data: { session } } = await supabase.auth.getSession();
   const { error } = await supabase.from('ticket_action_items').insert({
     ticket_id: ticketId,
     body: trimmed,
-    author_id: user?.id ?? null,
-    author_email: user?.email ?? null,
+    author_id: session?.user?.id ?? null,
+    author_email: session?.user?.email ?? null,
   });
   if (error) throw error;
   await logAction('ticket_action_item_added', ticketId, trimmed.slice(0, 120));
 }
 
 export async function setTicketActionItemDone(id: string, done: boolean): Promise<void> {
-  const { data: { user } } = await supabase.auth.getUser();
+  const { data: { session } } = await supabase.auth.getSession();
   const { data, error } = await supabase
     .from('ticket_action_items')
     .update({
       done,
       done_at: done ? new Date().toISOString() : null,
-      done_by: done ? (user?.email ?? null) : null,
+      done_by: done ? (session?.user?.email ?? null) : null,
     })
     .eq('id', id)
     .select('id, ticket_id, body');

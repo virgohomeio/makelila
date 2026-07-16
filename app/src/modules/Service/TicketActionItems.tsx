@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { memo, useEffect, useState } from 'react';
 import {
   useTicketActionItems, addTicketActionItem, setTicketActionItemDone, deleteTicketActionItem,
   type TicketActionItem,
@@ -71,8 +71,7 @@ export function TicketActionItems({ ticketId }: Props) {
   );
 }
 
-function ActionItemRow({ item }: { item: TicketActionItem }) {
-  const [confirmDelete, setConfirmDelete] = useState(false);
+const ActionItemRow = memo(function ActionItemRow({ item }: { item: TicketActionItem }) {
   const [error, setError] = useState<string | null>(null);
   // Optimistic UI: reflect the toggle / delete instantly instead of waiting on
   // the DB round-trip + realtime echo. Reconcile / revert on the server result.
@@ -94,9 +93,9 @@ function ActionItemRow({ item }: { item: TicketActionItem }) {
   }
 
   function remove() {
-    setHidden(true); setError(null);            // vanish immediately
+    setHidden(true); setError(null);            // one click, vanish immediately
     deleteTicketActionItem(item.id).catch((e: Error) => {
-      setHidden(false); setConfirmDelete(false); setError(e.message);
+      setHidden(false); setError(e.message);     // restore on failure
     });
   }
 
@@ -125,24 +124,15 @@ function ActionItemRow({ item }: { item: TicketActionItem }) {
                 <> · ✓ done {new Date(item.done_at).toLocaleString()}{item.done_by ? ` by ${item.done_by.split('@')[0]}` : ''}</>
               )}
             </span>
-            {!confirmDelete && (
-              <button
-                className={styles.noteDeleteBtn}
-                title="Delete action item"
-                onClick={() => setConfirmDelete(true)}
-              >🗑</button>
-            )}
+            <button
+              className={styles.noteDeleteBtn}
+              title="Delete action item"
+              onClick={remove}
+            >🗑</button>
           </div>
-          {confirmDelete && (
-            <div className={styles.noteConfirm}>
-              <span>Delete this action item?</span>
-              <button className={styles.btnDanger} onClick={remove}>Delete</button>
-              <button className={styles.btnSecondary} onClick={() => setConfirmDelete(false)}>Cancel</button>
-            </div>
-          )}
           {error && <div className={styles.noteError}>{error}</div>}
         </div>
       </div>
     </div>
   );
-}
+});
