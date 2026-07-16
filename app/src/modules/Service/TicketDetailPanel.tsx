@@ -3,8 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import ReplacementPickerModal from './ReplacementPickerModal';
 import { useCustomers, sendFollowupSms } from '../../lib/customers';
 import {
-  type ServiceTicket, type TicketStatus, type IssueArea, type TicketCategory,
-  STATUS_META, CATEGORY_META, PRIORITY_META, NEXT_STATUSES, TICKET_STATUSES,
+  type ServiceTicket, type IssueArea, type TicketCategory,
+  STATUS_META, CATEGORY_META, PRIORITY_META, TICKET_STATUSES,
   statusMeta, priorityMeta, sourceLabel, topicLabel, slaChip,
   ISSUE_AREAS, ISSUE_AREA_LABEL,
   updateTicketStatus, updateTicketTags, assignTicketOwner, setTicketPriority, setTicketIssueArea, setTicketCategory,
@@ -763,24 +763,17 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
         </div>
 
         <div className={styles.detailSection}>
-          <div className={styles.detailSectionLabel}>Status — transition</div>
-          <div className={styles.actionsRow}>
-            {(NEXT_STATUSES[ticket.status] ?? TICKET_STATUSES).map(next => (
-              <button
-                key={next}
-                className={styles.btnPrimary}
-                disabled={busy}
-                onClick={() => run(updateTicketStatus(ticket.id, next as TicketStatus))}
-              >→ {STATUS_META[next].label}</button>
-            ))}
-          </div>
-        </div>
-
-        <div className={styles.detailSection}>
           <div className={styles.detailSectionLabel}>Status tags — multi-select</div>
           <div className={styles.actionsRow}>
             {TICKET_STATUSES.map(tag => {
-              const active = (ticket.tags ?? []).includes(tag);
+              // The Complete tag is terminal: it drives the ticket's real
+              // `status` column (and closed_at, the OPEN KPI, and replacement
+              // auto-cancel) instead of being a plain annotation. Every other
+              // tag is a free-form multi-select annotation stored in `tags`.
+              const isCloseTag = tag === 'closed';
+              const active = isCloseTag
+                ? ticket.status === 'closed'
+                : (ticket.tags ?? []).includes(tag);
               const m = STATUS_META[tag];
               return (
                 <button
@@ -789,9 +782,22 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
                   disabled={busy}
                   style={active ? { background: m.color, borderColor: m.color } : { color: m.color }}
                   onClick={() => {
-                    const current = ticket.tags ?? [];
-                    const next = active ? current.filter(t => t !== tag) : [...current, tag];
-                    void run(updateTicketTags(ticket.id, next));
+                    if (isCloseTag) {
+                      // Close, or reopen back to the default "Action Needed"
+                      // state. Also strip any stale 'closed' left in `tags` so
+                      // it isn't shown twice alongside the status pill.
+                      const cleaned = (ticket.tags ?? []).filter(t => t !== 'closed');
+                      void run((async () => {
+                        if (cleaned.length !== (ticket.tags ?? []).length) {
+                          await updateTicketTags(ticket.id, cleaned);
+                        }
+                        await updateTicketStatus(ticket.id, active ? 'waiting_on_us' : 'closed');
+                      })());
+                    } else {
+                      const current = ticket.tags ?? [];
+                      const next = active ? current.filter(t => t !== tag) : [...current, tag];
+                      void run(updateTicketTags(ticket.id, next));
+                    }
                   }}
                 >{active ? '✓ ' : ''}{m.label}</button>
               );
