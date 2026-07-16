@@ -65,6 +65,7 @@ function NoteItem({ note }: { note: TicketNote }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [draft, setDraft] = useState(note.body);
   const [busy, setBusy] = useState(false);
+  const [hidden, setHidden] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const edited = new Date(note.updated_at).getTime() - new Date(note.created_at).getTime() > 1000;
@@ -83,17 +84,16 @@ function NoteItem({ note }: { note: TicketNote }) {
     }
   }
 
-  async function remove() {
-    setBusy(true); setError(null);
-    try {
-      await deleteTicketNote(note.id);
-      // Row disappears via the realtime DELETE event; no local state to reset.
-    } catch (e) {
-      setError((e as Error).message);
-      setBusy(false);
-      setConfirmDelete(false);
-    }
+  function remove() {
+    // Optimistic: hide the note immediately instead of waiting on the DB
+    // round-trip + realtime DELETE echo. Restore it if the delete fails.
+    setHidden(true); setError(null);
+    deleteTicketNote(note.id).catch((e: Error) => {
+      setHidden(false); setConfirmDelete(false); setError(e.message);
+    });
   }
+
+  if (hidden) return null;
 
   return (
     <div className={styles.noteItem}>
@@ -124,12 +124,8 @@ function NoteItem({ note }: { note: TicketNote }) {
         <>
           <div className={styles.noteConfirm}>
             <span>Delete this note?</span>
-            <button className={styles.btnDanger} disabled={busy} onClick={() => void remove()}>
-              {busy ? 'Deleting…' : 'Delete'}
-            </button>
-            <button className={styles.btnSecondary} disabled={busy} onClick={() => setConfirmDelete(false)}>
-              Cancel
-            </button>
+            <button className={styles.btnDanger} onClick={remove}>Delete</button>
+            <button className={styles.btnSecondary} onClick={() => setConfirmDelete(false)}>Cancel</button>
           </div>
           {error && <div className={styles.noteError}>{error}</div>}
         </>

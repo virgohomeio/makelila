@@ -134,8 +134,11 @@ export async function logAction(
     };
   },
 ): Promise<void> {
-  const { data } = await supabase.auth.getUser();
-  const user = data.user;
+  // getSession() reads the cached session locally; getUser() makes a network
+  // round-trip to the auth server on every call, which slowed every mutation
+  // that logs (add/delete note, etc.).
+  const { data: { session } } = await supabase.auth.getSession();
+  const user = session?.user;
   if (!user) throw new Error('logAction: not authenticated');
 
   const { error } = await supabase.from('activity_log').insert({

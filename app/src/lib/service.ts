@@ -619,12 +619,12 @@ export function useTicketNotes(ticketId: string | null): {
 export async function addTicketNote(ticketId: string, body: string): Promise<void> {
   const trimmed = body.trim();
   if (!trimmed) throw new Error('Note cannot be empty.');
-  const { data: { user } } = await supabase.auth.getUser();
+  const { data: { session } } = await supabase.auth.getSession();
   const { error } = await supabase.from('ticket_notes').insert({
     ticket_id: ticketId,
     body: trimmed,
-    author_id: user?.id ?? null,
-    author_email: user?.email ?? null,
+    author_id: session?.user?.id ?? null,
+    author_email: session?.user?.email ?? null,
   });
   if (error) throw error;
   await logAction('ticket_note_added', ticketId, trimmed.slice(0, 120));
