@@ -1,19 +1,19 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { insertMock, fromMock, getUserMock, invokeMock } = vi.hoisted(() => {
+const { insertMock, fromMock, getSessionMock, invokeMock } = vi.hoisted(() => {
   const insertMock = vi.fn();
   const fromMock = vi.fn(() => ({ insert: insertMock }));
-  const getUserMock = vi.fn<() => Promise<{ data: { user: { id: string } | null } }>>(
-    () => Promise.resolve({ data: { user: { id: 'user-1' } } }),
+  const getSessionMock = vi.fn<() => Promise<{ data: { session: { user: { id: string } } | null } }>>(
+    () => Promise.resolve({ data: { session: { user: { id: 'user-1' } } } }),
   );
   const invokeMock = vi.fn().mockResolvedValue({ data: {}, error: null });
-  return { insertMock, fromMock, getUserMock, invokeMock };
+  return { insertMock, fromMock, getSessionMock, invokeMock };
 });
 
 vi.mock('./supabase', () => ({
   supabase: {
     from: fromMock,
-    auth: { getUser: getUserMock },
+    auth: { getSession: getSessionMock },
     functions: { invoke: invokeMock },
     channel: vi.fn(() => ({
       on: vi.fn().mockReturnThis(),
@@ -54,7 +54,7 @@ describe('logAction', () => {
   });
 
   it('throws if no authenticated user', async () => {
-    getUserMock.mockResolvedValueOnce({ data: { user: null } });
+    getSessionMock.mockResolvedValueOnce({ data: { session: null } });
     await expect(logAction('x', 'y')).rejects.toThrow(/not authenticated/i);
   });
 
