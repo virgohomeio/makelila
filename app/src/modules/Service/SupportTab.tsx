@@ -313,9 +313,12 @@ export function SupportTab() {
 function CustomerGroupRow({ g, selected, onClick }: { g: CustomerGroup; selected: boolean; onClick: () => void }) {
   const s = statusMeta(g.rollupStatus);
   const ageHours = (Date.now() - new Date(g.lastActivity).getTime()) / 3_600_000;
-  // Every distinct status tag across this customer's tickets — shown alongside
-  // the rollup status so multi-tagged tickets surface all their tags here.
-  const groupTags = [...new Set(g.tickets.flatMap(t => t.tags ?? []))];
+  // Every distinct status tag across this customer's OPEN tickets — shown
+  // alongside the rollup status. When all tickets are closed there are no open
+  // tags, so the row just reads "Complete" (the rollup status).
+  const groupTags = [...new Set(
+    g.tickets.filter(t => t.status !== 'closed').flatMap(t => t.tags ?? []),
+  )];
   return (
     <tr className={`${styles.row} ${selected ? styles.rowSelected : ''}`} onClick={onClick}>
       <td>
