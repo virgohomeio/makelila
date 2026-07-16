@@ -19,6 +19,7 @@ import { createLinearIssue, createGitHubIssue } from '../../lib/githubLinear';
 import { useReplacementSummary } from '../../lib/orders';
 import { AttachmentStrip } from './AttachmentStrip';
 import { TicketNotes } from './TicketNotes';
+import { TicketActionItems } from './TicketActionItems';
 import { DeviceContextHeader } from '../../components/DeviceContextHeader';
 import styles from './Service.module.css';
 
@@ -848,6 +849,11 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
         <div className={styles.detailSection}>
           <div className={styles.detailSectionLabel}>Notes</div>
           <TicketNotes ticketId={ticket.id} />
+        </div>
+
+        <div className={styles.detailSection}>
+          <div className={styles.detailSectionLabel}>Action items</div>
+          <TicketActionItems ticketId={ticket.id} />
         </div>
 
         {ticket.hubspot_ticket_id && (

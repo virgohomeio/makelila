@@ -177,6 +177,18 @@ export type TicketNote = {
   updated_at: string;
 };
 
+export type TicketActionItem = {
+  id: string;
+  ticket_id: string;
+  body: string;
+  done: boolean;
+  done_at: string | null;
+  done_by: string | null;
+  author_id: string | null;
+  author_email: string | null;
+  created_at: string;
+};
+
 // ============================================================ Display metadata
 
 export const CATEGORY_META: Record<TicketCategory, { label: string; color: string; bg: string }> = {
@@ -644,6 +656,101 @@ export async function deleteTicketNote(noteId: string): Promise<void> {
     throw new Error('Note was not deleted (no permission or already removed).');
   }
   await logAction('ticket_note_deleted', data[0].ticket_id as string, '');
+}
+
+// ── Action items — a checkable running to-do list per ticket ─────────────────
+export function useTicketActionItems(ticketId: string | null): {
+  items: TicketActionItem[];
+  loading: boolean;
+} {
+  const [items, setItems] = useState<TicketActionItem[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!ticketId) { setItems([]); setLoading(false); return; }
+    let channel: RealtimeChannel | null = null;
+    let cancelled = false;
+    setLoading(true);
+    (async () => {
+      const { data, error } = await supabase
+        .from('ticket_action_items')
+        .select('*')
+        .eq('ticket_id', ticketId)
+        .order('created_at', { ascending: true });
+      if (cancelled) return;
+      if (!error && data) setItems(data as TicketActionItem[]);
+      setLoading(false);
+
+      channel = supabase
+        .channel(`ticket_action_items:${ticketId}`)
+        .on('postgres_changes',
+          { event: '*', schema: 'public', table: 'ticket_action_items', filter: `ticket_id=eq.${ticketId}` },
+          (payload) => {
+            setItems(prev => {
+              if (payload.eventType === 'DELETE' && payload.old) {
+                return prev.filter(i => i.id !== (payload.old as { id: string }).id);
+              }
+              if (payload.new) {
+                const row = payload.new as TicketActionItem;
+                const idx = prev.findIndex(i => i.id === row.id);
+                if (idx >= 0) { const next = [...prev]; next[idx] = row; return next; }
+                return [...prev, row];
+              }
+              return prev;
+            });
+          })
+        .subscribe();
+    })();
+    return () => { cancelled = true; if (channel) void channel.unsubscribe(); };
+  }, [ticketId]);
+
+  return { items, loading };
+}
+
+export async function addTicketActionItem(ticketId: string, body: string): Promise<void> {
+  const trimmed = body.trim();
+  if (!trimmed) throw new Error('Action item cannot be empty.');
+  const { data: { user } } = await supabase.auth.getUser();
+  const { error } = await supabase.from('ticket_action_items').insert({
+    ticket_id: ticketId,
+    body: trimmed,
+    author_id: user?.id ?? null,
+    author_email: user?.email ?? null,
+  });
+  if (error) throw error;
+  await logAction('ticket_action_item_added', ticketId, trimmed.slice(0, 120));
+}
+
+export async function setTicketActionItemDone(id: string, done: boolean): Promise<void> {
+  const { data: { user } } = await supabase.auth.getUser();
+  const { data, error } = await supabase
+    .from('ticket_action_items')
+    .update({
+      done,
+      done_at: done ? new Date().toISOString() : null,
+      done_by: done ? (user?.email ?? null) : null,
+    })
+    .eq('id', id)
+    .select('id, ticket_id, body');
+  if (error) throw error;
+  if (!data || data.length === 0) {
+    throw new Error('Action item was not updated (no permission or already removed).');
+  }
+  await logAction(done ? 'ticket_action_item_completed' : 'ticket_action_item_reopened',
+    data[0].ticket_id as string, (data[0].body as string).slice(0, 120));
+}
+
+export async function deleteTicketActionItem(id: string): Promise<void> {
+  const { data, error } = await supabase
+    .from('ticket_action_items')
+    .delete()
+    .eq('id', id)
+    .select('id, ticket_id');
+  if (error) throw error;
+  if (!data || data.length === 0) {
+    throw new Error('Action item was not deleted (no permission or already removed).');
+  }
+  await logAction('ticket_action_item_deleted', data[0].ticket_id as string, '');
 }
 
 export function useTicketMessages(ticketId: string | null): {
