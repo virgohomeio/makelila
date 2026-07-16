@@ -7,7 +7,7 @@ import {
   STATUS_META, CATEGORY_META, PRIORITY_META, TICKET_STATUSES,
   statusMeta, priorityMeta, sourceLabel, topicLabel, slaChip,
   ISSUE_AREAS, ISSUE_AREA_LABEL,
-  updateTicketStatus, updateTicketTags, assignTicketOwner, setTicketPriority, setTicketIssueArea, setTicketCategory,
+  updateTicketStatus, assignTicketOwner, setTicketPriority, setTicketIssueArea, setTicketCategory,
   setRepairFields, reclassifyTicket, deleteTicket, updateTicketSubject, setTicketDescription,
   markDiagnosisLinkSent, setLinearIssueUrl, setGitHubIssueUrl,
   useCustomerLifecycle, warrantyState,
@@ -764,22 +764,17 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
         </div>
 
         <div className={styles.detailSection}>
-          <div className={styles.detailSectionLabel}>Status tags — multi-select</div>
+          <div className={styles.detailSectionLabel}>Status</div>
           <div className={styles.actionsRow}>
             {TICKET_STATUSES.map(tag => {
-              // Two tags mirror the ticket's real `status` column instead of
-              // being plain annotations:
-              //   • Complete (closed) — closes / reopens the ticket.
-              //   • Action Needed (waiting_on_us) — the default status, so it's
-              //     auto-selected; clicking it deselects → moves to In Progress.
-              // Every other tag is a free-form multi-select annotation in `tags`.
+              // Single-select: every button reflects and sets the ticket's real
+              // `status`, so the checked button always matches the status pill.
+              //   • Action Needed (waiting_on_us) is the default → auto-selected;
+              //     clicking it to deselect moves the ticket to In Progress.
+              //   • Complete (closed) closes / reopens.
               const isCloseTag = tag === 'closed';
               const isActionNeeded = tag === 'waiting_on_us';
-              const active = isCloseTag
-                ? ticket.status === 'closed'
-                : isActionNeeded
-                  ? ticket.status === 'waiting_on_us'
-                  : (ticket.tags ?? []).includes(tag);
+              const active = ticket.status === tag;
               const m = STATUS_META[tag];
               return (
                 <button
@@ -789,23 +784,12 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
                   style={active ? { background: m.color, borderColor: m.color } : { color: m.color }}
                   onClick={() => {
                     if (isCloseTag) {
-                      // Close, or reopen back to the default "Action Needed"
-                      // state. Also strip any stale 'closed' left in `tags` so
-                      // it isn't shown twice alongside the status pill.
-                      const cleaned = (ticket.tags ?? []).filter(t => t !== 'closed');
-                      void run((async () => {
-                        if (cleaned.length !== (ticket.tags ?? []).length) {
-                          await updateTicketTags(ticket.id, cleaned);
-                        }
-                        await updateTicketStatus(ticket.id, active ? 'waiting_on_us' : 'closed');
-                      })());
-                    } else if (isActionNeeded) {
-                      // Select → status becomes Action Needed; deselect → In Progress.
-                      void run(updateTicketStatus(ticket.id, active ? 'in_progress' : 'waiting_on_us'));
-                    } else {
-                      const current = ticket.tags ?? [];
-                      const next = active ? current.filter(t => t !== tag) : [...current, tag];
-                      void run(updateTicketTags(ticket.id, next));
+                      void run(updateTicketStatus(ticket.id, active ? 'waiting_on_us' : 'closed'));
+                    } else if (isActionNeeded && active) {
+                      // Deselect Action Needed → In Progress.
+                      void run(updateTicketStatus(ticket.id, 'in_progress'));
+                    } else if (!active) {
+                      void run(updateTicketStatus(ticket.id, tag));
                     }
                   }}
                 >{active ? '✓ ' : ''}{m.label}</button>
