@@ -21,6 +21,13 @@ select cron.schedule(
   $q$select public.invoke_edge_function('klaviyo-pull-events', '{}'::jsonb)$q$
 );
 
+-- Klaviyo email campaign performance (Email tab) — daily is plenty.
+select cron.schedule(
+  'sync-klaviyo-campaigns-daily',
+  '55 7 * * *',
+  $q$select public.invoke_edge_function('sync-klaviyo-campaigns', '{}'::jsonb)$q$
+);
+
 -- GA4 (Shopify/website analytics) — intraday available, refresh every 6h.
 select cron.schedule(
   'sync-ga4-6h',

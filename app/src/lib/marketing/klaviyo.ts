@@ -46,3 +46,50 @@ export async function triggerKlaviyoEventsSync(): Promise<{ synced: number; scan
   if (error) throw new Error(await fnErrorMessage(error));
   return data as { synced: number; scanned?: number; profiles?: number; note?: string };
 }
+
+export type KlaviyoCampaign = {
+  campaign_id: string;
+  name: string | null;
+  status: string | null;
+  send_time: string | null;
+  recipients: number | null;
+  delivered: number | null;
+  opens_unique: number | null;
+  open_rate: number | null;
+  clicks_unique: number | null;
+  click_rate: number | null;
+  conversions: number | null;
+  revenue: number | null;
+  unsubscribes: number | null;
+  unsubscribe_rate: number | null;
+  bounce_rate: number | null;
+  spam_complaint_rate: number | null;
+  synced_at: string;
+};
+
+/** Email campaign performance rows (open/click rate, revenue) for the Email tab. */
+export function useKlaviyoCampaigns(): { campaigns: KlaviyoCampaign[]; loading: boolean } {
+  const [campaigns, setCampaigns] = useState<KlaviyoCampaign[]>([]);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    let cancelled = false;
+    void supabase
+      .from('klaviyo_campaigns')
+      .select('*')
+      .order('send_time', { ascending: false, nullsFirst: false })
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (!error && data) setCampaigns(data as KlaviyoCampaign[]);
+        setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, []);
+  return { campaigns, loading };
+}
+
+/** Pull Klaviyo email campaign performance into klaviyo_campaigns. */
+export async function triggerKlaviyoCampaignsSync(): Promise<{ synced: number; note?: string }> {
+  const { data, error } = await supabase.functions.invoke('sync-klaviyo-campaigns');
+  if (error) throw new Error(await fnErrorMessage(error));
+  return data as { synced: number; note?: string };
+}
