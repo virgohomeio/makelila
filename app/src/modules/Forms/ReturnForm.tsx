@@ -92,9 +92,16 @@ export default function ReturnForm() {
   const [usage,     setUsage]     = useState<string>('');
   // 6. Return reasons (multi-select) + structured category
   const [reasons,       setReasons]       = useState<string[]>([]);
+  const [reasonOther,   setReasonOther]   = useState('');   // mandatory when 'Other' reason checked
   const [returnCategory, setReturnCategory] = useState<string>('');
+  const [categoryOther, setCategoryOther] = useState('');   // mandatory when category = 'other'
   // 7. Description
   const [description, setDescription] = useState('');
+  // Purchaser: was the person filing the return the actual buyer?
+  const [isPurchaser,    setIsPurchaser]    = useState<'' | 'yes' | 'no'>('');
+  const [purchaserName,  setPurchaserName]  = useState('');
+  const [purchaserEmail, setPurchaserEmail] = useState('');
+  const [purchaserPhone, setPurchaserPhone] = useState('');
   // 8. Support contacted
   const [support,   setSupport]   = useState<string>('');
   // 9. Star rating
@@ -179,8 +186,18 @@ export default function ReturnForm() {
     }
     if (!usage)     { setError('Please tell us how long you\'ve been using the unit.'); return; }
     if (reasons.length === 0) { setError('Please select at least one return reason.'); return; }
+    if (reasons.includes('Other') && !reasonOther.trim()) {
+      setError('Please describe your "Other" return reason.'); return;
+    }
     if (!returnCategory) { setError('Please select the primary category for your return.'); return; }
+    if (returnCategory === 'other' && !categoryOther.trim()) {
+      setError('Please describe your "Other" primary reason.'); return;
+    }
     if (!description.trim())  { setError('Please describe the issue in more detail.'); return; }
+    if (!isPurchaser) { setError('Please tell us whether you were the purchaser of this unit.'); return; }
+    if (isPurchaser === 'no' && (!purchaserName.trim() || !purchaserEmail.trim() || !purchaserPhone.trim())) {
+      setError('Please provide the purchaser\'s full name, email, and phone number.'); return;
+    }
     if (!support)   { setError('Please tell us whether you contacted support.'); return; }
     if (!rating)    { setError('Please rate your overall experience.'); return; }
     if (!future)    { setError('Please tell us how likely you are to consider LILA again.'); return; }
@@ -198,6 +215,9 @@ export default function ReturnForm() {
       if (uploadErr) throw uploadErr;
 
       const fullName = `${firstName.trim()} ${lastName.trim()}`;
+      // Fold the free-text into the "Other" reason so it shows in the reasons list.
+      const reasonsForInsert = reasons.map(r =>
+        r === 'Other' && reasonOther.trim() ? `Other — ${reasonOther.trim()}` : r);
       const ref = `CRT-${Math.floor(Math.random() * 90000 + 10000)}`;
       // Generate the id client-side so we don't read the row back with
       // .select() — customers submit anonymously (anon role), which has INSERT
@@ -213,15 +233,22 @@ export default function ReturnForm() {
         unit_serial: serial.trim() || null,
         original_order_ref: normalizedRef,
         condition,
-        reason: reasons[0] ?? null,           // primary reason for the legacy reason column
+        reason: reasonsForInsert[0] ?? null,  // primary reason for the legacy reason column
         return_category: returnCategory || null,
+        category_other: returnCategory === 'other' ? categoryOther.trim() : null,
         description: description.trim(),
+        // Purchaser identity — when the filer isn't the buyer, the refund
+        // workflow uses the purchaser as the customer on the card.
+        is_purchaser: isPurchaser === 'yes',
+        purchaser_name:  isPurchaser === 'no' ? purchaserName.trim() : null,
+        purchaser_email: isPurchaser === 'no' ? purchaserEmail.trim() : null,
+        purchaser_phone: isPurchaser === 'no' ? purchaserPhone.trim() : null,
         notes: `Customer reference: ${ref}`,
         status: 'created',
         source: 'customer_form',
         // Extended fields
         usage_duration: usage,
-        return_reasons: reasons,
+        return_reasons: reasonsForInsert,
         support_contacted: support,
         experience_rating: rating,
         would_change_decision: wouldChange.trim() || null,
@@ -321,6 +348,31 @@ export default function ReturnForm() {
           </Field>
         </div>
 
+        {/* Purchaser check */}
+        <Field label="Were you the purchaser of this unit?" required>
+          <RadioGroup
+            options={['Yes', 'No']}
+            value={isPurchaser === 'yes' ? 'Yes' : isPurchaser === 'no' ? 'No' : ''}
+            onChange={(v) => setIsPurchaser(v === 'Yes' ? 'yes' : 'no')}
+          />
+        </Field>
+        {isPurchaser === 'no' && (
+          <div className={styles.fieldGrid2}>
+            <Field label="Purchaser's full name" required>
+              <input value={purchaserName} onChange={e => setPurchaserName(e.target.value)}
+                     className={styles.input} required placeholder="Full name of the person who bought it" />
+            </Field>
+            <Field label="Purchaser's email" required>
+              <input type="email" value={purchaserEmail} onChange={e => setPurchaserEmail(e.target.value)}
+                     className={styles.input} required placeholder="purchaser@example.com" />
+            </Field>
+            <Field label="Purchaser's phone number" required>
+              <input type="tel" value={purchaserPhone} onChange={e => setPurchaserPhone(e.target.value)}
+                     className={styles.input} required placeholder="(000) 000-0000" />
+            </Field>
+          </div>
+        )}
+
         {/* 5. Usage duration */}
         <Field label="How long have you been using your LILA Pro?" required>
           <RadioGroup options={USAGE_OPTIONS} value={usage} onChange={setUsage} />
@@ -330,6 +382,16 @@ export default function ReturnForm() {
         <SectionHeader text="Why you're returning" />
         <Field label="Why are you returning your LILA Pro? (Select all that apply)" required>
           <CheckboxGroup options={RETURN_REASONS} values={reasons} onToggle={toggleReason} />
+          {reasons.includes('Other') && (
+            <div style={{ marginTop: 10 }}>
+              <label className={styles.fieldLabel}>
+                Please describe your "Other" reason<span className={styles.required}>*</span>
+              </label>
+              <textarea value={reasonOther} onChange={e => setReasonOther(e.target.value)}
+                        className={styles.textarea} required
+                        placeholder="Tell us what issue you faced." />
+            </div>
+          )}
         </Field>
 
         <Field label="What best describes the primary reason for your return?" required>
@@ -343,6 +405,16 @@ export default function ReturnForm() {
               <option key={opt.value} value={opt.value}>{opt.label}</option>
             ))}
           </select>
+          {returnCategory === 'other' && (
+            <div style={{ marginTop: 10 }}>
+              <label className={styles.fieldLabel}>
+                Please describe your "Other" primary reason<span className={styles.required}>*</span>
+              </label>
+              <textarea value={categoryOther} onChange={e => setCategoryOther(e.target.value)}
+                        className={styles.textarea} required
+                        placeholder="Tell us what issue you faced." />
+            </div>
+          )}
         </Field>
 
         {/* 7. Description */}

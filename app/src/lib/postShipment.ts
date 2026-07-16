@@ -112,6 +112,7 @@ export type ReturnRow = {
   condition: ReturnCondition | null;
   reason: string | null;
   return_category: ReturnCategory | null;
+  category_other: string | null;
   disposition: ReturnDisposition | null;
   refund_amount_usd: number | null;
   status: ReturnStatus;
@@ -136,6 +137,11 @@ export type ReturnRow = {
   refund_contact: string | null;
   additional_comments: string | null;
   purchase_proof: string | null;
+  // Purchaser identity when the return filer isn't the buyer (is_purchaser=false).
+  is_purchaser: boolean | null;
+  purchaser_name: string | null;
+  purchaser_email: string | null;
+  purchaser_phone: string | null;
   created_at: string;
   updated_at: string;
 };

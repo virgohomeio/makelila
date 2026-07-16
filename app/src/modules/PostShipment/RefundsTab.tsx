@@ -1032,6 +1032,20 @@ function RefundDetailPanel({
             ) : '—'}
           </DetailField>
 
+          {linkedReturn.category_other && (
+            <DetailField label="Primary reason (Other)" wide value={linkedReturn.category_other} />
+          )}
+
+          {linkedReturn.is_purchaser === false && (
+            <DetailField label="Purchased by (not the filer)" wide>
+              <div className={styles.detailQuote}>
+                {linkedReturn.purchaser_name ?? '—'}
+                {linkedReturn.purchaser_email ? ` · ${linkedReturn.purchaser_email}` : ''}
+                {linkedReturn.purchaser_phone ? ` · ${linkedReturn.purchaser_phone}` : ''}
+              </div>
+            </DetailField>
+          )}
+
           <DetailField label="Support contacted" wide value={linkedReturn.support_contacted ?? '—'} />
 
           <DetailField label="Issue description" wide>
@@ -1200,8 +1214,9 @@ function RequestRefundModal({
     setReturnId(id);
     const r = returns.find(x => x.id === id);
     if (r) {
-      setCustomerName(r.customer_name);
-      setCustomerEmail(r.customer_email ?? '');
+      // When the filer wasn't the buyer, the refund customer is the purchaser.
+      setCustomerName(r.purchaser_name?.trim() || r.customer_name);
+      setCustomerEmail((r.purchaser_email?.trim() || r.customer_email) ?? '');
       if (r.refund_amount_usd) setAmount(String(r.refund_amount_usd));
       if (r.reason) setReason(r.reason);
     }
