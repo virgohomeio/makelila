@@ -6,21 +6,23 @@ import { DashboardTab } from './DashboardTab';
 import { ReportTab } from './ReportTab';
 import { JourneyTab } from './JourneyTab';
 import { SocialTab } from './SocialTab';
+import { EmailTab } from './EmailTab';
 import { WebTab } from './WebTab';
 import { SystemOfRecordCard } from './SystemOfRecordCard';
 import { useFbCampaigns, triggerFbSync } from '../../lib/marketing/facebook';
-import { useKlaviyoSyncStatus, triggerKlaviyoSync, triggerKlaviyoEventsSync } from '../../lib/marketing/klaviyo';
+import { useKlaviyoSyncStatus, triggerKlaviyoSync, triggerKlaviyoEventsSync, triggerKlaviyoCampaignsSync } from '../../lib/marketing/klaviyo';
 import { triggerGa4Sync, triggerGscSync } from '../../lib/marketing/google';
 import { triggerFbIgSync } from '../../lib/marketing/social';
 import styles from './Marketing.module.css';
 
-type Tab = 'dashboard' | 'report' | 'campaigns' | 'social' | 'web' | 'attribution' | 'journey' | 'sync';
+type Tab = 'dashboard' | 'report' | 'campaigns' | 'social' | 'email' | 'web' | 'attribution' | 'journey' | 'sync';
 
 // Every inbound analytics source, fired together by the "Sync All Sources"
 // button. Each returns a short human summary for the status panel.
 const SYNC_ALL_TASKS: { label: string; run: () => Promise<string> }[] = [
   { label: 'Meta Ads', run: async () => `${(await triggerFbSync()).synced} campaign rows` },
-  { label: 'Klaviyo email', run: async () => { const r = await triggerKlaviyoEventsSync(); return r.note ?? `${r.synced} events`; } },
+  { label: 'Email campaigns', run: async () => { const r = await triggerKlaviyoCampaignsSync(); return r.note ?? `${r.synced} campaigns`; } },
+  { label: 'Klaviyo journey', run: async () => { const r = await triggerKlaviyoEventsSync(); return r.note ?? `${r.synced} events`; } },
   { label: 'Google Analytics', run: async () => `${(await triggerGa4Sync()).synced} rows` },
   { label: 'Search Console', run: async () => `${(await triggerGscSync()).synced} rows` },
   { label: 'Organic social', run: async () => { const r = await triggerFbIgSync(); return `${r.synced} rows (${r.channels.join(', ')})`; } },
@@ -131,7 +133,7 @@ export default function Marketing() {
       )}
 
       <div className={styles.tabs}>
-        {(['dashboard', 'report', 'campaigns', 'social', 'web', 'attribution', 'journey', 'sync'] as Tab[]).map(t => (
+        {(['dashboard', 'report', 'campaigns', 'social', 'email', 'web', 'attribution', 'journey', 'sync'] as Tab[]).map(t => (
           <button
             key={t}
             className={`${styles.tab} ${tab === t ? styles.tabActive : ''}`}
@@ -186,6 +188,8 @@ export default function Marketing() {
       {tab === 'report' && <ReportTab />}
 
       {tab === 'social' && <SocialTab />}
+
+      {tab === 'email' && <EmailTab />}
 
       {tab === 'web' && <WebTab />}
 

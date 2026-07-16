@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { supabase } from '../supabase';
+import { fnErrorMessage } from './fnError';
 import { subscribeReload } from './realtime';
 
 export type FbMetrics = {
@@ -104,18 +105,6 @@ export function useFbAds(): { ads: FbAd[]; loading: boolean } {
     return subscribeReload('fb_ads:realtime', ['fb_ads'], () => void load());
   }, [load]);
   return { ads, loading };
-}
-
-// supabase-js collapses any non-2xx into "Edge Function returned a non-2xx
-// status code"; the real { error } JSON is on error.context (a Response). Pull
-// it out so the Sync button shows the actual cause.
-async function fnErrorMessage(error: unknown): Promise<string> {
-  const ctx = (error as { context?: unknown }).context;
-  if (ctx instanceof Response) {
-    try { const b = await ctx.clone().json() as { error?: string }; if (b?.error) return b.error; } catch { /* not json */ }
-    try { const t = await ctx.text(); if (t) return t.slice(0, 400); } catch { /* ignore */ }
-  }
-  return (error as Error)?.message ?? 'Edge function call failed';
 }
 
 export async function triggerFbSync(): Promise<{ synced: number }> {
