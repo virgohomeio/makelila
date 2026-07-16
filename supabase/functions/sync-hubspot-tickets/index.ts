@@ -157,22 +157,42 @@ async function handle(req: Request): Promise<Response> {
         }
       }
 
-      const row = {
-        hubspot_ticket_id: t.id,
-        category: mapCategory(p.hs_ticket_category),
-        source: 'hubspot' as const,
-        status: mapStage(p.hs_pipeline_stage),
-        priority: mapPriority(p.hs_ticket_priority),
-        customer_id,
-        customer_name,
-        customer_email,
-        subject: p.subject ?? '(no subject)',
-        description: p.content ?? null,
-      };
-
-      const { error: upErr } = await admin
+      // makelila is the system of record for ticket workflow state. HubSpot
+      // SEEDS new tickets, but must never clobber operator-curated fields on
+      // re-sync — otherwise a ticket closed in makelila gets reopened every
+      // hour from HubSpot's stale pipeline stage (status), and the operator's
+      // priority/category get overwritten too. So: insert new tickets with the
+      // mapped stage; on an existing ticket only refresh the customer link
+      // (derived data), leaving status/priority/category/subject/description
+      // under operator control.
+      const { data: existing } = await admin
         .from('service_tickets')
-        .upsert(row, { onConflict: 'hubspot_ticket_id', ignoreDuplicates: false });
+        .select('id')
+        .eq('hubspot_ticket_id', t.id)
+        .maybeSingle();
+
+      let upErr;
+      if (existing) {
+        ({ error: upErr } = await admin
+          .from('service_tickets')
+          .update({ customer_id, customer_name, customer_email })
+          .eq('id', existing.id));
+      } else {
+        ({ error: upErr } = await admin
+          .from('service_tickets')
+          .insert({
+            hubspot_ticket_id: t.id,
+            category: mapCategory(p.hs_ticket_category),
+            source: 'hubspot' as const,
+            status: mapStage(p.hs_pipeline_stage),
+            priority: mapPriority(p.hs_ticket_priority),
+            customer_id,
+            customer_name,
+            customer_email,
+            subject: p.subject ?? '(no subject)',
+            description: p.content ?? null,
+          }));
+      }
       if (upErr) {
         skipped.push({ id: t.id, reason: `db: ${upErr.message}` });
         continue;
