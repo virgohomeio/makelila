@@ -52,6 +52,8 @@ export function RefundsTab() {
   const userEmail = user?.email;
 
   const [showRequestModal, setShowRequestModal] = useState(false);
+  const [requestReturnId, setRequestReturnId] = useState<string | null>(null);
+  const [viewReturnId, setViewReturnId] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [financeModalId, setFinanceModalId] = useState<string | null>(null);
   const [openTicketId, setOpenTicketId] = useState<string | null>(null);
@@ -175,8 +177,12 @@ export function RefundsTab() {
   // the first column of the queue, so the inspection step is visible.
   const inspectionReturns = useMemo(() => {
     const withApproval = new Set(approvals.map(a => a.return_id).filter(Boolean) as string[]);
+    // Every return still in the return/inspection phase — from a freshly
+    // submitted form ('created') through 'received'/'inspected' — that doesn't
+    // yet have a refund request. New return-form submissions land here first.
+    const TERMINAL = ['refunded', 'denied', 'closed', 'discarded'];
     return returns
-      .filter(r => r.status === 'received' && !withApproval.has(r.id))
+      .filter(r => !TERMINAL.includes(r.status) && !withApproval.has(r.id))
       .sort((a, b) => b.created_at.localeCompare(a.created_at));
   }, [returns, approvals]);
 
@@ -263,9 +269,18 @@ export function RefundsTab() {
             {inspectionReturns.length === 0 ? (
               <div className={styles.kanbanEmpty}>—</div>
             ) : inspectionReturns.map(r => (
-              <div key={r.id} className={styles.refundCard} style={{ borderLeftColor: '#805ad5' }}>
+              <div
+                key={r.id}
+                className={styles.refundCard}
+                style={{ borderLeftColor: '#805ad5', cursor: 'pointer' }}
+                role="button"
+                tabIndex={0}
+                onClick={() => setViewReturnId(r.id)}
+                title="Click to view the full return form"
+              >
                 <div className={styles.refundCardHead}>
-                  <strong>{r.customer_name}</strong>
+                  {/* When the filer isn't the buyer, show the purchaser as the customer. */}
+                  <strong>{r.purchaser_name?.trim() || r.customer_name}</strong>
                   {r.refund_amount_usd != null && (
                     <span className={styles.refundAmount}>${Number(r.refund_amount_usd).toLocaleString('en-US')}</span>
                   )}
@@ -277,8 +292,8 @@ export function RefundsTab() {
                 )}
                 {r.reason && <div className={styles.refundReason}>{r.reason}</div>}
                 <div className={styles.refundMeta}>Unit returned — inspect, then compile for George</div>
-                <div className={styles.refundActions}>
-                  <button className={styles.refundApproveBtn} onClick={() => setShowRequestModal(true)}>
+                <div className={styles.refundActions} onClick={e => e.stopPropagation()}>
+                  <button className={styles.refundApproveBtn} onClick={() => { setRequestReturnId(r.id); setShowRequestModal(true); }}>
                     Compile → George
                   </button>
                 </div>
@@ -341,10 +356,17 @@ export function RefundsTab() {
       {showRequestModal && (
         <RequestRefundModal
           returns={returns}
-          onClose={() => setShowRequestModal(false)}
+          initialReturnId={requestReturnId}
+          onClose={() => { setShowRequestModal(false); setRequestReturnId(null); }}
           onError={setError}
         />
       )}
+
+      {viewReturnId && (() => {
+        const r = returnsById.get(viewReturnId);
+        if (!r) return null;
+        return <ReturnDetailModal r={r} onClose={() => setViewReturnId(null)} />;
+      })()}
 
       {financeModalId && (() => {
         const refund = approvals.find(a => a.id === financeModalId);
@@ -1001,69 +1023,7 @@ function RefundDetailPanel({
             <span style={{ fontSize: 11, color: '#975a16' }}>⚠ not set</span>
           )}
         </div>
-        <div className={styles.refundDetailGrid}>
-          <DetailField label="Order #" value={linkedReturn.original_order_ref ?? '—'} mono />
-          <DetailField label="Unit serial" value={linkedReturn.unit_serial ?? '—'} mono />
-          <DetailField label="Channel" value={linkedReturn.channel ?? '—'} />
-          <DetailField label="Source" value={linkedReturn.source ?? '—'} />
-          <DetailField label="Usage duration" value={linkedReturn.usage_duration ?? '—'} />
-          <DetailField label="Condition" value={linkedReturn.condition ?? '—'} />
-          <DetailField label="Packaging" value={linkedReturn.packaging_status ?? '—'} />
-          <DetailField label="Alternative composting" value={linkedReturn.alternative_composting ?? '—'} />
-          <DetailField label="Refund preference" value={linkedReturn.refund_method_preference ?? '—'} />
-          <DetailField label="Refund contact" value={linkedReturn.refund_contact ?? '—'} mono />
-          <DetailField label="Future LILA likelihood" value={linkedReturn.future_likelihood ?? '—'} />
-          <DetailField
-            label="Experience rating"
-            value={
-              linkedReturn.experience_rating
-                ? `${STAR.repeat(linkedReturn.experience_rating)}${'☆'.repeat(5 - linkedReturn.experience_rating)} (${linkedReturn.experience_rating}/5)`
-                : '—'
-            }
-          />
-
-          <DetailField label="Selected reasons" wide>
-            {linkedReturn.return_reasons && linkedReturn.return_reasons.length > 0 ? (
-              <div className={styles.reasonTags}>
-                {linkedReturn.return_reasons.map(r => (
-                  <span key={r} className={styles.reasonTag}>{r}</span>
-                ))}
-              </div>
-            ) : '—'}
-          </DetailField>
-
-          {linkedReturn.category_other && (
-            <DetailField label="Primary reason (Other)" wide value={linkedReturn.category_other} />
-          )}
-
-          {linkedReturn.is_purchaser === false && (
-            <DetailField label="Purchased by (not the filer)" wide>
-              <div className={styles.detailQuote}>
-                {linkedReturn.purchaser_name ?? '—'}
-                {linkedReturn.purchaser_email ? ` · ${linkedReturn.purchaser_email}` : ''}
-                {linkedReturn.purchaser_phone ? ` · ${linkedReturn.purchaser_phone}` : ''}
-              </div>
-            </DetailField>
-          )}
-
-          <DetailField label="Support contacted" wide value={linkedReturn.support_contacted ?? '—'} />
-
-          <DetailField label="Issue description" wide>
-            <div className={styles.detailQuote}>{linkedReturn.description ?? '—'}</div>
-          </DetailField>
-
-          {linkedReturn.would_change_decision && (
-            <DetailField label="What would've changed their mind" wide>
-              <div className={styles.detailQuote}>{linkedReturn.would_change_decision}</div>
-            </DetailField>
-          )}
-
-          {linkedReturn.additional_comments && (
-            <DetailField label="Additional comments" wide>
-              <div className={styles.detailQuote}>{linkedReturn.additional_comments}</div>
-            </DetailField>
-          )}
-        </div>
+        <ReturnFormAnswers r={linkedReturn} />
         </>
       )}
 
@@ -1153,6 +1113,106 @@ function RefundDetailPanel({
   );
 }
 
+// The full set of return-form answers, shared by the refund detail panel and
+// the standalone read-only viewer (opened from the Return & inspection cards).
+function ReturnFormAnswers({ r }: { r: ReturnRow }) {
+  return (
+    <div className={styles.refundDetailGrid}>
+      <DetailField label="Order #" value={r.original_order_ref ?? '—'} mono />
+      <DetailField label="Unit serial" value={r.unit_serial ?? '—'} mono />
+      <DetailField label="Channel" value={r.channel ?? '—'} />
+      <DetailField label="Source" value={r.source ?? '—'} />
+      <DetailField label="Usage duration" value={r.usage_duration ?? '—'} />
+      <DetailField label="Condition" value={r.condition ?? '—'} />
+      <DetailField label="Packaging" value={r.packaging_status ?? '—'} />
+      <DetailField label="Alternative composting" value={r.alternative_composting ?? '—'} />
+      <DetailField label="Refund preference" value={r.refund_method_preference ?? '—'} />
+      <DetailField label="Refund contact" value={r.refund_contact ?? '—'} mono />
+      <DetailField label="Future LILA likelihood" value={r.future_likelihood ?? '—'} />
+      <DetailField
+        label="Experience rating"
+        value={
+          r.experience_rating
+            ? `${STAR.repeat(r.experience_rating)}${'☆'.repeat(5 - r.experience_rating)} (${r.experience_rating}/5)`
+            : '—'
+        }
+      />
+
+      <DetailField label="Selected reasons" wide>
+        {r.return_reasons && r.return_reasons.length > 0 ? (
+          <div className={styles.reasonTags}>
+            {r.return_reasons.map(x => (
+              <span key={x} className={styles.reasonTag}>{x}</span>
+            ))}
+          </div>
+        ) : '—'}
+      </DetailField>
+
+      {r.category_other && (
+        <DetailField label="Primary reason (Other)" wide value={r.category_other} />
+      )}
+
+      {r.is_purchaser === false && (
+        <DetailField label="Purchased by (not the filer)" wide>
+          <div className={styles.detailQuote}>
+            {r.purchaser_name ?? '—'}
+            {r.purchaser_email ? ` · ${r.purchaser_email}` : ''}
+            {r.purchaser_phone ? ` · ${r.purchaser_phone}` : ''}
+          </div>
+        </DetailField>
+      )}
+
+      <DetailField label="Support contacted" wide value={r.support_contacted ?? '—'} />
+
+      <DetailField label="Issue description" wide>
+        <div className={styles.detailQuote}>{r.description ?? '—'}</div>
+      </DetailField>
+
+      {r.would_change_decision && (
+        <DetailField label="What would've changed their mind" wide>
+          <div className={styles.detailQuote}>{r.would_change_decision}</div>
+        </DetailField>
+      )}
+
+      {r.additional_comments && (
+        <DetailField label="Additional comments" wide>
+          <div className={styles.detailQuote}>{r.additional_comments}</div>
+        </DetailField>
+      )}
+    </div>
+  );
+}
+
+// Read-only viewer for a return's full submitted form — opened by clicking a
+// card in the Return & inspection column (before a refund request exists).
+function ReturnDetailModal({ r, onClose }: { r: ReturnRow; onClose: () => void }) {
+  const displayName = r.purchaser_name?.trim() || r.customer_name;
+  return (
+    <div className={styles.modalBackdrop} onClick={onClose}>
+      <div className={styles.modalCard} onClick={e => e.stopPropagation()} style={{ maxWidth: 720, maxHeight: '85vh', overflowY: 'auto' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+          <div>
+            <h3 className={styles.modalTitle} style={{ marginBottom: 2 }}>{displayName}</h3>
+            <div style={{ fontSize: 12, color: '#718096' }}>
+              Return form · {r.return_ref ?? r.original_order_ref ?? '—'}
+              {r.is_purchaser === false && r.customer_name !== displayName && (
+                <> · filed by {r.customer_name}</>
+              )}
+            </div>
+            <div style={{ fontSize: 12, color: '#718096' }}>
+              {[r.customer_email, r.customer_phone].filter(Boolean).join(' · ') || '—'}
+            </div>
+          </div>
+          <button className={styles.btnSecondary} onClick={onClose}>Close</button>
+        </div>
+        <div style={{ marginTop: 12 }}>
+          <ReturnFormAnswers r={r} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function DetailField({
   label, value, children, mono, wide,
 }: { label: string; value?: string; children?: React.ReactNode; mono?: boolean; wide?: boolean }) {
@@ -1186,9 +1246,10 @@ function RefundStep({ label, ts, note, active, negative }: {
 // Request refund modal
 // ============================================================================
 function RequestRefundModal({
-  returns, onClose, onError,
+  returns, initialReturnId, onClose, onError,
 }: {
   returns: ReturnRow[];
+  initialReturnId?: string | null;
   onClose: () => void;
   onError: (msg: string | null) => void;
 }) {
@@ -1201,11 +1262,11 @@ function RequestRefundModal({
   const [notes, setNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  // Surface returns that are received/inspected and don't already have a
-  // refund_approval row downstream — those are the natural ones to request
-  // a refund on. (We don't enforce this; CS can still type a freeform name.)
+  // Surface returns still in the return/inspection phase (created → inspected)
+  // that don't already have a refund_approval — the natural ones to request a
+  // refund on. (We don't enforce this; CS can still type a freeform name.)
   const eligibleReturns = useMemo(
-    () => returns.filter(r => ['received', 'inspected'].includes(r.status))
+    () => returns.filter(r => ['created', 'received', 'inspected'].includes(r.status))
       .sort((a, b) => (b.created_at).localeCompare(a.created_at)),
     [returns],
   );
@@ -1221,6 +1282,13 @@ function RequestRefundModal({
       if (r.reason) setReason(r.reason);
     }
   };
+
+  // Pre-select the return when opened from a "Compile → George" button so the
+  // purchaser (if any) pre-fills the customer name.
+  useEffect(() => {
+    if (initialReturnId) onReturnChange(initialReturnId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialReturnId]);
 
   const submit = async () => {
     if (!customerName.trim() || !amount.trim()) return;
