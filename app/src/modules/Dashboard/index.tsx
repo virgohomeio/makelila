@@ -1,4 +1,6 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import { useNotifications, type FleetNotification } from '../../lib/notifications';
 import PlotlyChart from './PlotlyChart';
 import AssignCustomerModal from './AssignCustomerModal';
 import StatusSmsModal from './StatusSmsModal';
@@ -22,6 +24,7 @@ import {
   useUnitCustomerMap,
   deleteDatasetLabel,
   RecordType,
+  type MachineStatus,
 } from '../../lib/dashboard';
 import {
   buildBmeHumidityChart,
@@ -42,7 +45,11 @@ export default function Dashboard() {
   const { data: unitCustomerMap, refresh: refreshUnits } = useUnitCustomerMap();
   const { data: teamSerials } = useTeamTestSerials();
   const { live, checked } = useLiveSerials(serials);
-  const [selected, setSelected] = useState<string | null>(null);
+  // A notification click deep-links to /customers?tab=fleet&serial=… — honour
+  // it as the initial + reactive selection so the flagged machine opens.
+  const [searchParams] = useSearchParams();
+  const serialParam = searchParams.get('serial');
+  const [selected, setSelected] = useState<string | null>(serialParam);
   const [assignTarget, setAssignTarget] = useState<string | null>(null);
   // Backlog #59 — team test units default-hidden so internal noise doesn't
   // distort what an operator scanning the sidebar sees.
@@ -55,9 +62,19 @@ export default function Dashboard() {
       .sort(),
     [serials, live, teamSerials, showTeamUnits],
   );
-  const hiddenTeamCount = useMemo(
-    () => showTeamUnits ? 0 : serials.filter((sn) => live.has(sn) && teamSerials.has(sn)).length,
+  // Machines known to telemetry that aren't transmitting in the live window.
+  // Shown after the live ones so the whole fleet is visible, not just what's
+  // online this minute.
+  const offlineSerials = useMemo(
+    () => serials
+      .filter((sn) => !live.has(sn))
+      .filter((sn) => showTeamUnits || !teamSerials.has(sn))
+      .sort(),
     [serials, live, teamSerials, showTeamUnits],
+  );
+  const hiddenTeamCount = useMemo(
+    () => showTeamUnits ? 0 : serials.filter((sn) => teamSerials.has(sn)).length,
+    [serials, teamSerials, showTeamUnits],
   );
 
   // makelila system-of-record (units.customer_name) wins over telemetry
@@ -76,6 +93,57 @@ export default function Dashboard() {
     setAssignTarget(null);
     refreshUnits();
   };
+
+  // ── Notification feed (Customers → Fleet is the producer) ─────────────────
+  // Each rendered machine row computes its own status via useMachineStatus;
+  // rows report it up here so we can flag every customer machine that isn't
+  // OK. Offline assigned machines are DIAGNOSE by definition (no data in the
+  // live window) — flagged without an extra fetch. Published to the global
+  // NotificationsProvider so the header bell shows them across the app.
+  const { setFleetNotifications } = useNotifications();
+  const [liveStatuses, setLiveStatuses] = useState<Record<string, MachineStatus>>({});
+  const reportStatus = useCallback((sn: string, status: MachineStatus | null) => {
+    setLiveStatuses((prev) => {
+      if (status == null) {
+        if (!(sn in prev)) return prev;
+        const next = { ...prev }; delete next[sn]; return next;
+      }
+      if (prev[sn] === status) return prev;
+      return { ...prev, [sn]: status };
+    });
+  }, []);
+
+  const notifications = useMemo<FleetNotification[]>(() => {
+    const nameFor = (sn: string): string | null => {
+      const fromUnits = unitCustomerMap[sn];
+      if (fromUnits) return fromUnits;
+      const fromTelemetry = telemetryUserMap[sn];
+      if (fromTelemetry && fromTelemetry !== sn) return fromTelemetry;
+      return null; // unassigned — not "a customer's machine"
+    };
+    const out: FleetNotification[] = [];
+    for (const sn of liveSerials) {
+      const name = nameFor(sn);
+      const status = liveStatuses[sn];
+      if (name && status && status !== 'OK') out.push({ serial: sn, customerName: name, status });
+    }
+    for (const sn of offlineSerials) {
+      const name = nameFor(sn);
+      if (name) out.push({ serial: sn, customerName: name, status: 'DIAGNOSE' });
+    }
+    out.sort((a, b) => a.customerName.localeCompare(b.customerName));
+    return out;
+  }, [liveSerials, offlineSerials, liveStatuses, unitCustomerMap, telemetryUserMap]);
+
+  useEffect(() => {
+    setFleetNotifications(notifications);
+  }, [notifications, setFleetNotifications]);
+
+  // React to deep-link ?serial= changes (e.g. a second bell click while the
+  // Fleet tab is already open).
+  useEffect(() => {
+    if (serialParam) setSelected(serialParam);
+  }, [serialParam]);
 
   const isMobile = useIsMobile();
 
@@ -127,14 +195,33 @@ export default function Dashboard() {
         </header>
         {serialsErr && <p className={styles.error}>Failed to load: {serialsErr.message}</p>}
         {serialsLoading && <p className={styles.muted}>Loading machines…</p>}
-        {checked && liveSerials.length === 0 && (
-          <p className={styles.muted}>No machines have transmitted in the last 10 minutes.</p>
+        {checked && serials.length === 0 && (
+          <p className={styles.muted}>No machines found.</p>
         )}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: 4 }}>
           {liveSerials.map((sn) => {
             const { name, assigned } = resolveDisplay(sn);
             return (
               <MobileMachineCard
+                key={sn}
+                serialNumber={sn}
+                displayName={name}
+                assigned={assigned}
+                onSelect={() => setSelected(sn)}
+                onAssign={() => setAssignTarget(sn)}
+                onStatus={reportStatus}
+              />
+            );
+          })}
+          {offlineSerials.length > 0 && (
+            <p className={styles.muted} style={{ margin: '6px 4px 0' }}>
+              Offline · {offlineSerials.length}
+            </p>
+          )}
+          {offlineSerials.map((sn) => {
+            const { name, assigned } = resolveDisplay(sn);
+            return (
+              <OfflineMobileCard
                 key={sn}
                 serialNumber={sn}
                 displayName={name}
@@ -183,8 +270,8 @@ export default function Dashboard() {
         {serialsErr && <p className={styles.error}>Failed to load: {serialsErr.message}</p>}
         {serialsLoading && <p className={styles.muted}>Loading machines…</p>}
 
-        {checked && liveSerials.length === 0 && (
-          <p className={styles.muted}>No machines have transmitted in the last 10 minutes.</p>
+        {checked && serials.length === 0 && (
+          <p className={styles.muted}>No machines found.</p>
         )}
 
         <ul className={styles.machineList}>
@@ -192,6 +279,24 @@ export default function Dashboard() {
             const { name, assigned } = resolveDisplay(sn);
             return (
               <MachineRow
+                key={sn}
+                serialNumber={sn}
+                displayName={name}
+                assigned={assigned}
+                active={selected === sn}
+                onSelect={() => setSelected(sn)}
+                onAssign={() => setAssignTarget(sn)}
+                onStatus={reportStatus}
+              />
+            );
+          })}
+          {offlineSerials.length > 0 && (
+            <li className={styles.machineListDivider}>Offline · {offlineSerials.length}</li>
+          )}
+          {offlineSerials.map((sn) => {
+            const { name, assigned } = resolveDisplay(sn);
+            return (
+              <OfflineMachineRow
                 key={sn}
                 serialNumber={sn}
                 displayName={name}
@@ -217,7 +322,7 @@ export default function Dashboard() {
             />
           );
         })() : (
-          <p className={styles.placeholder}>Select a live machine to view charts.</p>
+          <p className={styles.placeholder}>Select a machine to view charts.</p>
         )}
       </main>
 
@@ -236,20 +341,44 @@ export default function Dashboard() {
 // Mobile-only NavCard variant. Status color resolved here (one hook per row)
 // so the unit list can show the live dot without re-reading the giant
 // telemetry payload at the module level.
+function MobileAssignButton({ onAssign }: { onAssign: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={(e) => { e.stopPropagation(); onAssign(); }}
+      style={{
+        position: 'absolute',
+        top: 10, right: 56,
+        background: 'var(--color-warning-bg)',
+        color: 'var(--color-warning)',
+        border: '1px solid var(--color-warning-border)',
+        borderRadius: 999,
+        padding: '4px 10px',
+        fontSize: 11,
+        fontWeight: 700,
+        cursor: 'pointer',
+      }}
+    >+ assign</button>
+  );
+}
+
 function MobileMachineCard({
   serialNumber,
   displayName,
   assigned,
   onSelect,
   onAssign,
+  onStatus,
 }: {
   serialNumber: string;
   displayName: string;
   assigned: boolean;
   onSelect: () => void;
   onAssign: () => void;
+  onStatus?: (serial: string, status: MachineStatus | null) => void;
 }) {
   const { status, color } = useMachineStatus(serialNumber);
+  useEffect(() => { onStatus?.(serialNumber, status); }, [serialNumber, status, onStatus]);
   const subtitle = assigned ? `${serialNumber} · ${status ?? 'classifying…'}` : `${serialNumber} · unassigned`;
   return (
     <div style={{ position: 'relative' }}>
@@ -270,29 +399,115 @@ function MobileMachineCard({
         }
         iconBg="transparent"
       />
-      {!assigned && (
-        <button
-          type="button"
-          onClick={(e) => { e.stopPropagation(); onAssign(); }}
-          style={{
-            position: 'absolute',
-            top: 10, right: 56,
-            background: 'var(--color-warning-bg)',
-            color: 'var(--color-warning)',
-            border: '1px solid var(--color-warning-border)',
-            borderRadius: 999,
-            padding: '4px 10px',
-            fontSize: 11,
-            fontWeight: 700,
-            cursor: 'pointer',
-          }}
-        >+ assign</button>
-      )}
+      {!assigned && <MobileAssignButton onAssign={onAssign} />}
     </div>
   );
 }
 
+// Offline machine card — no per-machine data fetch (see OfflineMachineRow).
+function OfflineMobileCard({
+  serialNumber,
+  displayName,
+  assigned,
+  onSelect,
+  onAssign,
+}: {
+  serialNumber: string;
+  displayName: string;
+  assigned: boolean;
+  onSelect: () => void;
+  onAssign: () => void;
+}) {
+  return (
+    <div style={{ position: 'relative', opacity: 0.65 }}>
+      <NavCard
+        onClick={onSelect}
+        title={displayName}
+        subtitle={`${serialNumber} · offline`}
+        icon={
+          <span
+            style={{
+              display: 'inline-block',
+              width: 12,
+              height: 12,
+              borderRadius: '50%',
+              background: '#cbd5e0',
+            }}
+          />
+        }
+        iconBg="transparent"
+      />
+      {!assigned && <MobileAssignButton onAssign={onAssign} />}
+    </div>
+  );
+}
+
+function AssignBadge({ onAssign }: { onAssign: () => void }) {
+  return (
+    <span
+      role="button"
+      tabIndex={0}
+      className={styles.assignBadge}
+      onClick={(e) => { e.stopPropagation(); onAssign(); }}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          e.stopPropagation();
+          onAssign();
+        }
+      }}
+      title="Assign customer"
+    >
+      + assign
+    </span>
+  );
+}
+
 function MachineRow({
+  serialNumber,
+  displayName,
+  assigned,
+  active,
+  onSelect,
+  onAssign,
+  onStatus,
+}: {
+  serialNumber: string;
+  displayName: string;
+  assigned: boolean;
+  active: boolean;
+  onSelect: () => void;
+  onAssign: () => void;
+  onStatus?: (serial: string, status: MachineStatus | null) => void;
+}) {
+  const { status, color } = useMachineStatus(serialNumber);
+  useEffect(() => { onStatus?.(serialNumber, status); }, [serialNumber, status, onStatus]);
+  return (
+    <li>
+      <button
+        className={`${styles.machineRow} ${active ? styles.active : ''}`}
+        onClick={onSelect}
+      >
+        <span
+          className={styles.statusDot}
+          style={{ background: color ?? '#bbb' }}
+          title={status ?? 'classifying…'}
+        />
+        <span className={styles.machineName}>
+          {displayName}
+          {!assigned && <AssignBadge onAssign={onAssign} />}
+        </span>
+        <span className={styles.machineStatus}>{status ?? '…'}</span>
+      </button>
+    </li>
+  );
+}
+
+// Offline machines — no telemetry in the live window. Rendered WITHOUT the
+// per-machine data fetch (useMachineStatus → useDashboardData), so listing the
+// whole fleet doesn't fan out one query per machine. Selecting a row loads its
+// data on demand in the detail pane.
+function OfflineMachineRow({
   serialNumber,
   displayName,
   assigned,
@@ -307,40 +522,22 @@ function MachineRow({
   onSelect: () => void;
   onAssign: () => void;
 }) {
-  const { status, color } = useMachineStatus(serialNumber);
   return (
     <li>
       <button
-        className={`${styles.machineRow} ${active ? styles.active : ''}`}
+        className={`${styles.machineRow} ${styles.machineRowOffline} ${active ? styles.active : ''}`}
         onClick={onSelect}
       >
         <span
           className={styles.statusDot}
-          style={{ background: color ?? '#bbb' }}
-          title={status ?? 'classifying…'}
+          style={{ background: '#cbd5e0' }}
+          title={`Offline — ${serialNumber} has no telemetry in the last 10 minutes`}
         />
         <span className={styles.machineName}>
           {displayName}
-          {!assigned && (
-            <span
-              role="button"
-              tabIndex={0}
-              className={styles.assignBadge}
-              onClick={(e) => { e.stopPropagation(); onAssign(); }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  onAssign();
-                }
-              }}
-              title="Assign customer"
-            >
-              + assign
-            </span>
-          )}
+          {!assigned && <AssignBadge onAssign={onAssign} />}
         </span>
-        <span className={styles.machineStatus}>{status ?? '…'}</span>
+        <span className={styles.machineStatus}>offline</span>
       </button>
     </li>
   );
@@ -359,7 +556,10 @@ function MachineDetail({
 }) {
   const { data, loading, error, refresh } = useDashboardData(serialNumber);
   const { status, color } = useMachineStatus(serialNumber);
-  const [smsOpen, setSmsOpen] = useState(false);
+  // The status the SMS modal was opened for. Usually the live machine status,
+  // but partial-mixing (LEFT_ONLY / RIGHT_ONLY) opens it as NOT_MIXING so it
+  // reuses the wellness template + 48h cooldown (see the mixing-wellness button).
+  const [smsStatus, setSmsStatus] = useState<MachineStatus | null>(null);
   const [labelOpen, setLabelOpen] = useState(false);
   const smsKind = status ? STATUS_SMS_KIND[status] : null;
   const { labels: existingLabels, refresh: refreshLabels } = useDatasetLabels(serialNumber);
@@ -368,6 +568,15 @@ function MachineDetail({
   const seen = lastReceived(data);
   const mixing = useMemo(() => classifyMixing(data.liveData), [data.liveData]);
   const mixMeta = MIXING_VERDICT_META[mixing.verdict];
+
+  // Partial mixing (one chamber side stalled) warrants the same wellness
+  // check-in as NEITHER — which already surfaces via the NOT_MIXING status
+  // button. Only offer the extra button when the live status isn't already
+  // offering a wellness SMS, so a machine never shows two identical buttons.
+  const showMixingWellness =
+    assigned &&
+    smsKind !== 'wellness' &&
+    (mixing.verdict === 'LEFT_ONLY' || mixing.verdict === 'RIGHT_ONLY');
 
   const eventCharts = useMemo(() => buildEventCharts(data.events), [data.events]);
   const currents = useMemo(() => buildCurrentsChart(data.liveData), [data.liveData]);
@@ -395,6 +604,15 @@ function MachineDetail({
             >
               {mixMeta.label}
             </span>
+            {showMixingWellness && (
+              <button
+                type="button"
+                className={styles.statusSmsBtn}
+                onClick={() => setSmsStatus('NOT_MIXING')}
+              >
+                ✉️ {STATUS_SMS_TEMPLATES.wellness.label}
+              </button>
+            )}
           </div>
           <p className={styles.muted}>{serialNumber}</p>
         </div>
@@ -414,7 +632,7 @@ function MachineDetail({
         <div className={styles.statusBanner} style={{ borderLeftColor: color ?? '#bbb' }}>
           <strong>{status}</strong> — {STATUS_DESCRIPTIONS[status]}
           {smsKind && assigned && (
-            <button type="button" className={styles.statusSmsBtn} onClick={() => setSmsOpen(true)}>
+            <button type="button" className={styles.statusSmsBtn} onClick={() => setSmsStatus(status)}>
               ✉️ {STATUS_SMS_TEMPLATES[smsKind].label}
             </button>
           )}
@@ -455,11 +673,11 @@ function MachineDetail({
         />
       )}
 
-      {smsOpen && status && (
+      {smsStatus && (
         <StatusSmsModal
           serialNumber={serialNumber}
-          status={status}
-          onClose={() => setSmsOpen(false)}
+          status={smsStatus}
+          onClose={() => setSmsStatus(null)}
         />
       )}
 

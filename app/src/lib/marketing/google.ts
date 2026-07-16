@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { supabase } from '../supabase';
+import { subscribeReload } from './realtime';
 
 // GA4 web analytics + Search Console performance (Marketing → Web tab).
 
@@ -32,7 +33,10 @@ export function useGa4() {
     setLoading(false);
   }, []);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    void load();
+    return subscribeReload('ga4_daily:realtime', ['ga4_daily'], () => void load());
+  }, [load]);
 
   return { totals, byChannel, lastSynced, loading, reload: load };
 }
@@ -66,7 +70,10 @@ export function useGsc() {
     setLoading(false);
   }, []);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    void load();
+    return subscribeReload('gsc_daily:realtime', ['gsc_daily'], () => void load());
+  }, [load]);
 
   return { totals, lastSynced, loading, reload: load };
 }

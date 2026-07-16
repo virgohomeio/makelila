@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { supabase } from '../supabase';
 import { eventMeta, type CustomerEvent } from '../customerEvents';
+import { subscribeReload } from './realtime';
 
 // Per-customer buying-journey assembly (Marketing → Journey tab, Phase 1).
 //
@@ -243,27 +244,27 @@ export function useAcquisitionOverview() {
   const [rows, setRows] = useState<AcquisitionRow[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    let cancelled = false;
-    void supabase
+  const load = useCallback(async () => {
+    const { data } = await supabase
       .from('customers')
-      .select('first_touch_source, first_touch_medium')
-      .then(({ data }) => {
-        if (cancelled) return;
-        const m = new Map<string, number>();
-        for (const r of (data ?? []) as { first_touch_source: string | null; first_touch_medium: string | null }[]) {
-          const ch = r.first_touch_source ? classifyChannel(r.first_touch_source, r.first_touch_medium) : 'Unknown';
-          m.set(ch, (m.get(ch) ?? 0) + 1);
-        }
-        setRows(
-          Array.from(m.entries())
-            .map(([channel, count]) => ({ channel, count }))
-            .sort((a, b) => b.count - a.count),
-        );
-        setLoading(false);
-      });
-    return () => { cancelled = true; };
+      .select('first_touch_source, first_touch_medium');
+    const m = new Map<string, number>();
+    for (const r of (data ?? []) as { first_touch_source: string | null; first_touch_medium: string | null }[]) {
+      const ch = r.first_touch_source ? classifyChannel(r.first_touch_source, r.first_touch_medium) : 'Unknown';
+      m.set(ch, (m.get(ch) ?? 0) + 1);
+    }
+    setRows(
+      Array.from(m.entries())
+        .map(([channel, count]) => ({ channel, count }))
+        .sort((a, b) => b.count - a.count),
+    );
+    setLoading(false);
   }, []);
+
+  useEffect(() => {
+    void load();
+    return subscribeReload('acquisition_overview:realtime', ['customers'], () => void load());
+  }, [load]);
 
   return { rows, loading };
 }

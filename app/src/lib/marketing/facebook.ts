@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { supabase } from '../supabase';
 import { fnErrorMessage } from './fnError';
+import { subscribeReload } from './realtime';
 
 export type FbMetrics = {
   delivery?: string;
@@ -55,21 +56,20 @@ export function useFbCampaigns(limit = 90): { campaigns: FbCampaign[]; loading: 
   const [campaigns, setCampaigns] = useState<FbCampaign[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const { data, error } = await supabase
-        .from('fb_campaigns')
-        .select('*')
-        .order('date_start', { ascending: false })
-        .limit(limit);
-      if (!cancelled) {
-        if (!error && data) setCampaigns(data as FbCampaign[]);
-        setLoading(false);
-      }
-    })();
-    return () => { cancelled = true; };
+  const load = useCallback(async () => {
+    const { data, error } = await supabase
+      .from('fb_campaigns')
+      .select('*')
+      .order('date_start', { ascending: false })
+      .limit(limit);
+    if (!error && data) setCampaigns(data as FbCampaign[]);
+    setLoading(false);
   }, [limit]);
+
+  useEffect(() => {
+    void load();
+    return subscribeReload('fb_campaigns:realtime', ['fb_campaigns'], () => void load());
+  }, [load]);
 
   return { campaigns, loading };
 }
@@ -92,18 +92,18 @@ export type FbAd = {
 export function useFbAds(): { ads: FbAd[]; loading: boolean } {
   const [ads, setAds] = useState<FbAd[]>([]);
   const [loading, setLoading] = useState(true);
-  useEffect(() => {
-    let cancelled = false;
-    void supabase
+  const load = useCallback(async () => {
+    const { data, error } = await supabase
       .from('fb_ads')
-      .select('ad_id, ad_name, adset_id, adset_name, campaign_id, campaign_name, spend_cad, impressions, clicks, ctr, leads')
-      .then(({ data, error }) => {
-        if (cancelled) return;
-        if (!error && data) setAds(data as FbAd[]);
-        setLoading(false);
-      });
-    return () => { cancelled = true; };
+      .select('ad_id, ad_name, adset_id, adset_name, campaign_id, campaign_name, spend_cad, impressions, clicks, ctr, leads');
+    if (!error && data) setAds(data as FbAd[]);
+    setLoading(false);
   }, []);
+
+  useEffect(() => {
+    void load();
+    return subscribeReload('fb_ads:realtime', ['fb_ads'], () => void load());
+  }, [load]);
   return { ads, loading };
 }
 

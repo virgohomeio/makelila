@@ -15,7 +15,7 @@ import { MobileTabbedModule, type MobileTab } from '../../components/MobileTabbe
 import styles from './Build.module.css';
 
 type View = 'board' | 'table' | 'qc';
-const BATCH_FILTERS = ['all', 'P50N', 'P100', 'P100X', 'P150', 'P200'] as const;
+const BATCH_FILTERS = ['all', 'P50N', 'P100', 'P100X', 'P150', 'P200', 'LILA-Mini'] as const;
 type BatchFilter = typeof BATCH_FILTERS[number];
 
 function qcDateRange(days = 30) {
@@ -258,7 +258,7 @@ export default function Build() {
               value={showClaimSerial.batch}
               onChange={e => setShowClaimSerial({ batch: e.target.value })}
             >
-              {(['P50N', 'P100', 'P100X', 'P150', 'P200'] as const).map(b => (
+              {(['P50N', 'P100', 'P100X', 'P150', 'P200', 'LILA-Mini'] as const).map(b => (
                 <option key={b} value={b}>{b}</option>
               ))}
             </select>

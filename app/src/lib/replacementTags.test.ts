@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { replacementItemTags, replacementStageTag, replacementDemandBySku, replacementUnitDemandByBatch } from './replacementTags';
+import { replacementItemTags, replacementStageTag, replacementDemandBySku, replacementUnitDemandByBatch, isUnitTag } from './replacementTags';
 
-const order = (line_items: unknown[], extra: Partial<{ awaiting_batch_id: string | null; replacement_state: string | null }> = {}) =>
+const order = (line_items: unknown[], extra: Partial<{ awaiting_batch_id: string | null; replacement_state: string | null; shipped_at: string | null; delivered_at: string | null }> = {}) =>
   ({ line_items, awaiting_batch_id: null, replacement_state: 'ready', ...extra }) as never;
 
 describe('replacementItemTags', () => {
@@ -97,5 +97,33 @@ describe('replacementDemandBySku', () => {
       o([{ kind: 'part', description: 'unspecified parts' }]),   // no tag → nothing
     ]);
     expect(m.size).toBe(0);
+  });
+});
+
+describe('LILA-Mini upcoming batch', () => {
+  const isPending = (b: string) => b === 'P100X' || b === 'LILA-Mini'; // both not yet arrived
+
+  it('LILA-Mini is a unit tag', () => {
+    expect(isUnitTag('LILA-Mini')).toBe(true);
+    expect(isUnitTag('lila-mini')).toBe(true);
+    expect(isUnitTag('LILAMini')).toBe(true);
+  });
+
+  it('maps a LILA-Mini unit_pending line + awaiting_batch_id to the unit tag', () => {
+    expect(replacementItemTags(order([{ kind: 'unit_pending', batch: 'LILA-Mini' }]))).toEqual(['LILA-Mini']);
+    expect(replacementItemTags(order([], { awaiting_batch_id: 'LILA-Mini' }))).toEqual(['LILA-Mini']);
+  });
+
+  it('a LILA-Mini replacement reads as "awaiting batch" until the batch arrives', () => {
+    expect(replacementStageTag(order([], { awaiting_batch_id: 'LILA-Mini' }), ['LILA-Mini'], isPending)).toBe('awaiting batch');
+  });
+
+  it('counts LILA-Mini toward per-batch unit demand', () => {
+    const m = replacementUnitDemandByBatch([
+      order([{ kind: 'unit_pending', batch: 'LILA-Mini' }]),
+      order([], { awaiting_batch_id: 'LILA-Mini' }),
+      order([{ kind: 'unit_pending', batch: 'LILA-Mini' }], { shipped_at: '2026-06-01' }), // shipped → skip
+    ]);
+    expect(m.get('LILA-Mini')).toBe(2);
   });
 });

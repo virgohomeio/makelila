@@ -8,7 +8,7 @@
 import type { Order } from './orders';
 
 export const ITEM_TAGS = [
-  'P100', 'P100X', 'P150', 'starter kit', 'manual',
+  'P100', 'P100X', 'P150', 'LILA-Mini', 'starter kit', 'manual',
   'chamber-L', 'chamber-R', 'filter', 'hopper', 'lid',
   'side latch-L', 'side latch-R',
 ] as const;
@@ -36,9 +36,10 @@ const SKU_TAG: Record<string, string> = {
 };
 
 /** A tag refers to a whole unit (vs. a part/consumable) when it's a batch code
- *  like P100 / P100X / P150, or a BASE batch for replacement bases (#90). */
+ *  like P100 / P100X / P150, the LILA-Mini batch, or a BASE batch for
+ *  replacement bases (#90). */
 export function isUnitTag(tag: string): boolean {
-  return /^P\d/i.test(tag) || /^BASE/i.test(tag);
+  return /^P\d/i.test(tag) || /^BASE/i.test(tag) || /^lila-?mini$/i.test(tag);
 }
 
 /** Keyword map for the looser Excel-backfill descriptions. Side-ambiguous
@@ -47,6 +48,7 @@ export function isUnitTag(tag: string): boolean {
 function tagsFromText(text: string): string[] {
   const s = text.toLowerCase();
   const out: string[] = [];
+  if (/lila[\s-]?mini|\bmini\b/.test(s)) out.push('LILA-Mini');
   if (/p100\s*x/.test(s)) out.push('P100X');
   else if (/p150/.test(s)) out.push('P150');
   else if (/p100/.test(s)) out.push('P100');

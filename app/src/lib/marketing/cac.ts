@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { supabase } from '../supabase';
+import { subscribeReload } from './realtime';
 
 export type CacInput = {
   fbSpendByMonth: Array<{ month: string; spend_cad: number }>;
@@ -39,43 +40,42 @@ type CacState = { rows: CacRow[]; loading: boolean };
 export function useCacByChannel(): CacState {
   const [state, setState] = useState<CacState>({ rows: [], loading: true });
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const [spendRes, channelRes] = await Promise.all([
-        supabase
-          .from('fb_campaigns')
-          .select('date_start, spend_cad')
-          .not('spend_cad', 'is', null),
-        supabase
-          .from('customers')
-          .select('first_touch_source')
-          .not('first_touch_source', 'is', null),
-      ]);
+  const load = useCallback(async () => {
+    const [spendRes, channelRes] = await Promise.all([
+      supabase
+        .from('fb_campaigns')
+        .select('date_start, spend_cad')
+        .not('spend_cad', 'is', null),
+      supabase
+        .from('customers')
+        .select('first_touch_source')
+        .not('first_touch_source', 'is', null),
+    ]);
 
-      if (cancelled) return;
+    const spendByMonth = new Map<string, number>();
+    for (const row of spendRes.data ?? []) {
+      const month = (row.date_start as string).slice(0, 7);
+      spendByMonth.set(month, (spendByMonth.get(month) ?? 0) + (row.spend_cad ?? 0));
+    }
 
-      const spendByMonth = new Map<string, number>();
-      for (const row of spendRes.data ?? []) {
-        const month = (row.date_start as string).slice(0, 7);
-        spendByMonth.set(month, (spendByMonth.get(month) ?? 0) + (row.spend_cad ?? 0));
-      }
+    const channelCount = new Map<string, number>();
+    for (const row of channelRes.data ?? []) {
+      const ch = (row.first_touch_source as string).toLowerCase();
+      channelCount.set(ch, (channelCount.get(ch) ?? 0) + 1);
+    }
 
-      const channelCount = new Map<string, number>();
-      for (const row of channelRes.data ?? []) {
-        const ch = (row.first_touch_source as string).toLowerCase();
-        channelCount.set(ch, (channelCount.get(ch) ?? 0) + 1);
-      }
+    const rows = computeCac({
+      fbSpendByMonth: Array.from(spendByMonth.entries()).map(([month, spend_cad]) => ({ month, spend_cad })),
+      customersByChannel: Array.from(channelCount.entries()).map(([channel, count]) => ({ channel, count })),
+    });
 
-      const rows = computeCac({
-        fbSpendByMonth: Array.from(spendByMonth.entries()).map(([month, spend_cad]) => ({ month, spend_cad })),
-        customersByChannel: Array.from(channelCount.entries()).map(([channel, count]) => ({ channel, count })),
-      });
-
-      setState({ rows, loading: false });
-    })();
-    return () => { cancelled = true; };
+    setState({ rows, loading: false });
   }, []);
+
+  useEffect(() => {
+    void load();
+    return subscribeReload('cac:realtime', ['fb_campaigns', 'customers'], () => void load());
+  }, [load]);
 
   return state;
 }

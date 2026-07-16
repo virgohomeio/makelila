@@ -65,6 +65,7 @@ export function NewPOModal({ onClose, onCreated, prefill }: Props) {
               <option value="P100X">P100X</option>
               <option value="P150">P150</option>
               <option value="P200">P200</option>
+              <option value="LILA-Mini">LILA-Mini</option>
             </select>
           </label>
           <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>

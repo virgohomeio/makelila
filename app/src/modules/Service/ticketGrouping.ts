@@ -13,7 +13,7 @@ export type CustomerGroup = {
   tickets: ServiceTicket[];         // sorted open-first, then most-recent
   total: number;
   openCount: number;
-  rollupStatus: TicketStatus;       // status of the most recently CREATED ticket
+  rollupStatus: TicketStatus;       // newest OPEN ticket's status (newest overall only if all closed)
   lastActivity: string;             // ISO ts — newest activity across the tickets
 };
 
@@ -55,10 +55,14 @@ export function groupTicketsByCustomer(tickets: ServiceTicket[]): GroupedTickets
     });
 
     const openTickets = sorted.filter(isOpen);
-    // Profile status follows the most recently CREATED ticket.
-    const newestCreated = sorted.reduce((newest, t) =>
-      t.created_at > newest.created_at ? t : newest, sorted[0]);
-    const rollupStatus = newestCreated.status;
+    // Profile status follows the most recently CREATED *open* ticket, so a
+    // customer with open tickets never reads as "Complete" just because their
+    // newest ticket happens to be closed (e.g. a resolved replacement while an
+    // onboarding/support ticket is still open). Only when every ticket is
+    // closed does it fall back to the newest ticket overall.
+    const rollupPool = openTickets.length > 0 ? openTickets : sorted;
+    const rollupStatus = rollupPool.reduce((newest, t) =>
+      t.created_at > newest.created_at ? t : newest, rollupPool[0]).status;
 
     const first = sorted[0];
     groups.push({

@@ -72,12 +72,13 @@ function FollowUpCalendar({
         });
       }
     }
-    // Follow-ups — FU1 = onboard_date + FU1_DAYS, FU2 = +FU2_DAYS, per customer
-    // that hasn't had that follow-up done yet.
+    // Follow-ups — FU1 = anchor + FU1_DAYS, FU2 = +FU2_DAYS, per customer that
+    // hasn't had that follow-up done yet. The anchor is the completed
+    // onboard_date OR the scheduled onboarding call date (anchorByCustomer).
     for (const c of customers) {
-      if (!c.onboard_date) continue;
-      if (blockedCustomerIds.has(c.id)) continue; // follow-up on hold — skip FU markers
       const anchor = anchorByCustomer.get(c.id) ?? c.onboard_date;
+      if (!anchor) continue;
+      if (blockedCustomerIds.has(c.id)) continue; // follow-up on hold — skip FU markers
       const { fu1Due: fu1, fu2Due: fu2 } = followUpDueDates(anchor);
       const state = computeFuState(c, today, anchor);
       for (const [kind, dueDate] of [['fu1', fu1], ['fu2', fu2]] as const) {
@@ -227,9 +228,11 @@ export function FollowUpsTab() {
   const [selected, setSelected] = useState<{ customerId: string; kind: 'fu1' | 'fu2' } | null>(null);
   const [openTicketId, setOpenTicketId] = useState<string | null>(null);
 
+  // Customers that have a follow-up anchor — a completed onboard_date OR a
+  // scheduled onboarding call (anchorByCustomer carries the effective anchor).
   const scheduledCustomers = useMemo(
-    () => customers.filter(c => !!c.onboard_date && !excludedCustomerIds.has(c.id)),
-    [customers, excludedCustomerIds],
+    () => customers.filter(c => !!anchorByCustomer.get(c.id) && !excludedCustomerIds.has(c.id)),
+    [customers, anchorByCustomer, excludedCustomerIds],
   );
 
   const selectedCustomer = useMemo(

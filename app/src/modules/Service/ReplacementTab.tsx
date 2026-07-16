@@ -97,8 +97,8 @@ export default function ReplacementTab() {
     const unitDemand = replacementUnitDemandByBatch(orders);
     const readyByBatch = new Map<string, number>();
     for (const u of units) if (u.status === 'ready') readyByBatch.set(u.batch, (readyByBatch.get(u.batch) ?? 0) + 1);
-    const rank = (id: string) => ({ P100: 0, P100X: 1, P150: 2 } as Record<string, number>)[id] ?? 9;
-    const unitRows = [...new Set<string>([...unitDemand.keys(), 'P100X'])]
+    const rank = (id: string) => ({ P100: 0, P100X: 1, P150: 2, 'LILA-Mini': 3 } as Record<string, number>)[id] ?? 9;
+    const unitRows = [...new Set<string>([...unitDemand.keys(), 'P100X', 'LILA-Mini'])]
       .map(id => {
         const ready = readyByBatch.get(id) ?? 0;
         const d = unitDemand.get(id) ?? 0;

@@ -31,3 +31,13 @@ do $$ begin
     execute 'create policy internal_only on public.klaviyo_campaigns using (public.is_internal_user()) with check (public.is_internal_user())';
   end if;
 end $$;
+
+-- Realtime so the Email tab auto-repaints when a sync writes rows.
+do $$ begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname='supabase_realtime' and schemaname='public' and tablename='klaviyo_campaigns'
+  ) then
+    execute 'alter publication supabase_realtime add table public.klaviyo_campaigns';
+  end if;
+end $$;

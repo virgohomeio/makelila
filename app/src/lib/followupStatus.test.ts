@@ -232,6 +232,43 @@ describe('effectiveFollowUpAnchor', () => {
   });
 });
 
+describe('follow-ups queue from a scheduled onboarding call (before completion)', () => {
+  it('anchors FU1 on the scheduled call date when onboard_date is null', () => {
+    const c = { ...base, onboard_date: null };
+    const ctx = { ...emptyCtx, onboardingCallDate: `${daysAgo(14)}T15:00:00Z` };
+    // FU1 = call date + 14d = today
+    expect(effectiveFollowUpAnchor(c, ctx)).toBe(daysAgo(14));
+    const s = computeCustomerStatuses(c, ctx, today);
+    expect(s.has('due_today')).toBe(true);
+    expect(s.has('in_followup')).toBe(true);
+  });
+
+  it('queues follow-ups even with the onboarding call ticket still open (not held)', () => {
+    const c = { ...base, onboard_date: null };
+    const ctx = {
+      ...emptyCtx,
+      onboardingCallDate: `${daysAgo(20)}T15:00:00Z`,
+      openTickets: [{ status: 'waiting_on_us' as ServiceTicket['status'], category: 'onboarding' as ServiceTicket['category'], source: 'calendly' as ServiceTicket['source'] }],
+    };
+    const s = computeCustomerStatuses(c, ctx, today);
+    expect(s.has('overdue')).toBe(true);      // FU1 overdue from the call date
+    expect(s.has('fu_on_hold')).toBe(false);  // onboarding tickets don't hold
+  });
+
+  it('stays unscheduled with neither an onboard_date nor a scheduled call', () => {
+    expect(effectiveFollowUpAnchor({ ...base }, emptyCtx)).toBeNull();
+    const s = computeCustomerStatuses({ ...base }, emptyCtx, today);
+    expect(s.has('in_followup')).toBe(false);
+    expect(s.has('overdue')).toBe(false);
+  });
+
+  it('prefers a completed onboard_date over the scheduled call date', () => {
+    const c = { ...base, onboard_date: daysAgo(20) };
+    const ctx = { ...emptyCtx, onboardingCallDate: `${daysAgo(2)}T15:00:00Z` };
+    expect(effectiveFollowUpAnchor(c, ctx)).toBe(daysAgo(20));
+  });
+});
+
 import { matchKeysFor, type Matchable } from './followupStatus';
 
 describe('matchKeysFor', () => {

@@ -3,8 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import ReplacementPickerModal from './ReplacementPickerModal';
 import { useCustomers, sendFollowupSms } from '../../lib/customers';
 import {
-  type ServiceTicket, type TicketStatus, type IssueArea, type TicketCategory,
-  STATUS_META, CATEGORY_META, PRIORITY_META, NEXT_STATUSES, TICKET_STATUSES,
+  type ServiceTicket, type IssueArea, type TicketCategory,
+  STATUS_META, CATEGORY_META, PRIORITY_META, TICKET_STATUSES,
   statusMeta, priorityMeta, sourceLabel, topicLabel, slaChip,
   ISSUE_AREAS, ISSUE_AREA_LABEL,
   updateTicketStatus, assignTicketOwner, setTicketPriority, setTicketIssueArea, setTicketCategory,
@@ -16,8 +16,10 @@ import {
 } from '../../lib/service';
 import { CANNED_SMS_TEMPLATES } from '../../lib/cannedSms';
 import { createLinearIssue, createGitHubIssue } from '../../lib/githubLinear';
+import { useReplacementSummary } from '../../lib/orders';
 import { AttachmentStrip } from './AttachmentStrip';
 import { TicketNotes } from './TicketNotes';
+import { TicketActionItems } from './TicketActionItems';
 import { DeviceContextHeader } from '../../components/DeviceContextHeader';
 import styles from './Service.module.css';
 
@@ -42,6 +44,54 @@ type Props = {
   ticket: ServiceTicket;
   onClose: () => void;
 };
+
+// Shows what the customer is queued up for on the linked replacement order —
+// the items (units/parts) and the batch/fulfillment state — right in the
+// ticket, so an operator doesn't have to click through to Order Review.
+function QueuedReplacementDetails({ orderId }: { orderId: string }) {
+  const { summary, loading } = useReplacementSummary(orderId);
+  if (loading || !summary) return null;
+
+  const items = (summary.line_items ?? [])
+    .map(li => li?.name)
+    .filter((n): n is string => !!n);
+  // Batch-blocked orders can carry the batch in awaiting_batch_id with empty
+  // line_items (e.g. a straight "awaiting P100X / LILA-Mini" queue).
+  if (items.length === 0 && summary.awaiting_batch_id) {
+    items.push(`LILA (${summary.awaiting_batch_id})`);
+  }
+
+  const shipped = !!(summary.shipped_at || summary.delivered_at);
+  const status = shipped
+    ? { label: 'Shipped', color: '#2b6cb0' }
+    : summary.awaiting_batch_id
+      ? { label: `Awaiting batch · ${summary.awaiting_batch_id}`, color: '#c05621' }
+      : summary.replacement_state === 'awaiting'
+        ? { label: 'Awaiting stock', color: '#c05621' }
+        : summary.replacement_state === 'held'
+          ? { label: 'Held', color: '#9b2c2c' }
+          : { label: 'Ready to ship', color: '#276749' };
+
+  return (
+    <div className={styles.queuedRepl}>
+      <div className={styles.queuedReplHead}>
+        <span className={styles.queuedReplLabel}>
+          Queued for{summary.order_ref ? ` · ${summary.order_ref}` : ''}
+        </span>
+        <span className={styles.queuedReplStatus} style={{ color: status.color }}>{status.label}</span>
+      </div>
+      {items.length > 0 ? (
+        <div className={styles.queuedReplItems}>
+          {items.map((name, i) => (
+            <span key={i} className={styles.queuedReplChip}>{name}</span>
+          ))}
+        </div>
+      ) : (
+        <div className={styles.queuedReplEmpty}>No items recorded on this replacement.</div>
+      )}
+    </div>
+  );
+}
 
 export function TicketDetailPanel({ ticket, onClose }: Props) {
   const navigate = useNavigate();
@@ -237,6 +287,17 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
           <div className={styles.detailMetaRow}>
             <span className={styles.pill} style={{ background: cat.bg, color: cat.color }}>{cat.label}</span>
             <span className={styles.pill} style={{ background: status.bg, color: status.color }}>{status.label}</span>
+            {(ticket.tags ?? []).map(tag => {
+              const m = statusMeta(tag);
+              return (
+                <span
+                  key={tag}
+                  className={styles.pill}
+                  style={{ background: '#fff', color: m.color, border: `1px solid ${m.color}` }}
+                  title="Status tag"
+                >🏷 {m.label}</span>
+              );
+            })}
             <span className={styles.pill} style={{ background: '#f7fafc', color: prio.color }}>{prio.label}</span>
             <span className={styles.pill} style={{ background: '#edf2f7', color: '#4a5568' }}>
               {sourceLabel(ticket.source)}
@@ -295,12 +356,15 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
 
         <div className={styles.detailSection} style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
           {ticket.replacement_order_id && ticket.replacement_order_id.length > 0 ? (
-            <div className={styles.replacementLink}>
-              Replacement order:&nbsp;
-              <a
-                href={`/order-review/${ticket.replacement_order_id}`}
-                onClick={e => { e.preventDefault(); navigate(`/order-review/${ticket.replacement_order_id}`); }}
-              >open in Order Review</a>
+            <div className={styles.replacementLink} style={{ flexBasis: '100%', display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <div>
+                Replacement order:&nbsp;
+                <a
+                  href={`/order-review/${ticket.replacement_order_id}`}
+                  onClick={e => { e.preventDefault(); navigate(`/order-review/${ticket.replacement_order_id}`); }}
+                >open in Order Review</a>
+              </div>
+              <QueuedReplacementDetails orderId={ticket.replacement_order_id} />
             </div>
           ) : (
             <button
@@ -700,16 +764,37 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
         </div>
 
         <div className={styles.detailSection}>
-          <div className={styles.detailSectionLabel}>Status — transition</div>
+          <div className={styles.detailSectionLabel}>Status</div>
           <div className={styles.actionsRow}>
-            {(NEXT_STATUSES[ticket.status] ?? TICKET_STATUSES).map(next => (
-              <button
-                key={next}
-                className={styles.btnPrimary}
-                disabled={busy}
-                onClick={() => run(updateTicketStatus(ticket.id, next as TicketStatus))}
-              >→ {STATUS_META[next].label}</button>
-            ))}
+            {TICKET_STATUSES.map(tag => {
+              // Single-select: every button reflects and sets the ticket's real
+              // `status`, so the checked button always matches the status pill.
+              //   • Action Needed (waiting_on_us) is the default → auto-selected;
+              //     clicking it to deselect moves the ticket to In Progress.
+              //   • Complete (closed) closes / reopens.
+              const isCloseTag = tag === 'closed';
+              const isActionNeeded = tag === 'waiting_on_us';
+              const active = ticket.status === tag;
+              const m = STATUS_META[tag];
+              return (
+                <button
+                  key={tag}
+                  className={active ? styles.btnPrimary : styles.btnSecondary}
+                  disabled={busy}
+                  style={active ? { background: m.color, borderColor: m.color } : { color: m.color }}
+                  onClick={() => {
+                    if (isCloseTag) {
+                      void run(updateTicketStatus(ticket.id, active ? 'waiting_on_us' : 'closed'));
+                    } else if (isActionNeeded && active) {
+                      // Deselect Action Needed → In Progress.
+                      void run(updateTicketStatus(ticket.id, 'in_progress'));
+                    } else if (!active) {
+                      void run(updateTicketStatus(ticket.id, tag));
+                    }
+                  }}
+                >{active ? '✓ ' : ''}{m.label}</button>
+              );
+            })}
           </div>
         </div>
 
@@ -756,6 +841,11 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
         <div className={styles.detailSection}>
           <div className={styles.detailSectionLabel}>Notes</div>
           <TicketNotes ticketId={ticket.id} />
+        </div>
+
+        <div className={styles.detailSection}>
+          <div className={styles.detailSectionLabel}>Action items</div>
+          <TicketActionItems ticketId={ticket.id} />
         </div>
 
         {ticket.hubspot_ticket_id && (

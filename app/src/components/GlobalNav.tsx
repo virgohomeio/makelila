@@ -1,5 +1,6 @@
 import { Link, NavLink } from 'react-router-dom';
 import styles from './GlobalNav.module.css';
+import { NotificationBell } from './NotificationBell';
 import { UserBadge } from './UserBadge';
 import { useAuth } from '../lib/auth';
 import { canView } from '../lib/permissions';
@@ -15,6 +16,7 @@ const MODULES = [
   { path: '/customers',     label: 'Customers' },
   { path: '/lovely',        label: 'Lovely' },
   { path: '/finance',       label: 'Finance' },
+  { path: '/products',      label: 'Products' },
 ];
 
 const MARKETING_ROLES = ['pedrum@virgohome.io', 'huayi@virgohome.io', 'george@virgohome.io', 'yueli@virgohome.io'];
@@ -39,6 +41,7 @@ export function GlobalNav() {
         />
         <span className={styles.brandWordmark}>makelila</span>
       </Link>
+      <NotificationBell />
       {visibleModules.map(m => (
         <NavLink
           key={m.path}

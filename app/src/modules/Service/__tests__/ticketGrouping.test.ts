@@ -52,13 +52,35 @@ describe('groupTicketsByCustomer', () => {
     expect(g.rollupStatus).toBe('waiting_on_customer'); // status of the newest-created ticket (t2)
   });
 
-  it('rollup follows the newest ticket even when it is closed', () => {
+  it('does NOT roll up to closed when an older ticket is still open', () => {
+    // A newer closed ticket must not mask an open one — the profile should
+    // read as open, never "Complete" (regression: Patrick Taylor).
     const { groups } = groupTicketsByCustomer([
       mk({ id: 't1', customer_id: 'c1', status: 'waiting_on_us', created_at: '2026-06-01T00:00:00Z' }),
       mk({ id: 't2', customer_id: 'c1', status: 'closed', created_at: '2026-06-09T00:00:00Z' }),
     ]);
     expect(groups[0].openCount).toBe(1);
-    expect(groups[0].rollupStatus).toBe('closed'); // newest-created ticket is closed
+    expect(groups[0].rollupStatus).toBe('waiting_on_us'); // the open ticket, not the newer closed one
+  });
+
+  it('rolls up to the newest OPEN ticket among several open + a newer closed one', () => {
+    const { groups } = groupTicketsByCustomer([
+      mk({ id: 'onboard',  customer_id: 'c1', status: 'waiting_on_us',           created_at: '2026-05-21T00:00:00Z' }),
+      mk({ id: 'support',  customer_id: 'c1', status: 'waiting_on_us',           created_at: '2026-05-22T00:00:00Z' }),
+      mk({ id: 'repl',     customer_id: 'c1', status: 'queued_for_replacement',  created_at: '2026-06-11T00:00:00Z' }),
+      mk({ id: 'jumper',   customer_id: 'c1', status: 'closed',                  created_at: '2026-07-07T00:00:00Z' }),
+    ]);
+    expect(groups[0].openCount).toBe(3);
+    expect(groups[0].rollupStatus).toBe('queued_for_replacement'); // newest open, not the closed jumper
+  });
+
+  it('rolls up to closed only when every ticket is closed', () => {
+    const { groups } = groupTicketsByCustomer([
+      mk({ id: 't1', customer_id: 'c1', status: 'closed', created_at: '2026-06-01T00:00:00Z' }),
+      mk({ id: 't2', customer_id: 'c1', status: 'closed', created_at: '2026-06-09T00:00:00Z' }),
+    ]);
+    expect(groups[0].openCount).toBe(0);
+    expect(groups[0].rollupStatus).toBe('closed');
   });
 
   it('sorts open profiles before all-closed profiles', () => {

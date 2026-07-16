@@ -472,6 +472,47 @@ export function useOrder(id: string | null): { order: Order | null; loading: boo
   return { order, loading: loading && !order };
 }
 
+/** What a customer is queued up for on a single replacement order — its items,
+ *  batch, and fulfillment state. A lightweight per-id fetch (not the whole
+ *  orders list) so a ticket panel can show the queued replacement inline.
+ *  Live-updates when the order changes (state promotion, ship, item edit). */
+export type ReplacementSummary = {
+  order_ref: string | null;
+  awaiting_batch_id: string | null;
+  replacement_state: 'ready' | 'awaiting' | 'held' | null;
+  shipped_at: string | null;
+  delivered_at: string | null;
+  line_items: Array<{ kind?: string; name?: string; batch?: string }>;
+};
+
+export function useReplacementSummary(orderId: string | null): { summary: ReplacementSummary | null; loading: boolean } {
+  const [summary, setSummary] = useState<ReplacementSummary | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!orderId) { setSummary(null); setLoading(false); return; }
+    let channel: RealtimeChannel | null = null;
+    let cancelled = false;
+    setLoading(true);
+    const cols = 'order_ref, awaiting_batch_id, replacement_state, shipped_at, delivered_at, line_items';
+    (async () => {
+      const { data } = await supabase.from('orders').select(cols).eq('id', orderId).maybeSingle();
+      if (cancelled) return;
+      setSummary((data as ReplacementSummary | null) ?? null);
+      setLoading(false);
+      channel = supabase
+        .channel(`order:summary:${orderId}`)
+        .on('postgres_changes',
+          { event: 'UPDATE', schema: 'public', table: 'orders', filter: `id=eq.${orderId}` },
+          (payload) => setSummary(payload.new as ReplacementSummary))
+        .subscribe();
+    })();
+    return () => { cancelled = true; if (channel) void channel.unsubscribe(); };
+  }, [orderId]);
+
+  return { summary, loading };
+}
+
 /** All un-shipped replacement orders in 'ready' or 'awaiting' state.
  * Used by ReturnsTab/RefundsTab (#83) to warn when a customer has a queued
  * replacement that should be held before their refund is processed. */
@@ -569,6 +610,57 @@ export async function resumeReplacement(orderId: string, state: 'ready' | 'await
  *      them; 'awaiting' never decremented and 'held' can't be disambiguated,
  *      so parts aren't auto-restored there (units are still freed).
  */
+type CancellableReplacement = {
+  id: string;
+  order_ref: string;
+  replacement_state: 'ready' | 'awaiting' | 'held' | null;
+  linked_ticket_id: string | null;
+  line_items: unknown;
+};
+
+/** Release a replacement's reserved stock, clear its ticket back-link, and
+ *  delete the order so it drops off both the Sales (Order Review) and Service
+ *  replacement lists via realtime. No guards — callers enforce them. */
+async function releaseAndDeleteReplacement(order: CancellableReplacement, note: string): Promise<void> {
+  // Release reserved units (conditional → safe for every state; no-op when
+  // nothing was reserved, e.g. an 'awaiting' order).
+  const { error: uErr } = await supabase
+    .from('units')
+    .update({ status: 'ready', customer_order_ref: null, customer_name: null })
+    .eq('customer_order_ref', order.order_ref)
+    .eq('status', 'reserved');
+  if (uErr) throw new Error(`Failed to release reserved units: ${uErr.message}`);
+
+  // Restore decremented parts — only for a 'ready' order (the state in which
+  // createReplacementOrder decremented them; 'awaiting' never did).
+  if (order.replacement_state === 'ready') {
+    const lineItems = (order.line_items ?? []) as ReplacementLineItem[];
+    for (const li of lineItems) {
+      if (li.kind === 'part') {
+        await adjustPartStock(li.part_id, li.qty, `Replacement ${order.order_ref} cancelled`);
+      }
+    }
+  }
+
+  // Drop the ticket back-link so nothing dangles once the order is gone.
+  if (order.linked_ticket_id) {
+    await supabase.from('service_tickets')
+      .update({ replacement_order_id: null })
+      .eq('id', order.linked_ticket_id);
+  }
+
+  // Delete the order. select() back so an RLS-blocked delete (0 rows, no error)
+  // surfaces as a failure instead of silently leaving it in place.
+  const { data: del, error: delErr } = await supabase
+    .from('orders').delete().eq('id', order.id).select('id');
+  if (delErr) throw new Error(`Cancel failed: ${delErr.message}`);
+  if (!del || del.length === 0) {
+    throw new Error('Replacement was not cancelled (no permission or already removed).');
+  }
+
+  await logAction('replacement_cancelled', order.order_ref, note);
+}
+
 export async function cancelReplacementOrder(orderId: string): Promise<void> {
   const { data: order, error: oErr } = await supabase
     .from('orders')
@@ -597,44 +689,33 @@ export async function cancelReplacementOrder(orderId: string): Promise<void> {
     }
   }
 
-  // Release reserved units (conditional → safe for every state).
-  const { error: uErr } = await supabase
-    .from('units')
-    .update({ status: 'ready', customer_order_ref: null, customer_name: null })
-    .eq('customer_order_ref', order.order_ref)
-    .eq('status', 'reserved');
-  if (uErr) throw new Error(`Failed to release reserved units: ${uErr.message}`);
+  await releaseAndDeleteReplacement(
+    order as CancellableReplacement,
+    order.linked_ticket_id ? 'ticket closed · stock released' : 'no linked ticket · stock released',
+  );
+}
 
-  // Restore decremented parts — only for a 'ready' order.
-  if (order.replacement_state === 'ready') {
-    const lineItems = (order.line_items ?? []) as ReplacementLineItem[];
-    for (const li of lineItems) {
-      if (li.kind === 'part') {
-        await adjustPartStock(li.part_id, li.qty, `Replacement ${order.order_ref} cancelled`);
-      }
-    }
+/** Auto-cancel an 'awaiting' replacement queued for a ticket when the ticket is
+ *  marked complete (closed): it's no longer needed, so it's removed from the
+ *  replacement workflow. Scoped to 'awaiting' ONLY — a 'ready' replacement has
+ *  a unit reserved and may be about to ship, so it's left intact (operator can
+ *  still cancel it manually from Order Review). 'awaiting' never reserved units
+ *  or decremented parts, so there's nothing to release beyond deleting the row.
+ *  Best-effort per order — a failure on one doesn't block the others. */
+export async function cancelPendingReplacementsForTicket(ticketId: string): Promise<void> {
+  const { data: linked, error } = await supabase
+    .from('orders')
+    .select('id, order_ref, replacement_state, linked_ticket_id, line_items')
+    .eq('kind', 'replacement')
+    .eq('linked_ticket_id', ticketId)
+    .eq('replacement_state', 'awaiting')
+    .is('shipped_at', null)
+    .is('delivered_at', null);
+  if (error) throw new Error(`Failed to look up linked replacements: ${error.message}`);
+
+  for (const o of (linked ?? []) as CancellableReplacement[]) {
+    await releaseAndDeleteReplacement(o, `ticket completed → awaiting replacement cancelled`);
   }
-
-  // Drop the ticket back-link so nothing dangles once the order is gone.
-  if (order.linked_ticket_id) {
-    await supabase.from('service_tickets')
-      .update({ replacement_order_id: null })
-      .eq('id', order.linked_ticket_id);
-  }
-
-  // Delete the order. select() back so an RLS-blocked delete (0 rows, no error)
-  // surfaces as a failure instead of silently leaving it in place.
-  const { data: del, error: delErr } = await supabase
-    .from('orders').delete().eq('id', orderId).select('id');
-  if (delErr) throw new Error(`Cancel failed: ${delErr.message}`);
-  if (!del || del.length === 0) {
-    throw new Error('Replacement was not cancelled (no permission or already removed).');
-  }
-
-  await logAction('replacement_cancelled', order.order_ref,
-    order.linked_ticket_id
-      ? `ticket closed · stock released`
-      : `no linked ticket · stock released`);
 }
 
 export function useOrderNotes(orderId: string | null): {

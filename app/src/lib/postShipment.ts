@@ -112,6 +112,7 @@ export type ReturnRow = {
   condition: ReturnCondition | null;
   reason: string | null;
   return_category: ReturnCategory | null;
+  category_other: string | null;
   disposition: ReturnDisposition | null;
   refund_amount_usd: number | null;
   status: ReturnStatus;
@@ -136,6 +137,11 @@ export type ReturnRow = {
   refund_contact: string | null;
   additional_comments: string | null;
   purchase_proof: string | null;
+  // Purchaser identity when the return filer isn't the buyer (is_purchaser=false).
+  is_purchaser: boolean | null;
+  purchaser_name: string | null;
+  purchaser_email: string | null;
+  purchaser_phone: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -534,6 +540,18 @@ export async function submitRefundRequest(input: {
         event_id: `return-${input.order_id ?? Date.now()}`,
       },
     });
+}
+
+/** Edit a refund's dollar amount directly from the card, at any stage.
+ *  Approvers (manager/finance) use this to correct the amount without having
+ *  to advance the refund through the approval action. */
+export async function updateRefundAmount(id: string, amount: number): Promise<void> {
+  if (!Number.isFinite(amount) || amount < 0) throw new Error('Amount must be a non-negative number');
+  const rounded = Math.round(amount * 100) / 100;
+  const { error } = await supabase.from('refund_approvals')
+    .update({ refund_amount_usd: rounded }).eq('id', id);
+  if (error) throw error;
+  await logAction('refund_amount_edited', id, `$${rounded.toFixed(2)}`);
 }
 
 export async function managerApprove(id: string, note?: string): Promise<void> {

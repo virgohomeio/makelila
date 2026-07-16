@@ -129,11 +129,13 @@ export function followUpDueDates(anchorIso: string): { fu1Due: Date; fu2Due: Dat
 }
 
 /** Compute the follow-up state for a customer. Due dates count from `anchorIso`
- *  when supplied (the effective anchor after a ticket-close reschedule),
- *  otherwise from `onboard_date`. "Today" = same calendar day. */
+ *  when supplied (the effective anchor — a completed `onboard_date`, a
+ *  ticket-close reschedule, or a SCHEDULED onboarding call date), otherwise
+ *  from `onboard_date`. "Today" = same calendar day. */
 export function computeFuState(c: Customer, today: Date = new Date(), anchorIso?: string | null): FuState {
-  if (!c.onboard_date) return 'unscheduled';
-  const { fu1Due, fu2Due } = followUpDueDates(anchorIso ?? c.onboard_date);
+  const anchor = anchorIso ?? c.onboard_date;
+  if (!anchor) return 'unscheduled';
+  const { fu1Due, fu2Due } = followUpDueDates(anchor);
   const todayMid = new Date(today); todayMid.setHours(0, 0, 0, 0);
 
   if (c.fu1_status && c.fu2_status) return 'complete';
