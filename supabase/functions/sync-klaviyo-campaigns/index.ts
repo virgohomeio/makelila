@@ -44,13 +44,24 @@ Deno.serve(async (req: Request) => {
   if (!KLAVIYO_KEY) return j({ error: 'KLAVIYO_PRIVATE_KEY not configured' }, 400);
 
   // 1. Find the conversion metric ("Placed Order" from the Shopify integration).
-  //    The campaign-values report requires a conversion_metric_id.
+  //    The campaign-values report requires a conversion_metric_id. The Metrics
+  //    endpoint has no page[size] param — page via links.next.
   let conversionMetricId = '';
   try {
-    const res = await fetch('https://a.klaviyo.com/api/metrics/?page%5Bsize%5D=100', { headers: kHeaders() });
-    if (!res.ok) return j({ error: `Klaviyo metrics ${res.status}: ${(await res.text()).slice(0, 300)}` }, 502);
-    const body = await res.json() as { data?: Array<{ id: string; attributes?: { name?: string } }> };
-    const metrics = body.data ?? [];
+    const metrics: Array<{ id: string; attributes?: { name?: string } }> = [];
+    let mUrl: string | null = 'https://a.klaviyo.com/api/metrics/';
+    let mPages = 0;
+    while (mUrl && mPages < 10) {
+      const res = await fetch(mUrl, { headers: kHeaders() });
+      if (!res.ok) return j({ error: `Klaviyo metrics ${res.status}: ${(await res.text()).slice(0, 300)}` }, 502);
+      const body = await res.json() as {
+        data?: Array<{ id: string; attributes?: { name?: string } }>;
+        links?: { next?: string | null };
+      };
+      for (const m of body.data ?? []) metrics.push(m);
+      mUrl = body.links?.next ?? null;
+      mPages++;
+    }
     const pick = (n: string) => metrics.find(m => (m.attributes?.name ?? '').toLowerCase() === n)?.id;
     conversionMetricId = pick('placed order') ?? pick('ordered product') ??
       metrics.find(m => /order/i.test(m.attributes?.name ?? ''))?.id ?? '';
