@@ -37,7 +37,9 @@ export function SupportTab() {
 
   const filtered = useMemo(() => {
     return tickets.filter(t => {
-      if (statusFilter !== 'all' && t.status !== statusFilter) return false;
+      // Match the workflow status OR any of the ticket's status tags, so
+      // filtering a tag surfaces every customer whose ticket carries it.
+      if (statusFilter !== 'all' && t.status !== statusFilter && !(t.tags ?? []).includes(statusFilter)) return false;
       if (sourceFilter !== 'all' && t.source !== sourceFilter) return false;
       if (topicFilter !== 'all' && t.topic !== topicFilter) return false;
       if (areaFilter === 'none' && t.issue_area !== null) return false;
@@ -311,6 +313,9 @@ export function SupportTab() {
 function CustomerGroupRow({ g, selected, onClick }: { g: CustomerGroup; selected: boolean; onClick: () => void }) {
   const s = statusMeta(g.rollupStatus);
   const ageHours = (Date.now() - new Date(g.lastActivity).getTime()) / 3_600_000;
+  // Every distinct status tag across this customer's tickets — shown alongside
+  // the rollup status so multi-tagged tickets surface all their tags here.
+  const groupTags = [...new Set(g.tickets.flatMap(t => t.tags ?? []))];
   return (
     <tr className={`${styles.row} ${selected ? styles.rowSelected : ''}`} onClick={onClick}>
       <td>
@@ -320,7 +325,20 @@ function CustomerGroupRow({ g, selected, onClick }: { g: CustomerGroup; selected
       <td>{g.total}</td>
       <td>{g.openCount > 0 ? <strong>{g.openCount}</strong> : '—'}</td>
       <td>{formatAge(ageHours)}</td>
-      <td><span className={styles.pill} style={{ background: s.bg, color: s.color }}>{s.label}</span></td>
+      <td>
+        <span className={styles.pill} style={{ background: s.bg, color: s.color }}>{s.label}</span>
+        {groupTags.map(tag => {
+          const m = statusMeta(tag);
+          return (
+            <span
+              key={tag}
+              className={styles.pill}
+              style={{ background: '#fff', color: m.color, border: `1px solid ${m.color}` }}
+              title="Status tag"
+            >🏷 {m.label}</span>
+          );
+        })}
+      </td>
       <td style={{ textAlign: 'right', color: '#a0aec0' }}>›</td>
     </tr>
   );
