@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import ReplacementPickerModal from './ReplacementPickerModal';
 import { useCustomers, sendFollowupSms } from '../../lib/customers';
 import {
-  type ServiceTicket, type IssueArea, type TicketCategory,
+  type ServiceTicket, type IssueArea, type TicketCategory, type TicketStatus,
   STATUS_META, CATEGORY_META, PRIORITY_META, TICKET_STATUSES,
   statusMeta, priorityMeta, sourceLabel, topicLabel, slaChip,
   ISSUE_AREAS, ISSUE_AREA_LABEL,
@@ -761,6 +761,20 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
               >{CATEGORY_META[c].label}</button>
             ))}
           </div>
+        </div>
+
+        <div className={styles.detailSection}>
+          <div className={styles.detailSectionLabel}>Status</div>
+          <select
+            className={styles.select}
+            value={ticket.status}
+            disabled={busy}
+            onChange={(e) => void run(updateTicketStatus(ticket.id, e.target.value as TicketStatus))}
+          >
+            {TICKET_STATUSES.map(s => (
+              <option key={s} value={s}>{STATUS_META[s].label}</option>
+            ))}
+          </select>
         </div>
 
         <div className={styles.detailSection}>
