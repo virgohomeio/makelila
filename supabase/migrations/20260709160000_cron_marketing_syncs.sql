@@ -14,6 +14,14 @@ select cron.schedule(
   $q$select public.invoke_edge_function('sync-facebook-ads', '{}'::jsonb)$q$
 );
 
+-- Link customers → Klaviyo profile ids (prerequisite for the events pull).
+-- Runs at :05, ahead of the :15 events pull.
+select cron.schedule(
+  'klaviyo-link-profiles-3h',
+  '5 */3 * * *',
+  $q$select public.invoke_edge_function('sync-klaviyo-profile-ids', '{}'::jsonb)$q$
+);
+
 -- Klaviyo email events — feed the customer journey, refresh every 3h.
 select cron.schedule(
   'klaviyo-pull-events-3h',
