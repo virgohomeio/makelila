@@ -11,6 +11,7 @@ import { useFbCampaigns, triggerFbSync } from '../../lib/marketing/facebook';
 import { useKlaviyoSyncStatus, triggerKlaviyoSync, triggerKlaviyoEventsSync, triggerKlaviyoCampaignsSync } from '../../lib/marketing/klaviyo';
 import { triggerGa4Sync, triggerGscSync } from '../../lib/marketing/google';
 import { triggerFbIgSync } from '../../lib/marketing/social';
+import { supabase } from '../../lib/supabase';
 import styles from './Marketing.module.css';
 
 type Tab = 'dashboard' | 'report' | 'campaigns' | 'social' | 'email' | 'web' | 'sync';
@@ -18,6 +19,14 @@ type Tab = 'dashboard' | 'report' | 'campaigns' | 'social' | 'email' | 'web' | '
 // Every inbound analytics source, fired together by the "Sync All Sources"
 // button. Each returns a short human summary for the status panel.
 const SYNC_ALL_TASKS: { label: string; run: () => Promise<string> }[] = [
+  { label: 'Shopify orders', run: async () => {
+    // Full sync (no incremental flag) so attribution + journey source backfill
+    // across all orders — the Report's Source column reads from here.
+    const { data, error } = await supabase.functions.invoke('sync-shopify-orders', { body: {} });
+    if (error) throw error;
+    const d = (data ?? {}) as { imported?: number; refreshed?: number };
+    return `${d.imported ?? 0} new, ${d.refreshed ?? 0} refreshed`;
+  } },
   { label: 'Meta Ads', run: async () => `${(await triggerFbSync()).synced} campaign rows` },
   { label: 'Email campaigns', run: async () => { const r = await triggerKlaviyoCampaignsSync(); return r.note ?? `${r.synced} campaigns`; } },
   { label: 'Klaviyo journey', run: async () => { const r = await triggerKlaviyoEventsSync(); return r.note ?? `${r.synced} events`; } },
