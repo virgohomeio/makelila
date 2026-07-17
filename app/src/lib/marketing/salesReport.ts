@@ -21,6 +21,9 @@ export type SalesRow = {
   channel: string;
   campaign: string | null;
   referrer: string | null;
+  // Purchase (last) visit source — the channel they came from when they bought.
+  last_channel: string | null;
+  last_referrer: string | null;
   plan: string;
   discount_codes: string[];
   revenue: number;
@@ -108,6 +111,8 @@ export function buildSalesReport(
       channel,
       campaign: a.campaign,
       referrer: o.attribution_referrer ?? null,
+      last_channel: o.attribution_last_source ? classifyChannel(o.attribution_last_source, o.attribution_last_medium) : null,
+      last_referrer: o.attribution_last_referrer ?? null,
       plan,
       discount_codes: codes,
       revenue,
@@ -179,17 +184,22 @@ function hostOf(url: string | null): string | null {
   try { return new URL(url).hostname.toLowerCase().replace(/^www\./, ''); } catch { return url; }
 }
 
-function buildNote(r: SalesRow, source: string): string {
+/** A channel + its specific referring site, e.g. "Referral (linktr.ee)". */
+function labelWithSite(channel: string, referrer: string | null): string {
+  let s = sourceLabel(channel);
+  if (s === 'Referral') { const ref = hostOf(referrer); if (ref) s = `Referral (${ref})`; }
+  return s;
+}
+
+function buildNote(r: SalesRow, firstLabel: string, lastLabel: string | null): string {
   const bits: string[] = [];
-  if (source !== UNKNOWN) bits.push(`Saw ${source}`);
-  const ref = hostOf(r.referrer);
-  if (ref) bits.push(`via ${ref}`);
+  if (firstLabel !== UNKNOWN) bits.push(`First visit: ${firstLabel}`);
+  if (lastLabel && lastLabel !== UNKNOWN && lastLabel !== firstLabel) bits.push(`Purchase visit: ${lastLabel}`);
   if (r.campaign) bits.push(`campaign ${r.campaign}`);
   // Visit history from Klaviyo when we have it; otherwise flag it's not captured.
-  if (r.journey_note) bits.push(r.journey_note);
-  else bits.push('visit history UNKNOWN');
+  bits.push(r.journey_note ?? 'visit history UNKNOWN');
   // Exact ad creative (v21a…) can't be auto-detected — operator adds it manually.
-  return bits.length ? bits.join(', ') : UNKNOWN;
+  return bits.length ? bits.join('; ') : UNKNOWN;
 }
 
 /** One buyer row rendered as the 16 tracker columns. Shared by the table + CSV
@@ -200,12 +210,13 @@ export function reportCells(r: SalesRow): string[] {
   const time = d ? d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' }) : UNKNOWN;
   const codes = r.discount_codes.map(c => c.toUpperCase());
   const others = codes.filter(c => c !== 'WELCOMELILA' && c !== 'CHECKOUTFIVE');
-  let source = sourceLabel(r.channel);
-  // A bare "Referral" is anonymous — name the site (Linktree, a blog, …).
-  if (source === 'Referral') {
-    const ref = hostOf(r.referrer);
-    if (ref) source = `Referral (${ref})`;
-  }
+  // First (acquisition) + purchase (last) visit sources, each named with its
+  // site. Source column shows "first → purchase" when they differ.
+  const firstLabel = labelWithSite(r.channel, r.referrer);
+  const lastLabel = r.last_channel ? labelWithSite(r.last_channel, r.last_referrer) : null;
+  const source = (!lastLabel || lastLabel === firstLabel || lastLabel === UNKNOWN)
+    ? firstLabel
+    : `${firstLabel} → ${lastLabel}`;
   return [
     r.name,
     date,
@@ -222,7 +233,7 @@ export function reportCells(r: SalesRow): string[] {
     others[0] ?? 'No',
     others[1] ?? 'No',
     r.purchase_time ?? UNKNOWN,   // from the buyer's Klaviyo purchase-visit timing
-    buildNote(r, source),
+    buildNote(r, firstLabel, lastLabel),
   ];
 }
 
