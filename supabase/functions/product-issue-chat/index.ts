@@ -17,6 +17,14 @@ const DEEPSEEK_API = 'https://api.deepseek.com/chat/completions';
 const SEVERITIES = ['critical', 'high', 'medium', 'low'] as const;
 type Severity = typeof SEVERITIES[number];
 
+// Canonical product-id allowlist, mirroring the DB check constraint on
+// product_issues.product_id. Used to validate a DeepSeek-proposed issue —
+// deliberately NOT derived from the client-supplied `products` array, since
+// that's request-body data a caller could tamper with. `products` is still
+// used (below) to build the DeepSeek prompt's id->label list, which is not
+// security-relevant.
+const VALID_PRODUCT_IDS = ['pro', 'mini', 'mega', 'makelila', 'lovely', 'shop', 'marketplace'] as const;
+
 export type ChatTurn = { role: 'user' | 'assistant'; content: string };
 
 export type ChatRequest = {
@@ -142,7 +150,6 @@ async function handle(req: Request): Promise<Response> {
     return json({ reply: "Chat isn't configured yet — ask an admin to set DEEPSEEK_API_KEY.", filed: false }, 200);
   }
 
-  const validProductIds = products.map(p => p.id);
   const systemPrompt = buildSystemPrompt(products, knownTeam, productId);
 
   let deepseekTurn: DeepseekTurn;
@@ -173,7 +180,7 @@ async function handle(req: Request): Promise<Response> {
     return json({ reply: deepseekTurn.reply, filed: false }, 200);
   }
 
-  const validated = validateIssue(deepseekTurn.issue, validProductIds);
+  const validated = validateIssue(deepseekTurn.issue, [...VALID_PRODUCT_IDS]);
   if (!validated) {
     return json({ reply: deepseekTurn.reply, filed: false }, 200);
   }
