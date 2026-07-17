@@ -1,17 +1,36 @@
-import { useState } from 'react';
-import { useGa4, useGsc, triggerGa4Sync, triggerGscSync } from '../../lib/marketing/google';
+import { useMemo, useState } from 'react';
+import {
+  useGa4, useGsc, aggregateGa4, aggregateGsc, triggerGa4Sync, triggerGscSync,
+} from '../../lib/marketing/google';
 
 const subtle = 'var(--color-ink-subtle)';
 const muted = 'var(--color-ink-muted)';
+
+const RANGES = [
+  { label: 'Last 7 days', days: 7 },
+  { label: 'Last 14 days', days: 14 },
+  { label: 'Last 30 days', days: 30 },
+  { label: 'Last 60 days', days: 60 },
+  { label: 'Last 90 days', days: 90 },
+  { label: 'All synced', days: 0 },
+];
 
 // Website analytics — GA4 traffic + Search Console performance. Both pull via a
 // Google service account (see the Web setup checklist). Cards show "not connected"
 // until the first sync returns rows.
 export function WebTab() {
-  const { totals: ga, byChannel, lastSynced: gaSynced, loading: gaLoading, reload: reloadGa } = useGa4();
-  const { totals: gsc, lastSynced: gscSynced, loading: gscLoading, reload: reloadGsc } = useGsc();
+  const { rows: gaRows, lastSynced: gaSynced, loading: gaLoading, reload: reloadGa } = useGa4();
+  const { rows: gscRows, lastSynced: gscSynced, loading: gscLoading, reload: reloadGsc } = useGsc();
   const [syncing, setSyncing] = useState<'ga4' | 'gsc' | null>(null);
   const [msg, setMsg] = useState('');
+  const [days, setDays] = useState(90);
+
+  const cutoff = useMemo(() => (days ? new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 10) : ''), [days]);
+  const inRange = (d: string) => !cutoff || d >= cutoff;
+
+  const { totals: ga, byChannel } = useMemo(() => aggregateGa4(gaRows.filter(r => inRange(r.date))), [gaRows, cutoff]); // eslint-disable-line react-hooks/exhaustive-deps
+  const gsc = useMemo(() => aggregateGsc(gscRows.filter(r => inRange(r.date))), [gscRows, cutoff]); // eslint-disable-line react-hooks/exhaustive-deps
+  const rangeLabel = RANGES.find(r => r.days === days)?.label ?? `last ${days} days`;
 
   async function run(which: 'ga4' | 'gsc') {
     setSyncing(which); setMsg('');
@@ -26,8 +45,10 @@ export function WebTab() {
     }
   }
 
-  const gaConnected = ga.sessions > 0;
-  const gscConnected = gsc.impressions > 0;
+  // "Connected" = the source has ever returned rows, independent of the range —
+  // so a narrow window with no data shows zeros, not a false "not connected".
+  const gaConnected = gaRows.length > 0;
+  const gscConnected = gscRows.length > 0;
 
   return (
     <div>
@@ -47,8 +68,16 @@ export function WebTab() {
         {msg && <span style={{ fontSize: 12, color: muted, alignSelf: 'center' }}>{msg}</span>}
       </div>
 
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+        <select value={days} onChange={e => setDays(Number(e.target.value))}
+                style={{ padding: '6px 10px', fontSize: 13, border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm, 6px)' }}>
+          {RANGES.map(r => <option key={r.days} value={r.days}>{r.label}</option>)}
+        </select>
+        <span style={{ fontSize: 11, color: subtle }}>Filters both GA4 and Search Console below.</span>
+      </div>
+
       {/* GA4 */}
-      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Google Analytics (GA4) · last 90 days</div>
+      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Google Analytics (GA4) · {rangeLabel}</div>
       {gaLoading ? <p style={{ color: subtle, fontSize: 13 }}>Loading…</p> : !gaConnected ? (
         <div style={notice}>Not connected yet. Add the service account to your GA4 property + set <code>GA4_PROPERTY_ID</code>, then Sync GA4.</div>
       ) : (
@@ -75,7 +104,7 @@ export function WebTab() {
       )}
 
       {/* Search Console */}
-      <div style={{ fontSize: 13, fontWeight: 600, margin: '10px 0 8px' }}>Search Console · last 90 days</div>
+      <div style={{ fontSize: 13, fontWeight: 600, margin: '10px 0 8px' }}>Search Console · {rangeLabel}</div>
       {gscLoading ? <p style={{ color: subtle, fontSize: 13 }}>Loading…</p> : !gscConnected ? (
         <div style={notice}>Not connected yet. Add the service account to your Search Console property + set <code>GSC_SITE_URL</code>, then Sync Search Console.</div>
       ) : (
