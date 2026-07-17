@@ -44,6 +44,7 @@ function mkOrder(partial: Partial<Order> & { id: string; status: Order['status']
     total_usd: 1149,
     subtotal_usd: null, tax_usd: null, discount_total_usd: null,
     discount_codes: null, payment_methods: null, financial_status: null, tax_lines: null, shipping_line_title: null,
+    attribution_source: null, attribution_medium: null, attribution_campaign: null,
     line_items: [],
     sales_confirmed_fit: false,
     dispositioned_by: null,
