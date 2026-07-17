@@ -101,6 +101,11 @@ export type Order = {
   discount_codes: string[] | null;
   payment_methods: string[] | null;
   financial_status: string | null;
+  // Per-order Shopify acquisition source (utm → referrer host → direct), set by
+  // sync-shopify-orders. Preferred over the customer's first-touch in reporting.
+  attribution_source: string | null;
+  attribution_medium: string | null;
+  attribution_campaign: string | null;
   shipping_line_title: string | null;
   line_items: LineItem[];
   sales_confirmed_fit: boolean;
