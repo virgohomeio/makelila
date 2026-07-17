@@ -53,8 +53,17 @@ export function ReportTab() {
       const orderMs = new Date(o.placed_at ?? o.created_at).getTime();
       return summarizeJourney(journeys.get(o.customer_id), orderMs);
     };
-    return buildSalesReport(filtered, resolve, adSpendCad, journey);
-  }, [orders, byId, byEmail, journeys, adSpendCad, cutoff]); // eslint-disable-line react-hooks/exhaustive-deps
+    // Resolve a raw campaign value to a readable name: Meta campaign id → its
+    // name; underscores/hyphens → spaces; a bare unmatched number → dropped.
+    const fbNames = new Map(campaigns.filter(c => c.campaign_id && c.campaign_name).map(c => [String(c.campaign_id), c.campaign_name]));
+    const campaignName = (raw: string): string | null => {
+      const named = fbNames.get(String(raw));
+      if (named) return named;
+      if (/^\d+$/.test(raw)) return null;
+      return raw.replace(/[_-]+/g, ' ').trim();
+    };
+    return buildSalesReport(filtered, resolve, adSpendCad, journey, campaignName);
+  }, [orders, byId, byEmail, journeys, campaigns, adSpendCad, cutoff]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const downloadCsv = () => {
     const blob = new Blob([salesRowsToCsv(rows)], { type: 'text/csv;charset=utf-8' });
