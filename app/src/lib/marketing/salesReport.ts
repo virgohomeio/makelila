@@ -133,22 +133,75 @@ export function buildSalesReport(
   };
 }
 
-/** CSV mirroring the manual tracker's per-buyer columns (the ones we can fill). */
-export function salesRowsToCsv(rows: SalesRow[]): string {
-  const head = ['Name', 'Date', 'City', 'Province/State', 'Country', 'Channel', 'Campaign', 'Plan', 'Discount Codes', 'Revenue', 'Currency'];
-  const esc = (v: string | number) => {
-    const s = String(v ?? '');
-    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-  };
-  const lines = rows.map(r => [
+// Marker for any cell we can't populate from current data (age/gender demographics,
+// exact ad creative, session timing). Shown greyed in the UI so it's obvious what
+// still needs a data source rather than being silently blank.
+export const UNKNOWN = 'UNKNOWN';
+
+// Exact column order of the manual "Late Spring Sale" tracker.
+export const REPORT_COLUMNS = [
+  'Name', 'Date', 'Time (EST)', 'City', 'Province/State', 'Country',
+  'Age Range', 'Gender', 'Source', 'Buyer Plan',
+  'Discount WELCOMELILA?', 'Discount CHECKOUTFIVE?', 'Other Codes?', 'Other Code 2',
+  'Purchase Time after Purchase Visit', 'Notes',
+] as const;
+
+const COUNTRY_NAME: Record<string, string> = { US: 'United States', CA: 'Canada' };
+
+function yesNo(codes: string[], code: string): string {
+  return codes.includes(code) ? 'Yes' : 'No';
+}
+
+/** Friendly Source label; UNKNOWN when we have no attribution for the buyer. */
+export function sourceLabel(channel: string): string {
+  if (!channel || channel === 'Unknown' || channel === '—') return UNKNOWN;
+  // The manual tracker wrote Facebook/Instagram paid simply as "Meta Ad".
+  if (/^(Facebook|Instagram) Paid$/.test(channel) || channel === 'Paid Social') return 'Meta Ad';
+  return channel;
+}
+
+function buildNote(r: SalesRow, source: string): string {
+  const bits: string[] = [];
+  if (source !== UNKNOWN) bits.push(`Saw ${source}`);
+  if (r.campaign) bits.push(`campaign ${r.campaign}`);
+  // Visit history / exact creative / time-after-visit aren't captured yet.
+  return bits.length ? `${bits.join(', ')} (visit history UNKNOWN)` : UNKNOWN;
+}
+
+/** One buyer row rendered as the 16 tracker columns. Shared by the table + CSV
+ *  so they never drift. UNKNOWN marks a cell no current data source can fill. */
+export function reportCells(r: SalesRow): string[] {
+  const d = r.placed_at ? new Date(r.placed_at) : null;
+  const date = d ? d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'America/New_York' }) : UNKNOWN;
+  const time = d ? d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' }) : UNKNOWN;
+  const codes = r.discount_codes.map(c => c.toUpperCase());
+  const others = codes.filter(c => c !== 'WELCOMELILA' && c !== 'CHECKOUTFIVE');
+  const source = sourceLabel(r.channel);
+  return [
     r.name,
-    r.placed_at ? new Date(r.placed_at).toLocaleDateString('en-CA') : '',
-    r.city ?? '', r.region ?? '', r.country ?? '',
-    r.channel, r.campaign ?? '', r.plan,
-    r.discount_codes.join(' + '),
-    r.revenue.toFixed(2), r.currency,
-  ].map(esc).join(','));
-  return [head.join(','), ...lines].join('\n');
+    date,
+    time,
+    r.city || UNKNOWN,
+    r.region || UNKNOWN,
+    (r.country && COUNTRY_NAME[r.country]) || r.country || UNKNOWN,
+    UNKNOWN,                 // Age Range — needs Meta/GA demographics
+    UNKNOWN,                 // Gender    — needs Meta/GA demographics
+    source,
+    r.plan,
+    yesNo(codes, 'WELCOMELILA'),
+    yesNo(codes, 'CHECKOUTFIVE'),
+    others[0] ?? 'No',
+    others[1] ?? 'No',
+    UNKNOWN,                 // Purchase time after visit — needs GA/Shopify journey sessions
+    buildNote(r, source),
+  ];
+}
+
+/** CSV of the full 16-column tracker (UNKNOWN where a source isn't wired yet). */
+export function salesRowsToCsv(rows: SalesRow[]): string {
+  const esc = (v: string) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
+  const lines = rows.map(r => reportCells(r).map(esc).join(','));
+  return [REPORT_COLUMNS.join(','), ...lines].join('\n');
 }
 
 /** Attribution per customer (by id + email) so each order resolves its source. */

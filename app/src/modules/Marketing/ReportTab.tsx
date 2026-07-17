@@ -2,7 +2,8 @@ import { useMemo, useState, type CSSProperties } from 'react';
 import { useOrders, type Order } from '../../lib/orders';
 import { useFbCampaigns } from '../../lib/marketing/facebook';
 import {
-  buildSalesReport, salesRowsToCsv, useCustomerAttribution, type Attribution,
+  buildSalesReport, salesRowsToCsv, reportCells, REPORT_COLUMNS, UNKNOWN,
+  useCustomerAttribution, type Attribution,
 } from '../../lib/marketing/salesReport';
 
 const subtle = 'var(--color-ink-subtle)';
@@ -77,38 +78,40 @@ export function ReportTab() {
       </div>
 
       <div style={{ fontSize: 11, color: muted, marginBottom: 14 }}>
-        Revenue sums order totals across currencies as-is; ad spend is CAD. Visit counts, exact ad creative, time-after-visit
-        and age/gender aren't here — those need the Shopify Customer-Journey + Klaviyo event tracking.
+        One row per buyer, mirroring the manual Sale tracker. Cells marked <em style={{ color: subtle }}>UNKNOWN</em> need a
+        data source we don't capture yet — <strong>Age / Gender</strong> (Meta or GA4 demographics) and{' '}
+        <strong>Purchase time after visit</strong> + visit history (Shopify/GA4 session journey). Everything else is pulled
+        live from the order.
       </div>
 
-      {/* Per-buyer table */}
+      {/* Per-buyer table — exact tracker columns */}
       {ordersLoading ? (
         <p style={{ color: subtle, fontSize: 13 }}>Loading…</p>
       ) : (
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, marginBottom: 18 }}>
-          <thead>
-            <tr style={{ color: subtle, fontSize: 11, textAlign: 'left' }}>
-              <th style={{ paddingBottom: 6 }}>Date</th><th>Name</th><th>Location</th>
-              <th>Channel</th><th>Campaign</th><th>Plan</th><th>Codes</th>
-              <th style={{ textAlign: 'right' }}>Revenue</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map(r => (
-              <tr key={r.order_ref} style={{ borderTop: '1px solid var(--color-border)' }}>
-                <td style={{ padding: '6px 0', whiteSpace: 'nowrap' }}>{r.placed_at ? new Date(r.placed_at).toLocaleDateString('en-CA', { month: 'short', day: 'numeric' }) : '—'}</td>
-                <td>{r.name}</td>
-                <td style={{ color: muted }}>{[r.city, r.region, r.country].filter(Boolean).join(', ')}</td>
-                <td>{r.channel}</td>
-                <td style={{ color: muted }}>{r.campaign ?? '—'}</td>
-                <td>{r.plan}</td>
-                <td style={{ color: muted }}>{r.discount_codes.join(' + ') || '—'}</td>
-                <td style={{ textAlign: 'right' }}>{money(r.revenue)}</td>
+        <div style={{ overflowX: 'auto', border: '1px solid var(--color-border)', borderRadius: 8, marginBottom: 18 }}>
+          <table style={{ borderCollapse: 'collapse', fontSize: 12, width: '100%', whiteSpace: 'nowrap' }}>
+            <thead>
+              <tr style={{ color: subtle, fontSize: 11, textAlign: 'left' }}>
+                {REPORT_COLUMNS.map(c => <th key={c} style={{ padding: '8px 10px', background: 'var(--color-surface)' }}>{c}</th>)}
               </tr>
-            ))}
-            {rows.length === 0 && <tr><td colSpan={8} style={{ padding: 12, color: subtle }}>No sales in this window.</td></tr>}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {rows.map(r => (
+                <tr key={r.order_ref} style={{ borderTop: '1px solid var(--color-border)' }}>
+                  {reportCells(r).map((cell, i) => (
+                    <td key={i} style={{
+                      padding: '7px 10px',
+                      color: cell === UNKNOWN ? subtle : 'inherit',
+                      fontStyle: cell === UNKNOWN ? 'italic' : 'normal',
+                      fontWeight: i === 0 ? 600 : 400,
+                    }}>{cell}</td>
+                  ))}
+                </tr>
+              ))}
+              {rows.length === 0 && <tr><td colSpan={REPORT_COLUMNS.length} style={{ padding: 12, color: subtle }}>No sales in this window.</td></tr>}
+            </tbody>
+          </table>
+        </div>
       )}
 
       {/* Breakdowns */}
