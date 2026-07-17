@@ -33,6 +33,7 @@ type ShopifyLineItem = {
 
 type ShopifyOrder = {
   name: string;
+  id?: number | null;
   email?: string | null;
   phone?: string | null;
   created_at?: string | null;
@@ -272,6 +273,68 @@ function deriveAttribution(landingUrl: string | null | undefined, referring: str
     ?? { source: 'shopify_direct', medium: 'direct', campaign: null };
 }
 
+// Shopify's own conversion summary ("1st session from Google") lives on the
+// GraphQL Order.customerJourneySummary.firstVisit — richer than the REST
+// referring_site (which is usually empty). We prefer it when available.
+type FirstVisit = {
+  source?: string | null;
+  sourceType?: string | null;
+  utmParameters?: { source?: string | null; medium?: string | null; campaign?: string | null } | null;
+};
+
+/** Map Shopify's firstVisit into our source/medium. */
+function journeyAttribution(fv: FirstVisit | null | undefined): Attribution | null {
+  if (!fv) return null;
+  const utm = fv.utmParameters;
+  if (utm?.source) return { source: utm.source, medium: utm.medium ?? null, campaign: utm.campaign ?? null };
+  const src = (fv.source ?? '').toLowerCase().trim();
+  if (!src) return null;
+  const type = (fv.sourceType ?? '').toLowerCase();
+  const medium =
+    type === 'search'   ? 'organic'  :
+    type === 'social'   ? 'social'   :
+    type === 'email'    ? 'email'    :
+    type === 'direct'   ? 'direct'   :
+    type === 'referral' ? 'referral' :
+    (type || 'referral');
+  return { source: src, medium, campaign: null };
+}
+
+/** Batched GraphQL lookup of each order's firstVisit source. Non-fatal: any
+ *  failure just leaves the REST-derived attribution in place. Returns a map of
+ *  order_ref → attribution for orders where Shopify has journey data. */
+async function fetchJourneyAttribution(
+  shop: string,
+  headers: Record<string, string>,
+  refs: string[],
+  rawByRef: Map<string, ShopifyOrder>,
+): Promise<Map<string, Attribution>> {
+  const out = new Map<string, Attribution>();
+  const withId = refs
+    .map(ref => ({ ref, id: rawByRef.get(ref)?.id }))
+    .filter((x): x is { ref: string; id: number } => typeof x.id === 'number');
+  const FIELDS = 'customerJourneySummary { firstVisit { source sourceType utmParameters { source medium campaign } } }';
+  for (let i = 0; i < withId.length; i += 40) {
+    const batch = withId.slice(i, i + 40);
+    const query = `{ ${batch.map((b, k) => `o${k}: order(id: "gid://shopify/Order/${b.id}") { ${FIELDS} }`).join(' ')} }`;
+    try {
+      const res = await fetch(`https://${shop}/admin/api/2024-10/graphql.json`, {
+        method: 'POST',
+        headers: { ...headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query }),
+      });
+      if (!res.ok) continue;
+      const body = await res.json() as { data?: Record<string, { customerJourneySummary?: { firstVisit?: FirstVisit } } | null> };
+      const data = body.data ?? {};
+      batch.forEach((b, k) => {
+        const attr = journeyAttribution(data[`o${k}`]?.customerJourneySummary?.firstVisit);
+        if (attr) out.set(b.ref, attr);
+      });
+    } catch { /* non-fatal — keep REST-derived attribution */ }
+  }
+  return out;
+}
+
 serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -345,6 +408,22 @@ serve(async (req: Request) => {
     if ('error' in result) skipped.push(result);
     else { mapped.push(result); rawByRef.set(o.name, o); }
   }
+
+  // Prefer Shopify's own customer-journey source (matches the order's
+  // "conversion summary" in the admin, e.g. "1st session from Google") over the
+  // REST landing/referrer heuristic. Non-fatal — falls back if GraphQL is
+  // unavailable or the scope is missing.
+  try {
+    const journey = await fetchJourneyAttribution(shop, shopHeaders, mapped.map(m => m.order_ref), rawByRef);
+    for (const m of mapped) {
+      const j = journey.get(m.order_ref);
+      if (j?.source) {
+        m.attribution_source = j.source;
+        m.attribution_medium = j.medium;
+        m.attribution_campaign = j.campaign;
+      }
+    }
+  } catch { /* keep REST-derived attribution */ }
 
   const orderRefs = mapped.map(m => m.order_ref);
   const { data: existingOrders } = await admin
