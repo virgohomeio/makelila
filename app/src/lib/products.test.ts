@@ -5,7 +5,7 @@ import {
   type DbProductIssue,
 } from './products';
 
-const { mockResolve, mockOn, mockSubscribe, mockUnsubscribe, mockChannel, mockInvoke } = vi.hoisted(() => {
+const { mockResolve, mockOn, mockSubscribe, mockChannel, mockInvoke } = vi.hoisted(() => {
   const mockResolve = vi.fn();
   const mockUnsubscribe = vi.fn();
   const mockOn = vi.fn().mockReturnThis();
