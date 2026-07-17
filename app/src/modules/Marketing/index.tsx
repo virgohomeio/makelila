@@ -44,6 +44,16 @@ const SYNC_ALL_TASKS: { label: string; run: () => Promise<string> }[] = [
 
 type SyncAllRow = { label: string; state: 'pending' | 'ok' | 'err'; msg: string };
 
+const TAB_LABELS: Record<Tab, string> = {
+  dashboard: 'Dashboard',
+  report: 'Journey Report',
+  campaigns: 'Campaigns',
+  social: 'Social',
+  email: 'Email',
+  web: 'Web',
+  sync: 'Sync',
+};
+
 export default function Marketing() {
   const [tab, setTab] = useState<Tab>('dashboard');
   const [campaignsSub, setCampaignsSub] = useState<'all' | 'mini'>('all');
@@ -153,7 +163,7 @@ export default function Marketing() {
             className={`${styles.tab} ${tab === t ? styles.tabActive : ''}`}
             onClick={() => setTab(t)}
           >
-            {t.charAt(0).toUpperCase() + t.slice(1)}
+            {TAB_LABELS[t]}
           </button>
         ))}
       </div>

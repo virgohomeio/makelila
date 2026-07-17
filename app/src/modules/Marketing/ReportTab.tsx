@@ -23,6 +23,7 @@ export function ReportTab() {
   const { byCustomer: journeys } = useKlaviyoJourneys();
   const { campaigns } = useFbCampaigns(365);
   const [days, setDays] = useState(60);
+  const [campaignFilter, setCampaignFilter] = useState('all');
 
   const cutoff = useMemo(() => (days ? Date.now() - days * 86_400_000 : 0), [days]);
 
@@ -32,13 +33,39 @@ export function ReportTab() {
     return new Date(iso).getTime() >= cutoff;
   };
 
-  const adSpendCad = useMemo(
-    () => campaigns.filter(c => inRange(c.date_start)).reduce((s, c) => s + (c.spend_cad ?? 0), 0),
-    [campaigns, cutoff], // eslint-disable-line react-hooks/exhaustive-deps
-  );
+  // Each Meta campaign's attribution window runs from its start until the NEXT
+  // campaign starts — so a sale in a gap after a campaign ended (but before the
+  // next began) still counts to that (the last active) campaign.
+  const campaignWindows = useMemo(() => {
+    const byId2 = new Map<string, { id: string; name: string; startMs: number }>();
+    for (const c of campaigns) {
+      const startIso = c.metrics?.campaign_start ?? c.date_start ?? null;
+      if (!c.campaign_id || !startIso) continue;
+      const startMs = new Date(startIso).getTime();
+      if (!isFinite(startMs)) continue;
+      const prev = byId2.get(c.campaign_id);
+      if (!prev || startMs < prev.startMs) byId2.set(c.campaign_id, { id: c.campaign_id, name: c.campaign_name, startMs });
+    }
+    const list = Array.from(byId2.values()).sort((a, b) => a.startMs - b.startMs);
+    return list.map((c, i) => ({ ...c, endMs: list[i + 1]?.startMs ?? Infinity }));
+  }, [campaigns]);
+
+  const selectedWindow = campaignFilter === 'all' ? null : (campaignWindows.find(c => c.id === campaignFilter) ?? null);
+
+  const orderMs = (o: Order) => new Date(o.placed_at ?? o.created_at).getTime();
+  const inScope = (o: Order) => {
+    if (selectedWindow) { const t = orderMs(o); return t >= selectedWindow.startMs && t < selectedWindow.endMs; }
+    return inRange(o.placed_at ?? o.created_at);
+  };
+
+  const adSpendCad = useMemo(() => {
+    // Per-campaign spend when a campaign is picked; otherwise the range total.
+    if (selectedWindow) return campaigns.filter(c => c.campaign_id === selectedWindow.id).reduce((s, c) => s + (c.spend_cad ?? 0), 0);
+    return campaigns.filter(c => inRange(c.date_start)).reduce((s, c) => s + (c.spend_cad ?? 0), 0);
+  }, [campaigns, cutoff, selectedWindow]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const { rows, kpis } = useMemo(() => {
-    const filtered = orders.filter(o => o.kind !== 'replacement' && inRange(o.placed_at ?? o.created_at));
+    const filtered = orders.filter(o => o.kind !== 'replacement' && inScope(o));
     const resolve = (o: Order): Attribution =>
       // Prefer the order's own Shopify attribution (google organic, meta, …);
       // fall back to the customer's first-touch, then unknown.
@@ -63,7 +90,7 @@ export function ReportTab() {
       return raw.replace(/[_-]+/g, ' ').trim();
     };
     return buildSalesReport(filtered, resolve, adSpendCad, journey, campaignName);
-  }, [orders, byId, byEmail, journeys, campaigns, adSpendCad, cutoff]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [orders, byId, byEmail, journeys, campaigns, adSpendCad, cutoff, campaignFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const downloadCsv = () => {
     const blob = new Blob([salesRowsToCsv(rows)], { type: 'text/csv;charset=utf-8' });
@@ -78,11 +105,25 @@ export function ReportTab() {
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
-        <select value={days} onChange={e => setDays(Number(e.target.value))} style={selectStyle}>
+        <select value={campaignFilter} onChange={e => setCampaignFilter(e.target.value)} style={{ ...selectStyle, maxWidth: 320 }}>
+          <option value="all">All campaigns</option>
+          {[...campaignWindows].reverse().map(c => (
+            <option key={c.id} value={c.id}>{c.name}</option>
+          ))}
+        </select>
+        <select value={days} onChange={e => setDays(Number(e.target.value))} style={selectStyle} disabled={campaignFilter !== 'all'}>
           {RANGES.map(r => <option key={r.days} value={r.days}>{r.label}</option>)}
         </select>
         <button onClick={downloadCsv} disabled={rows.length === 0} style={btnStyle}>↓ Download CSV</button>
-        {kpis.adSpendCad === 0 && (
+        {selectedWindow && (
+          <span style={{ fontSize: 11, color: muted }}>
+            {new Date(selectedWindow.startMs).toLocaleDateString('en-CA', { dateStyle: 'medium' })}
+            {' → '}
+            {selectedWindow.endMs === Infinity ? 'now' : new Date(selectedWindow.endMs).toLocaleDateString('en-CA', { dateStyle: 'medium' })}
+            {' (incl. gap after)'}
+          </span>
+        )}
+        {kpis.adSpendCad === 0 && !selectedWindow && (
           <span style={{ fontSize: 11, color: muted }}>Ad spend $0 — connect Meta to fill CAC/ROAS/ROI.</span>
         )}
       </div>
