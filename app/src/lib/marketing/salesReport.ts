@@ -74,12 +74,15 @@ const sortBreakdown = (m: Map<string, Breakdown>) => Array.from(m.values()).sort
 export type JourneyInfo = { timeLabel: string | null; note: string | null };
 
 /** Build the report from sale orders + an attribution resolver + Meta spend.
- *  `journey` (optional) supplies the Klaviyo-derived purchase-time + visit note. */
+ *  `journey` (optional) supplies the Klaviyo-derived purchase-time + visit note.
+ *  `campaignName` (optional) turns a raw campaign value into a readable name
+ *  (maps Meta campaign ids → their name; drops bare numeric ids). */
 export function buildSalesReport(
   orders: Order[],
   resolve: (o: Order) => Attribution,
   adSpendCad: number,
   journey?: (o: Order) => JourneyInfo,
+  campaignName?: (raw: string) => string | null,
 ): { rows: SalesRow[]; kpis: SalesKpis } {
   const sales = orders.filter(o => o.kind !== 'replacement');
 
@@ -109,7 +112,7 @@ export function buildSalesReport(
       region: o.region_state ?? null,
       country: o.country ?? null,
       channel,
-      campaign: a.campaign,
+      campaign: a.campaign ? (campaignName ? campaignName(a.campaign) : a.campaign) : null,
       referrer: o.attribution_referrer ?? null,
       last_channel: o.attribution_last_source ? classifyChannel(o.attribution_last_source, o.attribution_last_medium) : null,
       last_referrer: o.attribution_last_referrer ?? null,
