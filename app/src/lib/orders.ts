@@ -109,6 +109,11 @@ export type Order = {
   // The specific referring URL from Shopify's customer journey (e.g. a Linktree
   // or Instagram link) — shown in the Report so a "Referral" isn't anonymous.
   attribution_referrer: string | null;
+  // The purchase (converting) visit source — Shopify journey lastVisit. Distinct
+  // from the first-touch acquisition above; shown alongside it in the Report.
+  attribution_last_source: string | null;
+  attribution_last_medium: string | null;
+  attribution_last_referrer: string | null;
   shipping_line_title: string | null;
   line_items: LineItem[];
   sales_confirmed_fit: boolean;

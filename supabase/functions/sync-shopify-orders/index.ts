@@ -108,6 +108,9 @@ type MappedOrder = {
   attribution_medium: string | null;
   attribution_campaign: string | null;
   attribution_referrer: string | null;
+  attribution_last_source: string | null;
+  attribution_last_medium: string | null;
+  attribution_last_referrer: string | null;
 };
 
 function num(v: string | null | undefined): number | null {
@@ -223,6 +226,10 @@ function mapOrder(
         attribution_medium: a.medium,
         attribution_campaign: a.campaign,
         attribution_referrer: o.referring_site ?? null,
+        // Last-visit fields only come from the GraphQL journey; null on REST.
+        attribution_last_source: null,
+        attribution_last_medium: null,
+        attribution_last_referrer: null,
       };
     })(),
   };
@@ -326,17 +333,26 @@ function journeyAttribution(fv: FirstVisit | null | undefined): Attribution | nu
 /** Batched GraphQL lookup of each order's firstVisit source. Non-fatal: any
  *  failure just leaves the REST-derived attribution in place. Returns a map of
  *  order_ref → attribution for orders where Shopify has journey data. */
+type VisitAttr = { attr: Attribution; referrer: string | null };
+type JourneyResult = { first: VisitAttr | null; last: VisitAttr | null };
+
+function visitAttr(v: FirstVisit | null | undefined): VisitAttr | null {
+  const attr = journeyAttribution(v);
+  return attr ? { attr, referrer: v?.referrerUrl ?? null } : null;
+}
+
 async function fetchJourneyAttribution(
   shop: string,
   headers: Record<string, string>,
   refs: string[],
   rawByRef: Map<string, ShopifyOrder>,
-): Promise<Map<string, { attr: Attribution; referrer: string | null }>> {
-  const out = new Map<string, { attr: Attribution; referrer: string | null }>();
+): Promise<Map<string, JourneyResult>> {
+  const out = new Map<string, JourneyResult>();
   const withId = refs
     .map(ref => ({ ref, id: rawByRef.get(ref)?.id }))
     .filter((x): x is { ref: string; id: number } => typeof x.id === 'number');
-  const FIELDS = 'customerJourneySummary { firstVisit { source sourceType referrerUrl utmParameters { source medium campaign } } }';
+  const VISIT = 'source sourceType referrerUrl utmParameters { source medium campaign }';
+  const FIELDS = `customerJourneySummary { firstVisit { ${VISIT} } lastVisit { ${VISIT} } }`;
   for (let i = 0; i < withId.length; i += 40) {
     const batch = withId.slice(i, i + 40);
     const query = `{ ${batch.map((b, k) => `o${k}: order(id: "gid://shopify/Order/${b.id}") { ${FIELDS} }`).join(' ')} }`;
@@ -347,12 +363,11 @@ async function fetchJourneyAttribution(
         body: JSON.stringify({ query }),
       });
       if (!res.ok) continue;
-      const body = await res.json() as { data?: Record<string, { customerJourneySummary?: { firstVisit?: FirstVisit } } | null> };
+      const body = await res.json() as { data?: Record<string, { customerJourneySummary?: { firstVisit?: FirstVisit; lastVisit?: FirstVisit } } | null> };
       const data = body.data ?? {};
       batch.forEach((b, k) => {
-        const fv = data[`o${k}`]?.customerJourneySummary?.firstVisit;
-        const attr = journeyAttribution(fv);
-        if (attr) out.set(b.ref, { attr, referrer: fv?.referrerUrl ?? null });
+        const cjs = data[`o${k}`]?.customerJourneySummary;
+        out.set(b.ref, { first: visitAttr(cjs?.firstVisit), last: visitAttr(cjs?.lastVisit) });
       });
     } catch { /* non-fatal — keep REST-derived attribution */ }
   }
@@ -441,11 +456,16 @@ serve(async (req: Request) => {
     const journey = await fetchJourneyAttribution(shop, shopHeaders, mapped.map(m => m.order_ref), rawByRef);
     for (const m of mapped) {
       const j = journey.get(m.order_ref);
-      if (j?.attr.source) {
-        m.attribution_source = j.attr.source;
-        m.attribution_medium = j.attr.medium;
-        m.attribution_campaign = j.attr.campaign;
-        if (j.referrer) m.attribution_referrer = j.referrer;
+      if (j?.first?.attr.source) {
+        m.attribution_source = j.first.attr.source;
+        m.attribution_medium = j.first.attr.medium;
+        m.attribution_campaign = j.first.attr.campaign;
+        if (j.first.referrer) m.attribution_referrer = j.first.referrer;
+      }
+      if (j?.last?.attr.source) {
+        m.attribution_last_source = j.last.attr.source;
+        m.attribution_last_medium = j.last.attr.medium;
+        m.attribution_last_referrer = j.last.referrer;
       }
     }
   } catch { /* keep REST-derived attribution */ }
@@ -546,6 +566,9 @@ serve(async (req: Request) => {
         attribution_medium: m.attribution_medium,
         attribution_campaign: m.attribution_campaign,
         attribution_referrer: m.attribution_referrer,
+        attribution_last_source: m.attribution_last_source,
+        attribution_last_medium: m.attribution_last_medium,
+        attribution_last_referrer: m.attribution_last_referrer,
       };
 
       let addressChanged = false;
