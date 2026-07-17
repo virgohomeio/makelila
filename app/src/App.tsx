@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom
 import { AuthProvider, ProtectedRoute, useAuth } from './lib/auth';
 import { canView, type Module } from './lib/permissions';
 import { AppShell } from './components/AppShell';
+import { RouteErrorBoundary } from './components/RouteErrorBoundary';
 import { MobileHome } from './components/MobileHome';
 import { useIsMobile } from './lib/useMediaQuery';
 // Eager: OrderReview is the default landing route + Login is on the auth
@@ -39,9 +40,11 @@ function RequireRole({ role, children }: { role: Module; children: React.ReactNo
 
 function LazyRoute({ children }: { children: React.ReactNode }) {
   return (
-    <Suspense fallback={<div style={{ padding: 24, color: '#4a5568' }}>Loading…</div>}>
-      {children}
-    </Suspense>
+    <RouteErrorBoundary>
+      <Suspense fallback={<div style={{ padding: 24, color: '#4a5568' }}>Loading…</div>}>
+        {children}
+      </Suspense>
+    </RouteErrorBoundary>
   );
 }
 

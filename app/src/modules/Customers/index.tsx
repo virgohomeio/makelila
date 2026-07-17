@@ -15,6 +15,7 @@ import { JourneyTab } from './JourneyTab';
 import { useIsMobile } from '../../lib/useMediaQuery';
 import { NavCard } from '../../components/NavCard';
 import { MobileBackHeader } from '../../components/MobileBackHeader';
+import { RouteErrorBoundary } from '../../components/RouteErrorBoundary';
 import { useCustomerEvents, useCustomerEngagement, eventMeta, dormancyBadge } from '../../lib/customerEvents';
 import { useCustomerInvoices, getInvoiceSignedUrl } from '../../lib/invoices';
 import styles from './Customers.module.css';
@@ -249,9 +250,11 @@ export default function Customers() {
             </div>
           </div>
         )}
-        <Suspense fallback={<div style={{ padding: 24 }}>Loading fleet…</div>}>
-          <Dashboard />
-        </Suspense>
+        <RouteErrorBoundary label="Fleet">
+          <Suspense fallback={<div style={{ padding: 24 }}>Loading fleet…</div>}>
+            <Dashboard />
+          </Suspense>
+        </RouteErrorBoundary>
       </div>
     );
   }
