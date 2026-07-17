@@ -1,7 +1,17 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useKlaviyoCampaigns, type KlaviyoCampaign } from '../../lib/marketing/klaviyo';
 
 const subtle = 'var(--color-ink-subtle)';
+
+const RANGES = [
+  { label: 'Last 7 days', days: 7 },
+  { label: 'Last 30 days', days: 30 },
+  { label: 'Last 60 days', days: 60 },
+  { label: 'Last 90 days', days: 90 },
+  { label: 'Last 180 days', days: 180 },
+  { label: 'Last 365 days', days: 365 },
+  { label: 'All time', days: 0 },
+];
 
 const pct   = (n: number | null) => (n == null ? '—' : `${(n * 100).toFixed(1)}%`);
 const num   = (n: number | null) => (n == null ? '—' : n.toLocaleString());
@@ -25,20 +35,32 @@ function weightedRate(rows: KlaviyoCampaign[], rate: (c: KlaviyoCampaign) => num
 
 export function EmailTab() {
   const { campaigns, loading } = useKlaviyoCampaigns();
+  const [days, setDays] = useState(365);
+
+  const filtered = useMemo(() => {
+    const cutoff = days ? Date.now() - days * 86_400_000 : 0;
+    // Undated campaigns can't be placed in a window, so exclude them from a
+    // bounded range (they still show under "All time").
+    const inRange = days
+      ? campaigns.filter(c => c.send_time && new Date(c.send_time).getTime() >= cutoff)
+      : [...campaigns];
+    // Most recently sent at the top (undated last).
+    return inRange.sort((a, b) => (b.send_time ?? '').localeCompare(a.send_time ?? ''));
+  }, [campaigns, days]);
 
   const totals = useMemo(() => {
-    const sent = campaigns.reduce((s, c) => s + (c.recipients ?? 0), 0);
-    const revenue = campaigns.reduce((s, c) => s + (c.revenue ?? 0), 0);
-    const orders = campaigns.reduce((s, c) => s + (c.conversions ?? 0), 0);
+    const sent = filtered.reduce((s, c) => s + (c.recipients ?? 0), 0);
+    const revenue = filtered.reduce((s, c) => s + (c.revenue ?? 0), 0);
+    const orders = filtered.reduce((s, c) => s + (c.conversions ?? 0), 0);
     return {
-      count: campaigns.length,
+      count: filtered.length,
       sent,
       revenue,
       orders,
-      openRate: weightedRate(campaigns, c => c.open_rate),
-      clickRate: weightedRate(campaigns, c => c.click_rate),
+      openRate: weightedRate(filtered, c => c.open_rate),
+      clickRate: weightedRate(filtered, c => c.click_rate),
     };
-  }, [campaigns]);
+  }, [filtered]);
 
   if (loading) return <p style={{ color: subtle, fontSize: 13 }}>Loading email campaigns…</p>;
   if (campaigns.length === 0) return (
@@ -49,6 +71,14 @@ export function EmailTab() {
 
   return (
     <div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+        <select value={days} onChange={e => setDays(Number(e.target.value))}
+                style={{ padding: '6px 10px', fontSize: 13, border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm, 6px)' }}>
+          {RANGES.map(r => <option key={r.days} value={r.days}>{r.label}</option>)}
+        </select>
+        <span style={{ fontSize: 11, color: subtle }}>{filtered.length} campaign{filtered.length === 1 ? '' : 's'} in range</span>
+      </div>
+
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 20 }}>
         <Stat label="Campaigns" value={num(totals.count)} />
         <Stat label="Emails sent" value={num(totals.sent)} />
@@ -74,7 +104,7 @@ export function EmailTab() {
             </tr>
           </thead>
           <tbody>
-            {campaigns.map(c => (
+            {filtered.map(c => (
               <tr key={c.campaign_id} style={{ borderTop: '1px solid var(--color-border)' }}>
                 <td style={{ padding: '7px 10px', fontWeight: 500, maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis' }} title={c.name ?? c.campaign_id}>
                   {c.name ?? c.campaign_id}
@@ -89,6 +119,9 @@ export function EmailTab() {
                 <td style={td}>{pct(c.bounce_rate)}</td>
               </tr>
             ))}
+            {filtered.length === 0 && (
+              <tr><td colSpan={9} style={{ padding: 12, color: subtle }}>No campaigns sent in this window.</td></tr>
+            )}
           </tbody>
         </table>
       </div>
