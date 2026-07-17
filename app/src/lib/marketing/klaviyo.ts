@@ -39,6 +39,14 @@ export async function triggerKlaviyoSync(): Promise<{ profiles_sent: number; err
   return data as { profiles_sent: number; errors: number };
 }
 
+/** Back-fill customers.klaviyo_profile_id by matching email → Klaviyo profile.
+ *  Prerequisite for pulling per-customer events. */
+export async function triggerKlaviyoProfileLink(): Promise<{ linked: number; scanned?: number; note?: string }> {
+  const { data, error } = await supabase.functions.invoke('sync-klaviyo-profile-ids');
+  if (error) throw new Error(await fnErrorMessage(error));
+  return data as { linked: number; scanned?: number; note?: string };
+}
+
 /** Pull each customer's Klaviyo email/engagement events into customer_events so
  *  the per-customer Journey shows the email leg (opens, clicks, cart, order). */
 export async function triggerKlaviyoEventsSync(): Promise<{ synced: number; scanned?: number; profiles?: number; note?: string }> {

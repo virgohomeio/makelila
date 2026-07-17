@@ -5,6 +5,7 @@ import {
   buildSalesReport, salesRowsToCsv, reportCells, REPORT_COLUMNS, UNKNOWN,
   useCustomerAttribution, type Attribution,
 } from '../../lib/marketing/salesReport';
+import { useKlaviyoJourneys, summarizeJourney } from '../../lib/marketing/journeyTiming';
 
 const subtle = 'var(--color-ink-subtle)';
 const muted = 'var(--color-ink-muted)';
@@ -19,6 +20,7 @@ const RANGES = [
 export function ReportTab() {
   const { all: orders, loading: ordersLoading } = useOrders();
   const { byId, byEmail } = useCustomerAttribution();
+  const { byCustomer: journeys } = useKlaviyoJourneys();
   const { campaigns } = useFbCampaigns(365);
   const [days, setDays] = useState(60);
 
@@ -46,8 +48,13 @@ export function ReportTab() {
       (o.customer_id ? byId.get(o.customer_id) : undefined) ??
       (o.customer_email ? byEmail.get(o.customer_email.toLowerCase()) : undefined) ??
       { source: null, medium: null, campaign: null };
-    return buildSalesReport(filtered, resolve, adSpendCad);
-  }, [orders, byId, byEmail, adSpendCad, cutoff]); // eslint-disable-line react-hooks/exhaustive-deps
+    const journey = (o: Order) => {
+      if (!o.customer_id) return { timeLabel: null, note: null };
+      const orderMs = new Date(o.placed_at ?? o.created_at).getTime();
+      return summarizeJourney(journeys.get(o.customer_id), orderMs);
+    };
+    return buildSalesReport(filtered, resolve, adSpendCad, journey);
+  }, [orders, byId, byEmail, journeys, adSpendCad, cutoff]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const downloadCsv = () => {
     const blob = new Blob([salesRowsToCsv(rows)], { type: 'text/csv;charset=utf-8' });
@@ -83,10 +90,10 @@ export function ReportTab() {
       </div>
 
       <div style={{ fontSize: 11, color: muted, marginBottom: 14 }}>
-        One row per buyer, mirroring the manual Sale tracker. Cells marked <em style={{ color: subtle }}>UNKNOWN</em> need a
-        data source we don't capture yet — <strong>Age / Gender</strong> (Meta or GA4 demographics) and{' '}
-        <strong>Purchase time after visit</strong> + visit history (Shopify/GA4 session journey). Everything else is pulled
-        live from the order.
+        One row per buyer, mirroring the manual Sale tracker. <strong>Purchase time</strong> + visit history in Notes are
+        auto-filled from the buyer's Klaviyo events (run Sync All so profiles link + events pull; UNKNOWN until then).
+        Still manual/unavailable: <strong>Age / Gender</strong> (no per-buyer source) and the exact <strong>ad creative</strong>
+        (v21a…) in Notes. Everything else is pulled live from the order.
       </div>
 
       {/* Per-buyer table — exact tracker columns */}

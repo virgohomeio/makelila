@@ -8,7 +8,7 @@ import { EmailTab } from './EmailTab';
 import { WebTab } from './WebTab';
 import { SystemOfRecordCard } from './SystemOfRecordCard';
 import { useFbCampaigns, triggerFbSync } from '../../lib/marketing/facebook';
-import { useKlaviyoSyncStatus, triggerKlaviyoSync, triggerKlaviyoEventsSync, triggerKlaviyoCampaignsSync } from '../../lib/marketing/klaviyo';
+import { useKlaviyoSyncStatus, triggerKlaviyoSync, triggerKlaviyoEventsSync, triggerKlaviyoCampaignsSync, triggerKlaviyoProfileLink } from '../../lib/marketing/klaviyo';
 import { triggerGa4Sync, triggerGscSync } from '../../lib/marketing/google';
 import { triggerFbIgSync } from '../../lib/marketing/social';
 import { supabase } from '../../lib/supabase';
@@ -29,7 +29,14 @@ const SYNC_ALL_TASKS: { label: string; run: () => Promise<string> }[] = [
   } },
   { label: 'Meta Ads', run: async () => `${(await triggerFbSync()).synced} campaign rows` },
   { label: 'Email campaigns', run: async () => { const r = await triggerKlaviyoCampaignsSync(); return r.note ?? `${r.synced} campaigns`; } },
-  { label: 'Klaviyo journey', run: async () => { const r = await triggerKlaviyoEventsSync(); return r.note ?? `${r.synced} events`; } },
+  { label: 'Klaviyo journey', run: async () => {
+    // Link profiles first (email → klaviyo_profile_id), then pull that
+    // customer's events — the pull only works for linked customers.
+    const link = await triggerKlaviyoProfileLink();
+    const r = await triggerKlaviyoEventsSync();
+    const linkedNote = link.linked ? `${link.linked} newly linked; ` : '';
+    return `${linkedNote}${r.note ?? `${r.synced} events`}`;
+  } },
   { label: 'Google Analytics', run: async () => `${(await triggerGa4Sync()).synced} rows` },
   { label: 'Search Console', run: async () => `${(await triggerGscSync()).synced} rows` },
   { label: 'Organic social', run: async () => { const r = await triggerFbIgSync(); return `${r.synced} rows (${r.channels.join(', ')})`; } },

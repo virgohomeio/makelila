@@ -25,6 +25,9 @@ export type SalesRow = {
   discount_codes: string[];
   revenue: number;
   currency: string;
+  // Derived from the buyer's Klaviyo events (null when we have none).
+  purchase_time: string | null;
+  journey_note: string | null;
 };
 
 export type Breakdown = { key: string; count: number; revenue: number };
@@ -65,11 +68,15 @@ function bump(map: Map<string, Breakdown>, key: string, revenue: number) {
 
 const sortBreakdown = (m: Map<string, Breakdown>) => Array.from(m.values()).sort((a, b) => b.revenue - a.revenue);
 
-/** Build the report from sale orders + an attribution resolver + Meta spend. */
+export type JourneyInfo = { timeLabel: string | null; note: string | null };
+
+/** Build the report from sale orders + an attribution resolver + Meta spend.
+ *  `journey` (optional) supplies the Klaviyo-derived purchase-time + visit note. */
 export function buildSalesReport(
   orders: Order[],
   resolve: (o: Order) => Attribution,
   adSpendCad: number,
+  journey?: (o: Order) => JourneyInfo,
 ): { rows: SalesRow[]; kpis: SalesKpis } {
   const sales = orders.filter(o => o.kind !== 'replacement');
 
@@ -105,6 +112,8 @@ export function buildSalesReport(
       discount_codes: codes,
       revenue,
       currency: o.currency || 'USD',
+      purchase_time: journey?.(o)?.timeLabel ?? null,
+      journey_note: journey?.(o)?.note ?? null,
     };
   });
 
@@ -176,8 +185,11 @@ function buildNote(r: SalesRow, source: string): string {
   const ref = hostOf(r.referrer);
   if (ref) bits.push(`via ${ref}`);
   if (r.campaign) bits.push(`campaign ${r.campaign}`);
-  // Visit history / exact creative / time-after-visit aren't captured yet.
-  return bits.length ? `${bits.join(', ')} (visit history UNKNOWN)` : UNKNOWN;
+  // Visit history from Klaviyo when we have it; otherwise flag it's not captured.
+  if (r.journey_note) bits.push(r.journey_note);
+  else bits.push('visit history UNKNOWN');
+  // Exact ad creative (v21a…) can't be auto-detected — operator adds it manually.
+  return bits.length ? bits.join(', ') : UNKNOWN;
 }
 
 /** One buyer row rendered as the 16 tracker columns. Shared by the table + CSV
@@ -209,7 +221,7 @@ export function reportCells(r: SalesRow): string[] {
     yesNo(codes, 'CHECKOUTFIVE'),
     others[0] ?? 'No',
     others[1] ?? 'No',
-    UNKNOWN,                 // Purchase time after visit — needs GA/Shopify journey sessions
+    r.purchase_time ?? UNKNOWN,   // from the buyer's Klaviyo purchase-visit timing
     buildNote(r, source),
   ];
 }
