@@ -106,7 +106,8 @@ export function buildSalesReport(
     };
   });
 
-  rows.sort((a, b) => (a.placed_at ?? '').localeCompare(b.placed_at ?? ''));
+  // Newest sales first (most recent purchase at the top of the tracker).
+  rows.sort((a, b) => (b.placed_at ?? '').localeCompare(a.placed_at ?? ''));
 
   const revenue = rows.reduce((s, r) => s + r.revenue, 0);
   const salesCount = rows.length;
@@ -157,6 +158,8 @@ export function sourceLabel(channel: string): string {
   if (!channel || channel === 'Unknown' || channel === '—') return UNKNOWN;
   // The manual tracker wrote Facebook/Instagram paid simply as "Meta Ad".
   if (/^(Facebook|Instagram) Paid$/.test(channel) || channel === 'Paid Social') return 'Meta Ad';
+  // Search engines: match Shopify's "google organic search" phrasing.
+  if (channel === 'Google Organic' || channel === 'Bing Organic') return `${channel} Search`;
   return channel;
 }
 

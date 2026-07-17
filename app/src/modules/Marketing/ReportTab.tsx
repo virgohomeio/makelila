@@ -38,6 +38,11 @@ export function ReportTab() {
   const { rows, kpis } = useMemo(() => {
     const filtered = orders.filter(o => o.kind !== 'replacement' && inRange(o.placed_at ?? o.created_at));
     const resolve = (o: Order): Attribution =>
+      // Prefer the order's own Shopify attribution (google organic, meta, …);
+      // fall back to the customer's first-touch, then unknown.
+      (o.attribution_source
+        ? { source: o.attribution_source, medium: o.attribution_medium, campaign: o.attribution_campaign }
+        : undefined) ??
       (o.customer_id ? byId.get(o.customer_id) : undefined) ??
       (o.customer_email ? byEmail.get(o.customer_email.toLowerCase()) : undefined) ??
       { source: null, medium: null, campaign: null };

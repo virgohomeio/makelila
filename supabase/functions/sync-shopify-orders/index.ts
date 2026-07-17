@@ -38,6 +38,7 @@ type ShopifyOrder = {
   created_at?: string | null;
   landing_site?: string | null;
   landing_site_ref?: string | null;
+  referring_site?: string | null;
   currency?: string | null;
   presentment_currency?: string | null;
   total_price?: string | null;
@@ -100,6 +101,11 @@ type MappedOrder = {
   financial_status: string | null;
   line_items: Array<{ sku: string; name: string; qty: number; price_usd: number }>;
   placed_at: string | null;
+  // Per-order acquisition source, Shopify-style: UTM on the landing URL wins,
+  // else the referrer host (google → organic, facebook → social, …), else direct.
+  attribution_source: string | null;
+  attribution_medium: string | null;
+  attribution_campaign: string | null;
 };
 
 function num(v: string | null | undefined): number | null {
@@ -208,24 +214,62 @@ function mapOrder(
       price_usd: presentmentNum(li.price_set, li.price) ?? 0,
     })),
     placed_at: o.created_at ?? null,
+    ...(() => {
+      const a = deriveAttribution(o.landing_site ?? o.landing_site_ref ?? null, o.referring_site ?? null);
+      return { attribution_source: a.source, attribution_medium: a.medium, attribution_campaign: a.campaign };
+    })(),
   };
 }
 
-function parseUtm(landingUrl: string | null | undefined): { source: string | null; medium: string | null; campaign: string | null } {
-  if (!landingUrl) return { source: null, medium: null, campaign: null };
+type Attribution = { source: string | null; medium: string | null; campaign: string | null };
+
+/** UTM params off the landing URL. Returns null if there's no utm_source. */
+function parseUtm(landingUrl: string | null | undefined): Attribution | null {
+  if (!landingUrl) return null;
   try {
     const url = new URL(landingUrl);
     const source = url.searchParams.get('utm_source');
-    const medium = url.searchParams.get('utm_medium');
-    const campaign = url.searchParams.get('utm_campaign');
-    // No utm_source on the landing URL = the visitor came in directly (typed
-    // the URL, bookmark, etc.). Tag medium 'direct' so the classifier reads it
-    // as Direct rather than Unknown.
-    if (!source) return { source: 'shopify_direct', medium: medium ?? 'direct', campaign: null };
-    return { source, medium, campaign };
+    if (!source) return null;
+    return {
+      source,
+      medium: url.searchParams.get('utm_medium'),
+      campaign: url.searchParams.get('utm_campaign'),
+    };
   } catch {
-    return { source: null, medium: null, campaign: null };
+    return null;
   }
+}
+
+/** Classify the referrer host the way Shopify's conversion summary does — a
+ *  Google referral with no UTM is "google / organic search", Facebook is social,
+ *  etc. Returns null for own-domain / unknown referrers (caller treats those as
+ *  direct). */
+function classifyReferrer(referring: string | null | undefined): Attribution | null {
+  if (!referring) return null;
+  let host: string;
+  try { host = new URL(referring).hostname.toLowerCase(); } catch { return null; }
+  if (!host) return null;
+  const organic = (source: string): Attribution => ({ source, medium: 'organic', campaign: null });
+  const social  = (source: string): Attribution => ({ source, medium: 'social', campaign: null });
+  if (/(^|\.)google\./.test(host))                         return organic('google');
+  if (/(^|\.)bing\./.test(host))                           return organic('bing');
+  if (/duckduckgo|(^|\.)yahoo\.|ecosia|(^|\.)baidu\./.test(host)) return organic(host.replace(/^www\./, ''));
+  if (/facebook\.|(^|\.)fb\.|lm\.facebook|l\.facebook/.test(host)) return social('facebook');
+  if (/instagram\.|l\.instagram/.test(host))              return social('instagram');
+  if (/youtube\.|youtu\.be/.test(host))                   return social('youtube');
+  if (/tiktok\./.test(host))                              return social('tiktok');
+  if (/t\.co|twitter\.|(^|\.)x\.com/.test(host))          return social('twitter');
+  if (/pinterest\./.test(host))                           return social('pinterest');
+  if (/linkedin\.|lnkd\.in/.test(host))                   return social('linkedin');
+  if (/reddit\./.test(host))                              return social('reddit');
+  return null;
+}
+
+/** Per-order acquisition: UTM wins, then referrer host, then direct. */
+function deriveAttribution(landingUrl: string | null | undefined, referring: string | null | undefined): Attribution {
+  return parseUtm(landingUrl)
+    ?? classifyReferrer(referring)
+    ?? { source: 'shopify_direct', medium: 'direct', campaign: null };
 }
 
 serve(async (req: Request) => {
@@ -347,17 +391,16 @@ serve(async (req: Request) => {
     if (isNew) {
       imported++;
       const raw = rawByRef.get(m.order_ref);
-      const utm = parseUtm(raw?.landing_site ?? raw?.landing_site_ref ?? null);
-      if (utm.source && m.customer_email) {
+      if (m.attribution_source && m.customer_email) {
         const email = m.customer_email.toLowerCase();
         const at = raw?.created_at ?? new Date().toISOString();
         // First touch — insert-only (never overwrite the original acquisition).
         await admin
           .from('customers')
           .update({
-            first_touch_source: utm.source,
-            first_touch_medium: utm.medium,
-            first_touch_campaign_id: utm.campaign,
+            first_touch_source: m.attribution_source,
+            first_touch_medium: m.attribution_medium,
+            first_touch_campaign_id: m.attribution_campaign,
             first_touch_at: at,
           })
           .eq('email', email)
@@ -367,9 +410,9 @@ serve(async (req: Request) => {
         await admin
           .from('customers')
           .update({
-            last_touch_source: utm.source,
-            last_touch_medium: utm.medium,
-            last_touch_campaign_id: utm.campaign,
+            last_touch_source: m.attribution_source,
+            last_touch_medium: m.attribution_medium,
+            last_touch_campaign_id: m.attribution_campaign,
             last_touch_at: at,
           })
           .eq('email', email);
@@ -393,6 +436,11 @@ serve(async (req: Request) => {
         payment_methods: m.payment_methods,
         financial_status: m.financial_status,
         line_items: m.line_items,
+        // Shopify-derived source of truth — safe to refresh; backfills existing
+        // orders (that predate this column) on the next full sync.
+        attribution_source: m.attribution_source,
+        attribution_medium: m.attribution_medium,
+        attribution_campaign: m.attribution_campaign,
       };
 
       let addressChanged = false;
