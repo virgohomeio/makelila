@@ -61,8 +61,27 @@ function creativeLabel(name: string): string {
   return m ? CREATIVE_MAP[`m${m[1]}`] ?? '—' : '—';
 }
 
+// Local YYYY-MM-DD for today + offset (matches fb_ads.date_start day strings).
+function dayStr(offset: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() + offset);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+const RANGES: { key: string; label: string; from: () => string; to: () => string }[] = [
+  { key: 'today',     label: 'Today',         from: () => dayStr(0),   to: () => dayStr(0) },
+  { key: 'yesterday', label: 'Yesterday',     from: () => dayStr(-1),  to: () => dayStr(-1) },
+  { key: '7',         label: 'Last 7 days',   from: () => dayStr(-6),  to: () => dayStr(0) },
+  { key: '14',        label: 'Last 14 days',  from: () => dayStr(-13), to: () => dayStr(0) },
+  { key: '28',        label: 'Last 28 days',  from: () => dayStr(-27), to: () => dayStr(0) },
+  { key: '30',        label: 'Last 30 days',  from: () => dayStr(-29), to: () => dayStr(0) },
+  { key: '90',        label: 'Last 90 days',  from: () => dayStr(-89), to: () => dayStr(0) },
+  { key: 'all',       label: 'All time',      from: () => '0000-01-01', to: () => '9999-12-31' },
+];
+
 export function MiniTab() {
   const { ads, loading } = useFbAds();
+  const [rangeKey, setRangeKey] = useState('all');
 
   const campaigns = useMemo(() => {
     const s = new Set<string>();
@@ -77,7 +96,13 @@ export function MiniTab() {
   const [selected, setSelected] = useState<string | null>(null);
   const campaign = selected ?? defaultCampaign;
 
-  const campaignAds = useMemo(() => ads.filter(a => a.campaign_name === campaign), [ads, campaign]);
+  const campaignAds = useMemo(() => {
+    const r = RANGES.find(x => x.key === rangeKey) ?? RANGES[RANGES.length - 1];
+    const from = r.from(), to = r.to();
+    return ads.filter(a =>
+      a.campaign_name === campaign &&
+      a.date_start != null && a.date_start >= from && a.date_start <= to);
+  }, [ads, campaign, rangeKey]);
 
   const overall = useMemo(() => aggregate('Whole campaign', campaignAds), [campaignAds]);
   const byAdset = useMemo(() => groupBy(campaignAds, a => a.adset_name ?? '—'), [campaignAds]);
@@ -98,7 +123,12 @@ export function MiniTab() {
                 style={{ padding: '6px 10px', fontSize: 13, border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm, 6px)', maxWidth: 420 }}>
           {campaigns.map(c => <option key={c} value={c}>{c}</option>)}
         </select>
-        <span style={{ fontSize: 11, color: subtle }}>{campaignAds.length} ads</span>
+        <span style={{ fontSize: 12, color: muted }}>Date</span>
+        <select value={rangeKey} onChange={e => setRangeKey(e.target.value)}
+                style={{ padding: '6px 10px', fontSize: 13, border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm, 6px)' }}>
+          {RANGES.map(r => <option key={r.key} value={r.key}>{r.label}</option>)}
+        </select>
+        <span style={{ fontSize: 11, color: subtle }}>{campaignAds.length} ad-days</span>
       </div>
 
       <Section title="Overall campaign" rows={[overall]} firstCol="Campaign" />

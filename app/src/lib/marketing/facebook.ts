@@ -81,6 +81,7 @@ export type FbAd = {
   adset_name: string | null;
   campaign_id: string | null;
   campaign_name: string | null;
+  date_start: string | null;
   spend_cad: number | null;
   impressions: number | null;
   clicks: number | null;
@@ -95,7 +96,7 @@ export function useFbAds(): { ads: FbAd[]; loading: boolean } {
   const load = useCallback(async () => {
     const { data, error } = await supabase
       .from('fb_ads')
-      .select('ad_id, ad_name, adset_id, adset_name, campaign_id, campaign_name, spend_cad, impressions, clicks, ctr, leads');
+      .select('ad_id, ad_name, adset_id, adset_name, campaign_id, campaign_name, date_start, spend_cad, impressions, clicks, ctr, leads');
     if (!error && data) setAds(data as FbAd[]);
     setLoading(false);
   }, []);
