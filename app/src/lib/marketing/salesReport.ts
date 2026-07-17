@@ -20,6 +20,7 @@ export type SalesRow = {
   country: string | null;
   channel: string;
   campaign: string | null;
+  referrer: string | null;
   plan: string;
   discount_codes: string[];
   revenue: number;
@@ -99,6 +100,7 @@ export function buildSalesReport(
       country: o.country ?? null,
       channel,
       campaign: a.campaign,
+      referrer: o.attribution_referrer ?? null,
       plan,
       discount_codes: codes,
       revenue,
@@ -163,9 +165,16 @@ export function sourceLabel(channel: string): string {
   return channel;
 }
 
+function hostOf(url: string | null): string | null {
+  if (!url) return null;
+  try { return new URL(url).hostname.toLowerCase().replace(/^www\./, ''); } catch { return url; }
+}
+
 function buildNote(r: SalesRow, source: string): string {
   const bits: string[] = [];
   if (source !== UNKNOWN) bits.push(`Saw ${source}`);
+  const ref = hostOf(r.referrer);
+  if (ref) bits.push(`via ${ref}`);
   if (r.campaign) bits.push(`campaign ${r.campaign}`);
   // Visit history / exact creative / time-after-visit aren't captured yet.
   return bits.length ? `${bits.join(', ')} (visit history UNKNOWN)` : UNKNOWN;
@@ -179,7 +188,12 @@ export function reportCells(r: SalesRow): string[] {
   const time = d ? d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' }) : UNKNOWN;
   const codes = r.discount_codes.map(c => c.toUpperCase());
   const others = codes.filter(c => c !== 'WELCOMELILA' && c !== 'CHECKOUTFIVE');
-  const source = sourceLabel(r.channel);
+  let source = sourceLabel(r.channel);
+  // A bare "Referral" is anonymous — name the site (Linktree, a blog, …).
+  if (source === 'Referral') {
+    const ref = hostOf(r.referrer);
+    if (ref) source = `Referral (${ref})`;
+  }
   return [
     r.name,
     date,

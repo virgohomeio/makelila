@@ -107,6 +107,7 @@ type MappedOrder = {
   attribution_source: string | null;
   attribution_medium: string | null;
   attribution_campaign: string | null;
+  attribution_referrer: string | null;
 };
 
 function num(v: string | null | undefined): number | null {
@@ -217,7 +218,12 @@ function mapOrder(
     placed_at: o.created_at ?? null,
     ...(() => {
       const a = deriveAttribution(o.landing_site ?? o.landing_site_ref ?? null, o.referring_site ?? null);
-      return { attribution_source: a.source, attribution_medium: a.medium, attribution_campaign: a.campaign };
+      return {
+        attribution_source: a.source,
+        attribution_medium: a.medium,
+        attribution_campaign: a.campaign,
+        attribution_referrer: o.referring_site ?? null,
+      };
     })(),
   };
 }
@@ -241,20 +247,24 @@ function parseUtm(landingUrl: string | null | undefined): Attribution | null {
   }
 }
 
+function hostOf(url: string | null | undefined): string | null {
+  if (!url) return null;
+  try { return new URL(url).hostname.toLowerCase().replace(/^www\./, ''); } catch { return null; }
+}
+
 /** Classify the referrer host the way Shopify's conversion summary does — a
  *  Google referral with no UTM is "google / organic search", Facebook is social,
- *  etc. Returns null for own-domain / unknown referrers (caller treats those as
- *  direct). */
+ *  Linktree is our link-in-bio, etc. Returns null only when there's no host at
+ *  all (caller then decides direct vs. generic referral). */
 function classifyReferrer(referring: string | null | undefined): Attribution | null {
-  if (!referring) return null;
-  let host: string;
-  try { host = new URL(referring).hostname.toLowerCase(); } catch { return null; }
+  const host = hostOf(referring);
   if (!host) return null;
   const organic = (source: string): Attribution => ({ source, medium: 'organic', campaign: null });
   const social  = (source: string): Attribution => ({ source, medium: 'social', campaign: null });
+  const referral = (source: string): Attribution => ({ source, medium: 'referral', campaign: null });
   if (/(^|\.)google\./.test(host))                         return organic('google');
   if (/(^|\.)bing\./.test(host))                           return organic('bing');
-  if (/duckduckgo|(^|\.)yahoo\.|ecosia|(^|\.)baidu\./.test(host)) return organic(host.replace(/^www\./, ''));
+  if (/duckduckgo|(^|\.)yahoo\.|ecosia|(^|\.)baidu\./.test(host)) return organic(host);
   if (/facebook\.|(^|\.)fb\.|lm\.facebook|l\.facebook/.test(host)) return social('facebook');
   if (/instagram\.|l\.instagram/.test(host))              return social('instagram');
   if (/youtube\.|youtu\.be/.test(host))                   return social('youtube');
@@ -263,6 +273,8 @@ function classifyReferrer(referring: string | null | undefined): Attribution | n
   if (/pinterest\./.test(host))                           return social('pinterest');
   if (/linkedin\.|lnkd\.in/.test(host))                   return social('linkedin');
   if (/reddit\./.test(host))                              return social('reddit');
+  if (/linktr\.ee|linktree/.test(host))                   return referral('linktree');
+  if (/beacons\.ai|bio\.link|milkshake|carrd\./.test(host)) return referral(host);
   return null;
 }
 
@@ -279,14 +291,25 @@ function deriveAttribution(landingUrl: string | null | undefined, referring: str
 type FirstVisit = {
   source?: string | null;
   sourceType?: string | null;
+  referrerUrl?: string | null;
   utmParameters?: { source?: string | null; medium?: string | null; campaign?: string | null } | null;
 };
 
-/** Map Shopify's firstVisit into our source/medium. */
+/** Map Shopify's firstVisit into our source/medium. Precedence: UTM tags →
+ *  the specific referrer host (linktree, instagram, a blog…) → Shopify's own
+ *  source/sourceType label. */
 function journeyAttribution(fv: FirstVisit | null | undefined): Attribution | null {
   if (!fv) return null;
   const utm = fv.utmParameters;
   if (utm?.source) return { source: utm.source, medium: utm.medium ?? null, campaign: utm.campaign ?? null };
+
+  // Prefer the actual referring site so a referral resolves to its real channel
+  // (Instagram, Linktree, someblog.com) rather than a bare "referral".
+  const known = classifyReferrer(fv.referrerUrl);
+  if (known) return known;
+  const host = hostOf(fv.referrerUrl);
+  if (host) return { source: host, medium: 'referral', campaign: null };
+
   const src = (fv.source ?? '').toLowerCase().trim();
   if (!src) return null;
   const type = (fv.sourceType ?? '').toLowerCase();
@@ -308,12 +331,12 @@ async function fetchJourneyAttribution(
   headers: Record<string, string>,
   refs: string[],
   rawByRef: Map<string, ShopifyOrder>,
-): Promise<Map<string, Attribution>> {
-  const out = new Map<string, Attribution>();
+): Promise<Map<string, { attr: Attribution; referrer: string | null }>> {
+  const out = new Map<string, { attr: Attribution; referrer: string | null }>();
   const withId = refs
     .map(ref => ({ ref, id: rawByRef.get(ref)?.id }))
     .filter((x): x is { ref: string; id: number } => typeof x.id === 'number');
-  const FIELDS = 'customerJourneySummary { firstVisit { source sourceType utmParameters { source medium campaign } } }';
+  const FIELDS = 'customerJourneySummary { firstVisit { source sourceType referrerUrl utmParameters { source medium campaign } } }';
   for (let i = 0; i < withId.length; i += 40) {
     const batch = withId.slice(i, i + 40);
     const query = `{ ${batch.map((b, k) => `o${k}: order(id: "gid://shopify/Order/${b.id}") { ${FIELDS} }`).join(' ')} }`;
@@ -327,8 +350,9 @@ async function fetchJourneyAttribution(
       const body = await res.json() as { data?: Record<string, { customerJourneySummary?: { firstVisit?: FirstVisit } } | null> };
       const data = body.data ?? {};
       batch.forEach((b, k) => {
-        const attr = journeyAttribution(data[`o${k}`]?.customerJourneySummary?.firstVisit);
-        if (attr) out.set(b.ref, attr);
+        const fv = data[`o${k}`]?.customerJourneySummary?.firstVisit;
+        const attr = journeyAttribution(fv);
+        if (attr) out.set(b.ref, { attr, referrer: fv?.referrerUrl ?? null });
       });
     } catch { /* non-fatal — keep REST-derived attribution */ }
   }
@@ -417,10 +441,11 @@ serve(async (req: Request) => {
     const journey = await fetchJourneyAttribution(shop, shopHeaders, mapped.map(m => m.order_ref), rawByRef);
     for (const m of mapped) {
       const j = journey.get(m.order_ref);
-      if (j?.source) {
-        m.attribution_source = j.source;
-        m.attribution_medium = j.medium;
-        m.attribution_campaign = j.campaign;
+      if (j?.attr.source) {
+        m.attribution_source = j.attr.source;
+        m.attribution_medium = j.attr.medium;
+        m.attribution_campaign = j.attr.campaign;
+        if (j.referrer) m.attribution_referrer = j.referrer;
       }
     }
   } catch { /* keep REST-derived attribution */ }
@@ -520,6 +545,7 @@ serve(async (req: Request) => {
         attribution_source: m.attribution_source,
         attribution_medium: m.attribution_medium,
         attribution_campaign: m.attribution_campaign,
+        attribution_referrer: m.attribution_referrer,
       };
 
       let addressChanged = false;

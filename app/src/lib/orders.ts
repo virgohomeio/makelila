@@ -106,6 +106,9 @@ export type Order = {
   attribution_source: string | null;
   attribution_medium: string | null;
   attribution_campaign: string | null;
+  // The specific referring URL from Shopify's customer journey (e.g. a Linktree
+  // or Instagram link) — shown in the Report so a "Referral" isn't anonymous.
+  attribution_referrer: string | null;
   shipping_line_title: string | null;
   line_items: LineItem[];
   sales_confirmed_fit: boolean;
