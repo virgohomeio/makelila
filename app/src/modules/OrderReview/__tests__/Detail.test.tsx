@@ -64,7 +64,7 @@ const order: Order = {
   total_usd: 1149,
   subtotal_usd: null, tax_usd: null, discount_total_usd: null,
   discount_codes: null, payment_methods: null, financial_status: null, tax_lines: null, shipping_line_title: null,
-  attribution_source: null, attribution_medium: null, attribution_campaign: null,
+  attribution_source: null, attribution_medium: null, attribution_campaign: null, attribution_referrer: null,
   line_items: [{ sku: 'LL01', name: 'Lila 01', qty: 1, price_usd: 1149 }],
   sales_confirmed_fit: false,
   dispositioned_by: null, dispositioned_at: null,
