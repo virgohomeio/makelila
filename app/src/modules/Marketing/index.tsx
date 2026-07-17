@@ -1,10 +1,8 @@
 import { useState } from 'react';
-import { CacDashboard } from './CacDashboard';
 import { CampaignsTable } from './CampaignsTable';
 import { MiniTab } from './MiniTab';
 import { DashboardTab } from './DashboardTab';
 import { ReportTab } from './ReportTab';
-import { JourneyTab } from './JourneyTab';
 import { SocialTab } from './SocialTab';
 import { EmailTab } from './EmailTab';
 import { WebTab } from './WebTab';
@@ -15,7 +13,7 @@ import { triggerGa4Sync, triggerGscSync } from '../../lib/marketing/google';
 import { triggerFbIgSync } from '../../lib/marketing/social';
 import styles from './Marketing.module.css';
 
-type Tab = 'dashboard' | 'report' | 'campaigns' | 'social' | 'email' | 'web' | 'attribution' | 'journey' | 'sync';
+type Tab = 'dashboard' | 'report' | 'campaigns' | 'social' | 'email' | 'web' | 'sync';
 
 // Every inbound analytics source, fired together by the "Sync All Sources"
 // button. Each returns a short human summary for the status panel.
@@ -133,7 +131,7 @@ export default function Marketing() {
       )}
 
       <div className={styles.tabs}>
-        {(['dashboard', 'report', 'campaigns', 'social', 'email', 'web', 'attribution', 'journey', 'sync'] as Tab[]).map(t => (
+        {(['dashboard', 'report', 'campaigns', 'social', 'email', 'web', 'sync'] as Tab[]).map(t => (
           <button
             key={t}
             className={`${styles.tab} ${tab === t ? styles.tabActive : ''}`}
@@ -192,10 +190,6 @@ export default function Marketing() {
       {tab === 'email' && <EmailTab />}
 
       {tab === 'web' && <WebTab />}
-
-      {tab === 'attribution' && <CacDashboard />}
-
-      {tab === 'journey' && <JourneyTab />}
 
       {tab === 'sync' && (
         <>
