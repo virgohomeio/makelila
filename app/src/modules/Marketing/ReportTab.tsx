@@ -6,6 +6,7 @@ import {
   useCustomerAttribution, type Attribution,
 } from '../../lib/marketing/salesReport';
 import { useKlaviyoJourneys, summarizeJourney } from '../../lib/marketing/journeyTiming';
+import { buildCampaignGroups } from '../../lib/marketing/campaignGroups';
 
 const subtle = 'var(--color-ink-subtle)';
 const muted = 'var(--color-ink-muted)';
@@ -33,36 +34,24 @@ export function ReportTab() {
     return new Date(iso).getTime() >= cutoff;
   };
 
-  // Each Meta campaign's attribution window runs from its start until the NEXT
-  // campaign starts — so a sale in a gap after a campaign ended (but before the
-  // next began) still counts to that (the last active) campaign.
-  const campaignWindows = useMemo(() => {
-    const byId2 = new Map<string, { id: string; name: string; startMs: number }>();
-    for (const c of campaigns) {
-      const startIso = c.metrics?.campaign_start ?? c.date_start ?? null;
-      if (!c.campaign_id || !startIso) continue;
-      const startMs = new Date(startIso).getTime();
-      if (!isFinite(startMs)) continue;
-      const prev = byId2.get(c.campaign_id);
-      if (!prev || startMs < prev.startMs) byId2.set(c.campaign_id, { id: c.campaign_id, name: c.campaign_name, startMs });
-    }
-    const list = Array.from(byId2.values()).sort((a, b) => a.startMs - b.startMs);
-    return list.map((c, i) => ({ ...c, endMs: list[i + 1]?.startMs ?? Infinity }));
-  }, [campaigns]);
-
-  const selectedWindow = campaignFilter === 'all' ? null : (campaignWindows.find(c => c.id === campaignFilter) ?? null);
+  // Curated sale groups (each = many Meta campaigns), piled chronologically:
+  // each group's window runs from its earliest Meta start until the NEXT group
+  // starts — so a sale in the gap after a sale ended still counts to that (the
+  // last active) group.
+  const campaignGroups = useMemo(() => buildCampaignGroups(campaigns), [campaigns]);
+  const selectedGroup = campaignFilter === 'all' ? null : (campaignGroups.find(g => g.key === campaignFilter) ?? null);
 
   const orderMs = (o: Order) => new Date(o.placed_at ?? o.created_at).getTime();
   const inScope = (o: Order) => {
-    if (selectedWindow) { const t = orderMs(o); return t >= selectedWindow.startMs && t < selectedWindow.endMs; }
+    if (selectedGroup) { const t = orderMs(o); return t >= selectedGroup.startMs && t < selectedGroup.endMs; }
     return inRange(o.placed_at ?? o.created_at);
   };
 
   const adSpendCad = useMemo(() => {
-    // Per-campaign spend when a campaign is picked; otherwise the range total.
-    if (selectedWindow) return campaigns.filter(c => c.campaign_id === selectedWindow.id).reduce((s, c) => s + (c.spend_cad ?? 0), 0);
+    // Group spend (all its Meta campaigns) when a group is picked; else range total.
+    if (selectedGroup) return campaigns.filter(c => c.campaign_id && selectedGroup.ids.has(c.campaign_id)).reduce((s, c) => s + (c.spend_cad ?? 0), 0);
     return campaigns.filter(c => inRange(c.date_start)).reduce((s, c) => s + (c.spend_cad ?? 0), 0);
-  }, [campaigns, cutoff, selectedWindow]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [campaigns, cutoff, selectedGroup]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const { rows, kpis } = useMemo(() => {
     const filtered = orders.filter(o => o.kind !== 'replacement' && inScope(o));
@@ -105,25 +94,25 @@ export function ReportTab() {
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
-        <select value={campaignFilter} onChange={e => setCampaignFilter(e.target.value)} style={{ ...selectStyle, maxWidth: 320 }}>
+        <select value={campaignFilter} onChange={e => setCampaignFilter(e.target.value)} style={{ ...selectStyle, maxWidth: 360 }}>
           <option value="all">All campaigns</option>
-          {[...campaignWindows].reverse().map(c => (
-            <option key={c.id} value={c.id}>{c.name}</option>
+          {[...campaignGroups].reverse().map(g => (
+            <option key={g.key} value={g.key}>{g.label}</option>
           ))}
         </select>
         <select value={days} onChange={e => setDays(Number(e.target.value))} style={selectStyle} disabled={campaignFilter !== 'all'}>
           {RANGES.map(r => <option key={r.days} value={r.days}>{r.label}</option>)}
         </select>
         <button onClick={downloadCsv} disabled={rows.length === 0} style={btnStyle}>↓ Download CSV</button>
-        {selectedWindow && (
+        {selectedGroup && (
           <span style={{ fontSize: 11, color: muted }}>
-            {new Date(selectedWindow.startMs).toLocaleDateString('en-CA', { dateStyle: 'medium' })}
+            {new Date(selectedGroup.startMs).toLocaleDateString('en-CA', { dateStyle: 'medium' })}
             {' → '}
-            {selectedWindow.endMs === Infinity ? 'now' : new Date(selectedWindow.endMs).toLocaleDateString('en-CA', { dateStyle: 'medium' })}
+            {selectedGroup.endMs === Infinity ? 'now' : new Date(selectedGroup.endMs).toLocaleDateString('en-CA', { dateStyle: 'medium' })}
             {' (incl. gap after)'}
           </span>
         )}
-        {kpis.adSpendCad === 0 && !selectedWindow && (
+        {kpis.adSpendCad === 0 && !selectedGroup && (
           <span style={{ fontSize: 11, color: muted }}>Ad spend $0 — connect Meta to fill CAC/ROAS/ROI.</span>
         )}
       </div>
