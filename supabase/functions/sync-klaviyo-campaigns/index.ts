@@ -95,11 +95,15 @@ Deno.serve(async (req: Request) => {
     return j({ error: `Klaviyo campaigns request failed: ${(e as Error).message}` }, 502);
   }
 
-  // 3. Per-campaign stats over the last year.
+  // 3. Per-campaign stats over the last year. Use an explicit rolling window
+  //    (now − 365d → now) instead of the `last_12_months` key, which is
+  //    calendar-month based and drops campaigns sent in the current month.
   const statistics = [
     'recipients', 'delivered', 'opens_unique', 'open_rate', 'clicks_unique', 'click_rate',
     'conversions', 'conversion_value', 'unsubscribes', 'unsubscribe_rate', 'bounce_rate', 'spam_complaint_rate',
   ];
+  const end = new Date();
+  const start = new Date(end.getTime() - 365 * 86_400_000);
   let results: ReportResult[] = [];
   try {
     const res = await fetch('https://a.klaviyo.com/api/campaign-values-reports/', {
@@ -109,7 +113,7 @@ Deno.serve(async (req: Request) => {
         data: {
           type: 'campaign-values-report',
           attributes: {
-            timeframe: { key: 'last_12_months' },
+            timeframe: { start: start.toISOString(), end: end.toISOString() },
             conversion_metric_id: conversionMetricId,
             statistics,
           },
