@@ -76,7 +76,7 @@ Deno.serve(async (req: Request) => {
     let url: string | null =
       'https://a.klaviyo.com/api/campaigns/?filter=' +
       encodeURIComponent("equals(messages.channel,'email')") +
-      '&fields%5Bcampaign%5D=name,status,send_time&sort=-created_at&page%5Bsize%5D=100';
+      '&fields%5Bcampaign%5D=name,status,send_time&sort=-created_at';
     let pages = 0;
     while (url && pages < 20) {
       const res = await fetch(url, { headers: kHeaders() });
