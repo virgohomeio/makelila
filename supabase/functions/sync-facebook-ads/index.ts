@@ -120,8 +120,10 @@ Deno.serve(async (req: Request) => {
   const adRows: Record<string, unknown>[] = [];
   try {
     const adFields = 'campaign_id,campaign_name,adset_id,adset_name,ad_id,ad_name,spend,impressions,clicks,ctr,actions,date_start,date_stop';
+    // time_increment=1 → one row per ad PER DAY, so the LILA Mini tab can filter
+    // by date range (today, last 7 days, …) and re-aggregate.
     let url: string | null =
-      `${base}/${acct}/insights?level=ad&fields=${adFields}&date_preset=maximum&limit=500&access_token=${encodeURIComponent(token)}`;
+      `${base}/${acct}/insights?level=ad&fields=${adFields}&date_preset=maximum&time_increment=1&limit=500&access_token=${encodeURIComponent(token)}`;
     let pages = 0;
     const n = (v?: string) => (v != null && v !== '' ? Number(v) : null);
     while (url && pages < 40) {
@@ -151,7 +153,12 @@ Deno.serve(async (req: Request) => {
       pages++;
     }
     if (adRows.length) {
-      await admin.from('fb_ads').upsert(adRows, { onConflict: 'ad_id,date_start' });
+      // Clean-replace: fb_ads is fully re-derived here, so wipe first to avoid
+      // stale lifetime rows double-counting alongside the new daily rows.
+      await admin.from('fb_ads').delete().neq('ad_id', '');
+      for (let i = 0; i < adRows.length; i += 500) {
+        await admin.from('fb_ads').upsert(adRows.slice(i, i + 500), { onConflict: 'ad_id,date_start' });
+      }
     }
   } catch { /* non-fatal — campaign sync already succeeded */ }
 
