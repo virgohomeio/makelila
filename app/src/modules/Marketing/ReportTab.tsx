@@ -1,5 +1,5 @@
 import { useMemo, useState, type CSSProperties } from 'react';
-import { useOrders, type Order } from '../../lib/orders';
+import { useAllOrders, type Order } from '../../lib/orders';
 import { useFbCampaigns, useFbDemographics } from '../../lib/marketing/facebook';
 import {
   buildSalesReport, salesRowsToCsv, reportCells, REPORT_COLUMNS, UNKNOWN,
@@ -19,7 +19,7 @@ const RANGES = [
 ];
 
 export function ReportTab() {
-  const { all: orders, loading: ordersLoading } = useOrders();
+  const { orders, loading: ordersLoading } = useAllOrders();
   const { byId, byEmail } = useCustomerAttribution();
   const { byCustomer: journeys } = useKlaviyoJourneys();
   const { campaigns } = useFbCampaigns(365);

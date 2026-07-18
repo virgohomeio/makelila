@@ -479,6 +479,27 @@ export function useOrders(): {
   }, [cache, fulfilledOrderIds, shippedCustomers, loading]);
 }
 
+/** Every order in the table (including shipped/fulfilled) — for reporting, where
+ *  we want the full sales history, not just the active Order-Review queue. */
+export function useAllOrders(): { orders: Order[]; loading: boolean } {
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    let cancelled = false;
+    void supabase
+      .from('orders')
+      .select('*')
+      .order('placed_at', { ascending: false, nullsFirst: false })
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (!error && data) setOrders(data as Order[]);
+        setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, []);
+  return { orders, loading };
+}
+
 export function useOrder(id: string | null): { order: Order | null; loading: boolean } {
   const { all, loading } = useOrders();
   const order = id ? all.find(o => o.id === id) ?? null : null;
