@@ -220,10 +220,22 @@ function labelWithSite(channel: string, referrer: string | null): string {
   return REFERRER_NAMES[host] ?? `Referral (${host})`;
 }
 
-function buildNote(r: SalesRow, firstLabel: string, lastLabel: string | null): string {
+// The store's own domains — a "referral" from these is internal navigation, NOT
+// a real acquisition source, so it's treated like Direct.
+const STORE_HOSTS = ['lilacomposter.com'];
+
+/** A real acquisition source, or null for Direct / self-referral / unknown, so
+ *  Direct is only ever a last resort. */
+function realSource(label: string | null): string | null {
+  if (!label || label === UNKNOWN || label === 'Direct') return null;
+  if (STORE_HOSTS.some(h => label.toLowerCase().includes(h))) return null;
+  return label;
+}
+
+function buildNote(r: SalesRow, source: string, secondary: string | null): string {
   const bits: string[] = [];
-  if (firstLabel !== UNKNOWN) bits.push(`First visit: ${firstLabel}`);
-  if (lastLabel && lastLabel !== UNKNOWN && lastLabel !== firstLabel) bits.push(`Purchase visit: ${lastLabel}`);
+  if (source !== UNKNOWN) bits.push(`Saw ${source}`);
+  if (secondary) bits.push(`also ${secondary}`);
   if (r.campaign) bits.push(`campaign ${r.campaign}`);
   // Visit history from Klaviyo when we have it; otherwise flag it's not captured.
   bits.push(r.journey_note ?? 'visit history UNKNOWN');
@@ -239,13 +251,19 @@ export function reportCells(r: SalesRow): string[] {
   const time = d ? d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' }) : UNKNOWN;
   const codes = r.discount_codes.map(c => c.toUpperCase());
   const others = codes.filter(c => c !== 'WELCOMELILA' && c !== 'CHECKOUTFIVE');
-  // First (acquisition) + purchase (last) visit sources, each named with its
-  // site. Source column shows "first → purchase" when they differ.
+  // Source = the most meaningful real source across the first (acquisition) and
+  // purchase (last) visits. Direct is only used when NO visit has a real source
+  // (a self-referral off our own domain counts as internal, not a source).
   const firstLabel = labelWithSite(r.channel, r.referrer);
   const lastLabel = r.last_channel ? labelWithSite(r.last_channel, r.last_referrer) : null;
-  const source = (!lastLabel || lastLabel === firstLabel || lastLabel === UNKNOWN)
-    ? firstLabel
-    : `${firstLabel} → ${lastLabel}`;
+  const firstReal = realSource(firstLabel);
+  const lastReal = realSource(lastLabel);
+  const source = firstReal ?? lastReal
+    ?? ((firstLabel === 'Direct' || lastLabel === 'Direct') ? 'Direct' : UNKNOWN);
+  // A second distinct real source (e.g. first Meta Ad, purchase Linktree) → Notes.
+  const secondary = firstReal && lastReal && firstReal !== lastReal
+    ? (source === firstReal ? lastReal : firstReal)
+    : null;
   return [
     r.campaign_group ?? '—',
     r.name,
@@ -265,7 +283,7 @@ export function reportCells(r: SalesRow): string[] {
     others[0] ?? 'No',
     others[1] ?? 'No',
     r.purchase_time ?? UNKNOWN,   // from the buyer's Klaviyo purchase-visit timing
-    buildNote(r, firstLabel, lastLabel),
+    buildNote(r, source, secondary),
   ];
 }
 

@@ -24,7 +24,7 @@ export function ReportTab() {
   const { byCustomer: journeys } = useKlaviyoJourneys();
   const { campaigns } = useFbCampaigns(365);
   const { demographics } = useFbDemographics();
-  const [days, setDays] = useState(60);
+  const [days, setDays] = useState(0);   // default: All time — show every sale
   const [campaignFilter, setCampaignFilter] = useState('all');
   const [pageSize, setPageSize] = useState(20);
   const [page, setPage] = useState(0);
