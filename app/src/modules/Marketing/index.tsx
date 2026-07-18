@@ -7,7 +7,7 @@ import { SocialTab } from './SocialTab';
 import { EmailTab } from './EmailTab';
 import { WebTab } from './WebTab';
 import { SystemOfRecordCard } from './SystemOfRecordCard';
-import { useFbCampaigns, triggerFbSync } from '../../lib/marketing/facebook';
+import { useFbCampaigns, triggerFbSync, triggerFbDemographicsSync } from '../../lib/marketing/facebook';
 import { useKlaviyoSyncStatus, triggerKlaviyoSync, triggerKlaviyoEventsSync, triggerKlaviyoCampaignsSync, triggerKlaviyoProfileLink } from '../../lib/marketing/klaviyo';
 import { triggerGa4Sync, triggerGscSync } from '../../lib/marketing/google';
 import { triggerFbIgSync } from '../../lib/marketing/social';
@@ -28,6 +28,7 @@ const SYNC_ALL_TASKS: { label: string; run: () => Promise<string> }[] = [
     return `${d.imported ?? 0} new, ${d.refreshed ?? 0} refreshed`;
   } },
   { label: 'Meta Ads', run: async () => `${(await triggerFbSync()).synced} campaign rows` },
+  { label: 'Ad demographics', run: async () => `${(await triggerFbDemographicsSync()).synced} purchase segments` },
   { label: 'Email campaigns', run: async () => { const r = await triggerKlaviyoCampaignsSync(); return r.note ?? `${r.synced} campaigns`; } },
   { label: 'Klaviyo journey', run: async () => {
     // Link profiles first (email → klaviyo_profile_id), then pull that

@@ -31,6 +31,9 @@ export type SalesRow = {
   // Derived from the buyer's Klaviyo events (null when we have none).
   purchase_time: string | null;
   journey_note: string | null;
+  // Best-effort from Meta's purchase demographics (null when not a clean match).
+  age: string | null;
+  gender: string | null;
 };
 
 export type Breakdown = { key: string; count: number; revenue: number };
@@ -72,17 +75,19 @@ function bump(map: Map<string, Breakdown>, key: string, revenue: number) {
 const sortBreakdown = (m: Map<string, Breakdown>) => Array.from(m.values()).sort((a, b) => b.revenue - a.revenue);
 
 export type JourneyInfo = { timeLabel: string | null; note: string | null };
+export type Demo = { age: string | null; gender: string | null };
 
 /** Build the report from sale orders + an attribution resolver + Meta spend.
  *  `journey` (optional) supplies the Klaviyo-derived purchase-time + visit note.
- *  `campaignName` (optional) turns a raw campaign value into a readable name
- *  (maps Meta campaign ids → their name; drops bare numeric ids). */
+ *  `campaignName` (optional) turns a raw campaign value into a readable name.
+ *  `demo` (optional) supplies the best-effort Meta age/gender for the buyer. */
 export function buildSalesReport(
   orders: Order[],
   resolve: (o: Order) => Attribution,
   adSpendCad: number,
   journey?: (o: Order) => JourneyInfo,
   campaignName?: (raw: string) => string | null,
+  demo?: (o: Order) => Demo,
 ): { rows: SalesRow[]; kpis: SalesKpis } {
   const sales = orders.filter(o => o.kind !== 'replacement');
 
@@ -122,6 +127,8 @@ export function buildSalesReport(
       currency: o.currency || 'USD',
       purchase_time: journey?.(o)?.timeLabel ?? null,
       journey_note: journey?.(o)?.note ?? null,
+      age: demo?.(o)?.age ?? null,
+      gender: demo?.(o)?.gender ?? null,
     };
   });
 
@@ -240,8 +247,10 @@ export function reportCells(r: SalesRow): string[] {
     r.city || UNKNOWN,
     r.region || UNKNOWN,
     (r.country && COUNTRY_NAME[r.country]) || r.country || UNKNOWN,
-    UNKNOWN,                 // Age Range — needs Meta/GA demographics
-    UNKNOWN,                 // Gender    — needs Meta/GA demographics
+    r.age && r.age.toLowerCase() !== 'unknown' ? r.age : UNKNOWN,       // best-effort from Meta
+    r.gender && r.gender.toLowerCase() !== 'unknown'                    // best-effort from Meta
+      ? r.gender.charAt(0).toUpperCase() + r.gender.slice(1).toLowerCase()
+      : UNKNOWN,
     source,
     r.plan,
     yesNo(codes, 'WELCOMELILA'),
