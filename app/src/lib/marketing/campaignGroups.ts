@@ -53,7 +53,10 @@ export function buildCampaignGroups(campaigns: FbCampaign[]): CampaignGroup[] {
     if (EXCLUDE.test(name)) continue;   // LILA Mini — not a Shopify sales bucket
     const def = GROUP_DEFS.find(g => g.match.test(name));
     if (!def) continue;
-    const startIso = c.metrics?.campaign_start ?? c.date_start ?? null;
+    // "First day of first batch" = the campaign's first delivery day (date_start
+    // from the lifetime insights). Preferred over Meta's configured start_time,
+    // which can predate delivery / be edited and scrambles the timeline.
+    const startIso = c.date_start ?? c.metrics?.campaign_start ?? null;
     const startMs = startIso ? new Date(startIso).getTime() : NaN;
     const g = acc.get(def.key) ?? { name: def.name, startMs: Infinity, ids: new Set<string>(), discount: null };
     if (isFinite(startMs)) g.startMs = Math.min(g.startMs, startMs);
