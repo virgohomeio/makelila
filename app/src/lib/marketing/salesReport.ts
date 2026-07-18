@@ -34,6 +34,8 @@ export type SalesRow = {
   // Best-effort from Meta's purchase demographics (null when not a clean match).
   age: string | null;
   gender: string | null;
+  // Which campaign group this sale piled into (for verifying the bucketing).
+  campaign_group: string | null;
 };
 
 export type Breakdown = { key: string; count: number; revenue: number };
@@ -80,7 +82,8 @@ export type Demo = { age: string | null; gender: string | null };
 /** Build the report from sale orders + an attribution resolver + Meta spend.
  *  `journey` (optional) supplies the Klaviyo-derived purchase-time + visit note.
  *  `campaignName` (optional) turns a raw campaign value into a readable name.
- *  `demo` (optional) supplies the best-effort Meta age/gender for the buyer. */
+ *  `demo` (optional) supplies the best-effort Meta age/gender for the buyer.
+ *  `groupOf` (optional) supplies which campaign bucket the sale fell into. */
 export function buildSalesReport(
   orders: Order[],
   resolve: (o: Order) => Attribution,
@@ -88,6 +91,7 @@ export function buildSalesReport(
   journey?: (o: Order) => JourneyInfo,
   campaignName?: (raw: string) => string | null,
   demo?: (o: Order) => Demo,
+  groupOf?: (o: Order) => string | null,
 ): { rows: SalesRow[]; kpis: SalesKpis } {
   const sales = orders.filter(o => o.kind !== 'replacement');
 
@@ -129,6 +133,7 @@ export function buildSalesReport(
       journey_note: journey?.(o)?.note ?? null,
       age: demo?.(o)?.age ?? null,
       gender: demo?.(o)?.gender ?? null,
+      campaign_group: groupOf?.(o) ?? null,
     };
   });
 
@@ -165,9 +170,10 @@ export function buildSalesReport(
 // still needs a data source rather than being silently blank.
 export const UNKNOWN = 'UNKNOWN';
 
-// Exact column order of the manual "Late Spring Sale" tracker.
+// Manual tracker columns, prefixed with a Campaign column so the bucketing each
+// sale piled into is visible for verification.
 export const REPORT_COLUMNS = [
-  'Name', 'Date', 'Time (EST)', 'City', 'Province/State', 'Country',
+  'Campaign', 'Name', 'Date', 'Time (EST)', 'City', 'Province/State', 'Country',
   'Age Range', 'Gender', 'Source', 'Buyer Plan',
   'Discount WELCOMELILA?', 'Discount CHECKOUTFIVE?', 'Other Codes?', 'Other Code 2',
   'Purchase Time after Purchase Visit', 'Notes',
@@ -241,6 +247,7 @@ export function reportCells(r: SalesRow): string[] {
     ? firstLabel
     : `${firstLabel} → ${lastLabel}`;
   return [
+    r.campaign_group ?? '—',
     r.name,
     date,
     time,
