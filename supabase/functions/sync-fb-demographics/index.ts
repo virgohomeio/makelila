@@ -15,16 +15,17 @@ import { authenticate } from '../_shared/auth.ts';
 
 type ActionItem = { action_type?: string; value?: string };
 
-// First matching purchase action (priority order) — not a sum, to avoid Meta's
-// overlapping purchase action types double-counting.
-function purchaseCount(actions?: ActionItem[]): number {
-  const keys = ['offsite_conversion.fb_pixel_purchase', 'purchase', 'onsite_web_purchase', 'omni_purchase'];
+// First matching action (priority order) — not a sum, to avoid Meta's
+// overlapping action types double-counting.
+function firstAction(actions: ActionItem[] | undefined, keys: string[]): number {
   for (const k of keys) {
     const hit = actions?.find(a => a.action_type === k);
     if (hit?.value != null && hit.value !== '') return Number(hit.value) || 0;
   }
   return 0;
 }
+const purchaseCount = (a?: ActionItem[]) => firstAction(a, ['offsite_conversion.fb_pixel_purchase', 'purchase', 'onsite_web_purchase', 'omni_purchase']);
+const leadCount     = (a?: ActionItem[]) => firstAction(a, ['offsite_conversion.fb_pixel_lead', 'lead', 'onsite_conversion.lead_grouped']);
 
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
@@ -59,16 +60,19 @@ Deno.serve(async (req: Request) => {
       const body = await res.json();
       if (!res.ok) return j({ error: `Meta insights ${res.status}: ${JSON.stringify(body?.error ?? body).slice(0, 300)}` }, 502);
       for (const r of (body.data ?? []) as Array<Record<string, unknown> & { actions?: ActionItem[] }>) {
-        const campaignName = String(r.campaign_name ?? '');
-        if (/\bmini\b/i.test(campaignName)) continue;      // Shopline, not Shopify
         const purchases = purchaseCount(r.actions);
-        if (!r.campaign_id || !r.date_start || purchases <= 0) continue;
+        const leads = leadCount(r.actions);
+        // Keep any converting segment (a lead OR a purchase). Mini is included
+        // here as its own set; the Journey Report filters it out client-side.
+        if (!r.campaign_id || !r.date_start || (purchases <= 0 && leads <= 0)) continue;
         rows.push({
           campaign_id: r.campaign_id,
+          campaign_name: String(r.campaign_name ?? ''),
           date: r.date_start,
           age: String(r.age ?? 'unknown'),
           gender: String(r.gender ?? 'unknown'),
           country: String(r.country ?? 'unknown'),
+          leads,
           purchases,
           synced_at: now,
         });

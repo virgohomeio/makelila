@@ -6,6 +6,7 @@ import { ReportTab } from './ReportTab';
 import { SocialTab } from './SocialTab';
 import { EmailTab } from './EmailTab';
 import { WebTab } from './WebTab';
+import { DemographicsTab } from './DemographicsTab';
 import { SystemOfRecordCard } from './SystemOfRecordCard';
 import { useFbCampaigns, triggerFbSync, triggerFbDemographicsSync } from '../../lib/marketing/facebook';
 import { useKlaviyoSyncStatus, triggerKlaviyoSync, triggerKlaviyoEventsSync, triggerKlaviyoCampaignsSync, triggerKlaviyoProfileLink } from '../../lib/marketing/klaviyo';
@@ -14,7 +15,7 @@ import { triggerFbIgSync } from '../../lib/marketing/social';
 import { supabase } from '../../lib/supabase';
 import styles from './Marketing.module.css';
 
-type Tab = 'dashboard' | 'report' | 'campaigns' | 'social' | 'email' | 'web' | 'sync';
+type Tab = 'dashboard' | 'report' | 'campaigns' | 'social' | 'email' | 'web' | 'demographics' | 'sync';
 
 // Every inbound analytics source, fired together by the "Sync All Sources"
 // button. Each returns a short human summary for the status panel.
@@ -52,6 +53,7 @@ const TAB_LABELS: Record<Tab, string> = {
   social: 'Social',
   email: 'Email',
   web: 'Web',
+  demographics: 'Demographics',
   sync: 'Sync',
 };
 
@@ -158,7 +160,7 @@ export default function Marketing() {
       )}
 
       <div className={styles.tabs}>
-        {(['dashboard', 'report', 'campaigns', 'social', 'email', 'web', 'sync'] as Tab[]).map(t => (
+        {(['dashboard', 'report', 'campaigns', 'social', 'email', 'web', 'demographics', 'sync'] as Tab[]).map(t => (
           <button
             key={t}
             className={`${styles.tab} ${tab === t ? styles.tabActive : ''}`}
@@ -217,6 +219,8 @@ export default function Marketing() {
       {tab === 'email' && <EmailTab />}
 
       {tab === 'web' && <WebTab />}
+
+      {tab === 'demographics' && <DemographicsTab />}
 
       {tab === 'sync' && (
         <>

@@ -116,14 +116,17 @@ export async function triggerFbSync(): Promise<{ synced: number }> {
 
 export type FbDemographic = {
   campaign_id: string;
+  campaign_name: string | null;
   date: string;
   age: string;
   gender: string;
   country: string;
+  leads: number | null;
   purchases: number | null;
 };
 
-/** Meta purchase segments (age×gender×country×day) for Age/Gender auto-match. */
+/** Meta lead/purchase segments (age×gender×country×day) — powers the Journey
+ *  Report age/gender match and the Demographics page. */
 export function useFbDemographics(): { demographics: FbDemographic[]; loading: boolean } {
   const [demographics, setDemographics] = useState<FbDemographic[]>([]);
   const [loading, setLoading] = useState(true);
@@ -131,7 +134,7 @@ export function useFbDemographics(): { demographics: FbDemographic[]; loading: b
     let cancelled = false;
     void supabase
       .from('fb_demographics')
-      .select('campaign_id, date, age, gender, country, purchases')
+      .select('campaign_id, campaign_name, date, age, gender, country, leads, purchases')
       .then(({ data, error }) => {
         if (cancelled) return;
         if (!error && data) setDemographics(data as FbDemographic[]);
