@@ -43,11 +43,15 @@ export function DemographicsTab() {
 
   const { total, byGender, byAge, byCountry } = useMemo(() => {
     const rows = demographics.filter(d => setOf(d.campaign_name ?? '') === set);
-    const total = rows.reduce((s, d) => s + val(d, metric), 0);
-    const byGender = groupSum(rows, d => gender(d.gender), metric).sort((a, b) => b.value - a.value);
-    const byAge = groupSum(rows, d => d.age, metric)
+    // Two breakdown kinds share the table: age×gender rows (country='all') and
+    // country rows (age/gender='all'). Split them so we never double-count.
+    const ag = rows.filter(d => d.age !== 'all' && d.gender !== 'all');
+    const geo = rows.filter(d => d.country !== 'all');
+    const total = ag.reduce((s, d) => s + val(d, metric), 0);
+    const byGender = groupSum(ag, d => gender(d.gender), metric).sort((a, b) => b.value - a.value);
+    const byAge = groupSum(ag, d => d.age, metric)
       .sort((a, b) => (AGE_ORDER.indexOf(a.label) - AGE_ORDER.indexOf(b.label)) || (b.value - a.value));
-    const byCountry = groupSum(rows, d => country(d.country), metric).sort((a, b) => b.value - a.value);
+    const byCountry = groupSum(geo, d => country(d.country), metric).sort((a, b) => b.value - a.value);
     return { total, byGender, byAge, byCountry };
   }, [demographics, set, metric]);
 
