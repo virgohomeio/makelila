@@ -14,6 +14,13 @@ select cron.schedule(
   $q$select public.invoke_edge_function('sync-facebook-ads', '{}'::jsonb)$q$
 );
 
+-- Meta purchase demographics (age×gender×country×day) — heavier, once a day.
+select cron.schedule(
+  'sync-fb-demographics-daily',
+  '20 8 * * *',
+  $q$select public.invoke_edge_function('sync-fb-demographics', '{}'::jsonb)$q$
+);
+
 -- Link customers → Klaviyo profile ids (prerequisite for the events pull).
 -- Runs at :05, ahead of the :15 events pull.
 select cron.schedule(

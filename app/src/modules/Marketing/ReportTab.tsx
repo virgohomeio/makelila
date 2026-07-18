@@ -1,9 +1,9 @@
 import { useMemo, useState, type CSSProperties } from 'react';
 import { useOrders, type Order } from '../../lib/orders';
-import { useFbCampaigns } from '../../lib/marketing/facebook';
+import { useFbCampaigns, useFbDemographics } from '../../lib/marketing/facebook';
 import {
   buildSalesReport, salesRowsToCsv, reportCells, REPORT_COLUMNS, UNKNOWN,
-  useCustomerAttribution, type Attribution,
+  useCustomerAttribution, type Attribution, type Demo,
 } from '../../lib/marketing/salesReport';
 import { useKlaviyoJourneys, summarizeJourney } from '../../lib/marketing/journeyTiming';
 import { buildCampaignGroups } from '../../lib/marketing/campaignGroups';
@@ -23,6 +23,7 @@ export function ReportTab() {
   const { byId, byEmail } = useCustomerAttribution();
   const { byCustomer: journeys } = useKlaviyoJourneys();
   const { campaigns } = useFbCampaigns(365);
+  const { demographics } = useFbDemographics();
   const [days, setDays] = useState(60);
   const [campaignFilter, setCampaignFilter] = useState('all');
 
@@ -78,8 +79,45 @@ export function ReportTab() {
       if (/^\d+$/.test(raw)) return null;
       return raw.replace(/[_-]+/g, ' ').trim();
     };
-    return buildSalesReport(filtered, resolve, adSpendCad, journey, campaignName);
-  }, [orders, byId, byEmail, journeys, campaigns, adSpendCad, cutoff, campaignFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    // Best-effort Age/Gender: match a sale to a Meta purchase segment only when
+    // it's unambiguous — the day+country had exactly ONE Shopify sale AND Meta
+    // shows exactly ONE purchase in a single age×gender segment. Else UNKNOWN.
+    const dayKey = (iso: string, country: string) => {
+      const d = new Date(iso);
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}|${country}`;
+    };
+    const demoByKey = new Map<string, Map<string, number>>();
+    for (const d of demographics) {
+      if (!d.purchases) continue;
+      const k = `${d.date}|${d.country}`;
+      const seg = `${d.age}|${d.gender}`;
+      const m = demoByKey.get(k) ?? new Map<string, number>();
+      m.set(seg, (m.get(seg) ?? 0) + (d.purchases ?? 0));
+      demoByKey.set(k, m);
+    }
+    const salesByKey = new Map<string, number>();
+    for (const o of orders) {
+      if (o.kind === 'replacement') continue;
+      const k = dayKey(o.placed_at ?? o.created_at, o.country);
+      salesByKey.set(k, (salesByKey.get(k) ?? 0) + 1);
+    }
+    const demo = (o: Order): Demo => {
+      const k = dayKey(o.placed_at ?? o.created_at, o.country);
+      const segs = demoByKey.get(k);
+      if (!segs) return { age: null, gender: null };
+      const total = Array.from(segs.values()).reduce((a, b) => a + b, 0);
+      const distinct = Array.from(segs.entries()).filter(([, v]) => v > 0);
+      const sales = salesByKey.get(k) ?? 0;
+      if (sales === 1 && total === 1 && distinct.length === 1) {
+        const [age, gender] = distinct[0][0].split('|');
+        return { age, gender };
+      }
+      return { age: null, gender: null };
+    };
+
+    return buildSalesReport(filtered, resolve, adSpendCad, journey, campaignName, demo);
+  }, [orders, byId, byEmail, journeys, campaigns, demographics, adSpendCad, cutoff, campaignFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const downloadCsv = () => {
     const blob = new Blob([salesRowsToCsv(rows)], { type: 'text/csv;charset=utf-8' });
@@ -129,10 +167,10 @@ export function ReportTab() {
       </div>
 
       <div style={{ fontSize: 11, color: muted, marginBottom: 14 }}>
-        One row per buyer, mirroring the manual Sale tracker. <strong>Purchase time</strong> + visit history in Notes are
-        auto-filled from the buyer's Klaviyo events (run Sync All so profiles link + events pull; UNKNOWN until then).
-        Still manual/unavailable: <strong>Age / Gender</strong> (no per-buyer source) and the exact <strong>ad creative</strong>
-        (v21a…) in Notes. Everything else is pulled live from the order.
+        One row per buyer, mirroring the manual Sale tracker. <strong>Purchase time</strong> + visit history are auto-filled
+        from Klaviyo; <strong>Age / Gender</strong> are best-effort from Meta's purchase demographics — filled only when a
+        sale is an unambiguous match (that day + country had one sale and Meta shows one purchase in one age/gender segment),
+        otherwise UNKNOWN. Still manual: the exact <strong>ad creative</strong> (v21a…) in Notes. Run Sync All to populate.
       </div>
 
       {/* Per-buyer table — exact tracker columns */}

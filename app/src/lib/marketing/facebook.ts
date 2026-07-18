@@ -113,3 +113,37 @@ export async function triggerFbSync(): Promise<{ synced: number }> {
   if (error) throw new Error(await fnErrorMessage(error));
   return data as { synced: number };
 }
+
+export type FbDemographic = {
+  campaign_id: string;
+  date: string;
+  age: string;
+  gender: string;
+  country: string;
+  purchases: number | null;
+};
+
+/** Meta purchase segments (age×gender×country×day) for Age/Gender auto-match. */
+export function useFbDemographics(): { demographics: FbDemographic[]; loading: boolean } {
+  const [demographics, setDemographics] = useState<FbDemographic[]>([]);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    let cancelled = false;
+    void supabase
+      .from('fb_demographics')
+      .select('campaign_id, date, age, gender, country, purchases')
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (!error && data) setDemographics(data as FbDemographic[]);
+        setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, []);
+  return { demographics, loading };
+}
+
+export async function triggerFbDemographicsSync(): Promise<{ synced: number }> {
+  const { data, error } = await supabase.functions.invoke('sync-fb-demographics');
+  if (error) throw new Error(await fnErrorMessage(error));
+  return data as { synced: number };
+}
