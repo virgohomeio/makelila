@@ -116,8 +116,15 @@ export function ReportTab() {
       return { age: null, gender: null };
     };
 
-    return buildSalesReport(filtered, resolve, adSpendCad, journey, campaignName, demo);
-  }, [orders, byId, byEmail, journeys, campaigns, demographics, adSpendCad, cutoff, campaignFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+    // Which campaign bucket each sale piled into (shown in the Campaign column).
+    const groupOf = (o: Order): string | null => {
+      const t = orderMs(o);
+      const g = campaignGroups.find(gr => t >= gr.startMs && t < gr.endMs);
+      return g ? g.label : null;
+    };
+
+    return buildSalesReport(filtered, resolve, adSpendCad, journey, campaignName, demo, groupOf);
+  }, [orders, byId, byEmail, journeys, campaigns, campaignGroups, demographics, adSpendCad, cutoff, campaignFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const downloadCsv = () => {
     const blob = new Blob([salesRowsToCsv(rows)], { type: 'text/csv;charset=utf-8' });
