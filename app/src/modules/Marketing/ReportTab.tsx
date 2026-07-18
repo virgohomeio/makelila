@@ -26,6 +26,8 @@ export function ReportTab() {
   const { demographics } = useFbDemographics();
   const [days, setDays] = useState(60);
   const [campaignFilter, setCampaignFilter] = useState('all');
+  const [pageSize, setPageSize] = useState(20);
+  const [page, setPage] = useState(0);
 
   const cutoff = useMemo(() => (days ? Date.now() - days * 86_400_000 : 0), [days]);
 
@@ -126,6 +128,10 @@ export function ReportTab() {
     return buildSalesReport(filtered, resolve, adSpendCad, journey, campaignName, demo, groupOf);
   }, [orders, byId, byEmail, journeys, campaigns, campaignGroups, demographics, adSpendCad, cutoff, campaignFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const pageCount = Math.max(1, Math.ceil(rows.length / pageSize));
+  const safePage = Math.min(page, pageCount - 1);
+  const pagedRows = rows.slice(safePage * pageSize, (safePage + 1) * pageSize);
+
   const downloadCsv = () => {
     const blob = new Blob([salesRowsToCsv(rows)], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
@@ -139,14 +145,17 @@ export function ReportTab() {
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
-        <select value={campaignFilter} onChange={e => setCampaignFilter(e.target.value)} style={{ ...selectStyle, maxWidth: 360 }}>
+        <select value={campaignFilter} onChange={e => { setCampaignFilter(e.target.value); setPage(0); }} style={{ ...selectStyle, maxWidth: 360 }}>
           <option value="all">All campaigns</option>
           {[...campaignGroups].reverse().map(g => (
             <option key={g.key} value={g.key}>{g.label}</option>
           ))}
         </select>
-        <select value={days} onChange={e => setDays(Number(e.target.value))} style={selectStyle} disabled={campaignFilter !== 'all'}>
+        <select value={days} onChange={e => { setDays(Number(e.target.value)); setPage(0); }} style={selectStyle} disabled={campaignFilter !== 'all'}>
           {RANGES.map(r => <option key={r.days} value={r.days}>{r.label}</option>)}
+        </select>
+        <select value={pageSize} onChange={e => { setPageSize(Number(e.target.value)); setPage(0); }} style={selectStyle} title="Rows per page">
+          {[20, 40, 60, 80, 100].map(n => <option key={n} value={n}>{n} / page</option>)}
         </select>
         <button onClick={downloadCsv} disabled={rows.length === 0} style={btnStyle}>↓ Download CSV</button>
         {selectedGroup && (
@@ -192,7 +201,7 @@ export function ReportTab() {
               </tr>
             </thead>
             <tbody>
-              {rows.map(r => (
+              {pagedRows.map(r => (
                 <tr key={r.order_ref} style={{ borderTop: '1px solid var(--color-border)' }}>
                   {reportCells(r).map((cell, i) => (
                     <td key={i} style={{
@@ -207,6 +216,20 @@ export function ReportTab() {
               {rows.length === 0 && <tr><td colSpan={REPORT_COLUMNS.length} style={{ padding: 12, color: subtle }}>No sales in this window.</td></tr>}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {rows.length > 0 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 18, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 11, color: muted, marginRight: 6 }}>
+            {safePage * pageSize + 1}–{Math.min((safePage + 1) * pageSize, rows.length)} of {rows.length}
+          </span>
+          <button onClick={() => setPage(safePage - 1)} disabled={safePage === 0} style={pageBtn}>‹ Prev</button>
+          {pageWindow(safePage, pageCount).map((p, i) => p === -1
+            ? <span key={`e${i}`} style={{ fontSize: 12, color: subtle, padding: '0 2px' }}>…</span>
+            : <button key={p} onClick={() => setPage(p)} style={p === safePage ? pageBtnActive : pageBtn}>{p + 1}</button>,
+          )}
+          <button onClick={() => setPage(safePage + 1)} disabled={safePage >= pageCount - 1} style={pageBtn}>Next ›</button>
         </div>
       )}
 
@@ -253,6 +276,24 @@ function Kpi({ label, value }: { label: string; value: string }) {
 function money(n: number): string {
   return `$${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 }
+
+// Page indices to show, with -1 marking an ellipsis gap (first, last, ±2 around current).
+function pageWindow(current: number, count: number): number[] {
+  const out: number[] = [];
+  for (let p = 0; p < count; p++) {
+    if (p === 0 || p === count - 1 || Math.abs(p - current) <= 2) out.push(p);
+    else if (out[out.length - 1] !== -1) out.push(-1);
+  }
+  return out;
+}
+
+const pageBtn: CSSProperties = {
+  fontSize: 12, padding: '4px 9px', border: '1px solid var(--color-border)',
+  borderRadius: 6, background: 'var(--color-surface)', cursor: 'pointer',
+};
+const pageBtnActive: CSSProperties = {
+  ...pageBtn, background: 'var(--color-crimson)', color: '#fff', borderColor: 'var(--color-crimson)',
+};
 
 const selectStyle: CSSProperties = {
   padding: '6px 10px', fontSize: 13, border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm, 6px)',
