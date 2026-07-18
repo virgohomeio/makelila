@@ -6,10 +6,16 @@ import type { FbCampaign } from './facebook';
 // the campaign name (e.g. "…30% off…" → "30% Off"). Order in the Journey Report
 // is chronological (piled: each group runs until the next group starts).
 
+// LILA Mini sells through Shopline/Smartpush, NOT Shopify. The Journey Report is
+// Shopify (LILA Pro) sales only, so Mini campaigns are excluded from the buckets
+// entirely — otherwise a Mini campaign's date window would wrongly capture the
+// Shopify Pro sales that fall inside it (its own LILA Mini tab under Campaigns
+// already covers Mini analytics from its real source).
+const EXCLUDE = /\bmini\b/i;
+
 // Order matters — more specific patterns first so "Late Spring" doesn't fall
-// into "Spring", and "Mini" doesn't fall into "Pre-Launch".
+// into "Spring".
 const GROUP_DEFS: { key: string; name: string; match: RegExp }[] = [
-  { key: 'mini',       name: 'Mini - Test/Pre-Launch',     match: /\bmini\b/i },
   { key: 'summer',     name: 'Summer Pre Order 2026',      match: /summer|pre[\s-]?order/i },
   { key: 'latespring', name: 'Late Spring Sale (v2) 2026', match: /late[\s-]?spring|spring[^a-z]*(v ?2|version 2)|\bv2\b/i },
   { key: 'spring',     name: 'Spring Sale 2026',           match: /spring/i },
@@ -44,6 +50,7 @@ export function buildCampaignGroups(campaigns: FbCampaign[]): CampaignGroup[] {
   const acc = new Map<string, { name: string; startMs: number; ids: Set<string>; discount: string | null }>();
   for (const c of campaigns) {
     const name = c.campaign_name ?? '';
+    if (EXCLUDE.test(name)) continue;   // LILA Mini — not a Shopify sales bucket
     const def = GROUP_DEFS.find(g => g.match.test(name));
     if (!def) continue;
     const startIso = c.metrics?.campaign_start ?? c.date_start ?? null;
