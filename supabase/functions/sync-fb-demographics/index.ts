@@ -48,38 +48,46 @@ Deno.serve(async (req: Request) => {
 
   const now = new Date().toISOString();
   const rows: Record<string, unknown>[] = [];
-  try {
-    const fields = 'campaign_id,campaign_name,actions,date_start';
-    const breakdowns = encodeURIComponent('age,gender,country');
+  const fields = 'campaign_id,campaign_name,actions,date_start';
+
+  // Meta rejects age+gender+country in one breakdown, so pull two: age×gender,
+  // and country. Rows use an 'all' sentinel for the dimension they don't carry.
+  async function pull(
+    breakdowns: string,
+    build: (r: Record<string, unknown>, leads: number, purchases: number) => Record<string, unknown>,
+  ): Promise<void> {
     let url: string | null =
-      `${base}/${acct}/insights?level=campaign&fields=${fields}&breakdowns=${breakdowns}` +
+      `${base}/${acct}/insights?level=campaign&fields=${fields}&breakdowns=${encodeURIComponent(breakdowns)}` +
       `&time_increment=1&date_preset=maximum&limit=500&access_token=${encodeURIComponent(token)}`;
     let pages = 0;
     while (url && pages < 100) {
       const res = await fetch(url);
       const body = await res.json();
-      if (!res.ok) return j({ error: `Meta insights ${res.status}: ${JSON.stringify(body?.error ?? body).slice(0, 300)}` }, 502);
+      if (!res.ok) throw new Error(`Meta insights ${res.status}: ${JSON.stringify(body?.error ?? body).slice(0, 300)}`);
       for (const r of (body.data ?? []) as Array<Record<string, unknown> & { actions?: ActionItem[] }>) {
         const purchases = purchaseCount(r.actions);
         const leads = leadCount(r.actions);
         // Keep any converting segment (a lead OR a purchase). Mini is included
         // here as its own set; the Journey Report filters it out client-side.
         if (!r.campaign_id || !r.date_start || (purchases <= 0 && leads <= 0)) continue;
-        rows.push({
-          campaign_id: r.campaign_id,
-          campaign_name: String(r.campaign_name ?? ''),
-          date: r.date_start,
-          age: String(r.age ?? 'unknown'),
-          gender: String(r.gender ?? 'unknown'),
-          country: String(r.country ?? 'unknown'),
-          leads,
-          purchases,
-          synced_at: now,
-        });
+        rows.push(build(r, leads, purchases));
       }
       url = (body.paging as { next?: string } | undefined)?.next ?? null;
       pages++;
     }
+  }
+
+  try {
+    await pull('age,gender', (r, leads, purchases) => ({
+      campaign_id: r.campaign_id, campaign_name: String(r.campaign_name ?? ''), date: r.date_start,
+      age: String(r.age ?? 'unknown'), gender: String(r.gender ?? 'unknown'), country: 'all',
+      leads, purchases, synced_at: now,
+    }));
+    await pull('country', (r, leads, purchases) => ({
+      campaign_id: r.campaign_id, campaign_name: String(r.campaign_name ?? ''), date: r.date_start,
+      age: 'all', gender: 'all', country: String(r.country ?? 'unknown'),
+      leads, purchases, synced_at: now,
+    }));
   } catch (e) {
     return j({ error: `Meta insights request failed: ${(e as Error).message}` }, 502);
   }

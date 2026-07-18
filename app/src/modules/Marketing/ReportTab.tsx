@@ -90,33 +90,30 @@ export function ReportTab() {
     // Best-effort Age/Gender: match a sale to a Meta purchase segment only when
     // it's unambiguous — the day+country had exactly ONE Shopify sale AND Meta
     // shows exactly ONE purchase in a single age×gender segment. Else UNKNOWN.
-    const dayKey = (iso: string, country: string) => {
-      const d = new Date(iso);
-      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}|${country}`;
-    };
-    const demoByKey = new Map<string, Map<string, number>>();
+    // Age×gender purchase segments per day (country is a separate breakdown now).
+    const demoByDate = new Map<string, Map<string, number>>();
     for (const d of demographics) {
       if (!d.purchases) continue;
-      if (/\bmini\b/i.test(d.campaign_name ?? '')) continue;   // Mini = Shopline, not a Shopify sale
-      const k = `${d.date}|${d.country}`;
+      if (d.age === 'all' || d.gender === 'all') continue;         // only age×gender rows
+      if (/\bmini\b/i.test(d.campaign_name ?? '')) continue;        // Mini = Shopline, not a Shopify sale
       const seg = `${d.age}|${d.gender}`;
-      const m = demoByKey.get(k) ?? new Map<string, number>();
+      const m = demoByDate.get(d.date) ?? new Map<string, number>();
       m.set(seg, (m.get(seg) ?? 0) + (d.purchases ?? 0));
-      demoByKey.set(k, m);
+      demoByDate.set(d.date, m);
     }
-    const salesByKey = new Map<string, number>();
+    const salesByDate = new Map<string, number>();
     for (const o of orders) {
       if (o.kind === 'replacement') continue;
-      const k = dayKey(o.placed_at ?? o.created_at, o.country);
-      salesByKey.set(k, (salesByKey.get(k) ?? 0) + 1);
+      const dt = estDate(o.placed_at ?? o.created_at);
+      salesByDate.set(dt, (salesByDate.get(dt) ?? 0) + 1);
     }
     const demo = (o: Order): Demo => {
-      const k = dayKey(o.placed_at ?? o.created_at, o.country);
-      const segs = demoByKey.get(k);
+      const dt = estDate(o.placed_at ?? o.created_at);
+      const segs = demoByDate.get(dt);
       if (!segs) return { age: null, gender: null };
       const total = Array.from(segs.values()).reduce((a, b) => a + b, 0);
       const distinct = Array.from(segs.entries()).filter(([, v]) => v > 0);
-      const sales = salesByKey.get(k) ?? 0;
+      const sales = salesByDate.get(dt) ?? 0;
       if (sales === 1 && total === 1 && distinct.length === 1) {
         const [age, gender] = distinct[0][0].split('|');
         return { age, gender };
