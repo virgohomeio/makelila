@@ -44,9 +44,14 @@ export function ReportTab() {
   const campaignGroups = useMemo(() => buildCampaignGroups(campaigns), [campaigns]);
   const selectedGroup = campaignFilter === 'all' ? null : (campaignGroups.find(g => g.key === campaignFilter) ?? null);
 
-  const orderMs = (o: Order) => new Date(o.placed_at ?? o.created_at).getTime();
+  // Order's calendar day in EST (matches the displayed Date/Time) for comparing
+  // against the campaign windows' inclusive YYYY-MM-DD boundaries.
+  const estDate = (iso: string) => new Date(iso).toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
   const inScope = (o: Order) => {
-    if (selectedGroup) { const t = orderMs(o); return t >= selectedGroup.startMs && t < selectedGroup.endMs; }
+    if (selectedGroup) {
+      const d = estDate(o.placed_at ?? o.created_at);
+      return d >= selectedGroup.startDate && (!selectedGroup.endDate || d <= selectedGroup.endDate);
+    }
     return inRange(o.placed_at ?? o.created_at);
   };
 
@@ -120,8 +125,8 @@ export function ReportTab() {
 
     // Which campaign bucket each sale piled into (shown in the Campaign column).
     const groupOf = (o: Order): string | null => {
-      const t = orderMs(o);
-      const g = campaignGroups.find(gr => t >= gr.startMs && t < gr.endMs);
+      const d = estDate(o.placed_at ?? o.created_at);
+      const g = campaignGroups.find(gr => d >= gr.startDate && (!gr.endDate || d <= gr.endDate));
       return g ? g.label : null;
     };
 
@@ -160,10 +165,9 @@ export function ReportTab() {
         <button onClick={downloadCsv} disabled={rows.length === 0} style={btnStyle}>↓ Download CSV</button>
         {selectedGroup && (
           <span style={{ fontSize: 11, color: muted }}>
-            {new Date(selectedGroup.startMs).toLocaleDateString('en-CA', { dateStyle: 'medium' })}
+            {new Date(selectedGroup.startDate + 'T12:00:00').toLocaleDateString('en-CA', { dateStyle: 'medium' })}
             {' → '}
-            {selectedGroup.endMs === Infinity ? 'now' : new Date(selectedGroup.endMs).toLocaleDateString('en-CA', { dateStyle: 'medium' })}
-            {' (incl. gap after)'}
+            {selectedGroup.endDate ? new Date(selectedGroup.endDate + 'T12:00:00').toLocaleDateString('en-CA', { dateStyle: 'medium' }) : 'today'}
           </span>
         )}
         {kpis.adSpendCad === 0 && !selectedGroup && (
