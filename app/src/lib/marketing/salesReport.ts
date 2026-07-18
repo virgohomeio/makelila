@@ -207,16 +207,17 @@ const REFERRER_NAMES: Record<string, string> = {
   'carrd.co': 'Carrd', 'taplink.cc': 'Taplink', 'komi.io': 'Komi',
 };
 
-/** Distinguish the three ambiguous cases clearly:
- *   - a NAMED referral      → "Linktree" (or "Referral (someblog.com)")
- *   - a generic referral    → "Referral" (referral, but Shopify has no site)
- *   - a direct visit        → "Direct"  (came straight to the site, no source)
- *  Non-referral channels (Meta Ad, Google Organic, Email, …) pass through. */
+/** Label a channel, naming the referring site when there is one:
+ *   - a NAMED referral  → "Linktree" (or "Referral (someblog.com)")
+ *   - no specific site  → "Direct"  (Shopify has no referrer → treat as direct)
+ *  Non-referral channels (Meta Ad, Google Organic, Email, …) pass through.
+ *  We only call it a Referral when we can say who referred them; otherwise it's
+ *  effectively a direct visit. */
 function labelWithSite(channel: string, referrer: string | null): string {
   const s = sourceLabel(channel);
   if (s !== 'Referral') return s;                 // Direct / Meta Ad / Google Organic / …
   const host = hostOf(referrer);
-  if (!host) return 'Referral';                   // it was a referral, but no site captured
+  if (!host || STORE_HOSTS.some(h => host.includes(h))) return 'Direct';   // no real referrer site
   return REFERRER_NAMES[host] ?? `Referral (${host})`;
 }
 
