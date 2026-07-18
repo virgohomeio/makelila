@@ -187,11 +187,24 @@ function hostOf(url: string | null): string | null {
   try { return new URL(url).hostname.toLowerCase().replace(/^www\./, ''); } catch { return url; }
 }
 
-/** A channel + its specific referring site, e.g. "Referral (linktr.ee)". */
+// Friendly names for link-in-bio / referral hosts so they read as themselves.
+const REFERRER_NAMES: Record<string, string> = {
+  'linktr.ee': 'Linktree', 'linktree.com': 'Linktree',
+  'beacons.ai': 'Beacons', 'bio.link': 'Bio Link', 'milkshake.app': 'Milkshake',
+  'carrd.co': 'Carrd', 'taplink.cc': 'Taplink', 'komi.io': 'Komi',
+};
+
+/** Distinguish the three ambiguous cases clearly:
+ *   - a NAMED referral      → "Linktree" (or "Referral (someblog.com)")
+ *   - a generic referral    → "Referral" (referral, but Shopify has no site)
+ *   - a direct visit        → "Direct"  (came straight to the site, no source)
+ *  Non-referral channels (Meta Ad, Google Organic, Email, …) pass through. */
 function labelWithSite(channel: string, referrer: string | null): string {
-  let s = sourceLabel(channel);
-  if (s === 'Referral') { const ref = hostOf(referrer); if (ref) s = `Referral (${ref})`; }
-  return s;
+  const s = sourceLabel(channel);
+  if (s !== 'Referral') return s;                 // Direct / Meta Ad / Google Organic / …
+  const host = hostOf(referrer);
+  if (!host) return 'Referral';                   // it was a referral, but no site captured
+  return REFERRER_NAMES[host] ?? `Referral (${host})`;
 }
 
 function buildNote(r: SalesRow, firstLabel: string, lastLabel: string | null): string {
