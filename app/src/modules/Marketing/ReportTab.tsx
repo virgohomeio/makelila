@@ -97,6 +97,7 @@ export function ReportTab() {
     const demoByKey = new Map<string, Map<string, number>>();
     for (const d of demographics) {
       if (!d.purchases) continue;
+      if (/\bmini\b/i.test(d.campaign_name ?? '')) continue;   // Mini = Shopline, not a Shopify sale
       const k = `${d.date}|${d.country}`;
       const seg = `${d.age}|${d.gender}`;
       const m = demoByKey.get(k) ?? new Map<string, number>();
