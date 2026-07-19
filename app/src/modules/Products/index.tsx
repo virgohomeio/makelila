@@ -12,6 +12,9 @@ const SEV_LABEL: Record<string, string>  = { critical:'C', high:'H', medium:'M',
 const SEV_CLASS: Record<string, string>  = {
   critical: styles.sevCrit, high: styles.sevHigh, medium: styles.sevMed, low: styles.sevLow,
 };
+const REF_KIND_LABEL: Record<string, string> = {
+  github: 'GitHub', notion: 'Notion', doc: 'Doc', other: 'Link',
+};
 const PMF_CLS: Record<string, string> = {
   ok: styles.pmfOk, warn: styles.pmfWarn, crit: styles.pmfCrit, na: styles.pmfNa,
 };
@@ -200,7 +203,27 @@ function IssueRows({ issues, offset = 0, expanded, onToggle }: {
               </div>
               <div style={{ fontSize: 11, color: 'var(--ink-4)', flexShrink: 0 }}>{isOpen ? '▲' : '▼'}</div>
             </div>
-            {isOpen && <div className={styles.issueBody}>{issue.meta}</div>}
+            {isOpen && (
+              <div className={styles.issueBody}>
+                {issue.meta}
+                {issue.references.length > 0 && (
+                  <div className={styles.issueRefs}>
+                    {issue.references.map((ref, ri) => (
+                      <a
+                        key={ri}
+                        href={ref.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className={styles.issueRefLink}
+                        onClick={e => e.stopPropagation()}
+                      >
+                        {REF_KIND_LABEL[ref.kind] ?? 'Link'} ↗
+                      </a>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         );
       })}

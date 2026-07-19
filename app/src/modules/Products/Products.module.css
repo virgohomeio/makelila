@@ -1090,3 +1090,24 @@
 .dashCountOpen { background: var(--surface); color: var(--ink-2); }
 .dashCountZero { background: var(--success-bg); color: var(--success); }
 .dashCountCrit { background: var(--crit-bg); color: var(--crit); }
+
+/* ── Issue references ────────────────────────────────────────────────────────── */
+.issueRefs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.issueRefLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-lt);
+  padding: 3px 8px;
+  border-radius: 999px;
+  text-decoration: none;
+}
+.issueRefLink:hover { text-decoration: underline; }
