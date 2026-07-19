@@ -41,7 +41,6 @@ export type FiledIssue = {
   tag: string;
   team: string;
   meta: string;
-  link: string | null;
   mp_blocker: boolean;
 };
 
@@ -68,9 +67,48 @@ export function validateIssue(
     tag: typeof i.tag === 'string' && i.tag.trim() ? i.tag.trim() : 'Other',
     team: typeof i.team === 'string' ? i.team.trim() : '',
     meta: i.meta.trim(),
-    link: typeof i.link === 'string' && i.link.trim() ? i.link.trim() : null,
     mp_blocker: i.mp_blocker === true,
   };
+}
+
+export type ReferenceKind = 'github' | 'notion' | 'doc' | 'other';
+export type ClassifiedReference = { url: string; kind: ReferenceKind };
+
+const REFERENCE_CAP = 10;
+
+function classifyKind(url: string): ReferenceKind {
+  let hostname: string;
+  try {
+    hostname = new URL(url).hostname.toLowerCase();
+  } catch {
+    return 'other';
+  }
+  if (hostname === 'github.com' || hostname.endsWith('.github.com')) return 'github';
+  if (hostname === 'notion.so' || hostname.endsWith('.notion.so')
+    || hostname === 'notion.site' || hostname.endsWith('.notion.site')) return 'notion';
+  if (hostname === 'docs.google.com' || hostname === 'drive.google.com') return 'doc';
+  return 'other';
+}
+
+/** Validates and classifies a model-proposed references list. Never trusts
+ *  the model's own judgment on URL scheme or kind — every URL is checked
+ *  here before it can reach the DB or ever be rendered as a link. Invalid
+ *  entries are silently dropped, never block filing. Exported for testing. */
+export function classifyReferences(urls: unknown): ClassifiedReference[] {
+  if (!Array.isArray(urls)) return [];
+  const seen = new Set<string>();
+  const out: ClassifiedReference[] = [];
+  for (const raw of urls) {
+    if (typeof raw !== 'string') continue;
+    const url = raw.trim();
+    if (!url) continue;
+    if (!/^https?:\/\//i.test(url)) continue;
+    if (seen.has(url)) continue;
+    seen.add(url);
+    out.push({ url, kind: classifyKind(url) });
+    if (out.length >= REFERENCE_CAP) break;
+  }
+  return out;
 }
 
 function buildSystemPrompt(
@@ -90,7 +128,7 @@ ${productHint
     ? `The user has pre-selected product "${productHint}" from a dropdown — assume that's the product unless they clearly name a different one in the conversation.`
     : 'No product has been pre-selected — ask which product line if it is not obvious from the description.'}
 
-You need, at minimum, before filing: which product line, a description of the problem (and optionally a link), an accountable person/team, and a severity assessment (critical/high/medium/low — use your judgment based on the description; ask the user only if genuinely ambiguous).
+You need, at minimum, before filing: which product line, a description of the problem, an accountable person/team, a severity assessment (critical/high/medium/low — use your judgment based on the description; ask the user only if genuinely ambiguous), and whether there's any related GitHub issue/PR, Notion page, or other document — if they say there's none, that's a complete answer, don't keep asking.
 
 Respond with JSON ONLY, no markdown, matching exactly:
 {
@@ -103,7 +141,7 @@ Respond with JSON ONLY, no markdown, matching exactly:
     "tag": "<short category tag, e.g. 'Hardware · Latch Mechanism'>",
     "team": "<accountable person/team>",
     "meta": "<full description as given, cleaned up into 1-3 sentences>",
-    "link": <string URL if one was given, else null>,
+    "references": [<string URL>, ...] | [],
     "mp_blocker": <true only if the user says or implies this blocks mass production, else false>
   }>
 }`;
@@ -200,7 +238,6 @@ async function handle(req: Request): Promise<Response> {
       tag: validated.tag,
       team: validated.team,
       meta: validated.meta,
-      link: validated.link,
       mp_blocker: validated.mp_blocker,
       source: 'chat',
       created_by: caller.user_id,
@@ -211,6 +248,15 @@ async function handle(req: Request): Promise<Response> {
 
   if (insertErr || !inserted) {
     return json({ reply: "I had the details but couldn't save the ticket — try again.", filed: false }, 200);
+  }
+
+  const references = classifyReferences(
+    (deepseekTurn.issue as Record<string, unknown> | null)?.references,
+  );
+  if (references.length > 0) {
+    await admin.from('product_issue_references').insert(
+      references.map(r => ({ issue_id: inserted.id, url: r.url, kind: r.kind })),
+    );
   }
 
   await admin.from('activity_log').insert({
