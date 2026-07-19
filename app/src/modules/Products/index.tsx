@@ -4,6 +4,8 @@ import {
   STAGES, PRODUCTS, RD_PROJECTS, isProBom,
   type Product, type StageItem, type BomItem, type ProBom,
 } from './data';
+import { useProductIssues, type Issue } from '../../lib/products';
+import { DashboardTab } from './DashboardTab';
 
 /* ── helpers ──────────────────────────────────────────────────────────────── */
 const SEV_LABEL: Record<string, string>  = { critical:'C', high:'H', medium:'M', low:'L' };
@@ -18,6 +20,7 @@ const RD_STATUS_CLS: Record<string, string> = {
 };
 
 const PRODUCT_TABS = [
+  { id:'dashboard',   label:'Dashboard' },
   { id:'pro',         label:'LILA Pro' },
   { id:'mini',        label:'LILA Mini' },
   { id:'mega',        label:'LILA Mega' },
@@ -690,13 +693,15 @@ function RDView() {
 }
 
 /* ── Product page ─────────────────────────────────────────────────────────── */
-function ProductPage({ prod, view, onViewChange }: {
+function ProductPage({ prod, view, onViewChange, liveIssues }: {
   prod: string;
   view: View;
   onViewChange: (v: View) => void;
+  liveIssues: Issue[];
 }) {
-  const d = PRODUCTS[prod];
-  if (!d) return null;
+  const base = PRODUCTS[prod];
+  if (!base) return null;
+  const d: Product = { ...base, issues: liveIssues };
   const stages = d.customStages ?? STAGES;
 
   return (
@@ -740,11 +745,12 @@ function ProductPage({ prod, view, onViewChange }: {
 
 /* ── Root ─────────────────────────────────────────────────────────────────── */
 export default function Products() {
-  const [activeProd, setActiveProd] = useState('pro');
+  const [activeProd, setActiveProd] = useState('dashboard');
   const [activeViews, setActiveViews] = useState<Record<string, View>>({
     pro:'Overview', mini:'Overview', mega:'Overview', makelila:'Overview',
     lovely:'Overview', shop:'Overview', marketplace:'Overview',
   });
+  const { issuesByProduct } = useProductIssues();
 
   const setView = (v: View) =>
     setActiveViews(prev => ({ ...prev, [activeProd]: v }));
@@ -754,6 +760,9 @@ export default function Products() {
       <div className={styles.tabBar}>
         {PRODUCT_TABS.map(tab => {
           const d = PRODUCTS[tab.id];
+          const liveIssues = issuesByProduct[tab.id] ?? [];
+          const liveCount = liveIssues.length;
+          const liveCrit  = liveIssues.some(i => i.sev === 'critical');
           return (
             <button
               key={tab.id}
@@ -761,13 +770,10 @@ export default function Products() {
               onClick={() => setActiveProd(tab.id)}
             >
               {tab.label}
-              {d?.badgeCount && (
-                <span className={`${styles.badge} ${
-                  d.badgeClass === 'badge-crit' ? styles.badgeCrit :
-                  d.badgeClass === 'badge-high' ? styles.badgeHigh :
-                  d.badgeClass === 'badge-ok'   ? styles.badgeOk :
-                  styles.badgeAcc
-                }`}>{d.badgeCount}</span>
+              {tab.id !== 'dashboard' && tab.id !== 'rd' && d && liveCount > 0 && (
+                <span className={`${styles.badge} ${liveCrit ? styles.badgeCrit : styles.badgeAcc}`}>
+                  {liveCount}
+                </span>
               )}
               {tab.id === 'rd' && (
                 <span className={`${styles.badge} ${styles.badgeAcc}`}>
@@ -779,13 +785,16 @@ export default function Products() {
         })}
       </div>
 
-      {activeProd === 'rd' ? (
+      {activeProd === 'dashboard' ? (
+        <DashboardTab issuesByProduct={issuesByProduct} onSelectProduct={setActiveProd} />
+      ) : activeProd === 'rd' ? (
         <RDView />
       ) : (
         <ProductPage
           prod={activeProd}
           view={activeViews[activeProd] ?? 'Overview'}
           onViewChange={setView}
+          liveIssues={issuesByProduct[activeProd] ?? []}
         />
       )}
     </div>
