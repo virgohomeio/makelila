@@ -4,9 +4,13 @@ import { supabase } from './supabase';
 
 export type IssueSeverity = 'critical' | 'high' | 'medium' | 'low';
 
+export type ReferenceKind = 'github' | 'notion' | 'doc' | 'other';
+export type IssueReference = { url: string; kind: ReferenceKind };
+
 export interface Issue {
   title: string; sev: IssueSeverity;
   tag: string; team: string; meta: string; mpBlocker?: boolean;
+  references: IssueReference[];
 }
 
 export type DbProductIssue = {
@@ -17,12 +21,12 @@ export type DbProductIssue = {
   tag: string;
   team: string | null;
   meta: string;
-  link: string | null;
   mp_blocker: boolean;
   source: 'seed' | 'chat';
   created_by: string | null;
   created_by_name: string | null;
   created_at: string;
+  product_issue_references: IssueReference[];
 };
 
 export function toIssue(row: DbProductIssue): Issue {
@@ -33,6 +37,7 @@ export function toIssue(row: DbProductIssue): Issue {
     team: row.team ?? '',
     meta: row.meta,
     mpBlocker: row.mp_blocker,
+    references: row.product_issue_references ?? [],
   };
 }
 
@@ -46,7 +51,7 @@ export function groupByProduct(rows: DbProductIssue[]): Record<string, Issue[]> 
 }
 
 const PRODUCT_ISSUE_COLUMNS =
-  'id, product_id, title, severity, tag, team, meta, link, mp_blocker, source, created_by, created_by_name, created_at';
+  'id, product_id, title, severity, tag, team, meta, mp_blocker, source, created_by, created_by_name, created_at, product_issue_references(url, kind)';
 
 /** Realtime-subscribed list of every product issue, grouped by product_id.
  *  Fetched once at the Products() root and threaded down to the Dashboard
@@ -59,22 +64,29 @@ export function useProductIssues(): { issuesByProduct: Record<string, Issue[]>; 
     let cancelled = false;
     let channel: RealtimeChannel | null = null;
 
-    (async () => {
+    const fetchRows = async () => {
       const { data, error } = await supabase
         .from('product_issues')
         .select(PRODUCT_ISSUE_COLUMNS);
       if (cancelled) return;
       if (!error && data) setRows(data as DbProductIssue[]);
       setLoading(false);
+    };
+
+    (async () => {
+      await fetchRows();
 
       channel = supabase
         .channel('product_issues:realtime')
         .on(
           'postgres_changes',
           { event: 'INSERT', schema: 'public', table: 'product_issues' },
-          (payload) => {
-            setRows(prev => [...prev, payload.new as DbProductIssue]);
-          },
+          () => { void fetchRows(); },
+        )
+        .on(
+          'postgres_changes',
+          { event: 'INSERT', schema: 'public', table: 'product_issue_references' },
+          () => { void fetchRows(); },
         )
         .subscribe();
     })();
