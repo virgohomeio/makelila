@@ -33,14 +33,16 @@ vi.mock('./supabase', () => {
 const ROW_PRO: DbProductIssue = {
   id: 'row-1', product_id: 'pro', title: 'Latch snaps off', severity: 'high',
   tag: 'Hardware · Latch', team: 'Ben Liang', meta: 'Breaks under normal use.',
-  link: null, mp_blocker: true, source: 'seed', created_by: null, created_by_name: null,
+  mp_blocker: true, source: 'seed', created_by: null, created_by_name: null,
   created_at: '2026-07-01T00:00:00.000Z',
+  product_issue_references: [],
 };
 const ROW_SHOP: DbProductIssue = {
   id: 'row-2', product_id: 'shop', title: 'CAC too high', severity: 'critical',
   tag: 'Marketing', team: 'Pedrum', meta: 'CAC is $400+.',
-  link: null, mp_blocker: false, source: 'seed', created_by: null, created_by_name: null,
+  mp_blocker: false, source: 'seed', created_by: null, created_by_name: null,
   created_at: '2026-07-01T00:00:00.000Z',
+  product_issue_references: [],
 };
 
 describe('toIssue', () => {
@@ -48,11 +50,22 @@ describe('toIssue', () => {
     expect(toIssue(ROW_PRO)).toEqual({
       title: 'Latch snaps off', sev: 'high', tag: 'Hardware · Latch',
       team: 'Ben Liang', meta: 'Breaks under normal use.', mpBlocker: true,
+      references: [],
     });
   });
 
   it('defaults a null team to an empty string', () => {
     expect(toIssue({ ...ROW_PRO, team: null }).team).toBe('');
+  });
+
+  it('maps embedded product_issue_references into the references array', () => {
+    const row: DbProductIssue = {
+      ...ROW_PRO,
+      product_issue_references: [{ url: 'https://github.com/virgohomeio/makelila/pull/1', kind: 'github' }],
+    };
+    expect(toIssue(row).references).toEqual([
+      { url: 'https://github.com/virgohomeio/makelila/pull/1', kind: 'github' },
+    ]);
   });
 });
 
@@ -110,7 +123,7 @@ describe('useProductIssues', () => {
     expect(result.current.issuesByProduct.shop).toHaveLength(1);
   });
 
-  it('subscribes to realtime INSERTs on product_issues', async () => {
+  it('subscribes to realtime INSERTs on both product_issues and product_issue_references', async () => {
     mockResolve.mockResolvedValueOnce({ data: [], error: null });
     renderHook(() => useProductIssues());
     await waitFor(() => expect(mockChannel).toHaveBeenCalledWith('product_issues:realtime'));
@@ -119,17 +132,43 @@ describe('useProductIssues', () => {
       { event: 'INSERT', schema: 'public', table: 'product_issues' },
       expect.any(Function),
     );
+    expect(mockOn).toHaveBeenCalledWith(
+      'postgres_changes',
+      { event: 'INSERT', schema: 'public', table: 'product_issue_references' },
+      expect.any(Function),
+    );
   });
 
-  it('appends a realtime INSERT payload into the right product group', async () => {
-    mockResolve.mockResolvedValueOnce({ data: [], error: null });
+  it('refetches the full list when a product_issues INSERT event fires', async () => {
+    mockResolve
+      .mockResolvedValueOnce({ data: [], error: null })
+      .mockResolvedValueOnce({ data: [ROW_PRO], error: null });
     const { result } = renderHook(() => useProductIssues());
     await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.issuesByProduct.pro).toBeUndefined();
 
-    const insertHandler = mockOn.mock.calls[0][2] as (payload: { new: DbProductIssue }) => void;
-    act(() => { insertHandler({ new: ROW_PRO }); });
+    const issuesInsertHandler = mockOn.mock.calls[0][2] as () => void;
+    await act(async () => { issuesInsertHandler(); });
 
-    expect(result.current.issuesByProduct.pro).toHaveLength(1);
+    await waitFor(() => expect(result.current.issuesByProduct.pro).toHaveLength(1));
+  });
+
+  it('refetches the full list when a product_issue_references INSERT event fires', async () => {
+    const rowWithRef: DbProductIssue = {
+      ...ROW_PRO,
+      product_issue_references: [{ url: 'https://notion.so/x', kind: 'notion' }],
+    };
+    mockResolve
+      .mockResolvedValueOnce({ data: [ROW_PRO], error: null })
+      .mockResolvedValueOnce({ data: [rowWithRef], error: null });
+    const { result } = renderHook(() => useProductIssues());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.issuesByProduct.pro[0].references).toEqual([]);
+
+    const referencesInsertHandler = mockOn.mock.calls[1][2] as () => void;
+    await act(async () => { referencesInsertHandler(); });
+
+    await waitFor(() => expect(result.current.issuesByProduct.pro[0].references).toHaveLength(1));
   });
 });
 
