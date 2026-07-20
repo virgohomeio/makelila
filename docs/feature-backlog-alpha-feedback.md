@@ -775,6 +775,32 @@ Alpha feedback collection window is **closed**. The 11 items above plus the meet
 
 ---
 
+## Ryan Yuan — AI chatbot initiative — 2026-07-14 to 2026-07-17
+
+> Source: WhatsApp conversation between Huayi and Ryan Yuan. Ryan is already building a cross-platform AI chatbot initiative — a custom Meta/Facebook DM bot (built rather than using Meta's built-in keyword automation "because their built-in automation features were more just keywords that I believe won't suffice if we want top quality customer service") was presented to the team 2026-07-17, internally graded 10/10, pending Meta app review. The two items below extend that same initiative into makeLILA itself and into Quo/OpenPhone customer messaging. Ryan is separately maintaining his own product tracker for the chatbot initiative (offered 2026-07-17, Huayi confirmed) — that tracker, not this doc, is the source of truth for day-to-day build status; these entries exist so the ask is visible alongside the rest of the backlog.
+
+- **#100** makeLILA AI — internal chatbot over the makeLILA database, session chat history logging.
+  **Source:** Huayi (2026-07-14, WhatsApp). **Owner:** Ryan Yuan.
+  **Description:** A chatbot the team can talk to *within their own makeLILA sessions* to ask for any information already in the makeLILA database — orders, customers, tickets, stock, etc. — without navigating the UI. Same build philosophy as Ryan's Lovely App / Meta bot work: custom-built and grounded in real data, not a keyword-triggered FAQ bot.
+  **Requirements confirmed in chat:**
+    1. Chat interface reachable from within a makeLILA session (exact surface — floating widget, dedicated tab, etc. — not yet specified; Ryan to propose).
+    2. Answers grounded in live makeLILA data (Supabase) — not a general-purpose assistant.
+    3. **Session chat histories must be recorded in the makeLILA database** (Huayi, 2026-07-14: "We want the sessions chat histories and so on recorded in our database as well") — explicitly for operational insight (what the team asks most, where the data model has gaps), not just as a log.
+  **Cost baseline (per Ryan, 2026-07-17):** the same chatbot infra family (Lovely App + Meta AI bot) runs ~$7.40/1k messages on the model he's currently using; Huayi flagged that cost needs to be modeled against production sales volume as it scales, not just current chat volume, before committing to a per-message-billed model long-term.
+  **Open questions:** exact chat surface/UI; which makeLILA tables/modules are in scope for V1 vs. deferred; retention policy for the new session-history table; whether this reuses Ryan's existing Claude-model evaluation work (a 97-question baseline pulled from Quo + Fireflies transcripts, run across multiple Claude models) or needs its own eval set specific to internal makeLILA questions.
+  **Likely touch:** new `chat_sessions` / `chat_messages` tables (schema TBD by Ryan); new edge function or Lovely-app-style backend service for the chat; a new UI surface inside the makeLILA app itself (distinct from the customer-facing Lovely app) for the team to invoke it from.
+
+- **#101** Quo auto-reply bot — cron-driven first response within 1–2 hours.
+  **Source:** Huayi (2026-07-14, WhatsApp). **Owner:** Ryan Yuan.
+  **Description:** Today, customer messages arriving via Quo (OpenPhone) rely entirely on Reina and Huayi to reply manually — Huayi named this explicitly as a response-time bottleneck: *"Currently we have customers talking to us on quo and it rel[ies on] Reina and me to reply. We want a cron job for a quo bot to reply within 1-2 hours."* Goal: a scheduled job that gets a first response to inbound Quo messages within a 1–2 hour SLA, easing the load on Reina/Huayi without leaving customers waiting.
+  **Open questions (not yet resolved in chat — flag for Ryan/Huayi to settle before build):**
+    1. Auto-send vs. auto-draft-for-review — does the bot reply directly, or stage a draft an operator approves (mirrors the AI-draft-suggestion pattern already used in Reina's Service work)?
+    2. Scope of questions it can answer vs. when it should escalate/hold for a human — likely reuses the existing rules-first + Claude ticket classifier infra (`classifier.ts` / `classifier-llm.ts`, already wired into `sync-gmail-tickets` / `reclassify-ticket`) rather than building fresh.
+    3. Pricing: Ryan noted (2026-07-17) Quo/Zipchat likely have a free tier sufficient for now, but hadn't confirmed — verify before assuming $0 marginal cost, same cost-scaling caution Huayi raised for #100.
+  **Likely touch:** new cron-scheduled edge function (natural integration point: alongside the existing `sync-quo-tickets`); reuse of `_shared/classifier-llm.ts` for drafting/replying; either a `quo_auto_reply_sent_at`-style dedupe column (auto-send) or a draft-queue surface in the Service Inbox (auto-draft-for-review) depending on how question 1 is resolved.
+
+---
+
 ## Reference
 
 - Email thread: "makeLILA app beta release, VCycene, Huayi" (started Apr 21, 2026)
