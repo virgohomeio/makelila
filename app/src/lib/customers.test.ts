@@ -48,7 +48,7 @@ vi.mock('./activityLog', () => ({
 }));
 
 // ── import after mocks ──────────────────────────────────────────────────────
-import { parseUtm, upsertHubSpotContact, followUpDueDates, computeFuState, refundUsageWindow, type Customer } from './customers';
+import { parseUtm, upsertHubSpotContact, followUpDueDates, computeFuState, refundUsageWindow, resolvePurchaserId, buildPurchaserIdByEmail, type Customer } from './customers';
 
 const base: Customer = {
   id: 'c1', hubspot_id: null, email: 'a@b.com', first_name: null, last_name: null,
@@ -268,5 +268,31 @@ describe('computeFuState anchor override', () => {
     const c = { ...base, onboard_date: '2026-05-01' };
     // Anchor 06-25 → FU1 due 07-09 → still upcoming on 07-01
     expect(computeFuState(c, today, '2026-06-25')).toBe('upcoming_fu1');
+  });
+});
+
+// FR-6: CUSTOMER (purchaser) vs USER (submitter) resolution.
+describe('resolvePurchaserId', () => {
+  it('returns the linked purchaser when purchaser_id is set (gift/household user row)', () => {
+    expect(resolvePurchaserId({ id: 'lily', purchaser_id: 'annie' })).toBe('annie');
+  });
+  it('returns the row id itself when purchaser_id is null (row is its own purchaser)', () => {
+    expect(resolvePurchaserId({ id: 'annie', purchaser_id: null })).toBe('annie');
+  });
+});
+
+describe('buildPurchaserIdByEmail', () => {
+  it("maps a user's email to the PURCHASER id, not the user's own (Lily Xu → Annie Wu)", () => {
+    const rows = [
+      { id: 'annie', email: 'annie@wu.com', purchaser_id: null },
+      { id: 'lily', email: 'Lily@Xu.com ', purchaser_id: 'annie' },
+    ];
+    const m = buildPurchaserIdByEmail(rows);
+    expect(m.get('lily@xu.com')).toBe('annie'); // resolves to purchaser
+    expect(m.get('annie@wu.com')).toBe('annie'); // purchaser resolves to self
+  });
+  it('skips rows without an email', () => {
+    const m = buildPurchaserIdByEmail([{ id: 'x', email: null, purchaser_id: null }]);
+    expect(m.size).toBe(0);
   });
 });
