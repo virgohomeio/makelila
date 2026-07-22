@@ -31,6 +31,19 @@ export const RETURN_STATUS_ORDER: ReturnStatus[] = [
   'created','pickup_scheduled','picked_up','received','inspected','refunded','denied','closed','discarded',
 ];
 
+// FR-2 (Refund & Return Approval PRD): a refund may only be approved once the
+// linked return is resolved — the unit has been received/inspected, or the
+// customer discarded a genuine-defect unit (BR-7: no physical return, but still
+// refundable). Statuses before receipt (created/pickup_scheduled/picked_up) and
+// 'denied' block approval. Used by both managerApprove and financeApprove.
+export const RETURN_STATUSES_ALLOWING_REFUND: ReturnStatus[] = [
+  'received', 'inspected', 'refunded', 'closed', 'discarded',
+];
+
+export function returnStatusAllowsRefund(status: ReturnStatus): boolean {
+  return RETURN_STATUSES_ALLOWING_REFUND.includes(status);
+}
+
 // Plain-language unit status for the Refunds tab — where is the physical unit?
 export const UNIT_STATUS_LABEL: Record<ReturnStatus, string> = {
   'created':          'Return form submitted',
@@ -556,6 +569,29 @@ export async function updateRefundAmount(id: string, amount: number): Promise<vo
 
 export async function managerApprove(id: string, note?: string): Promise<void> {
   const userId = await currentUserId();
+
+  // FR-2 gate: block Manager Review approval unless the linked return is
+  // resolved (received/inspected/discarded/…). This mirrors the guard in
+  // financeApprove so incomplete cards never reach — or pass — the Return
+  // Manager, rather than only being caught one stage later at Finance Review.
+  const { data: approval, error: aErr } = await supabase
+    .from('refund_approvals')
+    .select('id, return_id')
+    .eq('id', id)
+    .single();
+  if (aErr || !approval) throw new Error(`Refund approval not found: ${aErr?.message}`);
+  if (approval.return_id) {
+    const { data: ret, error: rErr } = await supabase
+      .from('returns')
+      .select('id, status')
+      .eq('id', approval.return_id)
+      .single();
+    if (rErr || !ret) throw new Error(`Linked return not found: ${rErr?.message}`);
+    if (!returnStatusAllowsRefund(ret.status)) {
+      throw new Error(`Return is in status '${ret.status}' — approval is blocked until the unit is received/inspected (or the customer discards a defective unit).`);
+    }
+  }
+
   const { error } = await supabase.from('refund_approvals').update({
     status: 'finance_review',
     manager_approved_by: userId,
@@ -595,8 +631,8 @@ export async function financeApprove(id: string, opts: FinanceApproveOpts): Prom
       .eq('id', approval.return_id)
       .single();
     if (rErr || !ret) throw new Error(`Linked return not found: ${rErr?.message}`);
-    if (!['received','inspected','refunded','closed'].includes(ret.status)) {
-      throw new Error(`Return is in status '${ret.status}' — refund cannot be processed until the unit is received.`);
+    if (!returnStatusAllowsRefund(ret.status)) {
+      throw new Error(`Return is in status '${ret.status}' — refund cannot be processed until the unit is received (or the customer discards a defective unit).`);
     }
   }
 

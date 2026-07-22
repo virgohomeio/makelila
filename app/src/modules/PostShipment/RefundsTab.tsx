@@ -13,7 +13,14 @@ import {
 const UNIT_STAGES: { value: ReturnStatus; label: string }[] = [
   { value: 'created',          label: 'Return form submitted' },
   { value: 'pickup_scheduled', label: 'Pickup scheduled' },
+  { value: 'picked_up',        label: 'Picked up' },
   { value: 'received',         label: 'Unit returned' },
+  // BUG-5 (Lisa Clark gap): 'inspected' exists in ReturnStatus but was missing
+  // from this dropdown, so operators could never record that the returned unit
+  // was inspected — leaving the Manager unable to tell. FR-2's approval gate
+  // treats 'received' and 'inspected' alike, but recording inspection is what
+  // lets the Manager see the case is actually complete.
+  { value: 'inspected',        label: 'Unit inspected' },
   { value: 'discarded',        label: 'Unit discarded by customer' },
 ];
 import { useQueuedReplacements, holdReplacement, type Order } from '../../lib/orders';
