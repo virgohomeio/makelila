@@ -81,7 +81,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const user = session?.user;
     if (!user) { setProfile(null); return; }
 
+    // Enforce the domain ONLY on a positively-known foreign email. A session
+    // can be re-emitted (token refresh, realtime re-auth after opening the
+    // Customers detail panel, etc.) with user.email transiently undefined —
+    // that means "session shape not fully populated yet", NOT "unauthorized".
+    // Calling the destructive global signOut() on a falsy email is what booted
+    // valid operators to /login (e.g. right after closing a customer profile).
+    // Missing email → wait for a complete session instead of destroying it.
+    if (!user.email) return;
+
     if (!requireInternalDomain(user.email)) {
+      console.warn('[auth] domain check rejected email, signing out:', user.email);
       supabase.auth.signOut();
       alert('Access restricted. Use your @virgohome.io account, or contact George if you need access.');
       return;

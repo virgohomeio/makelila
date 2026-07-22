@@ -3,11 +3,12 @@ import { render, screen, waitFor, act } from '@testing-library/react';
 import type { Session } from '@supabase/supabase-js';
 
 // Controllable mock of the singleton client. We capture the
-// onAuthStateChange callback so tests can drive auth events, and let each
-// test dictate what getSession() resolves to.
+// onAuthStateChange callback so tests can drive auth events, let each test
+// dictate what getSession() resolves to, and spy on signOut().
 type AuthCb = (event: string, session: Session | null) => void;
 const captured: { cb: AuthCb | null } = { cb: null };
 const getSession = vi.fn();
+const signOut = vi.fn();
 const unsubscribe = vi.fn();
 
 vi.mock('./supabase', () => ({
@@ -18,7 +19,7 @@ vi.mock('./supabase', () => ({
         captured.cb = cb;
         return { data: { subscription: { unsubscribe } } };
       },
-      signOut: vi.fn(),
+      signOut: () => signOut(),
     },
     // profiles fetch: from('profiles').select().eq().single() -> thenable
     from: () => ({
@@ -39,54 +40,40 @@ function Probe() {
   return <div data-testid="state">{loading ? 'loading' : session ? 'in' : 'out'}</div>;
 }
 
-const validSession = {
-  user: { id: 'u1', email: 'huayi@virgohome.io' },
-} as unknown as Session;
+const sessionFor = (email: string | undefined): Session =>
+  ({ user: { id: 'u1', email } } as unknown as Session);
+const validSession = sessionFor('huayi@virgohome.io');
 
 beforeEach(() => {
   captured.cb = null;
   getSession.mockReset();
+  signOut.mockReset();
   unsubscribe.mockReset();
+  // jsdom has no real alert(); the domain-reject path calls it.
+  vi.stubGlobal('alert', vi.fn());
 });
 
 describe('AuthProvider session resilience', () => {
   it('keeps the operator signed in when a spurious null auth event fires (session still in storage)', async () => {
-    // Initial load resolves a valid session; the re-validation after the
-    // spurious event ALSO finds the session still present in storage.
     getSession.mockResolvedValue({ data: { session: validSession } });
 
-    render(
-      <AuthProvider>
-        <Probe />
-      </AuthProvider>,
-    );
-
+    render(<AuthProvider><Probe /></AuthProvider>);
     await waitFor(() => expect(screen.getByTestId('state').textContent).toBe('in'));
 
-    // A transient SIGNED_OUT arrives (network blip during silent refresh /
-    // late null INITIAL_SESSION). The operator did NOT sign out.
     await act(async () => {
       captured.cb?.('SIGNED_OUT', null);
-      // let the deferred re-validation run
       await new Promise((r) => setTimeout(r, 0));
     });
 
-    // Must NOT be booted to the login screen.
     expect(screen.getByTestId('state').textContent).toBe('in');
   });
 
   it('signs the operator out when the session is genuinely gone from storage', async () => {
-    // Initial load: valid. Re-validation after the event: storage cleared.
     getSession
       .mockResolvedValueOnce({ data: { session: validSession } })
       .mockResolvedValue({ data: { session: null } });
 
-    render(
-      <AuthProvider>
-        <Probe />
-      </AuthProvider>,
-    );
-
+    render(<AuthProvider><Probe /></AuthProvider>);
     await waitFor(() => expect(screen.getByTestId('state').textContent).toBe('in'));
 
     await act(async () => {
@@ -95,5 +82,39 @@ describe('AuthProvider session resilience', () => {
     });
 
     await waitFor(() => expect(screen.getByTestId('state').textContent).toBe('out'));
+  });
+});
+
+describe('AuthProvider domain enforcement', () => {
+  it('does NOT sign out when a refreshed session transiently lacks an email', async () => {
+    // Start signed in, then a token-refresh / realtime re-auth re-emits the
+    // session with user.email momentarily undefined (the Customers-panel-close
+    // logout). This must NOT destroy the session.
+    getSession.mockResolvedValue({ data: { session: validSession } });
+
+    render(<AuthProvider><Probe /></AuthProvider>);
+    await waitFor(() => expect(screen.getByTestId('state').textContent).toBe('in'));
+
+    await act(async () => {
+      captured.cb?.('TOKEN_REFRESHED', sessionFor(undefined));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    expect(signOut).not.toHaveBeenCalled();
+    expect(screen.getByTestId('state').textContent).toBe('in');
+  });
+
+  it('STILL signs out a genuinely foreign email (security preserved)', async () => {
+    getSession.mockResolvedValue({ data: { session: validSession } });
+
+    render(<AuthProvider><Probe /></AuthProvider>);
+    await waitFor(() => expect(screen.getByTestId('state').textContent).toBe('in'));
+
+    await act(async () => {
+      captured.cb?.('SIGNED_IN', sessionFor('attacker@gmail.com'));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    expect(signOut).toHaveBeenCalled();
   });
 });
