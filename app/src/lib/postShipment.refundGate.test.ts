@@ -51,6 +51,7 @@ vi.mock('./activityLog', () => ({ logAction: logActionMock }));
 // ── import after mocks ──────────────────────────────────────────────────────
 import {
   managerApprove,
+  submitToManager,
   returnStatusAllowsRefund,
   type ReturnStatus,
 } from './postShipment';
@@ -108,5 +109,22 @@ describe('managerApprove — return/inspection gate (FR-2)', () => {
 
     await managerApprove('r1');
     expect(state.updateCalled).toBe(true);
+  });
+});
+
+describe('submitToManager (FR-3)', () => {
+  it('promotes a submitted card to manager_review', async () => {
+    state.approval = { id: 'r1', status: 'submitted' };
+
+    await submitToManager('r1');
+    expect(state.updateCalled).toBe(true);
+    expect(state.updatePatch.status).toBe('manager_review');
+  });
+
+  it('refuses to submit a card that is not in the submitted state', async () => {
+    state.approval = { id: 'r1', status: 'manager_review' };
+
+    await expect(submitToManager('r1')).rejects.toThrow(/manager_review|submit/i);
+    expect(state.updateCalled).toBe(false);
   });
 });

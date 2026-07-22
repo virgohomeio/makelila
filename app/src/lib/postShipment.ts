@@ -536,7 +536,9 @@ export async function submitRefundRequest(input: {
   const userId = await currentUserId();
   const { error } = await supabase.from('refund_approvals').insert({
     ...input,
-    status: 'manager_review',
+    // FR-3: land in Completeness/prep, not straight in front of the Return
+    // Manager. The Account Manager verifies the case, then calls submitToManager.
+    status: 'submitted',
     submitted_by: userId,
   });
   if (error) throw error;
@@ -565,6 +567,26 @@ export async function updateRefundAmount(id: string, amount: number): Promise<vo
     .update({ refund_amount_usd: rounded }).eq('id', id);
   if (error) throw error;
   await logAction('refund_amount_edited', id, `$${rounded.toFixed(2)}`);
+}
+
+/** FR-3: the Account Manager advances a prepared case from Completeness
+ *  ('submitted') to Manager Review. Explicit "Submit", distinct from the
+ *  Manager's "Approve" — so incomplete cases never sit in front of the Return
+ *  Manager. */
+export async function submitToManager(id: string): Promise<void> {
+  const { data: approval, error: aErr } = await supabase
+    .from('refund_approvals')
+    .select('id, status')
+    .eq('id', id)
+    .single();
+  if (aErr || !approval) throw new Error(`Refund approval not found: ${aErr?.message}`);
+  if (approval.status !== 'submitted') {
+    throw new Error(`Cannot submit to manager from status: ${approval.status}`);
+  }
+  const { error } = await supabase.from('refund_approvals')
+    .update({ status: 'manager_review' }).eq('id', id);
+  if (error) throw error;
+  await logAction('refund_submitted_to_manager', id, 'submitted to manager review');
 }
 
 export async function managerApprove(id: string, note?: string): Promise<void> {
