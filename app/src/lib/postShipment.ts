@@ -44,6 +44,28 @@ export function returnStatusAllowsRefund(status: ReturnStatus): boolean {
   return RETURN_STATUSES_ALLOWING_REFUND.includes(status);
 }
 
+// FR-11 / BR-14 / BR-15: a refund can only be processed against a valid
+// purchaser. When the return filer isn't the buyer (is_purchaser=false) we need
+// the purchaser's identity AND a proof of purchase — unless the Return Manager
+// has manually confirmed linkage (the no-receipt override). is_purchaser true
+// (filer is the buyer) or null (ops/legacy return, no attestation collected)
+// is not gated.
+export type PurchaserLinkageFields = {
+  is_purchaser: boolean | null;
+  purchaser_name: string | null;
+  purchaser_email: string | null;
+  purchase_proof: string | null;
+  purchaser_linkage_confirmed_at?: string | null;
+};
+
+export function hasValidPurchaserLinkage(r: PurchaserLinkageFields | null): boolean {
+  if (!r) return true;                                 // nothing to gate on
+  if (r.purchaser_linkage_confirmed_at) return true;   // BR-15 manager override
+  if (r.is_purchaser !== false) return true;           // filer is the buyer (or ops/legacy)
+  const hasIdentity = !!(r.purchaser_name?.trim() || r.purchaser_email?.trim());
+  return hasIdentity && !!r.purchase_proof;
+}
+
 // Plain-language unit status for the Refunds tab — where is the physical unit?
 export const UNIT_STATUS_LABEL: Record<ReturnStatus, string> = {
   'created':          'Return form submitted',
@@ -155,6 +177,9 @@ export type ReturnRow = {
   purchaser_name: string | null;
   purchaser_email: string | null;
   purchaser_phone: string | null;
+  // FR-11/BR-15: set when the Return Manager overrides the linkage gate.
+  purchaser_linkage_confirmed_at: string | null;
+  purchaser_linkage_confirmed_by: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -589,6 +614,19 @@ export async function submitToManager(id: string): Promise<void> {
   await logAction('refund_submitted_to_manager', id, 'submitted to manager review');
 }
 
+/** FR-11 / BR-15 override: the Return Manager manually confirms purchaser
+ *  linkage for a legitimate no-receipt case, clearing the linkage gate so the
+ *  refund can proceed. Mirrors the BR-3 30-day exception process. */
+export async function confirmPurchaserLinkage(returnId: string): Promise<void> {
+  const userId = await currentUserId();
+  const { error } = await supabase.from('returns').update({
+    purchaser_linkage_confirmed_at: new Date().toISOString(),
+    purchaser_linkage_confirmed_by: userId,
+  }).eq('id', returnId);
+  if (error) throw error;
+  await logAction('return_purchaser_linkage_confirmed', returnId, 'manager confirmed purchaser linkage');
+}
+
 export async function managerApprove(id: string, note?: string): Promise<void> {
   const userId = await currentUserId();
 
@@ -605,12 +643,16 @@ export async function managerApprove(id: string, note?: string): Promise<void> {
   if (approval.return_id) {
     const { data: ret, error: rErr } = await supabase
       .from('returns')
-      .select('id, status')
+      .select('id, status, is_purchaser, purchaser_name, purchaser_email, purchase_proof, purchaser_linkage_confirmed_at')
       .eq('id', approval.return_id)
       .single();
     if (rErr || !ret) throw new Error(`Linked return not found: ${rErr?.message}`);
     if (!returnStatusAllowsRefund(ret.status)) {
       throw new Error(`Return is in status '${ret.status}' — approval is blocked until the unit is received/inspected (or the customer discards a defective unit).`);
+    }
+    // FR-11 / BR-14 / BR-15: don't refund the wrong party.
+    if (!hasValidPurchaserLinkage(ret)) {
+      throw new Error(`Purchaser linkage is unverified — the filer isn't the buyer and no purchaser identity + receipt is on file. Confirm linkage (manager override) before approving.`);
     }
   }
 

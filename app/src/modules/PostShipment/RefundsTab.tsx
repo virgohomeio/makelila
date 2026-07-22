@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   useRefundApprovals, useReturns,
   submitRefundRequest, updateRefundAmount, submitToManager, managerApprove, financeApprove, executeRefund, denyRefund, closeRefund,
+  confirmPurchaserLinkage, hasValidPurchaserLinkage,
   setReturnDisposition, updateReturnStatus,
   useRefundNotes, addRefundNote, deleteRefundNote,
   REFUND_STATUS_META, REFUND_METHODS, REFUND_METHOD_META,
@@ -783,9 +784,22 @@ function RefundCard({
   const canActExecute = refund.status === 'refund_queue' && canFinance;
   const canDeny = canActManager || canActFinance;
 
+  // FR-11: flag a case whose purchaser linkage is unverified; the manager can
+  // override (BR-15) before approving.
+  const linkageOk = hasValidPurchaserLinkage(linkedReturn);
+  const needsLinkage = canActManager && !linkageOk;
+
   const runSubmitToManager = async () => {
     setBusy(true); onError(null);
     try { await submitToManager(refund.id); }
+    catch (e) { onError((e as Error).message); }
+    finally { setBusy(false); }
+  };
+
+  const runConfirmLinkage = async () => {
+    if (!linkedReturn) return;
+    setBusy(true); onError(null);
+    try { await confirmPurchaserLinkage(linkedReturn.id); }
     catch (e) { onError((e as Error).message); }
     finally { setBusy(false); }
   };
@@ -933,8 +947,15 @@ function RefundCard({
                 {busy ? '…' : 'Submit to manager →'}
               </button>
             )}
+            {needsLinkage && (
+              <button onClick={() => void runConfirmLinkage()} disabled={busy} className={styles.refundDenyBtn}
+                title="Filer isn't the buyer and no purchaser receipt is on file — confirm linkage to override (BR-15).">
+                {busy ? '…' : '⚠ Confirm purchaser linkage'}
+              </button>
+            )}
             {(canActManager || canActFinance) && (
-              <button onClick={openApprove} disabled={busy} className={styles.refundApproveBtn}>
+              <button onClick={openApprove} disabled={busy || needsLinkage} className={styles.refundApproveBtn}
+                title={needsLinkage ? 'Confirm purchaser linkage before approving' : undefined}>
                 {canActManager ? 'Approve (manager)' : 'Approve amount → queue'}
               </button>
             )}
@@ -991,6 +1012,19 @@ function RefundDetailPanel({
   const canActFinance = refund.status === 'finance_review' && canFinance;
   const canActExecute = refund.status === 'refund_queue' && canFinance;
   const canAct = canActManager || canActFinance;
+
+  // FR-11: block manager approval until purchaser linkage is verified or the
+  // manager overrides it (BR-15).
+  const linkageOk = hasValidPurchaserLinkage(linkedReturn);
+  const needsLinkage = canActManager && !linkageOk;
+
+  const runConfirmLinkage = async () => {
+    if (!linkedReturn) return;
+    setBusy(true); onError(null);
+    try { await confirmPurchaserLinkage(linkedReturn.id); }
+    catch (e) { onError((e as Error).message); }
+    finally { setBusy(false); }
+  };
 
   const runExecute = async () => {
     setBusy(true); onError(null);
@@ -1213,7 +1247,8 @@ function RefundDetailPanel({
 
       <div className={styles.refundDetailActions}>
         <div className={styles.refundDetailRolePill}>
-          {canActSubmit ? 'Completeness check — submit to the Manager when ready' :
+          {needsLinkage ? '⚠ Purchaser linkage unverified — confirm linkage (BR-15 override) before approving' :
+           canActSubmit ? 'Completeness check — submit to the Manager when ready' :
            canActManager ? 'You can act as Manager for this case' :
            canActFinance ? 'You can act as Finance for this case' :
            canActExecute ? 'Approved — execute the payout, then mark refunded' :
@@ -1250,8 +1285,15 @@ function RefundDetailPanel({
                 {busy ? '…' : 'Submit to manager →'}
               </button>
             )}
+            {needsLinkage && (
+              <button onClick={() => void runConfirmLinkage()} disabled={busy} className={styles.refundDetailDenyBtn}
+                title="Filer isn't the buyer and no purchaser receipt is on file — confirm linkage to override (BR-15).">
+                {busy ? '…' : '⚠ Confirm purchaser linkage'}
+              </button>
+            )}
             {canAct && (
-              <button onClick={openApprove} disabled={busy} className={styles.refundDetailApproveBtn}>
+              <button onClick={openApprove} disabled={busy || needsLinkage} className={styles.refundDetailApproveBtn}
+                title={needsLinkage ? 'Confirm purchaser linkage before approving' : undefined}>
                 {canActManager ? '✓ Approve as Manager' : '✓ Approve amount → Refund Queue'}
               </button>
             )}
