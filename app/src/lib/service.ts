@@ -1046,7 +1046,7 @@ async function sendTicketAssignmentEmail(
       subject: ticket.subject,
       customer_name: ticket.customer_name ?? ticket.customer_email ?? 'Unknown customer',
       assigned_by: actorEmail ? ownerFirstName(actorEmail) : 'A teammate',
-      ticket_url: `${APP_BASE_URL}/service`,
+      ticket_url: `${APP_BASE_URL}/service?tab=support`,
     },
   });
 }
