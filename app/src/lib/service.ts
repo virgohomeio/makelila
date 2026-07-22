@@ -1003,6 +1003,80 @@ export async function assignTicketOwner(id: string, owner_email: string | null):
     { entityType: 'ticket', entityId: id });
 }
 
+// Deep-link base for the assignment notification email. Custom domain, so the
+// router basename is '/'; the Service route lives at /service.
+const APP_BASE_URL = 'https://lila.vip';
+
+/** Best-guess first name from an @virgohome.io address, capitalized:
+ *  'reina@virgohome.io' → 'Reina', 'yueli@…' → 'Yueli'. */
+export function ownerFirstName(email: string): string {
+  const local = (email.split('@')[0] ?? email).split(/[._-]/)[0] ?? email;
+  return local ? local.charAt(0).toUpperCase() + local.slice(1) : email;
+}
+
+/** Decide whether assigning `newOwner` (previously `previousOwner`, by
+ *  operator `actorEmail`) should trigger a notification email. We notify only
+ *  when the owner actually changes to a real person other than the operator
+ *  making the change — no self-assignment spam, no email on unassign, no email
+ *  when the owner is unchanged. Pure + exported so it's unit-testable. */
+export function shouldNotifyAssignment(
+  previousOwner: string | null | undefined,
+  newOwner: string | null | undefined,
+  actorEmail: string | null | undefined,
+): boolean {
+  if (!newOwner) return false;                                  // unassigning
+  const next = newOwner.toLowerCase();
+  if (next === (previousOwner ?? '').toLowerCase()) return false; // unchanged
+  if (next === (actorEmail ?? '').toLowerCase()) return false;    // self-assign
+  return true;
+}
+
+async function sendTicketAssignmentEmail(
+  ticket: ServiceTicket,
+  assigneeEmail: string,
+  actorEmail: string | null | undefined,
+): Promise<void> {
+  await sendTemplate({
+    template_key: 'ticket_assigned',
+    to: assigneeEmail,
+    to_name: ownerFirstName(assigneeEmail),
+    variables: {
+      assignee_first_name: ownerFirstName(assigneeEmail),
+      ticket_number: ticket.ticket_number,
+      subject: ticket.subject,
+      customer_name: ticket.customer_name ?? ticket.customer_email ?? 'Unknown customer',
+      assigned_by: actorEmail ? ownerFirstName(actorEmail) : 'A teammate',
+      ticket_url: `${APP_BASE_URL}/service`,
+    },
+  });
+}
+
+/** Assign (or clear) a ticket's owner and, when appropriate, email the new
+ *  owner that a ticket was assigned to them. The DB update + activity log
+ *  always happen; the email is best-effort and never blocks reassignment.
+ *  Returns whether a notification email went out (for optional UI feedback). */
+export async function reassignTicketOwner(
+  ticket: ServiceTicket,
+  newOwner: string | null,
+  actorEmail: string | null | undefined,
+): Promise<{ emailed: boolean }> {
+  const previous = ticket.owner_email ?? null;
+  if ((newOwner ?? null) === previous) return { emailed: false };
+
+  await assignTicketOwner(ticket.id, newOwner);
+
+  if (!shouldNotifyAssignment(previous, newOwner, actorEmail)) return { emailed: false };
+  try {
+    await sendTicketAssignmentEmail(ticket, newOwner as string, actorEmail);
+    return { emailed: true };
+  } catch (e) {
+    // Non-fatal: the reassignment already succeeded. Surface in console; the
+    // caller may show a soft toast but must not roll back the assignment.
+    console.warn('Ticket-assignment email failed (non-fatal):', (e as Error).message);
+    return { emailed: false };
+  }
+}
+
 // Walkthrough #41: defines the support → repair pipeline. Operators flip a
 // ticket's category here once they've confirmed it's actually a hardware
 // repair issue (vs. an onboarding question or a general support inquiry).

@@ -7,7 +7,7 @@ import {
   STATUS_META, CATEGORY_META, PRIORITY_META, TICKET_STATUSES,
   statusMeta, priorityMeta, sourceLabel, topicLabel, slaChip,
   ISSUE_AREAS, ISSUE_AREA_LABEL,
-  updateTicketStatus, assignTicketOwner, setTicketPriority, setTicketIssueArea, setTicketCategory,
+  updateTicketStatus, reassignTicketOwner, setTicketPriority, setTicketIssueArea, setTicketCategory,
   setRepairFields, reclassifyTicket, deleteTicket, updateTicketSubject, setTicketDescription,
   markDiagnosisLinkSent, setLinearIssueUrl, setGitHubIssueUrl,
   useCustomerLifecycle, warrantyState,
@@ -17,6 +17,7 @@ import {
 import { CANNED_SMS_TEMPLATES } from '../../lib/cannedSms';
 import { createLinearIssue, createGitHubIssue } from '../../lib/githubLinear';
 import { useReplacementSummary } from '../../lib/orders';
+import { useAuth } from '../../lib/auth';
 import { AttachmentStrip } from './AttachmentStrip';
 import { TicketNotes } from './TicketNotes';
 import { TicketActionItems } from './TicketActionItems';
@@ -95,6 +96,7 @@ function QueuedReplacementDetails({ orderId }: { orderId: string }) {
 
 export function TicketDetailPanel({ ticket, onClose }: Props) {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [defectCat, setDefectCat] = useState(ticket.defect_category ?? '');
   const [parts, setParts] = useState(ticket.parts_needed ?? '');
   const [busy, setBusy] = useState(false);
@@ -804,7 +806,7 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
             className={styles.select}
             value={ticket.owner_email ?? ''}
             disabled={busy}
-            onChange={(e) => void run(assignTicketOwner(ticket.id, e.target.value || null))}
+            onChange={(e) => void run(reassignTicketOwner(ticket, e.target.value || null, user?.email))}
           >
             <option value="">— Unassigned —</option>
             {OPS_OWNERS.map(e => <option key={e} value={e}>{e}</option>)}

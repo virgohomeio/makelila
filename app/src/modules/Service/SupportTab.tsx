@@ -11,7 +11,9 @@ import { useCustomers, syncCustomersFromHubspot, type Customer } from '../../lib
 import { useUnits } from '../../lib/stock';
 import { TicketDetailPanel } from './TicketDetailPanel';
 import { CustomerProfilePanel } from './CustomerProfilePanel';
+import { OwnerKanban } from './OwnerKanban';
 import { groupTicketsByCustomer, type CustomerGroup } from './ticketGrouping';
+import { useAuth } from '../../lib/auth';
 import styles from './Service.module.css';
 
 const STATUS_FILTERS: { key: TicketStatus | 'all'; label: string }[] = [
@@ -23,6 +25,7 @@ export function SupportTab() {
   const { tickets, loading } = useServiceTickets('support');
   const { closedIds: closedSinceIds } = useTicketsClosedSince(7);
   const { customers } = useCustomers();
+  const { user } = useAuth();
   const [statusFilter, setStatusFilter] = useState<TicketStatus | 'all'>('all');
   const [sourceFilter, setSourceFilter] = useState<'all' | 'customer_form' | 'hubspot' | 'gmail' | 'quo' | 'telemetry_auto'>('all');
   const [topicFilter, setTopicFilter] = useState<TicketTopic | 'all'>('all');
@@ -127,6 +130,12 @@ export function SupportTab() {
         <Kpi label="Waiting on us"  value={waitingCount} />
         <Kpi label="Closed (7d)"    value={closedWeekCount} />
       </div>
+
+      <OwnerKanban
+        tickets={tickets}
+        currentUserEmail={user?.email}
+        onSelectTicket={(t) => setSelectedId(t.id)}
+      />
 
       <div className={styles.filterRow}>
         {STATUS_FILTERS.map(f => (
@@ -233,6 +242,7 @@ export function SupportTab() {
                   <th>Open</th>
                   <th>Last activity</th>
                   <th>Status</th>
+                  <th>Owner</th>
                   <th></th>
                 </tr>
               </thead>
@@ -324,6 +334,11 @@ function CustomerGroupRow({ g, selected, onClick }: { g: CustomerGroup; selected
     : [g.rollupStatus];
   const tags = [...new Set(openTickets.flatMap(t => t.tags ?? []))]
     .filter(tag => !statuses.includes(tag));
+  // Distinct owners across this customer's open tickets — a profile can hold
+  // several tickets split across people, so show each as a chip.
+  const owners = [...new Set(
+    openTickets.map(t => t.owner_email).filter((e): e is string => !!e),
+  )].sort();
   return (
     <tr className={`${styles.row} ${selected ? styles.rowSelected : ''}`} onClick={onClick}>
       <td>
@@ -351,6 +366,15 @@ function CustomerGroupRow({ g, selected, onClick }: { g: CustomerGroup; selected
             >🏷 {m.label}</span>
           );
         })}
+      </td>
+      <td>
+        {owners.length > 0 ? (
+          <div className={styles.ownerChips}>
+            {owners.map(o => (
+              <span key={o} className={styles.ownerChip} title={o}>{o.split('@')[0]}</span>
+            ))}
+          </div>
+        ) : <span style={{ color: '#a0aec0' }}>—</span>}
       </td>
       <td style={{ textAlign: 'right', color: '#a0aec0' }}>›</td>
     </tr>
