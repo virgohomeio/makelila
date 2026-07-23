@@ -95,10 +95,19 @@ export function MiniTab() {
   const [view, setView] = useState<MiniView>('creative');
   const [selected, setSelected] = useState<string | null>(null);
 
+  // Campaigns ordered by start date (each campaign's earliest ad-day),
+  // most-recently-started at the top.
   const campaigns = useMemo(() => {
-    const s = new Set<string>();
-    for (const a of ads) if (a.campaign_name) s.add(a.campaign_name);
-    return Array.from(s).sort();
+    const start = new Map<string, string>();
+    for (const a of ads) {
+      if (!a.campaign_name) continue;
+      const d = a.date_start ?? '';
+      const cur = start.get(a.campaign_name);
+      if (cur === undefined || (d && d < cur)) start.set(a.campaign_name, d);
+    }
+    return Array.from(start.entries())
+      .sort((x, y) => y[1].localeCompare(x[1]))   // newest start first
+      .map(([name]) => name);
   }, [ads]);
 
   // Each sub-tab defaults to its own specific campaign: the July creative test
