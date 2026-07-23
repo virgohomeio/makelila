@@ -443,6 +443,32 @@ export async function returnAttachmentSignedUrl(filePath: string): Promise<strin
 }
 
 // ============================================================================
+// FR-13 — one-click return-shipping label + courier pickup (Freightcom).
+// Invokes the book-return-label edge function, which quotes + books a return
+// shipment (customer → warehouse) and stamps the return's pickup fields.
+// ============================================================================
+export type ReturnLabelResult = { label_url: string | null; tracking: string | null; carrier: string; service: string };
+
+export async function bookReturnLabel(returnId: string): Promise<ReturnLabelResult> {
+  const { data, error } = await supabase.functions.invoke('book-return-label', { body: { return_id: returnId } });
+  if (error) {
+    // Surface the edge function's JSON error message when available.
+    let msg = error.message;
+    try {
+      const ctx = (error as { context?: { json?: () => Promise<{ error?: string }> } }).context;
+      const body = ctx?.json ? await ctx.json() : null;
+      if (body?.error) msg = body.error;
+    } catch { /* keep generic message */ }
+    throw new Error(msg);
+  }
+  const result = data as ReturnLabelResult & { error?: string };
+  if (result?.error) throw new Error(result.error);
+  await logAction('return_label_booked', returnId, `${result.carrier ?? ''} ${result.tracking ?? ''}`.trim() || 'booked',
+    { entityType: 'return', entityId: returnId });
+  return result;
+}
+
+// ============================================================================
 // Replacement queue
 // ============================================================================
 

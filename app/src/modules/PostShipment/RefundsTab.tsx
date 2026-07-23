@@ -8,6 +8,7 @@ import {
   setReturnDisposition, updateReturnStatus,
   useReturnAttachments, uploadReturnAttachment, deleteReturnAttachment, returnAttachmentSignedUrl,
   RETURN_ATTACH_INPUT_ACCEPT, type ReturnAttachment,
+  bookReturnLabel,
   useRefundNotes, addRefundNote, deleteRefundNote,
   REFUND_STATUS_META, REFUND_METHODS, REFUND_METHOD_META,
   UNIT_STATUS_LABEL, RETURN_DISPOSITION_META,
@@ -490,6 +491,43 @@ function toNamedFile(blob: File): File {
   return new File([blob], `pasted-${Date.now()}.${ext}`, { type: blob.type });
 }
 
+// FR-13 — one-click return-shipping label. Shows the booked tracking once a
+// label exists; otherwise offers to generate one (books a real Freightcom
+// shipment, so it confirms first). Only meaningful when the customer ships the
+// unit back (disposition 'ship_back').
+function ReturnLabelControl({ r, onError }: { r: ReturnRow; onError: (m: string | null) => void }) {
+  const [busy, setBusy] = useState(false);
+  if (r.disposition === 'discard') return null; // discard = no return shipment
+
+  if (r.pickup_tracking) {
+    return (
+      <span onClick={e => e.stopPropagation()}
+        style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 999, color: '#276749', background: '#f0fff4' }}
+        title={`Return label booked${r.pickup_carrier ? ` · ${r.pickup_carrier}` : ''}`}>
+        🏷 {r.pickup_carrier ? `${r.pickup_carrier} · ` : ''}{r.pickup_tracking}
+      </span>
+    );
+  }
+
+  const run = async () => {
+    if (!window.confirm('Generate a return shipping label and book courier pickup for this unit? This books a shipment with the carrier.')) return;
+    setBusy(true); onError(null);
+    try {
+      const res = await bookReturnLabel(r.id);
+      if (res.label_url) window.open(res.label_url, '_blank', 'noopener');
+    } catch (e) { onError((e as Error).message); }
+    finally { setBusy(false); }
+  };
+  return (
+    <button onClick={e => { e.stopPropagation(); void run(); }} disabled={busy}
+      style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 999, cursor: 'pointer',
+               border: '1px solid #cbd5e0', background: '#fff', color: '#2b6cb0' }}
+      title="Quote + book a return label (customer → warehouse) via Freightcom">
+      {busy ? 'Booking…' : '🏷 Generate return label'}
+    </button>
+  );
+}
+
 function ReturnAttachmentStrip({ returnId, onError }: { returnId: string; onError: (m: string | null) => void }) {
   const { attachments, refresh } = useReturnAttachments(returnId);
   const [busy, setBusy] = useState(false);
@@ -841,6 +879,7 @@ function InspectionCard({
             ⚠ Disposition not set
           </span>
         )}
+        <ReturnLabelControl r={r} onError={onError} />
       </div>
       <div className={styles.refundActions} onClick={e => e.stopPropagation()}>
         <button className={styles.refundApproveBtn} onClick={onCompile}>Compile → George</button>
@@ -1367,6 +1406,7 @@ function RefundDetailPanel({
           {!linkedReturn.disposition && (
             <span style={{ fontSize: 11, color: '#975a16' }}>⚠ not set</span>
           )}
+          <ReturnLabelControl r={linkedReturn} onError={onError} />
         </div>
         <ReturnFormAnswers r={linkedReturn} />
         <ReturnAttachmentStrip returnId={linkedReturn.id} onError={onError} />
