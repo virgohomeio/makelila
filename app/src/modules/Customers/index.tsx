@@ -3,7 +3,7 @@ import { isTelemetryConfigured } from '../../lib/supabaseTelemetry';
 const Dashboard = lazy(() => import('../Dashboard'));
 import {
   useCustomers, syncCustomersFromHubspot, exportPurchasers, pushToKlaviyo,
-  type Customer,
+  setPurchaser, type Customer,
 } from '../../lib/customers';
 import { useOrders } from '../../lib/orders';
 import { formatMoney } from '../../lib/money';
@@ -44,7 +44,7 @@ export default function Customers() {
       setMobileTabPicked(true);
     }
   }, [paramTab]);
-  const { customers, loading } = useCustomers();
+  const { customers, loading, refresh: refreshCustomers } = useCustomers();
   const { units } = useUnits();
   // Pre-build serial lookups so each row can render its serial(s) without
   // re-filtering the full units list. The canonical units.customer_id FK
@@ -404,6 +404,8 @@ export default function Customers() {
     {selectedCustomer && (
       <CustomerDetailPanel
         customer={selectedCustomer}
+        allCustomers={customers}
+        onChanged={() => { void refreshCustomers(); }}
         onClose={() => setSelectedCustomerId(null)}
       />
     )}
@@ -438,7 +440,109 @@ function CustomerRow({ c, serials, onSelect }: { c: Customer; serials: string[];
   );
 }
 
-function CustomerDetailPanel({ customer, onClose }: { customer: Customer; onClose: () => void }) {
+// FR-6: link a USER (submitter / gift recipient / household member) to the
+// PURCHASER of record. Refunds and accounting resolve to the purchaser, so this
+// is where operators fix the Lily Xu → Annie Wu class of case.
+function PurchaserLinkSection({ customer, allCustomers, onChanged }: {
+  customer: Customer;
+  allCustomers: Customer[];
+  onChanged: () => void;
+}) {
+  const [query, setQuery] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const purchaser = customer.purchaser_id
+    ? allCustomers.find(c => c.id === customer.purchaser_id) ?? null
+    : null;
+  const linkedUsers = useMemo(
+    () => allCustomers.filter(c => c.purchaser_id === customer.id),
+    [allCustomers, customer.id],
+  );
+
+  const matches = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (q.length < 2) return [];
+    return allCustomers
+      .filter(c => c.id !== customer.id && (
+        c.full_name.toLowerCase().includes(q) || c.email?.toLowerCase().includes(q)
+      ))
+      .slice(0, 8);
+  }, [query, allCustomers, customer.id]);
+
+  const run = async (fn: () => Promise<void>) => {
+    setBusy(true); setErr(null);
+    try { await fn(); setQuery(''); onChanged(); }
+    catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+    finally { setBusy(false); }
+  };
+
+  const label = (c: Customer) => `${c.full_name || '—'}${c.email ? ` · ${c.email}` : ''}`;
+
+  return (
+    <PanelSection title="Purchaser & users">
+      {purchaser ? (
+        <div className={styles.kvRow}>
+          <span className={styles.kvLabel}>Acts for purchaser</span>
+          <span className={styles.kvValue}>
+            {label(purchaser)}{' '}
+            <button className={styles.linkBtn} disabled={busy}
+              onClick={() => void run(() => setPurchaser(customer.id, null))}>Unlink</button>
+          </span>
+        </div>
+      ) : (
+        <>
+          <div className={styles.kvRow}>
+            <span className={styles.kvLabel}>Purchaser of record</span>
+            <span className={styles.kvValue}>This customer is the purchaser.</span>
+          </div>
+          <div style={{ marginTop: 6 }}>
+            <input
+              className={styles.searchInput}
+              placeholder="Link to a purchaser — type name or email…"
+              value={query}
+              disabled={busy}
+              onChange={e => setQuery(e.target.value)}
+            />
+            {matches.length > 0 && (
+              <div className={styles.section} style={{ marginTop: 4 }}>
+                {matches.map(m => (
+                  <div key={m.id} className={styles.kvRow}>
+                    <span className={styles.kvValue}>{label(m)}</span>
+                    <button className={styles.linkBtn} disabled={busy}
+                      onClick={() => void run(() => setPurchaser(customer.id, m.id))}>Link →</button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
+      {linkedUsers.length > 0 && (
+        <div style={{ marginTop: 8 }}>
+          <div className={styles.kvLabel}>Linked users ({linkedUsers.length})</div>
+          {linkedUsers.map(u => (
+            <div key={u.id} className={styles.kvRow}>
+              <span className={styles.kvValue}>{label(u)}</span>
+              <button className={styles.linkBtn} disabled={busy}
+                onClick={() => void run(() => setPurchaser(u.id, null))}>Unlink</button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {err && <div className={styles.toastError} style={{ marginTop: 6 }}>{err}</div>}
+    </PanelSection>
+  );
+}
+
+function CustomerDetailPanel({ customer, allCustomers, onChanged, onClose }: {
+  customer: Customer;
+  allCustomers: Customer[];
+  onChanged: () => void;
+  onClose: () => void;
+}) {
   const { all: orders } = useOrders();
   const { units } = useUnits();
   const { tickets } = useServiceTickets();
@@ -480,6 +584,8 @@ function CustomerDetailPanel({ customer, onClose }: { customer: Customer; onClos
             <PanelRow label="Phone" value={customer.phone} />
             <PanelRow label="Address" value={fullAddress} multiline />
           </PanelSection>
+
+          <PurchaserLinkSection customer={customer} allCustomers={allCustomers} onChanged={onChanged} />
 
           <LilaAppActivitySection customerId={customer.id} />
 

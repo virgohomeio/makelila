@@ -53,9 +53,36 @@ export type Customer = {
   last_touch_at: string | null;
   // J6: when true, the telemetry auto-ticket cron skips all units for this customer.
   telemetry_autoticket_suppress: boolean;
+  // FR-6: when set, this row is a USER acting for the purchaser at this id
+  // (gift/household case); refunds + accounting resolve to the purchaser.
+  // NULL = this row is its own purchaser. See resolvePurchaserId().
+  purchaser_id: string | null;
   created_at: string;
   updated_at: string;
 };
+
+// ── FR-6: CUSTOMER (purchaser) vs USER (submitter) ──────────────────────────
+// Every person is a customers row. A row representing a USER acting for someone
+// else links to the PURCHASER via purchaser_id; refunds/accounting book against
+// the purchaser. These pure helpers are the single resolution point.
+
+/** The accounting entity for a customer row: the linked purchaser if set,
+ *  otherwise the row itself. */
+export function resolvePurchaserId(row: { id: string; purchaser_id: string | null }): string {
+  return row.purchaser_id ?? row.id;
+}
+
+/** email (lowercased/trimmed) → resolved PURCHASER id. A user's email maps to
+ *  the purchaser they act for, so refund-card lookups book against the payer. */
+export function buildPurchaserIdByEmail(
+  rows: Array<{ id: string; email: string | null; purchaser_id: string | null }>,
+): Map<string, string> {
+  const m = new Map<string, string>();
+  for (const r of rows) {
+    if (r.email) m.set(r.email.toLowerCase().trim(), resolvePurchaserId(r));
+  }
+  return m;
+}
 
 export function parseUtm(
   landingUrl: string | null | undefined,
@@ -359,6 +386,9 @@ export function useOnboardDates(): { byEmail: Map<string, string | null>; loadin
  *  a household's records (tickets, etc.) by customer even when they span
  *  multiple emails — e.g. a couple where one partner's tickets carry a second
  *  email but all attach to one customer record. Read-only snapshot. */
+/** email → resolved PURCHASER id (FR-6). A gift/household user's email resolves
+ *  to the purchaser they act for, so refund lookups book the accounting entity,
+ *  not the submitter. */
 export function useCustomerIdByEmail(): { byEmail: Map<string, string>; loading: boolean } {
   const [byEmail, setByEmail] = useState<Map<string, string>>(new Map());
   const [loading, setLoading] = useState(true);
@@ -366,19 +396,27 @@ export function useCustomerIdByEmail(): { byEmail: Map<string, string>; loading:
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const { data } = await supabase.from('customers').select('id, email');
+      const { data } = await supabase.from('customers').select('id, email, purchaser_id');
       if (cancelled) return;
-      const m = new Map<string, string>();
-      for (const c of (data ?? []) as { id: string; email: string | null }[]) {
-        if (c.email) m.set(c.email.toLowerCase().trim(), c.id);
-      }
-      setByEmail(m);
+      setByEmail(buildPurchaserIdByEmail(
+        (data ?? []) as { id: string; email: string | null; purchaser_id: string | null }[],
+      ));
       setLoading(false);
     })();
     return () => { cancelled = true; };
   }, []);
 
   return { byEmail, loading };
+}
+
+/** FR-6: link a USER row to the PURCHASER it acts for (or pass null to unlink,
+ *  making the row its own purchaser again). */
+export async function setPurchaser(userId: string, purchaserId: string | null): Promise<void> {
+  if (purchaserId === userId) throw new Error('A customer cannot be their own linked purchaser.');
+  const { error } = await supabase.from('customers')
+    .update({ purchaser_id: purchaserId }).eq('id', userId);
+  if (error) throw error;
+  await logAction('customer_purchaser_linked', userId, purchaserId ?? 'unlinked');
 }
 
 export function useCustomers(): {

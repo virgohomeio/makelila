@@ -2,6 +2,17 @@ import { useEffect, useState } from 'react';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase } from './supabase';
 import { logAction } from './activityLog';
+import { sendTemplate } from './templates';
+
+const APP_BASE_URL = 'https://lila.vip';
+const REFUND_URL = `${APP_BASE_URL}/post-shipment?tab=refunds`;
+
+/** First name from a VCycene email local-part, for greeting notification
+ *  recipients (e.g. 'pedrum@virgohome.io' → 'Pedrum'). */
+function firstNameFromEmail(email: string): string {
+  const local = email.split('@')[0].split(/[._-]/)[0] ?? email;
+  return local.charAt(0).toUpperCase() + local.slice(1);
+}
 
 // ============================================================================
 // Returns
@@ -30,6 +41,41 @@ export const RETURN_STATUS_META: Record<ReturnStatus, { label: string; color: st
 export const RETURN_STATUS_ORDER: ReturnStatus[] = [
   'created','pickup_scheduled','picked_up','received','inspected','refunded','denied','closed','discarded',
 ];
+
+// FR-2 (Refund & Return Approval PRD): a refund may only be approved once the
+// linked return is resolved — the unit has been received/inspected, or the
+// customer discarded a genuine-defect unit (BR-7: no physical return, but still
+// refundable). Statuses before receipt (created/pickup_scheduled/picked_up) and
+// 'denied' block approval. Used by both managerApprove and financeApprove.
+export const RETURN_STATUSES_ALLOWING_REFUND: ReturnStatus[] = [
+  'received', 'inspected', 'refunded', 'closed', 'discarded',
+];
+
+export function returnStatusAllowsRefund(status: ReturnStatus): boolean {
+  return RETURN_STATUSES_ALLOWING_REFUND.includes(status);
+}
+
+// FR-11 / BR-14 / BR-15: a refund can only be processed against a valid
+// purchaser. When the return filer isn't the buyer (is_purchaser=false) we need
+// the purchaser's identity AND a proof of purchase — unless the Return Manager
+// has manually confirmed linkage (the no-receipt override). is_purchaser true
+// (filer is the buyer) or null (ops/legacy return, no attestation collected)
+// is not gated.
+export type PurchaserLinkageFields = {
+  is_purchaser: boolean | null;
+  purchaser_name: string | null;
+  purchaser_email: string | null;
+  purchase_proof: string | null;
+  purchaser_linkage_confirmed_at?: string | null;
+};
+
+export function hasValidPurchaserLinkage(r: PurchaserLinkageFields | null): boolean {
+  if (!r) return true;                                 // nothing to gate on
+  if (r.purchaser_linkage_confirmed_at) return true;   // BR-15 manager override
+  if (r.is_purchaser !== false) return true;           // filer is the buyer (or ops/legacy)
+  const hasIdentity = !!(r.purchaser_name?.trim() || r.purchaser_email?.trim());
+  return hasIdentity && !!r.purchase_proof;
+}
 
 // Plain-language unit status for the Refunds tab — where is the physical unit?
 export const UNIT_STATUS_LABEL: Record<ReturnStatus, string> = {
@@ -142,6 +188,9 @@ export type ReturnRow = {
   purchaser_name: string | null;
   purchaser_email: string | null;
   purchaser_phone: string | null;
+  // FR-11/BR-15: set when the Return Manager overrides the linkage gate.
+  purchaser_linkage_confirmed_at: string | null;
+  purchaser_linkage_confirmed_by: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -371,6 +420,36 @@ export const REFUND_METHODS: RefundMethod[] = [
   'shopify','sezzle','quickbooks_cc','bank_etransfer','original_card',
 ];
 
+// FR-9 queue routing. A refund entering the Refund Queue is executed by the
+// payments operator (Shopify + Sezzle/BNPL, per Stage 8) or the finance officer
+// (card / bank / other). These are the current role-holders — routing keys off
+// the role, so swapping a holder is a one-line change here.
+export const REFUND_EXECUTORS = {
+  payments: 'pedrum@virgohome.io',   // payments operator (Shopify + BNPL)
+  finance:  'yueli@virgohome.io',    // finance officer (Julie)
+} as const;
+
+export function refundExecutorEmail(method: RefundMethod | null): string {
+  return method === 'shopify' || method === 'sezzle'
+    ? REFUND_EXECUTORS.payments
+    : REFUND_EXECUTORS.finance;
+}
+
+// FR-12 fee breakdown (BR-9/BR-10, honouring current terms per OQ-1). The
+// restocking fee defaults to $50; return shipping is operator-entered actual
+// cost (OQ-2 resolved as actual, not fixed). Both are waived for genuine-defect
+// cases (BR-7). computeRefundNet derives the payout from the gross minus fees.
+export const DEFAULT_RESTOCKING_FEE = 50;
+
+export function computeRefundNet(gross: number, restocking: number, returnShipping: number): number {
+  const net = Number(gross) - (Number(restocking) || 0) - (Number(returnShipping) || 0);
+  return Math.max(0, Math.round(net * 100) / 100);
+}
+
+export function defaultRefundFees(isDefect: boolean): { restocking: number; returnShipping: number } {
+  return { restocking: isDefect ? 0 : DEFAULT_RESTOCKING_FEE, returnShipping: 0 };
+}
+
 export type RefundApproval = {
   id: string;
   return_id: string | null;
@@ -381,6 +460,9 @@ export type RefundApproval = {
   refund_method: RefundMethod | null;
   original_amount_usd: number | null;
   amount_correction_note: string | null;
+  // FR-12 fee breakdown (how the net payout was derived).
+  restocking_fee_usd: number | null;
+  return_shipping_fee_usd: number | null;
   currency: string;
   payment_method: string | null;
   reason: string | null;
@@ -523,7 +605,9 @@ export async function submitRefundRequest(input: {
   const userId = await currentUserId();
   const { error } = await supabase.from('refund_approvals').insert({
     ...input,
-    status: 'manager_review',
+    // FR-3: land in Completeness/prep, not straight in front of the Return
+    // Manager. The Account Manager verifies the case, then calls submitToManager.
+    status: 'submitted',
     submitted_by: userId,
   });
   if (error) throw error;
@@ -554,8 +638,68 @@ export async function updateRefundAmount(id: string, amount: number): Promise<vo
   await logAction('refund_amount_edited', id, `$${rounded.toFixed(2)}`);
 }
 
+/** FR-3: the Account Manager advances a prepared case from Completeness
+ *  ('submitted') to Manager Review. Explicit "Submit", distinct from the
+ *  Manager's "Approve" — so incomplete cases never sit in front of the Return
+ *  Manager. */
+export async function submitToManager(id: string): Promise<void> {
+  const { data: approval, error: aErr } = await supabase
+    .from('refund_approvals')
+    .select('id, status')
+    .eq('id', id)
+    .single();
+  if (aErr || !approval) throw new Error(`Refund approval not found: ${aErr?.message}`);
+  if (approval.status !== 'submitted') {
+    throw new Error(`Cannot submit to manager from status: ${approval.status}`);
+  }
+  const { error } = await supabase.from('refund_approvals')
+    .update({ status: 'manager_review' }).eq('id', id);
+  if (error) throw error;
+  await logAction('refund_submitted_to_manager', id, 'submitted to manager review');
+}
+
+/** FR-11 / BR-15 override: the Return Manager manually confirms purchaser
+ *  linkage for a legitimate no-receipt case, clearing the linkage gate so the
+ *  refund can proceed. Mirrors the BR-3 30-day exception process. */
+export async function confirmPurchaserLinkage(returnId: string): Promise<void> {
+  const userId = await currentUserId();
+  const { error } = await supabase.from('returns').update({
+    purchaser_linkage_confirmed_at: new Date().toISOString(),
+    purchaser_linkage_confirmed_by: userId,
+  }).eq('id', returnId);
+  if (error) throw error;
+  await logAction('return_purchaser_linkage_confirmed', returnId, 'manager confirmed purchaser linkage');
+}
+
 export async function managerApprove(id: string, note?: string): Promise<void> {
   const userId = await currentUserId();
+
+  // FR-2 gate: block Manager Review approval unless the linked return is
+  // resolved (received/inspected/discarded/…). This mirrors the guard in
+  // financeApprove so incomplete cards never reach — or pass — the Return
+  // Manager, rather than only being caught one stage later at Finance Review.
+  const { data: approval, error: aErr } = await supabase
+    .from('refund_approvals')
+    .select('id, return_id')
+    .eq('id', id)
+    .single();
+  if (aErr || !approval) throw new Error(`Refund approval not found: ${aErr?.message}`);
+  if (approval.return_id) {
+    const { data: ret, error: rErr } = await supabase
+      .from('returns')
+      .select('id, status, is_purchaser, purchaser_name, purchaser_email, purchase_proof, purchaser_linkage_confirmed_at')
+      .eq('id', approval.return_id)
+      .single();
+    if (rErr || !ret) throw new Error(`Linked return not found: ${rErr?.message}`);
+    if (!returnStatusAllowsRefund(ret.status)) {
+      throw new Error(`Return is in status '${ret.status}' — approval is blocked until the unit is received/inspected (or the customer discards a defective unit).`);
+    }
+    // FR-11 / BR-14 / BR-15: don't refund the wrong party.
+    if (!hasValidPurchaserLinkage(ret)) {
+      throw new Error(`Purchaser linkage is unverified — the filer isn't the buyer and no purchaser identity + receipt is on file. Confirm linkage (manager override) before approving.`);
+    }
+  }
+
   const { error } = await supabase.from('refund_approvals').update({
     status: 'finance_review',
     manager_approved_by: userId,
@@ -571,6 +715,8 @@ export type FinanceApproveOpts = {
   amount?: number;             // if omitted, keep original
   correction_note?: string;    // required if amount differs from original
   note?: string;               // free-form optional note (e.g. Stripe refund ID)
+  restocking_fee?: number;     // FR-12: recorded on the card for the audit trail
+  return_shipping_fee?: number;
 };
 
 export async function financeApprove(id: string, opts: FinanceApproveOpts): Promise<void> {
@@ -579,7 +725,7 @@ export async function financeApprove(id: string, opts: FinanceApproveOpts): Prom
   // 1. Fetch the approval row to validate + read original amount
   const { data: approval, error: aErr } = await supabase
     .from('refund_approvals')
-    .select('id, return_id, original_amount_usd, refund_amount_usd, status, customer_email')
+    .select('id, return_id, original_amount_usd, refund_amount_usd, status, customer_email, customer_name')
     .eq('id', id)
     .single();
   if (aErr || !approval) throw new Error(`Refund approval not found: ${aErr?.message}`);
@@ -595,8 +741,8 @@ export async function financeApprove(id: string, opts: FinanceApproveOpts): Prom
       .eq('id', approval.return_id)
       .single();
     if (rErr || !ret) throw new Error(`Linked return not found: ${rErr?.message}`);
-    if (!['received','inspected','refunded','closed'].includes(ret.status)) {
-      throw new Error(`Return is in status '${ret.status}' — refund cannot be processed until the unit is received.`);
+    if (!returnStatusAllowsRefund(ret.status)) {
+      throw new Error(`Return is in status '${ret.status}' — refund cannot be processed until the unit is received (or the customer discards a defective unit).`);
     }
   }
 
@@ -619,6 +765,9 @@ export async function financeApprove(id: string, opts: FinanceApproveOpts): Prom
     finance_approved_by: userId,
     finance_approved_at: new Date().toISOString(),
     finance_decision_note: opts.note?.trim() || null,
+    // FR-12: record the fee breakdown behind the net payout (null = not set).
+    restocking_fee_usd: opts.restocking_fee ?? null,
+    return_shipping_fee_usd: opts.return_shipping_fee ?? null,
   };
   const { error: upErr } = await supabase
     .from('refund_approvals')
@@ -627,6 +776,28 @@ export async function financeApprove(id: string, opts: FinanceApproveOpts): Prom
   if (upErr) throw upErr;
 
   await logAction('refund_finance_approved', id, `${opts.method} $${adjusted.toFixed(2)}`);
+
+  // FR-9a: notify the executor that a refund is queued for payout. Best-effort —
+  // a mail failure must never roll back the approval (mirrors the ticket-
+  // assignment email). Shopify/Sezzle → payments operator, else finance officer.
+  const executorEmail = refundExecutorEmail(opts.method);
+  try {
+    await sendTemplate({
+      template_key: 'refund_queued_executor',
+      to: executorEmail,
+      to_name: firstNameFromEmail(executorEmail),
+      variables: {
+        executor_first_name: firstNameFromEmail(executorEmail),
+        customer_name: approval.customer_name ?? approval.customer_email ?? 'Unknown customer',
+        amount: `$${adjusted.toFixed(2)}`,
+        method: REFUND_METHOD_META[opts.method].label,
+        refund_url: REFUND_URL,
+      },
+      related_refund_id: id,
+    });
+  } catch (e) {
+    console.warn('Refund queue-entry email failed (non-fatal):', (e as Error).message);
+  }
 }
 
 /** Refund Queue → Refunded. Finance has already approved the case + amount; this
@@ -636,7 +807,7 @@ export async function financeApprove(id: string, opts: FinanceApproveOpts): Prom
 export async function executeRefund(id: string, note?: string): Promise<void> {
   const { data: approval, error: aErr } = await supabase
     .from('refund_approvals')
-    .select('id, status, customer_email')
+    .select('id, status, customer_email, customer_name, refund_amount_usd, refund_method, submitted_by')
     .eq('id', id)
     .single();
   if (aErr || !approval) throw new Error(`Refund approval not found: ${aErr?.message}`);
@@ -651,6 +822,34 @@ export async function executeRefund(id: string, note?: string): Promise<void> {
   await logAction('refund_executed', id, note?.trim() || 'paid out',
     undefined,
     { klaviyoEvent: 'Refund Processed', ...(approval.customer_email ? { klaviyoEmail: approval.customer_email as string } : {}) });
+
+  // FR-9b: notify the Account Manager (the case owner who submitted it) that the
+  // payout is done, so they can tell the customer. Best-effort — never blocks
+  // the executed refund.
+  if (approval.submitted_by) {
+    try {
+      const { data: amProfile } = await supabase
+        .from('profiles').select('email').eq('id', approval.submitted_by).maybeSingle();
+      const amEmail = (amProfile as { email?: string } | null)?.email;
+      if (amEmail) {
+        await sendTemplate({
+          template_key: 'refund_executed_am',
+          to: amEmail,
+          to_name: firstNameFromEmail(amEmail),
+          variables: {
+            am_first_name: firstNameFromEmail(amEmail),
+            customer_name: approval.customer_name ?? approval.customer_email ?? 'the customer',
+            amount: `$${Number(approval.refund_amount_usd).toFixed(2)}`,
+            method: approval.refund_method ? REFUND_METHOD_META[approval.refund_method as RefundMethod].label : '—',
+            refund_url: REFUND_URL,
+          },
+          related_refund_id: id,
+        });
+      }
+    } catch (e) {
+      console.warn('Refund completion email failed (non-fatal):', (e as Error).message);
+    }
+  }
 }
 
 export async function denyRefund(id: string, stage: 'manager_review' | 'finance_review', reason: string): Promise<void> {

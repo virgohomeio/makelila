@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   useRefundApprovals, useReturns,
-  submitRefundRequest, updateRefundAmount, managerApprove, financeApprove, executeRefund, denyRefund, closeRefund,
+  submitRefundRequest, updateRefundAmount, submitToManager, managerApprove, financeApprove, executeRefund, denyRefund, closeRefund,
+  confirmPurchaserLinkage, hasValidPurchaserLinkage,
+  computeRefundNet, defaultRefundFees,
   setReturnDisposition, updateReturnStatus,
   useRefundNotes, addRefundNote, deleteRefundNote,
   REFUND_STATUS_META, REFUND_METHODS, REFUND_METHOD_META,
@@ -13,7 +15,14 @@ import {
 const UNIT_STAGES: { value: ReturnStatus; label: string }[] = [
   { value: 'created',          label: 'Return form submitted' },
   { value: 'pickup_scheduled', label: 'Pickup scheduled' },
+  { value: 'picked_up',        label: 'Picked up' },
   { value: 'received',         label: 'Unit returned' },
+  // BUG-5 (Lisa Clark gap): 'inspected' exists in ReturnStatus but was missing
+  // from this dropdown, so operators could never record that the returned unit
+  // was inspected — leaving the Manager unable to tell. FR-2's approval gate
+  // treats 'received' and 'inspected' alike, but recording inspection is what
+  // lets the Manager see the case is actually complete.
+  { value: 'inspected',        label: 'Unit inspected' },
   { value: 'discarded',        label: 'Unit discarded by customer' },
 ];
 import { useQueuedReplacements, holdReplacement, type Order } from '../../lib/orders';
@@ -30,9 +39,10 @@ import styles from './PostShipment.module.css';
 
 const STAR = '★';
 
-type ColKey = 'manager_review' | 'finance_review' | 'refund_queue' | 'refunded' | 'denied';
+type ColKey = 'submitted' | 'manager_review' | 'finance_review' | 'refund_queue' | 'refunded' | 'denied';
 
 const COLUMNS: { key: ColKey; label: string; helper: string }[] = [
+  { key: 'submitted',      label: 'Completeness',   helper: 'Account manager — submit when ready' },
   { key: 'manager_review', label: 'Manager review',  helper: 'Awaiting George' },
   { key: 'finance_review', label: 'Finance review',  helper: 'Awaiting Julie / Huayi (amount)' },
   { key: 'refund_queue',   label: 'Refund Queue',    helper: 'Approved — execute the payout' },
@@ -65,6 +75,7 @@ export function RefundsTab() {
 
   const isManager = canDo(role, 'approve_refund_manager');
   const isFinance = canDo(role, 'approve_refund_finance');
+  const isSubmitter = canDo(role, 'submit_to_manager');
 
   const returnsById = useMemo(() => {
     const m = new Map<string, ReturnRow>();
@@ -161,10 +172,12 @@ export function RefundsTab() {
     const m = new Map<ColKey, RefundApproval[]>();
     for (const col of COLUMNS) m.set(col.key, []);
     for (const a of approvals) {
-      // Map status to column. 'submitted' rolls into manager_review since
-      // submission immediately puts it in front of the manager.
+      // Map status to column. FR-3: 'submitted' is the account manager's
+      // Completeness/prep column, distinct from 'manager_review' (Awaiting
+      // George) — the Submit action promotes one to the other.
       const k: ColKey | null =
-        a.status === 'submitted' || a.status === 'manager_review' ? 'manager_review' :
+        a.status === 'submitted' ? 'submitted' :
+        a.status === 'manager_review' ? 'manager_review' :
         a.status === 'finance_review' ? 'finance_review' :
         a.status === 'refund_queue' ? 'refund_queue' :
         a.status === 'refunded' ? 'refunded' :
@@ -207,7 +220,7 @@ export function RefundsTab() {
     return {
       totalRefunded: Math.round(totalRefunded),
       totalPending: Math.round(totalPending),
-      pendingCount: (byColumn.get('manager_review')?.length ?? 0) + (byColumn.get('finance_review')?.length ?? 0),
+      pendingCount: (byColumn.get('submitted')?.length ?? 0) + (byColumn.get('manager_review')?.length ?? 0) + (byColumn.get('finance_review')?.length ?? 0),
       oldestPendingDays,
     };
   }, [approvals, byColumn]);
@@ -313,6 +326,7 @@ export function RefundsTab() {
                     onOpenTicket={setOpenTicketId}
                     canManager={isManager}
                     canFinance={isFinance}
+                    canSubmit={isSubmitter}
                     selected={selectedId === r.id}
                     onSelect={() => setSelectedId(prev => prev === r.id ? null : r.id)}
                     onError={setError}
@@ -336,6 +350,7 @@ export function RefundsTab() {
           queuedReplacements={replsByEmail.get((selectedRefund.customer_email ?? '').toLowerCase().trim()) ?? []}
           canManager={isManager}
           canFinance={isFinance}
+          canSubmit={isSubmitter}
           onClose={() => setSelectedId(null)}
           onError={setError}
           onOpenFinanceModal={setFinanceModalId}
@@ -679,7 +694,7 @@ function InspectionCard({
 }
 
 function RefundCard({
-  refund, linkedReturn, usage, invoices, tickets, onOpenTicket, canManager, canFinance, selected, onSelect, onError, onOpenFinanceModal,
+  refund, linkedReturn, usage, invoices, tickets, onOpenTicket, canManager, canFinance, canSubmit, selected, onSelect, onError, onOpenFinanceModal,
 }: {
   refund: RefundApproval;
   linkedReturn: ReturnRow | null;
@@ -689,6 +704,7 @@ function RefundCard({
   onOpenTicket: (ticketId: string) => void;
   canManager: boolean;
   canFinance: boolean;
+  canSubmit: boolean;
   selected: boolean;
   onSelect: () => void;
   onError: (msg: string | null) => void;
@@ -760,11 +776,34 @@ function RefundCard({
     finally { setBusy(false); }
   };
 
-  const canActManager = (refund.status === 'manager_review' || refund.status === 'submitted') && canManager;
+  // FR-3: 'submitted' is the account manager's prep stage — Submit (not
+  // Approve) promotes it to Manager Review, where the manager acts.
+  const canActSubmit = refund.status === 'submitted' && canSubmit;
+  const canActManager = refund.status === 'manager_review' && canManager;
   const canActFinance = refund.status === 'finance_review' && canFinance;
   // Refund Queue → execute the payout. Finance role (Julie / Huayi) does it.
   const canActExecute = refund.status === 'refund_queue' && canFinance;
   const canDeny = canActManager || canActFinance;
+
+  // FR-11: flag a case whose purchaser linkage is unverified; the manager can
+  // override (BR-15) before approving.
+  const linkageOk = hasValidPurchaserLinkage(linkedReturn);
+  const needsLinkage = canActManager && !linkageOk;
+
+  const runSubmitToManager = async () => {
+    setBusy(true); onError(null);
+    try { await submitToManager(refund.id); }
+    catch (e) { onError((e as Error).message); }
+    finally { setBusy(false); }
+  };
+
+  const runConfirmLinkage = async () => {
+    if (!linkedReturn) return;
+    setBusy(true); onError(null);
+    try { await confirmPurchaserLinkage(linkedReturn.id); }
+    catch (e) { onError((e as Error).message); }
+    finally { setBusy(false); }
+  };
 
   return (
     <div
@@ -904,8 +943,20 @@ function RefundCard({
           </div>
         ) : (
           <>
+            {canActSubmit && (
+              <button onClick={() => void runSubmitToManager()} disabled={busy} className={styles.refundApproveBtn}>
+                {busy ? '…' : 'Submit to manager →'}
+              </button>
+            )}
+            {needsLinkage && (
+              <button onClick={() => void runConfirmLinkage()} disabled={busy} className={styles.refundDenyBtn}
+                title="Filer isn't the buyer and no purchaser receipt is on file — confirm linkage to override (BR-15).">
+                {busy ? '…' : '⚠ Confirm purchaser linkage'}
+              </button>
+            )}
             {(canActManager || canActFinance) && (
-              <button onClick={openApprove} disabled={busy} className={styles.refundApproveBtn}>
+              <button onClick={openApprove} disabled={busy || needsLinkage} className={styles.refundApproveBtn}
+                title={needsLinkage ? 'Confirm purchaser linkage before approving' : undefined}>
                 {canActManager ? 'Approve (manager)' : 'Approve amount → queue'}
               </button>
             )}
@@ -935,7 +986,7 @@ function RefundCard({
 // Renders the linked return-form data + approve / deny actions.
 // ============================================================================
 function RefundDetailPanel({
-  refund, linkedReturn, usage, invoices, tickets, onOpenTicket, queuedReplacements, canManager, canFinance, onClose, onError, onOpenFinanceModal,
+  refund, linkedReturn, usage, invoices, tickets, onOpenTicket, queuedReplacements, canManager, canFinance, canSubmit, onClose, onError, onOpenFinanceModal,
 }: {
   refund: RefundApproval;
   linkedReturn: ReturnRow | null;
@@ -946,6 +997,7 @@ function RefundDetailPanel({
   queuedReplacements: Order[];
   canManager: boolean;
   canFinance: boolean;
+  canSubmit: boolean;
   onClose: () => void;
   onError: (msg: string | null) => void;
   onOpenFinanceModal: (id: string) => void;
@@ -956,14 +1008,35 @@ function RefundDetailPanel({
   const [newNote, setNewNote] = useState('');
   const meta = REFUND_STATUS_META[refund.status];
 
-  const canActManager = (refund.status === 'manager_review' || refund.status === 'submitted') && canManager;
+  const canActSubmit = refund.status === 'submitted' && canSubmit;
+  const canActManager = refund.status === 'manager_review' && canManager;
   const canActFinance = refund.status === 'finance_review' && canFinance;
   const canActExecute = refund.status === 'refund_queue' && canFinance;
   const canAct = canActManager || canActFinance;
 
+  // FR-11: block manager approval until purchaser linkage is verified or the
+  // manager overrides it (BR-15).
+  const linkageOk = hasValidPurchaserLinkage(linkedReturn);
+  const needsLinkage = canActManager && !linkageOk;
+
+  const runConfirmLinkage = async () => {
+    if (!linkedReturn) return;
+    setBusy(true); onError(null);
+    try { await confirmPurchaserLinkage(linkedReturn.id); }
+    catch (e) { onError((e as Error).message); }
+    finally { setBusy(false); }
+  };
+
   const runExecute = async () => {
     setBusy(true); onError(null);
     try { await executeRefund(refund.id); onClose(); }
+    catch (e) { onError((e as Error).message); }
+    finally { setBusy(false); }
+  };
+
+  const runSubmitToManager = async () => {
+    setBusy(true); onError(null);
+    try { await submitToManager(refund.id); onClose(); }
     catch (e) { onError((e as Error).message); }
     finally { setBusy(false); }
   };
@@ -1175,7 +1248,9 @@ function RefundDetailPanel({
 
       <div className={styles.refundDetailActions}>
         <div className={styles.refundDetailRolePill}>
-          {canActManager ? 'You can act as Manager for this case' :
+          {needsLinkage ? '⚠ Purchaser linkage unverified — confirm linkage (BR-15 override) before approving' :
+           canActSubmit ? 'Completeness check — submit to the Manager when ready' :
+           canActManager ? 'You can act as Manager for this case' :
            canActFinance ? 'You can act as Finance for this case' :
            canActExecute ? 'Approved — execute the payout, then mark refunded' :
            refund.status === 'refunded' ? 'Refunded — no action needed' :
@@ -1206,8 +1281,20 @@ function RefundDetailPanel({
           </div>
         ) : (
           <div className={styles.refundDetailButtons}>
+            {canActSubmit && (
+              <button onClick={() => void runSubmitToManager()} disabled={busy} className={styles.refundDetailApproveBtn}>
+                {busy ? '…' : 'Submit to manager →'}
+              </button>
+            )}
+            {needsLinkage && (
+              <button onClick={() => void runConfirmLinkage()} disabled={busy} className={styles.refundDetailDenyBtn}
+                title="Filer isn't the buyer and no purchaser receipt is on file — confirm linkage to override (BR-15).">
+                {busy ? '…' : '⚠ Confirm purchaser linkage'}
+              </button>
+            )}
             {canAct && (
-              <button onClick={openApprove} disabled={busy} className={styles.refundDetailApproveBtn}>
+              <button onClick={openApprove} disabled={busy || needsLinkage} className={styles.refundDetailApproveBtn}
+                title={needsLinkage ? 'Confirm purchaser linkage before approving' : undefined}>
                 {canActManager ? '✓ Approve as Manager' : '✓ Approve amount → Refund Queue'}
               </button>
             )}
@@ -1564,6 +1651,15 @@ function FinanceApproveModal({
   const amount = Number(amountStr);
   const amountChanged = !Number.isNaN(amount) && Number(amount.toFixed(2)) !== Number(original.toFixed(2));
 
+  // FR-12: fee breakdown. Restocking defaults to $50 (waived for genuine-defect
+  // discards, BR-7); return shipping is operator-entered actual cost (OQ-2).
+  const feeDefaults = defaultRefundFees(isDefectiveDiscard);
+  const [restockingStr, setRestockingStr] = useState(feeDefaults.restocking.toFixed(2));
+  const [returnShipStr, setReturnShipStr] = useState(feeDefaults.returnShipping.toFixed(2));
+  const restockingFee = Number(restockingStr) || 0;
+  const returnShipFee = Number(returnShipStr) || 0;
+  const suggestedNet = computeRefundNet(original, restockingFee, returnShipFee);
+
   const [shipping, setShipping] = useState<{ total: number; paidShipping: number } | null>(null);
   useEffect(() => {
     const ref = linkedReturn?.original_order_ref;
@@ -1596,6 +1692,8 @@ function FinanceApproveModal({
         amount,
         correction_note: amountChanged ? correctionNote.trim() : undefined,
         note: note.trim() || undefined,
+        restocking_fee: restockingFee,
+        return_shipping_fee: returnShipFee,
       });
       onClose();
     } catch (e) {
@@ -1647,6 +1745,32 @@ function FinanceApproveModal({
             {shipping && (
               <> · Order total: ${shipping.total.toFixed(2)} · Shipping (customer-paid, non-refundable): ${shipping.paidShipping.toFixed(2)} · Max refundable: ${(shipping.total - shipping.paidShipping).toFixed(2)}</>
             )}
+          </div>
+        </div>
+
+        <div className={styles.modalField}>
+          <label className={styles.modalLabel}>Fees (FR-12)</label>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <div style={{ flex: 1 }}>
+              <div className={styles.modalHint}>Restocking fee</div>
+              <input type="number" step="0.01" min="0" value={restockingStr}
+                onChange={e => setRestockingStr(e.target.value)} className={styles.modalInput} />
+            </div>
+            <div style={{ flex: 1 }}>
+              <div className={styles.modalHint}>Return shipping (customer-paid)</div>
+              <input type="number" step="0.01" min="0" value={returnShipStr}
+                onChange={e => setReturnShipStr(e.target.value)} className={styles.modalInput} />
+            </div>
+          </div>
+          <div className={styles.modalHint} style={{ marginTop: 6 }}>
+            {isDefectiveDiscard
+              ? '✓ Genuine defect — fees waived by default (BR-7).'
+              : '$50 restocking default; return shipping is the actual cost (adjust for currency).'}
+            {' '}Gross ${original.toFixed(2)} − restocking ${restockingFee.toFixed(2)} − shipping ${returnShipFee.toFixed(2)} = <strong>net ${suggestedNet.toFixed(2)}</strong>.
+            {' '}<button type="button" onClick={() => setAmountStr(suggestedNet.toFixed(2))}
+              style={{ border: 'none', background: 'none', color: '#2b6cb0', cursor: 'pointer', padding: 0, fontWeight: 600 }}>
+              Apply net →
+            </button>
           </div>
         </div>
 
