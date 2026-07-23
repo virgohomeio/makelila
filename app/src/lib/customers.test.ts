@@ -62,7 +62,7 @@ const base: Customer = {
   journey_stage_override_at: null, journey_stage_override_by: null,
   first_touch_source: null, first_touch_campaign_id: null, first_touch_at: null,
   last_touch_source: null, last_touch_campaign_id: null, last_touch_at: null,
-  telemetry_autoticket_suppress: false, created_at: '', updated_at: '',
+  telemetry_autoticket_suppress: false, purchaser_id: null, created_at: '', updated_at: '',
 };
 
 // ── refundUsageWindow (30-day refund eligibility window) ────────────────────
