@@ -2,6 +2,17 @@ import { useEffect, useState } from 'react';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase } from './supabase';
 import { logAction } from './activityLog';
+import { sendTemplate } from './templates';
+
+const APP_BASE_URL = 'https://lila.vip';
+const REFUND_URL = `${APP_BASE_URL}/post-shipment?tab=refunds`;
+
+/** First name from a VCycene email local-part, for greeting notification
+ *  recipients (e.g. 'pedrum@virgohome.io' → 'Pedrum'). */
+function firstNameFromEmail(email: string): string {
+  const local = email.split('@')[0].split(/[._-]/)[0] ?? email;
+  return local.charAt(0).toUpperCase() + local.slice(1);
+}
 
 // ============================================================================
 // Returns
@@ -409,6 +420,21 @@ export const REFUND_METHODS: RefundMethod[] = [
   'shopify','sezzle','quickbooks_cc','bank_etransfer','original_card',
 ];
 
+// FR-9 queue routing. A refund entering the Refund Queue is executed by the
+// payments operator (Shopify + Sezzle/BNPL, per Stage 8) or the finance officer
+// (card / bank / other). These are the current role-holders — routing keys off
+// the role, so swapping a holder is a one-line change here.
+export const REFUND_EXECUTORS = {
+  payments: 'pedrum@virgohome.io',   // payments operator (Shopify + BNPL)
+  finance:  'yueli@virgohome.io',    // finance officer (Julie)
+} as const;
+
+export function refundExecutorEmail(method: RefundMethod | null): string {
+  return method === 'shopify' || method === 'sezzle'
+    ? REFUND_EXECUTORS.payments
+    : REFUND_EXECUTORS.finance;
+}
+
 export type RefundApproval = {
   id: string;
   return_id: string | null;
@@ -679,7 +705,7 @@ export async function financeApprove(id: string, opts: FinanceApproveOpts): Prom
   // 1. Fetch the approval row to validate + read original amount
   const { data: approval, error: aErr } = await supabase
     .from('refund_approvals')
-    .select('id, return_id, original_amount_usd, refund_amount_usd, status, customer_email')
+    .select('id, return_id, original_amount_usd, refund_amount_usd, status, customer_email, customer_name')
     .eq('id', id)
     .single();
   if (aErr || !approval) throw new Error(`Refund approval not found: ${aErr?.message}`);
@@ -727,6 +753,28 @@ export async function financeApprove(id: string, opts: FinanceApproveOpts): Prom
   if (upErr) throw upErr;
 
   await logAction('refund_finance_approved', id, `${opts.method} $${adjusted.toFixed(2)}`);
+
+  // FR-9a: notify the executor that a refund is queued for payout. Best-effort —
+  // a mail failure must never roll back the approval (mirrors the ticket-
+  // assignment email). Shopify/Sezzle → payments operator, else finance officer.
+  const executorEmail = refundExecutorEmail(opts.method);
+  try {
+    await sendTemplate({
+      template_key: 'refund_queued_executor',
+      to: executorEmail,
+      to_name: firstNameFromEmail(executorEmail),
+      variables: {
+        executor_first_name: firstNameFromEmail(executorEmail),
+        customer_name: approval.customer_name ?? approval.customer_email ?? 'Unknown customer',
+        amount: `$${adjusted.toFixed(2)}`,
+        method: REFUND_METHOD_META[opts.method].label,
+        refund_url: REFUND_URL,
+      },
+      related_refund_id: id,
+    });
+  } catch (e) {
+    console.warn('Refund queue-entry email failed (non-fatal):', (e as Error).message);
+  }
 }
 
 /** Refund Queue → Refunded. Finance has already approved the case + amount; this
@@ -736,7 +784,7 @@ export async function financeApprove(id: string, opts: FinanceApproveOpts): Prom
 export async function executeRefund(id: string, note?: string): Promise<void> {
   const { data: approval, error: aErr } = await supabase
     .from('refund_approvals')
-    .select('id, status, customer_email')
+    .select('id, status, customer_email, customer_name, refund_amount_usd, refund_method, submitted_by')
     .eq('id', id)
     .single();
   if (aErr || !approval) throw new Error(`Refund approval not found: ${aErr?.message}`);
@@ -751,6 +799,34 @@ export async function executeRefund(id: string, note?: string): Promise<void> {
   await logAction('refund_executed', id, note?.trim() || 'paid out',
     undefined,
     { klaviyoEvent: 'Refund Processed', ...(approval.customer_email ? { klaviyoEmail: approval.customer_email as string } : {}) });
+
+  // FR-9b: notify the Account Manager (the case owner who submitted it) that the
+  // payout is done, so they can tell the customer. Best-effort — never blocks
+  // the executed refund.
+  if (approval.submitted_by) {
+    try {
+      const { data: amProfile } = await supabase
+        .from('profiles').select('email').eq('id', approval.submitted_by).maybeSingle();
+      const amEmail = (amProfile as { email?: string } | null)?.email;
+      if (amEmail) {
+        await sendTemplate({
+          template_key: 'refund_executed_am',
+          to: amEmail,
+          to_name: firstNameFromEmail(amEmail),
+          variables: {
+            am_first_name: firstNameFromEmail(amEmail),
+            customer_name: approval.customer_name ?? approval.customer_email ?? 'the customer',
+            amount: `$${Number(approval.refund_amount_usd).toFixed(2)}`,
+            method: approval.refund_method ? REFUND_METHOD_META[approval.refund_method as RefundMethod].label : '—',
+            refund_url: REFUND_URL,
+          },
+          related_refund_id: id,
+        });
+      }
+    } catch (e) {
+      console.warn('Refund completion email failed (non-fatal):', (e as Error).message);
+    }
+  }
 }
 
 export async function denyRefund(id: string, stage: 'manager_review' | 'finance_review', reason: string): Promise<void> {

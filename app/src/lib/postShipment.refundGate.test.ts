@@ -55,7 +55,10 @@ import {
   confirmPurchaserLinkage,
   returnStatusAllowsRefund,
   hasValidPurchaserLinkage,
+  refundExecutorEmail,
+  REFUND_EXECUTORS,
   type ReturnStatus,
+  type RefundMethod,
 } from './postShipment';
 
 beforeEach(() => {
@@ -175,6 +178,23 @@ describe('confirmPurchaserLinkage (BR-15 override)', () => {
     expect(state.updateCalled).toBe(true);
     expect(state.updatePatch.purchaser_linkage_confirmed_at).toEqual(expect.any(String));
     expect(state.updatePatch.purchaser_linkage_confirmed_by).toBe('mgr-1');
+  });
+});
+
+describe('refundExecutorEmail (FR-9 queue routing)', () => {
+  it('routes Shopify refunds to the payments operator', () => {
+    expect(refundExecutorEmail('shopify')).toBe(REFUND_EXECUTORS.payments);
+  });
+  it('routes Sezzle/BNPL refunds to the payments operator', () => {
+    expect(refundExecutorEmail('sezzle')).toBe(REFUND_EXECUTORS.payments);
+  });
+  it('routes card/bank/other refunds to the finance officer', () => {
+    for (const m of ['quickbooks_cc', 'bank_etransfer', 'original_card'] as RefundMethod[]) {
+      expect(refundExecutorEmail(m)).toBe(REFUND_EXECUTORS.finance);
+    }
+  });
+  it('defaults an unset method to the finance officer', () => {
+    expect(refundExecutorEmail(null)).toBe(REFUND_EXECUTORS.finance);
   });
 });
 
