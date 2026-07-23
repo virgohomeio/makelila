@@ -350,6 +350,99 @@ async function hasField(id: string, field: string): Promise<boolean> {
 }
 
 // ============================================================================
+// FR-14 — return/refund card attachments (paste-to-attach photos)
+// Multi-photo attachments on a return, stored in the 'return-documents' bucket
+// and recorded in return_attachments. Mirrors the ticket attachment layer.
+// ============================================================================
+export type ReturnAttachment = {
+  id: string;
+  return_id: string;
+  file_path: string;
+  file_name: string;
+  mime_type: string | null;
+  size_bytes: number | null;
+  uploaded_by: string | null;
+  created_at: string;
+};
+
+export const RETURN_ATTACH_BUCKET = 'return-documents';
+export const RETURN_ATTACH_MAX_BYTES = 25 * 1024 * 1024; // 25 MB
+export const RETURN_ATTACH_ALLOWED_MIME = [
+  'image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/heic', 'application/pdf',
+];
+export const RETURN_ATTACH_INPUT_ACCEPT = RETURN_ATTACH_ALLOWED_MIME.join(',');
+
+export function useReturnAttachments(returnId: string | null): { attachments: ReturnAttachment[]; loading: boolean; refresh: () => void } {
+  const [attachments, setAttachments] = useState<ReturnAttachment[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [tick, setTick] = useState(0);
+  const refresh = () => setTick(t => t + 1);
+
+  useEffect(() => {
+    if (!returnId) { setAttachments([]); setLoading(false); return; }
+    let channel: RealtimeChannel | null = null;
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from('return_attachments')
+        .select('*')
+        .eq('return_id', returnId)
+        .order('created_at', { ascending: true });
+      if (cancelled) return;
+      setAttachments((data ?? []) as ReturnAttachment[]);
+      setLoading(false);
+      channel = supabase
+        .channel(`return_attachments:${returnId}`)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'return_attachments', filter: `return_id=eq.${returnId}` },
+          () => refresh())
+        .subscribe();
+    })();
+    return () => { cancelled = true; if (channel) supabase.removeChannel(channel); };
+  }, [returnId, tick]);
+
+  return { attachments, loading, refresh };
+}
+
+export async function uploadReturnAttachment(returnId: string, file: File): Promise<ReturnAttachment> {
+  if (file.type && !RETURN_ATTACH_ALLOWED_MIME.includes(file.type)) {
+    throw new Error(`Unsupported file type: ${file.type}`);
+  }
+  if (file.size > RETURN_ATTACH_MAX_BYTES) {
+    throw new Error(`File is too large (max ${Math.round(RETURN_ATTACH_MAX_BYTES / (1024 * 1024))} MB).`);
+  }
+  const path = `${returnId}/attach-${crypto.randomUUID()}-${file.name}`;
+  const { error: upErr } = await supabase.storage
+    .from(RETURN_ATTACH_BUCKET)
+    .upload(path, file, { contentType: file.type || undefined, upsert: false });
+  if (upErr) throw upErr;
+
+  const userId = await currentUserId();
+  const { data, error } = await supabase.from('return_attachments').insert({
+    return_id: returnId, file_path: path, file_name: file.name,
+    mime_type: file.type || null, size_bytes: file.size, uploaded_by: userId,
+  }).select('*').single();
+  if (error) {
+    await supabase.storage.from(RETURN_ATTACH_BUCKET).remove([path]).then(() => {}, () => {});
+    throw error;
+  }
+  await logAction('return_attachment_added', returnId, file.name, { entityType: 'return', entityId: returnId });
+  return data as ReturnAttachment;
+}
+
+export async function deleteReturnAttachment(att: ReturnAttachment): Promise<void> {
+  const { error } = await supabase.from('return_attachments').delete().eq('id', att.id);
+  if (error) throw error;
+  await supabase.storage.from(RETURN_ATTACH_BUCKET).remove([att.file_path]).then(() => {}, () => {});
+  await logAction('return_attachment_removed', att.return_id, att.file_name, { entityType: 'return', entityId: att.return_id });
+}
+
+export async function returnAttachmentSignedUrl(filePath: string): Promise<string> {
+  const { data, error } = await supabase.storage.from(RETURN_ATTACH_BUCKET).createSignedUrl(filePath, 3600);
+  if (error || !data) throw error ?? new Error('Could not sign attachment URL');
+  return data.signedUrl;
+}
+
+// ============================================================================
 // Replacement queue
 // ============================================================================
 

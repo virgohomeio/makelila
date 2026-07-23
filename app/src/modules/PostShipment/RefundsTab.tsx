@@ -6,6 +6,8 @@ import {
   computeRefundNet, defaultRefundFees,
   preRefundStage, customerWaitState,
   setReturnDisposition, updateReturnStatus,
+  useReturnAttachments, uploadReturnAttachment, deleteReturnAttachment, returnAttachmentSignedUrl,
+  RETURN_ATTACH_INPUT_ACCEPT, type ReturnAttachment,
   useRefundNotes, addRefundNote, deleteRefundNote,
   REFUND_STATUS_META, REFUND_METHODS, REFUND_METHOD_META,
   UNIT_STATUS_LABEL, RETURN_DISPOSITION_META,
@@ -456,6 +458,116 @@ function CustomerWaitBadge({ r }: { r: ReturnRow }) {
     <div className={styles.usageBadgeUnknown}
          title="Awaiting a customer response — auto-reminders are going out every 7 days (BR-16).">
       ⏳ Awaiting customer · {dayLabel} — reminder sent
+    </div>
+  );
+}
+
+// ============================================================================
+// FR-14 — paste-to-attach photos/documents on a return card. Ported from the
+// ticket AttachmentStrip: a window-level paste listener (Safari never fires
+// `paste` on a div) captures clipboard images; a hidden file input covers the
+// click path. Files go to the return-documents bucket via the lib layer.
+// ============================================================================
+function imageFilesFrom(dt: DataTransfer | null): File[] {
+  if (!dt) return [];
+  const out: File[] = [];
+  if (dt.items && dt.items.length) {
+    for (const item of Array.from(dt.items)) {
+      if (item.kind === 'file' && item.type.startsWith('image/')) {
+        const f = item.getAsFile();
+        if (f) out.push(f);
+      }
+    }
+  }
+  if (!out.length && dt.files) {
+    for (const f of Array.from(dt.files)) if (f.type.startsWith('image/')) out.push(f);
+  }
+  return out;
+}
+function toNamedFile(blob: File): File {
+  if (blob.name && blob.name !== 'image.png') return blob;
+  const ext = (blob.type.split('/')[1] || 'png').replace('jpeg', 'jpg');
+  return new File([blob], `pasted-${Date.now()}.${ext}`, { type: blob.type });
+}
+
+function ReturnAttachmentStrip({ returnId, onError }: { returnId: string; onError: (m: string | null) => void }) {
+  const { attachments, refresh } = useReturnAttachments(returnId);
+  const [busy, setBusy] = useState(false);
+  const [urls, setUrls] = useState<Record<string, string>>({});
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const handleFiles = async (files: File[]) => {
+    if (!files.length) return;
+    setBusy(true); onError(null);
+    try {
+      for (const f of files) await uploadReturnAttachment(returnId, toNamedFile(f));
+      refresh();
+    } catch (e) { onError((e as Error).message); }
+    finally { setBusy(false); }
+  };
+
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      const imgs = imageFilesFrom(e.clipboardData);
+      if (imgs.length) { e.preventDefault(); void handleFiles(imgs); }
+    };
+    window.addEventListener('paste', onPaste);
+    return () => window.removeEventListener('paste', onPaste);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [returnId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const next: Record<string, string> = {};
+      for (const a of attachments) {
+        try { next[a.id] = await returnAttachmentSignedUrl(a.file_path); } catch { /* skip */ }
+      }
+      if (!cancelled) setUrls(next);
+    })();
+    return () => { cancelled = true; };
+  }, [attachments]);
+
+  const del = async (a: ReturnAttachment) => {
+    setBusy(true); onError(null);
+    try { await deleteReturnAttachment(a); refresh(); }
+    catch (e) { onError((e as Error).message); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div onClick={e => e.stopPropagation()} style={{ margin: '8px 0' }}>
+      <div style={{ fontSize: 12, fontWeight: 600, color: '#4a5568', marginBottom: 4 }}>
+        Photos &amp; documents ({attachments.length})
+      </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+        {attachments.map(a => {
+          const isImg = (a.mime_type ?? '').startsWith('image/');
+          return (
+            <div key={a.id} style={{ position: 'relative', width: 64, height: 64, borderRadius: 6, overflow: 'hidden', border: '1px solid #e2e8f0', background: '#f7fafc' }}>
+              {isImg && urls[a.id] ? (
+                <img src={urls[a.id]} alt={a.file_name}
+                     style={{ width: '100%', height: '100%', objectFit: 'cover', cursor: 'pointer' }}
+                     onClick={() => urls[a.id] && window.open(urls[a.id], '_blank', 'noopener')} />
+              ) : (
+                <a href={urls[a.id]} target="_blank" rel="noopener noreferrer"
+                   style={{ display: 'flex', width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center', fontSize: 10, padding: 4, textAlign: 'center', color: '#4a5568' }}>
+                  {a.file_name.slice(0, 18)}
+                </a>
+              )}
+              <button onClick={() => void del(a)} disabled={busy} title="Remove"
+                style={{ position: 'absolute', top: 0, right: 0, background: 'rgba(0,0,0,0.6)', color: '#fff', border: 'none', cursor: 'pointer', fontSize: 11, lineHeight: 1, padding: '2px 5px' }}>✕</button>
+            </div>
+          );
+        })}
+        <button onClick={() => inputRef.current?.click()} disabled={busy}
+          style={{ width: 64, height: 64, borderRadius: 6, border: '1px dashed #cbd5e0', background: '#fff', cursor: 'pointer', fontSize: 11, color: '#718096' }}>
+          {busy ? '…' : '+ Add'}
+        </button>
+      </div>
+      <input ref={inputRef} type="file" multiple accept={RETURN_ATTACH_INPUT_ACCEPT} style={{ display: 'none' }}
+        onChange={e => { void handleFiles(Array.from(e.target.files ?? [])); e.currentTarget.value = ''; }} />
+      <div style={{ fontSize: 10, color: '#a0aec0', marginTop: 2 }}>Paste (⌘/Ctrl+V) an image while this case is open, or click + to upload.</div>
     </div>
   );
 }
@@ -1257,6 +1369,7 @@ function RefundDetailPanel({
           )}
         </div>
         <ReturnFormAnswers r={linkedReturn} />
+        <ReturnAttachmentStrip returnId={linkedReturn.id} onError={onError} />
         </>
       )}
 
