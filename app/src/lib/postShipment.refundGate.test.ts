@@ -60,6 +60,9 @@ import {
   computeRefundNet,
   defaultRefundFees,
   DEFAULT_RESTOCKING_FEE,
+  preRefundStage,
+  RETURN_INTAKE_STATUSES,
+  RETURN_INSPECTION_STATUSES,
   type ReturnStatus,
   type RefundMethod,
 } from './postShipment';
@@ -82,6 +85,37 @@ describe('returnStatusAllowsRefund', () => {
 
   it.each(blocked)('blocks refund when linked return is "%s"', (status) => {
     expect(returnStatusAllowsRefund(status)).toBe(false);
+  });
+});
+
+// FR-1 (PRD §4): the two Account-Manager-owned pre-manager columns. A return
+// with no refund request yet belongs to "Return Form Submitted" (Intake / New)
+// or "Return & Inspection" by its unit status. Terminal statuses map to neither.
+describe('preRefundStage (FR-1 board split)', () => {
+  const intake: ReturnStatus[] = ['created', 'pickup_scheduled', 'picked_up'];
+  const inspection: ReturnStatus[] = ['received', 'inspected'];
+  const neither: ReturnStatus[] = ['refunded', 'denied', 'closed', 'discarded'];
+
+  it.each(intake)('routes "%s" to the Return Form Submitted (intake) column', (status) => {
+    expect(preRefundStage(status)).toBe('intake');
+  });
+
+  it.each(inspection)('routes "%s" to the Return & Inspection column', (status) => {
+    expect(preRefundStage(status)).toBe('inspection');
+  });
+
+  it.each(neither)('returns null for terminal status "%s" (not a pre-refund column)', (status) => {
+    expect(preRefundStage(status)).toBeNull();
+  });
+
+  it('exposes the two status sets as a partition of the pre-refund statuses', () => {
+    // No status appears in both buckets, and the two buckets are exactly the
+    // non-terminal, pre-request statuses.
+    const overlap = RETURN_INTAKE_STATUSES.filter(s => RETURN_INSPECTION_STATUSES.includes(s));
+    expect(overlap).toEqual([]);
+    expect([...RETURN_INTAKE_STATUSES, ...RETURN_INSPECTION_STATUSES].sort()).toEqual(
+      ['created', 'inspected', 'picked_up', 'pickup_scheduled', 'received'].sort(),
+    );
   });
 });
 

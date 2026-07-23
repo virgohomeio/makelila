@@ -4,6 +4,7 @@ import {
   submitRefundRequest, updateRefundAmount, submitToManager, managerApprove, financeApprove, executeRefund, denyRefund, closeRefund,
   confirmPurchaserLinkage, hasValidPurchaserLinkage,
   computeRefundNet, defaultRefundFees,
+  preRefundStage,
   setReturnDisposition, updateReturnStatus,
   useRefundNotes, addRefundNote, deleteRefundNote,
   REFUND_STATUS_META, REFUND_METHODS, REFUND_METHOD_META,
@@ -188,19 +189,20 @@ export function RefundsTab() {
     return m;
   }, [approvals]);
 
-  // Pre-George stage (CEO 2026-07): before a refund even reaches manager review,
-  // the unit has to be returned and inspected, then compiled. Surface returns
-  // that are physically back ('received') and don't yet have a refund request as
-  // the first column of the queue, so the inspection step is visible.
-  const inspectionReturns = useMemo(() => {
+  // FR-1 (PRD §4): the two Account-Manager-owned columns before Manager Review.
+  // A return without a refund request yet is split by unit status into
+  // "Return Form Submitted" (Intake / New — form in, unit not yet back) and
+  // "Return & inspection" (unit physically back, being inspected). Reina owns
+  // both. Terminal statuses (refunded/denied/closed/discarded) drop out.
+  const preRefundReturns = useMemo(() => {
     const withApproval = new Set(approvals.map(a => a.return_id).filter(Boolean) as string[]);
-    // Every return still in the return/inspection phase — from a freshly
-    // submitted form ('created') through 'received'/'inspected' — that doesn't
-    // yet have a refund request. New return-form submissions land here first.
-    const TERMINAL = ['refunded', 'denied', 'closed', 'discarded'];
-    return returns
-      .filter(r => !TERMINAL.includes(r.status) && !withApproval.has(r.id))
+    const eligible = returns
+      .filter(r => preRefundStage(r.status) !== null && !withApproval.has(r.id))
       .sort((a, b) => b.created_at.localeCompare(a.created_at));
+    return {
+      intake: eligible.filter(r => preRefundStage(r.status) === 'intake'),
+      inspection: eligible.filter(r => preRefundStage(r.status) === 'inspection'),
+    };
   }, [returns, approvals]);
 
   const stats = useMemo(() => {
@@ -239,13 +241,45 @@ export function RefundsTab() {
     const ro = new ResizeObserver(update);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [approvals, inspectionReturns]);
+  }, [approvals, preRefundReturns]);
   const syncFromTop = () => {
     if (kanbanRef.current && topScrollRef.current) kanbanRef.current.scrollLeft = topScrollRef.current.scrollLeft;
   };
   const syncFromKanban = () => {
     if (kanbanRef.current && topScrollRef.current) topScrollRef.current.scrollLeft = kanbanRef.current.scrollLeft;
   };
+
+  // FR-1: both pre-manager columns render the same InspectionCard; only the
+  // heading, helper, and row set differ. Reina (Account Manager) owns both.
+  const renderPreRefundColumn = (label: string, helper: string, rows: ReturnRow[]) => (
+    <div className={styles.kanbanCol}>
+      <div className={styles.kanbanColHead}>
+        <span className={styles.kanbanColLabel}>{label}</span>
+        <span className={styles.kanbanColCount}>{rows.length}</span>
+      </div>
+      <div className={styles.kanbanColSub}>{helper}</div>
+      <div className={styles.kanbanList}>
+        {rows.length === 0 ? (
+          <div className={styles.kanbanEmpty}>—</div>
+        ) : rows.map(r => {
+          const email = r.purchaser_email?.trim() || r.customer_email;
+          return (
+            <InspectionCard
+              key={r.id}
+              r={r}
+              usage={usageForEmail(email)}
+              invoices={invoicesForEmail(email)}
+              tickets={ticketsForEmails([r.purchaser_email, r.customer_email])}
+              onOpenTicket={setOpenTicketId}
+              onView={() => setViewReturnId(r.id)}
+              onCompile={() => { setRequestReturnId(r.id); setShowRequestModal(true); }}
+              onError={setError}
+            />
+          );
+        })}
+      </div>
+    </div>
+  );
 
   if (aLoading || rLoading) return <div className={styles.loading}>Loading refunds…</div>;
 
@@ -274,35 +308,18 @@ export function RefundsTab() {
         <div style={{ width: scrollW }} />
       </div>
       <div ref={kanbanRef} className={styles.kanban} onScroll={syncFromKanban}>
-        {/* Pre-George: unit returned & being inspected, before it's compiled
-            and sent to manager review. */}
-        <div className={styles.kanbanCol}>
-          <div className={styles.kanbanColHead}>
-            <span className={styles.kanbanColLabel}>Return &amp; inspection</span>
-            <span className={styles.kanbanColCount}>{inspectionReturns.length}</span>
-          </div>
-          <div className={styles.kanbanColSub}>Unit returned &amp; inspected — before George</div>
-          <div className={styles.kanbanList}>
-            {inspectionReturns.length === 0 ? (
-              <div className={styles.kanbanEmpty}>—</div>
-            ) : inspectionReturns.map(r => {
-              const email = r.purchaser_email?.trim() || r.customer_email;
-              return (
-                <InspectionCard
-                  key={r.id}
-                  r={r}
-                  usage={usageForEmail(email)}
-                  invoices={invoicesForEmail(email)}
-                  tickets={ticketsForEmails([r.purchaser_email, r.customer_email])}
-                  onOpenTicket={setOpenTicketId}
-                  onView={() => setViewReturnId(r.id)}
-                  onCompile={() => { setRequestReturnId(r.id); setShowRequestModal(true); }}
-                  onError={setError}
-                />
-              );
-            })}
-          </div>
-        </div>
+        {/* FR-1 (PRD §4) — Account-Manager (Reina) owned intake + inspection,
+            before the card is compiled and sent to Manager Review. */}
+        {renderPreRefundColumn(
+          'Return Form Submitted',
+          'Reina — new return forms · before the unit ships back',
+          preRefundReturns.intake,
+        )}
+        {renderPreRefundColumn(
+          'Return & inspection',
+          'Reina — unit returned & inspected · before George',
+          preRefundReturns.inspection,
+        )}
         {COLUMNS.map(col => {
           const rows = byColumn.get(col.key) ?? [];
           return (

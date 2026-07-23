@@ -55,6 +55,27 @@ export function returnStatusAllowsRefund(status: ReturnStatus): boolean {
   return RETURN_STATUSES_ALLOWING_REFUND.includes(status);
 }
 
+// FR-1 (Refund & Return Approval PRD §4): the two Account-Manager-owned columns
+// that precede Manager Review. A return that doesn't yet have a refund request
+// lands in one of them by unit status:
+//   • "Return Form Submitted" (the PRD's Intake / New stage) — a card just
+//     auto-generated from the customer's form, before the unit is physically
+//     back: created / pickup_scheduled / picked_up.
+//   • "Return & Inspection" — the returned unit is physically back and being
+//     inspected: received / inspected.
+// Terminal / post-request statuses (refunded, denied, closed, discarded) belong
+// to neither pre-refund column and return null.
+export const RETURN_INTAKE_STATUSES: ReturnStatus[] = ['created', 'pickup_scheduled', 'picked_up'];
+export const RETURN_INSPECTION_STATUSES: ReturnStatus[] = ['received', 'inspected'];
+
+export type PreRefundStage = 'intake' | 'inspection';
+
+export function preRefundStage(status: ReturnStatus): PreRefundStage | null {
+  if (RETURN_INTAKE_STATUSES.includes(status)) return 'intake';
+  if (RETURN_INSPECTION_STATUSES.includes(status)) return 'inspection';
+  return null;
+}
+
 // FR-11 / BR-14 / BR-15: a refund can only be processed against a valid
 // purchaser. When the return filer isn't the buyer (is_purchaser=false) we need
 // the purchaser's identity AND a proof of purchase — unless the Return Manager
