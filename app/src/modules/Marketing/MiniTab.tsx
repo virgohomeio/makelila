@@ -101,13 +101,13 @@ export function MiniTab() {
     return Array.from(s).sort();
   }, [ads]);
 
-  // Each sub-tab defaults to its own campaign: the creative test vs the primary
-  // text-sales campaign. The picker still lets you switch to any campaign.
+  // Each sub-tab defaults to its own specific campaign: the July creative test
+  // vs the primary-text-test sales campaign.
   const defaultCampaign = useMemo(() => {
     if (view === 'creative') {
-      return campaigns.find(c => /creative/i.test(c)) ?? campaigns.find(c => /mini/i.test(c)) ?? campaigns[0] ?? '';
+      return campaigns.find(c => /creative test/i.test(c)) ?? campaigns.find(c => /mini/i.test(c) && /creative/i.test(c)) ?? campaigns[0] ?? '';
     }
-    return campaigns.find(c => /mini/i.test(c) && !/creative/i.test(c)) ?? campaigns.find(c => /mini/i.test(c)) ?? campaigns[0] ?? '';
+    return campaigns.find(c => /primary text/i.test(c)) ?? campaigns.find(c => /mini/i.test(c) && !/creative/i.test(c)) ?? campaigns[0] ?? '';
   }, [campaigns, view]);
   const campaign = selected ?? defaultCampaign;
 
@@ -116,8 +116,10 @@ export function MiniTab() {
     const from = r.from(), to = r.to();
     return ads.filter(a =>
       a.campaign_name === campaign &&
-      a.date_start != null && a.date_start >= from && a.date_start <= to);
-  }, [ads, campaign, rangeKey]);
+      a.date_start != null && a.date_start >= from && a.date_start <= to &&
+      // The Primary Text Test dropped the "crowdfunding interests" audience.
+      !(view === 'text' && /crowdfunding/i.test(a.adset_name ?? '')));
+  }, [ads, campaign, rangeKey, view]);
 
   const overall = useMemo(() => aggregate('Whole campaign', campaignAds), [campaignAds]);
   const byAdset = useMemo(() => groupBy(campaignAds, a => a.adset_name ?? '—'), [campaignAds]);
@@ -137,7 +139,7 @@ export function MiniTab() {
     <div>
       {/* Sub-tabs: the creative test vs the primary text-sales campaign */}
       <div style={{ display: 'flex', gap: 4, borderBottom: '2px solid var(--color-border)', marginBottom: 14 }}>
-        {([['creative', 'Creative Test'], ['text', 'Text Sales']] as [MiniView, string][]).map(([k, label]) => (
+        {([['creative', 'Creative Test'], ['text', 'Primary Text Test']] as [MiniView, string][]).map(([k, label]) => (
           <button key={k} onClick={() => { setView(k); setSelected(null); }}
             style={{
               padding: '7px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer', border: 'none', background: 'none',
@@ -172,7 +174,7 @@ export function MiniTab() {
       <div style={{ fontSize: 11, color: muted, marginTop: 8 }}>
         {view === 'creative'
           ? '"Creative" groups by ad name (m1a, m2a…), summing that creative across all its ad sets.'
-          : '"Text combination" is parsed from the ad name (e.g. "m4a HB3BL1" → "HB3BL1"), summing each text variant across creatives + ad sets.'}
+          : '"Text combination" is parsed from the ad name (e.g. "m4a HB3BL1" → "HB3BL1"), summing each text variant across ad sets. The "crowdfunding interests" audience is excluded (removed for this test).'}
         {' '}Lead rate = leads ÷ impressions.
       </div>
     </div>
