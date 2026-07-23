@@ -63,6 +63,9 @@ import {
   preRefundStage,
   RETURN_INTAKE_STATUSES,
   RETURN_INSPECTION_STATUSES,
+  customerWaitState,
+  CUSTOMER_REMIND_DAYS,
+  CUSTOMER_ESCALATE_DAYS,
   type ReturnStatus,
   type RefundMethod,
 } from './postShipment';
@@ -116,6 +119,41 @@ describe('preRefundStage (FR-1 board split)', () => {
     expect([...RETURN_INTAKE_STATUSES, ...RETURN_INSPECTION_STATUSES].sort()).toEqual(
       ['created', 'inspected', 'picked_up', 'pickup_scheduled', 'received'].sort(),
     );
+  });
+});
+
+// BR-16 (PRD §5.5, v0.2): a return awaiting the customer must not stall
+// silently. After CUSTOMER_REMIND_DAYS (default 7) it's due for an auto-remind
+// and shows an "awaiting customer, day X" indicator; after CUSTOMER_ESCALATE_DAYS
+// (default 14) it's flagged for escalation/closure.
+describe('customerWaitState (BR-16)', () => {
+  const now = new Date('2026-07-22T12:00:00Z');
+  const daysAgo = (n: number) => new Date(now.getTime() - n * 86_400_000).toISOString();
+
+  it('returns null for missing / unparseable timestamps', () => {
+    expect(customerWaitState(null, now)).toBeNull();
+    expect(customerWaitState(undefined, now)).toBeNull();
+    expect(customerWaitState('not-a-date', now)).toBeNull();
+  });
+
+  it('is "fresh" before the remind threshold', () => {
+    expect(customerWaitState(daysAgo(0), now)).toEqual({ days: 0, stage: 'fresh' });
+    expect(customerWaitState(daysAgo(6), now)).toEqual({ days: 6, stage: 'fresh' });
+  });
+
+  it('is "remind_due" from the first threshold up to escalation', () => {
+    expect(customerWaitState(daysAgo(CUSTOMER_REMIND_DAYS), now)!.stage).toBe('remind_due');
+    expect(customerWaitState(daysAgo(13), now)).toEqual({ days: 13, stage: 'remind_due' });
+  });
+
+  it('is "escalate" at/after the second threshold', () => {
+    expect(customerWaitState(daysAgo(CUSTOMER_ESCALATE_DAYS), now)!.stage).toBe('escalate');
+    expect(customerWaitState(daysAgo(30), now)).toEqual({ days: 30, stage: 'escalate' });
+  });
+
+  it('uses 7 and 14 as the default BR-16 intervals', () => {
+    expect(CUSTOMER_REMIND_DAYS).toBe(7);
+    expect(CUSTOMER_ESCALATE_DAYS).toBe(14);
   });
 });
 

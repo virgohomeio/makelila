@@ -76,6 +76,31 @@ export function preRefundStage(status: ReturnStatus): PreRefundStage | null {
   return null;
 }
 
+// BR-16 (PRD §5.5, v0.2): a return sitting in the Account-Manager stages while we
+// wait on the customer must not stall silently. After CUSTOMER_REMIND_DAYS the
+// system auto-reminds the customer and the card shows "awaiting customer, day X";
+// after CUSTOMER_ESCALATE_DAYS the card is flagged for escalation/closure. These
+// are the PRD's default intervals (team may tune later).
+export const CUSTOMER_REMIND_DAYS = 7;
+export const CUSTOMER_ESCALATE_DAYS = 14;
+
+export type CustomerWaitStage = 'fresh' | 'remind_due' | 'escalate';
+export type CustomerWaitState = { days: number; stage: CustomerWaitStage };
+
+export function customerWaitState(
+  since: string | null | undefined,
+  now: Date = new Date(),
+): CustomerWaitState | null {
+  if (!since) return null;
+  const t = Date.parse(since);
+  if (Number.isNaN(t)) return null;
+  const days = Math.floor((now.getTime() - t) / 86_400_000);
+  const stage: CustomerWaitStage =
+    days >= CUSTOMER_ESCALATE_DAYS ? 'escalate' :
+    days >= CUSTOMER_REMIND_DAYS ? 'remind_due' : 'fresh';
+  return { days, stage };
+}
+
 // FR-11 / BR-14 / BR-15: a refund can only be processed against a valid
 // purchaser. When the return filer isn't the buyer (is_purchaser=false) we need
 // the purchaser's identity AND a proof of purchase — unless the Return Manager
@@ -212,6 +237,9 @@ export type ReturnRow = {
   // FR-11/BR-15: set when the Return Manager overrides the linkage gate.
   purchaser_linkage_confirmed_at: string | null;
   purchaser_linkage_confirmed_by: string | null;
+  // BR-16: customer-followup tracking for a return stuck awaiting the customer.
+  last_customer_reminder_at: string | null;
+  followup_escalated_at: string | null;
   created_at: string;
   updated_at: string;
 };

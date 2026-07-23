@@ -4,7 +4,7 @@ import {
   submitRefundRequest, updateRefundAmount, submitToManager, managerApprove, financeApprove, executeRefund, denyRefund, closeRefund,
   confirmPurchaserLinkage, hasValidPurchaserLinkage,
   computeRefundNet, defaultRefundFees,
-  preRefundStage,
+  preRefundStage, customerWaitState,
   setReturnDisposition, updateReturnStatus,
   useRefundNotes, addRefundNote, deleteRefundNote,
   REFUND_STATUS_META, REFUND_METHODS, REFUND_METHOD_META,
@@ -435,6 +435,32 @@ function UsageWindowBadge({ usage }: { usage: RefundUsageWindow }) {
 }
 
 // ============================================================================
+// BR-16 — "awaiting customer, day X" indicator. Shows on an intake ('created')
+// return that's been waiting on the customer: amber once past the 7-day remind
+// threshold, red (escalate) at 14 days or once followup_escalated_at is set.
+// Fresh (< 7 days) and non-intake returns render nothing.
+// ============================================================================
+function CustomerWaitBadge({ r }: { r: ReturnRow }) {
+  if (r.status !== 'created') return null;
+  const w = customerWaitState(r.created_at);
+  if (!w) return null;
+  const escalated = w.stage === 'escalate' || !!r.followup_escalated_at;
+  if (w.stage === 'fresh' && !escalated) return null;
+  const dayLabel = w.days === 1 ? 'day 1' : `day ${w.days}`;
+  return escalated ? (
+    <div className={styles.usageBadgeOver}
+         title="Awaiting the customer past the escalation interval (14+ days) — take it over or close it (BR-16).">
+      ⚠ Awaiting customer · {dayLabel} — <strong>escalate</strong>
+    </div>
+  ) : (
+    <div className={styles.usageBadgeUnknown}
+         title="Awaiting a customer response — auto-reminders are going out every 7 days (BR-16).">
+      ⏳ Awaiting customer · {dayLabel} — reminder sent
+    </div>
+  );
+}
+
+// ============================================================================
 // Sales invoice + order number — the customer's original invoice(s) on file,
 // surfaced the same way as the customer directory (invoice #, order #, date,
 // amount, View link to the stored PDF).
@@ -670,6 +696,7 @@ function InspectionCard({
       )}
       {r.reason && <div className={styles.refundReason}>{r.reason}</div>}
       {r.refund_method_preference && <div className={styles.refundMeta}>via {r.refund_method_preference}</div>}
+      <CustomerWaitBadge r={r} />
       <UsageWindowBadge usage={usage} />
       <RefundInvoices invoices={invoices} fallbackOrderRef={r.original_order_ref} />
       <CustomerTicketHistory tickets={tickets} onOpenTicket={onOpenTicket} defaultOpen />
