@@ -61,6 +61,14 @@ function creativeLabel(name: string): string {
   return m ? CREATIVE_MAP[`m${m[1]}`] ?? '—' : '—';
 }
 
+// The "text combination" code in an ad name (e.g. "m4a HB3BL1" → "HB3BL1"),
+// stripping the creative code (m<N><letter>) so ads group by their text variant.
+function textCombo(name: string): string {
+  const tokens = name.split(/[\s\-_|]+/).filter(Boolean);
+  const nonCreative = tokens.filter(t => !/^m\d+[a-z]?$/i.test(t));
+  return (nonCreative.length ? nonCreative.join(' ') : name) || '—';
+}
+
 // Local YYYY-MM-DD for today + offset (matches fb_ads.date_start day strings).
 function dayStr(offset: number): string {
   const d = new Date();
@@ -79,9 +87,13 @@ const RANGES: { key: string; label: string; from: () => string; to: () => string
   { key: 'all',       label: 'All time',      from: () => '0000-01-01', to: () => '9999-12-31' },
 ];
 
+type MiniView = 'creative' | 'text';
+
 export function MiniTab() {
   const { ads, loading } = useFbAds();
   const [rangeKey, setRangeKey] = useState('all');
+  const [view, setView] = useState<MiniView>('creative');
+  const [selected, setSelected] = useState<string | null>(null);
 
   const campaigns = useMemo(() => {
     const s = new Set<string>();
@@ -89,11 +101,14 @@ export function MiniTab() {
     return Array.from(s).sort();
   }, [ads]);
 
-  const defaultCampaign = useMemo(
-    () => campaigns.find(c => /mini/i.test(c)) ?? campaigns[0] ?? '',
-    [campaigns],
-  );
-  const [selected, setSelected] = useState<string | null>(null);
+  // Each sub-tab defaults to its own campaign: the creative test vs the primary
+  // text-sales campaign. The picker still lets you switch to any campaign.
+  const defaultCampaign = useMemo(() => {
+    if (view === 'creative') {
+      return campaigns.find(c => /creative/i.test(c)) ?? campaigns.find(c => /mini/i.test(c)) ?? campaigns[0] ?? '';
+    }
+    return campaigns.find(c => /mini/i.test(c) && !/creative/i.test(c)) ?? campaigns.find(c => /mini/i.test(c)) ?? campaigns[0] ?? '';
+  }, [campaigns, view]);
   const campaign = selected ?? defaultCampaign;
 
   const campaignAds = useMemo(() => {
@@ -106,7 +121,10 @@ export function MiniTab() {
 
   const overall = useMemo(() => aggregate('Whole campaign', campaignAds), [campaignAds]);
   const byAdset = useMemo(() => groupBy(campaignAds, a => a.adset_name ?? '—'), [campaignAds]);
-  const byCreative = useMemo(() => groupBy(campaignAds, a => a.ad_name ?? '—'), [campaignAds]);
+  const byThird = useMemo(
+    () => groupBy(campaignAds, a => (view === 'creative' ? (a.ad_name ?? '—') : textCombo(a.ad_name ?? ''))),
+    [campaignAds, view],
+  );
 
   if (loading) return <p style={{ color: subtle, fontSize: 13 }}>Loading ad data…</p>;
   if (ads.length === 0) return (
@@ -117,6 +135,18 @@ export function MiniTab() {
 
   return (
     <div>
+      {/* Sub-tabs: the creative test vs the primary text-sales campaign */}
+      <div style={{ display: 'flex', gap: 4, borderBottom: '2px solid var(--color-border)', marginBottom: 14 }}>
+        {([['creative', 'Creative Test'], ['text', 'Text Sales']] as [MiniView, string][]).map(([k, label]) => (
+          <button key={k} onClick={() => { setView(k); setSelected(null); }}
+            style={{
+              padding: '7px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer', border: 'none', background: 'none',
+              color: view === k ? 'var(--color-crimson)' : 'var(--color-ink-muted)',
+              borderBottom: `2px solid ${view === k ? 'var(--color-crimson)' : 'transparent'}`, marginBottom: -2,
+            }}>{label}</button>
+        ))}
+      </div>
+
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
         <span style={{ fontSize: 12, color: muted }}>Campaign</span>
         <select value={campaign} onChange={e => setSelected(e.target.value)}
@@ -133,10 +163,17 @@ export function MiniTab() {
 
       <Section title="Overall campaign" rows={[overall]} firstCol="Campaign" />
       <Section title="By ad set (audience)" rows={byAdset} firstCol="Ad set" />
-      <Section title="By ad creative (compiled across ad sets)" rows={byCreative} firstCol="Ad name" describe={creativeLabel} />
+      {view === 'creative' ? (
+        <Section title="By ad creative (compiled across ad sets)" rows={byThird} firstCol="Ad name" describe={creativeLabel} />
+      ) : (
+        <Section title="By text combination (compiled across ad sets)" rows={byThird} firstCol="Text combination" />
+      )}
 
       <div style={{ fontSize: 11, color: muted, marginTop: 8 }}>
-        "Creative" groups by ad name (m1a, m2a…), summing that creative across all its ad sets. Lead rate = leads ÷ impressions.
+        {view === 'creative'
+          ? '"Creative" groups by ad name (m1a, m2a…), summing that creative across all its ad sets.'
+          : '"Text combination" is parsed from the ad name (e.g. "m4a HB3BL1" → "HB3BL1"), summing each text variant across creatives + ad sets.'}
+        {' '}Lead rate = leads ÷ impressions.
       </div>
     </div>
   );
