@@ -57,6 +57,9 @@ import {
   hasValidPurchaserLinkage,
   refundExecutorEmail,
   REFUND_EXECUTORS,
+  computeRefundNet,
+  defaultRefundFees,
+  DEFAULT_RESTOCKING_FEE,
   type ReturnStatus,
   type RefundMethod,
 } from './postShipment';
@@ -195,6 +198,30 @@ describe('refundExecutorEmail (FR-9 queue routing)', () => {
   });
   it('defaults an unset method to the finance officer', () => {
     expect(refundExecutorEmail(null)).toBe(REFUND_EXECUTORS.finance);
+  });
+});
+
+describe('computeRefundNet (FR-12)', () => {
+  it('subtracts restocking + return shipping from the gross', () => {
+    expect(computeRefundNet(200, 50, 20)).toBe(130);
+  });
+  it('never goes below zero', () => {
+    expect(computeRefundNet(30, 50, 20)).toBe(0);
+  });
+  it('rounds to cents', () => {
+    expect(computeRefundNet(100, 12.345, 0)).toBe(87.66);
+  });
+  it('treats missing fees as zero', () => {
+    expect(computeRefundNet(100, 0, 0)).toBe(100);
+  });
+});
+
+describe('defaultRefundFees (FR-12 / BR-7 defect waiver)', () => {
+  it('applies the $50 restocking default for a standard case', () => {
+    expect(defaultRefundFees(false)).toEqual({ restocking: DEFAULT_RESTOCKING_FEE, returnShipping: 0 });
+  });
+  it('waives both fees for a genuine-defect case', () => {
+    expect(defaultRefundFees(true)).toEqual({ restocking: 0, returnShipping: 0 });
   });
 });
 

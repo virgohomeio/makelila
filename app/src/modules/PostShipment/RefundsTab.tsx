@@ -3,6 +3,7 @@ import {
   useRefundApprovals, useReturns,
   submitRefundRequest, updateRefundAmount, submitToManager, managerApprove, financeApprove, executeRefund, denyRefund, closeRefund,
   confirmPurchaserLinkage, hasValidPurchaserLinkage,
+  computeRefundNet, defaultRefundFees,
   setReturnDisposition, updateReturnStatus,
   useRefundNotes, addRefundNote, deleteRefundNote,
   REFUND_STATUS_META, REFUND_METHODS, REFUND_METHOD_META,
@@ -1650,6 +1651,15 @@ function FinanceApproveModal({
   const amount = Number(amountStr);
   const amountChanged = !Number.isNaN(amount) && Number(amount.toFixed(2)) !== Number(original.toFixed(2));
 
+  // FR-12: fee breakdown. Restocking defaults to $50 (waived for genuine-defect
+  // discards, BR-7); return shipping is operator-entered actual cost (OQ-2).
+  const feeDefaults = defaultRefundFees(isDefectiveDiscard);
+  const [restockingStr, setRestockingStr] = useState(feeDefaults.restocking.toFixed(2));
+  const [returnShipStr, setReturnShipStr] = useState(feeDefaults.returnShipping.toFixed(2));
+  const restockingFee = Number(restockingStr) || 0;
+  const returnShipFee = Number(returnShipStr) || 0;
+  const suggestedNet = computeRefundNet(original, restockingFee, returnShipFee);
+
   const [shipping, setShipping] = useState<{ total: number; paidShipping: number } | null>(null);
   useEffect(() => {
     const ref = linkedReturn?.original_order_ref;
@@ -1682,6 +1692,8 @@ function FinanceApproveModal({
         amount,
         correction_note: amountChanged ? correctionNote.trim() : undefined,
         note: note.trim() || undefined,
+        restocking_fee: restockingFee,
+        return_shipping_fee: returnShipFee,
       });
       onClose();
     } catch (e) {
@@ -1733,6 +1745,32 @@ function FinanceApproveModal({
             {shipping && (
               <> · Order total: ${shipping.total.toFixed(2)} · Shipping (customer-paid, non-refundable): ${shipping.paidShipping.toFixed(2)} · Max refundable: ${(shipping.total - shipping.paidShipping).toFixed(2)}</>
             )}
+          </div>
+        </div>
+
+        <div className={styles.modalField}>
+          <label className={styles.modalLabel}>Fees (FR-12)</label>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <div style={{ flex: 1 }}>
+              <div className={styles.modalHint}>Restocking fee</div>
+              <input type="number" step="0.01" min="0" value={restockingStr}
+                onChange={e => setRestockingStr(e.target.value)} className={styles.modalInput} />
+            </div>
+            <div style={{ flex: 1 }}>
+              <div className={styles.modalHint}>Return shipping (customer-paid)</div>
+              <input type="number" step="0.01" min="0" value={returnShipStr}
+                onChange={e => setReturnShipStr(e.target.value)} className={styles.modalInput} />
+            </div>
+          </div>
+          <div className={styles.modalHint} style={{ marginTop: 6 }}>
+            {isDefectiveDiscard
+              ? '✓ Genuine defect — fees waived by default (BR-7).'
+              : '$50 restocking default; return shipping is the actual cost (adjust for currency).'}
+            {' '}Gross ${original.toFixed(2)} − restocking ${restockingFee.toFixed(2)} − shipping ${returnShipFee.toFixed(2)} = <strong>net ${suggestedNet.toFixed(2)}</strong>.
+            {' '}<button type="button" onClick={() => setAmountStr(suggestedNet.toFixed(2))}
+              style={{ border: 'none', background: 'none', color: '#2b6cb0', cursor: 'pointer', padding: 0, fontWeight: 600 }}>
+              Apply net →
+            </button>
           </div>
         </div>
 

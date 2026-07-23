@@ -435,6 +435,21 @@ export function refundExecutorEmail(method: RefundMethod | null): string {
     : REFUND_EXECUTORS.finance;
 }
 
+// FR-12 fee breakdown (BR-9/BR-10, honouring current terms per OQ-1). The
+// restocking fee defaults to $50; return shipping is operator-entered actual
+// cost (OQ-2 resolved as actual, not fixed). Both are waived for genuine-defect
+// cases (BR-7). computeRefundNet derives the payout from the gross minus fees.
+export const DEFAULT_RESTOCKING_FEE = 50;
+
+export function computeRefundNet(gross: number, restocking: number, returnShipping: number): number {
+  const net = Number(gross) - (Number(restocking) || 0) - (Number(returnShipping) || 0);
+  return Math.max(0, Math.round(net * 100) / 100);
+}
+
+export function defaultRefundFees(isDefect: boolean): { restocking: number; returnShipping: number } {
+  return { restocking: isDefect ? 0 : DEFAULT_RESTOCKING_FEE, returnShipping: 0 };
+}
+
 export type RefundApproval = {
   id: string;
   return_id: string | null;
@@ -445,6 +460,9 @@ export type RefundApproval = {
   refund_method: RefundMethod | null;
   original_amount_usd: number | null;
   amount_correction_note: string | null;
+  // FR-12 fee breakdown (how the net payout was derived).
+  restocking_fee_usd: number | null;
+  return_shipping_fee_usd: number | null;
   currency: string;
   payment_method: string | null;
   reason: string | null;
@@ -697,6 +715,8 @@ export type FinanceApproveOpts = {
   amount?: number;             // if omitted, keep original
   correction_note?: string;    // required if amount differs from original
   note?: string;               // free-form optional note (e.g. Stripe refund ID)
+  restocking_fee?: number;     // FR-12: recorded on the card for the audit trail
+  return_shipping_fee?: number;
 };
 
 export async function financeApprove(id: string, opts: FinanceApproveOpts): Promise<void> {
@@ -745,6 +765,9 @@ export async function financeApprove(id: string, opts: FinanceApproveOpts): Prom
     finance_approved_by: userId,
     finance_approved_at: new Date().toISOString(),
     finance_decision_note: opts.note?.trim() || null,
+    // FR-12: record the fee breakdown behind the net payout (null = not set).
+    restocking_fee_usd: opts.restocking_fee ?? null,
+    return_shipping_fee_usd: opts.return_shipping_fee ?? null,
   };
   const { error: upErr } = await supabase
     .from('refund_approvals')
