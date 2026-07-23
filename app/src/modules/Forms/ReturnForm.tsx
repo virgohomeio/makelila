@@ -125,6 +125,8 @@ export default function ReturnForm() {
   // 18. Purchase proof file upload
   const [purchaseProofFile, setPurchaseProofFile] = useState<File | null>(null);
   // Order number validation
+  const [orderValidating, setOrderValidating] = useState(false);
+  const [orderFound, setOrderFound] = useState<boolean | null>(null);
 
   // Hidden / inferred
   const [country, setCountry] = useState<'Canada' | 'USA'>('Canada');
@@ -138,16 +140,27 @@ export default function ReturnForm() {
     setReasons(prev => prev.includes(r) ? prev.filter(x => x !== r) : [...prev, r]);
   };
 
-  // Tidy the order ref on blur (prefix '#'). We deliberately do NOT verify it
-  // against the orders table here: this public form runs as the anon role,
+  // Confirm the order number exists. This public form runs as the anon role,
   // which has no SELECT on orders (RLS is authenticated + is_internal_user
-  // only), so every lookup returns null and wrongly reported "order not found"
-  // for real orders — blocking all customers from submitting. Operators
-  // validate the ref (they have access) once the return lands. Same
-  // anon-no-SELECT constraint the returns insert below already accounts for.
-  const normalizeOnBlur = () => {
+  // only) — a direct .from('orders').select() returns null for every order and
+  // wrongly reports "not found". Instead we call the return_form_order_exists
+  // SECURITY DEFINER function, which anon may execute and which returns only a
+  // boolean (no order rows / PII). On any error we leave orderFound null so the
+  // submit path fails open rather than blocking a real customer.
+  const validateOrderRef = async () => {
     const normalized = normalizeOrderRef(orderRef);
-    if (normalized) setOrderRef(normalized);
+    if (!normalized) return;
+    setOrderRef(normalized);
+    setOrderValidating(true);
+    setOrderFound(null);
+    try {
+      const { data, error } = await supabase.rpc('return_form_order_exists', { p_order_ref: normalized });
+      setOrderFound(error ? null : data === true);
+    } catch {
+      setOrderFound(null);
+    } finally {
+      setOrderValidating(false);
+    }
   };
 
   const submit = async (e: React.FormEvent) => {
@@ -161,6 +174,27 @@ export default function ReturnForm() {
       return;
     }
     if (!orderRef.trim()) { setError('Please include your order number.'); return; }
+    if (orderFound !== true) {
+      const normalized = normalizeOrderRef(orderRef);
+      setOrderRef(normalized);
+      setOrderValidating(true);
+      try {
+        const { data, error } = await supabase.rpc('return_form_order_exists', { p_order_ref: normalized });
+        // Fail open on a validation-service error — never block a real customer
+        // because the lookup itself failed.
+        if (!error) {
+          setOrderFound(data === true);
+          if (data !== true) {
+            setError(`${normalized} was not found in our system — please check the number (e.g. #1107). If you received the unit as a gift or have a different reference, contact us at support@lilacomposter.com.`);
+            return;
+          }
+        }
+      } catch {
+        // Network error — don't block.
+      } finally {
+        setOrderValidating(false);
+      }
+    }
     if (!usage)     { setError('Please tell us how long you\'ve been using the unit.'); return; }
     if (reasons.length === 0) { setError('Please select at least one return reason.'); return; }
     if (reasons.includes('Other') && !reasonOther.trim()) {
@@ -312,10 +346,12 @@ export default function ReturnForm() {
         <div className={styles.fieldGrid2}>
           <Field label="Order number" required>
             <input value={orderRef}
-                   onChange={e => setOrderRef(e.target.value)}
-                   onBlur={normalizeOnBlur}
+                   onChange={e => { setOrderRef(e.target.value); setOrderFound(null); }}
+                   onBlur={validateOrderRef}
                    className={styles.input} placeholder="#1107" required />
-            <div className={styles.fieldHelp} style={{color:'#718096'}}>Your Shopify order number, e.g. #1107.</div>
+            {orderValidating && <div className={styles.fieldHelp} style={{color:'#718096'}}>Checking…</div>}
+            {!orderValidating && orderFound === true && <div className={styles.fieldHelp} style={{color:'#276749'}}>✓ Order found</div>}
+            {!orderValidating && orderFound === false && <div className={styles.fieldHelp} style={{color:'#c53030'}}>Order not found — please check the number (e.g. #1107).</div>}
           </Field>
           <Field label="Unit serial number" help="Stamped on the bottom of your unit. Optional.">
             <input value={serial} onChange={e => setSerial(e.target.value)}
