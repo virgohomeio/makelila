@@ -58,10 +58,11 @@ The app-side executor addresses (FR-9a/b) live in `REFUND_EXECUTORS` in
 
 ## 4. Open decisions to confirm
 
-- **OQ-2 (return-shipping deduction):** shipped as **operator-entered actual cost**
-  (Finance types it, default 0), *not* a fixed number — this was not explicitly
-  decided. If the team wants a fixed deduction, change the default in
-  `defaultRefundFees()` / the FinanceApproveModal. No schema change needed.
+- **OQ-2 (return-shipping deduction): RESOLVED 2026-07-23 by Huayi → keep
+  operator-entered actual cost.** Finance types the real return-label cost each
+  time (default $0); label cost varies by destination/weight, so no fixed
+  deduction. This matches the shipped `defaultRefundFees()` (`returnShipping: 0`) —
+  no code change. Restocking stays $50 default, both waived for defects.
 - **BR-9/BR-12 sign-off:** the internal-only defect-exception wording still needs
   Huayi + George's explicit confirmation (per the PRD).
 
