@@ -14,6 +14,15 @@ function firstNameFromEmail(email: string): string {
   return local.charAt(0).toUpperCase() + local.slice(1);
 }
 
+// FR-15: customer greeting — prefer the customer's given name, fall back to the
+// email local part. Returns 'there' if we have neither.
+function customerFirstName(name: string | null | undefined, email: string | null | undefined): string {
+  const fromName = (name ?? '').trim().split(/\s+/)[0];
+  if (fromName) return fromName;
+  if (email && email.includes('@')) return firstNameFromEmail(email);
+  return 'there';
+}
+
 // ============================================================================
 // Returns
 // ============================================================================
@@ -673,6 +682,37 @@ export async function submitRefundRequest(input: {
         event_id: `return-${input.order_id ?? Date.now()}`,
       },
     });
+
+  // FR-15: tell the customer we've received their refund request. Best-effort —
+  // a mail failure must never roll back the submission.
+  await notifyCustomerRefundStatus('refund_application_received_customer', {
+    email: input.customer_email, name: input.customer_name, amount: input.refund_amount_usd,
+  });
+}
+
+// FR-15: standardized customer-facing status message at a refund transition.
+// Best-effort (never throws into the caller); no-ops when we have no email.
+async function notifyCustomerRefundStatus(
+  templateKey: string,
+  c: { email?: string | null; name?: string | null; amount?: number | null; method?: RefundMethod | null; relatedRefundId?: string },
+): Promise<void> {
+  const to = (c.email ?? '').trim();
+  if (!to) return;
+  try {
+    await sendTemplate({
+      template_key: templateKey,
+      to,
+      to_name: customerFirstName(c.name, to),
+      variables: {
+        customer_first_name: customerFirstName(c.name, to),
+        amount: c.amount != null ? `$${Number(c.amount).toFixed(2)}` : 'your refund',
+        method: c.method ? REFUND_METHOD_META[c.method].label : 'your original payment method',
+      },
+      ...(c.relatedRefundId ? { related_refund_id: c.relatedRefundId } : {}),
+    });
+  } catch (e) {
+    console.warn(`FR-15 customer status email (${templateKey}) failed (non-fatal):`, (e as Error).message);
+  }
 }
 
 /** Edit a refund's dollar amount directly from the card, at any stage.
@@ -729,7 +769,7 @@ export async function managerApprove(id: string, note?: string): Promise<void> {
   // Manager, rather than only being caught one stage later at Finance Review.
   const { data: approval, error: aErr } = await supabase
     .from('refund_approvals')
-    .select('id, return_id')
+    .select('id, return_id, customer_email, customer_name, refund_amount_usd')
     .eq('id', id)
     .single();
   if (aErr || !approval) throw new Error(`Refund approval not found: ${aErr?.message}`);
@@ -757,6 +797,11 @@ export async function managerApprove(id: string, note?: string): Promise<void> {
   }).eq('id', id);
   if (error) throw error;
   await logAction('refund_manager_approved', id, note ?? 'approved');
+
+  // FR-15: tell the customer their refund was approved.
+  await notifyCustomerRefundStatus('refund_approved_customer', {
+    email: approval.customer_email, name: approval.customer_name, amount: approval.refund_amount_usd, relatedRefundId: id,
+  });
 }
 
 export type FinanceApproveOpts = {
@@ -847,6 +892,11 @@ export async function financeApprove(id: string, opts: FinanceApproveOpts): Prom
   } catch (e) {
     console.warn('Refund queue-entry email failed (non-fatal):', (e as Error).message);
   }
+
+  // FR-15: tell the customer their refund is now being processed.
+  await notifyCustomerRefundStatus('refund_processing_customer', {
+    email: approval.customer_email, name: approval.customer_name, amount: adjusted, method: opts.method, relatedRefundId: id,
+  });
 }
 
 /** Refund Queue → Refunded. Finance has already approved the case + amount; this
@@ -899,6 +949,15 @@ export async function executeRefund(id: string, note?: string): Promise<void> {
       console.warn('Refund completion email failed (non-fatal):', (e as Error).message);
     }
   }
+
+  // FR-15: tell the customer the funds have been sent.
+  await notifyCustomerRefundStatus('refund_funds_sent_customer', {
+    email: approval.customer_email as string | null,
+    name: approval.customer_name as string | null,
+    amount: approval.refund_amount_usd as number | null,
+    method: (approval.refund_method as RefundMethod | null) ?? null,
+    relatedRefundId: id,
+  });
 }
 
 export async function denyRefund(id: string, stage: 'manager_review' | 'finance_review', reason: string): Promise<void> {
