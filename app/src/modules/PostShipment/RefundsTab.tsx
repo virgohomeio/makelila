@@ -388,7 +388,16 @@ export function RefundsTab() {
       {viewReturnId && (() => {
         const r = returnsById.get(viewReturnId);
         if (!r) return null;
-        return <ReturnDetailModal r={r} onClose={() => setViewReturnId(null)} />;
+        const email = r.purchaser_email?.trim() || r.customer_email;
+        return <ReturnDetailModal
+          r={r}
+          usage={usageForEmail(email)}
+          invoices={invoicesForEmail(email)}
+          tickets={ticketsForEmails([r.purchaser_email, r.customer_email])}
+          onOpenTicket={setOpenTicketId}
+          onError={setError}
+          onClose={() => setViewReturnId(null)}
+        />;
       })()}
 
       {financeModalId && (() => {
@@ -1706,7 +1715,15 @@ function ReturnFormAnswers({ r }: { r: ReturnRow }) {
 
 // Read-only viewer for a return's full submitted form — opened by clicking a
 // card in the Return & inspection column (before a refund request exists).
-function ReturnDetailModal({ r, onClose }: { r: ReturnRow; onClose: () => void }) {
+function ReturnDetailModal({ r, usage, invoices, tickets, onOpenTicket, onError, onClose }: {
+  r: ReturnRow;
+  usage: RefundUsageWindow;
+  invoices: CustomerInvoice[];
+  tickets: ServiceTicket[];
+  onOpenTicket: (ticketId: string) => void;
+  onError: (msg: string | null) => void;
+  onClose: () => void;
+}) {
   const displayName = r.purchaser_name?.trim() || r.customer_name;
   return (
     <div className={styles.modalBackdrop} onClick={onClose}>
@@ -1726,7 +1743,15 @@ function ReturnDetailModal({ r, onClose }: { r: ReturnRow; onClose: () => void }
           </div>
           <button className={styles.btnSecondary} onClick={onClose}>Close</button>
         </div>
+        {/* Full case context — same blocks the refund detail panel shows:
+            usage window, sales invoice + order #, ticket history, saved notes,
+            then the return form answers. */}
         <div style={{ marginTop: 12 }}>
+          <UsageWindowBadge usage={usage} />
+          <RefundInvoices invoices={invoices} fallbackOrderRef={r.original_order_ref} />
+          <CustomerTicketHistory tickets={tickets} onOpenTicket={onOpenTicket} defaultOpen />
+          <ReturnNotes returnId={r.id} onError={onError} />
+          <ReturnAttachmentStrip returnId={r.id} onError={onError} />
           <ReturnFormAnswers r={r} />
         </div>
       </div>
