@@ -1098,6 +1098,41 @@ export async function closeRefund(id: string): Promise<void> {
   await logAction('refund_closed', id, 'archived');
 }
 
+// Send a refund card BACK to an earlier column (e.g. Manager → Completeness when
+// there isn't enough information). Clears the approval stamps for every stage
+// at/after the target so the trail stays honest. Available to everyone involved.
+export type RefundBackTarget = 'submitted' | 'manager_review' | 'finance_review';
+
+export function refundBackPatch(toStatus: RefundBackTarget): Record<string, unknown> {
+  const patch: Record<string, unknown> = { status: toStatus };
+  // Any target is at/below the finance stage, so the finance decision is undone.
+  patch.finance_approved_by = null;
+  patch.finance_approved_at = null;
+  patch.finance_decision_note = null;
+  // Going all the way back to Completeness also undoes the manager approval.
+  if (toStatus === 'submitted') {
+    patch.manager_approved_by = null;
+    patch.manager_approved_at = null;
+    patch.manager_decision_note = null;
+  }
+  return patch;
+}
+
+export async function sendRefundBack(id: string, toStatus: RefundBackTarget): Promise<void> {
+  const { error } = await supabase.from('refund_approvals').update(refundBackPatch(toStatus)).eq('id', id);
+  if (error) throw error;
+  await logAction('refund_sent_back', id, `→ ${toStatus}`);
+}
+
+// "Uncompile" — remove the refund request so the case returns to Return &
+// Inspection (the linked return row stays). Used to move a Completeness card
+// back a column. Destructive: notes on the refund request are lost.
+export async function uncompileRefund(id: string): Promise<void> {
+  const { error } = await supabase.from('refund_approvals').delete().eq('id', id);
+  if (error) throw error;
+  await logAction('refund_uncompiled', id, 'returned to Return & Inspection (refund request removed)');
+}
+
 // ============================================================================
 // Order cancellations (customer-submitted via /cancel-order)
 // ============================================================================

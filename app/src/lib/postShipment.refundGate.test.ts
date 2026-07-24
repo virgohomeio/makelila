@@ -66,6 +66,7 @@ import {
   customerWaitState,
   CUSTOMER_REMIND_DAYS,
   CUSTOMER_ESCALATE_DAYS,
+  refundBackPatch,
   type ReturnStatus,
   type RefundMethod,
 } from './postShipment';
@@ -154,6 +155,35 @@ describe('customerWaitState (BR-16)', () => {
   it('uses 7 and 14 as the default BR-16 intervals', () => {
     expect(CUSTOMER_REMIND_DAYS).toBe(7);
     expect(CUSTOMER_ESCALATE_DAYS).toBe(14);
+  });
+});
+
+// Send-back: moving a refund card to an earlier column must clear the approval
+// stamps for every stage at/after the target, so the audit trail stays honest.
+describe('refundBackPatch (send a card back a column)', () => {
+  it('back to Completeness clears BOTH manager and finance stamps', () => {
+    const p = refundBackPatch('submitted');
+    expect(p.status).toBe('submitted');
+    expect(p.manager_approved_by).toBeNull();
+    expect(p.manager_approved_at).toBeNull();
+    expect(p.manager_decision_note).toBeNull();
+    expect(p.finance_approved_by).toBeNull();
+    expect(p.finance_approved_at).toBeNull();
+    expect(p.finance_decision_note).toBeNull();
+  });
+
+  it('back to Manager Review clears finance stamps but keeps the manager approval', () => {
+    const p = refundBackPatch('manager_review');
+    expect(p.status).toBe('manager_review');
+    expect(p.finance_approved_at).toBeNull();
+    expect(p).not.toHaveProperty('manager_approved_at');
+  });
+
+  it('back to Finance Review clears the finance stamps (finance re-decides)', () => {
+    const p = refundBackPatch('finance_review');
+    expect(p.status).toBe('finance_review');
+    expect(p.finance_approved_by).toBeNull();
+    expect(p).not.toHaveProperty('manager_approved_at');
   });
 });
 

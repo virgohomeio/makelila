@@ -20,6 +20,7 @@ export type Action =
   | 'approve_refund_finance'
   | 'deny_refund'
   | 'submit_to_manager'             // FR-3: Account Manager advances a case to Manager Review
+  | 'move_refund_flow'              // everyone involved: move a card fwd/back + edit amount/notes
   | 'dispose_unit'                  // Reina's Returns disposition writes
   | 'edit_warranty_registration'    // Junaid's warranty write path
   | 'repost_journal';               // Finance QBO journal repost
@@ -45,6 +46,9 @@ const ACTION_ROLES: Record<Action, Role[]> = {
   // FR-3: the Product Refund Account Manager is an operator-tier case owner
   // today; a distinct "account_manager" role is a future RBAC-enum refinement.
   submit_to_manager:          ['operator', 'manager', 'finance', 'admin'],
+  // Everyone involved in the refund workflow can move a card between columns
+  // (forward or back) and edit its amount/notes — the Account Manager included.
+  move_refund_flow:           ['operator', 'manager', 'finance', 'admin'],
   dispose_unit:               ['manager', 'finance', 'admin'],
   edit_warranty_registration: ['operator', 'manager', 'finance', 'admin'],
   repost_journal:             ['finance', 'admin'],

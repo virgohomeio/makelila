@@ -12,6 +12,10 @@ describe('canDo', () => {
     ['operator', 'dispose_unit',               false],
     ['operator', 'edit_warranty_registration', true],
     ['operator', 'submit_to_manager',          true],  // FR-3: the Account Manager (operator tier today) submits cases
+    ['operator', 'move_refund_flow',           true],  // everyone involved moves cards fwd/back
+    ['manager',  'move_refund_flow',            true],
+    ['finance',  'move_refund_flow',            true],
+    [null,       'move_refund_flow',            false],
 
     // manager — refund manager-side + disposition + warranty; not finance-stage
     ['manager',  'approve_refund_manager',     true],

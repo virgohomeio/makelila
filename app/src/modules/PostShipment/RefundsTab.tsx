@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   useRefundApprovals, useReturns,
   submitRefundRequest, updateRefundAmount, submitToManager, managerApprove, financeApprove, executeRefund, denyRefund, closeRefund,
+  sendRefundBack, uncompileRefund, type RefundBackTarget,
   confirmPurchaserLinkage, hasValidPurchaserLinkage,
   computeRefundNet, defaultRefundFees,
   preRefundStage, customerWaitState,
@@ -79,7 +80,8 @@ export function RefundsTab() {
 
   const isManager = canDo(role, 'approve_refund_manager');
   const isFinance = canDo(role, 'approve_refund_finance');
-  const isSubmitter = canDo(role, 'submit_to_manager');
+  // Everyone involved can move cards forward/back + edit amount/notes.
+  const canFlow = canDo(role, 'move_refund_flow');
 
   const returnsById = useMemo(() => {
     const m = new Map<string, ReturnRow>();
@@ -344,9 +346,7 @@ export function RefundsTab() {
                     invoices={invoicesFor(r, r.return_id ? returnsById.get(r.return_id) ?? null : null)}
                     tickets={ticketsFor(r, r.return_id ? returnsById.get(r.return_id) ?? null : null)}
                     onOpenTicket={setOpenTicketId}
-                    canManager={isManager}
-                    canFinance={isFinance}
-                    canSubmit={isSubmitter}
+                    canFlow={canFlow}
                     selected={selectedId === r.id}
                     onSelect={() => setSelectedId(prev => prev === r.id ? null : r.id)}
                     onError={setError}
@@ -368,9 +368,7 @@ export function RefundsTab() {
           tickets={ticketsFor(selectedRefund, selectedReturn)}
           onOpenTicket={setOpenTicketId}
           queuedReplacements={replsByEmail.get((selectedRefund.customer_email ?? '').toLowerCase().trim()) ?? []}
-          canManager={isManager}
-          canFinance={isFinance}
-          canSubmit={isSubmitter}
+          canFlow={canFlow}
           onClose={() => setSelectedId(null)}
           onError={setError}
           onOpenFinanceModal={setFinanceModalId}
@@ -882,14 +880,32 @@ function InspectionCard({
         <ReturnLabelControl r={r} onError={onError} />
       </div>
       <div className={styles.refundActions} onClick={e => e.stopPropagation()}>
-        <button className={styles.refundApproveBtn} onClick={onCompile}>Compile → George</button>
+        {preRefundStage(r.status) === 'intake' ? (
+          <button className={styles.refundApproveBtn} disabled={statusBusy}
+            onClick={() => void runStatus('received')}
+            title="Unit is back — move this case to the Return & Inspection column">
+            Move to Return &amp; Inspection →
+          </button>
+        ) : (
+          <>
+            <button className={styles.refundCloseBtn} disabled={statusBusy}
+              onClick={() => void runStatus('created')}
+              title="Move this case back to the Return Form Submitted column">
+              ← Return Form Submitted
+            </button>
+            <button className={styles.refundApproveBtn} onClick={onCompile}
+              title="Compile the case into a refund request (moves it to the Completeness column)">
+              Compile → Completeness
+            </button>
+          </>
+        )}
       </div>
     </div>
   );
 }
 
 function RefundCard({
-  refund, linkedReturn, usage, invoices, tickets, onOpenTicket, canManager, canFinance, canSubmit, selected, onSelect, onError, onOpenFinanceModal,
+  refund, linkedReturn, usage, invoices, tickets, onOpenTicket, canFlow, selected, onSelect, onError, onOpenFinanceModal,
 }: {
   refund: RefundApproval;
   linkedReturn: ReturnRow | null;
@@ -897,9 +913,7 @@ function RefundCard({
   invoices: CustomerInvoice[];
   tickets: ServiceTicket[];
   onOpenTicket: (ticketId: string) => void;
-  canManager: boolean;
-  canFinance: boolean;
-  canSubmit: boolean;
+  canFlow: boolean;
   selected: boolean;
   onSelect: () => void;
   onError: (msg: string | null) => void;
@@ -911,8 +925,8 @@ function RefundCard({
   const [inputVal, setInputVal] = useState('');
   const meta = REFUND_STATUS_META[refund.status];
 
-  // Approvers can correct the dollar amount inline at any stage.
-  const canEditAmount = canManager || canFinance;
+  // Everyone involved can correct the dollar amount inline at any stage.
+  const canEditAmount = canFlow;
   const [editingAmount, setEditingAmount] = useState(false);
   const [amountDraft, setAmountDraft] = useState('');
   const startEditAmount = () => { setAmountDraft(String(refund.refund_amount_usd ?? '')); setEditingAmount(true); };
@@ -971,19 +985,43 @@ function RefundCard({
     finally { setBusy(false); }
   };
 
-  // FR-3: 'submitted' is the account manager's prep stage — Submit (not
-  // Approve) promotes it to Manager Review, where the manager acts.
-  const canActSubmit = refund.status === 'submitted' && canSubmit;
-  const canActManager = refund.status === 'manager_review' && canManager;
-  const canActFinance = refund.status === 'finance_review' && canFinance;
-  // Refund Queue → execute the payout. Finance role (Julie / Huayi) does it.
-  const canActExecute = refund.status === 'refund_queue' && canFinance;
+  // Everyone involved can advance a card to the next column. The distinct
+  // labels stay (Submit / Approve / etc.), but the gate is now the shared
+  // move_refund_flow permission rather than a per-role one.
+  const canActSubmit = refund.status === 'submitted' && canFlow;
+  const canActManager = refund.status === 'manager_review' && canFlow;
+  const canActFinance = refund.status === 'finance_review' && canFlow;
+  const canActExecute = refund.status === 'refund_queue' && canFlow;
   const canDeny = canActManager || canActFinance;
 
   // FR-11: flag a case whose purchaser linkage is unverified; the manager can
   // override (BR-15) before approving.
   const linkageOk = hasValidPurchaserLinkage(linkedReturn);
   const needsLinkage = canActManager && !linkageOk;
+
+  // Send a card BACK a column (not enough info, etc.). From Completeness this
+  // "uncompiles" the case back to Return & Inspection.
+  const backTarget: RefundBackTarget | 'uncompile' | null =
+    refund.status === 'manager_review' ? 'submitted' :
+    refund.status === 'finance_review' ? 'manager_review' :
+    refund.status === 'refund_queue'   ? 'finance_review' :
+    refund.status === 'submitted'      ? 'uncompile' : null;
+  const backLabel =
+    refund.status === 'manager_review' ? '← Completeness' :
+    refund.status === 'finance_review' ? '← Manager review' :
+    refund.status === 'refund_queue'   ? '← Finance review' :
+    refund.status === 'submitted'      ? '← Return & Inspection' : '';
+  const runBack = async () => {
+    if (!backTarget) return;
+    if (backTarget === 'uncompile' &&
+        !window.confirm('Move this case back to Return & Inspection? This removes the refund request; notes on it will be lost.')) return;
+    setBusy(true); onError(null);
+    try {
+      if (backTarget === 'uncompile') await uncompileRefund(refund.id);
+      else await sendRefundBack(refund.id, backTarget);
+    } catch (e) { onError((e as Error).message); }
+    finally { setBusy(false); }
+  };
 
   const runSubmitToManager = async () => {
     setBusy(true); onError(null);
@@ -1138,6 +1176,12 @@ function RefundCard({
           </div>
         ) : (
           <>
+            {canFlow && backTarget && (
+              <button onClick={() => void runBack()} disabled={busy} className={styles.refundCloseBtn}
+                title="Send this card back a column (e.g. not enough information)">
+                {busy ? '…' : backLabel}
+              </button>
+            )}
             {canActSubmit && (
               <button onClick={() => void runSubmitToManager()} disabled={busy} className={styles.refundApproveBtn}>
                 {busy ? '…' : 'Submit to manager →'}
@@ -1181,7 +1225,7 @@ function RefundCard({
 // Renders the linked return-form data + approve / deny actions.
 // ============================================================================
 function RefundDetailPanel({
-  refund, linkedReturn, usage, invoices, tickets, onOpenTicket, queuedReplacements, canManager, canFinance, canSubmit, onClose, onError, onOpenFinanceModal,
+  refund, linkedReturn, usage, invoices, tickets, onOpenTicket, queuedReplacements, canFlow, onClose, onError, onOpenFinanceModal,
 }: {
   refund: RefundApproval;
   linkedReturn: ReturnRow | null;
@@ -1190,9 +1234,7 @@ function RefundDetailPanel({
   tickets: ServiceTicket[];
   onOpenTicket: (ticketId: string) => void;
   queuedReplacements: Order[];
-  canManager: boolean;
-  canFinance: boolean;
-  canSubmit: boolean;
+  canFlow: boolean;
   onClose: () => void;
   onError: (msg: string | null) => void;
   onOpenFinanceModal: (id: string) => void;
@@ -1203,11 +1245,34 @@ function RefundDetailPanel({
   const [newNote, setNewNote] = useState('');
   const meta = REFUND_STATUS_META[refund.status];
 
-  const canActSubmit = refund.status === 'submitted' && canSubmit;
-  const canActManager = refund.status === 'manager_review' && canManager;
-  const canActFinance = refund.status === 'finance_review' && canFinance;
-  const canActExecute = refund.status === 'refund_queue' && canFinance;
+  const canActSubmit = refund.status === 'submitted' && canFlow;
+  const canActManager = refund.status === 'manager_review' && canFlow;
+  const canActFinance = refund.status === 'finance_review' && canFlow;
+  const canActExecute = refund.status === 'refund_queue' && canFlow;
   const canAct = canActManager || canActFinance;
+
+  // Send a card back a column (mirrors RefundCard).
+  const backTarget: RefundBackTarget | 'uncompile' | null =
+    refund.status === 'manager_review' ? 'submitted' :
+    refund.status === 'finance_review' ? 'manager_review' :
+    refund.status === 'refund_queue'   ? 'finance_review' :
+    refund.status === 'submitted'      ? 'uncompile' : null;
+  const backLabel =
+    refund.status === 'manager_review' ? '← Completeness' :
+    refund.status === 'finance_review' ? '← Manager review' :
+    refund.status === 'refund_queue'   ? '← Finance review' :
+    refund.status === 'submitted'      ? '← Return & Inspection' : '';
+  const runBack = async () => {
+    if (!backTarget) return;
+    if (backTarget === 'uncompile' &&
+        !window.confirm('Move this case back to Return & Inspection? This removes the refund request; notes on it will be lost.')) return;
+    setBusy(true); onError(null);
+    try {
+      if (backTarget === 'uncompile') { await uncompileRefund(refund.id); onClose(); }
+      else await sendRefundBack(refund.id, backTarget);
+    } catch (e) { onError((e as Error).message); }
+    finally { setBusy(false); }
+  };
 
   // FR-11: block manager approval until purchaser linkage is verified or the
   // manager overrides it (BR-15).
@@ -1478,6 +1543,12 @@ function RefundDetailPanel({
           </div>
         ) : (
           <div className={styles.refundDetailButtons}>
+            {canFlow && backTarget && (
+              <button onClick={() => void runBack()} disabled={busy} className={styles.refundCloseBtn}
+                title="Send this card back a column (e.g. not enough information)">
+                {busy ? '…' : backLabel}
+              </button>
+            )}
             {canActSubmit && (
               <button onClick={() => void runSubmitToManager()} disabled={busy} className={styles.refundDetailApproveBtn}>
                 {busy ? '…' : 'Submit to manager →'}
