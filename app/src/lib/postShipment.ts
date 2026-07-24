@@ -757,6 +757,61 @@ export async function addRefundNote(refundId: string, body: string): Promise<voi
   await logAction('refund_note_added', refundId, body.trim().slice(0, 120));
 }
 
+// Notes on a pre-refund return card (Return Form Submitted / Return &
+// Inspection). Mirrors the refund-note layer; any internal user can add.
+export type ReturnNote = {
+  id: string;
+  return_id: string;
+  body: string;
+  author_id: string | null;
+  author_name: string | null;
+  created_at: string;
+};
+
+export function useReturnNotes(returnId: string | null): {
+  notes: ReturnNote[]; loading: boolean; refresh: () => void;
+} {
+  const [notes, setNotes] = useState<ReturnNote[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [tick, setTick] = useState(0);
+
+  useEffect(() => {
+    if (!returnId) { setNotes([]); setLoading(false); return; }
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      const { data } = await supabase
+        .from('return_notes')
+        .select('*')
+        .eq('return_id', returnId)
+        .order('created_at', { ascending: true });
+      if (!cancelled) { setNotes((data ?? []) as ReturnNote[]); setLoading(false); }
+    })();
+    return () => { cancelled = true; };
+  }, [returnId, tick]);
+
+  return { notes, loading, refresh: () => setTick(t => t + 1) };
+}
+
+export async function addReturnNote(returnId: string, body: string): Promise<void> {
+  const { data: { user } } = await supabase.auth.getUser();
+  let authorName: string | null = null;
+  if (user) {
+    const { data: prof } = await supabase.from('profiles').select('display_name').eq('id', user.id).maybeSingle();
+    authorName = (prof as { display_name?: string } | null)?.display_name ?? user.email ?? null;
+  }
+  const { error } = await supabase.from('return_notes')
+    .insert({ return_id: returnId, body: body.trim(), author_id: user?.id ?? null, author_name: authorName });
+  if (error) throw error;
+  await logAction('return_note_added', returnId, body.trim().slice(0, 120), { entityType: 'return', entityId: returnId });
+}
+
+export async function deleteReturnNote(noteId: string, returnId: string): Promise<void> {
+  const { error } = await supabase.from('return_notes').delete().eq('id', noteId);
+  if (error) throw error;
+  await logAction('return_note_deleted', returnId, 'removed a note', { entityType: 'return', entityId: returnId });
+}
+
 export async function deleteRefundNote(noteId: string, refundId: string): Promise<void> {
   const { error } = await supabase.from('refund_notes').delete().eq('id', noteId);
   if (error) throw error;

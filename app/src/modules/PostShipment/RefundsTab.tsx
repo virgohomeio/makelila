@@ -11,6 +11,7 @@ import {
   RETURN_ATTACH_INPUT_ACCEPT, type ReturnAttachment,
   bookReturnLabel,
   useRefundNotes, addRefundNote, deleteRefundNote,
+  useReturnNotes, addReturnNote, deleteReturnNote,
   REFUND_STATUS_META, REFUND_METHODS, REFUND_METHOD_META,
   UNIT_STATUS_LABEL, RETURN_DISPOSITION_META,
   type RefundApproval, type ReturnRow, type RefundMethod, type ReturnDisposition, type ReturnStatus, type ReturnCategory,
@@ -526,6 +527,54 @@ function ReturnLabelControl({ r, onError }: { r: ReturnRow; onError: (m: string 
   );
 }
 
+// Notes on a pre-refund return card (Return Form Submitted / Return &
+// Inspection). Everyone involved can add — mirrors the refund-card notes.
+function ReturnNotes({ returnId, onError }: { returnId: string; onError: (m: string | null) => void }) {
+  const { notes, refresh } = useReturnNotes(returnId);
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const add = async () => {
+    if (!text.trim()) return;
+    setBusy(true); onError(null);
+    try { await addReturnNote(returnId, text); setText(''); refresh(); }
+    catch (e) { onError((e as Error).message); }
+    finally { setBusy(false); }
+  };
+  const del = async (id: string) => {
+    setBusy(true); onError(null);
+    try { await deleteReturnNote(id, returnId); refresh(); }
+    catch (e) { onError((e as Error).message); }
+    finally { setBusy(false); }
+  };
+  return (
+    <div onClick={e => e.stopPropagation()} style={{ margin: '8px 0' }}>
+      <div style={{ fontSize: 12, fontWeight: 600, color: '#4a5568', marginBottom: 4 }}>Notes ({notes.length})</div>
+      {notes.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 6 }}>
+          {notes.map(n => (
+            <div key={n.id} style={{ fontSize: 12, background: '#f7fafc', border: '1px solid #edf2f7', borderRadius: 6, padding: '4px 6px' }}>
+              <div style={{ whiteSpace: 'pre-wrap' }}>{n.body}</div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', color: '#a0aec0', fontSize: 10, marginTop: 2 }}>
+                <span>{n.author_name ?? 'Unknown'} · {new Date(n.created_at).toLocaleString('en-US')}</span>
+                <button onClick={() => void del(n.id)} disabled={busy}
+                  style={{ border: 'none', background: 'none', color: '#a0aec0', cursor: 'pointer', fontSize: 10 }}>remove</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      <div style={{ display: 'flex', gap: 4 }}>
+        <textarea value={text} onChange={e => setText(e.target.value)} placeholder="Add a note…" rows={1}
+          onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) void add(); }}
+          style={{ flex: 1, fontSize: 12, padding: '4px 6px', border: '1px solid #cbd5e0', borderRadius: 6, resize: 'vertical', minHeight: 28 }} />
+        <button onClick={() => void add()} disabled={busy || !text.trim()} className={styles.refundApproveBtn} style={{ fontSize: 11 }}>
+          {busy ? '…' : 'Add'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function ReturnAttachmentStrip({ returnId, onError }: { returnId: string; onError: (m: string | null) => void }) {
   const { attachments, refresh } = useReturnAttachments(returnId);
   const [busy, setBusy] = useState(false);
@@ -848,6 +897,7 @@ function InspectionCard({
       <UsageWindowBadge usage={usage} />
       <RefundInvoices invoices={invoices} fallbackOrderRef={r.original_order_ref} />
       <CustomerTicketHistory tickets={tickets} onOpenTicket={onOpenTicket} defaultOpen />
+      <ReturnNotes returnId={r.id} onError={onError} />
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, margin: '6px 0', alignItems: 'center' }}
            onClick={e => e.stopPropagation()}>
         <select
