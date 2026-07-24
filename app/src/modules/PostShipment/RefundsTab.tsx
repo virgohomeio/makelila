@@ -472,6 +472,69 @@ function CustomerWaitBadge({ r }: { r: ReturnRow }) {
 }
 
 // ============================================================================
+// FR-6 — Purchaser vs User. Every card/detail header states plainly whether the
+// prominent name is the CUSTOMER (purchaser of record — accounting is against
+// this person, BR-13) or, when the filer isn't the buyer (gift/household),
+// shows the purchaser AND the USER who filed, each labelled.
+// ============================================================================
+type Parties = { purchaser: string; user: string | null; confirmed: boolean };
+
+function resolveParties(opts: {
+  fallbackName: string;
+  isPurchaser: boolean | null;
+  purchaserName: string | null;
+  filerName: string | null;
+}): Parties {
+  const { fallbackName, isPurchaser, purchaserName, filerName } = opts;
+  const filer = filerName?.trim() || fallbackName;
+  if (isPurchaser === false) {
+    // Filer is NOT the buyer → purchaser + a distinct user.
+    const purchaser = purchaserName?.trim() || fallbackName;
+    return { purchaser, user: purchaser.toLowerCase() === filer.toLowerCase() ? null : filer, confirmed: true };
+  }
+  // Filer IS the buyer (true) or unattested (null) → one party.
+  return { purchaser: fallbackName, user: null, confirmed: isPurchaser === true };
+}
+
+function PartyPill({ text, tone, title }: { text: string; tone: 'purchaser' | 'purchaser-unconfirmed' | 'user'; title: string }) {
+  const c = tone === 'user'
+    ? { color: '#2b6cb0', background: '#ebf8ff' }
+    : tone === 'purchaser'
+      ? { color: '#276749', background: '#f0fff4' }
+      : { color: '#975a16', background: '#fffbeb' };
+  return (
+    <span title={title} style={{
+      fontSize: 9, fontWeight: 700, letterSpacing: 0.4, textTransform: 'uppercase',
+      padding: '1px 5px', borderRadius: 4, marginLeft: 6, whiteSpace: 'nowrap', ...c,
+    }}>{text}</span>
+  );
+}
+
+// Renders the purchaser (bold) with a Purchaser pill, and — when the filer is a
+// different person — a second line for the User who filed.
+function PartyHeader({ parties, nameNode }: { parties: Parties; nameNode?: (name: string) => React.ReactNode }) {
+  const { purchaser, user, confirmed } = parties;
+  return (
+    <span>
+      {nameNode ? nameNode(purchaser) : <strong>{purchaser}</strong>}
+      <PartyPill
+        text={confirmed ? 'Purchaser' : 'Purchaser?'}
+        tone={confirmed ? 'purchaser' : 'purchaser-unconfirmed'}
+        title={confirmed
+          ? 'Purchaser of record — the refund is processed against this person (BR-13).'
+          : 'Purchaser not yet confirmed — no purchaser attestation on file (FR-11/BR-15).'}
+      />
+      {user && (
+        <span style={{ display: 'block', fontSize: 12, color: '#718096', marginTop: 2 }}>
+          <strong style={{ fontWeight: 600 }}>{user}</strong>
+          <PartyPill text="User · filed" tone="user" title="The person we talk to / who filed the request — not the purchaser of record." />
+        </span>
+      )}
+    </span>
+  );
+}
+
+// ============================================================================
 // FR-14 — paste-to-attach photos/documents on a return card. Ported from the
 // ticket AttachmentStrip: a window-level paste listener (Safari never fires
 // `paste` on a div) captures clipboard images; a hidden file input covers the
@@ -878,8 +941,11 @@ function InspectionCard({
     catch (e) { onError((e as Error).message); }
     finally { setStatusBusy(false); }
   };
-  // When the filer isn't the buyer, show the purchaser as the customer.
-  const displayName = r.purchaser_name?.trim() || r.customer_name;
+  // FR-6: label whether the name is the purchaser or a distinct filer (user).
+  const parties = resolveParties({
+    fallbackName: r.customer_name, isPurchaser: r.is_purchaser,
+    purchaserName: r.purchaser_name, filerName: r.customer_name,
+  });
   return (
     <div
       className={styles.refundCard}
@@ -890,7 +956,7 @@ function InspectionCard({
       title="Click to view the full return form"
     >
       <div className={styles.refundCardHead}>
-        <strong>{displayName}</strong>
+        <PartyHeader parties={parties} />
         {r.refund_amount_usd != null && (
           <span className={styles.refundAmount}>${Number(r.refund_amount_usd).toLocaleString('en-US')}</span>
         )}
@@ -1106,7 +1172,12 @@ function RefundCard({
       tabIndex={0}
     >
       <div className={styles.refundCardHead}>
-        <strong>{refund.customer_name}</strong>
+        <PartyHeader parties={resolveParties({
+          fallbackName: refund.customer_name,
+          isPurchaser: linkedReturn?.is_purchaser ?? null,
+          purchaserName: linkedReturn?.purchaser_name ?? null,
+          filerName: linkedReturn?.customer_name ?? null,
+        })} />
         {editingAmount ? (
           <span onClick={e => e.stopPropagation()} style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
             <span style={{ fontWeight: 700 }}>$</span>
@@ -1424,7 +1495,17 @@ function RefundDetailPanel({
       <div className={styles.refundDetailHead}>
         <div>
           <div className={styles.refundDetailTitleRow}>
-            <h3 className={styles.refundDetailTitle}>{refund.customer_name}</h3>
+            <h3 className={styles.refundDetailTitle} style={{ display: 'inline' }}>
+              <PartyHeader
+                parties={resolveParties({
+                  fallbackName: refund.customer_name,
+                  isPurchaser: linkedReturn?.is_purchaser ?? null,
+                  purchaserName: linkedReturn?.purchaser_name ?? null,
+                  filerName: linkedReturn?.customer_name ?? null,
+                })}
+                nameNode={(name) => <span>{name}</span>}
+              />
+            </h3>
             <span
               className={styles.refundDetailStatusPill}
               style={{ color: meta.color, background: meta.bg, borderColor: meta.border }}
@@ -1724,18 +1805,20 @@ function ReturnDetailModal({ r, usage, invoices, tickets, onOpenTicket, onError,
   onError: (msg: string | null) => void;
   onClose: () => void;
 }) {
-  const displayName = r.purchaser_name?.trim() || r.customer_name;
+  const parties = resolveParties({
+    fallbackName: r.customer_name, isPurchaser: r.is_purchaser,
+    purchaserName: r.purchaser_name, filerName: r.customer_name,
+  });
   return (
     <div className={styles.modalBackdrop} onClick={onClose}>
       <div className={styles.modalCard} onClick={e => e.stopPropagation()} style={{ maxWidth: 720, maxHeight: '85vh', overflowY: 'auto' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
           <div>
-            <h3 className={styles.modalTitle} style={{ marginBottom: 2 }}>{displayName}</h3>
+            <h3 className={styles.modalTitle} style={{ marginBottom: 2, display: 'inline' }}>
+              <PartyHeader parties={parties} nameNode={(name) => <span>{name}</span>} />
+            </h3>
             <div style={{ fontSize: 12, color: '#718096' }}>
               Return form · {r.return_ref ?? r.original_order_ref ?? '—'}
-              {r.is_purchaser === false && r.customer_name !== displayName && (
-                <> · filed by {r.customer_name}</>
-              )}
             </div>
             <div style={{ fontSize: 12, color: '#718096' }}>
               {[r.customer_email, r.customer_phone].filter(Boolean).join(' · ') || '—'}
