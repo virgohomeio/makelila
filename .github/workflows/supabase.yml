@@ -33,6 +33,11 @@ jobs:
       - uses: supabase/setup-cli@v1
         with:
           version: latest
+        env:
+          # Authenticate the GitHub API "resolve latest release" call so it uses
+          # the 1000/hr authenticated limit, not the shared 60/hr unauthenticated
+          # one (which intermittently fails with "rate limit exceeded").
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Deploy all edge functions
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
@@ -56,6 +61,11 @@ jobs:
       - uses: supabase/setup-cli@v1
         with:
           version: latest
+        env:
+          # Authenticate the GitHub API "resolve latest release" call so it uses
+          # the 1000/hr authenticated limit, not the shared 60/hr unauthenticated
+          # one (which intermittently fails with "rate limit exceeded").
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Push migrations
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}

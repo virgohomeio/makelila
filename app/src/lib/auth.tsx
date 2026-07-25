@@ -46,21 +46,52 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let active = true;
+
     supabase.auth.getSession().then(({ data }) => {
+      if (!active) return;
       setSession(data.session);
       setLoading(false);
     });
+
     const { data: sub } = supabase.auth.onAuthStateChange((_event, s) => {
-      setSession(s);
+      if (!active) return;
+      if (s) { setSession(s); return; }
+
+      // A null session arrived (e.g. SIGNED_OUT from a transient silent-refresh
+      // failure, or a late null INITIAL_SESSION racing getSession() above).
+      // Trusting it blindly boots a still-authenticated operator to /login —
+      // the "keeps logging me out" bug. Re-read the persisted session and only
+      // clear if Supabase confirms there genuinely is none. A real sign-out
+      // clears storage, so getSession() returns null there and we still log out.
+      //
+      // Deferred out of the callback: calling supabase.auth methods *inside*
+      // onAuthStateChange can deadlock the client's internal lock.
+      setTimeout(() => {
+        supabase.auth.getSession().then(({ data }) => {
+          if (active) setSession(data.session);
+        });
+      }, 0);
     });
-    return () => sub.subscription.unsubscribe();
+
+    return () => { active = false; sub.subscription.unsubscribe(); };
   }, []);
 
   useEffect(() => {
     const user = session?.user;
     if (!user) { setProfile(null); return; }
 
+    // Enforce the domain ONLY on a positively-known foreign email. A session
+    // can be re-emitted (token refresh, realtime re-auth after opening the
+    // Customers detail panel, etc.) with user.email transiently undefined —
+    // that means "session shape not fully populated yet", NOT "unauthorized".
+    // Calling the destructive global signOut() on a falsy email is what booted
+    // valid operators to /login (e.g. right after closing a customer profile).
+    // Missing email → wait for a complete session instead of destroying it.
+    if (!user.email) return;
+
     if (!requireInternalDomain(user.email)) {
+      console.warn('[auth] domain check rejected email, signing out:', user.email);
       supabase.auth.signOut();
       alert('Access restricted. Use your @virgohome.io account, or contact George if you need access.');
       return;

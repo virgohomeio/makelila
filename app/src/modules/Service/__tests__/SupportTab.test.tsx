@@ -68,12 +68,19 @@ vi.mock('../../../lib/stock', async () => {
   const actual = await vi.importActual<typeof import('../../../lib/stock')>('../../../lib/stock');
   return { ...actual, useUnits: vi.fn(() => ({ units: [] })) };
 });
+// SupportTab (and the detail panel it opens) now reads the current operator
+// via useAuth for the ticket-owner assignment flow. These bare renders have no
+// AuthProvider, so stub the hook the same way the data hooks are stubbed.
+vi.mock('../../../lib/auth', () => ({
+  useAuth: vi.fn(() => ({ user: { email: 'huayi@virgohome.io' } })),
+}));
 
 describe('SupportTab status resilience', () => {
   it('renders cleanly with a canonical status', () => {
     ticketsToReturn = [mkTicket({ id: 't1' })];
     render(<SupportTab />);
-    expect(screen.getByText('help me')).toBeInTheDocument();
+    // The subject now appears in both the owner board card and the table row.
+    expect(screen.getAllByText('help me').length).toBeGreaterThan(0);
   });
 
   it('does not crash when a ticket has an unexpected status value', () => {
@@ -88,7 +95,8 @@ describe('SupportTab status resilience', () => {
   it('does not crash opening the detail panel for an unexpected status', () => {
     ticketsToReturn = [mkTicket({ id: 't3', status: 'escalated' as never })];
     render(<SupportTab />);
-    expect(() => fireEvent.click(screen.getByText('help me'))).not.toThrow();
+    // Either the board card or the row opens the panel; click the first match.
+    expect(() => fireEvent.click(screen.getAllByText('help me')[0])).not.toThrow();
   });
 
   it('shows the close date in the row for a closed ticket', () => {

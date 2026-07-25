@@ -140,6 +140,13 @@ export default function ReturnForm() {
     setReasons(prev => prev.includes(r) ? prev.filter(x => x !== r) : [...prev, r]);
   };
 
+  // Confirm the order number exists. This public form runs as the anon role,
+  // which has no SELECT on orders (RLS is authenticated + is_internal_user
+  // only) — a direct .from('orders').select() returns null for every order and
+  // wrongly reports "not found". Instead we call the return_form_order_exists
+  // SECURITY DEFINER function, which anon may execute and which returns only a
+  // boolean (no order rows / PII). On any error we leave orderFound null so the
+  // submit path fails open rather than blocking a real customer.
   const validateOrderRef = async () => {
     const normalized = normalizeOrderRef(orderRef);
     if (!normalized) return;
@@ -147,8 +154,8 @@ export default function ReturnForm() {
     setOrderValidating(true);
     setOrderFound(null);
     try {
-      const { data } = await supabase.from('orders').select('id').eq('order_ref', normalized).maybeSingle();
-      setOrderFound(data !== null);
+      const { data, error } = await supabase.rpc('return_form_order_exists', { p_order_ref: normalized });
+      setOrderFound(error ? null : data === true);
     } catch {
       setOrderFound(null);
     } finally {
@@ -172,14 +179,18 @@ export default function ReturnForm() {
       setOrderRef(normalized);
       setOrderValidating(true);
       try {
-        const { data } = await supabase.from('orders').select('id').eq('order_ref', normalized).maybeSingle();
-        setOrderFound(data !== null);
-        if (!data) {
-          setError(`${normalized} was not found in our system — please check the number (e.g. #1107). If you received the unit as a gift or have a different reference, contact us at support@lilacomposter.com.`);
-          return;
+        const { data, error } = await supabase.rpc('return_form_order_exists', { p_order_ref: normalized });
+        // Fail open on a validation-service error — never block a real customer
+        // because the lookup itself failed.
+        if (!error) {
+          setOrderFound(data === true);
+          if (data !== true) {
+            setError(`${normalized} was not found in our system — please check the number (e.g. #1107). If you received the unit as a gift or have a different reference, contact us at support@lilacomposter.com.`);
+            return;
+          }
         }
       } catch {
-        // Don't block on network error
+        // Network error — don't block.
       } finally {
         setOrderValidating(false);
       }

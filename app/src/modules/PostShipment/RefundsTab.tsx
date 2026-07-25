@@ -1,9 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   useRefundApprovals, useReturns,
-  submitRefundRequest, updateRefundAmount, managerApprove, financeApprove, executeRefund, denyRefund, closeRefund,
+  submitRefundRequest, updateRefundAmount, submitToManager, managerApprove, financeApprove, executeRefund, denyRefund, closeRefund,
+  sendRefundBack, uncompileRefund, type RefundBackTarget,
+  confirmPurchaserLinkage, hasValidPurchaserLinkage,
+  computeRefundNet, defaultRefundFees,
+  preRefundStage, customerWaitState,
   setReturnDisposition, updateReturnStatus,
+  useReturnAttachments, uploadReturnAttachment, deleteReturnAttachment, returnAttachmentSignedUrl,
+  RETURN_ATTACH_INPUT_ACCEPT, type ReturnAttachment,
+  bookReturnLabel,
   useRefundNotes, addRefundNote, deleteRefundNote,
+  useReturnNotes, addReturnNote, deleteReturnNote,
   REFUND_STATUS_META, REFUND_METHODS, REFUND_METHOD_META,
   UNIT_STATUS_LABEL, RETURN_DISPOSITION_META,
   type RefundApproval, type ReturnRow, type RefundMethod, type ReturnDisposition, type ReturnStatus, type ReturnCategory,
@@ -13,7 +21,14 @@ import {
 const UNIT_STAGES: { value: ReturnStatus; label: string }[] = [
   { value: 'created',          label: 'Return form submitted' },
   { value: 'pickup_scheduled', label: 'Pickup scheduled' },
+  { value: 'picked_up',        label: 'Picked up' },
   { value: 'received',         label: 'Unit returned' },
+  // BUG-5 (Lisa Clark gap): 'inspected' exists in ReturnStatus but was missing
+  // from this dropdown, so operators could never record that the returned unit
+  // was inspected — leaving the Manager unable to tell. FR-2's approval gate
+  // treats 'received' and 'inspected' alike, but recording inspection is what
+  // lets the Manager see the case is actually complete.
+  { value: 'inspected',        label: 'Unit inspected' },
   { value: 'discarded',        label: 'Unit discarded by customer' },
 ];
 import { useQueuedReplacements, holdReplacement, type Order } from '../../lib/orders';
@@ -30,9 +45,10 @@ import styles from './PostShipment.module.css';
 
 const STAR = '★';
 
-type ColKey = 'manager_review' | 'finance_review' | 'refund_queue' | 'refunded' | 'denied';
+type ColKey = 'submitted' | 'manager_review' | 'finance_review' | 'refund_queue' | 'refunded' | 'denied';
 
 const COLUMNS: { key: ColKey; label: string; helper: string }[] = [
+  { key: 'submitted',      label: 'Completeness',   helper: 'Account manager — submit when ready' },
   { key: 'manager_review', label: 'Manager review',  helper: 'Awaiting George' },
   { key: 'finance_review', label: 'Finance review',  helper: 'Awaiting Julie / Huayi (amount)' },
   { key: 'refund_queue',   label: 'Refund Queue',    helper: 'Approved — execute the payout' },
@@ -65,6 +81,8 @@ export function RefundsTab() {
 
   const isManager = canDo(role, 'approve_refund_manager');
   const isFinance = canDo(role, 'approve_refund_finance');
+  // Everyone involved can move cards forward/back + edit amount/notes.
+  const canFlow = canDo(role, 'move_refund_flow');
 
   const returnsById = useMemo(() => {
     const m = new Map<string, ReturnRow>();
@@ -161,10 +179,12 @@ export function RefundsTab() {
     const m = new Map<ColKey, RefundApproval[]>();
     for (const col of COLUMNS) m.set(col.key, []);
     for (const a of approvals) {
-      // Map status to column. 'submitted' rolls into manager_review since
-      // submission immediately puts it in front of the manager.
+      // Map status to column. FR-3: 'submitted' is the account manager's
+      // Completeness/prep column, distinct from 'manager_review' (Awaiting
+      // George) — the Submit action promotes one to the other.
       const k: ColKey | null =
-        a.status === 'submitted' || a.status === 'manager_review' ? 'manager_review' :
+        a.status === 'submitted' ? 'submitted' :
+        a.status === 'manager_review' ? 'manager_review' :
         a.status === 'finance_review' ? 'finance_review' :
         a.status === 'refund_queue' ? 'refund_queue' :
         a.status === 'refunded' ? 'refunded' :
@@ -175,19 +195,20 @@ export function RefundsTab() {
     return m;
   }, [approvals]);
 
-  // Pre-George stage (CEO 2026-07): before a refund even reaches manager review,
-  // the unit has to be returned and inspected, then compiled. Surface returns
-  // that are physically back ('received') and don't yet have a refund request as
-  // the first column of the queue, so the inspection step is visible.
-  const inspectionReturns = useMemo(() => {
+  // FR-1 (PRD §4): the two Account-Manager-owned columns before Manager Review.
+  // A return without a refund request yet is split by unit status into
+  // "Return Form Submitted" (Intake / New — form in, unit not yet back) and
+  // "Return & inspection" (unit physically back, being inspected). Reina owns
+  // both. Terminal statuses (refunded/denied/closed/discarded) drop out.
+  const preRefundReturns = useMemo(() => {
     const withApproval = new Set(approvals.map(a => a.return_id).filter(Boolean) as string[]);
-    // Every return still in the return/inspection phase — from a freshly
-    // submitted form ('created') through 'received'/'inspected' — that doesn't
-    // yet have a refund request. New return-form submissions land here first.
-    const TERMINAL = ['refunded', 'denied', 'closed', 'discarded'];
-    return returns
-      .filter(r => !TERMINAL.includes(r.status) && !withApproval.has(r.id))
+    const eligible = returns
+      .filter(r => preRefundStage(r.status) !== null && !withApproval.has(r.id))
       .sort((a, b) => b.created_at.localeCompare(a.created_at));
+    return {
+      intake: eligible.filter(r => preRefundStage(r.status) === 'intake'),
+      inspection: eligible.filter(r => preRefundStage(r.status) === 'inspection'),
+    };
   }, [returns, approvals]);
 
   const stats = useMemo(() => {
@@ -207,7 +228,7 @@ export function RefundsTab() {
     return {
       totalRefunded: Math.round(totalRefunded),
       totalPending: Math.round(totalPending),
-      pendingCount: (byColumn.get('manager_review')?.length ?? 0) + (byColumn.get('finance_review')?.length ?? 0),
+      pendingCount: (byColumn.get('submitted')?.length ?? 0) + (byColumn.get('manager_review')?.length ?? 0) + (byColumn.get('finance_review')?.length ?? 0),
       oldestPendingDays,
     };
   }, [approvals, byColumn]);
@@ -226,13 +247,45 @@ export function RefundsTab() {
     const ro = new ResizeObserver(update);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [approvals, inspectionReturns]);
+  }, [approvals, preRefundReturns]);
   const syncFromTop = () => {
     if (kanbanRef.current && topScrollRef.current) kanbanRef.current.scrollLeft = topScrollRef.current.scrollLeft;
   };
   const syncFromKanban = () => {
     if (kanbanRef.current && topScrollRef.current) topScrollRef.current.scrollLeft = kanbanRef.current.scrollLeft;
   };
+
+  // FR-1: both pre-manager columns render the same InspectionCard; only the
+  // heading, helper, and row set differ. Reina (Account Manager) owns both.
+  const renderPreRefundColumn = (label: string, helper: string, rows: ReturnRow[]) => (
+    <div className={styles.kanbanCol}>
+      <div className={styles.kanbanColHead}>
+        <span className={styles.kanbanColLabel}>{label}</span>
+        <span className={styles.kanbanColCount}>{rows.length}</span>
+      </div>
+      <div className={styles.kanbanColSub}>{helper}</div>
+      <div className={styles.kanbanList}>
+        {rows.length === 0 ? (
+          <div className={styles.kanbanEmpty}>—</div>
+        ) : rows.map(r => {
+          const email = r.purchaser_email?.trim() || r.customer_email;
+          return (
+            <InspectionCard
+              key={r.id}
+              r={r}
+              usage={usageForEmail(email)}
+              invoices={invoicesForEmail(email)}
+              tickets={ticketsForEmails([r.purchaser_email, r.customer_email])}
+              onOpenTicket={setOpenTicketId}
+              onView={() => setViewReturnId(r.id)}
+              onCompile={() => { setRequestReturnId(r.id); setShowRequestModal(true); }}
+              onError={setError}
+            />
+          );
+        })}
+      </div>
+    </div>
+  );
 
   if (aLoading || rLoading) return <div className={styles.loading}>Loading refunds…</div>;
 
@@ -261,35 +314,18 @@ export function RefundsTab() {
         <div style={{ width: scrollW }} />
       </div>
       <div ref={kanbanRef} className={styles.kanban} onScroll={syncFromKanban}>
-        {/* Pre-George: unit returned & being inspected, before it's compiled
-            and sent to manager review. */}
-        <div className={styles.kanbanCol}>
-          <div className={styles.kanbanColHead}>
-            <span className={styles.kanbanColLabel}>Return &amp; inspection</span>
-            <span className={styles.kanbanColCount}>{inspectionReturns.length}</span>
-          </div>
-          <div className={styles.kanbanColSub}>Unit returned &amp; inspected — before George</div>
-          <div className={styles.kanbanList}>
-            {inspectionReturns.length === 0 ? (
-              <div className={styles.kanbanEmpty}>—</div>
-            ) : inspectionReturns.map(r => {
-              const email = r.purchaser_email?.trim() || r.customer_email;
-              return (
-                <InspectionCard
-                  key={r.id}
-                  r={r}
-                  usage={usageForEmail(email)}
-                  invoices={invoicesForEmail(email)}
-                  tickets={ticketsForEmails([r.purchaser_email, r.customer_email])}
-                  onOpenTicket={setOpenTicketId}
-                  onView={() => setViewReturnId(r.id)}
-                  onCompile={() => { setRequestReturnId(r.id); setShowRequestModal(true); }}
-                  onError={setError}
-                />
-              );
-            })}
-          </div>
-        </div>
+        {/* FR-1 (PRD §4) — Account-Manager (Reina) owned intake + inspection,
+            before the card is compiled and sent to Manager Review. */}
+        {renderPreRefundColumn(
+          'Return Form Submitted',
+          'Reina — new return forms · before the unit ships back',
+          preRefundReturns.intake,
+        )}
+        {renderPreRefundColumn(
+          'Return & inspection',
+          'Reina — unit returned & inspected · before George',
+          preRefundReturns.inspection,
+        )}
         {COLUMNS.map(col => {
           const rows = byColumn.get(col.key) ?? [];
           return (
@@ -311,8 +347,7 @@ export function RefundsTab() {
                     invoices={invoicesFor(r, r.return_id ? returnsById.get(r.return_id) ?? null : null)}
                     tickets={ticketsFor(r, r.return_id ? returnsById.get(r.return_id) ?? null : null)}
                     onOpenTicket={setOpenTicketId}
-                    canManager={isManager}
-                    canFinance={isFinance}
+                    canFlow={canFlow}
                     selected={selectedId === r.id}
                     onSelect={() => setSelectedId(prev => prev === r.id ? null : r.id)}
                     onError={setError}
@@ -334,8 +369,7 @@ export function RefundsTab() {
           tickets={ticketsFor(selectedRefund, selectedReturn)}
           onOpenTicket={setOpenTicketId}
           queuedReplacements={replsByEmail.get((selectedRefund.customer_email ?? '').toLowerCase().trim()) ?? []}
-          canManager={isManager}
-          canFinance={isFinance}
+          canFlow={canFlow}
           onClose={() => setSelectedId(null)}
           onError={setError}
           onOpenFinanceModal={setFinanceModalId}
@@ -354,7 +388,16 @@ export function RefundsTab() {
       {viewReturnId && (() => {
         const r = returnsById.get(viewReturnId);
         if (!r) return null;
-        return <ReturnDetailModal r={r} onClose={() => setViewReturnId(null)} />;
+        const email = r.purchaser_email?.trim() || r.customer_email;
+        return <ReturnDetailModal
+          r={r}
+          usage={usageForEmail(email)}
+          invoices={invoicesForEmail(email)}
+          tickets={ticketsForEmails([r.purchaser_email, r.customer_email])}
+          onOpenTicket={setOpenTicketId}
+          onError={setError}
+          onClose={() => setViewReturnId(null)}
+        />;
       })()}
 
       {financeModalId && (() => {
@@ -398,6 +441,290 @@ function UsageWindowBadge({ usage }: { usage: RefundUsageWindow }) {
   ) : (
     <div className={styles.usageBadgeUnder} title="Under 30 days of use">
       ⏱ {dayLabel} since onboarding · under 30 days
+    </div>
+  );
+}
+
+// ============================================================================
+// BR-16 — "awaiting customer, day X" indicator. Shows on an intake ('created')
+// return that's been waiting on the customer: amber once past the 7-day remind
+// threshold, red (escalate) at 14 days or once followup_escalated_at is set.
+// Fresh (< 7 days) and non-intake returns render nothing.
+// ============================================================================
+function CustomerWaitBadge({ r }: { r: ReturnRow }) {
+  if (r.status !== 'created') return null;
+  const w = customerWaitState(r.created_at);
+  if (!w) return null;
+  const escalated = w.stage === 'escalate' || !!r.followup_escalated_at;
+  if (w.stage === 'fresh' && !escalated) return null;
+  const dayLabel = w.days === 1 ? 'day 1' : `day ${w.days}`;
+  return escalated ? (
+    <div className={styles.usageBadgeOver}
+         title="Awaiting the customer past the escalation interval (14+ days) — take it over or close it (BR-16).">
+      ⚠ Awaiting customer · {dayLabel} — <strong>escalate</strong>
+    </div>
+  ) : (
+    <div className={styles.usageBadgeUnknown}
+         title="Awaiting a customer response — auto-reminders are going out every 7 days (BR-16).">
+      ⏳ Awaiting customer · {dayLabel} — reminder sent
+    </div>
+  );
+}
+
+// ============================================================================
+// FR-6 — Purchaser vs User. Every card/detail header states plainly whether the
+// prominent name is the CUSTOMER (purchaser of record — accounting is against
+// this person, BR-13) or, when the filer isn't the buyer (gift/household),
+// shows the purchaser AND the USER who filed, each labelled.
+// ============================================================================
+type Parties = { purchaser: string; user: string | null; confirmed: boolean };
+
+function resolveParties(opts: {
+  fallbackName: string;
+  isPurchaser: boolean | null;
+  purchaserName: string | null;
+  filerName: string | null;
+}): Parties {
+  const { fallbackName, isPurchaser, purchaserName, filerName } = opts;
+  const filer = filerName?.trim() || fallbackName;
+  if (isPurchaser === false) {
+    // Filer is NOT the buyer → purchaser + a distinct user.
+    const purchaser = purchaserName?.trim() || fallbackName;
+    return { purchaser, user: purchaser.toLowerCase() === filer.toLowerCase() ? null : filer, confirmed: true };
+  }
+  // Filer IS the buyer (true) or unattested (null) → one party.
+  return { purchaser: fallbackName, user: null, confirmed: isPurchaser === true };
+}
+
+function PartyPill({ text, tone, title }: { text: string; tone: 'purchaser' | 'purchaser-unconfirmed' | 'user'; title: string }) {
+  const c = tone === 'user'
+    ? { color: '#2b6cb0', background: '#ebf8ff' }
+    : tone === 'purchaser'
+      ? { color: '#276749', background: '#f0fff4' }
+      : { color: '#975a16', background: '#fffbeb' };
+  return (
+    <span title={title} style={{
+      fontSize: 9, fontWeight: 700, letterSpacing: 0.4, textTransform: 'uppercase',
+      padding: '1px 5px', borderRadius: 4, marginLeft: 6, whiteSpace: 'nowrap', ...c,
+    }}>{text}</span>
+  );
+}
+
+// Renders the purchaser (bold) with a Purchaser pill, and — when the filer is a
+// different person — a second line for the User who filed.
+function PartyHeader({ parties, nameNode }: { parties: Parties; nameNode?: (name: string) => React.ReactNode }) {
+  const { purchaser, user, confirmed } = parties;
+  return (
+    <span>
+      {nameNode ? nameNode(purchaser) : <strong>{purchaser}</strong>}
+      <PartyPill
+        text={confirmed ? 'Purchaser' : 'Purchaser?'}
+        tone={confirmed ? 'purchaser' : 'purchaser-unconfirmed'}
+        title={confirmed
+          ? 'Purchaser of record — the refund is processed against this person (BR-13).'
+          : 'Purchaser not yet confirmed — no purchaser attestation on file (FR-11/BR-15).'}
+      />
+      {user && (
+        <span style={{ display: 'block', fontSize: 12, color: '#718096', marginTop: 2 }}>
+          <strong style={{ fontWeight: 600 }}>{user}</strong>
+          <PartyPill text="User · filed" tone="user" title="The person we talk to / who filed the request — not the purchaser of record." />
+        </span>
+      )}
+    </span>
+  );
+}
+
+// ============================================================================
+// FR-14 — paste-to-attach photos/documents on a return card. Ported from the
+// ticket AttachmentStrip: a window-level paste listener (Safari never fires
+// `paste` on a div) captures clipboard images; a hidden file input covers the
+// click path. Files go to the return-documents bucket via the lib layer.
+// ============================================================================
+function imageFilesFrom(dt: DataTransfer | null): File[] {
+  if (!dt) return [];
+  const out: File[] = [];
+  if (dt.items && dt.items.length) {
+    for (const item of Array.from(dt.items)) {
+      if (item.kind === 'file' && item.type.startsWith('image/')) {
+        const f = item.getAsFile();
+        if (f) out.push(f);
+      }
+    }
+  }
+  if (!out.length && dt.files) {
+    for (const f of Array.from(dt.files)) if (f.type.startsWith('image/')) out.push(f);
+  }
+  return out;
+}
+function toNamedFile(blob: File): File {
+  if (blob.name && blob.name !== 'image.png') return blob;
+  const ext = (blob.type.split('/')[1] || 'png').replace('jpeg', 'jpg');
+  return new File([blob], `pasted-${Date.now()}.${ext}`, { type: blob.type });
+}
+
+// FR-13 — one-click return-shipping label. Shows the booked tracking once a
+// label exists; otherwise offers to generate one (books a real Freightcom
+// shipment, so it confirms first). Only meaningful when the customer ships the
+// unit back (disposition 'ship_back').
+function ReturnLabelControl({ r, onError }: { r: ReturnRow; onError: (m: string | null) => void }) {
+  const [busy, setBusy] = useState(false);
+  if (r.disposition === 'discard') return null; // discard = no return shipment
+
+  if (r.pickup_tracking) {
+    return (
+      <span onClick={e => e.stopPropagation()}
+        style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 999, color: '#276749', background: '#f0fff4' }}
+        title={`Return label booked${r.pickup_carrier ? ` · ${r.pickup_carrier}` : ''}`}>
+        🏷 {r.pickup_carrier ? `${r.pickup_carrier} · ` : ''}{r.pickup_tracking}
+      </span>
+    );
+  }
+
+  const run = async () => {
+    if (!window.confirm('Generate a return shipping label and book courier pickup for this unit? This books a shipment with the carrier.')) return;
+    setBusy(true); onError(null);
+    try {
+      const res = await bookReturnLabel(r.id);
+      if (res.label_url) window.open(res.label_url, '_blank', 'noopener');
+    } catch (e) { onError((e as Error).message); }
+    finally { setBusy(false); }
+  };
+  return (
+    <button onClick={e => { e.stopPropagation(); void run(); }} disabled={busy}
+      style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 999, cursor: 'pointer',
+               border: '1px solid #cbd5e0', background: '#fff', color: '#2b6cb0' }}
+      title="Quote + book a return label (customer → warehouse) via Freightcom">
+      {busy ? 'Booking…' : '🏷 Generate return label'}
+    </button>
+  );
+}
+
+// Notes on a pre-refund return card (Return Form Submitted / Return &
+// Inspection). Everyone involved can add — mirrors the refund-card notes.
+function ReturnNotes({ returnId, onError }: { returnId: string; onError: (m: string | null) => void }) {
+  const { notes, refresh } = useReturnNotes(returnId);
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const add = async () => {
+    if (!text.trim()) return;
+    setBusy(true); onError(null);
+    try { await addReturnNote(returnId, text); setText(''); refresh(); }
+    catch (e) { onError((e as Error).message); }
+    finally { setBusy(false); }
+  };
+  const del = async (id: string) => {
+    setBusy(true); onError(null);
+    try { await deleteReturnNote(id, returnId); refresh(); }
+    catch (e) { onError((e as Error).message); }
+    finally { setBusy(false); }
+  };
+  return (
+    <div onClick={e => e.stopPropagation()} style={{ margin: '8px 0' }}>
+      <div style={{ fontSize: 12, fontWeight: 600, color: '#4a5568', marginBottom: 4 }}>Notes ({notes.length})</div>
+      {notes.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 6 }}>
+          {notes.map(n => (
+            <div key={n.id} style={{ fontSize: 12, background: '#f7fafc', border: '1px solid #edf2f7', borderRadius: 6, padding: '4px 6px' }}>
+              <div style={{ whiteSpace: 'pre-wrap' }}>{n.body}</div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', color: '#a0aec0', fontSize: 10, marginTop: 2 }}>
+                <span>{n.author_name ?? 'Unknown'} · {new Date(n.created_at).toLocaleString('en-US')}</span>
+                <button onClick={() => void del(n.id)} disabled={busy}
+                  style={{ border: 'none', background: 'none', color: '#a0aec0', cursor: 'pointer', fontSize: 10 }}>remove</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      <div style={{ display: 'flex', gap: 4 }}>
+        <textarea value={text} onChange={e => setText(e.target.value)} placeholder="Add a note…" rows={1}
+          onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) void add(); }}
+          style={{ flex: 1, fontSize: 12, padding: '4px 6px', border: '1px solid #cbd5e0', borderRadius: 6, resize: 'vertical', minHeight: 28 }} />
+        <button onClick={() => void add()} disabled={busy || !text.trim()} className={styles.refundApproveBtn} style={{ fontSize: 11 }}>
+          {busy ? '…' : 'Add'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ReturnAttachmentStrip({ returnId, onError }: { returnId: string; onError: (m: string | null) => void }) {
+  const { attachments, refresh } = useReturnAttachments(returnId);
+  const [busy, setBusy] = useState(false);
+  const [urls, setUrls] = useState<Record<string, string>>({});
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const handleFiles = async (files: File[]) => {
+    if (!files.length) return;
+    setBusy(true); onError(null);
+    try {
+      for (const f of files) await uploadReturnAttachment(returnId, toNamedFile(f));
+      refresh();
+    } catch (e) { onError((e as Error).message); }
+    finally { setBusy(false); }
+  };
+
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      const imgs = imageFilesFrom(e.clipboardData);
+      if (imgs.length) { e.preventDefault(); void handleFiles(imgs); }
+    };
+    window.addEventListener('paste', onPaste);
+    return () => window.removeEventListener('paste', onPaste);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [returnId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const next: Record<string, string> = {};
+      for (const a of attachments) {
+        try { next[a.id] = await returnAttachmentSignedUrl(a.file_path); } catch { /* skip */ }
+      }
+      if (!cancelled) setUrls(next);
+    })();
+    return () => { cancelled = true; };
+  }, [attachments]);
+
+  const del = async (a: ReturnAttachment) => {
+    setBusy(true); onError(null);
+    try { await deleteReturnAttachment(a); refresh(); }
+    catch (e) { onError((e as Error).message); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div onClick={e => e.stopPropagation()} style={{ margin: '8px 0' }}>
+      <div style={{ fontSize: 12, fontWeight: 600, color: '#4a5568', marginBottom: 4 }}>
+        Photos &amp; documents ({attachments.length})
+      </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+        {attachments.map(a => {
+          const isImg = (a.mime_type ?? '').startsWith('image/');
+          return (
+            <div key={a.id} style={{ position: 'relative', width: 64, height: 64, borderRadius: 6, overflow: 'hidden', border: '1px solid #e2e8f0', background: '#f7fafc' }}>
+              {isImg && urls[a.id] ? (
+                <img src={urls[a.id]} alt={a.file_name}
+                     style={{ width: '100%', height: '100%', objectFit: 'cover', cursor: 'pointer' }}
+                     onClick={() => urls[a.id] && window.open(urls[a.id], '_blank', 'noopener')} />
+              ) : (
+                <a href={urls[a.id]} target="_blank" rel="noopener noreferrer"
+                   style={{ display: 'flex', width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center', fontSize: 10, padding: 4, textAlign: 'center', color: '#4a5568' }}>
+                  {a.file_name.slice(0, 18)}
+                </a>
+              )}
+              <button onClick={() => void del(a)} disabled={busy} title="Remove"
+                style={{ position: 'absolute', top: 0, right: 0, background: 'rgba(0,0,0,0.6)', color: '#fff', border: 'none', cursor: 'pointer', fontSize: 11, lineHeight: 1, padding: '2px 5px' }}>✕</button>
+            </div>
+          );
+        })}
+        <button onClick={() => inputRef.current?.click()} disabled={busy}
+          style={{ width: 64, height: 64, borderRadius: 6, border: '1px dashed #cbd5e0', background: '#fff', cursor: 'pointer', fontSize: 11, color: '#718096' }}>
+          {busy ? '…' : '+ Add'}
+        </button>
+      </div>
+      <input ref={inputRef} type="file" multiple accept={RETURN_ATTACH_INPUT_ACCEPT} style={{ display: 'none' }}
+        onChange={e => { void handleFiles(Array.from(e.target.files ?? [])); e.currentTarget.value = ''; }} />
+      <div style={{ fontSize: 10, color: '#a0aec0', marginTop: 2 }}>Paste (⌘/Ctrl+V) an image while this case is open, or click + to upload.</div>
     </div>
   );
 }
@@ -614,8 +941,11 @@ function InspectionCard({
     catch (e) { onError((e as Error).message); }
     finally { setStatusBusy(false); }
   };
-  // When the filer isn't the buyer, show the purchaser as the customer.
-  const displayName = r.purchaser_name?.trim() || r.customer_name;
+  // FR-6: label whether the name is the purchaser or a distinct filer (user).
+  const parties = resolveParties({
+    fallbackName: r.customer_name, isPurchaser: r.is_purchaser,
+    purchaserName: r.purchaser_name, filerName: r.customer_name,
+  });
   return (
     <div
       className={styles.refundCard}
@@ -626,7 +956,7 @@ function InspectionCard({
       title="Click to view the full return form"
     >
       <div className={styles.refundCardHead}>
-        <strong>{displayName}</strong>
+        <PartyHeader parties={parties} />
         {r.refund_amount_usd != null && (
           <span className={styles.refundAmount}>${Number(r.refund_amount_usd).toLocaleString('en-US')}</span>
         )}
@@ -638,9 +968,11 @@ function InspectionCard({
       )}
       {r.reason && <div className={styles.refundReason}>{r.reason}</div>}
       {r.refund_method_preference && <div className={styles.refundMeta}>via {r.refund_method_preference}</div>}
+      <CustomerWaitBadge r={r} />
       <UsageWindowBadge usage={usage} />
       <RefundInvoices invoices={invoices} fallbackOrderRef={r.original_order_ref} />
       <CustomerTicketHistory tickets={tickets} onOpenTicket={onOpenTicket} defaultOpen />
+      <ReturnNotes returnId={r.id} onError={onError} />
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, margin: '6px 0', alignItems: 'center' }}
            onClick={e => e.stopPropagation()}>
         <select
@@ -670,16 +1002,35 @@ function InspectionCard({
             ⚠ Disposition not set
           </span>
         )}
+        <ReturnLabelControl r={r} onError={onError} />
       </div>
       <div className={styles.refundActions} onClick={e => e.stopPropagation()}>
-        <button className={styles.refundApproveBtn} onClick={onCompile}>Compile → George</button>
+        {preRefundStage(r.status) === 'intake' ? (
+          <button className={styles.refundApproveBtn} disabled={statusBusy}
+            onClick={() => void runStatus('received')}
+            title="Unit is back — move this case to the Return & Inspection column">
+            Move to Return &amp; Inspection →
+          </button>
+        ) : (
+          <>
+            <button className={styles.refundCloseBtn} disabled={statusBusy}
+              onClick={() => void runStatus('created')}
+              title="Move this case back to the Return Form Submitted column">
+              ← Return Form Submitted
+            </button>
+            <button className={styles.refundApproveBtn} onClick={onCompile}
+              title="Compile the case into a refund request (moves it to the Completeness column)">
+              Compile → Completeness
+            </button>
+          </>
+        )}
       </div>
     </div>
   );
 }
 
 function RefundCard({
-  refund, linkedReturn, usage, invoices, tickets, onOpenTicket, canManager, canFinance, selected, onSelect, onError, onOpenFinanceModal,
+  refund, linkedReturn, usage, invoices, tickets, onOpenTicket, canFlow, selected, onSelect, onError, onOpenFinanceModal,
 }: {
   refund: RefundApproval;
   linkedReturn: ReturnRow | null;
@@ -687,8 +1038,7 @@ function RefundCard({
   invoices: CustomerInvoice[];
   tickets: ServiceTicket[];
   onOpenTicket: (ticketId: string) => void;
-  canManager: boolean;
-  canFinance: boolean;
+  canFlow: boolean;
   selected: boolean;
   onSelect: () => void;
   onError: (msg: string | null) => void;
@@ -700,8 +1050,8 @@ function RefundCard({
   const [inputVal, setInputVal] = useState('');
   const meta = REFUND_STATUS_META[refund.status];
 
-  // Approvers can correct the dollar amount inline at any stage.
-  const canEditAmount = canManager || canFinance;
+  // Everyone involved can correct the dollar amount inline at any stage.
+  const canEditAmount = canFlow;
   const [editingAmount, setEditingAmount] = useState(false);
   const [amountDraft, setAmountDraft] = useState('');
   const startEditAmount = () => { setAmountDraft(String(refund.refund_amount_usd ?? '')); setEditingAmount(true); };
@@ -760,11 +1110,58 @@ function RefundCard({
     finally { setBusy(false); }
   };
 
-  const canActManager = (refund.status === 'manager_review' || refund.status === 'submitted') && canManager;
-  const canActFinance = refund.status === 'finance_review' && canFinance;
-  // Refund Queue → execute the payout. Finance role (Julie / Huayi) does it.
-  const canActExecute = refund.status === 'refund_queue' && canFinance;
+  // Everyone involved can advance a card to the next column. The distinct
+  // labels stay (Submit / Approve / etc.), but the gate is now the shared
+  // move_refund_flow permission rather than a per-role one.
+  const canActSubmit = refund.status === 'submitted' && canFlow;
+  const canActManager = refund.status === 'manager_review' && canFlow;
+  const canActFinance = refund.status === 'finance_review' && canFlow;
+  const canActExecute = refund.status === 'refund_queue' && canFlow;
   const canDeny = canActManager || canActFinance;
+
+  // FR-11: flag a case whose purchaser linkage is unverified; the manager can
+  // override (BR-15) before approving.
+  const linkageOk = hasValidPurchaserLinkage(linkedReturn);
+  const needsLinkage = canActManager && !linkageOk;
+
+  // Send a card BACK a column (not enough info, etc.). From Completeness this
+  // "uncompiles" the case back to Return & Inspection.
+  const backTarget: RefundBackTarget | 'uncompile' | null =
+    refund.status === 'manager_review' ? 'submitted' :
+    refund.status === 'finance_review' ? 'manager_review' :
+    refund.status === 'refund_queue'   ? 'finance_review' :
+    refund.status === 'submitted'      ? 'uncompile' : null;
+  const backLabel =
+    refund.status === 'manager_review' ? '← Completeness' :
+    refund.status === 'finance_review' ? '← Manager review' :
+    refund.status === 'refund_queue'   ? '← Finance review' :
+    refund.status === 'submitted'      ? '← Return & Inspection' : '';
+  const runBack = async () => {
+    if (!backTarget) return;
+    if (backTarget === 'uncompile' &&
+        !window.confirm('Move this case back to Return & Inspection? This removes the refund request; notes on it will be lost.')) return;
+    setBusy(true); onError(null);
+    try {
+      if (backTarget === 'uncompile') await uncompileRefund(refund.id);
+      else await sendRefundBack(refund.id, backTarget);
+    } catch (e) { onError((e as Error).message); }
+    finally { setBusy(false); }
+  };
+
+  const runSubmitToManager = async () => {
+    setBusy(true); onError(null);
+    try { await submitToManager(refund.id); }
+    catch (e) { onError((e as Error).message); }
+    finally { setBusy(false); }
+  };
+
+  const runConfirmLinkage = async () => {
+    if (!linkedReturn) return;
+    setBusy(true); onError(null);
+    try { await confirmPurchaserLinkage(linkedReturn.id); }
+    catch (e) { onError((e as Error).message); }
+    finally { setBusy(false); }
+  };
 
   return (
     <div
@@ -775,7 +1172,12 @@ function RefundCard({
       tabIndex={0}
     >
       <div className={styles.refundCardHead}>
-        <strong>{refund.customer_name}</strong>
+        <PartyHeader parties={resolveParties({
+          fallbackName: refund.customer_name,
+          isPurchaser: linkedReturn?.is_purchaser ?? null,
+          purchaserName: linkedReturn?.purchaser_name ?? null,
+          filerName: linkedReturn?.customer_name ?? null,
+        })} />
         {editingAmount ? (
           <span onClick={e => e.stopPropagation()} style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
             <span style={{ fontWeight: 700 }}>$</span>
@@ -904,8 +1306,26 @@ function RefundCard({
           </div>
         ) : (
           <>
+            {canFlow && backTarget && (
+              <button onClick={() => void runBack()} disabled={busy} className={styles.refundCloseBtn}
+                title="Send this card back a column (e.g. not enough information)">
+                {busy ? '…' : backLabel}
+              </button>
+            )}
+            {canActSubmit && (
+              <button onClick={() => void runSubmitToManager()} disabled={busy} className={styles.refundApproveBtn}>
+                {busy ? '…' : 'Submit to manager →'}
+              </button>
+            )}
+            {needsLinkage && (
+              <button onClick={() => void runConfirmLinkage()} disabled={busy} className={styles.refundDenyBtn}
+                title="Filer isn't the buyer and no purchaser receipt is on file — confirm linkage to override (BR-15).">
+                {busy ? '…' : '⚠ Confirm purchaser linkage'}
+              </button>
+            )}
             {(canActManager || canActFinance) && (
-              <button onClick={openApprove} disabled={busy} className={styles.refundApproveBtn}>
+              <button onClick={openApprove} disabled={busy || needsLinkage} className={styles.refundApproveBtn}
+                title={needsLinkage ? 'Confirm purchaser linkage before approving' : undefined}>
                 {canActManager ? 'Approve (manager)' : 'Approve amount → queue'}
               </button>
             )}
@@ -935,7 +1355,7 @@ function RefundCard({
 // Renders the linked return-form data + approve / deny actions.
 // ============================================================================
 function RefundDetailPanel({
-  refund, linkedReturn, usage, invoices, tickets, onOpenTicket, queuedReplacements, canManager, canFinance, onClose, onError, onOpenFinanceModal,
+  refund, linkedReturn, usage, invoices, tickets, onOpenTicket, queuedReplacements, canFlow, onClose, onError, onOpenFinanceModal,
 }: {
   refund: RefundApproval;
   linkedReturn: ReturnRow | null;
@@ -944,8 +1364,7 @@ function RefundDetailPanel({
   tickets: ServiceTicket[];
   onOpenTicket: (ticketId: string) => void;
   queuedReplacements: Order[];
-  canManager: boolean;
-  canFinance: boolean;
+  canFlow: boolean;
   onClose: () => void;
   onError: (msg: string | null) => void;
   onOpenFinanceModal: (id: string) => void;
@@ -956,14 +1375,58 @@ function RefundDetailPanel({
   const [newNote, setNewNote] = useState('');
   const meta = REFUND_STATUS_META[refund.status];
 
-  const canActManager = (refund.status === 'manager_review' || refund.status === 'submitted') && canManager;
-  const canActFinance = refund.status === 'finance_review' && canFinance;
-  const canActExecute = refund.status === 'refund_queue' && canFinance;
+  const canActSubmit = refund.status === 'submitted' && canFlow;
+  const canActManager = refund.status === 'manager_review' && canFlow;
+  const canActFinance = refund.status === 'finance_review' && canFlow;
+  const canActExecute = refund.status === 'refund_queue' && canFlow;
   const canAct = canActManager || canActFinance;
+
+  // Send a card back a column (mirrors RefundCard).
+  const backTarget: RefundBackTarget | 'uncompile' | null =
+    refund.status === 'manager_review' ? 'submitted' :
+    refund.status === 'finance_review' ? 'manager_review' :
+    refund.status === 'refund_queue'   ? 'finance_review' :
+    refund.status === 'submitted'      ? 'uncompile' : null;
+  const backLabel =
+    refund.status === 'manager_review' ? '← Completeness' :
+    refund.status === 'finance_review' ? '← Manager review' :
+    refund.status === 'refund_queue'   ? '← Finance review' :
+    refund.status === 'submitted'      ? '← Return & Inspection' : '';
+  const runBack = async () => {
+    if (!backTarget) return;
+    if (backTarget === 'uncompile' &&
+        !window.confirm('Move this case back to Return & Inspection? This removes the refund request; notes on it will be lost.')) return;
+    setBusy(true); onError(null);
+    try {
+      if (backTarget === 'uncompile') { await uncompileRefund(refund.id); onClose(); }
+      else await sendRefundBack(refund.id, backTarget);
+    } catch (e) { onError((e as Error).message); }
+    finally { setBusy(false); }
+  };
+
+  // FR-11: block manager approval until purchaser linkage is verified or the
+  // manager overrides it (BR-15).
+  const linkageOk = hasValidPurchaserLinkage(linkedReturn);
+  const needsLinkage = canActManager && !linkageOk;
+
+  const runConfirmLinkage = async () => {
+    if (!linkedReturn) return;
+    setBusy(true); onError(null);
+    try { await confirmPurchaserLinkage(linkedReturn.id); }
+    catch (e) { onError((e as Error).message); }
+    finally { setBusy(false); }
+  };
 
   const runExecute = async () => {
     setBusy(true); onError(null);
     try { await executeRefund(refund.id); onClose(); }
+    catch (e) { onError((e as Error).message); }
+    finally { setBusy(false); }
+  };
+
+  const runSubmitToManager = async () => {
+    setBusy(true); onError(null);
+    try { await submitToManager(refund.id); onClose(); }
     catch (e) { onError((e as Error).message); }
     finally { setBusy(false); }
   };
@@ -1032,7 +1495,17 @@ function RefundDetailPanel({
       <div className={styles.refundDetailHead}>
         <div>
           <div className={styles.refundDetailTitleRow}>
-            <h3 className={styles.refundDetailTitle}>{refund.customer_name}</h3>
+            <h3 className={styles.refundDetailTitle} style={{ display: 'inline' }}>
+              <PartyHeader
+                parties={resolveParties({
+                  fallbackName: refund.customer_name,
+                  isPurchaser: linkedReturn?.is_purchaser ?? null,
+                  purchaserName: linkedReturn?.purchaser_name ?? null,
+                  filerName: linkedReturn?.customer_name ?? null,
+                })}
+                nameNode={(name) => <span>{name}</span>}
+              />
+            </h3>
             <span
               className={styles.refundDetailStatusPill}
               style={{ color: meta.color, background: meta.bg, borderColor: meta.border }}
@@ -1138,8 +1611,10 @@ function RefundDetailPanel({
           {!linkedReturn.disposition && (
             <span style={{ fontSize: 11, color: '#975a16' }}>⚠ not set</span>
           )}
+          <ReturnLabelControl r={linkedReturn} onError={onError} />
         </div>
         <ReturnFormAnswers r={linkedReturn} />
+        <ReturnAttachmentStrip returnId={linkedReturn.id} onError={onError} />
         </>
       )}
 
@@ -1175,7 +1650,9 @@ function RefundDetailPanel({
 
       <div className={styles.refundDetailActions}>
         <div className={styles.refundDetailRolePill}>
-          {canActManager ? 'You can act as Manager for this case' :
+          {needsLinkage ? '⚠ Purchaser linkage unverified — confirm linkage (BR-15 override) before approving' :
+           canActSubmit ? 'Completeness check — submit to the Manager when ready' :
+           canActManager ? 'You can act as Manager for this case' :
            canActFinance ? 'You can act as Finance for this case' :
            canActExecute ? 'Approved — execute the payout, then mark refunded' :
            refund.status === 'refunded' ? 'Refunded — no action needed' :
@@ -1206,8 +1683,26 @@ function RefundDetailPanel({
           </div>
         ) : (
           <div className={styles.refundDetailButtons}>
+            {canFlow && backTarget && (
+              <button onClick={() => void runBack()} disabled={busy} className={styles.refundCloseBtn}
+                title="Send this card back a column (e.g. not enough information)">
+                {busy ? '…' : backLabel}
+              </button>
+            )}
+            {canActSubmit && (
+              <button onClick={() => void runSubmitToManager()} disabled={busy} className={styles.refundDetailApproveBtn}>
+                {busy ? '…' : 'Submit to manager →'}
+              </button>
+            )}
+            {needsLinkage && (
+              <button onClick={() => void runConfirmLinkage()} disabled={busy} className={styles.refundDetailDenyBtn}
+                title="Filer isn't the buyer and no purchaser receipt is on file — confirm linkage to override (BR-15).">
+                {busy ? '…' : '⚠ Confirm purchaser linkage'}
+              </button>
+            )}
             {canAct && (
-              <button onClick={openApprove} disabled={busy} className={styles.refundDetailApproveBtn}>
+              <button onClick={openApprove} disabled={busy || needsLinkage} className={styles.refundDetailApproveBtn}
+                title={needsLinkage ? 'Confirm purchaser linkage before approving' : undefined}>
                 {canActManager ? '✓ Approve as Manager' : '✓ Approve amount → Refund Queue'}
               </button>
             )}
@@ -1301,19 +1796,29 @@ function ReturnFormAnswers({ r }: { r: ReturnRow }) {
 
 // Read-only viewer for a return's full submitted form — opened by clicking a
 // card in the Return & inspection column (before a refund request exists).
-function ReturnDetailModal({ r, onClose }: { r: ReturnRow; onClose: () => void }) {
-  const displayName = r.purchaser_name?.trim() || r.customer_name;
+function ReturnDetailModal({ r, usage, invoices, tickets, onOpenTicket, onError, onClose }: {
+  r: ReturnRow;
+  usage: RefundUsageWindow;
+  invoices: CustomerInvoice[];
+  tickets: ServiceTicket[];
+  onOpenTicket: (ticketId: string) => void;
+  onError: (msg: string | null) => void;
+  onClose: () => void;
+}) {
+  const parties = resolveParties({
+    fallbackName: r.customer_name, isPurchaser: r.is_purchaser,
+    purchaserName: r.purchaser_name, filerName: r.customer_name,
+  });
   return (
     <div className={styles.modalBackdrop} onClick={onClose}>
       <div className={styles.modalCard} onClick={e => e.stopPropagation()} style={{ maxWidth: 720, maxHeight: '85vh', overflowY: 'auto' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
           <div>
-            <h3 className={styles.modalTitle} style={{ marginBottom: 2 }}>{displayName}</h3>
+            <h3 className={styles.modalTitle} style={{ marginBottom: 2, display: 'inline' }}>
+              <PartyHeader parties={parties} nameNode={(name) => <span>{name}</span>} />
+            </h3>
             <div style={{ fontSize: 12, color: '#718096' }}>
               Return form · {r.return_ref ?? r.original_order_ref ?? '—'}
-              {r.is_purchaser === false && r.customer_name !== displayName && (
-                <> · filed by {r.customer_name}</>
-              )}
             </div>
             <div style={{ fontSize: 12, color: '#718096' }}>
               {[r.customer_email, r.customer_phone].filter(Boolean).join(' · ') || '—'}
@@ -1321,7 +1826,15 @@ function ReturnDetailModal({ r, onClose }: { r: ReturnRow; onClose: () => void }
           </div>
           <button className={styles.btnSecondary} onClick={onClose}>Close</button>
         </div>
+        {/* Full case context — same blocks the refund detail panel shows:
+            usage window, sales invoice + order #, ticket history, saved notes,
+            then the return form answers. */}
         <div style={{ marginTop: 12 }}>
+          <UsageWindowBadge usage={usage} />
+          <RefundInvoices invoices={invoices} fallbackOrderRef={r.original_order_ref} />
+          <CustomerTicketHistory tickets={tickets} onOpenTicket={onOpenTicket} defaultOpen />
+          <ReturnNotes returnId={r.id} onError={onError} />
+          <ReturnAttachmentStrip returnId={r.id} onError={onError} />
           <ReturnFormAnswers r={r} />
         </div>
       </div>
@@ -1564,6 +2077,15 @@ function FinanceApproveModal({
   const amount = Number(amountStr);
   const amountChanged = !Number.isNaN(amount) && Number(amount.toFixed(2)) !== Number(original.toFixed(2));
 
+  // FR-12: fee breakdown. Restocking defaults to $50 (waived for genuine-defect
+  // discards, BR-7); return shipping is operator-entered actual cost (OQ-2).
+  const feeDefaults = defaultRefundFees(isDefectiveDiscard);
+  const [restockingStr, setRestockingStr] = useState(feeDefaults.restocking.toFixed(2));
+  const [returnShipStr, setReturnShipStr] = useState(feeDefaults.returnShipping.toFixed(2));
+  const restockingFee = Number(restockingStr) || 0;
+  const returnShipFee = Number(returnShipStr) || 0;
+  const suggestedNet = computeRefundNet(original, restockingFee, returnShipFee);
+
   const [shipping, setShipping] = useState<{ total: number; paidShipping: number } | null>(null);
   useEffect(() => {
     const ref = linkedReturn?.original_order_ref;
@@ -1596,6 +2118,8 @@ function FinanceApproveModal({
         amount,
         correction_note: amountChanged ? correctionNote.trim() : undefined,
         note: note.trim() || undefined,
+        restocking_fee: restockingFee,
+        return_shipping_fee: returnShipFee,
       });
       onClose();
     } catch (e) {
@@ -1647,6 +2171,32 @@ function FinanceApproveModal({
             {shipping && (
               <> · Order total: ${shipping.total.toFixed(2)} · Shipping (customer-paid, non-refundable): ${shipping.paidShipping.toFixed(2)} · Max refundable: ${(shipping.total - shipping.paidShipping).toFixed(2)}</>
             )}
+          </div>
+        </div>
+
+        <div className={styles.modalField}>
+          <label className={styles.modalLabel}>Fees (FR-12)</label>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <div style={{ flex: 1 }}>
+              <div className={styles.modalHint}>Restocking fee</div>
+              <input type="number" step="0.01" min="0" value={restockingStr}
+                onChange={e => setRestockingStr(e.target.value)} className={styles.modalInput} />
+            </div>
+            <div style={{ flex: 1 }}>
+              <div className={styles.modalHint}>Return shipping (customer-paid)</div>
+              <input type="number" step="0.01" min="0" value={returnShipStr}
+                onChange={e => setReturnShipStr(e.target.value)} className={styles.modalInput} />
+            </div>
+          </div>
+          <div className={styles.modalHint} style={{ marginTop: 6 }}>
+            {isDefectiveDiscard
+              ? '✓ Genuine defect — fees waived by default (BR-7).'
+              : '$50 restocking default; return shipping is the actual cost (adjust for currency).'}
+            {' '}Gross ${original.toFixed(2)} − restocking ${restockingFee.toFixed(2)} − shipping ${returnShipFee.toFixed(2)} = <strong>net ${suggestedNet.toFixed(2)}</strong>.
+            {' '}<button type="button" onClick={() => setAmountStr(suggestedNet.toFixed(2))}
+              style={{ border: 'none', background: 'none', color: '#2b6cb0', cursor: 'pointer', padding: 0, fontWeight: 600 }}>
+              Apply net →
+            </button>
           </div>
         </div>
 

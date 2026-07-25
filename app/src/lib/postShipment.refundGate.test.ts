@@ -1,0 +1,345 @@
+// FR-2 (Refund & Return Approval PRD v0.2): the return/inspection gate must
+// block Manager Review approval — not only Finance Review — so incomplete cards
+// never reach the Return Manager. BR-7: genuine-defect units are discarded by
+// the customer (no physical return) and must still be refundable.
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+// ── hoisted mock state ──────────────────────────────────────────────────────
+const { fromMock, getUserMock, logActionMock, state } = vi.hoisted(() => {
+  const state: {
+    approval: any;
+    ret: any;
+    updatePatch: any;
+    updateCalled: boolean;
+  } = { approval: null, ret: null, updatePatch: null, updateCalled: false };
+
+  const getUserMock = vi.fn(() =>
+    Promise.resolve({ data: { user: { id: 'mgr-1' } } }),
+  );
+  const logActionMock = vi.fn(() => Promise.resolve());
+
+  // Dispatch by table + operation. select→eq→single reads; update→eq writes.
+  const fromMock = vi.fn((table: string) => ({
+    select: (_cols?: string) => ({
+      eq: (_col: string, _val: string) => ({
+        single: () =>
+          Promise.resolve(
+            table === 'refund_approvals'
+              ? { data: state.approval, error: state.approval ? null : { message: 'not found' } }
+              : { data: state.ret, error: state.ret ? null : { message: 'not found' } },
+          ),
+      }),
+    }),
+    update: (patch: any) => ({
+      eq: (_col: string, _val: string) => {
+        state.updateCalled = true;
+        state.updatePatch = patch;
+        return Promise.resolve({ error: null });
+      },
+    }),
+  }));
+
+  return { fromMock, getUserMock, logActionMock, state };
+});
+
+vi.mock('./supabase', () => ({
+  supabase: { from: fromMock, auth: { getUser: getUserMock } },
+}));
+vi.mock('./activityLog', () => ({ logAction: logActionMock }));
+
+// ── import after mocks ──────────────────────────────────────────────────────
+import {
+  managerApprove,
+  submitToManager,
+  confirmPurchaserLinkage,
+  returnStatusAllowsRefund,
+  hasValidPurchaserLinkage,
+  refundExecutorEmail,
+  REFUND_EXECUTORS,
+  computeRefundNet,
+  defaultRefundFees,
+  DEFAULT_RESTOCKING_FEE,
+  preRefundStage,
+  RETURN_INTAKE_STATUSES,
+  RETURN_INSPECTION_STATUSES,
+  customerWaitState,
+  CUSTOMER_REMIND_DAYS,
+  CUSTOMER_ESCALATE_DAYS,
+  refundBackPatch,
+  type ReturnStatus,
+  type RefundMethod,
+} from './postShipment';
+
+beforeEach(() => {
+  state.approval = null;
+  state.ret = null;
+  state.updatePatch = null;
+  state.updateCalled = false;
+  vi.clearAllMocks();
+});
+
+describe('returnStatusAllowsRefund', () => {
+  const allowed: ReturnStatus[] = ['received', 'inspected', 'refunded', 'closed', 'discarded'];
+  const blocked: ReturnStatus[] = ['created', 'pickup_scheduled', 'picked_up', 'denied'];
+
+  it.each(allowed)('allows refund when linked return is "%s"', (status) => {
+    expect(returnStatusAllowsRefund(status)).toBe(true);
+  });
+
+  it.each(blocked)('blocks refund when linked return is "%s"', (status) => {
+    expect(returnStatusAllowsRefund(status)).toBe(false);
+  });
+});
+
+// FR-1 (PRD §4): the two Account-Manager-owned pre-manager columns. A return
+// with no refund request yet belongs to "Return Form Submitted" (Intake / New)
+// or "Return & Inspection" by its unit status. Terminal statuses map to neither.
+describe('preRefundStage (FR-1 board split)', () => {
+  const intake: ReturnStatus[] = ['created', 'pickup_scheduled', 'picked_up'];
+  const inspection: ReturnStatus[] = ['received', 'inspected'];
+  const neither: ReturnStatus[] = ['refunded', 'denied', 'closed', 'discarded'];
+
+  it.each(intake)('routes "%s" to the Return Form Submitted (intake) column', (status) => {
+    expect(preRefundStage(status)).toBe('intake');
+  });
+
+  it.each(inspection)('routes "%s" to the Return & Inspection column', (status) => {
+    expect(preRefundStage(status)).toBe('inspection');
+  });
+
+  it.each(neither)('returns null for terminal status "%s" (not a pre-refund column)', (status) => {
+    expect(preRefundStage(status)).toBeNull();
+  });
+
+  it('exposes the two status sets as a partition of the pre-refund statuses', () => {
+    // No status appears in both buckets, and the two buckets are exactly the
+    // non-terminal, pre-request statuses.
+    const overlap = RETURN_INTAKE_STATUSES.filter(s => RETURN_INSPECTION_STATUSES.includes(s));
+    expect(overlap).toEqual([]);
+    expect([...RETURN_INTAKE_STATUSES, ...RETURN_INSPECTION_STATUSES].sort()).toEqual(
+      ['created', 'inspected', 'picked_up', 'pickup_scheduled', 'received'].sort(),
+    );
+  });
+});
+
+// BR-16 (PRD §5.5, v0.2): a return awaiting the customer must not stall
+// silently. After CUSTOMER_REMIND_DAYS (default 7) it's due for an auto-remind
+// and shows an "awaiting customer, day X" indicator; after CUSTOMER_ESCALATE_DAYS
+// (default 14) it's flagged for escalation/closure.
+describe('customerWaitState (BR-16)', () => {
+  const now = new Date('2026-07-22T12:00:00Z');
+  const daysAgo = (n: number) => new Date(now.getTime() - n * 86_400_000).toISOString();
+
+  it('returns null for missing / unparseable timestamps', () => {
+    expect(customerWaitState(null, now)).toBeNull();
+    expect(customerWaitState(undefined, now)).toBeNull();
+    expect(customerWaitState('not-a-date', now)).toBeNull();
+  });
+
+  it('is "fresh" before the remind threshold', () => {
+    expect(customerWaitState(daysAgo(0), now)).toEqual({ days: 0, stage: 'fresh' });
+    expect(customerWaitState(daysAgo(6), now)).toEqual({ days: 6, stage: 'fresh' });
+  });
+
+  it('is "remind_due" from the first threshold up to escalation', () => {
+    expect(customerWaitState(daysAgo(CUSTOMER_REMIND_DAYS), now)!.stage).toBe('remind_due');
+    expect(customerWaitState(daysAgo(13), now)).toEqual({ days: 13, stage: 'remind_due' });
+  });
+
+  it('is "escalate" at/after the second threshold', () => {
+    expect(customerWaitState(daysAgo(CUSTOMER_ESCALATE_DAYS), now)!.stage).toBe('escalate');
+    expect(customerWaitState(daysAgo(30), now)).toEqual({ days: 30, stage: 'escalate' });
+  });
+
+  it('uses 7 and 14 as the default BR-16 intervals', () => {
+    expect(CUSTOMER_REMIND_DAYS).toBe(7);
+    expect(CUSTOMER_ESCALATE_DAYS).toBe(14);
+  });
+});
+
+// Send-back: moving a refund card to an earlier column must clear the approval
+// stamps for every stage at/after the target, so the audit trail stays honest.
+describe('refundBackPatch (send a card back a column)', () => {
+  it('back to Completeness clears BOTH manager and finance stamps', () => {
+    const p = refundBackPatch('submitted');
+    expect(p.status).toBe('submitted');
+    expect(p.manager_approved_by).toBeNull();
+    expect(p.manager_approved_at).toBeNull();
+    expect(p.manager_decision_note).toBeNull();
+    expect(p.finance_approved_by).toBeNull();
+    expect(p.finance_approved_at).toBeNull();
+    expect(p.finance_decision_note).toBeNull();
+  });
+
+  it('back to Manager Review clears finance stamps but keeps the manager approval', () => {
+    const p = refundBackPatch('manager_review');
+    expect(p.status).toBe('manager_review');
+    expect(p.finance_approved_at).toBeNull();
+    expect(p).not.toHaveProperty('manager_approved_at');
+  });
+
+  it('back to Finance Review clears the finance stamps (finance re-decides)', () => {
+    const p = refundBackPatch('finance_review');
+    expect(p.status).toBe('finance_review');
+    expect(p.finance_approved_by).toBeNull();
+    expect(p).not.toHaveProperty('manager_approved_at');
+  });
+});
+
+describe('managerApprove — return/inspection gate (FR-2)', () => {
+  it('blocks approval when the linked return has not been received', async () => {
+    state.approval = { id: 'r1', return_id: 'ret1', status: 'manager_review' };
+    state.ret = { id: 'ret1', status: 'pickup_scheduled' };
+
+    await expect(managerApprove('r1')).rejects.toThrow(/pickup_scheduled|received/i);
+    expect(state.updateCalled).toBe(false);
+  });
+
+  it('allows approval when the linked return has been received', async () => {
+    state.approval = { id: 'r1', return_id: 'ret1', status: 'manager_review' };
+    state.ret = { id: 'ret1', status: 'received' };
+
+    await managerApprove('r1', 'looks good');
+    expect(state.updateCalled).toBe(true);
+    expect(state.updatePatch.status).toBe('finance_review');
+  });
+
+  it('allows approval for genuine-defect discard cases (BR-7)', async () => {
+    state.approval = { id: 'r1', return_id: 'ret1', status: 'manager_review' };
+    state.ret = { id: 'ret1', status: 'discarded' };
+
+    await managerApprove('r1');
+    expect(state.updateCalled).toBe(true);
+    expect(state.updatePatch.status).toBe('finance_review');
+  });
+
+  it('allows approval when there is no linked return (nothing to gate on)', async () => {
+    state.approval = { id: 'r1', return_id: null, status: 'manager_review' };
+
+    await managerApprove('r1');
+    expect(state.updateCalled).toBe(true);
+  });
+});
+
+// FR-11 / BR-14 / BR-15: valid purchaser linkage required before a refund can
+// be approved — prevents refunding the wrong party on gift/household cases.
+describe('hasValidPurchaserLinkage', () => {
+  const base = {
+    is_purchaser: false as boolean | null,
+    purchaser_name: null as string | null,
+    purchaser_email: null as string | null,
+    purchase_proof: null as string | null,
+    purchaser_linkage_confirmed_at: null as string | null,
+  };
+
+  it('passes when there is no linked return', () => {
+    expect(hasValidPurchaserLinkage(null)).toBe(true);
+  });
+  it('passes when the filer is the purchaser (is_purchaser=true)', () => {
+    expect(hasValidPurchaserLinkage({ ...base, is_purchaser: true })).toBe(true);
+  });
+  it('passes for an ops/legacy return with no attestation (is_purchaser=null)', () => {
+    expect(hasValidPurchaserLinkage({ ...base, is_purchaser: null })).toBe(true);
+  });
+  it('blocks a gift filer with no purchaser identity or proof', () => {
+    expect(hasValidPurchaserLinkage(base)).toBe(false);
+  });
+  it('blocks a gift filer who named the purchaser but attached no proof', () => {
+    expect(hasValidPurchaserLinkage({ ...base, purchaser_name: 'Annie Wu' })).toBe(false);
+  });
+  it('passes a gift filer with purchaser identity AND proof', () => {
+    expect(hasValidPurchaserLinkage({ ...base, purchaser_name: 'Annie Wu', purchase_proof: 'receipt.pdf' })).toBe(true);
+  });
+  it('passes when the Return Manager has confirmed linkage (BR-15 override)', () => {
+    expect(hasValidPurchaserLinkage({ ...base, purchaser_linkage_confirmed_at: '2026-07-22T00:00:00Z' })).toBe(true);
+  });
+});
+
+describe('managerApprove — purchaser-linkage gate (FR-11)', () => {
+  it('blocks approval when a gift return lacks purchaser linkage', async () => {
+    state.approval = { id: 'r1', return_id: 'ret1', status: 'manager_review' };
+    state.ret = { id: 'ret1', status: 'received', is_purchaser: false, purchaser_name: null, purchaser_email: null, purchase_proof: null, purchaser_linkage_confirmed_at: null };
+
+    await expect(managerApprove('r1')).rejects.toThrow(/purchaser|linkage/i);
+    expect(state.updateCalled).toBe(false);
+  });
+
+  it('allows approval once the manager has confirmed linkage', async () => {
+    state.approval = { id: 'r1', return_id: 'ret1', status: 'manager_review' };
+    state.ret = { id: 'ret1', status: 'received', is_purchaser: false, purchaser_name: null, purchaser_email: null, purchase_proof: null, purchaser_linkage_confirmed_at: '2026-07-22T00:00:00Z' };
+
+    await managerApprove('r1');
+    expect(state.updateCalled).toBe(true);
+    expect(state.updatePatch.status).toBe('finance_review');
+  });
+});
+
+describe('confirmPurchaserLinkage (BR-15 override)', () => {
+  it('stamps the confirmation on the return', async () => {
+    state.ret = { id: 'ret1', status: 'received' };
+
+    await confirmPurchaserLinkage('ret1');
+    expect(state.updateCalled).toBe(true);
+    expect(state.updatePatch.purchaser_linkage_confirmed_at).toEqual(expect.any(String));
+    expect(state.updatePatch.purchaser_linkage_confirmed_by).toBe('mgr-1');
+  });
+});
+
+describe('refundExecutorEmail (FR-9 queue routing)', () => {
+  it('routes Shopify refunds to the payments operator', () => {
+    expect(refundExecutorEmail('shopify')).toBe(REFUND_EXECUTORS.payments);
+  });
+  it('routes Sezzle/BNPL refunds to the payments operator', () => {
+    expect(refundExecutorEmail('sezzle')).toBe(REFUND_EXECUTORS.payments);
+  });
+  it('routes card/bank/other refunds to the finance officer', () => {
+    for (const m of ['quickbooks_cc', 'bank_etransfer', 'original_card'] as RefundMethod[]) {
+      expect(refundExecutorEmail(m)).toBe(REFUND_EXECUTORS.finance);
+    }
+  });
+  it('defaults an unset method to the finance officer', () => {
+    expect(refundExecutorEmail(null)).toBe(REFUND_EXECUTORS.finance);
+  });
+});
+
+describe('computeRefundNet (FR-12)', () => {
+  it('subtracts restocking + return shipping from the gross', () => {
+    expect(computeRefundNet(200, 50, 20)).toBe(130);
+  });
+  it('never goes below zero', () => {
+    expect(computeRefundNet(30, 50, 20)).toBe(0);
+  });
+  it('rounds to cents', () => {
+    expect(computeRefundNet(100, 12.345, 0)).toBe(87.66);
+  });
+  it('treats missing fees as zero', () => {
+    expect(computeRefundNet(100, 0, 0)).toBe(100);
+  });
+});
+
+describe('defaultRefundFees (FR-12 / BR-7 defect waiver)', () => {
+  it('applies the $50 restocking default for a standard case', () => {
+    expect(defaultRefundFees(false)).toEqual({ restocking: DEFAULT_RESTOCKING_FEE, returnShipping: 0 });
+  });
+  it('waives both fees for a genuine-defect case', () => {
+    expect(defaultRefundFees(true)).toEqual({ restocking: 0, returnShipping: 0 });
+  });
+});
+
+describe('submitToManager (FR-3)', () => {
+  it('promotes a submitted card to manager_review', async () => {
+    state.approval = { id: 'r1', status: 'submitted' };
+
+    await submitToManager('r1');
+    expect(state.updateCalled).toBe(true);
+    expect(state.updatePatch.status).toBe('manager_review');
+  });
+
+  it('refuses to submit a card that is not in the submitted state', async () => {
+    state.approval = { id: 'r1', status: 'manager_review' };
+
+    await expect(submitToManager('r1')).rejects.toThrow(/manager_review|submit/i);
+    expect(state.updateCalled).toBe(false);
+  });
+});

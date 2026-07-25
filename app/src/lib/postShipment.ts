@@ -2,6 +2,26 @@ import { useEffect, useState } from 'react';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase } from './supabase';
 import { logAction } from './activityLog';
+import { sendTemplate } from './templates';
+
+const APP_BASE_URL = 'https://lila.vip';
+const REFUND_URL = `${APP_BASE_URL}/post-shipment?tab=refunds`;
+
+/** First name from a VCycene email local-part, for greeting notification
+ *  recipients (e.g. 'pedrum@virgohome.io' → 'Pedrum'). */
+function firstNameFromEmail(email: string): string {
+  const local = email.split('@')[0].split(/[._-]/)[0] ?? email;
+  return local.charAt(0).toUpperCase() + local.slice(1);
+}
+
+// FR-15: customer greeting — prefer the customer's given name, fall back to the
+// email local part. Returns 'there' if we have neither.
+function customerFirstName(name: string | null | undefined, email: string | null | undefined): string {
+  const fromName = (name ?? '').trim().split(/\s+/)[0];
+  if (fromName) return fromName;
+  if (email && email.includes('@')) return firstNameFromEmail(email);
+  return 'there';
+}
 
 // ============================================================================
 // Returns
@@ -30,6 +50,87 @@ export const RETURN_STATUS_META: Record<ReturnStatus, { label: string; color: st
 export const RETURN_STATUS_ORDER: ReturnStatus[] = [
   'created','pickup_scheduled','picked_up','received','inspected','refunded','denied','closed','discarded',
 ];
+
+// FR-2 (Refund & Return Approval PRD): a refund may only be approved once the
+// linked return is resolved — the unit has been received/inspected, or the
+// customer discarded a genuine-defect unit (BR-7: no physical return, but still
+// refundable). Statuses before receipt (created/pickup_scheduled/picked_up) and
+// 'denied' block approval. Used by both managerApprove and financeApprove.
+export const RETURN_STATUSES_ALLOWING_REFUND: ReturnStatus[] = [
+  'received', 'inspected', 'refunded', 'closed', 'discarded',
+];
+
+export function returnStatusAllowsRefund(status: ReturnStatus): boolean {
+  return RETURN_STATUSES_ALLOWING_REFUND.includes(status);
+}
+
+// FR-1 (Refund & Return Approval PRD §4): the two Account-Manager-owned columns
+// that precede Manager Review. A return that doesn't yet have a refund request
+// lands in one of them by unit status:
+//   • "Return Form Submitted" (the PRD's Intake / New stage) — a card just
+//     auto-generated from the customer's form, before the unit is physically
+//     back: created / pickup_scheduled / picked_up.
+//   • "Return & Inspection" — the returned unit is physically back and being
+//     inspected: received / inspected.
+// Terminal / post-request statuses (refunded, denied, closed, discarded) belong
+// to neither pre-refund column and return null.
+export const RETURN_INTAKE_STATUSES: ReturnStatus[] = ['created', 'pickup_scheduled', 'picked_up'];
+export const RETURN_INSPECTION_STATUSES: ReturnStatus[] = ['received', 'inspected'];
+
+export type PreRefundStage = 'intake' | 'inspection';
+
+export function preRefundStage(status: ReturnStatus): PreRefundStage | null {
+  if (RETURN_INTAKE_STATUSES.includes(status)) return 'intake';
+  if (RETURN_INSPECTION_STATUSES.includes(status)) return 'inspection';
+  return null;
+}
+
+// BR-16 (PRD §5.5, v0.2): a return sitting in the Account-Manager stages while we
+// wait on the customer must not stall silently. After CUSTOMER_REMIND_DAYS the
+// system auto-reminds the customer and the card shows "awaiting customer, day X";
+// after CUSTOMER_ESCALATE_DAYS the card is flagged for escalation/closure. These
+// are the PRD's default intervals (team may tune later).
+export const CUSTOMER_REMIND_DAYS = 7;
+export const CUSTOMER_ESCALATE_DAYS = 14;
+
+export type CustomerWaitStage = 'fresh' | 'remind_due' | 'escalate';
+export type CustomerWaitState = { days: number; stage: CustomerWaitStage };
+
+export function customerWaitState(
+  since: string | null | undefined,
+  now: Date = new Date(),
+): CustomerWaitState | null {
+  if (!since) return null;
+  const t = Date.parse(since);
+  if (Number.isNaN(t)) return null;
+  const days = Math.floor((now.getTime() - t) / 86_400_000);
+  const stage: CustomerWaitStage =
+    days >= CUSTOMER_ESCALATE_DAYS ? 'escalate' :
+    days >= CUSTOMER_REMIND_DAYS ? 'remind_due' : 'fresh';
+  return { days, stage };
+}
+
+// FR-11 / BR-14 / BR-15: a refund can only be processed against a valid
+// purchaser. When the return filer isn't the buyer (is_purchaser=false) we need
+// the purchaser's identity AND a proof of purchase — unless the Return Manager
+// has manually confirmed linkage (the no-receipt override). is_purchaser true
+// (filer is the buyer) or null (ops/legacy return, no attestation collected)
+// is not gated.
+export type PurchaserLinkageFields = {
+  is_purchaser: boolean | null;
+  purchaser_name: string | null;
+  purchaser_email: string | null;
+  purchase_proof: string | null;
+  purchaser_linkage_confirmed_at?: string | null;
+};
+
+export function hasValidPurchaserLinkage(r: PurchaserLinkageFields | null): boolean {
+  if (!r) return true;                                 // nothing to gate on
+  if (r.purchaser_linkage_confirmed_at) return true;   // BR-15 manager override
+  if (r.is_purchaser !== false) return true;           // filer is the buyer (or ops/legacy)
+  const hasIdentity = !!(r.purchaser_name?.trim() || r.purchaser_email?.trim());
+  return hasIdentity && !!r.purchase_proof;
+}
 
 // Plain-language unit status for the Refunds tab — where is the physical unit?
 export const UNIT_STATUS_LABEL: Record<ReturnStatus, string> = {
@@ -142,6 +243,12 @@ export type ReturnRow = {
   purchaser_name: string | null;
   purchaser_email: string | null;
   purchaser_phone: string | null;
+  // FR-11/BR-15: set when the Return Manager overrides the linkage gate.
+  purchaser_linkage_confirmed_at: string | null;
+  purchaser_linkage_confirmed_by: string | null;
+  // BR-16: customer-followup tracking for a return stuck awaiting the customer.
+  last_customer_reminder_at: string | null;
+  followup_escalated_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -240,6 +347,125 @@ export async function setReturnDisposition(id: string, disposition: ReturnDispos
 async function hasField(id: string, field: string): Promise<boolean> {
   const { data } = await supabase.from('returns').select(field).eq('id', id).single();
   return !!(data as Record<string, unknown> | null)?.[field];
+}
+
+// ============================================================================
+// FR-14 — return/refund card attachments (paste-to-attach photos)
+// Multi-photo attachments on a return, stored in the 'return-documents' bucket
+// and recorded in return_attachments. Mirrors the ticket attachment layer.
+// ============================================================================
+export type ReturnAttachment = {
+  id: string;
+  return_id: string;
+  file_path: string;
+  file_name: string;
+  mime_type: string | null;
+  size_bytes: number | null;
+  uploaded_by: string | null;
+  created_at: string;
+};
+
+export const RETURN_ATTACH_BUCKET = 'return-documents';
+export const RETURN_ATTACH_MAX_BYTES = 25 * 1024 * 1024; // 25 MB
+export const RETURN_ATTACH_ALLOWED_MIME = [
+  'image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/heic', 'application/pdf',
+];
+export const RETURN_ATTACH_INPUT_ACCEPT = RETURN_ATTACH_ALLOWED_MIME.join(',');
+
+export function useReturnAttachments(returnId: string | null): { attachments: ReturnAttachment[]; loading: boolean; refresh: () => void } {
+  const [attachments, setAttachments] = useState<ReturnAttachment[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [tick, setTick] = useState(0);
+  const refresh = () => setTick(t => t + 1);
+
+  useEffect(() => {
+    if (!returnId) { setAttachments([]); setLoading(false); return; }
+    let channel: RealtimeChannel | null = null;
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from('return_attachments')
+        .select('*')
+        .eq('return_id', returnId)
+        .order('created_at', { ascending: true });
+      if (cancelled) return;
+      setAttachments((data ?? []) as ReturnAttachment[]);
+      setLoading(false);
+      channel = supabase
+        .channel(`return_attachments:${returnId}`)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'return_attachments', filter: `return_id=eq.${returnId}` },
+          () => refresh())
+        .subscribe();
+    })();
+    return () => { cancelled = true; if (channel) supabase.removeChannel(channel); };
+  }, [returnId, tick]);
+
+  return { attachments, loading, refresh };
+}
+
+export async function uploadReturnAttachment(returnId: string, file: File): Promise<ReturnAttachment> {
+  if (file.type && !RETURN_ATTACH_ALLOWED_MIME.includes(file.type)) {
+    throw new Error(`Unsupported file type: ${file.type}`);
+  }
+  if (file.size > RETURN_ATTACH_MAX_BYTES) {
+    throw new Error(`File is too large (max ${Math.round(RETURN_ATTACH_MAX_BYTES / (1024 * 1024))} MB).`);
+  }
+  const path = `${returnId}/attach-${crypto.randomUUID()}-${file.name}`;
+  const { error: upErr } = await supabase.storage
+    .from(RETURN_ATTACH_BUCKET)
+    .upload(path, file, { contentType: file.type || undefined, upsert: false });
+  if (upErr) throw upErr;
+
+  const userId = await currentUserId();
+  const { data, error } = await supabase.from('return_attachments').insert({
+    return_id: returnId, file_path: path, file_name: file.name,
+    mime_type: file.type || null, size_bytes: file.size, uploaded_by: userId,
+  }).select('*').single();
+  if (error) {
+    await supabase.storage.from(RETURN_ATTACH_BUCKET).remove([path]).then(() => {}, () => {});
+    throw error;
+  }
+  await logAction('return_attachment_added', returnId, file.name, { entityType: 'return', entityId: returnId });
+  return data as ReturnAttachment;
+}
+
+export async function deleteReturnAttachment(att: ReturnAttachment): Promise<void> {
+  const { error } = await supabase.from('return_attachments').delete().eq('id', att.id);
+  if (error) throw error;
+  await supabase.storage.from(RETURN_ATTACH_BUCKET).remove([att.file_path]).then(() => {}, () => {});
+  await logAction('return_attachment_removed', att.return_id, att.file_name, { entityType: 'return', entityId: att.return_id });
+}
+
+export async function returnAttachmentSignedUrl(filePath: string): Promise<string> {
+  const { data, error } = await supabase.storage.from(RETURN_ATTACH_BUCKET).createSignedUrl(filePath, 3600);
+  if (error || !data) throw error ?? new Error('Could not sign attachment URL');
+  return data.signedUrl;
+}
+
+// ============================================================================
+// FR-13 — one-click return-shipping label + courier pickup (Freightcom).
+// Invokes the book-return-label edge function, which quotes + books a return
+// shipment (customer → warehouse) and stamps the return's pickup fields.
+// ============================================================================
+export type ReturnLabelResult = { label_url: string | null; tracking: string | null; carrier: string; service: string };
+
+export async function bookReturnLabel(returnId: string): Promise<ReturnLabelResult> {
+  const { data, error } = await supabase.functions.invoke('book-return-label', { body: { return_id: returnId } });
+  if (error) {
+    // Surface the edge function's JSON error message when available.
+    let msg = error.message;
+    try {
+      const ctx = (error as { context?: { json?: () => Promise<{ error?: string }> } }).context;
+      const body = ctx?.json ? await ctx.json() : null;
+      if (body?.error) msg = body.error;
+    } catch { /* keep generic message */ }
+    throw new Error(msg);
+  }
+  const result = data as ReturnLabelResult & { error?: string };
+  if (result?.error) throw new Error(result.error);
+  await logAction('return_label_booked', returnId, `${result.carrier ?? ''} ${result.tracking ?? ''}`.trim() || 'booked',
+    { entityType: 'return', entityId: returnId });
+  return result;
 }
 
 // ============================================================================
@@ -371,6 +597,36 @@ export const REFUND_METHODS: RefundMethod[] = [
   'shopify','sezzle','quickbooks_cc','bank_etransfer','original_card',
 ];
 
+// FR-9 queue routing. A refund entering the Refund Queue is executed by the
+// payments operator (Shopify + Sezzle/BNPL, per Stage 8) or the finance officer
+// (card / bank / other). These are the current role-holders — routing keys off
+// the role, so swapping a holder is a one-line change here.
+export const REFUND_EXECUTORS = {
+  payments: 'pedrum@virgohome.io',   // payments operator (Shopify + BNPL)
+  finance:  'yueli@virgohome.io',    // finance officer (Julie)
+} as const;
+
+export function refundExecutorEmail(method: RefundMethod | null): string {
+  return method === 'shopify' || method === 'sezzle'
+    ? REFUND_EXECUTORS.payments
+    : REFUND_EXECUTORS.finance;
+}
+
+// FR-12 fee breakdown (BR-9/BR-10, honouring current terms per OQ-1). The
+// restocking fee defaults to $50; return shipping is operator-entered actual
+// cost (OQ-2 resolved as actual, not fixed). Both are waived for genuine-defect
+// cases (BR-7). computeRefundNet derives the payout from the gross minus fees.
+export const DEFAULT_RESTOCKING_FEE = 50;
+
+export function computeRefundNet(gross: number, restocking: number, returnShipping: number): number {
+  const net = Number(gross) - (Number(restocking) || 0) - (Number(returnShipping) || 0);
+  return Math.max(0, Math.round(net * 100) / 100);
+}
+
+export function defaultRefundFees(isDefect: boolean): { restocking: number; returnShipping: number } {
+  return { restocking: isDefect ? 0 : DEFAULT_RESTOCKING_FEE, returnShipping: 0 };
+}
+
 export type RefundApproval = {
   id: string;
   return_id: string | null;
@@ -381,6 +637,9 @@ export type RefundApproval = {
   refund_method: RefundMethod | null;
   original_amount_usd: number | null;
   amount_correction_note: string | null;
+  // FR-12 fee breakdown (how the net payout was derived).
+  restocking_fee_usd: number | null;
+  return_shipping_fee_usd: number | null;
   currency: string;
   payment_method: string | null;
   reason: string | null;
@@ -498,6 +757,61 @@ export async function addRefundNote(refundId: string, body: string): Promise<voi
   await logAction('refund_note_added', refundId, body.trim().slice(0, 120));
 }
 
+// Notes on a pre-refund return card (Return Form Submitted / Return &
+// Inspection). Mirrors the refund-note layer; any internal user can add.
+export type ReturnNote = {
+  id: string;
+  return_id: string;
+  body: string;
+  author_id: string | null;
+  author_name: string | null;
+  created_at: string;
+};
+
+export function useReturnNotes(returnId: string | null): {
+  notes: ReturnNote[]; loading: boolean; refresh: () => void;
+} {
+  const [notes, setNotes] = useState<ReturnNote[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [tick, setTick] = useState(0);
+
+  useEffect(() => {
+    if (!returnId) { setNotes([]); setLoading(false); return; }
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      const { data } = await supabase
+        .from('return_notes')
+        .select('*')
+        .eq('return_id', returnId)
+        .order('created_at', { ascending: true });
+      if (!cancelled) { setNotes((data ?? []) as ReturnNote[]); setLoading(false); }
+    })();
+    return () => { cancelled = true; };
+  }, [returnId, tick]);
+
+  return { notes, loading, refresh: () => setTick(t => t + 1) };
+}
+
+export async function addReturnNote(returnId: string, body: string): Promise<void> {
+  const { data: { user } } = await supabase.auth.getUser();
+  let authorName: string | null = null;
+  if (user) {
+    const { data: prof } = await supabase.from('profiles').select('display_name').eq('id', user.id).maybeSingle();
+    authorName = (prof as { display_name?: string } | null)?.display_name ?? user.email ?? null;
+  }
+  const { error } = await supabase.from('return_notes')
+    .insert({ return_id: returnId, body: body.trim(), author_id: user?.id ?? null, author_name: authorName });
+  if (error) throw error;
+  await logAction('return_note_added', returnId, body.trim().slice(0, 120), { entityType: 'return', entityId: returnId });
+}
+
+export async function deleteReturnNote(noteId: string, returnId: string): Promise<void> {
+  const { error } = await supabase.from('return_notes').delete().eq('id', noteId);
+  if (error) throw error;
+  await logAction('return_note_deleted', returnId, 'removed a note', { entityType: 'return', entityId: returnId });
+}
+
 export async function deleteRefundNote(noteId: string, refundId: string): Promise<void> {
   const { error } = await supabase.from('refund_notes').delete().eq('id', noteId);
   if (error) throw error;
@@ -523,7 +837,9 @@ export async function submitRefundRequest(input: {
   const userId = await currentUserId();
   const { error } = await supabase.from('refund_approvals').insert({
     ...input,
-    status: 'manager_review',
+    // FR-3: land in Completeness/prep, not straight in front of the Return
+    // Manager. The Account Manager verifies the case, then calls submitToManager.
+    status: 'submitted',
     submitted_by: userId,
   });
   if (error) throw error;
@@ -540,6 +856,37 @@ export async function submitRefundRequest(input: {
         event_id: `return-${input.order_id ?? Date.now()}`,
       },
     });
+
+  // FR-15: tell the customer we've received their refund request. Best-effort —
+  // a mail failure must never roll back the submission.
+  await notifyCustomerRefundStatus('refund_application_received_customer', {
+    email: input.customer_email, name: input.customer_name, amount: input.refund_amount_usd,
+  });
+}
+
+// FR-15: standardized customer-facing status message at a refund transition.
+// Best-effort (never throws into the caller); no-ops when we have no email.
+async function notifyCustomerRefundStatus(
+  templateKey: string,
+  c: { email?: string | null; name?: string | null; amount?: number | null; method?: RefundMethod | null; relatedRefundId?: string },
+): Promise<void> {
+  const to = (c.email ?? '').trim();
+  if (!to) return;
+  try {
+    await sendTemplate({
+      template_key: templateKey,
+      to,
+      to_name: customerFirstName(c.name, to),
+      variables: {
+        customer_first_name: customerFirstName(c.name, to),
+        amount: c.amount != null ? `$${Number(c.amount).toFixed(2)}` : 'your refund',
+        method: c.method ? REFUND_METHOD_META[c.method].label : 'your original payment method',
+      },
+      ...(c.relatedRefundId ? { related_refund_id: c.relatedRefundId } : {}),
+    });
+  } catch (e) {
+    console.warn(`FR-15 customer status email (${templateKey}) failed (non-fatal):`, (e as Error).message);
+  }
 }
 
 /** Edit a refund's dollar amount directly from the card, at any stage.
@@ -554,8 +901,68 @@ export async function updateRefundAmount(id: string, amount: number): Promise<vo
   await logAction('refund_amount_edited', id, `$${rounded.toFixed(2)}`);
 }
 
+/** FR-3: the Account Manager advances a prepared case from Completeness
+ *  ('submitted') to Manager Review. Explicit "Submit", distinct from the
+ *  Manager's "Approve" — so incomplete cases never sit in front of the Return
+ *  Manager. */
+export async function submitToManager(id: string): Promise<void> {
+  const { data: approval, error: aErr } = await supabase
+    .from('refund_approvals')
+    .select('id, status')
+    .eq('id', id)
+    .single();
+  if (aErr || !approval) throw new Error(`Refund approval not found: ${aErr?.message}`);
+  if (approval.status !== 'submitted') {
+    throw new Error(`Cannot submit to manager from status: ${approval.status}`);
+  }
+  const { error } = await supabase.from('refund_approvals')
+    .update({ status: 'manager_review' }).eq('id', id);
+  if (error) throw error;
+  await logAction('refund_submitted_to_manager', id, 'submitted to manager review');
+}
+
+/** FR-11 / BR-15 override: the Return Manager manually confirms purchaser
+ *  linkage for a legitimate no-receipt case, clearing the linkage gate so the
+ *  refund can proceed. Mirrors the BR-3 30-day exception process. */
+export async function confirmPurchaserLinkage(returnId: string): Promise<void> {
+  const userId = await currentUserId();
+  const { error } = await supabase.from('returns').update({
+    purchaser_linkage_confirmed_at: new Date().toISOString(),
+    purchaser_linkage_confirmed_by: userId,
+  }).eq('id', returnId);
+  if (error) throw error;
+  await logAction('return_purchaser_linkage_confirmed', returnId, 'manager confirmed purchaser linkage');
+}
+
 export async function managerApprove(id: string, note?: string): Promise<void> {
   const userId = await currentUserId();
+
+  // FR-2 gate: block Manager Review approval unless the linked return is
+  // resolved (received/inspected/discarded/…). This mirrors the guard in
+  // financeApprove so incomplete cards never reach — or pass — the Return
+  // Manager, rather than only being caught one stage later at Finance Review.
+  const { data: approval, error: aErr } = await supabase
+    .from('refund_approvals')
+    .select('id, return_id, customer_email, customer_name, refund_amount_usd')
+    .eq('id', id)
+    .single();
+  if (aErr || !approval) throw new Error(`Refund approval not found: ${aErr?.message}`);
+  if (approval.return_id) {
+    const { data: ret, error: rErr } = await supabase
+      .from('returns')
+      .select('id, status, is_purchaser, purchaser_name, purchaser_email, purchase_proof, purchaser_linkage_confirmed_at')
+      .eq('id', approval.return_id)
+      .single();
+    if (rErr || !ret) throw new Error(`Linked return not found: ${rErr?.message}`);
+    if (!returnStatusAllowsRefund(ret.status)) {
+      throw new Error(`Return is in status '${ret.status}' — approval is blocked until the unit is received/inspected (or the customer discards a defective unit).`);
+    }
+    // FR-11 / BR-14 / BR-15: don't refund the wrong party.
+    if (!hasValidPurchaserLinkage(ret)) {
+      throw new Error(`Purchaser linkage is unverified — the filer isn't the buyer and no purchaser identity + receipt is on file. Confirm linkage (manager override) before approving.`);
+    }
+  }
+
   const { error } = await supabase.from('refund_approvals').update({
     status: 'finance_review',
     manager_approved_by: userId,
@@ -564,6 +971,11 @@ export async function managerApprove(id: string, note?: string): Promise<void> {
   }).eq('id', id);
   if (error) throw error;
   await logAction('refund_manager_approved', id, note ?? 'approved');
+
+  // FR-15: tell the customer their refund was approved.
+  await notifyCustomerRefundStatus('refund_approved_customer', {
+    email: approval.customer_email, name: approval.customer_name, amount: approval.refund_amount_usd, relatedRefundId: id,
+  });
 }
 
 export type FinanceApproveOpts = {
@@ -571,6 +983,8 @@ export type FinanceApproveOpts = {
   amount?: number;             // if omitted, keep original
   correction_note?: string;    // required if amount differs from original
   note?: string;               // free-form optional note (e.g. Stripe refund ID)
+  restocking_fee?: number;     // FR-12: recorded on the card for the audit trail
+  return_shipping_fee?: number;
 };
 
 export async function financeApprove(id: string, opts: FinanceApproveOpts): Promise<void> {
@@ -579,7 +993,7 @@ export async function financeApprove(id: string, opts: FinanceApproveOpts): Prom
   // 1. Fetch the approval row to validate + read original amount
   const { data: approval, error: aErr } = await supabase
     .from('refund_approvals')
-    .select('id, return_id, original_amount_usd, refund_amount_usd, status, customer_email')
+    .select('id, return_id, original_amount_usd, refund_amount_usd, status, customer_email, customer_name')
     .eq('id', id)
     .single();
   if (aErr || !approval) throw new Error(`Refund approval not found: ${aErr?.message}`);
@@ -595,8 +1009,8 @@ export async function financeApprove(id: string, opts: FinanceApproveOpts): Prom
       .eq('id', approval.return_id)
       .single();
     if (rErr || !ret) throw new Error(`Linked return not found: ${rErr?.message}`);
-    if (!['received','inspected','refunded','closed'].includes(ret.status)) {
-      throw new Error(`Return is in status '${ret.status}' — refund cannot be processed until the unit is received.`);
+    if (!returnStatusAllowsRefund(ret.status)) {
+      throw new Error(`Return is in status '${ret.status}' — refund cannot be processed until the unit is received (or the customer discards a defective unit).`);
     }
   }
 
@@ -619,6 +1033,9 @@ export async function financeApprove(id: string, opts: FinanceApproveOpts): Prom
     finance_approved_by: userId,
     finance_approved_at: new Date().toISOString(),
     finance_decision_note: opts.note?.trim() || null,
+    // FR-12: record the fee breakdown behind the net payout (null = not set).
+    restocking_fee_usd: opts.restocking_fee ?? null,
+    return_shipping_fee_usd: opts.return_shipping_fee ?? null,
   };
   const { error: upErr } = await supabase
     .from('refund_approvals')
@@ -627,6 +1044,33 @@ export async function financeApprove(id: string, opts: FinanceApproveOpts): Prom
   if (upErr) throw upErr;
 
   await logAction('refund_finance_approved', id, `${opts.method} $${adjusted.toFixed(2)}`);
+
+  // FR-9a: notify the executor that a refund is queued for payout. Best-effort —
+  // a mail failure must never roll back the approval (mirrors the ticket-
+  // assignment email). Shopify/Sezzle → payments operator, else finance officer.
+  const executorEmail = refundExecutorEmail(opts.method);
+  try {
+    await sendTemplate({
+      template_key: 'refund_queued_executor',
+      to: executorEmail,
+      to_name: firstNameFromEmail(executorEmail),
+      variables: {
+        executor_first_name: firstNameFromEmail(executorEmail),
+        customer_name: approval.customer_name ?? approval.customer_email ?? 'Unknown customer',
+        amount: `$${adjusted.toFixed(2)}`,
+        method: REFUND_METHOD_META[opts.method].label,
+        refund_url: REFUND_URL,
+      },
+      related_refund_id: id,
+    });
+  } catch (e) {
+    console.warn('Refund queue-entry email failed (non-fatal):', (e as Error).message);
+  }
+
+  // FR-15: tell the customer their refund is now being processed.
+  await notifyCustomerRefundStatus('refund_processing_customer', {
+    email: approval.customer_email, name: approval.customer_name, amount: adjusted, method: opts.method, relatedRefundId: id,
+  });
 }
 
 /** Refund Queue → Refunded. Finance has already approved the case + amount; this
@@ -636,7 +1080,7 @@ export async function financeApprove(id: string, opts: FinanceApproveOpts): Prom
 export async function executeRefund(id: string, note?: string): Promise<void> {
   const { data: approval, error: aErr } = await supabase
     .from('refund_approvals')
-    .select('id, status, customer_email')
+    .select('id, status, customer_email, customer_name, refund_amount_usd, refund_method, submitted_by')
     .eq('id', id)
     .single();
   if (aErr || !approval) throw new Error(`Refund approval not found: ${aErr?.message}`);
@@ -651,6 +1095,43 @@ export async function executeRefund(id: string, note?: string): Promise<void> {
   await logAction('refund_executed', id, note?.trim() || 'paid out',
     undefined,
     { klaviyoEvent: 'Refund Processed', ...(approval.customer_email ? { klaviyoEmail: approval.customer_email as string } : {}) });
+
+  // FR-9b: notify the Account Manager (the case owner who submitted it) that the
+  // payout is done, so they can tell the customer. Best-effort — never blocks
+  // the executed refund.
+  if (approval.submitted_by) {
+    try {
+      const { data: amProfile } = await supabase
+        .from('profiles').select('email').eq('id', approval.submitted_by).maybeSingle();
+      const amEmail = (amProfile as { email?: string } | null)?.email;
+      if (amEmail) {
+        await sendTemplate({
+          template_key: 'refund_executed_am',
+          to: amEmail,
+          to_name: firstNameFromEmail(amEmail),
+          variables: {
+            am_first_name: firstNameFromEmail(amEmail),
+            customer_name: approval.customer_name ?? approval.customer_email ?? 'the customer',
+            amount: `$${Number(approval.refund_amount_usd).toFixed(2)}`,
+            method: approval.refund_method ? REFUND_METHOD_META[approval.refund_method as RefundMethod].label : '—',
+            refund_url: REFUND_URL,
+          },
+          related_refund_id: id,
+        });
+      }
+    } catch (e) {
+      console.warn('Refund completion email failed (non-fatal):', (e as Error).message);
+    }
+  }
+
+  // FR-15: tell the customer the funds have been sent.
+  await notifyCustomerRefundStatus('refund_funds_sent_customer', {
+    email: approval.customer_email as string | null,
+    name: approval.customer_name as string | null,
+    amount: approval.refund_amount_usd as number | null,
+    method: (approval.refund_method as RefundMethod | null) ?? null,
+    relatedRefundId: id,
+  });
 }
 
 export async function denyRefund(id: string, stage: 'manager_review' | 'finance_review', reason: string): Promise<void> {
@@ -670,6 +1151,41 @@ export async function closeRefund(id: string): Promise<void> {
   const { error } = await supabase.from('refund_approvals').update({ status: 'closed' }).eq('id', id);
   if (error) throw error;
   await logAction('refund_closed', id, 'archived');
+}
+
+// Send a refund card BACK to an earlier column (e.g. Manager → Completeness when
+// there isn't enough information). Clears the approval stamps for every stage
+// at/after the target so the trail stays honest. Available to everyone involved.
+export type RefundBackTarget = 'submitted' | 'manager_review' | 'finance_review';
+
+export function refundBackPatch(toStatus: RefundBackTarget): Record<string, unknown> {
+  const patch: Record<string, unknown> = { status: toStatus };
+  // Any target is at/below the finance stage, so the finance decision is undone.
+  patch.finance_approved_by = null;
+  patch.finance_approved_at = null;
+  patch.finance_decision_note = null;
+  // Going all the way back to Completeness also undoes the manager approval.
+  if (toStatus === 'submitted') {
+    patch.manager_approved_by = null;
+    patch.manager_approved_at = null;
+    patch.manager_decision_note = null;
+  }
+  return patch;
+}
+
+export async function sendRefundBack(id: string, toStatus: RefundBackTarget): Promise<void> {
+  const { error } = await supabase.from('refund_approvals').update(refundBackPatch(toStatus)).eq('id', id);
+  if (error) throw error;
+  await logAction('refund_sent_back', id, `→ ${toStatus}`);
+}
+
+// "Uncompile" — remove the refund request so the case returns to Return &
+// Inspection (the linked return row stays). Used to move a Completeness card
+// back a column. Destructive: notes on the refund request are lost.
+export async function uncompileRefund(id: string): Promise<void> {
+  const { error } = await supabase.from('refund_approvals').delete().eq('id', id);
+  if (error) throw error;
+  await logAction('refund_uncompiled', id, 'returned to Return & Inspection (refund request removed)');
 }
 
 // ============================================================================
