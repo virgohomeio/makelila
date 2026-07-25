@@ -1,4 +1,4 @@
--- supabase/migrations/20260724130000_hiring_schema.sql
+-- supabase/migrations/20260724140000_hiring_schema.sql
 --
 -- Hiring module core schema (PRD §4.15). Four tables behind a shared
 -- can_view_posting() RLS helper: leadership (is_finance(), which already
