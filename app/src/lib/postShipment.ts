@@ -818,6 +818,19 @@ export async function deleteRefundNote(noteId: string, refundId: string): Promis
   await logAction('refund_note_deleted', refundId, noteId);
 }
 
+// Edit a note you authored (RLS lets an author update only their own note).
+export async function updateReturnNote(noteId: string, returnId: string, body: string): Promise<void> {
+  const { error } = await supabase.from('return_notes').update({ body: body.trim() }).eq('id', noteId);
+  if (error) throw error;
+  await logAction('return_note_edited', returnId, body.trim().slice(0, 120), { entityType: 'return', entityId: returnId });
+}
+
+export async function updateRefundNote(noteId: string, refundId: string, body: string): Promise<void> {
+  const { error } = await supabase.from('refund_notes').update({ body: body.trim() }).eq('id', noteId);
+  if (error) throw error;
+  await logAction('refund_note_edited', refundId, body.trim().slice(0, 120));
+}
+
 async function currentUserId(): Promise<string> {
   const { data } = await supabase.auth.getUser();
   if (!data.user) throw new Error('refund: not authenticated');

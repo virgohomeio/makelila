@@ -10,8 +10,8 @@ import {
   useReturnAttachments, uploadReturnAttachment, deleteReturnAttachment, returnAttachmentSignedUrl,
   RETURN_ATTACH_INPUT_ACCEPT, type ReturnAttachment,
   bookReturnLabel,
-  useRefundNotes, addRefundNote, deleteRefundNote,
-  useReturnNotes, addReturnNote, deleteReturnNote,
+  useRefundNotes, addRefundNote, deleteRefundNote, updateRefundNote,
+  useReturnNotes, addReturnNote, deleteReturnNote, updateReturnNote,
   REFUND_STATUS_META, REFUND_METHODS, REFUND_METHOD_META,
   UNIT_STATUS_LABEL, RETURN_DISPOSITION_META,
   type RefundApproval, type ReturnRow, type RefundMethod, type ReturnDisposition, type ReturnStatus, type ReturnCategory,
@@ -667,8 +667,12 @@ function ReturnLabelControl({ r, onError }: { r: ReturnRow; onError: (m: string 
 // Inspection). Everyone involved can add — mirrors the refund-card notes.
 function ReturnNotes({ returnId, onError }: { returnId: string; onError: (m: string | null) => void }) {
   const { notes, refresh } = useReturnNotes(returnId);
+  const { user } = useAuth();
+  const uid = user?.id;
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
+  const [editId, setEditId] = useState<string | null>(null);
+  const [editText, setEditText] = useState('');
   const add = async () => {
     if (!text.trim()) return;
     setBusy(true); onError(null);
@@ -682,6 +686,13 @@ function ReturnNotes({ returnId, onError }: { returnId: string; onError: (m: str
     catch (e) { onError((e as Error).message); }
     finally { setBusy(false); }
   };
+  const saveEdit = async (id: string) => {
+    if (!editText.trim()) return;
+    setBusy(true); onError(null);
+    try { await updateReturnNote(id, returnId, editText); setEditId(null); refresh(); }
+    catch (e) { onError((e as Error).message); }
+    finally { setBusy(false); }
+  };
   return (
     <div onClick={e => e.stopPropagation()} style={{ margin: '8px 0' }}>
       <div style={{ fontSize: 12, fontWeight: 600, color: '#4a5568', marginBottom: 4 }}>Notes ({notes.length})</div>
@@ -689,12 +700,32 @@ function ReturnNotes({ returnId, onError }: { returnId: string; onError: (m: str
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 6 }}>
           {notes.map(n => (
             <div key={n.id} style={{ fontSize: 12, background: '#f7fafc', border: '1px solid #edf2f7', borderRadius: 6, padding: '4px 6px' }}>
-              <div style={{ whiteSpace: 'pre-wrap' }}>{n.body}</div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', color: '#a0aec0', fontSize: 10, marginTop: 2 }}>
-                <span>{n.author_name ?? 'Unknown'} · {new Date(n.created_at).toLocaleString('en-US')}</span>
-                <button onClick={() => void del(n.id)} disabled={busy}
-                  style={{ border: 'none', background: 'none', color: '#a0aec0', cursor: 'pointer', fontSize: 10 }}>remove</button>
-              </div>
+              {editId === n.id ? (
+                <>
+                  <textarea value={editText} onChange={e => setEditText(e.target.value)} rows={2} autoFocus
+                    onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) void saveEdit(n.id); if (e.key === 'Escape') setEditId(null); }}
+                    style={{ width: '100%', fontSize: 12, padding: '4px 6px', border: '1px solid #2b6cb0', borderRadius: 6, resize: 'vertical' }} />
+                  <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
+                    <button onClick={() => void saveEdit(n.id)} disabled={busy || !editText.trim()} className={styles.refundApproveBtn} style={{ fontSize: 10 }}>Save</button>
+                    <button onClick={() => setEditId(null)} disabled={busy} style={{ border: 'none', background: 'none', color: '#a0aec0', cursor: 'pointer', fontSize: 10 }}>Cancel</button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div style={{ whiteSpace: 'pre-wrap' }}>{n.body}</div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', color: '#a0aec0', fontSize: 10, marginTop: 2 }}>
+                    <span>{n.author_name ?? 'Unknown'} · {new Date(n.created_at).toLocaleString('en-US')}</span>
+                    <span style={{ display: 'flex', gap: 8 }}>
+                      {n.author_id === uid && (
+                        <button onClick={() => { setEditId(n.id); setEditText(n.body); }} disabled={busy}
+                          style={{ border: 'none', background: 'none', color: '#2b6cb0', cursor: 'pointer', fontSize: 10 }}>edit</button>
+                      )}
+                      <button onClick={() => void del(n.id)} disabled={busy}
+                        style={{ border: 'none', background: 'none', color: '#a0aec0', cursor: 'pointer', fontSize: 10 }}>remove</button>
+                    </span>
+                  </div>
+                </>
+              )}
             </div>
           ))}
         </div>
@@ -1447,7 +1478,11 @@ function RefundDetailPanel({
   const [busy, setBusy] = useState(false);
   const [holdBusy, setHoldBusy] = useState<string | null>(null);
   const { notes, refresh: refreshNotes } = useRefundNotes(refund.id);
+  const { user: authUser } = useAuth();
+  const uid = authUser?.id;
   const [newNote, setNewNote] = useState('');
+  const [editNoteId, setEditNoteId] = useState<string | null>(null);
+  const [editNoteText, setEditNoteText] = useState('');
   const meta = REFUND_STATUS_META[refund.status];
 
   // Forward/approve is owner-only (canApproveHere); deny is open to everyone.
@@ -1512,6 +1547,13 @@ function RefundDetailPanel({
     if (!newNote.trim()) return;
     setBusy(true); onError(null);
     try { await addRefundNote(refund.id, newNote); setNewNote(''); refreshNotes(); }
+    catch (e) { onError((e as Error).message); }
+    finally { setBusy(false); }
+  };
+  const runEditNote = async (noteId: string) => {
+    if (!editNoteText.trim()) return;
+    setBusy(true); onError(null);
+    try { await updateRefundNote(noteId, refund.id, editNoteText); setEditNoteId(null); refreshNotes(); }
     catch (e) { onError((e as Error).message); }
     finally { setBusy(false); }
   };
@@ -1696,12 +1738,34 @@ function RefundDetailPanel({
           {notes.length === 0 && <div style={{ fontSize: 12, color: '#a0aec0' }}>No notes yet — add context for the approver here.</div>}
           {notes.map(n => (
             <div key={n.id} style={{ fontSize: 13, background: '#f7fafc', borderRadius: 6, padding: '6px 9px' }}>
-              <div style={{ whiteSpace: 'pre-wrap' }}>{n.body}</div>
-              <div style={{ fontSize: 10, color: '#a0aec0', marginTop: 3, display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-                <span>{n.author_name ?? 'Unknown'} · {new Date(n.created_at).toLocaleString()}</span>
-                <button onClick={() => void runDeleteNote(n.id)} disabled={busy} title="Delete note"
-                  style={{ border: 'none', background: 'none', color: '#cbd5e0', cursor: 'pointer', fontSize: 13, lineHeight: 1 }}>×</button>
-              </div>
+              {editNoteId === n.id ? (
+                <>
+                  <textarea value={editNoteText} onChange={e => setEditNoteText(e.target.value)} rows={2} autoFocus
+                    onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) void runEditNote(n.id); if (e.key === 'Escape') setEditNoteId(null); }}
+                    style={{ width: '100%', fontSize: 13, padding: '6px 9px', border: '1px solid #2b6cb0', borderRadius: 6, resize: 'vertical' }} />
+                  <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                    <button onClick={() => void runEditNote(n.id)} disabled={busy || !editNoteText.trim()}
+                      style={{ fontSize: 11, fontWeight: 600, padding: '2px 10px', borderRadius: 6, border: '1px solid #2b6cb0', color: '#fff', background: '#2b6cb0', cursor: 'pointer' }}>Save</button>
+                    <button onClick={() => setEditNoteId(null)} disabled={busy}
+                      style={{ border: 'none', background: 'none', color: '#a0aec0', cursor: 'pointer', fontSize: 11 }}>Cancel</button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div style={{ whiteSpace: 'pre-wrap' }}>{n.body}</div>
+                  <div style={{ fontSize: 10, color: '#a0aec0', marginTop: 3, display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                    <span>{n.author_name ?? 'Unknown'} · {new Date(n.created_at).toLocaleString()}</span>
+                    <span style={{ display: 'flex', gap: 10 }}>
+                      {n.author_id === uid && (
+                        <button onClick={() => { setEditNoteId(n.id); setEditNoteText(n.body); }} disabled={busy} title="Edit your note"
+                          style={{ border: 'none', background: 'none', color: '#2b6cb0', cursor: 'pointer', fontSize: 11 }}>edit</button>
+                      )}
+                      <button onClick={() => void runDeleteNote(n.id)} disabled={busy} title="Delete note"
+                        style={{ border: 'none', background: 'none', color: '#cbd5e0', cursor: 'pointer', fontSize: 13, lineHeight: 1 }}>×</button>
+                    </span>
+                  </div>
+                </>
+              )}
             </div>
           ))}
         </div>
@@ -2115,12 +2179,23 @@ function FinanceApproveModal({
   // Approve action. Fixes the case where the linked return isn't received yet
   // (Approve button disabled) but Julie/Huayi still need to record context.
   const { notes: approverNotes, refresh: refreshNotes } = useRefundNotes(refund.id);
+  const { user: authUser } = useAuth();
+  const uid = authUser?.id;
   const [newNote, setNewNote] = useState('');
   const [noteBusy, setNoteBusy] = useState(false);
+  const [editNoteId, setEditNoteId] = useState<string | null>(null);
+  const [editNoteText, setEditNoteText] = useState('');
   const runAddNote = async () => {
     if (!newNote.trim()) return;
     setNoteBusy(true); setLocalError(null); onError(null);
     try { await addRefundNote(refund.id, newNote); setNewNote(''); refreshNotes(); }
+    catch (e) { const m = (e as Error).message; setLocalError(m); onError(m); }
+    finally { setNoteBusy(false); }
+  };
+  const runEditNote = async (noteId: string) => {
+    if (!editNoteText.trim()) return;
+    setNoteBusy(true); setLocalError(null);
+    try { await updateRefundNote(noteId, refund.id, editNoteText); setEditNoteId(null); refreshNotes(); }
     catch (e) { const m = (e as Error).message; setLocalError(m); onError(m); }
     finally { setNoteBusy(false); }
   };
@@ -2297,12 +2372,34 @@ function FinanceApproveModal({
             )}
             {approverNotes.map(n => (
               <div key={n.id} style={{ fontSize: 13, background: '#f7fafc', borderRadius: 6, padding: '6px 9px' }}>
-                <div style={{ whiteSpace: 'pre-wrap' }}>{n.body}</div>
-                <div style={{ fontSize: 10, color: '#a0aec0', marginTop: 3, display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-                  <span>{n.author_name ?? 'Unknown'} · {new Date(n.created_at).toLocaleString()}</span>
-                  <button onClick={() => void runDeleteNote(n.id)} disabled={noteBusy} title="Delete note"
-                    style={{ border: 'none', background: 'none', color: '#cbd5e0', cursor: 'pointer', fontSize: 13, lineHeight: 1 }}>×</button>
-                </div>
+                {editNoteId === n.id ? (
+                  <>
+                    <textarea value={editNoteText} onChange={e => setEditNoteText(e.target.value)} rows={2} autoFocus
+                      onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) void runEditNote(n.id); if (e.key === 'Escape') setEditNoteId(null); }}
+                      className={styles.modalInput} style={{ resize: 'vertical' }} />
+                    <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                      <button onClick={() => void runEditNote(n.id)} disabled={noteBusy || !editNoteText.trim()}
+                        style={{ fontSize: 11, fontWeight: 600, padding: '2px 10px', borderRadius: 6, border: '1px solid #2b6cb0', color: '#fff', background: '#2b6cb0', cursor: 'pointer' }}>Save</button>
+                      <button onClick={() => setEditNoteId(null)} disabled={noteBusy}
+                        style={{ border: 'none', background: 'none', color: '#a0aec0', cursor: 'pointer', fontSize: 11 }}>Cancel</button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div style={{ whiteSpace: 'pre-wrap' }}>{n.body}</div>
+                    <div style={{ fontSize: 10, color: '#a0aec0', marginTop: 3, display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                      <span>{n.author_name ?? 'Unknown'} · {new Date(n.created_at).toLocaleString()}</span>
+                      <span style={{ display: 'flex', gap: 10 }}>
+                        {n.author_id === uid && (
+                          <button onClick={() => { setEditNoteId(n.id); setEditNoteText(n.body); }} disabled={noteBusy} title="Edit your note"
+                            style={{ border: 'none', background: 'none', color: '#2b6cb0', cursor: 'pointer', fontSize: 11 }}>edit</button>
+                        )}
+                        <button onClick={() => void runDeleteNote(n.id)} disabled={noteBusy} title="Delete note"
+                          style={{ border: 'none', background: 'none', color: '#cbd5e0', cursor: 'pointer', fontSize: 13, lineHeight: 1 }}>×</button>
+                      </span>
+                    </div>
+                  </>
+                )}
               </div>
             ))}
           </div>
