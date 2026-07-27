@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../supabase';
 import { classifyChannel } from './journey';
+import { manualCreative } from './manualCreatives';
 import type { Order } from '../orders';
 
 // Auto sales-attribution report — the programmatic version of the manual
@@ -238,14 +239,17 @@ function realSource(label: string | null): string | null {
   return label;
 }
 
-function buildNote(r: SalesRow, source: string, secondary: string | null): string {
+function buildNote(r: SalesRow, source: string, secondary: string | null, creative: string | null): string {
   const bits: string[] = [];
-  if (source !== UNKNOWN) bits.push(`Saw ${source}`);
+  // Operator-tracked ad creative (from the manual sale sheets) is authoritative —
+  // name the exact Meta ad they saw, e.g. "Saw Meta Ad v13a". Falls back to the
+  // auto source label when we have no hand-tracked creative for this buyer.
+  if (creative) bits.push(`Saw Meta Ad ${creative}`);
+  else if (source !== UNKNOWN) bits.push(`Saw ${source}`);
   if (secondary) bits.push(`also ${secondary}`);
   if (r.campaign) bits.push(`campaign ${r.campaign}`);
   // Visit history from Klaviyo when we have it; otherwise flag it's not captured.
   bits.push(r.journey_note ?? 'visit history UNKNOWN');
-  // Exact ad creative (v21a…) can't be auto-detected — operator adds it manually.
   return bits.length ? bits.join('; ') : UNKNOWN;
 }
 
@@ -270,6 +274,8 @@ export function reportCells(r: SalesRow): string[] {
   const secondary = firstReal && lastReal && firstReal !== lastReal
     ? (source === firstReal ? lastReal : firstReal)
     : null;
+  // Hand-tracked ad creative for this buyer, matched on name + purchase date.
+  const creative = manualCreative(r.name, date);
   return [
     r.campaign_group ?? '—',
     r.name,
@@ -289,7 +295,7 @@ export function reportCells(r: SalesRow): string[] {
     others[0] ?? 'No',
     others[1] ?? 'No',
     r.purchase_time ?? UNKNOWN,   // from the buyer's Klaviyo purchase-visit timing
-    buildNote(r, source, secondary),
+    buildNote(r, source, secondary, creative),
   ];
 }
 
