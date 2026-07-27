@@ -53,7 +53,8 @@ async function handle(req: Request): Promise<Response> {
       // a resolved URL (Task 6 fix — the bucket is private, so no public
       // URL to parse). Remove it from Storage by that path as-is.
       if (row.resume_url) {
-        await admin.storage.from('hiring-resumes').remove([row.resume_url]);
+        const { error: storageErr } = await admin.storage.from('hiring-resumes').remove([row.resume_url]);
+        if (storageErr) { errors.push(`${row.id}: ${storageErr.message}`); continue; }
       }
       const { error: updateErr } = await admin.from('candidates').update({
         full_name: '[purged]', email: null, phone: null, resume_url: null,
