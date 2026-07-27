@@ -29,7 +29,11 @@ export function InterviewsTab({ candidateId, candidateName }: { candidateId: str
     setDecisionOverrides({});
   }
 
-  const interviews = [...fetchedInterviews, ...createdInterviews].map(iv =>
+  // De-dup by id: if useInterviews ever gains a realtime subscription, a row
+  // inserted by book() could land in fetchedInterviews while already present
+  // in createdInterviews. Fetched copy wins so it stays authoritative.
+  const fetchedIds = new Set(fetchedInterviews.map(iv => iv.id));
+  const interviews = [...fetchedInterviews, ...createdInterviews.filter(iv => !fetchedIds.has(iv.id))].map(iv =>
     decisionOverrides[iv.id] ? { ...iv, ...decisionOverrides[iv.id] } : iv
   );
 
