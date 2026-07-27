@@ -663,6 +663,31 @@ function ReturnLabelControl({ r, onError }: { r: ReturnRow; onError: (m: string 
   );
 }
 
+// Unit status (where the physical unit is) — anyone can record it. Used in the
+// pre-refund card modal; mirrors the dropdown on the card + the refund panel.
+function UnitStatusEditor({ r, onError }: { r: ReturnRow; onError: (m: string | null) => void }) {
+  const [busy, setBusy] = useState(false);
+  const run = async (s: ReturnStatus) => {
+    if (r.status === s) return;
+    setBusy(true); onError(null);
+    try { await updateReturnStatus(r.id, s); }
+    catch (e) { onError((e as Error).message); }
+    finally { setBusy(false); }
+  };
+  return (
+    <div onClick={e => e.stopPropagation()} style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', margin: '8px 0' }}>
+      <span style={{ fontSize: 12, fontWeight: 600, color: '#4a5568' }}>Unit status:</span>
+      <select value={r.status} onChange={e => void run(e.target.value as ReturnStatus)} disabled={busy}
+        style={{ fontSize: 12, fontWeight: 600, padding: '3px 8px', borderRadius: 6, border: '1px solid #cbd5e0', background: '#fff', color: '#2d3748', cursor: 'pointer' }}>
+        {!UNIT_STAGES.some(st => st.value === r.status) && (
+          <option value={r.status} disabled>📦 {UNIT_STATUS_LABEL[r.status]}</option>
+        )}
+        {UNIT_STAGES.map(st => <option key={st.value} value={st.value}>📦 {st.label}</option>)}
+      </select>
+    </div>
+  );
+}
+
 // Disposition (ship back vs discard) — anyone can set/clear it. Used in the
 // pre-refund card modal; mirrors the refund detail panel's instruction row.
 function DispositionEditor({ r, onError }: { r: ReturnRow; onError: (m: string | null) => void }) {
@@ -1100,8 +1125,7 @@ function InspectionCard({
         <select
           value={r.status}
           onChange={e => void runStatus(e.target.value as ReturnStatus)}
-          disabled={statusBusy || !canOwn}
-          title={canOwn ? undefined : 'Only Reina can change the unit status in these columns'}
+          disabled={statusBusy}
           style={{ fontSize: 11, fontWeight: 600, padding: '2px 6px', borderRadius: 4,
                    border: '1px solid #cbd5e0', background: '#edf2f7', color: '#2d3748',
                    cursor: 'pointer', maxWidth: 160 }}
@@ -1990,6 +2014,7 @@ function ReturnDetailModal({ r, parties, usage, invoices, tickets, onOpenTicket,
             usage window, sales invoice + order #, ticket history, saved notes,
             then the return form answers. */}
         <div style={{ marginTop: 12 }}>
+          <UnitStatusEditor r={r} onError={onError} />
           <DispositionEditor r={r} onError={onError} />
           <UsageWindowBadge usage={usage} />
           <RefundInvoices invoices={invoices} fallbackOrderRef={r.original_order_ref} />
