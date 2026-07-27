@@ -218,17 +218,26 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
+  min-width: 0;              /* let the card shrink to its column, never overflow */
+  overflow: hidden;          /* nothing bleeds into the column to the right */
+  overflow-wrap: anywhere;   /* long names/emails/tracking #s wrap, not overflow */
 }
 .refundCardHead {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;   /* the name area can be multi-line (purchaser + user) */
+  gap: 8px;
 }
+/* The name/party area takes the remaining width and may wrap; the amount keeps
+   its intrinsic width and never gets pushed out of the card. */
+.refundCardHead > :first-child { flex: 1 1 auto; min-width: 0; }
+.refundCardHead > :last-child:not(:first-child) { flex: 0 0 auto; }
 .refundAmount {
   font-weight: 800;
   color: var(--color-ink);
   font-variant-numeric: tabular-nums;
   font-size: 14px;
+  flex: 0 0 auto;
 }
 .refundReason {
   color: var(--color-ink-muted);
