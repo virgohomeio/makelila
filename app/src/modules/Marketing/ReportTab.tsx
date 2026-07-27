@@ -55,11 +55,25 @@ export function ReportTab() {
     return inRange(o.placed_at ?? o.created_at);
   };
 
+  // Defensive: collapse fb_campaigns to one row per Meta campaign_id so any
+  // stray duplicate lifetime row can never double-count ad spend. (The sync
+  // also guards against dupes; this makes the report safe regardless.)
+  const uniqueCampaigns = useMemo(() => {
+    const m = new Map<string, typeof campaigns[number]>();
+    const noId: typeof campaigns = [];
+    for (const c of campaigns) {
+      if (!c.campaign_id) { noId.push(c); continue; }
+      const prev = m.get(c.campaign_id);
+      if (!prev || (c.spend_cad ?? 0) >= (prev.spend_cad ?? 0)) m.set(c.campaign_id, c);
+    }
+    return [...m.values(), ...noId];
+  }, [campaigns]);
+
   const adSpendCad = useMemo(() => {
     // Group spend (all its Meta campaigns) when a group is picked; else range total.
-    if (selectedGroup) return campaigns.filter(c => c.campaign_id && selectedGroup.ids.has(c.campaign_id)).reduce((s, c) => s + (c.spend_cad ?? 0), 0);
-    return campaigns.filter(c => inRange(c.date_start)).reduce((s, c) => s + (c.spend_cad ?? 0), 0);
-  }, [campaigns, cutoff, selectedGroup]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (selectedGroup) return uniqueCampaigns.filter(c => c.campaign_id && selectedGroup.ids.has(c.campaign_id)).reduce((s, c) => s + (c.spend_cad ?? 0), 0);
+    return uniqueCampaigns.filter(c => inRange(c.date_start)).reduce((s, c) => s + (c.spend_cad ?? 0), 0);
+  }, [uniqueCampaigns, cutoff, selectedGroup]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const { rows, kpis } = useMemo(() => {
     const filtered = orders.filter(o => o.kind !== 'replacement' && inScope(o));
