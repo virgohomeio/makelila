@@ -27,6 +27,7 @@ export type Action =
 
 export type Module =
   | 'finance'      // restricted to finance + admin only
+  | 'hiring'       // restricted to finance + admin, or a posting-assigned interviewer — see canViewPosting()
   | 'orderReview'
   | 'fulfillment'
   | 'build'
@@ -54,7 +55,7 @@ const ACTION_ROLES: Record<Action, Role[]> = {
   repost_journal:             ['finance', 'admin'],
 };
 
-const RESTRICTED_MODULES: Module[] = ['finance'];
+const RESTRICTED_MODULES: Module[] = ['finance', 'hiring'];
 
 export function canDo(role: Role | null | undefined, action: Action): boolean {
   if (!role) return false;
@@ -76,4 +77,14 @@ export function canView(role: Role | null | undefined, module: Module): boolean 
 // onboarding funnel) without needing a dedicated restricted-module flag.
 export function isLeadership(role: Role | null | undefined): boolean {
   return role === 'finance' || role === 'admin';
+}
+
+/** Posting-level visibility for Hiring: leadership sees every posting;
+ *  anyone else needs to be an explicitly assigned interviewer on THAT
+ *  posting (checked server-side via posting_interviewers + the
+ *  can_view_posting() RLS helper — this client-side mirror is for
+ *  UI gating only, not the security boundary). */
+export function canViewPosting(role: Role | null | undefined, isAssignedInterviewer: boolean): boolean {
+  if (isLeadership(role)) return true;
+  return isAssignedInterviewer;
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { canDo, canView, type Role, type Action, type Module } from './permissions';
+import { canDo, canView, canViewPosting, type Role, type Action, type Module } from './permissions';
 
 describe('canDo', () => {
   // Source-of-truth matrix mirroring ACTION_ROLES inside permissions.ts.
@@ -74,4 +74,30 @@ describe('canView', () => {
       });
     }
   }
+});
+
+describe('canViewPosting', () => {
+  it('returns true for finance role regardless of assignment', () => {
+    expect(canViewPosting('finance', false)).toBe(true);
+  });
+  it('returns true for admin role regardless of assignment', () => {
+    expect(canViewPosting('admin', false)).toBe(true);
+  });
+  it('returns true for an operator who is an assigned interviewer', () => {
+    expect(canViewPosting('operator', true)).toBe(true);
+  });
+  it('returns false for an operator who is not assigned', () => {
+    expect(canViewPosting('operator', false)).toBe(false);
+  });
+  it('returns false for a null role with no assignment', () => {
+    expect(canViewPosting(null, false)).toBe(false);
+  });
+});
+
+describe('canView hiring module', () => {
+  it('is restricted like finance', () => {
+    expect(canView('operator', 'hiring')).toBe(false);
+    expect(canView('finance', 'hiring')).toBe(true);
+    expect(canView('admin', 'hiring')).toBe(true);
+  });
 });
