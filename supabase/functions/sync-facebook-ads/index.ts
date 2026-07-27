@@ -114,22 +114,35 @@ Deno.serve(async (req: Request) => {
   const { error } = await admin.from('fb_campaigns').upsert(rows, { onConflict: 'campaign_id,date_start' });
   if (error) return j({ error: `DB upsert failed: ${error.message}` }, 500);
 
-  // 3) Ad-level insights → fb_ads (for per-ad-set + per-creative analysis, e.g.
-  //    the LILA Mini test: 5 creatives × 5 audiences). Non-fatal — the campaign
-  //    data is already saved if this part errors.
+  // 3) Ad-level insights → fb_ads (per ad-set + per-creative, e.g. the LILA Mini
+  //    tests). Non-fatal for the campaign sync — but its failures used to be
+  //    swallowed silently, which froze fb_ads. We now capture `adError` and
+  //    return it so a broken ad pull is visible.
+  //
+  //    WHY A BOUNDED WINDOW: date_preset=maximum + time_increment=1 asks Meta for
+  //    every ad × every day since the ad account began. Meta rejects that request
+  //    ("please reduce the amount of data"), so fb_ads silently stopped updating
+  //    and new campaigns never appeared. A recent daily window stays within
+  //    Meta's synchronous-insights limit and still covers every live campaign.
   const adRows: Record<string, unknown>[] = [];
+  let adError: string | null = null;
   try {
     const adFields = 'campaign_id,campaign_name,adset_id,adset_name,ad_id,ad_name,spend,impressions,clicks,ctr,actions,date_start,date_stop';
+    const until = new Date();
+    const since = new Date();
+    since.setDate(since.getDate() - 120);   // ~4 months back — covers every current campaign
+    const day = (d: Date) => d.toISOString().slice(0, 10);
+    const timeRange = encodeURIComponent(JSON.stringify({ since: day(since), until: day(until) }));
     // time_increment=1 → one row per ad PER DAY, so the LILA Mini tab can filter
     // by date range (today, last 7 days, …) and re-aggregate.
     let url: string | null =
-      `${base}/${acct}/insights?level=ad&fields=${adFields}&date_preset=maximum&time_increment=1&limit=500&access_token=${encodeURIComponent(token)}`;
+      `${base}/${acct}/insights?level=ad&fields=${adFields}&time_range=${timeRange}&time_increment=1&limit=500&access_token=${encodeURIComponent(token)}`;
     let pages = 0;
     const n = (v?: string) => (v != null && v !== '' ? Number(v) : null);
-    while (url && pages < 40) {
+    while (url && pages < 60) {
       const res = await fetch(url);
       const body = await res.json();
-      if (!res.ok) break;
+      if (!res.ok) { adError = `Meta ad insights ${res.status}: ${JSON.stringify(body?.error ?? body).slice(0, 300)}`; break; }
       for (const a of (body.data ?? []) as Array<Record<string, unknown> & { actions?: ActionItem[] }>) {
         if (!a.ad_id || !a.date_start) continue;
         adRows.push({
@@ -153,16 +166,15 @@ Deno.serve(async (req: Request) => {
       pages++;
     }
     if (adRows.length) {
-      // Clean-replace: fb_ads is fully re-derived here, so wipe first to avoid
-      // stale lifetime rows double-counting alongside the new daily rows.
+      // Clean-replace: fb_ads is fully re-derived for the pulled window.
       await admin.from('fb_ads').delete().neq('ad_id', '');
       for (let i = 0; i < adRows.length; i += 500) {
         await admin.from('fb_ads').upsert(adRows.slice(i, i + 500), { onConflict: 'ad_id,date_start' });
       }
     }
-  } catch { /* non-fatal — campaign sync already succeeded */ }
+  } catch (e) { adError = `Meta ad insights request failed: ${(e as Error).message}`; }
 
-  return j({ synced: rows.length, ads: adRows.length });
+  return j({ synced: rows.length, ads: adRows.length, adError });
 });
 
 function buildRow(ins: Insight, meta: CampaignMeta | undefined, now: string): Record<string, unknown> {

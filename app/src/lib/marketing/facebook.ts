@@ -94,10 +94,24 @@ export function useFbAds(): { ads: FbAd[]; loading: boolean } {
   const [ads, setAds] = useState<FbAd[]>([]);
   const [loading, setLoading] = useState(true);
   const load = useCallback(async () => {
-    const { data, error } = await supabase
-      .from('fb_ads')
-      .select('ad_id, ad_name, adset_id, adset_name, campaign_id, campaign_name, date_start, spend_cad, impressions, clicks, ctr, leads');
-    if (!error && data) setAds(data as FbAd[]);
+    // Supabase caps a single response at 1000 rows. fb_ads now exceeds that
+    // (daily rows per ad × many campaigns), so page through with .range() —
+    // otherwise the newest campaign silently falls off the end and never shows
+    // in the LILA Mini dropdown.
+    const cols = 'ad_id, ad_name, adset_id, adset_name, campaign_id, campaign_name, date_start, spend_cad, impressions, clicks, ctr, leads';
+    const PAGE = 1000;
+    const all: FbAd[] = [];
+    for (let from = 0; ; from += PAGE) {
+      const { data, error } = await supabase
+        .from('fb_ads')
+        .select(cols)
+        .order('date_start', { ascending: false })
+        .range(from, from + PAGE - 1);
+      if (error || !data) break;
+      all.push(...(data as FbAd[]));
+      if (data.length < PAGE) break;
+    }
+    setAds(all);
     setLoading(false);
   }, []);
 
