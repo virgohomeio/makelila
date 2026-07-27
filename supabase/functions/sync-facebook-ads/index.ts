@@ -114,6 +114,14 @@ Deno.serve(async (req: Request) => {
   const { error } = await admin.from('fb_campaigns').upsert(rows, { onConflict: 'campaign_id,date_start' });
   if (error) return j({ error: `DB upsert failed: ${error.message}` }, 500);
 
+  // Each campaign should have exactly ONE lifetime row. Meta's "maximum" start
+  // date can shift between syncs, which — under the (campaign_id, date_start)
+  // key — inserts a SECOND row instead of updating, doubling that campaign's
+  // spend in the Journey Report. Drop any row not refreshed this run: the fresh
+  // rows all carry synced_at = now, so stale duplicates (and campaigns Meta no
+  // longer returns) are strictly older.
+  await admin.from('fb_campaigns').delete().lt('synced_at', now);
+
   // 3) Ad-level insights → fb_ads (per ad-set + per-creative, e.g. the LILA Mini
   //    tests). Non-fatal for the campaign sync — but its failures used to be
   //    swallowed silently, which froze fb_ads. We now capture `adError` and
