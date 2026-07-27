@@ -663,6 +663,36 @@ function ReturnLabelControl({ r, onError }: { r: ReturnRow; onError: (m: string 
   );
 }
 
+// Disposition (ship back vs discard) — anyone can set/clear it. Used in the
+// pre-refund card modal; mirrors the refund detail panel's instruction row.
+function DispositionEditor({ r, onError }: { r: ReturnRow; onError: (m: string | null) => void }) {
+  const [busy, setBusy] = useState(false);
+  const run = async (d: ReturnDisposition | null) => {
+    setBusy(true); onError(null);
+    try { await setReturnDisposition(r.id, d); }
+    catch (e) { onError((e as Error).message); }
+    finally { setBusy(false); }
+  };
+  return (
+    <div onClick={e => e.stopPropagation()} style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', margin: '8px 0' }}>
+      <span style={{ fontSize: 12, fontWeight: 600, color: '#4a5568' }}>Instruction:</span>
+      {(['ship_back', 'discard'] as ReturnDisposition[]).map(d => {
+        const on = r.disposition === d;
+        const dm = RETURN_DISPOSITION_META[d];
+        return (
+          <button key={d} disabled={busy} onClick={() => void run(on ? null : d)}
+            style={{ fontSize: 11, fontWeight: 600, padding: '3px 10px', borderRadius: 999, cursor: 'pointer',
+                     border: `1px solid ${on ? dm.color : '#e2e8f0'}`, color: on ? dm.color : '#718096', background: on ? dm.bg : '#fff' }}>
+            {on ? '✓ ' : ''}{dm.label}
+          </button>
+        );
+      })}
+      {!r.disposition && <span style={{ fontSize: 11, color: '#975a16' }}>⚠ not set</span>}
+      <ReturnLabelControl r={r} onError={onError} />
+    </div>
+  );
+}
+
 // Notes on a pre-refund return card (Return Form Submitted / Return &
 // Inspection). Everyone involved can add — mirrors the refund-card notes.
 function ReturnNotes({ returnId, onError }: { returnId: string; onError: (m: string | null) => void }) {
@@ -1960,6 +1990,7 @@ function ReturnDetailModal({ r, parties, usage, invoices, tickets, onOpenTicket,
             usage window, sales invoice + order #, ticket history, saved notes,
             then the return form answers. */}
         <div style={{ marginTop: 12 }}>
+          <DispositionEditor r={r} onError={onError} />
           <UsageWindowBadge usage={usage} />
           <RefundInvoices invoices={invoices} fallbackOrderRef={r.original_order_ref} />
           <CustomerTicketHistory tickets={tickets} onOpenTicket={onOpenTicket} defaultOpen />
