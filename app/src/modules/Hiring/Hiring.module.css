@@ -28,3 +28,4 @@
 .interviewerWidget { margin-top: 10px; font-size: 12px; }
 .interviewerResult { display: flex; justify-content: space-between; align-items: center; padding: 3px 0; }
 .interviewerList { font-size: 11px; color: var(--color-ink-subtle); margin-top: 4px; }
+.formError { margin-top: 6px; padding: 6px 10px; background: #fff5f5; border: 1px solid #fed7d7; border-radius: 4px; font-size: 12px; color: #a51b1b; }

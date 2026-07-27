@@ -64,10 +64,12 @@ function NewPostingForm({ onCreated }: { onCreated: () => void }) {
   const [indeedUrl, setIndeedUrl] = useState('');
   const [jobDescription, setJobDescription] = useState('');
   const [saving, setSaving] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
 
   async function submit() {
     if (!title.trim()) return;
     setSaving(true);
+    setCreateError(null);
     try {
       await createJobPosting({
         title: title.trim(),
@@ -78,6 +80,8 @@ function NewPostingForm({ onCreated }: { onCreated: () => void }) {
         job_description: jobDescription.trim() || undefined,
       });
       onCreated();
+    } catch (e: unknown) {
+      setCreateError(e instanceof Error ? e.message : 'Create posting failed');
     } finally {
       setSaving(false);
     }
@@ -97,6 +101,7 @@ function NewPostingForm({ onCreated }: { onCreated: () => void }) {
         onChange={e => setJobDescription(e.target.value)}
       />
       <button onClick={submit} disabled={saving || !title.trim()}>{saving ? 'Creating…' : 'Create posting'}</button>
+      {createError && <div className={styles.formError}>{createError}</div>}
     </div>
   );
 }
@@ -106,6 +111,7 @@ function InterviewerAssignment({ postingId }: { postingId: string }) {
   const [results, setResults] = useState<InternalProfile[]>([]);
   const [searching, setSearching] = useState(false);
   const [added, setAdded] = useState<string[]>([]);
+  const [assignError, setAssignError] = useState<string | null>(null);
 
   async function search() {
     if (!query.trim()) return;
@@ -115,10 +121,15 @@ function InterviewerAssignment({ postingId }: { postingId: string }) {
   }
 
   async function assign(profile: InternalProfile) {
-    await addPostingInterviewer(postingId, profile.id);
-    setAdded(prev => [...prev, profile.display_name]);
-    setResults([]);
-    setQuery('');
+    setAssignError(null);
+    try {
+      await addPostingInterviewer(postingId, profile.id);
+      setAdded(prev => [...prev, profile.display_name]);
+      setResults([]);
+      setQuery('');
+    } catch (e: unknown) {
+      setAssignError(e instanceof Error ? e.message : 'Add interviewer failed');
+    }
   }
 
   return (
@@ -132,6 +143,7 @@ function InterviewerAssignment({ postingId }: { postingId: string }) {
           <button onClick={() => assign(r)}>Add</button>
         </div>
       ))}
+      {assignError && <div className={styles.formError}>{assignError}</div>}
       {added.length > 0 && <div className={styles.interviewerList}>Assigned this session: {added.join(', ')}</div>}
     </div>
   );
@@ -143,6 +155,7 @@ function RubricEditor({ postingId, jobDescription, rubric }: {
   const [rows, setRows] = useState<RubricDimension[]>(rubric.length ? rubric : [{ dimension: '', weight_pct: 0 }]);
   const [suggesting, setSuggesting] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   async function suggestFromJd() {
     if (!jobDescription?.trim()) return;
@@ -157,8 +170,14 @@ function RubricEditor({ postingId, jobDescription, rubric }: {
 
   async function save() {
     setSaving(true);
-    try { await updatePostingRubric(postingId, rows.filter(r => r.dimension.trim())); }
-    finally { setSaving(false); }
+    setSaveError(null);
+    try {
+      await updatePostingRubric(postingId, rows.filter(r => r.dimension.trim()));
+    } catch (e: unknown) {
+      setSaveError(e instanceof Error ? e.message : 'Save rubric failed');
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -185,6 +204,7 @@ function RubricEditor({ postingId, jobDescription, rubric }: {
       ))}
       <button onClick={() => setRows(prev => [...prev, { dimension: '', weight_pct: 0 }])}>+ Add dimension</button>
       <button onClick={save} disabled={saving} style={{ marginLeft: 8 }}>{saving ? 'Saving…' : 'Save rubric'}</button>
+      {saveError && <div className={styles.formError}>{saveError}</div>}
     </div>
   );
 }
