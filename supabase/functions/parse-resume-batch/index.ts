@@ -21,7 +21,7 @@ import { corsHeaders } from '../_shared/cors.ts';
 import { authenticate } from '../_shared/auth.ts';
 
 const ANTHROPIC_API = 'https://api.anthropic.com/v1/messages';
-const MODEL = 'claude-haiku-4-5';
+const MODEL = 'claude-haiku-4-5-20251001';
 
 export type RubricDimension = { dimension: string; weight_pct: number };
 
@@ -100,8 +100,8 @@ async function handle(req: Request): Promise<Response> {
   }
 
   const input = await req.json().catch(() => null) as ParseResumeInput | null;
-  if (!input?.posting_id || !input.storage_path || !input.mime_type) {
-    return json({ error: 'posting_id, storage_path, and mime_type are required' }, 400);
+  if (!input?.posting_id || !input.storage_path || !input.mime_type || !input.source) {
+    return json({ error: 'posting_id, storage_path, mime_type, and source are required' }, 400);
   }
 
   const { data: posting, error: postingErr } = await admin
@@ -158,8 +158,12 @@ async function handle(req: Request): Promise<Response> {
     .eq('enrichment_status', 'stub');
   const matchedId = matchExistingStub(stubs ?? [], extracted.full_name);
 
-  const { data: publicUrlData } = admin.storage.from('hiring-resumes').getPublicUrl(input.storage_path);
-  const resumeUrl = publicUrlData.publicUrl;
+  // hiring-resumes is a private bucket (20260724130100_hiring_resumes_bucket.sql)
+  // — there is no public URL to resolve here. A signed URL would expire, and
+  // this column needs to stay valid indefinitely, so we store the raw storage
+  // path instead (yes, "resume_url" is a misleading name for a path). Signed-URL
+  // generation happens at read time in the Applicants tab UI (Task 11), not here.
+  const resumeUrl = input.storage_path;
 
   if (matchedId) {
     const { error: updateErr } = await admin.from('candidates').update({
