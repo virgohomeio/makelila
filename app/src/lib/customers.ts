@@ -57,6 +57,11 @@ export type Customer = {
   // (gift/household case); refunds + accounting resolve to the purchaser.
   // NULL = this row is its own purchaser. See resolvePurchaserId().
   purchaser_id: string | null;
+  // FR-6: the PRIMARY USER of this customer's machine (e.g. a spouse) when
+  // different from the purchaser/account holder. Free-text — the primary user is
+  // usually not a customer of record. Surfaced on the refund card.
+  primary_user_name: string | null;
+  primary_user_email: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -441,6 +446,32 @@ export async function setPurchaser(userId: string, purchaserId: string | null): 
     .update({ purchaser_id: purchaserId }).eq('id', userId);
   if (error) throw error;
   await logAction('customer_purchaser_linked', userId, purchaserId ?? 'unlinked');
+}
+
+/** FR-6: set (or clear) the primary user of this customer's machine — a person
+ *  who is usually not a customer of record (e.g. a spouse), so free-text. */
+export async function setPrimaryUser(customerId: string, name: string | null, email: string | null): Promise<void> {
+  const cleanName = name?.trim() || null;
+  const cleanEmail = email?.trim() || null;
+  const { error } = await supabase.from('customers')
+    .update({ primary_user_name: cleanName, primary_user_email: cleanEmail }).eq('id', customerId);
+  if (error) throw error;
+  await logAction('customer_primary_user_set', customerId, cleanName ?? 'cleared');
+}
+
+/** FR-6: the primary user of the machine to show on a refund card. Given the
+ *  filer's email, resolve to their accounting owner (linked purchaser, else the
+ *  filer's own row) and return that owner's primary_user_name, if set. */
+export function resolvePrimaryUserName(opts: {
+  filerEmail: string | null | undefined;
+  byEmail: Map<string, { id: string; purchaser_id: string | null }>;
+  byId: Map<string, { primary_user_name: string | null }>;
+}): string | null {
+  const e = (opts.filerEmail ?? '').toLowerCase().trim();
+  const filer = e ? opts.byEmail.get(e) : undefined;
+  if (!filer) return null;
+  const ownerId = filer.purchaser_id ?? filer.id;
+  return opts.byId.get(ownerId)?.primary_user_name?.trim() || null;
 }
 
 export function useCustomers(): {

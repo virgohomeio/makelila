@@ -48,7 +48,7 @@ vi.mock('./activityLog', () => ({
 }));
 
 // ── import after mocks ──────────────────────────────────────────────────────
-import { parseUtm, upsertHubSpotContact, followUpDueDates, computeFuState, refundUsageWindow, resolvePurchaserId, buildPurchaserIdByEmail, resolvePartiesFromDirectory, type Customer } from './customers';
+import { parseUtm, upsertHubSpotContact, followUpDueDates, computeFuState, refundUsageWindow, resolvePurchaserId, buildPurchaserIdByEmail, resolvePartiesFromDirectory, resolvePrimaryUserName, type Customer } from './customers';
 
 const base: Customer = {
   id: 'c1', hubspot_id: null, email: 'a@b.com', first_name: null, last_name: null,
@@ -62,7 +62,8 @@ const base: Customer = {
   journey_stage_override_at: null, journey_stage_override_by: null,
   first_touch_source: null, first_touch_campaign_id: null, first_touch_at: null,
   last_touch_source: null, last_touch_campaign_id: null, last_touch_at: null,
-  telemetry_autoticket_suppress: false, purchaser_id: null, created_at: '', updated_at: '',
+  telemetry_autoticket_suppress: false, purchaser_id: null,
+  primary_user_name: null, primary_user_email: null, created_at: '', updated_at: '',
 };
 
 // ── refundUsageWindow (30-day refund eligibility window) ────────────────────
@@ -325,5 +326,33 @@ describe('resolvePartiesFromDirectory', () => {
     const orphan = new Map([['u@x.com', { id: 'u', full_name: 'User', purchaser_id: 'ghost' }]]);
     expect(resolvePartiesFromDirectory({ filerEmail: 'u@x.com', filerName: 'User', byEmail: orphan, byId: new Map() }))
       .toEqual({ purchaser: 'User', user: 'User', confirmed: true });
+  });
+});
+
+// FR-6: the machine's primary user comes from the accounting owner's record.
+describe('resolvePrimaryUserName', () => {
+  const byEmail = new Map([
+    ['chad@x.com', { id: 'chad', purchaser_id: null }],        // Chad is the purchaser/owner
+    ['lily@x.com', { id: 'lily', purchaser_id: 'annie' }],     // Lily acts for Annie
+  ]);
+  const byId = new Map([
+    ['chad', { primary_user_name: 'Sarah Lockhart' }],
+    ['annie', { primary_user_name: 'Lily Xiao Xu' }],
+    ['lily', { primary_user_name: null }],
+  ]);
+
+  it("returns the owner's primary user when the filer IS the purchaser (Chad → Sarah)", () => {
+    expect(resolvePrimaryUserName({ filerEmail: 'Chad@X.com ', byEmail, byId })).toBe('Sarah Lockhart');
+  });
+
+  it("resolves through the purchaser link when a user files (Lily's file → Annie's primary user)", () => {
+    expect(resolvePrimaryUserName({ filerEmail: 'lily@x.com', byEmail, byId })).toBe('Lily Xiao Xu');
+  });
+
+  it('returns null when no primary user is set, filer unknown, or email missing', () => {
+    const noPrimary = new Map([['z', { primary_user_name: null }]]);
+    expect(resolvePrimaryUserName({ filerEmail: 'z@x.com', byEmail: new Map([['z@x.com', { id: 'z', purchaser_id: null }]]), byId: noPrimary })).toBeNull();
+    expect(resolvePrimaryUserName({ filerEmail: 'nobody@x.com', byEmail, byId })).toBeNull();
+    expect(resolvePrimaryUserName({ filerEmail: null, byEmail, byId })).toBeNull();
   });
 });

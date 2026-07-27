@@ -3,7 +3,7 @@ import { isTelemetryConfigured } from '../../lib/supabaseTelemetry';
 const Dashboard = lazy(() => import('../Dashboard'));
 import {
   useCustomers, syncCustomersFromHubspot, exportPurchasers, pushToKlaviyo,
-  setPurchaser, type Customer,
+  setPurchaser, setPrimaryUser, type Customer,
 } from '../../lib/customers';
 import { useOrders } from '../../lib/orders';
 import { formatMoney } from '../../lib/money';
@@ -537,6 +537,53 @@ function PurchaserLinkSection({ customer, allCustomers, onChanged }: {
   );
 }
 
+// FR-6: the PRIMARY USER of this customer's machine (e.g. a spouse) when
+// different from the purchaser. Free-text — usually not a customer of record.
+// Set here; surfaced on the refund card. Example: Chad (purchaser) → Sarah.
+function PrimaryUserSection({ customer, onChanged }: { customer: Customer; onChanged: () => void }) {
+  const [name, setName] = useState(customer.primary_user_name ?? '');
+  const [email, setEmail] = useState(customer.primary_user_email ?? '');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {
+    setName(customer.primary_user_name ?? '');
+    setEmail(customer.primary_user_email ?? '');
+  }, [customer.id, customer.primary_user_name, customer.primary_user_email]);
+
+  const dirty =
+    (name.trim() || null) !== (customer.primary_user_name ?? null) ||
+    (email.trim() || null) !== (customer.primary_user_email ?? null);
+
+  const save = async (clear?: boolean) => {
+    setBusy(true); setErr(null);
+    try {
+      await setPrimaryUser(customer.id, clear ? null : name, clear ? null : email);
+      if (clear) { setName(''); setEmail(''); }
+      onChanged();
+    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <PanelSection title="Primary user of the machine">
+      <div className={styles.kvLabel} style={{ marginBottom: 4 }}>
+        Who actually uses the machine, when different from the purchaser (e.g. a spouse). Shown on the refund card.
+      </div>
+      <input className={styles.searchInput} placeholder="Primary user name (e.g. Sarah Lockhart)"
+        value={name} disabled={busy} onChange={e => setName(e.target.value)} />
+      <input className={styles.searchInput} style={{ marginTop: 4 }} placeholder="Primary user email (optional)"
+        value={email} disabled={busy} onChange={e => setEmail(e.target.value)} />
+      <div style={{ marginTop: 6, display: 'flex', gap: 8 }}>
+        <button className={styles.linkBtn} disabled={busy || !dirty} onClick={() => void save()}>Save</button>
+        {(customer.primary_user_name || customer.primary_user_email) && (
+          <button className={styles.linkBtn} disabled={busy} onClick={() => void save(true)}>Clear</button>
+        )}
+      </div>
+      {err && <div className={styles.toastError} style={{ marginTop: 6 }}>{err}</div>}
+    </PanelSection>
+  );
+}
+
 function CustomerDetailPanel({ customer, allCustomers, onChanged, onClose }: {
   customer: Customer;
   allCustomers: Customer[];
@@ -586,6 +633,7 @@ function CustomerDetailPanel({ customer, allCustomers, onChanged, onClose }: {
           </PanelSection>
 
           <PurchaserLinkSection customer={customer} allCustomers={allCustomers} onChanged={onChanged} />
+          <PrimaryUserSection customer={customer} onChanged={onChanged} />
 
           <LilaAppActivitySection customerId={customer.id} />
 

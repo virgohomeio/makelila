@@ -32,7 +32,7 @@ const UNIT_STAGES: { value: ReturnStatus; label: string }[] = [
   { value: 'discarded',        label: 'Unit discarded by customer' },
 ];
 import { useQueuedReplacements, holdReplacement, type Order } from '../../lib/orders';
-import { useOnboardDates, useCustomerIdByEmail, useCustomers, refundUsageWindow, resolvePartiesFromDirectory, type RefundUsageWindow } from '../../lib/customers';
+import { useOnboardDates, useCustomerIdByEmail, useCustomers, refundUsageWindow, resolvePartiesFromDirectory, resolvePrimaryUserName, type RefundUsageWindow } from '../../lib/customers';
 import { useInvoicesByCustomerEmail, getInvoiceSignedUrl, type CustomerInvoice } from '../../lib/invoices';
 import {
   useServiceTickets, useTicketMessages, useTicketNotes, STATUS_META as TICKET_STATUS_META,
@@ -101,8 +101,8 @@ export function RefundsTab() {
     return m;
   }, [customers]);
   const customerById = useMemo(() => {
-    const m = new Map<string, { full_name: string }>();
-    for (const c of customers) m.set(c.id, { full_name: c.full_name });
+    const m = new Map<string, { full_name: string; primary_user_name: string | null }>();
+    for (const c of customers) m.set(c.id, { full_name: c.full_name, primary_user_name: c.primary_user_name });
     return m;
   }, [customers]);
 
@@ -113,16 +113,18 @@ export function RefundsTab() {
     filerEmail?: string | null; filerName: string;
     isPurchaser?: boolean | null; purchaserName?: string | null; purchaserEmail?: string | null;
   }): Parties => {
-    const fromDir = resolvePartiesFromDirectory({
+    const base = resolvePartiesFromDirectory({
       filerEmail: opts.filerEmail, filerName: opts.filerName, byEmail: customerByEmail, byId: customerById,
-    });
-    if (fromDir) return fromDir;
-    return resolveParties({
+    }) ?? resolveParties({
       fallbackName: opts.filerName,
       isPurchaser: opts.isPurchaser ?? null,
       purchaserName: opts.purchaserName ?? null,
       filerName: opts.filerName,
     });
+    // FR-6: the machine's primary user (e.g. a spouse) from the owner's record.
+    const pu = resolvePrimaryUserName({ filerEmail: opts.filerEmail, byEmail: customerByEmail, byId: customerById });
+    const primaryUser = pu && pu !== base.purchaser && pu !== base.user ? pu : null;
+    return { ...base, primaryUser };
   };
   const partiesForReturn = (r: ReturnRow): Parties =>
     partiesFor({ filerEmail: r.customer_email, filerName: r.customer_name, isPurchaser: r.is_purchaser, purchaserName: r.purchaser_name });
@@ -525,7 +527,7 @@ function CustomerWaitBadge({ r }: { r: ReturnRow }) {
 // this person, BR-13) or, when the filer isn't the buyer (gift/household),
 // shows the purchaser AND the USER who filed, each labelled.
 // ============================================================================
-type Parties = { purchaser: string; user: string | null; confirmed: boolean };
+type Parties = { purchaser: string; user: string | null; primaryUser?: string | null; confirmed: boolean };
 
 function resolveParties(opts: {
   fallbackName: string;
@@ -561,7 +563,7 @@ function PartyPill({ text, tone, title }: { text: string; tone: 'purchaser' | 'p
 // Renders the purchaser (bold) with a Purchaser pill, and — when the filer is a
 // different person — a second line for the User who filed.
 function PartyHeader({ parties, nameNode }: { parties: Parties; nameNode?: (name: string) => React.ReactNode }) {
-  const { purchaser, user, confirmed } = parties;
+  const { purchaser, user, primaryUser, confirmed } = parties;
   return (
     <span>
       {nameNode ? nameNode(purchaser) : <strong>{purchaser}</strong>}
@@ -572,6 +574,12 @@ function PartyHeader({ parties, nameNode }: { parties: Parties; nameNode?: (name
           ? 'Purchaser of record — the refund is processed against this person (BR-13).'
           : 'Purchaser not yet confirmed — no purchaser attestation on file (FR-11/BR-15).'}
       />
+      {primaryUser && (
+        <span style={{ display: 'block', fontSize: 12, color: '#718096', marginTop: 2 }}>
+          <strong style={{ fontWeight: 600 }}>{primaryUser}</strong>
+          <PartyPill text="Primary user" tone="user" title="The primary user of the machine (set on the purchaser's customer record) — may differ from who paid or who filed." />
+        </span>
+      )}
       {user && (
         <span style={{ display: 'block', fontSize: 12, color: '#718096', marginTop: 2 }}>
           <strong style={{ fontWeight: 600 }}>{user}</strong>
