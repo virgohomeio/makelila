@@ -543,22 +543,25 @@ function PurchaserLinkSection({ customer, allCustomers, onChanged }: {
 function PrimaryUserSection({ customer, onChanged }: { customer: Customer; onChanged: () => void }) {
   const [name, setName] = useState(customer.primary_user_name ?? '');
   const [phone, setPhone] = useState(customer.primary_user_phone ?? '');
+  const [email, setEmail] = useState(customer.primary_user_email ?? '');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   useEffect(() => {
     setName(customer.primary_user_name ?? '');
     setPhone(customer.primary_user_phone ?? '');
-  }, [customer.id, customer.primary_user_name, customer.primary_user_phone]);
+    setEmail(customer.primary_user_email ?? '');
+  }, [customer.id, customer.primary_user_name, customer.primary_user_phone, customer.primary_user_email]);
 
   const dirty =
     (name.trim() || null) !== (customer.primary_user_name ?? null) ||
-    (phone.trim() || null) !== (customer.primary_user_phone ?? null);
+    (phone.trim() || null) !== (customer.primary_user_phone ?? null) ||
+    (email.trim() || null) !== (customer.primary_user_email ?? null);
 
   const save = async (clear?: boolean) => {
     setBusy(true); setErr(null);
     try {
-      await setPrimaryUser(customer.id, clear ? null : name, clear ? null : phone);
-      if (clear) { setName(''); setPhone(''); }
+      await setPrimaryUser(customer.id, clear ? null : name, clear ? null : phone, clear ? null : email);
+      if (clear) { setName(''); setPhone(''); setEmail(''); }
       onChanged();
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
     finally { setBusy(false); }
@@ -573,9 +576,11 @@ function PrimaryUserSection({ customer, onChanged }: { customer: Customer; onCha
         value={name} disabled={busy} onChange={e => setName(e.target.value)} />
       <input className={styles.searchInput} style={{ marginTop: 4 }} type="tel" placeholder="Primary user phone (optional)"
         value={phone} disabled={busy} onChange={e => setPhone(e.target.value)} />
+      <input className={styles.searchInput} style={{ marginTop: 4 }} type="email" placeholder="Primary user email (optional)"
+        value={email} disabled={busy} onChange={e => setEmail(e.target.value)} />
       <div style={{ marginTop: 6, display: 'flex', gap: 8 }}>
         <button className={styles.linkBtn} disabled={busy || !dirty} onClick={() => void save()}>Save</button>
-        {(customer.primary_user_name || customer.primary_user_phone) && (
+        {(customer.primary_user_name || customer.primary_user_phone || customer.primary_user_email) && (
           <button className={styles.linkBtn} disabled={busy} onClick={() => void save(true)}>Clear</button>
         )}
       </div>

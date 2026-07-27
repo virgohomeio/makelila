@@ -62,6 +62,7 @@ export type Customer = {
   // usually not a customer of record. Surfaced on the refund card.
   primary_user_name: string | null;
   primary_user_phone: string | null;
+  primary_user_email: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -450,13 +451,16 @@ export async function setPurchaser(userId: string, purchaserId: string | null): 
 
 /** FR-6: set (or clear) the primary user of this customer's machine — a person
  *  who is usually not a customer of record (e.g. a spouse), so free-text. */
-export async function setPrimaryUser(customerId: string, name: string | null, phone: string | null): Promise<void> {
-  const cleanName = name?.trim() || null;
-  const cleanPhone = phone?.trim() || null;
-  const { error } = await supabase.from('customers')
-    .update({ primary_user_name: cleanName, primary_user_phone: cleanPhone }).eq('id', customerId);
+export async function setPrimaryUser(
+  customerId: string, name: string | null, phone: string | null, email: string | null,
+): Promise<void> {
+  const { error } = await supabase.from('customers').update({
+    primary_user_name: name?.trim() || null,
+    primary_user_phone: phone?.trim() || null,
+    primary_user_email: email?.trim() || null,
+  }).eq('id', customerId);
   if (error) throw error;
-  await logAction('customer_primary_user_set', customerId, cleanName ?? 'cleared');
+  await logAction('customer_primary_user_set', customerId, name?.trim() || 'cleared');
 }
 
 /** FR-6: the primary user of the machine to show on a refund card. Given the
