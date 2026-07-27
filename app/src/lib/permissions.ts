@@ -85,6 +85,7 @@ export function isLeadership(role: Role | null | undefined): boolean {
  *  can_view_posting() RLS helper — this client-side mirror is for
  *  UI gating only, not the security boundary). */
 export function canViewPosting(role: Role | null | undefined, isAssignedInterviewer: boolean): boolean {
+  if (!role) return false;
   if (isLeadership(role)) return true;
   return isAssignedInterviewer;
 }

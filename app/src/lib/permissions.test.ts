@@ -92,6 +92,12 @@ describe('canViewPosting', () => {
   it('returns false for a null role with no assignment', () => {
     expect(canViewPosting(null, false)).toBe(false);
   });
+  it('returns false for a null role even if assigned as interviewer', () => {
+    expect(canViewPosting(null, true)).toBe(false);
+  });
+  it('returns false for an undefined role even if assigned as interviewer', () => {
+    expect(canViewPosting(undefined, true)).toBe(false);
+  });
 });
 
 describe('canView hiring module', () => {
