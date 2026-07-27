@@ -134,7 +134,6 @@ describe('mutations', () => {
   });
 
   it('addPostingInterviewer inserts a posting_interviewers row', async () => {
-    mockResolve.mockResolvedValueOnce({ error: null });
     await addPostingInterviewer('p1', 'u2');
     expect(mockInsert).toHaveBeenCalledWith({ posting_id: 'p1', profile_id: 'u2' });
   });
