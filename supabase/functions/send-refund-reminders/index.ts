@@ -25,14 +25,16 @@ const APP_REFUNDS_URL = 'https://lila.vip/post-shipment?tab=refunds';
 const REMINDER_DAYS = 3;
 const REMINDER_MS = REMINDER_DAYS * 86_400_000;
 
-// Role → holder addresses (env-overridable so swapping a holder needs no code
-// change). Mirrors REFUND_EXECUTORS in app/src/lib/postShipment.ts.
-const MANAGER_EMAIL  = Deno.env.get('REFUND_MANAGER_EMAIL')  || 'george@virgohome.io';
-const FINANCE_EMAIL  = Deno.env.get('REFUND_FINANCE_EMAIL')  || 'yueli@virgohome.io';
-const PAYMENTS_EMAIL = Deno.env.get('REFUND_PAYMENTS_EMAIL') || 'pedrum@virgohome.io';
+// Column owner → holder addresses (env-overridable). Mirrors
+// REFUND_COLUMN_OWNERS in app/src/modules/PostShipment/RefundsTab.tsx.
+const COMPLETENESS_EMAIL = Deno.env.get('REFUND_COMPLETENESS_EMAIL') || 'reina@virgohome.io';
+const MANAGER_EMAIL      = Deno.env.get('REFUND_MANAGER_EMAIL')      || 'george@virgohome.io';
+const FINANCE_EMAIL      = Deno.env.get('REFUND_FINANCE_EMAIL')      || 'yueli@virgohome.io';
+const PAYMENTS_EMAIL     = Deno.env.get('REFUND_PAYMENTS_EMAIL')     || 'pedrum@virgohome.io';
 
-const ACTION_STATUSES = ['manager_review', 'finance_review', 'refund_queue'] as const;
+const ACTION_STATUSES = ['submitted', 'manager_review', 'finance_review', 'refund_queue'] as const;
 const STAGE_LABEL: Record<string, string> = {
+  submitted: 'Completeness',
   manager_review: 'Manager review',
   finance_review: 'Finance review',
   refund_queue: 'Refund Queue',
@@ -184,6 +186,7 @@ async function handle(req: Request): Promise<Response> {
  *  submitted_at is the closest proxy. */
 function stageEntry(r: RefundRow): string | null {
   switch (r.status) {
+    case 'submitted':      return r.submitted_at;
     case 'manager_review': return r.submitted_at;
     case 'finance_review': return r.manager_approved_at ?? r.submitted_at;
     case 'refund_queue':   return r.finance_approved_at ?? r.submitted_at;
@@ -191,11 +194,15 @@ function stageEntry(r: RefundRow): string | null {
   }
 }
 
+// Each column has one owner who is nudged about cards sitting in it.
 function recipientFor(r: RefundRow): string {
-  if (r.status === 'manager_review') return MANAGER_EMAIL;
-  if (r.status === 'finance_review') return FINANCE_EMAIL;
-  // refund_queue — route to the executor, same rule as the app's refundExecutorEmail.
-  return (r.refund_method === 'shopify' || r.refund_method === 'sezzle') ? PAYMENTS_EMAIL : FINANCE_EMAIL;
+  switch (r.status) {
+    case 'submitted':      return COMPLETENESS_EMAIL; // Reina
+    case 'manager_review': return MANAGER_EMAIL;      // George
+    case 'finance_review': return FINANCE_EMAIL;      // Julie / Huayi
+    case 'refund_queue':   return PAYMENTS_EMAIL;     // Pedrum
+    default:               return MANAGER_EMAIL;
+  }
 }
 
 function summaryLine(c: RefundRow, now: number): string {

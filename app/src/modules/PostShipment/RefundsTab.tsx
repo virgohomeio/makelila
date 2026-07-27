@@ -48,13 +48,31 @@ const STAR = '★';
 type ColKey = 'submitted' | 'manager_review' | 'finance_review' | 'refund_queue' | 'refunded' | 'denied';
 
 const COLUMNS: { key: ColKey; label: string; helper: string }[] = [
-  { key: 'submitted',      label: 'Completeness',   helper: 'Account manager — submit when ready' },
-  { key: 'manager_review', label: 'Manager review',  helper: 'Awaiting George' },
-  { key: 'finance_review', label: 'Finance review',  helper: 'Awaiting Julie / Huayi (amount)' },
-  { key: 'refund_queue',   label: 'Refund Queue',    helper: 'Approved — execute the payout' },
+  { key: 'submitted',      label: 'Completeness',   helper: 'Reina — submit when ready' },
+  { key: 'manager_review', label: 'Manager review',  helper: 'George approves' },
+  { key: 'finance_review', label: 'Finance review',  helper: 'Julie / Huayi approve (amount)' },
+  { key: 'refund_queue',   label: 'Refund Queue',    helper: 'Pedrum executes the payout' },
   { key: 'refunded',       label: 'Refunded',        helper: 'Payment executed' },
   { key: 'denied',         label: 'Denied',          helper: 'Rejected — shows which stage' },
 ];
+
+// Per-person column ownership: only a column's owner may approve/move its cards
+// FORWARD to the next column. Denials and back-moves stay open to everyone.
+// Column keys are the refund_approval statuses, plus the pre-refund stages
+// 'intake' (Return Form Submitted) and 'inspection' (Return & Inspection).
+// Keep in sync with the send-refund-reminders edge function recipients.
+const REFUND_COLUMN_OWNERS: Record<string, string[]> = {
+  intake:         ['reina@virgohome.io'],
+  inspection:     ['reina@virgohome.io'],
+  submitted:      ['reina@virgohome.io'],
+  manager_review: ['george@virgohome.io'],
+  finance_review: ['yueli@virgohome.io', 'huayi@virgohome.io'],
+  refund_queue:   ['pedrum@virgohome.io'],
+};
+function ownsRefundColumn(email: string | null | undefined, column: string | null | undefined): boolean {
+  const e = (email ?? '').toLowerCase().trim();
+  return !!column && !!e && (REFUND_COLUMN_OWNERS[column] ?? []).includes(e);
+}
 
 export function RefundsTab() {
   const { approvals, loading: aLoading } = useRefundApprovals();
@@ -311,6 +329,7 @@ export function RefundsTab() {
             <InspectionCard
               key={r.id}
               r={r}
+              canOwn={ownsRefundColumn(userEmail, preRefundStage(r.status))}
               parties={partiesForReturn(r)}
               usage={usageForEmail(email)}
               invoices={invoicesForEmail(email)}
@@ -383,6 +402,7 @@ export function RefundsTab() {
                     refund={r}
                     linkedReturn={r.return_id ? returnsById.get(r.return_id) ?? null : null}
                     parties={partiesForRefund(r, r.return_id ? returnsById.get(r.return_id) ?? null : null)}
+                    canApproveHere={ownsRefundColumn(userEmail, r.status)}
                     usage={usageFor(r, r.return_id ? returnsById.get(r.return_id) ?? null : null)}
                     invoices={invoicesFor(r, r.return_id ? returnsById.get(r.return_id) ?? null : null)}
                     tickets={ticketsFor(r, r.return_id ? returnsById.get(r.return_id) ?? null : null)}
@@ -405,6 +425,7 @@ export function RefundsTab() {
           refund={selectedRefund}
           linkedReturn={selectedReturn}
           parties={partiesForRefund(selectedRefund, selectedReturn)}
+          canApproveHere={ownsRefundColumn(userEmail, selectedRefund.status)}
           usage={usageFor(selectedRefund, selectedReturn)}
           invoices={invoicesFor(selectedRefund, selectedReturn)}
           tickets={ticketsFor(selectedRefund, selectedReturn)}
@@ -965,10 +986,11 @@ function TicketQuickView({ ticket, onClose }: { ticket: ServiceTicket; onClose: 
 // that doesn't yet have a refund request — so the inspection stage carries all
 // the same context as the downstream refund stages.
 function InspectionCard({
-  r, parties, usage, invoices, tickets, onOpenTicket, onView, onCompile, onError,
+  r, parties, canOwn, usage, invoices, tickets, onOpenTicket, onView, onCompile, onError,
 }: {
   r: ReturnRow;
   parties: Parties;
+  canOwn: boolean;
   usage: RefundUsageWindow;
   invoices: CustomerInvoice[];
   tickets: ServiceTicket[];
@@ -1017,7 +1039,8 @@ function InspectionCard({
         <select
           value={r.status}
           onChange={e => void runStatus(e.target.value as ReturnStatus)}
-          disabled={statusBusy}
+          disabled={statusBusy || !canOwn}
+          title={canOwn ? undefined : 'Only Reina can change the unit status in these columns'}
           style={{ fontSize: 11, fontWeight: 600, padding: '2px 6px', borderRadius: 4,
                    border: '1px solid #cbd5e0', background: '#edf2f7', color: '#2d3748',
                    cursor: 'pointer', maxWidth: 160 }}
@@ -1045,22 +1068,37 @@ function InspectionCard({
       </div>
       <div className={styles.refundActions} onClick={e => e.stopPropagation()}>
         {preRefundStage(r.status) === 'intake' ? (
-          <button className={styles.refundApproveBtn} disabled={statusBusy}
-            onClick={() => void runStatus('received')}
-            title="Unit is back — move this case to the Return & Inspection column">
-            Move to Return &amp; Inspection →
-          </button>
+          canOwn ? (
+            <>
+              <button className={styles.refundApproveBtn} disabled={statusBusy}
+                onClick={() => void runStatus('received')}
+                title="Unit is back — move this case to the Return & Inspection column">
+                Move to Return &amp; Inspection →
+              </button>
+              {r.disposition === 'discard' && (
+                <button className={styles.refundApproveBtn} onClick={onCompile}
+                  title="Customer is discarding the unit (no return) — compile straight to Completeness, skipping Return & Inspection">
+                  Discard → Completeness
+                </button>
+              )}
+            </>
+          ) : (
+            <span className={styles.refundCardHint}>Reina moves these forward</span>
+          )
         ) : (
           <>
+            {/* back-move stays open to everyone */}
             <button className={styles.refundCloseBtn} disabled={statusBusy}
               onClick={() => void runStatus('created')}
               title="Move this case back to the Return Form Submitted column">
               ← Return Form Submitted
             </button>
-            <button className={styles.refundApproveBtn} onClick={onCompile}
-              title="Compile the case into a refund request (moves it to the Completeness column)">
-              Compile → Completeness
-            </button>
+            {canOwn && (
+              <button className={styles.refundApproveBtn} onClick={onCompile}
+                title="Compile the case into a refund request (moves it to the Completeness column)">
+                Compile → Completeness
+              </button>
+            )}
           </>
         )}
       </div>
@@ -1069,11 +1107,12 @@ function InspectionCard({
 }
 
 function RefundCard({
-  refund, linkedReturn, parties, usage, invoices, tickets, onOpenTicket, canFlow, selected, onSelect, onError, onOpenFinanceModal,
+  refund, linkedReturn, parties, canApproveHere, usage, invoices, tickets, onOpenTicket, canFlow, selected, onSelect, onError, onOpenFinanceModal,
 }: {
   refund: RefundApproval;
   linkedReturn: ReturnRow | null;
   parties: Parties;
+  canApproveHere: boolean;
   usage: RefundUsageWindow;
   invoices: CustomerInvoice[];
   tickets: ServiceTicket[];
@@ -1127,8 +1166,8 @@ function RefundCard({
       if (confirmMode === 'approve') {
         await managerApprove(refund.id, inputVal.trim() || undefined);
       } else {
-        const stage: 'manager_review' | 'finance_review' =
-          refund.status === 'finance_review' ? 'finance_review' : 'manager_review';
+        const stage = (['submitted', 'manager_review', 'finance_review', 'refund_queue'].includes(refund.status)
+          ? refund.status : 'manager_review') as 'submitted' | 'manager_review' | 'finance_review' | 'refund_queue';
         await denyRefund(refund.id, stage, inputVal.trim());
       }
       setConfirmMode(null);
@@ -1150,14 +1189,13 @@ function RefundCard({
     finally { setBusy(false); }
   };
 
-  // Everyone involved can advance a card to the next column. The distinct
-  // labels stay (Submit / Approve / etc.), but the gate is now the shared
-  // move_refund_flow permission rather than a per-role one.
-  const canActSubmit = refund.status === 'submitted' && canFlow;
-  const canActManager = refund.status === 'manager_review' && canFlow;
-  const canActFinance = refund.status === 'finance_review' && canFlow;
-  const canActExecute = refund.status === 'refund_queue' && canFlow;
-  const canDeny = canActManager || canActFinance;
+  // Only the OWNER of a card's column may approve/move it forward
+  // (canApproveHere). Denial + back-moves stay open to everyone (canFlow).
+  const canActSubmit = refund.status === 'submitted' && canApproveHere;
+  const canActManager = refund.status === 'manager_review' && canApproveHere;
+  const canActFinance = refund.status === 'finance_review' && canApproveHere;
+  const canActExecute = refund.status === 'refund_queue' && canApproveHere;
+  const canDeny = canFlow && ['submitted', 'manager_review', 'finance_review', 'refund_queue'].includes(refund.status);
 
   // FR-11: flag a case whose purchaser linkage is unverified; the manager can
   // override (BR-15) before approving.
@@ -1390,11 +1428,12 @@ function RefundCard({
 // Renders the linked return-form data + approve / deny actions.
 // ============================================================================
 function RefundDetailPanel({
-  refund, linkedReturn, parties, usage, invoices, tickets, onOpenTicket, queuedReplacements, canFlow, onClose, onError, onOpenFinanceModal,
+  refund, linkedReturn, parties, canApproveHere, usage, invoices, tickets, onOpenTicket, queuedReplacements, canFlow, onClose, onError, onOpenFinanceModal,
 }: {
   refund: RefundApproval;
   linkedReturn: ReturnRow | null;
   parties: Parties;
+  canApproveHere: boolean;
   usage: RefundUsageWindow;
   invoices: CustomerInvoice[];
   tickets: ServiceTicket[];
@@ -1411,11 +1450,13 @@ function RefundDetailPanel({
   const [newNote, setNewNote] = useState('');
   const meta = REFUND_STATUS_META[refund.status];
 
-  const canActSubmit = refund.status === 'submitted' && canFlow;
-  const canActManager = refund.status === 'manager_review' && canFlow;
-  const canActFinance = refund.status === 'finance_review' && canFlow;
-  const canActExecute = refund.status === 'refund_queue' && canFlow;
+  // Forward/approve is owner-only (canApproveHere); deny is open to everyone.
+  const canActSubmit = refund.status === 'submitted' && canApproveHere;
+  const canActManager = refund.status === 'manager_review' && canApproveHere;
+  const canActFinance = refund.status === 'finance_review' && canApproveHere;
+  const canActExecute = refund.status === 'refund_queue' && canApproveHere;
   const canAct = canActManager || canActFinance;
+  const canDeny = canFlow && ['submitted', 'manager_review', 'finance_review', 'refund_queue'].includes(refund.status);
 
   // Send a card back a column (mirrors RefundCard).
   const backTarget: RefundBackTarget | 'uncompile' | null =
@@ -1515,8 +1556,8 @@ function RefundDetailPanel({
         await managerApprove(refund.id, inputVal.trim() || undefined);
         onClose();
       } else {
-        const stage: 'manager_review' | 'finance_review' =
-          refund.status === 'finance_review' ? 'finance_review' : 'manager_review';
+        const stage = (['submitted', 'manager_review', 'finance_review', 'refund_queue'].includes(refund.status)
+          ? refund.status : 'manager_review') as 'submitted' | 'manager_review' | 'finance_review' | 'refund_queue';
         await denyRefund(refund.id, stage, inputVal.trim());
         onClose();
       }
@@ -1739,7 +1780,7 @@ function RefundDetailPanel({
                 {busy ? '…' : '✓ Mark refunded (executed)'}
               </button>
             )}
-            {canAct && (
+            {canDeny && (
               <button onClick={openDeny} disabled={busy} className={styles.refundDetailDenyBtn}>
                 ✕ Deny
               </button>

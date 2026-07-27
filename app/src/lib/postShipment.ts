@@ -1134,7 +1134,7 @@ export async function executeRefund(id: string, note?: string): Promise<void> {
   });
 }
 
-export async function denyRefund(id: string, stage: 'manager_review' | 'finance_review', reason: string): Promise<void> {
+export async function denyRefund(id: string, stage: 'submitted' | 'manager_review' | 'finance_review' | 'refund_queue', reason: string): Promise<void> {
   const userId = await currentUserId();
   const { error } = await supabase.from('refund_approvals').update({
     status: 'denied',
