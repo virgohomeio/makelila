@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../supabase';
 import { classifyChannel } from './journey';
-import { manualCreative } from './manualCreatives';
+import { manualCreative, manualAge, manualGender } from './manualCreatives';
 import type { Order } from '../orders';
 
 // Auto sales-attribution report — the programmatic version of the manual
@@ -196,8 +196,11 @@ export function sourceLabel(channel: string): string {
   if (!channel || channel === 'Unknown' || channel === '—') return UNKNOWN;
   // The manual tracker wrote Facebook/Instagram paid simply as "Meta Ad".
   if (/^(Facebook|Instagram) Paid$/.test(channel) || channel === 'Paid Social') return 'Meta Ad';
-  // Search engines: match the manual tracker's "Google Organic Search/SEO" phrasing.
-  if (channel === 'Google Organic' || channel === 'Bing Organic') return `${channel} Search/SEO`;
+  // Search engines: the manual tracker calls organic search "Google Organic
+  // Search/SEO". Shopify reports it as the generic 'organic_search' → "Organic
+  // Search"; label that and Google organic the same way.
+  if (channel === 'Google Organic' || channel === 'Organic Search') return 'Google Organic Search/SEO';
+  if (channel === 'Bing Organic') return 'Bing Organic Search/SEO';
   return channel;
 }
 
@@ -284,10 +287,11 @@ export function reportCells(r: SalesRow): string[] {
     r.city || UNKNOWN,
     r.region || UNKNOWN,
     (r.country && COUNTRY_NAME[r.country]) || r.country || UNKNOWN,
-    r.age && r.age.toLowerCase() !== 'unknown' ? r.age : UNKNOWN,       // best-effort from Meta
-    r.gender && r.gender.toLowerCase() !== 'unknown'                    // best-effort from Meta
+    // Operator-tracked age/gender (from the manual sheets) wins; else best-effort from Meta; else UNKNOWN.
+    manualAge(r.name, date) ?? (r.age && r.age.toLowerCase() !== 'unknown' ? r.age : UNKNOWN),
+    manualGender(r.name, date) ?? (r.gender && r.gender.toLowerCase() !== 'unknown'
       ? r.gender.charAt(0).toUpperCase() + r.gender.slice(1).toLowerCase()
-      : UNKNOWN,
+      : UNKNOWN),
     source,
     r.plan,
     yesNo(codes, 'WELCOMELILA'),
