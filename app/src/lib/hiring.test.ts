@@ -9,7 +9,7 @@ import {
 } from './hiring';
 
 const {
-  mockResolve, mockOn, mockSubscribe, mockUnsubscribe, mockChannel, mockUpdate, mockInsert, mockSingle, mockEq,
+  mockResolve, mockChannel, mockUpdate, mockInsert, mockSingle, mockEq,
   mockGetUser, mockInvoke, mockStorageUpload, mockCreateSignedUrl,
 } = vi.hoisted(() => {
     const mockResolve = vi.fn();
@@ -18,7 +18,7 @@ const {
     const mockSubscribe = vi.fn().mockReturnThis();
     const mockChannel = vi.fn(() => ({ on: mockOn, subscribe: mockSubscribe, unsubscribe: mockUnsubscribe }));
     const mockSingle = vi.fn();
-    const mockEq = vi.fn(() => ({ single: mockSingle }));
+    const mockEq = vi.fn((): { single?: typeof mockSingle; then?: (onFulfilled: (v: unknown) => unknown) => unknown } => ({ single: mockSingle }));
     const mockUpdate = vi.fn(() => ({ eq: mockEq }));
     const mockInsert = vi.fn(() => ({ select: () => ({ single: mockSingle }) }));
     const mockGetUser = vi.fn();
@@ -26,7 +26,7 @@ const {
     const mockStorageUpload = vi.fn();
     const mockCreateSignedUrl = vi.fn();
     return {
-      mockResolve, mockOn, mockSubscribe, mockUnsubscribe, mockChannel, mockUpdate, mockInsert, mockSingle, mockEq,
+      mockResolve, mockChannel, mockUpdate, mockInsert, mockSingle, mockEq,
       mockGetUser, mockInvoke, mockStorageUpload, mockCreateSignedUrl,
     };
   });
@@ -78,6 +78,16 @@ describe('useCandidates', () => {
     const { result } = renderHook(() => useCandidates('p1'));
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.candidates).toHaveLength(1);
+  });
+});
+
+describe('useInterviews', () => {
+  it('loads interviews for a candidate and stops loading', async () => {
+    mockResolve.mockResolvedValueOnce({ data: [{ id: 'i1', candidate_id: 'c1', round_label: 'Screen' }], error: null });
+    const { result } = renderHook(() => useInterviews('c1'));
+    expect(result.current.loading).toBe(true);
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.interviews).toHaveLength(1);
   });
 });
 
