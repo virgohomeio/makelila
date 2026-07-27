@@ -1,5 +1,5 @@
 import { assertEquals } from 'https://deno.land/std@0.224.0/assert/mod.ts';
-import { buildScoringPrompt, matchExistingStub } from './index.ts';
+import { buildScoringPrompt, matchExistingStub, requireLeadershipRole } from './index.ts';
 
 Deno.test('buildScoringPrompt: includes the JD text and every rubric dimension', () => {
   const prompt = buildScoringPrompt(
@@ -23,4 +23,21 @@ Deno.test('matchExistingStub: returns null when no name matches', () => {
 
 Deno.test('matchExistingStub: returns null for an empty candidate list', () => {
   assertEquals(matchExistingStub([], 'Anyone'), null);
+});
+
+Deno.test('requireLeadershipRole: allows finance and admin through', () => {
+  assertEquals(requireLeadershipRole('finance'), null);
+  assertEquals(requireLeadershipRole('admin'), null);
+});
+
+Deno.test('requireLeadershipRole: rejects a non-leadership internal user (e.g. recruiter) with 403', async () => {
+  const res = requireLeadershipRole('recruiter');
+  assertEquals(res?.status, 403);
+  const body = await res?.json();
+  assertEquals(body.error, 'This function is restricted to finance/admin (Hiring module leadership).');
+});
+
+Deno.test('requireLeadershipRole: rejects a missing/null role with 403', () => {
+  assertEquals(requireLeadershipRole(null)?.status, 403);
+  assertEquals(requireLeadershipRole(undefined)?.status, 403);
 });

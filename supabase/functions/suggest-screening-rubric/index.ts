@@ -11,6 +11,17 @@ const MODEL = 'claude-haiku-4-5-20251001';
 
 export type RubricDimension = { dimension: string; weight_pct: number };
 
+/** Hiring module leadership gate (finance/admin only) — mirrors
+ *  app/src/lib/permissions.ts isLeadership(). authenticate() only checks
+ *  profiles.is_internal, which doesn't match this module's own
+ *  leadership-only restriction. Returns a 403 Response to short-circuit
+ *  the caller when the profile's role isn't leadership, or null to
+ *  continue. Exported for unit testing without a live profiles lookup. */
+export function requireLeadershipRole(role: string | null | undefined): Response | null {
+  if (role === 'finance' || role === 'admin') return null;
+  return json({ error: 'This function is restricted to finance/admin (Hiring module leadership).' }, 403);
+}
+
 /** Validates a Claude-proposed rubric: non-empty array, every entry has a
  *  non-empty dimension label and a positive weight, weights sum to 100
  *  (within floating-point tolerance). Exported for unit testing. */
@@ -53,6 +64,15 @@ async function handle(req: Request): Promise<Response> {
   if (caller.kind !== 'user') {
     return json({ error: 'This function requires an operator JWT — cron-secret not accepted.' }, 403);
   }
+
+  const { data: callerProfile, error: profileErr } = await admin
+    .from('profiles')
+    .select('role')
+    .eq('id', caller.user_id)
+    .maybeSingle();
+  if (profileErr) return json({ error: `Profile lookup: ${profileErr.message}` }, 500);
+  const leadershipRejection = requireLeadershipRole(callerProfile?.role);
+  if (leadershipRejection) return leadershipRejection;
 
   const { job_description } = await req.json().catch(() => ({})) as { job_description?: string };
   if (!job_description?.trim()) return json({ error: 'job_description is required' }, 400);

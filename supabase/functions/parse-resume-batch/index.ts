@@ -63,6 +63,20 @@ Respond with JSON ONLY, matching exactly:
 }`;
 }
 
+/** Hiring module leadership gate (finance/admin only) — mirrors
+ *  app/src/lib/permissions.ts isLeadership(). authenticate() only checks
+ *  profiles.is_internal, which is not enough here: this function inserts
+ *  candidate rows via the service-role client, bypassing the client-side
+ *  RLS insert restriction, so any internal user could otherwise create
+ *  candidate records or burn Claude API calls outside the leadership-only
+ *  UI this is meant to back. Returns a 403 Response to short-circuit the
+ *  caller when the profile's role isn't leadership, or null to continue.
+ *  Exported for unit testing without a live profiles lookup. */
+export function requireLeadershipRole(role: string | null | undefined): Response | null {
+  if (role === 'finance' || role === 'admin') return null;
+  return json({ error: 'This function is restricted to finance/admin (Hiring module leadership).' }, 403);
+}
+
 /** Case-insensitive exact-name match against a posting's existing stub
  *  rows. Exported for unit testing — the real caller passes rows already
  *  scoped to enrichment_status='stub' for the target posting_id. */
@@ -98,6 +112,15 @@ async function handle(req: Request): Promise<Response> {
   if (caller.kind !== 'user') {
     return json({ error: 'This function requires an operator JWT — cron-secret not accepted.' }, 403);
   }
+
+  const { data: callerProfile, error: profileErr } = await admin
+    .from('profiles')
+    .select('role')
+    .eq('id', caller.user_id)
+    .maybeSingle();
+  if (profileErr) return json({ error: `Profile lookup: ${profileErr.message}` }, 500);
+  const leadershipRejection = requireLeadershipRole(callerProfile?.role);
+  if (leadershipRejection) return leadershipRejection;
 
   const input = await req.json().catch(() => null) as ParseResumeInput | null;
   if (!input?.posting_id || !input.storage_path || !input.mime_type || !input.source) {

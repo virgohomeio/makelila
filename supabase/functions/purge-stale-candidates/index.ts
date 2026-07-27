@@ -58,7 +58,7 @@ async function handle(req: Request): Promise<Response> {
       }
       const { error: updateErr } = await admin.from('candidates').update({
         full_name: '[purged]', email: null, phone: null, resume_url: null,
-        indeed_relay_email: null,
+        indeed_relay_email: null, indeed_dashboard_url: null,
       }).eq('id', row.id);
       if (updateErr) { errors.push(`${row.id}: ${updateErr.message}`); continue; }
       purged++;

@@ -39,7 +39,7 @@ export function ApplicantsTab({ postingId, pipelineStages, onSelectCandidate }: 
 function CandidateCard({ candidate, pipelineStages, onSelectCandidate }: {
   candidate: Candidate; pipelineStages: string[]; onSelectCandidate: (id: string) => void;
 }) {
-  const [scores, setScores] = useState<Record<string, number>>(candidate.scores);
+  const [scores, setScores] = useState<Record<string, number>>({ ...(candidate.suggested_scores ?? {}), ...candidate.scores });
   const [resumeError, setResumeError] = useState<string | null>(null);
   const isStub = candidate.enrichment_status === 'stub';
 
