@@ -83,13 +83,13 @@ export function useJobPostings(): { postings: JobPosting[]; loading: boolean } {
       setLoading(false);
     })();
     const channel = supabase
-      .channel('job_postings:realtime')
+      .channel(`job_postings:realtime:${crypto.randomUUID()}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'job_postings' }, () => {
         supabase.from('job_postings').select(POSTING_COLUMNS).order('created_at', { ascending: false })
           .then(({ data }) => { if (data) setPostings(data as JobPosting[]); });
       })
       .subscribe();
-    return () => { cancelled = true; void channel.unsubscribe(); };
+    return () => { cancelled = true; void supabase.removeChannel(channel); };
   }, []);
 
   return { postings, loading };
@@ -116,14 +116,14 @@ export function useCandidates(postingId: string | null): { candidates: Candidate
       setLoading(false);
     })();
     const channel = supabase
-      .channel(`candidates:${postingId}`)
+      .channel(`candidates:${postingId}:${crypto.randomUUID()}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'candidates', filter: `posting_id=eq.${postingId}` }, () => {
         supabase.from('candidates').select(CANDIDATE_COLUMNS).eq('posting_id', postingId)
           .order('applied_at', { ascending: false })
           .then(({ data }) => { if (data) setCandidates(data as Candidate[]); });
       })
       .subscribe();
-    return () => { cancelled = true; void channel.unsubscribe(); };
+    return () => { cancelled = true; void supabase.removeChannel(channel); };
   }, [postingId]);
 
   return { candidates, loading };

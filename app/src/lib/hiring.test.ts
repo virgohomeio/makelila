@@ -10,13 +10,14 @@ import {
 
 const {
   mockResolve, mockChannel, mockUpdate, mockInsert, mockSingle, mockEq,
-  mockGetUser, mockInvoke, mockStorageUpload, mockCreateSignedUrl,
+  mockGetUser, mockInvoke, mockStorageUpload, mockCreateSignedUrl, mockRemoveChannel,
 } = vi.hoisted(() => {
     const mockResolve = vi.fn();
     const mockUnsubscribe = vi.fn();
     const mockOn = vi.fn().mockReturnThis();
     const mockSubscribe = vi.fn().mockReturnThis();
     const mockChannel = vi.fn(() => ({ on: mockOn, subscribe: mockSubscribe, unsubscribe: mockUnsubscribe }));
+    const mockRemoveChannel = vi.fn();
     const mockSingle = vi.fn();
     const mockEq = vi.fn((): { single?: typeof mockSingle; then?: (onFulfilled: (v: unknown) => unknown) => unknown } => ({ single: mockSingle }));
     const mockUpdate = vi.fn(() => ({ eq: mockEq }));
@@ -27,7 +28,7 @@ const {
     const mockCreateSignedUrl = vi.fn();
     return {
       mockResolve, mockChannel, mockUpdate, mockInsert, mockSingle, mockEq,
-      mockGetUser, mockInvoke, mockStorageUpload, mockCreateSignedUrl,
+      mockGetUser, mockInvoke, mockStorageUpload, mockCreateSignedUrl, mockRemoveChannel,
     };
   });
 
@@ -47,6 +48,7 @@ vi.mock('./supabase', () => {
     supabase: {
       from: () => builder,
       channel: mockChannel,
+      removeChannel: mockRemoveChannel,
       auth: { getUser: mockGetUser },
       functions: { invoke: mockInvoke },
       storage: { from: () => ({ upload: mockStorageUpload, createSignedUrl: mockCreateSignedUrl }) },
@@ -64,6 +66,27 @@ describe('useJobPostings', () => {
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.postings).toHaveLength(1);
   });
+
+  it('cleans up by calling supabase.removeChannel, not just channel.unsubscribe', async () => {
+    mockResolve.mockResolvedValueOnce({ data: [], error: null });
+    const { result, unmount } = renderHook(() => useJobPostings());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    const channelInstance = mockChannel.mock.results[0]?.value;
+    unmount();
+    expect(mockRemoveChannel).toHaveBeenCalledWith(channelInstance);
+  });
+
+  it('subscribes with a unique channel topic on each mount (StrictMode double-mount safe)', () => {
+    mockResolve.mockResolvedValue({ data: [], error: null });
+    const { unmount: unmount1 } = renderHook(() => useJobPostings());
+    const { unmount: unmount2 } = renderHook(() => useJobPostings());
+    expect(mockChannel).toHaveBeenCalledTimes(2);
+    const [topic1] = mockChannel.mock.calls[0] as unknown as [string];
+    const [topic2] = mockChannel.mock.calls[1] as unknown as [string];
+    expect(topic1).not.toBe(topic2);
+    unmount1();
+    unmount2();
+  });
 });
 
 describe('useCandidates', () => {
@@ -78,6 +101,27 @@ describe('useCandidates', () => {
     const { result } = renderHook(() => useCandidates('p1'));
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.candidates).toHaveLength(1);
+  });
+
+  it('cleans up by calling supabase.removeChannel, not just channel.unsubscribe', async () => {
+    mockResolve.mockResolvedValueOnce({ data: [], error: null });
+    const { result, unmount } = renderHook(() => useCandidates('p1'));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    const channelInstance = mockChannel.mock.results[0]?.value;
+    unmount();
+    expect(mockRemoveChannel).toHaveBeenCalledWith(channelInstance);
+  });
+
+  it('subscribes with a unique channel topic when two components use the same postingId concurrently', () => {
+    mockResolve.mockResolvedValue({ data: [], error: null });
+    const { unmount: unmount1 } = renderHook(() => useCandidates('p1'));
+    const { unmount: unmount2 } = renderHook(() => useCandidates('p1'));
+    expect(mockChannel).toHaveBeenCalledTimes(2);
+    const [topic1] = mockChannel.mock.calls[0] as unknown as [string];
+    const [topic2] = mockChannel.mock.calls[1] as unknown as [string];
+    expect(topic1).not.toBe(topic2);
+    unmount1();
+    unmount2();
   });
 });
 
