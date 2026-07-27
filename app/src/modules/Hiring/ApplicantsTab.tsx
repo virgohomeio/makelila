@@ -3,15 +3,27 @@ import styles from './Hiring.module.css';
 import { ResumeUploadPanel } from './ResumeUploadPanel';
 import {
   useCandidates, updateCandidateStage, recordCandidateScore, rejectCandidate, hireCandidate,
-  getResumeSignedUrl, type Candidate,
+  getResumeSignedUrl, type Candidate, type CandidateSource,
 } from '../../lib/hiring';
 
 export function ApplicantsTab({ postingId, pipelineStages }: { postingId: string; pipelineStages: string[] }) {
   const { candidates, loading } = useCandidates(postingId);
+  const [uploadSource, setUploadSource] = useState<CandidateSource>('indeed');
 
   return (
     <div>
-      <ResumeUploadPanel postingId={postingId} source="indeed" onUploaded={() => {}} />
+      <select
+        className={styles.stageSelect}
+        value={uploadSource}
+        onChange={e => setUploadSource(e.target.value as CandidateSource)}
+        style={{ marginBottom: 8 }}
+      >
+        <option value="indeed">Indeed</option>
+        <option value="linkedin">LinkedIn</option>
+        <option value="referral">Referral</option>
+        <option value="other">Other</option>
+      </select>
+      <ResumeUploadPanel postingId={postingId} source={uploadSource} onUploaded={() => {}} />
       <h3 style={{ marginTop: 20 }}>Applicants</h3>
       {loading && <div>Loading…</div>}
       {!loading && !candidates.length && <div>No applicants yet.</div>}
