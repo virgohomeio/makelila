@@ -44,7 +44,7 @@ export function useKlaviyoJourneys(): { byCustomer: Map<string, Ev[]>; loading: 
 }
 
 function fmtDelta(ms: number): string {
-  if (ms < 60_000) return 'under a minute later';
+  if (ms < 60_000) return '1+ minute later';
   const m = Math.floor(ms / 60_000);
   if (m < 60) return `${m}+ minute${m === 1 ? '' : 's'} later`;
   const h = Math.floor(m / 60);
@@ -53,38 +53,37 @@ function fmtDelta(ms: number): string {
   return `${d}+ day${d === 1 ? '' : 's'} later`;
 }
 
-const isOrder = (type: string) => /placed_order|ordered_product/.test(type);
-const isCart  = (type: string) => /added_to_cart/.test(type);
+const isCart = (type: string) => /added_to_cart/.test(type);
 
-/** Time-to-purchase within the buying session + a visit-history note. Returns
- *  nulls when there are no events (caller shows UNKNOWN). `orderTimeMs` anchors
- *  which "placed order" event this order corresponds to. */
+/** Time-to-purchase within the buying session + a visit-history note, anchored
+ *  on the real Shopify order time (`orderTimeMs`). Only the buyer's events up to
+ *  the purchase count — a later re-engagement must never leak into an older
+ *  order's timing or visit count. Returns nulls (caller shows UNKNOWN) when the
+ *  buyer has NO Klaviyo history before this order, e.g. campaigns before our
+ *  Klaviyo events begin (May 2026) — so old orders read UNKNOWN, not a made-up
+ *  number. */
 export function summarizeJourney(events: Ev[] | undefined, orderTimeMs: number): JourneySummary {
   if (!events || events.length === 0) return { timeLabel: null, note: null };
 
-  // The purchase = the "placed order" event nearest this order's timestamp
-  // (a customer may have several orders); fall back to the order time itself.
-  const orders = events.filter(e => isOrder(e.type));
-  const purchase = orders.length
-    ? orders.reduce((best, e) => (Math.abs(e.t - orderTimeMs) < Math.abs(best.t - orderTimeMs) ? e : best)).t
-    : orderTimeMs;
+  const purchase = orderTimeMs;
+  // Pre-purchase history only (small buffer covers the order event's own clock skew).
+  const history = events.filter(e => e.t <= purchase + 60_000);
+  if (history.length === 0) return { timeLabel: null, note: null };   // no history before the order → UNKNOWN
 
   // Session start = walk back from the purchase while gaps stay under 30 min.
-  const pre = events.filter(e => e.t <= purchase + 60_000);
   let sessionStart = purchase;
-  for (let i = pre.length - 1; i >= 0; i--) {
-    if (pre[i].t > purchase) continue;
-    if (sessionStart - pre[i].t <= SESSION_GAP_MS) sessionStart = pre[i].t;
+  for (let i = history.length - 1; i >= 0; i--) {
+    if (sessionStart - history[i].t <= SESSION_GAP_MS) sessionStart = history[i].t;
     else break;
   }
   const timeLabel = fmtDelta(purchase - sessionStart);
 
-  // Visit count = number of session clusters across all events.
+  // Visit count = session clusters within the pre-purchase history only.
   let visits = 0;
   let last = -Infinity;
-  for (const e of events) { if (e.t - last > SESSION_GAP_MS) visits++; last = e.t; }
-  const firstVisit = new Date(events[0].t).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-  const carts = events.filter(e => isCart(e.type)).length;
+  for (const e of history) { if (e.t - last > SESSION_GAP_MS) visits++; last = e.t; }
+  const firstVisit = new Date(history[0].t).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'America/New_York' });
+  const carts = history.filter(e => isCart(e.type)).length;
 
   const bits = [`visited ${visits} time${visits === 1 ? '' : 's'} since ${firstVisit}`];
   if (carts) bits.push(`${carts} add-to-cart${carts === 1 ? '' : 's'}`);

@@ -56,13 +56,18 @@ export type SalesKpis = {
 
 export type Attribution = { source: string | null; medium: string | null; campaign: string | null };
 
-/** Buyer plan from the order's payment method / line items. We can tell Outright
- *  from financed (Sezzle); the exact 12 vs 36-month term isn't in our data. */
+/** Buyer plan, matching the manual tracker's labels: Outright, Sezzle, and the
+ *  LILA financing terms (12-Month / 36-Month Plan). Sezzle is read from the
+ *  payment method; the financing term is read from the line-item name when Meta/
+ *  Shopify carries it, falling back to a generic "Financing" when the term isn't
+ *  in our data, and Outright otherwise. */
 export function classifyPlan(o: Order): string {
   const pm = (o.payment_methods ?? []).map(s => s.toLowerCase());
-  if (pm.some(p => p.includes('sezzle'))) return 'Financing (Sezzle)';
-  const items = (o.line_items ?? []).map(li => ('name' in li ? li.name : '').toLowerCase());
-  if (items.some(n => n.includes('month') || n.includes('financ') || n.includes('plan'))) return 'Financing';
+  if (pm.some(p => p.includes('sezzle'))) return 'Sezzle';
+  const text = (o.line_items ?? []).map(li => ('name' in li ? li.name : '')).join(' ').toLowerCase();
+  if (/36[\s-]*month/.test(text)) return '36-Month Plan';
+  if (/12[\s-]*month/.test(text)) return '12-Month Plan';
+  if (/financ|payment plan|monthly/.test(text)) return 'Financing';
   return 'Outright';
 }
 
@@ -190,8 +195,8 @@ export function sourceLabel(channel: string): string {
   if (!channel || channel === 'Unknown' || channel === '—') return UNKNOWN;
   // The manual tracker wrote Facebook/Instagram paid simply as "Meta Ad".
   if (/^(Facebook|Instagram) Paid$/.test(channel) || channel === 'Paid Social') return 'Meta Ad';
-  // Search engines: match Shopify's "google organic search" phrasing.
-  if (channel === 'Google Organic' || channel === 'Bing Organic') return `${channel} Search`;
+  // Search engines: match the manual tracker's "Google Organic Search/SEO" phrasing.
+  if (channel === 'Google Organic' || channel === 'Bing Organic') return `${channel} Search/SEO`;
   return channel;
 }
 
