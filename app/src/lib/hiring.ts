@@ -297,3 +297,12 @@ export async function recordInterviewDecision(
   }).eq('id', interviewId);
   if (error) throw error;
 }
+
+/** Resolves a stored hiring-resumes storage path (candidates.resume_url) to
+ *  a time-limited signed URL for viewing. Generated at read time, not
+ *  write time, since signed URLs expire — see Task 6's review. */
+export async function getResumeSignedUrl(storagePath: string): Promise<string> {
+  const { data, error } = await supabase.storage.from('hiring-resumes').createSignedUrl(storagePath, 3600);
+  if (error || !data) throw error ?? new Error('getResumeSignedUrl: no signed URL returned');
+  return data.signedUrl;
+}

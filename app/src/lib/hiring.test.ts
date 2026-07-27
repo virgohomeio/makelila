@@ -5,12 +5,12 @@ import {
   createJobPosting, addPostingInterviewer, searchInternalProfiles, getCurrentUserId,
   updateCandidateStage, recordCandidateScore, rejectCandidate, hireCandidate,
   createInterview, recordInterviewDecision, updatePostingRubric,
-  suggestScreeningRubric, uploadAndScoreResume,
+  suggestScreeningRubric, uploadAndScoreResume, getResumeSignedUrl,
 } from './hiring';
 
 const {
   mockResolve, mockOn, mockSubscribe, mockUnsubscribe, mockChannel, mockUpdate, mockInsert, mockSingle, mockEq,
-  mockGetUser, mockInvoke, mockStorageUpload,
+  mockGetUser, mockInvoke, mockStorageUpload, mockCreateSignedUrl,
 } = vi.hoisted(() => {
     const mockResolve = vi.fn();
     const mockUnsubscribe = vi.fn();
@@ -24,9 +24,10 @@ const {
     const mockGetUser = vi.fn();
     const mockInvoke = vi.fn();
     const mockStorageUpload = vi.fn();
+    const mockCreateSignedUrl = vi.fn();
     return {
       mockResolve, mockOn, mockSubscribe, mockUnsubscribe, mockChannel, mockUpdate, mockInsert, mockSingle, mockEq,
-      mockGetUser, mockInvoke, mockStorageUpload,
+      mockGetUser, mockInvoke, mockStorageUpload, mockCreateSignedUrl,
     };
   });
 
@@ -48,7 +49,7 @@ vi.mock('./supabase', () => {
       channel: mockChannel,
       auth: { getUser: mockGetUser },
       functions: { invoke: mockInvoke },
-      storage: { from: () => ({ upload: mockStorageUpload }) },
+      storage: { from: () => ({ upload: mockStorageUpload, createSignedUrl: mockCreateSignedUrl }) },
     },
   };
 });
@@ -183,5 +184,12 @@ describe('mutations', () => {
       postingId: 'p1', file: new File(['%PDF'], 'resume.pdf', { type: 'application/pdf' }), source: 'indeed',
     })).rejects.toEqual({ message: 'quota exceeded' });
     expect(mockInvoke).not.toHaveBeenCalled();
+  });
+
+  it('getResumeSignedUrl returns the signed URL', async () => {
+    mockCreateSignedUrl.mockResolvedValueOnce({ data: { signedUrl: 'https://.../signed?token=abc' }, error: null });
+    const url = await getResumeSignedUrl('p1/abc-resume.pdf');
+    expect(mockCreateSignedUrl).toHaveBeenCalledWith('p1/abc-resume.pdf', 3600);
+    expect(url).toBe('https://.../signed?token=abc');
   });
 });
