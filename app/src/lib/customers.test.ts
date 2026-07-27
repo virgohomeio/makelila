@@ -48,7 +48,7 @@ vi.mock('./activityLog', () => ({
 }));
 
 // ── import after mocks ──────────────────────────────────────────────────────
-import { parseUtm, upsertHubSpotContact, followUpDueDates, computeFuState, refundUsageWindow, resolvePurchaserId, buildPurchaserIdByEmail, resolvePartiesFromDirectory, resolvePrimaryUserName, type Customer } from './customers';
+import { parseUtm, upsertHubSpotContact, followUpDueDates, computeFuState, refundUsageWindow, resolvePurchaserId, buildPurchaserIdByEmail, resolveRefundParties, type Customer } from './customers';
 
 const base: Customer = {
   id: 'c1', hubspot_id: null, email: 'a@b.com', first_name: null, last_name: null,
@@ -301,58 +301,45 @@ describe('buildPurchaserIdByEmail', () => {
 // FR-6: the customer directory link is the authoritative purchaser/user source
 // for the refund workflow. A filer whose customer row points at a purchaser is
 // the USER; the linked row is the PURCHASER.
-describe('resolvePartiesFromDirectory', () => {
+// FR-6: every card resolves to a definite purchaser + primary user (no
+// "unconfirmed"). The filer defaults to being both, splitting only on a link.
+describe('resolveRefundParties', () => {
+  const cust = (id: string, full_name: string, purchaser_id: string | null, primary_user_name: string | null) =>
+    ({ id, full_name, purchaser_id, primary_user_name });
   const byEmail = new Map([
-    ['lily@xu.com', { id: 'lily', full_name: 'Lily Xu', purchaser_id: 'annie' }],
-    ['annie@wu.com', { id: 'annie', full_name: 'Annie Wu', purchaser_id: null }],
+    ['amanda@x.com', cust('amanda', 'Amanda Acker', null, null)],
+    ['chad@x.com',   cust('chad', 'Chad Lockhart', null, 'Sarah Lockhart')],
+    ['lily@x.com',   cust('lily', 'Lily Xiao Xu', 'annie', null)],
   ]);
-  const byId = new Map([['annie', { full_name: 'Annie Wu' }], ['lily', { full_name: 'Lily Xu' }]]);
-
-  it('resolves a linked filer to purchaser=linked, user=filer (Lily → Annie)', () => {
-    expect(resolvePartiesFromDirectory({ filerEmail: 'Lily@Xu.com ', filerName: 'Lily Xu', byEmail, byId }))
-      .toEqual({ purchaser: 'Annie Wu', user: 'Lily Xu', confirmed: true });
-  });
-
-  it('returns null when the filer is their own purchaser (no link) — caller falls back', () => {
-    expect(resolvePartiesFromDirectory({ filerEmail: 'annie@wu.com', filerName: 'Annie Wu', byEmail, byId })).toBeNull();
-  });
-
-  it('returns null when the filer email is not in the directory', () => {
-    expect(resolvePartiesFromDirectory({ filerEmail: 'nobody@x.com', filerName: 'Nobody', byEmail, byId })).toBeNull();
-    expect(resolvePartiesFromDirectory({ filerEmail: null, filerName: 'X', byEmail, byId })).toBeNull();
-  });
-
-  it('falls back to the filer name when the linked purchaser row is missing', () => {
-    const orphan = new Map([['u@x.com', { id: 'u', full_name: 'User', purchaser_id: 'ghost' }]]);
-    expect(resolvePartiesFromDirectory({ filerEmail: 'u@x.com', filerName: 'User', byEmail: orphan, byId: new Map() }))
-      .toEqual({ purchaser: 'User', user: 'User', confirmed: true });
-  });
-});
-
-// FR-6: the machine's primary user comes from the accounting owner's record.
-describe('resolvePrimaryUserName', () => {
-  const byEmail = new Map([
-    ['chad@x.com', { id: 'chad', purchaser_id: null }],        // Chad is the purchaser/owner
-    ['lily@x.com', { id: 'lily', purchaser_id: 'annie' }],     // Lily acts for Annie
-  ]);
-  const byId = new Map([
-    ['chad', { primary_user_name: 'Sarah Lockhart' }],
-    ['annie', { primary_user_name: 'Lily Xiao Xu' }],
-    ['lily', { primary_user_name: null }],
+  const byId = new Map<string, { full_name: string; primary_user_name: string | null }>([
+    ['amanda', { full_name: 'Amanda Acker', primary_user_name: null }],
+    ['chad',   { full_name: 'Chad Lockhart', primary_user_name: 'Sarah Lockhart' }],
+    ['annie',  { full_name: 'Annie Chunli Wu', primary_user_name: null }],
+    ['lily',   { full_name: 'Lily Xiao Xu', primary_user_name: null }],
   ]);
 
-  it("returns the owner's primary user when the filer IS the purchaser (Chad → Sarah)", () => {
-    expect(resolvePrimaryUserName({ filerEmail: 'Chad@X.com ', byEmail, byId })).toBe('Sarah Lockhart');
+  it('a lone customer is BOTH purchaser and primary user (no split, no "?")', () => {
+    const r = resolveRefundParties({ filerEmail: 'amanda@x.com', filerName: 'Amanda Acker', byEmail, byId });
+    expect(r).toMatchObject({ purchaser: 'Amanda Acker', primaryUser: 'Amanda Acker', samePerson: true, filerIsPurchaser: true, filerIsPrimaryUser: true });
   });
 
-  it("resolves through the purchaser link when a user files (Lily's file → Annie's primary user)", () => {
-    expect(resolvePrimaryUserName({ filerEmail: 'lily@x.com', byEmail, byId })).toBe('Lily Xiao Xu');
+  it('splits when a separate primary user is named (Chad purchaser, Sarah primary user)', () => {
+    const r = resolveRefundParties({ filerEmail: 'Chad@X.com ', filerName: 'Chad Lockhart', byEmail, byId });
+    expect(r).toMatchObject({ purchaser: 'Chad Lockhart', primaryUser: 'Sarah Lockhart', samePerson: false, filerIsPurchaser: true, filerIsPrimaryUser: false });
   });
 
-  it('returns null when no primary user is set, filer unknown, or email missing', () => {
-    const noPrimary = new Map([['z', { primary_user_name: null }]]);
-    expect(resolvePrimaryUserName({ filerEmail: 'z@x.com', byEmail: new Map([['z@x.com', { id: 'z', purchaser_id: null }]]), byId: noPrimary })).toBeNull();
-    expect(resolvePrimaryUserName({ filerEmail: 'nobody@x.com', byEmail, byId })).toBeNull();
-    expect(resolvePrimaryUserName({ filerEmail: null, byEmail, byId })).toBeNull();
+  it('a linked filer is the primary user, the linked row is the purchaser (Lily files for Annie)', () => {
+    const r = resolveRefundParties({ filerEmail: 'lily@x.com', filerName: 'Lily Xu', byEmail, byId });
+    expect(r).toMatchObject({ purchaser: 'Annie Chunli Wu', primaryUser: 'Lily Xiao Xu', filerIsPurchaser: false, filerIsPrimaryUser: true });
+  });
+
+  it('unknown filer with a gift attestation → purchaser from the form, filer is the primary user', () => {
+    const r = resolveRefundParties({ filerEmail: 'rj@x.com', filerName: 'RJ', byEmail, byId, attestIsPurchaser: false, attestPurchaserName: 'Katrina' });
+    expect(r).toMatchObject({ purchaser: 'Katrina', primaryUser: 'RJ', filerIsPurchaser: false, filerIsPrimaryUser: true });
+  });
+
+  it('unknown filer, no attestation → filer is both', () => {
+    const r = resolveRefundParties({ filerEmail: 'ghost@x.com', filerName: 'Ghost', byEmail, byId });
+    expect(r).toMatchObject({ purchaser: 'Ghost', primaryUser: 'Ghost', samePerson: true, filerIsPurchaser: true });
   });
 });

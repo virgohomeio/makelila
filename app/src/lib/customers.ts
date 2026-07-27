@@ -90,27 +90,74 @@ export function buildPurchaserIdByEmail(
   return m;
 }
 
-/** FR-6: the customer directory is the authoritative purchaser/user source for
- *  the refund workflow. Given the filer's email, if their customer row links to
- *  a purchaser (purchaser_id set) they are the USER and the linked row is the
- *  PURCHASER. Returns null when the filer isn't a linked user (their own
- *  purchaser, or not in the directory) so the caller can fall back to the
- *  return form's own attestation. */
-export type DirectoryParties = { purchaser: string; user: string | null; confirmed: boolean };
-export function resolvePartiesFromDirectory(opts: {
+// FR-6: resolve who a refund card is about. Every card has a PURCHASER (the
+// accounting entity) and a PRIMARY USER of the machine; by default the customer
+// who filed the form is BOTH, and we only split them when there's an explicit
+// link — a purchaser link (gift/household), or a separately-named primary user
+// (e.g. Chad bought it, Sarah uses it). No "unconfirmed" state: the labels are
+// always definite. `filerIs*` flags say which role the person who filled out the
+// form holds, so the card can make that clear.
+type CustLite = { id: string; full_name: string; purchaser_id: string | null; primary_user_name: string | null };
+export type RefundParties = {
+  purchaser: string;
+  primaryUser: string;      // defaults to the purchaser when none is linked
+  filer: string;            // who filled out the form
+  samePerson: boolean;      // purchaser === primaryUser
+  filerIsPurchaser: boolean;
+  filerIsPrimaryUser: boolean;
+};
+
+const sameName = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+
+export function resolveRefundParties(opts: {
   filerEmail: string | null | undefined;
   filerName: string;
-  byEmail: Map<string, { id: string; full_name: string; purchaser_id: string | null }>;
-  byId: Map<string, { full_name: string }>;
-}): DirectoryParties | null {
+  byEmail: Map<string, CustLite>;
+  byId: Map<string, { full_name: string; primary_user_name: string | null }>;
+  // return-form attestation, used only when the filer isn't in the directory:
+  attestIsPurchaser?: boolean | null;
+  attestPurchaserName?: string | null;
+}): RefundParties {
   const e = (opts.filerEmail ?? '').toLowerCase().trim();
-  const filer = e ? opts.byEmail.get(e) : undefined;
-  if (!filer || !filer.purchaser_id) return null;
-  const p = opts.byId.get(filer.purchaser_id);
+  const filerCust = e ? opts.byEmail.get(e) : undefined;
+  const filer = (filerCust?.full_name || opts.filerName || '').trim() || opts.filerName;
+
+  let purchaser: string;
+  let ownerPrimaryUserName: string | null = null;
+  let filerIsPurchaser: boolean;
+
+  if (filerCust?.purchaser_id) {
+    // Filer is a linked user acting for a purchaser (gift/household).
+    const owner = opts.byId.get(filerCust.purchaser_id);
+    purchaser = (owner?.full_name || '').trim() || filer;
+    ownerPrimaryUserName = owner?.primary_user_name?.trim() || null;
+    filerIsPurchaser = false;
+  } else if (filerCust) {
+    // Filer is a known customer and their own purchaser.
+    purchaser = (filerCust.full_name || '').trim() || filer;
+    ownerPrimaryUserName = filerCust.primary_user_name?.trim() || null;
+    filerIsPurchaser = true;
+  } else if (opts.attestIsPurchaser === false && opts.attestPurchaserName?.trim()) {
+    // Not in the directory, but the form says the filer isn't the buyer.
+    purchaser = opts.attestPurchaserName.trim();
+    filerIsPurchaser = false;
+  } else {
+    // Default: the filer is the purchaser.
+    purchaser = filer;
+    filerIsPurchaser = true;
+  }
+
+  // Primary user: an explicitly-named one wins; else the acting filer (when they
+  // aren't the purchaser); else the purchaser is also the primary user.
+  const primaryUser = ownerPrimaryUserName ?? (!filerIsPurchaser ? filer : purchaser);
+
   return {
-    purchaser: p?.full_name || opts.filerName,
-    user: filer.full_name || opts.filerName,
-    confirmed: true,
+    purchaser,
+    primaryUser,
+    filer,
+    samePerson: sameName(purchaser, primaryUser),
+    filerIsPurchaser,
+    filerIsPrimaryUser: sameName(primaryUser, filer),
   };
 }
 
@@ -463,20 +510,6 @@ export async function setPrimaryUser(
   await logAction('customer_primary_user_set', customerId, name?.trim() || 'cleared');
 }
 
-/** FR-6: the primary user of the machine to show on a refund card. Given the
- *  filer's email, resolve to their accounting owner (linked purchaser, else the
- *  filer's own row) and return that owner's primary_user_name, if set. */
-export function resolvePrimaryUserName(opts: {
-  filerEmail: string | null | undefined;
-  byEmail: Map<string, { id: string; purchaser_id: string | null }>;
-  byId: Map<string, { primary_user_name: string | null }>;
-}): string | null {
-  const e = (opts.filerEmail ?? '').toLowerCase().trim();
-  const filer = e ? opts.byEmail.get(e) : undefined;
-  if (!filer) return null;
-  const ownerId = filer.purchaser_id ?? filer.id;
-  return opts.byId.get(ownerId)?.primary_user_name?.trim() || null;
-}
 
 export function useCustomers(): {
   customers: Customer[];
