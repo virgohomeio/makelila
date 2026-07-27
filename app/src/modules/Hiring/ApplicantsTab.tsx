@@ -6,7 +6,9 @@ import {
   getResumeSignedUrl, type Candidate, type CandidateSource,
 } from '../../lib/hiring';
 
-export function ApplicantsTab({ postingId, pipelineStages }: { postingId: string; pipelineStages: string[] }) {
+export function ApplicantsTab({ postingId, pipelineStages, onSelectCandidate }: {
+  postingId: string; pipelineStages: string[]; onSelectCandidate: (id: string) => void;
+}) {
   const { candidates, loading } = useCandidates(postingId);
   const [uploadSource, setUploadSource] = useState<CandidateSource>('indeed');
 
@@ -28,13 +30,15 @@ export function ApplicantsTab({ postingId, pipelineStages }: { postingId: string
       {loading && <div>Loading…</div>}
       {!loading && !candidates.length && <div>No applicants yet.</div>}
       {candidates.map(c => (
-        <CandidateCard key={c.id} candidate={c} pipelineStages={pipelineStages} />
+        <CandidateCard key={c.id} candidate={c} pipelineStages={pipelineStages} onSelectCandidate={onSelectCandidate} />
       ))}
     </div>
   );
 }
 
-function CandidateCard({ candidate, pipelineStages }: { candidate: Candidate; pipelineStages: string[] }) {
+function CandidateCard({ candidate, pipelineStages, onSelectCandidate }: {
+  candidate: Candidate; pipelineStages: string[]; onSelectCandidate: (id: string) => void;
+}) {
   const [scores, setScores] = useState<Record<string, number>>(candidate.scores);
   const [resumeError, setResumeError] = useState<string | null>(null);
   const isStub = candidate.enrichment_status === 'stub';
@@ -98,6 +102,7 @@ function CandidateCard({ candidate, pipelineStages }: { candidate: Candidate; pi
           <div style={{ marginTop: 8 }}>
             <button onClick={() => void hireCandidate(candidate.id)}>Hire</button>
             <button onClick={() => void rejectCandidate(candidate.id)} style={{ marginLeft: 8 }}>Reject</button>
+            <button onClick={() => onSelectCandidate(candidate.id)} style={{ marginLeft: 8 }}>Interviews →</button>
           </div>
         </>
       )}

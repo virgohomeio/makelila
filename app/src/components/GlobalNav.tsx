@@ -16,6 +16,7 @@ const MODULES = [
   { path: '/customers',     label: 'Customers' },
   { path: '/lovely',        label: 'Lovely' },
   { path: '/finance',       label: 'Finance' },
+  { path: '/hiring',        label: 'Hiring' },
   { path: '/products',      label: 'Products' },
 ];
 
@@ -28,6 +29,7 @@ export function GlobalNav() {
   const visibleModules = MODULES.filter(m => {
     if (m.path === '/marketing') return MARKETING_ROLES.includes(userEmail.toLowerCase());
     if (m.path === '/finance') return canView(role, 'finance');
+    if (m.path === '/hiring') return canView(role, 'hiring');
     return true;
   });
 

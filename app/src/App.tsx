@@ -30,6 +30,7 @@ const Marketing   = lazy(() => import('./modules/Marketing'));
 const Finance     = lazy(() => import('./modules/Finance'));
 const Shipping    = lazy(() => import('./modules/Shipping'));
 const Products    = lazy(() => import('./modules/Products'));
+const Hiring      = lazy(() => import('./modules/Hiring'));
 
 function RequireRole({ role, children }: { role: Module; children: React.ReactNode }) {
   const { role: userRole, loading } = useAuth();
@@ -98,6 +99,11 @@ export default function App() {
             <Route path="finance" element={
               <RequireRole role="finance">
                 <LazyRoute><Finance /></LazyRoute>
+              </RequireRole>
+            } />
+            <Route path="hiring" element={
+              <RequireRole role="hiring">
+                <LazyRoute><Hiring /></LazyRoute>
               </RequireRole>
             } />
             <Route path="products" element={<LazyRoute><Products /></LazyRoute>} />
