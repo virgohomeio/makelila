@@ -32,7 +32,7 @@ const UNIT_STAGES: { value: ReturnStatus; label: string }[] = [
   { value: 'discarded',        label: 'Unit discarded by customer' },
 ];
 import { useQueuedReplacements, holdReplacement, type Order } from '../../lib/orders';
-import { useOnboardDates, useCustomerIdByEmail, refundUsageWindow, type RefundUsageWindow } from '../../lib/customers';
+import { useOnboardDates, useCustomerIdByEmail, useCustomers, refundUsageWindow, resolvePartiesFromDirectory, type RefundUsageWindow } from '../../lib/customers';
 import { useInvoicesByCustomerEmail, getInvoiceSignedUrl, type CustomerInvoice } from '../../lib/invoices';
 import {
   useServiceTickets, useTicketMessages, useTicketNotes, STATUS_META as TICKET_STATUS_META,
@@ -63,6 +63,7 @@ export function RefundsTab() {
   const { byEmail: onboardByEmail } = useOnboardDates();
   const { byEmail: invoicesByEmail } = useInvoicesByCustomerEmail();
   const { byEmail: customerIdByEmail } = useCustomerIdByEmail();
+  const { customers } = useCustomers();
   const { tickets: allTickets } = useServiceTickets();
   const { user, role } = useAuth();
   const userEmail = user?.email;
@@ -89,6 +90,49 @@ export function RefundsTab() {
     for (const r of returns) m.set(r.id, r);
     return m;
   }, [returns]);
+
+  // FR-6: the customer directory drives purchaser vs user. Build email→row and
+  // id→row maps so a card can resolve a filer to their linked purchaser.
+  const customerByEmail = useMemo(() => {
+    const m = new Map<string, { id: string; full_name: string; purchaser_id: string | null }>();
+    for (const c of customers) {
+      if (c.email) m.set(c.email.toLowerCase().trim(), { id: c.id, full_name: c.full_name, purchaser_id: c.purchaser_id });
+    }
+    return m;
+  }, [customers]);
+  const customerById = useMemo(() => {
+    const m = new Map<string, { full_name: string }>();
+    for (const c of customers) m.set(c.id, { full_name: c.full_name });
+    return m;
+  }, [customers]);
+
+  // Resolve the purchaser/user labels for a card. The customer-directory link
+  // (purchaser_id) is authoritative; if the filer isn't a linked user there, we
+  // fall back to the return form's own attestation (is_purchaser/purchaser_name).
+  const partiesFor = (opts: {
+    filerEmail?: string | null; filerName: string;
+    isPurchaser?: boolean | null; purchaserName?: string | null; purchaserEmail?: string | null;
+  }): Parties => {
+    const fromDir = resolvePartiesFromDirectory({
+      filerEmail: opts.filerEmail, filerName: opts.filerName, byEmail: customerByEmail, byId: customerById,
+    });
+    if (fromDir) return fromDir;
+    return resolveParties({
+      fallbackName: opts.filerName,
+      isPurchaser: opts.isPurchaser ?? null,
+      purchaserName: opts.purchaserName ?? null,
+      filerName: opts.filerName,
+    });
+  };
+  const partiesForReturn = (r: ReturnRow): Parties =>
+    partiesFor({ filerEmail: r.customer_email, filerName: r.customer_name, isPurchaser: r.is_purchaser, purchaserName: r.purchaser_name });
+  const partiesForRefund = (refund: RefundApproval, ret: ReturnRow | null): Parties =>
+    partiesFor({
+      filerEmail: ret?.customer_email ?? refund.customer_email,
+      filerName: refund.customer_name,
+      isPurchaser: ret?.is_purchaser ?? null,
+      purchaserName: ret?.purchaser_name ?? null,
+    });
 
   const replsByEmail = useMemo(() => {
     const m = new Map<string, Order[]>();
@@ -273,6 +317,7 @@ export function RefundsTab() {
             <InspectionCard
               key={r.id}
               r={r}
+              parties={partiesForReturn(r)}
               usage={usageForEmail(email)}
               invoices={invoicesForEmail(email)}
               tickets={ticketsForEmails([r.purchaser_email, r.customer_email])}
@@ -343,6 +388,7 @@ export function RefundsTab() {
                     key={r.id}
                     refund={r}
                     linkedReturn={r.return_id ? returnsById.get(r.return_id) ?? null : null}
+                    parties={partiesForRefund(r, r.return_id ? returnsById.get(r.return_id) ?? null : null)}
                     usage={usageFor(r, r.return_id ? returnsById.get(r.return_id) ?? null : null)}
                     invoices={invoicesFor(r, r.return_id ? returnsById.get(r.return_id) ?? null : null)}
                     tickets={ticketsFor(r, r.return_id ? returnsById.get(r.return_id) ?? null : null)}
@@ -364,6 +410,7 @@ export function RefundsTab() {
         <RefundDetailPanel
           refund={selectedRefund}
           linkedReturn={selectedReturn}
+          parties={partiesForRefund(selectedRefund, selectedReturn)}
           usage={usageFor(selectedRefund, selectedReturn)}
           invoices={invoicesFor(selectedRefund, selectedReturn)}
           tickets={ticketsFor(selectedRefund, selectedReturn)}
@@ -391,6 +438,7 @@ export function RefundsTab() {
         const email = r.purchaser_email?.trim() || r.customer_email;
         return <ReturnDetailModal
           r={r}
+          parties={partiesForReturn(r)}
           usage={usageForEmail(email)}
           invoices={invoicesForEmail(email)}
           tickets={ticketsForEmails([r.purchaser_email, r.customer_email])}
@@ -922,9 +970,10 @@ function TicketQuickView({ ticket, onClose }: { ticket: ServiceTicket; onClose: 
 // that doesn't yet have a refund request — so the inspection stage carries all
 // the same context as the downstream refund stages.
 function InspectionCard({
-  r, usage, invoices, tickets, onOpenTicket, onView, onCompile, onError,
+  r, parties, usage, invoices, tickets, onOpenTicket, onView, onCompile, onError,
 }: {
   r: ReturnRow;
+  parties: Parties;
   usage: RefundUsageWindow;
   invoices: CustomerInvoice[];
   tickets: ServiceTicket[];
@@ -941,11 +990,6 @@ function InspectionCard({
     catch (e) { onError((e as Error).message); }
     finally { setStatusBusy(false); }
   };
-  // FR-6: label whether the name is the purchaser or a distinct filer (user).
-  const parties = resolveParties({
-    fallbackName: r.customer_name, isPurchaser: r.is_purchaser,
-    purchaserName: r.purchaser_name, filerName: r.customer_name,
-  });
   return (
     <div
       className={styles.refundCard}
@@ -1030,10 +1074,11 @@ function InspectionCard({
 }
 
 function RefundCard({
-  refund, linkedReturn, usage, invoices, tickets, onOpenTicket, canFlow, selected, onSelect, onError, onOpenFinanceModal,
+  refund, linkedReturn, parties, usage, invoices, tickets, onOpenTicket, canFlow, selected, onSelect, onError, onOpenFinanceModal,
 }: {
   refund: RefundApproval;
   linkedReturn: ReturnRow | null;
+  parties: Parties;
   usage: RefundUsageWindow;
   invoices: CustomerInvoice[];
   tickets: ServiceTicket[];
@@ -1172,12 +1217,7 @@ function RefundCard({
       tabIndex={0}
     >
       <div className={styles.refundCardHead}>
-        <PartyHeader parties={resolveParties({
-          fallbackName: refund.customer_name,
-          isPurchaser: linkedReturn?.is_purchaser ?? null,
-          purchaserName: linkedReturn?.purchaser_name ?? null,
-          filerName: linkedReturn?.customer_name ?? null,
-        })} />
+        <PartyHeader parties={parties} />
         {editingAmount ? (
           <span onClick={e => e.stopPropagation()} style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
             <span style={{ fontWeight: 700 }}>$</span>
@@ -1355,10 +1395,11 @@ function RefundCard({
 // Renders the linked return-form data + approve / deny actions.
 // ============================================================================
 function RefundDetailPanel({
-  refund, linkedReturn, usage, invoices, tickets, onOpenTicket, queuedReplacements, canFlow, onClose, onError, onOpenFinanceModal,
+  refund, linkedReturn, parties, usage, invoices, tickets, onOpenTicket, queuedReplacements, canFlow, onClose, onError, onOpenFinanceModal,
 }: {
   refund: RefundApproval;
   linkedReturn: ReturnRow | null;
+  parties: Parties;
   usage: RefundUsageWindow;
   invoices: CustomerInvoice[];
   tickets: ServiceTicket[];
@@ -1496,15 +1537,7 @@ function RefundDetailPanel({
         <div>
           <div className={styles.refundDetailTitleRow}>
             <h3 className={styles.refundDetailTitle} style={{ display: 'inline' }}>
-              <PartyHeader
-                parties={resolveParties({
-                  fallbackName: refund.customer_name,
-                  isPurchaser: linkedReturn?.is_purchaser ?? null,
-                  purchaserName: linkedReturn?.purchaser_name ?? null,
-                  filerName: linkedReturn?.customer_name ?? null,
-                })}
-                nameNode={(name) => <span>{name}</span>}
-              />
+              <PartyHeader parties={parties} nameNode={(name) => <span>{name}</span>} />
             </h3>
             <span
               className={styles.refundDetailStatusPill}
@@ -1796,8 +1829,9 @@ function ReturnFormAnswers({ r }: { r: ReturnRow }) {
 
 // Read-only viewer for a return's full submitted form — opened by clicking a
 // card in the Return & inspection column (before a refund request exists).
-function ReturnDetailModal({ r, usage, invoices, tickets, onOpenTicket, onError, onClose }: {
+function ReturnDetailModal({ r, parties, usage, invoices, tickets, onOpenTicket, onError, onClose }: {
   r: ReturnRow;
+  parties: Parties;
   usage: RefundUsageWindow;
   invoices: CustomerInvoice[];
   tickets: ServiceTicket[];
@@ -1805,10 +1839,6 @@ function ReturnDetailModal({ r, usage, invoices, tickets, onOpenTicket, onError,
   onError: (msg: string | null) => void;
   onClose: () => void;
 }) {
-  const parties = resolveParties({
-    fallbackName: r.customer_name, isPurchaser: r.is_purchaser,
-    purchaserName: r.purchaser_name, filerName: r.customer_name,
-  });
   return (
     <div className={styles.modalBackdrop} onClick={onClose}>
       <div className={styles.modalCard} onClick={e => e.stopPropagation()} style={{ maxWidth: 720, maxHeight: '85vh', overflowY: 'auto' }}>

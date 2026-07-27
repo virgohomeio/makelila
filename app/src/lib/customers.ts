@@ -84,6 +84,30 @@ export function buildPurchaserIdByEmail(
   return m;
 }
 
+/** FR-6: the customer directory is the authoritative purchaser/user source for
+ *  the refund workflow. Given the filer's email, if their customer row links to
+ *  a purchaser (purchaser_id set) they are the USER and the linked row is the
+ *  PURCHASER. Returns null when the filer isn't a linked user (their own
+ *  purchaser, or not in the directory) so the caller can fall back to the
+ *  return form's own attestation. */
+export type DirectoryParties = { purchaser: string; user: string | null; confirmed: boolean };
+export function resolvePartiesFromDirectory(opts: {
+  filerEmail: string | null | undefined;
+  filerName: string;
+  byEmail: Map<string, { id: string; full_name: string; purchaser_id: string | null }>;
+  byId: Map<string, { full_name: string }>;
+}): DirectoryParties | null {
+  const e = (opts.filerEmail ?? '').toLowerCase().trim();
+  const filer = e ? opts.byEmail.get(e) : undefined;
+  if (!filer || !filer.purchaser_id) return null;
+  const p = opts.byId.get(filer.purchaser_id);
+  return {
+    purchaser: p?.full_name || opts.filerName,
+    user: filer.full_name || opts.filerName,
+    confirmed: true,
+  };
+}
+
 export function parseUtm(
   landingUrl: string | null | undefined,
 ): { source: string | null; campaign: string | null } {

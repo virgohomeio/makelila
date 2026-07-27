@@ -48,7 +48,7 @@ vi.mock('./activityLog', () => ({
 }));
 
 // ── import after mocks ──────────────────────────────────────────────────────
-import { parseUtm, upsertHubSpotContact, followUpDueDates, computeFuState, refundUsageWindow, resolvePurchaserId, buildPurchaserIdByEmail, type Customer } from './customers';
+import { parseUtm, upsertHubSpotContact, followUpDueDates, computeFuState, refundUsageWindow, resolvePurchaserId, buildPurchaserIdByEmail, resolvePartiesFromDirectory, type Customer } from './customers';
 
 const base: Customer = {
   id: 'c1', hubspot_id: null, email: 'a@b.com', first_name: null, last_name: null,
@@ -294,5 +294,36 @@ describe('buildPurchaserIdByEmail', () => {
   it('skips rows without an email', () => {
     const m = buildPurchaserIdByEmail([{ id: 'x', email: null, purchaser_id: null }]);
     expect(m.size).toBe(0);
+  });
+});
+
+// FR-6: the customer directory link is the authoritative purchaser/user source
+// for the refund workflow. A filer whose customer row points at a purchaser is
+// the USER; the linked row is the PURCHASER.
+describe('resolvePartiesFromDirectory', () => {
+  const byEmail = new Map([
+    ['lily@xu.com', { id: 'lily', full_name: 'Lily Xu', purchaser_id: 'annie' }],
+    ['annie@wu.com', { id: 'annie', full_name: 'Annie Wu', purchaser_id: null }],
+  ]);
+  const byId = new Map([['annie', { full_name: 'Annie Wu' }], ['lily', { full_name: 'Lily Xu' }]]);
+
+  it('resolves a linked filer to purchaser=linked, user=filer (Lily → Annie)', () => {
+    expect(resolvePartiesFromDirectory({ filerEmail: 'Lily@Xu.com ', filerName: 'Lily Xu', byEmail, byId }))
+      .toEqual({ purchaser: 'Annie Wu', user: 'Lily Xu', confirmed: true });
+  });
+
+  it('returns null when the filer is their own purchaser (no link) — caller falls back', () => {
+    expect(resolvePartiesFromDirectory({ filerEmail: 'annie@wu.com', filerName: 'Annie Wu', byEmail, byId })).toBeNull();
+  });
+
+  it('returns null when the filer email is not in the directory', () => {
+    expect(resolvePartiesFromDirectory({ filerEmail: 'nobody@x.com', filerName: 'Nobody', byEmail, byId })).toBeNull();
+    expect(resolvePartiesFromDirectory({ filerEmail: null, filerName: 'X', byEmail, byId })).toBeNull();
+  });
+
+  it('falls back to the filer name when the linked purchaser row is missing', () => {
+    const orphan = new Map([['u@x.com', { id: 'u', full_name: 'User', purchaser_id: 'ghost' }]]);
+    expect(resolvePartiesFromDirectory({ filerEmail: 'u@x.com', filerName: 'User', byEmail: orphan, byId: new Map() }))
+      .toEqual({ purchaser: 'User', user: 'User', confirmed: true });
   });
 });
