@@ -751,8 +751,12 @@ export async function addRefundNote(refundId: string, body: string): Promise<voi
     const { data: prof } = await supabase.from('profiles').select('display_name').eq('id', user.id).maybeSingle();
     authorName = (prof as { display_name?: string } | null)?.display_name ?? user.email ?? null;
   }
-  const { error } = await supabase.from('refund_notes')
-    .insert({ refund_id: refundId, body: body.trim(), author_id: user?.id ?? null, author_name: authorName });
+  // Omit author_id when we don't have it so the DB default (auth.uid()) fills
+  // it — never send an explicit null, which would defeat the default and (under
+  // the old policy) silently reject the insert. Notes must always save.
+  const payload: Record<string, unknown> = { refund_id: refundId, body: body.trim(), author_name: authorName };
+  if (user?.id) payload.author_id = user.id;
+  const { error } = await supabase.from('refund_notes').insert(payload);
   if (error) throw error;
   await logAction('refund_note_added', refundId, body.trim().slice(0, 120));
 }
@@ -800,8 +804,11 @@ export async function addReturnNote(returnId: string, body: string): Promise<voi
     const { data: prof } = await supabase.from('profiles').select('display_name').eq('id', user.id).maybeSingle();
     authorName = (prof as { display_name?: string } | null)?.display_name ?? user.email ?? null;
   }
-  const { error } = await supabase.from('return_notes')
-    .insert({ return_id: returnId, body: body.trim(), author_id: user?.id ?? null, author_name: authorName });
+  // Omit author_id when absent so the DB default (auth.uid()) fills it — never
+  // send an explicit null. Notes must always save.
+  const payload: Record<string, unknown> = { return_id: returnId, body: body.trim(), author_name: authorName };
+  if (user?.id) payload.author_id = user.id;
+  const { error } = await supabase.from('return_notes').insert(payload);
   if (error) throw error;
   await logAction('return_note_added', returnId, body.trim().slice(0, 120), { entityType: 'return', entityId: returnId });
 }
