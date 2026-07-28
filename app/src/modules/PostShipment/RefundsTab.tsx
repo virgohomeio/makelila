@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   useRefundApprovals, useReturns,
-  submitRefundRequest, updateRefundAmount, setRefundCurrency, type RefundCurrency, submitToManager, managerApprove, financeApprove, executeRefund, denyRefund, closeRefund,
+  submitRefundRequest, compileReturnToRefund, updateRefundAmount, setRefundCurrency, type RefundCurrency, submitToManager, managerApprove, financeApprove, executeRefund, denyRefund, closeRefund,
   sendRefundBack, uncompileRefund, type RefundBackTarget,
   confirmPurchaserLinkage, hasValidPurchaserLinkage,
   computeRefundNet, defaultRefundFees,
@@ -314,6 +314,14 @@ export function RefundsTab() {
     if (kanbanRef.current && topScrollRef.current) topScrollRef.current.scrollLeft = kanbanRef.current.scrollLeft;
   };
 
+  // Compile a return straight into Completeness — no amount/method prompt. The
+  // amount + payment method are set by Finance (Julie) at Finance Review.
+  const compileReturn = async (r: ReturnRow) => {
+    setError(null);
+    try { await compileReturnToRefund(r); }
+    catch (e) { setError((e as Error).message); }
+  };
+
   // FR-1: both pre-manager columns render the same InspectionCard; only the
   // heading, helper, and row set differ. Reina (Account Manager) owns both.
   const renderPreRefundColumn = (label: string, helper: string, rows: ReturnRow[]) => (
@@ -339,7 +347,7 @@ export function RefundsTab() {
               tickets={ticketsForEmails([r.purchaser_email, r.customer_email])}
               onOpenTicket={setOpenTicketId}
               onView={() => setViewReturnId(r.id)}
-              onCompile={() => { setRequestReturnId(r.id); setShowRequestModal(true); }}
+              onCompile={() => void compileReturn(r)}
               onError={setError}
             />
           );
@@ -1393,7 +1401,15 @@ function RefundCard({
         <AmountEditor refund={refund} editable={canFlow} onError={onError} />
       </div>
       {refund.reason && <div className={styles.refundReason}>{refund.reason}</div>}
-      {refund.payment_method && <div className={styles.refundMeta}>via {refund.payment_method}</div>}
+      {/* The refund method is set by Finance (Julie) at Finance Review and shown
+          to Pedrum in the Refund Queue. Falls back to the legacy payment_method. */}
+      {refund.refund_method ? (
+        <div className={styles.refundMeta} style={{ fontWeight: 700, color: '#2d3748' }}>
+          Refund via {REFUND_METHOD_META[refund.refund_method].label}
+        </div>
+      ) : refund.payment_method ? (
+        <div className={styles.refundMeta}>via {refund.payment_method}</div>
+      ) : null}
       <UsageWindowBadge usage={usage} />
       <RefundInvoices invoices={invoices} fallbackOrderRef={linkedReturn?.original_order_ref} />
       <CustomerTicketHistory tickets={tickets} onOpenTicket={onOpenTicket} defaultOpen />
@@ -2105,8 +2121,6 @@ function RequestRefundModal({
   const [returnId, setReturnId] = useState<string>('');
   const [customerName, setCustomerName] = useState('');
   const [customerEmail, setCustomerEmail] = useState('');
-  const [amount, setAmount] = useState('');
-  const [paymentMethod, setPaymentMethod] = useState('Stripe refund');
   const [reason, setReason] = useState('');
   const [notes, setNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -2127,7 +2141,6 @@ function RequestRefundModal({
       // When the filer wasn't the buyer, the refund customer is the purchaser.
       setCustomerName(r.purchaser_name?.trim() || r.customer_name);
       setCustomerEmail((r.purchaser_email?.trim() || r.customer_email) ?? '');
-      if (r.refund_amount_usd) setAmount(String(r.refund_amount_usd));
       if (r.reason) setReason(r.reason);
     }
   };
@@ -2140,20 +2153,15 @@ function RequestRefundModal({
   }, [initialReturnId]);
 
   const submit = async () => {
-    if (!customerName.trim() || !amount.trim()) return;
-    const amt = Number(amount);
-    if (!Number.isFinite(amt) || amt < 0) {
-      onError('Amount must be a non-negative number');
-      return;
-    }
+    if (!customerName.trim()) return;
     setSubmitting(true); onError(null);
     try {
+      // Amount + payment method are set by Finance (Julie) at Finance Review, not here.
       await submitRefundRequest({
         return_id: returnId || undefined,
         customer_name: customerName.trim(),
         customer_email: customerEmail.trim() || undefined,
-        refund_amount_usd: amt,
-        payment_method: paymentMethod || undefined,
+        refund_amount_usd: 0,
         reason: reason.trim() || undefined,
         notes: notes.trim() || undefined,
       });
@@ -2195,21 +2203,9 @@ function RequestRefundModal({
               <input type="email" value={customerEmail} onChange={e => setCustomerEmail(e.target.value)}
                      className={styles.modalInput} />
             </div>
-            <div className={styles.modalRow}>
-              <label>Refund amount (USD)</label>
-              <input type="number" min="0" step="0.01" value={amount}
-                     onChange={e => setAmount(e.target.value)} className={styles.modalInput} required />
-            </div>
-            <div className={styles.modalRow}>
-              <label>Payment method</label>
-              <select value={paymentMethod} onChange={e => setPaymentMethod(e.target.value)} className={styles.modalInput}>
-                <option>Stripe refund</option>
-                <option>Shopify refund</option>
-                <option>Cheque</option>
-                <option>E-transfer</option>
-                <option>Manual</option>
-              </select>
-            </div>
+          </div>
+          <div style={{ fontSize: 12, color: '#718096', margin: '2px 0 6px' }}>
+            The refund amount and payment method are set by Finance (Julie) at Finance Review.
           </div>
           <div className={styles.modalRow}>
             <label>Reason (one-line summary)</label>
@@ -2226,9 +2222,9 @@ function RequestRefundModal({
         </div>
         <div className={styles.modalFoot}>
           <button onClick={onClose} className={styles.modalSecondary}>Cancel</button>
-          <button onClick={() => void submit()} disabled={submitting || !customerName.trim() || !amount.trim()}
+          <button onClick={() => void submit()} disabled={submitting || !customerName.trim()}
                   className={styles.modalPrimary}>
-            {submitting ? 'Submitting…' : 'Submit for manager review'}
+            {submitting ? 'Creating…' : 'Create refund request'}
           </button>
         </div>
       </div>

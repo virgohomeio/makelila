@@ -877,6 +877,23 @@ export async function submitRefundRequest(input: {
   });
 }
 
+/** Compile a return into a refund request in the Completeness column — WITHOUT
+ *  an amount or payment method. Those are set by Finance (Julie) at Finance
+ *  Review, then carried to Pedrum in the Refund Queue. Auto-fills the
+ *  purchaser/customer from the return; amount starts at 0 for Finance to fill. */
+export async function compileReturnToRefund(r: ReturnRow): Promise<void> {
+  const usePurchaser = r.is_purchaser === false;
+  await submitRefundRequest({
+    return_id: r.id,
+    order_id: r.original_order_ref ?? undefined,
+    customer_name: (usePurchaser && r.purchaser_name?.trim()) ? r.purchaser_name.trim() : r.customer_name,
+    customer_email: ((usePurchaser && r.purchaser_email?.trim()) ? r.purchaser_email.trim() : r.customer_email) ?? undefined,
+    refund_amount_usd: r.refund_amount_usd ?? 0,
+    reason: r.reason ?? undefined,
+    // no payment_method — Finance sets amount + method at Finance Review.
+  });
+}
+
 // FR-15: standardized customer-facing status message at a refund transition.
 // Best-effort (never throws into the caller); no-ops when we have no email.
 async function notifyCustomerRefundStatus(
@@ -892,7 +909,7 @@ async function notifyCustomerRefundStatus(
       to_name: customerFirstName(c.name, to),
       variables: {
         customer_first_name: customerFirstName(c.name, to),
-        amount: c.amount != null ? `$${Number(c.amount).toFixed(2)}` : 'your refund',
+        amount: (c.amount != null && Number(c.amount) > 0) ? `$${Number(c.amount).toFixed(2)}` : 'your refund',
         method: c.method ? REFUND_METHOD_META[c.method].label : 'your original payment method',
       },
       ...(c.relatedRefundId ? { related_refund_id: c.relatedRefundId } : {}),
