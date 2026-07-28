@@ -838,6 +838,52 @@ export async function updateRefundNote(noteId: string, refundId: string, body: s
   await logAction('refund_note_edited', refundId, body.trim().slice(0, 120));
 }
 
+// ── Unified "case" notes ────────────────────────────────────────────────────
+// A refund card and its underlying return are the SAME case; the refund row is
+// transient (created on compile, deleted on uncompile) but the return persists.
+// So for a return-linked case, notes are anchored to the RETURN. Every view of
+// the case (return card, refund card at any stage, detail modals) reads the
+// union of the return's notes and any legacy refund-side notes, and NEW notes
+// are written to the return. Result: moving a card to Completeness (or back)
+// changes nothing about its notes and can never lose them. Direct refunds with
+// no return fall back to refund_notes.
+export type CaseNote = {
+  id: string; body: string; author_id: string | null; author_name: string | null;
+  created_at: string; source: 'return' | 'refund';
+};
+
+export function useCaseNotes(refundId: string | null, returnId: string | null): {
+  notes: CaseNote[]; loading: boolean; refresh: () => void;
+} {
+  const rn = useReturnNotes(returnId);
+  const fn = useRefundNotes(refundId);
+  const notes: CaseNote[] = [
+    ...rn.notes.map(n => ({ ...n, source: 'return' as const })),
+    ...fn.notes.map(n => ({ id: n.id, body: n.body, author_id: n.author_id, author_name: n.author_name, created_at: n.created_at, source: 'refund' as const })),
+  ].sort((a, b) => a.created_at.localeCompare(b.created_at));
+  return { notes, loading: rn.loading || fn.loading, refresh: () => { rn.refresh(); fn.refresh(); } };
+}
+
+// New notes anchor to the return when the case has one, so they survive the
+// refund row being deleted on uncompile.
+export async function addCaseNote(refundId: string | null, returnId: string | null, body: string): Promise<void> {
+  if (returnId) return addReturnNote(returnId, body);
+  if (refundId) return addRefundNote(refundId, body);
+  throw new Error('addCaseNote: neither returnId nor refundId provided');
+}
+
+export async function updateCaseNote(note: CaseNote, refundId: string | null, returnId: string | null, body: string): Promise<void> {
+  if (note.source === 'return' && returnId) return updateReturnNote(note.id, returnId, body);
+  if (refundId) return updateRefundNote(note.id, refundId, body);
+  throw new Error('updateCaseNote: no target for note');
+}
+
+export async function deleteCaseNote(note: CaseNote, refundId: string | null, returnId: string | null): Promise<void> {
+  if (note.source === 'return' && returnId) return deleteReturnNote(note.id, returnId);
+  if (refundId) return deleteRefundNote(note.id, refundId);
+  throw new Error('deleteCaseNote: no target for note');
+}
+
 async function currentUserId(): Promise<string> {
   const { data } = await supabase.auth.getUser();
   if (!data.user) throw new Error('refund: not authenticated');
@@ -906,22 +952,9 @@ export async function compileReturnToRefund(r: ReturnRow): Promise<void> {
     reason: r.reason ?? undefined,
     // no payment_method — Finance sets amount + method at Finance Review.
   });
-  // Carry the return's notes onto the new refund card so nothing is lost when
-  // the case moves from Return & Inspection into Completeness. Author + original
-  // timestamp are preserved.
-  const { data: notes, error: readErr } = await supabase
-    .from('return_notes')
-    .select('body, author_id, author_name, created_at')
-    .eq('return_id', r.id)
-    .order('created_at', { ascending: true });
-  if (readErr) throw readErr;
-  if (notes && notes.length) {
-    const rows = (notes as PortableNote[]).map(n => ({
-      refund_id: refundId, body: n.body, author_id: n.author_id, author_name: n.author_name, created_at: n.created_at,
-    }));
-    const { error: copyErr } = await supabase.from('refund_notes').insert(rows);
-    if (copyErr) throw copyErr;
-  }
+  // No note copying needed: the case's notes stay on the return and every refund
+  // view reads them via useCaseNotes, so the card is unchanged after compile.
+  void refundId;
 }
 
 // FR-15: standardized customer-facing status message at a refund transition.

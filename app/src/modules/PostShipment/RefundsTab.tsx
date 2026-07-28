@@ -10,8 +10,7 @@ import {
   useReturnAttachments, uploadReturnAttachment, deleteReturnAttachment, returnAttachmentSignedUrl,
   RETURN_ATTACH_INPUT_ACCEPT, type ReturnAttachment,
   bookReturnLabel,
-  useRefundNotes, addRefundNote, deleteRefundNote, updateRefundNote,
-  useReturnNotes, addReturnNote, deleteReturnNote, updateReturnNote,
+  useCaseNotes, addCaseNote, updateCaseNote, deleteCaseNote, type CaseNote,
   REFUND_STATUS_META, REFUND_METHODS, REFUND_METHOD_META,
   UNIT_STATUS_LABEL, RETURN_DISPOSITION_META,
   type RefundApproval, type ReturnRow, type RefundMethod, type ReturnDisposition, type ReturnStatus, type ReturnCategory,
@@ -797,8 +796,12 @@ function DispositionEditor({ r, onError }: { r: ReturnRow; onError: (m: string |
 
 // Notes on a pre-refund return card (Return Form Submitted / Return &
 // Inspection). Everyone involved can add — mirrors the refund-card notes.
-function ReturnNotes({ returnId, onError }: { returnId: string; onError: (m: string | null) => void }) {
-  const { notes, refresh } = useReturnNotes(returnId);
+// Notes for a case. Pass a returnId (return-only cards) and/or a refundId
+// (refund cards). Reads the union and anchors new notes to the return so the
+// same list shows at every stage and is never lost across compile/uncompile.
+function CaseNotes({ refundId = null, returnId = null, onError }:
+  { refundId?: string | null; returnId?: string | null; onError: (m: string | null) => void }) {
+  const { notes, refresh } = useCaseNotes(refundId, returnId);
   const { user } = useAuth();
   const uid = user?.id;
   const [text, setText] = useState('');
@@ -808,20 +811,20 @@ function ReturnNotes({ returnId, onError }: { returnId: string; onError: (m: str
   const add = async () => {
     if (!text.trim()) return;
     setBusy(true); onError(null);
-    try { await addReturnNote(returnId, text); setText(''); refresh(); }
+    try { await addCaseNote(refundId, returnId, text); setText(''); refresh(); }
     catch (e) { onError((e as Error).message); }
     finally { setBusy(false); }
   };
-  const del = async (id: string) => {
+  const del = async (n: CaseNote) => {
     setBusy(true); onError(null);
-    try { await deleteReturnNote(id, returnId); refresh(); }
+    try { await deleteCaseNote(n, refundId, returnId); refresh(); }
     catch (e) { onError((e as Error).message); }
     finally { setBusy(false); }
   };
-  const saveEdit = async (id: string) => {
+  const saveEdit = async (n: CaseNote) => {
     if (!editText.trim()) return;
     setBusy(true); onError(null);
-    try { await updateReturnNote(id, returnId, editText); setEditId(null); refresh(); }
+    try { await updateCaseNote(n, refundId, returnId, editText); setEditId(null); refresh(); }
     catch (e) { onError((e as Error).message); }
     finally { setBusy(false); }
   };
@@ -835,10 +838,10 @@ function ReturnNotes({ returnId, onError }: { returnId: string; onError: (m: str
               {editId === n.id ? (
                 <>
                   <textarea value={editText} onChange={e => setEditText(e.target.value)} rows={2} autoFocus
-                    onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) void saveEdit(n.id); if (e.key === 'Escape') setEditId(null); }}
+                    onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) void saveEdit(n); if (e.key === 'Escape') setEditId(null); }}
                     style={{ width: '100%', fontSize: 12, padding: '4px 6px', border: '1px solid #2b6cb0', borderRadius: 6, resize: 'vertical' }} />
                   <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
-                    <button onClick={() => void saveEdit(n.id)} disabled={busy || !editText.trim()} className={styles.refundApproveBtn} style={{ fontSize: 10 }}>Save</button>
+                    <button onClick={() => void saveEdit(n)} disabled={busy || !editText.trim()} className={styles.refundApproveBtn} style={{ fontSize: 10 }}>Save</button>
                     <button onClick={() => setEditId(null)} disabled={busy} style={{ border: 'none', background: 'none', color: '#a0aec0', cursor: 'pointer', fontSize: 10 }}>Cancel</button>
                   </div>
                 </>
@@ -852,7 +855,7 @@ function ReturnNotes({ returnId, onError }: { returnId: string; onError: (m: str
                         <button onClick={() => { setEditId(n.id); setEditText(n.body); }} disabled={busy}
                           style={{ border: 'none', background: 'none', color: '#2b6cb0', cursor: 'pointer', fontSize: 10 }}>edit</button>
                       )}
-                      <button onClick={() => void del(n.id)} disabled={busy}
+                      <button onClick={() => void del(n)} disabled={busy}
                         style={{ border: 'none', background: 'none', color: '#a0aec0', cursor: 'pointer', fontSize: 10 }}>remove</button>
                     </span>
                   </div>
@@ -1196,7 +1199,7 @@ function InspectionCard({
       <UsageWindowBadge usage={usage} />
       <RefundInvoices invoices={invoices} fallbackOrderRef={r.original_order_ref} />
       <CustomerTicketHistory tickets={tickets} onOpenTicket={onOpenTicket} defaultOpen />
-      <ReturnNotes returnId={r.id} onError={onError} />
+      <CaseNotes returnId={r.id} onError={onError} />
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, margin: '6px 0', alignItems: 'center' }}
            onClick={e => e.stopPropagation()}>
         <select
@@ -1547,6 +1550,8 @@ function RefundCard({
           </>
         )}
       </div>
+      {/* Same notes as the return card — the case is unchanged after compile. */}
+      <CaseNotes refundId={refund.id} returnId={refund.return_id} onError={onError} />
       {!selected && (
         <div className={styles.refundCardHint}>Click to open the full case ↗</div>
       )}
@@ -1577,7 +1582,7 @@ function RefundDetailPanel({
 }) {
   const [busy, setBusy] = useState(false);
   const [holdBusy, setHoldBusy] = useState<string | null>(null);
-  const { notes, refresh: refreshNotes } = useRefundNotes(refund.id);
+  const { notes, refresh: refreshNotes } = useCaseNotes(refund.id, refund.return_id);
   const { user: authUser } = useAuth();
   const uid = authUser?.id;
   const [newNote, setNewNote] = useState('');
@@ -1646,20 +1651,20 @@ function RefundDetailPanel({
   const runAddNote = async () => {
     if (!newNote.trim()) return;
     setBusy(true); onError(null);
-    try { await addRefundNote(refund.id, newNote); setNewNote(''); refreshNotes(); }
+    try { await addCaseNote(refund.id, refund.return_id, newNote); setNewNote(''); refreshNotes(); }
     catch (e) { onError((e as Error).message); }
     finally { setBusy(false); }
   };
-  const runEditNote = async (noteId: string) => {
+  const runEditNote = async (n: CaseNote) => {
     if (!editNoteText.trim()) return;
     setBusy(true); onError(null);
-    try { await updateRefundNote(noteId, refund.id, editNoteText); setEditNoteId(null); refreshNotes(); }
+    try { await updateCaseNote(n, refund.id, refund.return_id, editNoteText); setEditNoteId(null); refreshNotes(); }
     catch (e) { onError((e as Error).message); }
     finally { setBusy(false); }
   };
-  const runDeleteNote = async (noteId: string) => {
+  const runDeleteNote = async (n: CaseNote) => {
     setBusy(true); onError(null);
-    try { await deleteRefundNote(noteId, refund.id); refreshNotes(); }
+    try { await deleteCaseNote(n, refund.id, refund.return_id); refreshNotes(); }
     catch (e) { onError((e as Error).message); }
     finally { setBusy(false); }
   };
@@ -1845,10 +1850,10 @@ function RefundDetailPanel({
               {editNoteId === n.id ? (
                 <>
                   <textarea value={editNoteText} onChange={e => setEditNoteText(e.target.value)} rows={2} autoFocus
-                    onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) void runEditNote(n.id); if (e.key === 'Escape') setEditNoteId(null); }}
+                    onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) void runEditNote(n); if (e.key === 'Escape') setEditNoteId(null); }}
                     style={{ width: '100%', fontSize: 13, padding: '6px 9px', border: '1px solid #2b6cb0', borderRadius: 6, resize: 'vertical' }} />
                   <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
-                    <button onClick={() => void runEditNote(n.id)} disabled={busy || !editNoteText.trim()}
+                    <button onClick={() => void runEditNote(n)} disabled={busy || !editNoteText.trim()}
                       style={{ fontSize: 11, fontWeight: 600, padding: '2px 10px', borderRadius: 6, border: '1px solid #2b6cb0', color: '#fff', background: '#2b6cb0', cursor: 'pointer' }}>Save</button>
                     <button onClick={() => setEditNoteId(null)} disabled={busy}
                       style={{ border: 'none', background: 'none', color: '#a0aec0', cursor: 'pointer', fontSize: 11 }}>Cancel</button>
@@ -1864,7 +1869,7 @@ function RefundDetailPanel({
                         <button onClick={() => { setEditNoteId(n.id); setEditNoteText(n.body); }} disabled={busy} title="Edit your note"
                           style={{ border: 'none', background: 'none', color: '#2b6cb0', cursor: 'pointer', fontSize: 11 }}>edit</button>
                       )}
-                      <button onClick={() => void runDeleteNote(n.id)} disabled={busy} title="Delete note"
+                      <button onClick={() => void runDeleteNote(n)} disabled={busy} title="Delete note"
                         style={{ border: 'none', background: 'none', color: '#cbd5e0', cursor: 'pointer', fontSize: 13, lineHeight: 1 }}>×</button>
                     </span>
                   </div>
@@ -2069,7 +2074,7 @@ function ReturnDetailModal({ r, parties, usage, invoices, tickets, onOpenTicket,
           <UsageWindowBadge usage={usage} />
           <RefundInvoices invoices={invoices} fallbackOrderRef={r.original_order_ref} />
           <CustomerTicketHistory tickets={tickets} onOpenTicket={onOpenTicket} defaultOpen />
-          <ReturnNotes returnId={r.id} onError={onError} />
+          <CaseNotes returnId={r.id} onError={onError} />
           <ReturnAttachmentStrip returnId={r.id} onError={onError} />
           <ReturnFormAnswers r={r} />
         </div>
@@ -2264,7 +2269,7 @@ function FinanceApproveModal({
   // Collaborative "Notes for approvers" — saved immediately, independent of the
   // Approve action. Fixes the case where the linked return isn't received yet
   // (Approve button disabled) but Julie/Huayi still need to record context.
-  const { notes: approverNotes, refresh: refreshNotes } = useRefundNotes(refund.id);
+  const { notes: approverNotes, refresh: refreshNotes } = useCaseNotes(refund.id, refund.return_id);
   const { user: authUser } = useAuth();
   const uid = authUser?.id;
   const [newNote, setNewNote] = useState('');
@@ -2274,20 +2279,20 @@ function FinanceApproveModal({
   const runAddNote = async () => {
     if (!newNote.trim()) return;
     setNoteBusy(true); setLocalError(null); onError(null);
-    try { await addRefundNote(refund.id, newNote); setNewNote(''); refreshNotes(); }
+    try { await addCaseNote(refund.id, refund.return_id, newNote); setNewNote(''); refreshNotes(); }
     catch (e) { const m = (e as Error).message; setLocalError(m); onError(m); }
     finally { setNoteBusy(false); }
   };
-  const runEditNote = async (noteId: string) => {
+  const runEditNote = async (n: CaseNote) => {
     if (!editNoteText.trim()) return;
     setNoteBusy(true); setLocalError(null);
-    try { await updateRefundNote(noteId, refund.id, editNoteText); setEditNoteId(null); refreshNotes(); }
+    try { await updateCaseNote(n, refund.id, refund.return_id, editNoteText); setEditNoteId(null); refreshNotes(); }
     catch (e) { const m = (e as Error).message; setLocalError(m); onError(m); }
     finally { setNoteBusy(false); }
   };
-  const runDeleteNote = async (noteId: string) => {
+  const runDeleteNote = async (n: CaseNote) => {
     setNoteBusy(true); setLocalError(null);
-    try { await deleteRefundNote(noteId, refund.id); refreshNotes(); }
+    try { await deleteCaseNote(n, refund.id, refund.return_id); refreshNotes(); }
     catch (e) { const m = (e as Error).message; setLocalError(m); onError(m); }
     finally { setNoteBusy(false); }
   };
@@ -2461,10 +2466,10 @@ function FinanceApproveModal({
                 {editNoteId === n.id ? (
                   <>
                     <textarea value={editNoteText} onChange={e => setEditNoteText(e.target.value)} rows={2} autoFocus
-                      onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) void runEditNote(n.id); if (e.key === 'Escape') setEditNoteId(null); }}
+                      onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) void runEditNote(n); if (e.key === 'Escape') setEditNoteId(null); }}
                       className={styles.modalInput} style={{ resize: 'vertical' }} />
                     <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
-                      <button onClick={() => void runEditNote(n.id)} disabled={noteBusy || !editNoteText.trim()}
+                      <button onClick={() => void runEditNote(n)} disabled={noteBusy || !editNoteText.trim()}
                         style={{ fontSize: 11, fontWeight: 600, padding: '2px 10px', borderRadius: 6, border: '1px solid #2b6cb0', color: '#fff', background: '#2b6cb0', cursor: 'pointer' }}>Save</button>
                       <button onClick={() => setEditNoteId(null)} disabled={noteBusy}
                         style={{ border: 'none', background: 'none', color: '#a0aec0', cursor: 'pointer', fontSize: 11 }}>Cancel</button>
@@ -2480,7 +2485,7 @@ function FinanceApproveModal({
                           <button onClick={() => { setEditNoteId(n.id); setEditNoteText(n.body); }} disabled={noteBusy} title="Edit your note"
                             style={{ border: 'none', background: 'none', color: '#2b6cb0', cursor: 'pointer', fontSize: 11 }}>edit</button>
                         )}
-                        <button onClick={() => void runDeleteNote(n.id)} disabled={noteBusy} title="Delete note"
+                        <button onClick={() => void runDeleteNote(n)} disabled={noteBusy} title="Delete note"
                           style={{ border: 'none', background: 'none', color: '#cbd5e0', cursor: 'pointer', fontSize: 13, lineHeight: 1 }}>×</button>
                       </span>
                     </div>
