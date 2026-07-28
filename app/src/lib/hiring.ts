@@ -1,6 +1,27 @@
 import { useEffect, useState } from 'react';
 import { supabase } from './supabase';
 
+/** supabase.functions.invoke()'s error.message is always the fixed string
+ *  "Edge Function returned a non-2xx status code" — the function's real
+ *  {error: "..."} response body sits unconsumed on error.context (a
+ *  Response), which nothing was reading. Extracts and rethrows with the
+ *  real message; falls back to the original error if the body can't be
+ *  read/parsed (e.g. a network-level FunctionsFetchError has no context
+ *  Response to read from). */
+export async function extractFunctionErrorMessage(error: unknown): Promise<Error> {
+  if (error && typeof error === 'object' && 'context' in error) {
+    try {
+      const context = (error as { context: Response }).context;
+      const body = await context.json();
+      if (body?.error) return new Error(body.error);
+    } catch {
+      // context wasn't a Response with a JSON body, or body didn't have
+      // an `error` field — fall through to the original error below.
+    }
+  }
+  return error instanceof Error ? error : new Error(String(error));
+}
+
 export type PostingStatus = 'open' | 'on_hold' | 'closed';
 export type RubricDimension = { dimension: string; weight_pct: number };
 
@@ -254,7 +275,7 @@ export async function suggestScreeningRubric(jobDescription: string): Promise<Ru
   const { data, error } = await supabase.functions.invoke('suggest-screening-rubric', {
     body: { job_description: jobDescription },
   });
-  if (error) throw error;
+  if (error) throw await extractFunctionErrorMessage(error);
   return (data as { rubric: RubricDimension[] }).rubric;
 }
 
@@ -281,7 +302,7 @@ export async function uploadAndScoreResume(input: {
   const { data, error } = await supabase.functions.invoke('parse-resume-batch', {
     body: { posting_id: input.postingId, storage_path: path, mime_type: input.file.type, source: input.source },
   });
-  if (error) throw error;
+  if (error) throw await extractFunctionErrorMessage(error);
   return data as ParseResumeResult;
 }
 

@@ -6,7 +6,7 @@ import {
   updateCandidateStage, recordCandidateScore, rejectCandidate, hireCandidate,
   createInterview, recordInterviewDecision, updatePostingRubric,
   suggestScreeningRubric, uploadAndScoreResume, getResumeSignedUrl,
-  isAssignedInterviewerAnywhere,
+  isAssignedInterviewerAnywhere, extractFunctionErrorMessage,
 } from './hiring';
 
 const {
@@ -217,6 +217,17 @@ describe('mutations', () => {
     expect(result).toEqual([{ dimension: 'Logistics', weight_pct: 100 }]);
   });
 
+  it('suggestScreeningRubric surfaces the edge function\'s real error message, not the generic wrapper text', async () => {
+    const genericError = Object.assign(new Error('Edge Function returned a non-2xx status code'), {
+      name: 'FunctionsHttpError',
+      context: { json: () => Promise.resolve({ error: 'This posting has no job_description set — add one before scoring resumes against it.' }) },
+    });
+    mockInvoke.mockResolvedValueOnce({ data: null, error: genericError });
+    await expect(suggestScreeningRubric('')).rejects.toThrow(
+      'This posting has no job_description set — add one before scoring resumes against it.',
+    );
+  });
+
   it('uploadAndScoreResume uploads to storage then invokes parse-resume-batch', async () => {
     mockStorageUpload.mockResolvedValueOnce({ data: { path: 'p1/abc-resume.pdf' }, error: null });
     mockInvoke.mockResolvedValueOnce({
@@ -239,6 +250,18 @@ describe('mutations', () => {
       postingId: 'p1', file: new File(['%PDF'], 'resume.pdf', { type: 'application/pdf' }), source: 'indeed',
     })).rejects.toEqual({ message: 'quota exceeded' });
     expect(mockInvoke).not.toHaveBeenCalled();
+  });
+
+  it('uploadAndScoreResume surfaces parse-resume-batch\'s real error message, not the generic wrapper text', async () => {
+    mockStorageUpload.mockResolvedValueOnce({ data: { path: 'p1/abc-resume.pdf' }, error: null });
+    const genericError = Object.assign(new Error('Edge Function returned a non-2xx status code'), {
+      name: 'FunctionsHttpError',
+      context: { json: () => Promise.resolve({ error: 'This posting has no job_description set — add one before scoring resumes against it.' }) },
+    });
+    mockInvoke.mockResolvedValueOnce({ data: null, error: genericError });
+    await expect(uploadAndScoreResume({
+      postingId: 'p1', file: new File(['%PDF'], 'resume.pdf', { type: 'application/pdf' }), source: 'indeed',
+    })).rejects.toThrow('This posting has no job_description set — add one before scoring resumes against it.');
   });
 
   it('getResumeSignedUrl returns the signed URL', async () => {
@@ -266,5 +289,46 @@ describe('isAssignedInterviewerAnywhere', () => {
     mockGetUser.mockResolvedValueOnce({ data: { user: null }, error: null });
     expect(await isAssignedInterviewerAnywhere()).toBe(false);
     expect(mockResolve).not.toHaveBeenCalled();
+  });
+});
+
+describe('extractFunctionErrorMessage', () => {
+  it('extracts the real message from a FunctionsHttpError-shaped error.context Response', async () => {
+    const error = Object.assign(new Error('Edge Function returned a non-2xx status code'), {
+      name: 'FunctionsHttpError',
+      context: { json: () => Promise.resolve({ error: 'This posting has no job_description set.' }) },
+    });
+    const result = await extractFunctionErrorMessage(error);
+    expect(result.message).toBe('This posting has no job_description set.');
+  });
+
+  it('falls back to the original error when context.json() rejects (not a JSON body)', async () => {
+    const error = Object.assign(new Error('Edge Function returned a non-2xx status code'), {
+      name: 'FunctionsHttpError',
+      context: { json: () => Promise.reject(new Error('not json')) },
+    });
+    const result = await extractFunctionErrorMessage(error);
+    expect(result.message).toBe('Edge Function returned a non-2xx status code');
+  });
+
+  it('falls back to the original error when the parsed body has no `error` field', async () => {
+    const error = Object.assign(new Error('Edge Function returned a non-2xx status code'), {
+      name: 'FunctionsHttpError',
+      context: { json: () => Promise.resolve({ unrelated: 'field' }) },
+    });
+    const result = await extractFunctionErrorMessage(error);
+    expect(result.message).toBe('Edge Function returned a non-2xx status code');
+  });
+
+  it('falls back to the original error when it has no `context` property (e.g. FunctionsFetchError-like)', async () => {
+    const error = new Error('Failed to send a request to the Edge Function');
+    const result = await extractFunctionErrorMessage(error);
+    expect(result.message).toBe('Failed to send a request to the Edge Function');
+  });
+
+  it('wraps a non-Error value in a new Error', async () => {
+    const result = await extractFunctionErrorMessage('plain string error');
+    expect(result).toBeInstanceOf(Error);
+    expect(result.message).toBe('plain string error');
   });
 });
