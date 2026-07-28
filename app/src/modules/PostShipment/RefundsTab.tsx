@@ -625,6 +625,48 @@ function CurrencyToggle({ refund, editable, onError }: { refund: RefundApproval;
   );
 }
 
+// Editable refund amount + currency toggle. Used on the card head AND in the
+// opened detail panel so both stay identical.
+function AmountEditor({ refund, editable, onError, big }: {
+  refund: RefundApproval; editable: boolean; onError: (m: string | null) => void; big?: boolean;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+  const start = () => { setDraft(String(refund.refund_amount_usd ?? '')); setEditing(true); };
+  const save = async () => {
+    const next = Number(draft);
+    if (!Number.isFinite(next) || next < 0) { setEditing(false); return; }
+    if (next === Number(refund.refund_amount_usd)) { setEditing(false); return; }
+    setBusy(true); onError(null);
+    try { await updateRefundAmount(refund.id, next); setEditing(false); }
+    catch (e) { onError((e as Error).message); }
+    finally { setBusy(false); }
+  };
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }} onClick={e => e.stopPropagation()}>
+      {editing ? (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+          <span style={{ fontWeight: 700 }}>$</span>
+          <input autoFocus type="number" step="0.01" min="0" value={draft}
+            onChange={e => setDraft(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') void save(); if (e.key === 'Escape') setEditing(false); }}
+            onBlur={() => void save()} disabled={busy}
+            style={{ width: 100, fontSize: big ? 16 : 13, fontWeight: 700, padding: '2px 4px', border: '1px solid #2b6cb0', borderRadius: 4, textAlign: 'right' }} />
+        </span>
+      ) : (
+        <span className={styles.refundAmount}
+          onClick={editable ? start : undefined}
+          style={{ ...(editable ? { cursor: 'pointer' } : {}), ...(big ? { fontSize: 18 } : {}) }}
+          title={editable ? 'Click to edit the refund amount' : undefined}>
+          ${Number(refund.refund_amount_usd).toLocaleString('en-US')}{editable && ' ✎'}
+        </span>
+      )}
+      <CurrencyToggle refund={refund} editable={editable} onError={onError} />
+    </div>
+  );
+}
+
 // ============================================================================
 // FR-14 — paste-to-attach photos/documents on a return card. Ported from the
 // ticket AttachmentStrip: a window-level paste listener (Safari never fires
@@ -1241,21 +1283,6 @@ function RefundCard({
   const [inputVal, setInputVal] = useState('');
   const meta = REFUND_STATUS_META[refund.status];
 
-  // Everyone involved can correct the dollar amount inline at any stage.
-  const canEditAmount = canFlow;
-  const [editingAmount, setEditingAmount] = useState(false);
-  const [amountDraft, setAmountDraft] = useState('');
-  const startEditAmount = () => { setAmountDraft(String(refund.refund_amount_usd ?? '')); setEditingAmount(true); };
-  const saveAmount = async () => {
-    const next = Number(amountDraft);
-    if (!Number.isFinite(next) || next < 0) { setEditingAmount(false); return; }
-    if (next === Number(refund.refund_amount_usd)) { setEditingAmount(false); return; }
-    setBusy(true); onError(null);
-    try { await updateRefundAmount(refund.id, next); setEditingAmount(false); }
-    catch (e) { onError((e as Error).message); }
-    finally { setBusy(false); }
-  };
-
   const runStatus = async (s: ReturnStatus) => {
     if (!linkedReturn || linkedReturn.status === s) return;
     setStatusBusy(true); onError(null);
@@ -1363,34 +1390,7 @@ function RefundCard({
     >
       <div className={styles.refundCardHead}>
         <PartyHeader parties={parties} />
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
-          {editingAmount ? (
-            <span onClick={e => e.stopPropagation()} style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
-              <span style={{ fontWeight: 700 }}>$</span>
-              <input
-                autoFocus
-                type="number" step="0.01" min="0"
-                value={amountDraft}
-                onChange={e => setAmountDraft(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') void saveAmount(); if (e.key === 'Escape') setEditingAmount(false); }}
-                onBlur={() => void saveAmount()}
-                disabled={busy}
-                style={{ width: 90, fontSize: 13, fontWeight: 700, padding: '2px 4px',
-                         border: '1px solid #2b6cb0', borderRadius: 4, textAlign: 'right' }}
-              />
-            </span>
-          ) : (
-            <span
-              className={styles.refundAmount}
-              onClick={canEditAmount ? (e) => { e.stopPropagation(); startEditAmount(); } : undefined}
-              style={canEditAmount ? { cursor: 'pointer' } : undefined}
-              title={canEditAmount ? 'Click to edit the refund amount' : undefined}
-            >
-              ${Number(refund.refund_amount_usd).toLocaleString('en-US')}{canEditAmount && ' ✎'}
-            </span>
-          )}
-          <CurrencyToggle refund={refund} editable={canEditAmount} onError={onError} />
-        </div>
+        <AmountEditor refund={refund} editable={canFlow} onError={onError} />
       </div>
       {refund.reason && <div className={styles.refundReason}>{refund.reason}</div>}
       {refund.payment_method && <div className={styles.refundMeta}>via {refund.payment_method}</div>}
@@ -1710,6 +1710,10 @@ function RefundDetailPanel({
             {linkedReturn?.original_order_ref ?? '—'} ·
             {' '}{linkedReturn?.customer_email ?? refund.customer_email ?? '—'} ·
             {' '}{linkedReturn?.customer_phone ?? '—'}
+          </div>
+          <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{ fontSize: 12, fontWeight: 600, color: '#4a5568' }}>Refund amount:</span>
+            <AmountEditor refund={refund} editable={canFlow} onError={onError} big />
           </div>
           <div style={{ marginTop: 6 }}>
             <UsageWindowBadge usage={usage} />
