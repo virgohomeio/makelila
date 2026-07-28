@@ -15,6 +15,11 @@
 .rubricInput { flex: 1; padding: 4px 8px; font-size: 12px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); }
 .weightInput { width: 60px; padding: 4px 8px; font-size: 12px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); }
 .jdTextarea { width: 100%; min-height: 140px; font-size: 13px; padding: 8px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); font-family: inherit; }
+.jdDisplay {
+  margin-top: 8px; padding: 10px; font-size: 12px; white-space: pre-wrap;
+  max-height: 300px; overflow-y: auto; border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm); background: var(--color-surface); cursor: default;
+}
 .suggestButton {
   padding: 6px 12px; font-size: 12px; font-weight: 600; border-radius: var(--radius-sm);
   border: 1px solid var(--color-crimson); background: transparent; color: var(--color-crimson); cursor: pointer;

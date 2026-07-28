@@ -15,6 +15,7 @@ const STATUS_LABEL: Record<PostingStatus, string> = {
 export function PostingsTab({ onSelectPosting }: { onSelectPosting: (id: string) => void }) {
   const { postings, loading } = useJobPostings();
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [jdOpenId, setJdOpenId] = useState<string | null>(null);
   const [showNewForm, setShowNewForm] = useState(false);
 
   return (
@@ -35,10 +36,20 @@ export function PostingsTab({ onSelectPosting }: { onSelectPosting: (id: string)
             <span className={`${styles.postingStatus} ${STATUS_CLASS[p.status]}`}>{STATUS_LABEL[p.status]}</span>
             <button
               style={{ marginLeft: 8, fontSize: 12, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-ink-subtle)' }}
+              onClick={() => setJdOpenId(jdOpenId === p.id ? null : p.id)}
+              disabled={!p.job_description}
+            >
+              {jdOpenId === p.id ? 'Hide JD ▲' : 'View JD ▼'}
+            </button>
+            <button
+              style={{ marginLeft: 8, fontSize: 12, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-ink-subtle)' }}
               onClick={() => setExpandedId(expandedId === p.id ? null : p.id)}
             >
               {expandedId === p.id ? 'Hide rubric ▲' : 'Edit rubric ▼'}
             </button>
+            {jdOpenId === p.id && (
+              <div className={styles.jdDisplay}>{p.job_description}</div>
+            )}
             {expandedId === p.id && (
               <>
                 <RubricEditor
