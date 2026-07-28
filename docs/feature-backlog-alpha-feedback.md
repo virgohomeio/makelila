@@ -801,6 +801,36 @@ Alpha feedback collection window is **closed**. The 11 items above plus the meet
 
 ---
 
+## Refund workflow — coverage backlog + E2E test — 2026-07-27 (Huayi)
+
+### BACKLOG: Column-ownership override so Huayi can cover for Reina on vacation
+**Requested by:** Huayi, 2026-07-27. **Owner:** Huayi.
+**Description:** Column ownership is strict per-person today (`REFUND_COLUMN_OWNERS` in `app/src/modules/PostShipment/RefundsTab.tsx`): only `reina@virgohome.io` can move the Return Form Submitted / Return & Inspection / Completeness columns *forward*. When Reina is on vacation or unavailable, **Huayi (or a designated backup) needs to override and move cards through Reina's columns.** (Deny + back-moves are already open to everyone; this is only about the forward/approve action.)
+**Design options (pick one before build):**
+  1. **Leadership/admin override** — `isLeadership(role)` already exists (`finance` + `admin`); let it act on *any* column. Simplest, but also lets George/Julie move Reina's columns, not just Huayi.
+  2. **Named backup owner** — a per-column "backup" list (e.g. add Huayi to each column's owners), or a single global "backup owner" env/const. Keeps it to Huayi specifically.
+  3. **"Cover for X" toggle** — a temporary, self-service coverage switch (nicest UX, most work).
+**Touch:** `ownsRefundColumn` / `REFUND_COLUMN_OWNERS` in `RefundsTab.tsx`; possibly `permissions.ts`; if coverage should also redirect the reminder digest, mirror in `supabase/functions/send-refund-reminders` recipients.
+**⚠️ Hard prerequisite (blocks the test below too):** operators **Reina & Pedrum currently cannot write `refund_approvals` at all** — the UPDATE policy is still `with check is_manager()` (operators excluded), and there is no DELETE policy. Until this is relaxed to `is_internal_user()`, Reina can't submit a card to Manager Review and Pedrum can't mark a refund executed. SQL is in `docs/refund-approval-deploy-handoff.md`.
+
+### E2E refund test runbook (planned Tue 2026-07-28 AM) — "pretend refund"
+Goal: move one test card start→finish through every owner. **Do the prerequisites first or the test stalls.**
+
+**Prerequisites (must be done before the test):**
+- [ ] Run the `refund_approvals` RLS SQL (see handoff doc) — otherwise Reina's Submit-to-Manager and Pedrum's Mark-refunded steps **fail at the DB**.
+- [ ] Decide if the Huayi-override (backlog item above) needs to be built before the test, in case Reina doesn't action step 2. If not built, Huayi can only *deny*, not move forward, on Reina's columns.
+- [ ] Have a test card to move (either Reina submits a real test return form, or seed one).
+
+**Steps:**
+1. **Submit the return form as Reina** → card lands in **Return Form Submitted**.
+2. **Reina moves it → Manager Review** (Tue 7/28 AM): Return Form Submitted → (Return & Inspection or, for discard, straight to) Completeness → **Submit to Manager**. *Contingency:* if Reina doesn't, **Huayi overrides** and does it (requires the override above).
+3. **George** moves it: Manager Review → **Approve (manager)** → Finance Review.
+4. **Julie** moves it: Finance Review → **Approve amount → queue** (finance modal) → Refund Queue.
+5. **Pedrum** moves it: Refund Queue → **Mark refunded** → Refunded.
+6. Verify along the way: owner-only forward buttons appear for the right person; deny/back work for anyone; owner email digests fire (3-day cadence); customer status emails send at each transition (use `EMAIL_TEST_RECIPIENT` to avoid emailing a real customer during the test).
+
+---
+
 ## Reference
 
 - Email thread: "makeLILA app beta release, VCycene, Huayi" (started Apr 21, 2026)
