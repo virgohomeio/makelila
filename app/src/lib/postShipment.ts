@@ -885,7 +885,8 @@ export async function compileReturnToRefund(r: ReturnRow): Promise<void> {
   const usePurchaser = r.is_purchaser === false;
   await submitRefundRequest({
     return_id: r.id,
-    order_id: r.original_order_ref ?? undefined,
+    // NOTE: don't pass order_id — that column is a UUID FK to orders(id), not the
+    // human original_order_ref (e.g. "#1107"). The refund links via return_id.
     customer_name: (usePurchaser && r.purchaser_name?.trim()) ? r.purchaser_name.trim() : r.customer_name,
     customer_email: ((usePurchaser && r.purchaser_email?.trim()) ? r.purchaser_email.trim() : r.customer_email) ?? undefined,
     refund_amount_usd: r.refund_amount_usd ?? 0,
