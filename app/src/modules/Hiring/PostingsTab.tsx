@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import styles from './Hiring.module.css';
 import {
   useJobPostings, updatePostingRubric, createJobPosting, addPostingInterviewer, searchInternalProfiles,
-  suggestScreeningRubric, type RubricDimension, type PostingStatus, type InternalProfile,
+  suggestScreeningRubric, getPostingInterviewers,
+  type RubricDimension, type PostingStatus, type InternalProfile, type PostingInterviewer,
 } from '../../lib/hiring';
 
 const STATUS_CLASS: Record<PostingStatus, string> = {
@@ -121,8 +122,14 @@ function InterviewerAssignment({ postingId }: { postingId: string }) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<InternalProfile[]>([]);
   const [searching, setSearching] = useState(false);
-  const [added, setAdded] = useState<string[]>([]);
+  const [assigned, setAssigned] = useState<PostingInterviewer[]>([]);
   const [assignError, setAssignError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    getPostingInterviewers(postingId).then(rows => { if (!cancelled) setAssigned(rows); });
+    return () => { cancelled = true; };
+  }, [postingId]);
 
   async function search() {
     if (!query.trim()) return;
@@ -133,19 +140,32 @@ function InterviewerAssignment({ postingId }: { postingId: string }) {
 
   async function assign(profile: InternalProfile) {
     setAssignError(null);
+    if (assigned.some(a => a.profile_id === profile.id)) {
+      setAssignError(`${profile.display_name} is already assigned to this posting.`);
+      return;
+    }
     try {
       await addPostingInterviewer(postingId, profile.id);
-      setAdded(prev => [...prev, profile.display_name]);
+      setAssigned(prev => [...prev, { id: profile.id, profile_id: profile.id, display_name: profile.display_name }]);
       setResults([]);
       setQuery('');
     } catch (e: unknown) {
-      setAssignError(e instanceof Error ? e.message : 'Add interviewer failed');
+      // Postgres unique_violation — the pre-check above already catches the
+      // common case (assigned list stale from a race with another operator),
+      // this is the fallback for that race.
+      const isDuplicate = e && typeof e === 'object' && 'code' in e && (e as { code: string }).code === '23505';
+      setAssignError(isDuplicate
+        ? `${profile.display_name} is already assigned to this posting.`
+        : e instanceof Error ? e.message : 'Add interviewer failed');
     }
   }
 
   return (
     <div className={styles.interviewerWidget}>
       <div style={{ fontWeight: 600, marginBottom: 4 }}>Assign interviewer</div>
+      {assigned.length > 0 && (
+        <div className={styles.interviewerList}>Currently assigned: {assigned.map(a => a.display_name).join(', ')}</div>
+      )}
       <input placeholder="Search by name…" value={query} onChange={e => setQuery(e.target.value)} style={{ fontSize: 12, padding: '4px 8px' }} />
       <button onClick={search} disabled={searching || !query.trim()} style={{ marginLeft: 6 }}>Search</button>
       {results.map(r => (
@@ -155,7 +175,6 @@ function InterviewerAssignment({ postingId }: { postingId: string }) {
         </div>
       ))}
       {assignError && <div className={styles.formError}>{assignError}</div>}
-      {added.length > 0 && <div className={styles.interviewerList}>Assigned this session: {added.join(', ')}</div>}
     </div>
   );
 }

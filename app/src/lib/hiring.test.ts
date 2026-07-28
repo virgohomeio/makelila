@@ -6,7 +6,7 @@ import {
   updateCandidateStage, recordCandidateScore, rejectCandidate, hireCandidate,
   createInterview, recordInterviewDecision, updatePostingRubric,
   suggestScreeningRubric, uploadAndScoreResume, getResumeSignedUrl,
-  isAssignedInterviewerAnywhere, extractFunctionErrorMessage,
+  isAssignedInterviewerAnywhere, extractFunctionErrorMessage, getPostingInterviewers,
 } from './hiring';
 
 const {
@@ -199,6 +199,24 @@ describe('mutations', () => {
     const result = await searchInternalProfiles('reina');
     expect(result).toHaveLength(1);
     expect(result[0].display_name).toBe('Reina');
+  });
+
+  it('getPostingInterviewers resolves the embedded profile into display_name', async () => {
+    mockResolve.mockResolvedValueOnce({
+      data: [{ id: 'pi1', profile_id: 'u2', profiles: { display_name: 'Reina' } }],
+      error: null,
+    });
+    const result = await getPostingInterviewers('p1');
+    expect(result).toEqual([{ id: 'pi1', profile_id: 'u2', display_name: 'Reina' }]);
+  });
+
+  it('getPostingInterviewers falls back to "Unknown" when the embedded profile is missing', async () => {
+    mockResolve.mockResolvedValueOnce({
+      data: [{ id: 'pi1', profile_id: 'u2', profiles: null }],
+      error: null,
+    });
+    const result = await getPostingInterviewers('p1');
+    expect(result[0].display_name).toBe('Unknown');
   });
 
   it('getCurrentUserId returns the session user id, or null when signed out', async () => {

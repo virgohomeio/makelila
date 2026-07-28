@@ -226,6 +226,33 @@ export async function addPostingInterviewer(postingId: string, profileId: string
   if (error) throw error;
 }
 
+export interface PostingInterviewer {
+  id: string;           // posting_interviewers row id
+  profile_id: string;
+  display_name: string;
+}
+
+/** Existing (already-persisted) interviewer assignments for a posting —
+ *  the "assign interviewer" widget only ever tracked names added in the
+ *  current browser session, so reopening a posting (or a second operator
+ *  loading the same one) showed no one as assigned even when RLS/the DB
+ *  already had real rows, making a duplicate add attempt fail with an
+ *  unexplained conflict. `profile_id` has exactly one FK to `profiles`
+ *  (added_by references auth.users instead), so the embedded-resource
+ *  select is unambiguous with no relationship hint needed. */
+export async function getPostingInterviewers(postingId: string): Promise<PostingInterviewer[]> {
+  const { data, error } = await supabase
+    .from('posting_interviewers')
+    .select('id, profile_id, profiles(display_name)')
+    .eq('posting_id', postingId);
+  if (error) throw error;
+  return (data ?? []).map((row) => ({
+    id: row.id as string,
+    profile_id: row.profile_id as string,
+    display_name: (row.profiles as unknown as { display_name: string } | null)?.display_name ?? 'Unknown',
+  }));
+}
+
 /** The signed-in user's id, or null when signed out. Exists so UI
  *  components (e.g. InterviewsTab, Task 12) never import `supabase`
  *  directly — components go through lib/ functions only (AGENTS.md). */
