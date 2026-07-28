@@ -1229,11 +1229,26 @@ export async function sendRefundBack(id: string, toStatus: RefundBackTarget): Pr
 
 // "Uncompile" — remove the refund request so the case returns to Return &
 // Inspection (the linked return row stays). Used to move a Completeness card
-// back a column. Destructive: notes on the refund request are lost.
-export async function uncompileRefund(id: string): Promise<void> {
+// back a column. Notes are NEVER lost: any notes on the refund are copied onto
+// the linked return before the refund row (and its cascading notes) is removed.
+export async function uncompileRefund(id: string, returnId?: string | null): Promise<void> {
+  if (returnId) {
+    const { data: notes, error: readErr } = await supabase
+      .from('refund_notes')
+      .select('body, author_id, author_name, created_at')
+      .eq('refund_id', id)
+      .order('created_at', { ascending: true });
+    if (readErr) throw readErr;
+    if (notes && notes.length) {
+      const rows = (notes as { body: string; author_id: string | null; author_name: string | null; created_at: string }[])
+        .map(n => ({ return_id: returnId, body: n.body, author_id: n.author_id, author_name: n.author_name, created_at: n.created_at }));
+      const { error: copyErr } = await supabase.from('return_notes').insert(rows);
+      if (copyErr) throw copyErr;
+    }
+  }
   const { error } = await supabase.from('refund_approvals').delete().eq('id', id);
   if (error) throw error;
-  await logAction('refund_uncompiled', id, 'returned to Return & Inspection (refund request removed)');
+  await logAction('refund_uncompiled', id, 'returned to Return & Inspection (notes preserved on the return)');
 }
 
 // ============================================================================

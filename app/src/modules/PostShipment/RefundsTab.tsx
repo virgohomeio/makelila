@@ -1364,10 +1364,10 @@ function RefundCard({
   const runBack = async () => {
     if (!backTarget) return;
     if (backTarget === 'uncompile' &&
-        !window.confirm('Move this case back to Return & Inspection? This removes the refund request; notes on it will be lost.')) return;
+        !window.confirm('Move this case back to Return & Inspection? This removes the refund request. Any notes on it are kept on the return.')) return;
     setBusy(true); onError(null);
     try {
-      if (backTarget === 'uncompile') await uncompileRefund(refund.id);
+      if (backTarget === 'uncompile') await uncompileRefund(refund.id, refund.return_id);
       else await sendRefundBack(refund.id, backTarget);
     } catch (e) { onError((e as Error).message); }
     finally { setBusy(false); }
@@ -1607,10 +1607,10 @@ function RefundDetailPanel({
   const runBack = async () => {
     if (!backTarget) return;
     if (backTarget === 'uncompile' &&
-        !window.confirm('Move this case back to Return & Inspection? This removes the refund request; notes on it will be lost.')) return;
+        !window.confirm('Move this case back to Return & Inspection? This removes the refund request. Any notes on it are kept on the return.')) return;
     setBusy(true); onError(null);
     try {
-      if (backTarget === 'uncompile') { await uncompileRefund(refund.id); onClose(); }
+      if (backTarget === 'uncompile') { await uncompileRefund(refund.id, refund.return_id); onClose(); }
       else await sendRefundBack(refund.id, backTarget);
     } catch (e) { onError((e as Error).message); }
     finally { setBusy(false); }
