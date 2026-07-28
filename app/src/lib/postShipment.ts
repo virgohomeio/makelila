@@ -853,16 +853,17 @@ export async function submitRefundRequest(input: {
   payment_method?: string;
   reason?: string;
   notes?: string;
-}): Promise<void> {
+}): Promise<string> {
   const userId = await currentUserId();
-  const { error } = await supabase.from('refund_approvals').insert({
+  const { data: created, error } = await supabase.from('refund_approvals').insert({
     ...input,
     // FR-3: land in Completeness/prep, not straight in front of the Return
     // Manager. The Account Manager verifies the case, then calls submitToManager.
     status: 'submitted',
     submitted_by: userId,
-  });
+  }).select('id').single();
   if (error) throw error;
+  const newRefundId = (created as { id: string }).id;
   await logAction('refund_submitted', input.customer_name, `$${input.refund_amount_usd} (${input.reason ?? 'no reason'})`,
     undefined,
     {
@@ -882,7 +883,12 @@ export async function submitRefundRequest(input: {
   await notifyCustomerRefundStatus('refund_application_received_customer', {
     email: input.customer_email, name: input.customer_name, amount: input.refund_amount_usd,
   });
+  return newRefundId;
 }
+
+// A note row as stored on either notes table, minus the id/target — used to
+// carry notes across the compile/uncompile boundary so none are ever lost.
+type PortableNote = { body: string; author_id: string | null; author_name: string | null; created_at: string };
 
 /** Compile a return into a refund request in the Completeness column — WITHOUT
  *  an amount or payment method. Those are set by Finance (Julie) at Finance
@@ -890,7 +896,7 @@ export async function submitRefundRequest(input: {
  *  purchaser/customer from the return; amount starts at 0 for Finance to fill. */
 export async function compileReturnToRefund(r: ReturnRow): Promise<void> {
   const usePurchaser = r.is_purchaser === false;
-  await submitRefundRequest({
+  const refundId = await submitRefundRequest({
     return_id: r.id,
     // NOTE: don't pass order_id — that column is a UUID FK to orders(id), not the
     // human original_order_ref (e.g. "#1107"). The refund links via return_id.
@@ -900,6 +906,22 @@ export async function compileReturnToRefund(r: ReturnRow): Promise<void> {
     reason: r.reason ?? undefined,
     // no payment_method — Finance sets amount + method at Finance Review.
   });
+  // Carry the return's notes onto the new refund card so nothing is lost when
+  // the case moves from Return & Inspection into Completeness. Author + original
+  // timestamp are preserved.
+  const { data: notes, error: readErr } = await supabase
+    .from('return_notes')
+    .select('body, author_id, author_name, created_at')
+    .eq('return_id', r.id)
+    .order('created_at', { ascending: true });
+  if (readErr) throw readErr;
+  if (notes && notes.length) {
+    const rows = (notes as PortableNote[]).map(n => ({
+      refund_id: refundId, body: n.body, author_id: n.author_id, author_name: n.author_name, created_at: n.created_at,
+    }));
+    const { error: copyErr } = await supabase.from('refund_notes').insert(rows);
+    if (copyErr) throw copyErr;
+  }
 }
 
 // FR-15: standardized customer-facing status message at a refund transition.
@@ -1240,10 +1262,19 @@ export async function uncompileRefund(id: string, returnId?: string | null): Pro
       .order('created_at', { ascending: true });
     if (readErr) throw readErr;
     if (notes && notes.length) {
-      const rows = (notes as { body: string; author_id: string | null; author_name: string | null; created_at: string }[])
+      // Skip notes already on the return (those carried over at compile time),
+      // matched by their preserved created_at, so round-tripping a card fwd/back
+      // never duplicates a note. Only refund-side additions come back.
+      const { data: existing } = await supabase
+        .from('return_notes').select('created_at').eq('return_id', returnId);
+      const seen = new Set(((existing ?? []) as { created_at: string }[]).map(e => e.created_at));
+      const rows = (notes as PortableNote[])
+        .filter(n => !seen.has(n.created_at))
         .map(n => ({ return_id: returnId, body: n.body, author_id: n.author_id, author_name: n.author_name, created_at: n.created_at }));
-      const { error: copyErr } = await supabase.from('return_notes').insert(rows);
-      if (copyErr) throw copyErr;
+      if (rows.length) {
+        const { error: copyErr } = await supabase.from('return_notes').insert(rows);
+        if (copyErr) throw copyErr;
+      }
     }
   }
   const { error } = await supabase.from('refund_approvals').delete().eq('id', id);
