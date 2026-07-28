@@ -211,6 +211,39 @@ export async function getCurrentUserId(): Promise<string | null> {
   return data.user?.id ?? null;
 }
 
+/** True if the current session user has a posting_interviewers row for
+ *  ANY posting — used to admit assigned-but-non-leadership interviewers
+ *  into the Hiring module (nav + route), independent of which specific
+ *  posting they're assigned to. RLS's can_view_posting() already lets a
+ *  user see their own posting_interviewers row (it resolves true for a
+ *  row where profile_id = the querying user, since that's exactly what
+ *  "assigned interviewer" means), so this query needs no special RLS. */
+export async function isAssignedInterviewerAnywhere(): Promise<boolean> {
+  const userId = await getCurrentUserId();
+  if (!userId) return false;
+  const { data, error } = await supabase.from('posting_interviewers').select('id').eq('profile_id', userId).limit(1);
+  if (error) return false;
+  return (data?.length ?? 0) > 0;
+}
+
+/** Hook wrapper for isAssignedInterviewerAnywhere() — fetches once on
+ *  mount. Used by the module-level nav/route gate (App.tsx, GlobalNav.tsx),
+ *  not by any per-posting UI (that already goes through canViewPosting()
+ *  with a per-posting boolean computed elsewhere). */
+export function useIsAssignedInterviewer(): { isAssigned: boolean; loading: boolean } {
+  const [isAssigned, setIsAssigned] = useState(false);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const result = await isAssignedInterviewerAnywhere();
+      if (!cancelled) { setIsAssigned(result); setLoading(false); }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+  return { isAssigned, loading };
+}
+
 /** Calls the suggest-screening-rubric edge function. Components never call
  *  `supabase.functions.invoke` directly — this is the one place that does
  *  for rubric suggestion (same pattern as lib/products.ts's

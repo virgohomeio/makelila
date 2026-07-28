@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { canDo, canView, canViewPosting, type Role, type Action, type Module } from './permissions';
+import { canDo, canView, canViewPosting, canAccessHiringModule, type Role, type Action, type Module } from './permissions';
 
 describe('canDo', () => {
   // Source-of-truth matrix mirroring ACTION_ROLES inside permissions.ts.
@@ -105,5 +105,37 @@ describe('canView hiring module', () => {
     expect(canView('operator', 'hiring')).toBe(false);
     expect(canView('finance', 'hiring')).toBe(true);
     expect(canView('admin', 'hiring')).toBe(true);
+  });
+});
+
+describe('canAccessHiringModule', () => {
+  it('returns true for leadership regardless of assignment', () => {
+    expect(canAccessHiringModule('finance', false)).toBe(true);
+    expect(canAccessHiringModule('admin', false)).toBe(true);
+    expect(canAccessHiringModule('finance', true)).toBe(true);
+  });
+
+  it('returns true for a non-leadership user assigned to at least one posting', () => {
+    expect(canAccessHiringModule('operator', true)).toBe(true);
+    expect(canAccessHiringModule('manager', true)).toBe(true);
+  });
+
+  it('returns false for a non-leadership user not assigned to any posting', () => {
+    expect(canAccessHiringModule('operator', false)).toBe(false);
+  });
+
+  // Deliberately differs from canViewPosting()'s `if (!role) return false`
+  // guard: isAssignedToAnyPosting can only be true after a real, RLS-gated
+  // DB lookup for this authenticated user's own id already succeeded, so a
+  // null/undefined role here means the profile-role fetch just hasn't
+  // resolved yet (a real race — see auth.tsx), not an unauthenticated user.
+  it('returns true for a null/undefined role when already confirmed assigned', () => {
+    expect(canAccessHiringModule(null, true)).toBe(true);
+    expect(canAccessHiringModule(undefined, true)).toBe(true);
+  });
+
+  it('returns false for a null/undefined role with no confirmed assignment', () => {
+    expect(canAccessHiringModule(null, false)).toBe(false);
+    expect(canAccessHiringModule(undefined, false)).toBe(false);
   });
 });

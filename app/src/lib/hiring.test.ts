@@ -6,6 +6,7 @@ import {
   updateCandidateStage, recordCandidateScore, rejectCandidate, hireCandidate,
   createInterview, recordInterviewDecision, updatePostingRubric,
   suggestScreeningRubric, uploadAndScoreResume, getResumeSignedUrl,
+  isAssignedInterviewerAnywhere,
 } from './hiring';
 
 const {
@@ -245,5 +246,25 @@ describe('mutations', () => {
     const url = await getResumeSignedUrl('p1/abc-resume.pdf');
     expect(mockCreateSignedUrl).toHaveBeenCalledWith('p1/abc-resume.pdf', 3600);
     expect(url).toBe('https://.../signed?token=abc');
+  });
+});
+
+describe('isAssignedInterviewerAnywhere', () => {
+  it('returns true when a posting_interviewers row exists for the current user', async () => {
+    mockGetUser.mockResolvedValueOnce({ data: { user: { id: 'u1' } }, error: null });
+    mockResolve.mockResolvedValueOnce({ data: [{ id: 'pi1' }], error: null });
+    expect(await isAssignedInterviewerAnywhere()).toBe(true);
+  });
+
+  it('returns false when no posting_interviewers row exists for the current user', async () => {
+    mockGetUser.mockResolvedValueOnce({ data: { user: { id: 'u1' } }, error: null });
+    mockResolve.mockResolvedValueOnce({ data: [], error: null });
+    expect(await isAssignedInterviewerAnywhere()).toBe(false);
+  });
+
+  it('returns false when there is no session (getCurrentUserId returns null)', async () => {
+    mockGetUser.mockResolvedValueOnce({ data: { user: null }, error: null });
+    expect(await isAssignedInterviewerAnywhere()).toBe(false);
+    expect(mockResolve).not.toHaveBeenCalled();
   });
 });

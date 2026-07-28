@@ -1,7 +1,8 @@
 import { lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
 import { AuthProvider, ProtectedRoute, useAuth } from './lib/auth';
-import { canView, type Module } from './lib/permissions';
+import { canView, canAccessHiringModule, type Module } from './lib/permissions';
+import { useIsAssignedInterviewer } from './lib/hiring';
 import { AppShell } from './components/AppShell';
 import { RouteErrorBoundary } from './components/RouteErrorBoundary';
 import { MobileHome } from './components/MobileHome';
@@ -36,6 +37,20 @@ function RequireRole({ role, children }: { role: Module; children: React.ReactNo
   const { role: userRole, loading } = useAuth();
   if (loading) return <div style={{ padding: 24 }}>Loading…</div>;
   if (!canView(userRole, role)) return <Navigate to="/" replace />;
+  return <>{children}</>;
+}
+
+/** Hiring-specific route guard: leadership OR anyone assigned as an
+ *  interviewer on at least one posting (see lib/permissions.ts's
+ *  canAccessHiringModule doc comment for the null-role reasoning). Kept
+ *  separate from the generic RequireRole above — that component is shared
+ *  by every leadership-only module (Finance today, others later) and
+ *  Hiring's extra async assignment check doesn't belong there. */
+function RequireHiringAccess({ children }: { children: React.ReactNode }) {
+  const { role, loading: authLoading } = useAuth();
+  const { isAssigned, loading: assignedLoading } = useIsAssignedInterviewer();
+  if (authLoading || assignedLoading) return <div style={{ padding: 24 }}>Loading…</div>;
+  if (!canAccessHiringModule(role, isAssigned)) return <Navigate to="/" replace />;
   return <>{children}</>;
 }
 
@@ -102,9 +117,9 @@ export default function App() {
               </RequireRole>
             } />
             <Route path="hiring" element={
-              <RequireRole role="hiring">
+              <RequireHiringAccess>
                 <LazyRoute><Hiring /></LazyRoute>
-              </RequireRole>
+              </RequireHiringAccess>
             } />
             <Route path="products" element={<LazyRoute><Products /></LazyRoute>} />
           </Route>
