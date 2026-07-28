@@ -24,6 +24,9 @@ export function ApplicantsTab({ postingId, pipelineStages, onSelectCandidate }: 
         <option value="linkedin">LinkedIn</option>
         <option value="referral">Referral</option>
         <option value="other">Other</option>
+        <option value="university_of_waterloo">University of Waterloo</option>
+        <option value="university_of_toronto">University of Toronto</option>
+        <option value="york_university">York University</option>
       </select>
       <ResumeUploadPanel postingId={postingId} source={uploadSource} onUploaded={() => {}} />
       <h3 style={{ marginTop: 20 }}>Applicants</h3>

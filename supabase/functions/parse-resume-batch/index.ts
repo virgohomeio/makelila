@@ -29,7 +29,8 @@ export type ParseResumeInput = {
   posting_id: string;
   storage_path: string;   // path within the hiring-resumes bucket
   mime_type: 'application/pdf' | 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-  source: 'indeed' | 'linkedin' | 'referral' | 'other';
+  source: 'indeed' | 'linkedin' | 'referral' | 'other'
+    | 'university_of_waterloo' | 'university_of_toronto' | 'york_university';
 };
 
 type ExtractedResume = {

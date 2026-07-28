@@ -19,7 +19,9 @@ export interface JobPosting {
   created_at: string;
 }
 
-export type CandidateSource = 'indeed' | 'linkedin' | 'referral' | 'other';
+export type CandidateSource =
+  | 'indeed' | 'linkedin' | 'referral' | 'other'
+  | 'university_of_waterloo' | 'university_of_toronto' | 'york_university';
 export type IngestedVia = 'email_sync' | 'manual_upload';
 export type EnrichmentStatus = 'stub' | 'resume_attached';
 
