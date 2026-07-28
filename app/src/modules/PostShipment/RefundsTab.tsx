@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   useRefundApprovals, useReturns,
-  submitRefundRequest, updateRefundAmount, submitToManager, managerApprove, financeApprove, executeRefund, denyRefund, closeRefund,
+  submitRefundRequest, updateRefundAmount, setRefundCurrency, type RefundCurrency, submitToManager, managerApprove, financeApprove, executeRefund, denyRefund, closeRefund,
   sendRefundBack, uncompileRefund, type RefundBackTarget,
   confirmPurchaserLinkage, hasValidPurchaserLinkage,
   computeRefundNet, defaultRefundFees,
@@ -83,8 +83,11 @@ export function RefundsTab() {
   const { byEmail: customerIdByEmail } = useCustomerIdByEmail();
   const { customers } = useCustomers();
   const { tickets: allTickets } = useServiceTickets();
-  const { user, role } = useAuth();
-  const userEmail = user?.email;
+  const { user, profile, role } = useAuth();
+  // Gate on the profile email (loaded from the DB, stable) — the auth session's
+  // user.email is often transiently undefined after a token refresh, which would
+  // silently blank out every column owner's forward/approve button.
+  const userEmail = profile?.email ?? user?.email;
 
   const [showRequestModal, setShowRequestModal] = useState(false);
   const [requestReturnId, setRequestReturnId] = useState<string | null>(null);
@@ -595,6 +598,30 @@ function PartyHeader({ parties, nameNode }: { parties: Parties; nameNode?: (name
         </span>
       )}
     </span>
+  );
+}
+
+// USD ⇄ CAD toggle for the refund amount (a label — the value isn't converted).
+// Editable by anyone who can edit the amount; read-only chip otherwise.
+function CurrencyToggle({ refund, editable, onError }: { refund: RefundApproval; editable: boolean; onError: (m: string | null) => void }) {
+  const [busy, setBusy] = useState(false);
+  const cur: RefundCurrency = refund.currency === 'CAD' ? 'CAD' : 'USD';
+  if (!editable) {
+    return <span style={{ fontSize: 9, fontWeight: 700, color: '#a0aec0' }}>{cur}</span>;
+  }
+  const toggle = async () => {
+    setBusy(true); onError(null);
+    try { await setRefundCurrency(refund.id, cur === 'USD' ? 'CAD' : 'USD'); }
+    catch (e) { onError((e as Error).message); }
+    finally { setBusy(false); }
+  };
+  return (
+    <button onClick={e => { e.stopPropagation(); void toggle(); }} disabled={busy}
+      title="Switch currency (USD ⇄ CAD)"
+      style={{ fontSize: 9, fontWeight: 700, letterSpacing: 0.3, padding: '1px 6px', borderRadius: 4, cursor: 'pointer',
+               border: '1px solid #cbd5e0', background: '#fff', color: '#4a5568', whiteSpace: 'nowrap' }}>
+      {busy ? '…' : `${cur} ⇄`}
+    </button>
   );
 }
 
@@ -1336,31 +1363,34 @@ function RefundCard({
     >
       <div className={styles.refundCardHead}>
         <PartyHeader parties={parties} />
-        {editingAmount ? (
-          <span onClick={e => e.stopPropagation()} style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
-            <span style={{ fontWeight: 700 }}>$</span>
-            <input
-              autoFocus
-              type="number" step="0.01" min="0"
-              value={amountDraft}
-              onChange={e => setAmountDraft(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') void saveAmount(); if (e.key === 'Escape') setEditingAmount(false); }}
-              onBlur={() => void saveAmount()}
-              disabled={busy}
-              style={{ width: 90, fontSize: 13, fontWeight: 700, padding: '2px 4px',
-                       border: '1px solid #2b6cb0', borderRadius: 4, textAlign: 'right' }}
-            />
-          </span>
-        ) : (
-          <span
-            className={styles.refundAmount}
-            onClick={canEditAmount ? (e) => { e.stopPropagation(); startEditAmount(); } : undefined}
-            style={canEditAmount ? { cursor: 'pointer' } : undefined}
-            title={canEditAmount ? 'Click to edit the refund amount' : undefined}
-          >
-            ${Number(refund.refund_amount_usd).toLocaleString('en-US')}{canEditAmount && ' ✎'}
-          </span>
-        )}
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
+          {editingAmount ? (
+            <span onClick={e => e.stopPropagation()} style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+              <span style={{ fontWeight: 700 }}>$</span>
+              <input
+                autoFocus
+                type="number" step="0.01" min="0"
+                value={amountDraft}
+                onChange={e => setAmountDraft(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') void saveAmount(); if (e.key === 'Escape') setEditingAmount(false); }}
+                onBlur={() => void saveAmount()}
+                disabled={busy}
+                style={{ width: 90, fontSize: 13, fontWeight: 700, padding: '2px 4px',
+                         border: '1px solid #2b6cb0', borderRadius: 4, textAlign: 'right' }}
+              />
+            </span>
+          ) : (
+            <span
+              className={styles.refundAmount}
+              onClick={canEditAmount ? (e) => { e.stopPropagation(); startEditAmount(); } : undefined}
+              style={canEditAmount ? { cursor: 'pointer' } : undefined}
+              title={canEditAmount ? 'Click to edit the refund amount' : undefined}
+            >
+              ${Number(refund.refund_amount_usd).toLocaleString('en-US')}{canEditAmount && ' ✎'}
+            </span>
+          )}
+          <CurrencyToggle refund={refund} editable={canEditAmount} onError={onError} />
+        </div>
       </div>
       {refund.reason && <div className={styles.refundReason}>{refund.reason}</div>}
       {refund.payment_method && <div className={styles.refundMeta}>via {refund.payment_method}</div>}

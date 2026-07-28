@@ -23,7 +23,7 @@ export function requireInternalDomain(email: string | undefined | null): boolean
   return EXTERNAL_ALLOWLIST.has(lower);
 }
 
-type Profile = { id: string; display_name: string; role: Role };
+type Profile = { id: string; display_name: string; role: Role; email: string | null };
 
 type AuthState = {
   session: Session | null;
@@ -99,7 +99,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     supabase
       .from('profiles')
-      .select('id, display_name, role')
+      .select('id, display_name, role, email')
       .eq('id', user.id)
       .single()
       .then(({ data }) => setProfile(data as Profile | null));

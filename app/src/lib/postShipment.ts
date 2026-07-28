@@ -914,6 +914,16 @@ export async function updateRefundAmount(id: string, amount: number): Promise<vo
   await logAction('refund_amount_edited', id, `$${rounded.toFixed(2)}`);
 }
 
+export type RefundCurrency = 'USD' | 'CAD';
+/** Set the currency the refund amount is denominated in (label only — the value
+ *  isn't converted). */
+export async function setRefundCurrency(id: string, currency: RefundCurrency): Promise<void> {
+  const { error } = await supabase.from('refund_approvals')
+    .update({ currency }).eq('id', id);
+  if (error) throw error;
+  await logAction('refund_currency_set', id, currency);
+}
+
 /** FR-3: the Account Manager advances a prepared case from Completeness
  *  ('submitted') to Manager Review. Explicit "Submit", distinct from the
  *  Manager's "Approve" — so incomplete cases never sit in front of the Return
