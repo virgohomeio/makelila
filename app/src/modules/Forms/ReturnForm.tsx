@@ -216,6 +216,12 @@ export default function ReturnForm() {
     if (!packaging) { setError('Please tell us about the packaging.'); return; }
     if (!alternative) { setError('Please select an alternative composting plan.'); return; }
     if (!refundMethod) { setError('Please select a refund method.'); return; }
+    if (!refundContact.trim()) {
+      setError(refundMethod.startsWith('Email')
+        ? 'Please enter the email to send your e-transfer to.'
+        : 'Please enter the phone number for us to call.');
+      return;
+    }
     if (!purchaseProofFile) { setError('Please upload your proof of purchase (receipt, invoice, or order confirmation as PDF or image).'); return; }
 
     setSubmitting(true);
@@ -485,16 +491,18 @@ export default function ReturnForm() {
           <RadioGroup options={REFUND_METHOD_OPTIONS} value={refundMethod} onChange={setRefundMethod} stacked />
         </Field>
 
-        {/* 16. Refund contact (conditional shown if refundMethod is set) */}
+        {/* 16. Refund contact (conditional shown if refundMethod is set — required) */}
         {refundMethod && (
           <Field
             label={refundMethod.startsWith('Email') ? 'E-Transfer email' : 'Callback phone number'}
+            required
             help={refundMethod.startsWith('Email')
               ? 'Where to send the e-transfer.'
               : 'We will call this number to take your card details.'}
           >
             <input value={refundContact} onChange={e => setRefundContact(e.target.value)}
-                   className={styles.input}
+                   type={refundMethod.startsWith('Email') ? 'email' : 'tel'}
+                   className={styles.input} required
                    placeholder={refundMethod.startsWith('Email') ? 'you@example.com' : '(000) 000-0000'} />
           </Field>
         )}
