@@ -1,12 +1,78 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import styles from './Hiring.module.css';
-import { useInterviews, createInterview, recordInterviewDecision, getCurrentUserId, type Interview, type InterviewDecision } from '../../lib/hiring';
+import {
+  useJobPostings, useCandidates, useInterviews, createInterview, recordInterviewDecision, getCurrentUserId,
+  type Interview, type InterviewDecision,
+} from '../../lib/hiring';
 
 const DECISION_LABEL: Record<InterviewDecision, string> = {
   advance: 'Advance', reject: 'Reject', hold: 'Hold', no_show: 'No-show',
 };
 
-export function InterviewsTab({ candidateId, candidateName }: { candidateId: string; candidateName: string }) {
+export function InterviewsTab({ initialExpandedCandidateId }: { initialExpandedCandidateId?: string }) {
+  const { postings, loading } = useJobPostings();
+
+  if (loading) return <div>Loading postings…</div>;
+  if (!postings.length) return <div className={styles.empty}>No job postings yet.</div>;
+
+  return (
+    <div className={styles.board}>
+      {postings.map(p => (
+        <InterviewColumn
+          key={p.id}
+          postingId={p.id}
+          title={p.title}
+          initialExpandedCandidateId={initialExpandedCandidateId}
+        />
+      ))}
+    </div>
+  );
+}
+
+function InterviewColumn({ postingId, title, initialExpandedCandidateId }: {
+  postingId: string; title: string; initialExpandedCandidateId?: string;
+}) {
+  const { candidates, loading } = useCandidates(postingId);
+  // Interviews only make sense for a real, resume-attached candidate.
+  const interviewable = candidates.filter(c => c.enrichment_status !== 'stub');
+  const [expandedCandidateId, setExpandedCandidateId] = useState<string | undefined>(undefined);
+  const rowRef = useRef<HTMLDivElement>(null);
+  const autoExpandedRef = useRef(false);
+  const hasInitialCandidate = interviewable.some(c => c.id === initialExpandedCandidateId);
+
+  useEffect(() => {
+    if (autoExpandedRef.current || !initialExpandedCandidateId || !hasInitialCandidate) return;
+    autoExpandedRef.current = true;
+    setExpandedCandidateId(initialExpandedCandidateId);
+    rowRef.current?.scrollIntoView({ block: 'nearest' });
+  }, [initialExpandedCandidateId, hasInitialCandidate]);
+
+  return (
+    <div className={styles.column}>
+      <div className={styles.columnHeader}>
+        {title} <span className={styles.columnCount}>· {interviewable.length}</span>
+      </div>
+      {loading && <div>Loading…</div>}
+      {!loading && !interviewable.length && <div>No candidates ready for interviews yet.</div>}
+      {interviewable.map(c => (
+        <div key={c.id} ref={c.id === initialExpandedCandidateId ? rowRef : undefined}>
+          <div
+            className={styles.candidateCard}
+            style={{ cursor: 'pointer' }}
+            onClick={() => setExpandedCandidateId(expandedCandidateId === c.id ? undefined : c.id)}
+          >
+            <strong>{c.full_name}</strong>
+          </div>
+          {expandedCandidateId === c.id && (
+            <CandidateInterviewPanel key={c.id} candidateId={c.id} candidateName={c.full_name} />
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function CandidateInterviewPanel({ candidateId, candidateName }: { candidateId: string; candidateName: string }) {
   const { interviews: fetchedInterviews, loading } = useInterviews(candidateId);
   const [roundLabel, setRoundLabel] = useState('');
   const [calendlyUrl, setCalendlyUrl] = useState('');
@@ -17,17 +83,18 @@ export function InterviewsTab({ candidateId, candidateName }: { candidateId: str
   // subscription (unlike useJobPostings/useCandidates) — track interviews
   // created/decided by this component locally and merge them into the
   // fetched list on render, so book()/DecisionForm reflect their own writes
-  // immediately instead of requiring a remount to see them. Resets whenever
-  // candidateId changes (React's "adjusting state when a prop changes"
-  // pattern rather than an effect — https://react.dev/learn/you-might-not-need-an-effect).
-  const [trackedCandidateId, setTrackedCandidateId] = useState(candidateId);
+  // immediately instead of requiring a remount to see them.
+  //
+  // This panel is now mounted only while its candidate's row is expanded,
+  // with `key={candidateId}` at the call site (InterviewColumn) — so a
+  // fresh component instance is created whenever the expanded candidate
+  // changes, and candidateId never changes within one mounted instance's
+  // lifetime. That makes the old "adjust tracked candidate id during
+  // render" reset trick unnecessary: there is no stale local state to
+  // clear, because this instance never renders for a second candidateId.
+  // Dropped in favor of the plain `key`-driven remount.
   const [createdInterviews, setCreatedInterviews] = useState<Interview[]>([]);
   const [decisionOverrides, setDecisionOverrides] = useState<Record<string, { decision: InterviewDecision; decision_notes: string }>>({});
-  if (candidateId !== trackedCandidateId) {
-    setTrackedCandidateId(candidateId);
-    setCreatedInterviews([]);
-    setDecisionOverrides({});
-  }
 
   // De-dup by id: if useInterviews ever gains a realtime subscription, a row
   // inserted by book() could land in fetchedInterviews while already present
@@ -62,7 +129,7 @@ export function InterviewsTab({ candidateId, candidateName }: { candidateId: str
   }
 
   return (
-    <div>
+    <div style={{ marginBottom: 10 }}>
       <h4>Interviews — {candidateName}</h4>
       {loading && <div>Loading…</div>}
       {interviews.map(iv => (

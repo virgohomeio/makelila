@@ -2,18 +2,42 @@ import { useState } from 'react';
 import styles from './Hiring.module.css';
 import { ResumeUploadPanel } from './ResumeUploadPanel';
 import {
-  useCandidates, updateCandidateStage, recordCandidateScore, rejectCandidate, hireCandidate,
+  useJobPostings, useCandidates, updateCandidateStage, recordCandidateScore, rejectCandidate, hireCandidate,
   getResumeSignedUrl, type Candidate, type CandidateSource,
 } from '../../lib/hiring';
 
-export function ApplicantsTab({ postingId, pipelineStages, onSelectCandidate }: {
-  postingId: string; pipelineStages: string[]; onSelectCandidate: (id: string) => void;
+export function ApplicantsTab({ onSelectCandidate }: { onSelectCandidate: (id: string) => void }) {
+  const { postings, loading } = useJobPostings();
+
+  if (loading) return <div>Loading postings…</div>;
+  if (!postings.length) return <div className={styles.empty}>No job postings yet.</div>;
+
+  return (
+    <div className={styles.board}>
+      {postings.map(p => (
+        <PostingColumn
+          key={p.id}
+          postingId={p.id}
+          title={p.title}
+          pipelineStages={p.pipeline_stages}
+          onSelectCandidate={onSelectCandidate}
+        />
+      ))}
+    </div>
+  );
+}
+
+function PostingColumn({ postingId, title, pipelineStages, onSelectCandidate }: {
+  postingId: string; title: string; pipelineStages: string[]; onSelectCandidate: (id: string) => void;
 }) {
   const { candidates, loading } = useCandidates(postingId);
   const [uploadSource, setUploadSource] = useState<CandidateSource>('indeed');
 
   return (
-    <div>
+    <div className={styles.column}>
+      <div className={styles.columnHeader}>
+        {title} <span className={styles.columnCount}>· {candidates.length}</span>
+      </div>
       <select
         className={styles.stageSelect}
         value={uploadSource}
