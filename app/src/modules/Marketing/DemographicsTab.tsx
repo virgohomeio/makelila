@@ -11,11 +11,17 @@ const muted = 'var(--color-ink-muted)';
 //   • LILA Mini        — Leads / Purchases (Shopline funnel)
 //   • LILA Pro         — Purchases (the Dec-2025 → Summer-Pre-Order sale campaigns)
 // Location: for LILA Pro we pull country / province / city from the actual
-// Shopify sales (every sale carries all three) instead of Meta's country-only
-// demographic breakdown. Sharpei/Mini keep Meta's country breakdown.
+// Shopify sales (every sale carries all three), split into a Canada-provinces
+// pie and a US-states pie. Sharpei/Mini keep Meta's country breakdown.
+//
+// Charts: SVG donuts. Identity uses the validated categorical palette in fixed
+// order (extras fold into a grey "Other"); age uses a sequential blue ramp since
+// it's ordinal (young → old = light → dark). Every donut ships a legend so
+// identity is never colour-alone.
 
 type SetKey = 'sharpei' | 'mini' | 'pro';
 type Metric = 'leads' | 'purchases';
+type Entry = { label: string; value: number };
 
 /** Classify a Meta campaign into a product set (null = excluded / pre-2025). */
 function setOf(name: string): SetKey | null {
@@ -27,15 +33,22 @@ function setOf(name: string): SetKey | null {
 }
 
 const AGE_ORDER = ['13-17', '18-24', '25-34', '35-44', '45-54', '55-64', '65+'];
-// Bucket midpoints for a weighted average age (65+ treated as ~70).
 const AGE_MID: Record<string, number> = {
   '13-17': 15, '18-24': 21, '25-34': 29.5, '35-44': 39.5, '45-54': 49.5, '55-64': 59.5, '65+': 70,
 };
+// Sequential blue ramp (light→dark) aligned to AGE_ORDER so age reads as a progression.
+const AGE_COLOR: Record<string, string> = {
+  '13-17': '#86b6ef', '18-24': '#5598e7', '25-34': '#3987e5', '35-44': '#256abf',
+  '45-54': '#1c5cab', '55-64': '#184f95', '65+': '#0d366b',
+};
+// Validated categorical palette (fixed order). "Other"/"Unknown" → grey.
+const CAT = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#4a3aa7', '#e34948'];
+const GREY = '#b8b6ae';
+const catColor = (label: string, i: number) => (/^(other|unknown)$/i.test(label) ? GREY : CAT[i % CAT.length]);
+
 const gender = (g: string) => (g && g.toLowerCase() !== 'unknown' ? g.charAt(0).toUpperCase() + g.slice(1).toLowerCase() : 'Unknown');
 const country = (c: string) => (c === 'US' ? 'United States' : c === 'CA' ? 'Canada' : c || 'Unknown');
 const val = (d: FbDemographic, m: Metric) => ((m === 'leads' ? d.leads : d.purchases) ?? 0);
-
-type Entry = { label: string; value: number };
 
 function groupSum(rows: FbDemographic[], key: (d: FbDemographic) => string, m: Metric): Entry[] {
   const map = new Map<string, number>();
@@ -43,19 +56,18 @@ function groupSum(rows: FbDemographic[], key: (d: FbDemographic) => string, m: M
   return Array.from(map.entries()).map(([label, value]) => ({ label, value })).filter(e => e.value > 0);
 }
 
-/** Weighted average age from the age buckets, or null if none are known. */
+/** Weighted average age from the age buckets, or null. */
 function averageAge(entries: Entry[]): number | null {
   let sum = 0, n = 0;
   for (const e of entries) {
     const mid = AGE_MID[e.label];
     if (mid == null) continue;
-    sum += mid * e.value;
-    n += e.value;
+    sum += mid * e.value; n += e.value;
   }
   return n > 0 ? sum / n : null;
 }
 
-/** Count orders by an arbitrary key (blank keys skipped), biggest first. */
+/** Count orders by key (blank keys skipped), biggest first. */
 function countBy(orders: Order[], key: (o: Order) => string): Entry[] {
   const m = new Map<string, number>();
   for (const o of orders) {
@@ -64,6 +76,21 @@ function countBy(orders: Order[], key: (o: Order) => string): Entry[] {
     m.set(k, (m.get(k) ?? 0) + 1);
   }
   return Array.from(m.entries()).map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value);
+}
+
+/** Keep the biggest slices; fold the rest (too many, or below minShare) into
+ *  "Other" so a pie never turns into confetti. Assumes entries are sorted desc. */
+function foldOther(entries: Entry[], maxSlices = 6, minShare = 0.03): Entry[] {
+  const total = entries.reduce((s, e) => s + e.value, 0);
+  if (total === 0) return [];
+  const kept: Entry[] = [];
+  let other = 0;
+  for (const e of entries) {
+    if (kept.length < maxSlices && e.value / total >= minShare) kept.push(e);
+    else other += e.value;
+  }
+  if (other > 0) kept.push({ label: 'Other', value: other });
+  return kept;
 }
 
 export function DemographicsTab() {
@@ -76,8 +103,6 @@ export function DemographicsTab() {
 
   const { total, byGender, byAge, byCountry, avgAge } = useMemo(() => {
     const rows = demographics.filter(d => setOf(d.campaign_name ?? '') === set);
-    // Two breakdown kinds share the table: age×gender rows (country='all') and
-    // country rows (age/gender='all'). Split them so we never double-count.
     const ag = rows.filter(d => d.age !== 'all' && d.gender !== 'all');
     const geo = rows.filter(d => d.country !== 'all');
     const total = ag.reduce((s, d) => s + val(d, metric), 0);
@@ -88,19 +113,23 @@ export function DemographicsTab() {
     return { total, byGender, byAge, byCountry, avgAge: averageAge(byAge) };
   }, [demographics, set, metric]);
 
-  // LILA Pro location from the actual Shopify sales (country / province / city).
+  // LILA Pro location from the actual Shopify sales — Canada provinces + US
+  // states in separate pies, plus a country split and a top-cities list.
   const saleLoc = useMemo(() => {
     const sales = orders.filter(o => o.kind !== 'replacement');
+    const ca = sales.filter(o => o.country === 'CA');
+    const us = sales.filter(o => o.country === 'US');
     return {
       total: sales.length,
-      byCountry: countBy(sales, o => country(o.country ?? '')),
-      byProvince: countBy(sales, o => o.region_state ?? ''),
-      byCity: countBy(sales, o => o.city ?? ''),
+      byCountry: foldOther(countBy(sales, o => country(o.country ?? '')), 5, 0),
+      caProvinces: foldOther(countBy(ca, o => o.region_state ?? ''), 6, 0.03),
+      usStates: foldOther(countBy(us, o => o.region_state ?? ''), 6, 0.03),
+      topCities: countBy(sales, o => o.city ?? '').slice(0, 10),
+      caTotal: ca.length, usTotal: us.length,
     };
   }, [orders]);
 
   const metricLabel = metric === 'leads' ? 'Leads' : 'Purchases';
-  const topAge = byAge.slice().sort((a, b) => b.value - a.value)[0];
   const topLoc = set === 'pro' ? saleLoc.byCountry[0] : byCountry[0];
   const locTotal = set === 'pro' ? saleLoc.total : total;
 
@@ -120,7 +149,6 @@ export function DemographicsTab() {
         ))}
       </div>
 
-      {/* Mini has Leads / Purchases sub-views */}
       {set === 'mini' && (
         <div style={{ display: 'flex', gap: 6, marginBottom: 16 }}>
           {(['leads', 'purchases'] as Metric[]).map(m => (
@@ -145,30 +173,31 @@ export function DemographicsTab() {
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 20 }}>
             <Stat label={`Total ${metricLabel.toLowerCase()}`} value={total.toLocaleString()} />
             <Stat label="Top gender" value={byGender[0] ? `${byGender[0].label} · ${pct(byGender[0].value, total)}` : '—'} />
-            <Stat label="Top age" value={topAge ? `${topAge.label} · ${pct(topAge.value, total)}` : '—'} />
             <Stat label="Average age" value={avgAge != null ? `~${Math.round(avgAge)}` : '—'} />
             <Stat label="Top location" value={topLoc ? `${topLoc.label} · ${pct(topLoc.value, locTotal)}` : '—'} />
           </div>
 
-          <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', alignItems: 'flex-start' }}>
-            <Breakdown title="By gender" entries={byGender} total={total} />
-            <Breakdown title="By age" entries={byAge} total={total} footer={avgAge != null ? `Average age ~${Math.round(avgAge)}` : undefined} />
+          <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+            <PieCard title="By gender" entries={byGender} colorFor={catColor} center={{ main: total.toLocaleString(), sub: metricLabel.toLowerCase() }} />
+            <PieCard title="By age" entries={byAge} colorFor={(l) => AGE_COLOR[l] ?? GREY}
+              center={{ main: avgAge != null ? `~${Math.round(avgAge)}` : '—', sub: 'avg age' }} />
             {set === 'pro' ? (
               <>
-                <Breakdown title="By country" entries={saleLoc.byCountry} total={saleLoc.total} />
-                <Breakdown title="By province / state" entries={saleLoc.byProvince} total={saleLoc.total} />
-                <Breakdown title="By city" entries={saleLoc.byCity.slice(0, 15)} total={saleLoc.total} />
+                <PieCard title="By country" entries={saleLoc.byCountry} colorFor={catColor} center={{ main: saleLoc.total.toLocaleString(), sub: 'sales' }} />
+                <PieCard title="Canada — by province" entries={saleLoc.caProvinces} colorFor={catColor} center={{ main: saleLoc.caTotal.toLocaleString(), sub: 'CA sales' }} />
+                <PieCard title="US — by state" entries={saleLoc.usStates} colorFor={catColor} center={{ main: saleLoc.usTotal.toLocaleString(), sub: 'US sales' }} />
+                <TopList title="Top cities" entries={saleLoc.topCities} total={saleLoc.total} />
               </>
             ) : (
-              <Breakdown title="By location" entries={byCountry} total={total} />
+              <PieCard title="By location" entries={byCountry} colorFor={catColor} center={{ main: total.toLocaleString(), sub: metricLabel.toLowerCase() }} />
             )}
           </div>
 
-          <div style={{ fontSize: 11, color: muted, marginTop: 14 }}>
+          <div style={{ fontSize: 11, color: muted, marginTop: 16 }}>
             Age &amp; gender are {metricLabel.toLowerCase()} attributed by Meta to this set's campaigns (percent of total {metricLabel.toLowerCase()});
-            average age is a weighted midpoint of the age buckets.{' '}
+            average age is a weighted midpoint of the age buckets. Small slices fold into “Other.”{' '}
             {set === 'pro'
-              ? `Location is pulled from your ${saleLoc.total.toLocaleString()} Shopify sales — country, province/state, and city (percent of sales).`
+              ? `Location comes from your ${saleLoc.total.toLocaleString()} Shopify sales — split into Canada provinces and US states (percent of that country's sales).`
               : 'Location is country-level (Meta’s demographic breakdown).'}
           </div>
         </>
@@ -190,24 +219,72 @@ function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
-function Breakdown({ title, entries, total, footer }: { title: string; entries: Entry[]; total: number; footer?: string }) {
-  const max = Math.max(1, ...entries.map(e => e.value));
+/** SVG donut + legend. `colorFor(label, index)` assigns each slice its colour. */
+function PieCard({ title, entries, colorFor, center }: {
+  title: string;
+  entries: Entry[];
+  colorFor: (label: string, i: number) => string;
+  center?: { main: string; sub?: string };
+}) {
+  const total = entries.reduce((s, e) => s + e.value, 0);
+  const R = 52, T = 22, C = 2 * Math.PI * R;      // ring radius + thickness
+  const gap = entries.length > 1 ? 3 : 0;          // px gap between slices
+  let acc = 0;
+  const slices = entries.map((e, i) => {
+    const f = total > 0 ? e.value / total : 0;
+    const slice = { color: colorFor(e.label, i), dash: Math.max(0, f * C - gap), offset: -acc * C, label: e.label, value: e.value };
+    acc += f;
+    return slice;
+  });
+
   return (
-    <div style={{ flex: '1 1 240px', minWidth: 240, border: '1px solid var(--color-border)', borderRadius: 8, padding: '12px 14px' }}>
+    <div style={{ flex: '0 0 auto', minWidth: 210, border: '1px solid var(--color-border)', borderRadius: 10, padding: '14px 16px' }}>
+      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>{title}</div>
+      {total === 0 ? (
+        <div style={{ fontSize: 12, color: subtle, padding: '18px 0' }}>No data yet</div>
+      ) : (
+        <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
+          <svg viewBox="0 0 140 140" width={128} height={128} role="img" aria-label={title}>
+            <g transform="rotate(-90 70 70)">
+              {slices.map((s, i) => (
+                <circle key={i} cx={70} cy={70} r={R} fill="none" stroke={s.color} strokeWidth={T}
+                  strokeDasharray={`${s.dash} ${C}`} strokeDashoffset={s.offset} />
+              ))}
+            </g>
+            {center && (
+              <>
+                <text x={70} y={center.sub ? 66 : 74} textAnchor="middle" style={{ fontSize: 22, fontWeight: 700, fill: 'currentColor' }}>{center.main}</text>
+                {center.sub && <text x={70} y={84} textAnchor="middle" style={{ fontSize: 11, fill: muted }}>{center.sub}</text>}
+              </>
+            )}
+          </svg>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 5, minWidth: 96 }}>
+            {slices.map((s, i) => (
+              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+                <span style={{ width: 11, height: 11, borderRadius: 3, background: s.color, flex: '0 0 auto' }} />
+                <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={s.label}>{s.label}</span>
+                <span style={{ color: muted, fontVariantNumeric: 'tabular-nums' }}>{pct(s.value, total)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Compact ranked list — for cities, which are too fragmented for a pie. */
+function TopList({ title, entries, total }: { title: string; entries: Entry[]; total: number }) {
+  return (
+    <div style={{ flex: '0 0 auto', minWidth: 200, border: '1px solid var(--color-border)', borderRadius: 10, padding: '14px 16px' }}>
       <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 10 }}>{title}</div>
       {entries.length === 0 && <div style={{ fontSize: 12, color: subtle }}>—</div>}
       {entries.map(e => (
-        <div key={e.label} style={{ marginBottom: 9 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 3 }}>
-            <span>{e.label}</span>
-            <span style={{ color: muted }}>{e.value.toLocaleString()} · {pct(e.value, total)}</span>
-          </div>
-          <div style={{ height: 6, borderRadius: 3, background: 'var(--color-surface)', overflow: 'hidden' }}>
-            <div style={{ height: '100%', width: `${(e.value / max) * 100}%`, background: 'var(--color-crimson)', borderRadius: 3 }} />
-          </div>
+        <div key={e.label} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 6, gap: 10 }}>
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={e.label}>{e.label}</span>
+          <span style={{ color: muted, flex: '0 0 auto', fontVariantNumeric: 'tabular-nums' }}>{e.value.toLocaleString()} · {pct(e.value, total)}</span>
         </div>
       ))}
-      {footer && <div style={{ fontSize: 11, color: subtle, marginTop: 4 }}>{footer}</div>}
     </div>
   );
 }
