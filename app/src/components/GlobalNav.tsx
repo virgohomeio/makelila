@@ -3,7 +3,8 @@ import styles from './GlobalNav.module.css';
 import { NotificationBell } from './NotificationBell';
 import { UserBadge } from './UserBadge';
 import { useAuth } from '../lib/auth';
-import { canView } from '../lib/permissions';
+import { canView, canAccessHiringModule } from '../lib/permissions';
+import { useIsAssignedInterviewer } from '../lib/hiring';
 
 const MODULES = [
   { path: '/team',          label: 'Team' },
@@ -16,6 +17,7 @@ const MODULES = [
   { path: '/customers',     label: 'Customers' },
   { path: '/lovely',        label: 'Lovely' },
   { path: '/finance',       label: 'Finance' },
+  { path: '/hiring',        label: 'Hiring' },
   { path: '/products',      label: 'Products' },
 ];
 
@@ -24,10 +26,12 @@ const MARKETING_ROLES = ['pedrum@virgohome.io', 'huayi@virgohome.io', 'george@vi
 export function GlobalNav() {
   const { user, role } = useAuth();
   const userEmail = user?.email ?? '';
+  const { isAssigned: isAssignedInterviewer } = useIsAssignedInterviewer();
 
   const visibleModules = MODULES.filter(m => {
     if (m.path === '/marketing') return MARKETING_ROLES.includes(userEmail.toLowerCase());
     if (m.path === '/finance') return canView(role, 'finance');
+    if (m.path === '/hiring') return canAccessHiringModule(role, isAssignedInterviewer);
     return true;
   });
 

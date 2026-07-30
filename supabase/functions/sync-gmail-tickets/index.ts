@@ -16,7 +16,7 @@
 // Setup runbook: docs/gmail-sync-setup.md
 
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
-import { SignJWT, importPKCS8 } from 'https://esm.sh/jose@5.9.6';
+import { getGmailAccessToken, type ServiceAccountKey } from '../_shared/gmail-auth.ts';
 import { corsHeaders } from '../_shared/cors.ts';
 import { authenticate } from '../_shared/auth.ts';
 import { classify, type Category, type Priority, type ThreadInput } from '../_shared/classifier.ts';
@@ -40,12 +40,6 @@ const GMAIL_QUERY = 'in:inbox -from:me -category:promotions -category:social -ca
 const SCOPES = 'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.modify';
 const SYNC_LABEL_NAME = 'makelila/synced';
 const VIRGO_DOMAIN = '@virgohome.io';
-
-type ServiceAccountKey = {
-  client_email: string;
-  private_key: string;
-  token_uri: string;
-};
 
 type GmailMessage = {
   id: string;
@@ -150,7 +144,7 @@ async function syncMailbox(
   };
 
   try {
-    const token = await getAccessToken(saKey, mailbox);
+    const token = await getGmailAccessToken(saKey, mailbox, SCOPES);
     const { data: stateRow } = await admin
       .from('gmail_sync_state')
       .select('*')
@@ -569,35 +563,6 @@ async function ensureLabel(mailbox: string, token: string, name: string): Promis
 }
 async function applyLabel(mailbox: string, token: string, threadId: string, labelId: string): Promise<void> {
   await gmailPost(mailbox, token, `/threads/${threadId}/modify`, { addLabelIds: [labelId] });
-}
-
-// ============================================================ Service-account JWT → OAuth access token
-async function getAccessToken(saKey: ServiceAccountKey, delegatedSubject: string): Promise<string> {
-  const now = Math.floor(Date.now() / 1000);
-  const privateKey = await importPKCS8(saKey.private_key, 'RS256');
-  const assertion = await new SignJWT({ scope: SCOPES })
-    .setProtectedHeader({ alg: 'RS256', typ: 'JWT' })
-    .setIssuer(saKey.client_email)
-    .setSubject(delegatedSubject)
-    .setAudience(saKey.token_uri)
-    .setIssuedAt(now)
-    .setExpirationTime(now + 3600)
-    .sign(privateKey);
-
-  const res = await fetch(saKey.token_uri, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
-      assertion,
-    }),
-  });
-  if (!res.ok) {
-    throw new Error(`Google token endpoint ${res.status}: ${(await res.text()).slice(0, 300)}`);
-  }
-  const json = await res.json() as { access_token?: string };
-  if (!json.access_token) throw new Error('Google token endpoint returned no access_token');
-  return json.access_token;
 }
 
 // ============================================================ Response helper
