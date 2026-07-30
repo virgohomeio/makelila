@@ -78,10 +78,12 @@ export function requireLeadershipRole(role: string | null | undefined): Response
   return json({ error: 'This function is restricted to finance/admin (Hiring module leadership).' }, 403);
 }
 
-/** Case-insensitive exact-name match against a posting's existing stub
- *  rows. Exported for unit testing — the real caller passes rows already
- *  scoped to enrichment_status='stub' for the target posting_id. */
-export function matchExistingStub(
+/** Case-insensitive exact-name match against a posting's existing candidates
+ *  that are still awaiting a resume file. Exported for unit testing — the
+ *  real caller passes rows already scoped to resume_url IS NULL for the
+ *  target posting_id (stubs from the Indeed sync path, but also any other
+ *  candidate — however created — that's missing its actual resume file). */
+export function matchExistingCandidate(
   candidates: { id: string; full_name: string }[], extractedName: string,
 ): string | null {
   const target = extractedName.trim().toLowerCase();
@@ -179,8 +181,8 @@ async function handle(req: Request): Promise<Response> {
     .from('candidates')
     .select('id, full_name')
     .eq('posting_id', input.posting_id)
-    .eq('enrichment_status', 'stub');
-  const matchedId = matchExistingStub(stubs ?? [], extracted.full_name);
+    .is('resume_url', null);
+  const matchedId = matchExistingCandidate(stubs ?? [], extracted.full_name);
 
   // hiring-resumes is a private bucket (20260724130100_hiring_resumes_bucket.sql)
   // — there is no public URL to resolve here. A signed URL would expire, and

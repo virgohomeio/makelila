@@ -1,5 +1,5 @@
 import { assertEquals } from 'https://deno.land/std@0.224.0/assert/mod.ts';
-import { buildScoringPrompt, matchExistingStub, requireLeadershipRole } from './index.ts';
+import { buildScoringPrompt, matchExistingCandidate, requireLeadershipRole } from './index.ts';
 
 Deno.test('buildScoringPrompt: includes the JD text and every rubric dimension', () => {
   const prompt = buildScoringPrompt(
@@ -11,18 +11,26 @@ Deno.test('buildScoringPrompt: includes the JD text and every rubric dimension',
   assertEquals(prompt.includes('Communication'), true);
 });
 
-Deno.test('matchExistingStub: matches on case-insensitive exact name', () => {
+Deno.test('matchExistingCandidate: matches on case-insensitive exact name', () => {
   const candidates = [{ id: 'c1', full_name: 'Jenivan Sivakumaru' }, { id: 'c2', full_name: 'Roshan Shaji' }];
-  assertEquals(matchExistingStub(candidates, 'jenivan sivakumaru'), 'c1');
+  assertEquals(matchExistingCandidate(candidates, 'jenivan sivakumaru'), 'c1');
 });
 
-Deno.test('matchExistingStub: returns null when no name matches', () => {
+Deno.test('matchExistingCandidate: returns null when no name matches', () => {
   const candidates = [{ id: 'c1', full_name: 'Jenivan Sivakumaru' }];
-  assertEquals(matchExistingStub(candidates, 'Someone Else'), null);
+  assertEquals(matchExistingCandidate(candidates, 'Someone Else'), null);
 });
 
-Deno.test('matchExistingStub: returns null for an empty candidate list', () => {
-  assertEquals(matchExistingStub([], 'Anyone'), null);
+Deno.test('matchExistingCandidate: returns null for an empty candidate list', () => {
+  assertEquals(matchExistingCandidate([], 'Anyone'), null);
+});
+
+Deno.test('matchExistingCandidate: matches regardless of enrichment_status — the pure function does not filter on it, the caller\'s query (resume_url IS NULL) does', () => {
+  // Simulates a candidate row that already has enrichment_status='resume_attached'
+  // (e.g. inserted by a one-off admin script) but is still missing its resume_url,
+  // so the caller's query includes it. The name-match logic itself must not care.
+  const candidates = [{ id: 'c1', full_name: 'Jenivan Sivakumaru' }];
+  assertEquals(matchExistingCandidate(candidates, 'Jenivan Sivakumaru'), 'c1');
 });
 
 Deno.test('requireLeadershipRole: allows finance and admin through', () => {

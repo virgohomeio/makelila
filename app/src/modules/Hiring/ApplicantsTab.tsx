@@ -3,7 +3,7 @@ import styles from './Hiring.module.css';
 import { ResumeUploadPanel } from './ResumeUploadPanel';
 import {
   useJobPostings, useCandidates, updateCandidateStage, recordCandidateScore, rejectCandidate, hireCandidate,
-  getResumeSignedUrl, type Candidate, type CandidateSource,
+  getResumeSignedUrl, computeOverallScore, type Candidate, type CandidateSource, type RubricDimension,
 } from '../../lib/hiring';
 
 export function ApplicantsTab({ onSelectCandidate }: { onSelectCandidate: (id: string) => void }) {
@@ -20,6 +20,7 @@ export function ApplicantsTab({ onSelectCandidate }: { onSelectCandidate: (id: s
           postingId={p.id}
           title={p.title}
           pipelineStages={p.pipeline_stages}
+          rubric={p.screening_rubric}
           onSelectCandidate={onSelectCandidate}
         />
       ))}
@@ -27,11 +28,20 @@ export function ApplicantsTab({ onSelectCandidate }: { onSelectCandidate: (id: s
   );
 }
 
-function PostingColumn({ postingId, title, pipelineStages, onSelectCandidate }: {
-  postingId: string; title: string; pipelineStages: string[]; onSelectCandidate: (id: string) => void;
+function PostingColumn({ postingId, title, pipelineStages, rubric, onSelectCandidate }: {
+  postingId: string; title: string; pipelineStages: string[]; rubric: RubricDimension[]; onSelectCandidate: (id: string) => void;
 }) {
   const { candidates, loading } = useCandidates(postingId);
   const [uploadSource, setUploadSource] = useState<CandidateSource>('indeed');
+
+  // Rank scored candidates by descending composite score; stub candidates
+  // (no scores recorded yet) have nothing meaningful to rank by, so they're
+  // kept out of the sort and rendered after, in their existing order.
+  const scored = candidates
+    .filter(c => c.enrichment_status !== 'stub')
+    .map(c => ({ candidate: c, overallScore: computeOverallScore(c.scores && Object.keys(c.scores).length ? c.scores : (c.suggested_scores ?? {}), rubric) }))
+    .sort((a, b) => b.overallScore - a.overallScore);
+  const stubs = candidates.filter(c => c.enrichment_status === 'stub');
 
   return (
     <div className={styles.column}>
@@ -56,15 +66,37 @@ function PostingColumn({ postingId, title, pipelineStages, onSelectCandidate }: 
       <h3 style={{ marginTop: 20 }}>Applicants</h3>
       {loading && <div>Loading…</div>}
       {!loading && !candidates.length && <div>No applicants yet.</div>}
-      {candidates.map(c => (
+      {scored.map(({ candidate: c, overallScore }, i) => (
+        <CandidateCard
+          key={c.id} candidate={c} pipelineStages={pipelineStages} onSelectCandidate={onSelectCandidate}
+          overallScore={overallScore} rank={i + 1}
+        />
+      ))}
+      {stubs.map(c => (
         <CandidateCard key={c.id} candidate={c} pipelineStages={pipelineStages} onSelectCandidate={onSelectCandidate} />
       ))}
     </div>
   );
 }
 
-function CandidateCard({ candidate, pipelineStages, onSelectCandidate }: {
+function scoreTier(overallScore: number): { key: 'strong' | 'consider' | 'weak'; label: string } {
+  if (overallScore >= 4.0) return { key: 'strong', label: 'Strong fit' };
+  if (overallScore >= 3.0) return { key: 'consider', label: 'Consider' };
+  return { key: 'weak', label: 'Lower fit' };
+}
+
+/** First letter of the first token + first letter of the last token of
+ *  full_name. Single-word names just use that one letter. */
+function initialsOf(fullName: string): string {
+  const tokens = fullName.trim().split(/\s+/).filter(Boolean);
+  if (!tokens.length) return '?';
+  if (tokens.length === 1) return tokens[0][0].toUpperCase();
+  return (tokens[0][0] + tokens[tokens.length - 1][0]).toUpperCase();
+}
+
+function CandidateCard({ candidate, pipelineStages, onSelectCandidate, overallScore, rank }: {
   candidate: Candidate; pipelineStages: string[]; onSelectCandidate: (id: string) => void;
+  overallScore?: number; rank?: number;
 }) {
   const [scores, setScores] = useState<Record<string, number>>({ ...(candidate.suggested_scores ?? {}), ...candidate.scores });
   const [resumeError, setResumeError] = useState<string | null>(null);
@@ -81,8 +113,27 @@ function CandidateCard({ candidate, pipelineStages, onSelectCandidate }: {
     }
   }
 
+  const tier = overallScore !== undefined ? scoreTier(overallScore) : null;
+  const tierClass = tier && { strong: styles.tierStrong, consider: styles.tierConsider, weak: styles.tierWeak }[tier.key];
+  const avatarClass = tier && { strong: styles.avatarStrong, consider: styles.avatarConsider, weak: styles.avatarWeak }[tier.key];
+
   return (
     <div className={styles.candidateCard}>
+      {!isStub && tier && overallScore !== undefined && (
+        <div className={styles.scorecardHeader}>
+          <span className={`${styles.avatar} ${avatarClass}`}>{initialsOf(candidate.full_name)}</span>
+          <div className={styles.scorecardMeta}>
+            <div>
+              {rank !== undefined && <span className={styles.rankBadge}>#{rank}</span>}
+              <span className={`${styles.tierLabel} ${tierClass}`}>{tier.label}</span>
+              <span className={styles.overallScoreText}> · {overallScore.toFixed(1)} / 5</span>
+            </div>
+            <div className={styles.overallScoreBar}>
+              <div className={styles.overallScoreFill} style={{ width: `${Math.max(0, Math.min(100, (overallScore / 5) * 100))}%` }} />
+            </div>
+          </div>
+        </div>
+      )}
       <div>
         <strong>{candidate.full_name}</strong>
         {isStub && <span className={styles.stubBadge}>Stub — no resume yet</span>}
