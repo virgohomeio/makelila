@@ -36,18 +36,40 @@ const AGE_ORDER = ['13-17', '18-24', '25-34', '35-44', '45-54', '55-64', '65+'];
 const AGE_MID: Record<string, number> = {
   '13-17': 15, '18-24': 21, '25-34': 29.5, '35-44': 39.5, '45-54': 49.5, '55-64': 59.5, '65+': 70,
 };
-// Sequential blue ramp (light→dark) aligned to AGE_ORDER so age reads as a progression.
-const AGE_COLOR: Record<string, string> = {
-  '13-17': '#86b6ef', '18-24': '#5598e7', '25-34': '#3987e5', '35-44': '#256abf',
-  '45-54': '#1c5cab', '55-64': '#184f95', '65+': '#0d366b',
-};
 // Validated categorical palette (fixed order). "Other"/"Unknown" → grey.
 const CAT = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#4a3aa7', '#e34948'];
 const GREY = '#b8b6ae';
 const catColor = (label: string, i: number) => (/^(other|unknown)$/i.test(label) ? GREY : CAT[i % CAT.length]);
+// Age uses the same distinct categorical hues, one per bucket (not shades of blue).
+const ageColor = (label: string) => { const i = AGE_ORDER.indexOf(label); return i >= 0 ? CAT[i % CAT.length] : GREY; };
 
 const gender = (g: string) => (g && g.toLowerCase() !== 'unknown' ? g.charAt(0).toUpperCase() + g.slice(1).toLowerCase() : 'Unknown');
 const country = (c: string) => (c === 'US' ? 'United States' : c === 'CA' ? 'Canada' : c || 'Unknown');
+
+// Province/state code → full name, for "Ontario (ON)" style pie labels.
+const REGION_NAME: Record<string, string> = {
+  // Canada
+  AB: 'Alberta', BC: 'British Columbia', MB: 'Manitoba', NB: 'New Brunswick',
+  NL: 'Newfoundland and Labrador', NS: 'Nova Scotia', NT: 'Northwest Territories',
+  NU: 'Nunavut', ON: 'Ontario', PE: 'Prince Edward Island', QC: 'Quebec',
+  SK: 'Saskatchewan', YT: 'Yukon',
+  // United States
+  AL: 'Alabama', AK: 'Alaska', AZ: 'Arizona', AR: 'Arkansas', CA: 'California',
+  CO: 'Colorado', CT: 'Connecticut', DE: 'Delaware', DC: 'District of Columbia',
+  FL: 'Florida', GA: 'Georgia', HI: 'Hawaii', ID: 'Idaho', IL: 'Illinois',
+  IN: 'Indiana', IA: 'Iowa', KS: 'Kansas', KY: 'Kentucky', LA: 'Louisiana',
+  ME: 'Maine', MD: 'Maryland', MA: 'Massachusetts', MI: 'Michigan', MN: 'Minnesota',
+  MS: 'Mississippi', MO: 'Missouri', MT: 'Montana', NE: 'Nebraska', NV: 'Nevada',
+  NH: 'New Hampshire', NJ: 'New Jersey', NM: 'New Mexico', NY: 'New York',
+  NC: 'North Carolina', ND: 'North Dakota', OH: 'Ohio', OK: 'Oklahoma', OR: 'Oregon',
+  PA: 'Pennsylvania', RI: 'Rhode Island', SC: 'South Carolina', SD: 'South Dakota',
+  TN: 'Tennessee', TX: 'Texas', UT: 'Utah', VT: 'Vermont', VA: 'Virginia',
+  WA: 'Washington', WV: 'West Virginia', WI: 'Wisconsin', WY: 'Wyoming',
+};
+function regionLabel(code: string): string {
+  const name = REGION_NAME[code];
+  return name ? `${name} (${code})` : code;
+}
 const val = (d: FbDemographic, m: Metric) => ((m === 'leads' ? d.leads : d.purchases) ?? 0);
 
 function groupSum(rows: FbDemographic[], key: (d: FbDemographic) => string, m: Metric): Entry[] {
@@ -93,6 +115,11 @@ function foldOther(entries: Entry[], maxSlices = 6, minShare = 0.03): Entry[] {
   return kept;
 }
 
+/** Turn province/state codes into "Full Name (CODE)" pie labels; keep "Other". */
+function labelRegions(entries: Entry[]): Entry[] {
+  return entries.map(e => ({ label: e.label === 'Other' ? 'Other' : regionLabel(e.label), value: e.value }));
+}
+
 export function DemographicsTab() {
   const { demographics, loading } = useFbDemographics();
   const { orders } = useAllOrders();
@@ -114,17 +141,19 @@ export function DemographicsTab() {
   }, [demographics, set, metric]);
 
   // LILA Pro location from the actual Shopify sales — Canada provinces + US
-  // states in separate pies, plus a country split and a top-cities list.
+  // states in separate pies, and top cities split by country ("Richmond Hill, ON").
   const saleLoc = useMemo(() => {
     const sales = orders.filter(o => o.kind !== 'replacement');
     const ca = sales.filter(o => o.country === 'CA');
     const us = sales.filter(o => o.country === 'US');
+    const cityLabel = (o: Order) => (o.city ? (o.region_state ? `${o.city}, ${o.region_state}` : o.city) : '');
     return {
       total: sales.length,
       byCountry: foldOther(countBy(sales, o => country(o.country ?? '')), 5, 0),
-      caProvinces: foldOther(countBy(ca, o => o.region_state ?? ''), 6, 0.03),
-      usStates: foldOther(countBy(us, o => o.region_state ?? ''), 6, 0.03),
-      topCities: countBy(sales, o => o.city ?? '').slice(0, 10),
+      caProvinces: labelRegions(foldOther(countBy(ca, o => o.region_state ?? ''), 6, 0.03)),
+      usStates: labelRegions(foldOther(countBy(us, o => o.region_state ?? ''), 6, 0.03)),
+      citiesCA: countBy(ca, cityLabel).slice(0, 10),
+      citiesUS: countBy(us, cityLabel).slice(0, 10),
       caTotal: ca.length, usTotal: us.length,
     };
   }, [orders]);
@@ -179,14 +208,15 @@ export function DemographicsTab() {
 
           <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', alignItems: 'flex-start' }}>
             <PieCard title="By gender" entries={byGender} colorFor={catColor} center={{ main: total.toLocaleString(), sub: metricLabel.toLowerCase() }} />
-            <PieCard title="By age" entries={byAge} colorFor={(l) => AGE_COLOR[l] ?? GREY}
+            <PieCard title="By age" entries={byAge} colorFor={(l) => ageColor(l)}
               center={{ main: avgAge != null ? `~${Math.round(avgAge)}` : '—', sub: 'avg age' }} />
             {set === 'pro' ? (
               <>
                 <PieCard title="By country" entries={saleLoc.byCountry} colorFor={catColor} center={{ main: saleLoc.total.toLocaleString(), sub: 'sales' }} />
                 <PieCard title="Canada — by province" entries={saleLoc.caProvinces} colorFor={catColor} center={{ main: saleLoc.caTotal.toLocaleString(), sub: 'CA sales' }} />
                 <PieCard title="US — by state" entries={saleLoc.usStates} colorFor={catColor} center={{ main: saleLoc.usTotal.toLocaleString(), sub: 'US sales' }} />
-                <TopList title="Top cities" entries={saleLoc.topCities} total={saleLoc.total} />
+                <TopList title="Top cities — Canada" entries={saleLoc.citiesCA} total={saleLoc.caTotal} />
+                <TopList title="Top cities — US" entries={saleLoc.citiesUS} total={saleLoc.usTotal} />
               </>
             ) : (
               <PieCard title="By location" entries={byCountry} colorFor={catColor} center={{ main: total.toLocaleString(), sub: metricLabel.toLowerCase() }} />
