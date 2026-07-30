@@ -1,6 +1,6 @@
 import { useMemo, useState, type CSSProperties } from 'react';
 import { useAllOrders, type Order } from '../../lib/orders';
-import { useFbCampaigns, useFbDemographics } from '../../lib/marketing/facebook';
+import { useFbCampaigns, useFbDemographics, type FbCampaign } from '../../lib/marketing/facebook';
 import {
   buildSalesReport, salesRowsToCsv, reportCells, REPORT_COLUMNS, UNKNOWN,
   useCustomerAttribution, type Attribution, type Demo,
@@ -59,8 +59,8 @@ export function ReportTab() {
   // stray duplicate lifetime row can never double-count ad spend. (The sync
   // also guards against dupes; this makes the report safe regardless.)
   const uniqueCampaigns = useMemo(() => {
-    const m = new Map<string, typeof campaigns[number]>();
-    const noId: typeof campaigns = [];
+    const m = new Map<string, FbCampaign>();
+    const noId: FbCampaign[] = [];
     for (const c of campaigns) {
       if (!c.campaign_id) { noId.push(c); continue; }
       const prev = m.get(c.campaign_id);
