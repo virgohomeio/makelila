@@ -129,7 +129,7 @@ function CandidateCard({ candidate, pipelineStages, onSelectCandidate, overallSc
               <span className={styles.overallScoreText}> · {overallScore.toFixed(1)} / 5</span>
             </div>
             <div className={styles.overallScoreBar}>
-              <div className={styles.overallScoreFill} style={{ width: `${Math.min(100, (overallScore / 5) * 100)}%` }} />
+              <div className={styles.overallScoreFill} style={{ width: `${Math.max(0, Math.min(100, (overallScore / 5) * 100))}%` }} />
             </div>
           </div>
         </div>
