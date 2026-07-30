@@ -7,6 +7,7 @@ import {
   createInterview, recordInterviewDecision, updatePostingRubric,
   suggestScreeningRubric, uploadAndScoreResume, getResumeSignedUrl,
   isAssignedInterviewerAnywhere, extractFunctionErrorMessage, getPostingInterviewers,
+  computeOverallScore, type RubricDimension,
 } from './hiring';
 
 const {
@@ -307,6 +308,38 @@ describe('isAssignedInterviewerAnywhere', () => {
     mockGetUser.mockResolvedValueOnce({ data: { user: null }, error: null });
     expect(await isAssignedInterviewerAnywhere()).toBe(false);
     expect(mockResolve).not.toHaveBeenCalled();
+  });
+});
+
+describe('computeOverallScore', () => {
+  const rubric: RubricDimension[] = [
+    { dimension: 'Experience', weight_pct: 40 },
+    { dimension: 'Skills', weight_pct: 30 },
+    { dimension: 'Culture', weight_pct: 20 },
+    { dimension: 'Communication', weight_pct: 10 },
+  ];
+
+  it('computes the weighted composite when every dimension is scored', () => {
+    const scores = { Experience: 5, Skills: 4, Culture: 3, Communication: 5 };
+    // (5*40 + 4*30 + 3*20 + 5*10) / 100 = 4.3
+    expect(computeOverallScore(scores, rubric)).toBeCloseTo(4.3);
+  });
+
+  it('does not renormalize when a dimension has no recorded score — an incomplete scorecard is penalized', () => {
+    // Communication (10% weight) is missing entirely.
+    const partialScores = { Experience: 5, Skills: 4, Culture: 3 };
+    const partial = computeOverallScore(partialScores, rubric);
+    // (5*40 + 4*30 + 3*20 + 0*10) / 100 = 3.8
+    expect(partial).toBeCloseTo(3.8);
+
+    // The renormalized alternative (excluding the missing dimension's weight
+    // from the denominator) would score higher — confirm we're lower than that.
+    const renormalized = (5 * 40 + 4 * 30 + 3 * 20) / (40 + 30 + 20);
+    expect(partial).toBeLessThan(renormalized);
+  });
+
+  it('returns 0 for an empty rubric without dividing by zero', () => {
+    expect(computeOverallScore({ Experience: 5 }, [])).toBe(0);
   });
 });
 

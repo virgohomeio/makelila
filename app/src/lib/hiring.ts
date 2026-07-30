@@ -381,6 +381,18 @@ export async function recordInterviewDecision(
   if (error) throw error;
 }
 
+/** Weighted composite score for ranking candidates within a posting: each
+ *  rubric dimension's score (1-5) weighted by its screening_rubric
+ *  weight_pct, summed and normalized to a 0-5 scale. A dimension with no
+ *  recorded score contributes 0 for that dimension's weight share (does not
+ *  skip/renormalize the denominator) so an incomplete scorecard is
+ *  penalized rather than silently inflated. */
+export function computeOverallScore(scores: Record<string, number>, rubric: RubricDimension[]): number {
+  if (!rubric.length) return 0;
+  const weighted = rubric.reduce((sum, r) => sum + (scores[r.dimension] ?? 0) * r.weight_pct, 0);
+  return weighted / 100;
+}
+
 /** Resolves a stored hiring-resumes storage path (candidates.resume_url) to
  *  a time-limited signed URL for viewing. Generated at read time, not
  *  write time, since signed URLs expire — see Task 6's review. */
