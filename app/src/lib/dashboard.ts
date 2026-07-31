@@ -1043,7 +1043,7 @@ export async function lastStatusSmsAt(serial: string, status: MachineStatus): Pr
 
 // ── Backlog #61: dataset labels (ML training pairs) ─────────────────────────
 
-export type DatasetLabelKind = 'smelly' | 'no_smell' | 'dry' | 'wet' | 'mixing' | 'not_mixing' | 'moldy_composter' | 'moldy_chamber' | 'other';
+export type DatasetLabelKind = 'smelly' | 'no_smell' | 'dry' | 'wet' | 'mixing' | 'not_mixing' | 'motor_jammed' | 'moldy_composter' | 'moldy_chamber' | 'other';
 export type DatasetLabelSource = 'sms' | 'phone' | 'ticket' | 'in_person' | 'operator_inferred';
 export type DatasetLabelConfidence = 'customer_reported' | 'operator_inferred';
 
