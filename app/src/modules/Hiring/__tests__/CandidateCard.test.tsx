@@ -69,6 +69,27 @@ describe('CandidateCard decision tags', () => {
     expect(hireCandidate).toHaveBeenCalledWith('c1');
   });
 
+  // InterviewsTab lists shortlisted candidates only, so the jump would land on
+  // a board that doesn't show this candidate.
+  it('disables the Interviews jump until the candidate is shortlisted', () => {
+    const onSelect = vi.fn();
+    render(<CandidateCard candidate={candidate({ id: 'c1' })} pipelineStages={stages} onSelectCandidate={onSelect} />);
+    const button = screen.getByRole('button', { name: 'Interviews →' }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    fireEvent.click(button);
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it('enables the Interviews jump for a shortlisted candidate', () => {
+    const onSelect = vi.fn();
+    render(<CandidateCard
+      candidate={candidate({ id: 'c1', hired_at: '2026-07-30T00:00:00Z' })}
+      pipelineStages={stages} onSelectCandidate={onSelect}
+    />);
+    fireEvent.click(screen.getByRole('button', { name: 'Interviews →' }));
+    expect(onSelect).toHaveBeenCalledWith('c1');
+  });
+
   it('keeps both decision buttons active after a decision (switching stays possible)', () => {
     render(<CandidateCard
       candidate={candidate({ id: 'c1', hired_at: '2026-07-30T00:00:00Z' })}

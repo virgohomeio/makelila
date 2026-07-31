@@ -133,7 +133,17 @@ export function CandidateCard({ candidate, pipelineStages, onSelectCandidate }: 
           <div style={{ marginTop: 8 }}>
             <button onClick={() => void hireCandidate(candidate.id)}>Shortlist</button>
             <button onClick={() => void rejectCandidate(candidate.id)} style={{ marginLeft: 8 }}>Reject</button>
-            <button onClick={() => onSelectCandidate(candidate.id)} style={{ marginLeft: 8 }}>Interviews →</button>
+            {/* The Interviews board lists shortlisted candidates only — jumping
+                there before a shortlist decision would land on a board this
+                candidate isn't on. */}
+            <button
+              onClick={() => onSelectCandidate(candidate.id)}
+              disabled={decision !== 'shortlisted'}
+              title={decision === 'shortlisted' ? undefined : 'Shortlist this candidate to schedule interviews'}
+              style={{ marginLeft: 8 }}
+            >
+              Interviews →
+            </button>
           </div>
         </>
       )}
