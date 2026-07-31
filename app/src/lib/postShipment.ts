@@ -1146,7 +1146,14 @@ export async function financeApprove(id: string, opts: FinanceApproveOpts): Prom
     .eq('id', id);
   if (upErr) throw upErr;
 
-  await logAction('refund_finance_approved', id, `${opts.method} $${adjusted.toFixed(2)}`);
+  // Best-effort audit log — the approval has already committed above, so a log
+  // failure (e.g. a momentary session gap) must NEVER surface as an approval
+  // failure or the card looks stuck when it actually moved.
+  try {
+    await logAction('refund_finance_approved', id, `${opts.method} $${adjusted.toFixed(2)}`);
+  } catch (e) {
+    console.warn('Refund finance-approve audit log failed (non-fatal):', (e as Error).message);
+  }
 
   // FR-9a: notify the executor that a refund is queued for payout. Best-effort —
   // a mail failure must never roll back the approval (mirrors the ticket-
