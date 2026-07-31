@@ -343,15 +343,18 @@ export async function recordCandidateScore(candidateId: string, scores: Record<s
   if (error) throw error;
 }
 
+/** Each decision clears the opposing timestamp so a candidate carries at
+ *  most one decision tag (Shortlisted/Rejected) and re-clicking the other
+ *  button switches it. */
 export async function rejectCandidate(candidateId: string): Promise<void> {
   const { error } = await supabase.from('candidates')
-    .update({ rejected_at: new Date().toISOString() }).eq('id', candidateId);
+    .update({ rejected_at: new Date().toISOString(), hired_at: null }).eq('id', candidateId);
   if (error) throw error;
 }
 
 export async function hireCandidate(candidateId: string): Promise<void> {
   const { error } = await supabase.from('candidates')
-    .update({ hired_at: new Date().toISOString() }).eq('id', candidateId);
+    .update({ hired_at: new Date().toISOString(), rejected_at: null }).eq('id', candidateId);
   if (error) throw error;
 }
 

@@ -149,16 +149,16 @@ describe('mutations', () => {
     expect(mockUpdate).toHaveBeenCalledWith({ scores: { culture_fit: 4 } });
   });
 
-  it('rejectCandidate sets rejected_at', async () => {
+  it('rejectCandidate sets rejected_at and clears hired_at (switching a shortlisted candidate)', async () => {
     mockEq.mockReturnValueOnce({ then: (f: (v: unknown) => unknown) => Promise.resolve({ error: null }).then(f) });
     await rejectCandidate('c1');
-    expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({ rejected_at: expect.any(String) }));
+    expect(mockUpdate).toHaveBeenCalledWith({ rejected_at: expect.any(String), hired_at: null });
   });
 
-  it('hireCandidate sets hired_at', async () => {
+  it('hireCandidate sets hired_at and clears rejected_at (switching a rejected candidate)', async () => {
     mockEq.mockReturnValueOnce({ then: (f: (v: unknown) => unknown) => Promise.resolve({ error: null }).then(f) });
     await hireCandidate('c1');
-    expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({ hired_at: expect.any(String) }));
+    expect(mockUpdate).toHaveBeenCalledWith({ hired_at: expect.any(String), rejected_at: null });
   });
 
   it('createInterview inserts a row and returns it', async () => {

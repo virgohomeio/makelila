@@ -63,12 +63,14 @@ function PostingColumn({ postingId, title, pipelineStages, onSelectCandidate }: 
   );
 }
 
-function CandidateCard({ candidate, pipelineStages, onSelectCandidate }: {
+export function CandidateCard({ candidate, pipelineStages, onSelectCandidate }: {
   candidate: Candidate; pipelineStages: string[]; onSelectCandidate: (id: string) => void;
 }) {
   const [scores, setScores] = useState<Record<string, number>>({ ...(candidate.suggested_scores ?? {}), ...candidate.scores });
   const [resumeError, setResumeError] = useState<string | null>(null);
   const isStub = candidate.enrichment_status === 'stub';
+  // hired_at wins if a legacy row has both — the mutations clear the opposing column.
+  const decision = candidate.hired_at ? 'shortlisted' : candidate.rejected_at ? 'rejected' : null;
 
   async function viewResume() {
     if (!candidate.resume_url) return;
@@ -86,6 +88,8 @@ function CandidateCard({ candidate, pipelineStages, onSelectCandidate }: {
       <div>
         <strong>{candidate.full_name}</strong>
         {isStub && <span className={styles.stubBadge}>Stub — no resume yet</span>}
+        {decision === 'shortlisted' && <span className={styles.decisionShortlisted}>Shortlisted</span>}
+        {decision === 'rejected' && <span className={styles.decisionRejected}>Rejected</span>}
       </div>
       <div style={{ fontSize: 12, color: 'var(--color-ink-subtle)' }}>
         {candidate.email ?? candidate.indeed_relay_email ?? '—'} · {candidate.phone ?? '—'}
@@ -127,7 +131,7 @@ function CandidateCard({ candidate, pipelineStages, onSelectCandidate }: {
             </div>
           )}
           <div style={{ marginTop: 8 }}>
-            <button onClick={() => void hireCandidate(candidate.id)}>Hire</button>
+            <button onClick={() => void hireCandidate(candidate.id)}>Shortlist</button>
             <button onClick={() => void rejectCandidate(candidate.id)} style={{ marginLeft: 8 }}>Reject</button>
             <button onClick={() => onSelectCandidate(candidate.id)} style={{ marginLeft: 8 }}>Interviews →</button>
           </div>
