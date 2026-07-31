@@ -885,6 +885,12 @@ export async function deleteCaseNote(note: CaseNote, refundId: string | null, re
 }
 
 async function currentUserId(): Promise<string> {
+  // Prefer the locally-cached session (no network) — getUser() makes a round-trip
+  // to the auth server that can transiently fail on a valid session and abort an
+  // approval before it runs (looks like "can't move the card"). Fall back to the
+  // network call only if there's no cached session. Mirrors logAction().
+  const { data: { session } } = await supabase.auth.getSession();
+  if (session?.user) return session.user.id;
   const { data } = await supabase.auth.getUser();
   if (!data.user) throw new Error('refund: not authenticated');
   return data.user.id;
