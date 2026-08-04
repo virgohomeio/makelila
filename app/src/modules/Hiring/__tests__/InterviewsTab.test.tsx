@@ -17,6 +17,7 @@ vi.mock('../../../lib/hiring', () => ({
   recordInterviewDecision: vi.fn(),
   markScreeningInviteSent: vi.fn(async () => {}),
   getCurrentUserId: vi.fn(),
+  useOperatorEmails: vi.fn(() => ({ emails: ['huayi@virgohome.io', 'junaid@virgohome.io'], loading: false })),
 }));
 
 // The mail handoff is a side effect on window.location — stubbed so the assertions
@@ -88,6 +89,7 @@ Object.defineProperty(navigator, 'clipboard', {
 // the per-test hook stubs are re-seeded to their defaults here.
 beforeEach(() => {
   vi.clearAllMocks();
+  localStorage.clear();
   vi.mocked(useInterviews).mockReturnValue({ interviews: [], loading: false });
   vi.mocked(useEmailTemplate).mockReturnValue({ template: screeningTemplate, loading: false });
   vi.mocked(useShortlistedCandidates).mockReturnValue({ candidates: [], loading: false });
@@ -251,6 +253,20 @@ describe('InterviewsTab screening invite draft', () => {
       subject: 'Screening interview for the Fulfillment Associate role at VCycene',
       body: expect.stringContaining('https://calendly.com/huayi/screening'),
     });
+  });
+
+  // The sender picker lives in the outreach panel above the board; the
+  // per-candidate button has to honour the same choice, not the signed-in
+  // account, or the two send paths would disagree about who is writing.
+  it('follows the sender chosen in the outreach panel', () => {
+    withCandidates([shortlisted({ email: 'sam@example.com' })]);
+    render(<InterviewsTab />);
+
+    fireEvent.change(screen.getByLabelText('Sending as'), { target: { value: 'junaid@virgohome.io' } });
+    const panel = expandCandidate();
+    fireEvent.click(within(panel).getByRole('button', { name: 'Send as junaid@virgohome.io' }));
+
+    expect(openMailDraft).toHaveBeenCalledWith(expect.objectContaining({ from: 'junaid@virgohome.io' }));
   });
 
   it('addresses the draft to the Indeed relay when there is no direct email', () => {

@@ -2,12 +2,13 @@ import { useEffect, useRef, useState } from 'react';
 import styles from './Hiring.module.css';
 import {
   useJobPostings, useCandidates, useInterviews, createInterview, recordInterviewDecision,
-  getCurrentUserId, markScreeningInviteSent,
+  getCurrentUserId, markScreeningInviteSent, useOperatorEmails,
   type Candidate, type Interview, type InterviewDecision,
 } from '../../lib/hiring';
 import { useEmailTemplate, useSchedulingUrl } from '../../lib/templates';
 import { openMailDraft } from '../../lib/mailDraft';
 import { useAuth } from '../../lib/auth';
+import { useSendingAccount } from './sendingAccount';
 import { OutreachPanel } from './OutreachPanel';
 import { SCREENING_TEMPLATE_KEY, candidateEmail, renderScreeningInvite } from './screeningInvite';
 
@@ -137,7 +138,10 @@ function CandidateInterviewPanel({ candidate, postingTitle }: { candidate: Candi
   // Composes from the signed-in operator's own @virgohome.io account rather
   // than whatever account the OS mail handler defaults to.
   const { user } = useAuth();
-  const sendingAs = user?.email ?? null;
+  const { emails: operatorEmails } = useOperatorEmails();
+  // Same choice the outreach panel's picker drives — the two send paths must
+  // not disagree about who is writing.
+  const sendingAs = useSendingAccount(user?.email ?? null, operatorEmails);
   const { template: screeningTemplate, loading: templateLoading } = useEmailTemplate(SCREENING_TEMPLATE_KEY);
   const { schedulingUrl } = useSchedulingUrl();
   const [copied, setCopied] = useState(false);
@@ -166,7 +170,7 @@ function CandidateInterviewPanel({ candidate, postingTitle }: { candidate: Candi
   async function sendDraft() {
     if (!draft || !to) return;
     setSendError(null);
-    openMailDraft({ from: user?.email, to, ...draft });
+    openMailDraft({ from: sendingAs, to, ...draft });
     try {
       await markScreeningInviteSent(candidateId, true);
       setSentOverride(new Date().toISOString());

@@ -1,7 +1,10 @@
 import { useRef, useState } from 'react';
 import styles from './Hiring.module.css';
-import { useShortlistedCandidates, markScreeningInviteSent, type ShortlistedCandidate } from '../../lib/hiring';
+import {
+  useShortlistedCandidates, markScreeningInviteSent, useOperatorEmails, type ShortlistedCandidate,
+} from '../../lib/hiring';
 import { useAuth } from '../../lib/auth';
+import { useSendingAccount, setSendingAccount } from './sendingAccount';
 import { useEmailTemplate, useSchedulingUrl } from '../../lib/templates';
 import { openMailDraft } from '../../lib/mailDraft';
 import { SCREENING_TEMPLATE_KEY, candidateEmail, renderScreeningInvite } from './screeningInvite';
@@ -19,7 +22,14 @@ export function OutreachPanel() {
   // the @virgohome.io domain, so this is the org account the invite composes
   // from rather than whatever Outlook defaults to.
   const { user } = useAuth();
-  const sendingAs = user?.email ?? null;
+  const { emails: operatorEmails } = useOperatorEmails();
+  // The signed-in operator is always offered, even if the roster query hasn't
+  // landed (or RLS hides it) — otherwise the picker could omit the very
+  // account the session belongs to.
+  const senderOptions = user?.email && !operatorEmails.includes(user.email)
+    ? [user.email, ...operatorEmails]
+    : operatorEmails;
+  const sendingAs = useSendingAccount(user?.email ?? null, senderOptions);
   const { candidates, loading } = useShortlistedCandidates();
   const { template } = useEmailTemplate(SCREENING_TEMPLATE_KEY);
   const { schedulingUrl, loading: linkLoading, save } = useSchedulingUrl();
@@ -59,7 +69,7 @@ export function OutreachPanel() {
       postingTitle: candidate.posting_title,
       schedulingUrl,
     });
-    openMailDraft({ from: user?.email, to, ...invite });
+    openMailDraft({ from: sendingAs, to, ...invite });
     await setSent(candidate, true);
   }
 
@@ -70,10 +80,23 @@ export function OutreachPanel() {
           <div className={styles.outreachTitle}>Screening outreach</div>
           {/* Gmail only renders a From line for accounts with several send-as
               addresses, so its compose tab often can't answer "who am I sending
-              as". State it here, before the click. */}
-          <div className={styles.sendingAs}>
-            {sendingAs ? `Sending as ${sendingAs}` : 'Sending from your default mail client'}
-          </div>
+              as". State it here, before the click — and let it be changed. */}
+          {sendingAs ? (
+            <div className={styles.sendingAs}>
+              <label htmlFor="sending-as">Sending as</label>
+              <select
+                id="sending-as"
+                className={styles.stageSelect}
+                value={sendingAs}
+                onChange={e => setSendingAccount(e.target.value)}
+                style={{ marginLeft: 6 }}
+              >
+                {senderOptions.map(email => <option key={email} value={email}>{email}</option>)}
+              </select>
+            </div>
+          ) : (
+            <div className={styles.sendingAs}>Sending from your default mail client</div>
+          )}
         </div>
         <SchedulingLinkForm savedUrl={schedulingUrl} loading={linkLoading} onSave={save} />
       </div>

@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, within } from '@testing-library/react';
 import { OutreachPanel } from '../OutreachPanel';
-import { useShortlistedCandidates, markScreeningInviteSent, type ShortlistedCandidate } from '../../../lib/hiring';
+import {
+  useShortlistedCandidates, markScreeningInviteSent, useOperatorEmails, type ShortlistedCandidate,
+} from '../../../lib/hiring';
 import { useEmailTemplate, useSchedulingUrl, type EmailTemplate } from '../../../lib/templates';
 import { openMailDraft } from '../../../lib/mailDraft';
 import { useAuth } from '../../../lib/auth';
@@ -9,6 +11,7 @@ import { useAuth } from '../../../lib/auth';
 vi.mock('../../../lib/hiring', () => ({
   useShortlistedCandidates: vi.fn(),
   markScreeningInviteSent: vi.fn(async () => {}),
+  useOperatorEmails: vi.fn(),
 }));
 
 vi.mock('../../../lib/templates', () => ({
@@ -57,7 +60,13 @@ function withShortlist(candidates: ShortlistedCandidate[]) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // The chosen sender is remembered in localStorage — clear it so each test
+  // starts from "no choice made yet" and falls back to the signed-in account.
+  localStorage.clear();
   vi.mocked(useAuth).mockReturnValue({ user: { email: 'huayi@virgohome.io' } } as unknown as ReturnType<typeof useAuth>);
+  vi.mocked(useOperatorEmails).mockReturnValue({
+    emails: ['huayi@virgohome.io', 'junaid@virgohome.io', 'pedrum@virgohome.io'], loading: false,
+  });
   vi.mocked(useEmailTemplate).mockReturnValue({ template, loading: false });
   vi.mocked(useSchedulingUrl).mockReturnValue({ schedulingUrl: null, loading: false, save: vi.fn() });
   withShortlist([]);
@@ -88,13 +97,48 @@ describe('OutreachPanel counts', () => {
   // Gmail only shows a From line on accounts with multiple send-as addresses,
   // so the compose tab often can't answer "who am I sending as" — makeLILA says
   // it here, before the click.
-  it('names the sending account in the panel header', () => {
+  it('defaults the sending account to the signed-in operator', () => {
     render(<OutreachPanel />);
-    expect(screen.getByText('Sending as huayi@virgohome.io')).toBeTruthy();
+    expect((screen.getByLabelText('Sending as') as HTMLSelectElement).value).toBe('huayi@virgohome.io');
   });
 
-  it('says the draft opens in the operator default mail client when the address is unknown', () => {
+  it('offers the other internal operators as senders', () => {
+    render(<OutreachPanel />);
+    const options = Array.from((screen.getByLabelText('Sending as') as HTMLSelectElement).options).map(o => o.value);
+    expect(options).toContain('junaid@virgohome.io');
+    expect(options).toContain('pedrum@virgohome.io');
+  });
+
+  it('drafts as the chosen account rather than the signed-in one', () => {
+    withShortlist([shortlisted({ id: 'c1', full_name: 'Sam Chen' })]);
+    render(<OutreachPanel />);
+
+    fireEvent.change(screen.getByLabelText('Sending as'), { target: { value: 'junaid@virgohome.io' } });
+    fireEvent.click(within(row('Sam Chen')).getByRole('button', { name: 'Send as junaid@virgohome.io' }));
+
+    expect(openMailDraft).toHaveBeenCalledWith(expect.objectContaining({ from: 'junaid@virgohome.io' }));
+  });
+
+  it('remembers the chosen sender across a remount', () => {
+    const first = render(<OutreachPanel />);
+    fireEvent.change(screen.getByLabelText('Sending as'), { target: { value: 'junaid@virgohome.io' } });
+    first.unmount();
+
+    render(<OutreachPanel />);
+    expect((screen.getByLabelText('Sending as') as HTMLSelectElement).value).toBe('junaid@virgohome.io');
+  });
+
+  // A remembered address that is no longer a colleague (someone left) must not
+  // silently keep addressing mail from an account nobody can open.
+  it('falls back to the signed-in account when the remembered sender is gone', () => {
+    localStorage.setItem('makelila.hiring.sendingAs', 'departed@virgohome.io');
+    render(<OutreachPanel />);
+    expect((screen.getByLabelText('Sending as') as HTMLSelectElement).value).toBe('huayi@virgohome.io');
+  });
+
+  it('says the draft opens in the operator default mail client when no account is known', () => {
     vi.mocked(useAuth).mockReturnValue({ user: null } as unknown as ReturnType<typeof useAuth>);
+    vi.mocked(useOperatorEmails).mockReturnValue({ emails: [], loading: false });
     withShortlist([shortlisted({ id: 'c1', full_name: 'Sam Chen' })]);
     render(<OutreachPanel />);
 
