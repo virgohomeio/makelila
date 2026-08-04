@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useRef, useState } from 'react';
 import styles from './Hiring.module.css';
 import { useShortlistedCandidates, markScreeningInviteSent, type ShortlistedCandidate } from '../../lib/hiring';
 import { useEmailTemplate, useSchedulingUrl } from '../../lib/templates';
@@ -146,19 +146,15 @@ export function OutreachPanel() {
 function SchedulingLinkForm({ savedUrl, loading, onSave }: {
   savedUrl: string | null; loading: boolean; onSave: (url: string) => Promise<void>;
 }) {
-  const [value, setValue] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Seed the input once the profile arrives. Keyed on the fetched value so a
-  // save (which updates savedUrl) doesn't fight the operator's typing.
-  useEffect(() => { setValue(savedUrl ?? ''); }, [savedUrl]);
-
   async function submit() {
     setSaving(true); setError(null); setSaved(false);
     try {
-      await onSave(value);
+      await onSave(inputRef.current?.value ?? '');
       setSaved(true);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Could not save the scheduling link');
@@ -170,12 +166,18 @@ function SchedulingLinkForm({ savedUrl, loading, onSave }: {
   return (
     <div className={styles.linkForm}>
       <label className={styles.linkLabel} htmlFor="scheduling-url">Your scheduling link</label>
+      {/* Uncontrolled: the saved link arrives from an async profile fetch, and
+          keying the input on it re-seeds the field when it lands (and after a
+          save) without a state-sync effect. The key is on the input rather
+          than the component so the "Saved" confirmation below survives. */}
       <input
+        key={savedUrl ?? ''}
         id="scheduling-url"
+        ref={inputRef}
         className={styles.linkInput}
         placeholder="https://calendly.com/you/screening"
-        value={value}
-        onChange={e => { setValue(e.target.value); setSaved(false); }}
+        defaultValue={savedUrl ?? ''}
+        onChange={() => setSaved(false)}
         disabled={loading}
       />
       <button onClick={submit} disabled={saving || loading}>Save</button>

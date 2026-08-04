@@ -164,7 +164,7 @@ describe('OutreachPanel scheduling link', () => {
     });
     render(<OutreachPanel />);
 
-    expect(screen.getByLabelText('Your scheduling link').getAttribute('value'))
+    expect((screen.getByLabelText('Your scheduling link') as HTMLInputElement).value)
       .toBe('https://calendly.com/huayi/screening');
   });
 
