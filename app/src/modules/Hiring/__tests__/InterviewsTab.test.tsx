@@ -211,7 +211,9 @@ describe('InterviewsTab screening invite draft', () => {
     expect(within(panel).queryByText(/\{\{scheduling_url\}\}/)).toBeNull();
   });
 
-  it('copies the address, subject and body to the clipboard', async () => {
+  // The address has its own button — it belongs in the To: field, not pasted
+  // into the message.
+  it('copies the subject and body, with no address in it', async () => {
     withCandidates([shortlisted({ email: 'sam@example.com' })]);
     render(<InterviewsTab />);
     const panel = expandCandidate();
@@ -219,10 +221,10 @@ describe('InterviewsTab screening invite draft', () => {
     fireEvent.click(within(panel).getByRole('button', { name: 'Copy email' }));
 
     const copied = vi.mocked(navigator.clipboard.writeText).mock.calls[0][0];
-    expect(copied).toContain('To: sam@example.com');
-    expect(copied).toContain('Screening interview for the Fulfillment Associate role at VCycene');
+    expect(copied.startsWith('Subject: Screening interview for the Fulfillment Associate role at VCycene')).toBe(true);
     expect(copied).toContain('Hi Shortlisted,');
     expect(copied).toContain('[paste your scheduling link here]');
+    expect(copied).not.toContain('sam@example.com');
     expect(await within(panel).findByText('Email copied')).toBeTruthy();
   });
 
@@ -248,13 +250,13 @@ describe('InterviewsTab screening invite draft', () => {
     expect(navigator.clipboard.writeText).not.toHaveBeenCalled();
   });
 
-  it('addresses the copy to the Indeed relay when there is no direct email', () => {
+  it('copies the Indeed relay address when there is no direct email', () => {
     withCandidates([shortlisted({ email: null, indeed_relay_email: 'relay+sam@indeedemail.com' })]);
     render(<InterviewsTab />);
     const panel = expandCandidate();
 
-    fireEvent.click(within(panel).getByRole('button', { name: 'Copy email' }));
-    expect(vi.mocked(navigator.clipboard.writeText).mock.calls[0][0]).toContain('To: relay+sam@indeedemail.com');
+    fireEvent.click(within(panel).getByRole('button', { name: 'Copy address' }));
+    expect(vi.mocked(navigator.clipboard.writeText).mock.calls[0][0]).toBe('relay+sam@indeedemail.com');
   });
 
   // makeLILA hands over text, nothing else — no mail client is launched and

@@ -46,9 +46,13 @@ export function OutreachPanel() {
   }
 
   /** Puts this candidate's invite on the clipboard, ready to paste into
-   *  whatever mail client the operator already has open. Copying deliberately
-   *  does NOT mark the candidate emailed — the mail hasn't been sent yet, and
-   *  a row that claims otherwise is how someone ends up never contacted. */
+   *  whatever mail client the operator already has open. The message only —
+   *  the address goes in a different field of the compose window and has its
+   *  own button.
+   *
+   *  Copying deliberately does NOT mark the candidate emailed: the mail hasn't
+   *  been sent yet, and a row that claims otherwise is how someone ends up
+   *  never contacted. */
   async function copyInvite(candidate: ShortlistedCandidate) {
     if (!template) return;
     const invite = renderScreeningInvite(template, {
@@ -56,10 +60,7 @@ export function OutreachPanel() {
       postingTitle: candidate.posting_title,
       schedulingUrl,
     });
-    const to = candidateEmail(candidate);
-    await navigator.clipboard.writeText(
-      `${to ? `To: ${to}\n` : ''}Subject: ${invite.subject}\n\n${invite.body}`
-    );
+    await navigator.clipboard.writeText(`Subject: ${invite.subject}\n\n${invite.body}`);
     setCopied({ id: candidate.id, what: 'email' });
   }
 

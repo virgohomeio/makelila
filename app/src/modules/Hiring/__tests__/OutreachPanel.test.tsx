@@ -108,7 +108,9 @@ describe('OutreachPanel rows', () => {
     expect(within(row('Sam Chen')).getByText(/^Emailed /)).toBeTruthy();
   });
 
-  it('copies that candidate invite, addressed and filled in', async () => {
+  // The address has its own button — it belongs in the To: field, not pasted
+  // into the message.
+  it('copies the message alone, with no address in it', async () => {
     vi.mocked(useSchedulingUrl).mockReturnValue({
       schedulingUrl: 'https://calendly.com/huayi/screening', loading: false, save: vi.fn(),
     });
@@ -118,10 +120,10 @@ describe('OutreachPanel rows', () => {
     fireEvent.click(within(row('Sam Chen')).getByRole('button', { name: 'Copy email' }));
 
     expect(copiedText()).toBe(
-      'To: sam@example.com\n' +
       'Subject: Screening interview for the Fulfillment Associate role at VCycene\n\n' +
       'Hi Sam,\n\nBook a time: https://calendly.com/huayi/screening'
     );
+    expect(copiedText()).not.toContain('sam@example.com');
     expect(await within(row('Sam Chen')).findByText('Email copied')).toBeTruthy();
   });
 
@@ -155,16 +157,6 @@ describe('OutreachPanel rows', () => {
     expect(navigator.clipboard.writeText).not.toHaveBeenCalled();
   });
 
-  it('addresses the copy to the Indeed relay when there is no direct email', () => {
-    withShortlist([shortlisted({
-      id: 'c1', full_name: 'Sam Chen', email: null, indeed_relay_email: 'relay+sam@indeedemail.com',
-    })]);
-    render(<OutreachPanel />);
-
-    fireEvent.click(within(row('Sam Chen')).getByRole('button', { name: 'Copy email' }));
-    expect(copiedText()).toContain('To: relay+sam@indeedemail.com');
-  });
-
   // Copying is not sending — the operator still has to paste and send, so the
   // sent marker stays an explicit action rather than a side effect of copying.
   it('does not mark the candidate emailed just for copying', () => {
@@ -175,7 +167,7 @@ describe('OutreachPanel rows', () => {
     expect(markScreeningInviteSent).not.toHaveBeenCalled();
   });
 
-  it('copies the invite body alone when no address is on file', () => {
+  it('still copies the invite for a candidate with no address on file', () => {
     withShortlist([shortlisted({ id: 'c1', full_name: 'Sam Chen', email: null, indeed_relay_email: null })]);
     render(<OutreachPanel />);
 

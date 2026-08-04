@@ -153,13 +153,10 @@ function CandidateInterviewPanel({ candidate, postingTitle }: { candidate: Candi
    *  "Mark emailed" below records that separately, once it has actually gone.
    *
    *  Address and message copy separately because they land in different fields
-   *  of a compose window; the message copy keeps its To: line so a single paste
-   *  still carries everything for anyone who works that way. */
+   *  of a compose window — this one is the message only. */
   async function copyDraft() {
     if (!draft) return;
-    await navigator.clipboard.writeText(
-      `${to ? `To: ${to}\n` : ''}Subject: ${draft.subject}\n\n${draft.body}`
-    );
+    await navigator.clipboard.writeText(`Subject: ${draft.subject}\n\n${draft.body}`);
     setCopied('email');
   }
 
