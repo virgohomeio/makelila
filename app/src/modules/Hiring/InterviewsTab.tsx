@@ -135,7 +135,7 @@ function CandidateInterviewPanel({ candidate, postingTitle }: { candidate: Candi
   // Nothing here touches Resend, email_messages, or a mail client.
   const { template: screeningTemplate, loading: templateLoading } = useEmailTemplate(SCREENING_TEMPLATE_KEY);
   const { schedulingUrl } = useSchedulingUrl();
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<'email' | 'address' | null>(null);
   const to = candidateEmail(candidate);
   // Local echo of the sent marker, same override shape as decisionOverrides
   // above: this panel's own write shows immediately, without waiting on
@@ -150,13 +150,23 @@ function CandidateInterviewPanel({ candidate, postingTitle }: { candidate: Candi
 
   /** Copying is all makeLILA does with the invite — the operator pastes it and
    *  sends it themselves, so this deliberately leaves the sent marker alone.
-   *  "Mark emailed" below records that separately, once it has actually gone. */
+   *  "Mark emailed" below records that separately, once it has actually gone.
+   *
+   *  Address and message copy separately because they land in different fields
+   *  of a compose window; the message copy keeps its To: line so a single paste
+   *  still carries everything for anyone who works that way. */
   async function copyDraft() {
     if (!draft) return;
     await navigator.clipboard.writeText(
       `${to ? `To: ${to}\n` : ''}Subject: ${draft.subject}\n\n${draft.body}`
     );
-    setCopied(true);
+    setCopied('email');
+  }
+
+  async function copyAddress() {
+    if (!to) return;
+    await navigator.clipboard.writeText(to);
+    setCopied('address');
   }
 
   async function toggleSent() {
@@ -240,10 +250,22 @@ function CandidateInterviewPanel({ candidate, postingTitle }: { candidate: Candi
             <div className={styles.inviteSubject}>Subject: {draft.subject}</div>
             <pre className={styles.inviteBody}>{draft.body}</pre>
             <button onClick={copyDraft}>Copy email</button>
+            <button
+              onClick={copyAddress}
+              disabled={!to}
+              title={to ? 'Copies just the address, for the To: field' : 'No email address on file for this candidate'}
+              style={{ marginLeft: 8 }}
+            >
+              Copy address
+            </button>
             <button className={styles.linkButton} onClick={toggleSent}>
               {sentAt ? 'Mark not emailed' : 'Mark emailed'}
             </button>
-            {copied && <span className={styles.inviteHint}>Copied</span>}
+            {copied && (
+              <span className={styles.inviteHint}>
+                {copied === 'address' ? 'Address copied' : 'Email copied'}
+              </span>
+            )}
             <div className={styles.inviteHint} style={{ marginLeft: 0, marginTop: 6 }}>
               {sentAt
                 ? `Invite marked as emailed ${new Date(sentAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}.`

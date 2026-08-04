@@ -22,7 +22,7 @@ export function OutreachPanel() {
   // reflect this panel's own writes immediately; the refetch then agrees.
   const [sentOverrides, setSentOverrides] = useState<Record<string, string | null>>({});
   const [pendingId, setPendingId] = useState<string | null>(null);
-  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [copied, setCopied] = useState<{ id: string; what: 'email' | 'address' } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const rows = candidates.map(c =>
@@ -60,7 +60,15 @@ export function OutreachPanel() {
     await navigator.clipboard.writeText(
       `${to ? `To: ${to}\n` : ''}Subject: ${invite.subject}\n\n${invite.body}`
     );
-    setCopiedId(candidate.id);
+    setCopied({ id: candidate.id, what: 'email' });
+  }
+
+  /** The address alone, for pasting into a compose window's To: field. */
+  async function copyAddress(candidate: ShortlistedCandidate) {
+    const to = candidateEmail(candidate);
+    if (!to) return;
+    await navigator.clipboard.writeText(to);
+    setCopied({ id: candidate.id, what: 'address' });
   }
 
   return (
@@ -124,7 +132,11 @@ export function OutreachPanel() {
                       : <span className={styles.unsentChip}>Not emailed</span>}
                   </td>
                   <td className={styles.outreachActions}>
-                    {copiedId === c.id && <span className={styles.outreachMuted}>Copied</span>}
+                    {copied?.id === c.id && (
+                      <span className={styles.outreachMuted}>
+                        {copied.what === 'address' ? 'Address copied' : 'Email copied'}
+                      </span>
+                    )}
                     <button
                       onClick={() => copyInvite(c)}
                       disabled={!template}
@@ -135,6 +147,13 @@ export function OutreachPanel() {
                       }
                     >
                       Copy email
+                    </button>
+                    <button
+                      onClick={() => copyAddress(c)}
+                      disabled={!to}
+                      title={to ? 'Copies just the address, for the To: field' : 'No email address on file for this candidate'}
+                    >
+                      Copy address
                     </button>
                     <button
                       className={styles.linkButton}

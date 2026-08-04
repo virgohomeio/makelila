@@ -122,7 +122,37 @@ describe('OutreachPanel rows', () => {
       'Subject: Screening interview for the Fulfillment Associate role at VCycene\n\n' +
       'Hi Sam,\n\nBook a time: https://calendly.com/huayi/screening'
     );
-    expect(await within(row('Sam Chen')).findByText('Copied')).toBeTruthy();
+    expect(await within(row('Sam Chen')).findByText('Email copied')).toBeTruthy();
+  });
+
+  it('copies the recipient address on its own', async () => {
+    withShortlist([shortlisted({ id: 'c1', full_name: 'Sam Chen' })]);
+    render(<OutreachPanel />);
+
+    fireEvent.click(within(row('Sam Chen')).getByRole('button', { name: 'Copy address' }));
+
+    expect(copiedText()).toBe('sam@example.com');
+    expect(await within(row('Sam Chen')).findByText('Address copied')).toBeTruthy();
+  });
+
+  it('copies the Indeed relay address when there is no direct email', () => {
+    withShortlist([shortlisted({
+      id: 'c1', full_name: 'Sam Chen', email: null, indeed_relay_email: 'relay+sam@indeedemail.com',
+    })]);
+    render(<OutreachPanel />);
+
+    fireEvent.click(within(row('Sam Chen')).getByRole('button', { name: 'Copy address' }));
+    expect(copiedText()).toBe('relay+sam@indeedemail.com');
+  });
+
+  it('cannot copy an address that is not on file', () => {
+    withShortlist([shortlisted({ id: 'c1', full_name: 'Sam Chen', email: null, indeed_relay_email: null })]);
+    render(<OutreachPanel />);
+
+    const button = within(row('Sam Chen')).getByRole('button', { name: 'Copy address' }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    fireEvent.click(button);
+    expect(navigator.clipboard.writeText).not.toHaveBeenCalled();
   });
 
   it('addresses the copy to the Indeed relay when there is no direct email', () => {

@@ -223,7 +223,29 @@ describe('InterviewsTab screening invite draft', () => {
     expect(copied).toContain('Screening interview for the Fulfillment Associate role at VCycene');
     expect(copied).toContain('Hi Shortlisted,');
     expect(copied).toContain('[paste your scheduling link here]');
-    expect(await within(panel).findByText('Copied')).toBeTruthy();
+    expect(await within(panel).findByText('Email copied')).toBeTruthy();
+  });
+
+  it('copies the recipient address on its own', async () => {
+    withCandidates([shortlisted({ email: 'sam@example.com' })]);
+    render(<InterviewsTab />);
+    const panel = expandCandidate();
+
+    fireEvent.click(within(panel).getByRole('button', { name: 'Copy address' }));
+
+    expect(vi.mocked(navigator.clipboard.writeText).mock.calls[0][0]).toBe('sam@example.com');
+    expect(await within(panel).findByText('Address copied')).toBeTruthy();
+  });
+
+  it('cannot copy an address that is not on file', () => {
+    withCandidates([shortlisted({ email: null, indeed_relay_email: null })]);
+    render(<InterviewsTab />);
+    const panel = expandCandidate();
+
+    const button = within(panel).getByRole('button', { name: 'Copy address' }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    fireEvent.click(button);
+    expect(navigator.clipboard.writeText).not.toHaveBeenCalled();
   });
 
   it('addresses the copy to the Indeed relay when there is no direct email', () => {
