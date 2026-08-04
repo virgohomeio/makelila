@@ -2,13 +2,10 @@ import { useEffect, useRef, useState } from 'react';
 import styles from './Hiring.module.css';
 import {
   useJobPostings, useCandidates, useInterviews, createInterview, recordInterviewDecision,
-  getCurrentUserId, markScreeningInviteSent, useOperatorEmails,
+  getCurrentUserId, markScreeningInviteSent,
   type Candidate, type Interview, type InterviewDecision,
 } from '../../lib/hiring';
 import { useEmailTemplate, useSchedulingUrl } from '../../lib/templates';
-import { openMailDraft } from '../../lib/mailDraft';
-import { useAuth } from '../../lib/auth';
-import { useSendingAccount } from './sendingAccount';
 import { OutreachPanel } from './OutreachPanel';
 import { SCREENING_TEMPLATE_KEY, candidateEmail, renderScreeningInvite } from './screeningInvite';
 
@@ -133,15 +130,9 @@ function CandidateInterviewPanel({ candidate, postingTitle }: { candidate: Candi
     decisionOverrides[iv.id] ? { ...iv, ...decisionOverrides[iv.id] } : iv
   );
 
-  // Screening invite draft — makeLILA renders the copy, the operator sends it
-  // from their own mail client. Nothing here touches Resend or email_messages.
-  // Composes from the signed-in operator's own @virgohome.io account rather
-  // than whatever account the OS mail handler defaults to.
-  const { user } = useAuth();
-  const { emails: operatorEmails } = useOperatorEmails();
-  // Same choice the outreach panel's picker drives — the two send paths must
-  // not disagree about who is writing.
-  const sendingAs = useSendingAccount(user?.email ?? null, operatorEmails);
+  // Screening invite draft — makeLILA renders the copy and hands it over as
+  // text; the operator pastes it into their own mail client and sends it.
+  // Nothing here touches Resend, email_messages, or a mail client.
   const { template: screeningTemplate, loading: templateLoading } = useEmailTemplate(SCREENING_TEMPLATE_KEY);
   const { schedulingUrl } = useSchedulingUrl();
   const [copied, setCopied] = useState(false);
@@ -157,26 +148,15 @@ function CandidateInterviewPanel({ candidate, postingTitle }: { candidate: Candi
     candidateName, postingTitle, schedulingUrl,
   });
 
+  /** Copying is all makeLILA does with the invite — the operator pastes it and
+   *  sends it themselves, so this deliberately leaves the sent marker alone.
+   *  "Mark emailed" below records that separately, once it has actually gone. */
   async function copyDraft() {
     if (!draft) return;
-    await navigator.clipboard.writeText(`Subject: ${draft.subject}\n\n${draft.body}`);
+    await navigator.clipboard.writeText(
+      `${to ? `To: ${to}\n` : ''}Subject: ${draft.subject}\n\n${draft.body}`
+    );
     setCopied(true);
-  }
-
-  /** Hands the filled-in invite to Gmail, composing as the signed-in operator,
-   *  and records the outreach. The mail client owns the send — makeLILA can't
-   *  observe it, so the marker is "drafted and handed off", reversible from
-   *  here and from the outreach panel. */
-  async function sendDraft() {
-    if (!draft || !to) return;
-    setSendError(null);
-    openMailDraft({ from: sendingAs, to, ...draft });
-    try {
-      await markScreeningInviteSent(candidateId, true);
-      setSentOverride(new Date().toISOString());
-    } catch (e: unknown) {
-      setSendError(e instanceof Error ? e.message : 'Draft opened, but the sent marker did not save');
-    }
   }
 
   async function toggleSent() {
@@ -256,20 +236,10 @@ function CandidateInterviewPanel({ candidate, postingTitle }: { candidate: Candi
         )}
         {draft && (
           <>
+            {to && <div className={styles.inviteSubject}>To: {to}</div>}
             <div className={styles.inviteSubject}>Subject: {draft.subject}</div>
             <pre className={styles.inviteBody}>{draft.body}</pre>
-            <button
-              onClick={sendDraft}
-              disabled={!to}
-              title={
-                !to ? 'No email address on file for this candidate'
-                : sendingAs ? `Opens a Gmail compose tab as ${sendingAs} — you press Send`
-                : 'Opens a draft in your default mail client — you press Send'
-              }
-            >
-              Send{sendingAs ? ` as ${sendingAs}` : ' email'}
-            </button>
-            <button onClick={copyDraft} style={{ marginLeft: 8 }}>Copy email</button>
+            <button onClick={copyDraft}>Copy email</button>
             <button className={styles.linkButton} onClick={toggleSent}>
               {sentAt ? 'Mark not emailed' : 'Mark emailed'}
             </button>
@@ -277,9 +247,7 @@ function CandidateInterviewPanel({ candidate, postingTitle }: { candidate: Candi
             <div className={styles.inviteHint} style={{ marginLeft: 0, marginTop: 6 }}>
               {sentAt
                 ? `Invite marked as emailed ${new Date(sentAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}.`
-                : sendingAs
-                  ? `Opens a Gmail compose tab as ${sendingAs} — the draft waits there until you press Send.`
-                  : 'Opens this draft in your default mail client — it waits there until you press Send.'}
+                : 'Copy this, paste it into your mail client, and mark it emailed once it has gone.'}
             </div>
             {sendError && <div className={styles.formError}>{sendError}</div>}
           </>

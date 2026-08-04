@@ -6,7 +6,6 @@ import {
   type Candidate, type JobPosting,
 } from '../../../lib/hiring';
 import { useEmailTemplate, useSchedulingUrl, type EmailTemplate } from '../../../lib/templates';
-import { openMailDraft } from '../../../lib/mailDraft';
 
 vi.mock('../../../lib/hiring', () => ({
   useJobPostings: vi.fn(() => ({ postings: [posting], loading: false })),
@@ -17,17 +16,6 @@ vi.mock('../../../lib/hiring', () => ({
   recordInterviewDecision: vi.fn(),
   markScreeningInviteSent: vi.fn(async () => {}),
   getCurrentUserId: vi.fn(),
-  useOperatorEmails: vi.fn(() => ({ emails: ['huayi@virgohome.io', 'junaid@virgohome.io'], loading: false })),
-}));
-
-// The mail handoff is a side effect on window.location — stubbed so the assertions
-// can read the draft that would have been handed to Outlook.
-vi.mock('../../../lib/mailDraft', () => ({ openMailDraft: vi.fn() }));
-
-// The panel composes as the signed-in operator; these tests render it outside
-// an AuthProvider, so the context read is stubbed with an org account.
-vi.mock('../../../lib/auth', () => ({
-  useAuth: () => ({ user: { email: 'huayi@virgohome.io' } }),
 }));
 
 // renderTemplate is pure string substitution — the real one is kept here rather
@@ -223,79 +211,41 @@ describe('InterviewsTab screening invite draft', () => {
     expect(within(panel).queryByText(/\{\{scheduling_url\}\}/)).toBeNull();
   });
 
-  it('copies the subject and body to the clipboard', async () => {
-    withCandidates([shortlisted()]);
+  it('copies the address, subject and body to the clipboard', async () => {
+    withCandidates([shortlisted({ email: 'sam@example.com' })]);
     render(<InterviewsTab />);
     const panel = expandCandidate();
 
     fireEvent.click(within(panel).getByRole('button', { name: 'Copy email' }));
 
     const copied = vi.mocked(navigator.clipboard.writeText).mock.calls[0][0];
+    expect(copied).toContain('To: sam@example.com');
     expect(copied).toContain('Screening interview for the Fulfillment Associate role at VCycene');
     expect(copied).toContain('Hi Shortlisted,');
     expect(copied).toContain('[paste your scheduling link here]');
     expect(await within(panel).findByText('Copied')).toBeTruthy();
   });
 
-  it('hands the filled-in draft to the mail client, addressed to the candidate', () => {
-    vi.mocked(useSchedulingUrl).mockReturnValue({
-      schedulingUrl: 'https://calendly.com/huayi/screening', loading: false, save: vi.fn(),
-    });
-    withCandidates([shortlisted({ email: 'sam@example.com' })]);
-    render(<InterviewsTab />);
-    const panel = expandCandidate();
-
-    fireEvent.click(within(panel).getByRole('button', { name: 'Send as huayi@virgohome.io' }));
-
-    expect(openMailDraft).toHaveBeenCalledWith({
-      from: 'huayi@virgohome.io',
-      to: 'sam@example.com',
-      subject: 'Screening interview for the Fulfillment Associate role at VCycene',
-      body: expect.stringContaining('https://calendly.com/huayi/screening'),
-    });
-  });
-
-  // The sender picker lives in the outreach panel above the board; the
-  // per-candidate button has to honour the same choice, not the signed-in
-  // account, or the two send paths would disagree about who is writing.
-  it('follows the sender chosen in the outreach panel', () => {
-    withCandidates([shortlisted({ email: 'sam@example.com' })]);
-    render(<InterviewsTab />);
-
-    fireEvent.change(screen.getByLabelText('Sending as'), { target: { value: 'junaid@virgohome.io' } });
-    const panel = expandCandidate();
-    fireEvent.click(within(panel).getByRole('button', { name: 'Send as junaid@virgohome.io' }));
-
-    expect(openMailDraft).toHaveBeenCalledWith(expect.objectContaining({ from: 'junaid@virgohome.io' }));
-  });
-
-  it('addresses the draft to the Indeed relay when there is no direct email', () => {
+  it('addresses the copy to the Indeed relay when there is no direct email', () => {
     withCandidates([shortlisted({ email: null, indeed_relay_email: 'relay+sam@indeedemail.com' })]);
     render(<InterviewsTab />);
     const panel = expandCandidate();
 
-    fireEvent.click(within(panel).getByRole('button', { name: 'Send as huayi@virgohome.io' }));
-
-    expect(vi.mocked(openMailDraft).mock.calls[0][0].to).toBe('relay+sam@indeedemail.com');
+    fireEvent.click(within(panel).getByRole('button', { name: 'Copy email' }));
+    expect(vi.mocked(navigator.clipboard.writeText).mock.calls[0][0]).toContain('To: relay+sam@indeedemail.com');
   });
 
-  it('records the outreach when the draft is handed off', async () => {
+  // makeLILA hands over text, nothing else — no mail client is launched and
+  // nothing is sent, so copying can't imply the candidate was contacted.
+  it('opens no mail client and marks nothing on copy', () => {
     withCandidates([shortlisted()]);
     render(<InterviewsTab />);
     const panel = expandCandidate();
 
-    fireEvent.click(within(panel).getByRole('button', { name: 'Send as huayi@virgohome.io' }));
+    fireEvent.click(within(panel).getByRole('button', { name: 'Copy email' }));
 
-    expect(markScreeningInviteSent).toHaveBeenCalledWith('c1', true);
-    expect(await within(panel).findByText(/Invite marked as emailed/)).toBeTruthy();
-  });
-
-  it('cannot send to a candidate with no email on file', () => {
-    withCandidates([shortlisted({ email: null, indeed_relay_email: null })]);
-    render(<InterviewsTab />);
-    const panel = expandCandidate();
-
-    expect(within(panel).getByRole('button', { name: 'Send as huayi@virgohome.io' }).hasAttribute('disabled')).toBe(true);
+    expect(within(panel).queryByRole('button', { name: /send/i })).toBeNull();
+    expect(markScreeningInviteSent).not.toHaveBeenCalled();
   });
 
   it('lets the operator clear a sent marker set by mistake', async () => {

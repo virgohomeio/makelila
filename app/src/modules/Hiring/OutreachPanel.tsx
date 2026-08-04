@@ -1,35 +1,18 @@
 import { useRef, useState } from 'react';
 import styles from './Hiring.module.css';
-import {
-  useShortlistedCandidates, markScreeningInviteSent, useOperatorEmails, type ShortlistedCandidate,
-} from '../../lib/hiring';
-import { useAuth } from '../../lib/auth';
-import { useSendingAccount, setSendingAccount } from './sendingAccount';
+import { useShortlistedCandidates, markScreeningInviteSent, type ShortlistedCandidate } from '../../lib/hiring';
 import { useEmailTemplate, useSchedulingUrl } from '../../lib/templates';
-import { openMailDraft } from '../../lib/mailDraft';
 import { SCREENING_TEMPLATE_KEY, candidateEmail, renderScreeningInvite } from './screeningInvite';
 
 /** Screening outreach — the "who have I actually emailed?" board.
  *
- *  The invite leaves from the operator's own Outlook, so makeLILA never learns
- *  whether it went out. This panel is where that gets recorded: every
- *  shortlisted candidate across every visible posting, with a sent/not-sent
- *  state the operator drives, plus a one-click draft for the ones still
- *  waiting. Sending from here marks the row; the marker can also be set or
- *  cleared by hand for invites that went out another way. */
+ *  makeLILA hands over text and nothing else: the invite is copied from here
+ *  and sent by the operator from whatever mail client they already have open,
+ *  so nothing downstream can tell us whether it went out. This panel is where
+ *  that gets recorded — every shortlisted candidate across every visible
+ *  posting, with a sent/not-sent state the operator drives, and a copy button
+ *  for the ones still waiting. */
 export function OutreachPanel() {
-  // The signed-in operator's own address — AuthProvider has already enforced
-  // the @virgohome.io domain, so this is the org account the invite composes
-  // from rather than whatever Outlook defaults to.
-  const { user } = useAuth();
-  const { emails: operatorEmails } = useOperatorEmails();
-  // The signed-in operator is always offered, even if the roster query hasn't
-  // landed (or RLS hides it) — otherwise the picker could omit the very
-  // account the session belongs to.
-  const senderOptions = user?.email && !operatorEmails.includes(user.email)
-    ? [user.email, ...operatorEmails]
-    : operatorEmails;
-  const sendingAs = useSendingAccount(user?.email ?? null, senderOptions);
   const { candidates, loading } = useShortlistedCandidates();
   const { template } = useEmailTemplate(SCREENING_TEMPLATE_KEY);
   const { schedulingUrl, loading: linkLoading, save } = useSchedulingUrl();
@@ -39,6 +22,7 @@ export function OutreachPanel() {
   // reflect this panel's own writes immediately; the refetch then agrees.
   const [sentOverrides, setSentOverrides] = useState<Record<string, string | null>>({});
   const [pendingId, setPendingId] = useState<string | null>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const rows = candidates.map(c =>
@@ -61,16 +45,22 @@ export function OutreachPanel() {
     }
   }
 
-  async function draft(candidate: ShortlistedCandidate) {
-    const to = candidateEmail(candidate);
-    if (!template || !to) return;
+  /** Puts this candidate's invite on the clipboard, ready to paste into
+   *  whatever mail client the operator already has open. Copying deliberately
+   *  does NOT mark the candidate emailed — the mail hasn't been sent yet, and
+   *  a row that claims otherwise is how someone ends up never contacted. */
+  async function copyInvite(candidate: ShortlistedCandidate) {
+    if (!template) return;
     const invite = renderScreeningInvite(template, {
       candidateName: candidate.full_name,
       postingTitle: candidate.posting_title,
       schedulingUrl,
     });
-    openMailDraft({ from: sendingAs, to, ...invite });
-    await setSent(candidate, true);
+    const to = candidateEmail(candidate);
+    await navigator.clipboard.writeText(
+      `${to ? `To: ${to}\n` : ''}Subject: ${invite.subject}\n\n${invite.body}`
+    );
+    setCopiedId(candidate.id);
   }
 
   return (
@@ -78,25 +68,7 @@ export function OutreachPanel() {
       <div className={styles.outreachHeader}>
         <div>
           <div className={styles.outreachTitle}>Screening outreach</div>
-          {/* Gmail only renders a From line for accounts with several send-as
-              addresses, so its compose tab often can't answer "who am I sending
-              as". State it here, before the click — and let it be changed. */}
-          {sendingAs ? (
-            <div className={styles.sendingAs}>
-              <label htmlFor="sending-as">Sending as</label>
-              <select
-                id="sending-as"
-                className={styles.stageSelect}
-                value={sendingAs}
-                onChange={e => setSendingAccount(e.target.value)}
-                style={{ marginLeft: 6 }}
-              >
-                {senderOptions.map(email => <option key={email} value={email}>{email}</option>)}
-              </select>
-            </div>
-          ) : (
-            <div className={styles.sendingAs}>Sending from your default mail client</div>
-          )}
+          <div className={styles.sendingAs}>Copy an invite, then send it from your own mail client.</div>
         </div>
         <SchedulingLinkForm savedUrl={schedulingUrl} loading={linkLoading} onSave={save} />
       </div>
@@ -152,16 +124,17 @@ export function OutreachPanel() {
                       : <span className={styles.unsentChip}>Not emailed</span>}
                   </td>
                   <td className={styles.outreachActions}>
+                    {copiedId === c.id && <span className={styles.outreachMuted}>Copied</span>}
                     <button
-                      onClick={() => draft(c)}
-                      disabled={!to || !template || pendingId === c.id}
+                      onClick={() => copyInvite(c)}
+                      disabled={!template}
                       title={
-                        !to ? 'No email address on file for this candidate'
-                        : sendingAs ? `Opens a Gmail compose tab as ${sendingAs}`
-                        : 'Opens your default mail client'
+                        template
+                          ? 'Copies the invite — paste it into your mail client'
+                          : 'Screening template not found in the template library'
                       }
                     >
-                      {sentAt ? 'Send again' : 'Send'}{sendingAs ? ` as ${sendingAs}` : ' email'}
+                      Copy email
                     </button>
                     <button
                       className={styles.linkButton}

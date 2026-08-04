@@ -235,33 +235,6 @@ export function useInterviews(candidateId: string): { interviews: Interview[]; l
   return { interviews, loading };
 }
 
-/** Org email addresses of internal operators, for the Hiring module's "send
- *  as" picker. Fetched once — the roster changes on the order of months, and
- *  the picker is a small dropdown, not a live view. Sorted by display name so
- *  the list reads the way the team roster does. */
-export function useOperatorEmails(): { emails: string[]; loading: boolean } {
-  const [emails, setEmails] = useState<string[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('email, display_name')
-        .eq('is_internal', true)
-        .not('email', 'is', null)
-        .order('display_name', { ascending: true });
-      if (cancelled) return;
-      if (!error && data) setEmails((data as { email: string }[]).map(row => row.email));
-      setLoading(false);
-    })();
-    return () => { cancelled = true; };
-  }, []);
-
-  return { emails, loading };
-}
-
 export async function updatePostingRubric(postingId: string, rubric: RubricDimension[]): Promise<void> {
   const { error } = await supabase.from('job_postings').update({ screening_rubric: rubric }).eq('id', postingId);
   if (error) throw error;
