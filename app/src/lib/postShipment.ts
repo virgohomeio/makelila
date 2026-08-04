@@ -885,6 +885,12 @@ export async function deleteCaseNote(note: CaseNote, refundId: string | null, re
 }
 
 async function currentUserId(): Promise<string> {
+  // Prefer the locally-cached session (no network) — getUser() makes a round-trip
+  // to the auth server that can transiently fail on a valid session and abort an
+  // approval before it runs (looks like "can't move the card"). Fall back to the
+  // network call only if there's no cached session. Mirrors logAction().
+  const { data: { session } } = await supabase.auth.getSession();
+  if (session?.user) return session.user.id;
   const { data } = await supabase.auth.getUser();
   if (!data.user) throw new Error('refund: not authenticated');
   return data.user.id;
@@ -1146,7 +1152,14 @@ export async function financeApprove(id: string, opts: FinanceApproveOpts): Prom
     .eq('id', id);
   if (upErr) throw upErr;
 
-  await logAction('refund_finance_approved', id, `${opts.method} $${adjusted.toFixed(2)}`);
+  // Best-effort audit log — the approval has already committed above, so a log
+  // failure (e.g. a momentary session gap) must NEVER surface as an approval
+  // failure or the card looks stuck when it actually moved.
+  try {
+    await logAction('refund_finance_approved', id, `${opts.method} $${adjusted.toFixed(2)}`);
+  } catch (e) {
+    console.warn('Refund finance-approve audit log failed (non-fatal):', (e as Error).message);
+  }
 
   // FR-9a: notify the executor that a refund is queued for payout. Best-effort —
   // a mail failure must never roll back the approval (mirrors the ticket-

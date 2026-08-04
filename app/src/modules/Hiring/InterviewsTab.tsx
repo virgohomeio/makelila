@@ -2,12 +2,21 @@ import { useEffect, useRef, useState } from 'react';
 import styles from './Hiring.module.css';
 import {
   useJobPostings, useCandidates, useInterviews, createInterview, recordInterviewDecision, getCurrentUserId,
-  type Interview, type InterviewDecision,
+  type Candidate, type Interview, type InterviewDecision,
 } from '../../lib/hiring';
 
 const DECISION_LABEL: Record<InterviewDecision, string> = {
   advance: 'Advance', reject: 'Reject', hold: 'Hold', no_show: 'No-show',
 };
+
+/** Screening scores as one inline string, e.g. "Communication 4 · Reliability 5".
+ *  Saved operator scores win over Claude's suggestions — the same merge the
+ *  Applicants board uses to seed its editable score inputs. */
+function scoreSummary(candidate: Candidate): string {
+  const entries = Object.entries({ ...(candidate.suggested_scores ?? {}), ...candidate.scores });
+  if (!entries.length) return 'No scores yet';
+  return entries.map(([dimension, value]) => `${dimension} ${value}`).join(' · ');
+}
 
 export function InterviewsTab({ initialExpandedCandidateId }: { initialExpandedCandidateId?: string }) {
   const { postings, loading } = useJobPostings();
@@ -33,8 +42,11 @@ function InterviewColumn({ postingId, title, initialExpandedCandidateId }: {
   postingId: string; title: string; initialExpandedCandidateId?: string;
 }) {
   const { candidates, loading } = useCandidates(postingId);
-  // Interviews only make sense for a real, resume-attached candidate.
-  const interviewable = candidates.filter(c => c.enrichment_status !== 'stub');
+  // Interviews only make sense for a real, resume-attached candidate the team
+  // has shortlisted. `hired_at` is the shortlist marker (see the decision-tags
+  // design doc) and wins over `rejected_at` on a legacy row carrying both —
+  // same derivation as CandidateCard on the Applicants board.
+  const interviewable = candidates.filter(c => c.enrichment_status !== 'stub' && c.hired_at);
   const [expandedCandidateId, setExpandedCandidateId] = useState<string | undefined>(undefined);
   const rowRef = useRef<HTMLDivElement>(null);
   const autoExpandedRef = useRef(false);
@@ -53,7 +65,7 @@ function InterviewColumn({ postingId, title, initialExpandedCandidateId }: {
         {title} <span className={styles.columnCount}>· {interviewable.length}</span>
       </div>
       {loading && <div>Loading…</div>}
-      {!loading && !interviewable.length && <div>No candidates ready for interviews yet.</div>}
+      {!loading && !interviewable.length && <div>No shortlisted candidates yet.</div>}
       {interviewable.map(c => (
         <div key={c.id} ref={c.id === initialExpandedCandidateId ? rowRef : undefined}>
           <div
@@ -62,6 +74,7 @@ function InterviewColumn({ postingId, title, initialExpandedCandidateId }: {
             onClick={() => setExpandedCandidateId(expandedCandidateId === c.id ? undefined : c.id)}
           >
             <strong>{c.full_name}</strong>
+            <span className={styles.scoreSummary}>{scoreSummary(c)}</span>
           </div>
           {expandedCandidateId === c.id && (
             <CandidateInterviewPanel key={c.id} candidateId={c.id} candidateName={c.full_name} />

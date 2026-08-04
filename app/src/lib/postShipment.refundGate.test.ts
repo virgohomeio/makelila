@@ -6,7 +6,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // ── hoisted mock state ──────────────────────────────────────────────────────
-const { fromMock, getUserMock, logActionMock, state } = vi.hoisted(() => {
+const { fromMock, getSessionMock, getUserMock, logActionMock, state } = vi.hoisted(() => {
   const state: {
     approval: any;
     ret: any;
@@ -14,6 +14,11 @@ const { fromMock, getUserMock, logActionMock, state } = vi.hoisted(() => {
     updateCalled: boolean;
   } = { approval: null, ret: null, updatePatch: null, updateCalled: false };
 
+  // currentUserId() prefers the cached session and only falls back to
+  // getUser() when there is none, so both have to resolve to the same manager.
+  const getSessionMock = vi.fn(() =>
+    Promise.resolve({ data: { session: { user: { id: 'mgr-1' } } } }),
+  );
   const getUserMock = vi.fn(() =>
     Promise.resolve({ data: { user: { id: 'mgr-1' } } }),
   );
@@ -40,11 +45,11 @@ const { fromMock, getUserMock, logActionMock, state } = vi.hoisted(() => {
     }),
   }));
 
-  return { fromMock, getUserMock, logActionMock, state };
+  return { fromMock, getSessionMock, getUserMock, logActionMock, state };
 });
 
 vi.mock('./supabase', () => ({
-  supabase: { from: fromMock, auth: { getUser: getUserMock } },
+  supabase: { from: fromMock, auth: { getSession: getSessionMock, getUser: getUserMock } },
 }));
 vi.mock('./activityLog', () => ({ logAction: logActionMock }));
 
