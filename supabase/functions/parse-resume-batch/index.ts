@@ -120,12 +120,29 @@ async function handle(req: Request): Promise<Response> {
     .eq('id', caller.user_id)
     .maybeSingle();
   if (profileErr) return json({ error: `Profile lookup: ${profileErr.message}` }, 500);
-  const leadershipRejection = requireLeadershipRole(callerProfile?.role);
-  if (leadershipRejection) return leadershipRejection;
 
   const input = await req.json().catch(() => null) as ParseResumeInput | null;
   if (!input?.posting_id || !input.storage_path || !input.mime_type || !input.source) {
     return json({ error: 'posting_id, storage_path, mime_type, and source are required' }, 400);
+  }
+
+  // Leadership (finance/admin) always passes. A non-leadership caller can still
+  // upload/score resumes for a SPECIFIC posting if they're an interviewer
+  // assigned to it (posting_interviewers) — same rule the app already uses to
+  // decide whether they can open that posting in the Hiring module UI
+  // (can_view_posting() RLS helper / canViewPosting() in lib/permissions.ts).
+  // Scoped to input.posting_id, not "assigned to anything," so an interviewer
+  // on Posting A can't burn Claude calls or write candidates on Posting B.
+  const leadershipRejection = requireLeadershipRole(callerProfile?.role);
+  if (leadershipRejection) {
+    const { data: assignment, error: assignmentErr } = await admin
+      .from('posting_interviewers')
+      .select('id')
+      .eq('posting_id', input.posting_id)
+      .eq('profile_id', caller.user_id)
+      .limit(1);
+    if (assignmentErr) return json({ error: `Interviewer check: ${assignmentErr.message}` }, 500);
+    if (!assignment || assignment.length === 0) return leadershipRejection;
   }
 
   const { data: posting, error: postingErr } = await admin
