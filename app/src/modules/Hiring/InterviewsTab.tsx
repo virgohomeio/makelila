@@ -1,9 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import styles from './Hiring.module.css';
 import {
-  useJobPostings, useCandidates, useInterviews, createInterview, recordInterviewDecision, getCurrentUserId,
+  useJobPostings, useCandidates, useInterviews, createInterview, recordInterviewDecision,
+  getCurrentUserId, markScreeningInviteSent,
   type Candidate, type Interview, type InterviewDecision,
 } from '../../lib/hiring';
+import { useEmailTemplate, useSchedulingUrl } from '../../lib/templates';
+import { OutreachPanel } from './OutreachPanel';
+import { SCREENING_TEMPLATE_KEY, candidateEmail, renderScreeningInvite } from './screeningInvite';
 
 const DECISION_LABEL: Record<InterviewDecision, string> = {
   advance: 'Advance', reject: 'Reject', hold: 'Hold', no_show: 'No-show',
@@ -25,16 +29,19 @@ export function InterviewsTab({ initialExpandedCandidateId }: { initialExpandedC
   if (!postings.length) return <div className={styles.empty}>No job postings yet.</div>;
 
   return (
-    <div className={styles.board}>
-      {postings.map(p => (
-        <InterviewColumn
-          key={p.id}
-          postingId={p.id}
-          title={p.title}
-          initialExpandedCandidateId={initialExpandedCandidateId}
-        />
-      ))}
-    </div>
+    <>
+      <OutreachPanel />
+      <div className={styles.board}>
+        {postings.map(p => (
+          <InterviewColumn
+            key={p.id}
+            postingId={p.id}
+            title={p.title}
+            initialExpandedCandidateId={initialExpandedCandidateId}
+          />
+        ))}
+      </div>
+    </>
   );
 }
 
@@ -74,10 +81,14 @@ function InterviewColumn({ postingId, title, initialExpandedCandidateId }: {
             onClick={() => setExpandedCandidateId(expandedCandidateId === c.id ? undefined : c.id)}
           >
             <strong>{c.full_name}</strong>
+            <span className={styles.candidateEmail}>{candidateEmail(c) ?? 'No email on file'}</span>
+            {c.screening_invite_sent_at
+              ? <span className={styles.sentChip}>Emailed</span>
+              : <span className={styles.unsentChip}>Not emailed</span>}
             <span className={styles.scoreSummary}>{scoreSummary(c)}</span>
           </div>
           {expandedCandidateId === c.id && (
-            <CandidateInterviewPanel key={c.id} candidateId={c.id} candidateName={c.full_name} />
+            <CandidateInterviewPanel key={c.id} candidate={c} postingTitle={title} />
           )}
         </div>
       ))}
@@ -85,7 +96,9 @@ function InterviewColumn({ postingId, title, initialExpandedCandidateId }: {
   );
 }
 
-function CandidateInterviewPanel({ candidateId, candidateName }: { candidateId: string; candidateName: string }) {
+function CandidateInterviewPanel({ candidate, postingTitle }: { candidate: Candidate; postingTitle: string }) {
+  const candidateId = candidate.id;
+  const candidateName = candidate.full_name;
   const { interviews: fetchedInterviews, loading } = useInterviews(candidateId);
   const [roundLabel, setRoundLabel] = useState('');
   const [calendlyUrl, setCalendlyUrl] = useState('');
@@ -116,6 +129,53 @@ function CandidateInterviewPanel({ candidateId, candidateName }: { candidateId: 
   const interviews = [...fetchedInterviews, ...createdInterviews.filter(iv => !fetchedIds.has(iv.id))].map(iv =>
     decisionOverrides[iv.id] ? { ...iv, ...decisionOverrides[iv.id] } : iv
   );
+
+  // Screening invite draft — makeLILA renders the copy and hands it over as
+  // text; the operator pastes it into their own mail client and sends it.
+  // Nothing here touches Resend, email_messages, or a mail client.
+  const { template: screeningTemplate, loading: templateLoading } = useEmailTemplate(SCREENING_TEMPLATE_KEY);
+  const { schedulingUrl } = useSchedulingUrl();
+  const [copied, setCopied] = useState<'email' | 'address' | null>(null);
+  const to = candidateEmail(candidate);
+  // Local echo of the sent marker, same override shape as decisionOverrides
+  // above: this panel's own write shows immediately, without waiting on
+  // useCandidates' realtime refetch. Until it makes one, the row wins — so a
+  // mark made from the outreach panel above the board reaches this view too.
+  const [sentOverride, setSentOverride] = useState<string | null | undefined>(undefined);
+  const sentAt = sentOverride !== undefined ? sentOverride : candidate.screening_invite_sent_at;
+  const [sendError, setSendError] = useState<string | null>(null);
+  const draft = screeningTemplate && renderScreeningInvite(screeningTemplate, {
+    candidateName, postingTitle, schedulingUrl,
+  });
+
+  /** Copying is all makeLILA does with the invite — the operator pastes it and
+   *  sends it themselves, so this deliberately leaves the sent marker alone.
+   *  "Mark emailed" below records that separately, once it has actually gone.
+   *
+   *  Address and message copy separately because they land in different fields
+   *  of a compose window — this one is the message only. */
+  async function copyDraft() {
+    if (!draft) return;
+    await navigator.clipboard.writeText(`Subject: ${draft.subject}\n\n${draft.body}`);
+    setCopied('email');
+  }
+
+  async function copyAddress() {
+    if (!to) return;
+    await navigator.clipboard.writeText(to);
+    setCopied('address');
+  }
+
+  async function toggleSent() {
+    setSendError(null);
+    const next = !sentAt;
+    try {
+      await markScreeningInviteSent(candidateId, next);
+      setSentOverride(next ? new Date().toISOString() : null);
+    } catch (e: unknown) {
+      setSendError(e instanceof Error ? e.message : 'Could not update the outreach status');
+    }
+  }
 
   async function book() {
     if (!roundLabel.trim()) return;
@@ -172,6 +232,45 @@ function CandidateInterviewPanel({ candidateId, candidateName }: { candidateId: 
         <input placeholder="Calendly event URL (optional)" value={calendlyUrl} onChange={e => setCalendlyUrl(e.target.value)} style={{ marginLeft: 8 }} />
         <button onClick={book} disabled={creating} style={{ marginLeft: 8 }}>Book interview</button>
         {bookError && <div className={styles.formError}>{bookError}</div>}
+      </div>
+      <div className={styles.inviteBlock}>
+        <div className={styles.inviteTitle}>Screening interview invite</div>
+        {templateLoading && <div className={styles.inviteHint}>Loading template…</div>}
+        {!templateLoading && !draft && (
+          <div className={styles.inviteHint}>
+            Screening interview invite template not found in the template library.
+          </div>
+        )}
+        {draft && (
+          <>
+            {to && <div className={styles.inviteSubject}>To: {to}</div>}
+            <div className={styles.inviteSubject}>Subject: {draft.subject}</div>
+            <pre className={styles.inviteBody}>{draft.body}</pre>
+            <button onClick={copyDraft}>Copy email</button>
+            <button
+              onClick={copyAddress}
+              disabled={!to}
+              title={to ? 'Copies just the address, for the To: field' : 'No email address on file for this candidate'}
+              style={{ marginLeft: 8 }}
+            >
+              Copy address
+            </button>
+            <button className={styles.linkButton} onClick={toggleSent}>
+              {sentAt ? 'Mark not emailed' : 'Mark emailed'}
+            </button>
+            {copied && (
+              <span className={styles.inviteHint}>
+                {copied === 'address' ? 'Address copied' : 'Email copied'}
+              </span>
+            )}
+            <div className={styles.inviteHint} style={{ marginLeft: 0, marginTop: 6 }}>
+              {sentAt
+                ? `Invite marked as emailed ${new Date(sentAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}.`
+                : 'Copy this, paste it into your mail client, and mark it emailed once it has gone.'}
+            </div>
+            {sendError && <div className={styles.formError}>{sendError}</div>}
+          </>
+        )}
       </div>
     </div>
   );

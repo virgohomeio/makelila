@@ -6,6 +6,18 @@ import {
   getResumeSignedUrl, type Candidate, type CandidateSource,
 } from '../../lib/hiring';
 
+const SOURCE_LABEL: Record<CandidateSource, string> = {
+  indeed: 'Indeed',
+  linkedin: 'LinkedIn',
+  referral: 'Referral',
+  other: 'Other',
+  university_of_waterloo: 'University of Waterloo',
+  university_of_toronto: 'University of Toronto',
+  york_university: 'York University',
+};
+
+const SOURCES = Object.keys(SOURCE_LABEL) as CandidateSource[];
+
 export function ApplicantsTab({ onSelectCandidate }: { onSelectCandidate: (id: string) => void }) {
   const { postings, loading } = useJobPostings();
 
@@ -31,32 +43,50 @@ function PostingColumn({ postingId, title, pipelineStages, onSelectCandidate }: 
   postingId: string; title: string; pipelineStages: string[]; onSelectCandidate: (id: string) => void;
 }) {
   const { candidates, loading } = useCandidates(postingId);
+  // Two separate source pickers, because they answer different questions: one
+  // tags the resumes being uploaded, the other narrows the list on screen.
+  // They used to be a single control, which read as a filter and did nothing.
   const [uploadSource, setUploadSource] = useState<CandidateSource>('indeed');
+  const [sourceFilter, setSourceFilter] = useState<CandidateSource | 'all'>('all');
+  const shown = sourceFilter === 'all' ? candidates : candidates.filter(c => c.source === sourceFilter);
 
   return (
     <div className={styles.column}>
       <div className={styles.columnHeader}>
-        {title} <span className={styles.columnCount}>· {candidates.length}</span>
+        {title}
+        <span className={styles.columnCount}>
+          {sourceFilter === 'all' ? `· ${candidates.length}` : `· ${shown.length} of ${candidates.length}`}
+        </span>
       </div>
-      <select
-        className={styles.stageSelect}
-        value={uploadSource}
-        onChange={e => setUploadSource(e.target.value as CandidateSource)}
-        style={{ marginBottom: 8 }}
-      >
-        <option value="indeed">Indeed</option>
-        <option value="linkedin">LinkedIn</option>
-        <option value="referral">Referral</option>
-        <option value="other">Other</option>
-        <option value="university_of_waterloo">University of Waterloo</option>
-        <option value="university_of_toronto">University of Toronto</option>
-        <option value="york_university">York University</option>
-      </select>
+      <label className={styles.selectLabel}>
+        Source for uploaded resumes
+        <select
+          className={styles.stageSelect}
+          value={uploadSource}
+          onChange={e => setUploadSource(e.target.value as CandidateSource)}
+        >
+          {SOURCES.map(s => <option key={s} value={s}>{SOURCE_LABEL[s]}</option>)}
+        </select>
+      </label>
       <ResumeUploadPanel postingId={postingId} source={uploadSource} onUploaded={() => {}} />
       <h3 style={{ marginTop: 20 }}>Applicants</h3>
+      <label className={styles.selectLabel}>
+        Filter by source
+        <select
+          className={styles.stageSelect}
+          value={sourceFilter}
+          onChange={e => setSourceFilter(e.target.value as CandidateSource | 'all')}
+        >
+          <option value="all">All sources</option>
+          {SOURCES.map(s => <option key={s} value={s}>{SOURCE_LABEL[s]}</option>)}
+        </select>
+      </label>
       {loading && <div>Loading…</div>}
       {!loading && !candidates.length && <div>No applicants yet.</div>}
-      {candidates.map(c => (
+      {!loading && !!candidates.length && !shown.length && sourceFilter !== 'all' && (
+        <div>No applicants from {SOURCE_LABEL[sourceFilter]}.</div>
+      )}
+      {shown.map(c => (
         <CandidateCard key={c.id} candidate={c} pipelineStages={pipelineStages} onSelectCandidate={onSelectCandidate} />
       ))}
     </div>
