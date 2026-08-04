@@ -4,6 +4,7 @@ import { OutreachPanel } from '../OutreachPanel';
 import { useShortlistedCandidates, markScreeningInviteSent, type ShortlistedCandidate } from '../../../lib/hiring';
 import { useEmailTemplate, useSchedulingUrl, type EmailTemplate } from '../../../lib/templates';
 import { openMailDraft } from '../../../lib/mailDraft';
+import { useAuth } from '../../../lib/auth';
 
 vi.mock('../../../lib/hiring', () => ({
   useShortlistedCandidates: vi.fn(),
@@ -23,10 +24,9 @@ vi.mock('../../../lib/templates', () => ({
 vi.mock('../../../lib/mailDraft', () => ({ openMailDraft: vi.fn() }));
 
 // The panel composes as the signed-in operator; this renders it outside an
-// AuthProvider, so the context read is stubbed with an org account.
-vi.mock('../../../lib/auth', () => ({
-  useAuth: () => ({ user: { email: 'huayi@virgohome.io' } }),
-}));
+// AuthProvider, so the context read is stubbed. Seeded per test in beforeEach
+// so a test can drop the address and exercise the mailto fallback labelling.
+vi.mock('../../../lib/auth', () => ({ useAuth: vi.fn() }));
 
 const template: EmailTemplate = {
   id: 't1', key: 'screening_interview_invite', name: 'Screening interview invite',
@@ -57,6 +57,7 @@ function withShortlist(candidates: ShortlistedCandidate[]) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(useAuth).mockReturnValue({ user: { email: 'huayi@virgohome.io' } } as unknown as ReturnType<typeof useAuth>);
   vi.mocked(useEmailTemplate).mockReturnValue({ template, loading: false });
   vi.mocked(useSchedulingUrl).mockReturnValue({ schedulingUrl: null, loading: false, save: vi.fn() });
   withShortlist([]);
@@ -84,6 +85,23 @@ describe('OutreachPanel counts', () => {
     expect(screen.getByText('33% contacted')).toBeTruthy();
   });
 
+  // Gmail only shows a From line on accounts with multiple send-as addresses,
+  // so the compose tab often can't answer "who am I sending as" — makeLILA says
+  // it here, before the click.
+  it('names the sending account in the panel header', () => {
+    render(<OutreachPanel />);
+    expect(screen.getByText('Sending as huayi@virgohome.io')).toBeTruthy();
+  });
+
+  it('says the draft opens in the operator default mail client when the address is unknown', () => {
+    vi.mocked(useAuth).mockReturnValue({ user: null } as unknown as ReturnType<typeof useAuth>);
+    withShortlist([shortlisted({ id: 'c1', full_name: 'Sam Chen' })]);
+    render(<OutreachPanel />);
+
+    expect(screen.getByText('Sending from your default mail client')).toBeTruthy();
+    expect(within(row('Sam Chen')).getByRole('button', { name: 'Send email' })).toBeTruthy();
+  });
+
   it('says so when nobody is shortlisted yet', () => {
     render(<OutreachPanel />);
     expect(screen.getByText(/No shortlisted candidates yet/)).toBeTruthy();
@@ -108,7 +126,7 @@ describe('OutreachPanel rows', () => {
     render(<OutreachPanel />);
 
     expect(within(row('Sam Chen')).getByText(/^Emailed /)).toBeTruthy();
-    expect(within(row('Sam Chen')).getByRole('button', { name: 'Send again' })).toBeTruthy();
+    expect(within(row('Sam Chen')).getByRole('button', { name: 'Send again as huayi@virgohome.io' })).toBeTruthy();
   });
 
   it('opens a draft and records the outreach in one click', async () => {
@@ -118,7 +136,7 @@ describe('OutreachPanel rows', () => {
     withShortlist([shortlisted({ id: 'c1', full_name: 'Sam Chen' })]);
     render(<OutreachPanel />);
 
-    fireEvent.click(within(row('Sam Chen')).getByRole('button', { name: 'Send email' }));
+    fireEvent.click(within(row('Sam Chen')).getByRole('button', { name: 'Send as huayi@virgohome.io' }));
 
     expect(openMailDraft).toHaveBeenCalledWith({
       from: 'huayi@virgohome.io',
@@ -136,7 +154,7 @@ describe('OutreachPanel rows', () => {
 
     const r = row('Sam Chen');
     expect(within(r).getByText('No email on file')).toBeTruthy();
-    expect(within(r).getByRole('button', { name: 'Send email' }).hasAttribute('disabled')).toBe(true);
+    expect(within(r).getByRole('button', { name: 'Send as huayi@virgohome.io' }).hasAttribute('disabled')).toBe(true);
   });
 
   it('lets the operator confirm an invite sent some other way, and undo it', async () => {

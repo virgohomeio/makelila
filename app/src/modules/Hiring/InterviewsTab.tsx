@@ -137,6 +137,7 @@ function CandidateInterviewPanel({ candidate, postingTitle }: { candidate: Candi
   // Composes from the signed-in operator's own @virgohome.io account rather
   // than whatever account the OS mail handler defaults to.
   const { user } = useAuth();
+  const sendingAs = user?.email ?? null;
   const { template: screeningTemplate, loading: templateLoading } = useEmailTemplate(SCREENING_TEMPLATE_KEY);
   const { schedulingUrl } = useSchedulingUrl();
   const [copied, setCopied] = useState(false);
@@ -256,9 +257,13 @@ function CandidateInterviewPanel({ candidate, postingTitle }: { candidate: Candi
             <button
               onClick={sendDraft}
               disabled={!to}
-              title={to ? 'Opens a draft in your mail client — you press Send' : 'No email address on file for this candidate'}
+              title={
+                !to ? 'No email address on file for this candidate'
+                : sendingAs ? `Opens a Gmail compose tab as ${sendingAs} — you press Send`
+                : 'Opens a draft in your default mail client — you press Send'
+              }
             >
-              Send email
+              Send{sendingAs ? ` as ${sendingAs}` : ' email'}
             </button>
             <button onClick={copyDraft} style={{ marginLeft: 8 }}>Copy email</button>
             <button className={styles.linkButton} onClick={toggleSent}>
@@ -268,7 +273,9 @@ function CandidateInterviewPanel({ candidate, postingTitle }: { candidate: Candi
             <div className={styles.inviteHint} style={{ marginLeft: 0, marginTop: 6 }}>
               {sentAt
                 ? `Invite marked as emailed ${new Date(sentAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}.`
-                : 'Send email opens this draft in Outlook — it waits there until you press Send.'}
+                : sendingAs
+                  ? `Opens a Gmail compose tab as ${sendingAs} — the draft waits there until you press Send.`
+                  : 'Opens this draft in your default mail client — it waits there until you press Send.'}
             </div>
             {sendError && <div className={styles.formError}>{sendError}</div>}
           </>

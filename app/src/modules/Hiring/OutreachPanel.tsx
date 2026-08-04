@@ -19,6 +19,7 @@ export function OutreachPanel() {
   // the @virgohome.io domain, so this is the org account the invite composes
   // from rather than whatever Outlook defaults to.
   const { user } = useAuth();
+  const sendingAs = user?.email ?? null;
   const { candidates, loading } = useShortlistedCandidates();
   const { template } = useEmailTemplate(SCREENING_TEMPLATE_KEY);
   const { schedulingUrl, loading: linkLoading, save } = useSchedulingUrl();
@@ -65,7 +66,15 @@ export function OutreachPanel() {
   return (
     <div className={styles.outreachPanel}>
       <div className={styles.outreachHeader}>
-        <div className={styles.outreachTitle}>Screening outreach</div>
+        <div>
+          <div className={styles.outreachTitle}>Screening outreach</div>
+          {/* Gmail only renders a From line for accounts with several send-as
+              addresses, so its compose tab often can't answer "who am I sending
+              as". State it here, before the click. */}
+          <div className={styles.sendingAs}>
+            {sendingAs ? `Sending as ${sendingAs}` : 'Sending from your default mail client'}
+          </div>
+        </div>
         <SchedulingLinkForm savedUrl={schedulingUrl} loading={linkLoading} onSave={save} />
       </div>
 
@@ -123,9 +132,13 @@ export function OutreachPanel() {
                     <button
                       onClick={() => draft(c)}
                       disabled={!to || !template || pendingId === c.id}
-                      title={to ? undefined : 'No email address on file for this candidate'}
+                      title={
+                        !to ? 'No email address on file for this candidate'
+                        : sendingAs ? `Opens a Gmail compose tab as ${sendingAs}`
+                        : 'Opens your default mail client'
+                      }
                     >
-                      {sentAt ? 'Send again' : 'Send email'}
+                      {sentAt ? 'Send again' : 'Send'}{sendingAs ? ` as ${sendingAs}` : ' email'}
                     </button>
                     <button
                       className={styles.linkButton}

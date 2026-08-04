@@ -243,7 +243,7 @@ describe('InterviewsTab screening invite draft', () => {
     render(<InterviewsTab />);
     const panel = expandCandidate();
 
-    fireEvent.click(within(panel).getByRole('button', { name: 'Send email' }));
+    fireEvent.click(within(panel).getByRole('button', { name: 'Send as huayi@virgohome.io' }));
 
     expect(openMailDraft).toHaveBeenCalledWith({
       from: 'huayi@virgohome.io',
@@ -258,7 +258,7 @@ describe('InterviewsTab screening invite draft', () => {
     render(<InterviewsTab />);
     const panel = expandCandidate();
 
-    fireEvent.click(within(panel).getByRole('button', { name: 'Send email' }));
+    fireEvent.click(within(panel).getByRole('button', { name: 'Send as huayi@virgohome.io' }));
 
     expect(vi.mocked(openMailDraft).mock.calls[0][0].to).toBe('relay+sam@indeedemail.com');
   });
@@ -268,7 +268,7 @@ describe('InterviewsTab screening invite draft', () => {
     render(<InterviewsTab />);
     const panel = expandCandidate();
 
-    fireEvent.click(within(panel).getByRole('button', { name: 'Send email' }));
+    fireEvent.click(within(panel).getByRole('button', { name: 'Send as huayi@virgohome.io' }));
 
     expect(markScreeningInviteSent).toHaveBeenCalledWith('c1', true);
     expect(await within(panel).findByText(/Invite marked as emailed/)).toBeTruthy();
@@ -279,7 +279,7 @@ describe('InterviewsTab screening invite draft', () => {
     render(<InterviewsTab />);
     const panel = expandCandidate();
 
-    expect(within(panel).getByRole('button', { name: 'Send email' }).hasAttribute('disabled')).toBe(true);
+    expect(within(panel).getByRole('button', { name: 'Send as huayi@virgohome.io' }).hasAttribute('disabled')).toBe(true);
   });
 
   it('lets the operator clear a sent marker set by mistake', async () => {

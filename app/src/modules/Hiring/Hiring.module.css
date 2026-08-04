@@ -78,6 +78,7 @@
   gap: 16px; flex-wrap: wrap; margin-bottom: 12px;
 }
 .outreachTitle { font-weight: 600; font-size: 14px; }
+.sendingAs { font-size: 11px; color: var(--color-ink-subtle); margin-top: 2px; }
 .linkForm { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .linkLabel { font-size: 11px; color: var(--color-ink-subtle); }
 .linkInput {
