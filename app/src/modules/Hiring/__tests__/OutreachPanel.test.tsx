@@ -22,6 +22,12 @@ vi.mock('../../../lib/templates', () => ({
 
 vi.mock('../../../lib/mailDraft', () => ({ openMailDraft: vi.fn() }));
 
+// The panel composes as the signed-in operator; this renders it outside an
+// AuthProvider, so the context read is stubbed with an org account.
+vi.mock('../../../lib/auth', () => ({
+  useAuth: () => ({ user: { email: 'huayi@virgohome.io' } }),
+}));
+
 const template: EmailTemplate = {
   id: 't1', key: 'screening_interview_invite', name: 'Screening interview invite',
   category: 'support', description: null,
@@ -115,6 +121,7 @@ describe('OutreachPanel rows', () => {
     fireEvent.click(within(row('Sam Chen')).getByRole('button', { name: 'Send email' }));
 
     expect(openMailDraft).toHaveBeenCalledWith({
+      from: 'huayi@virgohome.io',
       to: 'sam@example.com',
       subject: 'Screening interview for the Fulfillment Associate role at VCycene',
       body: 'Hi Sam,\n\nBook a time: https://calendly.com/huayi/screening',

@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import styles from './Hiring.module.css';
 import { useShortlistedCandidates, markScreeningInviteSent, type ShortlistedCandidate } from '../../lib/hiring';
+import { useAuth } from '../../lib/auth';
 import { useEmailTemplate, useSchedulingUrl } from '../../lib/templates';
 import { openMailDraft } from '../../lib/mailDraft';
 import { SCREENING_TEMPLATE_KEY, candidateEmail, renderScreeningInvite } from './screeningInvite';
@@ -14,6 +15,10 @@ import { SCREENING_TEMPLATE_KEY, candidateEmail, renderScreeningInvite } from '.
  *  waiting. Sending from here marks the row; the marker can also be set or
  *  cleared by hand for invites that went out another way. */
 export function OutreachPanel() {
+  // The signed-in operator's own address — AuthProvider has already enforced
+  // the @virgohome.io domain, so this is the org account the invite composes
+  // from rather than whatever Outlook defaults to.
+  const { user } = useAuth();
   const { candidates, loading } = useShortlistedCandidates();
   const { template } = useEmailTemplate(SCREENING_TEMPLATE_KEY);
   const { schedulingUrl, loading: linkLoading, save } = useSchedulingUrl();
@@ -53,7 +58,7 @@ export function OutreachPanel() {
       postingTitle: candidate.posting_title,
       schedulingUrl,
     });
-    openMailDraft({ to, ...invite });
+    openMailDraft({ from: user?.email, to, ...invite });
     await setSent(candidate, true);
   }
 

@@ -23,6 +23,12 @@ vi.mock('../../../lib/hiring', () => ({
 // can read the draft that would have been handed to Outlook.
 vi.mock('../../../lib/mailDraft', () => ({ openMailDraft: vi.fn() }));
 
+// The panel composes as the signed-in operator; these tests render it outside
+// an AuthProvider, so the context read is stubbed with an org account.
+vi.mock('../../../lib/auth', () => ({
+  useAuth: () => ({ user: { email: 'huayi@virgohome.io' } }),
+}));
+
 // renderTemplate is pure string substitution — the real one is kept here rather
 // than stubbed, so these tests exercise the same rendering the app ships.
 // No default return here: vi.mock factories are hoisted above the const below,
@@ -240,6 +246,7 @@ describe('InterviewsTab screening invite draft', () => {
     fireEvent.click(within(panel).getByRole('button', { name: 'Send email' }));
 
     expect(openMailDraft).toHaveBeenCalledWith({
+      from: 'huayi@virgohome.io',
       to: 'sam@example.com',
       subject: 'Screening interview for the Fulfillment Associate role at VCycene',
       body: expect.stringContaining('https://calendly.com/huayi/screening'),

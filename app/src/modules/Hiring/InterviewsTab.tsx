@@ -7,6 +7,7 @@ import {
 } from '../../lib/hiring';
 import { useEmailTemplate, useSchedulingUrl } from '../../lib/templates';
 import { openMailDraft } from '../../lib/mailDraft';
+import { useAuth } from '../../lib/auth';
 import { OutreachPanel } from './OutreachPanel';
 import { SCREENING_TEMPLATE_KEY, candidateEmail, renderScreeningInvite } from './screeningInvite';
 
@@ -133,6 +134,9 @@ function CandidateInterviewPanel({ candidate, postingTitle }: { candidate: Candi
 
   // Screening invite draft — makeLILA renders the copy, the operator sends it
   // from their own mail client. Nothing here touches Resend or email_messages.
+  // Composes from the signed-in operator's own @virgohome.io account rather
+  // than whatever account the OS mail handler defaults to.
+  const { user } = useAuth();
   const { template: screeningTemplate, loading: templateLoading } = useEmailTemplate(SCREENING_TEMPLATE_KEY);
   const { schedulingUrl } = useSchedulingUrl();
   const [copied, setCopied] = useState(false);
@@ -154,14 +158,14 @@ function CandidateInterviewPanel({ candidate, postingTitle }: { candidate: Candi
     setCopied(true);
   }
 
-  /** Hands the filled-in invite to Outlook and records the outreach. The mail
-   *  client owns the send — makeLILA can't observe it, so the marker is
-   *  "drafted and handed off", reversible from here and from the outreach
-   *  panel. */
+  /** Hands the filled-in invite to Gmail, composing as the signed-in operator,
+   *  and records the outreach. The mail client owns the send — makeLILA can't
+   *  observe it, so the marker is "drafted and handed off", reversible from
+   *  here and from the outreach panel. */
   async function sendDraft() {
     if (!draft || !to) return;
     setSendError(null);
-    openMailDraft({ to, ...draft });
+    openMailDraft({ from: user?.email, to, ...draft });
     try {
       await markScreeningInviteSent(candidateId, true);
       setSentOverride(new Date().toISOString());
