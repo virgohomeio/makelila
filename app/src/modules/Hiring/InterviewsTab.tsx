@@ -4,10 +4,25 @@ import {
   useJobPostings, useCandidates, useInterviews, createInterview, recordInterviewDecision, getCurrentUserId,
   type Candidate, type Interview, type InterviewDecision,
 } from '../../lib/hiring';
+import { useEmailTemplate, renderTemplate } from '../../lib/templates';
 
 const DECISION_LABEL: Record<InterviewDecision, string> = {
   advance: 'Advance', reject: 'Reject', hold: 'Hold', no_show: 'No-show',
 };
+
+const SCREENING_TEMPLATE_KEY = 'screening_interview_invite';
+/** Stands in for {{scheduling_url}} in the draft. makeLILA doesn't hold the
+ *  booking page, and the operator pastes the email into their own mail client
+ *  anyway — a bracketed instruction reads as an obvious to-do in a way a
+ *  leftover {{scheduling_url}} does not. */
+const CALENDLY_PLACEHOLDER = '[paste Calendly link here]';
+
+/** Where to reach the candidate. Indeed applicants often have no direct
+ *  address — only the relay Indeed forwards from — so fall back to it, the
+ *  same order the Applicants board displays. */
+function candidateEmail(candidate: Candidate): string | null {
+  return candidate.email ?? candidate.indeed_relay_email;
+}
 
 /** Screening scores as one inline string, e.g. "Communication 4 · Reliability 5".
  *  Saved operator scores win over Claude's suggestions — the same merge the
@@ -74,10 +89,11 @@ function InterviewColumn({ postingId, title, initialExpandedCandidateId }: {
             onClick={() => setExpandedCandidateId(expandedCandidateId === c.id ? undefined : c.id)}
           >
             <strong>{c.full_name}</strong>
+            <span className={styles.candidateEmail}>{candidateEmail(c) ?? 'No email on file'}</span>
             <span className={styles.scoreSummary}>{scoreSummary(c)}</span>
           </div>
           {expandedCandidateId === c.id && (
-            <CandidateInterviewPanel key={c.id} candidateId={c.id} candidateName={c.full_name} />
+            <CandidateInterviewPanel key={c.id} candidate={c} postingTitle={title} />
           )}
         </div>
       ))}
@@ -85,7 +101,9 @@ function InterviewColumn({ postingId, title, initialExpandedCandidateId }: {
   );
 }
 
-function CandidateInterviewPanel({ candidateId, candidateName }: { candidateId: string; candidateName: string }) {
+function CandidateInterviewPanel({ candidate, postingTitle }: { candidate: Candidate; postingTitle: string }) {
+  const candidateId = candidate.id;
+  const candidateName = candidate.full_name;
   const { interviews: fetchedInterviews, loading } = useInterviews(candidateId);
   const [roundLabel, setRoundLabel] = useState('');
   const [calendlyUrl, setCalendlyUrl] = useState('');
@@ -116,6 +134,26 @@ function CandidateInterviewPanel({ candidateId, candidateName }: { candidateId: 
   const interviews = [...fetchedInterviews, ...createdInterviews.filter(iv => !fetchedIds.has(iv.id))].map(iv =>
     decisionOverrides[iv.id] ? { ...iv, ...decisionOverrides[iv.id] } : iv
   );
+
+  // Screening invite draft — makeLILA renders the copy, the operator sends it
+  // from their own mail client. Nothing here touches Resend or email_messages.
+  const { template: screeningTemplate, loading: templateLoading } = useEmailTemplate(SCREENING_TEMPLATE_KEY);
+  const [copied, setCopied] = useState(false);
+  const templateVars = {
+    candidate_first_name: candidateName.split(' ')[0],
+    job_title: postingTitle,
+    scheduling_url: CALENDLY_PLACEHOLDER,
+  };
+  const draft = screeningTemplate && {
+    subject: renderTemplate(screeningTemplate.subject, templateVars),
+    body: renderTemplate(screeningTemplate.body, templateVars),
+  };
+
+  async function copyDraft() {
+    if (!draft) return;
+    await navigator.clipboard.writeText(`Subject: ${draft.subject}\n\n${draft.body}`);
+    setCopied(true);
+  }
 
   async function book() {
     if (!roundLabel.trim()) return;
@@ -172,6 +210,23 @@ function CandidateInterviewPanel({ candidateId, candidateName }: { candidateId: 
         <input placeholder="Calendly event URL (optional)" value={calendlyUrl} onChange={e => setCalendlyUrl(e.target.value)} style={{ marginLeft: 8 }} />
         <button onClick={book} disabled={creating} style={{ marginLeft: 8 }}>Book interview</button>
         {bookError && <div className={styles.formError}>{bookError}</div>}
+      </div>
+      <div className={styles.inviteBlock}>
+        <div className={styles.inviteTitle}>Screening interview invite</div>
+        {templateLoading && <div className={styles.inviteHint}>Loading template…</div>}
+        {!templateLoading && !draft && (
+          <div className={styles.inviteHint}>
+            Screening interview invite template not found in the template library.
+          </div>
+        )}
+        {draft && (
+          <>
+            <div className={styles.inviteSubject}>Subject: {draft.subject}</div>
+            <pre className={styles.inviteBody}>{draft.body}</pre>
+            <button onClick={copyDraft}>Copy email</button>
+            {copied && <span className={styles.inviteHint}>Copied</span>}
+          </>
+        )}
       </div>
     </div>
   );
