@@ -1,17 +1,27 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, within } from '@testing-library/react';
 import { InterviewsTab } from '../InterviewsTab';
-import { useCandidates, useInterviews, type Candidate, type JobPosting } from '../../../lib/hiring';
-import { useEmailTemplate, type EmailTemplate } from '../../../lib/templates';
+import {
+  useCandidates, useInterviews, useShortlistedCandidates, markScreeningInviteSent,
+  type Candidate, type JobPosting,
+} from '../../../lib/hiring';
+import { useEmailTemplate, useSchedulingUrl, type EmailTemplate } from '../../../lib/templates';
+import { openMailDraft } from '../../../lib/mailDraft';
 
 vi.mock('../../../lib/hiring', () => ({
   useJobPostings: vi.fn(() => ({ postings: [posting], loading: false })),
   useCandidates: vi.fn(() => ({ candidates: [], loading: false })),
+  useShortlistedCandidates: vi.fn(() => ({ candidates: [], loading: false })),
   useInterviews: vi.fn(() => ({ interviews: [], loading: false })),
   createInterview: vi.fn(),
   recordInterviewDecision: vi.fn(),
+  markScreeningInviteSent: vi.fn(async () => {}),
   getCurrentUserId: vi.fn(),
 }));
+
+// The mail handoff is a side effect on window.location — stubbed so the assertions
+// can read the draft that would have been handed to Outlook.
+vi.mock('../../../lib/mailDraft', () => ({ openMailDraft: vi.fn() }));
 
 // renderTemplate is pure string substitution — the real one is kept here rather
 // than stubbed, so these tests exercise the same rendering the app ships.
@@ -20,6 +30,7 @@ vi.mock('../../../lib/hiring', () => ({
 // seeds the return value instead.
 vi.mock('../../../lib/templates', () => ({
   useEmailTemplate: vi.fn(),
+  useSchedulingUrl: vi.fn(),
   renderTemplate: (template: string, vars: Record<string, string | undefined>) =>
     template.replace(/\{\{\s*(\w+)\s*\}\}/g, (_, name) => {
       const v = vars[name];
@@ -27,11 +38,13 @@ vi.mock('../../../lib/templates', () => ({
     }),
 }));
 
+// Body matches the shipped copy after 20260804140200 dropped the corporate
+// sign-off — the invite goes out under the operator's own signature.
 const screeningTemplate: EmailTemplate = {
   id: 't1', key: 'screening_interview_invite', name: 'Screening interview invite',
   category: 'support', description: null,
   subject: 'Screening interview for the {{job_title}} role at VCycene',
-  body: 'Hi {{candidate_first_name}},\n\nPlease pick a time that works for you here:\n{{scheduling_url}}\n\n— The VCycene Hiring Team',
+  body: 'Hi {{candidate_first_name}},\n\nPlease pick a time that works for you here:\n{{scheduling_url}}\n\nLooking forward to speaking with you.',
   variables: ['candidate_first_name', 'job_title', 'scheduling_url'],
   channel: 'email', active: true,
   created_at: '2026-08-04T00:00:00Z', updated_at: '2026-08-04T00:00:00Z',
@@ -51,6 +64,7 @@ function candidate(over: Partial<Candidate> & { id: string; full_name: string })
     enrichment_status: 'resume_attached', indeed_relay_email: null, indeed_dashboard_url: null,
     qualifications_tags: [], stage_index: 0, scores: {}, suggested_scores: null,
     applied_at: '2026-07-01T00:00:00Z', rejected_at: null, hired_at: null,
+    screening_invite_sent_at: null, screening_invite_sent_by: null,
     ...over,
   };
 }
@@ -70,6 +84,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(useInterviews).mockReturnValue({ interviews: [], loading: false });
   vi.mocked(useEmailTemplate).mockReturnValue({ template: screeningTemplate, loading: false });
+  vi.mocked(useShortlistedCandidates).mockReturnValue({ candidates: [], loading: false });
+  vi.mocked(useSchedulingUrl).mockReturnValue({ schedulingUrl: null, loading: false, save: vi.fn() });
 });
 
 describe('InterviewsTab candidate list', () => {
@@ -178,12 +194,24 @@ describe('InterviewsTab screening invite draft', () => {
     expect(within(panel).getByText(/Hi Shortlisted,/)).toBeTruthy();
   });
 
-  it('leaves a Calendly placeholder for the operator to paste a link into', () => {
+  it('fills in the scheduling link saved on the operator profile', () => {
+    vi.mocked(useSchedulingUrl).mockReturnValue({
+      schedulingUrl: 'https://calendly.com/huayi/screening', loading: false, save: vi.fn(),
+    });
     withCandidates([shortlisted()]);
     render(<InterviewsTab />);
     const panel = expandCandidate();
 
-    expect(within(panel).getByText(/\[paste Calendly link here\]/)).toBeTruthy();
+    expect(within(panel).getByText(/https:\/\/calendly\.com\/huayi\/screening/)).toBeTruthy();
+    expect(within(panel).queryByText(/paste your scheduling link/)).toBeNull();
+  });
+
+  it('falls back to a paste-it-here marker when no scheduling link is saved', () => {
+    withCandidates([shortlisted()]);
+    render(<InterviewsTab />);
+    const panel = expandCandidate();
+
+    expect(within(panel).getByText(/\[paste your scheduling link here\]/)).toBeTruthy();
     expect(within(panel).queryByText(/\{\{scheduling_url\}\}/)).toBeNull();
   });
 
@@ -197,16 +225,79 @@ describe('InterviewsTab screening invite draft', () => {
     const copied = vi.mocked(navigator.clipboard.writeText).mock.calls[0][0];
     expect(copied).toContain('Screening interview for the Fulfillment Associate role at VCycene');
     expect(copied).toContain('Hi Shortlisted,');
-    expect(copied).toContain('[paste Calendly link here]');
+    expect(copied).toContain('[paste your scheduling link here]');
     expect(await within(panel).findByText('Copied')).toBeTruthy();
   });
 
-  it('sends nothing — the draft is copy-only', () => {
+  it('hands the filled-in draft to the mail client, addressed to the candidate', () => {
+    vi.mocked(useSchedulingUrl).mockReturnValue({
+      schedulingUrl: 'https://calendly.com/huayi/screening', loading: false, save: vi.fn(),
+    });
+    withCandidates([shortlisted({ email: 'sam@example.com' })]);
+    render(<InterviewsTab />);
+    const panel = expandCandidate();
+
+    fireEvent.click(within(panel).getByRole('button', { name: 'Send email' }));
+
+    expect(openMailDraft).toHaveBeenCalledWith({
+      to: 'sam@example.com',
+      subject: 'Screening interview for the Fulfillment Associate role at VCycene',
+      body: expect.stringContaining('https://calendly.com/huayi/screening'),
+    });
+  });
+
+  it('addresses the draft to the Indeed relay when there is no direct email', () => {
+    withCandidates([shortlisted({ email: null, indeed_relay_email: 'relay+sam@indeedemail.com' })]);
+    render(<InterviewsTab />);
+    const panel = expandCandidate();
+
+    fireEvent.click(within(panel).getByRole('button', { name: 'Send email' }));
+
+    expect(vi.mocked(openMailDraft).mock.calls[0][0].to).toBe('relay+sam@indeedemail.com');
+  });
+
+  it('records the outreach when the draft is handed off', async () => {
     withCandidates([shortlisted()]);
     render(<InterviewsTab />);
     const panel = expandCandidate();
 
-    expect(within(panel).queryByRole('button', { name: /send/i })).toBeNull();
+    fireEvent.click(within(panel).getByRole('button', { name: 'Send email' }));
+
+    expect(markScreeningInviteSent).toHaveBeenCalledWith('c1', true);
+    expect(await within(panel).findByText(/Invite marked as emailed/)).toBeTruthy();
+  });
+
+  it('cannot send to a candidate with no email on file', () => {
+    withCandidates([shortlisted({ email: null, indeed_relay_email: null })]);
+    render(<InterviewsTab />);
+    const panel = expandCandidate();
+
+    expect(within(panel).getByRole('button', { name: 'Send email' }).hasAttribute('disabled')).toBe(true);
+  });
+
+  it('lets the operator clear a sent marker set by mistake', async () => {
+    withCandidates([shortlisted({ screening_invite_sent_at: '2026-08-04T12:00:00Z' })]);
+    render(<InterviewsTab />);
+    const panel = expandCandidate();
+
+    fireEvent.click(within(panel).getByRole('button', { name: 'Mark not emailed' }));
+
+    expect(markScreeningInviteSent).toHaveBeenCalledWith('c1', false);
+    expect(await within(panel).findByRole('button', { name: 'Mark emailed' })).toBeTruthy();
+  });
+
+  it('shows on the candidate row whether the invite went out', () => {
+    withCandidates([
+      shortlisted({ id: 'c1', full_name: 'Emailed Eve', screening_invite_sent_at: '2026-08-04T12:00:00Z' }),
+      shortlisted({ id: 'c2', full_name: 'Waiting Wes' }),
+    ]);
+    render(<InterviewsTab />);
+
+    // Scoped to the candidate card: the outreach panel above the board carries
+    // an "Emailed" stat label too.
+    const card = (name: string) => screen.getByText(name).closest('div') as HTMLElement;
+    expect(within(card('Emailed Eve')).getByText('Emailed')).toBeTruthy();
+    expect(within(card('Waiting Wes')).getByText('Not emailed')).toBeTruthy();
   });
 
   it('says so when the screening template is missing from the library', () => {

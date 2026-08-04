@@ -120,6 +120,53 @@ export function useEmailTemplate(key: string): { template: EmailTemplate | null;
   return { template, loading };
 }
 
+/** The signed-in operator's own booking link (profiles.scheduling_url), which
+ *  fills {{scheduling_url}} in the drafts they generate. Saved once, on their
+ *  account, instead of pasted into every draft by hand.
+ *
+ *  Lives here rather than in lib/auth.tsx's AuthContext deliberately: it is a
+ *  template-rendering default, only read by the surfaces that draft mail, and
+ *  putting it in context would re-render the whole app when it is saved. */
+export function useSchedulingUrl(): {
+  schedulingUrl: string | null;
+  loading: boolean;
+  save: (url: string) => Promise<void>;
+} {
+  const [schedulingUrl, setSchedulingUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) { if (!cancelled) setLoading(false); return; }
+      const { data } = await supabase
+        .from('profiles')
+        .select('scheduling_url')
+        .eq('id', user.id)
+        .maybeSingle();
+      if (cancelled) return;
+      setSchedulingUrl((data as { scheduling_url: string | null } | null)?.scheduling_url ?? null);
+      setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  async function save(url: string): Promise<void> {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error('Not signed in');
+    const trimmed = url.trim();
+    const { error } = await supabase
+      .from('profiles')
+      .update({ scheduling_url: trimmed || null })
+      .eq('id', user.id);
+    if (error) throw error;
+    setSchedulingUrl(trimmed || null);
+  }
+
+  return { schedulingUrl, loading, save };
+}
+
 export function useEmailMessages(): { messages: EmailMessage[]; loading: boolean } {
   const [messages, setMessages] = useState<EmailMessage[]>([]);
   const [loading, setLoading] = useState(true);

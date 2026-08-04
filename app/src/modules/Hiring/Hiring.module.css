@@ -51,6 +51,10 @@
 .decisionShortlisted { font-size: 10px; padding: 2px 8px; border-radius: 999px; background: #DCFCE7; color: #166534; margin-left: 8px; }
 .decisionRejected { font-size: 10px; padding: 2px 8px; border-radius: 999px; background: #FEE2E2; color: #991B1B; margin-left: 8px; }
 .stageSelect { font-size: 12px; padding: 4px 8px; border-radius: var(--radius-sm); border: 1px solid var(--color-border); }
+.selectLabel {
+  display: flex; align-items: center; gap: 6px; margin-bottom: 8px;
+  font-size: 11px; color: var(--color-ink-subtle);
+}
 .scoreRow { display: flex; justify-content: space-between; font-size: 12px; padding: 2px 0; }
 .scoreSummary { font-size: 11px; color: var(--color-ink-subtle); margin-left: 8px; }
 .candidateEmail { font-size: 11px; color: var(--color-ink-subtle); margin-left: 8px; }
@@ -63,6 +67,51 @@
   padding: 10px; border: 1px solid var(--color-border); border-radius: var(--radius-sm);
   background: #fff; max-height: 260px; overflow-y: auto;
 }
+
+/* Screening outreach panel — sits above the Interviews board. */
+.outreachPanel {
+  border: 1px solid var(--color-border); border-radius: var(--radius-lg);
+  padding: 14px 16px; margin-bottom: 16px; background: #fff;
+}
+.outreachHeader {
+  display: flex; align-items: flex-end; justify-content: space-between;
+  gap: 16px; flex-wrap: wrap; margin-bottom: 12px;
+}
+.outreachTitle { font-weight: 600; font-size: 14px; }
+.linkForm { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.linkLabel { font-size: 11px; color: var(--color-ink-subtle); }
+.linkInput {
+  width: 260px; padding: 5px 8px; font-size: 12px;
+  border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+}
+.statRow { display: flex; align-items: flex-end; gap: 28px; flex-wrap: wrap; margin-bottom: 12px; }
+.stat { min-width: 64px; }
+.statValue { font-size: 22px; font-weight: 600; line-height: 1.1; }
+.statLabel { font-size: 11px; color: var(--color-ink-subtle); }
+.progressWrap { flex: 1; min-width: 160px; }
+.progressTrack {
+  height: 6px; border-radius: 999px; background: var(--color-surface);
+  border: 1px solid var(--color-border); overflow: hidden; margin-bottom: 4px;
+}
+.progressFill { height: 100%; background: #166534; transition: width 160ms ease-out; }
+.outreachTable { width: 100%; border-collapse: collapse; font-size: 12px; }
+.outreachTable th {
+  text-align: left; font-weight: 600; font-size: 11px; color: var(--color-ink-subtle);
+  padding: 6px 8px; border-bottom: 1px solid var(--color-border);
+}
+.outreachTable td { padding: 7px 8px; border-bottom: 1px solid var(--color-border); vertical-align: middle; }
+.outreachMuted { color: var(--color-ink-subtle); }
+.outreachActions { display: flex; gap: 8px; align-items: center; justify-content: flex-end; }
+/* The chips carry a left margin for the inline candidate-card layout; in a
+   table cell they sit at the cell edge instead. */
+.outreachTable .sentChip, .outreachTable .unsentChip { margin-left: 0; }
+.sentChip { font-size: 10px; padding: 2px 8px; border-radius: 999px; background: #DCFCE7; color: #166534; margin-left: 8px; white-space: nowrap; }
+.unsentChip { font-size: 10px; padding: 2px 8px; border-radius: 999px; background: #F3F4F6; color: #6B7280; margin-left: 8px; white-space: nowrap; }
+.linkButton {
+  background: none; border: none; padding: 0 4px; font-size: 11px;
+  color: var(--color-ink-subtle); cursor: pointer; text-decoration: underline;
+}
+.linkButton:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .board { display: flex; gap: 16px; overflow-x: auto; align-items: flex-start; padding-bottom: 8px; }
 .column {

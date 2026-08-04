@@ -65,6 +65,12 @@ export interface Candidate {
   applied_at: string;
   rejected_at: string | null;
   hired_at: string | null;
+  /** When an operator marked the screening invite as sent. The invite leaves
+   *  from their own mail client, so this is makeLILA's only record that the
+   *  candidate has been contacted — an operator marker, not a delivery
+   *  receipt. */
+  screening_invite_sent_at: string | null;
+  screening_invite_sent_by: string | null;
 }
 
 export type InterviewDecision = 'advance' | 'reject' | 'hold' | 'no_show';
@@ -86,7 +92,7 @@ export interface Interview {
 const POSTING_COLUMNS =
   'id, title, department, location, comp_range, status, indeed_url, linkedin_url, job_description, screening_rubric, pipeline_stages, created_at';
 const CANDIDATE_COLUMNS =
-  'id, posting_id, full_name, email, phone, source, resume_url, ingested_via, enrichment_status, indeed_relay_email, indeed_dashboard_url, qualifications_tags, stage_index, scores, suggested_scores, applied_at, rejected_at, hired_at';
+  'id, posting_id, full_name, email, phone, source, resume_url, ingested_via, enrichment_status, indeed_relay_email, indeed_dashboard_url, qualifications_tags, stage_index, scores, suggested_scores, applied_at, rejected_at, hired_at, screening_invite_sent_at, screening_invite_sent_by';
 const INTERVIEW_COLUMNS =
   'id, candidate_id, round_label, interviewer_id, calendly_event_uri, scheduled_at, held_at, decision, decision_notes, decided_by, decided_at';
 
@@ -148,6 +154,61 @@ export function useCandidates(postingId: string | null): { candidates: Candidate
       .subscribe();
     return () => { cancelled = true; void supabase.removeChannel(channel); };
   }, [postingId]);
+
+  return { candidates, loading };
+}
+
+export interface ShortlistedCandidate extends Candidate {
+  posting_title: string;
+}
+
+/** Every shortlisted candidate the operator can see, across all postings, with
+ *  the posting title joined in — the outreach panel's "who still needs an
+ *  email?" list.
+ *
+ *  One query rather than a useCandidates() per posting: the panel sits above a
+ *  board that already opens a channel per column, and fanning out a second
+ *  round of per-posting queries + channels to render a summary would double
+ *  that for no reason. RLS (can_view_posting) scopes the result set, so an
+ *  assigned-to-one-posting interviewer sees only their own.
+ *
+ *  Shortlist derivation matches the board: hired_at set (the shortlist marker)
+ *  and a real, resume-attached candidate. */
+export function useShortlistedCandidates(): { candidates: ShortlistedCandidate[]; loading: boolean } {
+  const [candidates, setCandidates] = useState<ShortlistedCandidate[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const fetchRows = async () => {
+      const { data, error } = await supabase
+        .from('candidates')
+        .select(`${CANDIDATE_COLUMNS}, job_postings(title)`)
+        .not('hired_at', 'is', null)
+        .neq('enrichment_status', 'stub')
+        .order('hired_at', { ascending: false });
+      if (cancelled || error || !data) return;
+      setCandidates(data.map(row => {
+        const { job_postings, ...candidate } = row as Candidate & {
+          job_postings: { title: string } | { title: string }[] | null;
+        };
+        // PostgREST returns an embedded to-one relation as an object, but
+        // some client/schema-cache combinations hand back a single-element
+        // array — normalize both.
+        const posting = Array.isArray(job_postings) ? job_postings[0] : job_postings;
+        return { ...candidate, posting_title: posting?.title ?? 'Unknown role' };
+      }));
+    };
+
+    (async () => { await fetchRows(); if (!cancelled) setLoading(false); })();
+
+    const channel = supabase
+      .channel(`candidates:shortlist:${crypto.randomUUID()}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'candidates' }, () => { void fetchRows(); })
+      .subscribe();
+    return () => { cancelled = true; void supabase.removeChannel(channel); };
+  }, []);
 
   return { candidates, loading };
 }
@@ -355,6 +416,19 @@ export async function rejectCandidate(candidateId: string): Promise<void> {
 export async function hireCandidate(candidateId: string): Promise<void> {
   const { error } = await supabase.from('candidates')
     .update({ hired_at: new Date().toISOString(), rejected_at: null }).eq('id', candidateId);
+  if (error) throw error;
+}
+
+/** Records (or clears) "we have emailed this candidate their screening
+ *  invite". Set when the operator opens the mail draft from the board, and
+ *  settable by hand from the outreach panel for an invite that went out some
+ *  other way — or clearable when a draft was abandoned. */
+export async function markScreeningInviteSent(candidateId: string, sent: boolean): Promise<void> {
+  const userId = sent ? await getCurrentUserId() : null;
+  const { error } = await supabase.from('candidates').update({
+    screening_invite_sent_at: sent ? new Date().toISOString() : null,
+    screening_invite_sent_by: userId,
+  }).eq('id', candidateId);
   if (error) throw error;
 }
 

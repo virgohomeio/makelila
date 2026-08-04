@@ -21,6 +21,7 @@ function candidate(over: Partial<Candidate> & { id: string }): Candidate {
     enrichment_status: 'resume_attached', indeed_relay_email: null, indeed_dashboard_url: null,
     qualifications_tags: [], stage_index: 0, scores: {}, suggested_scores: null,
     applied_at: '2026-07-01T00:00:00Z', rejected_at: null, hired_at: null,
+    screening_invite_sent_at: null, screening_invite_sent_by: null,
     ...over,
   };
 }

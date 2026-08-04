@@ -1,28 +1,18 @@
 import { useEffect, useRef, useState } from 'react';
 import styles from './Hiring.module.css';
 import {
-  useJobPostings, useCandidates, useInterviews, createInterview, recordInterviewDecision, getCurrentUserId,
+  useJobPostings, useCandidates, useInterviews, createInterview, recordInterviewDecision,
+  getCurrentUserId, markScreeningInviteSent,
   type Candidate, type Interview, type InterviewDecision,
 } from '../../lib/hiring';
-import { useEmailTemplate, renderTemplate } from '../../lib/templates';
+import { useEmailTemplate, useSchedulingUrl } from '../../lib/templates';
+import { openMailDraft } from '../../lib/mailDraft';
+import { OutreachPanel } from './OutreachPanel';
+import { SCREENING_TEMPLATE_KEY, candidateEmail, renderScreeningInvite } from './screeningInvite';
 
 const DECISION_LABEL: Record<InterviewDecision, string> = {
   advance: 'Advance', reject: 'Reject', hold: 'Hold', no_show: 'No-show',
 };
-
-const SCREENING_TEMPLATE_KEY = 'screening_interview_invite';
-/** Stands in for {{scheduling_url}} in the draft. makeLILA doesn't hold the
- *  booking page, and the operator pastes the email into their own mail client
- *  anyway — a bracketed instruction reads as an obvious to-do in a way a
- *  leftover {{scheduling_url}} does not. */
-const CALENDLY_PLACEHOLDER = '[paste Calendly link here]';
-
-/** Where to reach the candidate. Indeed applicants often have no direct
- *  address — only the relay Indeed forwards from — so fall back to it, the
- *  same order the Applicants board displays. */
-function candidateEmail(candidate: Candidate): string | null {
-  return candidate.email ?? candidate.indeed_relay_email;
-}
 
 /** Screening scores as one inline string, e.g. "Communication 4 · Reliability 5".
  *  Saved operator scores win over Claude's suggestions — the same merge the
@@ -40,16 +30,19 @@ export function InterviewsTab({ initialExpandedCandidateId }: { initialExpandedC
   if (!postings.length) return <div className={styles.empty}>No job postings yet.</div>;
 
   return (
-    <div className={styles.board}>
-      {postings.map(p => (
-        <InterviewColumn
-          key={p.id}
-          postingId={p.id}
-          title={p.title}
-          initialExpandedCandidateId={initialExpandedCandidateId}
-        />
-      ))}
-    </div>
+    <>
+      <OutreachPanel />
+      <div className={styles.board}>
+        {postings.map(p => (
+          <InterviewColumn
+            key={p.id}
+            postingId={p.id}
+            title={p.title}
+            initialExpandedCandidateId={initialExpandedCandidateId}
+          />
+        ))}
+      </div>
+    </>
   );
 }
 
@@ -90,6 +83,9 @@ function InterviewColumn({ postingId, title, initialExpandedCandidateId }: {
           >
             <strong>{c.full_name}</strong>
             <span className={styles.candidateEmail}>{candidateEmail(c) ?? 'No email on file'}</span>
+            {c.screening_invite_sent_at
+              ? <span className={styles.sentChip}>Emailed</span>
+              : <span className={styles.unsentChip}>Not emailed</span>}
             <span className={styles.scoreSummary}>{scoreSummary(c)}</span>
           </div>
           {expandedCandidateId === c.id && (
@@ -138,21 +134,51 @@ function CandidateInterviewPanel({ candidate, postingTitle }: { candidate: Candi
   // Screening invite draft — makeLILA renders the copy, the operator sends it
   // from their own mail client. Nothing here touches Resend or email_messages.
   const { template: screeningTemplate, loading: templateLoading } = useEmailTemplate(SCREENING_TEMPLATE_KEY);
+  const { schedulingUrl } = useSchedulingUrl();
   const [copied, setCopied] = useState(false);
-  const templateVars = {
-    candidate_first_name: candidateName.split(' ')[0],
-    job_title: postingTitle,
-    scheduling_url: CALENDLY_PLACEHOLDER,
-  };
-  const draft = screeningTemplate && {
-    subject: renderTemplate(screeningTemplate.subject, templateVars),
-    body: renderTemplate(screeningTemplate.body, templateVars),
-  };
+  const to = candidateEmail(candidate);
+  // Local echo of the sent marker, same override shape as decisionOverrides
+  // above: this panel's own write shows immediately, without waiting on
+  // useCandidates' realtime refetch. Until it makes one, the row wins — so a
+  // mark made from the outreach panel above the board reaches this view too.
+  const [sentOverride, setSentOverride] = useState<string | null | undefined>(undefined);
+  const sentAt = sentOverride !== undefined ? sentOverride : candidate.screening_invite_sent_at;
+  const [sendError, setSendError] = useState<string | null>(null);
+  const draft = screeningTemplate && renderScreeningInvite(screeningTemplate, {
+    candidateName, postingTitle, schedulingUrl,
+  });
 
   async function copyDraft() {
     if (!draft) return;
     await navigator.clipboard.writeText(`Subject: ${draft.subject}\n\n${draft.body}`);
     setCopied(true);
+  }
+
+  /** Hands the filled-in invite to Outlook and records the outreach. The mail
+   *  client owns the send — makeLILA can't observe it, so the marker is
+   *  "drafted and handed off", reversible from here and from the outreach
+   *  panel. */
+  async function sendDraft() {
+    if (!draft || !to) return;
+    setSendError(null);
+    openMailDraft({ to, ...draft });
+    try {
+      await markScreeningInviteSent(candidateId, true);
+      setSentOverride(new Date().toISOString());
+    } catch (e: unknown) {
+      setSendError(e instanceof Error ? e.message : 'Draft opened, but the sent marker did not save');
+    }
+  }
+
+  async function toggleSent() {
+    setSendError(null);
+    const next = !sentAt;
+    try {
+      await markScreeningInviteSent(candidateId, next);
+      setSentOverride(next ? new Date().toISOString() : null);
+    } catch (e: unknown) {
+      setSendError(e instanceof Error ? e.message : 'Could not update the outreach status');
+    }
   }
 
   async function book() {
@@ -223,8 +249,24 @@ function CandidateInterviewPanel({ candidate, postingTitle }: { candidate: Candi
           <>
             <div className={styles.inviteSubject}>Subject: {draft.subject}</div>
             <pre className={styles.inviteBody}>{draft.body}</pre>
-            <button onClick={copyDraft}>Copy email</button>
+            <button
+              onClick={sendDraft}
+              disabled={!to}
+              title={to ? 'Opens a draft in your mail client — you press Send' : 'No email address on file for this candidate'}
+            >
+              Send email
+            </button>
+            <button onClick={copyDraft} style={{ marginLeft: 8 }}>Copy email</button>
+            <button className={styles.linkButton} onClick={toggleSent}>
+              {sentAt ? 'Mark not emailed' : 'Mark emailed'}
+            </button>
             {copied && <span className={styles.inviteHint}>Copied</span>}
+            <div className={styles.inviteHint} style={{ marginLeft: 0, marginTop: 6 }}>
+              {sentAt
+                ? `Invite marked as emailed ${new Date(sentAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}.`
+                : 'Send email opens this draft in Outlook — it waits there until you press Send.'}
+            </div>
+            {sendError && <div className={styles.formError}>{sendError}</div>}
           </>
         )}
       </div>
