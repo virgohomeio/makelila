@@ -3,7 +3,7 @@ import styles from './Hiring.module.css';
 import { ResumeUploadPanel } from './ResumeUploadPanel';
 import {
   useJobPostings, useCandidates, updateCandidateStage, recordCandidateScore, rejectCandidate, hireCandidate,
-  getResumeSignedUrl, type Candidate, type CandidateSource,
+  getResumeObjectUrl, type Candidate, type CandidateSource,
 } from '../../lib/hiring';
 
 const SOURCE_LABEL: Record<CandidateSource, string> = {
@@ -103,12 +103,15 @@ export function CandidateCard({ candidate, pipelineStages, onSelectCandidate }: 
   const decision = candidate.hired_at ? 'shortlisted' : candidate.rejected_at ? 'rejected' : null;
 
   /** hiring-resumes is a private bucket, so the file needs a signed URL before
-   *  it can be shown — and that round trip is what made this button feel dead.
-   *  Opening the tab *after* the await leaves it to the popup blocker, and the
-   *  old code ignored window.open's return value, so a blocked tab produced no
-   *  tab and no message. The tab is now opened during the click itself, while
-   *  the browser still counts it as user-initiated, and pointed at the URL once
-   *  it arrives. */
+   *  it can be shown, and that round trip is what made this button feel dead.
+   *  Two separate causes, both now handled:
+   *
+   *  1. Opening the tab *after* the await left it to the popup blocker, and
+   *     window.open's return value was ignored, so a blocked tab meant nothing
+   *     on screen. The tab is opened during the click instead.
+   *  2. Pointing that tab at the signed URL let the browser decide what to do
+   *     with the response; Firefox saved it and left the tab blank. It now gets
+   *     a blob: URL of the file itself (see getResumeObjectUrl). */
   async function viewResume() {
     if (!candidate.resume_url) return;
     setResumeError(null);
@@ -123,8 +126,7 @@ export function CandidateCard({ candidate, pipelineStages, onSelectCandidate }: 
     tab.opener = null;
 
     try {
-      const signedUrl = await getResumeSignedUrl(candidate.resume_url);
-      tab.location.href = signedUrl;
+      tab.location.href = await getResumeObjectUrl(candidate.resume_url);
     } catch (e: unknown) {
       // The real reason, not a generic retry: "Object not found" (the file was
       // purged) and an auth failure need different responses from the operator.

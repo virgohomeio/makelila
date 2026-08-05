@@ -12,7 +12,7 @@ vi.mock('../../../lib/hiring', () => ({
   recordCandidateScore: vi.fn(),
   rejectCandidate: vi.fn(),
   hireCandidate: vi.fn(),
-  getResumeSignedUrl: vi.fn(),
+  getResumeObjectUrl: vi.fn(),
   uploadAndScoreResume: vi.fn(),
 }));
 

@@ -5,7 +5,7 @@ import {
   createJobPosting, addPostingInterviewer, searchInternalProfiles, getCurrentUserId,
   updateCandidateStage, recordCandidateScore, rejectCandidate, hireCandidate,
   createInterview, recordInterviewDecision, updatePostingRubric,
-  suggestScreeningRubric, uploadAndScoreResume, getResumeSignedUrl,
+  suggestScreeningRubric, uploadAndScoreResume, getResumeSignedUrl, getResumeObjectUrl,
   isAssignedInterviewerAnywhere, extractFunctionErrorMessage, getPostingInterviewers,
 } from './hiring';
 
@@ -287,6 +287,45 @@ describe('mutations', () => {
     const url = await getResumeSignedUrl('p1/abc-resume.pdf');
     expect(mockCreateSignedUrl).toHaveBeenCalledWith('p1/abc-resume.pdf', 3600);
     expect(url).toBe('https://.../signed?token=abc');
+  });
+});
+
+// The storage response carries a Content-Disposition the browser is free to
+// treat as a download — Firefox does, leaving the viewer tab blank. Fetching
+// the bytes and handing over a blob: URL takes that decision away from it.
+describe('getResumeObjectUrl', () => {
+  beforeEach(() => {
+    vi.stubGlobal('URL', Object.assign(globalThis.URL, { createObjectURL: vi.fn(() => 'blob:makelila/resume') }));
+  });
+
+  it('fetches the signed URL and hands back a blob URL', async () => {
+    mockCreateSignedUrl.mockResolvedValueOnce({ data: { signedUrl: 'https://storage/signed?token=abc' }, error: null });
+    const blob = new Blob(['%PDF-1.4'], { type: 'application/pdf' });
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(blob, {
+      status: 200, headers: { 'content-type': 'application/pdf' },
+    })));
+
+    expect(await getResumeObjectUrl('p1/abc-resume.pdf')).toBe('blob:makelila/resume');
+    expect(fetch).toHaveBeenCalledWith('https://storage/signed?token=abc');
+    const passed = vi.mocked(URL.createObjectURL).mock.calls[0][0] as Blob;
+    expect(passed.type).toBe('application/pdf');
+  });
+
+  // A resume the browser hands back as octet-stream would download instead of
+  // rendering; .pdf paths get the type restored so the viewer takes it.
+  it('restores the pdf type when the response has none', async () => {
+    mockCreateSignedUrl.mockResolvedValueOnce({ data: { signedUrl: 'https://storage/signed?token=abc' }, error: null });
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(new Blob(['%PDF-1.4']), { status: 200 })));
+
+    await getResumeObjectUrl('p1/abc-resume.pdf');
+    expect((vi.mocked(URL.createObjectURL).mock.calls[0][0] as Blob).type).toBe('application/pdf');
+  });
+
+  it('reports the status when the file cannot be fetched', async () => {
+    mockCreateSignedUrl.mockResolvedValueOnce({ data: { signedUrl: 'https://storage/signed?token=abc' }, error: null });
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('nope', { status: 403 })));
+
+    await expect(getResumeObjectUrl('p1/abc-resume.pdf')).rejects.toThrow(/403/);
   });
 });
 
