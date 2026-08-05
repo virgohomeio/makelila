@@ -298,12 +298,14 @@ describe('getResumeObjectUrl', () => {
     vi.stubGlobal('URL', Object.assign(globalThis.URL, { createObjectURL: vi.fn(() => 'blob:makelila/resume') }));
   });
 
+  // Plain-object responses, not `new Response(blob)`: undici's Response treats
+  // jsdom's Blob (the global in this test environment) as blob-like and calls
+  // .stream() on it, which jsdom's Blob doesn't implement on CI's Node 20 —
+  // that TypeError blocked the Pages deploy. Same pattern as lovely.test.ts.
   it('fetches the signed URL and hands back a blob URL', async () => {
     mockCreateSignedUrl.mockResolvedValueOnce({ data: { signedUrl: 'https://storage/signed?token=abc' }, error: null });
     const blob = new Blob(['%PDF-1.4'], { type: 'application/pdf' });
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(blob, {
-      status: 200, headers: { 'content-type': 'application/pdf' },
-    })));
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, status: 200, blob: async () => blob })));
 
     expect(await getResumeObjectUrl('p1/abc-resume.pdf')).toBe('blob:makelila/resume');
     expect(fetch).toHaveBeenCalledWith('https://storage/signed?token=abc');
@@ -315,7 +317,7 @@ describe('getResumeObjectUrl', () => {
   // rendering; .pdf paths get the type restored so the viewer takes it.
   it('restores the pdf type when the response has none', async () => {
     mockCreateSignedUrl.mockResolvedValueOnce({ data: { signedUrl: 'https://storage/signed?token=abc' }, error: null });
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(new Blob(['%PDF-1.4']), { status: 200 })));
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, status: 200, blob: async () => new Blob(['%PDF-1.4']) })));
 
     await getResumeObjectUrl('p1/abc-resume.pdf');
     expect((vi.mocked(URL.createObjectURL).mock.calls[0][0] as Blob).type).toBe('application/pdf');
@@ -323,7 +325,7 @@ describe('getResumeObjectUrl', () => {
 
   it('reports the status when the file cannot be fetched', async () => {
     mockCreateSignedUrl.mockResolvedValueOnce({ data: { signedUrl: 'https://storage/signed?token=abc' }, error: null });
-    vi.stubGlobal('fetch', vi.fn(async () => new Response('nope', { status: 403 })));
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 403 })));
 
     await expect(getResumeObjectUrl('p1/abc-resume.pdf')).rejects.toThrow(/403/);
   });
