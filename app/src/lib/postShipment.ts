@@ -446,6 +446,13 @@ export async function returnAttachmentSignedUrl(filePath: string): Promise<strin
 // FR-13 — one-click return-shipping label + courier pickup (Freightcom).
 // Invokes the book-return-label edge function, which quotes + books a return
 // shipment (customer → warehouse) and stamps the return's pickup fields.
+//
+// ⚠ UNWIRED as of 2026-08-04 — no caller. The "Generate return label" button was
+// removed from RefundsTab because the edge fn reads `orders.address_postal_code`,
+// a column that does not exist (real columns: postal_code / address_customer_postal
+// / address_google_postal), so every click 400'd with "No customer postal code on
+// file". Kept in the tree for the backlog item; see
+// docs/feature-backlog-alpha-feedback.md → "FR-13 return shipping label (parked)".
 // ============================================================================
 export type ReturnLabelResult = { label_url: string | null; tracking: string | null; carrier: string; service: string };
 
@@ -930,11 +937,12 @@ export async function submitRefundRequest(input: {
       },
     });
 
-  // FR-15: tell the customer we've received their refund request. Best-effort —
-  // a mail failure must never roll back the submission.
-  await notifyCustomerRefundStatus('refund_application_received_customer', {
-    email: input.customer_email, name: input.customer_name, amount: input.refund_amount_usd,
-  });
+  // FR-15 (revised 2026-08-04): NO customer email here. Compiling a case into
+  // the refund pipeline is an internal move — the customer already got the
+  // return-form confirmation from send-return-emails, and the only other
+  // automatic customer email in this workflow is the one at Refunded
+  // (executeRefund). See "Refund workflow customer emails" in
+  // docs/feature-backlog-alpha-feedback.md.
   return newRefundId;
 }
 
@@ -965,6 +973,11 @@ export async function compileReturnToRefund(r: ReturnRow): Promise<void> {
 
 // FR-15: standardized customer-facing status message at a refund transition.
 // Best-effort (never throws into the caller); no-ops when we have no email.
+//
+// ⚠ As of 2026-08-04 there is exactly ONE caller: executeRefund (→ Refunded).
+// Per operator decision, the customer hears from us twice in this workflow —
+// the return-form confirmation (send-return-emails) and the refund-sent notice.
+// Do not add transition emails here without that decision being revisited.
 async function notifyCustomerRefundStatus(
   templateKey: string,
   c: { email?: string | null; name?: string | null; amount?: number | null; method?: RefundMethod | null; relatedRefundId?: string },
@@ -1080,11 +1093,8 @@ export async function managerApprove(id: string, note?: string): Promise<void> {
   }).eq('id', id);
   if (error) throw error;
   await logAction('refund_manager_approved', id, note ?? 'approved');
-
-  // FR-15: tell the customer their refund was approved.
-  await notifyCustomerRefundStatus('refund_approved_customer', {
-    email: approval.customer_email, name: approval.customer_name, amount: approval.refund_amount_usd, relatedRefundId: id,
-  });
+  // FR-15 (revised 2026-08-04): no customer email on manager approval — an
+  // internal stage move. The customer is told once, at Refunded.
 }
 
 export type FinanceApproveOpts = {
@@ -1182,11 +1192,9 @@ export async function financeApprove(id: string, opts: FinanceApproveOpts): Prom
   } catch (e) {
     console.warn('Refund queue-entry email failed (non-fatal):', (e as Error).message);
   }
-
-  // FR-15: tell the customer their refund is now being processed.
-  await notifyCustomerRefundStatus('refund_processing_customer', {
-    email: approval.customer_email, name: approval.customer_name, amount: adjusted, method: opts.method, relatedRefundId: id,
-  });
+  // FR-15 (revised 2026-08-04): no customer email when the card enters the
+  // Refund Queue — internal only (the executor notice above). The customer is
+  // told once, at Refunded.
 }
 
 /** Refund Queue → Refunded. Finance has already approved the case + amount; this
@@ -1240,7 +1248,9 @@ export async function executeRefund(id: string, note?: string): Promise<void> {
     }
   }
 
-  // FR-15: tell the customer the funds have been sent.
+  // FR-15 (revised 2026-08-04): the ONLY automatic customer email in the refund
+  // workflow after the return-form confirmation — sent when the card lands in
+  // Refunded, telling them to expect the money in 7–10 business days.
   await notifyCustomerRefundStatus('refund_funds_sent_customer', {
     email: approval.customer_email as string | null,
     name: approval.customer_name as string | null,
