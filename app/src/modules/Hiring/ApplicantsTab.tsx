@@ -102,14 +102,34 @@ export function CandidateCard({ candidate, pipelineStages, onSelectCandidate }: 
   // hired_at wins if a legacy row has both — the mutations clear the opposing column.
   const decision = candidate.hired_at ? 'shortlisted' : candidate.rejected_at ? 'rejected' : null;
 
+  /** hiring-resumes is a private bucket, so the file needs a signed URL before
+   *  it can be shown — and that round trip is what made this button feel dead.
+   *  Opening the tab *after* the await leaves it to the popup blocker, and the
+   *  old code ignored window.open's return value, so a blocked tab produced no
+   *  tab and no message. The tab is now opened during the click itself, while
+   *  the browser still counts it as user-initiated, and pointed at the URL once
+   *  it arrives. */
   async function viewResume() {
     if (!candidate.resume_url) return;
     setResumeError(null);
+
+    const tab = window.open('', '_blank');
+    if (!tab) {
+      setResumeError('Your browser blocked the resume tab — allow pop-ups for this site and try again.');
+      return;
+    }
+    // Opened without 'noopener' because that makes window.open return null and
+    // there'd be no handle to navigate; severing the link here instead.
+    tab.opener = null;
+
     try {
       const signedUrl = await getResumeSignedUrl(candidate.resume_url);
-      window.open(signedUrl, '_blank', 'noopener,noreferrer');
-    } catch {
-      setResumeError('Could not open resume — try again.');
+      tab.location.href = signedUrl;
+    } catch (e: unknown) {
+      // The real reason, not a generic retry: "Object not found" (the file was
+      // purged) and an auth failure need different responses from the operator.
+      tab.close();
+      setResumeError(`Could not open resume: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
