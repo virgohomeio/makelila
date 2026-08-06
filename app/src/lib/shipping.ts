@@ -279,6 +279,12 @@ export type AllShipmentRow = {
   billed_amount: number | null;
   /** ISO code Freightcom invoiced in. Null until the row has been invoiced. */
   billed_currency: string | null;
+  /** Actual carrier cost recorded against the linked order (operator-entered at
+   *  the Fulfilled step, or backfilled from the carrier spreadsheets). Used when
+   *  Freightcom has not invoiced — a real cost beats a quote. */
+  recorded_cost: number | null;
+  /** ISO code for recorded_cost. Read, never inferred from the column name. */
+  recorded_currency: string | null;
   /** Charge breakdown behind billed_cad — shown as the Rate cell's hover text so
    *  an unexpectedly high cost can be explained without opening Freightcom. */
   base_charge_cad: number | null;
@@ -308,14 +314,19 @@ export type AllClaimRow = Claim & {
 // ── Shipment cost ──────────────────────────────────────────────────────────
 
 /**
- * Which number the Rate column is showing.
+ * Which number the Rate column is showing, best first.
  *   invoiced — what Freightcom actually billed. Authoritative.
- *   quoted   — the estimate captured at booking, shown only until an invoice
+ *   recorded — the actual carrier cost captured against the order, either typed
+ *              in by an operator at the Fulfilled step or backfilled from the
+ *              carrier spreadsheets. A real cost that was really paid, just not
+ *              read from the Freightcom API — so it ranks below `invoiced` but
+ *              comfortably above a quote.
+ *   quoted   — the estimate captured at booking, shown only until a real cost
  *              lands. Reweighs and residential/fuel surcharges routinely move
  *              the final figure, so this must never be presented as the cost.
- *   none     — neither on file.
+ *   none     — nothing on file.
  */
-export type CostBasis = 'invoiced' | 'quoted' | 'none';
+export type CostBasis = 'invoiced' | 'recorded' | 'quoted' | 'none';
 
 export type ShipmentCost = {
   amount: number | null;
@@ -338,6 +349,8 @@ export function resolveShipmentCost(row: {
   billed_cad: number | null;
   billed_amount?: number | null;
   billed_currency?: string | null;
+  recorded_cost?: number | null;
+  recorded_currency?: string | null;
   rate_cad: number | null;
 }): ShipmentCost {
   if (row.billed_cad != null) {
@@ -347,17 +360,35 @@ export function resolveShipmentCost(row: {
     const currency = row.billed_currency ?? 'CAD';
     return { amount: row.billed_amount, currency, basis: 'invoiced', foreign: currency !== 'CAD' };
   }
+  if (row.recorded_cost != null) {
+    // The currency here is read, never assumed. The storage column is named
+    // `shipping_cost_usd` and holds CAD; trusting the name is the bug.
+    const currency = row.recorded_currency ?? 'CAD';
+    return { amount: row.recorded_cost, currency, basis: 'recorded', foreign: currency !== 'CAD' };
+  }
   if (row.rate_cad != null) {
     return { amount: row.rate_cad, currency: 'CAD', basis: 'quoted', foreign: false };
   }
   return { amount: null, currency: 'CAD', basis: 'none', foreign: false };
 }
 
-/** Sums the invoiced CAD costs on a set of rows, ignoring quotes and non-CAD. */
-export function totalInvoicedCad(rows: Array<Parameters<typeof resolveShipmentCost>[0]>): number {
+/** True for a basis that represents money actually spent, not an estimate. */
+export function isActualCost(basis: CostBasis): boolean {
+  return basis === 'invoiced' || basis === 'recorded';
+}
+
+/**
+ * Sums the CAD costs actually incurred across a set of rows.
+ *
+ * Quotes are excluded — adding an estimate to a total makes the total an
+ * estimate, and this figure is meant to be reconcilable. Non-CAD amounts are
+ * excluded too rather than being added across currencies at an implied rate
+ * of 1.0.
+ */
+export function totalActualCad(rows: Array<Parameters<typeof resolveShipmentCost>[0]>): number {
   return rows.reduce((sum, r) => {
     const c = resolveShipmentCost(r);
-    return c.basis === 'invoiced' && !c.foreign ? sum + (c.amount ?? 0) : sum;
+    return isActualCost(c.basis) && !c.foreign ? sum + (c.amount ?? 0) : sum;
   }, 0);
 }
 
@@ -383,15 +414,22 @@ export function isMissingColumnError(err: { code?: string; message?: string } | 
   return err.code === '42703' || /column .* does not exist/i.test(err.message ?? '');
 }
 
+// The joined order supplies the recorded carrier cost. `shipping_cost_currency`
+// arrived with migration 20260806170000, so the join degrades too — otherwise a
+// database without that migration fails every variant and the table renders
+// empty rather than merely cost-less.
+const ORDER_JOIN_FULL = 'orders(order_ref, customer_name, shipping_cost_usd, shipping_cost_currency)';
+const ORDER_JOIN_MIN  = 'orders(order_ref, customer_name)';
+
 /** Progressively shorter column lists: all optional groups, then one fewer, … */
 export function shipmentSelectVariants(): string[] {
   const variants: string[] = [];
   for (let drop = 0; drop <= SHIPMENT_OPTIONAL_GROUPS.length; drop++) {
     const groups = SHIPMENT_OPTIONAL_GROUPS.slice(drop);
-    variants.push(
-      [SHIPMENT_BASE_COLS, ...groups, 'orders(order_ref, customer_name)'].join(', '),
-    );
+    variants.push([SHIPMENT_BASE_COLS, ...groups, ORDER_JOIN_FULL].join(', '));
   }
+  // Last resort: nothing optional on either side of the join.
+  variants.push([SHIPMENT_BASE_COLS, ORDER_JOIN_MIN].join(', '));
   return variants;
 }
 
@@ -436,7 +474,10 @@ export function useAllShipments(): { shipments: AllShipmentRow[]; loading: boole
         freightcom_shipment_id: string;
         freightcom_status?: string | null; status_synced_at?: string | null;
         raw_payload?: ShipmentRawPayload;
-        orders: { order_ref: string; customer_name: string } | null;
+        orders: {
+          order_ref: string; customer_name: string;
+          shipping_cost_usd?: number | null; shipping_cost_currency?: string | null;
+        } | null;
       }>).map(s => {
         const party = deriveShipmentParty({
           raw_payload: s.raw_payload ?? null,
@@ -453,6 +494,8 @@ export function useAllShipments(): { shipments: AllShipmentRow[]; loading: boole
           billed_cad: s.billed_cad,
           billed_amount: s.billed_amount ?? null,
           billed_currency: s.billed_currency ?? null,
+          recorded_cost: s.orders?.shipping_cost_usd ?? null,
+          recorded_currency: s.orders?.shipping_cost_currency ?? null,
           base_charge_cad: s.base_charge_cad ?? null,
           fuel_surcharge_cad: s.fuel_surcharge_cad ?? null,
           residential_surcharge_cad: s.residential_surcharge_cad ?? null,

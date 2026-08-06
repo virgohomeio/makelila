@@ -5,7 +5,8 @@
 // dashboard actually shows. These tests fix what each cell is allowed to claim.
 import { describe, it, expect } from 'vitest';
 import {
-  resolveShipmentCost, totalInvoicedCad, shipmentSelectVariants, isMissingColumnError,
+  resolveShipmentCost, totalActualCad, isActualCost,
+  shipmentSelectVariants, isMissingColumnError,
 } from './shipping';
 
 describe('resolveShipmentCost', () => {
@@ -17,6 +18,27 @@ describe('resolveShipmentCost', () => {
   it('falls back to the quote, flagged as a quote', () => {
     expect(resolveShipmentCost({ billed_cad: null, rate_cad: 99 }))
       .toEqual({ amount: 99, currency: 'CAD', basis: 'quoted', foreign: false });
+  });
+
+  it('prefers a recorded actual cost over a quote', () => {
+    expect(resolveShipmentCost({ billed_cad: null, recorded_cost: 143.08, recorded_currency: 'CAD', rate_cad: 99 }))
+      .toEqual({ amount: 143.08, currency: 'CAD', basis: 'recorded', foreign: false });
+  });
+
+  it('still prefers a Freightcom invoice over a recorded cost', () => {
+    expect(resolveShipmentCost({ billed_cad: 128.4, recorded_cost: 143.08, recorded_currency: 'CAD', rate_cad: 99 }).basis)
+      .toBe('invoiced');
+  });
+
+  it('reads the recorded currency instead of trusting the _usd column name', () => {
+    // orders.shipping_cost_usd holds CAD; the suffix is a lie the UI must not repeat.
+    const c = resolveShipmentCost({ billed_cad: null, recorded_cost: 60, recorded_currency: 'CAD', rate_cad: null });
+    expect(c.currency).toBe('CAD');
+    expect(c.foreign).toBe(false);
+
+    const usd = resolveShipmentCost({ billed_cad: null, recorded_cost: 60, recorded_currency: 'USD', rate_cad: null });
+    expect(usd.foreign).toBe(true);
+    expect(usd.currency).toBe('USD');
   });
 
   it('reports nothing rather than zero when neither is on file', () => {
@@ -42,20 +64,37 @@ describe('resolveShipmentCost', () => {
   });
 });
 
-describe('totalInvoicedCad', () => {
-  it('sums invoiced CAD only — quotes are estimates and must not enter a total', () => {
-    const total = totalInvoicedCad([
+describe('isActualCost', () => {
+  it('counts money spent, not estimates', () => {
+    expect(isActualCost('invoiced')).toBe(true);
+    expect(isActualCost('recorded')).toBe(true);
+    expect(isActualCost('quoted')).toBe(false);
+    expect(isActualCost('none')).toBe(false);
+  });
+});
+
+describe('totalActualCad', () => {
+  it('sums invoiced and recorded CAD — quotes are estimates and must not enter a total', () => {
+    const total = totalActualCad([
       { billed_cad: 100.25, rate_cad: 90 },
       { billed_cad: 49.75,  rate_cad: null },
+      { billed_cad: null, recorded_cost: 50, recorded_currency: 'CAD', rate_cad: null },
       { billed_cad: null,   rate_cad: 500 },                                   // quote
       { billed_cad: null,   billed_amount: 80, billed_currency: 'USD', rate_cad: null }, // USD
+      { billed_cad: null, recorded_cost: 70, recorded_currency: 'USD', rate_cad: null }, // USD
       { billed_cad: null,   rate_cad: null },                                  // nothing
     ]);
-    expect(total).toBe(150);
+    expect(total).toBe(200);
+  });
+
+  it('never sums across currencies at an implied rate of 1.0', () => {
+    expect(totalActualCad([
+      { billed_cad: null, recorded_cost: 100, recorded_currency: 'USD', rate_cad: null },
+    ])).toBe(0);
   });
 
   it('is zero for an empty table', () => {
-    expect(totalInvoicedCad([])).toBe(0);
+    expect(totalActualCad([])).toBe(0);
   });
 });
 
@@ -75,8 +114,18 @@ describe('shipmentSelectVariants', () => {
     for (const cols of shipmentSelectVariants()) {
       expect(cols).toContain('fuel_surcharge_cad');
       expect(cols).toContain('invoice_number');
-      expect(cols).toContain('orders(order_ref, customer_name)');
+      expect(cols).toContain('orders(order_ref, customer_name');
     }
+  });
+
+  it('degrades the orders join too, so a missing shipping_cost_currency still renders', () => {
+    const v = shipmentSelectVariants();
+    expect(v[0]).toContain('shipping_cost_currency');
+    // The final fallback asks for nothing that a later migration added.
+    const last = v[v.length - 1];
+    expect(last).not.toContain('shipping_cost_currency');
+    expect(last).not.toContain('billed_amount');
+    expect(last).toContain('orders(order_ref, customer_name)');
   });
 });
 

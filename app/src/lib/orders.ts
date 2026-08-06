@@ -47,7 +47,12 @@ export type Order = {
   replacement_state: 'ready' | 'awaiting' | 'held' | null;
   held_reason: string | null;
   cogs_usd: number | null;
+  /** Actual carrier/label cost. MISNAMED: the `_usd` suffix is historical and
+   *  wrong — the currency is whatever `shipping_cost_currency` says, and every
+   *  row populated to date is CAD. Never sum this without grouping by currency. */
   shipping_cost_usd: number | null;
+  /** ISO code for shipping_cost_usd. Required whenever that column is set. */
+  shipping_cost_currency: string | null;
   shipped_at: string | null;
   delivered_at: string | null;
   // Backlog #55 follow-up — carrier tracking. Populated by the Fulfillment
@@ -1066,13 +1071,25 @@ export function useReplacementOrders(): { orders: Order[]; loading: boolean } {
   return { orders, loading };
 }
 
-/** Records that an order shipped. Sets shipped_at and shipping_cost_usd
- *  (the actual freight/label cost from Freightcom/ClickShip). Works for
- *  both sales and replacements. */
-export async function markOrderShipped(orderId: string, shippingCostUsd: number): Promise<void> {
-  if (!Number.isFinite(shippingCostUsd) || shippingCostUsd < 0) {
-    throw new Error('shipping_cost_usd must be a non-negative number');
+/** Records that an order shipped. Sets shipped_at, the actual freight/label cost
+ *  from Freightcom/ClickShip, and the currency that cost is in. Works for both
+ *  sales and replacements.
+ *
+ *  The currency is explicit and required. The storage column is named
+ *  `shipping_cost_usd` but has only ever held CAD (see the 20260806170000
+ *  migration); the operator input was labelled USD while the backfill wrote CAD,
+ *  which is exactly the ambiguity this parameter removes. Callers state the
+ *  currency; nothing infers it from the column name. */
+export async function markOrderShipped(
+  orderId: string, shippingCost: number, currency: string = 'CAD',
+): Promise<void> {
+  if (!Number.isFinite(shippingCost) || shippingCost < 0) {
+    throw new Error('shipping cost must be a non-negative number');
   }
+  if (!/^[A-Z]{3}$/.test(currency)) {
+    throw new Error('shipping cost currency must be a 3-letter ISO code');
+  }
+  const shippingCostUsd = shippingCost;
   const { data: row, error: rErr } = await supabase
     .from('orders')
     .select('order_ref, customer_email')
@@ -1082,10 +1099,14 @@ export async function markOrderShipped(orderId: string, shippingCostUsd: number)
 
   const { error } = await supabase
     .from('orders')
-    .update({ shipped_at: new Date().toISOString(), shipping_cost_usd: shippingCostUsd })
+    .update({
+      shipped_at: new Date().toISOString(),
+      shipping_cost_usd: shippingCostUsd,
+      shipping_cost_currency: currency,
+    })
     .eq('id', orderId);
   if (error) throw new Error(error.message);
-  await logAction('order_shipped', row.order_ref, `shipping $${shippingCostUsd.toFixed(2)}`,
+  await logAction('order_shipped', row.order_ref, `shipping $${shippingCostUsd.toFixed(2)} ${currency}`,
     undefined,
     { klaviyoEvent: 'Order Shipped', ...((row.customer_email as string | null) ? { klaviyoEmail: row.customer_email as string } : {}) });
 }
