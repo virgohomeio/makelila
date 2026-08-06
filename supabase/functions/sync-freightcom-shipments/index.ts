@@ -229,6 +229,7 @@ async function mapPool<T, R>(items: T[], limit: number, fn: (item: T) => Promise
 }
 
 Deno.serve(async (req: Request) => {
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
   const body = await req.json().catch(() => ({})) as { probe?: boolean; limit?: number };
   try { return await handle(body?.probe === true, body?.limit); }
   catch (err) {
