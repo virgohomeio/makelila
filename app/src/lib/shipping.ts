@@ -269,7 +269,11 @@ export type AllShipmentRow = {
   customer_name: string;
   carrier: string;
   service: string;
+  /** What we were quoted at booking time. Null for shipments makelila didn't book. */
   rate_cad: number | null;
+  /** What Freightcom actually invoiced. Authoritative when present — surcharges,
+   *  reweighs and residential fees mean this routinely differs from the quote. */
+  billed_cad: number | null;
   primary_tracking_number: string | null;
   status: ShipmentStatus;
   booked_at: string;
@@ -277,6 +281,8 @@ export type AllShipmentRow = {
   freightcom_shipment_id: string;
   freightcom_status: string | null;
   status_synced_at: string | null;
+  /** When the Freightcom sync last wrote this row. Drives the staleness banner. */
+  synced_at: string | null;
   direction: ShipmentDirection;
   counterparty_name: string;
 };
@@ -288,7 +294,7 @@ export type AllClaimRow = Claim & {
 
 // Columns that exist regardless of whether the freightcom_status migration ran.
 const SHIPMENT_BASE_COLS =
-  'id, order_id, carrier, service, rate_cad, primary_tracking_number, status, booked_at, label_url, freightcom_shipment_id, raw_payload';
+  'id, order_id, carrier, service, rate_cad, billed_cad, synced_at, primary_tracking_number, status, booked_at, label_url, freightcom_shipment_id, raw_payload';
 
 /** True for a Postgres "undefined column" error (42703) — the migration isn't applied. */
 export function isMissingColumnError(err: { code?: string; message?: string } | null): boolean {
@@ -333,7 +339,8 @@ export function useAllShipments(): { shipments: AllShipmentRow[]; loading: boole
       if (err) { setError(err.message ?? 'Failed to load shipments'); setLoading(false); return; }
       const rows: AllShipmentRow[] = ((data ?? []) as unknown as Array<{
         id: string; order_id: string; carrier: string; service: string;
-        rate_cad: number | null; primary_tracking_number: string | null;
+        rate_cad: number | null; billed_cad: number | null; synced_at: string | null;
+        primary_tracking_number: string | null;
         status: string; booked_at: string; label_url: string | null;
         freightcom_shipment_id: string;
         freightcom_status?: string | null; status_synced_at?: string | null;
@@ -352,6 +359,8 @@ export function useAllShipments(): { shipments: AllShipmentRow[]; loading: boole
           carrier: s.carrier,
           service: s.service,
           rate_cad: s.rate_cad,
+          billed_cad: s.billed_cad,
+          synced_at: s.synced_at ?? null,
           primary_tracking_number: s.primary_tracking_number,
           status: s.status as ShipmentStatus,
           booked_at: s.booked_at,

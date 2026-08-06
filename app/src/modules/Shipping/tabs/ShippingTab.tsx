@@ -17,6 +17,60 @@ const FC_BADGE_CLASS: Record<string, string> = {
   'cancelled':           styles.statusCancelled,
 };
 
+// Shipping cost. Two different numbers get conflated here, so the cell says
+// which one you're looking at: `billed_cad` is what Freightcom actually invoiced
+// (authoritative — reweighs, fuel and residential surcharges routinely push it
+// past the quote), `rate_cad` is only what we were quoted at booking. Quoted
+// values render muted with a "quoted" tag so nobody reconciles against them.
+function ShipmentCost({ billed, quoted }: { billed: number | null; quoted: number | null }) {
+  if (billed != null) {
+    return (
+      <span title="Invoiced by Freightcom — actual cost">
+        ${Number(billed).toFixed(2)}
+      </span>
+    );
+  }
+  if (quoted != null) {
+    return (
+      <span style={{ color: '#a0aec0' }}
+            title="Quote captured at booking — Freightcom has not invoiced this shipment yet, so the final cost may differ">
+        ${Number(quoted).toFixed(2)}
+        <span style={{ fontSize: 10, marginLeft: 4 }}>quoted</span>
+      </span>
+    );
+  }
+  return <span style={{ color: '#cbd5e0' }} title="No quote and no invoice on file for this shipment">—</span>;
+}
+
+// The dashboard is only as current as the last successful Freightcom sync. When
+// that sync silently stops (it did, from 2026-06-25 to 2026-08-06 — the finance
+// API was rejecting the credentials and the error was swallowed), the table
+// still renders happily and looks authoritative. Say the age out loud instead.
+const STALE_AFTER_HOURS = 36;
+
+function SyncFreshnessBanner({ shipments }: { shipments: AllShipmentRow[] }) {
+  const stamps = shipments.map(s => s.synced_at).filter((v): v is string => !!v);
+  const newest = stamps.length ? stamps.reduce((a, b) => (a > b ? a : b)) : null;
+  if (!newest) {
+    return (
+      <div style={{ padding: '8px 12px', marginBottom: 10, borderRadius: 6, fontSize: 12,
+                    background: '#fffaf0', border: '1px solid #f6ad55', color: '#7b341e' }}>
+        ⚠ No Freightcom sync has ever recorded these shipments — what you see below was loaded by hand.
+      </div>
+    );
+  }
+  const ageHours = (Date.now() - Date.parse(newest)) / 3_600_000;
+  if (ageHours < STALE_AFTER_HOURS) return null;
+  const ageDays = Math.floor(ageHours / 24);
+  return (
+    <div style={{ padding: '8px 12px', marginBottom: 10, borderRadius: 6, fontSize: 12,
+                  background: '#fff5f5', border: '1px solid #fc8181', color: '#822727' }}>
+      ⚠ Freightcom last synced <strong>{ageDays >= 1 ? `${ageDays} day${ageDays === 1 ? '' : 's'}` : `${Math.floor(ageHours)} hours`} ago</strong>
+      {' '}({new Date(newest).toLocaleDateString()}). Shipments booked since then are missing from this table.
+    </div>
+  );
+}
+
 type Filter = 'all' | typeof FREIGHTCOM_STATUSES[number] | 'other' | 'returns';
 const FILTERS: { id: Filter; label: string }[] = [
   { id: 'all',                 label: 'All'                 },
@@ -222,6 +276,8 @@ export function ShippingTab() {
       <div className={styles.section}>
         <h3 className={styles.sectionTitle}>All Shipments</h3>
 
+        {!shipmentsLoading && <SyncFreshnessBanner shipments={shipments} />}
+
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '8px 0' }}>
           <button
             onClick={handleRefreshStatuses}
@@ -272,7 +328,10 @@ export function ShippingTab() {
                 <th style={{ padding: '7px 12px', textAlign: 'left', fontWeight: 600 }}>Direction</th>
                 <th style={{ padding: '7px 12px', textAlign: 'left', fontWeight: 600 }}>Carrier</th>
                 <th style={{ padding: '7px 12px', textAlign: 'left', fontWeight: 600 }}>Service</th>
-                <th style={{ padding: '7px 12px', textAlign: 'right', fontWeight: 600 }}>Rate (CAD)</th>
+                <th style={{ padding: '7px 12px', textAlign: 'right', fontWeight: 600 }}
+                    title="Freightcom's invoiced cost once billed; the booking quote until then.">
+                  Rate (CAD)
+                </th>
                 <th style={{ padding: '7px 12px', textAlign: 'left', fontWeight: 600 }}>Tracking</th>
                 <th style={{ padding: '7px 12px', textAlign: 'left', fontWeight: 600 }}>Freightcom status</th>
                 <th style={{ padding: '7px 12px', textAlign: 'left', fontWeight: 600 }}>Booked</th>
@@ -301,7 +360,7 @@ export function ShippingTab() {
                   <td style={{ padding: '7px 12px' }}>{s.carrier}</td>
                   <td style={{ padding: '7px 12px', color: '#4a5568' }}>{s.service}</td>
                   <td style={{ padding: '7px 12px', textAlign: 'right' }}>
-                    {s.rate_cad != null ? `$${Number(s.rate_cad).toFixed(2)}` : '—'}
+                    <ShipmentCost billed={s.billed_cad} quoted={s.rate_cad} />
                   </td>
                   <td style={{ padding: '7px 12px', fontFamily: 'monospace', fontSize: 11, color: '#4a5568' }}>
                     {s.primary_tracking_number ?? '—'}
