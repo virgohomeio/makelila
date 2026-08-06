@@ -2,6 +2,7 @@ import { useState } from 'react';
 import {
   useShippingOrders, useAllShipments, bookShipment,
   refreshFreightcomStatuses, displayFreightcomStatus, isKnownFreightcomStatus,
+  resolveShipmentCost, totalInvoicedCad,
   FREIGHTCOM_STATUSES, type AllShipmentRow,
 } from '../../../lib/shipping';
 import { useQuotes, fetchFreightcomQuotes, selectQuote, type FreightQuote } from '../../../lib/freight';
@@ -17,29 +18,62 @@ const FC_BADGE_CLASS: Record<string, string> = {
   'cancelled':           styles.statusCancelled,
 };
 
-// Shipping cost. Two different numbers get conflated here, so the cell says
-// which one you're looking at: `billed_cad` is what Freightcom actually invoiced
-// (authoritative — reweighs, fuel and residential surcharges routinely push it
-// past the quote), `rate_cad` is only what we were quoted at booking. Quoted
-// values render muted with a "quoted" tag so nobody reconciles against them.
-function ShipmentCost({ billed, quoted }: { billed: number | null; quoted: number | null }) {
-  if (billed != null) {
+// Shipping cost. Three different numbers get conflated in this one column, so
+// the cell always says which one you're looking at:
+//   • an invoiced CAD total       — the actual cost, plain
+//   • an invoiced non-CAD total   — real, but labelled with its currency, since
+//                                   the column heading says CAD and it isn't
+//   • a booking quote             — muted and tagged "quoted", because reweighs
+//                                   and fuel/residential surcharges routinely
+//                                   move the final figure and finance must not
+//                                   reconcile against an estimate
+function CostCell({ row }: { row: AllShipmentRow }) {
+  const cost = resolveShipmentCost(row);
+
+  if (cost.basis === 'none') {
     return (
-      <span title="Invoiced by Freightcom — actual cost">
-        ${Number(billed).toFixed(2)}
-      </span>
+      <span style={{ color: '#cbd5e0' }}
+            title="No quote and no invoice on file for this shipment.">—</span>
     );
   }
-  if (quoted != null) {
+
+  const figure = `$${Number(cost.amount).toFixed(2)}`;
+
+  if (cost.basis === 'quoted') {
     return (
       <span style={{ color: '#a0aec0' }}
-            title="Quote captured at booking — Freightcom has not invoiced this shipment yet, so the final cost may differ">
-        ${Number(quoted).toFixed(2)}
+            title="Quote captured at booking. Freightcom has not invoiced this shipment yet, so the final cost may differ.">
+        {figure}
         <span style={{ fontSize: 10, marginLeft: 4 }}>quoted</span>
       </span>
     );
   }
-  return <span style={{ color: '#cbd5e0' }} title="No quote and no invoice on file for this shipment">—</span>;
+
+  return (
+    <span title={invoiceTitle(row)}>
+      {figure}
+      {cost.foreign && (
+        <span style={{ fontSize: 10, marginLeft: 4, color: '#b7791f' }}>{cost.currency}</span>
+      )}
+    </span>
+  );
+}
+
+/** Hover text for an invoiced cost: the charge breakdown behind the total. */
+function invoiceTitle(row: AllShipmentRow): string {
+  const lines = ['Invoiced by Freightcom — actual cost.'];
+  const part = (label: string, v: number | null) =>
+    v != null ? `${label}: $${v.toFixed(2)}` : null;
+  const parts = [
+    part('Base', row.base_charge_cad),
+    part('Fuel', row.fuel_surcharge_cad),
+    part('Residential', row.residential_surcharge_cad),
+    part('Remote', row.remote_surcharge_cad),
+    ...(row.other_surcharges ?? []).map(s => `${s.name}: $${s.amount_cad.toFixed(2)}`),
+  ].filter(Boolean);
+  if (parts.length) lines.push(parts.join('  ·  '));
+  if (row.invoice_number) lines.push(`Invoice ${row.invoice_number}`);
+  return lines.join('\n');
 }
 
 // The dashboard is only as current as the last successful Freightcom sync. When
@@ -329,7 +363,9 @@ export function ShippingTab() {
                 <th style={{ padding: '7px 12px', textAlign: 'left', fontWeight: 600 }}>Carrier</th>
                 <th style={{ padding: '7px 12px', textAlign: 'left', fontWeight: 600 }}>Service</th>
                 <th style={{ padding: '7px 12px', textAlign: 'right', fontWeight: 600 }}
-                    title="Freightcom's invoiced cost once billed; the booking quote until then.">
+                    title={'Freightcom\'s invoiced cost once billed; the booking quote until then.\n'
+                         + 'Hover a cell for the charge breakdown. Quoted values are muted — they are\n'
+                         + 'estimates, not costs, and are excluded from the total below.'}>
                   Rate (CAD)
                 </th>
                 <th style={{ padding: '7px 12px', textAlign: 'left', fontWeight: 600 }}>Tracking</th>
@@ -360,7 +396,7 @@ export function ShippingTab() {
                   <td style={{ padding: '7px 12px' }}>{s.carrier}</td>
                   <td style={{ padding: '7px 12px', color: '#4a5568' }}>{s.service}</td>
                   <td style={{ padding: '7px 12px', textAlign: 'right' }}>
-                    <ShipmentCost billed={s.billed_cad} quoted={s.rate_cad} />
+                    <CostCell row={s} />
                   </td>
                   <td style={{ padding: '7px 12px', fontFamily: 'monospace', fontSize: 11, color: '#4a5568' }}>
                     {s.primary_tracking_number ?? '—'}
@@ -390,9 +426,46 @@ export function ShippingTab() {
                 </tr>
               ))}
             </tbody>
+            <CostTotals rows={filteredShipments} />
           </table>
         )}
       </div>
     </div>
+  );
+}
+
+// Only invoiced CAD costs are summed. Quotes are excluded on purpose — adding an
+// estimate to a total makes the total an estimate, and this figure is meant to
+// be reconcilable against Freightcom's billing. Whatever is excluded is stated
+// rather than silently dropped.
+function CostTotals({ rows }: { rows: AllShipmentRow[] }) {
+  const total = totalInvoicedCad(rows);
+  const costs = rows.map(resolveShipmentCost);
+  const invoiced = costs.filter(c => c.basis === 'invoiced' && !c.foreign).length;
+  const quoted   = costs.filter(c => c.basis === 'quoted').length;
+  const foreign  = costs.filter(c => c.foreign).length;
+  const none     = costs.filter(c => c.basis === 'none').length;
+
+  const excluded = [
+    quoted  ? `${quoted} still on a quote` : null,
+    foreign ? `${foreign} billed in another currency` : null,
+    none    ? `${none} with no cost on file` : null,
+  ].filter(Boolean).join(', ');
+
+  return (
+    <tfoot>
+      <tr style={{ borderTop: '2px solid #e2e8f0', background: '#f7fafc' }}>
+        <td colSpan={5} style={{ padding: '8px 12px', fontSize: 12, color: '#4a5568' }}>
+          Invoiced total — {invoiced} shipment{invoiced === 1 ? '' : 's'}
+          {excluded && (
+            <span style={{ color: '#a0aec0' }}> (excludes {excluded})</span>
+          )}
+        </td>
+        <td style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 600 }}>
+          ${total.toFixed(2)}
+        </td>
+        <td colSpan={5} />
+      </tr>
+    </tfoot>
   );
 }

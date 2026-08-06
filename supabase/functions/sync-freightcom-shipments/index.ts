@@ -1,42 +1,53 @@
 // sync-freightcom-shipments
 //
-// Pulls shipments from the Freightcom API into public.shipments.
+// Keeps public.shipments — the Shipping dashboard's table — current against the
+// Freightcom API: costs, statuses, tracking numbers and delivery dates.
 //
 // ⚠ HISTORY (2026-08-06): this function existed only as an ad-hoc deployment
-// (entrypoint /tmp/user_fn_…) with no copy in the repo, so nobody could review
-// or redeploy it. This file is that deployment, restored to source control with
-// the diagnostics below added. Behaviour is otherwise unchanged.
+// (entrypoint /tmp/user_fn_…) with no copy in the repo. It has never written a
+// row. Three faults were fixed on 2026-08-06 (cron timeout, finance-call
+// parameters, swallowed errors); this revision fixes the two that remained.
 //
-// Discovery strategy:
-//   1. GET /finance/documents?start_date&end_date → invoice list with shipment IDs
-//   2. GET /shipment/{id} per discovered ID → full details
-//   3. GET /finance/invoices-for-shipment-id/{id} → cost breakdown
-//   4. match_shipment_serials() / match_shipment_orders() to link units + orders
+// ── Discovery ──────────────────────────────────────────────────────────────
+// Discovery used to be invoice-only: list finance documents, pull shipment ids
+// out of them, fetch those. That has a hole big enough to explain the empty Rate
+// column on its own — a shipment is invisible until Freightcom raises a finance
+// document for it, which is up to a billing cycle after it ships, and a shipment
+// that was already in our table but never appeared on a fetched invoice was
+// never revisited. All 38 rows on the dashboard are in exactly that position:
+// real Freightcom transaction numbers, hand-loaded from a tracking-dashboard
+// export, never once looked up against the API.
 //
-// KNOWN LIMITATION — discovery is invoice-driven. A shipment is only found once
-// Freightcom has raised a finance document for it, so anything booked in the
-// last billing cycle is invisible here no matter how often this runs. If the
-// dashboard needs to show shipments the day they go out, discovery has to come
-// from a shipment-listing endpoint (or from makelila's own bookings), not from
-// invoices.
+// Discovery is now the UNION of:
+//   1. every freightcom_shipment_id already in public.shipments  ← reconciliation
+//   2. shipment ids named by GET /finance/documents              ← new shipments
 //
-// The `probe` diagnostics exist because every non-OK response used to be
-// swallowed into an empty array: an expired key, a wrong environment and a
-// genuinely empty account all looked identical ("0 invoices"). They are
-// reported on every run so a silent-zero can be told apart from a failure.
+// so an existing row gets its cost filled in on the next run, and a new shipment
+// still gets picked up when its invoice lands.
 //
-// Body (all optional): { probe?: boolean }  — probe:true returns response body
-//                       snippets from the finance calls without upserting.
+// ── Writes ─────────────────────────────────────────────────────────────────
+// Per the repo's system-of-record rule, this sync adds what the API knows and
+// leaves everything else alone: null fields are pruned before the upsert rather
+// than overwriting stored values, and raw_payload is merged so the hand-loaded
+// provenance keys the dashboard derives Customer and Direction from survive.
+//
+// Body (all optional):
+//   { probe?: boolean }   — report the finance/auth state, write nothing
+//   { limit?: number }    — cap shipments processed this run
 //
 // Env vars:
 //   FREIGHTCOM_API_KEY   — bare token (no Bearer prefix)
-//   FREIGHTCOM_BASE_URL  — ⚠ defaults to LIVE here, but freightcom-book /
-//     -invoices / -status / -tracking all default to the ssd-test SANDBOX host.
-//     If this var is unset, this sync and the rest of the integration are
-//     talking to two different Freightcom environments. Set it explicitly.
+//   FREIGHTCOM_BASE_URL  — host to talk to. Defaults to the ssd-test SANDBOX,
+//     matching freightcom-book / -invoices / -quote / -status / -tracking. Set
+//     it to https://external-api.freightcom.com together with a LIVE key to
+//     point the integration at the real account.
 //   SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY (auto-injected)
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
+import {
+  type FCDoc, money, splitCurrency, cadOnly, breakdown,
+  pruneNulls, mergeRawPayload, mapStatus,
+} from './parse.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -44,8 +55,14 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const DEFAULT_BASE_URL = 'https://external-api.freightcom.com';
-const DAYS_BACK = 730; // 2 years of history
+// Matches the other five freightcom-* functions. Previously this one alone
+// defaulted to the live host, so the integration straddled two environments.
+const DEFAULT_BASE_URL = 'https://customer-external-api.ssd-test.freightcom.com';
+const LIVE_BASE_URL    = 'https://external-api.freightcom.com';
+
+const DAYS_BACK   = 730; // 2 years of finance documents
+const MAX_SHIPMENTS = 500;
+const CONCURRENCY = 4;
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -54,14 +71,10 @@ function json(body: unknown, status = 200) {
   });
 }
 
-function delay(ms: number) {
-  return new Promise((r) => setTimeout(r, ms));
-}
+const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-type FCDoc = Record<string, unknown>;
-
-/** What a finance call actually did — surfaced in the response so a zero-result
- *  run can be diagnosed without redeploying. */
+/** What a Freightcom call actually did — surfaced so a zero-result run can be
+ *  diagnosed without redeploying. */
 type Probe = { call: string; status: number | null; ok: boolean; body_snippet: string };
 
 function envelope(data: unknown): FCDoc[] | null {
@@ -77,38 +90,38 @@ function envelope(data: unknown): FCDoc[] | null {
 //
 // Verified against the API on 2026-08-06 (freightcom-auth-probe):
 //   GET /finance/documents?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD  → 200
-//   …&start_date only                    → 400 {"end_date":"missing"}
-//   …ISO-8601 datetimes instead of dates  → 400 {"start_date":"missing"}
-//   POST /finance/documents               → 403 (AWS SigV4 complaint — the route
-//                                           has no POST method; GET-only)
-//
-// The previous implementation sent from_year/from_month/from_day + to_* and
-// tried POST first, so it earned a 403 then a 400 on every run and reported
-// "0 invoices". Both parameters are required and both must be plain dates.
+//   …&start_date only                     → 400 {"end_date":"missing"}
+//   …ISO-8601 datetimes instead of dates   → 400 {"start_date":"missing"}
+//   POST /finance/documents                → 403 (AWS SigV4 complaint — the
+//                                            route has no POST method; GET-only)
+// Both parameters are required and both must be plain dates.
 async function fetchFinanceDocs(
   baseUrl: string, apiKey: string, probes: Probe[],
-): Promise<FCDoc[]> {
+): Promise<{ docs: FCDoc[]; authOk: boolean }> {
   const end   = new Date();
   const start = new Date(Date.now() - DAYS_BACK * 86_400_000);
   const asDate = (d: Date) => d.toISOString().slice(0, 10);
 
-  const params = new URLSearchParams({
-    start_date: asDate(start),
-    end_date:   asDate(end),
-  });
-  const res = await fetch(`${baseUrl}/finance/documents?${params}`, {
-    headers: { Authorization: apiKey },
-  });
+  const params = new URLSearchParams({ start_date: asDate(start), end_date: asDate(end) });
+  let res: Response;
+  try {
+    res = await fetch(`${baseUrl}/finance/documents?${params}`, {
+      headers: { Authorization: apiKey },
+    });
+  } catch (e) {
+    probes.push({ call: 'GET /finance/documents', status: null, ok: false,
+                  body_snippet: (e as Error)?.message?.slice(0, 300) ?? 'network error' });
+    return { docs: [], authOk: false };
+  }
   const text = await res.text();
   probes.push({
     call: `GET /finance/documents?start_date=${asDate(start)}&end_date=${asDate(end)}`,
     status: res.status, ok: res.ok, body_snippet: text.slice(0, 300),
   });
-  if (!res.ok) return [];
+  if (!res.ok) return { docs: [], authOk: res.status !== 401 && res.status !== 403 };
   try {
-    const rows = envelope(JSON.parse(text));
-    return rows ?? [];
-  } catch { return []; }
+    return { docs: envelope(JSON.parse(text)) ?? [], authOk: true };
+  } catch { return { docs: [], authOk: true }; }
 }
 
 function extractShipmentIds(docs: FCDoc[]): Set<string> {
@@ -116,13 +129,10 @@ function extractShipmentIds(docs: FCDoc[]): Set<string> {
   for (const doc of docs) {
     for (const field of ['shipment_id', 'shipmentId', 'freight_shipment_id']) {
       const v = doc[field];
-      if (v && typeof v === 'string') ids.add(v);
-      if (v && typeof v === 'number') ids.add(String(v));
+      if (typeof v === 'string' && v) ids.add(v);
+      if (typeof v === 'number') ids.add(String(v));
     }
-    const lines = doc['line_items'] as FCDoc[] | undefined
-               ?? doc['lineItems'] as FCDoc[] | undefined
-               ?? doc['items'] as FCDoc[] | undefined
-               ?? doc['shipments'] as FCDoc[] | undefined;
+    const lines = (doc['line_items'] ?? doc['lineItems'] ?? doc['items'] ?? doc['shipments']) as FCDoc[] | undefined;
     if (Array.isArray(lines)) {
       for (const line of lines) {
         for (const field of ['shipment_id', 'shipmentId', 'id']) {
@@ -135,32 +145,32 @@ function extractShipmentIds(docs: FCDoc[]): Set<string> {
   return ids;
 }
 
-async function fetchShipment(baseUrl: string, apiKey: string, shipmentId: string): Promise<FCDoc | null> {
-  const res = await fetch(`${baseUrl}/shipment/${encodeURIComponent(shipmentId)}`, {
-    headers: { Authorization: apiKey },
-  });
-  if (res.status === 202) {
-    await delay(2000);
-    const retry = await fetch(`${baseUrl}/shipment/${encodeURIComponent(shipmentId)}`, {
-      headers: { Authorization: apiKey },
-    });
-    if (!retry.ok) return null;
-    return (await retry.json()) as FCDoc;
-  }
-  if (!res.ok) return null;
-  return (await res.json()) as FCDoc;
+async function fetchShipment(
+  baseUrl: string, apiKey: string, id: string,
+): Promise<{ doc: FCDoc | null; status: number | null }> {
+  const url = `${baseUrl}/shipment/${encodeURIComponent(id)}`;
+  const get = () => fetch(url, { headers: { Authorization: apiKey } });
+  let res = await get();
+  if (res.status === 202) { await delay(2000); res = await get(); } // still assembling
+  if (!res.ok) return { doc: null, status: res.status };
+  try { return { doc: (await res.json()) as FCDoc, status: res.status }; }
+  catch { return { doc: null, status: res.status }; }
 }
 
-async function fetchShipmentInvoices(baseUrl: string, apiKey: string, shipmentId: string): Promise<FCDoc[]> {
-  const res = await fetch(`${baseUrl}/finance/invoices-for-shipment-id/${encodeURIComponent(shipmentId)}`, {
-    headers: { Authorization: apiKey },
-  });
+async function fetchShipmentInvoices(baseUrl: string, apiKey: string, id: string): Promise<FCDoc[]> {
+  const res = await fetch(
+    `${baseUrl}/finance/invoices-for-shipment-id/${encodeURIComponent(id)}`,
+    { headers: { Authorization: apiKey } },
+  );
   if (!res.ok) return [];
-  const data = await res.json();
-  return Array.isArray(data) ? data : [];
+  try {
+    const data = await res.json();
+    return envelope(data) ?? [];
+  } catch { return []; }
 }
 
-function str(obj: FCDoc, ...keys: string[]): string | null {
+function str(obj: FCDoc | null, ...keys: string[]): string | null {
+  if (!obj) return null;
   for (const k of keys) {
     const v = obj[k];
     if (v !== null && v !== undefined && v !== '') return String(v);
@@ -168,22 +178,20 @@ function str(obj: FCDoc, ...keys: string[]): string | null {
   return null;
 }
 
+/** Plain numeric reader, for the measurements that are NOT money — weight and
+ *  cuboid dimensions come back as bare units, never as cents. */
 function num(obj: FCDoc | null, ...keys: string[]): number | null {
   if (!obj) return null;
   for (const k of keys) {
     const v = obj[k];
-    if (v !== null && v !== undefined) {
-      if (typeof v === 'object' && (v as FCDoc).value !== undefined) {
-        return parseInt(String((v as FCDoc).value), 10) / 100;
-      }
-      const parsed = parseFloat(String(v));
-      if (!isNaN(parsed)) return parsed;
-    }
+    if (v === null || v === undefined || v === '') continue;
+    const parsed = parseFloat(String(v));
+    if (!Number.isNaN(parsed)) return parsed;
   }
   return null;
 }
 
-function nested(obj: FCDoc, ...path: string[]): FCDoc | null {
+function nested(obj: FCDoc | null, ...path: string[]): FCDoc | null {
   let cur: unknown = obj;
   for (const k of path) {
     if (!cur || typeof cur !== 'object') return null;
@@ -192,174 +200,253 @@ function nested(obj: FCDoc, ...path: string[]): FCDoc | null {
   return (cur as FCDoc) ?? null;
 }
 
-function toDate(obj: FCDoc | string | null): string | null {
-  if (!obj) return null;
-  if (typeof obj === 'string') return obj.slice(0, 10);
-  const { year, month, day } = obj as { year?: number; month?: number; day?: number };
-  if (year && month && day) return `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+/** Freightcom dates arrive either as {year,month,day} or as an ISO string. */
+function toDate(v: unknown): string | null {
+  if (!v) return null;
+  if (typeof v === 'string') return v.slice(0, 10);
+  if (typeof v === 'object') {
+    const { year, month, day } = v as { year?: number; month?: number; day?: number };
+    if (year && month && day) {
+      return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    }
+  }
   return null;
 }
 
-function mapStatus(state: string | null): string {
-  if (!state) return 'booked';
-  const s = state.toLowerCase();
-  if (s.includes('transit') || s.includes('in-transit')) return 'in_transit';
-  if (s.includes('deliver')) return 'delivered';
-  if (s.includes('exception') || s.includes('error')) return 'exception';
-  if (s.includes('missing') || s.includes('lost')) return 'missing';
-  if (s.includes('cancel')) return 'cancelled';
-  return 'booked';
+const toIso = (d: string | null) => (d ? new Date(`${d}T00:00:00Z`).toISOString() : null);
+
+/** Runs `fn` over `items` with a bounded number in flight. */
+async function mapPool<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const out: R[] = new Array(items.length);
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) {
+      const i = next++;
+      out[i] = await fn(items[i]);
+    }
+  }));
+  return out;
 }
 
 Deno.serve(async (req: Request) => {
-  if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
-  let probeOnly = false;
-  try {
-    const body = await req.json().catch(() => ({})) as { probe?: boolean };
-    probeOnly = body?.probe === true;
-  } catch { /* no body = normal run */ }
-  try { return await handle(probeOnly); }
+  const body = await req.json().catch(() => ({})) as { probe?: boolean; limit?: number };
+  try { return await handle(body?.probe === true, body?.limit); }
   catch (err) {
-    return json({ error: `Uncaught: ${(err as Error)?.message ?? String(err)}` }, 500);
+    return json({ ok: false, error: `Uncaught: ${(err as Error)?.message ?? String(err)}` }, 500);
   }
 });
 
-async function handle(probeOnly: boolean): Promise<Response> {
+async function handle(probeOnly: boolean, limit?: number): Promise<Response> {
   const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
   const serviceKey  = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
   const apiKey      = Deno.env.get('FREIGHTCOM_API_KEY');
   const baseUrlEnv  = Deno.env.get('FREIGHTCOM_BASE_URL');
   const baseUrl     = baseUrlEnv ?? DEFAULT_BASE_URL;
 
-  if (!apiKey) return json({ error: 'FREIGHTCOM_API_KEY not configured' }, 500);
+  if (!apiKey) return json({ ok: false, error: 'FREIGHTCOM_API_KEY not configured' }, 500);
 
   const admin = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
 
-  const probes: Probe[] = [];
-  const docs = await fetchFinanceDocs(baseUrl, apiKey, probes);
-  const shipmentIds = extractShipmentIds(docs);
+  // 1. Reconciliation set — everything already on the dashboard.
+  const { data: existingRows, error: existingErr } = await admin
+    .from('shipments')
+    .select('freightcom_shipment_id, raw_payload')
+    .not('freightcom_shipment_id', 'is', null);
+  if (existingErr) return json({ ok: false, error: `Reading shipments: ${existingErr.message}` }, 500);
 
-  // Environment/credential facts that make a zero-result run interpretable.
+  const stored = new Map<string, FCDoc | null>(
+    (existingRows ?? []).map((r) => [
+      String((r as { freightcom_shipment_id: string }).freightcom_shipment_id),
+      (r as { raw_payload: FCDoc | null }).raw_payload,
+    ]),
+  );
+
+  // 2. Discovery set — shipments named by finance documents.
+  const probes: Probe[] = [];
+  const { docs, authOk } = await fetchFinanceDocs(baseUrl, apiKey, probes);
+  const invoiceIds = extractShipmentIds(docs);
+
+  const warnings: string[] = [];
+  if (!authOk) {
+    warnings.push(
+      `Freightcom rejected the credential on ${baseUrl}. No costs can be synced until ` +
+      `FREIGHTCOM_API_KEY and FREIGHTCOM_BASE_URL name the same environment.`,
+    );
+  }
+  if (baseUrlEnv === undefined) {
+    warnings.push(
+      `FREIGHTCOM_BASE_URL is unset — defaulting to the ssd-test sandbox. The live ` +
+      `account is at ${LIVE_BASE_URL}; set the var explicitly so the environment is ` +
+      `not implied.`,
+    );
+  }
+
   const diagnostics = {
     base_url: baseUrl,
     base_url_from_env: baseUrlEnv !== undefined,
+    environment: baseUrl === LIVE_BASE_URL ? 'live' : 'sandbox',
     api_key_len: apiKey.length,
+    existing_rows: stored.size,
+    invoice_ids: invoiceIds.size,
     probes,
   };
 
   if (probeOnly) {
-    return json({ ok: true, probe: true, invoices_fetched: docs.length,
-                  shipment_ids_found: shipmentIds.size, diagnostics });
+    return json({ ok: authOk, probe: true, invoices_fetched: docs.length,
+                  shipment_ids_found: invoiceIds.size, warnings, diagnostics });
   }
 
+  // A credential the API refuses can only produce a run that looks like "nothing
+  // to do". Stop here rather than reporting a healthy zero.
+  if (!authOk) {
+    return json({ ok: false, error: 'Freightcom authentication failed', warnings, diagnostics }, 502);
+  }
+
+  // Invoice metadata keyed by shipment, used when the per-shipment invoice call
+  // returns nothing but the document list already named a total.
   const invoiceByShipment = new Map<string, FCDoc>();
   for (const doc of docs) {
     const sid = str(doc, 'shipment_id', 'shipmentId', 'freight_shipment_id');
     if (sid) invoiceByShipment.set(sid, doc);
     const lines = (doc['line_items'] ?? doc['lineItems'] ?? doc['items'] ?? doc['shipments'] ?? []) as FCDoc[];
-    for (const line of lines) {
+    for (const line of Array.isArray(lines) ? lines : []) {
       const lsid = str(line, 'shipment_id', 'shipmentId', 'id');
       if (lsid) invoiceByShipment.set(lsid, doc);
     }
   }
 
-  let upserted = 0;
-  let errors   = 0;
+  const allIds = [...new Set([...stored.keys(), ...invoiceIds])];
+  const cap = Math.max(0, Math.min(limit ?? MAX_SHIPMENTS, MAX_SHIPMENTS));
+  const targets = allIds.slice(0, cap);
+  if (allIds.length > targets.length) {
+    warnings.push(`${allIds.length - targets.length} shipment(s) not processed this run (cap ${cap}).`);
+  }
 
-  for (const shipmentId of shipmentIds) {
+  let upserted = 0, costed = 0, notFound = 0, errors = 0;
+
+  const results = await mapPool(targets, CONCURRENCY, async (shipmentId) => {
     try {
-      const s = await fetchShipment(baseUrl, apiKey, shipmentId);
-      if (!s) { errors++; continue; }
+      const { doc: s, status } = await fetchShipment(baseUrl, apiKey, shipmentId);
+      if (!s) return status === 404 ? 'not_found' : 'error';
 
       const invoiceDocs = await fetchShipmentInvoices(baseUrl, apiKey, shipmentId);
       const inv: FCDoc = invoiceDocs[0] ?? invoiceByShipment.get(shipmentId) ?? {};
 
-      const trackingNum = str(s, 'primary_tracking_number', 'primaryTrackingNumber', 'tracking_number');
-      const carrier     = str(s, 'carrier_name', 'carrierName', 'carrier');
-      const service     = str(s, 'service_name', 'serviceName', 'service');
-      const state       = str(s, 'state', 'status');
-      const labelUrl    = (s['labels'] as FCDoc[] | undefined)?.[0]?.['url'] as string | null ?? null;
+      // ── Cost ────────────────────────────────────────────────────────────
+      // What Freightcom actually invoiced. Authoritative: reweighs, fuel and
+      // residential surcharges routinely push it past the booking quote.
+      const billed = splitCurrency(
+        money(inv, 'total_amount', 'totalAmount', 'total', 'amount', 'amount_cad')
+        ?? money(s, 'total_amount', 'totalAmount'),
+      );
+      // The quote captured at booking. Kept separate so the dashboard can say
+      // which of the two numbers it is showing.
+      const quoted = cadOnly(
+        money(s, 'rate_cad', 'rate', 'quoted_rate') ?? money(nested(s, 'total'), 'value'),
+      );
 
-      const bookedAt    = toDate(nested(s, 'created_at') ?? nested(s, 'booked_at') ?? nested(s, 'createdAt') ?? (s['created_at'] as string | null));
-      const pickedUpAt  = toDate(nested(s, 'picked_up_at') ?? nested(s, 'pickedUpAt') ?? (s['picked_up_at'] as string | null));
-      const deliveredAt = toDate(nested(s, 'delivered_at') ?? nested(s, 'deliveredAt') ?? (s['delivered_at'] as string | null));
-      const estDelivery = toDate(nested(s, 'estimated_delivery') ?? nested(s, 'estimatedDelivery') ?? (s['estimated_delivery'] as string | null));
+      const charges = (inv['charges'] ?? inv['surcharges'] ?? []) as FCDoc[];
+      const parts = breakdown(Array.isArray(charges) ? charges : []);
 
+      // ── Addresses, packaging ────────────────────────────────────────────
       const orig = nested(s, 'details', 'origin', 'address') ?? {};
       const dest = nested(s, 'details', 'destination', 'address') ?? {};
 
       const pkgs = (nested(s, 'details', 'packaging_properties', 'packages') as unknown as FCDoc[] | null) ?? [];
-      const totalWeightKg = pkgs.reduce((sum, p) => sum + (num(nested(p, 'measurements', 'weight'), 'value') ?? 0), 0) || null;
-      const cuboid = pkgs[0] ? nested(pkgs[0] as FCDoc, 'measurements', 'cuboid') : null;
-      const dimensions = cuboid ? { l: num(cuboid, 'l'), w: num(cuboid, 'w'), h: num(cuboid, 'h') } : null;
+      const weight = pkgs.reduce(
+        (sum, p) => sum + (num(nested(p, 'measurements', 'weight'), 'value') ?? 0), 0,
+      ) || null;
+      const cuboid = pkgs[0] ? nested(pkgs[0], 'measurements', 'cuboid') : null;
+      const dimensions = cuboid
+        ? { l: num(cuboid, 'l'), w: num(cuboid, 'w'), h: num(cuboid, 'h') }
+        : null;
 
-      const billedCad = num(inv, 'total_amount', 'totalAmount', 'total', 'amount_cad')
-                     ?? num(s,   'total_amount', 'totalAmount');
-      const invNumber = str(inv, 'invoice_number', 'invoiceNumber', 'id', 'document_id');
-      const invDate   = toDate(nested(inv, 'invoice_date') ?? nested(inv, 'date') ?? nested(inv, 'document_date') ?? (inv['invoice_date'] as string | null));
-
-      const charges = ((inv['charges'] ?? inv['surcharges'] ?? []) as FCDoc[]);
-      let baseCad = null as number | null, fuelCad = null as number | null;
-      let resCad  = null as number | null, remoteCad = null as number | null;
-      const otherSurcharges: { name: string; amount_cad: number }[] = [];
-      for (const charge of charges) {
-        const name = str(charge, 'name', 'description', 'type') ?? '';
-        const amt  = num(charge, 'amount', 'value');
-        if (amt === null) continue;
-        const nl = name.toLowerCase();
-        if (nl.includes('base') || nl.includes('freight')) baseCad = amt;
-        else if (nl.includes('fuel')) fuelCad = amt;
-        else if (nl.includes('residential') || nl.includes('resi')) resCad = amt;
-        else if (nl.includes('remote') || nl.includes('rural')) remoteCad = amt;
-        else otherSurcharges.push({ name, amount_cad: amt });
-      }
-
-      // Quoted rate. Falls back to the invoiced total so the Rate column is
-      // never empty for a shipment we have a real cost for.
-      const rateCad = num(s, 'rate_cad', 'rate', 'quoted_rate')
-                   ?? num(nested(s, 'total'), 'value')
-                   ?? billedCad;
-      const transitDays = (s['transit_time_days'] ?? s['transitTimeDays'] ?? null) as number | null;
+      const state    = str(s, 'state', 'status');
+      const invDate  = toDate(inv['invoice_date'] ?? inv['date'] ?? inv['document_date']);
+      const bookedAt = toDate(s['created_at'] ?? s['booked_at'] ?? s['createdAt']);
 
       const row = {
         freightcom_shipment_id: shipmentId,
-        carrier: carrier ?? '', service: service ?? '',
-        status: mapStatus(state), rate_cad: rateCad, transit_days: transitDays,
-        label_url: labelUrl, primary_tracking_number: trackingNum,
+        carrier: str(s, 'carrier_name', 'carrierName', 'carrier'),
+        service: str(s, 'service_name', 'serviceName', 'service'),
+        status: mapStatus(state),
+        freightcom_status: state,
+        status_synced_at: new Date().toISOString(),
+        rate_cad: quoted,
+        transit_days: (s['transit_time_days'] ?? s['transitTimeDays'] ?? null) as number | null,
+        label_url: (s['labels'] as FCDoc[] | undefined)?.[0]?.['url'] as string | null ?? null,
+        primary_tracking_number: str(s, 'primary_tracking_number', 'primaryTrackingNumber', 'tracking_number'),
         origin_city: str(orig, 'city'), origin_province: str(orig, 'province', 'state'),
-        origin_postal: str(orig, 'postal_code', 'postalCode', 'zip'), origin_country: str(orig, 'country') ?? 'CA',
+        origin_postal: str(orig, 'postal_code', 'postalCode', 'zip'), origin_country: str(orig, 'country'),
         dest_city: str(dest, 'city'), dest_province: str(dest, 'province', 'state'),
-        dest_postal: str(dest, 'postal_code', 'postalCode', 'zip'), dest_country: str(dest, 'country') ?? 'CA',
-        weight_kg: totalWeightKg, dimensions_cm: dimensions,
-        billed_cad: billedCad, base_charge_cad: baseCad, fuel_surcharge_cad: fuelCad,
-        residential_surcharge_cad: resCad, remote_surcharge_cad: remoteCad,
-        other_surcharges: otherSurcharges.length ? otherSurcharges : null,
-        invoice_number: invNumber, invoice_date: invDate,
-        invoiced_at: invDate ? new Date(invDate).toISOString() : null,
-        booked_at: bookedAt ? new Date(bookedAt).toISOString() : new Date().toISOString(),
-        picked_up_at: pickedUpAt ? new Date(pickedUpAt).toISOString() : null,
-        estimated_delivery: estDelivery,
-        delivered_at: deliveredAt ? new Date(deliveredAt).toISOString() : null,
-        synced_at: new Date().toISOString(), raw_payload: s,
+        dest_postal: str(dest, 'postal_code', 'postalCode', 'zip'), dest_country: str(dest, 'country'),
+        weight_kg: weight, dimensions_cm: dimensions,
+        billed_cad: billed.cad, billed_amount: billed.amount, billed_currency: billed.currency,
+        ...parts,
+        invoice_number: str(inv, 'invoice_number', 'invoiceNumber', 'id', 'document_id'),
+        invoice_date: invDate,
+        invoiced_at: toIso(invDate),
+        booked_at: toIso(bookedAt),
+        picked_up_at: toIso(toDate(s['picked_up_at'] ?? s['pickedUpAt'])),
+        estimated_delivery: toDate(s['estimated_delivery'] ?? s['estimatedDelivery']),
+        delivered_at: toIso(toDate(s['delivered_at'] ?? s['deliveredAt'])),
+        synced_at: new Date().toISOString(),
+        raw_payload: mergeRawPayload(stored.get(shipmentId), s),
       };
 
-      await admin.from('shipments').upsert(row, { onConflict: 'freightcom_shipment_id' });
-      upserted++;
+      // Prune before writing: a field the API omitted came through as null, and
+      // writing it back would erase whatever is stored — an operator-entered
+      // tracking number, a carrier from the manual import.
+      const patch = pruneNulls(row) as Record<string, unknown>;
+      // carrier/service are NOT NULL with no default, so a first insert has to
+      // supply them even when Freightcom didn't name them. On an update they
+      // stay pruned and the stored values survive.
+      if (!stored.has(shipmentId)) {
+        patch.carrier ??= '';
+        patch.service ??= '';
+      }
+
+      const { error } = await admin
+        .from('shipments')
+        .upsert(patch, { onConflict: 'freightcom_shipment_id' });
+      if (error) {
+        console.error(`Upsert failed for ${shipmentId}: ${error.message}`);
+        return 'error';
+      }
+      return billed.amount !== null ? 'costed' : 'upserted';
     } catch (e) {
       console.error(`Error processing shipment ${shipmentId}:`, e);
-      errors++;
+      return 'error';
     }
+  });
+
+  for (const r of results) {
+    if (r === 'costed')        { upserted++; costed++; }
+    else if (r === 'upserted')   upserted++;
+    else if (r === 'not_found')  notFound++;
+    else                         errors++;
+  }
+
+  // Every id unknown to the host is the signature of pointing a valid credential
+  // at the wrong environment. It is not a quiet "nothing to do" — report it as a
+  // failed run so cron.job_run_details and any alerting see it.
+  const allMissing = targets.length > 0 && notFound === targets.length;
+  if (allMissing) {
+    warnings.push(
+      `None of the ${targets.length} shipment ids exist on ${baseUrl}. These are live ` +
+      `Freightcom transaction numbers — the sandbox host does not know them.`,
+    );
   }
 
   await admin.rpc('match_shipment_serials');
   await admin.rpc('match_shipment_orders');
 
+  const ok = errors === 0 && !allMissing;
   return json({
-    ok: true,
+    ok,
     invoices_fetched: docs.length,
-    shipment_ids_found: shipmentIds.size,
-    upserted,
-    errors,
-    diagnostics,
-  });
+    shipments_targeted: targets.length,
+    upserted, costed, not_found: notFound, errors,
+    warnings, diagnostics,
+  }, ok ? 200 : 502);
 }
