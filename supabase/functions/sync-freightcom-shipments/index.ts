@@ -8,7 +8,7 @@
 // the diagnostics below added. Behaviour is otherwise unchanged.
 //
 // Discovery strategy:
-//   1. POST /finance/documents (wide date range) → invoice list with shipment IDs
+//   1. GET /finance/documents?start_date&end_date → invoice list with shipment IDs
 //   2. GET /shipment/{id} per discovered ID → full details
 //   3. GET /finance/invoices-for-shipment-id/{id} → cost breakdown
 //   4. match_shipment_serials() / match_shipment_orders() to link units + orders
@@ -73,45 +73,42 @@ function envelope(data: unknown): FCDoc[] | null {
   return null;
 }
 
+// Freightcom's finance document list.
+//
+// Verified against the API on 2026-08-06 (freightcom-auth-probe):
+//   GET /finance/documents?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD  → 200
+//   …&start_date only                    → 400 {"end_date":"missing"}
+//   …ISO-8601 datetimes instead of dates  → 400 {"start_date":"missing"}
+//   POST /finance/documents               → 403 (AWS SigV4 complaint — the route
+//                                           has no POST method; GET-only)
+//
+// The previous implementation sent from_year/from_month/from_day + to_* and
+// tried POST first, so it earned a 403 then a 400 on every run and reported
+// "0 invoices". Both parameters are required and both must be plain dates.
 async function fetchFinanceDocs(
   baseUrl: string, apiKey: string, probes: Probe[],
 ): Promise<FCDoc[]> {
-  const to   = new Date();
-  const from = new Date(Date.now() - DAYS_BACK * 86_400_000);
-  const toObj   = { year: to.getUTCFullYear(),   month: to.getUTCMonth() + 1,   day: to.getUTCDate() };
-  const fromObj = { year: from.getUTCFullYear(), month: from.getUTCMonth() + 1, day: from.getUTCDate() };
-
-  const record = async (call: string, res: Response): Promise<unknown | null> => {
-    const text = await res.text();
-    probes.push({ call, status: res.status, ok: res.ok, body_snippet: text.slice(0, 300) });
-    if (!res.ok) return null;
-    try { return JSON.parse(text); } catch { return null; }
-  };
-
-  const postRes = await fetch(`${baseUrl}/finance/documents`, {
-    method: 'POST',
-    headers: { Authorization: apiKey, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ from: fromObj, to: toObj }),
-  });
-  const postData = await record('POST /finance/documents', postRes);
-  if (postData !== null) {
-    const rows = envelope(postData);
-    if (rows) return rows;
-  }
+  const end   = new Date();
+  const start = new Date(Date.now() - DAYS_BACK * 86_400_000);
+  const asDate = (d: Date) => d.toISOString().slice(0, 10);
 
   const params = new URLSearchParams({
-    from_year:  String(fromObj.year),  from_month: String(fromObj.month),  from_day: String(fromObj.day),
-    to_year:    String(toObj.year),    to_month:   String(toObj.month),    to_day:   String(toObj.day),
+    start_date: asDate(start),
+    end_date:   asDate(end),
   });
-  const getRes = await fetch(`${baseUrl}/finance/documents?${params}`, {
+  const res = await fetch(`${baseUrl}/finance/documents?${params}`, {
     headers: { Authorization: apiKey },
   });
-  const getData = await record('GET /finance/documents', getRes);
-  if (getData !== null) {
-    const rows = envelope(getData);
-    if (rows) return rows;
-  }
-  return [];
+  const text = await res.text();
+  probes.push({
+    call: `GET /finance/documents?start_date=${asDate(start)}&end_date=${asDate(end)}`,
+    status: res.status, ok: res.ok, body_snippet: text.slice(0, 300),
+  });
+  if (!res.ok) return [];
+  try {
+    const rows = envelope(JSON.parse(text));
+    return rows ?? [];
+  } catch { return []; }
 }
 
 function extractShipmentIds(docs: FCDoc[]): Set<string> {
