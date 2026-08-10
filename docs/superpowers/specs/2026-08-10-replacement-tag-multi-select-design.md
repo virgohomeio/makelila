@@ -108,35 +108,31 @@ currently do:
 .update({ replacement_order_id: row.id, status: 'queued_for_replacement' })
 ```
 
-Replace with a read-modify-write that appends the tag and leaves `status` alone.
-A shared helper keeps both sites honest:
+Drop the `status` key so the operator's status survives, and append the tag
+through an **atomic RPC**:
 
 ```ts
-/** Add 'queued_for_replacement' to a ticket's tags without touching its status
- *  or disturbing tags the operator set. Deduped. */
-async function tagTicketQueuedForReplacement(ticketId: string, orderId: string): Promise<void>
+.update({ replacement_order_id: row.id })          // status no longer touched
+await supabase.rpc('add_ticket_tag', { p_ticket_id: input.ticket_id, p_tag: 'queued_for_replacement' });
 ```
 
-It reads `tags`, unions in `queued_for_replacement`, and writes back together
-with `replacement_order_id` in one update.
+A read-modify-write in TypeScript would be a TOCTOU race — a concurrent operator
+tag edit could be lost. Two SQL functions do it atomically instead, following the
+`decrement_part_on_hand` precedent (`20260604220000`):
 
-Race note: this is a read-modify-write, not an atomic array append. Two
-concurrent replacement creations against the same ticket could drop one
-operator's concurrent tag edit. Acceptable — replacements are created one at a
-time by one operator from the ticket panel, and the tag set is small and
-idempotent. Not worth an RPC.
+```sql
+add_ticket_tag(p_ticket_id uuid, p_tag text)     -- array_append, no-op if present
+remove_ticket_tag(p_ticket_id uuid, p_tag text)  -- array_remove, no-op if absent
+```
+
+Both `security invoker` so ticket RLS still applies (unlike `decrement_part_on_hand`,
+which is `security definer` because it writes the shared parts table). Both
+idempotent, so retries are safe.
 
 ### 6. Auto-clear on ship and cancel — `lib/orders.ts`
 
-Symmetric helper:
-
-```ts
-/** Remove 'queued_for_replacement' from a ticket's tags. No-op when absent.
- *  Leaves every other tag and the ticket's status alone. */
-async function untagTicketQueuedForReplacement(ticketId: string): Promise<void>
-```
-
-Called from two places:
+`await supabase.rpc('remove_ticket_tag', { p_ticket_id, p_tag: 'queued_for_replacement' })`,
+called from two places:
 
 - **`releaseAndDeleteReplacement()`** (~L684) — in the block that already nulls
   `replacement_order_id`. This covers *both* cancel paths:
@@ -167,7 +163,8 @@ message text. Tickets it would have marked queued become `in_progress`.
 
 ### 8. Backfill migration
 
-`supabase/migrations/<ts>_ticket_queued_replacement_to_tag.sql`:
+One migration carries both the two RPCs from §5 and the backfill below —
+`supabase/migrations/20260810120000_ticket_queued_replacement_to_tag.sql`:
 
 ```sql
 UPDATE service_tickets
