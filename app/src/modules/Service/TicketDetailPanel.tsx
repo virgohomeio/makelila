@@ -4,10 +4,10 @@ import ReplacementPickerModal from './ReplacementPickerModal';
 import { useCustomers, sendFollowupSms } from '../../lib/customers';
 import {
   type ServiceTicket, type IssueArea, type TicketCategory,
-  STATUS_META, CATEGORY_META, PRIORITY_META, TICKET_STATUSES,
+  STATUS_META, CATEGORY_META, PRIORITY_META, TICKET_STATUSES, WORKFLOW_STATUSES,
   statusMeta, priorityMeta, sourceLabel, topicLabel, slaChip,
   ISSUE_AREAS, ISSUE_AREA_LABEL,
-  updateTicketStatus, reassignTicketOwner, setTicketPriority, setTicketIssueArea, setTicketCategory,
+  updateTicketStatus, updateTicketTags, reassignTicketOwner, setTicketPriority, setTicketIssueArea, setTicketCategory,
   setRepairFields, reclassifyTicket, deleteTicket, updateTicketSubject, setTicketDescription,
   markDiagnosisLinkSent, setLinearIssueUrl, setGitHubIssueUrl,
   useCustomerLifecycle, warrantyState,
@@ -768,9 +768,11 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
         <div className={styles.detailSection}>
           <div className={styles.detailSectionLabel}>Status</div>
           <div className={styles.actionsRow}>
-            {TICKET_STATUSES.map(tag => {
+            {WORKFLOW_STATUSES.map(tag => {
               // Single-select: every button reflects and sets the ticket's real
               // `status`, so the checked button always matches the status pill.
+              // 'queued_for_replacement' is absent by design — it lives in the
+              // Tags row below so it can coexist with any status.
               //   • Action Needed (waiting_on_us) is the default → auto-selected;
               //     clicking it to deselect moves the ticket to In Progress.
               //   • Complete (closed) closes / reopens.
@@ -795,6 +797,34 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
                     }
                   }}
                 >{active ? '✓ ' : ''}{m.label}</button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className={styles.detailSection}>
+          <div
+            className={styles.detailSectionLabel}
+            title="Multi-select labels, independent of the workflow status above. 'Queued for Replacement' is applied automatically when a replacement order is created, and cleared when it ships or is cancelled."
+          >Tags</div>
+          <div className={styles.actionsRow}>
+            {TICKET_STATUSES.map(tag => {
+              const active = (ticket.tags ?? []).includes(tag);
+              const m = STATUS_META[tag];
+              return (
+                <button
+                  key={tag}
+                  className={active ? styles.btnPrimary : styles.btnSecondary}
+                  disabled={busy}
+                  style={active ? { background: m.color, borderColor: m.color } : { color: m.color }}
+                  onClick={() => {
+                    // Toggle, then re-derive from TICKET_STATUSES so the stored
+                    // array keeps a stable order regardless of click order.
+                    const current = new Set(ticket.tags ?? []);
+                    if (active) current.delete(tag); else current.add(tag);
+                    void run(updateTicketTags(ticket.id, TICKET_STATUSES.filter(s => current.has(s))));
+                  }}
+                >{active ? '✓ ' : ''}🏷 {m.label}</button>
               );
             })}
           </div>

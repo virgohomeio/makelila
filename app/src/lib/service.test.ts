@@ -1,5 +1,20 @@
 import { describe, it, expect } from 'vitest';
-import { onboardingAnchorDate, shouldNotifyAssignment, ownerFirstName } from './service';
+import {
+  onboardingAnchorDate, shouldNotifyAssignment, ownerFirstName,
+  TICKET_STATUSES, WORKFLOW_STATUSES,
+} from './service';
+
+describe('WORKFLOW_STATUSES', () => {
+  it('is every ticket status except queued_for_replacement', () => {
+    expect(WORKFLOW_STATUSES).toEqual(
+      TICKET_STATUSES.filter(s => s !== 'queued_for_replacement'),
+    );
+  });
+
+  it('keeps queued_for_replacement in the full vocabulary (DB values + tags)', () => {
+    expect(TICKET_STATUSES).toContain('queued_for_replacement');
+  });
+});
 
 describe('onboardingAnchorDate', () => {
   it('uses the latest onboarding call date, sliced to YYYY-MM-DD', () => {

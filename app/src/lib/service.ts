@@ -22,6 +22,14 @@ export const TICKET_STATUSES = [
   'queued_for_replacement', 'call_scheduled', 'on_hold', 'closed',
 ] as const;
 export type TicketStatus = (typeof TICKET_STATUSES)[number];
+/** The workflow states an operator can set as a ticket's `status`.
+ *  Excludes 'queued_for_replacement': that is a TAG now, set automatically when
+ *  a replacement order is created, so it can coexist with any status. It stays
+ *  in TICKET_STATUSES because that is both the DB CHECK vocabulary (legacy rows)
+ *  and the tag vocabulary. */
+export const WORKFLOW_STATUSES = TICKET_STATUSES.filter(
+  (s): s is TicketStatus => s !== 'queued_for_replacement',
+);
 export type TicketPriority = 'low' | 'normal' | 'high' | 'urgent';
 export type OnboardingStatus =
   | 'not_scheduled' | 'scheduled' | 'completed' | 'no_show' | 'skipped';
