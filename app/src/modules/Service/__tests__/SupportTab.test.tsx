@@ -192,6 +192,20 @@ describe('SupportTab replacement queue labels', () => {
     expect(tableText()).toContain('Queued for Replacement');
   });
 
+  // The marker now lives in `tags`, not `status` (migration
+  // 20260810120000) — a ticket can be In Progress AND queued for a
+  // replacement at the same time. Both must render.
+  it('renders the replacement kind from a TAG, not just a status', () => {
+    ticketsToReturn = [mkTicket({
+      id: 't7', customer_id: 'c7', status: 'in_progress',
+      tags: ['queued_for_replacement'], replacement_order_id: 'o7',
+    })];
+    replacementOrdersToReturn = [mkReplacementOrder('o7', [{ kind: 'unit_pending', batch: 'P100X' }])];
+    render(<SupportTab />);
+    expect(tableText()).toContain('Queued for P100X Replacement');
+    expect(tableText()).toContain('In Progress');
+  });
+
   it('labels an unassigned (customer-less) ticket row too', () => {
     ticketsToReturn = [mkTicket({
       id: 't6', customer_id: null, status: 'queued_for_replacement', replacement_order_id: 'o6',
