@@ -22,14 +22,6 @@ export const TICKET_STATUSES = [
   'queued_for_replacement', 'call_scheduled', 'on_hold', 'closed',
 ] as const;
 export type TicketStatus = (typeof TICKET_STATUSES)[number];
-/** The workflow states an operator can set as a ticket's `status`.
- *  Excludes 'queued_for_replacement': that is a TAG now, set automatically when
- *  a replacement order is created, so it can coexist with any status. It stays
- *  in TICKET_STATUSES because that is both the DB CHECK vocabulary (legacy rows)
- *  and the tag vocabulary. */
-export const WORKFLOW_STATUSES = TICKET_STATUSES.filter(
-  (s): s is TicketStatus => s !== 'queued_for_replacement',
-);
 export type TicketPriority = 'low' | 'normal' | 'high' | 'urgent';
 export type OnboardingStatus =
   | 'not_scheduled' | 'scheduled' | 'completed' | 'no_show' | 'skipped';
@@ -989,6 +981,74 @@ export async function updateTicketStatus(id: string, status: TicketStatus): Prom
   // reserved and may be about to ship, so it's left intact. Best-effort: the
   // ticket is already closed, so a failure here shouldn't fail the status
   // change (the operator can still cancel manually from Order Review).
+  if (status === 'closed') {
+    await cancelPendingReplacementsForTicket(id).catch((e: Error) => {
+      console.warn('Auto-cancel of queued replacement on ticket close failed (non-fatal):', e.message);
+    });
+  }
+}
+
+/** Every status a ticket currently holds. Statuses are MULTI-SELECT: a ticket
+ *  can be In Progress and Queued for Replacement at the same time.
+ *
+ *  The set is the union of the `status` column and the `tags` array, in
+ *  TICKET_STATUSES order. Reading the union (rather than trusting `tags` alone)
+ *  keeps every pre-existing row correct — rows written before multi-select, and
+ *  rows whose tag was applied by the replacement workflow's add_ticket_tag RPC,
+ *  both carry the primary in `status` and only the extras in `tags`. */
+export function ticketStatusSet(
+  t: { status: TicketStatus; tags?: TicketStatus[] | null },
+): TicketStatus[] {
+  const held = new Set<TicketStatus>(
+    [t.status, ...(t.tags ?? [])].filter(Boolean) as TicketStatus[],
+  );
+  const known = TICKET_STATUSES.filter(s => held.has(s));
+  // Values the DB holds that this build doesn't recognize. The frontend and DB
+  // status vocabularies have drifted apart before (a 10-state UI against a
+  // 7-state DB white-screened the Support tab), so pass unknowns through to
+  // statusMeta's humanize fallback rather than silently dropping them.
+  const unknown = [...held].filter(s => !(TICKET_STATUSES as readonly string[]).includes(s));
+  return [...known, ...unknown];
+}
+
+/** Replace the full set of statuses on a ticket.
+ *
+ *  `tags` stores the whole set; `status` mirrors the primary (first in
+ *  TICKET_STATUSES order) because open-vs-closed is what the rest of the app
+ *  keys off — closed_at, SLA resolution, the Kanban, follow-ups, and every open
+ *  count read that single column.
+ *
+ *  'closed' is exclusive: a Complete ticket holds no other status, and closing
+ *  carries side effects (closed_at stamp, auto-cancel of a queued replacement).
+ *  Clearing every status falls back to Action Needed rather than leaving a
+ *  ticket in no state at all. */
+export async function setTicketStatuses(id: string, next: TicketStatus[]): Promise<void> {
+  const held = new Set(next);
+  const ordered: TicketStatus[] = held.has('closed')
+    ? ['closed']
+    : TICKET_STATUSES.filter(s => held.has(s));
+  const final: TicketStatus[] = ordered.length > 0 ? ordered : ['waiting_on_us'];
+  const status = final[0];
+
+  // Stamp closed_at on close, and CLEAR it on reopen so a later re-close gets a
+  // fresh timestamp (the DB trigger only coalesces, so without clearing, a
+  // reopened-then-reclosed ticket would keep its stale original close date).
+  const { error } = await supabase
+    .from('service_tickets')
+    .update({
+      status,
+      tags: final,
+      closed_at: status === 'closed' ? new Date().toISOString() : null,
+    })
+    .eq('id', id);
+  if (error) throw error;
+  await logAction('ticket_status_changed', id, final.join(', '),
+    { entityType: 'ticket', entityId: id });
+
+  // Marking a ticket complete means an 'awaiting' replacement queued for it is
+  // no longer needed. Scoped to 'awaiting' only: a 'ready' replacement has a
+  // unit reserved and may be about to ship. Best-effort — the ticket is already
+  // closed, so a failure here shouldn't fail the status change.
   if (status === 'closed') {
     await cancelPendingReplacementsForTicket(id).catch((e: Error) => {
       console.warn('Auto-cancel of queued replacement on ticket close failed (non-fatal):', e.message);

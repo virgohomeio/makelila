@@ -6,13 +6,13 @@ import type { ServiceTicket } from '../../../lib/service';
 
 const render = (ui: ReactElement) => rtlRender(<MemoryRouter>{ui}</MemoryRouter>);
 
-const updateTicketTagsMock = vi.fn(() => Promise.resolve());
+const setTicketStatusesMock = vi.fn(() => Promise.resolve());
 
 vi.mock('../../../lib/service', async () => {
   const actual = await vi.importActual<typeof import('../../../lib/service')>('../../../lib/service');
   return {
     ...actual,
-    updateTicketTags: (...args: unknown[]) => updateTicketTagsMock(...(args as [])),
+    setTicketStatuses: (...args: unknown[]) => setTicketStatusesMock(...(args as [])),
     useCustomerLifecycle: vi.fn(() => ({ row: null, loading: false })),
     useTicketMessages: vi.fn(() => ({ messages: [], loading: false })),
     useClassificationLog: vi.fn(() => ({ entries: [], loading: false })),
@@ -82,61 +82,87 @@ function mkTicket(partial: Partial<ServiceTicket> = {}): ServiceTicket {
   } as ServiceTicket;
 }
 
-/** The buttons under a given section label ("Status" / "Tags"). Each section is
- *  `<div><div>{label}</div><div class=actionsRow>…buttons…</div></div>`. */
-const sectionButtons = (label: string) =>
-  within(screen.getByText(label).parentElement!).getAllByRole('button');
+/** The buttons under the "Status" section label. The section is
+ *  `<div><div>Status</div><div class=actionsRow>…buttons…</div></div>`. */
+const statusButtons = () =>
+  within(screen.getByText('Status').parentElement!).getAllByRole('button');
+const statusButton = (label: string) =>
+  statusButtons().find(b => (b.textContent ?? '').includes(label))!;
 
-describe('TicketDetailPanel — Status row', () => {
-  beforeEach(() => updateTicketTagsMock.mockClear());
+describe('TicketDetailPanel — Status is multi-select', () => {
+  beforeEach(() => setTicketStatusesMock.mockClear());
 
-  it('does not offer Queued for Replacement as a settable status', () => {
-    render(<TicketDetailPanel ticket={mkTicket({ status: 'in_progress' })} onClose={() => {}} />);
-    const labels = sectionButtons('Status').map(b => b.textContent ?? '');
-    expect(labels.some(l => l.includes('Queued for Replacement'))).toBe(false);
-    // The other six workflow states are still settable.
-    expect(labels.some(l => l.includes('Action Needed'))).toBe(true);
-    expect(labels.some(l => l.includes('On Hold'))).toBe(true);
-  });
-});
-
-describe('TicketDetailPanel — Tags row', () => {
-  beforeEach(() => updateTicketTagsMock.mockClear());
-
-  it('offers Queued for Replacement as a tag', () => {
+  it('offers every status, including Queued for Replacement, in ONE row', () => {
     render(<TicketDetailPanel ticket={mkTicket()} onClose={() => {}} />);
-    const labels = sectionButtons('Tags').map(b => b.textContent ?? '');
-    expect(labels.some(l => l.includes('Queued for Replacement'))).toBe(true);
+    const labels = statusButtons().map(b => b.textContent ?? '');
+    for (const expected of [
+      'Action Needed', 'In Progress', 'Awaiting Customer Response',
+      'Queued for Replacement', 'Call Scheduled', 'On Hold', 'Complete',
+    ]) {
+      expect(labels.some(l => l.includes(expected))).toBe(true);
+    }
+    // There is no separate Tags control — statuses ARE the tags.
+    expect(screen.queryByText('Tags')).toBeNull();
   });
 
-  it('adds a tag alongside an existing one — the reported bug', () => {
+  it('checks every status the ticket holds, from status + tags', () => {
     render(<TicketDetailPanel
       ticket={mkTicket({ status: 'in_progress', tags: ['queued_for_replacement'] })}
       onClose={() => {}}
     />);
-    const onHold = sectionButtons('Tags').find(b => (b.textContent ?? '').includes('On Hold'))!;
-    fireEvent.click(onHold);
-    expect(updateTicketTagsMock).toHaveBeenCalledWith('t1', ['queued_for_replacement', 'on_hold']);
+    expect(statusButton('In Progress').textContent).toContain('✓');
+    expect(statusButton('Queued for Replacement').textContent).toContain('✓');
+    expect(statusButton('On Hold').textContent).not.toContain('✓');
   });
 
-  it('toggles a tag off without disturbing the others', () => {
+  it('adds a status alongside an existing one — the reported bug', () => {
+    render(<TicketDetailPanel
+      ticket={mkTicket({ status: 'in_progress', tags: ['queued_for_replacement'] })}
+      onClose={() => {}}
+    />);
+    fireEvent.click(statusButton('On Hold'));
+    expect(setTicketStatusesMock).toHaveBeenCalledWith(
+      't1', ['in_progress', 'queued_for_replacement', 'on_hold'],
+    );
+  });
+
+  it('removes a status without disturbing the others', () => {
     render(<TicketDetailPanel
       ticket={mkTicket({ status: 'in_progress', tags: ['queued_for_replacement', 'on_hold'] })}
       onClose={() => {}}
     />);
-    const onHold = sectionButtons('Tags').find(b => (b.textContent ?? '').includes('On Hold'))!;
-    fireEvent.click(onHold);
-    expect(updateTicketTagsMock).toHaveBeenCalledWith('t1', ['queued_for_replacement']);
+    fireEvent.click(statusButton('On Hold'));
+    expect(setTicketStatusesMock).toHaveBeenCalledWith(
+      't1', ['in_progress', 'queued_for_replacement'],
+    );
   });
 
-  it('stores tags in TICKET_STATUSES order regardless of click order', () => {
+  it('keeps the auto-applied replacement status when another is added', () => {
+    // The replacement workflow tags the ticket; the operator then marks it
+    // Awaiting Customer Response. Both must survive.
     render(<TicketDetailPanel
-      ticket={mkTicket({ status: 'in_progress', tags: ['on_hold'] })}
+      ticket={mkTicket({ status: 'waiting_on_us', tags: ['queued_for_replacement'] })}
       onClose={() => {}}
     />);
-    const inProgress = sectionButtons('Tags').find(b => (b.textContent ?? '').includes('In Progress'))!;
-    fireEvent.click(inProgress);
-    // in_progress precedes on_hold in TICKET_STATUSES, so it leads.
-    expect(updateTicketTagsMock).toHaveBeenCalledWith('t1', ['in_progress', 'on_hold']);
+    fireEvent.click(statusButton('Awaiting Customer Response'));
+    const [, next] = setTicketStatusesMock.mock.calls[0] as unknown as [string, string[]];
+    expect(next).toContain('queued_for_replacement');
+    expect(next).toContain('waiting_on_customer');
+  });
+
+  it('Complete is exclusive — selecting it clears the other statuses', () => {
+    render(<TicketDetailPanel
+      ticket={mkTicket({ status: 'in_progress', tags: ['queued_for_replacement'] })}
+      onClose={() => {}}
+    />);
+    fireEvent.click(statusButton('Complete'));
+    expect(setTicketStatusesMock).toHaveBeenCalledWith('t1', ['closed']);
+  });
+
+  it('deselecting Complete reopens the ticket', () => {
+    render(<TicketDetailPanel ticket={mkTicket({ status: 'closed' })} onClose={() => {}} />);
+    fireEvent.click(statusButton('Complete'));
+    // Empty set — setTicketStatuses falls back to Action Needed.
+    expect(setTicketStatusesMock).toHaveBeenCalledWith('t1', []);
   });
 });

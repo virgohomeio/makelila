@@ -3,7 +3,7 @@ import {
   useServiceTickets, useTicketsClosedSince, createTicket, syncGmailTickets,
   STATUS_META, TICKET_STATUSES, TOPIC_LABEL,
   statusMeta, priorityMeta, sourceLabel, topicLabel, slaChip,
-  ISSUE_AREAS, ISSUE_AREA_LABEL,
+  ISSUE_AREAS, ISSUE_AREA_LABEL, ticketStatusSet,
   type TicketStatus, type TicketPriority, type TicketTopic, type ServiceTicket,
   type IssueArea,
 } from '../../lib/service';
@@ -335,20 +335,16 @@ export function SupportTab() {
   );
 }
 
-/** Status pill(s) for one status / status-tag value. "Queued for Replacement"
- *  expands into one pill per replacement kind — "Queued for P100X Replacement",
- *  "Queued for PARTS Replacement" — so the row says what the customer is
- *  actually waiting on. Falls back to the plain status label when the linked
- *  replacement order can't be resolved. */
-function StatusPills({ value, queueKinds, variant = 'status' }: {
-  value: string;
-  queueKinds: string[];
-  variant?: 'status' | 'tag';
-}) {
+/** Status pill(s) for one status value. "Queued for Replacement" expands into
+ *  one pill per replacement kind — "Queued for P100X Replacement", "Queued for
+ *  PARTS Replacement" — so the row says what the customer is actually waiting
+ *  on. Falls back to the plain status label when the linked replacement order
+ *  can't be resolved.
+ *
+ *  Statuses are multi-select, so a row renders several of these; they all share
+ *  one pill style (there is no separate "tag" styling — a status is a status). */
+function StatusPills({ value, queueKinds }: { value: string; queueKinds: string[] }) {
   const m = statusMeta(value);
-  const style = variant === 'tag'
-    ? { background: '#fff', color: m.color, border: `1px solid ${m.color}` }
-    : { background: m.bg, color: m.color };
   const labels = value === 'queued_for_replacement' && queueKinds.length > 0
     ? queueKinds.map(queuedForReplacementLabel)
     : [m.label];
@@ -358,9 +354,8 @@ function StatusPills({ value, queueKinds, variant = 'status' }: {
         <span
           key={label}
           className={styles.pill}
-          style={style}
-          title={variant === 'tag' ? 'Status tag' : undefined}
-        >{variant === 'tag' ? `🏷 ${label}` : label}</span>
+          style={{ background: m.bg, color: m.color }}
+        >{label}</span>
       ))}
     </>
   );
@@ -373,18 +368,15 @@ function CustomerGroupRow({ g, queueKindsByTicket, selected, onClick }: {
   onClick: () => void;
 }) {
   const ageHours = (Date.now() - new Date(g.lastActivity).getTime()) / 3_600_000;
-  // Surface the state of EVERY open ticket, not just the newest one:
-  //   • each distinct status across open tickets → a status pill
-  //   • each distinct tag across open tickets → a 🏷 chip (skipping any that a
-  //     status pill already shows)
-  // When all tickets are closed there are no open ones, so fall back to the
-  // rollup status — which reads "Complete".
+  // Surface every status held across EVERY open ticket, not just the newest
+  // one. Statuses are multi-select, so one ticket can contribute several (e.g.
+  // In Progress + Queued for Replacement); ticketStatusSet unions the `status`
+  // column with `tags` per ticket. When all tickets are closed there are no
+  // open ones, so fall back to the rollup status — which reads "Complete".
   const openTickets = g.tickets.filter(t => t.status !== 'closed');
   const statuses = openTickets.length > 0
-    ? [...new Set(openTickets.map(t => t.status))]
+    ? [...new Set(openTickets.flatMap(t => ticketStatusSet(t)))]
     : [g.rollupStatus];
-  const tags = [...new Set(openTickets.flatMap(t => t.tags ?? []))]
-    .filter(tag => !statuses.includes(tag));
   // Distinct owners across this customer's open tickets — a profile can hold
   // several tickets split across people, so show each as a chip.
   const owners = [...new Set(
@@ -405,7 +397,6 @@ function CustomerGroupRow({ g, queueKindsByTicket, selected, onClick }: {
       <td>{formatAge(ageHours)}</td>
       <td>
         {statuses.map(v => <StatusPills key={v} value={v} queueKinds={queueKinds} />)}
-        {tags.map(tag => <StatusPills key={tag} value={tag} queueKinds={queueKinds} variant="tag" />)}
       </td>
       <td>
         {owners.length > 0 ? (
@@ -715,9 +706,8 @@ function TicketRow({ t, queueKinds, selected, onClick }: {
       <td><span className={styles.pill} style={{ background: '#f7fafc', color: p.color }}>{p.label}</span></td>
       <td><SlaChipPill label={sla.label} color={sla.color} /></td>
       <td>
-        <StatusPills value={t.status} queueKinds={queueKinds} />
-        {(t.tags ?? []).map(tag => (
-          <StatusPills key={tag} value={tag} queueKinds={queueKinds} variant="tag" />
+        {ticketStatusSet(t).map(s => (
+          <StatusPills key={s} value={s} queueKinds={queueKinds} />
         ))}
         {t.status === 'closed' && t.closed_at && (
           <div className={styles.closedDate} title={`Closed ${new Date(t.closed_at).toLocaleString()}`}>

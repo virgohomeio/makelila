@@ -1,18 +1,37 @@
 import { describe, it, expect } from 'vitest';
 import {
   onboardingAnchorDate, shouldNotifyAssignment, ownerFirstName,
-  TICKET_STATUSES, WORKFLOW_STATUSES,
+  ticketStatusSet,
 } from './service';
 
-describe('WORKFLOW_STATUSES', () => {
-  it('is every ticket status except queued_for_replacement', () => {
-    expect(WORKFLOW_STATUSES).toEqual(
-      TICKET_STATUSES.filter(s => s !== 'queued_for_replacement'),
-    );
+describe('ticketStatusSet', () => {
+  it('unions the status column with the tags array', () => {
+    expect(ticketStatusSet({ status: 'in_progress', tags: ['queued_for_replacement'] }))
+      .toEqual(['in_progress', 'queued_for_replacement']);
   });
 
-  it('keeps queued_for_replacement in the full vocabulary (DB values + tags)', () => {
-    expect(TICKET_STATUSES).toContain('queued_for_replacement');
+  it('returns TICKET_STATUSES order, not tag insertion order', () => {
+    expect(ticketStatusSet({ status: 'on_hold', tags: ['queued_for_replacement', 'in_progress'] }))
+      .toEqual(['in_progress', 'queued_for_replacement', 'on_hold']);
+  });
+
+  it('never duplicates a status that is in both columns', () => {
+    expect(ticketStatusSet({ status: 'in_progress', tags: ['in_progress', 'on_hold'] }))
+      .toEqual(['in_progress', 'on_hold']);
+  });
+
+  it('handles rows written before multi-select (null / empty tags)', () => {
+    expect(ticketStatusSet({ status: 'waiting_on_us', tags: null })).toEqual(['waiting_on_us']);
+    expect(ticketStatusSet({ status: 'waiting_on_us', tags: [] })).toEqual(['waiting_on_us']);
+  });
+
+  // The frontend and DB status vocabularies have drifted before and
+  // white-screened the Support tab. Unknown values must survive to the
+  // humanize fallback, never be filtered away.
+  it('passes through statuses this build does not recognize', () => {
+    expect(ticketStatusSet({ status: 'triaging' as never, tags: [] })).toEqual(['triaging']);
+    expect(ticketStatusSet({ status: 'in_progress', tags: ['triaging' as never] }))
+      .toEqual(['in_progress', 'triaging']);
   });
 });
 
