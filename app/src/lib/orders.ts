@@ -681,11 +681,19 @@ async function releaseAndDeleteReplacement(order: CancellableReplacement, note: 
     }
   }
 
-  // Drop the ticket back-link so nothing dangles once the order is gone.
+  // Drop the ticket back-link so nothing dangles once the order is gone, and
+  // clear the queued marker — the customer is no longer waiting on this
+  // replacement. Best-effort on the tag: the order is being deleted either way,
+  // so a tag failure must not strand it (same precedent as the auto-cancel on
+  // ticket close).
   if (order.linked_ticket_id) {
     await supabase.from('service_tickets')
       .update({ replacement_order_id: null })
       .eq('id', order.linked_ticket_id);
+    const { error: tagErr } = await supabase.rpc('remove_ticket_tag', {
+      p_ticket_id: order.linked_ticket_id, p_tag: 'queued_for_replacement',
+    });
+    if (tagErr) console.warn('Clearing queued_for_replacement tag failed (non-fatal):', tagErr.message);
   }
 
   // Delete the order. select() back so an RLS-blocked delete (0 rows, no error)
@@ -927,13 +935,19 @@ export async function createReplacementOrder(input: ReplacementOrderInput):
     .single();
   if (insErr || !row) throw new Error(`Create order: ${insErr?.message ?? 'no row'}`);
 
-  // 2. Back-link the ticket and mark it queued_for_replacement so it surfaces
-  //    with that status in Support Tickets while the replacement is in flight.
+  // 2. Back-link the ticket and TAG it queued_for_replacement. The tag (not the
+  //    status) carries the marker, so whatever workflow state the operator set
+  //    survives — and they can layer other tags on top.
   const { error: tErr } = await supabase
     .from('service_tickets')
-    .update({ replacement_order_id: row.id, status: 'queued_for_replacement' })
+    .update({ replacement_order_id: row.id })
     .eq('id', input.ticket_id);
   if (tErr) throw new Error(`Link ticket: ${tErr.message}`);
+
+  const { error: tagErr } = await supabase.rpc('add_ticket_tag', {
+    p_ticket_id: input.ticket_id, p_tag: 'queued_for_replacement',
+  });
+  if (tagErr) throw new Error(`Tag ticket: ${tagErr.message}`);
 
   // 3. Decrement parts.on_hand atomically per line item. The RPC takes a
   //    transaction-level lock on the parts row and floors at 0, so two
@@ -1017,13 +1031,19 @@ export async function createPendingReplacement(input: ReplacementOrderInput):
     .single();
   if (insErr || !row) throw new Error(`Create pending replacement: ${insErr?.message ?? 'no row'}`);
 
-  // Back-link + queue the ticket. No stock decrement / unit reservation —
-  // the order is awaiting stock/batch and consumes nothing until promoted.
+  // Back-link + TAG the ticket queued_for_replacement (its status is left
+  // alone). No stock decrement / unit reservation — the order is awaiting
+  // stock/batch and consumes nothing until promoted.
   const { error: tErr } = await supabase
     .from('service_tickets')
-    .update({ replacement_order_id: row.id, status: 'queued_for_replacement' })
+    .update({ replacement_order_id: row.id })
     .eq('id', input.ticket_id);
   if (tErr) throw new Error(`Link ticket: ${tErr.message}`);
+
+  const { error: tagErr } = await supabase.rpc('add_ticket_tag', {
+    p_ticket_id: input.ticket_id, p_tag: 'queued_for_replacement',
+  });
+  if (tagErr) throw new Error(`Tag ticket: ${tagErr.message}`);
 
   await logAction(
     'replacement_create',
@@ -1092,7 +1112,7 @@ export async function markOrderShipped(
   const shippingCostUsd = shippingCost;
   const { data: row, error: rErr } = await supabase
     .from('orders')
-    .select('order_ref, customer_email')
+    .select('order_ref, customer_email, kind, linked_ticket_id')
     .eq('id', orderId)
     .single();
   if (rErr || !row) throw new Error(`Read order: ${rErr?.message ?? 'not found'}`);
@@ -1109,6 +1129,16 @@ export async function markOrderShipped(
   await logAction('order_shipped', row.order_ref, `shipping $${shippingCostUsd.toFixed(2)} ${currency}`,
     undefined,
     { klaviyoEvent: 'Order Shipped', ...((row.customer_email as string | null) ? { klaviyoEmail: row.customer_email as string } : {}) });
+
+  // A shipped replacement is no longer "queued" — drop the tag so the Support
+  // list doesn't show a stale chip. Best-effort: the shipment is already
+  // recorded and must not be failed by a tag write.
+  if (row.kind === 'replacement' && row.linked_ticket_id) {
+    const { error: tagErr } = await supabase.rpc('remove_ticket_tag', {
+      p_ticket_id: row.linked_ticket_id, p_tag: 'queued_for_replacement',
+    });
+    if (tagErr) console.warn('Clearing queued_for_replacement tag failed (non-fatal):', tagErr.message);
+  }
 }
 
 /** Shipped orders that have not yet been marked delivered.
