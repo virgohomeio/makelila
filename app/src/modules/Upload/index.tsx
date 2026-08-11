@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 import {
-  bulkUploadAndMatch, useReviewQueueInvoices, assignInvoice, getInvoiceSignedUrl, deleteInvoice,
+  bulkUploadAndMatch, useReviewQueueInvoices, assignInvoice, openInvoiceInNewTab, deleteInvoice,
   type BulkUploadResult, type CustomerInvoice, type InvoiceDocType, type InvoiceMatchStatus,
 } from '../../lib/invoices';
 import { useCustomers } from '../../lib/customers';
@@ -162,10 +162,8 @@ function StatusBadge({ status }: { status: InvoiceMatchStatus }) {
 
 function ViewLink({ path }: { path: string }) {
   const open = async () => {
-    try {
-      const url = await getInvoiceSignedUrl(path);
-      window.open(url, '_blank', 'noopener');
-    } catch (e) { alert((e as Error).message); }
+    try { await openInvoiceInNewTab(path); }
+    catch (e) { alert((e as Error).message); }
   };
   return <button className={styles.linkBtn} onClick={() => void open()}>View PDF</button>;
 }

@@ -18,7 +18,7 @@ import { NavCard } from '../../components/NavCard';
 import { MobileBackHeader } from '../../components/MobileBackHeader';
 import { RouteErrorBoundary } from '../../components/RouteErrorBoundary';
 import { useCustomerEvents, useCustomerEngagement, eventMeta, dormancyBadge } from '../../lib/customerEvents';
-import { useCustomerInvoices, getInvoiceSignedUrl } from '../../lib/invoices';
+import { useCustomerInvoices, openInvoiceInNewTab } from '../../lib/invoices';
 import styles from './Customers.module.css';
 
 type Tab = 'directory' | 'profitability' | 'journey' | 'fleet';
@@ -993,10 +993,8 @@ function CustomerInvoicesSection({ customerId }: { customerId: string }) {
   const { invoices, loading } = useCustomerInvoices(customerId);
 
   const view = async (path: string) => {
-    try {
-      const url = await getInvoiceSignedUrl(path);
-      window.open(url, '_blank', 'noopener');
-    } catch (e) { alert((e as Error).message); }
+    try { await openInvoiceInNewTab(path); }
+    catch (e) { alert((e as Error).message); }
   };
 
   return (

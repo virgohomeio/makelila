@@ -32,7 +32,7 @@ const UNIT_STAGES: { value: ReturnStatus; label: string }[] = [
 ];
 import { useQueuedReplacements, holdReplacement, type Order } from '../../lib/orders';
 import { useOnboardDates, useCustomerIdByEmail, useCustomers, refundUsageWindow, resolveRefundParties, type RefundParties, type RefundUsageWindow } from '../../lib/customers';
-import { useInvoicesByCustomerEmail, getInvoiceSignedUrl, type CustomerInvoice } from '../../lib/invoices';
+import { useInvoicesByCustomerEmail, openInvoiceInNewTab, type CustomerInvoice } from '../../lib/invoices';
 import {
   useServiceTickets, useTicketMessages, useTicketNotes, STATUS_META as TICKET_STATUS_META,
   sourceLabel, topicLabel, type ServiceTicket,
@@ -1005,10 +1005,8 @@ function RefundInvoices({ invoices, fallbackOrderRef }: {
   fallbackOrderRef?: string | null;
 }) {
   const view = async (path: string) => {
-    try {
-      const url = await getInvoiceSignedUrl(path);
-      window.open(url, '_blank', 'noopener');
-    } catch (e) { alert((e as Error).message); }
+    try { await openInvoiceInNewTab(path); }
+    catch (e) { alert((e as Error).message); }
   };
 
   return (

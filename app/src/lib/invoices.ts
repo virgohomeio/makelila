@@ -155,6 +155,35 @@ export async function getInvoiceSignedUrl(storagePath: string): Promise<string> 
   return data.signedUrl;
 }
 
+/** Open an invoice PDF in a new tab.
+ *
+ *  Every "View" button used to sign the URL first and only then call
+ *  window.open — by which point the await had ended the user-gesture window,
+ *  so browsers blocked the tab silently (Safari always, Chrome depending on
+ *  how long signing took). The click looked like it did nothing at all.
+ *
+ *  So claim the tab synchronously inside the gesture, then point it at the
+ *  signed URL once we have it. Note the open() deliberately omits 'noopener':
+ *  that feature makes the call return null by spec, and we need the handle —
+ *  the opener is severed manually instead. If the browser blocked even the
+ *  synchronous open, fall back to navigating the current tab so the operator
+ *  still gets the PDF. */
+export async function openInvoiceInNewTab(storagePath: string): Promise<void> {
+  const tab = window.open('', '_blank');
+  if (tab) {
+    try { tab.opener = null; } catch { /* cross-origin guard; harmless */ }
+    try { tab.document.write('Loading invoice…'); } catch { /* not writable; fine */ }
+  }
+  try {
+    const url = await getInvoiceSignedUrl(storagePath);
+    if (tab && !tab.closed) tab.location.replace(url);
+    else window.location.assign(url);
+  } catch (e) {
+    try { tab?.close(); } catch { /* already gone */ }
+    throw e;
+  }
+}
+
 export async function deleteInvoice(id: string, storagePath: string): Promise<void> {
   const { error: dbErr } = await supabase
     .from('customer_invoices')
