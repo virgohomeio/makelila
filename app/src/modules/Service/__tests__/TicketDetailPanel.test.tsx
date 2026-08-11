@@ -97,7 +97,7 @@ describe('TicketDetailPanel — Status is multi-select', () => {
     const labels = statusButtons().map(b => b.textContent ?? '');
     for (const expected of [
       'Action Needed', 'In Progress', 'Awaiting Customer Response',
-      'Queued for Replacement', 'Call Scheduled', 'On Hold', 'Complete',
+      'Queued for Replacement', 'Return/Refund', 'Call Scheduled', 'On Hold', 'Complete',
     ]) {
       expect(labels.some(l => l.includes(expected))).toBe(true);
     }

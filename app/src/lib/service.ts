@@ -17,9 +17,13 @@ export type TicketSource =
 
 export type TicketKind = 'conversation' | 'ticket';
 export type InboxDisposition = 'promoted' | 'sales' | 'follow_up' | 'dismissed';
+// Order is load-bearing: statuses are multi-select, and the FIRST one a ticket
+// holds in this order becomes its primary `status`. 'return_refund' sits with
+// 'queued_for_replacement' — both are post-sale escalations that outrank the
+// scheduling states below them.
 export const TICKET_STATUSES = [
   'waiting_on_us', 'in_progress', 'waiting_on_customer',
-  'queued_for_replacement', 'call_scheduled', 'on_hold', 'closed',
+  'queued_for_replacement', 'return_refund', 'call_scheduled', 'on_hold', 'closed',
 ] as const;
 export type TicketStatus = (typeof TICKET_STATUSES)[number];
 export type TicketPriority = 'low' | 'normal' | 'high' | 'urgent';
@@ -230,6 +234,7 @@ export const STATUS_META: Record<TicketStatus, { label: string; color: string; b
   in_progress:            { label: 'In Progress',            color: '#c05621', bg: '#fffaf0' },
   waiting_on_customer:    { label: 'Awaiting Customer Response', color: '#718096', bg: '#f7fafc' },
   queued_for_replacement: { label: 'Queued for Replacement', color: '#553c9a', bg: '#faf5ff' },
+  return_refund:          { label: 'Return/Refund',          color: '#b83280', bg: '#fff5f7' },
   call_scheduled:         { label: 'Call Scheduled',         color: '#2c7a7b', bg: '#e6fffa' },
   on_hold:                { label: 'On Hold',                color: '#b7791f', bg: '#fffff0' },
   closed:                 { label: 'Complete',               color: '#a0aec0', bg: '#edf2f7' },
@@ -1091,10 +1096,17 @@ export function ticketStatusSet(
 
 /** Replace the full set of statuses on a ticket.
  *
- *  `tags` stores the whole set; `status` mirrors the primary (first in
- *  TICKET_STATUSES order) because open-vs-closed is what the rest of the app
- *  keys off — closed_at, SLA resolution, the Kanban, follow-ups, and every open
- *  count read that single column.
+ *  `status` holds the PRIMARY (first in TICKET_STATUSES order) because
+ *  open-vs-closed is what the rest of the app keys off — closed_at, SLA
+ *  resolution, the Kanban, follow-ups, and every open count read that single
+ *  column. `tags` holds ONLY THE EXTRAS, never the primary.
+ *
+ *  That split matters: the Gmail sync and the reclassifier write `status`
+ *  directly. If `tags` also carried the primary, such a write would strand the
+ *  old primary in `tags` and the ticket would silently accumulate a stale
+ *  status. With extras-only, a bare `status` write just swaps the primary and
+ *  leaves the operator's extras intact. A DB trigger enforces the invariant for
+ *  writers that don't come through here.
  *
  *  'closed' is exclusive: a Complete ticket holds no other status, and closing
  *  carries side effects (closed_at stamp, auto-cancel of a queued replacement).
@@ -1115,7 +1127,7 @@ export async function setTicketStatuses(id: string, next: TicketStatus[]): Promi
     .from('service_tickets')
     .update({
       status,
-      tags: final,
+      tags: final.slice(1),
       closed_at: status === 'closed' ? new Date().toISOString() : null,
     })
     .eq('id', id);

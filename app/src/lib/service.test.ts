@@ -15,6 +15,11 @@ describe('ticketStatusSet', () => {
       .toEqual(['in_progress', 'queued_for_replacement', 'on_hold']);
   });
 
+  it('includes the Return/Refund status', () => {
+    expect(ticketStatusSet({ status: 'return_refund', tags: ['on_hold'] }))
+      .toEqual(['return_refund', 'on_hold']);
+  });
+
   it('never duplicates a status that is in both columns', () => {
     expect(ticketStatusSet({ status: 'in_progress', tags: ['in_progress', 'on_hold'] }))
       .toEqual(['in_progress', 'on_hold']);

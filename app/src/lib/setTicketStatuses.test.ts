@@ -32,34 +32,54 @@ describe('setTicketStatuses', () => {
     fromMock.mockReturnValue({ update: updateMock } as any);
   });
 
-  it('stores the whole set in tags and mirrors the primary into status', async () => {
+  // The primary lives in `status`; `tags` holds only the extras. If the primary
+  // were in both, a bare `status` write from the Gmail sync or the reclassifier
+  // would strand the old primary in `tags` as a phantom extra status.
+  it('puts the primary in status and only the EXTRAS in tags', async () => {
     await setTicketStatuses('t1', ['in_progress', 'queued_for_replacement']);
-    expect(patch().tags).toEqual(['in_progress', 'queued_for_replacement']);
     // in_progress precedes queued_for_replacement in TICKET_STATUSES.
     expect(patch().status).toBe('in_progress');
+    expect(patch().tags).toEqual(['queued_for_replacement']);
+  });
+
+  it('leaves tags empty for a single status', async () => {
+    await setTicketStatuses('t1', ['on_hold']);
+    expect(patch().status).toBe('on_hold');
+    expect(patch().tags).toEqual([]);
   });
 
   it('normalizes to TICKET_STATUSES order regardless of click order', async () => {
     await setTicketStatuses('t1', ['on_hold', 'queued_for_replacement', 'in_progress']);
-    expect(patch().tags).toEqual(['in_progress', 'queued_for_replacement', 'on_hold']);
     expect(patch().status).toBe('in_progress');
+    expect(patch().tags).toEqual(['queued_for_replacement', 'on_hold']);
   });
 
   it('dedupes a status passed twice', async () => {
     await setTicketStatuses('t1', ['on_hold', 'on_hold']);
-    expect(patch().tags).toEqual(['on_hold']);
+    expect(patch().status).toBe('on_hold');
+    expect(patch().tags).toEqual([]);
   });
 
   it('falls back to Action Needed when every status is cleared', async () => {
     await setTicketStatuses('t1', []);
     expect(patch().status).toBe('waiting_on_us');
-    expect(patch().tags).toEqual(['waiting_on_us']);
+    expect(patch().tags).toEqual([]);
   });
 
   it('treats closed as exclusive — it clears the rest', async () => {
     await setTicketStatuses('t1', ['in_progress', 'queued_for_replacement', 'closed']);
     expect(patch().status).toBe('closed');
-    expect(patch().tags).toEqual(['closed']);
+    expect(patch().tags).toEqual([]);
+  });
+
+  it('ranks return_refund above the scheduling states but below in_progress', async () => {
+    await setTicketStatuses('t1', ['on_hold', 'return_refund', 'call_scheduled']);
+    expect(patch().status).toBe('return_refund');
+    expect(patch().tags).toEqual(['call_scheduled', 'on_hold']);
+
+    await setTicketStatuses('t2', ['return_refund', 'in_progress']);
+    expect(updateMock.mock.calls[1][0].status).toBe('in_progress');
+    expect(updateMock.mock.calls[1][0].tags).toEqual(['return_refund']);
   });
 
   it('stamps closed_at on close and cancels a queued replacement', async () => {
