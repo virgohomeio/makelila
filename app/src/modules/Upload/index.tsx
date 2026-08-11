@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from 'react';
 import {
   bulkUploadAndMatch, useReviewQueueInvoices, assignInvoice, openInvoiceInNewTab, deleteInvoice,
+  reextractInvoiceAmounts,
   type BulkUploadResult, type CustomerInvoice, type InvoiceDocType, type InvoiceMatchStatus,
 } from '../../lib/invoices';
 import { useCustomers } from '../../lib/customers';
@@ -143,6 +144,8 @@ export default function Upload() {
         </div>
       )}
 
+      <ReextractAmounts />
+
       <ReviewQueue
         invoices={reviewQueue}
         loading={queueLoading}
@@ -150,6 +153,61 @@ export default function Upload() {
         customerName={customerName}
         onAssigned={reloadQueue}
       />
+    </div>
+  );
+}
+
+// Invoices ingested before the Payment/Total Due split carry no payment_cad, so
+// a refund compiled from them still opens at whatever total_cad holds — $0.00
+// on any invoice that was already paid. This re-reads the stored PDFs and fills
+// the Payment figure in. Batched by the edge function; loop until a pass stops
+// making progress (PDFs that won't parse would otherwise repeat forever).
+function ReextractAmounts() {
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
+  const [errors, setErrors] = useState<{ file_name: string; error: string }[]>([]);
+
+  const run = async () => {
+    setBusy(true); setStatus('Re-reading…'); setErrors([]);
+    let updated = 0;
+    try {
+      for (;;) {
+        const res = await reextractInvoiceAmounts(20);
+        updated += res.updated;
+        setStatus(`Re-read ${updated} invoice${updated === 1 ? '' : 's'}, ${res.remaining} to go…`);
+        if (res.errors.length) setErrors(prev => [...prev, ...res.errors]);
+        if (res.updated === 0 || res.remaining === 0) {
+          setStatus(`Done — ${updated} invoice${updated === 1 ? '' : 's'} updated`
+            + (res.remaining ? `, ${res.remaining} could not be read` : '.'));
+          break;
+        }
+      }
+    } catch (e) {
+      setStatus(`Failed: ${(e as Error).message}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className={styles.dropCard}>
+      <div className={styles.kindDesc}>
+        <strong>Re-read invoice amounts.</strong> Pulls the "Payment" figure (what the customer
+        actually paid) off invoices already on file, so refund cards open at the right amount
+        instead of the $0.00 that "Total Due" shows on a paid invoice. Safe to re-run — it only
+        touches invoices with no Payment amount yet, and never changes who an invoice is filed under.
+      </div>
+      <button onClick={() => void run()} disabled={busy} className={styles.uploadBtn}>
+        {busy ? 'Re-reading…' : 'Re-read amounts from PDFs'}
+      </button>
+      {status && <div className={styles.pickedList}>{status}</div>}
+      {errors.length > 0 && (
+        <div className={styles.pickedList}>
+          {errors.map((e, i) => (
+            <div key={i} className={styles.errText}>{e.file_name}: {e.error}</div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

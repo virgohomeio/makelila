@@ -3,6 +3,9 @@ import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase } from './supabase';
 import { logAction } from './activityLog';
 import { sendTemplate } from './templates';
+import {
+  invoiceAmountCad, pickRefundBasisInvoice, invoicesForCustomerEmail, type CustomerInvoice,
+} from './invoices';
 
 const APP_BASE_URL = 'https://lila.vip';
 const REFUND_URL = `${APP_BASE_URL}/post-shipment?tab=refunds`;
@@ -924,6 +927,7 @@ export async function submitRefundRequest(input: {
   customer_name: string;
   customer_email?: string;
   refund_amount_usd: number;
+  currency?: RefundCurrency;
   payment_method?: string;
   reason?: string;
   notes?: string;
@@ -965,22 +969,58 @@ export async function submitRefundRequest(input: {
 // carry notes across the compile/uncompile boundary so none are ever lost.
 type PortableNote = { body: string; author_id: string | null; author_name: string | null; created_at: string };
 
-/** Compile a return into a refund request in the Completeness column — WITHOUT
- *  an amount or payment method. Those are set by Finance (Julie) at Finance
- *  Review, then carried to Pedrum in the Refund Queue. Auto-fills the
- *  purchaser/customer from the return; amount starts at 0 for Finance to fill. */
+/** The opening refund amount for a case: what the customer actually paid on
+ *  their sales invoice, in CAD (invoices are issued in CAD). Falls back to any
+ *  amount already recorded on the return, which is denominated in USD.
+ *
+ *  Every card used to open at $0.00 because this read the return's
+ *  refund_amount_usd and nothing else — it is null on most returns, and the
+ *  invoice was never consulted. Finance still confirms and can edit the figure;
+ *  this only saves them re-keying it off the PDF. */
+export async function defaultRefundAmountFromInvoice(
+  email: string | null | undefined,
+  orderRef: string | null | undefined,
+  fallbackUsd: number | null | undefined,
+): Promise<{ amount: number; currency: RefundCurrency; invoice: CustomerInvoice | null }> {
+  if (email?.trim()) {
+    try {
+      const invoices = await invoicesForCustomerEmail(email);
+      const basis = pickRefundBasisInvoice(invoices, orderRef);
+      const amount = basis ? invoiceAmountCad(basis) : null;
+      if (basis && amount != null) return { amount, currency: 'CAD', invoice: basis };
+    } catch (e) {
+      // A lookup failure must not block compiling the case — the operator can
+      // always type the amount in.
+      console.warn('refund amount from invoice failed (non-fatal):', (e as Error).message);
+    }
+  }
+  return { amount: Number(fallbackUsd ?? 0), currency: 'USD', invoice: null };
+}
+
+/** Compile a return into a refund request in the Completeness column, opening
+ *  at the amount the customer paid on their sales invoice (CAD). Finance
+ *  (Julie) confirms or corrects it — and the payment method — at Finance
+ *  Review, then it carries to Pedrum in the Refund Queue. Auto-fills the
+ *  purchaser/customer from the return. */
 export async function compileReturnToRefund(r: ReturnRow): Promise<void> {
   const usePurchaser = r.is_purchaser === false;
+  const email = ((usePurchaser && r.purchaser_email?.trim()) ? r.purchaser_email.trim() : r.customer_email) ?? undefined;
+  const opening = await defaultRefundAmountFromInvoice(email, r.original_order_ref, r.refund_amount_usd);
   const refundId = await submitRefundRequest({
     return_id: r.id,
     // NOTE: don't pass order_id — that column is a UUID FK to orders(id), not the
     // human original_order_ref (e.g. "#1107"). The refund links via return_id.
     customer_name: (usePurchaser && r.purchaser_name?.trim()) ? r.purchaser_name.trim() : r.customer_name,
-    customer_email: ((usePurchaser && r.purchaser_email?.trim()) ? r.purchaser_email.trim() : r.customer_email) ?? undefined,
-    refund_amount_usd: r.refund_amount_usd ?? 0,
+    customer_email: email,
+    refund_amount_usd: opening.amount,
+    currency: opening.currency,
     reason: r.reason ?? undefined,
-    // no payment_method — Finance sets amount + method at Finance Review.
+    // no payment_method — Finance sets the method at Finance Review.
   });
+  if (opening.invoice) {
+    await logAction('refund_amount_from_invoice', refundId,
+      `$${opening.amount.toFixed(2)} CAD from invoice #${opening.invoice.invoice_number}`);
+  }
   // No note copying needed: the case's notes stay on the return and every refund
   // view reads them via useCaseNotes, so the card is unchanged after compile.
   void refundId;
@@ -1450,11 +1490,17 @@ export async function processCancellation(
 
   let refundApprovalId: string | null = null;
   if (createRefund) {
+    // No amount typed in → open at what they paid on the sales invoice (CAD),
+    // same as a return-compiled card, rather than at $0.00.
+    const opening = refundAmount != null
+      ? { amount: refundAmount, currency: 'USD' as RefundCurrency }
+      : await defaultRefundAmountFromInvoice(c.customer_email, c.order_ref, c.order_amount_usd);
     const { data: ra, error: raErr } = await supabase.from('refund_approvals').insert({
       order_id: null,
       customer_name: c.customer_name,
       customer_email: c.customer_email,
-      refund_amount_usd: refundAmount ?? c.order_amount_usd ?? 0,
+      refund_amount_usd: opening.amount,
+      currency: opening.currency,
       payment_method: c.preferred_contact === 'phone' ? 'Credit Card (call to process)' : 'E-Transfer',
       reason: `Order cancellation: ${c.reason ?? 'no reason'}`,
       notes: `Auto-created from order_cancellation ${c.order_ref ?? id}. Customer preferred contact: ${c.preferred_contact ?? '—'}.`,

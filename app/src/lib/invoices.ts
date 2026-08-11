@@ -22,6 +22,14 @@ export type CustomerInvoice = {
   storage_path: string;
   invoice_date: string | null;   // ISO date "YYYY-MM-DD"
   total_cad: number | null;
+  // What the customer actually paid — the invoice's "Payment" line. This, not
+  // total_cad, is what a refund is based on: "Total Due" reads $0.00 once the
+  // payment has been applied, which is why refund cards used to open at $0.00.
+  // Null on invoices ingested before the split, until "Re-read amounts" runs.
+  payment_cad: number | null;
+  // When the PDF was last read for payment_cad — set even when the invoice has
+  // no Payment line, so the backfill doesn't revisit it forever.
+  payment_extracted_at: string | null;
   bill_to_name: string | null;
   match_status: InvoiceMatchStatus;
   match_method: string | null;   // 'order_number' | 'email' | 'name' | 'manual' | null
@@ -37,6 +45,74 @@ export type BulkUploadResult = {
   error?: string;
   extract_error?: string | null;
 };
+
+/** The amount an invoice is worth in CAD, for display and for defaulting a
+ *  refund: the "Payment" figure when we have it, else the invoice total. Both
+ *  can be legitimately absent (unparsed PDF), hence null. Zero is treated as
+ *  "no usable amount" — a $0.00 total is the "Total Due" artefact this column
+ *  pair exists to work around, never a real invoice value. */
+export function invoiceAmountCad(inv: Pick<CustomerInvoice, 'payment_cad' | 'total_cad'>): number | null {
+  for (const v of [inv.payment_cad, inv.total_cad]) {
+    if (v != null && Number(v) > 0) return Number(v);
+  }
+  return null;
+}
+
+/** The invoice to base a refund on for this customer, newest first, preferring
+ *  one whose order_ref matches the return's order. Refund receipts are skipped —
+ *  a refund is priced off the original sale, not off a previous refund. */
+export function pickRefundBasisInvoice(
+  invoices: CustomerInvoice[],
+  orderRef?: string | null,
+): CustomerInvoice | null {
+  const sales = invoices.filter(i => i.document_type === 'invoice' && invoiceAmountCad(i) != null);
+  if (!sales.length) return null;
+  const ref = (orderRef ?? '').trim().replace(/^#/, '');
+  if (ref) {
+    const onOrder = sales.find(i => (i.order_ref ?? '').trim().replace(/^#/, '') === ref);
+    if (onOrder) return onOrder;
+  }
+  return [...sales].sort((a, b) =>
+    (b.invoice_date ?? b.created_at).localeCompare(a.invoice_date ?? a.created_at))[0];
+}
+
+/** One customer's invoices, looked up by email — the same email → customer →
+ *  invoice chain the Refunds tab renders, but as a one-shot query for callers
+ *  outside React (e.g. compiling a return into a refund). */
+export async function invoicesForCustomerEmail(email: string): Promise<CustomerInvoice[]> {
+  const clean = email.trim().toLowerCase();
+  if (!clean) return [];
+  const { data: custs } = await supabase
+    .from('customers').select('id').ilike('email', clean);
+  const ids = ((custs ?? []) as { id: string }[]).map(c => c.id);
+  if (!ids.length) return [];
+  const { data } = await supabase
+    .from('customer_invoices').select('*').in('customer_id', ids);
+  return (data ?? []) as CustomerInvoice[];
+}
+
+/** Re-read amounts from the stored PDFs for invoices never read for a payment
+ *  (i.e. everything ingested before the Payment/Total Due split). One batch per
+ *  call; loop while `updated > 0 && remaining > 0`. Rows whose PDF won't parse
+ *  come back in `stalled`/`errors` and stay unread, so a loop watching only
+ *  `remaining` would never terminate. */
+export type ReextractResult = {
+  processed: number;
+  updated: number;
+  remaining: number;
+  stalled: number;
+  errors: { file_name: string; error: string }[];
+};
+
+export async function reextractInvoiceAmounts(limit = 20): Promise<ReextractResult> {
+  const { data, error } = await supabase.functions.invoke('match-invoice', {
+    body: { reextract: true, limit },
+  });
+  if (error) throw new Error(error.message);
+  const res = data as ReextractResult & { error?: string };
+  if (res?.error) throw new Error(res.error);
+  return res;
+}
 
 export function useCustomerInvoices(customerId: string) {
   const [invoices, setInvoices] = useState<CustomerInvoice[]>([]);

@@ -29,10 +29,16 @@ type MatchInput = {
   document_type?: 'invoice' | 'refund_receipt';
 };
 
+// Re-run extraction over invoices already on file, to pick up fields the
+// original parse never captured (payment_cad). Batched — the caller loops
+// until `remaining` hits 0 — so one invocation never runs past its timeout.
+type ReextractInput = { reextract: true; limit?: number };
+
 type Extracted = {
   invoice_number: string | null;
   invoice_date: string | null;   // ISO YYYY-MM-DD
   total_cad: number | null;
+  payment_cad: number | null;
   shopify_order_number: string | null;
   bill_to_name: string | null;
 };
@@ -55,8 +61,11 @@ Deno.serve(async (req: Request) => {
     return j({ error: 'This function requires an operator JWT — cron-secret not accepted.' }, 403);
   }
 
-  const body = (await req.json()) as MatchInput;
-  const { storage_path, file_name } = body;
+  const body = (await req.json()) as MatchInput | ReextractInput;
+  if ((body as ReextractInput).reextract) {
+    return await reextractBatch(admin, (body as ReextractInput).limit ?? 20);
+  }
+  const { storage_path, file_name } = body as MatchInput;
   const documentType = body.document_type === 'refund_receipt' ? 'refund_receipt' : 'invoice';
   if (!storage_path || !file_name) return j({ error: 'storage_path and file_name required' }, 400);
 
@@ -72,6 +81,7 @@ Deno.serve(async (req: Request) => {
     invoice_number: invoiceNumberFromFilename(file_name),
     invoice_date: null,
     total_cad: null,
+    payment_cad: null,
     shopify_order_number: null,
     bill_to_name: null,
   };
@@ -84,6 +94,7 @@ Deno.serve(async (req: Request) => {
         invoice_number: llm.invoice_number ?? extracted.invoice_number,
         invoice_date: llm.invoice_date,
         total_cad: llm.total_cad,
+        payment_cad: llm.payment_cad,
         shopify_order_number: llm.shopify_order_number,
         bill_to_name: llm.bill_to_name,
       };
@@ -164,6 +175,10 @@ Deno.serve(async (req: Request) => {
       storage_path,
       invoice_date:   extracted.invoice_date,
       total_cad:      extracted.total_cad,
+      payment_cad:    extracted.payment_cad,
+      // Only count the PDF as read for a payment when the LLM actually ran, so
+      // a filename-only fallback still gets picked up by the backfill.
+      payment_extracted_at: extractError ? null : new Date().toISOString(),
       bill_to_name:   extracted.bill_to_name,
       match_status:   matchStatus,
       match_method:   matchMethod,
@@ -178,12 +193,86 @@ Deno.serve(async (req: Request) => {
 
 // ────────────────────────────────────────────────────────────────────────
 
+/** Re-read amounts off invoices already on file. Only rows with no payment_cad
+ *  are touched, so this is resumable and idempotent: the caller keeps calling
+ *  until `remaining` is 0.
+ *
+ *  Deliberately narrow — it writes ONLY the extracted amounts (and a date/number
+ *  that was missing). Customer/order linkage and match_status are operator-
+ *  curated (system-of-record rule) and are never overwritten here, even when
+ *  this parse would resolve them differently. */
+async function reextractBatch(
+  admin: ReturnType<typeof createClient>,
+  limit: number,
+): Promise<Response> {
+  const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY');
+  if (!anthropicKey) return j({ error: 'ANTHROPIC_API_KEY not configured' }, 500);
+
+  // Keyed on "never read for a payment", NOT on "payment_cad is null" — an
+  // invoice with no Payment line legitimately stays null, and would otherwise
+  // be handed back on every pass while later invoices were never reached.
+  const { count: remainingBefore } = await admin
+    .from('customer_invoices')
+    .select('id', { count: 'exact', head: true })
+    .is('payment_extracted_at', null);
+
+  const { data: rows, error } = await admin
+    .from('customer_invoices')
+    .select('id, storage_path, file_name, invoice_number, invoice_date, total_cad')
+    .is('payment_extracted_at', null)
+    .order('created_at', { ascending: false })
+    .limit(Math.min(Math.max(limit, 1), 50));
+  if (error) return j({ error: `Could not list invoices: ${error.message}` }, 500);
+
+  const errors: { file_name: string; error: string }[] = [];
+  let updated = 0;
+
+  for (const row of rows ?? []) {
+    try {
+      const { data: blob, error: dlErr } = await admin.storage
+        .from('customer-invoices').download(row.storage_path as string);
+      if (dlErr || !blob) throw new Error(dlErr?.message ?? 'file missing from bucket');
+      const llm = await claudeExtract(anthropicKey, base64FromArrayBuffer(await blob.arrayBuffer()));
+
+      // payment_cad is what we came for; the rest only fills genuine gaps.
+      const patch: Record<string, unknown> = {
+        payment_cad: llm.payment_cad,
+        payment_extracted_at: new Date().toISOString(),
+      };
+      if (llm.total_cad != null) patch.total_cad = llm.total_cad;
+      if (llm.invoice_date && !row.invoice_date) patch.invoice_date = llm.invoice_date;
+      if (llm.invoice_number && row.invoice_number === '(unknown)') patch.invoice_number = llm.invoice_number;
+
+      const { error: upErr } = await admin
+        .from('customer_invoices').update(patch).eq('id', row.id as string);
+      if (upErr) throw new Error(upErr.message);
+      updated++;
+    } catch (e) {
+      // A PDF that won't parse must not stall the batch — but it also must not
+      // be silently skipped forever, so it is named in the response.
+      errors.push({ file_name: row.file_name as string, error: (e as Error).message });
+    }
+  }
+
+  const processed = (rows ?? []).length;
+  return j({
+    processed,
+    updated,
+    // Rows that errored still have a null payment_cad, so they'd be picked up
+    // again forever; report remaining as what a *successful* pass could still do.
+    remaining: Math.max((remainingBefore ?? processed) - updated, 0),
+    stalled: errors.length,
+    errors,
+  });
+}
+
 async function claudeExtract(apiKey: string, pdfBase64: string): Promise<Extracted> {
   const prompt =
 `You are reading a sales invoice PDF (QuickBooks style). Reply with ONLY a JSON object, no prose, with these fields:
 - "invoice_number": the invoice number as a string (e.g. "1356"), or null.
 - "invoice_date": the invoice DATE in ISO format YYYY-MM-DD. The PDF may show it as DD/MM/YYYY. Null if absent.
-- "total_cad": the total amount due in CAD as a number (no currency symbol, no thousands separators), or null.
+- "total_cad": the invoice TOTAL in CAD — the "Total" line, the full value of the invoice. NOT "Total Due" / "Balance Due", which read $0.00 on an invoice whose payment has already been applied. Number only, no currency symbol, no thousands separators. Null if absent.
+- "payment_cad": the amount on the "Payment" line — what the customer actually paid, in CAD. This is the figure a refund is based on. Same number formatting. Null if the invoice shows no payment.
 - "shopify_order_number": the Shopify order number if it appears anywhere (often in the line-item description, e.g. "Shopify order# 1192" → "1192"). Digits only. Null if absent.
 - "bill_to_name": the customer name in the BILL TO section, or null.`;
 
@@ -222,6 +311,7 @@ async function claudeExtract(apiKey: string, pdfBase64: string): Promise<Extract
     invoice_number: str(p.invoice_number),
     invoice_date: str(p.invoice_date),
     total_cad: num(p.total_cad),
+    payment_cad: num(p.payment_cad),
     shopify_order_number: str(p.shopify_order_number),
     bill_to_name: str(p.bill_to_name),
   };

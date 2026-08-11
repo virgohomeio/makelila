@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   useRefundApprovals, useReturns,
-  submitRefundRequest, compileReturnToRefund, updateRefundAmount, setRefundCurrency, type RefundCurrency, submitToManager, managerApprove, financeApprove, executeRefund, denyRefund, closeRefund,
+  submitRefundRequest, compileReturnToRefund, defaultRefundAmountFromInvoice,
+  updateRefundAmount, setRefundCurrency, type RefundCurrency, submitToManager, managerApprove, financeApprove, executeRefund, denyRefund, closeRefund,
   sendRefundBack, uncompileRefund, type RefundBackTarget,
   confirmPurchaserLinkage, hasValidPurchaserLinkage,
   computeRefundNet, defaultRefundFees,
@@ -32,7 +33,9 @@ const UNIT_STAGES: { value: ReturnStatus; label: string }[] = [
 ];
 import { useQueuedReplacements, holdReplacement, type Order } from '../../lib/orders';
 import { useOnboardDates, useCustomerIdByEmail, useCustomers, refundUsageWindow, resolveRefundParties, type RefundParties, type RefundUsageWindow } from '../../lib/customers';
-import { useInvoicesByCustomerEmail, openInvoiceInNewTab, type CustomerInvoice } from '../../lib/invoices';
+import {
+  useInvoicesByCustomerEmail, openInvoiceInNewTab, invoiceAmountCad, type CustomerInvoice,
+} from '../../lib/invoices';
 import {
   useServiceTickets, useTicketMessages, useTicketNotes, STATUS_META as TICKET_STATUS_META,
   sourceLabel, topicLabel, type ServiceTicket,
@@ -639,6 +642,12 @@ function CurrencyToggle({ refund, editable, onError }: { refund: RefundApproval;
 
 // Editable refund amount + currency toggle. Used on the card head AND in the
 // opened detail panel so both stay identical.
+//
+// `editable` is unconditionally true at both call sites: the amount is the one
+// field on a refund card that is NOT column-gated. Julie confirms the real
+// figure and she doesn't own every column it passes through, and anyone may
+// correct an obviously wrong amount or flip the currency label. Advancing the
+// refund through its approvals stays gated (canFlow / canApproveHere).
 function AmountEditor({ refund, editable, onError, big }: {
   refund: RefundApproval; editable: boolean; onError: (m: string | null) => void; big?: boolean;
 }) {
@@ -1029,8 +1038,13 @@ function RefundInvoices({ invoices, fallbackOrderRef }: {
             <span className={styles.invoiceDate}>
               {inv.invoice_date ? new Date(inv.invoice_date).toLocaleDateString('en-US') : '—'}
             </span>
-            {inv.total_cad != null && (
-              <span className={styles.invoiceAmount}>${Number(inv.total_cad).toFixed(2)} CAD</span>
+            {/* What they paid (the invoice's Payment line), which is what the
+                refund is based on — not Total Due, which is $0.00 once paid. */}
+            {invoiceAmountCad(inv) != null && (
+              <span className={styles.invoiceAmount}
+                title={inv.payment_cad != null ? 'Paid (invoice Payment line)' : 'Invoice total'}>
+                ${invoiceAmountCad(inv)!.toFixed(2)} CAD
+              </span>
             )}
             <button className={styles.invoiceView} onClick={() => void view(inv.storage_path)}>View</button>
           </div>
@@ -1435,7 +1449,7 @@ function RefundCard({
     >
       <div className={styles.refundCardHead}>
         <PartyHeader parties={parties} />
-        <AmountEditor refund={refund} editable={canFlow} onError={onError} />
+        <AmountEditor refund={refund} editable onError={onError} />
       </div>
       {refund.reason && <div className={styles.refundReason}>{refund.reason}</div>}
       {/* The refund method is set by Finance (Julie) at Finance Review and shown
@@ -1768,7 +1782,7 @@ function RefundDetailPanel({
           </div>
           <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 10 }}>
             <span style={{ fontSize: 12, fontWeight: 600, color: '#4a5568' }}>Refund amount:</span>
-            <AmountEditor refund={refund} editable={canFlow} onError={onError} big />
+            <AmountEditor refund={refund} editable onError={onError} big />
           </div>
           <div style={{ marginTop: 6 }}>
             <UsageWindowBadge usage={usage} />
@@ -2195,12 +2209,17 @@ function RequestRefundModal({
     if (!customerName.trim()) return;
     setSubmitting(true); onError(null);
     try {
-      // Amount + payment method are set by Finance (Julie) at Finance Review, not here.
+      // Opens at what the customer paid on their sales invoice (CAD); Finance
+      // (Julie) confirms or corrects that, and sets the method, at Finance Review.
+      const linked = returns.find(x => x.id === returnId) ?? null;
+      const opening = await defaultRefundAmountFromInvoice(
+        customerEmail.trim() || null, linked?.original_order_ref, linked?.refund_amount_usd);
       await submitRefundRequest({
         return_id: returnId || undefined,
         customer_name: customerName.trim(),
         customer_email: customerEmail.trim() || undefined,
-        refund_amount_usd: 0,
+        refund_amount_usd: opening.amount,
+        currency: opening.currency,
         reason: reason.trim() || undefined,
         notes: notes.trim() || undefined,
       });
