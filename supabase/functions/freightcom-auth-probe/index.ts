@@ -1,8 +1,15 @@
 // freightcom-auth-probe — ops diagnostic, read-only.
 //
-// Answers two questions that otherwise require a support ticket to Freightcom:
+// Answers three questions that otherwise require a support ticket to Freightcom:
 //   1. Is FREIGHTCOM_API_KEY a LIVE key or a SANDBOX (ssd-test) key?
 //   2. Does it carry finance/billing scope, or only shipping scope?
+//   3. Are we presenting the credential in the scheme the host expects?
+//
+// (3) was added 2026-08-11. Until then the probe only ever tried a bare
+// `Authorization: <key>` header, so "the key is rejected" and "the key is fine
+// but we send it wrongly" were indistinguishable — and the second is a code bug
+// we could fix, while the first needs Freightcom. Never conclude a key is dead
+// without having ruled the header scheme out.
 //
 // It sends the same credential to both hosts and reports the raw status code
 // per endpoint. Interpretation:
@@ -29,9 +36,21 @@ const HOSTS: { label: string; url: string }[] = [
   { label: 'sandbox', url: 'https://customer-external-api.ssd-test.freightcom.com' },
 ];
 
+/** Every plausible way an API expects a token. If the live host accepts any of
+ *  these, the integration is a header fix away from working rather than blocked
+ *  on procurement. */
+const SCHEMES: { label: string; headers: (key: string) => Record<string, string> }[] = [
+  { label: 'Authorization: <key>',        headers: (k) => ({ Authorization: k }) },
+  { label: 'Authorization: Bearer <key>', headers: (k) => ({ Authorization: `Bearer ${k}` }) },
+  { label: 'Authorization: Token <key>',  headers: (k) => ({ Authorization: `Token ${k}` }) },
+  { label: 'X-API-Key: <key>',            headers: (k) => ({ 'X-API-Key': k }) },
+  { label: 'apikey: <key>',               headers: (k) => ({ apikey: k }) },
+];
+
 type Result = {
   host: string;
   base_url: string;
+  scheme: string;
   call: string;
   status: number | null;
   verdict: string;
@@ -51,20 +70,20 @@ function classify(call: string, status: number | null): string {
 }
 
 async function probe(
-  host: { label: string; url: string }, apiKey: string, call: string,
+  host: { label: string; url: string }, scheme: string, call: string,
   init: RequestInit, path: string,
 ): Promise<Result> {
   try {
     const res = await fetch(`${host.url}${path}`, init);
     const text = await res.text().catch(() => '');
     return {
-      host: host.label, base_url: host.url, call,
+      host: host.label, base_url: host.url, scheme, call,
       status: res.status, verdict: classify(call, res.status),
       body_snippet: text.slice(0, 200),
     };
   } catch (e) {
     return {
-      host: host.label, base_url: host.url, call,
+      host: host.label, base_url: host.url, scheme, call,
       status: null, verdict: classify(call, null),
       body_snippet: (e as Error)?.message?.slice(0, 200) ?? '',
     };
@@ -89,26 +108,35 @@ Deno.serve(async (req: Request) => {
 
   const to = new Date();
   const from = new Date(Date.now() - 730 * 86_400_000);
+  const asDate = (d: Date) => d.toISOString().slice(0, 10);
   const range = {
     from: { year: from.getUTCFullYear(), month: from.getUTCMonth() + 1, day: from.getUTCDate() },
     to:   { year: to.getUTCFullYear(),   month: to.getUTCMonth() + 1,   day: to.getUTCDate() },
   };
-  const qs = new URLSearchParams({
-    from_year: String(range.from.year), from_month: String(range.from.month), from_day: String(range.from.day),
-    to_year: String(range.to.year), to_month: String(range.to.month), to_day: String(range.to.day),
-  });
+  const qs = new URLSearchParams({ start_date: asDate(from), end_date: asDate(to) });
 
   const results: Result[] = [];
+
+  // Pass 1 — the credential-scheme sweep. Read a shipment under every scheme on
+  // every host; this is the cheap call and the one whose 404-vs-401 split cleanly
+  // separates "authenticated" from "rejected".
   for (const host of HOSTS) {
-    // Shipping scope — read a shipment. Read-only.
-    results.push(await probe(host, apiKey, `GET /shipment/${shipmentId}`,
-      { headers: { Authorization: apiKey } }, `/shipment/${shipmentId}`));
-    // Finance scope — both shapes the sync tries.
-    results.push(await probe(host, apiKey, 'POST /finance/documents',
-      { method: 'POST', headers: { Authorization: apiKey, 'Content-Type': 'application/json' },
+    for (const scheme of SCHEMES) {
+      results.push(await probe(host, scheme.label, `GET /shipment/${shipmentId}`,
+        { headers: scheme.headers(apiKey) }, `/shipment/${shipmentId}`));
+    }
+  }
+
+  // Pass 2 — finance scope, using whichever scheme (if any) authenticated above,
+  // falling back to the bare header so the output is comparable to prior runs.
+  const winning = results.find((r) => r.verdict.startsWith('AUTH OK'));
+  const scheme = SCHEMES.find((s) => s.label === winning?.scheme) ?? SCHEMES[0];
+  for (const host of HOSTS) {
+    results.push(await probe(host, scheme.label, 'POST /finance/documents',
+      { method: 'POST', headers: { ...scheme.headers(apiKey), 'Content-Type': 'application/json' },
         body: JSON.stringify(range) }, '/finance/documents'));
-    results.push(await probe(host, apiKey, 'GET /finance/documents',
-      { headers: { Authorization: apiKey } }, `/finance/documents?${qs}`));
+    results.push(await probe(host, scheme.label, 'GET /finance/documents',
+      { headers: scheme.headers(apiKey) }, `/finance/documents?${qs}`));
   }
 
   const authOk = (r: Result) => r.verdict.startsWith('AUTH OK');
@@ -117,8 +145,11 @@ Deno.serve(async (req: Request) => {
     key_fingerprint: `${apiKey.slice(0, 4)}…${apiKey.slice(-4)}`,
     FREIGHTCOM_BASE_URL_set: baseUrlEnv !== undefined,
     FREIGHTCOM_BASE_URL: baseUrlEnv ?? null,
-    shipping_scope_ok_on: results.filter(r => r.call.startsWith('GET /shipment') && authOk(r)).map(r => r.host),
-    finance_scope_ok_on:  results.filter(r => r.call.includes('/finance/')     && authOk(r)).map(r => r.host),
+    // Which credential scheme, if any, the host accepted. Empty on every host
+    // means the key itself is the problem, not how we present it.
+    schemes_accepted: [...new Set(results.filter(authOk).map((r) => `${r.host}: ${r.scheme}`))],
+    shipping_scope_ok_on: [...new Set(results.filter(r => r.call.startsWith('GET /shipment') && authOk(r)).map(r => r.host))],
+    finance_scope_ok_on:  [...new Set(results.filter(r => r.call.includes('/finance/')     && authOk(r)).map(r => r.host))],
   };
 
   return new Response(JSON.stringify({ ok: true, summary, results }, null, 2),
