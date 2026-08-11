@@ -1,8 +1,33 @@
 # Refreshing the Shipping dashboard from a Freightcom export
 
-Use this whenever the Shipping dashboard goes stale. It is the only way to update
-it while the Freightcom API key remains a sandbox key — see
-[docs/freightcom-live-credentials.md](../docs/freightcom-live-credentials.md).
+Use this whenever the Shipping dashboard goes stale. **It remains necessary even
+now that the API works.** The Freightcom API cannot list shipments and cannot
+resolve portal-booked shipment ids, so it supplies costs and nothing else —
+carrier, tracking, customer and direction only ever arrive through this importer.
+See [docs/freightcom-api-shape.md](../docs/freightcom-api-shape.md).
+
+Run this first, then the sync (`sync-freightcom-shipments`) to attach costs.
+
+## Copy-paste works too — no CSV export needed
+
+The parser matches columns by header name, so you can select the portal's
+shipment grid in the browser, paste it into a spreadsheet, and save as CSV. Or
+build the CSV by hand with these headers, which is what was done on 2026-08-11
+for 157 shipments:
+
+```
+Transaction No,Tracking Number,Carrier,Ship Date,Ship From,Ship To,Status,Delivered On,Reference
+42905666,D420352470002085661001,Canpar,Apr 22 2026,Microart Services Inc.,Camp Jubilee,Delivered,Apr 30 2026,
+```
+
+Only `Transaction No`, `Status`, `Ship To` and `Ship From` are required. Note the
+portal paginates and defaults to a 3-month window — widen the **Ship Date Range**
+and page through, or shipments will be silently missing. The per-range header
+("All Active (73)") is the count to reconcile against.
+
+Ship From / Ship To decide the **Direction** column: `VCycene`/`LILA` as sender is
+outbound, as recipient is a return. A third-party sender such as Microart falls
+through to outbound, which is correct for contract-manufacturer shipments.
 
 ## 1. Get the export
 
