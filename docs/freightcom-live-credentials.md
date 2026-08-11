@@ -1,10 +1,16 @@
-# Freightcom: the integration has never been pointed at the live account
+# Freightcom: connecting the integration to the live account
 
-**Status:** blocked on credentials. Code is ready and deployed; no cost data can
-arrive until the two secrets below are set.
+**Status: RESOLVED 2026-08-11.** A live token was generated in the Freightcom
+portal (Settings → API Settings → Manage API Tokens — it is self-serve, no
+support ticket needed) and set in Supabase along with `FREIGHTCOM_BASE_URL`. The
+first successful sync costed all 38 shipments, $4,709.02 CAD total.
 
-**Owner needed:** whoever holds the Freightcom account (George).
-**Raised:** 2026-08-06. **Re-measured 2026-08-11 — it has since got worse.**
+**Read [freightcom-api-shape.md](freightcom-api-shape.md) before changing the
+sync** — the live key revealed that this API cannot list shipments at all, which
+constrains what the dashboard can ever show.
+
+**Raised:** 2026-08-06. **Resolved:** 2026-08-11. The history below is kept
+because the diagnosis sequence is reusable when the token next expires.
 
 ---
 
