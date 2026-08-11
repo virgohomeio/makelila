@@ -117,6 +117,77 @@ export function breakdown(charges: FCDoc[]): ChargeBreakdown {
   };
 }
 
+// ── Finance documents ──────────────────────────────────────────────────────
+
+/**
+ * The transaction number a finance document belongs to.
+ *
+ * Measured against the live API on 2026-08-11. A document looks like:
+ *
+ *   { id: "028uK6URd6MJa7YXqpP8hjm2Y29HFFW7",
+ *     type: "shipment-order-details", number: "43694778",
+ *     date: {...}, amount: { value: "19304", currency: "CAD" }, owing: {...} }
+ *
+ * `number` is the portal's transaction number — the same identifier stored in
+ * shipments.freightcom_shipment_id by the tracking-dashboard CSV import. `id` is
+ * an opaque document key that resolves nowhere else. The previous extractor
+ * looked only for `shipment_id`/`shipmentId`/`freight_shipment_id` and nested
+ * line items, none of which this API returns, so it found 0 shipments in 774
+ * documents and the sync had nothing to reconcile.
+ */
+export function documentNumber(doc: FCDoc | null): string | null {
+  if (!doc) return null;
+  for (const k of ['number', 'shipment_id', 'shipmentId', 'freight_shipment_id']) {
+    const v = doc[k];
+    if (typeof v === 'string' && v) return v;
+    if (typeof v === 'number') return String(v);
+  }
+  return null;
+}
+
+/** Document types that represent money moving back to us, not the cost of the
+ *  shipment. Netting these into the shipment cost would understate it. */
+const REFUND_TYPES = ['refund'];
+
+/** Preference order for "what did this shipment cost". `shipment-order-details`
+ *  is the charge breakdown for the shipment itself; the credit-card invoices are
+ *  payment records that may bundle several shipments. */
+const COST_TYPE_RANK = [
+  'shipment-order-details',
+  'shipment-credit-card-detailed-invoice',
+  'shipment-credit-card-invoice',
+];
+
+/**
+ * Chooses the authoritative cost document for one transaction number.
+ *
+ * Freightcom returns several documents per shipment — on this account 774
+ * documents across 359 numbers. Picking arbitrarily (as "first one wins" would)
+ * risks reading a refund or a bundled card invoice as the shipment's cost.
+ */
+export function pickCostDocument(docs: FCDoc[]): FCDoc | null {
+  const usable = (docs ?? []).filter((d) => {
+    const t = String(d['type'] ?? '').toLowerCase();
+    return !REFUND_TYPES.some((r) => t.includes(r));
+  });
+  if (!usable.length) return null;
+  for (const type of COST_TYPE_RANK) {
+    const hit = usable.find((d) => String(d['type'] ?? '').toLowerCase() === type);
+    if (hit) return hit;
+  }
+  return usable[0];
+}
+
+/** Freightcom dates arrive as {year, month, day}; render as YYYY-MM-DD. */
+export function docDate(doc: FCDoc | null): string | null {
+  const d = doc?.['date'] ?? doc?.['document_date'] ?? doc?.['invoice_date'];
+  if (!d) return null;
+  if (typeof d === 'string') return d.slice(0, 10);
+  const { year, month, day } = d as { year?: number; month?: number; day?: number };
+  if (!year || !month || !day) return null;
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
 // ── Merge rules ────────────────────────────────────────────────────────────
 
 /**

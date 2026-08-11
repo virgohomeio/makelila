@@ -9,6 +9,7 @@ import { describe, it, expect } from 'vitest';
 import {
   money, splitCurrency, cadOnly, breakdown,
   pruneNulls, mergeRawPayload, mapStatus,
+  documentNumber, pickCostDocument, docDate,
 } from '../../../supabase/functions/sync-freightcom-shipments/parse';
 
 describe('money', () => {
@@ -178,5 +179,83 @@ describe('mapStatus', () => {
     for (const s of ['in-transit', 'Delivered', 'lost in transit', 'error', 'weird', null]) {
       expect(allowed).toContain(mapStatus(s));
     }
+  });
+});
+
+// ── Finance documents ──────────────────────────────────────────────────────
+//
+// Shapes below are copied verbatim from the live API (2026-08-11), not invented.
+// The previous extractor looked for `shipment_id` and found 0 shipments across
+// 774 real documents, which is what kept the Rate (CAD) column empty.
+
+describe('documentNumber', () => {
+  const live = {
+    id: '028uK6URd6MJa7YXqpP8hjm2Y29HFFW7',
+    type: 'shipment-order-details',
+    number: '43694778',
+    date: { year: 2026, month: 5, day: 14 },
+    amount: { value: '19304', currency: 'CAD' },
+  };
+
+  it('reads `number` — the portal transaction number — from a live document', () => {
+    expect(documentNumber(live)).toBe('43694778');
+  });
+
+  it('does not mistake the opaque document id for a shipment number', () => {
+    expect(documentNumber(live)).not.toBe(live.id);
+  });
+
+  it('still honours the documented field names if the API ever sends them', () => {
+    expect(documentNumber({ shipment_id: 'abc' })).toBe('abc');
+    expect(documentNumber({ freight_shipment_id: 99 })).toBe('99');
+  });
+
+  it('returns null when no identifier is present', () => {
+    expect(documentNumber({ type: 'x' })).toBeNull();
+    expect(documentNumber(null)).toBeNull();
+  });
+});
+
+describe('pickCostDocument', () => {
+  const order  = { type: 'shipment-order-details', amount: { value: '22223', currency: 'CAD' } };
+  const card   = { type: 'shipment-credit-card-invoice', amount: { value: '500', currency: 'CAD' } };
+  const refund = { type: 'shipment-credit-card-refund-invoice', amount: { value: '22223', currency: 'CAD' } };
+
+  it('prefers the shipment order details over a card invoice', () => {
+    expect(pickCostDocument([card, order])).toBe(order);
+  });
+
+  it('never reports a refund as the cost of a shipment', () => {
+    expect(pickCostDocument([refund])).toBeNull();
+    expect(pickCostDocument([refund, order])).toBe(order);
+  });
+
+  it('falls back to whatever non-refund document exists', () => {
+    expect(pickCostDocument([card])).toBe(card);
+  });
+
+  it('handles an empty group', () => {
+    expect(pickCostDocument([])).toBeNull();
+  });
+
+  it('yields an amount in dollars once read through money()', () => {
+    const pick = pickCostDocument([card, order])!;
+    expect(money(pick, 'amount')).toEqual({ amount: 222.23, currency: 'CAD' });
+  });
+});
+
+describe('docDate', () => {
+  it('renders the {year, month, day} form zero-padded', () => {
+    expect(docDate({ date: { year: 2026, month: 5, day: 4 } })).toBe('2026-05-04');
+  });
+
+  it('accepts an ISO string', () => {
+    expect(docDate({ date: '2026-05-04T12:00:00Z' })).toBe('2026-05-04');
+  });
+
+  it('returns null on a partial or absent date', () => {
+    expect(docDate({ date: { year: 2026 } })).toBeNull();
+    expect(docDate({})).toBeNull();
+    expect(docDate(null)).toBeNull();
   });
 });

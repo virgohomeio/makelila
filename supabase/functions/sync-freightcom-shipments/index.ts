@@ -8,22 +8,25 @@
 // row. Three faults were fixed on 2026-08-06 (cron timeout, finance-call
 // parameters, swallowed errors); this revision fixes the two that remained.
 //
-// ── Discovery ──────────────────────────────────────────────────────────────
-// Discovery used to be invoice-only: list finance documents, pull shipment ids
-// out of them, fetch those. That has a hole big enough to explain the empty Rate
-// column on its own — a shipment is invisible until Freightcom raises a finance
-// document for it, which is up to a billing cycle after it ships, and a shipment
-// that was already in our table but never appeared on a fetched invoice was
-// never revisited. All 38 rows on the dashboard are in exactly that position:
-// real Freightcom transaction numbers, hand-loaded from a tracking-dashboard
-// export, never once looked up against the API.
+// ── What this API can and cannot do (measured 2026-08-11, live key) ────────
+// Two id spaces, and they do not meet:
 //
-// Discovery is now the UNION of:
-//   1. every freightcom_shipment_id already in public.shipments  ← reconciliation
-//   2. shipment ids named by GET /finance/documents              ← new shipments
+//   GET /finance/documents?start_date&end_date  → 200. The only bulk read there
+//     is. Documents are keyed by `number` — the portal's transaction number,
+//     which is exactly what shipments.freightcom_shipment_id holds.
+//   GET /shipment/{id}                          → exists, but only resolves ids
+//     minted by POST /shipment. Portal-booked shipments 404 here permanently.
+//   GET /shipments, /shipment, /shipments/search, /track/{n}  → no such routes
+//     (API Gateway 403s). THERE IS NO WAY TO LIST SHIPMENTS.
 //
-// so an existing row gets its cost filled in on the next run, and a new shipment
-// still gets picked up when its invoice lands.
+// Consequences worth understanding before changing anything here:
+//   • Costs, dates and existence come from finance documents. Carrier, service,
+//     tracking, addresses and status come from GET /shipment/{id} — so for
+//     portal-booked shipments we get money and nothing else. The CSV importer
+//     (scripts/import-freightcom-tracking.mjs) is what fills in the rest.
+//   • A shipment is invisible to us until Freightcom raises a finance document
+//     for it, which lags shipping by up to a billing cycle. The dashboard can
+//     therefore never be a live mirror of the Freightcom portal by API alone.
 //
 // ── Writes ─────────────────────────────────────────────────────────────────
 // Per the repo's system-of-record rule, this sync adds what the API knows and
@@ -32,8 +35,11 @@
 // provenance keys the dashboard derives Customer and Direction from survive.
 //
 // Body (all optional):
-//   { probe?: boolean }   — report the finance/auth state, write nothing
-//   { limit?: number }    — cap shipments processed this run
+//   { probe?: boolean }          — report the finance/auth state, write nothing
+//   { limit?: number }           — cap shipments processed this run
+//   { create_missing?: boolean } — also insert shipments that appear in finance
+//     documents but not on the dashboard. Off by default: those rows carry a
+//     cost and a date and nothing else.
 //
 // Env vars:
 //   FREIGHTCOM_API_KEY   — bare token (no Bearer prefix)
@@ -47,6 +53,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import {
   type FCDoc, money, splitCurrency, cadOnly, breakdown,
   pruneNulls, mergeRawPayload, mapStatus,
+  documentNumber, pickCostDocument, docDate,
 } from './parse.ts';
 
 const corsHeaders = {
@@ -124,25 +131,17 @@ async function fetchFinanceDocs(
   } catch { return { docs: [], authOk: true }; }
 }
 
-function extractShipmentIds(docs: FCDoc[]): Set<string> {
-  const ids = new Set<string>();
+/** Groups finance documents by the transaction number they belong to. */
+function groupByNumber(docs: FCDoc[]): Map<string, FCDoc[]> {
+  const out = new Map<string, FCDoc[]>();
   for (const doc of docs) {
-    for (const field of ['shipment_id', 'shipmentId', 'freight_shipment_id']) {
-      const v = doc[field];
-      if (typeof v === 'string' && v) ids.add(v);
-      if (typeof v === 'number') ids.add(String(v));
-    }
-    const lines = (doc['line_items'] ?? doc['lineItems'] ?? doc['items'] ?? doc['shipments']) as FCDoc[] | undefined;
-    if (Array.isArray(lines)) {
-      for (const line of lines) {
-        for (const field of ['shipment_id', 'shipmentId', 'id']) {
-          const sid = line[field];
-          if (sid) ids.add(String(sid));
-        }
-      }
-    }
+    const num = documentNumber(doc);
+    if (!num) continue;
+    const bucket = out.get(num);
+    if (bucket) bucket.push(doc);
+    else out.set(num, [doc]);
   }
-  return ids;
+  return out;
 }
 
 async function fetchShipment(
@@ -230,18 +229,27 @@ async function mapPool<T, R>(items: T[], limit: number, fn: (item: T) => Promise
 
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
-  const body = await req.json().catch(() => ({})) as { probe?: boolean; limit?: number };
-  try { return await handle(body?.probe === true, body?.limit); }
+  const body = await req.json().catch(() => ({})) as
+    { probe?: boolean; limit?: number; create_missing?: boolean };
+  try { return await handle(body?.probe === true, body?.limit, body?.create_missing === true); }
   catch (err) {
     return json({ ok: false, error: `Uncaught: ${(err as Error)?.message ?? String(err)}` }, 500);
   }
 });
 
-async function handle(probeOnly: boolean, limit?: number): Promise<Response> {
+async function handle(
+  probeOnly: boolean, limit?: number, createMissing = false,
+): Promise<Response> {
   const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
   const serviceKey  = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-  const apiKey      = Deno.env.get('FREIGHTCOM_API_KEY');
-  const baseUrlEnv  = Deno.env.get('FREIGHTCOM_BASE_URL');
+  const apiKey      = Deno.env.get('FREIGHTCOM_API_KEY')?.trim();
+  // .trim() is not cosmetic. A secret pasted into the Supabase dashboard arrives
+  // with trailing newlines — observed 2026-08-11, when FREIGHTCOM_BASE_URL held
+  // "https://external-api.freightcom.com\n\n". The WHATWG URL parser strips them
+  // so requests still worked, but `baseUrl === LIVE_BASE_URL` was false, and the
+  // function reported environment "sandbox" while talking to production.
+  const baseUrlRaw  = Deno.env.get('FREIGHTCOM_BASE_URL');
+  const baseUrlEnv  = baseUrlRaw?.trim() || undefined;
   const baseUrl     = baseUrlEnv ?? DEFAULT_BASE_URL;
 
   if (!apiKey) return json({ ok: false, error: 'FREIGHTCOM_API_KEY not configured' }, 500);
@@ -263,9 +271,17 @@ async function handle(probeOnly: boolean, limit?: number): Promise<Response> {
   );
 
   // 2. Discovery set — shipments named by finance documents.
+  //
+  // This is the ONLY bulk discovery the API offers. Measured 2026-08-11 with a
+  // live key: there is no list-shipments route (GET /shipments, /shipment,
+  // /shipments/search and /track all return API-Gateway 403s, meaning no such
+  // route), and GET /shipment/{id} — which does exist — does not recognise the
+  // portal's transaction numbers. So finance documents are how we learn that a
+  // shipment exists at all. See docs/freightcom-live-credentials.md.
   const probes: Probe[] = [];
   const { docs, authOk } = await fetchFinanceDocs(baseUrl, apiKey, probes);
-  const invoiceIds = extractShipmentIds(docs);
+  const docsByNumber = groupByNumber(docs);
+  const invoiceIds = new Set(docsByNumber.keys());
 
   const warnings: string[] = [];
   if (!authOk) {
@@ -303,20 +319,21 @@ async function handle(probeOnly: boolean, limit?: number): Promise<Response> {
     return json({ ok: false, error: 'Freightcom authentication failed', warnings, diagnostics }, 502);
   }
 
-  // Invoice metadata keyed by shipment, used when the per-shipment invoice call
-  // returns nothing but the document list already named a total.
+  // The authoritative cost document per transaction number — one shipment can
+  // have an order-details document, a card invoice and a refund.
   const invoiceByShipment = new Map<string, FCDoc>();
-  for (const doc of docs) {
-    const sid = str(doc, 'shipment_id', 'shipmentId', 'freight_shipment_id');
-    if (sid) invoiceByShipment.set(sid, doc);
-    const lines = (doc['line_items'] ?? doc['lineItems'] ?? doc['items'] ?? doc['shipments'] ?? []) as FCDoc[];
-    for (const line of Array.isArray(lines) ? lines : []) {
-      const lsid = str(line, 'shipment_id', 'shipmentId', 'id');
-      if (lsid) invoiceByShipment.set(lsid, doc);
-    }
+  for (const [num, group] of docsByNumber) {
+    const pick = pickCostDocument(group);
+    if (pick) invoiceByShipment.set(num, pick);
   }
 
-  const allIds = [...new Set([...stored.keys(), ...invoiceIds])];
+  // By default reconcile only what the dashboard already shows. Shipments known
+  // solely to Freightcom's finance API carry no carrier, customer or tracking —
+  // creating them silently would fill the dashboard with rows that have a cost
+  // and nothing else, so it is opt-in.
+  const allIds = createMissing
+    ? [...new Set([...stored.keys(), ...invoiceIds])]
+    : [...stored.keys()];
   const cap = Math.max(0, Math.min(limit ?? MAX_SHIPMENTS, MAX_SHIPMENTS));
   const targets = allIds.slice(0, cap);
   if (allIds.length > targets.length) {
@@ -327,11 +344,23 @@ async function handle(probeOnly: boolean, limit?: number): Promise<Response> {
 
   const results = await mapPool(targets, CONCURRENCY, async (shipmentId) => {
     try {
+      // Shipment detail is a bonus, not a precondition.
+      //
+      // GET /shipment/{id} only resolves ids minted by POST /shipment — i.e.
+      // shipments booked through this API. Anything booked in the Freightcom
+      // portal 404s here forever. Treating that as a dead end (which the previous
+      // version did, by returning early) threw away the finance document we had
+      // already fetched, so a shipment we knew the cost of got recorded as
+      // "not found" and the Rate (CAD) column stayed empty. Fetch what detail we
+      // can, then write whatever we ended up with.
       const { doc: s, status } = await fetchShipment(baseUrl, apiKey, shipmentId);
-      if (!s) return status === 404 ? 'not_found' : 'error';
+      if (!s && status !== 404) return 'error';
 
-      const invoiceDocs = await fetchShipmentInvoices(baseUrl, apiKey, shipmentId);
+      const invoiceDocs = s ? await fetchShipmentInvoices(baseUrl, apiKey, shipmentId) : [];
       const inv: FCDoc = invoiceDocs[0] ?? invoiceByShipment.get(shipmentId) ?? {};
+
+      // Nothing from either source — genuinely nothing to say about this id.
+      if (!s && !Object.keys(inv).length) return 'not_found';
 
       // ── Cost ────────────────────────────────────────────────────────────
       // What Freightcom actually invoiced. Authoritative: reweighs, fuel and
@@ -362,20 +391,27 @@ async function handle(probeOnly: boolean, limit?: number): Promise<Response> {
         ? { l: num(cuboid, 'l'), w: num(cuboid, 'w'), h: num(cuboid, 'h') }
         : null;
 
+      // `s` is null for every portal-booked shipment. Index through a stand-in so
+      // the field readers below degrade to null instead of throwing.
+      const sd: FCDoc = s ?? {};
+
       const state    = str(s, 'state', 'status');
-      const invDate  = toDate(inv['invoice_date'] ?? inv['date'] ?? inv['document_date']);
-      const bookedAt = toDate(s['created_at'] ?? s['booked_at'] ?? s['createdAt']);
+      const invDate  = docDate(inv);
+      const bookedAt = toDate(sd['created_at'] ?? sd['booked_at'] ?? sd['createdAt']);
 
       const row = {
         freightcom_shipment_id: shipmentId,
         carrier: str(s, 'carrier_name', 'carrierName', 'carrier'),
         service: str(s, 'service_name', 'serviceName', 'service'),
-        status: mapStatus(state),
+        // Only claim a status when the shipment API actually told us one.
+        // mapStatus(null) returns 'booked', which would quietly regress a row
+        // the CSV import had already marked delivered.
+        status: state ? mapStatus(state) : null,
         freightcom_status: state,
-        status_synced_at: new Date().toISOString(),
+        status_synced_at: state ? new Date().toISOString() : null,
         rate_cad: quoted,
-        transit_days: (s['transit_time_days'] ?? s['transitTimeDays'] ?? null) as number | null,
-        label_url: (s['labels'] as FCDoc[] | undefined)?.[0]?.['url'] as string | null ?? null,
+        transit_days: (sd['transit_time_days'] ?? sd['transitTimeDays'] ?? null) as number | null,
+        label_url: (sd['labels'] as FCDoc[] | undefined)?.[0]?.['url'] as string | null ?? null,
         primary_tracking_number: str(s, 'primary_tracking_number', 'primaryTrackingNumber', 'tracking_number'),
         origin_city: str(orig, 'city'), origin_province: str(orig, 'province', 'state'),
         origin_postal: str(orig, 'postal_code', 'postalCode', 'zip'), origin_country: str(orig, 'country'),
@@ -388,30 +424,43 @@ async function handle(probeOnly: boolean, limit?: number): Promise<Response> {
         invoice_date: invDate,
         invoiced_at: toIso(invDate),
         booked_at: toIso(bookedAt),
-        picked_up_at: toIso(toDate(s['picked_up_at'] ?? s['pickedUpAt'])),
-        estimated_delivery: toDate(s['estimated_delivery'] ?? s['estimatedDelivery']),
-        delivered_at: toIso(toDate(s['delivered_at'] ?? s['deliveredAt'])),
+        picked_up_at: toIso(toDate(sd['picked_up_at'] ?? sd['pickedUpAt'])),
+        estimated_delivery: toDate(sd['estimated_delivery'] ?? sd['estimatedDelivery']),
+        delivered_at: toIso(toDate(sd['delivered_at'] ?? sd['deliveredAt'])),
         synced_at: new Date().toISOString(),
-        raw_payload: mergeRawPayload(stored.get(shipmentId), s),
+        // With no shipment payload there is nothing to merge in, and writing the
+        // merge result anyway would rewrite the column for no reason. Leave it.
+        raw_payload: s ? mergeRawPayload(stored.get(shipmentId), s) : null,
       };
 
       // Prune before writing: a field the API omitted came through as null, and
       // writing it back would erase whatever is stored — an operator-entered
       // tracking number, a carrier from the manual import.
       const patch = pruneNulls(row) as Record<string, unknown>;
-      // carrier/service are NOT NULL with no default, so a first insert has to
-      // supply them even when Freightcom didn't name them. On an update they
-      // stay pruned and the stored values survive.
-      if (!stored.has(shipmentId)) {
+
+      // Insert and update take different routes, for the same reason
+      // scripts/import-freightcom-tracking.mjs splits POST from PATCH.
+      //
+      // PostgREST's .upsert() is INSERT ... ON CONFLICT, and Postgres validates
+      // the *proposed* row before it ever gets to the conflict clause. carrier
+      // and service are NOT NULL with no default, so an update that legitimately
+      // omits them fails with 23502 on carrier — which is precisely what happened
+      // on the first live run: 38 targets, 38 errors, 0 rows written. An UPDATE
+      // touches only the columns supplied, so a sparse API response can no longer
+      // blank a carrier the CSV import established.
+      let error;
+      if (stored.has(shipmentId)) {
+        ({ error } = await admin
+          .from('shipments')
+          .update(patch)
+          .eq('freightcom_shipment_id', shipmentId));
+      } else {
         patch.carrier ??= '';
         patch.service ??= '';
+        ({ error } = await admin.from('shipments').insert(patch));
       }
-
-      const { error } = await admin
-        .from('shipments')
-        .upsert(patch, { onConflict: 'freightcom_shipment_id' });
       if (error) {
-        console.error(`Upsert failed for ${shipmentId}: ${error.message}`);
+        console.error(`Write failed for ${shipmentId}: ${error.message}`);
         return 'error';
       }
       return billed.amount !== null ? 'costed' : 'upserted';
@@ -428,14 +477,28 @@ async function handle(probeOnly: boolean, limit?: number): Promise<Response> {
     else                         errors++;
   }
 
-  // Every id unknown to the host is the signature of pointing a valid credential
-  // at the wrong environment. It is not a quiet "nothing to do" — report it as a
-  // failed run so cron.job_run_details and any alerting see it.
+  // An id with neither a shipment payload nor a finance document is invisible to
+  // this account. All of them being invisible is the signature of a credential
+  // pointed at the wrong environment — not a quiet "nothing to do", so it is
+  // reported as a failed run for cron.job_run_details and any alerting.
   const allMissing = targets.length > 0 && notFound === targets.length;
   if (allMissing) {
     warnings.push(
-      `None of the ${targets.length} shipment ids exist on ${baseUrl}. These are live ` +
-      `Freightcom transaction numbers — the sandbox host does not know them.`,
+      `None of the ${targets.length} shipment ids are known to ${baseUrl} — neither ` +
+      `GET /shipment/{id} nor any finance document names them. Check that ` +
+      `FREIGHTCOM_API_KEY belongs to the account that booked these shipments.`,
+    );
+  }
+
+  // Shipments Freightcom has billed us for that the dashboard has never heard
+  // of. Surfaced on every run so the gap is visible rather than inferred; pass
+  // { create_missing: true } to bring them in.
+  const unknownToUs = [...invoiceIds].filter((id) => !stored.has(id));
+  if (unknownToUs.length && !createMissing) {
+    warnings.push(
+      `${unknownToUs.length} shipment(s) appear in Freightcom's finance documents but ` +
+      `are not on the dashboard. Re-run with {"create_missing":true} to add them ` +
+      `(they will carry cost and date only — no carrier, tracking or customer).`,
     );
   }
 
@@ -448,6 +511,7 @@ async function handle(probeOnly: boolean, limit?: number): Promise<Response> {
     invoices_fetched: docs.length,
     shipments_targeted: targets.length,
     upserted, costed, not_found: notFound, errors,
+    unknown_to_dashboard: unknownToUs.length,
     warnings, diagnostics,
   }, ok ? 200 : 502);
 }
