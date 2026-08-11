@@ -56,10 +56,16 @@ export type ServiceTicket = {
   ticket_number: string;
   category: TicketCategory;
   source: TicketSource;
+  /** The PRIMARY status. Statuses are multi-select (see `tags`); this column
+   *  mirrors the first one because open-vs-closed, closed_at, SLA resolution
+   *  and every open-queue count key off a single value. */
   status: TicketStatus;
-  // Multi-select status tags — separate from the single workflow `status`.
-  // Reuses the status vocabulary (TicketStatus keys). Optional: undefined on
-  // rows read before the `tags` column migration lands; treat as [] on read.
+  /** The full multi-select status set, including the primary that `status`
+   *  mirrors. Never render this alongside `status` — that double-prints the
+   *  primary. Read the set with ticketStatusSet(), write it with
+   *  setTicketStatuses(). Optional: undefined on rows read before the column
+   *  landed, and empty on rows only ever written by the pre-multi-select code;
+   *  ticketStatusSet() handles both by unioning with `status`. */
   tags?: TicketStatus[];
   priority: TicketPriority;
   customer_id: string | null;
@@ -1126,14 +1132,6 @@ export async function setTicketStatuses(id: string, next: TicketStatus[]): Promi
       console.warn('Auto-cancel of queued replacement on ticket close failed (non-fatal):', e.message);
     });
   }
-}
-
-/** Replace a ticket's status tags (multi-select, separate from `status`). */
-export async function updateTicketTags(id: string, tags: TicketStatus[]): Promise<void> {
-  const { error } = await supabase.from('service_tickets').update({ tags }).eq('id', id);
-  if (error) throw error;
-  await logAction('ticket_tags_changed', id, tags.length ? tags.join(', ') : '(none)',
-    { entityType: 'ticket', entityId: id });
 }
 
 export async function assignTicketOwner(id: string, owner_email: string | null): Promise<void> {

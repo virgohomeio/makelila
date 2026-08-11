@@ -1,4 +1,4 @@
-import { statusMeta, topicLabel, sourceLabel, type ServiceTicket } from '../../lib/service';
+import { statusMeta, topicLabel, sourceLabel, ticketStatusSet, type ServiceTicket } from '../../lib/service';
 import type { Customer } from '../../lib/customers';
 import { DeviceContextHeader } from '../../components/DeviceContextHeader';
 import type { CustomerGroup } from './ticketGrouping';
@@ -51,7 +51,6 @@ export function CustomerProfilePanel({
 
         <div className={styles.profileTicketList}>
           {group.tickets.map(t => {
-            const s = statusMeta(t.status);
             const ts = t.last_message_at ?? t.created_at;
             return (
               <button key={t.id} className={styles.profileTicketRow} onClick={() => onOpenTicket(t)}>
@@ -64,16 +63,16 @@ export function CustomerProfilePanel({
                   {sourceLabel(t.source)} · {new Date(ts).toLocaleDateString()}
                 </span>
                 <span style={{ display: 'flex', flexWrap: 'wrap', gap: 4, justifyContent: 'flex-end' }}>
-                  <span className={styles.pill} style={{ background: s.bg, color: s.color }}>{s.label}</span>
-                  {(t.tags ?? []).map(tag => {
-                    const m = statusMeta(tag);
+                  {/* Statuses are multi-select — render the whole set in one
+                      uniform pill style. Rendering `status` and `tags` as two
+                      separate lists double-printed the primary, which is stored
+                      in both. */}
+                  {ticketStatusSet(t).map(v => {
+                    const m = statusMeta(v);
                     return (
-                      <span
-                        key={tag}
-                        className={styles.pill}
-                        style={{ background: '#fff', color: m.color, border: `1px solid ${m.color}` }}
-                        title="Status tag"
-                      >🏷 {m.label}</span>
+                      <span key={v} className={styles.pill} style={{ background: m.bg, color: m.color }}>
+                        {m.label}
+                      </span>
                     );
                   })}
                 </span>
