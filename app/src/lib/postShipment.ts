@@ -354,6 +354,16 @@ async function hasField(id: string, field: string): Promise<boolean> {
 // Multi-photo attachments on a return, stored in the 'return-documents' bucket
 // and recorded in return_attachments. Mirrors the ticket attachment layer.
 // ============================================================================
+// Photos land in one of two operator-facing sections. 'context' is what opened
+// the case (customer-supplied evidence); 'inspection' is what we found once the
+// unit was back on the bench. Rows predating the split backfilled to 'context'.
+export type ReturnAttachmentCategory = 'context' | 'inspection';
+
+export const RETURN_ATTACH_CATEGORIES: { value: ReturnAttachmentCategory; label: string }[] = [
+  { value: 'context', label: 'Context of the Case - Photos' },
+  { value: 'inspection', label: 'Inspection Photos' },
+];
+
 export type ReturnAttachment = {
   id: string;
   return_id: string;
@@ -361,6 +371,7 @@ export type ReturnAttachment = {
   file_name: string;
   mime_type: string | null;
   size_bytes: number | null;
+  category: ReturnAttachmentCategory;
   uploaded_by: string | null;
   created_at: string;
 };
@@ -403,7 +414,11 @@ export function useReturnAttachments(returnId: string | null): { attachments: Re
   return { attachments, loading, refresh };
 }
 
-export async function uploadReturnAttachment(returnId: string, file: File): Promise<ReturnAttachment> {
+export async function uploadReturnAttachment(
+  returnId: string,
+  file: File,
+  category: ReturnAttachmentCategory = 'context',
+): Promise<ReturnAttachment> {
   if (file.type && !RETURN_ATTACH_ALLOWED_MIME.includes(file.type)) {
     throw new Error(`Unsupported file type: ${file.type}`);
   }
@@ -419,13 +434,13 @@ export async function uploadReturnAttachment(returnId: string, file: File): Prom
   const userId = await currentUserId();
   const { data, error } = await supabase.from('return_attachments').insert({
     return_id: returnId, file_path: path, file_name: file.name,
-    mime_type: file.type || null, size_bytes: file.size, uploaded_by: userId,
+    mime_type: file.type || null, size_bytes: file.size, category, uploaded_by: userId,
   }).select('*').single();
   if (error) {
     await supabase.storage.from(RETURN_ATTACH_BUCKET).remove([path]).then(() => {}, () => {});
     throw error;
   }
-  await logAction('return_attachment_added', returnId, file.name, { entityType: 'return', entityId: returnId });
+  await logAction('return_attachment_added', returnId, `${file.name} (${category})`, { entityType: 'return', entityId: returnId });
   return data as ReturnAttachment;
 }
 

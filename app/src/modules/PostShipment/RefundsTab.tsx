@@ -8,7 +8,8 @@ import {
   preRefundStage, customerWaitState,
   setReturnDisposition, updateReturnStatus,
   useReturnAttachments, uploadReturnAttachment, deleteReturnAttachment, returnAttachmentSignedUrl,
-  RETURN_ATTACH_INPUT_ACCEPT, type ReturnAttachment,
+  RETURN_ATTACH_INPUT_ACCEPT, RETURN_ATTACH_CATEGORIES,
+  type ReturnAttachment, type ReturnAttachmentCategory,
   useCaseNotes, addCaseNote, updateCaseNote, deleteCaseNote, type CaseNote,
   REFUND_STATUS_META, REFUND_METHODS, REFUND_METHOD_META,
   UNIT_STATUS_LABEL, RETURN_DISPOSITION_META,
@@ -864,17 +865,22 @@ function CaseNotes({ refundId = null, returnId = null, onError }:
   );
 }
 
+// Photos on a case live in two sections — "Context of the Case" (what the
+// customer sent us) and "Inspection" (what we found on the bench). Both take
+// pasted images, so a single window-level paste listener lives here in the
+// parent and routes to whichever section is armed; two independent listeners
+// would file the same clipboard image into both sections.
 function ReturnAttachmentStrip({ returnId, onError }: { returnId: string; onError: (m: string | null) => void }) {
   const { attachments, refresh } = useReturnAttachments(returnId);
   const [busy, setBusy] = useState(false);
   const [urls, setUrls] = useState<Record<string, string>>({});
-  const inputRef = useRef<HTMLInputElement>(null);
+  const [pasteTarget, setPasteTarget] = useState<ReturnAttachmentCategory>('context');
 
-  const handleFiles = async (files: File[]) => {
+  const handleFiles = async (files: File[], category: ReturnAttachmentCategory) => {
     if (!files.length) return;
     setBusy(true); onError(null);
     try {
-      for (const f of files) await uploadReturnAttachment(returnId, toNamedFile(f));
+      for (const f of files) await uploadReturnAttachment(returnId, toNamedFile(f), category);
       refresh();
     } catch (e) { onError((e as Error).message); }
     finally { setBusy(false); }
@@ -883,12 +889,12 @@ function ReturnAttachmentStrip({ returnId, onError }: { returnId: string; onErro
   useEffect(() => {
     const onPaste = (e: ClipboardEvent) => {
       const imgs = imageFilesFrom(e.clipboardData);
-      if (imgs.length) { e.preventDefault(); void handleFiles(imgs); }
+      if (imgs.length) { e.preventDefault(); void handleFiles(imgs, pasteTarget); }
     };
     window.addEventListener('paste', onPaste);
     return () => window.removeEventListener('paste', onPaste);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [returnId]);
+  }, [returnId, pasteTarget]);
 
   useEffect(() => {
     let cancelled = false;
@@ -910,12 +916,51 @@ function ReturnAttachmentStrip({ returnId, onError }: { returnId: string; onErro
   };
 
   return (
-    <div onClick={e => e.stopPropagation()} style={{ margin: '8px 0' }}>
-      <div style={{ fontSize: 12, fontWeight: 600, color: '#4a5568', marginBottom: 4 }}>
-        Photos &amp; documents ({attachments.length})
+    <div onClick={e => e.stopPropagation()} style={{ margin: '8px 0', display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {RETURN_ATTACH_CATEGORIES.map(cat => (
+        <ReturnAttachmentSection
+          key={cat.value}
+          label={cat.label}
+          armed={pasteTarget === cat.value}
+          onArm={() => setPasteTarget(cat.value)}
+          items={attachments.filter(a => (a.category ?? 'context') === cat.value)}
+          urls={urls}
+          busy={busy}
+          onUpload={files => void handleFiles(files, cat.value)}
+          onDelete={a => void del(a)}
+        />
+      ))}
+    </div>
+  );
+}
+
+// One titled photo section. Clicking anywhere in it arms it as the paste
+// target, so the operator can paste straight into the section they mean.
+function ReturnAttachmentSection({ label, armed, onArm, items, urls, busy, onUpload, onDelete }: {
+  label: string;
+  armed: boolean;
+  onArm: () => void;
+  items: ReturnAttachment[];
+  urls: Record<string, string>;
+  busy: boolean;
+  onUpload: (files: File[]) => void;
+  onDelete: (a: ReturnAttachment) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  return (
+    <div onClick={onArm}
+      style={{ border: `1px solid ${armed ? '#90cdf4' : '#edf2f7'}`, background: armed ? '#f7fbff' : '#fff',
+               borderRadius: 8, padding: '8px 10px', cursor: armed ? 'default' : 'pointer' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+        <span style={{ fontSize: 12, fontWeight: 700, color: '#4a5568' }}>{label} ({items.length})</span>
+        {armed && (
+          <span style={{ fontSize: 10, fontWeight: 600, color: '#2b6cb0', background: '#ebf8ff', border: '1px solid #bee3f8', borderRadius: 999, padding: '1px 7px' }}>
+            ⌘/Ctrl+V pastes here
+          </span>
+        )}
       </div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-        {attachments.map(a => {
+        {items.map(a => {
           const isImg = (a.mime_type ?? '').startsWith('image/');
           return (
             <div key={a.id} style={{ position: 'relative', width: 64, height: 64, borderRadius: 6, overflow: 'hidden', border: '1px solid #e2e8f0', background: '#f7fafc' }}>
@@ -929,7 +974,7 @@ function ReturnAttachmentStrip({ returnId, onError }: { returnId: string; onErro
                   {a.file_name.slice(0, 18)}
                 </a>
               )}
-              <button onClick={() => void del(a)} disabled={busy} title="Remove"
+              <button onClick={() => onDelete(a)} disabled={busy} title="Remove"
                 style={{ position: 'absolute', top: 0, right: 0, background: 'rgba(0,0,0,0.6)', color: '#fff', border: 'none', cursor: 'pointer', fontSize: 11, lineHeight: 1, padding: '2px 5px' }}>✕</button>
             </div>
           );
@@ -940,8 +985,12 @@ function ReturnAttachmentStrip({ returnId, onError }: { returnId: string; onErro
         </button>
       </div>
       <input ref={inputRef} type="file" multiple accept={RETURN_ATTACH_INPUT_ACCEPT} style={{ display: 'none' }}
-        onChange={e => { void handleFiles(Array.from(e.target.files ?? [])); e.currentTarget.value = ''; }} />
-      <div style={{ fontSize: 10, color: '#a0aec0', marginTop: 2 }}>Paste (⌘/Ctrl+V) an image while this case is open, or click + to upload.</div>
+        onChange={e => { onUpload(Array.from(e.target.files ?? [])); e.currentTarget.value = ''; }} />
+      <div style={{ fontSize: 10, color: '#a0aec0', marginTop: 3 }}>
+        {armed
+          ? 'Paste (⌘/Ctrl+V) an image to file it here, or click + to upload.'
+          : 'Click this section to paste here, or click + to upload.'}
+      </div>
     </div>
   );
 }
