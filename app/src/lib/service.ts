@@ -187,6 +187,9 @@ export type TicketActionItem = {
   author_id: string | null;
   author_email: string | null;
   created_at: string;
+  /** Calendar day the item is due, 'YYYY-MM-DD', or null when unscheduled.
+   *  A `date` column, so it carries no timezone — compare it as a string. */
+  due_date: string | null;
 };
 
 // ============================================================ Display metadata
@@ -707,7 +710,9 @@ export function useTicketActionItems(ticketId: string | null): {
   return { items, loading };
 }
 
-export async function addTicketActionItem(ticketId: string, body: string): Promise<void> {
+export async function addTicketActionItem(
+  ticketId: string, body: string, dueDate?: string | null,
+): Promise<void> {
   const trimmed = body.trim();
   if (!trimmed) throw new Error('Action item cannot be empty.');
   // getSession() reads the cached session locally (no network); getUser() hits
@@ -716,11 +721,78 @@ export async function addTicketActionItem(ticketId: string, body: string): Promi
   const { error } = await supabase.from('ticket_action_items').insert({
     ticket_id: ticketId,
     body: trimmed,
+    due_date: dueDate || null,
     author_id: session?.user?.id ?? null,
     author_email: session?.user?.email ?? null,
   });
   if (error) throw error;
-  await logAction('ticket_action_item_added', ticketId, trimmed.slice(0, 120));
+  await logAction('ticket_action_item_added', ticketId,
+    dueDate ? `${trimmed.slice(0, 100)} · due ${dueDate}` : trimmed.slice(0, 120));
+}
+
+/** Schedule (or unschedule, with null) an action item. `dueDate` is a
+ *  'YYYY-MM-DD' calendar day — see the due_date column comment. */
+export async function setTicketActionItemDueDate(
+  id: string, dueDate: string | null,
+): Promise<void> {
+  const { data, error } = await supabase
+    .from('ticket_action_items')
+    .update({ due_date: dueDate })
+    .eq('id', id)
+    .select('id, ticket_id, body');
+  if (error) throw error;
+  if (!data || data.length === 0) {
+    throw new Error('Action item was not rescheduled (no permission or already removed).');
+  }
+  await logAction('ticket_action_item_due_date_set', data[0].ticket_id as string,
+    `${(data[0].body as string).slice(0, 100)} · ${dueDate ?? 'no due date'}`);
+}
+
+/** Every OPEN action item across all tickets — the week board's data source.
+ *  Scoped to done=false because the board plans upcoming work; completed items
+ *  stay visible on their own ticket. Realtime on the whole table (no ticket
+ *  filter), so an item added or checked off anywhere re-buckets the board. */
+export function useOpenActionItems(): { items: TicketActionItem[]; loading: boolean } {
+  const [items, setItems] = useState<TicketActionItem[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let channel: RealtimeChannel | null = null;
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await supabase
+        .from('ticket_action_items')
+        .select('*')
+        .eq('done', false)
+        .order('due_date', { ascending: true, nullsFirst: false });
+      if (cancelled) return;
+      if (!error && data) setItems(data as TicketActionItem[]);
+      setLoading(false);
+
+      channel = supabase
+        .channel('ticket_action_items:open')
+        .on('postgres_changes',
+          { event: '*', schema: 'public', table: 'ticket_action_items' },
+          (payload) => {
+            setItems(prev => {
+              if (payload.eventType === 'DELETE' && payload.old) {
+                return prev.filter(i => i.id !== (payload.old as { id: string }).id);
+              }
+              if (!payload.new) return prev;
+              const row = payload.new as TicketActionItem;
+              // Checking an item off removes it from the board; unchecking
+              // brings it back. The subscription is unfiltered, so both
+              // directions arrive here as UPDATEs.
+              const rest = prev.filter(i => i.id !== row.id);
+              return row.done ? rest : [...rest, row];
+            });
+          })
+        .subscribe();
+    })();
+    return () => { cancelled = true; if (channel) void channel.unsubscribe(); };
+  }, []);
+
+  return { items, loading };
 }
 
 export async function setTicketActionItemDone(id: string, done: boolean): Promise<void> {

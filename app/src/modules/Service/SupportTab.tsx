@@ -15,6 +15,7 @@ import { replacementQueueKindsByTicket, groupQueueKinds } from './replacementQue
 import { TicketDetailPanel } from './TicketDetailPanel';
 import { CustomerProfilePanel } from './CustomerProfilePanel';
 import { OwnerKanban } from './OwnerKanban';
+import { ActionItemKanban } from './ActionItemKanban';
 import { groupTicketsByCustomer, type CustomerGroup } from './ticketGrouping';
 import { useAuth } from '../../lib/auth';
 import styles from './Service.module.css';
@@ -147,6 +148,11 @@ export function SupportTab() {
       <OwnerKanban
         tickets={tickets}
         currentUserEmail={user?.email}
+        onSelectTicket={(t) => setSelectedId(t.id)}
+      />
+
+      <ActionItemKanban
+        tickets={tickets}
         onSelectTicket={(t) => setSelectedId(t.id)}
       />
 
