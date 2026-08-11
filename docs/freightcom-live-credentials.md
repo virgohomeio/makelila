@@ -4,17 +4,44 @@
 arrive until the two secrets below are set.
 
 **Owner needed:** whoever holds the Freightcom account (George).
-**Raised:** 2026-08-06.
+**Raised:** 2026-08-06. **Re-measured 2026-08-11 — it has since got worse.**
 
 ---
 
 ## The one-line version
 
-`FREIGHTCOM_API_KEY` in Supabase is a **sandbox** key. The live Freightcom host
-rejects it on every route. Until a live key is issued and
+`FREIGHTCOM_API_KEY` in Supabase is a **sandbox** key, and as of 2026-08-11 that
+sandbox key has been **deactivated by Freightcom for inactivity**. It now
+authenticates on *neither* host. Until a live key is issued and
 `FREIGHTCOM_BASE_URL` is set to the live host, the Shipping dashboard's
 **Rate (CAD)** column stays empty and shipment statuses stay frozen — no matter
 how often the sync runs.
+
+## Update — 2026-08-11
+
+Re-ran the probe. The picture changed in the one way that matters:
+
+| Host | Call | 2026-08-06 | 2026-08-11 |
+|---|---|---|---|
+| live | `GET /shipment/45011657` | 401 | 401 |
+| live | `GET /finance/documents` | 401 | 401 |
+| sandbox | `GET /shipment/45011657` | 404 (**auth passed**) | **401** `token deactivated due to shipping inactivity` |
+| sandbox | `GET /finance/documents` | 200/400 (**auth passed**) | **401** same |
+
+The key now opens nothing. Freightcom's own error string —
+`token deactivated due to shipping inactivity` — is the tell: this was a test
+token that expired from disuse, which is further confirmation the live account
+was never API-provisioned. The request to Freightcom is therefore **issue new
+live API credentials**, not "rotate" or "find the existing key".
+
+Dashboard state at that measurement: 38 rows, **0** with a cost,
+`max(synced_at) = 2026-06-25`. Nothing has been written since.
+
+Note that `cron.job_run_details` for job 35 (`sync-freightcom-shipments-daily`)
+reports **succeeded** for every nightly run. That is a false green: the cron
+calls `net.http_post` and never inspects the response, so the function's 502 is
+invisible at the cron layer. Judge the integration by `max(synced_at)` on
+`public.shipments` or by calling the function directly — not by the cron log.
 
 ## Evidence
 
@@ -28,7 +55,7 @@ curl -s -X POST "$SUPABASE_URL/functions/v1/freightcom-auth-probe" \
   -H "Content-Type: application/json" -d '{}'
 ```
 
-Result on 2026-08-06:
+Result on 2026-08-06 (see the 2026-08-11 update above for what changed):
 
 | Host | Call | Status | Reading |
 |---|---|---|---|
@@ -109,3 +136,7 @@ hand-loaded from a tracking-dashboard CSV export, which is consistent with the
 API never having been provisioned for the live account. If so this needs a
 request to Freightcom support for live API credentials with finance scope, not
 just a copy-paste of an existing key.
+
+As of the 2026-08-11 re-measurement this is effectively answered: the only key we
+hold was a test token and Freightcom has now expired it. Treat this as a support
+request for **new live credentials with finance/billing scope**.
