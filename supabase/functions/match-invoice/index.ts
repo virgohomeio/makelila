@@ -193,9 +193,9 @@ Deno.serve(async (req: Request) => {
 
 // ────────────────────────────────────────────────────────────────────────
 
-/** Re-read amounts off invoices already on file. Only rows with no payment_cad
- *  are touched, so this is resumable and idempotent: the caller keeps calling
- *  until `remaining` is 0.
+/** Re-read amounts off invoices already on file. Only rows never read for a
+ *  payment are touched, so this is resumable and idempotent: the caller keeps
+ *  calling until a pass stops making progress.
  *
  *  Deliberately narrow — it writes ONLY the extracted amounts (and a date/number
  *  that was missing). Customer/order linkage and match_status are operator-
@@ -258,8 +258,8 @@ async function reextractBatch(
   return j({
     processed,
     updated,
-    // Rows that errored still have a null payment_cad, so they'd be picked up
-    // again forever; report remaining as what a *successful* pass could still do.
+    // Rows that errored stay unread, so they come back on the next pass; the
+    // caller stops on updated === 0 rather than waiting for this to reach 0.
     remaining: Math.max((remainingBefore ?? processed) - updated, 0),
     stalled: errors.length,
     errors,
