@@ -24,6 +24,42 @@ Reading the status codes correctly matters here:
 - **404 `{"message":"not found"}`** means the route exists and authentication
   passed — the resource simply isn't there.
 
+## Rating works, and it is the one route that mints ids we can follow
+
+Measured 2026-08-12 with `freightcom-endpoint-scan`'s `rate` probe (a pricing
+query — it books and reserves nothing), origin L3R9Z7 → M1N 1H9, one 23 kg
+61×61×61 cm package:
+
+| Leg | Result |
+|---|---|
+| `POST /rate` | **202**, `request_id` |
+| `GET /rate/{request_id}` (poll 1, +2s) | 200, `done:false`, 19 rates |
+| `GET /rate/{request_id}` (poll 2, +4s) | 200, `done:true`, **22 rates** |
+
+So the live key rates fine — the sweep above only looked GET-shaped routes and
+never covered this. A rate looks like:
+
+```json
+{ "service_id": "canpar.ground",
+  "carrier_name": "Canpar", "service_name": "Ground",
+  "total": { "value": "3605", "currency": "CAD" },
+  "transit_time_days": 1, "transit_time_not_available": false }
+```
+
+- **`total.value` is in CENTS**, same as finance documents. `"3605"` is $36.05.
+- Rates come back in CAD for our account regardless of the destination country,
+  which is why `orders.freight_estimate_usd` is rendered as CAD and why
+  `selectQuote` refuses to copy a USD-priced quote into it.
+- `service_id` is what `freightcom-book` feeds to `POST /shipment`. Booking
+  through makelila is therefore the only way to get a shipment id that
+  `GET /shipment/{id}` will resolve — see point 4 below.
+
+Note this went unmeasured for two months because quoting could never reach the
+API at all: `freightcom-quote` selected `orders.address_postal_code`, a column
+that does not exist, so every request died as "Order not found" before any
+Freightcom call was made. Fixed 2026-08-12; `edgeFunctionColumns.test.ts` guards
+the functions tree against the name coming back.
+
 ## Two id spaces that never meet
 
 Finance documents look like this:
@@ -84,4 +120,8 @@ curl -s -X POST "$SUPABASE_URL/functions/v1/freightcom-endpoint-scan" \
 ```
 
 Accepts `{ "paths": [...] }` to scan specific routes and `{ "full": true }` to
-return untruncated bodies. Read-only; every call is a GET.
+return untruncated bodies. Every call is a GET.
+
+Add `{ "paths": [], "rate": { "postal_code": "M1N 1H9", "country": "CA" } }` to
+run the rate probe instead of the GET sweep. It POSTs a rate request and polls
+the result; nothing is booked, reserved or charged. Takes up to ~20s.
