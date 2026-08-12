@@ -82,12 +82,15 @@ async function handle(req: Request): Promise<Response> {
   if (ret.original_order_ref) {
     const { data: order } = await admin
       .from('orders')
-      .select('id, address_postal_code, country')
+      // orders.postal_code — the address_* prefix belongs to the verification
+      // columns only. Selecting the wrong name made PostgREST reject this read,
+      // so every return label failed with "No customer postal code on file".
+      .select('id, postal_code, country')
       .eq('order_ref', ret.original_order_ref)
       .maybeSingle();
     if (order) {
       orderId = order.id as string;
-      originPostal = (order.address_postal_code as string | null)?.replace(/\s/g, '') ?? null;
+      originPostal = (order.postal_code as string | null)?.replace(/\s/g, '') ?? null;
       originCountry = (order.country as string) === 'US' ? 'US' : 'CA';
     }
   }

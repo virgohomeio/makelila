@@ -21,10 +21,83 @@
 //   { number?: string }  — a transaction number to interpolate into routes
 //   { doc_id?: string }  — a finance-document id to interpolate into routes
 //   { paths?: string[] } — scan these instead of the built-in candidate list
+//   { rate?: { postal_code, country? } } — additionally exercise POST /rate for
+//     that destination. Rating is a pricing query: it reserves nothing, books
+//     nothing and costs nothing, so it stays within this function's remit. Added
+//     2026-08-12 to establish whether the live key can quote at all, which the
+//     GET-only scan above cannot answer.
 
 import { corsHeaders } from '../_shared/cors.ts';
 
 const LIVE = 'https://external-api.freightcom.com';
+
+// VCycene warehouse — origin for all shipments, same constants freightcom-quote
+// rates against so the probe measures the real request shape.
+const ORIGIN_POSTAL  = 'L3R9Z7';
+const ORIGIN_COUNTRY = 'CA';
+const PROBE_PACKAGE = {
+  measurements: {
+    weight: { unit: 'kg', value: 23 },
+    cuboid: { unit: 'cm', l: 61, w: 61, h: 61 },
+  },
+  description: 'LILA Composter',
+};
+
+const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** POST /rate then poll GET /rate/{id}, reporting each leg's status. */
+async function rateProbe(
+  baseUrl: string, apiKey: string, postalCode: string, country: string,
+): Promise<Record<string, unknown>> {
+  const tomorrow = new Date(Date.now() + 86_400_000);
+  const req = {
+    details: {
+      expected_ship_date: {
+        year:  tomorrow.getUTCFullYear(),
+        month: tomorrow.getUTCMonth() + 1,
+        day:   tomorrow.getUTCDate(),
+      },
+      packaging_type: 'package',
+      packaging_properties: { packages: [PROBE_PACKAGE] },
+      origin: { address: { postal_code: ORIGIN_POSTAL, country: ORIGIN_COUNTRY } },
+      destination: {
+        address: { postal_code: postalCode.replace(/\s/g, ''), country },
+        signature_requirement: 'not-required',
+      },
+    },
+  };
+
+  const initRes = await fetch(`${baseUrl}/rate`, {
+    method: 'POST',
+    headers: { Authorization: apiKey, 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  });
+  const initText = await initRes.text().catch(() => '');
+  if (initRes.status !== 202) {
+    return { post_rate_status: initRes.status, post_rate_body: initText.slice(0, 600) };
+  }
+
+  const requestId = (JSON.parse(initText) as { request_id?: string }).request_id;
+  const polls: Array<{ status: number; done: boolean; rates: number }> = [];
+  let rates: unknown[] = [];
+  for (let i = 0; i < 10; i++) {
+    await delay(2000);
+    const pollRes = await fetch(`${baseUrl}/rate/${requestId}`, { headers: { Authorization: apiKey } });
+    const data = await pollRes.json().catch(() => ({})) as
+      { status?: { done?: boolean }; rates?: unknown[] };
+    rates = data.rates ?? rates;
+    polls.push({ status: pollRes.status, done: !!data.status?.done, rates: (data.rates ?? []).length });
+    if (data.status?.done) break;
+  }
+
+  return {
+    post_rate_status: 202,
+    request_id: requestId,
+    polls,
+    rate_count: rates.length,
+    first_rate: rates[0] ?? null,
+  };
+}
 
 function candidates(num: string, docId: string, from: string, to: string): string[] {
   const range = `start_date=${from}&end_date=${to}`;
@@ -63,7 +136,8 @@ Deno.serve(async (req: Request) => {
   }
 
   const body = await req.json().catch(() => ({})) as
-    { number?: string; doc_id?: string; paths?: string[]; full?: boolean };
+    { number?: string; doc_id?: string; paths?: string[]; full?: boolean;
+      rate?: { postal_code?: string; country?: string } };
   const num   = body.number ?? '43694778';
   const docId = body.doc_id ?? '028uK6URd6MJa7YXqpP8hjm2Y29HFFW7';
 
@@ -71,7 +145,9 @@ Deno.serve(async (req: Request) => {
   const from = new Date(Date.now() - 730 * 86_400_000);
   const asDate = (d: Date) => d.toISOString().slice(0, 10);
 
-  const paths = body.paths ?? candidates(num, docId, asDate(from), asDate(to));
+  // A rate probe is a question on its own; asking for one skips the GET sweep
+  // unless paths were named explicitly.
+  const paths = body.paths ?? (body.rate ? [] : candidates(num, docId, asDate(from), asDate(to)));
 
   const results = [];
   for (const path of paths) {
@@ -98,6 +174,10 @@ Deno.serve(async (req: Request) => {
   const reachable = results.filter((r) => r.status && r.status >= 200 && r.status < 300)
                            .map((r) => r.path);
 
-  return new Response(JSON.stringify({ ok: true, base_url: baseUrl, reachable, results }, null, 2),
+  const rate = body.rate?.postal_code
+    ? await rateProbe(baseUrl, apiKey, body.rate.postal_code, body.rate.country ?? 'CA')
+    : null;
+
+  return new Response(JSON.stringify({ ok: true, base_url: baseUrl, reachable, results, rate }, null, 2),
     { headers: { ...corsHeaders, 'content-type': 'application/json' } });
 });

@@ -86,15 +86,21 @@ async function handle(req: Request): Promise<Response> {
 
   if (!order_id) return json({ error: 'order_id required' }, 400);
 
-  // Load order destination
+  // Load order destination. The column is `postal_code` — an earlier
+  // `address_postal_code` (a name that only exists on the address_* verification
+  // columns) made PostgREST reject this select with 42703, which surfaced here
+  // as a flat "Order not found" for every order and left freight_quotes empty
+  // from the feature's first day.
   const { data: order, error: orderErr } = await admin
     .from('orders')
-    .select('id, address_postal_code, country')
+    .select('id, postal_code, country')
     .eq('id', order_id)
     .single();
-  if (orderErr || !order) return json({ error: 'Order not found' }, 404);
+  if (orderErr || !order) {
+    return json({ error: 'Order not found', details: orderErr?.message ?? null }, 404);
+  }
 
-  const destPostal = (order.address_postal_code as string | null)?.replace(/\s/g, '');
+  const destPostal = (order.postal_code as string | null)?.replace(/\s/g, '');
   if (!destPostal) return json({ error: 'Order has no destination postal code' }, 400);
 
   // Default ship date = next business day (tomorrow)

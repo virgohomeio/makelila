@@ -89,15 +89,19 @@ async function handle(req: Request): Promise<Response> {
   const serviceId = (quote.raw as Record<string, unknown>)?.service_id as string | undefined;
   if (!serviceId) return json({ error: 'Quote raw data missing service_id' }, 400);
 
-  // Load order destination
+  // Load order destination. Same column bug as freightcom-quote carried: the
+  // orders column is `postal_code`, and selecting `address_postal_code` failed
+  // the whole request as "Order not found".
   const { data: order, error: oErr } = await admin
     .from('orders')
-    .select('id, address_postal_code, country')
+    .select('id, postal_code, country')
     .eq('id', order_id)
     .single();
-  if (oErr || !order) return json({ error: 'Order not found' }, 404);
+  if (oErr || !order) {
+    return json({ error: 'Order not found', details: oErr?.message ?? null }, 404);
+  }
 
-  const destPostal = (order.address_postal_code as string | null)?.replace(/\s/g, '');
+  const destPostal = (order.postal_code as string | null)?.replace(/\s/g, '');
   if (!destPostal) return json({ error: 'Order has no destination postal code' }, 400);
 
   // Build ship date (tomorrow)
