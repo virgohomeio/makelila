@@ -173,6 +173,15 @@ export const RETURN_CATEGORIES: ReturnCategory[] = [
   'customer_service','financing','other',
 ];
 
+/** The reason line stored on a manually-created refund: the picked category,
+ *  plus the operator's one-line detail when they gave one. Kept as text because
+ *  refund_approvals.reason is free text and renders straight onto the card. */
+export function manualRefundReason(category: ReturnCategory, detail?: string | null): string {
+  const label = RETURN_CATEGORY_META[category].label;
+  const extra = (detail ?? '').trim();
+  return extra ? `${label} — ${extra}` : label;
+}
+
 // Responsible-team accountability mapping (PostShipment dashboard, George's
 // ask). Derived from return_category — no separate column. A return with no
 // category counts toward 'Unassigned' alongside the 'other' category.
@@ -369,7 +378,10 @@ export const RETURN_ATTACH_CATEGORIES: { value: ReturnAttachmentCategory; label:
 
 export type ReturnAttachment = {
   id: string;
-  return_id: string;
+  // Exactly one of these is set — a photo belongs either to a return or, when
+  // the case never had one, to the refund itself. See caseAttachmentOwner.
+  return_id: string | null;
+  refund_id: string | null;
   file_path: string;
   file_name: string;
   mime_type: string | null;
@@ -386,35 +398,103 @@ export const RETURN_ATTACH_ALLOWED_MIME = [
 ];
 export const RETURN_ATTACH_INPUT_ACCEPT = RETURN_ATTACH_ALLOWED_MIME.join(',');
 
-export function useReturnAttachments(returnId: string | null): { attachments: ReturnAttachment[]; loading: boolean; refresh: () => void } {
+/** Which row a case's photos hang off. A case with a return files against the
+ *  return, so the Returns board and the refund card show one shared strip; a
+ *  refund with no return — cancellation-born, or opened by hand — carries its
+ *  own. Null when the caller has neither, which is not a case at all. */
+export type CaseAttachmentOwner = { column: 'return_id' | 'refund_id'; id: string };
+
+export function caseAttachmentOwner(
+  refundId: string | null,
+  returnId: string | null,
+): CaseAttachmentOwner | null {
+  if (returnId) return { column: 'return_id', id: returnId };
+  if (refundId) return { column: 'refund_id', id: refundId };
+  return null;
+}
+
+/** Photos on a case, from whichever row owns them. */
+export function useCaseAttachments(
+  refundId: string | null,
+  returnId: string | null,
+): { attachments: ReturnAttachment[]; loading: boolean; refresh: () => void } {
   const [attachments, setAttachments] = useState<ReturnAttachment[]>([]);
   const [loading, setLoading] = useState(true);
   const [tick, setTick] = useState(0);
   const refresh = () => setTick(t => t + 1);
+  const owner = caseAttachmentOwner(refundId, returnId);
+  const ownerColumn = owner?.column ?? null;
+  const ownerId = owner?.id ?? null;
 
   useEffect(() => {
-    if (!returnId) { setAttachments([]); setLoading(false); return; }
+    if (!ownerColumn || !ownerId) { setAttachments([]); setLoading(false); return; }
     let channel: RealtimeChannel | null = null;
     let cancelled = false;
     (async () => {
       const { data } = await supabase
         .from('return_attachments')
         .select('*')
-        .eq('return_id', returnId)
+        .eq(ownerColumn, ownerId)
         .order('created_at', { ascending: true });
       if (cancelled) return;
       setAttachments((data ?? []) as ReturnAttachment[]);
       setLoading(false);
       channel = supabase
-        .channel(`return_attachments:${returnId}`)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'return_attachments', filter: `return_id=eq.${returnId}` },
+        .channel(`return_attachments:${ownerColumn}:${ownerId}`)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'return_attachments', filter: `${ownerColumn}=eq.${ownerId}` },
           () => refresh())
         .subscribe();
     })();
     return () => { cancelled = true; if (channel) supabase.removeChannel(channel); };
-  }, [returnId, tick]);
+  }, [ownerColumn, ownerId, tick]);
 
   return { attachments, loading, refresh };
+}
+
+export function useReturnAttachments(returnId: string | null): { attachments: ReturnAttachment[]; loading: boolean; refresh: () => void } {
+  return useCaseAttachments(null, returnId);
+}
+
+export async function uploadCaseAttachment(
+  target: { refundId: string | null; returnId: string | null },
+  file: File,
+  category: ReturnAttachmentCategory = 'context',
+): Promise<ReturnAttachment> {
+  const owner = caseAttachmentOwner(target.refundId, target.returnId);
+  if (!owner) throw new Error('Cannot attach a photo: the case has no return or refund to file it against.');
+  if (file.type && !RETURN_ATTACH_ALLOWED_MIME.includes(file.type)) {
+    throw new Error(`Unsupported file type: ${file.type}`);
+  }
+  if (file.size > RETURN_ATTACH_MAX_BYTES) {
+    throw new Error(`File is too large (max ${Math.round(RETURN_ATTACH_MAX_BYTES / (1024 * 1024))} MB).`);
+  }
+  // Refund-owned files get a 'refund-' prefix so the bucket never collides a
+  // refund id with a return id, and so a path alone says which board it's from.
+  const folder = owner.column === 'return_id' ? owner.id : `refund-${owner.id}`;
+  const path = `${folder}/attach-${crypto.randomUUID()}-${file.name}`;
+  const { error: upErr } = await supabase.storage
+    .from(RETURN_ATTACH_BUCKET)
+    .upload(path, file, { contentType: file.type || undefined, upsert: false });
+  if (upErr) throw upErr;
+
+  const userId = await currentUserId();
+  // Only the owner column that applies — naming the other one, even as null,
+  // breaks return-owned uploads on a database that predates the refund_id
+  // column. See the same note in insertRefundNote.
+  const { data, error } = await supabase.from('return_attachments').insert({
+    [owner.column]: owner.id,
+    file_path: path, file_name: file.name,
+    mime_type: file.type || null, size_bytes: file.size, category, uploaded_by: userId,
+  }).select('*').single();
+  if (error) {
+    await supabase.storage.from(RETURN_ATTACH_BUCKET).remove([path]).then(() => {}, () => {});
+    throw error;
+  }
+  // Only returns are an activity-log entity type; a refund-owned photo logs
+  // against the refund id alone, the same way refund notes do.
+  await logAction('return_attachment_added', owner.id, `${file.name} (${category})`,
+    owner.column === 'return_id' ? { entityType: 'return', entityId: owner.id } : undefined);
+  return data as ReturnAttachment;
 }
 
 export async function uploadReturnAttachment(
@@ -422,37 +502,19 @@ export async function uploadReturnAttachment(
   file: File,
   category: ReturnAttachmentCategory = 'context',
 ): Promise<ReturnAttachment> {
-  if (file.type && !RETURN_ATTACH_ALLOWED_MIME.includes(file.type)) {
-    throw new Error(`Unsupported file type: ${file.type}`);
-  }
-  if (file.size > RETURN_ATTACH_MAX_BYTES) {
-    throw new Error(`File is too large (max ${Math.round(RETURN_ATTACH_MAX_BYTES / (1024 * 1024))} MB).`);
-  }
-  const path = `${returnId}/attach-${crypto.randomUUID()}-${file.name}`;
-  const { error: upErr } = await supabase.storage
-    .from(RETURN_ATTACH_BUCKET)
-    .upload(path, file, { contentType: file.type || undefined, upsert: false });
-  if (upErr) throw upErr;
-
-  const userId = await currentUserId();
-  const { data, error } = await supabase.from('return_attachments').insert({
-    return_id: returnId, file_path: path, file_name: file.name,
-    mime_type: file.type || null, size_bytes: file.size, category, uploaded_by: userId,
-  }).select('*').single();
-  if (error) {
-    await supabase.storage.from(RETURN_ATTACH_BUCKET).remove([path]).then(() => {}, () => {});
-    throw error;
-  }
-  await logAction('return_attachment_added', returnId, `${file.name} (${category})`, { entityType: 'return', entityId: returnId });
-  return data as ReturnAttachment;
+  return uploadCaseAttachment({ refundId: null, returnId }, file, category);
 }
 
-export async function deleteReturnAttachment(att: ReturnAttachment): Promise<void> {
+export async function deleteCaseAttachment(att: ReturnAttachment): Promise<void> {
   const { error } = await supabase.from('return_attachments').delete().eq('id', att.id);
   if (error) throw error;
   await supabase.storage.from(RETURN_ATTACH_BUCKET).remove([att.file_path]).then(() => {}, () => {});
-  await logAction('return_attachment_removed', att.return_id, att.file_name, { entityType: 'return', entityId: att.return_id });
+  const ownerId = att.return_id ?? att.refund_id ?? att.id;
+  await logAction('return_attachment_removed', ownerId, att.file_name,
+    att.return_id ? { entityType: 'return', entityId: att.return_id } : undefined);
 }
+
+export const deleteReturnAttachment = deleteCaseAttachment;
 
 export async function returnAttachmentSignedUrl(filePath: string): Promise<string> {
   const { data, error } = await supabase.storage.from(RETURN_ATTACH_BUCKET).createSignedUrl(filePath, 3600);
@@ -737,14 +799,18 @@ export function useRefundApprovals(): { approvals: RefundApproval[]; loading: bo
 
 export type RefundNote = {
   id: string;
-  refund_id: string;
+  // Exactly one of these is set — see caseNoteAnchor.
+  refund_id: string | null;
+  cancellation_id: string | null;
   body: string;
   author_id: string | null;
   author_name: string | null;
   created_at: string;
 };
 
-export function useRefundNotes(refundId: string | null): {
+/** Notes on a refund_notes row, read by whichever column owns them: refund_id
+ *  for a refund's own notes, cancellation_id for a cancellation request's. */
+function useRefundNotesBy(column: 'refund_id' | 'cancellation_id', ownerId: string | null): {
   notes: RefundNote[]; loading: boolean; refresh: () => void;
 } {
   const [notes, setNotes] = useState<RefundNote[]>([]);
@@ -752,24 +818,40 @@ export function useRefundNotes(refundId: string | null): {
   const [tick, setTick] = useState(0);
 
   useEffect(() => {
-    if (!refundId) { setNotes([]); setLoading(false); return; }
+    if (!ownerId) { setNotes([]); setLoading(false); return; }
     let cancelled = false;
     (async () => {
       setLoading(true);
       const { data } = await supabase
         .from('refund_notes')
         .select('*')
-        .eq('refund_id', refundId)
+        .eq(column, ownerId)
         .order('created_at', { ascending: true });
       if (!cancelled) { setNotes((data ?? []) as RefundNote[]); setLoading(false); }
     })();
     return () => { cancelled = true; };
-  }, [refundId, tick]);
+  }, [column, ownerId, tick]);
 
   return { notes, loading, refresh: () => setTick(t => t + 1) };
 }
 
-export async function addRefundNote(refundId: string, body: string): Promise<void> {
+export function useRefundNotes(refundId: string | null): {
+  notes: RefundNote[]; loading: boolean; refresh: () => void;
+} {
+  return useRefundNotesBy('refund_id', refundId);
+}
+
+/** Notes typed on a cancellation request card, before any refund exists. */
+export function useCancellationNotes(cancellationId: string | null): {
+  notes: RefundNote[]; loading: boolean; refresh: () => void;
+} {
+  return useRefundNotesBy('cancellation_id', cancellationId);
+}
+
+async function insertRefundNote(
+  owner: { column: 'refund_id' | 'cancellation_id'; id: string },
+  body: string,
+): Promise<void> {
   const { data: { user } } = await supabase.auth.getUser();
   let authorName: string | null = null;
   if (user) {
@@ -779,11 +861,27 @@ export async function addRefundNote(refundId: string, body: string): Promise<voi
   // Omit author_id when we don't have it so the DB default (auth.uid()) fills
   // it — never send an explicit null, which would defeat the default and (under
   // the old policy) silently reject the insert. Notes must always save.
-  const payload: Record<string, unknown> = { refund_id: refundId, body: body.trim(), author_name: authorName };
+  // Send ONLY the owner column that applies. Naming the other one — even as
+  // null — makes the insert fail outright on a database where it doesn't exist
+  // yet ("could not find the column in the schema cache"), which would break
+  // ordinary refund notes if the frontend ships ahead of the migration.
+  const payload: Record<string, unknown> = {
+    [owner.column]: owner.id,
+    body: body.trim(),
+    author_name: authorName,
+  };
   if (user?.id) payload.author_id = user.id;
   const { error } = await supabase.from('refund_notes').insert(payload);
   if (error) throw error;
-  await logAction('refund_note_added', refundId, body.trim().slice(0, 120));
+  await logAction('refund_note_added', owner.id, body.trim().slice(0, 120));
+}
+
+export async function addRefundNote(refundId: string, body: string): Promise<void> {
+  return insertRefundNote({ column: 'refund_id', id: refundId }, body);
+}
+
+export async function addCancellationNote(cancellationId: string, body: string): Promise<void> {
+  return insertRefundNote({ column: 'cancellation_id', id: cancellationId }, body);
 }
 
 // Notes on a pre-refund return card (Return Form Submitted / Return &
@@ -877,35 +975,88 @@ export type CaseNote = {
   created_at: string; source: 'return' | 'refund';
 };
 
-export function useCaseNotes(refundId: string | null, returnId: string | null): {
-  notes: CaseNote[]; loading: boolean; refresh: () => void;
-} {
+/** Where a new note on this case gets written. Anchor to the longest-lived row
+ *  the case has, so moving the card between columns never loses the thread:
+ *
+ *    return       → outlives compile AND uncompile (uncompile keeps the return)
+ *    cancellation → outlives both too; compiling only flips it to 'completed'
+ *    refund       → last resort, for a direct refund with neither
+ *
+ *  The refund row is the one that gets DELETED on uncompile, taking its notes
+ *  with it, which is exactly why it sorts last. */
+export type CaseNoteAnchor = {
+  table: 'return_notes' | 'refund_notes';
+  column: 'return_id' | 'cancellation_id' | 'refund_id';
+  id: string;
+};
+
+export function caseNoteAnchor(
+  refundId: string | null,
+  returnId: string | null,
+  cancellationId: string | null = null,
+): CaseNoteAnchor | null {
+  if (returnId)      return { table: 'return_notes', column: 'return_id',      id: returnId };
+  if (cancellationId) return { table: 'refund_notes', column: 'cancellation_id', id: cancellationId };
+  if (refundId)      return { table: 'refund_notes', column: 'refund_id',      id: refundId };
+  return null;
+}
+
+export function useCaseNotes(
+  refundId: string | null,
+  returnId: string | null,
+  cancellationId: string | null = null,
+): { notes: CaseNote[]; loading: boolean; refresh: () => void } {
   const rn = useReturnNotes(returnId);
   const fn = useRefundNotes(refundId);
+  const cn = useCancellationNotes(cancellationId);
+  const fromRefundNotes = (n: RefundNote) => ({
+    id: n.id, body: n.body, author_id: n.author_id, author_name: n.author_name,
+    created_at: n.created_at, source: 'refund' as const,
+  });
   const notes: CaseNote[] = [
     ...rn.notes.map(n => ({ ...n, source: 'return' as const })),
-    ...fn.notes.map(n => ({ id: n.id, body: n.body, author_id: n.author_id, author_name: n.author_name, created_at: n.created_at, source: 'refund' as const })),
+    ...fn.notes.map(fromRefundNotes),
+    ...cn.notes.map(fromRefundNotes),
   ].sort((a, b) => a.created_at.localeCompare(b.created_at));
-  return { notes, loading: rn.loading || fn.loading, refresh: () => { rn.refresh(); fn.refresh(); } };
+  return {
+    notes,
+    loading: rn.loading || fn.loading || cn.loading,
+    refresh: () => { rn.refresh(); fn.refresh(); cn.refresh(); },
+  };
 }
 
-// New notes anchor to the return when the case has one, so they survive the
-// refund row being deleted on uncompile.
-export async function addCaseNote(refundId: string | null, returnId: string | null, body: string): Promise<void> {
-  if (returnId) return addReturnNote(returnId, body);
-  if (refundId) return addRefundNote(refundId, body);
-  throw new Error('addCaseNote: neither returnId nor refundId provided');
+export async function addCaseNote(
+  refundId: string | null,
+  returnId: string | null,
+  body: string,
+  cancellationId: string | null = null,
+): Promise<void> {
+  const anchor = caseNoteAnchor(refundId, returnId, cancellationId);
+  if (!anchor) throw new Error('addCaseNote: neither returnId, cancellationId nor refundId provided');
+  if (anchor.column === 'return_id')       return addReturnNote(anchor.id, body);
+  if (anchor.column === 'cancellation_id') return addCancellationNote(anchor.id, body);
+  return addRefundNote(anchor.id, body);
 }
 
-export async function updateCaseNote(note: CaseNote, refundId: string | null, returnId: string | null, body: string): Promise<void> {
+// Edits and deletes only need the note's own id — the owner id is passed along
+// for the activity log, so any of the three the card happens to have will do.
+export async function updateCaseNote(
+  note: CaseNote, refundId: string | null, returnId: string | null, body: string,
+  cancellationId: string | null = null,
+): Promise<void> {
   if (note.source === 'return' && returnId) return updateReturnNote(note.id, returnId, body);
-  if (refundId) return updateRefundNote(note.id, refundId, body);
+  const target = refundId ?? cancellationId;
+  if (target) return updateRefundNote(note.id, target, body);
   throw new Error('updateCaseNote: no target for note');
 }
 
-export async function deleteCaseNote(note: CaseNote, refundId: string | null, returnId: string | null): Promise<void> {
+export async function deleteCaseNote(
+  note: CaseNote, refundId: string | null, returnId: string | null,
+  cancellationId: string | null = null,
+): Promise<void> {
   if (note.source === 'return' && returnId) return deleteReturnNote(note.id, returnId);
-  if (refundId) return deleteRefundNote(note.id, refundId);
+  const target = refundId ?? cancellationId;
+  if (target) return deleteRefundNote(note.id, target);
   throw new Error('deleteCaseNote: no target for note');
 }
 
@@ -1495,6 +1646,19 @@ export function pendingCancellationRefunds(
                  && !Number.isNaN(Date.parse(c.created_at))
                  && Date.parse(c.created_at) >= cutoff)
     .sort((a, b) => b.created_at.localeCompare(a.created_at));
+}
+
+/** The cancellation a refund was compiled from, or null. The link is one-way in
+ *  the schema (order_cancellations.refund_approval_id), so a refund card finds
+ *  its cancellation by scanning the rows the board already has in memory. Used
+ *  to keep the notes typed on the cancellation card visible on the refund card
+ *  it became. */
+export function cancellationForRefund(
+  rows: OrderCancellation[],
+  refundId: string | null,
+): OrderCancellation | null {
+  if (!refundId) return null;
+  return rows.find(c => c.refund_approval_id === refundId) ?? null;
 }
 
 /** Compile a cancellation into a refund request in the Completeness column —

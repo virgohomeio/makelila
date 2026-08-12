@@ -7,11 +7,12 @@ import {
   confirmPurchaserLinkage, hasValidPurchaserLinkage,
   computeRefundNet, defaultRefundFees,
   preRefundStage, customerWaitState,
-  useOrderCancellations, pendingCancellationRefunds,
+  useOrderCancellations, pendingCancellationRefunds, cancellationForRefund,
   compileCancellationToRefund, dismissCancellationRefund, type OrderCancellation,
   setReturnDisposition, updateReturnStatus,
-  useReturnAttachments, uploadReturnAttachment, deleteReturnAttachment, returnAttachmentSignedUrl,
-  RETURN_ATTACH_INPUT_ACCEPT, RETURN_ATTACH_CATEGORIES,
+  useCaseAttachments, uploadCaseAttachment, deleteCaseAttachment, returnAttachmentSignedUrl,
+  RETURN_ATTACH_INPUT_ACCEPT, RETURN_ATTACH_CATEGORIES, RETURN_ATTACH_ALLOWED_MIME,
+  RETURN_CATEGORIES, RETURN_CATEGORY_META, manualRefundReason,
   type ReturnAttachment, type ReturnAttachmentCategory,
   useCaseNotes, addCaseNote, updateCaseNote, deleteCaseNote, type CaseNote,
   REFUND_STATUS_META, REFUND_METHODS, REFUND_METHOD_META,
@@ -34,7 +35,7 @@ const UNIT_STAGES: { value: ReturnStatus; label: string }[] = [
   { value: 'discarded',        label: 'Unit discarded by customer' },
 ];
 import { useQueuedReplacements, holdReplacement, type Order } from '../../lib/orders';
-import { useOnboardDates, useCustomerIdByEmail, useCustomers, refundUsageWindow, resolveRefundParties, type RefundParties, type RefundUsageWindow } from '../../lib/customers';
+import { useOnboardDates, useCustomerIdByEmail, useCustomers, refundUsageWindow, resolveRefundParties, resolvePurchaserId, type Customer, type RefundParties, type RefundUsageWindow } from '../../lib/customers';
 import {
   useInvoicesByCustomerEmail, openInvoiceInNewTab, invoiceAmountCad, type CustomerInvoice,
 } from '../../lib/invoices';
@@ -96,7 +97,6 @@ export function RefundsTab() {
   const userEmail = profile?.email ?? user?.email;
 
   const [showRequestModal, setShowRequestModal] = useState(false);
-  const [requestReturnId, setRequestReturnId] = useState<string | null>(null);
   const [viewReturnId, setViewReturnId] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [financeModalId, setFinanceModalId] = useState<string | null>(null);
@@ -284,6 +284,12 @@ export function RefundsTab() {
     [cancellations],
   );
 
+  // A refund compiled from a cancellation keeps reading that cancellation's
+  // notes, so the thread written on the intake card doesn't disappear the
+  // moment the case moves to Completeness.
+  const cancellationIdFor = (refundId: string): string | null =>
+    cancellationForRefund(cancellations, refundId)?.id ?? null;
+
   const stats = useMemo(() => {
     let totalRefunded = 0;
     let totalPending = 0;
@@ -417,7 +423,7 @@ export function RefundsTab() {
 
       <div className={styles.refundsBar}>
         <button className={styles.requestRefundBtn} onClick={() => setShowRequestModal(true)}>
-          + Request refund
+          + Create Manual Refund
         </button>
         {error && <span className={styles.refundsError}>{error}</span>}
       </div>
@@ -458,6 +464,7 @@ export function RefundsTab() {
                     key={r.id}
                     refund={r}
                     linkedReturn={r.return_id ? returnsById.get(r.return_id) ?? null : null}
+                    cancellationId={cancellationIdFor(r.id)}
                     parties={partiesForRefund(r, r.return_id ? returnsById.get(r.return_id) ?? null : null)}
                     canApproveHere={ownsRefundColumn(userEmail, r.status)}
                     usage={usageFor(r, r.return_id ? returnsById.get(r.return_id) ?? null : null)}
@@ -481,6 +488,7 @@ export function RefundsTab() {
         <RefundDetailPanel
           refund={selectedRefund}
           linkedReturn={selectedReturn}
+          cancellationId={cancellationIdFor(selectedRefund.id)}
           parties={partiesForRefund(selectedRefund, selectedReturn)}
           canApproveHere={ownsRefundColumn(userEmail, selectedRefund.status)}
           usage={usageFor(selectedRefund, selectedReturn)}
@@ -496,10 +504,8 @@ export function RefundsTab() {
       )}
 
       {showRequestModal && (
-        <RequestRefundModal
-          returns={returns}
-          initialReturnId={requestReturnId}
-          onClose={() => { setShowRequestModal(false); setRequestReturnId(null); }}
+        <CreateManualRefundModal
+          onClose={() => setShowRequestModal(false)}
           onError={setError}
         />
       )}
@@ -528,6 +534,7 @@ export function RefundsTab() {
           <FinanceApproveModal
             refund={refund}
             linkedReturn={linked}
+            cancellationId={cancellationIdFor(refund.id)}
             onClose={() => setFinanceModalId(null)}
             onError={setError}
           />
@@ -840,9 +847,9 @@ function DispositionEditor({ r, onError }: { r: ReturnRow; onError: (m: string |
 // Notes for a case. Pass a returnId (return-only cards) and/or a refundId
 // (refund cards). Reads the union and anchors new notes to the return so the
 // same list shows at every stage and is never lost across compile/uncompile.
-function CaseNotes({ refundId = null, returnId = null, onError }:
-  { refundId?: string | null; returnId?: string | null; onError: (m: string | null) => void }) {
-  const { notes, refresh } = useCaseNotes(refundId, returnId);
+function CaseNotes({ refundId = null, returnId = null, cancellationId = null, onError }:
+  { refundId?: string | null; returnId?: string | null; cancellationId?: string | null; onError: (m: string | null) => void }) {
+  const { notes, refresh } = useCaseNotes(refundId, returnId, cancellationId);
   const { user } = useAuth();
   const uid = user?.id;
   const [text, setText] = useState('');
@@ -852,20 +859,20 @@ function CaseNotes({ refundId = null, returnId = null, onError }:
   const add = async () => {
     if (!text.trim()) return;
     setBusy(true); onError(null);
-    try { await addCaseNote(refundId, returnId, text); setText(''); refresh(); }
+    try { await addCaseNote(refundId, returnId, text, cancellationId); setText(''); refresh(); }
     catch (e) { onError((e as Error).message); }
     finally { setBusy(false); }
   };
   const del = async (n: CaseNote) => {
     setBusy(true); onError(null);
-    try { await deleteCaseNote(n, refundId, returnId); refresh(); }
+    try { await deleteCaseNote(n, refundId, returnId, cancellationId); refresh(); }
     catch (e) { onError((e as Error).message); }
     finally { setBusy(false); }
   };
   const saveEdit = async (n: CaseNote) => {
     if (!editText.trim()) return;
     setBusy(true); onError(null);
-    try { await updateCaseNote(n, refundId, returnId, editText); setEditId(null); refresh(); }
+    try { await updateCaseNote(n, refundId, returnId, editText, cancellationId); setEditId(null); refresh(); }
     catch (e) { onError((e as Error).message); }
     finally { setBusy(false); }
   };
@@ -923,8 +930,12 @@ function CaseNotes({ refundId = null, returnId = null, onError }:
 // pasted images, so a single window-level paste listener lives here in the
 // parent and routes to whichever section is armed; two independent listeners
 // would file the same clipboard image into both sections.
-function ReturnAttachmentStrip({ returnId, onError }: { returnId: string; onError: (m: string | null) => void }) {
-  const { attachments, refresh } = useReturnAttachments(returnId);
+function CaseAttachmentStrip({ refundId = null, returnId = null, onError }: {
+  refundId?: string | null;
+  returnId?: string | null;
+  onError: (m: string | null) => void;
+}) {
+  const { attachments, refresh } = useCaseAttachments(refundId, returnId);
   const [busy, setBusy] = useState(false);
   const [urls, setUrls] = useState<Record<string, string>>({});
   const [pasteTarget, setPasteTarget] = useState<ReturnAttachmentCategory>('context');
@@ -933,7 +944,7 @@ function ReturnAttachmentStrip({ returnId, onError }: { returnId: string; onErro
     if (!files.length) return;
     setBusy(true); onError(null);
     try {
-      for (const f of files) await uploadReturnAttachment(returnId, toNamedFile(f), category);
+      for (const f of files) await uploadCaseAttachment({ refundId, returnId }, toNamedFile(f), category);
       refresh();
     } catch (e) { onError((e as Error).message); }
     finally { setBusy(false); }
@@ -947,7 +958,7 @@ function ReturnAttachmentStrip({ returnId, onError }: { returnId: string; onErro
     window.addEventListener('paste', onPaste);
     return () => window.removeEventListener('paste', onPaste);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [returnId, pasteTarget]);
+  }, [refundId, returnId, pasteTarget]);
 
   useEffect(() => {
     let cancelled = false;
@@ -963,7 +974,7 @@ function ReturnAttachmentStrip({ returnId, onError }: { returnId: string; onErro
 
   const del = async (a: ReturnAttachment) => {
     setBusy(true); onError(null);
-    try { await deleteReturnAttachment(a); refresh(); }
+    try { await deleteCaseAttachment(a); refresh(); }
     catch (e) { onError((e as Error).message); }
     finally { setBusy(false); }
   };
@@ -1424,6 +1435,9 @@ function CancellationCard({
       <UsageWindowBadge usage={usage} />
       <RefundInvoices invoices={invoices} fallbackOrderRef={c.order_ref} />
       <CustomerTicketHistory tickets={tickets} onOpenTicket={onOpenTicket} defaultOpen />
+      {/* Notes anchor to the cancellation, so they carry onto the refund card
+          this compiles into instead of starting over there. */}
+      <CaseNotes cancellationId={c.id} onError={onError} />
       <div className={styles.refundActions}>
         {canOwn ? (
           <>
@@ -1446,10 +1460,11 @@ function CancellationCard({
 }
 
 function RefundCard({
-  refund, linkedReturn, parties, canApproveHere, usage, invoices, tickets, onOpenTicket, canFlow, selected, onSelect, onError, onOpenFinanceModal,
+  refund, linkedReturn, cancellationId = null, parties, canApproveHere, usage, invoices, tickets, onOpenTicket, canFlow, selected, onSelect, onError, onOpenFinanceModal,
 }: {
   refund: RefundApproval;
   linkedReturn: ReturnRow | null;
+  cancellationId?: string | null;
   parties: Parties;
   canApproveHere: boolean;
   usage: RefundUsageWindow;
@@ -1725,7 +1740,7 @@ function RefundCard({
         )}
       </div>
       {/* Same notes as the return card — the case is unchanged after compile. */}
-      <CaseNotes refundId={refund.id} returnId={refund.return_id} onError={onError} />
+      <CaseNotes refundId={refund.id} returnId={refund.return_id} cancellationId={cancellationId} onError={onError} />
       {!selected && (
         <div className={styles.refundCardHint}>Click to open the full case ↗</div>
       )}
@@ -1738,10 +1753,11 @@ function RefundCard({
 // Renders the linked return-form data + approve / deny actions.
 // ============================================================================
 function RefundDetailPanel({
-  refund, linkedReturn, parties, canApproveHere, usage, invoices, tickets, onOpenTicket, queuedReplacements, canFlow, onClose, onError, onOpenFinanceModal,
+  refund, linkedReturn, cancellationId = null, parties, canApproveHere, usage, invoices, tickets, onOpenTicket, queuedReplacements, canFlow, onClose, onError, onOpenFinanceModal,
 }: {
   refund: RefundApproval;
   linkedReturn: ReturnRow | null;
+  cancellationId?: string | null;
   parties: Parties;
   canApproveHere: boolean;
   usage: RefundUsageWindow;
@@ -1756,7 +1772,7 @@ function RefundDetailPanel({
 }) {
   const [busy, setBusy] = useState(false);
   const [holdBusy, setHoldBusy] = useState<string | null>(null);
-  const { notes, refresh: refreshNotes } = useCaseNotes(refund.id, refund.return_id);
+  const { notes, refresh: refreshNotes } = useCaseNotes(refund.id, refund.return_id, cancellationId);
   const { user: authUser } = useAuth();
   const uid = authUser?.id;
   const [newNote, setNewNote] = useState('');
@@ -1825,20 +1841,20 @@ function RefundDetailPanel({
   const runAddNote = async () => {
     if (!newNote.trim()) return;
     setBusy(true); onError(null);
-    try { await addCaseNote(refund.id, refund.return_id, newNote); setNewNote(''); refreshNotes(); }
+    try { await addCaseNote(refund.id, refund.return_id, newNote, cancellationId); setNewNote(''); refreshNotes(); }
     catch (e) { onError((e as Error).message); }
     finally { setBusy(false); }
   };
   const runEditNote = async (n: CaseNote) => {
     if (!editNoteText.trim()) return;
     setBusy(true); onError(null);
-    try { await updateCaseNote(n, refund.id, refund.return_id, editNoteText); setEditNoteId(null); refreshNotes(); }
+    try { await updateCaseNote(n, refund.id, refund.return_id, editNoteText, cancellationId); setEditNoteId(null); refreshNotes(); }
     catch (e) { onError((e as Error).message); }
     finally { setBusy(false); }
   };
   const runDeleteNote = async (n: CaseNote) => {
     setBusy(true); onError(null);
-    try { await deleteCaseNote(n, refund.id, refund.return_id); refreshNotes(); }
+    try { await deleteCaseNote(n, refund.id, refund.return_id, cancellationId); refreshNotes(); }
     catch (e) { onError((e as Error).message); }
     finally { setBusy(false); }
   };
@@ -2008,9 +2024,13 @@ function RefundDetailPanel({
           <ReturnTrackingBadge r={linkedReturn} />
         </div>
         <ReturnFormAnswers r={linkedReturn} />
-        <ReturnAttachmentStrip returnId={linkedReturn.id} onError={onError} />
         </>
       )}
+
+      {/* Photos file against the return when the case has one and against the
+          refund when it doesn't, so a card with no return behind it — born from
+          a cancellation form, or opened by hand — still takes evidence. */}
+      <CaseAttachmentStrip refundId={refund.id} returnId={linkedReturn?.id ?? null} onError={onError} />
 
       {/* Notes for approvers (George/Julie) — collaborative, timestamped, attributed. */}
       <div style={{ margin: '12px 0', borderTop: '1px solid #edf2f7', paddingTop: 12 }}>
@@ -2249,7 +2269,7 @@ function ReturnDetailModal({ r, parties, usage, invoices, tickets, onOpenTicket,
           <RefundInvoices invoices={invoices} fallbackOrderRef={r.original_order_ref} />
           <CustomerTicketHistory tickets={tickets} onOpenTicket={onOpenTicket} defaultOpen />
           <CaseNotes returnId={r.id} onError={onError} />
-          <ReturnAttachmentStrip returnId={r.id} onError={onError} />
+          <CaseAttachmentStrip returnId={r.id} onError={onError} />
           <ReturnFormAnswers r={r} />
         </div>
       </div>
@@ -2287,128 +2307,249 @@ function RefundStep({ label, ts, note, active, negative }: {
 }
 
 // ============================================================================
-// Request refund modal
+// Create Manual Refund modal
 // ============================================================================
-function RequestRefundModal({
-  returns, initialReturnId, onClose, onError,
+// Open a refund on a customer picked straight from the directory, with no
+// return or cancellation form behind it — the path for cases that arrive by
+// email or phone. Everyone in the refund workflow can create one; it lands in
+// Completeness like every other card, so nothing skips verification.
+//
+// Photos and the opening note can only be written once the refund row exists
+// (both are keyed to its id), so submit creates the card first and then files
+// them against it.
+function CreateManualRefundModal({
+  onClose, onError,
 }: {
-  returns: ReturnRow[];
-  initialReturnId?: string | null;
   onClose: () => void;
   onError: (msg: string | null) => void;
 }) {
-  const [returnId, setReturnId] = useState<string>('');
-  const [customerName, setCustomerName] = useState('');
-  const [customerEmail, setCustomerEmail] = useState('');
-  const [reason, setReason] = useState('');
+  const { customers, loading: customersLoading } = useCustomers();
+  const [query, setQuery] = useState('');
+  const [picked, setPicked] = useState<Customer | null>(null);
+  const [listOpen, setListOpen] = useState(false);
+  const [category, setCategory] = useState<ReturnCategory | ''>('');
+  const [reasonDetail, setReasonDetail] = useState('');
+  const [files, setFiles] = useState<File[]>([]);
   const [notes, setNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [step, setStep] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
 
-  // Surface returns still in the return/inspection phase (created → inspected)
-  // that don't already have a refund_approval — the natural ones to request a
-  // refund on. (We don't enforce this; CS can still type a freeform name.)
-  const eligibleReturns = useMemo(
-    () => returns.filter(r => ['created', 'received', 'inspected'].includes(r.status))
-      .sort((a, b) => (b.created_at).localeCompare(a.created_at)),
-    [returns],
-  );
+  // FR-6: a directory row can be a USER acting for someone else. Refunds book
+  // against the PURCHASER, so that's who the card is opened for.
+  const purchaser = useMemo(() => {
+    if (!picked) return null;
+    const payeeId = resolvePurchaserId(picked);
+    return payeeId === picked.id ? null : customers.find(c => c.id === payeeId) ?? null;
+  }, [picked, customers]);
+  const payee = purchaser ?? picked;
 
-  const onReturnChange = (id: string) => {
-    setReturnId(id);
-    const r = returns.find(x => x.id === id);
-    if (r) {
-      // When the filer wasn't the buyer, the refund customer is the purchaser.
-      setCustomerName(r.purchaser_name?.trim() || r.customer_name);
-      setCustomerEmail((r.purchaser_email?.trim() || r.customer_email) ?? '');
-      if (r.reason) setReason(r.reason);
-    }
+  const matches = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return customers.slice(0, 50);
+    return customers.filter(c =>
+      c.full_name.toLowerCase().includes(q) ||
+      (c.email ?? '').toLowerCase().includes(q) ||
+      (c.phone ?? '').toLowerCase().includes(q)
+    ).slice(0, 50);
+  }, [customers, query]);
+
+  const pick = (c: Customer) => {
+    setPicked(c);
+    setQuery(c.full_name);
+    setListOpen(false);
   };
 
-  // Pre-select the return when opened from a "Compile → George" button so the
-  // purchaser (if any) pre-fills the customer name.
+  const addFiles = (picked: File[]) => {
+    const ok = picked.filter(f => !f.type || RETURN_ATTACH_ALLOWED_MIME.includes(f.type));
+    if (ok.length !== picked.length) onError('Some files were skipped — images and PDFs only.');
+    setFiles(prev => [...prev, ...ok.map(toNamedFile)]);
+  };
+
+  // Paste-to-attach, same gesture as the card's photo strip.
   useEffect(() => {
-    if (initialReturnId) onReturnChange(initialReturnId);
+    const onPaste = (e: ClipboardEvent) => {
+      const imgs = imageFilesFrom(e.clipboardData);
+      if (imgs.length) { e.preventDefault(); addFiles(imgs); }
+    };
+    window.addEventListener('paste', onPaste);
+    return () => window.removeEventListener('paste', onPaste);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialReturnId]);
+  }, []);
+
+  const canSubmit = !!payee && !!category && !submitting;
 
   const submit = async () => {
-    if (!customerName.trim()) return;
+    if (!payee || !category) return;
     setSubmitting(true); onError(null);
+    let refundId: string | null = null;
     try {
-      // Opens at what the customer paid on their sales invoice (CAD); Finance
-      // (Julie) confirms or corrects that, and sets the method, at Finance Review.
-      const linked = returns.find(x => x.id === returnId) ?? null;
-      const opening = await defaultRefundAmountFromInvoice(
-        customerEmail.trim() || null, linked?.original_order_ref, linked?.refund_amount_usd);
-      await submitRefundRequest({
-        return_id: returnId || undefined,
-        customer_name: customerName.trim(),
-        customer_email: customerEmail.trim() || undefined,
+      setStep('Creating the card…');
+      // Opens at what they paid on their sales invoice (CAD); Finance confirms
+      // the figure and sets the method at Finance Review.
+      const opening = await defaultRefundAmountFromInvoice(payee.email, null, null);
+      const reason = manualRefundReason(category, reasonDetail);
+      refundId = await submitRefundRequest({
+        customer_name: payee.full_name,
+        customer_email: payee.email ?? undefined,
         refund_amount_usd: opening.amount,
         currency: opening.currency,
-        reason: reason.trim() || undefined,
-        notes: notes.trim() || undefined,
+        reason,
+        notes: purchaser ? `Opened from directory entry "${picked?.full_name}" (user); refund books to the purchaser.` : undefined,
       });
+
+      if (files.length) {
+        setStep(`Uploading ${files.length} file${files.length > 1 ? 's' : ''}…`);
+        for (const f of files) {
+          await uploadCaseAttachment({ refundId, returnId: null }, f, 'context');
+        }
+      }
+      if (notes.trim()) {
+        setStep('Saving the note…');
+        await addCaseNote(refundId, null, notes);
+      }
       onClose();
     } catch (e) {
-      onError((e as Error).message);
+      // The card may already exist — say so rather than implying nothing happened.
+      const msg = (e as Error).message;
+      onError(refundId
+        ? `The refund card was created, but finishing it failed: ${msg}. Open the card to add the rest.`
+        : msg);
     } finally {
       setSubmitting(false);
+      setStep(null);
     }
   };
+
+  const field = (label: string, value: string | null | undefined) => (
+    <div style={{ display: 'flex', gap: 6, fontSize: 12 }}>
+      <span style={{ color: '#718096', minWidth: 62 }}>{label}</span>
+      <span style={{ color: value ? '#2d3748' : '#a0aec0', fontWeight: value ? 600 : 400 }}>{value || '—'}</span>
+    </div>
+  );
 
   return (
     <div className={styles.modalBackdrop} onClick={onClose}>
       <div className={styles.modalCard} onClick={e => e.stopPropagation()}>
         <div className={styles.modalHead}>
-          <strong>Request refund</strong>
+          <strong>Create Manual Refund</strong>
           <button onClick={onClose} className={styles.modalClose}>✕</button>
         </div>
         <div className={styles.modalBody}>
+
+          {/* Customer — picked from the directory, never typed freehand, so the
+              card always resolves to a real customer record. */}
+          <div className={styles.modalRow} style={{ position: 'relative' }}>
+            <label>Customer <span style={{ color: '#c53030' }}>*</span></label>
+            <input
+              type="text"
+              className={styles.modalInput}
+              value={query}
+              disabled={customersLoading}
+              placeholder={customersLoading ? 'Loading the directory…' : 'Search by name, email or phone'}
+              onChange={e => { setQuery(e.target.value); setPicked(null); setListOpen(true); }}
+              onFocus={() => setListOpen(true)}
+            />
+            {listOpen && !picked && (
+              <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 20, maxHeight: 240,
+                            overflowY: 'auto', background: '#fff', border: '1px solid #e2e8f0', borderRadius: 8,
+                            boxShadow: '0 8px 24px rgba(0,0,0,0.12)' }}>
+                {matches.length === 0 ? (
+                  <div style={{ padding: '10px 12px', fontSize: 12, color: '#a0aec0' }}>
+                    No customer in the directory matches that.
+                  </div>
+                ) : matches.map(c => (
+                  <button key={c.id} type="button" onClick={() => pick(c)}
+                    style={{ display: 'block', width: '100%', textAlign: 'left', padding: '7px 12px', border: 'none',
+                             background: 'none', cursor: 'pointer', fontSize: 13, borderBottom: '1px solid #f7fafc' }}>
+                    <span style={{ fontWeight: 600, color: '#2d3748' }}>{c.full_name}</span>
+                    <span style={{ color: '#718096' }}>{c.email ? ` · ${c.email}` : ''}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Everything the directory knows, pulled in with the selection. */}
+          {picked && (
+            <div style={{ border: '1px solid #e2e8f0', borderRadius: 8, padding: '9px 11px', margin: '2px 0 10px',
+                          display: 'flex', flexDirection: 'column', gap: 4, background: '#f7fafc' }}>
+              {field('Email', payee?.email)}
+              {field('Phone', payee?.phone)}
+              {field('Address', [picked.address_line, picked.city, picked.region, picked.postal_code, picked.country]
+                .filter(Boolean).join(', ') || null)}
+              {field('Serials', picked.serials?.length ? picked.serials.join(', ') : null)}
+              {field('Onboarded', picked.onboard_date)}
+              {purchaser && (
+                <div style={{ fontSize: 11, fontWeight: 600, color: '#975a16', background: '#fffbeb',
+                              border: '1px solid #fbd38d', borderRadius: 6, padding: '4px 8px', marginTop: 2 }}>
+                  ⚠ {picked.full_name} is a user, not the buyer — this refund books to {purchaser.full_name}.
+                </div>
+              )}
+            </div>
+          )}
+
           <div className={styles.modalRow}>
-            <label>Link to existing return (optional)</label>
-            <select value={returnId} onChange={e => onReturnChange(e.target.value)} className={styles.modalInput}>
-              <option value="">— freeform (no return) —</option>
-              {eligibleReturns.map(r => (
-                <option key={r.id} value={r.id}>
-                  {r.return_ref ?? '(no ref)'} · {r.customer_name} · ${r.refund_amount_usd ?? 0}
-                </option>
+            <label>Reason for refund <span style={{ color: '#c53030' }}>*</span></label>
+            <select value={category} onChange={e => setCategory(e.target.value as ReturnCategory)}
+                    className={styles.modalInput}>
+              <option value="">— select a reason —</option>
+              {RETURN_CATEGORIES.map(c => (
+                <option key={c} value={c}>{RETURN_CATEGORY_META[c].label}</option>
               ))}
             </select>
           </div>
-          <div className={styles.modalGrid}>
-            <div className={styles.modalRow}>
-              <label>Customer name</label>
-              <input type="text" value={customerName} onChange={e => setCustomerName(e.target.value)}
-                     className={styles.modalInput} required />
-            </div>
-            <div className={styles.modalRow}>
-              <label>Customer email</label>
-              <input type="email" value={customerEmail} onChange={e => setCustomerEmail(e.target.value)}
-                     className={styles.modalInput} />
-            </div>
-          </div>
-          <div style={{ fontSize: 12, color: '#718096', margin: '2px 0 6px' }}>
-            The refund amount and payment method are set by Finance (Julie) at Finance Review.
-          </div>
           <div className={styles.modalRow}>
-            <label>Reason (one-line summary)</label>
-            <input type="text" value={reason} onChange={e => setReason(e.target.value)}
-                   placeholder="e.g. Product defect, shipping damage…"
-                   className={styles.modalInput} />
+            <label>Reason detail (optional)</label>
+            <input type="text" value={reasonDetail} onChange={e => setReasonDetail(e.target.value)}
+                   className={styles.modalInput}
+                   placeholder="What happened, in one line" />
           </div>
+
           <div className={styles.modalRow}>
-            <label>Notes</label>
+            <label>Photos (optional)</label>
+            <div onClick={() => fileRef.current?.click()}
+              style={{ border: '1px dashed #cbd5e0', borderRadius: 8, padding: '10px 12px', cursor: 'pointer',
+                       fontSize: 12, color: '#718096', background: '#fff' }}>
+              Click to choose files, or paste an image — {files.length
+                ? `${files.length} file${files.length > 1 ? 's' : ''} ready`
+                : 'nothing attached yet'}
+            </div>
+            <input ref={fileRef} type="file" multiple accept={RETURN_ATTACH_INPUT_ACCEPT} style={{ display: 'none' }}
+              onChange={e => { addFiles(Array.from(e.target.files ?? [])); e.target.value = ''; }} />
+            {files.length > 0 && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
+                {files.map((f, i) => (
+                  <span key={`${f.name}-${i}`}
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11, background: '#edf2f7',
+                             borderRadius: 999, padding: '3px 8px', color: '#4a5568' }}>
+                    {f.name.slice(0, 24)}
+                    <button type="button" onClick={() => setFiles(prev => prev.filter((_, j) => j !== i))}
+                      style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#a0aec0', fontSize: 12 }}>✕</button>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className={styles.modalRow}>
+            <label>Notes (optional)</label>
             <textarea value={notes} onChange={e => setNotes(e.target.value)}
-                      className={styles.modalTextarea} rows={2}
-                      placeholder="Context for George / Julie" />
+                      className={styles.modalTextarea} rows={3}
+                      placeholder="Context for whoever picks this up — more can be added at any stage on the card." />
+          </div>
+
+          <div style={{ fontSize: 12, color: '#718096', margin: '2px 0 0' }}>
+            Opens in Completeness at what the customer paid on their sales invoice. Finance confirms
+            the amount and sets the payment method at Finance Review.
           </div>
         </div>
         <div className={styles.modalFoot}>
+          {step && <span style={{ fontSize: 12, color: '#718096', marginRight: 'auto' }}>{step}</span>}
           <button onClick={onClose} className={styles.modalSecondary}>Cancel</button>
-          <button onClick={() => void submit()} disabled={submitting || !customerName.trim()}
-                  className={styles.modalPrimary}>
-            {submitting ? 'Creating…' : 'Create refund request'}
+          <button onClick={() => void submit()} disabled={!canSubmit} className={styles.modalPrimary}
+                  title={!picked ? 'Pick a customer from the directory' : !category ? 'Choose a reason for the refund' : ''}>
+            {submitting ? 'Creating…' : 'Create refund'}
           </button>
         </div>
       </div>
@@ -2430,10 +2571,11 @@ function KPI({ label, value, tone, sub }: { label: string; value: number | strin
 // Finance approve modal
 // ============================================================================
 function FinanceApproveModal({
-  refund, linkedReturn, onClose, onError,
+  refund, linkedReturn, cancellationId = null, onClose, onError,
 }: {
   refund: RefundApproval;
   linkedReturn: ReturnRow | null;
+  cancellationId?: string | null;
   onClose: () => void;
   onError: (m: string | null) => void;
 }) {
@@ -2448,7 +2590,7 @@ function FinanceApproveModal({
   // Collaborative "Notes for approvers" — saved immediately, independent of the
   // Approve action. Fixes the case where the linked return isn't received yet
   // (Approve button disabled) but Julie/Huayi still need to record context.
-  const { notes: approverNotes, refresh: refreshNotes } = useCaseNotes(refund.id, refund.return_id);
+  const { notes: approverNotes, refresh: refreshNotes } = useCaseNotes(refund.id, refund.return_id, cancellationId);
   const { user: authUser } = useAuth();
   const uid = authUser?.id;
   const [newNote, setNewNote] = useState('');
@@ -2458,20 +2600,20 @@ function FinanceApproveModal({
   const runAddNote = async () => {
     if (!newNote.trim()) return;
     setNoteBusy(true); setLocalError(null); onError(null);
-    try { await addCaseNote(refund.id, refund.return_id, newNote); setNewNote(''); refreshNotes(); }
+    try { await addCaseNote(refund.id, refund.return_id, newNote, cancellationId); setNewNote(''); refreshNotes(); }
     catch (e) { const m = (e as Error).message; setLocalError(m); onError(m); }
     finally { setNoteBusy(false); }
   };
   const runEditNote = async (n: CaseNote) => {
     if (!editNoteText.trim()) return;
     setNoteBusy(true); setLocalError(null);
-    try { await updateCaseNote(n, refund.id, refund.return_id, editNoteText); setEditNoteId(null); refreshNotes(); }
+    try { await updateCaseNote(n, refund.id, refund.return_id, editNoteText, cancellationId); setEditNoteId(null); refreshNotes(); }
     catch (e) { const m = (e as Error).message; setLocalError(m); onError(m); }
     finally { setNoteBusy(false); }
   };
   const runDeleteNote = async (n: CaseNote) => {
     setNoteBusy(true); setLocalError(null);
-    try { await deleteCaseNote(n, refund.id, refund.return_id); refreshNotes(); }
+    try { await deleteCaseNote(n, refund.id, refund.return_id, cancellationId); refreshNotes(); }
     catch (e) { const m = (e as Error).message; setLocalError(m); onError(m); }
     finally { setNoteBusy(false); }
   };
