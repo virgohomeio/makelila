@@ -1471,14 +1471,29 @@ export function useOrderCancellations(): { cancellations: OrderCancellation[]; l
   return { cancellations, loading };
 }
 
+/** Auto-queueing starts here: only cancellation forms submitted on or after the
+ *  day this shipped become refund cards. The rows already sitting in the table
+ *  (old test submissions, requests handled off-system months ago) are not
+ *  refunds anyone still owes — they stay in the Cancellations tab and never
+ *  appear on the Refunds board. */
+export const CANCELLATION_QUEUE_START = '2026-08-12T00:00:00Z';
+
 /** The cancellation forms waiting to be turned into a refund. A customer
  *  cancellation is a refund request the moment it's submitted — the same way a
  *  return form is — so every 'submitted' row with no refund_approval_id yet is
  *  a live card on the Refunds board's first column. Once processed (refund
  *  compiled, or dismissed as "no money collected") the row drops out. */
-export function pendingCancellationRefunds(rows: OrderCancellation[]): OrderCancellation[] {
+export function pendingCancellationRefunds(
+  rows: OrderCancellation[],
+  since: string = CANCELLATION_QUEUE_START,
+): OrderCancellation[] {
+  // Parse rather than string-compare: PostgREST timestamps carry an offset
+  // ('+00:00') that a lexicographic compare against a 'Z' cutoff gets wrong.
+  const cutoff = Date.parse(since);
   return rows
-    .filter(c => c.status === 'submitted' && !c.refund_approval_id)
+    .filter(c => c.status === 'submitted' && !c.refund_approval_id
+                 && !Number.isNaN(Date.parse(c.created_at))
+                 && Date.parse(c.created_at) >= cutoff)
     .sort((a, b) => b.created_at.localeCompare(a.created_at));
 }
 

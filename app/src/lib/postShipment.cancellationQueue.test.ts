@@ -85,16 +85,18 @@ function cancellation(over: Partial<OrderCancellation> = {}): OrderCancellation 
     processed_by: null,
     processed_at: null,
     refund_approval_id: null,
-    created_at: '2026-08-10T00:00:00Z',
-    updated_at: '2026-08-10T00:00:00Z',
+    // After CANCELLATION_QUEUE_START, so the filter tests below isolate the one
+    // condition each is about.
+    created_at: '2026-08-15T00:00:00Z',
+    updated_at: '2026-08-15T00:00:00Z',
     ...over,
   };
 }
 
 describe('pendingCancellationRefunds', () => {
   it('queues every freshly submitted cancellation, newest first', () => {
-    const older = cancellation({ id: 'a', created_at: '2026-08-01T00:00:00Z' });
-    const newer = cancellation({ id: 'b', created_at: '2026-08-09T00:00:00Z' });
+    const older = cancellation({ id: 'a', created_at: '2026-08-13T00:00:00Z' });
+    const newer = cancellation({ id: 'b', created_at: '2026-08-20T00:00:00Z' });
     expect(pendingCancellationRefunds([older, newer]).map(c => c.id)).toEqual(['b', 'a']);
   });
 
@@ -106,6 +108,22 @@ describe('pendingCancellationRefunds', () => {
   it('drops rows an operator already closed out', () => {
     const done = cancellation({ id: 'd', status: 'completed' });
     expect(pendingCancellationRefunds([done])).toEqual([]);
+  });
+
+  // Only forms submitted from the ship date onward auto-queue: the rows that
+  // predate the feature (old test submissions, requests long since handled) are
+  // not refunds anyone owes and must never appear on the board.
+  it('ignores cancellations submitted before the queue start date', () => {
+    const preexisting = [
+      cancellation({ id: 'reina',  created_at: '2026-07-13T20:32:01.415301+00:00' }),
+      cancellation({ id: 'marina', created_at: '2026-06-19T15:28:59.532171+00:00' }),
+    ];
+    expect(pendingCancellationRefunds(preexisting)).toEqual([]);
+  });
+
+  it('keeps a form submitted after the cutoff, offset timestamp and all', () => {
+    const fresh = cancellation({ id: 'gabriella', created_at: '2026-08-12T18:06:09.3437+00:00' });
+    expect(pendingCancellationRefunds([fresh]).map(c => c.id)).toEqual(['gabriella']);
   });
 });
 
