@@ -7,6 +7,8 @@ import {
   confirmPurchaserLinkage, hasValidPurchaserLinkage,
   computeRefundNet, defaultRefundFees,
   preRefundStage, customerWaitState,
+  useOrderCancellations, pendingCancellationRefunds,
+  compileCancellationToRefund, dismissCancellationRefund, type OrderCancellation,
   setReturnDisposition, updateReturnStatus,
   useReturnAttachments, uploadReturnAttachment, deleteReturnAttachment, returnAttachmentSignedUrl,
   RETURN_ATTACH_INPUT_ACCEPT, RETURN_ATTACH_CATEGORIES,
@@ -64,6 +66,7 @@ const COLUMNS: { key: ColKey; label: string; helper: string }[] = [
 // 'intake' (Return Form Submitted) and 'inspection' (Return & Inspection).
 // Keep in sync with the send-refund-reminders edge function recipients.
 const REFUND_COLUMN_OWNERS: Record<string, string[]> = {
+  cancellation:   ['reina@virgohome.io'],
   intake:         ['reina@virgohome.io'],
   inspection:     ['reina@virgohome.io'],
   submitted:      ['reina@virgohome.io'],
@@ -79,6 +82,7 @@ function ownsRefundColumn(email: string | null | undefined, column: string | nul
 export function RefundsTab() {
   const { approvals, loading: aLoading } = useRefundApprovals();
   const { returns, loading: rLoading } = useReturns();
+  const { cancellations, loading: cLoading } = useOrderCancellations();
   const { replacements: queuedRepls } = useQueuedReplacements();
   const { byEmail: onboardByEmail } = useOnboardDates();
   const { byEmail: invoicesByEmail } = useInvoicesByCustomerEmail();
@@ -272,6 +276,14 @@ export function RefundsTab() {
     };
   }, [returns, approvals]);
 
+  // A cancellation form is a refund request the moment the customer submits it,
+  // exactly like a return form — so it queues here immediately instead of
+  // waiting for someone to open the Cancellations tab and process it.
+  const pendingCancellations = useMemo(
+    () => pendingCancellationRefunds(cancellations),
+    [cancellations],
+  );
+
   const stats = useMemo(() => {
     let totalRefunded = 0;
     let totalPending = 0;
@@ -308,7 +320,7 @@ export function RefundsTab() {
     const ro = new ResizeObserver(update);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [approvals, preRefundReturns]);
+  }, [approvals, preRefundReturns, pendingCancellations]);
   const syncFromTop = () => {
     if (kanbanRef.current && topScrollRef.current) kanbanRef.current.scrollLeft = topScrollRef.current.scrollLeft;
   };
@@ -358,7 +370,36 @@ export function RefundsTab() {
     </div>
   );
 
-  if (aLoading || rLoading) return <div className={styles.loading}>Loading refunds…</div>;
+  // Cancellation cards carry the same context as a return card (parties, usage
+  // window, invoices, ticket history) — only the source record differs.
+  const renderCancellationColumn = () => (
+    <div className={styles.kanbanCol}>
+      <div className={styles.kanbanColHead}>
+        <span className={styles.kanbanColLabel}>Cancellation Requests</span>
+        <span className={styles.kanbanColCount}>{pendingCancellations.length}</span>
+      </div>
+      <div className={styles.kanbanColSub}>Reina — new cancellation forms · queue the refund</div>
+      <div className={styles.kanbanList}>
+        {pendingCancellations.length === 0 ? (
+          <div className={styles.kanbanEmpty}>—</div>
+        ) : pendingCancellations.map(c => (
+          <CancellationCard
+            key={c.id}
+            c={c}
+            canOwn={ownsRefundColumn(userEmail, 'cancellation')}
+            parties={partiesFor({ filerEmail: c.customer_email, filerName: c.customer_name })}
+            usage={usageForEmail(c.customer_email)}
+            invoices={invoicesForEmail(c.customer_email)}
+            tickets={ticketsForEmails([c.customer_email])}
+            onOpenTicket={setOpenTicketId}
+            onError={setError}
+          />
+        ))}
+      </div>
+    </div>
+  );
+
+  if (aLoading || rLoading || cLoading) return <div className={styles.loading}>Loading refunds…</div>;
 
   return (
     <div className={styles.tabContent}>
@@ -385,6 +426,9 @@ export function RefundsTab() {
         <div style={{ width: scrollW }} />
       </div>
       <div ref={kanbanRef} className={styles.kanban} onScroll={syncFromKanban}>
+        {/* Customer cancellation forms land here the moment they're submitted —
+            the cancellation-side twin of "Return Form Submitted". */}
+        {renderCancellationColumn()}
         {/* FR-1 (PRD §4) — Account-Manager (Reina) owned intake + inspection,
             before the card is compiled and sent to Manager Review. */}
         {renderPreRefundColumn(
@@ -1313,6 +1357,88 @@ function InspectionCard({
               </button>
             )}
           </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// Cancellation card
+// ============================================================================
+// A card in the "Cancellation Requests" column: a customer cancellation form
+// that hasn't been turned into a refund yet. Sibling of InspectionCard — the
+// return form's card — so both intake paths look and behave the same. Compiling
+// opens a refund card in Completeness; "No refund needed" closes the request
+// out for orders that were never charged.
+function CancellationCard({
+  c, parties, canOwn, usage, invoices, tickets, onOpenTicket, onError,
+}: {
+  c: OrderCancellation;
+  parties: Parties;
+  canOwn: boolean;
+  usage: RefundUsageWindow;
+  invoices: CustomerInvoice[];
+  tickets: ServiceTicket[];
+  onOpenTicket: (ticketId: string) => void;
+  onError: (msg: string | null) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+
+  const run = async (fn: () => Promise<void>) => {
+    setBusy(true); onError(null);
+    try { await fn(); }
+    catch (e) { onError((e as Error).message); }
+    finally { setBusy(false); }
+  };
+
+  const dismiss = () => {
+    const note = window.prompt('Why is no refund needed? (e.g. order was never charged)') ?? undefined;
+    void run(() => dismissCancellationRefund(c, note));
+  };
+
+  return (
+    <div className={styles.refundCard} style={{ borderLeftColor: '#d69e2e' }}>
+      <div className={styles.refundCardHead}>
+        <PartyHeader parties={parties} />
+        {c.order_amount_usd != null && (
+          <span className={styles.refundAmount}>${Number(c.order_amount_usd).toLocaleString('en-US')}</span>
+        )}
+      </div>
+      <div className={styles.refundMeta}>
+        {[c.order_ref, c.product_name, c.purchase_channel].filter(Boolean).join(' · ') || '—'}
+      </div>
+      {c.reason && <div className={styles.refundReason}>{c.reason}</div>}
+      {c.desired_resolution && <div className={styles.refundMeta}>Wants: {c.desired_resolution}</div>}
+      <div className={styles.refundMeta}>
+        Preferred contact: {c.preferred_contact ?? '—'}
+        {c.customer_phone ? ` · ${c.customer_phone}` : ''}
+      </div>
+      {c.product_received && (
+        <div style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 999,
+                      color: '#975a16', background: '#fffbeb', display: 'inline-block', margin: '4px 0' }}>
+          ⚠ Customer already has the unit — route through Returns
+        </div>
+      )}
+      {c.description && <div className={styles.refundReason}>{c.description}</div>}
+      <UsageWindowBadge usage={usage} />
+      <RefundInvoices invoices={invoices} fallbackOrderRef={c.order_ref} />
+      <CustomerTicketHistory tickets={tickets} onOpenTicket={onOpenTicket} defaultOpen />
+      <div className={styles.refundActions}>
+        {canOwn ? (
+          <>
+            <button className={styles.refundApproveBtn} disabled={busy}
+              onClick={() => void run(() => compileCancellationToRefund(c))}
+              title="Open a refund request for this cancellation (moves it to the Completeness column)">
+              {busy ? '…' : 'Compile → Completeness'}
+            </button>
+            <button className={styles.refundCloseBtn} disabled={busy} onClick={dismiss}
+              title="No money was collected — close the cancellation without a refund">
+              No refund needed
+            </button>
+          </>
+        ) : (
+          <span className={styles.refundCardHint}>Reina moves these forward</span>
         )}
       </div>
     </div>

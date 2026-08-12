@@ -1471,6 +1471,44 @@ export function useOrderCancellations(): { cancellations: OrderCancellation[]; l
   return { cancellations, loading };
 }
 
+/** The cancellation forms waiting to be turned into a refund. A customer
+ *  cancellation is a refund request the moment it's submitted — the same way a
+ *  return form is — so every 'submitted' row with no refund_approval_id yet is
+ *  a live card on the Refunds board's first column. Once processed (refund
+ *  compiled, or dismissed as "no money collected") the row drops out. */
+export function pendingCancellationRefunds(rows: OrderCancellation[]): OrderCancellation[] {
+  return rows
+    .filter(c => c.status === 'submitted' && !c.refund_approval_id)
+    .sort((a, b) => b.created_at.localeCompare(a.created_at));
+}
+
+/** Compile a cancellation into a refund request in the Completeness column —
+ *  the cancellation-side twin of compileReturnToRefund. Opens at what the
+ *  customer paid on their sales invoice (CAD) unless an amount is passed. */
+async function createCancellationRefund(
+  c: OrderCancellation,
+  refundAmount?: number,
+): Promise<string> {
+  // No amount typed in → open at what they paid on the sales invoice (CAD),
+  // same as a return-compiled card, rather than at $0.00.
+  const opening = refundAmount != null
+    ? { amount: refundAmount, currency: 'USD' as RefundCurrency }
+    : await defaultRefundAmountFromInvoice(c.customer_email, c.order_ref, c.order_amount_usd);
+  // Goes through submitRefundRequest so a cancellation-born card is
+  // indistinguishable from a return-born one: it lands in Completeness
+  // (status 'submitted') for the Account Manager to verify before George sees
+  // it, rather than jumping the queue straight into Manager Review.
+  return submitRefundRequest({
+    customer_name: c.customer_name,
+    customer_email: c.customer_email,
+    refund_amount_usd: opening.amount,
+    currency: opening.currency,
+    payment_method: c.preferred_contact === 'phone' ? 'Credit Card (call to process)' : 'E-Transfer',
+    reason: `Order cancellation: ${c.reason ?? 'no reason'}`,
+    notes: `Auto-created from order_cancellation ${c.order_ref ?? c.id}. Customer preferred contact: ${c.preferred_contact ?? '—'}.`,
+  });
+}
+
 /** Process the cancellation request: marks status='completed' and
  *  optionally spawns a refund_approval row when money needs to be paid
  *  back. No review/deny step — every customer request is accepted. */
@@ -1490,25 +1528,7 @@ export async function processCancellation(
 
   let refundApprovalId: string | null = null;
   if (createRefund) {
-    // No amount typed in → open at what they paid on the sales invoice (CAD),
-    // same as a return-compiled card, rather than at $0.00.
-    const opening = refundAmount != null
-      ? { amount: refundAmount, currency: 'USD' as RefundCurrency }
-      : await defaultRefundAmountFromInvoice(c.customer_email, c.order_ref, c.order_amount_usd);
-    const { data: ra, error: raErr } = await supabase.from('refund_approvals').insert({
-      order_id: null,
-      customer_name: c.customer_name,
-      customer_email: c.customer_email,
-      refund_amount_usd: opening.amount,
-      currency: opening.currency,
-      payment_method: c.preferred_contact === 'phone' ? 'Credit Card (call to process)' : 'E-Transfer',
-      reason: `Order cancellation: ${c.reason ?? 'no reason'}`,
-      notes: `Auto-created from order_cancellation ${c.order_ref ?? id}. Customer preferred contact: ${c.preferred_contact ?? '—'}.`,
-      status: 'manager_review',
-      submitted_by: userId,
-    }).select('id').single();
-    if (raErr) throw raErr;
-    refundApprovalId = (ra as { id: string }).id;
+    refundApprovalId = await createCancellationRefund(c as OrderCancellation, refundAmount);
   }
 
   const { error: upErr } = await supabase.from('order_cancellations').update({
@@ -1521,4 +1541,18 @@ export async function processCancellation(
   if (upErr) throw upErr;
 
   await logAction('cancellation_processed', id, refundApprovalId ? `→ refund ${refundApprovalId}` : 'no refund needed');
+}
+
+/** Refunds-board action on a cancellation card: compile it into a refund
+ *  request in Completeness and close out the cancellation. Thin wrapper over
+ *  processCancellation so both entry points (Refunds board, Cancellations tab)
+ *  write exactly the same rows. */
+export async function compileCancellationToRefund(c: OrderCancellation): Promise<void> {
+  await processCancellation(c.id, true);
+}
+
+/** Refunds-board action on a cancellation card: no money to give back (e.g.
+ *  the order was never charged). Closes the cancellation without a refund. */
+export async function dismissCancellationRefund(c: OrderCancellation, opsNote?: string): Promise<void> {
+  await processCancellation(c.id, false, undefined, opsNote);
 }
