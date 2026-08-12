@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { replacementItemTags, replacementStageTag, replacementDemandBySku, replacementUnitDemandByBatch, isUnitTag } from './replacementTags';
+import { replacementItemTags, replacementStageTag, replacementDemandBySku, replacementUnitDemandByBatch, isUnitTag, replacementQueueKinds, queuedForReplacementLabel } from './replacementTags';
 
 const order = (line_items: unknown[], extra: Partial<{ awaiting_batch_id: string | null; replacement_state: string | null; shipped_at: string | null; delivered_at: string | null }> = {}) =>
   ({ line_items, awaiting_batch_id: null, replacement_state: 'ready', ...extra }) as never;
@@ -48,6 +48,39 @@ describe('replacementStageTag', () => {
   });
   it('truly empty → null', () => {
     expect(replacementStageTag(order([]), [], isPending)).toBeNull();
+  });
+});
+
+describe('replacementQueueKinds', () => {
+  it('a whole-unit replacement → its batch code', () => {
+    expect(replacementQueueKinds(order([{ kind: 'unit', batch: 'P100' }]))).toEqual(['P100']);
+    expect(replacementQueueKinds(order([{ kind: 'unit_pending', batch: 'P100X' }]))).toEqual(['P100X']);
+    expect(replacementQueueKinds(order([{ kind: 'unit_pending', batch: 'LILA-Mini' }]))).toEqual(['LILA-Mini']);
+  });
+
+  it('batch-blocked with empty line_items → the awaiting batch', () => {
+    expect(replacementQueueKinds(order([], { awaiting_batch_id: 'P100X' }))).toEqual(['P100X']);
+  });
+
+  it('parts / consumables → PARTS', () => {
+    expect(replacementQueueKinds(order([{ kind: 'part', sku: 'LILA-LID-V36' }]))).toEqual(['PARTS']);
+    // Off-vocabulary parts (e.g. the Jumper) yield no item tag but are still parts.
+    expect(replacementQueueKinds(order([{ kind: 'part_pending', sku: 'LILA-JUMPER', name: 'Jumper' }]))).toEqual(['PARTS']);
+  });
+
+  it('a unit shipped alongside parts reads as the unit', () => {
+    expect(replacementQueueKinds(order([
+      { kind: 'unit_pending', batch: 'P100X' }, { kind: 'part', sku: 'LILA-HOPPER' },
+    ]))).toEqual(['P100X']);
+  });
+
+  it('an empty order yields no kind', () => {
+    expect(replacementQueueKinds(order([]))).toEqual([]);
+  });
+
+  it('labels read "Queued for <kind> Replacement"', () => {
+    expect(queuedForReplacementLabel('P100X')).toBe('Queued for P100X Replacement');
+    expect(queuedForReplacementLabel('PARTS')).toBe('Queued for PARTS Replacement');
   });
 });
 

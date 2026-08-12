@@ -3,6 +3,7 @@ import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase } from './supabase';
 import { logAction } from './activityLog';
 import { adjustPartStock } from './parts';
+import { functionErrorMessage } from './functionError';
 
 export type OrderStatus = 'pending' | 'approved' | 'flagged' | 'held';
 
@@ -47,7 +48,12 @@ export type Order = {
   replacement_state: 'ready' | 'awaiting' | 'held' | null;
   held_reason: string | null;
   cogs_usd: number | null;
+  /** Actual carrier/label cost. MISNAMED: the `_usd` suffix is historical and
+   *  wrong — the currency is whatever `shipping_cost_currency` says, and every
+   *  row populated to date is CAD. Never sum this without grouping by currency. */
   shipping_cost_usd: number | null;
+  /** ISO code for shipping_cost_usd. Required whenever that column is set. */
+  shipping_cost_currency: string | null;
   shipped_at: string | null;
   delivered_at: string | null;
   // Backlog #55 follow-up — carrier tracking. Populated by the Fulfillment
@@ -272,25 +278,6 @@ export type VerifyAddressResult = {
   // verdict was downgraded for an infra reason, not a bad address.
   google_error?: string | null;
 };
-
-/** supabase-js collapses any non-2xx edge-function response into a generic
- *  "Edge Function returned a non-2xx status code"; the real `{ error }` JSON the
- *  function returned is on error.context (a Response). Pull it out so operators
- *  see the actual cause instead of the opaque default. */
-async function functionErrorMessage(error: unknown): Promise<string> {
-  const ctx = (error as { context?: unknown }).context;
-  if (ctx instanceof Response) {
-    try {
-      const body = (await ctx.clone().json()) as { error?: string };
-      if (body?.error) return body.error;
-    } catch { /* body wasn't JSON — fall through to text */ }
-    try {
-      const text = await ctx.text();
-      if (text) return text.slice(0, 400);
-    } catch { /* ignore */ }
-  }
-  return (error as Error)?.message ?? 'Edge function call failed';
-}
 
 export async function confirmAddress(orderId: string): Promise<{ order_ref: string; already_confirmed: boolean }> {
   const { data, error } = await supabase.functions.invoke<{ order_ref: string; already_confirmed: boolean }>(
@@ -676,11 +663,19 @@ async function releaseAndDeleteReplacement(order: CancellableReplacement, note: 
     }
   }
 
-  // Drop the ticket back-link so nothing dangles once the order is gone.
+  // Drop the ticket back-link so nothing dangles once the order is gone, and
+  // clear the queued marker — the customer is no longer waiting on this
+  // replacement. Best-effort on the tag: the order is being deleted either way,
+  // so a tag failure must not strand it (same precedent as the auto-cancel on
+  // ticket close).
   if (order.linked_ticket_id) {
     await supabase.from('service_tickets')
       .update({ replacement_order_id: null })
       .eq('id', order.linked_ticket_id);
+    const { error: tagErr } = await supabase.rpc('remove_ticket_tag', {
+      p_ticket_id: order.linked_ticket_id, p_tag: 'queued_for_replacement',
+    });
+    if (tagErr) console.warn('Clearing queued_for_replacement tag failed (non-fatal):', tagErr.message);
   }
 
   // Delete the order. select() back so an RLS-blocked delete (0 rows, no error)
@@ -922,13 +917,19 @@ export async function createReplacementOrder(input: ReplacementOrderInput):
     .single();
   if (insErr || !row) throw new Error(`Create order: ${insErr?.message ?? 'no row'}`);
 
-  // 2. Back-link the ticket and mark it queued_for_replacement so it surfaces
-  //    with that status in Support Tickets while the replacement is in flight.
+  // 2. Back-link the ticket and TAG it queued_for_replacement. The tag (not the
+  //    status) carries the marker, so whatever workflow state the operator set
+  //    survives — and they can layer other tags on top.
   const { error: tErr } = await supabase
     .from('service_tickets')
-    .update({ replacement_order_id: row.id, status: 'queued_for_replacement' })
+    .update({ replacement_order_id: row.id })
     .eq('id', input.ticket_id);
   if (tErr) throw new Error(`Link ticket: ${tErr.message}`);
+
+  const { error: tagErr } = await supabase.rpc('add_ticket_tag', {
+    p_ticket_id: input.ticket_id, p_tag: 'queued_for_replacement',
+  });
+  if (tagErr) throw new Error(`Tag ticket: ${tagErr.message}`);
 
   // 3. Decrement parts.on_hand atomically per line item. The RPC takes a
   //    transaction-level lock on the parts row and floors at 0, so two
@@ -1012,13 +1013,19 @@ export async function createPendingReplacement(input: ReplacementOrderInput):
     .single();
   if (insErr || !row) throw new Error(`Create pending replacement: ${insErr?.message ?? 'no row'}`);
 
-  // Back-link + queue the ticket. No stock decrement / unit reservation —
-  // the order is awaiting stock/batch and consumes nothing until promoted.
+  // Back-link + TAG the ticket queued_for_replacement (its status is left
+  // alone). No stock decrement / unit reservation — the order is awaiting
+  // stock/batch and consumes nothing until promoted.
   const { error: tErr } = await supabase
     .from('service_tickets')
-    .update({ replacement_order_id: row.id, status: 'queued_for_replacement' })
+    .update({ replacement_order_id: row.id })
     .eq('id', input.ticket_id);
   if (tErr) throw new Error(`Link ticket: ${tErr.message}`);
+
+  const { error: tagErr } = await supabase.rpc('add_ticket_tag', {
+    p_ticket_id: input.ticket_id, p_tag: 'queued_for_replacement',
+  });
+  if (tagErr) throw new Error(`Tag ticket: ${tagErr.message}`);
 
   await logAction(
     'replacement_create',
@@ -1066,28 +1073,54 @@ export function useReplacementOrders(): { orders: Order[]; loading: boolean } {
   return { orders, loading };
 }
 
-/** Records that an order shipped. Sets shipped_at and shipping_cost_usd
- *  (the actual freight/label cost from Freightcom/ClickShip). Works for
- *  both sales and replacements. */
-export async function markOrderShipped(orderId: string, shippingCostUsd: number): Promise<void> {
-  if (!Number.isFinite(shippingCostUsd) || shippingCostUsd < 0) {
-    throw new Error('shipping_cost_usd must be a non-negative number');
+/** Records that an order shipped. Sets shipped_at, the actual freight/label cost
+ *  from Freightcom/ClickShip, and the currency that cost is in. Works for both
+ *  sales and replacements.
+ *
+ *  The currency is explicit and required. The storage column is named
+ *  `shipping_cost_usd` but has only ever held CAD (see the 20260806170000
+ *  migration); the operator input was labelled USD while the backfill wrote CAD,
+ *  which is exactly the ambiguity this parameter removes. Callers state the
+ *  currency; nothing infers it from the column name. */
+export async function markOrderShipped(
+  orderId: string, shippingCost: number, currency: string = 'CAD',
+): Promise<void> {
+  if (!Number.isFinite(shippingCost) || shippingCost < 0) {
+    throw new Error('shipping cost must be a non-negative number');
   }
+  if (!/^[A-Z]{3}$/.test(currency)) {
+    throw new Error('shipping cost currency must be a 3-letter ISO code');
+  }
+  const shippingCostUsd = shippingCost;
   const { data: row, error: rErr } = await supabase
     .from('orders')
-    .select('order_ref, customer_email')
+    .select('order_ref, customer_email, kind, linked_ticket_id')
     .eq('id', orderId)
     .single();
   if (rErr || !row) throw new Error(`Read order: ${rErr?.message ?? 'not found'}`);
 
   const { error } = await supabase
     .from('orders')
-    .update({ shipped_at: new Date().toISOString(), shipping_cost_usd: shippingCostUsd })
+    .update({
+      shipped_at: new Date().toISOString(),
+      shipping_cost_usd: shippingCostUsd,
+      shipping_cost_currency: currency,
+    })
     .eq('id', orderId);
   if (error) throw new Error(error.message);
-  await logAction('order_shipped', row.order_ref, `shipping $${shippingCostUsd.toFixed(2)}`,
+  await logAction('order_shipped', row.order_ref, `shipping $${shippingCostUsd.toFixed(2)} ${currency}`,
     undefined,
     { klaviyoEvent: 'Order Shipped', ...((row.customer_email as string | null) ? { klaviyoEmail: row.customer_email as string } : {}) });
+
+  // A shipped replacement is no longer "queued" — drop the tag so the Support
+  // list doesn't show a stale chip. Best-effort: the shipment is already
+  // recorded and must not be failed by a tag write.
+  if (row.kind === 'replacement' && row.linked_ticket_id) {
+    const { error: tagErr } = await supabase.rpc('remove_ticket_tag', {
+      p_ticket_id: row.linked_ticket_id, p_tag: 'queued_for_replacement',
+    });
+    if (tagErr) console.warn('Clearing queued_for_replacement tag failed (non-fatal):', tagErr.message);
+  }
 }
 
 /** Shipped orders that have not yet been marked delivered.

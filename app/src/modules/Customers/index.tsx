@@ -3,7 +3,8 @@ import { isTelemetryConfigured } from '../../lib/supabaseTelemetry';
 const Dashboard = lazy(() => import('../Dashboard'));
 import {
   useCustomers, syncCustomersFromHubspot, exportPurchasers, pushToKlaviyo,
-  setPurchaser, setPrimaryUser, type Customer,
+  setPurchaser, setPrimaryUser, updateCustomerContact, PRIMARY_USER_RELATIONSHIPS,
+  type Customer,
 } from '../../lib/customers';
 import { useOrders } from '../../lib/orders';
 import { formatMoney } from '../../lib/money';
@@ -17,7 +18,7 @@ import { NavCard } from '../../components/NavCard';
 import { MobileBackHeader } from '../../components/MobileBackHeader';
 import { RouteErrorBoundary } from '../../components/RouteErrorBoundary';
 import { useCustomerEvents, useCustomerEngagement, eventMeta, dormancyBadge } from '../../lib/customerEvents';
-import { useCustomerInvoices, getInvoiceSignedUrl } from '../../lib/invoices';
+import { useCustomerInvoices, openInvoiceInNewTab } from '../../lib/invoices';
 import styles from './Customers.module.css';
 
 type Tab = 'directory' | 'profitability' | 'journey' | 'fleet';
@@ -440,6 +441,97 @@ function CustomerRow({ c, serials, onSelect }: { c: Customer; serials: string[];
   );
 }
 
+// Contact details — read-only until you hit Edit. Email and phone are
+// operator-editable here: makelila is the system of record and the HubSpot sync
+// only fills BLANK columns, so a correction made here is never clobbered.
+// Address stays read-only (it's per-order on the Order Review side).
+function ContactSection({ customer, onChanged }: { customer: Customer; onChanged: () => void }) {
+  const [editing, setEditing] = useState(false);
+  const [email, setEmail] = useState(customer.email ?? '');
+  const [phone, setPhone] = useState(customer.phone ?? '');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  // Reset the draft whenever we switch customer or the row changes underneath us.
+  useEffect(() => {
+    setEditing(false);
+    setEmail(customer.email ?? '');
+    setPhone(customer.phone ?? '');
+    setErr(null);
+  }, [customer.id, customer.email, customer.phone]);
+
+  const cityRegion = [customer.city, customer.region].filter(Boolean).join(', ');
+  const fullAddress = [customer.address_line, cityRegion, customer.postal_code, customer.country]
+    .filter(Boolean).join(', ');
+
+  // Compare case-insensitively: we store lowercased, but rows seeded before that
+  // may hold mixed case, and re-typing the same address shouldn't read as a change.
+  const emailChanged =
+    (email.trim().toLowerCase() || null) !== (customer.email?.trim().toLowerCase() ?? null);
+  const dirty = emailChanged || (phone.trim() || null) !== (customer.phone ?? null);
+
+  const save = async () => {
+    setBusy(true); setErr(null);
+    try {
+      await updateCustomerContact(customer.id, { email, phone });
+      setEditing(false);
+      onChanged();
+    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+    finally { setBusy(false); }
+  };
+
+  const cancel = () => {
+    setEmail(customer.email ?? '');
+    setPhone(customer.phone ?? '');
+    setErr(null);
+    setEditing(false);
+  };
+
+  if (!editing) {
+    return (
+      <PanelSection title="Contact">
+        <PanelRow label="Email" value={customer.email} />
+        <PanelRow label="Phone" value={customer.phone} />
+        <PanelRow label="Address" value={fullAddress} multiline />
+        <div style={{ marginTop: 6 }}>
+          <button className={styles.linkBtn} onClick={() => setEditing(true)}>
+            Edit email / phone
+          </button>
+        </div>
+      </PanelSection>
+    );
+  }
+
+  return (
+    <PanelSection title="Contact">
+      <div className={styles.kvLabel} style={{ marginBottom: 4 }}>
+        Email
+      </div>
+      <input className={styles.searchInput} type="email" placeholder="name@example.com"
+        value={email} disabled={busy} onChange={e => setEmail(e.target.value)} />
+      <div className={styles.kvLabel} style={{ margin: '6px 0 4px' }}>
+        Phone
+      </div>
+      <input className={styles.searchInput} type="tel" placeholder="e.g. 519-555-0142"
+        value={phone} disabled={busy} onChange={e => setPhone(e.target.value)} />
+      {emailChanged && (
+        <div className={styles.kvLabel} style={{ marginTop: 6 }}>
+          ⚠ Orders, tickets and refund cards are matched to this customer by email —
+          changing it re-points which of those show up on this record.
+        </div>
+      )}
+      <PanelRow label="Address" value={fullAddress} multiline />
+      <div style={{ marginTop: 6, display: 'flex', gap: 8 }}>
+        <button className={styles.linkBtn} disabled={busy || !dirty} onClick={() => void save()}>
+          {busy ? 'Saving…' : 'Save'}
+        </button>
+        <button className={styles.linkBtn} disabled={busy} onClick={cancel}>Cancel</button>
+      </div>
+      {err && <div className={styles.toastError} style={{ marginTop: 6 }}>{err}</div>}
+    </PanelSection>
+  );
+}
+
 // FR-6: link a USER (submitter / gift recipient / household member) to the
 // PURCHASER of record. Refunds and accounting resolve to the purchaser, so this
 // is where operators fix the Lily Xu → Annie Wu class of case.
@@ -540,28 +632,57 @@ function PurchaserLinkSection({ customer, allCustomers, onChanged }: {
 // FR-6: the PRIMARY USER of this customer's machine (e.g. a spouse) when
 // different from the purchaser. Free-text — usually not a customer of record.
 // Set here; surfaced on the refund card. Example: Chad (purchaser) → Sarah.
+//
+// The relationship picklist is PRIMARY_USER_RELATIONSHIPS; this sentinel is the
+// escape hatch. It is never stored — picking it just reveals the free-text box,
+// and what gets saved is whatever was typed there.
+const OTHER_RELATIONSHIP = 'Other…';
+
 function PrimaryUserSection({ customer, onChanged }: { customer: Customer; onChanged: () => void }) {
   const [name, setName] = useState(customer.primary_user_name ?? '');
   const [phone, setPhone] = useState(customer.primary_user_phone ?? '');
   const [email, setEmail] = useState(customer.primary_user_email ?? '');
+  // The stored relationship is free text. If it isn't one of the picklist
+  // values it's an "Other…" entry, so the select shows Other and the text box
+  // carries the value.
+  const storedRel = customer.primary_user_relationship ?? '';
+  const isListed = (v: string) => (PRIMARY_USER_RELATIONSHIPS as readonly string[]).includes(v);
+  const [relChoice, setRelChoice] = useState(
+    storedRel === '' ? '' : isListed(storedRel) ? storedRel : OTHER_RELATIONSHIP,
+  );
+  const [relOther, setRelOther] = useState(storedRel && !isListed(storedRel) ? storedRel : '');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   useEffect(() => {
     setName(customer.primary_user_name ?? '');
     setPhone(customer.primary_user_phone ?? '');
     setEmail(customer.primary_user_email ?? '');
-  }, [customer.id, customer.primary_user_name, customer.primary_user_phone, customer.primary_user_email]);
+    const rel = customer.primary_user_relationship ?? '';
+    setRelChoice(rel === '' ? '' : isListed(rel) ? rel : OTHER_RELATIONSHIP);
+    setRelOther(rel && !isListed(rel) ? rel : '');
+  }, [customer.id, customer.primary_user_name, customer.primary_user_phone,
+      customer.primary_user_email, customer.primary_user_relationship]);
+
+  // What we'd actually store: the picked option, or the free text behind "Other…".
+  const relationship = relChoice === OTHER_RELATIONSHIP ? relOther.trim() : relChoice;
 
   const dirty =
     (name.trim() || null) !== (customer.primary_user_name ?? null) ||
     (phone.trim() || null) !== (customer.primary_user_phone ?? null) ||
-    (email.trim() || null) !== (customer.primary_user_email ?? null);
+    (email.trim() || null) !== (customer.primary_user_email ?? null) ||
+    (relationship || null) !== (customer.primary_user_relationship ?? null);
 
   const save = async (clear?: boolean) => {
     setBusy(true); setErr(null);
     try {
-      await setPrimaryUser(customer.id, clear ? null : name, clear ? null : phone, clear ? null : email);
-      if (clear) { setName(''); setPhone(''); setEmail(''); }
+      await setPrimaryUser(
+        customer.id,
+        clear ? null : name,
+        clear ? null : phone,
+        clear ? null : email,
+        clear ? null : relationship,
+      );
+      if (clear) { setName(''); setPhone(''); setEmail(''); setRelChoice(''); setRelOther(''); }
       onChanged();
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
     finally { setBusy(false); }
@@ -570,7 +691,8 @@ function PrimaryUserSection({ customer, onChanged }: { customer: Customer; onCha
   return (
     <PanelSection title="Primary user of the machine">
       <div className={styles.kvLabel} style={{ marginBottom: 4 }}>
-        Who actually uses the machine, when different from the purchaser (e.g. a spouse). Shown on the refund card.
+        Who actually uses the machine, when different from the purchaser (e.g. a spouse), and how they
+        relate to the purchaser. Shown on the refund card.
       </div>
       <input className={styles.searchInput} placeholder="Primary user name (e.g. Sarah Lockhart)"
         value={name} disabled={busy} onChange={e => setName(e.target.value)} />
@@ -578,9 +700,23 @@ function PrimaryUserSection({ customer, onChanged }: { customer: Customer; onCha
         value={phone} disabled={busy} onChange={e => setPhone(e.target.value)} />
       <input className={styles.searchInput} style={{ marginTop: 4 }} type="email" placeholder="Primary user email (optional)"
         value={email} disabled={busy} onChange={e => setEmail(e.target.value)} />
+      <select className={styles.searchInput} style={{ marginTop: 4 }}
+        value={relChoice} disabled={busy}
+        onChange={e => setRelChoice(e.target.value)}
+        aria-label="Primary user's relationship to the purchaser">
+        <option value="">Relationship to purchaser (optional)…</option>
+        {PRIMARY_USER_RELATIONSHIPS.map(r => <option key={r} value={r}>{r}</option>)}
+        <option value={OTHER_RELATIONSHIP}>{OTHER_RELATIONSHIP}</option>
+      </select>
+      {relChoice === OTHER_RELATIONSHIP && (
+        <input className={styles.searchInput} style={{ marginTop: 4 }}
+          placeholder="Describe the relationship (e.g. neighbour)"
+          value={relOther} disabled={busy} onChange={e => setRelOther(e.target.value)} />
+      )}
       <div style={{ marginTop: 6, display: 'flex', gap: 8 }}>
         <button className={styles.linkBtn} disabled={busy || !dirty} onClick={() => void save()}>Save</button>
-        {(customer.primary_user_name || customer.primary_user_phone || customer.primary_user_email) && (
+        {(customer.primary_user_name || customer.primary_user_phone || customer.primary_user_email
+          || customer.primary_user_relationship) && (
           <button className={styles.linkBtn} disabled={busy} onClick={() => void save(true)}>Clear</button>
         )}
       </div>
@@ -616,9 +752,6 @@ function CustomerDetailPanel({ customer, allCustomers, onChanged, onClose }: {
     ? tickets.filter(t => t.customer_email?.toLowerCase() === lcEmail)
     : [];
 
-  const cityRegion = [customer.city, customer.region].filter(Boolean).join(', ');
-  const fullAddress = [customer.address_line, cityRegion, customer.postal_code, customer.country].filter(Boolean).join(', ');
-
   return (
     <div className={styles.panelBackdrop} onClick={onClose}>
       <div className={styles.panel} onClick={e => e.stopPropagation()}>
@@ -631,11 +764,7 @@ function CustomerDetailPanel({ customer, allCustomers, onChanged, onClose }: {
         </div>
 
         <div className={styles.panelBody}>
-          <PanelSection title="Contact">
-            <PanelRow label="Email" value={customer.email} />
-            <PanelRow label="Phone" value={customer.phone} />
-            <PanelRow label="Address" value={fullAddress} multiline />
-          </PanelSection>
+          <ContactSection customer={customer} onChanged={onChanged} />
 
           <PurchaserLinkSection customer={customer} allCustomers={allCustomers} onChanged={onChanged} />
           <PrimaryUserSection customer={customer} onChanged={onChanged} />
@@ -864,10 +993,8 @@ function CustomerInvoicesSection({ customerId }: { customerId: string }) {
   const { invoices, loading } = useCustomerInvoices(customerId);
 
   const view = async (path: string) => {
-    try {
-      const url = await getInvoiceSignedUrl(path);
-      window.open(url, '_blank', 'noopener');
-    } catch (e) { alert((e as Error).message); }
+    try { await openInvoiceInNewTab(path); }
+    catch (e) { alert((e as Error).message); }
   };
 
   return (

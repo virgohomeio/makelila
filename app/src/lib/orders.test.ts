@@ -28,7 +28,7 @@ vi.mock('./activityLog', () => ({
   logAction: logActionMock,
 }));
 
-import { disposition, needInfo, nextReplacementOrderRef, createReplacementOrder, createPendingReplacement, hasPendingLine, markOrderShipped, markOrderDelivered } from './orders';
+import { disposition, needInfo, nextReplacementOrderRef, createReplacementOrder, createPendingReplacement, hasPendingLine, markOrderShipped, markOrderDelivered, cancelReplacementOrder } from './orders';
 
 describe('disposition', () => {
   beforeEach(() => {
@@ -126,6 +126,7 @@ describe('createReplacementOrder', () => {
     rpcMock.mockImplementation((name: string) => {
       if (name === 'next_replacement_order_ref') return Promise.resolve({ data: 'R-0007', error: null });
       if (name === 'decrement_part_on_hand') return Promise.resolve({ data: 8, error: null });
+      if (name === 'add_ticket_tag') return Promise.resolve({ data: null, error: null });
       return Promise.resolve({ data: null, error: { message: `unexpected rpc ${name}` } });
     });
     const insertSingle = vi.fn().mockResolvedValue({ data: { id: 'o1', order_ref: 'R-0007' }, error: null });
@@ -167,6 +168,11 @@ describe('createReplacementOrder', () => {
     expect(insertArg.cogs_usd).toBeCloseTo(4.2 * 2 + 312, 2);
     expect(insertArg.replacement_state).toBe('ready');
     expect(ticketUpdate).toHaveBeenCalled();
+    // The queued marker is a TAG, applied atomically via RPC — the ticket's
+    // status is left alone so the operator's workflow state survives.
+    expect(rpcMock).toHaveBeenCalledWith('add_ticket_tag', {
+      p_ticket_id: 't1', p_tag: 'queued_for_replacement',
+    });
     expect(rpcMock).toHaveBeenCalledWith('decrement_part_on_hand', { p_part_id: 'p1', p_qty: 2 });
     expect(unitsUpdate).toHaveBeenCalled();
   });
@@ -201,10 +207,11 @@ describe('createPendingReplacement', () => {
   beforeEach(() => vi.clearAllMocks());
 
   it('creates an awaiting order WITHOUT decrementing stock or reserving units', async () => {
-    rpcMock.mockImplementation((name: string) =>
-      name === 'next_replacement_order_ref'
-        ? Promise.resolve({ data: 'R-0050', error: null })
-        : Promise.resolve({ data: null, error: { message: `unexpected rpc ${name}` } }));
+    rpcMock.mockImplementation((name: string) => {
+      if (name === 'next_replacement_order_ref') return Promise.resolve({ data: 'R-0050', error: null });
+      if (name === 'add_ticket_tag') return Promise.resolve({ data: null, error: null });
+      return Promise.resolve({ data: null, error: { message: `unexpected rpc ${name}` } });
+    });
     const insertSingle = vi.fn().mockResolvedValue({ data: { id: 'o9', order_ref: 'R-0050' }, error: null });
     const insert = vi.fn().mockReturnValue({ select: vi.fn().mockReturnValue({ single: insertSingle }) });
     const ticketUpdateFn = vi.fn().mockReturnValue({ eq: vi.fn().mockResolvedValue({ error: null }) });
@@ -232,10 +239,13 @@ describe('createPendingReplacement', () => {
     const insertArg = insert.mock.calls[0][0];
     expect(insertArg.replacement_state).toBe('awaiting');
     expect(insertArg.awaiting_batch_id).toBe('P100X');
-    // Ticket gets queued_for_replacement.
-    expect(ticketUpdateFn).toHaveBeenCalledWith(expect.objectContaining({
-      replacement_order_id: 'o9', status: 'queued_for_replacement',
-    }));
+    // Ticket is back-linked but its status is NOT touched — the operator's
+    // workflow state must survive a replacement being queued.
+    expect(ticketUpdateFn).toHaveBeenCalledWith({ replacement_order_id: 'o9' });
+    // The queued marker is a TAG, applied atomically via RPC.
+    expect(rpcMock).toHaveBeenCalledWith('add_ticket_tag', {
+      p_ticket_id: 't1', p_tag: 'queued_for_replacement',
+    });
     // Crucially: NO stock decrement and NO unit reservation for a pending order.
     expect(rpcMock).not.toHaveBeenCalledWith('decrement_part_on_hand', expect.anything());
     expect(unitsUpdate).not.toHaveBeenCalled();
@@ -268,12 +278,78 @@ describe('markOrderShipped', () => {
     expect(logActionMock).toHaveBeenCalledWith('order_shipped', 'R-0001', expect.any(String), undefined, expect.objectContaining({ klaviyoEvent: 'Order Shipped' }));
   });
 
+  it('clears the queued_for_replacement tag when a replacement ships', async () => {
+    const selectSingle = vi.fn().mockResolvedValue({
+      data: { order_ref: 'R-0002', customer_email: null, kind: 'replacement', linked_ticket_id: 'ticket-s' },
+      error: null,
+    });
+    const select = vi.fn().mockReturnValue({ eq: vi.fn().mockReturnValue({ single: selectSingle }) });
+    const update = vi.fn().mockReturnValue({ eq: vi.fn().mockResolvedValue({ error: null }) });
+    fromMock.mockReturnValue({ select, update } as any);
+    rpcMock.mockResolvedValue({ data: null, error: null });
+
+    await markOrderShipped('o2', 42.75);
+
+    expect(rpcMock).toHaveBeenCalledWith('remove_ticket_tag', {
+      p_ticket_id: 'ticket-s', p_tag: 'queued_for_replacement',
+    });
+  });
+
+  it('does not touch tickets when a non-replacement order ships', async () => {
+    const selectSingle = vi.fn().mockResolvedValue({
+      data: { order_ref: 'R-0003', customer_email: null, kind: 'sale', linked_ticket_id: null },
+      error: null,
+    });
+    const select = vi.fn().mockReturnValue({ eq: vi.fn().mockReturnValue({ single: selectSingle }) });
+    const update = vi.fn().mockReturnValue({ eq: vi.fn().mockResolvedValue({ error: null }) });
+    fromMock.mockReturnValue({ select, update } as any);
+
+    await markOrderShipped('o3', 42.75);
+
+    expect(rpcMock).not.toHaveBeenCalledWith('remove_ticket_tag', expect.anything());
+  });
+
   it('throws on negative shipping cost', async () => {
     await expect(markOrderShipped('o1', -1)).rejects.toThrow(/non-negative/i);
   });
 
   it('throws on non-finite shipping cost', async () => {
     await expect(markOrderShipped('o1', Number.NaN)).rejects.toThrow(/non-negative/i);
+  });
+});
+
+describe('cancelReplacementOrder', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('clears the queued_for_replacement tag when a replacement is cancelled', async () => {
+    const order = {
+      id: 'order-x', order_ref: 'R-0099', kind: 'replacement',
+      replacement_state: 'awaiting', linked_ticket_id: 'ticket-x',
+      shipped_at: null, delivered_at: null, line_items: [],
+    };
+    const ticketUpdateEq = vi.fn().mockResolvedValue({ error: null });
+
+    fromMock.mockImplementation(((table: string) => {
+      if (table === 'orders') return {
+        select: () => ({ eq: () => ({ single: () => Promise.resolve({ data: order, error: null }) }) }),
+        delete: () => ({ eq: () => ({ select: () => Promise.resolve({ data: [{ id: 'order-x' }], error: null }) }) }),
+      };
+      if (table === 'service_tickets') return {
+        // The cancel gate reads the ticket status; it must be closed.
+        select: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve({ data: { status: 'closed', ticket_number: 'T-1' }, error: null }) }) }),
+        update: () => ({ eq: ticketUpdateEq }),
+      };
+      if (table === 'units') return { update: () => ({ eq: () => ({ eq: () => Promise.resolve({ error: null }) }) }) };
+      throw new Error(`unexpected table ${table}`);
+    }) as any);
+    rpcMock.mockResolvedValue({ data: null, error: null });
+    logActionMock.mockResolvedValue(undefined);
+
+    await cancelReplacementOrder('order-x');
+
+    expect(rpcMock).toHaveBeenCalledWith('remove_ticket_tag', {
+      p_ticket_id: 'ticket-x', p_tag: 'queued_for_replacement',
+    });
   });
 });
 

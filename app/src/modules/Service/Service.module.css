@@ -1435,6 +1435,99 @@
   border-radius: var(--radius-sm);
 }
 
+/* ── Action-item week board ────────────────────────────────────────────────
+   Reuses the .kanban* primitives above; these are the week-specific additions. */
+.weekNav {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.weekNavBtn {
+  background: none;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  padding: 0 7px;
+  line-height: 18px;
+  font-size: 13px;
+  color: var(--color-ink-muted);
+}
+.weekNavBtn:hover {
+  border-color: var(--color-ink-subtle);
+  color: var(--color-ink);
+}
+.weekNavLabel {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--color-ink-muted);
+  min-width: 108px;
+  text-align: center;
+}
+.weekNavToday {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0 2px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  color: var(--color-crimson);
+}
+/* Today's column stands out from the other six. */
+.kanbanColToday {
+  border-color: var(--color-accent-gold);
+  background: var(--color-page);
+}
+.weekColOverdue {
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--color-error);
+}
+.kanbanCardOverdue {
+  border-left: 3px solid var(--color-error);
+}
+
+/* Due-date control on an action item row and in its composer */
+.dueDateField {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.dueDateLabel {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  color: var(--color-ink-subtle);
+}
+.dueDateInput {
+  font: inherit;
+  font-size: 11px;
+  color: var(--color-ink-muted);
+  background: var(--color-page);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 1px 4px;
+}
+.dueDateInput:hover { border-color: var(--color-ink-subtle); }
+.dueDateOverdue .dueDateLabel { color: var(--color-error); }
+.dueDateOverdue .dueDateInput {
+  border-color: var(--color-error-border);
+  background: var(--color-error-bg);
+  color: var(--color-error);
+}
+.dueDateClear {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0 2px;
+  font-size: 12px;
+  line-height: 1;
+  color: var(--color-ink-subtle);
+}
+.dueDateClear:hover { color: var(--color-error); }
+
 /* Owner chips on the customer profile rows */
 .ownerChips {
   display: flex;

@@ -48,7 +48,7 @@ vi.mock('./activityLog', () => ({
 }));
 
 // ── import after mocks ──────────────────────────────────────────────────────
-import { parseUtm, upsertHubSpotContact, followUpDueDates, computeFuState, refundUsageWindow, resolvePurchaserId, buildPurchaserIdByEmail, resolveRefundParties, type Customer } from './customers';
+import { parseUtm, upsertHubSpotContact, followUpDueDates, computeFuState, refundUsageWindow, resolvePurchaserId, buildPurchaserIdByEmail, resolveRefundParties, isPlausibleEmail, PRIMARY_USER_RELATIONSHIPS, type Customer } from './customers';
 
 const base: Customer = {
   id: 'c1', hubspot_id: null, email: 'a@b.com', first_name: null, last_name: null,
@@ -63,7 +63,8 @@ const base: Customer = {
   first_touch_source: null, first_touch_campaign_id: null, first_touch_at: null,
   last_touch_source: null, last_touch_campaign_id: null, last_touch_at: null,
   telemetry_autoticket_suppress: false, purchaser_id: null,
-  primary_user_name: null, primary_user_phone: null, primary_user_email: null, created_at: '', updated_at: '',
+  primary_user_name: null, primary_user_phone: null, primary_user_email: null,
+  primary_user_relationship: null, created_at: '', updated_at: '',
 };
 
 // ── refundUsageWindow (30-day refund eligibility window) ────────────────────
@@ -341,5 +342,44 @@ describe('resolveRefundParties', () => {
   it('unknown filer, no attestation → filer is both', () => {
     const r = resolveRefundParties({ filerEmail: 'ghost@x.com', filerName: 'Ghost', byEmail, byId });
     expect(r).toMatchObject({ purchaser: 'Ghost', primaryUser: 'Ghost', samePerson: true, filerIsPurchaser: true });
+  });
+});
+
+// ── isPlausibleEmail (guards the directory's editable contact fields) ────────
+describe('isPlausibleEmail', () => {
+  it.each([
+    'reina@virgohome.io',
+    'first.last+tag@sub.example.co.uk',
+    '  padded@example.com  ',
+  ])('accepts %s', (v) => {
+    expect(isPlausibleEmail(v)).toBe(true);
+  });
+
+  it.each([
+    'not-an-email',
+    'missing@tld',
+    '@example.com',
+    'two words@example.com',
+    'spaces in@both.com',
+    '',
+  ])('rejects %s', (v) => {
+    expect(isPlausibleEmail(v)).toBe(false);
+  });
+});
+
+// ── primary-user relationship picklist ──────────────────────────────────────
+describe('PRIMARY_USER_RELATIONSHIPS', () => {
+  it('leads with the spouse/partner case the field was asked for', () => {
+    expect(PRIMARY_USER_RELATIONSHIPS[0]).toBe('Spouse / partner');
+  });
+
+  it('has no duplicates and no blank entries (they back <option value>)', () => {
+    const list = [...PRIMARY_USER_RELATIONSHIPS];
+    expect(new Set(list).size).toBe(list.length);
+    expect(list.every(v => v.trim().length > 0)).toBe(true);
+  });
+
+  it('does not itself contain the Other sentinel — that is UI-only, never stored', () => {
+    expect([...PRIMARY_USER_RELATIONSHIPS].some(v => v.startsWith('Other'))).toBe(false);
   });
 });

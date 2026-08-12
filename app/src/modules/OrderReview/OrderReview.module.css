@@ -531,6 +531,21 @@
 }
 .freightHint { font-size: 9px; color: var(--color-ink-faint); margin-top: 4px; }
 
+/* Primary action on the card: pull live carrier rates. Sits above the manual
+   paste-a-portal-quote fallback, which stays as the escape hatch. */
+.freightQuoteBtn {
+  margin-top: 8px;
+  background: var(--color-ink);
+  color: #fff;
+  border: none;
+  padding: 5px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.freightQuoteBtn:disabled { opacity: 0.6; cursor: not-allowed; }
+
 .salesConfirmToggle {
   display: flex;
   align-items: center;

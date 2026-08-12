@@ -16,9 +16,10 @@ build/
 # Contains machine-local absolute paths so doesn't belong in git.
 .mcp.json
 
-# Supabase
-supabase/.temp/
-supabase/.branches/
+# Supabase (patterns with a slash are anchored to this file's directory, so
+# match every nesting level explicitly — app/supabase/.temp/ exists too)
+**/supabase/.temp/
+**/supabase/.branches/
 
 # Brainstorm server state (volatile pid/status files)
 .superpowers/**/state/

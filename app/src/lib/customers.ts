@@ -63,6 +63,9 @@ export type Customer = {
   primary_user_name: string | null;
   primary_user_phone: string | null;
   primary_user_email: string | null;
+  // How that primary user relates to the purchaser (e.g. 'Spouse / partner').
+  // Text, not an enum — the UI picklist has an "Other…" free-text escape.
+  primary_user_relationship: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -496,18 +499,103 @@ export async function setPurchaser(userId: string, purchaserId: string | null): 
   await logAction('customer_purchaser_linked', userId, purchaserId ?? 'unlinked');
 }
 
+/** Picklist for the primary user's relationship to the purchaser. Backed by a
+ *  plain text column, so this list can grow without a migration; the UI also
+ *  offers "Other…" for anything not covered here. */
+export const PRIMARY_USER_RELATIONSHIPS = [
+  'Spouse / partner',
+  'Parent',
+  'Child',
+  'Sibling',
+  // "Extended family", not "Other family member" — the picklist already ends in
+  // an "Other…" escape and two options starting with "Other" read as a mistake.
+  'Extended family',
+  'Roommate / housemate',
+  'Friend',
+  'Employee / staff',
+  'Property manager / caretaker',
+] as const;
+
 /** FR-6: set (or clear) the primary user of this customer's machine — a person
- *  who is usually not a customer of record (e.g. a spouse), so free-text. */
+ *  who is usually not a customer of record (e.g. a spouse), so free-text.
+ *  `relationship` is how they relate to the purchaser (see
+ *  PRIMARY_USER_RELATIONSHIPS; any string is accepted for the "Other…" case). */
 export async function setPrimaryUser(
-  customerId: string, name: string | null, phone: string | null, email: string | null,
+  customerId: string,
+  name: string | null,
+  phone: string | null,
+  email: string | null,
+  relationship: string | null,
 ): Promise<void> {
   const { error } = await supabase.from('customers').update({
     primary_user_name: name?.trim() || null,
     primary_user_phone: phone?.trim() || null,
     primary_user_email: email?.trim() || null,
+    primary_user_relationship: relationship?.trim() || null,
   }).eq('id', customerId);
   if (error) throw error;
-  await logAction('customer_primary_user_set', customerId, name?.trim() || 'cleared');
+  const rel = relationship?.trim();
+  await logAction(
+    'customer_primary_user_set',
+    customerId,
+    name?.trim() ? `${name.trim()}${rel ? ` (${rel})` : ''}` : 'cleared',
+    { entityType: 'customer', entityId: customerId },
+  );
+}
+
+// ── Operator-editable contact details ───────────────────────────────────────
+// makelila is the system of record (docs/system-of-record.md): HubSpot's sync
+// only FILLS BLANK columns on an existing row and never clobbers a curated
+// value, and no other sync writes customers.email / customers.phone. So an
+// operator correction here sticks.
+
+/** Loose sanity check — we're catching typos, not policing valid addresses. */
+export function isPlausibleEmail(value: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+}
+
+/** Correct a customer's own email / phone from the directory. Email is the key
+ *  this app matches orders, tickets and refund cards on, so a duplicate would
+ *  silently merge two people's histories — that's rejected here rather than
+ *  left to a DB constraint (there is no unique index on customers.email). */
+export async function updateCustomerContact(
+  customerId: string,
+  patch: { email?: string | null; phone?: string | null },
+): Promise<void> {
+  const update: Record<string, string | null> = {};
+
+  if (patch.email !== undefined) {
+    const email = patch.email?.trim().toLowerCase() || null;
+    if (email && !isPlausibleEmail(email)) {
+      throw new Error(`"${email}" doesn't look like an email address.`);
+    }
+    if (email) {
+      const { data: clash, error: clashErr } = await supabase
+        .from('customers')
+        .select('id, full_name')
+        .ilike('email', email)
+        .neq('id', customerId)
+        .limit(1);
+      if (clashErr) throw clashErr;
+      const other = (clash ?? [])[0] as { id: string; full_name: string } | undefined;
+      if (other) {
+        throw new Error(
+          `${other.full_name || 'Another customer'} already uses ${email}. ` +
+          `Two customers can't share an email — orders and tickets are matched on it. ` +
+          `Link them as purchaser/user instead, or fix the other record first.`,
+        );
+      }
+    }
+    update.email = email;
+  }
+
+  if (patch.phone !== undefined) update.phone = patch.phone?.trim() || null;
+  if (Object.keys(update).length === 0) return;
+
+  const { error } = await supabase.from('customers').update(update).eq('id', customerId);
+  if (error) throw error;
+  await logAction('customer_contact_updated', customerId, Object.keys(update).join(', '),
+    { entityType: 'customer', entityId: customerId });
 }
 
 

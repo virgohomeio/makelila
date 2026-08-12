@@ -1043,7 +1043,7 @@ export async function lastStatusSmsAt(serial: string, status: MachineStatus): Pr
 
 // ── Backlog #61: dataset labels (ML training pairs) ─────────────────────────
 
-export type DatasetLabelKind = 'smelly' | 'no_smell' | 'dry' | 'wet' | 'mixing' | 'not_mixing' | 'moldy_composter' | 'moldy_chamber' | 'other';
+export type DatasetLabelKind = 'smelly' | 'no_smell' | 'dry' | 'wet' | 'mixing' | 'not_mixing' | 'motor_jammed' | 'moldy_composter' | 'moldy_chamber' | 'other';
 export type DatasetLabelSource = 'sms' | 'phone' | 'ticket' | 'in_person' | 'operator_inferred';
 export type DatasetLabelConfidence = 'customer_reported' | 'operator_inferred';
 
@@ -1193,6 +1193,52 @@ export function useSerialToUser() {
           }
         }
         setData(map);
+      } catch (err) {
+        if (!cancelled) setError(err as Error);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return { data, loading, error };
+}
+
+/** Pure — no React/Supabase dependency, safe to unit test in isolation.
+ *  Keeps only serials with a non-empty firmware string: most of the fleet
+ *  predates OTA firmware reporting, so `lila.firmware_version` is null for
+ *  the majority of rows. */
+export function buildFirmwareMap(
+  rows: Array<Record<string, unknown>>,
+): Record<string, string> {
+  const map: Record<string, string> = {};
+  for (const r of rows) {
+    const sn = r.serial_number;
+    const fw = r.firmware_version;
+    if (typeof sn === 'string' && sn && typeof fw === 'string' && fw.trim()) {
+      map[sn] = fw.trim();
+    }
+  }
+  return map;
+}
+
+/** Telemetry `lila.firmware_version` per serial. Serials that haven't
+ *  reported a firmware version are absent from the map. */
+export function useSerialFirmware() {
+  const [data, setData] = useState<Record<string, string>>({});
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const rows = await fetchAllLilaRows('serial_number, firmware_version');
+        if (cancelled) return;
+        setData(buildFirmwareMap(rows));
       } catch (err) {
         if (!cancelled) setError(err as Error);
       } finally {

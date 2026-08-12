@@ -54,6 +54,7 @@ function mkOrder(partial: Partial<Order> & { id: string; status: Order['status']
     linked_ticket_id: null,
     cogs_usd: null,
     shipping_cost_usd: null,
+    shipping_cost_currency: null,
     shipped_at: null,
     delivered_at: null,
     created_at: '2026-04-17T00:00:00Z',

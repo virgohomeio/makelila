@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render as rtlRender, screen, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import type { ReactElement } from 'react';
@@ -8,6 +8,10 @@ import { SupportTab } from '../SupportTab';
 // render needs a Router context.
 const render = (ui: ReactElement) => rtlRender(<MemoryRouter>{ui}</MemoryRouter>);
 import type { ServiceTicket } from '../../../lib/service';
+import type { Order } from '../../../lib/orders';
+
+const mkReplacementOrder = (id: string, line_items: unknown[], extra: Partial<Order> = {}) =>
+  ({ id, kind: 'replacement', line_items, awaiting_batch_id: null, linked_ticket_id: null, ...extra }) as Order;
 
 function mkTicket(partial: Partial<ServiceTicket> & { id: string }): ServiceTicket {
   return {
@@ -63,6 +67,11 @@ vi.mock('../../../lib/service', async () => {
 vi.mock('../../../lib/customers', async () => {
   const actual = await vi.importActual<typeof import('../../../lib/customers')>('../../../lib/customers');
   return { ...actual, useCustomers: vi.fn(() => ({ customers: [] })) };
+});
+let replacementOrdersToReturn: Order[] = [];
+vi.mock('../../../lib/orders', async () => {
+  const actual = await vi.importActual<typeof import('../../../lib/orders')>('../../../lib/orders');
+  return { ...actual, useReplacementOrders: vi.fn(() => ({ orders: replacementOrdersToReturn, loading: false })) };
 });
 vi.mock('../../../lib/stock', async () => {
   const actual = await vi.importActual<typeof import('../../../lib/stock')>('../../../lib/stock');
@@ -133,5 +142,76 @@ describe('SupportTab status resilience', () => {
     // label's parent is the card holding both label and value.
     const openCard = screen.getByText('Open').parentElement;
     expect(openCard).toHaveTextContent('3');
+  });
+});
+
+describe('SupportTab replacement queue labels', () => {
+  beforeEach(() => { replacementOrdersToReturn = []; });
+
+  // The status FILTER chips carry the same "Queued for Replacement" text, so
+  // assert against the row tables only.
+  const tableText = () => screen.getAllByRole('table').map(t => t.textContent ?? '').join(' ');
+
+  it('names the batch a customer is queued for on their row', () => {
+    ticketsToReturn = [mkTicket({
+      id: 't1', customer_id: 'c1', status: 'queued_for_replacement', replacement_order_id: 'o1',
+    })];
+    replacementOrdersToReturn = [mkReplacementOrder('o1', [{ kind: 'unit_pending', batch: 'P100X' }])];
+    render(<SupportTab />);
+    expect(tableText()).toContain('Queued for P100X Replacement');
+    // The generic pill is replaced, not duplicated.
+    expect(tableText()).not.toContain('Queued for Replacement');
+  });
+
+  it('says PARTS when the replacement is parts / consumables', () => {
+    ticketsToReturn = [mkTicket({
+      id: 't2', customer_id: 'c2', status: 'queued_for_replacement', replacement_order_id: 'o2',
+    })];
+    replacementOrdersToReturn = [mkReplacementOrder('o2', [{ kind: 'part', sku: 'LILA-LID-V36' }])];
+    render(<SupportTab />);
+    expect(tableText()).toContain('Queued for PARTS Replacement');
+  });
+
+  it('shows one pill per kind when a customer is queued for both', () => {
+    ticketsToReturn = [
+      mkTicket({ id: 't3', customer_id: 'c3', status: 'queued_for_replacement', replacement_order_id: 'o3' }),
+      mkTicket({ id: 't4', customer_id: 'c3', status: 'queued_for_replacement', replacement_order_id: 'o4' }),
+    ];
+    replacementOrdersToReturn = [
+      mkReplacementOrder('o3', [{ kind: 'unit_pending', batch: 'LILA-Mini' }]),
+      mkReplacementOrder('o4', [{ kind: 'part', sku: 'LILA-HOPPER' }]),
+    ];
+    render(<SupportTab />);
+    expect(tableText()).toContain('Queued for LILA-Mini Replacement');
+    expect(tableText()).toContain('Queued for PARTS Replacement');
+  });
+
+  it('falls back to the plain status when no replacement order is linked', () => {
+    ticketsToReturn = [mkTicket({ id: 't5', customer_id: 'c5', status: 'queued_for_replacement' })];
+    render(<SupportTab />);
+    expect(tableText()).toContain('Queued for Replacement');
+  });
+
+  // The marker now lives in `tags`, not `status` (migration
+  // 20260810120000) — a ticket can be In Progress AND queued for a
+  // replacement at the same time. Both must render.
+  it('renders the replacement kind from a TAG, not just a status', () => {
+    ticketsToReturn = [mkTicket({
+      id: 't7', customer_id: 'c7', status: 'in_progress',
+      tags: ['queued_for_replacement'], replacement_order_id: 'o7',
+    })];
+    replacementOrdersToReturn = [mkReplacementOrder('o7', [{ kind: 'unit_pending', batch: 'P100X' }])];
+    render(<SupportTab />);
+    expect(tableText()).toContain('Queued for P100X Replacement');
+    expect(tableText()).toContain('In Progress');
+  });
+
+  it('labels an unassigned (customer-less) ticket row too', () => {
+    ticketsToReturn = [mkTicket({
+      id: 't6', customer_id: null, status: 'queued_for_replacement', replacement_order_id: 'o6',
+    })];
+    replacementOrdersToReturn = [mkReplacementOrder('o6', [{ kind: 'unit', batch: 'P150' }])];
+    render(<SupportTab />);
+    expect(tableText()).toContain('Queued for P150 Replacement');
   });
 });
