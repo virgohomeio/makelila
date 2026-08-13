@@ -1434,20 +1434,23 @@ export function CancellationCard({
   };
 
   // Collapsed on the board like every other card; the full request — context,
-  // notes and the compile/dismiss actions — opens in a modal.
+  // notes and the compile/dismiss actions — opens in a modal ON TOP of it. The
+  // card stays in its column the whole time: every other card type keeps its
+  // place because the parent owns the modal, and a request that disappears from
+  // Cancellation Requests while someone reads it looks like it was already
+  // dealt with.
   const [open, setOpen] = useState(false);
-  if (!open) {
-    return (
-      <CollapsedCard
-        borderColor="#d69e2e"
-        parties={parties}
-        orderRef={c.order_ref}
-        onOpen={() => setOpen(true)}
-      />
-    );
-  }
 
   return (
+    <>
+    <CollapsedCard
+      borderColor="#d69e2e"
+      parties={parties}
+      orderRef={c.order_ref}
+      selected={open}
+      onOpen={() => setOpen(true)}
+    />
+    {open && (
     <div className={styles.modalBackdrop} onClick={() => setOpen(false)}>
     <div className={styles.modalCard} onClick={e => e.stopPropagation()}
          style={{ maxWidth: 720, maxHeight: '85vh', overflowY: 'auto' }}>
@@ -1501,6 +1504,8 @@ export function CancellationCard({
       </div>
     </div>
     </div>
+    )}
+    </>
   );
 }
 

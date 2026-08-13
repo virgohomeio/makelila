@@ -102,24 +102,43 @@ describe('ContactBlock', () => {
 });
 
 describe('CancellationCard', () => {
+  const renderCard = () => render(
+    <CancellationCard
+      c={cancellation}
+      parties={parties}
+      contact={contact}
+      canOwn
+      usage={usage}
+      invoices={[]}
+      tickets={[]}
+      onOpenTicket={noop}
+      onError={noop}
+    />,
+  );
+
   it('shows the contact block once the request is opened', () => {
-    render(
-      <CancellationCard
-        c={cancellation}
-        parties={parties}
-        contact={contact}
-        canOwn
-        usage={usage}
-        invoices={[]}
-        tickets={[]}
-        onOpenTicket={noop}
-        onError={noop}
-      />,
-    );
+    renderCard();
     fireEvent.click(screen.getByRole('button', { name: 'Open Full Refund Card' }));
     expect(screen.getByText('ghottya@yahoo.com')).toBeTruthy();
     expect(screen.getByText('7864830997')).toBeTruthy();
     expect(screen.getByText(contact.address)).toBeTruthy();
+  });
+
+  // Opening a card must not empty its column — the board is how an operator
+  // sees what is queued, and a request that vanishes while it is being read
+  // looks like it was already dealt with.
+  it('leaves the card in its column while the request is open', () => {
+    renderCard();
+    fireEvent.click(screen.getByRole('button', { name: 'Open Full Refund Card' }));
+    expect(screen.getByRole('button', { name: 'Open Full Refund Card' })).toBeTruthy();
+  });
+
+  it('puts the card back on its own when the request is closed', () => {
+    renderCard();
+    fireEvent.click(screen.getByRole('button', { name: 'Open Full Refund Card' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(screen.queryByText('ghottya@yahoo.com')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Open Full Refund Card' })).toBeTruthy();
   });
 });
 
