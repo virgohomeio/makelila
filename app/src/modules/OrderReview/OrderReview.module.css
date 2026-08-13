@@ -381,6 +381,30 @@
 .actionFlag    { background: #fff; color: var(--color-error-strong); border: 1.5px solid var(--color-error-strong); }
 .actionHold    { background: #fff; color: var(--color-warning); border: 1.5px solid var(--color-warning-border); }
 .actionInfo    { background: #fff; color: var(--color-ink-muted); border: 1.5px solid var(--color-border); }
+.actionCancel  { background: var(--color-error-strong); color: #fff; }
+.actionCancel:hover { filter: brightness(0.92); }
+
+/* Terminal-state summary shown in place of the action buttons once an order
+   has been cancelled — there is no un-cancel, so there is nothing to click. */
+.cancelledBar {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--color-error-strong);
+  background: var(--color-error-bg);
+  border: 1px solid var(--color-error-border);
+  border-radius: var(--radius-sm);
+  padding: 9px 14px;
+}
+
+.reasonStack { display: flex; flex-direction: column; gap: 8px; flex: 1; }
+.cancelWarning {
+  font-size: 11px;
+  color: var(--color-error-strong);
+  background: var(--color-error-bg);
+  border: 1px solid var(--color-error-border);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+}
 
 .reasonRow { display: flex; gap: 8px; flex: 1; align-items: center; }
 .reasonInput {
@@ -571,6 +595,18 @@
 .urgencyChip.ok { background: var(--color-success-bg); color: var(--color-success); }
 .urgencyChip.urgent { background: var(--color-warning-bg); color: var(--color-warning); border: 1px solid var(--color-warning-border); }
 .urgencyChip.overdue { background: var(--color-error-bg); color: var(--color-error); font-weight: 800; border: 1px solid var(--color-error-border); }
+
+.cancelledChip {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 800;
+  padding: 1px 6px;
+  border-radius: 3px;
+  margin-left: 4px;
+  background: var(--color-error-bg);
+  color: var(--color-error);
+  border: 1px solid var(--color-error-border);
+}
 
 .urgencyBanner {
   padding: 6px 10px;

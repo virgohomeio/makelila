@@ -69,6 +69,10 @@ describe('Sidebar', () => {
   const p2 = mkOrder({ id: 'p2', status: 'pending', customer_name: 'Bob Boxer' });
   const h1 = mkOrder({ id: 'h1', status: 'held',    customer_name: 'Held Customer' });
   const f1 = mkOrder({ id: 'f1', status: 'flagged', customer_name: 'Flagged Customer' });
+  const c1 = mkOrder({
+    id: 'c1', status: 'cancelled', customer_name: 'Gabriella Hottya',
+    cancelled_at: '2026-08-13T15:03:17Z', cancelled_reason: 'Delays',
+  });
 
   const render_ = (selectedId: string | null = null, onSelect = vi.fn()) =>
     render(
@@ -79,6 +83,7 @@ describe('Sidebar', () => {
         flagged={[f1]}
         approved={[]}
         replacement={[]}
+        cancelled={[c1]}
         selectedId={selectedId}
         onSelect={onSelect}
       />,
@@ -117,10 +122,51 @@ describe('Sidebar', () => {
   it('shows empty-state copy when the active tab has no rows', () => {
     render(
       <Sidebar
-        all={[]} pending={[]} held={[]} flagged={[]} approved={[]} replacement={[]}
+        all={[]} pending={[]} held={[]} flagged={[]} approved={[]} replacement={[]} cancelled={[]}
         selectedId={null} onSelect={vi.fn()}
       />,
     );
     expect(screen.getByText(/no orders in this tab/i)).toBeInTheDocument();
+  });
+
+  // Cancelled orders are dead but not gone: they get their own tab so the team
+  // can still find one (and its reason) after the fact.
+  it('keeps cancelled orders out of every live tab but lists them under Cancelled', () => {
+    render_();
+    expect(screen.queryByText('Gabriella Hottya')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText(/Cancelled \(1\)/));
+    expect(screen.getByText('Gabriella Hottya')).toBeInTheDocument();
+    expect(screen.queryByText('Alice Ames')).not.toBeInTheDocument();
+  });
+
+  // Live tabs re-sort by order ref because they're a work queue. Cancelled is a
+  // lookup list that arrives newest-first from bucketOrders, so the Sidebar must
+  // leave it alone — sorting by ref here would bury the one just cancelled.
+  it('renders the Cancelled tab in the order given, not by order ref', () => {
+    const newer = mkOrder({
+      id: 'c2', status: 'cancelled', customer_name: 'Newer Cancel', order_ref: '#9999',
+      cancelled_at: '2026-08-13T00:00:00Z',
+    });
+    const older = mkOrder({
+      id: 'c0', status: 'cancelled', customer_name: 'Older Cancel', order_ref: '#1001',
+      cancelled_at: '2026-01-02T00:00:00Z',
+    });
+    render(
+      <Sidebar
+        all={[]} pending={[]} held={[]} flagged={[]} approved={[]} replacement={[]}
+        cancelled={[newer, older]}
+        selectedId={null} onSelect={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByText(/Cancelled \(2\)/));
+    const names = screen.getAllByText(/Cancel$/).map(n => n.textContent);
+    expect(names).toEqual(['Newer Cancel', 'Older Cancel']);
+  });
+
+  it('marks a cancelled row as cancelled instead of showing an SLA countdown', () => {
+    render_();
+    fireEvent.click(screen.getByText(/Cancelled \(1\)/));
+    expect(screen.getByText('CANCELLED')).toBeInTheDocument();
+    expect(screen.queryByText(/OVERDUE/)).not.toBeInTheDocument();
   });
 });

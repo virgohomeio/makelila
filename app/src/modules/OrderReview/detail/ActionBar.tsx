@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { orderDue, type Order } from '../../../lib/orders';
 import styles from '../OrderReview.module.css';
 
-type ExpandedAction = 'flag' | 'hold' | 'info' | null;
+type ExpandedAction = 'flag' | 'hold' | 'info' | 'cancel' | null;
 
 export function ActionBar({
   order,
@@ -10,6 +10,7 @@ export function ActionBar({
   onFlag,
   onHold,
   onNeedInfo,
+  onCancelOrder,
   confirmReady = true,
 }: {
   order: Order;
@@ -17,6 +18,7 @@ export function ActionBar({
   onFlag: (reason: string) => void;
   onHold: (reason: string) => void;
   onNeedInfo: (note: string) => void;
+  onCancelOrder: (reason: string) => void;
   confirmReady?: boolean;
 }) {
   const due = orderDue(order.placed_at ?? order.created_at);
@@ -31,6 +33,9 @@ export function ActionBar({
       onHold(reason);
     } else if (expanded === 'info') {
       onNeedInfo(reason);
+    } else if (expanded === 'cancel') {
+      if (!reason.trim()) return;
+      onCancelOrder(reason);
     }
     setExpanded(null);
     setReason('');
@@ -38,32 +43,58 @@ export function ActionBar({
 
   const cancel = () => { setExpanded(null); setReason(''); };
 
-  if (expanded) {
-    const placeholder =
-      expanded === 'flag' ? 'Why is this being flagged? (required)' :
-      expanded === 'hold' ? 'Why is this being held? (optional)' :
-                            'What info is needed from the customer? (optional)';
-    const submitDisabled = expanded === 'flag' && !reason.trim();
+  // Cancelling is terminal and there is no un-cancel anywhere in the app, so a
+  // cancelled order gets a read-only summary instead of actions that would
+  // quietly resurrect it.
+  if (order.status === 'cancelled') {
+    const on = order.cancelled_at
+      ? new Date(order.cancelled_at).toLocaleDateString('en-US')
+      : null;
     return (
       <div className={styles.actionBar}>
-        <div className={styles.reasonRow}>
-          <input
-            className={styles.reasonInput}
-            autoFocus
-            value={reason}
-            placeholder={placeholder}
-            onChange={e => setReason(e.target.value)}
-            onKeyDown={e => {
-              if (e.key === 'Enter' && !submitDisabled) submit();
-              if (e.key === 'Escape') cancel();
-            }}
-          />
-          <button
-            className={styles.reasonSubmit}
-            disabled={submitDisabled}
-            onClick={submit}
-          >Submit</button>
-          <button className={styles.reasonCancel} onClick={cancel}>Cancel</button>
+        <span className={styles.cancelledBar}>
+          ✕ Cancelled{on ? ` ${on}` : ''}
+          {order.cancelled_reason ? ` — ${order.cancelled_reason}` : ''}
+        </span>
+      </div>
+    );
+  }
+
+  if (expanded) {
+    const placeholder =
+      expanded === 'flag'   ? 'Why is this being flagged? (required)' :
+      expanded === 'hold'   ? 'Why is this being held? (optional)' :
+      expanded === 'cancel' ? 'Why is this order being cancelled? (required)' :
+                              'What info is needed from the customer? (optional)';
+    const submitDisabled = (expanded === 'flag' || expanded === 'cancel') && !reason.trim();
+    return (
+      <div className={styles.actionBar}>
+        <div className={styles.reasonStack}>
+          {expanded === 'cancel' && (
+            <div className={styles.cancelWarning}>
+              Cancelling {order.order_ref} is final — it leaves every live tab and opens a
+              record in Shipping › Cancellations for the refund team. No refund is issued here.
+            </div>
+          )}
+          <div className={styles.reasonRow}>
+            <input
+              className={styles.reasonInput}
+              autoFocus
+              value={reason}
+              placeholder={placeholder}
+              onChange={e => setReason(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter' && !submitDisabled) submit();
+                if (e.key === 'Escape') cancel();
+              }}
+            />
+            <button
+              className={styles.reasonSubmit}
+              disabled={submitDisabled}
+              onClick={submit}
+            >Submit</button>
+            <button className={styles.reasonCancel} onClick={cancel}>Cancel</button>
+          </div>
         </div>
       </div>
     );
@@ -78,6 +109,11 @@ export function ActionBar({
         style={!confirmReady ? { opacity: 0.5, cursor: 'not-allowed' } : undefined}
         title={!confirmReady ? 'Complete the 3 readiness criteria first' : 'Confirm order'}
       >✓ Confirm</button>
+      <button
+        className={`${styles.actionBtn} ${styles.actionCancel}`}
+        onClick={() => setExpanded('cancel')}
+        title="Cancel this order — it leaves every live tab and opens a cancellation record"
+      >✕ Cancel</button>
       <button className={`${styles.actionBtn} ${styles.actionFlag}`}    onClick={() => setExpanded('flag')}>⚑ Flag</button>
       <button className={`${styles.actionBtn} ${styles.actionHold}`}    onClick={() => setExpanded('hold')}>⏸ Hold</button>
       <button className={`${styles.actionBtn} ${styles.actionInfo}`}    onClick={() => setExpanded('info')}>? Need Info</button>

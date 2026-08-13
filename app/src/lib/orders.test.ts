@@ -28,7 +28,7 @@ vi.mock('./activityLog', () => ({
   logAction: logActionMock,
 }));
 
-import { disposition, needInfo, nextReplacementOrderRef, createReplacementOrder, createPendingReplacement, hasPendingLine, markOrderShipped, markOrderDelivered, cancelReplacementOrder } from './orders';
+import { bucketOrders, type Order, disposition, needInfo, nextReplacementOrderRef, createReplacementOrder, createPendingReplacement, hasPendingLine, markOrderShipped, markOrderDelivered, cancelReplacementOrder } from './orders';
 
 describe('disposition', () => {
   beforeEach(() => {
@@ -424,5 +424,72 @@ describe('markOrderDelivered', () => {
     await markOrderDelivered('o1');
     expect(orderUpdate).not.toHaveBeenCalled();
     expect(ticketUpdate).not.toHaveBeenCalled();
+  });
+});
+
+// bucketOrders is the pure core of useOrders: it decides which orders are
+// still live in Order Review and which tab each one lands in. Cancelling is
+// terminal, so a cancelled order leaves every live tab — but it keeps a tab of
+// its own rather than disappearing from the app entirely.
+describe('bucketOrders', () => {
+  const mk = (over: Partial<Order> & { id: string; status: Order['status'] }) => ({
+    order_ref: `#${over.id}`, customer_name: 'Someone', kind: 'sale',
+    cancelled_at: null, ...over,
+  }) as Order;
+
+  const none = new Set<string>();
+
+  it('routes each live sale to its status tab', () => {
+    const b = bucketOrders(
+      [mk({ id: 'a', status: 'pending' }), mk({ id: 'b', status: 'held' }),
+       mk({ id: 'c', status: 'flagged' }), mk({ id: 'd', status: 'approved' })],
+      none, none,
+    );
+    expect(b.pending.map(o => o.id)).toEqual(['a']);
+    expect(b.held.map(o => o.id)).toEqual(['b']);
+    expect(b.flagged.map(o => o.id)).toEqual(['c']);
+    expect(b.approved.map(o => o.id)).toEqual(['d']);
+    expect(b.cancelled).toEqual([]);
+  });
+
+  it('pulls a cancelled order out of every live tab and into cancelled', () => {
+    const b = bucketOrders(
+      [mk({ id: 'live', status: 'pending' }),
+       mk({ id: 'dead', status: 'cancelled', cancelled_at: '2026-08-13T15:03:17Z' })],
+      none, none,
+    );
+    expect(b.pending.map(o => o.id)).toEqual(['live']);
+    expect(b.all.map(o => o.id)).toEqual(['live']);
+    expect(b.cancelled.map(o => o.id)).toEqual(['dead']);
+  });
+
+  it('sorts cancelled newest-first, with never-stamped rows last', () => {
+    const b = bucketOrders(
+      [mk({ id: 'old',   status: 'cancelled', cancelled_at: '2026-01-01T00:00:00Z' }),
+       mk({ id: 'blank', status: 'cancelled' }),
+       mk({ id: 'new',   status: 'cancelled', cancelled_at: '2026-08-13T00:00:00Z' })],
+      none, none,
+    );
+    expect(b.cancelled.map(o => o.id)).toEqual(['new', 'old', 'blank']);
+  });
+
+  it('keeps cancelled replacements in the cancelled tab, not the replacement tab', () => {
+    const b = bucketOrders(
+      [mk({ id: 'r1', status: 'pending',   kind: 'replacement' }),
+       mk({ id: 'r2', status: 'cancelled', kind: 'replacement' })],
+      none, none,
+    );
+    expect(b.replacement.map(o => o.id)).toEqual(['r1']);
+    expect(b.cancelled.map(o => o.id)).toEqual(['r2']);
+  });
+
+  it('still hides fulfilled and already-shipped orders from every tab', () => {
+    const b = bucketOrders(
+      [mk({ id: 'fulfilled', status: 'approved' }),
+       mk({ id: 'shipped', status: 'pending', customer_name: 'Ada Ship' })],
+      new Set(['fulfilled']), new Set(['ada ship']),
+    );
+    expect(b.all).toEqual([]);
+    expect(b.cancelled).toEqual([]);
   });
 });

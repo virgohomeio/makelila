@@ -13,8 +13,12 @@ export default function OrderReview() {
   const { orderId } = useParams<{ orderId: string }>();
   const navigate = useNavigate();
   const isMobile = useIsMobile();
-  const { all, pending, held, flagged, approved, replacement, loading } = useOrders();
-  const selected = orderId ? all.find(o => o.id === orderId) ?? null : null;
+  const { all, pending, held, flagged, approved, replacement, cancelled, loading } = useOrders();
+  // Cancelled orders sit outside `all` (they are out of the live queue), but
+  // the Cancelled tab still has to be able to open one.
+  const selected = orderId
+    ? all.find(o => o.id === orderId) ?? cancelled.find(o => o.id === orderId) ?? null
+    : null;
   const [view, setView] = useState<'orders' | 'templates' | 'upload'>('orders');
 
   // Desktop auto-loads the first pending order so the right pane isn't empty
@@ -95,6 +99,7 @@ export default function OrderReview() {
           flagged={flagged}
           approved={approved}
           replacement={replacement}
+          cancelled={cancelled}
           selectedId={null}
           onSelect={(id) => navigate(`/order-review/${id}`)}
         />
@@ -113,6 +118,7 @@ export default function OrderReview() {
           flagged={flagged}
           approved={approved}
           replacement={replacement}
+          cancelled={cancelled}
           selectedId={orderId ?? null}
           onSelect={(id) => navigate(`/order-review/${id}`)}
         />

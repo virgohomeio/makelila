@@ -1,11 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
-const { dispositionMock, needInfoMock, addOrderNoteMock, useOrderNotesMock } = vi.hoisted(() => ({
+const { dispositionMock, needInfoMock, addOrderNoteMock, useOrderNotesMock, cancelOrderMock } = vi.hoisted(() => ({
   dispositionMock:  vi.fn(() => Promise.resolve()),
   needInfoMock:     vi.fn(() => Promise.resolve()),
   addOrderNoteMock: vi.fn(() => Promise.resolve()),
   useOrderNotesMock: vi.fn(() => ({ notes: [], loading: false })),
+  cancelOrderMock:  vi.fn(() => Promise.resolve()),
 }));
 
 vi.mock('../../../lib/orders', async () => {
@@ -16,6 +17,7 @@ vi.mock('../../../lib/orders', async () => {
     needInfo:       needInfoMock,
     addOrderNote:   addOrderNoteMock,
     useOrderNotes:  useOrderNotesMock,
+    cancelOrder:    cancelOrderMock,
   };
 });
 
@@ -86,6 +88,7 @@ describe('Detail', () => {
     dispositionMock.mockClear();
     needInfoMock.mockClear();
     addOrderNoteMock.mockClear();
+    cancelOrderMock.mockClear();
   });
 
   it('Confirm calls disposition with status=approved', async () => {
@@ -131,6 +134,41 @@ describe('Detail', () => {
       expect(dispositionMock).not.toHaveBeenCalled();
     });
     expect(addOrderNoteMock).toHaveBeenCalledWith('order-1', 'Test User', 'Need info: driveway photo');
+  });
+
+  // Cancelling is terminal — an order can be killed straight from Sales, but
+  // never without a reason on the record, and never twice.
+  it('Cancel requires a reason before Submit is enabled', async () => {
+    render(<Detail order={order} onAfterDisposition={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: /^✕ cancel$/i }));
+    const submit = screen.getByRole('button', { name: /submit/i });
+    expect(submit).toBeDisabled();
+    fireEvent.change(screen.getByPlaceholderText(/cancelled/i), { target: { value: 'customer changed their mind' } });
+    expect(submit).toBeEnabled();
+    fireEvent.click(submit);
+    await waitFor(() => {
+      expect(cancelOrderMock).toHaveBeenCalledWith('order-1', 'customer changed their mind');
+    });
+    expect(dispositionMock).not.toHaveBeenCalled();
+    expect(addOrderNoteMock).toHaveBeenCalledWith('order-1', 'Test User', 'Cancelled: customer changed their mind');
+  });
+
+  it('shows a read-only cancelled bar instead of the actions once cancelled', () => {
+    render(
+      <Detail
+        order={{
+          ...order,
+          status: 'cancelled',
+          cancelled_at: '2026-08-13T15:03:17Z',
+          cancelled_reason: 'Delays — customer wanted it ASAP',
+        }}
+        onAfterDisposition={vi.fn()}
+      />,
+    );
+    expect(screen.getByText(/delays — customer wanted it asap/i)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /confirm/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^✕ cancel$/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^⚑ flag$/i })).not.toBeInTheDocument();
   });
 
   it('Add note button fires addOrderNote with the current user name + body', async () => {

@@ -58,6 +58,7 @@ vi.mock('./supabase', () => ({
 vi.mock('./activityLog', () => ({ logAction: vi.fn(() => Promise.resolve()) }));
 
 import { cancelOrderFromQueue, returnQueueRowToOrders } from './fulfillment';
+import { bucketOrders, type Order } from './orders';
 
 const patchFor = (table: string) => state.updates.find(u => u.table === table)?.patch;
 
@@ -108,6 +109,19 @@ describe('cancelOrderFromQueue', () => {
     state.queue = { ...state.queue, step: 6, fulfilled_at: '2026-06-20T00:00:00Z' };
     await expect(cancelOrderFromQueue('q-1', 'too late')).rejects.toThrow(/already shipped/i);
     expect(state.deletes).toEqual([]);
+  });
+
+  // The two cancel paths (queue header and the Sales action bar) have to land
+  // in the same place. They meet at orders.status, so feed the patch this write
+  // produces straight into the tab router and check where it comes out.
+  it('lands the order in Order Review › Cancelled, same as cancelling from Sales', async () => {
+    await cancelOrderFromQueue('q-1', 'Customer changed their mind');
+    const cancelledOrder = { ...state.order, ...patchFor('orders') } as unknown as Order;
+
+    const buckets = bucketOrders([cancelledOrder], new Set(), new Set());
+    expect(buckets.cancelled.map(o => o.order_ref)).toEqual(['#1179']);
+    expect(buckets.all).toEqual([]);
+    expect(buckets.approved).toEqual([]);
   });
 
   it('does not file a cancellation for a replacement — nothing was paid for it', async () => {

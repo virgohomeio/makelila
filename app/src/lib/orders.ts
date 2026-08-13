@@ -328,7 +328,8 @@ function applyChange(cache: Order[], payload: { eventType: string; new: Order | 
   return cache;
 }
 
-export function useOrders(): {
+export type OrderBuckets = {
+  /** Every order still live in Order Review — excludes fulfilled and cancelled. */
   all: Order[];
   pending: Order[];
   held: Order[];
@@ -338,8 +339,57 @@ export function useOrders(): {
    *  Order Review's "Replacement" tab so they don't dilute the
    *  Pending/Held/Flagged/Confirmed sales tabs. */
   replacement: Order[];
-  loading: boolean;
-} {
+  /** Terminal: cancelled from Sales or from the fulfillment queue. Out of every
+   *  live tab, but kept in its own so the team can still find the order and the
+   *  reason it died. Newest cancellation first. */
+  cancelled: Order[];
+};
+
+/** The pure core of useOrders — which orders are still live, and which tab each
+ *  one belongs to. Split out from the hook so the routing rules are testable
+ *  without standing up Supabase. */
+export function bucketOrders(
+  cache: Order[],
+  fulfilledOrderIds: Set<string>,
+  shippedCustomers: Set<string>,
+): OrderBuckets {
+  // Cancelled is terminal and takes precedence over every other signal: a
+  // cancelled order belongs in the Cancelled tab whether or not it was ever
+  // queued, shipped or matched to a shipped unit.
+  const cancelled = cache
+    .filter(o => o.status === 'cancelled')
+    .sort((a, b) => (b.cancelled_at ?? '').localeCompare(a.cancelled_at ?? ''));
+
+  // Exclude orders that are fulfilled, by either signal:
+  //   (a) fulfillment_queue row reached step 6 / has fulfilled_at, OR
+  //   (b) customer has a shipped unit (catches legacy Excel-only shipments
+  //       where the queue row was never created or advanced).
+  const active = cache.filter(o => {
+    if (o.status === 'cancelled') return false;
+    if (fulfilledOrderIds.has(o.id)) return false;
+    // Never hide replacement orders by the shipped-customer name check —
+    // a returning customer's replacement must always be visible in Order Review.
+    if (o.kind !== 'replacement' && shippedCustomers.has(o.customer_name.toLowerCase().trim())) return false;
+    return true;
+  });
+
+  // Replacement orders get their own tab in the Sidebar so the
+  // Pending/Held/Flagged/Confirmed sales tabs don't include them.
+  // The Service module still has its dedicated Replacement view via
+  // useReplacementOrders().
+  const sales = active.filter(o => o.kind !== 'replacement');
+  return {
+    all:         active,
+    pending:     sales.filter(o => o.status === 'pending'),
+    held:        sales.filter(o => o.status === 'held'),
+    flagged:     sales.filter(o => o.status === 'flagged'),
+    approved:    sales.filter(o => o.status === 'approved'),
+    replacement: active.filter(o => o.kind === 'replacement'),
+    cancelled,
+  };
+}
+
+export function useOrders(): OrderBuckets & { loading: boolean } {
   const [cache, setCache] = useState<Order[]>([]);
   const [fulfilledOrderIds, setFulfilledOrderIds] = useState<Set<string>>(new Set());
   // Customer-name match (lowercased) for any shipped unit. Used as a second
@@ -449,36 +499,10 @@ export function useOrders(): {
     };
   }, []);
 
-  return useMemo(() => {
-    // Exclude orders that are fulfilled, by either signal:
-    //   (a) fulfillment_queue row reached step 6 / has fulfilled_at, OR
-    //   (b) customer has a shipped unit (catches legacy Excel-only shipments
-    //       where the queue row was never created or advanced).
-    // Cancelled orders are excluded outright - they're dead, and their record
-    // lives on in Shipping > Cancellations.
-    const active = cache.filter(o => {
-      if (o.status === 'cancelled') return false;
-      if (fulfilledOrderIds.has(o.id)) return false;
-      // Never hide replacement orders by the shipped-customer name check —
-      // a returning customer's replacement must always be visible in Order Review.
-      if (o.kind !== 'replacement' && shippedCustomers.has(o.customer_name.toLowerCase().trim())) return false;
-      return true;
-    });
-    // Replacement orders get their own tab in the Sidebar so the
-    // Pending/Held/Flagged/Confirmed sales tabs don't include them.
-    // The Service module still has its dedicated Replacement view via
-    // useReplacementOrders().
-    const sales = active.filter(o => o.kind !== 'replacement');
-    return {
-      all:         active,
-      pending:     sales.filter(o => o.status === 'pending'),
-      held:        sales.filter(o => o.status === 'held'),
-      flagged:     sales.filter(o => o.status === 'flagged'),
-      approved:    sales.filter(o => o.status === 'approved'),
-      replacement: active.filter(o => o.kind === 'replacement'),
-      loading,
-    };
-  }, [cache, fulfilledOrderIds, shippedCustomers, loading]);
+  return useMemo(
+    () => ({ ...bucketOrders(cache, fulfilledOrderIds, shippedCustomers), loading }),
+    [cache, fulfilledOrderIds, shippedCustomers, loading],
+  );
 }
 
 /** Every order in the table (including shipped/fulfilled) — for reporting, where
@@ -503,8 +527,10 @@ export function useAllOrders(): { orders: Order[]; loading: boolean } {
 }
 
 export function useOrder(id: string | null): { order: Order | null; loading: boolean } {
-  const { all, loading } = useOrders();
-  const order = id ? all.find(o => o.id === id) ?? null : null;
+  const { all, cancelled, loading } = useOrders();
+  // Cancelled orders live outside `all`, but a deep link to one still has to
+  // resolve — the Cancelled tab is how the team looks them up.
+  const order = id ? all.find(o => o.id === id) ?? cancelled.find(o => o.id === id) ?? null : null;
   return { order, loading: loading && !order };
 }
 
