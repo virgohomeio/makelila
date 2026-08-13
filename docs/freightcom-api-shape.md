@@ -60,6 +60,36 @@ that does not exist, so every request died as "Order not found" before any
 Freightcom call was made. Fixed 2026-08-12; `edgeFunctionColumns.test.ts` guards
 the functions tree against the name coming back.
 
+## Cross-border rating needs an email address at each end
+
+Measured 2026-08-13. A CA→US destination is an **international** shipment to
+Freightcom, and the body that rates a domestic one is rejected outright:
+
+| Body | `POST /rate` |
+|---|---|
+| `origin`/`destination` = address only | **400** `details.origin.email_addresses: at least one email address is required for international shipments` |
+| …plus `origin.email_addresses` | **400** same complaint, now for `details.destination` |
+| …plus `destination.email_addresses` | **202** → 8–10 rates, CAD |
+
+Two things worth knowing about that error surface:
+
+- The validator reports **one `data` map per call**, so the required-field set
+  can only be found by resending a fuller body and reading the next complaint.
+  `freightcom-endpoint-scan` takes a `rate_body` passthrough for exactly this.
+- **Nothing else** is required for cross-border: no street address, no city or
+  region, no customs block. Only the two email fields.
+
+This is why freight estimates worked for Canadian orders and failed for every
+American one from the feature's first day — the 502 branch reported a flat
+"Freightcom rate request failed" and dropped the body that named the field.
+`_shared/freightcom.ts` now builds the request for `freightcom-quote`,
+`freightcom-book` and `book-return-label`, emitting the emails on every
+shipment (domestic rating is unaffected: 22 rates with and without), and falling
+back to `support@lilacomposter.com` when an order carries no customer email.
+
+Rates come back **CAD for a US destination too**, so `cheapestCadQuote` and
+`selectQuote` need no currency handling beyond what they already do.
+
 ## Two id spaces that never meet
 
 Finance documents look like this:
@@ -125,3 +155,7 @@ return untruncated bodies. Every call is a GET.
 Add `{ "paths": [], "rate": { "postal_code": "M1N 1H9", "country": "CA" } }` to
 run the rate probe instead of the GET sweep. It POSTs a rate request and polls
 the result; nothing is booked, reserved or charged. Takes up to ~20s.
+
+Add `{ "rate_body": { "details": { … } } }` to POST an exact body of your own
+instead of the probe's. That is how the international requirement above was
+established, and it is the tool to reach for whenever Freightcom answers 400.

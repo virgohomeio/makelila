@@ -26,6 +26,11 @@
 //     nothing and costs nothing, so it stays within this function's remit. Added
 //     2026-08-12 to establish whether the live key can quote at all, which the
 //     GET-only scan above cannot answer.
+//   { rate_body?: {...} } — POST this exact body to /rate instead of the probe's
+//     own. Added 2026-08-13 to work out what a CA→US rate requires: Freightcom
+//     validates in one pass per call and returns a `data` map of complaints, so
+//     the required-field set for an international shipment can only be found by
+//     resending a fuller body and reading the next complaint.
 
 import { corsHeaders } from '../_shared/cors.ts';
 
@@ -45,12 +50,19 @@ const PROBE_PACKAGE = {
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-/** POST /rate then poll GET /rate/{id}, reporting each leg's status. */
+/** POST /rate then poll GET /rate/{id}, reporting each leg's status.
+ *
+ *  `override` replaces the whole request body, which is how the cross-border
+ *  field requirements were established: Freightcom's validator answers with one
+ *  `data` map of complaints per call, so discovering the full required set for a
+ *  CA→US rate means resending a slightly fuller body and reading the next
+ *  complaint. Rating stays free and reserves nothing, so iterating is cheap. */
 async function rateProbe(
   baseUrl: string, apiKey: string, postalCode: string, country: string,
+  override?: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
   const tomorrow = new Date(Date.now() + 86_400_000);
-  const req = {
+  const req = override ?? {
     details: {
       expected_ship_date: {
         year:  tomorrow.getUTCFullYear(),
@@ -96,6 +108,7 @@ async function rateProbe(
     polls,
     rate_count: rates.length,
     first_rate: rates[0] ?? null,
+    rates,
   };
 }
 
@@ -137,7 +150,8 @@ Deno.serve(async (req: Request) => {
 
   const body = await req.json().catch(() => ({})) as
     { number?: string; doc_id?: string; paths?: string[]; full?: boolean;
-      rate?: { postal_code?: string; country?: string } };
+      rate?: { postal_code?: string; country?: string };
+      rate_body?: Record<string, unknown> };
   const num   = body.number ?? '43694778';
   const docId = body.doc_id ?? '028uK6URd6MJa7YXqpP8hjm2Y29HFFW7';
 
@@ -147,7 +161,8 @@ Deno.serve(async (req: Request) => {
 
   // A rate probe is a question on its own; asking for one skips the GET sweep
   // unless paths were named explicitly.
-  const paths = body.paths ?? (body.rate ? [] : candidates(num, docId, asDate(from), asDate(to)));
+  const paths = body.paths
+    ?? ((body.rate || body.rate_body) ? [] : candidates(num, docId, asDate(from), asDate(to)));
 
   const results = [];
   for (const path of paths) {
@@ -174,8 +189,9 @@ Deno.serve(async (req: Request) => {
   const reachable = results.filter((r) => r.status && r.status >= 200 && r.status < 300)
                            .map((r) => r.path);
 
-  const rate = body.rate?.postal_code
-    ? await rateProbe(baseUrl, apiKey, body.rate.postal_code, body.rate.country ?? 'CA')
+  const rate = (body.rate?.postal_code || body.rate_body)
+    ? await rateProbe(baseUrl, apiKey, body.rate?.postal_code ?? '', body.rate?.country ?? 'CA',
+                      body.rate_body)
     : null;
 
   return new Response(JSON.stringify({ ok: true, base_url: baseUrl, reachable, results, rate }, null, 2),

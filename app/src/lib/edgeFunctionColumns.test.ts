@@ -44,11 +44,18 @@ describe('edge functions reference real orders columns', () => {
     });
   }
 
-  it('reads the destination postal code from orders.postal_code when quoting and booking', () => {
-    for (const fn of ['freightcom-quote/index.ts', 'freightcom-book/index.ts']) {
+  it('reads the address and contact columns Freightcom needs when quoting and booking', () => {
+    // customer_email joined this select on 2026-08-13: Freightcom refuses to
+    // rate an international shipment without an email address at each end, so a
+    // rename of that column would silently break every US order again.
+    for (const fn of [
+      'freightcom-quote/index.ts',
+      'freightcom-book/index.ts',
+      'book-return-label/index.ts',
+    ]) {
       const found = files.find(([path]) => path === fn);
       expect(found, `${fn} not found`).toBeTruthy();
-      expect(found![1], fn).toMatch(/\.select\('id, postal_code, country'\)/);
+      expect(found![1], fn).toMatch(/\.select\('id, postal_code, country, customer_email'\)/);
     }
   });
 });
