@@ -1775,7 +1775,7 @@ function RefundDetailPanel({
           )}
           <ReturnTrackingBadge r={linkedReturn} />
         </div>
-        <ReturnFormAnswers r={linkedReturn} />
+        <ReturnFormButton r={linkedReturn} />
         </>
       )}
 
@@ -1945,6 +1945,39 @@ function RefundDetailPanel({
   );
 }
 
+// The customer's form answers run long — a dozen fields plus free text — and
+// they buried the case controls in every detail view. Both views now open them
+// on demand, in their own window, the same way the board opens a full card.
+export function ReturnFormButton({ r }: { r: ReturnRow }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button
+        className={styles.openFullCardBtn}
+        style={{ width: 'auto' }}
+        onClick={e => { e.stopPropagation(); setOpen(true); }}
+      >
+        Open Refund/Return Form
+      </button>
+      {open && (
+        <div className={styles.modalBackdrop} onClick={() => setOpen(false)}>
+          <div className={styles.modalCard} onClick={e => e.stopPropagation()}
+               style={{ maxWidth: 720, maxHeight: '85vh', overflowY: 'auto' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                          gap: 12, marginBottom: 12 }}>
+              <h3 className={styles.modalTitle} style={{ margin: 0 }}>
+                Refund/Return form · {r.return_ref ?? r.original_order_ref ?? '—'}
+              </h3>
+              <button className={styles.btnSecondary} onClick={() => setOpen(false)}>Close</button>
+            </div>
+            <ReturnFormAnswers r={r} />
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 // The full set of return-form answers, shared by the refund detail panel and
 // the standalone read-only viewer (opened from the Return & inspection cards).
 function ReturnFormAnswers({ r }: { r: ReturnRow }) {
@@ -2065,7 +2098,7 @@ function ReturnDetailModal({ r, parties, canOwn, usage, invoices, tickets, onOpe
           <CustomerTicketHistory tickets={tickets} onOpenTicket={onOpenTicket} defaultOpen />
           <CaseNotes returnId={r.id} onError={onError} />
           <CaseAttachmentStrip returnId={r.id} onError={onError} />
-          <ReturnFormAnswers r={r} />
+          <ReturnFormButton r={r} />
           {/* Column actions — these used to live on the board card, which is
               now collapsed to the case's identity. */}
           <div style={{ marginTop: 12, borderTop: '1px solid #edf2f7', paddingTop: 12 }}>
