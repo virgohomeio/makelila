@@ -644,6 +644,169 @@ export async function setPrimaryUser(
   );
 }
 
+// ── Other users in the household ────────────────────────────────────────────
+// primary_user_* holds ONE person. A household often has more: the purchaser
+// stays the primary user and a spouse/child/roommate is also someone we're in
+// contact with. Those live in customer_additional_users — free text, because
+// like the primary user they're usually not customers of record.
+
+export type CustomerAdditionalUser = {
+  id: string;
+  customer_id: string;
+  full_name: string;
+  phone: string | null;
+  email: string | null;
+  /** How they relate to the purchaser. See PRIMARY_USER_RELATIONSHIPS — text,
+   *  so the UI's "Other…" free-text escape can store anything. */
+  relationship: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+/** The household users for one customer, oldest first. Pass null when no
+ *  customer is selected — the hook then idles with an empty list. */
+export function useCustomerAdditionalUsers(customerId: string | null): {
+  users: CustomerAdditionalUser[];
+  loading: boolean;
+  refresh: () => Promise<void>;
+} {
+  const [users, setUsers] = useState<CustomerAdditionalUser[]>([]);
+  const [loading, setLoading] = useState(customerId !== null);
+  const [refreshTick, setRefreshTick] = useState(0);
+
+  useEffect(() => {
+    if (!customerId) { setUsers([]); setLoading(false); return; }
+    let channel: RealtimeChannel | null = null;
+    let cancelled = false;
+    setLoading(true);
+    (async () => {
+      const { data, error } = await supabase
+        .from('customer_additional_users')
+        .select('*')
+        .eq('customer_id', customerId)
+        .order('created_at', { ascending: true });
+      if (cancelled) return;
+      if (!error && data) setUsers(data as CustomerAdditionalUser[]);
+      setLoading(false);
+
+      // Two operators can have the same customer open; keep both lists live.
+      // The channel name is per-customer so switching customers tears down the
+      // old subscription instead of stacking filters.
+      channel = supabase
+        .channel(`customer_additional_users:${customerId}`)
+        .on('postgres_changes', {
+          event: '*', schema: 'public', table: 'customer_additional_users',
+          filter: `customer_id=eq.${customerId}`,
+        }, (payload) => {
+          setUsers(prev => {
+            if (payload.eventType === 'DELETE' && payload.old) {
+              return prev.filter(u => u.id !== (payload.old as { id: string }).id);
+            }
+            if (payload.new) {
+              const row = payload.new as CustomerAdditionalUser;
+              const idx = prev.findIndex(u => u.id === row.id);
+              if (idx >= 0) { const next = [...prev]; next[idx] = row; return next; }
+              return [...prev, row].sort((a, b) => a.created_at.localeCompare(b.created_at));
+            }
+            return prev;
+          });
+        })
+        .subscribe();
+    })();
+    return () => { cancelled = true; if (channel) void channel.unsubscribe(); };
+  }, [customerId, refreshTick]);
+
+  const refresh = async () => { setRefreshTick(t => t + 1); };
+
+  return { users, loading, refresh };
+}
+
+/** Fields an operator can set on a household user. */
+export type AdditionalUserInput = {
+  full_name: string;
+  phone?: string | null;
+  email?: string | null;
+  relationship?: string | null;
+};
+
+/** Trim to the shape the table wants: blanks become NULL, never ''. */
+function normalizeAdditionalUser(input: AdditionalUserInput) {
+  return {
+    full_name: input.full_name.trim(),
+    phone: input.phone?.trim() || null,
+    email: input.email?.trim() || null,
+    relationship: input.relationship?.trim() || null,
+  };
+}
+
+/** One-line audit detail: "Sarah Lockhart (Spouse / partner)". */
+function additionalUserLabel(row: { full_name: string; relationship: string | null }): string {
+  return row.relationship ? `${row.full_name} (${row.relationship})` : row.full_name;
+}
+
+/** Add another person in this customer's household. */
+export async function addCustomerAdditionalUser(
+  customerId: string,
+  input: AdditionalUserInput,
+): Promise<CustomerAdditionalUser> {
+  const row = normalizeAdditionalUser(input);
+  if (!row.full_name) throw new Error('A name is required.');
+  const { data, error } = await supabase
+    .from('customer_additional_users')
+    .insert({ customer_id: customerId, ...row })
+    .select()
+    .single();
+  if (error) throw error;
+  await logAction(
+    'customer_additional_user_added',
+    customerId,
+    additionalUserLabel(row),
+    { entityType: 'customer', entityId: customerId },
+  );
+  return data as CustomerAdditionalUser;
+}
+
+/** Edit a household user in place. */
+export async function updateCustomerAdditionalUser(
+  id: string,
+  customerId: string,
+  input: AdditionalUserInput,
+): Promise<void> {
+  const row = normalizeAdditionalUser(input);
+  if (!row.full_name) throw new Error('A name is required.');
+  const { error } = await supabase
+    .from('customer_additional_users')
+    .update(row)
+    .eq('id', id);
+  if (error) throw error;
+  await logAction(
+    'customer_additional_user_updated',
+    customerId,
+    additionalUserLabel(row),
+    { entityType: 'customer', entityId: customerId },
+  );
+}
+
+/** Remove a household user. `name` is passed in only so the audit line stays
+ *  readable after the row is gone. */
+export async function removeCustomerAdditionalUser(
+  id: string,
+  customerId: string,
+  name: string,
+): Promise<void> {
+  const { error } = await supabase
+    .from('customer_additional_users')
+    .delete()
+    .eq('id', id);
+  if (error) throw error;
+  await logAction(
+    'customer_additional_user_removed',
+    customerId,
+    name,
+    { entityType: 'customer', entityId: customerId },
+  );
+}
+
 // ── Operator-editable contact details ───────────────────────────────────────
 // makelila is the system of record (docs/system-of-record.md): HubSpot's sync
 // only FILLS BLANK columns on an existing row and never clobbers a curated

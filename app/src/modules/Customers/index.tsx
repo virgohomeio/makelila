@@ -21,6 +21,7 @@ import { useCustomerEvents, useCustomerEngagement, eventMeta, dormancyBadge } fr
 import { useCustomerInvoices, openInvoiceInNewTab } from '../../lib/invoices';
 import { PanelSection, PanelRow } from './Panel';
 import { NameSection } from './NameSection';
+import { AdditionalUsersSection } from './AdditionalUsersSection';
 import styles from './Customers.module.css';
 
 type Tab = 'directory' | 'profitability' | 'journey' | 'fleet';
@@ -771,6 +772,7 @@ function CustomerDetailPanel({ customer, allCustomers, onChanged, onClose }: {
 
           <PurchaserLinkSection customer={customer} allCustomers={allCustomers} onChanged={onChanged} />
           <PrimaryUserSection customer={customer} onChanged={onChanged} />
+          <AdditionalUsersSection customerId={customer.id} />
 
           <LilaAppActivitySection customerId={customer.id} />
 

@@ -383,6 +383,32 @@
   color: var(--color-ink-subtle);
   font-style: italic;
 }
+/* Other users in the household — one card per person, so several stacked
+   contacts stay visually separate rather than reading as one block. */
+.additionalUser {
+  padding: 6px 0;
+  border-bottom: 1px solid #f4f4f4;
+  font-size: 12px;
+}
+.additionalUser:last-of-type { border-bottom: none; }
+.additionalUserName {
+  color: var(--color-ink);
+  font-weight: 600;
+}
+.additionalUserContact {
+  color: var(--color-ink-subtle);
+  font-size: 11px;
+  margin-top: 2px;
+}
+.additionalUserActions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+.additionalUserForm {
+  padding: 6px 0;
+  border-bottom: 1px solid #f4f4f4;
+}
 .statusPill {
   font-size: 10px;
   padding: 2px 6px;
