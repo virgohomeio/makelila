@@ -295,19 +295,32 @@ export function RefundsTab() {
   const cancellationIdFor = (refundId: string): string | null =>
     cancellationForRefund(cancellations, refundId)?.id ?? null;
 
-  // Contact block for a refund card. A refund row only ever carries an email,
-  // and manually-created cards may not even have that — so the customer
-  // directory (Customers → Directory) is what supplies the phone and the
-  // address. Case data wins where it exists; anything neither side has is
-  // reported as not on file rather than left blank.
+  // Contact block for a card on this board. A refund row only ever carries an
+  // email, a return form adds a phone, a cancellation form carries both — and
+  // none of the three carries an address, so the customer directory (Customers
+  // → Directory) is what supplies the rest. Case data wins where it exists;
+  // anything neither side has is reported as not on file rather than left
+  // blank. Every intake column goes through here, not just the refund columns:
+  // a cancellation request is a refund case an operator has to work, and having
+  // to leave for the directory to phone that customer is the bug this fixes.
   const contactIndex = useMemo(() => buildContactIndex(customers), [customers]);
+  const contactForCase = (c: {
+    email?: string | null; phone?: string | null; name?: string | null;
+  }): CustomerContact => resolveCustomerContact({
+    caseEmail: c.email,
+    casePhone: c.phone,
+    directory: lookupContactRow(contactIndex, { email: c.email, name: c.name }),
+  });
+
   const contactFor = (refund: RefundApproval, linkedReturn: ReturnRow | null): CustomerContact => {
     const email = refund.customer_email ?? linkedReturn?.customer_email ?? null;
     const cancellation = cancellationForRefund(cancellations, refund.id);
-    return resolveCustomerContact({
-      caseEmail: email ?? cancellation?.customer_email,
-      casePhone: linkedReturn?.customer_phone ?? cancellation?.customer_phone,
-      directory: lookupContactRow(contactIndex, { email, name: refund.customer_name }),
+    return contactForCase({
+      email: email ?? cancellation?.customer_email,
+      phone: linkedReturn?.customer_phone ?? cancellation?.customer_phone,
+      // Name is only the fallback key, so it has to be the name the directory
+      // would file this person under — the one on the card.
+      name: refund.customer_name,
     });
   };
 
@@ -405,6 +418,9 @@ export function RefundsTab() {
             c={c}
             canOwn={ownsRefundColumn(userEmail, 'cancellation')}
             parties={partiesFor({ filerEmail: c.customer_email, filerName: c.customer_name })}
+            contact={contactForCase({
+              email: c.customer_email, phone: c.customer_phone, name: c.customer_name,
+            })}
             usage={usageForEmail(c.customer_email)}
             invoices={invoicesForEmail(c.customer_email)}
             tickets={ticketsForEmails([c.customer_email])}
@@ -527,6 +543,9 @@ export function RefundsTab() {
         return <ReturnDetailModal
           r={r}
           parties={partiesForReturn(r)}
+          contact={contactForCase({
+            email: r.customer_email, phone: r.customer_phone, name: r.customer_name,
+          })}
           canOwn={ownsRefundColumn(userEmail, preRefundStage(r.status))}
           usage={usageForEmail(email)}
           invoices={invoicesForEmail(email)}
@@ -1387,11 +1406,12 @@ function InspectionActions({ r, canOwn, onCompile, onError }: {
 // return form's card — so both intake paths look and behave the same. Compiling
 // opens a refund card in Completeness; "No refund needed" closes the request
 // out for orders that were never charged.
-function CancellationCard({
-  c, parties, canOwn, usage, invoices, tickets, onOpenTicket, onError,
+export function CancellationCard({
+  c, parties, contact, canOwn, usage, invoices, tickets, onOpenTicket, onError,
 }: {
   c: OrderCancellation;
   parties: Parties;
+  contact: CustomerContact;
   canOwn: boolean;
   usage: RefundUsageWindow;
   invoices: CustomerInvoice[];
@@ -1441,11 +1461,13 @@ function CancellationCard({
       <div className={styles.refundMeta}>
         {[c.order_ref, c.product_name, c.purchase_channel].filter(Boolean).join(' · ') || '—'}
       </div>
+      <ContactBlock contact={contact} />
       {c.reason && <div className={styles.refundReason}>{c.reason}</div>}
       {c.desired_resolution && <div className={styles.refundMeta}>Wants: {c.desired_resolution}</div>}
+      {/* Which channel the customer asked to be reached on — the numbers
+          themselves are in the contact block above. */}
       <div className={styles.refundMeta}>
         Preferred contact: {c.preferred_contact ?? '—'}
-        {c.customer_phone ? ` · ${c.customer_phone}` : ''}
       </div>
       {c.product_received && (
         <div style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 999,
@@ -1506,15 +1528,17 @@ function RefundCard({ refund, linkedReturn, orderRef, parties, selected, onSelec
 }
 
 // ============================================================================
-// Contact block — on every refund card
+// Contact block — on every card on this board
 // ============================================================================
 // Whoever is looking at a card has to be able to reach the customer without
 // leaving for the Customers directory, whether the card came from a return
-// form, a cancellation or was raised by hand. A field with nothing behind it
-// says so in plain words — a blank line reads like an oversight, and an
-// operator can't tell "we never captured a phone" from "the card forgot to
+// form, a cancellation or was raised by hand. That means the intake columns
+// too: a cancellation request is a refund case someone has to work, and it is
+// the case least likely to have anything else on file. A field with nothing
+// behind it says so in plain words — a blank line reads like an oversight, and
+// an operator can't tell "we never captured a phone" from "the card forgot to
 // render it".
-function ContactBlock({ contact }: { contact: CustomerContact }) {
+export function ContactBlock({ contact }: { contact: CustomerContact }) {
   const row = (label: string, value: string | null, missing: string, href?: string) => (
     <div className={styles.contactRow}>
       <span className={styles.contactLabel}>{label}</span>
@@ -2106,9 +2130,10 @@ function ReturnFormAnswers({ r }: { r: ReturnRow }) {
 
 // Read-only viewer for a return's full submitted form — opened by clicking a
 // card in the Return & inspection column (before a refund request exists).
-function ReturnDetailModal({ r, parties, canOwn, usage, invoices, tickets, onOpenTicket, onCompile, onError, onClose }: {
+export function ReturnDetailModal({ r, parties, contact, canOwn, usage, invoices, tickets, onOpenTicket, onCompile, onError, onClose }: {
   r: ReturnRow;
   parties: Parties;
+  contact: CustomerContact;
   canOwn: boolean;
   usage: RefundUsageWindow;
   invoices: CustomerInvoice[];
@@ -2129,12 +2154,13 @@ function ReturnDetailModal({ r, parties, canOwn, usage, invoices, tickets, onOpe
             <div style={{ fontSize: 12, color: '#718096' }}>
               Return form · {r.return_ref ?? r.original_order_ref ?? '—'}
             </div>
-            <div style={{ fontSize: 12, color: '#718096' }}>
-              {[r.customer_email, r.customer_phone].filter(Boolean).join(' · ') || '—'}
-            </div>
           </div>
           <button className={styles.btnSecondary} onClick={onClose}>Close</button>
         </div>
+        {/* Replaces the old "email · phone" line: same two values, plus the
+            mailing address the return form never captured, and each one says
+            so when it isn't on file. */}
+        <ContactBlock contact={contact} />
         {/* Full case context — same blocks the refund detail panel shows:
             usage window, sales invoice + order #, ticket history, saved notes,
             then the return form answers. */}
