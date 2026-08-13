@@ -35,7 +35,12 @@ const UNIT_STAGES: { value: ReturnStatus; label: string }[] = [
   { value: 'discarded',        label: 'Unit discarded by customer' },
 ];
 import { useQueuedReplacements, holdReplacement, type Order } from '../../lib/orders';
-import { useOnboardDates, useCustomerIdByEmail, useCustomers, refundUsageWindow, resolveRefundParties, resolvePurchaserId, type Customer, type RefundParties, type RefundUsageWindow } from '../../lib/customers';
+import {
+  useOnboardDates, useCustomerIdByEmail, useCustomers, refundUsageWindow,
+  resolveRefundParties, resolvePurchaserId,
+  buildContactIndex, lookupContactRow, resolveCustomerContact,
+  type Customer, type CustomerContact, type RefundParties, type RefundUsageWindow,
+} from '../../lib/customers';
 import {
   useInvoicesByCustomerEmail, openInvoiceInNewTab, invoiceAmountCad, type CustomerInvoice,
 } from '../../lib/invoices';
@@ -290,6 +295,22 @@ export function RefundsTab() {
   const cancellationIdFor = (refundId: string): string | null =>
     cancellationForRefund(cancellations, refundId)?.id ?? null;
 
+  // Contact block for a refund card. A refund row only ever carries an email,
+  // and manually-created cards may not even have that — so the customer
+  // directory (Customers → Directory) is what supplies the phone and the
+  // address. Case data wins where it exists; anything neither side has is
+  // reported as not on file rather than left blank.
+  const contactIndex = useMemo(() => buildContactIndex(customers), [customers]);
+  const contactFor = (refund: RefundApproval, linkedReturn: ReturnRow | null): CustomerContact => {
+    const email = refund.customer_email ?? linkedReturn?.customer_email ?? null;
+    const cancellation = cancellationForRefund(cancellations, refund.id);
+    return resolveCustomerContact({
+      caseEmail: email ?? cancellation?.customer_email,
+      casePhone: linkedReturn?.customer_phone ?? cancellation?.customer_phone,
+      directory: lookupContactRow(contactIndex, { email, name: refund.customer_name }),
+    });
+  };
+
   const stats = useMemo(() => {
     let totalRefunded = 0;
     let totalPending = 0;
@@ -478,6 +499,7 @@ export function RefundsTab() {
           linkedReturn={selectedReturn}
           cancellationId={cancellationIdFor(selectedRefund.id)}
           parties={partiesForRefund(selectedRefund, selectedReturn)}
+          contact={contactFor(selectedRefund, selectedReturn)}
           canApproveHere={ownsRefundColumn(userEmail, selectedRefund.status)}
           usage={usageFor(selectedRefund, selectedReturn)}
           invoices={invoicesFor(selectedRefund, selectedReturn)}
@@ -1484,16 +1506,48 @@ function RefundCard({ refund, linkedReturn, orderRef, parties, selected, onSelec
 }
 
 // ============================================================================
+// Contact block — on every refund card
+// ============================================================================
+// Whoever is looking at a card has to be able to reach the customer without
+// leaving for the Customers directory, whether the card came from a return
+// form, a cancellation or was raised by hand. A field with nothing behind it
+// says so in plain words — a blank line reads like an oversight, and an
+// operator can't tell "we never captured a phone" from "the card forgot to
+// render it".
+function ContactBlock({ contact }: { contact: CustomerContact }) {
+  const row = (label: string, value: string | null, missing: string, href?: string) => (
+    <div className={styles.contactRow}>
+      <span className={styles.contactLabel}>{label}</span>
+      {value ? (
+        href
+          ? <a className={styles.contactLink} href={`${href}${value}`}>{value}</a>
+          : <span className={styles.contactValue}>{value}</span>
+      ) : (
+        <span className={styles.contactMissing}>{missing}</span>
+      )}
+    </div>
+  );
+  return (
+    <div className={styles.contactBlock}>
+      {row('Email', contact.email, 'No email on file', 'mailto:')}
+      {row('Phone', contact.phone, 'No phone number on file', 'tel:')}
+      {row('Address', contact.address, 'No address on file')}
+    </div>
+  );
+}
+
+// ============================================================================
 // Detail panel — shown below the Kanban when a card is selected.
 // Renders the linked return-form data + approve / deny actions.
 // ============================================================================
 function RefundDetailPanel({
-  refund, linkedReturn, cancellationId = null, parties, canApproveHere, usage, invoices, tickets, onOpenTicket, queuedReplacements, canFlow, onClose, onError, onOpenFinanceModal,
+  refund, linkedReturn, cancellationId = null, parties, contact, canApproveHere, usage, invoices, tickets, onOpenTicket, queuedReplacements, canFlow, onClose, onError, onOpenFinanceModal,
 }: {
   refund: RefundApproval;
   linkedReturn: ReturnRow | null;
   cancellationId?: string | null;
   parties: Parties;
+  contact: CustomerContact;
   canApproveHere: boolean;
   usage: RefundUsageWindow;
   invoices: CustomerInvoice[];
@@ -1660,10 +1714,9 @@ function RefundDetailPanel({
             >{meta.label}</span>
           </div>
           <div className={styles.refundDetailSub}>
-            {linkedReturn?.original_order_ref ?? '—'} ·
-            {' '}{linkedReturn?.customer_email ?? refund.customer_email ?? '—'} ·
-            {' '}{linkedReturn?.customer_phone ?? '—'}
+            {linkedReturn?.original_order_ref ?? 'No order reference on file'}
           </div>
+          <ContactBlock contact={contact} />
           {/* Top of the card, not buried at the bottom — the customer's own
               words are the first thing an approver wants. */}
           {linkedReturn && (

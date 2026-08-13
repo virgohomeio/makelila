@@ -164,6 +164,92 @@ export function resolveRefundParties(opts: {
   };
 }
 
+// ── Card contact block (email / phone / address) ────────────────────────────
+// Every refund card has to say how to reach the customer. The case records
+// themselves are thin: a refund carries an email at best, a return form adds a
+// phone, and NEITHER ever carries an address — so the customer directory is
+// what fills the gaps. Case data wins where it exists (an operator may have
+// corrected it on the form); the directory backfills the rest. Nothing here
+// invents a value: a field with nothing behind it comes back null so the card
+// can say it isn't on file.
+
+export type CustomerContact = {
+  email: string | null;
+  phone: string | null;
+  address: string | null;
+};
+
+/** The directory columns a contact block reads. */
+export type ContactDirectoryRow = Pick<
+  Customer,
+  'email' | 'phone' | 'address_line' | 'city' | 'region' | 'postal_code' | 'country'
+>;
+
+const trimmed = (v: string | null | undefined): string | null => (v ?? '').trim() || null;
+
+/** One-line mailing address from a directory row, skipping the parts that are
+ *  blank. Null when the row has no address parts at all. */
+export function formatCustomerAddress(
+  row: Partial<ContactDirectoryRow> | null | undefined,
+): string | null {
+  if (!row) return null;
+  const parts = [row.address_line, row.city, row.region, row.postal_code, row.country]
+    .map(trimmed)
+    .filter((p): p is string => p !== null);
+  return parts.length ? parts.join(', ') : null;
+}
+
+/** The best email / phone / address we have for the person a card is about. */
+export function resolveCustomerContact(opts: {
+  caseEmail?: string | null;
+  casePhone?: string | null;
+  directory?: Partial<ContactDirectoryRow> | null;
+}): CustomerContact {
+  return {
+    email: trimmed(opts.caseEmail) ?? trimmed(opts.directory?.email),
+    phone: trimmed(opts.casePhone) ?? trimmed(opts.directory?.phone),
+    address: formatCustomerAddress(opts.directory),
+  };
+}
+
+export type ContactIndex<T> = { byEmail: Map<string, T>; byName: Map<string, T> };
+
+/** Index the directory for contact lookups. Email is the real key; the name
+ *  index is the fallback for cards that never captured an email. A name shared
+ *  by two customers is dropped from the name index — guessing which household
+ *  a card belongs to would put a stranger's address on it. */
+export function buildContactIndex<T extends { email: string | null; full_name: string }>(
+  rows: T[],
+): ContactIndex<T> {
+  const byEmail = new Map<string, T>();
+  const byName = new Map<string, T>();
+  const ambiguous = new Set<string>();
+  for (const row of rows) {
+    const email = trimmed(row.email)?.toLowerCase();
+    if (email && !byEmail.has(email)) byEmail.set(email, row);
+    const name = trimmed(row.full_name)?.toLowerCase();
+    if (!name) continue;
+    if (byName.has(name)) { ambiguous.add(name); continue; }
+    byName.set(name, row);
+  }
+  for (const name of ambiguous) byName.delete(name);
+  return { byEmail, byName };
+}
+
+/** Find a card's directory row: by email, else by an unambiguous full name. */
+export function lookupContactRow<T>(
+  index: ContactIndex<T>,
+  opts: { email?: string | null; name?: string | null },
+): T | null {
+  const email = trimmed(opts.email)?.toLowerCase();
+  if (email) {
+    const hit = index.byEmail.get(email);
+    if (hit) return hit;
+  }
+  const name = trimmed(opts.name)?.toLowerCase();
+  return (name && index.byName.get(name)) || null;
+}
+
 export function parseUtm(
   landingUrl: string | null | undefined,
 ): { source: string | null; campaign: string | null } {
