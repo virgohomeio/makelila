@@ -116,7 +116,7 @@ export function Sidebar({
           </div>
         </div>
 
-        <div className={styles.tabBar}>
+        <div className={`${styles.tabBar} ${styles.tabBarScroll}`}>
           {tabs.map(t => (
             <button
               key={t.key}

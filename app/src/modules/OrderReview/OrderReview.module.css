@@ -105,6 +105,27 @@
   margin-bottom: 8px;
 }
 
+/* The status row outgrew the sidebar when Cancelled joined it. Flex items will
+   not shrink below their own text (min-width: auto), so the row overflowed and
+   .sidebar's overflow:hidden clipped the last tab clean out of reach. Scroll it
+   instead, with every tab sized to its label rather than to an equal share. */
+.tabBarScroll {
+  overflow-x: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-dark-3) transparent;
+}
+.tabBarScroll .tab {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  padding: 6px 10px;
+}
+.tabBarScroll::-webkit-scrollbar { height: 6px; }
+.tabBarScroll::-webkit-scrollbar-track { background: transparent; }
+.tabBarScroll::-webkit-scrollbar-thumb {
+  background: var(--color-dark-3);
+  border-radius: 3px;
+}
+
 .tab {
   flex: 1;
   background: transparent;
