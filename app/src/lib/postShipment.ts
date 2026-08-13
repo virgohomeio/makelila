@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase } from './supabase';
 import { logAction } from './activityLog';
@@ -755,20 +755,29 @@ export type RefundApproval = {
 // profiles.role enum is the source of truth; RLS on refund_approvals
 // enforces is_manager() in WITH CHECK as a backstop.
 
-export function useRefundApprovals(): { approvals: RefundApproval[]; loading: boolean } {
+export function useRefundApprovals(): {
+  approvals: RefundApproval[]; loading: boolean; refresh: () => Promise<void>;
+} {
   const [approvals, setApprovals] = useState<RefundApproval[]>([]);
   const [loading, setLoading] = useState(true);
+  const liveRef = useRef(true);
+
+  const refresh = useCallback(async () => {
+    const { data, error } = await supabase
+      .from('refund_approvals')
+      .select('*')
+      .order('submitted_at', { ascending: false });
+    if (!liveRef.current) return;
+    if (!error && data) setApprovals(data as RefundApproval[]);
+  }, []);
 
   useEffect(() => {
+    liveRef.current = true;
     let channel: RealtimeChannel | null = null;
-    let cancelled = false;
+    let joined = false;
     (async () => {
-      const { data, error } = await supabase
-        .from('refund_approvals')
-        .select('*')
-        .order('submitted_at', { ascending: false });
-      if (cancelled) return;
-      if (!error && data) setApprovals(data as RefundApproval[]);
+      await refresh();
+      if (!liveRef.current) return;
       setLoading(false);
 
       channel = supabase
@@ -787,12 +796,30 @@ export function useRefundApprovals(): { approvals: RefundApproval[]; loading: bo
             return prev;
           });
         })
-        .subscribe();
+        // A stage move is written straight to the DB and nothing here re-reads,
+        // so realtime is the board's only route to seeing it. When the socket
+        // drops, every change made in the gap is lost for good and the operator
+        // is left re-clicking an action that already happened (prod, 2026-08-13:
+        // the same card approved three times in three minutes, all three writes
+        // landing, the column never moving). Re-read on each rejoin so the gap
+        // heals itself. The first join is skipped — the fetch above is current.
+        .subscribe((status) => {
+          if (status !== 'SUBSCRIBED') return;
+          if (!joined) { joined = true; return; }
+          void refresh();
+        });
     })();
-    return () => { cancelled = true; if (channel) void channel.unsubscribe(); };
-  }, []);
+    return () => {
+      liveRef.current = false;
+      // removeChannel, not unsubscribe: unsubscribe leaves the channel on the
+      // client, so remounting this board opens a second channel on the same
+      // topic, and that duplicate join is enough to take realtime down for the
+      // rest of the session.
+      if (channel) void supabase.removeChannel(channel);
+    };
+  }, [refresh]);
 
-  return { approvals, loading };
+  return { approvals, loading, refresh };
 }
 
 // ── Refund notes (collaborative, approver-visible) ──────────────────────────
@@ -1271,10 +1298,18 @@ export async function managerApprove(id: string, note?: string): Promise<void> {
   // Manager, rather than only being caught one stage later at Finance Review.
   const { data: approval, error: aErr } = await supabase
     .from('refund_approvals')
-    .select('id, return_id, customer_email, customer_name, refund_amount_usd')
+    .select('id, return_id, status, customer_email, customer_name, refund_amount_usd')
     .eq('id', id)
     .single();
   if (aErr || !approval) throw new Error(`Refund approval not found: ${aErr?.message}`);
+
+  // Stage guard, matching submitToManager/financeApprove. Without it a board
+  // showing a stale column lets the approver click again on a card that has
+  // already moved, silently restamping manager_approved_at instead of saying so.
+  if (approval.status !== 'manager_review') {
+    throw new Error(`Cannot approve as manager from status: ${approval.status} — this card has already left Manager Review. Reload the board to see where it is now.`);
+  }
+
   if (approval.return_id) {
     const { data: ret, error: rErr } = await supabase
       .from('returns')

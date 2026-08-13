@@ -103,7 +103,7 @@ export function refundColumnOwnerLabel(column: string | null | undefined): strin
 }
 
 export function RefundsTab() {
-  const { approvals, loading: aLoading } = useRefundApprovals();
+  const { approvals, loading: aLoading, refresh: refreshApprovals } = useRefundApprovals();
   const { returns, loading: rLoading } = useReturns();
   const { cancellations, loading: cLoading } = useOrderCancellations();
   const { replacements: queuedRepls } = useQueuedReplacements();
@@ -389,7 +389,7 @@ export function RefundsTab() {
   // amount + payment method are set by Finance (Julie) at Finance Review.
   const compileReturn = async (r: ReturnRow) => {
     setError(null);
-    try { await compileReturnToRefund(r); }
+    try { await compileReturnToRefund(r); await refreshApprovals(); }
     catch (e) { setError((e as Error).message); }
   };
 
@@ -542,6 +542,7 @@ export function RefundsTab() {
           canFlow={canFlow}
           onClose={() => setSelectedId(null)}
           onError={setError}
+          onMoved={refreshApprovals}
           onOpenFinanceModal={setFinanceModalId}
         />
       )}
@@ -550,6 +551,7 @@ export function RefundsTab() {
         <CreateManualRefundModal
           onClose={() => setShowRequestModal(false)}
           onError={setError}
+          onMoved={refreshApprovals}
         />
       )}
 
@@ -586,6 +588,7 @@ export function RefundsTab() {
             canWrite={ownsRefundColumn(userEmail, refund.status)}
             onClose={() => setFinanceModalId(null)}
             onError={setError}
+            onMoved={refreshApprovals}
           />
         );
       })()}
@@ -1694,7 +1697,7 @@ export function ContactBlock({ contact }: { contact: CustomerContact }) {
 // Renders the linked return-form data + approve / deny actions.
 // ============================================================================
 function RefundDetailPanel({
-  refund, linkedReturn, cancellationId = null, parties, contact, canApproveHere, usage, invoices, tickets, onOpenTicket, queuedReplacements, canFlow, onClose, onError, onOpenFinanceModal,
+  refund, linkedReturn, cancellationId = null, parties, contact, canApproveHere, usage, invoices, tickets, onOpenTicket, queuedReplacements, canFlow, onClose, onError, onMoved, onOpenFinanceModal,
 }: {
   refund: RefundApproval;
   linkedReturn: ReturnRow | null;
@@ -1710,6 +1713,10 @@ function RefundDetailPanel({
   canFlow: boolean;
   onClose: () => void;
   onError: (msg: string | null) => void;
+  /** Re-read the board after a stage write. Realtime is meant to deliver the
+   *  change on its own, but a dropped socket loses it silently and strands the
+   *  card in the column it just left — so every move confirms itself. */
+  onMoved: () => Promise<void>;
   onOpenFinanceModal: (id: string) => void;
 }) {
   const [busy, setBusy] = useState(false);
@@ -1743,6 +1750,7 @@ function RefundDetailPanel({
     try {
       if (backTarget === 'uncompile') { await uncompileRefund(refund.id, refund.return_id); onClose(); }
       else await sendRefundBack(refund.id, backTarget);
+      await onMoved();
     } catch (e) { onError((e as Error).message); }
     finally { setBusy(false); }
   };
@@ -1762,21 +1770,21 @@ function RefundDetailPanel({
 
   const runExecute = async () => {
     setBusy(true); onError(null);
-    try { await executeRefund(refund.id); onClose(); }
+    try { await executeRefund(refund.id); onClose(); await onMoved(); }
     catch (e) { onError((e as Error).message); }
     finally { setBusy(false); }
   };
 
   const runClose = async () => {
     setBusy(true); onError(null);
-    try { await closeRefund(refund.id); onClose(); }
+    try { await closeRefund(refund.id); onClose(); await onMoved(); }
     catch (e) { onError((e as Error).message); }
     finally { setBusy(false); }
   };
 
   const runSubmitToManager = async () => {
     setBusy(true); onError(null);
-    try { await submitToManager(refund.id); onClose(); }
+    try { await submitToManager(refund.id); onClose(); await onMoved(); }
     catch (e) { onError((e as Error).message); }
     finally { setBusy(false); }
   };
@@ -1814,11 +1822,13 @@ function RefundDetailPanel({
       if (confirmMode === 'approve') {
         await managerApprove(refund.id, inputVal.trim() || undefined);
         onClose();
+        await onMoved();
       } else {
         const stage = (['submitted', 'manager_review', 'finance_review', 'refund_queue'].includes(refund.status)
           ? refund.status : 'manager_review') as 'submitted' | 'manager_review' | 'finance_review' | 'refund_queue';
         await denyRefund(refund.id, stage, inputVal.trim());
         onClose();
+        await onMoved();
       }
       setConfirmMode(null);
     } catch (e) { onError((e as Error).message); }
@@ -2303,10 +2313,12 @@ function RefundStep({ label, ts, note, active, negative }: {
 // (both are keyed to its id), so submit creates the card first and then files
 // them against it.
 function CreateManualRefundModal({
-  onClose, onError,
+  onClose, onError, onMoved,
 }: {
   onClose: () => void;
   onError: (msg: string | null) => void;
+  /** Re-read the board once the card exists — see RefundDetailPanel. */
+  onMoved: () => Promise<void>;
 }) {
   const { customers, loading: customersLoading } = useCustomers();
   const [query, setQuery] = useState('');
@@ -2401,6 +2413,10 @@ function CreateManualRefundModal({
         ? `The refund card was created, but finishing it failed: ${msg}. Open the card to add the rest.`
         : msg);
     } finally {
+      // Whether or not the extras landed, the card itself exists once
+      // refundId is set — pull it onto the board rather than waiting on a
+      // realtime insert that may never arrive.
+      if (refundId) await onMoved();
       setSubmitting(false);
       setStep(null);
     }
@@ -2556,7 +2572,7 @@ function KPI({ label, value, tone, sub }: { label: string; value: number | strin
 // Finance approve modal
 // ============================================================================
 function FinanceApproveModal({
-  refund, linkedReturn, cancellationId = null, canWrite, onClose, onError,
+  refund, linkedReturn, cancellationId = null, canWrite, onClose, onError, onMoved,
 }: {
   refund: RefundApproval;
   linkedReturn: ReturnRow | null;
@@ -2565,6 +2581,8 @@ function FinanceApproveModal({
   canWrite: boolean;
   onClose: () => void;
   onError: (m: string | null) => void;
+  /** Re-read the board after the approval lands — see RefundDetailPanel. */
+  onMoved: () => Promise<void>;
 }) {
   const [method, setMethod] = useState<RefundMethod>('shopify');
   const original = Number(refund.original_amount_usd ?? refund.refund_amount_usd);
@@ -2631,6 +2649,7 @@ function FinanceApproveModal({
         return_shipping_fee: returnShipFee,
       });
       onClose();
+      await onMoved();
     } catch (e) {
       const msg = (e as Error).message;
       setLocalError(msg);
