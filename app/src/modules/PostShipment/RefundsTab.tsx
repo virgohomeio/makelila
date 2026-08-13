@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import {
   useRefundApprovals, useReturns,
   submitRefundRequest, compileReturnToRefund, defaultRefundAmountFromInvoice,
@@ -80,9 +80,26 @@ const REFUND_COLUMN_OWNERS: Record<string, string[]> = {
   finance_review: ['yueli@virgohome.io', 'huayi@virgohome.io'],
   refund_queue:   ['pedrum@virgohome.io'],
 };
-function ownsRefundColumn(email: string | null | undefined, column: string | null | undefined): boolean {
+export function ownsRefundColumn(email: string | null | undefined, column: string | null | undefined): boolean {
   const e = (email ?? '').toLowerCase().trim();
   return !!column && !!e && (REFUND_COLUMN_OWNERS[column] ?? []).includes(e);
+}
+
+// Names for the owner emails above — used in the "you can't write here" hints
+// on a card sitting in someone else's column. An address nobody recognises
+// ("yueli@…") reads as a bug; "Julie owns this column" reads as a rule.
+const REFUND_OWNER_NAMES: Record<string, string> = {
+  'reina@virgohome.io':  'Reina',
+  'george@virgohome.io': 'George',
+  'yueli@virgohome.io':  'Julie',
+  'huayi@virgohome.io':  'Huayi',
+  'pedrum@virgohome.io': 'Pedrum',
+};
+// Empty for the terminal columns (Refunded / Denied), which nobody owns — the
+// case is finished there and its notes are the record of what happened.
+export function refundColumnOwnerLabel(column: string | null | undefined): string {
+  const owners = (column && REFUND_COLUMN_OWNERS[column]) || [];
+  return owners.map(e => REFUND_OWNER_NAMES[e] ?? e.split('@')[0]).join(' / ');
 }
 
 export function RefundsTab() {
@@ -566,6 +583,7 @@ export function RefundsTab() {
             refund={refund}
             linkedReturn={linked}
             cancellationId={cancellationIdFor(refund.id)}
+            canWrite={ownsRefundColumn(userEmail, refund.status)}
             onClose={() => setFinanceModalId(null)}
             onError={setError}
           />
@@ -873,13 +891,55 @@ function DispositionEditor({ r, onError }: { r: ReturnRow; onError: (m: string |
   );
 }
 
-// Notes on a pre-refund return card (Return Form Submitted / Return &
-// Inspection). Everyone involved can add — mirrors the refund-card notes.
-// Notes for a case. Pass a returnId (return-only cards) and/or a refundId
-// (refund cards). Reads the union and anchors new notes to the return so the
-// same list shows at every stage and is never lost across compile/uncompile.
-function CaseNotes({ refundId = null, returnId = null, cancellationId = null, onError }:
-  { refundId?: string | null; returnId?: string | null; cancellationId?: string | null; onError: (m: string | null) => void }) {
+// ============================================================================
+// Case notes — the single notes surface on this board
+// ============================================================================
+// Notes for a case. Pass a returnId (return-only cards), a cancellationId
+// and/or a refundId (refund cards). Reads the union and anchors new notes to
+// the return so the same list shows at every stage and is never lost across
+// compile/uncompile.
+//
+// Reading is open to everyone, at every stage — the thread is how the next
+// person picks the case up. Writing is scoped to whoever the case is with:
+//   - add     — only the owner of the column the card is sitting in right now
+//   - edit    — the note's own author, and only while they own that column
+//   - delete  — same as edit, and always behind a confirm step
+// Every button renders either way: red when the action is yours to take, grey
+// and inert when it isn't. A card parked in someone else's column should read
+// as "not your turn", not as a broken button.
+const NOTE_RED = '#c53030';
+const NOTE_GREY = '#a0aec0';
+
+// Shared look for the inline edit/delete links on a note.
+function noteLinkStyle(enabled: boolean, fontSize: number): CSSProperties {
+  return {
+    border: 'none', background: 'none', padding: 0,
+    color: enabled ? NOTE_RED : NOTE_GREY,
+    cursor: enabled ? 'pointer' : 'not-allowed',
+    fontWeight: enabled ? 600 : 400,
+    fontSize, lineHeight: 1.4,
+  };
+}
+
+export function CaseNotes({
+  refundId = null, returnId = null, cancellationId = null,
+  canWrite, ownerLabel = '', variant = 'compact',
+  label = 'Notes', emptyHint, placeholder = 'Add a note…', onError,
+}: {
+  refundId?: string | null;
+  returnId?: string | null;
+  cancellationId?: string | null;
+  /** True when the card currently sits in a column this user owns. */
+  canWrite: boolean;
+  /** Who does own it — named in the hint when canWrite is false. Empty for
+   *  the terminal columns, which nobody owns. */
+  ownerLabel?: string;
+  variant?: 'compact' | 'panel';
+  label?: string;
+  emptyHint?: string;
+  placeholder?: string;
+  onError: (m: string | null) => void;
+}) {
   const { notes, refresh } = useCaseNotes(refundId, returnId, cancellationId);
   const { user } = useAuth();
   const uid = user?.id;
@@ -887,71 +947,135 @@ function CaseNotes({ refundId = null, returnId = null, cancellationId = null, on
   const [busy, setBusy] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [editText, setEditText] = useState('');
+  // Which note is asking "delete this?" — the confirm popover is per-note, so
+  // one stray click never removes anything on its own.
+  const [confirmId, setConfirmId] = useState<string | null>(null);
+
+  const panel = variant === 'panel';
+  const bodySize = panel ? 13 : 12;
+  const linkSize = panel ? 11 : 10;
+  const lockedHint = ownerLabel
+    ? `${ownerLabel} owns this column — only they can add, edit or delete notes while the card is here`
+    : 'This case is closed — its notes are read-only';
+
   const add = async () => {
-    if (!text.trim()) return;
+    if (!canWrite || !text.trim()) return;
     setBusy(true); onError(null);
     try { await addCaseNote(refundId, returnId, text, cancellationId); setText(''); refresh(); }
     catch (e) { onError((e as Error).message); }
     finally { setBusy(false); }
   };
   const del = async (n: CaseNote) => {
+    if (!canWrite || n.author_id !== uid) return;
     setBusy(true); onError(null);
-    try { await deleteCaseNote(n, refundId, returnId, cancellationId); refresh(); }
+    try { await deleteCaseNote(n, refundId, returnId, cancellationId); setConfirmId(null); refresh(); }
     catch (e) { onError((e as Error).message); }
     finally { setBusy(false); }
   };
   const saveEdit = async (n: CaseNote) => {
-    if (!editText.trim()) return;
+    if (!canWrite || n.author_id !== uid || !editText.trim()) return;
     setBusy(true); onError(null);
     try { await updateCaseNote(n, refundId, returnId, editText, cancellationId); setEditId(null); refresh(); }
     catch (e) { onError((e as Error).message); }
     finally { setBusy(false); }
   };
+
   return (
-    <div onClick={e => e.stopPropagation()} style={{ margin: '8px 0' }}>
-      <div style={{ fontSize: 12, fontWeight: 600, color: '#4a5568', marginBottom: 4 }}>Notes ({notes.length})</div>
-      {notes.length > 0 && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 6 }}>
-          {notes.map(n => (
-            <div key={n.id} style={{ fontSize: 12, background: '#f7fafc', border: '1px solid #edf2f7', borderRadius: 6, padding: '4px 6px' }}>
+    <div onClick={e => e.stopPropagation()} style={{ margin: panel ? 0 : '8px 0' }}>
+      <div style={{ fontSize: 12, fontWeight: panel ? 700 : 600, color: '#4a5568', marginBottom: panel ? 6 : 4 }}>
+        {label} ({notes.length})
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: panel ? 6 : 4, marginBottom: panel ? 8 : 6 }}>
+        {notes.length === 0 && emptyHint && (
+          <div style={{ fontSize: 12, color: NOTE_GREY }}>{emptyHint}</div>
+        )}
+        {notes.map(n => {
+          const isAuthor = n.author_id === uid;
+          const mayEdit = canWrite && isAuthor;
+          const editHint = !canWrite ? lockedHint
+            : !isAuthor ? `Only ${n.author_name ?? 'the author'} can edit or delete this note`
+            : undefined;
+          return (
+            <div key={n.id} style={{ fontSize: bodySize, background: '#f7fafc', border: panel ? 'none' : '1px solid #edf2f7', borderRadius: 6, padding: panel ? '6px 9px' : '4px 6px' }}>
               {editId === n.id ? (
                 <>
                   <textarea value={editText} onChange={e => setEditText(e.target.value)} rows={2} autoFocus
+                    aria-label="Edit note"
                     onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) void saveEdit(n); if (e.key === 'Escape') setEditId(null); }}
-                    style={{ width: '100%', fontSize: 12, padding: '4px 6px', border: '1px solid #2b6cb0', borderRadius: 6, resize: 'vertical' }} />
+                    style={{ width: '100%', fontSize: bodySize, padding: '4px 6px', border: `1px solid ${NOTE_RED}`, borderRadius: 6, resize: 'vertical' }} />
                   <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
-                    <button onClick={() => void saveEdit(n)} disabled={busy || !editText.trim()} className={styles.refundApproveBtn} style={{ fontSize: 10 }}>Save</button>
-                    <button onClick={() => setEditId(null)} disabled={busy} style={{ border: 'none', background: 'none', color: '#a0aec0', cursor: 'pointer', fontSize: 10 }}>Cancel</button>
+                    <button onClick={() => void saveEdit(n)} disabled={busy || !editText.trim()}
+                      style={{ fontSize: linkSize, fontWeight: 600, padding: '2px 10px', borderRadius: 6,
+                               border: `1px solid ${NOTE_RED}`, color: '#fff', background: NOTE_RED,
+                               cursor: busy || !editText.trim() ? 'default' : 'pointer',
+                               opacity: busy || !editText.trim() ? 0.6 : 1 }}>Save</button>
+                    <button onClick={() => setEditId(null)} disabled={busy}
+                      style={{ border: 'none', background: 'none', color: NOTE_GREY, cursor: 'pointer', fontSize: linkSize }}>Cancel</button>
                   </div>
                 </>
               ) : (
                 <>
                   <div style={{ whiteSpace: 'pre-wrap' }}>{n.body}</div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', color: '#a0aec0', fontSize: 10, marginTop: 2 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, color: NOTE_GREY, fontSize: 10, marginTop: panel ? 3 : 2 }}>
                     <span>{n.author_name ?? 'Unknown'} · {new Date(n.created_at).toLocaleString('en-US')}</span>
-                    <span style={{ display: 'flex', gap: 8 }}>
-                      {n.author_id === uid && (
-                        <button onClick={() => { setEditId(n.id); setEditText(n.body); }} disabled={busy}
-                          style={{ border: 'none', background: 'none', color: '#2b6cb0', cursor: 'pointer', fontSize: 10 }}>edit</button>
+                    <span style={{ display: 'flex', gap: 10, position: 'relative' }}>
+                      <button onClick={() => { if (!mayEdit) return; setConfirmId(null); setEditId(n.id); setEditText(n.body); }}
+                        disabled={busy || !mayEdit} aria-disabled={!mayEdit}
+                        title={editHint ?? 'Edit your note'}
+                        style={noteLinkStyle(mayEdit, linkSize)}>edit</button>
+                      <button onClick={() => { if (!mayEdit) return; setConfirmId(n.id); }}
+                        disabled={busy || !mayEdit} aria-disabled={!mayEdit}
+                        title={editHint ?? 'Delete your note'}
+                        style={noteLinkStyle(mayEdit, linkSize)}>delete</button>
+                      {confirmId === n.id && (
+                        <span role="dialog" aria-label="Confirm delete note"
+                          style={{ position: 'absolute', right: 0, bottom: '100%', marginBottom: 6, zIndex: 20,
+                                   display: 'flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap',
+                                   background: '#fff', border: `1px solid ${NOTE_RED}`, borderRadius: 6,
+                                   padding: '6px 8px', boxShadow: '0 4px 12px rgba(0,0,0,0.12)' }}>
+                          <span style={{ fontSize: 11, color: '#4a5568' }}>Delete this note?</span>
+                          <button onClick={() => void del(n)} disabled={busy}
+                            style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 6,
+                                     border: `1px solid ${NOTE_RED}`, color: '#fff', background: NOTE_RED, cursor: 'pointer' }}>
+                            {busy ? '…' : 'Delete'}
+                          </button>
+                          <button onClick={() => setConfirmId(null)} disabled={busy}
+                            style={{ border: 'none', background: 'none', color: NOTE_GREY, cursor: 'pointer', fontSize: 11 }}>Cancel</button>
+                        </span>
                       )}
-                      <button onClick={() => void del(n)} disabled={busy}
-                        style={{ border: 'none', background: 'none', color: '#a0aec0', cursor: 'pointer', fontSize: 10 }}>remove</button>
                     </span>
                   </div>
                 </>
               )}
             </div>
-          ))}
-        </div>
-      )}
-      <div style={{ display: 'flex', gap: 4 }}>
-        <textarea value={text} onChange={e => setText(e.target.value)} placeholder="Add a note…" rows={1}
+          );
+        })}
+      </div>
+      <div style={{ display: 'flex', gap: panel ? 6 : 4 }}>
+        <textarea value={text} onChange={e => setText(e.target.value)} rows={panel ? 2 : 1}
+          aria-label="New note"
+          placeholder={canWrite ? placeholder : lockedHint}
+          disabled={!canWrite} title={canWrite ? undefined : lockedHint}
           onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) void add(); }}
-          style={{ flex: 1, fontSize: 12, padding: '4px 6px', border: '1px solid #cbd5e0', borderRadius: 6, resize: 'vertical', minHeight: 28 }} />
-        <button onClick={() => void add()} disabled={busy || !text.trim()} className={styles.refundApproveBtn} style={{ fontSize: 11 }}>
-          {busy ? '…' : 'Add'}
+          style={{ flex: 1, fontSize: bodySize, padding: panel ? '6px 9px' : '4px 6px',
+                   border: '1px solid #e2e8f0', borderRadius: 6, resize: 'vertical', minHeight: panel ? undefined : 28,
+                   background: canWrite ? '#fff' : '#f7fafc', color: canWrite ? undefined : NOTE_GREY,
+                   cursor: canWrite ? undefined : 'not-allowed' }} />
+        <button onClick={() => void add()} disabled={busy || !canWrite || !text.trim()} aria-disabled={!canWrite}
+          title={canWrite ? undefined : lockedHint}
+          style={{ fontSize: panel ? 12 : 11, fontWeight: 600, padding: panel ? '0 14px' : '0 10px', borderRadius: 6,
+                   whiteSpace: 'nowrap',
+                   border: `1px solid ${canWrite ? NOTE_RED : '#e2e8f0'}`,
+                   color: canWrite ? '#fff' : NOTE_GREY,
+                   background: canWrite ? NOTE_RED : '#f7fafc',
+                   cursor: canWrite && text.trim() && !busy ? 'pointer' : 'not-allowed',
+                   opacity: canWrite && text.trim() && !busy ? 1 : 0.75 }}>
+          {busy ? '…' : panel ? 'Add note' : 'Add'}
         </button>
       </div>
+      {!canWrite && (
+        <div style={{ fontSize: 11, color: NOTE_GREY, marginTop: 4 }}>{lockedHint}.</div>
+      )}
     </div>
   );
 }
@@ -1484,7 +1608,7 @@ export function CancellationCard({
       <CustomerTicketHistory tickets={tickets} onOpenTicket={onOpenTicket} defaultOpen />
       {/* Notes anchor to the cancellation, so they carry onto the refund card
           this compiles into instead of starting over there. */}
-      <CaseNotes cancellationId={c.id} onError={onError} />
+      <CaseNotes cancellationId={c.id} canWrite={canOwn} ownerLabel={refundColumnOwnerLabel('cancellation')} onError={onError} />
       <div className={styles.refundActions}>
         {canOwn ? (
           <>
@@ -1590,12 +1714,6 @@ function RefundDetailPanel({
 }) {
   const [busy, setBusy] = useState(false);
   const [holdBusy, setHoldBusy] = useState<string | null>(null);
-  const { notes, refresh: refreshNotes } = useCaseNotes(refund.id, refund.return_id, cancellationId);
-  const { user: authUser } = useAuth();
-  const uid = authUser?.id;
-  const [newNote, setNewNote] = useState('');
-  const [editNoteId, setEditNoteId] = useState<string | null>(null);
-  const [editNoteText, setEditNoteText] = useState('');
   const meta = REFUND_STATUS_META[refund.status];
 
   // Forward/approve is owner-only (canApproveHere); deny is open to everyone.
@@ -1659,27 +1777,6 @@ function RefundDetailPanel({
   const runSubmitToManager = async () => {
     setBusy(true); onError(null);
     try { await submitToManager(refund.id); onClose(); }
-    catch (e) { onError((e as Error).message); }
-    finally { setBusy(false); }
-  };
-
-  const runAddNote = async () => {
-    if (!newNote.trim()) return;
-    setBusy(true); onError(null);
-    try { await addCaseNote(refund.id, refund.return_id, newNote, cancellationId); setNewNote(''); refreshNotes(); }
-    catch (e) { onError((e as Error).message); }
-    finally { setBusy(false); }
-  };
-  const runEditNote = async (n: CaseNote) => {
-    if (!editNoteText.trim()) return;
-    setBusy(true); onError(null);
-    try { await updateCaseNote(n, refund.id, refund.return_id, editNoteText, cancellationId); setEditNoteId(null); refreshNotes(); }
-    catch (e) { onError((e as Error).message); }
-    finally { setBusy(false); }
-  };
-  const runDeleteNote = async (n: CaseNote) => {
-    setBusy(true); onError(null);
-    try { await deleteCaseNote(n, refund.id, refund.return_id, cancellationId); refreshNotes(); }
     catch (e) { onError((e as Error).message); }
     finally { setBusy(false); }
   };
@@ -1870,56 +1967,22 @@ function RefundDetailPanel({
           a cancellation form, or opened by hand — still takes evidence. */}
       <CaseAttachmentStrip refundId={refund.id} returnId={linkedReturn?.id ?? null} onError={onError} />
 
-      {/* Notes for approvers (George/Julie) — collaborative, timestamped, attributed. */}
+      {/* Notes for approvers (George/Julie) — collaborative, timestamped,
+          attributed, and writable only by whoever owns the column the card is
+          in right now (canApproveHere). Everyone still reads the whole thread. */}
       <div style={{ margin: '12px 0', borderTop: '1px solid #edf2f7', paddingTop: 12 }}>
-        <div style={{ fontSize: 12, fontWeight: 700, color: '#4a5568', marginBottom: 6 }}>
-          Notes for approvers ({notes.length})
-        </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 }}>
-          {notes.length === 0 && <div style={{ fontSize: 12, color: '#a0aec0' }}>No notes yet — add context for the approver here.</div>}
-          {notes.map(n => (
-            <div key={n.id} style={{ fontSize: 13, background: '#f7fafc', borderRadius: 6, padding: '6px 9px' }}>
-              {editNoteId === n.id ? (
-                <>
-                  <textarea value={editNoteText} onChange={e => setEditNoteText(e.target.value)} rows={2} autoFocus
-                    onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) void runEditNote(n); if (e.key === 'Escape') setEditNoteId(null); }}
-                    style={{ width: '100%', fontSize: 13, padding: '6px 9px', border: '1px solid #2b6cb0', borderRadius: 6, resize: 'vertical' }} />
-                  <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
-                    <button onClick={() => void runEditNote(n)} disabled={busy || !editNoteText.trim()}
-                      style={{ fontSize: 11, fontWeight: 600, padding: '2px 10px', borderRadius: 6, border: '1px solid #2b6cb0', color: '#fff', background: '#2b6cb0', cursor: 'pointer' }}>Save</button>
-                    <button onClick={() => setEditNoteId(null)} disabled={busy}
-                      style={{ border: 'none', background: 'none', color: '#a0aec0', cursor: 'pointer', fontSize: 11 }}>Cancel</button>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div style={{ whiteSpace: 'pre-wrap' }}>{n.body}</div>
-                  <div style={{ fontSize: 10, color: '#a0aec0', marginTop: 3, display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-                    <span>{n.author_name ?? 'Unknown'} · {new Date(n.created_at).toLocaleString()}</span>
-                    <span style={{ display: 'flex', gap: 10 }}>
-                      {n.author_id === uid && (
-                        <button onClick={() => { setEditNoteId(n.id); setEditNoteText(n.body); }} disabled={busy} title="Edit your note"
-                          style={{ border: 'none', background: 'none', color: '#2b6cb0', cursor: 'pointer', fontSize: 11 }}>edit</button>
-                      )}
-                      <button onClick={() => void runDeleteNote(n)} disabled={busy} title="Delete note"
-                        style={{ border: 'none', background: 'none', color: '#cbd5e0', cursor: 'pointer', fontSize: 13, lineHeight: 1 }}>×</button>
-                    </span>
-                  </div>
-                </>
-              )}
-            </div>
-          ))}
-        </div>
-        <div style={{ display: 'flex', gap: 6 }}>
-          <textarea value={newNote} onChange={e => setNewNote(e.target.value)} rows={2}
-            placeholder="Add a note for approvers (extra details on the refund/return)…"
-            style={{ flex: 1, fontSize: 13, padding: '6px 9px', border: '1px solid #e2e8f0', borderRadius: 6, resize: 'vertical' }} />
-          <button onClick={() => void runAddNote()} disabled={busy || !newNote.trim()}
-            style={{ fontSize: 12, fontWeight: 600, padding: '0 14px', borderRadius: 6, border: '1px solid #2b6cb0',
-                     color: '#fff', background: '#2b6cb0', cursor: busy || !newNote.trim() ? 'default' : 'pointer', opacity: busy || !newNote.trim() ? 0.6 : 1 }}>
-            Add note
-          </button>
-        </div>
+        <CaseNotes
+          refundId={refund.id}
+          returnId={refund.return_id}
+          cancellationId={cancellationId}
+          canWrite={canApproveHere}
+          ownerLabel={refundColumnOwnerLabel(refund.status)}
+          variant="panel"
+          label="Notes for approvers"
+          emptyHint="No notes yet — add context for the approver here."
+          placeholder="Add a note for approvers (extra details on the refund/return)…"
+          onError={onError}
+        />
       </div>
 
       {/* Approval trail — who moved the case and what they said. Used to sit on
@@ -2186,7 +2249,7 @@ export function ReturnDetailModal({ r, parties, contact, canOwn, usage, invoices
           <UsageWindowBadge usage={usage} />
           <RefundInvoices invoices={invoices} fallbackOrderRef={r.original_order_ref} />
           <CustomerTicketHistory tickets={tickets} onOpenTicket={onOpenTicket} defaultOpen />
-          <CaseNotes returnId={r.id} onError={onError} />
+          <CaseNotes returnId={r.id} canWrite={canOwn} ownerLabel={refundColumnOwnerLabel(preRefundStage(r.status))} onError={onError} />
           <CaseAttachmentStrip returnId={r.id} onError={onError} />
           {/* Column actions — these used to live on the board card, which is
               now collapsed to the case's identity. */}
@@ -2493,11 +2556,13 @@ function KPI({ label, value, tone, sub }: { label: string; value: number | strin
 // Finance approve modal
 // ============================================================================
 function FinanceApproveModal({
-  refund, linkedReturn, cancellationId = null, onClose, onError,
+  refund, linkedReturn, cancellationId = null, canWrite, onClose, onError,
 }: {
   refund: RefundApproval;
   linkedReturn: ReturnRow | null;
   cancellationId?: string | null;
+  /** True when the signed-in user owns the column this card sits in. */
+  canWrite: boolean;
   onClose: () => void;
   onError: (m: string | null) => void;
 }) {
@@ -2508,37 +2573,6 @@ function FinanceApproveModal({
   const [correctionNote, setCorrectionNote] = useState('');
   const [busy, setBusy] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
-
-  // Collaborative "Notes for approvers" — saved immediately, independent of the
-  // Approve action. Fixes the case where the linked return isn't received yet
-  // (Approve button disabled) but Julie/Huayi still need to record context.
-  const { notes: approverNotes, refresh: refreshNotes } = useCaseNotes(refund.id, refund.return_id, cancellationId);
-  const { user: authUser } = useAuth();
-  const uid = authUser?.id;
-  const [newNote, setNewNote] = useState('');
-  const [noteBusy, setNoteBusy] = useState(false);
-  const [editNoteId, setEditNoteId] = useState<string | null>(null);
-  const [editNoteText, setEditNoteText] = useState('');
-  const runAddNote = async () => {
-    if (!newNote.trim()) return;
-    setNoteBusy(true); setLocalError(null); onError(null);
-    try { await addCaseNote(refund.id, refund.return_id, newNote, cancellationId); setNewNote(''); refreshNotes(); }
-    catch (e) { const m = (e as Error).message; setLocalError(m); onError(m); }
-    finally { setNoteBusy(false); }
-  };
-  const runEditNote = async (n: CaseNote) => {
-    if (!editNoteText.trim()) return;
-    setNoteBusy(true); setLocalError(null);
-    try { await updateCaseNote(n, refund.id, refund.return_id, editNoteText, cancellationId); setEditNoteId(null); refreshNotes(); }
-    catch (e) { const m = (e as Error).message; setLocalError(m); onError(m); }
-    finally { setNoteBusy(false); }
-  };
-  const runDeleteNote = async (n: CaseNote) => {
-    setNoteBusy(true); setLocalError(null);
-    try { await deleteCaseNote(n, refund.id, refund.return_id, cancellationId); refreshNotes(); }
-    catch (e) { const m = (e as Error).message; setLocalError(m); onError(m); }
-    finally { setNoteBusy(false); }
-  };
 
   const FINANCE_OK_STATUSES = ['received', 'inspected', 'refunded', 'closed'];
   const DEFECTIVE_CATEGORIES: ReturnCategory[] = ['product_defect', 'shipping_damage'];
@@ -2699,58 +2733,18 @@ function FinanceApproveModal({
         </div>
 
         <div className={styles.modalField}>
-          <label className={styles.modalLabel}>Notes for approvers ({approverNotes.length})</label>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 }}>
-            {approverNotes.length === 0 && (
-              <div style={{ fontSize: 12, color: '#a0aec0' }}>No notes yet — save context here without approving.</div>
-            )}
-            {approverNotes.map(n => (
-              <div key={n.id} style={{ fontSize: 13, background: '#f7fafc', borderRadius: 6, padding: '6px 9px' }}>
-                {editNoteId === n.id ? (
-                  <>
-                    <textarea value={editNoteText} onChange={e => setEditNoteText(e.target.value)} rows={2} autoFocus
-                      onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) void runEditNote(n); if (e.key === 'Escape') setEditNoteId(null); }}
-                      className={styles.modalInput} style={{ resize: 'vertical' }} />
-                    <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
-                      <button onClick={() => void runEditNote(n)} disabled={noteBusy || !editNoteText.trim()}
-                        style={{ fontSize: 11, fontWeight: 600, padding: '2px 10px', borderRadius: 6, border: '1px solid #2b6cb0', color: '#fff', background: '#2b6cb0', cursor: 'pointer' }}>Save</button>
-                      <button onClick={() => setEditNoteId(null)} disabled={noteBusy}
-                        style={{ border: 'none', background: 'none', color: '#a0aec0', cursor: 'pointer', fontSize: 11 }}>Cancel</button>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <div style={{ whiteSpace: 'pre-wrap' }}>{n.body}</div>
-                    <div style={{ fontSize: 10, color: '#a0aec0', marginTop: 3, display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-                      <span>{n.author_name ?? 'Unknown'} · {new Date(n.created_at).toLocaleString()}</span>
-                      <span style={{ display: 'flex', gap: 10 }}>
-                        {n.author_id === uid && (
-                          <button onClick={() => { setEditNoteId(n.id); setEditNoteText(n.body); }} disabled={noteBusy} title="Edit your note"
-                            style={{ border: 'none', background: 'none', color: '#2b6cb0', cursor: 'pointer', fontSize: 11 }}>edit</button>
-                        )}
-                        <button onClick={() => void runDeleteNote(n)} disabled={noteBusy} title="Delete note"
-                          style={{ border: 'none', background: 'none', color: '#cbd5e0', cursor: 'pointer', fontSize: 13, lineHeight: 1 }}>×</button>
-                      </span>
-                    </div>
-                  </>
-                )}
-              </div>
-            ))}
-          </div>
-          <div style={{ display: 'flex', gap: 6 }}>
-            <textarea
-              value={newNote}
-              onChange={e => setNewNote(e.target.value)}
-              rows={2}
-              placeholder="Add a note for approvers (saved immediately, no approval needed)…"
-              className={styles.modalInput}
-              style={{ resize: 'vertical' }}
-            />
-            <button onClick={() => void runAddNote()} disabled={noteBusy || !newNote.trim()}
-              className={styles.btnPrimary} style={{ whiteSpace: 'nowrap' }}>
-              {noteBusy ? 'Saving…' : 'Add note'}
-            </button>
-          </div>
+          <CaseNotes
+            refundId={refund.id}
+            returnId={refund.return_id}
+            cancellationId={cancellationId}
+            canWrite={canWrite}
+            ownerLabel={refundColumnOwnerLabel(refund.status)}
+            variant="panel"
+            label="Notes for approvers"
+            emptyHint="No notes yet — save context here without approving."
+            placeholder="Add a note for approvers (saved immediately, no approval needed)…"
+            onError={m => { setLocalError(m); onError(m); }}
+          />
         </div>
 
         <div className={styles.modalActions}>
