@@ -3,7 +3,7 @@ import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from './supabase';
 import { logAction } from './activityLog';
 import { sendTemplate } from './templates';
-import { cancelPendingReplacementsForTicket } from './orders';
+import { cancelPendingReplacementsForTicket, shipQueuedReplacementsForTicket } from './orders';
 
 // ============================================================ Types
 
@@ -20,10 +20,13 @@ export type InboxDisposition = 'promoted' | 'sales' | 'follow_up' | 'dismissed';
 // Order is load-bearing: statuses are multi-select, and the FIRST one a ticket
 // holds in this order becomes its primary `status`. 'return_refund' sits with
 // 'queued_for_replacement' — both are post-sale escalations that outrank the
-// scheduling states below them.
+// scheduling states below them. 'replacement_sent' follows
+// 'queued_for_replacement' because it is the next state of the same thread:
+// setting it clears "queued" and ships the order (see setTicketStatuses).
 export const TICKET_STATUSES = [
   'waiting_on_us', 'in_progress', 'waiting_on_customer',
-  'queued_for_replacement', 'return_refund', 'call_scheduled', 'on_hold', 'closed',
+  'queued_for_replacement', 'replacement_sent', 'return_refund',
+  'call_scheduled', 'on_hold', 'closed',
 ] as const;
 export type TicketStatus = (typeof TICKET_STATUSES)[number];
 export type TicketPriority = 'low' | 'normal' | 'high' | 'urgent';
@@ -234,6 +237,7 @@ export const STATUS_META: Record<TicketStatus, { label: string; color: string; b
   in_progress:            { label: 'In Progress',            color: '#c05621', bg: '#fffaf0' },
   waiting_on_customer:    { label: 'Awaiting Customer Response', color: '#718096', bg: '#f7fafc' },
   queued_for_replacement: { label: 'Queued for Replacement', color: '#553c9a', bg: '#faf5ff' },
+  replacement_sent:       { label: 'Replacement Sent',       color: '#276749', bg: '#f0fff4' },
   return_refund:          { label: 'Return/Refund',          color: '#b83280', bg: '#fff5f7' },
   call_scheduled:         { label: 'Call Scheduled',         color: '#2c7a7b', bg: '#e6fffa' },
   on_hold:                { label: 'On Hold',                color: '#b7791f', bg: '#fffff0' },
@@ -1111,9 +1115,16 @@ export function ticketStatusSet(
  *  'closed' is exclusive: a Complete ticket holds no other status, and closing
  *  carries side effects (closed_at stamp, auto-cancel of a queued replacement).
  *  Clearing every status falls back to Action Needed rather than leaving a
- *  ticket in no state at all. */
+ *  ticket in no state at all.
+ *
+ *  'replacement_sent' is the other status with side effects: it supersedes
+ *  'queued_for_replacement' (the customer is no longer waiting in a queue) and
+ *  hands the linked replacement order over to Fulfillment › Queue › SHIPPED. */
 export async function setTicketStatuses(id: string, next: TicketStatus[]): Promise<void> {
   const held = new Set(next);
+  // Sent supersedes queued — the two never coexist, whichever way the operator
+  // clicked into it.
+  if (held.has('replacement_sent')) held.delete('queued_for_replacement');
   const ordered: TicketStatus[] = held.has('closed')
     ? ['closed']
     : TICKET_STATUSES.filter(s => held.has(s));
@@ -1143,6 +1154,21 @@ export async function setTicketStatuses(id: string, next: TicketStatus[]): Promi
     await cancelPendingReplacementsForTicket(id).catch((e: Error) => {
       console.warn('Auto-cancel of queued replacement on ticket close failed (non-fatal):', e.message);
     });
+  }
+
+  // Replacement Sent → the replacement order(s) queued for this ticket move to
+  // Fulfillment › Queue › SHIPPED. NOT best-effort: the operator's click means
+  // "this shipped", and silently leaving the order sitting in Sales › Orders ›
+  // Replacement would be the exact drift this status exists to remove. The
+  // status write above has already landed, so a throw here surfaces in the
+  // panel and the operator can re-click once the cause is fixed (the hand-off
+  // is idempotent).
+  if (final.includes('replacement_sent')) {
+    const refs = await shipQueuedReplacementsForTicket(id);
+    if (refs.length > 0) {
+      await logAction('replacement_sent', id, `${refs.join(', ')} → Fulfillment queue (shipped)`,
+        { entityType: 'ticket', entityId: id });
+    }
   }
 }
 

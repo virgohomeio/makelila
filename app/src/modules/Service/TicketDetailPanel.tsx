@@ -765,7 +765,7 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
         <div className={styles.detailSection}>
           <div
             className={styles.detailSectionLabel}
-            title="Statuses are multi-select — a ticket can be In Progress and Queued for Replacement at once. 'Queued for Replacement' is applied automatically when a replacement order is created, and cleared when it ships or is cancelled."
+            title="Statuses are multi-select — a ticket can be In Progress and Queued for Replacement at once. 'Queued for Replacement' is applied automatically when a replacement order is created. Setting 'Replacement Sent' replaces it and moves the replacement order into Fulfillment › Queue › Shipped."
           >Status</div>
           <div className={styles.actionsRow}>
             {TICKET_STATUSES.map(tag => {
@@ -787,7 +787,9 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
                   title={
                     tag === 'closed'
                       ? 'Completing a ticket clears its other statuses and cancels any queued replacement'
-                      : undefined
+                      : tag === 'replacement_sent'
+                        ? 'Marks the queued replacement as shipped — it moves to Fulfillment › Queue › Shipped'
+                        : undefined
                   }
                   onClick={() => {
                     const next = active

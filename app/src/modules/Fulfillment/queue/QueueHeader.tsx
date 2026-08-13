@@ -18,7 +18,7 @@ export function QueueHeader({
   onRemoved,
 }: {
   row: FulfillmentQueueRow;
-  order: { order_ref: string; customer_name: string; city: string; region_state: string | null; country: 'US'|'CA'; placed_at: string | null; created_at: string };
+  order: { order_ref: string; customer_name: string; city: string; region_state: string | null; country: 'US'|'CA'; placed_at: string | null; created_at: string; kind?: 'sale' | 'replacement' };
   /** Called once the row is gone from the queue, with a line to show in the
    *  now-empty detail pane (the row itself disappears via realtime). */
   onRemoved?: (message: string) => void;
@@ -108,6 +108,11 @@ export function QueueHeader({
           <div className={styles.headerTitle}>
             {row.priority && !fulfilled && <span className={styles.priorityBadge} title="Priority — expedite">⭐</span>}
             {order.customer_name} — LILA Pro
+            {/* A shipped replacement lives in the same SHIPPED list as a sale —
+                the badge is what keeps the two tellable apart on the card. */}
+            {order.kind === 'replacement' && (
+              <span className="replBadge" title="Warranty / service replacement — not a sale">Replacement</span>
+            )}
           </div>
           <div className={styles.headerMeta}>
             {order.order_ref} · {order.city}{order.region_state ? `, ${order.region_state}` : ''} · {order.country}

@@ -5,19 +5,23 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { updateMock, eqMock, fromMock, logActionMock, cancelPendingMock } = vi.hoisted(() => ({
+const { updateMock, eqMock, fromMock, logActionMock, cancelPendingMock, shipQueuedMock } = vi.hoisted(() => ({
   updateMock: vi.fn(),
   eqMock: vi.fn(),
   fromMock: vi.fn(),
   logActionMock: vi.fn(() => Promise.resolve()),
   cancelPendingMock: vi.fn(() => Promise.resolve()),
+  shipQueuedMock: vi.fn(() => Promise.resolve([] as string[])),
 }));
 
 vi.mock('./supabase', () => ({
   supabase: { from: fromMock, auth: { getUser: () => Promise.resolve({ data: { user: null } }) } },
 }));
 vi.mock('./activityLog', () => ({ logAction: logActionMock }));
-vi.mock('./orders', () => ({ cancelPendingReplacementsForTicket: cancelPendingMock }));
+vi.mock('./orders', () => ({
+  cancelPendingReplacementsForTicket: cancelPendingMock,
+  shipQueuedReplacementsForTicket: shipQueuedMock,
+}));
 
 import { setTicketStatuses } from './service';
 
@@ -97,6 +101,38 @@ describe('setTicketStatuses', () => {
   it('does not fail the status change when the auto-cancel errors', async () => {
     cancelPendingMock.mockRejectedValueOnce(new Error('boom'));
     await expect(setTicketStatuses('t1', ['closed'])).resolves.toBeUndefined();
+  });
+
+  // "Replacement Sent" is the next state of the same thread as "Queued for
+  // Replacement" — holding both would tell the operator the customer is still
+  // waiting for something that already shipped.
+  it('drops queued_for_replacement when replacement_sent is applied', async () => {
+    await setTicketStatuses('t1', ['in_progress', 'queued_for_replacement', 'replacement_sent']);
+    expect(patch().status).toBe('in_progress');
+    expect(patch().tags).toEqual(['replacement_sent']);
+  });
+
+  it('ships the queued replacement when replacement_sent is applied', async () => {
+    shipQueuedMock.mockResolvedValueOnce(['R-0042']);
+    await setTicketStatuses('t1', ['replacement_sent']);
+    expect(shipQueuedMock).toHaveBeenCalledWith('t1');
+    expect(logActionMock).toHaveBeenCalledWith(
+      'replacement_sent', 't1', 'R-0042 → Fulfillment queue (shipped)',
+      { entityType: 'ticket', entityId: 't1' },
+    );
+  });
+
+  it('ships nothing for a status change that does not include replacement_sent', async () => {
+    await setTicketStatuses('t1', ['in_progress', 'queued_for_replacement']);
+    expect(shipQueuedMock).not.toHaveBeenCalled();
+  });
+
+  // Unlike the close-time auto-cancel, this one is NOT best-effort: silently
+  // swallowing it would leave the order sitting in Sales › Orders › Replacement
+  // while the ticket claims it shipped.
+  it('surfaces a failure to hand the replacement over to fulfillment', async () => {
+    shipQueuedMock.mockRejectedValueOnce(new Error('rls'));
+    await expect(setTicketStatuses('t1', ['replacement_sent'])).rejects.toThrow(/rls/);
   });
 
   it('logs the full set, not just the primary', async () => {

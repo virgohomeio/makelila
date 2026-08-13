@@ -770,6 +770,94 @@ export async function cancelPendingReplacementsForTicket(ticketId: string): Prom
   }
 }
 
+/** Hand every live replacement queued for a ticket over to Fulfillment ›
+ *  Queue › SHIPPED. Fired when an operator sets the 'replacement_sent' status
+ *  on the ticket (see setTicketStatuses in lib/service.ts) — that click is the
+ *  operator saying the box left the building, so this records the shipment
+ *  rather than asking them to walk the order through the 6-step queue.
+ *
+ *  Per order:
+ *    - orders.shipped_at is stamped and status flips to 'approved' (it went out
+ *      the door; a replacement created as 'pending' never gets approved by the
+ *      sales flow). Shipping cost is deliberately NOT written — nobody has the
+ *      carrier invoice at this point, and a 0 would corrupt the finance
+ *      rollups. Freightcom sync fills it in later.
+ *    - a fulfillment_queue row is upserted at step 6 with fulfilled_at, which
+ *      is exactly what the Queue's SHIPPED tab lists. The row carries the
+ *      order_id, so the queue keeps showing kind='replacement' — the shipment
+ *      still reads as a replacement, not a sale.
+ *    - assigned_serial is set from the reserved unit when the replacement
+ *      carries one AND that serial is on a shelf slot (the column is FK'd to
+ *      shelf_slots). Setting it also lets the fq_sync_unit trigger flip the
+ *      unit to 'shipped'. Parts-only replacements simply have no serial.
+ *
+ *  Idempotent: orders that already shipped are skipped, so re-applying the
+ *  status (or applying it alongside other statuses) writes nothing new.
+ *  Returns the refs actually shipped, for the caller's log line. */
+export async function shipQueuedReplacementsForTicket(ticketId: string): Promise<string[]> {
+  const { data: linked, error } = await supabase
+    .from('orders')
+    .select('id, order_ref, line_items')
+    .eq('kind', 'replacement')
+    .eq('linked_ticket_id', ticketId)
+    .neq('status', 'cancelled')
+    .is('shipped_at', null)
+    .is('delivered_at', null);
+  if (error) throw new Error(`Failed to look up linked replacements: ${error.message}`);
+
+  const shippedAt = new Date().toISOString();
+  const shipped: string[] = [];
+
+  for (const o of (linked ?? []) as Array<{ id: string; order_ref: string; line_items: unknown }>) {
+    const { error: oErr } = await supabase
+      .from('orders')
+      .update({ shipped_at: shippedAt, status: 'approved' })
+      .eq('id', o.id);
+    if (oErr) throw new Error(`Mark ${o.order_ref} shipped: ${oErr.message}`);
+
+    const serial = await shelfSerialFor(o.line_items);
+    // Only send assigned_serial when we have one: on an upsert that hits an
+    // existing queue row, an omitted column keeps whatever is already there,
+    // so a parts-only ship can't blank out a serial assigned earlier.
+    const { error: qErr } = await supabase
+      .from('fulfillment_queue')
+      .upsert(
+        { order_id: o.id, step: 6, fulfilled_at: shippedAt, ...(serial ? { assigned_serial: serial } : {}) },
+        { onConflict: 'order_id' },
+      );
+    if (qErr) throw new Error(`Queue ${o.order_ref} as shipped: ${qErr.message}`);
+
+    shipped.push(o.order_ref);
+    await logAction(
+      'replacement_shipped',
+      o.order_ref,
+      `replacement sent on ticket ${ticketId}${serial ? ` · unit ${serial}` : ''}`,
+    );
+  }
+
+  return shipped;
+}
+
+/** The first unit/base serial on a replacement that actually exists in
+ *  shelf_slots. fulfillment_queue.assigned_serial is FK'd to shelf_slots, so an
+ *  off-shelf serial would fail the insert outright — better to record the
+ *  shipment with no serial than to lose it. */
+async function shelfSerialFor(lineItems: unknown): Promise<string | null> {
+  const serials = ((lineItems ?? []) as ReplacementLineItem[])
+    .filter((li): li is Extract<ReplacementLineItem, { kind: 'unit' | 'base' }> =>
+      li?.kind === 'unit' || li?.kind === 'base')
+    .map(li => li.unit_serial)
+    .filter(Boolean);
+  if (serials.length === 0) return null;
+
+  const { data } = await supabase
+    .from('shelf_slots')
+    .select('serial')
+    .in('serial', serials);
+  const onShelf = new Set(((data ?? []) as Array<{ serial: string }>).map(r => r.serial));
+  return serials.find(s => onShelf.has(s)) ?? null;
+}
+
 // ─── Cancelling an order / pulling it back out of fulfillment ───────────────
 
 /** Where an order lands in Order Review once it's put back on the board. */
