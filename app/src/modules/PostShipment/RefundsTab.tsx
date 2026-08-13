@@ -1960,7 +1960,7 @@ export function ReturnFormButton({ r }: { r: ReturnRow }) {
         className={styles.openFormBtn}
         onClick={e => { e.stopPropagation(); setOpen(true); }}
       >
-        📄 Open Refund/Return Form
+        Open Refund/Return Form
       </button>
       {open && (
         <div className={styles.modalBackdrop} onClick={() => setOpen(false)}>
