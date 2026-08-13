@@ -32,13 +32,13 @@ const row = {
 describe('ReturnFormButton', () => {
   it('keeps the form answers hidden behind the button', () => {
     render(<ReturnFormButton r={row} />);
-    expect(screen.getByRole('button', { name: 'Open Refund/Return Form' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Open Refund\/Return Form/ })).toBeTruthy();
     expect(screen.queryByText('SNLL01-00000000312')).toBeNull();
   });
 
   it('opens the answers, titled with the order it belongs to', () => {
     render(<ReturnFormButton r={row} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Open Refund/Return Form' }));
+    fireEvent.click(screen.getByRole('button', { name: /Open Refund\/Return Form/ }));
     expect(screen.getByText(/Refund\/Return form · #1174/)).toBeTruthy();
     expect(screen.getByText('SNLL01-00000000312')).toBeTruthy();
     expect(screen.getByText('Odor issues')).toBeTruthy();
@@ -47,7 +47,7 @@ describe('ReturnFormButton', () => {
 
   it('closes again from the Close button', () => {
     render(<ReturnFormButton r={row} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Open Refund/Return Form' }));
+    fireEvent.click(screen.getByRole('button', { name: /Open Refund\/Return Form/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Close' }));
     expect(screen.queryByText('SNLL01-00000000312')).toBeNull();
   });

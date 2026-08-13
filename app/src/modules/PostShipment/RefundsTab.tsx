@@ -1664,6 +1664,11 @@ function RefundDetailPanel({
             {' '}{linkedReturn?.customer_email ?? refund.customer_email ?? '—'} ·
             {' '}{linkedReturn?.customer_phone ?? '—'}
           </div>
+          {/* Top of the card, not buried at the bottom — the customer's own
+              words are the first thing an approver wants. */}
+          {linkedReturn && (
+            <div style={{ marginTop: 10 }}><ReturnFormButton r={linkedReturn} /></div>
+          )}
           <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 10 }}>
             <span style={{ fontSize: 12, fontWeight: 600, color: '#4a5568' }}>Refund amount:</span>
             <AmountEditor refund={refund} editable onError={onError} big />
@@ -1775,7 +1780,6 @@ function RefundDetailPanel({
           )}
           <ReturnTrackingBadge r={linkedReturn} />
         </div>
-        <ReturnFormButton r={linkedReturn} />
         </>
       )}
 
@@ -1953,11 +1957,10 @@ export function ReturnFormButton({ r }: { r: ReturnRow }) {
   return (
     <>
       <button
-        className={styles.openFullCardBtn}
-        style={{ width: 'auto' }}
+        className={styles.openFormBtn}
         onClick={e => { e.stopPropagation(); setOpen(true); }}
       >
-        Open Refund/Return Form
+        📄 Open Refund/Return Form
       </button>
       {open && (
         <div className={styles.modalBackdrop} onClick={() => setOpen(false)}>
@@ -2083,8 +2086,11 @@ function ReturnDetailModal({ r, parties, canOwn, usage, invoices, tickets, onOpe
             usage window, sales invoice + order #, ticket history, saved notes,
             then the return form answers. */}
         <div style={{ marginTop: 12 }}>
+          {/* Top of the card, not buried at the bottom — the customer's own
+              words are the first thing an operator wants. */}
+          <ReturnFormButton r={r} />
           {r.refund_amount_usd != null && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10, marginBottom: 6 }}>
               <span style={{ fontSize: 12, fontWeight: 600, color: '#4a5568' }}>Requested amount:</span>
               <span className={styles.refundAmount}>${Number(r.refund_amount_usd).toLocaleString('en-US')}</span>
             </div>
@@ -2098,7 +2104,6 @@ function ReturnDetailModal({ r, parties, canOwn, usage, invoices, tickets, onOpe
           <CustomerTicketHistory tickets={tickets} onOpenTicket={onOpenTicket} defaultOpen />
           <CaseNotes returnId={r.id} onError={onError} />
           <CaseAttachmentStrip returnId={r.id} onError={onError} />
-          <ReturnFormButton r={r} />
           {/* Column actions — these used to live on the board card, which is
               now collapsed to the case's identity. */}
           <div style={{ marginTop: 12, borderTop: '1px solid #edf2f7', paddingTop: 12 }}>

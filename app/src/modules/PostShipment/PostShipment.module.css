@@ -613,6 +613,21 @@
   font-style: italic;
 }
 
+/* Opens the customer's form answers from inside a detail view. Deliberately
+   loud — it sits at the top of the card and is the thing operators reach for. */
+.openFormBtn {
+  display: inline-block;
+  background: var(--color-crimson);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.openFormBtn:hover { filter: brightness(1.08); }
+
 /* The one action on a collapsed board card: open the full refund card. */
 .openFullCardBtn {
   margin-top: 4px;
