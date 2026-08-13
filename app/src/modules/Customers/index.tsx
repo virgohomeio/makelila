@@ -1,4 +1,4 @@
-import React, { lazy, Suspense, useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { isTelemetryConfigured } from '../../lib/supabaseTelemetry';
 const Dashboard = lazy(() => import('../Dashboard'));
 import {
@@ -19,6 +19,8 @@ import { MobileBackHeader } from '../../components/MobileBackHeader';
 import { RouteErrorBoundary } from '../../components/RouteErrorBoundary';
 import { useCustomerEvents, useCustomerEngagement, eventMeta, dormancyBadge } from '../../lib/customerEvents';
 import { useCustomerInvoices, openInvoiceInNewTab } from '../../lib/invoices';
+import { PanelSection, PanelRow } from './Panel';
+import { NameSection } from './NameSection';
 import styles from './Customers.module.css';
 
 type Tab = 'directory' | 'profitability' | 'journey' | 'fleet';
@@ -764,6 +766,7 @@ function CustomerDetailPanel({ customer, allCustomers, onChanged, onClose }: {
         </div>
 
         <div className={styles.panelBody}>
+          <NameSection customer={customer} onChanged={onChanged} />
           <ContactSection customer={customer} onChanged={onChanged} />
 
           <PurchaserLinkSection customer={customer} allCustomers={allCustomers} onChanged={onChanged} />
@@ -901,15 +904,6 @@ function CustomerDetailPanel({ customer, allCustomers, onChanged, onClose }: {
   );
 }
 
-function PanelSection({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div className={styles.section}>
-      <div className={styles.sectionTitle}>{title}</div>
-      <div className={styles.sectionBody}>{children}</div>
-    </div>
-  );
-}
-
 // Customer-side signals from the lilalovely app (beta-lovely). Backed by
 // customer_events + customer_engagement_summary; populated by the
 // ingest-lovely-event edge function. Renders engagement summary + the last
@@ -1025,15 +1019,6 @@ function CustomerInvoicesSection({ customerId }: { customerId: string }) {
         ))
       )}
     </PanelSection>
-  );
-}
-
-function PanelRow({ label, value, multiline }: { label: string; value: string | null | undefined; multiline?: boolean }) {
-  return (
-    <div className={styles.kvRow}>
-      <span className={styles.kvLabel}>{label}</span>
-      <span className={multiline ? styles.kvValueMulti : styles.kvValue}>{value || '—'}</span>
-    </div>
   );
 }
 

@@ -599,6 +599,82 @@ export async function updateCustomerContact(
 }
 
 
+// ── Name correction ─────────────────────────────────────────────────────────
+// customers.full_name is a generated column, so fixing first_name / last_name
+// fixes every screen reading the customers row. Eleven other tables hold a
+// denormalized customer_name snapshot and several match back to the customer BY
+// that string, so the rename has to cascade or the record is orphaned, not just
+// mislabelled. All of that happens inside the rename_customer RPC (migration
+// 20260813090000) in one transaction.
+// Spec: docs/superpowers/specs/2026-08-13-customer-name-editing-design.md
+
+/** A row the rename left alone because its only key was a name another
+ *  customer also answers to. `id` is that table's primary key. */
+export type CustomerRenameSkip = { table: string; id: string; label: string | null };
+
+export type CustomerRenameResult = {
+  old_name: string;
+  new_name: string;
+  /** True when another customer shares the old name. Name-only matching is
+   *  suppressed in that case and the affected rows land in `skipped`. */
+  ambiguous: boolean;
+  /** table name → rows whose customer_name changed. Tables with no changes
+   *  are omitted. */
+  updated: Record<string, number>;
+  skipped: CustomerRenameSkip[];
+};
+
+async function callRenameCustomer(
+  customerId: string,
+  firstName: string,
+  lastName: string,
+  dryRun: boolean,
+): Promise<CustomerRenameResult> {
+  const { data, error } = await supabase.rpc('rename_customer', {
+    p_customer_id: customerId,
+    p_first_name: firstName,
+    p_last_name: lastName,
+    p_dry_run: dryRun,
+  });
+  if (error) throw new Error(error.message);
+  const r = (data ?? {}) as Partial<CustomerRenameResult>;
+  return {
+    old_name: r.old_name ?? '',
+    new_name: r.new_name ?? '',
+    ambiguous: r.ambiguous ?? false,
+    updated: r.updated ?? {},
+    skipped: r.skipped ?? [],
+  };
+}
+
+/** Total rows a rename touches across every table. */
+export function renameRowCount(result: CustomerRenameResult): number {
+  return Object.values(result.updated).reduce((a, b) => a + b, 0);
+}
+
+/** Dry run: what a rename WOULD change, writing nothing. Shares its predicate
+ *  with the real thing, so the confirm dialog can't promise the wrong number. */
+export function previewCustomerRename(
+  customerId: string, firstName: string, lastName: string,
+): Promise<CustomerRenameResult> {
+  return callRenameCustomer(customerId, firstName, lastName, true);
+}
+
+/** Apply the rename and every cascade. Throws if both names are blank — that
+ *  would erase the key the cascades match on. */
+export async function renameCustomer(
+  customerId: string, firstName: string, lastName: string,
+): Promise<CustomerRenameResult> {
+  const result = await callRenameCustomer(customerId, firstName, lastName, false);
+  await logAction(
+    'customer_renamed',
+    customerId,
+    `${result.old_name || '(no name)'} → ${result.new_name} (${renameRowCount(result)} records)`,
+    { entityType: 'customer', entityId: customerId },
+  );
+  return result;
+}
+
 export function useCustomers(): {
   customers: Customer[];
   loading: boolean;
