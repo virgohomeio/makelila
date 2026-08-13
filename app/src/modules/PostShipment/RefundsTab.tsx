@@ -354,24 +354,14 @@ export function RefundsTab() {
       <div className={styles.kanbanList}>
         {rows.length === 0 ? (
           <div className={styles.kanbanEmpty}>—</div>
-        ) : rows.map(r => {
-          const email = r.purchaser_email?.trim() || r.customer_email;
-          return (
-            <InspectionCard
-              key={r.id}
-              r={r}
-              canOwn={ownsRefundColumn(userEmail, preRefundStage(r.status))}
-              parties={partiesForReturn(r)}
-              usage={usageForEmail(email)}
-              invoices={invoicesForEmail(email)}
-              tickets={ticketsForEmails([r.purchaser_email, r.customer_email])}
-              onOpenTicket={setOpenTicketId}
-              onView={() => setViewReturnId(r.id)}
-              onCompile={() => void compileReturn(r)}
-              onError={setError}
-            />
-          );
-        })}
+        ) : rows.map(r => (
+          <InspectionCard
+            key={r.id}
+            r={r}
+            parties={partiesForReturn(r)}
+            onView={() => setViewReturnId(r.id)}
+          />
+        ))}
       </div>
     </div>
   );
@@ -459,25 +449,23 @@ export function RefundsTab() {
               <div className={styles.kanbanList}>
                 {rows.length === 0 ? (
                   <div className={styles.kanbanEmpty}>—</div>
-                ) : rows.map(r => (
-                  <RefundCard
-                    key={r.id}
-                    refund={r}
-                    linkedReturn={r.return_id ? returnsById.get(r.return_id) ?? null : null}
-                    cancellationId={cancellationIdFor(r.id)}
-                    parties={partiesForRefund(r, r.return_id ? returnsById.get(r.return_id) ?? null : null)}
-                    canApproveHere={ownsRefundColumn(userEmail, r.status)}
-                    usage={usageFor(r, r.return_id ? returnsById.get(r.return_id) ?? null : null)}
-                    invoices={invoicesFor(r, r.return_id ? returnsById.get(r.return_id) ?? null : null)}
-                    tickets={ticketsFor(r, r.return_id ? returnsById.get(r.return_id) ?? null : null)}
-                    onOpenTicket={setOpenTicketId}
-                    canFlow={canFlow}
-                    selected={selectedId === r.id}
-                    onSelect={() => setSelectedId(prev => prev === r.id ? null : r.id)}
-                    onError={setError}
-                    onOpenFinanceModal={setFinanceModalId}
-                  />
-                ))}
+                ) : rows.map(r => {
+                  const linked = r.return_id ? returnsById.get(r.return_id) ?? null : null;
+                  return (
+                    <RefundCard
+                      key={r.id}
+                      refund={r}
+                      linkedReturn={linked}
+                      // A refund born from a cancellation form has no return
+                      // behind it — fall back to the cancellation's order ref
+                      // so the card still names the order it's against.
+                      orderRef={linked?.original_order_ref ?? cancellationForRefund(cancellations, r.id)?.order_ref ?? null}
+                      parties={partiesForRefund(r, linked)}
+                      selected={selectedId === r.id}
+                      onSelect={() => setSelectedId(prev => prev === r.id ? null : r.id)}
+                    />
+                  );
+                })}
               </div>
             </div>
           );
@@ -517,10 +505,12 @@ export function RefundsTab() {
         return <ReturnDetailModal
           r={r}
           parties={partiesForReturn(r)}
+          canOwn={ownsRefundColumn(userEmail, preRefundStage(r.status))}
           usage={usageForEmail(email)}
           invoices={invoicesForEmail(email)}
           tickets={ticketsForEmails([r.purchaser_email, r.customer_email])}
           onOpenTicket={setOpenTicketId}
+          onCompile={() => { void compileReturn(r); setViewReturnId(null); }}
           onError={setError}
           onClose={() => setViewReturnId(null)}
         />;
@@ -1248,23 +1238,74 @@ function TicketQuickView({ ticket, onClose }: { ticket: ServiceTicket; onClose: 
 }
 
 // ============================================================================
+// Collapsed queue card — every card on the Refunds board
+// ============================================================================
+// The board itself carries identity only: who the case belongs to (purchaser /
+// primary user, and which of them filled the form) and the order it's against.
+// Amount, badges, notes, unit status and every action live behind "Open Full
+// Refund Card", which opens the same full view the card always opened.
+export function CollapsedCard({
+  borderColor, parties, orderRef, selected = false, onOpen,
+}: {
+  borderColor: string;
+  parties: Parties;
+  orderRef?: string | null;
+  selected?: boolean;
+  onOpen: () => void;
+}) {
+  return (
+    <div
+      className={`${styles.refundCard} ${selected ? styles.refundCardSelected : ''}`}
+      style={{ borderLeftColor: borderColor }}
+      role="button"
+      tabIndex={0}
+      onClick={onOpen}
+      onKeyDown={e => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(); }
+      }}
+      title="Open the full refund card"
+    >
+      <div className={styles.refundCardHead}>
+        <PartyHeader parties={parties} />
+      </div>
+      {orderRef && <div className={styles.refundMeta}>{orderRef}</div>}
+      <button
+        className={styles.openFullCardBtn}
+        onClick={e => { e.stopPropagation(); onOpen(); }}
+      >
+        Open Full Refund Card
+      </button>
+    </div>
+  );
+}
+
+// ============================================================================
 // Refund card
 // ============================================================================
-// A card in the "Return & inspection" column. Mirrors RefundCard's information
-// (usage window, invoices, ticket history, unit-status control) for a return
-// that doesn't yet have a refund request — so the inspection stage carries all
-// the same context as the downstream refund stages.
-function InspectionCard({
-  r, parties, canOwn, usage, invoices, tickets, onOpenTicket, onView, onCompile, onError,
-}: {
+// A card in the "Return Form Submitted" / "Return & inspection" columns — a
+// return that doesn't yet have a refund request. Collapsed like every other
+// card on the board; the full return form (with the column actions) opens in
+// ReturnDetailModal.
+function InspectionCard({ r, parties, onView }: {
   r: ReturnRow;
   parties: Parties;
-  canOwn: boolean;
-  usage: RefundUsageWindow;
-  invoices: CustomerInvoice[];
-  tickets: ServiceTicket[];
-  onOpenTicket: (ticketId: string) => void;
   onView: () => void;
+}) {
+  return (
+    <CollapsedCard
+      borderColor="#805ad5"
+      parties={parties}
+      orderRef={r.original_order_ref}
+      onOpen={onView}
+    />
+  );
+}
+
+// The column actions for a pre-refund return (intake → inspection → compile).
+// They live in the return's full view now that the board card is collapsed.
+function InspectionActions({ r, canOwn, onCompile, onError }: {
+  r: ReturnRow;
+  canOwn: boolean;
   onCompile: () => void;
   onError: (msg: string | null) => void;
 }) {
@@ -1277,99 +1318,41 @@ function InspectionCard({
     finally { setStatusBusy(false); }
   };
   return (
-    <div
-      className={styles.refundCard}
-      style={{ borderLeftColor: '#805ad5', cursor: 'pointer' }}
-      role="button"
-      tabIndex={0}
-      onClick={onView}
-      title="Click to view the full return form"
-    >
-      <div className={styles.refundCardHead}>
-        <PartyHeader parties={parties} />
-        {r.refund_amount_usd != null && (
-          <span className={styles.refundAmount}>${Number(r.refund_amount_usd).toLocaleString('en-US')}</span>
-        )}
-      </div>
-      {(r.original_order_ref || r.unit_serial) && (
-        <div className={styles.refundMeta}>
-          {[r.original_order_ref, r.unit_serial].filter(Boolean).join(' · ')}
-        </div>
-      )}
-      {r.reason && <div className={styles.refundReason}>{r.reason}</div>}
-      {r.refund_method_preference && <div className={styles.refundMeta}>via {r.refund_method_preference}</div>}
-      <CustomerWaitBadge r={r} />
-      <UsageWindowBadge usage={usage} />
-      <RefundInvoices invoices={invoices} fallbackOrderRef={r.original_order_ref} />
-      <CustomerTicketHistory tickets={tickets} onOpenTicket={onOpenTicket} defaultOpen />
-      <CaseNotes returnId={r.id} onError={onError} />
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, margin: '6px 0', alignItems: 'center' }}
-           onClick={e => e.stopPropagation()}>
-        <select
-          value={r.status}
-          onChange={e => void runStatus(e.target.value as ReturnStatus)}
-          disabled={statusBusy}
-          style={{ fontSize: 11, fontWeight: 600, padding: '2px 6px', borderRadius: 4,
-                   border: '1px solid #cbd5e0', background: '#edf2f7', color: '#2d3748',
-                   cursor: 'pointer', maxWidth: 160 }}
-        >
-          {!UNIT_STAGES.some(st => st.value === r.status) && (
-            <option value={r.status} disabled>📦 {UNIT_STATUS_LABEL[r.status]}</option>
-          )}
-          {UNIT_STAGES.map(st => (
-            <option key={st.value} value={st.value}>📦 {st.label}</option>
-          ))}
-        </select>
-        {r.disposition ? (
-          <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 999,
-                         color: RETURN_DISPOSITION_META[r.disposition].color,
-                         background: RETURN_DISPOSITION_META[r.disposition].bg }}>
-            {RETURN_DISPOSITION_META[r.disposition].label}
-          </span>
-        ) : (
-          <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 999,
-                         color: '#975a16', background: '#fffbeb' }}>
-            ⚠ Disposition not set
-          </span>
-        )}
-        <ReturnTrackingBadge r={r} />
-      </div>
-      <div className={styles.refundActions} onClick={e => e.stopPropagation()}>
-        {preRefundStage(r.status) === 'intake' ? (
-          canOwn ? (
-            <>
-              <button className={styles.refundApproveBtn} disabled={statusBusy}
-                onClick={() => void runStatus('received')}
-                title="Unit is back — move this case to the Return & Inspection column">
-                Move to Return &amp; Inspection →
-              </button>
-              {r.disposition === 'discard' && (
-                <button className={styles.refundApproveBtn} onClick={onCompile}
-                  title="Customer is discarding the unit (no return) — compile straight to Completeness, skipping Return & Inspection">
-                  Discard → Completeness
-                </button>
-              )}
-            </>
-          ) : (
-            <span className={styles.refundCardHint}>Reina moves these forward</span>
-          )
-        ) : (
+    <div className={styles.refundActions}>
+      {preRefundStage(r.status) === 'intake' ? (
+        canOwn ? (
           <>
-            {/* back-move stays open to everyone */}
-            <button className={styles.refundCloseBtn} disabled={statusBusy}
-              onClick={() => void runStatus('created')}
-              title="Move this case back to the Return Form Submitted column">
-              ← Return Form Submitted
+            <button className={styles.refundApproveBtn} disabled={statusBusy}
+              onClick={() => void runStatus('received')}
+              title="Unit is back — move this case to the Return & Inspection column">
+              Move to Return &amp; Inspection →
             </button>
-            {canOwn && (
+            {r.disposition === 'discard' && (
               <button className={styles.refundApproveBtn} onClick={onCompile}
-                title="Compile the case into a refund request (moves it to the Completeness column)">
-                Compile → Completeness
+                title="Customer is discarding the unit (no return) — compile straight to Completeness, skipping Return & Inspection">
+                Discard → Completeness
               </button>
             )}
           </>
-        )}
-      </div>
+        ) : (
+          <span className={styles.refundCardHint}>Reina moves these forward</span>
+        )
+      ) : (
+        <>
+          {/* back-move stays open to everyone */}
+          <button className={styles.refundCloseBtn} disabled={statusBusy}
+            onClick={() => void runStatus('created')}
+            title="Move this case back to the Return Form Submitted column">
+            ← Return Form Submitted
+          </button>
+          {canOwn && (
+            <button className={styles.refundApproveBtn} onClick={onCompile}
+              title="Compile the case into a refund request (moves it to the Completeness column)">
+              Compile → Completeness
+            </button>
+          )}
+        </>
+      )}
     </div>
   );
 }
@@ -1408,13 +1391,30 @@ function CancellationCard({
     void run(() => dismissCancellationRefund(c, note));
   };
 
+  // Collapsed on the board like every other card; the full request — context,
+  // notes and the compile/dismiss actions — opens in a modal.
+  const [open, setOpen] = useState(false);
+  if (!open) {
+    return (
+      <CollapsedCard
+        borderColor="#d69e2e"
+        parties={parties}
+        orderRef={c.order_ref}
+        onOpen={() => setOpen(true)}
+      />
+    );
+  }
+
   return (
-    <div className={styles.refundCard} style={{ borderLeftColor: '#d69e2e' }}>
+    <div className={styles.modalBackdrop} onClick={() => setOpen(false)}>
+    <div className={styles.modalCard} onClick={e => e.stopPropagation()}
+         style={{ maxWidth: 720, maxHeight: '85vh', overflowY: 'auto' }}>
       <div className={styles.refundCardHead}>
         <PartyHeader parties={parties} />
         {c.order_amount_usd != null && (
           <span className={styles.refundAmount}>${Number(c.order_amount_usd).toLocaleString('en-US')}</span>
         )}
+        <button className={styles.btnSecondary} onClick={() => setOpen(false)}>Close</button>
       </div>
       <div className={styles.refundMeta}>
         {[c.order_ref, c.product_name, c.purchase_channel].filter(Boolean).join(' · ') || '—'}
@@ -1456,295 +1456,30 @@ function CancellationCard({
         )}
       </div>
     </div>
+    </div>
   );
 }
 
-function RefundCard({
-  refund, linkedReturn, cancellationId = null, parties, canApproveHere, usage, invoices, tickets, onOpenTicket, canFlow, selected, onSelect, onError, onOpenFinanceModal,
-}: {
+// A card in one of the refund columns. Collapsed to the case's identity — the
+// full card (amount, badges, unit status, notes, actions) opens in
+// RefundDetailPanel, exactly as clicking the card always did.
+function RefundCard({ refund, linkedReturn, orderRef, parties, selected, onSelect }: {
   refund: RefundApproval;
   linkedReturn: ReturnRow | null;
-  cancellationId?: string | null;
+  orderRef?: string | null;
   parties: Parties;
-  canApproveHere: boolean;
-  usage: RefundUsageWindow;
-  invoices: CustomerInvoice[];
-  tickets: ServiceTicket[];
-  onOpenTicket: (ticketId: string) => void;
-  canFlow: boolean;
   selected: boolean;
   onSelect: () => void;
-  onError: (msg: string | null) => void;
-  onOpenFinanceModal: (id: string) => void;
 }) {
-  const [busy, setBusy] = useState(false);
-  const [statusBusy, setStatusBusy] = useState(false);
-  const [confirmMode, setConfirmMode] = useState<'approve' | 'deny' | null>(null);
-  const [inputVal, setInputVal] = useState('');
   const meta = REFUND_STATUS_META[refund.status];
-
-  const runStatus = async (s: ReturnStatus) => {
-    if (!linkedReturn || linkedReturn.status === s) return;
-    setStatusBusy(true); onError(null);
-    try { await updateReturnStatus(linkedReturn.id, s); }
-    catch (e) { onError((e as Error).message); }
-    finally { setStatusBusy(false); }
-  };
-
-  const openApprove = () => {
-    if (refund.status === 'finance_review') { onOpenFinanceModal(refund.id); return; }
-    setInputVal(''); setConfirmMode('approve');
-  };
-  const openDeny = () => { setInputVal(''); setConfirmMode('deny'); };
-  const cancelConfirm = () => setConfirmMode(null);
-
-  const runConfirm = async () => {
-    if (confirmMode === 'deny' && !inputVal.trim()) return;
-    setBusy(true); onError(null);
-    try {
-      if (confirmMode === 'approve') {
-        await managerApprove(refund.id, inputVal.trim() || undefined);
-      } else {
-        const stage = (['submitted', 'manager_review', 'finance_review', 'refund_queue'].includes(refund.status)
-          ? refund.status : 'manager_review') as 'submitted' | 'manager_review' | 'finance_review' | 'refund_queue';
-        await denyRefund(refund.id, stage, inputVal.trim());
-      }
-      setConfirmMode(null);
-    } catch (e) { onError((e as Error).message); }
-    finally { setBusy(false); }
-  };
-
-  const runClose = async () => {
-    setBusy(true); onError(null);
-    try { await closeRefund(refund.id); }
-    catch (e) { onError((e as Error).message); }
-    finally { setBusy(false); }
-  };
-
-  const runExecute = async () => {
-    setBusy(true); onError(null);
-    try { await executeRefund(refund.id); }
-    catch (e) { onError((e as Error).message); }
-    finally { setBusy(false); }
-  };
-
-  // Only the OWNER of a card's column may approve/move it forward
-  // (canApproveHere). Denial + back-moves stay open to everyone (canFlow).
-  const canActSubmit = refund.status === 'submitted' && canApproveHere;
-  const canActManager = refund.status === 'manager_review' && canApproveHere;
-  const canActFinance = refund.status === 'finance_review' && canApproveHere;
-  const canActExecute = refund.status === 'refund_queue' && canApproveHere;
-  const canDeny = canFlow && ['submitted', 'manager_review', 'finance_review', 'refund_queue'].includes(refund.status);
-
-  // FR-11: flag a case whose purchaser linkage is unverified; the manager can
-  // override (BR-15) before approving.
-  const linkageOk = hasValidPurchaserLinkage(linkedReturn);
-  const needsLinkage = canActManager && !linkageOk;
-
-  // Send a card BACK a column (not enough info, etc.). From Completeness this
-  // "uncompiles" the case back to Return & Inspection.
-  const backTarget: RefundBackTarget | 'uncompile' | null =
-    refund.status === 'manager_review' ? 'submitted' :
-    refund.status === 'finance_review' ? 'manager_review' :
-    refund.status === 'refund_queue'   ? 'finance_review' :
-    refund.status === 'submitted'      ? 'uncompile' : null;
-  const backLabel =
-    refund.status === 'manager_review' ? '← Completeness' :
-    refund.status === 'finance_review' ? '← Manager review' :
-    refund.status === 'refund_queue'   ? '← Finance review' :
-    refund.status === 'submitted'      ? '← Return & Inspection' : '';
-  const runBack = async () => {
-    if (!backTarget) return;
-    if (backTarget === 'uncompile' &&
-        !window.confirm('Move this case back to Return & Inspection? This removes the refund request. Any notes on it are kept on the return.')) return;
-    setBusy(true); onError(null);
-    try {
-      if (backTarget === 'uncompile') await uncompileRefund(refund.id, refund.return_id);
-      else await sendRefundBack(refund.id, backTarget);
-    } catch (e) { onError((e as Error).message); }
-    finally { setBusy(false); }
-  };
-
-  const runSubmitToManager = async () => {
-    setBusy(true); onError(null);
-    try { await submitToManager(refund.id); }
-    catch (e) { onError((e as Error).message); }
-    finally { setBusy(false); }
-  };
-
-  const runConfirmLinkage = async () => {
-    if (!linkedReturn) return;
-    setBusy(true); onError(null);
-    try { await confirmPurchaserLinkage(linkedReturn.id); }
-    catch (e) { onError((e as Error).message); }
-    finally { setBusy(false); }
-  };
-
   return (
-    <div
-      className={`${styles.refundCard} ${selected ? styles.refundCardSelected : ''}`}
-      style={{ borderLeftColor: meta.color }}
-      onClick={onSelect}
-      role="button"
-      tabIndex={0}
-    >
-      <div className={styles.refundCardHead}>
-        <PartyHeader parties={parties} />
-        <AmountEditor refund={refund} editable onError={onError} />
-      </div>
-      {refund.reason && <div className={styles.refundReason}>{refund.reason}</div>}
-      {/* The refund method is set by Finance (Julie) at Finance Review and shown
-          to Pedrum in the Refund Queue. Falls back to the legacy payment_method. */}
-      {refund.refund_method ? (
-        <div className={styles.refundMeta} style={{ fontWeight: 700, color: '#2d3748' }}>
-          Refund via {REFUND_METHOD_META[refund.refund_method].label}
-        </div>
-      ) : refund.payment_method ? (
-        <div className={styles.refundMeta}>via {refund.payment_method}</div>
-      ) : null}
-      <UsageWindowBadge usage={usage} />
-      <RefundInvoices invoices={invoices} fallbackOrderRef={linkedReturn?.original_order_ref} />
-      <CustomerTicketHistory tickets={tickets} onOpenTicket={onOpenTicket} defaultOpen />
-      {linkedReturn && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, margin: '6px 0', alignItems: 'center' }}
-             onClick={e => e.stopPropagation()}>
-          <select
-            value={linkedReturn.status}
-            onChange={e => void runStatus(e.target.value as ReturnStatus)}
-            disabled={statusBusy}
-            style={{ fontSize: 11, fontWeight: 600, padding: '2px 6px', borderRadius: 4,
-                     border: '1px solid #cbd5e0', background: '#edf2f7', color: '#2d3748',
-                     cursor: 'pointer', maxWidth: 160 }}
-          >
-            {!UNIT_STAGES.some(st => st.value === linkedReturn.status) && (
-              <option value={linkedReturn.status} disabled>
-                📦 {UNIT_STATUS_LABEL[linkedReturn.status]}
-              </option>
-            )}
-            {UNIT_STAGES.map(st => (
-              <option key={st.value} value={st.value}>📦 {st.label}</option>
-            ))}
-          </select>
-          {linkedReturn.disposition ? (
-            <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 999,
-                           color: RETURN_DISPOSITION_META[linkedReturn.disposition].color,
-                           background: RETURN_DISPOSITION_META[linkedReturn.disposition].bg }}>
-              {RETURN_DISPOSITION_META[linkedReturn.disposition].label}
-            </span>
-          ) : (
-            <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 999,
-                           color: '#975a16', background: '#fffbeb' }}>
-              ⚠ Disposition not set
-            </span>
-          )}
-        </div>
-      )}
-      <div className={styles.refundTimeline}>
-        <RefundStep
-          label="Submitted"
-          ts={refund.submitted_at}
-          active
-        />
-        {refund.manager_approved_at && (
-          <RefundStep
-            label="Manager ✓"
-            ts={refund.manager_approved_at}
-            note={refund.manager_decision_note}
-            active
-          />
-        )}
-        {refund.finance_approved_at && (
-          <RefundStep
-            label="Finance ✓ amount"
-            ts={refund.finance_approved_at}
-            note={refund.finance_decision_note}
-            active
-          />
-        )}
-        {refund.refunded_at && (
-          <RefundStep
-            label="Refunded ✓ paid"
-            ts={refund.refunded_at}
-            active
-          />
-        )}
-        {refund.denied_at && (
-          <RefundStep
-            label={`Denied @ ${refund.denied_at_stage ? REFUND_STATUS_META[refund.denied_at_stage].label : 'review'}`}
-            ts={refund.denied_at}
-            note={refund.denied_reason}
-            negative
-            active
-          />
-        )}
-      </div>
-      <div className={styles.refundActions} onClick={e => e.stopPropagation()}>
-        {confirmMode ? (
-          <div className={styles.refundConfirmInline}>
-            <input
-              autoFocus
-              type="text"
-              placeholder={confirmMode === 'deny' ? 'Reason for denial (required)' : 'Note (optional)'}
-              value={inputVal}
-              onChange={e => setInputVal(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') void runConfirm(); if (e.key === 'Escape') cancelConfirm(); }}
-              className={styles.refundConfirmInput}
-              disabled={busy}
-            />
-            <div className={styles.refundConfirmBtns}>
-              <button
-                onClick={() => void runConfirm()}
-                disabled={busy || (confirmMode === 'deny' && !inputVal.trim())}
-                className={confirmMode === 'approve' ? styles.refundApproveBtn : styles.refundDenyBtn}
-              >{busy ? '…' : 'Confirm'}</button>
-              <button onClick={cancelConfirm} disabled={busy} className={styles.refundCloseBtn}>✕</button>
-            </div>
-          </div>
-        ) : (
-          <>
-            {canFlow && backTarget && (
-              <button onClick={() => void runBack()} disabled={busy} className={styles.refundCloseBtn}
-                title="Send this card back a column (e.g. not enough information)">
-                {busy ? '…' : backLabel}
-              </button>
-            )}
-            {canActSubmit && (
-              <button onClick={() => void runSubmitToManager()} disabled={busy} className={styles.refundApproveBtn}>
-                {busy ? '…' : 'Submit to manager →'}
-              </button>
-            )}
-            {needsLinkage && (
-              <button onClick={() => void runConfirmLinkage()} disabled={busy} className={styles.refundDenyBtn}
-                title="Filer isn't the buyer and no purchaser receipt is on file — confirm linkage to override (BR-15).">
-                {busy ? '…' : '⚠ Confirm purchaser linkage'}
-              </button>
-            )}
-            {(canActManager || canActFinance) && (
-              <button onClick={openApprove} disabled={busy || needsLinkage} className={styles.refundApproveBtn}
-                title={needsLinkage ? 'Confirm purchaser linkage before approving' : undefined}>
-                {canActManager ? 'Approve (manager)' : 'Approve amount → queue'}
-              </button>
-            )}
-            {canActExecute && (
-              <button onClick={() => void runExecute()} disabled={busy} className={styles.refundApproveBtn}>
-                {busy ? '…' : '✓ Mark refunded (executed)'}
-              </button>
-            )}
-            {canDeny && (
-              <button onClick={openDeny} disabled={busy} className={styles.refundDenyBtn}>Deny</button>
-            )}
-            {refund.status === 'refunded' && (
-              <button onClick={() => void runClose()} disabled={busy} className={styles.refundCloseBtn}>Close</button>
-            )}
-          </>
-        )}
-      </div>
-      {/* Same notes as the return card — the case is unchanged after compile. */}
-      <CaseNotes refundId={refund.id} returnId={refund.return_id} cancellationId={cancellationId} onError={onError} />
-      {!selected && (
-        <div className={styles.refundCardHint}>Click to open the full case ↗</div>
-      )}
-    </div>
+    <CollapsedCard
+      borderColor={meta.color}
+      parties={parties}
+      orderRef={orderRef ?? linkedReturn?.original_order_ref}
+      selected={selected}
+      onOpen={onSelect}
+    />
   );
 }
 
@@ -1827,6 +1562,13 @@ function RefundDetailPanel({
   const runExecute = async () => {
     setBusy(true); onError(null);
     try { await executeRefund(refund.id); onClose(); }
+    catch (e) { onError((e as Error).message); }
+    finally { setBusy(false); }
+  };
+
+  const runClose = async () => {
+    setBusy(true); onError(null);
+    try { await closeRefund(refund.id); onClose(); }
     catch (e) { onError((e as Error).message); }
     finally { setBusy(false); }
   };
@@ -1926,6 +1668,16 @@ function RefundDetailPanel({
             <span style={{ fontSize: 12, fontWeight: 600, color: '#4a5568' }}>Refund amount:</span>
             <AmountEditor refund={refund} editable onError={onError} big />
           </div>
+          {/* The refund method is set by Finance (Julie) at Finance Review and
+              read by Pedrum in the Refund Queue. Falls back to the legacy
+              payment_method. */}
+          {refund.refund_method ? (
+            <div className={styles.refundMeta} style={{ fontWeight: 700, color: '#2d3748', fontStyle: 'normal', marginTop: 6 }}>
+              Refund via {REFUND_METHOD_META[refund.refund_method].label}
+            </div>
+          ) : refund.payment_method ? (
+            <div className={styles.refundMeta} style={{ marginTop: 6 }}>via {refund.payment_method}</div>
+          ) : null}
           <div style={{ marginTop: 6 }}>
             <UsageWindowBadge usage={usage} />
           </div>
@@ -2084,6 +1836,33 @@ function RefundDetailPanel({
         </div>
       </div>
 
+      {/* Approval trail — who moved the case and what they said. Used to sit on
+          the board card; it lives here now that the card is collapsed. */}
+      <div style={{ margin: '12px 0', borderTop: '1px solid #edf2f7', paddingTop: 12 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: '#4a5568', marginBottom: 6 }}>Approval trail</div>
+        <div className={styles.refundTimeline}>
+          <RefundStep label="Submitted" ts={refund.submitted_at} active />
+          {refund.manager_approved_at && (
+            <RefundStep label="Manager ✓" ts={refund.manager_approved_at} note={refund.manager_decision_note} active />
+          )}
+          {refund.finance_approved_at && (
+            <RefundStep label="Finance ✓ amount" ts={refund.finance_approved_at} note={refund.finance_decision_note} active />
+          )}
+          {refund.refunded_at && (
+            <RefundStep label="Refunded ✓ paid" ts={refund.refunded_at} active />
+          )}
+          {refund.denied_at && (
+            <RefundStep
+              label={`Denied @ ${refund.denied_at_stage ? REFUND_STATUS_META[refund.denied_at_stage].label : 'review'}`}
+              ts={refund.denied_at}
+              note={refund.denied_reason}
+              negative
+              active
+            />
+          )}
+        </div>
+      </div>
+
       <div className={styles.refundDetailActions}>
         <div className={styles.refundDetailRolePill}>
           {needsLinkage ? '⚠ Purchaser linkage unverified — confirm linkage (BR-15 override) before approving' :
@@ -2150,6 +1929,12 @@ function RefundDetailPanel({
             {canDeny && (
               <button onClick={openDeny} disabled={busy} className={styles.refundDetailDenyBtn}>
                 ✕ Deny
+              </button>
+            )}
+            {refund.status === 'refunded' && (
+              <button onClick={() => void runClose()} disabled={busy} className={styles.refundCloseBtn}
+                title="Close this case out — the payout is done and nothing else is owed">
+                {busy ? '…' : 'Close'}
               </button>
             )}
           </div>
@@ -2232,13 +2017,15 @@ function ReturnFormAnswers({ r }: { r: ReturnRow }) {
 
 // Read-only viewer for a return's full submitted form — opened by clicking a
 // card in the Return & inspection column (before a refund request exists).
-function ReturnDetailModal({ r, parties, usage, invoices, tickets, onOpenTicket, onError, onClose }: {
+function ReturnDetailModal({ r, parties, canOwn, usage, invoices, tickets, onOpenTicket, onCompile, onError, onClose }: {
   r: ReturnRow;
   parties: Parties;
+  canOwn: boolean;
   usage: RefundUsageWindow;
   invoices: CustomerInvoice[];
   tickets: ServiceTicket[];
   onOpenTicket: (ticketId: string) => void;
+  onCompile: () => void;
   onError: (msg: string | null) => void;
   onClose: () => void;
 }) {
@@ -2263,6 +2050,14 @@ function ReturnDetailModal({ r, parties, usage, invoices, tickets, onOpenTicket,
             usage window, sales invoice + order #, ticket history, saved notes,
             then the return form answers. */}
         <div style={{ marginTop: 12 }}>
+          {r.refund_amount_usd != null && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+              <span style={{ fontSize: 12, fontWeight: 600, color: '#4a5568' }}>Requested amount:</span>
+              <span className={styles.refundAmount}>${Number(r.refund_amount_usd).toLocaleString('en-US')}</span>
+            </div>
+          )}
+          {r.reason && <div className={styles.refundReason}>{r.reason}</div>}
+          <CustomerWaitBadge r={r} />
           <UnitStatusEditor r={r} onError={onError} />
           <DispositionEditor r={r} onError={onError} />
           <UsageWindowBadge usage={usage} />
@@ -2271,6 +2066,11 @@ function ReturnDetailModal({ r, parties, usage, invoices, tickets, onOpenTicket,
           <CaseNotes returnId={r.id} onError={onError} />
           <CaseAttachmentStrip returnId={r.id} onError={onError} />
           <ReturnFormAnswers r={r} />
+          {/* Column actions — these used to live on the board card, which is
+              now collapsed to the case's identity. */}
+          <div style={{ marginTop: 12, borderTop: '1px solid #edf2f7', paddingTop: 12 }}>
+            <InspectionActions r={r} canOwn={canOwn} onCompile={onCompile} onError={onError} />
+          </div>
         </div>
       </div>
     </div>
