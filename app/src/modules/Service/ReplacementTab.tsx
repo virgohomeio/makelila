@@ -81,6 +81,9 @@ const TRIAGE_TOPICS: TicketTopic[] = ['return_hardware_defect', 'warranty_replac
 // Tickets in these statuses are "done" — exclude from triage.
 const CLOSED_TICKET_STATUSES = new Set(['resolved', 'closed']);
 
+// Rendered by the Fulfillment module at /fulfillment/replacements. The file
+// stays here because it reads Service.module.css + TicketDetailPanel for the
+// ticket-triage section above the order table.
 export default function ReplacementTab() {
   const { orders, loading } = useReplacementOrders();
   const { batches } = useBatches();

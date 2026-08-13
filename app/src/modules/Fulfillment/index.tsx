@@ -4,7 +4,10 @@ import Shelf from './shelf';
 import History from './history';
 import { ReturnsTab } from '../PostShipment/ReturnsTab';
 import { RefundsTab } from '../PostShipment/RefundsTab';
-import { ReplacementsTab } from '../PostShipment/ReplacementsTab';
+// The replacement queue lives in Service/ (it leans on Service.module.css +
+// TicketDetailPanel for the ticket-triage section) but is rendered here —
+// same arrangement as the PostShipment tabs above.
+import ReplacementTab from '../Service/ReplacementTab';
 import { CancellationsTab } from '../PostShipment/CancellationsTab';
 import { ClaimsTab } from '../PostShipment/ClaimsTab';
 import { DeliveryMapTab } from '../PostShipment/DeliveryMapTab';
@@ -38,7 +41,7 @@ export default function Fulfillment() {
       { key: 'map',           label: 'Delivery Map',      subtitle: 'Open shipments on a map',                    icon: '🗺️', iconBg: '#e6f4ea', content: <DeliveryMapTab /> },
       { key: 'returns',       label: 'Returns',           subtitle: 'Inbound returns, inspection queue',          icon: '↩️', iconBg: '#fff3e0', content: <ReturnsTab /> },
       { key: 'refunds',       label: 'Refunds',           subtitle: 'Awaiting manager + finance approval',        icon: '💵', iconBg: '#fef1f0', content: <RefundsTab /> },
-      { key: 'replacements',  label: 'Replacements',      subtitle: 'Internal replacement orders + parts',        icon: '🔁', iconBg: '#fef1f0', content: <ReplacementsTab /> },
+      { key: 'replacements',  label: 'Replacements',      subtitle: 'Warranty replacements + parts queue',        icon: '🔁', iconBg: '#fef1f0', content: <ReplacementTab /> },
       { key: 'cancellations', label: 'Cancellations',     subtitle: 'Customer-initiated cancellations',           icon: '❌', iconBg: '#f5f1eb', content: <CancellationsTab /> },
       { key: 'claims',        label: 'Claims',            subtitle: 'Shipping-damage claims + photos',            icon: '📸', iconBg: '#fffaf0', content: <ClaimsTab /> },
     ];
@@ -103,7 +106,7 @@ export default function Fulfillment() {
          active === 'map'           ? <DeliveryMapTab /> :
          active === 'returns'       ? <ReturnsTab /> :
          active === 'refunds'       ? <RefundsTab /> :
-         active === 'replacements'  ? <ReplacementsTab /> :
+         active === 'replacements'  ? <ReplacementTab /> :
          active === 'cancellations' ? <CancellationsTab /> :
          active === 'claims'        ? <ClaimsTab /> :
          <Queue />}

@@ -13,8 +13,8 @@ import { canView } from '../lib/permissions';
 
 const ATTENTION = [
   { to: '/order-review',  title: 'Sales',         subtitle: 'Pending orders, address verification, flags',     icon: '🛒', iconBg: '#fef1f0' },
-  { to: '/service',       title: 'Service',        subtitle: 'Support tickets, onboarding, replacements',       icon: '🎫', iconBg: '#fff3e0' },
-  { to: '/fulfillment',   title: 'Fulfillment',    subtitle: 'Queue, shelf, label & ship',                      icon: '📦', iconBg: '#e3f0fb' },
+  { to: '/service',       title: 'Service',        subtitle: 'Support tickets, onboarding, follow-ups',         icon: '🎫', iconBg: '#fff3e0' },
+  { to: '/fulfillment',   title: 'Fulfillment',    subtitle: 'Queue, shelf, label, ship & replacements',        icon: '📦', iconBg: '#e3f0fb' },
 ];
 
 const WORKSPACE = [
