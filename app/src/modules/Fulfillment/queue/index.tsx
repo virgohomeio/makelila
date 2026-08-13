@@ -31,6 +31,10 @@ export default function Queue() {
   const { ready, fulfilled, loading } = useFulfillmentQueue();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [orders, setOrders] = useState<Order[]>([]);
+  // What happened to the row that just left the queue (cancelled / moved back).
+  // The row disappears via realtime, so without this the detail pane would
+  // silently fall back to "Select a queued order" with no confirmation.
+  const [notice, setNotice] = useState<string | null>(null);
 
   const orderLookup = useMemo(() => {
     const m = new Map<string, Order>();
@@ -70,10 +74,11 @@ export default function Queue() {
       });
   }, [ready, fulfilled]);
 
-  // Default-select first row on load
+  // Default-select first row on load. Skipped while a notice is showing so the
+  // confirmation isn't blown away by an auto-select the operator didn't ask for.
   useEffect(() => {
-    if (!selectedId && ready.length > 0) setSelectedId(ready[0].id);
-  }, [ready, selectedId]);
+    if (!selectedId && !notice && ready.length > 0) setSelectedId(ready[0].id);
+  }, [ready, selectedId, notice]);
 
   const selected = allRows.find(r => r.id === selectedId) ?? null;
   const selectedOrder = selected ? orderLookup.get(selected.order_id) : null;
@@ -85,16 +90,23 @@ export default function Queue() {
         shippedRows={shippedRows}
         orderLookup={orderLookup}
         selectedId={selectedId}
-        onSelect={setSelectedId}
+        onSelect={id => { setNotice(null); setSelectedId(id); }}
       />
       <section className={styles.detail}>
         {loading ? (
           <div>Loading…</div>
         ) : !selected || !selectedOrder ? (
-          <div>Select a queued order from the left.</div>
+          <div>
+            {notice && <div className={styles.queueNotice}>✓ {notice}</div>}
+            <div>Select a queued order from the left.</div>
+          </div>
         ) : (
           <>
-            <QueueHeader row={selected} order={selectedOrder} />
+            <QueueHeader
+              row={selected}
+              order={selectedOrder}
+              onRemoved={message => { setNotice(message); setSelectedId(null); }}
+            />
             {selectedOrder.status !== 'approved' && selected.step < 6 ? (
               <PauseBanner status={selectedOrder.status} orderId={selectedOrder.id} />
             ) : (

@@ -5,7 +5,10 @@ import { logAction } from './activityLog';
 import { adjustPartStock } from './parts';
 import { functionErrorMessage } from './functionError';
 
-export type OrderStatus = 'pending' | 'approved' | 'flagged' | 'held';
+// 'cancelled' is terminal: the order is dead, it has no fulfillment_queue row,
+// and it is filtered out of every Order Review tab (see useOrders). The row is
+// kept for finance/history rather than deleted.
+export type OrderStatus = 'pending' | 'approved' | 'flagged' | 'held' | 'cancelled';
 
 export type LineItem =
   // Legacy Shopify-synced sale line — do not add new sale shapes here; extend the 'part'/'unit' variants instead.
@@ -47,6 +50,10 @@ export type Order = {
   // Held split in Order Review > Replacement. Null for non-replacement.
   replacement_state: 'ready' | 'awaiting' | 'held' | null;
   held_reason: string | null;
+  // Set together when status flips to 'cancelled' (Fulfillment > Queue >
+  // "Cancel Order"). Null on every live order.
+  cancelled_at: string | null;
+  cancelled_reason: string | null;
   cogs_usd: number | null;
   /** Actual carrier/label cost. MISNAMED: the `_usd` suffix is historical and
    *  wrong — the currency is whatever `shipping_cost_currency` says, and every
@@ -167,7 +174,12 @@ export function orderDue(placed_at: string | null): {
   return { dueDate: due, dueLabel: due.toLocaleDateString('en-US'), severity };
 }
 
-const ACTION_TYPE: Record<Exclude<OrderStatus, 'pending'>, string> = {
+/** The three dispositions Order Review can set by hand. 'pending' is the intake
+ *  state and 'cancelled' is terminal (see cancelOrder) - neither is a review
+ *  decision, so neither goes through disposition(). */
+export type Disposition = Exclude<OrderStatus, 'pending' | 'cancelled'>;
+
+const ACTION_TYPE: Record<Disposition, string> = {
   approved: 'order_approve',
   flagged:  'order_flag',
   held:     'order_hold',
@@ -181,7 +193,7 @@ async function currentUserId(): Promise<string> {
 
 export async function disposition(
   order: Pick<Order, 'id' | 'order_ref' | 'customer_name'>,
-  status: Exclude<OrderStatus, 'pending'>,
+  status: Disposition,
   reason?: string,
 ): Promise<void> {
   const userId = await currentUserId();
@@ -442,7 +454,10 @@ export function useOrders(): {
     //   (a) fulfillment_queue row reached step 6 / has fulfilled_at, OR
     //   (b) customer has a shipped unit (catches legacy Excel-only shipments
     //       where the queue row was never created or advanced).
+    // Cancelled orders are excluded outright - they're dead, and their record
+    // lives on in Shipping > Cancellations.
     const active = cache.filter(o => {
+      if (o.status === 'cancelled') return false;
       if (fulfilledOrderIds.has(o.id)) return false;
       // Never hide replacement orders by the shipped-customer name check —
       // a returning customer's replacement must always be visible in Order Review.
@@ -639,10 +654,11 @@ type CancellableReplacement = {
   line_items: unknown;
 };
 
-/** Release a replacement's reserved stock, clear its ticket back-link, and
- *  delete the order so it drops off both the Sales (Order Review) and Service
- *  replacement lists via realtime. No guards — callers enforce them. */
-async function releaseAndDeleteReplacement(order: CancellableReplacement, note: string): Promise<void> {
+/** Give back everything a replacement order is holding: reserved units, parts
+ *  decremented at creation, and the ticket back-link + queued marker. Shared by
+ *  the two ways a replacement stops being live — deleted outright
+ *  (releaseAndDeleteReplacement) or kept as a cancelled row (cancelOrder). */
+async function releaseReplacementHolds(order: CancellableReplacement, note: string): Promise<void> {
   // Release reserved units (conditional → safe for every state; no-op when
   // nothing was reserved, e.g. an 'awaiting' order).
   const { error: uErr } = await supabase
@@ -658,16 +674,16 @@ async function releaseAndDeleteReplacement(order: CancellableReplacement, note: 
     const lineItems = (order.line_items ?? []) as ReplacementLineItem[];
     for (const li of lineItems) {
       if (li.kind === 'part') {
-        await adjustPartStock(li.part_id, li.qty, `Replacement ${order.order_ref} cancelled`);
+        await adjustPartStock(li.part_id, li.qty, `Replacement ${order.order_ref} ${note}`);
       }
     }
   }
 
   // Drop the ticket back-link so nothing dangles once the order is gone, and
   // clear the queued marker — the customer is no longer waiting on this
-  // replacement. Best-effort on the tag: the order is being deleted either way,
-  // so a tag failure must not strand it (same precedent as the auto-cancel on
-  // ticket close).
+  // replacement. Best-effort on the tag: the order is being cancelled either
+  // way, so a tag failure must not strand it (same precedent as the auto-cancel
+  // on ticket close).
   if (order.linked_ticket_id) {
     await supabase.from('service_tickets')
       .update({ replacement_order_id: null })
@@ -677,6 +693,13 @@ async function releaseAndDeleteReplacement(order: CancellableReplacement, note: 
     });
     if (tagErr) console.warn('Clearing queued_for_replacement tag failed (non-fatal):', tagErr.message);
   }
+}
+
+/** Release a replacement's reserved stock, clear its ticket back-link, and
+ *  delete the order so it drops off both the Sales (Order Review) and Service
+ *  replacement lists via realtime. No guards — callers enforce them. */
+async function releaseAndDeleteReplacement(order: CancellableReplacement, note: string): Promise<void> {
+  await releaseReplacementHolds(order, 'cancelled');
 
   // Delete the order. select() back so an RLS-blocked delete (0 rows, no error)
   // surfaces as a failure instead of silently leaving it in place.
@@ -745,6 +768,180 @@ export async function cancelPendingReplacementsForTicket(ticketId: string): Prom
   for (const o of (linked ?? []) as CancellableReplacement[]) {
     await releaseAndDeleteReplacement(o, `ticket completed → awaiting replacement cancelled`);
   }
+}
+
+// ─── Cancelling an order / pulling it back out of fulfillment ───────────────
+
+/** Where an order lands in Order Review once it's put back on the board. */
+export type ReviewLanding = {
+  status: OrderStatus;
+  replacement_state: 'ready' | 'awaiting' | null;
+  /** Operator-facing path, e.g. "Order Review › Replacement › Awaiting Stock / Batch". */
+  label: string;
+};
+
+/** Re-derive a replacement's Ready-vs-Awaiting state against CURRENT stock
+ *  rather than trusting the replacement_state stamped when it was created —
+ *  the units and parts it was built against may have been consumed by another
+ *  order while it sat in the fulfillment queue.
+ *
+ *  A line is satisfied when:
+ *    - part        → parts.on_hand covers its qty
+ *    - unit / base → the serial is still 'ready' or 'reserved' (reserved counts:
+ *                    it is reserved *for this order*)
+ *    - *_pending   → never; pending is what "we don't have it" is called
+ *  Any unsatisfied line ⇒ 'awaiting', and the first blocked unit's batch becomes
+ *  awaiting_batch_id so Order Review groups it under that batch. */
+export async function resolveReplacementStockState(
+  order: { line_items: unknown },
+): Promise<{ replacement_state: 'ready' | 'awaiting'; awaiting_batch_id: string | null }> {
+  const items = (order.line_items ?? []) as ReplacementLineItem[];
+  let ready = true;
+  let blockedBatch: string | null = null;
+
+  for (const li of items) {
+    switch (li.kind) {
+      case 'unit_pending':
+      case 'base_pending':
+        ready = false;
+        if (!blockedBatch) blockedBatch = li.batch ?? null;
+        break;
+      case 'part_pending':
+        ready = false;
+        break;
+      case 'part': {
+        const { data } = await supabase
+          .from('parts').select('on_hand').eq('id', li.part_id).maybeSingle();
+        if ((data?.on_hand ?? 0) < (li.qty ?? 1)) ready = false;
+        break;
+      }
+      case 'unit':
+      case 'base': {
+        const { data } = await supabase
+          .from('units').select('status').eq('serial', li.unit_serial).maybeSingle();
+        if (data?.status !== 'ready' && data?.status !== 'reserved') {
+          ready = false;
+          if (!blockedBatch) blockedBatch = li.batch ?? null;
+        }
+        break;
+      }
+    }
+  }
+
+  return {
+    replacement_state: ready ? 'ready' : 'awaiting',
+    // Cleared when ready, otherwise a stale batch would keep grouping the order
+    // under a batch it is no longer waiting on.
+    awaiting_batch_id: ready ? null : blockedBatch,
+  };
+}
+
+/** Put an order back on the Order Review board after it was pulled out of the
+ *  fulfillment queue ("Shipment Not Ready"). A sale returns to Pending — the
+ *  tab every order starts in and the one an operator re-approves from. A
+ *  replacement returns to the Replacement tab, into Ready or Awaiting Stock /
+ *  Batch depending on the stock actually on hand right now.
+ *
+ *  Status goes back to 'pending' in both cases: leaving it 'approved' would
+ *  strand the order in Confirmed with no queue row, and re-approving it would
+ *  not re-fire the auto_enqueue_on_approve trigger. */
+export async function returnOrderToReview(orderId: string): Promise<ReviewLanding> {
+  const { data: order, error: oErr } = await supabase
+    .from('orders')
+    .select('id, order_ref, kind, line_items')
+    .eq('id', orderId)
+    .single();
+  if (oErr || !order) throw new Error(`Order not found: ${oErr?.message ?? 'no row'}`);
+
+  const patch: Record<string, unknown> = { status: 'pending' };
+  let landing: ReviewLanding = {
+    status: 'pending', replacement_state: null, label: 'Order Review › Pending',
+  };
+
+  if (order.kind === 'replacement') {
+    const stock = await resolveReplacementStockState(order);
+    patch.replacement_state = stock.replacement_state;
+    patch.awaiting_batch_id = stock.awaiting_batch_id;
+    landing = {
+      status: 'pending',
+      replacement_state: stock.replacement_state,
+      label: stock.replacement_state === 'ready'
+        ? 'Order Review › Replacement › Ready'
+        : 'Order Review › Replacement › Awaiting Stock / Batch',
+    };
+  }
+
+  const { error } = await supabase.from('orders').update(patch).eq('id', orderId);
+  if (error) throw new Error(`Failed to move the order back to Order Review: ${error.message}`);
+
+  await logAction('order_returned_to_review', order.order_ref, landing.label);
+  return landing;
+}
+
+/** Cancel an order outright. The row is kept (finance still needs its totals)
+ *  but flipped to the terminal 'cancelled' status, which hides it from every
+ *  Order Review tab.
+ *
+ *  Effects:
+ *    - Sale        → a row in Shipping › Cancellations, so the refund team sees
+ *                    it beside the customer-submitted ones and can compile or
+ *                    dismiss the refund. Never auto-refunds.
+ *    - Replacement → no cancellation record (nothing was paid for a warranty
+ *                    replacement, so there is no refund to route); reserved
+ *                    units, decremented parts and the ticket back-link are all
+ *                    given back instead.
+ *
+ *  Callers are responsible for anything queue-side (removing the
+ *  fulfillment_queue row, releasing the unit picked at step 1). */
+export async function cancelOrder(orderId: string, reason: string): Promise<void> {
+  const userId = await currentUserId();
+  const note = reason.trim();
+  if (!note) throw new Error('A reason is required to cancel an order.');
+
+  const { data: order, error: oErr } = await supabase
+    .from('orders')
+    .select('id, order_ref, kind, status, replacement_state, linked_ticket_id, line_items, customer_name, customer_email, customer_phone, total_usd, placed_at, created_at')
+    .eq('id', orderId)
+    .single();
+  if (oErr || !order) throw new Error(`Order not found: ${oErr?.message ?? 'no row'}`);
+  if (order.status === 'cancelled') throw new Error('This order is already cancelled.');
+
+  if (order.kind === 'replacement') {
+    await releaseReplacementHolds(order as CancellableReplacement, 'cancelled');
+  }
+
+  const nowIso = new Date().toISOString();
+  const { error: uErr } = await supabase
+    .from('orders')
+    .update({
+      status: 'cancelled',
+      cancelled_at: nowIso,
+      cancelled_reason: note,
+      dispositioned_by: userId,
+      dispositioned_at: nowIso,
+    })
+    .eq('id', orderId);
+  if (uErr) throw new Error(`Failed to cancel the order: ${uErr.message}`);
+
+  if (order.kind !== 'replacement') {
+    // Non-fatal: the order is already cancelled, and a missing record is
+    // recoverable by hand — losing the cancel over it would not be.
+    const { error: cErr } = await supabase.from('order_cancellations').insert({
+      order_ref:        order.order_ref,
+      customer_name:    order.customer_name,
+      customer_email:   order.customer_email ?? '',
+      customer_phone:   order.customer_phone,
+      order_date:       (order.placed_at ?? order.created_at)?.slice(0, 10) ?? null,
+      order_amount_usd: order.total_usd,
+      purchase_channel: 'Shopify',
+      reason:           note,
+      description:      'Cancelled in makeLILA from the fulfillment queue before shipping.',
+      product_received: false,
+    });
+    if (cErr) console.warn('Cancellation record insert failed (non-fatal):', cErr.message);
+  }
+
+  await logAction('order_cancelled', order.order_ref, note);
 }
 
 export function useOrderNotes(orderId: string | null): {
