@@ -425,26 +425,37 @@ export type CustomerProfitability = {
   email: string | null;
   country: string | null;
   onboard_date: string | null;
+  // V5: every amount is CAD, converted through public.fx_rates. The V4 `_usd`
+  // names were a misnomer on three of the four inputs — orders.total_usd/tax_usd
+  // follow orders.currency, cogs_usd is USD, shipping_cost_usd is CAD.
   // Revenue (net of tax — tax is pass-through to govt and not VCycene income)
-  revenue_usd: number;
+  revenue_cad: number;
   // Sales tax collected on behalf of govt — informational, NOT part of margin
-  tax_collected_usd: number;
+  tax_collected_cad: number;
   // 4 cost buckets — sale_cogs + sale_shipping are sales-only;
   // expected_warranty covers ALL non-cancelled replacement orders;
   // expected_refund covers ALL non-denied refund approvals.
-  sale_cogs_usd: number;
-  sale_shipping_usd: number;
-  expected_warranty_cost_usd: number;
-  expected_refund_usd: number;
+  sale_cogs_cad: number;
+  sale_shipping_cad: number;
+  expected_warranty_cost_cad: number;
+  expected_refund_cad: number;
   // Margin = revenue - all 4 buckets (no double-count)
-  net_margin_usd: number;
+  net_margin_cad: number;
   // Settled-refund subset (status='refunded' only) — shown alongside
   // expected so operators can see in-flight vs booked.
-  settled_refund_usd: number;
+  settled_refund_cad: number;
   // Counts
   order_count: number;
   replacement_count: number;
   open_replacement_count: number;
+  // Cost coverage. COGS is always filled, but batch_actual is the invoiced
+  // landed cost while schedule is the V-SAX roadmap projection. Shipping can
+  // still be genuinely unknown — shipping_uncosted_count > 0 means this
+  // customer's margin is an upper bound.
+  cogs_actual_count: number;
+  cogs_modelled_count: number;
+  shipping_costed_count: number;
+  shipping_uncosted_count: number;
   refund_count: number;
   in_flight_refund_count: number;
   ticket_count: number;
@@ -469,7 +480,7 @@ export function useCustomerProfitability(): {
       const { data, error: err } = await supabase
         .from('customer_profitability')
         .select('*')
-        .order('net_margin_usd', { ascending: false });
+        .order('net_margin_cad', { ascending: false });
       if (cancelled) return;
       if (err) {
         setError(err as unknown as Error);
@@ -480,14 +491,18 @@ export function useCustomerProfitability(): {
       // can do arithmetic without string juggling.
       const coerced = (data ?? []).map((r: Record<string, unknown>) => ({
         ...r,
-        revenue_usd:                Number(r.revenue_usd ?? 0),
-        tax_collected_usd:          Number(r.tax_collected_usd ?? 0),
-        sale_cogs_usd:              Number(r.sale_cogs_usd ?? 0),
-        sale_shipping_usd:          Number(r.sale_shipping_usd ?? 0),
-        expected_warranty_cost_usd: Number(r.expected_warranty_cost_usd ?? 0),
-        expected_refund_usd:        Number(r.expected_refund_usd ?? 0),
-        settled_refund_usd:         Number(r.settled_refund_usd ?? 0),
-        net_margin_usd:             Number(r.net_margin_usd ?? 0),
+        revenue_cad:                Number(r.revenue_cad ?? 0),
+        tax_collected_cad:          Number(r.tax_collected_cad ?? 0),
+        sale_cogs_cad:              Number(r.sale_cogs_cad ?? 0),
+        sale_shipping_cad:          Number(r.sale_shipping_cad ?? 0),
+        expected_warranty_cost_cad: Number(r.expected_warranty_cost_cad ?? 0),
+        expected_refund_cad:        Number(r.expected_refund_cad ?? 0),
+        settled_refund_cad:         Number(r.settled_refund_cad ?? 0),
+        net_margin_cad:             Number(r.net_margin_cad ?? 0),
+        cogs_actual_count:          Number(r.cogs_actual_count ?? 0),
+        cogs_modelled_count:        Number(r.cogs_modelled_count ?? 0),
+        shipping_costed_count:      Number(r.shipping_costed_count ?? 0),
+        shipping_uncosted_count:    Number(r.shipping_uncosted_count ?? 0),
       })) as CustomerProfitability[];
       setRows(coerced);
       setLoading(false);

@@ -707,6 +707,17 @@
 .profStatGood { border-left: 4px solid #38a169; }
 .profStatBad  { border-left: 4px solid #c53030; }
 .profStatWarn { border-left: 4px solid #d69e2e; }
+/* Inline cost-provenance hints on a card's COGS / Shipping line. `est.` means
+   the roadmap projection rather than an invoiced batch price; `uncosted` means
+   freight we have no Freightcom invoice for, so the margin is an upper bound. */
+.profBasisHint {
+  font-size: .75rem;
+  color: #a0aec0;
+}
+.profUncostedHint {
+  font-size: .75rem;
+  color: #b7791f;
+}
 .profStatLabel {
   font-size: .75rem;
   color: #718096;
