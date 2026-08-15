@@ -26,7 +26,7 @@ const WORKSPACE = [
   { to: '/team',         title: 'Team',         subtitle: 'Activity log & team tools',             icon: '👤', iconBg: '#f5f1eb' },
 ];
 
-const MARKETING_ROLES = ['pedrum@virgohome.io', 'huayi@virgohome.io', 'george@virgohome.io'];
+const MARKETING_ROLES = ['pedrum@virgohome.io', 'huayi@virgohome.io', 'george@virgohome.io', 'support@virgohome.io'];
 
 export function MobileHome() {
   const { user, role } = useAuth();
