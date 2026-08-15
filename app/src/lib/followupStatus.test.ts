@@ -18,7 +18,8 @@ const base: Customer = {
   first_touch_source: null, first_touch_campaign_id: null, first_touch_at: null,
   last_touch_source: null, last_touch_campaign_id: null, last_touch_at: null,
   telemetry_autoticket_suppress: false, purchaser_id: null,
-  primary_user_name: null, primary_user_phone: null, primary_user_email: null, created_at: '', updated_at: '',
+  primary_user_name: null, primary_user_phone: null, primary_user_email: null,
+  primary_user_relationship: null, created_at: '', updated_at: '',
 };
 const emptyCtx: CustomerStatusContext = {
   openTickets: [], queuedReplacement: false, returned: false, awaitingOnboarding: false,

@@ -1207,6 +1207,52 @@ export function useSerialToUser() {
   return { data, loading, error };
 }
 
+/** Pure — no React/Supabase dependency, safe to unit test in isolation.
+ *  Keeps only serials with a non-empty firmware string: most of the fleet
+ *  predates OTA firmware reporting, so `lila.firmware_version` is null for
+ *  the majority of rows. */
+export function buildFirmwareMap(
+  rows: Array<Record<string, unknown>>,
+): Record<string, string> {
+  const map: Record<string, string> = {};
+  for (const r of rows) {
+    const sn = r.serial_number;
+    const fw = r.firmware_version;
+    if (typeof sn === 'string' && sn && typeof fw === 'string' && fw.trim()) {
+      map[sn] = fw.trim();
+    }
+  }
+  return map;
+}
+
+/** Telemetry `lila.firmware_version` per serial. Serials that haven't
+ *  reported a firmware version are absent from the map. */
+export function useSerialFirmware() {
+  const [data, setData] = useState<Record<string, string>>({});
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const rows = await fetchAllLilaRows('serial_number, firmware_version');
+        if (cancelled) return;
+        setData(buildFirmwareMap(rows));
+      } catch (err) {
+        if (!cancelled) setError(err as Error);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return { data, loading, error };
+}
+
 export async function isRecentlyReceiving(
   serialNumber: string,
   windowMinutes = RECENT_RECEIVING_WINDOW_MINUTES,
@@ -1226,6 +1272,111 @@ export async function isRecentlyReceiving(
     .gte('created_at', startIso)
     .limit(1);
   return !!(ts && ts.length);
+}
+
+// Tables that prove a machine is alive. `isRecentlyReceiving` above checks
+// events + temperature_sensors; the Lovely PWA's own "connected" check uses
+// events + bme_sensors. Union all three so presence can never under-report
+// relative to what the customer is being told in the app.
+const PRESENCE_TABLES = ['events', 'bme_sensors', 'temperature_sensors'] as const;
+
+// PostgREST sends `.in()` lists in the query string, so very large fleets need
+// chunking to stay under the URL length cap.
+const PRESENCE_IN_CHUNK = 100;
+// Bounds the tier-2 fan-out below (one small query per table per quiet serial).
+const PRESENCE_CONCURRENCY = 8;
+
+function chunk<T>(items: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const out: R[] = new Array(items.length);
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (cursor < items.length) {
+      const i = cursor++;
+      out[i] = await fn(items[i]);
+    }
+  });
+  await Promise.all(workers);
+  return out;
+}
+
+/**
+ * Last-seen timestamp per serial, for a whole fleet at once.
+ *
+ * `isRecentlyReceiving` answers the same question for one serial in 2 queries,
+ * which would be 2N queries across a roster. This is two tiers instead:
+ *
+ *   1. One batched query per telemetry table over the online window. We only
+ *      need *existence* here, so the result set stays small no matter how many
+ *      serials are passed. Anything reporting inside the window is resolved.
+ *   2. For the serials that stayed quiet — normally the minority, and exactly
+ *      the ones an operator wants a date for — one `limit(1)` lookup per table
+ *      to get the exact last-seen, run with bounded concurrency.
+ *
+ * A serial absent from the returned map, or mapped to null, has no telemetry in
+ * any of these tables at all.
+ *
+ * Cost is O(tables) for the healthy majority plus O(tables × quiet serials).
+ * If the quiet set ever becomes most of a large fleet, tier 2 is the thing to
+ * replace with a server-side DISTINCT ON view.
+ */
+export async function fetchTelemetryPresence(
+  serials: string[],
+): Promise<Map<string, string | null>> {
+  const unique = Array.from(new Set(serials.filter(Boolean)));
+  const presence = new Map<string, string | null>();
+  if (unique.length === 0) return presence;
+
+  // Tier 1 — batched liveness over the online window.
+  const startIso = new Date(
+    Date.now() - RECENT_RECEIVING_WINDOW_MINUTES * 60_000,
+  ).toISOString();
+
+  await Promise.all(
+    PRESENCE_TABLES.flatMap(table =>
+      chunk(unique, PRESENCE_IN_CHUNK).map(async group => {
+        const { data, error } = await supabase
+          .from(table)
+          .select('serial_number, created_at')
+          .in('serial_number', group)
+          .gte('created_at', startIso);
+        if (error) throw error;
+        for (const row of (data ?? []) as Array<{ serial_number: string; created_at: string }>) {
+          const seen = presence.get(row.serial_number);
+          if (!seen || row.created_at > seen) presence.set(row.serial_number, row.created_at);
+        }
+      }),
+    ),
+  );
+
+  // Tier 2 — exact last-seen for whatever stayed quiet.
+  const quiet = unique.filter(s => !presence.has(s));
+  await mapWithConcurrency(quiet, PRESENCE_CONCURRENCY, async serial => {
+    let latest: string | null = null;
+    for (const table of PRESENCE_TABLES) {
+      const { data, error } = await supabase
+        .from(table)
+        .select('created_at')
+        .eq('serial_number', serial)
+        .order('created_at', { ascending: false })
+        .limit(1);
+      if (error) throw error;
+      const at = (data ?? [])[0]?.created_at as string | undefined;
+      if (at && (!latest || at > latest)) latest = at;
+    }
+    presence.set(serial, latest);
+  });
+
+  return presence;
 }
 
 export function useMachineStatus(serialNumber: string | null) {

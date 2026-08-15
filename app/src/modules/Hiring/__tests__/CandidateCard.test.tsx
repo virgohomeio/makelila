@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { CandidateCard } from '../ApplicantsTab';
-import { hireCandidate, rejectCandidate, type Candidate } from '../../../lib/hiring';
+import { hireCandidate, rejectCandidate, getResumeObjectUrl, type Candidate } from '../../../lib/hiring';
 
 vi.mock('../../../lib/hiring', () => ({
   useJobPostings: vi.fn(() => ({ postings: [], loading: false })),
@@ -10,7 +10,7 @@ vi.mock('../../../lib/hiring', () => ({
   recordCandidateScore: vi.fn(),
   rejectCandidate: vi.fn(),
   hireCandidate: vi.fn(),
-  getResumeSignedUrl: vi.fn(),
+  getResumeObjectUrl: vi.fn(),
   uploadAndScoreResume: vi.fn(),
 }));
 
@@ -28,7 +28,10 @@ function candidate(over: Partial<Candidate> & { id: string }): Candidate {
 
 const stages = ['Applied', 'Screen', 'Interview'];
 
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => {
+  vi.clearAllMocks();
+  vi.restoreAllMocks();
+});
 
 describe('CandidateCard decision tags', () => {
   it('shows no decision tag when the candidate is undecided', () => {
@@ -100,5 +103,81 @@ describe('CandidateCard decision tags', () => {
     expect(rejectButton.disabled).toBe(false);
     fireEvent.click(rejectButton);
     expect(rejectCandidate).toHaveBeenCalledWith('c1');
+  });
+});
+
+describe('CandidateCard resume viewing', () => {
+  /** A stand-in for the tab window.open hands back. */
+  function fakeTab() {
+    return { location: { href: '' }, opener: {} as unknown, close: vi.fn() };
+  }
+
+  // A blob: URL, not the signed one: Firefox saves the storage response instead
+  // of rendering it, which left the tab blank.
+  it('points a newly opened tab at the resume blob URL', async () => {
+    const tab = fakeTab();
+    vi.spyOn(window, 'open').mockReturnValue(tab as unknown as Window);
+    vi.mocked(getResumeObjectUrl).mockResolvedValue('blob:makelila/resume');
+
+    render(<CandidateCard candidate={candidate({ id: 'c1' })} pipelineStages={stages} onSelectCandidate={() => {}} />);
+    fireEvent.click(screen.getByRole('button', { name: 'View resume' }));
+
+    expect(getResumeObjectUrl).toHaveBeenCalledWith('p1/resume.pdf');
+    await waitFor(() => expect(tab.location.href).toBe('blob:makelila/resume'));
+  });
+
+  // The tab has to be opened during the click itself. Opening it after the
+  // signed-URL round trip leaves it to the popup blocker's discretion, and the
+  // old code ignored the return value, so a blocked tab looked like a dead
+  // button — which is exactly what it felt like.
+  it('opens the tab during the click, before the file is fetched', () => {
+    const open = vi.spyOn(window, 'open').mockReturnValue(fakeTab() as unknown as Window);
+    let resolveUrl: (url: string) => void = () => {};
+    vi.mocked(getResumeObjectUrl).mockReturnValue(new Promise<string>(res => { resolveUrl = res; }));
+
+    render(<CandidateCard candidate={candidate({ id: 'c1' })} pipelineStages={stages} onSelectCandidate={() => {}} />);
+    fireEvent.click(screen.getByRole('button', { name: 'View resume' }));
+
+    expect(open).toHaveBeenCalled();
+    resolveUrl('https://storage.example/signed/resume.pdf');
+  });
+
+  it('says the browser blocked the tab rather than failing silently', async () => {
+    vi.spyOn(window, 'open').mockReturnValue(null);
+    vi.mocked(getResumeObjectUrl).mockResolvedValue('https://storage.example/signed/resume.pdf');
+
+    render(<CandidateCard candidate={candidate({ id: 'c1' })} pipelineStages={stages} onSelectCandidate={() => {}} />);
+    fireEvent.click(screen.getByRole('button', { name: 'View resume' }));
+
+    expect(await screen.findByText(/blocked/i)).toBeTruthy();
+  });
+
+  it('surfaces why the resume could not be fetched instead of a generic retry message', async () => {
+    const tab = fakeTab();
+    vi.spyOn(window, 'open').mockReturnValue(tab as unknown as Window);
+    vi.mocked(getResumeObjectUrl).mockRejectedValue(new Error('Object not found'));
+
+    render(<CandidateCard candidate={candidate({ id: 'c1' })} pipelineStages={stages} onSelectCandidate={() => {}} />);
+    fireEvent.click(screen.getByRole('button', { name: 'View resume' }));
+
+    expect(await screen.findByText(/Object not found/)).toBeTruthy();
+    // The blank tab shouldn't be left sitting there once the fetch failed.
+    await waitFor(() => expect(tab.close).toHaveBeenCalled());
+  });
+
+  it('offers no resume button when the candidate has no file', () => {
+    render(<CandidateCard
+      candidate={candidate({ id: 'c1', resume_url: null })}
+      pipelineStages={stages} onSelectCandidate={() => {}}
+    />);
+    expect(screen.queryByRole('button', { name: 'View resume' })).toBeNull();
+  });
+
+  it('is unreachable for a stub candidate, who has no resume yet', () => {
+    render(<CandidateCard
+      candidate={candidate({ id: 'c1', enrichment_status: 'stub' })}
+      pipelineStages={stages} onSelectCandidate={() => {}}
+    />);
+    expect(screen.queryByRole('button', { name: 'View resume' })).toBeNull();
   });
 });

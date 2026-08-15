@@ -2,12 +2,17 @@
 // Uses async polling: POST /rate returns a request_id, then GET /rate/{id}
 // is polled until done=true.  All returned rates are stored in freight_quotes.
 //
+// The request body comes from _shared/freightcom.ts — see the note there on why
+// every US order used to fail here while Canadian ones quoted fine.
+//
 // Env vars required:
 //   FREIGHTCOM_API_KEY       — Bearer token (Authorization header)
 //   FREIGHTCOM_BASE_URL      — defaults to test env URL below
 //   SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY  (auto-injected)
 
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
+import { buildShipmentDetails, nextShipDate } from '../_shared/freightcom.ts';
+import type { FreightcomPackage, ShipDate } from '../_shared/freightcom.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -46,14 +51,6 @@ const DEFAULT_PACKAGES = [
 const POLL_MAX_TRIES   = 20;
 const POLL_INTERVAL_MS = 2000;
 
-type FreightcomPackageInput = {
-  weight_kg: number;
-  length_cm: number;
-  width_cm: number;
-  height_cm: number;
-  description?: string;
-};
-
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
   if (req.method !== 'POST') {
@@ -80,56 +77,47 @@ async function handle(req: Request): Promise<Response> {
   const body = await req.json();
   const { order_id, ship_date, packages: pkgOverrides } = body as {
     order_id?: string;
-    ship_date?: { year: number; month: number; day: number };
-    packages?: FreightcomPackageInput[];
+    ship_date?: ShipDate;
+    packages?: FreightcomPackage[];
   };
 
   if (!order_id) return json({ error: 'order_id required' }, 400);
 
-  // Load order destination
+  // Load order destination. The column is `postal_code` — an earlier
+  // `address_postal_code` (a name that only exists on the address_* verification
+  // columns) made PostgREST reject this select with 42703, which surfaced here
+  // as a flat "Order not found" for every order and left freight_quotes empty
+  // from the feature's first day.
   const { data: order, error: orderErr } = await admin
     .from('orders')
-    .select('id, address_postal_code, country')
+    // customer_email is here for the destination contact: Freightcom refuses to
+    // rate an international shipment without an email address at each end, which
+    // is why every US order used to fail at POST /rate.
+    .select('id, postal_code, country, customer_email')
     .eq('id', order_id)
     .single();
-  if (orderErr || !order) return json({ error: 'Order not found' }, 404);
+  if (orderErr || !order) {
+    return json({ error: 'Order not found', details: orderErr?.message ?? null }, 404);
+  }
 
-  const destPostal = (order.address_postal_code as string | null)?.replace(/\s/g, '');
-  if (!destPostal) return json({ error: 'Order has no destination postal code' }, 400);
+  const destPostal = order.postal_code as string | null;
+  if (!destPostal?.trim()) return json({ error: 'Order has no destination postal code' }, 400);
 
   // Default ship date = next business day (tomorrow)
-  const tomorrow  = new Date(Date.now() + 86_400_000);
-  const dateObj   = ship_date ?? {
-    year:  tomorrow.getUTCFullYear(),
-    month: tomorrow.getUTCMonth() + 1,
-    day:   tomorrow.getUTCDate(),
-  };
-
-  const pkgs = (pkgOverrides ?? DEFAULT_PACKAGES).map((p) => ({
-    measurements: {
-      weight: { unit: 'kg', value: p.weight_kg },
-      cuboid: { unit: 'cm', l: p.length_cm, w: p.width_cm, h: p.height_cm },
-    },
-    description: p.description ?? 'LILA Composter',
-  }));
+  const dateObj = ship_date ?? nextShipDate(Date.now());
 
   // POST /rate — initiates async rate calculation
   const rateReq = {
-    details: {
-      expected_ship_date: dateObj,
-      packaging_type: 'package',
-      packaging_properties: { packages: pkgs },
-      origin: {
-        address: { postal_code: ORIGIN_POSTAL, country: ORIGIN_COUNTRY },
-      },
+    details: buildShipmentDetails({
+      origin:      { postal_code: ORIGIN_POSTAL, country: ORIGIN_COUNTRY },
       destination: {
-        address: {
-          postal_code: destPostal,
-          country: (order.country as string) === 'US' ? 'US' : 'CA',
-        },
-        signature_requirement: 'not-required',
+        postal_code: destPostal,
+        country:     (order.country as string) ?? 'CA',
+        email:       order.customer_email as string | null,
       },
-    },
+      packages: pkgOverrides ?? DEFAULT_PACKAGES,
+      shipDate: dateObj,
+    }),
   };
 
   const initRes = await fetch(`${baseUrl}/rate`, {
@@ -140,7 +128,11 @@ async function handle(req: Request): Promise<Response> {
 
   if (initRes.status !== 202) {
     const errBody = await initRes.json().catch(() => ({}));
-    return json({ error: 'Freightcom rate request failed', details: errBody }, 502);
+    // Fold Freightcom's own complaint into `error`. The UI only ever renders
+    // that field, so a bare "Freightcom rate request failed" was all an operator
+    // saw while the body underneath said exactly which field was missing — the
+    // reason US orders looked like a flaky carrier rather than a bug.
+    return json({ error: `Freightcom rate request failed: ${summarize(errBody)}`, details: errBody }, 502);
   }
 
   const { request_id } = await initRes.json() as { request_id: string };
@@ -202,6 +194,14 @@ async function handle(req: Request): Promise<Response> {
 
 function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Freightcom rejections read `{ message, data: { "<field path>": "<why>" } }`.
+ *  Flatten that into one line an operator can act on. */
+function summarize(body: unknown): string {
+  const b = body as { message?: string; data?: Record<string, string> } | null;
+  const fields = Object.entries(b?.data ?? {}).map(([k, v]) => `${k} — ${v}`);
+  return [b?.message, ...fields].filter(Boolean).join('; ') || 'no detail returned';
 }
 
 function json(body: unknown, status = 200) {

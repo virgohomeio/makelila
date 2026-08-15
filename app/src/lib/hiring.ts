@@ -466,3 +466,28 @@ export async function getResumeSignedUrl(storagePath: string): Promise<string> {
   if (error || !data) throw error ?? new Error('getResumeSignedUrl: no signed URL returned');
   return data.signedUrl;
 }
+
+/** The resume as a local blob: URL, ready to hand to a viewer tab.
+ *
+ *  Navigating a tab straight at the signed URL leaves the rendering decision to
+ *  the browser and the storage response's Content-Disposition — Firefox treats
+ *  it as a download, so the tab we opened just sits there blank while the file
+ *  lands in Downloads. Storage logs confirmed the request itself succeeds (sign
+ *  200, fetch 200); it was only ever the display that failed. Fetching the
+ *  bytes here and handing over a blob: URL of a known type takes that decision
+ *  away from the browser.
+ *
+ *  Resumes are 70–160 KB PDFs, so buffering one is cheap. The caller owns the
+ *  returned URL — it stays valid until the page unloads. */
+export async function getResumeObjectUrl(storagePath: string): Promise<string> {
+  const signedUrl = await getResumeSignedUrl(storagePath);
+  const res = await fetch(signedUrl);
+  if (!res.ok) throw new Error(`Resume download failed (${res.status})`);
+  const blob = await res.blob();
+  // An empty or generic type would download rather than render; the bucket only
+  // accepts PDF and DOCX, and only PDF has an in-browser viewer to aim for.
+  const typed = blob.type === 'application/pdf' || !storagePath.toLowerCase().endsWith('.pdf')
+    ? blob
+    : new Blob([blob], { type: 'application/pdf' });
+  return URL.createObjectURL(typed);
+}

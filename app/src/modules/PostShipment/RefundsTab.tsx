@@ -1,15 +1,19 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import {
   useRefundApprovals, useReturns,
-  submitRefundRequest, compileReturnToRefund, updateRefundAmount, setRefundCurrency, type RefundCurrency, submitToManager, managerApprove, financeApprove, executeRefund, denyRefund, closeRefund,
+  submitRefundRequest, compileReturnToRefund, defaultRefundAmountFromInvoice,
+  updateRefundAmount, setRefundCurrency, type RefundCurrency, submitToManager, managerApprove, financeApprove, executeRefund, denyRefund, closeRefund,
   sendRefundBack, uncompileRefund, type RefundBackTarget,
   confirmPurchaserLinkage, hasValidPurchaserLinkage,
   computeRefundNet, defaultRefundFees,
   preRefundStage, customerWaitState,
+  useOrderCancellations, pendingCancellationRefunds, cancellationForRefund,
+  compileCancellationToRefund, dismissCancellationRefund, type OrderCancellation,
   setReturnDisposition, updateReturnStatus,
-  useReturnAttachments, uploadReturnAttachment, deleteReturnAttachment, returnAttachmentSignedUrl,
-  RETURN_ATTACH_INPUT_ACCEPT, type ReturnAttachment,
-  bookReturnLabel,
+  useCaseAttachments, uploadCaseAttachment, deleteCaseAttachment, returnAttachmentSignedUrl,
+  RETURN_ATTACH_INPUT_ACCEPT, RETURN_ATTACH_CATEGORIES, RETURN_ATTACH_ALLOWED_MIME,
+  RETURN_CATEGORIES, RETURN_CATEGORY_META, manualRefundReason,
+  type ReturnAttachment, type ReturnAttachmentCategory,
   useCaseNotes, addCaseNote, updateCaseNote, deleteCaseNote, type CaseNote,
   REFUND_STATUS_META, REFUND_METHODS, REFUND_METHOD_META,
   UNIT_STATUS_LABEL, RETURN_DISPOSITION_META,
@@ -31,8 +35,15 @@ const UNIT_STAGES: { value: ReturnStatus; label: string }[] = [
   { value: 'discarded',        label: 'Unit discarded by customer' },
 ];
 import { useQueuedReplacements, holdReplacement, type Order } from '../../lib/orders';
-import { useOnboardDates, useCustomerIdByEmail, useCustomers, refundUsageWindow, resolveRefundParties, type RefundParties, type RefundUsageWindow } from '../../lib/customers';
-import { useInvoicesByCustomerEmail, getInvoiceSignedUrl, type CustomerInvoice } from '../../lib/invoices';
+import {
+  useOnboardDates, useCustomerIdByEmail, useCustomers, refundUsageWindow,
+  resolveRefundParties, resolvePurchaserId,
+  buildContactIndex, lookupContactRow, resolveCustomerContact,
+  type Customer, type CustomerContact, type RefundParties, type RefundUsageWindow,
+} from '../../lib/customers';
+import {
+  useInvoicesByCustomerEmail, openInvoiceInNewTab, invoiceAmountCad, type CustomerInvoice,
+} from '../../lib/invoices';
 import {
   useServiceTickets, useTicketMessages, useTicketNotes, STATUS_META as TICKET_STATUS_META,
   sourceLabel, topicLabel, type ServiceTicket,
@@ -61,6 +72,7 @@ const COLUMNS: { key: ColKey; label: string; helper: string }[] = [
 // 'intake' (Return Form Submitted) and 'inspection' (Return & Inspection).
 // Keep in sync with the send-refund-reminders edge function recipients.
 const REFUND_COLUMN_OWNERS: Record<string, string[]> = {
+  cancellation:   ['reina@virgohome.io'],
   intake:         ['reina@virgohome.io'],
   inspection:     ['reina@virgohome.io'],
   submitted:      ['reina@virgohome.io'],
@@ -68,14 +80,32 @@ const REFUND_COLUMN_OWNERS: Record<string, string[]> = {
   finance_review: ['yueli@virgohome.io', 'huayi@virgohome.io'],
   refund_queue:   ['pedrum@virgohome.io'],
 };
-function ownsRefundColumn(email: string | null | undefined, column: string | null | undefined): boolean {
+export function ownsRefundColumn(email: string | null | undefined, column: string | null | undefined): boolean {
   const e = (email ?? '').toLowerCase().trim();
   return !!column && !!e && (REFUND_COLUMN_OWNERS[column] ?? []).includes(e);
 }
 
+// Names for the owner emails above — used in the "you can't write here" hints
+// on a card sitting in someone else's column. An address nobody recognises
+// ("yueli@…") reads as a bug; "Julie owns this column" reads as a rule.
+const REFUND_OWNER_NAMES: Record<string, string> = {
+  'reina@virgohome.io':  'Reina',
+  'george@virgohome.io': 'George',
+  'yueli@virgohome.io':  'Julie',
+  'huayi@virgohome.io':  'Huayi',
+  'pedrum@virgohome.io': 'Pedrum',
+};
+// Empty for the terminal columns (Refunded / Denied), which nobody owns — the
+// case is finished there and its notes are the record of what happened.
+export function refundColumnOwnerLabel(column: string | null | undefined): string {
+  const owners = (column && REFUND_COLUMN_OWNERS[column]) || [];
+  return owners.map(e => REFUND_OWNER_NAMES[e] ?? e.split('@')[0]).join(' / ');
+}
+
 export function RefundsTab() {
-  const { approvals, loading: aLoading } = useRefundApprovals();
+  const { approvals, loading: aLoading, refresh: refreshApprovals } = useRefundApprovals();
   const { returns, loading: rLoading } = useReturns();
+  const { cancellations, loading: cLoading } = useOrderCancellations();
   const { replacements: queuedRepls } = useQueuedReplacements();
   const { byEmail: onboardByEmail } = useOnboardDates();
   const { byEmail: invoicesByEmail } = useInvoicesByCustomerEmail();
@@ -89,7 +119,6 @@ export function RefundsTab() {
   const userEmail = profile?.email ?? user?.email;
 
   const [showRequestModal, setShowRequestModal] = useState(false);
-  const [requestReturnId, setRequestReturnId] = useState<string | null>(null);
   const [viewReturnId, setViewReturnId] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [financeModalId, setFinanceModalId] = useState<string | null>(null);
@@ -269,6 +298,49 @@ export function RefundsTab() {
     };
   }, [returns, approvals]);
 
+  // A cancellation form is a refund request the moment the customer submits it,
+  // exactly like a return form — so it queues here immediately instead of
+  // waiting for someone to open the Cancellations tab and process it.
+  const pendingCancellations = useMemo(
+    () => pendingCancellationRefunds(cancellations),
+    [cancellations],
+  );
+
+  // A refund compiled from a cancellation keeps reading that cancellation's
+  // notes, so the thread written on the intake card doesn't disappear the
+  // moment the case moves to Completeness.
+  const cancellationIdFor = (refundId: string): string | null =>
+    cancellationForRefund(cancellations, refundId)?.id ?? null;
+
+  // Contact block for a card on this board. A refund row only ever carries an
+  // email, a return form adds a phone, a cancellation form carries both — and
+  // none of the three carries an address, so the customer directory (Customers
+  // → Directory) is what supplies the rest. Case data wins where it exists;
+  // anything neither side has is reported as not on file rather than left
+  // blank. Every intake column goes through here, not just the refund columns:
+  // a cancellation request is a refund case an operator has to work, and having
+  // to leave for the directory to phone that customer is the bug this fixes.
+  const contactIndex = useMemo(() => buildContactIndex(customers), [customers]);
+  const contactForCase = (c: {
+    email?: string | null; phone?: string | null; name?: string | null;
+  }): CustomerContact => resolveCustomerContact({
+    caseEmail: c.email,
+    casePhone: c.phone,
+    directory: lookupContactRow(contactIndex, { email: c.email, name: c.name }),
+  });
+
+  const contactFor = (refund: RefundApproval, linkedReturn: ReturnRow | null): CustomerContact => {
+    const email = refund.customer_email ?? linkedReturn?.customer_email ?? null;
+    const cancellation = cancellationForRefund(cancellations, refund.id);
+    return contactForCase({
+      email: email ?? cancellation?.customer_email,
+      phone: linkedReturn?.customer_phone ?? cancellation?.customer_phone,
+      // Name is only the fallback key, so it has to be the name the directory
+      // would file this person under — the one on the card.
+      name: refund.customer_name,
+    });
+  };
+
   const stats = useMemo(() => {
     let totalRefunded = 0;
     let totalPending = 0;
@@ -305,7 +377,7 @@ export function RefundsTab() {
     const ro = new ResizeObserver(update);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [approvals, preRefundReturns]);
+  }, [approvals, preRefundReturns, pendingCancellations]);
   const syncFromTop = () => {
     if (kanbanRef.current && topScrollRef.current) kanbanRef.current.scrollLeft = topScrollRef.current.scrollLeft;
   };
@@ -317,7 +389,7 @@ export function RefundsTab() {
   // amount + payment method are set by Finance (Julie) at Finance Review.
   const compileReturn = async (r: ReturnRow) => {
     setError(null);
-    try { await compileReturnToRefund(r); }
+    try { await compileReturnToRefund(r); await refreshApprovals(); }
     catch (e) { setError((e as Error).message); }
   };
 
@@ -333,29 +405,51 @@ export function RefundsTab() {
       <div className={styles.kanbanList}>
         {rows.length === 0 ? (
           <div className={styles.kanbanEmpty}>—</div>
-        ) : rows.map(r => {
-          const email = r.purchaser_email?.trim() || r.customer_email;
-          return (
-            <InspectionCard
-              key={r.id}
-              r={r}
-              canOwn={ownsRefundColumn(userEmail, preRefundStage(r.status))}
-              parties={partiesForReturn(r)}
-              usage={usageForEmail(email)}
-              invoices={invoicesForEmail(email)}
-              tickets={ticketsForEmails([r.purchaser_email, r.customer_email])}
-              onOpenTicket={setOpenTicketId}
-              onView={() => setViewReturnId(r.id)}
-              onCompile={() => void compileReturn(r)}
-              onError={setError}
-            />
-          );
-        })}
+        ) : rows.map(r => (
+          <InspectionCard
+            key={r.id}
+            r={r}
+            parties={partiesForReturn(r)}
+            onView={() => setViewReturnId(r.id)}
+          />
+        ))}
       </div>
     </div>
   );
 
-  if (aLoading || rLoading) return <div className={styles.loading}>Loading refunds…</div>;
+  // Cancellation cards carry the same context as a return card (parties, usage
+  // window, invoices, ticket history) — only the source record differs.
+  const renderCancellationColumn = () => (
+    <div className={styles.kanbanCol}>
+      <div className={styles.kanbanColHead}>
+        <span className={styles.kanbanColLabel}>Cancellation Requests</span>
+        <span className={styles.kanbanColCount}>{pendingCancellations.length}</span>
+      </div>
+      <div className={styles.kanbanColSub}>Reina — new cancellation forms · queue the refund</div>
+      <div className={styles.kanbanList}>
+        {pendingCancellations.length === 0 ? (
+          <div className={styles.kanbanEmpty}>—</div>
+        ) : pendingCancellations.map(c => (
+          <CancellationCard
+            key={c.id}
+            c={c}
+            canOwn={ownsRefundColumn(userEmail, 'cancellation')}
+            parties={partiesFor({ filerEmail: c.customer_email, filerName: c.customer_name })}
+            contact={contactForCase({
+              email: c.customer_email, phone: c.customer_phone, name: c.customer_name,
+            })}
+            usage={usageForEmail(c.customer_email)}
+            invoices={invoicesForEmail(c.customer_email)}
+            tickets={ticketsForEmails([c.customer_email])}
+            onOpenTicket={setOpenTicketId}
+            onError={setError}
+          />
+        ))}
+      </div>
+    </div>
+  );
+
+  if (aLoading || rLoading || cLoading) return <div className={styles.loading}>Loading refunds…</div>;
 
   return (
     <div className={styles.tabContent}>
@@ -373,7 +467,7 @@ export function RefundsTab() {
 
       <div className={styles.refundsBar}>
         <button className={styles.requestRefundBtn} onClick={() => setShowRequestModal(true)}>
-          + Request refund
+          + Create Manual Refund
         </button>
         {error && <span className={styles.refundsError}>{error}</span>}
       </div>
@@ -382,6 +476,9 @@ export function RefundsTab() {
         <div style={{ width: scrollW }} />
       </div>
       <div ref={kanbanRef} className={styles.kanban} onScroll={syncFromKanban}>
+        {/* Customer cancellation forms land here the moment they're submitted —
+            the cancellation-side twin of "Return Form Submitted". */}
+        {renderCancellationColumn()}
         {/* FR-1 (PRD §4) — Account-Manager (Reina) owned intake + inspection,
             before the card is compiled and sent to Manager Review. */}
         {renderPreRefundColumn(
@@ -406,24 +503,23 @@ export function RefundsTab() {
               <div className={styles.kanbanList}>
                 {rows.length === 0 ? (
                   <div className={styles.kanbanEmpty}>—</div>
-                ) : rows.map(r => (
-                  <RefundCard
-                    key={r.id}
-                    refund={r}
-                    linkedReturn={r.return_id ? returnsById.get(r.return_id) ?? null : null}
-                    parties={partiesForRefund(r, r.return_id ? returnsById.get(r.return_id) ?? null : null)}
-                    canApproveHere={ownsRefundColumn(userEmail, r.status)}
-                    usage={usageFor(r, r.return_id ? returnsById.get(r.return_id) ?? null : null)}
-                    invoices={invoicesFor(r, r.return_id ? returnsById.get(r.return_id) ?? null : null)}
-                    tickets={ticketsFor(r, r.return_id ? returnsById.get(r.return_id) ?? null : null)}
-                    onOpenTicket={setOpenTicketId}
-                    canFlow={canFlow}
-                    selected={selectedId === r.id}
-                    onSelect={() => setSelectedId(prev => prev === r.id ? null : r.id)}
-                    onError={setError}
-                    onOpenFinanceModal={setFinanceModalId}
-                  />
-                ))}
+                ) : rows.map(r => {
+                  const linked = r.return_id ? returnsById.get(r.return_id) ?? null : null;
+                  return (
+                    <RefundCard
+                      key={r.id}
+                      refund={r}
+                      linkedReturn={linked}
+                      // A refund born from a cancellation form has no return
+                      // behind it — fall back to the cancellation's order ref
+                      // so the card still names the order it's against.
+                      orderRef={linked?.original_order_ref ?? cancellationForRefund(cancellations, r.id)?.order_ref ?? null}
+                      parties={partiesForRefund(r, linked)}
+                      selected={selectedId === r.id}
+                      onSelect={() => setSelectedId(prev => prev === r.id ? null : r.id)}
+                    />
+                  );
+                })}
               </div>
             </div>
           );
@@ -434,7 +530,9 @@ export function RefundsTab() {
         <RefundDetailPanel
           refund={selectedRefund}
           linkedReturn={selectedReturn}
+          cancellationId={cancellationIdFor(selectedRefund.id)}
           parties={partiesForRefund(selectedRefund, selectedReturn)}
+          contact={contactFor(selectedRefund, selectedReturn)}
           canApproveHere={ownsRefundColumn(userEmail, selectedRefund.status)}
           usage={usageFor(selectedRefund, selectedReturn)}
           invoices={invoicesFor(selectedRefund, selectedReturn)}
@@ -444,16 +542,16 @@ export function RefundsTab() {
           canFlow={canFlow}
           onClose={() => setSelectedId(null)}
           onError={setError}
+          onMoved={refreshApprovals}
           onOpenFinanceModal={setFinanceModalId}
         />
       )}
 
       {showRequestModal && (
-        <RequestRefundModal
-          returns={returns}
-          initialReturnId={requestReturnId}
-          onClose={() => { setShowRequestModal(false); setRequestReturnId(null); }}
+        <CreateManualRefundModal
+          onClose={() => setShowRequestModal(false)}
           onError={setError}
+          onMoved={refreshApprovals}
         />
       )}
 
@@ -464,10 +562,15 @@ export function RefundsTab() {
         return <ReturnDetailModal
           r={r}
           parties={partiesForReturn(r)}
+          contact={contactForCase({
+            email: r.customer_email, phone: r.customer_phone, name: r.customer_name,
+          })}
+          canOwn={ownsRefundColumn(userEmail, preRefundStage(r.status))}
           usage={usageForEmail(email)}
           invoices={invoicesForEmail(email)}
           tickets={ticketsForEmails([r.purchaser_email, r.customer_email])}
           onOpenTicket={setOpenTicketId}
+          onCompile={() => { void compileReturn(r); setViewReturnId(null); }}
           onError={setError}
           onClose={() => setViewReturnId(null)}
         />;
@@ -481,8 +584,11 @@ export function RefundsTab() {
           <FinanceApproveModal
             refund={refund}
             linkedReturn={linked}
+            cancellationId={cancellationIdFor(refund.id)}
+            canWrite={ownsRefundColumn(userEmail, refund.status)}
             onClose={() => setFinanceModalId(null)}
             onError={setError}
+            onMoved={refreshApprovals}
           />
         );
       })()}
@@ -523,6 +629,11 @@ function UsageWindowBadge({ usage }: { usage: RefundUsageWindow }) {
 // return that's been waiting on the customer: amber once past the 7-day remind
 // threshold, red (escalate) at 14 days or once followup_escalated_at is set.
 // Fresh (< 7 days) and non-intake returns render nothing.
+//
+// NOTE (2026-08-04): the automatic 7-day customer nudge was switched off — the
+// send-return-followups cron is inactive. The day counter is computed here from
+// created_at, so the badge still ages correctly; it now means "nobody has
+// chased this customer", not "a reminder went out".
 // ============================================================================
 function CustomerWaitBadge({ r }: { r: ReturnRow }) {
   if (r.status !== 'created') return null;
@@ -538,8 +649,8 @@ function CustomerWaitBadge({ r }: { r: ReturnRow }) {
     </div>
   ) : (
     <div className={styles.usageBadgeUnknown}
-         title="Awaiting a customer response — auto-reminders are going out every 7 days (BR-16).">
-      ⏳ Awaiting customer · {dayLabel} — reminder sent
+         title="Awaiting a customer response past the 7-day mark (BR-16). Auto-reminders are OFF — chase this one by hand if it needs it.">
+      ⏳ Awaiting customer · {dayLabel} — needs a nudge
     </div>
   );
 }
@@ -634,6 +745,12 @@ function CurrencyToggle({ refund, editable, onError }: { refund: RefundApproval;
 
 // Editable refund amount + currency toggle. Used on the card head AND in the
 // opened detail panel so both stay identical.
+//
+// `editable` is unconditionally true at both call sites: the amount is the one
+// field on a refund card that is NOT column-gated. Julie confirms the real
+// figure and she doesn't own every column it passes through, and anyone may
+// correct an obviously wrong amount or flip the currency label. Advancing the
+// refund through its approvals stays gated (canFlow / canApproveHere).
 function AmountEditor({ refund, editable, onError, big }: {
   refund: RefundApproval; editable: boolean; onError: (m: string | null) => void; big?: boolean;
 }) {
@@ -702,40 +819,23 @@ function toNamedFile(blob: File): File {
   return new File([blob], `pasted-${Date.now()}.${ext}`, { type: blob.type });
 }
 
-// FR-13 — one-click return-shipping label. Shows the booked tracking once a
-// label exists; otherwise offers to generate one (books a real Freightcom
-// shipment, so it confirms first). Only meaningful when the customer ships the
-// unit back (disposition 'ship_back').
-function ReturnLabelControl({ r, onError }: { r: ReturnRow; onError: (m: string | null) => void }) {
-  const [busy, setBusy] = useState(false);
+// FR-13 — read-only return-shipping tracking. The "Generate return label"
+// action (one-click Freightcom booking via the `book-return-label` edge fn) was
+// pulled 2026-08-04: it 400'd on every card because the edge fn reads a column
+// (`orders.address_postal_code`) that doesn't exist, and even on success it only
+// popped the PDF in a tab — nothing reached the customer. Feature is parked in
+// docs/feature-backlog-alpha-feedback.md; `bookReturnLabel()` and the edge fn
+// stay in the tree, unwired, for whoever picks it back up. This badge still
+// surfaces pickup tracking recorded by any other means.
+function ReturnTrackingBadge({ r }: { r: ReturnRow }) {
   if (r.disposition === 'discard') return null; // discard = no return shipment
-
-  if (r.pickup_tracking) {
-    return (
-      <span onClick={e => e.stopPropagation()}
-        style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 999, color: '#276749', background: '#f0fff4' }}
-        title={`Return label booked${r.pickup_carrier ? ` · ${r.pickup_carrier}` : ''}`}>
-        🏷 {r.pickup_carrier ? `${r.pickup_carrier} · ` : ''}{r.pickup_tracking}
-      </span>
-    );
-  }
-
-  const run = async () => {
-    if (!window.confirm('Generate a return shipping label and book courier pickup for this unit? This books a shipment with the carrier.')) return;
-    setBusy(true); onError(null);
-    try {
-      const res = await bookReturnLabel(r.id);
-      if (res.label_url) window.open(res.label_url, '_blank', 'noopener');
-    } catch (e) { onError((e as Error).message); }
-    finally { setBusy(false); }
-  };
+  if (!r.pickup_tracking) return null;
   return (
-    <button onClick={e => { e.stopPropagation(); void run(); }} disabled={busy}
-      style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 999, cursor: 'pointer',
-               border: '1px solid #cbd5e0', background: '#fff', color: '#2b6cb0' }}
-      title="Quote + book a return label (customer → warehouse) via Freightcom">
-      {busy ? 'Booking…' : '🏷 Generate return label'}
-    </button>
+    <span onClick={e => e.stopPropagation()}
+      style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 999, color: '#276749', background: '#f0fff4' }}
+      title={`Return shipment${r.pickup_carrier ? ` · ${r.pickup_carrier}` : ''}`}>
+      🏷 {r.pickup_carrier ? `${r.pickup_carrier} · ` : ''}{r.pickup_tracking}
+    </span>
   );
 }
 
@@ -789,105 +889,220 @@ function DispositionEditor({ r, onError }: { r: ReturnRow; onError: (m: string |
         );
       })}
       {!r.disposition && <span style={{ fontSize: 11, color: '#975a16' }}>⚠ not set</span>}
-      <ReturnLabelControl r={r} onError={onError} />
+      <ReturnTrackingBadge r={r} />
     </div>
   );
 }
 
-// Notes on a pre-refund return card (Return Form Submitted / Return &
-// Inspection). Everyone involved can add — mirrors the refund-card notes.
-// Notes for a case. Pass a returnId (return-only cards) and/or a refundId
-// (refund cards). Reads the union and anchors new notes to the return so the
-// same list shows at every stage and is never lost across compile/uncompile.
-function CaseNotes({ refundId = null, returnId = null, onError }:
-  { refundId?: string | null; returnId?: string | null; onError: (m: string | null) => void }) {
-  const { notes, refresh } = useCaseNotes(refundId, returnId);
+// ============================================================================
+// Case notes — the single notes surface on this board
+// ============================================================================
+// Notes for a case. Pass a returnId (return-only cards), a cancellationId
+// and/or a refundId (refund cards). Reads the union and anchors new notes to
+// the return so the same list shows at every stage and is never lost across
+// compile/uncompile.
+//
+// Reading is open to everyone, at every stage — the thread is how the next
+// person picks the case up. Writing is scoped to whoever the case is with:
+//   - add     — only the owner of the column the card is sitting in right now
+//   - edit    — the note's own author, and only while they own that column
+//   - delete  — same as edit, and always behind a confirm step
+// Every button renders either way: red when the action is yours to take, grey
+// and inert when it isn't. A card parked in someone else's column should read
+// as "not your turn", not as a broken button.
+const NOTE_RED = '#c53030';
+const NOTE_GREY = '#a0aec0';
+
+// Shared look for the inline edit/delete links on a note.
+function noteLinkStyle(enabled: boolean, fontSize: number): CSSProperties {
+  return {
+    border: 'none', background: 'none', padding: 0,
+    color: enabled ? NOTE_RED : NOTE_GREY,
+    cursor: enabled ? 'pointer' : 'not-allowed',
+    fontWeight: enabled ? 600 : 400,
+    fontSize, lineHeight: 1.4,
+  };
+}
+
+export function CaseNotes({
+  refundId = null, returnId = null, cancellationId = null,
+  canWrite, ownerLabel = '', variant = 'compact',
+  label = 'Notes', emptyHint, placeholder = 'Add a note…', onError,
+}: {
+  refundId?: string | null;
+  returnId?: string | null;
+  cancellationId?: string | null;
+  /** True when the card currently sits in a column this user owns. */
+  canWrite: boolean;
+  /** Who does own it — named in the hint when canWrite is false. Empty for
+   *  the terminal columns, which nobody owns. */
+  ownerLabel?: string;
+  variant?: 'compact' | 'panel';
+  label?: string;
+  emptyHint?: string;
+  placeholder?: string;
+  onError: (m: string | null) => void;
+}) {
+  const { notes, refresh } = useCaseNotes(refundId, returnId, cancellationId);
   const { user } = useAuth();
   const uid = user?.id;
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [editText, setEditText] = useState('');
+  // Which note is asking "delete this?" — the confirm popover is per-note, so
+  // one stray click never removes anything on its own.
+  const [confirmId, setConfirmId] = useState<string | null>(null);
+
+  const panel = variant === 'panel';
+  const bodySize = panel ? 13 : 12;
+  const linkSize = panel ? 11 : 10;
+  const lockedHint = ownerLabel
+    ? `${ownerLabel} owns this column — only they can add, edit or delete notes while the card is here`
+    : 'This case is closed — its notes are read-only';
+
   const add = async () => {
-    if (!text.trim()) return;
+    if (!canWrite || !text.trim()) return;
     setBusy(true); onError(null);
-    try { await addCaseNote(refundId, returnId, text); setText(''); refresh(); }
+    try { await addCaseNote(refundId, returnId, text, cancellationId); setText(''); refresh(); }
     catch (e) { onError((e as Error).message); }
     finally { setBusy(false); }
   };
   const del = async (n: CaseNote) => {
+    if (!canWrite || n.author_id !== uid) return;
     setBusy(true); onError(null);
-    try { await deleteCaseNote(n, refundId, returnId); refresh(); }
+    try { await deleteCaseNote(n, refundId, returnId, cancellationId); setConfirmId(null); refresh(); }
     catch (e) { onError((e as Error).message); }
     finally { setBusy(false); }
   };
   const saveEdit = async (n: CaseNote) => {
-    if (!editText.trim()) return;
+    if (!canWrite || n.author_id !== uid || !editText.trim()) return;
     setBusy(true); onError(null);
-    try { await updateCaseNote(n, refundId, returnId, editText); setEditId(null); refresh(); }
+    try { await updateCaseNote(n, refundId, returnId, editText, cancellationId); setEditId(null); refresh(); }
     catch (e) { onError((e as Error).message); }
     finally { setBusy(false); }
   };
+
   return (
-    <div onClick={e => e.stopPropagation()} style={{ margin: '8px 0' }}>
-      <div style={{ fontSize: 12, fontWeight: 600, color: '#4a5568', marginBottom: 4 }}>Notes ({notes.length})</div>
-      {notes.length > 0 && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 6 }}>
-          {notes.map(n => (
-            <div key={n.id} style={{ fontSize: 12, background: '#f7fafc', border: '1px solid #edf2f7', borderRadius: 6, padding: '4px 6px' }}>
+    <div onClick={e => e.stopPropagation()} style={{ margin: panel ? 0 : '8px 0' }}>
+      <div style={{ fontSize: 12, fontWeight: panel ? 700 : 600, color: '#4a5568', marginBottom: panel ? 6 : 4 }}>
+        {label} ({notes.length})
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: panel ? 6 : 4, marginBottom: panel ? 8 : 6 }}>
+        {notes.length === 0 && emptyHint && (
+          <div style={{ fontSize: 12, color: NOTE_GREY }}>{emptyHint}</div>
+        )}
+        {notes.map(n => {
+          const isAuthor = n.author_id === uid;
+          const mayEdit = canWrite && isAuthor;
+          const editHint = !canWrite ? lockedHint
+            : !isAuthor ? `Only ${n.author_name ?? 'the author'} can edit or delete this note`
+            : undefined;
+          return (
+            <div key={n.id} style={{ fontSize: bodySize, background: '#f7fafc', border: panel ? 'none' : '1px solid #edf2f7', borderRadius: 6, padding: panel ? '6px 9px' : '4px 6px' }}>
               {editId === n.id ? (
                 <>
                   <textarea value={editText} onChange={e => setEditText(e.target.value)} rows={2} autoFocus
+                    aria-label="Edit note"
                     onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) void saveEdit(n); if (e.key === 'Escape') setEditId(null); }}
-                    style={{ width: '100%', fontSize: 12, padding: '4px 6px', border: '1px solid #2b6cb0', borderRadius: 6, resize: 'vertical' }} />
+                    style={{ width: '100%', fontSize: bodySize, padding: '4px 6px', border: `1px solid ${NOTE_RED}`, borderRadius: 6, resize: 'vertical' }} />
                   <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
-                    <button onClick={() => void saveEdit(n)} disabled={busy || !editText.trim()} className={styles.refundApproveBtn} style={{ fontSize: 10 }}>Save</button>
-                    <button onClick={() => setEditId(null)} disabled={busy} style={{ border: 'none', background: 'none', color: '#a0aec0', cursor: 'pointer', fontSize: 10 }}>Cancel</button>
+                    <button onClick={() => void saveEdit(n)} disabled={busy || !editText.trim()}
+                      style={{ fontSize: linkSize, fontWeight: 600, padding: '2px 10px', borderRadius: 6,
+                               border: `1px solid ${NOTE_RED}`, color: '#fff', background: NOTE_RED,
+                               cursor: busy || !editText.trim() ? 'default' : 'pointer',
+                               opacity: busy || !editText.trim() ? 0.6 : 1 }}>Save</button>
+                    <button onClick={() => setEditId(null)} disabled={busy}
+                      style={{ border: 'none', background: 'none', color: NOTE_GREY, cursor: 'pointer', fontSize: linkSize }}>Cancel</button>
                   </div>
                 </>
               ) : (
                 <>
                   <div style={{ whiteSpace: 'pre-wrap' }}>{n.body}</div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', color: '#a0aec0', fontSize: 10, marginTop: 2 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, color: NOTE_GREY, fontSize: 10, marginTop: panel ? 3 : 2 }}>
                     <span>{n.author_name ?? 'Unknown'} · {new Date(n.created_at).toLocaleString('en-US')}</span>
-                    <span style={{ display: 'flex', gap: 8 }}>
-                      {n.author_id === uid && (
-                        <button onClick={() => { setEditId(n.id); setEditText(n.body); }} disabled={busy}
-                          style={{ border: 'none', background: 'none', color: '#2b6cb0', cursor: 'pointer', fontSize: 10 }}>edit</button>
+                    <span style={{ display: 'flex', gap: 10, position: 'relative' }}>
+                      <button onClick={() => { if (!mayEdit) return; setConfirmId(null); setEditId(n.id); setEditText(n.body); }}
+                        disabled={busy || !mayEdit} aria-disabled={!mayEdit}
+                        title={editHint ?? 'Edit your note'}
+                        style={noteLinkStyle(mayEdit, linkSize)}>edit</button>
+                      <button onClick={() => { if (!mayEdit) return; setConfirmId(n.id); }}
+                        disabled={busy || !mayEdit} aria-disabled={!mayEdit}
+                        title={editHint ?? 'Delete your note'}
+                        style={noteLinkStyle(mayEdit, linkSize)}>delete</button>
+                      {confirmId === n.id && (
+                        <span role="dialog" aria-label="Confirm delete note"
+                          style={{ position: 'absolute', right: 0, bottom: '100%', marginBottom: 6, zIndex: 20,
+                                   display: 'flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap',
+                                   background: '#fff', border: `1px solid ${NOTE_RED}`, borderRadius: 6,
+                                   padding: '6px 8px', boxShadow: '0 4px 12px rgba(0,0,0,0.12)' }}>
+                          <span style={{ fontSize: 11, color: '#4a5568' }}>Delete this note?</span>
+                          <button onClick={() => void del(n)} disabled={busy}
+                            style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 6,
+                                     border: `1px solid ${NOTE_RED}`, color: '#fff', background: NOTE_RED, cursor: 'pointer' }}>
+                            {busy ? '…' : 'Delete'}
+                          </button>
+                          <button onClick={() => setConfirmId(null)} disabled={busy}
+                            style={{ border: 'none', background: 'none', color: NOTE_GREY, cursor: 'pointer', fontSize: 11 }}>Cancel</button>
+                        </span>
                       )}
-                      <button onClick={() => void del(n)} disabled={busy}
-                        style={{ border: 'none', background: 'none', color: '#a0aec0', cursor: 'pointer', fontSize: 10 }}>remove</button>
                     </span>
                   </div>
                 </>
               )}
             </div>
-          ))}
-        </div>
-      )}
-      <div style={{ display: 'flex', gap: 4 }}>
-        <textarea value={text} onChange={e => setText(e.target.value)} placeholder="Add a note…" rows={1}
+          );
+        })}
+      </div>
+      <div style={{ display: 'flex', gap: panel ? 6 : 4 }}>
+        <textarea value={text} onChange={e => setText(e.target.value)} rows={panel ? 2 : 1}
+          aria-label="New note"
+          placeholder={canWrite ? placeholder : lockedHint}
+          disabled={!canWrite} title={canWrite ? undefined : lockedHint}
           onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) void add(); }}
-          style={{ flex: 1, fontSize: 12, padding: '4px 6px', border: '1px solid #cbd5e0', borderRadius: 6, resize: 'vertical', minHeight: 28 }} />
-        <button onClick={() => void add()} disabled={busy || !text.trim()} className={styles.refundApproveBtn} style={{ fontSize: 11 }}>
-          {busy ? '…' : 'Add'}
+          style={{ flex: 1, fontSize: bodySize, padding: panel ? '6px 9px' : '4px 6px',
+                   border: '1px solid #e2e8f0', borderRadius: 6, resize: 'vertical', minHeight: panel ? undefined : 28,
+                   background: canWrite ? '#fff' : '#f7fafc', color: canWrite ? undefined : NOTE_GREY,
+                   cursor: canWrite ? undefined : 'not-allowed' }} />
+        <button onClick={() => void add()} disabled={busy || !canWrite || !text.trim()} aria-disabled={!canWrite}
+          title={canWrite ? undefined : lockedHint}
+          style={{ fontSize: panel ? 12 : 11, fontWeight: 600, padding: panel ? '0 14px' : '0 10px', borderRadius: 6,
+                   whiteSpace: 'nowrap',
+                   border: `1px solid ${canWrite ? NOTE_RED : '#e2e8f0'}`,
+                   color: canWrite ? '#fff' : NOTE_GREY,
+                   background: canWrite ? NOTE_RED : '#f7fafc',
+                   cursor: canWrite && text.trim() && !busy ? 'pointer' : 'not-allowed',
+                   opacity: canWrite && text.trim() && !busy ? 1 : 0.75 }}>
+          {busy ? '…' : panel ? 'Add note' : 'Add'}
         </button>
       </div>
+      {!canWrite && (
+        <div style={{ fontSize: 11, color: NOTE_GREY, marginTop: 4 }}>{lockedHint}.</div>
+      )}
     </div>
   );
 }
 
-function ReturnAttachmentStrip({ returnId, onError }: { returnId: string; onError: (m: string | null) => void }) {
-  const { attachments, refresh } = useReturnAttachments(returnId);
+// Photos on a case live in two sections — "Context of the Case" (what the
+// customer sent us) and "Inspection" (what we found on the bench). Both take
+// pasted images, so a single window-level paste listener lives here in the
+// parent and routes to whichever section is armed; two independent listeners
+// would file the same clipboard image into both sections.
+function CaseAttachmentStrip({ refundId = null, returnId = null, onError }: {
+  refundId?: string | null;
+  returnId?: string | null;
+  onError: (m: string | null) => void;
+}) {
+  const { attachments, refresh } = useCaseAttachments(refundId, returnId);
   const [busy, setBusy] = useState(false);
   const [urls, setUrls] = useState<Record<string, string>>({});
-  const inputRef = useRef<HTMLInputElement>(null);
+  const [pasteTarget, setPasteTarget] = useState<ReturnAttachmentCategory>('context');
 
-  const handleFiles = async (files: File[]) => {
+  const handleFiles = async (files: File[], category: ReturnAttachmentCategory) => {
     if (!files.length) return;
     setBusy(true); onError(null);
     try {
-      for (const f of files) await uploadReturnAttachment(returnId, toNamedFile(f));
+      for (const f of files) await uploadCaseAttachment({ refundId, returnId }, toNamedFile(f), category);
       refresh();
     } catch (e) { onError((e as Error).message); }
     finally { setBusy(false); }
@@ -896,12 +1111,12 @@ function ReturnAttachmentStrip({ returnId, onError }: { returnId: string; onErro
   useEffect(() => {
     const onPaste = (e: ClipboardEvent) => {
       const imgs = imageFilesFrom(e.clipboardData);
-      if (imgs.length) { e.preventDefault(); void handleFiles(imgs); }
+      if (imgs.length) { e.preventDefault(); void handleFiles(imgs, pasteTarget); }
     };
     window.addEventListener('paste', onPaste);
     return () => window.removeEventListener('paste', onPaste);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [returnId]);
+  }, [refundId, returnId, pasteTarget]);
 
   useEffect(() => {
     let cancelled = false;
@@ -917,18 +1132,57 @@ function ReturnAttachmentStrip({ returnId, onError }: { returnId: string; onErro
 
   const del = async (a: ReturnAttachment) => {
     setBusy(true); onError(null);
-    try { await deleteReturnAttachment(a); refresh(); }
+    try { await deleteCaseAttachment(a); refresh(); }
     catch (e) { onError((e as Error).message); }
     finally { setBusy(false); }
   };
 
   return (
-    <div onClick={e => e.stopPropagation()} style={{ margin: '8px 0' }}>
-      <div style={{ fontSize: 12, fontWeight: 600, color: '#4a5568', marginBottom: 4 }}>
-        Photos &amp; documents ({attachments.length})
+    <div onClick={e => e.stopPropagation()} style={{ margin: '8px 0', display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {RETURN_ATTACH_CATEGORIES.map(cat => (
+        <ReturnAttachmentSection
+          key={cat.value}
+          label={cat.label}
+          armed={pasteTarget === cat.value}
+          onArm={() => setPasteTarget(cat.value)}
+          items={attachments.filter(a => (a.category ?? 'context') === cat.value)}
+          urls={urls}
+          busy={busy}
+          onUpload={files => void handleFiles(files, cat.value)}
+          onDelete={a => void del(a)}
+        />
+      ))}
+    </div>
+  );
+}
+
+// One titled photo section. Clicking anywhere in it arms it as the paste
+// target, so the operator can paste straight into the section they mean.
+function ReturnAttachmentSection({ label, armed, onArm, items, urls, busy, onUpload, onDelete }: {
+  label: string;
+  armed: boolean;
+  onArm: () => void;
+  items: ReturnAttachment[];
+  urls: Record<string, string>;
+  busy: boolean;
+  onUpload: (files: File[]) => void;
+  onDelete: (a: ReturnAttachment) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  return (
+    <div onClick={onArm}
+      style={{ border: `1px solid ${armed ? '#90cdf4' : '#edf2f7'}`, background: armed ? '#f7fbff' : '#fff',
+               borderRadius: 8, padding: '8px 10px', cursor: armed ? 'default' : 'pointer' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+        <span style={{ fontSize: 12, fontWeight: 700, color: '#4a5568' }}>{label} ({items.length})</span>
+        {armed && (
+          <span style={{ fontSize: 10, fontWeight: 600, color: '#2b6cb0', background: '#ebf8ff', border: '1px solid #bee3f8', borderRadius: 999, padding: '1px 7px' }}>
+            ⌘/Ctrl+V pastes here
+          </span>
+        )}
       </div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-        {attachments.map(a => {
+        {items.map(a => {
           const isImg = (a.mime_type ?? '').startsWith('image/');
           return (
             <div key={a.id} style={{ position: 'relative', width: 64, height: 64, borderRadius: 6, overflow: 'hidden', border: '1px solid #e2e8f0', background: '#f7fafc' }}>
@@ -942,7 +1196,7 @@ function ReturnAttachmentStrip({ returnId, onError }: { returnId: string; onErro
                   {a.file_name.slice(0, 18)}
                 </a>
               )}
-              <button onClick={() => void del(a)} disabled={busy} title="Remove"
+              <button onClick={() => onDelete(a)} disabled={busy} title="Remove"
                 style={{ position: 'absolute', top: 0, right: 0, background: 'rgba(0,0,0,0.6)', color: '#fff', border: 'none', cursor: 'pointer', fontSize: 11, lineHeight: 1, padding: '2px 5px' }}>✕</button>
             </div>
           );
@@ -953,8 +1207,12 @@ function ReturnAttachmentStrip({ returnId, onError }: { returnId: string; onErro
         </button>
       </div>
       <input ref={inputRef} type="file" multiple accept={RETURN_ATTACH_INPUT_ACCEPT} style={{ display: 'none' }}
-        onChange={e => { void handleFiles(Array.from(e.target.files ?? [])); e.currentTarget.value = ''; }} />
-      <div style={{ fontSize: 10, color: '#a0aec0', marginTop: 2 }}>Paste (⌘/Ctrl+V) an image while this case is open, or click + to upload.</div>
+        onChange={e => { onUpload(Array.from(e.target.files ?? [])); e.currentTarget.value = ''; }} />
+      <div style={{ fontSize: 10, color: '#a0aec0', marginTop: 3 }}>
+        {armed
+          ? 'Paste (⌘/Ctrl+V) an image to file it here, or click + to upload.'
+          : 'Click this section to paste here, or click + to upload.'}
+      </div>
     </div>
   );
 }
@@ -969,10 +1227,8 @@ function RefundInvoices({ invoices, fallbackOrderRef }: {
   fallbackOrderRef?: string | null;
 }) {
   const view = async (path: string) => {
-    try {
-      const url = await getInvoiceSignedUrl(path);
-      window.open(url, '_blank', 'noopener');
-    } catch (e) { alert((e as Error).message); }
+    try { await openInvoiceInNewTab(path); }
+    catch (e) { alert((e as Error).message); }
   };
 
   return (
@@ -995,8 +1251,13 @@ function RefundInvoices({ invoices, fallbackOrderRef }: {
             <span className={styles.invoiceDate}>
               {inv.invoice_date ? new Date(inv.invoice_date).toLocaleDateString('en-US') : '—'}
             </span>
-            {inv.total_cad != null && (
-              <span className={styles.invoiceAmount}>${Number(inv.total_cad).toFixed(2)} CAD</span>
+            {/* What they paid (the invoice's Payment line), which is what the
+                refund is based on — not Total Due, which is $0.00 once paid. */}
+            {invoiceAmountCad(inv) != null && (
+              <span className={styles.invoiceAmount}
+                title={inv.payment_cad != null ? 'Paid (invoice Payment line)' : 'Invoice total'}>
+                ${invoiceAmountCad(inv)!.toFixed(2)} CAD
+              </span>
             )}
             <button className={styles.invoiceView} onClick={() => void view(inv.storage_path)}>View</button>
           </div>
@@ -1145,23 +1406,74 @@ function TicketQuickView({ ticket, onClose }: { ticket: ServiceTicket; onClose: 
 }
 
 // ============================================================================
+// Collapsed queue card — every card on the Refunds board
+// ============================================================================
+// The board itself carries identity only: who the case belongs to (purchaser /
+// primary user, and which of them filled the form) and the order it's against.
+// Amount, badges, notes, unit status and every action live behind "Open Full
+// Refund Card", which opens the same full view the card always opened.
+export function CollapsedCard({
+  borderColor, parties, orderRef, selected = false, onOpen,
+}: {
+  borderColor: string;
+  parties: Parties;
+  orderRef?: string | null;
+  selected?: boolean;
+  onOpen: () => void;
+}) {
+  return (
+    <div
+      className={`${styles.refundCard} ${selected ? styles.refundCardSelected : ''}`}
+      style={{ borderLeftColor: borderColor }}
+      role="button"
+      tabIndex={0}
+      onClick={onOpen}
+      onKeyDown={e => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(); }
+      }}
+      title="Open the full refund card"
+    >
+      <div className={styles.refundCardHead}>
+        <PartyHeader parties={parties} />
+      </div>
+      {orderRef && <div className={styles.refundMeta}>{orderRef}</div>}
+      <button
+        className={styles.openFullCardBtn}
+        onClick={e => { e.stopPropagation(); onOpen(); }}
+      >
+        Open Full Refund Card
+      </button>
+    </div>
+  );
+}
+
+// ============================================================================
 // Refund card
 // ============================================================================
-// A card in the "Return & inspection" column. Mirrors RefundCard's information
-// (usage window, invoices, ticket history, unit-status control) for a return
-// that doesn't yet have a refund request — so the inspection stage carries all
-// the same context as the downstream refund stages.
-function InspectionCard({
-  r, parties, canOwn, usage, invoices, tickets, onOpenTicket, onView, onCompile, onError,
-}: {
+// A card in the "Return Form Submitted" / "Return & inspection" columns — a
+// return that doesn't yet have a refund request. Collapsed like every other
+// card on the board; the full return form (with the column actions) opens in
+// ReturnDetailModal.
+function InspectionCard({ r, parties, onView }: {
   r: ReturnRow;
   parties: Parties;
-  canOwn: boolean;
-  usage: RefundUsageWindow;
-  invoices: CustomerInvoice[];
-  tickets: ServiceTicket[];
-  onOpenTicket: (ticketId: string) => void;
   onView: () => void;
+}) {
+  return (
+    <CollapsedCard
+      borderColor="#805ad5"
+      parties={parties}
+      orderRef={r.original_order_ref}
+      onOpen={onView}
+    />
+  );
+}
+
+// The column actions for a pre-refund return (intake → inspection → compile).
+// They live in the return's full view now that the board card is collapsed.
+function InspectionActions({ r, canOwn, onCompile, onError }: {
+  r: ReturnRow;
+  canOwn: boolean;
   onCompile: () => void;
   onError: (msg: string | null) => void;
 }) {
@@ -1174,387 +1486,208 @@ function InspectionCard({
     finally { setStatusBusy(false); }
   };
   return (
-    <div
-      className={styles.refundCard}
-      style={{ borderLeftColor: '#805ad5', cursor: 'pointer' }}
-      role="button"
-      tabIndex={0}
-      onClick={onView}
-      title="Click to view the full return form"
-    >
-      <div className={styles.refundCardHead}>
-        <PartyHeader parties={parties} />
-        {r.refund_amount_usd != null && (
-          <span className={styles.refundAmount}>${Number(r.refund_amount_usd).toLocaleString('en-US')}</span>
-        )}
-      </div>
-      {(r.original_order_ref || r.unit_serial) && (
-        <div className={styles.refundMeta}>
-          {[r.original_order_ref, r.unit_serial].filter(Boolean).join(' · ')}
-        </div>
-      )}
-      {r.reason && <div className={styles.refundReason}>{r.reason}</div>}
-      {r.refund_method_preference && <div className={styles.refundMeta}>via {r.refund_method_preference}</div>}
-      <CustomerWaitBadge r={r} />
-      <UsageWindowBadge usage={usage} />
-      <RefundInvoices invoices={invoices} fallbackOrderRef={r.original_order_ref} />
-      <CustomerTicketHistory tickets={tickets} onOpenTicket={onOpenTicket} defaultOpen />
-      <CaseNotes returnId={r.id} onError={onError} />
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, margin: '6px 0', alignItems: 'center' }}
-           onClick={e => e.stopPropagation()}>
-        <select
-          value={r.status}
-          onChange={e => void runStatus(e.target.value as ReturnStatus)}
-          disabled={statusBusy}
-          style={{ fontSize: 11, fontWeight: 600, padding: '2px 6px', borderRadius: 4,
-                   border: '1px solid #cbd5e0', background: '#edf2f7', color: '#2d3748',
-                   cursor: 'pointer', maxWidth: 160 }}
-        >
-          {!UNIT_STAGES.some(st => st.value === r.status) && (
-            <option value={r.status} disabled>📦 {UNIT_STATUS_LABEL[r.status]}</option>
-          )}
-          {UNIT_STAGES.map(st => (
-            <option key={st.value} value={st.value}>📦 {st.label}</option>
-          ))}
-        </select>
-        {r.disposition ? (
-          <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 999,
-                         color: RETURN_DISPOSITION_META[r.disposition].color,
-                         background: RETURN_DISPOSITION_META[r.disposition].bg }}>
-            {RETURN_DISPOSITION_META[r.disposition].label}
-          </span>
-        ) : (
-          <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 999,
-                         color: '#975a16', background: '#fffbeb' }}>
-            ⚠ Disposition not set
-          </span>
-        )}
-        <ReturnLabelControl r={r} onError={onError} />
-      </div>
-      <div className={styles.refundActions} onClick={e => e.stopPropagation()}>
-        {preRefundStage(r.status) === 'intake' ? (
-          canOwn ? (
-            <>
-              <button className={styles.refundApproveBtn} disabled={statusBusy}
-                onClick={() => void runStatus('received')}
-                title="Unit is back — move this case to the Return & Inspection column">
-                Move to Return &amp; Inspection →
-              </button>
-              {r.disposition === 'discard' && (
-                <button className={styles.refundApproveBtn} onClick={onCompile}
-                  title="Customer is discarding the unit (no return) — compile straight to Completeness, skipping Return & Inspection">
-                  Discard → Completeness
-                </button>
-              )}
-            </>
-          ) : (
-            <span className={styles.refundCardHint}>Reina moves these forward</span>
-          )
-        ) : (
+    <div className={styles.refundActions}>
+      {preRefundStage(r.status) === 'intake' ? (
+        canOwn ? (
           <>
-            {/* back-move stays open to everyone */}
-            <button className={styles.refundCloseBtn} disabled={statusBusy}
-              onClick={() => void runStatus('created')}
-              title="Move this case back to the Return Form Submitted column">
-              ← Return Form Submitted
+            <button className={styles.refundApproveBtn} disabled={statusBusy}
+              onClick={() => void runStatus('received')}
+              title="Unit is back — move this case to the Return & Inspection column">
+              Move to Return &amp; Inspection →
             </button>
-            {canOwn && (
+            {r.disposition === 'discard' && (
               <button className={styles.refundApproveBtn} onClick={onCompile}
-                title="Compile the case into a refund request (moves it to the Completeness column)">
-                Compile → Completeness
+                title="Customer is discarding the unit (no return) — compile straight to Completeness, skipping Return & Inspection">
+                Discard → Completeness
               </button>
             )}
           </>
-        )}
-      </div>
+        ) : (
+          <span className={styles.refundCardHint}>Reina moves these forward</span>
+        )
+      ) : (
+        <>
+          {/* back-move stays open to everyone */}
+          <button className={styles.refundCloseBtn} disabled={statusBusy}
+            onClick={() => void runStatus('created')}
+            title="Move this case back to the Return Form Submitted column">
+            ← Return Form Submitted
+          </button>
+          {canOwn && (
+            <button className={styles.refundApproveBtn} onClick={onCompile}
+              title="Compile the case into a refund request (moves it to the Completeness column)">
+              Compile → Completeness
+            </button>
+          )}
+        </>
+      )}
     </div>
   );
 }
 
-function RefundCard({
-  refund, linkedReturn, parties, canApproveHere, usage, invoices, tickets, onOpenTicket, canFlow, selected, onSelect, onError, onOpenFinanceModal,
+// ============================================================================
+// Cancellation card
+// ============================================================================
+// A card in the "Cancellation Requests" column: a customer cancellation form
+// that hasn't been turned into a refund yet. Sibling of InspectionCard — the
+// return form's card — so both intake paths look and behave the same. Compiling
+// opens a refund card in Completeness; "No refund needed" closes the request
+// out for orders that were never charged.
+export function CancellationCard({
+  c, parties, contact, canOwn, usage, invoices, tickets, onOpenTicket, onError,
 }: {
-  refund: RefundApproval;
-  linkedReturn: ReturnRow | null;
+  c: OrderCancellation;
   parties: Parties;
-  canApproveHere: boolean;
+  contact: CustomerContact;
+  canOwn: boolean;
   usage: RefundUsageWindow;
   invoices: CustomerInvoice[];
   tickets: ServiceTicket[];
   onOpenTicket: (ticketId: string) => void;
-  canFlow: boolean;
-  selected: boolean;
-  onSelect: () => void;
   onError: (msg: string | null) => void;
-  onOpenFinanceModal: (id: string) => void;
 }) {
   const [busy, setBusy] = useState(false);
-  const [statusBusy, setStatusBusy] = useState(false);
-  const [confirmMode, setConfirmMode] = useState<'approve' | 'deny' | null>(null);
-  const [inputVal, setInputVal] = useState('');
-  const meta = REFUND_STATUS_META[refund.status];
 
-  const runStatus = async (s: ReturnStatus) => {
-    if (!linkedReturn || linkedReturn.status === s) return;
-    setStatusBusy(true); onError(null);
-    try { await updateReturnStatus(linkedReturn.id, s); }
-    catch (e) { onError((e as Error).message); }
-    finally { setStatusBusy(false); }
-  };
-
-  const openApprove = () => {
-    if (refund.status === 'finance_review') { onOpenFinanceModal(refund.id); return; }
-    setInputVal(''); setConfirmMode('approve');
-  };
-  const openDeny = () => { setInputVal(''); setConfirmMode('deny'); };
-  const cancelConfirm = () => setConfirmMode(null);
-
-  const runConfirm = async () => {
-    if (confirmMode === 'deny' && !inputVal.trim()) return;
+  const run = async (fn: () => Promise<void>) => {
     setBusy(true); onError(null);
-    try {
-      if (confirmMode === 'approve') {
-        await managerApprove(refund.id, inputVal.trim() || undefined);
-      } else {
-        const stage = (['submitted', 'manager_review', 'finance_review', 'refund_queue'].includes(refund.status)
-          ? refund.status : 'manager_review') as 'submitted' | 'manager_review' | 'finance_review' | 'refund_queue';
-        await denyRefund(refund.id, stage, inputVal.trim());
-      }
-      setConfirmMode(null);
-    } catch (e) { onError((e as Error).message); }
-    finally { setBusy(false); }
-  };
-
-  const runClose = async () => {
-    setBusy(true); onError(null);
-    try { await closeRefund(refund.id); }
+    try { await fn(); }
     catch (e) { onError((e as Error).message); }
     finally { setBusy(false); }
   };
 
-  const runExecute = async () => {
-    setBusy(true); onError(null);
-    try { await executeRefund(refund.id); }
-    catch (e) { onError((e as Error).message); }
-    finally { setBusy(false); }
+  const dismiss = () => {
+    const note = window.prompt('Why is no refund needed? (e.g. order was never charged)') ?? undefined;
+    void run(() => dismissCancellationRefund(c, note));
   };
 
-  // Only the OWNER of a card's column may approve/move it forward
-  // (canApproveHere). Denial + back-moves stay open to everyone (canFlow).
-  const canActSubmit = refund.status === 'submitted' && canApproveHere;
-  const canActManager = refund.status === 'manager_review' && canApproveHere;
-  const canActFinance = refund.status === 'finance_review' && canApproveHere;
-  const canActExecute = refund.status === 'refund_queue' && canApproveHere;
-  const canDeny = canFlow && ['submitted', 'manager_review', 'finance_review', 'refund_queue'].includes(refund.status);
-
-  // FR-11: flag a case whose purchaser linkage is unverified; the manager can
-  // override (BR-15) before approving.
-  const linkageOk = hasValidPurchaserLinkage(linkedReturn);
-  const needsLinkage = canActManager && !linkageOk;
-
-  // Send a card BACK a column (not enough info, etc.). From Completeness this
-  // "uncompiles" the case back to Return & Inspection.
-  const backTarget: RefundBackTarget | 'uncompile' | null =
-    refund.status === 'manager_review' ? 'submitted' :
-    refund.status === 'finance_review' ? 'manager_review' :
-    refund.status === 'refund_queue'   ? 'finance_review' :
-    refund.status === 'submitted'      ? 'uncompile' : null;
-  const backLabel =
-    refund.status === 'manager_review' ? '← Completeness' :
-    refund.status === 'finance_review' ? '← Manager review' :
-    refund.status === 'refund_queue'   ? '← Finance review' :
-    refund.status === 'submitted'      ? '← Return & Inspection' : '';
-  const runBack = async () => {
-    if (!backTarget) return;
-    if (backTarget === 'uncompile' &&
-        !window.confirm('Move this case back to Return & Inspection? This removes the refund request. Any notes on it are kept on the return.')) return;
-    setBusy(true); onError(null);
-    try {
-      if (backTarget === 'uncompile') await uncompileRefund(refund.id, refund.return_id);
-      else await sendRefundBack(refund.id, backTarget);
-    } catch (e) { onError((e as Error).message); }
-    finally { setBusy(false); }
-  };
-
-  const runSubmitToManager = async () => {
-    setBusy(true); onError(null);
-    try { await submitToManager(refund.id); }
-    catch (e) { onError((e as Error).message); }
-    finally { setBusy(false); }
-  };
-
-  const runConfirmLinkage = async () => {
-    if (!linkedReturn) return;
-    setBusy(true); onError(null);
-    try { await confirmPurchaserLinkage(linkedReturn.id); }
-    catch (e) { onError((e as Error).message); }
-    finally { setBusy(false); }
-  };
+  // Collapsed on the board like every other card; the full request — context,
+  // notes and the compile/dismiss actions — opens in a modal ON TOP of it. The
+  // card stays in its column the whole time: every other card type keeps its
+  // place because the parent owns the modal, and a request that disappears from
+  // Cancellation Requests while someone reads it looks like it was already
+  // dealt with.
+  const [open, setOpen] = useState(false);
 
   return (
-    <div
-      className={`${styles.refundCard} ${selected ? styles.refundCardSelected : ''}`}
-      style={{ borderLeftColor: meta.color }}
-      onClick={onSelect}
-      role="button"
-      tabIndex={0}
-    >
+    <>
+    <CollapsedCard
+      borderColor="#d69e2e"
+      parties={parties}
+      orderRef={c.order_ref}
+      selected={open}
+      onOpen={() => setOpen(true)}
+    />
+    {open && (
+    <div className={styles.modalBackdrop} onClick={() => setOpen(false)}>
+    <div className={styles.modalCard} onClick={e => e.stopPropagation()}
+         style={{ maxWidth: 720, maxHeight: '85vh', overflowY: 'auto' }}>
       <div className={styles.refundCardHead}>
         <PartyHeader parties={parties} />
-        <AmountEditor refund={refund} editable={canFlow} onError={onError} />
+        {c.order_amount_usd != null && (
+          <span className={styles.refundAmount}>${Number(c.order_amount_usd).toLocaleString('en-US')}</span>
+        )}
+        <button className={styles.btnSecondary} onClick={() => setOpen(false)}>Close</button>
       </div>
-      {refund.reason && <div className={styles.refundReason}>{refund.reason}</div>}
-      {/* The refund method is set by Finance (Julie) at Finance Review and shown
-          to Pedrum in the Refund Queue. Falls back to the legacy payment_method. */}
-      {refund.refund_method ? (
-        <div className={styles.refundMeta} style={{ fontWeight: 700, color: '#2d3748' }}>
-          Refund via {REFUND_METHOD_META[refund.refund_method].label}
+      <div className={styles.refundMeta}>
+        {[c.order_ref, c.product_name, c.purchase_channel].filter(Boolean).join(' · ') || '—'}
+      </div>
+      <ContactBlock contact={contact} />
+      {c.reason && <div className={styles.refundReason}>{c.reason}</div>}
+      {c.desired_resolution && <div className={styles.refundMeta}>Wants: {c.desired_resolution}</div>}
+      {/* Which channel the customer asked to be reached on — the numbers
+          themselves are in the contact block above. */}
+      <div className={styles.refundMeta}>
+        Preferred contact: {c.preferred_contact ?? '—'}
+      </div>
+      {c.product_received && (
+        <div style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 999,
+                      color: '#975a16', background: '#fffbeb', display: 'inline-block', margin: '4px 0' }}>
+          ⚠ Customer already has the unit — route through Returns
         </div>
-      ) : refund.payment_method ? (
-        <div className={styles.refundMeta}>via {refund.payment_method}</div>
-      ) : null}
+      )}
+      {c.description && <div className={styles.refundReason}>{c.description}</div>}
       <UsageWindowBadge usage={usage} />
-      <RefundInvoices invoices={invoices} fallbackOrderRef={linkedReturn?.original_order_ref} />
+      <RefundInvoices invoices={invoices} fallbackOrderRef={c.order_ref} />
       <CustomerTicketHistory tickets={tickets} onOpenTicket={onOpenTicket} defaultOpen />
-      {linkedReturn && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, margin: '6px 0', alignItems: 'center' }}
-             onClick={e => e.stopPropagation()}>
-          <select
-            value={linkedReturn.status}
-            onChange={e => void runStatus(e.target.value as ReturnStatus)}
-            disabled={statusBusy}
-            style={{ fontSize: 11, fontWeight: 600, padding: '2px 6px', borderRadius: 4,
-                     border: '1px solid #cbd5e0', background: '#edf2f7', color: '#2d3748',
-                     cursor: 'pointer', maxWidth: 160 }}
-          >
-            {!UNIT_STAGES.some(st => st.value === linkedReturn.status) && (
-              <option value={linkedReturn.status} disabled>
-                📦 {UNIT_STATUS_LABEL[linkedReturn.status]}
-              </option>
-            )}
-            {UNIT_STAGES.map(st => (
-              <option key={st.value} value={st.value}>📦 {st.label}</option>
-            ))}
-          </select>
-          {linkedReturn.disposition ? (
-            <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 999,
-                           color: RETURN_DISPOSITION_META[linkedReturn.disposition].color,
-                           background: RETURN_DISPOSITION_META[linkedReturn.disposition].bg }}>
-              {RETURN_DISPOSITION_META[linkedReturn.disposition].label}
-            </span>
-          ) : (
-            <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 999,
-                           color: '#975a16', background: '#fffbeb' }}>
-              ⚠ Disposition not set
-            </span>
-          )}
-        </div>
-      )}
-      <div className={styles.refundTimeline}>
-        <RefundStep
-          label="Submitted"
-          ts={refund.submitted_at}
-          active
-        />
-        {refund.manager_approved_at && (
-          <RefundStep
-            label="Manager ✓"
-            ts={refund.manager_approved_at}
-            note={refund.manager_decision_note}
-            active
-          />
-        )}
-        {refund.finance_approved_at && (
-          <RefundStep
-            label="Finance ✓ amount"
-            ts={refund.finance_approved_at}
-            note={refund.finance_decision_note}
-            active
-          />
-        )}
-        {refund.refunded_at && (
-          <RefundStep
-            label="Refunded ✓ paid"
-            ts={refund.refunded_at}
-            active
-          />
-        )}
-        {refund.denied_at && (
-          <RefundStep
-            label={`Denied @ ${refund.denied_at_stage ? REFUND_STATUS_META[refund.denied_at_stage].label : 'review'}`}
-            ts={refund.denied_at}
-            note={refund.denied_reason}
-            negative
-            active
-          />
-        )}
-      </div>
-      <div className={styles.refundActions} onClick={e => e.stopPropagation()}>
-        {confirmMode ? (
-          <div className={styles.refundConfirmInline}>
-            <input
-              autoFocus
-              type="text"
-              placeholder={confirmMode === 'deny' ? 'Reason for denial (required)' : 'Note (optional)'}
-              value={inputVal}
-              onChange={e => setInputVal(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') void runConfirm(); if (e.key === 'Escape') cancelConfirm(); }}
-              className={styles.refundConfirmInput}
-              disabled={busy}
-            />
-            <div className={styles.refundConfirmBtns}>
-              <button
-                onClick={() => void runConfirm()}
-                disabled={busy || (confirmMode === 'deny' && !inputVal.trim())}
-                className={confirmMode === 'approve' ? styles.refundApproveBtn : styles.refundDenyBtn}
-              >{busy ? '…' : 'Confirm'}</button>
-              <button onClick={cancelConfirm} disabled={busy} className={styles.refundCloseBtn}>✕</button>
-            </div>
-          </div>
-        ) : (
+      {/* Notes anchor to the cancellation, so they carry onto the refund card
+          this compiles into instead of starting over there. */}
+      <CaseNotes cancellationId={c.id} canWrite={canOwn} ownerLabel={refundColumnOwnerLabel('cancellation')} onError={onError} />
+      <div className={styles.refundActions}>
+        {canOwn ? (
           <>
-            {canFlow && backTarget && (
-              <button onClick={() => void runBack()} disabled={busy} className={styles.refundCloseBtn}
-                title="Send this card back a column (e.g. not enough information)">
-                {busy ? '…' : backLabel}
-              </button>
-            )}
-            {canActSubmit && (
-              <button onClick={() => void runSubmitToManager()} disabled={busy} className={styles.refundApproveBtn}>
-                {busy ? '…' : 'Submit to manager →'}
-              </button>
-            )}
-            {needsLinkage && (
-              <button onClick={() => void runConfirmLinkage()} disabled={busy} className={styles.refundDenyBtn}
-                title="Filer isn't the buyer and no purchaser receipt is on file — confirm linkage to override (BR-15).">
-                {busy ? '…' : '⚠ Confirm purchaser linkage'}
-              </button>
-            )}
-            {(canActManager || canActFinance) && (
-              <button onClick={openApprove} disabled={busy || needsLinkage} className={styles.refundApproveBtn}
-                title={needsLinkage ? 'Confirm purchaser linkage before approving' : undefined}>
-                {canActManager ? 'Approve (manager)' : 'Approve amount → queue'}
-              </button>
-            )}
-            {canActExecute && (
-              <button onClick={() => void runExecute()} disabled={busy} className={styles.refundApproveBtn}>
-                {busy ? '…' : '✓ Mark refunded (executed)'}
-              </button>
-            )}
-            {canDeny && (
-              <button onClick={openDeny} disabled={busy} className={styles.refundDenyBtn}>Deny</button>
-            )}
-            {refund.status === 'refunded' && (
-              <button onClick={() => void runClose()} disabled={busy} className={styles.refundCloseBtn}>Close</button>
-            )}
+            <button className={styles.refundApproveBtn} disabled={busy}
+              onClick={() => void run(() => compileCancellationToRefund(c))}
+              title="Open a refund request for this cancellation (moves it to the Completeness column)">
+              {busy ? '…' : 'Compile → Completeness'}
+            </button>
+            <button className={styles.refundCloseBtn} disabled={busy} onClick={dismiss}
+              title="No money was collected — close the cancellation without a refund">
+              No refund needed
+            </button>
           </>
+        ) : (
+          <span className={styles.refundCardHint}>Reina moves these forward</span>
         )}
       </div>
-      {/* Same notes as the return card — the case is unchanged after compile. */}
-      <CaseNotes refundId={refund.id} returnId={refund.return_id} onError={onError} />
-      {!selected && (
-        <div className={styles.refundCardHint}>Click to open the full case ↗</div>
+    </div>
+    </div>
+    )}
+    </>
+  );
+}
+
+// A card in one of the refund columns. Collapsed to the case's identity — the
+// full card (amount, badges, unit status, notes, actions) opens in
+// RefundDetailPanel, exactly as clicking the card always did.
+function RefundCard({ refund, linkedReturn, orderRef, parties, selected, onSelect }: {
+  refund: RefundApproval;
+  linkedReturn: ReturnRow | null;
+  orderRef?: string | null;
+  parties: Parties;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  const meta = REFUND_STATUS_META[refund.status];
+  return (
+    <CollapsedCard
+      borderColor={meta.color}
+      parties={parties}
+      orderRef={orderRef ?? linkedReturn?.original_order_ref}
+      selected={selected}
+      onOpen={onSelect}
+    />
+  );
+}
+
+// ============================================================================
+// Contact block — on every card on this board
+// ============================================================================
+// Whoever is looking at a card has to be able to reach the customer without
+// leaving for the Customers directory, whether the card came from a return
+// form, a cancellation or was raised by hand. That means the intake columns
+// too: a cancellation request is a refund case someone has to work, and it is
+// the case least likely to have anything else on file. A field with nothing
+// behind it says so in plain words — a blank line reads like an oversight, and
+// an operator can't tell "we never captured a phone" from "the card forgot to
+// render it".
+export function ContactBlock({ contact }: { contact: CustomerContact }) {
+  const row = (label: string, value: string | null, missing: string, href?: string) => (
+    <div className={styles.contactRow}>
+      <span className={styles.contactLabel}>{label}</span>
+      {value ? (
+        href
+          ? <a className={styles.contactLink} href={`${href}${value}`}>{value}</a>
+          : <span className={styles.contactValue}>{value}</span>
+      ) : (
+        <span className={styles.contactMissing}>{missing}</span>
       )}
+    </div>
+  );
+  return (
+    <div className={styles.contactBlock}>
+      {row('Email', contact.email, 'No email on file', 'mailto:')}
+      {row('Phone', contact.phone, 'No phone number on file', 'tel:')}
+      {row('Address', contact.address, 'No address on file')}
     </div>
   );
 }
@@ -1564,11 +1697,13 @@ function RefundCard({
 // Renders the linked return-form data + approve / deny actions.
 // ============================================================================
 function RefundDetailPanel({
-  refund, linkedReturn, parties, canApproveHere, usage, invoices, tickets, onOpenTicket, queuedReplacements, canFlow, onClose, onError, onOpenFinanceModal,
+  refund, linkedReturn, cancellationId = null, parties, contact, canApproveHere, usage, invoices, tickets, onOpenTicket, queuedReplacements, canFlow, onClose, onError, onMoved, onOpenFinanceModal,
 }: {
   refund: RefundApproval;
   linkedReturn: ReturnRow | null;
+  cancellationId?: string | null;
   parties: Parties;
+  contact: CustomerContact;
   canApproveHere: boolean;
   usage: RefundUsageWindow;
   invoices: CustomerInvoice[];
@@ -1578,16 +1713,14 @@ function RefundDetailPanel({
   canFlow: boolean;
   onClose: () => void;
   onError: (msg: string | null) => void;
+  /** Re-read the board after a stage write. Realtime is meant to deliver the
+   *  change on its own, but a dropped socket loses it silently and strands the
+   *  card in the column it just left — so every move confirms itself. */
+  onMoved: () => Promise<void>;
   onOpenFinanceModal: (id: string) => void;
 }) {
   const [busy, setBusy] = useState(false);
   const [holdBusy, setHoldBusy] = useState<string | null>(null);
-  const { notes, refresh: refreshNotes } = useCaseNotes(refund.id, refund.return_id);
-  const { user: authUser } = useAuth();
-  const uid = authUser?.id;
-  const [newNote, setNewNote] = useState('');
-  const [editNoteId, setEditNoteId] = useState<string | null>(null);
-  const [editNoteText, setEditNoteText] = useState('');
   const meta = REFUND_STATUS_META[refund.status];
 
   // Forward/approve is owner-only (canApproveHere); deny is open to everyone.
@@ -1617,6 +1750,7 @@ function RefundDetailPanel({
     try {
       if (backTarget === 'uncompile') { await uncompileRefund(refund.id, refund.return_id); onClose(); }
       else await sendRefundBack(refund.id, backTarget);
+      await onMoved();
     } catch (e) { onError((e as Error).message); }
     finally { setBusy(false); }
   };
@@ -1636,35 +1770,21 @@ function RefundDetailPanel({
 
   const runExecute = async () => {
     setBusy(true); onError(null);
-    try { await executeRefund(refund.id); onClose(); }
+    try { await executeRefund(refund.id); onClose(); await onMoved(); }
+    catch (e) { onError((e as Error).message); }
+    finally { setBusy(false); }
+  };
+
+  const runClose = async () => {
+    setBusy(true); onError(null);
+    try { await closeRefund(refund.id); onClose(); await onMoved(); }
     catch (e) { onError((e as Error).message); }
     finally { setBusy(false); }
   };
 
   const runSubmitToManager = async () => {
     setBusy(true); onError(null);
-    try { await submitToManager(refund.id); onClose(); }
-    catch (e) { onError((e as Error).message); }
-    finally { setBusy(false); }
-  };
-
-  const runAddNote = async () => {
-    if (!newNote.trim()) return;
-    setBusy(true); onError(null);
-    try { await addCaseNote(refund.id, refund.return_id, newNote); setNewNote(''); refreshNotes(); }
-    catch (e) { onError((e as Error).message); }
-    finally { setBusy(false); }
-  };
-  const runEditNote = async (n: CaseNote) => {
-    if (!editNoteText.trim()) return;
-    setBusy(true); onError(null);
-    try { await updateCaseNote(n, refund.id, refund.return_id, editNoteText); setEditNoteId(null); refreshNotes(); }
-    catch (e) { onError((e as Error).message); }
-    finally { setBusy(false); }
-  };
-  const runDeleteNote = async (n: CaseNote) => {
-    setBusy(true); onError(null);
-    try { await deleteCaseNote(n, refund.id, refund.return_id); refreshNotes(); }
+    try { await submitToManager(refund.id); onClose(); await onMoved(); }
     catch (e) { onError((e as Error).message); }
     finally { setBusy(false); }
   };
@@ -1702,11 +1822,13 @@ function RefundDetailPanel({
       if (confirmMode === 'approve') {
         await managerApprove(refund.id, inputVal.trim() || undefined);
         onClose();
+        await onMoved();
       } else {
         const stage = (['submitted', 'manager_review', 'finance_review', 'refund_queue'].includes(refund.status)
           ? refund.status : 'manager_review') as 'submitted' | 'manager_review' | 'finance_review' | 'refund_queue';
         await denyRefund(refund.id, stage, inputVal.trim());
         onClose();
+        await onMoved();
       }
       setConfirmMode(null);
     } catch (e) { onError((e as Error).message); }
@@ -1728,14 +1850,28 @@ function RefundDetailPanel({
             >{meta.label}</span>
           </div>
           <div className={styles.refundDetailSub}>
-            {linkedReturn?.original_order_ref ?? '—'} ·
-            {' '}{linkedReturn?.customer_email ?? refund.customer_email ?? '—'} ·
-            {' '}{linkedReturn?.customer_phone ?? '—'}
+            {linkedReturn?.original_order_ref ?? 'No order reference on file'}
           </div>
+          <ContactBlock contact={contact} />
+          {/* Top of the card, not buried at the bottom — the customer's own
+              words are the first thing an approver wants. */}
+          {linkedReturn && (
+            <div style={{ marginTop: 10 }}><ReturnFormButton r={linkedReturn} /></div>
+          )}
           <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 10 }}>
             <span style={{ fontSize: 12, fontWeight: 600, color: '#4a5568' }}>Refund amount:</span>
-            <AmountEditor refund={refund} editable={canFlow} onError={onError} big />
+            <AmountEditor refund={refund} editable onError={onError} big />
           </div>
+          {/* The refund method is set by Finance (Julie) at Finance Review and
+              read by Pedrum in the Refund Queue. Falls back to the legacy
+              payment_method. */}
+          {refund.refund_method ? (
+            <div className={styles.refundMeta} style={{ fontWeight: 700, color: '#2d3748', fontStyle: 'normal', marginTop: 6 }}>
+              Refund via {REFUND_METHOD_META[refund.refund_method].label}
+            </div>
+          ) : refund.payment_method ? (
+            <div className={styles.refundMeta} style={{ marginTop: 6 }}>via {refund.payment_method}</div>
+          ) : null}
           <div style={{ marginTop: 6 }}>
             <UsageWindowBadge usage={usage} />
           </div>
@@ -1831,62 +1967,58 @@ function RefundDetailPanel({
           {!linkedReturn.disposition && (
             <span style={{ fontSize: 11, color: '#975a16' }}>⚠ not set</span>
           )}
-          <ReturnLabelControl r={linkedReturn} onError={onError} />
+          <ReturnTrackingBadge r={linkedReturn} />
         </div>
-        <ReturnFormAnswers r={linkedReturn} />
-        <ReturnAttachmentStrip returnId={linkedReturn.id} onError={onError} />
         </>
       )}
 
-      {/* Notes for approvers (George/Julie) — collaborative, timestamped, attributed. */}
+      {/* Photos file against the return when the case has one and against the
+          refund when it doesn't, so a card with no return behind it — born from
+          a cancellation form, or opened by hand — still takes evidence. */}
+      <CaseAttachmentStrip refundId={refund.id} returnId={linkedReturn?.id ?? null} onError={onError} />
+
+      {/* Notes for approvers (George/Julie) — collaborative, timestamped,
+          attributed, and writable only by whoever owns the column the card is
+          in right now (canApproveHere). Everyone still reads the whole thread. */}
       <div style={{ margin: '12px 0', borderTop: '1px solid #edf2f7', paddingTop: 12 }}>
-        <div style={{ fontSize: 12, fontWeight: 700, color: '#4a5568', marginBottom: 6 }}>
-          Notes for approvers ({notes.length})
-        </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 }}>
-          {notes.length === 0 && <div style={{ fontSize: 12, color: '#a0aec0' }}>No notes yet — add context for the approver here.</div>}
-          {notes.map(n => (
-            <div key={n.id} style={{ fontSize: 13, background: '#f7fafc', borderRadius: 6, padding: '6px 9px' }}>
-              {editNoteId === n.id ? (
-                <>
-                  <textarea value={editNoteText} onChange={e => setEditNoteText(e.target.value)} rows={2} autoFocus
-                    onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) void runEditNote(n); if (e.key === 'Escape') setEditNoteId(null); }}
-                    style={{ width: '100%', fontSize: 13, padding: '6px 9px', border: '1px solid #2b6cb0', borderRadius: 6, resize: 'vertical' }} />
-                  <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
-                    <button onClick={() => void runEditNote(n)} disabled={busy || !editNoteText.trim()}
-                      style={{ fontSize: 11, fontWeight: 600, padding: '2px 10px', borderRadius: 6, border: '1px solid #2b6cb0', color: '#fff', background: '#2b6cb0', cursor: 'pointer' }}>Save</button>
-                    <button onClick={() => setEditNoteId(null)} disabled={busy}
-                      style={{ border: 'none', background: 'none', color: '#a0aec0', cursor: 'pointer', fontSize: 11 }}>Cancel</button>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div style={{ whiteSpace: 'pre-wrap' }}>{n.body}</div>
-                  <div style={{ fontSize: 10, color: '#a0aec0', marginTop: 3, display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-                    <span>{n.author_name ?? 'Unknown'} · {new Date(n.created_at).toLocaleString()}</span>
-                    <span style={{ display: 'flex', gap: 10 }}>
-                      {n.author_id === uid && (
-                        <button onClick={() => { setEditNoteId(n.id); setEditNoteText(n.body); }} disabled={busy} title="Edit your note"
-                          style={{ border: 'none', background: 'none', color: '#2b6cb0', cursor: 'pointer', fontSize: 11 }}>edit</button>
-                      )}
-                      <button onClick={() => void runDeleteNote(n)} disabled={busy} title="Delete note"
-                        style={{ border: 'none', background: 'none', color: '#cbd5e0', cursor: 'pointer', fontSize: 13, lineHeight: 1 }}>×</button>
-                    </span>
-                  </div>
-                </>
-              )}
-            </div>
-          ))}
-        </div>
-        <div style={{ display: 'flex', gap: 6 }}>
-          <textarea value={newNote} onChange={e => setNewNote(e.target.value)} rows={2}
-            placeholder="Add a note for approvers (extra details on the refund/return)…"
-            style={{ flex: 1, fontSize: 13, padding: '6px 9px', border: '1px solid #e2e8f0', borderRadius: 6, resize: 'vertical' }} />
-          <button onClick={() => void runAddNote()} disabled={busy || !newNote.trim()}
-            style={{ fontSize: 12, fontWeight: 600, padding: '0 14px', borderRadius: 6, border: '1px solid #2b6cb0',
-                     color: '#fff', background: '#2b6cb0', cursor: busy || !newNote.trim() ? 'default' : 'pointer', opacity: busy || !newNote.trim() ? 0.6 : 1 }}>
-            Add note
-          </button>
+        <CaseNotes
+          refundId={refund.id}
+          returnId={refund.return_id}
+          cancellationId={cancellationId}
+          canWrite={canApproveHere}
+          ownerLabel={refundColumnOwnerLabel(refund.status)}
+          variant="panel"
+          label="Notes for approvers"
+          emptyHint="No notes yet — add context for the approver here."
+          placeholder="Add a note for approvers (extra details on the refund/return)…"
+          onError={onError}
+        />
+      </div>
+
+      {/* Approval trail — who moved the case and what they said. Used to sit on
+          the board card; it lives here now that the card is collapsed. */}
+      <div style={{ margin: '12px 0', borderTop: '1px solid #edf2f7', paddingTop: 12 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: '#4a5568', marginBottom: 6 }}>Approval trail</div>
+        <div className={styles.refundTimeline}>
+          <RefundStep label="Submitted" ts={refund.submitted_at} active />
+          {refund.manager_approved_at && (
+            <RefundStep label="Manager ✓" ts={refund.manager_approved_at} note={refund.manager_decision_note} active />
+          )}
+          {refund.finance_approved_at && (
+            <RefundStep label="Finance ✓ amount" ts={refund.finance_approved_at} note={refund.finance_decision_note} active />
+          )}
+          {refund.refunded_at && (
+            <RefundStep label="Refunded ✓ paid" ts={refund.refunded_at} active />
+          )}
+          {refund.denied_at && (
+            <RefundStep
+              label={`Denied @ ${refund.denied_at_stage ? REFUND_STATUS_META[refund.denied_at_stage].label : 'review'}`}
+              ts={refund.denied_at}
+              note={refund.denied_reason}
+              negative
+              active
+            />
+          )}
         </div>
       </div>
 
@@ -1958,11 +2090,49 @@ function RefundDetailPanel({
                 ✕ Deny
               </button>
             )}
+            {refund.status === 'refunded' && (
+              <button onClick={() => void runClose()} disabled={busy} className={styles.refundCloseBtn}
+                title="Close this case out — the payout is done and nothing else is owed">
+                {busy ? '…' : 'Close'}
+              </button>
+            )}
           </div>
         )}
       </div>
     </div>
     </div>
+  );
+}
+
+// The customer's form answers run long — a dozen fields plus free text — and
+// they buried the case controls in every detail view. Both views now open them
+// on demand, in their own window, the same way the board opens a full card.
+export function ReturnFormButton({ r }: { r: ReturnRow }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button
+        className={styles.openFormBtn}
+        onClick={e => { e.stopPropagation(); setOpen(true); }}
+      >
+        Open Refund/Return Form
+      </button>
+      {open && (
+        <div className={styles.modalBackdrop} onClick={() => setOpen(false)}>
+          <div className={styles.modalCard} onClick={e => e.stopPropagation()}
+               style={{ maxWidth: 720, maxHeight: '85vh', overflowY: 'auto' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                          gap: 12, marginBottom: 12 }}>
+              <h3 className={styles.modalTitle} style={{ margin: 0 }}>
+                Refund/Return form · {r.return_ref ?? r.original_order_ref ?? '—'}
+              </h3>
+              <button className={styles.btnSecondary} onClick={() => setOpen(false)}>Close</button>
+            </div>
+            <ReturnFormAnswers r={r} />
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -2038,13 +2208,16 @@ function ReturnFormAnswers({ r }: { r: ReturnRow }) {
 
 // Read-only viewer for a return's full submitted form — opened by clicking a
 // card in the Return & inspection column (before a refund request exists).
-function ReturnDetailModal({ r, parties, usage, invoices, tickets, onOpenTicket, onError, onClose }: {
+export function ReturnDetailModal({ r, parties, contact, canOwn, usage, invoices, tickets, onOpenTicket, onCompile, onError, onClose }: {
   r: ReturnRow;
   parties: Parties;
+  contact: CustomerContact;
+  canOwn: boolean;
   usage: RefundUsageWindow;
   invoices: CustomerInvoice[];
   tickets: ServiceTicket[];
   onOpenTicket: (ticketId: string) => void;
+  onCompile: () => void;
   onError: (msg: string | null) => void;
   onClose: () => void;
 }) {
@@ -2059,24 +2232,40 @@ function ReturnDetailModal({ r, parties, usage, invoices, tickets, onOpenTicket,
             <div style={{ fontSize: 12, color: '#718096' }}>
               Return form · {r.return_ref ?? r.original_order_ref ?? '—'}
             </div>
-            <div style={{ fontSize: 12, color: '#718096' }}>
-              {[r.customer_email, r.customer_phone].filter(Boolean).join(' · ') || '—'}
-            </div>
           </div>
           <button className={styles.btnSecondary} onClick={onClose}>Close</button>
         </div>
+        {/* Replaces the old "email · phone" line: same two values, plus the
+            mailing address the return form never captured, and each one says
+            so when it isn't on file. */}
+        <ContactBlock contact={contact} />
         {/* Full case context — same blocks the refund detail panel shows:
             usage window, sales invoice + order #, ticket history, saved notes,
             then the return form answers. */}
         <div style={{ marginTop: 12 }}>
+          {/* Top of the card, not buried at the bottom — the customer's own
+              words are the first thing an operator wants. */}
+          <ReturnFormButton r={r} />
+          {r.refund_amount_usd != null && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10, marginBottom: 6 }}>
+              <span style={{ fontSize: 12, fontWeight: 600, color: '#4a5568' }}>Requested amount:</span>
+              <span className={styles.refundAmount}>${Number(r.refund_amount_usd).toLocaleString('en-US')}</span>
+            </div>
+          )}
+          {r.reason && <div className={styles.refundReason}>{r.reason}</div>}
+          <CustomerWaitBadge r={r} />
           <UnitStatusEditor r={r} onError={onError} />
           <DispositionEditor r={r} onError={onError} />
           <UsageWindowBadge usage={usage} />
           <RefundInvoices invoices={invoices} fallbackOrderRef={r.original_order_ref} />
           <CustomerTicketHistory tickets={tickets} onOpenTicket={onOpenTicket} defaultOpen />
-          <CaseNotes returnId={r.id} onError={onError} />
-          <ReturnAttachmentStrip returnId={r.id} onError={onError} />
-          <ReturnFormAnswers r={r} />
+          <CaseNotes returnId={r.id} canWrite={canOwn} ownerLabel={refundColumnOwnerLabel(preRefundStage(r.status))} onError={onError} />
+          <CaseAttachmentStrip returnId={r.id} onError={onError} />
+          {/* Column actions — these used to live on the board card, which is
+              now collapsed to the case's identity. */}
+          <div style={{ marginTop: 12, borderTop: '1px solid #edf2f7', paddingTop: 12 }}>
+            <InspectionActions r={r} canOwn={canOwn} onCompile={onCompile} onError={onError} />
+          </div>
         </div>
       </div>
     </div>
@@ -2113,123 +2302,255 @@ function RefundStep({ label, ts, note, active, negative }: {
 }
 
 // ============================================================================
-// Request refund modal
+// Create Manual Refund modal
 // ============================================================================
-function RequestRefundModal({
-  returns, initialReturnId, onClose, onError,
+// Open a refund on a customer picked straight from the directory, with no
+// return or cancellation form behind it — the path for cases that arrive by
+// email or phone. Everyone in the refund workflow can create one; it lands in
+// Completeness like every other card, so nothing skips verification.
+//
+// Photos and the opening note can only be written once the refund row exists
+// (both are keyed to its id), so submit creates the card first and then files
+// them against it.
+function CreateManualRefundModal({
+  onClose, onError, onMoved,
 }: {
-  returns: ReturnRow[];
-  initialReturnId?: string | null;
   onClose: () => void;
   onError: (msg: string | null) => void;
+  /** Re-read the board once the card exists — see RefundDetailPanel. */
+  onMoved: () => Promise<void>;
 }) {
-  const [returnId, setReturnId] = useState<string>('');
-  const [customerName, setCustomerName] = useState('');
-  const [customerEmail, setCustomerEmail] = useState('');
-  const [reason, setReason] = useState('');
+  const { customers, loading: customersLoading } = useCustomers();
+  const [query, setQuery] = useState('');
+  const [picked, setPicked] = useState<Customer | null>(null);
+  const [listOpen, setListOpen] = useState(false);
+  const [category, setCategory] = useState<ReturnCategory | ''>('');
+  const [reasonDetail, setReasonDetail] = useState('');
+  const [files, setFiles] = useState<File[]>([]);
   const [notes, setNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [step, setStep] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
 
-  // Surface returns still in the return/inspection phase (created → inspected)
-  // that don't already have a refund_approval — the natural ones to request a
-  // refund on. (We don't enforce this; CS can still type a freeform name.)
-  const eligibleReturns = useMemo(
-    () => returns.filter(r => ['created', 'received', 'inspected'].includes(r.status))
-      .sort((a, b) => (b.created_at).localeCompare(a.created_at)),
-    [returns],
-  );
+  // FR-6: a directory row can be a USER acting for someone else. Refunds book
+  // against the PURCHASER, so that's who the card is opened for.
+  const purchaser = useMemo(() => {
+    if (!picked) return null;
+    const payeeId = resolvePurchaserId(picked);
+    return payeeId === picked.id ? null : customers.find(c => c.id === payeeId) ?? null;
+  }, [picked, customers]);
+  const payee = purchaser ?? picked;
 
-  const onReturnChange = (id: string) => {
-    setReturnId(id);
-    const r = returns.find(x => x.id === id);
-    if (r) {
-      // When the filer wasn't the buyer, the refund customer is the purchaser.
-      setCustomerName(r.purchaser_name?.trim() || r.customer_name);
-      setCustomerEmail((r.purchaser_email?.trim() || r.customer_email) ?? '');
-      if (r.reason) setReason(r.reason);
-    }
+  const matches = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return customers.slice(0, 50);
+    return customers.filter(c =>
+      c.full_name.toLowerCase().includes(q) ||
+      (c.email ?? '').toLowerCase().includes(q) ||
+      (c.phone ?? '').toLowerCase().includes(q)
+    ).slice(0, 50);
+  }, [customers, query]);
+
+  const pick = (c: Customer) => {
+    setPicked(c);
+    setQuery(c.full_name);
+    setListOpen(false);
   };
 
-  // Pre-select the return when opened from a "Compile → George" button so the
-  // purchaser (if any) pre-fills the customer name.
+  const addFiles = (picked: File[]) => {
+    const ok = picked.filter(f => !f.type || RETURN_ATTACH_ALLOWED_MIME.includes(f.type));
+    if (ok.length !== picked.length) onError('Some files were skipped — images and PDFs only.');
+    setFiles(prev => [...prev, ...ok.map(toNamedFile)]);
+  };
+
+  // Paste-to-attach, same gesture as the card's photo strip.
   useEffect(() => {
-    if (initialReturnId) onReturnChange(initialReturnId);
+    const onPaste = (e: ClipboardEvent) => {
+      const imgs = imageFilesFrom(e.clipboardData);
+      if (imgs.length) { e.preventDefault(); addFiles(imgs); }
+    };
+    window.addEventListener('paste', onPaste);
+    return () => window.removeEventListener('paste', onPaste);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialReturnId]);
+  }, []);
+
+  const canSubmit = !!payee && !!category && !submitting;
 
   const submit = async () => {
-    if (!customerName.trim()) return;
+    if (!payee || !category) return;
     setSubmitting(true); onError(null);
+    let refundId: string | null = null;
     try {
-      // Amount + payment method are set by Finance (Julie) at Finance Review, not here.
-      await submitRefundRequest({
-        return_id: returnId || undefined,
-        customer_name: customerName.trim(),
-        customer_email: customerEmail.trim() || undefined,
-        refund_amount_usd: 0,
-        reason: reason.trim() || undefined,
-        notes: notes.trim() || undefined,
+      setStep('Creating the card…');
+      // Opens at what they paid on their sales invoice (CAD); Finance confirms
+      // the figure and sets the method at Finance Review.
+      const opening = await defaultRefundAmountFromInvoice(payee.email, null, null);
+      const reason = manualRefundReason(category, reasonDetail);
+      refundId = await submitRefundRequest({
+        customer_name: payee.full_name,
+        customer_email: payee.email ?? undefined,
+        refund_amount_usd: opening.amount,
+        currency: opening.currency,
+        reason,
+        notes: purchaser ? `Opened from directory entry "${picked?.full_name}" (user); refund books to the purchaser.` : undefined,
       });
+
+      if (files.length) {
+        setStep(`Uploading ${files.length} file${files.length > 1 ? 's' : ''}…`);
+        for (const f of files) {
+          await uploadCaseAttachment({ refundId, returnId: null }, f, 'context');
+        }
+      }
+      if (notes.trim()) {
+        setStep('Saving the note…');
+        await addCaseNote(refundId, null, notes);
+      }
       onClose();
     } catch (e) {
-      onError((e as Error).message);
+      // The card may already exist — say so rather than implying nothing happened.
+      const msg = (e as Error).message;
+      onError(refundId
+        ? `The refund card was created, but finishing it failed: ${msg}. Open the card to add the rest.`
+        : msg);
     } finally {
+      // Whether or not the extras landed, the card itself exists once
+      // refundId is set — pull it onto the board rather than waiting on a
+      // realtime insert that may never arrive.
+      if (refundId) await onMoved();
       setSubmitting(false);
+      setStep(null);
     }
   };
+
+  const field = (label: string, value: string | null | undefined) => (
+    <div style={{ display: 'flex', gap: 6, fontSize: 12 }}>
+      <span style={{ color: '#718096', minWidth: 62 }}>{label}</span>
+      <span style={{ color: value ? '#2d3748' : '#a0aec0', fontWeight: value ? 600 : 400 }}>{value || '—'}</span>
+    </div>
+  );
 
   return (
     <div className={styles.modalBackdrop} onClick={onClose}>
       <div className={styles.modalCard} onClick={e => e.stopPropagation()}>
         <div className={styles.modalHead}>
-          <strong>Request refund</strong>
+          <strong>Create Manual Refund</strong>
           <button onClick={onClose} className={styles.modalClose}>✕</button>
         </div>
         <div className={styles.modalBody}>
+
+          {/* Customer — picked from the directory, never typed freehand, so the
+              card always resolves to a real customer record. */}
+          <div className={styles.modalRow} style={{ position: 'relative' }}>
+            <label>Customer <span style={{ color: '#c53030' }}>*</span></label>
+            <input
+              type="text"
+              className={styles.modalInput}
+              value={query}
+              disabled={customersLoading}
+              placeholder={customersLoading ? 'Loading the directory…' : 'Search by name, email or phone'}
+              onChange={e => { setQuery(e.target.value); setPicked(null); setListOpen(true); }}
+              onFocus={() => setListOpen(true)}
+            />
+            {listOpen && !picked && (
+              <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 20, maxHeight: 240,
+                            overflowY: 'auto', background: '#fff', border: '1px solid #e2e8f0', borderRadius: 8,
+                            boxShadow: '0 8px 24px rgba(0,0,0,0.12)' }}>
+                {matches.length === 0 ? (
+                  <div style={{ padding: '10px 12px', fontSize: 12, color: '#a0aec0' }}>
+                    No customer in the directory matches that.
+                  </div>
+                ) : matches.map(c => (
+                  <button key={c.id} type="button" onClick={() => pick(c)}
+                    style={{ display: 'block', width: '100%', textAlign: 'left', padding: '7px 12px', border: 'none',
+                             background: 'none', cursor: 'pointer', fontSize: 13, borderBottom: '1px solid #f7fafc' }}>
+                    <span style={{ fontWeight: 600, color: '#2d3748' }}>{c.full_name}</span>
+                    <span style={{ color: '#718096' }}>{c.email ? ` · ${c.email}` : ''}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Everything the directory knows, pulled in with the selection. */}
+          {picked && (
+            <div style={{ border: '1px solid #e2e8f0', borderRadius: 8, padding: '9px 11px', margin: '2px 0 10px',
+                          display: 'flex', flexDirection: 'column', gap: 4, background: '#f7fafc' }}>
+              {field('Email', payee?.email)}
+              {field('Phone', payee?.phone)}
+              {field('Address', [picked.address_line, picked.city, picked.region, picked.postal_code, picked.country]
+                .filter(Boolean).join(', ') || null)}
+              {field('Serials', picked.serials?.length ? picked.serials.join(', ') : null)}
+              {field('Onboarded', picked.onboard_date)}
+              {purchaser && (
+                <div style={{ fontSize: 11, fontWeight: 600, color: '#975a16', background: '#fffbeb',
+                              border: '1px solid #fbd38d', borderRadius: 6, padding: '4px 8px', marginTop: 2 }}>
+                  ⚠ {picked.full_name} is a user, not the buyer — this refund books to {purchaser.full_name}.
+                </div>
+              )}
+            </div>
+          )}
+
           <div className={styles.modalRow}>
-            <label>Link to existing return (optional)</label>
-            <select value={returnId} onChange={e => onReturnChange(e.target.value)} className={styles.modalInput}>
-              <option value="">— freeform (no return) —</option>
-              {eligibleReturns.map(r => (
-                <option key={r.id} value={r.id}>
-                  {r.return_ref ?? '(no ref)'} · {r.customer_name} · ${r.refund_amount_usd ?? 0}
-                </option>
+            <label>Reason for refund <span style={{ color: '#c53030' }}>*</span></label>
+            <select value={category} onChange={e => setCategory(e.target.value as ReturnCategory)}
+                    className={styles.modalInput}>
+              <option value="">— select a reason —</option>
+              {RETURN_CATEGORIES.map(c => (
+                <option key={c} value={c}>{RETURN_CATEGORY_META[c].label}</option>
               ))}
             </select>
           </div>
-          <div className={styles.modalGrid}>
-            <div className={styles.modalRow}>
-              <label>Customer name</label>
-              <input type="text" value={customerName} onChange={e => setCustomerName(e.target.value)}
-                     className={styles.modalInput} required />
-            </div>
-            <div className={styles.modalRow}>
-              <label>Customer email</label>
-              <input type="email" value={customerEmail} onChange={e => setCustomerEmail(e.target.value)}
-                     className={styles.modalInput} />
-            </div>
-          </div>
-          <div style={{ fontSize: 12, color: '#718096', margin: '2px 0 6px' }}>
-            The refund amount and payment method are set by Finance (Julie) at Finance Review.
-          </div>
           <div className={styles.modalRow}>
-            <label>Reason (one-line summary)</label>
-            <input type="text" value={reason} onChange={e => setReason(e.target.value)}
-                   placeholder="e.g. Product defect, shipping damage…"
-                   className={styles.modalInput} />
+            <label>Reason detail (optional)</label>
+            <input type="text" value={reasonDetail} onChange={e => setReasonDetail(e.target.value)}
+                   className={styles.modalInput}
+                   placeholder="What happened, in one line" />
           </div>
+
           <div className={styles.modalRow}>
-            <label>Notes</label>
+            <label>Photos (optional)</label>
+            <div onClick={() => fileRef.current?.click()}
+              style={{ border: '1px dashed #cbd5e0', borderRadius: 8, padding: '10px 12px', cursor: 'pointer',
+                       fontSize: 12, color: '#718096', background: '#fff' }}>
+              Click to choose files, or paste an image — {files.length
+                ? `${files.length} file${files.length > 1 ? 's' : ''} ready`
+                : 'nothing attached yet'}
+            </div>
+            <input ref={fileRef} type="file" multiple accept={RETURN_ATTACH_INPUT_ACCEPT} style={{ display: 'none' }}
+              onChange={e => { addFiles(Array.from(e.target.files ?? [])); e.target.value = ''; }} />
+            {files.length > 0 && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
+                {files.map((f, i) => (
+                  <span key={`${f.name}-${i}`}
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11, background: '#edf2f7',
+                             borderRadius: 999, padding: '3px 8px', color: '#4a5568' }}>
+                    {f.name.slice(0, 24)}
+                    <button type="button" onClick={() => setFiles(prev => prev.filter((_, j) => j !== i))}
+                      style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#a0aec0', fontSize: 12 }}>✕</button>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className={styles.modalRow}>
+            <label>Notes (optional)</label>
             <textarea value={notes} onChange={e => setNotes(e.target.value)}
-                      className={styles.modalTextarea} rows={2}
-                      placeholder="Context for George / Julie" />
+                      className={styles.modalTextarea} rows={3}
+                      placeholder="Context for whoever picks this up — more can be added at any stage on the card." />
+          </div>
+
+          <div style={{ fontSize: 12, color: '#718096', margin: '2px 0 0' }}>
+            Opens in Completeness at what the customer paid on their sales invoice. Finance confirms
+            the amount and sets the payment method at Finance Review.
           </div>
         </div>
         <div className={styles.modalFoot}>
+          {step && <span style={{ fontSize: 12, color: '#718096', marginRight: 'auto' }}>{step}</span>}
           <button onClick={onClose} className={styles.modalSecondary}>Cancel</button>
-          <button onClick={() => void submit()} disabled={submitting || !customerName.trim()}
-                  className={styles.modalPrimary}>
-            {submitting ? 'Creating…' : 'Create refund request'}
+          <button onClick={() => void submit()} disabled={!canSubmit} className={styles.modalPrimary}
+                  title={!picked ? 'Pick a customer from the directory' : !category ? 'Choose a reason for the refund' : ''}>
+            {submitting ? 'Creating…' : 'Create refund'}
           </button>
         </div>
       </div>
@@ -2251,12 +2572,17 @@ function KPI({ label, value, tone, sub }: { label: string; value: number | strin
 // Finance approve modal
 // ============================================================================
 function FinanceApproveModal({
-  refund, linkedReturn, onClose, onError,
+  refund, linkedReturn, cancellationId = null, canWrite, onClose, onError, onMoved,
 }: {
   refund: RefundApproval;
   linkedReturn: ReturnRow | null;
+  cancellationId?: string | null;
+  /** True when the signed-in user owns the column this card sits in. */
+  canWrite: boolean;
   onClose: () => void;
   onError: (m: string | null) => void;
+  /** Re-read the board after the approval lands — see RefundDetailPanel. */
+  onMoved: () => Promise<void>;
 }) {
   const [method, setMethod] = useState<RefundMethod>('shopify');
   const original = Number(refund.original_amount_usd ?? refund.refund_amount_usd);
@@ -2265,37 +2591,6 @@ function FinanceApproveModal({
   const [correctionNote, setCorrectionNote] = useState('');
   const [busy, setBusy] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
-
-  // Collaborative "Notes for approvers" — saved immediately, independent of the
-  // Approve action. Fixes the case where the linked return isn't received yet
-  // (Approve button disabled) but Julie/Huayi still need to record context.
-  const { notes: approverNotes, refresh: refreshNotes } = useCaseNotes(refund.id, refund.return_id);
-  const { user: authUser } = useAuth();
-  const uid = authUser?.id;
-  const [newNote, setNewNote] = useState('');
-  const [noteBusy, setNoteBusy] = useState(false);
-  const [editNoteId, setEditNoteId] = useState<string | null>(null);
-  const [editNoteText, setEditNoteText] = useState('');
-  const runAddNote = async () => {
-    if (!newNote.trim()) return;
-    setNoteBusy(true); setLocalError(null); onError(null);
-    try { await addCaseNote(refund.id, refund.return_id, newNote); setNewNote(''); refreshNotes(); }
-    catch (e) { const m = (e as Error).message; setLocalError(m); onError(m); }
-    finally { setNoteBusy(false); }
-  };
-  const runEditNote = async (n: CaseNote) => {
-    if (!editNoteText.trim()) return;
-    setNoteBusy(true); setLocalError(null);
-    try { await updateCaseNote(n, refund.id, refund.return_id, editNoteText); setEditNoteId(null); refreshNotes(); }
-    catch (e) { const m = (e as Error).message; setLocalError(m); onError(m); }
-    finally { setNoteBusy(false); }
-  };
-  const runDeleteNote = async (n: CaseNote) => {
-    setNoteBusy(true); setLocalError(null);
-    try { await deleteCaseNote(n, refund.id, refund.return_id); refreshNotes(); }
-    catch (e) { const m = (e as Error).message; setLocalError(m); onError(m); }
-    finally { setNoteBusy(false); }
-  };
 
   const FINANCE_OK_STATUSES = ['received', 'inspected', 'refunded', 'closed'];
   const DEFECTIVE_CATEGORIES: ReturnCategory[] = ['product_defect', 'shipping_damage'];
@@ -2354,6 +2649,7 @@ function FinanceApproveModal({
         return_shipping_fee: returnShipFee,
       });
       onClose();
+      await onMoved();
     } catch (e) {
       const msg = (e as Error).message;
       setLocalError(msg);
@@ -2456,58 +2752,18 @@ function FinanceApproveModal({
         </div>
 
         <div className={styles.modalField}>
-          <label className={styles.modalLabel}>Notes for approvers ({approverNotes.length})</label>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 }}>
-            {approverNotes.length === 0 && (
-              <div style={{ fontSize: 12, color: '#a0aec0' }}>No notes yet — save context here without approving.</div>
-            )}
-            {approverNotes.map(n => (
-              <div key={n.id} style={{ fontSize: 13, background: '#f7fafc', borderRadius: 6, padding: '6px 9px' }}>
-                {editNoteId === n.id ? (
-                  <>
-                    <textarea value={editNoteText} onChange={e => setEditNoteText(e.target.value)} rows={2} autoFocus
-                      onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) void runEditNote(n); if (e.key === 'Escape') setEditNoteId(null); }}
-                      className={styles.modalInput} style={{ resize: 'vertical' }} />
-                    <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
-                      <button onClick={() => void runEditNote(n)} disabled={noteBusy || !editNoteText.trim()}
-                        style={{ fontSize: 11, fontWeight: 600, padding: '2px 10px', borderRadius: 6, border: '1px solid #2b6cb0', color: '#fff', background: '#2b6cb0', cursor: 'pointer' }}>Save</button>
-                      <button onClick={() => setEditNoteId(null)} disabled={noteBusy}
-                        style={{ border: 'none', background: 'none', color: '#a0aec0', cursor: 'pointer', fontSize: 11 }}>Cancel</button>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <div style={{ whiteSpace: 'pre-wrap' }}>{n.body}</div>
-                    <div style={{ fontSize: 10, color: '#a0aec0', marginTop: 3, display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-                      <span>{n.author_name ?? 'Unknown'} · {new Date(n.created_at).toLocaleString()}</span>
-                      <span style={{ display: 'flex', gap: 10 }}>
-                        {n.author_id === uid && (
-                          <button onClick={() => { setEditNoteId(n.id); setEditNoteText(n.body); }} disabled={noteBusy} title="Edit your note"
-                            style={{ border: 'none', background: 'none', color: '#2b6cb0', cursor: 'pointer', fontSize: 11 }}>edit</button>
-                        )}
-                        <button onClick={() => void runDeleteNote(n)} disabled={noteBusy} title="Delete note"
-                          style={{ border: 'none', background: 'none', color: '#cbd5e0', cursor: 'pointer', fontSize: 13, lineHeight: 1 }}>×</button>
-                      </span>
-                    </div>
-                  </>
-                )}
-              </div>
-            ))}
-          </div>
-          <div style={{ display: 'flex', gap: 6 }}>
-            <textarea
-              value={newNote}
-              onChange={e => setNewNote(e.target.value)}
-              rows={2}
-              placeholder="Add a note for approvers (saved immediately, no approval needed)…"
-              className={styles.modalInput}
-              style={{ resize: 'vertical' }}
-            />
-            <button onClick={() => void runAddNote()} disabled={noteBusy || !newNote.trim()}
-              className={styles.btnPrimary} style={{ whiteSpace: 'nowrap' }}>
-              {noteBusy ? 'Saving…' : 'Add note'}
-            </button>
-          </div>
+          <CaseNotes
+            refundId={refund.id}
+            returnId={refund.return_id}
+            cancellationId={cancellationId}
+            canWrite={canWrite}
+            ownerLabel={refundColumnOwnerLabel(refund.status)}
+            variant="panel"
+            label="Notes for approvers"
+            emptyHint="No notes yet — save context here without approving."
+            placeholder="Add a note for approvers (saved immediately, no approval needed)…"
+            onError={m => { setLocalError(m); onError(m); }}
+          />
         </div>
 
         <div className={styles.modalActions}>

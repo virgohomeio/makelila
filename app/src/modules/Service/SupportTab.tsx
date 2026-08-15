@@ -3,15 +3,19 @@ import {
   useServiceTickets, useTicketsClosedSince, createTicket, syncGmailTickets,
   STATUS_META, TICKET_STATUSES, TOPIC_LABEL,
   statusMeta, priorityMeta, sourceLabel, topicLabel, slaChip,
-  ISSUE_AREAS, ISSUE_AREA_LABEL,
+  ISSUE_AREAS, ISSUE_AREA_LABEL, ticketStatusSet,
   type TicketStatus, type TicketPriority, type TicketTopic, type ServiceTicket,
   type IssueArea,
 } from '../../lib/service';
 import { useCustomers, syncCustomersFromHubspot, type Customer } from '../../lib/customers';
 import { useUnits } from '../../lib/stock';
+import { useReplacementOrders } from '../../lib/orders';
+import { queuedForReplacementLabel } from '../../lib/replacementTags';
+import { replacementQueueKindsByTicket, groupQueueKinds } from './replacementQueue';
 import { TicketDetailPanel } from './TicketDetailPanel';
 import { CustomerProfilePanel } from './CustomerProfilePanel';
 import { OwnerKanban } from './OwnerKanban';
+import { ActionItemKanban } from './ActionItemKanban';
 import { groupTicketsByCustomer, type CustomerGroup } from './ticketGrouping';
 import { useAuth } from '../../lib/auth';
 import styles from './Service.module.css';
@@ -25,6 +29,7 @@ export function SupportTab() {
   const { tickets, loading } = useServiceTickets('support');
   const { closedIds: closedSinceIds } = useTicketsClosedSince(7);
   const { customers } = useCustomers();
+  const { orders: replacementOrders } = useReplacementOrders();
   const { user } = useAuth();
   const [statusFilter, setStatusFilter] = useState<TicketStatus | 'all'>('all');
   const [sourceFilter, setSourceFilter] = useState<'all' | 'customer_form' | 'hubspot' | 'gmail' | 'quo' | 'telemetry_auto'>('all');
@@ -65,6 +70,15 @@ export function SupportTab() {
   // the Unassigned group. Filters above narrow the ticket pool first, so a
   // profile appears when *any* of its tickets match.
   const grouped = useMemo(() => groupTicketsByCustomer(filtered), [filtered]);
+
+  // What each queued customer is actually waiting on — the batch code of the
+  // replacement unit ("P100X") or "PARTS" — read off the linked replacement
+  // order, so the row says "Queued for P100X Replacement" instead of just
+  // "Queued for Replacement".
+  const queueKindsByTicket = useMemo(
+    () => replacementQueueKindsByTicket(tickets, replacementOrders),
+    [tickets, replacementOrders],
+  );
 
   // Volume per issue area, computed over the *unfiltered* support-ticket
   // pool so the chip counts don't shift when other filters narrow the view.
@@ -134,6 +148,11 @@ export function SupportTab() {
       <OwnerKanban
         tickets={tickets}
         currentUserEmail={user?.email}
+        onSelectTicket={(t) => setSelectedId(t.id)}
+      />
+
+      <ActionItemKanban
+        tickets={tickets}
         onSelectTicket={(t) => setSelectedId(t.id)}
       />
 
@@ -249,6 +268,7 @@ export function SupportTab() {
               <tbody>
                 {grouped.groups.map(g => (
                   <CustomerGroupRow key={g.customerId} g={g}
+                    queueKindsByTicket={queueKindsByTicket}
                     selected={selectedCustomerId === g.customerId}
                     onClick={() => setSelectedCustomerId(g.customerId)} />
                 ))}
@@ -281,6 +301,7 @@ export function SupportTab() {
                 <tbody>
                   {grouped.unassigned.map(t => (
                     <TicketRow key={t.id} t={t}
+                      queueKinds={queueKindsByTicket.get(t.id) ?? []}
                       selected={selectedId === t.id}
                       onClick={() => setSelectedId(t.id)} />
                   ))}
@@ -320,25 +341,57 @@ export function SupportTab() {
   );
 }
 
-function CustomerGroupRow({ g, selected, onClick }: { g: CustomerGroup; selected: boolean; onClick: () => void }) {
+/** Status pill(s) for one status value. "Queued for Replacement" expands into
+ *  one pill per replacement kind — "Queued for P100X Replacement", "Queued for
+ *  PARTS Replacement" — so the row says what the customer is actually waiting
+ *  on. Falls back to the plain status label when the linked replacement order
+ *  can't be resolved.
+ *
+ *  Statuses are multi-select, so a row renders several of these; they all share
+ *  one pill style (there is no separate "tag" styling — a status is a status). */
+function StatusPills({ value, queueKinds }: { value: string; queueKinds: string[] }) {
+  const m = statusMeta(value);
+  const labels = value === 'queued_for_replacement' && queueKinds.length > 0
+    ? queueKinds.map(queuedForReplacementLabel)
+    : [m.label];
+  return (
+    <>
+      {labels.map(label => (
+        <span
+          key={label}
+          className={styles.pill}
+          style={{ background: m.bg, color: m.color }}
+        >{label}</span>
+      ))}
+    </>
+  );
+}
+
+function CustomerGroupRow({ g, queueKindsByTicket, selected, onClick }: {
+  g: CustomerGroup;
+  queueKindsByTicket: Map<string, string[]>;
+  selected: boolean;
+  onClick: () => void;
+}) {
   const ageHours = (Date.now() - new Date(g.lastActivity).getTime()) / 3_600_000;
-  // Surface the state of EVERY open ticket, not just the newest one:
-  //   • each distinct status across open tickets → a status pill
-  //   • each distinct tag across open tickets → a 🏷 chip (skipping any that a
-  //     status pill already shows)
-  // When all tickets are closed there are no open ones, so fall back to the
-  // rollup status — which reads "Complete".
+  // Surface every status held across EVERY open ticket, not just the newest
+  // one. Statuses are multi-select, so one ticket can contribute several (e.g.
+  // In Progress + Queued for Replacement); ticketStatusSet unions the `status`
+  // column with `tags` per ticket. When all tickets are closed there are no
+  // open ones, so fall back to the rollup status — which reads "Complete".
   const openTickets = g.tickets.filter(t => t.status !== 'closed');
   const statuses = openTickets.length > 0
-    ? [...new Set(openTickets.map(t => t.status))]
+    ? [...new Set(openTickets.flatMap(t => ticketStatusSet(t)))]
     : [g.rollupStatus];
-  const tags = [...new Set(openTickets.flatMap(t => t.tags ?? []))]
-    .filter(tag => !statuses.includes(tag));
   // Distinct owners across this customer's open tickets — a profile can hold
   // several tickets split across people, so show each as a chip.
   const owners = [...new Set(
     openTickets.map(t => t.owner_email).filter((e): e is string => !!e),
   )].sort();
+  // What this customer is queued for across their open tickets — "P100X",
+  // "LILA-Mini", "PARTS" … Empty when nothing is queued (or the replacement
+  // order is missing), in which case the pill keeps its generic label.
+  const queueKinds = groupQueueKinds(openTickets, queueKindsByTicket);
   return (
     <tr className={`${styles.row} ${selected ? styles.rowSelected : ''}`} onClick={onClick}>
       <td>
@@ -349,23 +402,7 @@ function CustomerGroupRow({ g, selected, onClick }: { g: CustomerGroup; selected
       <td>{g.openCount > 0 ? <strong>{g.openCount}</strong> : '—'}</td>
       <td>{formatAge(ageHours)}</td>
       <td>
-        {statuses.map(v => {
-          const m = statusMeta(v);
-          return (
-            <span key={v} className={styles.pill} style={{ background: m.bg, color: m.color }}>{m.label}</span>
-          );
-        })}
-        {tags.map(tag => {
-          const m = statusMeta(tag);
-          return (
-            <span
-              key={tag}
-              className={styles.pill}
-              style={{ background: '#fff', color: m.color, border: `1px solid ${m.color}` }}
-              title="Status tag"
-            >🏷 {m.label}</span>
-          );
-        })}
+        {statuses.map(v => <StatusPills key={v} value={v} queueKinds={queueKinds} />)}
       </td>
       <td>
         {owners.length > 0 ? (
@@ -621,8 +658,12 @@ function Kpi({ label, value }: { label: string; value: number }) {
   );
 }
 
-function TicketRow({ t, selected, onClick }: { t: ServiceTicket; selected: boolean; onClick: () => void }) {
-  const s = statusMeta(t.status);
+function TicketRow({ t, queueKinds, selected, onClick }: {
+  t: ServiceTicket;
+  queueKinds: string[];
+  selected: boolean;
+  onClick: () => void;
+}) {
   const p = priorityMeta(t.priority);
   const sla = slaChip(t);
   // Age: prefer last_message_at (gmail-aware) then created_at.
@@ -671,18 +712,9 @@ function TicketRow({ t, selected, onClick }: { t: ServiceTicket; selected: boole
       <td><span className={styles.pill} style={{ background: '#f7fafc', color: p.color }}>{p.label}</span></td>
       <td><SlaChipPill label={sla.label} color={sla.color} /></td>
       <td>
-        <span className={styles.pill} style={{ background: s.bg, color: s.color }}>{s.label}</span>
-        {(t.tags ?? []).map(tag => {
-          const m = statusMeta(tag);
-          return (
-            <span
-              key={tag}
-              className={styles.pill}
-              style={{ background: '#fff', color: m.color, border: `1px solid ${m.color}` }}
-              title="Status tag"
-            >🏷 {m.label}</span>
-          );
-        })}
+        {ticketStatusSet(t).map(s => (
+          <StatusPills key={s} value={s} queueKinds={queueKinds} />
+        ))}
         {t.status === 'closed' && t.closed_at && (
           <div className={styles.closedDate} title={`Closed ${new Date(t.closed_at).toLocaleString()}`}>
             Closed {new Date(t.closed_at).toLocaleDateString()}

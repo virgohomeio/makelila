@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
 import type { Order } from '../../lib/orders';
-import { disposition, needInfo, addOrderNote, orderUrgency } from '../../lib/orders';
+import { disposition, needInfo, addOrderNote, orderUrgency, cancelOrder } from '../../lib/orders';
 import { useAuth } from '../../lib/auth';
 import { CustomerCard } from './detail/CustomerCard';
 import { AddressCard }  from './detail/AddressCard';
@@ -63,6 +63,7 @@ export function Detail({
         onFlag={(reason) => wrap('Flagged', () => disposition(order, 'flagged', reason), 'Flagged', reason)}
         onHold={(reason) => wrap('Held',    () => disposition(order, 'held',    reason), 'Held', reason)}
         onNeedInfo={(note) => wrap('Need-info logged', () => needInfo(order, note), 'Need info', note)}
+        onCancelOrder={(reason) => wrap('Cancelled', () => cancelOrder(order.id, reason), 'Cancelled', reason)}
       />
       <div className={styles.detailBody}>
         {order.kind === 'replacement' && (

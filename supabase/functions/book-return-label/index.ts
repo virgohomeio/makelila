@@ -13,6 +13,7 @@
 //      FREIGHTCOM_PAYMENT_METHOD_ID, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY.
 
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
+import { buildShipmentDetails, nextShipDate } from '../_shared/freightcom.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -78,38 +79,40 @@ async function handle(req: Request): Promise<Response> {
 
   let originPostal: string | null = null;
   let originCountry = 'CA';
+  let originEmail: string | null = null;
   let orderId: string | null = null;
   if (ret.original_order_ref) {
     const { data: order } = await admin
       .from('orders')
-      .select('id, address_postal_code, country')
+      // orders.postal_code — the address_* prefix belongs to the verification
+      // columns only. Selecting the wrong name made PostgREST reject this read,
+      // so every return label failed with "No customer postal code on file".
+      // customer_email: a US customer returning to the Markham warehouse is an
+      // international shipment, which Freightcom refuses to rate without an
+      // email at each end — see _shared/freightcom.ts.
+      .select('id, postal_code, country, customer_email')
       .eq('order_ref', ret.original_order_ref)
       .maybeSingle();
     if (order) {
       orderId = order.id as string;
-      originPostal = (order.address_postal_code as string | null)?.replace(/\s/g, '') ?? null;
-      originCountry = (order.country as string) === 'US' ? 'US' : 'CA';
+      originPostal = order.postal_code as string | null;
+      originCountry = (order.country as string) ?? 'CA';
+      originEmail = order.customer_email as string | null;
     }
   }
-  if (!originPostal) {
+  if (!originPostal?.trim()) {
     return json({ error: 'No customer postal code on file for this return (link an order with an address first).' }, 400);
   }
 
-  const tomorrow = new Date(Date.now() + 86_400_000);
-  const shipDate = { year: tomorrow.getUTCFullYear(), month: tomorrow.getUTCMonth() + 1, day: tomorrow.getUTCDate() };
-  const pkgs = DEFAULT_PACKAGES.map(p => ({
-    measurements: { weight: { unit: 'kg', value: p.weight_kg }, cuboid: { unit: 'cm', l: p.length_cm, w: p.width_cm, h: p.height_cm } },
-    description: p.description,
-  }));
+  const shipDate = nextShipDate(Date.now());
 
   // RETURN direction: origin = customer, destination = warehouse.
-  const details = {
-    expected_ship_date: shipDate,
-    packaging_type: 'package',
-    packaging_properties: { packages: pkgs },
-    origin:      { address: { postal_code: originPostal, country: originCountry } },
-    destination: { address: { postal_code: WAREHOUSE_POSTAL, country: WAREHOUSE_COUNTRY }, signature_requirement: 'not-required' },
-  };
+  const details = buildShipmentDetails({
+    origin:      { postal_code: originPostal, country: originCountry, email: originEmail },
+    destination: { postal_code: WAREHOUSE_POSTAL, country: WAREHOUSE_COUNTRY },
+    packages:    DEFAULT_PACKAGES,
+    shipDate,
+  });
 
   // 1. POST /rate → poll → cheapest rate
   const rateRes = await fetch(`${baseUrl}/rate`, {

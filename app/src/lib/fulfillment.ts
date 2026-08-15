@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from './supabase';
 import { logAction } from './activityLog';
+import { cancelOrder, returnOrderToReview, type ReviewLanding } from './orders';
 
 export type FulfillmentStep = 1 | 2 | 3 | 4 | 5 | 6;
 export type ShelfSlotStatus = 'available' | 'reserved' | 'rework' | 'empty' | 'held';
@@ -576,6 +577,93 @@ export async function setQueuePriority(queueId: string, priority: boolean): Prom
     queueId,
     priority ? 'Marked priority' : 'Cleared priority',
   );
+}
+
+// ─── Leaving the queue: cancelled, or not ready to ship ─────────────────────
+
+/** Release the unit a queue row picked at step 1 back into ready stock. Mirrors
+ *  the step-2 rewind in goBackStep: only a unit that is still 'reserved' is
+ *  touched, so a backfilled pairing (already 'shipped') is left alone. */
+async function releaseAssignedUnit(serial: string | null): Promise<void> {
+  if (!serial) return;
+  const { data: unit } = await supabase
+    .from('units').select('status').eq('serial', serial).maybeSingle();
+  if (unit?.status !== 'reserved') return;
+  const { error: uErr } = await supabase
+    .from('units')
+    .update({ status: 'ready', customer_order_ref: null, customer_name: null })
+    .eq('serial', serial);
+  if (uErr) throw new Error(`Failed to release unit ${serial}: ${uErr.message}`);
+  const { error: sErr } = await supabase
+    .from('shelf_slots')
+    .update({ status: 'available', updated_at: new Date().toISOString() })
+    .eq('serial', serial);
+  if (sErr) throw new Error(`Failed to free the shelf slot for ${serial}: ${sErr.message}`);
+}
+
+type LeavingQueueRow = {
+  id: string; order_id: string; step: number;
+  assigned_serial: string | null; fulfilled_at: string | null;
+};
+
+/** Read the queue row and refuse to act on one that has already shipped —
+ *  a fulfilled order is a returns/refunds problem, not a queue problem. */
+async function loadRemovableQueueRow(queueId: string, action: string): Promise<LeavingQueueRow> {
+  const { data, error } = await supabase
+    .from('fulfillment_queue')
+    .select('id, order_id, step, assigned_serial, fulfilled_at')
+    .eq('id', queueId)
+    .single();
+  if (error || !data) throw new Error(`Queue row not found: ${error?.message ?? 'no row'}`);
+  const row = data as LeavingQueueRow;
+  if (row.step === 6 || row.fulfilled_at) {
+    throw new Error(`This order has already shipped and cannot be ${action} from the queue.`);
+  }
+  return row;
+}
+
+/** Delete the queue row, verifying it actually went: an RLS-blocked delete
+ *  returns 0 rows with no error, which would otherwise read as success. Done
+ *  before any other write so a refusal leaves the order untouched. */
+async function deleteQueueRow(queueId: string): Promise<void> {
+  const { data, error } = await supabase
+    .from('fulfillment_queue').delete().eq('id', queueId).select('id');
+  if (error) throw new Error(`Could not remove the order from the queue: ${error.message}`);
+  if (!data || data.length === 0) {
+    throw new Error('The order was not removed from the queue (no permission, or it is already gone).');
+  }
+}
+
+/** Queue header action — "Cancel Order". The whole order is dead: it leaves the
+ *  fulfillment queue, its unit goes back on the shelf, and the order is marked
+ *  cancelled so it disappears from every Order Review tab. A cancelled sale
+ *  surfaces in Shipping › Cancellations for the refund team (see cancelOrder). */
+export async function cancelOrderFromQueue(queueId: string, reason: string): Promise<void> {
+  await currentUserId();
+  if (!reason.trim()) throw new Error('A reason is required to cancel an order.');
+  const row = await loadRemovableQueueRow(queueId, 'cancelled');
+
+  await deleteQueueRow(queueId);
+  await releaseAssignedUnit(row.assigned_serial);
+  await cancelOrder(row.order_id, reason);
+  await logAction('fq_order_cancelled', queueId, reason.trim());
+}
+
+/** Queue header action — "Shipment Not Ready — Move Back to Orders". The order
+ *  is fine, it just isn't shipping today: it leaves the queue, the unit picked
+ *  for it goes back into ready stock, and the order returns to Order Review
+ *  (Pending for a sale; Replacement › Ready or Awaiting Stock / Batch for a
+ *  replacement, decided by the stock actually on hand). Approving it again
+ *  re-enqueues it from scratch. */
+export async function returnQueueRowToOrders(queueId: string, note?: string): Promise<ReviewLanding> {
+  await currentUserId();
+  const row = await loadRemovableQueueRow(queueId, 'moved back');
+
+  await deleteQueueRow(queueId);
+  await releaseAssignedUnit(row.assigned_serial);
+  const landing = await returnOrderToReview(row.order_id);
+  await logAction('fq_returned_to_orders', queueId, note?.trim() || landing.label);
+  return landing;
 }
 
 /** Swap two shelf slots atomically via Postgres RPC.

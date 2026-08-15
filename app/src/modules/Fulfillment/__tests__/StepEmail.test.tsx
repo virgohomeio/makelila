@@ -76,7 +76,9 @@ describe('StepEmail', () => {
     render(<StepEmail row={rowBase} order={orderCA} />);
     fireEvent.change(screen.getByPlaceholderText('42.75'), { target: { value: '42.75' } });
     fireEvent.click(screen.getByRole('button', { name: /send email/i }));
-    await waitFor(() => expect(markOrderShippedMock).toHaveBeenCalledWith('o-ca', 42.75));
+    // Currency is passed explicitly — the storage column is named `_usd` but
+    // holds CAD, so the caller states it rather than letting anything infer.
+    await waitFor(() => expect(markOrderShippedMock).toHaveBeenCalledWith('o-ca', 42.75, 'CAD'));
     await waitFor(() => expect(sendEmailMock).toHaveBeenCalledWith('q-e'));
   });
 

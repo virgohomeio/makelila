@@ -63,6 +63,9 @@ export type Customer = {
   primary_user_name: string | null;
   primary_user_phone: string | null;
   primary_user_email: string | null;
+  // How that primary user relates to the purchaser (e.g. 'Spouse / partner').
+  // Text, not an enum — the UI picklist has an "Other…" free-text escape.
+  primary_user_relationship: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -159,6 +162,92 @@ export function resolveRefundParties(opts: {
     filerIsPurchaser,
     filerIsPrimaryUser: sameName(primaryUser, filer),
   };
+}
+
+// ── Card contact block (email / phone / address) ────────────────────────────
+// Every refund card has to say how to reach the customer. The case records
+// themselves are thin: a refund carries an email at best, a return form adds a
+// phone, and NEITHER ever carries an address — so the customer directory is
+// what fills the gaps. Case data wins where it exists (an operator may have
+// corrected it on the form); the directory backfills the rest. Nothing here
+// invents a value: a field with nothing behind it comes back null so the card
+// can say it isn't on file.
+
+export type CustomerContact = {
+  email: string | null;
+  phone: string | null;
+  address: string | null;
+};
+
+/** The directory columns a contact block reads. */
+export type ContactDirectoryRow = Pick<
+  Customer,
+  'email' | 'phone' | 'address_line' | 'city' | 'region' | 'postal_code' | 'country'
+>;
+
+const trimmed = (v: string | null | undefined): string | null => (v ?? '').trim() || null;
+
+/** One-line mailing address from a directory row, skipping the parts that are
+ *  blank. Null when the row has no address parts at all. */
+export function formatCustomerAddress(
+  row: Partial<ContactDirectoryRow> | null | undefined,
+): string | null {
+  if (!row) return null;
+  const parts = [row.address_line, row.city, row.region, row.postal_code, row.country]
+    .map(trimmed)
+    .filter((p): p is string => p !== null);
+  return parts.length ? parts.join(', ') : null;
+}
+
+/** The best email / phone / address we have for the person a card is about. */
+export function resolveCustomerContact(opts: {
+  caseEmail?: string | null;
+  casePhone?: string | null;
+  directory?: Partial<ContactDirectoryRow> | null;
+}): CustomerContact {
+  return {
+    email: trimmed(opts.caseEmail) ?? trimmed(opts.directory?.email),
+    phone: trimmed(opts.casePhone) ?? trimmed(opts.directory?.phone),
+    address: formatCustomerAddress(opts.directory),
+  };
+}
+
+export type ContactIndex<T> = { byEmail: Map<string, T>; byName: Map<string, T> };
+
+/** Index the directory for contact lookups. Email is the real key; the name
+ *  index is the fallback for cards that never captured an email. A name shared
+ *  by two customers is dropped from the name index — guessing which household
+ *  a card belongs to would put a stranger's address on it. */
+export function buildContactIndex<T extends { email: string | null; full_name: string }>(
+  rows: T[],
+): ContactIndex<T> {
+  const byEmail = new Map<string, T>();
+  const byName = new Map<string, T>();
+  const ambiguous = new Set<string>();
+  for (const row of rows) {
+    const email = trimmed(row.email)?.toLowerCase();
+    if (email && !byEmail.has(email)) byEmail.set(email, row);
+    const name = trimmed(row.full_name)?.toLowerCase();
+    if (!name) continue;
+    if (byName.has(name)) { ambiguous.add(name); continue; }
+    byName.set(name, row);
+  }
+  for (const name of ambiguous) byName.delete(name);
+  return { byEmail, byName };
+}
+
+/** Find a card's directory row: by email, else by an unambiguous full name. */
+export function lookupContactRow<T>(
+  index: ContactIndex<T>,
+  opts: { email?: string | null; name?: string | null },
+): T | null {
+  const email = trimmed(opts.email)?.toLowerCase();
+  if (email) {
+    const hit = index.byEmail.get(email);
+    if (hit) return hit;
+  }
+  const name = trimmed(opts.name)?.toLowerCase();
+  return (name && index.byName.get(name)) || null;
 }
 
 export function parseUtm(
@@ -336,26 +425,37 @@ export type CustomerProfitability = {
   email: string | null;
   country: string | null;
   onboard_date: string | null;
+  // V5: every amount is CAD, converted through public.fx_rates. The V4 `_usd`
+  // names were a misnomer on three of the four inputs — orders.total_usd/tax_usd
+  // follow orders.currency, cogs_usd is USD, shipping_cost_usd is CAD.
   // Revenue (net of tax — tax is pass-through to govt and not VCycene income)
-  revenue_usd: number;
+  revenue_cad: number;
   // Sales tax collected on behalf of govt — informational, NOT part of margin
-  tax_collected_usd: number;
+  tax_collected_cad: number;
   // 4 cost buckets — sale_cogs + sale_shipping are sales-only;
   // expected_warranty covers ALL non-cancelled replacement orders;
   // expected_refund covers ALL non-denied refund approvals.
-  sale_cogs_usd: number;
-  sale_shipping_usd: number;
-  expected_warranty_cost_usd: number;
-  expected_refund_usd: number;
+  sale_cogs_cad: number;
+  sale_shipping_cad: number;
+  expected_warranty_cost_cad: number;
+  expected_refund_cad: number;
   // Margin = revenue - all 4 buckets (no double-count)
-  net_margin_usd: number;
+  net_margin_cad: number;
   // Settled-refund subset (status='refunded' only) — shown alongside
   // expected so operators can see in-flight vs booked.
-  settled_refund_usd: number;
+  settled_refund_cad: number;
   // Counts
   order_count: number;
   replacement_count: number;
   open_replacement_count: number;
+  // Cost coverage. COGS is always filled, but batch_actual is the invoiced
+  // landed cost while schedule is the V-SAX roadmap projection. Shipping can
+  // still be genuinely unknown — shipping_uncosted_count > 0 means this
+  // customer's margin is an upper bound.
+  cogs_actual_count: number;
+  cogs_modelled_count: number;
+  shipping_costed_count: number;
+  shipping_uncosted_count: number;
   refund_count: number;
   in_flight_refund_count: number;
   ticket_count: number;
@@ -380,7 +480,7 @@ export function useCustomerProfitability(): {
       const { data, error: err } = await supabase
         .from('customer_profitability')
         .select('*')
-        .order('net_margin_usd', { ascending: false });
+        .order('net_margin_cad', { ascending: false });
       if (cancelled) return;
       if (err) {
         setError(err as unknown as Error);
@@ -391,14 +491,18 @@ export function useCustomerProfitability(): {
       // can do arithmetic without string juggling.
       const coerced = (data ?? []).map((r: Record<string, unknown>) => ({
         ...r,
-        revenue_usd:                Number(r.revenue_usd ?? 0),
-        tax_collected_usd:          Number(r.tax_collected_usd ?? 0),
-        sale_cogs_usd:              Number(r.sale_cogs_usd ?? 0),
-        sale_shipping_usd:          Number(r.sale_shipping_usd ?? 0),
-        expected_warranty_cost_usd: Number(r.expected_warranty_cost_usd ?? 0),
-        expected_refund_usd:        Number(r.expected_refund_usd ?? 0),
-        settled_refund_usd:         Number(r.settled_refund_usd ?? 0),
-        net_margin_usd:             Number(r.net_margin_usd ?? 0),
+        revenue_cad:                Number(r.revenue_cad ?? 0),
+        tax_collected_cad:          Number(r.tax_collected_cad ?? 0),
+        sale_cogs_cad:              Number(r.sale_cogs_cad ?? 0),
+        sale_shipping_cad:          Number(r.sale_shipping_cad ?? 0),
+        expected_warranty_cost_cad: Number(r.expected_warranty_cost_cad ?? 0),
+        expected_refund_cad:        Number(r.expected_refund_cad ?? 0),
+        settled_refund_cad:         Number(r.settled_refund_cad ?? 0),
+        net_margin_cad:             Number(r.net_margin_cad ?? 0),
+        cogs_actual_count:          Number(r.cogs_actual_count ?? 0),
+        cogs_modelled_count:        Number(r.cogs_modelled_count ?? 0),
+        shipping_costed_count:      Number(r.shipping_costed_count ?? 0),
+        shipping_uncosted_count:    Number(r.shipping_uncosted_count ?? 0),
       })) as CustomerProfitability[];
       setRows(coerced);
       setLoading(false);
@@ -496,20 +600,344 @@ export async function setPurchaser(userId: string, purchaserId: string | null): 
   await logAction('customer_purchaser_linked', userId, purchaserId ?? 'unlinked');
 }
 
+/** Picklist for the primary user's relationship to the purchaser. Backed by a
+ *  plain text column, so this list can grow without a migration; the UI also
+ *  offers "Other…" for anything not covered here. */
+export const PRIMARY_USER_RELATIONSHIPS = [
+  'Spouse / partner',
+  'Parent',
+  'Child',
+  'Sibling',
+  // "Extended family", not "Other family member" — the picklist already ends in
+  // an "Other…" escape and two options starting with "Other" read as a mistake.
+  'Extended family',
+  'Roommate / housemate',
+  'Friend',
+  'Employee / staff',
+  'Property manager / caretaker',
+] as const;
+
 /** FR-6: set (or clear) the primary user of this customer's machine — a person
- *  who is usually not a customer of record (e.g. a spouse), so free-text. */
+ *  who is usually not a customer of record (e.g. a spouse), so free-text.
+ *  `relationship` is how they relate to the purchaser (see
+ *  PRIMARY_USER_RELATIONSHIPS; any string is accepted for the "Other…" case). */
 export async function setPrimaryUser(
-  customerId: string, name: string | null, phone: string | null, email: string | null,
+  customerId: string,
+  name: string | null,
+  phone: string | null,
+  email: string | null,
+  relationship: string | null,
 ): Promise<void> {
   const { error } = await supabase.from('customers').update({
     primary_user_name: name?.trim() || null,
     primary_user_phone: phone?.trim() || null,
     primary_user_email: email?.trim() || null,
+    primary_user_relationship: relationship?.trim() || null,
   }).eq('id', customerId);
   if (error) throw error;
-  await logAction('customer_primary_user_set', customerId, name?.trim() || 'cleared');
+  const rel = relationship?.trim();
+  await logAction(
+    'customer_primary_user_set',
+    customerId,
+    name?.trim() ? `${name.trim()}${rel ? ` (${rel})` : ''}` : 'cleared',
+    { entityType: 'customer', entityId: customerId },
+  );
 }
 
+// ── Other users in the household ────────────────────────────────────────────
+// primary_user_* holds ONE person. A household often has more: the purchaser
+// stays the primary user and a spouse/child/roommate is also someone we're in
+// contact with. Those live in customer_additional_users — free text, because
+// like the primary user they're usually not customers of record.
+
+export type CustomerAdditionalUser = {
+  id: string;
+  customer_id: string;
+  full_name: string;
+  phone: string | null;
+  email: string | null;
+  /** How they relate to the purchaser. See PRIMARY_USER_RELATIONSHIPS — text,
+   *  so the UI's "Other…" free-text escape can store anything. */
+  relationship: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+/** The household users for one customer, oldest first. Pass null when no
+ *  customer is selected — the hook then idles with an empty list. */
+export function useCustomerAdditionalUsers(customerId: string | null): {
+  users: CustomerAdditionalUser[];
+  loading: boolean;
+  refresh: () => Promise<void>;
+} {
+  const [users, setUsers] = useState<CustomerAdditionalUser[]>([]);
+  const [loading, setLoading] = useState(customerId !== null);
+  const [refreshTick, setRefreshTick] = useState(0);
+
+  useEffect(() => {
+    if (!customerId) { setUsers([]); setLoading(false); return; }
+    let channel: RealtimeChannel | null = null;
+    let cancelled = false;
+    setLoading(true);
+    (async () => {
+      const { data, error } = await supabase
+        .from('customer_additional_users')
+        .select('*')
+        .eq('customer_id', customerId)
+        .order('created_at', { ascending: true });
+      if (cancelled) return;
+      if (!error && data) setUsers(data as CustomerAdditionalUser[]);
+      setLoading(false);
+
+      // Two operators can have the same customer open; keep both lists live.
+      // The channel name is per-customer so switching customers tears down the
+      // old subscription instead of stacking filters.
+      channel = supabase
+        .channel(`customer_additional_users:${customerId}`)
+        .on('postgres_changes', {
+          event: '*', schema: 'public', table: 'customer_additional_users',
+          filter: `customer_id=eq.${customerId}`,
+        }, (payload) => {
+          setUsers(prev => {
+            if (payload.eventType === 'DELETE' && payload.old) {
+              return prev.filter(u => u.id !== (payload.old as { id: string }).id);
+            }
+            if (payload.new) {
+              const row = payload.new as CustomerAdditionalUser;
+              const idx = prev.findIndex(u => u.id === row.id);
+              if (idx >= 0) { const next = [...prev]; next[idx] = row; return next; }
+              return [...prev, row].sort((a, b) => a.created_at.localeCompare(b.created_at));
+            }
+            return prev;
+          });
+        })
+        .subscribe();
+    })();
+    return () => { cancelled = true; if (channel) void channel.unsubscribe(); };
+  }, [customerId, refreshTick]);
+
+  const refresh = async () => { setRefreshTick(t => t + 1); };
+
+  return { users, loading, refresh };
+}
+
+/** Fields an operator can set on a household user. */
+export type AdditionalUserInput = {
+  full_name: string;
+  phone?: string | null;
+  email?: string | null;
+  relationship?: string | null;
+};
+
+/** Trim to the shape the table wants: blanks become NULL, never ''. */
+function normalizeAdditionalUser(input: AdditionalUserInput) {
+  return {
+    full_name: input.full_name.trim(),
+    phone: input.phone?.trim() || null,
+    email: input.email?.trim() || null,
+    relationship: input.relationship?.trim() || null,
+  };
+}
+
+/** One-line audit detail: "Sarah Lockhart (Spouse / partner)". */
+function additionalUserLabel(row: { full_name: string; relationship: string | null }): string {
+  return row.relationship ? `${row.full_name} (${row.relationship})` : row.full_name;
+}
+
+/** Add another person in this customer's household. */
+export async function addCustomerAdditionalUser(
+  customerId: string,
+  input: AdditionalUserInput,
+): Promise<CustomerAdditionalUser> {
+  const row = normalizeAdditionalUser(input);
+  if (!row.full_name) throw new Error('A name is required.');
+  const { data, error } = await supabase
+    .from('customer_additional_users')
+    .insert({ customer_id: customerId, ...row })
+    .select()
+    .single();
+  if (error) throw error;
+  await logAction(
+    'customer_additional_user_added',
+    customerId,
+    additionalUserLabel(row),
+    { entityType: 'customer', entityId: customerId },
+  );
+  return data as CustomerAdditionalUser;
+}
+
+/** Edit a household user in place. */
+export async function updateCustomerAdditionalUser(
+  id: string,
+  customerId: string,
+  input: AdditionalUserInput,
+): Promise<void> {
+  const row = normalizeAdditionalUser(input);
+  if (!row.full_name) throw new Error('A name is required.');
+  const { error } = await supabase
+    .from('customer_additional_users')
+    .update(row)
+    .eq('id', id);
+  if (error) throw error;
+  await logAction(
+    'customer_additional_user_updated',
+    customerId,
+    additionalUserLabel(row),
+    { entityType: 'customer', entityId: customerId },
+  );
+}
+
+/** Remove a household user. `name` is passed in only so the audit line stays
+ *  readable after the row is gone. */
+export async function removeCustomerAdditionalUser(
+  id: string,
+  customerId: string,
+  name: string,
+): Promise<void> {
+  const { error } = await supabase
+    .from('customer_additional_users')
+    .delete()
+    .eq('id', id);
+  if (error) throw error;
+  await logAction(
+    'customer_additional_user_removed',
+    customerId,
+    name,
+    { entityType: 'customer', entityId: customerId },
+  );
+}
+
+// ── Operator-editable contact details ───────────────────────────────────────
+// makelila is the system of record (docs/system-of-record.md): HubSpot's sync
+// only FILLS BLANK columns on an existing row and never clobbers a curated
+// value, and no other sync writes customers.email / customers.phone. So an
+// operator correction here sticks.
+
+/** Loose sanity check — we're catching typos, not policing valid addresses. */
+export function isPlausibleEmail(value: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+}
+
+/** Correct a customer's own email / phone from the directory. Email is the key
+ *  this app matches orders, tickets and refund cards on, so a duplicate would
+ *  silently merge two people's histories — that's rejected here rather than
+ *  left to a DB constraint (there is no unique index on customers.email). */
+export async function updateCustomerContact(
+  customerId: string,
+  patch: { email?: string | null; phone?: string | null },
+): Promise<void> {
+  const update: Record<string, string | null> = {};
+
+  if (patch.email !== undefined) {
+    const email = patch.email?.trim().toLowerCase() || null;
+    if (email && !isPlausibleEmail(email)) {
+      throw new Error(`"${email}" doesn't look like an email address.`);
+    }
+    if (email) {
+      const { data: clash, error: clashErr } = await supabase
+        .from('customers')
+        .select('id, full_name')
+        .ilike('email', email)
+        .neq('id', customerId)
+        .limit(1);
+      if (clashErr) throw clashErr;
+      const other = (clash ?? [])[0] as { id: string; full_name: string } | undefined;
+      if (other) {
+        throw new Error(
+          `${other.full_name || 'Another customer'} already uses ${email}. ` +
+          `Two customers can't share an email — orders and tickets are matched on it. ` +
+          `Link them as purchaser/user instead, or fix the other record first.`,
+        );
+      }
+    }
+    update.email = email;
+  }
+
+  if (patch.phone !== undefined) update.phone = patch.phone?.trim() || null;
+  if (Object.keys(update).length === 0) return;
+
+  const { error } = await supabase.from('customers').update(update).eq('id', customerId);
+  if (error) throw error;
+  await logAction('customer_contact_updated', customerId, Object.keys(update).join(', '),
+    { entityType: 'customer', entityId: customerId });
+}
+
+
+// ── Name correction ─────────────────────────────────────────────────────────
+// customers.full_name is a generated column, so fixing first_name / last_name
+// fixes every screen reading the customers row. Eleven other tables hold a
+// denormalized customer_name snapshot and several match back to the customer BY
+// that string, so the rename has to cascade or the record is orphaned, not just
+// mislabelled. All of that happens inside the rename_customer RPC (migration
+// 20260813090000) in one transaction.
+// Spec: docs/superpowers/specs/2026-08-13-customer-name-editing-design.md
+
+/** A row the rename left alone because its only key was a name another
+ *  customer also answers to. `id` is that table's primary key. */
+export type CustomerRenameSkip = { table: string; id: string; label: string | null };
+
+export type CustomerRenameResult = {
+  old_name: string;
+  new_name: string;
+  /** True when another customer shares the old name. Name-only matching is
+   *  suppressed in that case and the affected rows land in `skipped`. */
+  ambiguous: boolean;
+  /** table name → rows whose customer_name changed. Tables with no changes
+   *  are omitted. */
+  updated: Record<string, number>;
+  skipped: CustomerRenameSkip[];
+};
+
+async function callRenameCustomer(
+  customerId: string,
+  firstName: string,
+  lastName: string,
+  dryRun: boolean,
+): Promise<CustomerRenameResult> {
+  const { data, error } = await supabase.rpc('rename_customer', {
+    p_customer_id: customerId,
+    p_first_name: firstName,
+    p_last_name: lastName,
+    p_dry_run: dryRun,
+  });
+  if (error) throw new Error(error.message);
+  const r = (data ?? {}) as Partial<CustomerRenameResult>;
+  return {
+    old_name: r.old_name ?? '',
+    new_name: r.new_name ?? '',
+    ambiguous: r.ambiguous ?? false,
+    updated: r.updated ?? {},
+    skipped: r.skipped ?? [],
+  };
+}
+
+/** Total rows a rename touches across every table. */
+export function renameRowCount(result: CustomerRenameResult): number {
+  return Object.values(result.updated).reduce((a, b) => a + b, 0);
+}
+
+/** Dry run: what a rename WOULD change, writing nothing. Shares its predicate
+ *  with the real thing, so the confirm dialog can't promise the wrong number. */
+export function previewCustomerRename(
+  customerId: string, firstName: string, lastName: string,
+): Promise<CustomerRenameResult> {
+  return callRenameCustomer(customerId, firstName, lastName, true);
+}
+
+/** Apply the rename and every cascade. Throws if both names are blank — that
+ *  would erase the key the cascades match on. */
+export async function renameCustomer(
+  customerId: string, firstName: string, lastName: string,
+): Promise<CustomerRenameResult> {
+  const result = await callRenameCustomer(customerId, firstName, lastName, false);
+  await logAction(
+    'customer_renamed',
+    customerId,
+    `${result.old_name || '(no name)'} → ${result.new_name} (${renameRowCount(result)} records)`,
+    { entityType: 'customer', entityId: customerId },
+  );
+  return result;
+}
 
 export function useCustomers(): {
   customers: Customer[];

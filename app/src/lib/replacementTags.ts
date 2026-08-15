@@ -122,6 +122,24 @@ export function replacementStageTag(
   return null;
 }
 
+/** What a replacement is *for*, in operator words: the batch code(s) when the
+ *  order carries a whole unit (e.g. "P100X", "LILA-Mini"), otherwise "PARTS".
+ *  A unit shipped alongside parts reads as the unit — same precedence as
+ *  `replacementStageTag`. A truly empty order yields no kind.
+ *  Powers the "Queued for … Replacement" pill on Service > Support Tickets. */
+export function replacementQueueKinds(
+  o: Pick<Order, 'line_items' | 'awaiting_batch_id'>,
+): string[] {
+  const unitTags = replacementItemTags(o).filter(isUnitTag);
+  if (unitTags.length > 0) return unitTags;
+  return (o.line_items?.length ?? 0) > 0 ? ['PARTS'] : [];
+}
+
+/** Pill text for a queue kind — "Queued for P100X Replacement". */
+export function queuedForReplacementLabel(kind: string): string {
+  return `Queued for ${kind} Replacement`;
+}
+
 /** Per-batch replacement demand for whole LILA units, queued across un-shipped
  *  replacement orders (Service > Replacement). Uses the same item-tag
  *  derivation the Replacement tab shows, keeping only the unit tags (P100,

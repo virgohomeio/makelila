@@ -3,7 +3,7 @@ import styles from './Hiring.module.css';
 import { ResumeUploadPanel } from './ResumeUploadPanel';
 import {
   useJobPostings, useCandidates, updateCandidateStage, recordCandidateScore, rejectCandidate, hireCandidate,
-  getResumeSignedUrl, type Candidate, type CandidateSource,
+  getResumeObjectUrl, type Candidate, type CandidateSource,
 } from '../../lib/hiring';
 
 const SOURCE_LABEL: Record<CandidateSource, string> = {
@@ -102,14 +102,36 @@ export function CandidateCard({ candidate, pipelineStages, onSelectCandidate }: 
   // hired_at wins if a legacy row has both — the mutations clear the opposing column.
   const decision = candidate.hired_at ? 'shortlisted' : candidate.rejected_at ? 'rejected' : null;
 
+  /** hiring-resumes is a private bucket, so the file needs a signed URL before
+   *  it can be shown, and that round trip is what made this button feel dead.
+   *  Two separate causes, both now handled:
+   *
+   *  1. Opening the tab *after* the await left it to the popup blocker, and
+   *     window.open's return value was ignored, so a blocked tab meant nothing
+   *     on screen. The tab is opened during the click instead.
+   *  2. Pointing that tab at the signed URL let the browser decide what to do
+   *     with the response; Firefox saved it and left the tab blank. It now gets
+   *     a blob: URL of the file itself (see getResumeObjectUrl). */
   async function viewResume() {
     if (!candidate.resume_url) return;
     setResumeError(null);
+
+    const tab = window.open('', '_blank');
+    if (!tab) {
+      setResumeError('Your browser blocked the resume tab — allow pop-ups for this site and try again.');
+      return;
+    }
+    // Opened without 'noopener' because that makes window.open return null and
+    // there'd be no handle to navigate; severing the link here instead.
+    tab.opener = null;
+
     try {
-      const signedUrl = await getResumeSignedUrl(candidate.resume_url);
-      window.open(signedUrl, '_blank', 'noopener,noreferrer');
-    } catch {
-      setResumeError('Could not open resume — try again.');
+      tab.location.href = await getResumeObjectUrl(candidate.resume_url);
+    } catch (e: unknown) {
+      // The real reason, not a generic retry: "Object not found" (the file was
+      // purged) and an auth failure need different responses from the operator.
+      tab.close();
+      setResumeError(`Could not open resume: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 

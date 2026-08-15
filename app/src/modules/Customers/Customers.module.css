@@ -383,6 +383,32 @@
   color: var(--color-ink-subtle);
   font-style: italic;
 }
+/* Other users in the household — one card per person, so several stacked
+   contacts stay visually separate rather than reading as one block. */
+.additionalUser {
+  padding: 6px 0;
+  border-bottom: 1px solid #f4f4f4;
+  font-size: 12px;
+}
+.additionalUser:last-of-type { border-bottom: none; }
+.additionalUserName {
+  color: var(--color-ink);
+  font-weight: 600;
+}
+.additionalUserContact {
+  color: var(--color-ink-subtle);
+  font-size: 11px;
+  margin-top: 2px;
+}
+.additionalUserActions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+.additionalUserForm {
+  padding: 6px 0;
+  border-bottom: 1px solid #f4f4f4;
+}
 .statusPill {
   font-size: 10px;
   padding: 2px 6px;
@@ -707,6 +733,17 @@
 .profStatGood { border-left: 4px solid #38a169; }
 .profStatBad  { border-left: 4px solid #c53030; }
 .profStatWarn { border-left: 4px solid #d69e2e; }
+/* Inline cost-provenance hints on a card's COGS / Shipping line. `est.` means
+   the roadmap projection rather than an invoiced batch price; `uncosted` means
+   freight we have no Freightcom invoice for, so the margin is an upper bound. */
+.profBasisHint {
+  font-size: .75rem;
+  color: #a0aec0;
+}
+.profUncostedHint {
+  font-size: .75rem;
+  color: #b7791f;
+}
 .profStatLabel {
   font-size: .75rem;
   color: #718096;

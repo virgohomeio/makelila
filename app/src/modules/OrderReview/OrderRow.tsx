@@ -46,7 +46,12 @@ export function OrderRow({
           <span className="replBadge">Replacement</span>
         )}
         {' '}· {order.city}
-        {(() => {
+        {order.status === 'cancelled' ? (
+          // An SLA countdown on a dead order is noise — say what happened instead.
+          <span className={styles.cancelledChip} title={order.cancelled_reason ?? undefined}>
+            CANCELLED
+          </span>
+        ) : (() => {
           const u = orderUrgency(order.placed_at);
           if (!u.label) return null;
           return <span className={`${styles.urgencyChip} ${styles[u.severity]}`}>{u.label}</span>;

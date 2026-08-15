@@ -4,7 +4,7 @@ import { supabase } from '../../lib/supabase';
 import { OrderRow } from './OrderRow';
 import styles from './OrderReview.module.css';
 
-type Tab = 'pending' | 'held' | 'flagged' | 'approved' | 'replacement' | 'all';
+type Tab = 'pending' | 'held' | 'flagged' | 'approved' | 'replacement' | 'all' | 'cancelled';
 
 type SyncState =
   | { kind: 'idle' }
@@ -13,7 +13,7 @@ type SyncState =
   | { kind: 'error'; message: string };
 
 export function Sidebar({
-  pending, held, flagged, approved, replacement, all,
+  pending, held, flagged, approved, replacement, all, cancelled,
   selectedId,
   onSelect,
 }: {
@@ -23,6 +23,9 @@ export function Sidebar({
   approved: Order[];
   replacement: Order[];
   all: Order[];
+  /** Terminal — cancelled here or from the fulfillment queue. Already sorted
+   *  newest-cancelled first by bucketOrders. */
+  cancelled: Order[];
   selectedId: string | null;
   onSelect: (id: string) => void;
 }) {
@@ -47,6 +50,7 @@ export function Sidebar({
                : tab === 'flagged'     ? flagged
                : tab === 'approved'    ? approved
                : tab === 'replacement' ? (replSub === 'awaiting' ? replAwaiting : replReady)
+               : tab === 'cancelled'   ? cancelled
                : all;
 
   const visible = useMemo(() => {
@@ -58,8 +62,11 @@ export function Sidebar({
           o.order_ref.toLowerCase().includes(q) ||
           (o.customer_email ?? '').toLowerCase().includes(q),
         );
+    // Live tabs are a work queue, so they read best by order ref. Cancelled is
+    // a lookup list — the one you just killed should be at the top.
+    if (tab === 'cancelled') return filtered;
     return [...filtered].sort((a, b) => a.order_ref.localeCompare(b.order_ref));
-  }, [source, query]);
+  }, [source, query, tab]);
 
   const tabs: Array<{ key: Tab; label: string; count: number }> = [
     { key: 'pending',     label: 'Pending',     count: pending.length },
@@ -68,6 +75,7 @@ export function Sidebar({
     { key: 'approved',    label: 'Confirmed',   count: approved.length },
     { key: 'replacement', label: 'Replacement', count: replacement.length },
     { key: 'all',         label: 'All',         count: all.length },
+    { key: 'cancelled',   label: 'Cancelled',   count: cancelled.length },
   ];
 
   const runSync = async () => {
@@ -108,7 +116,7 @@ export function Sidebar({
           </div>
         </div>
 
-        <div className={styles.tabBar}>
+        <div className={`${styles.tabBar} ${styles.tabBarScroll}`}>
           {tabs.map(t => (
             <button
               key={t.key}

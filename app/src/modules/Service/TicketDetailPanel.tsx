@@ -6,8 +6,8 @@ import {
   type ServiceTicket, type IssueArea, type TicketCategory,
   STATUS_META, CATEGORY_META, PRIORITY_META, TICKET_STATUSES,
   statusMeta, priorityMeta, sourceLabel, topicLabel, slaChip,
-  ISSUE_AREAS, ISSUE_AREA_LABEL,
-  updateTicketStatus, reassignTicketOwner, setTicketPriority, setTicketIssueArea, setTicketCategory,
+  ISSUE_AREAS, ISSUE_AREA_LABEL, ticketStatusSet,
+  setTicketStatuses, reassignTicketOwner, setTicketPriority, setTicketIssueArea, setTicketCategory,
   setRepairFields, reclassifyTicket, deleteTicket, updateTicketSubject, setTicketDescription,
   markDiagnosisLinkSent, setLinearIssueUrl, setGitHubIssueUrl,
   useCustomerLifecycle, warrantyState,
@@ -241,7 +241,6 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
   );
 
   const cat = CATEGORY_META[ticket.category];
-  const status = statusMeta(ticket.status);
   const prio = priorityMeta(ticket.priority);
 
   async function run<T>(p: Promise<T>) {
@@ -288,16 +287,14 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
           )}
           <div className={styles.detailMetaRow}>
             <span className={styles.pill} style={{ background: cat.bg, color: cat.color }}>{cat.label}</span>
-            <span className={styles.pill} style={{ background: status.bg, color: status.color }}>{status.label}</span>
-            {(ticket.tags ?? []).map(tag => {
-              const m = statusMeta(tag);
+            {/* Statuses are multi-select — render every one the ticket holds,
+                all in the same pill style. */}
+            {ticketStatusSet(ticket).map(s => {
+              const m = statusMeta(s);
               return (
-                <span
-                  key={tag}
-                  className={styles.pill}
-                  style={{ background: '#fff', color: m.color, border: `1px solid ${m.color}` }}
-                  title="Status tag"
-                >🏷 {m.label}</span>
+                <span key={s} className={styles.pill} style={{ background: m.bg, color: m.color }}>
+                  {m.label}
+                </span>
               );
             })}
             <span className={styles.pill} style={{ background: '#f7fafc', color: prio.color }}>{prio.label}</span>
@@ -766,17 +763,20 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
         </div>
 
         <div className={styles.detailSection}>
-          <div className={styles.detailSectionLabel}>Status</div>
+          <div
+            className={styles.detailSectionLabel}
+            title="Statuses are multi-select — a ticket can be In Progress and Queued for Replacement at once. 'Queued for Replacement' is applied automatically when a replacement order is created. Setting 'Replacement Sent' replaces it and moves the replacement order into Fulfillment › Queue › Shipped."
+          >Status</div>
           <div className={styles.actionsRow}>
             {TICKET_STATUSES.map(tag => {
-              // Single-select: every button reflects and sets the ticket's real
-              // `status`, so the checked button always matches the status pill.
-              //   • Action Needed (waiting_on_us) is the default → auto-selected;
-              //     clicking it to deselect moves the ticket to In Progress.
-              //   • Complete (closed) closes / reopens.
-              const isCloseTag = tag === 'closed';
-              const isActionNeeded = tag === 'waiting_on_us';
-              const active = ticket.status === tag;
+              // Multi-select: click to add a status, click again to remove it.
+              //   • Complete (closed) is exclusive — selecting it clears the
+              //     others and closes the ticket; deselecting reopens to Action
+              //     Needed. Everything else stacks freely.
+              //   • Clearing the last status falls back to Action Needed, so a
+              //     ticket is never in no state at all.
+              const held = ticketStatusSet(ticket);
+              const active = held.includes(tag);
               const m = STATUS_META[tag];
               return (
                 <button
@@ -784,15 +784,18 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
                   className={active ? styles.btnPrimary : styles.btnSecondary}
                   disabled={busy}
                   style={active ? { background: m.color, borderColor: m.color } : { color: m.color }}
+                  title={
+                    tag === 'closed'
+                      ? 'Completing a ticket clears its other statuses and cancels any queued replacement'
+                      : tag === 'replacement_sent'
+                        ? 'Marks the queued replacement as shipped — it moves to Fulfillment › Queue › Shipped'
+                        : undefined
+                  }
                   onClick={() => {
-                    if (isCloseTag) {
-                      void run(updateTicketStatus(ticket.id, active ? 'waiting_on_us' : 'closed'));
-                    } else if (isActionNeeded && active) {
-                      // Deselect Action Needed → In Progress.
-                      void run(updateTicketStatus(ticket.id, 'in_progress'));
-                    } else if (!active) {
-                      void run(updateTicketStatus(ticket.id, tag));
-                    }
+                    const next = active
+                      ? held.filter(s => s !== tag)
+                      : tag === 'closed' ? ['closed' as const] : [...held, tag];
+                    void run(setTicketStatuses(ticket.id, next));
                   }}
                 >{active ? '✓ ' : ''}{m.label}</button>
               );

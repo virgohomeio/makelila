@@ -5,8 +5,9 @@ export function StepFulfilled({
   order,
 }: {
   row: FulfillmentQueueRow;
-  order: { customer_name: string; customer_email: string | null; order_ref: string; country: 'US'|'CA' };
+  order: { customer_name: string; customer_email: string | null; order_ref: string; country: 'US'|'CA'; kind?: 'sale' | 'replacement' };
 }) {
+  const isReplacement = order.kind === 'replacement';
   const handoffRef = `${row.id.slice(0, 8)}-${Math.floor(Date.now() / 1000).toString(36)}`;
   const fulfilledOn = row.fulfilled_at
     ? new Date(row.fulfilled_at).toLocaleString('en-US')
@@ -36,10 +37,12 @@ export function StepFulfilled({
         justifyContent: 'space-between',
       }}>
         <strong style={{ color: 'var(--color-success)', fontSize: 13, fontWeight: 700 }}>
-          ✓ Fulfilled · {fulfilledOn}
+          ✓ {isReplacement ? 'Replacement sent' : 'Fulfilled'} · {fulfilledOn}
         </strong>
+        {/* A replacement shipped from the service ticket skips the queue's
+            email step, so don't claim an email that was never sent. */}
         <span style={{ color: 'var(--color-success)', fontSize: 11, fontVariantNumeric: 'tabular-nums' }}>
-          Email sent · Unit {serial}
+          {row.email_sent_at ? 'Email sent · ' : ''}Unit {serial}
         </span>
       </div>
 
@@ -48,6 +51,10 @@ export function StepFulfilled({
         display: 'grid', gridTemplateColumns: '140px 1fr', rowGap: 8, columnGap: 14,
         background: '#fff',
       }}>
+        <span style={labelStyle}>Shipment</span>
+        <span style={valStyle}>
+          {isReplacement ? 'Replacement — warranty / service, no charge' : 'Sale'}
+        </span>
         <span style={labelStyle}>Customer</span>
         <span style={valStyle}>{order.customer_name}</span>
         <span style={labelStyle}>Order ref</span>

@@ -56,7 +56,7 @@ export function ProfitabilityTab() {
         <SummaryStat label="Net margin"           value={fmt(totals.margin)}    variant={totals.margin < 0 ? 'bad' : 'good'} />
       </div>
       <div className={styles.profCurrencyNote}>
-        Revenue excludes sales tax (passed through to govt, not VCycene income). "Expected warranty" sums COGS + shipping for every non-cancelled replacement order. "Expected refunds" sums every refund approval that isn't denied. Amounts shown in the order's native currency (CAD for most rows) — see #65 for the FX conversion follow-up.
+        Revenue excludes sales tax (passed through to govt, not VCycene income). "Expected warranty" sums COGS + shipping for every non-cancelled replacement order. "Expected refunds" sums every refund approval that isn't denied. All amounts are converted to CAD through <code>fx_rates</code> — USD orders at the current company rate, not the rate on the order date.
       </div>
 
       <InsightsPanel insights={insights} />
@@ -108,16 +108,16 @@ export function ProfitabilityTab() {
 }
 
 function ProfitCard({ row }: { row: CustomerProfitability }) {
-  const margin = row.net_margin_usd;
+  const margin = row.net_margin_cad;
   const tone = margin < 0 ? styles.profCardLoss : margin === 0 ? styles.profCardFlat : styles.profCardWin;
 
-  const refundLine = row.expected_refund_usd === row.settled_refund_usd
-    ? fmt(row.expected_refund_usd)
-    : `${fmt(row.expected_refund_usd)} (${fmt(row.settled_refund_usd)} settled)`;
+  const refundLine = row.expected_refund_cad === row.settled_refund_cad
+    ? fmt(row.expected_refund_cad)
+    : `${fmt(row.expected_refund_cad)} (${fmt(row.settled_refund_cad)} settled)`;
 
   const warrantyLine = row.open_replacement_count === 0
-    ? fmt(row.expected_warranty_cost_usd)
-    : `${fmt(row.expected_warranty_cost_usd)} (${row.open_replacement_count} in-flight)`;
+    ? fmt(row.expected_warranty_cost_cad)
+    : `${fmt(row.expected_warranty_cost_cad)} (${row.open_replacement_count} in-flight)`;
 
   return (
     <div className={`${styles.profCard} ${tone}`}>
@@ -135,15 +135,35 @@ function ProfitCard({ row }: { row: CustomerProfitability }) {
       <div className={styles.profCardLabel}>net margin</div>
       <dl className={styles.profCardBreakdown}>
         <div title="net of sales tax — tax is passed through to the govt, not VCycene revenue">
-          <dt>Revenue</dt><dd>{fmt(row.revenue_usd)}</dd>
+          <dt>Revenue</dt><dd>{fmt(row.revenue_cad)}</dd>
         </div>
-        {row.tax_collected_usd > 0 && (
+        {row.tax_collected_cad > 0 && (
           <div title="sales tax collected for the govt (not in margin)">
-            <dt>Tax</dt><dd className={styles.profTaxLine}>+{fmt(row.tax_collected_usd)}</dd>
+            <dt>Tax</dt><dd className={styles.profTaxLine}>+{fmt(row.tax_collected_cad)}</dd>
           </div>
         )}
-        <div><dt>COGS</dt><dd>{fmt(row.sale_cogs_usd)}</dd></div>
-        <div><dt>Shipping</dt><dd>{fmt(row.sale_shipping_usd)}</dd></div>
+        <div title={row.cogs_modelled_count > 0
+          ? `${row.cogs_actual_count} of ${row.cogs_actual_count + row.cogs_modelled_count} order(s) costed from the invoiced batch price; the rest use the V-SAX roadmap projection`
+          : 'costed from the invoiced batch price of the unit that shipped'}>
+          <dt>COGS</dt>
+          <dd>
+            {fmt(row.sale_cogs_cad)}
+            {row.cogs_modelled_count > 0 && (
+              <span className={styles.profBasisHint}> ({row.cogs_modelled_count} est.)</span>
+            )}
+          </dd>
+        </div>
+        <div title={row.shipping_uncosted_count > 0
+          ? `${row.shipping_uncosted_count} order(s) have no Freightcom invoice linked — real freight is higher than this`
+          : 'summed from the Freightcom invoices for this order'}>
+          <dt>Shipping</dt>
+          <dd>
+            {fmt(row.sale_shipping_cad)}
+            {row.shipping_uncosted_count > 0 && (
+              <span className={styles.profUncostedHint}> ({row.shipping_uncosted_count} uncosted)</span>
+            )}
+          </dd>
+        </div>
         <div title="cogs + shipping on all non-cancelled replacement orders">
           <dt>Exp. warranty</dt><dd>{warrantyLine}</dd>
         </div>
@@ -183,36 +203,36 @@ function hasActivity(r: CustomerProfitability): boolean {
   return r.order_count > 0
       || r.replacement_count > 0
       || r.refund_count > 0
-      || r.expected_warranty_cost_usd > 0
-      || r.expected_refund_usd > 0
+      || r.expected_warranty_cost_cad > 0
+      || r.expected_refund_cad > 0
       || r.open_warranty_ticket_count > 0;
 }
 
 function sortFn(key: SortKey): (a: CustomerProfitability, b: CustomerProfitability) => number {
   switch (key) {
-    case 'margin_desc':   return (a, b) => b.net_margin_usd - a.net_margin_usd;
-    case 'margin_asc':    return (a, b) => a.net_margin_usd - b.net_margin_usd;
-    case 'warranty_desc': return (a, b) => b.expected_warranty_cost_usd - a.expected_warranty_cost_usd;
-    case 'revenue_desc':  return (a, b) => b.revenue_usd - a.revenue_usd;
+    case 'margin_desc':   return (a, b) => b.net_margin_cad - a.net_margin_cad;
+    case 'margin_asc':    return (a, b) => a.net_margin_cad - b.net_margin_cad;
+    case 'warranty_desc': return (a, b) => b.expected_warranty_cost_cad - a.expected_warranty_cost_cad;
+    case 'revenue_desc':  return (a, b) => b.revenue_cad - a.revenue_cad;
   }
 }
 
 function aggregate(rs: CustomerProfitability[]) {
   return rs.reduce(
     (acc, r) => ({
-      revenue:   acc.revenue   + r.revenue_usd,
-      tax:       acc.tax       + r.tax_collected_usd,
-      salesCost: acc.salesCost + r.sale_cogs_usd + r.sale_shipping_usd,
-      warranty:  acc.warranty  + r.expected_warranty_cost_usd,
-      refund:    acc.refund    + r.expected_refund_usd,
-      margin:    acc.margin    + r.net_margin_usd,
+      revenue:   acc.revenue   + r.revenue_cad,
+      tax:       acc.tax       + r.tax_collected_cad,
+      salesCost: acc.salesCost + r.sale_cogs_cad + r.sale_shipping_cad,
+      warranty:  acc.warranty  + r.expected_warranty_cost_cad,
+      refund:    acc.refund    + r.expected_refund_cad,
+      margin:    acc.margin    + r.net_margin_cad,
     }),
     { revenue: 0, tax: 0, salesCost: 0, warranty: 0, refund: 0, margin: 0 },
   );
 }
 
 function fmt(n: number): string {
-  return formatMoney(n, 'USD');
+  return formatMoney(n, 'CAD');
 }
 
 // ── Backlog #58 V2 — insights panel + cohort helpers ────────────────────────
@@ -259,8 +279,8 @@ function computeInsights(rows: CustomerProfitability[]): Insights {
       const arr = buckets.get(country) ?? [];
       const n = arr.length;
       if (n === 0) return { country, n, avgMargin: 0, avgWarranty: 0 };
-      const avgMargin   = arr.reduce((s, r) => s + r.net_margin_usd, 0) / n;
-      const avgWarranty = arr.reduce((s, r) => s + r.expected_warranty_cost_usd, 0) / n;
+      const avgMargin   = arr.reduce((s, r) => s + r.net_margin_cad, 0) / n;
+      const avgWarranty = arr.reduce((s, r) => s + r.expected_warranty_cost_cad, 0) / n;
       return { country, n, avgMargin, avgWarranty };
     })
     .filter(b => b.n > 0);
@@ -270,10 +290,10 @@ function computeInsights(rows: CustomerProfitability[]): Insights {
   const repeatWarranty = {
     n: repeaters.length,
     avgMargin: repeaters.length
-      ? repeaters.reduce((s, r) => s + r.net_margin_usd, 0) / repeaters.length
+      ? repeaters.reduce((s, r) => s + r.net_margin_cad, 0) / repeaters.length
       : 0,
     baselineAvgMargin: baselineActive.length
-      ? baselineActive.reduce((s, r) => s + r.net_margin_usd, 0) / baselineActive.length
+      ? baselineActive.reduce((s, r) => s + r.net_margin_cad, 0) / baselineActive.length
       : 0,
   };
 
@@ -289,12 +309,12 @@ function computeInsights(rows: CustomerProfitability[]): Insights {
     .filter(([, arr]) => arr.length >= 3)
     .map(([cohort, arr]) => {
       const n = arr.length;
-      const withWarranty = arr.filter(r => r.expected_warranty_cost_usd > 0).length;
+      const withWarranty = arr.filter(r => r.expected_warranty_cost_cad > 0).length;
       return {
         cohort,
         n,
         warrantyRate: withWarranty / n,
-        avgMargin: arr.reduce((s, r) => s + r.net_margin_usd, 0) / n,
+        avgMargin: arr.reduce((s, r) => s + r.net_margin_cad, 0) / n,
       };
     })
     .sort((a, b) => b.warrantyRate - a.warrantyRate)

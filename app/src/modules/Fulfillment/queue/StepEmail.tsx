@@ -79,7 +79,7 @@ export function StepEmail({
     setShipError(null);
     setBusy(true); setError(null);
     try {
-      await markOrderShipped(order.id, n);
+      await markOrderShipped(order.id, n, 'CAD');
       await sendFulfillmentEmail(row.id);
     }
     catch (e) { setError((e as Error).message); }
@@ -101,7 +101,10 @@ export function StepEmail({
         </div>
       )}
       <label className={styles.shippingCostLabel}>
-        Actual shipping cost (USD):&nbsp;
+        {/* Was labelled USD while every stored value was CAD — the carriers bill
+            VCycene in Canadian dollars. Corrected so operators aren't told to
+            enter one currency into a field that holds another. */}
+        Actual shipping cost (CAD):&nbsp;
         <input
           type="number"
           step="0.01"
