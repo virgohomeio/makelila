@@ -530,7 +530,7 @@ export function RefundsTab() {
         <RefundDetailPanel
           refund={selectedRefund}
           linkedReturn={selectedReturn}
-          cancellationId={cancellationIdFor(selectedRefund.id)}
+          cancellation={cancellationForRefund(cancellations, selectedRefund.id)}
           parties={partiesForRefund(selectedRefund, selectedReturn)}
           contact={contactFor(selectedRefund, selectedReturn)}
           canApproveHere={ownsRefundColumn(userEmail, selectedRefund.status)}
@@ -1592,6 +1592,11 @@ export function CancellationCard({
         {[c.order_ref, c.product_name, c.purchase_channel].filter(Boolean).join(' · ') || '—'}
       </div>
       <ContactBlock contact={contact} />
+      {/* Top of the card, not buried at the bottom — the customer's own words
+          are the first thing an operator wants, and the return side has had
+          this since the board collapsed its cards. Both intake paths now open
+          the form the customer actually filled out. */}
+      <div style={{ margin: '10px 0 4px' }}><CancellationFormButton c={c} /></div>
       {c.reason && <div className={styles.refundReason}>{c.reason}</div>}
       {c.desired_resolution && <div className={styles.refundMeta}>Wants: {c.desired_resolution}</div>}
       {/* Which channel the customer asked to be reached on — the numbers
@@ -1697,11 +1702,13 @@ export function ContactBlock({ contact }: { contact: CustomerContact }) {
 // Renders the linked return-form data + approve / deny actions.
 // ============================================================================
 function RefundDetailPanel({
-  refund, linkedReturn, cancellationId = null, parties, contact, canApproveHere, usage, invoices, tickets, onOpenTicket, queuedReplacements, canFlow, onClose, onError, onMoved, onOpenFinanceModal,
+  refund, linkedReturn, cancellation = null, parties, contact, canApproveHere, usage, invoices, tickets, onOpenTicket, queuedReplacements, canFlow, onClose, onError, onMoved, onOpenFinanceModal,
 }: {
   refund: RefundApproval;
   linkedReturn: ReturnRow | null;
-  cancellationId?: string | null;
+  /** The cancellation form this refund was compiled from, when it came from
+   *  one — it carries both the notes thread and the customer's answers. */
+  cancellation?: OrderCancellation | null;
   parties: Parties;
   contact: CustomerContact;
   canApproveHere: boolean;
@@ -1722,6 +1729,7 @@ function RefundDetailPanel({
   const [busy, setBusy] = useState(false);
   const [holdBusy, setHoldBusy] = useState<string | null>(null);
   const meta = REFUND_STATUS_META[refund.status];
+  const cancellationId = cancellation?.id ?? null;
 
   // Forward/approve is owner-only (canApproveHere); deny is open to everyone.
   const canActSubmit = refund.status === 'submitted' && canApproveHere;
@@ -1857,6 +1865,9 @@ function RefundDetailPanel({
               words are the first thing an approver wants. */}
           {linkedReturn && (
             <div style={{ marginTop: 10 }}><ReturnFormButton r={linkedReturn} /></div>
+          )}
+          {!linkedReturn && cancellation && (
+            <div style={{ marginTop: 10 }}><CancellationFormButton c={cancellation} /></div>
           )}
           <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 10 }}>
             <span style={{ fontSize: 12, fontWeight: 600, color: '#4a5568' }}>Refund amount:</span>
@@ -2200,6 +2211,81 @@ function ReturnFormAnswers({ r }: { r: ReturnRow }) {
       {r.additional_comments && (
         <DetailField label="Additional comments" wide>
           <div className={styles.detailQuote}>{r.additional_comments}</div>
+        </DetailField>
+      )}
+    </div>
+  );
+}
+
+// The cancellation-side twin of ReturnFormButton. A cancellation request is an
+// intake form like any other, so the answers open the same way — on demand, in
+// their own window — from the request card and from the refund it compiles
+// into.
+export function CancellationFormButton({ c }: { c: OrderCancellation }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button
+        className={styles.openFormBtn}
+        onClick={e => { e.stopPropagation(); setOpen(true); }}
+      >
+        Open Cancellation Form
+      </button>
+      {open && (
+        <div className={styles.modalBackdrop} onClick={() => setOpen(false)}>
+          <div className={styles.modalCard} onClick={e => e.stopPropagation()}
+               style={{ maxWidth: 720, maxHeight: '85vh', overflowY: 'auto' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                          gap: 12, marginBottom: 12 }}>
+              <h3 className={styles.modalTitle} style={{ margin: 0 }}>
+                Cancellation form · {c.order_ref ?? '—'}
+              </h3>
+              <button className={styles.btnSecondary} onClick={() => setOpen(false)}>Close</button>
+            </div>
+            <CancellationFormAnswers c={c} />
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+// The full set of cancellation-form answers, in the order the customer was
+// asked for them (see modules/Forms/CancelOrderForm.tsx). Name, email and
+// phone are deliberately absent: every view that opens this renders a
+// ContactBlock above it.
+function CancellationFormAnswers({ c }: { c: OrderCancellation }) {
+  return (
+    <div className={styles.refundDetailGrid}>
+      <DetailField label="Order #" value={c.order_ref ?? '—'} mono />
+      <DetailField label="Order date" value={c.order_date ?? '—'} />
+      <DetailField label="Product / Service" value={c.product_name ?? '—'} />
+      <DetailField
+        label="Order amount"
+        value={c.order_amount_usd != null
+          ? `$${Number(c.order_amount_usd).toLocaleString('en-US')}`
+          : '—'}
+      />
+      <DetailField label="Purchase channel" value={c.purchase_channel ?? '—'} />
+      <DetailField label="Preferred contact" value={c.preferred_contact ?? '—'} />
+      {/* Whether the unit is already with the customer decides whether this is
+          a cancellation at all or a return — so it reads as words, not a tick. */}
+      <DetailField
+        label="Product received yet?"
+        value={c.product_received == null ? '—' : c.product_received ? 'Yes' : 'No'}
+      />
+      <DetailField label="Submitted" value={new Date(c.created_at).toLocaleString('en-US')} />
+
+      <DetailField label="Reason for cancellation" wide value={c.reason ?? '—'} />
+      <DetailField label="Desired resolution" wide value={c.desired_resolution ?? '—'} />
+
+      <DetailField label="Detailed explanation" wide>
+        <div className={styles.detailQuote}>{c.description ?? '—'}</div>
+      </DetailField>
+
+      {c.ops_notes && (
+        <DetailField label="Ops notes" wide>
+          <div className={styles.detailQuote}>{c.ops_notes}</div>
         </DetailField>
       )}
     </div>
