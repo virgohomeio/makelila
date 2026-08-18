@@ -434,6 +434,12 @@ verify_jwt = false
 [functions.send-return-emails]
 verify_jwt = false
 
+# send-cancellation-emails: called from the public /cancel-order form (no user
+# JWT). Uses the service-role key internally; sends the "a card just landed in
+# Cancellation Requests" notification to Reina, who owns that column.
+[functions.send-cancellation-emails]
+verify_jwt = false
+
 # sync-hubspot-customers: same ES256 gateway workaround. Function uses the
 # service-role key internally and HUBSPOT_ACCESS_TOKEN for outbound calls,
 # so caller identity isn't needed for correctness.
