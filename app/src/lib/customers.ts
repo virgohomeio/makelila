@@ -406,7 +406,17 @@ export async function updateCustomerProfile(customerId: string, patch: CustomerP
   const { serial, ...rest } = patch;
   const update: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(rest)) update[k] = v === '' ? null : v;
-  if (serial !== undefined) update.serials = serial.trim() ? [serial.trim()] : [];
+  if (serial !== undefined) {
+    // The panel edits a single serial, but serials[] can legitimately hold
+    // several (a customer who owns two machines, or who has been through a
+    // replacement). Writing [serial] wholesale used to silently drop every
+    // other entry, so replace only the first element and keep the rest.
+    const next = serial.trim();
+    const { data: existing } = await supabase
+      .from('customers').select('serials').eq('id', customerId).single();
+    const rest_serials = ((existing?.serials as string[] | null) ?? []).slice(1);
+    update.serials = next ? [next, ...rest_serials] : rest_serials;
+  }
   const { error } = await supabase.from('customers').update(update).eq('id', customerId);
   if (error) throw error;
   await logAction('customer_profile_updated', customerId, Object.keys(patch).join(', '),

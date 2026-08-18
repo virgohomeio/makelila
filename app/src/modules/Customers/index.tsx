@@ -55,19 +55,26 @@ export default function Customers() {
   // (populated by the fulfillment-sheet sync, same link the Dashboard uses)
   // is preferred; the lowercase-name map is a fallback for any unit not yet
   // FK-linked.
+  //
+  // Only `shipped` units count as "currently held". A unit in rework/scrap/
+  // ready/team-test is physically back with us, so listing it against the
+  // customer is what made replaced units linger in the directory: after a
+  // replacement the original moves to rework but the customer keeps showing
+  // it. Filter here so both maps agree on the definition.
+  const heldUnits = useMemo(() => units.filter(u => u.status === 'shipped'), [units]);
   const serialsByCustomerId = useMemo(() => {
     const m = new Map<string, string[]>();
-    for (const u of units) {
+    for (const u of heldUnits) {
       if (!u.customer_id) continue;
       const arr = m.get(u.customer_id);
       if (arr) arr.push(u.serial);
       else m.set(u.customer_id, [u.serial]);
     }
     return m;
-  }, [units]);
+  }, [heldUnits]);
   const serialsByCustomerName = useMemo(() => {
     const m = new Map<string, string[]>();
-    for (const u of units) {
+    for (const u of heldUnits) {
       if (u.customer_id || !u.customer_name) continue;
       const key = u.customer_name.toLowerCase();
       const arr = m.get(key);
@@ -75,7 +82,7 @@ export default function Customers() {
       else m.set(key, [u.serial]);
     }
     return m;
-  }, [units]);
+  }, [heldUnits]);
   const [search, setSearch] = useState('');
   const [country, setCountry] = useState<'all' | 'CA' | 'US' | 'other'>('all');
   const [busy, setBusy] = useState(false);
@@ -385,14 +392,17 @@ export default function Customers() {
                 key={c.id}
                 c={c}
                 serials={
-                  // Sheet is the source of truth: prefer the synced serials,
-                  // then the canonical units.customer_id link, and only fall
-                  // back to name-matching for units not yet FK-linked.
-                  (c.serials && c.serials.length > 0)
-                    ? c.serials
-                    : (serialsByCustomerId.get(c.id)
-                        ?? serialsByCustomerName.get(c.full_name?.toLowerCase() ?? '')
-                        ?? [])
+                  // Stock is the source of truth for what a customer holds
+                  // today: prefer the canonical units.customer_id link, then
+                  // name-matching for units not yet FK-linked. customers.serials
+                  // is a denormalised snapshot of the fulfilment sheet that only
+                  // refreshes when sync_customer_serials_from_fulfillment() is
+                  // run, so it goes stale the moment a replacement ships — it is
+                  // now only a last resort for customers with no unit row at all.
+                  serialsByCustomerId.get(c.id)
+                    ?? serialsByCustomerName.get(c.full_name?.toLowerCase() ?? '')
+                    ?? c.serials
+                    ?? []
                 }
                 onSelect={() => setSelectedCustomerId(c.id)}
               />
