@@ -837,6 +837,30 @@ export async function cancelReplacementOrder(orderId: string): Promise<void> {
  *  still cancel it manually from Order Review). 'awaiting' never reserved units
  *  or decremented parts, so there's nothing to release beyond deleting the row.
  *  Best-effort per order — a failure on one doesn't block the others. */
+/** Replacements queued for a ticket that have a unit reserved ('ready') and have
+ *  not shipped. Closing a ticket auto-cancels its 'awaiting' replacements but
+ *  deliberately leaves these alone — a reserved unit may be about to go out. So
+ *  they used to be stranded silently: the case closed, nothing stamped
+ *  shipped_at, and the order sat in Sales › Orders › Replacement.
+ *
+ *  The panel calls this before closing so it can ask the one person who knows
+ *  whether the box actually left. Empty array = close with no question. */
+export async function readyReplacementsForTicket(
+  ticketId: string,
+): Promise<Array<{ id: string; order_ref: string }>> {
+  const { data, error } = await supabase
+    .from('orders')
+    .select('id, order_ref')
+    .eq('kind', 'replacement')
+    .eq('linked_ticket_id', ticketId)
+    .eq('replacement_state', 'ready')
+    .neq('status', 'cancelled')
+    .is('shipped_at', null)
+    .is('delivered_at', null);
+  if (error) throw new Error(`Failed to look up ready replacements: ${error.message}`);
+  return (data ?? []) as Array<{ id: string; order_ref: string }>;
+}
+
 export async function cancelPendingReplacementsForTicket(ticketId: string): Promise<void> {
   const { data: linked, error } = await supabase
     .from('orders')

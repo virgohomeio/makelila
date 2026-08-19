@@ -16,7 +16,10 @@ import {
 } from '../../lib/service';
 import { CANNED_SMS_TEMPLATES } from '../../lib/cannedSms';
 import { createLinearIssue, createGitHubIssue } from '../../lib/githubLinear';
-import { useReplacementSummary } from '../../lib/orders';
+import {
+  useReplacementSummary, readyReplacementsForTicket,
+  shipQueuedReplacementsForTicket, cancelReplacementOrder,
+} from '../../lib/orders';
 import { useAuth } from '../../lib/auth';
 import { AttachmentStrip } from './AttachmentStrip';
 import { TicketNotes } from './TicketNotes';
@@ -102,6 +105,9 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  // Replacements with a unit reserved that this close would otherwise strand.
+  // Non-null = the "did it ship?" confirm is open, holding the pending close.
+  const [closeBlockers, setCloseBlockers] = useState<Array<{ id: string; order_ref: string }> | null>(null);
   const [editingSubject, setEditingSubject] = useState(false);
   const [subjectDraft, setSubjectDraft] = useState(ticket.subject);
   const [editingDescription, setEditingDescription] = useState(false);
@@ -247,6 +253,39 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
     setBusy(true); setError(null);
     try { await p; }
     catch (e) { setError((e as Error).message); }
+    finally { setBusy(false); }
+  }
+
+  /** Completing a ticket that still has a 'ready' replacement is the moment the
+   *  shipping fact is known and the last moment it can be captured — the order
+   *  is about to drop out of every live view. Ask, rather than guess. */
+  async function requestClose() {
+    setBusy(true); setError(null);
+    try {
+      const blockers = await readyReplacementsForTicket(ticket.id);
+      if (blockers.length > 0) { setCloseBlockers(blockers); return; }
+      await setTicketStatuses(ticket.id, ['closed']);
+    } catch (e) { setError((e as Error).message); }
+    finally { setBusy(false); }
+  }
+
+  /** Resolve the confirm. `shipped` runs the same hand-off as the
+   *  'Replacement Sent' status (stamps shipped_at, moves the order to
+   *  Fulfillment › Queue › Shipped); otherwise the reserved stock is released.
+   *  Close first either way — cancelReplacementOrder refuses to run while the
+   *  linked ticket is still open. */
+  async function resolveClose(shipped: boolean) {
+    setBusy(true); setError(null);
+    try {
+      if (shipped) {
+        await shipQueuedReplacementsForTicket(ticket.id);
+        await setTicketStatuses(ticket.id, ['closed']);
+      } else {
+        await setTicketStatuses(ticket.id, ['closed']);
+        for (const b of closeBlockers ?? []) await cancelReplacementOrder(b.id);
+      }
+      setCloseBlockers(null);
+    } catch (e) { setError((e as Error).message); }
     finally { setBusy(false); }
   }
 
@@ -786,12 +825,16 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
                   style={active ? { background: m.color, borderColor: m.color } : { color: m.color }}
                   title={
                     tag === 'closed'
-                      ? 'Completing a ticket clears its other statuses and cancels any queued replacement'
+                      ? 'Completing a ticket clears its other statuses and cancels any replacement still awaiting stock. If one already has a unit reserved, you will be asked whether it shipped.'
                       : tag === 'replacement_sent'
                         ? 'Marks the queued replacement as shipped — it moves to Fulfillment › Queue › Shipped'
                         : undefined
                   }
                   onClick={() => {
+                    // Closing is the only transition that can strand a
+                    // replacement, so it goes through the check. Re-opening
+                    // (active → deselect) and every other status are unchanged.
+                    if (tag === 'closed' && !active) { void requestClose(); return; }
                     const next = active
                       ? held.filter(s => s !== tag)
                       : tag === 'closed' ? ['closed' as const] : [...held, tag];
@@ -801,6 +844,33 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
               );
             })}
           </div>
+          {closeBlockers && (
+            <div className={styles.dangerConfirm}>
+              <span className={styles.dangerConfirmText}>
+                {closeBlockers.length === 1
+                  ? `${closeBlockers[0].order_ref} has a unit reserved and has not been marked shipped.`
+                  : `${closeBlockers.map(b => b.order_ref).join(', ')} have units reserved and have not been marked shipped.`}
+                {' '}Did it go out to the customer?
+              </span>
+              <div className={styles.actionsRow}>
+                <button
+                  className={styles.btnPrimary}
+                  disabled={busy}
+                  onClick={() => void resolveClose(true)}
+                >{busy ? 'Working…' : 'Yes — shipped'}</button>
+                <button
+                  className={styles.btnDanger}
+                  disabled={busy}
+                  onClick={() => void resolveClose(false)}
+                >No — release the stock</button>
+                <button
+                  className={styles.btnSecondary}
+                  disabled={busy}
+                  onClick={() => setCloseBlockers(null)}
+                >Cancel</button>
+              </div>
+            </div>
+          )}
         </div>
 
         <div className={styles.detailSection}>

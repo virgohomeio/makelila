@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render as rtlRender, screen, fireEvent, within } from '@testing-library/react';
+import { render as rtlRender, screen, fireEvent, within, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import type { ReactElement } from 'react';
 import type { ServiceTicket } from '../../../lib/service';
@@ -22,9 +22,18 @@ vi.mock('../../../lib/customers', async () => {
   const actual = await vi.importActual<typeof import('../../../lib/customers')>('../../../lib/customers');
   return { ...actual, useCustomers: vi.fn(() => ({ customers: [] })) };
 });
+const readyReplacementsMock = vi.fn(() => Promise.resolve([] as Array<{ id: string; order_ref: string }>));
+const shipQueuedMock = vi.fn(() => Promise.resolve([] as string[]));
+const cancelReplacementMock = vi.fn(() => Promise.resolve());
 vi.mock('../../../lib/orders', async () => {
   const actual = await vi.importActual<typeof import('../../../lib/orders')>('../../../lib/orders');
-  return { ...actual, useReplacementSummary: vi.fn(() => ({ summary: null, loading: false })) };
+  return {
+    ...actual,
+    useReplacementSummary: vi.fn(() => ({ summary: null, loading: false })),
+    readyReplacementsForTicket: (...a: unknown[]) => readyReplacementsMock(...(a as [])),
+    shipQueuedReplacementsForTicket: (...a: unknown[]) => shipQueuedMock(...(a as [])),
+    cancelReplacementOrder: (...a: unknown[]) => cancelReplacementMock(...(a as [])),
+  };
 });
 vi.mock('../../../lib/auth', () => ({
   useAuth: vi.fn(() => ({ user: { email: 'huayi@virgohome.io' } })),
@@ -90,7 +99,12 @@ const statusButton = (label: string) =>
   statusButtons().find(b => (b.textContent ?? '').includes(label))!;
 
 describe('TicketDetailPanel — Status is multi-select', () => {
-  beforeEach(() => setTicketStatusesMock.mockClear());
+  beforeEach(() => {
+    setTicketStatusesMock.mockClear();
+    readyReplacementsMock.mockClear();
+    shipQueuedMock.mockClear();
+    cancelReplacementMock.mockClear();
+  });
 
   it('offers every status, including Queued for Replacement, in ONE row', () => {
     render(<TicketDetailPanel ticket={mkTicket()} onClose={() => {}} />);
@@ -150,13 +164,63 @@ describe('TicketDetailPanel — Status is multi-select', () => {
     expect(next).toContain('waiting_on_customer');
   });
 
-  it('Complete is exclusive — selecting it clears the other statuses', () => {
+  it('Complete is exclusive — selecting it clears the other statuses', async () => {
     render(<TicketDetailPanel
       ticket={mkTicket({ status: 'in_progress', tags: ['queued_for_replacement'] })}
       onClose={() => {}}
     />);
     fireEvent.click(statusButton('Complete'));
-    expect(setTicketStatusesMock).toHaveBeenCalledWith('t1', ['closed']);
+    // Closing now checks for a stranded 'ready' replacement first; with none,
+    // it closes straight through exactly as before.
+    await waitFor(() => expect(setTicketStatusesMock).toHaveBeenCalledWith('t1', ['closed']));
+  });
+
+  // A 'ready' replacement has a unit reserved. Closing used to leave it behind
+  // silently — the order stayed in Sales › Orders › Replacement with no
+  // shipped_at, which is how 15 resolved replacements piled up in that tab.
+  describe('closing a ticket that would strand a ready replacement', () => {
+    const withBlocker = () => {
+      readyReplacementsMock.mockResolvedValueOnce([{ id: 'o1', order_ref: 'R-0042' }]);
+      render(<TicketDetailPanel
+        ticket={mkTicket({ status: 'in_progress', tags: ['queued_for_replacement'] })}
+        onClose={() => {}}
+      />);
+      fireEvent.click(statusButton('Complete'));
+    };
+
+    it('asks instead of closing', async () => {
+      withBlocker();
+      await waitFor(() => expect(screen.getByText(/R-0042/)).toBeInTheDocument());
+      expect(setTicketStatusesMock).not.toHaveBeenCalled();
+    });
+
+    it('"Yes — shipped" runs the hand-off, then closes', async () => {
+      withBlocker();
+      await waitFor(() => screen.getByText('Yes — shipped'));
+      fireEvent.click(screen.getByText('Yes — shipped'));
+      await waitFor(() => expect(shipQueuedMock).toHaveBeenCalledWith('t1'));
+      expect(setTicketStatusesMock).toHaveBeenCalledWith('t1', ['closed']);
+      expect(cancelReplacementMock).not.toHaveBeenCalled();
+    });
+
+    it('"No" closes first, then releases the reserved stock', async () => {
+      withBlocker();
+      await waitFor(() => screen.getByText('No — release the stock'));
+      fireEvent.click(screen.getByText('No — release the stock'));
+      // Order matters: cancelReplacementOrder refuses while the ticket is open.
+      await waitFor(() => expect(cancelReplacementMock).toHaveBeenCalledWith('o1'));
+      expect(setTicketStatusesMock).toHaveBeenCalledWith('t1', ['closed']);
+      expect(shipQueuedMock).not.toHaveBeenCalled();
+    });
+
+    it('Cancel leaves the ticket open and the replacement untouched', async () => {
+      withBlocker();
+      await waitFor(() => screen.getByText('Cancel'));
+      fireEvent.click(screen.getByText('Cancel'));
+      expect(setTicketStatusesMock).not.toHaveBeenCalled();
+      expect(shipQueuedMock).not.toHaveBeenCalled();
+      expect(cancelReplacementMock).not.toHaveBeenCalled();
+    });
   });
 
   it('deselecting Complete reopens the ticket', () => {
