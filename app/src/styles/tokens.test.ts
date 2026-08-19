@@ -37,6 +37,17 @@ const REQUIRED = [
 ];
 
 describe('tokens.css', () => {
+  it('reads the real stylesheet, not Vitest\'s empty-string CSS mock', () => {
+    // Diagnostic, not correctness: if test.css.include in vite.config.ts
+    // ever stops matching tokens.css, tokensCss becomes '', jsdom parses
+    // nothing, and all 18 `defines %s` assertions below fail at once. That
+    // simultaneous failure doesn't point at the cause — it looks like every
+    // token vanished from tokens.css, and the Vitest CSS mock is the last
+    // place anyone would look. This assertion fails first, alone, and names
+    // the actual cause.
+    expect(tokensCss.length).toBeGreaterThan(0);
+  });
+
   it.each(REQUIRED)('defines %s', (name) => {
     expect(tokenValue(name)).not.toBeNull();
   });
