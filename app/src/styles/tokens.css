@@ -3,6 +3,7 @@
      Primary: Ladybug Red #CC2D30 — used for CTAs, brand chrome, active states.
      Legacy --color-crimson name retained so every module keeps working. */
   --color-crimson:       #CC2D30;  /* Ladybug Red   — primary */
+  --color-crimson-rgb:   204, 45, 48;  /* --color-crimson channels, for rgba() composition */
   --color-crimson-dark:  #991B1E;  /* Deep Ladybug  — hover/active */
   --color-accent-gold:   #C9A96E;  /* Muted Gold    — accent highlights */
   --color-accent-coffee: #A68B6B;  /* Warm Coffee   — secondary accent */
@@ -31,6 +32,7 @@
 
   /* Neutrals — LILA warm palette (Charcoal Soil → Warm White) */
   --color-ink:         #2C2A25;  /* Charcoal Soil — headings */
+  --color-ink-rgb:     44, 42, 37;  /* --color-ink channels, for rgba() composition */
   --color-ink-muted:   #5C564E;  /* Warm Gray     — body text */
   --color-ink-subtle:  #A39B8F;  /* Stone         — secondary text */
   --color-ink-faint:   #C5BEB2;  /* lighter stone — tertiary text */
@@ -71,12 +73,18 @@
   --font-size-meta:    11px;  /* uppercase labels, timestamps */
 
   /* Identifiers and quantities — order refs, serials, money, counts — are
-     monospaced with tabular figures so digits align down a column. This is
-     functional, not decorative: operators reconcile refunds by scanning. */
+     monospaced (--font-mono) with tabular figures (--font-numeric) so
+     digits align down a column. This is functional, not decorative:
+     operators reconcile refunds by scanning. */
   --font-mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace;
+  --font-numeric: tabular-nums;
 
   /* ── Spacing ───────────────────────────────────────────────────────────
-     4px base. Use these, never arbitrary pixel values. */
+     4px base. Use these, never arbitrary pixel values. The index is an
+     ordinal position in the scale, not a "× 4px" multiplier — --space-5 is
+     24px, not 20px:
+       --space-1: 4px   --space-2: 8px   --space-3: 12px   --space-4: 16px
+       --space-5: 24px  --space-6: 32px  --space-7: 48px */
   --space-1:  4px;
   --space-2:  8px;
   --space-3: 12px;
@@ -86,10 +94,12 @@
   --space-7: 48px;
 
   /* ── Elevation ─────────────────────────────────────────────────────────
-     Warm-tinted shadows so cards don't read cold against the cream page. */
-  --shadow-sm: 0 1px 2px rgba(44, 42, 37, 0.06);
-  --shadow-md: 0 4px 12px rgba(44, 42, 37, 0.10);
-  --shadow-lg: 0 8px 24px rgba(44, 42, 37, 0.14);
+     Warm-tinted shadows so cards don't read cold against the cream page.
+     Composed from --color-ink-rgb rather than restating its channels, so
+     the two can't drift apart. */
+  --shadow-sm: 0 1px 2px rgba(var(--color-ink-rgb), 0.06);
+  --shadow-md: 0 4px 12px rgba(var(--color-ink-rgb), 0.10);
+  --shadow-lg: 0 8px 24px rgba(var(--color-ink-rgb), 0.14);
 
   /* ── Table rows ────────────────────────────────────────────────────────
      Compact density (design decision, 2026-08-19): the cramped feeling is
@@ -99,6 +109,11 @@
   --row-height-header: 30px;
 
   /* ── Focus ─────────────────────────────────────────────────────────────
-     One visible focus treatment everywhere. Keyboard access is a floor. */
-  --focus-ring: 0 0 0 3px rgba(204, 45, 48, 0.28);
+     One visible focus treatment everywhere. Keyboard access is a floor.
+     Composed from --color-crimson-rgb rather than restated, so it can't
+     drift from the brand red. This is a box-shadow value: an element that
+     already carries an elevation shadow must combine both on
+     :focus-visible or it will lose its elevation while focused —
+       box-shadow: var(--shadow-md), var(--focus-ring); */
+  --focus-ring: 0 0 0 3px rgba(var(--color-crimson-rgb), 0.28);
 }
