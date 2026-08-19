@@ -119,7 +119,7 @@ Migration is therefore scoped by **routed surface**, not by directory.
 
 Brand tokens in `tokens.css` are correct and stay. Changes:
 
-- **Deepen error red** so it is distinguishable from Ladybug Red: `--color-error` moves from `#c53030` to `#9B2C2C`, a value already used 18 times in the existing module CSS.
+- **Deepen error red** so it is distinguishable from Ladybug Red: `--color-error` moves from `#c53030` to `#7F1D1D`. Measured: `#c53030` sits at a 1.038 relative-luminance ratio from `#CC2D30` (indistinguishable); `#7F1D1D` sits at 1.90, and holds 10.02:1 against white for text use.
 - **Ladybug Red `#CC2D30` is reserved for action and attention only** — primary buttons, active nav item, unread counts. Never a decorative fill, never a status background.
 - **Delete the cool ramp.** Every `#718096`, `#4a5568`, `#e2e8f0`, `#cbd5e0`, `#f7fafc`, `#edf2f7`, `#1a202c` maps onto the warm equivalent.
 - Status colours (success/warning/info/purple) stay, referenced only via tokens.
