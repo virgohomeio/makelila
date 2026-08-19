@@ -21,12 +21,24 @@ const MIGRATED = [
 ];
 
 let failed = false;
+let hadHexHits = false;
 
 for (const relativePath of MIGRATED) {
-  const hits = findRawHex(readFileSync(resolve(appRoot, relativePath), 'utf8'));
+  let source;
+  try {
+    source = readFileSync(resolve(appRoot, relativePath), 'utf8');
+  } catch (err) {
+    if (err.code !== 'ENOENT') throw err;
+    failed = true;
+    console.error(`\n${relativePath} is listed in MIGRATED but does not exist — was it renamed?`);
+    continue;
+  }
+
+  const hits = findRawHex(source);
   if (hits.length === 0) continue;
 
   failed = true;
+  hadHexHits = true;
   console.error(`\n${relativePath} — ${hits.length} raw hex value(s), expected var(--token):`);
   for (const { line, column, hex } of hits) {
     console.error(`  ${relativePath}:${line}:${column}  ${hex}`);
@@ -34,7 +46,9 @@ for (const relativePath of MIGRATED) {
 }
 
 if (failed) {
-  console.error('\nDefine the colour in src/styles/tokens.css and reference it with var().\n');
+  if (hadHexHits) {
+    console.error('\nDefine the colour in src/styles/tokens.css and reference it with var().\n');
+  }
   process.exit(1);
 }
 
