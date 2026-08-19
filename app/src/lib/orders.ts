@@ -352,6 +352,10 @@ export function bucketOrders(
   cache: Order[],
   fulfilledOrderIds: Set<string>,
   shippedCustomers: Set<string>,
+  /** Service tickets in status 'closed'. A replacement order whose ticket is
+   *  closed has been dealt with, so it leaves the Replacement tab. Optional so
+   *  existing callers (and tests) keep their previous behaviour. */
+  closedTicketIds: Set<string> = new Set(),
 ): OrderBuckets {
   // Cancelled is terminal and takes precedence over every other signal: a
   // cancelled order belongs in the Cancelled tab whether or not it was ever
@@ -370,6 +374,14 @@ export function bucketOrders(
     // Never hide replacement orders by the shipped-customer name check —
     // a returning customer's replacement must always be visible in Order Review.
     if (o.kind !== 'replacement' && shippedCustomers.has(o.customer_name.toLowerCase().trim())) return false;
+    // (c) the replacement's service ticket is closed. shipped_at is only ever
+    //     stamped by shipQueuedReplacementsForTicket(), which fires solely on
+    //     the 'replacement_sent' ticket status — a status no ticket has ever
+    //     used, because operators close the case directly instead. Without
+    //     this the order sits in the Replacement tab forever even though the
+    //     unit or part went out months ago. Scoped to replacements: a sale
+    //     order's ticket says nothing about whether the sale shipped.
+    if (o.kind === 'replacement' && o.linked_ticket_id && closedTicketIds.has(o.linked_ticket_id)) return false;
     return true;
   });
 
@@ -397,12 +409,16 @@ export function useOrders(): OrderBuckets & { loading: boolean } {
   // fulfilled even if fulfillment_queue never advanced to step 6 (e.g.
   // orders shipped via the legacy Excel workflow before queue rows existed).
   const [shippedCustomers, setShippedCustomers] = useState<Set<string>>(new Set());
+  // Third fulfilment signal, for replacements only: the linked service ticket
+  // is closed. See the (c) branch in bucketOrders for why this is needed.
+  const [closedTicketIds, setClosedTicketIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let ordersChannel: RealtimeChannel | null = null;
     let queueChannel: RealtimeChannel | null = null;
     let unitsChannel: RealtimeChannel | null = null;
+    let ticketsChannel: RealtimeChannel | null = null;
     let cancelled = false;
 
     (async () => {
@@ -410,14 +426,19 @@ export function useOrders(): OrderBuckets & { loading: boolean } {
         { data: ordersData, error: ordersErr },
         { data: queueData, error: queueErr },
         { data: unitsData, error: unitsErr },
+        { data: ticketsData, error: ticketsErr },
       ] = await Promise.all([
         supabase.from('orders').select('*').order('created_at', { ascending: false }),
         supabase.from('fulfillment_queue').select('order_id, step, fulfilled_at'),
         supabase.from('units').select('customer_name, status').eq('status', 'shipped'),
+        supabase.from('service_tickets').select('id').eq('status', 'closed'),
       ]);
 
       if (cancelled) return;
       if (!ordersErr && ordersData) setCache(ordersData as Order[]);
+      if (!ticketsErr && ticketsData) {
+        setClosedTicketIds(new Set((ticketsData as { id: string }[]).map(t => t.id)));
+      }
       if (!queueErr && queueData) {
         setFulfilledOrderIds(new Set(
           (queueData as { order_id: string; step: number; fulfilled_at: string | null }[])
@@ -489,6 +510,31 @@ export function useOrders(): OrderBuckets & { loading: boolean } {
           },
         )
         .subscribe();
+
+      // Closing a ticket has to drop its replacement out of the tab straight
+      // away — that click is the operator saying "this case is done", and it
+      // is the moment the drift used to start. Re-opening puts it back.
+      ticketsChannel = supabase
+        .channel('orders:service_tickets')
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'service_tickets' },
+          (payload) => {
+            const row = (payload.new ?? payload.old) as { id?: string; status?: string } | null;
+            if (!row?.id) return;
+            setClosedTicketIds(prev => {
+              const next = new Set(prev);
+              if (payload.eventType !== 'DELETE'
+                  && (payload.new as { status?: string } | null)?.status === 'closed') {
+                next.add(row.id!);
+              } else {
+                next.delete(row.id!);
+              }
+              return next;
+            });
+          },
+        )
+        .subscribe();
     })();
 
     return () => {
@@ -496,12 +542,13 @@ export function useOrders(): OrderBuckets & { loading: boolean } {
       if (ordersChannel) void ordersChannel.unsubscribe();
       if (queueChannel) void queueChannel.unsubscribe();
       if (unitsChannel) void unitsChannel.unsubscribe();
+      if (ticketsChannel) void ticketsChannel.unsubscribe();
     };
   }, []);
 
   return useMemo(
-    () => ({ ...bucketOrders(cache, fulfilledOrderIds, shippedCustomers), loading }),
-    [cache, fulfilledOrderIds, shippedCustomers, loading],
+    () => ({ ...bucketOrders(cache, fulfilledOrderIds, shippedCustomers, closedTicketIds), loading }),
+    [cache, fulfilledOrderIds, shippedCustomers, closedTicketIds, loading],
   );
 }
 
@@ -587,15 +634,25 @@ export function useQueuedReplacements(): { replacements: Order[]; loading: boole
     let cancelled = false;
 
     (async () => {
-      const { data, error } = await supabase
-        .from('orders')
-        .select('*')
-        .eq('kind', 'replacement')
-        .in('replacement_state', ['ready', 'awaiting'])
-        .is('shipped_at', null)
-        .order('created_at', { ascending: true });
+      // Same closed-ticket caveat as bucketOrders: shipped_at is almost never
+      // stamped, so `shipped_at IS NULL` alone would warn about replacements
+      // that were resolved months ago and block refunds that should proceed.
+      const [{ data, error }, { data: closedTickets }] = await Promise.all([
+        supabase
+          .from('orders')
+          .select('*')
+          .eq('kind', 'replacement')
+          .in('replacement_state', ['ready', 'awaiting'])
+          .is('shipped_at', null)
+          .order('created_at', { ascending: true }),
+        supabase.from('service_tickets').select('id').eq('status', 'closed'),
+      ]);
       if (cancelled) return;
-      if (!error && data) setReplacements(data as Order[]);
+      const closed = new Set((closedTickets ?? []).map(t => (t as { id: string }).id));
+      if (!error && data) {
+        setReplacements((data as Order[])
+          .filter(o => !(o.linked_ticket_id && closed.has(o.linked_ticket_id))));
+      }
       setLoading(false);
 
       channel = supabase

@@ -1148,12 +1148,16 @@ export async function setTicketStatuses(id: string, next: TicketStatus[]): Promi
 
   // Marking a ticket complete means an 'awaiting' replacement queued for it is
   // no longer needed. Scoped to 'awaiting' only: a 'ready' replacement has a
-  // unit reserved and may be about to ship. Best-effort — the ticket is already
-  // closed, so a failure here shouldn't fail the status change.
+  // unit reserved and may be about to ship.
+  //
+  // NOT best-effort, for the same reason the 'replacement_sent' branch below
+  // isn't: a console.warn nobody reads let this fail silently and leave the
+  // order sitting in Sales › Orders › Replacement. The status write above has
+  // already landed, so throwing here surfaces the problem in the panel without
+  // undoing the close, and the operator can re-click — the hand-off is
+  // idempotent (it only ever matches 'awaiting', un-shipped rows).
   if (status === 'closed') {
-    await cancelPendingReplacementsForTicket(id).catch((e: Error) => {
-      console.warn('Auto-cancel of queued replacement on ticket close failed (non-fatal):', e.message);
-    });
+    await cancelPendingReplacementsForTicket(id);
   }
 
   // Replacement Sent → the replacement order(s) queued for this ticket move to

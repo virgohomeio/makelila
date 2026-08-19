@@ -492,4 +492,43 @@ describe('bucketOrders', () => {
     expect(b.all).toEqual([]);
     expect(b.cancelled).toEqual([]);
   });
+
+  // A replacement whose service ticket is closed has been dealt with — the
+  // operator resolved the case. It only lingered in the Replacement tab
+  // because nothing stamps orders.shipped_at unless the ticket goes through
+  // the 'replacement_sent' status, which in practice never happens: operators
+  // close the ticket directly. Treat a closed ticket as the fulfilment signal.
+  it('hides a replacement whose linked ticket is closed', () => {
+    const b = bucketOrders(
+      [mk({ id: 'done', status: 'pending', kind: 'replacement', linked_ticket_id: 't1' }),
+       mk({ id: 'live', status: 'pending', kind: 'replacement', linked_ticket_id: 't2' })],
+      none, none, new Set(['t1']),
+    );
+    expect(b.replacement.map(o => o.id)).toEqual(['live']);
+    expect(b.all.map(o => o.id)).toEqual(['live']);
+  });
+
+  it('does not hide a SALE order just because its ticket is closed', () => {
+    const b = bucketOrders(
+      [mk({ id: 's1', status: 'pending', kind: 'sale', linked_ticket_id: 't1' })],
+      none, none, new Set(['t1']),
+    );
+    expect(b.pending.map(o => o.id)).toEqual(['s1']);
+  });
+
+  it('keeps replacements with no linked ticket visible', () => {
+    const b = bucketOrders(
+      [mk({ id: 'r1', status: 'pending', kind: 'replacement', linked_ticket_id: null })],
+      none, none, new Set(['t1']),
+    );
+    expect(b.replacement.map(o => o.id)).toEqual(['r1']);
+  });
+
+  it('defaults to hiding nothing when no closed-ticket set is passed', () => {
+    const b = bucketOrders(
+      [mk({ id: 'r1', status: 'pending', kind: 'replacement', linked_ticket_id: 't1' })],
+      none, none,
+    );
+    expect(b.replacement.map(o => o.id)).toEqual(['r1']);
+  });
 });

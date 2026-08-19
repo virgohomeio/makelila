@@ -98,9 +98,24 @@ describe('setTicketStatuses', () => {
     expect(cancelPendingMock).not.toHaveBeenCalled();
   });
 
-  it('does not fail the status change when the auto-cancel errors', async () => {
+  // Was previously swallowed to a console.warn so a failure here couldn't fail
+  // the close. That hid the failure completely and left the replacement order
+  // sitting in Sales › Orders › Replacement — the drift this whole path exists
+  // to prevent, and the reason 15 closed-ticket replacements were still in the
+  // tab. Now it surfaces, matching the 'replacement_sent' branch: the status
+  // write has already landed, so the close is not undone, and the operator can
+  // re-click because the hand-off is idempotent.
+  it('surfaces an auto-cancel failure instead of swallowing it', async () => {
     cancelPendingMock.mockRejectedValueOnce(new Error('boom'));
-    await expect(setTicketStatuses('t1', ['closed'])).resolves.toBeUndefined();
+    await expect(setTicketStatuses('t1', ['closed'])).rejects.toThrow('boom');
+  });
+
+  it('still writes the status before the auto-cancel can fail', async () => {
+    cancelPendingMock.mockRejectedValueOnce(new Error('boom'));
+    await expect(setTicketStatuses('t1', ['closed'])).rejects.toThrow();
+    // The close landed in the DB even though the hand-off threw afterwards.
+    expect(patch().status).toBe('closed');
+    expect(patch().closed_at).toEqual(expect.any(String));
   });
 
   // "Replacement Sent" is the next state of the same thread as "Queued for
