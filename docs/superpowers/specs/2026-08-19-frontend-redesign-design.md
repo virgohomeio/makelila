@@ -192,7 +192,7 @@ Six phases. Each ships independently and leaves the app working.
 
 **Phase 3 — Pilot migration: Fulfillment.** The highest-leverage surface — it absorbs Shipping, owns the queue that motivates StageRail, and pulls in PostShipment's tabs. Proves the primitives against the hardest case before fanning out. **Checkpoint: review before continuing.**
 
-**Phase 4 — Remaining surfaces**, in waves: Service (+Lovely) · Sales · Stock (+Build) · Customers (+Dashboard) · Team · Finance · Products · Marketing · Hiring · Forms.
+**Phase 4 — Remaining surfaces, one module at a time.** Strictly sequential — one surface per branch/PR, merged and verified before the next begins. Operator constraint: the platform should never absorb more than one module of visual change at once. Order, easiest-first to build confidence before the largest: Team · Finance · Products · Hiring · Stock (+Build) · Sales · Customers (+Dashboard) · Marketing · Forms · Service (+Lovely).
 
 **Phase 5 — Role-aware home.**
 
@@ -200,7 +200,7 @@ Six phases. Each ships independently and leaves the app working.
 
 ### Sizing
 
-139 `.tsx` files across 19 module directories, ~31,900 lines, with 103 existing test files. Phase 4 is the bulk of the work and is parallelisable by surface.
+139 `.tsx` files across 19 module directories, ~31,900 lines, with 103 existing test files. Phase 4 is the bulk of the work. It is sequential by operator instruction, so its duration is the sum of its surfaces, not the longest one.
 
 ---
 
@@ -208,7 +208,7 @@ Six phases. Each ships independently and leaves the app working.
 
 | Risk | Mitigation |
 |---|---|
-| Long period where migrated and unmigrated modules look different | Phase order puts shell + one full surface first so the new language is visible early; waves are short |
+| Long period where migrated and unmigrated modules look different | Unavoidable given sequential migration, and accepted. Phase order puts shell + one full surface first so the new language appears early; each surface is a small, self-contained PR |
 | `DataTable` cannot absorb every bespoke table | Pilot phase exists to find this before 10 more surfaces depend on it |
 | Route changes break deep links operators have bookmarked | Redirect every old path, following the existing precedent in `App.tsx` |
 | Regression in untested UI | 103 test files exist; primitives get their own tests; e2e specs run per phase |
