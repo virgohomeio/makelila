@@ -128,4 +128,13 @@ describe('tokens.css', () => {
   it('error red stays legible as text on white', () => {
     expect(ratio('#ffffff', tokenValue('--color-error') as string)).toBeGreaterThanOrEqual(7);
   });
+
+  it('error-strong stays AA-legible as text on white', () => {
+    // --color-error-strong is NOT held to the 1.7 separation invariant above
+    // — it's the vivid fill/accent variant and deliberately shares red's
+    // family with the brand (see the Status comment block in tokens.css).
+    // What it must hold is WCAG AA for normal text (4.5:1), because it's
+    // used as text — buttons, badges — on light surfaces, not only as a fill.
+    expect(ratio('#ffffff', tokenValue('--color-error-strong') as string)).toBeGreaterThanOrEqual(4.5);
+  });
 });

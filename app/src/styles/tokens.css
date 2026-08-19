@@ -16,7 +16,20 @@
      --color-error is deliberately much deeper than Ladybug Red. The two were
      #CC2D30 and #c53030 — a 1.038 luminance ratio, i.e. the same colour — so
      a destructive warning looked exactly like a primary action. Ladybug Red
-     now means "action" and nothing else. See tokens.test.ts. */
+     now means "action" and nothing else.
+
+     Two different rules apply to the two error tokens, because they do two
+     different jobs:
+       --color-error is the deep text/base token. It must clear a ≥1.7
+       luminance-ratio separation from Ladybug Red (see tokens.test.ts) so a
+       destructive warning is never mistaken for a primary action.
+       --color-error-strong is the vivid fill/accent variant. It deliberately
+       shares red's family with the brand and is NOT held to 1.7 — reaching
+       1.7 requires going nearly as dark as --color-error itself, which would
+       collapse the base/strong distinction this pair exists for. What it
+       must hold instead is ≥4.5:1 contrast against white (WCAG AA for
+       normal text), because it is used as text — buttons, badges — on light
+       surfaces, not only as a fill. See tokens.test.ts. */
   --color-success: #276749;
   --color-success-bg: #f0fff4;
   --color-success-border: #9ae6b4;
@@ -25,7 +38,7 @@
   --color-warning-bg: #fffbeb;
   --color-warning-border: #f6ad55;
   --color-error: #7F1D1D;
-  --color-error-strong: #e53e3e;
+  --color-error-strong: #A61B1B;
   --color-error-bg: #fff5f5;
   --color-error-border: #fc8181;
   --color-info: #2b6cb0;
