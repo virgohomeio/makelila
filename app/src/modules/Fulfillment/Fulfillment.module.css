@@ -118,7 +118,7 @@
   border-left: 3px solid var(--color-crimson);
   padding-left: 11px;
 }
-.queueRow.overdue { border-left: 3px solid var(--color-error-strong); padding-left: 11px; }
+.queueRow.overdue { border-left: 3px solid var(--color-error-accent); padding-left: 11px; }
 .queueRow.fulfilled { opacity: 0.65; }
 .queueRow.priority {
   background: linear-gradient(90deg, #3a2a0c 0%, #222 60%);
@@ -130,7 +130,7 @@
 
 .queueRow.paused {
   background: linear-gradient(90deg, #3a1818 0%, #1f1818 70%);
-  border-left: 3px solid var(--color-error-strong);
+  border-left: 3px solid var(--color-error-accent);
   padding-left: 11px;
 }
 .queueRow.paused:hover { background: linear-gradient(90deg, #4a1e1e 0%, #2a1e1e 70%); }

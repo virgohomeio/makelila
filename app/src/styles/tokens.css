@@ -18,18 +18,41 @@
      a destructive warning looked exactly like a primary action. Ladybug Red
      now means "action" and nothing else.
 
-     Two different rules apply to the two error tokens, because they do two
-     different jobs:
+     --color-error-strong used to serve two roles at once — vivid accent on
+     dark surfaces AND AA-legible text on light surfaces — and fixing the
+     light-surface AA failure (#e53e3e measured 4.13:1 on white, below the
+     4.5:1 AA floor for normal text) by darkening it to #A61B1B silently
+     broke the dark-surface role: against --color-dark-1 (#1c1c1c), where
+     3:1 is the WCAG floor for non-text, #e53e3e held 4.13 and #A61B1B
+     measures 2.27 — a fail (this is how an "overdue" queue-row marker ended
+     up dimmer than a merely "selected" one). The two roles are now two
+     tokens:
        --color-error is the deep text/base token. It must clear a ≥1.7
        luminance-ratio separation from Ladybug Red (see tokens.test.ts) so a
        destructive warning is never mistaken for a primary action.
-       --color-error-strong is the vivid fill/accent variant. It deliberately
-       shares red's family with the brand and is NOT held to 1.7 — reaching
-       1.7 requires going nearly as dark as --color-error itself, which would
-       collapse the base/strong distinction this pair exists for. What it
-       must hold instead is ≥4.5:1 contrast against white (WCAG AA for
-       normal text), because it is used as text — buttons, badges — on light
-       surfaces, not only as a fill. See tokens.test.ts. */
+       --color-error-strong is the AA-legible text/fill variant for LIGHT
+       surfaces only — buttons, badges on white or --color-page. It must
+       hold ≥4.5:1 contrast against white (WCAG AA for normal text) and is
+       NOT held to the 1.7 separation above — reaching 1.7 requires going
+       nearly as dark as --color-error itself, which would collapse the
+       base/strong distinction this pair exists for.
+       --color-error-accent is the vivid accent variant for DARK surfaces
+       only (e.g. the queue sidebar's 3px left-border markers). It is
+       explicitly NOT for text on light surfaces — it fails AA there at
+       4.13:1 on white. It must clear ≥3:1 against --color-dark-1 (WCAG
+       floor for non-text). See tokens.test.ts.
+
+     Known exemption: the ≥1.7 separation above is asserted against
+     --color-crimson only. It does NOT hold against --color-crimson-dark
+     (#991B1E, the primary button's hover/active state) — --color-error
+     measures 1.207 against it and --color-error-strong measures 1.104,
+     worse than the 1.038 collision this file originally set out to fix.
+     This is a known, deliberate exemption, not an oversight: the operator
+     instruction is that brand colours stay fixed, so --color-crimson-dark
+     is not changed to satisfy this invariant. Consequence for plan 2:
+     a filled danger button and the primary button's hover state will read
+     as the same red, so Button's danger variant should not be a filled red
+     on any screen where primary is also filled red. */
   --color-success: #276749;
   --color-success-bg: #f0fff4;
   --color-success-border: #9ae6b4;
@@ -39,6 +62,7 @@
   --color-warning-border: #f6ad55;
   --color-error: #7F1D1D;
   --color-error-strong: #A61B1B;
+  --color-error-accent: #e53e3e;
   --color-error-bg: #fff5f5;
   --color-error-border: #fc8181;
   --color-info: #2b6cb0;

@@ -30,7 +30,7 @@ const REQUIRED = [
   '--font-mono', '--font-numeric',
   '--font-size-title', '--font-size-section', '--font-size-body', '--font-size-meta',
   ...SPACING,
-  '--color-crimson-rgb', '--color-ink-rgb',
+  '--color-crimson-rgb', '--color-ink-rgb', '--color-error-accent',
   '--shadow-sm', '--shadow-md', '--shadow-lg',
   '--row-height', '--row-height-header',
   '--focus-ring',
@@ -152,5 +152,16 @@ describe('tokens.css', () => {
     // What it must hold is WCAG AA for normal text (4.5:1), because it's
     // used as text — buttons, badges — on light surfaces, not only as a fill.
     expect(contrastRatio('#ffffff', tokenValue('--color-error-strong') as string)).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it('error-accent clears 3:1 against --color-dark-1', () => {
+    // --color-error-accent is the vivid dark-surface sibling of
+    // --color-error-strong (see the Status comment block in tokens.css) —
+    // used for non-text elements like the queue sidebar's 3px left-border
+    // markers, so the WCAG floor here is 3:1, not the 4.5:1 text floor.
+    // This is the invariant that was silently violated when
+    // --color-error-strong was darkened for AA-on-white and kept reused on
+    // dark surfaces: it measured 2.27 against --color-dark-1, a fail.
+    expect(contrastRatio(tokenValue('--color-error-accent') as string, tokenValue('--color-dark-1') as string)).toBeGreaterThanOrEqual(3);
   });
 });

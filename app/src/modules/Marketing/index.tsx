@@ -261,7 +261,7 @@ export default function Marketing() {
                       {new Date(log.synced_at).toLocaleString('en-CA', { dateStyle: 'medium', timeStyle: 'short' })}
                     </td>
                     <td style={{ textAlign: 'right' }}>{log.profiles_sent}</td>
-                    <td style={{ textAlign: 'right', color: log.errors > 0 ? 'var(--color-danger, #c53030)' : 'inherit' }}>
+                    <td style={{ textAlign: 'right', color: log.errors > 0 ? 'var(--color-error)' : 'inherit' }}>
                       {log.errors}
                     </td>
                     <td style={{ color: 'var(--color-ink-subtle)' }}>{log.detail ?? '—'}</td>
