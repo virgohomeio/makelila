@@ -399,7 +399,7 @@ const HEX = /#[0-9a-fA-F]{3,8}\b/g;
  * block comments.
  *
  * @param {string} css
- * @returns {{ line: number, hex: string }[]} hits in document order
+ * @returns {{ line: number, column: number, hex: string }[]} hits in document order
  */
 export function findRawHex(css) {
   // Blank comments out rather than deleting them: newlines are preserved, so
@@ -484,8 +484,8 @@ for (const relativePath of MIGRATED) {
 
   failed = true;
   console.error(`\n${relativePath} — ${hits.length} raw hex value(s), expected var(--token):`);
-  for (const { line, hex } of hits) {
-    console.error(`  ${relativePath}:${line}  ${hex}`);
+  for (const { line, column, hex } of hits) {
+    console.error(`  ${relativePath}:${line}:${column}  ${hex}`);
   }
 }
 
