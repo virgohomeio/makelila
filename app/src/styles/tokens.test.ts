@@ -40,7 +40,7 @@ describe('tokens.css', () => {
   it('reads the real stylesheet, not Vitest\'s empty-string CSS mock', () => {
     // Diagnostic, not correctness: if test.css.include in vite.config.ts
     // ever stops matching tokens.css, tokensCss becomes '', jsdom parses
-    // nothing, and all 18 `defines %s` assertions below fail at once. That
+    // nothing, and every `defines %s` assertion below fails at once. That
     // simultaneous failure doesn't point at the cause — it looks like every
     // token vanished from tokens.css, and the Vitest CSS mock is the last
     // place anyone would look. This assertion fails first, alone, and names
@@ -87,8 +87,13 @@ describe('tokens.css', () => {
     expect(tokenValue('--focus-ring')).toContain('var(--color-crimson-rgb');
   });
 
-  const channels = (hex: string) =>
-    [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)).join(',');
+  // Both this and luminance() below need a hex string's channels; extracted
+  // so a future fix (e.g. supporting 3-digit hex) has one place to land.
+  // Assumes 6-digit hex — a 3-digit token like #fff yields NaN and fails
+  // loudly rather than false-passing, which is fine as-is.
+  const channelsOf = (hex: string) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+
+  const channels = (hex: string) => channelsOf(hex).join(',');
 
   it.each(['--color-crimson', '--color-ink'])('%s-rgb matches its hex', (name) => {
     // jsdom returns "204,45,48" — commas without spaces — so normalise
@@ -104,29 +109,40 @@ describe('tokens.css', () => {
     expect(tokenValue(n)).toContain('var(--color-ink-rgb)');
   });
 
-  // WCAG relative luminance. Used here to prove two reds are actually
-  // different, not to assert a text-contrast requirement.
+  // WCAG relative luminance.
   function luminance(hex: string): number {
-    const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
+    const [r, g, b] = channelsOf(hex).map((c) => c / 255);
     const lin = (c: number) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
     return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
   }
 
-  function ratio(a: string, b: string): number {
+  // Compares lightness, not hue — --color-info #2b6cb0 measures 1.029
+  // against brand red yet is obviously distinguishable by hue alone. Used
+  // here specifically to prove two REDS differ, where hue can't do the work.
+  function contrastRatio(a: string, b: string): number {
     const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
     return (hi + 0.05) / (lo + 0.05);
   }
 
-  it('error red is clearly distinguishable from brand red', () => {
+  it('error red is a different weight of red from brand red', () => {
     const brand = tokenValue('--color-crimson');
     const error = tokenValue('--color-error');
     expect(brand).not.toBeNull();
     expect(error).not.toBeNull();
-    expect(ratio(brand as string, error as string)).toBeGreaterThanOrEqual(1.7);
+    // 1.7 floor; #7F1D1D achieves 1.90 — headroom, not a ceiling
+    expect(contrastRatio(brand as string, error as string)).toBeGreaterThanOrEqual(1.7);
   });
 
   it('error red stays legible as text on white', () => {
-    expect(ratio('#ffffff', tokenValue('--color-error') as string)).toBeGreaterThanOrEqual(7);
+    // 7:1 = WCAG AAA for normal text
+    expect(contrastRatio('#ffffff', tokenValue('--color-error') as string)).toBeGreaterThanOrEqual(7);
+  });
+
+  it('error red stays legible as text on --color-page', () => {
+    // --color-page is the app's page background, but AppShell.tsx paints
+    // <main> with a literal #fff, so white is also a real content surface —
+    // both get checked. 7:1 = WCAG AAA for normal text.
+    expect(contrastRatio(tokenValue('--color-page') as string, tokenValue('--color-error') as string)).toBeGreaterThanOrEqual(7);
   });
 
   it('error-strong stays AA-legible as text on white', () => {
@@ -135,6 +151,6 @@ describe('tokens.css', () => {
     // family with the brand (see the Status comment block in tokens.css).
     // What it must hold is WCAG AA for normal text (4.5:1), because it's
     // used as text — buttons, badges — on light surfaces, not only as a fill.
-    expect(ratio('#ffffff', tokenValue('--color-error-strong') as string)).toBeGreaterThanOrEqual(4.5);
+    expect(contrastRatio('#ffffff', tokenValue('--color-error-strong') as string)).toBeGreaterThanOrEqual(4.5);
   });
 });
