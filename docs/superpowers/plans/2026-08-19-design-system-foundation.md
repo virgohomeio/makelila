@@ -30,6 +30,32 @@ Nothing in this plan changes what any screen looks like except the two colour co
 
 ---
 
+## Constraint: no node builtins under `src/`
+
+Learned the hard way while executing this plan; it applies to every later plan in the sequence.
+
+`app/tsconfig.app.json` typechecks `include: ["src"]` with `types: ["vite/client"]`. **Anything under `app/src/` that imports `node:fs`, `node:path` or `node:url` fails `tsc -b`, and therefore fails `npm run build`,** even though Vitest runs it happily. No test in `src/` did this before this plan.
+
+So a test under `src/` that needs to read a file must read it through Vite:
+
+```ts
+import tokensCss from './tokens.css?raw';
+```
+
+With one catch that costs an hour if you don't know it: **Vitest replaces `.css` imports with an empty string by default**, and that interception fires on the extension regardless of the `?raw` query. The import typechecks, the build passes, and the test silently receives `''`. The fix is a scoped entry in `vite.config.ts`:
+
+```ts
+test: {
+  css: { include: [/tokens\.css/] },
+}
+```
+
+Scoped deliberately — a bare `css: true` turns on real CSS processing for all 100+ test files to serve one.
+
+This does **not** apply to `app/scripts/*.mjs` (Task 3 and Task 4). Those sit outside `include: ["src"]`, are never typechecked by `tsc -b`, and use `node:fs` correctly.
+
+---
+
 ## File Structure
 
 **Created**
@@ -48,6 +74,7 @@ Nothing in this plan changes what any screen looks like except the two colour co
 | `app/src/styles/tokens.css` | Add type scale, spacing scale, mono font, elevation, row heights, focus ring; correct `--color-error` |
 | `app/src/styles/globals.css` | `.replBadge` stops hardcoding hex so it can be the first guarded file |
 | `app/package.json` | Add `check:css-tokens` script; run it from `build` |
+| `app/vite.config.ts` | Scoped `test.css.include` so `tokens.test.ts` receives the real stylesheet |
 
 The split between `find-raw-hex.mjs` and `check-css-tokens.mjs` is deliberate: file-system walking and `process.exit` are not unit-testable, string scanning is. Keep the pure part pure.
 
@@ -67,21 +94,26 @@ Create `app/src/styles/tokens.test.ts`:
 
 ```ts
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+// Read through Vite, NOT node:fs — see "Constraint: no node builtins under
+// src/" below. Requires test.css.include in vite.config.ts, or Vitest hands
+// back an empty string.
+import tokensCss from './tokens.css?raw';
 
 // tokens.css is the one file in the app allowed to hold raw hex values —
 // every other stylesheet must reach them through var(). These tests are the
 // contract that lets check-css-tokens.mjs enforce that rule elsewhere.
-const CSS = readFileSync(
-  resolve(dirname(fileURLToPath(import.meta.url)), 'tokens.css'),
-  'utf8',
-);
+//
+// The stylesheet is parsed by jsdom rather than scanned with a regex: a
+// regex reports a token as "defined" even when it sits inside a comment or
+// outside the :root block, which is exactly the silent failure this contract
+// exists to prevent.
+const style = document.createElement('style');
+style.textContent = tokensCss;
+document.head.appendChild(style);
+const ROOT = getComputedStyle(document.documentElement);
 
 function tokenValue(name: string): string | null {
-  const match = CSS.match(new RegExp(`^\\s*${name}\\s*:\\s*([^;]+);`, 'm'));
-  return match ? match[1].trim() : null;
+  return ROOT.getPropertyValue(name).trim() || null;
 }
 
 const SPACING = ['--space-1', '--space-2', '--space-3', '--space-4', '--space-5', '--space-6', '--space-7'];
