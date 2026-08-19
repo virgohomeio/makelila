@@ -12,7 +12,11 @@
   /* Legacy slots retained */
   --color-us-navy: #3C3B6E;
 
-  /* Status */
+  /* Status.
+     --color-error is deliberately much deeper than Ladybug Red. The two were
+     #CC2D30 and #c53030 — a 1.038 luminance ratio, i.e. the same colour — so
+     a destructive warning looked exactly like a primary action. Ladybug Red
+     now means "action" and nothing else. See tokens.test.ts. */
   --color-success: #276749;
   --color-success-bg: #f0fff4;
   --color-success-border: #9ae6b4;
@@ -20,7 +24,7 @@
   --color-warning-strong: #d69e2e;
   --color-warning-bg: #fffbeb;
   --color-warning-border: #f6ad55;
-  --color-error: #c53030;
+  --color-error: #7F1D1D;
   --color-error-strong: #e53e3e;
   --color-error-bg: #fff5f5;
   --color-error-border: #fc8181;
