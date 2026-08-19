@@ -1,7 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import tokensCss from './tokens.css?raw';
 
 // tokens.css is the one file in the app allowed to hold raw hex values —
 // every other stylesheet must reach them through var(). This test loads the
@@ -11,12 +9,14 @@ import { fileURLToPath } from 'node:url';
 // :root block — both invisible to a real browser, but "defined" as far as a
 // regex is concerned. getComputedStyle sees exactly what a browser would,
 // which is the contract check-css-tokens.mjs relies on to enforce
-// var()-only usage everywhere else in the app.
+// var()-only usage everywhere else in the app. The stylesheet comes in via
+// Vite's `?raw` import (typed by vite/client, already in
+// tsconfig.app.json's `types`) rather than node:fs, so this file needs no
+// Node globals; vite.config.ts scopes `test.css.include` to this one file
+// so the real bytes make it through Vitest's default CSS-to-empty-string
+// mock — see the comment there.
 const style = document.createElement('style');
-style.textContent = readFileSync(
-  resolve(dirname(fileURLToPath(import.meta.url)), 'tokens.css'),
-  'utf8',
-);
+style.textContent = tokensCss;
 document.head.appendChild(style);
 const ROOT = getComputedStyle(document.documentElement);
 
