@@ -3,7 +3,7 @@ import { findRawHex } from './find-raw-hex.mjs';
 
 describe('findRawHex', () => {
   it('finds a hex literal in a declaration', () => {
-    expect(findRawHex('.a { color: #718096; }')).toEqual([{ line: 1, hex: '#718096' }]);
+    expect(findRawHex('.a { color: #718096; }')).toEqual([{ line: 1, column: 13, hex: '#718096' }]);
   });
 
   it('ignores hex inside a block comment', () => {
@@ -17,13 +17,13 @@ describe('findRawHex', () => {
       '   replaced 2026-08 */',
       '.a { color: #e2e8f0; }',
     ].join('\n');
-    expect(findRawHex(css)).toEqual([{ line: 4, hex: '#e2e8f0' }]);
+    expect(findRawHex(css)).toEqual([{ line: 4, column: 13, hex: '#e2e8f0' }]);
   });
 
   it('finds every literal on a line, in order', () => {
     expect(findRawHex('.a { color: #fff; background: #F5F1EB; }')).toEqual([
-      { line: 1, hex: '#fff' },
-      { line: 1, hex: '#F5F1EB' },
+      { line: 1, column: 13, hex: '#fff' },
+      { line: 1, column: 31, hex: '#F5F1EB' },
     ]);
   });
 
@@ -39,8 +39,8 @@ describe('findRawHex', () => {
 
   it('finds the 4- and 8-digit alpha forms', () => {
     expect(findRawHex('.a { color: #abcd; box-shadow: 0 1px 2px #00000014; }')).toEqual([
-      { line: 1, hex: '#abcd' },
-      { line: 1, hex: '#00000014' },
+      { line: 1, column: 13, hex: '#abcd' },
+      { line: 1, column: 42, hex: '#00000014' },
     ]);
   });
 
@@ -52,7 +52,7 @@ describe('findRawHex', () => {
   // selector IS reported — so a future reader who wants to "fix" the regex
   // finds the decision recorded here instead of rediscovering it as a bug.
   it('flags an ID selector that happens to be all hex digits (accepted tradeoff, not a bug)', () => {
-    expect(findRawHex('#abc123 { color: red; }')).toEqual([{ line: 1, hex: '#abc123' }]);
+    expect(findRawHex('#abc123 { color: red; }')).toEqual([{ line: 1, column: 1, hex: '#abc123' }]);
   });
 
   // Blanking a comment (rather than deleting it) also prevents code that
@@ -61,5 +61,29 @@ describe('findRawHex', () => {
   // that never appears in the source.
   it('does not fabricate a hex literal that only exists once a comment is removed', () => {
     expect(findRawHex('.a{x:#ab/*z*/cdef}')).toEqual([]);
+  });
+
+  // Alternation tries branches left to right; longest-first is defence in
+  // depth against a shorter branch grabbing a prefix of a longer run (the
+  // trailing \b actually rejects that on its own here, since both sides of
+  // a mid-run cut are still hex/word characters — verified across all six
+  // possible branch orderings before choosing this one). Pins the correct,
+  // whole-token result either way.
+  it('matches the full 8-digit run rather than splitting off a 6-digit prefix', () => {
+    expect(findRawHex('.a { color: #abcdef12; }')).toEqual([{ line: 1, column: 13, hex: '#abcdef12' }]);
+  });
+
+  // The actual point of tightening {3,8} to discrete {8}/{6}/{3,4}: 5- and
+  // 7-digit runs are never valid CSS hex colours and are no longer matched.
+  it('rejects 5- and 7-digit runs, which are not valid CSS hex colours', () => {
+    expect(findRawHex('.a { color: #12345; border-color: #1234567; }')).toEqual([]);
+  });
+
+  // The CSS spec treats EOF as closing an open comment, so an unterminated
+  // /* must blank to the end of the string, not leave the rest of the file
+  // scannable as if the comment had never opened.
+  it('blanks an unterminated block comment through to end of string', () => {
+    const css = '.a { color: var(--color-ink); }\n/* leftover notes below\n#4a5568 dead code';
+    expect(findRawHex(css)).toEqual([]);
   });
 });
