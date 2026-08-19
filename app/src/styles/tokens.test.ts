@@ -70,8 +70,27 @@ describe('tokens.css', () => {
     // Defined-ness of --color-crimson-rgb is covered by the REQUIRED loop
     // above; this checks the other half of the link — that --focus-ring
     // actually references it via var() rather than hardcoding the numbers,
-    // so the two can't quietly drift apart.
-    expect(tokenValue('--focus-ring')).toContain('var(--color-crimson-rgb)');
+    // so the two can't quietly drift apart. No trailing ")" on the needle:
+    // a defensive fallback form like var(--color-crimson-rgb, 204, 45, 48)
+    // should still satisfy this check.
+    expect(tokenValue('--focus-ring')).toContain('var(--color-crimson-rgb');
+  });
+
+  const channels = (hex: string) =>
+    [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)).join(',');
+
+  it.each(['--color-crimson', '--color-ink'])('%s-rgb matches its hex', (name) => {
+    // jsdom returns "204,45,48" — commas without spaces — so normalise
+    // whitespace before comparing.
+    expect(tokenValue(`${name}-rgb`)!.replace(/\s+/g, '')).toBe(channels(tokenValue(name)!));
+  });
+
+  it.each(['--shadow-sm', '--shadow-md', '--shadow-lg'])('%s derives from the ink channels', (n) => {
+    // Only --focus-ring was checked against --color-crimson-rgb before this;
+    // without this, renaming --color-ink-rgb would leave all three shadows
+    // pointing at a dead variable (invalid at computed-value time in a real
+    // browser, so cards silently lose elevation) while every test still passes.
+    expect(tokenValue(n)).toContain('var(--color-ink-rgb)');
   });
 
   // WCAG relative luminance. Used here to prove two reds are actually
