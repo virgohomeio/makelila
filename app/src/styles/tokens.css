@@ -61,4 +61,44 @@
   --radius-sm: 4px;
   --radius-md: 6px;
   --radius-lg: 8px;
+
+  /* ── Typography scale ──────────────────────────────────────────────────
+     Four sizes, no more. Anything that doesn't fit one of these is a sign
+     the layout is wrong, not that the scale is short. */
+  --font-size-title:   20px;  /* page title */
+  --font-size-section: 15px;  /* section heading, card title */
+  --font-size-body:    13px;  /* body copy, table cells */
+  --font-size-meta:    11px;  /* uppercase labels, timestamps */
+
+  /* Identifiers and quantities — order refs, serials, money, counts — are
+     monospaced with tabular figures so digits align down a column. This is
+     functional, not decorative: operators reconcile refunds by scanning. */
+  --font-mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace;
+
+  /* ── Spacing ───────────────────────────────────────────────────────────
+     4px base. Use these, never arbitrary pixel values. */
+  --space-1:  4px;
+  --space-2:  8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+
+  /* ── Elevation ─────────────────────────────────────────────────────────
+     Warm-tinted shadows so cards don't read cold against the cream page. */
+  --shadow-sm: 0 1px 2px rgba(44, 42, 37, 0.06);
+  --shadow-md: 0 4px 12px rgba(44, 42, 37, 0.10);
+  --shadow-lg: 0 8px 24px rgba(44, 42, 37, 0.14);
+
+  /* ── Table rows ────────────────────────────────────────────────────────
+     Compact density (design decision, 2026-08-19): the cramped feeling is
+     fixed by alignment and quieter borders, not by adding padding. Changing
+     --row-height is the single lever if that turns out to be wrong. */
+  --row-height:        34px;
+  --row-height-header: 30px;
+
+  /* ── Focus ─────────────────────────────────────────────────────────────
+     One visible focus treatment everywhere. Keyboard access is a floor. */
+  --focus-ring: 0 0 0 3px rgba(204, 45, 48, 0.28);
 }
