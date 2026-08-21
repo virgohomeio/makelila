@@ -97,7 +97,7 @@ beforeEach(() => {
   fetchMock.mockReset();
   presenceMock.mockReset();
   getSessionMock.mockResolvedValue({ data: { session: { access_token: 'tok' } } });
-  presenceMock.mockResolvedValue(new Map());
+  presenceMock.mockResolvedValue({ presence: new Map(), warnings: [] });
 });
 
 describe('lastActivity', () => {
@@ -114,6 +114,30 @@ describe('lastActivity', () => {
       at: ago(3 * DAY),
       signal: 'notification',
     });
+  });
+
+  // The edge function has always computed these three; lastActivity used to
+  // drop them on the floor, so a user whose only recent action was installing
+  // the PWA or filing a damage report read as dormant.
+  it('counts a PWA install event as app activity', () => {
+    const user = mkUser({ last_login_at: ago(20 * DAY) });
+    const act = mkActivity({ pwa_last_event_at: ago(2 * DAY) });
+    expect(lastActivity(user, act)).toEqual({ at: ago(2 * DAY), signal: 'pwa' });
+  });
+
+  it('counts a damage report as app activity', () => {
+    const user = mkUser({ last_login_at: ago(20 * DAY) });
+    const act = mkActivity({ last_damage_at: ago(3 * DAY) });
+    expect(lastActivity(user, act)).toEqual({ at: ago(3 * DAY), signal: 'damage' });
+  });
+
+  it('counts a completed batch, not just a started one', () => {
+    const user = mkUser({ last_login_at: ago(20 * DAY) });
+    const act = mkActivity({
+      last_batch_started_at: ago(30 * DAY),
+      last_batch_completed_at: ago(4 * DAY),
+    });
+    expect(lastActivity(user, act)).toEqual({ at: ago(4 * DAY), signal: 'batch_completed' });
   });
 
   it('reports a login when login is the freshest signal', () => {
@@ -158,21 +182,49 @@ describe('appBucket', () => {
   it('buckets by recency of the composite signal', () => {
     expect(appBucket(null, NOW)).toBe('never');
     expect(appBucket(ago(3 * DAY), NOW)).toBe('active');
-    expect(appBucket(ago(7 * DAY - MIN), NOW)).toBe('active');
-    expect(appBucket(ago(8 * DAY), NOW)).toBe('cooling');
-    expect(appBucket(ago(30 * DAY - MIN), NOW)).toBe('cooling');
-    expect(appBucket(ago(31 * DAY), NOW)).toBe('dormant');
+    expect(appBucket(ago(14 * DAY - MIN), NOW)).toBe('active');
+    expect(appBucket(ago(15 * DAY), NOW)).toBe('cooling');
+    expect(appBucket(ago(45 * DAY - MIN), NOW)).toBe('cooling');
+    expect(appBucket(ago(46 * DAY), NOW)).toBe('dormant');
+  });
+
+  // A PWA user composts on a weekly-ish rhythm; a 7-day window called them
+  // Cooling after a single quiet week. 14 days is one missed cycle, not churn.
+  it('keeps a user who acted 10 days ago in the active bucket', () => {
+    expect(appBucket(ago(10 * DAY), NOW)).toBe('active');
   });
 });
 
 describe('machineState', () => {
+  const seen = (at: string) => ({ at, exact: true });
+
   it('distinguishes unpaired, never-seen, online, intermittent and offline', () => {
-    expect(machineState(null, null, NOW)).toBe('unpaired');
-    expect(machineState('LL01-1', null, NOW)).toBe('never');
-    expect(machineState('LL01-1', ago(5 * MIN), NOW)).toBe('online');
-    expect(machineState('LL01-1', ago(9 * MIN), NOW)).toBe('online');
-    expect(machineState('LL01-1', ago(30 * MIN), NOW)).toBe('intermittent');
-    expect(machineState('LL01-1', ago(3 * HOUR), NOW)).toBe('offline');
+    expect(machineState(null, undefined, NOW)).toBe('unpaired');
+    expect(machineState('LL01-1', { at: null, exact: true }, NOW)).toBe('never');
+    expect(machineState('LL01-1', seen(ago(5 * MIN)), NOW)).toBe('online');
+    expect(machineState('LL01-1', seen(ago(9 * MIN)), NOW)).toBe('online');
+    expect(machineState('LL01-1', seen(ago(30 * MIN)), NOW)).toBe('intermittent');
+    expect(machineState('LL01-1', seen(ago(40 * HOUR)), NOW)).toBe('offline');
+  });
+
+  // A unit that reported this morning is not "down". The old 2h cutoff called
+  // every machine offline overnight, which is what buried the tab in alarms.
+  it('treats a machine that reported earlier today as intermittent, not offline', () => {
+    expect(machineState('LL01-1', seen(ago(4 * HOUR)), NOW)).toBe('intermittent');
+    expect(machineState('LL01-1', seen(ago(23 * HOUR)), NOW)).toBe('intermittent');
+    expect(machineState('LL01-1', seen(ago(25 * HOUR)), NOW)).toBe('offline');
+  });
+
+  // Absence of evidence is not evidence of absence: when the telemetry read
+  // failed we know nothing, and must not claim the unit is down.
+  it('reports unknown when telemetry never answered for this serial', () => {
+    expect(machineState('LL01-1', undefined, NOW)).toBe('unknown');
+  });
+
+  // Found nothing inside the lookback window: definitely not reporting, but we
+  // never learned the exact last-seen date.
+  it('reports offline when the serial was searched but only within a window', () => {
+    expect(machineState('LL01-1', { at: null, exact: false }, NOW)).toBe('offline');
   });
 });
 
@@ -198,6 +250,16 @@ describe('activityStatus', () => {
     expect(activityStatus(u, 'dormant', 'online')).toBe('silent_user');
     expect(activityStatus(u, 'dormant', 'offline')).toBe('at_risk');
   });
+
+  // An unknown machine must never manufacture an alarm. The row falls back to
+  // the app axis alone; the Machine column says "No data" and the tab shows a
+  // banner explaining why.
+  it('never calls a user down when the machine state is unknown', () => {
+    const u = mkUser();
+    expect(activityStatus(u, 'active', 'unknown')).toBe('healthy');
+    expect(activityStatus(u, 'cooling', 'unknown')).toBe('healthy');
+    expect(activityStatus(u, 'dormant', 'unknown')).toBe('silent_user');
+  });
 });
 
 describe('buildEntries', () => {
@@ -208,8 +270,8 @@ describe('buildEntries', () => {
     ];
     const activity = [mkActivity({ user_id: 'u1', serial_number: 'LL01-1', batch_count: 4 })];
     const presence = new Map([
-      ['LL01-1', ago(2 * MIN)],
-      ['LL01-2', ago(1 * MIN)],
+      ['LL01-1', { at: ago(2 * MIN), exact: true }],
+      ['LL01-2', { at: ago(1 * MIN), exact: true }],
     ]);
 
     const entries = buildEntries(users, activity, presence, NOW);
@@ -228,11 +290,25 @@ describe('buildEntries', () => {
     expect(byId.get('u2')!.activity).toBeNull();
   });
 
-  it('treats a serial with no telemetry entry as never seen', () => {
+  // The presence read failing used to blank the map, which turned every paired
+  // customer into "Unit down" at once. A missing entry now means unknown.
+  it('treats a serial missing from the presence map as unknown, not down', () => {
     const entries = buildEntries(
       [mkUser({ serial_number: 'LL01-9', last_login_at: ago(1 * DAY) })],
       [],
       new Map(),
+      NOW,
+    );
+    expect(entries[0].machine).toBe('unknown');
+    expect(entries[0].lastSeenAt).toBeNull();
+    expect(entries[0].status).toBe('healthy');
+  });
+
+  it('still reports never-seen when telemetry answered and found nothing', () => {
+    const entries = buildEntries(
+      [mkUser({ serial_number: 'LL01-9', last_login_at: ago(1 * DAY) })],
+      [],
+      new Map([['LL01-9', { at: null, exact: true }]]),
       NOW,
     );
     expect(entries[0].machine).toBe('never');
@@ -245,7 +321,11 @@ describe('buildEntries', () => {
       mkUser({ id: 'down', serial_number: 'LL01-2', last_login_at: ago(1 * DAY) }),
       mkUser({ id: 'risk', serial_number: 'LL01-3', last_login_at: ago(90 * DAY) }),
     ];
-    const presence = new Map([['LL01-1', ago(1 * MIN)]]);
+    const presence = new Map([
+      ['LL01-1', { at: ago(1 * MIN), exact: true }],
+      ['LL01-2', { at: null, exact: true }],
+      ['LL01-3', { at: null, exact: true }],
+    ]);
     const entries = buildEntries(users, [], presence, NOW);
     expect(entries.map(e => e.status)).toEqual(['unit_down', 'at_risk', 'healthy']);
   });
@@ -259,7 +339,10 @@ describe('statusCounts', () => {
         mkUser({ id: 'b', serial_number: 'LL01-2', last_login_at: ago(1 * DAY) }),
       ],
       [],
-      new Map([['LL01-1', ago(1 * MIN)], ['LL01-2', ago(1 * MIN)]]),
+      new Map([
+        ['LL01-1', { at: ago(1 * MIN), exact: true }],
+        ['LL01-2', { at: ago(1 * MIN), exact: true }],
+      ]),
       NOW,
     );
     const counts = statusCounts(entries);
@@ -326,9 +409,37 @@ describe('useLovelyActivity', () => {
 
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.entries).toHaveLength(1);
-    expect(result.current.entries[0].machine).toBe('never');
+    // Unknown, not "never seen": the read failed, so we learned nothing about
+    // this machine and must not report it as down.
+    expect(result.current.entries[0].machine).toBe('unknown');
     expect(result.current.telemetryError).toContain('telemetry down');
     expect(result.current.error).toBeNull();
+  });
+
+  // A single slow serial used to reject the whole Promise.all and blank every
+  // row. Partial results must survive, with the failures named.
+  it('keeps the serials telemetry did answer for when others fail', async () => {
+    fetchMock.mockResolvedValue(okResponse({ activity: [] }));
+    // The hook clocks itself off Date.now(), not the NOW fixture, so this one
+    // timestamp has to be relative to the real clock.
+    presenceMock.mockResolvedValue({
+      presence: new Map([['LL01-1', { at: new Date(Date.now() - 2 * MIN).toISOString(), exact: true }]]),
+      warnings: ['events/LL01-2: statement timeout'],
+    });
+
+    const { result } = renderHook(() =>
+      useLovelyActivity([
+        mkUser({ id: 'u1', serial_number: 'LL01-1', last_login_at: ago(1 * DAY) }),
+        mkUser({ id: 'u2', serial_number: 'LL01-2', last_login_at: ago(1 * DAY) }),
+      ]),
+    );
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    const byId = new Map(result.current.entries.map(e => [e.user.id, e]));
+    expect(byId.get('u1')!.machine).toBe('online');
+    expect(byId.get('u2')!.machine).toBe('unknown');
+    expect(result.current.telemetryWarnings).toEqual(['events/LL01-2: statement timeout']);
+    expect(result.current.telemetryError).toBeNull();
   });
 
   it('errors with "Not signed in." and does not call the function when there is no session', async () => {

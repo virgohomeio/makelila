@@ -16,20 +16,29 @@ import type { LovelyUser } from './lovely';
 //   app dormant + machine up   → silent user: composting fine, ignoring the app
 //   app dormant + machine down → at risk
 //
+// "machine down" means telemetry answered and the unit was silent. A telemetry
+// read that fails is a third thing — unknown — and never counts as down.
+//
 // App-side aggregates come from the `lovely-activity` edge function (deployed on
 // the Lovely project, operator-JWT gated). Machine-side presence comes from the
 // telemetry tables via lib/dashboard.
 
 // ── Thresholds ──────────────────────────────────────────────────────────────
-// App buckets are business judgement; machine ones mirror what the rest of the
-// stack already means by "connected": 10 min is the DIAGNOSE cutoff in
-// dashboard.ts, and 2 h is what the Lovely PWA itself calls "disconnected"
-// (beta-lovelyapp-host/app/api/dashboard/route.ts), so operators and customers
-// read the same story.
-export const APP_ACTIVE_DAYS = 7;
-export const APP_COOLING_DAYS = 30;
+// App buckets are business judgement. Composting runs on a weekly-ish rhythm,
+// so a 7-day window called a normal user "cooling" after one quiet week; 14
+// days is one missed cycle and 45 is roughly a missed month.
+export const APP_ACTIVE_DAYS = 14;
+export const APP_COOLING_DAYS = 45;
+
+// "Online" mirrors what the rest of the stack means by connected: 10 min is the
+// DIAGNOSE cutoff in dashboard.ts. The far cutoff is deliberately NOT the PWA's
+// 2 h "disconnected" banner — that answers "can I trust this reading right
+// now", which is a different question from "should an operator call this
+// customer". At 2 h every machine read offline overnight and the tab filled
+// with false alarms, so a unit that reported at any point in the last day is
+// intermittent, and only a full day of silence is offline.
 export const MACHINE_ONLINE_MINUTES = 10;
-export const MACHINE_INTERMITTENT_HOURS = 2;
+export const MACHINE_INTERMITTENT_HOURS = 24;
 
 // An approval writes users.is_verified, which bumps updated_at. Treating that
 // as customer activity would make every freshly-approved user look active on
@@ -64,13 +73,17 @@ export type LovelyActivityRow = {
 };
 
 export type ActivitySignal =
-  | 'notification' | 'batch' | 'ota' | 'feedback' | 'login' | 'profile';
+  | 'notification' | 'batch' | 'batch_completed' | 'ota' | 'feedback'
+  | 'damage' | 'pwa' | 'login' | 'profile';
 
 export const SIGNAL_LABELS: Record<ActivitySignal, string> = {
   notification: 'Read notifications',
   batch: 'Started a batch',
+  batch_completed: 'Completed a batch',
   ota: 'Accepted an update',
   feedback: 'Sent feedback',
+  damage: 'Reported damage',
+  pwa: 'Installed the app',
   login: 'Signed in',
   profile: 'Updated profile',
 };
@@ -78,7 +91,19 @@ export const SIGNAL_LABELS: Record<ActivitySignal, string> = {
 export type LastActivity = { at: string | null; signal: ActivitySignal | null };
 
 export type AppBucket = 'active' | 'cooling' | 'dormant' | 'never';
-export type MachineState = 'online' | 'intermittent' | 'offline' | 'never' | 'unpaired';
+export type MachineState =
+  | 'online' | 'intermittent' | 'offline' | 'never' | 'unpaired' | 'unknown';
+
+// What the telemetry read managed to establish about one serial. Absence from
+// the presence map is meaningful in its own right — see machineState.
+export type PresenceEntry = {
+  // Newest telemetry row found, or null if the search came up empty.
+  at: string | null;
+  // Whether the search covered all of history. False means we only looked
+  // inside the recent window, so a null `at` proves silence across that window
+  // and says nothing about older history.
+  exact: boolean;
+};
 
 export type ActivityStatus =
   | 'unit_down' | 'at_risk' | 'never_used' | 'unverified'
@@ -107,6 +132,7 @@ export const MACHINE_LABELS: Record<MachineState, string> = {
   offline: 'Offline',
   never: 'Never seen',
   unpaired: 'Not paired',
+  unknown: 'No data',
 };
 
 export const STATUS_META: Record<
@@ -176,6 +202,11 @@ function profileSignalAt(user: LovelyUser): string | null {
 // The newest timestamp across every signal the app writes, plus which one it
 // was — "4 days ago · read notifications" is actionable in a way a bare date
 // is not. Order below is also the tie-break order (strongest signal wins).
+//
+// Every timestamped column the edge function returns is counted. Leaving any of
+// them out silently ages a user: notification read_at is null for most of the
+// roster, so a customer whose real last action was installing the PWA or filing
+// a damage report used to fall back to a months-old login.
 export function lastActivity(
   user: LovelyUser,
   activity: LovelyActivityRow | null | undefined,
@@ -183,8 +214,11 @@ export function lastActivity(
   const candidates: Array<[ActivitySignal, string | null]> = [
     ['notification', activity?.last_notification_read_at ?? null],
     ['batch', activity?.last_batch_started_at ?? null],
+    ['batch_completed', activity?.last_batch_completed_at ?? null],
     ['ota', activity?.ota_last_accepted_at ?? null],
     ['feedback', activity?.last_feedback_at ?? null],
+    ['damage', activity?.last_damage_at ?? null],
+    ['pwa', activity?.pwa_last_event_at ?? null],
     ['login', user.last_login_at],
     ['profile', profileSignalAt(user)],
   ];
@@ -211,14 +245,24 @@ export function appBucket(at: string | null, nowMs: number): AppBucket {
   return 'dormant';
 }
 
+// `presence` is undefined when the telemetry read never produced an answer for
+// this serial — a failed or timed-out query. That is NOT the same as "the
+// machine is silent", and conflating the two is what turned a single slow query
+// into a roster-wide "everything is down". Unknown stays unknown.
 export function machineState(
   serial: string | null,
-  lastSeenAt: string | null,
+  presence: PresenceEntry | undefined,
   nowMs: number,
 ): MachineState {
   if (!serial) return 'unpaired';
-  const age = msSince(lastSeenAt, nowMs);
-  if (age === null) return 'never';
+  if (!presence) return 'unknown';
+
+  const age = msSince(presence.at, nowMs);
+  if (age === null) {
+    // Searched and found nothing. Across all of history that means never seen;
+    // inside a bounded window it only proves the machine is quiet right now.
+    return presence.exact ? 'never' : 'offline';
+  }
   if (age <= MACHINE_ONLINE_MINUTES * 60_000) return 'online';
   if (age <= MACHINE_INTERMITTENT_HOURS * 3_600_000) return 'intermittent';
   return 'offline';
@@ -234,9 +278,13 @@ export function activityStatus(
   if (app === 'never') return 'never_used';
 
   const appUp = app === 'active' || app === 'cooling';
-  const machineUp = machine === 'online' || machine === 'intermittent';
-  if (appUp) return machineUp ? 'healthy' : 'unit_down';
-  return machineUp ? 'silent_user' : 'at_risk';
+  // 'unknown' counts as not-down. Every status on the down side of this matrix
+  // is a call-the-customer alarm, and we will not raise one on the strength of
+  // a telemetry read that failed. The Machine column shows "No data" and the
+  // tab banners the failure, so the gap stays visible without crying wolf.
+  const machineDown = machine === 'offline' || machine === 'never';
+  if (appUp) return machineDown ? 'unit_down' : 'healthy';
+  return machineDown ? 'at_risk' : 'silent_user';
 }
 
 // Joins the three sources into one row per user, ordered most-actionable first
@@ -244,18 +292,28 @@ export function activityStatus(
 export function buildEntries(
   users: LovelyUser[],
   activity: LovelyActivityRow[],
-  presence: Map<string, string | null>,
+  presence: Map<string, PresenceEntry>,
   nowMs: number,
 ): ActivityEntry[] {
   const byUser = new Map(activity.map(a => [a.user_id, a]));
 
   const entries: ActivityEntry[] = users.map(user => {
     const act = byUser.get(user.id) ?? null;
-    const lastSeenAt = user.serial_number ? presence.get(user.serial_number) ?? null : null;
+    // Deliberately not defaulted to null: a serial absent from the map means
+    // telemetry never answered for it, which machineState reads as 'unknown'.
+    const seen = user.serial_number ? presence.get(user.serial_number) : undefined;
     const last = lastActivity(user, act);
     const app = appBucket(last.at, nowMs);
-    const machine = machineState(user.serial_number, lastSeenAt, nowMs);
-    return { user, activity: act, lastSeenAt, last, app, machine, status: activityStatus(user, app, machine) };
+    const machine = machineState(user.serial_number, seen, nowMs);
+    return {
+      user,
+      activity: act,
+      lastSeenAt: seen?.at ?? null,
+      last,
+      app,
+      machine,
+      status: activityStatus(user, app, machine),
+    };
   });
 
   return entries.sort((a, b) => {
@@ -280,11 +338,14 @@ export function statusCounts(entries: ActivityEntry[]): Record<ActivityStatus, n
 
 export function useLovelyActivity(users: LovelyUser[]) {
   const [activity, setActivity] = useState<LovelyActivityRow[]>([]);
-  const [presence, setPresence] = useState<Map<string, string | null>>(new Map());
+  const [presence, setPresence] = useState<Map<string, PresenceEntry>>(new Map());
   const [loading, setLoading] = useState<boolean>(isTelemetryConfigured);
   const [presenceLoading, setPresenceLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [telemetryError, setTelemetryError] = useState<string | null>(null);
+  // Partial failures: the read succeeded for most serials but not all. Those
+  // rows show "No data" rather than dragging the whole roster down with them.
+  const [telemetryWarnings, setTelemetryWarnings] = useState<string[]>([]);
   // Recomputed only when the roster actually changes, so relative-time
   // rendering doesn't re-bucket every row on every parent render.
   const [nowMs, setNowMs] = useState(() => Date.now());
@@ -339,17 +400,22 @@ export function useLovelyActivity(users: LovelyUser[]) {
   const fetchPresence = useCallback(async (list: string[]) => {
     if (!isTelemetryConfigured || list.length === 0) {
       setPresence(new Map());
+      setTelemetryWarnings([]);
       return;
     }
     setPresenceLoading(true);
     setTelemetryError(null);
     try {
-      setPresence(await fetchTelemetryPresence(list));
+      const { presence: found, warnings } = await fetchTelemetryPresence(list);
+      setPresence(found);
+      setTelemetryWarnings(warnings);
     } catch (e) {
       // Telemetry is the softer half — degrade to app-only data rather than
-      // blanking the roster.
+      // blanking the roster. An empty map means every machine reads 'unknown',
+      // which keeps the rows out of the down statuses entirely.
       setTelemetryError((e as Error).message);
       setPresence(new Map());
+      setTelemetryWarnings([]);
     } finally {
       setPresenceLoading(false);
     }
@@ -378,6 +444,7 @@ export function useLovelyActivity(users: LovelyUser[]) {
     loading: loading || presenceLoading,
     error,
     telemetryError,
+    telemetryWarnings,
     configured: isTelemetryConfigured,
     nowMs,
     refetch,

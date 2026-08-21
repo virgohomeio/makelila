@@ -1286,6 +1286,12 @@ const PRESENCE_IN_CHUNK = 100;
 // Bounds the tier-2 fan-out below (one small query per table per quiet serial).
 const PRESENCE_CONCURRENCY = 8;
 
+// How far back tier 2 looks. Kept in step with MACHINE_INTERMITTENT_HOURS in
+// lovelyActivity.ts — not imported, because that module imports this one — so
+// that anything tier 2 fails to find is already past the "offline" cutoff and
+// the missing exact date cannot change a status.
+const PRESENCE_RECENT_WINDOW_HOURS = 24;
+
 function chunk<T>(items: T[], size: number): T[][] {
   const out: T[][] = [];
   for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
@@ -1313,34 +1319,44 @@ async function mapWithConcurrency<T, R>(
  * Last-seen timestamp per serial, for a whole fleet at once.
  *
  * `isRecentlyReceiving` answers the same question for one serial in 2 queries,
- * which would be 2N queries across a roster. This is two tiers instead:
+ * which would be 2N queries across a roster. This is three tiers instead, each
+ * cheaper to be wrong about than the last:
  *
  *   1. One batched query per telemetry table over the online window. We only
  *      need *existence* here, so the result set stays small no matter how many
  *      serials are passed. Anything reporting inside the window is resolved.
- *   2. For the serials that stayed quiet — normally the minority, and exactly
- *      the ones an operator wants a date for — one `limit(1)` lookup per table
- *      to get the exact last-seen, run with bounded concurrency.
+ *   2. For the serials that stayed quiet, one `limit(1)` lookup per table
+ *      bounded to the recent window. The bound is what makes this cheap — see
+ *      PRESENCE_RECENT_WINDOW_HOURS.
+ *   3. Best-effort exact last-seen for whatever is still unresolved, purely so
+ *      the UI can print a real date for a long-dead unit. Never required for
+ *      correctness: by tier 3 we already know the machine is silent.
  *
- * A serial absent from the returned map, or mapped to null, has no telemetry in
- * any of these tables at all.
- *
- * Cost is O(tables) for the healthy majority plus O(tables × quiet serials).
- * If the quiet set ever becomes most of a large fleet, tier 2 is the thing to
- * replace with a server-side DISTINCT ON view.
+ * Failures are contained rather than thrown. A serial ABSENT from the returned
+ * map is one we failed to learn anything about, which callers must treat as
+ * unknown — not as "the machine is down". Getting this wrong is what turned one
+ * slow query into a roster-wide false alarm.
  */
+export type PresenceEntry = { at: string | null; exact: boolean };
+export type PresenceResult = {
+  presence: Map<string, PresenceEntry>;
+  warnings: string[];
+};
+
 export async function fetchTelemetryPresence(
   serials: string[],
-): Promise<Map<string, string | null>> {
+): Promise<PresenceResult> {
   const unique = Array.from(new Set(serials.filter(Boolean)));
-  const presence = new Map<string, string | null>();
-  if (unique.length === 0) return presence;
+  const presence = new Map<string, PresenceEntry>();
+  const warnings: string[] = [];
+  if (unique.length === 0) return { presence, warnings };
 
-  // Tier 1 — batched liveness over the online window.
-  const startIso = new Date(
-    Date.now() - RECENT_RECEIVING_WINDOW_MINUTES * 60_000,
-  ).toISOString();
+  const now = Date.now();
+  const onlineIso = new Date(now - RECENT_RECEIVING_WINDOW_MINUTES * 60_000).toISOString();
+  const recentIso = new Date(now - PRESENCE_RECENT_WINDOW_HOURS * 3_600_000).toISOString();
 
+  // ── Tier 1 — batched liveness over the online window ──────────────────────
+  const live = new Map<string, string>();
   await Promise.all(
     PRESENCE_TABLES.flatMap(table =>
       chunk(unique, PRESENCE_IN_CHUNK).map(async group => {
@@ -1348,35 +1364,94 @@ export async function fetchTelemetryPresence(
           .from(table)
           .select('serial_number, created_at')
           .in('serial_number', group)
-          .gte('created_at', startIso);
-        if (error) throw error;
+          .gte('created_at', onlineIso);
+        if (error) {
+          // One table going down costs one source of liveness, not the roster.
+          warnings.push(`${table}: ${error.message}`);
+          return;
+        }
         for (const row of (data ?? []) as Array<{ serial_number: string; created_at: string }>) {
-          const seen = presence.get(row.serial_number);
-          if (!seen || row.created_at > seen) presence.set(row.serial_number, row.created_at);
+          const seen = live.get(row.serial_number);
+          if (!seen || row.created_at > seen) live.set(row.serial_number, row.created_at);
         }
       }),
     ),
   );
+  for (const [serial, at] of live) presence.set(serial, { at, exact: true });
 
-  // Tier 2 — exact last-seen for whatever stayed quiet.
+  // ── Tier 2 — bounded last-seen for whatever stayed quiet ──────────────────
+  // The `gte` is load-bearing. These tables are indexed on
+  // (created_at, serial_number), so an unbounded `where serial = ? order by
+  // created_at desc limit 1` scans the entire index backward — measured at
+  // ~11.7s per serial on bme_sensors, past the statement timeout, and worst
+  // for exactly the dead serials that reach this tier. Bounding the range to
+  // the recent window turns it into a small range scan.
   const quiet = unique.filter(s => !presence.has(s));
+  const unresolved: string[] = [];
+
   await mapWithConcurrency(quiet, PRESENCE_CONCURRENCY, async serial => {
     let latest: string | null = null;
+    let failed = false;
     for (const table of PRESENCE_TABLES) {
+      const { data, error } = await supabase
+        .from(table)
+        .select('created_at')
+        .eq('serial_number', serial)
+        .gte('created_at', recentIso)
+        .order('created_at', { ascending: false })
+        .limit(1);
+      if (error) {
+        warnings.push(`${table}/${serial}: ${error.message}`);
+        failed = true;
+        continue;
+      }
+      const at = (data ?? [])[0]?.created_at as string | undefined;
+      if (at && (!latest || at > latest)) latest = at;
+    }
+
+    if (latest) {
+      presence.set(serial, { at: latest, exact: true });
+    } else if (failed) {
+      // Never established anything. Leave the serial out of the map entirely so
+      // the caller reads it as unknown.
+      unresolved.push(serial);
+    } else {
+      // Definitively silent across the window. The exact older date is still
+      // unknown, which `exact: false` records.
+      presence.set(serial, { at: null, exact: false });
+      unresolved.push(serial);
+    }
+  });
+
+  // ── Tier 3 — best-effort exact date for the long-quiet ────────────────────
+  // Unbounded, so it depends on a (serial_number, created_at DESC) index being
+  // present. Circuit-broken on the first failure: without that index every one
+  // of these times out, and hammering the database to improve a display string
+  // is not worth it. Whatever tier 2 already concluded stands.
+  let exactTierOpen = true;
+  await mapWithConcurrency(unresolved, PRESENCE_CONCURRENCY, async serial => {
+    if (!exactTierOpen) return;
+    let latest: string | null = null;
+    for (const table of PRESENCE_TABLES) {
+      if (!exactTierOpen) return;
       const { data, error } = await supabase
         .from(table)
         .select('created_at')
         .eq('serial_number', serial)
         .order('created_at', { ascending: false })
         .limit(1);
-      if (error) throw error;
+      if (error) {
+        exactTierOpen = false;
+        warnings.push(`exact last-seen unavailable (${table}: ${error.message})`);
+        return;
+      }
       const at = (data ?? [])[0]?.created_at as string | undefined;
       if (at && (!latest || at > latest)) latest = at;
     }
-    presence.set(serial, latest);
+    presence.set(serial, { at: latest, exact: true });
   });
 
-  return presence;
+  return { presence, warnings };
 }
 
 export function useMachineStatus(serialNumber: string | null) {

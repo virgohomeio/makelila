@@ -23,7 +23,8 @@ import styles from './Lovely.module.css';
 // leave alone" — which is the whole point of the tab.
 export function ActivityTab() {
   const { users, loading: usersLoading, error: usersError, refetch: refetchUsers } = useLovelyUsers();
-  const { entries, loading, error, telemetryError, nowMs, refetch } = useLovelyActivity(users);
+  const { entries, loading, error, telemetryError, telemetryWarnings, nowMs, refetch } =
+    useLovelyActivity(users);
 
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState<ActivityStatus | null>(null);
@@ -127,7 +128,17 @@ export function ActivityTab() {
       {telemetryError && (
         <div className={styles.calloutBar}>
           Machine telemetry unavailable — app-side data below is still accurate, but every
-          unit reads as “Never seen”. ({telemetryError})
+          unit reads as “No data” and no row can be called down until it comes back.
+          ({telemetryError})
+        </div>
+      )}
+
+      {!telemetryError && telemetryWarnings.length > 0 && (
+        <div className={styles.calloutBar}>
+          Telemetry answered for most units but not all — the {' '}
+          {telemetryWarnings.length === 1 ? 'one that failed reads' : 'ones that failed read'}{' '}
+          as “No data” rather than down.{' '}
+          <span className={styles.muted}>{telemetryWarnings.join('; ')}</span>
         </div>
       )}
 
