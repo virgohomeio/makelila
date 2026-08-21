@@ -10,69 +10,346 @@
  *      is right-aligned so tags and SLA line up down the whole list. That
  *      alignment is the only reason the queue scans — don't collapse it back
  *      into a single flowing meta line.
- *   3. The confirm SLA is stated ONCE per surface: .urgencyChip in the rail,
- *      .slaBig in the detail header. It used to appear three times in three
- *      vocabularies (row chip, body banner, action-bar due pill).
+ *   3. The confirm SLA is stated ONCE per surface, and both surfaces read it
+ *      from sla.ts: .rail in the list, .slaBig in the detail header. It used
+ *      to appear three times in three vocabularies (row chip, body banner,
+ *      action-bar due pill).
  */
 
-/* ── Page header ─────────────────────────────────────────────────────────── */
+/* ══════════════════════════════════════════════════════════════════════════
+   Page chrome — the same system Support Tickets adopted on 2026-08-21
+   (Service.module.css). Queue bar, saved views, one toolbar, view switch.
+   Sales' spine is the confirm SLA, so the dwell rail becomes an SLA rail;
+   scale and ticks live in sla.ts, mirroring Service/dwell.ts.
+   ══════════════════════════════════════════════════════════════════════════ */
 .pageHead {
   display: flex;
-  align-items: flex-end;
+  align-items: flex-start;
   gap: var(--space-4);
-  margin-bottom: var(--space-3);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-4);
 }
 .pageTitle {
   font-size: var(--font-size-title);
   font-weight: 700;
-  letter-spacing: -0.4px;
-  line-height: 1;
+  letter-spacing: -0.015em;
   color: var(--color-ink);
+  margin: 0 0 2px;
 }
 .pageSub {
-  font-size: var(--font-size-meta);
-  color: var(--color-ink-subtle);
-  margin-top: 5px;
+  font-size: 12.5px;
+  color: var(--color-ink-muted);
+  margin: 0;
 }
-.pageHeadRight {
+.pageSub b {
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--font-numeric);
+  font-weight: 650;
+  color: var(--color-ink);
+}
+.pageActions {
   margin-left: auto;
   display: flex;
   align-items: center;
   gap: var(--space-2);
 }
+.addBtn {
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 550;
+  padding: 6px var(--space-3);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  background: var(--color-raised);
+  color: var(--color-ink-muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.addBtn:hover:not(:disabled) { color: var(--color-ink); border-color: var(--color-ink-subtle); }
+.addBtn:disabled { color: var(--color-ink-faint); cursor: not-allowed; }
+.syncStatus { font-size: 11.5px; color: var(--color-ink-subtle); }
+.syncError { color: var(--color-error-strong); font-weight: 600; }
 
-/* Views (Orders / Templates / Upload) are a different navigational level from
-   the status tabs inside the rail. They used to be crimson pills — visually
-   identical to the status tabs sitting directly below them. Quiet segmented
-   control instead, so the two levels stop competing. */
-.viewChips {
+.addBtn:focus-visible,
+.clearBtn:focus-visible,
+.queueSeg:focus-visible,
+.legendItem:focus-visible,
+.savedChip:focus-visible,
+.savedChipOn:focus-visible,
+.filterChip:focus-visible,
+.filterChipOn:focus-visible,
+.viewSeg:focus-visible,
+.viewSegOn:focus-visible,
+.menuItem:focus-visible,
+.search:focus-visible,
+.row:focus-visible,
+.actionBtn:focus-visible,
+.blockFix:focus-visible,
+.reasonInput:focus-visible,
+.notesArea:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/* ── Queue bar: the status filter, sized to the real distribution ───────── */
+.queueBar { margin-bottom: var(--space-3); }
+.queueTrack {
+  display: flex;
+  height: 30px;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+.queueSeg {
+  border: 0;
+  border-right: 1px solid rgba(255, 255, 255, 0.5);
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+  display: grid;
+  place-items: center;
+  color: var(--color-raised);
+  min-width: 3px;
+  transition: filter 0.12s ease;
+}
+.queueSeg:last-child { border-right: 0; }
+.queueSeg:hover { filter: brightness(1.12); }
+.queueSeg[aria-pressed='true'] { box-shadow: inset 0 0 0 2px var(--color-ink); }
+.queueSegN {
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--font-numeric);
+  font-size: 11.5px;
+  font-weight: 650;
+}
+.queueEmpty {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  font-size: 11.5px;
+  color: var(--color-ink-subtle);
+}
+
+.queueLegend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px var(--space-4);
+  margin-top: 9px;
+}
+.legendItem {
   display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: 0;
+  padding: 2px 0;
+  font: inherit;
+  font-size: 11.5px;
+  color: var(--color-ink-muted);
+  cursor: pointer;
+}
+.legendItem:hover { color: var(--color-ink); }
+.legendItem b {
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--font-numeric);
+  color: var(--color-ink);
+  font-weight: 650;
+}
+/* A status nothing currently holds stays filterable — a status you can set is
+   one you must be able to find — but it recedes. */
+.legendZero { opacity: 0.45; }
+.legendOn {
+  color: var(--color-ink);
+  font-weight: 650;
+  opacity: 1;
+  box-shadow: inset 0 -2px 0 var(--color-crimson);
+}
+/* Cancelled is terminal, not part of the live queue, so it sits apart. */
+.legendSep {
+  margin-left: 2px;
+  padding-left: var(--space-4);
+  border-left: 1px solid var(--color-border);
+}
+.legendDot { width: 9px; height: 9px; border-radius: 2px; flex: none; }
+
+/* ── Saved views ───────────────────────────────────────────────────────── */
+.savedViews {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-3);
+  align-items: center;
+}
+.savedChip,
+.savedChipOn {
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 11px 5px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--color-border);
+  background: var(--color-raised);
+  color: var(--color-ink-muted);
+}
+.savedChip:hover { border-color: var(--color-ink-subtle); color: var(--color-ink); }
+.savedChipOn {
+  background: var(--color-ink);
+  border-color: var(--color-ink);
+  color: var(--color-page);
+}
+.savedCount {
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--font-numeric);
+  font-size: 11px;
+  font-weight: 650;
+  background: var(--color-surface);
+  color: var(--color-ink);
+  padding: 1px 6px;
+  border-radius: 999px;
+}
+.savedChipOn .savedCount { background: rgba(255, 255, 255, 0.16); color: var(--color-raised); }
+.savedDot { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+.savedDot_blocked     { background: var(--color-accent-gold); }
+.savedDot_overdue     { background: var(--color-accent-clay); }
+.savedDot_replacement { background: var(--color-purple); }
+/* The ready/awaiting split, shown only while the replacement view is on. */
+.savedSub {
+  margin-left: 2px;
+  padding-left: var(--space-3);
+  border-left: 1px solid var(--color-border);
+  display: inline-flex;
+  gap: var(--space-2);
+}
+
+/* ── Toolbar ───────────────────────────────────────────────────────────── */
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-border);
+  margin-bottom: var(--space-3);
+}
+.toolbarSpacer { flex: 1; }
+.clearBtn {
+  font: inherit;
+  font-size: 12px;
+  padding: 6px var(--space-3);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   background: var(--color-raised);
-  overflow: hidden;
-}
-.viewChip {
-  border: none;
-  background: transparent;
   color: var(--color-ink-muted);
-  padding: 6px 14px;
-  font-size: var(--font-size-meta);
-  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.clearBtn:hover { color: var(--color-ink); border-color: var(--color-ink-subtle); }
+
+.dropdown { position: relative; }
+.filterChip,
+.filterChipOn {
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+  padding: 6px var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-raised);
+  color: var(--color-ink-muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.filterChip:hover { border-color: var(--color-ink-subtle); color: var(--color-ink); }
+.filterChipOn {
+  background: var(--color-ink);
+  border-color: var(--color-ink);
+  color: var(--color-page);
+}
+.caret { font-size: 9px; opacity: 0.65; }
+
+.menu {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 5px);
+  left: 0;
+  min-width: 220px;
+  background: var(--color-raised);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  padding: 7px;
+  max-height: 380px;
+  overflow-y: auto;
+}
+.menuLabel {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-ink-subtle);
+  padding: 7px var(--space-2) 5px;
+}
+.menuItem {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  font-size: 12.5px;
+  padding: 5px var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--color-ink);
   cursor: pointer;
 }
-.viewChip + .viewChip { border-left: 1px solid var(--color-border); }
-.viewChip:hover { background: var(--color-page); color: var(--color-ink); }
-.viewChipActive {
-  background: var(--color-surface);
-  color: var(--color-ink);
-  font-weight: 700;
+.menuItem:hover { background: var(--color-surface); }
+.menuItem[aria-checked='true'] { font-weight: 650; }
+.menuCheck { width: 10px; flex: none; color: var(--color-crimson); font-size: 11px; }
+.menuItemLabel { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.menuCount {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--font-numeric);
+  font-size: 11px;
+  color: var(--color-ink-subtle);
 }
+
+/* ── View switcher ─────────────────────────────────────────────────────── */
+.viewSwitch {
+  display: flex;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--color-raised);
+}
+.viewSeg,
+.viewSegOn {
+  font: inherit;
+  font-size: 12.5px;
+  padding: 6px 11px;
+  border: 0;
+  border-right: 1px solid var(--color-border);
+  background: none;
+  color: var(--color-ink-muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.viewSeg:last-child,
+.viewSegOn:last-child { border-right: 0; }
+.viewSeg:hover { color: var(--color-ink); }
+.viewSegOn { background: var(--color-surface); color: var(--color-ink); font-weight: 650; }
 
 /* ── Shell ───────────────────────────────────────────────────────────────── */
 .layout {
   display: grid;
-  grid-template-columns: 344px 1fr;
+  grid-template-columns: 420px 1fr;
   height: calc(100vh - 176px);
   min-height: 560px;
   background: var(--color-raised);
@@ -101,6 +378,7 @@
      instead. */
   .detail,
   .detailBody { overflow: visible; }
+  .slaHead, .rail, .railDead { width: 140px; }
   .cards { grid-template-columns: 1fr; }
   .detailId { row-gap: 4px; }
   .slaBig { margin-left: 0; }
@@ -124,125 +402,162 @@
   overflow: hidden;
 }
 
-.sidebarHeader {
-  padding: var(--space-3);
-  border-bottom: 1px solid var(--color-border);
-}
-
-.searchWrap { position: relative; margin-bottom: var(--space-3); }
-.searchIcon {
-  position: absolute;
-  left: 10px; top: 50%;
-  transform: translateY(-50%);
-  color: var(--color-ink-subtle);
-  font-size: var(--font-size-body);
-  pointer-events: none;
-}
 .search {
-  width: 100%;
-  background: var(--color-raised);
+  flex: 1;
+  min-width: 220px;
+  padding: 6px 10px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
-  padding: 7px 28px 7px 30px;
-  font-size: var(--font-size-body);
+  background: var(--color-raised);
+  font-size: 12.5px;
+  font-family: inherit;
   color: var(--color-ink);
 }
 .search::placeholder { color: var(--color-ink-faint); }
-.search:focus-visible { outline: none; border-color: var(--color-ink-faint); box-shadow: var(--focus-ring); }
-.searchClear {
-  position: absolute;
-  right: 6px; top: 50%;
-  transform: translateY(-50%);
-  border: none;
-  background: var(--color-border);
-  color: var(--color-ink-muted);
-  width: 17px; height: 17px;
-  border-radius: 50%;
-  font-size: var(--font-size-meta);
-  line-height: 1;
-  padding: 0;
-  cursor: pointer;
-}
-.searchClear:hover { background: var(--color-ink-faint); color: var(--color-ink); }
 
-/* Seven statuses wrap onto two rows. They used to be one horizontally
-   scrolling strip, which put Cancelled off the edge of a 320px rail. */
-.tabBar {
+/* ══════════════════════════════════════════════════════════════════════════
+   The SLA rail.
+
+   Age used to be a bare "6d URGENT" chip with no reference point, so 3d and
+   11d read as equally late. The list header draws the axis once and every row
+   plots a mark against it, which turns the column into a shape: the pile-up
+   past the 2-day tick is the actual state of this queue.
+
+   Same construction as the dwell rail on Support Tickets — --sla-gutter
+   reserves fixed room for the age label so a mark at the far right can never
+   sit underneath it. Scale and ticks live in sla.ts.
+   ══════════════════════════════════════════════════════════════════════════ */
+.listHead {
   display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
+  align-items: flex-end;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3) 6px;
+  border-bottom: 1px solid var(--color-border);
 }
-.tab {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  border: 1px solid var(--color-border);
-  background: var(--color-raised);
-  color: var(--color-ink-muted);
-  border-radius: 999px;
-  padding: 4px 5px 4px 11px;
-  font-size: var(--font-size-meta);
-  font-weight: 600;
-  cursor: pointer;
-}
-.tab:hover { border-color: var(--color-ink-faint); color: var(--color-ink); }
-.tabCount {
-  font-family: var(--font-mono);
-  font-variant-numeric: var(--font-numeric);
-  background: var(--color-surface);
-  color: var(--color-ink-muted);
-  border-radius: 999px;
-  padding: 1px 6px;
-  font-size: 10px;
-  font-weight: 700;
-  min-width: 20px;
-  text-align: center;
-}
-.tab.activeTab {
-  background: var(--color-crimson);
-  border-color: var(--color-crimson);
-  color: var(--color-raised);
-}
-.tab.activeTab .tabCount {
-  background: rgba(var(--color-ink-rgb), 0.22);
-  color: var(--color-raised);
-}
-.tabZero { color: var(--color-ink-faint); }
-.tabZero .tabCount { color: var(--color-ink-faint); }
-
-.railCount {
+.listCount {
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.5px;
   text-transform: uppercase;
   color: var(--color-ink-subtle);
-  padding: var(--space-2) var(--space-3) 0;
+  white-space: nowrap;
 }
+.slaHead {
+  margin-left: auto;
+  width: 164px;
+  flex: none;
+  --sla-gutter: 40px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--color-ink-subtle);
+  text-align: right;
+}
+.slaAxis {
+  position: relative;
+  display: block;
+  height: 14px;
+  margin-right: var(--sla-gutter);
+  margin-bottom: 2px;
+}
+.slaAxis::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 1px;
+  background: var(--color-border);
+}
+.slaTick {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+  font-weight: 400;
+  text-transform: none;
+  color: var(--color-ink-faint);
+}
+.slaTick:first-child { transform: none; }
+.slaTick:last-child { transform: translateX(-100%); }
 
-.syncRow {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
+.rail {
+  position: relative;
+  display: block;
+  height: 16px;
+  width: 164px;
+  flex: none;
+  --sla-gutter: 40px;
 }
-/* Was --color-us-navy: a legacy US-flag slot, off-palette and louder than the
-   primary action. Syncing is maintenance, not a decision. */
-.syncBtn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  background: var(--color-raised);
-  color: var(--color-ink-muted);
-  border: 1px solid var(--color-border);
-  padding: 6px 12px;
-  border-radius: var(--radius-md);
-  font-size: var(--font-size-meta);
-  font-weight: 600;
-  cursor: pointer;
+.railTrack {
+  position: absolute;
+  left: 0;
+  right: var(--sla-gutter);
+  top: 7px;
+  height: 2px;
+  background: var(--color-border);
 }
-.syncBtn:hover:not(:disabled) { background: var(--color-surface); color: var(--color-ink); }
-.syncBtn:disabled { color: var(--color-ink-faint); cursor: not-allowed; }
-.syncStatus { font-size: 10px; color: var(--color-ink-subtle); }
-.syncError { color: var(--color-error-strong); font-weight: 600; }
+/* The 2-day line — the SLA this queue is measured against. */
+.railThreshold {
+  position: absolute;
+  top: 1px;
+  bottom: 1px;
+  width: 1px;
+  background: var(--color-ink-faint);
+  opacity: 0.5;
+}
+.railFill {
+  position: absolute;
+  left: 0;
+  top: 7px;
+  height: 2px;
+  border-radius: 1px;
+  opacity: 0.3;
+  background: currentColor;
+}
+.railMark {
+  position: absolute;
+  top: 2px;
+  width: 5px;
+  height: 12px;
+  border-radius: 1.5px;
+  transform: translateX(-2.5px);
+  background: currentColor;
+}
+.railLabel {
+  position: absolute;
+  right: 0;
+  top: 0;
+  width: 36px;
+  text-align: right;
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--font-numeric);
+  font-size: 11px;
+  font-weight: 650;
+  color: currentColor;
+}
+/* Three tiers, so the rail reads as state rather than decoration.
+   currentColor drives fill, mark and label together. */
+.rail_ontime { color: var(--color-success); }
+.rail_due    { color: var(--color-accent-coffee); }
+.rail_late   { color: var(--color-accent-clay); }
+
+/* A cancelled order has no live SLA — say what happened instead of plotting
+   a countdown on a dead row. */
+.railDead {
+  width: 164px;
+  flex: none;
+  text-align: right;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  color: var(--color-ink-subtle);
+  text-transform: uppercase;
+}
 
 .list { flex: 1; overflow-y: auto; }
 .list::-webkit-scrollbar { width: 8px; }
@@ -350,33 +665,6 @@
   border: 1px solid var(--color-warning-border);
 }
 
-.urgencyChip {
-  display: inline-block;
-  font-family: var(--font-mono);
-  font-variant-numeric: var(--font-numeric);
-  font-size: 10px;
-  font-weight: 700;
-  padding: 2px 7px;
-  border-radius: 999px;
-  white-space: nowrap;
-}
-.urgencyChip.ok      { background: var(--color-success-bg); color: var(--color-success); }
-.urgencyChip.urgent  { background: var(--color-warning-bg); color: var(--color-warning); }
-.urgencyChip.overdue { background: var(--color-error-bg);   color: var(--color-error); }
-
-.cancelledChip {
-  display: inline-block;
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.3px;
-  padding: 2px 7px;
-  border-radius: 999px;
-  background: var(--color-surface);
-  color: var(--color-ink-subtle);
-  border: 1px solid var(--color-border);
-  white-space: nowrap;
-}
-
 /* ── Detail pane ─────────────────────────────────────────────────────────── */
 .detail {
   display: flex;
@@ -424,9 +712,11 @@
   border-radius: 999px;
   white-space: nowrap;
 }
-.slaBig.ok      { background: var(--color-success-bg); color: var(--color-success); }
-.slaBig.urgent  { background: var(--color-warning-bg); color: var(--color-warning); }
-.slaBig.overdue { background: var(--color-error-bg);   color: var(--color-error); }
+/* The same three tiers the rail uses, so the list and the detail header never
+   describe one order two different ways. */
+.slaBig_ontime { background: var(--color-success-bg); color: var(--color-success); }
+.slaBig_due    { background: var(--color-warning-bg); color: var(--color-warning); }
+.slaBig_late   { background: var(--color-error-bg);   color: var(--color-error); }
 
 /* ── Action bar ──────────────────────────────────────────────────────────── */
 .actionBar {

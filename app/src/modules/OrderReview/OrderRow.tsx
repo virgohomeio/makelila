@@ -1,7 +1,8 @@
 import type { Order } from '../../lib/orders';
-import { orderUrgency, AREA_TYPE_TAG } from '../../lib/orders';
+import { AREA_TYPE_TAG } from '../../lib/orders';
 import { useQuotes } from '../../lib/freight';
-import { canConfirm } from './detail/ReadinessChecklist';
+import { canConfirm } from './detail/readiness';
+import { daysSincePlaced, slaPercent, slaTier, slaLabel, SLA_DAYS } from './sla';
 import styles from './OrderReview.module.css';
 
 const AREA_TAG_CLASS: Record<NonNullable<Order['area_type']>, string> = {
@@ -10,18 +11,44 @@ const AREA_TAG_CLASS: Record<NonNullable<Order['area_type']>, string> = {
   rural:    styles.tagRural,
 };
 
+/** One row's position on the shared SLA axis. Mirrors DwellRail on Support
+ *  Tickets: track, threshold line, fill, mark and label, all coloured by tier
+ *  through currentColor. */
+function SlaRail({ days }: { days: number }) {
+  const pct = slaPercent(days);
+  const tier = slaTier(days);
+  const at = `calc((100% - var(--sla-gutter)) * ${pct / 100})`;
+  return (
+    <span
+      className={`${styles.rail} ${styles[`rail_${tier}`]}`}
+      title={`Placed ${days} day${days === 1 ? '' : 's'} ago — confirm within ${SLA_DAYS}`}
+    >
+      <span className={styles.railTrack} />
+      {/* The SLA line this queue is measured against. */}
+      <span
+        className={styles.railThreshold}
+        style={{ left: `calc((100% - var(--sla-gutter)) * ${slaPercent(SLA_DAYS) / 100})` }}
+      />
+      <span className={styles.railFill} style={{ width: at }} />
+      <span className={styles.railMark} style={{ left: at }} />
+      <span className={styles.railLabel}>{slaLabel(days)}</span>
+    </span>
+  );
+}
+
 /** One row in the order rail.
  *
  *  A 2×2 grid, not a flowing meta line. Identity (name, ref, city) sits left;
- *  state (blocker dot, SLA, country/area/risk tags) sits in a right-aligned
- *  column so it forms real columns down the list. Comparing two orders used to
- *  mean reading two wrapped sentences. */
+ *  state (the SLA rail, then the tags) sits in a right-aligned column so it
+ *  forms real columns down the list. */
 export function OrderRow({
   order,
+  now,
   isSelected,
   onClick,
 }: {
   order: Order;
+  now: number;
   isSelected: boolean;
   onClick: () => void;
 }) {
@@ -38,9 +65,9 @@ export function OrderRow({
   const isRiskAddress = order.address_verdict === 'apt' || order.address_verdict === 'condo' || order.address_verdict === 'remote';
   const isCancelled = order.status === 'cancelled';
   // A dot rather than a chip: it says "this one isn't confirmable yet" without
-  // spending the width the SLA needs. Meaningless on terminal/decided rows.
+  // spending width the rail needs. Meaningless on terminal/decided rows.
   const showBlockDot = !isCancelled && order.status !== 'approved' && !canConfirm(order);
-  const urgency = orderUrgency(order.placed_at);
+  const days = daysSincePlaced(order.placed_at ?? order.created_at, now);
 
   const quoteLabel = selectedQuote
     ? [
@@ -55,12 +82,12 @@ export function OrderRow({
     : null;
 
   // Read in order, the row's own text announces as one run-on string
-  // ("Alice Ames125d OVERDUE#p1· PortlandUS"). Spell it out instead.
+  // ("Alice Ames6d#p1· PortlandUS"). Spell it out instead.
   const label = [
     order.customer_name,
     `order ${order.order_ref}`,
     order.city,
-    isCancelled ? 'cancelled' : urgency.label || null,
+    isCancelled ? 'cancelled' : `placed ${slaLabel(days)}`,
     showBlockDot ? 'not yet confirmable' : null,
   ].filter(Boolean).join(', ');
 
@@ -69,20 +96,10 @@ export function OrderRow({
       <span className={styles.rowName}>{order.customer_name}</span>
 
       <span className={styles.rowState}>
-        {showBlockDot && (
-          <span
-            className={styles.blockDot}
-            title="Not yet confirmable — open it to see what's missing"
-          />
-        )}
-        {isCancelled ? (
+        {isCancelled
           // An SLA countdown on a dead order is noise — say what happened.
-          <span className={styles.cancelledChip} title={order.cancelled_reason ?? undefined}>
-            Cancelled
-          </span>
-        ) : urgency.label ? (
-          <span className={`${styles.urgencyChip} ${styles[urgency.severity]}`}>{urgency.label}</span>
-        ) : null}
+          ? <span className={styles.railDead} title={order.cancelled_reason ?? undefined}>Cancelled</span>
+          : <SlaRail days={days} />}
       </span>
 
       <span className={styles.rowMeta}>
@@ -92,6 +109,9 @@ export function OrderRow({
       </span>
 
       <span className={styles.rowTags}>
+        {showBlockDot && (
+          <span className={styles.blockDot} title="Not yet confirmable — open it to see what's missing" />
+        )}
         {order.kind === 'replacement' && (
           <span className={`${styles.tag} ${styles.tagCa}`}>Repl</span>
         )}

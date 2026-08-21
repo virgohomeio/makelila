@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { Order } from '../../../lib/orders';
-import { CRITERIA_COUNT } from './ReadinessChecklist';
+import { CRITERIA_COUNT } from './readiness';
 import styles from '../OrderReview.module.css';
 
 type ExpandedAction = 'flag' | 'hold' | 'info' | 'cancel' | null;

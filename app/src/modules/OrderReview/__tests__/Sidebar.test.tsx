@@ -59,147 +59,101 @@ function mkOrder(partial: Partial<Order> & { id: string; status: Order['status']
     shipping_cost_currency: null,
     shipped_at: null,
     delivered_at: null,
-    created_at: '2026-04-17T00:00:00Z',
-    placed_at: '2026-04-19T00:00:00Z',
+    created_at: partial.created_at ?? '2026-04-17T00:00:00Z',
+    // Honour an explicit placed_at — the SLA rail is plotted from it.
+    placed_at: partial.placed_at !== undefined ? partial.placed_at : '2026-04-19T00:00:00Z',
   };
 }
 
+// Filtering, bucketing and sorting moved to filters.ts when the page took
+// ownership of them (see filters.test.ts). What is left here is what the list
+// itself is responsible for: rendering rows against the shared SLA axis.
+const NOW = Date.parse('2026-08-21T12:00:00Z');
+const agoDays = (n: number) => new Date(NOW - n * 86_400_000).toISOString();
+
 describe('Sidebar', () => {
-  const p1 = mkOrder({ id: 'p1', status: 'pending', customer_name: 'Alice Ames' });
-  const p2 = mkOrder({ id: 'p2', status: 'pending', customer_name: 'Bob Boxer' });
-  const h1 = mkOrder({ id: 'h1', status: 'held',    customer_name: 'Held Customer' });
-  const f1 = mkOrder({ id: 'f1', status: 'flagged', customer_name: 'Flagged Customer' });
-  const c1 = mkOrder({
+  const fresh = mkOrder({
+    id: 'p1', status: 'pending', customer_name: 'Alice Ames',
+    order_ref: '#1001', placed_at: agoDays(1),
+  });
+  const late = mkOrder({
+    id: 'p2', status: 'pending', customer_name: 'Bob Boxer',
+    order_ref: '#1002', placed_at: agoDays(9),
+  });
+  const dead = mkOrder({
     id: 'c1', status: 'cancelled', customer_name: 'Gabriella Hottya',
-    cancelled_at: '2026-08-13T15:03:17Z', cancelled_reason: 'Delays',
+    order_ref: '#1003', cancelled_at: '2026-08-13T15:03:17Z', cancelled_reason: 'Delays',
   });
 
-  const render_ = (selectedId: string | null = null, onSelect = vi.fn()) =>
+  const render_ = (orders = [fresh, late], selectedId: string | null = null, onSelect = vi.fn()) =>
     render(
       <Sidebar
-        all={[p1, p2, h1, f1]}
-        pending={[p1, p2]}
-        held={[h1]}
-        flagged={[f1]}
-        approved={[]}
-        replacement={[]}
-        cancelled={[c1]}
+        orders={orders}
+        now={NOW}
         selectedId={selectedId}
         onSelect={onSelect}
+        emptyHint="Nothing in this queue."
       />,
     );
 
-  it('shows only pending rows in the default tab', () => {
+  it('renders every order it is given, in the order given', () => {
     render_();
-    expect(screen.getByText('Alice Ames')).toBeInTheDocument();
-    expect(screen.getByText('Bob Boxer')).toBeInTheDocument();
-    expect(screen.queryByText('Held Customer')).not.toBeInTheDocument();
-    expect(screen.queryByText('Flagged Customer')).not.toBeInTheDocument();
+    const names = screen.getAllByRole('button').map(b => b.textContent);
+    expect(names[0]).toContain('Alice Ames');
+    expect(names[1]).toContain('Bob Boxer');
   });
 
-  it('switches tab content when a tab is clicked', () => {
+  it('draws the shared SLA axis once, above the list', () => {
     render_();
-    fireEvent.click(screen.getByRole('button', { name: /^Flagged: 1 order$/ }));
-    expect(screen.getByText('Flagged Customer')).toBeInTheDocument();
-    expect(screen.queryByText('Alice Ames')).not.toBeInTheDocument();
+    // The ticks the rails are plotted against — see sla.ts SLA_TICKS.
+    for (const tick of ['today', '2d', '4d', '1w', '2w+']) {
+      expect(screen.getByText(tick)).toBeInTheDocument();
+    }
   });
 
-  it('filters by search query within the active tab', () => {
+  it('plots each row against that axis with a compact age label', () => {
     render_();
-    const searchBox = screen.getByPlaceholderText(/search name/i);
-    fireEvent.change(searchBox, { target: { value: 'bob' } });
-    expect(screen.getByText('Bob Boxer')).toBeInTheDocument();
-    expect(screen.queryByText('Alice Ames')).not.toBeInTheDocument();
+    expect(screen.getByText('1d')).toBeInTheDocument();
+    expect(screen.getByText('9d')).toBeInTheDocument();
   });
 
-  it('invokes onSelect with the row id when a row is clicked', () => {
-    const onSelect = vi.fn();
-    render_(null, onSelect);
-    fireEvent.click(screen.getByText('Alice Ames'));
-    expect(onSelect).toHaveBeenCalledWith('p1');
-  });
-
-  it('shows empty-state copy when the active tab has no rows', () => {
-    render(
-      <Sidebar
-        all={[]} pending={[]} held={[]} flagged={[]} approved={[]} replacement={[]} cancelled={[]}
-        selectedId={null} onSelect={vi.fn()}
-      />,
-    );
-    expect(screen.getByText(/no orders in this tab/i)).toBeInTheDocument();
-  });
-
-  // Cancelled orders are dead but not gone: they get their own tab so the team
-  // can still find one (and its reason) after the fact.
-  it('keeps cancelled orders out of every live tab but lists them under Cancelled', () => {
-    render_();
-    expect(screen.queryByText('Gabriella Hottya')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /^Cancelled: 1 order$/ }));
-    expect(screen.getByText('Gabriella Hottya')).toBeInTheDocument();
-    expect(screen.queryByText('Alice Ames')).not.toBeInTheDocument();
-  });
-
-  // Live tabs re-sort by order ref because they're a work queue. Cancelled is a
-  // lookup list that arrives newest-first from bucketOrders, so the Sidebar must
-  // leave it alone — sorting by ref here would bury the one just cancelled.
-  it('renders the Cancelled tab in the order given, not by order ref', () => {
-    const newer = mkOrder({
-      id: 'c2', status: 'cancelled', customer_name: 'Newer Cancel', order_ref: '#9999',
-      cancelled_at: '2026-08-13T00:00:00Z',
-    });
-    const older = mkOrder({
-      id: 'c0', status: 'cancelled', customer_name: 'Older Cancel', order_ref: '#1001',
-      cancelled_at: '2026-01-02T00:00:00Z',
-    });
-    render(
-      <Sidebar
-        all={[]} pending={[]} held={[]} flagged={[]} approved={[]} replacement={[]}
-        cancelled={[newer, older]}
-        selectedId={null} onSelect={vi.fn()}
-      />,
-    );
-    fireEvent.click(screen.getByRole('button', { name: /^Cancelled: 2 orders$/ }));
-    const names = screen.getAllByText(/Cancel$/).map(n => n.textContent);
-    expect(names).toEqual(['Newer Cancel', 'Older Cancel']);
-  });
-
-  it('marks a cancelled row as cancelled instead of showing an SLA countdown', () => {
-    render_();
-    fireEvent.click(screen.getByRole('button', { name: /^Cancelled: 1 order$/ }));
+  // An SLA countdown on a dead order is noise.
+  it('marks a cancelled row as cancelled instead of plotting an SLA', () => {
+    render_([dead]);
     const row = screen.getByRole('button', { name: /Gabriella Hottya/ });
     expect(row).toHaveTextContent(/cancelled/i);
-    expect(row).not.toHaveTextContent(/OVERDUE/);
+    expect(row).not.toHaveTextContent(/\dd$/);
   });
 
-  // The rail is a scanning surface: identity on the left, state right-aligned
-  // so tags and SLA chips form columns down the list. Rows are real buttons,
-  // so the whole row is keyboard-reachable rather than a div with role.
-  it('renders each order as a button carrying its ref, city and country', () => {
+  it('carries ref, city and country on the row', () => {
     render_();
     const row = screen.getByRole('button', { name: /Alice Ames/ });
-    expect(row).toHaveTextContent('#p1');
+    expect(row).toHaveTextContent('#1001');
     expect(row).toHaveTextContent('Portland');
     expect(row).toHaveTextContent('US');
   });
 
-  it('reports how many orders the active tab is showing', () => {
+  it('reports how many orders it is showing', () => {
     render_();
     expect(screen.getByText('2 orders')).toBeInTheDocument();
+    render_([fresh]);
+    expect(screen.getByText('1 order')).toBeInTheDocument();
   });
 
-  it('names the tab and the query when a search returns nothing', () => {
-    render_();
-    fireEvent.change(screen.getByPlaceholderText(/search name/i), { target: { value: 'zzz' } });
-    expect(screen.getByText(/No order in Pending matches/i)).toBeInTheDocument();
-    expect(screen.getByText('0 orders matching')).toBeInTheDocument();
+  // The list cannot tell an empty queue from an over-narrow filter, so the
+  // page tells it what to say.
+  it('shows the hint it was given when there is nothing to show', () => {
+    render(
+      <Sidebar orders={[]} now={NOW} selectedId={null} onSelect={vi.fn()}
+        emptyHint="No order matches these filters." />,
+    );
+    expect(screen.getByText('No order matches these filters.')).toBeInTheDocument();
   });
 
-  it('clears the query from the search box', () => {
-    render_();
-    const box = screen.getByPlaceholderText(/search name/i);
-    fireEvent.change(box, { target: { value: 'bob' } });
-    expect(screen.queryByText('Alice Ames')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /clear search/i }));
-    expect(screen.getByText('Alice Ames')).toBeInTheDocument();
+  it('invokes onSelect with the row id when a row is clicked', () => {
+    const onSelect = vi.fn();
+    render_([fresh, late], null, onSelect);
+    fireEvent.click(screen.getByText('Alice Ames'));
+    expect(onSelect).toHaveBeenCalledWith('p1');
   });
 });

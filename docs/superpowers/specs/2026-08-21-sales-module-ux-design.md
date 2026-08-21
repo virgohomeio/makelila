@@ -1,7 +1,7 @@
 # Sales module — UX rework
 
 **Date:** 2026-08-21
-**Status:** Shipped
+**Status:** Shipped, then aligned to the Support Tickets theme (see §6)
 **Scope:** `/order-review` (the "Sales" module) — presentation and structure only. No schema, no new capability.
 
 ---
@@ -60,3 +60,55 @@ The module's whole job is *can this order be confirmed, and if not what fixes it
 1. **Out of the redesign spec's Phase 4 order** (Team · Finance · Products · Hiring · Stock · **Sales** · …), and ahead of the Phase 3 Fulfillment pilot. The operator asked for Sales specifically. The constraint that actually matters — never more than one module of visual change in flight — still holds: no other module migration is open.
 2. **Primary stays green**, per §2 above.
 3. **No `components/ui/` primitives were built.** This module was migrated against tokens directly. When Phase 1 lands, Sales is a consumer to revisit — the shapes here (pill tab, status chip, card group) are candidates for `StatusPill`, `Tabs`, `Card`.
+
+
+---
+
+## 6. Second pass — theme alignment with Support Tickets
+
+**Date:** 2026-08-21 (same day, after `3b31a4c`)
+
+Support Tickets was reworked hours earlier (`509ca89`) and established a page-chrome
+system. Sales now adopts it, so the two highest-traffic queues in the app are read the
+same way. Nothing here is invented: each piece is the Sales counterpart of a piece that
+shipped in `Service.module.css` / `SupportTab.tsx`.
+
+| Support Tickets | Sales |
+|---|---|
+| `dwell.ts` — days untouched, non-linear anchors, ticks drawn from the same anchors | **`sla.ts`** — days since placed, ticks `today · 2d · 4d · 1w · 2w+`, threshold line at the 2-day SLA |
+| Dwell rail: track, threshold, fill, mark, label, three tiers via `currentColor` | **SLA rail**, same construction, tiers `ontime · due · late` |
+| Queue bar — segments sized to the real distribution, each segment the filter | **Queue bar** over order status; `cancelled` is terminal so it gets no segment but keeps its legend entry, exactly as `closed` does |
+| Saved views — Unowned · Idle 30 days+ · Replacement queue | **Blocked · Overdue 4 days+ · Replacement queue** |
+| One toolbar — search, dropdowns, clear | **One toolbar** — search, Country, Area, Clear *n* filters |
+| View switch — List · By owner · Action items | **View switch** — Orders · Templates · Upload |
+| `STATUS_META` warm palette, AA + non-competing-red pinned by tests | **`ORDER_STATUS_META`**, same system, same hex values where the meaning matches, same two contracts |
+
+### What this replaced in Sales
+
+The status pills built in the first pass lived inside a 420px rail and had to wrap to
+two rows. Status is now a full-width queue bar that shows the *share* of each status,
+which equal-width pills could not. Search and the field filters moved out of the rail
+into the toolbar. The rail keeps only what a list should own: the axis and the rows.
+
+### Architecture changes this forced
+
+- **`filters.ts`** — every filter as pure functions, so the queue bar, the saved-view
+  chips and the list all count the same pool. Sidebar became presentational; the page
+  owns filter state, the way `SupportTab` does.
+- **`detail/readiness.ts`** — the readiness logic split out of the component file so the
+  "Blocked" saved view can ask the same question the detail pane answers.
+- **`now` is resolved once per mount**, not per render. It feeds the memo behind
+  `visible`, which is a dependency of the auto-select effect — a fresh `Date.now()` each
+  render gave that memo a new identity every time and re-fired the effect.
+
+### Accessibility fixes found while building
+
+Count badges sit next to their labels with no separating text node, so the controls
+announced as `Flagged1` and `Blocked1`. Tabs, saved-view chips and queue segments all
+carry explicit `aria-label`s now. **The same defect exists on Support Tickets'
+`SavedViewChip` and legend items** — worth the same fix there.
+
+### Tests added
+
+`sla.ts` 15 · `filters.ts` 18 · `ORDER_STATUS_META` 18 · page chrome 10 = **61 new**,
+1,360 passing in total.
