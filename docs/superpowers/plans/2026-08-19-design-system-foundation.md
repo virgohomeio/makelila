@@ -30,6 +30,32 @@ Nothing in this plan changes what any screen looks like except the two colour co
 
 ---
 
+## Constraint: no node builtins under `src/`
+
+Learned the hard way while executing this plan; it applies to every later plan in the sequence.
+
+`app/tsconfig.app.json` typechecks `include: ["src"]` with `types: ["vite/client"]`. **Anything under `app/src/` that imports `node:fs`, `node:path` or `node:url` fails `tsc -b`, and therefore fails `npm run build`,** even though Vitest runs it happily. No test in `src/` did this before this plan.
+
+So a test under `src/` that needs to read a file must read it through Vite:
+
+```ts
+import tokensCss from './tokens.css?raw';
+```
+
+With one catch that costs an hour if you don't know it: **Vitest replaces `.css` imports with an empty string by default**, and that interception fires on the extension regardless of the `?raw` query. The import typechecks, the build passes, and the test silently receives `''`. The fix is a scoped entry in `vite.config.ts`:
+
+```ts
+test: {
+  css: { include: [/tokens\.css/] },
+}
+```
+
+Scoped deliberately — a bare `css: true` turns on real CSS processing for all 100+ test files to serve one.
+
+This does **not** apply to `app/scripts/*.mjs` (Task 3 and Task 4). Those sit outside `include: ["src"]`, are never typechecked by `tsc -b`, and use `node:fs` correctly.
+
+---
+
 ## File Structure
 
 **Created**
@@ -48,6 +74,7 @@ Nothing in this plan changes what any screen looks like except the two colour co
 | `app/src/styles/tokens.css` | Add type scale, spacing scale, mono font, elevation, row heights, focus ring; correct `--color-error` |
 | `app/src/styles/globals.css` | `.replBadge` stops hardcoding hex so it can be the first guarded file |
 | `app/package.json` | Add `check:css-tokens` script; run it from `build` |
+| `app/vite.config.ts` | Scoped `test.css.include` so `tokens.test.ts` receives the real stylesheet |
 
 The split between `find-raw-hex.mjs` and `check-css-tokens.mjs` is deliberate: file-system walking and `process.exit` are not unit-testable, string scanning is. Keep the pure part pure.
 
@@ -67,21 +94,26 @@ Create `app/src/styles/tokens.test.ts`:
 
 ```ts
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+// Read through Vite, NOT node:fs — see "Constraint: no node builtins under
+// src/" below. Requires test.css.include in vite.config.ts, or Vitest hands
+// back an empty string.
+import tokensCss from './tokens.css?raw';
 
 // tokens.css is the one file in the app allowed to hold raw hex values —
 // every other stylesheet must reach them through var(). These tests are the
 // contract that lets check-css-tokens.mjs enforce that rule elsewhere.
-const CSS = readFileSync(
-  resolve(dirname(fileURLToPath(import.meta.url)), 'tokens.css'),
-  'utf8',
-);
+//
+// The stylesheet is parsed by jsdom rather than scanned with a regex: a
+// regex reports a token as "defined" even when it sits inside a comment or
+// outside the :root block, which is exactly the silent failure this contract
+// exists to prevent.
+const style = document.createElement('style');
+style.textContent = tokensCss;
+document.head.appendChild(style);
+const ROOT = getComputedStyle(document.documentElement);
 
 function tokenValue(name: string): string | null {
-  const match = CSS.match(new RegExp(`^\\s*${name}\\s*:\\s*([^;]+);`, 'm'));
-  return match ? match[1].trim() : null;
+  return ROOT.getPropertyValue(name).trim() || null;
 }
 
 const SPACING = ['--space-1', '--space-2', '--space-3', '--space-4', '--space-5', '--space-6', '--space-7'];
@@ -359,25 +391,45 @@ Create `app/scripts/lib/find-raw-hex.mjs`:
 ```js
 // Pure string scanning for the CSS token guardrail. Deliberately free of any
 // I/O so it can be unit-tested; check-css-tokens.mjs owns files and exit codes.
-
-const HEX = /#[0-9a-fA-F]{3,8}\b/g;
+//
+// This is a string scanner, not a CSS tokenizer, so it has no notion of
+// string literals: `content: "/*"` will blank live code that follows it,
+// and `content: "#fff"` will be flagged as a colour literal. Neither
+// pattern exists in this codebase today; a real tokenizer was judged not
+// worth the complexity for a build-time guardrail.
 
 /**
  * Finds raw hex colour literals in CSS source, ignoring anything inside
  * block comments.
  *
  * @param {string} css
- * @returns {{ line: number, hex: string }[]} hits in document order
+ * @returns {{ line: number, column: number, hex: string }[]} hits in document order
  */
 export function findRawHex(css) {
-  // Blank comments out rather than deleting them: newlines are preserved, so
-  // reported line numbers still match the file the developer will open.
-  const scannable = css.replace(/\/\*[\s\S]*?\*\//g, (block) => block.replace(/[^\n]/g, ' '));
+  // Declared per call, not at module scope: matchAll never mutates lastIndex
+  // so a shared regex is safe today, but a shared /g regex is a landmine for
+  // whoever next reaches for .test()/.exec() here. Longest alternative
+  // first reads as the obvious, unsurprising order — the trailing \b means a
+  // shorter branch that swallowed part of a longer run fails anyway (both
+  // sides of the cut are still "word" characters), so this is defence in
+  // depth rather than a fix for an observed bug.
+  const hex = /#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{3,4})\b/g;
+
+  // Blank comments out rather than deleting them, for two reasons: (1)
+  // newlines are preserved, so reported line numbers still match the file
+  // the developer will open, and (2) it prevents code that only becomes
+  // contiguous once the comment is gone from being read as one token — e.g.
+  // `#ab/*z*/cdef` must never be reported as the fabricated literal
+  // `#abcdef`, which deleting the comment outright would produce.
+  // An unterminated `/*` blanks to end of string rather than failing to
+  // match at all: the CSS spec treats EOF as closing an open comment, so
+  // whatever follows is already dead and must not be scanned.
+  const scannable = css.replace(/\/\*[\s\S]*?(?:\*\/|$)/g, (block) => block.replace(/[^\n]/g, ' '));
 
   const hits = [];
   scannable.split('\n').forEach((text, index) => {
-    for (const match of text.matchAll(HEX)) {
-      hits.push({ line: index + 1, hex: match[0] });
+    for (const match of text.matchAll(hex)) {
+      hits.push({ line: index + 1, column: match.index + 1, hex: match[0] });
     }
   });
   return hits;
@@ -452,8 +504,8 @@ for (const relativePath of MIGRATED) {
 
   failed = true;
   console.error(`\n${relativePath} — ${hits.length} raw hex value(s), expected var(--token):`);
-  for (const { line, hex } of hits) {
-    console.error(`  ${relativePath}:${line}  ${hex}`);
+  for (const { line, column, hex } of hits) {
+    console.error(`  ${relativePath}:${line}:${column}  ${hex}`);
   }
 }
 
@@ -533,7 +585,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 
 ## Done when
 
-- [ ] `npx vitest run` is green, including 22 new token tests and 5 detector tests
+- [ ] `npx vitest run` is green, including the token-contract and detector suites (47 tests between them as shipped)
 - [ ] `npm run check:css-tokens` exits 0
 - [ ] `npm run build` succeeds with the guardrail in the chain
 - [ ] Error badges across the app now read visibly deeper than primary buttons — spot-check Fulfillment's queue and any refund view with `npm run dev`
@@ -544,4 +596,4 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 - **Do not bulk-replace the 1,099 hex literals.** They come out module by module in later plans. A sweeping find-and-replace would touch 29 files at once, which is exactly the overwhelm the sequential migration exists to avoid.
 - **`tokens.css` must never appear in `MIGRATED`.** It is the one file allowed raw hex.
 - **Known limitation of the detector:** an ID selector whose name is entirely hex-like — `#abc123` — would be reported as a colour. None exists today (`#app-shell`, the only ID in `globals.css`, is safe because `p` is not a hex digit). If one is ever added, exclude it in the CLI rather than loosening the regex.
-- **If compact rows turn out to be wrong,** change `--row-height` and the assertion in `tokens.test.ts`. That is the whole change — it was designed as one lever.
+- **If compact rows turn out to be wrong,** change `--row-height`. That is the whole change. The shipped assertion is a range (`<= 40px`, and greater than `--row-height-header`), not an equality, so the lever moves without test churn.

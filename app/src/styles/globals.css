@@ -105,8 +105,8 @@ button { cursor: pointer; font: inherit; }
   margin-left: 6px;
   padding: 1px 8px;
   border-radius: 999px;
-  background: #fef3c7;
-  color: #b7791f;
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
   font-size: 0.7rem;
   font-weight: 500;
   vertical-align: middle;

@@ -183,7 +183,7 @@
 }
 
 .row.flaggedRow {
-  border-left: 3px solid var(--color-error-strong);
+  border-left: 3px solid var(--color-error-accent);
   padding-left: 11px;
   background: #1a1010;
 }
