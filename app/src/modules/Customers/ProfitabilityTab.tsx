@@ -53,13 +53,16 @@ export function ProfitabilityTab() {
         <SummaryStat label="COGS + shipping"      value={fmt(totals.salesCost)} variant="warn" />
         <SummaryStat label="Expected warranty"    value={fmt(totals.warranty)}  variant="warn" />
         <SummaryStat label="Expected refunds"     value={fmt(totals.refund)}    variant="warn" />
+        <SummaryStat label="Return handling"
+                     value={fmt(totals.returnHandling)}
+                     variant="warn" />
         <SummaryStat label="Support labour"
                      value={totals.supportPriced ? fmt(totals.support) : 'rate not set'}
                      variant="warn" />
         <SummaryStat label="Net margin"           value={fmt(totals.margin)}    variant={totals.margin < 0 ? 'bad' : 'good'} />
       </div>
       <div className={styles.profCurrencyNote}>
-        Revenue excludes sales tax (passed through to govt, not VCycene income). "Expected warranty" sums COGS + shipping for every non-cancelled replacement order. "Expected refunds" sums every refund approval that isn't denied. "Support labour" prices diagnosis calls at time on the call × internal attendees × the blended person-hour rate in <code>support_rates</code>, including calls the customer never joined. All amounts are converted to CAD through <code>fx_rates</code> — USD orders at the current company rate, not the rate on the order date.
+        Revenue excludes sales tax (passed through to govt, not VCycene income). "Expected warranty" sums COGS + shipping for every non-cancelled replacement order. "Expected refunds" sums every refund approval that isn't denied. "Support labour" prices diagnosis calls at time on the call × internal attendees × the blended person-hour rate in <code>support_rates</code>, including calls the customer never joined. "Return handling" is stocking + inspection + return freight for units that physically came back — units the customer discarded are excluded, and it is separate from the restocking fee charged to the customer. All amounts are converted to CAD through <code>fx_rates</code> — USD orders at the current company rate, not the rate on the order date.
       </div>
 
       <InsightsPanel insights={insights} />
@@ -129,6 +132,17 @@ function ProfitCard({ row }: { row: CustomerProfitability }) {
     ? (row.diagnosis_call_count > 0 ? 'rate not set' : fmt(0))
     : `${fmt(row.support_cost_cad)} (${minutesLabel(row.diagnosis_minutes)})`;
 
+  // Stocking + inspection + the return leg, shown as one line with the split
+  // in the tooltip so the card doesn't grow three more rows.
+  const returnHandlingTitle = [
+    `${row.returns_handled} unit(s) came back`,
+    `stocking ${fmt(row.return_stocking_cad ?? 0)}`,
+    `inspection ${fmt(row.return_inspection_cad ?? 0)}`,
+    row.return_freight_cad
+      ? `return freight ${fmt(row.return_freight_cad)}`
+      : 'return freight not on file',
+  ].join(' · ');
+
   return (
     <div className={`${styles.profCard} ${tone}`}>
       <div className={styles.profCardHead}>
@@ -180,6 +194,20 @@ function ProfitCard({ row }: { row: CustomerProfitability }) {
         <div title="all refund approvals that haven't been denied">
           <dt>Exp. refunds</dt><dd>{refundLine}</dd>
         </div>
+        {row.returns_handled > 0 && (
+          <div title={returnHandlingTitle}>
+            <dt>Return handling</dt>
+            <dd>
+              {fmt(row.return_handling_cad ?? 0)}
+              {!row.return_freight_cad && (
+                <span className={styles.profUncostedHint}
+                      title="no return-leg freight on file for this customer — the real cost is higher">
+                  {' '}(freight missing)
+                </span>
+              )}
+            </dd>
+          </div>
+        )}
         {row.diagnosis_call_count > 0 && (
           <div title={row.support_cost_cad == null
             ? 'Diagnosis-call labour. Set support_rates.hourly_cad to price it.'
@@ -247,7 +275,8 @@ function hasActivity(r: CustomerProfitability): boolean {
       // Support time is activity. Antonio Gonsalves and Dhruv Talwar have
       // diagnosis calls but no orders on file — without this they'd be
       // filtered out and their labour cost would never be visible.
-      || r.diagnosis_call_count > 0;
+      || r.diagnosis_call_count > 0
+      || r.returns_handled > 0;
 }
 
 function sortFn(key: SortKey): (a: CustomerProfitability, b: CustomerProfitability) => number {
@@ -270,12 +299,13 @@ function aggregate(rs: CustomerProfitability[]) {
       warranty:  acc.warranty  + r.expected_warranty_cost_cad,
       refund:    acc.refund    + r.expected_refund_cad,
       support:   acc.support   + (r.support_cost_cad ?? 0),
+      returnHandling: acc.returnHandling + (r.return_handling_cad ?? 0),
       // Any priced call at all means the rate is live; without this the bar
       // would show $0.00 and read as "support is free".
       supportPriced: acc.supportPriced || r.support_cost_cad != null,
       margin:    acc.margin    + r.net_margin_cad,
     }),
-    { revenue: 0, tax: 0, salesCost: 0, warranty: 0, refund: 0, support: 0, supportPriced: false, margin: 0 },
+    { revenue: 0, tax: 0, salesCost: 0, warranty: 0, refund: 0, support: 0, supportPriced: false, returnHandling: 0, margin: 0 },
   );
 }
 

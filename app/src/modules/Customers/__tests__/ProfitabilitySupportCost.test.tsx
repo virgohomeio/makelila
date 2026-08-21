@@ -25,6 +25,8 @@ function row(over: Partial<CustomerProfitability> = {}): CustomerProfitability {
     refund_count: 0, in_flight_refund_count: 0,
     ticket_count: 0, open_warranty_ticket_count: 0,
     diagnosis_call_count: 0, diagnosis_minutes: 0, diagnosis_noshow_count: 0,
+    return_handling_cad: null, return_stocking_cad: null,
+    return_inspection_cad: null, return_freight_cad: null, returns_handled: 0,
     is_team_member: false,
     ...over,
   };
@@ -93,6 +95,34 @@ describe('ProfitabilityTab — diagnosis-call support cost', () => {
     cleanup();
     mount([row({ sale_shipping_cad: 0, shipping_uncosted_count: 1 })]);
     expect(screen.getByText(/1 uncosted/)).toBeInTheDocument();
+  });
+
+  it('shows return handling as one line with the split in its tooltip', () => {
+    mount([row({
+      returns_handled: 2, return_stocking_cad: 100, return_inspection_cad: 150,
+      return_freight_cad: 191.82, return_handling_cad: 441.82,
+    })]);
+    const dt = screen.getAllByText('Return handling').find(el => el.tagName === 'DT')!;
+    const title = dt.closest('div')!.getAttribute('title')!;
+    expect(title).toContain('2 unit(s) came back');
+    expect(title).toContain('stocking');
+    expect(title).toContain('inspection');
+  });
+
+  it('flags return handling whose freight is not on file', () => {
+    // 45 of 51 returns have no tracking, so freight is $0 and the total is a
+    // floor, not the real cost. Say so rather than implying it is complete.
+    mount([row({
+      returns_handled: 1, return_stocking_cad: 50, return_inspection_cad: 75,
+      return_freight_cad: 0, return_handling_cad: 125,
+    })]);
+    expect(screen.getByText(/freight missing/)).toBeInTheDocument();
+  });
+
+  it('excludes customer-discarded returns from return handling', () => {
+    // A discarded unit never shipped, so returns_handled is 0 and no line shows.
+    mount([row({ returns_handled: 0, return_handling_cad: 0 })]);
+    expect(screen.queryAllByText('Return handling').filter(el => el.tagName === 'DT')).toHaveLength(0);
   });
 
   it('does not render a Support line for a customer who never called', () => {

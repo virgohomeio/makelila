@@ -453,7 +453,18 @@ export type CustomerProfitability = {
   // NULL — not 0 — while support_rates.hourly_cad is unset, so the card can
   // distinguish "no calls" from "we haven't priced a person-hour yet".
   support_cost_cad: number | null;
-  // Margin = revenue - all 5 buckets (no double-count)
+  // V8 6th bucket: what it costs US to take a unit back — stocking +
+  // inspection + the return freight leg. Not to be confused with
+  // refund_approvals.restocking_fee_usd, which is a fee charged TO the
+  // customer and already nets out of expected_refund_cad.
+  return_handling_cad: number | null;
+  return_stocking_cad: number | null;
+  return_inspection_cad: number | null;
+  return_freight_cad: number | null;
+  // Returns where the unit physically came back. Customer-discarded returns
+  // are excluded — nothing shipped, so there was nothing to stock or inspect.
+  returns_handled: number;
+  // Margin = revenue - all 6 buckets (no double-count)
   net_margin_cad: number;
   // Settled-refund subset (status='refunded' only) — shown alongside
   // expected so operators can see in-flight vs booked.
@@ -520,6 +531,11 @@ export function useCustomerProfitability(): {
         expected_refund_cad:        Number(r.expected_refund_cad ?? 0),
         // Preserve null: it means the rate is unset, not that support was free.
         support_cost_cad:           r.support_cost_cad == null ? null : Number(r.support_cost_cad),
+        return_handling_cad:        r.return_handling_cad == null ? null : Number(r.return_handling_cad),
+        return_stocking_cad:        r.return_stocking_cad == null ? null : Number(r.return_stocking_cad),
+        return_inspection_cad:      r.return_inspection_cad == null ? null : Number(r.return_inspection_cad),
+        return_freight_cad:         r.return_freight_cad == null ? null : Number(r.return_freight_cad),
+        returns_handled:            Number(r.returns_handled ?? 0),
         diagnosis_call_count:       Number(r.diagnosis_call_count ?? 0),
         diagnosis_minutes:          Number(r.diagnosis_minutes ?? 0),
         diagnosis_noshow_count:     Number(r.diagnosis_noshow_count ?? 0),
