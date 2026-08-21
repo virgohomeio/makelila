@@ -187,16 +187,56 @@ export function ActivityTab() {
         </table>
       </div>
 
-      <p className={styles.sectionNote}>
-        “Last activity” is the newest of: sign-in, profile write, notification read, update
-        accepted, batch started, feedback sent — because Lovely is a PWA and a session can
-        outlive a login by weeks, so sign-ins alone understate real use. App buckets:
-        active ≤{APP_ACTIVE_DAYS}d, cooling ≤{APP_COOLING_DAYS}d, dormant beyond.
-        Machine: online ≤{MACHINE_ONLINE_MINUTES}m, intermittent ≤{MACHINE_INTERMITTENT_HOURS}h,
-        offline beyond — the same thresholds the customer’s own app uses. Passive
-        viewing leaves no trace anywhere, so a user who only reads the dashboard still
-        registers as quiet.
-      </p>
+      <div className={styles.legend}>
+        <div className={styles.detailHead}>How these are worked out</div>
+
+        <p className={styles.sectionNote}>
+          Every row is one question crossed with another: <strong>is the customer opening
+          the app</strong>, and <strong>is their machine reporting</strong>.
+        </p>
+
+        <ul className={styles.legendList}>
+          <li>
+            <span className={styles.legendTerm}>App activity</span>
+            newest of sign-in, profile write, notification read, update accepted, batch
+            started or completed, feedback, damage report, or app install — Lovely is a PWA
+            and a session outlives a login by weeks, so sign-ins alone understate real use.
+            Active ≤{APP_ACTIVE_DAYS}d · cooling ≤{APP_COOLING_DAYS}d · dormant beyond.
+          </li>
+          <li>
+            <span className={styles.legendTerm}>Machine</span>
+            newest telemetry row the unit has sent. Online ≤{MACHINE_ONLINE_MINUTES}m ·
+            intermittent ≤{MACHINE_INTERMITTENT_HOURS}h · offline beyond ·
+            “no data” when the telemetry lookup itself failed.
+          </li>
+          <li>
+            <span className={styles.legendTerm}>Healthy</span>
+            using the app, machine reporting.
+          </li>
+          <li>
+            <span className={styles.legendTerm}>Unit down</span>
+            using the app, but the machine has gone quiet for over
+            {' '}{MACHINE_INTERMITTENT_HOURS}h — call today.
+          </li>
+          <li>
+            <span className={styles.legendTerm}>Silent user</span>
+            machine is composting fine, they have stopped opening the app.
+          </li>
+          <li>
+            <span className={styles.legendTerm}>At risk</span>
+            neither — no app activity and no telemetry.
+          </li>
+        </ul>
+
+        <p className={styles.sectionNote}>
+          Two cautions. A failed telemetry read is never counted as “down”, so a unit
+          showing “no data” is unknown, not broken. And a machine reads as down whenever
+          its <em>paired serial</em> is silent — if the serial on the account is wrong or a
+          placeholder, the customer looks down no matter how well their real unit is
+          running. Passive viewing leaves no trace anywhere, so someone who only reads the
+          dashboard still registers as quiet.
+        </p>
+      </div>
     </>
   );
 }

@@ -512,3 +512,35 @@
     transition: none;
   }
 }
+
+/* ---- Activity legend: how the statuses are derived ---- */
+
+.legend {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(44, 42, 37, 0.08);
+}
+
+.legendList {
+  list-style: none;
+  margin: 10px 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 72ch;
+}
+
+.legendList li {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--color-ink-muted);
+}
+
+/* Inline lead-in so each rule reads as "term — definition" on one flow. */
+.legendTerm {
+  font-weight: 600;
+  color: var(--color-ink);
+  margin-right: 6px;
+}
+.legendTerm::after { content: ' —'; font-weight: 400; }
