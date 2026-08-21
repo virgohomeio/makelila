@@ -70,7 +70,8 @@ mirroring `Service/dwell.ts`, a full-width queue bar replacing the status pills,
 views (Blocked · Overdue · Replacement queue), a single toolbar, and `ORDER_STATUS_META`
 reusing `STATUS_META`'s warm palette under the same AA / non-competing-red contracts.
 
-**Reverted at the operator's request in ``5e7d586``.** Sales stands as §1–§5 describe.
+**Reverted the same day at the operator's request** (the revert of `c7070c2` on `main`).
+Sales stands as §1–§5 describe.
 The work is recoverable in full from `c7070c2` if it is ever wanted — recorded here so it
 is not rebuilt from scratch by someone who does not know it was already tried.
 
