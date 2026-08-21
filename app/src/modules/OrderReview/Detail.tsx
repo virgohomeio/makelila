@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
 import type { Order } from '../../lib/orders';
-import { disposition, needInfo, addOrderNote, orderDue, cancelOrder } from '../../lib/orders';
+import { disposition, needInfo, addOrderNote, orderUrgency, orderDue, cancelOrder } from '../../lib/orders';
 import { useAuth } from '../../lib/auth';
 import { CustomerCard } from './detail/CustomerCard';
 import { AddressCard }  from './detail/AddressCard';
@@ -12,22 +12,16 @@ import { InvoicesCard } from './detail/InvoicesCard';
 import { ActionBar }    from './detail/ActionBar';
 import { ReplacementCancel } from './detail/ReplacementCancel';
 import { ConfirmBanner } from './detail/ConfirmBanner';
-import { ReadinessChecklist } from './detail/ReadinessChecklist';
-import { canConfirm } from './detail/readiness';
-import { daysSincePlaced, slaTier, slaLabel } from './sla';
+import { ReadinessChecklist, canConfirm } from './detail/ReadinessChecklist';
 import styles from './OrderReview.module.css';
 
 type Banner = { variant: 'success' | 'error'; message: string } | null;
 
 export function Detail({
   order,
-  now,
   onAfterDisposition,
 }: {
   order: Order;
-  /** Resolved once by the page so every row and this header agree on the
-   *  same instant. */
-  now: number;
   onAfterDisposition: () => void;
 }) {
   const [banner, setBanner] = useState<Banner>(null);
@@ -62,13 +56,12 @@ export function Detail({
 
   // The confirm SLA is stated once per surface, in one vocabulary. It used to
   // appear three times — a chip on the row, a banner in the body, and a "Due:"
-  // pill in the action bar — each phrased differently. The list's rail and this
-  // header now share sla.ts: same tiers, same label, same scale.
+  // pill in the action bar — each phrased differently. The rail chip and the
+  // header below now render the identical label from orderUrgency().
   const basis = order.placed_at ?? order.created_at;
-  const days = daysSincePlaced(basis, now);
-  const tier = slaTier(days);
+  const urgency = orderUrgency(basis);
   const due = orderDue(basis);
-  const showSla = order.kind === 'sale' && !isCancelled && !!basis;
+  const showSla = order.kind === 'sale' && !isCancelled && !!urgency.label;
 
   return (
     <section className={styles.detail}>
@@ -85,10 +78,10 @@ export function Detail({
           </span>
           {showSla && (
             <span
-              className={`${styles.slaBig} ${styles[`slaBig_${tier}`]}`}
+              className={`${styles.slaBig} ${styles[urgency.severity]}`}
               title="Order-confirmation SLA: placed date + 2 days"
             >
-              Due {due.dueLabel} · placed {slaLabel(days)}
+              Due {due.dueLabel} · {urgency.label}
             </span>
           )}
         </div>

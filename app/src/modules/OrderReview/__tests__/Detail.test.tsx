@@ -83,9 +83,6 @@ const order: Order = {
   placed_at: '2026-04-19T00:00:00Z',
 };
 
-// Pinned so the SLA header renders the same string on every run.
-const NOW = Date.parse('2026-04-21T12:00:00Z');
-
 describe('Detail', () => {
   beforeEach(() => {
     dispositionMock.mockClear();
@@ -95,7 +92,7 @@ describe('Detail', () => {
   });
 
   it('Confirm calls disposition with status=approved', async () => {
-    render(<Detail order={order} now={NOW} onAfterDisposition={vi.fn()} />);
+    render(<Detail order={order} onAfterDisposition={vi.fn()} />);
     fireEvent.click(screen.getByRole('button', { name: /confirm/i }));
     await waitFor(() => {
       expect(dispositionMock).toHaveBeenCalledWith(order, 'approved');
@@ -104,7 +101,7 @@ describe('Detail', () => {
   });
 
   it('Flag requires a reason before Submit is enabled', async () => {
-    render(<Detail order={order} now={NOW} onAfterDisposition={vi.fn()} />);
+    render(<Detail order={order} onAfterDisposition={vi.fn()} />);
     fireEvent.click(screen.getByRole('button', { name: /^⚑ flag$/i }));
     const submit = screen.getByRole('button', { name: /^flag order$/i });
     expect(submit).toBeDisabled();
@@ -118,7 +115,7 @@ describe('Detail', () => {
   });
 
   it('Hold allows empty reason', async () => {
-    render(<Detail order={order} now={NOW} onAfterDisposition={vi.fn()} />);
+    render(<Detail order={order} onAfterDisposition={vi.fn()} />);
     fireEvent.click(screen.getByRole('button', { name: /^⏸ hold$/i }));
     fireEvent.click(screen.getByRole('button', { name: /^hold order$/i }));
     await waitFor(() => {
@@ -128,7 +125,7 @@ describe('Detail', () => {
   });
 
   it('Need Info calls needInfo (not disposition)', async () => {
-    render(<Detail order={order} now={NOW} onAfterDisposition={vi.fn()} />);
+    render(<Detail order={order} onAfterDisposition={vi.fn()} />);
     fireEvent.click(screen.getByRole('button', { name: /need info/i }));
     fireEvent.change(screen.getByPlaceholderText(/what you need from the customer/i), { target: { value: 'driveway photo' } });
     fireEvent.click(screen.getByRole('button', { name: /^log request$/i }));
@@ -142,7 +139,7 @@ describe('Detail', () => {
   // Cancelling is terminal — an order can be killed straight from Sales, but
   // never without a reason on the record, and never twice.
   it('Cancel requires a reason before Submit is enabled', async () => {
-    render(<Detail order={order} now={NOW} onAfterDisposition={vi.fn()} />);
+    render(<Detail order={order} onAfterDisposition={vi.fn()} />);
     fireEvent.click(screen.getByRole('button', { name: /^cancel order$/i }));
     const submit = screen.getByRole('button', { name: /^cancel this order$/i });
     expect(submit).toBeDisabled();
@@ -165,7 +162,6 @@ describe('Detail', () => {
           cancelled_at: '2026-08-13T15:03:17Z',
           cancelled_reason: 'Delays — customer wanted it ASAP',
         }}
-        now={NOW}
         onAfterDisposition={vi.fn()}
       />,
     );
@@ -176,7 +172,7 @@ describe('Detail', () => {
   });
 
   it('Add note button fires addOrderNote with the current user name + body', async () => {
-    render(<Detail order={order} now={NOW} onAfterDisposition={vi.fn()} />);
+    render(<Detail order={order} onAfterDisposition={vi.fn()} />);
     const textarea = screen.getByPlaceholderText(/add a review note/i);
     fireEvent.change(textarea, { target: { value: 'first note' } });
     expect(addOrderNoteMock).not.toHaveBeenCalled();
@@ -189,7 +185,7 @@ describe('Detail', () => {
   // The action bar used to be REPLACED by the reason input, so opening a
   // drawer took the order's identity and the primary action off screen.
   it('keeps the action bar visible while a reason drawer is open', () => {
-    render(<Detail order={order} now={NOW} onAfterDisposition={vi.fn()} />);
+    render(<Detail order={order} onAfterDisposition={vi.fn()} />);
     fireEvent.click(screen.getByRole('button', { name: /^⚑ flag$/i }));
     expect(screen.getByRole('button', { name: /confirm order/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /^cancel order$/i })).toBeInTheDocument();
@@ -202,7 +198,6 @@ describe('Detail', () => {
     render(
       <Detail
         order={{ ...order, customer_phone: null, address_verdict: 'condo' }}
-        now={NOW}
         onAfterDisposition={vi.fn()}
       />,
     );
@@ -214,7 +209,7 @@ describe('Detail', () => {
   });
 
   it('reports readiness instead of blockers once both criteria are met', () => {
-    render(<Detail order={order} now={NOW} onAfterDisposition={vi.fn()} />);
+    render(<Detail order={order} onAfterDisposition={vi.fn()} />);
     expect(screen.getByText(/ready to confirm/i)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /fix in/i })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /confirm order/i })).toBeEnabled();

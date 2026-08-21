@@ -10,34 +10,6 @@ import { functionErrorMessage } from './functionError';
 // kept for finance/history rather than deleted.
 export type OrderStatus = 'pending' | 'approved' | 'flagged' | 'held' | 'cancelled';
 
-/* Order status colours, warm palette — the same system Support Tickets uses
- * (see STATUS_META in lib/service.ts), and deliberately the same hex values
- * where the meaning matches, so a status reads identically in both modules.
- *
- * Two rules, both pinned by orders.statusColours.test.ts:
- *   1. Nothing here is a red that competes with Ladybug Red #CC2D30, which is
- *      reserved for action. If nothing on a row is red, a destructive warning
- *      can never be mistaken for the primary action.
- *   2. Every `color` clears 4.5:1 against its own `bg` and against the page
- *      ground (WCAG AA for the 11px pill text).
- *
- * Hex rather than var() because these are consumed as inline style values on
- * queue-bar segments and legend dots, not from CSS; the raw-hex guardrail
- * scopes to *.module.css. */
-export const ORDER_STATUS_META: Record<OrderStatus, { label: string; color: string; bg: string }> = {
-  pending:   { label: 'Pending',   color: '#8C4A2F', bg: '#F7EDE7' },
-  held:      { label: 'Held',      color: '#7A5E1E', bg: '#F7F1DE' },
-  flagged:   { label: 'Flagged',   color: '#8A3D5A', bg: '#F8EDF1' },
-  approved:  { label: 'Confirmed', color: '#3E6B45', bg: '#EBF2EA' },
-  cancelled: { label: 'Cancelled', color: '#6E6862', bg: '#F0EDE7' },
-};
-
-/** Statuses that make up the live queue, in the order the queue bar draws
- *  them. 'cancelled' is terminal and is not part of it — it keeps its place in
- *  the legend as a filter, exactly as Support Tickets treats 'closed'. */
-export const OPEN_ORDER_STATUSES: readonly OrderStatus[] =
-  ['pending', 'held', 'flagged', 'approved'];
-
 export type LineItem =
   // Legacy Shopify-synced sale line — do not add new sale shapes here; extend the 'part'/'unit' variants instead.
   | { sku: string; name: string; qty: number; price_usd: number }
