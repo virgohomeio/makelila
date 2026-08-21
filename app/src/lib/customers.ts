@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from './supabase';
 import { logAction } from './activityLog';
+import { DEFAULT_RATES, type ProfitabilityRates, type AcquisitionSpendRow } from './profitability';
 
 export type Customer = {
   id: string;
@@ -434,12 +435,36 @@ export type CustomerProfitability = {
   full_name: string;
   email: string | null;
   country: string | null;
+  // V9: province/state, read off the first sale order's ship-to (present on
+  // every sale order) and folded to a two-letter code. region_code prefixes
+  // the country — 'CA-ON' vs 'US-CA' — because 'CA' alone is ambiguous.
+  region: string | null;
+  region_code: string | null;
   onboard_date: string | null;
+  // V9: acquisition. Channel is the first sale order's UTM attribution
+  // collapsed to a budgetable bucket; later orders are upsells and must not
+  // re-attribute the customer. acquired_on anchors every cohort.
+  acquisition_channel: string;
+  acquisition_campaign: string | null;
+  first_order_at: string | null;
+  last_order_at: string | null;
+  acquired_on: string | null;
   // V5: every amount is CAD, converted through public.fx_rates. The V4 `_usd`
   // names were a misnomer on three of the four inputs — orders.total_usd/tax_usd
   // follow orders.currency, cogs_usd is USD, shipping_cost_usd is CAD.
   // Revenue (net of tax — tax is pass-through to govt and not VCycene income)
   revenue_cad: number;
+  // V9 revenue detail. gross is what list price would have been, so
+  // discount / gross is the discount rate. initial is the original machine
+  // purchase; everything after it is upsell.
+  gross_revenue_cad: number;
+  discount_cad: number;
+  initial_revenue_cad: number;
+  initial_discount_cad: number;
+  upsell_revenue_cad: number;
+  // Always 0 today — LILA sells no subscription or service plan. Kept as a
+  // column so the model is ready rather than reshaped later.
+  recurring_revenue_cad: number;
   // Sales tax collected on behalf of govt — informational, NOT part of margin
   tax_collected_cad: number;
   // 4 cost buckets — sale_cogs + sale_shipping are sales-only;
@@ -464,13 +489,22 @@ export type CustomerProfitability = {
   // Returns where the unit physically came back. Customer-discarded returns
   // are excluded — nothing shipped, so there was nothing to stock or inspect.
   returns_handled: number;
-  // Margin = revenue - all 6 buckets (no double-count)
+  // V9 buckets 7-9, priced from public.profitability_rates. All three are
+  // rated 0 until Finance sets them, and the UI says "unpriced" rather than
+  // letting the 0 read as "free".
+  payment_fee_cad: number;
+  sales_commission_cad: number;
+  installation_cost_cad: number;
+  // Margin = revenue - all 9 buckets (no double-count)
   net_margin_cad: number;
   // Settled-refund subset (status='refunded' only) — shown alongside
   // expected so operators can see in-flight vs booked.
   settled_refund_cad: number;
   // Counts
   order_count: number;
+  // Sale orders with a unit traced to them. Lower than order_count whenever an
+  // order has not shipped, or its unit was never linked to the order ref.
+  units_shipped_count: number;
   replacement_count: number;
   open_replacement_count: number;
   // Cost coverage. COGS is always filled, but batch_actual is the invoiced
@@ -524,6 +558,17 @@ export function useCustomerProfitability(): {
       const coerced = (data ?? []).map((r: Record<string, unknown>) => ({
         ...r,
         revenue_cad:                Number(r.revenue_cad ?? 0),
+        gross_revenue_cad:          Number(r.gross_revenue_cad ?? 0),
+        discount_cad:               Number(r.discount_cad ?? 0),
+        initial_revenue_cad:        Number(r.initial_revenue_cad ?? 0),
+        initial_discount_cad:       Number(r.initial_discount_cad ?? 0),
+        upsell_revenue_cad:         Number(r.upsell_revenue_cad ?? 0),
+        recurring_revenue_cad:      Number(r.recurring_revenue_cad ?? 0),
+        payment_fee_cad:            Number(r.payment_fee_cad ?? 0),
+        sales_commission_cad:       Number(r.sales_commission_cad ?? 0),
+        installation_cost_cad:      Number(r.installation_cost_cad ?? 0),
+        units_shipped_count:        Number(r.units_shipped_count ?? 0),
+        acquisition_channel:        (r.acquisition_channel as string) ?? 'unknown',
         tax_collected_cad:          Number(r.tax_collected_cad ?? 0),
         sale_cogs_cad:              Number(r.sale_cogs_cad ?? 0),
         sale_shipping_cad:          Number(r.sale_shipping_cad ?? 0),
@@ -553,6 +598,86 @@ export function useCustomerProfitability(): {
   }, []);
 
   return { rows, loading, error };
+}
+
+// ── Profitability inputs: rates and acquisition spend ───────────────────────
+// Both are small reference tables read once. They feed lib/profitability.ts,
+// which is where every formula that needs more than one customer lives.
+
+/** public.profitability_rates, keyed for direct use by the calc layer. */
+export function useProfitabilityRates(): {
+  rates: ProfitabilityRates;
+  loading: boolean;
+  error: Error | null;
+} {
+  const [rates, setRates] = useState<ProfitabilityRates>(DEFAULT_RATES);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data, error: err } = await supabase
+        .from('profitability_rates')
+        .select('key, value');
+      if (cancelled) return;
+      if (err) {
+        // A missing rates table must not blank the dashboard — fall back to
+        // the defaults, which are all zero, and let the UI flag them unpriced.
+        setError(err as unknown as Error);
+        setLoading(false);
+        return;
+      }
+      const next = { ...DEFAULT_RATES };
+      for (const row of (data ?? []) as { key: string; value: unknown }[]) {
+        if (row.key in next) {
+          (next as unknown as Record<string, number>)[row.key] = Number(row.value ?? 0);
+        }
+      }
+      setRates(next);
+      setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  return { rates, loading, error };
+}
+
+/** public.acquisition_spend_monthly — Meta spend plus any hand-entered rows. */
+export function useAcquisitionSpend(): {
+  spend: AcquisitionSpendRow[];
+  loading: boolean;
+  error: Error | null;
+} {
+  const [spend, setSpend] = useState<AcquisitionSpendRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data, error: err } = await supabase
+        .from('acquisition_spend_monthly')
+        .select('*')
+        .order('month', { ascending: true });
+      if (cancelled) return;
+      if (err) {
+        setError(err as unknown as Error);
+        setLoading(false);
+        return;
+      }
+      setSpend((data ?? []).map((r: Record<string, unknown>) => ({
+        channel:   String(r.channel ?? 'unknown'),
+        month:     String(r.month ?? ''),
+        spend_cad: Number(r.spend_cad ?? 0),
+        source:    String(r.source ?? 'manual'),
+      })));
+      setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  return { spend, loading, error };
 }
 
 // ── 30-day refund window (anchored on onboarding date) ──────────────────────

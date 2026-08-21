@@ -1,12 +1,20 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, cleanup } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent } from '@testing-library/react';
 import type { CustomerProfitability } from '../../../lib/customers';
+import { DEFAULT_RATES } from '../../../lib/profitability';
 
 const { profitabilityMock } = vi.hoisted(() => ({ profitabilityMock: vi.fn() }));
 
 vi.mock('../../../lib/customers', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../lib/customers')>();
-  return { ...actual, useCustomerProfitability: profitabilityMock };
+  return {
+    ...actual,
+    useCustomerProfitability: profitabilityMock,
+    // The rates and spend tables are reference data; the card assertions below
+    // do not depend on them, and stubbing them keeps Supabase out of the test.
+    useProfitabilityRates: () => ({ rates: DEFAULT_RATES, loading: false, error: null }),
+    useAcquisitionSpend: () => ({ spend: [], loading: false, error: null }),
+  };
 });
 
 import { ProfitabilityTab } from '../ProfitabilityTab';
@@ -14,8 +22,16 @@ import { ProfitabilityTab } from '../ProfitabilityTab';
 function row(over: Partial<CustomerProfitability> = {}): CustomerProfitability {
   return {
     id: 'c1', full_name: 'Ronald Hatch', email: 'rdhridgeback@gmail.com',
-    country: 'US', onboard_date: '2026-05-01',
-    revenue_cad: 1000, tax_collected_cad: 0,
+    country: 'US', region: 'CA', region_code: 'US-CA', onboard_date: '2026-05-01',
+    acquisition_channel: 'organic_search', acquisition_campaign: null,
+    first_order_at: '2026-05-01T00:00:00Z', last_order_at: '2026-05-01T00:00:00Z',
+    acquired_on: '2026-05-01',
+    revenue_cad: 1000, gross_revenue_cad: 1000, discount_cad: 0,
+    initial_revenue_cad: 1000, initial_discount_cad: 0, upsell_revenue_cad: 0,
+    recurring_revenue_cad: 0,
+    payment_fee_cad: 0, sales_commission_cad: 0, installation_cost_cad: 0,
+    units_shipped_count: 1,
+    tax_collected_cad: 0,
     sale_cogs_cad: 400, sale_shipping_cad: 100,
     expected_warranty_cost_cad: 0, expected_refund_cad: 0, settled_refund_cad: 0,
     support_cost_cad: null, net_margin_cad: 500,
@@ -32,9 +48,14 @@ function row(over: Partial<CustomerProfitability> = {}): CustomerProfitability {
   };
 }
 
+/** The tab now opens on the executive overview, and the customer list defaults
+ *  to the table. Every assertion below is about the per-customer card, so mount
+ *  navigates to it: Customers view, cards layout. */
 function mount(rows: CustomerProfitability[]) {
   profitabilityMock.mockReturnValue({ rows, loading: false, error: null });
   render(<ProfitabilityTab />);
+  fireEvent.click(screen.getByRole('tab', { name: 'Customers' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Cards' }));
 }
 
 describe('ProfitabilityTab — diagnosis-call support cost', () => {

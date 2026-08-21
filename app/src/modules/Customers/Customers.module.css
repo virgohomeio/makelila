@@ -1204,3 +1204,556 @@
 .followupMoved { font-size: 13px; color: var(--color-ink-subtle); padding: 8px 0; }
 .followupMoved a { color: #2b6cb0; font-weight: 600; text-decoration: none; }
 .followupMoved a:hover { text-decoration: underline; }
+
+/* ── Backlog #58 V9 — profitability dashboard ─────────────────────────────────
+   Views, KPI row, charts, the province/state tile map and the customer
+   drill-down. Colour in the charts only ever encodes the sign of a number
+   (red money leaving, blue money staying); every mark is labelled with its
+   own value so nothing depends on colour alone. */
+
+.profViewNav {
+  display: flex;
+  gap: 2px;
+  border-bottom: 1px solid #e2e8f0;
+  margin-bottom: 14px;
+}
+.profViewTab {
+  padding: 8px 14px;
+  border: none;
+  background: none;
+  font-size: .85rem;
+  color: #718096;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.profViewTab:hover { color: #2d3748; }
+.profViewTabActive {
+  color: #1a202c;
+  font-weight: 600;
+  border-bottom-color: var(--color-crimson, #CC2D30);
+}
+
+.profClearBtn {
+  padding: 6px 12px;
+  border: 1px solid #cbd5e0;
+  border-radius: 6px;
+  background: #fff;
+  font-size: .8rem;
+  color: #4a5568;
+  cursor: pointer;
+}
+.profClearBtn:hover { background: #f7fafc; }
+
+.kpiGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.sectionHeading {
+  font-size: .95rem;
+  font-weight: 600;
+  color: #1a202c;
+  margin: 22px 0 8px;
+}
+.sectionNote {
+  font-size: .8rem;
+  color: #718096;
+  margin: 0 0 10px;
+  max-width: 68ch;
+  line-height: 1.5;
+}
+
+/* ── Charts ───────────────────────────────────────────────────────────────── */
+
+.overviewSplit {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.chartFigure {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 14px 16px;
+  margin: 0;
+}
+.chartTitle {
+  font-size: .85rem;
+  font-weight: 600;
+  color: #1a202c;
+  display: block;
+  margin-bottom: 10px;
+}
+.chartSub {
+  display: block;
+  font-size: .75rem;
+  font-weight: 400;
+  color: #718096;
+  margin-top: 2px;
+  line-height: 1.45;
+}
+.chartEmpty {
+  font-size: .8rem;
+  color: #718096;
+  padding: 18px 0;
+  line-height: 1.5;
+}
+.chartCanvas { width: 100%; }
+
+.waterfallSvg {
+  width: 100%;
+  height: 190px;
+  display: block;
+}
+.waterfallLabels {
+  display: flex;
+  margin-top: 6px;
+}
+.waterfallLabel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  min-width: 0;
+}
+.waterfallValue {
+  font-size: .7rem;
+  font-weight: 600;
+  color: #1a202c;
+  font-variant-numeric: tabular-nums;
+}
+.waterfallName {
+  font-size: .6rem;
+  color: #718096;
+  text-align: center;
+  line-height: 1.15;
+  word-break: break-word;
+}
+.waterfallTotal .waterfallName { color: #2d3748; font-weight: 600; }
+
+.histogram { display: flex; flex-direction: column; gap: 5px; }
+.histRow {
+  display: grid;
+  grid-template-columns: 110px 1fr 32px;
+  align-items: center;
+  gap: 8px;
+  cursor: default;
+}
+.histLabel { font-size: .74rem; color: #4a5568; font-variant-numeric: tabular-nums; }
+.histTrack { background: #f7fafc; border-radius: 3px; height: 14px; }
+.histBar { display: block; height: 14px; border-radius: 3px; min-width: 2px; }
+.histCount {
+  font-size: .74rem;
+  color: #1a202c;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.scatterSvg { width: 100%; height: 200px; display: block; }
+.scatterLabel { font-size: 2.6px; }
+.axisLabel { font-size: 2.8px; }
+.scatterReadout {
+  font-size: .75rem;
+  color: #4a5568;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid #edf2f7;
+}
+
+.cohortChart {
+  display: flex;
+  align-items: stretch;
+  gap: 3px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+.cohortCol {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 26px;
+  flex: 1;
+}
+.cohortBarArea {
+  height: 90px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.cohortBar { width: 100%; border-radius: 2px; }
+.cohortLabel {
+  font-size: .58rem;
+  color: #718096;
+  margin-top: 3px;
+  writing-mode: vertical-rl;
+  white-space: nowrap;
+}
+
+.cohortControls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: .8rem;
+  color: #4a5568;
+  margin-bottom: 8px;
+}
+.grainBtn, .grainActive {
+  padding: 4px 10px;
+  border: 1px solid #cbd5e0;
+  border-radius: 6px;
+  background: #fff;
+  font-size: .78rem;
+  cursor: pointer;
+  color: #4a5568;
+}
+.grainActive {
+  background: #1a202c;
+  border-color: #1a202c;
+  color: #fff;
+}
+.layoutToggle { display: flex; gap: 6px; margin: 12px 0 10px; }
+
+.bestWorst { display: flex; flex-direction: column; gap: 8px; }
+.bestWorstCard {
+  border: 1px solid #e2e8f0;
+  border-left: 4px solid #2a78d6;
+  border-radius: 6px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.bestWorstBad { border-left-color: #b93030; }
+.bestWorstTag {
+  font-size: .62rem;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: #718096;
+}
+.bestWorstCard strong { font-size: .95rem; color: #1a202c; }
+.bestWorstCard span:last-child { font-size: .78rem; color: #4a5568; }
+
+/* ── Geography tile map ───────────────────────────────────────────────────── */
+
+.geoMapWrap {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 14px 16px;
+  margin-bottom: 18px;
+}
+.geoMapHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.geoMapTitle { font-size: .9rem; font-weight: 600; color: #1a202c; }
+.geoMapSub {
+  font-size: .75rem;
+  color: #718096;
+  margin-top: 2px;
+  max-width: 60ch;
+  line-height: 1.45;
+}
+.geoMeasureSelect {
+  padding: 6px 10px;
+  border: 1px solid #cbd5e0;
+  border-radius: 6px;
+  font-size: .8rem;
+  background: #fff;
+}
+.geoMapBody {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(200px, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+.geoMapSvg { width: 100%; height: auto; display: block; }
+.geoCountryLabel {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: .08em;
+}
+.geoTileActive { cursor: pointer; }
+.geoTileEmpty { pointer-events: none; }
+.geoTileCode { font-size: 13px; font-weight: 600; }
+.geoTileValue { font-size: 9px; font-variant-numeric: tabular-nums; }
+
+.geoSide { display: flex; flex-direction: column; gap: 12px; }
+.geoLegend { display: flex; flex-direction: column; gap: 4px; }
+.geoLegendScale { display: flex; height: 12px; border-radius: 3px; overflow: hidden; }
+.geoLegendScale span { flex: 1; }
+.geoLegendLabels {
+  display: flex;
+  justify-content: space-between;
+  font-size: .68rem;
+  color: #718096;
+  font-variant-numeric: tabular-nums;
+}
+.geoTooltip {
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 10px 12px;
+  background: #f7fafc;
+}
+.geoTooltipName { font-weight: 600; font-size: .85rem; color: #1a202c; margin-bottom: 6px; }
+.geoTooltip dl { margin: 0; display: flex; flex-direction: column; gap: 3px; }
+.geoTooltip dl > div { display: flex; justify-content: space-between; gap: 10px; }
+.geoTooltip dt { font-size: .72rem; color: #718096; }
+.geoTooltip dd {
+  margin: 0;
+  font-size: .72rem;
+  color: #1a202c;
+  font-variant-numeric: tabular-nums;
+}
+.geoTooltipHint {
+  font-size: .75rem;
+  color: #718096;
+  line-height: 1.5;
+}
+
+.rankList { display: flex; flex-direction: column; gap: 4px; }
+.rankRow {
+  display: grid;
+  grid-template-columns: 132px 1fr 66px 28px;
+  align-items: center;
+  gap: 8px;
+  border: none;
+  background: none;
+  padding: 3px 0;
+  cursor: pointer;
+  text-align: left;
+}
+.rankRow:hover { background: #f7fafc; }
+.rankName {
+  font-size: .78rem;
+  color: #2d3748;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rankTrack { background: #f7fafc; border-radius: 3px; height: 12px; }
+.rankBar { display: block; height: 12px; border-radius: 3px; min-width: 2px; }
+.rankValue {
+  font-size: .75rem;
+  text-align: right;
+  color: #1a202c;
+  font-variant-numeric: tabular-nums;
+}
+.rankCount { font-size: .7rem; color: #a0aec0; text-align: right; }
+
+/* ── Segment / customer tables ────────────────────────────────────────────── */
+
+.segTableWrap {
+  overflow-x: auto;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+}
+.segTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: .78rem;
+}
+.segTable th {
+  text-align: left;
+  padding: 9px 10px;
+  background: #f7fafc;
+  color: #4a5568;
+  font-weight: 600;
+  font-size: .7rem;
+  text-transform: uppercase;
+  letter-spacing: .03em;
+  white-space: nowrap;
+  border-bottom: 1px solid #e2e8f0;
+}
+.segTable td {
+  padding: 8px 10px;
+  border-bottom: 1px solid #edf2f7;
+  color: #2d3748;
+  white-space: nowrap;
+}
+.segTable tbody tr:last-child td { border-bottom: none; }
+.segTable .num { text-align: right; font-variant-numeric: tabular-nums; }
+.segName { font-weight: 500; color: #1a202c; display: flex; align-items: center; gap: 5px; }
+.segClickable { cursor: pointer; }
+.segClickable:hover { background: #f7fafc; }
+.segSelected { background: #ebf8ff; }
+.segLoss { background: #fffafa; }
+.lossMark { color: #b93030; font-size: .65rem; }
+.negative { color: #b93030; }
+.positive { color: #184f95; }
+.unpriced { color: #a0aec0; font-style: italic; font-size: .95em; }
+.paybackCell { font-size: .74rem; color: #4a5568; }
+
+/* ── Customer detail panel ────────────────────────────────────────────────── */
+
+.detailBackdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(11, 11, 11, 0.35);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 40px 20px;
+  overflow-y: auto;
+  z-index: 50;
+}
+.detailPanel {
+  background: #fff;
+  border-radius: 10px;
+  padding: 20px 24px;
+  width: min(920px, 100%);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, .2);
+}
+.detailHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  border-bottom: 1px solid #edf2f7;
+  padding-bottom: 12px;
+}
+.detailName { font-size: 1.1rem; font-weight: 600; color: #1a202c; }
+.detailMeta { font-size: .78rem; color: #718096; margin-top: 3px; }
+.detailClose {
+  border: none;
+  background: none;
+  font-size: 1.5rem;
+  line-height: 1;
+  color: #a0aec0;
+  cursor: pointer;
+  padding: 0 4px;
+}
+.detailClose:hover { color: #4a5568; }
+.detailHero {
+  font-size: 2rem;
+  font-weight: 700;
+  margin: 16px 0 20px;
+  font-variant-numeric: tabular-nums;
+  display: flex;
+  flex-direction: column;
+}
+.detailHeroLabel {
+  font-size: .72rem;
+  font-weight: 400;
+  color: #718096;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  margin-top: 2px;
+}
+.detailCols {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 20px;
+}
+.detailCols h4 {
+  font-size: .72rem;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: #718096;
+  margin: 0 0 8px;
+}
+.detailList { margin: 0; display: flex; flex-direction: column; gap: 4px; }
+.detailList > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: baseline;
+}
+.detailList dt { font-size: .76rem; color: #4a5568; }
+.detailList dd {
+  margin: 0;
+  font-size: .78rem;
+  color: #1a202c;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.detailRowStrong {
+  border-top: 1px solid #edf2f7;
+  padding-top: 4px;
+  margin-top: 2px;
+}
+.detailRowStrong dt, .detailRowStrong dd { font-weight: 600; }
+.detailUsage {
+  margin-top: 20px;
+  padding-top: 14px;
+  border-top: 1px solid #edf2f7;
+}
+.detailUsage h4 {
+  font-size: .72rem;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: #718096;
+  margin: 0 0 6px;
+}
+.detailUsage p {
+  margin: 0;
+  font-size: .78rem;
+  color: #4a5568;
+  line-height: 1.55;
+  max-width: 72ch;
+}
+.detailGaps {
+  margin-top: 16px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: #fffbeb;
+  border: 1px solid #f6ad55;
+  font-size: .76rem;
+  color: #744210;
+}
+.detailGaps ul { margin: 5px 0 0; padding-left: 18px; }
+.detailGaps li { margin-bottom: 2px; }
+
+/* ── Data-quality disclosure ──────────────────────────────────────────────── */
+
+.dataQuality {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+  padding: 10px 14px;
+  margin-top: 18px;
+}
+.dataQuality summary {
+  cursor: pointer;
+  font-size: .82rem;
+  font-weight: 600;
+  color: #4a5568;
+}
+.dataQualityBody {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px;
+}
+.dataQualityBody h5 {
+  font-size: .7rem;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: #718096;
+  margin: 0 0 5px;
+}
+.dataQualityBody p, .dataQualityBody li {
+  font-size: .76rem;
+  color: #4a5568;
+  line-height: 1.55;
+  margin: 0;
+}
+.dataQualityBody ul { margin: 0; padding-left: 16px; }
+.dataQualityBody li { margin-bottom: 4px; }
+.dataQualityBody code {
+  font-size: .95em;
+  background: #f7fafc;
+  padding: 1px 4px;
+  border-radius: 3px;
+}
