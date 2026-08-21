@@ -188,11 +188,14 @@ export function SupportTab() {
   // Header figures. In Progress / Waiting-on-us used to be their own KPI tiles;
   // the queue bar reports both (and every other status) with the added truth
   // that the tiles hid — their share of the queue.
-  const dayAgo = now - 86400_000;
+  //
+  // Intake and throughput share the same 7-day window so they read as a pair:
+  // "N in, M out" over the same period. The old "New (24h)" tile read 0 on most
+  // days, which is a measurement artefact of the window, not a quiet week.
   const weekAgo = now - 7 * 86400_000;
   // Open = anything not yet closed (the only terminal status).
   const openCount = tickets.filter(t => t.status !== 'closed').length;
-  const newTodayCount = tickets.filter(t => new Date(t.created_at).getTime() > dayAgo).length;
+  const newWeekCount = tickets.filter(t => new Date(t.created_at).getTime() > weekAgo).length;
   // Closed (7d) = throughput: support tickets closed at least once in the window,
   // counting reopened ones too. A ticket qualifies if it has a close event in the
   // activity log within 7d, OR its current closed_at falls in the window (covers
@@ -211,7 +214,7 @@ export function SupportTab() {
           <h2 className={styles.pageTitle}>Support Tickets</h2>
           <p className={styles.pageSub}>
             <b>{openCount}</b> open across <b>{grouped.groups.length}</b> customers
-            {' · '}<b>{newTodayCount}</b> new today
+            {' · '}<b>{newWeekCount}</b> new this week
             {' · '}<b>{closedWeekCount}</b> closed this week
           </p>
         </div>

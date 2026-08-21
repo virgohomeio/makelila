@@ -131,6 +131,22 @@ describe('SupportTab status resilience', () => {
     expect(screen.queryByText(/^Closed \d/)).not.toBeInTheDocument();
   });
 
+  // Intake and throughput share one 7-day window so the pair reads as
+  // "N in, M out" over the same period.
+  it('counts intake over the past seven days, not just today', () => {
+    const now = Date.now();
+    const daysAgo = (n: number) => new Date(now - n * 86_400_000).toISOString();
+    ticketsToReturn = [
+      mkTicket({ id: 'a', status: 'waiting_on_us', created_at: daysAgo(0) }),
+      mkTicket({ id: 'b', status: 'waiting_on_us', created_at: daysAgo(3) }),
+      mkTicket({ id: 'c', status: 'waiting_on_us', created_at: daysAgo(6) }),
+      // Outside the window.
+      mkTicket({ id: 'd', status: 'waiting_on_us', created_at: daysAgo(9) }),
+    ];
+    render(<SupportTab />);
+    expect(screen.getByText(/new this week/)).toHaveTextContent('3 new this week');
+  });
+
   it('the header open count covers every ticket that is not closed', () => {
     ticketsToReturn = [
       mkTicket({ id: 'o1', status: 'in_progress' }),
