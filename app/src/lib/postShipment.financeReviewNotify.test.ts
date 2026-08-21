@@ -24,7 +24,11 @@ const { fromMock, getSessionMock, getUserMock, logActionMock, sendTemplateMock, 
   const getSessionMock = vi.fn(() => Promise.resolve({ data: { session: { user: { id: 'mgr-1' } } } }));
   const getUserMock = vi.fn(() => Promise.resolve({ data: { user: { id: 'mgr-1' } } }));
   const logActionMock = vi.fn(() => Promise.resolve());
-  const sendTemplateMock = vi.fn(() => Promise.resolve({ message_id: 'm1', resend_id: 'r1' }));
+  // Typed with its argument so `.mock.calls[0][0]` stays indexable under
+  // `tsc -b` — an untyped vi.fn() infers a zero-length tuple for calls.
+  const sendTemplateMock = vi.fn((_input: any) =>
+    Promise.resolve({ message_id: 'm1', resend_id: 'r1' }),
+  );
 
   const fromMock = vi.fn((table: string) => ({
     select: (_cols?: string) => ({
