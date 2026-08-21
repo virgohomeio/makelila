@@ -699,6 +699,14 @@ export function refundExecutorEmail(method: RefundMethod | null): string {
     : REFUND_EXECUTORS.finance;
 }
 
+// FR-9d: who is told when a card lands in Finance Review. Kept separate from
+// REFUND_EXECUTORS.finance — that one is "who executes a payout", this one is
+// "who owns the Finance Review column" — so the two can diverge without one
+// silently re-routing the other. Her account is yueli@ but the board (and she)
+// says Julie, so greet her by the name she uses rather than the local-part.
+export const REFUND_FINANCE_REVIEWER = 'yueli@virgohome.io';
+export const REFUND_FINANCE_REVIEWER_NAME = 'Julie';
+
 // FR-12 fee breakdown (BR-9/BR-10, honouring current terms per OQ-1). The
 // restocking fee defaults to $50; return shipping is operator-entered actual
 // cost (OQ-2 resolved as actual, not fixed). Both are waived for genuine-defect
@@ -1289,6 +1297,37 @@ export async function confirmPurchaserLinkage(returnId: string): Promise<void> {
   await logAction('return_purchaser_linkage_confirmed', returnId, 'manager confirmed purchaser linkage');
 }
 
+/** FR-9d: knock on the Finance Officer's door the moment a card enters her
+ *  column. Before this, manager_review → finance_review was the only stage move
+ *  in the refund flow that notified nobody — the neighbouring hops already send
+ *  refund_queued_executor (FR-9a) and refund_executed_am (FR-9b) — so the first
+ *  thing she heard was send-refund-reminders, the 3-day *overdue* digest, up to
+ *  four days later. Best-effort by design: the stage move has already committed
+ *  when this runs, so a mail failure must never surface as a failed approval. */
+async function notifyFinanceReviewEntry(
+  id: string,
+  card: { customer_name?: string | null; customer_email?: string | null; refund_amount_usd?: number | null } | null,
+): Promise<void> {
+  try {
+    await sendTemplate({
+      template_key: 'refund_finance_review',
+      to: REFUND_FINANCE_REVIEWER,
+      to_name: REFUND_FINANCE_REVIEWER_NAME,
+      variables: {
+        finance_first_name: REFUND_FINANCE_REVIEWER_NAME,
+        customer_name: card?.customer_name ?? card?.customer_email ?? 'Unknown customer',
+        amount: card?.refund_amount_usd != null
+          ? `$${Number(card.refund_amount_usd).toFixed(2)}`
+          : '$—',
+        refund_url: REFUND_URL,
+      },
+      related_refund_id: id,
+    });
+  } catch (e) {
+    console.warn('Finance Review entry email failed (non-fatal):', (e as Error).message);
+  }
+}
+
 export async function managerApprove(id: string, note?: string): Promise<void> {
   const userId = await currentUserId();
 
@@ -1336,6 +1375,8 @@ export async function managerApprove(id: string, note?: string): Promise<void> {
   await logAction('refund_manager_approved', id, note ?? 'approved');
   // FR-15 (revised 2026-08-04): no customer email on manager approval — an
   // internal stage move. The customer is told once, at Refunded.
+  // FR-9d: but Finance *is* told, now that the card is sitting in her column.
+  await notifyFinanceReviewEntry(id, approval);
 }
 
 export type FinanceApproveOpts = {
@@ -1541,9 +1582,26 @@ export function refundBackPatch(toStatus: RefundBackTarget): Record<string, unkn
 }
 
 export async function sendRefundBack(id: string, toStatus: RefundBackTarget): Promise<void> {
+  // FR-9d: the second door into Finance Review — the executor bouncing a card
+  // back from the Refund Queue. Read the card first (it's about to be patched)
+  // so the notice can name the customer + amount; a read failure only costs us
+  // those details, never the send-back itself.
+  let card: { customer_name?: string | null; customer_email?: string | null; refund_amount_usd?: number | null } | null = null;
+  if (toStatus === 'finance_review') {
+    try {
+      const { data } = await supabase
+        .from('refund_approvals')
+        .select('customer_name, customer_email, refund_amount_usd')
+        .eq('id', id)
+        .single();
+      card = data as typeof card;
+    } catch { /* fall through with null — the email still goes, just generic */ }
+  }
+
   const { error } = await supabase.from('refund_approvals').update(refundBackPatch(toStatus)).eq('id', id);
   if (error) throw error;
   await logAction('refund_sent_back', id, `→ ${toStatus}`);
+  if (toStatus === 'finance_review') await notifyFinanceReviewEntry(id, card);
 }
 
 // "Uncompile" — remove the refund request so the case returns to Return &

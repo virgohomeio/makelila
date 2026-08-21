@@ -14,7 +14,9 @@
 // stage" keys off a per-stage entry timestamp, so the timer resets when a card
 // advances. Included cards get last_reminded_at stamped after a successful send.
 //
-// Body (all optional): { dry_run?: boolean }
+// Body (all optional): { dry_run?: boolean, min_days?: number }
+//   min_days overrides the 3-day threshold for a single run, so an operator can
+//   nudge the queue immediately instead of waiting for a card to go overdue.
 // Cron- or operator-callable (authenticate accepts X-Cron-Secret or a user JWT).
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
@@ -23,7 +25,6 @@ import { authenticate } from '../_shared/auth.ts';
 
 const APP_REFUNDS_URL = 'https://lila.vip/post-shipment?tab=refunds';
 const REMINDER_DAYS = 3;
-const REMINDER_MS = REMINDER_DAYS * 86_400_000;
 
 // Column owner → holder addresses (env-overridable). Mirrors
 // REFUND_COLUMN_OWNERS in app/src/modules/PostShipment/RefundsTab.tsx.
@@ -72,9 +73,12 @@ async function handle(req: Request): Promise<Response> {
   try { await authenticate(req, admin); }
   catch (e) { if (e instanceof Response) return e; throw e; }
 
-  let body: { dry_run?: boolean } = {};
-  try { body = (await req.json()) as { dry_run?: boolean }; } catch { /* empty body = defaults */ }
+  let body: { dry_run?: boolean; min_days?: number } = {};
+  try { body = (await req.json()) as { dry_run?: boolean; min_days?: number }; } catch { /* empty body = defaults */ }
   const dryRun = body.dry_run === true;
+  // Per-run threshold override (clamped to >= 0). Defaults to the standard 3 days.
+  const minDays = Number.isFinite(body.min_days) ? Math.max(0, Number(body.min_days)) : REMINDER_DAYS;
+  const thresholdMs = minDays * 86_400_000;
 
   const { data: rows, error: qErr } = await admin
     .from('refund_approvals')
@@ -90,8 +94,8 @@ async function handle(req: Request): Promise<Response> {
     const entry = stageEntry(r);
     if (!entry) continue;
     const inStageMs = now - Date.parse(entry);
-    if (isNaN(inStageMs) || inStageMs < REMINDER_MS) continue;               // < 3 days in stage
-    if (r.last_reminded_at && (now - Date.parse(r.last_reminded_at)) < REMINDER_MS) continue; // reminded recently
+    if (isNaN(inStageMs) || inStageMs < thresholdMs) continue;               // not yet at the threshold
+    if (r.last_reminded_at && (now - Date.parse(r.last_reminded_at)) < thresholdMs) continue; // reminded recently
     const to = recipientFor(r);
     (byRecipient.get(to) ?? byRecipient.set(to, []).get(to)!).push(r);
   }
@@ -178,7 +182,7 @@ async function handle(req: Request): Promise<Response> {
     });
   }
 
-  return j({ ok: true, dry_run: dryRun, recipients: byRecipient.size, results }, 200);
+  return j({ ok: true, dry_run: dryRun, min_days: minDays, recipients: byRecipient.size, results }, 200);
 }
 
 /** The timestamp a card entered its current action stage (proxy from the
