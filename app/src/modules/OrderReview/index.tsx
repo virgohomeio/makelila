@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { useOrders } from '../../lib/orders';
+import { useOrders, syncShopifyOrders } from '../../lib/orders';
 import { useIsMobile } from '../../lib/useMediaQuery';
 import { MobileBackHeader } from '../../components/MobileBackHeader';
 import { Sidebar } from './Sidebar';
@@ -8,6 +8,12 @@ import { Detail } from './Detail';
 import Templates from '../Templates';
 import Upload from '../Upload';
 import styles from './OrderReview.module.css';
+
+type SyncState =
+  | { kind: 'idle' }
+  | { kind: 'syncing' }
+  | { kind: 'done'; imported: number; skipped: number }
+  | { kind: 'error'; message: string };
 
 export default function OrderReview() {
   const { orderId } = useParams<{ orderId: string }>();
@@ -20,6 +26,9 @@ export default function OrderReview() {
     ? all.find(o => o.id === orderId) ?? cancelled.find(o => o.id === orderId) ?? null
     : null;
   const [view, setView] = useState<'orders' | 'templates' | 'upload'>('orders');
+  // Syncing is a module-level action, not a list filter, so it lives in the
+  // page header rather than inside the order rail's header.
+  const [sync, setSync] = useState<SyncState>({ kind: 'idle' });
 
   // Desktop auto-loads the first pending order so the right pane isn't empty
   // on first paint. On mobile we keep the sidebar visible (no order selected)
@@ -40,39 +49,80 @@ export default function OrderReview() {
     }
   };
 
-  const viewChips = (
-    <div className={styles.viewChips}>
-      <button
-        className={`${styles.viewChip} ${view === 'orders' ? styles.viewChipActive : ''}`}
-        onClick={() => setView('orders')}
-      >Orders</button>
-      <button
-        className={`${styles.viewChip} ${view === 'templates' ? styles.viewChipActive : ''}`}
-        onClick={() => setView('templates')}
-      >Templates</button>
-      <button
-        className={`${styles.viewChip} ${view === 'upload' ? styles.viewChipActive : ''}`}
-        onClick={() => setView('upload')}
-      >Upload</button>
+  const runSync = async () => {
+    setSync({ kind: 'syncing' });
+    try {
+      const r = await syncShopifyOrders();
+      setSync({ kind: 'done', imported: r.imported, skipped: r.skipped });
+    } catch (e) {
+      setSync({ kind: 'error', message: (e as Error).message });
+    }
+  };
+
+  const liveCount = all.length;
+
+  // Views (Orders / Templates / Upload) are a different navigational level
+  // from the status tabs in the rail, so they no longer wear the same crimson
+  // pill treatment those tabs use.
+  const header = (
+    <div className={styles.pageHead}>
+      <div>
+        <div className={styles.pageTitle}>Sales</div>
+        <div className={styles.pageSub}>
+          {loading
+            ? 'Loading orders…'
+            : `${liveCount} live order${liveCount === 1 ? '' : 's'} · ${pending.length} awaiting confirmation`}
+        </div>
+      </div>
+      <div className={styles.pageHeadRight}>
+        {view === 'orders' && (
+          <span className={styles.syncRow}>
+            <span className={styles.syncStatus}>
+              {sync.kind === 'done' && `${sync.imported} new · ${sync.skipped} skipped`}
+              {sync.kind === 'error' && (
+                <span className={styles.syncError}>Sync failed: {sync.message}</span>
+              )}
+            </span>
+            <button
+              type="button"
+              className={styles.syncBtn}
+              onClick={() => void runSync()}
+              disabled={sync.kind === 'syncing'}
+            >
+              {sync.kind === 'syncing' ? 'Syncing…' : '⟲ Sync from Shopify'}
+            </button>
+          </span>
+        )}
+        <div className={styles.viewChips}>
+          <button
+            type="button"
+            className={`${styles.viewChip} ${view === 'orders' ? styles.viewChipActive : ''}`}
+            onClick={() => setView('orders')}
+            aria-pressed={view === 'orders'}
+          >Orders</button>
+          <button
+            type="button"
+            className={`${styles.viewChip} ${view === 'templates' ? styles.viewChipActive : ''}`}
+            onClick={() => setView('templates')}
+            aria-pressed={view === 'templates'}
+          >Templates</button>
+          <button
+            type="button"
+            className={`${styles.viewChip} ${view === 'upload' ? styles.viewChipActive : ''}`}
+            onClick={() => setView('upload')}
+            aria-pressed={view === 'upload'}
+          >Upload</button>
+        </div>
+      </div>
     </div>
   );
 
   if (view === 'templates') {
-    return (
-      <div>
-        {viewChips}
-        <Templates />
-      </div>
-    );
+    return <div>{header}<Templates /></div>;
   }
 
   if (view === 'upload') {
-    return (
-      <div>
-        {viewChips}
-        <Upload />
-      </div>
-    );
+    return <div>{header}<Upload /></div>;
   }
 
   // Mobile: single column. Sidebar (filter strip + order list) when no
@@ -82,7 +132,7 @@ export default function OrderReview() {
       return (
         <div className={styles.layout}>
           <MobileBackHeader
-            label={`#${selected.order_ref} · ${selected.customer_name}`}
+            label={`${selected.order_ref} · ${selected.customer_name}`}
             onBack={() => navigate('/order-review')}
           />
           <Detail order={selected} onAfterDisposition={afterDisposition} />
@@ -90,26 +140,28 @@ export default function OrderReview() {
       );
     }
     return (
-      <div className={styles.layout}>
-        {viewChips}
-        <Sidebar
-          all={all}
-          pending={pending}
-          held={held}
-          flagged={flagged}
-          approved={approved}
-          replacement={replacement}
-          cancelled={cancelled}
-          selectedId={null}
-          onSelect={(id) => navigate(`/order-review/${id}`)}
-        />
+      <div>
+        {header}
+        <div className={styles.layout}>
+          <Sidebar
+            all={all}
+            pending={pending}
+            held={held}
+            flagged={flagged}
+            approved={approved}
+            replacement={replacement}
+            cancelled={cancelled}
+            selectedId={null}
+            onSelect={(id) => navigate(`/order-review/${id}`)}
+          />
+        </div>
       </div>
     );
   }
 
   return (
     <div>
-      {viewChips}
+      {header}
       <div className={styles.layout}>
         <Sidebar
           all={all}
@@ -126,7 +178,7 @@ export default function OrderReview() {
           <Detail order={selected} onAfterDisposition={afterDisposition} />
         ) : (
           <section className={styles.empty}>
-            {loading ? 'Loading…' : 'Select an order from the left to review.'}
+            {loading ? 'Loading…' : 'Pick an order from the list to review it.'}
           </section>
         )}
       </div>

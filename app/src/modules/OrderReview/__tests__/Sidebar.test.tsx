@@ -99,7 +99,7 @@ describe('Sidebar', () => {
 
   it('switches tab content when a tab is clicked', () => {
     render_();
-    fireEvent.click(screen.getByText(/Flagged \(1\)/));
+    fireEvent.click(screen.getByRole('button', { name: /^Flagged: 1 order$/ }));
     expect(screen.getByText('Flagged Customer')).toBeInTheDocument();
     expect(screen.queryByText('Alice Ames')).not.toBeInTheDocument();
   });
@@ -134,7 +134,7 @@ describe('Sidebar', () => {
   it('keeps cancelled orders out of every live tab but lists them under Cancelled', () => {
     render_();
     expect(screen.queryByText('Gabriella Hottya')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByText(/Cancelled \(1\)/));
+    fireEvent.click(screen.getByRole('button', { name: /^Cancelled: 1 order$/ }));
     expect(screen.getByText('Gabriella Hottya')).toBeInTheDocument();
     expect(screen.queryByText('Alice Ames')).not.toBeInTheDocument();
   });
@@ -158,15 +158,48 @@ describe('Sidebar', () => {
         selectedId={null} onSelect={vi.fn()}
       />,
     );
-    fireEvent.click(screen.getByText(/Cancelled \(2\)/));
+    fireEvent.click(screen.getByRole('button', { name: /^Cancelled: 2 orders$/ }));
     const names = screen.getAllByText(/Cancel$/).map(n => n.textContent);
     expect(names).toEqual(['Newer Cancel', 'Older Cancel']);
   });
 
   it('marks a cancelled row as cancelled instead of showing an SLA countdown', () => {
     render_();
-    fireEvent.click(screen.getByText(/Cancelled \(1\)/));
-    expect(screen.getByText('CANCELLED')).toBeInTheDocument();
-    expect(screen.queryByText(/OVERDUE/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /^Cancelled: 1 order$/ }));
+    const row = screen.getByRole('button', { name: /Gabriella Hottya/ });
+    expect(row).toHaveTextContent(/cancelled/i);
+    expect(row).not.toHaveTextContent(/OVERDUE/);
+  });
+
+  // The rail is a scanning surface: identity on the left, state right-aligned
+  // so tags and SLA chips form columns down the list. Rows are real buttons,
+  // so the whole row is keyboard-reachable rather than a div with role.
+  it('renders each order as a button carrying its ref, city and country', () => {
+    render_();
+    const row = screen.getByRole('button', { name: /Alice Ames/ });
+    expect(row).toHaveTextContent('#p1');
+    expect(row).toHaveTextContent('Portland');
+    expect(row).toHaveTextContent('US');
+  });
+
+  it('reports how many orders the active tab is showing', () => {
+    render_();
+    expect(screen.getByText('2 orders')).toBeInTheDocument();
+  });
+
+  it('names the tab and the query when a search returns nothing', () => {
+    render_();
+    fireEvent.change(screen.getByPlaceholderText(/search name/i), { target: { value: 'zzz' } });
+    expect(screen.getByText(/No order in Pending matches/i)).toBeInTheDocument();
+    expect(screen.getByText('0 orders matching')).toBeInTheDocument();
+  });
+
+  it('clears the query from the search box', () => {
+    render_();
+    const box = screen.getByPlaceholderText(/search name/i);
+    fireEvent.change(box, { target: { value: 'bob' } });
+    expect(screen.queryByText('Alice Ames')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /clear search/i }));
+    expect(screen.getByText('Alice Ames')).toBeInTheDocument();
   });
 });

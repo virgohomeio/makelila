@@ -1621,3 +1621,21 @@ export async function markOrderDelivered(orderId: string): Promise<void> {
     await logAction('ticket_auto_closed', row.linked_ticket_id, `via replacement ${row.order_ref}`);
   }
 }
+
+/** Pull new orders from Shopify. Wraps the `sync-shopify-orders` edge
+ *  function so the Sales module doesn't import `supabase` directly — see
+ *  AGENTS.md, "All Supabase queries go through lib/". */
+export async function syncShopifyOrders(): Promise<{
+  fetched: number;
+  imported: number;
+  skipped: number;
+}> {
+  const { data, error } = await supabase.functions.invoke<{
+    fetched: number;
+    imported: number;
+    skipped: number;
+  }>('sync-shopify-orders', { body: {} });
+  if (error) throw new Error(error.message);
+  if (!data) throw new Error('empty response from sync-shopify-orders');
+  return data;
+}

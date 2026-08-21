@@ -102,10 +102,10 @@ describe('Detail', () => {
 
   it('Flag requires a reason before Submit is enabled', async () => {
     render(<Detail order={order} onAfterDisposition={vi.fn()} />);
-    fireEvent.click(screen.getByRole('button', { name: /flag/i }));
-    const submit = screen.getByRole('button', { name: /submit/i });
+    fireEvent.click(screen.getByRole('button', { name: /^⚑ flag$/i }));
+    const submit = screen.getByRole('button', { name: /^flag order$/i });
     expect(submit).toBeDisabled();
-    fireEvent.change(screen.getByPlaceholderText(/flagged/i), { target: { value: 'bad zip' } });
+    fireEvent.change(screen.getByPlaceholderText(/being flagged/i), { target: { value: 'bad zip' } });
     expect(submit).toBeEnabled();
     fireEvent.click(submit);
     await waitFor(() => {
@@ -116,8 +116,8 @@ describe('Detail', () => {
 
   it('Hold allows empty reason', async () => {
     render(<Detail order={order} onAfterDisposition={vi.fn()} />);
-    fireEvent.click(screen.getByRole('button', { name: /hold/i }));
-    fireEvent.click(screen.getByRole('button', { name: /submit/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^⏸ hold$/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^hold order$/i }));
     await waitFor(() => {
       expect(dispositionMock).toHaveBeenCalledWith(order, 'held', '');
     });
@@ -127,8 +127,8 @@ describe('Detail', () => {
   it('Need Info calls needInfo (not disposition)', async () => {
     render(<Detail order={order} onAfterDisposition={vi.fn()} />);
     fireEvent.click(screen.getByRole('button', { name: /need info/i }));
-    fireEvent.change(screen.getByPlaceholderText(/info is needed/i), { target: { value: 'driveway photo' } });
-    fireEvent.click(screen.getByRole('button', { name: /submit/i }));
+    fireEvent.change(screen.getByPlaceholderText(/what you need from the customer/i), { target: { value: 'driveway photo' } });
+    fireEvent.click(screen.getByRole('button', { name: /^log request$/i }));
     await waitFor(() => {
       expect(needInfoMock).toHaveBeenCalledWith(order, 'driveway photo');
       expect(dispositionMock).not.toHaveBeenCalled();
@@ -140,10 +140,10 @@ describe('Detail', () => {
   // never without a reason on the record, and never twice.
   it('Cancel requires a reason before Submit is enabled', async () => {
     render(<Detail order={order} onAfterDisposition={vi.fn()} />);
-    fireEvent.click(screen.getByRole('button', { name: /^✕ cancel$/i }));
-    const submit = screen.getByRole('button', { name: /submit/i });
+    fireEvent.click(screen.getByRole('button', { name: /^cancel order$/i }));
+    const submit = screen.getByRole('button', { name: /^cancel this order$/i });
     expect(submit).toBeDisabled();
-    fireEvent.change(screen.getByPlaceholderText(/cancelled/i), { target: { value: 'customer changed their mind' } });
+    fireEvent.change(screen.getByPlaceholderText(/being cancelled/i), { target: { value: 'customer changed their mind' } });
     expect(submit).toBeEnabled();
     fireEvent.click(submit);
     await waitFor(() => {
@@ -167,7 +167,7 @@ describe('Detail', () => {
     );
     expect(screen.getByText(/delays — customer wanted it asap/i)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /confirm/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /^✕ cancel$/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^cancel order$/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^⚑ flag$/i })).not.toBeInTheDocument();
   });
 
@@ -180,5 +180,38 @@ describe('Detail', () => {
     await waitFor(() => {
       expect(addOrderNoteMock).toHaveBeenCalledWith('order-1', 'Test User', 'first note');
     });
+  });
+
+  // The action bar used to be REPLACED by the reason input, so opening a
+  // drawer took the order's identity and the primary action off screen.
+  it('keeps the action bar visible while a reason drawer is open', () => {
+    render(<Detail order={order} onAfterDisposition={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: /^⚑ flag$/i }));
+    expect(screen.getByRole('button', { name: /confirm order/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^cancel order$/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^flag order$/i })).toBeInTheDocument();
+  });
+
+  // There are two confirm criteria. The action bar claimed three for months
+  // after the freight check was dropped; CRITERIA_COUNT now feeds both.
+  it('names the real blockers and offers a jump to where each is fixed', () => {
+    render(
+      <Detail
+        order={{ ...order, customer_phone: null, address_verdict: 'condo' }}
+        onAfterDisposition={vi.fn()}
+      />,
+    );
+    expect(screen.getByText(/2 blockers before you can confirm/i)).toBeInTheDocument();
+    expect(screen.getByText(/0 of 2 met/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /fix in customer/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /fix in address/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /confirm order/i })).toBeDisabled();
+  });
+
+  it('reports readiness instead of blockers once both criteria are met', () => {
+    render(<Detail order={order} onAfterDisposition={vi.fn()} />);
+    expect(screen.getByText(/ready to confirm/i)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /fix in/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /confirm order/i })).toBeEnabled();
   });
 });

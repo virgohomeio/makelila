@@ -81,6 +81,12 @@
   --color-surface:     #F5F1EB;  /* Cream — section BG */
   --color-page:        #FAF8F5;  /* Warm White — page BG */
 
+  /* Completes the ground ramp: surface (recessed) → page (default) →
+     raised (elevated). Cards, inputs and buttons sit on --color-raised so
+     they lift off whichever ground they're placed on. Modules migrating off
+     raw `#fff` under the check:css-tokens ratchet should reach for this. */
+  --color-raised:      #FFFFFF;  /* Card / control ground */
+
   /* Dark UI (app nav, sidebar) — kept dark so the nav keeps its contrast
      against the warm-white page background. */
   --color-dark-0: #111;

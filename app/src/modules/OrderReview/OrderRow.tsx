@@ -1,6 +1,7 @@
 import type { Order } from '../../lib/orders';
 import { orderUrgency, AREA_TYPE_TAG } from '../../lib/orders';
 import { useQuotes } from '../../lib/freight';
+import { canConfirm } from './detail/ReadinessChecklist';
 import styles from './OrderReview.module.css';
 
 const AREA_TAG_CLASS: Record<NonNullable<Order['area_type']>, string> = {
@@ -9,6 +10,12 @@ const AREA_TAG_CLASS: Record<NonNullable<Order['area_type']>, string> = {
   rural:    styles.tagRural,
 };
 
+/** One row in the order rail.
+ *
+ *  A 2×2 grid, not a flowing meta line. Identity (name, ref, city) sits left;
+ *  state (blocker dot, SLA, country/area/risk tags) sits in a right-aligned
+ *  column so it forms real columns down the list. Comparing two orders used to
+ *  mean reading two wrapped sentences. */
 export function OrderRow({
   order,
   isSelected,
@@ -29,48 +36,73 @@ export function OrderRow({
 
   const countryTag = order.country === 'CA' ? styles.tagCa : styles.tagUs;
   const isRiskAddress = order.address_verdict === 'apt' || order.address_verdict === 'condo' || order.address_verdict === 'remote';
+  const isCancelled = order.status === 'cancelled';
+  // A dot rather than a chip: it says "this one isn't confirmable yet" without
+  // spending the width the SLA needs. Meaningless on terminal/decided rows.
+  const showBlockDot = !isCancelled && order.status !== 'approved' && !canConfirm(order);
+  const urgency = orderUrgency(order.placed_at);
+
+  const quoteLabel = selectedQuote
+    ? [
+        selectedQuote.provider,
+        selectedQuote.rate_cad != null
+          ? `$${selectedQuote.rate_cad.toFixed(0)} CAD`
+          : selectedQuote.rate_usd != null
+            ? `$${selectedQuote.rate_usd.toFixed(0)} USD`
+            : null,
+        selectedQuote.transit_days != null ? `${selectedQuote.transit_days}d` : null,
+      ].filter(Boolean).join(' ')
+    : null;
+
+  // Read in order, the row's own text announces as one run-on string
+  // ("Alice Ames125d OVERDUE#p1· PortlandUS"). Spell it out instead.
+  const label = [
+    order.customer_name,
+    `order ${order.order_ref}`,
+    order.city,
+    isCancelled ? 'cancelled' : urgency.label || null,
+    showBlockDot ? 'not yet confirmable' : null,
+  ].filter(Boolean).join(', ');
 
   return (
-    <div className={cls} onClick={onClick} role="button" tabIndex={0}>
-      <div className={styles.rowName}>{order.customer_name}</div>
-      <div className={styles.rowMeta}>
-        <span className={`${styles.tag} ${countryTag}`}>{order.country}</span>
+    <button type="button" className={cls} onClick={onClick} aria-label={label}>
+      <span className={styles.rowName}>{order.customer_name}</span>
+
+      <span className={styles.rowState}>
+        {showBlockDot && (
+          <span
+            className={styles.blockDot}
+            title="Not yet confirmable — open it to see what's missing"
+          />
+        )}
+        {isCancelled ? (
+          // An SLA countdown on a dead order is noise — say what happened.
+          <span className={styles.cancelledChip} title={order.cancelled_reason ?? undefined}>
+            Cancelled
+          </span>
+        ) : urgency.label ? (
+          <span className={`${styles.urgencyChip} ${styles[urgency.severity]}`}>{urgency.label}</span>
+        ) : null}
+      </span>
+
+      <span className={styles.rowMeta}>
+        <span className={styles.rowRef}>{order.order_ref}</span>
+        <span>· {order.city}</span>
+        {quoteLabel && <span className={styles.rowFreight}>· {quoteLabel}</span>}
+      </span>
+
+      <span className={styles.rowTags}>
+        {order.kind === 'replacement' && (
+          <span className={`${styles.tag} ${styles.tagCa}`}>Repl</span>
+        )}
         {isRiskAddress && (
           <span className={`${styles.tag} ${styles.tagWarn}`}>{order.address_verdict}</span>
         )}
         {order.area_type && (
           <span className={`${styles.tag} ${AREA_TAG_CLASS[order.area_type]}`}>{AREA_TYPE_TAG[order.area_type]}</span>
         )}
-        {order.order_ref}
-        {order.kind === 'replacement' && (
-          <span className="replBadge">Replacement</span>
-        )}
-        {' '}· {order.city}
-        {order.status === 'cancelled' ? (
-          // An SLA countdown on a dead order is noise — say what happened instead.
-          <span className={styles.cancelledChip} title={order.cancelled_reason ?? undefined}>
-            CANCELLED
-          </span>
-        ) : (() => {
-          const u = orderUrgency(order.placed_at);
-          if (!u.label) return null;
-          return <span className={`${styles.urgencyChip} ${styles[u.severity]}`}>{u.label}</span>;
-        })()}
-        {selectedQuote && (
-          <span style={{
-            fontSize: 10, padding: '2px 8px', borderRadius: 4,
-            background: 'var(--color-surface)', border: '1px solid var(--color-border)',
-            color: 'var(--color-ink-muted)',
-          }}>
-            {selectedQuote.provider} {selectedQuote.rate_cad != null
-              ? `$${selectedQuote.rate_cad.toFixed(0)} CAD`
-              : selectedQuote.rate_usd != null
-                ? `$${selectedQuote.rate_usd.toFixed(0)} USD`
-                : ''}
-            {selectedQuote.transit_days != null && ` · ${selectedQuote.transit_days}d`}
-          </span>
-        )}
-      </div>
-    </div>
+        <span className={`${styles.tag} ${countryTag}`}>{order.country}</span>
+      </span>
+    </button>
   );
 }

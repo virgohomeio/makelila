@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { Order, AreaType } from '../../../lib/orders';
 import { setSalesConfirmedFit, verifyAddress, setAreaType, AREA_TYPE_LABEL } from '../../../lib/orders';
 import { sendTemplate } from '../../../lib/templates';
+import { ADDRESS_CARD_ID } from './anchors';
 import styles from '../OrderReview.module.css';
 
 const VERDICT_CLASS: Record<Order['address_verdict'], string> = {
@@ -18,8 +19,20 @@ const VERDICT_LABEL: Record<Order['address_verdict'], string> = {
   remote: 'Remote area · freight surcharge likely',
 };
 
-function MissingField() {
-  return <span className={styles.missing}>Missing — complete via QUO</span>;
+function MissingField({ quoUrl }: { quoUrl: string | null }) {
+  return (
+    <span className={styles.missing}>
+      Not on file
+      {quoUrl && (
+        <a
+          className={styles.missingFix}
+          href={quoUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+        >Get via QUO ↗</a>
+      )}
+    </span>
+  );
 }
 
 export function AddressCard({ order }: { order: Order }) {
@@ -67,14 +80,14 @@ export function AddressCard({ order }: { order: Order }) {
   };
 
   return (
-    <div className={styles.card}>
+    <div className={styles.card} id={ADDRESS_CARD_ID}>
       <div className={styles.cardHead}>Shipping Address</div>
       <div className={styles.cardBody}>
         <div className={styles.contactLine}>
           <span className={styles.contactLabel}>Street</span>
           {order.address_line
             ? <span>{order.address_line}</span>
-            : <MissingField />}
+            : <MissingField quoUrl={order.quo_thread_url} />}
         </div>
         <div className={styles.contactLine}>
           <span className={styles.contactLabel}>Apartment/Unit #</span>
@@ -90,13 +103,13 @@ export function AddressCard({ order }: { order: Order }) {
           <span className={styles.contactLabel}>Region</span>
           {order.region_state
             ? <span>{order.region_state}</span>
-            : <MissingField />}
+            : <MissingField quoUrl={order.quo_thread_url} />}
         </div>
         <div className={styles.contactLine}>
           <span className={styles.contactLabel}>{order.country === 'US' ? 'ZIP Code' : 'Postal Code'}</span>
           {order.address_customer_postal
             ? <span>{order.address_customer_postal}</span>
-            : <MissingField />}
+            : <MissingField quoUrl={order.quo_thread_url} />}
         </div>
         <div className={styles.contactLine}>
           <span className={styles.contactLabel}>Country</span>

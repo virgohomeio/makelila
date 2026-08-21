@@ -1,16 +1,9 @@
 import { useMemo, useState } from 'react';
 import type { Order } from '../../lib/orders';
-import { supabase } from '../../lib/supabase';
 import { OrderRow } from './OrderRow';
 import styles from './OrderReview.module.css';
 
 type Tab = 'pending' | 'held' | 'flagged' | 'approved' | 'replacement' | 'all' | 'cancelled';
-
-type SyncState =
-  | { kind: 'idle' }
-  | { kind: 'syncing' }
-  | { kind: 'done'; imported: number; skipped: number }
-  | { kind: 'error'; message: string };
 
 export function Sidebar({
   pending, held, flagged, approved, replacement, all, cancelled,
@@ -43,7 +36,6 @@ export function Sidebar({
     () => replacement.filter(o => o.replacement_state === 'awaiting'),
     [replacement],
   );
-  const [sync, setSync] = useState<SyncState>({ kind: 'idle' });
 
   const source = tab === 'pending'     ? pending
                : tab === 'held'        ? held
@@ -78,81 +70,87 @@ export function Sidebar({
     { key: 'cancelled',   label: 'Cancelled',   count: cancelled.length },
   ];
 
-  const runSync = async () => {
-    setSync({ kind: 'syncing' });
-    const { data, error } = await supabase.functions.invoke<{
-      fetched: number;
-      imported: number;
-      skipped: number;
-    }>('sync-shopify-orders', { body: {} });
-    if (error) {
-      setSync({ kind: 'error', message: error.message });
-      return;
-    }
-    if (!data) {
-      setSync({ kind: 'error', message: 'empty response' });
-      return;
-    }
-    setSync({ kind: 'done', imported: data.imported, skipped: data.skipped });
-  };
+  const activeTabLabel = tabs.find(t => t.key === tab)?.label ?? '';
 
   return (
     <aside className={styles.sidebar}>
       <div className={styles.sidebarHeader}>
-        <div className={styles.syncRow}>
-          <button
-            className={styles.syncBtn}
-            onClick={runSync}
-            disabled={sync.kind === 'syncing'}
-          >
-            {sync.kind === 'syncing' ? 'Syncing…' : '⟲ Sync from Shopify'}
-          </button>
-          <div className={styles.syncStatus}>
-            {sync.kind === 'done' &&
-              `${sync.imported} new · ${sync.skipped} skipped`}
-            {sync.kind === 'error' && (
-              <span className={styles.syncError}>Failed: {sync.message}</span>
-            )}
-          </div>
+        <div className={styles.searchWrap}>
+          <span className={styles.searchIcon} aria-hidden="true">⌕</span>
+          <input
+            className={styles.search}
+            placeholder="Search name, email, order #"
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+          />
+          {query && (
+            <button
+              type="button"
+              className={styles.searchClear}
+              onClick={() => setQuery('')}
+              aria-label="Clear search"
+            >×</button>
+          )}
         </div>
 
-        <div className={`${styles.tabBar} ${styles.tabBarScroll}`}>
+        {/* Seven statuses wrap onto two rows. They used to scroll sideways,
+            which put Cancelled off the edge of the rail. */}
+        <div className={styles.tabBar}>
           {tabs.map(t => (
             <button
               key={t.key}
-              className={`${styles.tab} ${tab === t.key ? styles.activeTab : ''}`}
+              type="button"
+              className={[
+                styles.tab,
+                tab === t.key ? styles.activeTab : '',
+                t.count === 0 ? styles.tabZero : '',
+              ].filter(Boolean).join(' ')}
               onClick={() => setTab(t.key)}
+              aria-pressed={tab === t.key}
+              // Without this the badge runs into the label and the tab
+              // announces as "Flagged1".
+              aria-label={`${t.label}: ${t.count} order${t.count === 1 ? '' : 's'}`}
             >
-              {t.label} ({t.count})
+              {t.label}<span className={styles.tabCount}>{t.count}</span>
             </button>
           ))}
         </div>
+
         {tab === 'replacement' && (
-          <div className={styles.tabBar}>
+          <div className={styles.tabBar} style={{ marginTop: 6 }}>
             <button
+              type="button"
               className={`${styles.tab} ${replSub === 'ready' ? styles.activeTab : ''}`}
               onClick={() => setReplSub('ready')}
+              aria-pressed={replSub === 'ready'}
+              aria-label={`Ready to ship: ${replReady.length} order${replReady.length === 1 ? '' : 's'}`}
             >
-              Replacement Orders (Ready) ({replReady.length})
+              Ready to ship<span className={styles.tabCount}>{replReady.length}</span>
             </button>
             <button
+              type="button"
               className={`${styles.tab} ${replSub === 'awaiting' ? styles.activeTab : ''}`}
               onClick={() => setReplSub('awaiting')}
+              aria-pressed={replSub === 'awaiting'}
+              aria-label={`Awaiting stock: ${replAwaiting.length} order${replAwaiting.length === 1 ? '' : 's'}`}
             >
-              Awaiting Stock / Batch ({replAwaiting.length})
+              Awaiting stock<span className={styles.tabCount}>{replAwaiting.length}</span>
             </button>
           </div>
         )}
-        <input
-          className={styles.search}
-          placeholder="Search name, email, order #"
-          value={query}
-          onChange={e => setQuery(e.target.value)}
-        />
       </div>
+
+      <div className={styles.railCount}>
+        {visible.length} order{visible.length === 1 ? '' : 's'}{query.trim() ? ' matching' : ''}
+      </div>
+
       <div className={styles.list}>
         {visible.length === 0 ? (
-          <div className={styles.emptyList}>No orders in this tab.</div>
+          <div className={styles.emptyList}>
+            {query.trim()
+              ? `No order in ${activeTabLabel} matches “${query.trim()}”.`
+              : 'No orders in this tab.'}
+          </div>
         ) : visible.map(o => (
           <OrderRow
             key={o.id}
