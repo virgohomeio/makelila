@@ -1286,11 +1286,12 @@ const PRESENCE_IN_CHUNK = 100;
 // Bounds the tier-2 fan-out below (one small query per table per quiet serial).
 const PRESENCE_CONCURRENCY = 8;
 
-// How far back tier 2 looks. Kept in step with MACHINE_INTERMITTENT_HOURS in
-// lovelyActivity.ts — not imported, because that module imports this one — so
-// that anything tier 2 fails to find is already past the "offline" cutoff and
-// the missing exact date cannot change a status.
-const PRESENCE_RECENT_WINDOW_HOURS = 24;
+// How far back tier 2 looks. MUST stay in step with MACHINE_INTERMITTENT_HOURS
+// in lovelyActivity.ts — not imported, because that module imports this one —
+// so that anything tier 2 fails to find is already past the "offline" cutoff
+// and the missing exact date cannot change a status. Shortening this below that
+// cutoff would silently start reporting live machines as offline.
+const PRESENCE_RECENT_WINDOW_HOURS = 72;
 
 function chunk<T>(items: T[], size: number): T[][] {
   const out: T[][] = [];

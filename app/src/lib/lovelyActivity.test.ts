@@ -204,15 +204,16 @@ describe('machineState', () => {
     expect(machineState('LL01-1', seen(ago(5 * MIN)), NOW)).toBe('online');
     expect(machineState('LL01-1', seen(ago(9 * MIN)), NOW)).toBe('online');
     expect(machineState('LL01-1', seen(ago(30 * MIN)), NOW)).toBe('intermittent');
-    expect(machineState('LL01-1', seen(ago(40 * HOUR)), NOW)).toBe('offline');
+    expect(machineState('LL01-1', seen(ago(5 * DAY)), NOW)).toBe('offline');
   });
 
   // A unit that reported this morning is not "down". The old 2h cutoff called
   // every machine offline overnight, which is what buried the tab in alarms.
-  it('treats a machine that reported earlier today as intermittent, not offline', () => {
+  it('treats a machine that reported within the last 3 days as intermittent', () => {
     expect(machineState('LL01-1', seen(ago(4 * HOUR)), NOW)).toBe('intermittent');
     expect(machineState('LL01-1', seen(ago(23 * HOUR)), NOW)).toBe('intermittent');
-    expect(machineState('LL01-1', seen(ago(25 * HOUR)), NOW)).toBe('offline');
+    expect(machineState('LL01-1', seen(ago(3 * DAY - HOUR)), NOW)).toBe('intermittent');
+    expect(machineState('LL01-1', seen(ago(3 * DAY + HOUR)), NOW)).toBe('offline');
   });
 
   // Absence of evidence is not evidence of absence: when the telemetry read

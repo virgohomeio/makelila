@@ -112,9 +112,11 @@ describe('fetchTelemetryPresence', () => {
     expect(tier2.length).toBeGreaterThan(0);
     for (const q of tier2) {
       const windowMs = Date.now() - Date.parse(q.gteValue!);
-      // 24h window, allowing for the elapsed test runtime.
-      expect(windowMs).toBeGreaterThan(23 * HOUR);
-      expect(windowMs).toBeLessThan(25 * HOUR);
+      // 3-day window, allowing for the elapsed test runtime. Must stay in step
+      // with MACHINE_INTERMITTENT_HOURS so nothing tier 2 misses can still be
+      // fresh enough to change a status.
+      expect(windowMs).toBeGreaterThan(71 * HOUR);
+      expect(windowMs).toBeLessThan(73 * HOUR);
     }
   });
 

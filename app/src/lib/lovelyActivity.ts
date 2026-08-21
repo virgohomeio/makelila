@@ -35,10 +35,18 @@ export const APP_COOLING_DAYS = 45;
 // 2 h "disconnected" banner — that answers "can I trust this reading right
 // now", which is a different question from "should an operator call this
 // customer". At 2 h every machine read offline overnight and the tab filled
-// with false alarms, so a unit that reported at any point in the last day is
-// intermittent, and only a full day of silence is offline.
+// with false alarms.
+//
+// 3 days is an operator judgement, traded knowingly: a healthy unit writes
+// something every ~15 s, so any of these cutoffs is far past "borderline", and
+// the only thing a longer window costs is noticing a genuinely dead unit later.
+// Erring long keeps the queue trustworthy — an alarm here means call someone.
 export const MACHINE_ONLINE_MINUTES = 10;
-export const MACHINE_INTERMITTENT_HOURS = 24;
+export const MACHINE_INTERMITTENT_HOURS = 72;
+
+// Display form of the cutoff: "72h" reads worse than "3 days" in the UI, but
+// the arithmetic wants hours. Keep the two in step.
+export const MACHINE_OFFLINE_AFTER_LABEL = '3 days';
 
 // An approval writes users.is_verified, which bumps updated_at. Treating that
 // as customer activity would make every freshly-approved user look active on

@@ -10,7 +10,7 @@ import {
   APP_ACTIVE_DAYS,
   APP_COOLING_DAYS,
   MACHINE_ONLINE_MINUTES,
-  MACHINE_INTERMITTENT_HOURS,
+  MACHINE_OFFLINE_AFTER_LABEL,
   type ActivityEntry,
   type ActivityStatus,
 } from '../../lib/lovelyActivity';
@@ -205,9 +205,11 @@ export function ActivityTab() {
           </li>
           <li>
             <span className={styles.legendTerm}>Machine</span>
-            newest telemetry row the unit has sent. Online ≤{MACHINE_ONLINE_MINUTES}m ·
-            intermittent ≤{MACHINE_INTERMITTENT_HOURS}h · offline beyond ·
-            “no data” when the telemetry lookup itself failed.
+            newest row the unit itself has written to <code>events</code>,{' '}
+            <code>bme_sensors</code> or <code>temperature_sensors</code> — nothing the
+            customer does affects it. Online ≤{MACHINE_ONLINE_MINUTES}m · intermittent
+            ≤{MACHINE_OFFLINE_AFTER_LABEL} · offline beyond · “no data” when the
+            telemetry lookup itself failed.
           </li>
           <li>
             <span className={styles.legendTerm}>Healthy</span>
@@ -215,8 +217,9 @@ export function ActivityTab() {
           </li>
           <li>
             <span className={styles.legendTerm}>Unit down</span>
-            using the app, but the machine has gone quiet for over
-            {' '}{MACHINE_INTERMITTENT_HOURS}h — call today.
+            using the app, but the machine has sent nothing for over
+            {' '}{MACHINE_OFFLINE_AFTER_LABEL} — call today. A live unit writes every
+            ~15s, so this is never a borderline call.
           </li>
           <li>
             <span className={styles.legendTerm}>Silent user</span>
