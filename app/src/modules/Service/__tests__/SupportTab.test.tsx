@@ -7,6 +7,7 @@ import { SupportTab } from '../SupportTab';
 // SupportTab uses useNavigate (deep-link to replacement orders), so every
 // render needs a Router context.
 const render = (ui: ReactElement) => rtlRender(<MemoryRouter>{ui}</MemoryRouter>);
+import { STATUS_META, TICKET_STATUSES } from '../../../lib/service';
 import type { ServiceTicket } from '../../../lib/service';
 import type { Order } from '../../../lib/orders';
 
@@ -130,7 +131,7 @@ describe('SupportTab status resilience', () => {
     expect(screen.queryByText(/^Closed \d/)).not.toBeInTheDocument();
   });
 
-  it('Open KPI counts every ticket that is not closed', () => {
+  it('the header open count covers every ticket that is not closed', () => {
     ticketsToReturn = [
       mkTicket({ id: 'o1', status: 'in_progress' }),
       mkTicket({ id: 'o2', status: 'waiting_on_us' }),
@@ -138,10 +139,75 @@ describe('SupportTab status resilience', () => {
       mkTicket({ id: 'c1', status: 'closed', closed_at: '2026-06-03T00:00:00Z' }),
     ];
     render(<SupportTab />);
-    // Kpi renders <div.kpiCard><div>label</div><div>value</div></div>, so the
-    // label's parent is the card holding both label and value.
-    const openCard = screen.getByText('Open').parentElement;
-    expect(openCard).toHaveTextContent('3');
+    // The five KPI tiles collapsed into one sentence plus the queue bar; the
+    // open figure now lives in the sentence.
+    expect(screen.getByText(/open across/)).toHaveTextContent('3 open across');
+  });
+
+  // Every status stays filterable, including ones nothing currently holds — a
+  // status an operator can set has to be a status they can find.
+  it('offers all nine statuses as filters, even at zero', () => {
+    ticketsToReturn = [mkTicket({ id: 'o1', status: 'waiting_on_us' })];
+    render(<SupportTab />);
+    for (const s of TICKET_STATUSES) {
+      expect(
+        screen.getAllByRole('button', { name: new RegExp(STATUS_META[s].label) }).length,
+        `${STATUS_META[s].label} is not offered as a filter`,
+      ).toBeGreaterThan(0);
+    }
+  });
+
+  // The rail is the one piece of the row that encodes a number as position, so
+  // assert the label it derives rather than the geometry.
+  it('shows how long each customer has gone untouched', () => {
+    const now = Date.now();
+    const daysAgo = (n: number) => new Date(now - n * 86_400_000).toISOString();
+    ticketsToReturn = [
+      mkTicket({ id: 'fresh', customer_id: 'c1', customer_name: 'Fresh Co',
+                 status: 'waiting_on_us', last_message_at: daysAgo(2) }),
+      mkTicket({ id: 'stale', customer_id: 'c2', customer_name: 'Stale Co',
+                 status: 'waiting_on_us', last_message_at: daysAgo(68) }),
+    ];
+    render(<SupportTab />);
+    const rows = screen.queryAllByRole('table').map(t => t.textContent ?? '').join(' ');
+    expect(rows).toContain('2d');
+    expect(rows).toContain('2mo');
+  });
+
+  it('offers the three saved views with counts', () => {
+    const now = Date.now();
+    const recent = new Date(now - 86_400_000).toISOString();
+    // mkTicket's default created_at is months old, so anything meant to be
+    // NOT idle needs an explicit recent touch.
+    ticketsToReturn = [
+      mkTicket({ id: 'u1', status: 'waiting_on_us', owner_email: null,
+                 last_message_at: recent }),
+      mkTicket({ id: 'i1', status: 'waiting_on_us', owner_email: 'a@b.io',
+                 last_message_at: new Date(now - 90 * 86_400_000).toISOString() }),
+      mkTicket({ id: 'r1', status: 'queued_for_replacement', owner_email: 'a@b.io',
+                 last_message_at: recent }),
+    ];
+    render(<SupportTab />);
+    expect(screen.getByRole('button', { name: /Unowned/ })).toHaveTextContent('1');
+    expect(screen.getByRole('button', { name: /Idle 30 days\+/ })).toHaveTextContent('1');
+    expect(screen.getByRole('button', { name: /Replacement queue/ })).toHaveTextContent('1');
+  });
+
+  it('filters the table down to a chosen status', () => {
+    ticketsToReturn = [
+      mkTicket({ id: 'o1', status: 'in_progress', subject: 'Motor stalled' }),
+      mkTicket({ id: 'o2', status: 'on_hold', subject: 'Waiting on parts' }),
+    ];
+    render(<SupportTab />);
+    // The status labels also appear on the filter legend, so assert against
+    // the row tables only.
+    const rows = () => screen.queryAllByRole('table').map(t => t.textContent ?? '').join(' ');
+    expect(rows()).toContain('Waiting on parts');
+
+    fireEvent.click(screen.getAllByRole('button', { name: /In Progress/ })[0]);
+
+    expect(rows()).toContain('Motor stalled');
+    expect(rows()).not.toContain('Waiting on parts');
   });
 });
 

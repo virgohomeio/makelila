@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   useServiceTickets, useTicketsClosedSince, createTicket, syncGmailTickets,
   STATUS_META, TICKET_STATUSES, TOPIC_LABEL,
@@ -7,6 +7,9 @@ import {
   type TicketStatus, type TicketPriority, type TicketTopic, type ServiceTicket,
   type IssueArea,
 } from '../../lib/service';
+import {
+  daysIdle, dwellTier, dwellPercent, dwellLabel, DWELL_TICKS, STALE_DAYS,
+} from './dwell';
 import { useCustomers, syncCustomersFromHubspot, type Customer } from '../../lib/customers';
 import { useUnits } from '../../lib/stock';
 import { useReplacementOrders } from '../../lib/orders';
@@ -20,10 +23,22 @@ import { groupTicketsByCustomer, type CustomerGroup } from './ticketGrouping';
 import { useAuth } from '../../lib/auth';
 import styles from './Service.module.css';
 
-const STATUS_FILTERS: { key: TicketStatus | 'all'; label: string }[] = [
-  { key: 'all', label: 'All' },
-  ...TICKET_STATUSES.map(s => ({ key: s, label: STATUS_META[s].label })),
+const SOURCE_FILTERS: { key: SourceFilter; label: string }[] = [
+  { key: 'all',            label: 'Any source' },
+  { key: 'gmail',          label: 'Gmail' },
+  { key: 'customer_form',  label: 'Form' },
+  { key: 'hubspot',        label: 'HubSpot' },
+  { key: 'quo',            label: 'Quo' },
+  { key: 'telemetry_auto', label: 'Telemetry auto' },
 ];
+
+type SourceFilter = 'all' | 'customer_form' | 'hubspot' | 'gmail' | 'quo' | 'telemetry_auto';
+type OwnerFilter = 'all' | 'none' | string;
+/** Saved views answer the three questions the queue's shape says matter, none
+ *  of which was reachable before: who owns nothing, what has gone stale, and
+ *  who is waiting on a unit. */
+type SavedView = null | 'unowned' | 'idle' | 'replacement';
+type ViewMode = 'list' | 'owners' | 'actions';
 
 export function SupportTab() {
   const { tickets, loading } = useServiceTickets('support');
@@ -32,10 +47,16 @@ export function SupportTab() {
   const { orders: replacementOrders } = useReplacementOrders();
   const { user } = useAuth();
   const [statusFilter, setStatusFilter] = useState<TicketStatus | 'all'>('all');
-  const [sourceFilter, setSourceFilter] = useState<'all' | 'customer_form' | 'hubspot' | 'gmail' | 'quo' | 'telemetry_auto'>('all');
+  const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all');
   const [topicFilter, setTopicFilter] = useState<TicketTopic | 'all'>('all');
   const [areaFilter, setAreaFilter] = useState<IssueArea | 'all' | 'none'>('all');
+  const [ownerFilter, setOwnerFilter] = useState<OwnerFilter>('all');
+  const [savedView, setSavedView] = useState<SavedView>(null);
+  const [view, setView] = useState<ViewMode>('list');
   const [q, setQ] = useState('');
+  // Resolved once per render pass so every row on screen measures dwell
+  // against the same instant.
+  const now = Date.now();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
   const [showNew, setShowNew] = useState(false);
@@ -52,6 +73,13 @@ export function SupportTab() {
       if (topicFilter !== 'all' && t.topic !== topicFilter) return false;
       if (areaFilter === 'none' && t.issue_area !== null) return false;
       if (areaFilter !== 'all' && areaFilter !== 'none' && t.issue_area !== areaFilter) return false;
+      if (ownerFilter === 'none' && t.owner_email) return false;
+      if (ownerFilter !== 'all' && ownerFilter !== 'none' && t.owner_email !== ownerFilter) return false;
+      if (savedView === 'unowned' && (t.owner_email || t.status === 'closed')) return false;
+      if (savedView === 'idle'
+        && (t.status === 'closed'
+            || daysIdle(t.last_message_at ?? t.created_at, now) <= STALE_DAYS)) return false;
+      if (savedView === 'replacement' && !ticketStatusSet(t).includes('queued_for_replacement')) return false;
       if (q) {
         const needle = q.toLowerCase();
         return (
@@ -64,7 +92,7 @@ export function SupportTab() {
       }
       return true;
     });
-  }, [tickets, statusFilter, sourceFilter, topicFilter, areaFilter, q]);
+  }, [tickets, statusFilter, sourceFilter, topicFilter, areaFilter, ownerFilter, savedView, q, now]);
 
   // One row per customer (a "ticket profile"); customer-less tickets fall into
   // the Unassigned group. Filters above narrow the ticket pool first, so a
@@ -95,6 +123,47 @@ export function SupportTab() {
     return { counts, untagged };
   }, [tickets]);
 
+  // Volume per STATUS, computed over the unfiltered pool so the bar and its
+  // legend don't move when other filters narrow the view. Counted over
+  // `status` UNION `tags`, because statuses are multi-select — a ticket
+  // carrying "Queued for Replacement" as an extra tag is queued, and counting
+  // only the `status` column under-reports it.
+  const statusCounts = useMemo(() => {
+    const counts = Object.fromEntries(TICKET_STATUSES.map(s => [s, 0])) as Record<TicketStatus, number>;
+    for (const t of tickets) for (const s of ticketStatusSet(t)) {
+      if (s in counts) counts[s as TicketStatus]++;
+    }
+    return counts;
+  }, [tickets]);
+
+  // Owners holding at least one ticket, for the Owner menu.
+  const ownerCounts = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const t of tickets) {
+      if (t.status === 'closed' || !t.owner_email) continue;
+      m.set(t.owner_email, (m.get(t.owner_email) ?? 0) + 1);
+    }
+    return [...m.entries()].sort((a, b) => b[1] - a[1]);
+  }, [tickets]);
+
+  const topicCounts = useMemo(() => {
+    const counts: Partial<Record<TicketTopic, number>> = {};
+    for (const t of tickets) if (t.topic) counts[t.topic] = (counts[t.topic] ?? 0) + 1;
+    return counts;
+  }, [tickets]);
+  const topicCoverage = useMemo(() => tickets.filter(t => t.topic).length, [tickets]);
+
+  const savedCounts = useMemo(() => {
+    let unowned = 0, idle = 0, replacement = 0;
+    for (const t of tickets) {
+      const open = t.status !== 'closed';
+      if (open && !t.owner_email) unowned++;
+      if (open && daysIdle(t.last_message_at ?? t.created_at, now) > STALE_DAYS) idle++;
+      if (ticketStatusSet(t).includes('queued_for_replacement')) replacement++;
+    }
+    return { unowned, idle, replacement };
+  }, [tickets, now]);
+
   const onSyncNow = async () => {
     setSyncing(true); setSyncMessage(null);
     try {
@@ -116,14 +185,14 @@ export function SupportTab() {
 
   const selected = filtered.find(t => t.id === selectedId) ?? tickets.find(t => t.id === selectedId) ?? null;
 
-  // KPIs
-  const dayAgo = Date.now() - 86400_000;
-  const weekAgo = Date.now() - 7 * 86400_000;
+  // Header figures. In Progress / Waiting-on-us used to be their own KPI tiles;
+  // the queue bar reports both (and every other status) with the added truth
+  // that the tiles hid — their share of the queue.
+  const dayAgo = now - 86400_000;
+  const weekAgo = now - 7 * 86400_000;
   // Open = anything not yet closed (the only terminal status).
   const openCount = tickets.filter(t => t.status !== 'closed').length;
   const newTodayCount = tickets.filter(t => new Date(t.created_at).getTime() > dayAgo).length;
-  const inProgressCount = tickets.filter(t => t.status === 'in_progress').length;
-  const waitingCount = tickets.filter(t => t.status === 'waiting_on_us').length;
   // Closed (7d) = throughput: support tickets closed at least once in the window,
   // counting reopened ones too. A ticket qualifies if it has a close event in the
   // activity log within 7d, OR its current closed_at falls in the window (covers
@@ -137,118 +206,199 @@ export function SupportTab() {
 
   return (
     <>
-      <div className={styles.kpiStrip}>
-        <Kpi label="Open"           value={openCount} />
-        <Kpi label="New (24h)"      value={newTodayCount} />
-        <Kpi label="In progress"    value={inProgressCount} />
-        <Kpi label="Waiting on us"  value={waitingCount} />
-        <Kpi label="Closed (7d)"    value={closedWeekCount} />
+      <div className={styles.pageHead}>
+        <div>
+          <h2 className={styles.pageTitle}>Support Tickets</h2>
+          <p className={styles.pageSub}>
+            <b>{openCount}</b> open across <b>{grouped.groups.length}</b> customers
+            {' · '}<b>{newTodayCount}</b> new today
+            {' · '}<b>{closedWeekCount}</b> closed this week
+          </p>
+        </div>
+        <div className={styles.pageActions}>
+          <button
+            className={styles.addBtn}
+            onClick={() => void onSyncNow()}
+            disabled={syncing}
+            title="Manually trigger the Gmail sync edge function"
+          >{syncing ? 'Syncing…' : 'Sync now'}</button>
+          <button className={styles.addBtnPrimary} onClick={() => { setNewPreset(null); setShowNew(true); }}>
+            + Add ticket
+          </button>
+        </div>
       </div>
 
-      <OwnerKanban
-        tickets={tickets}
-        currentUserEmail={user?.email}
-        onSelectTicket={(t) => setSelectedId(t.id)}
+      <QueueBar
+        counts={statusCounts}
+        openTotal={openCount}
+        active={statusFilter}
+        onPick={s => { setStatusFilter(s); setSavedView(null); }}
       />
 
-      <ActionItemKanban
-        tickets={tickets}
-        onSelectTicket={(t) => setSelectedId(t.id)}
-      />
+      <div className={styles.savedViews}>
+        <SavedViewChip
+          label="Unowned" count={savedCounts.unowned} tone="unowned"
+          active={savedView === 'unowned'}
+          onClick={() => { setSavedView(v => v === 'unowned' ? null : 'unowned'); setStatusFilter('all'); }}
+        />
+        <SavedViewChip
+          label={`Idle ${STALE_DAYS} days+`} count={savedCounts.idle} tone="idle"
+          active={savedView === 'idle'}
+          onClick={() => { setSavedView(v => v === 'idle' ? null : 'idle'); setStatusFilter('all'); }}
+        />
+        <SavedViewChip
+          label="Replacement queue" count={savedCounts.replacement} tone="replacement"
+          active={savedView === 'replacement'}
+          onClick={() => { setSavedView(v => v === 'replacement' ? null : 'replacement'); setStatusFilter('all'); }}
+        />
+      </div>
 
-      <div className={styles.filterRow}>
-        {STATUS_FILTERS.map(f => (
-          <button
-            key={f.key}
-            className={`${styles.chip} ${statusFilter === f.key ? styles.chipActive : ''}`}
-            onClick={() => setStatusFilter(f.key)}
-          >{f.label}</button>
-        ))}
-        <button
-          className={`${styles.chip} ${sourceFilter === 'all' ? styles.chipActive : ''}`}
-          onClick={() => setSourceFilter('all')}
-        >Any source</button>
-        <button
-          className={`${styles.chip} ${sourceFilter === 'gmail' ? styles.chipActive : ''}`}
-          onClick={() => setSourceFilter('gmail')}
-        >Gmail</button>
-        <button
-          className={`${styles.chip} ${sourceFilter === 'customer_form' ? styles.chipActive : ''}`}
-          onClick={() => setSourceFilter('customer_form')}
-        >Form</button>
-        <button
-          className={`${styles.chip} ${sourceFilter === 'hubspot' ? styles.chipActive : ''}`}
-          onClick={() => setSourceFilter('hubspot')}
-        >HubSpot</button>
-        <button
-          className={`${styles.chip} ${sourceFilter === 'telemetry_auto' ? styles.chipActive : ''}`}
-          onClick={() => setSourceFilter('telemetry_auto')}
-        >Telemetry-auto</button>
+      <div className={styles.toolbar}>
         <input
           className={styles.search}
           placeholder="Search ticket #, subject, customer, summary…"
+          aria-label="Search tickets"
           value={q}
           onChange={e => setQ(e.target.value)}
         />
-        <button
-          className={styles.addBtn}
-          onClick={() => void onSyncNow()}
-          disabled={syncing}
-          title="Manually trigger the Gmail sync edge function"
-        >{syncing ? 'Syncing…' : 'Sync now'}</button>
-        <button className={styles.addBtn} onClick={() => { setNewPreset(null); setShowNew(true); }}>
-          + Add ticket
-        </button>
-      </div>
 
-      <div className={styles.filterRow}>
-        <span className={styles.filterGroupLabel}>Topic:</span>
-        <button
-          className={`${styles.chipSm} ${topicFilter === 'all' ? styles.chipActive : ''}`}
-          onClick={() => setTopicFilter('all')}
-        >Any</button>
-        {(Object.keys(TOPIC_LABEL) as TicketTopic[]).map(k => (
-          <button
-            key={k}
-            className={`${styles.chipSm} ${topicFilter === k ? styles.chipActive : ''}`}
-            onClick={() => setTopicFilter(k)}
-          >{TOPIC_LABEL[k]}</button>
-        ))}
-      </div>
-
-      <div className={styles.filterRow}>
-        <span className={styles.filterGroupLabel}>Issue area:</span>
-        <button
-          className={`${styles.chipSm} ${areaFilter === 'all' ? styles.chipActive : ''}`}
-          onClick={() => setAreaFilter('all')}
-        >Any</button>
-        {ISSUE_AREAS.map(a => (
-          <button
-            key={a}
-            className={`${styles.chipSm} ${areaFilter === a ? styles.chipActive : ''}`}
-            onClick={() => setAreaFilter(a)}
-          >
-            {ISSUE_AREA_LABEL[a]}
-            {(areaCounts.counts[a] ?? 0) > 0 && (
-              <span className={styles.chipBadge}>{areaCounts.counts[a]}</span>
-            )}
-          </button>
-        ))}
-        <button
-          className={`${styles.chipSm} ${areaFilter === 'none' ? styles.chipActive : ''}`}
-          onClick={() => setAreaFilter('none')}
-          title="Tickets with no issue area set yet"
+        <Dropdown
+          label={ownerFilter === 'all' ? 'Owner' : ownerFilter === 'none' ? 'Unowned' : ownerFilter.split('@')[0]}
+          active={ownerFilter !== 'all'}
         >
-          Uncategorized
-          {areaCounts.untagged > 0 && (
-            <span className={styles.chipBadge}>{areaCounts.untagged}</span>
+          {close => (
+            <>
+              <div className={styles.menuLabel}>Owner</div>
+              <MenuItem checked={ownerFilter === 'all'} label="Anyone"
+                onClick={() => { setOwnerFilter('all'); close(); }} />
+              <MenuItem checked={ownerFilter === 'none'} label="Unowned" count={savedCounts.unowned}
+                onClick={() => { setOwnerFilter('none'); close(); }} />
+              {ownerCounts.map(([email, n]) => (
+                <MenuItem key={email} checked={ownerFilter === email}
+                  label={email.split('@')[0]} count={n}
+                  onClick={() => { setOwnerFilter(email); close(); }} />
+              ))}
+            </>
           )}
-        </button>
+        </Dropdown>
+
+        <Dropdown
+          label={sourceFilter === 'all' ? 'Source' : sourceLabel(sourceFilter)}
+          active={sourceFilter !== 'all'}
+        >
+          {close => (
+            <>
+              <div className={styles.menuLabel}>Source</div>
+              {SOURCE_FILTERS.map(f => (
+                <MenuItem key={f.key} checked={sourceFilter === f.key} label={f.label}
+                  onClick={() => { setSourceFilter(f.key); close(); }} />
+              ))}
+            </>
+          )}
+        </Dropdown>
+
+        {/* Topic and issue area live behind a disclosure rather than costing two
+            permanent rows: both columns are empty on ~95% of tickets, so the
+            chips filter on data that mostly isn't there. Nothing is removed —
+            every chip and count is still here, and the coverage is stated so a
+            sparse list reads as sparse data rather than a broken filter. */}
+        <Dropdown
+          label="More filters"
+          active={topicFilter !== 'all' || areaFilter !== 'all'}
+          badge={(topicFilter !== 'all' ? 1 : 0) + (areaFilter !== 'all' ? 1 : 0)}
+          wide
+        >
+          {() => (
+            <>
+              <div className={styles.menuLabel}>Topic</div>
+              <div className={styles.menuGrid}>
+                <MenuItem checked={topicFilter === 'all'} label="Any topic"
+                  onClick={() => setTopicFilter('all')} />
+                {(Object.keys(TOPIC_LABEL) as TicketTopic[]).map(k => (
+                  <MenuItem key={k} checked={topicFilter === k} label={TOPIC_LABEL[k]}
+                    count={topicCounts[k] ?? 0}
+                    onClick={() => setTopicFilter(topicFilter === k ? 'all' : k)} />
+                ))}
+              </div>
+              <p className={styles.menuNote}>
+                {topicCoverage} of {tickets.length} support tickets carry a topic. Auto-classified on sync.
+              </p>
+
+              <div className={styles.menuLabel}>Issue area</div>
+              <div className={styles.menuGrid}>
+                <MenuItem checked={areaFilter === 'all'} label="Any area"
+                  onClick={() => setAreaFilter('all')} />
+                {ISSUE_AREAS.map(a => (
+                  <MenuItem key={a} checked={areaFilter === a} label={ISSUE_AREA_LABEL[a]}
+                    count={areaCounts.counts[a] ?? 0}
+                    onClick={() => setAreaFilter(areaFilter === a ? 'all' : a)} />
+                ))}
+                <MenuItem checked={areaFilter === 'none'} label="Uncategorized"
+                  count={areaCounts.untagged}
+                  onClick={() => setAreaFilter(areaFilter === 'none' ? 'all' : 'none')} />
+              </div>
+              <p className={styles.menuNote}>
+                Operator-set, for volume reporting. {tickets.length - areaCounts.untagged} of {tickets.length} categorised.
+              </p>
+            </>
+          )}
+        </Dropdown>
+
+        {(statusFilter !== 'all' || sourceFilter !== 'all' || topicFilter !== 'all'
+          || areaFilter !== 'all' || ownerFilter !== 'all' || savedView || q) && (
+          <button
+            className={styles.clearBtn}
+            onClick={() => {
+              setStatusFilter('all'); setSourceFilter('all'); setTopicFilter('all');
+              setAreaFilter('all'); setOwnerFilter('all'); setSavedView(null); setQ('');
+            }}
+          >Clear filters</button>
+        )}
+
+        <span className={styles.toolbarSpacer} />
+
+        {/* The two boards were permanently stacked above the table, which put
+            the first ticket row below the fold. Same components, same drag
+            behaviour — they are views now, so the page has one scrolling
+            region instead of three. */}
+        <div className={styles.viewSwitch} role="group" aria-label="View">
+          <button
+            className={view === 'list' ? styles.viewSegOn : styles.viewSeg}
+            aria-pressed={view === 'list'}
+            onClick={() => setView('list')}
+          >List</button>
+          <button
+            className={view === 'owners' ? styles.viewSegOn : styles.viewSeg}
+            aria-pressed={view === 'owners'}
+            onClick={() => setView('owners')}
+          >By owner</button>
+          <button
+            className={view === 'actions' ? styles.viewSegOn : styles.viewSeg}
+            aria-pressed={view === 'actions'}
+            onClick={() => setView('actions')}
+          >Action items</button>
+        </div>
       </div>
 
       {syncMessage && <div className={styles.syncMessage}>{syncMessage}</div>}
 
-      {grouped.groups.length === 0 && grouped.unassigned.length === 0 ? (
+      {view === 'owners' && (
+        <OwnerKanban
+          tickets={tickets}
+          currentUserEmail={user?.email}
+          onSelectTicket={(t) => setSelectedId(t.id)}
+        />
+      )}
+
+      {view === 'actions' && (
+        <ActionItemKanban
+          tickets={tickets}
+          onSelectTicket={(t) => setSelectedId(t.id)}
+        />
+      )}
+
+      {view === 'list' && (
+       grouped.groups.length === 0 && grouped.unassigned.length === 0 ? (
         <div className={styles.empty}>No tickets match these filters.</div>
       ) : (
         <>
@@ -259,9 +409,9 @@ export function SupportTab() {
                   <th>Customer</th>
                   <th>Tickets</th>
                   <th>Open</th>
-                  <th>Last activity</th>
                   <th>Status</th>
                   <th>Owner</th>
+                  <th className={styles.dwellHead}><DwellAxis /></th>
                   <th></th>
                 </tr>
               </thead>
@@ -269,6 +419,7 @@ export function SupportTab() {
                 {grouped.groups.map(g => (
                   <CustomerGroupRow key={g.customerId} g={g}
                     queueKindsByTicket={queueKindsByTicket}
+                    now={now}
                     selected={selectedCustomerId === g.customerId}
                     onClick={() => setSelectedCustomerId(g.customerId)} />
                 ))}
@@ -285,7 +436,7 @@ export function SupportTab() {
                 <thead>
                   <tr>
                     <th>#</th>
-                    <th>Age</th>
+                    <th className={styles.dwellHead}><DwellAxis /></th>
                     <th>Created</th>
                     <th>Customer</th>
                     <th>Subject</th>
@@ -302,6 +453,7 @@ export function SupportTab() {
                   {grouped.unassigned.map(t => (
                     <TicketRow key={t.id} t={t}
                       queueKinds={queueKindsByTicket.get(t.id) ?? []}
+                      now={now}
                       selected={selectedId === t.id}
                       onClick={() => setSelectedId(t.id)} />
                   ))}
@@ -310,7 +462,7 @@ export function SupportTab() {
             </>
           )}
         </>
-      )}
+      ))}
 
       {selectedCustomerId && (() => {
         const g = grouped.groups.find(x => x.customerId === selectedCustomerId);
@@ -367,13 +519,14 @@ function StatusPills({ value, queueKinds }: { value: string; queueKinds: string[
   );
 }
 
-function CustomerGroupRow({ g, queueKindsByTicket, selected, onClick }: {
+function CustomerGroupRow({ g, queueKindsByTicket, now, selected, onClick }: {
   g: CustomerGroup;
   queueKindsByTicket: Map<string, string[]>;
+  now: number;
   selected: boolean;
   onClick: () => void;
 }) {
-  const ageHours = (Date.now() - new Date(g.lastActivity).getTime()) / 3_600_000;
+  const idle = daysIdle(g.lastActivity, now);
   // Surface every status held across EVERY open ticket, not just the newest
   // one. Statuses are multi-select, so one ticket can contribute several (e.g.
   // In Progress + Queued for Replacement); ticketStatusSet unions the `status`
@@ -400,7 +553,6 @@ function CustomerGroupRow({ g, queueKindsByTicket, selected, onClick }: {
       </td>
       <td>{g.total}</td>
       <td>{g.openCount > 0 ? <strong>{g.openCount}</strong> : '—'}</td>
-      <td>{formatAge(ageHours)}</td>
       <td>
         {statuses.map(v => <StatusPills key={v} value={v} queueKinds={queueKinds} />)}
       </td>
@@ -411,9 +563,10 @@ function CustomerGroupRow({ g, queueKindsByTicket, selected, onClick }: {
               <span key={o} className={styles.ownerChip} title={o}>{o.split('@')[0]}</span>
             ))}
           </div>
-        ) : <span style={{ color: '#a0aec0' }}>—</span>}
+        ) : <span className={styles.unowned}>Unowned</span>}
       </td>
-      <td style={{ textAlign: 'right', color: '#a0aec0' }}>›</td>
+      <td><DwellRail days={idle} /></td>
+      <td className={styles.chevron}>›</td>
     </tr>
   );
 }
@@ -649,18 +802,194 @@ function NewTicketModal({
   );
 }
 
-function Kpi({ label, value }: { label: string; value: number }) {
+/** The open queue as one segmented bar, where each segment is also the filter.
+ *
+ *  This replaces a five-tile KPI strip AND a ten-chip status row. It carries
+ *  more than either did: sized to the real distribution, it shows that Action
+ *  Needed is roughly three quarters of everything open — which five equal-width
+ *  tiles actively hid.
+ *
+ *  The legend below it lists every status, including ones nothing currently
+ *  holds. A status an operator can set has to be a status they can find. */
+function QueueBar({ counts, openTotal, active, onPick }: {
+  counts: Record<TicketStatus, number>;
+  openTotal: number;
+  active: TicketStatus | 'all';
+  onPick: (s: TicketStatus | 'all') => void;
+}) {
+  // 'closed' is not part of the open queue, so it gets no segment — but it
+  // keeps its place in the legend as a filter.
+  const openStatuses = TICKET_STATUSES.filter(s => s !== 'closed' && counts[s] > 0);
   return (
-    <div className={styles.kpiCard}>
-      <div className={styles.kpiLabel}>{label}</div>
-      <div className={styles.kpiValue}>{value}</div>
+    <div className={styles.queueBar}>
+      <div className={styles.queueTrack} role="group" aria-label="Open tickets by status">
+        {openStatuses.map(s => {
+          const m = STATUS_META[s];
+          const pct = openTotal > 0 ? (counts[s] / openTotal) * 100 : 0;
+          return (
+            <button
+              key={s}
+              className={styles.queueSeg}
+              style={{ flexBasis: `${pct}%`, background: m.color }}
+              aria-pressed={active === s}
+              title={`${m.label} — ${counts[s]} open`}
+              onClick={() => onPick(active === s ? 'all' : s)}
+            >
+              {pct > 7 && <span className={styles.queueSegN}>{counts[s]}</span>}
+            </button>
+          );
+        })}
+      </div>
+
+      <div className={styles.queueLegend}>
+        {TICKET_STATUSES.map(s => {
+          const m = STATUS_META[s];
+          const n = counts[s];
+          return (
+            <button
+              key={s}
+              className={[
+                styles.legendItem,
+                n === 0 ? styles.legendZero : '',
+                active === s ? styles.legendOn : '',
+                s === 'closed' ? styles.legendSep : '',
+              ].filter(Boolean).join(' ')}
+              aria-pressed={active === s}
+              title={n === 0 ? 'No tickets currently hold this status' : undefined}
+              onClick={() => onPick(active === s ? 'all' : s)}
+            >
+              <span className={styles.legendDot} style={{ background: m.color }} />
+              {m.label} <b>{n}</b>
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
 
-function TicketRow({ t, queueKinds, selected, onClick }: {
+function SavedViewChip({ label, count, tone, active, onClick }: {
+  label: string; count: number; tone: 'unowned' | 'idle' | 'replacement';
+  active: boolean; onClick: () => void;
+}) {
+  return (
+    <button
+      className={active ? styles.savedChipOn : styles.savedChip}
+      aria-pressed={active}
+      onClick={onClick}
+    >
+      <span className={`${styles.savedDot} ${styles[`savedDot_${tone}`]}`} />
+      {label}
+      <span className={styles.savedCount}>{count}</span>
+    </button>
+  );
+}
+
+/** Popover filter. Closes on outside click and on Escape. */
+function Dropdown({ label, active, badge, wide, children }: {
+  label: string;
+  active: boolean;
+  badge?: number;
+  wide?: boolean;
+  children: (close: () => void) => React.ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  return (
+    <div className={styles.dropdown} ref={ref}>
+      <button
+        className={active ? styles.filterChipOn : styles.filterChip}
+        aria-haspopup="true"
+        aria-expanded={open}
+        onClick={() => setOpen(o => !o)}
+      >
+        {label}
+        {badge ? <span className={styles.filterBadge}>{badge}</span> : null}
+        <span className={styles.caret} aria-hidden="true">▾</span>
+      </button>
+      {open && (
+        <div className={wide ? styles.menuWide : styles.menu} role="menu">
+          {children(() => setOpen(false))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MenuItem({ checked, label, count, onClick }: {
+  checked: boolean; label: string; count?: number; onClick: () => void;
+}) {
+  return (
+    <button
+      className={styles.menuItem}
+      role="menuitemcheckbox"
+      aria-checked={checked}
+      onClick={onClick}
+    >
+      <span className={styles.menuCheck} aria-hidden="true">{checked ? '✓' : ''}</span>
+      <span className={styles.menuItemLabel}>{label}</span>
+      {count !== undefined && <span className={styles.menuCount}>{count}</span>}
+    </button>
+  );
+}
+
+/** The shared age axis, drawn once in the column header. Every rail below it
+ *  is plotted against these ticks — that is what turns a column of unrelated
+ *  numbers into a readable shape. */
+function DwellAxis() {
+  return (
+    <>
+      <span className={styles.dwellAxis} aria-hidden="true">
+        {DWELL_TICKS.map(t => (
+          <span key={t.label} className={styles.dwellTick} style={{ left: `${t.pct}%` }}>
+            {t.label}
+          </span>
+        ))}
+      </span>
+      Untouched for
+    </>
+  );
+}
+
+/** One row's position on the shared axis. */
+function DwellRail({ days }: { days: number }) {
+  const pct = dwellPercent(days);
+  const tier = dwellTier(days);
+  const at = `calc((100% - var(--dwell-gutter)) * ${pct / 100})`;
+  return (
+    <span
+      className={`${styles.rail} ${styles[`rail_${tier}`]}`}
+      title={`${days} day${days === 1 ? '' : 's'} since last activity`}
+    >
+      <span className={styles.railTrack} />
+      {/* The stale threshold — the line most of this queue has crossed. */}
+      <span className={styles.railThreshold} style={{ left: `calc((100% - var(--dwell-gutter)) * ${dwellPercent(STALE_DAYS) / 100})` }} />
+      <span className={styles.railFill} style={{ width: at }} />
+      <span className={styles.railMark} style={{ left: at }} />
+      <span className={styles.railLabel}>{dwellLabel(days)}</span>
+    </span>
+  );
+}
+
+function TicketRow({ t, queueKinds, now, selected, onClick }: {
   t: ServiceTicket;
   queueKinds: string[];
+  now: number;
   selected: boolean;
   onClick: () => void;
 }) {
@@ -668,7 +997,10 @@ function TicketRow({ t, queueKinds, selected, onClick }: {
   const sla = slaChip(t);
   // Age: prefer last_message_at (gmail-aware) then created_at.
   const lastTs = t.last_message_at ?? t.created_at;
-  const ageHours = (Date.now() - new Date(lastTs).getTime()) / 3_600_000;
+  const ageHours = (now - new Date(lastTs).getTime()) / 3_600_000;
+  const idle = daysIdle(lastTs, now);
+  // Priority-scoped staleness is a different signal from dwell: an urgent
+  // ticket is stale after a day, and the rail's 30-day scale can't show that.
   const stale =
     (t.priority === 'urgent' && ageHours > 24) ||
     (t.priority === 'high'   && ageHours > 48);
@@ -683,10 +1015,8 @@ function TicketRow({ t, queueKinds, selected, onClick }: {
     >
       <td style={{ fontFamily: 'ui-monospace, monospace' }}>{t.ticket_number}</td>
       <td>
-        <span className={stale ? styles.ageStale : styles.age}>
-          {stale && <span aria-label="stale" title="Stale">⚠ </span>}
-          {formatAge(ageHours)}
-        </span>
+        {stale && <span className={styles.stalePip} aria-label="stale" title="Past SLA for its priority">⚠</span>}
+        <DwellRail days={idle} />
       </td>
       <td title={new Date(t.created_at).toLocaleString()}>{new Date(t.created_at).toLocaleDateString()}</td>
       <td>{t.customer_name ?? t.customer_email ?? '—'}</td>
@@ -696,7 +1026,7 @@ function TicketRow({ t, queueKinds, selected, onClick }: {
         {t.engineering_resolved_at && !t.closed_at && (
           <div
             title={`Engineering resolved ${new Date(t.engineering_resolved_at).toLocaleString()}`}
-            style={{ marginTop: 2, fontSize: 10, fontWeight: 700, color: '#276749' }}
+            className={styles.engFixed}
           >
             Engineering fixed — follow up
           </div>
@@ -709,7 +1039,7 @@ function TicketRow({ t, queueKinds, selected, onClick }: {
           : sourceLabel(t.source)
         }
       </td>
-      <td><span className={styles.pill} style={{ background: '#f7fafc', color: p.color }}>{p.label}</span></td>
+      <td><span className={styles.pill} style={{ background: 'var(--color-surface)', color: p.color }}>{p.label}</span></td>
       <td><SlaChipPill label={sla.label} color={sla.color} /></td>
       <td>
         {ticketStatusSet(t).map(s => (
@@ -731,11 +1061,13 @@ function TicketRow({ t, queueKinds, selected, onClick }: {
   );
 }
 
+// Same warm ramp and AA floor as STATUS_META; 'red' is the AA-legible error
+// token value, not the old #c53030 the spec measured against Ladybug Red.
 const SLA_CHIP_STYLE: Record<string, { background: string; color: string }> = {
-  green: { background: '#f0fff4', color: '#276749' },
-  amber: { background: '#fffaf0', color: '#c05621' },
-  red:   { background: '#fff5f5', color: '#c53030' },
-  grey:  { background: '#edf2f7', color: '#718096' },
+  green: { background: '#EBF2EA', color: '#3E6B45' },
+  amber: { background: '#FAF4E2', color: '#7D6114' },
+  red:   { background: '#FDECEC', color: '#A61B1B' },
+  grey:  { background: '#F0EDE7', color: '#6E6862' },
 };
 
 function SlaChipPill({ label, color }: { label: string; color: 'green' | 'amber' | 'red' | 'grey' }) {
@@ -743,9 +1075,4 @@ function SlaChipPill({ label, color }: { label: string; color: 'green' | 'amber'
   return <span className={styles.pill} style={style}>{label}</span>;
 }
 
-function formatAge(hours: number): string {
-  if (hours < 1) return `${Math.max(0, Math.floor(hours * 60))}m`;
-  if (hours < 24) return `${Math.floor(hours)}h`;
-  const days = Math.floor(hours / 24);
-  return days < 30 ? `${days}d` : `${Math.floor(days / 30)}mo`;
-}
+

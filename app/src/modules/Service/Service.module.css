@@ -1544,3 +1544,488 @@
   border: 1px solid var(--color-border);
   color: var(--color-ink-muted);
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Support Tickets — page chrome (2026-08-21)
+
+   Replaces the five-tile KPI strip, the ten-chip status row, the sixteen-chip
+   topic row and the nine-chip issue-area row that used to stack above the
+   table. All of that filtering still exists; it is re-ranked, not removed.
+
+   Everything below is written against tokens — no raw hex — so this block is
+   ready for the css-token guardrail when Service.module.css joins the ratchet.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.pageHead {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-4);
+}
+.pageTitle {
+  font-size: var(--font-size-title);
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  color: var(--color-ink);
+  margin: 0 0 2px;
+}
+.pageSub {
+  font-size: 12.5px;
+  color: var(--color-ink-muted);
+  margin: 0;
+}
+.pageSub b {
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--font-numeric);
+  font-weight: 650;
+  color: var(--color-ink);
+}
+.pageActions {
+  margin-left: auto;
+  display: flex;
+  gap: var(--space-2);
+}
+.addBtnPrimary {
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 550;
+  padding: 6px var(--space-3);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-crimson);
+  background: var(--color-crimson);
+  color: #fff;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.addBtnPrimary:hover { background: var(--color-crimson-dark); border-color: var(--color-crimson-dark); }
+.addBtnPrimary:focus-visible,
+.clearBtn:focus-visible,
+.queueSeg:focus-visible,
+.legendItem:focus-visible,
+.savedChip:focus-visible,
+.savedChipOn:focus-visible,
+.filterChip:focus-visible,
+.filterChipOn:focus-visible,
+.viewSeg:focus-visible,
+.viewSegOn:focus-visible,
+.menuItem:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/* ── Queue bar: the KPI strip and the status filter, merged ─────────────── */
+.queueBar { margin-bottom: var(--space-3); }
+
+.queueTrack {
+  display: flex;
+  height: 30px;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+.queueSeg {
+  border: 0;
+  border-right: 1px solid rgba(255, 255, 255, 0.5);
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  min-width: 3px;
+  transition: filter 0.12s ease;
+}
+.queueSeg:last-child { border-right: 0; }
+.queueSeg:hover { filter: brightness(1.12); }
+.queueSeg[aria-pressed='true'] { box-shadow: inset 0 0 0 2px var(--color-ink); }
+.queueSegN {
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--font-numeric);
+  font-size: 11.5px;
+  font-weight: 650;
+}
+
+.queueLegend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px var(--space-4);
+  margin-top: 9px;
+}
+.legendItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: 0;
+  padding: 2px 0;
+  font: inherit;
+  font-size: 11.5px;
+  color: var(--color-ink-muted);
+  cursor: pointer;
+}
+.legendItem:hover { color: var(--color-ink); }
+.legendItem b {
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--font-numeric);
+  color: var(--color-ink);
+  font-weight: 650;
+}
+/* A status nothing currently holds stays filterable — a status you can set is
+   one you must be able to find — but it recedes. */
+.legendZero { opacity: 0.45; }
+.legendOn {
+  color: var(--color-ink);
+  font-weight: 650;
+  opacity: 1;
+  box-shadow: inset 0 -2px 0 var(--color-crimson);
+}
+/* Complete is not part of the open queue, so it sits apart from it. */
+.legendSep {
+  margin-left: 2px;
+  padding-left: var(--space-4);
+  border-left: 1px solid var(--color-border);
+}
+.legendDot {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  flex: none;
+}
+
+/* ── Saved views ───────────────────────────────────────────────────────── */
+.savedViews {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-3);
+}
+.savedChip,
+.savedChipOn {
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 11px 5px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--color-border);
+  background: #fff;
+  color: var(--color-ink-muted);
+}
+.savedChip:hover { border-color: var(--color-ink-subtle); color: var(--color-ink); }
+.savedChipOn {
+  background: var(--color-ink);
+  border-color: var(--color-ink);
+  color: var(--color-page);
+}
+.savedCount {
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--font-numeric);
+  font-size: 11px;
+  font-weight: 650;
+  background: var(--color-surface);
+  color: var(--color-ink);
+  padding: 1px 6px;
+  border-radius: 999px;
+}
+.savedChipOn .savedCount {
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+}
+.savedDot { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+.savedDot_unowned     { background: var(--color-accent-clay); }
+.savedDot_idle        { background: var(--color-accent-gold); }
+.savedDot_replacement { background: var(--color-purple); }
+
+/* ── Toolbar ───────────────────────────────────────────────────────────── */
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-border);
+  margin-bottom: var(--space-2);
+}
+.toolbarSpacer { flex: 1; }
+
+.clearBtn {
+  font: inherit;
+  font-size: 12px;
+  padding: 6px var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: #fff;
+  color: var(--color-ink-muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.clearBtn:hover { color: var(--color-ink); border-color: var(--color-ink-subtle); }
+
+.dropdown { position: relative; }
+.filterChip,
+.filterChipOn {
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+  padding: 6px var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: #fff;
+  color: var(--color-ink-muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.filterChip:hover { border-color: var(--color-ink-subtle); color: var(--color-ink); }
+.filterChipOn {
+  background: var(--color-ink);
+  border-color: var(--color-ink);
+  color: var(--color-page);
+}
+.caret { font-size: 9px; opacity: 0.65; }
+.filterBadge {
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--font-numeric);
+  font-size: 10.5px;
+  font-weight: 650;
+  background: var(--color-crimson);
+  color: #fff;
+  border-radius: 999px;
+  padding: 0 5px;
+  min-width: 16px;
+  text-align: center;
+}
+
+.menu,
+.menuWide {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 5px);
+  left: 0;
+  min-width: 220px;
+  background: #fff;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  padding: 7px;
+  max-height: 380px;
+  overflow-y: auto;
+}
+.menuWide { min-width: 440px; }
+.menuLabel {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-ink-subtle);
+  padding: 7px var(--space-2) 5px;
+}
+.menuGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px var(--space-3);
+}
+.menuItem {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  font-size: 12.5px;
+  padding: 5px var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--color-ink);
+  cursor: pointer;
+}
+.menuItem:hover { background: var(--color-surface); }
+.menuItem[aria-checked='true'] { font-weight: 650; }
+.menuCheck {
+  width: 10px;
+  flex: none;
+  color: var(--color-crimson);
+  font-size: 11px;
+}
+.menuItemLabel { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.menuCount {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--font-numeric);
+  font-size: 11px;
+  color: var(--color-ink-subtle);
+}
+.menuNote {
+  font-size: 11px;
+  color: var(--color-ink-subtle);
+  padding: 6px var(--space-2) 2px;
+  line-height: 1.45;
+  margin: 0;
+}
+
+/* ── View switcher ─────────────────────────────────────────────────────── */
+.viewSwitch {
+  display: flex;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: #fff;
+}
+.viewSeg,
+.viewSegOn {
+  font: inherit;
+  font-size: 12.5px;
+  padding: 6px 11px;
+  border: 0;
+  border-right: 1px solid var(--color-border);
+  background: none;
+  color: var(--color-ink-muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.viewSeg:last-child,
+.viewSegOn:last-child { border-right: 0; }
+.viewSeg:hover { color: var(--color-ink); }
+.viewSegOn {
+  background: var(--color-surface);
+  color: var(--color-ink);
+  font-weight: 650;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   The dwell rail.
+
+   Age used to be a bare "68d" cell with no reference point, so 41d and 98d
+   read as equally "old". The column header draws the axis once and every row
+   plots a mark against it, which turns the column into a shape: the pile-up
+   past the one-month tick is the actual state of this queue.
+
+   --dwell-gutter reserves fixed room for the age label so a mark at the far
+   right can never sit underneath it.
+   ══════════════════════════════════════════════════════════════════════════ */
+.dwellHead {
+  min-width: 210px;
+  --dwell-gutter: 46px;
+}
+.dwellAxis {
+  position: relative;
+  display: block;
+  height: 15px;
+  margin-right: var(--dwell-gutter);
+  margin-bottom: 2px;
+}
+.dwellAxis::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 1px;
+  background: var(--color-border);
+}
+.dwellTick {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+  font-weight: 400;
+  text-transform: none;
+  color: var(--color-ink-faint);
+}
+.dwellTick:first-child { transform: none; }
+.dwellTick:last-child { transform: translateX(-100%); }
+
+.rail {
+  position: relative;
+  display: block;
+  height: 16px;
+  min-width: 190px;
+  --dwell-gutter: 46px;
+}
+.railTrack {
+  position: absolute;
+  left: 0;
+  right: var(--dwell-gutter);
+  top: 7px;
+  height: 2px;
+  background: var(--color-border);
+}
+/* The 30-day line — the threshold most of this queue has crossed. */
+.railThreshold {
+  position: absolute;
+  top: 1px;
+  bottom: 1px;
+  width: 1px;
+  background: var(--color-ink-faint);
+  opacity: 0.5;
+}
+.railFill {
+  position: absolute;
+  left: 0;
+  top: 7px;
+  height: 2px;
+  border-radius: 1px;
+  opacity: 0.3;
+  background: currentColor;
+}
+.railMark {
+  position: absolute;
+  top: 2px;
+  width: 5px;
+  height: 12px;
+  border-radius: 1.5px;
+  transform: translateX(-2.5px);
+  background: currentColor;
+}
+.railLabel {
+  position: absolute;
+  right: 0;
+  top: 0;
+  width: 42px;
+  text-align: right;
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--font-numeric);
+  font-size: 11px;
+  font-weight: 650;
+  color: currentColor;
+}
+/* Three tiers, so the rail reads as state rather than decoration. currentColor
+   drives fill, mark and label together. */
+.rail_fresh { color: var(--color-success); }
+.rail_mid   { color: var(--color-accent-coffee); }
+.rail_stale { color: var(--color-accent-clay); }
+
+.stalePip {
+  color: var(--color-error-strong);
+  font-size: 11px;
+  margin-right: 4px;
+}
+.unowned { color: var(--color-ink-subtle); }
+.chevron { text-align: right; color: var(--color-ink-subtle); }
+.engFixed {
+  margin-top: 2px;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--color-success);
+}
+
+/* Explains the locked 'Queued for Replacement' toggle by naming the order
+   that is holding it. */
+.lockNote {
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--color-ink-muted);
+  border-left: 2px solid var(--color-border);
+  padding: 2px 0 2px var(--space-3);
+  margin: var(--space-2) 0 0;
+}
+.lockNote b { color: var(--color-ink); }

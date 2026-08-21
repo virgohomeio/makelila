@@ -3,7 +3,10 @@ import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from './supabase';
 import { logAction } from './activityLog';
 import { sendTemplate } from './templates';
-import { cancelPendingReplacementsForTicket, shipQueuedReplacementsForTicket } from './orders';
+import {
+  cancelPendingReplacementsForTicket, shipQueuedReplacementsForTicket,
+  liveReplacementsForTicket,
+} from './orders';
 
 // ============================================================ Types
 
@@ -207,11 +210,12 @@ export type TicketActionItem = {
 
 // ============================================================ Display metadata
 
+/* Category badges, same warm ramp and same no-red rule as STATUS_META. */
 export const CATEGORY_META: Record<TicketCategory, { label: string; color: string; bg: string }> = {
-  onboarding:     { label: 'Onboarding',     color: '#276749', bg: '#f0fff4' },
-  support:        { label: 'Support',        color: '#2b6cb0', bg: '#ebf8ff' },
-  repair:         { label: 'Repair',         color: '#c05621', bg: '#fffaf0' },
-  diagnosis_call: { label: 'Diagnosis call', color: '#805ad5', bg: '#faf5ff' },
+  onboarding:     { label: 'Onboarding',     color: '#3E6B45', bg: '#EBF2EA' },
+  support:        { label: 'Support',        color: '#2F6660', bg: '#E8F1EF' },
+  repair:         { label: 'Repair',         color: '#8C4A2F', bg: '#F7EDE7' },
+  diagnosis_call: { label: 'Diagnosis call', color: '#6B4472', bg: '#F3EDF5' },
 };
 
 export const TOPIC_LABEL: Record<TicketTopic, string> = {
@@ -232,23 +236,45 @@ export const TOPIC_LABEL: Record<TicketTopic, string> = {
   other:                  'Other',
 };
 
+/* Status pill colours.
+ *
+ * These used to be drawn from the cool blue-gray ramp the redesign spec
+ * measured and marked for deletion (#2b6cb0 / #718096 / #edf2f7 …), which put
+ * a second, colder neutral palette next to the warm brand one in the same
+ * table. They are now warm hues that sit on --color-surface / --color-page.
+ *
+ * Two rules hold this set together:
+ *   1. No red. Ladybug Red means "action" — primary buttons, active nav,
+ *      unread counts — so no status may compete with it. That is also the
+ *      real fix for the collision the spec flagged between brand red and
+ *      error red: if nothing on the row is red, a destructive warning can
+ *      never be mistaken for a primary action.
+ *   2. Every `color` clears 4.5:1 against its own `bg` (WCAG AA for the
+ *      11px pill text). Asserted in service.statusColours.test.ts.
+ *
+ * Hex rather than var() because these are consumed as inline style values on
+ * pill elements, not from CSS; the raw-hex guardrail scopes to *.module.css. */
 export const STATUS_META: Record<TicketStatus, { label: string; color: string; bg: string }> = {
-  waiting_on_us:          { label: 'Action Needed',          color: '#2b6cb0', bg: '#ebf8ff' },
-  in_progress:            { label: 'In Progress',            color: '#c05621', bg: '#fffaf0' },
-  waiting_on_customer:    { label: 'Awaiting Customer Response', color: '#718096', bg: '#f7fafc' },
-  queued_for_replacement: { label: 'Queued for Replacement', color: '#553c9a', bg: '#faf5ff' },
-  replacement_sent:       { label: 'Replacement Sent',       color: '#276749', bg: '#f0fff4' },
-  return_refund:          { label: 'Return/Refund',          color: '#b83280', bg: '#fff5f7' },
-  call_scheduled:         { label: 'Call Scheduled',         color: '#2c7a7b', bg: '#e6fffa' },
-  on_hold:                { label: 'On Hold',                color: '#b7791f', bg: '#fffff0' },
-  closed:                 { label: 'Complete',               color: '#a0aec0', bg: '#edf2f7' },
+  waiting_on_us:          { label: 'Action Needed',          color: '#8C4A2F', bg: '#F7EDE7' },
+  in_progress:            { label: 'In Progress',            color: '#7D6114', bg: '#FAF4E2' },
+  waiting_on_customer:    { label: 'Awaiting Customer Response', color: '#5F5951', bg: '#F1EEE8' },
+  queued_for_replacement: { label: 'Queued for Replacement', color: '#6B4472', bg: '#F3EDF5' },
+  replacement_sent:       { label: 'Replacement Sent',       color: '#3E6B45', bg: '#EBF2EA' },
+  return_refund:          { label: 'Return/Refund',          color: '#8A3D5A', bg: '#F8EDF1' },
+  call_scheduled:         { label: 'Call Scheduled',         color: '#2F6660', bg: '#E8F1EF' },
+  on_hold:                { label: 'On Hold',                color: '#7A5E1E', bg: '#F7F1DE' },
+  closed:                 { label: 'Complete',               color: '#6E6862', bg: '#F0EDE7' },
 };
 
+/* Priority colours, warm ramp. 'urgent' is the one place a red is correct —
+ * it is a warning, not an action — so it uses the AA-legible error token
+ * value (--color-error-strong) rather than the old #c53030, which the spec
+ * measured as indistinguishable from Ladybug Red. */
 export const PRIORITY_META: Record<TicketPriority, { label: string; color: string }> = {
-  low:    { label: 'Low',    color: '#718096' },
-  normal: { label: 'Normal', color: '#2b6cb0' },
-  high:   { label: 'High',   color: '#c05621' },
-  urgent: { label: 'Urgent', color: '#c53030' },
+  low:    { label: 'Low',    color: '#6E6862' },
+  normal: { label: 'Normal', color: '#5C564E' },
+  high:   { label: 'High',   color: '#8C4A2F' },
+  urgent: { label: 'Urgent', color: '#A61B1B' },
 };
 
 export const SOURCE_LABEL: Record<TicketSource, string> = {
@@ -277,12 +303,12 @@ function humanizeToken(raw: string): string {
 
 export function statusMeta(status: string): { label: string; color: string; bg: string } {
   return STATUS_META[status as TicketStatus]
-    ?? { label: humanizeToken(status), color: '#718096', bg: '#edf2f7' };
+    ?? { label: humanizeToken(status), color: '#6E6862', bg: '#F0EDE7' };
 }
 
 export function priorityMeta(priority: string): { label: string; color: string } {
   return PRIORITY_META[priority as TicketPriority]
-    ?? { label: humanizeToken(priority), color: '#718096' };
+    ?? { label: humanizeToken(priority), color: '#6E6862' };
 }
 
 export function sourceLabel(source: string): string {
@@ -1098,6 +1124,22 @@ export function ticketStatusSet(
   return [...known, ...unknown];
 }
 
+/** Does this ticket currently hold 'queued_for_replacement', in either
+ *  `status` or `tags`? Read fresh rather than trusting the caller's `next`,
+ *  which describes the desired state, not the current one. */
+async function ticketHoldsQueuedForReplacement(id: string): Promise<boolean> {
+  const { data, error } = await supabase
+    .from('service_tickets')
+    .select('status, tags')
+    .eq('id', id)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) return false;
+  const row = data as { status: string; tags: string[] | null };
+  return row.status === 'queued_for_replacement'
+    || (row.tags ?? []).includes('queued_for_replacement');
+}
+
 /** Replace the full set of statuses on a ticket.
  *
  *  `status` holds the PRIMARY (first in TICKET_STATUSES order) because
@@ -1120,6 +1162,24 @@ export function ticketStatusSet(
  *  'replacement_sent' is the other status with side effects: it supersedes
  *  'queued_for_replacement' (the customer is no longer waiting in a queue) and
  *  hands the linked replacement order over to Fulfillment › Queue › SHIPPED. */
+/** Thrown when an operator tries to clear 'queued_for_replacement' by hand
+ *  while the replacement order behind it is still live. Carries the refs so
+ *  the caller can name them instead of showing a generic failure. */
+export class QueuedReplacementLockedError extends Error {
+  readonly orderRefs: string[];
+  constructor(orderRefs: string[]) {
+    const refs = orderRefs.join(', ');
+    super(
+      `Can't remove Queued for Replacement while ${refs} ` +
+      `${orderRefs.length === 1 ? 'is' : 'are'} still open. ` +
+      `Cancel ${orderRefs.length === 1 ? 'it' : 'them'} in Sales or Fulfillment first, ` +
+      `or mark the ticket Replacement Sent if the unit went out.`,
+    );
+    this.name = 'QueuedReplacementLockedError';
+    this.orderRefs = orderRefs;
+  }
+}
+
 export async function setTicketStatuses(id: string, next: TicketStatus[]): Promise<void> {
   const held = new Set(next);
   // Sent supersedes queued — the two never coexist, whichever way the operator
@@ -1130,6 +1190,28 @@ export async function setTicketStatuses(id: string, next: TicketStatus[]): Promi
     : TICKET_STATUSES.filter(s => held.has(s));
   const final: TicketStatus[] = ordered.length > 0 ? ordered : ['waiting_on_us'];
   const status = final[0];
+
+  // 'queued_for_replacement' is set automatically when a replacement order is
+  // created, so it may not be cleared by hand while that order is still live —
+  // the order is the source of truth for whether the customer is waiting.
+  //
+  // Checked here rather than only in the panel because this function is the
+  // chokepoint every operator edit goes through. Two ways OUT of the tag stay
+  // open, and both are resolved above before we get here:
+  //   · 'replacement_sent'  — deleted the tag itself, and ships the order below
+  //   · 'closed' (Complete) — cancels the awaiting order below
+  // so we only block a bare removal.
+  const removingQueued =
+    !final.includes('queued_for_replacement') &&
+    !final.includes('replacement_sent') &&
+    status !== 'closed';
+  if (removingQueued) {
+    const wasQueued = await ticketHoldsQueuedForReplacement(id);
+    if (wasQueued) {
+      const live = await liveReplacementsForTicket(id);
+      if (live.length > 0) throw new QueuedReplacementLockedError(live.map(o => o.order_ref));
+    }
+  }
 
   // Stamp closed_at on close, and CLEAR it on reopen so a later re-close gets a
   // fresh timestamp (the DB trigger only coalesces, so without clearing, a

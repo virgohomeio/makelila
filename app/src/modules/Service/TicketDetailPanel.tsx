@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import ReplacementPickerModal from './ReplacementPickerModal';
 import { useCustomers, sendFollowupSms } from '../../lib/customers';
@@ -17,7 +17,7 @@ import {
 import { CANNED_SMS_TEMPLATES } from '../../lib/cannedSms';
 import { createLinearIssue, createGitHubIssue } from '../../lib/githubLinear';
 import {
-  useReplacementSummary, readyReplacementsForTicket,
+  useReplacementSummary, readyReplacementsForTicket, liveReplacementsForTicket,
   shipQueuedReplacementsForTicket, cancelReplacementOrder,
 } from '../../lib/orders';
 import { useAuth } from '../../lib/auth';
@@ -255,6 +255,25 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
     catch (e) { setError((e as Error).message); }
     finally { setBusy(false); }
   }
+
+  /* 'Queued for Replacement' is set automatically when a replacement order is
+   * created, so it cannot be cleared by hand while that order is still live —
+   * setTicketStatuses enforces it. Look the blockers up here too so the toggle
+   * reads as locked instead of failing on click, and so the operator can see
+   * WHICH order is holding it. */
+  const holdsQueued = ticketStatusSet(ticket).includes('queued_for_replacement');
+  const [queuedLockRefs, setQueuedLockRefs] = useState<string[]>([]);
+  useEffect(() => {
+    if (!holdsQueued) { setQueuedLockRefs([]); return; }
+    let live = true;
+    liveReplacementsForTicket(ticket.id)
+      .then(rows => { if (live) setQueuedLockRefs(rows.map(r => r.order_ref)); })
+      // A failed lookup must not fake a lock; setTicketStatuses is the real
+      // guard and will still refuse if an order is genuinely live.
+      .catch(() => { if (live) setQueuedLockRefs([]); });
+    return () => { live = false; };
+  }, [ticket.id, holdsQueued, ticket.status, ticket.tags]);
+  const queuedLocked = holdsQueued && queuedLockRefs.length > 0;
 
   /** Completing a ticket that still has a 'ready' replacement is the moment the
    *  shipping fact is known and the last moment it can be captured — the order
@@ -817,18 +836,26 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
               const held = ticketStatusSet(ticket);
               const active = held.includes(tag);
               const m = STATUS_META[tag];
+              // Removing a live queued replacement is the one blocked move.
+              // Setting it, and both routes out of it (Replacement Sent,
+              // Complete), stay available.
+              const lockedOff = tag === 'queued_for_replacement' && active && queuedLocked;
               return (
                 <button
                   key={tag}
                   className={active ? styles.btnPrimary : styles.btnSecondary}
-                  disabled={busy}
+                  disabled={busy || lockedOff}
+                  aria-disabled={lockedOff || undefined}
                   style={active ? { background: m.color, borderColor: m.color } : { color: m.color }}
                   title={
-                    tag === 'closed'
-                      ? 'Completing a ticket clears its other statuses and cancels any replacement still awaiting stock. If one already has a unit reserved, you will be asked whether it shipped.'
-                      : tag === 'replacement_sent'
-                        ? 'Marks the queued replacement as shipped — it moves to Fulfillment › Queue › Shipped'
-                        : undefined
+                    lockedOff
+                      ? `Locked while ${queuedLockRefs.join(', ')} ${queuedLockRefs.length === 1 ? 'is' : 'are'} still open. `
+                        + 'Cancel in Sales or Fulfillment to clear it, or mark the ticket Replacement Sent if the unit went out.'
+                      : tag === 'closed'
+                        ? 'Completing a ticket clears its other statuses and cancels any replacement still awaiting stock. If one already has a unit reserved, you will be asked whether it shipped.'
+                        : tag === 'replacement_sent'
+                          ? 'Marks the queued replacement as shipped — it moves to Fulfillment › Queue › Shipped'
+                          : undefined
                   }
                   onClick={() => {
                     // Closing is the only transition that can strand a
@@ -840,10 +867,18 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
                       : tag === 'closed' ? ['closed' as const] : [...held, tag];
                     void run(setTicketStatuses(ticket.id, next));
                   }}
-                >{active ? '✓ ' : ''}{m.label}</button>
+                >{active ? '✓ ' : ''}{m.label}{lockedOff ? ' 🔒' : ''}</button>
               );
             })}
           </div>
+          {queuedLocked && (
+            <p className={styles.lockNote}>
+              <b>Queued for Replacement is locked</b> while {queuedLockRefs.join(', ')}{' '}
+              {queuedLockRefs.length === 1 ? 'is' : 'are'} open. Cancel{' '}
+              {queuedLockRefs.length === 1 ? 'it' : 'them'} in Sales or Fulfillment to clear the tag —
+              marking the ticket <b>Replacement Sent</b> or <b>Complete</b> also resolves it.
+            </p>
+          )}
           {closeBlockers && (
             <div className={styles.dangerConfirm}>
               <span className={styles.dangerConfirmText}>

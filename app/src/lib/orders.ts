@@ -861,6 +861,34 @@ export async function readyReplacementsForTicket(
   return (data ?? []) as Array<{ id: string; order_ref: string }>;
 }
 
+/** Every replacement still live for a ticket — either state ('awaiting' or
+ *  'ready'), not cancelled, not shipped, not delivered.
+ *
+ *  This is what makes the 'Queued for Replacement' status non-removable by
+ *  hand. The tag is set automatically when a replacement order is created, so
+ *  clearing it while the order is still sitting in Sales would leave the two
+ *  disagreeing about whether the customer is waiting on a unit — exactly the
+ *  drift the tag exists to prevent. The order is the source of truth; cancel
+ *  it in Sales or Fulfillment (or mark the ticket Replacement Sent / Complete)
+ *  and the tag follows.
+ *
+ *  Broader than readyReplacementsForTicket, which is scoped to 'ready' because
+ *  it answers a different question ("might this have shipped?"). */
+export async function liveReplacementsForTicket(
+  ticketId: string,
+): Promise<Array<{ id: string; order_ref: string }>> {
+  const { data, error } = await supabase
+    .from('orders')
+    .select('id, order_ref')
+    .eq('kind', 'replacement')
+    .eq('linked_ticket_id', ticketId)
+    .neq('status', 'cancelled')
+    .is('shipped_at', null)
+    .is('delivered_at', null);
+  if (error) throw new Error(`Failed to look up live replacements: ${error.message}`);
+  return (data ?? []) as Array<{ id: string; order_ref: string }>;
+}
+
 export async function cancelPendingReplacementsForTicket(ticketId: string): Promise<void> {
   const { data: linked, error } = await supabase
     .from('orders')
