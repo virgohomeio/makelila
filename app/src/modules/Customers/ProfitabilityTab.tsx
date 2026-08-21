@@ -164,7 +164,7 @@ function ProfitCard({ row }: { row: CustomerProfitability }) {
           </dd>
         </div>
         <div title={row.shipping_uncosted_count > 0
-          ? `${row.shipping_uncosted_count} order(s) have no Freightcom invoice linked — real freight is higher than this`
+          ? `${row.shipping_uncosted_count} shipped order(s) have no freight invoice on file — real freight is higher than this. Unshipped orders are not counted.`
           : 'summed from the Freightcom invoices for this order'}>
           <dt>Shipping</dt>
           <dd>

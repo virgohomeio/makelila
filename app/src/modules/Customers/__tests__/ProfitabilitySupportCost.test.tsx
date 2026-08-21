@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, cleanup } from '@testing-library/react';
 import type { CustomerProfitability } from '../../../lib/customers';
 
 const { profitabilityMock } = vi.hoisted(() => ({ profitabilityMock: vi.fn() }));
@@ -82,6 +82,17 @@ describe('ProfitabilityTab — diagnosis-call support cost', () => {
       support_cost_cad: 30.75, diagnosis_call_count: 1, diagnosis_minutes: 18.45,
     })]);
     expect(screen.getByText('Antonio Gonsalves')).toBeInTheDocument();
+  });
+
+  it('shows the uncosted-freight hint only when an order actually shipped', () => {
+    // V7: a pending/cancelled order has no freight to be missing, so the view
+    // reports 0 and no amber hint appears next to $0.00 shipping.
+    mount([row({ sale_shipping_cad: 0, shipping_uncosted_count: 0 })]);
+    expect(screen.queryByText(/uncosted/)).not.toBeInTheDocument();
+
+    cleanup();
+    mount([row({ sale_shipping_cad: 0, shipping_uncosted_count: 1 })]);
+    expect(screen.getByText(/1 uncosted/)).toBeInTheDocument();
   });
 
   it('does not render a Support line for a customer who never called', () => {
