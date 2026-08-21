@@ -3,7 +3,7 @@ import { useCustomerProfitability, type CustomerProfitability } from '../../lib/
 import { formatMoney } from '../../lib/money';
 import styles from './Customers.module.css';
 
-type SortKey = 'margin_desc' | 'margin_asc' | 'warranty_desc' | 'revenue_desc';
+type SortKey = 'margin_desc' | 'margin_asc' | 'warranty_desc' | 'revenue_desc' | 'support_desc';
 type CountryFilter = 'all' | 'CA' | 'US' | 'other';
 
 export function ProfitabilityTab() {
@@ -53,10 +53,13 @@ export function ProfitabilityTab() {
         <SummaryStat label="COGS + shipping"      value={fmt(totals.salesCost)} variant="warn" />
         <SummaryStat label="Expected warranty"    value={fmt(totals.warranty)}  variant="warn" />
         <SummaryStat label="Expected refunds"     value={fmt(totals.refund)}    variant="warn" />
+        <SummaryStat label="Support labour"
+                     value={totals.supportPriced ? fmt(totals.support) : 'rate not set'}
+                     variant="warn" />
         <SummaryStat label="Net margin"           value={fmt(totals.margin)}    variant={totals.margin < 0 ? 'bad' : 'good'} />
       </div>
       <div className={styles.profCurrencyNote}>
-        Revenue excludes sales tax (passed through to govt, not VCycene income). "Expected warranty" sums COGS + shipping for every non-cancelled replacement order. "Expected refunds" sums every refund approval that isn't denied. All amounts are converted to CAD through <code>fx_rates</code> — USD orders at the current company rate, not the rate on the order date.
+        Revenue excludes sales tax (passed through to govt, not VCycene income). "Expected warranty" sums COGS + shipping for every non-cancelled replacement order. "Expected refunds" sums every refund approval that isn't denied. "Support labour" prices diagnosis calls at time on the call × internal attendees × the blended person-hour rate in <code>support_rates</code>, including calls the customer never joined. All amounts are converted to CAD through <code>fx_rates</code> — USD orders at the current company rate, not the rate on the order date.
       </div>
 
       <InsightsPanel insights={insights} />
@@ -73,6 +76,7 @@ export function ProfitabilityTab() {
           <option value="margin_asc">Losing money first</option>
           <option value="warranty_desc">Highest expected warranty</option>
           <option value="revenue_desc">Highest revenue</option>
+          <option value="support_desc">Most support time</option>
         </select>
         <select value={country} onChange={e => setCountry(e.target.value as CountryFilter)}>
           <option value="all">All countries</option>
@@ -118,6 +122,12 @@ function ProfitCard({ row }: { row: CustomerProfitability }) {
   const warrantyLine = row.open_replacement_count === 0
     ? fmt(row.expected_warranty_cost_cad)
     : `${fmt(row.expected_warranty_cost_cad)} (${row.open_replacement_count} in-flight)`;
+
+  // null = nobody has set support_rates.hourly_cad yet. Say so rather than
+  // printing $0.00, which would read as "these calls cost nothing".
+  const supportLine = row.support_cost_cad == null
+    ? (row.diagnosis_call_count > 0 ? 'rate not set' : fmt(0))
+    : `${fmt(row.support_cost_cad)} (${minutesLabel(row.diagnosis_minutes)})`;
 
   return (
     <div className={`${styles.profCard} ${tone}`}>
@@ -170,12 +180,33 @@ function ProfitCard({ row }: { row: CustomerProfitability }) {
         <div title="all refund approvals that haven't been denied">
           <dt>Exp. refunds</dt><dd>{refundLine}</dd>
         </div>
+        {row.diagnosis_call_count > 0 && (
+          <div title={row.support_cost_cad == null
+            ? 'Diagnosis-call labour. Set support_rates.hourly_cad to price it.'
+            : `${row.diagnosis_call_count} call(s), billed as time on the call x internal attendees x the blended person-hour rate`}>
+            <dt>Support</dt>
+            <dd>
+              {supportLine}
+              {row.diagnosis_noshow_count > 0 && (
+                <span className={styles.profUncostedHint}
+                      title="calls the customer never joined — billed like any other call, since the team's time was spent either way">
+                  {' '}({row.diagnosis_noshow_count} no-show)
+                </span>
+              )}
+            </dd>
+          </div>
+        )}
       </dl>
       <div className={styles.profCardCounts}>
         <span>{row.order_count} orders</span>
         <span>{row.replacement_count} replacements</span>
         <span>{row.refund_count} refunds</span>
         <span>{row.ticket_count} tickets</span>
+        {row.diagnosis_call_count > 0 && (
+          <span title={`${minutesLabel(row.diagnosis_minutes)} of diagnosis calls${row.diagnosis_noshow_count > 0 ? `, ${row.diagnosis_noshow_count} of them no-shows` : ''}`}>
+            {row.diagnosis_call_count} diagnosis
+          </span>
+        )}
         {row.open_warranty_ticket_count > 0 && (
           <span className={styles.profStatWarn} title="Open warranty/defect tickets with no replacement order yet — expected warranty will likely grow when these convert">
             ⚠ {row.open_warranty_ticket_count} open warranty
@@ -184,6 +215,13 @@ function ProfitCard({ row }: { row: CustomerProfitability }) {
       </div>
     </div>
   );
+}
+
+/** "1h 20m" / "45m" — minutes are stored as a decimal from the recording. */
+function minutesLabel(mins: number): string {
+  const total = Math.round(mins);
+  if (total < 60) return `${total}m`;
+  return `${Math.floor(total / 60)}h ${total % 60}m`;
 }
 
 function SummaryStat({ label, value, variant }: { label: string; value: string; variant?: 'good' | 'bad' | 'warn' }) {
@@ -205,7 +243,11 @@ function hasActivity(r: CustomerProfitability): boolean {
       || r.refund_count > 0
       || r.expected_warranty_cost_cad > 0
       || r.expected_refund_cad > 0
-      || r.open_warranty_ticket_count > 0;
+      || r.open_warranty_ticket_count > 0
+      // Support time is activity. Antonio Gonsalves and Dhruv Talwar have
+      // diagnosis calls but no orders on file — without this they'd be
+      // filtered out and their labour cost would never be visible.
+      || r.diagnosis_call_count > 0;
 }
 
 function sortFn(key: SortKey): (a: CustomerProfitability, b: CustomerProfitability) => number {
@@ -214,6 +256,8 @@ function sortFn(key: SortKey): (a: CustomerProfitability, b: CustomerProfitabili
     case 'margin_asc':    return (a, b) => a.net_margin_cad - b.net_margin_cad;
     case 'warranty_desc': return (a, b) => b.expected_warranty_cost_cad - a.expected_warranty_cost_cad;
     case 'revenue_desc':  return (a, b) => b.revenue_cad - a.revenue_cad;
+    // Sorts on minutes, not dollars, so it still ranks before a rate is set.
+    case 'support_desc':  return (a, b) => b.diagnosis_minutes - a.diagnosis_minutes;
   }
 }
 
@@ -225,9 +269,13 @@ function aggregate(rs: CustomerProfitability[]) {
       salesCost: acc.salesCost + r.sale_cogs_cad + r.sale_shipping_cad,
       warranty:  acc.warranty  + r.expected_warranty_cost_cad,
       refund:    acc.refund    + r.expected_refund_cad,
+      support:   acc.support   + (r.support_cost_cad ?? 0),
+      // Any priced call at all means the rate is live; without this the bar
+      // would show $0.00 and read as "support is free".
+      supportPriced: acc.supportPriced || r.support_cost_cad != null,
       margin:    acc.margin    + r.net_margin_cad,
     }),
-    { revenue: 0, tax: 0, salesCost: 0, warranty: 0, refund: 0, margin: 0 },
+    { revenue: 0, tax: 0, salesCost: 0, warranty: 0, refund: 0, support: 0, supportPriced: false, margin: 0 },
   );
 }
 

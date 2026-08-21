@@ -449,7 +449,11 @@ export type CustomerProfitability = {
   sale_shipping_cad: number;
   expected_warranty_cost_cad: number;
   expected_refund_cad: number;
-  // Margin = revenue - all 4 buckets (no double-count)
+  // V6 5th bucket: diagnosis-call labour, from public.diagnosis_calls.
+  // NULL — not 0 — while support_rates.hourly_cad is unset, so the card can
+  // distinguish "no calls" from "we haven't priced a person-hour yet".
+  support_cost_cad: number | null;
+  // Margin = revenue - all 5 buckets (no double-count)
   net_margin_cad: number;
   // Settled-refund subset (status='refunded' only) — shown alongside
   // expected so operators can see in-flight vs booked.
@@ -472,6 +476,13 @@ export type CustomerProfitability = {
   // Leading indicator: open warranty/defect tickets with no replacement
   // order yet — expected_warranty will grow when these convert.
   open_warranty_ticket_count: number;
+  // Every diagnosis call and the total time on them, no-shows included —
+  // support_cost_cad bills both the same way.
+  diagnosis_call_count: number;
+  diagnosis_minutes: number;
+  // Subset of diagnosis_call_count the customer never joined, not additional
+  // to it. Billed, but surfaced separately so the waste stays legible.
+  diagnosis_noshow_count: number;
   is_team_member: boolean;
 };
 
@@ -507,6 +518,11 @@ export function useCustomerProfitability(): {
         sale_shipping_cad:          Number(r.sale_shipping_cad ?? 0),
         expected_warranty_cost_cad: Number(r.expected_warranty_cost_cad ?? 0),
         expected_refund_cad:        Number(r.expected_refund_cad ?? 0),
+        // Preserve null: it means the rate is unset, not that support was free.
+        support_cost_cad:           r.support_cost_cad == null ? null : Number(r.support_cost_cad),
+        diagnosis_call_count:       Number(r.diagnosis_call_count ?? 0),
+        diagnosis_minutes:          Number(r.diagnosis_minutes ?? 0),
+        diagnosis_noshow_count:     Number(r.diagnosis_noshow_count ?? 0),
         settled_refund_cad:         Number(r.settled_refund_cad ?? 0),
         net_margin_cad:             Number(r.net_margin_cad ?? 0),
         cogs_actual_count:          Number(r.cogs_actual_count ?? 0),
