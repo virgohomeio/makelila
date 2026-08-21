@@ -27,7 +27,7 @@ function tokenValue(name: string): string | null {
 const SPACING = ['--space-1', '--space-2', '--space-3', '--space-4', '--space-5', '--space-6', '--space-7'];
 
 const REQUIRED = [
-  '--font-mono', '--font-numeric',
+  '--font-mono', '--font-numeric', '--font-display', '--font-data',
   '--font-size-title', '--font-size-section', '--font-size-body', '--font-size-meta',
   ...SPACING,
   '--color-crimson-rgb', '--color-ink-rgb', '--color-error-accent',
@@ -50,6 +50,24 @@ describe('tokens.css', () => {
 
   it.each(REQUIRED)('defines %s', (name) => {
     expect(tokenValue(name)).not.toBeNull();
+  });
+
+  // The Sales aesthetic pilot opts in by rebinding --font-sans to
+  // --font-display inside its own scope, which only works if the two stay
+  // distinct: if --font-display ever collapses onto Inter the pilot silently
+  // becomes a no-op rather than failing.
+  it('offers a display face that is not the default UI face', () => {
+    expect(tokenValue('--font-display')).toContain('Raleway');
+    expect(tokenValue('--font-sans')).toContain('Inter');
+  });
+
+  // Raleway has no tabular figures. Identifiers and money must not fall back
+  // to it, or digit columns stop aligning — see --font-data's comment.
+  it('keeps a data face with real tabular figures', () => {
+    const data = tokenValue('--font-data')!;
+    expect(data).toContain('IBM Plex Mono');
+    expect(data).toMatch(/monospace$/);
+    expect(data).not.toContain('Raleway');
   });
 
   it('leaves the LILA brand tokens untouched', () => {

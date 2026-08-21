@@ -15,6 +15,88 @@
  *      vocabularies (row chip, body banner, action-bar due pill).
  */
 
+/* ══════════════════════════════════════════════════════════════════════════
+   Sales aesthetic pilot — 2026-08-21
+
+   Scoped to this module on purpose. The other eleven surfaces stay on Inter
+   and a flat ground until this is judged; `.salesRoot` is the whole opt-in and
+   deleting it reverts the look completely.
+
+   Type is rebound as VARIABLES, not as font-family. globals.css sets
+   font-family on the universal selector `*`, so `.salesRoot { font-family }`
+   would lose to it on every descendant — custom properties inherit and `*`
+   re-resolves them per element, so this is the mechanism that actually works.
+
+   Raleway is the face VCycene Brand Style Guide.pdf specifies; the app has
+   been off-brand on Inter. Every identifier, amount and count keeps a
+   monospace with true tabular figures, because Raleway has none and this
+   queue is reconciled by scanning digit columns — rebinding --font-mono
+   carries that through every rule below without touching one of them.
+   ══════════════════════════════════════════════════════════════════════════ */
+.salesRoot {
+  --font-sans: var(--font-display);
+  --font-mono: var(--font-data);
+
+  /* Atmosphere rather than a flat fill. LILA is a composter, so the ground is
+     sediment: fine horizontal strata. Held at ~2.8% ink because this sits
+     behind a work queue, not a landing page — it should register as depth
+     without ever competing with a row.
+
+     Texture only, over the page's own colour. An earlier pass laid a
+     page→surface gradient under this and set its own padding; AppShell's
+     <main> already pads 18px, so that painted a visibly inset rectangle with
+     a seam along the bottom edge. Tinting nothing means there is no edge to
+     seam. */
+  background-image: repeating-linear-gradient(
+    180deg,
+    transparent 0 26px,
+    rgba(var(--color-ink-rgb), 0.028) 26px 27px
+  );
+}
+
+/* Raleway runs optically larger and looser than Inter at the same size; these
+   three are the places that needed re-tuning rather than a global scale bump. */
+.salesRoot .pageTitle { letter-spacing: -0.02em; font-weight: 700; }
+.salesRoot .cardHead  { letter-spacing: 0.09em; font-weight: 700; }
+.salesRoot .tab       { letter-spacing: 0.01em; }
+
+/* The layout lifts off the sediment instead of sitting flush on it. */
+.salesRoot .layout { box-shadow: var(--shadow-md); }
+
+/* ── The one orchestrated moment ─────────────────────────────────────────
+   A queue settling into place on load, once. There are deliberately no
+   hover flourishes, no ambient loops and no scroll reveals anywhere else in
+   this module: an operator reads this list for hours, and motion behind a
+   work queue is a cost that has to earn its place. --i is capped by the
+   caller so a long queue's last row never waits on a long stagger. */
+@keyframes rowSettle {
+  from { opacity: 0; transform: translateY(-3px); }
+  to   { opacity: 1; transform: none; }
+}
+.salesRoot .row {
+  animation: rowSettle 300ms cubic-bezier(0.2, 0.7, 0.3, 1) both;
+  animation-delay: calc(var(--i, 0) * 18ms);
+}
+
+@keyframes seamIn {
+  from { opacity: 0; clip-path: inset(0 0 100% 0); }
+  to   { opacity: 1; clip-path: inset(0 0 0 0); }
+}
+.salesRoot .blockers {
+  animation: seamIn 360ms cubic-bezier(0.2, 0.7, 0.3, 1) both;
+  animation-delay: 90ms;
+}
+
+/* The signature element, read as a stratum: a core-sample edge on the one
+   strip that answers this page's only question. */
+.salesRoot .blockersWarn { box-shadow: inset 3px 0 0 var(--color-warning-strong); }
+.salesRoot .blockersOk   { box-shadow: inset 3px 0 0 var(--color-success); }
+
+@media (prefers-reduced-motion: reduce) {
+  .salesRoot .row,
+  .salesRoot .blockers { animation: none; }
+}
+
 /* ── Page header ─────────────────────────────────────────────────────────── */
 .pageHead {
   display: flex;

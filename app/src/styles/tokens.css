@@ -102,6 +102,26 @@
                'SF Pro Display', 'SF Pro Text', 'Helvetica Neue', sans-serif;
   --font-logo: 'Brolink DEMO', 'Brolink', 'Inter', sans-serif;
 
+  /* Two roles added for the Sales aesthetic pilot (2026-08-21).
+     --font-sans stays Inter so the other eleven modules are untouched; a
+     module opts in by rebinding --font-sans to --font-display inside its own
+     scope. Rebinding the variable is the only mechanism that works here:
+     globals.css sets font-family on the universal selector `*`, so a scoped
+     font-family declaration loses to it on every descendant, while custom
+     properties inherit and `*` re-resolves them per element.
+
+     Raleway is not a taste call — VCycene Brand Style Guide.pdf specifies it
+     for all VCycene print and digital communications, and the app has been
+     off-brand on Inter since launch.
+
+     Raleway has NO tabular figures, which is disqualifying for a queue that
+     is reconciled by scanning digit columns. --font-data carries every
+     identifier, amount, count and date. IBM Plex Mono is a console face by
+     origin with true tabular figures, and its humanist skeleton sits with
+     Raleway rather than fighting it. */
+  --font-display: 'Raleway', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-data: 'IBM Plex Mono', ui-monospace, 'SF Mono', SFMono-Regular, Menlo, monospace;
+
   /* Sizing */
   /* Full-bleed: the app fills the whole viewport width rather than sitting
      in a centered 1200px column (operator request 2026-06-30). */

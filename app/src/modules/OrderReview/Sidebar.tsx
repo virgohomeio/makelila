@@ -151,10 +151,13 @@ export function Sidebar({
               ? `No order in ${activeTabLabel} matches “${query.trim()}”.`
               : 'No orders in this tab.'}
           </div>
-        ) : visible.map(o => (
+        ) : visible.map((o, i) => (
           <OrderRow
             key={o.id}
             order={o}
+            // Drives the load stagger. Capped at 14 so a long queue's last row
+            // isn't held behind a quarter-second run-up it gains nothing from.
+            revealIndex={Math.min(i, 14)}
             isSelected={o.id === selectedId}
             onClick={() => onSelect(o.id)}
           />

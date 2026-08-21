@@ -118,11 +118,11 @@ export default function OrderReview() {
   );
 
   if (view === 'templates') {
-    return <div>{header}<Templates /></div>;
+    return <div className={styles.salesRoot}>{header}<Templates /></div>;
   }
 
   if (view === 'upload') {
-    return <div>{header}<Upload /></div>;
+    return <div className={styles.salesRoot}>{header}<Upload /></div>;
   }
 
   // Mobile: single column. Sidebar (filter strip + order list) when no
@@ -130,17 +130,19 @@ export default function OrderReview() {
   if (isMobile) {
     if (selected) {
       return (
-        <div className={styles.layout}>
-          <MobileBackHeader
-            label={`${selected.order_ref} · ${selected.customer_name}`}
-            onBack={() => navigate('/order-review')}
-          />
-          <Detail order={selected} onAfterDisposition={afterDisposition} />
+        <div className={styles.salesRoot}>
+          <div className={styles.layout}>
+            <MobileBackHeader
+              label={`${selected.order_ref} · ${selected.customer_name}`}
+              onBack={() => navigate('/order-review')}
+            />
+            <Detail order={selected} onAfterDisposition={afterDisposition} />
+          </div>
         </div>
       );
     }
     return (
-      <div>
+      <div className={styles.salesRoot}>
         {header}
         <div className={styles.layout}>
           <Sidebar
@@ -160,7 +162,7 @@ export default function OrderReview() {
   }
 
   return (
-    <div>
+    <div className={styles.salesRoot}>
       {header}
       <div className={styles.layout}>
         <Sidebar

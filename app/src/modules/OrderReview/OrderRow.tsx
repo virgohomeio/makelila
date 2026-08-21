@@ -1,3 +1,4 @@
+import type { CSSProperties } from 'react';
 import type { Order } from '../../lib/orders';
 import { orderUrgency, AREA_TYPE_TAG } from '../../lib/orders';
 import { useQuotes } from '../../lib/freight';
@@ -20,10 +21,13 @@ export function OrderRow({
   order,
   isSelected,
   onClick,
+  revealIndex = 0,
 }: {
   order: Order;
   isSelected: boolean;
   onClick: () => void;
+  /** Position in the load stagger. See --i in OrderReview.module.css. */
+  revealIndex?: number;
 }) {
   const cls = [
     styles.row,
@@ -65,7 +69,13 @@ export function OrderRow({
   ].filter(Boolean).join(', ');
 
   return (
-    <button type="button" className={cls} onClick={onClick} aria-label={label}>
+    <button
+      type="button"
+      className={cls}
+      onClick={onClick}
+      aria-label={label}
+      style={{ '--i': revealIndex } as CSSProperties}
+    >
       <span className={styles.rowName}>{order.customer_name}</span>
 
       <span className={styles.rowState}>
