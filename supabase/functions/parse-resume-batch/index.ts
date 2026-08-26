@@ -13,14 +13,15 @@
 // then either enriches a matching stub row (name match within the same
 // posting) or inserts a brand-new full record.
 //
-// Providers: Claude is primary. When QWEN_API_KEY is also set, any HTTP
-// error from Claude (the trigger that prompted this was a 400 "credit
-// balance is too low", but 401/429/529/5xx count too) falls through to
-// Qwen via _shared/qwen.ts. Qwen's chat API has no document block, so the
-// PDF/DOCX text is extracted locally (_shared/documentText.ts) and sent
-// inline. With no Anthropic key at all, Qwen runs directly. A successful
-// Claude reply that isn't valid JSON is NOT retried on Qwen — that's a
-// model-output problem, not an availability one.
+// Providers: Claude, then Qwen, then OpenAI — whichever of them have keys
+// configured, in that order (override with RESUME_PROVIDER_ORDER). Any HTTP
+// or network error from one falls through to the next: the trigger that
+// prompted this was a 400 "credit balance is too low", but 401/429/529/5xx
+// count too. Neither fallback's chat API takes a document, so the PDF/DOCX
+// text is extracted locally (_shared/documentText.ts) and sent inline; both
+// speak the same OpenAI-compatible wire format, so they share one client
+// (_shared/openaiCompat.ts). A successful reply that isn't valid JSON is NOT
+// retried elsewhere — that's a model-output problem, not an availability one.
 // Design: docs/superpowers/specs/2026-08-26-hiring-resume-qwen-fallback-design.md
 //
 // Auth: requires a user JWT (rejects cron-secret callers) — this is
@@ -29,23 +30,44 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { corsHeaders } from '../_shared/cors.ts';
 import { authenticate } from '../_shared/auth.ts';
-import { chatCompletion, qwenConfigFromEnv } from '../_shared/qwen.ts';
+import { chatCompletion } from '../_shared/openaiCompat.ts';
+import { qwenConfigFromEnv, type ProviderConfig } from '../_shared/qwen.ts';
+import { openaiConfigFromEnv } from '../_shared/openai.ts';
 import { extractDocumentText } from '../_shared/documentText.ts';
 
 const ANTHROPIC_API = 'https://api.anthropic.com/v1/messages';
 const MODEL = 'claude-haiku-4-5-20251001';
 
-export type ResumeProvider = 'claude' | 'qwen';
+export type ResumeProvider = 'claude' | 'qwen' | 'openai';
 
-/** Which providers to try, in order, given which keys are configured.
- *  Claude stays primary; Qwen is only ever a fallback (or the sole option
- *  when the Anthropic key is missing). Empty string counts as unset so a
- *  `supabase secrets set QWEN_API_KEY=` typo can't half-enable it. */
-export function pickProviders(anthropicKey: string | undefined, qwenKey: string | undefined): ResumeProvider[] {
-  const providers: ResumeProvider[] = [];
-  if (anthropicKey) providers.push('claude');
-  if (qwenKey) providers.push('qwen');
-  return providers;
+/** Claude first (it reads the file directly, no local text extraction), then
+ *  the OpenAI-compatible fallbacks. */
+export const DEFAULT_PROVIDER_ORDER: ResumeProvider[] = ['claude', 'qwen', 'openai'];
+
+export const PROVIDER_LABELS: Record<ResumeProvider, string> =
+  { claude: 'Claude', qwen: 'Qwen', openai: 'OpenAI' };
+
+/** Parses RESUME_PROVIDER_ORDER (e.g. "openai,claude") into a try-order.
+ *  Unrecognised names are ignored and any provider the operator didn't name
+ *  is appended in default order — reordering should never silently disable a
+ *  provider whose key is configured, and a typo should degrade to the
+ *  default rather than to nothing. */
+export function parseProviderOrder(csv: string | undefined): ResumeProvider[] {
+  const named = (csv ?? '').split(',')
+    .map(s => s.trim().toLowerCase())
+    .filter((s): s is ResumeProvider => (DEFAULT_PROVIDER_ORDER as string[]).includes(s));
+  const deduped = [...new Set(named)];
+  return [...deduped, ...DEFAULT_PROVIDER_ORDER.filter(p => !deduped.includes(p))];
+}
+
+/** Which providers to actually try, in order: the configured order filtered
+ *  down to the ones that have a key. Empty string counts as unset so a
+ *  `supabase secrets set QWEN_API_KEY=` typo can't half-enable one. */
+export function pickProviders(
+  keys: Partial<Record<ResumeProvider, string | undefined>>,
+  orderCsv?: string,
+): ResumeProvider[] {
+  return parseProviderOrder(orderCsv).filter(p => !!keys[p]);
 }
 
 /** Parses the JSON a model returned for the scoring prompt. Both providers
@@ -151,10 +173,14 @@ async function handle(req: Request): Promise<Response> {
   const serviceKey  = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
   const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY');
   const qwen = qwenConfigFromEnv();
+  const openai = openaiConfigFromEnv();
   if (!supabaseUrl || !serviceKey) return json({ error: 'Missing SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY' }, 500);
-  const providers = pickProviders(anthropicKey, qwen?.apiKey);
+  const providers = pickProviders(
+    { claude: anthropicKey, qwen: qwen?.apiKey, openai: openai?.apiKey },
+    Deno.env.get('RESUME_PROVIDER_ORDER'),
+  );
   if (providers.length === 0) {
-    return json({ error: 'No resume-parsing provider configured. Set ANTHROPIC_API_KEY (primary) and/or QWEN_API_KEY (fallback) via supabase secrets set.' }, 500);
+    return json({ error: 'No resume-parsing provider configured. Set ANTHROPIC_API_KEY, QWEN_API_KEY, or OPENAI_API_KEY via supabase secrets set.' }, 500);
   }
 
   const admin = createClient(supabaseUrl, serviceKey);
@@ -223,7 +249,7 @@ async function handle(req: Request): Promise<Response> {
     try {
       textBlock = candidate === 'claude'
         ? await extractWithClaude(anthropicKey!, input.mime_type, fileBytes, prompt)
-        : await extractWithQwen(qwen!, input.mime_type, fileBytes, prompt);
+        : await extractWithTextProvider(candidate, candidate === 'qwen' ? qwen! : openai!, input.mime_type, fileBytes, prompt);
       provider = candidate;
       break;
     } catch (e) {
@@ -233,12 +259,13 @@ async function handle(req: Request): Promise<Response> {
     }
   }
   if (textBlock === null || provider === null) {
-    // Two failures means Claude then Qwen (Qwen is only ever second).
-    const [primary, fallback] = failures;
-    const error = fallback ? `${primary}; Qwen fallback also failed: ${fallback}` : primary;
+    // Each message already names its provider, so joining them tells the
+    // operator which key(s) need attention without any extra labelling.
+    const [primary, ...rest] = failures;
+    const error = rest.length ? `${primary}; then ${rest.join('; then ')}` : primary;
     return json({ error, providers_tried: providers }, 502);
   }
-  const label = provider === 'claude' ? 'Claude' : 'Qwen';
+  const label = PROVIDER_LABELS[provider];
 
   let extracted: ExtractedResume;
   try {
@@ -336,20 +363,27 @@ async function extractWithClaude(
   return claudeJson.content?.find(c => c.type === 'text')?.text ?? '';
 }
 
-/** Fallback provider: Qwen's chat API has no document block, so extract the
- *  text locally and send it inline. A scanned (image-only) PDF yields no
- *  text and is reported as such rather than sent empty. Throws Error("Qwen
- *  …") like the Claude path so the provider loop can record it. */
-async function extractWithQwen(
-  qwen: { apiKey: string; baseUrl: string; model: string },
+/** Fallback providers: neither chat API takes a document, so extract the text
+ *  locally and send it inline. A scanned (image-only) PDF yields no text and
+ *  is reported as such rather than sent empty. Throws Error("<Label> …") like
+ *  the Claude path so the provider loop can record it.
+ *
+ *  No max_tokens is set: reasoning models reject the parameter outright, and
+ *  capping a JSON reply risks truncating it into something unparseable —
+ *  worse than letting a short, tightly-prompted response finish. */
+async function extractWithTextProvider(
+  provider: Exclude<ResumeProvider, 'claude'>, cfg: ProviderConfig,
   mimeType: ParseResumeInput['mime_type'], fileBytes: ArrayBuffer, prompt: string,
 ): Promise<string> {
+  const label = PROVIDER_LABELS[provider];
+  const prefix = provider.toUpperCase();
   let resumeText: string;
   try { resumeText = await extractDocumentText(fileBytes, mimeType); }
-  catch (e) { throw new Error(`Qwen fallback could not read the file: ${(e as Error)?.message ?? String(e)}`); }
-  if (!resumeText) throw new Error('Qwen fallback found no text in this file (scanned/image-only PDF?)');
+  catch (e) { throw new Error(`${label} could not read the file: ${(e as Error)?.message ?? String(e)}`); }
+  if (!resumeText) throw new Error(`${label} found no text in this file (scanned/image-only PDF?)`);
   return chatCompletion({
-    apiKey: qwen.apiKey, baseUrl: qwen.baseUrl, model: qwen.model,
+    label, apiKey: cfg.apiKey, baseUrl: cfg.baseUrl, model: cfg.model,
+    keyEnvVar: `${prefix}_API_KEY`, baseUrlEnvVar: `${prefix}_BASE_URL`, modelEnvVar: `${prefix}_MODEL`,
     system: 'You screen resumes for a hiring team. Output strict JSON only — no markdown, no commentary.',
     user: buildTextResumeMessage(prompt, resumeText),
   });

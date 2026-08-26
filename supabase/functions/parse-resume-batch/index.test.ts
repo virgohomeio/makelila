@@ -43,24 +43,46 @@ Deno.test('requireLeadershipRole: rejects a missing/null role with 403', () => {
 });
 
 import { assertThrows } from 'https://deno.land/std@0.224.0/assert/mod.ts';
-import { buildTextResumeMessage, parseModelJson, pickProviders } from './index.ts';
+import { buildTextResumeMessage, parseModelJson, parseProviderOrder, pickProviders } from './index.ts';
 
-Deno.test('pickProviders: Claude first, Qwen as fallback, when both keys are set', () => {
-  assertEquals(pickProviders('sk-ant', 'sk-qwen'), ['claude', 'qwen']);
+const ALL = { claude: 'sk-ant', qwen: 'sk-ws-q', openai: 'sk-proj-o' };
+
+Deno.test('pickProviders: Claude, then Qwen, then OpenAI when all three keys are set', () => {
+  assertEquals(pickProviders(ALL), ['claude', 'qwen', 'openai']);
 });
 
-Deno.test('pickProviders: Claude only when no Qwen key (pre-fallback behaviour)', () => {
-  assertEquals(pickProviders('sk-ant', undefined), ['claude']);
-  assertEquals(pickProviders('sk-ant', ''), ['claude']);
+Deno.test('pickProviders: skips providers with no key, keeping relative order', () => {
+  assertEquals(pickProviders({ claude: 'sk-ant', openai: 'sk-proj-o' }), ['claude', 'openai']);
+  assertEquals(pickProviders({ qwen: 'sk-ws-q' }), ['qwen']);
 });
 
-Deno.test('pickProviders: Qwen directly when the Anthropic key is missing', () => {
-  assertEquals(pickProviders(undefined, 'sk-qwen'), ['qwen']);
-  assertEquals(pickProviders('', 'sk-qwen'), ['qwen']);
+Deno.test('pickProviders: an empty-string key counts as unset', () => {
+  assertEquals(pickProviders({ claude: 'sk-ant', qwen: '', openai: undefined }), ['claude']);
 });
 
-Deno.test('pickProviders: empty when neither key is configured', () => {
-  assertEquals(pickProviders(undefined, undefined), []);
+Deno.test('pickProviders: empty when no key is configured', () => {
+  assertEquals(pickProviders({}), []);
+  assertEquals(pickProviders({ claude: undefined, qwen: '', openai: '' }), []);
+});
+
+Deno.test('pickProviders: RESUME_PROVIDER_ORDER reorders the chain', () => {
+  assertEquals(pickProviders(ALL, 'openai,claude,qwen'), ['openai', 'claude', 'qwen']);
+  assertEquals(pickProviders(ALL, 'qwen'), ['qwen', 'claude', 'openai']);
+});
+
+Deno.test('parseProviderOrder: defaults when unset, blank, or all-garbage', () => {
+  assertEquals(parseProviderOrder(undefined), ['claude', 'qwen', 'openai']);
+  assertEquals(parseProviderOrder(''), ['claude', 'qwen', 'openai']);
+  assertEquals(parseProviderOrder('gemini,llama'), ['claude', 'qwen', 'openai']);
+});
+
+Deno.test('parseProviderOrder: unnamed providers are appended, never dropped', () => {
+  assertEquals(parseProviderOrder('openai'), ['openai', 'claude', 'qwen']);
+  assertEquals(parseProviderOrder('openai,typo'), ['openai', 'claude', 'qwen']);
+});
+
+Deno.test('parseProviderOrder: tolerates whitespace, case, and duplicates', () => {
+  assertEquals(parseProviderOrder(' OpenAI , claude ,openai'), ['openai', 'claude', 'qwen']);
 });
 
 Deno.test('parseModelJson: parses bare JSON', () => {
