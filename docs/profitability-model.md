@@ -73,8 +73,9 @@ margin, LTV and payback figure moves with them — no code change needed.
 
 **Freight is the bill, not the quote.** `shipments.billed_amount` is what
 Freightcom quoted at booking and is never revised, so four batch fuel-surcharge
-invoices raised later were invisible — 30 of 126 shipments understated by
-$391.26 in total. Bucket 2 now prefers `shipment_invoiced_charges.applicable_cad`,
+invoices raised later were invisible — 46 of 169 shipments understated. The
+largest single correction is UPS 1ZV56D26DK11111494 (Phayvanh
+Nanthavongdouangsy), quoted $173.40 and finally billed $400.92. Bucket 2 now prefers `shipment_invoiced_charges.applicable_cad`,
 which is net of both later adjustments and refunds.
 
 The coalesce happens **per shipment, not per order**. Ten sale orders carry more
@@ -87,8 +88,8 @@ repair parts that the customer keeps — the postage was free with Prime. They
 arrived labelled "Amazon shipping costs", but filing them under Shipping would
 corrupt every freight-per-unit figure on the tab, so they sit in their own
 bucket beside cost of goods. A recipient who matches no customer record is held
-at `customer_id is null` and reported as unattributed rather than dropped:
-one today, Kaiti Klucas, who has freight and an Amazon order but no customer row.
+at `customer_id is null` and reported as unattributed rather than dropped.
+None today: the one case, Kaiti Klucas, now has a customer record.
 
 **The freight gap is measured at customer level.** An order still in the queue
 owes no freight, so bucket 2's `shipping_uncosted_count` only counts orders that
