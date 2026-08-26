@@ -70,6 +70,21 @@ nothing else is added.
 Buckets 7–9 are rated at $0 today. Set them in `profitability_rates` and every
 margin, LTV and payback figure moves with them — no code change needed.
 
+**The freight gap is measured at customer level.** An order still in the queue
+owes no freight, so bucket 2's `shipping_uncosted_count` only counts orders that
+shipped. Asking that per order via `units.customer_order_ref` was wrong: the
+column carries 80 of 176 shipped units, so the gap read 3 when it was 51.
+V10 asks it of the customer instead — did this customer receive a machine? —
+which a repeat buyer can over-count. Deliberate: an over-estimate that says so
+beats a silent zero. `units_shipped_count` keeps the strict per-order trace,
+because it is shown to operators as "Units shipped".
+
+Roughly 30 of the flagged orders predate Freightcom (first shipment
+2026-01-26) and went out via Canpar/GLS. **No table holds their freight** — it
+needs a manual backfill with `shipping_cost_basis = 'legacy_backfill'`. Nothing
+is imputed in the meantime; the dollars stay absent and the margin stays an
+upper bound.
+
 **Return handling is not the restocking fee.** Bucket 6 is what it costs *us* to
 take a machine back. `refund_approvals.restocking_fee_usd` is a fee charged *to
 the customer* and already nets out of bucket 4.

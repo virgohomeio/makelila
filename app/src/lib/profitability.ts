@@ -371,7 +371,10 @@ export function costCoverage(row: CustomerProfitability): {
 } {
   const gaps: string[] = [];
   if (row.shipping_uncosted_count > 0) {
-    gaps.push(`${row.shipping_uncosted_count} shipped order(s) with no freight invoice`);
+    // "Appear to have shipped": the view answers this at customer level, since
+    // units.customer_order_ref is too sparse to answer it per order. A repeat
+    // buyer can over-count. Word it as evidence, not as a fact we traced.
+    gaps.push(`${row.shipping_uncosted_count} order(s) that appear to have shipped with no freight invoice`);
   }
   if (row.cogs_modelled_count > 0) {
     gaps.push(`${row.cogs_modelled_count} order(s) costed from the roadmap projection, not an invoice`);
