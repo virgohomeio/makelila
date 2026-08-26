@@ -52,13 +52,13 @@ denominator.
 
 ## Cost buckets
 
-Nine buckets. Each dollar belongs to exactly one; they sum to variable cost and
+Ten buckets. Each dollar belongs to exactly one; they sum to variable cost and
 nothing else is added.
 
 | # | Bucket | Formula | Source | Basis |
 |---|---|---|---|---|
 | 1 | Product COGS | `Σ cogs_usd` over sale orders | `orders.cogs_usd` | Actual where `cogs_basis = 'batch_actual'`, **estimated** where `'schedule'` (V-SAX roadmap projection) |
-| 2 | Shipping | `Σ shipping_cost_usd` over sale orders | Freightcom invoices via `orders` | Actual; **incomplete** where `shipping_uncosted_count > 0` |
+| 2 | Shipping | Per shipment: invoiced charge where on file, else the booking quote | `shipment_invoiced_charges`, else `orders.shipping_cost_usd` | Actual; **incomplete** where `shipping_uncosted_count > 0` |
 | 3 | Warranty | `Σ (cogs + shipping)` over non-cancelled replacement orders | `orders` where `kind = 'replacement'` | Actual |
 | 4 | Refunds | `Σ refund_amount` over approvals not denied | `refund_approvals` | Actual (expected) + settled subset |
 | 5 | Support | `Σ duration × internal attendees × person-hour rate` | `diagnosis_calls`, `support_rates` | Estimated — no-shows billed, since the team's time was spent either way |
@@ -66,9 +66,29 @@ nothing else is added.
 | 7 | Payment fees | `charged gross (incl. tax) × payment_fee_pct` | `profitability_rates` | **Unpriced — rate is 0** |
 | 8 | Sales commission | `revenue × sales_commission_pct` | `profitability_rates` | **Unpriced — rate is 0** |
 | 9 | Installation | `sale orders × installation_cost_per_unit_cad` | `profitability_rates` | **Unpriced — rate is 0**; LILA ships self-install, so 0 may also be correct |
+| 10 | Consumables & parts | `Σ amount` over the customer's retail purchases | `external_item_costs` | Actual |
 
 Buckets 7–9 are rated at $0 today. Set them in `profitability_rates` and every
 margin, LTV and payback figure moves with them — no code change needed.
+
+**Freight is the bill, not the quote.** `shipments.billed_amount` is what
+Freightcom quoted at booking and is never revised, so four batch fuel-surcharge
+invoices raised later were invisible — 30 of 126 shipments understated by
+$391.26 in total. Bucket 2 now prefers `shipment_invoiced_charges.applicable_cad`,
+which is net of both later adjustments and refunds.
+
+The coalesce happens **per shipment, not per order**. Ten sale orders carry more
+than one shipment and five are only partly invoiced; swapping an order's whole
+freight for its invoiced subset silently deletes the uninvoiced legs, and reads
+as a saving where an invoice true-up should only ever cost more.
+
+**Bucket 10 is not freight.** The Amazon orders behind it buy worm castings and
+repair parts that the customer keeps — the postage was free with Prime. They
+arrived labelled "Amazon shipping costs", but filing them under Shipping would
+corrupt every freight-per-unit figure on the tab, so they sit in their own
+bucket beside cost of goods. A recipient who matches no customer record is held
+at `customer_id is null` and reported as unattributed rather than dropped:
+one today, Kaiti Klucas, who has freight and an Amazon order but no customer row.
 
 **The freight gap is measured at customer level.** An order still in the queue
 owes no freight, so bucket 2's `shipping_uncosted_count` only counts orders that
@@ -94,7 +114,7 @@ the customer* and already nets out of bucket 4.
 ## Contribution margin
 
 ```
-Contribution margin   = revenue − Σ(buckets 1…9)
+Contribution margin   = revenue − Σ(buckets 1…10)
 Contribution margin % = contribution margin ÷ revenue      (null when revenue = 0)
 ```
 
@@ -259,7 +279,8 @@ Listed in the UI under "What these numbers do and don't cover", and in
 ## Data integrity
 
 - **No double counting.** Each cost belongs to exactly one bucket; a test asserts
-  the nine sum with powers of two so a duplicated bucket changes the total.
+  the ten sum with powers of two so a duplicated bucket changes the total, and a
+  second test pins consumables out of the shipping bucket.
 - **Refunds reduce margin** through bucket 4, not by editing revenue — the
   original sale stays visible.
 - **Cancelled replacement orders are excluded** from warranty cost.

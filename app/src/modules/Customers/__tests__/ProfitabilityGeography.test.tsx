@@ -35,6 +35,7 @@ function row(over: Partial<CustomerProfitability> = {}): CustomerProfitability {
     return_handling_cad: 0, return_stocking_cad: 0,
     return_inspection_cad: 0, return_freight_cad: 0, returns_handled: 0,
     payment_fee_cad: 0, sales_commission_cad: 0, installation_cost_cad: 0,
+    consumables_cost_cad: 0, consumable_item_count: 0, shipping_invoiced_count: 0,
     net_margin_cad: 500,
     order_count: 1, units_shipped_count: 1,
     replacement_count: 0, open_replacement_count: 0,

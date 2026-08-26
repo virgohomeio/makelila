@@ -29,6 +29,7 @@ function row(over: Partial<CustomerProfitability> = {}): CustomerProfitability {
     return_handling_cad: 0, return_stocking_cad: 0,
     return_inspection_cad: 0, return_freight_cad: 0, returns_handled: 0,
     payment_fee_cad: 0, sales_commission_cad: 0, installation_cost_cad: 0,
+    consumables_cost_cad: 0, consumable_item_count: 0, shipping_invoiced_count: 0,
     net_margin_cad: 0,
     order_count: 0, units_shipped_count: 0,
     replacement_count: 0, open_replacement_count: 0,
@@ -106,14 +107,23 @@ describe('revenue', () => {
 // ── Costs ───────────────────────────────────────────────────────────────────
 
 describe('cost buckets', () => {
-  it('sums exactly the nine buckets and nothing else', () => {
+  it('sums exactly the ten buckets and nothing else', () => {
     const costs = variableCosts(row({
       sale_cogs_cad: 1, sale_shipping_cad: 2, expected_warranty_cost_cad: 4,
       expected_refund_cad: 8, support_cost_cad: 16, return_handling_cad: 32,
       payment_fee_cad: 64, sales_commission_cad: 128, installation_cost_cad: 256,
+      consumables_cost_cad: 512,
     }));
     // Powers of two: any bucket dropped or double-counted changes the total.
-    expect(sumCosts(costs)).toBe(511);
+    expect(sumCosts(costs)).toBe(1023);
+  });
+
+  it('keeps consumables out of shipping', () => {
+    // Amazon worm castings are product the customer keeps, not freight. If they
+    // ever land in `shipping`, every freight-per-unit figure on the tab is wrong.
+    const costs = variableCosts(row({ sale_shipping_cad: 40, consumables_cost_cad: 20 }));
+    expect(costs.shipping).toBe(40);
+    expect(costs.consumables).toBe(20);
   });
 
   it('counts an unpriced support cost as zero without crashing', () => {

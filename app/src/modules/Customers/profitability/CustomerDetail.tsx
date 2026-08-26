@@ -65,7 +65,9 @@ export function CustomerDetail({
           <h4>Costs</h4>
           <dl className={styles.detailList}>
             <Row label="Product COGS"    value={money(metrics.costs.cogs)} />
-            <Row label="Shipping"        value={money(metrics.costs.shipping)} />
+            <Row label="Shipping"        value={row.shipping_invoiced_count > 0
+                   ? `${money(metrics.costs.shipping)} · ${row.shipping_invoiced_count} invoiced`
+                   : money(metrics.costs.shipping)} />
             <Row label="Warranty"        value={money(metrics.costs.warranty)} />
             <Row label="Refunds"         value={money(metrics.costs.refunds)} />
             <Row label="Support"         value={row.support_cost_cad == null && row.diagnosis_call_count > 0
@@ -75,6 +77,10 @@ export function CustomerDetail({
             <Row label="Payment fees"    value={<Unpriced amount={metrics.costs.paymentFees} />} />
             <Row label="Sales commission" value={<Unpriced amount={metrics.costs.commission} />} />
             <Row label="Installation"    value={<Unpriced amount={metrics.costs.installation} />} />
+            <Row label="Consumables & parts"
+                 value={row.consumable_item_count > 0
+                   ? `${money(metrics.costs.consumables)} · ${row.consumable_item_count} item(s)`
+                   : money(metrics.costs.consumables)} />
             <Row label="Variable costs"  value={money(metrics.variableCosts)} strong />
             <Row label="CAC"             value={cacCell(metrics)} />
           </dl>

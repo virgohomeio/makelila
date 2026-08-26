@@ -30,6 +30,7 @@ function row(over: Partial<CustomerProfitability> = {}): CustomerProfitability {
     initial_revenue_cad: 1000, initial_discount_cad: 0, upsell_revenue_cad: 0,
     recurring_revenue_cad: 0,
     payment_fee_cad: 0, sales_commission_cad: 0, installation_cost_cad: 0,
+    consumables_cost_cad: 0, consumable_item_count: 0, shipping_invoiced_count: 0,
     units_shipped_count: 1,
     tax_collected_cad: 0,
     sale_cogs_cad: 400, sale_shipping_cad: 100,

@@ -8,11 +8,14 @@
  *
  *  Three rules this module holds to, because the numbers get quoted:
  *
+ *  0. **Ten buckets, one home per dollar.** COGS, freight, warranty, refunds,
+ *     support labour, return handling, payment fees, commission, installation,
+ *     consumables.
  *  1. **Nothing is invented.** A cost we have never priced comes back with a
  *     basis of 'unpriced' next to its zero, and every caller is expected to
  *     say so. A metric with no data at all returns null, not 0.
  *  2. **No double counting.** Each dollar of cost belongs to exactly one
- *     bucket. The nine buckets sum to variable cost and nothing else adds in.
+ *     bucket. The ten buckets sum to variable cost and nothing else adds in.
  *  3. **Realized and projected never mix.** Realized LTV is margin banked to
  *     date. Projected LTV adds an explicitly-flagged assumption on top, and
  *     the two are separate fields so a chart cannot blur them.
@@ -213,6 +216,7 @@ export type CustomerMetrics = {
     paymentFees: number;
     commission: number;
     installation: number;
+    consumables: number;
   };
   variableCosts: number;
   contributionMargin: number;
@@ -238,7 +242,13 @@ export type CustomerMetrics = {
 /** Every cost we can attribute to this customer, one bucket each.
  *  A null support or return-handling cost means the rate is unset — counted as
  *  0 here so the arithmetic works, and flagged by `costCoverage` so the UI can
- *  say the margin is an upper bound. */
+ *  say the margin is an upper bound.
+ *
+ *  `consumables` is bucket 10: parts and consumables bought at retail and
+ *  drop-shipped to the customer. It is cost of goods, not freight — the Amazon
+ *  orders behind it buy worm castings the customer keeps, and the postage on
+ *  them was free. Filing them under `shipping` would corrupt every
+ *  freight-per-unit figure on the tab. */
 export function variableCosts(row: CustomerProfitability): CustomerMetrics['costs'] {
   return {
     cogs:           row.sale_cogs_cad ?? 0,
@@ -250,13 +260,14 @@ export function variableCosts(row: CustomerProfitability): CustomerMetrics['cost
     paymentFees:    row.payment_fee_cad ?? 0,
     commission:     row.sales_commission_cad ?? 0,
     installation:   row.installation_cost_cad ?? 0,
+    consumables:    row.consumables_cost_cad ?? 0,
   };
 }
 
 export function sumCosts(costs: CustomerMetrics['costs']): number {
   return costs.cogs + costs.shipping + costs.warranty + costs.refunds
        + costs.support + costs.returnHandling + costs.paymentFees
-       + costs.commission + costs.installation;
+       + costs.commission + costs.installation + costs.consumables;
 }
 
 /** Whole days between two dates, or null if either is missing. */
@@ -604,7 +615,7 @@ export function profitDistribution(metrics: CustomerMetrics[]): ProfitBucket[] {
   }));
 }
 
-/** The nine cost buckets summed across a set of customers. */
+/** The ten cost buckets summed across a set of customers. */
 export function aggregateCosts(metrics: CustomerMetrics[]): CustomerMetrics['costs'] {
   return metrics.reduce<CustomerMetrics['costs']>((acc, m) => ({
     cogs:           acc.cogs           + m.costs.cogs,
@@ -616,8 +627,10 @@ export function aggregateCosts(metrics: CustomerMetrics[]): CustomerMetrics['cos
     paymentFees:    acc.paymentFees    + m.costs.paymentFees,
     commission:     acc.commission     + m.costs.commission,
     installation:   acc.installation   + m.costs.installation,
+    consumables:    acc.consumables    + m.costs.consumables,
   }), { cogs: 0, shipping: 0, warranty: 0, refunds: 0, support: 0,
-        returnHandling: 0, paymentFees: 0, commission: 0, installation: 0 });
+        returnHandling: 0, paymentFees: 0, commission: 0, installation: 0,
+        consumables: 0 });
 }
 
 export type WaterfallStep = {
@@ -646,6 +659,7 @@ export function waterfall(metrics: CustomerMetrics[], cacTotal: number): Waterfa
     { label: 'Payment fees',     value: -c.paymentFees,      isTotal: false },
     { label: 'Commission',       value: -c.commission,       isTotal: false },
     { label: 'Installation',     value: -c.installation,     isTotal: false },
+    { label: 'Consumables',      value: -c.consumables,      isTotal: false },
     { label: 'Contribution',     value: contribution,        isTotal: true },
     { label: 'CAC',              value: -cacTotal,           isTotal: false },
     { label: 'Lifetime profit',  value: contribution - cacTotal, isTotal: true },

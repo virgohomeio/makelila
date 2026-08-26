@@ -495,7 +495,12 @@ export type CustomerProfitability = {
   payment_fee_cad: number;
   sales_commission_cad: number;
   installation_cost_cad: number;
-  // Margin = revenue - all 9 buckets (no double-count)
+  // Bucket 10: consumables and repair parts bought at retail and drop-shipped
+  // to the customer (Amazon worm castings, jumper caps). Cost of goods, not
+  // freight -- the money buys product the customer keeps.
+  consumables_cost_cad: number;
+  consumable_item_count: number;
+  // Margin = revenue - all 10 buckets (no double-count)
   net_margin_cad: number;
   // Settled-refund subset (status='refunded' only) — shown alongside
   // expected so operators can see in-flight vs booked.
@@ -515,6 +520,9 @@ export type CustomerProfitability = {
   cogs_modelled_count: number;
   shipping_costed_count: number;
   shipping_uncosted_count: number;
+  // Sale orders whose freight came from a Freightcom invoice rather than the
+  // booking quote. The quote is never revised when an adjustment lands.
+  shipping_invoiced_count: number;
   refund_count: number;
   in_flight_refund_count: number;
   ticket_count: number;
@@ -567,6 +575,9 @@ export function useCustomerProfitability(): {
         payment_fee_cad:            Number(r.payment_fee_cad ?? 0),
         sales_commission_cad:       Number(r.sales_commission_cad ?? 0),
         installation_cost_cad:      Number(r.installation_cost_cad ?? 0),
+        consumables_cost_cad:       Number(r.consumables_cost_cad ?? 0),
+        consumable_item_count:      Number(r.consumable_item_count ?? 0),
+        shipping_invoiced_count:    Number(r.shipping_invoiced_count ?? 0),
         units_shipped_count:        Number(r.units_shipped_count ?? 0),
         acquisition_channel:        (r.acquisition_channel as string) ?? 'unknown',
         tax_collected_cad:          Number(r.tax_collected_cad ?? 0),
