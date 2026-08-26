@@ -41,3 +41,50 @@ Deno.test('requireLeadershipRole: rejects a missing/null role with 403', () => {
   assertEquals(requireLeadershipRole(null)?.status, 403);
   assertEquals(requireLeadershipRole(undefined)?.status, 403);
 });
+
+import { assertThrows } from 'https://deno.land/std@0.224.0/assert/mod.ts';
+import { buildTextResumeMessage, parseModelJson, pickProviders } from './index.ts';
+
+Deno.test('pickProviders: Claude first, Qwen as fallback, when both keys are set', () => {
+  assertEquals(pickProviders('sk-ant', 'sk-qwen'), ['claude', 'qwen']);
+});
+
+Deno.test('pickProviders: Claude only when no Qwen key (pre-fallback behaviour)', () => {
+  assertEquals(pickProviders('sk-ant', undefined), ['claude']);
+  assertEquals(pickProviders('sk-ant', ''), ['claude']);
+});
+
+Deno.test('pickProviders: Qwen directly when the Anthropic key is missing', () => {
+  assertEquals(pickProviders(undefined, 'sk-qwen'), ['qwen']);
+  assertEquals(pickProviders('', 'sk-qwen'), ['qwen']);
+});
+
+Deno.test('pickProviders: empty when neither key is configured', () => {
+  assertEquals(pickProviders(undefined, undefined), []);
+});
+
+Deno.test('parseModelJson: parses bare JSON', () => {
+  assertEquals(parseModelJson('{"full_name":"Ada"}'), { full_name: 'Ada' });
+});
+
+Deno.test('parseModelJson: strips ```json fences and surrounding whitespace', () => {
+  assertEquals(parseModelJson('\n```json\n{"full_name":"Ada"}\n```\n'), { full_name: 'Ada' });
+  assertEquals(parseModelJson('```\n{"full_name":"Ada"}\n```'), { full_name: 'Ada' });
+});
+
+Deno.test('parseModelJson: throws on non-JSON output', () => {
+  assertThrows(() => parseModelJson('Sorry, I cannot read this file.'));
+  assertThrows(() => parseModelJson(''));
+});
+
+Deno.test('buildTextResumeMessage: wraps the extracted resume text ahead of the scoring prompt', () => {
+  const msg = buildTextResumeMessage('Score this.', 'Ada Lovelace\nada@example.com');
+  assertEquals(msg.indexOf('Ada Lovelace') < msg.indexOf('Score this.'), true);
+  assertEquals(msg.includes('ada@example.com'), true);
+});
+
+Deno.test('buildTextResumeMessage: caps very long resume text so one bad file cannot blow the context', () => {
+  const msg = buildTextResumeMessage('Score this.', 'x'.repeat(200_000));
+  assertEquals(msg.length < 100_000, true);
+  assertEquals(msg.includes('Score this.'), true);
+});
