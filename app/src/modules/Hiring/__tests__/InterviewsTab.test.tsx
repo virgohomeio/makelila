@@ -3,6 +3,7 @@ import { render, screen, fireEvent, within } from '@testing-library/react';
 import { InterviewsTab } from '../InterviewsTab';
 import {
   useCandidates, useInterviews, useShortlistedCandidates, markScreeningInviteSent,
+  rejectCandidate, recordProjectScores,
   type Candidate, type JobPosting,
 } from '../../../lib/hiring';
 import { useEmailTemplate, useSchedulingUrl, type EmailTemplate } from '../../../lib/templates';
@@ -16,6 +17,9 @@ vi.mock('../../../lib/hiring', () => ({
   recordInterviewDecision: vi.fn(),
   markScreeningInviteSent: vi.fn(async () => {}),
   getCurrentUserId: vi.fn(),
+  rejectCandidate: vi.fn(async () => {}),
+  recordProjectScores: vi.fn(async () => {}),
+  PROJECT_QUESTIONS: ['Question 1', 'Question 2'],
 }));
 
 // renderTemplate is pure string substitution — the real one is kept here rather
@@ -57,8 +61,8 @@ function candidate(over: Partial<Candidate> & { id: string; full_name: string })
     posting_id: 'p1', email: null, phone: null,
     source: 'indeed', resume_url: 'p1/resume.pdf', ingested_via: 'manual_upload',
     enrichment_status: 'resume_attached', indeed_relay_email: null, indeed_dashboard_url: null,
-    qualifications_tags: [], stage_index: 0, scores: {}, suggested_scores: null,
-    applied_at: '2026-07-01T00:00:00Z', rejected_at: null, hired_at: null,
+    qualifications_tags: [], stage_index: 0, scores: {}, suggested_scores: null, project_scores: {},
+    applied_at: '2026-07-01T00:00:00Z', rejected_at: null, rejection_stage: null, hired_at: null,
     screening_invite_sent_at: null, screening_invite_sent_by: null,
     ...over,
   };
@@ -304,5 +308,41 @@ describe('InterviewsTab screening invite draft', () => {
     const panel = expandCandidate();
 
     expect(within(panel).getByText(/Screening interview invite template not found/)).toBeTruthy();
+  });
+});
+
+describe('InterviewsTab interview-stage rejection', () => {
+  it('rejects the candidate at the interview stage, apart from resume-screen rejections', () => {
+    withCandidates([shortlisted()]);
+    render(<InterviewsTab />);
+    const panel = expandCandidate();
+
+    fireEvent.click(within(panel).getByRole('button', { name: 'Reject' }));
+
+    expect(rejectCandidate).toHaveBeenCalledWith('c1', 'interview');
+  });
+});
+
+describe('InterviewsTab project scores', () => {
+  it('saves a score per project question', async () => {
+    withCandidates([shortlisted()]);
+    render(<InterviewsTab />);
+    const panel = expandCandidate();
+
+    fireEvent.change(within(panel).getByRole('spinbutton', { name: 'Question 1' }), { target: { value: '4' } });
+    fireEvent.change(within(panel).getByRole('spinbutton', { name: 'Question 2' }), { target: { value: '5' } });
+    fireEvent.click(within(panel).getByRole('button', { name: 'Save project scores' }));
+
+    expect(recordProjectScores).toHaveBeenCalledWith('c1', { 'Question 1': 4, 'Question 2': 5 });
+    expect(await within(panel).findByText('Saved')).toBeTruthy();
+  });
+
+  it('seeds the inputs from previously saved project scores', () => {
+    withCandidates([shortlisted({ project_scores: { 'Question 1': 3 } })]);
+    render(<InterviewsTab />);
+    const panel = expandCandidate();
+
+    expect((within(panel).getByRole('spinbutton', { name: 'Question 1' }) as HTMLInputElement).value).toBe('3');
+    expect((within(panel).getByRole('spinbutton', { name: 'Question 2' }) as HTMLInputElement).value).toBe('');
   });
 });

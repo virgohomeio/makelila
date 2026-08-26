@@ -40,8 +40,8 @@ function shortlisted(over: Partial<ShortlistedCandidate> & { id: string; full_na
     email: 'sam@example.com', phone: null, source: 'indeed',
     resume_url: 'p1/resume.pdf', ingested_via: 'manual_upload', enrichment_status: 'resume_attached',
     indeed_relay_email: null, indeed_dashboard_url: null, qualifications_tags: [],
-    stage_index: 0, scores: {}, suggested_scores: null,
-    applied_at: '2026-07-01T00:00:00Z', rejected_at: null, hired_at: '2026-07-30T00:00:00Z',
+    stage_index: 0, scores: {}, suggested_scores: null, project_scores: {},
+    applied_at: '2026-07-01T00:00:00Z', rejected_at: null, rejection_stage: null, hired_at: '2026-07-30T00:00:00Z',
     screening_invite_sent_at: null, screening_invite_sent_by: null,
     ...over,
   };

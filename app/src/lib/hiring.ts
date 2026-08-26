@@ -64,7 +64,14 @@ export interface Candidate {
   suggested_scores: Record<string, number> | null;
   applied_at: string;
   rejected_at: string | null;
+  /** Which gate the rejection happened at — set alongside rejected_at, null
+   *  otherwise. The Applicants board rejects at resume screening; the
+   *  Interviews board rejects after an interview. */
+  rejection_stage: RejectionStage | null;
   hired_at: string | null;
+  /** Take-home project scores, keyed by PROJECT_QUESTIONS labels. Same shape
+   *  as `scores` (the screening rubric). */
+  project_scores: Record<string, number>;
   /** When an operator marked the screening invite as sent. The invite leaves
    *  from their own mail client, so this is makeLILA's only record that the
    *  candidate has been contacted — an operator marker, not a delivery
@@ -74,6 +81,7 @@ export interface Candidate {
 }
 
 export type InterviewDecision = 'advance' | 'reject' | 'hold' | 'no_show';
+export type RejectionStage = 'resume_screening' | 'interview';
 
 export interface Interview {
   id: string;
@@ -92,7 +100,7 @@ export interface Interview {
 const POSTING_COLUMNS =
   'id, title, department, location, comp_range, status, indeed_url, linkedin_url, job_description, screening_rubric, pipeline_stages, created_at';
 const CANDIDATE_COLUMNS =
-  'id, posting_id, full_name, email, phone, source, resume_url, ingested_via, enrichment_status, indeed_relay_email, indeed_dashboard_url, qualifications_tags, stage_index, scores, suggested_scores, applied_at, rejected_at, hired_at, screening_invite_sent_at, screening_invite_sent_by';
+  'id, posting_id, full_name, email, phone, source, resume_url, ingested_via, enrichment_status, indeed_relay_email, indeed_dashboard_url, qualifications_tags, stage_index, scores, suggested_scores, project_scores, applied_at, rejected_at, rejection_stage, hired_at, screening_invite_sent_at, screening_invite_sent_by';
 const INTERVIEW_COLUMNS =
   'id, candidate_id, round_label, interviewer_id, calendly_event_uri, scheduled_at, held_at, decision, decision_notes, decided_by, decided_at';
 
@@ -406,16 +414,27 @@ export async function recordCandidateScore(candidateId: string, scores: Record<s
 
 /** Each decision clears the opposing timestamp so a candidate carries at
  *  most one decision tag (Shortlisted/Rejected) and re-clicking the other
- *  button switches it. */
-export async function rejectCandidate(candidateId: string): Promise<void> {
+ *  button switches it. `stage` records which gate the rejection happened at:
+ *  the Applicants board passes 'resume_screening', the Interviews board's
+ *  Reject button passes 'interview'. */
+export async function rejectCandidate(candidateId: string, stage: RejectionStage): Promise<void> {
   const { error } = await supabase.from('candidates')
-    .update({ rejected_at: new Date().toISOString(), hired_at: null }).eq('id', candidateId);
+    .update({ rejected_at: new Date().toISOString(), rejection_stage: stage, hired_at: null }).eq('id', candidateId);
   if (error) throw error;
 }
 
 export async function hireCandidate(candidateId: string): Promise<void> {
   const { error } = await supabase.from('candidates')
-    .update({ hired_at: new Date().toISOString(), rejected_at: null }).eq('id', candidateId);
+    .update({ hired_at: new Date().toISOString(), rejected_at: null, rejection_stage: null }).eq('id', candidateId);
+  if (error) throw error;
+}
+
+/** The post-interview take-home project is a fixed 2-question exercise;
+ *  these labels key candidates.project_scores. */
+export const PROJECT_QUESTIONS = ['Question 1', 'Question 2'] as const;
+
+export async function recordProjectScores(candidateId: string, scores: Record<string, number>): Promise<void> {
+  const { error } = await supabase.from('candidates').update({ project_scores: scores }).eq('id', candidateId);
   if (error) throw error;
 }
 

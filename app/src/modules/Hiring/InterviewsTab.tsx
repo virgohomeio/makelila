@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import styles from './Hiring.module.css';
 import {
   useJobPostings, useCandidates, useInterviews, createInterview, recordInterviewDecision,
-  getCurrentUserId, markScreeningInviteSent,
+  getCurrentUserId, markScreeningInviteSent, rejectCandidate, recordProjectScores, PROJECT_QUESTIONS,
   type Candidate, type Interview, type InterviewDecision,
 } from '../../lib/hiring';
 import { useEmailTemplate, useSchedulingUrl } from '../../lib/templates';
@@ -177,6 +177,52 @@ function CandidateInterviewPanel({ candidate, postingTitle }: { candidate: Candi
     }
   }
 
+  // Candidate-level rejection at the interview gate. Clearing hired_at (inside
+  // rejectCandidate) drops the candidate off this board via useCandidates'
+  // realtime refetch; the Applicants board then tags them Rejected — interview,
+  // apart from the resume-screen rejections.
+  const [rejecting, setRejecting] = useState(false);
+  const [rejectError, setRejectError] = useState<string | null>(null);
+
+  async function reject() {
+    setRejecting(true);
+    setRejectError(null);
+    try {
+      await rejectCandidate(candidateId, 'interview');
+    } catch (e: unknown) {
+      setRejectError(e instanceof Error ? e.message : 'Reject failed');
+    } finally {
+      setRejecting(false);
+    }
+  }
+
+  // Take-home project — two fixed questions, scored 1–5 like the screening
+  // rubric. Seeded from the row; Saved hint clears on the next edit.
+  const [projectScores, setProjectScores] = useState<Record<string, number>>({ ...candidate.project_scores });
+  const [projectSaved, setProjectSaved] = useState(false);
+  const [projectError, setProjectError] = useState<string | null>(null);
+
+  function setProjectScore(question: string, raw: string) {
+    setProjectSaved(false);
+    setProjectScores(prev => {
+      if (raw === '') {
+        const { [question]: _removed, ...rest } = prev;
+        return rest;
+      }
+      return { ...prev, [question]: Number(raw) };
+    });
+  }
+
+  async function saveProjectScores() {
+    setProjectError(null);
+    try {
+      await recordProjectScores(candidateId, projectScores);
+      setProjectSaved(true);
+    } catch (e: unknown) {
+      setProjectError(e instanceof Error ? e.message : 'Save project scores failed');
+    }
+  }
+
   async function book() {
     if (!roundLabel.trim()) return;
     setCreating(true);
@@ -204,6 +250,13 @@ function CandidateInterviewPanel({ candidate, postingTitle }: { candidate: Candi
   return (
     <div style={{ marginBottom: 10 }}>
       <h4>Interviews — {candidateName}</h4>
+      <div style={{ marginBottom: 10 }}>
+        <button onClick={reject} disabled={rejecting}>Reject</button>
+        <span className={styles.inviteHint}>
+          Marks the candidate rejected after interview and removes them from this board.
+        </span>
+        {rejectError && <div className={styles.formError}>{rejectError}</div>}
+      </div>
       {loading && <div>Loading…</div>}
       {interviews.map(iv => (
         <div key={iv.id} className={styles.candidateCard}>
@@ -271,6 +324,23 @@ function CandidateInterviewPanel({ candidate, postingTitle }: { candidate: Candi
             {sendError && <div className={styles.formError}>{sendError}</div>}
           </>
         )}
+      </div>
+      <div className={styles.inviteBlock}>
+        <div className={styles.inviteTitle}>Project — 2 questions</div>
+        {PROJECT_QUESTIONS.map(question => (
+          <div key={question} className={styles.scoreRow}>
+            <span>{question}</span>
+            <input
+              type="number" min={1} max={5} style={{ width: 40 }}
+              aria-label={question}
+              value={projectScores[question] ?? ''}
+              onChange={e => setProjectScore(question, e.target.value)}
+            />
+          </div>
+        ))}
+        <button onClick={() => void saveProjectScores()}>Save project scores</button>
+        {projectSaved && <span className={styles.inviteHint}>Saved</span>}
+        {projectError && <div className={styles.formError}>{projectError}</div>}
       </div>
     </div>
   );

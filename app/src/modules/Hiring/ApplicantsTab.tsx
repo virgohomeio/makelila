@@ -141,7 +141,13 @@ export function CandidateCard({ candidate, pipelineStages, onSelectCandidate }: 
         <strong>{candidate.full_name}</strong>
         {isStub && <span className={styles.stubBadge}>Stub — no resume yet</span>}
         {decision === 'shortlisted' && <span className={styles.decisionShortlisted}>Shortlisted</span>}
-        {decision === 'rejected' && <span className={styles.decisionRejected}>Rejected</span>}
+        {/* Legacy rows rejected before rejection_stage existed carry null —
+            those all came from this board, so they read as resume screen. */}
+        {decision === 'rejected' && (
+          <span className={styles.decisionRejected}>
+            {candidate.rejection_stage === 'interview' ? 'Rejected — interview' : 'Rejected — resume screen'}
+          </span>
+        )}
       </div>
       <div style={{ fontSize: 12, color: 'var(--color-ink-subtle)' }}>
         {candidate.email ?? candidate.indeed_relay_email ?? '—'} · {candidate.phone ?? '—'}
@@ -184,7 +190,7 @@ export function CandidateCard({ candidate, pipelineStages, onSelectCandidate }: 
           )}
           <div style={{ marginTop: 8 }}>
             <button onClick={() => void hireCandidate(candidate.id)}>Shortlist</button>
-            <button onClick={() => void rejectCandidate(candidate.id)} style={{ marginLeft: 8 }}>Reject</button>
+            <button onClick={() => void rejectCandidate(candidate.id, 'resume_screening')} style={{ marginLeft: 8 }}>Reject</button>
             {/* The Interviews board lists shortlisted candidates only — jumping
                 there before a shortlist decision would land on a board this
                 candidate isn't on. */}
