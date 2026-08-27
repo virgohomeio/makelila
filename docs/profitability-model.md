@@ -9,6 +9,21 @@ presented as if we had.** A cost nobody has priced comes back as $0 with an
 "unpriced" label beside it. A metric no table can answer is listed as
 unavailable rather than quietly omitted.
 
+That rule only holds if the reader can see which is which, so **every figure on
+the tab carries its basis**:
+
+| Mark | Meaning |
+|---|---|
+| *(none)* | Invoiced. Summed from bills or records of what happened. |
+| `est` | A rate multiplied by a quantity. Real arithmetic, but the rate is an assumption. |
+| `part est` | Partly invoiced, partly projected — COGS with a mix of batch and schedule, or freight with orders still uncosted. |
+| `unpriced` | No rate set, so the bucket reads $0 and the margin is an upper bound. |
+
+`costsBasis()` derives the mark per bucket and `marginBasis()` rolls them up, so
+anything downstream of an estimate — contribution margin, LTV, lifetime profit —
+inherits and displays it. Today only refunds, consumables and fully-invoiced
+COGS and freight carry no mark.
+
 ---
 
 ## Where the numbers come from

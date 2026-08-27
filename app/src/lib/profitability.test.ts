@@ -5,7 +5,8 @@ import {
   cacPayback, channelLabel, costCoverage, customerMetrics, isUnpriced,
   monthKey, portfolio, profitDistribution, projectedLtv, quarterKey,
   reliability, rollup, sumCosts, variableCosts, volumeSegment, waterfall,
-  aggregateCosts, type AcquisitionSpendRow,
+  aggregateCosts, costsBasis, marginBasis,
+  type AcquisitionSpendRow,
 } from './profitability';
 
 /** A customer with nothing going on. Every test starts here and changes only
@@ -118,6 +119,45 @@ describe('cost buckets', () => {
     }));
     // Powers of two: any bucket dropped or double-counted changes the total.
     expect(sumCosts(costs)).toBe(2047);
+  });
+
+  it('marks every bucket with how well it is known', () => {
+    // The "never present an unmeasured number as measured" rule only holds if
+    // the basis is visible, so it has to be derivable per bucket.
+    const b = costsBasis(row({
+      cogs_actual_count: 2, cogs_modelled_count: 1,   // some invoiced, some projected
+      shipping_uncosted_count: 1,                     // freight partly missing
+      support_cost_cad: 40, diagnosis_call_count: 2,  // rate x duration
+      fulfilment_cost_cad: 6.45,                      // contracted rate card
+      payment_fee_cad: 0,                             // nobody has set the rate
+    }));
+    expect(b.cogs).toBe('partial');
+    expect(b.shipping).toBe('partial');
+    expect(b.support).toBe('estimated');
+    expect(b.returnHandling).toBe('estimated');
+    expect(b.fulfilment).toBe('estimated');
+    expect(b.paymentFees).toBe('unpriced');
+    expect(b.refunds).toBe('actual');
+    expect(b.consumables).toBe('actual');
+  });
+
+  it('calls COGS invoiced only when no order used the projection', () => {
+    expect(costsBasis(row({ cogs_actual_count: 3, cogs_modelled_count: 0 })).cogs).toBe('actual');
+    expect(costsBasis(row({ cogs_actual_count: 0, cogs_modelled_count: 3 })).cogs).toBe('estimated');
+  });
+
+  it('calls support unpriced, not free, when the rate is unset', () => {
+    const b = costsBasis(row({ support_cost_cad: null, diagnosis_call_count: 3 }));
+    expect(b.support).toBe('unpriced');
+  });
+
+  it('rolls the bucket bases up into a verdict on the margin', () => {
+    // A margin resting on any estimate is not a settled figure, and the tab
+    // has to be able to say which buckets are responsible.
+    const mb = marginBasis(row({ cogs_modelled_count: 1, fulfilment_cost_cad: 6.45 }));
+    expect(mb.fullyMeasured).toBe(false);
+    expect(mb.estimated).toContain('3PL handling');
+    expect(mb.unpriced).toContain('Payment fees');
   });
 
   it('keeps 3PL handling out of shipping', () => {

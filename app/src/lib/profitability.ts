@@ -384,6 +384,101 @@ export function customerMetrics(
   };
 }
 
+/** How well a bucket's figure is known.
+ *
+ *  The model's founding rule is that a number we have not measured is never
+ *  presented as if we had. That rule is only kept if the distinction is
+ *  *visible*, so every bucket carries a basis and the tab renders it.
+ *
+ *  - `actual`    — summed from invoices or records of what happened.
+ *  - `partial`   — some of it is measured, some is missing or projected.
+ *  - `estimated` — a rate multiplied by a quantity. Real arithmetic, but the
+ *                  rate is an assumption, not a bill.
+ *  - `unpriced`  — nobody has set the rate, so the bucket reads 0 and the
+ *                  margin is an upper bound.
+ */
+export type BucketBasis = 'actual' | 'partial' | 'estimated' | 'unpriced';
+
+export type CostsBasis = Record<keyof CustomerMetrics['costs'], BucketBasis>;
+
+export const BASIS_LABEL: Record<BucketBasis, string> = {
+  actual:    'invoiced',
+  partial:   'part estimated',
+  estimated: 'estimated',
+  unpriced:  'unpriced',
+};
+
+/** Per-bucket basis for one customer. */
+export function costsBasis(row: CustomerProfitability): CostsBasis {
+  const modelled = row.cogs_modelled_count ?? 0;
+  const invoiced = row.cogs_actual_count ?? 0;
+  const cogs: BucketBasis =
+    modelled > 0 && invoiced > 0 ? 'partial'
+    : modelled > 0               ? 'estimated'
+    : 'actual';
+
+  const supportUnpriced = row.support_cost_cad == null && (row.diagnosis_call_count ?? 0) > 0;
+
+  return {
+    // Invoiced batch price where we have it, roadmap projection where we don't.
+    cogs,
+    // Freight is billed, but an order that shipped with no invoice on file
+    // leaves the bucket short — measured as far as it goes.
+    shipping: (row.shipping_uncosted_count ?? 0) > 0 ? 'partial' : 'actual',
+    warranty: 'actual',
+    refunds:  'actual',
+    // Duration x attendees x an assumed person-hour rate.
+    support:  supportUnpriced ? 'unpriced' : 'estimated',
+    // Flat stocking and inspection rates; return freight is usually missing.
+    returnHandling: 'estimated',
+    paymentFees:  (row.payment_fee_cad ?? 0) === 0 ? 'unpriced' : 'estimated',
+    commission:   (row.sales_commission_cad ?? 0) === 0 ? 'unpriced' : 'estimated',
+    installation: (row.installation_cost_cad ?? 0) === 0 ? 'unpriced' : 'estimated',
+    // Retail receipts: what was actually paid.
+    consumables: 'actual',
+    // Contracted 3PL rate card, with no invoice yet to reconcile against.
+    fulfilment: 'estimated',
+  };
+}
+
+export type MarginBasis = {
+  /** True when every bucket is measured, so the margin is a fact not a figure. */
+  fullyMeasured: boolean;
+  estimated: string[];
+  partial: string[];
+  unpriced: string[];
+};
+
+export const BUCKET_LABEL: Record<keyof CustomerMetrics['costs'], string> = {
+  cogs: 'COGS',
+  shipping: 'Shipping',
+  warranty: 'Warranty',
+  refunds: 'Refunds',
+  support: 'Support',
+  returnHandling: 'Return handling',
+  paymentFees: 'Payment fees',
+  commission: 'Commission',
+  installation: 'Installation',
+  consumables: 'Consumables',
+  fulfilment: '3PL handling',
+};
+
+/** Roll the per-bucket bases up into a verdict on the margin itself. Anything
+ *  downstream of an estimate — margin, LTV, lifetime profit — inherits it. */
+export function marginBasis(row: CustomerProfitability): MarginBasis {
+  const b = costsBasis(row);
+  const keys = Object.keys(b) as (keyof CostsBasis)[];
+  const pick = (want: BucketBasis) =>
+    keys.filter(k => b[k] === want).map(k => BUCKET_LABEL[k]);
+  const estimated = pick('estimated');
+  const partial = pick('partial');
+  const unpriced = pick('unpriced');
+  return {
+    fullyMeasured: estimated.length === 0 && partial.length === 0 && unpriced.length === 0,
+    estimated, partial, unpriced,
+  };
+}
+
 /** Which of this customer's costs are known to be incomplete. The margin is an
  *  upper bound whenever any of these is true. */
 export function costCoverage(row: CustomerProfitability): {

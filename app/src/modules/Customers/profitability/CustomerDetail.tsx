@@ -1,6 +1,7 @@
 import type { CustomerProfitability } from '../../../lib/customers';
 import {
-  channelLabel, costCoverage, type CustomerMetrics,
+  channelLabel, costCoverage, costsBasis, BASIS_LABEL,
+  type CustomerMetrics, type BucketBasis,
 } from '../../../lib/profitability';
 import { regionName } from '../../../lib/regions';
 import { DIVERGING } from './palette';
@@ -22,6 +23,7 @@ export function CustomerDetail({
   onClose: () => void;
 }) {
   const coverage = costCoverage(row);
+  const basis = costsBasis(row);
   const profit = metrics.lifetimeProfit;
 
   return (
@@ -64,30 +66,30 @@ export function CustomerDetail({
         <section>
           <h4>Costs</h4>
           <dl className={styles.detailList}>
-            <Row label="Product COGS"    value={money(metrics.costs.cogs)} />
+            <Row label="Product COGS"    value={<>{money(metrics.costs.cogs)}<Est basis={basis.cogs} /></>} />
             <Row label="Legacy freight"  value={row.legacy_shipment_count > 0
                    ? `${money(row.legacy_shipping_cad)} · ${row.legacy_shipment_count} pre-Freightcom`
                    : money(0)} />
-            <Row label="Shipping"        value={row.shipping_invoiced_count > 0
+            <Row label="Shipping"        value={<>{row.shipping_invoiced_count > 0
                    ? `${money(metrics.costs.shipping)} · ${row.shipping_invoiced_count} invoiced`
-                   : money(metrics.costs.shipping)} />
+                   : money(metrics.costs.shipping)}<Est basis={basis.shipping} /></>} />
             <Row label="Warranty"        value={money(metrics.costs.warranty)} />
             <Row label="Refunds"         value={money(metrics.costs.refunds)} />
             <Row label="Support"         value={row.support_cost_cad == null && row.diagnosis_call_count > 0
                                                  ? <span className={styles.unpriced}>rate not set</span>
-                                                 : money(metrics.costs.support)} />
-            <Row label="Return handling" value={money(metrics.costs.returnHandling)} />
+                                                 : <>{money(metrics.costs.support)}<Est basis={basis.support} /></>} />
+            <Row label="Return handling" value={<>{money(metrics.costs.returnHandling)}<Est basis={basis.returnHandling} /></>} />
             <Row label="Payment fees"    value={<Unpriced amount={metrics.costs.paymentFees} />} />
             <Row label="Sales commission" value={<Unpriced amount={metrics.costs.commission} />} />
             <Row label="Installation"    value={<Unpriced amount={metrics.costs.installation} />} />
-            <Row label="3PL handling"    value={row.fulfilment_order_count > 0
-                   ? `${money(metrics.costs.fulfilment)} · ${row.fulfilment_order_count} order(s), est.`
-                   : money(0)} />
+            <Row label="3PL handling"    value={<>{row.fulfilment_order_count > 0
+                   ? `${money(metrics.costs.fulfilment)} · ${row.fulfilment_order_count} order(s)`
+                   : money(0)}<Est basis={basis.fulfilment} /></>} />
             <Row label="Consumables & parts"
                  value={row.consumable_item_count > 0
                    ? `${money(metrics.costs.consumables)} · ${row.consumable_item_count} item(s)`
                    : money(metrics.costs.consumables)} />
-            <Row label="Variable costs"  value={money(metrics.variableCosts)} strong />
+            <Row label="Variable costs"  value={<>{money(metrics.variableCosts)}<Est basis="partial" /></>} strong />
             <Row label="CAC"             value={cacCell(metrics)} />
           </dl>
         </section>
@@ -95,7 +97,7 @@ export function CustomerDetail({
         <section>
           <h4>Profitability</h4>
           <dl className={styles.detailList}>
-            <Row label="Contribution margin" value={money(metrics.contributionMargin)} />
+            <Row label="Contribution margin" value={<>{money(metrics.contributionMargin)}<Est basis="partial" /></>} />
             <Row label="Contribution margin %"
                  value={metrics.contributionMarginPct == null ? '—'
                         : `${(metrics.contributionMarginPct * 100).toFixed(0)}%`} />
@@ -155,6 +157,18 @@ function Row({ label, value, strong }: { label: string; value: React.ReactNode; 
 }
 
 /** A zero here means Finance has not set the rate, not that the cost is nil. */
+/** Same footnote the tab uses, so a figure reads the same in both places. */
+function Est({ basis }: { basis: BucketBasis }) {
+  if (basis === 'actual') return null;
+  const text = basis === 'partial' ? 'part est' : basis === 'unpriced' ? 'unpriced' : 'est';
+  return (
+    <span className={styles.estMark}
+          title={`This figure is ${BASIS_LABEL[basis]}, not taken from an invoice.`}>
+      {text}
+    </span>
+  );
+}
+
 function Unpriced({ amount }: { amount: number }) {
   if (amount === 0) return <span className={styles.unpriced}>unpriced</span>;
   return <>{money(amount)}</>;

@@ -744,6 +744,40 @@
   font-size: .75rem;
   color: #b7791f;
 }
+
+/* ── Estimate marking ─────────────────────────────────────────────────────────
+   The model never presents an unmeasured number as measured, which only holds
+   if the reader can see which is which. Every figure that rests on a rate
+   rather than an invoice carries one of these, and the legend on the tab says
+   what they mean. Deliberately quiet: it should read as a footnote, not an
+   alarm — most of these numbers are perfectly usable, they are just not bills. */
+.estMark {
+  display: inline-block;
+  margin-left: 5px;
+  padding: 0 4px;
+  font-size: .62rem;
+  font-weight: 600;
+  letter-spacing: .03em;
+  text-transform: uppercase;
+  border-radius: 2px;
+  vertical-align: 2px;
+  background: #fdf3d9;
+  color: #8a6212;
+  border: 1px solid #f0dfae;
+}
+.estMarkPartial { background: #fdf3d9; color: #8a6212; border-color: #f0dfae; }
+.estMarkUnpriced { background: #eef1f4; color: #6b7684; border-color: #dde2e8; }
+
+.estLegend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  margin: 10px 0 0;
+  font-size: .75rem;
+  color: #718096;
+}
+.estLegend strong { font-weight: 600; color: #4a5568; }
 .profStatLabel {
   font-size: .75rem;
   color: #718096;
