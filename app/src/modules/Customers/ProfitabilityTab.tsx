@@ -828,6 +828,15 @@ function ProfitCard({ row, onOpen }: { row: CustomerProfitability; onOpen: () =>
             )}
           </dd>
         </div>
+        {row.legacy_shipping_cad > 0 && (
+          <div title={`${row.legacy_shipment_count} pre-Freightcom shipment(s) (Canpar/GLS/Purolator/FedEx, Oct 2025 - Jan 2026), entered by hand from the carrier records. Attributed to the customer, not to an order.`}>
+            <dt>Legacy freight</dt>
+            <dd>
+              {fmt(row.legacy_shipping_cad)}
+              <span className={styles.profUncostedHint}> ({row.legacy_shipment_count})</span>
+            </dd>
+          </div>
+        )}
         <div title={row.shipping_uncosted_count > 0
           ? `${row.shipping_uncosted_count} order(s) that appear to have shipped have no freight invoice on file — real freight is higher than this. Cancelled and still-unshipped orders are not counted. "Appear to have shipped" is judged from this customer's shipped machines, so a repeat buyer may over-count.`
           : 'summed from the Freightcom invoices for this order'}>
@@ -968,7 +977,7 @@ function aggregate(rs: CustomerProfitability[]) {
     (acc, r) => ({
       revenue:   acc.revenue   + r.revenue_cad,
       tax:       acc.tax       + r.tax_collected_cad,
-      salesCost: acc.salesCost + r.sale_cogs_cad + r.sale_shipping_cad,
+      salesCost: acc.salesCost + r.sale_cogs_cad + r.sale_shipping_cad + (r.legacy_shipping_cad ?? 0),
       warranty:  acc.warranty  + r.expected_warranty_cost_cad,
       refund:    acc.refund    + r.expected_refund_cad,
       support:   acc.support   + (r.support_cost_cad ?? 0),

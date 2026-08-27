@@ -30,6 +30,7 @@ function row(over: Partial<CustomerProfitability> = {}): CustomerProfitability {
     return_inspection_cad: 0, return_freight_cad: 0, returns_handled: 0,
     payment_fee_cad: 0, sales_commission_cad: 0, installation_cost_cad: 0,
     consumables_cost_cad: 0, consumable_item_count: 0, shipping_invoiced_count: 0,
+    legacy_shipping_cad: 0, legacy_shipment_count: 0,
     net_margin_cad: 0,
     order_count: 0, units_shipped_count: 0,
     replacement_count: 0, open_replacement_count: 0,
@@ -116,6 +117,13 @@ describe('cost buckets', () => {
     }));
     // Powers of two: any bucket dropped or double-counted changes the total.
     expect(sumCosts(costs)).toBe(1023);
+  });
+
+  it('adds pre-Freightcom legacy freight into the shipping bucket', () => {
+    // Legacy freight is attributed per customer rather than per order, but it
+    // is still freight -- it belongs in bucket 2, not a bucket of its own.
+    const costs = variableCosts(row({ sale_shipping_cad: 100, legacy_shipping_cad: 41.02 }));
+    expect(costs.shipping).toBeCloseTo(141.02, 2);
   });
 
   it('keeps consumables out of shipping', () => {

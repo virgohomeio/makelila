@@ -523,6 +523,11 @@ export type CustomerProfitability = {
   // Sale orders whose freight came from a Freightcom invoice rather than the
   // booking quote. The quote is never revised when an adjustment lands.
   shipping_invoiced_count: number;
+  // Pre-Freightcom freight (Canpar/GLS/Purolator/FedEx, Oct 2025 - Jan 2026).
+  // Attributed per customer, because most of that cohort has no order record.
+  // Part of the shipping bucket, held separately so it stays auditable.
+  legacy_shipping_cad: number;
+  legacy_shipment_count: number;
   refund_count: number;
   in_flight_refund_count: number;
   ticket_count: number;
@@ -578,6 +583,8 @@ export function useCustomerProfitability(): {
         consumables_cost_cad:       Number(r.consumables_cost_cad ?? 0),
         consumable_item_count:      Number(r.consumable_item_count ?? 0),
         shipping_invoiced_count:    Number(r.shipping_invoiced_count ?? 0),
+        legacy_shipping_cad:        Number(r.legacy_shipping_cad ?? 0),
+        legacy_shipment_count:      Number(r.legacy_shipment_count ?? 0),
         units_shipped_count:        Number(r.units_shipped_count ?? 0),
         acquisition_channel:        (r.acquisition_channel as string) ?? 'unknown',
         tax_collected_cad:          Number(r.tax_collected_cad ?? 0),

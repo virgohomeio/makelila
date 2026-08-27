@@ -65,6 +65,9 @@ export function CustomerDetail({
           <h4>Costs</h4>
           <dl className={styles.detailList}>
             <Row label="Product COGS"    value={money(metrics.costs.cogs)} />
+            <Row label="Legacy freight"  value={row.legacy_shipment_count > 0
+                   ? `${money(row.legacy_shipping_cad)} · ${row.legacy_shipment_count} pre-Freightcom`
+                   : money(0)} />
             <Row label="Shipping"        value={row.shipping_invoiced_count > 0
                    ? `${money(metrics.costs.shipping)} · ${row.shipping_invoiced_count} invoiced`
                    : money(metrics.costs.shipping)} />

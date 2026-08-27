@@ -252,7 +252,10 @@ export type CustomerMetrics = {
 export function variableCosts(row: CustomerProfitability): CustomerMetrics['costs'] {
   return {
     cogs:           row.sale_cogs_cad ?? 0,
-    shipping:       row.sale_shipping_cad ?? 0,
+    // Order-level freight plus the pre-Freightcom shipments, which are
+    // attributed per customer because most of that cohort has no order to
+    // hang them on. Both are freight, so both are bucket 2.
+    shipping:       (row.sale_shipping_cad ?? 0) + (row.legacy_shipping_cad ?? 0),
     warranty:       row.expected_warranty_cost_cad ?? 0,
     refunds:        row.expected_refund_cad ?? 0,
     support:        row.support_cost_cad ?? 0,

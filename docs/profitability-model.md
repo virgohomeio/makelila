@@ -58,7 +58,7 @@ nothing else is added.
 | # | Bucket | Formula | Source | Basis |
 |---|---|---|---|---|
 | 1 | Product COGS | `Σ cogs_usd` over sale orders | `orders.cogs_usd` | Actual where `cogs_basis = 'batch_actual'`, **estimated** where `'schedule'` (V-SAX roadmap projection) |
-| 2 | Shipping | Per shipment: invoiced charge where on file, else the booking quote | `shipment_invoiced_charges`, else `orders.shipping_cost_usd` | Actual; **incomplete** where `shipping_uncosted_count > 0` |
+| 2 | Shipping | Per shipment: invoiced charge where on file, else the booking quote; **plus** pre-Freightcom freight attributed per customer | `shipment_invoiced_charges`, `orders.shipping_cost_usd`, `legacy_shipping_costs` | Actual; **incomplete** where `shipping_uncosted_count > 0` |
 | 3 | Warranty | `Σ (cogs + shipping)` over non-cancelled replacement orders | `orders` where `kind = 'replacement'` | Actual |
 | 4 | Refunds | `Σ refund_amount` over approvals not denied | `refund_approvals` | Actual (expected) + settled subset |
 | 5 | Support | `Σ duration × internal attendees × person-hour rate` | `diagnosis_calls`, `support_rates` | Estimated — no-shows billed, since the team's time was spent either way |
@@ -100,11 +100,22 @@ which a repeat buyer can over-count. Deliberate: an over-estimate that says so
 beats a silent zero. `units_shipped_count` keeps the strict per-order trace,
 because it is shown to operators as "Units shipped".
 
-Roughly 30 of the flagged orders predate Freightcom (first shipment
-2026-01-26) and went out via Canpar/GLS. **No table holds their freight** — it
-needs a manual backfill with `shipping_cost_basis = 'legacy_backfill'`. Nothing
-is imputed in the meantime; the dollars stay absent and the margin stays an
-upper bound.
+**Pre-Freightcom freight now has a home.** VCycene shipped via Canpar, GLS,
+Purolator and FedEx from Oct 2025 until the cutover on 2026-01-26; none of it is
+in `shipments` and the Freightcom API has no record of it. 44 shipments worth
+$2,526.81 are entered by hand in `legacy_shipping_costs`, keyed by tracking
+number.
+
+They attach to the **customer**, not an order. Every row matched a customer on
+exact email and 42 of 42 serials matched a unit, but not one carried an order
+link — most of that Oct/Nov 2025 cohort predates any order record. Pinning the
+cost to an order would mean inventing the order.
+
+`superseded_by_order_ref` holds the one row already counted elsewhere:
+Elizabeth Antony's $66.01 sits on order #1173 as `legacy_backfill`. It stays in
+the table for the audit trail and out of the sum, so $2,460.80 is countable.
+Orders that shipped in the Freightcom era with no invoice on file are still
+reported as a gap and still imputed at nothing.
 
 **Return handling is not the restocking fee.** Bucket 6 is what it costs *us* to
 take a machine back. `refund_approvals.restocking_fee_usd` is a fee charged *to
