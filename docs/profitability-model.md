@@ -60,7 +60,7 @@ nothing else is added.
 | 1 | Product COGS | `Σ cogs_usd` over sale orders | `orders.cogs_usd` | Actual where `cogs_basis = 'batch_actual'`, **estimated** where `'schedule'` (V-SAX roadmap projection) |
 | 2 | Shipping | Per shipment: invoiced charge where on file, else the booking quote; **plus** pre-Freightcom freight attributed per customer | `shipment_invoiced_charges`, `orders.shipping_cost_usd`, `legacy_shipping_costs` | Actual; **incomplete** where `shipping_uncosted_count > 0` |
 | 3 | Warranty | `Σ (cogs + shipping)` over non-cancelled replacement orders | `orders` where `kind = 'replacement'` | Actual |
-| 4 | Refunds | `Σ refund_amount` over approvals not denied | `refund_approvals` | Actual (expected) + settled subset |
+| 4 | Refunds | `Σ refund_amount` over approvals not denied | `refund_approvals`, reached through the return **or** by the approval's own customer fields | Actual (expected) + settled subset |
 | 5 | Support | `Σ duration × internal attendees × person-hour rate` | `diagnosis_calls`, `support_rates` | Estimated — no-shows billed, since the team's time was spent either way |
 | 6 | Return handling | `stocking + inspection + return freight` for units that physically came back | `returns`, `return_cost_rates`, `shipments` | Estimated; freight often missing |
 | 7 | Payment fees | `charged gross (incl. tax) × payment_fee_pct` | `profitability_rates` | **Unpriced — rate is 0** |
@@ -116,6 +116,19 @@ Elizabeth Antony's $66.01 sits on order #1173 as `legacy_backfill`. It stays in
 the table for the audit trail and out of the sum, so $2,460.80 is countable.
 Orders that shipped in the Freightcom era with no invoice on file are still
 reported as a gap and still imputed at nothing.
+
+**An approval without a return still counts.** `refund_agg` used to walk
+customers → returns → approvals, so an approval with a null `return_id` matched
+nothing and contributed nothing — $5,030.56 across five customers, all settled,
+all real money out the door. V13 adds a second path that matches the approval's
+own `customer_name` / `customer_email`, UNIONed on (customer, approval) so an
+approval reachable both ways still counts once.
+
+**Refunds are gross, revenue is net.** A refund returns the tax the customer
+paid, but revenue excludes that tax, so a fully-refunded customer shows a
+margin worse than their COGS by the tax alone. That is arithmetically right —
+the cash did leave — but the HST portion is recoverable from CRA and the model
+has no way to know it. Roughly $2.2k across the current 18 approvals.
 
 **Return handling is not the restocking fee.** Bucket 6 is what it costs *us* to
 take a machine back. `refund_approvals.restocking_fee_usd` is a fee charged *to
