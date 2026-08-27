@@ -18,6 +18,9 @@ const appRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 const MIGRATED = [
   'src/styles/globals.css',
+  'src/components/ui/primitives.module.css',
+  'src/components/AppShell.module.css',
+  'src/components/GlobalNav.module.css',
   'src/modules/OrderReview/OrderReview.module.css',
 ];
 

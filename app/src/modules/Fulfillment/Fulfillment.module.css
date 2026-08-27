@@ -1,53 +1,51 @@
-.layout {
-  background: #fff;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--color-border);
-  overflow: hidden;
-}
+/* ══════════════════════════════════════════════════════════════════════════
+   Fulfillment — the app's busiest screen, and the one that looked least like
+   the rest of it.
 
-.tabs {
+   Two things were wrong and both are structural, not cosmetic.
+
+   1. The tab row. Nine tabs, each drawn as a bordered box filled with cream
+      and lettered in Ladybug Red, sitting on a 2px red rule, with a literal
+      "|" character in the markup between the third and fourth. Nine red
+      boxes read as nine buttons — or nine warnings — not as one control with
+      one selection, and it left red meaning nothing anywhere else on the
+      page. Tabs now come from components/ui; `.tabs` / `.tab` / `.tabDivider`
+      are gone from this file rather than restyled, and the group break is a
+      property of the tab data instead of a stray glyph.
+
+   2. The queue sidebar was a full dark theme — its own greys (#252525,
+      #232323), its own gradients (#3a2a0c → #222) and its own status ramp
+      (#fc8181 / #fbd38d / #68d391) — inside an otherwise warm, light app.
+      On an empty queue it rendered as a solid black rectangle 390px wide
+      containing the words "No queued orders". It is now the same recessed
+      cream every other list in the app sits on.
+
+      That move forces one correction that is not cosmetic: --color-error-accent
+      (#e53e3e) marked overdue rows, and tokens.css is explicit that it is a
+      dark-surface token — it measures 4.13:1 on white, under the 4.5:1 AA
+      floor. Overdue markers move to --color-error-strong, which is the
+      light-surface variant that exists for exactly this.
+   ══════════════════════════════════════════════════════════════════════════ */
+.layout {
   display: flex;
-  border-bottom: 2px solid var(--color-crimson);
-}
-.tab {
-  padding: 9px 20px;
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--color-crimson);
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-bottom: none;
-  cursor: pointer;
-  border-radius: var(--radius-md) var(--radius-md) 0 0;
-  margin-right: 3px;
-}
-.tab.active {
-  background: var(--color-crimson);
-  color: #fff;
+  flex-direction: column;
+  gap: var(--space-4);
 }
 
 .tabPanel {
-  padding: 16px;
-  min-height: calc(100vh - 200px);
-}
-
-.tabDivider {
-  width: 1px;
-  background: var(--color-dark-3, #333);
-  margin: 8px 4px;
-  align-self: stretch;
+  min-height: calc(100vh - 240px);
 }
 
 .queueLayout {
   display: grid;
-  grid-template-columns: 280px 1fr;
+  grid-template-columns: 300px 1fr;
   gap: 0;
-  height: calc(100vh - 220px);
+  height: calc(100vh - 240px);
   min-height: 500px;
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   overflow: hidden;
-  background: #fff;
+  background: var(--color-raised);
 }
 
 /* Mobile: stack sidebar above detail. Borders dropped at edge-to-edge. */
@@ -62,25 +60,27 @@
 }
 
 .sidebar {
-  background: var(--color-dark-1);
+  background: var(--color-surface);
+  border-right: 1px solid var(--color-border);
   display: flex;
   flex-direction: column;
   overflow-y: auto;
 }
 
 .sidebarHeader {
-  padding: 12px 14px;
-  font-size: 9px;
-  font-weight: 700;
-  color: #aaa;
-  letter-spacing: 0.5px;
-  border-bottom: 1px solid var(--color-dark-3);
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--font-size-meta);
+  font-weight: 600;
+  color: var(--color-ink-subtle);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--color-border);
 }
 
 .sidebarTabs {
   display: flex;
   flex-shrink: 0;
-  border-bottom: 1px solid var(--color-dark-3);
+  border-bottom: 1px solid var(--color-border);
 }
 
 .sidebarTab {
@@ -88,109 +88,149 @@
   background: none;
   border: none;
   border-bottom: 2px solid transparent;
-  color: #888;
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.5px;
-  padding: 11px 6px;
+  color: var(--color-ink-subtle);
+  font-size: 12px;
+  font-weight: 500;
+  padding: var(--space-3) var(--space-2);
   cursor: pointer;
   text-align: center;
-  transition: color 0.12s;
+  transition: color var(--dur-fast) var(--ease-out);
   margin-bottom: -1px;
 }
 
-.sidebarTab:hover { color: #ccc; }
+.sidebarTab:hover { color: var(--color-ink-muted); }
+
+/* The counts were baked into the label as "READY TO SHIP (0)" — caps, and a
+   figure in brackets that a reader has to parse out of a sentence. Same
+   treatment as every other tab count in the app. */
+.sidebarTabCount {
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--font-numeric);
+  color: var(--color-ink-faint);
+  margin-left: var(--space-1);
+}
+.sidebarTab.activeTab .sidebarTabCount { color: var(--color-ink-muted); }
 
 .sidebarTab.activeTab {
-  color: #fff;
-  border-bottom: 2px solid var(--color-crimson);
+  color: var(--color-ink);
+  font-weight: 600;
+  border-bottom: 2px solid var(--color-ink);
 }
 
+/* A queue row. Selection is ink, not red: which row you are reading is
+   state, and the accent is reserved for the action you can take on it.
+   Condition markers — priority, paused, overdue — keep their own colours,
+   because those are the one thing on this list that genuinely is urgent. */
 .queueRow {
-  padding: 10px 14px;
-  border-bottom: 1px solid #252525;
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+  border-left: 3px solid transparent;
   cursor: pointer;
-  transition: background 0.1s;
+  transition: background var(--dur-fast) var(--ease-out);
 }
-.queueRow:hover { background: #232323; }
+.queueRow:hover { background: rgba(var(--color-ink-rgb), 0.035); }
 .queueRow.selected {
-  background: #2a1010;
-  border-left: 3px solid var(--color-crimson);
-  padding-left: 11px;
+  background: var(--color-raised);
+  border-left-color: var(--color-ink);
 }
-.queueRow.overdue { border-left: 3px solid var(--color-error-accent); padding-left: 11px; }
-.queueRow.fulfilled { opacity: 0.65; }
+.queueRow.overdue { border-left-color: var(--color-error-strong); }
+.queueRow.fulfilled { opacity: 0.6; }
 .queueRow.priority {
-  background: linear-gradient(90deg, #3a2a0c 0%, #222 60%);
-  border-left: 3px solid #f6ad55;
-  padding-left: 11px;
+  background: var(--color-warning-bg);
+  border-left-color: var(--color-warning-strong);
 }
-.queueRow.priority:hover { background: linear-gradient(90deg, #4a360f 0%, #2a2a2a 60%); }
-.queueRow.priority.selected { background: #3a1a1a; border-left: 3px solid var(--color-crimson); }
-
+.queueRow.priority:hover { background: var(--color-warning-border); }
+.queueRow.priority.selected { border-left-color: var(--color-ink); }
 .queueRow.paused {
-  background: linear-gradient(90deg, #3a1818 0%, #1f1818 70%);
-  border-left: 3px solid var(--color-error-accent);
-  padding-left: 11px;
+  background: var(--color-error-bg);
+  border-left-color: var(--color-error-strong);
 }
-.queueRow.paused:hover { background: linear-gradient(90deg, #4a1e1e 0%, #2a1e1e 70%); }
-.queueRow.paused.selected { background: #4a1010; }
+.queueRow.paused:hover { background: var(--color-error-border); }
+.queueRow.paused.selected { border-left-color: var(--color-ink); }
 
 .pauseBadge {
-  font-size: 9px;
-  font-weight: 800;
-  margin-top: 3px;
-  letter-spacing: 0.5px;
-  color: #fc8181;
+  font-size: var(--font-size-meta);
+  font-weight: 600;
+  margin-top: var(--space-1);
+  letter-spacing: 0.04em;
+  color: var(--color-error-strong);
 }
 
 .priorityBadge {
   display: inline-block;
-  margin-right: 4px;
-  font-size: 10px;
+  margin-right: var(--space-1);
+  font-size: var(--font-size-meta);
 }
 
-.rowName { font-size: 11px; font-weight: 600; color: #e8e8e8; }
-.rowMeta { font-size: 10px; color: #888; margin-top: 2px; }
-.rowDue  { font-size: 9px; font-weight: 700; margin-top: 3px; }
-.rowDue.today { color: #fc8181; }
-.rowDue.soon  { color: #fbd38d; }
-.rowDue.ok    { color: #68d391; }
-.rowDue.done  { color: #48bb78; }
+.rowName { font-size: var(--font-size-body); font-weight: 600; color: var(--color-ink); }
+/* Serial + order ref live here, so this line is data. */
+.rowMeta {
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--font-numeric);
+  font-size: var(--font-size-meta);
+  color: var(--color-ink-subtle);
+  margin-top: 2px;
+}
+.rowDue  {
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--font-numeric);
+  font-size: var(--font-size-meta);
+  font-weight: 500;
+  margin-top: 3px;
+}
+/* The four due states were a dark-surface ramp (#fc8181 / #fbd38d / #68d391
+   / #48bb78) that would be close to invisible on cream. "ok" and "done" both
+   mean nothing-to-do, so they now share one quiet green instead of two
+   greens a reader had to tell apart. */
+.rowDue.today { color: var(--color-error-strong); }
+.rowDue.soon  { color: var(--color-warning); }
+.rowDue.ok    { color: var(--color-success); }
+.rowDue.done  { color: var(--color-success); }
 
 .stepBadge {
   display: inline-block;
-  font-size: 9px;
-  background: #2d2d2d;
-  color: #ccc;
-  padding: 2px 6px;
-  border-radius: 3px;
-  font-weight: 700;
-  margin-left: 6px;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-meta);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  color: var(--color-ink-muted);
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-sm);
+  font-weight: 500;
+  margin-left: var(--space-2);
 }
 
-.emptyList { padding: 20px 14px; color: var(--color-ink-faint); font-size: 11px; text-align: center; }
+.emptyList {
+  padding: var(--space-5) var(--space-4);
+  color: var(--color-ink-subtle);
+  font-size: var(--font-size-body);
+  text-align: center;
+}
 
 .detail {
-  padding: 16px 18px;
+  padding: var(--space-4) var(--space-5);
   overflow-y: auto;
 }
 
+/* The detail header was a 2px crimson rule under a crimson 14px/800 title —
+   one more place the accent was carrying a job (this is a heading) that ink
+   does better. */
 .header {
-  padding-bottom: 10px;
-  border-bottom: 2px solid var(--color-crimson);
-  margin-bottom: 14px;
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+  margin-bottom: var(--space-4);
 }
 .headerRow {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  gap: 12px;
+  gap: var(--space-3);
 }
 .headerTitle {
-  font-size: 14px;
-  font-weight: 800;
-  color: var(--color-crimson);
+  font-size: var(--font-size-section);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--color-ink);
 }
 .priorityBtnOff, .priorityBtnOn {
   border: 1px solid var(--color-border);

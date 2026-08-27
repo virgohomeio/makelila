@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import type { Order } from '../../lib/orders';
 import { OrderRow } from './OrderRow';
+import { EmptyState } from '../../components/ui';
 import styles from './OrderReview.module.css';
 
 type Tab = 'pending' | 'held' | 'flagged' | 'approved' | 'replacement' | 'all' | 'cancelled';
@@ -146,11 +147,17 @@ export function Sidebar({
 
       <div className={styles.list}>
         {visible.length === 0 ? (
-          <div className={styles.emptyList}>
-            {query.trim()
-              ? `No order in ${activeTabLabel} matches “${query.trim()}”.`
-              : 'No orders in this tab.'}
-          </div>
+          query.trim() ? (
+            <EmptyState
+              title="No match"
+              body={`Nothing in ${activeTabLabel} matches “${query.trim()}”. Try a different name, email or order number, or switch tabs.`}
+            />
+          ) : (
+            <EmptyState
+              title={`Nothing in ${activeTabLabel}`}
+              body="Sync from Shopify to pull in orders placed since the last run."
+            />
+          )
         ) : visible.map((o, i) => (
           <OrderRow
             key={o.id}

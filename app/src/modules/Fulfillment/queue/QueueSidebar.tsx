@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import type { FulfillmentQueueRow } from '../../../lib/fulfillment';
 import type { OrderStatus } from '../../../lib/orders';
+import { useNavigate } from 'react-router-dom';
+import { Button, EmptyState } from '../../../components/ui';
 import styles from '../Fulfillment.module.css';
 
 /** Parse a "YYYY-MM-DD" due-date as a LOCAL calendar date (not UTC midnight).
@@ -50,6 +52,7 @@ export function QueueSidebar({
   onSelect: (id: string) => void;
 }) {
   const [tab, setTab] = useState<'ready' | 'shipped'>('ready');
+  const navigate = useNavigate();
   const rows = tab === 'ready' ? readyRows : shippedRows;
 
   return (
@@ -59,19 +62,31 @@ export function QueueSidebar({
           className={`${styles.sidebarTab} ${tab === 'ready' ? styles.activeTab : ''}`}
           onClick={() => setTab('ready')}
         >
-          READY TO SHIP ({readyRows.length})
+          Ready to ship <span className={styles.sidebarTabCount}>{readyRows.length}</span>
         </button>
         <button
           className={`${styles.sidebarTab} ${tab === 'shipped' ? styles.activeTab : ''}`}
           onClick={() => setTab('shipped')}
         >
-          SHIPPED ({shippedRows.length})
+          Shipped <span className={styles.sidebarTabCount}>{shippedRows.length}</span>
         </button>
       </div>
       {rows.length === 0 ? (
-        <div className={styles.emptyList}>
-          {tab === 'ready' ? 'No queued orders.' : 'No shipped orders.'}
-        </div>
+        // "No queued orders." told an operator nothing they could act on, and
+        // an empty ready-queue is the one moment they have attention to spare.
+        // Each state now says what is true and where the next row comes from.
+        tab === 'ready' ? (
+          <EmptyState
+            title="Nothing queued"
+            body="Orders arrive here once they are confirmed in Sales."
+            action={<Button small onClick={() => navigate('/order-review')}>Go to Sales</Button>}
+          />
+        ) : (
+          <EmptyState
+            title="Nothing shipped yet"
+            body="Orders move here as they leave the dock."
+          />
+        )
       ) : rows.map(r => {
         const o = orderLookup.get(r.order_id);
         const fulfilled = r.step === 6;

@@ -94,21 +94,45 @@
   --color-dark-2: #232323;
   --color-dark-3: #2a2a2a;
 
-  /* Typography — Inter for UI/body. Brolink is reserved for the "makelila"
-     wordmark only (logo use), per operator instruction 2026-06-07 after a
-     brief experiment with Brolink across the UI. --font-logo is the only
-     token that points at Brolink. */
-  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont,
-               'SF Pro Display', 'SF Pro Text', 'Helvetica Neue', sans-serif;
-  --font-logo: 'Brolink DEMO', 'Brolink', 'Inter', sans-serif;
+  /* Text ON those dark grounds. GlobalNav had been writing #fff / #ccc /
+     #b0b0b0 / #888 directly — four greys, none of them in the palette, all
+     of them neutral inside an otherwise warm system, which is most of why
+     the nav read as a strip bolted on from another app.
 
-  /* Two roles added for the Sales aesthetic pilot (2026-08-21).
-     --font-sans stays Inter so the other eleven modules are untouched; a
-     module opts in by rebinding --font-sans to --font-display inside its own
-     scope. Rebinding the variable is the only mechanism that works here:
-     globals.css sets font-family on the universal selector `*`, so a scoped
-     font-family declaration loses to it on every descendant, while custom
-     properties inherit and `*` re-resolves them per element.
+     Measured against --color-dark-0 (#111):
+       on-dark        17.21:1  active label
+       on-dark-muted   7.39:1  inactive label — clears AA for normal text
+       on-dark-faint   4.21:1  NON-TEXT ONLY: dividers, rules. It clears the
+                               3:1 WCAG floor for non-text and misses the
+                               4.5:1 floor for text. Do not label with it.
+     For reference the grey it replaces, #888, measured 5.33:1 — it passed
+     AA; the problem with it was that it was cold and muddy, not illegible.
+     --color-crimson measures 3.58:1 here: fine for the 2px active rule
+     (non-text), never for a nav label. */
+  --color-on-dark:        #F7F4EF;
+  --color-on-dark-muted:  #A8A199;
+  --color-on-dark-faint:  #7C766F;
+
+  /* Typography.
+
+     --font-sans and --font-mono are the two roles the app actually writes
+     against; every module reaches type through one of them. They are BOUND
+     to --font-display / --font-data below rather than restating those
+     stacks, so the pair can never drift apart — there is exactly one place
+     where the app's faces are named.
+
+     Brolink is reserved for the "makelila" wordmark only (logo use), per
+     operator instruction 2026-06-07 after a brief experiment with Brolink
+     across the UI. --font-logo is the only token that points at Brolink. */
+  --font-sans: var(--font-display);
+  --font-logo: 'Brolink DEMO', 'Brolink', 'Raleway', sans-serif;
+
+  /* The app's two faces. Piloted on Sales 2026-08-21, adopted app-wide
+     2026-08-27 — the pilot's whole purpose was to be judged, and shipping it
+     to one of twelve modules left Sales looking deliberately out of step
+     with the other eleven. --font-sans and --font-mono above now bind to
+     these, so the rollout is those two lines and nothing else; no module
+     needs a scoped rebind any more.
 
      Raleway is not a taste call — VCycene Brand Style Guide.pdf specifies it
      for all VCycene print and digital communications, and the app has been
@@ -130,6 +154,19 @@
   --radius-sm: 4px;
   --radius-md: 6px;
   --radius-lg: 8px;
+  /* Fully-round. Filter chips and count badges reached for a literal 999px
+     in nine separate module stylesheets; this is that one value. */
+  --radius-pill: 999px;
+
+  /* ── Motion ────────────────────────────────────────────────────────────
+     Two values, because an operations tool has exactly two kinds of motion:
+     a control acknowledging a pointer (--dur-fast) and a surface arriving
+     (--dur-settle). Anything slower than --dur-settle is decoration in a
+     queue that gets read for hours. Every rule using these must be removed
+     by prefers-reduced-motion. */
+  --dur-fast:   120ms;
+  --dur-settle: 300ms;
+  --ease-out:   cubic-bezier(0.2, 0.7, 0.3, 1);
 
   /* ── Typography scale ──────────────────────────────────────────────────
      Four sizes, no more. Anything that doesn't fit one of these is a sign
@@ -143,7 +180,7 @@
      monospaced (--font-mono) with tabular figures (--font-numeric) so
      digits align down a column. This is functional, not decorative:
      operators reconcile refunds by scanning. */
-  --font-mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace;
+  --font-mono: var(--font-data);
   --font-numeric: tabular-nums;
 
   /* ── Spacing ───────────────────────────────────────────────────────────

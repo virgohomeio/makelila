@@ -1,14 +1,22 @@
-/* LILA brand fonts: Inter for UI, Brolink DEMO for the LILA wordmark.
-   Brolink is self-hosted from /fonts/ so we don't depend on the
-   onlinewebfonts CDN (which silently returned CSS without the woff2
-   resolving reliably in-browser). */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
-/* Sales aesthetic pilot (2026-08-21): Raleway is the face VCycene Brand Style
-   Guide.pdf actually specifies; IBM Plex Mono carries identifiers and money,
-   because Raleway has no tabular figures. Weights kept tight on purpose —
-   three and two — so the pilot costs little over the wire. */
-@import url('https://fonts.googleapis.com/css2?family=Raleway:wght@400;600;700&display=swap');
-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&display=swap');
+/* LILA brand fonts: Raleway for UI, IBM Plex Mono for identifiers and money,
+   Brolink DEMO for the LILA wordmark. Brolink is self-hosted from /fonts/ so
+   we don't depend on the onlinewebfonts CDN (which silently returned CSS
+   without the woff2 resolving reliably in-browser).
+
+   Raleway is the face VCycene Brand Style Guide.pdf specifies for all VCycene
+   print and digital communications. It carries a 500 as of the app-wide
+   rollout (2026-08-27) that the Sales pilot did not need: dense UI leans on
+   medium constantly, and without a real 500 the browser rounds it down to 400
+   and the whole app loses a step of hierarchy.
+
+   Raleway has NO tabular figures, so IBM Plex Mono carries every identifier,
+   amount, count and date — see --font-data in tokens.css.
+
+   Inter's webfont is deliberately no longer fetched. It survives as a name in
+   the fallback stacks, where it costs nothing and resolves only if a machine
+   already has it installed. */
+@import url('https://fonts.googleapis.com/css2?family=Raleway:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap');
 @import './tokens.css';
 
 @font-face {

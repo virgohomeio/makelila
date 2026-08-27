@@ -11,6 +11,7 @@ import { StepLabel } from './StepLabel';
 import { StepDock } from './StepDock';
 import { StepEmail } from './StepEmail';
 import { StepFulfilled } from './StepFulfilled';
+import { EmptyState } from '../../../components/ui';
 import styles from '../Fulfillment.module.css';
 
 type Order = {
@@ -98,7 +99,13 @@ export default function Queue() {
         ) : !selected || !selectedOrder ? (
           <div>
             {notice && <div className={styles.queueNotice}>✓ {notice}</div>}
-            <div>Select a queued order from the left.</div>
+            {/* Was a bare sentence set flush to the top-left of a 1000px-tall
+                empty pane. It now sits in the shared EmptyState, so this
+                reads the same as every other "nothing selected" pane. */}
+            <EmptyState
+              title="No order open"
+              body="Pick an order from the queue to test it, dock it, print its label and send the shipping email."
+            />
           </div>
         ) : (
           <>

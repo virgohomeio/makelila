@@ -7,6 +7,7 @@ import { Sidebar } from './Sidebar';
 import { Detail } from './Detail';
 import Templates from '../Templates';
 import Upload from '../Upload';
+import { EmptyState } from '../../components/ui';
 import styles from './OrderReview.module.css';
 
 type SyncState =
@@ -180,7 +181,12 @@ export default function OrderReview() {
           <Detail order={selected} onAfterDisposition={afterDisposition} />
         ) : (
           <section className={styles.empty}>
-            {loading ? 'Loading…' : 'Pick an order from the list to review it.'}
+            {loading ? 'Loading…' : (
+              <EmptyState
+                title="No order open"
+                body="Pick an order from the list to check its address, freight and line items before it goes to Fulfillment."
+              />
+            )}
           </section>
         )}
       </div>

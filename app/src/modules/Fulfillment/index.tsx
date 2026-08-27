@@ -13,6 +13,7 @@ import { ClaimsTab } from '../PostShipment/ClaimsTab';
 import { DeliveryMapTab } from '../PostShipment/DeliveryMapTab';
 import { useIsMobile } from '../../lib/useMediaQuery';
 import { MobileTabbedModule, type MobileTab } from '../../components/MobileTabbedModule';
+import { PageHeader, Tabs } from '../../components/ui';
 import styles from './Fulfillment.module.css';
 
 type Tab =
@@ -24,6 +25,22 @@ const VALID_TABS: Tab[] = [
   'queue', 'shelf', 'history',
   'returns', 'refunds', 'replacements', 'cancellations', 'claims',
   'map',
+];
+
+// Two groups: what is going out, and what is coming back. The seam used to be
+// a literal "|" between two of the nine buttons; `startsGroup` draws it now,
+// and the labels lost their redundant nouns ("Fulfillment Queue" inside the
+// Fulfillment module, "Inventory Shelf" beside it).
+const FULFILLMENT_TABS: { key: Tab; label: string; startsGroup?: boolean }[] = [
+  { key: 'queue',         label: 'Queue' },
+  { key: 'shelf',         label: 'Shelf' },
+  { key: 'history',       label: 'History' },
+  { key: 'map',           label: 'Delivery map', startsGroup: true },
+  { key: 'returns',       label: 'Returns' },
+  { key: 'refunds',       label: 'Refunds' },
+  { key: 'replacements',  label: 'Replacements' },
+  { key: 'cancellations', label: 'Cancellations' },
+  { key: 'claims',        label: 'Claims' },
 ];
 
 export default function Fulfillment() {
@@ -58,47 +75,16 @@ export default function Fulfillment() {
 
   return (
     <div className={styles.layout}>
-      <div className={styles.tabs}>
-        <button
-          className={`${styles.tab} ${active === 'queue' ? styles.active : ''}`}
-          onClick={() => navigate('/fulfillment/queue')}
-        >Fulfillment Queue</button>
-        <button
-          className={`${styles.tab} ${active === 'shelf' ? styles.active : ''}`}
-          onClick={() => navigate('/fulfillment/shelf')}
-        >Inventory Shelf</button>
-        <button
-          className={`${styles.tab} ${active === 'history' ? styles.active : ''}`}
-          onClick={() => navigate('/fulfillment/history')}
-        >History</button>
-
-        <span className={styles.tabDivider} />
-
-        <button
-          className={`${styles.tab} ${active === 'map' ? styles.active : ''}`}
-          onClick={() => navigate('/fulfillment/map')}
-        >Delivery Map</button>
-        <button
-          className={`${styles.tab} ${active === 'returns' ? styles.active : ''}`}
-          onClick={() => navigate('/fulfillment/returns')}
-        >Returns</button>
-        <button
-          className={`${styles.tab} ${active === 'refunds' ? styles.active : ''}`}
-          onClick={() => navigate('/fulfillment/refunds')}
-        >Refunds</button>
-        <button
-          className={`${styles.tab} ${active === 'replacements' ? styles.active : ''}`}
-          onClick={() => navigate('/fulfillment/replacements')}
-        >Replacements</button>
-        <button
-          className={`${styles.tab} ${active === 'cancellations' ? styles.active : ''}`}
-          onClick={() => navigate('/fulfillment/cancellations')}
-        >Cancellations</button>
-        <button
-          className={`${styles.tab} ${active === 'claims' ? styles.active : ''}`}
-          onClick={() => navigate('/fulfillment/claims')}
-        >Claims</button>
-      </div>
+      <PageHeader
+        title="Fulfillment"
+        meta="Everything between a confirmed order and a closed case."
+      />
+      <Tabs
+        ariaLabel="Fulfillment sections"
+        items={FULFILLMENT_TABS}
+        active={active}
+        onChange={(k) => navigate(`/fulfillment/${k}`)}
+      />
       <div className={styles.tabPanel}>
         {active === 'queue'         ? <Queue /> :
          active === 'shelf'         ? <Shelf /> :

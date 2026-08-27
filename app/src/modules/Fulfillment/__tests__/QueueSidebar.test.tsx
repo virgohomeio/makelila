@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { QueueSidebar } from '../queue/QueueSidebar';
 import type { FulfillmentQueueRow } from '../../../lib/fulfillment';
 
@@ -33,7 +34,7 @@ describe('QueueSidebar', () => {
   ]);
 
   it('renders ready rows with customer name and step badge', () => {
-    render(<QueueSidebar readyRows={[row1, row2]} shippedRows={[]} orderLookup={orders} selectedId={null} onSelect={vi.fn()} />);
+    render(<MemoryRouter><QueueSidebar readyRows={[row1, row2]} shippedRows={[]} orderLookup={orders} selectedId={null} onSelect={vi.fn()} /></MemoryRouter>);
     expect(screen.getByText('Alice')).toBeInTheDocument();
     expect(screen.getByText('Bob')).toBeInTheDocument();
     expect(screen.getByText('1/6')).toBeInTheDocument();
@@ -41,37 +42,42 @@ describe('QueueSidebar', () => {
   });
 
   it('shows "Due TODAY" for today\'s deadline', () => {
-    render(<QueueSidebar readyRows={[row1]} shippedRows={[]} orderLookup={orders} selectedId={null} onSelect={vi.fn()} />);
+    render(<MemoryRouter><QueueSidebar readyRows={[row1]} shippedRows={[]} orderLookup={orders} selectedId={null} onSelect={vi.fn()} /></MemoryRouter>);
     expect(screen.getByText(/Due TODAY/i)).toBeInTheDocument();
   });
 
   it('calls onSelect with the row id', () => {
     const onSelect = vi.fn();
-    render(<QueueSidebar readyRows={[row1, row2]} shippedRows={[]} orderLookup={orders} selectedId={null} onSelect={onSelect} />);
+    render(<MemoryRouter><QueueSidebar readyRows={[row1, row2]} shippedRows={[]} orderLookup={orders} selectedId={null} onSelect={onSelect} /></MemoryRouter>);
     fireEvent.click(screen.getByText('Alice'));
     expect(onSelect).toHaveBeenCalledWith('q1');
   });
 
   it('shows empty-state when no ready rows', () => {
-    render(<QueueSidebar readyRows={[]} shippedRows={[]} orderLookup={orders} selectedId={null} onSelect={vi.fn()} />);
-    expect(screen.getByText(/No queued orders/i)).toBeInTheDocument();
+    render(<MemoryRouter><QueueSidebar readyRows={[]} shippedRows={[]} orderLookup={orders} selectedId={null} onSelect={vi.fn()} /></MemoryRouter>);
+    expect(screen.getByText(/Nothing queued/i)).toBeInTheDocument();
+    // The point of the rewrite: an empty queue now says where the next row
+    // comes from and offers the way to it, rather than only that it is empty.
+    expect(screen.getByRole('button', { name: /go to sales/i })).toBeInTheDocument();
   });
 
   it('renders a ⭐ priority badge for prioritized rows', () => {
     const pri = mkRow({ id: 'q4', order_id: 'o1', step: 1, priority: true });
-    render(<QueueSidebar readyRows={[pri]} shippedRows={[]} orderLookup={orders} selectedId={null} onSelect={vi.fn()} />);
+    render(<MemoryRouter><QueueSidebar readyRows={[pri]} shippedRows={[]} orderLookup={orders} selectedId={null} onSelect={vi.fn()} /></MemoryRouter>);
     expect(screen.getByTitle(/Priority/i)).toBeInTheDocument();
   });
 
   it('shows tab buttons with counts', () => {
-    render(<QueueSidebar readyRows={[row1]} shippedRows={[shippedRow]} orderLookup={orders} selectedId={null} onSelect={vi.fn()} />);
-    expect(screen.getByText(/READY TO SHIP \(1\)/i)).toBeInTheDocument();
-    expect(screen.getByText(/SHIPPED \(1\)/i)).toBeInTheDocument();
+    render(<MemoryRouter><QueueSidebar readyRows={[row1]} shippedRows={[shippedRow]} orderLookup={orders} selectedId={null} onSelect={vi.fn()} /></MemoryRouter>);
+    // Label and count are separate elements now — the count carries the data
+    // face so it lines up with every other tab count in the app.
+    expect(screen.getByRole('button', { name: /ready to ship 1/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^shipped 1/i })).toBeInTheDocument();
   });
 
   it('switches to shipped tab and shows shipped orders', () => {
-    render(<QueueSidebar readyRows={[row1]} shippedRows={[shippedRow]} orderLookup={orders} selectedId={null} onSelect={vi.fn()} />);
-    fireEvent.click(screen.getByText(/SHIPPED \(1\)/i));
+    render(<MemoryRouter><QueueSidebar readyRows={[row1]} shippedRows={[shippedRow]} orderLookup={orders} selectedId={null} onSelect={vi.fn()} /></MemoryRouter>);
+    fireEvent.click(screen.getByRole('button', { name: /^shipped 1/i }));
     expect(screen.getByText('Bob')).toBeInTheDocument();
     expect(screen.getByText('6/6')).toBeInTheDocument();
   });

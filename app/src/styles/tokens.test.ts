@@ -33,7 +33,8 @@ const REQUIRED = [
   '--color-crimson-rgb', '--color-ink-rgb', '--color-error-accent',
   '--shadow-sm', '--shadow-md', '--shadow-lg',
   '--row-height', '--row-height-header',
-  '--focus-ring',
+  '--focus-ring', '--radius-pill',
+  '--dur-fast', '--dur-settle', '--ease-out',
 ];
 
 describe('tokens.css', () => {
@@ -52,13 +53,21 @@ describe('tokens.css', () => {
     expect(tokenValue(name)).not.toBeNull();
   });
 
-  // The Sales aesthetic pilot opts in by rebinding --font-sans to
-  // --font-display inside its own scope, which only works if the two stay
-  // distinct: if --font-display ever collapses onto Inter the pilot silently
-  // becomes a no-op rather than failing.
-  it('offers a display face that is not the default UI face', () => {
+  // Raleway is the face VCycene Brand Style Guide.pdf specifies for all
+  // VCycene communications; it went app-wide on 2026-08-27. Two separate
+  // things are asserted, because there are two distinct ways this regresses.
+  it('names Raleway as the display face', () => {
     expect(tokenValue('--font-display')).toContain('Raleway');
-    expect(tokenValue('--font-sans')).toContain('Inter');
+  });
+
+  // --font-sans must stay BOUND to --font-display rather than restating its
+  // stack. A restated copy still renders Raleway today, so no visual test
+  // would catch it — and the two would then drift the moment either is
+  // edited. jsdom does not substitute var(), so the literal binding is
+  // exactly what reads back here.
+  it('binds the UI face to the display face rather than restating it', () => {
+    expect(tokenValue('--font-sans')).toBe('var(--font-display)');
+    expect(tokenValue('--font-mono')).toBe('var(--font-data)');
   });
 
   // Raleway has no tabular figures. Identifiers and money must not fall back
@@ -68,6 +77,14 @@ describe('tokens.css', () => {
     expect(data).toContain('IBM Plex Mono');
     expect(data).toMatch(/monospace$/);
     expect(data).not.toContain('Raleway');
+  });
+
+  // Inter was the UI face until the Raleway rollout. It survives only as a
+  // fallback inside the stacks; if it ever reappears as a role of its own,
+  // the app has quietly reverted.
+  it('no longer treats Inter as a role', () => {
+    expect(tokenValue('--font-sans')).not.toContain('Inter');
+    expect(tokenValue('--font-mono')).not.toContain('Inter');
   });
 
   it('leaves the LILA brand tokens untouched', () => {

@@ -12,6 +12,7 @@ import {
   type Customer, type FuState,
 } from '../../lib/customers';
 import { TicketDetailPanel } from './TicketDetailPanel';
+import { EmptyState } from '../../components/ui';
 import styles from './Service.module.css';
 
 // View modes — walkthrough #31 asked for an explicit "needs onboarding —
@@ -294,7 +295,12 @@ function NotScheduledView({ rows, customerById }: {
   customerById: Map<string, Customer>;
 }) {
   if (rows.length === 0) {
-    return <div className={styles.empty}>Nobody waiting — every shipped customer has been scheduled, completed, or skipped.</div>;
+    return (
+      <EmptyState
+        title="Nobody waiting"
+        body="Every shipped customer has been scheduled, completed or skipped."
+      />
+    );
   }
   // Oldest shipments first — those have been waiting longest.
   const sorted = [...rows].sort((a, b) => new Date(a.shipped_at).getTime() - new Date(b.shipped_at).getTime());
@@ -349,7 +355,12 @@ function ScheduledView({
   }, [scheduledLifecycle]);
 
   if (tickets.length === 0) {
-    return <div className={styles.empty}>No upcoming onboarding sessions booked.</div>;
+    return (
+      <EmptyState
+        title="No sessions booked"
+        body="Onboarding calls booked through Calendly appear here as soon as a customer picks a slot."
+      />
+    );
   }
   return (
     <table className={styles.table}>
@@ -399,7 +410,7 @@ function AllUnitsView({ rows, customerById }: {
   rows: CustomerLifecycle[];
   customerById: Map<string, Customer>;
 }) {
-  if (rows.length === 0) return <div className={styles.empty}>No shipped units yet.</div>;
+  if (rows.length === 0) return <EmptyState title="No shipped units yet" body="Units appear here once Fulfillment marks them shipped." />;
   return (
     <table className={styles.table}>
       <thead>
@@ -462,7 +473,12 @@ function CheckInsView({ rows, today }: {
   today: Date;
 }) {
   if (rows.length === 0) {
-    return <div className={styles.empty}>No check-ins due — everyone&apos;s onboarding follow-ups are up to date.</div>;
+    return (
+      <EmptyState
+        title="No check-ins due"
+        body="Everyone's onboarding follow-ups are up to date."
+      />
+    );
   }
   const todayMid = new Date(today); todayMid.setHours(0, 0, 0, 0);
   return (

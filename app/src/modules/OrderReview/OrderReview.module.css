@@ -16,46 +16,24 @@
  */
 
 /* ══════════════════════════════════════════════════════════════════════════
-   Sales aesthetic pilot — 2026-08-21
+   Sales was the aesthetic pilot (2026-08-21). It was adopted app-wide on
+   2026-08-27, so both of its opt-ins have left this file:
 
-   Scoped to this module on purpose. The other eleven surfaces stay on Inter
-   and a flat ground until this is judged; `.salesRoot` is the whole opt-in and
-   deleting it reverts the look completely.
+     Type   — the Raleway / IBM Plex Mono rebind now lives on :root in
+              tokens.css, where --font-sans and --font-mono bind to
+              --font-display and --font-data for every module at once.
+     Ground — the sediment strata moved to AppShell.module.css, so they are
+              drawn once for the whole app. Keeping a copy here would lay a
+              second set of layers over the first.
 
-   Type is rebound as VARIABLES, not as font-family. globals.css sets
-   font-family on the universal selector `*`, so `.salesRoot { font-family }`
-   would lose to it on every descendant — custom properties inherit and `*`
-   re-resolves them per element, so this is the mechanism that actually works.
-
-   Raleway is the face VCycene Brand Style Guide.pdf specifies; the app has
-   been off-brand on Inter. Every identifier, amount and count keeps a
-   monospace with true tabular figures, because Raleway has none and this
-   queue is reconciled by scanning digit columns — rebinding --font-mono
-   carries that through every rule below without touching one of them.
+   What is left below is only what is genuinely local to this queue: three
+   optical corrections Raleway needs at these specific sizes, and the one
+   orchestrated moment on load.
    ══════════════════════════════════════════════════════════════════════════ */
-.salesRoot {
-  --font-sans: var(--font-display);
-  --font-mono: var(--font-data);
 
-  /* Atmosphere rather than a flat fill. LILA is a composter, so the ground is
-     sediment: fine horizontal strata. Held at ~2.8% ink because this sits
-     behind a work queue, not a landing page — it should register as depth
-     without ever competing with a row.
-
-     Texture only, over the page's own colour. An earlier pass laid a
-     page→surface gradient under this and set its own padding; AppShell's
-     <main> already pads 18px, so that painted a visibly inset rectangle with
-     a seam along the bottom edge. Tinting nothing means there is no edge to
-     seam. */
-  background-image: repeating-linear-gradient(
-    180deg,
-    transparent 0 26px,
-    rgba(var(--color-ink-rgb), 0.028) 26px 27px
-  );
-}
-
-/* Raleway runs optically larger and looser than Inter at the same size; these
-   three are the places that needed re-tuning rather than a global scale bump. */
+/* Raleway runs optically larger and looser than the Inter these were set
+   against; these three are the places that needed re-tuning rather than a
+   global scale bump. */
 .salesRoot .pageTitle { letter-spacing: -0.02em; font-weight: 700; }
 .salesRoot .cardHead  { letter-spacing: 0.09em; font-weight: 700; }
 .salesRoot .tab       { letter-spacing: 0.01em; }

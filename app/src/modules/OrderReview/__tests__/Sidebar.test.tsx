@@ -126,7 +126,7 @@ describe('Sidebar', () => {
         selectedId={null} onSelect={vi.fn()}
       />,
     );
-    expect(screen.getByText(/no orders in this tab/i)).toBeInTheDocument();
+    expect(screen.getByText(/nothing in pending/i)).toBeInTheDocument();
   });
 
   // Cancelled orders are dead but not gone: they get their own tab so the team
@@ -190,7 +190,7 @@ describe('Sidebar', () => {
   it('names the tab and the query when a search returns nothing', () => {
     render_();
     fireEvent.change(screen.getByPlaceholderText(/search name/i), { target: { value: 'zzz' } });
-    expect(screen.getByText(/No order in Pending matches/i)).toBeInTheDocument();
+    expect(screen.getByText(/Nothing in Pending matches/i)).toBeInTheDocument();
     expect(screen.getByText('0 orders matching')).toBeInTheDocument();
   });
 
