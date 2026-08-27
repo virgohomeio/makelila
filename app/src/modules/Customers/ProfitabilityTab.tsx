@@ -665,6 +665,7 @@ function CustomersView({
                      value={totals.supportPriced ? fmt(totals.support) : 'rate not set'}
                      variant="warn" />
         <SummaryStat label="Consumables & parts"  value={fmt(totals.consumables)} variant="warn" />
+        <SummaryStat label="3PL handling"          value={fmt(totals.fulfilment)} variant="warn" />
         <SummaryStat label="Net margin"           value={fmt(totals.margin)}    variant={totals.margin < 0 ? 'bad' : 'good'} />
       </div>
       <div className={styles.profCurrencyNote}>
@@ -884,6 +885,15 @@ function ProfitCard({ row, onOpen }: { row: CustomerProfitability; onOpen: () =>
             </dd>
           </div>
         )}
+        {row.fulfilment_cost_cad > 0 && (
+          <div title={`${row.fulfilment_order_count} order(s) handled by the 3PL since the contract began on 23 Jun 2026 — order fee plus picks, at the contracted rate card. Estimated: no FlexSpace invoice is on file. Carrier cost is not included here, it is already in Shipping.`}>
+            <dt>3PL handling</dt>
+            <dd>
+              {fmt(row.fulfilment_cost_cad)}
+              <span className={styles.profUncostedHint}> ({row.fulfilment_order_count})</span>
+            </dd>
+          </div>
+        )}
         {row.consumables_cost_cad > 0 && (
           <div title={`${row.consumable_item_count} consumable/part order(s) bought at retail and shipped to this customer (worm castings, repair parts). Cost of goods, not freight — the postage on them was free.`}>
             <dt>Consumables</dt>
@@ -983,12 +993,13 @@ function aggregate(rs: CustomerProfitability[]) {
       support:   acc.support   + (r.support_cost_cad ?? 0),
       returnHandling: acc.returnHandling + (r.return_handling_cad ?? 0),
       consumables: acc.consumables + (r.consumables_cost_cad ?? 0),
+      fulfilment: acc.fulfilment + (r.fulfilment_cost_cad ?? 0),
       // Any priced call at all means the rate is live; without this the bar
       // would show $0.00 and read as "support is free".
       supportPriced: acc.supportPriced || r.support_cost_cad != null,
       margin:    acc.margin    + r.net_margin_cad,
     }),
-    { revenue: 0, tax: 0, salesCost: 0, warranty: 0, refund: 0, support: 0, supportPriced: false, returnHandling: 0, consumables: 0, margin: 0 },
+    { revenue: 0, tax: 0, salesCost: 0, warranty: 0, refund: 0, support: 0, supportPriced: false, returnHandling: 0, consumables: 0, fulfilment: 0, margin: 0 },
   );
 }
 

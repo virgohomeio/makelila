@@ -52,8 +52,8 @@ denominator.
 
 ## Cost buckets
 
-Ten buckets. Each dollar belongs to exactly one; they sum to variable cost and
-nothing else is added.
+Eleven buckets. Each dollar belongs to exactly one; they sum to variable cost
+and nothing else is added.
 
 | # | Bucket | Formula | Source | Basis |
 |---|---|---|---|---|
@@ -67,6 +67,7 @@ nothing else is added.
 | 8 | Sales commission | `revenue × sales_commission_pct` | `profitability_rates` | **Unpriced — rate is 0** |
 | 9 | Installation | `sale orders × installation_cost_per_unit_cad` | `profitability_rates` | **Unpriced — rate is 0**; LILA ships self-install, so 0 may also be correct |
 | 10 | Consumables & parts | `Σ amount` over the customer's retail purchases | `external_item_costs` | Actual |
+| 11 | 3PL handling | `order fee + first pick + additional pick × (items − 1)` per order, from the contract's effective date | `profitability_rates` (`fulfilment_*`) | **Estimated** — contracted rates, no invoice to reconcile |
 
 Buckets 7–9 are rated at $0 today. Set them in `profitability_rates` and every
 margin, LTV and payback figure moves with them — no code change needed.
@@ -130,6 +131,25 @@ margin worse than their COGS by the tax alone. That is arithmetically right —
 the cash did leave — but the HST portion is recoverable from CRA and the model
 has no way to know it. Roughly $2.2k across the current 18 approvals.
 
+**The 3PL's transportation is not bucket 11.** FlexSpace passes carrier cost
+through at cost, and that same freight is already bucket 2 via Freightcom.
+Charging it in both places would bill every shipment twice. As of this writing
+no shipment has moved to the 3PL's own carriers either — every one since the
+2026-06-23 effective date is still GLS, Canpar or UPS, and there is not one
+Canada Post or UniUni record in `shipments`.
+
+**The 3PL's fixed fees are out of scope by design.** Account management
+($150/mo) and pallet storage ($28/pallet/mo) do not vary with any one customer,
+and this is a *contribution* margin model. Spreading them over customers would
+be an allocation presented as a measurement, and would move every customer's
+margin whenever the pallet count changed. On the rate card's own ~300-order
+scenario that is $2,225–$2,645/mo depending on pallets — a real cost, but an
+operating-cost figure rather than a per-customer one. Inbound container
+unloading ($550/$850 plus overage) is inventory cost incurred before any
+customer exists, and belongs with COGS.
+
+Cancelled orders carry no 3PL fee: nothing was picked.
+
 **Return handling is not the restocking fee.** Bucket 6 is what it costs *us* to
 take a machine back. `refund_approvals.restocking_fee_usd` is a fee charged *to
 the customer* and already nets out of bucket 4.
@@ -139,7 +159,7 @@ the customer* and already nets out of bucket 4.
 ## Contribution margin
 
 ```
-Contribution margin   = revenue − Σ(buckets 1…10)
+Contribution margin   = revenue − Σ(buckets 1…11)
 Contribution margin % = contribution margin ÷ revenue      (null when revenue = 0)
 ```
 
@@ -304,8 +324,8 @@ Listed in the UI under "What these numbers do and don't cover", and in
 ## Data integrity
 
 - **No double counting.** Each cost belongs to exactly one bucket; a test asserts
-  the ten sum with powers of two so a duplicated bucket changes the total, and a
-  second test pins consumables out of the shipping bucket.
+  the eleven sum with powers of two so a duplicated bucket changes the total,
+  and two more pin consumables and 3PL handling out of the shipping bucket.
 - **Refunds reduce margin** through bucket 4, not by editing revenue — the
   original sale stays visible.
 - **Cancelled replacement orders are excluded** from warranty cost.

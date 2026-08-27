@@ -500,6 +500,11 @@ export type CustomerProfitability = {
   // freight -- the money buys product the customer keeps.
   consumables_cost_cad: number;
   consumable_item_count: number;
+  // Bucket 11: 3PL per-order handling (FlexSpace) -- order fee + picks.
+  // ESTIMATED from the contracted rate card, not from an invoice. Excludes
+  // transportation, which the 3PL passes through and bucket 2 already holds.
+  fulfilment_cost_cad: number;
+  fulfilment_order_count: number;
   // Margin = revenue - all 10 buckets (no double-count)
   net_margin_cad: number;
   // Settled-refund subset (status='refunded' only) — shown alongside
@@ -581,6 +586,8 @@ export function useCustomerProfitability(): {
         sales_commission_cad:       Number(r.sales_commission_cad ?? 0),
         installation_cost_cad:      Number(r.installation_cost_cad ?? 0),
         consumables_cost_cad:       Number(r.consumables_cost_cad ?? 0),
+        fulfilment_cost_cad:        Number(r.fulfilment_cost_cad ?? 0),
+        fulfilment_order_count:     Number(r.fulfilment_order_count ?? 0),
         consumable_item_count:      Number(r.consumable_item_count ?? 0),
         shipping_invoiced_count:    Number(r.shipping_invoiced_count ?? 0),
         legacy_shipping_cad:        Number(r.legacy_shipping_cad ?? 0),

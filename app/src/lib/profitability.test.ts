@@ -31,6 +31,7 @@ function row(over: Partial<CustomerProfitability> = {}): CustomerProfitability {
     payment_fee_cad: 0, sales_commission_cad: 0, installation_cost_cad: 0,
     consumables_cost_cad: 0, consumable_item_count: 0, shipping_invoiced_count: 0,
     legacy_shipping_cad: 0, legacy_shipment_count: 0,
+    fulfilment_cost_cad: 0, fulfilment_order_count: 0,
     net_margin_cad: 0,
     order_count: 0, units_shipped_count: 0,
     replacement_count: 0, open_replacement_count: 0,
@@ -108,15 +109,23 @@ describe('revenue', () => {
 // ── Costs ───────────────────────────────────────────────────────────────────
 
 describe('cost buckets', () => {
-  it('sums exactly the ten buckets and nothing else', () => {
+  it('sums exactly the eleven buckets and nothing else', () => {
     const costs = variableCosts(row({
       sale_cogs_cad: 1, sale_shipping_cad: 2, expected_warranty_cost_cad: 4,
       expected_refund_cad: 8, support_cost_cad: 16, return_handling_cad: 32,
       payment_fee_cad: 64, sales_commission_cad: 128, installation_cost_cad: 256,
-      consumables_cost_cad: 512,
+      consumables_cost_cad: 512, fulfilment_cost_cad: 1024,
     }));
     // Powers of two: any bucket dropped or double-counted changes the total.
-    expect(sumCosts(costs)).toBe(1023);
+    expect(sumCosts(costs)).toBe(2047);
+  });
+
+  it('keeps 3PL handling out of shipping', () => {
+    // The 3PL passes carrier cost through and bucket 2 already holds it. If
+    // handling ever lands in `shipping`, every shipment is billed twice.
+    const costs = variableCosts(row({ sale_shipping_cad: 150, fulfilment_cost_cad: 6.45 }));
+    expect(costs.shipping).toBe(150);
+    expect(costs.fulfilment).toBeCloseTo(6.45, 2);
   });
 
   it('adds pre-Freightcom legacy freight into the shipping bucket', () => {

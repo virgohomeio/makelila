@@ -80,6 +80,9 @@ export function CustomerDetail({
             <Row label="Payment fees"    value={<Unpriced amount={metrics.costs.paymentFees} />} />
             <Row label="Sales commission" value={<Unpriced amount={metrics.costs.commission} />} />
             <Row label="Installation"    value={<Unpriced amount={metrics.costs.installation} />} />
+            <Row label="3PL handling"    value={row.fulfilment_order_count > 0
+                   ? `${money(metrics.costs.fulfilment)} · ${row.fulfilment_order_count} order(s), est.`
+                   : money(0)} />
             <Row label="Consumables & parts"
                  value={row.consumable_item_count > 0
                    ? `${money(metrics.costs.consumables)} · ${row.consumable_item_count} item(s)`
