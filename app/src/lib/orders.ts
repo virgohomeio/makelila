@@ -130,6 +130,14 @@ export type Order = {
   shipping_line_title: string | null;
   line_items: LineItem[];
   sales_confirmed_fit: boolean;
+  // An operator's verdict on an order that predates the fulfillment queue —
+  // see lib/reconcile.ts. Optional rather than `| null` because the columns
+  // ship behind the gated migration workflow, so select('*') returns rows
+  // without them on an environment that hasn't run it yet.
+  reconciled_at?: string | null;
+  reconciled_by?: string | null;
+  reconcile_outcome?: 'shipped' | 'duplicate' | 'open' | null;
+  reconcile_note?: string | null;
   dispositioned_by: string | null;
   dispositioned_at: string | null;
   created_at: string;
@@ -373,7 +381,17 @@ export function bucketOrders(
     if (fulfilledOrderIds.has(o.id)) return false;
     // Never hide replacement orders by the shipped-customer name check —
     // a returning customer's replacement must always be visible in Order Review.
-    if (o.kind !== 'replacement' && shippedCustomers.has(o.customer_name.toLowerCase().trim())) return false;
+    //
+    // The check is a *name* match, so it also hides every new order from any
+    // customer who has ever received a unit — 112 of the 163 pending orders as
+    // of 2026-08-28, four of them placed that fortnight. An explicit 'open'
+    // verdict from the reconcile screen (lib/reconcile.ts) is a human saying
+    // "nothing shipped against this one", and beats the heuristic.
+    if (
+      o.kind !== 'replacement'
+      && o.reconcile_outcome !== 'open'
+      && shippedCustomers.has(o.customer_name.toLowerCase().trim())
+    ) return false;
     // (c) the replacement's service ticket is closed. shipped_at is only ever
     //     stamped by shipQueuedReplacementsForTicket(), which fires solely on
     //     the 'replacement_sent' ticket status — a status no ticket has ever

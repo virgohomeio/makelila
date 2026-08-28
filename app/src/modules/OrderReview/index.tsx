@@ -7,6 +7,7 @@ import { Sidebar } from './Sidebar';
 import { Detail } from './Detail';
 import Templates from '../Templates';
 import Upload from '../Upload';
+import Reconcile from './Reconcile';
 import { EmptyState } from '../../components/ui';
 import styles from './OrderReview.module.css';
 
@@ -26,7 +27,7 @@ export default function OrderReview() {
   const selected = orderId
     ? all.find(o => o.id === orderId) ?? cancelled.find(o => o.id === orderId) ?? null
     : null;
-  const [view, setView] = useState<'orders' | 'templates' | 'upload'>('orders');
+  const [view, setView] = useState<'orders' | 'reconcile' | 'templates' | 'upload'>('orders');
   // Syncing is a module-level action, not a list filter, so it lives in the
   // page header rather than inside the order rail's header.
   const [sync, setSync] = useState<SyncState>({ kind: 'idle' });
@@ -103,6 +104,13 @@ export default function OrderReview() {
           >Orders</button>
           <button
             type="button"
+            className={`${styles.viewChip} ${view === 'reconcile' ? styles.viewChipActive : ''}`}
+            onClick={() => setView('reconcile')}
+            aria-pressed={view === 'reconcile'}
+            title="Pending orders whose customer already has a machine — say what actually happened to each"
+          >Reconcile</button>
+          <button
+            type="button"
             className={`${styles.viewChip} ${view === 'templates' ? styles.viewChipActive : ''}`}
             onClick={() => setView('templates')}
             aria-pressed={view === 'templates'}
@@ -117,6 +125,10 @@ export default function OrderReview() {
       </div>
     </div>
   );
+
+  if (view === 'reconcile') {
+    return <div className={styles.salesRoot}>{header}<Reconcile /></div>;
+  }
 
   if (view === 'templates') {
     return <div className={styles.salesRoot}>{header}<Templates /></div>;

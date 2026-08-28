@@ -493,6 +493,27 @@ describe('bucketOrders', () => {
     expect(b.cancelled).toEqual([]);
   });
 
+  // The shipped-customer signal is a *name* match against any shipped unit, so
+  // it also swallows a repeat customer's genuinely new order. An operator who
+  // has been through the Reconcile screen and said "nothing shipped against
+  // this one" outranks the heuristic.
+  it('shows a pending order the shipped-customer match would hide once it is reconciled open', () => {
+    const b = bucketOrders(
+      [mk({ id: 'reopened', status: 'pending', customer_name: 'Ada Ship', reconcile_outcome: 'open' }),
+       mk({ id: 'hidden',   status: 'pending', customer_name: 'Ada Ship' })],
+      none, new Set(['ada ship']),
+    );
+    expect(b.pending.map(o => o.id)).toEqual(['reopened']);
+  });
+
+  it('keeps hiding an order reconciled as shipped', () => {
+    const b = bucketOrders(
+      [mk({ id: 'done', status: 'pending', customer_name: 'Ada Ship', reconcile_outcome: 'shipped' })],
+      none, new Set(['ada ship']),
+    );
+    expect(b.all).toEqual([]);
+  });
+
   // A replacement whose service ticket is closed has been dealt with — the
   // operator resolved the case. It only lingered in the Replacement tab
   // because nothing stamps orders.shipped_at unless the ticket goes through
