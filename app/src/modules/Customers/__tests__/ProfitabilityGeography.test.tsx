@@ -132,6 +132,74 @@ describe('ProfitabilityTab — geography', () => {
     expect(screen.getByText(/Clear filters \(3 shown\)/)).toBeInTheDocument();
   });
 
+  it('keeps the rest of the map alive while one region is selected', () => {
+    // Reported from the live tab: click Arizona, hover Texas, and the map
+    // claimed Texas had no customers. The region filter was narrowing the
+    // very dimension the map draws, so selecting one region hatched the
+    // other sixty-three.
+    const rows = [
+      ...[0, 1, 2].map(i => row({
+        id: `az${i}`, region_code: 'US-AZ', region: 'AZ', country: 'US', net_margin_cad: 500,
+      })),
+      ...[0, 1, 2].map(i => row({
+        id: `tx${i}`, region_code: 'US-TX', region: 'TX', country: 'US', net_margin_cad: 300,
+      })),
+    ];
+    mountGeography(rows);
+    const map = screen.getByRole('img', { name: /by province and state/i });
+
+    fireEvent.click(within(map).getByText('AZ').closest('g')!);
+    expect(screen.getByText(/Clear filters \(3 shown\)/)).toBeInTheDocument();
+
+    // Texas keeps its own readout rather than reporting itself as empty.
+    fireEvent.mouseEnter(within(map).getByText('TX').closest('g')!);
+    const readout = screen.getByText('Profit / customer').closest('dl')!.parentElement!;
+    expect(within(readout).getByText('Texas')).toBeInTheDocument();
+    expect(screen.queryByText(/No customers here/)).not.toBeInTheDocument();
+  });
+
+  it('still ranks every region while one is selected', () => {
+    const rows = [
+      ...[0, 1, 2].map(i => row({
+        id: `on${i}`, region_code: 'CA-ON', region: 'ON', net_margin_cad: 600,
+      })),
+      ...[0, 1, 2].map(i => row({
+        id: `ca${i}`, region_code: 'US-CA', region: 'CA', country: 'US', net_margin_cad: -400,
+      })),
+    ];
+    mountGeography(rows);
+    fireEvent.click(within(screen.getByRole('img', { name: /by province and state/i }))
+      .getByText('ON').closest('g')!);
+    // Both ends of the ranking survive the selection — otherwise the lists
+    // collapse to the one region you just picked.
+    const best = screen.getByText('Most profitable regions').closest('div')!;
+    const worst = screen.getByText('Least profitable regions').closest('div')!;
+    expect(within(best.parentElement!).getByText('Ontario')).toBeInTheDocument();
+    expect(within(worst.parentElement!).getByText('California')).toBeInTheDocument();
+  });
+
+  it('says which kind of empty a hatched region is', () => {
+    mountGeography(twoRegions());
+    const map = screen.getByRole('img', { name: /by province and state/i });
+    fireEvent.mouseEnter(within(map).getByText('NU').closest('g')!);
+    // No filter narrowing beyond the defaults the tab always applies, so the
+    // honest reading of an empty Nunavut is "nobody has bought here".
+    expect(screen.getByText(/No customers here/)).toBeInTheDocument();
+  });
+
+  it('distinguishes never-sold-here from filtered-out', () => {
+    mountGeography(twoRegions());
+    // A search narrows the map, so an empty Nunavut no longer means nobody
+    // has ever bought there — only that nobody matching is left.
+    fireEvent.change(screen.getByPlaceholderText('Search customer…'), {
+      target: { value: 'Ontario' },
+    });
+    const map = screen.getByRole('img', { name: /by province and state/i });
+    fireEvent.mouseEnter(within(map).getByText('NU').closest('g')!);
+    expect(screen.getByText('No customers here match the current filters.')).toBeInTheDocument();
+    expect(screen.queryByText('No customers here yet.')).not.toBeInTheDocument();
+  });
+
   it('keeps a region with too few customers out of the ranking', () => {
     mountGeography([row({ id: 'solo', region_code: 'CA-NS', region: 'NS' })]);
     expect(screen.getAllByText(/Not enough data yet/).length).toBeGreaterThan(0);

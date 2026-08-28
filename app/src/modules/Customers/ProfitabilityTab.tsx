@@ -70,7 +70,13 @@ export function ProfitabilityTab() {
   const cohortOptions = useMemo(() => buildCohortOptions(rows), [rows]);
   const regionOptions = useMemo(() => buildRegionOptions(rows), [rows]);
 
-  const filteredRows = useMemo(() => {
+  // Every filter except the region one. The map, the region rankings and the
+  // province/state table are all built from this rather than from
+  // filteredRows: a filter control has to keep showing the options it is
+  // choosing between. Narrowing geography by the geography filter left one
+  // region on the map and hatched the other sixty-three, so clicking Arizona
+  // made the map claim Texas had no customers.
+  const rowsBeforeRegion = useMemo(() => {
     const q = search.trim().toLowerCase();
     return rows
       .filter(r => showTeam || !r.is_team_member)
@@ -80,7 +86,6 @@ export function ProfitabilityTab() {
         if (country === 'other') return r.country !== 'CA' && r.country !== 'US';
         return r.country === country;
       })
-      .filter(r => region === 'all' || r.region_code === region)
       .filter(r => channel === 'all' || r.acquisition_channel === channel)
       .filter(r => {
         if (volume === 'all') return true;
@@ -89,7 +94,12 @@ export function ProfitabilityTab() {
       })
       .filter(r => cohort === 'all' || cohortOf(r) === cohort)
       .filter(r => q === '' || r.full_name.toLowerCase().includes(q) || (r.email ?? '').toLowerCase().includes(q));
-  }, [rows, search, country, region, channel, volume, cohort, showTeam, hideZero, allMetrics]);
+  }, [rows, search, country, channel, volume, cohort, showTeam, hideZero, allMetrics]);
+
+  const filteredRows = useMemo(
+    () => rowsBeforeRegion.filter(r => region === 'all' || r.region_code === region),
+    [rowsBeforeRegion, region],
+  );
 
   const filteredMetrics = useMemo(
     () => filteredRows.map(r => allMetrics.get(r.id)!).filter(Boolean),
@@ -104,6 +114,18 @@ export function ProfitabilityTab() {
   const totals = useMemo(() => portfolio(filteredMetrics), [filteredMetrics]);
   const legacyTotals = useMemo(() => aggregate(filteredRows), [filteredRows]);
   const regions = useMemo(() => byRegion(filteredMetrics), [filteredMetrics]);
+  // The geography dimension at full width — see rowsBeforeRegion.
+  const geoRegions = useMemo(
+    () => byRegion(rowsBeforeRegion.map(r => allMetrics.get(r.id)!).filter(Boolean)),
+    [rowsBeforeRegion, allMetrics],
+  );
+  // Whether anything *other* than the region pick is narrowing the map, so a
+  // hatched region can say which kind of empty it is. showTeam and hideZero
+  // are deliberately absent: hideZero is on by default and showTeam is off,
+  // and flipping either one only ever *adds* rows — neither is a narrowing
+  // the operator chose.
+  const geoNarrowed = country !== 'all' || channel !== 'all' || volume !== 'all'
+    || cohort !== 'all' || search.trim() !== '';
   const channels = useMemo(() => byChannel(filteredMetrics), [filteredMetrics]);
   const countries = useMemo(() => byCountry(filteredMetrics), [filteredMetrics]);
   const volumes = useMemo(() => byVolume(filteredMetrics), [filteredMetrics]);
@@ -171,7 +193,8 @@ export function ProfitabilityTab() {
 
       {view === 'geography' && (
         <GeographyView
-          regions={regions}
+          regions={geoRegions}
+          narrowed={geoNarrowed}
           countries={countries}
           measure={geoMeasure}
           setMeasure={setGeoMeasure}
@@ -480,9 +503,10 @@ function DataQualityPanel({
 // ── Geography ───────────────────────────────────────────────────────────────
 
 function GeographyView({
-  regions, countries, measure, setMeasure, selected, onSelect,
+  regions, narrowed, countries, measure, setMeasure, selected, onSelect,
 }: {
   regions: ReturnType<typeof byRegion>;
+  narrowed: boolean;
   countries: ReturnType<typeof byCountry>;
   measure: GeoMeasure;
   setMeasure: (m: GeoMeasure) => void;
@@ -497,6 +521,7 @@ function GeographyView({
     <>
       <GeoMap
         regions={regions}
+        narrowed={narrowed}
         measure={measure}
         onMeasureChange={setMeasure}
         onSelect={onSelect}

@@ -84,12 +84,18 @@ export function GeoMap({
   onMeasureChange,
   onSelect,
   selected,
+  narrowed = false,
 }: {
   regions: SegmentMetrics[];
   measure: GeoMeasure;
   onMeasureChange: (m: GeoMeasure) => void;
   onSelect: (regionCode: string | null) => void;
   selected: string | null;
+  /** Whether a filter other than the region pick is narrowing the map. It
+   *  changes what a hatched region means: "nobody has ever bought here" and
+   *  "nobody here matches the current filters" are different facts, and the
+   *  map should not report the first when it means the second. */
+  narrowed?: boolean;
 }) {
   const [hover, setHover] = useState<string | null>(null);
 
@@ -128,9 +134,9 @@ export function GeoMap({
         <div>
           <div className={styles.geoMapTitle}>{MEASURE_LABELS[measure]} by province / state</div>
           <div className={styles.geoMapSub}>
-            Hatched regions have no customers yet. Regions too small to carry their
-            own number are labelled down the right-hand side. Alaska and Hawaii are
-            insets, not to scale.
+            Hatched regions have no customers {narrowed ? 'matching the filters' : 'yet'}.
+            Regions too small to carry their own number are labelled down the
+            right-hand side. Alaska and Hawaii are insets, not to scale.
           </div>
         </div>
         <select
@@ -201,7 +207,7 @@ export function GeoMap({
         </svg>
 
         <div className={styles.geoSide}>
-          <Legend measure={measure} scale={scale} />
+          <Legend measure={measure} scale={scale} narrowed={narrowed} />
           {activeSeg ? (
             <div className={styles.geoTooltip}>
               <div className={styles.geoTooltipName}>{regionName(activeSeg.key)}</div>
@@ -217,7 +223,9 @@ export function GeoMap({
           ) : active ? (
             <div className={styles.geoTooltip}>
               <div className={styles.geoTooltipName}>{regionName(active)}</div>
-              <div className={styles.geoTooltipHint}>No customers here yet.</div>
+              <div className={styles.geoTooltipHint}>
+                {narrowed ? 'No customers here match the current filters.' : 'No customers here yet.'}
+              </div>
             </div>
           ) : (
             <div className={styles.geoTooltipHint}>
@@ -335,7 +343,9 @@ function Region({
   );
 }
 
-function Legend({ measure, scale }: { measure: GeoMeasure; scale: number }) {
+function Legend({ measure, scale, narrowed }: {
+  measure: GeoMeasure; scale: number; narrowed: boolean;
+}) {
   const steps = measure === 'customers'
     ? [DIVERGING.neutral, DIVERGING.profitLight, DIVERGING.profit, DIVERGING.profitStrong]
     : [DIVERGING.lossStrong, DIVERGING.loss, DIVERGING.lossLight,
@@ -351,7 +361,7 @@ function Legend({ measure, scale }: { measure: GeoMeasure; scale: number }) {
       </div>
       <div className={styles.geoLegendNote}>
         <span className={styles.geoLegendHatch} aria-hidden="true" />
-        No customers yet
+        {narrowed ? 'No customers matching' : 'No customers yet'}
       </div>
     </div>
   );
