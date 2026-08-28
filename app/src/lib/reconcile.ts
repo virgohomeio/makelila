@@ -301,13 +301,18 @@ async function currentUser(): Promise<{ id: string; email: string }> {
 
 /** Record that this order shipped, outside the queue, as `serial`.
  *
- *  Approving the order makes the auto_enqueue_on_approve trigger create its
- *  queue row; this then fast-forwards that row to step 6 carrying the unit's
- *  own timestamps. Three things about that are load-bearing:
+ *  One RPC, not three client writes. Approving the order is what makes
+ *  auto_enqueue_on_approve create its queue row, and that row then has to be
+ *  fast-forwarded to step 6 — so the two writes are inseparable. Done from here
+ *  they were not: the first version approved #1015 and then failed to close its
+ *  queue row, leaving the order gone from Sales and sitting in Fulfillment as
+ *  live work nobody had done. Inside the function they are one transaction.
  *
- *  1. `label_confirmed_at` must be set. The fq_sync_unit trigger writes
- *     units.shipped_at = coalesce(label_confirmed_at, fulfilled_at, now()), so
- *     leaving both null would stamp today over the real ship date and move the
+ *  What the function guarantees, and why each matters:
+ *
+ *  1. `label_confirmed_at` carries the unit's own ship date. fq_sync_unit
+ *     writes units.shipped_at = coalesce(label_confirmed_at, fulfilled_at,
+ *     now()), so a null pair would stamp today over the real ship date and drag
  *     warranty expiry with it.
  *  2. `email_sent_at` stays null. Step 5 is what emails the customer, and these
  *     customers received the machine months ago.
@@ -319,60 +324,17 @@ export async function recordShippedOffline(
   serial: string,
   note?: string,
 ): Promise<void> {
-  const { id: userId, email } = await currentUser();
+  const { email } = await currentUser();
 
-  const { data: unit, error: uErr } = await supabase
-    .from('units')
-    .select('serial, shipped_at, carrier, tracking_num')
-    .eq('serial', serial)
-    .single();
-  if (uErr || !unit) throw new Error(`Unit ${serial} not found: ${uErr?.message ?? 'no row'}`);
+  const { error } = await supabase.rpc('reconcile_order_shipped', {
+    p_order_id: order.id,
+    p_serial: serial,
+    p_by: email,
+    p_note: note ?? null,
+  });
+  if (error) throw new Error(`Could not record the shipment: ${error.message}`);
 
-  const shippedAt = (unit as { shipped_at: string | null }).shipped_at
-    ?? order.placed_at ?? order.created_at;
-  const nowIso = new Date().toISOString();
-
-  const { error: oErr } = await supabase
-    .from('orders')
-    .update({
-      status: 'approved',
-      shipped_at: shippedAt,
-      dispositioned_by: userId,
-      dispositioned_at: nowIso,
-      reconciled_at: nowIso,
-      reconciled_by: email,
-      reconcile_outcome: 'shipped',
-      reconcile_note: note ?? `Shipped outside the queue as ${serial}`,
-    })
-    .eq('id', order.id);
-  if (oErr) throw new Error(`Failed to record the shipment: ${oErr.message}`);
-
-  const { data: queueRow, error: qErr } = await supabase
-    .from('fulfillment_queue')
-    .select('id')
-    .eq('order_id', order.id)
-    .maybeSingle();
-  if (qErr) throw new Error(`Order was approved but its queue row could not be read: ${qErr.message}`);
-  if (!queueRow) throw new Error('Order was approved but no queue row was created.');
-
-  const { error: fErr } = await supabase
-    .from('fulfillment_queue')
-    .update({
-      step: 6,
-      assigned_serial: serial,
-      carrier: (unit as { carrier: string | null }).carrier,
-      tracking_num: (unit as { tracking_num: string | null }).tracking_num,
-      label_confirmed_at: shippedAt,
-      label_confirmed_by: userId,
-      fulfilled_at: shippedAt,
-      fulfilled_by: userId,
-      reconciled_at: nowIso,
-      reconciliation_source: 'sales_reconcile',
-    })
-    .eq('id', (queueRow as { id: string }).id);
-  if (fErr) throw new Error(`Order was approved but the queue row could not be closed: ${fErr.message}`);
-
-  await logAction('order_reconciled_shipped', order.order_ref, `${serial} · shipped ${shippedAt.slice(0, 10)}`,
+  await logAction('order_reconciled_shipped', order.order_ref, serial,
     { entityType: 'order', entityId: order.id, unitSerial: serial });
 }
 
