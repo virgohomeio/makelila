@@ -901,3 +901,21 @@
   font-size: 0.7rem;
   font-weight: 600;
 }
+
+.batchAdminBar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 8px;
+}
+.modalHint {
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--color-ink-subtle);
+  background: var(--color-surface);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+}
+.modalError {
+  font-size: 11px;
+  color: var(--color-error);
+}

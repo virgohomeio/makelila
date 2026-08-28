@@ -1,13 +1,22 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // ── Supabase mock ────────────────────────────────────────────────────────────
-const { fromMock, updateMock, selectMock, singleResult, logActionMock } = vi.hoisted(() => {
+const {
+  fromMock, updateMock, selectMock, insertMock, limitMock,
+  singleResult, logActionMock, getUserMock,
+} = vi.hoisted(() => {
   // Mutable cell so individual tests can override the single() response.
   const singleResult: { data: { status: string } | null; error: null | { message: string } } =
     { data: { status: 'ready' }, error: null };
 
+  // Batch-admin additions: the stock_managers read ends in .limit(), and
+  // createBatch goes through .insert(). Both share this one from() mock.
+  const limitMock = vi.fn();
+  const insertMock = vi.fn();
+
   const eqAfterSelect = vi.fn(() => ({
     single: vi.fn(() => Promise.resolve(singleResult)),
+    limit: limitMock,
   }));
 
   const selectMock = vi.fn(() => ({ eq: eqAfterSelect }));
@@ -15,22 +24,25 @@ const { fromMock, updateMock, selectMock, singleResult, logActionMock } = vi.hoi
   const eqAfterUpdate = vi.fn(() => Promise.resolve({ error: null }));
   const updateMock = vi.fn(() => ({ eq: eqAfterUpdate }));
 
-  const fromMock = vi.fn((_table: string) => ({
+  const fromMock = vi.fn((table: string) => ({
     select: selectMock,
     update: updateMock,
+    insert: (row: unknown) => insertMock(table, row),
   }));
 
   const logActionMock = vi.fn(() => Promise.resolve());
+  const getUserMock = vi.fn().mockResolvedValue({ data: { user: { id: 'user-1' } } });
 
-  return { fromMock, updateMock, selectMock, singleResult, logActionMock };
+  return {
+    fromMock, updateMock, selectMock, insertMock, limitMock,
+    singleResult, logActionMock, getUserMock,
+  };
 });
 
 vi.mock('./supabase', () => ({
   supabase: {
     from: fromMock,
-    auth: {
-      getUser: vi.fn().mockResolvedValue({ data: { user: { id: 'user-1' } } }),
-    },
+    auth: { getUser: getUserMock },
   },
 }));
 vi.mock('./activityLog', () => ({
@@ -42,7 +54,10 @@ vi.mock('./supabaseTelemetry', () => ({
   supabaseTelemetry: null,
 }));
 
-import { updateUnitStatus, mergeTimelineEvents, type TimelineEvent } from './stock';
+import {
+  updateUnitStatus, mergeTimelineEvents, createBatch, isStockManager,
+  type TimelineEvent,
+} from './stock';
 
 // assignUnit's quarantine guard is covered end-to-end in fulfillment.test.ts;
 // here we only verify the 'quarantine' UnitStatus + its STATUS_META entry exist.
@@ -183,5 +198,85 @@ describe('mergeTimelineEvents', () => {
 
   it('handles an empty array', () => {
     expect(mergeTimelineEvents([])).toEqual([]);
+  });
+});
+
+// ── Batch administration ─────────────────────────────────────────────────────
+
+const validInput = { id: 'P200', unit_count: 200, manufacturer: 'Dongguan LC Technology' };
+
+describe('createBatch', () => {
+  beforeEach(() => {
+    insertMock.mockReset();
+    insertMock.mockResolvedValue({ error: null });
+    logActionMock.mockClear();
+  });
+
+  it('inserts the batch and writes an activity-log entry', async () => {
+    await createBatch(validInput);
+    expect(insertMock).toHaveBeenCalledWith('batches', expect.objectContaining({
+      id: 'P200', unit_count: 200, manufacturer: 'Dongguan LC Technology',
+    }));
+    expect(logActionMock).toHaveBeenCalledWith(
+      'batch_created', 'P200', expect.stringContaining('200 units'),
+    );
+  });
+
+  it('trims the id and nulls blank optional fields', async () => {
+    await createBatch({ ...validInput, id: '  P200  ', version: '   ', notes: '' });
+    expect(insertMock).toHaveBeenCalledWith('batches', expect.objectContaining({
+      id: 'P200', version: null, notes: null,
+    }));
+  });
+
+  it('rejects a blank id before touching the database', async () => {
+    await expect(createBatch({ ...validInput, id: '   ' })).rejects.toThrow('Batch ID is required');
+    expect(insertMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects a non-positive unit count', async () => {
+    await expect(createBatch({ ...validInput, unit_count: 0 }))
+      .rejects.toThrow('Unit count must be a positive whole number');
+    expect(insertMock).not.toHaveBeenCalled();
+  });
+
+  it('turns a PK violation into a readable duplicate message', async () => {
+    insertMock.mockResolvedValue({ error: { code: '23505', message: 'duplicate key value' } });
+    await expect(createBatch(validInput)).rejects.toThrow('Batch "P200" already exists');
+  });
+
+  it('does not log when the insert fails', async () => {
+    insertMock.mockResolvedValue({ error: { code: '42501', message: 'permission denied' } });
+    await expect(createBatch(validInput)).rejects.toThrow('permission denied');
+    expect(logActionMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('isStockManager', () => {
+  beforeEach(() => {
+    limitMock.mockReset();
+    getUserMock.mockReset();
+    getUserMock.mockResolvedValue({ data: { user: { id: 'user-1' } } });
+  });
+
+  it('is true when the allowlist returns a row', async () => {
+    limitMock.mockResolvedValue({ data: [{ profile_id: 'user-1' }], error: null });
+    expect(await isStockManager()).toBe(true);
+  });
+
+  it('is false when the allowlist is empty', async () => {
+    limitMock.mockResolvedValue({ data: [], error: null });
+    expect(await isStockManager()).toBe(false);
+  });
+
+  it('is false — not thrown — when the query errors', async () => {
+    limitMock.mockResolvedValue({ data: null, error: { message: 'boom' } });
+    expect(await isStockManager()).toBe(false);
+  });
+
+  it('is false when signed out, without querying', async () => {
+    getUserMock.mockResolvedValue({ data: { user: null } });
+    expect(await isStockManager()).toBe(false);
+    expect(limitMock).not.toHaveBeenCalled();
   });
 });
