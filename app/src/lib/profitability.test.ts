@@ -5,7 +5,8 @@ import {
   cacPayback, channelLabel, costCoverage, customerMetrics, isUnpriced,
   monthKey, portfolio, profitDistribution, projectedLtv, quarterKey,
   reliability, rollup, sumCosts, variableCosts, volumeSegment, waterfall,
-  aggregateCosts, type AcquisitionSpendRow,
+  aggregateCosts, costsBasis, marginBasis,
+  type AcquisitionSpendRow,
 } from './profitability';
 
 /** A customer with nothing going on. Every test starts here and changes only
@@ -31,6 +32,7 @@ function row(over: Partial<CustomerProfitability> = {}): CustomerProfitability {
     payment_fee_cad: 0, sales_commission_cad: 0, installation_cost_cad: 0,
     consumables_cost_cad: 0, consumable_item_count: 0, shipping_invoiced_count: 0,
     legacy_shipping_cad: 0, legacy_shipment_count: 0,
+    fulfilment_cost_cad: 0, fulfilment_order_count: 0,
     net_margin_cad: 0,
     order_count: 0, units_shipped_count: 0,
     replacement_count: 0, open_replacement_count: 0,
@@ -108,15 +110,62 @@ describe('revenue', () => {
 // ── Costs ───────────────────────────────────────────────────────────────────
 
 describe('cost buckets', () => {
-  it('sums exactly the ten buckets and nothing else', () => {
+  it('sums exactly the eleven buckets and nothing else', () => {
     const costs = variableCosts(row({
       sale_cogs_cad: 1, sale_shipping_cad: 2, expected_warranty_cost_cad: 4,
       expected_refund_cad: 8, support_cost_cad: 16, return_handling_cad: 32,
       payment_fee_cad: 64, sales_commission_cad: 128, installation_cost_cad: 256,
-      consumables_cost_cad: 512,
+      consumables_cost_cad: 512, fulfilment_cost_cad: 1024,
     }));
     // Powers of two: any bucket dropped or double-counted changes the total.
-    expect(sumCosts(costs)).toBe(1023);
+    expect(sumCosts(costs)).toBe(2047);
+  });
+
+  it('marks every bucket with how well it is known', () => {
+    // The "never present an unmeasured number as measured" rule only holds if
+    // the basis is visible, so it has to be derivable per bucket.
+    const b = costsBasis(row({
+      cogs_actual_count: 2, cogs_modelled_count: 1,   // some invoiced, some projected
+      shipping_uncosted_count: 1,                     // freight partly missing
+      support_cost_cad: 40, diagnosis_call_count: 2,  // rate x duration
+      fulfilment_cost_cad: 6.45,                      // contracted rate card
+      payment_fee_cad: 0,                             // nobody has set the rate
+    }));
+    expect(b.cogs).toBe('partial');
+    expect(b.shipping).toBe('partial');
+    expect(b.support).toBe('estimated');
+    expect(b.returnHandling).toBe('estimated');
+    expect(b.fulfilment).toBe('estimated');
+    expect(b.paymentFees).toBe('unpriced');
+    expect(b.refunds).toBe('actual');
+    expect(b.consumables).toBe('actual');
+  });
+
+  it('calls COGS invoiced only when no order used the projection', () => {
+    expect(costsBasis(row({ cogs_actual_count: 3, cogs_modelled_count: 0 })).cogs).toBe('actual');
+    expect(costsBasis(row({ cogs_actual_count: 0, cogs_modelled_count: 3 })).cogs).toBe('estimated');
+  });
+
+  it('calls support unpriced, not free, when the rate is unset', () => {
+    const b = costsBasis(row({ support_cost_cad: null, diagnosis_call_count: 3 }));
+    expect(b.support).toBe('unpriced');
+  });
+
+  it('rolls the bucket bases up into a verdict on the margin', () => {
+    // A margin resting on any estimate is not a settled figure, and the tab
+    // has to be able to say which buckets are responsible.
+    const mb = marginBasis(row({ cogs_modelled_count: 1, fulfilment_cost_cad: 6.45 }));
+    expect(mb.fullyMeasured).toBe(false);
+    expect(mb.estimated).toContain('3PL handling');
+    expect(mb.unpriced).toContain('Payment fees');
+  });
+
+  it('keeps 3PL handling out of shipping', () => {
+    // The 3PL passes carrier cost through and bucket 2 already holds it. If
+    // handling ever lands in `shipping`, every shipment is billed twice.
+    const costs = variableCosts(row({ sale_shipping_cad: 150, fulfilment_cost_cad: 6.45 }));
+    expect(costs.shipping).toBe(150);
+    expect(costs.fulfilment).toBeCloseTo(6.45, 2);
   });
 
   it('adds pre-Freightcom legacy freight into the shipping bucket', () => {

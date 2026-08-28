@@ -8,14 +8,14 @@
  *
  *  Three rules this module holds to, because the numbers get quoted:
  *
- *  0. **Ten buckets, one home per dollar.** COGS, freight, warranty, refunds,
+ *  0. **Eleven buckets, one home per dollar.** COGS, freight, warranty, refunds,
  *     support labour, return handling, payment fees, commission, installation,
- *     consumables.
+ *     consumables, 3PL handling.
  *  1. **Nothing is invented.** A cost we have never priced comes back with a
  *     basis of 'unpriced' next to its zero, and every caller is expected to
  *     say so. A metric with no data at all returns null, not 0.
  *  2. **No double counting.** Each dollar of cost belongs to exactly one
- *     bucket. The ten buckets sum to variable cost and nothing else adds in.
+ *     bucket. The eleven buckets sum to variable cost and nothing else adds in.
  *  3. **Realized and projected never mix.** Realized LTV is margin banked to
  *     date. Projected LTV adds an explicitly-flagged assumption on top, and
  *     the two are separate fields so a chart cannot blur them.
@@ -217,6 +217,7 @@ export type CustomerMetrics = {
     commission: number;
     installation: number;
     consumables: number;
+    fulfilment: number;
   };
   variableCosts: number;
   contributionMargin: number;
@@ -248,7 +249,11 @@ export type CustomerMetrics = {
  *  drop-shipped to the customer. It is cost of goods, not freight — the Amazon
  *  orders behind it buy worm castings the customer keeps, and the postage on
  *  them was free. Filing them under `shipping` would corrupt every
- *  freight-per-unit figure on the tab. */
+ *  freight-per-unit figure on the tab.
+ *
+ *  `fulfilment` is bucket 11: the 3PL's per-order handling. Transportation is
+ *  deliberately absent -- the 3PL passes carrier cost through, and that freight
+ *  is already `shipping`. */
 export function variableCosts(row: CustomerProfitability): CustomerMetrics['costs'] {
   return {
     cogs:           row.sale_cogs_cad ?? 0,
@@ -264,13 +269,15 @@ export function variableCosts(row: CustomerProfitability): CustomerMetrics['cost
     commission:     row.sales_commission_cad ?? 0,
     installation:   row.installation_cost_cad ?? 0,
     consumables:    row.consumables_cost_cad ?? 0,
+    fulfilment:     row.fulfilment_cost_cad ?? 0,
   };
 }
 
 export function sumCosts(costs: CustomerMetrics['costs']): number {
   return costs.cogs + costs.shipping + costs.warranty + costs.refunds
        + costs.support + costs.returnHandling + costs.paymentFees
-       + costs.commission + costs.installation + costs.consumables;
+       + costs.commission + costs.installation + costs.consumables
+       + costs.fulfilment;
 }
 
 /** Whole days between two dates, or null if either is missing. */
@@ -374,6 +381,101 @@ export function customerMetrics(
     channel: row.acquisition_channel ?? 'unknown',
     regionCode: row.region_code,
     country: row.country,
+  };
+}
+
+/** How well a bucket's figure is known.
+ *
+ *  The model's founding rule is that a number we have not measured is never
+ *  presented as if we had. That rule is only kept if the distinction is
+ *  *visible*, so every bucket carries a basis and the tab renders it.
+ *
+ *  - `actual`    — summed from invoices or records of what happened.
+ *  - `partial`   — some of it is measured, some is missing or projected.
+ *  - `estimated` — a rate multiplied by a quantity. Real arithmetic, but the
+ *                  rate is an assumption, not a bill.
+ *  - `unpriced`  — nobody has set the rate, so the bucket reads 0 and the
+ *                  margin is an upper bound.
+ */
+export type BucketBasis = 'actual' | 'partial' | 'estimated' | 'unpriced';
+
+export type CostsBasis = Record<keyof CustomerMetrics['costs'], BucketBasis>;
+
+export const BASIS_LABEL: Record<BucketBasis, string> = {
+  actual:    'invoiced',
+  partial:   'part estimated',
+  estimated: 'estimated',
+  unpriced:  'unpriced',
+};
+
+/** Per-bucket basis for one customer. */
+export function costsBasis(row: CustomerProfitability): CostsBasis {
+  const modelled = row.cogs_modelled_count ?? 0;
+  const invoiced = row.cogs_actual_count ?? 0;
+  const cogs: BucketBasis =
+    modelled > 0 && invoiced > 0 ? 'partial'
+    : modelled > 0               ? 'estimated'
+    : 'actual';
+
+  const supportUnpriced = row.support_cost_cad == null && (row.diagnosis_call_count ?? 0) > 0;
+
+  return {
+    // Invoiced batch price where we have it, roadmap projection where we don't.
+    cogs,
+    // Freight is billed, but an order that shipped with no invoice on file
+    // leaves the bucket short — measured as far as it goes.
+    shipping: (row.shipping_uncosted_count ?? 0) > 0 ? 'partial' : 'actual',
+    warranty: 'actual',
+    refunds:  'actual',
+    // Duration x attendees x an assumed person-hour rate.
+    support:  supportUnpriced ? 'unpriced' : 'estimated',
+    // Flat stocking and inspection rates; return freight is usually missing.
+    returnHandling: 'estimated',
+    paymentFees:  (row.payment_fee_cad ?? 0) === 0 ? 'unpriced' : 'estimated',
+    commission:   (row.sales_commission_cad ?? 0) === 0 ? 'unpriced' : 'estimated',
+    installation: (row.installation_cost_cad ?? 0) === 0 ? 'unpriced' : 'estimated',
+    // Retail receipts: what was actually paid.
+    consumables: 'actual',
+    // Contracted 3PL rate card, with no invoice yet to reconcile against.
+    fulfilment: 'estimated',
+  };
+}
+
+export type MarginBasis = {
+  /** True when every bucket is measured, so the margin is a fact not a figure. */
+  fullyMeasured: boolean;
+  estimated: string[];
+  partial: string[];
+  unpriced: string[];
+};
+
+export const BUCKET_LABEL: Record<keyof CustomerMetrics['costs'], string> = {
+  cogs: 'COGS',
+  shipping: 'Shipping',
+  warranty: 'Warranty',
+  refunds: 'Refunds',
+  support: 'Support',
+  returnHandling: 'Return handling',
+  paymentFees: 'Payment fees',
+  commission: 'Commission',
+  installation: 'Installation',
+  consumables: 'Consumables',
+  fulfilment: '3PL handling',
+};
+
+/** Roll the per-bucket bases up into a verdict on the margin itself. Anything
+ *  downstream of an estimate — margin, LTV, lifetime profit — inherits it. */
+export function marginBasis(row: CustomerProfitability): MarginBasis {
+  const b = costsBasis(row);
+  const keys = Object.keys(b) as (keyof CostsBasis)[];
+  const pick = (want: BucketBasis) =>
+    keys.filter(k => b[k] === want).map(k => BUCKET_LABEL[k]);
+  const estimated = pick('estimated');
+  const partial = pick('partial');
+  const unpriced = pick('unpriced');
+  return {
+    fullyMeasured: estimated.length === 0 && partial.length === 0 && unpriced.length === 0,
+    estimated, partial, unpriced,
   };
 }
 
@@ -618,7 +720,7 @@ export function profitDistribution(metrics: CustomerMetrics[]): ProfitBucket[] {
   }));
 }
 
-/** The ten cost buckets summed across a set of customers. */
+/** The eleven cost buckets summed across a set of customers. */
 export function aggregateCosts(metrics: CustomerMetrics[]): CustomerMetrics['costs'] {
   return metrics.reduce<CustomerMetrics['costs']>((acc, m) => ({
     cogs:           acc.cogs           + m.costs.cogs,
@@ -631,9 +733,10 @@ export function aggregateCosts(metrics: CustomerMetrics[]): CustomerMetrics['cos
     commission:     acc.commission     + m.costs.commission,
     installation:   acc.installation   + m.costs.installation,
     consumables:    acc.consumables    + m.costs.consumables,
+    fulfilment:     acc.fulfilment     + m.costs.fulfilment,
   }), { cogs: 0, shipping: 0, warranty: 0, refunds: 0, support: 0,
         returnHandling: 0, paymentFees: 0, commission: 0, installation: 0,
-        consumables: 0 });
+        consumables: 0, fulfilment: 0 });
 }
 
 export type WaterfallStep = {
@@ -663,6 +766,7 @@ export function waterfall(metrics: CustomerMetrics[], cacTotal: number): Waterfa
     { label: 'Commission',       value: -c.commission,       isTotal: false },
     { label: 'Installation',     value: -c.installation,     isTotal: false },
     { label: 'Consumables',      value: -c.consumables,      isTotal: false },
+    { label: '3PL handling',     value: -c.fulfilment,       isTotal: false },
     { label: 'Contribution',     value: contribution,        isTotal: true },
     { label: 'CAC',              value: -cacTotal,           isTotal: false },
     { label: 'Lifetime profit',  value: contribution - cacTotal, isTotal: true },

@@ -14,14 +14,16 @@ import { useIsAssignedInterviewer } from '../lib/hiring';
 // groups of four. Same twelve entries, same labels; only the order and the
 // two hairlines are new.
 const MODULES = [
-  // An order, start to finish.
+  // An order, start to finish. Shipping is no longer here: it was folded into
+  // Fulfillment on 2026-08-28, where booking and tracking sit beside the queue
+  // that produces the parcels. Stock moved up behind Fulfillment because it is
+  // what Fulfillment draws from — you check the shelf, then you check stock.
   { path: '/order-review',  label: 'Sales' },
   { path: '/fulfillment',   label: 'Fulfillment' },
-  { path: '/shipping',      label: 'Shipping' },
+  { path: '/stock',         label: 'Stock' },
   { path: '/service',       label: 'Service' },
   // The records it touches, which outlive it.
   { path: '/customers',     label: 'Customers', startsGroup: true },
-  { path: '/stock',         label: 'Stock' },
   { path: '/products',      label: 'Products' },
   { path: '/lovely',        label: 'Lovely' },
   // The company around it.

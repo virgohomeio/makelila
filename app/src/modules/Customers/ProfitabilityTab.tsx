@@ -7,7 +7,8 @@ import {
   allocateCac, byChannel, byCohort, byCountry, byRegion, byVolume,
   channelLabel, customerMetrics, isUnpriced, portfolio, profitDistribution,
   reliability, waterfall, CHANNEL_LABELS, VOLUME_LABELS, UNAVAILABLE_METRICS,
-  type CustomerMetrics, type PortfolioMetrics,
+  costsBasis, marginBasis, BASIS_LABEL,
+  type CustomerMetrics, type PortfolioMetrics, type BucketBasis,
 } from '../../lib/profitability';
 import { regionName } from '../../lib/regions';
 import { formatMoney } from '../../lib/money';
@@ -333,15 +334,16 @@ function OverviewView({
         <Kpi label="Revenue per customer"
              value={totals.customers > 0 ? fmt(totals.revenue / totals.customers) : '—'} />
         <Kpi label="Contribution margin" value={fmt(totals.contributionMargin)}
-             tone={totals.contributionMargin < 0 ? 'bad' : 'good'} />
+             tone={totals.contributionMargin < 0 ? 'bad' : 'good'} est="partial"
+             hint="Revenue less all eleven cost buckets. Some of those are rates rather than invoices — COGS is part projected, support, return handling and 3PL handling are rate-based, and three buckets are unpriced — so this is an upper bound on the loss, not a settled figure." />
         <Kpi label="Contribution margin %"
              value={totals.contributionMarginPct == null ? '—'
                     : `${(totals.contributionMarginPct * 100).toFixed(0)}%`}
              tone={(totals.contributionMarginPct ?? 0) < 0 ? 'bad' : 'good'} />
         <Kpi label="CAC" value={totals.cacTotal === 0 ? 'no spend on file' : fmt(totals.cac)}
              hint="Meta spend divided across the customers each campaign month won. Channels with no spend feed are booked at $0." />
-        <Kpi label="LTV (realized)" value={fmt(totals.ltv)}
-             hint="Contribution margin banked to date, per customer. Not a projection." />
+        <Kpi label="LTV (realized)" value={fmt(totals.ltv)} est="partial"
+             hint="Contribution margin banked to date, per customer. Not a projection — but it inherits the estimated buckets inside contribution margin." />
         <Kpi label="LTV:CAC"
              value={totals.ltvCac == null ? '—' : `${totals.ltvCac.toFixed(1)}×`}
              tone={totals.ltvCac == null ? undefined : totals.ltvCac >= 3 ? 'good' : 'warn'} />
@@ -349,11 +351,14 @@ function OverviewView({
              value={`${totals.paybackImmediate} at sale · ${totals.paybackOutstanding} short`}
              hint="LILA sells once, so acquisition is either recovered by the sale or not at all until there is recurring revenue." />
         <Kpi label="Lifetime contribution profit" value={fmt(totals.lifetimeProfit)}
-             tone={totals.lifetimeProfit < 0 ? 'bad' : 'good'} />
+             tone={totals.lifetimeProfit < 0 ? 'bad' : 'good'} est="partial"
+             hint="Contribution margin less CAC. Inherits every estimate inside the margin, and CAC itself is $0 for every customer until acquisition spend is loaded monthly." />
         <Kpi label="Warranty + service per unit"
              value={fmt(reliabilityStats.warrantyPlusServicePerUnit)}
-             tone="warn" />
+             tone="warn" est="estimated"
+             hint="Support labour and return handling are both rate-based, so this is an estimate." />
       </div>
+      <EstimateLegend />
 
       <div className={styles.overviewSplit}>
         <WaterfallChart steps={waterfall(metrics, totals.cacTotal)} />
@@ -399,8 +404,8 @@ function OverviewView({
   );
 }
 
-function Kpi({ label, value, tone, hint }: {
-  label: string; value: string; tone?: 'good' | 'bad' | 'warn'; hint?: string;
+function Kpi({ label, value, tone, hint, est }: {
+  label: string; value: string; tone?: 'good' | 'bad' | 'warn'; hint?: string; est?: BucketBasis;
 }) {
   const cls = tone === 'good' ? styles.profStatGood
             : tone === 'bad'  ? styles.profStatBad
@@ -408,7 +413,7 @@ function Kpi({ label, value, tone, hint }: {
             : '';
   return (
     <div className={`${styles.profStat} ${cls}`} title={hint}>
-      <div className={styles.profStatLabel}>{label}</div>
+      <div className={styles.profStatLabel}>{label}{est && <Est basis={est} />}</div>
       <div className={styles.profStatValue}>{value}</div>
     </div>
   );
@@ -657,16 +662,18 @@ function CustomersView({
         <SummaryStat label="Customers"            value={String(rows.length)} />
         <SummaryStat label="Revenue (net of tax)" value={fmt(totals.revenue)} />
         <SummaryStat label="Tax collected"        value={fmt(totals.tax)}       variant="warn" />
-        <SummaryStat label="COGS + shipping"      value={fmt(totals.salesCost)} variant="warn" />
+        <SummaryStat label="COGS + shipping"      value={fmt(totals.salesCost)} variant="warn" est="partial" />
         <SummaryStat label="Expected warranty"    value={fmt(totals.warranty)}  variant="warn" />
         <SummaryStat label="Expected refunds"     value={fmt(totals.refund)}    variant="warn" />
-        <SummaryStat label="Return handling"      value={fmt(totals.returnHandling)} variant="warn" />
+        <SummaryStat label="Return handling"      value={fmt(totals.returnHandling)} variant="warn" est="estimated" />
         <SummaryStat label="Support labour"
                      value={totals.supportPriced ? fmt(totals.support) : 'rate not set'}
-                     variant="warn" />
+                     variant="warn" est={totals.supportPriced ? 'estimated' : 'unpriced'} />
         <SummaryStat label="Consumables & parts"  value={fmt(totals.consumables)} variant="warn" />
+        <SummaryStat label="3PL handling"          value={fmt(totals.fulfilment)} variant="warn" est="estimated" />
         <SummaryStat label="Net margin"           value={fmt(totals.margin)}    variant={totals.margin < 0 ? 'bad' : 'good'} />
       </div>
+      <EstimateLegend />
       <div className={styles.profCurrencyNote}>
         Revenue excludes sales tax (passed through to govt, not VCycene income). "Expected warranty" sums COGS + shipping for every non-cancelled replacement order. "Expected refunds" sums every refund approval that isn't denied. "Support labour" prices diagnosis calls at time on the call × internal attendees × the blended person-hour rate in <code>support_rates</code>, including calls the customer never joined. "Return handling" is stocking + inspection + return freight for units that physically came back — units the customer discarded are excluded, and it is separate from the restocking fee charged to the customer. All amounts are converted to CAD through <code>fx_rates</code> — USD orders at the current company rate, not the rate on the order date.
       </div>
@@ -766,6 +773,8 @@ function paybackShort(m: CustomerMetrics): string {
 
 function ProfitCard({ row, onOpen }: { row: CustomerProfitability; onOpen: () => void }) {
   const margin = row.net_margin_cad;
+  const basis = costsBasis(row);
+  const mb = marginBasis(row);
   const tone = margin < 0 ? styles.profCardLoss : margin === 0 ? styles.profCardFlat : styles.profCardWin;
 
   const refundLine = row.expected_refund_cad === row.settled_refund_cad
@@ -807,7 +816,14 @@ function ProfitCard({ row, onOpen }: { row: CustomerProfitability; onOpen: () =>
         </div>
       </div>
       <div className={styles.profMargin}>{fmt(margin)}</div>
-      <div className={styles.profCardLabel}>net margin</div>
+      <div className={styles.profCardLabel}>
+        net margin
+        {!mb.fullyMeasured && (
+          <Est basis={mb.partial.length > 0 ? 'partial' : 'estimated'}
+               title={`Rests on figures that are not invoiced: ${
+                 [...mb.partial, ...mb.estimated, ...mb.unpriced].join(', ')}.`} />
+        )}
+      </div>
       <dl className={styles.profCardBreakdown}>
         <div title="net of sales tax — tax is passed through to the govt, not VCycene revenue">
           <dt>Revenue</dt><dd>{fmt(row.revenue_cad)}</dd>
@@ -823,9 +839,10 @@ function ProfitCard({ row, onOpen }: { row: CustomerProfitability; onOpen: () =>
           <dt>COGS</dt>
           <dd>
             {fmt(row.sale_cogs_cad)}
-            {row.cogs_modelled_count > 0 && (
-              <span className={styles.profBasisHint}> ({row.cogs_modelled_count} est.)</span>
-            )}
+            <Est basis={basis.cogs}
+                 title={row.cogs_modelled_count > 0
+                   ? `${row.cogs_modelled_count} of ${row.cogs_actual_count + row.cogs_modelled_count} order(s) use the roadmap projection rather than an invoiced batch price`
+                   : undefined} />
           </dd>
         </div>
         {row.legacy_shipping_cad > 0 && (
@@ -846,6 +863,7 @@ function ProfitCard({ row, onOpen }: { row: CustomerProfitability; onOpen: () =>
             {row.shipping_uncosted_count > 0 && (
               <span className={styles.profUncostedHint}> ({row.shipping_uncosted_count} uncosted)</span>
             )}
+            <Est basis={basis.shipping} />
           </dd>
         </div>
         <div title="cogs + shipping on all non-cancelled replacement orders">
@@ -875,12 +893,23 @@ function ProfitCard({ row, onOpen }: { row: CustomerProfitability; onOpen: () =>
             <dt>Support</dt>
             <dd>
               {supportLine}
+              <Est basis={basis.support} />
               {row.diagnosis_noshow_count > 0 && (
                 <span className={styles.profUncostedHint}
                       title="calls the customer never joined — billed like any other call, since the team's time was spent either way">
                   {' '}({row.diagnosis_noshow_count} no-show)
                 </span>
               )}
+            </dd>
+          </div>
+        )}
+        {row.fulfilment_cost_cad > 0 && (
+          <div title={`${row.fulfilment_order_count} order(s) handled by the 3PL since the contract began on 23 Jun 2026 — order fee plus picks, at the contracted rate card. Estimated: no FlexSpace invoice is on file. Carrier cost is not included here, it is already in Shipping.`}>
+            <dt>3PL handling</dt>
+            <dd>
+              {fmt(row.fulfilment_cost_cad)}
+              <span className={styles.profUncostedHint}> ({row.fulfilment_order_count})</span>
+              <Est basis={basis.fulfilment} />
             </dd>
           </div>
         )}
@@ -921,16 +950,46 @@ function minutesLabel(mins: number): string {
   return `${Math.floor(total / 60)}h ${total % 60}m`;
 }
 
-function SummaryStat({ label, value, variant }: { label: string; value: string; variant?: 'good' | 'bad' | 'warn' }) {
+function SummaryStat({ label, value, variant, est }: {
+  label: string; value: string; variant?: 'good' | 'bad' | 'warn'; est?: BucketBasis;
+}) {
   const cls = variant === 'good' ? styles.profStatGood
             : variant === 'bad'  ? styles.profStatBad
             : variant === 'warn' ? styles.profStatWarn
             : '';
   return (
     <div className={`${styles.profStat} ${cls}`}>
-      <div className={styles.profStatLabel}>{label}</div>
+      <div className={styles.profStatLabel}>{label}{est && <Est basis={est} />}</div>
       <div className={styles.profStatValue}>{value}</div>
     </div>
+  );
+}
+
+/** The visible half of the model's "never present an unmeasured number as
+ *  measured" rule. Renders nothing when a figure really is invoiced. */
+export function Est({ basis, title }: { basis: BucketBasis; title?: string }) {
+  if (basis === 'actual') return null;
+  const cls = basis === 'unpriced' ? styles.estMarkUnpriced
+            : basis === 'partial' ? styles.estMarkPartial
+            : '';
+  const text = basis === 'partial' ? 'part est' : basis === 'unpriced' ? 'unpriced' : 'est';
+  return (
+    <span className={`${styles.estMark} ${cls}`}
+          title={title ?? `This figure is ${BASIS_LABEL[basis]}, not taken from an invoice.`}>
+      {text}
+    </span>
+  );
+}
+
+function EstimateLegend() {
+  return (
+    <p className={styles.estLegend}>
+      <span><strong>How to read the figures:</strong></span>
+      <span><Est basis="estimated" /> a rate x a quantity, not a bill</span>
+      <span><Est basis="partial" /> partly invoiced, partly projected</span>
+      <span><Est basis="unpriced" /> no rate set, so the cost reads 0 and margin is an upper bound</span>
+      <span>no mark = invoiced</span>
+    </p>
   );
 }
 
@@ -983,12 +1042,13 @@ function aggregate(rs: CustomerProfitability[]) {
       support:   acc.support   + (r.support_cost_cad ?? 0),
       returnHandling: acc.returnHandling + (r.return_handling_cad ?? 0),
       consumables: acc.consumables + (r.consumables_cost_cad ?? 0),
+      fulfilment: acc.fulfilment + (r.fulfilment_cost_cad ?? 0),
       // Any priced call at all means the rate is live; without this the bar
       // would show $0.00 and read as "support is free".
       supportPriced: acc.supportPriced || r.support_cost_cad != null,
       margin:    acc.margin    + r.net_margin_cad,
     }),
-    { revenue: 0, tax: 0, salesCost: 0, warranty: 0, refund: 0, support: 0, supportPriced: false, returnHandling: 0, consumables: 0, margin: 0 },
+    { revenue: 0, tax: 0, salesCost: 0, warranty: 0, refund: 0, support: 0, supportPriced: false, returnHandling: 0, consumables: 0, fulfilment: 0, margin: 0 },
   );
 }
 
