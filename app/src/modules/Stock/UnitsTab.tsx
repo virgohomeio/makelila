@@ -1,12 +1,15 @@
 import { useMemo, useState } from 'react';
 import {
-  useBatches, useUnits, useStatusCountsByBatch,
+  useBatches, useUnits, useStatusCountsByBatch, useIsStockManager,
   STATUS_META, STATUS_ORDER, getStatusMeta,
   type UnitStatus, type StatusCategory,
 } from '../../lib/stock';
 import { BatchCards } from './BatchCards';
 import { UnitTable } from './UnitTable';
 import { TestReportUploader } from './TestReportUploader';
+import { NewBatchModal } from './NewBatchModal';
+import { useAuth } from '../../lib/auth';
+import { canManageBatches } from '../../lib/permissions';
 import styles from './Stock.module.css';
 
 type CategoryFilter = 'all' | StatusCategory;
@@ -22,6 +25,11 @@ export function UnitsTab() {
   const [statusFilter, setStatusFilter] = useState<UnitStatus | null>(null);
   const [search, setSearch] = useState('');
   const [suspectFilter, setSuspectFilter] = useState(false);
+
+  const { role } = useAuth();
+  const { isManager } = useIsStockManager();
+  const [showNewBatch, setShowNewBatch] = useState(false);
+  const canAddBatch = canManageBatches(role, isManager);
 
   // Suspect: ready units with a customer name stamped — likely a state mismatch
   // (unit was assigned/shipped but status wasn't updated in makelila).
@@ -52,6 +60,14 @@ export function UnitsTab() {
 
   return (
     <div className={styles.stockLayout}>
+      {canAddBatch && (
+        <div className={styles.batchAdminBar}>
+          <button className={styles.btnPrimary} onClick={() => setShowNewBatch(true)}>
+            + Add batch
+          </button>
+        </div>
+      )}
+      {showNewBatch && <NewBatchModal onClose={() => setShowNewBatch(false)} />}
       <BatchCards
         batches={batches}
         countsByBatch={countsByBatch}
