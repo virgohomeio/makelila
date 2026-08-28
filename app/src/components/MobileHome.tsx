@@ -14,11 +14,13 @@ import { canView } from '../lib/permissions';
 const ATTENTION = [
   { to: '/order-review',  title: 'Sales',         subtitle: 'Pending orders, address verification, flags',     icon: '🛒', iconBg: '#fef1f0' },
   { to: '/service',       title: 'Service',        subtitle: 'Support tickets, onboarding, follow-ups',         icon: '🎫', iconBg: '#fff3e0' },
-  { to: '/fulfillment',   title: 'Fulfillment',    subtitle: 'Queue, shelf, label, ship & replacements',        icon: '📦', iconBg: '#e3f0fb' },
+  { to: '/fulfillment',   title: 'Fulfillment',    subtitle: 'Queue, shelf, ship, track & returns',             icon: '📦', iconBg: '#e3f0fb' },
 ];
 
+// Shipping is not listed here any more — it became three tabs inside
+// Fulfillment on 2026-08-28. Reaching it from this screen means tapping
+// Fulfillment, which is one tap further but is where the work already was.
 const WORKSPACE = [
-  { to: '/shipping',     title: 'Shipping',     subtitle: 'Book, track, invoices & claims',        icon: '🚚', iconBg: '#e3f0fb' },
   { to: '/stock',        title: 'Stock',        subtitle: 'Units, parts, batches',                 icon: '📊', iconBg: '#e6f4ea' },
   { to: '/customers',    title: 'Customers',    subtitle: 'Directory & journey stages',            icon: '👥', iconBg: '#f5f1eb' },
   { to: '/lovely',       title: 'Lovely',       subtitle: 'Lovely app users',                      icon: '🌱', iconBg: '#e6f4ea' },
