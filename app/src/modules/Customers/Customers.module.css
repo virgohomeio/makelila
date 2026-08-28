@@ -1240,7 +1240,7 @@
 .followupMoved a:hover { text-decoration: underline; }
 
 /* ── Backlog #58 V9 — profitability dashboard ─────────────────────────────────
-   Views, KPI row, charts, the province/state tile map and the customer
+   Views, KPI row, charts, the province/state choropleth and the customer
    drill-down. Colour in the charts only ever encodes the sign of a number
    (red money leaving, blue money staying); every mark is labelled with its
    own value so nothing depends on colour alone. */
@@ -1474,7 +1474,7 @@
 .bestWorstCard strong { font-size: .95rem; color: #1a202c; }
 .bestWorstCard span:last-child { font-size: .78rem; color: #4a5568; }
 
-/* ── Geography tile map ───────────────────────────────────────────────────── */
+/* ── Geography choropleth ─────────────────────────────────────────────────── */
 
 .geoMapWrap {
   background: #fff;
@@ -1507,20 +1507,46 @@
 }
 .geoMapBody {
   display: grid;
-  grid-template-columns: minmax(0, 3fr) minmax(200px, 1fr);
+  grid-template-columns: minmax(0, 4fr) minmax(200px, 1fr);
   gap: 18px;
   align-items: start;
 }
-.geoMapSvg { width: 100%; height: auto; display: block; }
-.geoCountryLabel {
-  font-size: 9px;
-  font-weight: 600;
-  letter-spacing: .08em;
+/* Below this the map's own labels start shrinking past legibility, so the
+   legend and readout give up the column and go underneath it. */
+@media (max-width: 1180px) {
+  .geoMapBody { grid-template-columns: minmax(0, 1fr); }
 }
-.geoTileActive { cursor: pointer; }
-.geoTileEmpty { pointer-events: none; }
-.geoTileCode { font-size: 13px; font-weight: 600; }
-.geoTileValue { font-size: 9px; font-variant-numeric: tabular-nums; }
+.geoMapSvg { width: 100%; height: auto; display: block; }
+
+.geoRegion { cursor: default; }
+.geoRegionActive { cursor: pointer; }
+/* Labels never eat the pointer — hovering "ON" must still hover Ontario. */
+.geoMapSvg text, .geoMapSvg polyline, .geoMapSvg circle { pointer-events: none; }
+
+.geoLabelCode { font-size: 12px; font-weight: 600; }
+.geoLabelValue { font-size: 10px; font-variant-numeric: tabular-nums; }
+.geoLabelCodeSmall { font-size: 9.5px; font-weight: 600; }
+.geoLabelValueSmall { font-size: 8.5px; font-variant-numeric: tabular-nums; }
+
+.geoInsetFrame { pointer-events: none; }
+.geoInsetLabel {
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: .06em;
+  fill: #718096;
+}
+.geoInsetValue {
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  fill: #1a202c;
+}
+
+.geoChipCode { font-size: 11px; font-weight: 600; fill: #1a202c; }
+.geoChipValue {
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  fill: #1a202c;
+}
 
 .geoSide { display: flex; flex-direction: column; gap: 12px; }
 .geoLegend { display: flex; flex-direction: column; gap: 4px; }
@@ -1532,6 +1558,22 @@
   font-size: .68rem;
   color: #718096;
   font-variant-numeric: tabular-nums;
+}
+.geoLegendNote {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+  font-size: .68rem;
+  color: #718096;
+}
+.geoLegendHatch {
+  width: 14px;
+  height: 12px;
+  border-radius: 2px;
+  border: 1px solid #e2e8f0;
+  background:
+    repeating-linear-gradient(45deg, #dcdcd8 0 1px, #fbfbfa 1px 6px);
 }
 .geoTooltip {
   border: 1px solid #e2e8f0;

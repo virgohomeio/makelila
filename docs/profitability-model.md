@@ -267,17 +267,32 @@ Region codes are `country-region`: `CA-ON`, `US-CA`. The prefix is required —
 `public.normalize_region()` folds `Ontario` and `ON` to the same code so a
 province is one row, not two.
 
-**The map** is a tile grid: one square per province/state, placed roughly
-geographically. Not a true choropleth on purpose — real geography would give
-Nunavut forty times the ink of New Jersey and hide Prince Edward Island
-entirely, and the map compares profit, not land area. Regions never sold into
-are drawn as dashed outlines, because "no customers here" belongs on a sales map.
+**The map** is a choropleth on real province and state outlines. The geometry
+is generated, not fetched: `app/scripts/generate-region-shapes.mjs` projects
+Natural Earth's 1:50m admin-1 boundaries once and writes `lib/regionShapes.ts`,
+so the app ships no mapping library and the map draws with no network call.
+Rerun that script only when the outlines themselves need to change.
+
+The projection is composite, the same shape d3's `albersUsa` takes: one Albers
+conic equal-area over Canada and the lower 48, plus separate framed insets for
+Alaska and Hawaii. Alaska in the mainland cone would be a smeared crescent
+bigger than Ontario; Hawaii would push the frame 3,000km west for eight pixels
+of island. Both insets are captioned as such, and carry their value in the
+caption rather than on the islands.
+
+Real geography costs what a tile grid did not: Prince Edward Island is three
+pixels across. Regions too small to hold a label get a leader line out to a
+chip in the right-hand gutter — and which regions those are is decided by
+measured drawing room (the radius of the largest circle that fits inside the
+region, computed by the generator), not a hand-kept list, so it stays correct
+if the projection changes. Regions never sold into are hatched, because "no
+customers here" belongs on a sales map.
 
 Colour is **diverging** (loss ↔ neutral ↔ profit), red for loss and blue for
 profit. Red-green was rejected: it is the one pair a red-green colourblind
 reader cannot separate, and separating profit from loss is the map's whole job.
-Every tile is also labelled with its value, so colour never carries meaning
-alone.
+Every region is also labelled with its value — inline or in its gutter chip —
+so colour never carries meaning alone.
 
 **Ranking floor:** a region needs ≥ 3 customers to appear in the best/worst
 lists. One customer tells you nothing about a province, and one warranty claim

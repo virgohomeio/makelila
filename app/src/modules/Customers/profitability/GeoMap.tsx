@@ -1,18 +1,28 @@
 import { useMemo, useState } from 'react';
 import type { SegmentMetrics } from '../../../lib/profitability';
-import { REGION_TILES, TILE_GRID_COLS, TILE_GRID_ROWS, regionName } from '../../../lib/regions';
+import { regionName } from '../../../lib/regions';
+import {
+  REGION_SHAPES, MAP_VIEWBOX, MAP_GUTTER, MAP_INSETS, type RegionShape,
+} from '../../../lib/regionShapes';
 import { DIVERGING, divergingColor, inkOn, INK } from './palette';
 import styles from '../Customers.module.css';
 
-/** A tile-grid map of Canada and the US, coloured by a profitability measure.
+/** A choropleth of Canada and the US, coloured by a profitability measure.
  *
- *  One square per province/state, placed roughly where it sits on the
- *  continent. Not a true choropleth on purpose: real geography would give
- *  Nunavut forty times the ink of New Jersey and hide Prince Edward Island
- *  entirely, and this map is comparing profit per customer, not land area.
+ *  Real outlines, projected once at build time by scripts/generate-region-
+ *  shapes.mjs, so the app ships no mapping library and makes no network call
+ *  to draw a map. The projection is composite the way d3's albersUsa is: one
+ *  Albers cone over Canada and the lower 48, and separate framed insets for
+ *  Alaska and Hawaii.
  *
- *  Regions we have never sold into are drawn as empty outlines rather than
- *  omitted — "no customers here" is itself worth seeing on a sales map.
+ *  Real geography costs us something a tile grid did not: Prince Edward
+ *  Island is three pixels across and cannot hold its own label. Those regions
+ *  get a leader line out to a chip in the right-hand gutter rather than being
+ *  dropped or having their number float over a neighbour — and which regions
+ *  those are is decided by measured drawing room, not a hand-kept list.
+ *
+ *  Regions we have never sold into are hatched rather than omitted — "no
+ *  customers here" is itself worth seeing on a sales map.
  */
 
 export type GeoMeasure = 'profitPerCustomer' | 'contributionMargin' | 'customers' | 'arpu';
@@ -33,12 +43,40 @@ function measureOf(seg: SegmentMetrics, measure: GeoMeasure): number | null {
   }
 }
 
-const CELL = 46;
-const GAP = 4;
-/** Every tile is pushed down by this much to clear the country captions, so the
- *  viewBox has to be that much taller — without it the bottom row (Hawaii,
- *  Texas, Florida) is clipped off the canvas. */
-const TOP_OFFSET = 20;
+/** Room, in px, for a two-line label at the two type sizes the map uses. Room
+ *  is the radius of the largest circle that fits inside the region, so these
+ *  are the radii that clear a ~34x22 and a ~28x17 box respectively. */
+const BIG_ROOM = 21;
+const SMALL_ROOM = 13;
+
+const CHIP_H = 24;
+const CHIP_GAP = 6;
+const CHIP_W = MAP_GUTTER - 4;
+const GUTTER_X = MAP_VIEWBOX.width - MAP_GUTTER;
+
+const INSET_CODES = new Set<string>(MAP_INSETS.map(i => i.code));
+
+type Callout = RegionShape & { chipY: number };
+
+/** Lay the gutter chips out top to bottom, each as close to its own region as
+ *  the one above it allows. Pure geometry — it does not depend on the data, so
+ *  it is computed once for the module rather than per render. */
+const CALLOUTS: Callout[] = (() => {
+  const small = REGION_SHAPES
+    .filter(s => s.room < SMALL_ROOM && !INSET_CODES.has(s.code))
+    .sort((a, b) => a.labelY - b.labelY);
+  let cursor = 0;
+  const out = small.map(s => {
+    const chipY = Math.max(s.labelY - CHIP_H / 2, cursor);
+    cursor = chipY + CHIP_H + CHIP_GAP;
+    return { ...s, chipY };
+  });
+  const overflow = cursor - CHIP_GAP - MAP_VIEWBOX.height;
+  if (overflow > 0) for (const c of out) c.chipY -= overflow;
+  return out;
+})();
+
+const CALLOUT_BY_CODE = new Map(CALLOUTS.map(c => [c.code, c]));
 
 export function GeoMap({
   regions,
@@ -71,10 +109,18 @@ export function GeoMap({
     return Math.max(...values.map(Math.abs), 1);
   }, [regions, measure]);
 
-  const width = TILE_GRID_COLS * (CELL + GAP);
-  const height = TILE_GRID_ROWS * (CELL + GAP) + TOP_OFFSET;
   const active = hover ?? selected;
   const activeSeg = active ? byCode.get(active) : undefined;
+
+  const fillFor = (code: string): { fill: string; value: number | null } => {
+    const seg = byCode.get(code);
+    const value = seg ? measureOf(seg, measure) : null;
+    if (value == null) return { fill: 'url(#geoNoData)', value: null };
+    return {
+      fill: divergingColor(measure === 'customers' ? Math.abs(value) : value, scale),
+      value,
+    };
+  };
 
   return (
     <div className={styles.geoMapWrap}>
@@ -82,8 +128,9 @@ export function GeoMap({
         <div>
           <div className={styles.geoMapTitle}>{MEASURE_LABELS[measure]} by province / state</div>
           <div className={styles.geoMapSub}>
-            One square per region, placed roughly geographically. Outlined squares are
-            regions we have never sold into.
+            Hatched regions have no customers yet. Regions too small to carry their
+            own number are labelled down the right-hand side. Alaska and Hawaii are
+            insets, not to scale.
           </div>
         </div>
         <select
@@ -100,60 +147,57 @@ export function GeoMap({
 
       <div className={styles.geoMapBody}>
         <svg
-          viewBox={`0 0 ${width} ${height}`}
+          viewBox={`0 0 ${MAP_VIEWBOX.width} ${MAP_VIEWBOX.height}`}
           className={styles.geoMapSvg}
           role="img"
           aria-label={`${MEASURE_LABELS[measure]} by province and state`}
         >
-          <text x={2} y={14} className={styles.geoCountryLabel} fill={INK.muted}>CANADA</text>
-          <text x={2} y={4 * (CELL + GAP) + TOP_OFFSET - 6} className={styles.geoCountryLabel} fill={INK.muted}>
-            UNITED STATES
-          </text>
-          {REGION_TILES.map(tile => {
-            const seg = byCode.get(tile.code);
-            const value = seg ? measureOf(seg, measure) : null;
-            const fill = seg == null || value == null
-              ? 'transparent'
-              : divergingColor(measure === 'customers' ? Math.abs(value) : value, scale);
-            const code = tile.code.split('-')[1];
-            const isActive = active === tile.code;
-            return (
-              <g
-                key={tile.code}
-                transform={`translate(${tile.col * (CELL + GAP)}, ${tile.row * (CELL + GAP) + TOP_OFFSET})`}
-                onMouseEnter={() => setHover(tile.code)}
-                onMouseLeave={() => setHover(null)}
-                onClick={() => seg && onSelect(selected === tile.code ? null : tile.code)}
-                className={seg ? styles.geoTileActive : styles.geoTileEmpty}
-              >
-                <rect
-                  width={CELL} height={CELL} rx={5}
-                  fill={fill}
-                  stroke={isActive ? INK.primary : seg ? 'rgba(11,11,11,0.10)' : INK.axis}
-                  strokeWidth={isActive ? 2 : 1}
-                  strokeDasharray={seg ? undefined : '3 3'}
-                />
-                <text
-                  x={CELL / 2} y={CELL / 2 - 2}
-                  textAnchor="middle"
-                  className={styles.geoTileCode}
-                  fill={seg ? inkOn(fill) : INK.muted}
-                >
-                  {code}
-                </text>
-                {seg && value != null && (
-                  <text
-                    x={CELL / 2} y={CELL / 2 + 12}
-                    textAnchor="middle"
-                    className={styles.geoTileValue}
-                    fill={inkOn(fill)}
-                  >
-                    {shortValue(value, measure)}
-                  </text>
-                )}
-              </g>
-            );
-          })}
+          <defs>
+            <pattern
+              id="geoNoData" width="6" height="6"
+              patternUnits="userSpaceOnUse" patternTransform="rotate(45)"
+            >
+              <rect width="6" height="6" fill="#fbfbfa" />
+              <line x1="0" y1="0" x2="0" y2="6" stroke="#dcdcd8" strokeWidth="1" />
+            </pattern>
+          </defs>
+
+          {MAP_INSETS.map(inset => (
+            <g key={`frame-${inset.code}`} className={styles.geoInsetFrame}>
+              <rect
+                x={inset.x - 9} y={inset.y - 9}
+                width={inset.width + 18} height={inset.height + 18}
+                rx={6} fill="none" stroke={INK.grid}
+              />
+              {/* Name and number on one line: the two insets sit close enough
+                  that anchoring each number to its own frame's right edge
+                  butts it against the next frame's caption. */}
+              <text x={inset.x - 9} y={inset.y + inset.height + 22} className={styles.geoInsetLabel}>
+                {inset.label.toUpperCase()}
+                <tspan dx="7" className={styles.geoInsetValue}>
+                  {formatValue(fillFor(inset.code).value, measure)}
+                </tspan>
+              </text>
+            </g>
+          ))}
+
+          {/* The active region goes last so its heavier stroke is not painted
+              over by whichever neighbour happens to sort after it. */}
+          {[...REGION_SHAPES]
+            .sort((a, b) => Number(a.code === active) - Number(b.code === active))
+            .map(shape => (
+              <Region
+                key={shape.code}
+                shape={shape}
+                {...fillFor(shape.code)}
+                measure={measure}
+                isActive={active === shape.code}
+                hasData={byCode.has(shape.code)}
+                onHover={setHover}
+                onSelect={onSelect}
+                selected={selected}
+              />
+            ))}
         </svg>
 
         <div className={styles.geoSide}>
@@ -170,14 +214,124 @@ export function GeoMap({
                 <div><dt>Warranty cost</dt><dd>{money(activeSeg.warrantyCost)}</dd></div>
               </dl>
             </div>
+          ) : active ? (
+            <div className={styles.geoTooltip}>
+              <div className={styles.geoTooltipName}>{regionName(active)}</div>
+              <div className={styles.geoTooltipHint}>No customers here yet.</div>
+            </div>
           ) : (
             <div className={styles.geoTooltipHint}>
-              Hover a square for the detail. Click to filter the whole tab to that region.
+              Hover a region for the detail. Click to filter the whole tab to that region.
             </div>
           )}
         </div>
       </div>
     </div>
+  );
+}
+
+/** One province or state: its outline, and either an inline label or a leader
+ *  line out to a chip in the gutter. Both live in the same &lt;g&gt; so the chip
+ *  hovers and selects the region it belongs to. */
+function Region({
+  shape, fill, value, measure, isActive, hasData, onHover, onSelect, selected,
+}: {
+  shape: RegionShape;
+  fill: string;
+  value: number | null;
+  measure: GeoMeasure;
+  isActive: boolean;
+  hasData: boolean;
+  onHover: (code: string | null) => void;
+  onSelect: (code: string | null) => void;
+  selected: string | null;
+}) {
+  const code = shape.code.split('-')[1];
+  const callout = CALLOUT_BY_CODE.get(shape.code);
+  const isInset = INSET_CODES.has(shape.code);
+  const ink = hasData ? inkOn(fill) : INK.muted;
+  const big = shape.room >= BIG_ROOM;
+
+  return (
+    <g
+      className={hasData ? styles.geoRegionActive : styles.geoRegion}
+      onMouseEnter={() => onHover(shape.code)}
+      onMouseLeave={() => onHover(null)}
+      onClick={() => hasData && onSelect(selected === shape.code ? null : shape.code)}
+    >
+      <path
+        d={shape.d}
+        fill={fill}
+        stroke={isActive ? INK.primary : '#ffffff'}
+        strokeWidth={isActive ? 2 : 0.9}
+        strokeLinejoin="round"
+      />
+
+      {/* Insets carry their number in the frame caption — the islands
+          themselves are too small to print on. */}
+      {!callout && !isInset && (
+        value == null
+          ? (
+            <text
+              x={shape.labelX} y={shape.labelY + (big ? 4 : 3)}
+              textAnchor="middle" fill={ink}
+              className={big ? styles.geoLabelCode : styles.geoLabelCodeSmall}
+            >
+              {code}
+            </text>
+          )
+          : (
+            <>
+              <text
+                x={shape.labelX} y={shape.labelY - 1}
+                textAnchor="middle" fill={ink}
+                className={big ? styles.geoLabelCode : styles.geoLabelCodeSmall}
+              >
+                {code}
+              </text>
+              <text
+                x={shape.labelX} y={shape.labelY + (big ? 11 : 9)}
+                textAnchor="middle" fill={ink}
+                className={big ? styles.geoLabelValue : styles.geoLabelValueSmall}
+              >
+                {formatValue(value, measure)}
+              </text>
+            </>
+          )
+      )}
+
+      {callout && (
+        <>
+          <polyline
+            points={`${shape.labelX},${shape.labelY} ${GUTTER_X - 20},${callout.chipY + CHIP_H / 2} ${GUTTER_X},${callout.chipY + CHIP_H / 2}`}
+            fill="none"
+            stroke={isActive ? INK.primary : INK.axis}
+            strokeWidth={1}
+          />
+          <circle cx={shape.labelX} cy={shape.labelY} r={1.8} fill={INK.muted} />
+          <rect
+            x={GUTTER_X} y={callout.chipY} width={CHIP_W} height={CHIP_H} rx={4}
+            fill={INK.surface} stroke={isActive ? INK.primary : INK.grid}
+          />
+          <rect
+            x={GUTTER_X + 1} y={callout.chipY + 1} width={5} height={CHIP_H - 2}
+            fill={fill}
+          />
+          <text
+            x={GUTTER_X + 14} y={callout.chipY + CHIP_H / 2 + 4}
+            className={styles.geoChipCode}
+          >
+            {code}
+          </text>
+          <text
+            x={GUTTER_X + CHIP_W - 10} y={callout.chipY + CHIP_H / 2 + 4}
+            textAnchor="end" className={styles.geoChipValue}
+          >
+            {formatValue(value, measure)}
+          </text>
+        </>
+      )}
+    </g>
   );
 }
 
@@ -195,16 +349,22 @@ function Legend({ measure, scale }: { measure: GeoMeasure; scale: number }) {
         <span>{measure === 'customers' ? '0' : `−${shortMoney(scale)}`}</span>
         <span>{measure === 'customers' ? `${Math.round(scale)}` : shortMoney(scale)}</span>
       </div>
+      <div className={styles.geoLegendNote}>
+        <span className={styles.geoLegendHatch} aria-hidden="true" />
+        No customers yet
+      </div>
     </div>
   );
 }
 
-function shortValue(v: number, measure: GeoMeasure): string {
+function formatValue(v: number | null, measure: GeoMeasure): string {
+  if (v == null) return '—';
   if (measure === 'customers') return String(Math.round(v));
   return shortMoney(v);
 }
 
-/** Compact money for a 46px tile: "$1.2k", "−$840". */
+/** Compact money for a label that has to fit inside Rhode Island: "$1.2k",
+ *  "−$840". */
 function shortMoney(v: number): string {
   const sign = v < 0 ? '−' : '';
   const a = Math.abs(v);

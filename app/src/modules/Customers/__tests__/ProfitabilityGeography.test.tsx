@@ -2,8 +2,8 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent, within } from '@testing-library/react';
 import type { CustomerProfitability } from '../../../lib/customers';
 import { DEFAULT_RATES } from '../../../lib/profitability';
-import { regionName, REGION_TILES } from '../../../lib/regions';
-import { GeoMap } from '../profitability/GeoMap';
+import { regionName } from '../../../lib/regions';
+import { REGION_SHAPES, MAP_VIEWBOX } from '../../../lib/regionShapes';
 
 const { profitabilityMock } = vi.hoisted(() => ({ profitabilityMock: vi.fn() }));
 
@@ -87,9 +87,10 @@ describe('ProfitabilityTab — geography', () => {
     expect(within(worst.parentElement!).getByText('California')).toBeInTheDocument();
   });
 
-  it('draws a map tile for every region, sold-into or not', () => {
+  it('draws an outline for every region, sold-into or not', () => {
     mountGeography(twoRegions());
     const map = screen.getByRole('img', { name: /by province and state/i });
+    expect(map.querySelectorAll('path[d]').length).toBe(REGION_SHAPES.length);
     // ON and CA carry values; a region we have never sold into is still drawn.
     expect(within(map).getByText('ON')).toBeInTheDocument();
     expect(within(map).getByText('NU')).toBeInTheDocument();
@@ -102,11 +103,32 @@ describe('ProfitabilityTab — geography', () => {
     expect(screen.getByText('Profit / customer')).toBeInTheDocument();
   });
 
-  it('filters the whole tab to a region when its tile is clicked', () => {
+  it('says so on hover when a region has no customers', () => {
+    mountGeography(twoRegions());
+    const map = screen.getByRole('img', { name: /by province and state/i });
+    fireEvent.mouseEnter(within(map).getByText('NU').closest('g')!);
+    expect(screen.getByText('Nunavut')).toBeInTheDocument();
+    expect(screen.getByText('No customers here yet.')).toBeInTheDocument();
+  });
+
+  it('filters the whole tab to a region when it is clicked', () => {
     mountGeography(twoRegions());
     const map = screen.getByRole('img', { name: /by province and state/i });
     fireEvent.click(within(map).getByText('ON').closest('g')!);
     // The clear-filters affordance reports how many customers survived.
+    expect(screen.getByText(/Clear filters \(3 shown\)/)).toBeInTheDocument();
+  });
+
+  it('labels a region too small to print on with a gutter chip', () => {
+    // Prince Edward Island is three pixels across. Its number has to live in
+    // the right-hand column, and clicking that chip has to select PEI.
+    mountGeography([0, 1, 2].map(i => row({
+      id: `pe${i}`, region_code: 'CA-PE', region: 'PE', net_margin_cad: 500,
+    })));
+    const map = screen.getByRole('img', { name: /by province and state/i });
+    const chip = within(map).getByText('PE');
+    expect(chip.closest('g')!.querySelector('polyline')).not.toBeNull();
+    fireEvent.click(chip.closest('g')!);
     expect(screen.getByText(/Clear filters \(3 shown\)/)).toBeInTheDocument();
   });
 
@@ -124,51 +146,43 @@ describe('region reference data', () => {
     expect(regionName(null)).toBe('Unknown');
   });
 
-  it('gives every tile a unique grid position', () => {
-    const seen = new Set(REGION_TILES.map(t => `${t.row}:${t.col}`));
-    expect(seen.size).toBe(REGION_TILES.length);
+  it('has a name for every region it draws', () => {
+    const unnamed = REGION_SHAPES.filter(s => regionName(s.code) === s.code);
+    expect(unnamed).toEqual([]);
   });
 
-  it('has a name for every tile it draws', () => {
-    const unnamed = REGION_TILES.filter(t => regionName(t.code) === t.code);
-    expect(unnamed).toEqual([]);
+  it('draws all thirteen provinces and all fifty-one US regions', () => {
+    const ca = REGION_SHAPES.filter(s => s.code.startsWith('CA-'));
+    const us = REGION_SHAPES.filter(s => s.code.startsWith('US-'));
+    expect(ca).toHaveLength(13);
+    expect(us).toHaveLength(51);
+    expect(new Set(REGION_SHAPES.map(s => s.code)).size).toBe(REGION_SHAPES.length);
   });
 });
 
 describe('map geometry', () => {
-  it('fits every tile inside the viewBox', () => {
-    // The bottom row — Hawaii, Texas, Florida — sits below the last grid row
-    // once the country captions push everything down, so the canvas has to be
-    // taller than rows × cell or those three states are clipped away.
-    render(<GeoMapProbe />);
-    const svg = screen.getByRole('img', { name: /by province and state/i });
-    const [, , vbWidth, vbHeight] = svg.getAttribute('viewBox')!.split(' ').map(Number);
+  it('fits every outline inside the viewBox', () => {
+    // The generator lays out the insets against the mainland; an off-by-one
+    // there silently clips Hawaii or the callout column off the canvas.
+    for (const shape of REGION_SHAPES) {
+      const points = shape.d
+        .split('M').filter(Boolean)
+        .flatMap(sub => sub.replace('Z', '').split('L').map(p => p.split(',').map(Number)));
+      for (const [x, y] of points) {
+        expect(x).toBeGreaterThanOrEqual(0);
+        expect(y).toBeGreaterThanOrEqual(0);
+        expect(x).toBeLessThanOrEqual(MAP_VIEWBOX.width);
+        expect(y).toBeLessThanOrEqual(MAP_VIEWBOX.height);
+      }
+    }
+  });
 
-    const boxes = Array.from(svg.querySelectorAll('g[transform]')).map(g => {
-      const [x, y] = /translate\(([-\d.]+),\s*([-\d.]+)\)/
-        .exec(g.getAttribute('transform')!)!.slice(1).map(Number);
-      const rect = g.querySelector('rect')!;
-      return {
-        right:  x + Number(rect.getAttribute('width')),
-        bottom: y + Number(rect.getAttribute('height')),
-      };
-    });
-
-    expect(boxes.length).toBe(REGION_TILES.length);
-    expect(Math.max(...boxes.map(b => b.bottom))).toBeLessThanOrEqual(vbHeight);
-    expect(Math.max(...boxes.map(b => b.right))).toBeLessThanOrEqual(vbWidth);
+  it('keeps every label anchor inside the frame', () => {
+    for (const shape of REGION_SHAPES) {
+      expect(shape.labelX).toBeGreaterThan(0);
+      expect(shape.labelX).toBeLessThan(MAP_VIEWBOX.width);
+      expect(shape.labelY).toBeGreaterThan(0);
+      expect(shape.labelY).toBeLessThan(MAP_VIEWBOX.height);
+    }
   });
 });
-
-/** The map on its own, with no customers — geometry does not depend on data. */
-function GeoMapProbe() {
-  return (
-    <GeoMap
-      regions={[]}
-      measure="profitPerCustomer"
-      onMeasureChange={() => {}}
-      onSelect={() => {}}
-      selected={null}
-    />
-  );
-}
