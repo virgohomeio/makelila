@@ -49,7 +49,7 @@ Do this once per shell; every test command below assumes it.
 
 The timestamp must sort after `20260827090000_customer_profitability_v12_legacy_freight.sql`, the current latest.
 
-- [ ] **Step 1: Write the migration**
+- [x] **Step 1: Write the migration**
 
 ```sql
 -- Stock batch administration.
@@ -124,14 +124,14 @@ create policy "batches_insert" on public.batches
   with check (public.can_manage_batches());
 ```
 
-- [ ] **Step 2: Verify it parses**
+- [x] **Step 2: Verify it parses**
 
 There is no local Postgres in this repo and the makeLILA Supabase project is not reachable from the coding session, so this is a syntax read-through, not an execution. Confirm by eye:
 - every statement ends in `;`
 - the `$$` function body opens and closes
 - `is_finance()` exists — it does, `20260607020000_profiles_role_enum_and_canDo_canView.sql:105-110`
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add supabase/migrations/20260828120000_stock_managers_and_batch_insert.sql
@@ -146,7 +146,7 @@ git commit -m "feat(stock): stock_managers allowlist + batches INSERT policy"
 - Modify: `app/src/lib/permissions.ts`
 - Test: `app/src/lib/permissions.test.ts`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `app/src/lib/permissions.test.ts`. Also add `canManageBatches` to the existing import on line 2.
 
@@ -176,12 +176,12 @@ describe('canManageBatches', () => {
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd app && npx vitest run src/lib/permissions.test.ts`
 Expected: FAIL — `"canManageBatches" is not exported by "src/lib/permissions.ts"`
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 Append to `app/src/lib/permissions.ts`:
 
@@ -206,12 +206,12 @@ export function canManageBatches(
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cd app && npx vitest run src/lib/permissions.test.ts`
 Expected: PASS — all `canDo` / `canView` / `canViewPosting` / `canAccessHiringModule` / `canManageBatches` suites green.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add app/src/lib/permissions.ts app/src/lib/permissions.test.ts
@@ -228,7 +228,7 @@ git commit -m "feat(stock): canManageBatches permission helper"
 
 `getCurrentUserId()` already exists in `hiring.ts`, but importing Hiring into Stock for a three-line auth read is a bad dependency. Call `supabase.auth.getUser()` directly instead.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `app/src/lib/stock.test.ts`:
 
@@ -337,12 +337,12 @@ describe('isStockManager', () => {
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd app && npx vitest run src/lib/stock.test.ts`
 Expected: FAIL — `"createBatch" is not exported by "src/lib/stock.ts"`
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 Append to `app/src/lib/stock.ts`:
 
@@ -437,12 +437,12 @@ export function useIsStockManager(): { isManager: boolean; loading: boolean } {
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cd app && npx vitest run src/lib/stock.test.ts`
 Expected: PASS — 10 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add app/src/lib/stock.ts app/src/lib/stock.test.ts
@@ -458,7 +458,7 @@ git commit -m "feat(stock): createBatch + stock-manager allowlist read"
 
 Structure copies `PartsTab.tsx:307-418` — same `modalBackdrop / modalCard / modalHead / modalBody / modalGrid / modalRow / modalInput / modalFoot / modalPrimary / modalSecondary` classes, all already in `Stock.module.css`. Do **not** copy `NewPOModal.tsx`; it uses inline styles, which this module does not.
 
-- [ ] **Step 1: Write the component**
+- [x] **Step 1: Write the component**
 
 ```tsx
 import { useState } from 'react';
@@ -621,12 +621,12 @@ export function NewBatchModal({ onClose }: Props) {
 }
 ```
 
-- [ ] **Step 2: Verify it compiles**
+- [x] **Step 2: Verify it compiles**
 
 Run: `cd app && npx tsc -b --noEmit`
 Expected: no errors. If `modalHint` / `modalError` are flagged, they are added in Task 5 — run this again after that task.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add app/src/modules/Stock/NewBatchModal.tsx
@@ -641,7 +641,7 @@ git commit -m "feat(stock): new-batch modal form"
 - Modify: `app/src/modules/Stock/UnitsTab.tsx`
 - Modify: `app/src/modules/Stock/Stock.module.css`
 
-- [ ] **Step 1: Add the CSS**
+- [x] **Step 1: Add the CSS**
 
 Append to `app/src/modules/Stock/Stock.module.css`. Stock.module.css is not yet in the `check-css-tokens.mjs` MIGRATED ratchet, but use tokens anyway so it stays clean when its turn comes:
 
@@ -665,7 +665,7 @@ Append to `app/src/modules/Stock/Stock.module.css`. Stock.module.css is not yet 
 }
 ```
 
-- [ ] **Step 2: Wire up UnitsTab**
+- [x] **Step 2: Wire up UnitsTab**
 
 Three edits to `app/src/modules/Stock/UnitsTab.tsx`.
 
@@ -701,7 +701,7 @@ In the returned JSX, immediately after `<div className={styles.stockLayout}>` an
 
 `useBatches()` already subscribes to the `batches:realtime` channel ([stock.ts:147-166](../../../app/src/lib/stock.ts)), so the new card appears without a reload once the insert lands.
 
-- [ ] **Step 3: Verify the full suite and the build**
+- [x] **Step 3: Verify the full suite and the build**
 
 ```bash
 cd app && npx vitest run
@@ -715,7 +715,7 @@ Expected: succeeds. This also runs `check-css-tokens.mjs` and `tsc -b`.
 
 If the build is being checked for CI parity, note that CI runs Node 20 while local dev is Node 24 — use `npx node@20` if a version-sensitive failure appears.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add app/src/modules/Stock/UnitsTab.tsx app/src/modules/Stock/Stock.module.css
