@@ -10,8 +10,9 @@
 // here. This function downloads it, sends it to Claude as a document
 // content block for {name, email, phone} extraction AND a JD-grounded
 // rubric score (unconditional — no opt-in toggle, per product decision),
-// then either enriches a matching stub row (name match within the same
-// posting) or inserts a brand-new full record.
+// then files the result against the posting: it enriches a matching Indeed
+// stub, reports a match on someone already on the board as a duplicate
+// (changing nothing), or inserts a brand-new full record.
 //
 // Providers: Claude, then Qwen, then OpenAI — whichever of them have keys
 // configured, in that order (override with RESUME_PROVIDER_ORDER). Any HTTP
@@ -148,15 +149,53 @@ export function requireLeadershipRole(role: string | null | undefined): Response
   return json({ error: 'This function is restricted to finance/admin (Hiring module leadership).' }, 403);
 }
 
-/** Case-insensitive exact-name match against a posting's existing stub
- *  rows. Exported for unit testing — the real caller passes rows already
- *  scoped to enrichment_status='stub' for the target posting_id. */
-export function matchExistingStub(
-  candidates: { id: string; full_name: string }[], extractedName: string,
-): string | null {
-  const target = extractedName.trim().toLowerCase();
-  const match = candidates.find(c => c.full_name.trim().toLowerCase() === target);
-  return match?.id ?? null;
+/** An existing candidate row on the posting, as loaded for duplicate
+ *  detection. `phone` rides along for the contact backfill below and is not
+ *  part of the matching. */
+export type ExistingCandidate = {
+  id: string;
+  full_name: string;
+  email: string | null;
+  phone?: string | null;
+  enrichment_status: 'stub' | 'resume_attached';
+};
+
+const normalize = (value: string | null | undefined): string => (value ?? '').trim().toLowerCase();
+
+/** Finds the candidate a resume already belongs to, anywhere on the posting:
+ *  an Indeed stub waiting to be enriched, OR a full record some earlier
+ *  upload already created. This used to look at stubs only, so re-uploading
+ *  a resume filed the same applicant a second time.
+ *
+ *  Email decides identity whenever both sides have one. A name-only match is
+ *  accepted only when at least one side has no email — two different people
+ *  who happen to share a name (and both put an email on their resume) must
+ *  never be merged into one record. Stubs win ties: enriching a placeholder
+ *  is the useful outcome.
+ *
+ *  Exported for unit testing — the real caller passes every candidate row for
+ *  the target posting_id. */
+export function matchExistingCandidate(
+  candidates: ExistingCandidate[], extracted: { full_name: string; email: string | null },
+): ExistingCandidate | null {
+  const email = normalize(extracted.email);
+  const name = normalize(extracted.full_name);
+
+  const byEmail = email ? candidates.filter(c => normalize(c.email) === email) : [];
+  if (byEmail.length) return preferStub(byEmail);
+
+  const byName = name
+    ? candidates.filter(c =>
+        normalize(c.full_name) === name &&
+        // Both sides carry an email and they differ (an equal pair would have
+        // matched above) — same name, different person.
+        !(email && normalize(c.email) && normalize(c.email) !== email))
+    : [];
+  return byName.length ? preferStub(byName) : null;
+}
+
+function preferStub(rows: ExistingCandidate[]): ExistingCandidate {
+  return rows.find(r => r.enrichment_status === 'stub') ?? rows[0];
 }
 
 Deno.serve(async (req: Request) => {
@@ -275,12 +314,54 @@ async function handle(req: Request): Promise<Response> {
   }
   if (!extracted.full_name) return json({ error: `${label} did not extract a full_name from this resume`, provider }, 502);
 
-  const { data: stubs } = await admin
+  // Every candidate on the posting, not just the stubs: a resume the operator
+  // has already uploaded is 'resume_attached', and skipping those rows is
+  // exactly what made a second upload of the same resume file a second
+  // applicant.
+  const { data: existing, error: existingErr } = await admin
     .from('candidates')
-    .select('id, full_name')
-    .eq('posting_id', input.posting_id)
-    .eq('enrichment_status', 'stub');
-  const matchedId = matchExistingStub(stubs ?? [], extracted.full_name);
+    .select('id, full_name, email, phone, enrichment_status')
+    .eq('posting_id', input.posting_id);
+  if (existingErr) return json({ error: `Duplicate check failed: ${existingErr.message}` }, 500);
+  const matched = matchExistingCandidate((existing ?? []) as ExistingCandidate[], extracted);
+
+  if (matched && matched.enrichment_status !== 'stub') {
+    // This applicant is already on the board from an earlier upload. Insert
+    // nothing — that second row is the whole bug — and leave every
+    // operator-curated field (scores, stage, decision tags, hand-corrected
+    // contact details) untouched. The only writes are contact fields the
+    // earlier parse left empty, which cannot clobber anything.
+    //
+    // The file just uploaded stays in the bucket unreferenced, and the record
+    // keeps the resume it already had: a name/email match is not proof the two
+    // files are the same document, and silently swapping one candidate's
+    // resume for another's would be a worse outcome than a stray object.
+    const backfill: Record<string, string> = {};
+    if (!matched.email && extracted.email) backfill.email = extracted.email;
+    if (!matched.phone && extracted.phone) backfill.phone = extracted.phone;
+    if (Object.keys(backfill).length > 0) {
+      const { error: backfillErr } = await admin.from('candidates').update(backfill).eq('id', matched.id);
+      if (backfillErr) return json({ error: `Contact backfill failed: ${backfillErr.message}` }, 500);
+    }
+
+    await admin.from('activity_log').insert({
+      user_id: caller.user_id, type: 'candidate_resume_duplicate', entity: matched.full_name,
+      entity_type: 'candidate', entity_id: matched.id,
+      detail: `Duplicate resume upload — kept the existing record (parsed by ${label})`,
+    });
+    // The board's name, not the resume's: if an operator corrected the name
+    // after the first upload, that is the one they will be looking for.
+    return json({
+      candidate_id: matched.id,
+      duplicate: true,
+      full_name: matched.full_name,
+      email: matched.email ?? extracted.email,
+      phone: matched.phone ?? extracted.phone,
+      suggested_scores: extracted.suggested_scores,
+      enrichment_status: 'resume_attached',
+      provider,
+    }, 200);
+  }
 
   // hiring-resumes is a private bucket (20260724130100_hiring_resumes_bucket.sql)
   // — there is no public URL to resolve here. A signed URL would expire, and
@@ -289,7 +370,8 @@ async function handle(req: Request): Promise<Response> {
   // generation happens at read time in the Applicants tab UI (Task 11), not here.
   const resumeUrl = input.storage_path;
 
-  if (matchedId) {
+  if (matched) {
+    // A stub (an Indeed notification with no resume attached) — fill it in.
     const { error: updateErr } = await admin.from('candidates').update({
       full_name: extracted.full_name,
       email: extracted.email,
@@ -297,14 +379,14 @@ async function handle(req: Request): Promise<Response> {
       resume_url: resumeUrl,
       enrichment_status: 'resume_attached',
       suggested_scores: extracted.suggested_scores,
-    }).eq('id', matchedId);
+    }).eq('id', matched.id);
     if (updateErr) return json({ error: `Enrich failed: ${updateErr.message}` }, 500);
 
     await admin.from('activity_log').insert({
       user_id: caller.user_id, type: 'candidate_resume_enriched', entity: extracted.full_name,
-      entity_type: 'candidate', entity_id: matchedId, detail: `Parsed by ${label}`,
+      entity_type: 'candidate', entity_id: matched.id, detail: `Parsed by ${label}`,
     });
-    return json({ candidate_id: matchedId, ...extracted, enrichment_status: 'resume_attached', provider }, 200);
+    return json({ candidate_id: matched.id, duplicate: false, ...extracted, enrichment_status: 'resume_attached', provider }, 200);
   }
 
   const { data: inserted, error: insertErr } = await admin.from('candidates').insert({
@@ -324,7 +406,7 @@ async function handle(req: Request): Promise<Response> {
     user_id: caller.user_id, type: 'candidate_uploaded', entity: extracted.full_name,
     entity_type: 'candidate', entity_id: inserted.id, detail: `Parsed by ${label}`,
   });
-  return json({ candidate_id: inserted.id, ...extracted, enrichment_status: 'resume_attached', provider }, 200);
+  return json({ candidate_id: inserted.id, duplicate: false, ...extracted, enrichment_status: 'resume_attached', provider }, 200);
 }
 
 /** Primary provider: the resume goes to Claude as a base64 document block.

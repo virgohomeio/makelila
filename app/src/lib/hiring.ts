@@ -382,6 +382,10 @@ export type ParseResumeResult = {
   phone: string | null;
   suggested_scores: Record<string, number>;
   enrichment_status: EnrichmentStatus;
+  /** True when this resume belongs to someone already on the board — the
+   *  existing record was left as it is and no new applicant was created.
+   *  `candidate_id` points at that existing record. */
+  duplicate: boolean;
 };
 
 /** Uploads a resume file to the hiring-resumes bucket, then invokes

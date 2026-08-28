@@ -1,5 +1,5 @@
 import { assertEquals } from 'https://deno.land/std@0.224.0/assert/mod.ts';
-import { buildScoringPrompt, matchExistingStub, requireLeadershipRole } from './index.ts';
+import { buildScoringPrompt, requireLeadershipRole } from './index.ts';
 
 Deno.test('buildScoringPrompt: includes the JD text and every rubric dimension', () => {
   const prompt = buildScoringPrompt(
@@ -9,20 +9,6 @@ Deno.test('buildScoringPrompt: includes the JD text and every rubric dimension',
   assertEquals(prompt.includes('Operations & Fulfillment Specialist'), true);
   assertEquals(prompt.includes('Logistics experience'), true);
   assertEquals(prompt.includes('Communication'), true);
-});
-
-Deno.test('matchExistingStub: matches on case-insensitive exact name', () => {
-  const candidates = [{ id: 'c1', full_name: 'Jenivan Sivakumaru' }, { id: 'c2', full_name: 'Roshan Shaji' }];
-  assertEquals(matchExistingStub(candidates, 'jenivan sivakumaru'), 'c1');
-});
-
-Deno.test('matchExistingStub: returns null when no name matches', () => {
-  const candidates = [{ id: 'c1', full_name: 'Jenivan Sivakumaru' }];
-  assertEquals(matchExistingStub(candidates, 'Someone Else'), null);
-});
-
-Deno.test('matchExistingStub: returns null for an empty candidate list', () => {
-  assertEquals(matchExistingStub([], 'Anyone'), null);
 });
 
 Deno.test('requireLeadershipRole: allows finance and admin through', () => {
@@ -109,4 +95,53 @@ Deno.test('buildTextResumeMessage: caps very long resume text so one bad file ca
   const msg = buildTextResumeMessage('Score this.', 'x'.repeat(200_000));
   assertEquals(msg.length < 100_000, true);
   assertEquals(msg.includes('Score this.'), true);
+});
+
+import { matchExistingCandidate } from './index.ts';
+
+const stub = (id: string, full_name: string, email: string | null = null) =>
+  ({ id, full_name, email, enrichment_status: 'stub' as const });
+const attached = (id: string, full_name: string, email: string | null = null) =>
+  ({ id, full_name, email, enrichment_status: 'resume_attached' as const });
+
+Deno.test('matchExistingCandidate: a re-uploaded resume matches the record the first upload created', () => {
+  const rows = [attached('c1', 'Ada Lovelace', 'ada@example.com')];
+  const match = matchExistingCandidate(rows, { full_name: 'Ada Lovelace', email: 'ada@example.com' });
+  assertEquals(match?.id, 'c1');
+});
+
+Deno.test('matchExistingCandidate: enriches an Indeed stub by name when the stub has no email', () => {
+  const rows = [stub('c1', 'Jenivan Sivakumaru'), attached('c2', 'Roshan Shaji', 'roshan@example.com')];
+  const match = matchExistingCandidate(rows, { full_name: 'jenivan sivakumaru', email: 'jen@example.com' });
+  assertEquals(match?.id, 'c1');
+  assertEquals(match?.enrichment_status, 'stub');
+});
+
+Deno.test('matchExistingCandidate: matches on email when the resume spells the name differently', () => {
+  const rows = [attached('c1', 'Ada Lovelace', 'ada@example.com')];
+  const match = matchExistingCandidate(rows, { full_name: 'Ada B. Lovelace', email: ' ADA@Example.com ' });
+  assertEquals(match?.id, 'c1');
+});
+
+Deno.test('matchExistingCandidate: two applicants sharing a name but not an email stay separate', () => {
+  const rows = [attached('c1', 'John Smith', 'john.smith@example.com')];
+  assertEquals(matchExistingCandidate(rows, { full_name: 'John Smith', email: 'jsmith@other.com' }), null);
+});
+
+Deno.test('matchExistingCandidate: falls back to an exact name match when neither side has an email', () => {
+  const rows = [attached('c1', 'Ada Lovelace', null)];
+  assertEquals(matchExistingCandidate(rows, { full_name: '  ada lovelace ', email: null })?.id, 'c1');
+});
+
+Deno.test('matchExistingCandidate: prefers the stub when a stub and a full record both match', () => {
+  const rows = [attached('c2', 'Ada Lovelace', null), stub('c1', 'Ada Lovelace')];
+  assertEquals(matchExistingCandidate(rows, { full_name: 'Ada Lovelace', email: null })?.id, 'c1');
+});
+
+Deno.test('matchExistingCandidate: returns null when nobody matches', () => {
+  assertEquals(matchExistingCandidate([], { full_name: 'Anyone', email: 'a@b.com' }), null);
+  assertEquals(
+    matchExistingCandidate([attached('c1', 'Ada Lovelace', 'ada@example.com')], { full_name: 'Someone Else', email: null }),
+    null,
+  );
 });
