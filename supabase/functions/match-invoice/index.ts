@@ -4,10 +4,10 @@
 // Flow (Upload module bulk flow):
 //   1. Client uploads the PDF to the `customer-invoices` bucket.
 //   2. Client POSTs { storage_path, file_name, document_type } here.
-//   3. We download the PDF, hand it to Claude to extract the fields that
-//      identify it — the Shopify order number is printed in the line-item body
-//      (e.g. "Shopify order# 1192"), plus invoice number / date / total /
-//      bill-to name.
+//   3. We download the PDF and hand it to an LLM (see Providers below) to
+//      extract the fields that identify it — the Shopify order number is
+//      printed in the line-item body (e.g. "Shopify order# 1192"), plus
+//      invoice number / date / total / payment / bill-to name.
 //   4. Match cascade: order number → orders row → its customer; else resolve
 //      the bill-to name to a customer. Order match OR a customer-name match
 //      (even with no order #, common for pre-Shopify / in-person / financing
@@ -277,6 +277,7 @@ async function reextractBatch(
 
   const errors: { file_name: string; error: string }[] = [];
   const providersUsed = new Set<LlmProvider>();
+  const down = new Map<LlmProvider, string>();
   let updated = 0;
 
   for (const row of rows ?? []) {
@@ -284,7 +285,7 @@ async function reextractBatch(
       const { data: blob, error: dlErr } = await admin.storage
         .from('customer-invoices').download(row.storage_path as string);
       if (dlErr || !blob) throw new Error(dlErr?.message ?? 'file missing from bucket');
-      const read = await extractInvoiceFields(chain, await blob.arrayBuffer());
+      const read = await extractInvoiceFields(chain, await blob.arrayBuffer(), down);
       const llm = read.fields;
       providersUsed.add(read.provider);
 
@@ -343,21 +344,34 @@ const EXTRACT_PROMPT =
  *  model-output problem, not an availability one, and the same rule the
  *  hiring path follows.
  *
+ *  `down` is a per-batch memo: a provider that has already failed on an
+ *  earlier file is skipped for the rest of the run. With Claude out of credit
+ *  and 100+ invoices to backfill, retrying it per row would spend the whole
+ *  invocation on round-trips that are known to fail and time the batch out.
+ *  Scoped to one invocation, so the next call re-tries everything.
+ *
  *  Throws with every failure chained when no provider got through. */
 async function extractInvoiceFields(
-  chain: ProviderChain, pdfBytes: ArrayBuffer,
+  chain: ProviderChain, pdfBytes: ArrayBuffer, down?: Map<LlmProvider, string>,
 ): Promise<{ fields: Extracted; provider: LlmProvider }> {
   const failures: string[] = [];
   for (const provider of chain.providers) {
+    const alreadyDown = down?.get(provider);
+    if (alreadyDown) { failures.push(alreadyDown); continue; }
     let reply: string;
     try {
       reply = provider === 'claude'
         ? await claudeExtract(chain.claudeKey!, pdfBytes)
         : await textProviderExtract(provider, provider === 'qwen' ? chain.qwen! : chain.openai!, pdfBytes);
     } catch (e) {
-      failures.push((e as Error)?.message ?? String(e));
+      const msg = (e as Error)?.message ?? String(e);
+      failures.push(msg);
+      down?.set(provider, msg);
       continue;
     }
+    // Answering clears an earlier strike: a one-off 429 shouldn't sideline a
+    // provider that is plainly working now.
+    down?.delete(provider);
     return { fields: parseExtracted(reply, PROVIDER_LABELS[provider]), provider };
   }
   throw new Error(chainFailures(failures));
