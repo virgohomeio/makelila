@@ -43,7 +43,15 @@ export type BulkUploadResult = {
   ok: boolean;
   invoice?: CustomerInvoice;
   error?: string;
+  // Why the PDF's fields couldn't be read, when the row was still filed. The
+  // row lands in the review queue either way, so without this the operator
+  // sees "unassigned" with no cause — which is how an extractor that had been
+  // dead since 2026-08-13 went unnoticed until every upload needed assigning
+  // by hand. Always render it.
   extract_error?: string | null;
+  // Which LLM provider read the PDF ('claude' | 'qwen' | 'openai'), null when
+  // none could.
+  provider?: string | null;
 };
 
 /** The amount an invoice is worth in CAD, for display and for defaulting a
@@ -102,6 +110,7 @@ export type ReextractResult = {
   remaining: number;
   stalled: number;
   errors: { file_name: string; error: string }[];
+  providers?: string[];
 };
 
 export async function reextractInvoiceAmounts(limit = 20): Promise<ReextractResult> {
@@ -351,7 +360,9 @@ export async function bulkUploadAndMatch(
       continue;
     }
 
-    const { data, error } = await supabase.functions.invoke<{ invoice: CustomerInvoice; extract_error: string | null }>(
+    const { data, error } = await supabase.functions.invoke<{
+      invoice: CustomerInvoice; extract_error: string | null; provider: string | null;
+    }>(
       'match-invoice',
       { body: { storage_path: storagePath, file_name: file.name, document_type: documentType } },
     );
@@ -362,7 +373,10 @@ export async function bulkUploadAndMatch(
       results.push({ file_name: file.name, ok: false, error: error?.message ?? 'No response from matcher' });
       continue;
     }
-    results.push({ file_name: file.name, ok: true, invoice: data.invoice, extract_error: data.extract_error });
+    results.push({
+      file_name: file.name, ok: true, invoice: data.invoice,
+      extract_error: data.extract_error, provider: data.provider,
+    });
   }
   return results;
 }

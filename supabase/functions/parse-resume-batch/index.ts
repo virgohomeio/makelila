@@ -35,41 +35,19 @@ import { chatCompletion } from '../_shared/openaiCompat.ts';
 import { qwenConfigFromEnv, type ProviderConfig } from '../_shared/qwen.ts';
 import { openaiConfigFromEnv } from '../_shared/openai.ts';
 import { extractDocumentText } from '../_shared/documentText.ts';
+import {
+  DEFAULT_PROVIDER_ORDER, PROVIDER_LABELS, parseProviderOrder, pickProviders,
+  type LlmProvider,
+} from '../_shared/llmProviders.ts';
 
 const ANTHROPIC_API = 'https://api.anthropic.com/v1/messages';
 const MODEL = 'claude-haiku-4-5-20251001';
 
-export type ResumeProvider = 'claude' | 'qwen' | 'openai';
-
-/** Claude first (it reads the file directly, no local text extraction), then
- *  the OpenAI-compatible fallbacks. */
-export const DEFAULT_PROVIDER_ORDER: ResumeProvider[] = ['claude', 'qwen', 'openai'];
-
-export const PROVIDER_LABELS: Record<ResumeProvider, string> =
-  { claude: 'Claude', qwen: 'Qwen', openai: 'OpenAI' };
-
-/** Parses RESUME_PROVIDER_ORDER (e.g. "openai,claude") into a try-order.
- *  Unrecognised names are ignored and any provider the operator didn't name
- *  is appended in default order — reordering should never silently disable a
- *  provider whose key is configured, and a typo should degrade to the
- *  default rather than to nothing. */
-export function parseProviderOrder(csv: string | undefined): ResumeProvider[] {
-  const named = (csv ?? '').split(',')
-    .map(s => s.trim().toLowerCase())
-    .filter((s): s is ResumeProvider => (DEFAULT_PROVIDER_ORDER as string[]).includes(s));
-  const deduped = [...new Set(named)];
-  return [...deduped, ...DEFAULT_PROVIDER_ORDER.filter(p => !deduped.includes(p))];
-}
-
-/** Which providers to actually try, in order: the configured order filtered
- *  down to the ones that have a key. Empty string counts as unset so a
- *  `supabase secrets set QWEN_API_KEY=` typo can't half-enable one. */
-export function pickProviders(
-  keys: Partial<Record<ResumeProvider, string | undefined>>,
-  orderCsv?: string,
-): ResumeProvider[] {
-  return parseProviderOrder(orderCsv).filter(p => !!keys[p]);
-}
+// The provider chain lives in _shared/llmProviders.ts — match-invoice reads
+// PDFs the same way and needs the same fallback. Re-exported here because
+// this module is the published surface for the hiring-side tests.
+export type ResumeProvider = LlmProvider;
+export { DEFAULT_PROVIDER_ORDER, PROVIDER_LABELS, parseProviderOrder, pickProviders };
 
 /** Parses the JSON a model returned for the scoring prompt. Both providers
  *  are told "JSON ONLY" but both occasionally wrap it in a ``` fence, so

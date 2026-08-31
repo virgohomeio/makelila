@@ -42,6 +42,7 @@ export default function Upload() {
   const [files, setFiles] = useState<File[]>([]);
   const [busy, setBusy] = useState(false);
   const [results, setResults] = useState<BulkUploadResult[] | null>(null);
+  const [runError, setRunError] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
   const { customers } = useCustomers();
@@ -60,13 +61,17 @@ export default function Upload() {
 
   const run = async () => {
     if (files.length === 0) return;
-    setBusy(true); setResults(null);
+    setBusy(true); setResults(null); setRunError(null);
     try {
       const r = await bulkUploadAndMatch(files, kind.documentType);
       setResults(r);
       setFiles([]);
       if (fileInput.current) fileInput.current.value = '';
       void reloadQueue();
+    } catch (e) {
+      // Without this the promise rejected into the void: the button reset and
+      // nothing appeared, which reads as "the upload does nothing".
+      setRunError((e as Error).message);
     } finally {
       setBusy(false);
     }
@@ -75,6 +80,9 @@ export default function Upload() {
   const matchedCount = results?.filter(r => r.ok && r.invoice?.match_status === 'matched').length ?? 0;
   const reviewCount  = results?.filter(r => r.ok && r.invoice?.match_status !== 'matched').length ?? 0;
   const failedCount  = results?.filter(r => !r.ok).length ?? 0;
+  // Every file failing to parse is one cause, not N — an exhausted API key, a
+  // missing one. Say it once, at the top, with the provider's own message.
+  const unreadable   = results?.filter(r => r.ok && r.extract_error) ?? [];
 
   return (
     <div className={styles.layout}>
@@ -115,6 +123,7 @@ export default function Upload() {
         <button onClick={() => void run()} disabled={busy || files.length === 0} className={styles.uploadBtn}>
           {busy ? `Uploading & matching ${files.length}…` : `Upload & match ${files.length || ''}`.trim()}
         </button>
+        {runError && <div className={styles.errText}>Upload failed: {runError}</div>}
       </div>
 
       {results && (
@@ -124,6 +133,15 @@ export default function Upload() {
             <span className={styles.badgeReview}>{reviewCount} need review</span>
             {failedCount > 0 && <span className={styles.badgeFailed}>{failedCount} failed</span>}
           </div>
+          {unreadable.length > 0 && (
+            <div className={styles.warnBanner}>
+              <strong>
+                Couldn't read {unreadable.length} PDF{unreadable.length === 1 ? '' : 's'} —
+                {' '}filed by filename only, so nothing auto-matched.
+              </strong>
+              <div className={styles.errText}>{unreadable[0].extract_error}</div>
+            </div>
+          )}
           <table className={styles.table}>
             <thead>
               <tr><th>File</th><th>Invoice #</th><th>Order</th><th>Customer</th><th>Status</th><th></th></tr>
@@ -136,7 +154,14 @@ export default function Upload() {
                   <td className={styles.mono}>{r.invoice?.order_ref ?? '—'}</td>
                   <td>{r.ok ? (r.invoice?.customer_id ? (customerName.get(r.invoice.customer_id) ?? '—') : (r.invoice?.bill_to_name ?? '—')) : '—'}</td>
                   <td>{r.ok && r.invoice ? <StatusBadge status={r.invoice.match_status} /> : <span className={styles.badgeFailed}>failed</span>}</td>
-                  <td>{r.ok && r.invoice ? <ViewLink path={r.invoice.storage_path} /> : <span className={styles.errText} title={r.error}>{r.error}</span>}</td>
+                  <td>
+                    {r.ok && r.invoice
+                      ? <ViewLink path={r.invoice.storage_path} />
+                      : <span className={styles.errText} title={r.error}>{r.error}</span>}
+                    {r.extract_error && (
+                      <div className={styles.errText} title={r.extract_error}>couldn't read PDF</div>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>

@@ -1,9 +1,14 @@
-# Hiring — resume parsing providers (Claude → Qwen → OpenAI)
+# LLM document-reading providers (Claude → Qwen → OpenAI)
 
-The Applicants tab's resume uploader calls the `parse-resume-batch` edge
-function, which reads each PDF/DOCX with an LLM to pull out name / email /
-phone and a JD-grounded rubric score. Three providers are wired in; each is
-tried in turn until one answers.
+Two features read an uploaded document with an LLM, and both use the same
+provider chain (`_shared/llmProviders.ts`):
+
+| Feature | Edge function | Reads | Order override |
+|---|---|---|---|
+| Hiring → Applicants resume upload | `parse-resume-batch` | Name / email / phone + a JD-grounded rubric score | `RESUME_PROVIDER_ORDER` |
+| Sales → Upload (invoices + refund receipts) | `match-invoice` | Invoice #, date, total, payment, Shopify order #, bill-to name | `INVOICE_PROVIDER_ORDER` |
+
+Three providers are wired in; each is tried in turn until one answers.
 
 | Order | Provider | Secret(s) | Notes |
 |---|---|---|---|
@@ -19,10 +24,24 @@ every configured provider fails, the error names each failure in turn:
 Claude 400: credit balance is too low…; then Qwen chat 401: … ; then OpenAI chat 404: …
 ```
 
-Successful responses carry `provider: "claude" | "qwen" | "openai"`, and the
-activity-log entry says `Parsed by <provider>`. A failure response also
-carries `providers_tried`, which is the quickest way to see which keys the
+Successful responses carry `provider: "claude" | "qwen" | "openai"`. For
+resumes the activity-log entry says `Parsed by <provider>`; for invoices the
+Upload results table shows the reason inline when a PDF couldn't be read. Both
+also return `providers_tried`, which is the quickest way to see which keys the
 function can actually see.
+
+**Invoices fail soft.** `match-invoice` still files a row when no provider can
+read the PDF — invoice # from the filename, everything else null,
+`match_status: 'unassigned'` — so a bulk upload never hard-fails. The cost is
+that a dead provider chain looks like "every upload needs assigning by hand",
+which is exactly how the 2026-08-13 Anthropic credit outage went unnoticed for
+two weeks. That's why `extract_error` is now rendered in the Upload tab rather
+than only returned.
+
+Once the chain is healthy again, **Sales → Upload → "Re-read amounts from
+PDFs"** backfills the amounts on everything uploaded while it was down. It only
+touches rows never read for a payment and never changes who an invoice is filed
+under, so it's safe to re-run.
 
 **Not retried across providers:** a provider that answers successfully but
 returns unparseable JSON. That's a model-output problem, not availability —
@@ -30,8 +49,8 @@ retry the upload instead.
 
 ## Changing the order
 
-Set `RESUME_PROVIDER_ORDER` to a comma-separated list, e.g.
-`OPENAI,CLAUDE`. Case and whitespace don't matter. Any provider you don't
+Set `RESUME_PROVIDER_ORDER` (resumes) or `INVOICE_PROVIDER_ORDER`
+(invoices) to a comma-separated list, e.g. `OPENAI,CLAUDE`. Case and whitespace don't matter. Any provider you don't
 name is appended in default order rather than disabled, so a typo degrades
 to the default instead of silently switching a provider off.
 
@@ -65,7 +84,8 @@ any other OpenAI-compatible host instead of `api.openai.com`.
 Then redeploy: the GitHub `Deploy Supabase backend` workflow runs on push to
 `supabase/functions/**` (runs can take ~20 min to appear — an empty Actions
 list right after a push doesn't mean it didn't trigger), or run
-`supabase functions deploy parse-resume-batch --project-ref txeftbbzeflequvrmjjr`.
+`supabase functions deploy parse-resume-batch --project-ref txeftbbzeflequvrmjjr`
+(or `match-invoice`).
 
 ## How the fallbacks read the file
 

@@ -17,11 +17,30 @@
 //
 // Extraction/match failures are non-fatal: the row is still inserted (status
 // 'unassigned') so a bulk upload never hard-fails and the operator can assign
-// it from the Upload review queue.
+// it from the Upload review queue. The reason is returned as `extract_error`
+// and shown in the Upload results table — a silent fallback to "unassigned"
+// is what let a dead extractor go unnoticed for two weeks.
+//
+// Providers: Claude, then Qwen, then OpenAI — whichever have keys configured,
+// in that order (override with INVOICE_PROVIDER_ORDER). Any HTTP or network
+// error from one falls through to the next. The Anthropic account running out
+// of credit on 2026-08-13 is exactly why: every invoice uploaded after it
+// extracted nothing — no order #, no amounts — and dropped into the review
+// queue for manual assignment. parse-resume-batch was given this chain on
+// 2026-08-26; this is the same fix for the same outage.
+// Setup + troubleshooting: docs/llm-document-providers.md
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
+import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { corsHeaders } from '../_shared/cors.ts';
 import { authenticate } from '../_shared/auth.ts';
+import { chatCompletion } from '../_shared/openaiCompat.ts';
+import { qwenConfigFromEnv, type ProviderConfig } from '../_shared/qwen.ts';
+import { openaiConfigFromEnv } from '../_shared/openai.ts';
+import { extractDocumentText, PDF_MIME } from '../_shared/documentText.ts';
+import {
+  PROVIDER_LABELS, chainFailures, jsonFromModelText, pickProviders,
+  type LlmProvider,
+} from '../_shared/llmProviders.ts';
 
 type MatchInput = {
   storage_path: string;
@@ -42,6 +61,30 @@ type Extracted = {
   shopify_order_number: string | null;
   bill_to_name: string | null;
 };
+
+/** The providers this invocation can actually use, resolved from secrets. */
+type ProviderChain = {
+  providers: LlmProvider[];
+  claudeKey?: string;
+  qwen: ProviderConfig | null;
+  openai: ProviderConfig | null;
+};
+
+function providerChain(): ProviderChain {
+  const claudeKey = Deno.env.get('ANTHROPIC_API_KEY') || undefined;
+  const qwen = qwenConfigFromEnv();
+  const openai = openaiConfigFromEnv();
+  return {
+    claudeKey, qwen, openai,
+    providers: pickProviders(
+      { claude: claudeKey, qwen: qwen?.apiKey, openai: openai?.apiKey },
+      Deno.env.get('INVOICE_PROVIDER_ORDER'),
+    ),
+  };
+}
+
+const NO_PROVIDER =
+  'No LLM provider configured — set ANTHROPIC_API_KEY, QWEN_API_KEY or OPENAI_API_KEY via supabase secrets set.';
 
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
@@ -65,18 +108,19 @@ Deno.serve(async (req: Request) => {
   if ((body as ReextractInput).reextract) {
     return await reextractBatch(admin, (body as ReextractInput).limit ?? 20);
   }
-  const { storage_path, file_name } = body as MatchInput;
-  const documentType = body.document_type === 'refund_receipt' ? 'refund_receipt' : 'invoice';
+  const { storage_path, file_name, document_type } = body as MatchInput;
+  const documentType = document_type === 'refund_receipt' ? 'refund_receipt' : 'invoice';
   if (!storage_path || !file_name) return j({ error: 'storage_path and file_name required' }, 400);
 
   // ── Download the uploaded PDF ──────────────────────────────────────────
   const { data: blob, error: dlErr } = await admin.storage.from('customer-invoices').download(storage_path);
   if (dlErr || !blob) return j({ error: `Could not read uploaded file: ${dlErr?.message}` }, 404);
-  const pdfBase64 = base64FromArrayBuffer(await blob.arrayBuffer());
+  const pdfBytes = await blob.arrayBuffer();
 
   // ── Extract fields (non-fatal) ─────────────────────────────────────────
-  // Filename gives a guaranteed-ish invoice-number fallback
-  // ("Invoice_1356_from_VCycene_Inc.pdf" → 1356) even if Claude is unavailable.
+  // Filename gives a guaranteed-ish number fallback
+  // ("Invoice_1356_from_VCycene_Inc.pdf" → 1356) even when no provider can
+  // read the PDF at all.
   let extracted: Extracted = {
     invoice_number: invoiceNumberFromFilename(file_name),
     invoice_date: null,
@@ -86,23 +130,25 @@ Deno.serve(async (req: Request) => {
     bill_to_name: null,
   };
   let extractError: string | null = null;
-  const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY');
-  if (anthropicKey) {
+  let extractProvider: LlmProvider | null = null;
+  const chain = providerChain();
+  if (chain.providers.length === 0) {
+    extractError = `${NO_PROVIDER} Only the filename was parsed.`;
+  } else {
     try {
-      const llm = await claudeExtract(anthropicKey, pdfBase64);
+      const read = await extractInvoiceFields(chain, pdfBytes);
+      extractProvider = read.provider;
       extracted = {
-        invoice_number: llm.invoice_number ?? extracted.invoice_number,
-        invoice_date: llm.invoice_date,
-        total_cad: llm.total_cad,
-        payment_cad: llm.payment_cad,
-        shopify_order_number: llm.shopify_order_number,
-        bill_to_name: llm.bill_to_name,
+        invoice_number: read.fields.invoice_number ?? extracted.invoice_number,
+        invoice_date: read.fields.invoice_date,
+        total_cad: read.fields.total_cad,
+        payment_cad: read.fields.payment_cad,
+        shopify_order_number: read.fields.shopify_order_number,
+        bill_to_name: read.fields.bill_to_name,
       };
     } catch (e) {
       extractError = (e as Error).message;
     }
-  } else {
-    extractError = 'ANTHROPIC_API_KEY not configured — only filename was parsed.';
   }
 
   // ── Match cascade ──────────────────────────────────────────────────────
@@ -188,7 +234,12 @@ Deno.serve(async (req: Request) => {
     .single();
   if (insErr) return j({ error: `DB insert failed: ${insErr.message}` }, 500);
 
-  return j({ invoice: inserted, extract_error: extractError });
+  return j({
+    invoice: inserted,
+    extract_error: extractError,
+    provider: extractProvider,
+    providers_tried: chain.providers,
+  });
 });
 
 // ────────────────────────────────────────────────────────────────────────
@@ -202,11 +253,11 @@ Deno.serve(async (req: Request) => {
  *  curated (system-of-record rule) and are never overwritten here, even when
  *  this parse would resolve them differently. */
 async function reextractBatch(
-  admin: ReturnType<typeof createClient>,
+  admin: SupabaseClient,
   limit: number,
 ): Promise<Response> {
-  const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY');
-  if (!anthropicKey) return j({ error: 'ANTHROPIC_API_KEY not configured' }, 500);
+  const chain = providerChain();
+  if (chain.providers.length === 0) return j({ error: NO_PROVIDER }, 500);
 
   // Keyed on "never read for a payment", NOT on "payment_cad is null" — an
   // invoice with no Payment line legitimately stays null, and would otherwise
@@ -225,6 +276,7 @@ async function reextractBatch(
   if (error) return j({ error: `Could not list invoices: ${error.message}` }, 500);
 
   const errors: { file_name: string; error: string }[] = [];
+  const providersUsed = new Set<LlmProvider>();
   let updated = 0;
 
   for (const row of rows ?? []) {
@@ -232,7 +284,9 @@ async function reextractBatch(
       const { data: blob, error: dlErr } = await admin.storage
         .from('customer-invoices').download(row.storage_path as string);
       if (dlErr || !blob) throw new Error(dlErr?.message ?? 'file missing from bucket');
-      const llm = await claudeExtract(anthropicKey, base64FromArrayBuffer(await blob.arrayBuffer()));
+      const read = await extractInvoiceFields(chain, await blob.arrayBuffer());
+      const llm = read.fields;
+      providersUsed.add(read.provider);
 
       // payment_cad is what we came for; the rest only fills genuine gaps.
       const patch: Record<string, unknown> = {
@@ -263,48 +317,124 @@ async function reextractBatch(
     remaining: Math.max((remainingBefore ?? processed) - updated, 0),
     stalled: errors.length,
     errors,
+    providers: [...providersUsed],
+    providers_tried: chain.providers,
   });
 }
 
-async function claudeExtract(apiKey: string, pdfBase64: string): Promise<Extracted> {
-  const prompt =
+/** The fields that identify an invoice, in a prompt every provider gets
+ *  verbatim. Kept as one constant so the document-mode (Claude) and text-mode
+ *  (Qwen/OpenAI) paths can never drift apart on what they ask for. */
+const EXTRACT_PROMPT =
 `You are reading a sales invoice PDF (QuickBooks style). Reply with ONLY a JSON object, no prose, with these fields:
-- "invoice_number": the invoice number as a string (e.g. "1356"), or null.
+- "invoice_number": the invoice number as a string (e.g. "1356"), or null. On a refund receipt this is the receipt's reference number.
 - "invoice_date": the invoice DATE in ISO format YYYY-MM-DD. The PDF may show it as DD/MM/YYYY. Null if absent.
 - "total_cad": the invoice TOTAL in CAD — the "Total" line, the full value of the invoice. NOT "Total Due" / "Balance Due", which read $0.00 on an invoice whose payment has already been applied. Number only, no currency symbol, no thousands separators. Null if absent.
 - "payment_cad": the amount on the "Payment" line — what the customer actually paid, in CAD. This is the figure a refund is based on. Same number formatting. Null if the invoice shows no payment.
 - "shopify_order_number": the Shopify order number if it appears anywhere (often in the line-item description, e.g. "Shopify order# 1192" → "1192"). Digits only. Null if absent.
 - "bill_to_name": the customer name in the BILL TO section, or null.`;
 
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-    },
-    body: JSON.stringify({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 400,
-      messages: [{
-        role: 'user',
-        content: [
-          { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: pdfBase64 } },
-          { type: 'text', text: prompt },
-        ],
-      }],
-    }),
-  });
-  if (!res.ok) {
-    throw new Error(`Anthropic ${res.status}: ${(await res.text()).slice(0, 300)}`);
+/** Read the invoice with the first provider that answers.
+ *
+ *  Any HTTP or network error falls through to the next provider — that is the
+ *  whole point of the chain, since the trigger was a 400 "credit balance is
+ *  too low" that made every upload extract nothing. A provider that DOES
+ *  answer but returns unparseable JSON is not retried elsewhere: that's a
+ *  model-output problem, not an availability one, and the same rule the
+ *  hiring path follows.
+ *
+ *  Throws with every failure chained when no provider got through. */
+async function extractInvoiceFields(
+  chain: ProviderChain, pdfBytes: ArrayBuffer,
+): Promise<{ fields: Extracted; provider: LlmProvider }> {
+  const failures: string[] = [];
+  for (const provider of chain.providers) {
+    let reply: string;
+    try {
+      reply = provider === 'claude'
+        ? await claudeExtract(chain.claudeKey!, pdfBytes)
+        : await textProviderExtract(provider, provider === 'qwen' ? chain.qwen! : chain.openai!, pdfBytes);
+    } catch (e) {
+      failures.push((e as Error)?.message ?? String(e));
+      continue;
+    }
+    return { fields: parseExtracted(reply, PROVIDER_LABELS[provider]), provider };
   }
+  throw new Error(chainFailures(failures));
+}
+
+/** Primary provider: the PDF goes to Claude as a base64 document block.
+ *  Returns the raw text of the reply, or throws Error("Claude <status>: …")
+ *  so the caller can fall through to the next provider. */
+async function claudeExtract(apiKey: string, pdfBytes: ArrayBuffer): Promise<string> {
+  let res: Response;
+  try {
+    res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 400,
+        messages: [{
+          role: 'user',
+          content: [
+            { type: 'document', source: { type: 'base64', media_type: PDF_MIME, data: base64FromArrayBuffer(pdfBytes) } },
+            { type: 'text', text: EXTRACT_PROMPT },
+          ],
+        }],
+      }),
+    });
+  } catch (e) {
+    throw new Error(`Claude request failed: ${(e as Error)?.message ?? String(e)}`);
+  }
+  if (!res.ok) throw new Error(`Claude ${res.status}: ${(await res.text()).slice(0, 300)}`);
   const data = await res.json() as { content?: Array<{ type: string; text?: string }> };
-  const text = (data.content ?? []).find(b => b.type === 'text')?.text ?? '';
-  const m = text.match(/\{[\s\S]*\}/);
-  if (!m) throw new Error(`Claude returned non-JSON: ${text.slice(0, 200)}`);
-  const p = JSON.parse(m[0]) as Record<string, unknown>;
+  return (data.content ?? []).find(b => b.type === 'text')?.text ?? '';
+}
+
+/** Longest invoice text we'll send to a text-mode provider. A QuickBooks
+ *  invoice is a page or two; anything past this is a mis-uploaded file, and
+ *  the cap keeps one of those from blowing the model's context. */
+const MAX_INVOICE_TEXT_CHARS = 40_000;
+
+/** Fallback providers: neither chat API takes a document, so the PDF text is
+ *  extracted locally and sent inline ahead of the same prompt. A scanned
+ *  (image-only) PDF yields no text and is reported as such rather than sent
+ *  empty — a blank body would come back as a confident all-nulls answer, which
+ *  is worse than a named failure. */
+async function textProviderExtract(
+  provider: Exclude<LlmProvider, 'claude'>, cfg: ProviderConfig, pdfBytes: ArrayBuffer,
+): Promise<string> {
+  const label = PROVIDER_LABELS[provider];
+  const prefix = provider.toUpperCase();
+  let text: string;
+  try { text = await extractDocumentText(pdfBytes, PDF_MIME); }
+  catch (e) { throw new Error(`${label} could not read the PDF: ${(e as Error)?.message ?? String(e)}`); }
+  if (!text) throw new Error(`${label} found no text in this PDF (scanned/image-only?)`);
+  const body = text.length > MAX_INVOICE_TEXT_CHARS
+    ? `${text.slice(0, MAX_INVOICE_TEXT_CHARS)}\n[… truncated …]`
+    : text;
+  return chatCompletion({
+    label, apiKey: cfg.apiKey, baseUrl: cfg.baseUrl, model: cfg.model,
+    keyEnvVar: `${prefix}_API_KEY`, baseUrlEnvVar: `${prefix}_BASE_URL`, modelEnvVar: `${prefix}_MODEL`,
+    system: 'You read accounting documents. Output strict JSON only — no markdown, no commentary.',
+    user: `Invoice (plain text extracted from the PDF):\n<<<\n${body}\n>>>\n\n${EXTRACT_PROMPT}`,
+  });
+}
+
+/** Coerces a model reply into Extracted. Strings that aren't numbers, and
+ *  empty strings, become null rather than NaN or "" — a bad parse must read as
+ *  "not found" so the review queue catches it, never as a value. */
+export function parseExtracted(reply: string, label = 'Model'): Extracted {
+  let p: Record<string, unknown>;
+  try { p = jsonFromModelText(reply); }
+  catch (e) { throw new Error(`${label}: ${(e as Error)?.message ?? String(e)}`); }
   const num = (v: unknown): number | null =>
-    typeof v === 'number' ? v : (typeof v === 'string' && v.trim() !== '' && !isNaN(Number(v.replace(/,/g, ''))) ? Number(v.replace(/,/g, '')) : null);
+    typeof v === 'number' ? v : (typeof v === 'string' && v.trim() !== '' && !isNaN(Number(v.replace(/[$,\s]/g, ''))) ? Number(v.replace(/[$,\s]/g, '')) : null);
   const str = (v: unknown): string | null =>
     typeof v === 'string' && v.trim() !== '' ? v.trim() : null;
   return {
@@ -317,8 +447,13 @@ async function claudeExtract(apiKey: string, pdfBase64: string): Promise<Extract
   };
 }
 
-function invoiceNumberFromFilename(fileName: string): string | null {
-  const m = fileName.match(/invoice[_\s-]*#?\s*(\d{2,})/i);
+/** Last-resort number when no provider could read the PDF. QuickBooks names
+ *  both document kinds predictably — "Invoice_1356_from_VCycene_Inc.pdf" and
+ *  "Refund_Receipt_Ref_0042_from_VCycene_Inc.pdf" — and a refund receipt that
+ *  came back as "(unknown)" is unidentifiable in the review queue, which is
+ *  half of what this tab uploads. Exported for tests. */
+export function invoiceNumberFromFilename(fileName: string): string | null {
+  const m = fileName.match(/(?:invoice|receipt[_\s-]*ref|ref)[_\s-]*#?\s*(\d{2,})/i);
   return m ? m[1] : null;
 }
 
