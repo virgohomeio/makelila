@@ -15,8 +15,16 @@
   min-width: 0;
 }
 
+/* The name carries NO typography of its own — no weight, no size, no colour.
+   It inherits from the row it sits in, so a customer with a separate primary
+   user renders identically to one without. Only the split layout adds the
+   ellipsis, and it does so by context so the class name stays the same in
+   both cases. */
 .name {
-  font-weight: 600;
+  min-width: 0;
+}
+
+.nameRow > .name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -54,8 +62,10 @@
   color: #a0aec0;
 }
 
+/* No weight here either — the purchaser is a name like any other. The row's
+   size and colour already place it below the headline. */
 .purchaserName {
-  font-weight: 600;
+  font-weight: inherit;
 }
 
 /* Inline variant — one line, purchaser de-emphasised but never dropped. */

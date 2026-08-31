@@ -50,6 +50,8 @@ const { setDispositionMock } = vi.hoisted(() => ({
   setDispositionMock: vi.fn().mockResolvedValue(undefined),
 }));
 let inboxRows: ServiceTicket[] | null = null;
+let isMobile = false;
+vi.mock('../../../lib/useMediaQuery', () => ({ useIsMobile: () => isMobile }));
 let customersToReturn: unknown[] = [];
 vi.mock('../../../lib/customers', async () => {
   const actual = await vi.importActual<typeof import('../../../lib/customers')>('../../../lib/customers');
@@ -71,7 +73,7 @@ vi.mock('../../../lib/service', async () => {
   };
 });
 
-beforeEach(() => { setDispositionMock.mockClear(); inboxRows = null; customersToReturn = []; });
+beforeEach(() => { setDispositionMock.mockClear(); inboxRows = null; customersToReturn = []; isMobile = false; });
 
 describe('InboxTab', () => {
   it('renders one row per conversation with channel icon + customer', () => {
@@ -126,5 +128,23 @@ describe('InboxTab — purchaser vs primary user', () => {
     inboxRows = [mkConv({ id: 'c1', customer_id: null, customer_name: 'Walk-in Wendy' })];
     render(<InboxTab />);
     expect(screen.getByText('Walk-in Wendy')).toBeInTheDocument();
+  });
+});
+
+// The mobile card list and back-header are plain-string contexts, so they
+// can't render the component — but they must still name the same person the
+// desktop row does, or the two views disagree about whose conversation it is.
+describe('InboxTab — the mobile view names the primary user too', () => {
+  it('uses the resolved name on the mobile card', () => {
+    isMobile = true;
+    inboxRows = [mkConv({ id: 'c1', customer_id: 'c-chad', customer_name: 'Chad Wu' })];
+    customersToReturn = [{
+      id: 'c-chad', full_name: 'Chad Wu', phone: null, email: null,
+      purchaser_id: null, primary_user_name: 'Sarah Wu', primary_user_phone: null,
+      primary_user_email: null, primary_user_relationship: null,
+    }];
+    render(<InboxTab />);
+    expect(screen.getByText('Sarah Wu')).toBeInTheDocument();
+    expect(screen.queryByText('Chad Wu')).toBeNull();
   });
 });

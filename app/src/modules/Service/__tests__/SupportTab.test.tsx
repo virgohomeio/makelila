@@ -386,3 +386,19 @@ describe('SupportTab — purchaser vs primary user', () => {
     expect(screen.queryByText('unrelated')).toBeNull();
   });
 });
+
+// The Unassigned table sits directly under the grouped rows. Rendering names
+// through a different path there is how the two halves of one screen drift
+// apart, so it goes through the same component even though a ticket with no
+// customer_id always resolves to its own snapshot.
+describe('SupportTab — unassigned rows use the same name rendering', () => {
+  beforeEach(() => { customersToReturn = []; });
+
+  it('renders the unassigned ticket name through the shared party component', () => {
+    ticketsToReturn = [mkTicket({ id: 'u1', customer_id: null, customer_name: 'Walk-in Wendy' })];
+    const { container } = render(<SupportTab />);
+    const names = Array.from(container.querySelectorAll('[data-party-name]'))
+      .map(n => n.textContent);
+    expect(names).toContain('Walk-in Wendy');
+  });
+});

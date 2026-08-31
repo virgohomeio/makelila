@@ -565,6 +565,7 @@ export function TicketDetailPanel({ ticket, onClose, showDeviceContext = true }:
 
         {pickerOpen && (
           <ReplacementPickerModal
+            parties={parties}
             ticket={{
               id: ticket.id,
               customer_name: ticket.customer_name,

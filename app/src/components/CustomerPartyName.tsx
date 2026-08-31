@@ -23,8 +23,16 @@ export function CustomerPartyName({ parties, variant = 'full', className }: Prop
   const { displayName, purchaserName, split, relationship } = parties;
   const name = displayName || purchaserName || '—';
 
+  // Every branch below renders the name through THIS node and no other. A
+  // person's name is the same kind of thing whether or not their household has
+  // a separate primary user, so it must not change weight or size depending on
+  // that — otherwise split households read as bold for no reason an operator
+  // can act on. The name carries no typography of its own and inherits from
+  // whatever row it sits in.
+  const nameNode = <span className={styles.name} data-party-name>{name}</span>;
+
   if (!split) {
-    return <span className={className}>{name}</span>;
+    return <span className={className}>{nameNode}</span>;
   }
 
   const userLabel = relationship ? `Primary user · ${relationship}` : 'Primary user';
@@ -32,7 +40,7 @@ export function CustomerPartyName({ parties, variant = 'full', className }: Prop
   if (variant === 'inline') {
     return (
       <span className={className}>
-        {name}
+        {nameNode}
         <span
           className={styles.inlineFor}
           title={`${name} is the primary user; ${purchaserName} purchased the machine.`}
@@ -46,7 +54,7 @@ export function CustomerPartyName({ parties, variant = 'full', className }: Prop
   return (
     <span className={`${styles.party} ${className ?? ''}`}>
       <span className={styles.nameRow}>
-        <span className={styles.name}>{name}</span>
+        {nameNode}
         <span
           className={`${styles.pill} ${styles.pillUser}`}
           title="The primary user of the machine — may differ from who paid for it."

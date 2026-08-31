@@ -13,9 +13,10 @@ import {
 } from './dwell';
 import {
   useCustomers, syncCustomersFromHubspot, buildPartyResolver,
-  type Customer, type CustomerPartyRow, type CustomerParties,
+  type Customer, type CustomerPartyRow, type CustomerParties, type PartyResolver,
 } from '../../lib/customers';
 import { CustomerPartyName } from '../../components/CustomerPartyName';
+import { TicketPartyLabel } from './TicketPartyLabel';
 import { useUnits } from '../../lib/stock';
 import { useReplacementOrders } from '../../lib/orders';
 import { queuedForReplacementLabel } from '../../lib/replacementTags';
@@ -495,6 +496,7 @@ export function SupportTab() {
                 <tbody>
                   {grouped.unassigned.map(t => (
                     <TicketRow key={t.id} t={t}
+                      partiesFor={partiesFor}
                       queueKinds={queueKindsByTicket.get(t.id) ?? []}
                       now={now}
                       selected={selectedId === t.id}
@@ -1042,8 +1044,9 @@ function DwellRail({ days }: { days: number }) {
   );
 }
 
-function TicketRow({ t, queueKinds, now, selected, onClick }: {
+function TicketRow({ t, partiesFor, queueKinds, now, selected, onClick }: {
   t: ServiceTicket;
+  partiesFor: PartyResolver;
   queueKinds: string[];
   now: number;
   selected: boolean;
@@ -1075,7 +1078,7 @@ function TicketRow({ t, queueKinds, now, selected, onClick }: {
         <DwellRail days={idle} />
       </td>
       <td title={new Date(t.created_at).toLocaleString()}>{new Date(t.created_at).toLocaleDateString()}</td>
-      <td>{t.customer_name ?? t.customer_email ?? '—'}</td>
+      <td><TicketPartyLabel ticket={t} partiesFor={partiesFor} /></td>
       <td>
         <div>{t.subject}</div>
         {t.summary && <div className={styles.rowSummary}>{t.summary}</div>}

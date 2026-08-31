@@ -79,7 +79,8 @@ export function InboxTab() {
     return (
       <>
         <MobileBackHeader
-          label={r.customer_name ?? r.customer_phone ?? r.customer_email ?? 'Unknown'}
+          label={partiesFor({ customerId: r.customer_id, fallbackName: r.customer_name }).displayName
+            || r.customer_phone || r.customer_email || 'Unknown'}
           onBack={() => setOpenId(null)}
         />
         <div style={{ padding: 4, display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -167,7 +168,8 @@ export function InboxTab() {
             <NavCard
               key={r.id}
               onClick={() => setOpenId(r.id)}
-              title={r.customer_name ?? r.customer_phone ?? r.customer_email ?? 'Unknown'}
+              title={partiesFor({ customerId: r.customer_id, fallbackName: r.customer_name }).displayName
+                || r.customer_phone || r.customer_email || 'Unknown'}
               subtitle={
                 (r.subject ? r.subject + ' · ' : '') +
                 (r.description ? r.description.slice(0, 60) : 'no body') +

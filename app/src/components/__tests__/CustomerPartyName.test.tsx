@@ -59,3 +59,38 @@ describe('CustomerPartyName — nothing on file', () => {
     expect(screen.getByText('—')).toBeTruthy();
   });
 });
+
+// The name is the same kind of thing in every row — a person's name — so it
+// must not change weight depending on whether a household happens to have a
+// separate primary user. Rendering the split case through `.name` (600) and
+// the plain case through a bare span made split households look bold for no
+// reason the operator could act on.
+describe('CustomerPartyName — the name reads the same either way', () => {
+  const nameEl = (c: HTMLElement) => c.querySelector('[data-party-name]');
+
+  it('renders the name through one identical element whether or not it splits', () => {
+    const { container: plain } = render(<CustomerPartyName parties={parties({
+      displayName: 'Chad Wu', purchaserName: 'Chad Wu', split: false,
+    })} />);
+    const { container: split } = render(<CustomerPartyName parties={parties()} />);
+
+    expect(nameEl(plain)).not.toBeNull();
+    expect(nameEl(split)).not.toBeNull();
+    expect(nameEl(split)!.className).toBe(nameEl(plain)!.className);
+  });
+
+  it('uses that same element in the inline variant too', () => {
+    const { container: plain } = render(<CustomerPartyName variant="inline" parties={parties({
+      displayName: 'Chad Wu', purchaserName: 'Chad Wu', split: false,
+    })} />);
+    const { container: split } = render(
+      <CustomerPartyName variant="inline" parties={parties()} />);
+
+    expect(nameEl(split)!.className).toBe(nameEl(plain)!.className);
+  });
+
+  it('never hard-codes a weight on the name, so it inherits its context', () => {
+    const { container } = render(<CustomerPartyName parties={parties()} />);
+    expect((nameEl(container) as HTMLElement).style.fontWeight).toBe('');
+  });
+});

@@ -412,8 +412,6 @@ function ScheduledView({
             && new Date(t.calendly_event_start).getTime() < Date.now();
           const lc = t.unit_serial ? lifecycleBySerial.get(t.unit_serial) : null;
           const c = t.customer_id ? customerById.get(t.customer_id) : null;
-          const customerLabel = t.customer_name ?? c?.full_name ?? t.customer_email ?? '—';
-          void customerLabel;
           return (
             <tr
               key={t.id}

@@ -4,7 +4,8 @@ const Dashboard = lazy(() => import('../Dashboard'));
 import {
   useCustomers, syncCustomersFromHubspot, exportPurchasers, pushToKlaviyo,
   setPurchaser, setPrimaryUser, updateCustomerContact, PRIMARY_USER_RELATIONSHIPS,
-  type Customer,
+  useAllCustomerAdditionalUsers, matchCustomerSearch,
+  type Customer, type CustomerAdditionalUser,
 } from '../../lib/customers';
 import { useOrders } from '../../lib/orders';
 import { formatMoney } from '../../lib/money';
@@ -27,6 +28,10 @@ import styles from './Customers.module.css';
 type Tab = 'directory' | 'profitability' | 'journey' | 'fleet';
 
 const TAB_KEYS: Tab[] = ['directory', 'profitability', 'journey', 'fleet'];
+
+// Shared empty list for customers with no additional household users — keeps
+// the search filter from allocating a new array per row on every keystroke.
+const NO_HOUSEHOLD_USERS: CustomerAdditionalUser[] = [];
 
 export default function Customers() {
   const [searchParams] = useSearchParams();
@@ -83,6 +88,9 @@ export default function Customers() {
     }
     return m;
   }, [heldUnits]);
+  // Every household user in the directory, so the search box can look past the
+  // purchaser's name (the per-customer hook only covers the open panel).
+  const { byCustomerId: usersByCustomerId } = useAllCustomerAdditionalUsers();
   const [search, setSearch] = useState('');
   const [country, setCountry] = useState<'all' | 'CA' | 'US' | 'other'>('all');
   const [busy, setBusy] = useState(false);
@@ -94,22 +102,22 @@ export default function Customers() {
     [customers, selectedCustomerId],
   );
 
+  // Search reads the whole household, not just the purchaser: the name an
+  // operator has been given is usually the person who USES the machine.
+  // `via` says which of them matched, so a row that surfaced under a name the
+  // Name column doesn't show still explains itself.
   const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return customers.filter(c => {
-      if (country === 'CA' && c.country !== 'CA') return false;
-      if (country === 'US' && c.country !== 'US') return false;
-      if (country === 'other' && (c.country === 'CA' || c.country === 'US')) return false;
-      if (q && !(
-        c.full_name.toLowerCase().includes(q) ||
-        c.email?.toLowerCase().includes(q) ||
-        c.phone?.toLowerCase().includes(q) ||
-        c.city?.toLowerCase().includes(q) ||
-        c.region?.toLowerCase().includes(q)
-      )) return false;
-      return true;
-    }).sort((a, b) => a.full_name.localeCompare(b.full_name));
-  }, [customers, country, search]);
+    const rows: Array<{ customer: Customer; via: string | null }> = [];
+    for (const c of customers) {
+      if (country === 'CA' && c.country !== 'CA') continue;
+      if (country === 'US' && c.country !== 'US') continue;
+      if (country === 'other' && (c.country === 'CA' || c.country === 'US')) continue;
+      const m = matchCustomerSearch(c, usersByCustomerId.get(c.id) ?? NO_HOUSEHOLD_USERS, search);
+      if (!m.matched) continue;
+      rows.push({ customer: c, via: m.via });
+    }
+    return rows.sort((a, b) => a.customer.full_name.localeCompare(b.customer.full_name));
+  }, [customers, country, search, usersByCustomerId]);
 
   const stats = useMemo(() => {
     const s = { total: 0, ca: 0, us: 0, other: 0, withEmail: 0, withPhone: 0, withAddress: 0 };
@@ -366,7 +374,7 @@ export default function Customers() {
           type="search"
           value={search}
           onChange={e => setSearch(e.target.value)}
-          placeholder="Search name, email, phone, city…"
+          placeholder="Search any name on the record, email, phone, city…"
           className={styles.searchInput}
         />
         <div className={styles.resultCount}>
@@ -387,10 +395,11 @@ export default function Customers() {
             </tr>
           </thead>
           <tbody>
-            {filtered.map(c => (
+            {filtered.map(({ customer: c, via }) => (
               <CustomerRow
                 key={c.id}
                 c={c}
+                via={via}
                 serials={
                   // Stock is the source of truth for what a customer holds
                   // today: prefer the canonical units.customer_id link, then
@@ -427,7 +436,10 @@ export default function Customers() {
   );
 }
 
-function CustomerRow({ c, serials, onSelect }: { c: Customer; serials: string[]; onSelect: () => void }) {
+function CustomerRow(
+  { c, serials, via, onSelect }:
+  { c: Customer; serials: string[]; via: string | null; onSelect: () => void },
+) {
   const cityRegion = [c.city, c.region].filter(Boolean).join(', ');
   const fullAddrParts = [c.address_line, cityRegion, c.postal_code, c.country].filter(Boolean);
   const addr = fullAddrParts.join(' · ');
@@ -438,7 +450,12 @@ function CustomerRow({ c, serials, onSelect }: { c: Customer; serials: string[];
       : `${serials[0]} +${serials.length - 1}`;
   return (
     <tr onClick={onSelect} className={styles.clickableRow}>
-      <td><strong>{c.full_name || <span className={styles.muted}>—</span>}</strong></td>
+      <td>
+        <strong>{c.full_name || <span className={styles.muted}>—</span>}</strong>
+        {/* Why this row is in the results when the name searched for isn't the
+            purchaser's. */}
+        {via && <div className={styles.viaMatch}>via {via}</div>}
+      </td>
       <td className={styles.mono}>{c.email ?? <span className={styles.muted}>—</span>}</td>
       <td>{c.phone ?? <span className={styles.muted}>—</span>}</td>
       <td className={styles.mono} title={serials.join(', ')}>

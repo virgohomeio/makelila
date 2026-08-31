@@ -1868,3 +1868,12 @@
   padding: 1px 4px;
   border-radius: 3px;
 }
+
+/* Directory search: names the household member a row matched on, when that
+   isn't the purchaser whose name the Name column shows. */
+.viaMatch {
+  margin-top: 2px;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--color-ink-subtle);
+}

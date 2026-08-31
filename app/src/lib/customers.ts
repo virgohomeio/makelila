@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from './supabase';
 import { logAction } from './activityLog';
@@ -1186,6 +1186,172 @@ export async function removeCustomerAdditionalUser(
     name,
     { entityType: 'customer', entityId: customerId },
   );
+}
+
+/** Every household user in the directory, grouped by customer. The per-customer
+ *  hook above serves one open panel; the directory needs them all at once so a
+ *  search can look past the purchaser's name. One row per contact (not per
+ *  customer), so the whole table is small enough to hold. */
+export function useAllCustomerAdditionalUsers(): {
+  byCustomerId: Map<string, CustomerAdditionalUser[]>;
+  loading: boolean;
+  refresh: () => Promise<void>;
+} {
+  const [rows, setRows] = useState<CustomerAdditionalUser[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshTick, setRefreshTick] = useState(0);
+
+  useEffect(() => {
+    let channel: RealtimeChannel | null = null;
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await supabase
+        .from('customer_additional_users')
+        .select('*')
+        .order('created_at', { ascending: true });
+      if (cancelled) return;
+      if (!error && data) setRows(data as CustomerAdditionalUser[]);
+      setLoading(false);
+
+      // A user added in one operator's panel should become searchable in
+      // another's directory without a reload.
+      channel = supabase
+        .channel('customer_additional_users:all')
+        .on('postgres_changes', {
+          event: '*', schema: 'public', table: 'customer_additional_users',
+        }, (payload) => {
+          setRows(prev => {
+            if (payload.eventType === 'DELETE' && payload.old) {
+              return prev.filter(u => u.id !== (payload.old as { id: string }).id);
+            }
+            if (payload.new) {
+              const row = payload.new as CustomerAdditionalUser;
+              const idx = prev.findIndex(u => u.id === row.id);
+              if (idx >= 0) { const next = [...prev]; next[idx] = row; return next; }
+              return [...prev, row];
+            }
+            return prev;
+          });
+        })
+        .subscribe();
+    })();
+    return () => { cancelled = true; if (channel) void channel.unsubscribe(); };
+  }, [refreshTick]);
+
+  const byCustomerId = useMemo(() => {
+    const m = new Map<string, CustomerAdditionalUser[]>();
+    for (const r of rows) {
+      const arr = m.get(r.customer_id);
+      if (arr) arr.push(r);
+      else m.set(r.customer_id, [r]);
+    }
+    return m;
+  }, [rows]);
+
+  const refresh = async () => { setRefreshTick(t => t + 1); };
+
+  return { byCustomerId, loading, refresh };
+}
+
+// ── Directory search across everyone on a record ────────────────────────────
+// A customer record is a household, not just the person who paid. The name an
+// operator is handed — on the phone, in an email, on a support ticket — is
+// usually whoever USES the machine, and that's often the primary user or
+// another household user rather than the purchaser. Searching only
+// customers.full_name made those records unfindable by the only name the
+// operator had.
+
+/** The customer-row fields a directory search reads. */
+export type SearchableCustomer = {
+  full_name: string;
+  email: string | null;
+  phone: string | null;
+  city: string | null;
+  region: string | null;
+  primary_user_name: string | null;
+  primary_user_email: string | null;
+  primary_user_phone: string | null;
+  primary_user_relationship: string | null;
+};
+
+/** The household-user fields a directory search reads. */
+export type SearchableUser = {
+  full_name: string;
+  email: string | null;
+  phone: string | null;
+  relationship: string | null;
+};
+
+export type CustomerSearchMatch = {
+  matched: boolean;
+  /** Set only when the hit came from someone OTHER than the purchaser, so the
+   *  row can say why it's in the results (e.g. "Sarah Lockhart · Spouse"). */
+  via: string | null;
+};
+
+const SEARCH_MISS: CustomerSearchMatch = { matched: false, via: null };
+const SEARCH_HIT: CustomerSearchMatch = { matched: true, via: null };
+
+const fieldHit = (value: string | null | undefined, q: string) =>
+  !!value && value.toLowerCase().includes(q);
+
+/** "Sarah Lockhart · Spouse / partner", or just the name when there's no
+ *  relationship. Falls back to whatever contact detail we have when a person is
+ *  on the record without a name. */
+function viaLabel(person: {
+  full_name?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  relationship?: string | null;
+}): string {
+  const who = person.full_name?.trim() || person.email?.trim() || person.phone?.trim() || 'household user';
+  const rel = person.relationship?.trim();
+  return rel ? `${who} · ${rel}` : who;
+}
+
+/** Does this customer match the directory search box? Checks the purchaser's
+ *  own name/contact/city first, then the primary user, then everyone else in
+ *  the household — so a hit on the purchaser never gets annotated, and a hit on
+ *  anyone else reports who it was. An empty query matches everyone. */
+export function matchCustomerSearch(
+  c: SearchableCustomer,
+  users: SearchableUser[],
+  query: string,
+): CustomerSearchMatch {
+  const q = query.trim().toLowerCase();
+  if (!q) return SEARCH_HIT;
+
+  // The purchaser themself — the record's own identity.
+  if (
+    fieldHit(c.full_name, q) || fieldHit(c.email, q) || fieldHit(c.phone, q) ||
+    fieldHit(c.city, q) || fieldHit(c.region, q)
+  ) return SEARCH_HIT;
+
+  // The primary user (customers.primary_user_*): the one named person who uses
+  // the machine when that isn't the purchaser.
+  if (
+    fieldHit(c.primary_user_name, q) || fieldHit(c.primary_user_email, q) ||
+    fieldHit(c.primary_user_phone, q)
+  ) {
+    return {
+      matched: true,
+      via: viaLabel({
+        full_name: c.primary_user_name,
+        email: c.primary_user_email,
+        phone: c.primary_user_phone,
+        relationship: c.primary_user_relationship,
+      }),
+    };
+  }
+
+  // Everyone else in the household (customer_additional_users).
+  for (const u of users) {
+    if (fieldHit(u.full_name, q) || fieldHit(u.email, q) || fieldHit(u.phone, q)) {
+      return { matched: true, via: viaLabel(u) };
+    }
+  }
+
+  return SEARCH_MISS;
 }
 
 // ── Operator-editable contact details ───────────────────────────────────────
