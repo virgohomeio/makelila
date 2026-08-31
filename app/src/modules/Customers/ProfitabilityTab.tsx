@@ -1,14 +1,16 @@
 import { useMemo, useState } from 'react';
 import {
   useCustomerProfitability, useProfitabilityRates, useAcquisitionSpend,
+  useRetainedUnitCosts,
   type CustomerProfitability,
 } from '../../lib/customers';
 import {
   allocateCac, byChannel, byCohort, byCountry, byRegion, byVolume,
   channelLabel, customerMetrics, isUnpriced, portfolio, profitDistribution,
-  reliability, waterfall, CHANNEL_LABELS, VOLUME_LABELS, UNAVAILABLE_METRICS,
-  costsBasis, marginBasis, BASIS_LABEL,
+  reliability, retainedUnits, waterfall, CHANNEL_LABELS, VOLUME_LABELS,
+  UNAVAILABLE_METRICS, costsBasis, marginBasis, BASIS_LABEL,
   type CustomerMetrics, type PortfolioMetrics, type BucketBasis,
+  type RetainedUnits,
 } from '../../lib/profitability';
 import { regionName } from '../../lib/regions';
 import { formatMoney } from '../../lib/money';
@@ -38,6 +40,7 @@ export function ProfitabilityTab() {
   const { rows, loading, error } = useCustomerProfitability();
   const { rates } = useProfitabilityRates();
   const { spend } = useAcquisitionSpend();
+  const { rows: retainedRows } = useRetainedUnitCosts();
 
   const [view, setView] = useState<ViewKey>('overview');
   const [search, setSearch] = useState('');
@@ -131,6 +134,9 @@ export function ProfitabilityTab() {
   const volumes = useMemo(() => byVolume(filteredMetrics), [filteredMetrics]);
   const cohorts = useMemo(() => byCohort(filteredMetrics, cohortGrain), [filteredMetrics, cohortGrain]);
   const reliabilityStats = useMemo(() => reliability(filteredRows), [filteredRows]);
+  // Company-level, so it never narrows with a filter: a cancelled order has no
+  // customer to filter it by. Shown beside contribution margin, never inside.
+  const retained = useMemo(() => retainedUnits(retainedRows), [retainedRows]);
   // Insights are computed from the *unfiltered* set (minus team accounts)
   // so the panel always shows the full picture regardless of search.
   const insights = useMemo(() => computeInsights(rows.filter(r => showTeam || !r.is_team_member)), [rows, showTeam]);
@@ -188,6 +194,7 @@ export function ProfitabilityTab() {
           reliabilityStats={reliabilityStats}
           rates={ratesSummary(rates)}
           insights={insights}
+          retained={retained}
         />
       )}
 
@@ -337,6 +344,7 @@ function FilterBar(p: {
 
 function OverviewView({
   totals, metrics, channels, regions, cacResult, reliabilityStats, rates, insights,
+  retained,
 }: {
   totals: PortfolioMetrics;
   metrics: CustomerMetrics[];
@@ -346,6 +354,7 @@ function OverviewView({
   reliabilityStats: ReturnType<typeof reliability>;
   rates: { unpricedBuckets: string[] };
   insights: Insights;
+  retained: RetainedUnits;
 }) {
   const best = regions.filter(r => r.customers >= 3)[0];
   const worst = [...regions].filter(r => r.customers >= 3).pop();
@@ -382,6 +391,7 @@ function OverviewView({
              hint="Support labour and return handling are both rate-based, so this is an estimate." />
       </div>
       <EstimateLegend />
+      <RetainedUnitsBand retained={retained} />
 
       <div className={styles.overviewSplit}>
         <WaterfallChart steps={waterfall(metrics, totals.cacTotal)} />
@@ -424,6 +434,40 @@ function OverviewView({
         reliabilityStats={reliabilityStats}
       />
     </>
+  );
+}
+
+/** Cost that no customer carries.
+ *
+ *  LILA keeps the machine when an order is cancelled, so V16 takes its build
+ *  cost off the customer — charging it to the person who cancelled would make
+ *  them read as the worst sale in the book. Their revenue stays, and the refund
+ *  reverses it once. The machine was still built, though, so the cost cannot
+ *  vanish with the order: it is stated here, beside contribution margin and
+ *  deliberately not inside it. */
+function RetainedUnitsBand({ retained }: { retained: RetainedUnits }) {
+  if (retained.orders === 0) return null;
+  return (
+    <div className={styles.retainedBand}>
+      <span className={styles.retainedBandLabel}>
+        Outside contribution margin · units retained from cancelled orders
+      </span>
+      <span className={styles.retainedBandValue}>
+        {fmt(retained.total)}
+        {retained.anyModelled && <Est basis="estimated" />}
+      </span>
+      <span className={styles.retainedBandNote}>
+        {retained.units} machine{retained.units === 1 ? '' : 's'} across{' '}
+        {retained.orders} cancelled order{retained.orders === 1 ? '' : 's'} —{' '}
+        {fmt(retained.cogs)} build cost
+        {retained.freight > 0 && (
+          <> plus {fmt(retained.freight)} of freight on {retained.shippedBeforeCancel}{' '}
+            that had already shipped</>
+        )}
+        . LILA kept the units, so no customer carries this — their revenue stays
+        on their record and the refund reverses it there.
+      </span>
+    </div>
   );
 }
 

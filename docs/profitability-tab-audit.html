@@ -1,0 +1,988 @@
+<title>Profitability Tab Audit</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+
+<style>
+  /* ── Tokens ──────────────────────────────────────────────────────────────
+     A ledger palette: cool blue-biased paper and graphite ink, one prussian
+     accent for rules and figures, and three semantics that carry the whole
+     verdict system (measured / estimated / broken). */
+  :root {
+    --paper:      #F6F8FA;
+    --card:       #FFFFFF;
+    --card-alt:   #EDF1F5;
+    --ink:        #10161D;
+    --ink-2:      #333F4C;
+    --muted:      #5D6B7A;
+    --rule:       #D8DFE7;
+    --rule-hard:  #B9C4D0;
+    --accent:     #1F4E79;
+    --accent-bg:  #E3ECF4;
+    --ok:         #2C6A50;
+    --ok-bg:      #E0EDE6;
+    --warn:       #8A6212;
+    --warn-bg:    #F6EBD5;
+    --crit:       #9C2C26;
+    --crit-bg:    #F6E3E1;
+    --shadow:     0 1px 1px rgba(16,22,29,.04), 0 8px 24px rgba(16,22,29,.05);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper:     #0C1116;
+      --card:      #141A21;
+      --card-alt:  #1B222B;
+      --ink:       #E7ECF1;
+      --ink-2:     #C0CAD5;
+      --muted:     #8695A4;
+      --rule:      #242D37;
+      --rule-hard: #37434F;
+      --accent:    #82B4E2;
+      --accent-bg: #16232F;
+      --ok:        #6DBD92;
+      --ok-bg:     #142520;
+      --warn:      #DBA948;
+      --warn-bg:   #2A2213;
+      --crit:      #E88A80;
+      --crit-bg:   #2C1917;
+      --shadow:    0 1px 1px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.3);
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper:     #0C1116;
+    --card:      #141A21;
+    --card-alt:  #1B222B;
+    --ink:       #E7ECF1;
+    --ink-2:     #C0CAD5;
+    --muted:     #8695A4;
+    --rule:      #242D37;
+    --rule-hard: #37434F;
+    --accent:    #82B4E2;
+    --accent-bg: #16232F;
+    --ok:        #6DBD92;
+    --ok-bg:     #142520;
+    --warn:      #DBA948;
+    --warn-bg:   #2A2213;
+    --crit:      #E88A80;
+    --crit-bg:   #2C1917;
+    --shadow:    0 1px 1px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.3);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: Archivo, "Helvetica Neue", Arial, sans-serif;
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 0 28px 96px; }
+  .measure { max-width: 68ch; }
+
+  /* ── Masthead ───────────────────────────────────────────────────────── */
+  .masthead { padding: 64px 0 36px; border-bottom: 2px solid var(--ink); }
+  .eyebrow {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 11.5px; font-weight: 500; letter-spacing: .13em;
+    text-transform: uppercase; color: var(--accent); margin: 0 0 18px;
+  }
+  h1 {
+    font-family: Newsreader, Georgia, serif;
+    font-size: clamp(38px, 6vw, 62px); font-weight: 500; line-height: 1.04;
+    letter-spacing: -.015em; margin: 0 0 20px; text-wrap: balance;
+  }
+  .dek {
+    font-family: Newsreader, Georgia, serif;
+    font-size: clamp(18px, 2.2vw, 21px); line-height: 1.5;
+    color: var(--ink-2); margin: 0 0 28px; max-width: 62ch;
+  }
+  .stampline {
+    display: flex; flex-wrap: wrap; gap: 8px 22px;
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 12px; color: var(--muted);
+  }
+  .stampline span { white-space: nowrap; }
+
+  /* ── Headline figures ───────────────────────────────────────────────── */
+  .figures {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+    gap: 1px; background: var(--rule);
+    border: 1px solid var(--rule); margin: 0 0 8px;
+  }
+  .fig { background: var(--card); padding: 20px 20px 18px; }
+  .fig .k {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--muted); margin: 0 0 10px;
+  }
+  .fig .v {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-variant-numeric: tabular-nums;
+    font-size: 25px; font-weight: 500; line-height: 1.1; letter-spacing: -.02em;
+    margin: 0 0 6px;
+  }
+  .fig .n { font-size: 12.5px; color: var(--muted); line-height: 1.4; }
+  .neg { color: var(--crit); }
+  .pos { color: var(--ok); }
+
+  /* ── Sections ───────────────────────────────────────────────────────── */
+  section { padding-top: 56px; }
+  .sechead { display: flex; align-items: baseline; gap: 14px; margin: 0 0 6px; }
+  .secnum {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 12px; font-weight: 600; color: var(--accent);
+    letter-spacing: .06em; padding-top: 4px;
+  }
+  h2 {
+    font-family: Newsreader, Georgia, serif;
+    font-size: clamp(26px, 3.4vw, 34px); font-weight: 500; line-height: 1.15;
+    letter-spacing: -.012em; margin: 0; text-wrap: balance;
+  }
+  .subhead {
+    color: var(--muted); font-size: 15px; margin: 0 0 26px 0;
+    max-width: 66ch;
+  }
+  h3 {
+    font-family: Archivo, sans-serif; font-size: 15px; font-weight: 700;
+    letter-spacing: .01em; margin: 36px 0 12px;
+  }
+  p { margin: 0 0 16px; }
+  p.tight { margin-bottom: 10px; }
+  a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+  code {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: .87em; background: var(--card-alt); color: var(--ink-2);
+    padding: 1px 5px; border-radius: 3px;
+  }
+  strong { font-weight: 600; }
+
+  /* ── Tables ─────────────────────────────────────────────────────────── */
+  .scroller { overflow-x: auto; border: 1px solid var(--rule); background: var(--card); }
+  table { border-collapse: collapse; width: 100%; min-width: 640px; font-size: 14px; }
+  thead th {
+    text-align: left; font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 10.5px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--muted); padding: 12px 14px; border-bottom: 1px solid var(--rule-hard);
+    background: var(--card-alt); white-space: nowrap;
+  }
+  tbody td { padding: 11px 14px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  tbody tr:last-child td { border-bottom: none; }
+  tfoot td {
+    padding: 12px 14px; border-top: 2px solid var(--rule-hard);
+    font-weight: 600; background: var(--card-alt);
+  }
+  .num {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap;
+  }
+  .nm { font-weight: 500; }
+  .note { color: var(--muted); font-size: 13px; }
+
+  /* ── Chips ──────────────────────────────────────────────────────────── */
+  .chip {
+    display: inline-block; font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 10px; font-weight: 600; letter-spacing: .07em; text-transform: uppercase;
+    padding: 3px 7px; border-radius: 2px; white-space: nowrap;
+  }
+  .c-ok   { background: var(--ok-bg);   color: var(--ok); }
+  .c-warn { background: var(--warn-bg); color: var(--warn); }
+  .c-crit { background: var(--crit-bg); color: var(--crit); }
+  .c-flat { background: var(--accent-bg); color: var(--accent); }
+
+  /* ── Finding rows ───────────────────────────────────────────────────── */
+  .findings { display: flex; flex-direction: column; gap: 1px; background: var(--rule);
+              border: 1px solid var(--rule); }
+  .finding {
+    background: var(--card); display: grid;
+    grid-template-columns: 54px 1fr 168px; gap: 0 20px; padding: 22px 22px 20px;
+  }
+  .finding .rank {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 12px; font-weight: 600; color: var(--muted);
+    border-right: 1px solid var(--rule); padding-right: 14px; padding-top: 3px;
+  }
+  .finding h4 {
+    font-family: Archivo, sans-serif; font-size: 17px; font-weight: 600;
+    line-height: 1.3; margin: 0 0 10px; letter-spacing: -.005em;
+  }
+  .finding p { font-size: 14.5px; margin: 0 0 12px; color: var(--ink-2); }
+  .finding p:last-child { margin-bottom: 0; }
+  .stake { text-align: right; }
+  .stake .amt {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-variant-numeric: tabular-nums; font-size: 20px; font-weight: 500;
+    line-height: 1.15; display: block; margin-bottom: 4px; letter-spacing: -.02em;
+  }
+  .stake .lbl { font-size: 11.5px; color: var(--muted); display: block; margin-bottom: 10px; }
+  .ask {
+    border-left: 2px solid var(--accent); background: var(--accent-bg);
+    padding: 9px 12px; font-size: 13.5px; color: var(--ink-2);
+  }
+  .ask b {
+    display: block; font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 10px; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--accent); margin-bottom: 3px;
+  }
+  @media (max-width: 720px) {
+    .finding { grid-template-columns: 40px 1fr; }
+    .finding .stake { grid-column: 2; text-align: left; margin-top: 4px; }
+    .finding .stake .amt { font-size: 17px; }
+  }
+
+  /* ── Callout ────────────────────────────────────────────────────────── */
+  .callout {
+    border: 1px solid var(--rule-hard); background: var(--card);
+    padding: 24px 26px; box-shadow: var(--shadow);
+  }
+  .callout h3 { margin-top: 0; }
+  .proof {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-variant-numeric: tabular-nums; font-size: 13px; line-height: 1.9;
+    background: var(--card-alt); border: 1px solid var(--rule);
+    padding: 14px 16px; overflow-x: auto; white-space: pre; color: var(--ink-2);
+    margin: 0 0 4px;
+  }
+
+  ul.plain { margin: 0 0 16px; padding-left: 20px; }
+  ul.plain li { margin-bottom: 9px; }
+
+  .footnote {
+    margin-top: 64px; padding-top: 22px; border-top: 1px solid var(--rule);
+    font-size: 13px; color: var(--muted);
+  }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+</style>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <p class="eyebrow">Internal audit · Customers → Profitability</p>
+    <h1>What the profitability tab knows, and what it is guessing</h1>
+    <p class="dek">A line-by-line audit of every figure the tab renders: which buckets
+      reconcile to real records, which are rate-driven estimates, and the sixteen places
+      where the number on screen is not the number in the business.</p>
+    <div class="stampline">
+      <span>28 August 2026 · revised after V16</span>
+      <span>Source: <code>customer_profitability</code> v16 (live)</span>
+      <span>340 customer rows · 233 sale orders</span>
+      <span>All amounts CAD</span>
+    </div>
+  </header>
+
+  <div class="figures" style="margin-top:36px">
+    <div class="fig">
+      <p class="k">Revenue, net of tax</p>
+      <p class="v">$202,099</p>
+      <p class="n">Gross $218,363 less $16,264 of discounts</p>
+    </div>
+    <div class="fig">
+      <p class="k">Contribution margin</p>
+      <p class="v neg">−$14,443</p>
+      <p class="n">An upper bound: three buckets are unpriced</p>
+    </div>
+    <div class="fig">
+      <p class="k">Buckets reconcile</p>
+      <p class="v pos">exactly</p>
+      <p class="n">All eleven sum to the view's own margin, to the cent</p>
+    </div>
+    <div class="fig">
+      <p class="k">Open findings</p>
+      <p class="v">16</p>
+      <p class="n">2 closed today, 1 new</p>
+    </div>
+  </div>
+
+  <!-- ─────────────────────────────────────────────────────────────────── -->
+  <section>
+    <div class="sechead"><span class="secnum">01</span><h2>The verdict, in one paragraph</h2></div>
+    <div class="measure">
+      <p><strong>The plumbing is sound; the inputs are half-filled.</strong> The model's
+        arithmetic is trustworthy — the eleven cost buckets sum to the view's stated margin
+        to the cent, no dollar lands in two buckets, and 114 unit tests pass. Every bucket
+        that has data behind it is wired correctly and labelled with its own provenance.</p>
+      <p>What is not trustworthy is the <em>completeness</em> of what feeds it. Four fifths
+        of COGS is a roadmap projection rather than an invoiced build cost. The entire
+        acquisition half of the tab — CAC, LTV:CAC, payback, lifetime profit — is inert,
+        because all $69,134 of Meta spend carries a single date stamp that predates every
+        customer it won. Three cost buckets have never been priced. Roughly $22,000 of
+        real cost is missing.</p>
+      <p>Read the headline −$14,443 as <strong>directionally right and precisely
+        wrong</strong>: the business is losing money per customer, the model is honest
+        about saying so, but the true figure could move several thousand dollars in either
+        direction once the items in section 5 are closed.</p>
+      <p class="tight"><strong>Since the first draft:</strong> cancelled orders now keep
+        their revenue and lose their cost (V16, shipped today — see A3). The refund
+        reverses the sale once, as it always did, and the $9,503.66 of machines LILA kept
+        moved to a company-level line outside the customer model. Margin improved by
+        $15,556.52. One new finding came out of it, A0, and it is the mirror image of the
+        problem the change was meant to fix.</p>
+    </div>
+  </section>
+
+  <!-- ─────────────────────────────────────────────────────────────────── -->
+  <section>
+    <div class="sechead"><span class="secnum">02</span><h2>Two different totals, both correct</h2></div>
+    <p class="subhead">The tab's default filters hide part of the book. Anyone quoting a
+      figure off the screen should know which total they are quoting. Separately from this
+      work, 85 zero-activity lead records were deleted from <code>customers</code> while the
+      audit was running; they carried no revenue and no cost, so no total moved.</p>
+
+    <div class="scroller">
+      <table>
+        <thead>
+          <tr>
+            <th>Population</th><th class="num">Customers</th><th class="num">Revenue</th>
+            <th class="num">Margin</th><th>What it is</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="nm">On screen by default</td>
+            <td class="num">205</td><td class="num">$199,891.77</td>
+            <td class="num neg">−$15,366.46</td>
+            <td class="note">Non-team accounts with any recorded activity</td>
+          </tr>
+          <tr>
+            <td class="nm">+ team accounts</td>
+            <td class="num">6</td><td class="num">$2,207.70</td>
+            <td class="num pos">+$1,237.36</td>
+            <td class="note">Internal and demo units, holding $963.89 of COGS. The positive
+              margin is Pedrum's cancelled test orders keeping their revenue while V16 drops
+              their cost — see A0</td>
+          </tr>
+          <tr>
+            <td class="nm">+ cost-only customers</td>
+            <td class="num">7</td><td class="num">$0.00</td>
+            <td class="num neg">−$313.85</td>
+            <td class="note">Legacy freight and consumables only — the activity filter misses them</td>
+          </tr>
+          <tr>
+            <td class="nm">+ no activity at all</td>
+            <td class="num">122</td><td class="num">$0.00</td>
+            <td class="num">$0.00</td>
+            <td class="note">Leads and prospects carried in the customers table</td>
+          </tr>
+        </tbody>
+        <tfoot>
+          <tr>
+            <td>Whole book</td><td class="num">340</td><td class="num">$202,099.47</td>
+            <td class="num neg">−$14,442.95</td><td class="note">Every row in the view</td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  </section>
+
+  <!-- ─────────────────────────────────────────────────────────────────── -->
+  <section>
+    <div class="sechead"><span class="secnum">03</span><h2>The eleven buckets, audited</h2></div>
+    <p class="subhead">Every dollar of cost has exactly one home. This is the table to read
+      before quoting any margin figure — the basis column is the difference between a bill
+      and an assumption.</p>
+
+    <div class="scroller">
+      <table>
+        <thead>
+          <tr>
+            <th>#</th><th>Bucket</th><th class="num">Amount</th><th class="num">% of rev</th>
+            <th>Fed by</th><th>Basis</th><th>Verdict</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="num">1</td><td class="nm">COGS</td>
+            <td class="num">$151,836.06</td><td class="num">75.1%</td>
+            <td class="note"><code>orders.cogs_usd</code>, batch cost or schedule</td>
+            <td><span class="chip c-warn">part est</span></td>
+            <td class="note">72 invoiced, 141 projected; 20 cancelled orders excluded</td>
+          </tr>
+          <tr>
+            <td class="num">2</td><td class="nm">Freight</td>
+            <td class="num">$19,293.18</td><td class="num">9.5%</td>
+            <td class="note">Freightcom invoices $16,832.38 + legacy carriers $2,460.80</td>
+            <td><span class="chip c-warn">partial</span></td>
+            <td class="note">All 158 shipments invoiced; 63 shipped orders have none</td>
+          </tr>
+          <tr>
+            <td class="num">3</td><td class="nm">Warranty</td>
+            <td class="num">$14,924.02</td><td class="num">7.4%</td>
+            <td class="note">Replacement orders: COGS + freight, cancelled excluded</td>
+            <td><span class="chip c-ok">invoiced</span></td>
+            <td class="note">Inherits COGS's projection where the batch is modelled</td>
+          </tr>
+          <tr>
+            <td class="num">4</td><td class="nm">Refunds</td>
+            <td class="num">$21,306.17</td><td class="num">10.5%</td>
+            <td class="note">18 rows in <code>refund_approvals</code></td>
+            <td><span class="chip c-crit">incomplete</span></td>
+            <td class="note">16 refunded orders have no approval row</td>
+          </tr>
+          <tr>
+            <td class="num">5</td><td class="nm">Support labour</td>
+            <td class="num">$1,855.91</td><td class="num">0.9%</td>
+            <td class="note">42 diagnosis calls × duration × attendees × $75/hr</td>
+            <td><span class="chip c-warn">estimated</span></td>
+            <td class="note">Durations all present; the hourly rate is the assumption</td>
+          </tr>
+          <tr>
+            <td class="num">6</td><td class="nm">Return handling</td>
+            <td class="num">$5,367.27</td><td class="num">2.7%</td>
+            <td class="note">40 returns × ($50 stocking + 1h inspection) + $367.27 freight</td>
+            <td><span class="chip c-warn">estimated</span></td>
+            <td class="note">93% flat rate — return-leg freight is missing</td>
+          </tr>
+          <tr>
+            <td class="num">7</td><td class="nm">Payment fees</td>
+            <td class="num">$0.00</td><td class="num">—</td>
+            <td class="note"><code>payment_fee_pct</code> × gross charged</td>
+            <td><span class="chip c-crit">unpriced</span></td>
+            <td class="note">Rate is 0. ≈$6,090 at a blended 2.9%</td>
+          </tr>
+          <tr>
+            <td class="num">8</td><td class="nm">Sales commission</td>
+            <td class="num">$0.00</td><td class="num">—</td>
+            <td class="note"><code>sales_commission_pct</code> × net revenue</td>
+            <td><span class="chip c-crit">unpriced</span></td>
+            <td class="note">Rate is 0. Unknown exposure</td>
+          </tr>
+          <tr>
+            <td class="num">9</td><td class="nm">Installation</td>
+            <td class="num">$0.00</td><td class="num">—</td>
+            <td class="note">Per-unit install cost</td>
+            <td><span class="chip c-ok">true zero</span></td>
+            <td class="note">LILA ships self-install; 0 is the real value</td>
+          </tr>
+          <tr>
+            <td class="num">10</td><td class="nm">Consumables</td>
+            <td class="num">$1,811.46</td><td class="num">0.9%</td>
+            <td class="note">78 retail receipts in <code>external_item_costs</code></td>
+            <td><span class="chip c-ok">invoiced</span></td>
+            <td class="note">Clean. Correctly kept out of the freight bucket</td>
+          </tr>
+          <tr>
+            <td class="num">11</td><td class="nm">3PL handling</td>
+            <td class="num">$148.35</td><td class="num">0.1%</td>
+            <td class="note">FlexSpace rate card on 23 orders since 2026-06-23</td>
+            <td><span class="chip c-warn">estimated</span></td>
+            <td class="note">Contracted rates, no invoice to reconcile against</td>
+          </tr>
+        </tbody>
+        <tfoot>
+          <tr>
+            <td></td><td>Variable cost</td><td class="num">$216,542.42</td>
+            <td class="num">107.1%</td><td colspan="3" class="note">
+              Revenue $202,099.47 − $216,542.42 = <strong>−$14,442.95</strong>, which is the
+              view's own <code>net_margin_cad</code> to the cent.</td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+
+    <h3>The reconciliation, since it is the one thing worth checking</h3>
+    <div class="proof">revenue          202,099.47
+  − cogs         151,836.06
+  − freight       19,293.18   (16,832.38 Freightcom + 2,460.80 legacy)
+  − warranty      14,924.02
+  − refunds       21,306.17
+  − support        1,855.91
+  − returns        5,367.27
+  − fees                0.00   unpriced
+  − commission          0.00   unpriced
+  − installation        0.00   true zero
+  − consumables    1,811.46
+  − 3PL              148.35
+  ────────────────────────────
+  margin        −14,442.95   ✓ matches net_margin_cad
+
+  outside the model, carried by nobody:
+  retained units   9,503.66   13 cancelled orders (8,724.98 build + 778.68 freight)</div>
+    <p class="note">No bucket double-counts. Consumables and 3PL handling are held out of
+      freight on purpose; return freight matches on the return's own tracking number, never
+      on order id; 3PL transportation is excluded because Freightcom already carries it. The
+      retained-unit line cannot overlap either — it reads only cancelled sale orders, which
+      are exactly the orders excluded from the COGS and freight buckets. A cancelled order's
+      revenue still counts, and its refund reverses it once, in bucket 4.</p>
+  </section>
+
+  <!-- ─────────────────────────────────────────────────────────────────── -->
+  <section>
+    <div class="sechead"><span class="secnum">04</span><h2>What is live and accurate</h2></div>
+    <p class="subhead">Quotable today, with the caveat attached to each.</p>
+    <div class="measure">
+      <ul class="plain">
+        <li><strong>Revenue, gross revenue and discounts.</strong> $202,099.47 net of tax
+          across 233 matched sale orders, with $16,263.85 of discount visible separately —
+          a 7.4% average giveaway. The founder-cohort invoices are booked (total less HST,
+          deposits included). One sale order worth $10.42 matches no customer.</li>
+        <li><strong>Freight, for the Freightcom era.</strong> All 158 shipments now carry
+          invoiced charges (169 charge rows), and the coalesce is per shipment, so
+          multi-leg orders no longer lose their un-invoiced legs. Average $124.27 a
+          shipment.</li>
+        <li><strong>Warranty cost.</strong> Replacement orders costed at COGS + freight,
+          with cancelled replacements correctly excluded. 42 customers have had one.</li>
+        <li><strong>Support labour.</strong> All 42 diagnosis calls carry a duration; none
+          fall back to "unpriced". The $75/person-hour blended rate is the only assumption
+          in the bucket.</li>
+        <li><strong>Consumables.</strong> 78 retail receipts, actual amounts, correctly
+          filed as cost of goods rather than freight.</li>
+        <li><strong>Geography and cohorts.</strong> Of 206 active customers, only 9 lack a
+          region and 7 a country — the ship-to on the first sale order beats the CRM
+          record, which is the right precedence. 21 have no cohort date.</li>
+        <li><strong>The provenance labelling itself.</strong> Every bucket renders its own
+          basis chip, the customer card lists its specific gaps, and the "what these
+          numbers do and don't cover" panel names the unpriced buckets and the unallocated
+          spend. The tab does not pretend.</li>
+        <li><strong>The arithmetic.</strong> 114 tests pass across the model and the tab,
+          including a powers-of-two check that would catch any duplicated bucket.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ─────────────────────────────────────────────────────────────────── -->
+  <section>
+    <div class="sechead"><span class="secnum">05</span><h2>Ten gaps that move the number</h2></div>
+    <p class="subhead">Ranked by dollars at stake. The figure on the right is the amount
+      exposed, not a correction already applied. A3 is closed — it shipped today — and the
+      finding it left behind leads the list.</p>
+
+    <div class="findings">
+
+      <article class="finding">
+        <div class="rank">A0</div>
+        <div>
+          <h4>Three cancelled orders now book revenue with nothing against them</h4>
+          <p>The mirror of the problem V16 fixed, and it was there all along — the change
+            just made it visible. A cancelled order keeps its revenue because a refund is
+            expected to reverse it. Where no refund is on file, the revenue stands alone:
+            no reversal, and now no COGS either.</p>
+          <p><strong>I-Scott Campbell</strong> and <strong>Juanita Wells</strong> read as
+            +$1,199.99 and +$1,099.99 of pure profit, which puts two cancelled orders among
+            the most profitable customers in the book. <strong>Matthew Lypkie</strong> adds
+            $68.74. On the team side, Pedrum's cancelled test orders carry $1,106.49 of
+            revenue with no cost, which is what pushes internal accounts to +$1,237.36.</p>
+          <p>Either the refund happened and the approval row is missing — the same gap as
+            A4, which already counts 16 refunded orders with no approval — or the money was
+            never collected and the revenue is not real.</p>
+          <div class="ask"><b>Send</b> Refund amount and date for these three, or
+            confirmation the orders were never paid. For Pedrum's seven, confirm whether
+            the test orders should carry revenue at all.</div>
+        </div>
+        <div class="stake">
+          <span class="amt">$3,475</span>
+          <span class="lbl">unreversed revenue</span>
+          <span class="chip c-crit">overstated</span>
+        </div>
+      </article>
+
+      <article class="finding">
+        <div class="rank">A1</div>
+        <div>
+          <h4>Four fifths of COGS is a projection, not a build cost</h4>
+          <p>141 of the 213 sale orders that still carry COGS use
+            <code>cogs_basis = 'schedule'</code> — the V-SAX roadmap projection — worth
+            roughly $119,000 against $32,800 costed from actual batches. COGS is 75% of
+            revenue and the single largest driver of the reported loss, so the headline is substantially a forecast. Warranty cost inherits the
+            same projection wherever a replacement draws on a modelled batch.</p>
+          <div class="ask"><b>Send</b> Actual per-batch build costs, so
+            <code>batch_actual</code> can replace the schedule on the 159.</div>
+        </div>
+        <div class="stake">
+          <span class="amt">≈$119,000</span>
+          <span class="lbl">provisional COGS</span>
+          <span class="chip c-crit">blocking</span>
+        </div>
+      </article>
+
+      <article class="finding">
+        <div class="rank">A2</div>
+        <div>
+          <h4>CAC, LTV:CAC and payback are all inert</h4>
+          <p>All 40 rows in <code>fb_campaigns</code> share one <code>date_start</code> of
+            2023-07-28, so the monthly rollup lands the entire $69,133.81 of Meta spend in
+            July 2023. Every paid-social customer was acquired between December 2025 and
+            June 2026. The two sets never intersect: 100% of spend goes unallocated, every
+            customer's CAC is $0 on a basis of "no spend on file", LTV:CAC is blank,
+            payback reads "0 at sale", and lifetime profit is contribution margin under
+            another name.</p>
+          <p><code>acquisition_spend_manual</code> is empty, so the 100 non-team customers
+            who arrived through organic search (47), organic social (28), referral (22) and
+            email (3) have no spend feed at all.</p>
+          <div class="ask"><b>Send</b> Monthly Meta spend for Dec 2025 → Aug 2026, or a fix
+            to the sync so it pulls monthly insights rather than lifetime totals. Plus any
+            spend behind the other four channels — SEO retainer, referral incentives, email
+            tooling.</div>
+        </div>
+        <div class="stake">
+          <span class="amt">$69,134</span>
+          <span class="lbl">unallocated spend</span>
+          <span class="chip c-crit">blocking</span>
+        </div>
+      </article>
+
+      <article class="finding">
+        <div class="rank">A3</div>
+        <div>
+          <h4>A cancelled order charged its machine to the customer <span class="chip c-ok">closed</span></h4>
+          <p>Shipped 28 August as <code>customer_profitability</code> V16. When an order is
+            cancelled LILA keeps the machine, so its COGS and freight no longer sit on the
+            person who cancelled — charging them for a machine that came back made a
+            cancellation read as the worst sale in the book.</p>
+          <p>Revenue is untouched. The sale happened and the refund reverses it once,
+            through bucket 4, so a cancellation refunded in full nets to zero: Gabriella
+            Hottya and Marina Weiss now sit at exactly $0.00. The $9,503.66 of machines
+            moved to <code>public.retained_unit_costs</code> — a company-level view with no
+            customer id — and the Overview shows it beside contribution margin, never
+            inside. Freight went with the machines: four had already shipped when they were
+            cancelled, costing $778.68. Margin improved $15,556.52.</p>
+          <p class="note">Pedrum's seven cancelled orders are confirmed test data, so the
+            view excludes team accounts outright rather than costing machines that were
+            never built — $6,052.78 that would otherwise have been invented.</p>
+          <div class="ask"><b>Watch</b> It left A0 behind: three cancelled orders whose
+            revenue nothing reverses.</div>
+        </div>
+        <div class="stake">
+          <span class="amt pos">+$15,557</span>
+          <span class="lbl">margin, applied</span>
+          <span class="chip c-ok">shipped</span>
+        </div>
+      </article>
+
+      <article class="finding">
+        <div class="rank">A4</div>
+        <div>
+          <h4>Sixteen refunded orders have no approval record</h4>
+          <p>The refund bucket reads <code>refund_approvals</code> only: 18 rows,
+            $21,306.17. But 35 sale orders carry a Shopify financial status of refunded or
+            partially refunded, worth $22,769.36 of revenue — and 16 of them match no
+            approval, on either email or name. That money went back and the model never
+            sees it.</p>
+          <p>A related blind spot: all 18 approvals sit at status <code>refunded</code>, so
+            the "expected vs settled" split on the tab carries no information — there is
+            nothing in flight to distinguish.</p>
+          <div class="ask"><b>Send</b> Refund amount and date for the 16 orders with no
+            approval row.</div>
+        </div>
+        <div class="stake">
+          <span class="amt">$8,128</span>
+          <span class="lbl">refunded, not booked</span>
+          <span class="chip c-crit">understated</span>
+        </div>
+      </article>
+
+      <article class="finding">
+        <div class="rank">A5</div>
+        <div>
+          <h4>Sixty-three shipped orders carry no freight at all</h4>
+          <p>Split two ways. <strong>25 predate Freightcom</strong> and are not among the
+            44 legacy rows already loaded, so their carrier records are still outstanding.
+            <strong>38 are Freightcom-era orders with no shipment row whatsoever</strong> —
+            worth distinguishing from "awaiting invoicing", because every shipment that
+            exists is already invoiced. Something is failing to create the shipment, or
+            the order-to-shipment match is missing it. At the observed $124.27 a shipment
+            that is roughly $7,800 of freight nobody carries.</p>
+          <div class="ask"><b>Send</b> Carrier records for the 25 pre-Freightcom orders.
+            <b>Investigate</b> why 38 recent shipped orders have no shipment row.</div>
+        </div>
+        <div class="stake">
+          <span class="amt">≈$7,800</span>
+          <span class="lbl">missing freight</span>
+          <span class="chip c-crit">understated</span>
+        </div>
+      </article>
+
+      <article class="finding">
+        <div class="rank">A6</div>
+        <div>
+          <h4>Payment processing has never been priced</h4>
+          <p><code>payment_fee_pct</code> is 0, so bucket 7 reads $0. Gross charged across
+            all sale orders is $210,002.23; at a blended 2.9% that is $6,090 of real cost
+            missing, which would take the margin to roughly −$20,500. No code change is
+            involved — it is one <code>update</code> on <code>profitability_rates</code>,
+            and every margin, LTV and payback figure on the tab moves with it.</p>
+          <div class="ask"><b>Send</b> The blended processor percentage across Shopify,
+            Sezzle and QuickBooks CC.</div>
+        </div>
+        <div class="stake">
+          <span class="amt">≈$6,090</span>
+          <span class="lbl">at 2.9% blended</span>
+          <span class="chip c-crit">understated</span>
+        </div>
+      </article>
+
+      <article class="finding">
+        <div class="rank">A7</div>
+        <div>
+          <h4>No return-leg freight on any of 51 returns</h4>
+          <p><code>returns.return_shipping_cad</code> is null on all 51 rows. Only $367.27
+            was recovered by matching pickup tracking numbers across the 40 handled returns
+            — about $9 each, against $124 for an outbound leg. The return-handling bucket
+            is therefore 93% flat rate: $2,000 stocking plus $3,000 inspection, with the
+            actual freight home almost entirely absent.</p>
+          <div class="ask"><b>Send</b> Return shipping costs — likely the same carrier
+            records the 44 legacy rows came from.</div>
+        </div>
+        <div class="stake">
+          <span class="amt">≈$4,600</span>
+          <span class="lbl">unrecorded return freight</span>
+          <span class="chip c-warn">understated</span>
+        </div>
+      </article>
+
+      <article class="finding">
+        <div class="rank">A8</div>
+        <div>
+          <h4>Sixteen customers have a machine and no sale order</h4>
+          <p>Down from 24 after the founder invoices were loaded, and unchanged by V16 —
+            cancelled orders still count as orders, so nobody moved in or out of this
+            bucket. Ten of the sixteen carry cost against blank revenue: warranty, legacy
+            freight, support labour and, in one case, a refund. They read as the worst
+            customers in the book on missing data rather than performance. Cheryl Lemieux is
+            the extreme — a $1,107.40 refund approval and $196.99 of support with no sale
+            behind either.</p>
+          <p class="note">Albert &amp; Vincenza Salvatore · Antonio Gonsalves · Caesar
+            Radicioni · Cheryl Lemieux · Doug Bailey · Kaiti Klucas · Kevin Cheng · Omniya
+            Hussein · Steven Yang · Tien Tran — plus six more with a machine, no order and
+            no cost yet.</p>
+          <div class="ask"><b>Send</b> Sale amount and date for these, or confirmation they
+            were free or demo units.</div>
+        </div>
+        <div class="stake">
+          <span class="amt">−$2,474</span>
+          <span class="lbl">cost with no revenue</span>
+          <span class="chip c-warn">distorting</span>
+        </div>
+      </article>
+
+      <article class="finding">
+        <div class="rank">A9</div>
+        <div>
+          <h4>Twenty-eight shipments belong to nobody</h4>
+          <p>These Freightcom shipments have no <code>order_id</code>, so their cost sits
+            outside every customer's margin. Alongside them, 17 shipped units have no
+            customer at all. Some are matchable by serial without any new information.</p>
+          <div class="ask"><b>Nothing yet</b> — these can be matched by serial from here.
+            Flagged so the $1,695 is not mistaken for freight that was never incurred.</div>
+        </div>
+        <div class="stake">
+          <span class="amt">$1,695</span>
+          <span class="lbl">unattributed freight</span>
+          <span class="chip c-warn">understated</span>
+        </div>
+      </article>
+
+      <article class="finding">
+        <div class="rank">A10</div>
+        <div>
+          <h4>Sales commission has never been priced</h4>
+          <p><code>sales_commission_pct</code> is 0. Unlike installation — where zero is the
+            true value while LILA ships self-install — nobody has confirmed whether
+            commission is genuinely nil or simply unrecorded. The tab labels it "unpriced"
+            rather than claiming it costs nothing, which is correct but unresolved.</p>
+          <div class="ask"><b>Send</b> Commission as a percentage of net revenue, or
+            confirmation that it is zero.</div>
+        </div>
+        <div class="stake">
+          <span class="amt">unknown</span>
+          <span class="lbl">exposure</span>
+          <span class="chip c-warn">unpriced</span>
+        </div>
+      </article>
+
+    </div>
+  </section>
+
+  <!-- ─────────────────────────────────────────────────────────────────── -->
+  <section>
+    <div class="sechead"><span class="secnum">06</span><h2>Six defects in what the tab shows</h2></div>
+    <p class="subhead">No new data required. These are definition and display problems —
+      the underlying numbers are right, the presentation misleads.</p>
+
+    <div class="scroller">
+      <table>
+        <thead>
+          <tr><th>#</th><th>Defect</th><th>What it does today</th><th>Fix</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="num">B1</td>
+            <td class="nm">Team accounts hide real COGS <span class="chip c-ok">mostly closed</span></td>
+            <td class="note">Was $7,016.67 of COGS and −$4,815.42 of margin hidden by
+              default. Most of it was cancelled test orders, whose cost V16 drops entirely.
+              What remains is $963.89 of COGS on 6 internal accounts — but they now show
+              +$1,237.36 of margin, because the test orders kept their revenue. See A0.</td>
+            <td class="note">Cost side resolved. The revenue side is A0's question</td>
+          </tr>
+          <tr>
+            <td class="num">B2</td>
+            <td class="nm">FX restates history</td>
+            <td class="note"><code>fx_rates</code> holds one USD/CAD rate (1.388889) applied
+              at query time. 93 of 234 sale orders are USD, so every historical figure on
+              the tab moves whenever Finance edits that one row.</td>
+            <td class="note">Store the rate as at the order date on the order</td>
+          </tr>
+          <tr>
+            <td class="num">B3</td>
+            <td class="nm">"Units" means orders</td>
+            <td class="note">Per-unit figures divide by order count (233) while line-item
+              quantities sum to 238. Separately, the customer card's "Units shipped" shows
+              75 against 176 units actually shipped, because only 80 units carry a
+              <code>customer_order_ref</code>.</td>
+            <td class="note">Read <code>line_items[].qty</code>; widen the units-shipped
+              trace or relabel it</td>
+          </tr>
+          <tr>
+            <td class="num">B4</td>
+            <td class="nm">Activity filter buries costs</td>
+            <td class="note"><code>hasActivity()</code> tests orders, replacements, refunds,
+              warranty, tickets, calls and returns — but not legacy freight or consumables.
+              9 customers holding $380.45 of real cost drop out of the default view.</td>
+            <td class="note">Add the two counts to the predicate</td>
+          </tr>
+          <tr>
+            <td class="num">B5</td>
+            <td class="nm">Warranty rate defined twice</td>
+            <td class="note">The segment table counts customers with warranty <em>cost</em>
+              &gt; 0 (39); the reliability line counts customers with a
+              <em>replacement</em> (42). Both appear on screen and can disagree — the
+              three-customer gap is replacements that were cancelled.</td>
+            <td class="note">Pick one definition and use it in both places</td>
+          </tr>
+          <tr>
+            <td class="num">B6</td>
+            <td class="nm">Insights ignore filters</td>
+            <td class="note">The insights panel computes from the unfiltered set by design,
+              so filtering to Ontario still shows conclusions drawn from the whole book.</td>
+            <td class="note">One-word change, or label the panel "all customers"</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ─────────────────────────────────────────────────────────────────── -->
+  <section>
+    <div class="sechead"><span class="secnum">07</span><h2>What I need from you</h2></div>
+    <p class="subhead">Everything above, consolidated into one list. Nothing here needs a
+      code change — each item is data or a decision.</p>
+
+    <div class="callout">
+      <h3>Data</h3>
+      <ul class="plain">
+        <li><strong>Per-batch build costs</strong> for the 141 orders costed from the
+          schedule — the single biggest lever on the reported loss. <span class="chip c-crit">A1</span></li>
+        <li><strong>Monthly Meta spend, Dec 2025 → Aug 2026</strong>, or a sync that pulls
+          monthly insights instead of lifetime totals. <span class="chip c-crit">A2</span></li>
+        <li><strong>Spend behind organic search, referral, organic social and email</strong>
+          — SEO retainer, referral incentives, email tooling. <span class="chip c-crit">A2</span></li>
+        <li><strong>Refund amount and date</strong> for the 16 refunded orders with no
+          approval row, and for the three cancelled orders in A0.
+          <span class="chip c-crit">A4 · A0</span></li>
+        <li><strong>Carrier records for 25 pre-Freightcom orders.</strong> <span class="chip c-crit">A5</span></li>
+        <li><strong>Return shipping costs</strong> for the 51 returns. <span class="chip c-warn">A7</span></li>
+        <li><strong>Sale amount and date</strong> for the customers with a machine and no
+          order — or confirmation they were free units. <span class="chip c-warn">A8</span></li>
+      </ul>
+
+      <h3>Three rates</h3>
+      <ul class="plain">
+        <li><strong>Blended payment processing %</strong> across Shopify, Sezzle and
+          QuickBooks CC. ≈$6,090 at 2.9%. <span class="chip c-crit">A6</span></li>
+        <li><strong>Sales commission %</strong> of net revenue, or confirmation of nil.
+          <span class="chip c-warn">A10</span></li>
+        <li><strong>Install cost per unit</strong> — currently $0 and believed true while
+          LILA ships self-install. Confirm and it stops being flagged as unpriced.</li>
+      </ul>
+
+      <h3>Two decisions</h3>
+      <ul class="plain">
+        <li><strong>Pedrum's seven cancelled test orders</strong> — their cost is dropped,
+          but they still carry $1,106.49 of revenue on an internal account. Should a test
+          order book revenue at all? <span class="chip c-crit">A0</span></li>
+        <li><strong>Sharon Corcoran's invoice 1200</strong> is annotated as a replacement
+          sale, not a first purchase. Count it as revenue, or as warranty?</li>
+      </ul>
+      <p class="note" style="margin-top:14px"><strong>Decided 28 August:</strong> a
+        cancelled order keeps its revenue — the refund reverses it once — and loses its
+        COGS and freight to a company-level retained-unit line, because LILA keeps the
+        machine. Test orders on team accounts are not retained machines and carry no cost.
+        Shipped as V16.</p>
+    </div>
+  </section>
+
+  <!-- ─────────────────────────────────────────────────────────────────── -->
+  <section>
+    <div class="sechead"><span class="secnum">08</span><h2>Correctly out of reach</h2></div>
+    <p class="subhead">Not gaps to close — these need systems that do not exist. The tab
+      already lists them rather than silently omitting them, which is the right handling.</p>
+
+    <div class="scroller">
+      <table>
+        <thead><tr><th>Metric</th><th>Why the database cannot answer it</th></tr></thead>
+        <tbody>
+          <tr><td class="nm">Utilization, cycles, waste processed</td>
+              <td class="note">Machine telemetry lives in the Lovely dashboard, not this database</td></tr>
+          <tr><td class="nm">Active-usage rate (30/90/180/365-day)</td>
+              <td class="note">Same — Lovely Activity tracks presence but is not joined to financial records</td></tr>
+          <tr><td class="nm">Subscription / service-plan retention</td>
+              <td class="note">LILA sells no subscription or service plan</td></tr>
+          <tr><td class="nm">Churn rate</td>
+              <td class="note">A one-time hardware purchase has no renewal to miss; return and refund rates stand in</td></tr>
+          <tr><td class="nm">Recurring revenue (MRR/ARR)</td>
+              <td class="note">No recurring product — held at $0 rather than estimated</td></tr>
+          <tr><td class="nm">Residential vs commercial split</td>
+              <td class="note">Customer type is not recorded; units purchased is the closest observable proxy</td></tr>
+          <tr><td class="nm">Per-campaign and per-rep CAC</td>
+              <td class="note">Campaign-level spend for Meta only, and no order carries a sales rep</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="note" style="margin-top:14px">One adjacent weakness worth noting: 49 of 203
+      active customers sit on an acquisition channel of "other" or "unknown", so channel
+      rollups describe about three quarters of the book, not all of it.</p>
+  </section>
+
+  <!-- ─────────────────────────────────────────────────────────────────── -->
+  <section>
+    <div class="sechead"><span class="secnum">09</span><h2>How this was verified</h2></div>
+    <div class="measure">
+      <p>Every figure above was read from the live database on 28 August 2026, not from the
+        model's own summaries. The audit ran three ways:</p>
+      <ul class="plain">
+        <li><strong>Against the view.</strong> All eleven buckets summed independently and
+          checked against <code>net_margin_cad</code> — they agree to the cent, before and
+          after V16. Each component was checked in isolation too: COGS −$14,777.76, freight
+          −$778.68, revenue and order count unchanged at $202,099.47 and 233, margin
+          +$15,556.52, and the five refunded cancellations re-checked one by one — two of
+          them land on exactly $0.00, which is the test that the reversal is counted once.</li>
+        <li><strong>Around the view.</strong> Each bucket's source table queried directly
+          to find records the view's joins miss: refunded orders with no approval, shipped
+          orders with no shipment, returns with no freight, shipments with no order,
+          machines with no order.</li>
+        <li><strong>Against the code.</strong> <code>lib/profitability.ts</code>,
+          <code>ProfitabilityTab.tsx</code> and the view definition read line by line
+          for definition mismatches — which is where B3, B5 and B6 came from. 114 tests
+          pass.</li>
+      </ul>
+      <p class="note">Shipped during this audit: V15
+        (<code>20260828120000_customer_profitability_v15_cancelled_orders.sql</code>,
+        <code>20260828130000_retained_units_team_split.sql</code>) and its correction V16
+        (<code>20260828140000_customer_profitability_v16_cancelled_cost_only.sql</code>),
+        all applied to the live database, with 1,445 tests and a clean production build
+        behind them. V15 removed a cancelled order's revenue as well as its cost, which
+        double-counted the refund; V16 keeps the revenue and moves only the cost.</p>
+      <p class="note">This supersedes the 27 August "Profitability Data Gaps" register,
+        which was written against v12 and predates the orphan-refund fix, the 3PL bucket
+        and the founder-cohort invoices. Where the two disagree, this one is current.
+        Model write-up: <code>docs/profitability-model.md</code>.</p>
+    </div>
+  </section>
+
+  <p class="footnote">makeLILA · Customers → Profitability · audited against
+    <code>customer_profitability</code> v16 on the live LILA-Pro-Inventory database.
+    Figures move as data lands; re-run before quoting.</p>
+
+</div>

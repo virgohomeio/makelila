@@ -668,6 +668,65 @@ export function useProfitabilityRates(): {
   return { rates, loading, error };
 }
 
+/** One cancelled sale order, and the machine LILA kept because of it.
+ *  Deliberately has no customer id: a cancelled order's cost belongs to the
+ *  company, not to the person who cancelled. Test orders on team accounts are
+ *  excluded by the view — no machine was built for those. See migration V16. */
+export type RetainedUnitCost = {
+  order_id: string;
+  order_ref: string | null;
+  customer_name: string | null;
+  placed_at: string | null;
+  cancelled_at: string | null;
+  cogs_basis: string | null;
+  cogs_cad: number;
+  freight_cad: number;
+  units_retained: number;
+};
+
+/** public.retained_unit_costs — cost of machines built for orders that were
+ *  later cancelled. Reported beside contribution margin, never inside it. */
+export function useRetainedUnitCosts(): {
+  rows: RetainedUnitCost[];
+  loading: boolean;
+  error: Error | null;
+} {
+  const [rows, setRows] = useState<RetainedUnitCost[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data, error: err } = await supabase
+        .from('retained_unit_costs')
+        .select('*')
+        .order('placed_at', { ascending: false });
+      if (cancelled) return;
+      if (err) {
+        setError(err as unknown as Error);
+        setLoading(false);
+        return;
+      }
+      setRows((data ?? []).map((r: Record<string, unknown>) => ({
+        order_id:       String(r.order_id ?? ''),
+        order_ref:      (r.order_ref as string) ?? null,
+        customer_name:  (r.customer_name as string) ?? null,
+        placed_at:      (r.placed_at as string) ?? null,
+        cancelled_at:   (r.cancelled_at as string) ?? null,
+        cogs_basis:     (r.cogs_basis as string) ?? null,
+        cogs_cad:       Number(r.cogs_cad ?? 0),
+        freight_cad:    Number(r.freight_cad ?? 0),
+        units_retained: Number(r.units_retained ?? 0),
+      })));
+      setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  return { rows, loading, error };
+}
+
 /** public.acquisition_spend_monthly — Meta spend plus any hand-entered rows. */
 export function useAcquisitionSpend(): {
   spend: AcquisitionSpendRow[];

@@ -1,0 +1,746 @@
+<title>Profitability Deck Speaker Notes</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=Public+Sans:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono:wght@400;600&display=swap">
+
+<style>
+  :root {
+    --paper:#F5F6F3; --card:#FFFFFF; --card-alt:#ECEEE9;
+    --ink:#14181A; --ink-2:#39423E; --muted:#5A6560;
+    --rule:#DCE0DA; --rule-hard:#BFC6BD;
+    --accent:#1F5F5B; --accent-bg:#DFEBE9;
+    --ok:#2E6B4A; --ok-bg:#E1EDE5;
+    --warn:#8A5A0F; --warn-bg:#F5EAD5;
+    --crit:#A32E23; --crit-bg:#F6E2DF;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper:#0E1211; --card:#161B19; --card-alt:#1D2321;
+      --ink:#E8ECE8; --ink-2:#C2CAC5; --muted:#8A958F;
+      --rule:#262E2B; --rule-hard:#3A443F;
+      --accent:#6FBDB4; --accent-bg:#17302E;
+      --ok:#6FBE93; --ok-bg:#15291F;
+      --warn:#DCA84F; --warn-bg:#2C2415;
+      --crit:#E6867B; --crit-bg:#311D1B;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper:#0E1211; --card:#161B19; --card-alt:#1D2321;
+    --ink:#E8ECE8; --ink-2:#C2CAC5; --muted:#8A958F;
+    --rule:#262E2B; --rule-hard:#3A443F;
+    --accent:#6FBDB4; --accent-bg:#17302E;
+    --ok:#6FBE93; --ok-bg:#15291F;
+    --warn:#DCA84F; --warn-bg:#2C2415;
+    --crit:#E6867B; --crit-bg:#311D1B;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    background: var(--paper); color: var(--ink);
+    font-family: "Public Sans", ui-sans-serif, system-ui, sans-serif;
+    font-size: 16px; line-height: 1.6; margin: 0; padding: 0 24px 90px;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 940px; margin: 0 auto; }
+
+  header.mast { padding: 56px 0 30px; border-bottom: 2px solid var(--ink); }
+  .eyebrow {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 11px; font-weight: 600; letter-spacing: .14em;
+    text-transform: uppercase; color: var(--accent); margin: 0 0 14px;
+  }
+  h1 {
+    font-family: "Bricolage Grotesque", ui-sans-serif, sans-serif;
+    font-weight: 800; font-size: clamp(2rem, 5vw, 3rem);
+    line-height: 1.03; letter-spacing: -.025em; margin: 0 0 18px; text-wrap: balance;
+  }
+  .standfirst { font-size: 1.06rem; color: var(--ink-2); max-width: 66ch; margin: 0 0 22px; }
+  .mast-meta {
+    display: flex; flex-wrap: wrap; gap: 8px 28px;
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 12px; color: var(--muted);
+  }
+  .mast-meta b { color: var(--ink-2); font-weight: 600; }
+
+  /* Slide block */
+  .slide {
+    display: grid; grid-template-columns: 96px 1fr; gap: 26px;
+    padding: 40px 0; border-bottom: 1px solid var(--rule);
+  }
+  .rail { position: relative; }
+  .rail-num {
+    font-family: "Bricolage Grotesque", ui-sans-serif, sans-serif;
+    font-weight: 800; font-size: 2.4rem; line-height: .9;
+    color: var(--accent); letter-spacing: -.03em;
+  }
+  .rail-time {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 11px; font-weight: 600; color: var(--muted);
+    margin-top: 8px; letter-spacing: .05em;
+  }
+  .slide-title {
+    font-family: "Bricolage Grotesque", ui-sans-serif, sans-serif;
+    font-weight: 700; font-size: 1.42rem; letter-spacing: -.015em;
+    margin: 0 0 4px; text-wrap: balance;
+  }
+  .slide-goal {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 11px; font-weight: 600; letter-spacing: .07em;
+    text-transform: uppercase; color: var(--muted); margin: 0 0 18px;
+  }
+
+  /* Spoken script */
+  .say {
+    border-left: 3px solid var(--accent); padding: 2px 0 2px 20px;
+    margin: 0 0 18px;
+  }
+  .say p { margin: 0 0 14px; font-size: 1.06rem; line-height: 1.62; max-width: 64ch; color: var(--ink); }
+  .say p:last-child { margin-bottom: 0; }
+  .say em { font-style: italic; color: var(--ink-2); }
+  .say b { font-weight: 600; }
+  .beat {
+    display: block; font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 11px; font-weight: 600; letter-spacing: .06em;
+    text-transform: uppercase; color: var(--accent); margin: 16px 0 6px;
+  }
+
+  /* Notes */
+  .note {
+    background: var(--card); border: 1px solid var(--rule);
+    border-radius: 5px; padding: 13px 16px; margin: 14px 0 0;
+    font-size: 14px; color: var(--ink-2);
+  }
+  .note.warnbox { background: var(--warn-bg); border-color: var(--warn); color: var(--warn); }
+  .note.critbox { background: var(--crit-bg); border-color: var(--crit); color: var(--crit); }
+  .note-l {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 10.5px; font-weight: 600; letter-spacing: .08em;
+    text-transform: uppercase; display: block; margin-bottom: 6px; opacity: .85;
+  }
+  .note p { margin: 0 0 8px; } .note p:last-child { margin: 0; }
+  .note ul { margin: 0; padding-left: 18px; } .note li { margin: 5px 0; }
+
+  h2.sec {
+    font-family: "Bricolage Grotesque", ui-sans-serif, sans-serif;
+    font-weight: 700; font-size: 1.7rem; letter-spacing: -.018em;
+    margin: 54px 0 8px; text-wrap: balance;
+  }
+  .sec-sub { color: var(--muted); margin: 0 0 22px; max-width: 64ch; }
+
+  /* Q&A */
+  .qa { display: grid; gap: 14px; }
+  .qa-item { background: var(--card); border: 1px solid var(--rule); border-radius: 6px; padding: 18px 20px; }
+  .qa-q {
+    font-family: "Bricolage Grotesque", ui-sans-serif, sans-serif;
+    font-weight: 700; font-size: 1.05rem; margin: 0 0 9px; color: var(--ink);
+  }
+  .qa-item p { margin: 0 0 10px; font-size: 15px; color: var(--ink-2); max-width: 66ch; }
+  .qa-item p:last-child { margin: 0; }
+
+  /* Timing table */
+  .tw { overflow-x: auto; border: 1px solid var(--rule); border-radius: 6px; background: var(--card); margin: 22px 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; min-width: 460px; }
+  th, td { text-align: left; padding: 9px 14px; border-bottom: 1px solid var(--rule); }
+  thead th {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 10.5px; font-weight: 600; letter-spacing: .08em;
+    text-transform: uppercase; color: var(--muted); background: var(--card-alt);
+  }
+  tbody tr:last-child td { border-bottom: none; }
+  td.num { text-align: right; font-family: "JetBrains Mono", ui-monospace, monospace; white-space: nowrap; }
+  tr.total td { background: var(--card-alt); font-weight: 600; border-top: 2px solid var(--rule-hard); }
+
+  footer {
+    margin-top: 56px; padding-top: 20px; border-top: 2px solid var(--ink);
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 12px; color: var(--muted); line-height: 1.7;
+  }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  @media (max-width: 680px) {
+    .slide { grid-template-columns: 1fr; gap: 10px; }
+    .rail { display: flex; align-items: baseline; gap: 14px; }
+    .rail-time { margin-top: 0; }
+  }
+</style>
+
+<div class="wrap">
+
+<header class="mast">
+  <p class="eyebrow">Companion to the Profitability Tab Status Update</p>
+  <h1>Speaker notes</h1>
+  <p class="standfirst">
+    What to say on each of the thirteen slides, written to be spoken aloud.
+    Read it through once beforehand — the wording is deliberate in a few places,
+    particularly slide 9.
+  </p>
+  <div class="mast-meta">
+    <span><b>Runtime</b> ~22 min + Q&amp;A</span>
+    <span><b>Slides</b> 13</span>
+    <span><b>Tone</b> candid, not defensive</span>
+  </div>
+</header>
+
+<div class="note warnbox" style="margin-top:26px">
+  <span class="note-l">Before you start</span>
+  <p>
+    Say the word "provisional" in the first thirty seconds and mean it. The single
+    worst outcome of this meeting is someone leaving with "we lose money on every
+    machine" in their head. The second worst is someone leaving thinking the numbers
+    are final. Frame it as: <b>the dashboard is built, the data underneath it isn't finished yet.</b>
+  </p>
+</div>
+
+<!-- 01 -->
+<div class="slide">
+  <div class="rail"><div class="rail-num">01</div><div class="rail-time">0:30</div></div>
+  <div>
+    <h3 class="slide-title">Title</h3>
+    <p class="slide-goal">Goal · set expectations before any number lands</p>
+    <div class="say">
+      <p>
+        This is a status update on the Profitability tab, under Customers in makeLILA.
+      </p>
+      <p>
+        I want to be upfront about what this is and isn't. The dashboard is built and it's
+        running on live data — but a lot of what it's showing still needs verifying. So treat
+        every number today as provisional. Nothing here should go into a board deck or in
+        front of an investor until we've closed the gaps I'm about to walk through.
+      </p>
+      <p>
+        What I want out of this session is agreement on a short list of things we need,
+        and an owner for each one.
+      </p>
+    </div>
+  </div>
+</div>
+
+<!-- 02 -->
+<div class="slide">
+  <div class="rail"><div class="rail-num">02</div><div class="rail-time">2:00</div></div>
+  <div>
+    <h3 class="slide-title">Where we stand</h3>
+    <p class="slide-goal">Goal · show the shape, then immediately defuse the margin figure</p>
+    <div class="say">
+      <p>
+        Here's the shape of the business as the tab currently sees it. 335 customers, 179 of
+        whom have actually bought something. Just under $200,000 of revenue, net of tax.
+        Against that, about $215,000 of variable cost — which gives a contribution margin of
+        <b>negative $15,680</b>.
+      </p>
+      <span class="beat">Pause here</span>
+      <p>
+        I want to stop on that number, because it's the one everyone will remember, and it's
+        the one I trust least. It says we lose money on every machine we sell. I don't believe
+        that's true, and I'll show you why in a few slides.
+      </p>
+      <p>
+        Two other things to flag. Acquisition cost reads zero for every single customer — that's
+        not because we don't spend money on ads, it's because the spend can't reach them.
+        And the warranty claim rate is 23.5%, which is measured, real, and probably the most
+        important number on this slide.
+      </p>
+    </div>
+    <div class="note">
+      <span class="note-l">If someone jumps in on the margin</span>
+      <p>
+        Don't defend it — agree and defer. "You're right that it looks bad. Hold that thought
+        for two minutes, I've got a slide on exactly why it's wrong." Then actually get to slide 9.
+      </p>
+    </div>
+  </div>
+</div>
+
+<!-- 03 -->
+<div class="slide">
+  <div class="rail"><div class="rail-num">03</div><div class="rail-time">1:00</div></div>
+  <div>
+    <h3 class="slide-title">What is live on the tab</h3>
+    <p class="slide-goal">Goal · establish the build is done, the data isn't</p>
+    <div class="say">
+      <p>
+        Quickly, what actually exists. Five views, all built, all rendering on live data.
+        An Overview with the headline KPIs and a margin waterfall. A Geography view with a
+        real map. Channels and segments. Cohorts. And a per-customer table where you can
+        click into anyone and see their full cost breakdown.
+      </p>
+      <p>
+        So this isn't a prototype. The plumbing is done. Every problem I'm going to describe
+        is in the data feeding the tab, not in the tab itself.
+      </p>
+    </div>
+  </div>
+</div>
+
+<!-- 04 -->
+<div class="slide">
+  <div class="rail"><div class="rail-num">04</div><div class="rail-time">1:00</div></div>
+  <div>
+    <h3 class="slide-title">How to read every number</h3>
+    <p class="slide-goal">Goal · teach the four labels so the rest of the deck reads itself</p>
+    <div class="say">
+      <p>
+        Before the numbers, one thing about how the tab is built, because it changes how
+        you read everything after this.
+      </p>
+      <p>
+        The model refuses to guess. If we've never priced something, it shows zero and labels
+        it "unpriced" — it doesn't quietly estimate and hope. If a number is a rate multiplied
+        by a quantity, it's marked "estimated". Only figures summed from actual bills are
+        left unmarked.
+      </p>
+      <p>
+        So: four categories. Measured, estimated, unpriced, and needs fixing. Every figure I
+        show you carries one of them. When you see "unpriced", read the margin as a best case —
+        the real cost is higher than what's on screen.
+      </p>
+    </div>
+    <div class="note">
+      <span class="note-l">Worth landing</span>
+      <p>
+        This is the design decision that makes the whole tab trustworthy even while it's
+        incomplete. It's a good thing to be proud of out loud.
+      </p>
+    </div>
+  </div>
+</div>
+
+<!-- 05 -->
+<div class="slide">
+  <div class="rail"><div class="rail-num">05</div><div class="rail-time">2:30</div></div>
+  <div>
+    <h3 class="slide-title">The eleven cost buckets</h3>
+    <p class="slide-goal">Goal · orient them on the table, then point at COGS</p>
+    <div class="say">
+      <p>
+        This is the core of it. Eleven cost buckets, and every dollar of cost belongs to
+        exactly one of them. There's a test that enforces that, so we can't accidentally
+        double-count.
+      </p>
+      <p>
+        By size: Product COGS at $151,000 is by far the biggest — that's the build cost of
+        the machines. Then refunds at $21,000, shipping at $19,000, warranty at $15,000.
+        Then the smaller ones — return handling, support labour, consumables, 3PL.
+      </p>
+      <span class="beat">Point at the right-hand column</span>
+      <p>
+        Look at the basis column. Only three of the eleven are fully measured — refunds,
+        consumables, and the invoiced part of shipping. Everything else is estimated,
+        incomplete, or unpriced. That's the honest state of it.
+      </p>
+      <p>
+        The one I'd have you remember is COGS. It's the biggest bucket by a mile, and it's
+        79% estimated.
+      </p>
+    </div>
+  </div>
+</div>
+
+<!-- 06 -->
+<div class="slide">
+  <div class="rail"><div class="rail-num">06</div><div class="rail-time">1:30</div></div>
+  <div>
+    <h3 class="slide-title">Accurate today</h3>
+    <p class="slide-goal">Goal · establish credibility before the bad news</p>
+    <div class="say">
+      <p>
+        Let's start with the good news, because there is real solid ground here.
+      </p>
+      <p>
+        Revenue, discounts and tax are exact — straight from order records. Refunds are
+        exact: 18 approvals, all settled, all reconciled. Consumables and parts are exact.
+        Freight is exact wherever we hold an invoice, and we have 169 invoiced charges on file.
+      </p>
+      <p>
+        The warranty claim rate of 23.5% is measured, and I'd stand behind it. And the US
+        versus Canada split, which I'll come back to, is robust.
+      </p>
+      <p>
+        Also worth saying: the structure of the model is sound. Eleven buckets, no double
+        counting, covered by tests. The logic isn't what's broken.
+      </p>
+    </div>
+  </div>
+</div>
+
+<!-- 07 -->
+<div class="slide">
+  <div class="rail"><div class="rail-num">07</div><div class="rail-time">2:00</div></div>
+  <div>
+    <h3 class="slide-title">Live, but resting on assumptions</h3>
+    <p class="slide-goal">Goal · make COGS the headline of this slide, not the list</p>
+    <div class="say">
+      <p>
+        Now the things that are live but resting on assumptions. These aren't wrong — the
+        arithmetic is real. But the rate underneath each one was set by hand by one person
+        and never signed off by Finance.
+      </p>
+      <p>
+        The big one is COGS. Only 72 of our 214 orders use actual build cost from a real
+        manufacturing batch. The other 142 use the roadmap schedule — which is a forecast
+        of what a unit <em>should</em> cost, not what it did cost. In dollar terms that's
+        79% of our largest cost bucket.
+      </p>
+      <p>
+        Why that matters: if the schedule is optimistic by ten percent, our headline number
+        moves by about twelve thousand dollars. So this is the single biggest lever on
+        accuracy we have.
+      </p>
+      <p>
+        Then support labour at $75 an hour. Return handling at $50 plus an hour of inspection.
+        The 3PL rate card. All reasonable numbers — none of them checked against payroll or
+        an actual invoice. And the exchange rate is one fixed number applied across all of
+        history, so older US orders get restated at today's rate.
+      </p>
+    </div>
+  </div>
+</div>
+
+<!-- 08 -->
+<div class="slide">
+  <div class="rail"><div class="rail-num">08</div><div class="rail-time">1:30</div></div>
+  <div>
+    <h3 class="slide-title">Real costs priced at zero</h3>
+    <p class="slide-goal">Goal · make the ask feel trivially cheap</p>
+    <div class="say">
+      <p>
+        These three are different. They're fully wired up, and they're showing zero purely
+        because nobody has given us a rate.
+      </p>
+      <p>
+        Payment processing is the real one. Every order goes through Shopify Payments, Sezzle
+        or QuickBooks, and they all take a cut. On our gross charges, a blended 2.9% would be
+        about <b>$6,700 of cost that's currently invisible</b>.
+      </p>
+      <p>
+        Sales commission — I genuinely don't know whether we pay it. If we do, it scales with
+        revenue and it matters.
+      </p>
+      <p>
+        Installation is probably genuinely zero, because we ship self-install. But I'd rather
+        have that confirmed than assumed.
+      </p>
+      <span class="beat">The ask</span>
+      <p>
+        These are the easiest fixes on the whole list. It's one line of config each — no code,
+        no deploy. The moment Finance gives me two percentages, every margin and LTV figure
+        on the tab updates by itself.
+      </p>
+    </div>
+  </div>
+</div>
+
+<!-- 09 -->
+<div class="slide">
+  <div class="rail"><div class="rail-num">09</div><div class="rail-time">3:00</div></div>
+  <div>
+    <h3 class="slide-title">Known to be wrong</h3>
+    <p class="slide-goal">Goal · the whole meeting turns on this slide — slow down</p>
+    <div class="say">
+      <p>
+        These two I'd call bugs. They're being displayed right now, and they're wrong.
+      </p>
+      <span class="beat">First — the one that explains the headline</span>
+      <p>
+        We sell machines on monthly payment plans. Every monthly payment arrives in the system
+        as its own separate order — and nothing in the record distinguishes an instalment from
+        a full purchase. So the model charges <b>a complete machine's build cost to every single
+        monthly payment</b>.
+      </p>
+      <p>
+        That affects 16 customers across 44 orders, and it's put roughly $19,500 of cost on the
+        books that doesn't exist. Correct just that, and the headline margin goes from negative
+        $15,680 to <b>positive $3,800 or thereabouts</b>.
+      </p>
+      <span class="beat">Say this slowly — it's the takeaway</span>
+      <p>
+        So: we are most likely profitable, and the dashboard is currently saying the opposite
+        because of one costing rule.
+      </p>
+      <p>
+        It has knock-on effects too. It inflates our order count, so revenue per order looks
+        lower than it really is. And it makes about 39 orders look like they're missing freight
+        when they aren't.
+      </p>
+      <span class="beat">Second — acquisition cost</span>
+      <p>
+        We have $69,000 of Meta spend sitting in the database. None of it reaches a customer.
+        The sync is pulling lifetime campaign totals instead of a monthly breakdown, so all the
+        spend collapses into a single month back in 2023 — a month in which we acquired nobody.
+        That's why CAC, LTV to CAC and payback are blank across the entire tab.
+      </p>
+      <p>
+        Both of these are fixable, and neither is a design flaw.
+      </p>
+    </div>
+    <div class="note critbox">
+      <span class="note-l">Do not overclaim</span>
+      <p>
+        The +$3,800 is <b>an estimate, not a restatement</b>. If pressed: it assumes each
+        affected customer should carry one machine's cost, and several of them haven't received
+        a machine at all — so the true correction is probably larger, not smaller. But say
+        "directionally" and "needs Finance to confirm" out loud. Do not let anyone write
+        "+$3,831" on a slide somewhere else.
+      </p>
+    </div>
+  </div>
+</div>
+
+<!-- 10 -->
+<div class="slide">
+  <div class="rail"><div class="rail-num">10</div><div class="rail-time">1:30</div></div>
+  <div>
+    <h3 class="slide-title">Data still missing</h3>
+    <p class="slide-goal">Goal · brisk. This is a list, not a discussion</p>
+    <div class="say">
+      <p>
+        Then a set of things that aren't wrong, just incomplete. I'll go quickly.
+      </p>
+      <p>
+        62 shipped orders have no freight cost on file at all, so freight is understated.
+        Some of that is the instalment issue, some is genuinely uninvoiced.
+      </p>
+      <p>
+        We have no spend feed for anything except Meta — so 73 customers on organic search,
+        referral, direct and email have no acquisition cost even in principle.
+      </p>
+      <p>
+        95 of our 176 shipped units aren't linked to the order that sold them, which means
+        per-unit metrics don't have a reliable denominator.
+      </p>
+      <p>
+        There's about $2,200 of HST inside our refund figures that's probably recoverable
+        from CRA. And 122 orders are carrying nearly $100,000 of build cost before they've
+        even shipped.
+      </p>
+    </div>
+  </div>
+</div>
+
+<!-- 11 -->
+<div class="slide">
+  <div class="rail"><div class="rail-num">11</div><div class="rail-time">2:00</div></div>
+  <div>
+    <h3 class="slide-title">Geography</h3>
+    <p class="slide-goal">Goal · deliver the one strong finding, then fence off the weak part</p>
+    <div class="say">
+      <p>
+        This is the clearest signal on the whole tab, and it holds up despite everything
+        I've just said.
+      </p>
+      <p>
+        The US book is profitable — 98 customers, plus $33,000, running at almost 27% margin.
+        The Canadian book is not: 163 customers, minus $48,000. Ontario alone is minus
+        $21,000 across 112 customers.
+      </p>
+      <p>
+        Some of that gap is real. Canadian orders skew heavily to discounted early-bird and
+        pre-order pricing, and essentially all of our warranty replacements have been domestic.
+      </p>
+      <span class="beat">The fence</span>
+      <p>
+        But don't read too much into the individual province rankings. Manitoba and BC at the
+        bottom there are distorted by the instalment issue — a couple of affected customers in
+        a small province swamps everything else. The country-level split is safe to use. The
+        province-level ranking isn't, yet.
+      </p>
+    </div>
+    <div class="note">
+      <span class="note-l">If asked "so should we stop selling in Canada?"</span>
+      <p>
+        No — and push back on that read. The gap is mostly discounting and warranty
+        concentration, both of which are fixable commercial decisions, not a structural
+        problem with the market. Offer to come back with a clean Canada breakdown once
+        the instalment fix lands.
+      </p>
+    </div>
+  </div>
+</div>
+
+<!-- 12 -->
+<div class="slide">
+  <div class="rail"><div class="rail-num">12</div><div class="rail-time">2:00</div></div>
+  <div>
+    <h3 class="slide-title">What we need</h3>
+    <p class="slide-goal">Goal · leave with owners and dates for the top four</p>
+    <div class="say">
+      <p>
+        So here's the ask list, in impact order.
+      </p>
+      <p>
+        One and two are engineering. We need a flag on orders that identifies an instalment
+        and links it back to the original purchase — that's a Shopify and data-model question.
+        And we need the Meta sync re-run with a monthly breakdown.
+      </p>
+      <p>
+        Three is Finance, and it's the cheapest thing on the list: a blended payment-processing
+        rate and a commission rate. Two numbers.
+      </p>
+      <p>
+        Four is manufacturing — actual landed build cost per batch for the remaining 142 orders.
+        That's the biggest accuracy gain available to us.
+      </p>
+      <p>
+        Five through eight are smaller: a Freightcom invoice export, monthly spend for non-Meta
+        channels, sign-off on the hand-set rates, and one FlexSpace invoice so we can check the
+        3PL rate card.
+      </p>
+      <p>
+        Nine is three policy decisions for Finance. Whether refunded HST should net out of the
+        refund figure. Whether we recognise cost when an order is placed or when it ships. And
+        whether we hold one exchange rate or store the rate at the order date.
+      </p>
+      <p>
+        Ten is data cleanup.
+      </p>
+      <span class="beat">Close the meeting on this</span>
+      <p>
+        What I'd like out of today is an owner and a rough date for the top four. The rest can
+        follow.
+      </p>
+    </div>
+  </div>
+</div>
+
+<!-- 13 -->
+<div class="slide">
+  <div class="rail"><div class="rail-num">13</div><div class="rail-time">1:30</div></div>
+  <div>
+    <h3 class="slide-title">Summary</h3>
+    <p class="slide-goal">Goal · leave the room with one sentence, not thirteen slides</p>
+    <div class="say">
+      <p>
+        To close.
+      </p>
+      <p>
+        The left column is what I'd be comfortable putting in front of anyone today. Revenue,
+        refunds, consumables, invoiced freight, the warranty claim rate, the US versus Canada
+        split, and the structure of the model itself.
+      </p>
+      <p>
+        The right column is what I'd hold back. The headline margin. Anything involving CAC.
+        Order-level COGS. Revenue per order. Province rankings. And any margin figure for
+        those 16 instalment customers.
+      </p>
+      <span class="beat">The one sentence</span>
+      <p>
+        The dashboard is built, wired and tested. It currently reports a loss on every machine,
+        and we have good reason to believe that's not true. Two engineering fixes and three
+        numbers from Finance turn it into something we can actually run the business on.
+      </p>
+      <p>
+        Questions?
+      </p>
+    </div>
+  </div>
+</div>
+
+<!-- ── Timing ─────────────────────────────────────────────── -->
+<h2 class="sec">Timing</h2>
+<p class="sec-sub">If you're running short, slides 3, 6 and 10 compress well. Never cut 9.</p>
+<div class="tw"><table>
+  <thead><tr><th>Slides</th><th>Segment</th><th class="num">Time</th></tr></thead>
+  <tbody>
+    <tr><td>1–4</td><td>Framing and how to read the tab</td><td class="num">4:30</td></tr>
+    <tr><td>5–6</td><td>The buckets, and what's solid</td><td class="num">4:00</td></tr>
+    <tr><td>7–8</td><td>Assumptions and unpriced costs</td><td class="num">3:30</td></tr>
+    <tr><td>9</td><td>What's wrong <b>— the core of the meeting</b></td><td class="num">3:00</td></tr>
+    <tr><td>10–11</td><td>Gaps and geography</td><td class="num">3:30</td></tr>
+    <tr><td>12–13</td><td>The ask and the close</td><td class="num">3:30</td></tr>
+    <tr class="total"><td colspan="2">Total, before questions</td><td class="num">22:00</td></tr>
+  </tbody>
+</table></div>
+
+<!-- ── Q&A ────────────────────────────────────────────────── -->
+<h2 class="sec">Likely questions</h2>
+<p class="sec-sub">The first three will almost certainly come up.</p>
+
+<div class="qa">
+
+  <div class="qa-item">
+    <p class="qa-q">"So are we profitable or not?"</p>
+    <p>
+      "On the machines themselves, probably yes, marginally — once the instalment costing is
+      fixed. But I want to be careful: that's contribution margin only. It excludes overheads,
+      salaries, the 3PL's fixed monthly fees, and it excludes acquisition cost entirely because
+      we can't calculate it yet. So 'the unit economics look roughly break-even to slightly
+      positive' is as far as I'd go today."
+    </p>
+  </div>
+
+  <div class="qa-item">
+    <p class="qa-q">"How confident are you in the plus $3,800?"</p>
+    <p>
+      "Directionally confident, precisely not. It assumes each affected customer should carry
+      exactly one machine's cost. Several of them haven't received a machine at all, so the
+      real correction is probably bigger. I'd treat it as 'the sign flips', not as a number."
+    </p>
+  </div>
+
+  <div class="qa-item">
+    <p class="qa-q">"Why is COGS estimated? Don't we know what our own machines cost?"</p>
+    <p>
+      "We do for the batches we've costed — that's the 72 orders. The other 142 were sold
+      before we had batch-level costing in place, or against batches we haven't closed the
+      books on. It's not that the information doesn't exist; it's that it hasn't been entered
+      against those orders. That's ask number four."
+    </p>
+  </div>
+
+  <div class="qa-item">
+    <p class="qa-q">"A 23.5% warranty claim rate — is that normal?"</p>
+    <p>
+      "It's high for hardware, and it's one of the few numbers on the tab I'd fully stand
+      behind. I'd treat it as a genuine finding rather than a data problem. Worth its own
+      session — the tab can tell you which regions and which batches, but not why."
+    </p>
+  </div>
+
+  <div class="qa-item">
+    <p class="qa-q">"How long to fix the instalment issue?"</p>
+    <p>
+      "The engineering is small. The blocker is a decision, not effort: we need to agree how
+      an instalment gets identified — a Shopify tag, a subscription contract ID, or a parent
+      order reference. Once that's decided it's a straightforward change. I'd rather not guess
+      at the mechanism and have to redo it."
+    </p>
+  </div>
+
+  <div class="qa-item">
+    <p class="qa-q">"Should we take the tab down until it's right?"</p>
+    <p>
+      "I'd rather not. Everything on it is labelled with its basis, so it's honest about its
+      own gaps — that's exactly what it was built to do. Taking it down loses the thing that's
+      generating these questions in the first place. What I would do is agree that nobody
+      quotes the margin number externally until we've closed items one through four."
+    </p>
+  </div>
+
+  <div class="qa-item">
+    <p class="qa-q">"What is the $69,000 of Meta spend telling us then?"</p>
+    <p>
+      "Right now, only that we spent it. We can't yet attach it to the customers it won, so
+      we have no cost per acquisition and no LTV-to-CAC ratio anywhere. The good news is the
+      customer side is ready — 198 of our 214 orders already carry a channel. It's purely the
+      spend feed that's broken. Fix that one sync and CAC lights up across the whole tab."
+    </p>
+  </div>
+
+  <div class="qa-item">
+    <p class="qa-q">"Why does Canada look so much worse than the US?"</p>
+    <p>
+      "Three things, and only the third is a data problem. Canadian orders skew heavily to
+      discounted early-bird and pre-order pricing. Essentially all our warranty replacements
+      have been domestic, so that cost concentrates there. And the instalment customers are
+      almost all Canadian, which drags the small provinces badly. The first two are real; the
+      third will partly wash out once we fix it."
+    </p>
+  </div>
+
+</div>
+
+<footer>
+  Companion to <b>Profitability Tab Status Update</b> · 28 Aug 2026<br>
+  All figures provisional and not finance-verified.
+</footer>
+
+</div>

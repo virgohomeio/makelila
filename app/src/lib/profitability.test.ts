@@ -5,9 +5,10 @@ import {
   cacPayback, channelLabel, costCoverage, customerMetrics, isUnpriced,
   monthKey, portfolio, profitDistribution, projectedLtv, quarterKey,
   reliability, rollup, sumCosts, variableCosts, volumeSegment, waterfall,
-  aggregateCosts, costsBasis, marginBasis,
+  aggregateCosts, costsBasis, marginBasis, retainedUnits,
   type AcquisitionSpendRow,
 } from './profitability';
+import type { RetainedUnitCost } from './customers';
 
 /** A customer with nothing going on. Every test starts here and changes only
  *  the fields it is about, so a number appearing in an assertion always traces
@@ -637,5 +638,63 @@ describe('helpers', () => {
     expect(channelLabel('paid_social')).toBe('Paid social');
     expect(channelLabel('tiktok')).toBe('tiktok');
     expect(channelLabel(null)).toBe('Unattributed');
+  });
+});
+
+/** A cancelled sale order and the machine LILA kept because of it. */
+function retained(over: Partial<RetainedUnitCost> = {}): RetainedUnitCost {
+  return {
+    order_id: 'o1', order_ref: '#1013', customer_name: 'Test Customer',
+    placed_at: '2026-03-13', cancelled_at: '2026-03-20',
+    cogs_basis: 'batch_actual', cogs_cad: 436.11, freight_cad: 0,
+    units_retained: 1,
+    ...over,
+  };
+}
+
+describe('retained units', () => {
+  it('sums build cost and freight into one company-level figure', () => {
+    const r = retainedUnits([
+      retained({ order_id: 'o1', cogs_cad: 436.11 }),
+      retained({ order_id: 'o2', cogs_cad: 913.89 }),
+    ]);
+    expect(r.orders).toBe(2);
+    expect(r.units).toBe(2);
+    expect(r.cogs).toBeCloseTo(1350.00, 2);
+    expect(r.freight).toBe(0);
+    expect(r.total).toBeCloseTo(1350.00, 2);
+  });
+
+  it('counts the orders that had already shipped when they were cancelled', () => {
+    const r = retainedUnits([
+      retained({ order_id: 'o1', freight_cad: 147.32 }),
+      retained({ order_id: 'o2', freight_cad: 0 }),
+      retained({ order_id: 'o3', freight_cad: 173.40 }),
+    ]);
+    expect(r.shippedBeforeCancel).toBe(2);
+    expect(r.freight).toBeCloseTo(320.72, 2);
+    expect(r.total).toBeCloseTo(436.11 * 3 + 320.72, 2);
+  });
+
+  it('flags a schedule-costed unit so the figure is marked estimated', () => {
+    expect(retainedUnits([retained({ cogs_basis: 'batch_actual' })]).anyModelled).toBe(false);
+    expect(retainedUnits([
+      retained({ order_id: 'o1', cogs_basis: 'batch_actual' }),
+      retained({ order_id: 'o2', cogs_basis: 'schedule' }),
+    ]).anyModelled).toBe(true);
+  });
+
+  it('adds a multi-unit cancelled order by its quantity, not its order count', () => {
+    const r = retainedUnits([retained({ units_retained: 3, cogs_cad: 1308.33 })]);
+    expect(r.orders).toBe(1);
+    expect(r.units).toBe(3);
+  });
+
+  it('comes back empty rather than throwing when nothing was cancelled', () => {
+    const r = retainedUnits([]);
+    expect(r).toEqual({
+      orders: 0, units: 0, cogs: 0, freight: 0, total: 0,
+      shippedBeforeCancel: 0, anyModelled: false,
+    });
   });
 });

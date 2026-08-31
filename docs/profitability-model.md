@@ -47,7 +47,7 @@ last year is restated at today's rate.
 
 | Metric | Formula | Source | Basis |
 |---|---|---|---|
-| Revenue | `Σ (total_usd − tax_usd)` over sale orders | `orders` | Actual |
+| Revenue | `Σ (total_usd − tax_usd)` over sale orders, cancelled included | `orders` | Actual |
 | Gross revenue | `revenue + discounts` | `orders.discount_total_usd` | Actual |
 | Discount rate | `discounts ÷ gross revenue` | `orders` | Actual |
 | Initial unit revenue | Net revenue of the **first** sale order | `orders`, earliest `placed_at` | Actual |
@@ -57,6 +57,34 @@ last year is restated at today's rate.
 
 **Tax is not revenue.** Sales tax is collected for the government and passed
 through, so it is excluded from revenue and shown separately.
+
+**A cancelled order keeps its revenue and loses its cost** (V16, 2026-08-28).
+
+*Revenue stays.* A cancelled order was a sale, so it counts, and the refund
+subtracts it through bucket 4. One reversal, not two — a cancellation refunded
+in full nets to zero on the customer's record.
+
+*Cost leaves.* LILA keeps the machine, so its COGS and freight do not belong to
+the person who cancelled. They move to `public.retained_unit_costs`, a
+company-level view with no customer id, surfaced on the Overview as a line
+**beside** contribution margin. No dollar can appear in both places: the view
+reads only cancelled sale orders, which are exactly the orders excluded from the
+COGS and freight buckets.
+
+Today that is 13 orders, 13 machines, $8,724.98 of build cost plus $778.68 of
+freight on the four that shipped before they were cancelled — $9,503.66 in
+total. Contribution margin improved by $15,556.52 against V14, all of it cost
+that left the customers who cancelled.
+
+**Test orders are not retained machines.** Pedrum's seven cancelled orders
+(#1013, #1014, #1089, #1101, #1105, #1106, #1193) are test data — no machine was
+built — so `retained_unit_costs` excludes team accounts outright. Including them
+would have invented $6,052.78.
+
+> V15, shipped and superseded the same day, also removed the revenue. That broke
+> the refund: the approval reversing the sale was still a cost, so the reversal
+> counted twice and five customers' margins overstated the loss by $6,547.69.
+> V16 is the correction.
 
 **Units.** Sale-order count is the unit denominator. `units_shipped_count`
 counts orders with a machine traced to them via `units.customer_order_ref`, but

@@ -745,6 +745,41 @@
   color: #b7791f;
 }
 
+/* ── Retained units ───────────────────────────────────────────────────────────
+   Cost that belongs to no customer. A cancelled order is credited back and the
+   machine returns to stock, so it sits outside contribution margin — but the
+   machine was built, so it must stay visible. Deliberately styled as an aside
+   rather than a KPI: it is a real number, and it is not part of the total
+   above it. */
+.retainedBand {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 18px;
+  margin: 12px 0 4px;
+  padding: 12px 16px;
+  background: #fdfaf3;
+  border: 1px solid #f0e4c8;
+  border-left: 4px solid #d69e2e;
+  border-radius: 8px;
+}
+.retainedBandLabel {
+  font-size: .8rem;
+  font-weight: 600;
+  color: #7a5c12;
+}
+.retainedBandValue {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #2d3748;
+  font-variant-numeric: tabular-nums;
+}
+.retainedBandNote {
+  font-size: .78rem;
+  color: #8a7448;
+  flex: 1 1 220px;
+}
+
 /* ── Estimate marking ─────────────────────────────────────────────────────────
    The model never presents an unmeasured number as measured, which only holds
    if the reader can see which is which. Every figure that rests on a rate

@@ -23,7 +23,7 @@
  *  See docs/profitability-model.md for the formula-by-formula write-up.
  */
 
-import type { CustomerProfitability } from './customers';
+import type { CustomerProfitability, RetainedUnitCost } from './customers';
 import { regionName } from './regions';
 
 // ── Rates and assumptions ───────────────────────────────────────────────────
@@ -692,6 +692,45 @@ export function portfolio(metrics: CustomerMetrics[]): PortfolioMetrics {
     paybackImmediate:   metrics.filter(m => m.payback.status === 'immediate').length,
     paybackOutstanding: metrics.filter(m => m.payback.status === 'not_recovered').length,
     recurringRevenue:   metrics.reduce((s, m) => s + m.recurringRevenue, 0),
+  };
+}
+
+// ── Retained units: what a cancellation costs the company ───────────────────
+
+/** Cost carried by nobody in particular.
+ *
+ *  When an order is cancelled LILA keeps the machine, so its build cost does not
+ *  belong to the person who cancelled. Their revenue stays where it is and the
+ *  refund reverses it once, through bucket 4; only the cost moves here. Four of
+ *  the machines had already shipped, so their freight moves with them.
+ *
+ *  This is bucket-neutral by construction. `retained_unit_costs` reads only
+ *  cancelled sale orders, and V16 excludes exactly those orders from the COGS
+ *  and freight buckets, so no dollar can appear in both places. Test orders on
+ *  team accounts are excluded by the view: no machine, nothing to retain. */
+export type RetainedUnits = {
+  orders: number;
+  units: number;
+  cogs: number;
+  freight: number;
+  total: number;
+  /** Cancelled after the machine had already gone out — freight was spent. */
+  shippedBeforeCancel: number;
+  /** True when any unit is costed from the roadmap schedule, not a batch. */
+  anyModelled: boolean;
+};
+
+export function retainedUnits(rows: RetainedUnitCost[]): RetainedUnits {
+  const cogs = rows.reduce((s, r) => s + r.cogs_cad, 0);
+  const freight = rows.reduce((s, r) => s + r.freight_cad, 0);
+  return {
+    orders: rows.length,
+    units: rows.reduce((s, r) => s + r.units_retained, 0),
+    cogs,
+    freight,
+    total: cogs + freight,
+    shippedBeforeCancel: rows.filter(r => r.freight_cad > 0).length,
+    anyModelled: rows.some(r => r.cogs_basis === 'schedule'),
   };
 }
 
