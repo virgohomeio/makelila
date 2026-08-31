@@ -297,3 +297,36 @@ describe('SupportTab replacement queue labels', () => {
     expect(tableText()).toContain('Queued for P150 Replacement');
   });
 });
+
+// The device-context chip counts open support tickets for one unit and links
+// here with ?unit_serial=. Landing with the list unfiltered is what let the
+// chip's number go unchecked, so the param has to narrow the queue.
+describe('SupportTab ?unit_serial= deep link', () => {
+  const renderAt = (url: string) =>
+    rtlRender(<MemoryRouter initialEntries={[url]}>{<SupportTab />}</MemoryRouter>);
+
+  beforeEach(() => {
+    ticketsToReturn = [
+      mkTicket({ id: 'u1', unit_serial: 'LL01-00000000244', subject: 'this unit', customer_name: 'Teresa' }),
+      mkTicket({ id: 'u2', unit_serial: 'LL01-00000000999', subject: 'another unit', customer_name: 'Bob' }),
+    ];
+  });
+
+  it('narrows the queue to the linked unit', () => {
+    renderAt('/service?tab=support&unit_serial=LL01-00000000244');
+    expect(screen.getAllByText('this unit').length).toBeGreaterThan(0);
+    expect(screen.queryByText('another unit')).toBeNull();
+  });
+
+  it('shows the serial in the search box so the operator can see why the list is short', () => {
+    renderAt('/service?tab=support&unit_serial=LL01-00000000244');
+    const search = screen.getByLabelText(/search tickets/i) as HTMLInputElement;
+    expect(search.value).toBe('LL01-00000000244');
+  });
+
+  it('leaves the queue whole with no unit_serial param', () => {
+    renderAt('/service?tab=support');
+    expect(screen.getAllByText('this unit').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('another unit').length).toBeGreaterThan(0);
+  });
+});

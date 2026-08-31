@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   useServiceTickets, useTicketsClosedSince, createTicket, syncGmailTickets,
   STATUS_META, TICKET_STATUSES, TOPIC_LABEL,
@@ -53,7 +54,13 @@ export function SupportTab() {
   const [ownerFilter, setOwnerFilter] = useState<OwnerFilter>('all');
   const [savedView, setSavedView] = useState<SavedView>(null);
   const [view, setView] = useState<ViewMode>('list');
-  const [q, setQ] = useState('');
+  // The device-context chip links here as ?unit_serial=<serial>. Seed the
+  // search box from it rather than filtering invisibly, so the operator can
+  // see why the queue is short — and consume the param so clearing the search
+  // doesn't re-apply it on the next render.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const unitParam = searchParams.get('unit_serial');
+  const [q, setQ] = useState(unitParam ?? '');
   // Resolved once per render pass so every row on screen measures dwell
   // against the same instant.
   const now = Date.now();
@@ -63,6 +70,12 @@ export function SupportTab() {
   const [newPreset, setNewPreset] = useState<Customer | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!unitParam) return;
+    setQ(unitParam);
+    setSearchParams(prev => { prev.delete('unit_serial'); return prev; }, { replace: true });
+  }, [unitParam, setSearchParams]);
 
   const filtered = useMemo(() => {
     return tickets.filter(t => {
@@ -87,6 +100,7 @@ export function SupportTab() {
           (t.customer_name ?? '').toLowerCase().includes(needle) ||
           (t.customer_email ?? '').toLowerCase().includes(needle) ||
           (t.summary ?? '').toLowerCase().includes(needle) ||
+          (t.unit_serial ?? '').toLowerCase().includes(needle) ||
           t.ticket_number.toLowerCase().includes(needle)
         );
       }

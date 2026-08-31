@@ -1879,10 +1879,40 @@ async function fetchDeviceContextTelemetry(unitSerial: string): Promise<DeviceCo
   return result;
 }
 
+/** Open tickets against one unit, counted the way the Support Tickets tab
+ *  counts them. `service_tickets` is a multi-purpose table and an unscoped
+ *  count reads far too high:
+ *    · kind='conversation' rows are untriaged Gmail/Quo threads. They are not
+ *      tickets, never carry status='closed', and sit in no queue the chip can
+ *      link to — 176 of them were being counted as open tickets.
+ *    · category 'onboarding' and 'diagnosis_call' tickets are closed out in
+ *      `customer_lifecycle` / the Follow-Ups calendar, never through `status`.
+ *      Not one has ever reached 'closed', so counting them pins the chip open
+ *      for the life of the customer.
+ *  That leaves 'support' — the population `useServiceTickets('support')` loads,
+ *  which is what the operator sees when they click the chip through. */
+function countOpenSupportTickets(unitSerial: string, excludeTicketId?: string) {
+  const q = supabase
+    .from('service_tickets')
+    .select('id', { count: 'exact', head: true })
+    .eq('unit_serial', unitSerial)
+    .eq('kind', 'ticket')
+    .eq('category', 'support')
+    .neq('status', 'closed');
+  return excludeTicketId ? q.neq('id', excludeTicketId) : q;
+}
+
 /** Hook that aggregates device context for a unit serial:
  *  unit QC fields, latest telemetry state, open ticket count,
- *  return count, and warranty registration. Used by DeviceContextHeader. */
-export function useDeviceContext(unitSerial: string | null): DeviceContext {
+ *  return count, and warranty registration. Used by DeviceContextHeader.
+ *
+ *  `excludeTicketId` drops the ticket the operator is already looking at, so
+ *  the chip reads "other open tickets" rather than counting the ticket on
+ *  screen as news. */
+export function useDeviceContext(
+  unitSerial: string | null,
+  excludeTicketId?: string,
+): DeviceContext {
   const warranty = useWarrantyRegistration(unitSerial);
   const [unit, setUnit] = useState<DeviceContextUnit | null>(null);
   const [telemetry, setTelemetry] = useState<DeviceContextTelemetry | null>(null);
@@ -1910,11 +1940,7 @@ export function useDeviceContext(unitSerial: string | null): DeviceContext {
           .select('firmware_version, electrical_check, mechanical_check, defect_notes, technician, status_updated_at, test_report_uploaded_at')
           .eq('serial', unitSerial)
           .maybeSingle(),
-        supabase
-          .from('service_tickets')
-          .select('id', { count: 'exact', head: true })
-          .eq('unit_serial', unitSerial)
-          .not('status', 'eq', 'closed'),
+        countOpenSupportTickets(unitSerial, excludeTicketId),
         supabase
           .from('returns')
           .select('id', { count: 'exact', head: true })
@@ -1938,7 +1964,7 @@ export function useDeviceContext(unitSerial: string | null): DeviceContext {
 
     return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [unitSerial]);
+  }, [unitSerial, excludeTicketId]);
 
   return { unit, telemetry, openTicketCount, returnCount, warranty, loading: loading || warranty.loading };
 }

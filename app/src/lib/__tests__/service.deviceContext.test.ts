@@ -6,46 +6,51 @@ import { useDeviceContext } from '../service';
 //
 // The hook calls supabase.from(...) for three tables in parallel:
 //   units            → .select().eq().maybeSingle()
-//   service_tickets  → .select(..., {count:'exact', head:true}).eq().not()  → { count }
-//   returns          → .select(..., {count:'exact', head:true}).eq()         → { count }
+//   service_tickets  → .select(..., {count:'exact', head:true}).eq()…  → { count }
+//   returns          → .select(..., {count:'exact', head:true}).eq()   → { count }
 //
-// We key the per-table results on the table name so parallel calls are safe.
+// The builder is a Proxy so ANY chain method works, and every call is recorded
+// per table. Recording matters: the open-ticket count is only correct if the
+// right *filters* are applied, and a mock that returns a fixed count no matter
+// what is asked cannot tell a scoped query from an unscoped one.
 
 type TableResult = { data: unknown; error: unknown; count?: number | null };
+type Call = [string, ...unknown[]];
 
 const tableResults: Record<string, TableResult> = {};
+const tableCalls: Record<string, Call[]> = {};
 
-const makeQueryBuilder = (result: TableResult) => {
-  // Every chain method returns a thenable builder.
-  // .eq() is BOTH intermediate (units chain: .select().eq().maybeSingle())
-  // and terminal (returns chain: .select(...,{head}).eq()  awaited directly).
-  // We make .eq() return a Promise that also has chain methods attached,
-  // so both uses work.
-  const b: Record<string, unknown> = {};
+const makeQueryBuilder = (table: string, result: TableResult) => {
+  const calls: Call[] = [];
+  tableCalls[table] = calls;
 
-  const makeTerminalPromise = (): Promise<TableResult> & Record<string, unknown> => {
-    const p = Promise.resolve(result) as Promise<TableResult> & Record<string, unknown>;
-    p.maybeSingle = () => Promise.resolve(result);
-    p.not         = () => Promise.resolve(result);
-    p.eq          = makeTerminalPromise;
-    p.is          = makeTerminalPromise;
-    return p;
-  };
+  const proxy: Record<string, unknown> = new Proxy({}, {
+    get(_t, prop) {
+      if (typeof prop === 'symbol') return undefined;
+      // Thenable: `await builder` / Promise.all resolves to the table result.
+      if (prop === 'then') {
+        return (res: (v: TableResult) => unknown, rej: (e: unknown) => unknown) =>
+          Promise.resolve(result).then(res, rej);
+      }
+      // Terminal row-getters resolve instead of continuing the chain.
+      if (prop === 'maybeSingle' || prop === 'single') {
+        return (...args: unknown[]) => {
+          calls.push([prop, ...args]);
+          return Promise.resolve(result);
+        };
+      }
+      return (...args: unknown[]) => { calls.push([prop, ...args]); return proxy; };
+    },
+  }) as Record<string, unknown>;
 
-  b.select      = () => b;
-  b.is          = () => b;
-  b.not         = () => Promise.resolve(result);    // service_tickets terminal
-  b.maybeSingle = () => Promise.resolve(result);    // units terminal
-  b.eq          = makeTerminalPromise;              // returns terminal OR intermediate
-
-  return b;
+  return proxy;
 };
 
 vi.mock('../supabase', () => ({
   supabase: {
     from: (table: string) => {
       const result: TableResult = tableResults[table] ?? { data: null, error: null, count: 0 };
-      return makeQueryBuilder(result);
+      return makeQueryBuilder(table, result);
     },
     auth: {
       // useWarrantyRegistration never fires when unitSerial is null; for
@@ -68,6 +73,7 @@ describe('useDeviceContext', () => {
   beforeEach(() => {
     // Reset per-table results to safe defaults before each test.
     Object.keys(tableResults).forEach(k => { delete tableResults[k]; });
+    Object.keys(tableCalls).forEach(k => { delete tableCalls[k]; });
     tableResults['units']              = { data: null,  error: null, count: null };
     tableResults['service_tickets']    = { data: null,  error: null, count: 0    };
     tableResults['returns']            = { data: null,  error: null, count: 0    };
@@ -90,6 +96,44 @@ describe('useDeviceContext', () => {
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.openTicketCount).toBe(3);
     expect(result.current.returnCount).toBe(0);
+  });
+
+  // ── The chip must count the same population the Support tab shows ──────────
+  //
+  // `service_tickets` is a multi-purpose table: kind='conversation' rows are
+  // untriaged Gmail/Quo threads (never closed), and category onboarding /
+  // diagnosis_call tickets close out in customer_lifecycle rather than via
+  // status. Counting any of them inflates the chip against the queue.
+
+  it('counts only kind=ticket rows, so inbox conversations are excluded', async () => {
+    renderHook(() => useDeviceContext('LL01-001'));
+    await waitFor(() => expect(tableCalls['service_tickets']).toBeTruthy());
+    expect(tableCalls['service_tickets']).toContainEqual(['eq', 'kind', 'ticket']);
+  });
+
+  it('counts only support-category tickets, so onboarding/diagnosis calls are excluded', async () => {
+    renderHook(() => useDeviceContext('LL01-001'));
+    await waitFor(() => expect(tableCalls['service_tickets']).toBeTruthy());
+    expect(tableCalls['service_tickets']).toContainEqual(['eq', 'category', 'support']);
+  });
+
+  it('scopes the count to the unit and to non-closed tickets', async () => {
+    renderHook(() => useDeviceContext('LL01-001'));
+    await waitFor(() => expect(tableCalls['service_tickets']).toBeTruthy());
+    expect(tableCalls['service_tickets']).toContainEqual(['eq', 'unit_serial', 'LL01-001']);
+    expect(tableCalls['service_tickets']).toContainEqual(['neq', 'status', 'closed']);
+  });
+
+  it('excludes the ticket being viewed when excludeTicketId is given', async () => {
+    renderHook(() => useDeviceContext('LL01-001', 'ticket-abc'));
+    await waitFor(() => expect(tableCalls['service_tickets']).toBeTruthy());
+    expect(tableCalls['service_tickets']).toContainEqual(['neq', 'id', 'ticket-abc']);
+  });
+
+  it('does not filter on id when no ticket is being viewed', async () => {
+    renderHook(() => useDeviceContext('LL01-001'));
+    await waitFor(() => expect(tableCalls['service_tickets']).toBeTruthy());
+    expect(tableCalls['service_tickets'].some(c => c[0] === 'neq' && c[1] === 'id')).toBe(false);
   });
 
   it('surfaces returnCount from the returns count query', async () => {
