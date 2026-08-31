@@ -1,7 +1,8 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import ReplacementPickerModal from './ReplacementPickerModal';
-import { useCustomers, sendFollowupSms } from '../../lib/customers';
+import { useCustomers, sendFollowupSms, buildPartyResolver, type CustomerPartyRow } from '../../lib/customers';
+import { CustomerPartyName } from '../../components/CustomerPartyName';
 import {
   type ServiceTicket, type IssueArea, type TicketCategory,
   STATUS_META, CATEGORY_META, PRIORITY_META, TICKET_STATUSES,
@@ -123,6 +124,24 @@ export function TicketDetailPanel({ ticket, onClose, showDeviceContext = true }:
   const linkedCustomer = useMemo(() =>
     ticket.customer_id ? customers.find(c => c.id === ticket.customer_id) : null,
     [customers, ticket.customer_id]);
+  // FR-6: who this ticket is about. The primary user leads (they're the one
+  // running the machine and the one we're talking to); the purchaser stays on
+  // screen because the warranty and any refund belong to them.
+  const parties = useMemo(
+    () => buildPartyResolver(customers as CustomerPartyRow[])({
+      customerId: ticket.customer_id,
+      fallbackName: ticket.customer_name,
+      fallbackPhone: ticket.customer_phone,
+      fallbackEmail: ticket.customer_email,
+    }),
+    [customers, ticket.customer_id, ticket.customer_name, ticket.customer_phone, ticket.customer_email],
+  );
+  // The send-followup-sms edge function resolves the destination from
+  // customers.phone server-side, so a primary user with their own number on
+  // file will NOT receive it. Surfaced in the dialog rather than papered over.
+  const smsPhone = linkedCustomer?.phone ?? ticket.customer_phone ?? null;
+  const smsMissesPrimaryUser =
+    parties.split && !!parties.phone && !!smsPhone && parties.phone !== smsPhone;
   const pickerAddress = useMemo(() => ({
     address_line: linkedCustomer?.address_line ?? null,
     city: linkedCustomer?.city ?? '',
@@ -159,13 +178,14 @@ export function TicketDetailPanel({ ticket, onClose, showDeviceContext = true }:
     }
   }
 
-  // Backlog #75 — default body interpolates the customer's first name
-  // from customer_name; falls back to "there" when name is missing so
-  // the message still reads naturally. Operator can edit before sending.
+  // Backlog #75 — default body interpolates a first name; falls back to
+  // "there" when no name is known so the message still reads naturally.
+  // FR-6: greet the PRIMARY USER — they're the person running the machine and
+  // the one who'll be on the diagnosis call. Operator can edit before sending.
   const diagDefaultBody = useMemo(() => {
-    const fn = (ticket.customer_name ?? '').trim().split(/\s+/)[0] || 'there';
+    const fn = (parties.displayName || ticket.customer_name || '').trim().split(/\s+/)[0] || 'there';
     return CANNED_SMS_TEMPLATES.diagnosis_call_request.body(fn);
-  }, [ticket.customer_name]);
+  }, [parties.displayName, ticket.customer_name]);
   const [diagBody, setDiagBody] = useState(diagDefaultBody);
 
   // Feature 3 — "Link to engineering" dialog state.
@@ -396,7 +416,9 @@ export function TicketDetailPanel({ ticket, onClose, showDeviceContext = true }:
           <div className={styles.detailSectionLabel}>Customer</div>
           <div className={styles.detailFieldGrid}>
             <span className={styles.detailFieldLabel}>Name</span>
-            <span className={styles.detailFieldValue}>{ticket.customer_name ?? '—'}</span>
+            <span className={styles.detailFieldValue}>
+              <CustomerPartyName parties={parties} />
+            </span>
             <span className={styles.detailFieldLabel}>Email</span>
             <span className={styles.detailFieldValue}>{ticket.customer_email ?? '—'}</span>
             <span className={styles.detailFieldLabel}>Phone</span>
@@ -504,8 +526,15 @@ export function TicketDetailPanel({ ticket, onClose, showDeviceContext = true }:
             <div className={styles.diagModal} onClick={e => e.stopPropagation()}>
               <div className={styles.diagModalTitle}>Send diagnosis-call link</div>
               <div className={styles.diagModalMeta}>
-                To: {ticket.customer_name ?? '—'} ({ticket.customer_phone ?? 'no phone on file'})
+                To: {parties.displayName || '—'} ({smsPhone ?? 'no phone on file'})
               </div>
+              {smsMissesPrimaryUser && (
+                <div className={styles.diagModalWarn}>
+                  {parties.displayName} has {parties.phone} on file, but this send
+                  goes to the purchaser's number ({smsPhone}) — the SMS function
+                  resolves the destination from the customer record.
+                </div>
+              )}
               <textarea
                 className={styles.diagModalTextarea}
                 value={diagBody}

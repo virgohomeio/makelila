@@ -93,3 +93,48 @@ describe('OverdueFollowupPanel', () => {
     await waitFor(() => expect(screen.getByText(/— skipped/i)).toBeInTheDocument());
   });
 });
+
+// FR-6: the follow-up asks how the machine is going, so it's addressed to the
+// person using it. The SMS itself still routes through send-followup-sms,
+// which resolves the destination from customers.phone server-side — so only
+// the name changes here, not where the message lands.
+describe('OverdueFollowupPanel — addresses the primary user', () => {
+  const partiesFor = () => ({
+    displayName: 'Sarah Wu', purchaserName: 'Chad Wu', split: true,
+    relationship: null, phone: null, email: null,
+  });
+
+  it('names the primary user in the row header', async () => {
+    generateMock.mockResolvedValue({
+      drafts: [{
+        customer_id: 'c-chad', customer_name: 'Chad Wu', customer_phone: '+15551111',
+        days_overdue: 5, fu_kind: 'fu1',
+        draft_message: 'how is it going?', skip_reason: null, context_summary: '',
+      }],
+    });
+    render(
+      <OverdueFollowupPanel
+        overdueCount={1}
+        overdueCustomerIds={['c-chad']}
+        partiesFor={partiesFor}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /generate/i }));
+    await waitFor(() => screen.getByText(/how is it going/i));
+    expect(screen.getByText(/Sarah Wu/)).toBeTruthy();
+  });
+
+  it('falls back to the draft name with no resolver supplied', async () => {
+    generateMock.mockResolvedValue({
+      drafts: [{
+        customer_id: 'c1', customer_name: 'Alice', customer_phone: '+15551111',
+        days_overdue: 5, fu_kind: 'fu1',
+        draft_message: 'hey alice!', skip_reason: null, context_summary: '',
+      }],
+    });
+    render(<OverdueFollowupPanel overdueCount={1} overdueCustomerIds={['c1']} />);
+    fireEvent.click(screen.getByRole('button', { name: /generate/i }));
+    await waitFor(() => screen.getByText(/hey alice/i));
+    expect(screen.getByText(/Alice/)).toBeTruthy();
+  });
+});

@@ -160,3 +160,37 @@ describe('ActionItemKanban', () => {
     expect(within(column('Overdue')).getByText('task late')).toBeInTheDocument();
   });
 });
+
+// FR-6: kanban cards are dense, so the household renders on one line — but the
+// purchaser is never dropped, only de-emphasised.
+describe('ActionItemKanban — purchaser vs primary user', () => {
+  beforeEach(() => { itemsToReturn = [mkItem('i1', TODAY)]; });
+  const expand = () => fireEvent.click(screen.getByRole('button', { name: /Action items by week/ }));
+
+  it('names the primary user and keeps the purchaser on the card', () => {
+    render(
+      <ActionItemKanban
+        tickets={[mkTicket('t1', { customer_id: 'c-chad', customer_name: 'Chad Wu' })]}
+        onSelectTicket={() => {}}
+        partiesFor={() => ({
+          displayName: 'Sarah Wu', purchaserName: 'Chad Wu', split: true,
+          relationship: null, phone: null, email: null,
+        })}
+      />,
+    );
+    expand();
+    expect(screen.getByText(/Sarah Wu/)).toBeTruthy();
+    expect(screen.getByText(/Chad Wu/)).toBeTruthy();
+  });
+
+  it('falls back to the ticket snapshot with no resolver supplied', () => {
+    render(
+      <ActionItemKanban
+        tickets={[mkTicket('t1', { customer_name: 'Alice' })]}
+        onSelectTicket={() => {}}
+      />,
+    );
+    expand();
+    expect(screen.getByText(/Alice/)).toBeTruthy();
+  });
+});

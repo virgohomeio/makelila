@@ -49,12 +49,18 @@ function mkConv(partial: Partial<ServiceTicket> & { id: string }): ServiceTicket
 const { setDispositionMock } = vi.hoisted(() => ({
   setDispositionMock: vi.fn().mockResolvedValue(undefined),
 }));
+let inboxRows: ServiceTicket[] | null = null;
+let customersToReturn: unknown[] = [];
+vi.mock('../../../lib/customers', async () => {
+  const actual = await vi.importActual<typeof import('../../../lib/customers')>('../../../lib/customers');
+  return { ...actual, useCustomers: vi.fn(() => ({ customers: customersToReturn })) };
+});
 vi.mock('../../../lib/service', async () => {
   const actual = await vi.importActual<typeof import('../../../lib/service')>('../../../lib/service');
   return {
     ...actual,
     useInbox: vi.fn(() => ({
-      rows: [
+      rows: inboxRows ?? [
         mkConv({ id: 'c1', customer_name: 'Alice', description: 'I need help' }),
         mkConv({ id: 'c2', source: 'gmail', subject: 'sales inquiry', description: 'Want a demo' }),
       ],
@@ -65,7 +71,7 @@ vi.mock('../../../lib/service', async () => {
   };
 });
 
-beforeEach(() => { setDispositionMock.mockClear(); });
+beforeEach(() => { setDispositionMock.mockClear(); inboxRows = null; customersToReturn = []; });
 
 describe('InboxTab', () => {
   it('renders one row per conversation with channel icon + customer', () => {
@@ -97,5 +103,28 @@ describe('InboxTab', () => {
     const buttons = within(table).getAllByRole('button', { name: /^follow-up$/i });
     fireEvent.click(buttons[0]);
     expect(setDispositionMock).toHaveBeenCalledWith('c1', 'follow_up');
+  });
+});
+
+// FR-6: inbox rows are service_tickets with kind='conversation' — the same
+// customer_id linkage as every other Service surface, so they resolve the same
+// household. Dense table, so the inline variant keeps it to one line.
+describe('InboxTab — purchaser vs primary user', () => {
+  it('names the primary user and keeps the purchaser on the row', () => {
+    inboxRows = [mkConv({ id: 'c1', customer_id: 'c-chad', customer_name: 'Chad Wu' })];
+    customersToReturn = [{
+      id: 'c-chad', full_name: 'Chad Wu', phone: null, email: null,
+      purchaser_id: null, primary_user_name: 'Sarah Wu', primary_user_phone: null,
+      primary_user_email: null, primary_user_relationship: null,
+    }];
+    render(<InboxTab />);
+    expect(screen.getAllByText(/Sarah Wu/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Chad Wu/).length).toBeGreaterThan(0);
+  });
+
+  it('leaves an unlinked conversation on its own snapshot name', () => {
+    inboxRows = [mkConv({ id: 'c1', customer_id: null, customer_name: 'Walk-in Wendy' })];
+    render(<InboxTab />);
+    expect(screen.getByText('Walk-in Wendy')).toBeInTheDocument();
   });
 });

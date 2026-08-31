@@ -2034,3 +2034,17 @@
   margin: var(--space-2) 0 0;
 }
 .lockNote b { color: var(--color-ink); }
+
+/* FR-6: the diagnosis SMS is addressed to the primary user but routed to the
+   purchaser's number by the edge function. Say so plainly — a message that
+   silently goes to the wrong person is worse than one that warns first. */
+.diagModalWarn {
+  margin-top: 6px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: #fffaf0;
+  border: 1px solid #f6e05e;
+  color: #744210;
+  font-size: 11px;
+  line-height: 1.4;
+}

@@ -18,9 +18,10 @@ vi.mock('../../../lib/service', async () => {
     useClassificationLog: vi.fn(() => ({ entries: [], loading: false })),
   };
 });
+let customersToReturn: unknown[] = [];
 vi.mock('../../../lib/customers', async () => {
   const actual = await vi.importActual<typeof import('../../../lib/customers')>('../../../lib/customers');
-  return { ...actual, useCustomers: vi.fn(() => ({ customers: [] })) };
+  return { ...actual, useCustomers: vi.fn(() => ({ customers: customersToReturn })) };
 });
 const readyReplacementsMock = vi.fn(() => Promise.resolve([] as Array<{ id: string; order_ref: string }>));
 const shipQueuedMock = vi.fn(() => Promise.resolve([] as string[]));
@@ -245,5 +246,71 @@ describe('TicketDetailPanel device context', () => {
   it('omits the chip strip when showDeviceContext is false', () => {
     render(<TicketDetailPanel ticket={mkTicket()} onClose={() => {}} showDeviceContext={false} />);
     expect(screen.queryByTestId('device-context-header')).toBeNull();
+  });
+});
+
+// FR-6: the detail panel is where an operator decides who to talk to, so it
+// has to distinguish the person using the machine from the person who paid —
+// and the diagnosis SMS has to be honest about which number it reaches.
+const mkCust = (over: Record<string, unknown> = {}) => ({
+  id: 'c-chad', full_name: 'Chad Wu', phone: '+14165550100', email: 'chad@example.com',
+  purchaser_id: null, primary_user_name: null, primary_user_phone: null,
+  primary_user_email: null, primary_user_relationship: null, ...over,
+});
+
+describe('TicketDetailPanel — purchaser vs primary user', () => {
+  beforeEach(() => { customersToReturn = []; });
+
+  it('names the primary user and the purchaser in the Customer block', () => {
+    customersToReturn = [mkCust({ primary_user_name: 'Sarah Wu' })];
+    render(<TicketDetailPanel
+      ticket={mkTicket({ customer_id: 'c-chad', customer_name: 'Chad Wu' })}
+      onClose={() => {}} />);
+    expect(screen.getAllByText('Sarah Wu').length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Chad Wu/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Primary user/).length).toBeGreaterThan(0);
+  });
+
+  it('greets the primary user, not the purchaser, in the diagnosis SMS', () => {
+    customersToReturn = [mkCust({ primary_user_name: 'Sarah Wu' })];
+    render(<TicketDetailPanel
+      ticket={mkTicket({
+        customer_id: 'c-chad', customer_name: 'Chad Wu',
+        customer_phone: '+14165550100',
+      })}
+      onClose={() => {}} />);
+    fireEvent.click(screen.getByText('Send diagnosis link'));
+    const box = document.querySelector('textarea') as HTMLTextAreaElement;
+    expect(box.value).toContain('Sarah');
+    expect(box.value).not.toContain('Chad');
+  });
+
+  it('still greets the purchaser when they are the only person on the record', () => {
+    customersToReturn = [mkCust({})];
+    render(<TicketDetailPanel
+      ticket={mkTicket({
+        customer_id: 'c-chad', customer_name: 'Chad Wu',
+        customer_phone: '+14165550100',
+      })}
+      onClose={() => {}} />);
+    fireEvent.click(screen.getByText('Send diagnosis link'));
+    expect((document.querySelector('textarea') as HTMLTextAreaElement).value).toContain('Chad');
+  });
+
+  it('warns when the SMS cannot reach the primary user own number', () => {
+    // The send-followup-sms edge function resolves the destination from
+    // customers.phone server-side, so a primary user with their own number on
+    // file will NOT receive it. Say so rather than implying otherwise.
+    customersToReturn = [mkCust({
+      primary_user_name: 'Sarah Wu', primary_user_phone: '+14165550199',
+    })];
+    render(<TicketDetailPanel
+      ticket={mkTicket({
+        customer_id: 'c-chad', customer_name: 'Chad Wu',
+        customer_phone: '+14165550100',
+      })}
+      onClose={() => {}} />);
+    fireEvent.click(screen.getByText('Send diagnosis link'));
+    expect(screen.getByText(/goes to the purchaser's number/i)).toBeTruthy();
   });
 });

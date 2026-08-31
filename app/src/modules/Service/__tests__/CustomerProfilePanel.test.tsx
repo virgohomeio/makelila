@@ -79,3 +79,42 @@ describe('CustomerProfilePanel device context', () => {
     expect(screen.queryByTestId('device-context-header')).toBeNull();
   });
 });
+
+// FR-6: the profile header is the biggest statement of "who this is". It has
+// to name the machine's primary user, and it must not thereby erase the
+// purchaser — they hold the warranty.
+describe('CustomerProfilePanel — purchaser vs primary user', () => {
+  const parties = (over: Record<string, unknown> = {}) => ({
+    displayName: 'Sarah Wu', purchaserName: 'Chad Wu', split: true,
+    relationship: null, phone: null, email: null, ...over,
+  });
+
+  it('headlines the primary user and still names the purchaser', () => {
+    render(
+      <CustomerProfilePanel
+        group={mkGroup([mkTicket({ id: 't1' })])}
+        customer={undefined}
+        parties={parties()}
+        onClose={() => {}}
+        onOpenTicket={() => {}}
+        onAddTicket={() => {}}
+      />,
+    );
+    expect(screen.getByText('Sarah Wu')).toBeTruthy();
+    expect(screen.getByText(/Chad Wu/)).toBeTruthy();
+    expect(screen.getByText(/Primary user/)).toBeTruthy();
+  });
+
+  it('falls back to the group name when no parties are resolved', () => {
+    render(
+      <CustomerProfilePanel
+        group={mkGroup([mkTicket({ id: 't1' })])}
+        customer={undefined}
+        onClose={() => {}}
+        onOpenTicket={() => {}}
+        onAddTicket={() => {}}
+      />,
+    );
+    expect(screen.getByText('Alice')).toBeTruthy();
+  });
+});

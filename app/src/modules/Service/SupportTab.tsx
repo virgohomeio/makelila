@@ -11,7 +11,11 @@ import {
 import {
   daysIdle, dwellTier, dwellPercent, dwellLabel, DWELL_TICKS, STALE_DAYS,
 } from './dwell';
-import { useCustomers, syncCustomersFromHubspot, type Customer } from '../../lib/customers';
+import {
+  useCustomers, syncCustomersFromHubspot, buildPartyResolver,
+  type Customer, type CustomerPartyRow, type CustomerParties,
+} from '../../lib/customers';
+import { CustomerPartyName } from '../../components/CustomerPartyName';
 import { useUnits } from '../../lib/stock';
 import { useReplacementOrders } from '../../lib/orders';
 import { queuedForReplacementLabel } from '../../lib/replacementTags';
@@ -45,6 +49,13 @@ export function SupportTab() {
   const { tickets, loading } = useServiceTickets('support');
   const { closedIds: closedSinceIds } = useTicketsClosedSince(7);
   const { customers } = useCustomers();
+  // FR-6: the ticket only carries a customer_name snapshot, so who the ticket
+  // is *about* is resolved from the directory on every render. Built once per
+  // customers array — the queue draws one of these per row.
+  const partiesFor = useMemo(
+    () => buildPartyResolver(customers as CustomerPartyRow[]),
+    [customers],
+  );
   const { orders: replacementOrders } = useReplacementOrders();
   const { user } = useAuth();
   const [statusFilter, setStatusFilter] = useState<TicketStatus | 'all'>('all');
@@ -95,8 +106,15 @@ export function SupportTab() {
       if (savedView === 'replacement' && !ticketStatusSet(t).includes('queued_for_replacement')) return false;
       if (q) {
         const needle = q.toLowerCase();
+        // Search BOTH parties. The row headlines the primary user, who never
+        // appears on the ticket itself — searching the name on screen has to
+        // find it — and the purchaser stays searchable because that is the
+        // name on the order, the invoice and the customer's own email.
+        const p = partiesFor({ customerId: t.customer_id, fallbackName: t.customer_name });
         return (
           t.subject.toLowerCase().includes(needle) ||
+          p.displayName.toLowerCase().includes(needle) ||
+          p.purchaserName.toLowerCase().includes(needle) ||
           (t.customer_name ?? '').toLowerCase().includes(needle) ||
           (t.customer_email ?? '').toLowerCase().includes(needle) ||
           (t.summary ?? '').toLowerCase().includes(needle) ||
@@ -106,7 +124,7 @@ export function SupportTab() {
       }
       return true;
     });
-  }, [tickets, statusFilter, sourceFilter, topicFilter, areaFilter, ownerFilter, savedView, q, now]);
+  }, [tickets, statusFilter, sourceFilter, topicFilter, areaFilter, ownerFilter, savedView, q, now, partiesFor]);
 
   // One row per customer (a "ticket profile"); customer-less tickets fall into
   // the Unassigned group. Filters above narrow the ticket pool first, so a
@@ -403,6 +421,7 @@ export function SupportTab() {
         <OwnerKanban
           tickets={tickets}
           currentUserEmail={user?.email}
+          partiesFor={partiesFor}
           onSelectTicket={(t) => setSelectedId(t.id)}
         />
       )}
@@ -410,6 +429,7 @@ export function SupportTab() {
       {view === 'actions' && (
         <ActionItemKanban
           tickets={tickets}
+          partiesFor={partiesFor}
           onSelectTicket={(t) => setSelectedId(t.id)}
         />
       )}
@@ -435,6 +455,12 @@ export function SupportTab() {
               <tbody>
                 {grouped.groups.map(g => (
                   <CustomerGroupRow key={g.customerId} g={g}
+                    parties={partiesFor({
+                      customerId: g.customerId,
+                      fallbackName: g.customerName,
+                      fallbackPhone: g.customerPhone,
+                      fallbackEmail: g.customerEmail,
+                    })}
                     queueKindsByTicket={queueKindsByTicket}
                     now={now}
                     selected={selectedCustomerId === g.customerId}
@@ -489,6 +515,12 @@ export function SupportTab() {
           <CustomerProfilePanel
             group={g}
             customer={cust}
+            parties={partiesFor({
+              customerId: g.customerId,
+              fallbackName: g.customerName,
+              fallbackPhone: g.customerPhone,
+              fallbackEmail: g.customerEmail,
+            })}
             onClose={() => setSelectedCustomerId(null)}
             onOpenTicket={(t) => setSelectedId(t.id)}
             onAddTicket={() => { setNewPreset(cust ?? null); setShowNew(true); }}
@@ -542,8 +574,9 @@ function StatusPills({ value, queueKinds }: { value: string; queueKinds: string[
   );
 }
 
-function CustomerGroupRow({ g, queueKindsByTicket, now, selected, onClick }: {
+function CustomerGroupRow({ g, parties, queueKindsByTicket, now, selected, onClick }: {
   g: CustomerGroup;
+  parties: CustomerParties;
   queueKindsByTicket: Map<string, string[]>;
   now: number;
   selected: boolean;
@@ -571,7 +604,7 @@ function CustomerGroupRow({ g, queueKindsByTicket, now, selected, onClick }: {
   return (
     <tr className={`${styles.row} ${selected ? styles.rowSelected : ''}`} onClick={onClick}>
       <td>
-        <div>{g.customerName}</div>
+        <CustomerPartyName parties={parties} />
         {g.customerEmail && <div className={styles.rowSummary}>{g.customerEmail}</div>}
       </td>
       <td>{g.total}</td>

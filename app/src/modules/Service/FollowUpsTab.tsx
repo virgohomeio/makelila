@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import {
-  useCustomers, computeFuState, followUpDueDates,
-  type Customer, type FuState,
+  useCustomers, computeFuState, followUpDueDates, buildPartyResolver,
+  type Customer, type FuState, type CustomerPartyRow, type PartyResolver,
 } from '../../lib/customers';
 import { useServiceTickets } from '../../lib/service';
 import { useFollowUpDirectory } from '../../lib/followupStatus';
@@ -26,12 +26,13 @@ function dayKey(d: Date): string {
 }
 
 function FollowUpCalendar({
-  month, today, customers, tickets, blockedCustomerIds, anchorByCustomer, onPrev, onNext, onToday, onCustomerClick, onCallClick,
+  month, today, customers, tickets, partiesFor, blockedCustomerIds, anchorByCustomer, onPrev, onNext, onToday, onCustomerClick, onCallClick,
 }: {
   month: Date;
   today: Date;
   customers: Customer[];
-  tickets: { id: string; category: string; calendly_event_start: string | null; customer_name: string | null; subject: string }[];
+  tickets: { id: string; category: string; calendly_event_start: string | null; customer_id: string | null; customer_name: string | null; subject: string }[];
+  partiesFor: PartyResolver;
   blockedCustomerIds: Set<string>;
   anchorByCustomer: Map<string, string | null>;
   onPrev: () => void;
@@ -57,7 +58,8 @@ function FollowUpCalendar({
       if (t.category === 'onboarding' && t.calendly_event_start) {
         add(t.calendly_event_start.slice(0, 10), {
           type: 'call', callKind: 'onboarding',
-          label: t.customer_name ?? t.subject,
+          label: partiesFor({ customerId: t.customer_id, fallbackName: t.customer_name }).displayName
+            || t.subject,
           time: t.calendly_event_start,
           ticketId: t.id,
         });
@@ -68,7 +70,9 @@ function FollowUpCalendar({
       if (t.category === 'diagnosis_call' && t.calendly_event_start) {
         add(t.calendly_event_start.slice(0, 10), {
           type: 'call', callKind: 'diagnosis',
-          label: t.customer_name ?? t.subject, time: t.calendly_event_start, ticketId: t.id,
+          label: partiesFor({ customerId: t.customer_id, fallbackName: t.customer_name }).displayName
+            || t.subject,
+          time: t.calendly_event_start, ticketId: t.id,
         });
       }
     }
@@ -176,9 +180,9 @@ function FollowUpCalendar({
                         ? styles.calEventOverdue
                         : ev.kind === 'fu1' ? styles.calEventFu1 : styles.calEventFu2,
                     ].join(' ')}
-                    title={`${ev.customer.full_name} — ${ev.kind.toUpperCase()} ${overdue ? 'overdue' : 'due'}`}
+                    title={`${partiesFor({ customerId: ev.customer.id, fallbackName: ev.customer.full_name }).displayName} — ${ev.kind.toUpperCase()} ${overdue ? 'overdue' : 'due'}`}
                   >
-                    {ev.kind.toUpperCase()}: {ev.customer.full_name}
+                    {ev.kind.toUpperCase()}: {partiesFor({ customerId: ev.customer.id, fallbackName: ev.customer.full_name }).displayName}
                   </button>
                 );
               })}
@@ -192,6 +196,12 @@ function FollowUpCalendar({
 
 export function FollowUpsTab() {
   const { customers, refresh } = useCustomers();
+  // FR-6: follow-ups ask how the machine is going, so they're addressed to
+  // whoever uses it.
+  const partiesFor = useMemo(
+    () => buildPartyResolver(customers as CustomerPartyRow[]),
+    [customers],
+  );
   const { tickets } = useServiceTickets();
   const today = useMemo(() => new Date(), []);
   const { rows, counts, overdueCount, excludedCustomerIds } = useFollowUpDirectory(today);
@@ -261,6 +271,7 @@ export function FollowUpsTab() {
   return (
     <div className={styles.wrap}>
       <OverdueFollowupPanel
+        partiesFor={partiesFor}
         overdueCount={overdueCustomerIds.length}
         overdueCustomerIds={overdueCustomerIds}
       />
@@ -271,6 +282,7 @@ export function FollowUpsTab() {
             today={today}
             customers={scheduledCustomers}
             tickets={tickets}
+            partiesFor={partiesFor}
             blockedCustomerIds={blockedCustomerIds}
             anchorByCustomer={anchorByCustomer}
             onPrev={() => setCalendarMonth(d => { const n = new Date(d); n.setMonth(n.getMonth() - 1); return n; })}
@@ -282,12 +294,14 @@ export function FollowUpsTab() {
         </div>
         <FollowUpDirectory
           rows={rows} counts={counts} overdueCount={overdueCount}
+          partiesFor={partiesFor}
           onSelect={(id) => setSelected({ customerId: id, kind: 'fu1' })}
         />
       </div>
       {selectedCustomer && (
         <FollowUpDetailPanel
           customer={selectedCustomer}
+          partiesFor={partiesFor}
           anchorDate={anchorByCustomer.get(selectedCustomer.id) ?? null}
           openTickets={selectedOpenTickets}
           isPaused={selectedPaused}

@@ -1,5 +1,6 @@
 import { statusMeta, topicLabel, sourceLabel, ticketStatusSet, type ServiceTicket } from '../../lib/service';
-import type { Customer } from '../../lib/customers';
+import type { Customer, CustomerParties } from '../../lib/customers';
+import { CustomerPartyName } from '../../components/CustomerPartyName';
 import type { CustomerGroup } from './ticketGrouping';
 import styles from './Service.module.css';
 
@@ -8,10 +9,13 @@ import styles from './Service.module.css';
 // creates another ticket under the same profile (tickets are never merged
 // destructively — the profile just collects them).
 export function CustomerProfilePanel({
-  group, customer, onClose, onOpenTicket, onAddTicket,
+  group, customer, parties, onClose, onOpenTicket, onAddTicket,
 }: {
   group: CustomerGroup;
   customer: Customer | undefined;
+  /** FR-6 purchaser / primary-user pair, resolved by the caller against the
+   *  directory. Absent only in bare renders — fall back to the group name. */
+  parties?: CustomerParties;
   onClose: () => void;
   onOpenTicket: (ticket: ServiceTicket) => void;
   onAddTicket: () => void;
@@ -26,7 +30,11 @@ export function CustomerProfilePanel({
     <div className={styles.detailOverlay}>
       <div className={styles.detailHead}>
         <div>
-          <h3 className={styles.detailSubject}>{group.customerName}</h3>
+          <h3 className={styles.detailSubject}>
+            {parties
+              ? <CustomerPartyName parties={parties} />
+              : group.customerName}
+          </h3>
           <div className={styles.profileContact}>{contact}</div>
           <div className={styles.detailMetaRow}>
             <span className={styles.pill} style={{ background: '#edf2f7', color: '#4a5568' }}>

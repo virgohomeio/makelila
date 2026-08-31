@@ -165,6 +165,136 @@ export function resolveRefundParties(opts: {
   };
 }
 
+// ── FR-6 for service tickets: who a ticket is about ─────────────────────────
+// A ticket is about whoever USES the machine, but whoever PAID still has to be
+// visible — warranty, refunds and accounting all book against them.
+//
+// Resolved at read time from the directory rather than read off the ticket:
+// service_tickets.customer_name is a snapshot taken at creation, so a renamed
+// or newly-split household keeps reading by its old name forever.
+//
+// The precedence deliberately matches resolveRefundParties(): a primary user
+// named on the PURCHASER's record outranks a linked user's own name. Two rules
+// would let one household read as two different people depending on the tab.
+
+export type CustomerPartyRow = Pick<
+  Customer,
+  'id' | 'full_name' | 'phone' | 'email' | 'purchaser_id'
+  | 'primary_user_name' | 'primary_user_phone' | 'primary_user_email'
+  | 'primary_user_relationship'
+>;
+
+export type CustomerParties = {
+  /** Headline name — the primary user of the machine. */
+  displayName: string;
+  /** Who paid. Identical to displayName when nobody else is named. */
+  purchaserName: string;
+  /** True only when these are genuinely two people, so the common case
+   *  renders as one plain name with no pills and no second line. */
+  split: boolean;
+  /** How the primary user relates to the purchaser, when recorded. */
+  relationship: string | null;
+  /** Best contact for the PRIMARY USER — their own if on file, else the
+   *  purchaser's, else the ticket snapshot. Outbound messages address the
+   *  person using the machine, but must still reach *somebody*. */
+  phone: string | null;
+  email: string | null;
+};
+
+/** Resolve the purchaser / primary-user pair behind a ticket. Pure. */
+export function resolveCustomerParties(opts: {
+  customer?: CustomerPartyRow | null;
+  byId?: Map<string, CustomerPartyRow>;
+  fallbackName?: string | null;
+  fallbackPhone?: string | null;
+  fallbackEmail?: string | null;
+}): CustomerParties {
+  const cust = opts.customer;
+
+  // No directory row: all we have is what the ticket captured. Fall back to it
+  // rather than guess, and claim no split we can't evidence.
+  if (!cust) {
+    const name = (opts.fallbackName ?? '').trim();
+    return {
+      displayName: name,
+      purchaserName: name,
+      split: false,
+      relationship: null,
+      phone: trimmed(opts.fallbackPhone),
+      email: trimmed(opts.fallbackEmail),
+    };
+  }
+
+  // The accounting entity: the linked purchaser, else the row itself. A
+  // dangling purchaser_id degrades to self — better a slightly incomplete card
+  // than one naming nobody at all.
+  const owner = (cust.purchaser_id ? opts.byId?.get(cust.purchaser_id) : null) ?? cust;
+  const purchaserName = (owner.full_name ?? '').trim();
+
+  const named = trimmed(owner.primary_user_name);
+  // Set only when this row is a USER acting for a different purchaser.
+  const linkedUser = owner.id !== cust.id ? cust : null;
+
+  let displayName: string;
+  let phone: string | null;
+  let email: string | null;
+
+  if (named) {
+    displayName = named;
+    phone = trimmed(owner.primary_user_phone);
+    email = trimmed(owner.primary_user_email);
+  } else if (linkedUser) {
+    displayName = (linkedUser.full_name ?? '').trim();
+    phone = trimmed(linkedUser.phone);
+    email = trimmed(linkedUser.email);
+  } else {
+    displayName = purchaserName;
+    phone = trimmed(cust.phone);
+    email = trimmed(cust.email);
+  }
+
+  // Someone who typed the purchaser's own name into the primary-user field has
+  // not created a second person. Collapse to the purchaser's canonical spelling
+  // so the card doesn't print the same human twice in two different casings.
+  const split = !sameName(displayName, purchaserName);
+  if (!split) displayName = purchaserName;
+
+  return {
+    displayName,
+    purchaserName,
+    split,
+    relationship: trimmed(owner.primary_user_relationship),
+    phone: phone ?? trimmed(owner.phone) ?? trimmed(opts.fallbackPhone),
+    email: email ?? trimmed(owner.email) ?? trimmed(opts.fallbackEmail),
+  };
+}
+
+/** The shape every Service surface consumes to name a ticket's person. */
+export type PartyResolver = (opts: {
+  customerId: string | null | undefined;
+  fallbackName?: string | null;
+  fallbackPhone?: string | null;
+  fallbackEmail?: string | null;
+}) => CustomerParties;
+
+/** Index the directory once, then resolve any number of tickets against it.
+ *  Every Service tab renders many rows, so the id map is built once per
+ *  customers array rather than per row. Pure — wrap in useMemo at the call
+ *  site and it recomputes only when the directory actually changes. */
+export function buildPartyResolver(customers: CustomerPartyRow[]): PartyResolver {
+  const byId = new Map<string, CustomerPartyRow>();
+  for (const c of customers) byId.set(c.id, c);
+
+  return ({ customerId, fallbackName, fallbackPhone, fallbackEmail }) =>
+    resolveCustomerParties({
+      customer: customerId ? byId.get(customerId) ?? null : null,
+      byId,
+      fallbackName,
+      fallbackPhone,
+      fallbackEmail,
+    });
+}
+
 // ── Card contact block (email / phone / address) ────────────────────────────
 // Every refund card has to say how to reach the customer. The case records
 // themselves are thin: a refund carries an email at best, a return form adds a

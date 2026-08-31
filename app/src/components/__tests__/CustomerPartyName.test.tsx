@@ -1,0 +1,61 @@
+// The one place a ticket's person is drawn. A household with a separate
+// primary user must show BOTH names — naming only the user hides who the
+// warranty and any refund actually belong to — but the overwhelmingly common
+// case is one person, and that case must stay a plain unadorned name.
+import { describe, it, expect } from 'vitest';
+import { render, screen } from '@testing-library/react';
+import type { CustomerParties } from '../../lib/customers';
+import { CustomerPartyName } from '../CustomerPartyName';
+
+const parties = (over: Partial<CustomerParties> = {}): CustomerParties => ({
+  displayName: 'Sarah Wu',
+  purchaserName: 'Chad Wu',
+  split: true,
+  relationship: null,
+  phone: null,
+  email: null,
+  ...over,
+});
+
+describe('CustomerPartyName — one person', () => {
+  it('renders a plain name with no role labels', () => {
+    render(<CustomerPartyName parties={parties({
+      displayName: 'Chad Wu', purchaserName: 'Chad Wu', split: false,
+    })} />);
+    expect(screen.getByText('Chad Wu')).toBeTruthy();
+    expect(screen.queryByText(/Purchaser/)).toBeNull();
+    expect(screen.queryByText(/Primary user/)).toBeNull();
+  });
+});
+
+describe('CustomerPartyName — split household', () => {
+  it('headlines the primary user and still names the purchaser', () => {
+    render(<CustomerPartyName parties={parties()} />);
+    expect(screen.getByText('Sarah Wu')).toBeTruthy();
+    expect(screen.getByText(/Primary user/)).toBeTruthy();
+    expect(screen.getByText(/Chad Wu/)).toBeTruthy();
+    expect(screen.getByText(/Purchaser/)).toBeTruthy();
+  });
+
+  it('shows the relationship alongside the primary-user label', () => {
+    render(<CustomerPartyName parties={parties({ relationship: 'Spouse / partner' })} />);
+    expect(screen.getByText(/Spouse \/ partner/)).toBeTruthy();
+  });
+
+  it('keeps both names on one line in the inline variant', () => {
+    const { container } = render(<CustomerPartyName parties={parties()} variant="inline" />);
+    // Dense rows (kanban cards, inbox tables) can't afford a second line, but
+    // must not therefore drop the purchaser entirely.
+    expect(container.textContent).toContain('Sarah Wu');
+    expect(container.textContent).toContain('Chad Wu');
+  });
+});
+
+describe('CustomerPartyName — nothing on file', () => {
+  it('falls back to an em dash rather than rendering an empty cell', () => {
+    render(<CustomerPartyName parties={parties({
+      displayName: '', purchaserName: '', split: false,
+    })} />);
+    expect(screen.getByText('—')).toBeTruthy();
+  });
+});

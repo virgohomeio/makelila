@@ -45,3 +45,51 @@ describe('ReplacementTab', () => {
     expect(kpiValues.length).toBeGreaterThan(0);
   });
 });
+
+// FR-6: the triage table lists open tickets awaiting a replacement decision.
+// It names a person, so it names the primary user — and keeps the purchaser,
+// because the replacement ships against their order.
+let ticketsToReturn: unknown[] = [];
+let customersToReturn: unknown[] = [];
+vi.mock('../../../lib/service', async () => {
+  const actual = await vi.importActual<typeof import('../../../lib/service')>('../../../lib/service');
+  return { ...actual, useServiceTickets: vi.fn(() => ({ tickets: ticketsToReturn, loading: false })) };
+});
+vi.mock('../../../lib/customers', async () => {
+  const actual = await vi.importActual<typeof import('../../../lib/customers')>('../../../lib/customers');
+  return { ...actual, useCustomers: vi.fn(() => ({ customers: customersToReturn })) };
+});
+
+describe('ReplacementTab — purchaser vs primary user', () => {
+  const mkTriageTicket = (over: Record<string, unknown> = {}) => ({
+    id: 'tt1', ticket_number: 'TKT-9', subject: 'lid cracked',
+    topic: 'warranty_replacement', status: 'waiting_on_us', priority: 'normal',
+    replacement_order_id: null, customer_id: 'c-chad', customer_name: 'Chad Wu',
+    customer_email: 'chad@example.com', customer_phone: null, tags: [],
+    category: 'support', source: 'gmail', created_at: '2026-06-01T00:00:00Z',
+    last_message_at: '2026-06-01T00:00:00Z', ...over,
+  });
+
+  it('headlines the primary user in the triage row', () => {
+    ticketsToReturn = [mkTriageTicket()];
+    customersToReturn = [{
+      id: 'c-chad', full_name: 'Chad Wu', phone: null, email: 'chad@example.com',
+      purchaser_id: null, primary_user_name: 'Sarah Wu', primary_user_phone: null,
+      primary_user_email: null, primary_user_relationship: null,
+    }];
+    render(<ReplacementTab />);
+    expect(screen.getAllByText(/Sarah Wu/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Chad Wu/).length).toBeGreaterThan(0);
+  });
+
+  it('shows one plain name when the purchaser is the only person', () => {
+    ticketsToReturn = [mkTriageTicket()];
+    customersToReturn = [{
+      id: 'c-chad', full_name: 'Chad Wu', phone: null, email: 'chad@example.com',
+      purchaser_id: null, primary_user_name: null, primary_user_phone: null,
+      primary_user_email: null, primary_user_relationship: null,
+    }];
+    render(<ReplacementTab />);
+    expect(screen.getAllByText(/Chad Wu/).length).toBeGreaterThan(0);
+  });
+});

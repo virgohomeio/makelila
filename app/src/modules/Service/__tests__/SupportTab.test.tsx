@@ -65,9 +65,10 @@ vi.mock('../../../lib/service', async () => {
     useTicketsClosedSince: vi.fn(() => ({ closedIds: new Set<string>(), loading: false })),
   };
 });
+let customersToReturn: unknown[] = [];
 vi.mock('../../../lib/customers', async () => {
   const actual = await vi.importActual<typeof import('../../../lib/customers')>('../../../lib/customers');
-  return { ...actual, useCustomers: vi.fn(() => ({ customers: [] })) };
+  return { ...actual, useCustomers: vi.fn(() => ({ customers: customersToReturn })) };
 });
 let replacementOrdersToReturn: Order[] = [];
 vi.mock('../../../lib/orders', async () => {
@@ -328,5 +329,60 @@ describe('SupportTab ?unit_serial= deep link', () => {
     renderAt('/service?tab=support');
     expect(screen.getAllByText('this unit').length).toBeGreaterThan(0);
     expect(screen.getAllByText('another unit').length).toBeGreaterThan(0);
+  });
+});
+
+// FR-6: a support ticket is about whoever USES the machine. The ticket row
+// carries only a customer_name snapshot, so the primary user has to be
+// resolved from the directory at read time — and the purchaser must stay
+// visible, since the warranty and any refund belong to them.
+const mkCustomer = (over: Record<string, unknown>) => ({
+  id: 'c-chad', full_name: 'Chad Wu', phone: '+1 416 555 0100', email: 'chad@example.com',
+  purchaser_id: null, primary_user_name: null, primary_user_phone: null,
+  primary_user_email: null, primary_user_relationship: null, ...over,
+});
+
+describe('SupportTab — purchaser vs primary user', () => {
+  beforeEach(() => { customersToReturn = []; });
+
+  it('headlines the primary user and still names the purchaser', () => {
+    customersToReturn = [mkCustomer({ primary_user_name: 'Sarah Wu' })];
+    ticketsToReturn = [mkTicket({ id: 't1', customer_id: 'c-chad', customer_name: 'Chad Wu' })];
+    render(<SupportTab />);
+    expect(screen.getAllByText('Sarah Wu').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Chad Wu').length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Primary user/).length).toBeGreaterThan(0);
+  });
+
+  it('shows a single plain name when nobody else is the primary user', () => {
+    customersToReturn = [mkCustomer({})];
+    ticketsToReturn = [mkTicket({ id: 't1', customer_id: 'c-chad', customer_name: 'Chad Wu' })];
+    render(<SupportTab />);
+    expect(screen.getAllByText('Chad Wu').length).toBeGreaterThan(0);
+    expect(screen.queryByText(/Primary user/)).toBeNull();
+  });
+
+  it('finds the ticket when searching the primary user, who is not on the ticket row', () => {
+    customersToReturn = [mkCustomer({ primary_user_name: 'Sarah Wu' })];
+    ticketsToReturn = [
+      mkTicket({ id: 't1', customer_id: 'c-chad', customer_name: 'Chad Wu', subject: 'lid jammed' }),
+      mkTicket({ id: 't2', customer_id: null, customer_name: 'Someone Else', subject: 'unrelated' }),
+    ];
+    render(<SupportTab />);
+    fireEvent.change(screen.getByLabelText(/search tickets/i), { target: { value: 'Sarah' } });
+    expect(screen.getAllByText('Sarah Wu').length).toBeGreaterThan(0);
+    expect(screen.queryByText('unrelated')).toBeNull();
+  });
+
+  it('still finds the ticket when searching the purchaser', () => {
+    customersToReturn = [mkCustomer({ primary_user_name: 'Sarah Wu' })];
+    ticketsToReturn = [
+      mkTicket({ id: 't1', customer_id: 'c-chad', customer_name: 'Chad Wu', subject: 'lid jammed' }),
+      mkTicket({ id: 't2', customer_id: null, customer_name: 'Someone Else', subject: 'unrelated' }),
+    ];
+    render(<SupportTab />);
+    fireEvent.change(screen.getByLabelText(/search tickets/i), { target: { value: 'Chad' } });
+    expect(screen.getAllByText('Sarah Wu').length).toBeGreaterThan(0);
+    expect(screen.queryByText('unrelated')).toBeNull();
   });
 });

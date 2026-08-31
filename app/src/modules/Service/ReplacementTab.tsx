@@ -9,6 +9,8 @@ import {
 import { useBatches, useUnits, type Batch } from '../../lib/stock';
 import { useParts } from '../../lib/parts';
 import { useServiceTickets, type TicketTopic } from '../../lib/service';
+import { useCustomers, buildPartyResolver, type CustomerPartyRow } from '../../lib/customers';
+import { TicketPartyLabel } from './TicketPartyLabel';
 import { TicketDetailPanel } from './TicketDetailPanel';
 import styles from './Service.module.css';
 
@@ -92,6 +94,13 @@ export default function ReplacementTab() {
   // Pull every support/repair ticket so we can filter for triage candidates.
   // useServiceTickets() with no arg returns all categories; we filter below.
   const { tickets } = useServiceTickets();
+  // FR-6: the triage row names a person, so resolve the household rather than
+  // printing the ticket's stale customer_name snapshot.
+  const { customers } = useCustomers();
+  const partiesFor = useMemo(
+    () => buildPartyResolver(customers as CustomerPartyRow[]),
+    [customers],
+  );
 
   // Queued replacement demand vs supply — units (ready vs needed, by batch)
   // and parts/consumables (on-hand vs queued). Drawn from un-shipped
@@ -298,7 +307,7 @@ export default function ReplacementTab() {
                 return (
                   <tr key={t.id} className={styles.row} onClick={() => setOpenTicketId(t.id)} style={{ cursor: 'pointer' }}>
                     <td style={{ fontFamily: 'ui-monospace, monospace' }}>{t.ticket_number}</td>
-                    <td>{t.customer_name ?? t.customer_email ?? '—'}</td>
+                    <td><TicketPartyLabel ticket={t} partiesFor={partiesFor} /></td>
                     <td><span className={styles.triageTopic}>{t.topic}</span></td>
                     <td>{t.subject.length > 60 ? t.subject.slice(0, 57) + '…' : t.subject}</td>
                     <td>{t.status}</td>
