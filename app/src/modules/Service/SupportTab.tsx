@@ -496,7 +496,13 @@ export function SupportTab() {
         );
       })()}
 
-      {selected && <TicketDetailPanel ticket={selected} onClose={() => setSelectedId(null)} />}
+      {selected && (
+        <TicketDetailPanel
+          ticket={selected}
+          onClose={() => setSelectedId(null)}
+          showDeviceContext={false}
+        />
+      )}
 
       {showNew && (
         <NewTicketModal

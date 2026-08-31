@@ -47,6 +47,9 @@ const OPS_OWNERS = [
 type Props = {
   ticket: ServiceTicket;
   onClose: () => void;
+  /** The device-context chip strip. On by default; the Support Tickets tab
+   *  turns it off, the other tabs that open this panel still want it. */
+  showDeviceContext?: boolean;
 };
 
 // Shows what the customer is queued up for on the linked replacement order —
@@ -97,7 +100,7 @@ function QueuedReplacementDetails({ orderId }: { orderId: string }) {
   );
 }
 
-export function TicketDetailPanel({ ticket, onClose }: Props) {
+export function TicketDetailPanel({ ticket, onClose, showDeviceContext = true }: Props) {
   const navigate = useNavigate();
   const { user } = useAuth();
   const [defectCat, setDefectCat] = useState(ticket.defect_category ?? '');
@@ -376,7 +379,9 @@ export function TicketDetailPanel({ ticket, onClose }: Props) {
         <button className={styles.detailClose} onClick={onClose}>✕</button>
       </div>
 
-      <DeviceContextHeader unitSerial={ticket.unit_serial} currentTicketId={ticket.id} />
+      {showDeviceContext && (
+        <DeviceContextHeader unitSerial={ticket.unit_serial} currentTicketId={ticket.id} />
+      )}
 
       {ticket.source === 'telemetry_auto' && (
         <TelemetryAutoBanner ticket={ticket} />

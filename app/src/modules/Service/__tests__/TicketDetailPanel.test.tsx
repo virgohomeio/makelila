@@ -43,7 +43,9 @@ vi.mock('../../../lib/auth', () => ({
 vi.mock('../TicketNotes', () => ({ TicketNotes: () => null }));
 vi.mock('../TicketActionItems', () => ({ TicketActionItems: () => null }));
 vi.mock('../AttachmentStrip', () => ({ AttachmentStrip: () => null }));
-vi.mock('../../../components/DeviceContextHeader', () => ({ DeviceContextHeader: () => null }));
+vi.mock('../../../components/DeviceContextHeader', () => ({
+  DeviceContextHeader: () => <div data-testid="device-context-header" />,
+}));
 
 import { TicketDetailPanel } from '../TicketDetailPanel';
 
@@ -228,5 +230,20 @@ describe('TicketDetailPanel — Status is multi-select', () => {
     fireEvent.click(statusButton('Complete'));
     // Empty set — setTicketStatuses falls back to Action Needed.
     expect(setTicketStatusesMock).toHaveBeenCalledWith('t1', []);
+  });
+});
+
+// The chip strip is device context for a ticket, and the Support Tickets tab
+// no longer wants it. The other tabs that open this panel still do, so the
+// default stays on and Support opts out explicitly.
+describe('TicketDetailPanel device context', () => {
+  it('renders the chip strip by default', () => {
+    render(<TicketDetailPanel ticket={mkTicket()} onClose={() => {}} />);
+    expect(screen.getByTestId('device-context-header')).toBeTruthy();
+  });
+
+  it('omits the chip strip when showDeviceContext is false', () => {
+    render(<TicketDetailPanel ticket={mkTicket()} onClose={() => {}} showDeviceContext={false} />);
+    expect(screen.queryByTestId('device-context-header')).toBeNull();
   });
 });

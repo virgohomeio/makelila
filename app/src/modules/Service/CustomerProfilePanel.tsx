@@ -1,10 +1,9 @@
 import { statusMeta, topicLabel, sourceLabel, ticketStatusSet, type ServiceTicket } from '../../lib/service';
 import type { Customer } from '../../lib/customers';
-import { DeviceContextHeader } from '../../components/DeviceContextHeader';
 import type { CustomerGroup } from './ticketGrouping';
 import styles from './Service.module.css';
 
-// The per-customer "ticket profile": device context up top, then every ticket
+// The per-customer "ticket profile": every ticket
 // this customer has, each opening the full TicketDetailPanel. "+ Add ticket"
 // creates another ticket under the same profile (tickets are never merged
 // destructively — the profile just collects them).
@@ -42,8 +41,6 @@ export function CustomerProfilePanel({
       </div>
 
       <div className={styles.detailBody}>
-        <DeviceContextHeader unitSerial={group.unitSerial} />
-
         <div className={styles.profileTicketsHead}>
           <span className={styles.detailSectionLabel}>Tickets</span>
           <button className={styles.profileAddBtn} onClick={onAddTicket}>+ Add ticket</button>
