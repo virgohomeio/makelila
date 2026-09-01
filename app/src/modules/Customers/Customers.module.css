@@ -1177,331 +1177,7 @@ select.searchInput { padding-left: var(--space-2); }
 }
 
 /* ─── Journey tab ──────────────────────────────────────────────────────────── */
-.journeyTab {
-  padding: 16px 24px;
-}
-
-.journeyNamelessBanner {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  background: #fffaf0;
-  border: 1px solid #fbd38d;
-  color: #744210;
-  border-radius: 8px;
-  padding: 12px 16px;
-  margin-bottom: 12px;
-  font-size: .85rem;
-}
-.journeyNamelessHint {
-  color: #975a16;
-  font-size: .8rem;
-}
-.journeyNamelessBtn {
-  background: #c05621;
-  color: #fff;
-  border: none;
-  padding: 6px 14px;
-  border-radius: 6px;
-  font-size: .8rem;
-  font-weight: 700;
-  cursor: pointer;
-  white-space: nowrap;
-}
-.journeyNamelessBtn:hover:not(:disabled) { background: #9c4221; }
-.journeyNamelessBtn:disabled { opacity: .6; cursor: not-allowed; }
-.journeyNamelessResult {
-  background: #f0fff4;
-  border: 1px solid #9ae6b4;
-  color: #276749;
-  padding: 8px 14px;
-  border-radius: 6px;
-  font-size: .8rem;
-  margin-bottom: 12px;
-}
-
-.journeyFunnel {
-  display: grid;
-  grid-template-columns: repeat(11, minmax(0, 1fr));
-  gap: 6px;
-  margin-bottom: 14px;
-}
-.journeyFunnelStage {
-  background: #fff;
-  border: 2px solid #cbd5e0;
-  border-radius: 6px;
-  padding: 8px 4px;
-  cursor: pointer;
-  text-align: center;
-  transition: transform .1s, background .1s;
-}
-.journeyFunnelStage:hover { transform: translateY(-1px); background: #f7fafc; }
-.journeyFunnelActive { background: #f7fafc; box-shadow: inset 0 -3px 0 currentColor; }
-.journeyFunnelLabel { font-size: .7rem; color: #2d3748; font-weight: 600; }
-.journeyFunnelCount { font-size: 1.1rem; font-weight: 700; color: #1a202c; margin-top: 2px; }
-
-.journeyControls {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  align-items: center;
-  margin-bottom: 16px;
-}
-.journeyResultCount {
-  margin-left: auto;
-  font-size: .8rem;
-  color: #718096;
-}
-
-.journeyGrid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 12px;
-}
-
-.journeyCard {
-  background: #fff;
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
-  padding: 12px 14px;
-  cursor: pointer;
-  text-align: left;
-  font-family: inherit;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  transition: transform .1s, box-shadow .1s;
-}
-.journeyCard:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 16px rgba(0,0,0,.08);
-}
-.journeyCardHead {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-.journeyCardName {
-  font-weight: 700;
-  font-size: .95rem;
-  color: #1a202c;
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.journeyCardMood {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 18px;
-  color: #fff;
-  flex-shrink: 0;
-}
-.journeyCardStage {
-  display: inline-block;
-  font-size: .75rem;
-  font-weight: 700;
-  padding: 3px 8px;
-  border: 1px solid;
-  border-radius: 4px;
-  align-self: flex-start;
-}
-.journeyCardEmotion {
-  font-size: .75rem;
-  color: #4a5568;
-  font-style: italic;
-  line-height: 1.35;
-}
-.journeyCardMini {
-  display: flex;
-  gap: 4px;
-  margin-top: 4px;
-}
-.journeyCardMiniDot {
-  flex: 1;
-  height: 6px;
-  border-radius: 3px;
-}
-
 /* ─── Journey detail panel ──────────────────────────────────────────────── */
-.journeyPanel {
-  background: #fff;
-  width: min(1200px, 96vw);
-  max-height: 92vh;
-  border-radius: 10px;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-.journeyPanelMood {
-  display: inline-block;
-  margin-left: 12px;
-  padding: 3px 10px;
-  border-radius: 12px;
-  color: #fff;
-  font-size: .75rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: .03em;
-}
-.journeyManualBadge {
-  display: inline-block;
-  margin-left: 8px;
-  padding: 2px 8px;
-  border-radius: 4px;
-  background: #fefcbf;
-  color: #744210;
-  border: 1px solid #d69e2e;
-  font-size: .65rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: .04em;
-}
-.journeyStagePicker {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-  padding: 10px 14px;
-  background: #f7fafc;
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
-  margin-bottom: 12px;
-}
-.journeyStagePickerLabel {
-  font-size: .8rem;
-  font-weight: 700;
-  color: #2d3748;
-}
-.journeyStagePickerSelect {
-  padding: 5px 10px;
-  font-size: .85rem;
-  border: 1px solid #cbd5e0;
-  border-radius: 6px;
-  background: #fff;
-  font-family: inherit;
-}
-.journeyStagePickerClear {
-  padding: 5px 12px;
-  font-size: .75rem;
-  background: #fff;
-  border: 1px solid #cbd5e0;
-  border-radius: 6px;
-  cursor: pointer;
-  color: #4a5568;
-}
-.journeyStagePickerClear:hover:not(:disabled) { background: #edf2f7; }
-.journeyStagePickerClear:disabled { opacity: .6; cursor: not-allowed; }
-.journeyStagePickerErr {
-  font-size: .75rem;
-  color: #c53030;
-}
-.journeyPanelHint {
-  font-size: .75rem;
-  color: #4a5568;
-  background: #f7fafc;
-  padding: 8px 12px;
-  border-radius: 6px;
-  margin-bottom: 14px;
-}
-.journeyPanelHint code {
-  background: #edf2f7;
-  padding: 1px 5px;
-  border-radius: 3px;
-  font-size: .7rem;
-}
-
-.journeyTimeline {
-  display: grid;
-  grid-template-columns: repeat(10, minmax(0, 1fr));
-  gap: 6px;
-  margin-bottom: 18px;
-}
-.journeyTimelineStage {
-  background: #fff;
-  border: 1px solid #e2e8f0;
-  border-top: 4px solid;
-  border-radius: 6px;
-  display: flex;
-  flex-direction: column;
-  min-height: 200px;
-}
-.journeyTimelineCurrent {
-  box-shadow: 0 0 0 2px #2b6cb0;
-}
-.journeyTimelineHead {
-  color: #fff;
-  padding: 8px 6px;
-  text-align: center;
-}
-.journeyTimelineEmoji { font-size: 18px; }
-.journeyTimelineLabel { font-size: .7rem; font-weight: 700; margin-top: 2px; }
-.journeyTimelineBody {
-  padding: 8px;
-  font-size: .7rem;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  flex: 1;
-}
-.journeyTimelineNotYet {
-  color: #a0aec0;
-  font-style: italic;
-  text-align: center;
-}
-.journeyTimelineScore {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 6px 0;
-  border-bottom: 1px dashed #e2e8f0;
-}
-.journeyTimelineScoreVal { font-size: 1rem; font-weight: 700; }
-.journeyTimelineScoreLabel { font-size: .65rem; color: #718096; text-transform: uppercase; }
-.journeyTimelineSignals {
-  list-style: disc;
-  margin: 0;
-  padding-left: 14px;
-  color: #2d3748;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-.journeyTimelineNoSignal { color: #a0aec0; }
-.journeyTimelineEmotion {
-  margin-top: auto;
-  padding-top: 6px;
-  border-top: 1px dotted #e2e8f0;
-  color: #4a5568;
-  font-style: italic;
-  font-size: .65rem;
-  line-height: 1.35;
-}
-
-.journeyDataDump {
-  display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
-  gap: 14px;
-  margin-top: 8px;
-}
-.journeyDataDumpTitle {
-  font-size: .75rem;
-  font-weight: 700;
-  color: #2d3748;
-  margin-bottom: 6px;
-}
-.journeyDataDumpRow {
-  font-size: .7rem;
-  color: #4a5568;
-  padding: 3px 0;
-  border-bottom: 1px dotted #edf2f7;
-}
-
 /* ── Backlog #58 V9 — profitability dashboard ─────────────────────────────────
    Views, KPI row, charts, the province/state choropleth and the customer
    drill-down. Colour in the charts only ever encodes the sign of a number
@@ -2099,3 +1775,522 @@ select.searchInput { padding-left: var(--space-2); }
 
 /* Directory search: names the household member a row matched on, when that
    isn't the purchaser whose name the Name column shows. */
+/* ══════════════════════════════════════════════════════════════════════════
+   Journey tab — the ten-stage CJM, per customer.
+
+   Converted alongside the Directory (2026-09-01). What this replaced:
+
+     - A funnel of eleven boxes, each with a 2px border in its own stage
+       colour: grey, gold, two blues, two purples, green, red, brown, green.
+       Ten hues, none of them in the palette, none of them encoding anything
+       the stage label wasn't already saying — and because every box was the
+       same width, the one thing an operator wants from a funnel (where the
+       customers actually are) could only be got by reading eleven numbers and
+       comparing them. The rail below encodes that as length instead.
+     - Card hover lifted 2px on a cold black shadow. In a grid of 146 cards
+       that is a lot of movement for "you are pointing at this one".
+     - The 32px coloured disc with an emoji in it. Satisfaction is now a dot
+       and the word itself, which is both quieter and more precise —
+       "concerned" and "neutral" were two emoji apart and easy to confuse.
+
+   Stage colour is gone; stage POSITION is the information, so the rail and
+   the timeline number the stages 01–10 and let ink carry the rest. The CJM's
+   own per-stage emoji stay in the detail panel, where the timeline reproduces
+   the canonical stage definitions.
+
+   Satisfaction keeps its colour, because there it is a real scale and the
+   sort order depends on it — remapped onto the status tokens.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.journeyTab {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+/* ── Nameless-customer banner ─────────────────────────────────────────────
+   Was #fffaf0 / #fbd38d / #744210 with a filled #c05621 button — a warning
+   built out of four hexes that only approximated the warning tokens. */
+.journeyNamelessBanner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-warning-border);
+  border-radius: var(--radius-md);
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
+  font-size: var(--font-size-body);
+}
+.journeyNamelessHint { color: var(--color-ink-muted); }
+
+/* ── Stage rail ───────────────────────────────────────────────────────────
+   One row, ten stages in order, plus All. Each cell carries its ordinal, its
+   name, its count in the data face, and a track whose fill is that count as a
+   share of the busiest stage — so the shape of the funnel is legible without
+   reading a single number. */
+.journeyRail {
+  display: grid;
+  grid-template-columns: auto repeat(10, minmax(0, 1fr));
+  gap: 1px;
+  padding: 1px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-border);
+  overflow: hidden;
+}
+
+.journeyRailCell {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-2) var(--space-1);
+  border: 0;
+  background: var(--color-raised);
+  text-align: left;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.journeyRailCell:hover { background: var(--color-surface); }
+.journeyRailCell:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.journeyRailActive { background: var(--color-surface); }
+
+.journeyRailOrdinal {
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--font-numeric);
+  font-size: 10px;
+  color: var(--color-ink-faint);
+}
+.journeyRailLabel {
+  font-size: var(--font-size-meta);
+  font-weight: 600;
+  line-height: 1.25;
+  color: var(--color-ink-subtle);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.journeyRailActive .journeyRailLabel { color: var(--color-ink); }
+
+.journeyRailCount {
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--font-numeric);
+  font-size: 17px;
+  font-weight: 500;
+  line-height: 1.1;
+  color: var(--color-ink);
+}
+/* A stage with nobody in it is not worth the same ink as a busy one. */
+.journeyRailZero { color: var(--color-ink-faint); }
+
+.journeyRailTrack {
+  height: 3px;
+  margin-top: auto;
+  border-radius: var(--radius-pill);
+  background: rgba(var(--color-ink-rgb), 0.07);
+  overflow: hidden;
+}
+.journeyRailFill {
+  height: 100%;
+  border-radius: var(--radius-pill);
+  background: var(--color-ink-faint);
+}
+.journeyRailActive .journeyRailFill { background: var(--color-ink); }
+
+/* ── Controls ─────────────────────────────────────────────────────────────
+   Same row the Directory uses: search, hairline, chips. Satisfaction was a
+   bare <select> with three options, which is a chip group wearing a disguise. */
+.journeyControls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+.journeyResultCount {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--font-numeric);
+  font-size: var(--font-size-meta);
+  color: var(--color-ink-subtle);
+  white-space: nowrap;
+}
+
+/* ── Cards ────────────────────────────────────────────────────────────────— */
+.journeyGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: var(--space-3);
+}
+
+.journeyCard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-raised);
+  text-align: left;
+  font: inherit;
+  transition: background var(--dur-fast) var(--ease-out),
+              border-color var(--dur-fast) var(--ease-out);
+}
+.journeyCard:hover {
+  background: var(--color-surface);
+  border-color: var(--color-ink-faint);
+}
+.journeyCard:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+
+.journeyCardHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+.journeyCardName {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--font-size-body);
+  font-weight: 600;
+  color: var(--color-ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Satisfaction: a dot and the word. The colour is the scale, the word is the
+   precision — neither is asked to work alone. */
+.journeyMood {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex: none;
+  font-size: var(--font-size-meta);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-ink-muted);
+}
+.journeyMoodDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.journeyCardStage {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  font-size: var(--font-size-body);
+  color: var(--color-ink);
+}
+.journeyCardStageOrdinal {
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--font-numeric);
+  font-size: var(--font-size-meta);
+  color: var(--color-ink-faint);
+}
+.journeyCardEmotion {
+  font-size: var(--font-size-meta);
+  line-height: 1.4;
+  color: var(--color-ink-subtle);
+}
+
+/* Ten segments, one per stage. Where they are now is the solid one; where
+   they have been is faint; ahead of them is barely there. */
+.journeyCardMini {
+  display: flex;
+  gap: 2px;
+  margin-top: auto;
+  padding-top: var(--space-1);
+}
+.journeyCardMiniDot {
+  flex: 1;
+  height: 4px;
+  border-radius: var(--radius-pill);
+  background: rgba(var(--color-ink-rgb), 0.09);
+}
+.journeyCardMiniReached { background: var(--color-ink-subtle); }
+.journeyCardMiniCurrent { background: var(--color-ink); }
+
+.journeyDormancy {
+  align-self: flex-start;
+  padding: 1px var(--space-2);
+  border: 1px solid;
+  border-radius: var(--radius-sm);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* ── Detail modal ─────────────────────────────────────────────────────────
+   Its own backdrop: the shared .panelBackdrop pins to the right for the
+   Directory drawer, and a 1200px panel pinned right reads as a drawer that
+   didn't make it to the edge. This one is a modal, so it is centred. */
+.journeyBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-5);
+  background: rgba(var(--color-ink-rgb), 0.32);
+}
+
+.journeyPanel {
+  width: min(1200px, 100%);
+  max-height: 92vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-raised);
+  box-shadow: var(--shadow-lg);
+}
+
+.journeyPanelBody {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.journeyPanelHeadline {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.journeyManualBadge {
+  padding: 1px var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-ink-muted);
+}
+
+.journeyStagePicker {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+.journeyStagePickerLabel {
+  font-size: var(--font-size-meta);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-ink-subtle);
+}
+.journeyStagePickerSelect { width: auto; min-width: 240px; }
+.journeyStagePickerErr {
+  font-size: var(--font-size-meta);
+  color: var(--color-error-strong);
+}
+
+.journeyAttribution {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  align-items: center;
+}
+.journeyAttrChip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  padding: 2px var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  font-size: var(--font-size-meta);
+  color: var(--color-ink-muted);
+}
+.journeyAttrChip strong {
+  font-family: var(--font-mono);
+  font-weight: 500;
+  color: var(--color-ink);
+}
+.journeyAttrLabel {
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-ink-subtle);
+}
+.journeyAttrUnknown {
+  font-size: var(--font-size-meta);
+  color: var(--color-ink-faint);
+}
+
+.journeyPanelHint {
+  padding: var(--space-3);
+  border-left: 2px solid var(--color-border);
+  font-size: var(--font-size-meta);
+  line-height: 1.5;
+  color: var(--color-ink-subtle);
+}
+.journeyPanelHint code {
+  font-family: var(--font-mono);
+  color: var(--color-ink-muted);
+}
+
+/* ── Timeline ─────────────────────────────────────────────────────────────
+   Ten columns. The heads used to be ten saturated colour blocks with white
+   text; they are now ink on the card ground, and the ordinal does the job the
+   colour was doing badly. The stage the customer is actually in is the only
+   one that gets an accent — which is the whole question this view answers. */
+.journeyTimeline {
+  display: grid;
+  grid-template-columns: repeat(10, minmax(0, 1fr));
+  gap: var(--space-1);
+}
+
+.journeyTimelineStage {
+  display: flex;
+  flex-direction: column;
+  min-height: 190px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-raised);
+  overflow: hidden;
+}
+.journeyTimelineCurrent { border-color: var(--color-ink); }
+.journeyTimelineCurrent .journeyTimelineHead {
+  background: var(--color-ink);
+  border-bottom-color: var(--color-ink);
+}
+.journeyTimelineCurrent .journeyTimelineLabel { color: var(--color-page); }
+.journeyTimelineCurrent .journeyTimelineOrdinal { color: var(--color-on-dark-muted); }
+
+.journeyTimelineHead {
+  padding: var(--space-2);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface);
+  text-align: center;
+}
+.journeyTimelineOrdinal {
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--font-numeric);
+  font-size: 10px;
+  color: var(--color-ink-faint);
+}
+.journeyTimelineEmoji { font-size: 15px; line-height: 1.3; }
+.journeyTimelineLabel {
+  font-size: var(--font-size-meta);
+  font-weight: 600;
+  color: var(--color-ink);
+  line-height: 1.25;
+}
+
+.journeyTimelineBody {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  font-size: var(--font-size-meta);
+}
+.journeyTimelineNotYet {
+  text-align: center;
+  color: var(--color-ink-faint);
+}
+.journeyTimelineScore {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--color-border);
+}
+.journeyTimelineScoreVal {
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--font-numeric);
+  font-size: 13px;
+  font-weight: 500;
+}
+.journeyTimelineScoreLabel {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-ink-subtle);
+}
+.journeyTimelineSignals {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+  padding-left: var(--space-4);
+  color: var(--color-ink-muted);
+  line-height: 1.4;
+}
+.journeyTimelineNoSignal { color: var(--color-ink-faint); list-style: none; margin-left: calc(var(--space-4) * -1); }
+.journeyTimelineEmotion {
+  margin-top: auto;
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--color-border);
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--color-ink-subtle);
+}
+
+/* ── Raw signals ──────────────────────────────────────────────────────────— */
+.journeyDataDump {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: var(--space-4);
+}
+.journeyDataDumpTitle {
+  margin-bottom: var(--space-2);
+  padding-bottom: var(--space-1);
+  border-bottom: 1px solid var(--color-border);
+  font-size: var(--font-size-meta);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-ink-subtle);
+}
+.journeyDataDumpRow {
+  padding: var(--space-1) 0;
+  border-bottom: 1px solid rgba(var(--color-ink-rgb), 0.06);
+  font-size: var(--font-size-meta);
+  color: var(--color-ink-muted);
+}
+.journeyDataDumpRow:last-child { border-bottom: none; }
+.journeyDataDumpRow code {
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--font-numeric);
+  color: var(--color-ink);
+}
+
+/* Skeleton cards while the six hooks this tab joins are still landing. */
+.journeySkelCard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-raised);
+  min-height: 118px;
+}
+
+@media (max-width: 1180px) {
+  /* Ten columns of anything stop being readable well before this; the rail
+     scrolls sideways and the timeline wraps to two rows of five. */
+  .journeyRail {
+    grid-template-columns: auto repeat(10, minmax(84px, 1fr));
+    overflow-x: auto;
+  }
+  .journeyTimeline { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+}

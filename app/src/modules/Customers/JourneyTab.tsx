@@ -5,6 +5,7 @@ import { useServiceTickets, useCustomerLifecycle, type ServiceTicket, type Custo
 import { useReturns, type ReturnRow } from '../../lib/postShipment';
 import { useUnits, type Unit } from '../../lib/stock';
 import { useCustomerEngagementMap, dormancyBadge } from '../../lib/customerEvents';
+import { Chip, ChipRow, Button, EmptyState } from '../../components/ui';
 import styles from './Customers.module.css';
 
 // ─── CJM stages, mirrors CJM/makeLILA_CJM_v2.html (10 stages) ─────────────────
@@ -21,20 +22,19 @@ type StageDef = {
   description: string;
   emoji: string;          // CJM "Customer Feeling" emoji at this stage
   emotionLabel: string;   // CJM verbatim emotion text
-  color: string;
 };
 
 const STAGES: readonly StageDef[] = [
-  { key: 'awareness',    label: 'Awareness',           description: 'Why do they start the journey?',     emoji: '😬', emotionLabel: 'Skeptical — ugly? too expensive? really compost?', color: '#a0aec0' },
-  { key: 'consideration',label: 'Consideration',        description: 'Why should they care about LILA?',   emoji: '🤔', emotionLabel: 'Cautiously interested but lots of doubts',           color: '#d69e2e' },
-  { key: 'conversion',   label: 'Conversion',           description: 'Why would they trust us?',           emoji: '😊', emotionLabel: 'Committed but anxious about the price',              color: '#2b6cb0' },
-  { key: 'shipping',     label: 'Shipping',             description: 'Comfortable while waiting?',         emoji: '😶', emotionLabel: 'Anticipating — reassured by onboarding outreach',    color: '#3182ce' },
-  { key: 'unboxing',     label: 'Unboxing',             description: 'First impression?',                  emoji: '😍', emotionLabel: 'Excited — first impression (packaging waste concern)', color: '#805ad5' },
-  { key: 'setup',        label: 'Setup',                description: 'How do they start using LILA?',      emoji: '😌', emotionLabel: 'Guided onboarding helps — tech barriers for some',  color: '#6b46c1' },
-  { key: 'routine',      label: 'Routine Use',          description: 'How can they feel successful?',      emoji: '🌱', emotionLabel: 'Satisfied — seeing real compost output',             color: '#276749' },
-  { key: 'failure',      label: 'Failure & Support',    description: 'How can they navigate failures?',    emoji: '😡', emotionLabel: 'Frustrated — speed of fix = will I recommend?',     color: '#c53030' },
-  { key: 'eol',          label: 'End of Life',          description: 'Feel good with end of life?',        emoji: '😔', emotionLabel: 'Reluctant — don\'t want to start over',              color: '#a0522d' },
-  { key: 'promotion',    label: 'Promotion',            description: 'Why recommend to others?',           emoji: '🥰', emotionLabel: 'Proud advocate — "tech expert" to friends',         color: '#38a169' },
+  { key: 'awareness',    label: 'Awareness',           description: 'Why do they start the journey?',     emoji: '😬', emotionLabel: 'Skeptical — ugly? too expensive? really compost?' },
+  { key: 'consideration',label: 'Consideration',        description: 'Why should they care about LILA?',   emoji: '🤔', emotionLabel: 'Cautiously interested but lots of doubts' },
+  { key: 'conversion',   label: 'Conversion',           description: 'Why would they trust us?',           emoji: '😊', emotionLabel: 'Committed but anxious about the price' },
+  { key: 'shipping',     label: 'Shipping',             description: 'Comfortable while waiting?',         emoji: '😶', emotionLabel: 'Anticipating — reassured by onboarding outreach' },
+  { key: 'unboxing',     label: 'Unboxing',             description: 'First impression?',                  emoji: '😍', emotionLabel: 'Excited — first impression (packaging waste concern)' },
+  { key: 'setup',        label: 'Setup',                description: 'How do they start using LILA?',      emoji: '😌', emotionLabel: 'Guided onboarding helps — tech barriers for some' },
+  { key: 'routine',      label: 'Routine Use',          description: 'How can they feel successful?',      emoji: '🌱', emotionLabel: 'Satisfied — seeing real compost output' },
+  { key: 'failure',      label: 'Failure & Support',    description: 'How can they navigate failures?',    emoji: '😡', emotionLabel: 'Frustrated — speed of fix = will I recommend?' },
+  { key: 'eol',          label: 'End of Life',          description: 'Feel good with end of life?',        emoji: '😔', emotionLabel: 'Reluctant — don\'t want to start over' },
+  { key: 'promotion',    label: 'Promotion',            description: 'Why recommend to others?',           emoji: '🥰', emotionLabel: 'Proud advocate — "tech expert" to friends' },
 ];
 
 const STAGE_INDEX: Record<StageKey, number> = STAGES.reduce(
@@ -71,11 +71,17 @@ type Journey = {
 
 const STAGE_KEYS = new Set<StageKey>(STAGES.map(s => s.key));
 
-const SATISFACTION_EMOJI: Record<Satisfaction, string> = {
-  0: '😞', 1: '😟', 2: '😕', 3: '😐', 4: '🙂', 5: '🤩',
-};
+// Satisfaction is a real scale and the card sort depends on it, so it keeps
+// its colour — but on the status tokens rather than six hexes that were close
+// to them. 4 and 5 share a green; "satisfied" and "delighted" are told apart
+// by the word beside the dot, which is what the word is there for.
 const SATISFACTION_COLOR: Record<Satisfaction, string> = {
-  0: '#742a2a', 1: '#c53030', 2: '#dd6b20', 3: '#a0aec0', 4: '#38a169', 5: '#276749',
+  0: 'var(--color-error)',
+  1: 'var(--color-error-strong)',
+  2: 'var(--color-warning-strong)',
+  3: 'var(--color-ink-subtle)',
+  4: 'var(--color-success)',
+  5: 'var(--color-success)',
 };
 const SATISFACTION_LABEL: Record<Satisfaction, string> = {
   0: 'abandoned', 1: 'frustrated', 2: 'concerned', 3: 'neutral', 4: 'satisfied', 5: 'delighted',
@@ -427,9 +433,28 @@ export function JourneyTab() {
     setNameRequestResult({ sent, failed });
   }
 
-  if (lc) return <div className={styles.loading}>Loading journey…</div>;
+  if (lc) {
+    return (
+      <div className={styles.journeyGrid}>
+        {Array.from({ length: 8 }, (_, i) => (
+          <div key={i} className={styles.journeySkelCard} aria-hidden="true">
+            <div className={styles.skelBar} style={{ width: '58%' }} />
+            <div className={styles.skelBar} style={{ width: '34%' }} />
+            <div className={styles.skelBar} style={{ width: '82%' }} />
+            <div className={styles.skelBar} style={{ width: '100%', marginTop: 'auto' }} />
+          </div>
+        ))}
+      </div>
+    );
+  }
 
   const open = openId ? journeys.find(j => j.customer.id === openId) ?? null : null;
+
+  const filtersOn = stageFilter !== 'all' || satFilter !== 'all' || search.trim() !== '';
+  const clearFilters = () => { setStageFilter('all'); setSatFilter('all'); setSearch(''); };
+  // The rail's bars are a share of the busiest stage, not of the total —
+  // against the total, nine of the ten stages would be a sliver.
+  const railPeak = Math.max(1, ...STAGES.map(st => stageCounts[st.key]));
 
   return (
     <div className={styles.journeyTab}>
@@ -441,62 +466,108 @@ export function JourneyTab() {
               {' '}Hidden from the cards below. Send them a short email asking for their name so they can be tracked.
             </span>
           </div>
-          <button
-            className={styles.journeyNamelessBtn}
-            onClick={() => void handleSendNameRequests()}
-            disabled={sendingNames}
-          >
+          <Button onClick={() => void handleSendNameRequests()} disabled={sendingNames}>
             {sendingNames ? 'Sending…' : `Send name request to ${namelessWithEmail.length}`}
-          </button>
+          </Button>
         </div>
       )}
       {nameRequestResult && (
-        <div className={styles.journeyNamelessResult}>
-          ✓ Sent {nameRequestResult.sent}{nameRequestResult.failed > 0 ? ` · ${nameRequestResult.failed} failed (see console)` : ''}
+        <div className={`${styles.toast} ${styles.toastSuccess}`}>
+          <span className={styles.toastText}>
+            Sent {nameRequestResult.sent}
+            {nameRequestResult.failed > 0 ? ` · ${nameRequestResult.failed} failed (see console)` : ''}
+          </span>
+          <button className={styles.toastClose} onClick={() => setNameRequestResult(null)} aria-label="Dismiss">✕</button>
         </div>
       )}
 
-      {/* Stage funnel — counts per stage, click to filter */}
-      <div className={styles.journeyFunnel}>
+      {/* Stage rail — where everybody is, as length rather than as eleven
+          numbers to compare. Click a stage to filter to it. */}
+      <div className={styles.journeyRail} role="group" aria-label="Filter by journey stage">
         <button
-          className={`${styles.journeyFunnelStage} ${stageFilter === 'all' ? styles.journeyFunnelActive : ''}`}
+          type="button"
+          aria-pressed={stageFilter === 'all'}
+          className={`${styles.journeyRailCell} ${stageFilter === 'all' ? styles.journeyRailActive : ''}`}
           onClick={() => setStageFilter('all')}
-          style={{ borderColor: '#cbd5e0' }}
         >
-          <div className={styles.journeyFunnelLabel}>All</div>
-          <div className={styles.journeyFunnelCount}>{journeys.length}</div>
+          <div className={styles.journeyRailOrdinal}>··</div>
+          <div className={styles.journeyRailLabel}>All</div>
+          <div className={styles.journeyRailCount}>{journeys.length}</div>
+          <div className={styles.journeyRailTrack}><div className={styles.journeyRailFill} style={{ width: '100%' }} /></div>
         </button>
-        {STAGES.map(s => (
-          <button
-            key={s.key}
-            className={`${styles.journeyFunnelStage} ${stageFilter === s.key ? styles.journeyFunnelActive : ''}`}
-            onClick={() => setStageFilter(stageFilter === s.key ? 'all' : s.key)}
-            style={{ borderColor: s.color }}
-            title={`${s.label} — ${s.description}`}
-          >
-            <div className={styles.journeyFunnelLabel}>{s.emoji} {s.label}</div>
-            <div className={styles.journeyFunnelCount} style={{ color: s.color }}>{stageCounts[s.key]}</div>
-          </button>
-        ))}
+        {STAGES.map((st, i) => {
+          const n = stageCounts[st.key];
+          const active = stageFilter === st.key;
+          return (
+            <button
+              key={st.key}
+              type="button"
+              aria-pressed={active}
+              className={`${styles.journeyRailCell} ${active ? styles.journeyRailActive : ''}`}
+              onClick={() => setStageFilter(active ? 'all' : st.key)}
+              title={`${st.label} — ${st.description}`}
+            >
+              <div className={styles.journeyRailOrdinal}>{String(i + 1).padStart(2, '0')}</div>
+              <div className={styles.journeyRailLabel}>{st.label}</div>
+              <div className={`${styles.journeyRailCount} ${n === 0 ? styles.journeyRailZero : ''}`}>{n}</div>
+              <div className={styles.journeyRailTrack}>
+                <div className={styles.journeyRailFill} style={{ width: `${Math.round((n / railPeak) * 100)}%` }} />
+              </div>
+            </button>
+          );
+        })}
       </div>
 
       <div className={styles.journeyControls}>
-        <input
-          className={styles.profSearch}
-          placeholder="Search customer…"
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-        />
-        <select value={satFilter} onChange={e => setSatFilter(e.target.value as SatisfactionFilter)}>
-          <option value="all">All satisfaction</option>
-          <option value="unhappy">Unhappy (≤2)</option>
-          <option value="happy">Happy (≥4)</option>
-        </select>
-        <span className={styles.journeyResultCount}>{filtered.length} customers</span>
+        <div className={styles.search}>
+          <span className={styles.searchIcon} aria-hidden="true">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.4">
+              <circle cx="6.2" cy="6.2" r="4.2" />
+              <path d="M9.4 9.4 12.5 12.5" strokeLinecap="round" />
+            </svg>
+          </span>
+          <input
+            type="search"
+            className={styles.searchField}
+            placeholder="Search name or email…"
+            aria-label="Search customers"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+          />
+          {search && (
+            <button className={styles.searchClear} onClick={() => setSearch('')} aria-label="Clear search">
+              <svg width="9" height="9" viewBox="0 0 9 9" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
+                <path d="M1 1l7 7M8 1l-7 7" />
+              </svg>
+            </button>
+          )}
+        </div>
+
+        <span className={styles.filterDivider} aria-hidden="true" />
+
+        {/* Three mutually exclusive options is a chip group, not a <select>. */}
+        <ChipRow>
+          {SAT_FILTERS.map(f => (
+            <Chip
+              key={f.key}
+              label={f.label}
+              active={satFilter === f.key}
+              onClick={() => setSatFilter(f.key)}
+            />
+          ))}
+        </ChipRow>
+
+        <span className={styles.journeyResultCount}>
+          {filtered.length} of {journeys.length}
+        </span>
       </div>
 
       {filtered.length === 0 ? (
-        <div className={styles.empty}>No customers match these filters.</div>
+        <EmptyState
+          title="No customer is at this point in the journey"
+          body="Stage comes from orders, lifecycle rows, tickets and returns — or from an operator override on the customer's card."
+          action={filtersOn ? <Button onClick={clearFilters}>Clear filters</Button> : undefined}
+        />
       ) : (
         <div className={styles.journeyGrid}>
           {filtered.map(j => (
@@ -521,63 +592,64 @@ export function JourneyTab() {
   );
 }
 
+const SAT_FILTERS: { key: SatisfactionFilter; label: string }[] = [
+  { key: 'all',     label: 'All' },
+  { key: 'unhappy', label: 'Unhappy \u2264 2' },
+  { key: 'happy',   label: 'Happy \u2265 4' },
+];
+
 function JourneyCard({ journey, dormancyDays, hasLovely, onOpen }: {
   journey: Journey;
   dormancyDays: number | null;
   hasLovely: boolean;
   onOpen: () => void;
 }) {
-  const stage = STAGES[STAGE_INDEX[journey.currentStage]];
+  const stageIdx = STAGE_INDEX[journey.currentStage];
+  const stage = STAGES[stageIdx];
   const s = journey.overallSatisfaction;
   const badge = dormancyBadge(dormancyDays);
+  const tone = badge
+    ? badge.tone === 'good' ? 'var(--color-success)'
+    : badge.tone === 'warn' ? 'var(--color-warning)'
+    :                         'var(--color-error-strong)'
+    : undefined;
   return (
     <button className={styles.journeyCard} onClick={onOpen}>
       <div className={styles.journeyCardHead}>
-        <div className={styles.journeyCardName}>{journey.customer.full_name}</div>
-        <div
-          className={styles.journeyCardMood}
-          title={SATISFACTION_LABEL[s]}
-          style={{ background: SATISFACTION_COLOR[s] }}
-        >
-          {SATISFACTION_EMOJI[s]}
-        </div>
+        <span className={styles.journeyCardName}>{journey.customer.full_name}</span>
+        <span className={styles.journeyMood}>
+          <span className={styles.journeyMoodDot} style={{ background: SATISFACTION_COLOR[s] }} />
+          {SATISFACTION_LABEL[s]}
+        </span>
       </div>
+
       {hasLovely && badge && (
-        <div style={{
-          display: 'inline-block', marginTop: 4,
-          fontSize: 9, padding: '1px 6px', borderRadius: 999,
-          fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.3,
-          color:
-            badge.tone === 'good'  ? 'var(--color-success)' :
-            badge.tone === 'warn'  ? 'var(--color-warning)' :
-                                     'var(--color-error)',
-          background:
-            badge.tone === 'good'  ? 'var(--color-success-bg)' :
-            badge.tone === 'warn'  ? 'var(--color-warning-bg)' :
-                                     'var(--color-error-bg)',
-        }} title="lilalovely engagement">{badge.label}</div>
+        <span
+          className={styles.journeyDormancy}
+          style={{ color: tone, borderColor: tone }}
+          title="lilalovely engagement"
+        >{badge.label}</span>
       )}
-      <div className={styles.journeyCardStage} style={{ color: stage.color, borderColor: stage.color }}>
-        {stage.emoji} {stage.label}
+
+      <div className={styles.journeyCardStage}>
+        <span className={styles.journeyCardStageOrdinal}>{String(stageIdx + 1).padStart(2, '0')}</span>
+        {stage.label}
       </div>
       <div className={styles.journeyCardEmotion}>{stage.emotionLabel}</div>
-      <div className={styles.journeyCardMini}>
-        {STAGES.map(st => {
-          const reached = STAGE_INDEX[st.key] <= STAGE_INDEX[journey.currentStage];
-          return (
-            <span
-              key={st.key}
-              className={styles.journeyCardMiniDot}
-              style={{
-                background: reached ? st.color : '#edf2f7',
-                opacity: reached ? 1 : 0.35,
-                outline: st.key === journey.currentStage ? `2px solid ${st.color}` : 'none',
-                outlineOffset: 1,
-              }}
-              title={st.label}
-            />
-          );
-        })}
+
+      {/* Where they are, where they have been, what is ahead — in ink, so the
+          card does not need ten colours to say one thing. */}
+      <div className={styles.journeyCardMini} title={`Stage ${stageIdx + 1} of ${STAGES.length}`}>
+        {STAGES.map((st, i) => (
+          <span
+            key={st.key}
+            className={[
+              styles.journeyCardMiniDot,
+              i < stageIdx ? styles.journeyCardMiniReached : '',
+              i === stageIdx ? styles.journeyCardMiniCurrent : '',
+            ].filter(Boolean).join(' ')}
+          />
+        ))}
       </div>
     </button>
   );
@@ -603,6 +675,12 @@ function JourneyDetailPanel({
     setPendingStage(isManualStage ? currentStage : '');
   }, [isManualStage, currentStage]);
 
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
   async function handleSetStage(next: string | null) {
     setBusy(true); setErr(null);
     try {
@@ -619,53 +697,53 @@ function JourneyDetailPanel({
   }
 
   return (
-    <div className={styles.panelBackdrop} onClick={onClose}>
+    <div className={styles.journeyBackdrop} onClick={onClose}>
       <div className={styles.journeyPanel} onClick={e => e.stopPropagation()}>
         <div className={styles.panelHeader}>
           <div>
-            <h2 className={styles.panelTitle}>
-              {customer.full_name}
-              <span
-                className={styles.journeyPanelMood}
-                title={SATISFACTION_LABEL[overallSatisfaction]}
-                style={{ background: SATISFACTION_COLOR[overallSatisfaction] }}
-              >
-                {SATISFACTION_EMOJI[overallSatisfaction]} {SATISFACTION_LABEL[overallSatisfaction]}
+            <div className={styles.journeyPanelHeadline}>
+              <h2 className={styles.panelTitle}>{customer.full_name}</h2>
+              <span className={styles.journeyMood}>
+                <span
+                  className={styles.journeyMoodDot}
+                  style={{ background: SATISFACTION_COLOR[overallSatisfaction] }}
+                />
+                {SATISFACTION_LABEL[overallSatisfaction]}
               </span>
               {isManualStage && (
                 <span className={styles.journeyManualBadge} title="Stage was manually set by an operator">
-                  manual
+                  stage set by hand
                 </span>
               )}
-            </h2>
+            </div>
             <div className={styles.panelSubtitle}>{customer.email ?? 'no email'}</div>
           </div>
-          <button onClick={onClose} className={styles.panelClose} aria-label="Close">×</button>
+          <button onClick={onClose} className={styles.panelClose} aria-label="Close">
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
+              <path d="M1.5 1.5l9 9M10.5 1.5l-9 9" />
+            </svg>
+          </button>
         </div>
 
-        <div className={styles.panelBody}>
+        <div className={`${styles.panelBody} ${styles.journeyPanelBody}`}>
           <div className={styles.journeyStagePicker}>
-            <label className={styles.journeyStagePickerLabel}>Override stage:</label>
+            <label className={styles.journeyStagePickerLabel} htmlFor="journey-stage-override">Stage</label>
             <select
+              id="journey-stage-override"
               value={pendingStage}
               onChange={e => void handleSetStage(e.target.value === '' ? null : e.target.value)}
               disabled={busy}
-              className={styles.journeyStagePickerSelect}
+              className={`${styles.searchInput} ${styles.journeyStagePickerSelect}`}
             >
-              <option value="">— inferred ({currentStage}) —</option>
-              {STAGES.map(s => (
-                <option key={s.key} value={s.key}>{s.emoji} {s.label}</option>
+              <option value="">Inferred from ops data — {STAGES[STAGE_INDEX[currentStage]].label}</option>
+              {STAGES.map((st, i) => (
+                <option key={st.key} value={st.key}>{String(i + 1).padStart(2, '0')} · {st.label}</option>
               ))}
             </select>
             {isManualStage && (
-              <button
-                type="button"
-                className={styles.journeyStagePickerClear}
-                onClick={() => void handleSetStage(null)}
-                disabled={busy}
-              >
+              <Button small onClick={() => void handleSetStage(null)} disabled={busy}>
                 Revert to inferred
-              </button>
+              </Button>
             )}
             {err && <span className={styles.journeyStagePickerErr}>{err}</span>}
           </div>
@@ -675,32 +753,20 @@ function JourneyDetailPanel({
             const first = customer.first_touch_source;
             const last  = customer.last_touch_source;
             if (!first && !last) {
-              return (
-                <div style={{ marginBottom: 12 }}>
-                  <span style={{ fontSize: 11, color: 'var(--color-ink-subtle)', fontStyle: 'italic' }}>
-                    Attribution unknown
-                  </span>
-                </div>
-              );
+              return <div className={styles.journeyAttrUnknown}>Attribution unknown</div>;
             }
             return (
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
+              <div className={styles.journeyAttribution}>
                 {first && (
-                  <span style={{
-                    fontSize: 10, padding: '3px 8px', borderRadius: 4,
-                    background: '#ebf8ff', color: '#2c5282', border: '1px solid #90cdf4',
-                    fontWeight: 600,
-                  }}>
-                    First touch: {first}{customer.first_touch_campaign_id ? ` · ${customer.first_touch_campaign_id}` : ''}
+                  <span className={styles.journeyAttrChip}>
+                    <span className={styles.journeyAttrLabel}>First touch</span>
+                    <strong>{first}{customer.first_touch_campaign_id ? ` · ${customer.first_touch_campaign_id}` : ''}</strong>
                   </span>
                 )}
                 {last && (
-                  <span style={{
-                    fontSize: 10, padding: '3px 8px', borderRadius: 4,
-                    background: '#f0fff4', color: '#276749', border: '1px solid #9ae6b4',
-                    fontWeight: 600,
-                  }}>
-                    Last touch: {last}{customer.last_touch_campaign_id ? ` · ${customer.last_touch_campaign_id}` : ''}
+                  <span className={styles.journeyAttrChip}>
+                    <span className={styles.journeyAttrLabel}>Last touch</span>
+                    <strong>{last}{customer.last_touch_campaign_id ? ` · ${customer.last_touch_campaign_id}` : ''}</strong>
                   </span>
                 )}
               </div>
@@ -708,22 +774,24 @@ function JourneyDetailPanel({
           })()}
 
           <div className={styles.journeyPanelHint}>
-            10-stage CJM from <code>CJM/makeLILA_CJM_v2.html</code>. Bars below a stage are scored 0–5
-            from real ops data — orders, lifecycle, tickets, returns. Click a bar to see the signals
-            feeding it. Use the override above when the heuristics get it wrong.
+            The ten stages come from <code>CJM/makeLILA_CJM_v2.html</code>. Each one a customer has
+            reached is scored 0–5 from real ops data — orders, lifecycle rows, tickets, returns —
+            and lists the signals that produced the score. Set the stage by hand above when the
+            heuristics get it wrong.
           </div>
 
           <div className={styles.journeyTimeline}>
             {journey.stages.map(ss => {
-              const def = STAGES[STAGE_INDEX[ss.key]];
+              const idx = STAGE_INDEX[ss.key];
+              const def = STAGES[idx];
               const current = ss.key === journey.currentStage;
               return (
                 <div
                   key={ss.key}
                   className={`${styles.journeyTimelineStage} ${current ? styles.journeyTimelineCurrent : ''}`}
-                  style={{ borderTopColor: def.color }}
                 >
-                  <div className={styles.journeyTimelineHead} style={{ background: def.color }}>
+                  <div className={styles.journeyTimelineHead}>
+                    <div className={styles.journeyTimelineOrdinal}>{String(idx + 1).padStart(2, '0')}</div>
                     <div className={styles.journeyTimelineEmoji}>{def.emoji}</div>
                     <div className={styles.journeyTimelineLabel}>{def.label}</div>
                   </div>
@@ -737,7 +805,7 @@ function JourneyDetailPanel({
                             className={styles.journeyTimelineScoreVal}
                             style={{ color: SATISFACTION_COLOR[ss.satisfaction ?? 3] }}
                           >
-                            {SATISFACTION_EMOJI[ss.satisfaction ?? 3]} {ss.satisfaction ?? '—'}/5
+                            {ss.satisfaction ?? '—'}/5
                           </span>
                           <span className={styles.journeyTimelineScoreLabel}>
                             {SATISFACTION_LABEL[ss.satisfaction ?? 3]}
@@ -763,7 +831,7 @@ function JourneyDetailPanel({
               {signals.orders.length === 0 ? <div className={styles.muted}>—</div> :
                 signals.orders.map(o => (
                   <div key={o.id} className={styles.journeyDataDumpRow}>
-                    {o.order_ref} · {o.kind} · {o.status} · {o.placed_at?.slice(0, 10) ?? '—'}
+                    <code>{o.order_ref}</code> · {o.kind} · {o.status} · <code>{o.placed_at?.slice(0, 10) ?? '—'}</code>
                   </div>
                 ))}
             </div>
@@ -781,7 +849,7 @@ function JourneyDetailPanel({
               {signals.returns.length === 0 ? <div className={styles.muted}>—</div> :
                 signals.returns.map(r => (
                   <div key={r.id} className={styles.journeyDataDumpRow}>
-                    {r.unit_serial ?? '—'} · {r.status} · rated {r.experience_rating ?? '—'}/5
+                    <code>{r.unit_serial ?? '—'}</code> · {r.status} · rated <code>{r.experience_rating ?? '—'}/5</code>
                   </div>
                 ))}
             </div>
