@@ -1,98 +1,644 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   Customers — module chrome + the Directory tab.
+
+   Converted to the shared control vocabulary (components/ui) 2026-09-01, the
+   same pass Fulfillment, Order Review and Service went through. What changed
+   and why:
+
+     - The module opened with the wordmark face in Ladybug Red at 22px. Brolink
+       is wordmark-only (operator instruction 2026-06-07) and red means "the
+       primary action" — a page title is neither. The title is now ink, via the
+       PageHeader primitive, and the only red left on the screen is the Sync
+       button and a stat that is asking to be acted on.
+     - The tab strip was #2b6cb0 blue, a colour that appears nowhere in the
+       palette. It is now the shared Tabs primitive.
+     - Five equal-weight buttons sat in the header (two CSV exports, two
+       Klaviyo pushes, a sync), so nothing read as the main action. The four
+       bulk-list operations are now one Export menu; Sync is the primary.
+     - The Directory is a lookup table for ~150 people. Everything below is in
+       service of one job: find a name, see whether the record is complete,
+       open it. Nothing here decorates.
+
+   Journey, Profitability and Fleet share this file's chrome but keep their own
+   internals; they are not part of this pass.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* Transparent column on the page ground, matching Service and Fulfillment.
+   It used to be a white card wrapping the whole module, which flattened the
+   ground ramp — cards inside it had nothing to lift off. */
 .layout {
-  background: #fff;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--color-border);
-  overflow: hidden;
-  min-height: calc(100vh - 200px);
-  padding: 16px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: var(--space-4);
+  min-height: calc(100vh - 200px);
 }
 
-.header {
+/* ── Header: the Export menu ──────────────────────────────────────────────
+   Four destinations for one list. As buttons they took as much width and
+   weight as Sync, which is the action an operator actually reaches for. */
+.mobilePicker {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-.title {
-  font-family: var(--font-logo);
-  font-size: 22px;
-  letter-spacing: 0.05em;
-  color: var(--color-crimson);
-  margin: 0;
-}
-.headerActions {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-.lastSync {
-  font-size: 11px;
-  color: var(--color-ink-subtle);
-}
-.syncBtn {
-  background: var(--color-crimson);
-  color: #fff;
-  border: none;
-  padding: 8px 16px;
-  border-radius: var(--radius-sm);
-  font-size: 11px;
-  font-weight: 700;
-  cursor: pointer;
-  letter-spacing: 0.3px;
-}
-.syncBtn:hover { background: var(--color-crimson-dark); }
-.syncBtn:disabled { opacity: 0.6; cursor: not-allowed; }
-
-.shippedUnitRow {
-  border-bottom: 1px solid #f4f4f4;
-  padding: 4px 0;
-}
-.shippedUnitRow:last-child { border-bottom: none; }
-.trackingLine {
-  font-size: 11px;
-  color: var(--color-ink-subtle);
-  padding: 2px 0 4px 0;
-  margin-left: 2px;
-}
-.missingTracking {
-  color: var(--color-error, #c53030);
-  font-weight: 600;
-  font-style: italic;
+  flex-direction: column;
+  gap: var(--space-3);
 }
 
-.exportBtn {
-  background: #fff;
-  color: var(--color-ink-muted);
+.menuWrap { position: relative; }
+
+.menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + var(--space-1));
+  z-index: 30;
+  min-width: 244px;
+  padding: var(--space-1);
+  background: var(--color-raised);
   border: 1px solid var(--color-border);
-  padding: 8px 12px;
-  border-radius: var(--radius-sm);
-  font-size: 11px;
-  font-weight: 600;
-  cursor: pointer;
-  letter-spacing: 0.3px;
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
 }
-.exportBtn:hover { background: var(--color-surface); border-color: var(--color-ink-muted); }
-.exportBtn:disabled { opacity: 0.5; cursor: not-allowed; }
 
+.menuLabel {
+  padding: var(--space-2) var(--space-3) var(--space-1);
+  font-size: var(--font-size-meta);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-ink-subtle);
+}
+
+.menuItem {
+  display: block;
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  text-align: left;
+  font-size: var(--font-size-body);
+  color: var(--color-ink);
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.menuItem:hover:not(:disabled) { background: var(--color-surface); }
+.menuItem:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.menuItem:disabled { opacity: 0.45; cursor: not-allowed; }
+.menuItem span {
+  display: block;
+  margin-top: 1px;
+  font-size: var(--font-size-meta);
+  color: var(--color-ink-subtle);
+}
+
+/* ── Toasts ───────────────────────────────────────────────────────────────
+   Dismissible: a sync result used to sit on the page until the next action,
+   long after it had been read. */
+.toast {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid;
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-body);
+}
 .toastSuccess {
   background: var(--color-success-bg);
+  border-color: var(--color-success-border);
   color: var(--color-success);
-  border: 1px solid var(--color-success-border);
-  padding: 8px 14px;
-  border-radius: var(--radius-sm);
-  font-size: 12px;
-  font-weight: 600;
 }
 .toastError {
   background: var(--color-error-bg);
+  border-color: var(--color-error-border);
   color: var(--color-error);
-  border: 1px solid var(--color-error-border);
-  padding: 8px 14px;
+}
+.toastText { flex: 1; }
+.toastClose {
+  flex: none;
+  padding: 0 var(--space-1);
+  border: 0;
+  background: none;
+  color: inherit;
+  opacity: 0.6;
+  line-height: 1;
+}
+.toastClose:hover { opacity: 1; }
+.toastClose:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: var(--radius-sm); }
+
+/* ── Filter row ───────────────────────────────────────────────────────────
+   No card around it. It used to sit in a bordered white box directly above
+   another bordered white box, which drew a line the content didn't need.
+   Country is one axis (single-select); the record gaps are another
+   (independent toggles), so a hairline separates the two groups. */
+.filterBar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.filterDivider {
+  width: 1px;
+  height: 18px;
+  background: var(--color-border);
+  flex: none;
+}
+
+.search {
+  position: relative;
+  flex: 0 1 320px;
+  min-width: 200px;
+}
+
+.searchIcon {
+  position: absolute;
+  left: var(--space-3);
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--color-ink-faint);
+  pointer-events: none;
+  display: flex;
+}
+
+.searchField {
+  width: 100%;
+  height: 32px;
+  padding: 0 30px 0 30px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-raised);
+  color: var(--color-ink);
+  font-size: var(--font-size-body);
+}
+.searchField::placeholder { color: var(--color-ink-faint); }
+.searchField::-webkit-search-cancel-button { display: none; }
+/* Focus is the ring, not a red border: red is the primary action's colour and
+   a focused text field is not an action. */
+.searchField:focus {
+  outline: none;
+  border-color: var(--color-ink-faint);
+  box-shadow: var(--focus-ring);
+}
+
+.searchClear {
+  position: absolute;
+  right: var(--space-2);
+  top: 50%;
+  transform: translateY(-50%);
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: none;
+  color: var(--color-ink-subtle);
+}
+.searchClear:hover { background: var(--color-surface); color: var(--color-ink); }
+.searchClear:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+
+/* Where Follow-Ups went. A wayfinding note, not an announcement — it has been
+   on this page since the move and only needs to be findable. */
+.movedNote {
+  margin-left: auto;
+  font-size: var(--font-size-meta);
+  color: var(--color-ink-subtle);
+}
+.movedNote a {
+  color: var(--color-ink-muted);
+  font-weight: 600;
+  border-bottom: 1px solid var(--color-border);
+}
+.movedNote a:hover { color: var(--color-ink); border-bottom-color: var(--color-ink-faint); }
+
+/* ── The table ────────────────────────────────────────────────────────────
+   Compact density per tokens.css: --row-height, quiet rules, and every
+   identifier in the data face so email, serial and date columns line up down
+   the page. Raleway has no tabular figures — a directory scanned for a serial
+   is exactly the case --font-data exists for. */
+.tableWrap {
+  background: var(--color-raised);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: auto;
+  max-height: calc(100vh - 400px);
+  min-height: 280px;
+}
+
+.table {
+  width: 100%;
+  /* Fixed layout, because auto-layout hands the width to whichever column
+     happens to hold the longest string — one hyphenated surname was taking a
+     fifth of the table and squeezing the address column into an ellipsis. */
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-size: var(--font-size-body);
+}
+
+.table th:nth-child(1) { width: 19%; }
+.table th:nth-child(2) { width: 19%; }
+.table th:nth-child(3) { width: 11%; }
+.table th:nth-child(4) { width: 13%; }
+.table th:nth-child(5) { width: 27%; }
+.table th:nth-child(6) { width: 11%; }
+
+.table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  height: var(--row-height-header);
+  padding: 0 var(--space-3);
+  background: var(--color-raised);
+  border-bottom: 1px solid var(--color-border);
+  text-align: left;
+  font-size: var(--font-size-meta);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-ink-subtle);
+  white-space: nowrap;
+}
+
+.table td {
+  height: var(--row-height);
+  padding: 0 var(--space-3);
+  border-bottom: 1px solid rgba(var(--color-ink-rgb), 0.06);
+  vertical-align: middle;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.table tbody tr:last-child td { border-bottom: 0; }
+
+/* The 3px gutter is reserved on every row so selecting one doesn't shift the
+   column. Same selection language as the Order Review queue. */
+.table td:first-child { border-left: 3px solid transparent; }
+
+.row { cursor: pointer; }
+.row:hover td { background: var(--color-surface); }
+.row:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.rowSelected td { background: var(--color-surface); }
+.rowSelected td:first-child { border-left-color: var(--color-crimson); }
+
+/* The name is what the operator is looking for; it carries the weight and the
+   row's two lines of height when a household member matched instead. */
+.cellName, .viaMatch {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cellName {
+  font-weight: 600;
+  color: var(--color-ink);
+}
+.viaMatch {
+  margin-top: -2px;
+  font-size: var(--font-size-meta);
+  font-weight: 400;
+  color: var(--color-ink-subtle);
+}
+.nameCell { line-height: 1.3; }
+
+.cellData {
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--font-numeric);
+  font-size: 12px;
+  color: var(--color-ink-muted);
+}
+
+.serialChip {
+  display: inline-block;
+  padding: 1px var(--space-2);
+  border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--font-numeric);
+  font-size: 11px;
+  color: var(--color-ink-muted);
+}
+.serialMore {
+  margin-left: var(--space-1);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-ink-faint);
+}
+
+/* A blank field is information — it is why the "no email" filter exists — but
+   there are a lot of them, so it is a mark rather than a warning. */
+.dash { color: var(--color-ink-faint); }
+
+/* ── Loading ──────────────────────────────────────────────────────────────
+   Skeleton rows inside the real table frame, so the page doesn't jump a
+   screen-height when 150 customers land. */
+.skelBar {
+  height: 9px;
+  border-radius: var(--radius-sm);
+  background: rgba(var(--color-ink-rgb), 0.07);
+}
+
+/* ── Motion ───────────────────────────────────────────────────────────────
+   The whole budget: one page-load settle, staggered down the three bands of
+   the screen. Declared only inside no-preference, so reduced motion gets no
+   animation at all rather than one that has to be switched off. */
+@media (prefers-reduced-motion: no-preference) {
+  .reveal {
+    animation: settle var(--dur-settle) var(--ease-out) backwards;
+    animation-delay: var(--reveal-delay, 0ms);
+  }
+  .skelBar { animation: skelPulse 1.4s var(--ease-out) infinite; }
+  .panelBackdrop { animation: fade var(--dur-fast) var(--ease-out); }
+  .panel { animation: slideIn var(--dur-settle) var(--ease-out); }
+}
+
+@keyframes settle {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes skelPulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.45; }
+}
+@keyframes fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes slideIn {
+  from { transform: translateX(16px); opacity: 0; }
+  to   { transform: none; opacity: 1; }
+}
+
+/* ── Detail drawer ────────────────────────────────────────────────────────
+   Shared with the Journey panel and the two nested modals in NameSection /
+   AdditionalUsersSection. */
+.panelBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  justify-content: flex-end;
+  /* Warm, not black: a cold scrim over a cream page reads as a different
+     application's modal. */
+  background: rgba(var(--color-ink-rgb), 0.32);
+}
+
+.panel {
+  width: 480px;
+  max-width: 90vw;
+  height: 100vh;
+  background: var(--color-raised);
+  border-left: 1px solid var(--color-border);
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.panelHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+
+.panelTitle {
+  font-size: var(--font-size-section);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--color-ink);
+  line-height: 1.2;
+}
+
+.panelSubtitle {
+  margin-top: 2px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--color-ink-subtle);
+}
+
+.panelClose {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--color-ink-subtle);
+  transition: background var(--dur-fast) var(--ease-out),
+              color var(--dur-fast) var(--ease-out);
+}
+.panelClose:hover { background: var(--color-raised); color: var(--color-ink); }
+.panelClose:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+
+.panelBody {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-4) var(--space-5) var(--space-6);
+}
+
+.section { margin-bottom: var(--space-5); }
+.section:last-child { margin-bottom: 0; }
+
+.sectionTitle {
+  margin-bottom: var(--space-2);
+  padding-bottom: var(--space-1);
+  border-bottom: 1px solid var(--color-border);
+  font-size: var(--font-size-meta);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-ink-subtle);
+}
+
+.sectionBody {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.kvRow {
+  display: flex;
+  gap: var(--space-3);
+  align-items: baseline;
+  padding: 3px 0;
+  font-size: var(--font-size-body);
+}
+.kvLabel {
+  flex: none;
+  min-width: 78px;
+  font-size: var(--font-size-meta);
+  color: var(--color-ink-subtle);
+}
+.kvValue, .kvValueMulti {
+  flex: 1;
+  min-width: 0;
+  color: var(--color-ink);
+  overflow-wrap: anywhere;
+}
+
+/* Panel form field. Deliberately its own class: it used to share .searchInput
+   with the directory's search box, so the two could not be styled apart. */
+.searchInput {
+  width: 100%;
+  height: 30px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-raised);
+  color: var(--color-ink);
+  font-size: var(--font-size-body);
+}
+.searchInput::placeholder { color: var(--color-ink-faint); }
+.searchInput:focus {
+  outline: none;
+  border-color: var(--color-ink-faint);
+  box-shadow: var(--focus-ring);
+}
+.searchInput:disabled { opacity: 0.55; }
+select.searchInput { padding-left: var(--space-2); }
+
+/* Panel action. Was an underlined crimson link, which spent the brand colour
+   on "Edit email / phone" twenty times over. It carries a resting border
+   rather than being a bare ghost: in a panel that is mostly labels and
+   read-only values, a control with no edge reads as more text. */
+.linkBtn {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-raised);
+  color: var(--color-ink-muted);
   font-size: 12px;
   font-weight: 600;
+  transition: background var(--dur-fast) var(--ease-out),
+              border-color var(--dur-fast) var(--ease-out),
+              color var(--dur-fast) var(--ease-out);
+}
+.linkBtn:hover:not(:disabled) {
+  background: var(--color-surface);
+  border-color: var(--color-ink-faint);
+  color: var(--color-ink);
+}
+.linkBtn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.linkBtn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.itemRow {
+  display: grid;
+  grid-template-columns: 1fr 80px 90px auto;
+  gap: var(--space-3);
+  align-items: center;
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid rgba(var(--color-ink-rgb), 0.06);
+  font-size: var(--font-size-body);
+}
+.itemRow:last-child { border-bottom: none; }
+
+.itemAmount {
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--font-numeric);
+  font-weight: 500;
+  text-align: right;
+}
+
+.emptyRow {
+  padding: var(--space-2) 0;
+  font-size: var(--font-size-body);
+  color: var(--color-ink-subtle);
+}
+
+.statusPill {
+  display: inline-block;
+  padding: 1px var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-ink-muted);
+}
+
+.shippedUnitRow {
+  padding: var(--space-1) 0;
+  border-bottom: 1px solid rgba(var(--color-ink-rgb), 0.06);
+}
+.shippedUnitRow:last-child { border-bottom: none; }
+
+.trackingLine {
+  padding: 2px 0 var(--space-1);
+  font-size: var(--font-size-meta);
+  color: var(--color-ink-subtle);
+}
+/* --color-error-strong, not --color-error: this sits on a light surface, where
+   the deep base token is the one that clears AA. */
+.missingTracking {
+  color: var(--color-error-strong);
+  font-weight: 600;
+}
+
+/* `var(--border)` is not a token and never has been, so these three borders
+   have simply not been drawing. */
+.orderCard {
+  margin-bottom: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+.orderCard:last-child { margin-bottom: 0; }
+
+.orderCardHeader {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.orderCardRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-2);
+  padding: 2px 0;
+  font-size: var(--font-size-body);
+}
+.orderCardRow > span:last-child {
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--font-numeric);
+}
+
+.orderTotalRow {
+  margin-top: var(--space-1);
+  padding-top: var(--space-1);
+  border-top: 1px solid var(--color-border);
+  font-weight: 600;
+}
+
+.orderFinancials {
+  margin-top: var(--space-2);
+  padding-top: var(--space-1);
+  border-top: 1px solid var(--color-border);
+}
+.orderLineItems {
+  margin-top: var(--space-2);
+  padding-top: var(--space-1);
+  border-top: 1px solid var(--color-border);
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--font-numeric);
+  font-size: 12px;
 }
 
 .loading {
@@ -102,148 +648,12 @@
   font-size: 13px;
 }
 
-.kpiRow {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 10px;
-}
-.kpi {
-  background: #fff;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  padding: 10px 14px;
-}
-.kpiLabel {
-  font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: var(--color-ink-subtle);
-  margin-bottom: 4px;
-}
-.kpiValue {
-  font-size: 20px;
-  font-weight: 800;
-  color: var(--color-ink);
-  font-variant-numeric: tabular-nums;
-}
-.kpiSub {
-  font-size: 10px;
-  color: var(--color-ink-subtle);
-  margin-top: 2px;
-}
-
-.filterBar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-  background: #fff;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  padding: 8px 12px;
-}
-.chip {
-  border: 1px solid var(--color-border);
-  background: #fff;
-  color: var(--color-ink-muted);
-  padding: 4px 10px;
-  border-radius: 12px;
-  font-size: 11px;
-  font-weight: 600;
-  cursor: pointer;
-}
-.chip:hover { border-color: var(--color-ink-subtle); color: var(--color-ink); }
-.chipActive {
-  background: var(--color-crimson);
-  color: #fff;
-  border-color: var(--color-crimson);
-}
-.searchInput {
-  flex: 1;
-  min-width: 200px;
-  padding: 6px 10px;
-  font-size: 12px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  font-family: inherit;
-}
-.searchInput:focus { outline: none; border-color: var(--color-crimson); }
-.resultCount {
-  font-size: 11px;
-  color: var(--color-ink-subtle);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
-.tableWrap {
-  background: #fff;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  overflow-x: auto;
-  overflow-y: auto;
-  max-height: calc(100vh - 480px);
-  min-height: 280px;
-}
-.table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 12px;
-}
-.table th {
-  position: sticky;
-  top: 0;
-  background: var(--color-surface);
-  border-bottom: 1.5px solid var(--color-border);
-  padding: 8px 10px;
-  text-align: left;
-  font-size: 10px;
-  font-weight: 700;
-  color: var(--color-ink-subtle);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  white-space: nowrap;
-}
-.table td {
-  padding: 7px 10px;
-  border-bottom: 1px solid #f0eee8;
-  vertical-align: middle;
-}
-.table tr:hover td { background: #fafaf6; }
-
-.mono { font-family: 'SF Mono', monospace; font-size: 11px; }
 .muted { color: var(--color-ink-faint); }
 .empty {
   padding: 30px;
   text-align: center;
   color: var(--color-ink-subtle);
   font-size: 12px;
-}
-
-.clickableRow {
-  cursor: pointer;
-}
-.clickableRow:hover {
-  background: var(--color-surface);
-}
-
-.panelBackdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(0,0,0,0.3);
-  z-index: 80;
-  display: flex;
-  justify-content: flex-end;
-}
-.panel {
-  width: 480px;
-  max-width: 90vw;
-  height: 100vh;
-  background: #fff;
-  border-left: 1px solid var(--color-border);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
 }
 
 /* Mobile: full viewport, no left-border (it's edge-to-edge). The backdrop
@@ -257,131 +667,6 @@
     height: 100dvh;
     padding-top: env(safe-area-inset-top);
   }
-}
-.panelHeader {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  padding: 18px 20px;
-  border-bottom: 1px solid var(--color-border);
-  background: var(--color-surface);
-}
-.panelTitle {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 700;
-  color: var(--color-ink);
-}
-.panelSubtitle {
-  font-size: 12px;
-  color: var(--color-ink-subtle);
-  margin-top: 2px;
-}
-.panelClose {
-  background: none;
-  border: none;
-  font-size: 24px;
-  cursor: pointer;
-  line-height: 1;
-  color: var(--color-ink-subtle);
-  padding: 0 6px;
-}
-.panelClose:hover {
-  color: var(--color-ink);
-}
-.panelBody {
-  flex: 1;
-  overflow-y: auto;
-  padding: 16px 20px;
-}
-.section {
-  margin-bottom: 22px;
-}
-.sectionTitle {
-  font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
-  color: var(--color-ink-subtle);
-  letter-spacing: 0.5px;
-  margin-bottom: 8px;
-}
-.sectionBody {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.kvRow {
-  display: flex;
-  gap: 8px;
-  align-items: baseline;
-  padding: 4px 0;
-  font-size: 12px;
-}
-.kvLabel {
-  min-width: 70px;
-  color: var(--color-ink-subtle);
-  font-size: 11px;
-}
-.kvValue, .kvValueMulti {
-  color: var(--color-ink);
-  flex: 1;
-}
-.kvValueMulti { white-space: pre-wrap; }
-.itemRow {
-  display: grid;
-  grid-template-columns: 1fr 80px 90px auto;
-  gap: 10px;
-  align-items: center;
-  padding: 6px 0;
-  border-bottom: 1px solid #f4f4f4;
-  font-size: 12px;
-}
-.itemRow:last-child { border-bottom: none; }
-
-.orderCard {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 10px 12px;
-  margin-bottom: 8px;
-  background: var(--color-surface);
-}
-.orderCard:last-child { margin-bottom: 0; }
-.orderCardHeader {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
-  flex-wrap: wrap;
-}
-.orderCardRow {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 8px;
-  padding: 2px 0;
-  font-size: 12px;
-}
-.orderFinancials {
-  margin-top: 6px;
-  border-top: 1px solid #f4f4f4;
-  padding-top: 4px;
-}
-.orderLineItems {
-  margin-top: 6px;
-  border-top: 1px solid #f4f4f4;
-  padding-top: 4px;
-  opacity: 0.8;
-}
-.itemAmount {
-  font-variant-numeric: tabular-nums;
-  font-weight: 600;
-  text-align: right;
-}
-.emptyRow {
-  padding: 8px 0;
-  font-size: 12px;
-  color: var(--color-ink-subtle);
-  font-style: italic;
 }
 /* Other users in the household — one card per person, so several stacked
    contacts stay visually separate rather than reading as one block. */
@@ -409,17 +694,6 @@
   padding: 6px 0;
   border-bottom: 1px solid #f4f4f4;
 }
-.statusPill {
-  font-size: 10px;
-  padding: 2px 6px;
-  border-radius: 4px;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
-  font-weight: 600;
-}
-
 
 /* Invoice rows */
 .invoiceRow {
@@ -446,18 +720,6 @@
   gap: 4px;
   align-items: center;
 }
-.linkBtn {
-  background: none;
-  border: none;
-  padding: 0 4px;
-  font-size: 11px;
-  color: var(--color-crimson);
-  cursor: pointer;
-  text-decoration: underline;
-  font-weight: 600;
-}
-.linkBtn:hover { opacity: 0.75; }
-.linkBtn:disabled { opacity: 0.4; cursor: not-allowed; }
 .invoiceUploadForm {
   margin-top: 10px;
   padding: 10px;
@@ -601,36 +863,6 @@
 .calEvent:hover { opacity: 0.8; }
 
 /* Customers module tabs (Directory / Profitability) */
-.titleRow {
-  display: flex;
-  align-items: center;
-  gap: 24px;
-  flex: 1;
-}
-.customersTabs {
-  display: flex;
-  gap: 4px;
-  border-bottom: 1px solid #e2e8f0;
-}
-.customersTab {
-  background: transparent;
-  border: none;
-  padding: 8px 16px;
-  cursor: pointer;
-  font-size: .9rem;
-  color: #718096;
-  border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
-}
-.customersTab:hover {
-  color: #2b6cb0;
-}
-.customersTabActive {
-  color: #2b6cb0;
-  border-bottom-color: #2b6cb0;
-  font-weight: 600;
-}
-
 /* Profitability tab */
 .profitabilityTab {
   padding: 16px 24px;
@@ -1270,10 +1502,6 @@
   border-bottom: 1px dotted #edf2f7;
 }
 
-.followupMoved { font-size: 13px; color: var(--color-ink-subtle); padding: 8px 0; }
-.followupMoved a { color: #2b6cb0; font-weight: 600; text-decoration: none; }
-.followupMoved a:hover { text-decoration: underline; }
-
 /* ── Backlog #58 V9 — profitability dashboard ─────────────────────────────────
    Views, KPI row, charts, the province/state choropleth and the customer
    drill-down. Colour in the charts only ever encodes the sign of a number
@@ -1871,9 +2099,3 @@
 
 /* Directory search: names the household member a row matched on, when that
    isn't the purchaser whose name the Name column shows. */
-.viaMatch {
-  margin-top: 2px;
-  font-size: 11px;
-  font-weight: 400;
-  color: var(--color-ink-subtle);
-}
