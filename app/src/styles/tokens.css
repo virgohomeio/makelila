@@ -71,6 +71,35 @@
   --color-purple: #553c9a;
   --color-purple-bg: #faf5ff;
 
+  /* ── Journey phases ────────────────────────────────────────────────────
+     The ten CJM stages, grouped into the four phases they fall into, so the
+     Journey rail can colour them.
+
+     Four and not ten: ten categorical hues cannot be told apart. Adjacent
+     hues on a ten-slot wheel measure a normal-vision ΔE around 7 — below the
+     15 floor, i.e. hard to separate even with full colour vision — and worse
+     under deuteranopia. Rotating lightness along with hue does not rescue it;
+     the blue end compresses. Five hues fail too: deep green against the risk
+     red measures ΔE 1.5 under protanopia. Four is what survives, and the
+     stage's ordinal already carries its position, so hue is free to carry the
+     phase instead — which is information the rail did not show before.
+
+     Validated as a categorical set against white, all pairs, with the
+     dataviz skill's checker: lightness band, chroma floor, CVD separation
+     (worst pair ΔE 8.0 protan / 8.7 tritan), normal-vision floor (18.9) and
+     contrast all pass. Interest measures 2.33:1 against white, which is a
+     WARN the checker only permits alongside visible labels — every rail cell
+     carries its stage name and ordinal in ink, which is that relief. Do not
+     reuse these as text colours on a light ground.
+
+     Phase red is deliberately NOT --color-crimson: brand red means "primary
+     action", and the Journey tab has no primary button for it to collide
+     with only because none is on that screen today. */
+  --color-phase-interest: #D6A20A;  /* 01 Awareness → 03 Conversion */
+  --color-phase-delivery: #2D6AC1;  /* 04 Shipping, 05 Unboxing */
+  --color-phase-service:  #479C4D;  /* 06 Setup, 07 Routine Use, 10 Promotion */
+  --color-phase-risk:     #AC1922;  /* 08 Failure & Support, 09 End of Life */
+
   /* Neutrals — LILA warm palette (Charcoal Soil → Warm White) */
   --color-ink:         #2C2A25;  /* Charcoal Soil — headings */
   --color-ink-rgb:     44, 42, 37;  /* --color-ink channels, for rgba() composition */

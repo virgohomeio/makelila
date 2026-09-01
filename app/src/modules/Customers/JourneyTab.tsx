@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import type { CSSProperties } from 'react';
 import { useCustomers, sendNameCollectionRequest, setJourneyStageOverride, type Customer } from '../../lib/customers';
 import { useOrders, type Order } from '../../lib/orders';
 import { useServiceTickets, useCustomerLifecycle, type ServiceTicket, type CustomerLifecycle } from '../../lib/service';
@@ -22,19 +23,49 @@ type StageDef = {
   description: string;
   emoji: string;          // CJM "Customer Feeling" emoji at this stage
   emotionLabel: string;   // CJM verbatim emotion text
+  phase: Phase;
 };
 
+// The ten stages fall into four phases, and the rail colours by phase rather
+// than by stage. That is not a compromise for its own sake: ten categorical
+// hues cannot be told apart — adjacent hues on a ten-slot wheel measure a
+// normal-vision ΔE around 7, against a floor of 15, and worse under
+// deuteranopia. See the --color-phase-* block in tokens.css for the numbers
+// and for the five-hue version that also failed. The stage's ordinal already
+// carries its position, so hue is free to carry something the rail was not
+// showing at all: which part of the journey a stage belongs to.
+//
+// Promotion is 'service' rather than a phase of its own — it is the far end
+// of a machine working well, and a fifth hue does not survive the check.
+type Phase = 'interest' | 'delivery' | 'service' | 'risk';
+
+const PHASE_LABEL: Record<Phase, string> = {
+  interest: 'Interest',
+  delivery: 'Delivery',
+  service:  'In service',
+  risk:     'At risk',
+};
+
+const PHASE_COLOR: Record<Phase, string> = {
+  interest: 'var(--color-phase-interest)',
+  delivery: 'var(--color-phase-delivery)',
+  service:  'var(--color-phase-service)',
+  risk:     'var(--color-phase-risk)',
+};
+
+const PHASE_ORDER: Phase[] = ['interest', 'delivery', 'service', 'risk'];
+
 const STAGES: readonly StageDef[] = [
-  { key: 'awareness',    label: 'Awareness',           description: 'Why do they start the journey?',     emoji: '😬', emotionLabel: 'Skeptical — ugly? too expensive? really compost?' },
-  { key: 'consideration',label: 'Consideration',        description: 'Why should they care about LILA?',   emoji: '🤔', emotionLabel: 'Cautiously interested but lots of doubts' },
-  { key: 'conversion',   label: 'Conversion',           description: 'Why would they trust us?',           emoji: '😊', emotionLabel: 'Committed but anxious about the price' },
-  { key: 'shipping',     label: 'Shipping',             description: 'Comfortable while waiting?',         emoji: '😶', emotionLabel: 'Anticipating — reassured by onboarding outreach' },
-  { key: 'unboxing',     label: 'Unboxing',             description: 'First impression?',                  emoji: '😍', emotionLabel: 'Excited — first impression (packaging waste concern)' },
-  { key: 'setup',        label: 'Setup',                description: 'How do they start using LILA?',      emoji: '😌', emotionLabel: 'Guided onboarding helps — tech barriers for some' },
-  { key: 'routine',      label: 'Routine Use',          description: 'How can they feel successful?',      emoji: '🌱', emotionLabel: 'Satisfied — seeing real compost output' },
-  { key: 'failure',      label: 'Failure & Support',    description: 'How can they navigate failures?',    emoji: '😡', emotionLabel: 'Frustrated — speed of fix = will I recommend?' },
-  { key: 'eol',          label: 'End of Life',          description: 'Feel good with end of life?',        emoji: '😔', emotionLabel: 'Reluctant — don\'t want to start over' },
-  { key: 'promotion',    label: 'Promotion',            description: 'Why recommend to others?',           emoji: '🥰', emotionLabel: 'Proud advocate — "tech expert" to friends' },
+  { key: 'awareness',    label: 'Awareness',           description: 'Why do they start the journey?',     emoji: '😬', emotionLabel: 'Skeptical — ugly? too expensive? really compost?' , phase: 'interest' },
+  { key: 'consideration',label: 'Consideration',        description: 'Why should they care about LILA?',   emoji: '🤔', emotionLabel: 'Cautiously interested but lots of doubts' , phase: 'interest' },
+  { key: 'conversion',   label: 'Conversion',           description: 'Why would they trust us?',           emoji: '😊', emotionLabel: 'Committed but anxious about the price' , phase: 'interest' },
+  { key: 'shipping',     label: 'Shipping',             description: 'Comfortable while waiting?',         emoji: '😶', emotionLabel: 'Anticipating — reassured by onboarding outreach' , phase: 'delivery' },
+  { key: 'unboxing',     label: 'Unboxing',             description: 'First impression?',                  emoji: '😍', emotionLabel: 'Excited — first impression (packaging waste concern)' , phase: 'delivery' },
+  { key: 'setup',        label: 'Setup',                description: 'How do they start using LILA?',      emoji: '😌', emotionLabel: 'Guided onboarding helps — tech barriers for some' , phase: 'service' },
+  { key: 'routine',      label: 'Routine Use',          description: 'How can they feel successful?',      emoji: '🌱', emotionLabel: 'Satisfied — seeing real compost output' , phase: 'service' },
+  { key: 'failure',      label: 'Failure & Support',    description: 'How can they navigate failures?',    emoji: '😡', emotionLabel: 'Frustrated — speed of fix = will I recommend?' , phase: 'risk' },
+  { key: 'eol',          label: 'End of Life',          description: 'Feel good with end of life?',        emoji: '😔', emotionLabel: 'Reluctant — don\'t want to start over' , phase: 'risk' },
+  { key: 'promotion',    label: 'Promotion',            description: 'Why recommend to others?',           emoji: '🥰', emotionLabel: 'Proud advocate — "tech expert" to friends' , phase: 'service' },
 ];
 
 const STAGE_INDEX: Record<StageKey, number> = STAGES.reduce(
@@ -489,7 +520,11 @@ export function JourneyTab() {
           aria-pressed={stageFilter === 'all'}
           className={`${styles.journeyRailCell} ${stageFilter === 'all' ? styles.journeyRailActive : ''}`}
           onClick={() => setStageFilter('all')}
+          // All is not a phase, so its band is the hairline — it keeps the row
+          // of bands continuous without claiming to mean one of the four.
+          style={{ '--phase': 'var(--color-border)' } as CSSProperties}
         >
+          <div className={styles.journeyRailPhaseRule} aria-hidden="true" />
           <div className={styles.journeyRailOrdinal}>··</div>
           <div className={styles.journeyRailLabel}>All</div>
           <div className={styles.journeyRailCount}>{journeys.length}</div>
@@ -505,8 +540,10 @@ export function JourneyTab() {
               aria-pressed={active}
               className={`${styles.journeyRailCell} ${active ? styles.journeyRailActive : ''}`}
               onClick={() => setStageFilter(active ? 'all' : st.key)}
-              title={`${st.label} — ${st.description}`}
+              title={`${st.label} — ${PHASE_LABEL[st.phase]} — ${st.description}`}
+              style={{ '--phase': PHASE_COLOR[st.phase] } as CSSProperties}
             >
+              <div className={styles.journeyRailPhaseRule} aria-hidden="true" />
               <div className={styles.journeyRailOrdinal}>{String(i + 1).padStart(2, '0')}</div>
               <div className={styles.journeyRailLabel}>{st.label}</div>
               <div className={`${styles.journeyRailCount} ${n === 0 ? styles.journeyRailZero : ''}`}>{n}</div>
@@ -516,6 +553,17 @@ export function JourneyTab() {
             </button>
           );
         })}
+      </div>
+
+      {/* The phases are contiguous blocks in the rail, but a block of colour
+          is not a label — this names what each hue means. */}
+      <div className={styles.journeyLegend}>
+        {PHASE_ORDER.map(p => (
+          <span key={p} className={styles.journeyLegendItem}>
+            <span className={styles.journeyLegendSwatch} style={{ background: PHASE_COLOR[p] }} />
+            {PHASE_LABEL[p]}
+          </span>
+        ))}
       </div>
 
       <div className={styles.journeyControls}>

@@ -1842,6 +1842,7 @@ select.searchInput { padding-left: var(--space-2); }
 }
 
 .journeyRailCell {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
@@ -1854,6 +1855,17 @@ select.searchInput { padding-left: var(--space-2); }
 .journeyRailCell:hover { background: var(--color-surface); }
 .journeyRailCell:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .journeyRailActive { background: var(--color-surface); }
+
+/* The phase band. Colour identifies which part of the journey a stage belongs
+   to; the label and the count stay ink, so nothing legible depends on hue.
+   4px rather than a hairline because the interest amber is a light colour and
+   a 1px rule of it would disappear against the card. */
+.journeyRailPhaseRule {
+  height: 4px;
+  margin: calc(var(--space-2) * -1) calc(var(--space-2) * -1) 0;
+  border-radius: var(--radius-pill) var(--radius-pill) 0 0;
+  background: var(--phase, transparent);
+}
 
 .journeyRailOrdinal {
   font-family: var(--font-mono);
@@ -1893,9 +1905,34 @@ select.searchInput { padding-left: var(--space-2); }
 .journeyRailFill {
   height: 100%;
   border-radius: var(--radius-pill);
-  background: var(--color-ink-faint);
+  /* Magnitude, in the stage's phase colour. Length is the number; the colour
+     is only saying which phase the number belongs to. */
+  background: var(--phase, var(--color-ink-faint));
 }
+/* Selection is ink, the way it is everywhere else in the app — so "which one
+   did I click" never competes with "which phase is this". */
 .journeyRailActive .journeyRailFill { background: var(--color-ink); }
+
+.journeyLegend {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  margin-top: calc(var(--space-2) * -1);
+}
+.journeyLegendItem {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-size-meta);
+  color: var(--color-ink-subtle);
+}
+.journeyLegendSwatch {
+  width: 10px;
+  height: 4px;
+  border-radius: var(--radius-pill);
+  flex: none;
+}
 
 /* ── Controls ─────────────────────────────────────────────────────────────
    Same row the Directory uses: search, hairline, chips. Satisfaction was a
