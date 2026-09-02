@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { isTelemetryConfigured } from '../../lib/supabaseTelemetry';
 const Dashboard = lazy(() => import('../Dashboard'));
@@ -123,6 +123,22 @@ export default function Customers() {
     }
     return m;
   }, [heldUnits]);
+  // Union the two maps rather than falling through between them. The previous
+  // `fk ?? name` short-circuit meant any customer with at least one FK-linked
+  // unit had their name-matched units silently dropped — which is how Kevin
+  // Cheng's own machine came to be hidden behind a mis-linked one. A customer
+  // can legitimately hold one of each while the backfill is only partly undone.
+  //
+  // `customers.serials` is deliberately NOT consulted. It is a snapshot of the
+  // fulfilment sheet last synced 2026-06-05 and only refreshes when
+  // sync_customer_serials_from_fulfillment() is run by hand, so it resurrects
+  // ownership that operators have since corrected — it was showing machines as
+  // held that Stock records as returned or scrapped.
+  const serialsFor = useCallback((c: Customer): string[] => {
+    const byId = serialsByCustomerId.get(c.id) ?? [];
+    const byName = serialsByCustomerName.get(c.full_name?.toLowerCase() ?? '') ?? [];
+    return byName.length === 0 ? byId : [...new Set([...byId, ...byName])];
+  }, [serialsByCustomerId, serialsByCustomerName]);
   // Every household user in the directory, so the search box can look past the
   // purchaser's name (the per-customer hook only covers the open panel).
   const { byCustomerId: usersByCustomerId } = useAllCustomerAdditionalUsers();
@@ -456,19 +472,7 @@ export default function Customers() {
                   c={c}
                   via={via}
                   selected={c.id === selectedCustomerId}
-                  serials={
-                    // Stock is the source of truth for what a customer holds
-                    // today: prefer the canonical units.customer_id link, then
-                    // name-matching for units not yet FK-linked. customers.serials
-                    // is a denormalised snapshot of the fulfilment sheet that only
-                    // refreshes when sync_customer_serials_from_fulfillment() is
-                    // run, so it goes stale the moment a replacement ships — it is
-                    // now only a last resort for customers with no unit row at all.
-                    serialsByCustomerId.get(c.id)
-                      ?? serialsByCustomerName.get(c.full_name?.toLowerCase() ?? '')
-                      ?? c.serials
-                      ?? []
-                  }
+                  serials={serialsFor(c)}
                   onSelect={() => setSelectedCustomerId(c.id)}
                 />
               ))}
@@ -920,14 +924,17 @@ function CustomerDetailPanel({ customer, allCustomers, onChanged, onClose }: {
   const myOrders = lcEmail
     ? orders.filter(o => o.customer_email?.toLowerCase() === lcEmail)
     : [];
-  // Prefer the canonical units.customer_id link (populated by the
-  // fulfillment-sheet sync, same association the Dashboard uses); fall back to
-  // name-matching only for units not yet FK-linked, so a unit with a known FK
-  // never shows up under the wrong customer.
+  // Prefer the canonical units.customer_id link; fall back to name-matching
+  // only for units not yet FK-linked, so a unit with a known FK never shows up
+  // under the wrong customer.
+  //
+  // The `status === 'shipped'` filter matches the directory list row. Without
+  // it the panel and the row disagreed: the row hid returned machines while
+  // opening the same customer listed them as still held.
   const myUnits = units.filter(u =>
-    u.customer_id
+    u.status === 'shipped' && (u.customer_id
       ? u.customer_id === customer.id
-      : u.customer_name?.toLowerCase() === lcName);
+      : u.customer_name?.toLowerCase() === lcName));
   const myTickets = lcEmail
     ? tickets.filter(t => t.customer_email?.toLowerCase() === lcEmail)
     : [];

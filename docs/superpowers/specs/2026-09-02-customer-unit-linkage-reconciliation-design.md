@@ -194,10 +194,13 @@ Salvatore DeCillis & Julia, …073 Tony Rinello, …030 Tony Wang, plus conteste
 ## Testing
 
 - **Matcher unit tests** (`lib/customerNameMatch.test.ts`), one case per bucket
-  above, including the adversarial ones: `Rongbin Sun` against the three
-  near-duplicate `Rongbin/Rongbing Sun` records must return `ambiguous`, not a
-  guess; `Mary Oskamp` must not silently match `Mary & Marilynne Oskamp`
-  (that link is already correct and must not be rewritten).
+  above, including the adversarial ones. `Rongbin Sun` resolves *uniquely* to
+  the annotated record — the two bare `Rongbing Sun` rows are spelled
+  differently and do not collide with it — so the genuine ambiguity case is a
+  unit named `Rongbing Sun`, which ties across two identical records and must
+  return `ambiguous` rather than guess. `Mary Oskamp` must not match
+  `Mary & Marilynne Oskamp` (that link is already correct and must survive
+  reconciliation untouched).
 - **Migration assertion** — before/after counts of correctly-attributed shipped
   units, failing loudly if the after-count is not 163.
 - **Directory tests** — a customer whose only serial came from `c.serials` now
