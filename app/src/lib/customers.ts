@@ -1865,3 +1865,126 @@ export async function setTelemetryAutoticketSuppress(
     { entityType: 'customer', entityId: customerId },
   );
 }
+
+// ── Batch profitability inputs ──────────────────────────────────────────────
+// Which production batch each shipped machine came from, and whose economics
+// it carries. Feeds lib/batchProfitability.ts.
+
+/** A shipped unit joined to the customer whose profitability row covers it. */
+export type UnitBatchLinkRow = {
+  serial: string;
+  batch: string;
+  customerId: string | null;
+  shippedAt: string | null;
+  /** How the customer was resolved, so the UI can say how solid the link is. */
+  basis: 'order_ref' | 'unit_fk' | 'none';
+};
+
+/** A batch with nothing shipped yet — P100X today. Held separately because it
+ *  has no margin at all, and a zero would read as "broke even". */
+export type FutureBatchRow = {
+  id: string;
+  unitCount: number;
+  unitCostUsd: number | null;
+  expectedArrival: string | null;
+  arrivedAt: string | null;
+  manufacturer: string | null;
+  destination: string | null;
+};
+
+/**
+ *  Shipped units, resolved to a customer.
+ *
+ *  Resolution prefers the order reference over `units.customer_id`. Both
+ *  exist, but the June 2026 backfill left a handful of unit FKs pointing at
+ *  the wrong customer, whereas `customer_order_ref` -> `orders.order_ref` is
+ *  the link fulfilment actually writes when it ships. Where there is no order
+ *  ref — most of the P50N and P150 era, which predates order records — the FK
+ *  is all there is, and `basis` records which one was used.
+ */
+export function useUnitBatchLinks(): {
+  links: UnitBatchLinkRow[];
+  futureBatches: FutureBatchRow[];
+  loading: boolean;
+  error: Error | null;
+} {
+  const [links, setLinks] = useState<UnitBatchLinkRow[]>([]);
+  const [futureBatches, setFutureBatches] = useState<FutureBatchRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const [unitsRes, ordersRes, batchesRes] = await Promise.all([
+        supabase
+          .from('units')
+          .select('serial, batch, customer_id, customer_order_ref, shipped_at, is_team_test')
+          .eq('status', 'shipped'),
+        supabase.from('orders').select('order_ref, customer_id'),
+        supabase
+          .from('batches')
+          .select('id, unit_count, unit_cost_usd, expected_arrival_date, arrived_at, manufacturer_short, destination'),
+      ]);
+      if (cancelled) return;
+
+      const err = unitsRes.error ?? ordersRes.error ?? batchesRes.error;
+      if (err) {
+        setError(err as unknown as Error);
+        setLoading(false);
+        return;
+      }
+
+      const refToCustomer = new Map<string, string>();
+      for (const o of (ordersRes.data ?? []) as Record<string, unknown>[]) {
+        const ref = o.order_ref as string | null;
+        const cid = o.customer_id as string | null;
+        if (ref && cid) refToCustomer.set(ref, cid);
+      }
+
+      const rows: UnitBatchLinkRow[] = [];
+      for (const u of (unitsRes.data ?? []) as Record<string, unknown>[]) {
+        const batch = (u.batch as string | null) ?? null;
+        // A unit with no batch cannot be attributed to one; it would otherwise
+        // land in an "unknown" bucket that reads like a real production run.
+        if (!batch) continue;
+        const ref = u.customer_order_ref as string | null;
+        const viaRef = ref ? refToCustomer.get(ref) ?? null : null;
+        const viaFk = (u.customer_id as string | null) ?? null;
+        rows.push({
+          serial: String(u.serial ?? ''),
+          batch,
+          customerId: viaRef ?? viaFk,
+          shippedAt: (u.shipped_at as string | null) ?? null,
+          basis: viaRef ? 'order_ref' : viaFk ? 'unit_fk' : 'none',
+        });
+      }
+
+      const shippedBatches = new Set(rows.map(r => r.batch));
+      const future: FutureBatchRow[] = [];
+      for (const b of (batchesRes.data ?? []) as Record<string, unknown>[]) {
+        const id = String(b.id ?? '');
+        // Only batches that have shipped nothing — everything else is already
+        // a row in the main table.
+        if (!id || shippedBatches.has(id)) continue;
+        if (Number(b.unit_count ?? 0) <= 0) continue;
+        future.push({
+          id,
+          unitCount: Number(b.unit_count ?? 0),
+          unitCostUsd: b.unit_cost_usd == null ? null : Number(b.unit_cost_usd),
+          expectedArrival: (b.expected_arrival_date as string | null) ?? null,
+          arrivedAt: (b.arrived_at as string | null) ?? null,
+          manufacturer: (b.manufacturer_short as string | null) ?? null,
+          destination: (b.destination as string | null) ?? null,
+        });
+      }
+
+      setLinks(rows);
+      setFutureBatches(future);
+      setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  return { links, futureBatches, loading, error };
+}

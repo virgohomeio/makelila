@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import {
   useCustomerProfitability, useProfitabilityRates, useAcquisitionSpend,
-  useRetainedUnitCosts,
+  useRetainedUnitCosts, useUnitBatchLinks,
   type CustomerProfitability,
 } from '../../lib/customers';
 import {
@@ -12,6 +12,11 @@ import {
   type CustomerMetrics, type PortfolioMetrics, type BucketBasis,
   type RetainedUnits,
 } from '../../lib/profitability';
+import {
+  byBatch, byBatchRegion, batchCountryReach, confoundedBatches,
+  batchRegionExtremes, attributionCoverage,
+  type BatchMetrics,
+} from '../../lib/batchProfitability';
 import { regionName } from '../../lib/regions';
 import { formatMoney } from '../../lib/money';
 import { GeoMap, type GeoMeasure } from './profitability/GeoMap';
@@ -19,6 +24,8 @@ import {
   CohortProfitChart, LtvCacScatter, ProfitDistribution, WaterfallChart,
 } from './profitability/Charts';
 import { SegmentTable } from './profitability/SegmentTable';
+import { BatchTable, FutureBatchPanel } from './profitability/BatchTable';
+import { BatchRegionMatrix, type CellMeasure } from './profitability/BatchRegionMatrix';
 import { CustomerDetail } from './profitability/CustomerDetail';
 import styles from './Customers.module.css';
 
@@ -26,11 +33,12 @@ type SortKey =
   | 'profit_desc' | 'profit_asc' | 'margin_desc' | 'margin_asc'
   | 'warranty_desc' | 'revenue_desc' | 'support_desc' | 'cac_desc';
 type CountryFilter = 'all' | 'CA' | 'US' | 'other';
-type ViewKey = 'overview' | 'geography' | 'segments' | 'cohorts' | 'customers';
+type ViewKey = 'overview' | 'geography' | 'batches' | 'segments' | 'cohorts' | 'customers';
 
 const VIEWS: { key: ViewKey; label: string }[] = [
   { key: 'overview',   label: 'Overview' },
   { key: 'geography',  label: 'Geography' },
+  { key: 'batches',    label: 'Batch Metrics' },
   { key: 'segments',   label: 'Channels & segments' },
   { key: 'cohorts',    label: 'Cohorts' },
   { key: 'customers',  label: 'Customers' },
@@ -41,6 +49,7 @@ export function ProfitabilityTab() {
   const { rates } = useProfitabilityRates();
   const { spend } = useAcquisitionSpend();
   const { rows: retainedRows } = useRetainedUnitCosts();
+  const { links: unitLinks, futureBatches } = useUnitBatchLinks();
 
   const [view, setView] = useState<ViewKey>('overview');
   const [search, setSearch] = useState('');
@@ -55,6 +64,8 @@ export function ProfitabilityTab() {
   const [cohort, setCohort] = useState<string>('all');
   const [cohortGrain, setCohortGrain] = useState<'month' | 'quarter'>('month');
   const [geoMeasure, setGeoMeasure] = useState<GeoMeasure>('profitPerCustomer');
+  const [batchMeasure, setBatchMeasure] = useState<CellMeasure>('profitPerUnit');
+  const [batch, setBatch] = useState<string>('all');
   // Default-hide team accounts (Pedrum etc.) so they don't skew the view.
   const [showTeam, setShowTeam] = useState(false);
   const [hideZero, setHideZero] = useState(true);
@@ -137,6 +148,34 @@ export function ProfitabilityTab() {
   // Company-level, so it never narrows with a filter: a cancelled order has no
   // customer to filter it by. Shown beside contribution margin, never inside.
   const retained = useMemo(() => retainedUnits(retainedRows), [retainedRows]);
+
+  // Batch economics run off the *unfiltered* metric set, minus team accounts.
+  // A batch is a fact about a production run, not about who is on screen —
+  // narrowing it by the region filter would let the Geography pick silently
+  // rewrite the batch table, which is the same trap the map fell into.
+  const batchMetricsInput = useMemo(() => {
+    const m = new Map<string, CustomerMetrics>();
+    for (const r of rows) {
+      if (r.is_team_member) continue;
+      const met = allMetrics.get(r.id);
+      if (met) m.set(r.id, met);
+    }
+    return m;
+  }, [rows, allMetrics]);
+
+  const batches = useMemo(
+    () => byBatch(batchMetricsInput, unitLinks),
+    [batchMetricsInput, unitLinks],
+  );
+  const batchRegions = useMemo(
+    () => byBatchRegion(batchMetricsInput, unitLinks),
+    [batchMetricsInput, unitLinks],
+  );
+  const batchReach = useMemo(
+    () => batchCountryReach(batchMetricsInput, unitLinks),
+    [batchMetricsInput, unitLinks],
+  );
+  const confounded = useMemo(() => confoundedBatches(batchReach), [batchReach]);
   // Insights are computed from the *unfiltered* set (minus team accounts)
   // so the panel always shows the full picture regardless of search.
   const insights = useMemo(() => computeInsights(rows.filter(r => showTeam || !r.is_team_member)), [rows, showTeam]);
@@ -207,6 +246,19 @@ export function ProfitabilityTab() {
           setMeasure={setGeoMeasure}
           selected={region === 'all' ? null : region}
           onSelect={code => setRegion(code ?? 'all')}
+        />
+      )}
+
+      {view === 'batches' && (
+        <BatchesView
+          batches={batches}
+          matrix={batchRegions}
+          confounded={confounded}
+          futureBatches={futureBatches}
+          measure={batchMeasure}
+          setMeasure={setBatchMeasure}
+          selected={batch === 'all' ? null : batch}
+          onSelect={key => setBatch(batch === key ? 'all' : key)}
         />
       )}
 
@@ -639,6 +691,140 @@ function RegionRank({ rows, onSelect }: {
 }
 
 // ── Segments ────────────────────────────────────────────────────────────────
+
+// ── Batches ─────────────────────────────────────────────────────────────────
+
+/**
+ *  Which production batch made money, and where.
+ *
+ *  The headline caveat is deliberately loud. LILA's batches are not just
+ *  different hardware — they are different *eras* and, as it turns out,
+ *  different *markets*: P50 and P150 sold into Canada only, P50N almost
+ *  entirely into the US, and only P100 sold into both. So a raw batch ranking
+ *  silently compares countries, freight lanes and tax regimes as much as it
+ *  compares machines. The view says so before it shows a single number,
+ *  because the ranking is the thing a reader will act on.
+ */
+function BatchesView({
+  batches, matrix, confounded, futureBatches, measure, setMeasure, selected, onSelect,
+}: {
+  batches: BatchMetrics[];
+  matrix: ReturnType<typeof byBatchRegion>;
+  confounded: ReturnType<typeof confoundedBatches>;
+  futureBatches: ReturnType<typeof useUnitBatchLinks>['futureBatches'];
+  measure: CellMeasure;
+  setMeasure: (m: CellMeasure) => void;
+  selected: string | null;
+  onSelect: (key: string) => void;
+}) {
+  const shipped = batches.filter(b => b.coverage.shipped > 0);
+  const ranked = [...shipped]
+    .filter(b => b.units > 0 && b.profitPerUnit != null)
+    .sort((a, b) => (b.profitPerUnit ?? 0) - (a.profitPerUnit ?? 0));
+  const best = ranked[0] ?? null;
+  const worst = ranked.length > 1 ? ranked[ranked.length - 1] : null;
+  const coverage = attributionCoverage(shipped);
+
+  const focus = selected ? shipped.find(b => b.key === selected) ?? null : null;
+  const extremes = focus ? batchRegionExtremes(matrix, focus.key) : null;
+
+  return (
+    <>
+      {best && worst && (
+        <div className={styles.batchHeadline}>
+          <div className={styles.batchHeadlineCard}>
+            <div className={styles.batchHeadlineLabel}>Most profitable batch</div>
+            <div className={styles.batchHeadlineValue}>{best.label}</div>
+            <div className={styles.batchHeadlineSub}>
+              {batchMoney(best.profitPerUnit)} per unit over {best.units} unit{best.units === 1 ? '' : 's'}
+            </div>
+          </div>
+          <div className={styles.batchHeadlineCard}>
+            <div className={styles.batchHeadlineLabel}>Least profitable batch</div>
+            <div className={`${styles.batchHeadlineValue} ${styles.negative}`}>{worst.label}</div>
+            <div className={styles.batchHeadlineSub}>
+              {batchMoney(worst.profitPerUnit)} per unit over {worst.units} unit{worst.units === 1 ? '' : 's'}
+            </div>
+          </div>
+          <div className={styles.batchHeadlineCard}>
+            <div className={styles.batchHeadlineLabel}>Units attributed</div>
+            <div className={styles.batchHeadlineValue}>
+              {coverage.attributed}<span className={styles.batchHeadlineOf}>/{coverage.shipped}</span>
+            </div>
+            <div className={styles.batchHeadlineSub}>
+              {coverage.unattributed === 0
+                ? 'every shipped machine traced to a customer'
+                : `${coverage.unattributed} shipped machine${coverage.unattributed === 1 ? '' : 's'} carry no customer`}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {confounded.length > 0 && (
+        <div className={styles.batchWarning}>
+          <strong>Batch and geography are confounded here.</strong>{' '}
+          {confounded.map((c, i) => (
+            <span key={c.batch}>
+              {i > 0 && (i === confounded.length - 1 ? ' and ' : ', ')}
+              {c.batch} sold essentially only into {c.country}
+            </span>
+          ))}
+          . A batch that never crossed the border cannot be compared to one that did
+          without also comparing freight, duty and tax — so read the ranking below as
+          "how this production run performed in the market it was sold into", not as a
+          verdict on the hardware.
+        </div>
+      )}
+
+      <p className={styles.sectionNote}>
+        A machine's economics are its owner's, split evenly when one customer owns
+        several. Batches are ordered by production chronology, oldest first. COGS is
+        the figure booked on the order, which for the older batches is a modelled
+        schedule rather than the factory invoice — it will not match the batch's
+        landed cost.
+      </p>
+
+      <BatchTable batches={shipped} onSelect={onSelect} selected={selected} />
+
+      <FutureBatchPanel batches={futureBatches} />
+
+      <BatchRegionMatrix
+        matrix={matrix}
+        measure={measure}
+        onMeasureChange={setMeasure}
+      />
+
+      {focus && extremes && (
+        <div className={styles.batchFocus}>
+          <div className={styles.batchFocusTitle}>
+            {focus.label} by region
+            <button className={styles.batchFocusClear} onClick={() => onSelect(focus.key)}>
+              clear
+            </button>
+          </div>
+          {extremes.best && extremes.worst ? (
+            <p className={styles.sectionNote}>
+              Best: <strong>{regionName(extremes.best.regionCode)}</strong> at{' '}
+              {batchMoney(extremes.best.profitPerUnit)} per unit over {extremes.best.units} units.
+              {' '}Worst: <strong>{regionName(extremes.worst.regionCode)}</strong> at{' '}
+              {batchMoney(extremes.worst.profitPerUnit)} per unit over {extremes.worst.units} units.
+            </p>
+          ) : (
+            <p className={styles.sectionNote}>
+              No region has three or more {focus.label} units — too thin to rank regions
+              for this batch.
+            </p>
+          )}
+          <SegmentTable
+            segments={extremes.ranked}
+            dimensionLabel={`${focus.label} region`}
+            emptyHint={`No ${focus.label} region clears the three-unit floor.`}
+          />
+        </div>
+      )}
+    </>
+  );
+}
 
 function SegmentsView({
   channels, volumes, countries, onSelectChannel, selectedChannel,
@@ -1137,6 +1323,11 @@ function fmt(n: number | null): string {
 function fmtShort(n: number): string {
   const sign = n < 0 ? '−' : '';
   return `${sign}$${Math.abs(Math.round(n)).toLocaleString('en-CA')}`;
+}
+
+/** fmtShort, but tolerant of the nulls the batch rollups carry. */
+function batchMoney(n: number | null): string {
+  return n == null ? '—' : fmtShort(n);
 }
 
 function pct(v: number | null): string {
