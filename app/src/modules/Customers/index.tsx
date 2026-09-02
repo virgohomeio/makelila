@@ -1,5 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
+import { buildHeldSerialIndex, serialsForCustomer, heldUnitsForCustomer } from '../../lib/heldUnits';
 import { isTelemetryConfigured } from '../../lib/supabaseTelemetry';
 const Dashboard = lazy(() => import('../Dashboard'));
 import {
@@ -90,55 +91,14 @@ export default function Customers() {
   }, [paramTab]);
   const { customers, loading, refresh: refreshCustomers } = useCustomers();
   const { units } = useUnits();
-  // Pre-build serial lookups so each row can render its serial(s) without
-  // re-filtering the full units list. The canonical units.customer_id FK
-  // (populated by the fulfillment-sheet sync, same link the Dashboard uses)
-  // is preferred; the lowercase-name map is a fallback for any unit not yet
-  // FK-linked.
-  //
-  // Only `shipped` units count as "currently held". A unit in rework/scrap/
-  // ready/team-test is physically back with us, so listing it against the
-  // customer is what made replaced units linger in the directory: after a
-  // replacement the original moves to rework but the customer keeps showing
-  // it. Filter here so both maps agree on the definition.
-  const heldUnits = useMemo(() => units.filter(u => u.status === 'shipped'), [units]);
-  const serialsByCustomerId = useMemo(() => {
-    const m = new Map<string, string[]>();
-    for (const u of heldUnits) {
-      if (!u.customer_id) continue;
-      const arr = m.get(u.customer_id);
-      if (arr) arr.push(u.serial);
-      else m.set(u.customer_id, [u.serial]);
-    }
-    return m;
-  }, [heldUnits]);
-  const serialsByCustomerName = useMemo(() => {
-    const m = new Map<string, string[]>();
-    for (const u of heldUnits) {
-      if (u.customer_id || !u.customer_name) continue;
-      const key = u.customer_name.toLowerCase();
-      const arr = m.get(key);
-      if (arr) arr.push(u.serial);
-      else m.set(key, [u.serial]);
-    }
-    return m;
-  }, [heldUnits]);
-  // Union the two maps rather than falling through between them. The previous
-  // `fk ?? name` short-circuit meant any customer with at least one FK-linked
-  // unit had their name-matched units silently dropped — which is how Kevin
-  // Cheng's own machine came to be hidden behind a mis-linked one. A customer
-  // can legitimately hold one of each while the backfill is only partly undone.
-  //
-  // `customers.serials` is deliberately NOT consulted. It is a snapshot of the
-  // fulfilment sheet last synced 2026-06-05 and only refreshes when
-  // sync_customer_serials_from_fulfillment() is run by hand, so it resurrects
-  // ownership that operators have since corrected — it was showing machines as
-  // held that Stock records as returned or scrapped.
-  const serialsFor = useCallback((c: Customer): string[] => {
-    const byId = serialsByCustomerId.get(c.id) ?? [];
-    const byName = serialsByCustomerName.get(c.full_name?.toLowerCase() ?? '') ?? [];
-    return byName.length === 0 ? byId : [...new Set([...byId, ...byName])];
-  }, [serialsByCustomerId, serialsByCustomerName]);
+  // Serial lookups live in lib/heldUnits so the list row below and the detail
+  // panel further down share one definition of "currently held" — they used to
+  // each hand-roll it and disagreed about returned machines.
+  const serialIndex = useMemo(() => buildHeldSerialIndex(units), [units]);
+  const serialsFor = useCallback(
+    (c: Customer) => serialsForCustomer(c, serialIndex),
+    [serialIndex],
+  );
   // Every household user in the directory, so the search box can look past the
   // purchaser's name (the per-customer hook only covers the open panel).
   const { byCustomerId: usersByCustomerId } = useAllCustomerAdditionalUsers();
@@ -919,22 +879,14 @@ function CustomerDetailPanel({ customer, allCustomers, onChanged, onClose }: {
   }, [onClose]);
 
   const lcEmail = customer.email?.toLowerCase() ?? '';
-  const lcName = customer.full_name.toLowerCase();
 
   const myOrders = lcEmail
     ? orders.filter(o => o.customer_email?.toLowerCase() === lcEmail)
     : [];
-  // Prefer the canonical units.customer_id link; fall back to name-matching
-  // only for units not yet FK-linked, so a unit with a known FK never shows up
-  // under the wrong customer.
-  //
-  // The `status === 'shipped'` filter matches the directory list row. Without
-  // it the panel and the row disagreed: the row hid returned machines while
-  // opening the same customer listed them as still held.
-  const myUnits = units.filter(u =>
-    u.status === 'shipped' && (u.customer_id
-      ? u.customer_id === customer.id
-      : u.customer_name?.toLowerCase() === lcName));
+  // Same rule as the directory list row — see lib/heldUnits. Panel and row
+  // used to disagree: the row hid returned machines while opening the same
+  // customer listed them as still held.
+  const myUnits = heldUnitsForCustomer(customer, units);
   const myTickets = lcEmail
     ? tickets.filter(t => t.customer_email?.toLowerCase() === lcEmail)
     : [];
