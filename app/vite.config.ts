@@ -11,7 +11,13 @@ export default defineConfig({
       // what lets edgeFunctionColumns.test.ts assert that their hand-written
       // PostgREST selects name columns that actually exist — a class of bug
       // nothing else in the toolchain can catch.
-      allow: ['.', '../supabase/functions'],
+      //
+      // The migrations are here for the same reason: partsRpcSignature.test.ts
+      // reads them to check that an RPC's parameter type matches the column it
+      // filters on. `decrement_part_on_hand(p_part_id uuid)` against a TEXT
+      // `parts.id` broke every part replacement order, and the SQL is the only
+      // place those two declarations meet.
+      allow: ['.', '../supabase/functions', '../supabase/migrations'],
     },
   },
   test: {
