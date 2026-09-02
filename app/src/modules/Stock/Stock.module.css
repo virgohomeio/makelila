@@ -891,6 +891,27 @@
   font-size: 0.75rem;
   color: #b7791f;
 }
+/* One-click confirmation of the name matcher's suggestion. Sits above the
+   search box because for most rows it is the whole interaction. */
+.orphanSuggestBtn {
+  width: 100%;
+  text-align: left;
+  padding: 6px 10px;
+  margin: 0 0 6px;
+  background: #f0fff4;
+  border: 1px solid #9ae6b4;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+.orphanSuggestBtn:hover:not(:disabled) {
+  background: #c6f6d5;
+}
+.orphanAmbiguous {
+  margin: 0 0 6px;
+  font-size: 0.75rem;
+  color: #b7791f;
+}
 .orphanBadge {
   display: inline-block;
   margin-left: 6px;
