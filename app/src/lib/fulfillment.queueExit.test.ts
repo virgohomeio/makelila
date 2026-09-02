@@ -124,6 +124,43 @@ describe('cancelOrderFromQueue', () => {
     expect(buckets.approved).toEqual([]);
   });
 
+  // Shopify has already given this customer their money back, so there is no
+  // refund left to work. Filing the cancellation as a live request puts a card
+  // in front of the refund team for a payment that already happened — what
+  // re-populated Cancellation Requests when seven settled orders were cleared
+  // out of the queue on 2026-08-21.
+  it('files an already-refunded order as settled, not as a live refund request', async () => {
+    state.order = { ...state.order, financial_status: 'refunded' };
+    await cancelOrderFromQueue('q-1', 'refunded');
+
+    const row = state.inserts.find(i => i.table === 'order_cancellations')?.row;
+    expect(row).toMatchObject({ status: 'completed' });
+    expect(row.refund_approval_id ?? null).toBeNull();
+    expect(row.processed_at).toEqual(expect.any(String));
+    expect(row.ops_notes).toMatch(/already refunded/i);
+  });
+
+  // An authorization that was never captured is the same story: no money moved,
+  // so nothing is owed back.
+  it('files a voided order as settled too', async () => {
+    state.order = { ...state.order, financial_status: 'voided' };
+    await cancelOrderFromQueue('q-1', 'never charged');
+    expect(state.inserts.find(i => i.table === 'order_cancellations')?.row)
+      .toMatchObject({ status: 'completed' });
+  });
+
+  // The other half of the rule: money the customer actually paid is a refund
+  // the team owes, and that still has to reach the board.
+  it.each(['paid', 'partially_refunded', null])(
+    'still queues a %s order — that refund is genuinely owed', async (fin) => {
+      state.order = { ...state.order, financial_status: fin };
+      await cancelOrderFromQueue('q-1', 'Customer changed their mind');
+
+      const row = state.inserts.find(i => i.table === 'order_cancellations')?.row;
+      expect(row).toMatchObject({ status: 'submitted' });
+      expect(row.processed_at ?? null).toBeNull();
+    });
+
   it('does not file a cancellation for a replacement — nothing was paid for it', async () => {
     state.order = { ...state.order, kind: 'replacement', order_ref: 'R-0002', replacement_state: 'ready' };
     await cancelOrderFromQueue('q-1', 'customer no longer needs it');

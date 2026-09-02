@@ -1119,6 +1119,22 @@ export async function returnOrderToReview(orderId: string): Promise<ReviewLandin
   return landing;
 }
 
+/** The Shopify money states in which nothing is left to give back: the order
+ *  was refunded in full, or the payment was authorized and voided without ever
+ *  being captured. 'partially_refunded' is deliberately NOT here — a balance
+ *  remains, so that cancellation still owes the customer a refund decision. */
+const SETTLED_FINANCIAL_STATUSES = new Set(['refunded', 'voided']);
+
+function alreadySettled(financialStatus: string | null | undefined): boolean {
+  return SETTLED_FINANCIAL_STATUSES.has((financialStatus ?? '').toLowerCase());
+}
+
+function settledNote(financialStatus: string | null | undefined): string {
+  return (financialStatus ?? '').toLowerCase() === 'voided'
+    ? 'Closed on cancel: payment was voided, never captured — no refund owed.'
+    : 'Closed on cancel: Shopify shows this order already refunded — no refund owed.';
+}
+
 /** Cancel an order outright. The row is kept (finance still needs its totals)
  *  but flipped to the terminal 'cancelled' status, which hides it from every
  *  Order Review tab.
@@ -1126,7 +1142,10 @@ export async function returnOrderToReview(orderId: string): Promise<ReviewLandin
  *  Effects:
  *    - Sale        → a row in Shipping › Cancellations, so the refund team sees
  *                    it beside the customer-submitted ones and can compile or
- *                    dismiss the refund. Never auto-refunds.
+ *                    dismiss the refund. Never auto-refunds. Orders Shopify has
+ *                    already settled are filed closed, so clearing stale
+ *                    already-refunded orders out of the queue does not mint
+ *                    refund requests for money that has already gone back.
  *    - Replacement → no cancellation record (nothing was paid for a warranty
  *                    replacement, so there is no refund to route); reserved
  *                    units, decremented parts and the ticket back-link are all
@@ -1141,7 +1160,7 @@ export async function cancelOrder(orderId: string, reason: string): Promise<void
 
   const { data: order, error: oErr } = await supabase
     .from('orders')
-    .select('id, order_ref, kind, status, replacement_state, linked_ticket_id, line_items, customer_name, customer_email, customer_phone, total_usd, placed_at, created_at')
+    .select('id, order_ref, kind, status, replacement_state, linked_ticket_id, line_items, customer_name, customer_email, customer_phone, total_usd, placed_at, created_at, financial_status')
     .eq('id', orderId)
     .single();
   if (oErr || !order) throw new Error(`Order not found: ${oErr?.message ?? 'no row'}`);
@@ -1165,6 +1184,13 @@ export async function cancelOrder(orderId: string, reason: string): Promise<void
   if (uErr) throw new Error(`Failed to cancel the order: ${uErr.message}`);
 
   if (order.kind !== 'replacement') {
+    // A cancellation record only belongs on the Refunds board while the money
+    // is still with us. Orders Shopify has already settled — refunded outright,
+    // or an authorization voided before capture — are filed closed instead:
+    // they stay in the Cancellations tab as history and never open a refund
+    // card for a payment that already went back. Anything still paid (or
+    // partially refunded, where a balance remains) queues as a live request.
+    const settled = alreadySettled(order.financial_status);
     // Non-fatal: the order is already cancelled, and a missing record is
     // recoverable by hand — losing the cancel over it would not be.
     const { error: cErr } = await supabase.from('order_cancellations').insert({
@@ -1178,6 +1204,10 @@ export async function cancelOrder(orderId: string, reason: string): Promise<void
       reason:           note,
       description:      'Cancelled in makeLILA from the fulfillment queue before shipping.',
       product_received: false,
+      status:           settled ? 'completed' : 'submitted',
+      processed_by:     settled ? userId : null,
+      processed_at:     settled ? nowIso : null,
+      ops_notes:        settled ? settledNote(order.financial_status) : null,
     });
     if (cErr) console.warn('Cancellation record insert failed (non-fatal):', cErr.message);
   }
