@@ -20,7 +20,11 @@ import { TicketPartyLabel } from './TicketPartyLabel';
 import { useUnits } from '../../lib/stock';
 import { useReplacementOrders } from '../../lib/orders';
 import { queuedForReplacementLabel } from '../../lib/replacementTags';
-import { replacementQueueKindsByTicket, groupQueueKinds } from './replacementQueue';
+import {
+  replacementQueueKindsByTicket, groupQueueKinds,
+  matchesReplacementKind, replacementKindOptions,
+  type ReplacementKindFilter,
+} from './replacementQueue';
 import { TicketDetailPanel } from './TicketDetailPanel';
 import { CustomerProfilePanel } from './CustomerProfilePanel';
 import { OwnerKanban } from './OwnerKanban';
@@ -65,6 +69,11 @@ export function SupportTab() {
   const [areaFilter, setAreaFilter] = useState<IssueArea | 'all' | 'none'>('all');
   const [ownerFilter, setOwnerFilter] = useState<OwnerFilter>('all');
   const [savedView, setSavedView] = useState<SavedView>(null);
+  // Which replacement the customer is waiting on — parts, any batch, or one
+  // named batch. Only applied inside the Replacement queue view, where the
+  // question means anything; cleared on the way out so it can't narrow the
+  // queue invisibly from a view that never shows the chips.
+  const [kindFilter, setKindFilter] = useState<ReplacementKindFilter>('all');
   const [view, setView] = useState<ViewMode>('list');
   // The device-context chip links here as ?unit_serial=<serial>. Seed the
   // search box from it rather than filtering invisibly, so the operator can
@@ -89,7 +98,20 @@ export function SupportTab() {
     setSearchParams(prev => { prev.delete('unit_serial'); return prev; }, { replace: true });
   }, [unitParam, setSearchParams]);
 
-  const filtered = useMemo(() => {
+  // What each queued customer is actually waiting on — the batch code of the
+  // replacement unit ("P100X") or "PARTS" — read off the linked replacement
+  // order, so the row says "Queued for P100X Replacement" instead of just
+  // "Queued for Replacement". Computed over the unfiltered pool, above the
+  // filter pipeline that now reads it.
+  const queueKindsByTicket = useMemo(
+    () => replacementQueueKindsByTicket(tickets, replacementOrders),
+    [tickets, replacementOrders],
+  );
+
+  // Everything except the replacement-kind chips. Kept separate so the chip
+  // counts can be taken from it: they then reflect the other active filters
+  // instead of promising rows that owner/source/search have already excluded.
+  const preKindFiltered = useMemo(() => {
     return tickets.filter(t => {
       // Match the workflow status OR any of the ticket's status tags, so
       // filtering a tag surfaces every customer whose ticket carries it.
@@ -127,19 +149,24 @@ export function SupportTab() {
     });
   }, [tickets, statusFilter, sourceFilter, topicFilter, areaFilter, ownerFilter, savedView, q, now, partiesFor]);
 
+  // The chips only exist inside the Replacement queue view, so the narrowing
+  // only applies there.
+  const kindOptions = useMemo(
+    () => replacementKindOptions(preKindFiltered, queueKindsByTicket),
+    [preKindFiltered, queueKindsByTicket],
+  );
+
+  const filtered = useMemo(() => {
+    if (savedView !== 'replacement' || kindFilter === 'all') return preKindFiltered;
+    return preKindFiltered.filter(
+      t => matchesReplacementKind(queueKindsByTicket.get(t.id) ?? [], kindFilter),
+    );
+  }, [preKindFiltered, savedView, kindFilter, queueKindsByTicket]);
+
   // One row per customer (a "ticket profile"); customer-less tickets fall into
   // the Unassigned group. Filters above narrow the ticket pool first, so a
   // profile appears when *any* of its tickets match.
   const grouped = useMemo(() => groupTicketsByCustomer(filtered), [filtered]);
-
-  // What each queued customer is actually waiting on — the batch code of the
-  // replacement unit ("P100X") or "PARTS" — read off the linked replacement
-  // order, so the row says "Queued for P100X Replacement" instead of just
-  // "Queued for Replacement".
-  const queueKindsByTicket = useMemo(
-    () => replacementQueueKindsByTicket(tickets, replacementOrders),
-    [tickets, replacementOrders],
-  );
 
   // Volume per issue area, computed over the *unfiltered* support-ticket
   // pool so the chip counts don't shift when other filters narrow the view.
@@ -268,7 +295,7 @@ export function SupportTab() {
         counts={statusCounts}
         openTotal={openCount}
         active={statusFilter}
-        onPick={s => { setStatusFilter(s); setSavedView(null); }}
+        onPick={s => { setStatusFilter(s); setSavedView(null); setKindFilter('all'); }}
       />
 
       <div className={styles.savedViews}>
@@ -285,9 +312,34 @@ export function SupportTab() {
         <SavedViewChip
           label="Replacement queue" count={savedCounts.replacement} tone="replacement"
           active={savedView === 'replacement'}
-          onClick={() => { setSavedView(v => v === 'replacement' ? null : 'replacement'); setStatusFilter('all'); }}
+          onClick={() => {
+            setSavedView(v => v === 'replacement' ? null : 'replacement');
+            setStatusFilter('all');
+            setKindFilter('all');
+          }}
         />
       </div>
+
+      {/* Waiting on a lid and waiting on a whole P100X are different jobs: one
+          ships off the shelf today, the other is blocked until a batch lands.
+          The chips split the queue on that, and the batch entries come from the
+          orders themselves — a new batch appears here on its own. */}
+      {savedView === 'replacement' && kindOptions.length > 1 && (
+        <div className={styles.kindChips} role="group" aria-label="Replacement kind">
+          {kindOptions.map(o => (
+            <button
+              key={o.key}
+              type="button"
+              className={`${styles.kindChip} ${o.group === 'batch' ? styles.kindChipNested : ''}`}
+              aria-pressed={kindFilter === o.key}
+              data-active={kindFilter === o.key || undefined}
+              onClick={() => setKindFilter(kindFilter === o.key ? 'all' : o.key)}
+            >
+              {o.label}<span className={styles.kindChipCount}>{o.count}</span>
+            </button>
+          ))}
+        </div>
+      )}
 
       <div className={styles.toolbar}>
         <input
@@ -381,12 +433,14 @@ export function SupportTab() {
         </Dropdown>
 
         {(statusFilter !== 'all' || sourceFilter !== 'all' || topicFilter !== 'all'
-          || areaFilter !== 'all' || ownerFilter !== 'all' || savedView || q) && (
+          || areaFilter !== 'all' || ownerFilter !== 'all' || savedView || q
+          || kindFilter !== 'all') && (
           <button
             className={styles.clearBtn}
             onClick={() => {
               setStatusFilter('all'); setSourceFilter('all'); setTopicFilter('all');
               setAreaFilter('all'); setOwnerFilter('all'); setSavedView(null); setQ('');
+              setKindFilter('all');
             }}
           >Clear filters</button>
         )}

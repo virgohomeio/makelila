@@ -402,3 +402,110 @@ describe('SupportTab — unassigned rows use the same name rendering', () => {
     expect(names).toContain('Walk-in Wendy');
   });
 });
+
+// The chips are the whole point of the feature: separating the customer waiting
+// on a lid (ships today) from the one waiting on a batch that has not landed.
+describe('SupportTab — parts vs batch replacement chips', () => {
+  beforeEach(() => {
+    replacementOrdersToReturn = [];
+    customersToReturn = [];
+  });
+
+  /** Three queued customers: two parts, one P100X, one LILA-Mini. */
+  function seedQueue() {
+    ticketsToReturn = [
+      mkTicket({ id: 't1', customer_id: 'c1', customer_name: 'Parts Pat',
+                 status: 'queued_for_replacement', replacement_order_id: 'o1' }),
+      mkTicket({ id: 't2', customer_id: 'c2', customer_name: 'Parts Pam',
+                 status: 'queued_for_replacement', replacement_order_id: 'o2' }),
+      mkTicket({ id: 't3', customer_id: 'c3', customer_name: 'Batch Bob',
+                 status: 'queued_for_replacement', replacement_order_id: 'o3' }),
+      mkTicket({ id: 't4', customer_id: 'c4', customer_name: 'Mini Mo',
+                 status: 'queued_for_replacement', replacement_order_id: 'o4' }),
+    ];
+    replacementOrdersToReturn = [
+      mkReplacementOrder('o1', [{ kind: 'part', sku: 'LILA-LID-V36' }]),
+      mkReplacementOrder('o2', [{ kind: 'part', sku: 'LILA-FILTER' }]),
+      mkReplacementOrder('o3', [{ kind: 'unit_pending', batch: 'P100X' }]),
+      mkReplacementOrder('o4', [{ kind: 'unit_pending', batch: 'LILA-Mini' }]),
+    ];
+  }
+
+  const openQueue = () =>
+    fireEvent.click(screen.getByRole('button', { name: /Replacement queue/ }));
+  const chips = () =>
+    screen.getByRole('group', { name: /replacement kind/i });
+  const tableText = () => screen.getAllByRole('table').map(t => t.textContent ?? '').join(' ');
+
+  it('hides the chips until the replacement queue view is open', () => {
+    seedQueue();
+    render(<SupportTab />);
+    expect(screen.queryByRole('group', { name: /replacement kind/i })).toBeNull();
+    openQueue();
+    expect(chips()).toBeTruthy();
+  });
+
+  it('offers All, Parts, Any batch and one chip per batch present', () => {
+    seedQueue();
+    render(<SupportTab />);
+    openQueue();
+    const labels = Array.from(chips().querySelectorAll('button')).map(b => b.textContent);
+    expect(labels).toEqual(['All4', 'Parts2', 'Any batch2', 'LILA-Mini1', 'P100X1']);
+  });
+
+  it('narrows to parts only', () => {
+    seedQueue();
+    render(<SupportTab />);
+    openQueue();
+    fireEvent.click(screen.getByRole('button', { name: /^Parts2$/ }));
+    expect(tableText()).toContain('Parts Pat');
+    expect(tableText()).toContain('Parts Pam');
+    expect(tableText()).not.toContain('Batch Bob');
+    expect(tableText()).not.toContain('Mini Mo');
+  });
+
+  it('narrows to a single batch, excluding the other batch and parts', () => {
+    seedQueue();
+    render(<SupportTab />);
+    openQueue();
+    fireEvent.click(screen.getByRole('button', { name: /^P100X1$/ }));
+    expect(tableText()).toContain('Batch Bob');
+    expect(tableText()).not.toContain('Mini Mo');
+    expect(tableText()).not.toContain('Parts Pat');
+  });
+
+  it('rolls every batch up under Any batch', () => {
+    seedQueue();
+    render(<SupportTab />);
+    openQueue();
+    fireEvent.click(screen.getByRole('button', { name: /^Any batch2$/ }));
+    expect(tableText()).toContain('Batch Bob');
+    expect(tableText()).toContain('Mini Mo');
+    expect(tableText()).not.toContain('Parts Pat');
+  });
+
+  it('surfaces a batch nobody has hardcoded', () => {
+    ticketsToReturn = [mkTicket({
+      id: 't9', customer_id: 'c9', customer_name: 'Future Fran',
+      status: 'queued_for_replacement', replacement_order_id: 'o9',
+    })];
+    replacementOrdersToReturn = [
+      mkReplacementOrder('o9', [{ kind: 'unit_pending', batch: 'P250-Neo' }]),
+    ];
+    render(<SupportTab />);
+    openQueue();
+    const labels = Array.from(chips().querySelectorAll('button')).map(b => b.textContent);
+    expect(labels).toContain('P250-Neo1');
+  });
+
+  it('clears the narrowing when leaving the replacement view', () => {
+    seedQueue();
+    render(<SupportTab />);
+    openQueue();
+    fireEvent.click(screen.getByRole('button', { name: /^Parts2$/ }));
+    expect(tableText()).not.toContain('Batch Bob');
+    openQueue();  // toggles the saved view back off
+    openQueue();  // and back on — the chip must not still be applied
+    expect(tableText()).toContain('Batch Bob');
+  });
+});
