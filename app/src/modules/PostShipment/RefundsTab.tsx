@@ -16,9 +16,13 @@ import {
   type ReturnAttachment, type ReturnAttachmentCategory,
   useCaseNotes, addCaseNote, updateCaseNote, deleteCaseNote, type CaseNote,
   REFUND_STATUS_META, REFUND_METHODS, REFUND_METHOD_META,
+  resolveCaseUnit, confirmCaseUnitSerial, CASE_UNIT_VIA_LABEL,
+  type CaseUnitResolution,
   UNIT_STATUS_LABEL, RETURN_DISPOSITION_META,
   type RefundApproval, type ReturnRow, type RefundMethod, type ReturnDisposition, type ReturnStatus, type ReturnCategory,
 } from '../../lib/postShipment';
+import { useUnits, STATUS_META, type UnitStatus } from '../../lib/stock';
+import { Link } from 'react-router-dom';
 
 // Operator-facing unit-status stages, editable from the refund detail panel.
 const UNIT_STAGES: { value: ReturnStatus; label: string }[] = [
@@ -111,6 +115,7 @@ export function RefundsTab() {
   const { byEmail: invoicesByEmail } = useInvoicesByCustomerEmail();
   const { byEmail: customerIdByEmail } = useCustomerIdByEmail();
   const { customers } = useCustomers();
+  const { units } = useUnits();
   const { tickets: allTickets } = useServiceTickets();
   const { user, profile, role } = useAuth();
   // Gate on the profile email (loaded from the DB, stable) — the auth session's
@@ -329,6 +334,23 @@ export function RefundsTab() {
     directory: lookupContactRow(contactIndex, { email: c.email, name: c.name }),
   });
 
+  // The machine a case is about. Once a unit is back it leaves `shipped`, so
+  // nothing keyed on "currently held" finds it — and most cases on this board
+  // never captured a serial to begin with. resolveCaseUnit reaches through the
+  // order ref, the name on the unit and the customer record, and reports which
+  // of those answered so the operator can judge the guess. The directory row is
+  // resolved here, the same way the contact block resolves it.
+  const caseUnitFor = (c: {
+    serial?: string | null; orderRef?: string | null;
+    email?: string | null; name?: string | null;
+  }): CaseUnitResolution => resolveCaseUnit({
+    caseSerial: c.serial,
+    orderRef: c.orderRef,
+    customerName: c.name,
+    customerId: lookupContactRow(contactIndex, { email: c.email, name: c.name })?.id ?? null,
+    units,
+  });
+
   const contactFor = (refund: RefundApproval, linkedReturn: ReturnRow | null): CustomerContact => {
     const email = refund.customer_email ?? linkedReturn?.customer_email ?? null;
     const cancellation = cancellationForRefund(cancellations, refund.id);
@@ -533,6 +555,13 @@ export function RefundsTab() {
           cancellation={cancellationForRefund(cancellations, selectedRefund.id)}
           parties={partiesForRefund(selectedRefund, selectedReturn)}
           contact={contactFor(selectedRefund, selectedReturn)}
+          caseUnit={caseUnitFor({
+            serial: selectedReturn?.unit_serial,
+            orderRef: selectedReturn?.original_order_ref,
+            email: selectedRefund.customer_email ?? selectedReturn?.customer_email,
+            name: selectedRefund.customer_name,
+          })}
+          returnId={selectedReturn?.id ?? null}
           canApproveHere={ownsRefundColumn(userEmail, selectedRefund.status)}
           usage={usageFor(selectedRefund, selectedReturn)}
           invoices={invoicesFor(selectedRefund, selectedReturn)}
@@ -564,6 +593,10 @@ export function RefundsTab() {
           parties={partiesForReturn(r)}
           contact={contactForCase({
             email: r.customer_email, phone: r.customer_phone, name: r.customer_name,
+          })}
+          caseUnit={caseUnitFor({
+            serial: r.unit_serial, orderRef: r.original_order_ref,
+            email: r.customer_email, name: r.customer_name,
           })}
           canOwn={ownsRefundColumn(userEmail, preRefundStage(r.status))}
           usage={usageForEmail(email)}
@@ -1698,11 +1731,91 @@ export function ContactBlock({ contact }: { contact: CustomerContact }) {
 }
 
 // ============================================================================
+// The machine this case is about
+// ============================================================================
+// A refund case names a unit the customer has already sent back, so the moment
+// it leaves `shipped` every "currently held" lookup renders it as nothing — and
+// most cases on this board never captured a serial at all. resolveCaseUnit
+// reaches for it instead, and this block shows the answer together with the
+// path that produced it: an operator deciding a refund needs to know whether
+// the serial came off the case itself or was inferred from a customer record
+// that the June backfill may have pointed at the wrong person. A confirmed
+// serial is stated plainly; a guess says it is one, and offers to become fact.
+function CaseUnitBlock({ unit, returnId, onError, onConfirmed }: {
+  unit: CaseUnitResolution;
+  returnId: string | null;
+  onError: (msg: string) => void;
+  onConfirmed: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+
+  if (!unit.serial) {
+    return (
+      <div className={styles.contactBlock}>
+        <div className={styles.contactRow}>
+          <span className={styles.contactLabel}>Unit</span>
+          <span className={styles.contactMissing}>
+            No serial on this case, and nothing on file identifies the machine
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  const confirmable = !unit.confirmed && returnId !== null;
+  const confirm = () => {
+    if (!returnId || !unit.serial) return;
+    setBusy(true);
+    void confirmCaseUnitSerial(returnId, unit.serial)
+      .then(onConfirmed)
+      .catch(e => onError((e as Error).message))
+      .finally(() => setBusy(false));
+  };
+
+  return (
+    <div className={styles.contactBlock}>
+      <div className={styles.contactRow}>
+        <span className={styles.contactLabel}>Unit</span>
+        <span className={styles.contactValue}>
+          <Link className={styles.contactLink} to={`/customers?tab=fleet&serial=${unit.serial}`}>
+            {unit.serial}
+          </Link>
+          {unit.status && (
+            <span className={styles.caseUnitStatus}>
+              now {STATUS_META[unit.status as UnitStatus]?.label ?? unit.status}
+            </span>
+          )}
+        </span>
+      </div>
+      <div className={styles.contactRow}>
+        <span className={styles.contactLabel}>Source</span>
+        <span className={unit.confirmed ? styles.contactValue : styles.caseUnitGuess}>
+          {CASE_UNIT_VIA_LABEL[unit.via ?? 'case']}
+          {unit.others.length > 0 && (
+            <> · {unit.others.length === 1
+              ? `1 other unit also matches (${unit.others[0].serial})`
+              : `${unit.others.length} other units also match`}</>
+          )}
+          {unit.conflictingName && (
+            <> · the unit itself is recorded to <strong>{unit.conflictingName}</strong></>
+          )}
+          {confirmable && (
+            <button className={styles.caseUnitConfirm} disabled={busy} onClick={confirm}>
+              {busy ? 'Saving…' : 'Confirm'}
+            </button>
+          )}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
 // Detail panel — shown below the Kanban when a card is selected.
 // Renders the linked return-form data + approve / deny actions.
 // ============================================================================
 function RefundDetailPanel({
-  refund, linkedReturn, cancellation = null, parties, contact, canApproveHere, usage, invoices, tickets, onOpenTicket, queuedReplacements, canFlow, onClose, onError, onMoved, onOpenFinanceModal,
+  refund, linkedReturn, cancellation = null, parties, contact, caseUnit, returnId, canApproveHere, usage, invoices, tickets, onOpenTicket, queuedReplacements, canFlow, onClose, onError, onMoved, onOpenFinanceModal,
 }: {
   refund: RefundApproval;
   linkedReturn: ReturnRow | null;
@@ -1717,6 +1830,8 @@ function RefundDetailPanel({
   tickets: ServiceTicket[];
   onOpenTicket: (ticketId: string) => void;
   queuedReplacements: Order[];
+  caseUnit: CaseUnitResolution;
+  returnId: string | null;
   canFlow: boolean;
   onClose: () => void;
   onError: (msg: string | null) => void;
@@ -1861,6 +1976,8 @@ function RefundDetailPanel({
             {linkedReturn?.original_order_ref ?? 'No order reference on file'}
           </div>
           <ContactBlock contact={contact} />
+          <CaseUnitBlock unit={caseUnit} returnId={returnId}
+                         onError={onError} onConfirmed={onMoved} />
           {/* Top of the card, not buried at the bottom — the customer's own
               words are the first thing an approver wants. */}
           {linkedReturn && (
@@ -2294,10 +2411,11 @@ function CancellationFormAnswers({ c }: { c: OrderCancellation }) {
 
 // Read-only viewer for a return's full submitted form — opened by clicking a
 // card in the Return & inspection column (before a refund request exists).
-export function ReturnDetailModal({ r, parties, contact, canOwn, usage, invoices, tickets, onOpenTicket, onCompile, onError, onClose }: {
+export function ReturnDetailModal({ r, parties, contact, caseUnit, canOwn, usage, invoices, tickets, onOpenTicket, onCompile, onError, onClose }: {
   r: ReturnRow;
   parties: Parties;
   contact: CustomerContact;
+  caseUnit: CaseUnitResolution;
   canOwn: boolean;
   usage: RefundUsageWindow;
   invoices: CustomerInvoice[];
@@ -2325,6 +2443,8 @@ export function ReturnDetailModal({ r, parties, contact, canOwn, usage, invoices
             mailing address the return form never captured, and each one says
             so when it isn't on file. */}
         <ContactBlock contact={contact} />
+        <CaseUnitBlock unit={caseUnit} returnId={r.id}
+                       onError={onError} onConfirmed={onClose} />
         {/* Full case context — same blocks the refund detail panel shows:
             usage window, sales invoice + order #, ticket history, saved notes,
             then the return form answers. */}

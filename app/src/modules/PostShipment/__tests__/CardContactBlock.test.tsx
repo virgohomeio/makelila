@@ -7,7 +7,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { CancellationCard, ContactBlock, ReturnDetailModal } from '../RefundsTab';
 import type { RefundParties } from '../../../lib/customers';
-import type { OrderCancellation, ReturnRow } from '../../../lib/postShipment';
+import type { OrderCancellation, ReturnRow, CaseUnitResolution } from '../../../lib/postShipment';
 
 // These cards sit inside the authenticated app shell; nothing here is about
 // who is signed in.
@@ -142,6 +142,10 @@ describe('CancellationCard', () => {
   });
 });
 
+// This modal renders inside a router in the app; the unit block is exercised
+// in postShipment.caseUnit.test.ts, so here it just needs a resolved-nothing.
+const noCaseUnit: CaseUnitResolution = { serial: null, status: null, via: null, confirmed: false, others: [], conflictingName: null };
+
 describe('ReturnDetailModal', () => {
   it('shows the contact block instead of a cramped email · phone line', () => {
     render(
@@ -149,6 +153,7 @@ describe('ReturnDetailModal', () => {
         r={returnRow}
         parties={parties}
         contact={contact}
+        caseUnit={noCaseUnit}
         canOwn
         usage={usage}
         invoices={[]}

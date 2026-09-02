@@ -356,6 +356,150 @@ export async function setReturnDisposition(id: string, disposition: ReturnDispos
     { entityType: 'return', entityId: id });
 }
 
+// ============================================================================
+// The unit a refund case is about
+// ============================================================================
+// A refund card names a machine the customer no longer holds. Once the unit is
+// back it leaves `shipped`, so anything keyed on "currently held" renders it as
+// nothing — which is why most cards on this board show no serial at all: 28 of
+// 51 returns never captured `unit_serial` in the first place.
+//
+// This resolves the machine from whatever the case does carry. Every answer is
+// labelled with the path that produced it, because the paths are not equally
+// trustworthy: the June 2026 fulfillment backfill wrote `units.customer_id`
+// pointing at the wrong person on nine units, so a customer-record match can
+// hand back a stranger's machine. The operator sees which path answered and
+// decides. Nothing here writes — see confirmCaseUnitSerial for that.
+
+/** How a case's unit was found, worst-to-best trust reading upward. */
+export type CaseUnitVia = 'case' | 'order' | 'unit_name' | 'customer';
+
+export const CASE_UNIT_VIA_LABEL: Record<CaseUnitVia, string> = {
+  case: 'recorded on the case',
+  order: 'matched by order ref',
+  unit_name: 'matched by name on the unit',
+  customer: 'matched via customer record',
+};
+
+/** The unit columns this resolution reads. */
+export type CaseUnitRow = {
+  serial: string;
+  status: string;
+  customer_id: string | null;
+  customer_name: string | null;
+  customer_order_ref: string | null;
+};
+
+export type CaseUnitCandidate = { serial: string; status: string };
+
+export type CaseUnitResolution = {
+  serial: string | null;
+  /** The unit's status *now* — the machine may be in rework, scrapped, or back
+   *  out with someone else. Null when nothing resolved. */
+  status: string | null;
+  via: CaseUnitVia | null;
+  /** True when the serial came off the case row itself, not a guess. */
+  confirmed: boolean;
+  /** Other units that tied at the winning path. Non-empty means ambiguous. */
+  others: CaseUnitCandidate[];
+  /** The name written on the matched unit, when it is someone other than the
+   *  customer this case is about. Only the customer-record path can produce
+   *  this, and when it does the match is standing on a `units.customer_id` that
+   *  disagrees with the unit's own name — the exact shape the June backfill
+   *  left behind. Both of today's customer-path matches look like this, so the
+   *  card has to say whose name is actually on the machine. */
+  conflictingName: string | null;
+};
+
+const NO_UNIT: CaseUnitResolution = {
+  serial: null, status: null, via: null, confirmed: false, others: [], conflictingName: null,
+};
+
+const normalizeRef = (v: string | null | undefined): string | null =>
+  (v ?? '').replace(/^#/, '').trim().toLowerCase() || null;
+
+const normalizeName = (v: string | null | undefined): string | null =>
+  (v ?? '').trim().toLowerCase() || null;
+
+/** Find the machine a refund/return case is about.
+ *
+ *  Tries the case's own `unit_serial` first, then order ref, then the name
+ *  typed on the unit row, then the directory customer's linked units. Stops at
+ *  the first path that matches and reports which one it was. `customerId` is
+ *  resolved by the caller (see lookupContactRow) so this stays pure. */
+export function resolveCaseUnit(opts: {
+  caseSerial?: string | null;
+  orderRef?: string | null;
+  customerName?: string | null;
+  customerId?: string | null;
+  units: CaseUnitRow[];
+}): CaseUnitResolution {
+  const { units } = opts;
+  const byStatus = (u: CaseUnitRow): CaseUnitCandidate => ({ serial: u.serial, status: u.status });
+
+  const caseSerial = (opts.caseSerial ?? '').trim();
+  if (caseSerial) {
+    const known = units.find(u => u.serial === caseSerial);
+    return {
+      serial: caseSerial,
+      status: known?.status ?? null,
+      via: 'case',
+      confirmed: true,
+      others: [],
+      conflictingName: null,
+    };
+  }
+
+  const caseName = normalizeName(opts.customerName);
+  const pick = (matches: CaseUnitRow[], via: CaseUnitVia): CaseUnitResolution | null => {
+    if (matches.length === 0) return null;
+    const [first, ...rest] = matches;
+    const onUnit = normalizeName(first.customer_name);
+    return {
+      serial: first.serial,
+      status: first.status,
+      via,
+      confirmed: false,
+      others: rest.map(byStatus),
+      conflictingName: onUnit && caseName && onUnit !== caseName ? first.customer_name : null,
+    };
+  };
+
+  const ref = normalizeRef(opts.orderRef);
+  if (ref) {
+    const hit = pick(units.filter(u => normalizeRef(u.customer_order_ref) === ref), 'order');
+    if (hit) return hit;
+  }
+
+  if (caseName) {
+    const hit = pick(units.filter(u => normalizeName(u.customer_name) === caseName), 'unit_name');
+    if (hit) return hit;
+  }
+
+  const customerId = (opts.customerId ?? '').trim();
+  if (customerId) {
+    const hit = pick(units.filter(u => u.customer_id === customerId), 'customer');
+    if (hit) return hit;
+  }
+
+  return NO_UNIT;
+}
+
+/** Record a resolved serial on the return, so the case stops guessing and every
+ *  downstream report reads the same answer. Operator-confirmed only — nothing
+ *  calls this automatically. */
+export async function confirmCaseUnitSerial(returnId: string, serial: string): Promise<void> {
+  const value = serial.trim();
+  if (!value) throw new Error('A serial is required to confirm the unit.');
+  const { error } = await supabase
+    .from('returns')
+    .update({ unit_serial: value })
+    .eq('id', returnId);
+  if (error) throw error;
+  await logAction('return_unit_confirmed', returnId, value,
+    { entityType: 'return', entityId: returnId, unitSerial: value });
+}
+
 async function hasField(id: string, field: string): Promise<boolean> {
   const { data } = await supabase.from('returns').select(field).eq('id', id).single();
   return !!(data as Record<string, unknown> | null)?.[field];

@@ -739,6 +739,39 @@
   font-style: italic;
 }
 
+/* The machine a refund case is about. Sits in the contact block so the case's
+   identifying facts read as one group. A serial recorded on the case looks like
+   any other fact; an inferred one is set apart, because an operator approving a
+   refund has to be able to tell a fact from a guess at a glance. */
+.caseUnitStatus {
+  margin-left: 8px;
+  font-weight: 500;
+  color: var(--color-ink-subtle);
+}
+.caseUnitGuess {
+  color: var(--color-ink-subtle);
+  font-style: italic;
+  word-break: break-word;
+}
+.caseUnitConfirm {
+  margin-left: 8px;
+  padding: 1px 8px;
+  font: inherit;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 600;
+  color: var(--color-ink);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  cursor: pointer;
+}
+.caseUnitConfirm:hover:not(:disabled) {
+  color: var(--color-crimson);
+  border-color: var(--color-crimson);
+}
+.caseUnitConfirm:disabled { opacity: 0.55; cursor: default; }
+
 .refundDetailClose {
   background: transparent;
   border: none;
