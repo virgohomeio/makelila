@@ -3,7 +3,7 @@ import type { CustomerMetrics } from './profitability';
 import {
   BATCH_ORDER, byBatch, byBatchRegion, byBatchChronology, scaleMetrics,
   batchRegionGaps, batchCountryReach, confoundedBatches, batchRegionExtremes,
-  attributionCoverage, type UnitBatchLink,
+  attributionCoverage, modelledCostBatches, type UnitBatchLink,
 } from './batchProfitability';
 
 /** A customer with round numbers, so allocation arithmetic is readable. */
@@ -303,5 +303,51 @@ describe('attributionCoverage', () => {
       link({ serial: '2', batch: 'P150', customerId: null }),
     ]);
     expect(attributionCoverage(rows)).toEqual({ shipped: 2, attributed: 1, unattributed: 1 });
+  });
+});
+
+describe('COGS basis', () => {
+  const basis = (m: Record<string, { actual: number; modelled: number }>) =>
+    (id: string) => m[id];
+
+  it('sums the basis counts of every customer behind a batch', () => {
+    const rows = byBatch(
+      asMap([metrics({ id: 'c1' }), metrics({ id: 'c2' })]),
+      [
+        link({ serial: '1', batch: 'P100', customerId: 'c1' }),
+        link({ serial: '2', batch: 'P100', customerId: 'c2' }),
+      ],
+      basis({ c1: { actual: 3, modelled: 1 }, c2: { actual: 1, modelled: 0 } }),
+    );
+    expect(rows[0].cogsBasis).toEqual({ actual: 4, modelled: 1 });
+    expect(rows[0].cogsModelledPct).toBeCloseTo(0.2);
+  });
+
+  it('reports a fully modelled batch as 100% modelled', () => {
+    const rows = byBatch(
+      asMap([metrics({ id: 'c1' })]),
+      [link({ serial: '1', batch: 'P150', customerId: 'c1' })],
+      basis({ c1: { actual: 0, modelled: 2 } }),
+    );
+    expect(rows[0].cogsModelledPct).toBe(1);
+    expect(modelledCostBatches(rows).map(r => r.key)).toEqual(['P150']);
+  });
+
+  it('leaves the basis unknown rather than guessing when no lookup is given', () => {
+    const rows = byBatch(asMap([metrics({ id: 'c1' })]), [
+      link({ serial: '1', batch: 'P100', customerId: 'c1' }),
+    ]);
+    expect(rows[0].cogsModelledPct).toBeNull();
+    // An unknown basis must not be flagged as modelled.
+    expect(modelledCostBatches(rows)).toEqual([]);
+  });
+
+  it('does not flag a batch that is mostly invoiced', () => {
+    const rows = byBatch(
+      asMap([metrics({ id: 'c1' })]),
+      [link({ serial: '1', batch: 'P100', customerId: 'c1' })],
+      basis({ c1: { actual: 7, modelled: 3 } }),
+    );
+    expect(modelledCostBatches(rows)).toEqual([]);
   });
 });

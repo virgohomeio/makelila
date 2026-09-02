@@ -80,6 +80,12 @@ export type BatchCoverage = {
   unattributed: number;
 };
 
+/** How a batch's COGS was arrived at. `schedule` is a modelled placeholder —
+ *  for the pre-P100 batches it is a flat legacy figure that does not track the
+ *  batch's invoiced landed cost, so a margin built on it is not a verdict on
+ *  the hardware. */
+export type CogsBasisCount = { actual: number; modelled: number };
+
 export type BatchMetrics = SegmentMetrics & {
   /** The eleven cost buckets, summed over the batch. `SegmentMetrics` carries
    *  only the warranty and service totals, but a batch comparison lives or
@@ -92,6 +98,10 @@ export type BatchMetrics = SegmentMetrics & {
   /** First and last ship date — the batch's selling era. */
   firstShipped: string | null;
   lastShipped: string | null;
+  /** Sale orders behind this batch's COGS, split by how the cost was derived. */
+  cogsBasis: CogsBasisCount;
+  /** Share of those orders on the modelled schedule, or null when unknown. */
+  cogsModelledPct: number | null;
 };
 
 // ── Allocation ──────────────────────────────────────────────────────────────
@@ -154,6 +164,7 @@ function partition(
   coverage: Map<string, BatchCoverage>;
   mixed: Map<string, number>;
   era: Map<string, { first: string | null; last: string | null }>;
+  customerIds: Map<string, string[]>;
 } {
   // How many shipped units each customer owns, across all batches — the
   // denominator of the equal split.
@@ -210,15 +221,48 @@ function partition(
     mixed.set(batch, mixedCount);
   }
 
-  return { byBatchKey, coverage, mixed, era };
+  const customerIds = new Map<string, string[]>();
+  for (const [batch, inner] of perBatchCustomer) customerIds.set(batch, Array.from(inner.keys()));
+
+  return { byBatchKey, coverage, mixed, era, customerIds };
+}
+
+/** Sum the COGS basis counts of every customer behind a batch. */
+function cogsBasisFor(
+  ids: string[] | undefined,
+  basisOf?: (customerId: string) => CogsBasisCount | undefined,
+): { cogsBasis: CogsBasisCount; cogsModelledPct: number | null } {
+  const cogsBasis: CogsBasisCount = { actual: 0, modelled: 0 };
+  if (!ids || !basisOf) return { cogsBasis, cogsModelledPct: null };
+  for (const id of ids) {
+    const b = basisOf(id);
+    if (!b) continue;
+    cogsBasis.actual += b.actual;
+    cogsBasis.modelled += b.modelled;
+  }
+  const total = cogsBasis.actual + cogsBasis.modelled;
+  return { cogsBasis, cogsModelledPct: total > 0 ? cogsBasis.modelled / total : null };
+}
+
+/** Batches whose cost is mostly or entirely a modelled placeholder rather than
+ *  an invoice. Their margin ranking is an artifact of the cost schedule as much
+ *  as of the batch, and the UI has to say so. */
+export function modelledCostBatches(
+  rows: BatchMetrics[],
+  threshold = 0.9,
+): BatchMetrics[] {
+  return rows.filter(r => r.cogsModelledPct != null && r.cogsModelledPct >= threshold);
 }
 
 /** Roll every batch up into one comparable row, oldest batch first. */
 export function byBatch(
   metrics: Map<string, CustomerMetrics>,
   links: UnitBatchLink[],
+  /** Per-customer COGS basis counts, from `customer_profitability`. Optional so
+   *  the calc still works for callers that have no basis data. */
+  basisOf?: (customerId: string) => CogsBasisCount | undefined,
 ): BatchMetrics[] {
-  const { byBatchKey, coverage, mixed, era } = partition(metrics, links);
+  const { byBatchKey, coverage, mixed, era, customerIds } = partition(metrics, links);
 
   // Iterate coverage, not byBatchKey: a batch whose units are *all*
   // unattributed has no metrics to roll up, but it still shipped and still
@@ -231,6 +275,7 @@ export function byBatch(
       ...rollup(arr, batch, BATCH_LABELS[batch] ?? batch),
       costs: aggregateCosts(arr),
       coverage: coverage.get(batch) ?? { shipped: 0, attributed: 0, unattributed: 0 },
+      ...cogsBasisFor(customerIds.get(batch), basisOf),
       mixedBatchCustomers: mixed.get(batch) ?? 0,
       firstShipped: e.first,
       lastShipped: e.last,

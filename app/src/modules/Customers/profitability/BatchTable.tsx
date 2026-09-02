@@ -39,6 +39,7 @@ export function BatchTable({
             <th className={styles.num}>Customers</th>
             <th className={styles.num}>Revenue</th>
             <th className={styles.num}>COGS / unit</th>
+            <th className={styles.num}>COGS basis</th>
             <th className={styles.num}>Freight / unit</th>
             <th className={styles.num}>Warranty</th>
             <th className={styles.num}>Contribution</th>
@@ -77,6 +78,22 @@ export function BatchTable({
               </td>
               <td className={styles.num}>{money(b.revenue)}</td>
               <td className={styles.num}>{money(perUnit(b.costs.cogs, b.units))}</td>
+              <td className={styles.num}>
+                {b.cogsModelledPct == null ? (
+                  <span className={styles.unpriced}>unknown</span>
+                ) : b.cogsModelledPct >= 0.9 ? (
+                  <span
+                    className={styles.cogsModelled}
+                    title="Cost is a modelled schedule figure, not the factory invoice — for the pre-P100 batches that schedule is a flat legacy number that does not track this batch's landed cost. Treat the margin as indicative only."
+                  >modelled</span>
+                ) : b.cogsModelledPct > 0 ? (
+                  <span title={`${Math.round((1 - b.cogsModelledPct) * 100)}% of orders costed from the factory invoice`}>
+                    {Math.round((1 - b.cogsModelledPct) * 100)}% invoiced
+                  </span>
+                ) : (
+                  <span title="Every order costed from the factory invoice">invoiced</span>
+                )}
+              </td>
               <td className={styles.num}>{money(perUnit(b.costs.shipping, b.units))}</td>
               <td className={styles.num}>{money(b.warrantyCost)}</td>
               <td className={`${styles.num} ${b.contributionMargin < 0 ? styles.negative : ''}`}>

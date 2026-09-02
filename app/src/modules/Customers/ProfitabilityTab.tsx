@@ -14,7 +14,7 @@ import {
 } from '../../lib/profitability';
 import {
   byBatch, byBatchRegion, batchCountryReach, confoundedBatches,
-  batchRegionExtremes, attributionCoverage,
+  batchRegionExtremes, attributionCoverage, modelledCostBatches,
   type BatchMetrics,
 } from '../../lib/batchProfitability';
 import { regionName } from '../../lib/regions';
@@ -163,9 +163,21 @@ export function ProfitabilityTab() {
     return m;
   }, [rows, allMetrics]);
 
+  // How each customer's COGS was derived — invoiced vs modelled schedule. The
+  // pre-P100 batches are costed entirely from a flat legacy schedule figure
+  // that does not track their landed cost, so the batch table has to say which
+  // of its numbers rest on an invoice.
+  const cogsBasisOf = useMemo(() => {
+    const m = new Map<string, { actual: number; modelled: number }>();
+    for (const r of rows) {
+      m.set(r.id, { actual: r.cogs_actual_count ?? 0, modelled: r.cogs_modelled_count ?? 0 });
+    }
+    return (id: string) => m.get(id);
+  }, [rows]);
+
   const batches = useMemo(
-    () => byBatch(batchMetricsInput, unitLinks),
-    [batchMetricsInput, unitLinks],
+    () => byBatch(batchMetricsInput, unitLinks, cogsBasisOf),
+    [batchMetricsInput, unitLinks, cogsBasisOf],
   );
   const batchRegions = useMemo(
     () => byBatchRegion(batchMetricsInput, unitLinks),
@@ -725,6 +737,7 @@ function BatchesView({
   const worst = ranked.length > 1 ? ranked[ranked.length - 1] : null;
   const coverage = attributionCoverage(shipped);
 
+  const modelled = modelledCostBatches(shipped);
   const focus = selected ? shipped.find(b => b.key === selected) ?? null : null;
   const extremes = focus ? batchRegionExtremes(matrix, focus.key) : null;
 
@@ -773,6 +786,19 @@ function BatchesView({
           without also comparing freight, duty and tax — so read the ranking below as
           "how this production run performed in the market it was sold into", not as a
           verdict on the hardware.
+        </div>
+      )}
+
+      {modelled.length > 0 && (
+        <div className={styles.batchWarning}>
+          <strong>Cost is modelled, not invoiced, for{' '}
+          {modelled.map(b => b.label).join(', ')}.</strong>{' '}
+          Every sale order behind {modelled.length === 1 ? 'this batch' : 'these batches'} is
+          costed from the <em>schedule</em> basis — a flat legacy figure that does not track
+          what the factory actually invoiced for the run. Restating them at their invoiced
+          landed cost moves the ranking materially and, for at least one batch, changes its
+          sign. Until those orders are re-costed, read these rows as indicative and trust the
+          invoiced batches for comparison.
         </div>
       )}
 
