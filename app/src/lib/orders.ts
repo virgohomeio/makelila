@@ -336,17 +336,15 @@ function applyChange(cache: Order[], payload: { eventType: string; new: Order | 
   return cache;
 }
 
+/** Every bucket here is sales-only (kind='sale'). Replacements are not shown in
+ *  Order Review at all — see the note in bucketOrders. */
 export type OrderBuckets = {
-  /** Every order still live in Order Review — excludes fulfilled and cancelled. */
+  /** Every sale still live in Order Review — excludes fulfilled and cancelled. */
   all: Order[];
   pending: Order[];
   held: Order[];
   flagged: Order[];
   approved: Order[];
-  /** All kind='replacement' orders in the active set. Surfaced in
-   *  Order Review's "Replacement" tab so they don't dilute the
-   *  Pending/Held/Flagged/Confirmed sales tabs. */
-  replacement: Order[];
   /** Terminal: cancelled from Sales or from the fulfillment queue. Out of every
    *  live tab, but kept in its own so the team can still find the order and the
    *  reason it died. Newest cancellation first. */
@@ -360,15 +358,33 @@ export function bucketOrders(
   cache: Order[],
   fulfilledOrderIds: Set<string>,
   shippedCustomers: Set<string>,
-  /** Service tickets in status 'closed'. A replacement order whose ticket is
-   *  closed has been dealt with, so it leaves the Replacement tab. Optional so
-   *  existing callers (and tests) keep their previous behaviour. */
-  closedTicketIds: Set<string> = new Set(),
 ): OrderBuckets {
+  // Sales carries sales, and that is the first thing decided here — every
+  // bucket below is downstream of it.
+  //
+  // Replacements are created already-approved and go straight into the
+  // fulfillment queue (createReplacementOrder), so there is nothing for an
+  // operator to decide about one in Order Review. They used to have their own
+  // tab in this sidebar, and it was a trap: the tab filtered on
+  // replacement_state while Confirm wrote status, so confirming a replacement
+  // moved nothing on screen and the row sat there looking unconfirmed. R-0067
+  // was approved four times in twenty seconds before anyone noticed the first
+  // click had worked. Their home is now Fulfillment > Queue (ready to ship)
+  // and Fulfillment > Replacements (awaiting stock), both fed by
+  // useReplacementOrders().
+  //
+  // This also retired the closed-ticket rule that used to live here (a
+  // replacement whose service ticket had closed left the Replacement tab,
+  // because shipped_at is only stamped on a ticket status no operator ever
+  // uses). It existed solely to keep that tab from filling with dead rows;
+  // with the tab gone it had nothing left to hide, and it took the
+  // closedTicketIds parameter with it.
+  const sales = cache.filter(o => o.kind !== 'replacement');
+
   // Cancelled is terminal and takes precedence over every other signal: a
   // cancelled order belongs in the Cancelled tab whether or not it was ever
   // queued, shipped or matched to a shipped unit.
-  const cancelled = cache
+  const cancelled = sales
     .filter(o => o.status === 'cancelled')
     .sort((a, b) => (b.cancelled_at ?? '').localeCompare(a.cancelled_at ?? ''));
 
@@ -376,45 +392,27 @@ export function bucketOrders(
   //   (a) fulfillment_queue row reached step 6 / has fulfilled_at, OR
   //   (b) customer has a shipped unit (catches legacy Excel-only shipments
   //       where the queue row was never created or advanced).
-  const active = cache.filter(o => {
+  const active = sales.filter(o => {
     if (o.status === 'cancelled') return false;
     if (fulfilledOrderIds.has(o.id)) return false;
-    // Never hide replacement orders by the shipped-customer name check —
-    // a returning customer's replacement must always be visible in Order Review.
-    //
-    // The check is a *name* match, so it also hides every new order from any
-    // customer who has ever received a unit — 112 of the 163 pending orders as
-    // of 2026-08-28, four of them placed that fortnight. An explicit 'open'
+    // (b) is a *name* match, so it also hides every new order from any customer
+    // who has ever received a unit — 112 of the 163 pending orders as of
+    // 2026-08-28, four of them placed that fortnight. An explicit 'open'
     // verdict from the reconcile screen (lib/reconcile.ts) is a human saying
     // "nothing shipped against this one", and beats the heuristic.
     if (
-      o.kind !== 'replacement'
-      && o.reconcile_outcome !== 'open'
+      o.reconcile_outcome !== 'open'
       && shippedCustomers.has(o.customer_name.toLowerCase().trim())
     ) return false;
-    // (c) the replacement's service ticket is closed. shipped_at is only ever
-    //     stamped by shipQueuedReplacementsForTicket(), which fires solely on
-    //     the 'replacement_sent' ticket status — a status no ticket has ever
-    //     used, because operators close the case directly instead. Without
-    //     this the order sits in the Replacement tab forever even though the
-    //     unit or part went out months ago. Scoped to replacements: a sale
-    //     order's ticket says nothing about whether the sale shipped.
-    if (o.kind === 'replacement' && o.linked_ticket_id && closedTicketIds.has(o.linked_ticket_id)) return false;
     return true;
   });
 
-  // Replacement orders get their own tab in the Sidebar so the
-  // Pending/Held/Flagged/Confirmed sales tabs don't include them.
-  // The Service module still has its dedicated Replacement view via
-  // useReplacementOrders().
-  const sales = active.filter(o => o.kind !== 'replacement');
   return {
-    all:         active,
-    pending:     sales.filter(o => o.status === 'pending'),
-    held:        sales.filter(o => o.status === 'held'),
-    flagged:     sales.filter(o => o.status === 'flagged'),
-    approved:    sales.filter(o => o.status === 'approved'),
-    replacement: active.filter(o => o.kind === 'replacement'),
+    all:      active,
+    pending:  active.filter(o => o.status === 'pending'),
+    held:     active.filter(o => o.status === 'held'),
+    flagged:  active.filter(o => o.status === 'flagged'),
+    approved: active.filter(o => o.status === 'approved'),
     cancelled,
   };
 }
@@ -427,16 +425,12 @@ export function useOrders(): OrderBuckets & { loading: boolean } {
   // fulfilled even if fulfillment_queue never advanced to step 6 (e.g.
   // orders shipped via the legacy Excel workflow before queue rows existed).
   const [shippedCustomers, setShippedCustomers] = useState<Set<string>>(new Set());
-  // Third fulfilment signal, for replacements only: the linked service ticket
-  // is closed. See the (c) branch in bucketOrders for why this is needed.
-  const [closedTicketIds, setClosedTicketIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let ordersChannel: RealtimeChannel | null = null;
     let queueChannel: RealtimeChannel | null = null;
     let unitsChannel: RealtimeChannel | null = null;
-    let ticketsChannel: RealtimeChannel | null = null;
     let cancelled = false;
 
     (async () => {
@@ -444,19 +438,14 @@ export function useOrders(): OrderBuckets & { loading: boolean } {
         { data: ordersData, error: ordersErr },
         { data: queueData, error: queueErr },
         { data: unitsData, error: unitsErr },
-        { data: ticketsData, error: ticketsErr },
       ] = await Promise.all([
         supabase.from('orders').select('*').order('created_at', { ascending: false }),
         supabase.from('fulfillment_queue').select('order_id, step, fulfilled_at'),
         supabase.from('units').select('customer_name, status').eq('status', 'shipped'),
-        supabase.from('service_tickets').select('id').eq('status', 'closed'),
       ]);
 
       if (cancelled) return;
       if (!ordersErr && ordersData) setCache(ordersData as Order[]);
-      if (!ticketsErr && ticketsData) {
-        setClosedTicketIds(new Set((ticketsData as { id: string }[]).map(t => t.id)));
-      }
       if (!queueErr && queueData) {
         setFulfilledOrderIds(new Set(
           (queueData as { order_id: string; step: number; fulfilled_at: string | null }[])
@@ -529,30 +518,6 @@ export function useOrders(): OrderBuckets & { loading: boolean } {
         )
         .subscribe();
 
-      // Closing a ticket has to drop its replacement out of the tab straight
-      // away — that click is the operator saying "this case is done", and it
-      // is the moment the drift used to start. Re-opening puts it back.
-      ticketsChannel = supabase
-        .channel('orders:service_tickets')
-        .on(
-          'postgres_changes',
-          { event: '*', schema: 'public', table: 'service_tickets' },
-          (payload) => {
-            const row = (payload.new ?? payload.old) as { id?: string; status?: string } | null;
-            if (!row?.id) return;
-            setClosedTicketIds(prev => {
-              const next = new Set(prev);
-              if (payload.eventType !== 'DELETE'
-                  && (payload.new as { status?: string } | null)?.status === 'closed') {
-                next.add(row.id!);
-              } else {
-                next.delete(row.id!);
-              }
-              return next;
-            });
-          },
-        )
-        .subscribe();
     })();
 
     return () => {
@@ -560,13 +525,12 @@ export function useOrders(): OrderBuckets & { loading: boolean } {
       if (ordersChannel) void ordersChannel.unsubscribe();
       if (queueChannel) void queueChannel.unsubscribe();
       if (unitsChannel) void unitsChannel.unsubscribe();
-      if (ticketsChannel) void ticketsChannel.unsubscribe();
     };
   }, []);
 
   return useMemo(
-    () => ({ ...bucketOrders(cache, fulfilledOrderIds, shippedCustomers, closedTicketIds), loading }),
-    [cache, fulfilledOrderIds, shippedCustomers, closedTicketIds, loading],
+    () => ({ ...bucketOrders(cache, fulfilledOrderIds, shippedCustomers), loading }),
+    [cache, fulfilledOrderIds, shippedCustomers, loading],
   );
 }
 
@@ -759,7 +723,11 @@ type CancellableReplacement = {
  *  decremented at creation, and the ticket back-link + queued marker. Shared by
  *  the two ways a replacement stops being live — deleted outright
  *  (releaseAndDeleteReplacement) or kept as a cancelled row (cancelOrder). */
-async function releaseReplacementHolds(order: CancellableReplacement, note: string): Promise<void> {
+async function releaseReplacementHolds(
+  order: CancellableReplacement,
+  note: string,
+  opts: { holdTicket?: boolean } = {},
+): Promise<void> {
   // Release reserved units (conditional → safe for every state; no-op when
   // nothing was reserved, e.g. an 'awaiting' order).
   const { error: uErr } = await supabase
@@ -793,6 +761,70 @@ async function releaseReplacementHolds(order: CancellableReplacement, note: stri
       p_ticket_id: order.linked_ticket_id, p_tag: 'queued_for_replacement',
     });
     if (tagErr) console.warn('Clearing queued_for_replacement tag failed (non-fatal):', tagErr.message);
+    if (opts.holdTicket) await holdTicketAfterCancel(order);
+  }
+}
+
+/** After an operator cancels a replacement: the case is not finished, but it is
+ *  no longer waiting on a box. Move the ticket off "Queued for Replacement" and
+ *  onto "On Hold" so it reads as needing a decision rather than a shipment.
+ *
+ *  Opt-in, and never on the ticket-close path. Closing a ticket auto-cancels its
+ *  awaiting replacements through this same helper, and flipping status there
+ *  would reopen the case the operator just closed.
+ *
+ *  Conditional on the ticket having no OTHER live replacement. A ticket can
+ *  carry more than one (ST-2026-0489 briefly had two lids, five seconds apart
+ *  from a double-submit) and holding it while a sibling is still queued would
+ *  say the customer is waiting on a decision when they are waiting on a box.
+ *
+ *  Best-effort throughout: the order is already cancelled and its stock already
+ *  released, so a ticket that fails to move is a smaller problem than throwing
+ *  here and leaving the caller unsure which half happened. */
+async function holdTicketAfterCancel(order: CancellableReplacement): Promise<void> {
+  if (!order.linked_ticket_id) return;
+  try {
+    const { data: ticket } = await supabase
+      .from('service_tickets')
+      .select('status, ticket_number, tags')
+      .eq('id', order.linked_ticket_id)
+      .maybeSingle();
+    if (!ticket) return;
+
+    const t = ticket as { status: string; ticket_number: string | null; tags: string[] | null };
+    if (t.status === 'closed') return;
+    // Only move a ticket that was actually waiting on this replacement —
+    // status or tag, the two places the marker can live.
+    const wasQueued = t.status === 'queued_for_replacement'
+      || (t.tags ?? []).includes('queued_for_replacement');
+    if (!wasQueued) return;
+
+    const { data: siblings } = await supabase
+      .from('orders')
+      .select('id')
+      .eq('kind', 'replacement')
+      .eq('linked_ticket_id', order.linked_ticket_id)
+      .neq('id', order.id)
+      .neq('status', 'cancelled')
+      .is('shipped_at', null)
+      .is('delivered_at', null);
+    if (siblings && siblings.length > 0) return;
+
+    const { error } = await supabase
+      .from('service_tickets')
+      .update({ status: 'on_hold' })
+      .eq('id', order.linked_ticket_id);
+    if (error) {
+      console.warn('Moving the ticket to on_hold failed (non-fatal):', error.message);
+      return;
+    }
+    await logAction(
+      'ticket_status_change',
+      t.ticket_number ?? order.linked_ticket_id,
+      `Queued for Replacement → On Hold · replacement ${order.order_ref} cancelled`,
+    );
+  } catch (e) {
+    console.warn('Moving the ticket to on_hold failed (non-fatal):', (e as Error).message);
   }
 }
 
@@ -1167,7 +1199,10 @@ export async function cancelOrder(orderId: string, reason: string): Promise<void
   if (order.status === 'cancelled') throw new Error('This order is already cancelled.');
 
   if (order.kind === 'replacement') {
-    await releaseReplacementHolds(order as CancellableReplacement, 'cancelled');
+    // holdTicket: this is the operator-facing cancel — from the fulfillment
+    // queue's Cancel Order, or from Sales' Cancelled view. The customer's case
+    // is still open, it just isn't waiting on a box any more.
+    await releaseReplacementHolds(order as CancellableReplacement, 'cancelled', { holdTicket: true });
   }
 
   const nowIso = new Date().toISOString();
@@ -1332,15 +1367,44 @@ const REPLACEMENT_ORDER_DEFAULTS = {
   sales_confirmed_fit: false,
 };
 
-/** Creates a replacement order (kind='replacement', status='pending'),
- *  back-links the ticket, decrements parts.on_hand, and reserves any units.
+/** Put an order into the fulfillment queue at step 1, due in 7 days — the same
+ *  SLA the auto_enqueue_on_approve trigger applies when a sale is confirmed.
+ *
+ *  A duplicate is success, not failure: fulfillment_queue.order_id is unique,
+ *  so a 23505 means the order is already queued (the trigger got there first,
+ *  or this is a retry after a partial failure). Anything else is real. */
+export async function enqueueForFulfillment(orderId: string): Promise<void> {
+  const due = new Date();
+  due.setDate(due.getDate() + 7);
+  const { error } = await supabase.from('fulfillment_queue').insert({
+    order_id: orderId,
+    due_date: due.toISOString().slice(0, 10),
+  });
+  if (error && error.code !== '23505') {
+    throw new Error(`Could not queue the order for fulfillment: ${error.message}`);
+  }
+}
+
+/** Creates a replacement order (kind='replacement', status='approved'),
+ *  back-links the ticket, decrements parts.on_hand, reserves any units, and
+ *  puts the order straight into the fulfillment queue.
  *  Returns the new order_ref + id.
  *
- *  Atomicity caveat: the four writes (order INSERT, ticket UPDATE, parts
- *  decrement, units reserve) are NOT transactional. Partial-failure
- *  recovery, by step:
+ *  Why 'approved' at birth: queueing a replacement on a service ticket IS the
+ *  authorisation. There was never a second, sales-side decision to make — the
+ *  customer already owns the machine, nobody is paying, and the address came
+ *  off the ticket. Landing these in Sales as 'pending' put them in a queue
+ *  whose Confirm button changed nothing an operator could see (the Replacement
+ *  tab filtered on replacement_state, never on status), so they accumulated:
+ *  40 pending replacements, 33 of them still waiting, some for months.
+ *
+ *  Atomicity caveat: the five writes (order INSERT, queue INSERT, ticket
+ *  UPDATE, parts decrement, units reserve) are NOT transactional.
+ *  Partial-failure recovery, by step:
  *    - INSERT fails: nothing to clean up.
- *    - INSERT ok, ticket UPDATE fails: the order exists but no back-link.
+ *    - INSERT ok, queue INSERT fails: the order exists, approved, but shows up
+ *      in no queue. Re-run `enqueueForFulfillment(orderId)` or delete the order.
+ *    - Queue ok, ticket UPDATE fails: the order exists but no back-link.
  *      Manually run `update service_tickets set replacement_order_id = ?
  *      where id = ?` or delete the order.
  *    - Ticket UPDATE ok, parts decrement fails partway: some on_hand
@@ -1365,7 +1429,7 @@ export async function createReplacementOrder(input: ReplacementOrderInput):
     .insert({
       order_ref,
       kind: 'replacement',
-      status: 'pending',
+      status: 'approved',
       replacement_state: 'ready',
       linked_ticket_id: input.ticket_id,
       cogs_usd,
@@ -1385,7 +1449,14 @@ export async function createReplacementOrder(input: ReplacementOrderInput):
     .single();
   if (insErr || !row) throw new Error(`Create order: ${insErr?.message ?? 'no row'}`);
 
-  // 2. Back-link the ticket and TAG it queued_for_replacement. The tag (not the
+  // 2. Queue it. The auto_enqueue_on_approve trigger fires `after update of
+  //    status`, so an INSERT that arrives already-approved slips past it —
+  //    which is why this is explicit rather than left to the database. Done
+  //    immediately after the insert: an approved replacement with no queue row
+  //    is visible in nothing, and that is the worst state to fail into.
+  await enqueueForFulfillment(row.id);
+
+  // 3. Back-link the ticket and TAG it queued_for_replacement. The tag (not the
   //    status) carries the marker, so whatever workflow state the operator set
   //    survives — and they can layer other tags on top.
   const { error: tErr } = await supabase
@@ -1399,7 +1470,7 @@ export async function createReplacementOrder(input: ReplacementOrderInput):
   });
   if (tagErr) throw new Error(`Tag ticket: ${tagErr.message}`);
 
-  // 3. Decrement parts.on_hand atomically per line item. The RPC takes a
+  // 4. Decrement parts.on_hand atomically per line item. The RPC takes a
   //    transaction-level lock on the parts row and floors at 0, so two
   //    concurrent replacement orders can't lose a decrement (see migration
   //    20260604220000_decrement_part_on_hand.sql).
@@ -1412,7 +1483,7 @@ export async function createReplacementOrder(input: ReplacementOrderInput):
     if (pErr) throw new Error(`Decrement part ${li.part_id}: ${pErr.message}`);
   }
 
-  // 4. Reserve units and bases — quarantine excluded: do not pick quarantined units.
+  // 5. Reserve units and bases — quarantine excluded: do not pick quarantined units.
   for (const li of input.line_items) {
     if (li.kind !== 'unit' && li.kind !== 'base') continue;
     const { data: unitRow } = await supabase

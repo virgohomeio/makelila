@@ -7,7 +7,7 @@
 // Pure — no supabase import, unit-testable without env.
 import type { Order } from '../../lib/orders';
 import type { ServiceTicket } from '../../lib/service';
-import { replacementQueueKinds, isUnitTag } from '../../lib/replacementTags';
+import { replacementQueueKinds, isUnitTag, isLiveReplacement } from '../../lib/replacementTags';
 
 /** True when the ticket is waiting on a replacement — either as its workflow
  *  status or as one of its multi-select status tags. */
@@ -29,6 +29,10 @@ export function replacementQueueKindsByTicket(
   const byOrderId = new Map<string, Order>();
   const byTicketId = new Map<string, Order>();
   for (const o of orders) {
+    // A cancelled replacement is not something the customer is queued for.
+    // Cancelling used to delete the row, so this list only ever held live
+    // orders; cancelling from the fulfillment queue keeps the row instead.
+    if (!isLiveReplacement(o)) continue;
     byOrderId.set(o.id, o);
     if (o.linked_ticket_id) byTicketId.set(o.linked_ticket_id, o);
   }

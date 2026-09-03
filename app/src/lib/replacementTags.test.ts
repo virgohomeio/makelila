@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { replacementItemTags, replacementStageTag, replacementDemandBySku, replacementUnitDemandByBatch, isUnitTag, replacementQueueKinds, queuedForReplacementLabel } from './replacementTags';
+import { replacementItemTags, replacementStageTag, replacementDemandBySku, replacementUnitDemandByBatch, isUnitTag, replacementQueueKinds, queuedForReplacementLabel, isLiveReplacement, replacementItemsLabel } from './replacementTags';
 
-const order = (line_items: unknown[], extra: Partial<{ awaiting_batch_id: string | null; replacement_state: string | null; shipped_at: string | null; delivered_at: string | null }> = {}) =>
-  ({ line_items, awaiting_batch_id: null, replacement_state: 'ready', ...extra }) as never;
+const order = (line_items: unknown[], extra: Partial<{ awaiting_batch_id: string | null; replacement_state: string | null; shipped_at: string | null; delivered_at: string | null; status: string }> = {}) =>
+  ({ line_items, awaiting_batch_id: null, replacement_state: 'ready', status: 'approved', ...extra }) as never;
 
 describe('replacementItemTags', () => {
   it('maps structured part SKUs to the vocabulary', () => {
@@ -158,5 +158,64 @@ describe('LILA-Mini upcoming batch', () => {
       order([{ kind: 'unit_pending', batch: 'LILA-Mini' }], { shipped_at: '2026-06-01' }), // shipped → skip
     ]);
     expect(m.get('LILA-Mini')).toBe(2);
+  });
+});
+
+// Cancelling a replacement used to DELETE the row, so "the row exists" was a
+// good enough liveness test and none of these helpers looked at status. The
+// fulfillment queue's Cancel Order keeps the row and marks it cancelled
+// instead, which broke that assumption in four places at once: Stock > Parts
+// demand, Build's per-batch demand, Finance's projection, and the Replacement
+// tab's open count all kept counting orders nobody was waiting on.
+describe('cancelled replacements are not demand', () => {
+  it('isLiveReplacement excludes cancelled, shipped and delivered', () => {
+    expect(isLiveReplacement(order([]))).toBe(true);
+    expect(isLiveReplacement(order([], { status: 'cancelled' }))).toBe(false);
+    expect(isLiveReplacement(order([], { shipped_at: '2026-08-01T00:00:00Z' }))).toBe(false);
+    expect(isLiveReplacement(order([], { delivered_at: '2026-08-04T00:00:00Z' }))).toBe(false);
+  });
+
+  it('drops a cancelled order out of per-SKU part demand', () => {
+    const live = order([{ kind: 'part', sku: 'LILA-LID-V36' }]);
+    const dead = order([{ kind: 'part', sku: 'LILA-LID-V36' }], { status: 'cancelled' });
+    expect(replacementDemandBySku([live, dead]).get('LILA-LID-V36')).toBe(1);
+  });
+
+  it('drops a cancelled order out of per-batch unit demand', () => {
+    const live = order([{ kind: 'unit', batch: 'P100X' }]);
+    const dead = order([{ kind: 'unit', batch: 'P100X' }], { status: 'cancelled' });
+    expect(replacementUnitDemandByBatch([live, dead]).get('P100X')).toBe(1);
+  });
+});
+
+// The fulfillment queue card used to read "Jeff Mottle — LILA Pro" for a $24
+// lid, because "LILA Pro" was hardcoded for every order in the queue. This is
+// the sentence that replaced it, shared with Fulfillment > Replacements so the
+// two surfaces name the same box the same way.
+describe('replacementItemsLabel', () => {
+  it('names the part rather than counting it', () => {
+    expect(replacementItemsLabel([
+      { kind: 'part', sku: 'LILA-LID-V36', name: 'Replacement Top Lid (v3.6)', qty: 1 },
+    ] as never)).toBe('Replacement Top Lid (v3.6)');
+  });
+
+  it('counts units and appends named parts', () => {
+    expect(replacementItemsLabel([
+      { kind: 'unit', batch: 'P100' },
+      { kind: 'part', description: 'Hopper', qty: 1 },
+    ] as never)).toBe('1 unit + Hopper');
+  });
+
+  it('falls back to a part count when nothing is named', () => {
+    expect(replacementItemsLabel([{ kind: 'part', qty: 3 }] as never)).toBe('3 parts');
+  });
+
+  it('marks a unit whose batch has not landed as pending', () => {
+    expect(replacementItemsLabel([{ kind: 'unit_pending', batch: 'P100X' }] as never))
+      .toBe('1 unit (pending)');
+  });
+
+  it('gives an em dash rather than an empty card for an empty order', () => {
+    expect(replacementItemsLabel([] as never)).toBe('—');
   });
 });

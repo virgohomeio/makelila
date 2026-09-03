@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import { QueueSidebar } from '../queue/QueueSidebar';
+import { QueueSidebar, type QueueOrderSummary } from '../queue/QueueSidebar';
 import type { FulfillmentQueueRow } from '../../../lib/fulfillment';
 
 function mkRow(partial: Partial<FulfillmentQueueRow> & { id: string; order_id: string }): FulfillmentQueueRow {
@@ -28,9 +28,9 @@ describe('QueueSidebar', () => {
   const row2 = mkRow({ id: 'q2', order_id: 'o2', step: 3, due_date: '2099-01-01' });
   const shippedRow = mkRow({ id: 'q3', order_id: 'o2', step: 6, fulfilled_at: '2026-06-01T00:00:00Z' });
 
-  const orders = new Map([
-    ['o1', { order_ref: '#1001', customer_name: 'Alice', city: 'Portland', country: 'US' as const }],
-    ['o2', { order_ref: '#1002', customer_name: 'Bob',   city: 'Toronto',  country: 'CA' as const }],
+  const orders = new Map<string, QueueOrderSummary>([
+    ['o1', { order_ref: '#1001', customer_name: 'Alice', city: 'Portland', country: 'US' }],
+    ['o2', { order_ref: '#1002', customer_name: 'Bob',   city: 'Toronto',  country: 'CA' }],
   ]);
 
   it('renders ready rows with customer name and step badge', () => {
@@ -80,5 +80,44 @@ describe('QueueSidebar', () => {
     fireEvent.click(screen.getByRole('button', { name: /^shipped 1/i }));
     expect(screen.getByText('Bob')).toBeInTheDocument();
     expect(screen.getByText('6/6')).toBeInTheDocument();
+  });
+
+  // Replacements arrive in this queue now (Sales no longer has a tab for
+  // them), and a replacement is either a whole machine or a $24 lid. A badge
+  // that only says "Replacement" makes the operator open every row to find out
+  // which, so it carries the item.
+  describe('replacement rows', () => {
+    const replRow = mkRow({ id: 'q5', order_id: 'o3', step: 1 });
+    const withRepl = (extra: Partial<QueueOrderSummary>) => new Map<string, QueueOrderSummary>([
+      ...orders,
+      ['o3', {
+        order_ref: 'R-0067', customer_name: 'Jeff Mottle', city: 'Calgary',
+        country: 'CA', kind: 'replacement', ...extra,
+      }],
+    ]);
+
+    it('names the part being replaced', () => {
+      render(<MemoryRouter><QueueSidebar readyRows={[replRow]} shippedRows={[]} orderLookup={withRepl({ line_items: [
+        { kind: 'part', part_id: 'P-LID-V36', sku: 'LILA-LID-V36', name: 'Replacement Top Lid (v3.6)', qty: 1, cost_per_unit_usd: 24 },
+      ] })} selectedId={null} onSelect={vi.fn()} /></MemoryRouter>);
+      expect(screen.getByText('Replacement · lid')).toBeInTheDocument();
+    });
+
+    it('names the batch when a whole unit is going out', () => {
+      render(<MemoryRouter><QueueSidebar readyRows={[replRow]} shippedRows={[]} orderLookup={withRepl({ line_items: [
+        { kind: 'unit', unit_serial: 'LL01-284', batch: 'P100X', name: 'LILA Pro (P100X)', qty: 1, cost_usd: 312 },
+      ] })} selectedId={null} onSelect={vi.fn()} /></MemoryRouter>);
+      expect(screen.getByText('Replacement · P100X')).toBeInTheDocument();
+    });
+
+    it('falls back to a bare badge rather than inventing an item', () => {
+      render(<MemoryRouter><QueueSidebar readyRows={[replRow]} shippedRows={[]} orderLookup={withRepl({ line_items: [] })} selectedId={null} onSelect={vi.fn()} /></MemoryRouter>);
+      expect(screen.getByText('Replacement')).toBeInTheDocument();
+    });
+
+    it('leaves a sale row unbadged', () => {
+      render(<MemoryRouter><QueueSidebar readyRows={[row1]} shippedRows={[]} orderLookup={orders} selectedId={null} onSelect={vi.fn()} /></MemoryRouter>);
+      expect(screen.queryByText(/^Replacement/)).not.toBeInTheDocument();
+    });
   });
 });

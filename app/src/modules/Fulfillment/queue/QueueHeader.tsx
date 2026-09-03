@@ -3,7 +3,8 @@ import {
   setQueuePriority, goBackStep, cancelOrderFromQueue, returnQueueRowToOrders,
   type FulfillmentQueueRow,
 } from '../../../lib/fulfillment';
-import { orderDue } from '../../../lib/orders';
+import { orderDue, type Order } from '../../../lib/orders';
+import { replacementItemsLabel } from '../../../lib/replacementTags';
 import { useAuth } from '../../../lib/auth';
 import styles from '../Fulfillment.module.css';
 
@@ -18,7 +19,13 @@ export function QueueHeader({
   onRemoved,
 }: {
   row: FulfillmentQueueRow;
-  order: { order_ref: string; customer_name: string; city: string; region_state: string | null; country: 'US'|'CA'; placed_at: string | null; created_at: string; kind?: 'sale' | 'replacement' };
+  order: {
+    order_ref: string; customer_name: string; city: string; region_state: string | null;
+    country: 'US'|'CA'; placed_at: string | null; created_at: string;
+    kind?: 'sale' | 'replacement';
+    line_items?: Order['line_items'];
+    linked_ticket_id?: string | null;
+  };
   /** Called once the row is gone from the queue, with a line to show in the
    *  now-empty detail pane (the row itself disappears via realtime). */
   onRemoved?: (message: string) => void;
@@ -107,7 +114,13 @@ export function QueueHeader({
         <div>
           <div className={styles.headerTitle}>
             {row.priority && !fulfilled && <span className={styles.priorityBadge} title="Priority — expedite">⭐</span>}
-            {order.customer_name} — LILA Pro
+            {/* A sale is always a machine, so "LILA Pro" was safe to hardcode
+                until replacements started arriving here. A replacement can be a
+                whole unit or a $24 lid — the card has to say which, or the
+                person packing it is reading a label that is simply wrong. */}
+            {order.customer_name} — {order.kind === 'replacement'
+              ? replacementItemsLabel(order.line_items ?? [])
+              : 'LILA Pro'}
             {/* A shipped replacement lives in the same SHIPPED list as a sale —
                 the badge is what keeps the two tellable apart on the card. */}
             {order.kind === 'replacement' && (
@@ -117,6 +130,11 @@ export function QueueHeader({
           <div className={styles.headerMeta}>
             {order.order_ref} · {order.city}{order.region_state ? `, ${order.region_state}` : ''} · {order.country}
             {row.due_date && <> · Due {new Date(row.due_date).toLocaleDateString('en-US')}</>}
+            {/* Why this box exists. Cancelling from here moves the ticket to
+                On Hold, so the operator should be one click from reading it. */}
+            {order.kind === 'replacement' && order.linked_ticket_id && (
+              <> · <a href="#/service">originating ticket</a></>
+            )}
           </div>
         </div>
         <div className={styles.headerRight}>

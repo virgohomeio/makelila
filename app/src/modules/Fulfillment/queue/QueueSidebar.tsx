@@ -1,9 +1,35 @@
 import { useState } from 'react';
 import type { FulfillmentQueueRow } from '../../../lib/fulfillment';
-import type { OrderStatus } from '../../../lib/orders';
+import type { Order, OrderStatus } from '../../../lib/orders';
+import { replacementItemTags } from '../../../lib/replacementTags';
 import { useNavigate } from 'react-router-dom';
 import { Button, EmptyState } from '../../../components/ui';
 import styles from '../Fulfillment.module.css';
+
+/** What the row needs to name a replacement. The queue is mostly sales, where
+ *  "LILA Pro" says everything; a replacement can be a whole machine or a $24
+ *  lid, and the two are picked, packed and shipped nothing alike. */
+export type QueueOrderSummary = {
+  order_ref: string;
+  customer_name: string;
+  city: string;
+  country: 'US' | 'CA';
+  status?: OrderStatus;
+  kind?: 'sale' | 'replacement';
+  line_items?: Order['line_items'];
+  awaiting_batch_id?: string | null;
+};
+
+/** "lid", "hopper", "P100X" — the same vocabulary Fulfillment > Replacements
+ *  uses, so the two surfaces name the same box the same way. Falls back to no
+ *  suffix rather than inventing one when the line items say nothing useful. */
+function replacementBadgeLabel(o: QueueOrderSummary): string {
+  const tags = replacementItemTags({
+    line_items: o.line_items ?? [],
+    awaiting_batch_id: o.awaiting_batch_id ?? null,
+  });
+  return tags.length > 0 ? `Replacement · ${tags.join(', ')}` : 'Replacement';
+}
 
 /** Parse a "YYYY-MM-DD" due-date as a LOCAL calendar date (not UTC midnight).
  *  Browsers parse `new Date("2026-04-20")` as UTC, which is off by a day in
@@ -47,7 +73,7 @@ export function QueueSidebar({
 }: {
   readyRows: FulfillmentQueueRow[];
   shippedRows: FulfillmentQueueRow[];
-  orderLookup: Map<string, { order_ref: string; customer_name: string; city: string; country: 'US'|'CA'; status?: OrderStatus; kind?: 'sale' | 'replacement' }>;
+  orderLookup: Map<string, QueueOrderSummary>;
   selectedId: string | null;
   onSelect: (id: string) => void;
 }) {
@@ -110,7 +136,11 @@ export function QueueSidebar({
             <div className={styles.rowName}>
               {r.priority && !fulfilled && <span className={styles.priorityBadge} title="Priority — expedite">⭐</span>}
               {o?.customer_name ?? r.order_id}
-              {o?.kind === 'replacement' && <span className="replBadge">Replacement</span>}
+              {o?.kind === 'replacement' && (
+                <span className="replBadge" title="Warranty / service replacement — not a sale">
+                  {replacementBadgeLabel(o)}
+                </span>
+              )}
               <span className={styles.stepBadge}>{r.step}/6</span>
             </div>
             <div className={styles.rowMeta}>

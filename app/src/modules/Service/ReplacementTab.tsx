@@ -1,10 +1,11 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useReplacementOrders, type Order } from '../../lib/orders';
-import { isReplacementLine } from '../../lib/orders';
+
 import {
   replacementItemTags, replacementStageTag, type StageTag,
   replacementUnitDemandByBatch, replacementDemandBySku,
+  replacementItemsLabel, isLiveReplacement,
 } from '../../lib/replacementTags';
 import { useBatches, useUnits, type Batch } from '../../lib/stock';
 import { useParts } from '../../lib/parts';
@@ -14,9 +15,13 @@ import { TicketPartyLabel } from './TicketPartyLabel';
 import { TicketDetailPanel } from './TicketDetailPanel';
 import styles from './Service.module.css';
 
-type Stage = 'pending' | 'approved' | 'fulfilling' | 'shipped' | 'delivered' | 'closed' | 'awaiting_batch';
+type Stage = 'pending' | 'approved' | 'fulfilling' | 'shipped' | 'delivered' | 'closed'
+  | 'awaiting_batch' | 'cancelled';
 
 function stageFor(o: Order): Stage {
+  // Cancelled outranks everything: a cancelled replacement is not awaiting a
+  // batch and not fulfilling, whatever its other columns still say.
+  if (o.status === 'cancelled') return 'cancelled';
   // Backlog #71 — batch-blocked orders surface as their own group so
   // operators can see at a glance which orders are stuck waiting on
   // inbound stock vs. actionable in the normal pipeline.
@@ -25,43 +30,6 @@ function stageFor(o: Order): Stage {
   if (o.shipped_at) return 'shipped';
   if (o.status === 'approved') return 'fulfilling';
   return o.status as Stage;
-}
-
-function summarize(line_items: Order['line_items']): string {
-  // Defensive: line_items can come from two paths:
-  //   1. The in-app #55 replacement workflow — full schema (qty, cost_*, sku).
-  //   2. The Excel backfill (migration 20260605080000) — looser shape:
-  //      `{kind:'part',description}` / `{kind:'unit',batch,unit_serial}` /
-  //      `{kind:'unit_pending',batch}` (serial not yet assigned).
-  // We count both shapes + surface descriptions for part rows so the
-  // table reads "1 unit + Hopper" instead of "1 unit + 1 part".
-  let parts = 0;
-  let units = 0;
-  let unitsPending = 0;
-  const partDescs: string[] = [];
-  for (const li of line_items) {
-    const k = (li as { kind?: string }).kind;
-    if (k === 'part') {
-      parts += isReplacementLine(li) ? li.qty : 1;
-      const desc = (li as { description?: string; name?: string }).description
-                ?? (li as { name?: string }).name;
-      if (desc) partDescs.push(desc);
-    } else if (k === 'unit') {
-      units += 1;
-    } else if (k === 'unit_pending') {
-      unitsPending += 1;
-    }
-  }
-  const segs: string[] = [];
-  if (units > 0)        segs.push(`${units} unit${units !== 1 ? 's' : ''}`);
-  if (unitsPending > 0) segs.push(`${unitsPending} unit${unitsPending !== 1 ? 's' : ''} (pending)`);
-  if (partDescs.length > 0) {
-    const joined = partDescs.join(', ');
-    segs.push(joined.length > 50 ? joined.slice(0, 47) + '…' : joined);
-  } else if (parts > 0) {
-    segs.push(`${parts} part${parts !== 1 ? 's' : ''}`);
-  }
-  return segs.join(' + ') || '—';
 }
 
 // Filter by the operator-facing item stage (spec 2026-06-08), not the pipeline
@@ -188,8 +156,11 @@ export default function ReplacementTab() {
 
   const now = Date.now();
   const monthAgo = now - 30 * 86400_000;
-  const open = orders.filter(o => !o.delivered_at).length;
-  const awaitingBatch = orders.filter(o => o.awaiting_batch_id && !o.shipped_at && !o.delivered_at).length;
+  // isLiveReplacement, not `!delivered_at`: cancelling from the fulfillment
+  // queue keeps the row (it used to delete it), so a cancelled replacement was
+  // counting as open and as batch demand forever.
+  const open = orders.filter(isLiveReplacement).length;
+  const awaitingBatch = orders.filter(o => o.awaiting_batch_id && isLiveReplacement(o)).length;
   const shipped30 = orders.filter(o => o.shipped_at && new Date(o.shipped_at).getTime() > monthAgo).length;
   const delivered30 = orders.filter(o => o.delivered_at && new Date(o.delivered_at).getTime() > monthAgo).length;
   const cogs30: number[] = orders
@@ -364,7 +335,7 @@ export default function ReplacementTab() {
                     <div className={styles.tagRow}>
                       {tags.length > 0
                         ? tags.map(t => <span key={t} className={styles.itemTag}>{t}</span>)
-                        : <span className={styles.muted}>{summarize(o.line_items)}</span>}
+                        : <span className={styles.muted}>{replacementItemsLabel(o.line_items)}</span>}
                     </div>
                   </td>
                   <td>

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { supabase } from '../../../lib/supabase';
 import { useFulfillmentQueue, type FulfillmentQueueRow } from '../../../lib/fulfillment';
-import type { OrderStatus } from '../../../lib/orders';
+import type { OrderStatus, Order as FullOrder } from '../../../lib/orders';
 import { QueueSidebar } from './QueueSidebar';
 import { QueueHeader } from './QueueHeader';
 import { StepAssign } from './StepAssign';
@@ -26,6 +26,12 @@ type Order = {
   status: OrderStatus;
   placed_at: string | null;
   created_at: string;
+  // Replacements only: what is actually in the box, and the case it came from.
+  // select('*') already returns these; they were simply never read here, which
+  // is why the card called a $24 lid a LILA Pro.
+  line_items: FullOrder['line_items'];
+  awaiting_batch_id: string | null;
+  linked_ticket_id: string | null;
 };
 
 export default function Queue() {

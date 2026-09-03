@@ -134,9 +134,11 @@ describe('createReplacementOrder', () => {
     const insert = vi.fn().mockReturnValue({ select });
     const ticketUpdate = vi.fn().mockResolvedValue({ error: null });
     const unitsUpdate = vi.fn().mockResolvedValue({ error: null });
+    const queueInsert = vi.fn().mockResolvedValue({ error: null });
 
     fromMock.mockImplementation(((table: string) => {
       if (table === 'orders') return { insert };
+      if (table === 'fulfillment_queue') return { insert: queueInsert };
       if (table === 'service_tickets') return { update: () => ({ eq: ticketUpdate }) };
       if (table === 'units') return {
         // createReplacementOrder now checks the unit isn't quarantined before reserving.
@@ -162,7 +164,9 @@ describe('createReplacementOrder', () => {
     expect(result.order_ref).toBe('R-0007');
     const insertArg = insert.mock.calls[0][0];
     expect(insertArg.kind).toBe('replacement');
-    expect(insertArg.status).toBe('pending');
+    // Born approved: queueing the replacement on the ticket IS the
+    // authorisation, so there is no second confirmation step in Sales.
+    expect(insertArg.status).toBe('approved');
     expect(insertArg.order_ref).toBe('R-0007');
     expect(insertArg.linked_ticket_id).toBe('t1');
     expect(insertArg.cogs_usd).toBeCloseTo(4.2 * 2 + 312, 2);
@@ -175,6 +179,13 @@ describe('createReplacementOrder', () => {
     });
     expect(rpcMock).toHaveBeenCalledWith('decrement_part_on_hand', { p_part_id: 'p1', p_qty: 2 });
     expect(unitsUpdate).toHaveBeenCalled();
+    // And it lands in the fulfillment queue itself. The auto_enqueue_on_approve
+    // trigger only fires `after update of status`, so an INSERT that arrives
+    // already-approved never reaches it — without this the order would be
+    // approved and visible in nothing.
+    expect(queueInsert).toHaveBeenCalledWith(
+      expect.objectContaining({ order_id: 'o1' }),
+    );
   });
 
   it('throws when line_items is empty', async () => {
@@ -473,14 +484,21 @@ describe('bucketOrders', () => {
     expect(b.cancelled.map(o => o.id)).toEqual(['new', 'old', 'blank']);
   });
 
-  it('keeps cancelled replacements in the cancelled tab, not the replacement tab', () => {
+  // Sales is sales-only. Replacements are born approved and live in the
+  // fulfillment queue; there is no tab here that should ever show one, and
+  // `all` and `cancelled` are the two that used to leak.
+  it('keeps replacements out of every bucket, whatever their status', () => {
     const b = bucketOrders(
-      [mk({ id: 'r1', status: 'pending',   kind: 'replacement' }),
-       mk({ id: 'r2', status: 'cancelled', kind: 'replacement' })],
+      [mk({ id: 'r-pending',   status: 'pending',   kind: 'replacement' }),
+       mk({ id: 'r-approved',  status: 'approved',  kind: 'replacement' }),
+       mk({ id: 'r-cancelled', status: 'cancelled', kind: 'replacement' }),
+       mk({ id: 's1',          status: 'pending',   kind: 'sale' })],
       none, none,
     );
-    expect(b.replacement.map(o => o.id)).toEqual(['r1']);
-    expect(b.cancelled.map(o => o.id)).toEqual(['r2']);
+    expect(b.all.map(o => o.id)).toEqual(['s1']);
+    expect(b.pending.map(o => o.id)).toEqual(['s1']);
+    expect(b.approved).toEqual([]);
+    expect(b.cancelled).toEqual([]);
   });
 
   it('still hides fulfilled and already-shipped orders from every tab', () => {
@@ -514,42 +532,14 @@ describe('bucketOrders', () => {
     expect(b.all).toEqual([]);
   });
 
-  // A replacement whose service ticket is closed has been dealt with — the
-  // operator resolved the case. It only lingered in the Replacement tab
-  // because nothing stamps orders.shipped_at unless the ticket goes through
-  // the 'replacement_sent' status, which in practice never happens: operators
-  // close the ticket directly. Treat a closed ticket as the fulfilment signal.
-  it('hides a replacement whose linked ticket is closed', () => {
-    const b = bucketOrders(
-      [mk({ id: 'done', status: 'pending', kind: 'replacement', linked_ticket_id: 't1' }),
-       mk({ id: 'live', status: 'pending', kind: 'replacement', linked_ticket_id: 't2' })],
-      none, none, new Set(['t1']),
-    );
-    expect(b.replacement.map(o => o.id)).toEqual(['live']);
-    expect(b.all.map(o => o.id)).toEqual(['live']);
-  });
-
-  it('does not hide a SALE order just because its ticket is closed', () => {
+  // The closed-ticket rule that used to live in bucketOrders is gone with the
+  // Replacement tab it served. A sale was never subject to it and still isn't:
+  // a sale order's linked ticket says nothing about whether the sale shipped.
+  it('does not hide a SALE order just because it has a linked ticket', () => {
     const b = bucketOrders(
       [mk({ id: 's1', status: 'pending', kind: 'sale', linked_ticket_id: 't1' })],
-      none, none, new Set(['t1']),
-    );
-    expect(b.pending.map(o => o.id)).toEqual(['s1']);
-  });
-
-  it('keeps replacements with no linked ticket visible', () => {
-    const b = bucketOrders(
-      [mk({ id: 'r1', status: 'pending', kind: 'replacement', linked_ticket_id: null })],
-      none, none, new Set(['t1']),
-    );
-    expect(b.replacement.map(o => o.id)).toEqual(['r1']);
-  });
-
-  it('defaults to hiding nothing when no closed-ticket set is passed', () => {
-    const b = bucketOrders(
-      [mk({ id: 'r1', status: 'pending', kind: 'replacement', linked_ticket_id: 't1' })],
       none, none,
     );
-    expect(b.replacement.map(o => o.id)).toEqual(['r1']);
+    expect(b.pending.map(o => o.id)).toEqual(['s1']);
   });
 });

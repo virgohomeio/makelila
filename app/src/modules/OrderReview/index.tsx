@@ -21,7 +21,10 @@ export default function OrderReview() {
   const { orderId } = useParams<{ orderId: string }>();
   const navigate = useNavigate();
   const isMobile = useIsMobile();
-  const { all, pending, held, flagged, approved, replacement, cancelled, loading } = useOrders();
+  const { all, pending, held, flagged, approved, cancelled, loading } = useOrders();
+  // Every bucket here is sales-only. Replacements are created already-approved
+  // and live in Fulfillment; Sales never shows one, including by URL.
+  //
   // Cancelled orders sit outside `all` (they are out of the live queue), but
   // the Cancelled tab still has to be able to open one.
   const selected = orderId
@@ -164,7 +167,6 @@ export default function OrderReview() {
             held={held}
             flagged={flagged}
             approved={approved}
-            replacement={replacement}
             cancelled={cancelled}
             selectedId={null}
             onSelect={(id) => navigate(`/order-review/${id}`)}
@@ -184,7 +186,6 @@ export default function OrderReview() {
           held={held}
           flagged={flagged}
           approved={approved}
-          replacement={replacement}
           cancelled={cancelled}
           selectedId={orderId ?? null}
           onSelect={(id) => navigate(`/order-review/${id}`)}

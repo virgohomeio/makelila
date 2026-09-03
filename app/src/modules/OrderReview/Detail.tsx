@@ -10,7 +10,6 @@ import { NotesCard }    from './detail/NotesCard';
 import { PaymentCard } from './detail/PaymentCard';
 import { InvoicesCard } from './detail/InvoicesCard';
 import { ActionBar }    from './detail/ActionBar';
-import { ReplacementCancel } from './detail/ReplacementCancel';
 import { ConfirmBanner } from './detail/ConfirmBanner';
 import { ReadinessChecklist, canConfirm } from './detail/ReadinessChecklist';
 import styles from './OrderReview.module.css';
@@ -74,7 +73,6 @@ export function Detail({
           <span className={styles.detailWhere}>
             {order.city}
             {order.region_state ? `, ${order.region_state}` : ''} {order.country}
-            {order.kind === 'replacement' ? ' · Replacement order' : ''}
           </span>
           {showSla && (
             <span
@@ -102,24 +100,6 @@ export function Detail({
       {!isCancelled && <ReadinessChecklist order={order} />}
 
       <div className={styles.detailBody}>
-        {order.kind === 'replacement' && (
-          <div className={styles.replHeaderBanner}>
-            <strong>Replacement order</strong>
-            {order.linked_ticket_id && (
-              <>
-                &nbsp;·&nbsp;
-                <a href="#/service">originating ticket</a>
-              </>
-            )}
-            {order.cogs_usd != null && <>&nbsp;·&nbsp;COGS ${order.cogs_usd.toFixed(2)}</>}
-            <ReplacementCancel
-              order={order}
-              onCancelled={onAfterDisposition}
-              onError={(message) => setBanner({ variant: 'error', message: `Failed: ${message}` })}
-            />
-          </div>
-        )}
-
         {/* Eight equal cards in one flat column meant scrolling to find
             anything. They now group by the question they answer. */}
         <div className={styles.group}>

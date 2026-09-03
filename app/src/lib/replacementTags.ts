@@ -140,16 +140,35 @@ export function queuedForReplacementLabel(kind: string): string {
   return `Queued for ${kind} Replacement`;
 }
 
+/** What the demand rollups need off an order. `status` is in here on purpose:
+ *  a cancelled replacement is not demand, and leaving the field out of the type
+ *  is exactly how it went uncounted for so long — the helpers physically could
+ *  not see it. Widening the Pick makes every caller supply it. */
+export type ReplacementDemandRow =
+  Pick<Order, 'line_items' | 'awaiting_batch_id' | 'shipped_at' | 'delivered_at' | 'status'>;
+
+/** Still queued: not cancelled, not shipped, not delivered.
+ *
+ *  Cancelling used to DELETE the replacement row (releaseAndDeleteReplacement),
+ *  so "does this row exist" was a good enough liveness test and nothing checked
+ *  status. Cancelling from the fulfillment queue keeps the row and marks it
+ *  cancelled instead, which made that assumption wrong everywhere at once:
+ *  Stock > Parts demand, Build's per-batch demand, Finance's projection and the
+ *  Replacement tab's open count all kept counting orders nobody was waiting on. */
+export function isLiveReplacement(o: ReplacementDemandRow): boolean {
+  return o.status !== 'cancelled' && !o.shipped_at && !o.delivered_at;
+}
+
 /** Per-batch replacement demand for whole LILA units, queued across un-shipped
  *  replacement orders (Service > Replacement). Uses the same item-tag
  *  derivation the Replacement tab shows, keeping only the unit tags (P100,
  *  P100X, P150 …). Powers the Stock > LILA Units supply-vs-demand section. */
 export function replacementUnitDemandByBatch(
-  orders: Array<Pick<Order, 'line_items' | 'awaiting_batch_id' | 'shipped_at' | 'delivered_at'>>,
+  orders: Array<ReplacementDemandRow>,
 ): Map<string, number> {
   const m = new Map<string, number>();
   for (const o of orders) {
-    if (o.shipped_at || o.delivered_at) continue; // only still-queued
+    if (!isLiveReplacement(o)) continue; // only still-queued
     for (const tag of replacementItemTags(o)) {
       if (isUnitTag(tag)) m.set(tag, (m.get(tag) ?? 0) + 1);
     }
@@ -164,15 +183,56 @@ export function replacementUnitDemandByBatch(
  *  an order counts as 1 (replacement orders are qty-1-per-part in practice).
  *  Ambiguous tags (no L/R side) and unit tags don't map to a SKU → not counted. */
 export function replacementDemandBySku(
-  orders: Array<Pick<Order, 'line_items' | 'awaiting_batch_id' | 'shipped_at' | 'delivered_at'>>,
+  orders: Array<ReplacementDemandRow>,
 ): Map<string, number> {
   const m = new Map<string, number>();
   for (const o of orders) {
-    if (o.shipped_at || o.delivered_at) continue; // only still-queued
+    if (!isLiveReplacement(o)) continue; // only still-queued
     for (const tag of replacementItemTags(o)) {
       const sku = PART_SKU_BY_TAG[tag];
       if (sku) m.set(sku, (m.get(sku) ?? 0) + 1);
     }
   }
   return m;
+}
+
+/** What a replacement order actually contains, in operator words: "1 unit",
+ *  "Replacement Top Lid (v3.6)", "1 unit + Hopper". Lives here rather than in
+ *  the Replacement tab that used to own it because the fulfillment queue needs
+ *  the same sentence — a queue card that says "Jeff Mottle — LILA Pro" when the
+ *  box holds a lid is worse than saying nothing.
+ *
+ *  Defensive about shape: line_items arrive from two paths, the in-app #55
+ *  workflow (full schema with qty/sku/cost) and the Excel backfill (looser —
+ *  `{kind:'part',description}` / `{kind:'unit',batch,unit_serial}` /
+ *  `{kind:'unit_pending',batch}`). Part descriptions are surfaced verbatim so
+ *  the result reads "1 unit + Hopper" rather than "1 unit + 1 part". */
+export function replacementItemsLabel(line_items: Order['line_items']): string {
+  let parts = 0;
+  let units = 0;
+  let unitsPending = 0;
+  const partDescs: string[] = [];
+  for (const li of line_items ?? []) {
+    const raw = li as Record<string, unknown>;
+    const k = raw.kind as string | undefined;
+    if (k === 'part') {
+      parts += typeof raw.qty === 'number' ? raw.qty : 1;
+      const desc = (raw.description ?? raw.name) as string | undefined;
+      if (desc) partDescs.push(desc);
+    } else if (k === 'unit') {
+      units += 1;
+    } else if (k === 'unit_pending') {
+      unitsPending += 1;
+    }
+  }
+  const segs: string[] = [];
+  if (units > 0)        segs.push(`${units} unit${units !== 1 ? 's' : ''}`);
+  if (unitsPending > 0) segs.push(`${unitsPending} unit${unitsPending !== 1 ? 's' : ''} (pending)`);
+  if (partDescs.length > 0) {
+    const joined = partDescs.join(', ');
+    segs.push(joined.length > 50 ? joined.slice(0, 47) + '…' : joined);
+  } else if (parts > 0) {
+    segs.push(`${parts} part${parts !== 1 ? 's' : ''}`);
+  }
+  return segs.join(' + ') || '—';
 }

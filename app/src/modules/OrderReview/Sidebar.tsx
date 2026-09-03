@@ -4,10 +4,10 @@ import { OrderRow } from './OrderRow';
 import { EmptyState } from '../../components/ui';
 import styles from './OrderReview.module.css';
 
-type Tab = 'pending' | 'held' | 'flagged' | 'approved' | 'replacement' | 'all' | 'cancelled';
+type Tab = 'pending' | 'held' | 'flagged' | 'approved' | 'all' | 'cancelled';
 
 export function Sidebar({
-  pending, held, flagged, approved, replacement, all, cancelled,
+  pending, held, flagged, approved, all, cancelled,
   selectedId,
   onSelect,
 }: {
@@ -15,7 +15,6 @@ export function Sidebar({
   held: Order[];
   flagged: Order[];
   approved: Order[];
-  replacement: Order[];
   all: Order[];
   /** Terminal — cancelled here or from the fulfillment queue. Already sorted
    *  newest-cancelled first by bucketOrders. */
@@ -24,25 +23,12 @@ export function Sidebar({
   onSelect: (id: string) => void;
 }) {
   const [tab, setTab] = useState<Tab>('pending');
-  // Replacement sub-tab: ready-to-ship vs waiting on out-of-stock parts / a
-  // pending unit batch (spec 2026-06-08).
-  const [replSub, setReplSub] = useState<'ready' | 'awaiting'>('ready');
   const [query, setQuery] = useState('');
-
-  const replReady = useMemo(
-    () => replacement.filter(o => o.replacement_state !== 'awaiting'),
-    [replacement],
-  );
-  const replAwaiting = useMemo(
-    () => replacement.filter(o => o.replacement_state === 'awaiting'),
-    [replacement],
-  );
 
   const source = tab === 'pending'     ? pending
                : tab === 'held'        ? held
                : tab === 'flagged'     ? flagged
                : tab === 'approved'    ? approved
-               : tab === 'replacement' ? (replSub === 'awaiting' ? replAwaiting : replReady)
                : tab === 'cancelled'   ? cancelled
                : all;
 
@@ -66,7 +52,6 @@ export function Sidebar({
     { key: 'held',        label: 'Held',        count: held.length },
     { key: 'flagged',     label: 'Flagged',     count: flagged.length },
     { key: 'approved',    label: 'Confirmed',   count: approved.length },
-    { key: 'replacement', label: 'Replacement', count: replacement.length },
     { key: 'all',         label: 'All',         count: all.length },
     { key: 'cancelled',   label: 'Cancelled',   count: cancelled.length },
   ];
@@ -117,28 +102,6 @@ export function Sidebar({
           ))}
         </div>
 
-        {tab === 'replacement' && (
-          <div className={styles.tabBar} style={{ marginTop: 6 }}>
-            <button
-              type="button"
-              className={`${styles.tab} ${replSub === 'ready' ? styles.activeTab : ''}`}
-              onClick={() => setReplSub('ready')}
-              aria-pressed={replSub === 'ready'}
-              aria-label={`Ready to ship: ${replReady.length} order${replReady.length === 1 ? '' : 's'}`}
-            >
-              Ready to ship<span className={styles.tabCount}>{replReady.length}</span>
-            </button>
-            <button
-              type="button"
-              className={`${styles.tab} ${replSub === 'awaiting' ? styles.activeTab : ''}`}
-              onClick={() => setReplSub('awaiting')}
-              aria-pressed={replSub === 'awaiting'}
-              aria-label={`Awaiting stock: ${replAwaiting.length} order${replAwaiting.length === 1 ? '' : 's'}`}
-            >
-              Awaiting stock<span className={styles.tabCount}>{replAwaiting.length}</span>
-            </button>
-          </div>
-        )}
       </div>
 
       <div className={styles.railCount}>

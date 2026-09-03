@@ -82,7 +82,6 @@ describe('Sidebar', () => {
         held={[h1]}
         flagged={[f1]}
         approved={[]}
-        replacement={[]}
         cancelled={[c1]}
         selectedId={selectedId}
         onSelect={onSelect}
@@ -122,7 +121,7 @@ describe('Sidebar', () => {
   it('shows empty-state copy when the active tab has no rows', () => {
     render(
       <Sidebar
-        all={[]} pending={[]} held={[]} flagged={[]} approved={[]} replacement={[]} cancelled={[]}
+        all={[]} pending={[]} held={[]} flagged={[]} approved={[]} cancelled={[]}
         selectedId={null} onSelect={vi.fn()}
       />,
     );
@@ -153,7 +152,7 @@ describe('Sidebar', () => {
     });
     render(
       <Sidebar
-        all={[]} pending={[]} held={[]} flagged={[]} approved={[]} replacement={[]}
+        all={[]} pending={[]} held={[]} flagged={[]} approved={[]}
         cancelled={[newer, older]}
         selectedId={null} onSelect={vi.fn()}
       />,
