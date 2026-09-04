@@ -3,6 +3,7 @@ import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from './supabase';
 import { logAction } from './activityLog';
 import { DEFAULT_RATES, type ProfitabilityRates, type AcquisitionSpendRow } from './profitability';
+import { batchCensus, type UnitCensus } from './batchLandedCost';
 
 export type Customer = {
   id: string;
@@ -1880,6 +1881,13 @@ export type UnitBatchLinkRow = {
   basis: 'order_ref' | 'unit_fk' | 'none';
 };
 
+/** What the factory invoice says about a batch — the input landed cost is
+ *  normalised from. */
+export type BatchInvoiceFacts = {
+  unitCount: number;
+  unitCostUsd: number | null;
+};
+
 /** A batch with nothing shipped yet — P100X today. Held separately because it
  *  has no margin at all, and a zero would read as "broke even". */
 export type FutureBatchRow = {
@@ -1905,18 +1913,25 @@ export type FutureBatchRow = {
 export function useUnitBatchLinks(): {
   links: UnitBatchLinkRow[];
   futureBatches: FutureBatchRow[];
+  /** Every unit of every batch, bucketed by disposition — the denominator for
+   *  yield-adjusted cost. Covers all statuses, not just shipped. */
+  census: Map<string, UnitCensus>;
+  /** Invoice facts per batch, for landed-cost normalisation. */
+  batchFacts: Map<string, BatchInvoiceFacts>;
   loading: boolean;
   error: Error | null;
 } {
   const [links, setLinks] = useState<UnitBatchLinkRow[]>([]);
   const [futureBatches, setFutureBatches] = useState<FutureBatchRow[]>([]);
+  const [census, setCensus] = useState<Map<string, UnitCensus>>(new Map());
+  const [batchFacts, setBatchFacts] = useState<Map<string, BatchInvoiceFacts>>(new Map());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const [unitsRes, ordersRes, batchesRes] = await Promise.all([
+      const [unitsRes, ordersRes, batchesRes, censusRes] = await Promise.all([
         supabase
           .from('units')
           .select('serial, batch, customer_id, customer_order_ref, shipped_at, is_team_test')
@@ -1925,10 +1940,13 @@ export function useUnitBatchLinks(): {
         supabase
           .from('batches')
           .select('id, unit_count, unit_cost_usd, expected_arrival_date, arrived_at, manufacturer_short, destination'),
+        // Unfiltered: scrap, lost and rework are exactly the rows the shipped
+        // query above excludes, and they are what yield is made of.
+        supabase.from('units').select('batch, status'),
       ]);
       if (cancelled) return;
 
-      const err = unitsRes.error ?? ordersRes.error ?? batchesRes.error;
+      const err = unitsRes.error ?? ordersRes.error ?? batchesRes.error ?? censusRes.error;
       if (err) {
         setError(err as unknown as Error);
         setLoading(false);
@@ -1962,11 +1980,19 @@ export function useUnitBatchLinks(): {
 
       const shippedBatches = new Set(rows.map(r => r.batch));
       const future: FutureBatchRow[] = [];
+      const facts = new Map<string, BatchInvoiceFacts>();
       for (const b of (batchesRes.data ?? []) as Record<string, unknown>[]) {
         const id = String(b.id ?? '');
+        if (!id) continue;
+        // Facts are collected for every batch, shipped or not — landed cost
+        // has to be computed for the table rows as well as the future panel.
+        facts.set(id, {
+          unitCount: Number(b.unit_count ?? 0),
+          unitCostUsd: b.unit_cost_usd == null ? null : Number(b.unit_cost_usd),
+        });
         // Only batches that have shipped nothing — everything else is already
         // a row in the main table.
-        if (!id || shippedBatches.has(id)) continue;
+        if (shippedBatches.has(id)) continue;
         if (Number(b.unit_count ?? 0) <= 0) continue;
         future.push({
           id,
@@ -1981,10 +2007,14 @@ export function useUnitBatchLinks(): {
 
       setLinks(rows);
       setFutureBatches(future);
+      setBatchFacts(facts);
+      setCensus(batchCensus(
+        (censusRes.data ?? []) as { batch: string | null; status: string | null }[],
+      ));
       setLoading(false);
     })();
     return () => { cancelled = true; };
   }, []);
 
-  return { links, futureBatches, loading, error };
+  return { links, futureBatches, census, batchFacts, loading, error };
 }
