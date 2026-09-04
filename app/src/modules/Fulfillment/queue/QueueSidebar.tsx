@@ -3,6 +3,7 @@ import type { FulfillmentQueueRow } from '../../../lib/fulfillment';
 import type { Order, OrderStatus } from '../../../lib/orders';
 import { replacementItemTags } from '../../../lib/replacementTags';
 import { refundFlagLabel, refundFlagTitle, type RefundFlag } from '../../../lib/refundedOrders';
+import { shippedMarkLabel, shippedMarkTitle, type ShippedMark } from '../../../lib/shippedOrders';
 import { useNavigate } from 'react-router-dom';
 import { Button, EmptyState } from '../../../components/ui';
 import styles from '../Fulfillment.module.css';
@@ -72,6 +73,7 @@ export function QueueSidebar({
   selectedId,
   onSelect,
   refundFlags,
+  shippedMarks,
 }: {
   readyRows: FulfillmentQueueRow[];
   shippedRows: FulfillmentQueueRow[];
@@ -81,6 +83,9 @@ export function QueueSidebar({
   /** Orders with a refund against them, by order id. A queued order whose money
    *  has gone back must not be picked, and the picker works from this rail. */
   refundFlags?: Map<string, RefundFlag>;
+  /** Queue rows whose machine already went out, keyed by queue row id. These
+   *  sit under Shipped rather than Ready to ship, and say why. */
+  shippedMarks?: Map<string, ShippedMark>;
 }) {
   const [tab, setTab] = useState<'ready' | 'shipped'>('ready');
   const navigate = useNavigate();
@@ -120,7 +125,11 @@ export function QueueSidebar({
         )
       ) : rows.map(r => {
         const o = orderLookup.get(r.order_id);
-        const fulfilled = r.step === 6;
+        const shippedMark = shippedMarks?.get(r.id) ?? null;
+        // A row whose machine already went out reads as done even though its
+        // step never got there — otherwise it lands in Shipped still shouting
+        // "OVERDUE by 91d" about a box the customer has had since June.
+        const fulfilled = r.step === 6 || !!shippedMark;
         const overdue = !fulfilled && r.due_date && new Date(r.due_date) < new Date(new Date().setHours(0,0,0,0));
         const paused = !fulfilled && o?.status && o.status !== 'approved';
         const cls = [
@@ -152,6 +161,14 @@ export function QueueSidebar({
             <div className={styles.rowMeta}>
               {o?.order_ref ?? '—'} · {o?.city ?? ''} · {o?.country ?? ''}
             </div>
+            {shippedMark && (
+              <div
+                className={`${styles.refundBadge} ${styles.refundBadgeSoft}`}
+                title={shippedMarkTitle(shippedMark)}
+              >
+                {shippedMarkLabel()}
+              </div>
+            )}
             {refundFlag && (
               <div
                 className={`${styles.refundBadge} ${refundFlag.level === 'order' ? '' : styles.refundBadgeSoft}`}

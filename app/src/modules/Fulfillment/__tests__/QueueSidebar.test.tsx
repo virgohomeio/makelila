@@ -120,4 +120,46 @@ describe('QueueSidebar', () => {
       expect(screen.queryByText(/^Replacement/)).not.toBeInTheDocument();
     });
   });
+
+  // A row whose machine is already at the customer sits under Shipped. It
+  // still carries its half-walked step, so the row has to explain itself.
+  describe('already-shipped rows', () => {
+    const mark = {
+      basis: 'ref' as const,
+      serial: 'LL01-00000000252',
+      shippedAt: '2026-06-12',
+      deliveredAt: null,
+    };
+    // Step 1 and long overdue — exactly the shape of the six stuck sale orders.
+    const stuck = mkRow({ id: 'q9', order_id: 'o1', step: 1, due_date: '2026-06-12' });
+
+    it('badges the row and names the machine that went out', () => {
+      render(<MemoryRouter><QueueSidebar
+        readyRows={[]} shippedRows={[stuck]} orderLookup={orders}
+        shippedMarks={new Map([['q9', mark]])}
+        selectedId={null} onSelect={vi.fn()} /></MemoryRouter>);
+      fireEvent.click(screen.getByText(/^Shipped/));
+      expect(screen.getByText('ALREADY SHIPPED')).toBeInTheDocument();
+      expect(screen.getByTitle(/LL01-00000000252/)).toBeInTheDocument();
+    });
+
+    it('reads as fulfilled rather than months overdue', () => {
+      render(<MemoryRouter><QueueSidebar
+        readyRows={[]} shippedRows={[stuck]} orderLookup={orders}
+        shippedMarks={new Map([['q9', mark]])}
+        selectedId={null} onSelect={vi.fn()} /></MemoryRouter>);
+      fireEvent.click(screen.getByText(/^Shipped/));
+      expect(screen.getByText('✓ Fulfilled')).toBeInTheDocument();
+      expect(screen.queryByText(/OVERDUE/)).not.toBeInTheDocument();
+    });
+
+    it('leaves an unmarked row showing its real due state', () => {
+      render(<MemoryRouter><QueueSidebar
+        readyRows={[stuck]} shippedRows={[]} orderLookup={orders}
+        shippedMarks={new Map()}
+        selectedId={null} onSelect={vi.fn()} /></MemoryRouter>);
+      expect(screen.queryByText('ALREADY SHIPPED')).not.toBeInTheDocument();
+      expect(screen.getByText(/OVERDUE/)).toBeInTheDocument();
+    });
+  });
 });

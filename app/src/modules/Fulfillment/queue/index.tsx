@@ -13,6 +13,9 @@ import { StepEmail } from './StepEmail';
 import { StepFulfilled } from './StepFulfilled';
 import { EmptyState } from '../../../components/ui';
 import { indexRefundFlags, useRefundMarks } from '../../../lib/refundedOrders';
+import {
+  indexShippedQueueRows, shippedMarkTitle, useShippedEvidence, type ShippedMark,
+} from '../../../lib/shippedOrders';
 import styles from '../Fulfillment.module.css';
 
 type Order = {
@@ -38,6 +41,7 @@ type Order = {
 export default function Queue() {
   const { ready, fulfilled, loading } = useFulfillmentQueue();
   const { marks: refundMarks } = useRefundMarks();
+  const { evidence: shippedEvidence } = useShippedEvidence();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [orders, setOrders] = useState<Order[]>([]);
   // What happened to the row that just left the queue (cancelled / moved back).
@@ -51,6 +55,15 @@ export default function Queue() {
     return m;
   }, [orders]);
 
+  // Queue rows whose machine is already at the customer. The queue only closes
+  // a row out when someone walks it to step 6 by hand, so an order shipped any
+  // other way just sits in Ready to ship — six sale orders were doing exactly
+  // that on 2026-09-04, months after delivery. See lib/shippedOrders.ts.
+  const shippedMarks = useMemo(
+    () => indexShippedQueueRows(ready, orderLookup, shippedEvidence),
+    [ready, orderLookup, shippedEvidence],
+  );
+
   const { readyRows, shippedRows } = useMemo(() => {
     const byRef = (a: FulfillmentQueueRow, b: FulfillmentQueueRow) => {
       const refA = orderLookup.get(a.order_id)?.order_ref ?? '';
@@ -58,12 +71,20 @@ export default function Queue() {
       return refA.localeCompare(refB);
     };
     // Priority rows (sales-flagged expedites) float to the top of Ready.
-    const readySorted = [...ready].sort((a, b) => {
-      if (a.priority !== b.priority) return a.priority ? -1 : 1;
-      return byRef(a, b);
-    });
-    return { readyRows: readySorted, shippedRows: [...fulfilled].sort(byRef) };
-  }, [ready, fulfilled, orderLookup]);
+    const readySorted = [...ready]
+      .filter(r => !shippedMarks.has(r.id))
+      .sort((a, b) => {
+        if (a.priority !== b.priority) return a.priority ? -1 : 1;
+        return byRef(a, b);
+      });
+    // Moved, not hidden: the row still has an order behind it that someone has
+    // to close out, and Shipped is where they will go looking for it.
+    const alreadyShipped = ready.filter(r => shippedMarks.has(r.id));
+    return {
+      readyRows: readySorted,
+      shippedRows: [...fulfilled, ...alreadyShipped].sort(byRef),
+    };
+  }, [ready, fulfilled, orderLookup, shippedMarks]);
 
   const allRows = useMemo(() => [...readyRows, ...shippedRows], [readyRows, shippedRows]);
 
@@ -93,9 +114,11 @@ export default function Queue() {
 
   // Default-select first row on load. Skipped while a notice is showing so the
   // confirmation isn't blown away by an auto-select the operator didn't ask for.
+  // Selects from readyRows, not ready: opening on an already-shipped order
+  // would put the Assign step in front of the picker first thing.
   useEffect(() => {
-    if (!selectedId && !notice && ready.length > 0) setSelectedId(ready[0].id);
-  }, [ready, selectedId, notice]);
+    if (!selectedId && !notice && readyRows.length > 0) setSelectedId(readyRows[0].id);
+  }, [readyRows, selectedId, notice]);
 
   const selected = allRows.find(r => r.id === selectedId) ?? null;
   const selectedOrder = selected ? orderLookup.get(selected.order_id) : null;
@@ -107,6 +130,7 @@ export default function Queue() {
         shippedRows={shippedRows}
         orderLookup={orderLookup}
         refundFlags={refundFlags}
+        shippedMarks={shippedMarks}
         selectedId={selectedId}
         onSelect={id => { setNotice(null); setSelectedId(id); }}
       />
@@ -131,7 +155,14 @@ export default function Queue() {
               order={selectedOrder}
               onRemoved={message => { setNotice(message); setSelectedId(null); }}
             />
-            {selectedOrder.status !== 'approved' && selected.step < 6 ? (
+            {shippedMarks.has(selected.id) ? (
+              // Ahead of the pause banner: "we already sent this" outranks
+              // "fulfillment is paused" for anyone holding a second machine.
+              <AlreadyShippedBanner
+                mark={shippedMarks.get(selected.id)!}
+                orderId={selectedOrder.id}
+              />
+            ) : selectedOrder.status !== 'approved' && selected.step < 6 ? (
               <PauseBanner status={selectedOrder.status} orderId={selectedOrder.id} />
             ) : (
               <>
@@ -146,6 +177,38 @@ export default function Queue() {
           </>
         )}
       </section>
+    </div>
+  );
+}
+
+/** Replaces the step UI on a row whose machine has already gone out. The steps
+ *  it stands in for are Assign and Test — i.e. "pick a machine for this order"
+ *  — which is the one thing nobody should do here. */
+function AlreadyShippedBanner({ mark, orderId }: { mark: ShippedMark; orderId: string }) {
+  return (
+    <div style={{
+      border: '1.5px solid var(--color-warning-border)',
+      background: 'var(--color-warning-bg)',
+      borderRadius: 8, padding: '16px 18px',
+    }}>
+      <div style={{
+        fontSize: 14, fontWeight: 700, color: 'var(--color-warning)',
+        marginBottom: 8, letterSpacing: '0.3px',
+      }}>
+        ALREADY SHIPPED — DO NOT PACK
+      </div>
+      <div style={{ fontSize: 13, color: 'var(--color-ink-muted)', lineHeight: 1.55, marginBottom: 12 }}>
+        {shippedMarkTitle(mark)} This row was never walked to step 6, which is
+        why it stayed in the queue.
+      </div>
+      <Link
+        to={`/order-review/${orderId}`}
+        style={{
+          display: 'inline-block', background: '#fff', color: 'var(--color-crimson)',
+          border: '1.5px solid var(--color-crimson)', padding: '7px 16px',
+          borderRadius: 6, fontSize: 12, fontWeight: 600, textDecoration: 'none',
+        }}
+      >Open in Order Review →</Link>
     </div>
   );
 }
