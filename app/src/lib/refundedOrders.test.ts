@@ -106,6 +106,14 @@ describe('refundFlagForOrder', () => {
     expect(refundFlagForOrder(order(), [mark({ status: 'closed', refunded_at: null })])).toBeNull();
   });
 
+  it.each(['submitted', 'manager_review', 'finance_review', 'refund_queue', 'refunded'])(
+    'treats %s as bearing on shipping', (status) => {
+      // These five must stay in step with the status list fetchRefundMarks asks
+      // the server for — a status in one and not the other means the badge and
+      // the guard disagree.
+      expect(refundFlagForOrder(order(), [mark({ status, order_id: 'order-1' })])).not.toBeNull();
+    });
+
   it('is null when nothing matches', () => {
     expect(refundFlagForOrder(order(), [mark({ customer_email: 'someone@else.com' })])).toBeNull();
     expect(refundFlagForOrder(order(), [])).toBeNull();

@@ -54,11 +54,18 @@ export type RefundFlag = {
   amountUsd: number | null;
 };
 
-/** A refund card that is neither denied nor archived still bears on whether we
- *  should ship. 'denied' is an explicit decision NOT to refund, so it must not
- *  stand in the way of a shipment; 'closed' is history. */
+/** The refund statuses that bear on whether we should ship. 'denied' is an
+ *  explicit decision NOT to refund, so it must not stand in the way of a
+ *  shipment; 'closed' is history. Listed positively rather than as a
+ *  not-in filter: this list is what the server is asked for, and a filter the
+ *  server rejects would fail the whole query — which fails open, silently
+ *  turning the guard off. */
+const SHIPPING_RELEVANT_STATUSES = [
+  'submitted', 'manager_review', 'finance_review', 'refund_queue', 'refunded',
+];
+
 function bearsOnShipping(status: string): boolean {
-  return status !== 'denied' && status !== 'closed';
+  return SHIPPING_RELEVANT_STATUSES.includes(status);
 }
 
 /** Reduce a human order reference to something comparable. Shopify writes
@@ -157,7 +164,7 @@ export async function fetchRefundMarks(): Promise<RefundMark[]> {
   const { data, error } = await supabase
     .from('refund_approvals')
     .select(MARK_COLUMNS)
-    .not('status', 'in', '(denied,closed)');
+    .in('status', SHIPPING_RELEVANT_STATUSES);
   if (error) throw new Error(`Could not read refunds: ${error.message}`);
   return ((data ?? []) as MarkQueryRow[]).map(toMark);
 }
