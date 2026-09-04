@@ -1,5 +1,5 @@
-import { describe, it, expect, vi } from 'vitest';
-import { render as rtlRender, screen } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { render as rtlRender, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import type { ReactElement } from 'react';
 import ReplacementTab from '../ReplacementTab';
@@ -7,10 +7,29 @@ import ReplacementTab from '../ReplacementTab';
 // ReplacementTab deep-links to orders (useNavigate/Link), so renders need a Router.
 const render = (ui: ReactElement) => rtlRender(<MemoryRouter>{ui}</MemoryRouter>);
 
+// This tab is the only way a replacement raised before 0fb7f45 can reach the
+// fulfillment queue — Sales stopped listing kind='replacement', taking the last
+// button that could queue one with it.
+const { queueSpy, queueState } = vi.hoisted(() => ({
+  queueSpy: vi.fn(),
+  queueState: { rows: [] as Array<{ order_id: string; step: number }> },
+}));
+
+vi.mock('../../../lib/fulfillment', async () => {
+  const actual = await vi.importActual<typeof import('../../../lib/fulfillment')>('../../../lib/fulfillment');
+  return {
+    ...actual,
+    useFulfillmentQueue: () => ({
+      all: queueState.rows, ready: [], fulfilled: [], loading: false,
+    }),
+  };
+});
+
 vi.mock('../../../lib/orders', async () => {
   const actual = await vi.importActual<typeof import('../../../lib/orders')>('../../../lib/orders');
   return {
     ...actual,
+    queueReplacementForFulfillment: queueSpy,
     useReplacementOrders: () => ({
       orders: [
         { id: 'o1', order_ref: 'R-0001', kind: 'replacement', status: 'pending',
@@ -91,5 +110,71 @@ describe('ReplacementTab — purchaser vs primary user', () => {
     }];
     render(<ReplacementTab />);
     expect(screen.getAllByText(/Chad Wu/).length).toBeGreaterThan(0);
+  });
+});
+
+// Which replacements are actually in Fulfillment › Queue, and how one gets
+// there. Queue membership is read from fulfillment_queue rather than inferred
+// from orders.status — inferring it is what the deleted Sales tab did, filtering
+// on replacement_state while Confirm wrote status, and the two disagreeing is
+// why that tab had to go.
+describe('ReplacementTab — getting a replacement into the queue', () => {
+  beforeEach(() => {
+    ticketsToReturn = [];
+    customersToReturn = [];
+    queueState.rows = [];
+    queueSpy.mockReset();
+    queueSpy.mockResolvedValue({ queued: true });
+  });
+
+  it('offers "Send to queue" for a live replacement with no queue row', () => {
+    render(<ReplacementTab />);
+    expect(screen.getAllByRole('button', { name: 'Send to queue' })).toHaveLength(2);
+  });
+
+  it('shows the step instead of the button once the order is queued', () => {
+    queueState.rows = [{ order_id: 'o1', step: 3 }];
+    render(<ReplacementTab />);
+    expect(screen.getByText('In queue · step 3')).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'Send to queue' })).toHaveLength(1);
+  });
+
+  it('counts what is NOT in the queue — the number that went missing with the Sales tab', () => {
+    queueState.rows = [{ order_id: 'o1', step: 3 }];
+    render(<ReplacementTab />);
+    const kpi = screen.getByText('Not in queue').parentElement!;
+    expect(kpi.textContent).toContain('1');
+  });
+
+  it('queues the order the button belongs to', async () => {
+    render(<ReplacementTab />);
+    fireEvent.click(screen.getAllByRole('button', { name: 'Send to queue' })[0]);
+    await waitFor(() => expect(queueSpy).toHaveBeenCalledWith('o1'));
+  });
+
+  it('asks before queueing an order the stock check says is short', async () => {
+    queueSpy.mockResolvedValueOnce({ queued: false, blocked: 'Hinge' });
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    render(<ReplacementTab />);
+    fireEvent.click(screen.getAllByRole('button', { name: 'Send to queue' })[0]);
+
+    await waitFor(() => expect(queueSpy).toHaveBeenCalledTimes(2));
+    expect(confirm.mock.calls[0][0]).toContain('Hinge');
+    // Only the second call overrides — the first must never force silently.
+    expect(queueSpy).toHaveBeenNthCalledWith(2, 'o1', { force: true });
+    confirm.mockRestore();
+  });
+
+  it('leaves the order alone when the operator declines the override', async () => {
+    queueSpy.mockResolvedValueOnce({ queued: false, blocked: 'Hinge' });
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+
+    render(<ReplacementTab />);
+    fireEvent.click(screen.getAllByRole('button', { name: 'Send to queue' })[0]);
+
+    await waitFor(() => expect(confirm).toHaveBeenCalled());
+    expect(queueSpy).toHaveBeenCalledTimes(1);
+    confirm.mockRestore();
   });
 });

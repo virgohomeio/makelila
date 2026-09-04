@@ -1064,28 +1064,52 @@ export type ReviewLanding = {
  *                    it is reserved *for this order*)
  *    - *_pending   → never; pending is what "we don't have it" is called
  *  Any unsatisfied line ⇒ 'awaiting', and the first blocked unit's batch becomes
- *  awaiting_batch_id so Order Review groups it under that batch. */
+ *  awaiting_batch_id so Fulfillment › Replacements groups it under that batch.
+ *
+ *  `blocked` names each unsatisfied line in operator words, because every
+ *  caller has to tell someone why the order is not going anywhere. */
 export async function resolveReplacementStockState(
   order: { line_items: unknown },
-): Promise<{ replacement_state: 'ready' | 'awaiting'; awaiting_batch_id: string | null }> {
+): Promise<{
+  replacement_state: 'ready' | 'awaiting';
+  awaiting_batch_id: string | null;
+  blocked: string[];
+}> {
   const items = (order.line_items ?? []) as ReplacementLineItem[];
-  let ready = true;
   let blockedBatch: string | null = null;
+  const blocked: string[] = [];
+
+  /** What to call this line when telling an operator it is short. */
+  const label = (li: ReplacementLineItem): string => {
+    const raw = li as unknown as Record<string, unknown>;
+    for (const k of ['name', 'description', 'sku', 'batch'] as const) {
+      if (typeof raw[k] === 'string' && raw[k]) return raw[k] as string;
+    }
+    return 'an unnamed item';
+  };
+  const block = (li: ReplacementLineItem) => { blocked.push(label(li)); };
 
   for (const li of items) {
     switch (li.kind) {
       case 'unit_pending':
       case 'base_pending':
-        ready = false;
+        block(li);
         if (!blockedBatch) blockedBatch = li.batch ?? null;
         break;
       case 'part_pending':
-        ready = false;
+        block(li);
         break;
       case 'part': {
+        // The Excel backfill wrote free-text lines — { kind: 'part',
+        // description: 'both side latch' } — with no part_id. There is nothing
+        // to look up, and looking up nothing used to return on_hand 0, marking
+        // every legacy replacement short of stock it may well have had. An
+        // unidentifiable line is a line only a human can rule on, so let it
+        // pass rather than blocking on a lookup that was never going to work.
+        if (!li.part_id) break;
         const { data } = await supabase
           .from('parts').select('on_hand').eq('id', li.part_id).maybeSingle();
-        if ((data?.on_hand ?? 0) < (li.qty ?? 1)) ready = false;
+        if ((data?.on_hand ?? 0) < (li.qty ?? 1)) block(li);
         break;
       }
       case 'unit':
@@ -1093,7 +1117,7 @@ export async function resolveReplacementStockState(
         const { data } = await supabase
           .from('units').select('status').eq('serial', li.unit_serial).maybeSingle();
         if (data?.status !== 'ready' && data?.status !== 'reserved') {
-          ready = false;
+          block(li);
           if (!blockedBatch) blockedBatch = li.batch ?? null;
         }
         break;
@@ -1101,19 +1125,97 @@ export async function resolveReplacementStockState(
     }
   }
 
+  const ready = blocked.length === 0;
   return {
     replacement_state: ready ? 'ready' : 'awaiting',
     // Cleared when ready, otherwise a stale batch would keep grouping the order
     // under a batch it is no longer waiting on.
     awaiting_batch_id: ready ? null : blockedBatch,
+    blocked,
   };
 }
 
-/** Put an order back on the Order Review board after it was pulled out of the
- *  fulfillment queue ("Shipment Not Ready"). A sale returns to Pending — the
- *  tab every order starts in and the one an operator re-approves from. A
- *  replacement returns to the Replacement tab, into Ready or Awaiting Stock /
- *  Batch depending on the stock actually on hand right now.
+/** Put a replacement into the fulfillment queue.
+ *
+ *  createReplacementOrder() enqueues at birth, which covers every replacement
+ *  raised from now on and none of the 43 that already existed. Those were
+ *  reached through Sales › Replacement, and when that tab went (0fb7f45) the
+ *  only button that could queue one went with it. This is its replacement, and
+ *  it lives on Fulfillment › Replacements — the screen that already lists every
+ *  replacement, queued or not.
+ *
+ *  Stock is re-derived rather than read off replacement_state: these rows were
+ *  stamped 'ready' or 'awaiting' months ago against stock that has since moved.
+ *  A short order is reported back, not thrown — the operator is entitled to
+ *  queue it anyway (`force`) when they know something the parts table does not,
+ *  which is routinely true of the free-text rows the Excel import left behind.
+ *
+ *  Setting status to 'approved' is what the queue lists on. It also fires
+ *  auto_enqueue_on_approve, so the insert that follows may lose the race to the
+ *  trigger; enqueueForFulfillment treats that duplicate as success. */
+export type QueueReplacementResult =
+  | { queued: true }
+  | { queued: false; blocked: string };
+
+export async function queueReplacementForFulfillment(
+  orderId: string,
+  opts: { force?: boolean } = {},
+): Promise<QueueReplacementResult> {
+  const { data: order, error: oErr } = await supabase
+    .from('orders')
+    .select('id, order_ref, kind, status, shipped_at, delivered_at, line_items')
+    .eq('id', orderId)
+    .single();
+  if (oErr || !order) throw new Error(`Replacement not found: ${oErr?.message ?? 'no row'}`);
+  if (order.kind !== 'replacement') {
+    throw new Error('This is not a replacement order — sales reach the queue by being confirmed.');
+  }
+  if (order.status === 'cancelled') {
+    throw new Error('This replacement was cancelled. Raise a new one from the service ticket.');
+  }
+  if (order.shipped_at || order.delivered_at) {
+    throw new Error('This replacement has already shipped.');
+  }
+
+  const stock = await resolveReplacementStockState(order);
+  if (stock.replacement_state !== 'ready' && !opts.force) {
+    return { queued: false, blocked: stock.blocked.join(', ') };
+  }
+
+  const { error: uErr } = await supabase
+    .from('orders')
+    .update({
+      status: 'approved',
+      replacement_state: 'ready',
+      // It is in the queue now; nothing is grouping it under a batch any more.
+      awaiting_batch_id: null,
+    })
+    .eq('id', orderId);
+  if (uErr) throw new Error(`Could not approve the replacement: ${uErr.message}`);
+
+  await enqueueForFulfillment(orderId);
+  await logAction(
+    'replacement_queued',
+    order.order_ref,
+    opts.force && stock.blocked.length > 0
+      ? `queued for fulfillment · operator override, stock short: ${stock.blocked.join(', ')}`
+      : 'queued for fulfillment',
+  );
+  return { queued: true };
+}
+
+/** Take an order back out of the fulfillment queue ("Shipment Not Ready").
+ *
+ *  A sale returns to Order Review › Pending — the tab every order starts in and
+ *  the one an operator re-approves from.
+ *
+ *  A replacement returns to Fulfillment › Replacements. It used to be announced
+ *  as landing in Order Review › Replacement, which stopped being true when that
+ *  tab was removed in 0fb7f45: Sales filters out kind='replacement' entirely,
+ *  so the order left the queue, appeared in no sales tab, and the toast pointed
+ *  the operator at a screen that no longer existed. Replacements always had a
+ *  second home; the label simply never followed them to it. Requeue from there
+ *  with queueReplacementForFulfillment().
  *
  *  Status goes back to 'pending' in both cases: leaving it 'approved' would
  *  strand the order in Confirmed with no queue row, and re-approving it would
@@ -1139,8 +1241,8 @@ export async function returnOrderToReview(orderId: string): Promise<ReviewLandin
       status: 'pending',
       replacement_state: stock.replacement_state,
       label: stock.replacement_state === 'ready'
-        ? 'Order Review › Replacement › Ready'
-        : 'Order Review › Replacement › Awaiting Stock / Batch',
+        ? 'Fulfillment › Replacements › Ready'
+        : 'Fulfillment › Replacements › Awaiting Stock / Batch',
     };
   }
 

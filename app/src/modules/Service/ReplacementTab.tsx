@@ -1,6 +1,9 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useReplacementOrders, type Order } from '../../lib/orders';
+import {
+  useReplacementOrders, queueReplacementForFulfillment, type Order,
+} from '../../lib/orders';
+import { useFulfillmentQueue } from '../../lib/fulfillment';
 
 import {
   replacementItemTags, replacementStageTag, type StageTag,
@@ -56,6 +59,11 @@ const CLOSED_TICKET_STATUSES = new Set(['resolved', 'closed']);
 // ticket-triage section above the order table.
 export default function ReplacementTab() {
   const { orders, loading } = useReplacementOrders();
+  // Queue membership, read from the queue itself rather than inferred from
+  // orders.status. Inferring it is what the deleted Sales tab did — it filtered
+  // on replacement_state while Confirm wrote status, and the two disagreeing is
+  // the whole reason that tab had to go.
+  const { all: queueRows } = useFulfillmentQueue();
   const { batches } = useBatches();
   const { units } = useUnits();
   const { parts } = useParts();
@@ -108,6 +116,42 @@ export default function ReplacementTab() {
   }, [orders, units, parts]);
   const [filter, setFilter] = useState<'all' | StageTag>('all');
   const [openTicketId, setOpenTicketId] = useState<string | null>(null);
+  const [queueing, setQueueing] = useState<string | null>(null);
+
+  const queueStepByOrder = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const r of queueRows) m.set(r.order_id, r.step);
+    return m;
+  }, [queueRows]);
+
+  /** Hand a replacement to Fulfillment › Queue.
+   *
+   *  Replacements raised from today on are queued at birth, but the ones that
+   *  predate that change were not, and neither is one an operator pulled back
+   *  out with "Shipment Not Ready". This is the only way in for those.
+   *
+   *  A short stock check is a question, not a refusal: half these orders came
+   *  off the Excel import as free text ("both side latch") and the parts table
+   *  has nothing to match them against. The operator holding the box knows
+   *  better than the lookup does. */
+  async function handleQueue(o: Order) {
+    setQueueing(o.id);
+    try {
+      const first = await queueReplacementForFulfillment(o.id);
+      if (!first.queued) {
+        const ok = window.confirm(
+          `Stock for ${o.order_ref} looks short: ${first.blocked}.\n\n`
+          + 'Queue it for fulfillment anyway?',
+        );
+        if (!ok) return;
+        await queueReplacementForFulfillment(o.id, { force: true });
+      }
+    } catch (e) {
+      window.alert(`Could not queue ${o.order_ref}: ${(e as Error).message}`);
+    } finally {
+      setQueueing(null);
+    }
+  }
 
   const batchById = useMemo(() => {
     const m = new Map<string, Batch>();
@@ -161,6 +205,10 @@ export default function ReplacementTab() {
   // counting as open and as batch demand forever.
   const open = orders.filter(isLiveReplacement).length;
   const awaitingBatch = orders.filter(o => o.awaiting_batch_id && isLiveReplacement(o)).length;
+  // The number that went missing when Sales stopped carrying replacements: live
+  // orders with no fulfillment_queue row. Most are legitimately waiting on a
+  // batch; the rest are the ones nobody can see are stuck.
+  const notQueued = orders.filter(o => isLiveReplacement(o) && !queueStepByOrder.has(o.id)).length;
   const shipped30 = orders.filter(o => o.shipped_at && new Date(o.shipped_at).getTime() > monthAgo).length;
   const delivered30 = orders.filter(o => o.delivered_at && new Date(o.delivered_at).getTime() > monthAgo).length;
   const cogs30: number[] = orders
@@ -247,6 +295,10 @@ export default function ReplacementTab() {
         <div className={styles.kpiCard}><div className={styles.kpiLabel}>Open</div><div className={styles.kpiValue}>{open}</div></div>
         <div className={styles.kpiCard}><div className={styles.kpiLabel}>Triage candidates</div><div className={styles.kpiValue}>{triageCandidates.length}</div></div>
         <div className={styles.kpiCard}><div className={styles.kpiLabel}>Awaiting batch</div><div className={styles.kpiValue}>{awaitingBatch}</div></div>
+        <div className={styles.kpiCard} title="Live replacements with no row in Fulfillment › Queue — including those still waiting on a batch. Use “Send to queue” on a row to move one across.">
+          <div className={styles.kpiLabel}>Not in queue</div>
+          <div className={styles.kpiValue}>{notQueued}</div>
+        </div>
         <div className={styles.kpiCard}><div className={styles.kpiLabel}>Shipped (30d)</div><div className={styles.kpiValue}>{shipped30}</div></div>
         <div className={styles.kpiCard}><div className={styles.kpiLabel}>Delivered (30d)</div><div className={styles.kpiValue}>{delivered30}</div></div>
         <div className={styles.kpiCard}><div className={styles.kpiLabel}>Avg COGS (30d)</div><div className={styles.kpiValue}>{avgCogs == null ? '—' : `$${avgCogs.toFixed(2)}`}</div></div>
@@ -309,6 +361,7 @@ export default function ReplacementTab() {
             <tr>
               <th>Order #</th><th>Ticket</th><th>Customer</th><th>Items</th>
               <th>Tracking</th><th>COGS</th><th>Item Type</th><th>Days open</th>
+              <th>Fulfillment</th>
             </tr>
           </thead>
           <tbody>
@@ -318,6 +371,7 @@ export default function ReplacementTab() {
               const batch = o.awaiting_batch_id ? batchById.get(o.awaiting_batch_id) : null;
               const tags = replacementItemTags(o);
               const stageTag = replacementStageTag(o, tags, isPendingBatch);
+              const queueStep = queueStepByOrder.get(o.id);
               return (
                 <tr key={o.id} className={styles.row}>
                   <td><Link to={`/order-review/${o.id}`}>{o.order_ref}</Link></td>
@@ -352,6 +406,22 @@ export default function ReplacementTab() {
                       : <span className={styles.muted}>{stage}</span>}
                   </td>
                   <td>{daysOpen}</td>
+                  <td>
+                    {queueStep != null ? (
+                      <span className={styles.pill}>
+                        {queueStep === 6 ? 'Shipped' : `In queue · step ${queueStep}`}
+                      </span>
+                    ) : !isLiveReplacement(o) ? (
+                      <span className={styles.muted}>—</span>
+                    ) : (
+                      <button
+                        type="button"
+                        className={styles.btnSecondary}
+                        disabled={queueing === o.id}
+                        onClick={() => void handleQueue(o)}
+                      >{queueing === o.id ? 'Queueing…' : 'Send to queue'}</button>
+                    )}
+                  </td>
                 </tr>
               );
             })}

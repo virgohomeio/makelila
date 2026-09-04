@@ -179,7 +179,14 @@ describe('returnQueueRowToOrders', () => {
     expect(landing).toMatchObject({ status: 'pending', label: 'Order Review › Pending' });
   });
 
-  it('sends a replacement back to Replacement › Ready when its unit is still on the shelf', async () => {
+  // The landing for a replacement is Fulfillment › Replacements, not Sales.
+  // It read "Order Review › Replacement" until that tab was removed in
+  // 0fb7f45; after it went, an operator clicking "Shipment Not Ready" was sent
+  // to a screen that no longer existed, chasing an order Sales had stopped
+  // listing. The order was never lost — Fulfillment › Replacements lists every
+  // replacement — but nothing said so, and nothing there could put it back in
+  // the queue until queueReplacementForFulfillment().
+  it('sends a replacement back to Fulfillment › Replacements › Ready when its unit is still on the shelf', async () => {
     state.order = {
       ...state.order, kind: 'replacement', order_ref: 'R-0002',
       line_items: [{ kind: 'unit', unit_serial: '00019', batch: 'P150', qty: 1 }],
@@ -189,7 +196,7 @@ describe('returnQueueRowToOrders', () => {
     expect(patchFor('orders')).toMatchObject({
       status: 'pending', replacement_state: 'ready', awaiting_batch_id: null,
     });
-    expect(landing.label).toBe('Order Review › Replacement › Ready');
+    expect(landing.label).toBe('Fulfillment › Replacements › Ready');
   });
 
   it('sends a replacement to Awaiting Stock / Batch when its unit is gone, tagged with the batch', async () => {
@@ -206,7 +213,7 @@ describe('returnQueueRowToOrders', () => {
     expect(patchFor('orders')).toMatchObject({
       status: 'pending', replacement_state: 'awaiting', awaiting_batch_id: 'P100X',
     });
-    expect(landing.label).toBe('Order Review › Replacement › Awaiting Stock / Batch');
+    expect(landing.label).toBe('Fulfillment › Replacements › Awaiting Stock / Batch');
   });
 
   it('sends a replacement to Awaiting Stock / Batch when a part has run out', async () => {
@@ -218,7 +225,7 @@ describe('returnQueueRowToOrders', () => {
 
     const landing = await returnQueueRowToOrders('q-1');
     expect(patchFor('orders')).toMatchObject({ replacement_state: 'awaiting', awaiting_batch_id: null });
-    expect(landing.label).toBe('Order Review › Replacement › Awaiting Stock / Batch');
+    expect(landing.label).toBe('Fulfillment › Replacements › Awaiting Stock / Batch');
   });
 
   it('refuses an order that has already shipped', async () => {
