@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { FulfillmentQueueRow } from '../../../lib/fulfillment';
 import type { Order, OrderStatus } from '../../../lib/orders';
 import { replacementItemTags } from '../../../lib/replacementTags';
+import { refundFlagLabel, refundFlagTitle, type RefundFlag } from '../../../lib/refundedOrders';
 import { useNavigate } from 'react-router-dom';
 import { Button, EmptyState } from '../../../components/ui';
 import styles from '../Fulfillment.module.css';
@@ -70,12 +71,16 @@ export function QueueSidebar({
   orderLookup,
   selectedId,
   onSelect,
+  refundFlags,
 }: {
   readyRows: FulfillmentQueueRow[];
   shippedRows: FulfillmentQueueRow[];
   orderLookup: Map<string, QueueOrderSummary>;
   selectedId: string | null;
   onSelect: (id: string) => void;
+  /** Orders with a refund against them, by order id. A queued order whose money
+   *  has gone back must not be picked, and the picker works from this rail. */
+  refundFlags?: Map<string, RefundFlag>;
 }) {
   const [tab, setTab] = useState<'ready' | 'shipped'>('ready');
   const navigate = useNavigate();
@@ -128,6 +133,7 @@ export function QueueSidebar({
           r.priority && !fulfilled ? styles.priority : '',
           paused ? styles.paused : '',
         ].filter(Boolean).join(' ');
+        const refundFlag = refundFlags?.get(r.order_id) ?? null;
         const pauseBadge = paused
           ? (o?.status === 'flagged' ? '⚑ FLAGGED' : o?.status === 'held' ? '⏸ HELD' : '• PAUSED')
           : null;
@@ -146,6 +152,14 @@ export function QueueSidebar({
             <div className={styles.rowMeta}>
               {o?.order_ref ?? '—'} · {o?.city ?? ''} · {o?.country ?? ''}
             </div>
+            {refundFlag && (
+              <div
+                className={`${styles.refundBadge} ${refundFlag.level === 'order' ? '' : styles.refundBadgeSoft}`}
+                title={refundFlagTitle(refundFlag)}
+              >
+                {refundFlagLabel(refundFlag)}
+              </div>
+            )}
             {pauseBadge ? (
               <div className={styles.pauseBadge}>{pauseBadge}</div>
             ) : (

@@ -156,6 +156,26 @@
   color: var(--color-error-strong);
 }
 
+/* This order was refunded but is still sitting in the queue. Nothing should
+   ship against it — say so where the picker is looking. */
+.refundBadge {
+  display: inline-block;
+  margin-top: var(--space-1);
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: var(--font-size-meta);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  background: var(--color-error-bg);
+  color: var(--color-error);
+  border: 1px solid var(--color-error-border);
+}
+.refundBadgeSoft {
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
+  border-color: var(--color-warning-border);
+}
+
 .priorityBadge {
   display: inline-block;
   margin-right: var(--space-1);

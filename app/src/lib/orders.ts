@@ -4,6 +4,7 @@ import { supabase } from './supabase';
 import { logAction } from './activityLog';
 import { adjustPartStock } from './parts';
 import { functionErrorMessage } from './functionError';
+import { refundFlagForOrderId, refundFlagTitle } from './refundedOrders';
 
 // 'cancelled' is terminal: the order is dead, it has no fulfillment_queue row,
 // and it is filtered out of every Order Review tab (see useOrders). The row is
@@ -199,11 +200,44 @@ async function currentUserId(): Promise<string> {
   return data.user.id;
 }
 
+/** Refuse to move an order towards a shipment when the money for THAT order has
+ *  already gone back — or is on its way back.
+ *
+ *  Nothing used to stop this. refund_approvals.order_id is null on every live
+ *  row, so no surface in the app could tell that an order had been refunded:
+ *  Sales listed it like any other, and confirming it fires
+ *  auto_enqueue_approved_order, which puts it in the fulfillment queue. The
+ *  queue ships what it is handed.
+ *
+ *  Only an order-level flag blocks. A customer who was refunded on a DIFFERENT
+ *  order may perfectly well have bought again — that one gets a badge in Sales
+ *  and the queue, and the operator decides.
+ *
+ *  A lookup failure lets the action through. This guard exists to catch a rare
+ *  mistake; a flaky network must not be able to stop every shipment. */
+async function assertNotRefunded(orderId: string, action: string): Promise<void> {
+  let flag: Awaited<ReturnType<typeof refundFlagForOrderId>>;
+  try {
+    flag = await refundFlagForOrderId(orderId);
+  } catch (e) {
+    console.warn('refund check failed (non-fatal, proceeding):', (e as Error).message);
+    return;
+  }
+  if (!flag || flag.level !== 'order') return;
+  throw new Error(`${action}: ${refundFlagTitle(flag)}`);
+}
+
 export async function disposition(
   order: Pick<Order, 'id' | 'order_ref' | 'customer_name'>,
   status: Disposition,
   reason?: string,
 ): Promise<void> {
+  // Guard here as well as in enqueueForFulfillment: this UPDATE is what fires
+  // auto_enqueue_approved_order, so by the time a queue row exists it is too
+  // late. Flagging and holding stay open — those are how an operator parks a
+  // refunded order rather than shipping it.
+  if (status === 'approved') await assertNotRefunded(order.id, 'Cannot confirm this order');
+
   const userId = await currentUserId();
 
   const { error } = await supabase
@@ -1476,6 +1510,7 @@ const REPLACEMENT_ORDER_DEFAULTS = {
  *  so a 23505 means the order is already queued (the trigger got there first,
  *  or this is a retry after a partial failure). Anything else is real. */
 export async function enqueueForFulfillment(orderId: string): Promise<void> {
+  await assertNotRefunded(orderId, 'Cannot queue this order for fulfillment');
   const due = new Date();
   due.setDate(due.getDate() + 7);
   const { error } = await supabase.from('fulfillment_queue').insert({

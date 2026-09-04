@@ -12,6 +12,7 @@ import { StepDock } from './StepDock';
 import { StepEmail } from './StepEmail';
 import { StepFulfilled } from './StepFulfilled';
 import { EmptyState } from '../../../components/ui';
+import { indexRefundFlags, useRefundMarks } from '../../../lib/refundedOrders';
 import styles from '../Fulfillment.module.css';
 
 type Order = {
@@ -36,6 +37,7 @@ type Order = {
 
 export default function Queue() {
   const { ready, fulfilled, loading } = useFulfillmentQueue();
+  const { marks: refundMarks } = useRefundMarks();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [orders, setOrders] = useState<Order[]>([]);
   // What happened to the row that just left the queue (cancelled / moved back).
@@ -64,6 +66,14 @@ export default function Queue() {
   }, [ready, fulfilled, orderLookup]);
 
   const allRows = useMemo(() => [...readyRows, ...shippedRows], [readyRows, shippedRows]);
+
+  // A queued order whose money has already gone back should never be picked.
+  // Shipped rows are history and are left unbadged — the box is gone, and that
+  // is the returns team's problem, not the picker's.
+  const refundFlags = useMemo(
+    () => indexRefundFlags(readyRows.flatMap(r => orderLookup.get(r.order_id) ?? []), refundMarks),
+    [readyRows, orderLookup, refundMarks],
+  );
 
   // Fetch orders referenced by the queue rows (one-shot; orders rarely change once approved)
   useEffect(() => {
@@ -96,6 +106,7 @@ export default function Queue() {
         readyRows={readyRows}
         shippedRows={shippedRows}
         orderLookup={orderLookup}
+        refundFlags={refundFlags}
         selectedId={selectedId}
         onSelect={id => { setNotice(null); setSelectedId(id); }}
       />

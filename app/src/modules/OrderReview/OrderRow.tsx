@@ -1,6 +1,7 @@
 import type { CSSProperties } from 'react';
 import type { Order } from '../../lib/orders';
 import { orderUrgency, AREA_TYPE_TAG } from '../../lib/orders';
+import { refundFlagLabel, refundFlagTitle, type RefundFlag } from '../../lib/refundedOrders';
 import { useQuotes } from '../../lib/freight';
 import { canConfirm } from './detail/ReadinessChecklist';
 import styles from './OrderReview.module.css';
@@ -22,12 +23,18 @@ export function OrderRow({
   isSelected,
   onClick,
   revealIndex = 0,
+  refundFlag = null,
 }: {
   order: Order;
   isSelected: boolean;
   onClick: () => void;
   /** Position in the load stagger. See --i in OrderReview.module.css. */
   revealIndex?: number;
+  /** Set when this order — or another order of this customer — has been
+   *  refunded. Confirming a refunded order queues a machine for someone we
+   *  have already paid back, and until this badge existed the row gave the
+   *  operator no way to know. */
+  refundFlag?: RefundFlag | null;
 }) {
   const cls = [
     styles.row,
@@ -66,6 +73,7 @@ export function OrderRow({
     order.city,
     isCancelled ? 'cancelled' : urgency.label || null,
     showBlockDot ? 'not yet confirmable' : null,
+    refundFlag ? refundFlagLabel(refundFlag).toLowerCase() : null,
   ].filter(Boolean).join(', ');
 
   return (
@@ -102,6 +110,14 @@ export function OrderRow({
       </span>
 
       <span className={styles.rowTags}>
+        {refundFlag && (
+          <span
+            className={`${styles.tag} ${refundFlag.level === 'order' ? styles.tagRefunded : styles.tagRefundedCustomer}`}
+            title={refundFlagTitle(refundFlag)}
+          >
+            {refundFlagLabel(refundFlag)}
+          </span>
+        )}
         {order.kind === 'replacement' && (
           <span className={`${styles.tag} ${styles.tagCa}`}>Repl</span>
         )}

@@ -634,6 +634,35 @@ async function deleteQueueRow(queueId: string): Promise<void> {
   }
 }
 
+/** Take an order out of the fulfillment queue because its money went back.
+ *
+ *  Called when a refund is executed. The order may or may not be queued —
+ *  usually it is not, which is why this reports a boolean rather than throwing.
+ *  When it IS queued and has not shipped, the row goes and the machine picked
+ *  for it returns to sellable stock: continuing to hold a unit for an order we
+ *  have already refunded is a second loss on top of the first.
+ *
+ *  An order that has already shipped is left exactly as it is. The box is gone;
+ *  that is a returns problem, and deleting the row would erase the only record
+ *  of the shipment. */
+export async function withdrawOrderFromQueue(orderId: string, reason: string): Promise<boolean> {
+  const { data, error } = await supabase
+    .from('fulfillment_queue')
+    .select('id, order_id, step, assigned_serial, fulfilled_at')
+    .eq('order_id', orderId)
+    .is('fulfilled_at', null)
+    .maybeSingle();
+  if (error || !data) return false;
+
+  const row = data as LeavingQueueRow;
+  if (row.step === 6 || row.fulfilled_at) return false;
+
+  await deleteQueueRow(row.id);
+  await releaseAssignedUnit(row.assigned_serial);
+  await logAction('fq_withdrawn_refunded', row.id, reason);
+  return true;
+}
+
 /** Queue header action — "Cancel Order". The whole order is dead: it leaves the
  *  fulfillment queue, its unit goes back on the shelf, and the order is marked
  *  cancelled so it disappears from every Order Review tab. A cancelled sale

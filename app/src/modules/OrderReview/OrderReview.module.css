@@ -410,6 +410,21 @@
   border: 1px solid var(--color-warning-border);
 }
 
+/* Money already went back on THIS order — confirming it would ship a machine
+   we have been paid nothing for. The loudest tag on the row, deliberately. */
+.tagRefunded {
+  background: var(--color-error-bg);
+  color: var(--color-error);
+  border: 1px solid var(--color-error-border);
+}
+/* A different order of theirs was refunded. Often fine — they bought again —
+   so this reads as a caution, not a stop. */
+.tagRefundedCustomer {
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
+  border: 1px solid var(--color-warning-border);
+}
+
 .urgencyChip {
   display: inline-block;
   font-family: var(--font-mono);

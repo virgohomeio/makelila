@@ -6,6 +6,8 @@ import { sendTemplate } from './templates';
 import {
   invoiceAmountCad, pickRefundBasisInvoice, invoicesForCustomerEmail, type CustomerInvoice,
 } from './invoices';
+import { resolveRefundOrderId } from './refundedOrders';
+import { withdrawOrderFromQueue } from './fulfillment';
 
 const APP_BASE_URL = 'https://lila.vip';
 const REFUND_URL = `${APP_BASE_URL}/post-shipment?tab=refunds`;
@@ -1336,10 +1338,17 @@ export async function compileReturnToRefund(r: ReturnRow): Promise<void> {
   const usePurchaser = r.is_purchaser === false;
   const email = ((usePurchaser && r.purchaser_email?.trim()) ? r.purchaser_email.trim() : r.customer_email) ?? undefined;
   const opening = await defaultRefundAmountFromInvoice(email, r.original_order_ref, r.refund_amount_usd);
+  // order_id is a UUID FK to orders(id) and original_order_ref is human text
+  // ("#1107", "1216", "I don't know, please ask Edward"), so this used to be
+  // left null — on all 18 live refunds. That made a refund invisible to every
+  // order surface: Sales listed a refunded order like any other and confirming
+  // it queued a machine for someone we had already paid back. Resolve the ref
+  // to the real order and record it; null when it genuinely can't be pinned to
+  // one order, which is honest and no worse than before.
+  const orderId = await resolveRefundOrderId(email, r.original_order_ref);
   const refundId = await submitRefundRequest({
     return_id: r.id,
-    // NOTE: don't pass order_id — that column is a UUID FK to orders(id), not the
-    // human original_order_ref (e.g. "#1107"). The refund links via return_id.
+    ...(orderId ? { order_id: orderId } : {}),
     customer_name: (usePurchaser && r.purchaser_name?.trim()) ? r.purchaser_name.trim() : r.customer_name,
     customer_email: email,
     refund_amount_usd: opening.amount,
@@ -1627,10 +1636,29 @@ export async function financeApprove(id: string, opts: FinanceApproveOpts): Prom
  *  is the operator actually executing the payout and marking it done. The Klaviyo
  *  "Refund Processed" event fires here — the moment money actually moves — not at
  *  finance approval. */
+/** Just enough of a refund_approvals row to find the order it refunded. */
+type RefundedApprovalRow = {
+  order_id: string | null;
+  customer_email: string | null;
+  returns: { original_order_ref: string | null } | { original_order_ref: string | null }[] | null;
+};
+
+/** Once a refund is paid, take its order out of the fulfillment queue so no one
+ *  ships against it. Falls back to resolving the human order ref for the older
+ *  cards written before order_id was ever populated. */
+async function releaseRefundedOrderFromQueue(approval: RefundedApprovalRow): Promise<void> {
+  const linked = Array.isArray(approval.returns) ? approval.returns[0] : approval.returns;
+  const orderId = approval.order_id
+    ?? await resolveRefundOrderId(approval.customer_email, linked?.original_order_ref);
+  if (!orderId) return;
+  const withdrawn = await withdrawOrderFromQueue(orderId, 'Order refunded — pulled from the queue');
+  if (withdrawn) await logAction('refund_order_withdrawn', orderId, 'refunded before it shipped');
+}
+
 export async function executeRefund(id: string, note?: string): Promise<void> {
   const { data: approval, error: aErr } = await supabase
     .from('refund_approvals')
-    .select('id, status, customer_email, customer_name, refund_amount_usd, refund_method, submitted_by')
+    .select('id, status, order_id, customer_email, customer_name, refund_amount_usd, refund_method, submitted_by, returns(original_order_ref)')
     .eq('id', id)
     .single();
   if (aErr || !approval) throw new Error(`Refund approval not found: ${aErr?.message}`);
@@ -1645,6 +1673,16 @@ export async function executeRefund(id: string, note?: string): Promise<void> {
   await logAction('refund_executed', id, note?.trim() || 'paid out',
     undefined,
     { klaviyoEvent: 'Refund Processed', ...(approval.customer_email ? { klaviyoEmail: approval.customer_email as string } : {}) });
+
+  // The money is back with the customer — nothing should still be waiting to
+  // ship to them on this order. Best-effort: a refund that has been paid out
+  // must never be rolled back because a queue row wouldn't budge, so a failure
+  // here is logged and the payout stands.
+  try {
+    await releaseRefundedOrderFromQueue(approval as RefundedApprovalRow);
+  } catch (e) {
+    console.warn('Withdrawing the refunded order from the queue failed (non-fatal):', (e as Error).message);
+  }
 
   // FR-9b: notify the Account Manager (the case owner who submitted it) that the
   // payout is done, so they can tell the customer. Best-effort — never blocks
@@ -1915,6 +1953,8 @@ async function createCancellationRefund(
   // (status 'submitted') for the Account Manager to verify before George sees
   // it, rather than jumping the queue straight into Manager Review.
   return submitRefundRequest({
+    ...(await resolveRefundOrderId(c.customer_email, c.order_ref)
+      .then(id => (id ? { order_id: id } : {}))),
     customer_name: c.customer_name,
     customer_email: c.customer_email,
     refund_amount_usd: opening.amount,

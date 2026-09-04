@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import type { Order } from '../../lib/orders';
 import { OrderRow } from './OrderRow';
+import { indexRefundFlags, useRefundMarks } from '../../lib/refundedOrders';
 import { EmptyState } from '../../components/ui';
 import styles from './OrderReview.module.css';
 
@@ -24,6 +25,9 @@ export function Sidebar({
 }) {
   const [tab, setTab] = useState<Tab>('pending');
   const [query, setQuery] = useState('');
+  // One query for the whole rail rather than one per row: a refund badge is
+  // cheap to compute and expensive to fetch.
+  const { marks } = useRefundMarks();
 
   const source = tab === 'pending'     ? pending
                : tab === 'held'        ? held
@@ -46,6 +50,8 @@ export function Sidebar({
     if (tab === 'cancelled') return filtered;
     return [...filtered].sort((a, b) => a.order_ref.localeCompare(b.order_ref));
   }, [source, query, tab]);
+
+  const refundFlags = useMemo(() => indexRefundFlags(visible, marks), [visible, marks]);
 
   const tabs: Array<{ key: Tab; label: string; count: number }> = [
     { key: 'pending',     label: 'Pending',     count: pending.length },
@@ -130,6 +136,7 @@ export function Sidebar({
             revealIndex={Math.min(i, 14)}
             isSelected={o.id === selectedId}
             onClick={() => onSelect(o.id)}
+            refundFlag={refundFlags.get(o.id) ?? null}
           />
         ))}
       </div>
