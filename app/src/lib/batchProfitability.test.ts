@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import type { CustomerMetrics } from './profitability';
 import {
-  BATCH_ORDER, byBatch, byBatchRegion, byBatchChronology, scaleMetrics,
-  batchRegionGaps, batchCountryReach, confoundedBatches, batchRegionExtremes,
+  BATCH_ORDER, byBatch, byBatchChronology, scaleMetrics,
+  singleMarketBatches, dominantMarketShare,
   attributionCoverage, modelledCostBatches, type UnitBatchLink,
 } from './batchProfitability';
 
@@ -168,134 +168,6 @@ describe('byBatchChronology', () => {
   });
 });
 
-describe('byBatchRegion', () => {
-  const setup = () => byBatchRegion(
-    asMap([
-      metrics({ id: 'on1', regionCode: 'CA-ON', country: 'CA' }),
-      metrics({ id: 'on2', regionCode: 'CA-ON', country: 'CA' }),
-      metrics({ id: 'tx1', regionCode: 'US-TX', country: 'US', contributionMargin: -200, lifetimeProfit: -200 }),
-    ]),
-    [
-      link({ serial: '1', batch: 'P100', customerId: 'on1' }),
-      link({ serial: '2', batch: 'P100', customerId: 'tx1' }),
-      link({ serial: '3', batch: 'P150', customerId: 'on2' }),
-    ],
-  );
-
-  it('builds a cell per batch/region pair that actually shipped', () => {
-    const m = setup();
-    expect(m.cells.has('P100|CA-ON')).toBe(true);
-    expect(m.cells.has('P100|US-TX')).toBe(true);
-    expect(m.cells.has('P150|CA-ON')).toBe(true);
-    // P150 never shipped to Texas — no cell, which is not the same as a loss.
-    expect(m.cells.has('P150|US-TX')).toBe(false);
-  });
-
-  it('orders regions by total units, busiest first', () => {
-    expect(setup().regions[0]).toBe('CA-ON');
-  });
-
-  it('reports a batch/region gap as absence', () => {
-    const gaps = batchRegionGaps(setup());
-    expect(gaps.get('P150')).toContain('US-TX');
-    expect(gaps.get('P100')).toEqual([]);
-  });
-});
-
-describe('confounding guards', () => {
-  // P150 sold into Canada only; P50N almost entirely into the US. Comparing
-  // their regional performance directly compares countries, not batches.
-  const reach = () => batchCountryReach(
-    asMap([
-      ...Array.from({ length: 6 }, (_, i) => metrics({ id: `ca${i}`, country: 'CA', regionCode: 'CA-ON' })),
-      ...Array.from({ length: 9 }, (_, i) => metrics({ id: `us${i}`, country: 'US', regionCode: 'US-TX' })),
-      metrics({ id: 'stray', country: 'CA', regionCode: 'CA-BC' }),
-    ]),
-    [
-      ...Array.from({ length: 6 }, (_, i) => link({ serial: `c${i}`, batch: 'P150', customerId: `ca${i}` })),
-      ...Array.from({ length: 9 }, (_, i) => link({ serial: `u${i}`, batch: 'P50N', customerId: `us${i}` })),
-      link({ serial: 'stray', batch: 'P50N', customerId: 'stray' }),
-    ],
-  );
-
-  it('counts units per country for each batch', () => {
-    expect(reach().get('P150')).toEqual([{ country: 'CA', units: 6 }]);
-    expect(reach().get('P50N')).toEqual([
-      { country: 'US', units: 9 }, { country: 'CA', units: 1 },
-    ]);
-  });
-
-  it('flags a batch that only ever sold into one country', () => {
-    const flagged = confoundedBatches(reach());
-    expect(flagged.map(f => f.batch)).toEqual(['P150', 'P50N']);
-    expect(flagged.find(f => f.batch === 'P150')!.country).toBe('CA');
-  });
-
-  it('treats one stray cross-border unit as still single-country', () => {
-    // P50N is 9 US + 1 CA = 90% US, which is confounded for comparison.
-    expect(confoundedBatches(reach()).find(f => f.batch === 'P50N')).toBeDefined();
-  });
-
-  it('does not flag a genuinely cross-border batch', () => {
-    const mixed = batchCountryReach(
-      asMap([
-        ...Array.from({ length: 5 }, (_, i) => metrics({ id: `a${i}`, country: 'CA' })),
-        ...Array.from({ length: 5 }, (_, i) => metrics({ id: `b${i}`, country: 'US' })),
-      ]),
-      [
-        ...Array.from({ length: 5 }, (_, i) => link({ serial: `a${i}`, batch: 'P100', customerId: `a${i}` })),
-        ...Array.from({ length: 5 }, (_, i) => link({ serial: `b${i}`, batch: 'P100', customerId: `b${i}` })),
-      ],
-    );
-    expect(confoundedBatches(mixed)).toEqual([]);
-  });
-
-  it('ignores a batch too small to say anything about', () => {
-    const tiny = batchCountryReach(
-      asMap([metrics({ id: 'c1', country: 'CA' })]),
-      [link({ serial: '1', batch: 'P50', customerId: 'c1' })],
-    );
-    expect(confoundedBatches(tiny)).toEqual([]);
-  });
-});
-
-describe('batchRegionExtremes', () => {
-  const matrix = () => byBatchRegion(
-    asMap([
-      // rollup() derives lifetime profit from contribution margin less CAC, so
-      // the margin is what has to differ between these regions.
-      ...Array.from({ length: 3 }, (_, i) =>
-        metrics({ id: `on${i}`, regionCode: 'CA-ON', country: 'CA', contributionMargin: 600 })),
-      ...Array.from({ length: 3 }, (_, i) =>
-        metrics({ id: `bc${i}`, regionCode: 'CA-BC', country: 'CA', contributionMargin: -300 })),
-      metrics({ id: 'solo', regionCode: 'CA-YT', country: 'CA', contributionMargin: 9999 }),
-    ]),
-    [
-      ...Array.from({ length: 3 }, (_, i) => link({ serial: `o${i}`, batch: 'P100', customerId: `on${i}` })),
-      ...Array.from({ length: 3 }, (_, i) => link({ serial: `b${i}`, batch: 'P100', customerId: `bc${i}` })),
-      link({ serial: 's', batch: 'P100', customerId: 'solo' }),
-    ],
-  );
-
-  it('ranks the best and worst region by profit per unit', () => {
-    const { best, worst } = batchRegionExtremes(matrix(), 'P100');
-    expect(best!.regionCode).toBe('CA-ON');
-    expect(worst!.regionCode).toBe('CA-BC');
-  });
-
-  it('excludes regions below the sample-size floor', () => {
-    // The single Yukon unit is the most profitable on paper; it is noise.
-    const { ranked } = batchRegionExtremes(matrix(), 'P100', 3);
-    expect(ranked.map(r => r.regionCode)).not.toContain('CA-YT');
-  });
-
-  it('returns no worst when only one region clears the floor', () => {
-    const { best, worst } = batchRegionExtremes(matrix(), 'P100', 6);
-    expect(best).toBeNull();
-    expect(worst).toBeNull();
-  });
-});
-
 describe('attributionCoverage', () => {
   it('totals shipped and attributed units across batches', () => {
     const rows = byBatch(asMap([metrics({ id: 'c1' })]), [
@@ -349,5 +221,126 @@ describe('COGS basis', () => {
       basis({ c1: { actual: 7, modelled: 3 } }),
     );
     expect(modelledCostBatches(rows)).toEqual([]);
+  });
+});
+
+describe('byBatch landed cost', () => {
+  const census = new Map([
+    ['P150', { total: 150, scrap: 1, lost: 34, rework: 72, shipped: 42, ready: 1 }],
+    ['P100', { total: 100, scrap: 1, lost: 0, rework: 0, shipped: 87, ready: 6 }],
+  ]);
+  const facts = new Map([
+    ['P150', { unitCount: 150, unitCostUsd: 345.28 }],
+    ['P100', { unitCount: 100, unitCostUsd: 314 }],
+  ]);
+
+  const run = () => byBatch(
+    asMap([metrics({ id: 'c1' }), metrics({ id: 'c2' })]),
+    [
+      link({ serial: 's1', batch: 'P150', customerId: 'c1' }),
+      link({ serial: 's2', batch: 'P100', customerId: 'c2' }),
+    ],
+    undefined,
+    { census, facts },
+  );
+
+  it('normalises an FOB batch onto landed cost', () => {
+    const p150 = run().find(b => b.key === 'P150')!;
+
+    expect(p150.landed!.landedUsd).toBeCloseTo(405.2, 2);
+    expect(p150.landed!.basis).toBe('estimated');
+    expect(p150.landed!.incoterm).toBe('FOB Ningbo');
+  });
+
+  it('leaves a CNF batch on its invoice plus clearance only', () => {
+    const p100 = run().find(b => b.key === 'P100')!;
+
+    expect(p100.landed!.freightUsd).toBe(0);
+    expect(p100.landed!.landedUsd).toBeCloseTo(316.88, 2);
+  });
+
+  it('spreads batch cost over surviving units, widest where yield is unresolved', () => {
+    const rows = run();
+    const p150 = rows.find(b => b.key === 'P150')!;
+    const p100 = rows.find(b => b.key === 'P100')!;
+
+    expect(p150.costPerSellable!.high).toBeCloseTo(405.2 * 150 / 43, 1);
+    expect(p150.costPerSellable!.low).toBeCloseTo(405.2 * 150 / 149, 1);
+    // P100 has nothing in doubt, so its band is a point.
+    expect(p100.costPerSellable!.low).toBeCloseTo(p100.costPerSellable!.high, 6);
+  });
+
+  it('leaves margin columns untouched — landed cost sits beside COGS, not in it', () => {
+    const withLanded = run().find(b => b.key === 'P100')!;
+    const without = byBatch(
+      asMap([metrics({ id: 'c2' })]),
+      [link({ serial: 's2', batch: 'P100', customerId: 'c2' })],
+    ).find(b => b.key === 'P100')!;
+
+    expect(withLanded.costs.cogs).toBe(without.costs.cogs);
+    expect(withLanded.contributionMargin).toBe(without.contributionMargin);
+    expect(withLanded.lifetimeProfit).toBe(without.lifetimeProfit);
+  });
+
+  it('carries no landed cost when no inputs are supplied, rather than a zero', () => {
+    const rows = byBatch(
+      asMap([metrics({ id: 'c1' })]),
+      [link({ serial: 's1', batch: 'P150', customerId: 'c1' })],
+    );
+    expect(rows[0].landed).toBeNull();
+    expect(rows[0].costPerSellable).toBeNull();
+  });
+});
+
+describe('market mix', () => {
+  // The batch tab compares batches only. The mix is context for that
+  // comparison — it must never become a per-region margin.
+  const mixed = () => byBatch(
+    new Map([
+      ...Array.from({ length: 6 }, (_, i) =>
+        [`ca${i}`, metrics({ id: `ca${i}`, country: 'CA', regionCode: 'CA-ON' })] as const),
+      ...Array.from({ length: 4 }, (_, i) =>
+        [`us${i}`, metrics({ id: `us${i}`, country: 'US', regionCode: 'US-TX' })] as const),
+      ['stray', metrics({ id: 'stray', country: 'CA', regionCode: 'CA-BC' })] as const,
+    ]),
+    [
+      ...Array.from({ length: 6 }, (_, i) => link({ serial: `c${i}`, batch: 'P150', customerId: `ca${i}` })),
+      ...Array.from({ length: 4 }, (_, i) => link({ serial: `u${i}`, batch: 'P100', customerId: `us${i}` })),
+      link({ serial: 's', batch: 'P100', customerId: 'stray' }),
+    ],
+  );
+
+  it('counts units per country, largest market first', () => {
+    const p100 = mixed().find(b => b.key === 'P100')!;
+    expect(p100.marketMix).toEqual([{ country: 'US', units: 4 }, { country: 'CA', units: 1 }]);
+    expect(mixed().find(b => b.key === 'P150')!.marketMix).toEqual([{ country: 'CA', units: 6 }]);
+  });
+
+  it('reports the dominant market share', () => {
+    const p150 = mixed().find(b => b.key === 'P150')!;
+    expect(dominantMarketShare(p150.marketMix)).toEqual({ country: 'CA', share: 1 });
+  });
+
+  it('returns null when no country is known', () => {
+    expect(dominantMarketShare([{ country: 'unknown', units: 3 }])).toBeNull();
+  });
+
+  it('flags a batch that sold into essentially one country', () => {
+    const flagged = singleMarketBatches(mixed());
+    expect(flagged.map(f => f.batch)).toEqual(['P150']);
+    expect(flagged[0].country).toBe('CA');
+  });
+
+  it('does not flag a genuinely cross-border batch', () => {
+    // P100 here is 4 US / 1 CA = 80%, under the 90% threshold.
+    expect(singleMarketBatches(mixed()).map(f => f.batch)).not.toContain('P100');
+  });
+
+  it('ignores a batch too small to describe as a market', () => {
+    const tiny = byBatch(
+      new Map([['c1', metrics({ id: 'c1', country: 'CA' })]]),
+      [link({ serial: '1', batch: 'P50', customerId: 'c1' })],
+    );
+    expect(singleMarketBatches(tiny)).toEqual([]);
   });
 });

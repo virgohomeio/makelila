@@ -1,8 +1,7 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
-import { BatchRegionMatrix } from '../profitability/BatchRegionMatrix';
 import { BatchTable, FutureBatchPanel } from '../profitability/BatchTable';
-import { byBatch, byBatchRegion, type UnitBatchLink } from '../../../lib/batchProfitability';
+import { byBatch, type UnitBatchLink } from '../../../lib/batchProfitability';
 import type { CustomerMetrics } from '../../../lib/profitability';
 
 function metrics(over: Partial<CustomerMetrics> & { id: string }): CustomerMetrics {
@@ -43,55 +42,8 @@ function fixture() {
     link({ serial: 'solo', batch: 'P100', customerId: 'solo' }),
   ];
   const map = new Map(people.map(p => [p.id, p]));
-  return { map, links, matrix: byBatchRegion(map, links), batches: byBatch(map, links) };
+  return { map, links, batches: byBatch(map, links) };
 }
-
-describe('BatchRegionMatrix', () => {
-  it('renders a column per batch in production order', () => {
-    const { matrix } = fixture();
-    render(<BatchRegionMatrix matrix={matrix} measure="profitPerUnit" onMeasureChange={vi.fn()} />);
-
-    const headers = screen.getAllByRole('columnheader').map(h => h.textContent);
-    expect(headers).toContain('P150');
-    expect(headers).toContain('P100');
-    expect(headers.indexOf('P150')).toBeLessThan(headers.indexOf('P100'));
-  });
-
-  it('marks a batch/region pair that never shipped as not-sold, not as a loss', () => {
-    const { matrix } = fixture();
-    render(<BatchRegionMatrix matrix={matrix} measure="profitPerUnit" onMeasureChange={vi.fn()} />);
-
-    // P150 never went to Texas.
-    const txRow = screen.getByText('US-TX').closest('tr')!;
-    expect(within(txRow).getByText('not sold here')).toBeTruthy();
-  });
-
-  it('direct-labels every populated cell, so colour is never the only encoding', () => {
-    const { matrix } = fixture();
-    render(<BatchRegionMatrix matrix={matrix} measure="profitPerUnit" onMeasureChange={vi.fn()} />);
-
-    const txRow = screen.getByText('US-TX').closest('tr')!;
-    // 3 Texas units at $900 contribution each.
-    expect(within(txRow).getByText('$900')).toBeTruthy();
-    // "3u" appears twice on the row: the P100 cell and the all-batches total.
-    expect(within(txRow).getAllByText(/3\s*u/).length).toBeGreaterThanOrEqual(1);
-  });
-
-  it('explains the hatching and the thin-cell rule in words', () => {
-    const { matrix } = fixture();
-    render(<BatchRegionMatrix matrix={matrix} measure="profitPerUnit" onMeasureChange={vi.fn()} />);
-    expect(screen.getByText(/never shipped to — not a loss/)).toBeTruthy();
-    expect(screen.getByText(/Not sold in this region/)).toBeTruthy();
-  });
-
-  it('switches measure when a measure button is chosen', () => {
-    const onChange = vi.fn();
-    const { matrix } = fixture();
-    render(<BatchRegionMatrix matrix={matrix} measure="profitPerUnit" onMeasureChange={onChange} />);
-    screen.getByText('Units shipped').click();
-    expect(onChange).toHaveBeenCalledWith('units');
-  });
-});
 
 describe('BatchTable', () => {
   it('lists batches oldest first with their shipping era', () => {
@@ -123,12 +75,95 @@ describe('FutureBatchPanel', () => {
 
     expect(screen.getByText('P100X')).toBeTruthy();
     expect(screen.getByText('100')).toBeTruthy();
-    expect(screen.getByText('not invoiced yet')).toBeTruthy();
+    // Costed at P100 parity until LC invoices it, and marked as an estimate so
+    // the assumption never reads as a quote.
+    expect(screen.getByText(/\$317 USD/)).toBeTruthy();
+    expect(screen.getByText('est')).toBeTruthy();
     expect(screen.getByText(/no margin — not a\s+margin of zero/)).toBeTruthy();
+  });
+
+  it('says so plainly for a batch with no invoice and no estimate', () => {
+    render(<FutureBatchPanel batches={[{
+      id: 'LILA-Mini', unitCount: 40, unitCostUsd: null,
+      expectedArrival: null, arrivedAt: null,
+      manufacturer: 'LC', destination: null,
+    }]} />);
+
+    expect(screen.getByText('not invoiced yet')).toBeTruthy();
   });
 
   it('renders nothing when every batch has shipped', () => {
     const { container } = render(<FutureBatchPanel batches={[]} />);
     expect(container.firstChild).toBeNull();
+  });
+});
+
+describe('BatchTable landed cost columns', () => {
+  const census = new Map([
+    ['P150', { total: 150, scrap: 1, lost: 34, rework: 72, shipped: 42, ready: 1 }],
+    ['P100', { total: 100, scrap: 1, lost: 0, rework: 0, shipped: 87, ready: 6 }],
+  ]);
+  const facts = new Map([
+    ['P150', { unitCount: 150, unitCostUsd: 345.28 }],
+    ['P100', { unitCount: 100, unitCostUsd: 314 }],
+  ]);
+
+  function withLanded() {
+    const { map, links } = fixture();
+    return byBatch(map, links, undefined, { census, facts });
+  }
+
+  const rowFor = (label: string) =>
+    screen.getAllByRole('row').find(r => within(r).queryByText(label))!;
+
+  it('shows landed cost in CAD, marked as an estimate', () => {
+    render(<BatchTable batches={withLanded()} />);
+
+    // P150: $405.20 USD x 1.388889 = $563 CAD.
+    expect(within(rowFor('P150')).getByText('$563')).toBeTruthy();
+    // P100: $316.88 USD = $440 CAD.
+    expect(within(rowFor('P100')).getByText('$440')).toBeTruthy();
+    expect(screen.getAllByText('est').length).toBe(2);
+  });
+
+  it('shows a range for a batch whose yield is unresolved and a point for a clean one', () => {
+    render(<BatchTable batches={withLanded()} />);
+
+    expect(within(rowFor('P150')).getByText('$567–$1,963')).toBeTruthy();
+    expect(within(rowFor('P100')).getByText('$445')).toBeTruthy();
+  });
+
+  it('shows yield as a band where rework and lost units are unsettled', () => {
+    render(<BatchTable batches={withLanded()} />);
+
+    expect(within(rowFor('P150')).getByText('29%–99%')).toBeTruthy();
+    expect(within(rowFor('P100')).getByText('99%')).toBeTruthy();
+  });
+
+  it('says unpriced rather than showing a zero when a batch cannot be costed', () => {
+    const { map, links } = fixture();
+    render(<BatchTable batches={byBatch(map, links)} />);
+
+    expect(screen.getAllByText('unpriced').length).toBeGreaterThan(0);
+  });
+});
+
+describe('BatchTable market column', () => {
+  it('shows the country mix as context, not as a regional margin', () => {
+    const { batches } = fixture();
+    render(<BatchTable batches={batches} />);
+
+    // P150 sold Canada-only in the fixture; P100 is split.
+    const p150 = screen.getByText('P150').closest('tr')!;
+    expect(within(p150).getByText('100% CA')).toBeTruthy();
+
+    const p100 = screen.getByText('P100').closest('tr')!;
+    expect(within(p100).getByText(/% US · .*% CA|% CA · .*% US/)).toBeTruthy();
+  });
+
+  it('never renders a province or state anywhere in the batch view', () => {
+    const { batches } = fixture();
+    const { container } = render(<BatchTable batches={batches} />);
+    expect(container.textContent).not.toMatch(/CA-ON|US-TX|Ontario|Texas/);
   });
 });

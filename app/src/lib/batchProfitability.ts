@@ -1,6 +1,9 @@
 import type { CustomerMetrics, SegmentMetrics } from './profitability';
-import { rollup, groupBy, aggregateCosts } from './profitability';
-import { regionName } from './regions';
+import { rollup, aggregateCosts } from './profitability';
+import {
+  landedCostPerUnit, costPerSellableUnit,
+  type LandedCost, type UnitCensus,
+} from './batchLandedCost';
 
 /**
  *  Batch profitability — which LILA Pro production batch made money, and where.
@@ -98,10 +101,28 @@ export type BatchMetrics = SegmentMetrics & {
   /** First and last ship date — the batch's selling era. */
   firstShipped: string | null;
   lastShipped: string | null;
+  /** Country split of the batch's units — context for comparing batches, not a
+   *  basis for a regional margin. See MarketMix. */
+  marketMix: MarketMix;
   /** Sale orders behind this batch's COGS, split by how the cost was derived. */
   cogsBasis: CogsBasisCount;
   /** Share of those orders on the modelled schedule, or null when unknown. */
   cogsModelledPct: number | null;
+  /** What one unit of this batch cost to put on a shelf in Toronto, normalised
+   *  across incoterms. Null when the batch cannot be costed at all.
+   *
+   *  This is deliberately *not* folded into `costs.cogs`. The margin columns
+   *  keep summing the same `customer_profitability` rows as every other view,
+   *  so batch revenue and profit still reconcile to the portfolio by
+   *  construction. Landed cost sits beside them as the procurement truth the
+   *  booked COGS should eventually be restated onto. */
+  landed: LandedCost | null;
+  /** Unit dispositions, and the sellable band derived from them. Null when no
+   *  census was supplied. */
+  census: UnitCensus | null;
+  /** Landed cost spread over the units that survived production, as a band.
+   *  This is the figure that actually separates the batches. */
+  costPerSellable: { low: number; high: number } | null;
 };
 
 // ── Allocation ──────────────────────────────────────────────────────────────
@@ -227,6 +248,18 @@ function partition(
   return { byBatchKey, coverage, mixed, era, customerIds };
 }
 
+/** Units per country for one batch's customers, largest market first. */
+function marketMixOf(arr: CustomerMetrics[]): MarketMix {
+  const counts = new Map<string, number>();
+  for (const m of arr) {
+    const c = m.country ?? 'unknown';
+    counts.set(c, (counts.get(c) ?? 0) + m.units);
+  }
+  return Array.from(counts.entries())
+    .map(([country, units]) => ({ country, units }))
+    .sort((a, b) => b.units - a.units || a.country.localeCompare(b.country));
+}
+
 /** Sum the COGS basis counts of every customer behind a batch. */
 function cogsBasisFor(
   ids: string[] | undefined,
@@ -261,6 +294,12 @@ export function byBatch(
   /** Per-customer COGS basis counts, from `customer_profitability`. Optional so
    *  the calc still works for callers that have no basis data. */
   basisOf?: (customerId: string) => CogsBasisCount | undefined,
+  /** Landed-cost inputs. Optional: without them the batch rows keep every
+   *  margin column and simply carry no landed cost, rather than failing. */
+  landedInput?: {
+    census: Map<string, UnitCensus>;
+    facts: Map<string, { unitCount: number; unitCostUsd: number | null }>;
+  },
 ): BatchMetrics[] {
   const { byBatchKey, coverage, mixed, era, customerIds } = partition(metrics, links);
 
@@ -275,13 +314,45 @@ export function byBatch(
       ...rollup(arr, batch, BATCH_LABELS[batch] ?? batch),
       costs: aggregateCosts(arr),
       coverage: coverage.get(batch) ?? { shipped: 0, attributed: 0, unattributed: 0 },
+      marketMix: marketMixOf(arr),
       ...cogsBasisFor(customerIds.get(batch), basisOf),
+      ...landedFor(batch, landedInput),
       mixedBatchCustomers: mixed.get(batch) ?? 0,
       firstShipped: e.first,
       lastShipped: e.last,
     });
   }
   return rows.sort(byBatchChronology);
+}
+
+/** Normalise one batch onto landed cost, and spread it over the units that
+ *  survived. The census is the authority on batch size — `units` rows are what
+ *  actually exist, whereas `batches.unit_count` is what was ordered, and for
+ *  P50N those disagree (the invoice covered 40 machines plus 40 spare lids). */
+function landedFor(
+  batch: string,
+  input?: {
+    census: Map<string, UnitCensus>;
+    facts: Map<string, { unitCount: number; unitCostUsd: number | null }>;
+  },
+): Pick<BatchMetrics, 'landed' | 'census' | 'costPerSellable'> {
+  if (!input) return { landed: null, census: null, costPerSellable: null };
+
+  const census = input.census.get(batch) ?? null;
+  const facts = input.facts.get(batch);
+  const landed = landedCostPerUnit({
+    batchId: batch,
+    invoiceUnitCostUsd: facts?.unitCostUsd ?? null,
+    // Clearance is spread over the entry, which is the batch as invoiced.
+    unitCount: facts?.unitCount ?? census?.total ?? 0,
+  });
+
+  return {
+    landed,
+    census,
+    costPerSellable:
+      landed && census ? costPerSellableUnit(landed.landedUsd, census) : null,
+  };
 }
 
 /** Batches sort by their position in the production timeline; anything not in
@@ -298,149 +369,54 @@ export function byBatchChronology(
   return ia - ib;
 }
 
-// ── Batch × region ──────────────────────────────────────────────────────────
-
-export type BatchRegionCell = SegmentMetrics & {
-  batch: string;
-  regionCode: string;
-};
-
-export type BatchRegionMatrix = {
-  batches: string[];
-  /** Region codes, ordered by total units across all batches, busiest first. */
-  regions: string[];
-  /** Keyed `${batch}|${regionCode}`. A missing key means the batch never
-   *  shipped to that region — which is NOT the same as losing money there. */
-  cells: Map<string, BatchRegionCell>;
-  /** Units per region across every batch, for the row headers. */
-  regionUnits: Map<string, number>;
-};
+// ── Market mix ──────────────────────────────────────────────────────────────
 
 /**
- *  Cross batch with province/state.
+ *  Where a batch's units went, as a country split.
  *
- *  Region comes from `CustomerMetrics.regionCode`, the same field the map and
- *  the region table use — so a cell here and a region there are the same
- *  population, and the two views cannot disagree.
+ *  This is deliberately NOT a profitability breakdown. Batch and geography are
+ *  the same variable in this dataset — P50 and P150 sold into Canada only,
+ *  P50N almost entirely into the US, and only P100 sold into both — so a
+ *  per-region margin for a batch reports the border as though it were the
+ *  machine. The mix is carried as plain context instead: enough to see that
+ *  two batches sold into different markets when comparing them, without
+ *  inviting a regional verdict the data cannot support.
  */
-export function byBatchRegion(
-  metrics: Map<string, CustomerMetrics>,
-  links: UnitBatchLink[],
-): BatchRegionMatrix {
-  const { byBatchKey } = partition(metrics, links);
+export type MarketMix = { country: string; units: number }[];
 
-  const cells = new Map<string, BatchRegionCell>();
-  const regionUnits = new Map<string, number>();
-  const batches: string[] = [];
-
-  for (const [batch, arr] of byBatchKey) {
-    batches.push(batch);
-    const perRegion = groupBy(arr, m => m.regionCode, regionName);
-    for (const seg of perRegion) {
-      if (seg.key === 'unknown') continue;
-      cells.set(`${batch}|${seg.key}`, { ...seg, batch, regionCode: seg.key });
-      regionUnits.set(seg.key, (regionUnits.get(seg.key) ?? 0) + seg.units);
-    }
-  }
-
-  const regions = Array.from(regionUnits.entries())
-    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-    .map(([code]) => code);
-
-  return {
-    batches: batches.sort((a, b) => byBatchChronology({ key: a }, { key: b })),
-    regions,
-    cells,
-    regionUnits,
-  };
+/** The share of a batch's units in its single largest market, or null when the
+ *  country is unknown for all of them. */
+export function dominantMarketShare(mix: MarketMix): { country: string; share: number } | null {
+  const known = mix.filter(m => m.country !== 'unknown');
+  const total = known.reduce((s, m) => s + m.units, 0);
+  if (total === 0) return null;
+  return { country: known[0].country, share: known[0].units / total };
 }
 
 /**
- *  Regions a batch never shipped to.
+ *  Batches that sold into essentially one country.
  *
- *  This is the guard-rail on the whole comparison. P150 and P50 sold into
- *  Canada only; P50N sold almost entirely into the US. Read naively, the
- *  matrix invites "P150 loses money in the US" — but no P150 ever went to the
- *  US, so the cell is empty, not bad. Anything reading the matrix has to be
- *  able to tell those two apart, so absence is returned explicitly rather than
- *  left as a hole for the caller to interpret.
+ *  Their margin cannot be compared like-for-like against a batch that sold
+ *  across the border, because freight, duty and tax ride along with the
+ *  market. The batch table names them so the ranking is read with that in
+ *  mind. `minUnits` keeps a two-unit batch from being described as a market.
  */
-export function batchRegionGaps(
-  matrix: BatchRegionMatrix,
-): Map<string, string[]> {
-  const gaps = new Map<string, string[]>();
-  for (const batch of matrix.batches) {
-    const missing = matrix.regions.filter(r => !matrix.cells.has(`${batch}|${r}`));
-    gaps.set(batch, missing);
-  }
-  return gaps;
-}
-
-/** Country reach per batch, used to warn that a batch/region comparison is
- *  confounded when a batch only ever sold into one country. */
-export function batchCountryReach(
-  metrics: Map<string, CustomerMetrics>,
-  links: UnitBatchLink[],
-): Map<string, { country: string; units: number }[]> {
-  const { byBatchKey } = partition(metrics, links);
-  const out = new Map<string, { country: string; units: number }[]>();
-  for (const [batch, arr] of byBatchKey) {
-    const counts = new Map<string, number>();
-    for (const m of arr) {
-      const c = m.country ?? 'unknown';
-      counts.set(c, (counts.get(c) ?? 0) + m.units);
-    }
-    out.set(batch, Array.from(counts.entries())
-      .map(([country, units]) => ({ country, units }))
-      .sort((a, b) => b.units - a.units));
-  }
-  return out;
-}
-
-/**
- *  Batches whose geography is too narrow to compare against the others.
- *
- *  A batch that sold into a single country cannot be ranked against one that
- *  sold into two — the difference could be the batch, or it could be the
- *  freight, duty and tax of the country it happened to sell into. Returns the
- *  batch keys that are single-country, with the country, so the UI can say so
- *  in words.
- */
-export function confoundedBatches(
-  reach: Map<string, { country: string; units: number }[]>,
+export function singleMarketBatches(
+  rows: BatchMetrics[],
   minUnits = 5,
-): { batch: string; country: string; units: number }[] {
-  const out: { batch: string; country: string; units: number }[] = [];
-  for (const [batch, countries] of reach) {
-    const known = countries.filter(c => c.country !== 'unknown');
-    const total = known.reduce((s, c) => s + c.units, 0);
+  threshold = 0.9,
+): { batch: string; label: string; country: string; units: number }[] {
+  const out: { batch: string; label: string; country: string; units: number }[] = [];
+  for (const r of rows) {
+    const known = r.marketMix.filter(m => m.country !== 'unknown');
+    const total = known.reduce((s, m) => s + m.units, 0);
     if (total < minUnits) continue;
-    // "Single country" in practice, not just in principle: P50N's 29 US units
-    // and 1 Canadian one make it a US batch for comparison purposes.
     const top = known[0];
-    if (top.units / total >= 0.9) out.push({ batch, country: top.country, units: top.units });
+    if (top.units / total >= threshold) {
+      out.push({ batch: r.key, label: r.label, country: top.country, units: top.units });
+    }
   }
   return out.sort((a, b) => byBatchChronology({ key: a.batch }, { key: b.batch }));
-}
-
-/** The regions where a batch made and lost the most money per unit, among
- *  regions with at least `minUnits` units — small cells are noise, and a
- *  one-unit region topping the list would be a lie of presentation. */
-export function batchRegionExtremes(
-  matrix: BatchRegionMatrix,
-  batch: string,
-  minUnits = 3,
-): { best: BatchRegionCell | null; worst: BatchRegionCell | null; ranked: BatchRegionCell[] } {
-  const ranked = matrix.regions
-    .map(r => matrix.cells.get(`${batch}|${r}`))
-    .filter((c): c is BatchRegionCell => c != null && c.units >= minUnits)
-    .sort((a, b) => (b.profitPerUnit ?? 0) - (a.profitPerUnit ?? 0));
-
-  return {
-    best: ranked.length > 0 ? ranked[0] : null,
-    worst: ranked.length > 1 ? ranked[ranked.length - 1] : null,
-    ranked,
-  };
 }
 
 /** Portfolio-wide attribution coverage, for the caveat line above the table. */

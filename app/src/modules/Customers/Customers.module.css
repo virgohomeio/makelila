@@ -2384,95 +2384,14 @@ select.searchInput { padding-left: var(--space-2); }
 
 .batchEra { font-size: .76rem; color: #718096; white-space: nowrap; }
 .batchMixedMark { color: #a0aec0; margin-left: 2px; cursor: help; }
-
-.batchMatrixWrap { margin-top: 22px; }
-.batchMatrixHead {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 12px;
-  margin-bottom: 10px;
-}
-.measureBtns { display: flex; gap: 6px; flex-shrink: 0; flex-wrap: wrap; }
-.batchMatrixScroll { overflow-x: auto; }
-
-.batchMatrix {
-  width: 100%;
-  border-collapse: separate;
-  border-spacing: 2px;   /* the 2px surface gap between adjacent fills */
-  font-size: .75rem;
-}
-.batchMatrix th {
-  font-weight: 500;
+/* Country split of a batch's units. Context for comparing two batches — the
+   tab deliberately carries no per-region margin. */
+.batchMarket {
+  font-size: .76rem;
   color: #4a5568;
-  text-align: left;
-  padding: 4px 6px;
   white-space: nowrap;
-}
-.batchMatrixCorner { min-width: 150px; }
-.batchMatrixRowHead {
-  display: flex;
-  min-width: 140px;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 8px;
-}
-.batchRegionName { color: #1a202c; }
-.batchRegionCode { color: #a0aec0; font-size: .68rem; font-variant-numeric: tabular-nums; }
-
-.batchCell {
-  border-radius: 4px;
-  padding: 6px 8px;
-  text-align: right;
-  min-width: 74px;
-  line-height: 1.25;
   font-variant-numeric: tabular-nums;
-  cursor: default;
 }
-.batchCellValue { display: block; font-weight: 600; }
-.batchCellN { display: block; font-size: .65rem; opacity: .72; }
-/* Under three units the cell is one or two machines — legible, but visibly
-   not a regional result. */
-.batchCellThin { opacity: .5; }
-
-.batchCellEmpty {
-  border-radius: 4px;
-  min-width: 74px;
-  background: repeating-linear-gradient(45deg, #dcdcd8 0 1px, #fbfbfa 1px 6px);
-}
-
-.batchMatrixFoot {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px 16px;
-  margin-top: 10px;
-}
-.batchLegend { display: flex; align-items: center; gap: 6px; }
-.batchLegendRamp { display: flex; }
-.batchLegendRamp span {
-  width: 16px;
-  height: 10px;
-  display: block;
-}
-.batchLegendRamp span:first-child { border-radius: 2px 0 0 2px; }
-.batchLegendRamp span:last-child { border-radius: 0 2px 2px 0; }
-.batchLegendSpacer { width: 6px; }
-.batchLegendHatch {
-  width: 14px;
-  height: 12px;
-  border-radius: 2px;
-  border: 1px solid #e2e8f0;
-  background: repeating-linear-gradient(45deg, #dcdcd8 0 1px, #fbfbfa 1px 6px);
-}
-.batchHoverNote {
-  font-size: .74rem;
-  color: #4a5568;
-  padding: 4px 8px;
-  background: #f7fafc;
-  border-radius: 4px;
-}
-
 .futureBatchPanel {
   margin-top: 22px;
   padding-top: 16px;
@@ -2501,39 +2420,6 @@ select.searchInput { padding-left: var(--space-2); }
 }
 .futureBatchFacts dt { color: #718096; }
 .futureBatchFacts dd { margin: 0; color: #1a202c; font-variant-numeric: tabular-nums; }
-
-.batchFocus {
-  margin-top: 22px;
-  padding-top: 16px;
-  border-top: 1px solid #edf2f7;
-}
-.batchFocusTitle {
-  font-size: .9rem;
-  font-weight: 600;
-  color: #1a202c;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.batchFocusClear {
-  border: 1px solid #cbd5e0;
-  border-radius: 6px;
-  background: #fff;
-  color: #4a5568;
-  font-size: .7rem;
-  padding: 2px 8px;
-  cursor: pointer;
-}
-
-.srOnly {
-  position: absolute;
-  width: 1px; height: 1px;
-  padding: 0; margin: -1px;
-  overflow: hidden;
-  clip: rect(0 0 0 0);
-  white-space: nowrap;
-  border: 0;
-}
 
 /* A batch whose cost is a modelled placeholder rather than an invoice. */
 .cogsModelled {
