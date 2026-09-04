@@ -164,9 +164,12 @@ describe('createReplacementOrder', () => {
     expect(result.order_ref).toBe('R-0007');
     const insertArg = insert.mock.calls[0][0];
     expect(insertArg.kind).toBe('replacement');
-    // Born approved: queueing the replacement on the ticket IS the
-    // authorisation, so there is no second confirmation step in Sales.
-    expect(insertArg.status).toBe('approved');
+    // Born 'pending', which for a replacement means Fulfillment › Replacements
+    // — not Sales, which stopped listing kind='replacement' in 0fb7f45.
+    // Raising a replacement on a ticket says the customer needs one; it does
+    // not say a box is packed and ready to go out. Only "Ready to Ship" on the
+    // Replacements tab says that, and only that puts it in the queue.
+    expect(insertArg.status).toBe('pending');
     expect(insertArg.order_ref).toBe('R-0007');
     expect(insertArg.linked_ticket_id).toBe('t1');
     expect(insertArg.cogs_usd).toBeCloseTo(4.2 * 2 + 312, 2);
@@ -179,13 +182,11 @@ describe('createReplacementOrder', () => {
     });
     expect(rpcMock).toHaveBeenCalledWith('decrement_part_on_hand', { p_part_id: 'p1', p_qty: 2 });
     expect(unitsUpdate).toHaveBeenCalled();
-    // And it lands in the fulfillment queue itself. The auto_enqueue_on_approve
-    // trigger only fires `after update of status`, so an INSERT that arrives
-    // already-approved never reaches it — without this the order would be
-    // approved and visible in nothing.
-    expect(queueInsert).toHaveBeenCalledWith(
-      expect.objectContaining({ order_id: 'o1' }),
-    );
+    // And it does NOT land in the fulfillment queue. Creating a replacement is
+    // ticket-driven and stops at Fulfillment › Replacements; an operator
+    // decides when it is actually ready to ship. Enqueue-at-birth put a $24 lid
+    // nobody had picked yet into Ready to Ship alongside packed sales.
+    expect(queueInsert).not.toHaveBeenCalled();
   });
 
   it('throws when line_items is empty', async () => {

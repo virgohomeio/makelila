@@ -122,6 +122,10 @@ describe('queueReplacementForFulfillment', () => {
     });
     expect(queued()).toHaveLength(1);
     expect(queued()[0].row).toMatchObject({ order_id: 'o-1' });
+    // No step: fulfillment_queue.step defaults to 1, and the Queue's "Ready to
+    // ship" tab is step < 6. Passing a step here would be the one way to land a
+    // replacement somewhere the operator did not ask for.
+    expect(queued()[0].row.step).toBeUndefined();
   });
 
   it('refuses, without writing anything, when the stock is not there', async () => {

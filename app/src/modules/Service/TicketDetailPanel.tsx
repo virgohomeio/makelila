@@ -575,9 +575,14 @@ export function TicketDetailPanel({ ticket, onClose, showDeviceContext = true }:
             }}
             address={pickerAddress}
             onClose={() => setPickerOpen(false)}
-            onCreated={(result) => {
+            onCreated={() => {
               setPickerOpen(false);
-              navigate(`/order-review/${result.id}`);
+              // Fulfillment › Replacements, not Order Review. A new replacement
+              // waits there for someone to mark it Ready to Ship, and Order
+              // Review has been unable to resolve a replacement at all since
+              // 0fb7f45 made bucketOrders sales-only — this navigate landed the
+              // operator on an empty detail pane straight after creating one.
+              navigate('/fulfillment/replacements');
             }}
           />
         )}

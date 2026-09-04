@@ -396,9 +396,10 @@ export function bucketOrders(
   // Sales carries sales, and that is the first thing decided here — every
   // bucket below is downstream of it.
   //
-  // Replacements are created already-approved and go straight into the
-  // fulfillment queue (createReplacementOrder), so there is nothing for an
-  // operator to decide about one in Order Review. They used to have their own
+  // Replacements are ticket-driven from end to end — raised on a service
+  // ticket, held in Fulfillment > Replacements, and sent to the queue when an
+  // operator marks one Ready to Ship. Sales is not on that path at any point,
+  // so there is nothing to decide about one here. They used to have their own
   // tab in this sidebar, and it was a trap: the tab filtered on
   // replacement_state while Confirm wrote status, so confirming a replacement
   // moved nothing on screen and the row sat there looking unconfirmed. R-0067
@@ -1169,14 +1170,21 @@ export async function resolveReplacementStockState(
   };
 }
 
-/** Put a replacement into the fulfillment queue.
+/** Put a replacement into Fulfillment › Queue › Ready to ship. Backs the
+ *  "Ready to Ship" button on Fulfillment › Replacements, and is the ONLY way a
+ *  replacement enters the queue.
  *
- *  createReplacementOrder() enqueues at birth, which covers every replacement
- *  raised from now on and none of the 43 that already existed. Those were
+ *  Replacements are ticket-driven: raised on a service ticket, they sit in
+ *  Fulfillment › Replacements until a person says the box is ready. Nothing
+ *  about creating the order means anyone has picked the item, so nothing
+ *  upstream of this call is entitled to queue it — not createReplacementOrder,
+ *  which enqueued at birth for two days and dropped un-picked replacements into
+ *  Ready to ship beside genuinely packed sales, and not the
+ *  auto_enqueue_on_approve trigger, which never sees the INSERT.
+ *
+ *  It also carries the 43 replacements raised before any of this: they were
  *  reached through Sales › Replacement, and when that tab went (0fb7f45) the
- *  only button that could queue one went with it. This is its replacement, and
- *  it lives on Fulfillment › Replacements — the screen that already lists every
- *  replacement, queued or not.
+ *  only button that could queue one went with it.
  *
  *  Stock is re-derived rather than read off replacement_state: these rows were
  *  stamped 'ready' or 'awaiting' months ago against stock that has since moved.
@@ -1522,26 +1530,30 @@ export async function enqueueForFulfillment(orderId: string): Promise<void> {
   }
 }
 
-/** Creates a replacement order (kind='replacement', status='approved'),
- *  back-links the ticket, decrements parts.on_hand, reserves any units, and
- *  puts the order straight into the fulfillment queue.
+/** Creates a replacement order (kind='replacement', status='pending'),
+ *  back-links the ticket, decrements parts.on_hand and reserves any units.
  *  Returns the new order_ref + id.
  *
- *  Why 'approved' at birth: queueing a replacement on a service ticket IS the
- *  authorisation. There was never a second, sales-side decision to make — the
- *  customer already owns the machine, nobody is paying, and the address came
- *  off the ticket. Landing these in Sales as 'pending' put them in a queue
- *  whose Confirm button changed nothing an operator could see (the Replacement
- *  tab filtered on replacement_state, never on status), so they accumulated:
- *  40 pending replacements, 33 of them still waiting, some for months.
+ *  Replacements are ticket-driven and stop here, in Fulfillment › Replacements.
+ *  Raising one says the customer needs a part or a unit; it does not say a box
+ *  is packed. The operator says that, with "Ready to Ship" on the Replacements
+ *  row, and only that puts the order in Fulfillment › Queue — see
+ *  queueReplacementForFulfillment().
  *
- *  Atomicity caveat: the five writes (order INSERT, queue INSERT, ticket
- *  UPDATE, parts decrement, units reserve) are NOT transactional.
+ *  This deliberately does NOT enqueue at birth (as it briefly did in 0fb7f45).
+ *  Nothing about creating the order means anyone has picked the item, so
+ *  enqueue-at-birth dropped un-picked replacements into Ready to Ship beside
+ *  sales that were genuinely packed, and the operator lost the one place they
+ *  could say otherwise. 'pending' is safe here in a way it was not before that
+ *  commit: Sales no longer lists kind='replacement' at all, so a pending
+ *  replacement sits in Fulfillment › Replacements rather than silting up a
+ *  sales tab whose Confirm button did nothing visible.
+ *
+ *  Atomicity caveat: the four writes (order INSERT, ticket UPDATE, parts
+ *  decrement, units reserve) are NOT transactional.
  *  Partial-failure recovery, by step:
  *    - INSERT fails: nothing to clean up.
- *    - INSERT ok, queue INSERT fails: the order exists, approved, but shows up
- *      in no queue. Re-run `enqueueForFulfillment(orderId)` or delete the order.
- *    - Queue ok, ticket UPDATE fails: the order exists but no back-link.
+ *    - INSERT ok, ticket UPDATE fails: the order exists but no back-link.
  *      Manually run `update service_tickets set replacement_order_id = ?
  *      where id = ?` or delete the order.
  *    - Ticket UPDATE ok, parts decrement fails partway: some on_hand
@@ -1566,7 +1578,9 @@ export async function createReplacementOrder(input: ReplacementOrderInput):
     .insert({
       order_ref,
       kind: 'replacement',
-      status: 'approved',
+      // Not 'approved' — see the note above. 'approved' is what the fulfillment
+      // queue lists on, and nothing has been picked yet.
+      status: 'pending',
       replacement_state: 'ready',
       linked_ticket_id: input.ticket_id,
       cogs_usd,
@@ -1586,14 +1600,7 @@ export async function createReplacementOrder(input: ReplacementOrderInput):
     .single();
   if (insErr || !row) throw new Error(`Create order: ${insErr?.message ?? 'no row'}`);
 
-  // 2. Queue it. The auto_enqueue_on_approve trigger fires `after update of
-  //    status`, so an INSERT that arrives already-approved slips past it —
-  //    which is why this is explicit rather than left to the database. Done
-  //    immediately after the insert: an approved replacement with no queue row
-  //    is visible in nothing, and that is the worst state to fail into.
-  await enqueueForFulfillment(row.id);
-
-  // 3. Back-link the ticket and TAG it queued_for_replacement. The tag (not the
+  // 2. Back-link the ticket and TAG it queued_for_replacement. The tag (not the
   //    status) carries the marker, so whatever workflow state the operator set
   //    survives — and they can layer other tags on top.
   const { error: tErr } = await supabase
@@ -1607,7 +1614,7 @@ export async function createReplacementOrder(input: ReplacementOrderInput):
   });
   if (tagErr) throw new Error(`Tag ticket: ${tagErr.message}`);
 
-  // 4. Decrement parts.on_hand atomically per line item. The RPC takes a
+  // 3. Decrement parts.on_hand atomically per line item. The RPC takes a
   //    transaction-level lock on the parts row and floors at 0, so two
   //    concurrent replacement orders can't lose a decrement (see migration
   //    20260604220000_decrement_part_on_hand.sql).
@@ -1620,7 +1627,7 @@ export async function createReplacementOrder(input: ReplacementOrderInput):
     if (pErr) throw new Error(`Decrement part ${li.part_id}: ${pErr.message}`);
   }
 
-  // 5. Reserve units and bases — quarantine excluded: do not pick quarantined units.
+  // 4. Reserve units and bases — quarantine excluded: do not pick quarantined units.
   for (const li of input.line_items) {
     if (li.kind !== 'unit' && li.kind !== 'base') continue;
     const { data: unitRow } = await supabase

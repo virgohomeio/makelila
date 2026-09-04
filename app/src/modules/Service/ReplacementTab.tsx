@@ -1,5 +1,4 @@
 import { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
 import {
   useReplacementOrders, queueReplacementForFulfillment, type Order,
 } from '../../lib/orders';
@@ -124,11 +123,12 @@ export default function ReplacementTab() {
     return m;
   }, [queueRows]);
 
-  /** Hand a replacement to Fulfillment › Queue.
+  /** "Ready to Ship" — hand a replacement to Fulfillment › Queue › Ready to
+   *  ship. This is the only way a replacement enters the queue.
    *
-   *  Replacements raised from today on are queued at birth, but the ones that
-   *  predate that change were not, and neither is one an operator pulled back
-   *  out with "Shipment Not Ready". This is the only way in for those.
+   *  Creating one on a service ticket says the customer needs a part or a unit.
+   *  It does not say anyone has picked it, which is why the order stops on this
+   *  screen and waits for a person to say the box is ready.
    *
    *  A short stock check is a question, not a refusal: half these orders came
    *  off the Excel import as free text ("both side latch") and the parts table
@@ -141,13 +141,13 @@ export default function ReplacementTab() {
       if (!first.queued) {
         const ok = window.confirm(
           `Stock for ${o.order_ref} looks short: ${first.blocked}.\n\n`
-          + 'Queue it for fulfillment anyway?',
+          + 'Mark it Ready to Ship anyway?',
         );
         if (!ok) return;
         await queueReplacementForFulfillment(o.id, { force: true });
       }
     } catch (e) {
-      window.alert(`Could not queue ${o.order_ref}: ${(e as Error).message}`);
+      window.alert(`Could not send ${o.order_ref} to the queue: ${(e as Error).message}`);
     } finally {
       setQueueing(null);
     }
@@ -295,7 +295,7 @@ export default function ReplacementTab() {
         <div className={styles.kpiCard}><div className={styles.kpiLabel}>Open</div><div className={styles.kpiValue}>{open}</div></div>
         <div className={styles.kpiCard}><div className={styles.kpiLabel}>Triage candidates</div><div className={styles.kpiValue}>{triageCandidates.length}</div></div>
         <div className={styles.kpiCard}><div className={styles.kpiLabel}>Awaiting batch</div><div className={styles.kpiValue}>{awaitingBatch}</div></div>
-        <div className={styles.kpiCard} title="Live replacements with no row in Fulfillment › Queue — including those still waiting on a batch. Use “Send to queue” on a row to move one across.">
+        <div className={styles.kpiCard} title="Live replacements nobody has marked Ready to Ship yet — most are legitimately waiting on a batch or a part. Click “Ready to Ship” on a row to send it to Fulfillment › Queue.">
           <div className={styles.kpiLabel}>Not in queue</div>
           <div className={styles.kpiValue}>{notQueued}</div>
         </div>
@@ -374,7 +374,12 @@ export default function ReplacementTab() {
               const queueStep = queueStepByOrder.get(o.id);
               return (
                 <tr key={o.id} className={styles.row}>
-                  <td><Link to={`/order-review/${o.id}`}>{o.order_ref}</Link></td>
+                  {/* Not a link. /order-review/:id resolves out of
+                      bucketOrders' `all` + `cancelled`, and 0fb7f45 made both
+                      sales-only, so every replacement sent there has landed on
+                      an empty detail pane since. This row already carries
+                      everything that page would have shown. */}
+                  <td>{o.order_ref}</td>
                   <td>
                     {o.linked_ticket_id ? (
                       <button
@@ -419,7 +424,7 @@ export default function ReplacementTab() {
                         className={styles.btnSecondary}
                         disabled={queueing === o.id}
                         onClick={() => void handleQueue(o)}
-                      >{queueing === o.id ? 'Queueing…' : 'Send to queue'}</button>
+                      >{queueing === o.id ? 'Queueing…' : 'Ready to Ship'}</button>
                     )}
                   </td>
                 </tr>

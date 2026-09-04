@@ -127,16 +127,16 @@ describe('ReplacementTab — getting a replacement into the queue', () => {
     queueSpy.mockResolvedValue({ queued: true });
   });
 
-  it('offers "Send to queue" for a live replacement with no queue row', () => {
+  it('offers "Ready to Ship" for a live replacement with no queue row', () => {
     render(<ReplacementTab />);
-    expect(screen.getAllByRole('button', { name: 'Send to queue' })).toHaveLength(2);
+    expect(screen.getAllByRole('button', { name: 'Ready to Ship' })).toHaveLength(2);
   });
 
   it('shows the step instead of the button once the order is queued', () => {
     queueState.rows = [{ order_id: 'o1', step: 3 }];
     render(<ReplacementTab />);
     expect(screen.getByText('In queue · step 3')).toBeInTheDocument();
-    expect(screen.getAllByRole('button', { name: 'Send to queue' })).toHaveLength(1);
+    expect(screen.getAllByRole('button', { name: 'Ready to Ship' })).toHaveLength(1);
   });
 
   it('counts what is NOT in the queue — the number that went missing with the Sales tab', () => {
@@ -146,9 +146,18 @@ describe('ReplacementTab — getting a replacement into the queue', () => {
     expect(kpi.textContent).toContain('1');
   });
 
+  // /order-review/:id resolves out of bucketOrders' `all` + `cancelled`, and
+  // 0fb7f45 made both sales-only. Every replacement deep link has pointed at a
+  // detail pane that renders its empty state ever since — including the one the
+  // ticket panel navigates to the moment a replacement is created.
+  it('does not link the order ref into Order Review, which cannot resolve a replacement', () => {
+    render(<ReplacementTab />);
+    expect(screen.getByText('R-0001').closest('a')).toBeNull();
+  });
+
   it('queues the order the button belongs to', async () => {
     render(<ReplacementTab />);
-    fireEvent.click(screen.getAllByRole('button', { name: 'Send to queue' })[0]);
+    fireEvent.click(screen.getAllByRole('button', { name: 'Ready to Ship' })[0]);
     await waitFor(() => expect(queueSpy).toHaveBeenCalledWith('o1'));
   });
 
@@ -157,7 +166,7 @@ describe('ReplacementTab — getting a replacement into the queue', () => {
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
 
     render(<ReplacementTab />);
-    fireEvent.click(screen.getAllByRole('button', { name: 'Send to queue' })[0]);
+    fireEvent.click(screen.getAllByRole('button', { name: 'Ready to Ship' })[0]);
 
     await waitFor(() => expect(queueSpy).toHaveBeenCalledTimes(2));
     expect(confirm.mock.calls[0][0]).toContain('Hinge');
@@ -171,7 +180,7 @@ describe('ReplacementTab — getting a replacement into the queue', () => {
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
 
     render(<ReplacementTab />);
-    fireEvent.click(screen.getAllByRole('button', { name: 'Send to queue' })[0]);
+    fireEvent.click(screen.getAllByRole('button', { name: 'Ready to Ship' })[0]);
 
     await waitFor(() => expect(confirm).toHaveBeenCalled());
     expect(queueSpy).toHaveBeenCalledTimes(1);
