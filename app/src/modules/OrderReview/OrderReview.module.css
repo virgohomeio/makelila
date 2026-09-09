@@ -558,9 +558,9 @@
   height: 22px;
   background: var(--color-border);
 }
-/* Cancelling is terminal and has no undo anywhere in the app. It was a solid
-   red slab sitting immediately beside Confirm; it is now a quiet text action
-   behind a divider, at the far end of the bar. */
+/* Cancelling takes an order out of every live tab. It was a solid red slab
+   sitting immediately beside Confirm; it is now a quiet text action behind a
+   divider, at the far end of the bar. */
 .actionCancel {
   background: transparent;
   border-color: transparent;
@@ -580,6 +580,30 @@
   border: 1px solid var(--color-error-border);
   border-radius: var(--radius-sm);
   padding: 9px var(--space-3);
+}
+
+/* The way back out of a mis-click, beside the cancellation it undoes. Quiet:
+   an order in the Cancelled tab is normally there on purpose, so this is a
+   neutral outline, never a second red slab competing with the summary. */
+.actionUncancel {
+  background: var(--color-raised);
+  border-color: var(--color-border);
+  color: var(--color-ink-muted);
+}
+.actionUncancel:hover { border-color: var(--color-ink-faint); color: var(--color-ink); }
+
+/* Confirm step, inline rather than a browser confirm(): the question names the
+   order and says what happens, which a native dialog cannot. */
+.uncancelConfirm {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.uncancelAsk {
+  font-size: var(--font-size-meta);
+  color: var(--color-ink-muted);
+  max-width: 44ch;
 }
 
 /* ── Reason drawer ───────────────────────────────────────────────────────── */

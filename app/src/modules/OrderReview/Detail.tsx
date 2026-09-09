@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
 import type { Order } from '../../lib/orders';
-import { disposition, needInfo, addOrderNote, orderUrgency, orderDue, cancelOrder } from '../../lib/orders';
+import { disposition, needInfo, addOrderNote, orderUrgency, orderDue, cancelOrder, uncancelOrder } from '../../lib/orders';
 import { useAuth } from '../../lib/auth';
 import { CustomerCard } from './detail/CustomerCard';
 import { AddressCard }  from './detail/AddressCard';
@@ -33,6 +33,11 @@ export function Detail({
     fn: () => Promise<void>,
     noteLabel?: string,
     reason?: string,
+    /** Dispositioning moves on to the next order in the queue, which is the
+     *  right behaviour for a work queue. Un-cancelling is not queue work: the
+     *  operator is fixing THIS order and needs to see it land in Pending, so it
+     *  stays put. */
+    opts?: { stay?: boolean },
   ) => {
     try {
       await fn();
@@ -41,7 +46,7 @@ export function Detail({
         await addOrderNote(order.id, authorName, `${noteLabel}: ${trimmed}`);
       }
       setBanner({ variant: 'success', message: `${label} · ${order.customer_name}` });
-      onAfterDisposition();
+      if (!opts?.stay) onAfterDisposition();
     } catch (err) {
       setBanner({
         variant: 'error',
@@ -91,6 +96,17 @@ export function Detail({
           onHold={(reason) => wrap('Held',    () => disposition(order, 'held',    reason), 'Held', reason)}
           onNeedInfo={(note) => wrap('Need-info logged', () => needInfo(order, note), 'Need info', note)}
           onCancelOrder={(reason) => wrap('Cancelled', () => cancelOrder(order.id, reason), 'Cancelled', reason)}
+          onUncancel={isCancelled ? () => wrap(
+            'Moved back to Pending',
+            () => uncancelOrder(order.id),
+            // The note quotes the reason it is undoing, so the order's own log
+            // reads as a pair rather than as two unrelated status flips.
+            'Moved back to Pending',
+            order.cancelled_reason
+              ? `reversing the cancellation "${order.cancelled_reason}"`
+              : 'cancelled in error',
+            { stay: true },
+          ) : undefined}
         />
       </div>
 

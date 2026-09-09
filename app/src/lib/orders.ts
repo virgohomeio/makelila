@@ -6,9 +6,11 @@ import { adjustPartStock } from './parts';
 import { functionErrorMessage } from './functionError';
 import { refundFlagForOrderId, refundFlagTitle } from './refundedOrders';
 
-// 'cancelled' is terminal: the order is dead, it has no fulfillment_queue row,
-// and it is filtered out of every Order Review tab (see useOrders). The row is
-// kept for finance/history rather than deleted.
+// 'cancelled' takes the order out of every live Order Review tab (see
+// useOrders) and it has no fulfillment_queue row. The row is kept for
+// finance/history rather than deleted. It is not quite terminal: a cancellation
+// made in error goes back to 'pending' through uncancelOrder, until money has
+// moved.
 export type OrderStatus = 'pending' | 'approved' | 'flagged' | 'held' | 'cancelled';
 
 export type LineItem =
@@ -1392,6 +1394,121 @@ export async function cancelOrder(orderId: string, reason: string): Promise<void
   }
 
   await logAction('order_cancelled', order.order_ref, note);
+}
+
+/** The same order, written the several ways this app has spelled it. Shopify
+ *  writes "#1184"; the cancellation form and older imports write "1184". A
+ *  cancellation record is paired to its order by ref alone (there is no FK), so
+ *  look under every spelling or the pairing quietly misses. */
+function orderRefVariants(ref: string): string[] {
+  const bare = ref.trim().replace(/^#/, '');
+  return Array.from(new Set([ref.trim(), bare, `#${bare}`].filter(Boolean)));
+}
+
+/** Undo a cancellation made in error — Sales › Cancelled › "Move back to
+ *  Pending". Cancelling used to be terminal with no undo anywhere in the app,
+ *  which meant one mis-click (#1184 Juanita M Wells, cancelled with the reason
+ *  "test") could only be fixed in the database.
+ *
+ *  It reverses the two things cancelOrder wrote:
+ *
+ *    - the order goes back to 'pending' — intake, not 'approved'. Same choice
+ *      as returnOrderToReview: landing it in Confirmed would strand it there
+ *      with no queue row, because re-approving would not re-fire
+ *      auto_enqueue_approved_order. It gets reviewed and confirmed again.
+ *    - the cancellation record is withdrawn, so the refund team stops seeing a
+ *      live request for an order that is live again. It is closed rather than
+ *      deleted: order_cancellations has no DELETE policy (a delete would come
+ *      back 0 rows with no error, reading as success), and status only allows
+ *      'submitted' or 'completed'. Closing it is what takes it off the Refunds
+ *      board — see pendingCancellationRefunds.
+ *
+ *  It refuses whenever the money has moved or is moving. Bringing an order back
+ *  to life after we have paid for it is the one mistake worse than the
+ *  cancellation being undone:
+ *
+ *    - a replacement — nothing was paid, but cancelling gave its reserved unit,
+ *      its parts and its ticket back, and that stock may since have gone to
+ *      someone else. Queue a fresh replacement from the ticket instead.
+ *    - an order Shopify already refunded or voided.
+ *    - an order with a refund card against it (assertNotRefunded).
+ *    - a cancellation already compiled into a refund request.
+ *
+ *  Anything queue-side is left alone, exactly as cancelOrder leaves it. */
+export async function uncancelOrder(orderId: string): Promise<void> {
+  const userId = await currentUserId();
+
+  const { data: order, error: oErr } = await supabase
+    .from('orders')
+    .select('id, order_ref, kind, status, financial_status')
+    .eq('id', orderId)
+    .single();
+  if (oErr || !order) throw new Error(`Order not found: ${oErr?.message ?? 'no row'}`);
+  if (order.status !== 'cancelled') throw new Error('This order is not cancelled.');
+
+  if (order.kind === 'replacement') {
+    throw new Error(
+      'Only a sale can be moved back to Pending. Cancelling this replacement released its '
+      + 'unit, its parts and its ticket, so queue a new replacement from the ticket instead.',
+    );
+  }
+  if (alreadySettled(order.financial_status)) {
+    throw new Error(
+      `Cannot move this order back to Pending: Shopify shows it as ${order.financial_status} — `
+      + 'the money has already gone back.',
+    );
+  }
+  await assertNotRefunded(orderId, 'Cannot move this order back to Pending');
+
+  // Withdraw the cancellation record BEFORE reviving the order. If this half
+  // fails the order stays cancelled and the operator can retry; the other
+  // order would briefly leave a live order with a live refund request against
+  // it, which is how an order that is about to ship gets refunded.
+  const { data: records, error: cErr } = await supabase
+    .from('order_cancellations')
+    .select('id, status, refund_approval_id, ops_notes')
+    .in('order_ref', orderRefVariants(order.order_ref));
+  if (cErr) throw new Error(`Could not check the cancellation record: ${cErr.message}`);
+
+  type PairedCancellation = {
+    id: string; status: string; refund_approval_id: string | null; ops_notes: string | null;
+  };
+  const paired = (records ?? []) as PairedCancellation[];
+
+  if (paired.some(c => c.refund_approval_id)) {
+    throw new Error(
+      'This cancellation has already been compiled into a refund request. Resolve the refund '
+      + 'in Shipping › Cancellations before moving the order back to Pending.',
+    );
+  }
+
+  const nowIso = new Date().toISOString();
+  const withdrawnNote = `Withdrawn ${nowIso.slice(0, 10)}: the order was moved back to Pending in makeLILA (cancelled in error). No refund owed.`;
+  for (const c of paired.filter(c => c.status === 'submitted')) {
+    const { error } = await supabase.from('order_cancellations').update({
+      status: 'completed',
+      processed_by: userId,
+      processed_at: nowIso,
+      ops_notes: [c.ops_notes, withdrawnNote].filter(Boolean).join('\n'),
+    }).eq('id', c.id);
+    if (error) throw new Error(`Failed to withdraw the cancellation record: ${error.message}`);
+  }
+
+  // 'pending' is the intake state, so the disposition stamps go with it: the
+  // order is back to having no decision on record, not carrying the cancel's.
+  const { error: uErr } = await supabase
+    .from('orders')
+    .update({
+      status: 'pending',
+      cancelled_at: null,
+      cancelled_reason: null,
+      dispositioned_by: null,
+      dispositioned_at: null,
+    })
+    .eq('id', orderId);
+  if (uErr) throw new Error(`Failed to move the order back to Pending: ${uErr.message}`);
+
+  await logAction('order_uncancelled', order.order_ref, 'moved back to Pending');
 }
 
 export function useOrderNotes(orderId: string | null): {

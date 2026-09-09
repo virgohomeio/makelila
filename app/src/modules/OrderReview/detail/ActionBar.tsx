@@ -30,6 +30,7 @@ export function ActionBar({
   onHold,
   onNeedInfo,
   onCancelOrder,
+  onUncancel,
   confirmReady = true,
 }: {
   order: Order;
@@ -38,10 +39,13 @@ export function ActionBar({
   onHold: (reason: string) => void;
   onNeedInfo: (note: string) => void;
   onCancelOrder: (reason: string) => void;
+  /** Only the Cancelled view passes this — the way back out of a mis-click. */
+  onUncancel?: () => void;
   confirmReady?: boolean;
 }) {
   const [expanded, setExpanded] = useState<ExpandedAction>(null);
   const [reason, setReason] = useState('');
+  const [confirmingUncancel, setConfirmingUncancel] = useState(false);
 
   const submit = () => {
     if (expanded === 'flag') {
@@ -66,9 +70,11 @@ export function ActionBar({
     setExpanded(prev => (prev === which ? null : which));
   };
 
-  // Cancelling is terminal and there is no un-cancel anywhere in the app, so a
-  // cancelled order gets a read-only summary instead of actions that would
-  // quietly resurrect it.
+  // A cancelled order gets a read-only summary instead of the review actions —
+  // it is out of the queue and nothing about it is still being decided. The one
+  // action it keeps is the way back: a cancel is a single click, and it used to
+  // be unfixable outside the database. Reviving it is gated by uncancelOrder,
+  // which refuses once money has moved, and by a confirm step here.
   if (order.status === 'cancelled') {
     const on = order.cancelled_at
       ? new Date(order.cancelled_at).toLocaleDateString('en-US')
@@ -79,6 +85,31 @@ export function ActionBar({
           ✕ Cancelled{on ? ` ${on}` : ''}
           {order.cancelled_reason ? ` — ${order.cancelled_reason}` : ''}
         </span>
+        {onUncancel && (confirmingUncancel ? (
+          <span className={styles.uncancelConfirm}>
+            <span className={styles.uncancelAsk}>
+              Move {order.order_ref} back to Pending? It returns to review and has to be
+              confirmed again.
+            </span>
+            <button
+              type="button"
+              className={styles.reasonCancel}
+              onClick={() => setConfirmingUncancel(false)}
+            >Discard</button>
+            <button
+              type="button"
+              className={styles.reasonSubmit}
+              onClick={() => { setConfirmingUncancel(false); onUncancel(); }}
+            >Move back to Pending</button>
+          </span>
+        ) : (
+          <button
+            type="button"
+            className={`${styles.actionBtn} ${styles.actionUncancel}`}
+            onClick={() => setConfirmingUncancel(true)}
+            title="Undo this cancellation — the order goes back to Pending for review"
+          >↩ Move back to Pending</button>
+        ))}
       </div>
     );
   }
@@ -121,8 +152,9 @@ export function ActionBar({
           aria-expanded={expanded === 'info'}
         >? Need info</button>
 
-        {/* Terminal, and there is no undo. It sits behind a divider at the far
-            end rather than as a filled red slab beside the primary action. */}
+        {/* Takes the order out of every live tab, and the only way back is the
+            Cancelled view. It sits behind a divider at the far end rather than
+            as a filled red slab beside the primary action. */}
         <span className={styles.actionRight}>
           <span className={styles.actionDivider} aria-hidden="true" />
           <button
@@ -139,8 +171,9 @@ export function ActionBar({
         <div className={styles.reasonStack}>
           {expanded === 'cancel' && (
             <div className={styles.cancelWarning}>
-              Cancelling {order.order_ref} is final — it leaves every live tab and opens a
-              record in Shipping › Cancellations for the refund team. No refund is issued here.
+              Cancelling {order.order_ref} takes it out of every live tab and opens a record
+              in Shipping › Cancellations for the refund team. No refund is issued here. Until
+              that record becomes a refund it can be moved back to Pending from Cancelled.
             </div>
           )}
           <div className={styles.drawerLabel}>{drawer.label}</div>
