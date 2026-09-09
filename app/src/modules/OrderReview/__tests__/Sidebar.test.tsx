@@ -83,6 +83,7 @@ describe('Sidebar', () => {
         held={[h1]}
         flagged={[f1]}
         approved={[]}
+        confirmedBacklog={[]}
         cancelled={[c1]}
         selectedId={selectedId}
         onSelect={onSelect}
@@ -120,7 +121,7 @@ describe('Sidebar', () => {
     render(
       <Sidebar
         all={[p1, stale]} pending={[p1]} pendingBacklog={[stale]}
-        held={[]} flagged={[]} approved={[]} cancelled={[]}
+        held={[]} flagged={[]} approved={[]} confirmedBacklog={[]} cancelled={[]}
         selectedId={null} onSelect={vi.fn()}
       />,
     );
@@ -130,6 +131,25 @@ describe('Sidebar', () => {
     expect(screen.queryByText('Richard Ahola')).not.toBeInTheDocument();
     fireEvent.click(note);
     expect(screen.getByText('Richard Ahola')).toBeInTheDocument();
+  });
+
+  // The note belongs to whichever queue you are looking at — Confirmed trims
+  // itself too, and a count from the other tab would be a lie.
+  it('reports the Confirmed queue backlog on the Confirmed tab', () => {
+    const stale = mkOrder({ id: 'a1', status: 'approved', customer_name: 'Tony Rinella' });
+    render(
+      <Sidebar
+        all={[p1, stale]} pending={[p1]} pendingBacklog={[]}
+        held={[]} flagged={[]} approved={[]} confirmedBacklog={[stale]}
+        cancelled={[]} selectedId={null} onSelect={vi.fn()}
+      />,
+    );
+    // Pending is showing and holds nothing back, so no note yet.
+    expect(screen.queryByText(/held back/i)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /^Confirmed: 0 orders$/ }));
+    expect(screen.getByRole('button', { name: /1 held back from this queue/i }))
+      .toBeInTheDocument();
   });
 
   it('says nothing about a backlog when the cutoff is holding nothing back', () => {
@@ -147,7 +167,7 @@ describe('Sidebar', () => {
   it('shows empty-state copy when the active tab has no rows', () => {
     render(
       <Sidebar
-        all={[]} pending={[]} pendingBacklog={[]} held={[]} flagged={[]} approved={[]} cancelled={[]}
+        all={[]} pending={[]} pendingBacklog={[]} held={[]} flagged={[]} approved={[]} confirmedBacklog={[]} cancelled={[]}
         selectedId={null} onSelect={vi.fn()}
       />,
     );
@@ -179,6 +199,7 @@ describe('Sidebar', () => {
     render(
       <Sidebar
         all={[]} pending={[]} pendingBacklog={[]} held={[]} flagged={[]} approved={[]}
+ confirmedBacklog={[]}
         cancelled={[newer, older]}
         selectedId={null} onSelect={vi.fn()}
       />,

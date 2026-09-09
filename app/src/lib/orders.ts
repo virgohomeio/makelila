@@ -385,7 +385,11 @@ export type OrderBuckets = {
   pendingBacklog: Order[];
   held: Order[];
   flagged: Order[];
+  /** The live ship queue — see isConfirmedQueueWork. */
   approved: Order[];
+  /** Confirmed sales the queue holds back as too old. Same treatment as
+   *  pendingBacklog: still in `all`, still searchable, oldest first. */
+  confirmedBacklog: Order[];
   /** Terminal: cancelled from Sales or from the fulfillment queue. Out of every
    *  live tab, but kept in its own so the team can still find the order and the
    *  reason it died. Newest cancellation first. */
@@ -405,38 +409,38 @@ function alreadySettled(financialStatus: string | null | undefined): boolean {
   return SETTLED_FINANCIAL_STATUSES.has((financialStatus ?? '').toLowerCase());
 }
 
-/** Pending is a work queue, and a work queue has to be finishable. Before this
- *  cutoff it opened on orders going back to 2023-04-14 — Shopify's whole
- *  history, imported at once — and 19 of the 36 rows in it were older than the
- *  three months anyone was actually working. Half of those had already been
- *  refunded; the rest had been sitting long enough that "pending review" was
- *  not an honest description of them.
+/** Sales' two work queues — Pending (review it) and Confirmed (ship it) — both
+ *  opened on the entire imported history, back to 2023-04-14. Pending held 19
+ *  rows older than anything anyone was working; Confirmed held 5, every one of
+ *  them an INV- row from the invoice importer with no fulfillment_queue row
+ *  behind it. Neither queue was finishable, and a queue you cannot finish stops
+ *  being read.
  *
  *  Same shape as CANCELLATION_QUEUE_START in postShipment: a date before which
  *  rows are history rather than work. Nothing is deleted or hidden — an order
  *  before the cutoff keeps its row, stays in the All tab, stays searchable, and
- *  comes back the moment this date moves. Only the queue is trimmed.
+ *  comes back the moment this date moves. Only the queues are trimmed.
  *
  *  Read against placed_at ?? created_at, the same basis the tab's own SLA uses,
  *  so an order's age means one thing on this screen. */
-export const PENDING_QUEUE_START = '2026-06-02';
+export const SALES_QUEUE_START = '2026-06-02';
 
 /** True when an order is new enough to be queue work. Fails open: an order
  *  whose date will not parse stays in the queue, because a row nobody can see
  *  is worse than a row in the wrong order. */
-function withinPendingQueue(order: Order, since: string = PENDING_QUEUE_START): boolean {
+function withinSalesQueue(order: Order, since: string = SALES_QUEUE_START): boolean {
   // Parse rather than string-compare — PostgREST timestamps carry an offset
   // ('+00:00') that a lexicographic compare against a bare date gets wrong.
   const basis = Date.parse(order.placed_at ?? order.created_at);
   return Number.isNaN(basis) || basis >= Date.parse(since);
 }
 
-/** Is this order still work?
+/** Is this order still work for the Pending queue?
  *
  *  Two ways it is not. It can be too old to be part of what anyone is doing
- *  (PENDING_QUEUE_START), or its money can already have gone back — Shopify
- *  says 'refunded' or 'voided', so there is nothing left to confirm, pick or
- *  ship. #1183 Sherry Tang was refunded on 2026-08-18 and #1231 Lisa Clarke on
+ *  (SALES_QUEUE_START), or its money can already have gone back — Shopify says
+ *  'refunded' or 'voided', so there is nothing left to confirm, pick or ship.
+ *  #1183 Sherry Tang was refunded on 2026-08-18 and #1231 Lisa Clarke on
  *  2026-08-13; both sat in Pending afterwards asking to be reviewed, because
  *  refunding an order never moved its status.
  *
@@ -449,7 +453,26 @@ function withinPendingQueue(order: Order, since: string = PENDING_QUEUE_START): 
  *  wants cancelling properly, which files it in Shipping › Cancellations. This
  *  rule only keeps it out of the queue meanwhile; it changes no data. */
 function isPendingQueueWork(order: Order): boolean {
-  return withinPendingQueue(order) && !alreadySettled(order.financial_status);
+  return withinSalesQueue(order) && !alreadySettled(order.financial_status);
+}
+
+/** Is this order still work for the Confirmed queue?
+ *
+ *  Age only — deliberately not the settled-money rule that Pending applies. A
+ *  confirmed order has been handed to fulfillment, and the money question there
+ *  is already answered better than a status field can: enqueueForFulfillment
+ *  refuses a refunded order outright, and withdrawOrderFromQueue pulls one that
+ *  gets refunded after the fact. Adding the rule here would change nothing
+ *  today (no confirmed order since the cutoff is refunded) while quietly hiding
+ *  a row that Fulfillment is still holding — the one place a Sales tab and the
+ *  ship queue must not disagree. */
+function isConfirmedQueueWork(order: Order): boolean {
+  return withinSalesQueue(order);
+}
+
+/** Oldest first — a backlog is read to work through it, not to skim it. */
+function byAgeAscending(a: Order, b: Order): number {
+  return (a.placed_at ?? a.created_at).localeCompare(b.placed_at ?? b.created_at);
 }
 
 export function bucketOrders(
@@ -506,17 +529,17 @@ export function bucketOrders(
     return true;
   });
 
-  const allPending = active.filter(o => o.status === 'pending');
+  const allPending  = active.filter(o => o.status === 'pending');
+  const allApproved = active.filter(o => o.status === 'approved');
 
   return {
     all:      active,
     pending:  allPending.filter(isPendingQueueWork),
-    pendingBacklog: allPending
-      .filter(o => !isPendingQueueWork(o))
-      .sort((a, b) => (a.placed_at ?? a.created_at).localeCompare(b.placed_at ?? b.created_at)),
+    pendingBacklog: allPending.filter(o => !isPendingQueueWork(o)).sort(byAgeAscending),
     held:     active.filter(o => o.status === 'held'),
     flagged:  active.filter(o => o.status === 'flagged'),
-    approved: active.filter(o => o.status === 'approved'),
+    approved: allApproved.filter(isConfirmedQueueWork),
+    confirmedBacklog: allApproved.filter(o => !isConfirmedQueueWork(o)).sort(byAgeAscending),
     cancelled,
   };
 }

@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import type { Order } from '../../lib/orders';
-import { PENDING_QUEUE_START } from '../../lib/orders';
+import { SALES_QUEUE_START } from '../../lib/orders';
 import { OrderRow } from './OrderRow';
 import { indexRefundFlags, useRefundMarks } from '../../lib/refundedOrders';
 import { EmptyState } from '../../components/ui';
@@ -9,17 +9,19 @@ import styles from './OrderReview.module.css';
 type Tab = 'pending' | 'held' | 'flagged' | 'approved' | 'all' | 'cancelled';
 
 export function Sidebar({
-  pending, pendingBacklog, held, flagged, approved, all, cancelled,
+  pending, pendingBacklog, held, flagged, approved, confirmedBacklog, all, cancelled,
   selectedId,
   onSelect,
 }: {
   pending: Order[];
-  /** Pending sales from before PENDING_QUEUE_START. They are not in the Pending
-   *  tab, so the rail says so rather than letting them disappear quietly. */
+  /** What each work queue holds back — too old, or (for Pending) already
+   *  refunded. They are not in their tab, so the rail says so rather than
+   *  letting them disappear quietly. */
   pendingBacklog: Order[];
   held: Order[];
   flagged: Order[];
   approved: Order[];
+  confirmedBacklog: Order[];
   all: Order[];
   /** Terminal — cancelled here or from the fulfillment queue. Already sorted
    *  newest-cancelled first by bucketOrders. */
@@ -70,8 +72,17 @@ export function Sidebar({
 
   // Rendered from the constant itself, so moving the cutoff moves this label
   // too — a hardcoded date here would go stale the first time it changed.
-  const cutoffLabel = new Date(`${PENDING_QUEUE_START}T00:00:00`)
+  const cutoffLabel = new Date(`${SALES_QUEUE_START}T00:00:00`)
     .toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+
+  // Both work queues trim themselves, so the note belongs to whichever one you
+  // are looking at. The other tabs are not queues and hold nothing back.
+  const backlog = tab === 'pending'  ? pendingBacklog
+                : tab === 'approved' ? confirmedBacklog
+                : [];
+  const backlogReason = tab === 'pending'
+    ? `already refunded, or placed before ${cutoffLabel}`
+    : `placed before ${cutoffLabel}`;
 
   return (
     <aside className={styles.sidebar}>
@@ -125,15 +136,15 @@ export function Sidebar({
 
       {/* A queue that quietly drops rows is a queue nobody can trust. When the
           cutoff is holding anything back, say how much and where it went. */}
-      {tab === 'pending' && pendingBacklog.length > 0 && (
+      {backlog.length > 0 && (
         <button
           type="button"
           className={styles.backlogNote}
           onClick={() => setTab('all')}
-          title={`Held back from this queue: already refunded, or placed before ${cutoffLabel}. `
+          title={`Held back from this queue: ${backlogReason}. `
                  + 'They keep their rows and stay searchable — click to see them in All.'}
         >
-          {pendingBacklog.length} held back from this queue — see All
+          {backlog.length} held back from this queue — see All
         </button>
       )}
 
