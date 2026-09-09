@@ -377,10 +377,9 @@ function applyChange(cache: Order[], payload: { eventType: string; new: Order | 
 export type OrderBuckets = {
   /** Every sale still live in Order Review — excludes fulfilled and cancelled. */
   all: Order[];
-  /** The live confirmation queue: pending sales placed on or after
-   *  PENDING_QUEUE_START. */
+  /** The live confirmation queue — see isPendingQueueWork. */
   pending: Order[];
-  /** Pending sales from before the cutoff, held back out of the queue. Not
+  /** Pending sales the queue holds back: too old, or already refunded. Not
    *  hidden — they are still in `all`, and this is what the rail counts when it
    *  says how many are being held back. Oldest first. */
   pendingBacklog: Order[];
@@ -396,6 +395,16 @@ export type OrderBuckets = {
 /** The pure core of useOrders — which orders are still live, and which tab each
  *  one belongs to. Split out from the hook so the routing rules are testable
  *  without standing up Supabase. */
+/** The Shopify money states in which nothing is left to give back: the order
+ *  was refunded in full, or the payment was authorized and voided without ever
+ *  being captured. 'partially_refunded' is deliberately NOT here — a balance
+ *  remains, so that cancellation still owes the customer a refund decision. */
+const SETTLED_FINANCIAL_STATUSES = new Set(['refunded', 'voided']);
+
+function alreadySettled(financialStatus: string | null | undefined): boolean {
+  return SETTLED_FINANCIAL_STATUSES.has((financialStatus ?? '').toLowerCase());
+}
+
 /** Pending is a work queue, and a work queue has to be finishable. Before this
  *  cutoff it opened on orders going back to 2023-04-14 — Shopify's whole
  *  history, imported at once — and 19 of the 36 rows in it were older than the
@@ -420,6 +429,27 @@ function withinPendingQueue(order: Order, since: string = PENDING_QUEUE_START): 
   // ('+00:00') that a lexicographic compare against a bare date gets wrong.
   const basis = Date.parse(order.placed_at ?? order.created_at);
   return Number.isNaN(basis) || basis >= Date.parse(since);
+}
+
+/** Is this order still work?
+ *
+ *  Two ways it is not. It can be too old to be part of what anyone is doing
+ *  (PENDING_QUEUE_START), or its money can already have gone back — Shopify
+ *  says 'refunded' or 'voided', so there is nothing left to confirm, pick or
+ *  ship. #1183 Sherry Tang was refunded on 2026-08-18 and #1231 Lisa Clarke on
+ *  2026-08-13; both sat in Pending afterwards asking to be reviewed, because
+ *  refunding an order never moved its status.
+ *
+ *  Settled-ness is read from the same SETTLED_FINANCIAL_STATUSES that decides
+ *  whether cancelling files a refund request, so "we already paid this back"
+ *  means one thing across the app. 'partially_refunded' is not settled: a
+ *  balance remains, and that order is still live work.
+ *
+ *  A refunded order in this state is a bookkeeping loose end — it probably
+ *  wants cancelling properly, which files it in Shipping › Cancellations. This
+ *  rule only keeps it out of the queue meanwhile; it changes no data. */
+function isPendingQueueWork(order: Order): boolean {
+  return withinPendingQueue(order) && !alreadySettled(order.financial_status);
 }
 
 export function bucketOrders(
@@ -480,9 +510,9 @@ export function bucketOrders(
 
   return {
     all:      active,
-    pending:  allPending.filter(o => withinPendingQueue(o)),
+    pending:  allPending.filter(isPendingQueueWork),
     pendingBacklog: allPending
-      .filter(o => !withinPendingQueue(o))
+      .filter(o => !isPendingQueueWork(o))
       .sort((a, b) => (a.placed_at ?? a.created_at).localeCompare(b.placed_at ?? b.created_at)),
     held:     active.filter(o => o.status === 'held'),
     flagged:  active.filter(o => o.status === 'flagged'),
@@ -1332,16 +1362,6 @@ export async function returnOrderToReview(orderId: string): Promise<ReviewLandin
 
   await logAction('order_returned_to_review', order.order_ref, landing.label);
   return landing;
-}
-
-/** The Shopify money states in which nothing is left to give back: the order
- *  was refunded in full, or the payment was authorized and voided without ever
- *  being captured. 'partially_refunded' is deliberately NOT here — a balance
- *  remains, so that cancellation still owes the customer a refund decision. */
-const SETTLED_FINANCIAL_STATUSES = new Set(['refunded', 'voided']);
-
-function alreadySettled(financialStatus: string | null | undefined): boolean {
-  return SETTLED_FINANCIAL_STATUSES.has((financialStatus ?? '').toLowerCase());
 }
 
 function settledNote(financialStatus: string | null | undefined): string {

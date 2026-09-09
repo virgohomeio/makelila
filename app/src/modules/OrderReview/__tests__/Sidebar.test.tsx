@@ -124,7 +124,7 @@ describe('Sidebar', () => {
         selectedId={null} onSelect={vi.fn()}
       />,
     );
-    const note = screen.getByRole('button', { name: /1 older than .* held back/i });
+    const note = screen.getByRole('button', { name: /1 held back from this queue/i });
     expect(note).toBeInTheDocument();
     // And it is a way through, not just a label: it opens the tab that has them.
     expect(screen.queryByText('Richard Ahola')).not.toBeInTheDocument();

@@ -130,9 +130,10 @@ export function Sidebar({
           type="button"
           className={styles.backlogNote}
           onClick={() => setTab('all')}
-          title="Show every live order, including the ones held back"
+          title={`Held back from this queue: already refunded, or placed before ${cutoffLabel}. `
+                 + 'They keep their rows and stay searchable — click to see them in All.'}
         >
-          {pendingBacklog.length} older than {cutoffLabel} held back — see All
+          {pendingBacklog.length} held back from this queue — see All
         </button>
       )}
 

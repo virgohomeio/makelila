@@ -618,4 +618,59 @@ describe('bucketOrders', () => {
       expect(b.pendingBacklog).toEqual([]);
     });
   });
+
+  // Refunding an order never moved its status, so #1183 Sherry Tang and #1231
+  // Lisa Clarke sat in Pending asking to be reviewed after their money had
+  // gone back. There is nothing left to confirm on an order we have paid back.
+  describe('orders whose money has already gone back', () => {
+    const recent = (id: string, financial_status: string | null) =>
+      mk({ id, status: 'pending', financial_status,
+           placed_at: '2026-08-23', created_at: '2026-08-23' });
+
+    it('holds a refunded or voided order back, however recent it is', () => {
+      const b = bucketOrders(
+        [recent('refunded', 'refunded'), recent('voided', 'voided'), recent('live', 'paid')],
+        none, none,
+      );
+      expect(b.pending.map(o => o.id)).toEqual(['live']);
+      expect(b.pendingBacklog.map(o => o.id).sort()).toEqual(['refunded', 'voided']);
+      // Held back, not deleted — Sales can still open them.
+      expect(b.all).toHaveLength(3);
+    });
+
+    it('reads the status case-insensitively', () => {
+      const b = bucketOrders([recent('shouty', 'REFUNDED')], none, none);
+      expect(b.pending).toEqual([]);
+    });
+
+    // A balance remains on a partial refund, so that order is still live work.
+    // This is the same line SETTLED_FINANCIAL_STATUSES draws for cancellations.
+    it('keeps a partially refunded order in the queue', () => {
+      const b = bucketOrders(
+        [recent('partial', 'partially_refunded'), recent('part-paid', 'partially_paid')],
+        none, none,
+      );
+      expect(b.pending.map(o => o.id).sort()).toEqual(['part-paid', 'partial']);
+      expect(b.pendingBacklog).toEqual([]);
+    });
+
+    it('keeps an order with no money state at all in the queue', () => {
+      const b = bucketOrders([recent('unknown', null)], none, none);
+      expect(b.pending.map(o => o.id)).toEqual(['unknown']);
+    });
+
+    // Same rule as the date cutoff: Pending only. A refunded order someone has
+    // deliberately flagged or held is a decision in progress, not queue noise.
+    it('leaves refunded orders in every other status alone', () => {
+      const b = bucketOrders(
+        [mk({ id: 'h', status: 'held',     financial_status: 'refunded' }),
+         mk({ id: 'f', status: 'flagged',  financial_status: 'refunded' }),
+         mk({ id: 'a', status: 'approved', financial_status: 'refunded' })],
+        none, none,
+      );
+      expect(b.held.map(o => o.id)).toEqual(['h']);
+      expect(b.flagged.map(o => o.id)).toEqual(['f']);
+      expect(b.approved.map(o => o.id)).toEqual(['a']);
+    });
+  });
 });
