@@ -279,6 +279,25 @@
   padding: var(--space-2) var(--space-3) 0;
 }
 
+/* The cutoff's receipt: what the Pending queue is holding back, and the way to
+   it. A quiet line under the count, not a warning — the orders are fine, they
+   are just not this week's work. */
+.backlogNote {
+  display: block;
+  width: calc(100% - var(--space-3) * 2);
+  margin: var(--space-2) var(--space-3) 0;
+  padding: 6px var(--space-2);
+  background: var(--color-surface);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-meta);
+  color: var(--color-ink-muted);
+  text-align: left;
+  cursor: pointer;
+}
+.backlogNote:hover { border-color: var(--color-ink-faint); color: var(--color-ink); }
+.backlogNote:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+
 .syncRow {
   display: flex;
   align-items: center;

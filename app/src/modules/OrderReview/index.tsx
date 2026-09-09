@@ -21,7 +21,7 @@ export default function OrderReview() {
   const { orderId } = useParams<{ orderId: string }>();
   const navigate = useNavigate();
   const isMobile = useIsMobile();
-  const { all, pending, held, flagged, approved, cancelled, loading } = useOrders();
+  const { all, pending, pendingBacklog, held, flagged, approved, cancelled, loading } = useOrders();
   // Every bucket here is sales-only. Replacements are created already-approved
   // and live in Fulfillment; Sales never shows one, including by URL.
   //
@@ -164,6 +164,7 @@ export default function OrderReview() {
           <Sidebar
             all={all}
             pending={pending}
+            pendingBacklog={pendingBacklog}
             held={held}
             flagged={flagged}
             approved={approved}
@@ -183,6 +184,7 @@ export default function OrderReview() {
         <Sidebar
           all={all}
           pending={pending}
+          pendingBacklog={pendingBacklog}
           held={held}
           flagged={flagged}
           approved={approved}

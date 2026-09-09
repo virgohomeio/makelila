@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import type { Order } from '../../lib/orders';
+import { PENDING_QUEUE_START } from '../../lib/orders';
 import { OrderRow } from './OrderRow';
 import { indexRefundFlags, useRefundMarks } from '../../lib/refundedOrders';
 import { EmptyState } from '../../components/ui';
@@ -8,11 +9,14 @@ import styles from './OrderReview.module.css';
 type Tab = 'pending' | 'held' | 'flagged' | 'approved' | 'all' | 'cancelled';
 
 export function Sidebar({
-  pending, held, flagged, approved, all, cancelled,
+  pending, pendingBacklog, held, flagged, approved, all, cancelled,
   selectedId,
   onSelect,
 }: {
   pending: Order[];
+  /** Pending sales from before PENDING_QUEUE_START. They are not in the Pending
+   *  tab, so the rail says so rather than letting them disappear quietly. */
+  pendingBacklog: Order[];
   held: Order[];
   flagged: Order[];
   approved: Order[];
@@ -64,6 +68,11 @@ export function Sidebar({
 
   const activeTabLabel = tabs.find(t => t.key === tab)?.label ?? '';
 
+  // Rendered from the constant itself, so moving the cutoff moves this label
+  // too — a hardcoded date here would go stale the first time it changed.
+  const cutoffLabel = new Date(`${PENDING_QUEUE_START}T00:00:00`)
+    .toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+
   return (
     <aside className={styles.sidebar}>
       <div className={styles.sidebarHeader}>
@@ -113,6 +122,19 @@ export function Sidebar({
       <div className={styles.railCount}>
         {visible.length} order{visible.length === 1 ? '' : 's'}{query.trim() ? ' matching' : ''}
       </div>
+
+      {/* A queue that quietly drops rows is a queue nobody can trust. When the
+          cutoff is holding anything back, say how much and where it went. */}
+      {tab === 'pending' && pendingBacklog.length > 0 && (
+        <button
+          type="button"
+          className={styles.backlogNote}
+          onClick={() => setTab('all')}
+          title="Show every live order, including the ones held back"
+        >
+          {pendingBacklog.length} older than {cutoffLabel} held back — see All
+        </button>
+      )}
 
       <div className={styles.list}>
         {visible.length === 0 ? (

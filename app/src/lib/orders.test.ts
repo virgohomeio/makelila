@@ -28,7 +28,7 @@ vi.mock('./activityLog', () => ({
   logAction: logActionMock,
 }));
 
-import { bucketOrders, type Order, disposition, needInfo, nextReplacementOrderRef, createReplacementOrder, createPendingReplacement, hasPendingLine, markOrderShipped, markOrderDelivered, cancelReplacementOrder } from './orders';
+import { bucketOrders, PENDING_QUEUE_START, type Order, disposition, needInfo, nextReplacementOrderRef, createReplacementOrder, createPendingReplacement, hasPendingLine, markOrderShipped, markOrderDelivered, cancelReplacementOrder } from './orders';
 
 describe('disposition', () => {
   beforeEach(() => {
@@ -542,5 +542,80 @@ describe('bucketOrders', () => {
       none, none,
     );
     expect(b.pending.map(o => o.id)).toEqual(['s1']);
+  });
+
+  // Pending is a work queue, and it opened on the whole Shopify import — back
+  // to 2023-04-14. PENDING_QUEUE_START trims it to work anyone is actually
+  // doing. Nothing is deleted or hidden: the backlog keeps its rows in `all`.
+  describe(`the ${PENDING_QUEUE_START} pending cutoff`, () => {
+    const dated = (id: string, placed: string) =>
+      mk({ id, status: 'pending', placed_at: placed, created_at: placed });
+
+    it('keeps orders placed on or after the cutoff in the queue', () => {
+      const b = bucketOrders(
+        [dated('on', PENDING_QUEUE_START), dated('after', '2026-09-07')],
+        none, none,
+      );
+      expect(b.pending.map(o => o.id)).toEqual(['on', 'after']);
+      expect(b.pendingBacklog).toEqual([]);
+    });
+
+    it('holds older orders back, oldest first, without removing them from All', () => {
+      const b = bucketOrders(
+        [dated('recent', '2026-09-07'),
+         dated('ancient', '2023-04-14'),
+         dated('old', '2026-02-26')],
+        none, none,
+      );
+      expect(b.pending.map(o => o.id)).toEqual(['recent']);
+      expect(b.pendingBacklog.map(o => o.id)).toEqual(['ancient', 'old']);
+      // The whole point of a cutoff over a delete: they are still here.
+      expect(b.all.map(o => o.id).sort()).toEqual(['ancient', 'old', 'recent']);
+    });
+
+    it('falls back to created_at when an order was never given a placed date', () => {
+      const b = bucketOrders(
+        [mk({ id: 'no-placed', status: 'pending', placed_at: null, created_at: '2026-01-05' })],
+        none, none,
+      );
+      expect(b.pending).toEqual([]);
+      expect(b.pendingBacklog.map(o => o.id)).toEqual(['no-placed']);
+    });
+
+    // A row nobody can see is worse than a row in the wrong order, so an
+    // unparseable date stays in the queue where someone will deal with it.
+    it('fails open on a date it cannot parse', () => {
+      const b = bucketOrders(
+        [mk({ id: 'junk', status: 'pending', placed_at: 'not a date', created_at: 'nor this' })],
+        none, none,
+      );
+      expect(b.pending.map(o => o.id)).toEqual(['junk']);
+      expect(b.pendingBacklog).toEqual([]);
+    });
+
+    // Timestamps come back from PostgREST with an offset. A lexicographic
+    // compare against the bare cutoff date would call this one too old.
+    it('compares parsed instants, not strings, against the bare cutoff date', () => {
+      const b = bucketOrders(
+        [dated('offset', '2026-06-02T09:15:00+00:00')],
+        none, none,
+      );
+      expect(b.pending.map(o => o.id)).toEqual(['offset']);
+    });
+
+    // The cutoff is a Pending-queue rule, not a global one: an old order that
+    // is held, flagged or confirmed is live work and must not be swept up.
+    it('leaves every other status alone', () => {
+      const b = bucketOrders(
+        [mk({ id: 'h', status: 'held',     placed_at: '2023-05-01', created_at: '2023-05-01' }),
+         mk({ id: 'f', status: 'flagged',  placed_at: '2024-12-31', created_at: '2024-12-31' }),
+         mk({ id: 'a', status: 'approved', placed_at: '2023-05-01', created_at: '2023-05-01' })],
+        none, none,
+      );
+      expect(b.held.map(o => o.id)).toEqual(['h']);
+      expect(b.flagged.map(o => o.id)).toEqual(['f']);
+      expect(b.approved.map(o => o.id)).toEqual(['a']);
+      expect(b.pendingBacklog).toEqual([]);
+    });
   });
 });

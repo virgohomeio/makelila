@@ -377,7 +377,13 @@ function applyChange(cache: Order[], payload: { eventType: string; new: Order | 
 export type OrderBuckets = {
   /** Every sale still live in Order Review — excludes fulfilled and cancelled. */
   all: Order[];
+  /** The live confirmation queue: pending sales placed on or after
+   *  PENDING_QUEUE_START. */
   pending: Order[];
+  /** Pending sales from before the cutoff, held back out of the queue. Not
+   *  hidden — they are still in `all`, and this is what the rail counts when it
+   *  says how many are being held back. Oldest first. */
+  pendingBacklog: Order[];
   held: Order[];
   flagged: Order[];
   approved: Order[];
@@ -390,6 +396,32 @@ export type OrderBuckets = {
 /** The pure core of useOrders — which orders are still live, and which tab each
  *  one belongs to. Split out from the hook so the routing rules are testable
  *  without standing up Supabase. */
+/** Pending is a work queue, and a work queue has to be finishable. Before this
+ *  cutoff it opened on orders going back to 2023-04-14 — Shopify's whole
+ *  history, imported at once — and 19 of the 36 rows in it were older than the
+ *  three months anyone was actually working. Half of those had already been
+ *  refunded; the rest had been sitting long enough that "pending review" was
+ *  not an honest description of them.
+ *
+ *  Same shape as CANCELLATION_QUEUE_START in postShipment: a date before which
+ *  rows are history rather than work. Nothing is deleted or hidden — an order
+ *  before the cutoff keeps its row, stays in the All tab, stays searchable, and
+ *  comes back the moment this date moves. Only the queue is trimmed.
+ *
+ *  Read against placed_at ?? created_at, the same basis the tab's own SLA uses,
+ *  so an order's age means one thing on this screen. */
+export const PENDING_QUEUE_START = '2026-06-02';
+
+/** True when an order is new enough to be queue work. Fails open: an order
+ *  whose date will not parse stays in the queue, because a row nobody can see
+ *  is worse than a row in the wrong order. */
+function withinPendingQueue(order: Order, since: string = PENDING_QUEUE_START): boolean {
+  // Parse rather than string-compare — PostgREST timestamps carry an offset
+  // ('+00:00') that a lexicographic compare against a bare date gets wrong.
+  const basis = Date.parse(order.placed_at ?? order.created_at);
+  return Number.isNaN(basis) || basis >= Date.parse(since);
+}
+
 export function bucketOrders(
   cache: Order[],
   fulfilledOrderIds: Set<string>,
@@ -444,9 +476,14 @@ export function bucketOrders(
     return true;
   });
 
+  const allPending = active.filter(o => o.status === 'pending');
+
   return {
     all:      active,
-    pending:  active.filter(o => o.status === 'pending'),
+    pending:  allPending.filter(o => withinPendingQueue(o)),
+    pendingBacklog: allPending
+      .filter(o => !withinPendingQueue(o))
+      .sort((a, b) => (a.placed_at ?? a.created_at).localeCompare(b.placed_at ?? b.created_at)),
     held:     active.filter(o => o.status === 'held'),
     flagged:  active.filter(o => o.status === 'flagged'),
     approved: active.filter(o => o.status === 'approved'),

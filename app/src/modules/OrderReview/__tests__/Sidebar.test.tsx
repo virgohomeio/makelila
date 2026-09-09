@@ -79,6 +79,7 @@ describe('Sidebar', () => {
       <Sidebar
         all={[p1, p2, h1, f1]}
         pending={[p1, p2]}
+        pendingBacklog={[]}
         held={[h1]}
         flagged={[f1]}
         approved={[]}
@@ -111,6 +112,31 @@ describe('Sidebar', () => {
     expect(screen.queryByText('Alice Ames')).not.toBeInTheDocument();
   });
 
+  // The cutoff trims the Pending queue, and a queue that quietly drops rows is
+  // a queue nobody can trust. The rail has to say what is being held back and
+  // give a way to it, or #1082 just looks lost.
+  it('reports how many pending orders the cutoff is holding back', () => {
+    const stale = mkOrder({ id: 'x1', status: 'pending', customer_name: 'Richard Ahola' });
+    render(
+      <Sidebar
+        all={[p1, stale]} pending={[p1]} pendingBacklog={[stale]}
+        held={[]} flagged={[]} approved={[]} cancelled={[]}
+        selectedId={null} onSelect={vi.fn()}
+      />,
+    );
+    const note = screen.getByRole('button', { name: /1 older than .* held back/i });
+    expect(note).toBeInTheDocument();
+    // And it is a way through, not just a label: it opens the tab that has them.
+    expect(screen.queryByText('Richard Ahola')).not.toBeInTheDocument();
+    fireEvent.click(note);
+    expect(screen.getByText('Richard Ahola')).toBeInTheDocument();
+  });
+
+  it('says nothing about a backlog when the cutoff is holding nothing back', () => {
+    render_();
+    expect(screen.queryByText(/held back/i)).not.toBeInTheDocument();
+  });
+
   it('invokes onSelect with the row id when a row is clicked', () => {
     const onSelect = vi.fn();
     render_(null, onSelect);
@@ -121,7 +147,7 @@ describe('Sidebar', () => {
   it('shows empty-state copy when the active tab has no rows', () => {
     render(
       <Sidebar
-        all={[]} pending={[]} held={[]} flagged={[]} approved={[]} cancelled={[]}
+        all={[]} pending={[]} pendingBacklog={[]} held={[]} flagged={[]} approved={[]} cancelled={[]}
         selectedId={null} onSelect={vi.fn()}
       />,
     );
@@ -152,7 +178,7 @@ describe('Sidebar', () => {
     });
     render(
       <Sidebar
-        all={[]} pending={[]} held={[]} flagged={[]} approved={[]}
+        all={[]} pending={[]} pendingBacklog={[]} held={[]} flagged={[]} approved={[]}
         cancelled={[newer, older]}
         selectedId={null} onSelect={vi.fn()}
       />,
