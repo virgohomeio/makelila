@@ -14,7 +14,8 @@ import { StepFulfilled } from './StepFulfilled';
 import { EmptyState } from '../../../components/ui';
 import { indexRefundFlags, useRefundMarks } from '../../../lib/refundedOrders';
 import {
-  indexShippedQueueRows, shippedMarkTitle, useShippedEvidence, type ShippedMark,
+  indexShippedQueueRows, shippedMarkHeading, shippedMarkTitle, useShippedEvidence,
+  type ShippedMark,
 } from '../../../lib/shippedOrders';
 import styles from '../Fulfillment.module.css';
 
@@ -55,10 +56,12 @@ export default function Queue() {
     return m;
   }, [orders]);
 
-  // Queue rows whose machine is already at the customer. The queue only closes
-  // a row out when someone walks it to step 6 by hand, so an order shipped any
-  // other way just sits in Ready to ship — six sale orders were doing exactly
-  // that on 2026-09-04, months after delivery. See lib/shippedOrders.ts.
+  // Queue rows that are no longer owed a box: a sale whose machine is already
+  // at the customer, or a replacement whose support case is closed. The queue
+  // only closes a row out when someone walks it to step 6 by hand, so anything
+  // settled another way just sits in Ready to ship — six sale orders were doing
+  // that on 2026-09-04 and five replacements on 2026-09-09, months after the
+  // fact. See lib/shippedOrders.ts.
   const shippedMarks = useMemo(
     () => indexShippedQueueRows(ready, orderLookup, shippedEvidence),
     [ready, orderLookup, shippedEvidence],
@@ -181,9 +184,10 @@ export default function Queue() {
   );
 }
 
-/** Replaces the step UI on a row whose machine has already gone out. The steps
- *  it stands in for are Assign and Test — i.e. "pick a machine for this order"
- *  — which is the one thing nobody should do here. */
+/** Replaces the step UI on a row that is no longer owed a box — the machine has
+ *  already gone out, or the case behind a replacement is closed. The steps it
+ *  stands in for are Assign and Test — i.e. "pick a machine for this order" —
+ *  which is the one thing nobody should do here. */
 function AlreadyShippedBanner({ mark, orderId }: { mark: ShippedMark; orderId: string }) {
   return (
     <div style={{
@@ -195,7 +199,7 @@ function AlreadyShippedBanner({ mark, orderId }: { mark: ShippedMark; orderId: s
         fontSize: 14, fontWeight: 700, color: 'var(--color-warning)',
         marginBottom: 8, letterSpacing: '0.3px',
       }}>
-        ALREADY SHIPPED — DO NOT PACK
+        {shippedMarkHeading(mark)}
       </div>
       <div style={{ fontSize: 13, color: 'var(--color-ink-muted)', lineHeight: 1.55, marginBottom: 12 }}>
         {shippedMarkTitle(mark)} This row was never walked to step 6, which is

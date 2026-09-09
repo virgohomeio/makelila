@@ -126,7 +126,7 @@ export function QueueSidebar({
       ) : rows.map(r => {
         const o = orderLookup.get(r.order_id);
         const shippedMark = shippedMarks?.get(r.id) ?? null;
-        // A row whose machine already went out reads as done even though its
+        // A row that is no longer owed a box reads as done even though its
         // step never got there — otherwise it lands in Shipped still shouting
         // "OVERDUE by 91d" about a box the customer has had since June.
         const fulfilled = r.step === 6 || !!shippedMark;
@@ -166,7 +166,7 @@ export function QueueSidebar({
                 className={`${styles.refundBadge} ${styles.refundBadgeSoft}`}
                 title={shippedMarkTitle(shippedMark)}
               >
-                {shippedMarkLabel()}
+                {shippedMarkLabel(shippedMark)}
               </div>
             )}
             {refundFlag && (

@@ -34,6 +34,17 @@ import { normaliseOrderRef } from './refundedOrders';
  *  heuristic bucketOrders uses in Sales, and it hides 69 pending orders — every
  *  repeat customer's brand-new order included. It is far too blunt to decide
  *  whether a specific box has been packed.
+ *
+ *  Replacements answer to a third signal instead, and only that one:
+ *
+ *    'ticket-closed' — the support case behind the replacement is closed. A
+ *                      replacement exists to settle one ticket, so a closed
+ *                      ticket is an operator saying that case is finished and
+ *                      nothing is owed. This is already how the rest of the app
+ *                      reads replacements (bucketOrders and useQueuedReplacements
+ *                      both filter on it) for the same reason: shipped_at is
+ *                      almost never stamped on a replacement, so it cannot be
+ *                      the thing that closes one out.
  */
 
 /** units, narrowed to what identifies an order-level shipment. */
@@ -55,10 +66,12 @@ export type ShipmentRow = {
 export type ShippedEvidence = {
   units: ShippedUnitRow[];
   shipments: ShipmentRow[];
+  /** ids of every service_ticket at status 'closed'. */
+  closedTicketIds: Set<string>;
 };
 
 export type ShippedMark = {
-  basis: 'ref' | 'in-queue';
+  basis: 'ref' | 'in-queue' | 'ticket-closed';
   serial: string | null;
   shippedAt: string | null;
   deliveredAt: string | null;
@@ -69,9 +82,11 @@ export type ShippableOrder = {
   id: string;
   order_ref: string;
   kind?: 'sale' | 'replacement' | string | null;
+  /** Replacements only: the support case this box was raised to settle. */
+  linked_ticket_id?: string | null;
 };
 
-const EMPTY_EVIDENCE: ShippedEvidence = { units: [], shipments: [] };
+const EMPTY_EVIDENCE: ShippedEvidence = { units: [], shipments: [], closedTicketIds: new Set() };
 
 /** Did `a` happen at or after `b`? False whenever either timestamp is missing —
  *  an absent date is not evidence, and this guard only ever adds a reason to
@@ -83,24 +98,38 @@ function atOrAfter(a: string | null, b: string | null): boolean {
   return Number.isFinite(at) && Number.isFinite(bt) && at >= bt;
 }
 
-/** Evidence that a machine already left for this order, or null.
+/** Evidence that a queue row is no longer owed a box, or null.
  *
  *  `queuedAt` is when the fulfillment_queue row was created; it is what makes
  *  the weaker 'in-queue' signal safe. Pass null to skip that signal entirely.
  *
- *  Replacements are excluded on purpose. Their shipping data is known bad:
- *  R-0027 was raised on 2026-08-19 and carries a serial-matched shipments row
- *  booked 2026-03-12 — five months earlier — because the June 2026 import
- *  matched replacements to whatever the customer had last received. Sales refs
- *  do not have that problem, and this rail is what the picker packs from, so it
- *  errs toward leaving a replacement visible rather than hiding a real one.
+ *  A replacement is decided on its ticket alone. Its *shipping* data stays
+ *  excluded, because it is known bad: R-0027 was raised on 2026-08-19 and
+ *  carries a serial-matched shipments row booked 2026-03-12 — five months
+ *  earlier — because the June 2026 import matched replacements to whatever the
+ *  customer had last received. Reading dates like that would hide live
+ *  replacements. The ticket has no such problem: it is a person's own statement
+ *  that the case is done, and closing one already auto-cancels the replacements
+ *  still awaiting stock behind it (cancelReplacementsForClosedTicket). All this
+ *  adds is the rows that had already been queued when that happened, which the
+ *  auto-cancel never covered — so they sat in Ready to ship instead.
+ *
+ *  R-0005, R-0027 and R-0031 were doing exactly that on 2026-09-09: each was
+ *  queued in August against a ticket closed on 2026-06-22, months after the
+ *  part had been delivered. All three read OVERDUE by ~14d for a latch, a lid
+ *  and a chamber the customer already had.
  */
 export function markShippedForOrder(
   order: ShippableOrder,
   queuedAt: string | null,
   evidence: ShippedEvidence = EMPTY_EVIDENCE,
 ): ShippedMark | null {
-  if (order.kind === 'replacement') return null;
+  if (order.kind === 'replacement') {
+    if (order.linked_ticket_id && evidence.closedTicketIds.has(order.linked_ticket_id)) {
+      return { basis: 'ticket-closed', serial: null, shippedAt: null, deliveredAt: null };
+    }
+    return null;
+  }
 
   const ref = normaliseOrderRef(order.order_ref);
   if (ref) {
@@ -150,12 +179,24 @@ export function indexShippedQueueRows(
   return index;
 }
 
-/** What the operator reads on the row. */
-export function shippedMarkLabel(): string {
-  return 'ALREADY SHIPPED';
+/** What the operator reads on the row. A closed case is not the same claim as
+ *  a tracked shipment, so it does not borrow that wording. */
+export function shippedMarkLabel(mark: ShippedMark): string {
+  return mark.basis === 'ticket-closed' ? 'CASE CLOSED' : 'ALREADY SHIPPED';
+}
+
+/** The banner heading on the detail pane. */
+export function shippedMarkHeading(mark: ShippedMark): string {
+  return mark.basis === 'ticket-closed'
+    ? 'CASE CLOSED — NOTHING TO SEND'
+    : 'ALREADY SHIPPED — DO NOT PACK';
 }
 
 export function shippedMarkTitle(mark: ShippedMark): string {
+  if (mark.basis === 'ticket-closed') {
+    return 'The support case behind this replacement is closed, so nothing is owed. '
+      + 'Do not pack one — close this row out or move it back.';
+  }
   const machine = mark.serial ? `Unit ${mark.serial}` : 'A machine';
   const when = mark.deliveredAt
     ? ` and was delivered ${mark.deliveredAt.slice(0, 10)}`
@@ -168,10 +209,15 @@ export function shippedMarkTitle(mark: ShippedMark): string {
   return `${machine} ${how}${when}. Do not pack a second one — move this row back to Sales or close it out.`;
 }
 
-/** Every shipped-unit and shipment row that can close a queue row out.
- *  Both queries are narrow on purpose: the queue asks this on every load. */
+/** Every shipped-unit, shipment and closed-ticket row that can close a queue
+ *  row out. All three queries are narrow on purpose: the queue asks this on
+ *  every load. */
 export async function fetchShippedEvidence(): Promise<ShippedEvidence> {
-  const [{ data: units, error: unitsErr }, { data: shipments, error: shipErr }] = await Promise.all([
+  const [
+    { data: units, error: unitsErr },
+    { data: shipments, error: shipErr },
+    { data: tickets, error: ticketErr },
+  ] = await Promise.all([
     supabase
       .from('units')
       .select('serial, status, customer_order_ref, shipped_at')
@@ -181,12 +227,15 @@ export async function fetchShippedEvidence(): Promise<ShippedEvidence> {
       .from('shipments')
       .select('order_id, unit_serial, booked_at, delivered_at')
       .not('order_id', 'is', null),
+    supabase.from('service_tickets').select('id').eq('status', 'closed'),
   ]);
   if (unitsErr) throw new Error(`Could not read shipped units: ${unitsErr.message}`);
   if (shipErr) throw new Error(`Could not read shipments: ${shipErr.message}`);
+  if (ticketErr) throw new Error(`Could not read closed tickets: ${ticketErr.message}`);
   return {
     units: (units ?? []) as ShippedUnitRow[],
     shipments: (shipments ?? []) as ShipmentRow[],
+    closedTicketIds: new Set((tickets ?? []).map(t => (t as { id: string }).id)),
   };
 }
 
@@ -203,6 +252,7 @@ export function useShippedEvidence(): { evidence: ShippedEvidence; loading: bool
   useEffect(() => {
     let unitsChannel: RealtimeChannel | null = null;
     let shipmentsChannel: RealtimeChannel | null = null;
+    let ticketsChannel: RealtimeChannel | null = null;
     let cancelled = false;
 
     const load = async () => {
@@ -228,12 +278,19 @@ export function useShippedEvidence(): { evidence: ShippedEvidence; loading: bool
         .channel('shipments:shipped-evidence')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'shipments' }, () => { void load(); })
         .subscribe();
+      // Closing a ticket has to take its replacement out of Ready to ship
+      // without a reload — and reopening one has to put it back.
+      ticketsChannel = supabase
+        .channel('service_tickets:shipped-evidence')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'service_tickets' }, () => { void load(); })
+        .subscribe();
     });
 
     return () => {
       cancelled = true;
       if (unitsChannel) void unitsChannel.unsubscribe();
       if (shipmentsChannel) void shipmentsChannel.unsubscribe();
+      if (ticketsChannel) void ticketsChannel.unsubscribe();
     };
   }, []);
 
