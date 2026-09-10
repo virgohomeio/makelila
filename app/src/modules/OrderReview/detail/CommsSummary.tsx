@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import {
-  CONCERN_LABELS, channelFootnote, commTone, shortDate,
+  CONCERN_LABELS, VERDICT_LABEL, channelFootnote, commDetail, commTone, shortDate,
 } from '../../../lib/commAssessment';
 import { requestCommAssessment, type OrderCommAssessment } from '../../../lib/orderComms';
 import styles from '../OrderReview.module.css';
@@ -58,15 +58,21 @@ export function CommsSummary({
   }
 
   const tone = commTone(assessment?.verdict);
-  const headline = assessment?.headline
-    ?? 'Recent communication not yet checked for this order';
+  // The verdict reads identically on every order; the model's own sentence
+  // follows it as the detail. Scanning a queue is the first job, knowing why
+  // is the second.
+  const label = assessment
+    ? VERDICT_LABEL[assessment.verdict]
+    : 'Recent communication not yet checked for this order';
+  const detail = commDetail(assessment?.verdict, assessment?.headline);
 
   return (
     <div className={`${styles.commBox} ${TONE_CLASS[tone]}`}>
       <div className={styles.commHeadline}>
         <span aria-hidden="true" className={styles.commIcon}>{TONE_ICON[tone]}</span>
-        {headline}
+        {label}
       </div>
+      {detail && <div className={styles.commDetail}>{detail}</div>}
 
       {!!assessment?.concerns?.length && (
         <div className={styles.commConcerns}>

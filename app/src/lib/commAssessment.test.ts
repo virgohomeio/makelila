@@ -9,6 +9,8 @@ import {
   channelFootnote,
   noContactAssessment,
   buildTranscript,
+  commDetail,
+  VERDICT_LABEL,
   CONCERN_LABELS,
   type CommMessage,
   type ChannelsScanned,
@@ -193,5 +195,39 @@ describe('CONCERN_LABELS', () => {
       expect(label, key).toBeTruthy();
       expect(label).not.toBe(key);
     }
+  });
+});
+
+describe('VERDICT_LABEL + commDetail', () => {
+  it('leads both safe verdicts with the same words, so a queue scans', () => {
+    expect(VERDICT_LABEL.clear).toBe('Clear to ship');
+    expect(VERDICT_LABEL.no_contact).toBe('Clear to ship');
+  });
+
+  it('asks for confirmation on the unclear verdict', () => {
+    expect(VERDICT_LABEL.unclear).toMatch(/confirm the desire to ship/i);
+  });
+
+  it("keeps the model's specific sentence as the detail line", () => {
+    expect(commDetail('unclear', 'Customer asked to cancel on Sep 3'))
+      .toBe('Customer asked to cancel on Sep 3');
+    expect(commDetail('clear', 'No shipping obstacles identified; timeline acknowledged.'))
+      .toBe('No shipping obstacles identified; timeline acknowledged.');
+  });
+
+  it('does not restate the label when the stored headline is the generated default', () => {
+    expect(commDetail('no_contact', 'Clear to ship — no support contact on file'))
+      .toBe('No support contact on file');
+    expect(commDetail('clear', 'Clear to ship — nothing in recent contact affects this shipment'))
+      .toBe('Nothing in recent contact affects this shipment');
+  });
+
+  it('strips a duplicated lead when the model opens with the label itself', () => {
+    expect(commDetail('clear', 'Clear to ship - customer confirmed the address'))
+      .toBe('customer confirmed the address');
+  });
+
+  it('has no detail to show before anything has been assessed', () => {
+    expect(commDetail(null, null)).toBeNull();
   });
 });

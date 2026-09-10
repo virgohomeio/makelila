@@ -1378,3 +1378,11 @@
   border-color: var(--color-warning-border);
   color: var(--color-warning);
 }
+
+/* The model's specific sentence, under the fixed verdict label. */
+.commDetail {
+  margin-top: 3px;
+  font-size: var(--font-size-meta);
+  line-height: 1.4;
+  color: var(--color-ink);
+}

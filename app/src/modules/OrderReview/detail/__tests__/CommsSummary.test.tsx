@@ -40,9 +40,19 @@ describe('CommsSummary', () => {
     expect(screen.getByText(/not yet checked/i)).toBeTruthy();
   });
 
-  it('shows the clearance headline', () => {
+  it('leads with the fixed clearance phrase', () => {
     render(<CommsSummary orderId="o1" assessment={assessment()} loading={false} />);
-    expect(screen.getByText(/clear to ship/i)).toBeTruthy();
+    expect(screen.getByText('Clear to ship')).toBeTruthy();
+  });
+
+  it("keeps the model's own sentence as the detail under that phrase", () => {
+    render(<CommsSummary orderId="o1" assessment={assessment({
+      headline: 'No shipping obstacles identified; customer acknowledged delayed timeline.',
+    })} loading={false} />);
+    // Same fixed lead every time, so a queue scans...
+    expect(screen.getByText('Clear to ship')).toBeTruthy();
+    // ...with the specific reason still on show.
+    expect(screen.getByText(/acknowledged delayed timeline/)).toBeTruthy();
   });
 
   it('distinguishes a clearance from silence', () => {
@@ -50,13 +60,14 @@ describe('CommsSummary', () => {
       verdict: 'no_contact',
       headline: 'Clear to ship — no support contact on file',
     })} loading={false} />);
+    expect(screen.getByText('Clear to ship')).toBeTruthy();
     expect(screen.getByText(/no support contact on file/i)).toBeTruthy();
   });
 
   it('names the concern, quotes the customer, and asks for confirmation when unclear', () => {
     render(<CommsSummary orderId="o1" assessment={assessment({
       verdict: 'unclear',
-      headline: 'Communication unclear (wants to cancel) — confirm the desire to ship',
+      headline: 'Customer said on Sep 3 they plan to bin the unit',
       concerns: ['cancel_intent'],
       evidence: [{
         channel: 'quo',
@@ -66,7 +77,11 @@ describe('CommsSummary', () => {
       }],
     })} loading={false} />);
 
-    expect(screen.getByText(/confirm the desire to ship/i)).toBeTruthy();
+    // The fixed lead tells the operator what to do...
+    expect(screen.getByText('Communication unclear — confirm the desire to ship')).toBeTruthy();
+    // ...the model's sentence tells them why...
+    expect(screen.getByText(/plan to bin the unit/)).toBeTruthy();
+    // ...and the customer's own words let them recognise the conversation.
     expect(screen.getByText('Wants to cancel')).toBeTruthy();
     expect(screen.getByText(/trash pile/)).toBeTruthy();
     expect(screen.getByText(/SMS · customer · Sep 3/)).toBeTruthy();

@@ -255,6 +255,45 @@ export function noContactAssessment(): AssessmentCore {
 
 // ============================================================ Presentation
 
+/** The fixed phrase that leads the box, per verdict.
+ *
+ *  The model writes a specific sentence and that sentence is the useful part,
+ *  but it phrases the same conclusion a dozen ways ("No shipping obstacles
+ *  identified", "Routine post-delivery check-in", …). An operator scanning a
+ *  queue needs the verdict itself to read identically every time, so the fixed
+ *  label leads and the model's sentence follows as detail. */
+export const VERDICT_LABEL: Record<CommVerdict, string> = {
+  clear:      'Clear to ship',
+  no_contact: 'Clear to ship',
+  unclear:    'Communication unclear — confirm the desire to ship',
+};
+
+/** The model's own sentence, or null when it would only restate the label.
+ *  Suppresses the double-up when the stored headline is the generated default
+ *  rather than something a model actually wrote. */
+export function commDetail(
+  verdict: CommVerdict | null | undefined,
+  headline: string | null | undefined,
+): string | null {
+  if (!verdict) return null;
+  const text = (headline ?? '').trim();
+  if (!text) return verdict === 'no_contact' ? 'No support contact on file' : null;
+  if (text === defaultHeadline(verdict, [])) {
+    return verdict === 'no_contact'
+      ? 'No support contact on file'
+      : verdict === 'clear'
+        ? 'Nothing in recent contact affects this shipment'
+        : null;
+  }
+  // A model sentence that already opens with the label adds nothing twice.
+  const label = VERDICT_LABEL[verdict].toLowerCase();
+  if (text.toLowerCase().startsWith(label.split(' — ')[0])) {
+    const rest = text.slice(label.split(' — ')[0].length).replace(/^[\s—:,.-]+/, '');
+    return rest || null;
+  }
+  return text;
+}
+
 export type CommTone = 'good' | 'warn' | 'unknown';
 
 export function commTone(verdict: CommVerdict | null | undefined): CommTone {
