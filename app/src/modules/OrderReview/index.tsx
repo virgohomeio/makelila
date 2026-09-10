@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { useOrders, syncShopifyOrders } from '../../lib/orders';
+import { useOrders, syncShopifyOrders, type ShopifySyncResult } from '../../lib/orders';
 import { useIsMobile } from '../../lib/useMediaQuery';
 import { MobileBackHeader } from '../../components/MobileBackHeader';
 import { Sidebar } from './Sidebar';
+import { SkippedPanel } from './SkippedPanel';
 import { Detail } from './Detail';
 import Templates from '../Templates';
 import Upload from '../Upload';
@@ -13,8 +14,8 @@ import styles from './OrderReview.module.css';
 
 type SyncState =
   | { kind: 'idle' }
-  | { kind: 'syncing' }
-  | { kind: 'done'; imported: number; skipped: number }
+  | { kind: 'syncing'; startedAt: number }
+  | { kind: 'done'; result: ShopifySyncResult }
   | { kind: 'error'; message: string };
 
 export default function OrderReview() {
@@ -34,6 +35,18 @@ export default function OrderReview() {
   // Syncing is a module-level action, not a list filter, so it lives in the
   // page header rather than inside the order rail's header.
   const [sync, setSync] = useState<SyncState>({ kind: 'idle' });
+  const [skipsOpen, setSkipsOpen] = useState(false);
+  // A sync used to sit behind a disabled button with no sign of life for over a
+  // minute, which is indistinguishable from a hung one. Ticking the elapsed
+  // seconds is the cheapest possible proof it is still running.
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    if (sync.kind !== 'syncing') return;
+    const startedAt = sync.startedAt;
+    setElapsed(0);
+    const id = setInterval(() => setElapsed(Math.round((Date.now() - startedAt) / 1000)), 1000);
+    return () => clearInterval(id);
+  }, [sync]);
 
   // Desktop auto-loads the first pending order so the right pane isn't empty
   // on first paint. On mobile we keep the sidebar visible (no order selected)
@@ -55,10 +68,11 @@ export default function OrderReview() {
   };
 
   const runSync = async () => {
-    setSync({ kind: 'syncing' });
+    setSync({ kind: 'syncing', startedAt: Date.now() });
+    setSkipsOpen(false);
     try {
       const r = await syncShopifyOrders();
-      setSync({ kind: 'done', imported: r.imported, skipped: r.skipped });
+      setSync({ kind: 'done', result: r });
     } catch (e) {
       setSync({ kind: 'error', message: (e as Error).message });
     }
@@ -83,7 +97,32 @@ export default function OrderReview() {
         {view === 'orders' && (
           <span className={styles.syncRow}>
             <span className={styles.syncStatus}>
-              {sync.kind === 'done' && `${sync.imported} new · ${sync.skipped} skipped`}
+              {sync.kind === 'done' && (
+                <>
+                  {sync.result.imported} new · {sync.result.refreshed} refreshed
+                  {sync.result.skipped > 0 && (
+                    <>
+                      {' · '}
+                      <button
+                        type="button"
+                        className={styles.syncSkipLink}
+                        onClick={() => setSkipsOpen(o => !o)}
+                        aria-expanded={skipsOpen}
+                        title="Orders Shopify returned that makeLILA has no row for — click for the list"
+                      >
+                        {sync.result.skipped} not imported
+                      </button>
+                    </>
+                  )}
+                  {sync.result.journeyBatchesFailed > 0 && (
+                    <span className={styles.syncError}>
+                      {' · attribution lookup failed for '}
+                      {sync.result.journeyBatchesFailed} batch
+                      {sync.result.journeyBatchesFailed === 1 ? '' : 'es'}
+                    </span>
+                  )}
+                </>
+              )}
               {sync.kind === 'error' && (
                 <span className={styles.syncError}>Sync failed: {sync.message}</span>
               )}
@@ -94,8 +133,16 @@ export default function OrderReview() {
               onClick={() => void runSync()}
               disabled={sync.kind === 'syncing'}
             >
-              {sync.kind === 'syncing' ? 'Syncing…' : '⟲ Sync from Shopify'}
+              {sync.kind === 'syncing'
+                ? `Syncing… ${elapsed}s`
+                : '⟲ Sync from Shopify'}
             </button>
+            {sync.kind === 'done' && skipsOpen && sync.result.skipped > 0 && (
+              <SkippedPanel
+                result={sync.result}
+                onClose={() => setSkipsOpen(false)}
+              />
+            )}
           </span>
         )}
         <div className={styles.viewChips}>

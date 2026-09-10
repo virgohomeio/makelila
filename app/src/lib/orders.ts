@@ -2082,20 +2082,89 @@ export async function markOrderDelivered(orderId: string): Promise<void> {
   }
 }
 
+/** Why a Shopify order never became a row in `orders`. Mirrors the `SkipReason`
+ *  union in supabase/functions/sync-shopify-orders/index.ts.
+ *
+ *  Only `db_error` is a failure. The rest are orders makeLILA has nowhere to
+ *  put: `orders.country` is NOT NULL with a CHECK of ('US','CA'), so a no-ship
+ *  product (the $1 LILA Mini Reservation, a subscription buyout) or an
+ *  international address has no home here. */
+export type ShopifySkipReason =
+  | 'no_shipping_address'
+  | 'international'
+  | 'missing_city'
+  | 'db_error';
+
+export type ShopifySkip = {
+  order_ref: string;
+  reason: ShopifySkipReason;
+  detail: string;
+  placed_at: string | null;
+  total: string | null;
+  currency: string | null;
+  customer: string | null;
+  items: string[];
+};
+
+export type ShopifySyncResult = {
+  fetched: number;
+  imported: number;
+  refreshed: number;
+  skipped: number;
+  skippedBreakdown: Partial<Record<ShopifySkipReason, number>>;
+  skippedDetails: ShopifySkip[];
+  journeyBatchesFailed: number;
+};
+
+export const SHOPIFY_SKIP_LABEL: Record<ShopifySkipReason, string> = {
+  no_shipping_address: 'No shipping address — nothing to fulfil against',
+  international: 'Ships outside the US and Canada',
+  missing_city: 'Shipping address has no city',
+  db_error: 'Write failed',
+};
+
+/** A full sync of ~250 orders now runs in seconds, but the ceiling has to
+ *  exist: without one a stalled request leaves the Sync button disabled with
+ *  no way back short of a page reload. */
+const SYNC_TIMEOUT_MS = 180_000;
+
 /** Pull new orders from Shopify. Wraps the `sync-shopify-orders` edge
  *  function so the Sales module doesn't import `supabase` directly — see
  *  AGENTS.md, "All Supabase queries go through lib/". */
-export async function syncShopifyOrders(): Promise<{
-  fetched: number;
-  imported: number;
-  skipped: number;
-}> {
-  const { data, error } = await supabase.functions.invoke<{
-    fetched: number;
-    imported: number;
-    skipped: number;
-  }>('sync-shopify-orders', { body: {} });
-  if (error) throw new Error(error.message);
+export async function syncShopifyOrders(): Promise<ShopifySyncResult> {
+  let data: ShopifySyncResult | null = null;
+  try {
+    const res = await supabase.functions.invoke<ShopifySyncResult>(
+      'sync-shopify-orders',
+      { body: {}, signal: AbortSignal.timeout(SYNC_TIMEOUT_MS) },
+    );
+    // supabase-js hides the function's own `{ error }` JSON behind a generic
+    // "non-2xx status code"; a dead Shopify token has to read as a dead token.
+    if (res.error) throw new Error(await functionErrorMessage(res.error));
+    data = res.data;
+  } catch (e) {
+    if ((e as Error)?.name === 'TimeoutError' || (e as Error)?.name === 'AbortError') {
+      throw new Error(
+        `Timed out after ${SYNC_TIMEOUT_MS / 1000}s. The sync may still be finishing on the server — reload in a minute before retrying.`,
+      );
+    }
+    throw e;
+  }
   if (!data) throw new Error('empty response from sync-shopify-orders');
-  return data;
+
+  const result: ShopifySyncResult = {
+    fetched: data.fetched ?? 0,
+    imported: data.imported ?? 0,
+    refreshed: data.refreshed ?? 0,
+    skipped: data.skipped ?? 0,
+    skippedBreakdown: data.skippedBreakdown ?? {},
+    skippedDetails: data.skippedDetails ?? [],
+    journeyBatchesFailed: data.journeyBatchesFailed ?? 0,
+  };
+  await logAction(
+    'shopify_sync',
+    'orders',
+    `${result.imported} new, ${result.refreshed} refreshed, ${result.skipped} not imported (of ${result.fetched} fetched)`,
+  );
+  return result;
 }

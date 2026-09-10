@@ -302,6 +302,8 @@
   display: flex;
   align-items: center;
   gap: var(--space-2);
+  /* anchors .skipPanel */
+  position: relative;
 }
 /* Was --color-us-navy: a legacy US-flag slot, off-palette and louder than the
    primary action. Syncing is maintenance, not a decision. */
@@ -322,6 +324,87 @@
 .syncBtn:disabled { color: var(--color-ink-faint); cursor: not-allowed; }
 .syncStatus { font-size: 10px; color: var(--color-ink-subtle); }
 .syncError { color: var(--color-error-strong); font-weight: 600; }
+
+/* The skipped count is the one part of the sync result an operator may need to
+   act on, so it has to be reachable — not a number they have to trust. */
+.syncSkipLink {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--color-ink);
+  font-weight: 600;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.syncSkipLink:hover { color: var(--color-accent-clay); }
+
+.skipPanel {
+  position: absolute;
+  top: calc(100% + var(--space-2));
+  right: 0;
+  z-index: 40;
+  width: min(560px, 80vw);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+  text-align: left;
+}
+.skipHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+  font-size: var(--font-size-meta);
+  font-weight: 600;
+  color: var(--color-ink);
+}
+.skipClose {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  color: var(--color-ink-subtle);
+}
+.skipClose:hover { color: var(--color-ink); }
+.skipBody { max-height: 340px; overflow-y: auto; }
+.skipGroup { padding: var(--space-2) var(--space-3); }
+.skipGroup + .skipGroup { border-top: 1px solid var(--color-border); }
+.skipGroupHead {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-ink-subtle);
+  margin-bottom: 4px;
+}
+.skipRow {
+  display: flex;
+  gap: var(--space-2);
+  align-items: baseline;
+  padding: 2px 0;
+  font-size: var(--font-size-meta);
+}
+.skipRef { font-weight: 600; color: var(--color-ink); flex: 0 0 auto; }
+.skipMeta {
+  color: var(--color-ink-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.skipFoot {
+  padding: var(--space-2) var(--space-3);
+  border-top: 1px solid var(--color-border);
+  background: var(--color-raised);
+  font-size: 10px;
+  color: var(--color-ink-subtle);
+  line-height: 1.5;
+}
 
 .list { flex: 1; overflow-y: auto; }
 .list::-webkit-scrollbar { width: 8px; }

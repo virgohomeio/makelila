@@ -150,17 +150,61 @@ function areaTypeFor(
   return 'suburban';
 }
 
+/** Why an order Shopify handed us never became a row in `orders`.
+ *
+ *  These are not all failures. `no_shipping_address` is the normal shape of a
+ *  no-ship product — the $1 "LILA Mini Reservation", a subscription buyout —
+ *  and `orders.country` is NOT NULL with a CHECK of ('US','CA'), so there is
+ *  nowhere to put one. What was broken is that the sync reported every one of
+ *  these as an anonymous "skipped" tally, so 27 reservations and a $1,418
+ *  buyout looked identical to a write failure. Each skip now carries enough to
+ *  identify the order on sight. */
+type SkipReason =
+  | 'no_shipping_address'
+  | 'international'
+  | 'missing_city'
+  | 'db_error';
+
+type Skip = {
+  order_ref: string;
+  reason: SkipReason;
+  /** Free text for db_error; empty for the classification-only reasons. */
+  detail: string;
+  placed_at: string | null;
+  total: string | null;
+  currency: string | null;
+  customer: string | null;
+  items: string[];
+};
+
+function skipRecord(o: ShopifyOrder, reason: SkipReason, detail = ''): Skip {
+  return {
+    order_ref: o.name,
+    reason,
+    detail,
+    placed_at: o.created_at ?? null,
+    total: o.total_price ?? null,
+    currency: o.presentment_currency ?? o.currency ?? null,
+    customer: [o.customer?.first_name, o.customer?.last_name].filter(Boolean).join(' ')
+      || o.customer?.email || o.email || null,
+    items: (o.line_items ?? []).map(li => li.title ?? 'Unknown item'),
+  };
+}
+
 function mapOrder(
   o: ShopifyOrder,
   remotePrefixes: string[],
-): MappedOrder | { error: string; order_ref: string } {
+): MappedOrder | Skip {
   const addr = o.shipping_address ?? null;
   const country = addr?.country_code;
-  if (country !== 'US' && country !== 'CA') {
-    return { error: `unsupported country: ${country ?? 'null'}`, order_ref: o.name };
+  if (!addr) {
+    return skipRecord(o, 'no_shipping_address');
   }
-  if (!addr?.city) {
-    return { error: 'missing city', order_ref: o.name };
+  if (country !== 'US' && country !== 'CA') {
+    return skipRecord(o, 'international', country ?? 'no country');
+  }
+  if (!addr.city) {
+    return skipRecord(o, 'missing_city');
   }
 
   const name = [o.customer?.first_name, o.customer?.last_name].filter(Boolean).join(' ')
@@ -330,6 +374,38 @@ function journeyAttribution(fv: FirstVisit | null | undefined): Attribution | nu
   return { source: src, medium, campaign: null };
 }
 
+/** Run `task` over `items` with at most `limit` in flight.
+ *
+ *  A full sync is ~250 orders, and every one of them used to be three
+ *  round-trips awaited one after another: the order write, then the customer
+ *  write, then the touch updates. That is pure latency — it put the manual
+ *  sync at ~70s wall clock with the Sales button disabled for all of it, and
+ *  it grows with every order the store ever takes. Nothing in the per-order
+ *  work depends on another order, so it does not have to be a queue. */
+async function mapPool<T, R>(
+  items: T[],
+  limit: number,
+  task: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const out = new Array<R>(items.length);
+  let next = 0;
+  const worker = async () => {
+    for (;;) {
+      const i = next++;
+      if (i >= items.length) return;
+      out[i] = await task(items[i]);
+    }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, worker),
+  );
+  return out;
+}
+
+// Postgrest round-trips in flight at once. High enough to erase the latency,
+// low enough not to exhaust the pooler on a store with thousands of orders.
+const DB_CONCURRENCY = 10;
+
 /** Batched GraphQL lookup of each order's firstVisit source. Non-fatal: any
  *  failure just leaves the REST-derived attribution in place. Returns a map of
  *  order_ref → attribution for orders where Shopify has journey data. */
@@ -346,15 +422,20 @@ async function fetchJourneyAttribution(
   headers: Record<string, string>,
   refs: string[],
   rawByRef: Map<string, ShopifyOrder>,
-): Promise<Map<string, JourneyResult>> {
+): Promise<{ journey: Map<string, JourneyResult>; failedBatches: number }> {
   const out = new Map<string, JourneyResult>();
   const withId = refs
     .map(ref => ({ ref, id: rawByRef.get(ref)?.id }))
     .filter((x): x is { ref: string; id: number } => typeof x.id === 'number');
   const VISIT = 'source sourceType referrerUrl utmParameters { source medium campaign }';
   const FIELDS = `customerJourneySummary { firstVisit { ${VISIT} } lastVisit { ${VISIT} } }`;
-  for (let i = 0; i < withId.length; i += 40) {
-    const batch = withId.slice(i, i + 40);
+  const batches: Array<Array<{ ref: string; id: number }>> = [];
+  for (let i = 0; i < withId.length; i += 40) batches.push(withId.slice(i, i + 40));
+
+  // 3 at a time: enough to hide the latency, well inside Shopify's GraphQL
+  // leaky bucket for a query this cheap.
+  let failed = 0;
+  await mapPool(batches, 3, async batch => {
     const query = `{ ${batch.map((b, k) => `o${k}: order(id: "gid://shopify/Order/${b.id}") { ${FIELDS} }`).join(' ')} }`;
     try {
       const res = await fetch(`https://${shop}/admin/api/2024-10/graphql.json`, {
@@ -362,16 +443,19 @@ async function fetchJourneyAttribution(
         headers: { ...headers, 'Content-Type': 'application/json' },
         body: JSON.stringify({ query }),
       });
-      if (!res.ok) continue;
+      if (!res.ok) { failed++; return; }
       const body = await res.json() as { data?: Record<string, { customerJourneySummary?: { firstVisit?: FirstVisit; lastVisit?: FirstVisit } } | null> };
       const data = body.data ?? {};
       batch.forEach((b, k) => {
         const cjs = data[`o${k}`]?.customerJourneySummary;
         out.set(b.ref, { first: visitAttr(cjs?.firstVisit), last: visitAttr(cjs?.lastVisit) });
       });
-    } catch { /* non-fatal — keep REST-derived attribution */ }
-  }
-  return out;
+    } catch { failed++; }
+  });
+  // Losing the journey lookup is survivable — the REST landing/referrer
+  // heuristic still stands — but it silently downgrades every attribution in
+  // the batch, so say so rather than letting the fallback pass for success.
+  return { journey: out, failedBatches: failed };
 }
 
 serve(async (req: Request) => {
@@ -440,11 +524,11 @@ serve(async (req: Request) => {
     .map((r: { prefix: string }) => r.prefix.toUpperCase());
 
   const mapped: MappedOrder[] = [];
-  const skipped: Array<{ order_ref: string; error: string }> = [];
+  const skipped: Skip[] = [];
   const rawByRef = new Map<string, ShopifyOrder>();
   for (const o of orders ?? []) {
     const result = mapOrder(o, remotePrefixes);
-    if ('error' in result) skipped.push(result);
+    if ('reason' in result) skipped.push(result);
     else { mapped.push(result); rawByRef.set(o.name, o); }
   }
 
@@ -452,8 +536,11 @@ serve(async (req: Request) => {
   // "conversion summary" in the admin, e.g. "1st session from Google") over the
   // REST landing/referrer heuristic. Non-fatal — falls back if GraphQL is
   // unavailable or the scope is missing.
+  let journeyBatchesFailed = 0;
   try {
-    const journey = await fetchJourneyAttribution(shop, shopHeaders, mapped.map(m => m.order_ref), rawByRef);
+    const { journey, failedBatches } =
+      await fetchJourneyAttribution(shop, shopHeaders, mapped.map(m => m.order_ref), rawByRef);
+    journeyBatchesFailed = failedBatches;
     for (const m of mapped) {
       const j = journey.get(m.order_ref);
       if (j?.first?.attr.source) {
@@ -500,123 +587,133 @@ serve(async (req: Request) => {
   let addressUpdated = 0;
   let customersUpserted = 0;
 
-  for (const m of mapped) {
+  // ── Phase 1: orders ────────────────────────────────────────────────────────
+  // We already know from `existingByRef` which refs are new, so the inserts go
+  // in one statement instead of one per order. ignoreDuplicates keeps it safe
+  // against an order that landed between the select and this write; the
+  // returned refs are the ones that actually inserted.
+  const fresh = mapped.filter(m => !existingByRef.has(m.order_ref));
+  const insertedRefs = new Set<string>();
+  const failedRefs = new Set<string>();
+  if (fresh.length > 0) {
     const { data, error } = await admin
       .from('orders')
-      .upsert(m, { onConflict: 'order_ref', ignoreDuplicates: true })
-      .select('id');
-
+      .upsert(fresh, { onConflict: 'order_ref', ignoreDuplicates: true })
+      .select('order_ref');
     if (error) {
-      skipped.push({ order_ref: m.order_ref, error: `db: ${error.message}` });
-      continue;
-    }
-
-    const isNew = data && data.length > 0;
-    if (isNew) {
-      imported++;
-      const raw = rawByRef.get(m.order_ref);
-      if (m.attribution_source && m.customer_email) {
-        const email = m.customer_email.toLowerCase();
-        const at = raw?.created_at ?? new Date().toISOString();
-        // First touch — insert-only (never overwrite the original acquisition).
-        await admin
-          .from('customers')
-          .update({
-            first_touch_source: m.attribution_source,
-            first_touch_medium: m.attribution_medium,
-            first_touch_campaign_id: m.attribution_campaign,
-            first_touch_at: at,
-          })
-          .eq('email', email)
-          .is('first_touch_source', null);
-        // Last touch — reflects the most recent order's landing, so the journey
-        // shows the channel that actually drove the latest purchase.
-        await admin
-          .from('customers')
-          .update({
-            last_touch_source: m.attribution_source,
-            last_touch_medium: m.attribution_medium,
-            last_touch_campaign_id: m.attribution_campaign,
-            last_touch_at: at,
-          })
-          .eq('email', email);
-      }
+      // One bad row fails the whole statement, so fall back to per-order
+      // writes: a single malformed order must not cost us the other 200.
+      await mapPool(fresh, DB_CONCURRENCY, async m => {
+        const { data: one, error: oneErr } = await admin
+          .from('orders')
+          .upsert(m, { onConflict: 'order_ref', ignoreDuplicates: true })
+          .select('order_ref');
+        if (oneErr) {
+          skipped.push(skipRecord(rawByRef.get(m.order_ref)!, 'db_error', oneErr.message));
+          failedRefs.add(m.order_ref);
+        } else if (one && one.length > 0) {
+          insertedRefs.add(m.order_ref);
+        }
+      });
     } else {
-      // Refresh Shopify source-of-truth fields on existing order
-      const existing = existingByRef.get(m.order_ref);
-      const operatorTouched = existing && !['pending', 'flagged'].includes(existing.status);
+      for (const row of data ?? []) insertedRefs.add((row as { order_ref: string }).order_ref);
+    }
+  }
+  imported = insertedRefs.size;
 
-      const refreshPatch: Record<string, unknown> = {
-        placed_at: m.placed_at,
-        customer_paid_shipping_usd: m.customer_paid_shipping_usd,
-        shipping_line_title: m.shipping_line_title,
-        currency: m.currency,
-        postal_code: m.postal_code,
-        subtotal_usd: m.subtotal_usd,
-        tax_usd: m.tax_usd,
-        tax_lines: m.tax_lines,
-        discount_total_usd: m.discount_total_usd,
-        discount_codes: m.discount_codes,
-        payment_methods: m.payment_methods,
-        financial_status: m.financial_status,
-        line_items: m.line_items,
-        // Shopify-derived source of truth — safe to refresh; backfills existing
-        // orders (that predate this column) on the next full sync.
-        attribution_source: m.attribution_source,
-        attribution_medium: m.attribution_medium,
-        attribution_campaign: m.attribution_campaign,
-        attribution_referrer: m.attribution_referrer,
-        attribution_last_source: m.attribution_last_source,
-        attribution_last_medium: m.attribution_last_medium,
-        attribution_last_referrer: m.attribution_last_referrer,
-      };
+  // Anything the insert refused has no row to refresh — updating it would match
+  // nothing and still count itself a success, on top of the skip it already
+  // reported.
+  const stale = mapped.filter(m => !insertedRefs.has(m.order_ref) && !failedRefs.has(m.order_ref));
+  await mapPool(stale, DB_CONCURRENCY, async m => {
+    // Refresh Shopify source-of-truth fields on existing order
+    const existing = existingByRef.get(m.order_ref);
+    const operatorTouched = existing && !['pending', 'flagged'].includes(existing.status);
 
-      let addressChanged = false;
-      if (!operatorTouched) {
-        refreshPatch.customer_email = m.customer_email;
-        refreshPatch.customer_phone = m.customer_phone;
-        refreshPatch.address_line   = m.address_line;
-        refreshPatch.address_line2  = m.address_line2;
-        refreshPatch.city           = m.city;
-        refreshPatch.region_state   = m.region_state;
-        refreshPatch.country        = m.country;
-        refreshPatch.address_verdict = m.address_verdict;
-        if ((existing?.area_type_source ?? 'auto') === 'auto') {
-          refreshPatch.area_type = m.area_type;
-          refreshPatch.area_type_source = 'auto';
-        }
-        if (existing?.status === 'pending' && m.address_verdict !== 'house') {
-          refreshPatch.status = 'flagged';
-        }
-        if (
-          (existing?.postal_code ?? null) !== (m.postal_code ?? null) ||
-          (existing?.address_line ?? null) !== (m.address_line ?? null)
-        ) {
-          refreshPatch.address_verified_at = null;
-          refreshPatch.address_match = null;
-          refreshPatch.address_google_formatted = null;
-          refreshPatch.address_google_postal = null;
-          refreshPatch.address_customer_postal = null;
-          addressChanged = true;
-        }
+    const refreshPatch: Record<string, unknown> = {
+      placed_at: m.placed_at,
+      customer_paid_shipping_usd: m.customer_paid_shipping_usd,
+      shipping_line_title: m.shipping_line_title,
+      currency: m.currency,
+      postal_code: m.postal_code,
+      subtotal_usd: m.subtotal_usd,
+      tax_usd: m.tax_usd,
+      tax_lines: m.tax_lines,
+      discount_total_usd: m.discount_total_usd,
+      discount_codes: m.discount_codes,
+      payment_methods: m.payment_methods,
+      financial_status: m.financial_status,
+      line_items: m.line_items,
+      // Shopify-derived source of truth — safe to refresh; backfills existing
+      // orders (that predate this column) on the next full sync.
+      attribution_source: m.attribution_source,
+      attribution_medium: m.attribution_medium,
+      attribution_campaign: m.attribution_campaign,
+      attribution_referrer: m.attribution_referrer,
+      attribution_last_source: m.attribution_last_source,
+      attribution_last_medium: m.attribution_last_medium,
+      attribution_last_referrer: m.attribution_last_referrer,
+    };
+
+    let addressChanged = false;
+    if (!operatorTouched) {
+      refreshPatch.customer_email = m.customer_email;
+      refreshPatch.customer_phone = m.customer_phone;
+      refreshPatch.address_line   = m.address_line;
+      refreshPatch.address_line2  = m.address_line2;
+      refreshPatch.city           = m.city;
+      refreshPatch.region_state   = m.region_state;
+      refreshPatch.country        = m.country;
+      refreshPatch.address_verdict = m.address_verdict;
+      if ((existing?.area_type_source ?? 'auto') === 'auto') {
+        refreshPatch.area_type = m.area_type;
+        refreshPatch.area_type_source = 'auto';
       }
-
-      const { error: upErr } = await admin
-        .from('orders')
-        .update(refreshPatch)
-        .eq('order_ref', m.order_ref);
-      if (upErr) {
-        skipped.push({ order_ref: m.order_ref, error: `refresh: ${upErr.message}` });
-        continue;
+      if (existing?.status === 'pending' && m.address_verdict !== 'house') {
+        refreshPatch.status = 'flagged';
       }
-      refreshed++;
-      if (addressChanged) addressUpdated++;
+      if (
+        (existing?.postal_code ?? null) !== (m.postal_code ?? null) ||
+        (existing?.address_line ?? null) !== (m.address_line ?? null)
+      ) {
+        refreshPatch.address_verified_at = null;
+        refreshPatch.address_match = null;
+        refreshPatch.address_google_formatted = null;
+        refreshPatch.address_google_postal = null;
+        refreshPatch.address_customer_postal = null;
+        addressChanged = true;
+      }
     }
 
+    const { error: upErr } = await admin
+      .from('orders')
+      .update(refreshPatch)
+      .eq('order_ref', m.order_ref);
+    if (upErr) {
+      skipped.push(skipRecord(rawByRef.get(m.order_ref)!, 'db_error', `refresh: ${upErr.message}`));
+      return;
+    }
+    refreshed++;
+    if (addressChanged) addressUpdated++;
+  });
+
+  // ── Phase 2: customers ─────────────────────────────────────────────────────
+  // One write per customer, not one per order: `customers.email` is UNIQUE, so
+  // two orders from the same buyer racing each other would have collided, and
+  // sequentially they just overwrote each other. The newest order wins, which
+  // also makes the result deterministic — it used to be whichever order Shopify
+  // happened to return last.
+  const newestByEmail = new Map<string, MappedOrder>();
+  for (const m of mapped) {
+    if (!m.customer_email) continue;
+    const key = m.customer_email.toLowerCase();
+    const prev = newestByEmail.get(key);
+    if (!prev || (m.placed_at ?? '') > (prev.placed_at ?? '')) newestByEmail.set(key, m);
+  }
+
+  await mapPool([...newestByEmail.entries()], DB_CONCURRENCY, async ([emailKey, m]) => {
     // Customer upsert: sync phone + address always; fill name only if blank.
     // Never touches operator-curated fields (notes, journey, follow-up statuses).
-    if (!m.customer_email) continue;
-    const emailKey = m.customer_email.toLowerCase();
     const raw = rawByRef.get(m.order_ref);
     const shopifyCustomerId = raw?.customer?.id ? String(raw.customer.id) : null;
     const addr = raw?.shipping_address ?? null;
@@ -651,17 +748,54 @@ serve(async (req: Request) => {
         country:      addr?.country_code ?? null,
         last_synced_at: new Date().toISOString(),
       });
-      if (!custErr) {
-        customersUpserted++;
-        customerByEmail.set(emailKey, {
-          id: '', email: emailKey, shopify_id: shopifyCustomerId,
-          first_name: raw?.customer?.first_name ?? null,
-          last_name: raw?.customer?.last_name ?? null,
-          phone: m.customer_phone,
-        });
-      }
+      if (!custErr) customersUpserted++;
     }
+  });
+
+  // ── Phase 3: acquisition touches ──────────────────────────────────────────
+  // Deliberately after Phase 2. These are UPDATEs keyed on email, so running
+  // them before the customer row exists — which is what happened when a
+  // first-time buyer's very first order came through — matched nothing and the
+  // acquisition source was lost for good, since the order is never "new" again.
+  const touchByEmail = new Map<string, MappedOrder>();
+  for (const m of mapped) {
+    if (!insertedRefs.has(m.order_ref)) continue;
+    if (!m.customer_email || !m.attribution_source) continue;
+    const key = m.customer_email.toLowerCase();
+    const prev = touchByEmail.get(key);
+    if (!prev || (m.placed_at ?? '') > (prev.placed_at ?? '')) touchByEmail.set(key, m);
   }
+
+  await mapPool([...touchByEmail.entries()], DB_CONCURRENCY, async ([email, m]) => {
+    const at = m.placed_at ?? new Date().toISOString();
+    // First touch — insert-only (never overwrite the original acquisition).
+    await admin
+      .from('customers')
+      .update({
+        first_touch_source: m.attribution_source,
+        first_touch_medium: m.attribution_medium,
+        first_touch_campaign_id: m.attribution_campaign,
+        first_touch_at: at,
+      })
+      .eq('email', email)
+      .is('first_touch_source', null);
+    // Last touch — reflects the most recent order's landing, so the journey
+    // shows the channel that actually drove the latest purchase.
+    await admin
+      .from('customers')
+      .update({
+        last_touch_source: m.attribution_source,
+        last_touch_medium: m.attribution_medium,
+        last_touch_campaign_id: m.attribution_campaign,
+        last_touch_at: at,
+      })
+      .eq('email', email);
+  });
+
+  const skippedBreakdown = skipped.reduce<Record<string, number>>((acc, sk) => {
+    acc[sk.reason] = (acc[sk.reason] ?? 0) + 1;
+    return acc;
+  }, {});
 
   return new Response(
     JSON.stringify({
@@ -672,6 +806,8 @@ serve(async (req: Request) => {
       addressUpdated,
       customersUpserted,
       skipped: skipped.length,
+      skippedBreakdown,
+      journeyBatchesFailed,
       skippedDetails: skipped,
     }),
     { status: 200, headers: { ...corsHeaders, 'content-type': 'application/json' } },
