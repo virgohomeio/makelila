@@ -5,6 +5,10 @@ import { logAction } from './activityLog';
 import { adjustPartStock } from './parts';
 import { functionErrorMessage } from './functionError';
 import { refundFlagForOrderId, refundFlagTitle } from './refundedOrders';
+import {
+  guessDwellingFromText,
+  type AreaType, type Dwelling, type DwellingSource, type UnitStatus,
+} from './addressClassify';
 
 // 'cancelled' takes the order out of every live Order Review tab (see
 // useOrders) and it has no fulfillment_queue row. The row is kept for
@@ -80,18 +84,39 @@ export type Order = {
   city: string;
   region_state: string | null;
   country: 'US' | 'CA';
-  address_verdict: 'house' | 'apt' | 'remote' | 'condo';
+  // Dwelling type. ALWAYS read alongside address_verdict_source — the value is
+  // only as good as where it came from, and 'sync-guess' (the default for every
+  // order) is a text match on the address the customer typed, checked against
+  // nothing. Only 'google' means a postal authority confirmed it.
+  address_verdict: Dwelling;
+  address_verdict_source: DwellingSource;
   // Urban/suburban vs rural area classification (separate from address_verdict's
-  // dwelling type). area_type_source tracks provenance: 'auto' (postal-code
-  // guess on sync), 'verified' (set by the Verify-address step via Claude), or
-  // 'manual' (operator override). null = unclassified.
-  area_type: 'urban' | 'suburban' | 'rural' | null;
+  // dwelling type). area_type_source tracks provenance: 'auto' (the postal-code
+  // rule, which can only establish rural), 'verified' (set by the Verify-address
+  // step), or 'manual' (operator override). null = unclassified, and it is left
+  // null on purpose rather than defaulted.
+  area_type: AreaType | null;
   area_type_source: string;
+  // Why the last verify could not classify the area, when it couldn't. Non-null
+  // means the field is blank for a reason the operator can act on (no provider
+  // key, a model outage) rather than because nobody has looked yet.
+  address_area_type_error: string | null;
   address_verified_at: string | null;
   address_match: 'match' | 'mismatch' | 'unverifiable' | null;
+  // 'missing' = the building has units and this order names none. A freight
+  // delivery with no unit number gets left in a lobby or returned.
+  address_unit_status: UnitStatus | null;
   address_google_formatted: string | null;
   address_google_postal: string | null;
   address_customer_postal: string | null;
+  // Raw signals behind the dwelling verdict, kept so it can be explained after
+  // the fact: Google's validationGranularity, the USPS DPV confirmation code
+  // and record type, and Google's own residential/business flags.
+  address_validation_granularity: string | null;
+  address_usps_dpv: string | null;
+  address_usps_record_type: string | null;
+  address_is_residential: boolean | null;
+  address_is_business: boolean | null;
   address_claude_verdict: 'plausible' | 'implausible' | 'unknown' | null;
   address_claude_notes: string | null;
   address_claude_postal: string | null;
@@ -282,7 +307,9 @@ export async function setSalesConfirmedFit(id: string, value: boolean): Promise<
   if (error) throw error;
 }
 
-export type AreaType = 'urban' | 'suburban' | 'rural';
+// One definition, shared with the edge functions via _shared/addressClassify.ts,
+// so the values the sync writes and the values the card renders cannot drift.
+export type { AreaType, Dwelling, DwellingSource, UnitStatus };
 
 /** Full labels for the detail card dropdown. */
 export const AREA_TYPE_LABEL: Record<AreaType, string> = {
@@ -310,6 +337,18 @@ export async function setAreaType(id: string, value: AreaType | null): Promise<v
   await logAction('area_type_set', id, value ?? 'unclassified');
 }
 
+/** Operator override of the dwelling type. Flips the source to 'manual' so
+ *  neither a Shopify re-sync nor a later verify silently replaces the operator's
+ *  own call — a person who has spoken to the customer knows more than either. */
+export async function setDwelling(id: string, value: Dwelling): Promise<void> {
+  const { error } = await supabase
+    .from('orders')
+    .update({ address_verdict: value, address_verdict_source: 'manual' })
+    .eq('id', id);
+  if (error) throw error;
+  await logAction('address_dwelling_set', id, value);
+}
+
 export async function updateFreightEstimate(id: string, amount: number): Promise<void> {
   // Backlog #17 — operator edit flips the source to 'manual' so the FreightCard
   // can render a "(operator edit)" tag and reporting can distinguish synced
@@ -328,7 +367,20 @@ export type VerifyAddressResult = {
   google_formatted: string | null;
   // Area type the verify step classified (urban/suburban/rural), written back
   // to the order with source 'verified'. null if it couldn't be determined.
-  area_type: 'urban' | 'suburban' | 'rural' | null;
+  area_type: AreaType | null;
+  // Why it couldn't, when it couldn't. A soft fallback that fails silently is
+  // how a blank field gets mistaken for a checked one.
+  area_type_error?: string | null;
+  // What kind of building, and whether that came from Google ('google') or is
+  // still the sync-time text guess ('sync-guess').
+  dwelling: Dwelling;
+  dwelling_source: DwellingSource;
+  // 'missing' = a multi-unit building with no unit number on the order. Flags
+  // the order, same as a postal mismatch.
+  unit_status: UnitStatus;
+  // Google's validationGranularity — PREMISE/SUB_PREMISE mean it resolved an
+  // actual building, ROUTE only a street.
+  granularity?: string | null;
   // Set when Google Address Validation failed (quota/billing/network) and we
   // degraded to 'unverifiable' rather than aborting. Lets the operator see the
   // verdict was downgraded for an infra reason, not a bad address.
@@ -1731,7 +1783,12 @@ const REPLACEMENT_ORDER_DEFAULTS = {
   freight_threshold_usd: 0,
   currency: 'USD',
   total_usd: 0,
+  // A replacement ships to an address we were given, not one anyone verified —
+  // the source says so, and the card renders it as unconfirmed until someone
+  // runs Verify. Callers override address_verdict with the text guess for the
+  // address they actually have.
   address_verdict: 'house' as const,
+  address_verdict_source: 'sync-guess' as const,
   sales_confirmed_fit: false,
 };
 
@@ -1818,6 +1875,9 @@ export async function createReplacementOrder(input: ReplacementOrderInput):
       postal_code: input.address.postal_code,
       address_customer_postal: input.address.postal_code,
       ...REPLACEMENT_ORDER_DEFAULTS,
+      address_verdict: guessDwellingFromText(
+        input.address.address_line, null, input.address.postal_code,
+      ),
       line_items: input.line_items,
     })
     .select('id, order_ref')
@@ -1914,6 +1974,9 @@ export async function createPendingReplacement(input: ReplacementOrderInput):
       postal_code: input.address.postal_code,
       address_customer_postal: input.address.postal_code,
       ...REPLACEMENT_ORDER_DEFAULTS,
+      address_verdict: guessDwellingFromText(
+        input.address.address_line, null, input.address.postal_code,
+      ),
       line_items: input.line_items,
     })
     .select('id, order_ref')

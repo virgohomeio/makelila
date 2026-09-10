@@ -1386,3 +1386,217 @@
   line-height: 1.4;
   color: var(--color-ink);
 }
+
+/* ── Address verification ────────────────────────────────────────────────
+   The card makes three claims — postal, dwelling type, area — and before this
+   they all rendered with identical weight whether a postal authority had
+   confirmed them or nobody had ever looked. Every claim now carries a
+   provenance line, and an unconfirmed claim is styled as the open question it
+   is rather than as an answer. */
+
+.claim {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-2) 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  margin-top: var(--space-2);
+}
+/* Confirmed by a postal authority. */
+.claimConfirmed {
+  background: var(--color-success-bg);
+  border-color: var(--color-success-border);
+}
+/* Needs a person: a wrong postal, a missing unit, an address that can't take
+   a freight delivery as it stands. */
+.claimBlocking {
+  background: var(--color-error-bg);
+  border-color: var(--color-error-border);
+}
+/* Real, but the operator should know before booking freight. */
+.claimCaution {
+  background: var(--color-warning-bg);
+  border-color: var(--color-warning-border);
+}
+/* Nobody has checked. Deliberately flat — an unchecked field should not read
+   as a result. */
+.claimUnchecked {
+  background: var(--color-surface);
+  border-style: dashed;
+}
+
+.claimHead {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.claimTitle {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--color-ink-subtle);
+  min-width: 76px;
+  flex: none;
+}
+.claimValue {
+  font-size: var(--font-size-body);
+  font-weight: 700;
+  color: var(--color-ink);
+}
+.claimValueUnchecked {
+  font-size: var(--font-size-body);
+  font-weight: 700;
+  color: var(--color-ink-subtle);
+  font-style: italic;
+}
+.claimNote {
+  font-size: var(--font-size-meta);
+  color: var(--color-ink-muted);
+}
+/* Where this claim came from. The single most important line on the card:
+   it is what lets an operator tell a checked fact from a starting guess. */
+.claimSource {
+  font-size: 10px;
+  color: var(--color-ink-subtle);
+  font-style: italic;
+}
+
+.claimSelect {
+  font-size: var(--font-size-meta);
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
+  background: var(--color-raised);
+  color: var(--color-ink);
+  cursor: pointer;
+}
+
+/* A multi-unit building with no unit number on the order. A freight driver
+   with nowhere to deliver leaves the pallet in a lobby or returns it to the
+   terminal, so this is the loudest thing on the card. */
+.unitAlert {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-top: 10px;
+  padding: 10px var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--color-error-bg);
+  border: 1px solid var(--color-error-border);
+  color: var(--color-error);
+}
+.unitAlertHead {
+  font-size: var(--font-size-meta);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.unitAlertBody { font-size: var(--font-size-meta); color: var(--color-ink); }
+
+.verifyRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-top: var(--space-2);
+}
+.verifySection {
+  margin-top: 14px;
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-border);
+}
+.verifyBtn {
+  padding: 6px var(--space-3);
+  font-size: var(--font-size-meta);
+  font-weight: 600;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  background: var(--color-crimson);
+  color: var(--color-raised);
+  border: 1px solid var(--color-crimson);
+}
+.verifyBtnDone {
+  background: var(--color-raised);
+  color: var(--color-ink-muted);
+  border-color: var(--color-border);
+}
+.verifyBtn:disabled { cursor: wait; opacity: 0.7; }
+
+.badge {
+  font-size: 10px;
+  padding: 3px var(--space-2);
+  border-radius: 3px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  border: 1px solid;
+}
+.badgeMatch {
+  background: var(--color-success-bg);
+  color: var(--color-success);
+  border-color: var(--color-success-border);
+}
+.badgeMismatch {
+  background: var(--color-error-bg);
+  color: var(--color-error);
+  border-color: var(--color-error-border);
+}
+.badgeUnverifiable {
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
+  border-color: var(--color-warning-border);
+}
+.badgeInfo {
+  background: var(--color-info-bg);
+  color: var(--color-info);
+  border-color: var(--color-info-border);
+}
+
+.mismatchDetail {
+  margin-top: 10px;
+  font-size: var(--font-size-meta);
+  color: var(--color-ink-muted);
+}
+.mismatchBtn {
+  margin-top: var(--space-2);
+  padding: 6px var(--space-3);
+  font-size: var(--font-size-meta);
+  font-weight: 600;
+  background: var(--color-crimson);
+  color: var(--color-raised);
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.mismatchBtn:disabled { cursor: not-allowed; opacity: 0.5; }
+
+.verifyMsg { margin-top: var(--space-2); font-size: var(--font-size-meta); color: var(--color-ink-muted); }
+.verifyMsgError { color: var(--color-error); }
+
+.awaiting {
+  margin-top: 10px;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--color-warning-bg);
+  border: 1px solid var(--color-warning-border);
+  font-size: var(--font-size-meta);
+  color: var(--color-warning);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.confirmed {
+  margin-top: 10px;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--color-success-bg);
+  border: 1px solid var(--color-success-border);
+  font-size: var(--font-size-meta);
+  color: var(--color-success);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}

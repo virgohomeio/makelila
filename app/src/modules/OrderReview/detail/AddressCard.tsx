@@ -1,23 +1,38 @@
 import { useState } from 'react';
-import type { Order, AreaType } from '../../../lib/orders';
-import { setSalesConfirmedFit, verifyAddress, setAreaType, AREA_TYPE_LABEL } from '../../../lib/orders';
+import type { Order, AreaType, Dwelling } from '../../../lib/orders';
+import {
+  setSalesConfirmedFit, verifyAddress, setAreaType, setDwelling, AREA_TYPE_LABEL,
+} from '../../../lib/orders';
+import {
+  DWELLING_LABEL, DWELLING_NOTE, dwellingProvenance, needsFitConfirmation,
+} from '../../../lib/addressClassify';
 import { sendTemplate } from '../../../lib/templates';
 import { ADDRESS_CARD_ID } from './anchors';
 import styles from '../OrderReview.module.css';
 
-const VERDICT_CLASS: Record<Order['address_verdict'], string> = {
-  house:  styles.verdictHouse,
-  apt:    styles.verdictApt,
-  condo:  styles.verdictCondo,
-  remote: styles.verdictRemote,
-};
+// The card states three things about an address, and each one is only worth
+// what its provenance is worth:
+//
+//   POSTAL   — does the code the customer typed match the real one?
+//   DWELLING — house, apartment, condo, business, PO box, rural route?
+//   AREA     — urban, suburban, rural?
+//
+// Before this rewrite all three rendered identically whether a postal authority
+// had confirmed them or nobody had ever looked: 280 of 287 orders read "HOUSE ·
+// single-family · standard delivery" (a regex over the street line, run once at
+// Shopify-sync time and never revisited) and ~200 read "Suburban" (a literal
+// fallthrough default). An operator can't act on a field that says the same
+// thing for every order, so every claim below carries the sentence that says
+// where it came from, and an unchecked claim is styled as an open question
+// rather than as an answer.
 
-const VERDICT_LABEL: Record<Order['address_verdict'], string> = {
-  house:  'Single-family · standard delivery',
-  apt:    'Apartment · delivery may need coordination',
-  condo:  'Condo · concierge / dock concerns',
-  remote: 'Remote area · freight surcharge likely',
-};
+const DWELLING_OPTIONS: Dwelling[] = ['house', 'apt', 'condo', 'remote', 'business', 'po_box'];
+
+/** Dwelling types that can't take a normal freight delivery at all, as opposed
+ *  to ones that just need coordinating. */
+function isBlockingDwelling(d: Dwelling): boolean {
+  return d === 'po_box';
+}
 
 function MissingField({ quoUrl }: { quoUrl: string | null }) {
   return (
@@ -38,27 +53,47 @@ function MissingField({ quoUrl }: { quoUrl: string | null }) {
 export function AddressCard({ order }: { order: Order }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  const [err, setErr] = useState(false);
+
+  const verified = !!order.address_verified_at;
+  const dwellingConfirmed = order.address_verdict_source === 'google';
+  const unitMissing = order.address_unit_status === 'missing';
+  const unitUnrecognized = order.address_unit_status === 'unrecognized';
+  const postalLabel = order.country === 'US' ? 'ZIP code' : 'Postal code';
+
+  const say = (text: string, isError = false) => { setMsg(text); setErr(isError); };
 
   const runVerify = async () => {
-    setBusy(true); setMsg(null);
+    setBusy(true); say('');
     try {
       const r = await verifyAddress(order.id);
-      const base =
-        r.match === 'match'      ? 'Address verified.' :
-        r.match === 'mismatch'   ? 'Postal code mismatch — see below.' :
-        r.google_error           ? 'Address validation service unavailable — classified what we could.' :
-                                   'Could not verify.';
-      setMsg(r.area_type ? `${base} Area: ${AREA_TYPE_LABEL[r.area_type]}.` : base);
+      const head =
+        r.match === 'match'    ? `${postalLabel} verified.` :
+        r.match === 'mismatch' ? `${postalLabel} mismatch — see below.` :
+        r.google_error         ? 'Address validation service unavailable — classified what we could.' :
+                                 `Could not confirm the ${postalLabel.toLowerCase()}.`;
+      const parts = [head];
+      // Say what each pass actually established. A verify that silently
+      // established nothing used to read the same as one that established
+      // everything.
+      parts.push(r.dwelling_source === 'google'
+        ? `Building: ${DWELLING_LABEL[r.dwelling].toLowerCase()} (confirmed).`
+        : `Building: still unconfirmed — Google resolved the street but not the premise.`);
+      if (r.unit_status === 'missing') parts.push('No unit number on file for a multi-unit building.');
+      parts.push(r.area_type
+        ? `Area: ${AREA_TYPE_LABEL[r.area_type]}.`
+        : `Area not classified${r.area_type_error ? ` — ${r.area_type_error}` : '.'}`);
+      say(parts.join(' '), r.match === 'mismatch' || r.unit_status === 'missing');
     } catch (e) {
-      setMsg(`Error: ${(e as Error).message}`);
+      say(`Error: ${(e as Error).message}`, true);
     } finally {
       setBusy(false);
     }
   };
 
   const sendMismatchEmail = async () => {
-    if (!order.customer_email) { setMsg('No customer email on file.'); return; }
-    setBusy(true); setMsg(null);
+    if (!order.customer_email) { say('No customer email on file.', true); return; }
+    setBusy(true); say('');
     try {
       const r = await sendTemplate({
         template_key: 'address_mismatch',
@@ -71,13 +106,47 @@ export function AddressCard({ order }: { order: Order }) {
           order_ref:            order.order_ref,
         },
       });
-      setMsg(`✓ Email sent (id ${r.message_id})`);
+      say(`✓ Email sent (id ${r.message_id})`);
     } catch (e) {
-      setMsg(`Send failed: ${(e as Error).message}`);
+      say(`Send failed: ${(e as Error).message}`, true);
     } finally {
       setBusy(false);
     }
   };
+
+  // ── Claim 1: the postal code ────────────────────────────────────────
+  const postalClaim = (() => {
+    if (!verified || !order.address_match) {
+      return { cls: styles.claimUnchecked, value: order.address_customer_postal ?? '—',
+               unchecked: true, note: 'Not checked against a postal authority yet.', source: 'run Verify to check it' };
+    }
+    if (order.address_match === 'match') {
+      return { cls: styles.claimConfirmed, value: order.address_google_postal ?? order.address_customer_postal ?? '—',
+               unchecked: false, note: 'Matches the postal authority’s record for this street address.',
+               source: `confirmed ${new Date(order.address_verified_at!).toLocaleDateString()}` };
+    }
+    if (order.address_match === 'mismatch') {
+      return { cls: styles.claimBlocking, value: order.address_customer_postal ?? '—',
+               unchecked: false, note: `The postal authority has ${order.address_google_postal ?? 'a different code'} for this address.`,
+               source: `checked ${new Date(order.address_verified_at!).toLocaleDateString()}` };
+    }
+    return { cls: styles.claimCaution, value: order.address_customer_postal ?? '—',
+             unchecked: false, note: 'The postal authority could not resolve this address well enough to confirm the code.',
+             source: `checked ${new Date(order.address_verified_at!).toLocaleDateString()}` };
+  })();
+
+  // ── Claim 2: the dwelling type ──────────────────────────────────────
+  const dwellingClaim = (() => {
+    if (!dwellingConfirmed && order.address_verdict_source !== 'manual') {
+      return { cls: styles.claimUnchecked, unchecked: true };
+    }
+    if (isBlockingDwelling(order.address_verdict)) return { cls: styles.claimBlocking, unchecked: false };
+    if (needsFitConfirmation(order.address_verdict)) return { cls: styles.claimCaution, unchecked: false };
+    return { cls: styles.claimConfirmed, unchecked: false };
+  })();
+
+  // ── Claim 3: the area type ──────────────────────────────────────────
+  const areaVerified = order.area_type_source === 'verified' || order.area_type_source === 'manual';
 
   return (
     <div className={styles.card} id={ADDRESS_CARD_ID}>
@@ -106,7 +175,7 @@ export function AddressCard({ order }: { order: Order }) {
             : <MissingField quoUrl={order.quo_thread_url} />}
         </div>
         <div className={styles.contactLine}>
-          <span className={styles.contactLabel}>{order.country === 'US' ? 'ZIP Code' : 'Postal Code'}</span>
+          <span className={styles.contactLabel}>{postalLabel}</span>
           {order.address_customer_postal
             ? <span>{order.address_customer_postal}</span>
             : <MissingField quoUrl={order.quo_thread_url} />}
@@ -115,40 +184,112 @@ export function AddressCard({ order }: { order: Order }) {
           <span className={styles.contactLabel}>Country</span>
           <span>{order.country}</span>
         </div>
-        <div className={styles.contactLine}>
-          <span className={styles.contactLabel}>Area type</span>
-          <select
-            value={order.area_type ?? ''}
-            onChange={async e => {
-              const v = (e.target.value || null) as AreaType | null;
-              try { await setAreaType(order.id, v); }
-              catch (err) { alert((err as Error).message); }
-            }}
-            style={{
-              fontSize: 11, padding: '2px 6px', borderRadius: 'var(--radius-sm)',
-              border: '1px solid var(--color-border)', background: '#fff',
-              color: 'var(--color-ink)', cursor: 'pointer',
-            }}
-          >
-            <option value="">Unclassified</option>
-            <option value="urban">{AREA_TYPE_LABEL.urban}</option>
-            <option value="suburban">{AREA_TYPE_LABEL.suburban}</option>
-            <option value="rural">{AREA_TYPE_LABEL.rural}</option>
-          </select>
-          {order.area_type && order.area_type_source === 'auto' && (
-            <span className={styles.muted} style={{ fontSize: 10 }}>auto-guess</span>
-          )}
-          {order.area_type && order.area_type_source === 'verified' && (
-            <span className={styles.muted} style={{ fontSize: 10 }}>from address verification</span>
-          )}
+
+        {/* A multi-unit building with no unit number. Loudest thing on the
+            card: a freight driver with nowhere to deliver leaves the pallet in
+            a lobby or takes it back to the terminal. */}
+        {unitMissing && (
+          <div className={styles.unitAlert}>
+            <span className={styles.unitAlertHead}>⚠ No unit number</span>
+            <span className={styles.unitAlertBody}>
+              {order.address_google_formatted ?? order.address_line} is a multi-unit building.
+              The street address is confirmed, but no apartment/unit number is on this order —
+              ask the customer for it before booking freight.
+            </span>
+          </div>
+        )}
+        {unitUnrecognized && (
+          <div className={styles.unitAlert}>
+            <span className={styles.unitAlertHead}>⚠ Unit not recognised</span>
+            <span className={styles.unitAlertBody}>
+              The postal authority confirmed the street but does not recognise unit
+              “{order.address_line2}” at it. Confirm the unit with the customer.
+            </span>
+          </div>
+        )}
+
+        {/* ── The three claims ───────────────────────────────────────── */}
+
+        <div className={`${styles.claim} ${postalClaim.cls}`}>
+          <div className={styles.claimHead}>
+            <span className={styles.claimTitle}>{postalLabel}</span>
+            <span className={postalClaim.unchecked ? styles.claimValueUnchecked : styles.claimValue}>
+              {postalClaim.unchecked ? 'Unverified' : postalClaim.value}
+            </span>
+          </div>
+          <span className={styles.claimNote}>{postalClaim.note}</span>
+          <span className={styles.claimSource}>{postalClaim.source}</span>
         </div>
 
-        <div className={`${styles.verdict} ${VERDICT_CLASS[order.address_verdict]}`} style={{ marginTop: 12 }}>
-          <strong>{order.address_verdict.toUpperCase()}</strong>
-          <span>{VERDICT_LABEL[order.address_verdict]}</span>
+        <div className={`${styles.claim} ${dwellingClaim.cls}`}>
+          <div className={styles.claimHead}>
+            <span className={styles.claimTitle}>Building</span>
+            <select
+              className={styles.claimSelect}
+              aria-label="Building type"
+              value={order.address_verdict}
+              onChange={async e => {
+                try { await setDwelling(order.id, e.target.value as Dwelling); }
+                catch (err2) { say((err2 as Error).message, true); }
+              }}
+            >
+              {DWELLING_OPTIONS.map(d => (
+                <option key={d} value={d}>{DWELLING_LABEL[d]}</option>
+              ))}
+            </select>
+          </div>
+          <span className={styles.claimNote}>
+            {dwellingClaim.unchecked
+              ? 'Not confirmed — this is a guess from the address text, and it is wrong often enough to check.'
+              : DWELLING_NOTE[order.address_verdict]}
+          </span>
+          <span className={styles.claimSource}>
+            {dwellingProvenance(order.address_verdict_source, order.address_verified_at)}
+            {order.address_usps_record_type && ` · USPS record type ${order.address_usps_record_type}`}
+          </span>
         </div>
 
-        {order.address_verdict !== 'house' && (
+        <div className={`${styles.claim} ${
+          !order.area_type ? styles.claimUnchecked
+          : areaVerified ? styles.claimConfirmed
+          : styles.claimUnchecked
+        }`}>
+          <div className={styles.claimHead}>
+            <span className={styles.claimTitle}>Area</span>
+            <select
+              className={styles.claimSelect}
+              aria-label="Area type"
+              value={order.area_type ?? ''}
+              onChange={async e => {
+                const v = (e.target.value || null) as AreaType | null;
+                try { await setAreaType(order.id, v); }
+                catch (err2) { say((err2 as Error).message, true); }
+              }}
+            >
+              <option value="">Unclassified</option>
+              <option value="urban">{AREA_TYPE_LABEL.urban}</option>
+              <option value="suburban">{AREA_TYPE_LABEL.suburban}</option>
+              <option value="rural">{AREA_TYPE_LABEL.rural}</option>
+            </select>
+          </div>
+          <span className={styles.claimNote}>
+            {order.area_type === 'rural'
+              ? 'Rural or remote delivery — expect a freight surcharge and a longer transit.'
+              : order.area_type
+                ? 'Standard delivery area.'
+                : 'Not classified. Urban and suburban cannot be told apart from a postal code, so nothing is assumed here.'}
+          </span>
+          <span className={styles.claimSource}>
+            {order.area_type_source === 'manual' ? 'set by an operator'
+              : order.area_type_source === 'verified' ? `classified by address verification${order.address_verified_at ? ` ${new Date(order.address_verified_at).toLocaleDateString()}` : ''}`
+              : order.area_type ? 'from the postal-code rule'
+              : order.address_area_type_error
+                ? `could not be classified — ${order.address_area_type_error}`
+                : 'run Verify to classify it'}
+          </span>
+        </div>
+
+        {needsFitConfirmation(order.address_verdict) && (
           <div className={styles.salesConfirmToggle}>
             <input
               type="checkbox"
@@ -156,88 +297,72 @@ export function AddressCard({ order }: { order: Order }) {
               checked={order.sales_confirmed_fit}
               onChange={async e => {
                 try { await setSalesConfirmedFit(order.id, e.target.checked); }
-                catch (err) { alert((err as Error).message); }
+                catch (err2) { say((err2 as Error).message, true); }
               }}
             />
             <label htmlFor={`sales-fit-${order.id}`}>
-              Sales confirmed fit with customer (required for {order.address_verdict} addresses)
+              Sales confirmed fit with customer (required for a{' '}
+              {DWELLING_LABEL[order.address_verdict].toLowerCase()} address)
             </label>
           </div>
         )}
 
         {order.address_confirmation_sent_at && !order.address_confirmed_at && (
-          <div style={{
-            marginTop: 10, padding: '6px 10px', borderRadius: 4,
-            background: '#fffbeb', border: '1px solid #f59e0b', fontSize: 11,
-            color: '#92400e', display: 'flex', alignItems: 'center', gap: 6,
-          }}>
+          <div className={styles.awaiting}>
             <span>⚠</span>
             <span>Awaiting customer address confirmation</span>
           </div>
         )}
         {order.address_confirmed_at && (
-          <div style={{
-            marginTop: 10, padding: '6px 10px', borderRadius: 4,
-            background: '#f0fff4', border: '1px solid #9ae6b4', fontSize: 11,
-            color: '#276749', display: 'flex', alignItems: 'center', gap: 6,
-          }}>
+          <div className={styles.confirmed}>
             <span>✓</span>
             <span>Customer confirmed address {new Date(order.address_confirmed_at).toLocaleDateString()}</span>
           </div>
         )}
 
-        <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--color-border)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <div className={styles.verifySection}>
+          <div className={styles.verifyRow}>
             <button
               onClick={() => void runVerify()}
               disabled={busy}
-              style={{
-                padding: '6px 12px', fontSize: 11, fontWeight: 600,
-                background: order.address_verified_at ? '#fff' : 'var(--color-crimson)',
-                color: order.address_verified_at ? 'var(--color-ink-muted)' : '#fff',
-                border: '1px solid ' + (order.address_verified_at ? 'var(--color-border)' : 'var(--color-crimson)'),
-                borderRadius: 'var(--radius-sm)', cursor: busy ? 'wait' : 'pointer',
-              }}
+              className={`${styles.verifyBtn} ${verified ? styles.verifyBtnDone : ''}`}
             >
-              {busy ? 'Verifying…' : order.address_verified_at ? 'Re-verify' : 'Verify address'}
+              {busy ? 'Verifying…' : verified ? 'Re-verify' : 'Verify address'}
             </button>
 
             {order.address_match === 'match' && (
-              <span style={{
-                fontSize: 10, padding: '3px 8px', borderRadius: 4,
-                background: '#f0fff4', color: '#276749', border: '1px solid #9ae6b4', fontWeight: 700,
-                letterSpacing: 0.3,
-              }}>✓ MATCH</span>
+              <span className={`${styles.badge} ${styles.badgeMatch}`}>✓ {postalLabel.toUpperCase()} MATCH</span>
             )}
             {order.address_match === 'mismatch' && (
-              <span style={{
-                fontSize: 10, padding: '3px 8px', borderRadius: 4,
-                background: '#fff5f5', color: '#9b2c2c', border: '1px solid #fc8181', fontWeight: 700,
-                letterSpacing: 0.3,
-              }}>⚠ POSTAL MISMATCH</span>
+              <span className={`${styles.badge} ${styles.badgeMismatch}`}>⚠ {postalLabel.toUpperCase()} MISMATCH</span>
             )}
             {order.address_match === 'unverifiable' && (
-              <span style={{
-                fontSize: 10, padding: '3px 8px', borderRadius: 4,
-                background: '#fffaf0', color: '#c05621', border: '1px solid #fbd38d', fontWeight: 700,
-                letterSpacing: 0.3,
-              }}>UNVERIFIABLE</span>
+              <span className={`${styles.badge} ${styles.badgeUnverifiable}`}>UNVERIFIABLE</span>
+            )}
+            {/* Granularity is the difference between "Google found this exact
+                building" and "Google found the street it's on" — which is
+                exactly how much to trust the building type above. */}
+            {verified && order.address_validation_granularity && (
+              <span
+                className={`${styles.badge} ${styles.badgeInfo}`}
+                title={
+                  order.address_validation_granularity === 'SUB_PREMISE' ? 'Resolved to a specific unit within the building.'
+                  : order.address_validation_granularity === 'PREMISE' ? 'Resolved to this exact building.'
+                  : 'Resolved only to the street — not precise enough to identify the building.'
+                }
+              >{order.address_validation_granularity.replace('_', ' ')}</span>
             )}
             {order.address_claude_verdict && (
               <span
+                className={`${styles.badge} ${styles.badgeInfo}`}
                 title={order.address_claude_notes ?? ''}
-                style={{
-                  fontSize: 10, padding: '3px 8px', borderRadius: 4,
-                  background: '#ebf8ff', color: '#2c5282', border: '1px solid #90cdf4',
-                  fontWeight: 700, letterSpacing: 0.3,
-                }}
-              >via Claude: {order.address_claude_verdict}</span>
+              >model: {order.address_claude_verdict}</span>
             )}
           </div>
 
           {order.address_claude_notes && (
-            <div style={{ marginTop: 6, fontSize: 11, color: 'var(--color-ink-muted)', fontStyle: 'italic' }}>
-              Claude: {order.address_claude_notes}
+            <div className={styles.mismatchDetail}>
+              <em>{order.address_claude_notes}</em>
               {order.address_claude_postal && (
                 <> · inferred postal: <strong>{order.address_claude_postal}</strong></>
               )}
@@ -245,19 +370,14 @@ export function AddressCard({ order }: { order: Order }) {
           )}
 
           {order.address_match === 'mismatch' && order.address_google_formatted && (
-            <div style={{ marginTop: 10, fontSize: 11, color: 'var(--color-ink-muted)' }}>
-              <div>Customer ZIP: <strong>{order.address_customer_postal ?? '—'}</strong></div>
-              <div>Google ZIP: <strong>{order.address_google_postal ?? '—'}</strong></div>
-              <div style={{ marginTop: 4 }}>Google's address: <em>{order.address_google_formatted}</em></div>
+            <div className={styles.mismatchDetail}>
+              <div>Customer {postalLabel.toLowerCase()}: <strong>{order.address_customer_postal ?? '—'}</strong></div>
+              <div>Postal authority: <strong>{order.address_google_postal ?? '—'}</strong></div>
+              <div style={{ marginTop: 4 }}>Standardized address: <em>{order.address_google_formatted}</em></div>
               <button
                 onClick={() => void sendMismatchEmail()}
                 disabled={busy || !order.customer_email}
-                style={{
-                  marginTop: 8, padding: '6px 12px', fontSize: 11, fontWeight: 600,
-                  background: 'var(--color-crimson)', color: '#fff', border: 'none',
-                  borderRadius: 'var(--radius-sm)', cursor: (busy || !order.customer_email) ? 'not-allowed' : 'pointer',
-                  opacity: !order.customer_email ? 0.5 : 1,
-                }}
+                className={styles.mismatchBtn}
               >
                 Send mismatch email
               </button>
@@ -265,12 +385,7 @@ export function AddressCard({ order }: { order: Order }) {
           )}
 
           {msg && (
-            <div style={{
-              marginTop: 8, fontSize: 11,
-              color: msg.startsWith('Error') || msg.startsWith('Send failed') || msg.startsWith('No customer') ? 'var(--color-error, #c53030)' : 'var(--color-ink-muted)',
-            }}>
-              {msg}
-            </div>
+            <div className={`${styles.verifyMsg} ${err ? styles.verifyMsgError : ''}`}>{msg}</div>
           )}
         </div>
       </div>

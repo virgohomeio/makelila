@@ -2,6 +2,7 @@ import { serve } from 'https://deno.land/std@0.224.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { corsHeaders } from '../_shared/cors.ts';
 import { authenticate } from '../_shared/auth.ts';
+import { guessDwellingFromText, areaTypeFromPostal, type Dwelling } from '../_shared/addressClassify.ts';
 
 type ShopifyAddress = {
   address1?: string | null;
@@ -82,8 +83,9 @@ type MappedOrder = {
   city: string;
   region_state: string | null;
   country: 'US' | 'CA';
-  address_verdict: 'house' | 'apt' | 'remote';
-  area_type: 'urban' | 'suburban' | 'rural';
+  address_verdict: Dwelling;
+  address_verdict_source: 'sync-guess';
+  area_type: 'urban' | 'suburban' | 'rural' | null;
   area_type_source: string;
   freight_estimate_usd: number;
   freight_threshold_usd: number;
@@ -123,31 +125,39 @@ function presentmentNum(set: MoneySet | null | undefined, fallback?: string | nu
   return num(set?.presentment_money?.amount) ?? num(set?.shop_money?.amount) ?? num(fallback);
 }
 
+/** The dwelling type an order is BORN with: a text match on what the customer
+ *  typed, checked against nothing. Always paired with source 'sync-guess' so
+ *  the card can show it as the starting point it is; verify-address replaces it
+ *  with Google's answer and flips the source to 'google'.
+ *
+ *  The rules live in _shared/addressClassify.ts, which reads BOTH address
+ *  lines — the old inline version looked only at address1, and Shopify puts the
+ *  unit number in address2, which is why 14 live orders with a unit on file
+ *  (a tower unit in Bay Harbor Islands, #21 on Bute St in downtown Vancouver,
+ *  'Suite 102' in Chesapeake) all read 'house'. */
 function verdictFor(
   addressLine: string | null | undefined,
+  addressLine2: string | null | undefined,
   postalCode: string | null,
   remotePrefixes: string[],
-): 'house' | 'apt' | 'remote' {
-  if (postalCode) {
-    const p = postalCode.toUpperCase().replace(/\s/g, '');
-    if (remotePrefixes.some(prefix => p.startsWith(prefix))) return 'remote';
-  }
-  const s = (addressLine ?? '').toLowerCase();
-  if (/\bapt\b|\bapartment\b|\bsuite\b|\bunit\b|#\s*\d/.test(s)) return 'apt';
-  return 'house';
+): Dwelling {
+  return guessDwellingFromText(addressLine, addressLine2, postalCode, remotePrefixes);
 }
 
+/** The area type a postal code alone can establish, and nothing more.
+ *
+ *  This used to end in `return 'suburban'`, so every non-rural order was born
+ *  claiming a classification nobody had made — ~200 rows reading 'Suburban'
+ *  with an 'auto' provenance the UI rendered as "auto-guess", visually
+ *  indistinguishable from the real per-address classification verify-address
+ *  produces. Urban and suburban cannot be told apart from a postal code, so
+ *  now the honest answer, null, is what gets written. */
 function areaTypeFor(
   postalCode: string | null,
   country: 'US' | 'CA',
   remotePrefixes: string[],
-): 'urban' | 'suburban' | 'rural' {
-  if (postalCode) {
-    const p = postalCode.toUpperCase().replace(/\s/g, '');
-    if (remotePrefixes.some(prefix => p.startsWith(prefix))) return 'rural';
-    if (country === 'CA' && /^[A-Z]0/.test(p)) return 'rural';
-  }
-  return 'suburban';
+): 'urban' | 'suburban' | 'rural' | null {
+  return areaTypeFromPostal(postalCode, country, remotePrefixes);
 }
 
 /** Why an order Shopify handed us never became a row in `orders`.
@@ -215,7 +225,7 @@ function mapOrder(
   const freight = shippingLine ? (presentmentNum(shippingLine.price_set, shippingLine.price) ?? 0) : 0;
   const total = presentmentNum(o.total_price_set, o.total_price) ?? 0;
   const postal = addr.zip?.trim() || null;
-  const verdict = verdictFor(addr.address1, postal, remotePrefixes);
+  const verdict = verdictFor(addr.address1, addr.address2, postal, remotePrefixes);
   const initialStatus: 'pending' | 'flagged' = verdict === 'house' ? 'pending' : 'flagged';
 
   const taxLines = (o.tax_lines ?? [])
@@ -239,6 +249,7 @@ function mapOrder(
     region_state: addr.province_code ?? null,
     country,
     address_verdict: verdict,
+    address_verdict_source: 'sync-guess' as const,
     area_type: areaTypeFor(postal, country, remotePrefixes),
     area_type_source: 'auto',
     freight_estimate_usd: 0,
@@ -560,12 +571,19 @@ serve(async (req: Request) => {
   const orderRefs = mapped.map(m => m.order_ref);
   const { data: existingOrders } = await admin
     .from('orders')
-    .select('order_ref, status, address_line, postal_code, area_type_source')
+    // address_line2 and address_verdict_source are both load-bearing below:
+    // without line2 the "did the address change?" test can never see a unit
+    // number being added, and without the verdict source the refresh would
+    // overwrite a Google-confirmed dwelling type with the sync's own guess on
+    // every run.
+    .select('order_ref, status, address_line, address_line2, postal_code, area_type_source, address_verdict_source')
     .in('order_ref', orderRefs);
   const existingByRef = new Map(
     (existingOrders ?? []).map(o => [o.order_ref, o as {
       order_ref: string; status: string;
-      address_line: string | null; postal_code: string | null; area_type_source: string | null;
+      address_line: string | null; address_line2: string | null;
+      postal_code: string | null; area_type_source: string | null;
+      address_verdict_source: string | null;
     }]),
   );
 
@@ -664,23 +682,51 @@ serve(async (req: Request) => {
       refreshPatch.city           = m.city;
       refreshPatch.region_state   = m.region_state;
       refreshPatch.country        = m.country;
-      refreshPatch.address_verdict = m.address_verdict;
+      // A re-sync must never demote a checked fact back to a guess. Only
+      // refresh the dwelling verdict while it is still the sync's own
+      // 'sync-guess'; a 'google' verdict came from the Address Validation API
+      // and a 'manual' one from an operator, and this heuristic knows less
+      // than either. (The address-changed branch below is what legitimately
+      // clears a stale 'google' verdict.)
+      if ((existing?.address_verdict_source ?? 'sync-guess') === 'sync-guess') {
+        refreshPatch.address_verdict = m.address_verdict;
+        refreshPatch.address_verdict_source = 'sync-guess';
+      }
       if ((existing?.area_type_source ?? 'auto') === 'auto') {
-        refreshPatch.area_type = m.area_type;
-        refreshPatch.area_type_source = 'auto';
+        // Only when the postal rule actually fired. m.area_type is null for
+        // everything it can't establish, and writing that null would blank a
+        // value an earlier verify had legitimately set.
+        if (m.area_type) {
+          refreshPatch.area_type = m.area_type;
+          refreshPatch.area_type_source = 'auto';
+        }
       }
       if (existing?.status === 'pending' && m.address_verdict !== 'house') {
         refreshPatch.status = 'flagged';
       }
       if (
         (existing?.postal_code ?? null) !== (m.postal_code ?? null) ||
-        (existing?.address_line ?? null) !== (m.address_line ?? null)
+        (existing?.address_line ?? null) !== (m.address_line ?? null) ||
+        (existing?.address_line2 ?? null) !== (m.address_line2 ?? null)
       ) {
+        // The address moved, so every verified fact about it is stale —
+        // including the dwelling type and the unit check, which is the whole
+        // point: a customer who adds the unit number we asked for must not
+        // keep the "no unit number" flag.
         refreshPatch.address_verified_at = null;
         refreshPatch.address_match = null;
         refreshPatch.address_google_formatted = null;
         refreshPatch.address_google_postal = null;
         refreshPatch.address_customer_postal = null;
+        refreshPatch.address_verdict = m.address_verdict;
+        refreshPatch.address_verdict_source = 'sync-guess';
+        refreshPatch.address_unit_status = null;
+        refreshPatch.address_validation_granularity = null;
+        refreshPatch.address_usps_dpv = null;
+        refreshPatch.address_usps_record_type = null;
+        refreshPatch.address_is_residential = null;
+        refreshPatch.address_is_business = null;
+        refreshPatch.address_area_type_error = null;
         addressChanged = true;
       }
     }

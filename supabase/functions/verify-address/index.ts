@@ -1,74 +1,59 @@
-// verify-address: on-demand validation for an order's address.
+// verify-address: on-demand validation for an order's shipping address.
 //
-// Primary path: Google's Address Validation API (addressvalidation.googleapis.com/v1:validateAddress).
-// Unlike the Geocoding API (which just resolves an address to coordinates and
-// echoes a best-effort match), this returns a real validation verdict plus the
-// USPS/postal-standardized address. We compare the validated postal with the
-// customer's parsed postal and write the verdict to orders.address_match. On
-// 'mismatch', also flips orders.status to 'flagged'.
+// The card in Order Review makes three claims to an operator, and this
+// function is responsible for all three:
 //
-// Fallback path (walkthrough #13): when Google returns 'unverifiable' (common
-// on Canadian rural addresses where the data coverage is poor), we hand the
-// address to Claude to judge plausibility and infer the postal. The Claude
-// verdict + reasoning is stored on the order so operators can see WHY a
-// verdict was overridden, and `address_match` is upgraded from
-// 'unverifiable' to 'match'/'mismatch' if Claude returns a usable answer.
+//   1. POSTAL — does the code the customer typed match the real one?
+//      Google's Address Validation API (addressvalidation.googleapis.com/
+//      v1:validateAddress) returns a validation verdict plus the postal-
+//      authority-standardized address. On 'mismatch' the order flips to
+//      'flagged'.
+//
+//   2. DWELLING — what are we delivering to: a house, an apartment, a condo,
+//      a business, a PO box, a rural route? This used to be a regex over the
+//      street line run once at Shopify-sync time and NEVER revisited here, so
+//      280 of 287 orders read "house · standard delivery". Google already
+//      tells us: USPS `addressRecordType` names the building kind outright,
+//      and outside the US a SUB_PREMISE granularity or a `subpremise`
+//      component says the same. We now read it and write both the verdict and
+//      its provenance, so the card can show a confirmed answer differently
+//      from an unverified guess.
+//
+//   3. AREA — urban, suburban or rural. Google exposes no density signal, so
+//      a model classifies it. That step is a soft fallback and its failures
+//      are now RECORDED (address_area_type_error) rather than swallowed: an
+//      area type that silently failed to compute is exactly how a field ends
+//      up looking classified when nothing classified it.
+//
+// A fourth thing falls out of the USPS data and is worth as much as the rest
+// combined: dpvConfirmation 'D' means the street is confirmed but the building
+// has units and this order names none. A composter ships freight; a driver
+// with no unit number leaves it in a lobby or takes it back to the terminal.
+// That case now flags the order.
+//
+// Google is a soft dependency throughout. When it errors (quota, billing, API
+// disabled, network) we degrade to 'unverifiable', still run the model pass,
+// and tell the operator the verdict was downgraded for an infra reason rather
+// than because the address is bad.
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { corsHeaders } from '../_shared/cors.ts';
 import { authenticate } from '../_shared/auth.ts';
+import { chatCompletion } from '../_shared/openaiCompat.ts';
+import { qwenConfigFromEnv } from '../_shared/qwen.ts';
+import { openaiConfigFromEnv } from '../_shared/openai.ts';
+import {
+  PROVIDER_LABELS, chainFailures, jsonFromModelText, pickProviders,
+  type LlmProvider,
+} from '../_shared/llmProviders.ts';
+import {
+  normalizePostal, parsePostalFromText, comparePostal,
+  guessDwellingFromText, dwellingFromValidation, unitStatusFromValidation,
+  areaTypeFromPostal,
+  type AVResponse, type AVResult, type Dwelling, type AreaType, type UnitStatus,
+} from '../_shared/addressClassify.ts';
 
 type VerifyInput = { order_id: string };
-
-// Subset of the Address Validation API response we care about.
-// https://developers.google.com/maps/documentation/address-validation/reference/rest/v1/TopLevel/validateAddress
-type AVAddressComponent = {
-  componentName?: { text?: string };
-  componentType?: string;
-};
-type AVResponse = {
-  result?: {
-    verdict?: {
-      validationGranularity?: string;
-      addressComplete?: boolean;
-      hasUnconfirmedComponents?: boolean;
-      hasInferredComponents?: boolean;
-      hasReplacedComponents?: boolean;
-    };
-    address?: {
-      formattedAddress?: string;
-      postalAddress?: { postalCode?: string };
-      addressComponents?: AVAddressComponent[];
-    };
-  };
-  error?: { code?: number; message?: string; status?: string };
-};
-
-function normalizePostal(p: string | null | undefined, country: 'US' | 'CA' | string): string | null {
-  if (!p) return null;
-  const s = p.replace(/[\s-]/g, '').toUpperCase();
-  if (country === 'US') {
-    const m = s.match(/^(\d{5})\d{0,4}$/);
-    return m ? m[1] : null;
-  }
-  if (country === 'CA') {
-    return /^[A-Z]\d[A-Z]\d[A-Z]\d$/.test(s) ? s : null;
-  }
-  return s;
-}
-
-function parseCustomerPostal(addressLine: string | null, country: 'US' | 'CA' | string): string | null {
-  if (!addressLine) return null;
-  if (country === 'US') {
-    const m = addressLine.match(/\b(\d{5})(-\d{4})?\b/);
-    return m ? m[1] : null;
-  }
-  if (country === 'CA') {
-    const m = addressLine.match(/\b([A-Za-z]\d[A-Za-z])[ -]?(\d[A-Za-z]\d)\b/);
-    return m ? (m[1] + m[2]).toUpperCase() : null;
-  }
-  return null;
-}
 
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
@@ -102,19 +87,26 @@ Deno.serve(async (req: Request) => {
 
   const { data: order, error: oErr } = await admin
     .from('orders')
-    .select('id, address_line, city, region_state, country, postal_code, status')
+    .select('id, address_line, address_line2, city, region_state, country, postal_code, status, address_verdict, address_verdict_source')
     .eq('id', order_id)
     .single();
   if (oErr || !order) return j({ error: `Order not found: ${oErr?.message}` }, 404);
 
-  const addressLines = [order.address_line].filter(Boolean) as string[];
+  const addressLines = [order.address_line, order.address_line2].filter(Boolean) as string[];
   if (addressLines.length === 0 && !order.city && !order.postal_code) {
     return j({ error: 'Order has no address to verify' }, 400);
   }
 
-  // Address Validation API takes a structured PostalAddress, not a free-text
-  // query — pass each field separately for a tighter, validated result.
-  const reqBody = {
+  // The Address Validation API takes a structured PostalAddress, not a
+  // free-text query. Both address lines go in: the unit number lives in the
+  // second one, and it's the difference between Google resolving a building
+  // and Google resolving a specific unit within it.
+  //
+  // enableUspsCass is what makes `uspsData` — dpvConfirmation and
+  // addressRecordType, our best dwelling and missing-unit signals — appear in
+  // the response at all. It is US/PR-only and errors elsewhere, so it is set
+  // per-country rather than always.
+  const reqBody: Record<string, unknown> = {
     address: {
       regionCode: order.country,
       addressLines,
@@ -123,14 +115,8 @@ Deno.serve(async (req: Request) => {
       postalCode: order.postal_code || undefined,
     },
   };
+  if (order.country === 'US') reqBody.enableUspsCass = true;
 
-  // Google Address Validation is the primary verdict source, but it must NOT be
-  // a hard dependency. When Google errors (quota, billing, API disabled, or a
-  // network blip) we degrade to 'unverifiable' and still run the Claude
-  // area-type + plausibility pass below — rather than failing the whole verify
-  // with a non-2xx. Pre-fix this returned 502 and the operator saw only the
-  // opaque "Edge Function returned a non-2xx status code", with the address
-  // never getting an area-type classification.
   let gJson: AVResponse | null = null;
   let googleError: string | null = null;
   try {
@@ -149,106 +135,110 @@ Deno.serve(async (req: Request) => {
     googleError = `Google Address Validation request failed: ${(e as Error).message}`;
   }
 
+  const result: AVResult | null = gJson?.result ?? null;
+
+  // ── 1. Postal ─────────────────────────────────────────────────────────
   // Prefer the postal_code column (populated from Shopify shipping_address.zip);
-  // fall back to regex on address_line for orders synced before that field
+  // fall back to a regex over address_line for orders synced before that field
   // was captured.
   const customerPostal = normalizePostal(
-    order.postal_code ?? parseCustomerPostal(order.address_line, order.country),
+    order.postal_code ?? parsePostalFromText(order.address_line, order.country),
     order.country,
   );
-
-  const result = gJson?.result;
-  // Validated postal: prefer the standardized postalAddress, fall back to the
-  // postal_code address component.
   const validatedPostalRaw =
     result?.address?.postalAddress?.postalCode ??
     result?.address?.addressComponents?.find(c => c.componentType === 'postal_code')?.componentName?.text ??
     null;
   const validatedPostal = normalizePostal(validatedPostalRaw, order.country);
+  const granularity = result?.verdict?.validationGranularity ?? null;
   const formatted = result?.address?.formattedAddress ?? null;
-  const granularity = result?.verdict?.validationGranularity ?? 'GRANULARITY_UNSPECIFIED';
-  // Granularities that mean "we couldn't pin this to a real place".
-  const unusableGranularity = granularity === 'GRANULARITY_UNSPECIFIED' || granularity === 'OTHER';
 
-  let match: 'match' | 'mismatch' | 'unverifiable';
-  if (!result || unusableGranularity || !validatedPostal || !customerPostal) {
-    match = 'unverifiable';
-  } else if (validatedPostal === customerPostal) {
-    match = 'match';
-  } else {
-    match = 'mismatch';
-  }
+  let match = comparePostal(customerPostal, validatedPostal, granularity);
 
-  // ─── Claude pass (walkthrough #13 + area classification) ────────────
-  // Claude does two jobs here:
-  //   1. Area-type classification (urban/suburban/rural) — runs on EVERY
-  //      verify so the operator gets it automatically. Google's validation
-  //      API doesn't expose density, so Claude (geography-aware) is the
-  //      reliable source; a postal heuristic backs it up below.
-  //   2. Plausibility fallback — its verdict is only USED to upgrade an
-  //      'unverifiable' result; Google stays authoritative when it returned a
-  //      real granularity.
+  // ── 2. Dwelling ───────────────────────────────────────────────────────
+  // Only overwrite the sync-time guess when Google actually gave us evidence.
+  // A null here keeps the existing verdict AND its 'sync-guess' provenance, so
+  // an unconfirmed address never launders itself into a confirmed one.
+  const googleDwelling: Dwelling | null = dwellingFromValidation(result);
+  const dwelling: Dwelling = googleDwelling
+    ?? (order.address_verdict as Dwelling | null)
+    ?? guessDwellingFromText(order.address_line, order.address_line2, order.postal_code);
+  const dwellingSource = googleDwelling ? 'google'
+    : (order.address_verdict_source === 'manual' ? 'manual' : 'sync-guess');
+
+  const unitStatus: UnitStatus = unitStatusFromValidation(result, order.address_line2);
+
+  // ── 3. Area type ──────────────────────────────────────────────────────
+  let areaType: AreaType | null = null;
+  let areaTypeError: string | null = null;
   let claudeVerdict: 'plausible' | 'implausible' | 'unknown' | null = null;
   let claudeNotes: string | null = null;
   let claudePostal: string | null = null;
-  let areaType: 'urban' | 'suburban' | 'rural' | null = null;
-  const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY');
-  if (anthropicKey) {
+
+  const chain = pickProviders(
+    {
+      claude: Deno.env.get('ANTHROPIC_API_KEY'),
+      qwen:   Deno.env.get('QWEN_API_KEY'),
+      openai: Deno.env.get('OPENAI_API_KEY'),
+    },
+    Deno.env.get('LLM_PROVIDER_ORDER'),
+  );
+
+  if (chain.length === 0) {
+    areaTypeError = 'No LLM provider configured (ANTHROPIC_API_KEY / QWEN_API_KEY / OPENAI_API_KEY all unset) — area type not classified.';
+  } else {
     try {
-      const llm = await claudeJudgeAddress(anthropicKey, {
+      const llm = await judgeAddress(chain, {
         address_line: order.address_line,
+        address_line2: order.address_line2,
         city: order.city,
         region: order.region_state,
         postal: order.postal_code,
         country: order.country,
+        // Google's standardized address is the better input when we have it —
+        // it resolves abbreviations and corrects the city ("Bay Harbor Is" →
+        // "Bay Harbor Islands"), which is exactly what a density judgement
+        // hinges on.
+        google_formatted: formatted,
       });
       areaType = llm.area_type;
+      if (!areaType) {
+        areaTypeError = 'The model could not tell the area type for this address.';
+      }
+      // The plausibility half is only USED to break a tie Google couldn't:
+      // Google stays authoritative whenever it returned a real granularity.
       if (match === 'unverifiable') {
         claudeVerdict = llm.verdict;
         claudeNotes = llm.notes;
         claudePostal = llm.inferred_postal;
-        // Upgrade the match verdict when Claude returns a usable answer:
-        //   plausible + postal matches → 'match'
-        //   plausible + postal differs → 'mismatch' (Claude inferred a different postal)
-        //   implausible                → 'mismatch' (the address itself is bogus)
-        //   unknown                    → leave as 'unverifiable'
         const normClaudePostal = normalizePostal(claudePostal, order.country);
         if (claudeVerdict === 'plausible' && normClaudePostal && customerPostal) {
           match = normClaudePostal === customerPostal ? 'match' : 'mismatch';
-        } else if (claudeVerdict === 'plausible' && customerPostal && !normClaudePostal) {
-          // Claude says plausible but couldn't infer a postal — take the
-          // customer's postal at face value and call it a match.
-          match = 'match';
-        } else if (claudeVerdict === 'plausible' && !customerPostal) {
-          // Shopify didn't capture the customer's postal at our end (common
-          // for older orders before we started recording postal_code). Google
-          // returned a usable granularity AND Claude judged the address
-          // plausible — the order is deliverable, treat as match.
+        } else if (claudeVerdict === 'plausible') {
+          // Plausible, but no postal to compare on one side or the other.
+          // Deliverable as far as anyone can tell — treat as a match.
           match = 'match';
         } else if (claudeVerdict === 'implausible') {
           match = 'mismatch';
         }
       }
     } catch (e) {
-      // Non-fatal — keep Google's verdict and (when unverifiable) record the
-      // error in notes for the operator. Area type falls back below.
-      if (match === 'unverifiable') {
-        claudeNotes = `Claude fallback errored: ${(e as Error).message}`;
-      }
+      // Non-fatal, but no longer silent. Before this, a model outage left the
+      // area type simply un-updated and the operator saw a stale or absent
+      // value with no indication anything had failed.
+      areaTypeError = `Area-type classification failed: ${(e as Error).message}`;
+      if (match === 'unverifiable') claudeNotes = areaTypeError;
     }
   }
 
-  // Heuristic backup for area type when Claude didn't give one (no key, error,
-  // or 'unknown'): the Canada-Post rural rule (FSA 2nd char 0). Urban vs
-  // suburban can't be told from a postal alone, so we leave it unset rather
-  // than guess — the operator can still pick it manually.
+  // Deterministic backup: the Canada-Post rural rule. Urban vs suburban cannot
+  // be told from a postal code, so anything it can't establish stays NULL —
+  // unclassified is an honest state, a manufactured 'suburban' is not.
   if (!areaType) {
     areaType = areaTypeFromPostal(order.postal_code, order.country);
+    if (areaType) areaTypeError = null;
   }
 
-  // When Google was the reason we couldn't verify, surface that to the operator
-  // (there's no dedicated column, so it rides on the claude_notes free-text
-  // field — the only verdict-context surface the AddressCard already renders).
   if (googleError && match === 'unverifiable' && !claudeNotes) {
     claudeNotes = `Address validation unavailable: ${googleError}`;
   }
@@ -262,16 +252,31 @@ Deno.serve(async (req: Request) => {
     address_claude_verdict: claudeVerdict,
     address_claude_notes:   claudeNotes,
     address_claude_postal:  claudePostal,
+    address_verdict:        dwelling,
+    address_verdict_source: dwellingSource,
+    address_unit_status:    unitStatus,
+    address_validation_granularity: granularity,
+    address_usps_dpv:         result?.uspsData?.dpvConfirmation ?? null,
+    address_usps_record_type: result?.uspsData?.addressRecordType ?? null,
+    address_is_residential:   result?.metadata?.residential ?? null,
+    address_is_business:      result?.metadata?.business ?? null,
+    address_area_type_error:  areaTypeError,
   };
   // Only write area_type when we determined one, so a verify never blanks a
-  // value. Source 'verified' marks it as set by this step (vs 'auto'/'manual').
+  // value an operator set by hand. Source 'verified' marks it as established
+  // by this step (vs 'auto' from the postal rule, or 'manual').
   if (areaType) {
     patch.area_type = areaType;
     patch.area_type_source = 'verified';
   }
-  if (match === 'mismatch' && order.status !== 'flagged') {
+
+  // Both of these mean the shipment cannot go out as it stands: a wrong postal
+  // code, or a multi-unit building with no unit number. Same treatment.
+  const blocking = match === 'mismatch' || unitStatus === 'missing';
+  if (blocking && order.status !== 'flagged') {
     patch.status = 'flagged';
   }
+
   const { error: upErr } = await admin.from('orders').update(patch).eq('id', order_id);
   if (upErr) return j({ error: `DB update failed: ${upErr.message}` }, 500);
 
@@ -284,107 +289,147 @@ Deno.serve(async (req: Request) => {
     claude_notes: claudeNotes,
     claude_postal: claudePostal,
     area_type: areaType,
+    area_type_error: areaTypeError,
+    dwelling,
+    dwelling_source: dwellingSource,
+    unit_status: unitStatus,
+    granularity,
     google_error: googleError,
   });
 });
 
-// Deterministic area-type backup from the postal code, used when Claude is
-// unavailable (no ANTHROPIC_API_KEY, an error, or an 'unknown' verdict). Only
-// returns a value we can assert from the postal alone: Canadian rural FSAs
-// (second character '0'). US ZIPs and urban-vs-suburban can't be told apart
-// from the code alone, so we return null and let Claude (or the operator) decide
-// rather than guess.
-function areaTypeFromPostal(
-  postal: string | null | undefined,
-  country: 'US' | 'CA' | string,
-): 'urban' | 'suburban' | 'rural' | null {
-  const p = (postal ?? '').toUpperCase().replace(/\s/g, '');
-  if (country === 'CA' && /^[A-Z]0/.test(p)) return 'rural';
-  return null;
-}
-
 // ────────────────────────────────────────────────────────────────────────
-// Claude fallback (walkthrough #13)
+// Model pass: area-type classification, plus plausibility as a tie-breaker
 // ────────────────────────────────────────────────────────────────────────
-type ClaudeJudgement = {
+type Judgement = {
   verdict: 'plausible' | 'implausible' | 'unknown';
   inferred_postal: string | null;
-  area_type: 'urban' | 'suburban' | 'rural' | null;
+  area_type: AreaType | null;
   notes: string;
 };
 
-async function claudeJudgeAddress(
-  apiKey: string,
-  addr: { address_line: string | null; city: string | null; region: string | null; postal: string | null; country: string },
-): Promise<ClaudeJudgement> {
-  const parts = [
-    addr.address_line, addr.city,
+const SYSTEM = 'You validate shipping addresses and classify delivery areas. Output strict JSON only — no markdown, no commentary.';
+
+function buildPrompt(addr: {
+  address_line: string | null; address_line2: string | null; city: string | null;
+  region: string | null; postal: string | null; country: string; google_formatted: string | null;
+}): string {
+  const composed = [
+    addr.address_line, addr.address_line2, addr.city,
     [addr.region, addr.postal].filter(Boolean).join(' '),
     addr.country,
-  ].filter(Boolean);
-  const composed = parts.join(', ');
+  ].filter(Boolean).join(', ');
 
-  const prompt =
-`You are validating a shipping address. Reply with ONLY a JSON object, no prose, with four fields:
-- "verdict": one of "plausible" (the address looks like a real, deliverable place), "implausible" (the address contains contradictions, typos, or is obviously fake), or "unknown" (you cannot tell).
-- "inferred_postal": the postal/ZIP code you would expect for this address, or null if you cannot infer one. Use the country's standard format (CA: A1A 1A1, US: 12345).
-- "area_type": classify the delivery area as one of "urban" (dense city core / major-city neighbourhood), "suburban" (residential area around a city or a mid-size town), or "rural" (countryside, small village, or remote/low-density area). Use null only if you genuinely cannot tell.
+  return `Reply with ONLY a JSON object, no prose, with four fields:
+- "verdict": one of "plausible" (a real, deliverable place), "implausible" (contradictions, typos, or obviously fake), or "unknown" (you cannot tell).
+- "inferred_postal": the postal/ZIP code you would expect for this address, or null. Use the country's standard format (CA: A1A 1A1, US: 12345).
+- "area_type": classify the DELIVERY AREA as "urban" (dense city core or major-city neighbourhood), "suburban" (residential area around a city, or a mid-size town), or "rural" (countryside, village, or remote low-density area). Judge the actual neighbourhood, not the metro area it belongs to — a downtown high-rise is urban even in a small city. Use null ONLY if you genuinely cannot place the address.
 - "notes": one sentence explaining your judgment.
 
-Address to validate:
+Address as the customer entered it:
 ${composed}
-
+${addr.google_formatted ? `\nSame address, standardized by the postal authority:\n${addr.google_formatted}` : ''}
 Customer-supplied postal: ${addr.postal ?? '(none)'}
 Country: ${addr.country}
 
 Examples:
 - "123 Main St, Toronto, ON M5V 2T6, CA" → {"verdict":"plausible","inferred_postal":"M5V 2T6","area_type":"urban","notes":"Standard downtown Toronto address with matching postal code."}
+- "925 Bute St, 21, Vancouver, BC V6E 1Y7, CA" → {"verdict":"plausible","inferred_postal":"V6E 1Y7","area_type":"urban","notes":"Apartment in the West End, a dense downtown Vancouver neighbourhood."}
 - "47 Maple Cres, Oakville, ON L6H 3R1, CA" → {"verdict":"plausible","inferred_postal":"L6H 3R1","area_type":"suburban","notes":"Residential street in a suburb west of Toronto."}
 - "PO Box 14, Whitehorse, YT Y1A 0C4, CA" → {"verdict":"plausible","inferred_postal":"Y1A 0C4","area_type":"rural","notes":"Valid Yukon PO box with correct Y1A prefix; remote territory."}
 - "999 Elm, Springfield, ON 99999 9X9, CA" → {"verdict":"implausible","inferred_postal":null,"area_type":null,"notes":"Postal code does not match Canadian format."}`;
+}
 
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-    },
-    body: JSON.stringify({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 256,
-      messages: [{ role: 'user', content: prompt }],
-    }),
-  });
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`Anthropic ${res.status}: ${body.slice(0, 300)}`);
+/** Tries each configured provider in order. A provider that errors (HTTP,
+ *  network, no credit) falls through to the next — the Anthropic account
+ *  running out of credit is exactly what this chain exists for. A provider
+ *  that answers with unparseable JSON is NOT retried elsewhere: that's a
+ *  model-output problem, not an availability one. Throws with every failure
+ *  chained when nothing got through, so the caller can record which key needs
+ *  attention. */
+async function judgeAddress(
+  providers: LlmProvider[],
+  addr: Parameters<typeof buildPrompt>[0],
+): Promise<Judgement> {
+  const prompt = buildPrompt(addr);
+  const failures: string[] = [];
+  for (const provider of providers) {
+    let reply: string;
+    try {
+      reply = provider === 'claude'
+        ? await claudeChat(Deno.env.get('ANTHROPIC_API_KEY')!, prompt)
+        : await compatChat(provider, prompt);
+    } catch (e) {
+      failures.push((e as Error)?.message ?? String(e));
+      continue;
+    }
+    return parseJudgement(reply, PROVIDER_LABELS[provider]);
   }
+  throw new Error(chainFailures(failures));
+}
+
+async function claudeChat(apiKey: string, prompt: string): Promise<string> {
+  let res: Response;
+  try {
+    res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: Deno.env.get('ANTHROPIC_MODEL') ?? 'claude-haiku-4-5-20251001',
+        max_tokens: 256,
+        system: SYSTEM,
+        messages: [{ role: 'user', content: prompt }],
+      }),
+    });
+  } catch (e) {
+    throw new Error(`Claude request failed: ${(e as Error)?.message ?? String(e)}`);
+  }
+  if (!res.ok) throw new Error(`Claude ${res.status}: ${(await res.text()).slice(0, 300)}`);
   const data = await res.json() as { content?: Array<{ type: string; text?: string }> };
-  const text = (data.content ?? []).find(b => b.type === 'text')?.text ?? '';
-  // Tolerant parse: pull the first {...} block in case the model wrapped it in prose.
-  const jsonMatch = text.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) throw new Error(`Claude returned non-JSON: ${text.slice(0, 200)}`);
-  const parsed = JSON.parse(jsonMatch[0]) as {
-    verdict?: string;
-    inferred_postal?: string | null;
-    area_type?: string | null;
-    notes?: string;
-  };
-  const verdict: ClaudeJudgement['verdict'] =
-    parsed.verdict === 'plausible'   ? 'plausible'
-  : parsed.verdict === 'implausible' ? 'implausible'
+  return (data.content ?? []).find(b => b.type === 'text')?.text ?? '';
+}
+
+async function compatChat(provider: Exclude<LlmProvider, 'claude'>, prompt: string): Promise<string> {
+  const cfg = provider === 'qwen' ? qwenConfigFromEnv() : openaiConfigFromEnv();
+  if (!cfg) throw new Error(`${PROVIDER_LABELS[provider]} is not configured.`);
+  const prefix = provider.toUpperCase();
+  return chatCompletion({
+    label: PROVIDER_LABELS[provider],
+    apiKey: cfg.apiKey, baseUrl: cfg.baseUrl, model: cfg.model,
+    keyEnvVar: `${prefix}_API_KEY`, baseUrlEnvVar: `${prefix}_BASE_URL`, modelEnvVar: `${prefix}_MODEL`,
+    system: SYSTEM,
+    user: prompt,
+    maxTokens: 256,
+  });
+}
+
+/** Coerces a model reply into a Judgement. An unrecognised verdict becomes
+ *  'unknown' and an unrecognised area type becomes null — a bad parse must
+ *  read as "not established", never as a value. */
+export function parseJudgement(reply: string, label = 'Model'): Judgement {
+  let p: Record<string, unknown>;
+  try { p = jsonFromModelText(reply); }
+  catch (e) { throw new Error(`${label}: ${(e as Error)?.message ?? String(e)}`); }
+  const verdict: Judgement['verdict'] =
+    p.verdict === 'plausible'   ? 'plausible'
+  : p.verdict === 'implausible' ? 'implausible'
   : 'unknown';
-  const area_type: ClaudeJudgement['area_type'] =
-    parsed.area_type === 'urban'    ? 'urban'
-  : parsed.area_type === 'suburban' ? 'suburban'
-  : parsed.area_type === 'rural'    ? 'rural'
+  const area_type: AreaType | null =
+    p.area_type === 'urban'    ? 'urban'
+  : p.area_type === 'suburban' ? 'suburban'
+  : p.area_type === 'rural'    ? 'rural'
   : null;
+  const postal = typeof p.inferred_postal === 'string' && p.inferred_postal.trim()
+    ? p.inferred_postal.trim() : null;
   return {
     verdict,
-    inferred_postal: parsed.inferred_postal ?? null,
+    inferred_postal: postal,
     area_type,
-    notes: parsed.notes ?? '(no notes)',
+    notes: typeof p.notes === 'string' && p.notes.trim() ? p.notes.trim() : '(no notes)',
   };
 }
 

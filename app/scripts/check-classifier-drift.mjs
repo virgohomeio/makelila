@@ -18,6 +18,7 @@ const MIRRORED_FILES = [
   ['app/src/lib/classifier.ts',   'supabase/functions/_shared/classifier.ts'],
   ['app/src/lib/quo-parsers.ts',  'supabase/functions/_shared/quo-parsers.ts'],
   ['app/src/lib/commAssessment.ts', 'supabase/functions/_shared/commAssessment.ts'],
+  ['app/src/lib/addressClassify.ts', 'supabase/functions/_shared/addressClassify.ts'],
 ];
 
 let failed = false;

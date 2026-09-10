@@ -1,5 +1,6 @@
 import type { CSSProperties } from 'react';
 import type { Order } from '../../lib/orders';
+import { DWELLING_LABEL, needsFitConfirmation } from '../../lib/addressClassify';
 import { orderUrgency, AREA_TYPE_TAG } from '../../lib/orders';
 import { refundFlagLabel, refundFlagTitle, type RefundFlag } from '../../lib/refundedOrders';
 import { useQuotes } from '../../lib/freight';
@@ -52,7 +53,13 @@ export function OrderRow({
   const selectedQuote = quotes.find(q => q.selected) ?? null;
 
   const countryTag = order.country === 'CA' ? styles.tagCa : styles.tagUs;
-  const isRiskAddress = order.address_verdict === 'apt' || order.address_verdict === 'condo' || order.address_verdict === 'remote';
+  // Anything that isn't a plain house needs a person to look at it before the
+  // freight is booked. Reads off the shared rule so a new dwelling type can't
+  // be added without the list row learning about it.
+  const isRiskAddress = needsFitConfirmation(order.address_verdict);
+  // Louder than the dwelling tag, because it is the one that stops a delivery
+  // outright: the building has units and the order names none.
+  const unitMissing = order.address_unit_status === 'missing';
   const isCancelled = order.status === 'cancelled';
   // A dot rather than a chip: it says "this one isn't confirmable yet" without
   // spending the width the SLA needs. Meaningless on terminal/decided rows.
@@ -133,8 +140,11 @@ export function OrderRow({
         {order.kind === 'replacement' && (
           <span className={`${styles.tag} ${styles.tagCa}`}>Repl</span>
         )}
+        {unitMissing && (
+          <span className={`${styles.tag} ${styles.tagRefunded}`} title="Multi-unit building with no unit number on the order">No unit #</span>
+        )}
         {isRiskAddress && (
-          <span className={`${styles.tag} ${styles.tagWarn}`}>{order.address_verdict}</span>
+          <span className={`${styles.tag} ${styles.tagWarn}`}>{DWELLING_LABEL[order.address_verdict]}</span>
         )}
         {order.area_type && (
           <span className={`${styles.tag} ${AREA_TAG_CLASS[order.area_type]}`}>{AREA_TYPE_TAG[order.area_type]}</span>

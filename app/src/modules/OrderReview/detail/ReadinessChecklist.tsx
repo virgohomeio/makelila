@@ -1,4 +1,5 @@
 import type { Order } from '../../../lib/orders';
+import { DWELLING_LABEL, needsFitConfirmation } from '../../../lib/addressClassify';
 import { CUSTOMER_CARD_ID, ADDRESS_CARD_ID, revealCard } from './anchors';
 import styles from '../OrderReview.module.css';
 
@@ -31,12 +32,32 @@ export function evaluateReadiness(order: Order): {
     ? 'Email, phone and street address are all on file'
     : `No ${missing.join(', no ')} on file`;
 
-  const addressOk = order.address_verdict === 'house' || order.sales_confirmed_fit;
-  const reason2 = addressOk
-    ? (order.address_verdict === 'house'
-        ? 'Single-family house — standard delivery'
-        : `${order.address_verdict} address — sales already confirmed fit`)
-    : `${order.address_verdict} address — sales has not confirmed the unit fits`;
+  // The dwelling gate. An UNCONFIRMED verdict still passes: it is the default
+  // state of every order that nobody has verified yet, and blocking on it would
+  // strand the whole pending queue behind a button click. The checklist says so
+  // out loud instead, so "this one is fine" reads differently from "nobody has
+  // looked at this one".
+  //
+  // A missing unit number does NOT pass, whatever the dwelling type says. The
+  // street is confirmed, the building has units, and no unit is on the order —
+  // a freight driver has nowhere to leave a pallet. Sales confirming fit does
+  // not conjure a unit number, so this one can only be cleared by getting the
+  // number from the customer.
+  const unitMissing = order.address_unit_status === 'missing';
+  const dwellingOk = !needsFitConfirmation(order.address_verdict) || order.sales_confirmed_fit;
+  const addressOk = dwellingOk && !unitMissing;
+  const unverified = order.address_verdict_source === 'sync-guess';
+  const dwellingLabel = DWELLING_LABEL[order.address_verdict].toLowerCase();
+  const reason2 =
+    unitMissing
+      ? 'Multi-unit building with no unit number on the order — freight cannot be delivered'
+    : !dwellingOk
+      ? `${dwellingLabel} address — sales has not confirmed the unit fits`
+    : needsFitConfirmation(order.address_verdict)
+      ? `${dwellingLabel} address — sales already confirmed fit`
+    : unverified
+      ? 'Looks like a house, but the address has not been verified yet'
+      : 'Single-family house, confirmed — standard delivery';
 
   return { contact, address: addressOk, reason1, reason2 };
 }
