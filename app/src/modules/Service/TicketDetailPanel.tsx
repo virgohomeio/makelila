@@ -4,7 +4,7 @@ import ReplacementPickerModal from './ReplacementPickerModal';
 import { useCustomers, sendFollowupSms, buildPartyResolver, type CustomerPartyRow } from '../../lib/customers';
 import { CustomerPartyName } from '../../components/CustomerPartyName';
 import {
-  type ServiceTicket, type IssueArea, type TicketCategory,
+  type ServiceTicket, type IssueArea, type TicketCategory, type TicketStatus,
   STATUS_META, CATEGORY_META, PRIORITY_META, TICKET_STATUSES,
   statusMeta, priorityMeta, sourceLabel, topicLabel, slaChip,
   ISSUE_AREAS, ISSUE_AREA_LABEL, ticketStatusSet,
@@ -20,10 +20,12 @@ import { createLinearIssue, createGitHubIssue } from '../../lib/githubLinear';
 import {
   useReplacementSummary, readyReplacementsForTicket, liveReplacementsForTicket,
   shipQueuedReplacementsForTicket, cancelReplacementOrder,
+  cancelReplacementsForTicket,
 } from '../../lib/orders';
 import { useAuth } from '../../lib/auth';
 import { AttachmentStrip } from './AttachmentStrip';
 import { TicketNotes } from './TicketNotes';
+import { NewTicketModal } from './NewTicketModal';
 import { TicketActionItems } from './TicketActionItems';
 import { DeviceContextHeader } from '../../components/DeviceContextHeader';
 import styles from './Service.module.css';
@@ -117,6 +119,13 @@ export function TicketDetailPanel({ ticket, onClose, showDeviceContext = true }:
   const [editingDescription, setEditingDescription] = useState(false);
   const [descriptionDraft, setDescriptionDraft] = useState(ticket.description ?? '');
   const [pickerOpen, setPickerOpen] = useState(false);
+  // Replacement outcome buttons — each opens a small confirm before it fires,
+  // because all three are one-way from the operator's point of view.
+  const [confirmShip, setConfirmShip] = useState(false);
+  const [confirmCancelRepl, setConfirmCancelRepl] = useState(false);
+  const [confirmDamaged, setConfirmDamaged] = useState(false);
+  const [newTicketOpen, setNewTicketOpen] = useState(false);
+  const [damagedTicketNo, setDamagedTicketNo] = useState<string | null>(null);
   // Backlog #75 — diagnosis-link send dialog state.
   const [diagOpen, setDiagOpen] = useState(false);
   const [diagSending, setDiagSending] = useState(false);
@@ -285,18 +294,77 @@ export function TicketDetailPanel({ ticket, onClose, showDeviceContext = true }:
    * reads as locked instead of failing on click, and so the operator can see
    * WHICH order is holding it. */
   const holdsQueued = ticketStatusSet(ticket).includes('queued_for_replacement');
-  const [queuedLockRefs, setQueuedLockRefs] = useState<string[]>([]);
+  /* Looked up for EVERY ticket, not just one holding the marker. The two can
+   * disagree, and when they do it is the order that is real: ST-2026-0406 was
+   * closed after Lily Xu was refunded, yet R-0048 stayed queued in Fulfillment
+   * › Replacements with nothing on the ticket admitting it. Gating the lookup
+   * on the marker is what hid it. */
+  const [liveRepls, setLiveRepls] = useState<Array<{ id: string; order_ref: string }>>([]);
+  const [replReload, setReplReload] = useState(0);
   useEffect(() => {
-    if (!holdsQueued) { setQueuedLockRefs([]); return; }
     let live = true;
     liveReplacementsForTicket(ticket.id)
-      .then(rows => { if (live) setQueuedLockRefs(rows.map(r => r.order_ref)); })
+      .then(rows => { if (live) setLiveRepls(rows); })
       // A failed lookup must not fake a lock; setTicketStatuses is the real
       // guard and will still refuse if an order is genuinely live.
-      .catch(() => { if (live) setQueuedLockRefs([]); });
+      .catch(() => { if (live) setLiveRepls([]); });
     return () => { live = false; };
-  }, [ticket.id, holdsQueued, ticket.status, ticket.tags]);
+  }, [ticket.id, ticket.status, ticket.tags, ticket.replacement_order_id, replReload]);
+  const queuedLockRefs = liveRepls.map(r => r.order_ref);
   const queuedLocked = holdsQueued && queuedLockRefs.length > 0;
+
+  /** Statuses this ticket should hold once the replacement thread resolves one
+   *  way or the other. A closed ticket keeps its close — setTicketStatuses
+   *  collapses any set containing 'closed' down to ['closed'] anyway, and
+   *  reopening a case the operator already finished is not what either button
+   *  means. */
+  function statusesWithout(drop: TicketStatus, add?: TicketStatus): TicketStatus[] {
+    const next = ticketStatusSet(ticket).filter(s => s !== drop);
+    if (add && !next.includes(add)) next.push(add);
+    return next.length > 0 ? next : ['waiting_on_us'];
+  }
+
+  /** "Replacement Shipped" — the box left the building. Same hand-off the
+   *  'Replacement Sent' status runs: shipped_at stamped, order approved, and a
+   *  fulfillment_queue row upserted at step 6, which is what makes every other
+   *  view (Queue › Shipped, Fulfillment › Replacements, Sales) say shipped.
+   *
+   *  Shipped FIRST, then the status. On a closed ticket the status write is a
+   *  no-op — 'closed' swallows the set — so the order-side hand-off cannot be
+   *  left to it. Both halves are idempotent. */
+  async function markReplacementShipped() {
+    setBusy(true); setError(null);
+    try {
+      const refs = await shipQueuedReplacementsForTicket(ticket.id);
+      if (ticket.status !== 'closed') {
+        await setTicketStatuses(ticket.id, statusesWithout('queued_for_replacement', 'replacement_sent'));
+      }
+      setLiveRepls([]);
+      setReplReload(n => n + 1);
+      if (refs.length === 0) setError('Nothing to ship — this replacement was already marked shipped.');
+    } catch (e) { setError((e as Error).message); }
+    finally { setBusy(false); setConfirmShip(false); }
+  }
+
+  /** "Replacement Cancelled" — it is not going out. Every live replacement on
+   *  the ticket is released (units freed, 'ready' parts restored) and deleted;
+   *  the FK from fulfillment_queue cascades, so it leaves the Queue, Sales and
+   *  Fulfillment › Replacements together rather than lingering in one of them. */
+  async function markReplacementCancelled() {
+    setBusy(true); setError(null);
+    try {
+      await cancelReplacementsForTicket(ticket.id);
+      if (ticket.status !== 'closed' && holdsQueued) {
+        // cancelReplacementsForTicket already moves a queued ticket to On Hold;
+        // this only catches the case where the marker is a tag on some OTHER
+        // status, which that helper leaves alone.
+        await setTicketStatuses(ticket.id, statusesWithout('queued_for_replacement'));
+      }
+      setLiveRepls([]);
+      setReplReload(n => n + 1);
+    } catch (e) { setError((e as Error).message); }
+    finally { setBusy(false); setConfirmCancelRepl(false); }
+  }
 
   /** Completing a ticket that still has a 'ready' replacement is the moment the
    *  shipping fact is known and the last moment it can be captured — the order
@@ -510,6 +578,57 @@ export function TicketDetailPanel({ ticket, onClose, showDeviceContext = true }:
               Link to engineering
             </button>
           )}
+          {/* Replacement outcome — shown whenever a replacement is still live
+              on this ticket, whatever the ticket's own status says. These are
+              the two ways it stops being live, and until they existed the only
+              way out was the status dropdown (which a closed ticket has no way
+              to reach) or Order Review. */}
+          {liveRepls.length > 0 && (
+            <>
+              <button
+                type="button"
+                className={styles.replacementBtn}
+                disabled={busy}
+                onClick={() => setConfirmShip(true)}
+                title={`Record ${queuedLockRefs.join(', ')} as shipped — moves it to Fulfillment › Queue › Shipped`}
+              >
+                Replacement Shipped
+              </button>
+              <button
+                type="button"
+                className={styles.replacementBtn}
+                disabled={busy}
+                onClick={() => setConfirmCancelRepl(true)}
+                title={`Cancel ${queuedLockRefs.join(', ')} — releases the stock and clears it from the fulfillment queue`}
+              >
+                Replacement Cancelled
+              </button>
+            </>
+          )}
+          {/* A replacement that arrives damaged is a new case, not a new state
+              of this one: the customer is owed another box, and that needs its
+              own ticket to carry it. Offered whenever this ticket has ever had
+              a replacement — the damage is usually reported after it shipped,
+              by which point there is nothing live left to act on. */}
+          {damagedTicketNo && (
+            <span
+              className={styles.replacementLink}
+              style={{ background: '#f0fff4', color: '#276749', padding: '2px 8px', borderRadius: 4, fontWeight: 600 }}
+            >
+              New ticket {damagedTicketNo} raised for the damaged replacement
+            </span>
+          )}
+          {(liveRepls.length > 0 || !!ticket.replacement_order_id) && (
+            <button
+              type="button"
+              className={styles.replacementBtn}
+              disabled={busy}
+              onClick={() => setConfirmDamaged(true)}
+              title="The replacement arrived damaged — raise a new ticket to send another"
+            >
+              Replacement Received Damaged
+            </button>
+          )}
           {ticket.engineering_resolved_at && !ticket.closed_at && (
             <span
               className={styles.replacementLink}
@@ -520,6 +639,84 @@ export function TicketDetailPanel({ ticket, onClose, showDeviceContext = true }:
             </span>
           )}
         </div>
+
+        {confirmShip && (
+          <div className={styles.diagModalBackdrop} onClick={() => !busy && setConfirmShip(false)}>
+            <div className={styles.diagModal} onClick={e => e.stopPropagation()}>
+              <div className={styles.diagModalTitle}>Mark the replacement shipped?</div>
+              <div className={styles.diagModalMeta}>
+                {queuedLockRefs.join(', ')} will be recorded as shipped and will show as
+                Shipped everywhere in the fulfillment queue.
+              </div>
+              <div className={styles.diagModalActions}>
+                <button
+                  type="button"
+                  className={styles.replacementBtn}
+                  disabled={busy}
+                  onClick={() => void markReplacementShipped()}
+                >{busy ? 'Working…' : 'Yes, it shipped'}</button>
+                <button type="button" disabled={busy} onClick={() => setConfirmShip(false)}>Cancel</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {confirmCancelRepl && (
+          <div className={styles.diagModalBackdrop} onClick={() => !busy && setConfirmCancelRepl(false)}>
+            <div className={styles.diagModal} onClick={e => e.stopPropagation()}>
+              <div className={styles.diagModalTitle}>Cancel the replacement?</div>
+              <div className={styles.diagModalMeta}>
+                {queuedLockRefs.join(', ')} will be cancelled and cleared from the
+                fulfillment queue. Any reserved unit goes back to stock. This cannot be undone.
+              </div>
+              <div className={styles.diagModalActions}>
+                <button
+                  type="button"
+                  className={styles.replacementBtn}
+                  disabled={busy}
+                  onClick={() => void markReplacementCancelled()}
+                >{busy ? 'Working…' : 'Yes, cancel it'}</button>
+                <button type="button" disabled={busy} onClick={() => setConfirmCancelRepl(false)}>Keep it</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {confirmDamaged && (
+          <div className={styles.diagModalBackdrop} onClick={() => setConfirmDamaged(false)}>
+            <div className={styles.diagModal} onClick={e => e.stopPropagation()}>
+              <div className={styles.diagModalTitle}>Create a new ticket for this customer?</div>
+              <div className={styles.diagModalMeta}>
+                The replacement arrived damaged. A new ticket carries the next one, so
+                this case keeps its own history.
+              </div>
+              <div className={styles.diagModalActions}>
+                <button
+                  type="button"
+                  className={styles.replacementBtn}
+                  onClick={() => { setConfirmDamaged(false); setNewTicketOpen(true); }}
+                >Create ticket</button>
+                <button type="button" onClick={() => setConfirmDamaged(false)}>Not now</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {newTicketOpen && (
+          <NewTicketModal
+            customers={customers}
+            presetCustomer={linkedCustomer ?? null}
+            presetSubject={`Replacement received damaged — ${ticket.ticket_number}`}
+            presetDescription={
+              `The replacement sent on ${ticket.ticket_number} arrived damaged. `
+              + 'Send another replacement.'
+            }
+            presetUnitSerial={ticket.unit_serial ?? undefined}
+            title="New ticket — replacement received damaged"
+            onClose={() => setNewTicketOpen(false)}
+            onCreated={t => { setNewTicketOpen(false); setDamagedTicketNo(t.ticket_number); }}
+          />
+        )}
 
         {diagOpen && (
           <div className={styles.diagModalBackdrop} onClick={() => !diagSending && setDiagOpen(false)}>

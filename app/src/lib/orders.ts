@@ -1020,8 +1020,10 @@ async function holdTicketAfterCancel(order: CancellableReplacement): Promise<voi
 /** Release a replacement's reserved stock, clear its ticket back-link, and
  *  delete the order so it drops off both the Sales (Order Review) and Service
  *  replacement lists via realtime. No guards — callers enforce them. */
-async function releaseAndDeleteReplacement(order: CancellableReplacement, note: string): Promise<void> {
-  await releaseReplacementHolds(order, 'cancelled');
+async function releaseAndDeleteReplacement(
+  order: CancellableReplacement, note: string, opts: { holdTicket?: boolean } = {},
+): Promise<void> {
+  await releaseReplacementHolds(order, 'cancelled', opts);
 
   // Delete the order. select() back so an RLS-blocked delete (0 rows, no error)
   // surfaces as a failure instead of silently leaving it in place.
@@ -1126,6 +1128,51 @@ export async function liveReplacementsForTicket(
     .is('delivered_at', null);
   if (error) throw new Error(`Failed to look up live replacements: ${error.message}`);
   return (data ?? []) as Array<{ id: string; order_ref: string }>;
+}
+
+/** Cancel EVERY replacement still live for a ticket — the "Replacement
+ *  Cancelled" button on the ticket panel.
+ *
+ *  Deliberately wider and less guarded than the two neighbours above:
+ *    - cancelPendingReplacementsForTicket only ever touches 'awaiting' rows,
+ *      because it fires automatically on ticket close and a 'ready' row has a
+ *      unit reserved that might be walking out the door.
+ *    - cancelReplacementOrder refuses while the linked ticket is still open,
+ *      because it is reachable from Order Review where the operator may not
+ *      have the case in front of them.
+ *  Neither fits an operator standing on the ticket saying "this one is not
+ *  going out". They can see the case, so the ticket's status is not a gate —
+ *  Lily Xu's R-0048 sat in Fulfillment › Replacements for weeks precisely
+ *  because her ticket was already closed (refunded) and every existing path
+ *  either skipped it or refused.
+ *
+ *  Each order is released (reserved units freed, 'ready' parts restored),
+ *  unlinked from the ticket, and deleted — and orders.id CASCADEs to
+ *  fulfillment_queue, so the row leaves the Queue at the same moment it leaves
+ *  Sales and Fulfillment › Replacements. holdTicket moves a still-open ticket
+ *  off "Queued for Replacement" and onto "On Hold": the case isn't finished,
+ *  it just isn't waiting on a box.
+ *
+ *  Returns the refs actually cancelled, for the caller's message. */
+export async function cancelReplacementsForTicket(ticketId: string): Promise<string[]> {
+  const { data: linked, error } = await supabase
+    .from('orders')
+    .select('id, order_ref, replacement_state, linked_ticket_id, line_items')
+    .eq('kind', 'replacement')
+    .eq('linked_ticket_id', ticketId)
+    .neq('status', 'cancelled')
+    .is('shipped_at', null)
+    .is('delivered_at', null);
+  if (error) throw new Error(`Failed to look up linked replacements: ${error.message}`);
+
+  const cancelled: string[] = [];
+  for (const o of (linked ?? []) as CancellableReplacement[]) {
+    await releaseAndDeleteReplacement(
+      o, `cancelled on ticket ${ticketId} · stock released`, { holdTicket: true },
+    );
+    cancelled.push(o.order_ref);
+  }
+  return cancelled;
 }
 
 export async function cancelPendingReplacementsForTicket(ticketId: string): Promise<void> {
