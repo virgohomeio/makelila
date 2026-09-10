@@ -282,6 +282,13 @@
 /* The cutoff's receipt: what the Pending queue is holding back, and the way to
    it. A quiet line under the count, not a warning — the orders are fine, they
    are just not this week's work. */
+.railCutoff {
+  color: var(--color-ink-faint);
+  font-weight: 400;
+  /* Cursor says the title is worth reading: it explains where older orders went. */
+  cursor: help;
+}
+
 .backlogNote {
   display: block;
   width: calc(100% - var(--space-3) * 2);

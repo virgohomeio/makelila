@@ -427,29 +427,19 @@ function applyChange(cache: Order[], payload: { eventType: string; new: Order | 
 /** Every bucket here is sales-only (kind='sale'). Replacements are not shown in
  *  Order Review at all — see the note in bucketOrders. */
 export type OrderBuckets = {
-  /** Live sales since SALES_QUEUE_START — excludes fulfilled and cancelled.
-   *  Age-trimmed like the two queues: All is the current book of work, not the
-   *  whole import. What it no longer shows is in `backlog`, never nowhere. */
+  /** Every sale Order Review still shows — excludes fulfilled and cancelled.
+   *  Like every bucket here, it starts after SALES_QUEUE_START. */
   all: Order[];
-  /** Every live sale no work queue is picking up: placed before
-   *  SALES_QUEUE_START, or held back by its queue's own rule. This is the tab
-   *  the rail's held-back note opens, and the reason trimming `all` loses
-   *  nothing — search is scoped to the open tab, so a row in no tab is a row
-   *  nobody can find. Oldest first. */
-  backlog: Order[];
   /** The live confirmation queue — see isPendingQueueWork. */
   pending: Order[];
-  /** Pending sales the queue holds back: too old, or already refunded. Not
-   *  hidden — they are still in `all`, and this is what the rail counts when it
-   *  says how many are being held back. Oldest first. */
+  /** Pending sales the queue holds back because the money already went back.
+   *  Not hidden — they are still in `all`, and this is what the rail counts
+   *  when it says how many are being held back. Oldest first. */
   pendingBacklog: Order[];
   held: Order[];
   flagged: Order[];
-  /** The live ship queue — see isConfirmedQueueWork. */
+  /** The live ship queue. */
   approved: Order[];
-  /** Confirmed sales the queue holds back as too old. Same treatment as
-   *  pendingBacklog: still in `all`, still searchable, oldest first. */
-  confirmedBacklog: Order[];
   /** Terminal: cancelled from Sales or from the fulfillment queue. Out of every
    *  live tab, but kept in its own so the team can still find the order and the
    *  reason it died. Newest cancellation first. */
@@ -477,17 +467,21 @@ function alreadySettled(financialStatus: string | null | undefined): boolean {
  *  being read.
  *
  *  Same shape as CANCELLATION_QUEUE_START in postShipment: a date before which
- *  rows are history rather than work. Nothing is deleted or hidden — an order
- *  before the cutoff keeps its row, moves to the Backlog tab, stays searchable
- *  there, and comes back the moment this date moves.
+ *  rows are history rather than work.
  *
- *  All is trimmed by it too, as of 2026-09-10. It held 47 rows, 25 of them
- *  older than anything anyone was working — #1001 zhiyue yu read "1245d
- *  OVERDUE" — so the one tab meant to show the current book of work was three
- *  quarters history. The 25 moved to Backlog rather than out of reach: 11 are
- *  paid with nothing shipped, and the rail's search only ever looks in the tab
- *  you have open, so dropping them from All without a home would have made an
- *  unmet obligation unfindable.
+ *  As of 2026-09-10 it governs the whole module, not just the two queues: it is
+ *  applied once, in bucketOrders, so Pending, Confirmed, Held, Flagged, All and
+ *  Cancelled all start on the same date. That was a deliberate call by the
+ *  operator — Sales shows the current book of work and nothing else.
+ *
+ *  Because age is global, no tab can hold an older row, and there is no Backlog
+ *  tab to catch one. **39 rows are consequently not visible anywhere in
+ *  Sales**: 25 live (11 paid with nothing shipped) and 14 cancelled (8 with
+ *  money in). No data is deleted — every row is untouched in Postgres and
+ *  reappears the moment this date moves — but nothing in the module surfaces
+ *  them, and the rail's search only ever looks in the tab you have open. Any
+ *  refund still owed on one is tracked in Shipping › Cancellations, which keeps
+ *  its own CANCELLATION_QUEUE_START.
  *
  *  Read against placed_at ?? created_at, the same basis the tab's own SLA uses,
  *  so an order's age means one thing on this screen. */
@@ -505,12 +499,13 @@ function withinSalesQueue(order: Order, since: string = SALES_QUEUE_START): bool
 
 /** Is this order still work for the Pending queue?
  *
- *  Two ways it is not. It can be too old to be part of what anyone is doing
- *  (SALES_QUEUE_START), or its money can already have gone back — Shopify says
- *  'refunded' or 'voided', so there is nothing left to confirm, pick or ship.
- *  #1183 Sherry Tang was refunded on 2026-08-18 and #1231 Lisa Clarke on
- *  2026-08-13; both sat in Pending afterwards asking to be reviewed, because
- *  refunding an order never moved its status.
+ *  The money test only. Age is no longer asked here — bucketOrders applies
+ *  SALES_QUEUE_START to every order before any bucket is built — so what is
+ *  left is whether the money already went back: Shopify says 'refunded' or
+ *  'voided', so there is nothing to confirm, pick or ship. #1183 Sherry Tang
+ *  was refunded on 2026-08-18 and #1231 Lisa Clarke on 2026-08-13; both sat in
+ *  Pending afterwards asking to be reviewed, because refunding an order never
+ *  moved its status.
  *
  *  Settled-ness is read from the same SETTLED_FINANCIAL_STATUSES that decides
  *  whether cancelling files a refund request, so "we already paid this back"
@@ -521,22 +516,18 @@ function withinSalesQueue(order: Order, since: string = SALES_QUEUE_START): bool
  *  wants cancelling properly, which files it in Shipping › Cancellations. This
  *  rule only keeps it out of the queue meanwhile; it changes no data. */
 function isPendingQueueWork(order: Order): boolean {
-  return withinSalesQueue(order) && !alreadySettled(order.financial_status);
+  return !alreadySettled(order.financial_status);
 }
 
-/** Is this order still work for the Confirmed queue?
- *
- *  Age only — deliberately not the settled-money rule that Pending applies. A
+/** Confirmed deliberately does NOT take Pending's settled-money rule. A
  *  confirmed order has been handed to fulfillment, and the money question there
  *  is already answered better than a status field can: enqueueForFulfillment
  *  refuses a refunded order outright, and withdrawOrderFromQueue pulls one that
- *  gets refunded after the fact. Adding the rule here would change nothing
- *  today (no confirmed order since the cutoff is refunded) while quietly hiding
- *  a row that Fulfillment is still holding — the one place a Sales tab and the
- *  ship queue must not disagree. */
-function isConfirmedQueueWork(order: Order): boolean {
-  return withinSalesQueue(order);
-}
+ *  gets refunded after the fact. Applying it here would quietly hide a row that
+ *  Fulfillment is still holding — the one place a Sales tab and the ship queue
+ *  must not disagree. Age was its only rule, and that is global now, so the tab
+ *  is simply every approved order.
+ */
 
 /** Oldest first — a backlog is read to work through it, not to skim it. */
 function byAgeAscending(a: Order, b: Order): number {
@@ -569,7 +560,11 @@ export function bucketOrders(
   // uses). It existed solely to keep that tab from filling with dead rows;
   // with the tab gone it had nothing left to hide, and it took the
   // closedTicketIds parameter with it.
-  const sales = cache.filter(o => o.kind !== 'replacement');
+  //
+  // Age is applied here, once, rather than per tab. Every Sales tab starts on
+  // SALES_QUEUE_START, so an order older than it is in no bucket at all — see
+  // the constant for what that hides and why the operator asked for it.
+  const sales = cache.filter(o => o.kind !== 'replacement' && withinSalesQueue(o));
 
   // Cancelled is terminal and takes precedence over every other signal: a
   // cancelled order belongs in the Cancelled tab whether or not it was ever
@@ -600,25 +595,13 @@ export function bucketOrders(
   const allPending  = active.filter(o => o.status === 'pending');
   const allApproved = active.filter(o => o.status === 'approved');
 
-  // Everything no live queue is picking up: too old for any tab, or held back
-  // by its own queue's rule. The pre-cutoff clause is what All sheds; the other
-  // two keep the rail's held-back note pointing somewhere true, including for a
-  // recent refunded order that Pending drops but All still shows.
-  const backlog = active.filter(o =>
-    !withinSalesQueue(o)
-    || (o.status === 'pending'  && !isPendingQueueWork(o))
-    || (o.status === 'approved' && !isConfirmedQueueWork(o)),
-  ).sort(byAgeAscending);
-
   return {
-    all:      active.filter(o => withinSalesQueue(o)),
-    backlog,
+    all:      active,
     pending:  allPending.filter(isPendingQueueWork),
     pendingBacklog: allPending.filter(o => !isPendingQueueWork(o)).sort(byAgeAscending),
     held:     active.filter(o => o.status === 'held'),
     flagged:  active.filter(o => o.status === 'flagged'),
-    approved: allApproved.filter(isConfirmedQueueWork),
-    confirmedBacklog: allApproved.filter(o => !isConfirmedQueueWork(o)).sort(byAgeAscending),
+    approved: allApproved,
     cancelled,
   };
 }

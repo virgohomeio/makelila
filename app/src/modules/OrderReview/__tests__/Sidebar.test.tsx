@@ -86,13 +86,11 @@ describe('Sidebar', () => {
     render(
       <Sidebar
         all={[p1, p2, h1, f1]}
-        backlog={[]}
         pending={[p1, p2]}
         pendingBacklog={[]}
         held={[h1]}
         flagged={[f1]}
         approved={[]}
-        confirmedBacklog={[]}
         cancelled={[c1]}
         selectedId={selectedId}
         onSelect={onSelect}
@@ -129,8 +127,8 @@ describe('Sidebar', () => {
     const stale = mkOrder({ id: 'x1', status: 'pending', customer_name: 'Richard Ahola' });
     render(
       <Sidebar
-        all={[p1]} backlog={[stale]} pending={[p1]} pendingBacklog={[stale]}
-        held={[]} flagged={[]} approved={[]} confirmedBacklog={[]} cancelled={[]}
+        all={[p1, stale]} pending={[p1]} pendingBacklog={[stale]}
+        held={[]} flagged={[]} approved={[]} cancelled={[]}
         selectedId={null} onSelect={vi.fn()}
       />,
     );
@@ -142,23 +140,32 @@ describe('Sidebar', () => {
     expect(screen.getByText('Richard Ahola')).toBeInTheDocument();
   });
 
-  // The note belongs to whichever queue you are looking at — Confirmed trims
-  // itself too, and a count from the other tab would be a lie.
-  it('reports the Confirmed queue backlog on the Confirmed tab', () => {
-    const stale = mkOrder({ id: 'a1', status: 'approved', customer_name: 'Tony Rinella' });
+  // Confirmed's only rule was age, and age is a module-wide filter now, so it
+  // holds nothing back and must not claim to. Pending keeps its money rule and
+  // is the only tab that can still show the note.
+  it('shows no held-back note on Confirmed, which holds nothing back', () => {
+    const refunded = mkOrder({ id: 'r1', status: 'pending', customer_name: 'Sherry Tang' });
     render(
       <Sidebar
-        all={[p1]} backlog={[stale]} pending={[p1]} pendingBacklog={[]}
-        held={[]} flagged={[]} approved={[]} confirmedBacklog={[stale]}
+        all={[p1, refunded]} pending={[p1]} pendingBacklog={[refunded]}
+        held={[]} flagged={[]} approved={[]}
         cancelled={[]} selectedId={null} onSelect={vi.fn()}
       />,
     );
-    // Pending is showing and holds nothing back, so no note yet.
-    expect(screen.queryByText(/held back/i)).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: /^Confirmed: 0 orders$/ }));
+    // Pending holds one back on the money rule, so the note is there.
     expect(screen.getByRole('button', { name: /1 held back from this queue/i }))
       .toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /^Confirmed: 0 orders$/ }));
+    expect(screen.queryByText(/held back/i)).not.toBeInTheDocument();
+  });
+
+  // Every tab starts at the cutoff and search only looks in the open tab, so
+  // the rail says where the module begins rather than leaving someone to
+  // conclude an older order was deleted.
+  it('says what date the module starts from', () => {
+    render_();
+    expect(screen.getByText(/from Jun 2, 2026/)).toBeInTheDocument();
   });
 
   it('says nothing about a backlog when the cutoff is holding nothing back', () => {
@@ -176,7 +183,7 @@ describe('Sidebar', () => {
   it('shows empty-state copy when the active tab has no rows', () => {
     render(
       <Sidebar
-        all={[]} backlog={[]} pending={[]} pendingBacklog={[]} held={[]} flagged={[]} approved={[]} confirmedBacklog={[]} cancelled={[]}
+        all={[]} pending={[]} pendingBacklog={[]} held={[]} flagged={[]} approved={[]} cancelled={[]}
         selectedId={null} onSelect={vi.fn()}
       />,
     );
@@ -207,8 +214,7 @@ describe('Sidebar', () => {
     });
     render(
       <Sidebar
-        all={[]} backlog={[]} pending={[]} pendingBacklog={[]} held={[]} flagged={[]} approved={[]}
- confirmedBacklog={[]}
+        all={[]} pending={[]} pendingBacklog={[]} held={[]} flagged={[]} approved={[]}
         cancelled={[newer, older]}
         selectedId={null} onSelect={vi.fn()}
       />,

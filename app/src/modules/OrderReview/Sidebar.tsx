@@ -7,26 +7,22 @@ import { useOrderCommAssessments } from '../../lib/orderComms';
 import { EmptyState } from '../../components/ui';
 import styles from './OrderReview.module.css';
 
-type Tab = 'pending' | 'held' | 'flagged' | 'approved' | 'all' | 'backlog' | 'cancelled';
+type Tab = 'pending' | 'held' | 'flagged' | 'approved' | 'all' | 'cancelled';
 
 export function Sidebar({
-  pending, pendingBacklog, held, flagged, approved, confirmedBacklog, all, backlog, cancelled,
+  pending, pendingBacklog, held, flagged, approved, all, cancelled,
   selectedId,
   onSelect,
 }: {
   pending: Order[];
-  /** What each work queue holds back — too old, or (for Pending) already
-   *  refunded. They are not in their tab, so the rail says so rather than
-   *  letting them disappear quietly. */
+  /** What Pending holds back because the money already went back. They are not
+   *  in that tab but are still in All, so the rail says so rather than letting
+   *  them disappear quietly. */
   pendingBacklog: Order[];
   held: Order[];
   flagged: Order[];
   approved: Order[];
-  confirmedBacklog: Order[];
   all: Order[];
-  /** Live sales no queue is picking up — pre-cutoff, or held back by a queue.
-   *  All no longer shows these, so this is where they are found. */
-  backlog: Order[];
   /** Terminal — cancelled here or from the fulfillment queue. Already sorted
    *  newest-cancelled first by bucketOrders. */
   cancelled: Order[];
@@ -44,7 +40,6 @@ export function Sidebar({
                : tab === 'flagged'     ? flagged
                : tab === 'approved'    ? approved
                : tab === 'cancelled'   ? cancelled
-               : tab === 'backlog'     ? backlog
                : all;
 
   const visible = useMemo(() => {
@@ -57,10 +52,8 @@ export function Sidebar({
           (o.customer_email ?? '').toLowerCase().includes(q),
         );
     // Live tabs are a work queue, so they read best by order ref. Cancelled is
-    // a lookup list — the one you just killed should be at the top. Backlog
-    // arrives oldest-first from bucketOrders and stays that way: it is read to
-    // work through, and the oldest debt is the one to settle first.
-    if (tab === 'cancelled' || tab === 'backlog') return filtered;
+    // a lookup list — the one you just killed should be at the top.
+    if (tab === 'cancelled') return filtered;
     return [...filtered].sort((a, b) => a.order_ref.localeCompare(b.order_ref));
   }, [source, query, tab]);
 
@@ -75,7 +68,6 @@ export function Sidebar({
     { key: 'flagged',     label: 'Flagged',     count: flagged.length },
     { key: 'approved',    label: 'Confirmed',   count: approved.length },
     { key: 'all',         label: 'All',         count: all.length },
-    { key: 'backlog',     label: 'Backlog',     count: backlog.length },
     { key: 'cancelled',   label: 'Cancelled',   count: cancelled.length },
   ];
 
@@ -86,14 +78,10 @@ export function Sidebar({
   const cutoffLabel = new Date(`${SALES_QUEUE_START}T00:00:00`)
     .toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 
-  // Both work queues trim themselves, so the note belongs to whichever one you
-  // are looking at. The other tabs are not queues and hold nothing back.
-  const queueBacklog = tab === 'pending'  ? pendingBacklog
-                     : tab === 'approved' ? confirmedBacklog
-                     : [];
-  const queueBacklogReason = tab === 'pending'
-    ? `already refunded, or placed before ${cutoffLabel}`
-    : `placed before ${cutoffLabel}`;
+  // Age is a module-wide filter now, so no tab holds a row back for being old.
+  // Pending is the only queue with a rule of its own left — the money one — and
+  // what it holds back is still in All, which is where the note points.
+  const queueBacklog = tab === 'pending' ? pendingBacklog : [];
 
   return (
     <aside className={styles.sidebar}>
@@ -141,8 +129,14 @@ export function Sidebar({
 
       </div>
 
+      {/* Every tab starts at the cutoff, so an older order is in none of them
+          and search will not find it either. Say so once, here, rather than
+          leaving someone to conclude the row was deleted. */}
       <div className={styles.railCount}>
         {visible.length} order{visible.length === 1 ? '' : 's'}{query.trim() ? ' matching' : ''}
+        <span className={styles.railCutoff} title={`Sales shows orders placed on or after ${cutoffLabel}. Older orders still exist and are unchanged, but no tab lists them and search does not reach them.`}>
+          {' '}· from {cutoffLabel}
+        </span>
       </div>
 
       {/* A queue that quietly drops rows is a queue nobody can trust. When the
@@ -151,11 +145,10 @@ export function Sidebar({
         <button
           type="button"
           className={styles.backlogNote}
-          onClick={() => setTab('backlog')}
-          title={`Held back from this queue: ${queueBacklogReason}. `
-                 + 'They keep their rows and stay searchable — click to see them in Backlog.'}
+          onClick={() => setTab('all')}
+          title="Held back from this queue: already refunded, so there is nothing left to confirm, pick or ship. They keep their rows and stay searchable — click to see them in All."
         >
-          {queueBacklog.length} held back from this queue — see Backlog
+          {queueBacklog.length} held back from this queue — see All
         </button>
       )}
 

@@ -544,11 +544,11 @@ describe('bucketOrders', () => {
     expect(b.pending.map(o => o.id)).toEqual(['s1']);
   });
 
-  // Pending is a work queue, and it opened on the whole Shopify import — back
-  // to 2023-04-14. SALES_QUEUE_START trims it to work anyone is actually
-  // doing. Nothing is deleted or hidden: the backlog keeps its rows, now in
-  // the Backlog tab rather than All, which is trimmed by the same date.
-  describe(`the ${SALES_QUEUE_START} pending cutoff`, () => {
+  // Sales opened on the whole Shopify import — back to 2023-04-14.
+  // SALES_QUEUE_START now governs the entire module: it is applied once, before
+  // any bucket is built, so every tab starts on the same date and an older
+  // order is in none of them.
+  describe(`the ${SALES_QUEUE_START} sales cutoff`, () => {
     const dated = (id: string, placed: string) =>
       mk({ id, status: 'pending', placed_at: placed, created_at: placed });
 
@@ -561,7 +561,7 @@ describe('bucketOrders', () => {
       expect(b.pendingBacklog).toEqual([]);
     });
 
-    it('holds older orders back, oldest first, and moves them out of All', () => {
+    it('drops older orders from every bucket, not just the queue', () => {
       const b = bucketOrders(
         [dated('recent', '2026-09-07'),
          dated('ancient', '2023-04-14'),
@@ -569,11 +569,9 @@ describe('bucketOrders', () => {
         none, none,
       );
       expect(b.pending.map(o => o.id)).toEqual(['recent']);
-      expect(b.pendingBacklog.map(o => o.id)).toEqual(['ancient', 'old']);
-      // All is the current book of work now, not the whole import.
       expect(b.all.map(o => o.id)).toEqual(['recent']);
-      // The whole point of a cutoff over a delete: they are still here.
-      expect(b.backlog.map(o => o.id)).toEqual(['ancient', 'old']);
+      // Not held back into a backlog any more — filtered out before bucketing.
+      expect(b.pendingBacklog).toEqual([]);
     });
 
     it('falls back to created_at when an order was never given a placed date', () => {
@@ -582,7 +580,7 @@ describe('bucketOrders', () => {
         none, none,
       );
       expect(b.pending).toEqual([]);
-      expect(b.pendingBacklog.map(o => o.id)).toEqual(['no-placed']);
+      expect(b.all).toEqual([]);
     });
 
     // A row nobody can see is worse than a row in the wrong order, so an
@@ -596,39 +594,43 @@ describe('bucketOrders', () => {
       expect(b.pendingBacklog).toEqual([]);
     });
 
-    // All showed 47 rows on 2026-09-10 and 25 of them predated anything anyone
-    // was working — #1001 read "1245d OVERDUE". The tab meant to show the
-    // current book of work was three quarters history.
-    it('trims All by the same date as the queues', () => {
+    // Held, Flagged and Cancelled used to keep every row at any age. The
+    // operator asked for one date across the whole module, so they take it too.
+    it('trims held, flagged and cancelled by the same date', () => {
       const b = bucketOrders(
-        [mk({ id: 'live',    status: 'pending',  placed_at: '2026-09-07', created_at: '2026-09-07' }),
-         mk({ id: 'old-pen', status: 'pending',  placed_at: '2023-04-14', created_at: '2023-04-14' }),
-         mk({ id: 'old-app', status: 'approved', placed_at: '2024-03-16', created_at: '2024-03-16' })],
+        [mk({ id: 'old-held', status: 'held',      placed_at: '2025-01-02', created_at: '2025-01-02' }),
+         mk({ id: 'new-held', status: 'held',      placed_at: '2026-08-02', created_at: '2026-08-02' }),
+         mk({ id: 'old-flag', status: 'flagged',   placed_at: '2025-01-03', created_at: '2025-01-03' }),
+         mk({ id: 'old-canx', status: 'cancelled', placed_at: '2024-06-01', created_at: '2024-06-01' }),
+         mk({ id: 'new-canx', status: 'cancelled', placed_at: '2026-07-01', created_at: '2026-07-01' })],
         none, none,
       );
-      expect(b.all.map(o => o.id)).toEqual(['live']);
-      expect(b.backlog.map(o => o.id)).toEqual(['old-pen', 'old-app']);
+      expect(b.held.map(o => o.id)).toEqual(['new-held']);
+      expect(b.flagged).toEqual([]);
+      expect(b.cancelled.map(o => o.id)).toEqual(['new-canx']);
     });
 
-    // Held and Flagged are parked decisions, not queues, and keep every row at
-    // any age — but All sheds an old one, so Backlog has to catch it or the
-    // row is only reachable from its own tab.
-    it('catches an old held or flagged order that All sheds', () => {
+    // This is the cost of one global date, asserted rather than left implicit:
+    // an older order is in NO bucket, and the rail searches only the open tab,
+    // so nothing in Sales surfaces it. 39 live rows sit outside on 2026-09-10,
+    // 11 of them paid with nothing shipped. The data is untouched in Postgres
+    // and comes back the moment SALES_QUEUE_START moves.
+    it('leaves a pre-cutoff order out of every bucket', () => {
       const b = bucketOrders(
-        [mk({ id: 'old-held', status: 'held',    placed_at: '2025-01-02', created_at: '2025-01-02' }),
-         mk({ id: 'old-flag', status: 'flagged', placed_at: '2025-01-03', created_at: '2025-01-03' })],
+        [mk({ id: 'paid-old', status: 'approved', placed_at: '2024-03-16',
+              created_at: '2024-03-16', financial_status: 'paid' })],
         none, none,
       );
-      expect(b.held.map(o => o.id)).toEqual(['old-held']);
-      expect(b.flagged.map(o => o.id)).toEqual(['old-flag']);
-      expect(b.all).toEqual([]);
-      expect(b.backlog.map(o => o.id)).toEqual(['old-held', 'old-flag']);
+      for (const bucket of [b.all, b.pending, b.pendingBacklog, b.held,
+                            b.flagged, b.approved, b.cancelled]) {
+        expect(bucket).toEqual([]);
+      }
     });
 
-    // Pending drops a refunded order at any age. That one is recent, so it is
-    // still in All — but the rail's held-back note opens Backlog, so it has to
-    // be there too or the note points at nothing.
-    it('holds a recent refunded pending order, which stays in All as well', () => {
+    // Pending still drops a refunded order at any age — the one queue rule that
+    // is not about age. It is recent, so All keeps it and the rail's note has
+    // somewhere true to point.
+    it('still holds a recent refunded pending order, which stays in All', () => {
       const b = bucketOrders(
         [mk({ id: 'refunded', status: 'pending', financial_status: 'refunded',
               placed_at: '2026-08-18', created_at: '2026-08-18' })],
@@ -637,29 +639,6 @@ describe('bucketOrders', () => {
       expect(b.pending).toEqual([]);
       expect(b.pendingBacklog.map(o => o.id)).toEqual(['refunded']);
       expect(b.all.map(o => o.id)).toEqual(['refunded']);
-      expect(b.backlog.map(o => o.id)).toEqual(['refunded']);
-    });
-
-    // The rail searches only the tab you have open, so a live order in no tab
-    // is one nobody can find. Eleven of the 25 All shed are paid with nothing
-    // shipped; this is the assertion that keeps them reachable.
-    it('leaves no live order out of every tab', () => {
-      const orders = [
-        mk({ id: 'live-pen',  status: 'pending',  placed_at: '2026-09-07', created_at: '2026-09-07' }),
-        mk({ id: 'old-pen',   status: 'pending',  placed_at: '2023-04-14', created_at: '2023-04-14' }),
-        mk({ id: 'paid-old',  status: 'approved', placed_at: '2024-03-16', created_at: '2024-03-16',
-             financial_status: 'paid' }),
-        mk({ id: 'refunded',  status: 'pending',  placed_at: '2026-08-18', created_at: '2026-08-18',
-             financial_status: 'refunded' }),
-        mk({ id: 'old-held',  status: 'held',     placed_at: '2025-01-02', created_at: '2025-01-02' }),
-        mk({ id: 'live-app',  status: 'approved', placed_at: '2026-09-08', created_at: '2026-09-08' }),
-      ];
-      const b = bucketOrders(orders, none, none);
-      const reachable = new Set([
-        ...b.pending, ...b.held, ...b.flagged, ...b.approved,
-        ...b.all, ...b.backlog, ...b.cancelled,
-      ].map(o => o.id));
-      expect([...reachable].sort()).toEqual(orders.map(o => o.id).sort());
     });
 
     // Timestamps come back from PostgREST with an offset. A lexicographic
@@ -672,19 +651,17 @@ describe('bucketOrders', () => {
       expect(b.pending.map(o => o.id)).toEqual(['offset']);
     });
 
-    // The cutoff trims the two work queues, Pending and Confirmed. Held and
-    // Flagged are not queues — they are parked decisions someone made on
-    // purpose, and age is not a reason to take one off the board.
-    it('leaves the non-queue statuses alone however old they are', () => {
+    // Recent held and flagged rows are untouched — age is the only thing that
+    // moved, and a parked decision made this quarter is still on the board.
+    it('keeps recent held and flagged rows', () => {
       const b = bucketOrders(
-        [mk({ id: 'h', status: 'held',    placed_at: '2023-05-01', created_at: '2023-05-01' }),
-         mk({ id: 'f', status: 'flagged', placed_at: '2024-12-31', created_at: '2024-12-31' })],
+        [mk({ id: 'h', status: 'held',    placed_at: '2026-07-01', created_at: '2026-07-01' }),
+         mk({ id: 'f', status: 'flagged', placed_at: '2026-08-31', created_at: '2026-08-31' })],
         none, none,
       );
       expect(b.held.map(o => o.id)).toEqual(['h']);
       expect(b.flagged.map(o => o.id)).toEqual(['f']);
       expect(b.pendingBacklog).toEqual([]);
-      expect(b.confirmedBacklog).toEqual([]);
     });
   });
 
@@ -703,16 +680,14 @@ describe('bucketOrders', () => {
         none, none,
       );
       expect(b.approved.map(o => o.id)).toEqual(['live']);
-      expect(b.confirmedBacklog.map(o => o.id)).toEqual(['legacy', 'old']);
-      // All is trimmed by the same date, so the two old ones are in Backlog.
+      // Filtered out before bucketing, so they are in no tab at all.
       expect(b.all.map(o => o.id)).toEqual(['live']);
-      expect(b.backlog.map(o => o.id)).toEqual(['legacy', 'old']);
     });
 
     it('keeps an order placed on the cutoff itself', () => {
       const b = bucketOrders([approvedOn('boundary', SALES_QUEUE_START)], none, none);
       expect(b.approved.map(o => o.id)).toEqual(['boundary']);
-      expect(b.confirmedBacklog).toEqual([]);
+      expect(b.all.map(o => o.id)).toEqual(['boundary']);
     });
 
     // Confirmed deliberately does NOT apply Pending's settled-money rule: a
@@ -725,7 +700,7 @@ describe('bucketOrders', () => {
         none, none,
       );
       expect(b.approved.map(o => o.id)).toEqual(['refunded-but-recent']);
-      expect(b.confirmedBacklog).toEqual([]);
+      expect(b.all.map(o => o.id)).toEqual(['refunded-but-recent']);
     });
 
     it('fails open on a date it cannot parse, exactly as Pending does', () => {
@@ -734,17 +709,19 @@ describe('bucketOrders', () => {
         none, none,
       );
       expect(b.approved.map(o => o.id)).toEqual(['junk']);
-      expect(b.confirmedBacklog).toEqual([]);
+      expect(b.all.map(o => o.id)).toEqual(['junk']);
     });
 
-    it('holds nothing back in Pending that belongs to Confirmed, or the reverse', () => {
+    it('drops a pre-cutoff pending and a pre-cutoff confirmed order alike', () => {
       const b = bucketOrders(
         [mk({ id: 'p', status: 'pending',  placed_at: '2023-01-01', created_at: '2023-01-01' }),
          approvedOn('a', '2023-01-01')],
         none, none,
       );
-      expect(b.pendingBacklog.map(o => o.id)).toEqual(['p']);
-      expect(b.confirmedBacklog.map(o => o.id)).toEqual(['a']);
+      expect(b.pending).toEqual([]);
+      expect(b.approved).toEqual([]);
+      expect(b.pendingBacklog).toEqual([]);
+      expect(b.all).toEqual([]);
     });
   });
 
