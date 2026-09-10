@@ -7,6 +7,7 @@ import {
   isUsableGranularity,
   guessDwellingFromText,
   dwellingFromValidation,
+  dwellingFromModelLabel,
   unitStatusFromValidation,
   areaTypeFromPostal,
   needsFitConfirmation,
@@ -304,5 +305,40 @@ describe('operator-facing copy', () => {
     expect(dwellingProvenance('sync-guess', '2026-09-10T15:14:35Z')).toMatch(/unconfirmed/i);
     expect(dwellingProvenance('google', '2026-09-10T15:14:35Z')).toMatch(/confirmed by address verification/i);
     expect(dwellingProvenance('manual', null)).toMatch(/operator/i);
+  });
+
+  // A model reading is neither a record nor a regex, and must not read as
+  // either — it is the only building signal a Canadian address ever gets.
+  it('distinguishes a model reading from a postal-authority record', () => {
+    const model = dwellingProvenance('model', '2026-09-10T15:14:35Z');
+    expect(model).toMatch(/classifier/i);
+    expect(model).toMatch(/no postal-authority record/i);
+    expect(model).not.toMatch(/unconfirmed/i);
+    expect(model).not.toMatch(/confirmed by address verification/i);
+  });
+});
+
+describe('dwellingFromModelLabel', () => {
+  it('maps the labels the prompt asks for onto our own vocabulary', () => {
+    expect(dwellingFromModelLabel('house')).toBe('house');
+    expect(dwellingFromModelLabel('apartment')).toBe('apt');
+    expect(dwellingFromModelLabel('condo')).toBe('condo');
+    expect(dwellingFromModelLabel('business')).toBe('business');
+    expect(dwellingFromModelLabel('po_box')).toBe('po_box');
+  });
+
+  it('accepts the near-misses a model reaches for', () => {
+    expect(dwellingFromModelLabel('Apartment Building')).toBe('apt');
+    expect(dwellingFromModelLabel('single-family')).toBe('house');
+    expect(dwellingFromModelLabel('  CONDOMINIUM ')).toBe('condo');
+    expect(dwellingFromModelLabel('rural route')).toBe('remote');
+  });
+
+  // A reply we cannot read must leave the verdict where it was, not move it.
+  it('returns null for unknown, empty or unrecognised answers', () => {
+    expect(dwellingFromModelLabel('unknown')).toBeNull();
+    expect(dwellingFromModelLabel('')).toBeNull();
+    expect(dwellingFromModelLabel(null)).toBeNull();
+    expect(dwellingFromModelLabel('houseboat')).toBeNull();
   });
 });

@@ -56,7 +56,12 @@ export function AddressCard({ order }: { order: Order }) {
   const [err, setErr] = useState(false);
 
   const verified = !!order.address_verified_at;
-  const dwellingConfirmed = order.address_verdict_source === 'google';
+  // Three states, not two: confirmed by a record (Google/USPS, or an operator),
+  // READ off the address by the classifier, or nobody has looked. The middle one
+  // exists because uspsData is US-only and most orders are Canadian — without
+  // it, a Canadian building type could only ever be an unchecked guess.
+  const dwellingConfirmed = order.address_verdict_source === 'google' || order.address_verdict_source === 'manual';
+  const dwellingRead = order.address_verdict_source === 'model';
   const unitMissing = order.address_unit_status === 'missing';
   const unitUnrecognized = order.address_unit_status === 'unrecognized';
   const postalLabel = order.country === 'US' ? 'ZIP code' : 'Postal code';
@@ -76,9 +81,14 @@ export function AddressCard({ order }: { order: Order }) {
       // Say what each pass actually established. A verify that silently
       // established nothing used to read the same as one that established
       // everything.
-      parts.push(r.dwelling_source === 'google'
-        ? `Building: ${DWELLING_LABEL[r.dwelling].toLowerCase()} (confirmed).`
-        : `Building: still unconfirmed — Google resolved the street but not the premise.`);
+      parts.push(
+        r.dwelling_source === 'google'
+          ? `Building: ${DWELLING_LABEL[r.dwelling].toLowerCase()} (confirmed by the postal authority).`
+        : r.dwelling_source === 'model'
+          ? `Building: ${DWELLING_LABEL[r.dwelling].toLowerCase()} (read from the address — no postal-authority record).`
+        : r.dwelling_source === 'manual'
+          ? `Building: ${DWELLING_LABEL[r.dwelling].toLowerCase()} (kept — you set this by hand).`
+          : 'Building: still unconfirmed — nothing in the response named the premise.');
       if (r.unit_status === 'missing') parts.push('No unit number on file for a multi-unit building.');
       parts.push(r.area_type
         ? `Area: ${AREA_TYPE_LABEL[r.area_type]}.`
@@ -137,12 +147,14 @@ export function AddressCard({ order }: { order: Order }) {
 
   // ── Claim 2: the dwelling type ──────────────────────────────────────
   const dwellingClaim = (() => {
-    if (!dwellingConfirmed && order.address_verdict_source !== 'manual') {
+    if (!dwellingConfirmed && !dwellingRead) {
       return { cls: styles.claimUnchecked, unchecked: true };
     }
     if (isBlockingDwelling(order.address_verdict)) return { cls: styles.claimBlocking, unchecked: false };
     if (needsFitConfirmation(order.address_verdict)) return { cls: styles.claimCaution, unchecked: false };
-    return { cls: styles.claimConfirmed, unchecked: false };
+    // A model reading of a plain house is real evidence but not a record, so it
+    // never gets the same green as a confirmed one.
+    return { cls: dwellingRead ? styles.claimCaution : styles.claimConfirmed, unchecked: false };
   })();
 
   // ── Claim 3: the area type ──────────────────────────────────────────

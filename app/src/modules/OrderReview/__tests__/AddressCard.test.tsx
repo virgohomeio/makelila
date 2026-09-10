@@ -162,9 +162,27 @@ describe('AddressCard — running a verify', () => {
     render(<AddressCard order={mkOrder()} />);
     fireEvent.click(screen.getByRole('button', { name: /verify address/i }));
     await waitFor(() => {
-      expect(screen.getByText(/Building: house \(confirmed\)/)).toBeInTheDocument();
+      expect(screen.getByText(/Building: house \(confirmed by the postal authority\)/)).toBeInTheDocument();
     });
     expect(screen.getByText(/Area not classified — No LLM provider configured/)).toBeInTheDocument();
+  });
+
+  // uspsData is US-only, so a Canadian address gets no record of what kind of
+  // building it is. The model pass names it instead, and the message says which
+  // of the two happened rather than reading the same either way.
+  it('distinguishes a building the model read from one a postal authority confirmed', async () => {
+    verifyAddressMock.mockResolvedValue({
+      match: 'match', customer_postal: 'L4S2R6', google_postal: 'L4S 2R6',
+      google_formatted: '118 Holly Drive, Richmond Hill, ON L4S 2R6, Canada',
+      dwelling: 'apt', dwelling_source: 'model', unit_status: 'unknown',
+      area_type: 'urban', area_type_error: null,
+    });
+    render(<AddressCard order={mkOrder()} />);
+    fireEvent.click(screen.getByRole('button', { name: /verify address/i }));
+    await waitFor(() => {
+      expect(screen.getByText(/Building: apartment \(read from the address — no postal-authority record\)/))
+        .toBeInTheDocument();
+    });
   });
 
   it('says plainly when Google resolved the street but not the building', () => {

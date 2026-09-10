@@ -148,10 +148,27 @@ export async function insertQuote(
   return data as FreightQuote;
 }
 
-export async function fetchFreightcomQuotes(
+/** What a quote run was actually asked about. A rate is only an estimate of
+ *  THIS order's freight if the carrier was asked about this order's destination
+ *  and this order's number of boxes, so the function reports both back and
+ *  Sales shows them beside the number. */
+export type QuoteRun = {
+  quotes: FreightQuote[];
+  /** The postal code the carrier rated. */
+  quoted_postal: string | null;
+  /** 'verified' means address verification found the customer's own code wrong
+   *  and the quote was re-pointed at the postal authority's. */
+  quoted_postal_source: 'customer' | 'verified';
+  package_count: number;
+  unit_count: number;
+  address_verified_at: string | null;
+};
+
+/** Pull live carrier rates and report the full context of the run. */
+export async function fetchFreightcomQuoteRun(
   orderId: string,
   packages?: FreightcomPackageInput[],
-): Promise<FreightQuote[]> {
+): Promise<QuoteRun> {
   const { data, error } = await supabase.functions.invoke('freightcom-quote', {
     body: { order_id: orderId, ...(packages ? { packages } : {}) },
   });
@@ -159,11 +176,64 @@ export async function fetchFreightcomQuotes(
   // ("non-2xx status code") is why a hard "Order not found" from every single
   // quote attempt read as a transient network problem for two months.
   if (error) throw new Error(await functionErrorMessage(error));
+  const run = (data ?? {}) as Partial<QuoteRun> & { count?: number };
   await logAction(
     'freightcom_quotes_fetched',
     orderId,
-    `count=${(data as { count?: number })?.count ?? 0}`,
+    `count=${run.count ?? 0} packages=${run.package_count ?? '?'} postal=${run.quoted_postal ?? '?'}`,
     { entityType: 'order', entityId: orderId },
   );
-  return (data as { quotes: FreightQuote[] }).quotes;
+  return {
+    quotes: run.quotes ?? [],
+    quoted_postal: run.quoted_postal ?? null,
+    quoted_postal_source: run.quoted_postal_source === 'verified' ? 'verified' : 'customer',
+    package_count: run.package_count ?? 1,
+    unit_count: run.unit_count ?? 1,
+    address_verified_at: run.address_verified_at ?? null,
+  };
+}
+
+export async function fetchFreightcomQuotes(
+  orderId: string,
+  packages?: FreightcomPackageInput[],
+): Promise<FreightQuote[]> {
+  return (await fetchFreightcomQuoteRun(orderId, packages)).quotes;
+}
+
+/** One line of a carrier's own pricing for this address. The rate payload names
+ *  them — 'residential-delivery', 'extended-area', 'fuel' — and they are the
+ *  only place a quote says WHY this address costs what it costs. */
+export type QuoteSurcharge = { type: string; label: string; amount_cad: number };
+
+const SURCHARGE_LABEL: Record<string, string> = {
+  fuel:                   'Fuel',
+  'residential-delivery': 'Residential delivery',
+  'extended-area':        'Extended / rural area',
+  'rural-delivery':       'Rural delivery',
+  'liftgate-delivery':    'Liftgate',
+  'signature-required':   'Signature',
+  'address-correction':   'Address correction',
+  oversize:               'Oversize',
+};
+
+function titleCase(type: string): string {
+  return type.replace(/[-_]+/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+/** The surcharges Freightcom itemised on a quote — the cheapest available
+ *  answer to "what about this address moved the price". Returns [] for a quote
+ *  whose raw payload we never captured (older rows, ClickShip pastes). */
+export function quoteSurcharges(quote: FreightQuote | null | undefined): QuoteSurcharge[] {
+  const raw = quote?.raw as {
+    surcharges?: Array<{ type?: string; amount?: { value?: string; currency?: string } }>;
+  } | undefined;
+  const out: QuoteSurcharge[] = [];
+  for (const s of raw?.surcharges ?? []) {
+    const type = s?.type ?? '';
+    if (!type) continue;
+    const cents = Number.parseInt(s?.amount?.value ?? '', 10);
+    if (!Number.isFinite(cents) || cents === 0) continue;
+    out.push({ type, label: SURCHARGE_LABEL[type] ?? titleCase(type), amount_cad: cents / 100 });
+  }
+  return out;
 }

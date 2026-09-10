@@ -29,10 +29,21 @@
  *  change how a pallet-sized composter gets delivered. */
 export type Dwelling = 'house' | 'apt' | 'condo' | 'remote' | 'business' | 'po_box';
 
-/** Where a dwelling verdict came from. 'sync-guess' is the weakest: a text
- *  match on the address the customer typed, with nothing checked against a
- *  postal authority. The card must not present it as confirmed. */
-export type DwellingSource = 'sync-guess' | 'google' | 'manual';
+/** Where a dwelling verdict came from, weakest first:
+ *
+ *    'sync-guess' — a text match on the address the customer typed, checked
+ *        against nothing. The card must not present it as confirmed.
+ *    'model'      — the model that classifies the area type also read the
+ *        address and named the building. Evidence, but not a record: a
+ *        judgement about a place rather than a postal authority's file on it.
+ *        It exists because uspsData is US-only, so a Canadian house or
+ *        apartment could never be confirmed at all — and most orders are
+ *        Canadian.
+ *    'google'     — Google/USPS resolved the actual premise and said what is
+ *        on it. The only source that is a record rather than a reading.
+ *    'manual'     — an operator set it, which beats all of the above: they have
+ *        spoken to the customer, we have parsed a string. */
+export type DwellingSource = 'sync-guess' | 'model' | 'google' | 'manual';
 
 export type AreaType = 'urban' | 'suburban' | 'rural';
 
@@ -252,6 +263,37 @@ export function dwellingFromValidation(result: AVResult | null | undefined): Dwe
   return 'house';
 }
 
+/** The building type a model named, mapped onto our own vocabulary. Anything
+ *  unrecognised — including the model's own "unknown" — returns null, so a
+ *  reply we cannot read leaves the verdict where it was instead of moving it.
+ *
+ *  Pair with source 'model'. Google's own evidence outranks this wherever it
+ *  exists; this fills the gap outside the US, where there is no USPS record
+ *  type and a premise-level hit alone cannot tell a house from a walk-up. */
+export function dwellingFromModelLabel(label: string | null | undefined): Dwelling | null {
+  switch ((label ?? '').trim().toLowerCase().replace(/[\s-]+/g, '_')) {
+    case 'house':
+    case 'detached':
+    case 'townhouse':
+    case 'single_family':      return 'house';
+    case 'apt':
+    case 'apartment':
+    case 'apartment_building':
+    case 'multi_unit':         return 'apt';
+    case 'condo':
+    case 'condominium':        return 'condo';
+    case 'business':
+    case 'commercial':
+    case 'office':             return 'business';
+    case 'po_box':
+    case 'pobox':              return 'po_box';
+    case 'remote':
+    case 'rural_route':
+    case 'farm':               return 'remote';
+    default:                   return null;
+  }
+}
+
 /** Is the apartment/unit number we need actually on the order?
  *
  *  'missing' is the case worth building this for. USPS dpvConfirmation 'D'
@@ -348,6 +390,10 @@ export function dwellingProvenance(source: DwellingSource, verifiedAt: string | 
     return verifiedAt
       ? `confirmed by address verification ${new Date(verifiedAt).toLocaleDateString()}`
       : 'confirmed by address verification';
+  }
+  if (source === 'model') {
+    const when = verifiedAt ? ` ${new Date(verifiedAt).toLocaleDateString()}` : '';
+    return `read from the address by the classifier${when} — no postal-authority record for this building`;
   }
   return 'unconfirmed — guessed from the address text, not yet verified';
 }

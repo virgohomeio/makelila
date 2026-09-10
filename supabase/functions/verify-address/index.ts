@@ -18,6 +18,11 @@
 //      component says the same. We now read it and write both the verdict and
 //      its provenance, so the card can show a confirmed answer differently
 //      from an unverified guess.
+//      uspsData is US-only, though, and most orders are Canadian — a Canadian
+//      house resolves to PREMISE and stops there, saying a building exists but
+//      not what kind. So the model pass below names the building too, recorded
+//      as source 'model': weaker than a postal-authority record, stronger than
+//      a regex over the street line, and never presented as either.
 //
 //   3. AREA — urban, suburban or rural. Google exposes no density signal, so
 //      a model classifies it. That step is a soft fallback and its failures
@@ -48,9 +53,10 @@ import {
 } from '../_shared/llmProviders.ts';
 import {
   normalizePostal, parsePostalFromText, comparePostal,
-  guessDwellingFromText, dwellingFromValidation, unitStatusFromValidation,
-  areaTypeFromPostal,
-  type AVResponse, type AVResult, type Dwelling, type AreaType, type UnitStatus,
+  guessDwellingFromText, dwellingFromValidation, dwellingFromModelLabel,
+  unitStatusFromValidation, areaTypeFromPostal,
+  type AVResponse, type AVResult, type Dwelling, type DwellingSource,
+  type AreaType, type UnitStatus,
 } from '../_shared/addressClassify.ts';
 
 type VerifyInput = { order_id: string };
@@ -160,11 +166,19 @@ Deno.serve(async (req: Request) => {
   // A null here keeps the existing verdict AND its 'sync-guess' provenance, so
   // an unconfirmed address never launders itself into a confirmed one.
   const googleDwelling: Dwelling | null = dwellingFromValidation(result);
-  const dwelling: Dwelling = googleDwelling
+  // Both are `let`: the model pass below can still name the building when
+  // Google's response carried no evidence for it, which outside the US is most
+  // of the time. An operator's own verdict is overwritten by neither — it used
+  // to lose to Google, which is backwards. They have spoken to the customer.
+  const operatorSet = order.address_verdict_source === 'manual';
+  let dwelling: Dwelling = googleDwelling
     ?? (order.address_verdict as Dwelling | null)
     ?? guessDwellingFromText(order.address_line, order.address_line2, order.postal_code);
-  const dwellingSource = googleDwelling ? 'google'
-    : (order.address_verdict_source === 'manual' ? 'manual' : 'sync-guess');
+  let dwellingSource: DwellingSource = googleDwelling ? 'google' : 'sync-guess';
+  if (operatorSet) {
+    dwelling = order.address_verdict as Dwelling;
+    dwellingSource = 'manual';
+  }
 
   const unitStatus: UnitStatus = unitStatusFromValidation(result, order.address_line2);
 
@@ -204,6 +218,14 @@ Deno.serve(async (req: Request) => {
       areaType = llm.area_type;
       if (!areaType) {
         areaTypeError = 'The model could not tell the area type for this address.';
+      }
+      // Fill the building type only where nothing better exists. Precedence is
+      // manual > google > model > sync-guess, and each is recorded as what it
+      // is — the card styles a model reading differently from a postal
+      // authority's record, so an operator can tell them apart.
+      if (!googleDwelling && !operatorSet && llm.dwelling) {
+        dwelling = llm.dwelling;
+        dwellingSource = 'model';
       }
       // The plausibility half is only USED to break a tie Google couldn't:
       // Google stays authoritative whenever it returned a real granularity.
@@ -305,6 +327,9 @@ type Judgement = {
   verdict: 'plausible' | 'implausible' | 'unknown';
   inferred_postal: string | null;
   area_type: AreaType | null;
+  /** The building the model named, already mapped onto our vocabulary. null
+   *  when it said "unknown" or something we don't recognise. */
+  dwelling: Dwelling | null;
   notes: string;
 };
 
@@ -320,10 +345,11 @@ function buildPrompt(addr: {
     addr.country,
   ].filter(Boolean).join(', ');
 
-  return `Reply with ONLY a JSON object, no prose, with four fields:
+  return `Reply with ONLY a JSON object, no prose, with five fields:
 - "verdict": one of "plausible" (a real, deliverable place), "implausible" (contradictions, typos, or obviously fake), or "unknown" (you cannot tell).
 - "inferred_postal": the postal/ZIP code you would expect for this address, or null. Use the country's standard format (CA: A1A 1A1, US: 12345).
 - "area_type": classify the DELIVERY AREA as "urban" (dense city core or major-city neighbourhood), "suburban" (residential area around a city, or a mid-size town), or "rural" (countryside, village, or remote low-density area). Judge the actual neighbourhood, not the metro area it belongs to — a downtown high-rise is urban even in a small city. Use null ONLY if you genuinely cannot place the address.
+- "building_type": what kind of building stands at this address — one of "house" (a detached house, townhouse or duplex), "apartment" (a multi-unit residential building), "condo" (a condominium tower, typically with a concierge or loading dock), "business" (a commercial or office address), "po_box", or "unknown" if you genuinely cannot tell. Judge the building at this street address, not the neighbourhood around it.
 - "notes": one sentence explaining your judgment.
 
 Address as the customer entered it:
@@ -333,11 +359,11 @@ Customer-supplied postal: ${addr.postal ?? '(none)'}
 Country: ${addr.country}
 
 Examples:
-- "123 Main St, Toronto, ON M5V 2T6, CA" → {"verdict":"plausible","inferred_postal":"M5V 2T6","area_type":"urban","notes":"Standard downtown Toronto address with matching postal code."}
-- "925 Bute St, 21, Vancouver, BC V6E 1Y7, CA" → {"verdict":"plausible","inferred_postal":"V6E 1Y7","area_type":"urban","notes":"Apartment in the West End, a dense downtown Vancouver neighbourhood."}
-- "47 Maple Cres, Oakville, ON L6H 3R1, CA" → {"verdict":"plausible","inferred_postal":"L6H 3R1","area_type":"suburban","notes":"Residential street in a suburb west of Toronto."}
-- "PO Box 14, Whitehorse, YT Y1A 0C4, CA" → {"verdict":"plausible","inferred_postal":"Y1A 0C4","area_type":"rural","notes":"Valid Yukon PO box with correct Y1A prefix; remote territory."}
-- "999 Elm, Springfield, ON 99999 9X9, CA" → {"verdict":"implausible","inferred_postal":null,"area_type":null,"notes":"Postal code does not match Canadian format."}`;
+- "123 Main St, Toronto, ON M5V 2T6, CA" → {"verdict":"plausible","inferred_postal":"M5V 2T6","area_type":"urban","building_type":"condo","notes":"Standard downtown Toronto address; M5V is dense condo towers."}
+- "925 Bute St, 21, Vancouver, BC V6E 1Y7, CA" → {"verdict":"plausible","inferred_postal":"V6E 1Y7","area_type":"urban","building_type":"apartment","notes":"Unit 21 in a West End apartment building, a dense downtown Vancouver neighbourhood."}
+- "47 Maple Cres, Oakville, ON L6H 3R1, CA" → {"verdict":"plausible","inferred_postal":"L6H 3R1","area_type":"suburban","building_type":"house","notes":"Residential street of detached houses in a suburb west of Toronto."}
+- "PO Box 14, Whitehorse, YT Y1A 0C4, CA" → {"verdict":"plausible","inferred_postal":"Y1A 0C4","area_type":"rural","building_type":"po_box","notes":"Valid Yukon PO box with correct Y1A prefix; remote territory."}
+- "999 Elm, Springfield, ON 99999 9X9, CA" → {"verdict":"implausible","inferred_postal":null,"area_type":null,"building_type":"unknown","notes":"Postal code does not match Canadian format."}`;
 }
 
 /** Tries each configured provider in order. A provider that errors (HTTP,
@@ -429,6 +455,7 @@ export function parseJudgement(reply: string, label = 'Model'): Judgement {
     verdict,
     inferred_postal: postal,
     area_type,
+    dwelling: dwellingFromModelLabel(typeof p.building_type === 'string' ? p.building_type : null),
     notes: typeof p.notes === 'string' && p.notes.trim() ? p.notes.trim() : '(no notes)',
   };
 }
