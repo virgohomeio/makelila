@@ -30,13 +30,25 @@ compact chip on the order row, showing a one-line verdict:
    on every run. `gmail_sync_state` is empty and zero `service_tickets` have
    `source='gmail'`. Enabling it is a Google Workspace admin task, not code.
 2. **Quo is in the database but 5 weeks stale.** Newest `ticket_messages.sent_at`
-   is 2026-08-05; the live Quo inbox has continuous traffic since. The cron
-   fires but `net._http_response.status_code` is null — the run times out.
-   Cause: `fetchMessagesForConversation` re-pulls every active conversation's
-   entire history (up to 1,000 messages, no `createdAfter` filter) on every
-   5-minute run, with no wall-clock budget. Because `since` is derived from
-   `max(last_message_at)` and the run never commits a full pass, the watermark
-   can never advance — a permanent wedge.
+   is 2026-08-05; the live Quo inbox has continuous traffic since.
+
+   *Initial reading (wrong):* the cron's `net._http_response.status_code` is
+   null, so the run was timing out and never committing a full pass.
+
+   *Actual cause, found by invoking the function with an explicit
+   `timeout_milliseconds := 240000`:* OpenPhone stopped accepting the bracketed
+   `participants[]` query param on `/v1/messages` and answers
+   `400 /participants: Expected array, /participants: Expected required
+   property`. Conversation *listing* still worked, so every run reported
+   HTTP 200 with `conversations_seen: 59` and a `messages_added: 0` — the 400
+   buried in a per-conversation `error` field, with `result.ok` hardcoded to
+   `true`. Nothing watched that field.
+
+   The null `status_code` was a red herring: `public.invoke_edge_function`
+   calls `net.http_post` with no `timeout_milliseconds`, so every cron'd
+   function takes pg_net's 5-second client-side default and records
+   `timed_out: true`. That bounds what the *database* waits for, not what the
+   function does.
 3. **The browser cannot read either source.** The app is React + Supabase; the
    assessment must be computed server-side and stored.
 
@@ -106,7 +118,14 @@ RLS: internal profiles read; service role writes.
 
 ### 3. Quo sync repair
 
-Three changes to `sync-quo-tickets`, minimum needed to unwedge it:
+The fix that actually restores imports:
+
+- Send a repeated `participants` param instead of `participants[]`.
+- A run that sees conversations and imports no messages reports `ok: false`,
+  so the next upstream break surfaces in the same week it happens.
+
+Kept as independent robustness (they were not the cause, but the reasoning
+behind each still holds):
 
 - Pass `createdAfter` (the watermark minus a 1-day overlap) to `/v1/messages`,
   so a conversation's whole history is not re-pulled every run.
@@ -114,6 +133,13 @@ Three changes to `sync-quo-tickets`, minimum needed to unwedge it:
   per-conversation progress is already committed.
 - Process conversations oldest-activity-first so each partial run advances the
   watermark instead of re-treading the same head of the list.
+
+The catch-up run after the fix: 59 conversations, 9 tickets created, 44
+appended, **377 messages added**, `partial: false`.
+
+The sweep's own cron therefore spells out `net.http_post(... timeout_
+milliseconds := 240000)` rather than using `public.invoke_edge_function` —
+five seconds does not cover a sweep that calls a model.
 
 ### 4. Frontend
 
@@ -134,11 +160,20 @@ Three changes to `sync-quo-tickets`, minimum needed to unwedge it:
 | loading | muted skeleton line |
 | `no_contact` | green · "Clear to ship — no support contact on file" |
 | `clear` | green · headline |
-| `unclear` | amber · headline + concern chips + ≤2 dated excerpts + Re-check |
+| `unclear` | amber · label + reason + concern chips + ≤2 dated excerpts + Re-check |
 | `error` / never assessed | muted · "Not yet assessed" + Re-check |
 
 Every state carries the channel footnote, e.g.
 `Scanned: Quo (to Sep 9) · Support email not connected`.
+
+The verdict phrase is fixed per verdict and applied in presentation
+(`VERDICT_LABEL`), with the model's own sentence rendered beneath it as detail.
+The first sweep over real orders had the model expressing one conclusion many
+ways — "No shipping obstacles identified", "Routine post-delivery check-in",
+"No shipping concerns identified in support history" — none of which is the
+phrase an operator scans for. Doing this in the UI rather than by instructing
+the model more firmly means it holds even when the model ignores the
+instruction.
 
 ## Testing
 
