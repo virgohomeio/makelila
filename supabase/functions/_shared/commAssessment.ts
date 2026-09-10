@@ -102,6 +102,38 @@ export function emailKey(raw: string | null | undefined): string | null {
   return trimmed.includes('@') ? trimmed : null;
 }
 
+// ============================================================ Who is "us"
+//
+// VCycene replies to customers from two domains: virgohome.io (Google
+// Workspace) and lilacomposter.com (Microsoft 365). Both appear as senders in
+// the same thread — a customer writes to support@lilacomposter.com and
+// reina@virgohome.io answers.
+
+export const DEFAULT_INTERNAL_DOMAINS = ['virgohome.io', 'lilacomposter.com'];
+
+/** True when a message came from the team rather than the customer.
+ *
+ *  This is the single most consequential field in the whole indicator: it is
+ *  what separates "the customer asked for a refund" from "we offered a
+ *  refund". Get it wrong and the model reads support's own words back as the
+ *  customer's, which turns routine helpfulness into a shipping block. A
+ *  one-domain test silently mislabels every reply sent from the other
+ *  domain, so the check takes the full list. */
+export function isInternalSender(
+  senderEmail: string | null | undefined,
+  opts: { domains?: string[]; mailbox?: string | null } = {},
+): boolean {
+  const email = (senderEmail ?? '').trim().toLowerCase();
+  if (!email) return false;
+  const mailbox = (opts.mailbox ?? '').trim().toLowerCase();
+  if (mailbox && email === mailbox) return true;
+  const domains = opts.domains ?? DEFAULT_INTERNAL_DOMAINS;
+  return domains
+    .map(d => d.trim().toLowerCase().replace(/^@/, ''))
+    .filter(Boolean)
+    .some(d => email.endsWith(`@${d}`));
+}
+
 // ============================================================ Message selection
 
 /** The newest `max` messages inside `windowDays`, returned oldest-first.

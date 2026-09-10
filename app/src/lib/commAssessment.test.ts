@@ -11,6 +11,8 @@ import {
   buildTranscript,
   commDetail,
   VERDICT_LABEL,
+  isInternalSender,
+  DEFAULT_INTERNAL_DOMAINS,
   CONCERN_LABELS,
   type CommMessage,
   type ChannelsScanned,
@@ -229,5 +231,32 @@ describe('VERDICT_LABEL + commDetail', () => {
 
   it('has no detail to show before anything has been assessed', () => {
     expect(commDetail(null, null)).toBeNull();
+  });
+});
+
+describe('isInternalSender', () => {
+  it('recognises both domains the team replies from', () => {
+    // The bug this guards: a one-domain check filed every lilacomposter.com
+    // reply as if the customer had written it.
+    expect(isInternalSender('reina@virgohome.io')).toBe(true);
+    expect(isInternalSender('support@lilacomposter.com')).toBe(true);
+    expect(DEFAULT_INTERNAL_DOMAINS).toContain('lilacomposter.com');
+  });
+
+  it('treats a real customer as external even on a lookalike domain', () => {
+    expect(isInternalSender('doug@gmail.com')).toBe(false);
+    expect(isInternalSender('someone@notvirgohome.io')).toBe(false);
+    expect(isInternalSender('virgohome.io@evil.com')).toBe(false);
+  });
+
+  it('counts the synced mailbox itself as internal whatever its domain', () => {
+    expect(isInternalSender('help@thirdparty.com', { mailbox: 'help@thirdparty.com' })).toBe(true);
+  });
+
+  it('is case- and @-prefix insensitive, and handles a missing sender', () => {
+    expect(isInternalSender('Reina@VirgoHome.IO')).toBe(true);
+    expect(isInternalSender('a@x.com', { domains: ['@x.com'] })).toBe(true);
+    expect(isInternalSender(null)).toBe(false);
+    expect(isInternalSender('')).toBe(false);
   });
 });
