@@ -20,6 +20,9 @@ import { supabase } from './supabase';
  *
  *    'order'    — THIS order was refunded. Shipping it is a second loss.
  *                 enqueueForFulfillment refuses it.
+ *    'ref'      — a refund names this order's number but was filed by someone
+ *                 who does not look like this customer. A typed number is not
+ *                 identity, so this warns and never blocks.
  *    'customer' — a DIFFERENT order of theirs was refunded. Often legitimate
  *                 (they bought again), so this warns and never blocks.
  */
@@ -30,6 +33,9 @@ export type RefundMark = {
   /** The FK, when a caller managed to resolve one. Null on all 18 live rows. */
   order_id: string | null;
   customer_email: string | null;
+  /** Who the refund was filed for. The only identity signal shared with an
+   *  order when the two rows carry different email addresses. */
+  customer_name: string | null;
   /** The linked return's original_order_ref — free text off a public form. */
   order_ref: string | null;
   refunded_at: string | null;
@@ -40,13 +46,21 @@ export type FlaggableOrder = {
   id: string;
   order_ref: string;
   customer_email: string | null;
+  customer_name: string | null;
 };
 
 type ResolvableOrder = FlaggableOrder & { kind?: string | null };
 
 export type RefundFlag = {
-  /** 'order' = this very order was refunded; 'customer' = another of theirs was. */
-  level: 'order' | 'customer';
+  /** 'order'    — this very order was refunded.
+   *  'ref'      — a refund names this order's number, but was filed by someone
+   *               who does not look like this customer. Cannot be trusted
+   *               either way, so it warns and never blocks.
+   *  'customer' — a different order of theirs was refunded. */
+  level: 'order' | 'ref' | 'customer';
+  /** Who the refund was filed for — shown on a 'ref' warning, where the whole
+   *  point is that it is not obviously this order's customer. */
+  refundCustomer: string | null;
   /** True once the payout actually happened; false while the card is in review. */
   settled: boolean;
   refundId: string;
@@ -69,26 +83,55 @@ function bearsOnShipping(status: string): boolean {
 }
 
 /** Reduce a human order reference to something comparable. Shopify writes
- *  "#1134", the invoice importer writes "INV-1134", and customers type "1134"
- *  into the return form — all one order. Replacement refs ("R-0043") have no
- *  numeric identity to strip, so they normalise by case alone.
+ *  "#1134" and customers type "1134" into the return form — one order, so the
+ *  hash goes. Everything else is kept.
+ *
+ *  In particular INV- is NOT stripped. It reads like a prefix on the same
+ *  number, but the invoice importer numbers its own series: all 14 INV- orders
+ *  in production collide with a #-series order belonging to a DIFFERENT
+ *  customer (INV-1174 is the Amaros, #1174 is Joseph Thavundayil). Stripping it
+ *  merged every one of those pairs.
  *
  *  Returns '' for anything that names no order, and '' never matches. */
 export function normaliseOrderRef(ref: string | null | undefined): string {
   const trimmed = (ref ?? '').trim().toLowerCase();
   if (!trimmed) return '';
-  const bare = trimmed.replace(/^#/, '').replace(/^inv-/, '').trim();
+  const bare = trimmed.replace(/^#/, '').trim();
   // Free text from the return form ("I don't know, please ask Edward") is not
-  // a reference. Accept only a ref-shaped token.
-  if (!/^[a-z]*-?\d+$/.test(bare)) return '';
+  // a reference. Accept only a ref-shaped token: letters and hyphens, then
+  // digits — '1216', 'r-0043', 'inv-1174', 'inv-r1205'.
+  if (!/^[a-z-]*\d+$/.test(bare)) return '';
   return bare;
 }
 
-function sameOrder(order: FlaggableOrder, mark: RefundMark): boolean {
-  if (mark.order_id && mark.order_id === order.id) return true;
-  const a = normaliseOrderRef(order.order_ref);
-  const b = normaliseOrderRef(mark.order_ref);
-  return a !== '' && a === b;
+const HONORIFICS = new Set(['mr', 'mrs', 'ms', 'miss', 'dr', 'prof', 'and']);
+
+/** The words in a name that carry identity. Punctuation and joint-account
+ *  scaffolding go ("Chad & Sarah Lockhart Anne" → chad, sarah, lockhart, anne),
+ *  as do honorifics and initials. */
+function nameTokens(name: string | null | undefined): Set<string> {
+  return new Set(
+    (name ?? '')
+      .toLowerCase()
+      .replace(/[^a-z\s]/g, ' ')
+      .split(/\s+/)
+      .filter(t => t.length > 1 && !HONORIFICS.has(t)),
+  );
+}
+
+/** Do two names look like the same person? Two shared words, not one: half the
+ *  order book shares a first name with somebody ('Michael Haywood' /
+ *  'Michael Madigan' are two customers who both hold a ...174-shaped ref).
+ *  Two is enough for the real pairs — 'Brent Neave' twice over, 'Chad Lockhart'
+ *  inside 'Chad & Sarah Lockhart Anne'.
+ *
+ *  Deliberately used ONLY to corroborate a ref match, never to find one. */
+function namesAgree(a: string | null | undefined, b: string | null | undefined): boolean {
+  const left = nameTokens(a);
+  if (left.size === 0) return false;
+  let shared = 0;
+  for (const token of nameTokens(b)) if (left.has(token)) shared++;
+  return shared >= 2;
 }
 
 function sameCustomer(order: FlaggableOrder, mark: RefundMark): boolean {
@@ -97,15 +140,36 @@ function sameCustomer(order: FlaggableOrder, mark: RefundMark): boolean {
   return a !== '' && a === b;
 }
 
+/** How strongly a refund card points at THIS order.
+ *
+ *  The FK is a decision someone made and is taken at face value. A human ref is
+ *  a string typed on a public form, and a bare number is not identity: Cheryl
+ *  Lemieux's return said '1216', which six weeks later became Raymond Keetch's
+ *  order number. So a ref match only rises to 'order' when the customer
+ *  corroborates it — same email, or a name that agrees. */
+function orderMatchLevel(order: FlaggableOrder, mark: RefundMark): 'order' | 'ref' | null {
+  if (mark.order_id) return mark.order_id === order.id ? 'order' : null;
+  const a = normaliseOrderRef(order.order_ref);
+  if (a === '' || a !== normaliseOrderRef(mark.order_ref)) return null;
+  return sameCustomer(order, mark) || namesAgree(order.customer_name, mark.customer_name)
+    ? 'order'
+    : 'ref';
+}
+
 function toFlag(mark: RefundMark, level: RefundFlag['level']): RefundFlag {
   return {
     level,
+    refundCustomer: mark.customer_name,
     settled: mark.status === 'refunded' || mark.refunded_at != null,
     refundId: mark.id,
     refundedAt: mark.refunded_at,
     amountUsd: mark.refund_amount_usd,
   };
 }
+
+/** Strongest first. 'ref' outranks 'customer': it points at this very order
+ *  number, where 'customer' is about a different order altogether. */
+const LEVEL_RANK: Record<RefundFlag['level'], number> = { order: 2, ref: 1, customer: 0 };
 
 /** The strongest refund signal against one order, or null if it is clean.
  *  Order-level beats customer-level; within a level, a settled refund beats a
@@ -114,12 +178,11 @@ export function refundFlagForOrder(order: FlaggableOrder, marks: RefundMark[]): 
   let best: RefundFlag | null = null;
   for (const mark of marks) {
     if (!bearsOnShipping(mark.status)) continue;
-    const level: RefundFlag['level'] | null =
-      sameOrder(order, mark) ? 'order' : sameCustomer(order, mark) ? 'customer' : null;
+    const level = orderMatchLevel(order, mark) ?? (sameCustomer(order, mark) ? 'customer' : null);
     if (!level) continue;
     const flag = toFlag(mark, level);
     if (!best) { best = flag; continue; }
-    if (best.level === 'customer' && flag.level === 'order') { best = flag; continue; }
+    if (LEVEL_RANK[flag.level] > LEVEL_RANK[best.level]) { best = flag; continue; }
     if (best.level === flag.level && !best.settled && flag.settled) best = flag;
   }
   return best;
@@ -139,7 +202,7 @@ export function indexRefundFlags(
   return index;
 }
 
-const MARK_COLUMNS = 'id, status, order_id, customer_email, refunded_at, refund_amount_usd, returns(original_order_ref)';
+const MARK_COLUMNS = 'id, status, order_id, customer_email, customer_name, refunded_at, refund_amount_usd, returns(original_order_ref)';
 
 type MarkQueryRow = Omit<RefundMark, 'order_ref'> & {
   returns: { original_order_ref: string | null } | { original_order_ref: string | null }[] | null;
@@ -152,6 +215,7 @@ function toMark(row: MarkQueryRow): RefundMark {
     status: row.status,
     order_id: row.order_id,
     customer_email: row.customer_email,
+    customer_name: row.customer_name,
     order_ref: linked?.original_order_ref ?? null,
     refunded_at: row.refunded_at,
     refund_amount_usd: row.refund_amount_usd,
@@ -174,7 +238,7 @@ export async function fetchRefundMarks(): Promise<RefundMark[]> {
 export async function refundFlagForOrderId(orderId: string): Promise<RefundFlag | null> {
   const { data: order, error } = await supabase
     .from('orders')
-    .select('id, order_ref, customer_email')
+    .select('id, order_ref, customer_email, customer_name')
     .eq('id', orderId)
     .single();
   if (error || !order) return null;
@@ -276,12 +340,18 @@ export function useRefundMarks(): { marks: RefundMark[]; loading: boolean } {
 /** The one-line warning an operator reads on a badge or in a blocked action. */
 export function refundFlagLabel(flag: RefundFlag): string {
   if (flag.level === 'order') return flag.settled ? 'REFUNDED' : 'REFUND PENDING';
+  if (flag.level === 'ref') return 'CHECK REFUND';
   return flag.settled ? 'CUSTOMER REFUNDED' : 'REFUND OPEN';
 }
 
 export function refundFlagTitle(flag: RefundFlag): string {
   const amount = flag.amountUsd != null ? `$${Number(flag.amountUsd).toFixed(2)}` : 'a refund';
   const when = flag.refundedAt ? ` on ${flag.refundedAt.slice(0, 10)}` : '';
+  if (flag.level === 'ref') {
+    const who = flag.refundCustomer ?? 'another customer';
+    return `A refund for ${who} (${amount}${when}) names this order number, but was filed `
+      + `against a different customer. Check which order it was really for before shipping.`;
+  }
   if (flag.level === 'order') {
     return flag.settled
       ? `This order was refunded — ${amount} paid back${when}. Do not ship it.`

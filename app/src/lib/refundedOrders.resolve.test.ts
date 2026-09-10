@@ -36,15 +36,24 @@ describe('resolveRefundOrderId', () => {
     expect(await resolveRefundOrderId('lisa@example.com', '1098')).toBe('o-1098');
   });
 
-  it('matches across the ref spellings the three importers use', async () => {
-    ordersTable([{ id: 'o-1', order_ref: 'INV-1169', customer_email: 's@example.com' }]);
-    expect(await resolveRefundOrderId('s@example.com', '#1169')).toBe('o-1');
+  it('matches across the ref spellings Shopify and the return form use', async () => {
+    ordersTable([{ id: 'o-1', order_ref: '#1169', customer_email: 's@example.com' }]);
+    expect(await resolveRefundOrderId('s@example.com', '1169')).toBe('o-1');
+  });
+
+  it('will not pin a #-series refund to the INV- order of the same number', async () => {
+    // INV-1169 is Scott Destephanis and #1169 is someone else entirely; the
+    // two series share nothing but digits. Every one of the 14 INV- orders in
+    // production collides like this.
+    ordersTable([{ id: 'o-inv', order_ref: 'INV-1169', customer_email: 'scott@example.com' }]);
+    expect(await resolveRefundOrderId('scott@example.com', '#1169')).toBeNull();
+    expect(await resolveRefundOrderId('scott@example.com', 'INV-1169')).toBe('o-inv');
   });
 
   it('narrows a colliding ref by the customer', async () => {
     ordersTable([
       { id: 'o-a', order_ref: '#1134', customer_email: 'a@example.com' },
-      { id: 'o-b', order_ref: 'INV-1134', customer_email: 'b@example.com' },
+      { id: 'o-b', order_ref: '1134', customer_email: 'b@example.com' },
     ]);
     expect(await resolveRefundOrderId('b@example.com', '1134')).toBe('o-b');
   });
@@ -52,7 +61,7 @@ describe('resolveRefundOrderId', () => {
   it('refuses to guess when a ref is ambiguous and there is no email to narrow by', async () => {
     ordersTable([
       { id: 'o-a', order_ref: '#1134', customer_email: 'a@example.com' },
-      { id: 'o-b', order_ref: 'INV-1134', customer_email: 'b@example.com' },
+      { id: 'o-b', order_ref: '1134', customer_email: 'b@example.com' },
     ]);
     expect(await resolveRefundOrderId(null, '1134')).toBeNull();
   });
