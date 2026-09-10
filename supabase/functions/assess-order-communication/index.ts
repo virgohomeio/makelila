@@ -138,11 +138,12 @@ async function handle(req: Request): Promise<Response> {
   if (orders.length === 0) return json({ assessed: 0, results: [], reason: 'no matching orders' }, 200);
 
   const channels = await loadChannelStatus(admin);
+  const tickets = await loadTicketIndex(admin);
 
   const budget = { left: body.order_id ? 1 : LLM_BUDGET_PER_RUN };
   const results: OrderOutcome[] = [];
   for (const order of orders) {
-    results.push(await assessOne(admin, order, channels, providers, budget, { force: !!body.order_id }));
+    results.push(await assessOne(admin, order, tickets, channels, providers, budget, { force: !!body.order_id }));
   }
 
   return json({
@@ -201,58 +202,79 @@ async function loadChannelStatus(admin: SupabaseClient): Promise<ChannelsScanned
   return { quo: await forSource(['quo']), email: await forSource(['gmail']) };
 }
 
-/** Every message this customer has exchanged with support, across both
- *  channels, identified by customer_id / email / phone — whichever of the three
- *  the ticket happens to carry. Shopify and Quo populate different subsets, so
- *  matching on only one of them loses roughly half the history. */
-async function loadMessages(admin: SupabaseClient, order: OrderRow): Promise<CommMessage[]> {
+/** Every support ticket, indexed by each of the three things that identify a
+ *  person. One fetch per invocation, reused for every order in the sweep — the
+ *  table holds a few hundred rows, and scanning it once per order instead
+ *  meant re-reading the same data 150 times a run. */
+type TicketIndex = {
+  byCustomerId: Map<string, TicketRow[]>;
+  byEmail: Map<string, TicketRow[]>;
+  byPhone: Map<string, TicketRow[]>;
+  byId: Map<string, TicketRow>;
+};
+
+async function loadTicketIndex(admin: SupabaseClient): Promise<TicketIndex> {
+  const { data, error } = await admin
+    .from('service_tickets')
+    .select('id, source, customer_id, customer_email, customer_phone')
+    .limit(10000);
+  if (error) throw new Error(`service_tickets: ${error.message}`);
+
+  const index: TicketIndex = {
+    byCustomerId: new Map(), byEmail: new Map(), byPhone: new Map(), byId: new Map(),
+  };
+  const push = (map: Map<string, TicketRow[]>, key: string | null, t: TicketRow) => {
+    if (!key) return;
+    const list = map.get(key);
+    if (list) list.push(t); else map.set(key, [t]);
+  };
+
+  for (const t of (data ?? []) as TicketRow[]) {
+    index.byId.set(t.id, t);
+    push(index.byCustomerId, t.customer_id, t);
+    push(index.byEmail, emailKey(t.customer_email), t);
+    // Phone is keyed on last-ten-digits rather than compared in SQL: the column
+    // holds every format from "+14165550134" to "(416) 555-0134", and only that
+    // reduction joins them. A LIKE would miss the punctuated forms, which are
+    // most of them.
+    push(index.byPhone, phoneKey(t.customer_phone), t);
+  }
+  return index;
+}
+
+/** This order's customer's tickets, found by customer_id, email or phone —
+ *  whichever the ticket happens to carry. Shopify and Quo populate different
+ *  subsets of the three, so matching on only one loses much of the history. */
+function ticketsForOrder(index: TicketIndex, order: OrderRow): TicketRow[] {
+  const found = new Map<string, TicketRow>();
+  const add = (list: TicketRow[] | undefined) => {
+    for (const t of list ?? []) found.set(t.id, t);
+  };
+  if (order.customer_id) add(index.byCustomerId.get(order.customer_id));
   const email = emailKey(order.customer_email);
+  if (email) add(index.byEmail.get(email));
   const phone = phoneKey(order.customer_phone);
+  if (phone) add(index.byPhone.get(phone));
+  return [...found.values()];
+}
 
-  const filters: string[] = [];
-  if (order.customer_id) filters.push(`customer_id.eq.${order.customer_id}`);
-  if (email) filters.push(`customer_email.ilike.${email}`);
-  if (filters.length === 0 && !phone) return [];
+async function loadMessages(
+  admin: SupabaseClient,
+  order: OrderRow,
+  index: TicketIndex,
+): Promise<CommMessage[]> {
+  const tickets = ticketsForOrder(index, order);
+  if (tickets.length === 0) return [];
+  const byId = new Map(tickets.map(t => [t.id, t]));
 
-  let tickets: TicketRow[] = [];
-  if (filters.length > 0) {
-    const { data, error } = await admin
-      .from('service_tickets')
-      .select('id, source, customer_id, customer_email, customer_phone')
-      .or(filters.join(','))
-      .limit(200);
-    if (error) throw new Error(`tickets by id/email: ${error.message}`);
-    tickets = (data ?? []) as TicketRow[];
-  }
-
-  // Phone is matched in TypeScript rather than SQL: the column holds every
-  // format from "+14165550134" to "(416) 555-0134", and only last-ten-digits
-  // comparison joins them. A LIKE on the last ten would miss the punctuated
-  // forms, which is most of them.
-  if (phone) {
-    const { data, error } = await admin
-      .from('service_tickets')
-      .select('id, source, customer_id, customer_email, customer_phone')
-      .not('customer_phone', 'is', null)
-      .limit(2000);
-    if (error) throw new Error(`tickets by phone: ${error.message}`);
-    for (const t of (data ?? []) as TicketRow[]) {
-      if (phoneKey(t.customer_phone) === phone) tickets.push(t);
-    }
-  }
-
-  const byId = new Map<string, TicketRow>();
-  for (const t of tickets) byId.set(t.id, t);
-  if (byId.size === 0) return [];
-
-  const { data: msgs, error: msgErr } = await admin
+  const { data: msgs, error } = await admin
     .from('ticket_messages')
     .select('id, ticket_id, direction, sent_at, body_text, snippet')
     .in('ticket_id', [...byId.keys()])
     .not('sent_at', 'is', null)
     .order('sent_at', { ascending: false })
     .limit(400);
-  if (msgErr) throw new Error(`ticket_messages: ${msgErr.message}`);
+  if (error) throw new Error(`ticket_messages: ${error.message}`);
 
   return ((msgs ?? []) as MessageRow[]).map(m => ({
     id: m.id,
@@ -269,13 +291,14 @@ async function loadMessages(admin: SupabaseClient, order: OrderRow): Promise<Com
 async function assessOne(
   admin: SupabaseClient,
   order: OrderRow,
+  index: TicketIndex,
   channels: ChannelsScanned,
   providers: LlmProvider[],
   budget: { left: number },
   opts: { force: boolean },
 ): Promise<OrderOutcome> {
   try {
-    const all = await loadMessages(admin, order);
+    const all = await loadMessages(admin, order, index);
     const msgs = selectMessages(all, { now: new Date(), windowDays: WINDOW_DAYS, max: MAX_MESSAGES });
 
     const scanned: ChannelsScanned = {
