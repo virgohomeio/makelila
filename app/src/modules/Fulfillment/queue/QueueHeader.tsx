@@ -5,10 +5,7 @@ import {
 } from '../../../lib/fulfillment';
 import { orderDue, type Order } from '../../../lib/orders';
 import { replacementItemsLabel } from '../../../lib/replacementTags';
-import { useAuth } from '../../../lib/auth';
 import styles from '../Fulfillment.module.css';
-
-const ADMIN_EMAILS = ['huayi@virgohome.io'] as const;
 
 /** Which of the two "this order leaves the queue" panels is open, if any. */
 type ExitPanel = 'cancel' | 'moveBack' | null;
@@ -17,6 +14,7 @@ export function QueueHeader({
   row,
   order,
   onRemoved,
+  onStepChanged,
 }: {
   row: FulfillmentQueueRow;
   order: {
@@ -29,15 +27,16 @@ export function QueueHeader({
   /** Called once the row is gone from the queue, with a line to show in the
    *  now-empty detail pane (the row itself disappears via realtime). */
   onRemoved?: (message: string) => void;
+  /** Called after a step rewind is written, so the board can re-read rather
+   *  than trusting the realtime socket to still be up. */
+  onStepChanged?: () => void;
 }) {
   const due = orderDue(order.placed_at ?? order.created_at);
   const STEP_LABELS = ['', 'Assign', 'Test', 'Label', 'Dock', 'Email', 'Fulfilled'];
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const { user } = useAuth();
 
   const fulfilled = row.step === 6;
-  const isAdmin = !!user?.email && ADMIN_EMAILS.includes(user.email as typeof ADMIN_EMAILS[number]);
 
   const handleTogglePriority = async () => {
     setBusy(true); setError(null);
@@ -80,17 +79,14 @@ export function QueueHeader({
     }
   };
 
-  // Normal rewind available on steps 2-5. Step 6 (Fulfilled) can only be
-  // rewound by admins (see ADMIN_EMAILS) — going back clears email_sent_at
-  // and fulfilled_at so the order can be re-sent.
-  const canGoBack =
-    (row.step > 1 && row.step < 6) ||
-    (row.step === 6 && isAdmin);
+  // Any step but the first can be rewound, by anyone on the team. Step 6 was
+  // gated to a single hardcoded email address, which left everyone else unable
+  // to undo a mis-click on the one step where a mis-click actually reaches the
+  // customer. The confirm below still spells out what reverting clears.
+  const canGoBack = row.step > 1;
   const backTitle = row.step === 1
     ? 'No previous step — already at Assign'
-    : row.step === 6 && !isAdmin
-      ? 'Only Huayi can revert a fulfilled order'
-      : `Back to ${STEP_LABELS[row.step - 1]}`;
+    : `Back to ${STEP_LABELS[row.step - 1]}`;
   const handleBack = async () => {
     if (!canGoBack) return;
     const prevLabel = STEP_LABELS[row.step - 1];
@@ -99,7 +95,14 @@ export function QueueHeader({
       : `Step back to "${prevLabel}"? Data already saved for later steps is kept.`;
     if (!window.confirm(confirmMsg)) return;
     setBusy(true); setError(null);
-    try { await goBackStep(row.id, row.step); }
+    try {
+      await goBackStep(row.id, row.step);
+      // Don't wait on the realtime socket to show the move. If it has dropped,
+      // the header would keep rendering the old step and the next click would
+      // re-send the same rewind — which is exactly how #1252 got four identical
+      // 5→4 entries in the log while the operator saw nothing happen.
+      onStepChanged?.();
+    }
     catch (e) { setError((e as Error).message); }
     finally { setBusy(false); }
   };

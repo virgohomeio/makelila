@@ -28,7 +28,7 @@ vi.mock('../../../lib/auth', () => ({
 }));
 
 import { QueueHeader } from '../queue/QueueHeader';
-import type { FulfillmentQueueRow } from '../../../lib/fulfillment';
+import { goBackStep, type FulfillmentQueueRow } from '../../../lib/fulfillment';
 
 const row = {
   id: 'q-1', order_id: 'o-1', step: 1, assigned_serial: '00019',
@@ -107,5 +107,64 @@ describe('QueueHeader exit actions', () => {
 
     await waitFor(() => expect(screen.getByText(/no permission/i)).toBeTruthy());
     expect(onRemoved).not.toHaveBeenCalled();
+  });
+});
+
+// The "← Back" rewind. Reported from prod on 2026-09-10: an operator could not
+// walk order #1252 back a step. Two separate causes met here — the board went
+// stale (covered in lib/fulfillment.queueRefresh.test.ts) and a fulfilled order
+// could only be rewound by one hardcoded email address. Every order has to be
+// able to go back to the previous step, whoever is holding the mouse.
+describe('QueueHeader step rewind', () => {
+  // Exact: /back/i would also catch "Move Back to Orders".
+  const backBtn = () => screen.getByRole('button', { name: '← Back' });
+
+  beforeEach(() => {
+    vi.mocked(goBackStep).mockClear();
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+  });
+
+  it('is disabled at step 1 — there is no earlier step to go to', () => {
+    render(<QueueHeader row={row} order={order} />);
+    expect(backBtn()).toHaveProperty('disabled', true);
+    expect(backBtn().getAttribute('title')).toMatch(/no previous step/i);
+  });
+
+  it('rewinds a mid-queue step for any operator', async () => {
+    const atDock = { ...row, step: 4 } as FulfillmentQueueRow;
+    render(<QueueHeader row={atDock} order={order} />);
+    expect(backBtn()).toHaveProperty('disabled', false);
+    fireEvent.click(backBtn());
+    await waitFor(() => expect(goBackStep).toHaveBeenCalledWith('q-1', 4));
+  });
+
+  // reina@virgohome.io is the mocked operator above and is not an admin.
+  it('rewinds a fulfilled order for a non-admin operator too', async () => {
+    const shipped = {
+      ...row, step: 6, fulfilled_at: '2026-09-08T00:00:00Z',
+      email_sent_at: '2026-09-08T00:00:00Z',
+    } as FulfillmentQueueRow;
+    render(<QueueHeader row={shipped} order={order} />);
+    expect(backBtn()).toHaveProperty('disabled', false);
+    fireEvent.click(backBtn());
+    await waitFor(() => expect(goBackStep).toHaveBeenCalledWith('q-1', 6));
+  });
+
+  it('asks the board to re-read once the rewind is written', async () => {
+    const onStepChanged = vi.fn();
+    const atDock = { ...row, step: 4 } as FulfillmentQueueRow;
+    render(<QueueHeader row={atDock} order={order} onStepChanged={onStepChanged} />);
+    fireEvent.click(backBtn());
+    await waitFor(() => expect(onStepChanged).toHaveBeenCalled());
+  });
+
+  it('leaves the board alone if the rewind failed', async () => {
+    const onStepChanged = vi.fn();
+    vi.mocked(goBackStep).mockRejectedValueOnce(new Error('rewind blocked'));
+    const atDock = { ...row, step: 4 } as FulfillmentQueueRow;
+    render(<QueueHeader row={atDock} order={order} onStepChanged={onStepChanged} />);
+    fireEvent.click(backBtn());
+    await waitFor(() => expect(screen.getByText(/rewind blocked/i)).toBeTruthy());
+    expect(onStepChanged).not.toHaveBeenCalled();
   });
 });

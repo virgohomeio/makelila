@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from './supabase';
 import { logAction } from './activityLog';
@@ -104,21 +104,31 @@ export function useFulfillmentQueue(): {
   ready: FulfillmentQueueRow[];
   fulfilled: FulfillmentQueueRow[];
   loading: boolean;
+  /** Re-read the queue from the DB. Call after a mutation whose result the
+   *  operator is about to act on again — see the rejoin note below. */
+  refresh: () => Promise<void>;
 } {
   const [cache, setCache] = useState<FulfillmentQueueRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const liveRef = useRef(true);
+
+  const refresh = useCallback(async () => {
+    const { data, error } = await supabase
+      .from('fulfillment_queue')
+      .select('*')
+      .order('due_date', { ascending: true });
+    if (!liveRef.current) return;
+    if (!error && data) setCache(data as FulfillmentQueueRow[]);
+  }, []);
 
   useEffect(() => {
+    liveRef.current = true;
     let channel: RealtimeChannel | null = null;
-    let cancelled = false;
+    let joined = false;
 
     (async () => {
-      const { data, error } = await supabase
-        .from('fulfillment_queue')
-        .select('*')
-        .order('due_date', { ascending: true });
-      if (cancelled) return;
-      if (!error && data) setCache(data as FulfillmentQueueRow[]);
+      await refresh();
+      if (!liveRef.current) return;
       setLoading(false);
 
       channel = supabase
@@ -141,18 +151,37 @@ export function useFulfillmentQueue(): {
             });
           },
         )
-        .subscribe();
+        // Every step move is written straight to the DB and nothing else here
+        // re-reads, so realtime is the board's only route to seeing it. When the
+        // socket drops, the cache freezes and the operator is left re-clicking an
+        // action that already landed (prod, 2026-09-10: order #1252 rewound 5→4
+        // four times in thirty seconds, all four writes landing, the step never
+        // moving). Re-read on each rejoin so the gap heals itself. The first join
+        // is skipped — the fetch above is current.
+        .subscribe((status) => {
+          if (status !== 'SUBSCRIBED') return;
+          if (!joined) { joined = true; return; }
+          void refresh();
+        });
     })();
 
-    return () => { cancelled = true; if (channel) void channel.unsubscribe(); };
-  }, []);
+    return () => {
+      liveRef.current = false;
+      // removeChannel, not unsubscribe: unsubscribe leaves the channel on the
+      // client, so remounting the board opens a second channel on the same
+      // topic, and that duplicate join is enough to take realtime down for the
+      // rest of the session.
+      if (channel) void supabase.removeChannel(channel);
+    };
+  }, [refresh]);
 
   return useMemo(() => ({
     all: cache,
     ready: cache.filter(r => r.step < 6),
     fulfilled: cache.filter(r => r.step === 6),
     loading,
-  }), [cache, loading]);
+    refresh,
+  }), [cache, loading, refresh]);
 }
 
 // --- useShelf ---

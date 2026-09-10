@@ -40,7 +40,7 @@ type Order = {
 };
 
 export default function Queue() {
-  const { ready, fulfilled, loading } = useFulfillmentQueue();
+  const { ready, fulfilled, loading, refresh } = useFulfillmentQueue();
   const { marks: refundMarks } = useRefundMarks();
   const { evidence: shippedEvidence } = useShippedEvidence();
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -157,6 +157,7 @@ export default function Queue() {
               row={selected}
               order={selectedOrder}
               onRemoved={message => { setNotice(message); setSelectedId(null); }}
+              onStepChanged={() => { void refresh(); }}
             />
             {shippedMarks.has(selected.id) ? (
               // Ahead of the pause banner: "we already sent this" outranks
