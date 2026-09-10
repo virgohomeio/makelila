@@ -326,7 +326,11 @@ async function syncPhoneNumber(
       result.messages_added += msgs.length; // individual rows inserted (dupes skipped by upsert)
     }
 
-    result.ok = true;
+    // Skipping every single conversation is a failure, not a quiet success.
+    // Reporting ok:true here is why the 2026-08-05 API break went unnoticed for
+    // five weeks: the cron kept returning 200 with a per-conversation error
+    // buried in the payload, and nothing was watching that field.
+    result.ok = !(result.conversations_seen > 0 && result.messages_added === 0 && !!result.error);
   } catch (err) {
     result.error = (err as Error).message;
   }
@@ -564,7 +568,13 @@ async function fetchMessagesForConversation(
   do {
     const url = new URL(`${OPENPHONE_BASE}/messages`);
     url.searchParams.set('phoneNumberId', phoneNumberId);
-    for (const p of otherParties) url.searchParams.append('participants[]', p);
+    // `participants`, repeated — NOT `participants[]`. OpenPhone stopped
+    // accepting the bracketed form and now reads it as a property literally
+    // named "participants[]", answering
+    // "/participants: Expected required property" with a 400. That break is
+    // what actually stopped this sync on 2026-08-05: conversation listing kept
+    // working, so every run still looked healthy while importing nothing.
+    for (const p of otherParties) url.searchParams.append('participants', p);
     url.searchParams.set('createdAfter', createdAfter);
     url.searchParams.set('maxResults', '100');
     if (pageToken) url.searchParams.set('pageToken', pageToken);
