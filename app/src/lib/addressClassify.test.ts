@@ -334,11 +334,39 @@ describe('dwellingFromModelLabel', () => {
     expect(dwellingFromModelLabel('rural route')).toBe('remote');
   });
 
+  // A model asked for one of six words answers with a phrase often enough that
+  // refusing phrases is the same as refusing to classify — which leaves the
+  // verdict at the sync-time regex, the failure this whole path exists to end.
+  it('reads a phrase for the word it contains', () => {
+    expect(dwellingFromModelLabel('single family home')).toBe('house');
+    expect(dwellingFromModelLabel('low-rise apartment building')).toBe('apt');
+    expect(dwellingFromModelLabel('a detached bungalow')).toBe('house');
+    expect(dwellingFromModelLabel('commercial / retail unit')).toBe('business');
+    expect(dwellingFromModelLabel('rural farmhouse')).toBe('remote');
+    expect(dwellingFromModelLabel('Post Office Box')).toBe('po_box');
+  });
+
+  // 'condo' wins over the house and apartment words it is routinely paired
+  // with — a condominium townhouse is a condo, and the delivery consequence
+  // (concierge, loading dock) is the condo's.
+  it('resolves the overlaps in a phrase to the more specific answer', () => {
+    expect(dwellingFromModelLabel('condominium townhouse')).toBe('condo');
+    expect(dwellingFromModelLabel('condo apartment')).toBe('condo');
+    expect(dwellingFromModelLabel('rural route farmhouse')).toBe('remote');
+  });
+
   // A reply we cannot read must leave the verdict where it was, not move it.
   it('returns null for unknown, empty or unrecognised answers', () => {
     expect(dwellingFromModelLabel('unknown')).toBeNull();
     expect(dwellingFromModelLabel('')).toBeNull();
     expect(dwellingFromModelLabel(null)).toBeNull();
-    expect(dwellingFromModelLabel('houseboat')).toBeNull();
+    expect(dwellingFromModelLabel('a windmill')).toBeNull();
+  });
+
+  // "unknown" has to beat the substring pass, or a hedged answer becomes a
+  // confident one.
+  it('never reads a hedge as a classification', () => {
+    expect(dwellingFromModelLabel('unknown')).toBeNull();
+    expect(dwellingFromModelLabel('unclear')).toBeNull();
   });
 });

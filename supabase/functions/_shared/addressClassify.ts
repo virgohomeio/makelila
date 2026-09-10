@@ -271,7 +271,15 @@ export function dwellingFromValidation(result: AVResult | null | undefined): Dwe
  *  exists; this fills the gap outside the US, where there is no USPS record
  *  type and a premise-level hit alone cannot tell a house from a walk-up. */
 export function dwellingFromModelLabel(label: string | null | undefined): Dwelling | null {
-  switch ((label ?? '').trim().toLowerCase().replace(/[\s-]+/g, '_')) {
+  const norm = (label ?? '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+  if (!norm) return null;
+
+  // "unknown" is an answer, and the answer is "leave the verdict alone". It has
+  // to be caught before the substring pass, or "unknown residential building"
+  // would read as a house.
+  if (norm === 'unknown' || norm === 'unclear' || norm === 'n_a' || norm === 'null') return null;
+
+  switch (norm) {
     case 'house':
     case 'detached':
     case 'townhouse':
@@ -290,8 +298,22 @@ export function dwellingFromModelLabel(label: string | null | undefined): Dwelli
     case 'remote':
     case 'rural_route':
     case 'farm':               return 'remote';
-    default:                   return null;
   }
+
+  // A model asked for one of six words routinely answers with a phrase —
+  // "single family home", "low-rise apartment building", "commercial/retail".
+  // Refusing those left the verdict at the sync-time regex, which is the exact
+  // failure this function exists to end, so a phrase is read for the word it
+  // contains. Order matters: 'condo' before the house words, because
+  // "condominium townhouse" is a condo.
+  if (/po_?box|post_office_box|postal_box/.test(norm))                 return 'po_box';
+  if (/condo/.test(norm))                                              return 'condo';
+  if (/apart|multi_?unit|multi_?family|high_?rise|low_?rise|walk_?up|duplex|triplex|flat/.test(norm)) return 'apt';
+  if (/business|commercial|office|retail|industrial|warehouse|firm|store/.test(norm)) return 'business';
+  if (/rural|farm|remote|acreage|ranch|homestead/.test(norm))           return 'remote';
+  if (/house|home|detached|townhouse|town_home|bungalow|cottage|residential|single_?family/.test(norm)) return 'house';
+
+  return null;
 }
 
 /** Is the apartment/unit number we need actually on the order?

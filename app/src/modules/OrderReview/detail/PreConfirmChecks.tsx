@@ -30,23 +30,29 @@ import styles from '../OrderReview.module.css';
 // prices our account in Canadian dollars for a US destination too.
 const FREIGHT_CURRENCY = 'CAD';
 
-/** One line of the summary: what we now know, and how we know it. */
-function Row({ label, value, note, source, tone }: {
+/** One line of the summary: what we now know, and how we know it.
+ *
+ *  `unchecked` is the state that matters most. A row whose value nothing
+ *  established must not render with the weight of one that something did — a
+ *  green border under a grey line reading "unconfirmed" is a contradiction, and
+ *  the border is what gets read. */
+function Row({ label, value, note, source, tone, unchecked }: {
   label: string;
   value: string;
   note?: string;
   source?: string;
   tone?: 'ok' | 'warn' | 'bad';
+  unchecked?: boolean;
 }) {
-  const cls =
-    tone === 'ok'   ? styles.summaryRowOk
-  : tone === 'warn' ? styles.summaryRowWarn
-  : tone === 'bad'  ? styles.summaryRowBad
-  : '';
+  const cls = unchecked ? styles.summaryRowUnchecked
+    : tone === 'ok'   ? styles.summaryRowOk
+    : tone === 'warn' ? styles.summaryRowWarn
+    : tone === 'bad'  ? styles.summaryRowBad
+    : '';
   return (
     <div className={`${styles.summaryRow} ${cls}`}>
       <span className={styles.summaryLabel}>{label}</span>
-      <span className={styles.summaryValue}>{value}</span>
+      <span className={unchecked ? styles.summaryValueUnchecked : styles.summaryValue}>{value}</span>
       {note   && <span className={styles.summaryNote}>{note}</span>}
       {source && <span className={styles.summarySource}>{source}</span>}
     </div>
@@ -105,6 +111,10 @@ export function PreConfirmChecks({ order }: { order: Order }) {
   // checking.
   const complete = verified && quoted;
 
+  // 'sync-guess' after a verify means the verify did not settle the building:
+  // it ran before the classifier shipped, or nothing would name the premise.
+  const buildingUnconfirmed = order.address_verdict_source === 'sync-guess';
+
   const postalRow = (() => {
     if (order.address_match === 'match') {
       return {
@@ -155,8 +165,9 @@ export function PreConfirmChecks({ order }: { order: Order }) {
             {verifyBusy ? 'Verifying…' : verified ? '✓ 1 · Address verified' : '1 · Verify address'}
           </button>
           <span className={styles.precheckHint}>
-            Start here. Checks the {postalLabel.toLowerCase()} against the postal
-            authority, and classifies the building and the delivery area.
+            {verified && buildingUnconfirmed
+              ? `Run again — the ${postalLabel.toLowerCase()} was checked, but the building type is still only a guess from the address text.`
+              : `Start here. Checks the ${postalLabel.toLowerCase()} against the postal authority, and classifies the building and the delivery area.`}
           </span>
           {verifyErr && <span className={styles.precheckError}>{verifyErr}</span>}
         </div>
@@ -198,10 +209,19 @@ export function PreConfirmChecks({ order }: { order: Order }) {
             tone={postalRow.tone}
             source={`checked ${new Date(order.address_verified_at!).toLocaleDateString()}`}
           />
+          {/* An unconfirmed building reads as a question, not an answer. It is
+              reachable two ways: a verify that ran before the classifier
+              existed (every order verified before 2026-09-10 16:13), or one
+              where neither the postal authority nor the model would name the
+              premise. Both are fixed by running step 1 again, so the row says
+              that rather than leaving the operator to work it out. */}
           <Row
             label="Building"
-            value={DWELLING_LABEL[order.address_verdict]}
-            note={DWELLING_NOTE[order.address_verdict]}
+            value={buildingUnconfirmed ? `${DWELLING_LABEL[order.address_verdict]}?` : DWELLING_LABEL[order.address_verdict]}
+            unchecked={buildingUnconfirmed}
+            note={buildingUnconfirmed
+              ? 'nothing has confirmed this — it is still the guess from the address text. Re-run step 1 to classify it.'
+              : DWELLING_NOTE[order.address_verdict]}
             source={dwellingProvenance(order.address_verdict_source, order.address_verified_at)}
             tone={order.address_verdict === 'po_box' ? 'bad'
               : order.address_verdict === 'house' ? 'ok' : 'warn'}
@@ -214,6 +234,7 @@ export function PreConfirmChecks({ order }: { order: Order }) {
               : order.area_type
                 ? 'standard delivery area'
                 : 'not classified — urban and suburban cannot be told apart from a postal code alone'}
+            unchecked={!order.area_type}
             tone={order.area_type === 'rural' ? 'warn' : order.area_type ? 'ok' : undefined}
             source={order.area_type_source === 'manual' ? 'set by an operator'
               : order.area_type_source === 'verified' ? 'classified by address verification'

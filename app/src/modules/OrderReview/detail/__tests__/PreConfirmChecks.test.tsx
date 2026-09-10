@@ -154,6 +154,24 @@ describe('PreConfirmChecks', () => {
     expect(screen.getByText(/canpar — ground/i)).toBeInTheDocument();
   });
 
+  // The bug this pair exists for: a verify that ran before the building
+  // classifier shipped leaves address_verdict_source at 'sync-guess', and the
+  // summary rendered that guess in the same green as an established fact, with
+  // only a small grey line underneath saying otherwise.
+  it('does not dress an unconfirmed building as a finding', () => {
+    quotes.push(quote());
+    render(<PreConfirmChecks order={checkedOrder({ address_verdict_source: 'sync-guess' })} />);
+    expect(screen.getByText('House?')).toBeInTheDocument();
+    expect(screen.getByText(/still the guess from the address text/i)).toBeInTheDocument();
+    expect(screen.getByText(/re-run step 1 to classify it/i)).toBeInTheDocument();
+  });
+
+  it('tells you step 1 is worth running again while the building is a guess', () => {
+    quotes.push(quote());
+    render(<PreConfirmChecks order={checkedOrder({ address_verdict_source: 'sync-guess' })} />);
+    expect(screen.getByText(/the building type is still only a guess/i)).toBeInTheDocument();
+  });
+
   // A model reading is the only building signal a Canadian address gets, and it
   // must never read as a postal-authority record.
   it('says where the building type came from', () => {

@@ -1745,3 +1745,18 @@
   .summaryRow { grid-template-columns: 1fr; gap: 2px; }
   .summarySource { grid-column: 1; }
 }
+
+/* A summary row for something nothing has established. Flat and dashed on
+   purpose: it used to take the same green as a confirmed claim while its own
+   source line read "unconfirmed", and the border is what an operator reads. */
+.summaryRowUnchecked {
+  border-left-style: dashed;
+  border-left-color: var(--color-ink-subtle);
+  background: transparent;
+}
+.summaryValueUnchecked {
+  font-size: var(--font-size-body);
+  font-weight: 700;
+  font-style: italic;
+  color: var(--color-ink-subtle);
+}
