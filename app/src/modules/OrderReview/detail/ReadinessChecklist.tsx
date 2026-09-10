@@ -1,6 +1,6 @@
 import type { Order } from '../../../lib/orders';
 import { DWELLING_LABEL, needsFitConfirmation } from '../../../lib/addressClassify';
-import { CUSTOMER_CARD_ID, ADDRESS_CARD_ID, revealCard } from './anchors';
+import { CUSTOMER_CARD_ID, ADDRESS_CARD_ID, PRECHECK_ID, revealCard } from './anchors';
 import styles from '../OrderReview.module.css';
 
 // Per Pedrum (2026-06-05): drop the freight readiness check. With the
@@ -10,15 +10,34 @@ import styles from '../OrderReview.module.css';
 // missing/high freight quote no longer blocks the confirm.
 //
 // The check was: freight 0 < freight_estimate ≤ freight_threshold_usd.
+// It has NOT come back: the third criterion below asks whether anybody RAN the
+// two pre-ship checks, and does not care what the freight number is. A $400
+// quote to Whitehorse still confirms; confirming with nobody having checked the
+// postal code no longer does.
 //
-// There are TWO criteria, not three. The action bar claimed three for
-// months after the freight check was dropped; the count is now derived
-// from CRITERIA below so the copy cannot drift from the logic again.
+// Every count rendered anywhere in the module derives from CRITERIA_COUNT, so
+// the copy cannot drift from the logic — it claimed three criteria for months
+// after the freight check was dropped.
+/** Has a carrier rate actually been pulled for this order?
+ *
+ *  `freight_estimate_usd > 0` alone is not the question. Shopify seeds that
+ *  column with what the CUSTOMER paid for shipping, which is a price we set in
+ *  a storefront, not a quote from a carrier — reading it as "freight is known"
+ *  is how an order reaches the dock costed against a number nobody looked up.
+ *  Only a live carrier quote, or an operator pasting a portal one, counts. */
+export function freightQuoted(order: Order): boolean {
+  if (order.freight_estimate_source === 'freightcom') return true;
+  if (order.freight_estimate_source === 'clickship') return true;
+  return order.freight_estimate_source === 'manual' && order.freight_estimate_usd > 0;
+}
+
 export function evaluateReadiness(order: Order): {
   contact: boolean;
   address: boolean;
+  preship: boolean;
   reason1: string;
   reason2: string;
+  reason3: string;
 } {
   const emailOk = !!order.customer_email;
   const phoneOk = !!order.customer_phone;
@@ -59,16 +78,38 @@ export function evaluateReadiness(order: Order): {
       ? 'Looks like a house, but the address has not been verified yet'
       : 'Single-family house, confirmed — standard delivery';
 
-  return { contact, address: addressOk, reason1, reason2 };
+  // The third gate, added with the pre-confirm panel above it: the two checks
+  // that decide whether this order can ship have to have been run, in order —
+  // an address a postal authority has confirmed, and a carrier rate pulled
+  // against it.
+  //
+  // Replacements never reach Order Review (they are born approved and live in
+  // Fulfillment), but canConfirm is called from the rail for every row, so the
+  // criterion answers honestly for one rather than blocking it.
+  const verifiedOk = !!order.address_verified_at;
+  const quoteOk = freightQuoted(order);
+  const preship = order.kind !== 'sale' ? true : (verifiedOk && quoteOk);
+  const reason3 =
+    order.kind !== 'sale'
+      ? 'Not required for a replacement'
+    : verifiedOk && quoteOk
+      ? 'Address verified, and freight quoted against it'
+    : !verifiedOk && !quoteOk
+      ? 'Neither check has been run — verify the address, then quote freight'
+    : !verifiedOk
+      ? 'Freight was quoted, but the address it was quoted against has not been verified'
+      : 'Address verified — no carrier rate has been pulled for it yet';
+
+  return { contact, address: addressOk, preship, reason1, reason2, reason3 };
 }
 
 /** The number of criteria that gate Confirm. Single source for every count
  *  rendered anywhere in the module. */
-export const CRITERIA_COUNT = 2;
+export const CRITERIA_COUNT = 3;
 
 export function canConfirm(order: Order): boolean {
   const r = evaluateReadiness(order);
-  return r.contact && r.address;
+  return r.contact && r.address && r.preship;
 }
 
 /** The blocker strip. Sits directly under the Confirm button it gates, so the
@@ -76,7 +117,7 @@ export function canConfirm(order: Order): boolean {
  *  link on the same line as the fault it repairs. */
 export function ReadinessChecklist({ order }: { order: Order }) {
   const r = evaluateReadiness(order);
-  const met = [r.contact, r.address].filter(Boolean).length;
+  const met = [r.contact, r.address, r.preship].filter(Boolean).length;
   const allOk = met === CRITERIA_COUNT;
   const outstanding = CRITERIA_COUNT - met;
 
@@ -124,6 +165,20 @@ export function ReadinessChecklist({ order }: { order: Order }) {
               className={styles.blockFix}
               onClick={() => revealCard(ADDRESS_CARD_ID)}
             >Fix in Address →</button>
+          )}
+        </div>
+        <div className={styles.blockItem}>
+          <span className={`${styles.blockMark} ${r.preship ? styles.blockMarkOk : styles.blockMarkNo}`}>
+            {r.preship ? '✓' : '!'}
+          </span>
+          <span className={styles.blockWhat}>Pre-ship checks</span>
+          <span className={styles.blockWhy}>{r.reason3}</span>
+          {!r.preship && (
+            <button
+              type="button"
+              className={styles.blockFix}
+              onClick={() => revealCard(PRECHECK_ID)}
+            >Run above →</button>
           )}
         </div>
       </div>

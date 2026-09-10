@@ -5,6 +5,7 @@ import styles from '../OrderReview.module.css';
  *  cannot drift apart. */
 export const CUSTOMER_CARD_ID = 'order-review-customer-card';
 export const ADDRESS_CARD_ID  = 'order-review-address-card';
+export const PRECHECK_ID      = 'order-review-precheck';
 
 /** Scroll a detail card into view and flash its border once. The blocker strip
  *  names a fault; this is what carries you to where the fault is fixed. */

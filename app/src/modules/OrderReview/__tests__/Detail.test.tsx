@@ -21,6 +21,17 @@ vi.mock('../../../lib/orders', async () => {
   };
 });
 
+// The pre-confirm panel subscribes to this order's quote history; the Detail
+// tests are about the action bar and the blocker strip, so the hook is inert
+// here and PreConfirmChecks has its own file.
+vi.mock('../../../lib/freight', async () => {
+  const actual = await vi.importActual<typeof import('../../../lib/freight')>('../../../lib/freight');
+  return {
+    ...actual,
+    useQuotes: () => ({ quotes: [], loading: false, refetch: vi.fn().mockResolvedValue(undefined) }),
+  };
+});
+
 vi.mock('../../../lib/auth', () => ({
   useAuth: () => ({
     profile: { id: 'u1', display_name: 'Test User', role: 'member' },
@@ -57,8 +68,11 @@ const order: Order = {
     address_is_business: null,
   area_type: 'suburban',
   area_type_source: 'auto',
-  address_verified_at: null,
-  address_match: null,
+  // The base fixture is an order that is ready to confirm: contact info on
+  // file, a house, and both pre-ship checks run. Tests that are about a blocker
+  // take one of those away.
+  address_verified_at: '2026-09-10T15:14:35Z',
+  address_match: 'match',
   address_google_formatted: null,
   address_google_postal: null,
   address_customer_postal: null,
@@ -71,7 +85,7 @@ const order: Order = {
   customer_paid_shipping_usd: 89.5, currency: 'USD',
   tracking_num: null, carrier: null,
   customer_id: null, awaiting_batch_id: null, replacement_state: null, held_reason: null,
-  cancelled_at: null, cancelled_reason: null, freight_estimate_source: 'shopify',
+  cancelled_at: null, cancelled_reason: null, freight_estimate_source: 'freightcom',
   total_usd: 1149,
   subtotal_usd: null, tax_usd: null, discount_total_usd: null,
   discount_codes: null, payment_methods: null, financial_status: null, tax_lines: null, shipping_line_title: null,
@@ -200,24 +214,49 @@ describe('Detail', () => {
     expect(screen.getByRole('button', { name: /^flag order$/i })).toBeInTheDocument();
   });
 
-  // There are two confirm criteria. The action bar claimed three for months
-  // after the freight check was dropped; CRITERIA_COUNT now feeds both.
+  // Three confirm criteria since the pre-confirm panel landed: contact info,
+  // address fit, and whether the two pre-ship checks were actually run. Every
+  // count on the screen derives from CRITERIA_COUNT — the bar claimed three for
+  // months after the freight check was dropped in June, when there were two.
   it('names the real blockers and offers a jump to where each is fixed', () => {
     render(
       <Detail
-        order={{ ...order, customer_phone: null, address_verdict: 'condo' }}
+        order={{
+          ...order,
+          customer_phone: null,
+          address_verdict: 'condo',
+          address_verified_at: null,
+          freight_estimate_source: 'shopify',
+        }}
         onAfterDisposition={vi.fn()}
       />,
     );
-    expect(screen.getByText(/2 blockers before you can confirm/i)).toBeInTheDocument();
-    expect(screen.getByText(/0 of 2 met/i)).toBeInTheDocument();
+    expect(screen.getByText(/3 blockers before you can confirm/i)).toBeInTheDocument();
+    expect(screen.getByText(/0 of 3 met/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /fix in customer/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /fix in address/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /run above/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /confirm order/i })).toBeDisabled();
   });
 
-  it('reports readiness instead of blockers once both criteria are met', () => {
-    render(<Detail order={order} onAfterDisposition={vi.fn()} />);
+  // A freight number seeded by Shopify is what the CUSTOMER paid for shipping,
+  // not a carrier's rate for this address, so it does not clear the check.
+  it('still blocks when the address is verified but nobody pulled a carrier rate', () => {
+    render(
+      <Detail
+        order={{ ...order, freight_estimate_source: 'shopify' }}
+        onAfterDisposition={vi.fn()}
+      />,
+    );
+    expect(screen.getByText(/1 blocker before you can confirm/i)).toBeInTheDocument();
+    expect(screen.getByText(/no carrier rate has been pulled/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /confirm order/i })).toBeDisabled();
+  });
+
+  it('reports readiness instead of blockers once all three criteria are met', () => {
+    render(
+      <Detail order={order} onAfterDisposition={vi.fn()} />,
+    );
     expect(screen.getByText(/ready to confirm/i)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /fix in/i })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /confirm order/i })).toBeEnabled();

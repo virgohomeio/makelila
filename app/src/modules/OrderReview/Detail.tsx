@@ -11,6 +11,7 @@ import { PaymentCard } from './detail/PaymentCard';
 import { InvoicesCard } from './detail/InvoicesCard';
 import { ActionBar }    from './detail/ActionBar';
 import { ConfirmBanner } from './detail/ConfirmBanner';
+import { PreConfirmChecks } from './detail/PreConfirmChecks';
 import { ReadinessChecklist, canConfirm } from './detail/ReadinessChecklist';
 import styles from './OrderReview.module.css';
 
@@ -112,7 +113,11 @@ export function Detail({
 
       <ConfirmBanner banner={banner} onDismiss={dismissBanner} />
 
-      {/* Directly under the button it gates. */}
+      {/* Directly under the button they gate, in the order they run: the two
+          pre-ship checks first, then the strip that says what is still in the
+          way. Both checks keep their original home further down the page, on
+          the Address and Freight cards, for the re-check after a fix. */}
+      {!isCancelled && order.kind === 'sale' && <PreConfirmChecks order={order} />}
       {!isCancelled && <ReadinessChecklist order={order} />}
 
       <div className={styles.detailBody}>

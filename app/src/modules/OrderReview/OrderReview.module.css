@@ -1607,3 +1607,141 @@
   align-items: center;
   gap: var(--space-2);
 }
+
+/* ── Pre-confirm checks ──────────────────────────────────────────────────
+   The two checks that gate a confirm, in the order they run, directly under
+   the Confirm button. Both actions already existed on cards below the fold;
+   what is new here is the sequence (freight cannot be quoted before the
+   address is verified) and the summary that says, in one place, what those
+   two checks established about this customer's address and what shipping to
+   it will cost. */
+.precheck {
+  flex: none;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-raised);
+  padding: var(--space-3) var(--space-4);
+  margin-bottom: var(--space-3);
+}
+.precheckHead {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--color-ink-subtle);
+  margin-bottom: var(--space-2);
+}
+.precheckSteps {
+  display: flex;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+.precheckStep {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1 1 260px;
+  min-width: 240px;
+}
+.precheckBtn {
+  align-self: flex-start;
+  padding: 7px var(--space-3);
+  font-size: var(--font-size-body);
+  font-weight: 700;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  background: var(--color-crimson);
+  color: var(--color-raised);
+  border: 1px solid var(--color-crimson);
+}
+.precheckBtn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+/* A step that has already run is no longer the thing to click. */
+.precheckBtnDone {
+  background: var(--color-success-bg);
+  color: var(--color-success);
+  border-color: var(--color-success-border);
+}
+.precheckBtn:disabled {
+  background: var(--color-border);
+  color: var(--color-ink-subtle);
+  border-color: var(--color-border);
+  cursor: not-allowed;
+}
+.precheckBtnDone:disabled {
+  background: var(--color-success-bg);
+  color: var(--color-success);
+  border-color: var(--color-success-border);
+}
+/* The instruction under each button. Deliberately quiet — it explains an
+   order of operations, it is not itself a thing to act on. */
+.precheckHint {
+  font-size: var(--font-size-meta);
+  color: var(--color-ink-subtle);
+  line-height: 1.4;
+  max-width: 42ch;
+}
+.precheckError {
+  font-size: var(--font-size-meta);
+  color: var(--color-error);
+  max-width: 46ch;
+}
+.precheckPending {
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px dashed var(--color-border);
+  font-size: var(--font-size-meta);
+  color: var(--color-ink-subtle);
+  font-style: italic;
+}
+
+/* The summary. One row per thing the two checks established, each carrying
+   the sentence that says where it came from — same rule as the address
+   card's claims: never state a fact without its provenance. */
+.summary {
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-border);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.summaryRow {
+  display: grid;
+  grid-template-columns: 88px minmax(0, auto) 1fr;
+  align-items: baseline;
+  gap: var(--space-2);
+  padding: 5px 8px;
+  border-radius: var(--radius-sm);
+  border-left: 3px solid var(--color-border);
+  background: var(--color-surface);
+}
+.summaryRowOk   { border-left-color: var(--color-success); }
+.summaryRowWarn { border-left-color: var(--color-warning-strong); }
+.summaryRowBad  { border-left-color: var(--color-error); }
+.summaryLabel {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--color-ink-subtle);
+}
+.summaryValue {
+  font-size: var(--font-size-body);
+  font-weight: 700;
+  color: var(--color-ink);
+}
+.summaryNote {
+  font-size: var(--font-size-meta);
+  color: var(--color-ink-muted);
+}
+.summarySource {
+  grid-column: 2 / -1;
+  font-size: 10px;
+  font-style: italic;
+  color: var(--color-ink-subtle);
+}
+
+@media (max-width: 700px) {
+  .summaryRow { grid-template-columns: 1fr; gap: 2px; }
+  .summarySource { grid-column: 1; }
+}
