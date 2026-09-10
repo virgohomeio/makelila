@@ -162,6 +162,11 @@ const RURAL_WORD = /\b(?:rr|r\.r\.|rural\s+route|hc|highway\s+contract|general\s
 // address across both fields ("16" / "Johnstone Lane", "629031" / "Grey Road
 // 119") rather than naming a unit. Several live orders are shaped this way.
 const STREET_WORD = /\b(?:st|street|rd|road|ave|av|avenue|dr|drive|ln|lane|blvd|boulevard|cres|crescent|way|ct|court|trl|trail|hwy|highway|pl|place|terr|terrace|cir|circle|pkwy|parkway|route|rue|chemin)\b\.?/i;
+// A second line that is only a mailbox number — "Box 1282" in Tisdale SK,
+// "Pb311" in Naramata BC — is where the customer collects their MAIL. It is
+// not a unit within a building, and freight still goes to the street address on
+// line 1. Without this both read as apartments.
+const MAILBOX_ONLY = /^(?:p\.?\s*o\.?\s*)?(?:box|bag|pb|p\.b\.)\s*#?\s*\d+[a-z]?$/i;
 
 /** The pre-verification guess, from the text the customer typed and nothing
  *  else. Reads BOTH address lines: Shopify puts "Apt 4N" in address2, and the
@@ -195,7 +200,8 @@ export function guessDwellingFromText(
   // carries no keyword ("4N", "21", "B448") — unless it reads as a street name,
   // which means the customer split one address across the two fields.
   const line2IsStreet = STREET_WORD.test(line2) && !UNIT_WORD.test(line2);
-  if (line2.length > 0 && !line2IsStreet) return 'apt';
+  const line2IsMailbox = MAILBOX_ONLY.test(line2);
+  if (line2.length > 0 && !line2IsStreet && !line2IsMailbox) return 'apt';
   if (UNIT_WORD.test(line1)) return 'apt';
   return 'house';
 }

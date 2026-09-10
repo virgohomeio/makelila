@@ -121,9 +121,21 @@ describe('guessDwellingFromText — the pre-verification starting point', () => 
     expect(guessDwellingFromText('629031', 'Grey Road 119', 'N0H 1J0')).toBe('house');
   });
 
+  it('treats a bare mailbox line as mail, not as a unit', () => {
+    // Live orders #1214 (Tisdale SK) and #1216 (Naramata BC) put a rural
+    // mailbox in address2 alongside a real street address on line 1. That is
+    // where the customer collects their MAIL; the freight still goes to the
+    // street, and reading it as an apartment sends the operator chasing a unit
+    // number that does not exist.
+    expect(guessDwellingFromText('1405 98 St', 'Box 1282', 'S0E 1T0')).toBe('house');
+    expect(guessDwellingFromText('465 Grimaldi Lane', 'Pb311', 'V0H 1N0')).toBe('house');
+    expect(guessDwellingFromText('1 Main St', 'Bag 44', 'N0H 1J0')).toBe('house');
+  });
+
   it('recognises a PO box in either line', () => {
     expect(guessDwellingFromText('PO Box 14', null, 'Y1A 0C4')).toBe('po_box');
     expect(guessDwellingFromText('1405 98 St', 'P.O. Box 1282', 'S0E 1T0')).toBe('po_box');
+    expect(guessDwellingFromText('Postal Box 9', null, 'A0R 1B0')).toBe('po_box');
   });
 
   it('recognises a rural route', () => {
