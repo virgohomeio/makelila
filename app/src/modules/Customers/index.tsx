@@ -32,27 +32,27 @@ import styles from './Customers.module.css';
 
 type Tab = 'directory' | 'profitability' | 'journey' | 'fleet';
 
-const TAB_KEYS: Tab[] = ['directory', 'profitability', 'journey', 'fleet'];
+const TAB_KEYS: Tab[] = ['directory', 'fleet', 'profitability', 'journey'];
 
 // Shared empty list for customers with no additional household users — keeps
 // the search filter from allocating a new array per row on every keystroke.
 const NO_HOUSEHOLD_USERS: CustomerAdditionalUser[] = [];
 
-// Order per operator (2026-06-05): Journey first (default), then
-// Profitability, Directory, Fleet. One list now drives the desktop tab strip
-// and the mobile picker, which had drifted into two hand-kept copies.
+// Order per operator (2026-09-10): Directory first (default), then Fleet,
+// Profitability, Journey. One list now drives the desktop tab strip and the
+// mobile picker, which had drifted into two hand-kept copies.
 const TABS: { key: Tab; label: string }[] = [
-  { key: 'journey',       label: 'Journey' },
-  { key: 'profitability', label: 'Profitability' },
   { key: 'directory',     label: 'Directory' },
   { key: 'fleet',         label: 'Fleet' },
+  { key: 'profitability', label: 'Profitability' },
+  { key: 'journey',       label: 'Journey' },
 ];
 
 const MOBILE_TAB_META: Record<Tab, { subtitle: string; icon: string; iconBg: string }> = {
-  journey:       { subtitle: '10-stage CJM · health per customer',      icon: '🛤️', iconBg: '#fef1f0' },
-  profitability: { subtitle: 'Revenue · returns · margin per customer', icon: '💰', iconBg: '#fff3e0' },
   directory:     { subtitle: 'All customers · search',                  icon: '👥', iconBg: '#e3f0fb' },
   fleet:         { subtitle: 'Live device telemetry · machine health',  icon: '📡', iconBg: '#e3f0fb' },
+  profitability: { subtitle: 'Revenue · returns · margin per customer', icon: '💰', iconBg: '#fff3e0' },
+  journey:       { subtitle: '10-stage CJM · health per customer',      icon: '🛤️', iconBg: '#fef1f0' },
 };
 
 type CountryFilter = 'all' | 'CA' | 'US' | 'other';
@@ -73,7 +73,7 @@ export default function Customers() {
   const [searchParams] = useSearchParams();
   const [tab, setTab] = useState<Tab>(() => {
     const p = searchParams.get('tab');
-    return (TAB_KEYS as string[]).includes(p ?? '') ? (p as Tab) : 'journey';
+    return (TAB_KEYS as string[]).includes(p ?? '') ? (p as Tab) : 'directory';
   });
   const isMobile = useIsMobile();
   // On mobile, start with the tab picker visible. Tapping a card flips this
@@ -221,7 +221,7 @@ export default function Customers() {
   if (isMobile && !mobileTabPicked) {
     return (
       <div className={styles.layout}>
-        <PageHeader title="Customers" meta="Journey, profitability, directory and fleet." />
+        <PageHeader title="Customers" meta="Directory, fleet, profitability and journey." />
         <div className={styles.mobilePicker}>
           {TABS.map(t => (
             <NavCard
