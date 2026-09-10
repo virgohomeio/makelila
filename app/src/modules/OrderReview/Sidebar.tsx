@@ -3,6 +3,7 @@ import type { Order } from '../../lib/orders';
 import { SALES_QUEUE_START } from '../../lib/orders';
 import { OrderRow } from './OrderRow';
 import { indexRefundFlags, useRefundMarks } from '../../lib/refundedOrders';
+import { useOrderCommAssessments } from '../../lib/orderComms';
 import { EmptyState } from '../../components/ui';
 import styles from './OrderReview.module.css';
 
@@ -58,6 +59,9 @@ export function Sidebar({
   }, [source, query, tab]);
 
   const refundFlags = useMemo(() => indexRefundFlags(visible, marks), [visible, marks]);
+  // One query for the whole rail. Only 'unclear' reaches the row — see the
+  // commConcern note on OrderRow.
+  const { byOrderId: commAssessments } = useOrderCommAssessments();
 
   const tabs: Array<{ key: Tab; label: string; count: number }> = [
     { key: 'pending',     label: 'Pending',     count: pending.length },
@@ -171,6 +175,11 @@ export function Sidebar({
             isSelected={o.id === selectedId}
             onClick={() => onSelect(o.id)}
             refundFlag={refundFlags.get(o.id) ?? null}
+            commConcern={
+              commAssessments[o.id]?.verdict === 'unclear'
+                ? commAssessments[o.id].headline
+                : null
+            }
           />
         ))}
       </div>

@@ -28,6 +28,19 @@ const corsHeaders = {
 
 const OPENPHONE_BASE = 'https://api.openphone.com/v1';
 const DEFAULT_LOOKBACK_DAYS = 7;
+
+// Wall-clock budget for one run. The cron fires every 5 minutes; a run that
+// outlives its own invocation is killed mid-pass and commits nothing new, and
+// because `since` is derived from what IS committed, the watermark can then
+// never advance. That is exactly how this sync wedged at 2026-08-05 and stopped
+// importing for five weeks. Stopping early and reporting `partial` keeps every
+// conversation already processed, so the next run starts further forward.
+const RUN_BUDGET_MS = 100_000;
+
+// How far before the watermark to re-ask for messages. Covers a message that
+// landed in OpenPhone while the previous run was mid-pass, at the cost of
+// re-offering a day of already-upserted rows (the upsert dedups them).
+const OVERLAP_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_OWNER_EMAIL = 'junaid@virgohome.io';
 
 // Our own OpenPhone inbox numbers — never use these as the "customer" phone.
@@ -90,6 +103,10 @@ type RunResult = {
   tickets_appended: number;
   messages_added: number;
   skipped: number;
+  /** True when the run hit RUN_BUDGET_MS before reaching the end of the
+   *  conversation list. Progress so far is committed; the next run resumes
+   *  from the advanced watermark. */
+  partial: boolean;
   error?: string;
 };
 
@@ -211,10 +228,12 @@ async function handle(req: Request): Promise<Response> {
   const since: string = sinceRow?.last_message_at
     ?? new Date(Date.now() - DEFAULT_LOOKBACK_DAYS * 24 * 60 * 60 * 1000).toISOString();
 
+  const deadline = Date.now() + RUN_BUDGET_MS;
+
   const results: RunResult[] = [];
   for (const phoneNumberId of phoneNumberIds) {
     const r = await syncPhoneNumber(
-      admin, apiKey, phoneNumberId, since,
+      admin, apiKey, phoneNumberId, since, deadline,
       customersByPhone, customersByPhone7, customersByEmail,
       unitsByCustomerName, ordersByEmail,
     );
@@ -222,7 +241,8 @@ async function handle(req: Request): Promise<Response> {
   }
 
   const ok = results.every(r => r.ok);
-  return jsonResponse({ ok, since, results }, ok ? 200 : 207);
+  const partial = results.some(r => r.partial);
+  return jsonResponse({ ok, partial, since, results }, ok ? 200 : 207);
 }
 
 // ============================================================ Per-phone-number sync
@@ -232,6 +252,7 @@ async function syncPhoneNumber(
   apiKey: string,
   phoneNumberId: string,
   since: string,
+  deadline: number,
   customersByPhone: Map<string, CustomerLite>,
   customersByPhone7: Map<string, CustomerLite>,
   customersByEmail: Map<string, CustomerLite>,
@@ -246,18 +267,32 @@ async function syncPhoneNumber(
     tickets_appended: 0,
     messages_added: 0,
     skipped: 0,
+    partial: false,
   };
 
   try {
     // Step 1: list all conversations for this phone number.
     const allConversations = await fetchAllConversations(apiKey, phoneNumberId);
     const sinceMs = new Date(since).getTime();
+    const createdAfter = new Date(Math.max(0, sinceMs - OVERLAP_MS)).toISOString();
 
-    for (const convo of allConversations) {
-      // Skip conversations with no activity since `since`.
-      const activityTs = convo.lastActivityAt ?? convo.updatedAt ?? convo.createdAt;
-      const lastActivity = activityTs ? new Date(activityTs).getTime() : 0;
-      if (lastActivity < sinceMs) continue;
+    // Oldest activity first. A run that cannot finish must still advance the
+    // watermark, and the watermark is the OLDEST unprocessed conversation —
+    // working newest-first would re-import the same recent handful every time
+    // and leave the backlog behind it untouched forever.
+    const due = allConversations
+      .map(convo => {
+        const activityTs = convo.lastActivityAt ?? convo.updatedAt ?? convo.createdAt;
+        return { convo, lastActivity: activityTs ? new Date(activityTs).getTime() : 0 };
+      })
+      .filter(c => c.lastActivity >= sinceMs)
+      .sort((a, b) => a.lastActivity - b.lastActivity);
+
+    for (const { convo } of due) {
+      if (Date.now() >= deadline) {
+        result.partial = true;
+        break;
+      }
 
       result.conversations_seen++;
 
@@ -268,7 +303,7 @@ async function syncPhoneNumber(
 
       let msgs: OPMessage[];
       try {
-        msgs = await fetchMessagesForConversation(apiKey, phoneNumberId, otherParties);
+        msgs = await fetchMessagesForConversation(apiKey, phoneNumberId, otherParties, createdAfter);
       } catch (err) {
         result.skipped++;
         // record per-conversation error but keep processing others
@@ -510,10 +545,17 @@ async function fetchAllConversations(
   return all;
 }
 
+/** Messages exchanged with one contact since `createdAfter`.
+ *
+ *  The `createdAfter` bound is what keeps this affordable. Without it every
+ *  run re-pulled each active conversation's entire history — up to ten pages
+ *  of a thousand messages, every five minutes, all of it already in the
+ *  database — which is what made a full pass impossible to finish. */
 async function fetchMessagesForConversation(
   apiKey: string,
   phoneNumberId: string,
   otherParties: string[],
+  createdAfter: string,
 ): Promise<OPMessage[]> {
   const all: OPMessage[] = [];
   let pageToken: string | undefined;
@@ -523,6 +565,7 @@ async function fetchMessagesForConversation(
     const url = new URL(`${OPENPHONE_BASE}/messages`);
     url.searchParams.set('phoneNumberId', phoneNumberId);
     for (const p of otherParties) url.searchParams.append('participants[]', p);
+    url.searchParams.set('createdAfter', createdAfter);
     url.searchParams.set('maxResults', '100');
     if (pageToken) url.searchParams.set('pageToken', pageToken);
 

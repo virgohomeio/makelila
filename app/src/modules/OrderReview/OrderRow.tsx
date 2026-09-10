@@ -24,6 +24,7 @@ export function OrderRow({
   onClick,
   revealIndex = 0,
   refundFlag = null,
+  commConcern = null,
 }: {
   order: Order;
   isSelected: boolean;
@@ -35,6 +36,11 @@ export function OrderRow({
    *  have already paid back, and until this badge existed the row gave the
    *  operator no way to know. */
   refundFlag?: RefundFlag | null;
+  /** Set when the customer's recent support history casts doubt on shipping.
+   *  Only doubt is shown — a "clear to ship" chip on every row would be a
+   *  column of green that nobody reads, and the chip's whole job is to be
+   *  noticed. The reason itself is in the order's Customer card. */
+  commConcern?: string | null;
 }) {
   const cls = [
     styles.row,
@@ -74,6 +80,7 @@ export function OrderRow({
     isCancelled ? 'cancelled' : urgency.label || null,
     showBlockDot ? 'not yet confirmable' : null,
     refundFlag ? refundFlagLabel(refundFlag).toLowerCase() : null,
+    commConcern ? 'customer communication unclear' : null,
   ].filter(Boolean).join(', ');
 
   return (
@@ -116,6 +123,11 @@ export function OrderRow({
             title={refundFlagTitle(refundFlag)}
           >
             {refundFlagLabel(refundFlag)}
+          </span>
+        )}
+        {commConcern && (
+          <span className={`${styles.tag} ${styles.tagComms}`} title={commConcern}>
+            Comms
           </span>
         )}
         {order.kind === 'replacement' && (

@@ -1,4 +1,6 @@
 import type { Order } from '../../../lib/orders';
+import { useOrderCommAssessment } from '../../../lib/orderComms';
+import { CommsSummary } from './CommsSummary';
 import { CUSTOMER_CARD_ID } from './anchors';
 import styles from '../OrderReview.module.css';
 
@@ -23,6 +25,7 @@ function MissingField({ quoUrl }: { quoUrl: string | null }) {
 
 export function CustomerCard({ order }: { order: Order }) {
   const quoUrl = order.quo_thread_url;
+  const { assessment, loading } = useOrderCommAssessment(order.id);
 
   return (
     <div className={styles.card} id={CUSTOMER_CARD_ID}>
@@ -43,6 +46,10 @@ export function CustomerCard({ order }: { order: Order }) {
             ? <span>{order.customer_phone}</span>
             : <MissingField quoUrl={quoUrl} />}
         </div>
+
+        {/* Directly under the contact details it is derived from — this is
+            the same person, read from the other end. */}
+        <CommsSummary orderId={order.id} assessment={assessment} loading={loading} />
 
         {quoUrl && (
           <a
