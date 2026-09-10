@@ -512,10 +512,64 @@
 .shelfStats { font-size: 11px; color: var(--color-ink-subtle); }
 .shelfStats strong { color: var(--color-ink); font-weight: 700; }
 
+.shelfSection {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.shelfSectionHead {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--color-border);
+}
+.shelfSectionTitle {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--color-ink);
+  letter-spacing: 0.2px;
+}
+.shelfSectionMeta {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--color-ink-subtle);
+}
+.shelfSectionBlurb {
+  font-size: 11px;
+  color: var(--color-ink-faint);
+}
+.shelfSectionEmpty {
+  padding: 18px 12px;
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  color: var(--color-ink-faint);
+  text-align: center;
+}
+
 .skidGrid {
   display: grid;
   grid-template-columns: repeat(5, 1fr);
   gap: 12px;
+}
+
+/* A shipment that arrived with no pallet manifest is one big group, not a row
+   of five-slot cards — let it span the grid and wrap internally. */
+.skidCardWide { grid-column: 1 / -1; }
+.bulkGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(52px, 1fr));
+  gap: 4px;
+}
+.skidNote {
+  font-weight: 600;
+  color: var(--color-ink-faint);
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .skidCard {

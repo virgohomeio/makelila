@@ -7,6 +7,30 @@ import { cancelOrder, returnOrderToReview, type ReviewLanding } from './orders';
 export type FulfillmentStep = 1 | 2 | 3 | 4 | 5 | 6;
 export type ShelfSlotStatus = 'available' | 'reserved' | 'rework' | 'empty' | 'held';
 
+/** Which building a skid/pallet sits in. Mirrors shelf_slots_location_check. */
+export type ShelfLocation = 'VentureLab' | 'Flex Space Logistics' | 'EZTrans' | 'US Warehouse';
+
+/** Section order on the Shelf board. Declared here rather than derived from the
+ *  rows so a site with no stock yet still renders as an empty section instead of
+ *  silently disappearing. */
+export const SHELF_SECTIONS: ReadonlyArray<{
+  location: ShelfLocation;
+  /** What the `skid` column means inside this section. */
+  groupNoun: 'skid' | 'pallet';
+  blurb: string;
+  /** True while the site exists on paper but has no integration behind it. */
+  pending?: boolean;
+}> = [
+  { location: 'VentureLab', groupNoun: 'skid',
+    blurb: 'Our own floor. Machines here can be picked and shipped by the team.' },
+  { location: 'Flex Space Logistics', groupNoun: 'pallet',
+    blurb: 'Held at the 3PL, grouped by the pallet each unit arrived on.' },
+  { location: 'EZTrans', groupNoun: 'pallet',
+    blurb: 'Not yet integrated \u2014 no stock is tracked here.', pending: true },
+  { location: 'US Warehouse', groupNoun: 'pallet',
+    blurb: 'Not yet integrated \u2014 no stock is tracked here.', pending: true },
+];
+
 export type FulfillmentQueueRow = {
   id: string;
   order_id: string;
@@ -49,6 +73,7 @@ export type ShelfSlot = {
   serial: string | null;
   batch: string | null;
   status: ShelfSlotStatus;
+  location: ShelfLocation;
   updated_at: string;
   // The underlying units.status, merged in by useShelf so the shelf tooltip
   // can explain *why* a slot is its colour (e.g. a 'held' slot because the
