@@ -113,14 +113,21 @@ export function Detail({
 
       <ConfirmBanner banner={banner} onDismiss={dismissBanner} />
 
-      {/* Directly under the button they gate, in the order they run: the two
-          pre-ship checks first, then the strip that says what is still in the
-          way. Both checks keep their original home further down the page, on
-          the Address and Freight cards, for the re-check after a fix. */}
-      {!isCancelled && order.kind === 'sale' && <PreConfirmChecks order={order} />}
+      {/* Directly under the button it gates. */}
       {!isCancelled && <ReadinessChecklist order={order} />}
 
       <div className={styles.detailBody}>
+        {/* The pre-ship checks lead the scrollable body rather than sitting in
+            the pinned header with the action bar and the blocker strip. Pinned,
+            they were `flex: none` in a `flex-direction: column` pane that
+            `overflow: hidden`s — so once the summary filled in, the panel and
+            the two strips above it could between them claim the whole pane
+            height, squeeze .detailBody to nothing, and clip every card below
+            out of reach with no way to scroll to them.
+            First in the body still puts them under Confirm order, and now the
+            whole card scrolls as one column. */}
+        {!isCancelled && order.kind === 'sale' && <PreConfirmChecks order={order} />}
+
         {/* Eight equal cards in one flat column meant scrolling to find
             anything. They now group by the question they answer. */}
         <div className={styles.group}>

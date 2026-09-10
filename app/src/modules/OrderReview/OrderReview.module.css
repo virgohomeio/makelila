@@ -850,6 +850,11 @@
 /* ── Detail body ─────────────────────────────────────────────────────────── */
 .detailBody {
   flex: 1;
+  /* Explicit rather than relying on the auto min-size of a scroll container:
+     this is the one element that is allowed to shrink, and everything above it
+     in .detail is flex: none. Without it a tall pinned sibling can push the
+     card list out of a pane that hides its overflow. */
+  min-height: 0;
   overflow-y: auto;
   padding: var(--space-4);
 }
@@ -1616,12 +1621,13 @@
    two checks established about this customer's address and what shipping to
    it will cost. */
 .precheck {
-  flex: none;
+  /* Lives inside .detailBody now, so it scrolls with the cards it sits above
+     rather than competing with them for a fixed pane. */
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   background: var(--color-raised);
   padding: var(--space-3) var(--space-4);
-  margin-bottom: var(--space-3);
+  margin-bottom: var(--space-5);
 }
 .precheckHead {
   font-size: 10px;

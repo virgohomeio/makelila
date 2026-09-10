@@ -253,6 +253,28 @@ describe('Detail', () => {
     expect(screen.getByRole('button', { name: /confirm order/i })).toBeDisabled();
   });
 
+  // The pane is a flex column that hides its overflow: .detailHead and the
+  // blocker strip are flex: none, and .detailBody is the only part that
+  // scrolls. A pre-ship panel pinned outside it grew with the summary until the
+  // cards below had no height left and no way to be scrolled to — reported as
+  // "can't see the rest of the sales card". Everything below the blocker strip
+  // has to live inside the scrolling element.
+  it('keeps the pre-ship checks inside the scrolling body, above the cards', () => {
+    const { container } = render(<Detail order={order} onAfterDisposition={vi.fn()} />);
+    const body = container.querySelector('[class*="detailBody"]');
+    const panel = container.querySelector('#order-review-precheck');
+    expect(body).toBeTruthy();
+    expect(panel).toBeTruthy();
+    expect(body!.contains(panel!)).toBe(true);
+
+    // …and the cards still follow it in the same scrolling column.
+    expect(body!.textContent).toMatch(/Shipping Address/i);
+    expect(body!.textContent).toMatch(/Freight Estimate/i);
+    const groups = body!.querySelectorAll('[class*="group"]');
+    expect(groups.length).toBeGreaterThan(0);
+    expect(panel!.compareDocumentPosition(groups[0]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it('reports readiness instead of blockers once all three criteria are met', () => {
     render(
       <Detail order={order} onAfterDisposition={vi.fn()} />,
