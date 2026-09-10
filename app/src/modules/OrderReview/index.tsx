@@ -22,7 +22,7 @@ export default function OrderReview() {
   const { orderId } = useParams<{ orderId: string }>();
   const navigate = useNavigate();
   const isMobile = useIsMobile();
-  const { all, pending, pendingBacklog, held, flagged, approved, confirmedBacklog, cancelled, loading } = useOrders();
+  const { all, backlog, pending, pendingBacklog, held, flagged, approved, confirmedBacklog, cancelled, loading } = useOrders();
   // Every bucket here is sales-only. Replacements are created already-approved
   // and live in Fulfillment; Sales never shows one, including by URL.
   //
@@ -210,6 +210,7 @@ export default function OrderReview() {
         <div className={styles.layout}>
           <Sidebar
             all={all}
+            backlog={backlog}
             pending={pending}
             pendingBacklog={pendingBacklog}
             held={held}
@@ -231,6 +232,7 @@ export default function OrderReview() {
       <div className={styles.layout}>
         <Sidebar
           all={all}
+          backlog={backlog}
           pending={pending}
           pendingBacklog={pendingBacklog}
           held={held}

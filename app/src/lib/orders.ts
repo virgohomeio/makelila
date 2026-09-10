@@ -375,8 +375,16 @@ function applyChange(cache: Order[], payload: { eventType: string; new: Order | 
 /** Every bucket here is sales-only (kind='sale'). Replacements are not shown in
  *  Order Review at all — see the note in bucketOrders. */
 export type OrderBuckets = {
-  /** Every sale still live in Order Review — excludes fulfilled and cancelled. */
+  /** Live sales since SALES_QUEUE_START — excludes fulfilled and cancelled.
+   *  Age-trimmed like the two queues: All is the current book of work, not the
+   *  whole import. What it no longer shows is in `backlog`, never nowhere. */
   all: Order[];
+  /** Every live sale no work queue is picking up: placed before
+   *  SALES_QUEUE_START, or held back by its queue's own rule. This is the tab
+   *  the rail's held-back note opens, and the reason trimming `all` loses
+   *  nothing — search is scoped to the open tab, so a row in no tab is a row
+   *  nobody can find. Oldest first. */
+  backlog: Order[];
   /** The live confirmation queue — see isPendingQueueWork. */
   pending: Order[];
   /** Pending sales the queue holds back: too old, or already refunded. Not
@@ -418,8 +426,16 @@ function alreadySettled(financialStatus: string | null | undefined): boolean {
  *
  *  Same shape as CANCELLATION_QUEUE_START in postShipment: a date before which
  *  rows are history rather than work. Nothing is deleted or hidden — an order
- *  before the cutoff keeps its row, stays in the All tab, stays searchable, and
- *  comes back the moment this date moves. Only the queues are trimmed.
+ *  before the cutoff keeps its row, moves to the Backlog tab, stays searchable
+ *  there, and comes back the moment this date moves.
+ *
+ *  All is trimmed by it too, as of 2026-09-10. It held 47 rows, 25 of them
+ *  older than anything anyone was working — #1001 zhiyue yu read "1245d
+ *  OVERDUE" — so the one tab meant to show the current book of work was three
+ *  quarters history. The 25 moved to Backlog rather than out of reach: 11 are
+ *  paid with nothing shipped, and the rail's search only ever looks in the tab
+ *  you have open, so dropping them from All without a home would have made an
+ *  unmet obligation unfindable.
  *
  *  Read against placed_at ?? created_at, the same basis the tab's own SLA uses,
  *  so an order's age means one thing on this screen. */
@@ -532,8 +548,19 @@ export function bucketOrders(
   const allPending  = active.filter(o => o.status === 'pending');
   const allApproved = active.filter(o => o.status === 'approved');
 
+  // Everything no live queue is picking up: too old for any tab, or held back
+  // by its own queue's rule. The pre-cutoff clause is what All sheds; the other
+  // two keep the rail's held-back note pointing somewhere true, including for a
+  // recent refunded order that Pending drops but All still shows.
+  const backlog = active.filter(o =>
+    !withinSalesQueue(o)
+    || (o.status === 'pending'  && !isPendingQueueWork(o))
+    || (o.status === 'approved' && !isConfirmedQueueWork(o)),
+  ).sort(byAgeAscending);
+
   return {
-    all:      active,
+    all:      active.filter(o => withinSalesQueue(o)),
+    backlog,
     pending:  allPending.filter(isPendingQueueWork),
     pendingBacklog: allPending.filter(o => !isPendingQueueWork(o)).sort(byAgeAscending),
     held:     active.filter(o => o.status === 'held'),

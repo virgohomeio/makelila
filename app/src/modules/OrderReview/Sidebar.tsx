@@ -7,10 +7,10 @@ import { useOrderCommAssessments } from '../../lib/orderComms';
 import { EmptyState } from '../../components/ui';
 import styles from './OrderReview.module.css';
 
-type Tab = 'pending' | 'held' | 'flagged' | 'approved' | 'all' | 'cancelled';
+type Tab = 'pending' | 'held' | 'flagged' | 'approved' | 'all' | 'backlog' | 'cancelled';
 
 export function Sidebar({
-  pending, pendingBacklog, held, flagged, approved, confirmedBacklog, all, cancelled,
+  pending, pendingBacklog, held, flagged, approved, confirmedBacklog, all, backlog, cancelled,
   selectedId,
   onSelect,
 }: {
@@ -24,6 +24,9 @@ export function Sidebar({
   approved: Order[];
   confirmedBacklog: Order[];
   all: Order[];
+  /** Live sales no queue is picking up — pre-cutoff, or held back by a queue.
+   *  All no longer shows these, so this is where they are found. */
+  backlog: Order[];
   /** Terminal — cancelled here or from the fulfillment queue. Already sorted
    *  newest-cancelled first by bucketOrders. */
   cancelled: Order[];
@@ -41,6 +44,7 @@ export function Sidebar({
                : tab === 'flagged'     ? flagged
                : tab === 'approved'    ? approved
                : tab === 'cancelled'   ? cancelled
+               : tab === 'backlog'     ? backlog
                : all;
 
   const visible = useMemo(() => {
@@ -53,8 +57,10 @@ export function Sidebar({
           (o.customer_email ?? '').toLowerCase().includes(q),
         );
     // Live tabs are a work queue, so they read best by order ref. Cancelled is
-    // a lookup list — the one you just killed should be at the top.
-    if (tab === 'cancelled') return filtered;
+    // a lookup list — the one you just killed should be at the top. Backlog
+    // arrives oldest-first from bucketOrders and stays that way: it is read to
+    // work through, and the oldest debt is the one to settle first.
+    if (tab === 'cancelled' || tab === 'backlog') return filtered;
     return [...filtered].sort((a, b) => a.order_ref.localeCompare(b.order_ref));
   }, [source, query, tab]);
 
@@ -69,6 +75,7 @@ export function Sidebar({
     { key: 'flagged',     label: 'Flagged',     count: flagged.length },
     { key: 'approved',    label: 'Confirmed',   count: approved.length },
     { key: 'all',         label: 'All',         count: all.length },
+    { key: 'backlog',     label: 'Backlog',     count: backlog.length },
     { key: 'cancelled',   label: 'Cancelled',   count: cancelled.length },
   ];
 
@@ -81,10 +88,10 @@ export function Sidebar({
 
   // Both work queues trim themselves, so the note belongs to whichever one you
   // are looking at. The other tabs are not queues and hold nothing back.
-  const backlog = tab === 'pending'  ? pendingBacklog
-                : tab === 'approved' ? confirmedBacklog
-                : [];
-  const backlogReason = tab === 'pending'
+  const queueBacklog = tab === 'pending'  ? pendingBacklog
+                     : tab === 'approved' ? confirmedBacklog
+                     : [];
+  const queueBacklogReason = tab === 'pending'
     ? `already refunded, or placed before ${cutoffLabel}`
     : `placed before ${cutoffLabel}`;
 
@@ -140,15 +147,15 @@ export function Sidebar({
 
       {/* A queue that quietly drops rows is a queue nobody can trust. When the
           cutoff is holding anything back, say how much and where it went. */}
-      {backlog.length > 0 && (
+      {queueBacklog.length > 0 && (
         <button
           type="button"
           className={styles.backlogNote}
-          onClick={() => setTab('all')}
-          title={`Held back from this queue: ${backlogReason}. `
-                 + 'They keep their rows and stay searchable — click to see them in All.'}
+          onClick={() => setTab('backlog')}
+          title={`Held back from this queue: ${queueBacklogReason}. `
+                 + 'They keep their rows and stay searchable — click to see them in Backlog.'}
         >
-          {backlog.length} held back from this queue — see All
+          {queueBacklog.length} held back from this queue — see Backlog
         </button>
       )}
 

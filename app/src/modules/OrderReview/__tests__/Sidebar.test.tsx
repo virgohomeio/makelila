@@ -78,6 +78,7 @@ describe('Sidebar', () => {
     render(
       <Sidebar
         all={[p1, p2, h1, f1]}
+        backlog={[]}
         pending={[p1, p2]}
         pendingBacklog={[]}
         held={[h1]}
@@ -120,7 +121,7 @@ describe('Sidebar', () => {
     const stale = mkOrder({ id: 'x1', status: 'pending', customer_name: 'Richard Ahola' });
     render(
       <Sidebar
-        all={[p1, stale]} pending={[p1]} pendingBacklog={[stale]}
+        all={[p1]} backlog={[stale]} pending={[p1]} pendingBacklog={[stale]}
         held={[]} flagged={[]} approved={[]} confirmedBacklog={[]} cancelled={[]}
         selectedId={null} onSelect={vi.fn()}
       />,
@@ -139,7 +140,7 @@ describe('Sidebar', () => {
     const stale = mkOrder({ id: 'a1', status: 'approved', customer_name: 'Tony Rinella' });
     render(
       <Sidebar
-        all={[p1, stale]} pending={[p1]} pendingBacklog={[]}
+        all={[p1]} backlog={[stale]} pending={[p1]} pendingBacklog={[]}
         held={[]} flagged={[]} approved={[]} confirmedBacklog={[stale]}
         cancelled={[]} selectedId={null} onSelect={vi.fn()}
       />,
@@ -167,7 +168,7 @@ describe('Sidebar', () => {
   it('shows empty-state copy when the active tab has no rows', () => {
     render(
       <Sidebar
-        all={[]} pending={[]} pendingBacklog={[]} held={[]} flagged={[]} approved={[]} confirmedBacklog={[]} cancelled={[]}
+        all={[]} backlog={[]} pending={[]} pendingBacklog={[]} held={[]} flagged={[]} approved={[]} confirmedBacklog={[]} cancelled={[]}
         selectedId={null} onSelect={vi.fn()}
       />,
     );
@@ -198,7 +199,7 @@ describe('Sidebar', () => {
     });
     render(
       <Sidebar
-        all={[]} pending={[]} pendingBacklog={[]} held={[]} flagged={[]} approved={[]}
+        all={[]} backlog={[]} pending={[]} pendingBacklog={[]} held={[]} flagged={[]} approved={[]}
  confirmedBacklog={[]}
         cancelled={[newer, older]}
         selectedId={null} onSelect={vi.fn()}
