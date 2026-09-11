@@ -8,6 +8,7 @@ import {
 } from './invoices';
 import { resolveRefundOrderId } from './refundedOrders';
 import { withdrawOrderFromQueue } from './fulfillment';
+import { cancelOpenOrdersForRefund, type AutoCancelOutcome } from './refundAutoCancel';
 
 const APP_BASE_URL = 'https://lila.vip';
 const REFUND_URL = `${APP_BASE_URL}/post-shipment?tab=refunds`;
@@ -1253,6 +1254,13 @@ async function currentUserId(): Promise<string> {
   return data.user.id;
 }
 
+/** Reporting hook for the auto-cancel that fires when a card is created. The
+ *  caller passes this when it has somewhere to show the result; the cancels
+ *  happen either way. */
+export type RefundRequestOpts = {
+  onAutoCancel?: (outcome: AutoCancelOutcome) => void;
+};
+
 export async function submitRefundRequest(input: {
   return_id?: string;
   order_id?: string;
@@ -1263,7 +1271,7 @@ export async function submitRefundRequest(input: {
   payment_method?: string;
   reason?: string;
   notes?: string;
-}): Promise<string> {
+}, opts: RefundRequestOpts = {}): Promise<string> {
   const userId = await currentUserId();
   const { data: created, error } = await supabase.from('refund_approvals').insert({
     ...input,
@@ -1287,6 +1295,37 @@ export async function submitRefundRequest(input: {
         event_id: `return-${input.order_id ?? Date.now()}`,
       },
     });
+
+  // The card now exists, so this customer is in the refund workflow — and
+  // nothing more should be on its way to them. Every order they still have in
+  // flight, sale or replacement, comes out of the fulfillment queue and is
+  // cancelled. See lib/refundAutoCancel.ts for what "in flight" means and why
+  // it is judged so conservatively.
+  //
+  // Best-effort, in the same sense as the audit log above: the card has already
+  // committed, and failing here would tell the operator the refund could not be
+  // created when it plainly was. It is NOT silent though — a failure is logged
+  // to the activity trail and handed to onAutoCancel, so the operator is told
+  // to cancel by hand rather than left believing it happened.
+  try {
+    const outcome = await cancelOpenOrdersForRefund({
+      refundId: newRefundId,
+      customerEmail: input.customer_email,
+      customerName: input.customer_name,
+    });
+    opts.onAutoCancel?.(outcome);
+  } catch (e) {
+    const message = (e as Error).message;
+    console.warn('Auto-cancelling the customer\'s open orders failed (non-fatal):', message);
+    try {
+      await logAction('refund_auto_cancel_failed', newRefundId, message);
+    } catch { /* the warning above is the last resort */ }
+    opts.onAutoCancel?.({
+      cancelled: [],
+      failed: [{ order_ref: 'this customer\'s open orders', message }],
+      skippedNoEmail: false,
+    });
+  }
 
   // FR-15 (revised 2026-08-04): NO customer email here. Compiling a case into
   // the refund pipeline is an internal move — the customer already got the
@@ -1334,7 +1373,9 @@ export async function defaultRefundAmountFromInvoice(
  *  (Julie) confirms or corrects it — and the payment method — at Finance
  *  Review, then it carries to Pedrum in the Refund Queue. Auto-fills the
  *  purchaser/customer from the return. */
-export async function compileReturnToRefund(r: ReturnRow): Promise<void> {
+export async function compileReturnToRefund(
+  r: ReturnRow, opts: RefundRequestOpts = {},
+): Promise<void> {
   const usePurchaser = r.is_purchaser === false;
   const email = ((usePurchaser && r.purchaser_email?.trim()) ? r.purchaser_email.trim() : r.customer_email) ?? undefined;
   const opening = await defaultRefundAmountFromInvoice(email, r.original_order_ref, r.refund_amount_usd);
@@ -1355,7 +1396,7 @@ export async function compileReturnToRefund(r: ReturnRow): Promise<void> {
     currency: opening.currency,
     reason: r.reason ?? undefined,
     // no payment_method — Finance sets the method at Finance Review.
-  });
+  }, opts);
   if (opening.invoice) {
     await logAction('refund_amount_from_invoice', refundId,
       `$${opening.amount.toFixed(2)} CAD from invoice #${opening.invoice.invoice_number}`);

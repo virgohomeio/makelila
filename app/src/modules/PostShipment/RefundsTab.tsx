@@ -21,6 +21,7 @@ import {
   UNIT_STATUS_LABEL, RETURN_DISPOSITION_META,
   type RefundApproval, type ReturnRow, type RefundMethod, type ReturnDisposition, type ReturnStatus, type ReturnCategory,
 } from '../../lib/postShipment';
+import { autoCancelBanner, type AutoCancelOutcome } from '../../lib/refundAutoCancel';
 import { useUnits, STATUS_META, type UnitStatus } from '../../lib/stock';
 import { Link } from 'react-router-dom';
 
@@ -38,7 +39,7 @@ const UNIT_STAGES: { value: ReturnStatus; label: string }[] = [
   { value: 'inspected',        label: 'Unit inspected' },
   { value: 'discarded',        label: 'Unit discarded by customer' },
 ];
-import { useQueuedReplacements, holdReplacement, type Order } from '../../lib/orders';
+import { useQueuedReplacements, cancelOrder, type Order } from '../../lib/orders';
 import {
   useOnboardDates, useCustomerIdByEmail, useCustomers, refundUsageWindow,
   resolveRefundParties, resolvePurchaserId,
@@ -129,6 +130,13 @@ export function RefundsTab() {
   const [financeModalId, setFinanceModalId] = useState<string | null>(null);
   const [openTicketId, setOpenTicketId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // What the auto-cancel did when the last card was created. Not an error —
+  // cancelling the customer's open orders is the intended effect — but the
+  // operator has to be told which orders just went, and told loudly if one
+  // would not go.
+  const [autoCancelNote, setAutoCancelNote] = useState<string | null>(null);
+  const reportAutoCancel = (outcome: AutoCancelOutcome) =>
+    setAutoCancelNote(autoCancelBanner(outcome));
 
   // Ticket opened from a refund card's history — resolved from the live list
   // so realtime edits keep it fresh.
@@ -411,7 +419,11 @@ export function RefundsTab() {
   // amount + payment method are set by Finance (Julie) at Finance Review.
   const compileReturn = async (r: ReturnRow) => {
     setError(null);
-    try { await compileReturnToRefund(r); await refreshApprovals(); }
+    setAutoCancelNote(null);
+    try {
+      await compileReturnToRefund(r, { onAutoCancel: reportAutoCancel });
+      await refreshApprovals();
+    }
     catch (e) { setError((e as Error).message); }
   };
 
@@ -493,6 +505,21 @@ export function RefundsTab() {
         </button>
         {error && <span className={styles.refundsError}>{error}</span>}
       </div>
+
+      {autoCancelNote && (
+        <div className={styles.autoCancelBanner}>
+          <span className={styles.replWarnIcon}>⛔</span>
+          <div className={styles.replWarnBody}>
+            <strong>Open orders cancelled</strong>
+            <span>{autoCancelNote}</span>
+          </div>
+          <button
+            className={styles.autoCancelDismiss}
+            onClick={() => setAutoCancelNote(null)}
+            title="Dismiss"
+          >✕</button>
+        </div>
+      )}
 
       <div ref={topScrollRef} className={styles.kanbanScrollTop} onScroll={syncFromTop}>
         <div style={{ width: scrollW }} />
@@ -580,6 +607,7 @@ export function RefundsTab() {
         <CreateManualRefundModal
           onClose={() => setShowRequestModal(false)}
           onError={setError}
+          onAutoCancel={reportAutoCancel}
           onMoved={refreshApprovals}
         />
       )}
@@ -1842,7 +1870,7 @@ function RefundDetailPanel({
   onOpenFinanceModal: (id: string) => void;
 }) {
   const [busy, setBusy] = useState(false);
-  const [holdBusy, setHoldBusy] = useState<string | null>(null);
+  const [cancelBusy, setCancelBusy] = useState<string | null>(null);
   const meta = REFUND_STATUS_META[refund.status];
   const cancellationId = cancellation?.id ?? null;
 
@@ -2013,35 +2041,43 @@ function RefundDetailPanel({
         <button onClick={onClose} className={styles.refundDetailClose} title="Close detail">✕</button>
       </div>
 
+      {/* Opening a refund card auto-cancels everything the customer still has
+          in flight (lib/refundAutoCancel.ts), so a replacement showing up here
+          is one the auto-cancel could not take: it was skipped because its
+          ticket reads as finished, it failed, or the card predates the
+          feature. Either way it needs a decision now, and the action is
+          Cancel — not the old Hold, which wrote a replacement_state the
+          database does not accept and so never held anything. */}
       {queuedReplacements.length > 0 && (
         <div className={styles.replWarnBanner}>
           <span className={styles.replWarnIcon}>⚠</span>
           <div className={styles.replWarnBody}>
             <strong>
               {queuedReplacements.length === 1
-                ? 'This customer has a queued replacement'
-                : `This customer has ${queuedReplacements.length} queued replacements`}
-              — hold before refunding
+                ? 'This customer still has a replacement queued'
+                : `This customer still has ${queuedReplacements.length} replacements queued`}
+              {' '}— cancel before this refund goes out
             </strong>
             <div className={styles.replWarnRow}>
               {queuedReplacements.map(rpl => (
                 <span key={rpl.id} className={styles.replWarnRef}>{rpl.order_ref} ({rpl.replacement_state})</span>
               ))}
-              {queuedReplacements.filter(rpl => rpl.replacement_state !== 'held').map(rpl => (
+              {queuedReplacements.map(rpl => (
                 <button
                   key={rpl.id}
                   className={styles.replWarnHoldBtn}
-                  disabled={holdBusy === rpl.id}
+                  disabled={cancelBusy === rpl.id}
                   onClick={() => {
-                    setHoldBusy(rpl.id);
-                    void holdReplacement(
+                    setCancelBusy(rpl.id);
+                    void cancelOrder(
                       rpl.id,
-                      `Held: refund in progress for ${refund.customer_name}`,
+                      `Cancelled: a refund is in progress for ${refund.customer_name}. `
+                      + 'Nothing ships to a customer we are paying back.',
                     ).catch(e => onError((e as Error).message))
-                      .finally(() => setHoldBusy(null));
+                      .finally(() => setCancelBusy(null));
                   }}
                 >
-                  {holdBusy === rpl.id ? '…' : `Hold ${rpl.order_ref}`}
+                  {cancelBusy === rpl.id ? '…' : `Cancel ${rpl.order_ref}`}
                 </button>
               ))}
             </div>
@@ -2519,10 +2555,13 @@ function RefundStep({ label, ts, note, active, negative }: {
 // (both are keyed to its id), so submit creates the card first and then files
 // them against it.
 function CreateManualRefundModal({
-  onClose, onError, onMoved,
+  onClose, onError, onAutoCancel, onMoved,
 }: {
   onClose: () => void;
   onError: (msg: string | null) => void;
+  /** What the card's creation cancelled — reported on the board behind the
+   *  modal, which is still standing when this closes. */
+  onAutoCancel: (outcome: AutoCancelOutcome) => void;
   /** Re-read the board once the card exists — see RefundDetailPanel. */
   onMoved: () => Promise<void>;
 }) {
@@ -2599,7 +2638,7 @@ function CreateManualRefundModal({
         currency: opening.currency,
         reason,
         notes: purchaser ? `Opened from directory entry "${picked?.full_name}" (user); refund books to the purchaser.` : undefined,
-      });
+      }, { onAutoCancel });
 
       if (files.length) {
         setStep(`Uploading ${files.length} file${files.length > 1 ? 's' : ''}…`);

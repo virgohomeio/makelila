@@ -1563,3 +1563,34 @@
 /* Finance modal banners */
 .financeModalWarn { background: #fffaf0; border: 1px solid #fbd38d; color: #c05621; padding: 10px 12px; border-radius: 6px; font-size: 13px; margin-bottom: 12px; }
 .financeModalError { background: var(--color-error-bg, #fff5f5); border: 1px solid #fc8181; color: var(--color-error, #9b2c2c); padding: 10px 12px; border-radius: 6px; font-size: 13px; margin-bottom: 12px; }
+
+/* Reports what creating a refund card just cancelled. Not an error — the
+   cancels are the intended effect — but it is a consequence the operator did
+   not click for, so it sits above the board until they dismiss it. Reuses
+   .replWarnIcon / .replWarnBody for the layout it shares with the queued-
+   replacement warning. */
+.autoCancelBanner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 0 0 10px;
+  padding: 10px 14px;
+  background: var(--color-error-bg);
+  border: 1px solid var(--color-error);
+  border-radius: var(--radius-md);
+  font-size: 12px;
+  color: var(--color-error);
+}
+.autoCancelDismiss {
+  flex-shrink: 0;
+  align-self: center;
+  padding: 2px 6px;
+  background: none;
+  border: none;
+  color: inherit;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.7;
+}
+.autoCancelDismiss:hover { opacity: 1; }
