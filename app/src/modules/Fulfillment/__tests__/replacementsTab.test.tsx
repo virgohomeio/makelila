@@ -11,6 +11,27 @@ import type { ServiceTicket } from '../../../lib/service';
 
 const createReplacementOrderMock = vi.fn().mockResolvedValue({ id: 'o9', order_ref: 'R-0009' });
 
+const LIVE_ORDER = {
+  id: 'o1', order_ref: 'R-0001', kind: 'replacement', status: 'pending',
+  customer_name: 'Sam', cogs_usd: 12.5, shipped_at: null, delivered_at: null,
+  created_at: '2026-06-02T00:00:00Z', linked_ticket_id: 't2', awaiting_batch_id: null,
+  line_items: [{ kind: 'part', part_id: 'p1', sku: 'HINGE', name: 'Lid Hinge', qty: 1, cost_per_unit_usd: 4.2 }],
+};
+
+// R-0051, prod: cancelled 2026-08-31 because the customer went to
+// return/refund. Cancelling keeps the row and only flips `status` — every
+// other column still reads like a live order awaiting a P100X.
+const CANCELLED_ORDER = {
+  id: 'o51', order_ref: 'R-0051', kind: 'replacement', status: 'cancelled',
+  customer_name: 'Amanda Acker', cogs_usd: 0, shipped_at: null, delivered_at: null,
+  created_at: '2026-07-08T00:00:00Z', linked_ticket_id: 't3',
+  replacement_state: 'awaiting', awaiting_batch_id: 'P100X',
+  line_items: [{ kind: 'unit_pending', batch: 'P100X', name: 'LILA (P100X, awaiting batch)', qty: 1, cost_usd: 314 }],
+};
+
+/** Mutable so a test can choose what the tab is handed. */
+let ordersFixture: unknown[] = [LIVE_ORDER];
+
 const TRIAGE_TICKET = {
   id: 't1',
   ticket_number: 'TKT-501',
@@ -59,15 +80,7 @@ vi.mock('../../../lib/orders', async () => {
     ...actual,
     createReplacementOrder: (...args: unknown[]) => createReplacementOrderMock(...(args as [])),
     useReplacementSummary: () => ({ summary: null, loading: false }),
-    useReplacementOrders: () => ({
-      orders: [
-        { id: 'o1', order_ref: 'R-0001', kind: 'replacement', status: 'pending',
-          customer_name: 'Sam', cogs_usd: 12.5, shipped_at: null, delivered_at: null,
-          created_at: '2026-06-02T00:00:00Z', linked_ticket_id: 't2',
-          line_items: [{ kind: 'part', part_id: 'p1', sku: 'HINGE', name: 'Lid Hinge', qty: 1, cost_per_unit_usd: 4.2 }] },
-      ],
-      loading: false,
-    }),
+    useReplacementOrders: () => ({ orders: ordersFixture, loading: false }),
   };
 });
 vi.mock('../../../lib/service', async () => {
@@ -118,7 +131,10 @@ const renderTab = () =>
   );
 
 describe('Fulfillment > Replacements — still ticket-driven', () => {
-  beforeEach(() => createReplacementOrderMock.mockClear());
+  beforeEach(() => {
+    createReplacementOrderMock.mockClear();
+    ordersFixture = [LIVE_ORDER];
+  });
 
   it('renders the replacement queue, not the old PostShipment tab', () => {
     renderTab();
@@ -159,5 +175,46 @@ describe('Fulfillment > Replacements — still ticket-driven', () => {
       customer_name: 'Linda',
       line_items: [expect.objectContaining({ kind: 'part', sku: 'HINGE' })],
     });
+  });
+});
+
+// Prod, 2026-09-11: Amanda Acker's R-0051 was cancelled on 2026-08-31 and went
+// on sitting in this table with an "awaiting batch" chip and no sign it was
+// cancelled — the tab telling the operator she was queued for a P100X eleven
+// days after someone had decided she was not.
+describe('Fulfillment > Replacements — a cancelled replacement is not queued work', () => {
+  beforeEach(() => {
+    createReplacementOrderMock.mockClear();
+    ordersFixture = [LIVE_ORDER, CANCELLED_ORDER];
+  });
+
+  it('keeps a cancelled order out of the default list', () => {
+    renderTab();
+    expect(screen.getByText('R-0001')).toBeInTheDocument();
+    expect(screen.queryByText('R-0051')).not.toBeInTheDocument();
+    expect(screen.queryByText('Amanda Acker')).not.toBeInTheDocument();
+  });
+
+  it('never labels it "awaiting batch" — that chip is a claim on a unit', () => {
+    renderTab();
+    fireEvent.click(screen.getByRole('button', { name: 'awaiting batch' }));
+    expect(screen.queryByText('R-0051')).not.toBeInTheDocument();
+  });
+
+  it('still reaches it under Cancelled, reading as cancelled', () => {
+    renderTab();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancelled' }));
+    expect(screen.getByText('R-0051')).toBeInTheDocument();
+    expect(screen.getByText('cancelled')).toBeInTheDocument();
+    // The live one is not cancelled, so it is not in this view.
+    expect(screen.queryByText('R-0001')).not.toBeInTheDocument();
+  });
+
+  it('does not count it as open replacement demand', () => {
+    renderTab();
+    // "Awaiting batch" KPI counts live orders only; the cancelled P100X is the
+    // only awaiting-batch row in the fixture, so the count must be zero.
+    const kpi = screen.getByText('Awaiting batch').closest('div')?.parentElement;
+    expect(kpi?.textContent).toMatch(/0/);
   });
 });

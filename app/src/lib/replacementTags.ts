@@ -105,13 +105,23 @@ export function replacementItemTags(
  *   - unit whose batch is available   → "Unit"             (e.g. P100, P150)
  *   - any other / unnamed parts       → "Parts/Consumables"
  *  `isPendingBatch(batch)` is true when that batch has no arrived stock yet
- *  (caller derives it from batches.arrived_at). Every order with line_items —
- *  even "unspecified parts" — gets a stage; only a truly empty row is null. */
+ *  (caller derives it from batches.arrived_at). Every LIVE order with
+ *  line_items — even "unspecified parts" — gets a stage; a truly empty row and
+ *  a cancelled one are null.
+ *
+ *  Cancelled is null rather than a stage of its own because every stage here is
+ *  a claim on stock: "awaiting batch" says a unit is owed, "Parts/Consumables"
+ *  says a part is. Amanda Acker's R-0051 was cancelled on 2026-08-31 and kept
+ *  wearing an "awaiting batch" chip in Fulfillment › Replacements, which is the
+ *  board telling an operator she was queued for a P100X eleven days after
+ *  someone had decided she was not. `status` is in the Pick so no caller can
+ *  ask the question without supplying the answer. */
 export function replacementStageTag(
-  o: Pick<Order, 'line_items'>,
+  o: Pick<Order, 'line_items' | 'status'>,
   tags: string[],
   isPendingBatch: (batch: string) => boolean,
 ): StageTag | null {
+  if (o.status === 'cancelled') return null;
   const unitTags = tags.filter(isUnitTag);
   if (unitTags.length > 0) {
     return unitTags.some(isPendingBatch) ? 'awaiting batch' : 'Unit';

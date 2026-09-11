@@ -49,6 +49,18 @@ describe('replacementStageTag', () => {
   it('truly empty → null', () => {
     expect(replacementStageTag(order([]), [], isPending)).toBeNull();
   });
+  it('cancelled → null, whatever the items still say (R-0051, Amanda Acker)', () => {
+    // Her cancelled P100X kept rendering an "awaiting batch" chip in
+    // Fulfillment > Replacements, which is the tab saying she is queued for a
+    // unit nobody is building for her. A cancelled order has no live stage.
+    expect(replacementStageTag(
+      order([{ kind: 'unit_pending', batch: 'P100X' }], { awaiting_batch_id: 'P100X', status: 'cancelled' }),
+      ['P100X'], isPending,
+    )).toBeNull();
+    expect(replacementStageTag(
+      order([{ kind: 'part', sku: 'LILA-HOPPER' }], { status: 'cancelled' }), ['hopper'], isPending,
+    )).toBeNull();
+  });
 });
 
 describe('replacementQueueKinds', () => {

@@ -37,11 +37,20 @@ function stageFor(o: Order): Stage {
 // Filter by the operator-facing item stage (spec 2026-06-08), not the pipeline
 // status. Every replacement is a unit (ready→Unit / pending→awaiting batch) or
 // parts/consumables.
-const STAGE_FILTERS: { key: 'all' | StageTag; label: string }[] = [
+//
+// 'Cancelled' is the exception, and sits apart from the stages on purpose: it
+// answers "what happened to this order", not "what is in the box". Cancelled
+// rows are excluded from every other view including All — this table is the
+// list of replacements someone is waiting on, and a cancelled order is the one
+// thing on it nobody is. They stay reachable here because the row is still the
+// record of what was promised and withdrawn.
+type Filter = 'all' | StageTag | 'cancelled';
+const STAGE_FILTERS: { key: Filter; label: string }[] = [
   { key: 'all',                label: 'All' },
   { key: 'Unit',               label: 'Unit' },
   { key: 'awaiting batch',     label: 'awaiting batch' },
   { key: 'Parts/Consumables',  label: 'Parts/Consumables' },
+  { key: 'cancelled',          label: 'Cancelled' },
 ];
 
 // Backlog #41 — topics that signal "this ticket is asking for a replacement"
@@ -113,7 +122,7 @@ export default function ReplacementTab() {
       partRows, partsOnHand, partsQueued, partsToGet,
     };
   }, [orders, units, parts]);
-  const [filter, setFilter] = useState<'all' | StageTag>('all');
+  const [filter, setFilter] = useState<Filter>('all');
   const [openTicketId, setOpenTicketId] = useState<string | null>(null);
   const [queueing, setQueueing] = useState<string | null>(null);
 
@@ -185,8 +194,12 @@ export default function ReplacementTab() {
   }, [tickets]);
 
   const filtered = useMemo(() => {
-    if (filter === 'all') return orders;
-    return orders.filter(o => {
+    if (filter === 'cancelled') return orders.filter(o => o.status === 'cancelled');
+    // Every other view is work still owed, so cancelled never appears in it —
+    // not even under All. See STAGE_FILTERS.
+    const live = orders.filter(o => o.status !== 'cancelled');
+    if (filter === 'all') return live;
+    return live.filter(o => {
       const tags = replacementItemTags(o);
       const st = replacementStageTag(o, tags, b => pendingBatchIds.has(b) || !batchById.has(b));
       return st === filter;
@@ -354,7 +367,9 @@ export default function ReplacementTab() {
       </div>
 
       {filtered.length === 0 ? (
-        <div className={styles.empty}>No replacement orders.</div>
+        <div className={styles.empty}>
+          {filter === 'cancelled' ? 'No cancelled replacement orders.' : 'No replacement orders.'}
+        </div>
       ) : (
         <table className={styles.table}>
           <thead>
