@@ -793,9 +793,17 @@ export function useReplacementSummary(orderId: string | null): { summary: Replac
   return { summary, loading };
 }
 
-/** All un-shipped replacement orders in 'ready' or 'awaiting' state.
- * Used by ReturnsTab/RefundsTab (#83) to warn when a customer has a queued
- * replacement that should be held before their refund is processed. */
+/** All un-shipped, un-cancelled replacement orders in 'ready' or 'awaiting'
+ * state. Used by ReturnsTab/RefundsTab (#83) to warn when a customer has a
+ * queued replacement that should be held before their refund is processed.
+ *
+ * `status` must be filtered as well as `replacement_state`: cancelling a
+ * replacement keeps the row and only flips `status`, leaving `replacement_state`
+ * at whatever it was. Amanda Acker's R-0051 was cancelled on 2026-08-31 with the
+ * reason "She is queued for return/refund" and went on warning Returns off her
+ * refund for eleven days — the warning arguing against the very thing that
+ * caused it. Same `.neq('status','cancelled')` the other replacement lookups
+ * here already carry. */
 export function useQueuedReplacements(): { replacements: Order[]; loading: boolean } {
   const [replacements, setReplacements] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
@@ -814,6 +822,7 @@ export function useQueuedReplacements(): { replacements: Order[]; loading: boole
           .select('*')
           .eq('kind', 'replacement')
           .in('replacement_state', ['ready', 'awaiting'])
+          .neq('status', 'cancelled')
           .is('shipped_at', null)
           .order('created_at', { ascending: true }),
         supabase.from('service_tickets').select('id').eq('status', 'closed'),
@@ -840,6 +849,7 @@ export function useQueuedReplacements(): { replacements: Order[]; loading: boole
                 const isQueued =
                   updated.kind === 'replacement' &&
                   (updated.replacement_state === 'ready' || updated.replacement_state === 'awaiting') &&
+                  updated.status !== 'cancelled' &&
                   !updated.shipped_at;
                 const idx = prev.findIndex(r => r.id === updated.id);
                 if (!isQueued) return prev.filter(r => r.id !== updated.id);
