@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react';
 import type { Order } from '../../lib/orders';
 import { disposition, needInfo, addOrderNote, orderUrgency, orderDue, cancelOrder, uncancelOrder } from '../../lib/orders';
+import { releaseHold } from '../../lib/fulfillment';
 import { useAuth } from '../../lib/auth';
 import { CustomerCard } from './detail/CustomerCard';
 import { AddressCard }  from './detail/AddressCard';
@@ -31,7 +32,9 @@ export function Detail({
 
   const wrap = async (
     label: string,
-    fn: () => Promise<void>,
+    /** A string return is appended to the success banner — for actions whose
+     *  outcome is only known once they have run (see onReleaseHold). */
+    fn: () => Promise<void | string>,
     noteLabel?: string,
     reason?: string,
     /** Dispositioning moves on to the next order in the queue, which is the
@@ -41,12 +44,15 @@ export function Detail({
     opts?: { stay?: boolean },
   ) => {
     try {
-      await fn();
+      const detail = await fn();
       const trimmed = reason?.trim();
       if (noteLabel && trimmed) {
         await addOrderNote(order.id, authorName, `${noteLabel}: ${trimmed}`);
       }
-      setBanner({ variant: 'success', message: `${label} · ${order.customer_name}` });
+      setBanner({
+        variant: 'success',
+        message: `${label}${detail ? ` — ${detail}` : ''} · ${order.customer_name}`,
+      });
       if (!opts?.stay) onAfterDisposition();
     } catch (err) {
       setBanner({
@@ -97,6 +103,22 @@ export function Detail({
           onHold={(reason) => wrap('Held',    () => disposition(order, 'held',    reason), 'Held', reason)}
           onNeedInfo={(note) => wrap('Need-info logged', () => needInfo(order, note), 'Need info', note)}
           onCancelOrder={(reason) => wrap('Cancelled', () => cancelOrder(order.id, reason), 'Cancelled', reason)}
+          // Like un-cancelling, this is a repair rather than queue work: the
+          // operator is fixing THIS order and needs to watch it land in
+          // Pending, so the panel stays put instead of advancing.
+          onReleaseHold={order.status === 'held' ? () => wrap(
+            'Hold released',
+            async () => {
+              const r = await releaseHold(order.id);
+              const where = `back to ${r.landing.label}`;
+              if (!r.queueRowRemoved) return where;
+              const unit = r.releasedSerial ? `, unit ${r.releasedSerial} back to stock` : '';
+              return `${where}; its open fulfillment row was pulled${unit}`;
+            },
+            'Hold released',
+            'moved back to Pending for review',
+            { stay: true },
+          ) : undefined}
           onUncancel={isCancelled ? () => wrap(
             'Moved back to Pending',
             () => uncancelOrder(order.id),

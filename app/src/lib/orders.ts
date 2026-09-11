@@ -1462,8 +1462,15 @@ export async function queueReplacementForFulfillment(
  *
  *  Status goes back to 'pending' in both cases: leaving it 'approved' would
  *  strand the order in Confirmed with no queue row, and re-approving it would
- *  not re-fire the auto_enqueue_on_approve trigger. */
-export async function returnOrderToReview(orderId: string): Promise<ReviewLanding> {
+ *  not re-fire the auto_enqueue_on_approve trigger.
+ *
+ *  `extraPatch` rides along on the same UPDATE rather than forcing a caller to
+ *  issue a second write against the row it just moved — releaseHold uses it to
+ *  clear the disposition stamps in the same breath as the status. */
+export async function returnOrderToReview(
+  orderId: string,
+  extraPatch?: Record<string, unknown>,
+): Promise<ReviewLanding> {
   const { data: order, error: oErr } = await supabase
     .from('orders')
     .select('id, order_ref, kind, line_items')
@@ -1488,6 +1495,8 @@ export async function returnOrderToReview(orderId: string): Promise<ReviewLandin
         : 'Fulfillment › Replacements › Awaiting Stock / Batch',
     };
   }
+
+  Object.assign(patch, extraPatch);
 
   const { error } = await supabase.from('orders').update(patch).eq('id', orderId);
   if (error) throw new Error(`Failed to move the order back to Order Review: ${error.message}`);

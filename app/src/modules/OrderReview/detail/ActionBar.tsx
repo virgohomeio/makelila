@@ -31,6 +31,7 @@ export function ActionBar({
   onNeedInfo,
   onCancelOrder,
   onUncancel,
+  onReleaseHold,
   confirmReady = true,
 }: {
   order: Order;
@@ -41,11 +42,14 @@ export function ActionBar({
   onCancelOrder: (reason: string) => void;
   /** Only the Cancelled view passes this — the way back out of a mis-click. */
   onUncancel?: () => void;
+  /** Only a held order passes this — the way back out of a hold. */
+  onReleaseHold?: () => void;
   confirmReady?: boolean;
 }) {
   const [expanded, setExpanded] = useState<ExpandedAction>(null);
   const [reason, setReason] = useState('');
   const [confirmingUncancel, setConfirmingUncancel] = useState(false);
+  const [confirmingRelease, setConfirmingRelease] = useState(false);
 
   const submit = () => {
     if (expanded === 'flag') {
@@ -132,6 +136,38 @@ export function ActionBar({
             ? 'Confirm this order'
             : `Clear the blockers below first — ${CRITERIA_COUNT} criteria must be met`}
         >✓ Confirm order</button>
+
+        {/* Holding is one click; until this button existed, un-holding was not
+            possible from the app at all. It sits beside Confirm because those
+            are the only two ways out of the Held tab, and it carries the same
+            inline confirm step as the uncancel above — a release moves the
+            order AND pulls its fulfillment row, which is too much to do on a
+            stray click. */}
+        {order.status === 'held' && onReleaseHold && (confirmingRelease ? (
+          <span className={styles.uncancelConfirm}>
+            <span className={styles.uncancelAsk}>
+              Release the hold on {order.order_ref}? It goes back to Pending for review, and
+              any unshipped fulfillment row it still has is pulled.
+            </span>
+            <button
+              type="button"
+              className={styles.reasonCancel}
+              onClick={() => setConfirmingRelease(false)}
+            >Discard</button>
+            <button
+              type="button"
+              className={styles.reasonSubmit}
+              onClick={() => { setConfirmingRelease(false); onReleaseHold(); }}
+            >Release hold</button>
+          </span>
+        ) : (
+          <button
+            type="button"
+            className={`${styles.actionBtn} ${styles.actionRelease}`}
+            onClick={() => setConfirmingRelease(true)}
+            title="Release this hold — the order goes back to Pending for review"
+          >▶ Release hold</button>
+        ))}
 
         <button
           type="button"

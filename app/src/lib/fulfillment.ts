@@ -638,11 +638,11 @@ export async function setQueuePriority(queueId: string, priority: boolean): Prom
 /** Release the unit a queue row picked at step 1 back into ready stock. Mirrors
  *  the step-2 rewind in goBackStep: only a unit that is still 'reserved' is
  *  touched, so a backfilled pairing (already 'shipped') is left alone. */
-async function releaseAssignedUnit(serial: string | null): Promise<void> {
-  if (!serial) return;
+async function releaseAssignedUnit(serial: string | null): Promise<boolean> {
+  if (!serial) return false;
   const { data: unit } = await supabase
     .from('units').select('status').eq('serial', serial).maybeSingle();
-  if (unit?.status !== 'reserved') return;
+  if (unit?.status !== 'reserved') return false;
   const { error: uErr } = await supabase
     .from('units')
     .update({ status: 'ready', customer_order_ref: null, customer_name: null })
@@ -653,6 +653,7 @@ async function releaseAssignedUnit(serial: string | null): Promise<void> {
     .update({ status: 'available', updated_at: new Date().toISOString() })
     .eq('serial', serial);
   if (sErr) throw new Error(`Failed to free the shelf slot for ${serial}: ${sErr.message}`);
+  return true;
 }
 
 type LeavingQueueRow = {
@@ -715,6 +716,83 @@ export async function withdrawOrderFromQueue(orderId: string, reason: string): P
   await releaseAssignedUnit(row.assigned_serial);
   await logAction('fq_withdrawn_refunded', row.id, reason);
   return true;
+}
+
+/** What releasing a hold actually did, so the banner can say it in one line. */
+export type HoldRelease = {
+  landing: ReviewLanding;
+  /** True when a live fulfillment_queue row was pulled as part of the release. */
+  queueRowRemoved: boolean;
+  /** Serial actually put back into sellable stock, if there was one. */
+  releasedSerial: string | null;
+};
+
+/** Order Review action — "Release hold". The way back out of a hold, and the
+ *  mirror of disposition(order, 'held').
+ *
+ *  A hold had no exit. Holding is one click, but the only way back out of the
+ *  Held tab was Confirm — which is gated on the pre-ship checks and sends the
+ *  order straight to fulfillment. So an order held precisely BECAUSE it should
+ *  never have been confirmed (#1214, confirmed and held 40 seconds apart) had
+ *  nowhere to go, and the only fix was an UPDATE run by hand against the
+ *  database.
+ *
+ *  A release returns the order to review, not to Confirmed: a hold means
+ *  somebody stopped this order, so it earns its confirmation again rather than
+ *  inheriting the one that was in place before.
+ *
+ *  It also pulls the queue row. A hold placed after a mis-click leaves one
+ *  behind — auto_enqueue_approved_order fires on the confirm and nothing
+ *  withdraws the row when the order is held again, so #1214 sat Held in Sales
+ *  and step-1 Ready-to-ship in Fulfillment at the same time for 29 days. An
+ *  order sitting in review must not still be pickable, so the row goes and its
+ *  machine goes back on the shelf.
+ *
+ *  An order that has already shipped is refused outright: releasing it would
+ *  put a shipped order back into Pending, and the box is already gone. */
+export async function releaseHold(orderId: string, note?: string): Promise<HoldRelease> {
+  await currentUserId();
+
+  const { data: order, error: oErr } = await supabase
+    .from('orders')
+    .select('id, order_ref, status')
+    .eq('id', orderId)
+    .single();
+  if (oErr || !order) throw new Error(`Order not found: ${oErr?.message ?? 'no row'}`);
+  if (order.status !== 'held') throw new Error('This order is not on hold.');
+
+  // Queue first. If this half refuses, the order stays Held rather than landing
+  // in Pending with a live queue row still pointing at it.
+  const { data: queued, error: qErr } = await supabase
+    .from('fulfillment_queue')
+    .select('id, order_id, step, assigned_serial, fulfilled_at')
+    .eq('order_id', orderId)
+    .maybeSingle();
+  if (qErr) throw new Error(`Could not check the fulfillment queue: ${qErr.message}`);
+
+  const row = (queued ?? null) as LeavingQueueRow | null;
+  if (row && (row.step === 6 || row.fulfilled_at)) {
+    throw new Error(
+      `${order.order_ref} has already shipped, so its hold cannot be released here — `
+      + 'handle it as a return or a refund instead.',
+    );
+  }
+
+  let releasedSerial: string | null = null;
+  if (row) {
+    await deleteQueueRow(row.id);
+    if (await releaseAssignedUnit(row.assigned_serial)) releasedSerial = row.assigned_serial;
+  }
+
+  // 'pending' is the intake state, so the disposition stamps go with it: the
+  // order is back to having no decision on record, not still carrying the hold's.
+  const landing = await returnOrderToReview(orderId, {
+    dispositioned_by: null,
+    dispositioned_at: null,
+  });
+
+  await logAction('order_hold_released', order.order_ref, note?.trim() || landing.label);
+  return { landing, queueRowRemoved: !!row, releasedSerial };
 }
 
 /** Queue header action — "Cancel Order". The whole order is dead: it leaves the

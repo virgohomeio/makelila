@@ -1,12 +1,20 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
-const { dispositionMock, needInfoMock, addOrderNoteMock, useOrderNotesMock, cancelOrderMock } = vi.hoisted(() => ({
+const {
+  dispositionMock, needInfoMock, addOrderNoteMock, useOrderNotesMock, cancelOrderMock,
+  releaseHoldMock,
+} = vi.hoisted(() => ({
   dispositionMock:  vi.fn(() => Promise.resolve()),
   needInfoMock:     vi.fn(() => Promise.resolve()),
   addOrderNoteMock: vi.fn(() => Promise.resolve()),
   useOrderNotesMock: vi.fn(() => ({ notes: [], loading: false })),
   cancelOrderMock:  vi.fn(() => Promise.resolve()),
+  releaseHoldMock:  vi.fn(() => Promise.resolve({
+    landing: { status: 'pending', replacement_state: null, label: 'Order Review › Pending' },
+    queueRowRemoved: true,
+    releasedSerial: '00019',
+  })),
 }));
 
 vi.mock('../../../lib/orders', async () => {
@@ -19,6 +27,11 @@ vi.mock('../../../lib/orders', async () => {
     useOrderNotes:  useOrderNotesMock,
     cancelOrder:    cancelOrderMock,
   };
+});
+
+vi.mock('../../../lib/fulfillment', async () => {
+  const actual = await vi.importActual<typeof import('../../../lib/fulfillment')>('../../../lib/fulfillment');
+  return { ...actual, releaseHold: releaseHoldMock };
 });
 
 // The pre-confirm panel subscribes to this order's quote history; the Detail
@@ -156,6 +169,60 @@ describe('Detail', () => {
       expect(dispositionMock).not.toHaveBeenCalled();
     });
     expect(addOrderNoteMock).toHaveBeenCalledWith('order-1', 'Test User', 'Need info: driveway photo');
+  });
+
+  // A hold used to be a one-way door: the Held tab's only exit was Confirm,
+  // which is gated on the pre-ship checks and ships the order. These cover the
+  // way back out.
+  describe('Release hold', () => {
+    const heldOrder: Order = { ...order, status: 'held' };
+
+    it('is offered only on a held order', () => {
+      const { unmount } = render(<Detail order={order} onAfterDisposition={vi.fn()} />);
+      expect(screen.queryByRole('button', { name: /release hold/i })).toBeNull();
+      unmount();
+
+      render(<Detail order={heldOrder} onAfterDisposition={vi.fn()} />);
+      expect(screen.getByRole('button', { name: /release hold/i })).toBeInTheDocument();
+    });
+
+    it('asks first, and does nothing if the confirm is discarded', () => {
+      render(<Detail order={heldOrder} onAfterDisposition={vi.fn()} />);
+      fireEvent.click(screen.getByRole('button', { name: /▶ release hold/i }));
+      expect(screen.getByText(/goes back to Pending for review/i)).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: /^discard$/i }));
+      expect(releaseHoldMock).not.toHaveBeenCalled();
+    });
+
+    it('releases the hold, notes it, and says the queue row went too', async () => {
+      const onAfter = vi.fn();
+      render(<Detail order={heldOrder} onAfterDisposition={onAfter} />);
+      fireEvent.click(screen.getByRole('button', { name: /▶ release hold/i }));
+      fireEvent.click(screen.getByRole('button', { name: /^release hold$/i }));
+
+      await waitFor(() => {
+        expect(releaseHoldMock).toHaveBeenCalledWith('order-1');
+      });
+      expect(addOrderNoteMock).toHaveBeenCalledWith(
+        'order-1', 'Test User', 'Hold released: moved back to Pending for review',
+      );
+      // The banner names the second thing that happened: an operator who does
+      // not know a queue row existed still needs to be told it is gone.
+      expect(await screen.findByText(/fulfillment row was pulled/i)).toBeInTheDocument();
+      expect(screen.getByText(/unit 00019 back to stock/i)).toBeInTheDocument();
+      // Repairing THIS order is not queue work — the panel stays put.
+      expect(onAfter).not.toHaveBeenCalled();
+    });
+
+    it('surfaces a refusal instead of pretending the hold lifted', async () => {
+      releaseHoldMock.mockRejectedValueOnce(new Error('#1214 has already shipped'));
+      render(<Detail order={heldOrder} onAfterDisposition={vi.fn()} />);
+      fireEvent.click(screen.getByRole('button', { name: /▶ release hold/i }));
+      fireEvent.click(screen.getByRole('button', { name: /^release hold$/i }));
+
+      expect(await screen.findByText(/already shipped/i)).toBeInTheDocument();
+      expect(addOrderNoteMock).not.toHaveBeenCalled();
+    });
   });
 
   // Cancelling is terminal — an order can be killed straight from Sales, but

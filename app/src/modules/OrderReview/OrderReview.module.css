@@ -701,6 +701,15 @@
 }
 .actionUncancel:hover { border-color: var(--color-ink-faint); color: var(--color-ink); }
 
+/* The way back out of a hold. Same quiet outline as the uncancel: a held order
+   is usually held on purpose, so this must not compete with Confirm. */
+.actionRelease {
+  background: var(--color-raised);
+  border-color: var(--color-border);
+  color: var(--color-ink-muted);
+}
+.actionRelease:hover { border-color: var(--color-ink-faint); color: var(--color-ink); }
+
 /* Confirm step, inline rather than a browser confirm(): the question names the
    order and says what happens, which a native dialog cannot. */
 .uncancelConfirm {
