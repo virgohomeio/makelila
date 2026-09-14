@@ -5,7 +5,7 @@ import styles from '../Fulfillment.module.css';
 type DragHandlers = React.ComponentProps<typeof Slot>['handlers'];
 
 /** A skid at VentureLab holds five machines in a 3-over-2 stack, and so does a
- *  pallet on the Flex Space manifest. The two shipments that arrived with no
+ *  pallet on the 3PL manifest. The two shipments that arrived with no
  *  manifest are a single undifferentiated group of ninety — those render as a
  *  wrapping grid rather than being carved into pallets nobody counted. */
 const STANDARD_SLOTS = 5;

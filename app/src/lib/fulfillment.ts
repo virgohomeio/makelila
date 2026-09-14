@@ -24,9 +24,9 @@ export const SHELF_SECTIONS: ReadonlyArray<{
   { location: 'VentureLab', groupNoun: 'skid',
     blurb: 'Our own floor. Machines here can be picked and shipped by the team.' },
   { location: 'Flex Space Logistics', groupNoun: 'pallet',
-    blurb: 'Held at the 3PL, grouped by the pallet each unit arrived on.' },
+    blurb: 'No stock held here \u2014 every pallet moved to EZTrans on 14 Sep 2026.' },
   { location: 'EZTrans', groupNoun: 'pallet',
-    blurb: 'Not yet integrated \u2014 no stock is tracked here.', pending: true },
+    blurb: 'Held at the 3PL, grouped by the pallet each unit arrived on.' },
   { location: 'US Warehouse', groupNoun: 'pallet',
     blurb: 'Not yet integrated \u2014 no stock is tracked here.', pending: true },
 ];

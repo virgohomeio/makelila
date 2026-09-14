@@ -9,7 +9,7 @@ import styles from '../Fulfillment.module.css';
 
 type Pos = { skid: string; slot_index: number };
 
-/** A1 < A2 < A10 (not A1 < A10 < A2), and FS-P01 < FS-P14 < FS-S2. */
+/** A1 < A2 < A10 (not A1 < A10 < A2), and EZ-P01 < EZ-P14 < EZ-S2. */
 function compareSkids(a: string, b: string): number {
   const split = (s: string) => s.match(/(\d+|\D+)/g) ?? [s];
   const as = split(a), bs = split(b);
@@ -179,9 +179,9 @@ export default function Shelf() {
                       skid={skid}
                       slots={groupSlots}
                       location={section.location}
-                      // Flex Space groups that aren't a real pallet are the
+                      // 3PL groups that aren't a real pallet are the
                       // shipments the manufacturer sent with no manifest.
-                      note={skid.startsWith('FS-S') ? 'no pallet manifest' : undefined}
+                      note={/^(FS|EZ)-S/.test(skid) ? 'no pallet manifest' : undefined}
                       dragSource={source}
                       dragTarget={target}
                       handlers={handlers}
