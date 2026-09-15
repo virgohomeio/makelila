@@ -76,12 +76,15 @@ export function returnStatusAllowsRefund(status: ReturnStatus): boolean {
 //   • "Return Form Submitted" (the PRD's Intake / New stage) — a card just
 //     auto-generated from the customer's form, before the unit is physically
 //     back: created / pickup_scheduled / picked_up.
-//   • "Return & Inspection" — the returned unit is physically back and being
-//     inspected: received / inspected.
-// Terminal / post-request statuses (refunded, denied, closed, discarded) belong
-// to neither pre-refund column and return null.
+//   • "Return & Inspection" — the unit question is settled and the case is
+//     ready to compile: received / inspected, or discarded (BR-7 — the
+//     customer disposed of a defective unit, so nothing is coming back but the
+//     refund is still owed). Treating 'discarded' as terminal here made a card
+//     vanish from the board the moment its unit status was set to it.
+// Terminal / post-request statuses (refunded, denied, closed) belong to neither
+// pre-refund column and return null.
 export const RETURN_INTAKE_STATUSES: ReturnStatus[] = ['created', 'pickup_scheduled', 'picked_up'];
-export const RETURN_INSPECTION_STATUSES: ReturnStatus[] = ['received', 'inspected'];
+export const RETURN_INSPECTION_STATUSES: ReturnStatus[] = ['received', 'inspected', 'discarded'];
 
 export type PreRefundStage = 'intake' | 'inspection';
 

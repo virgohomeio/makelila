@@ -100,10 +100,13 @@ describe('returnStatusAllowsRefund', () => {
 // FR-1 (PRD §4): the two Account-Manager-owned pre-manager columns. A return
 // with no refund request yet belongs to "Return Form Submitted" (Intake / New)
 // or "Return & Inspection" by its unit status. Terminal statuses map to neither.
+// 'discarded' is not terminal here: the unit question is settled (BR-7) but the
+// refund is still owed, so it waits in Return & Inspection to be compiled —
+// mapping it to null made the card vanish from the board (Amanda Acker, #1172).
 describe('preRefundStage (FR-1 board split)', () => {
   const intake: ReturnStatus[] = ['created', 'pickup_scheduled', 'picked_up'];
-  const inspection: ReturnStatus[] = ['received', 'inspected'];
-  const neither: ReturnStatus[] = ['refunded', 'denied', 'closed', 'discarded'];
+  const inspection: ReturnStatus[] = ['received', 'inspected', 'discarded'];
+  const neither: ReturnStatus[] = ['refunded', 'denied', 'closed'];
 
   it.each(intake)('routes "%s" to the Return Form Submitted (intake) column', (status) => {
     expect(preRefundStage(status)).toBe('intake');
@@ -123,7 +126,7 @@ describe('preRefundStage (FR-1 board split)', () => {
     const overlap = RETURN_INTAKE_STATUSES.filter(s => RETURN_INSPECTION_STATUSES.includes(s));
     expect(overlap).toEqual([]);
     expect([...RETURN_INTAKE_STATUSES, ...RETURN_INSPECTION_STATUSES].sort()).toEqual(
-      ['created', 'inspected', 'picked_up', 'pickup_scheduled', 'received'].sort(),
+      ['created', 'discarded', 'inspected', 'picked_up', 'pickup_scheduled', 'received'].sort(),
     );
   });
 });

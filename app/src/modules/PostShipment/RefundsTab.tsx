@@ -298,8 +298,8 @@ export function RefundsTab() {
   // FR-1 (PRD §4): the two Account-Manager-owned columns before Manager Review.
   // A return without a refund request yet is split by unit status into
   // "Return Form Submitted" (Intake / New — form in, unit not yet back) and
-  // "Return & inspection" (unit physically back, being inspected). Reina owns
-  // both. Terminal statuses (refunded/denied/closed/discarded) drop out.
+  // "Return & inspection" (unit back or discarded, ready to compile). Reina
+  // owns both. Terminal statuses (refunded/denied/closed) drop out.
   const preRefundReturns = useMemo(() => {
     const withApproval = new Set(approvals.map(a => a.return_id).filter(Boolean) as string[]);
     const eligible = returns
