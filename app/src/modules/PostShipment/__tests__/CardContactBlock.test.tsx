@@ -108,6 +108,7 @@ describe('CancellationCard', () => {
       parties={parties}
       contact={contact}
       canOwn
+      canCancel
       usage={usage}
       invoices={[]}
       tickets={[]}

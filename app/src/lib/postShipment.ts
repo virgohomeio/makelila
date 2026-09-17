@@ -1786,6 +1786,46 @@ export async function denyRefund(id: string, stage: 'submitted' | 'manager_revie
   await logAction('refund_denied', id, `${stage}: ${reason}`);
 }
 
+/** The statuses a refund card can still be cancelled from: everywhere the case
+ *  is live work. Once it is refunded, denied or closed the decision is made and
+ *  recorded, and "cancelling" would erase history rather than unwanted work. */
+export const CANCELLABLE_REFUND_STATUSES: RefundStatus[] = [
+  'submitted', 'manager_review', 'finance_review', 'refund_queue',
+];
+
+export function canCancelRefundRequest(status: RefundStatus): boolean {
+  return CANCELLABLE_REFUND_STATUSES.includes(status);
+}
+
+/** Pull a refund card that should never have been raised — a test, a
+ *  duplicate, an intake in error.
+ *
+ *  This is NOT a denial. A denial is a decision about a customer's money and
+ *  belongs in the Denied column where it can be read as one; a card parked
+ *  there because someone was testing the board says we refused a customer who
+ *  never asked. So a cancelled request goes to 'closed': it leaves the board,
+ *  and — because 'closed' is not one of the shipping-relevant statuses in
+ *  refundedOrders.ts — it stops standing between that customer and a shipment.
+ *
+ *  It undoes nothing else. Orders the card cancelled when it was created stay
+ *  cancelled; re-queueing those is a deliberate act, the same as after a
+ *  denial. */
+export async function cancelRefundRequest(id: string, reason: string): Promise<void> {
+  const note = reason.trim();
+  if (!note) throw new Error('A reason is required to cancel a request.');
+
+  // Status first: this is the write that can be refused (refund_approvals
+  // UPDATE is RLS-gated), and a note explaining a cancellation that never
+  // happened is worse than no note.
+  const { error } = await supabase.from('refund_approvals')
+    .update({ status: 'closed' }).eq('id', id);
+  if (error) throw error;
+
+  await logAction('refund_request_cancelled', id, note);
+  // The thread is where the next person looks, so the reason lives there too.
+  await addRefundNote(id, `Request cancelled: ${note}`);
+}
+
 export async function closeRefund(id: string): Promise<void> {
   const { error } = await supabase.from('refund_approvals').update({ status: 'closed' }).eq('id', id);
   if (error) throw error;
@@ -2060,4 +2100,24 @@ export async function compileCancellationToRefund(c: OrderCancellation): Promise
  *  the order was never charged). Closes the cancellation without a refund. */
 export async function dismissCancellationRefund(c: OrderCancellation, opsNote?: string): Promise<void> {
   await processCancellation(c.id, false, undefined, opsNote);
+}
+
+/** Refunds-board action on a cancellation card: this request should not be on
+ *  the board at all.
+ *
+ *  Distinct from "No refund needed", which is a finding about the money (the
+ *  order was never charged). This is a finding about the REQUEST: two Sales
+ *  orders raised to test the workflow, cancelled, and queued here as live
+ *  refund work for money nobody ever paid.
+ *
+ *  Recorded as 'completed' with no refund, because the database allows this
+ *  table only 'submitted' or 'completed' — the reason, not a status word, is
+ *  what says it was cancelled, and it is written in two places: the row's ops
+ *  notes (read in the Cancellations tab) and the card's own notes thread. */
+export async function cancelCancellationRequest(c: OrderCancellation, reason: string): Promise<void> {
+  const note = reason.trim();
+  if (!note) throw new Error('A reason is required to cancel a request.');
+  await processCancellation(c.id, false, undefined, `Request cancelled: ${note}`);
+  await logAction('cancellation_request_cancelled', c.order_ref ?? c.id, note);
+  await addCancellationNote(c.id, `Request cancelled: ${note}`);
 }

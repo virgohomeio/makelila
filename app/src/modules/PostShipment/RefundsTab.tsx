@@ -9,6 +9,7 @@ import {
   preRefundStage, customerWaitState,
   useOrderCancellations, pendingCancellationRefunds, cancellationForRefund,
   compileCancellationToRefund, dismissCancellationRefund, type OrderCancellation,
+  cancelCancellationRequest, cancelRefundRequest, canCancelRefundRequest,
   setReturnDisposition, updateReturnStatus,
   useCaseAttachments, uploadCaseAttachment, deleteCaseAttachment, returnAttachmentSignedUrl,
   RETURN_ATTACH_INPUT_ACCEPT, RETURN_ATTACH_CATEGORIES, RETURN_ATTACH_ALLOWED_MIME,
@@ -57,6 +58,7 @@ import { useAuth } from '../../lib/auth';
 import { canDo } from '../../lib/permissions';
 import { supabase } from '../../lib/supabase';
 import styles from './PostShipment.module.css';
+import { CancelRequestAction } from './CancelRequestAction';
 
 const STAR = '★';
 
@@ -468,6 +470,7 @@ export function RefundsTab() {
             key={c.id}
             c={c}
             canOwn={ownsRefundColumn(userEmail, 'cancellation')}
+            canCancel={canFlow}
             parties={partiesFor({ filerEmail: c.customer_email, filerName: c.customer_name })}
             contact={contactForCase({
               email: c.customer_email, phone: c.customer_phone, name: c.customer_name,
@@ -1595,12 +1598,15 @@ function InspectionActions({ r, canOwn, onCompile, onError }: {
 // opens a refund card in Completeness; "No refund needed" closes the request
 // out for orders that were never charged.
 export function CancellationCard({
-  c, parties, contact, canOwn, usage, invoices, tickets, onOpenTicket, onError,
+  c, parties, contact, canOwn, canCancel, usage, invoices, tickets, onOpenTicket, onError,
 }: {
   c: OrderCancellation;
   parties: Parties;
   contact: CustomerContact;
   canOwn: boolean;
+  /** Anyone working the board may pull a request that should not be here —
+   *  this is not the column owner's forward-motion right. */
+  canCancel: boolean;
   usage: RefundUsageWindow;
   invoices: CustomerInvoice[];
   tickets: ServiceTicket[];
@@ -1693,6 +1699,18 @@ export function CancellationCard({
           </>
         ) : (
           <span className={styles.refundCardHint}>Reina moves these forward</span>
+        )}
+        {/* Not owner-gated. Pedrum's two "Support LILA" test orders queued here
+            as live refund work and only Reina could clear them; junk on the
+            board is everyone's problem. Moving a real case FORWARD is still
+            hers alone. */}
+        {canCancel && (
+          <CancelRequestAction
+            disabled={busy}
+            title="This cancellation request should not be on the board (test, duplicate, raised in error)"
+            onCancel={reason => cancelCancellationRequest(c, reason)}
+            onError={onError}
+          />
         )}
       </div>
     </div>
@@ -2250,9 +2268,28 @@ function RefundDetailPanel({
               </button>
             )}
             {canDeny && (
-              <button onClick={openDeny} disabled={busy} className={styles.refundDetailDenyBtn}>
+              <button onClick={openDeny} disabled={busy} className={styles.refundDetailDenyBtn}
+                title="We are refusing this customer's refund. If the card itself should not exist — a test, a duplicate — cancel the request instead.">
                 ✕ Deny
               </button>
+            )}
+            {/* Cancelling is not denying: it says the card should never have
+                been raised, so the case leaves the board as 'closed' instead of
+                standing in Denied as a customer we turned down (and, being
+                closed, it stops blocking that customer's orders from shipping). */}
+            {canFlow && canCancelRefundRequest(refund.status) && (
+              <CancelRequestAction
+                label="✕ Cancel request"
+                confirmLabel="Confirm cancel"
+                disabled={busy}
+                title="This refund card should not exist (test, duplicate, raised in error) — closes it off the board with a reason"
+                onCancel={async (reason) => {
+                  await cancelRefundRequest(refund.id, reason);
+                  onClose();
+                  await onMoved();
+                }}
+                onError={onError}
+              />
             )}
             {refund.status === 'refunded' && (
               <button onClick={() => void runClose()} disabled={busy} className={styles.refundCloseBtn}
