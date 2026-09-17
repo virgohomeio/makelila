@@ -100,7 +100,8 @@ vi.mock('../../../lib/stock', () => ({
     loading: false,
   }),
 }));
-vi.mock('../../../lib/parts', () => ({
+vi.mock('../../../lib/parts', async () => ({
+  ...await vi.importActual<typeof import('../../../lib/parts')>('../../../lib/parts'),
   useParts: () => ({
     parts: [{ id: 'p1', sku: 'HINGE', name: 'Lid Hinge', category: 'replacement', on_hand: 5, cost_per_unit_usd: 4.2 }],
     loading: false,

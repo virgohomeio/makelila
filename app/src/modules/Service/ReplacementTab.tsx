@@ -10,7 +10,7 @@ import {
   replacementItemsLabel, isLiveReplacement,
 } from '../../lib/replacementTags';
 import { useBatches, useUnits, type Batch } from '../../lib/stock';
-import { useParts } from '../../lib/parts';
+import { useParts, effectiveDemandBySku } from '../../lib/parts';
 import { useServiceTickets, type TicketTopic } from '../../lib/service';
 import { useCustomers, buildPartyResolver, type CustomerPartyRow } from '../../lib/customers';
 import { TicketPartyLabel } from './TicketPartyLabel';
@@ -105,11 +105,13 @@ export default function ReplacementTab() {
     const totalReady = units.filter(u => u.status === 'ready').length;
     const totalToBuild = unitRows.reduce((n, r) => n + r.toBuild, 0);
 
-    const partDemand = replacementDemandBySku(orders);
+    // Same Demand as Stock › Parts: derived from orders, overridden by hand.
+    const partDemand = effectiveDemandBySku(replacementDemandBySku(orders), parts);
     const partRows = [...partDemand.entries()]
+      .filter(([, d]) => d > 0)
       .map(([sku, d]) => {
         const p = parts.find(pp => pp.sku === sku);
-        const onHand = p && p.category === 'replacement' ? p.on_hand : 0;
+        const onHand = p ? p.on_hand : 0;
         return { sku, name: p?.name ?? sku, onHand, demand: d, toGet: Math.max(0, d - onHand) };
       })
       .sort((a, b) => b.demand - a.demand || a.name.localeCompare(b.name));

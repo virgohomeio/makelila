@@ -108,6 +108,43 @@
 .adjustBtn:hover { border-color: var(--color-crimson); color: var(--color-crimson); }
 .adjustBtn:disabled { opacity: 0.4; cursor: not-allowed; }
 
+/* Click-to-edit numbers in the Parts table */
+.editCell {
+  background: none;
+  border: 1px dashed transparent;
+  border-radius: 3px;
+  padding: 1px 4px;
+  margin: -2px -5px;
+  font: inherit;
+  color: inherit;
+  text-align: right;
+  cursor: text;
+  min-width: 28px;
+}
+.editCell:hover:not(:disabled),
+.editCell:focus-visible { border-color: var(--color-border); background: #fff; }
+.editCell:disabled { cursor: wait; }
+.editInput {
+  width: 64px;
+  font: inherit;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  padding: 1px 4px;
+  border: 1px solid var(--color-crimson);
+  border-radius: 3px;
+}
+.manualTag {
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--color-ink-muted);
+  background: var(--color-surface);
+  border-radius: 8px;
+  padding: 1px 5px;
+  margin-right: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
 .partsShipHeader {
   font-size: 11px;
   font-weight: 700;
