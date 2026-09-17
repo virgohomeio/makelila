@@ -10,6 +10,7 @@ import {
   useOrderCancellations, pendingCancellationRefunds, cancellationForRefund,
   compileCancellationToRefund, dismissCancellationRefund, type OrderCancellation,
   cancelCancellationRequest, cancelRefundRequest, canCancelRefundRequest,
+  cancelReturnRequest, canCancelReturnRequest,
   setReturnDisposition, updateReturnStatus,
   useCaseAttachments, uploadCaseAttachment, deleteCaseAttachment, returnAttachmentSignedUrl,
   RETURN_ATTACH_INPUT_ACCEPT, RETURN_ATTACH_CATEGORIES, RETURN_ATTACH_ALLOWED_MIME,
@@ -630,6 +631,7 @@ export function RefundsTab() {
             email: r.customer_email, name: r.customer_name,
           })}
           canOwn={ownsRefundColumn(userEmail, preRefundStage(r.status))}
+          canCancel={canFlow}
           usage={usageForEmail(email)}
           invoices={invoicesForEmail(email)}
           tickets={ticketsForEmails([r.purchaser_email, r.customer_email])}
@@ -1535,11 +1537,15 @@ function InspectionCard({ r, parties, onView }: {
 
 // The column actions for a pre-refund return (intake → inspection → compile).
 // They live in the return's full view now that the board card is collapsed.
-function InspectionActions({ r, canOwn, onCompile, onError }: {
+function InspectionActions({ r, canOwn, canCancel, onCompile, onError, onCancelled }: {
   r: ReturnRow;
   canOwn: boolean;
+  /** Pulling a junk case off the board is open to everyone working it — only
+   *  moving a real one forward belongs to the column owner. */
+  canCancel: boolean;
   onCompile: () => void;
   onError: (msg: string | null) => void;
+  onCancelled?: () => void;
 }) {
   const [statusBusy, setStatusBusy] = useState(false);
   const runStatus = async (s: ReturnStatus) => {
@@ -1584,6 +1590,18 @@ function InspectionActions({ r, canOwn, onCompile, onError }: {
             </button>
           )}
         </>
+      )}
+      {/* The return columns are an intake queue fed by a public form, so they
+          collect the same junk the cancellation column does — test
+          submissions, duplicates, forms filled in by mistake. Same control,
+          same required reason. */}
+      {canCancel && canCancelReturnRequest(r.status) && (
+        <CancelRequestAction
+          disabled={statusBusy}
+          title="This return case should not be on the board (test, duplicate, raised in error) — closes it with a reason"
+          onCancel={async (reason) => { await cancelReturnRequest(r.id, reason); onCancelled?.(); }}
+          onError={onError}
+        />
       )}
     </div>
   );
@@ -2484,12 +2502,13 @@ function CancellationFormAnswers({ c }: { c: OrderCancellation }) {
 
 // Read-only viewer for a return's full submitted form — opened by clicking a
 // card in the Return & inspection column (before a refund request exists).
-export function ReturnDetailModal({ r, parties, contact, caseUnit, canOwn, usage, invoices, tickets, onOpenTicket, onCompile, onError, onClose }: {
+export function ReturnDetailModal({ r, parties, contact, caseUnit, canOwn, canCancel, usage, invoices, tickets, onOpenTicket, onCompile, onError, onClose }: {
   r: ReturnRow;
   parties: Parties;
   contact: CustomerContact;
   caseUnit: CaseUnitResolution;
   canOwn: boolean;
+  canCancel: boolean;
   usage: RefundUsageWindow;
   invoices: CustomerInvoice[];
   tickets: ServiceTicket[];
@@ -2543,7 +2562,8 @@ export function ReturnDetailModal({ r, parties, contact, caseUnit, canOwn, usage
           {/* Column actions — these used to live on the board card, which is
               now collapsed to the case's identity. */}
           <div style={{ marginTop: 12, borderTop: '1px solid #edf2f7', paddingTop: 12 }}>
-            <InspectionActions r={r} canOwn={canOwn} onCompile={onCompile} onError={onError} />
+            <InspectionActions r={r} canOwn={canOwn} canCancel={canCancel}
+              onCompile={onCompile} onError={onError} onCancelled={onClose} />
           </div>
         </div>
       </div>

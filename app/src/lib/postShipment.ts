@@ -1786,6 +1786,35 @@ export async function denyRefund(id: string, stage: 'submitted' | 'manager_revie
   await logAction('refund_denied', id, `${stage}: ${reason}`);
 }
 
+/** The statuses a RETURN can still be cancelled from: the two Account-Manager
+ *  columns before a refund card exists — Return Form Submitted and Return &
+ *  Inspection. Once the case is refunded, denied or closed it has left them. */
+export function canCancelReturnRequest(status: ReturnStatus): boolean {
+  return preRefundStage(status) !== null;
+}
+
+/** Pull a return case that should never have been raised.
+ *
+ *  The return columns are an intake queue fed by a public form, so they collect
+ *  the same junk the cancellation column does: test submissions, duplicates of
+ *  a case already being worked, forms filled in by mistake. Before this, the
+ *  only ways out were forward (compile it into a refund card) or a status
+ *  dropdown that says nothing about why.
+ *
+ *  'closed' is terminal for a return, so the card leaves both columns — the
+ *  same exit a compiled case takes, minus the refund card. */
+export async function cancelReturnRequest(id: string, reason: string): Promise<void> {
+  const note = reason.trim();
+  if (!note) throw new Error('A reason is required to cancel a request.');
+
+  const { error } = await supabase.from('returns')
+    .update({ status: 'closed' }).eq('id', id);
+  if (error) throw error;
+
+  await logAction('return_request_cancelled', id, note, { entityType: 'return', entityId: id });
+  await addReturnNote(id, `Request cancelled: ${note}`);
+}
+
 /** The statuses a refund card can still be cancelled from: everywhere the case
  *  is live work. Once it is refunded, denied or closed the decision is made and
  *  recorded, and "cancelling" would erase history rather than unwanted work. */

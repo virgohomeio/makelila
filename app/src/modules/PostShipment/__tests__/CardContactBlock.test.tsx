@@ -156,6 +156,7 @@ describe('ReturnDetailModal', () => {
         contact={contact}
         caseUnit={noCaseUnit}
         canOwn
+        canCancel
         usage={usage}
         invoices={[]}
         tickets={[]}

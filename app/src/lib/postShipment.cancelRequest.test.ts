@@ -41,7 +41,7 @@ vi.mock('./supabase', () => ({
         },
       }),
       insert: (row: any) => {
-        const column = row.refund_id ? 'refund_id' : 'cancellation_id';
+        const column = row.refund_id ? 'refund_id' : row.return_id ? 'return_id' : 'cancellation_id';
         state.notes.push({ column, id: row[column], body: row.body });
         return Promise.resolve({ error: null });
       },
@@ -59,9 +59,12 @@ vi.mock('./refundAutoCancel', () => ({ cancelOpenOrdersForRefund: vi.fn(() => Pr
 import {
   cancelRefundRequest,
   cancelCancellationRequest,
+  cancelReturnRequest,
   canCancelRefundRequest,
+  canCancelReturnRequest,
   type OrderCancellation,
   type RefundStatus,
+  type ReturnStatus,
 } from './postShipment';
 
 const cancellation = (over: Partial<OrderCancellation> = {}): OrderCancellation => ({
@@ -161,5 +164,51 @@ describe('cancelCancellationRequest', () => {
   it('will not cancel without a reason', async () => {
     await expect(cancelCancellationRequest(cancellation(), '')).rejects.toThrow(/reason/i);
     expect(state.updates).toEqual([]);
+  });
+});
+
+describe('canCancelReturnRequest', () => {
+  it('allows both Account-Manager columns a return can sit in', () => {
+    // Return Form Submitted (intake) and Return & Inspection.
+    const live: ReturnStatus[] = ['created', 'pickup_scheduled', 'picked_up', 'received', 'inspected', 'discarded'];
+    for (const s of live) expect(canCancelReturnRequest(s)).toBe(true);
+  });
+
+  it('refuses a return whose case is already finished', () => {
+    for (const s of ['refunded', 'denied', 'closed'] as ReturnStatus[]) {
+      expect(canCancelReturnRequest(s)).toBe(false);
+    }
+  });
+});
+
+describe('cancelReturnRequest', () => {
+  it('closes the return and keeps the reason on its thread', async () => {
+    await cancelReturnRequest('ret-1', '  Test submission from the form  ');
+
+    expect(state.updates).toEqual([
+      { table: 'returns', patch: { status: 'closed' }, id: 'ret-1' },
+    ]);
+    // 'closed' is terminal for a return, so the card leaves both pre-refund
+    // columns — the same exit a compiled case takes, without a refund card.
+    expect(state.notes).toEqual([
+      { column: 'return_id', id: 'ret-1', body: 'Request cancelled: Test submission from the form' },
+    ]);
+    // Tagged as a return entity, like every other return-side log line, so the
+    // case's activity trail shows it rather than only the global log.
+    expect(logActionMock).toHaveBeenCalledWith(
+      'return_request_cancelled', 'ret-1', 'Test submission from the form',
+      { entityType: 'return', entityId: 'ret-1' },
+    );
+  });
+
+  it('will not cancel without a reason', async () => {
+    await expect(cancelReturnRequest('ret-1', ' ')).rejects.toThrow(/reason/i);
+    expect(state.updates).toEqual([]);
+  });
+
+  it('says so plainly when the database refuses the change', async () => {
+    state.failUpdate = 'returns';
+    await expect(cancelReturnRequest('ret-1', 'test row')).rejects.toThrow(/row-level security/);
+    expect(state.notes).toEqual([]);
   });
 });
