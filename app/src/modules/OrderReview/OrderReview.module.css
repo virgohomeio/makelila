@@ -426,9 +426,14 @@
 }
 
 /* ── Order row — the 2×2 grid ────────────────────────────────────────────── */
+/* The identity column keeps a floor. The tag strip is an `auto` track, so a
+   heavily tagged order (refund + dwelling + area + country) used to bid for as
+   much width as its chips wanted and squeeze the name down to a single letter
+   — "Raymond Keetch" rendered as "R…" on #1216. The name is how an operator
+   finds the row, so it outranks the chips: the chips wrap instead. */
 .row {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: minmax(8rem, 1fr) auto;
   gap: 2px var(--space-2);
   align-items: center;
   width: 100%;
@@ -461,6 +466,10 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Clipped, not spilling: the ref/city/freight line is wider than its column on
+   a narrow rail, and an overflowing flex row paints itself over the tag strip
+   in the next column instead of being cut off. Least-important part goes
+   first — the freight quote ellipsises before the city is touched. */
 .rowMeta {
   font-size: var(--font-size-meta);
   color: var(--color-ink-subtle);
@@ -468,6 +477,8 @@
   align-items: center;
   gap: 6px;
   min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
 }
 .rowRef {
   font-family: var(--font-mono);
@@ -478,7 +489,15 @@
 /* Both state cells are justify-self:end — this is what makes tags and SLA
    chips form true columns down the list. */
 .rowState { justify-self: end; display: flex; align-items: center; gap: 5px; }
-.rowTags  { justify-self: end; display: flex; align-items: center; gap: 4px; }
+.rowTags  {
+  justify-self: end;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
+}
 
 /* A single dot means "this order has unmet confirm criteria" — readable at a
    glance without spending a whole chip on it. */
@@ -1283,6 +1302,9 @@
   font-variant-numeric: var(--font-numeric);
   color: var(--color-ink-subtle);
   white-space: nowrap;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* ============================================================ Communication indicator
