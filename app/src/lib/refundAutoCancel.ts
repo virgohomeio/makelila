@@ -71,6 +71,11 @@ export const FINISHED_TICKET_STATUSES = ['closed', 'replacement_sent'] as const;
  *      they usually are on a sale.
  *    - tracking_num — per the operator, tracking_num IS NOT NULL ⇒ shipped.
  *      Backfilled replacements have a tracking number and nothing else.
+ *    - a unit assigned to the order and marked shipped. An order fulfilled off
+ *      the old Google Sheet has none of the three signals above — #1172 was
+ *      still 'approved' with no shipped_at, no tracking and a queue row nobody
+ *      ever closed, while LL01-00000000310 went to that customer on 4 June.
+ *      The unit row is where that sale's history actually lives.
  *    - the linked ticket, for replacements only. shipped_at is almost never
  *      stamped on a replacement (only the 'replacement_sent' ticket status
  *      writes it, and effectively no ticket used it), so a replacement whose
@@ -81,9 +86,14 @@ export const FINISHED_TICKET_STATUSES = ['closed', 'replacement_sent'] as const;
  *      Doing that to a machine that physically shipped in June invents a unit
  *      and a lid that do not exist.
  */
-function stillInFlight(o: AutoCancellableOrder, finishedTicketIds: Set<string>): boolean {
+function stillInFlight(
+  o: AutoCancellableOrder,
+  finishedTicketIds: Set<string>,
+  shippedOrderRefs: Set<string>,
+): boolean {
   if (o.status === 'cancelled') return false;
   if (o.shipped_at || o.delivered_at || o.tracking_num) return false;
+  if (shippedOrderRefs.has(o.order_ref)) return false;
   if (o.kind === 'replacement') {
     return !(o.linked_ticket_id && finishedTicketIds.has(o.linked_ticket_id));
   }
@@ -91,12 +101,43 @@ function stillInFlight(o: AutoCancellableOrder, finishedTicketIds: Set<string>):
 }
 
 /** Everything of a customer's that a refund should take down. Pure, so the
- *  rule above is testable without a database. */
+ *  rule above is testable without a database.
+ *
+ *  `excludeOrderId` is the order the refund card itself is for. It is the
+ *  SUBJECT of the refund, not collateral: the card is already the money-back
+ *  record for it, so cancelling it here filed a second live request on the
+ *  Cancellations board for the same money. The caller still pulls it out of
+ *  the fulfillment queue — see cancelOpenOrdersForRefund. */
 export function ordersToAutoCancel(
   orders: AutoCancellableOrder[],
   finishedTicketIds: Set<string>,
+  extra: { shippedOrderRefs?: Set<string>; excludeOrderId?: string | null } = {},
 ): AutoCancellableOrder[] {
-  return orders.filter(o => stillInFlight(o, finishedTicketIds));
+  const shipped = extra.shippedOrderRefs ?? new Set<string>();
+  return orders.filter(o =>
+    o.id !== extra.excludeOrderId && stillInFlight(o, finishedTicketIds, shipped));
+}
+
+/** Of these order refs, the ones a unit was shipped against.
+ *
+ *  Like the ticket lookup below, the status test is applied here rather than as
+ *  a server-side filter: the units status set has moved before (the UI offers a
+ *  'quarantine' the database rejects), and a filter the database refuses fails
+ *  the WHOLE query — which would come back "nothing shipped" and cancel a sale
+ *  that went out in June. */
+async function shippedOrderRefsAmong(orderRefs: string[]): Promise<Set<string>> {
+  if (orderRefs.length === 0) return new Set();
+  const { data, error } = await supabase
+    .from('units')
+    .select('customer_order_ref, status')
+    .in('customer_order_ref', orderRefs);
+  if (error) throw new Error(`Could not check the units for these orders: ${error.message}`);
+  return new Set(
+    (data ?? [])
+      .map(u => u as { customer_order_ref: string | null; status: string | null })
+      .filter(u => u.status === 'shipped' && u.customer_order_ref)
+      .map(u => u.customer_order_ref as string),
+  );
 }
 
 export type AutoCancelledOrder = {
@@ -112,9 +153,12 @@ export type AutoCancelOutcome = {
   failed: Array<{ order_ref: string; message: string }>;
   /** The card carried no email, so no customer could be identified. */
   skippedNoEmail: boolean;
+  /** The card's own order, when it was still live and was pulled out of the
+   *  fulfillment queue. Not cancelled — the refund card is its record. */
+  withdrewOwnOrder: string | null;
 };
 
-const EMPTY: AutoCancelOutcome = { cancelled: [], failed: [], skippedNoEmail: false };
+const EMPTY: AutoCancelOutcome = { cancelled: [], failed: [], skippedNoEmail: false, withdrewOwnOrder: null };
 
 /** Which of these tickets are finished, asked only about the ids we hold. */
 async function finishedTicketIdsAmong(ids: string[]): Promise<Set<string>> {
@@ -166,6 +210,8 @@ export async function cancelOpenOrdersForRefund(opts: {
   refundId: string;
   customerEmail: string | null | undefined;
   customerName: string | null | undefined;
+  /** orders.id the refund card is for, when it resolved to one. */
+  refundOrderId?: string | null;
 }): Promise<AutoCancelOutcome> {
   const email = (opts.customerEmail ?? '').trim().toLowerCase();
   if (!email) return { ...EMPTY, skippedNoEmail: true };
@@ -182,8 +228,24 @@ export async function cancelOpenOrdersForRefund(opts: {
     rows.filter(o => o.kind === 'replacement' && o.linked_ticket_id)
       .map(o => o.linked_ticket_id as string),
   ));
-  const targets = ordersToAutoCancel(rows, await finishedTicketIdsAmong(ticketIds));
-  if (targets.length === 0) return EMPTY;
+  const [finishedTickets, shippedOrderRefs] = await Promise.all([
+    finishedTicketIdsAmong(ticketIds),
+    shippedOrderRefsAmong(rows.map(o => o.order_ref).filter(Boolean)),
+  ]);
+  const targets = ordersToAutoCancel(rows, finishedTickets, {
+    shippedOrderRefs,
+    excludeOrderId: opts.refundOrderId,
+  });
+  // The card's own order is not cancelled, but it must still stop moving: it
+  // comes out of the queue and gives its machine back, and the refund card
+  // stands as the record of the money. Only when it is genuinely still in
+  // flight — a stale queue row on an order that shipped is history, not a pick
+  // list, and withdrawing deletes it.
+  const own = opts.refundOrderId
+    ? rows.find(o => o.id === opts.refundOrderId
+        && ordersToAutoCancel([o], finishedTickets, { shippedOrderRefs }).length > 0)
+    : undefined;
+  if (targets.length === 0 && !own) return EMPTY;
 
   const who = (opts.customerName ?? '').trim() || email;
   // Read by someone standing in Sales › Cancelled who never saw the refund
@@ -191,7 +253,14 @@ export async function cancelOpenOrdersForRefund(opts: {
   const reason = `Auto-cancelled: a refund is in progress for ${who}. `
     + `Nothing ships to a customer we are paying back.`;
 
-  const outcome: AutoCancelOutcome = { cancelled: [], failed: [], skippedNoEmail: false };
+  const outcome: AutoCancelOutcome = { cancelled: [], failed: [], skippedNoEmail: false, withdrewOwnOrder: null };
+  if (own) {
+    try {
+      if (await withdrawOrderFromQueue(own.id, reason)) outcome.withdrewOwnOrder = own.order_ref;
+    } catch (e) {
+      outcome.failed.push({ order_ref: own.order_ref, message: (e as Error).message });
+    }
+  }
   for (const o of targets) {
     try {
       outcome.cancelled.push(await takeDown(o, reason));
@@ -208,8 +277,9 @@ export async function cancelOpenOrdersForRefund(opts: {
 export function summariseAutoCancel(outcome: AutoCancelOutcome): string {
   const done = outcome.cancelled.map(c => c.order_ref).join(', ');
   const bad = outcome.failed.map(f => `${f.order_ref} (${f.message})`).join(', ');
-  if (!done && !bad) return 'nothing open to cancel';
+  if (!done && !bad && !outcome.withdrewOwnOrder) return 'nothing open to cancel';
   const parts: string[] = [];
+  if (outcome.withdrewOwnOrder) parts.push(`withdrew ${outcome.withdrewOwnOrder} from the queue (this card's own order, not cancelled)`);
   if (done) parts.push(`cancelled ${outcome.cancelled.length}: ${done}`);
   if (bad) parts.push(`COULD NOT CANCEL ${outcome.failed.length}: ${bad}`);
   return parts.join(' · ');
@@ -218,7 +288,10 @@ export function summariseAutoCancel(outcome: AutoCancelOutcome): string {
 /** The same run, phrased for the operator who just made the card. Null when
  *  there is nothing worth interrupting them about. */
 export function autoCancelBanner(outcome: AutoCancelOutcome): string | null {
-  if (outcome.failed.length === 0 && outcome.cancelled.length === 0) return null;
+  if (outcome.failed.length === 0 && outcome.cancelled.length === 0 && !outcome.withdrewOwnOrder) return null;
+  const own = outcome.withdrewOwnOrder
+    ? `Took ${outcome.withdrewOwnOrder} out of the fulfillment queue — this refund is its record, so it was not cancelled.`
+    : '';
   const done = outcome.cancelled.length
     ? `Cancelled ${outcome.cancelled.length} order${outcome.cancelled.length > 1 ? 's' : ''} still in flight for this customer: `
       + outcome.cancelled.map(c => c.order_ref).join(', ') + '.'
@@ -227,5 +300,5 @@ export function autoCancelBanner(outcome: AutoCancelOutcome): string | null {
     ? ` Could not cancel ${outcome.failed.map(f => f.order_ref).join(', ')} — cancel `
       + `${outcome.failed.length > 1 ? 'them' : 'it'} by hand before this refund goes out.`
     : '';
-  return (done + bad).trim();
+  return [own, done, bad.trim()].filter(Boolean).join(' ').trim();
 }

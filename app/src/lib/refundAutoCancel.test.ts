@@ -91,11 +91,26 @@ describe('ordersToAutoCancel', () => {
   it('ignores a sale status that is not a live one', () => {
     expect(ordersToAutoCancel([sale({ status: 'something_new' })], new Set())).toEqual([]);
   });
+
+  it('leaves an order alone when a shipped unit is assigned to it', () => {
+    // #1172 shipped on 2026-06-04 as LL01-00000000310 and the order row was
+    // never stamped: no shipped_at, no tracking, still 'approved', with a
+    // stale queue row. The unit is the only place that sale's history exists.
+    const rows = [sale({ order_ref: '#1172', status: 'approved' })];
+    expect(ordersToAutoCancel(rows, new Set(), { shippedOrderRefs: new Set(['#1172']) })).toEqual([]);
+  });
+
+  it('never returns the order the refund card is for', () => {
+    // That order is the SUBJECT of the refund, not collateral. The card is
+    // already its money-back record; cancelling it files a second one.
+    const rows = [sale({ id: 'own', order_ref: '#1172' }), sale({ id: 'o2', order_ref: '#1233' })];
+    expect(refs(ordersToAutoCancel(rows, new Set(), { excludeOrderId: 'own' }))).toEqual(['#1233']);
+  });
 });
 
 /** A supabase double wide enough for the lookup half of the orchestrator. */
-function harness(orders: AutoCancellableOrder[], goneTicketIds: string[] = []) {
-  const state = { emailFilter: null as string | null, ticketIdsAsked: [] as string[] };
+function harness(orders: AutoCancellableOrder[], goneTicketIds: string[] = [], shippedRefs: string[] = []) {
+  const state = { emailFilter: null as string | null, ticketIdsAsked: [] as string[], unitRefsAsked: [] as string[] };
   fromMock.mockImplementation((table: string) => {
     if (table === 'orders') {
       return {
@@ -105,6 +120,21 @@ function harness(orders: AutoCancellableOrder[], goneTicketIds: string[] = []) {
             return {
               neq: () => Promise.resolve({ data: orders, error: null }),
             };
+          },
+        }),
+      } as any;
+    }
+    if (table === 'units') {
+      return {
+        select: () => ({
+          in: (_c: string, refs: string[]) => {
+            state.unitRefsAsked = refs;
+            return Promise.resolve({
+              data: shippedRefs
+                .filter(r => refs.includes(r))
+                .map(r => ({ customer_order_ref: r, status: 'shipped' })),
+              error: null,
+            });
           },
         }),
       } as any;
@@ -217,6 +247,67 @@ describe('cancelOpenOrdersForRefund', () => {
 
     expect(state.ticketIdsAsked.sort()).toEqual(['t-closed', 't-open']);
     expect(out.cancelled.map(c => c.order_ref)).toEqual(['R-0049']);
+  });
+
+
+  it('takes the card\'s own order out of the queue without cancelling it', async () => {
+    harness([sale({ id: 'own', order_ref: '#1172' })]);
+    withdrawMock.mockResolvedValue(true);
+
+    const out = await cancelOpenOrdersForRefund({
+      refundId: 'refund-1', customerEmail: 'jane@example.com', customerName: 'Jane Doe',
+      refundOrderId: 'own',
+    });
+
+    // Nothing ships to a customer being paid back — but the refund card is
+    // already the record for THIS order, so no cancel and no second
+    // order_cancellations request for the same money.
+    expect(withdrawMock).toHaveBeenCalledWith('own', expect.stringContaining('refund'));
+    expect(cancelOrderMock).not.toHaveBeenCalled();
+    expect(out.cancelled).toEqual([]);
+    expect(out.withdrewOwnOrder).toBe('#1172');
+  });
+
+  it('leaves the customer\'s other orders cancellable alongside its own', async () => {
+    harness([sale({ id: 'own', order_ref: '#1172' }), sale({ id: 'o2', order_ref: '#1233' })]);
+
+    const out = await cancelOpenOrdersForRefund({
+      refundId: 'refund-1', customerEmail: 'jane@example.com', customerName: 'Jane Doe',
+      refundOrderId: 'own',
+    });
+
+    expect(out.cancelled.map(c => c.order_ref)).toEqual(['#1233']);
+    expect(cancelOrderMock).toHaveBeenCalledTimes(1);
+    expect(cancelOrderMock.mock.calls[0][0]).toBe('o2');
+  });
+
+  it('treats an order with a shipped unit against it as already gone', async () => {
+    // The Amanda Acker case: order row says 'approved' with no shipped_at and
+    // no tracking, and the machine went out in June.
+    const state = harness([sale({ order_ref: '#1172', status: 'approved' })], [], ['#1172']);
+
+    const out = await cancelOpenOrdersForRefund({
+      refundId: 'refund-1', customerEmail: 'jane@example.com', customerName: 'Jane Doe',
+    });
+
+    expect(state.unitRefsAsked).toEqual(['#1172']);
+    expect(out.cancelled).toEqual([]);
+    expect(cancelOrderMock).not.toHaveBeenCalled();
+    expect(withdrawMock).not.toHaveBeenCalled();
+  });
+
+  it('does not withdraw its own order when that order already shipped', async () => {
+    harness([sale({ id: 'own', order_ref: '#1172', status: 'approved' })], [], ['#1172']);
+
+    const out = await cancelOpenOrdersForRefund({
+      refundId: 'refund-1', customerEmail: 'jane@example.com', customerName: 'Jane Doe',
+      refundOrderId: 'own',
+    });
+
+    // A stale queue row on a shipped order is history, not a pick list — see
+    // the fulfillment queue never auto-closing. Deleting it loses the record.
+    expect(withdrawMock).not.toHaveBeenCalled();
+    expect(out.withdrewOwnOrder).toBeNull();
   });
 
   it('records what it did on the activity log', async () => {

@@ -33,7 +33,7 @@ vi.mock('./refundAutoCancel', () => ({
 
 import { submitRefundRequest } from './postShipment';
 
-const CLEAN = { cancelled: [], failed: [], skippedNoEmail: false };
+const CLEAN = { cancelled: [], failed: [], skippedNoEmail: false, withdrewOwnOrder: null };
 
 describe('creating a refund card cancels what is still in flight', () => {
   beforeEach(() => {
@@ -55,7 +55,23 @@ describe('creating a refund card cancels what is still in flight', () => {
       refundId: 'refund-new',
       customerEmail: 'jane@example.com',
       customerName: 'Jane Doe',
+      refundOrderId: undefined,
     });
+  });
+
+  it('tells the cancel run which order the card is for, so it is spared', async () => {
+    // Otherwise the refund cancels the very order it is refunding and files a
+    // duplicate request on the Cancellations board for the same money.
+    await submitRefundRequest({
+      customer_name: 'Jane Doe',
+      customer_email: 'jane@example.com',
+      order_id: 'order-1172',
+      refund_amount_usd: 1281.76,
+    });
+
+    expect(autoCancelMock).toHaveBeenCalledWith(
+      expect.objectContaining({ refundOrderId: 'order-1172' }),
+    );
   });
 
   it('hands the result to the caller so the operator is told what went', async () => {
@@ -63,6 +79,7 @@ describe('creating a refund card cancels what is still in flight', () => {
       cancelled: [{ order_ref: '#1231', kind: 'sale', wasQueued: true }],
       failed: [],
       skippedNoEmail: false,
+      withdrewOwnOrder: null,
     };
     autoCancelMock.mockResolvedValue(outcome);
     const onAutoCancel = vi.fn();

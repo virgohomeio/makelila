@@ -1315,6 +1315,10 @@ export async function submitRefundRequest(input: {
       refundId: newRefundId,
       customerEmail: input.customer_email,
       customerName: input.customer_name,
+      // The order this card is FOR is spared: it only leaves the fulfillment
+      // queue. Cancelling it filed a second live request on the Cancellations
+      // board for the same money as the card itself.
+      refundOrderId: input.order_id,
     });
     opts.onAutoCancel?.(outcome);
   } catch (e) {
@@ -1327,6 +1331,7 @@ export async function submitRefundRequest(input: {
       cancelled: [],
       failed: [{ order_ref: 'this customer\'s open orders', message }],
       skippedNoEmail: false,
+      withdrewOwnOrder: null,
     });
   }
 
