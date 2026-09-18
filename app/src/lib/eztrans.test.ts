@@ -77,6 +77,8 @@ describe('buildEzTransBooking', () => {
     order: ORDER,
     serial: 'LL01-P100X-00412',
     masterCarton: '1',
+    carrier: 'Purolator',
+    tracking: 'PUR123456789',
   });
 
   it('says an order has been placed and names the customer in full', () => {
@@ -95,6 +97,17 @@ describe('buildEzTransBooking', () => {
     expect(booking.body).toContain('Batch/Lot Number: P100X');
     expect(booking.body).toContain('Master Carton: 1');
     expect(booking.body).toContain('Quantity: 1');
+  });
+
+  it('carries the label details and says the label is attached', () => {
+    expect(booking.body).toContain('SHIPPING LABEL (attached)');
+    expect(booking.body).toContain('Carrier: Purolator');
+    expect(booking.body).toContain('Tracking Number: PUR123456789');
+    expect(booking.body).toContain('print the attached label');
+    expect(booking.body).toContain('the shipping label are attached');
+    const list = booking.packingList.join('\n');
+    expect(list).toContain('Carrier: Purolator');
+    expect(list).toContain('Tracking No: PUR123456789');
   });
 
   it('names the order in the subject so a reply is traceable', () => {
@@ -124,6 +137,8 @@ describe('buildEzTransBooking', () => {
       order: { ...ORDER, customer_email: null, customer_phone: null },
       serial: 'LL01-P100X-00412',
       masterCarton: null,
+      carrier: null,
+      tracking: null,
     });
     expect(blank.body).not.toContain('null');
     expect(blank.packingList.join('\n')).not.toContain('null');

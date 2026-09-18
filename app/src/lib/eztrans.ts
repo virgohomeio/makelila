@@ -98,8 +98,11 @@ export function buildEzTransBooking(args: {
   order: EzTransShipTo & { order_ref: string };
   serial: string;
   masterCarton: string | null;
+  /** From the Goorooship booking. Both are required before the email can go. */
+  carrier: string | null;
+  tracking: string | null;
 }): EzTransBooking {
-  const { order, serial, masterCarton } = args;
+  const { order, serial, masterCarton, carrier, tracking } = args;
   const addr = addressLines(order);
   const email = order.customer_email ?? '—';
   const phone = order.customer_phone ?? '—';
@@ -111,8 +114,8 @@ export function buildEzTransBooking(args: {
   const body =
     `Hello EZ Trans team,\n\n` +
     `We are confirming that an order has been placed and the shipment has been ` +
-    `booked on Goorooship. Please fulfill it on your end. The packing list is ` +
-    `attached to this email.\n\n` +
+    `booked on Goorooship. Please fulfill it on your end. The packing list and ` +
+    `the shipping label are attached to this email.\n\n` +
     `CUSTOMER\n` +
     `Name: ${order.customer_name}\n` +
     `Address: ${addr.join('\n         ')}\n` +
@@ -125,6 +128,10 @@ export function buildEzTransBooking(args: {
     `Batch/Lot Number: ${PACKING_LIST_BATCH_LOT}\n` +
     `Master Carton: ${carton}\n` +
     `Quantity: ${PACKING_LIST_QUANTITY}\n\n` +
+    `SHIPPING LABEL (attached)\n` +
+    `Carrier: ${carrier ?? '—'}\n` +
+    `Tracking Number: ${tracking ?? '—'}\n` +
+    `Please print the attached label and affix it to the carton.\n\n` +
     `Order reference: ${order.order_ref}\n\n` +
     `Please reply to confirm once the unit is picked and the shipment is on its way.\n\n` +
     `Thank you,\n` +
@@ -147,9 +154,48 @@ export function buildEzTransBooking(args: {
     `Batch/Lot Number: ${PACKING_LIST_BATCH_LOT}`,
     `Master Carton: ${carton}`,
     `Quantity: ${PACKING_LIST_QUANTITY}`,
+    '',
+    'SHIPPING',
+    `Carrier: ${carrier ?? '—'}`,
+    `Tracking No: ${tracking ?? '—'}`,
   ];
 
   return { subject, body, packingList };
+}
+
+/** The label details Goorooship gives back, saved onto the queue row.
+ *
+ *  Deliberately does NOT advance the step: the operator is still standing in
+ *  step 3 and has yet to send the confirmation, and moving to step 4 here
+ *  would unmount the panel out from under them. `confirmLabel` still owns the
+ *  step-3 -> step-4 transition, and it leaves `label_pdf_path` alone when no
+ *  new file is picked, so the label uploaded here survives it.
+ *
+ *  Uses the same `order-labels` bucket and path convention as confirmLabel so
+ *  a label is a label wherever it was attached from. */
+export async function saveEzTransLabel(
+  queueId: string,
+  input: { carrier: string; tracking_num: string; label_pdf?: File },
+): Promise<{ label_pdf_path: string | null }> {
+  let label_pdf_path: string | null = null;
+  if (input.label_pdf) {
+    const path = `${queueId}/label-${Date.now()}.pdf`;
+    const { error: upErr } = await supabase.storage
+      .from('order-labels')
+      .upload(path, input.label_pdf, { contentType: 'application/pdf' });
+    if (upErr) throw upErr;
+    label_pdf_path = path;
+  }
+  const { error } = await supabase
+    .from('fulfillment_queue')
+    .update({
+      carrier: input.carrier,
+      tracking_num: input.tracking_num.trim(),
+      ...(label_pdf_path ? { label_pdf_path } : {}),
+    })
+    .eq('id', queueId);
+  if (error) throw error;
+  return { label_pdf_path };
 }
 
 /** Is this unit sitting at EZ Trans, and on which pallet?

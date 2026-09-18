@@ -18,9 +18,12 @@ export function StepLabel({
   order: EzTransOrder;
 }) {
   const country = order.country;
-  const [carrier, setCarrier] = useState<string>('');
-  const [tracking, setTracking] = useState<string>('');
-  const [starterTracking, setStarterTracking] = useState<string>('');
+  // Seeded from the row so a label already attached — by the EZ Trans panel
+  // below, or on an earlier pass that was rewound — doesn't have to be typed
+  // in twice.
+  const [carrier, setCarrier] = useState<string>(row.carrier ?? '');
+  const [tracking, setTracking] = useState<string>(row.tracking_num ?? '');
+  const [starterTracking, setStarterTracking] = useState<string>(row.starter_tracking_num ?? '');
   const [pdf, setPdf] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -48,7 +51,11 @@ export function StepLabel({
       <h3 style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>Attach the shipping label details</h3>
 
       {/* Renders only when the assigned unit is held at the EZTrans 3PL. */}
-      <EzTransPanel row={row} order={order} />
+      <EzTransPanel
+        row={row}
+        order={order}
+        onLabelSaved={({ carrier: c, tracking_num: t }) => { setCarrier(c); setTracking(t); }}
+      />
 
       <div style={{
         background: 'var(--color-info-bg)',
@@ -126,12 +133,19 @@ export function StepLabel({
             >Remove</button>
           </div>
         ) : (
-          <input
-            type="file"
-            accept="application/pdf"
-            onChange={e => setPdf(e.target.files?.[0] ?? null)}
-            style={{ fontSize: 11 }}
-          />
+          <>
+            <input
+              type="file"
+              accept="application/pdf"
+              onChange={e => setPdf(e.target.files?.[0] ?? null)}
+              style={{ fontSize: 11 }}
+            />
+            {row.label_pdf_path && (
+              <div style={{ fontSize: 10, color: 'var(--color-ink-subtle)', marginTop: 3 }}>
+                A label is already on this order — pick a file only to replace it.
+              </div>
+            )}
+          </>
         )}
       </div>
 

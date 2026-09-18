@@ -738,12 +738,15 @@
   list-style: decimal;
   margin: 0 0 10px;
   padding-left: 18px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
 }
+/* The li stays a list-item so the step number actually renders — `display:
+   flex` on an li drops the marker — and the row layout lives on an inner
+   wrapper instead. */
 .ezTransSteps li {
   font-size: 11px;
+  margin-bottom: 10px;
+}
+.ezTransStepRow {
   display: flex;
   gap: 10px;
   align-items: center;
@@ -804,4 +807,54 @@
   max-height: 280px;
   overflow-y: auto;
   margin: 0;
+}
+
+/* The label-capture step inside the EZ Trans panel. Laid out as its own block
+   under the step number rather than inline, because it is three fields rather
+   than one control. */
+.ezTransStepTitle {
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--color-ink);
+  margin-bottom: 6px;
+}
+.ezTransForm {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 4px;
+}
+.ezTransForm label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11px;
+  color: var(--color-ink-subtle);
+  max-width: 340px;
+}
+.ezTransForm select,
+.ezTransForm input[type='text'] {
+  padding: 6px 10px;
+  font-size: 11px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+}
+.ezTransForm input[type='text'] { font-family: ui-monospace, monospace; }
+.ezTransForm input[type='file'] { font-size: 11px; }
+.ezTransFile {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--color-ink);
+}
+.ezTransFile button {
+  background: transparent;
+  border: 1px solid var(--color-border);
+  color: var(--color-ink-subtle);
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-size: 10px;
+  cursor: pointer;
 }

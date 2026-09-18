@@ -1,8 +1,11 @@
 // Confirm an order with the EZ Trans 3PL after it has been booked on
-// Goorooship, and attach the packing list they pick from.
+// Goorooship: the packing list they pick from and the shipping label they
+// print, both attached.
 //
 // Operator path: Fulfillment > Queue > step 3 (Attach the shipping label).
-// The button only appears when the unit assigned at step 1 is held at EZTrans.
+// The panel only appears when the unit assigned at step 1 is held at EZTrans,
+// and it will not send until carrier, tracking number and label are on the
+// queue row.
 //
 // The email body and packing list are mirrored in app/src/lib/eztrans.ts (the
 // operator's preview). This copy is the one that goes on the wire — keep them
@@ -24,6 +27,9 @@ type QueueRow = {
   order_id: string;
   step: number;
   assigned_serial: string | null;
+  carrier: string | null;
+  tracking_num: string | null;
+  label_pdf_path: string | null;
 };
 
 type OrderRow = {
@@ -99,7 +105,7 @@ async function handle(req: Request): Promise<Response> {
 
   const { data: q, error: qErr } = await admin
     .from('fulfillment_queue')
-    .select('id, order_id, step, assigned_serial')
+    .select('id, order_id, step, assigned_serial, carrier, tracking_num, label_pdf_path')
     .eq('id', body.queue_id)
     .single<QueueRow>();
   if (qErr || !q) return json(404, { error: 'queue row not found' });
@@ -108,6 +114,15 @@ async function handle(req: Request): Promise<Response> {
   }
   if (q.step < 3) {
     return json(409, { error: `queue row at step ${q.step}, must be at or past step 3` });
+  }
+  // EZ Trans cannot ship what they cannot label. The panel disables the button
+  // until all three are on the row, but an email that reached the 3PL without
+  // a label would cost a day of back-and-forth, so refuse here too.
+  if (!q.carrier || !q.tracking_num) {
+    return json(409, { error: 'carrier and tracking number are required before EZ Trans can be emailed' });
+  }
+  if (!q.label_pdf_path) {
+    return json(409, { error: 'the shipping label PDF must be attached before EZ Trans can be emailed' });
   }
 
   const { data: order, error: oErr } = await admin
@@ -143,8 +158,8 @@ async function handle(req: Request): Promise<Response> {
   const text =
     `Hello EZ Trans team,\n\n` +
     `We are confirming that an order has been placed and the shipment has been ` +
-    `booked on Goorooship. Please fulfill it on your end. The packing list is ` +
-    `attached to this email.\n\n` +
+    `booked on Goorooship. Please fulfill it on your end. The packing list and ` +
+    `the shipping label are attached to this email.\n\n` +
     `CUSTOMER\n` +
     `Name: ${order.customer_name}\n` +
     `Address: ${addr.join('\n         ')}\n` +
@@ -157,6 +172,10 @@ async function handle(req: Request): Promise<Response> {
     `Batch/Lot Number: ${BATCH_LOT}\n` +
     `Master Carton: ${masterCarton}\n` +
     `Quantity: ${QUANTITY}\n\n` +
+    `SHIPPING LABEL (attached)\n` +
+    `Carrier: ${q.carrier}\n` +
+    `Tracking Number: ${q.tracking_num}\n` +
+    `Please print the attached label and affix it to the carton.\n\n` +
     `Order reference: ${order.order_ref}\n\n` +
     `Please reply to confirm once the unit is picked and the shipment is on its way.\n\n` +
     `Thank you,\n` +
@@ -179,13 +198,29 @@ async function handle(req: Request): Promise<Response> {
     { text: `Serial No: ${serial}`, size: 10 },
     { text: `Batch/Lot Number: ${BATCH_LOT}`, size: 10 },
     { text: `Master Carton: ${masterCarton}`, size: 10 },
-    { text: `Quantity: ${QUANTITY}`, size: 10, gap: 18 },
+    { text: `Quantity: ${QUANTITY}`, size: 10, gap: 14 },
+
+    { text: 'SHIPPING', size: 11, bold: true, gap: 2 },
+    { text: `Carrier: ${q.carrier}`, size: 10 },
+    { text: `Tracking No: ${q.tracking_num}`, size: 10, gap: 18 },
 
     { text: 'VCycene Inc. — LILA Composter', size: 9 },
     { text: 'Questions: support@lilacomposter.com', size: 9 },
   ];
   const pdf = toBase64(buildTextPdf(pdfLines));
-  const filename = `packing-list-${order.order_ref.replace(/[^A-Za-z0-9._-]/g, '')}.pdf`;
+  const safeRef = order.order_ref.replace(/[^A-Za-z0-9._-]/g, '');
+
+  // The label the operator attached in step 3, straight out of the private
+  // bucket. Read with the service role — `order-labels` is not public and the
+  // 3PL has no makeLILA login, so a signed URL would be a second thing to
+  // expire; the bytes ride along with the email instead.
+  const { data: labelBlob, error: labelErr } = await admin.storage
+    .from('order-labels')
+    .download(q.label_pdf_path);
+  if (labelErr || !labelBlob) {
+    return json(502, { error: `could not read the shipping label (${q.label_pdf_path}): ${labelErr?.message ?? 'not found'}` });
+  }
+  const labelPdf = toBase64(new Uint8Array(await labelBlob.arrayBuffer()));
 
   // Same testing override as send-fulfillment-email: while
   // EMAIL_TEST_RECIPIENT is set nothing reaches the 3PL.
@@ -211,7 +246,10 @@ async function handle(req: Request): Promise<Response> {
       to: [to],
       subject,
       text: emailText,
-      attachments: [{ filename, content: pdf }],
+      attachments: [
+        { filename: `shipping-label-${safeRef}.pdf`, content: labelPdf },
+        { filename: `packing-list-${safeRef}.pdf`, content: pdf },
+      ],
     }),
   });
   if (!resendRes.ok) {
@@ -220,5 +258,5 @@ async function handle(req: Request): Promise<Response> {
   }
   const sent = await resendRes.json() as { id: string };
 
-  return json(200, { email_id: sent.id, master_carton: masterCarton, to });
+  return json(200, { email_id: sent.id, master_carton: masterCarton, to, attachments: 2 });
 }

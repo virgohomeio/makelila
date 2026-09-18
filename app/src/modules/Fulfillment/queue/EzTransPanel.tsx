@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import {
   buildEzTransBooking,
+  saveEzTransLabel,
   sendEzTransBooking,
   useEzTransPlacement,
   EZTRANS_EMAIL,
@@ -14,15 +15,33 @@ import styles from '../Fulfillment.module.css';
 
 export type EzTransOrder = EzTransShipTo & { id: string; order_ref: string };
 
+const CARRIERS = ['UPS', 'FedEx', 'Purolator', 'Canada Post', 'Canpar', 'GLS'] as const;
+
 /** The Goorooship half of step 3.
  *
  *  Stock on our own floor is booked through Freightcom. Stock held at the
  *  EZTrans 3PL is booked through Goorooship, and EZ Trans only picks the box
- *  once we email them a confirmation with a packing list — so this panel only
- *  renders when the unit assigned at step 1 is actually sitting at EZTrans.
- *  It renders nothing at all otherwise. */
-export function EzTransPanel({ row, order }: { row: FulfillmentQueueRow; order: EzTransOrder }) {
+ *  once we email them a confirmation with a packing list and the label they
+ *  are to print — so this panel only renders when the unit assigned at step 1
+ *  is actually sitting at EZTrans. It renders nothing at all otherwise.
+ *
+ *  The label details captured here are the same three fields the Freightcom
+ *  card below asks for, written to the same queue-row columns, so nothing has
+ *  to be typed twice: `onLabelSaved` hands them up to StepLabel, which leaves
+ *  Confirm label as a single click. */
+export function EzTransPanel({
+  row,
+  order,
+  onLabelSaved,
+}: {
+  row: FulfillmentQueueRow;
+  order: EzTransOrder;
+  onLabelSaved?: (v: { carrier: string; tracking_num: string }) => void;
+}) {
   const { placement, loading } = useEzTransPlacement(row.assigned_serial);
+  const [carrier, setCarrier] = useState(row.carrier ?? '');
+  const [tracking, setTracking] = useState(row.tracking_num ?? '');
+  const [pdf, setPdf] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [justSent, setJustSent] = useState<string | null>(null);
@@ -34,28 +53,47 @@ export function EzTransPanel({ row, order }: { row: FulfillmentQueueRow; order: 
   const { entries } = useActivityForEntity({ entityType: 'order', entityId: order.id, limit: 50 });
   const priorSend = entries.find(e => e.type === EZTRANS_SENT_ACTION) ?? null;
 
+  // A label uploaded on an earlier pass is still on the row, so a resend (or a
+  // corrected tracking number) doesn't force the operator to find the file again.
+  const labelOnFile = !!row.label_pdf_path;
+  const ready = !!carrier && !!tracking.trim() && (!!pdf || labelOnFile);
+
   const booking = useMemo(() => {
     if (!placement) return null;
     return buildEzTransBooking({
       order,
       serial: placement.serial,
       masterCarton: placement.masterCarton,
+      carrier: carrier || null,
+      tracking: tracking.trim() || null,
     });
-  }, [order, placement]);
+  }, [order, placement, carrier, tracking]);
 
   if (loading || !placement || !booking) return null;
 
   const handleSend = async () => {
+    if (!ready) return;
     setBusy(true); setError(null);
     try {
+      // Save first: the edge function reads the label off the queue row rather
+      // than taking it from this form, so there is exactly one copy of the
+      // truth and a half-finished send can be picked up where it stopped.
+      await saveEzTransLabel(row.id, {
+        carrier,
+        tracking_num: tracking.trim(),
+        ...(pdf ? { label_pdf: pdf } : {}),
+      });
+      onLabelSaved?.({ carrier, tracking_num: tracking.trim() });
       await sendEzTransBooking(row.id);
       await logAction(
         EZTRANS_SENT_ACTION,
         order.order_ref,
-        `Booking confirmation + packing list sent to ${EZTRANS_EMAIL} — ` +
-        `serial ${placement.serial}, master carton ${placement.masterCarton ?? '—'}`,
+        `Booking confirmation, packing list + ${carrier} label sent to ${EZTRANS_EMAIL} — ` +
+        `serial ${placement.serial}, master carton ${placement.masterCarton ?? '—'}, ` +
+        `tracking ${tracking.trim()}`,
         { entityType: 'order', entityId: order.id, unitSerial: placement.serial },
       );
+      setPdf(null);
       setJustSent(new Date().toISOString());
     } catch (e) {
       setError((e as Error).message);
@@ -72,32 +110,83 @@ export function EzTransPanel({ row, order }: { row: FulfillmentQueueRow; order: 
       <p className={styles.ezTransLead}>
         {placement.serial} is held at EZ Trans
         {placement.skid ? ` on ${placement.skid}` : ''} — book this shipment on
-        Goorooship, then send EZ Trans the confirmation so they can fulfill it.
+        Goorooship, attach the label it gives you, then send EZ Trans the
+        confirmation so they can fulfill it.
       </p>
 
       <ol className={styles.ezTransSteps}>
         <li>
-          <a
-            href={GOOROOSHIP_SHIP_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            className={styles.extLinkBtn}
-          >Goorooship — Book a shipment ↗</a>
-          <span className={styles.ezTransHint}>Book it first — the email says it is already booked.</span>
+          <div className={styles.ezTransStepRow}>
+            <a
+              href={GOOROOSHIP_SHIP_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={styles.extLinkBtn}
+            >Goorooship — Book a shipment ↗</a>
+            <span className={styles.ezTransHint}>Book it first — the email says it is already booked.</span>
+          </div>
         </li>
+
         <li>
-          <button
-            className={styles.confirmBtn}
-            onClick={handleSend}
-            disabled={busy}
-          >
-            {busy ? 'Sending…' : sentAt ? `✉ Resend to ${EZTRANS_EMAIL}` : `✉ Send confirmation to ${EZTRANS_EMAIL}`}
-          </button>
-          <button
-            type="button"
-            className={styles.ezTransPreviewToggle}
-            onClick={() => setShowPreview(v => !v)}
-          >{showPreview ? 'Hide preview' : 'Preview email + packing list'}</button>
+          <span className={styles.ezTransStepTitle}>Attach the label Goorooship issued</span>
+          <div className={styles.ezTransForm}>
+            <label>
+              Carrier:
+              <select value={carrier} onChange={e => setCarrier(e.target.value)}>
+                <option value="">— select —</option>
+                {CARRIERS.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </label>
+
+            <label>
+              Tracking number:
+              <input
+                type="text"
+                value={tracking}
+                onChange={e => setTracking(e.target.value)}
+                placeholder="Paste from the Goorooship label"
+              />
+            </label>
+
+            <label>
+              Shipping label PDF:
+              {pdf ? (
+                <span className={styles.ezTransFile}>
+                  {pdf.name} · {(pdf.size / 1024).toFixed(0)} KB
+                  <button type="button" onClick={() => setPdf(null)}>Remove</button>
+                </span>
+              ) : (
+                <input
+                  type="file"
+                  accept="application/pdf"
+                  onChange={e => setPdf(e.target.files?.[0] ?? null)}
+                />
+              )}
+            </label>
+            {labelOnFile && !pdf && (
+              <span className={styles.ezTransHint}>
+                A label is already on this order — pick a file only to replace it.
+              </span>
+            )}
+          </div>
+        </li>
+
+        <li>
+          <div className={styles.ezTransStepRow}>
+            <button className={styles.confirmBtn} onClick={handleSend} disabled={!ready || busy}>
+              {busy ? 'Sending…' : sentAt ? `✉ Resend to ${EZTRANS_EMAIL}` : `✉ Send confirmation to ${EZTRANS_EMAIL}`}
+            </button>
+            <button
+              type="button"
+              className={styles.ezTransPreviewToggle}
+              onClick={() => setShowPreview(v => !v)}
+            >{showPreview ? 'Hide preview' : 'Preview email + packing list'}</button>
+            {!ready && (
+              <span className={styles.ezTransHint}>
+                Carrier, tracking number and the label PDF are all required before this can be sent.
+              </span>
+            )}
+          </div>
         </li>
       </ol>
 
@@ -109,7 +198,7 @@ export function EzTransPanel({ row, order }: { row: FulfillmentQueueRow; order: 
 
       {sentAt && (
         <div className={styles.ezTransSent}>
-          ✓ Confirmation sent to {EZTRANS_EMAIL} at {new Date(sentAt).toLocaleString()}.
+          ✓ Confirmation, packing list and label sent to {EZTRANS_EMAIL} at {new Date(sentAt).toLocaleString()}.
         </div>
       )}
       {error && <div className={styles.error}>{error}</div>}
@@ -118,7 +207,9 @@ export function EzTransPanel({ row, order }: { row: FulfillmentQueueRow; order: 
         <>
           <div className={styles.ezTransPreviewLabel}>Email to {EZTRANS_EMAIL}:</div>
           <pre className={styles.ezTransPreview}>
-            {`Subject: ${booking.subject}\n\n${booking.body}`}
+            {`Subject: ${booking.subject}\n` +
+             `Attachments: shipping-label.pdf · packing-list.pdf\n\n` +
+             booking.body}
           </pre>
           <div className={styles.ezTransPreviewLabel}>Attached packing list (PDF):</div>
           <pre className={styles.ezTransPreview}>{booking.packingList.join('\n')}</pre>
