@@ -1,9 +1,11 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
   buildEzTransBooking,
   saveEzTransLabel,
   sendEzTransBooking,
   useEzTransPlacement,
+  useEzTransTemplate,
   EZTRANS_EMAIL,
   EZTRANS_SENT_ACTION,
   GOOROOSHIP_SHIP_URL,
@@ -39,6 +41,7 @@ export function EzTransPanel({
   onLabelSaved?: (v: { carrier: string; tracking_num: string }) => void;
 }) {
   const { placement, loading } = useEzTransPlacement(row.assigned_serial);
+  const { template, source: templateSource } = useEzTransTemplate();
   const [carrier, setCarrier] = useState(row.carrier ?? '');
   const [tracking, setTracking] = useState(row.tracking_num ?? '');
   const [pdf, setPdf] = useState<File | null>(null);
@@ -46,6 +49,12 @@ export function EzTransPanel({
   const [error, setError] = useState<string | null>(null);
   const [justSent, setJustSent] = useState<string | null>(null);
   const [showPreview, setShowPreview] = useState(false);
+  // Null while the operator hasn't touched the wording — the email then simply
+  // tracks the template and the live label details. Once they type, their text
+  // is held as-is and stops following those, which is the point of editing it.
+  const [editedSubject, setEditedSubject] = useState<string | null>(null);
+  const [editedBody, setEditedBody] = useState<string | null>(null);
+  const edited = editedSubject !== null || editedBody !== null;
 
   // "Already emailed" survives a reload, so an operator coming back to the row
   // doesn't double-book the 3PL. Logged against the order, which is where the
@@ -66,8 +75,25 @@ export function EzTransPanel({
       masterCarton: placement.masterCarton,
       carrier: carrier || null,
       tracking: tracking.trim() || null,
+      template,
     });
-  }, [order, placement, carrier, tracking]);
+  }, [order, placement, carrier, tracking, template]);
+
+  // Opening the editor is what commits the current rendering as the starting
+  // text — before that the fields are unset so the preview keeps tracking the
+  // template and the label details as they are typed in above.
+  const subjectValue = editedSubject ?? booking?.subject ?? '';
+  const bodyValue = editedBody ?? booking?.body ?? '';
+
+  const [editing, setEditing] = useState(false);
+  const bodyRef = useRef<HTMLTextAreaElement | null>(null);
+  useEffect(() => {
+    if (editing && bodyRef.current) {
+      // Grow to fit rather than making the operator scroll a 6-row box.
+      bodyRef.current.style.height = 'auto';
+      bodyRef.current.style.height = `${Math.min(bodyRef.current.scrollHeight, 420)}px`;
+    }
+  }, [editing, bodyValue]);
 
   if (loading || !placement || !booking) return null;
 
@@ -84,13 +110,16 @@ export function EzTransPanel({
         ...(pdf ? { label_pdf: pdf } : {}),
       });
       onLabelSaved?.({ carrier, tracking_num: tracking.trim() });
-      await sendEzTransBooking(row.id);
+      await sendEzTransBooking(
+        row.id,
+        edited ? { subject: subjectValue, body: bodyValue } : undefined,
+      );
       await logAction(
         EZTRANS_SENT_ACTION,
         order.order_ref,
         `Booking confirmation, packing list + ${carrier} label sent to ${EZTRANS_EMAIL} — ` +
         `serial ${placement.serial}, master carton ${placement.masterCarton ?? '—'}, ` +
-        `tracking ${tracking.trim()}`,
+        `tracking ${tracking.trim()}${edited ? ' · wording edited for this order' : ''}`,
         { entityType: 'order', entityId: order.id, unitSerial: placement.serial },
       );
       setPdf(null);
@@ -180,7 +209,7 @@ export function EzTransPanel({
               type="button"
               className={styles.ezTransPreviewToggle}
               onClick={() => setShowPreview(v => !v)}
-            >{showPreview ? 'Hide preview' : 'Preview email + packing list'}</button>
+            >{showPreview ? 'Hide email' : edited ? 'Show edited email' : 'Preview / edit email'}</button>
             {!ready && (
               <span className={styles.ezTransHint}>
                 Carrier, tracking number and the label PDF are all required before this can be sent.
@@ -205,12 +234,70 @@ export function EzTransPanel({
 
       {showPreview && (
         <>
-          <div className={styles.ezTransPreviewLabel}>Email to {EZTRANS_EMAIL}:</div>
-          <pre className={styles.ezTransPreview}>
-            {`Subject: ${booking.subject}\n` +
-             `Attachments: shipping-label.pdf · packing-list.pdf\n\n` +
-             booking.body}
-          </pre>
+          <div className={styles.ezTransPreviewHead}>
+            <span className={styles.ezTransPreviewLabel}>Email to {EZTRANS_EMAIL}</span>
+            {editing ? (
+              <>
+                <button
+                  type="button"
+                  className={styles.ezTransPreviewToggle}
+                  onClick={() => { setEditedSubject(null); setEditedBody(null); }}
+                  disabled={!edited}
+                >Reset to {templateSource === 'template' ? 'template' : 'default'}</button>
+                <button
+                  type="button"
+                  className={styles.ezTransPreviewToggle}
+                  onClick={() => setEditing(false)}
+                >Done editing</button>
+              </>
+            ) : (
+              <button
+                type="button"
+                className={styles.ezTransPreviewToggle}
+                onClick={() => setEditing(true)}
+              >Edit this one</button>
+            )}
+            <span className={styles.ezTransHint}>
+              {edited
+                ? 'Edited for this order only — the saved wording is unchanged.'
+                : templateSource === 'template'
+                  ? <>Wording comes from <Link to="/templates">Templates → EZ Trans booking confirmation</Link>.</>
+                  : 'Wording is the built-in default — no template row in this environment yet.'}
+            </span>
+          </div>
+
+          {editing ? (
+            <div className={styles.ezTransEditor}>
+              <label>
+                Subject:
+                <input
+                  type="text"
+                  value={subjectValue}
+                  onChange={e => setEditedSubject(e.target.value)}
+                />
+              </label>
+              <label>
+                Body:
+                <textarea
+                  ref={bodyRef}
+                  value={bodyValue}
+                  onChange={e => setEditedBody(e.target.value)}
+                  spellCheck
+                />
+              </label>
+              <span className={styles.ezTransHint}>
+                The packing list and the label are attached automatically and are not
+                editable here — they are rebuilt from this order when it sends.
+              </span>
+            </div>
+          ) : (
+            <pre className={styles.ezTransPreview}>
+              {`Subject: ${subjectValue}\n` +
+               `Attachments: shipping-label.pdf · packing-list.pdf\n\n` +
+               bodyValue}
+            </pre>
+          )}
+
           <div className={styles.ezTransPreviewLabel}>Attached packing list (PDF):</div>
           <pre className={styles.ezTransPreview}>{booking.packingList.join('\n')}</pre>
         </>

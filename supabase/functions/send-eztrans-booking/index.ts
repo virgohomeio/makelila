@@ -7,13 +7,21 @@
 // and it will not send until carrier, tracking number and label are on the
 // queue row.
 //
-// The email body and packing list are mirrored in app/src/lib/eztrans.ts (the
-// operator's preview). This copy is the one that goes on the wire — keep them
-// in step.
+// The wording comes from the operator's edit for this order, else the
+// `eztrans_booking` row in email_templates, else the built-in default in
+// _shared/eztransTemplate.ts. The packing list is never templated — it is
+// rebuilt here from the queue row, the order and the shelf row, so an edited
+// email cannot change the document the 3PL picks from.
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { corsHeaders } from '../_shared/cors.ts';
 import { authenticate } from '../_shared/auth.ts';
 import { buildTextPdf, toBase64, type PdfLine } from '../_shared/simplePdf.ts';
+import {
+  DEFAULT_EZTRANS_BODY,
+  DEFAULT_EZTRANS_SUBJECT,
+  EZTRANS_TEMPLATE_KEY,
+  renderEzTransTemplate,
+} from '../_shared/eztransTemplate.ts';
 
 const EZTRANS_LOCATION = 'EZTrans';
 const EZTRANS_EMAIL = 'cs@goorooship.ca';
@@ -100,8 +108,24 @@ async function handle(req: Request): Promise<Response> {
     return json(403, { error: 'This function requires an operator JWT — cron-secret not accepted.' });
   }
 
-  const body = await req.json() as { queue_id?: string };
+  const body = await req.json() as { queue_id?: string; subject?: string; body?: string };
   if (!body.queue_id) return json(400, { error: 'queue_id required' });
+
+  // The operator may have edited the wording in the step-3 panel. Both halves
+  // must arrive together — a subject with no body (or the reverse) means the
+  // caller is confused, and silently filling the gap from the template would
+  // send a half-edited email.
+  const hasOverride = body.subject !== undefined || body.body !== undefined;
+  if (hasOverride) {
+    if (typeof body.subject !== 'string' || typeof body.body !== 'string') {
+      return json(400, { error: 'subject and body must be sent together' });
+    }
+    if (!body.subject.trim() || !body.body.trim()) {
+      return json(400, { error: 'an edited subject and body cannot be empty' });
+    }
+    if (body.subject.length > 300) return json(400, { error: 'subject is too long (max 300 characters)' });
+    if (body.body.length > 20000) return json(400, { error: 'body is too long (max 20000 characters)' });
+  }
 
   const { data: q, error: qErr } = await admin
     .from('fulfillment_queue')
@@ -155,31 +179,45 @@ async function handle(req: Request): Promise<Response> {
   const email = order.customer_email ?? '—';
   const phone = order.customer_phone ?? '—';
 
-  const text =
-    `Hello EZ Trans team,\n\n` +
-    `We are confirming that an order has been placed and the shipment has been ` +
-    `booked on Goorooship. Please fulfill it on your end. The packing list and ` +
-    `the shipping label are attached to this email.\n\n` +
-    `CUSTOMER\n` +
-    `Name: ${order.customer_name}\n` +
-    `Address: ${addr.join('\n         ')}\n` +
-    `Email: ${email}\n` +
-    `Phone: ${phone}\n\n` +
-    `SHIPMENT\n` +
-    `Product Name: ${PRODUCT_NAME}\n` +
-    `SKU: ${SKU}\n` +
-    `Serial No: ${serial}\n` +
-    `Batch/Lot Number: ${BATCH_LOT}\n` +
-    `Master Carton: ${masterCarton}\n` +
-    `Quantity: ${QUANTITY}\n\n` +
-    `SHIPPING LABEL (attached)\n` +
-    `Carrier: ${q.carrier}\n` +
-    `Tracking Number: ${q.tracking_num}\n` +
-    `Please print the attached label and affix it to the carton.\n\n` +
-    `Order reference: ${order.order_ref}\n\n` +
-    `Please reply to confirm once the unit is picked and the shipment is on its way.\n\n` +
-    `Thank you,\n` +
-    `The VCycene Team`;
+  // Wording, in order of precedence: what the operator typed for this order,
+  // the Templates-tab row, then the built-in default. Whichever wins, the
+  // variables are filled from the DB here — an edited body still cannot put a
+  // serial or carton on the wire that the row does not say.
+  const vars: Record<string, string> = {
+    customer_name: order.customer_name,
+    customer_address: addr.join('\n         '),
+    customer_email: email,
+    customer_phone: phone,
+    product_name: PRODUCT_NAME,
+    sku: SKU,
+    serial,
+    batch_lot: BATCH_LOT,
+    master_carton: masterCarton,
+    quantity: String(QUANTITY),
+    carrier: q.carrier,
+    tracking: q.tracking_num,
+    order_ref: order.order_ref,
+  };
+
+  let tplSubject = DEFAULT_EZTRANS_SUBJECT;
+  let tplBody = DEFAULT_EZTRANS_BODY;
+  if (!hasOverride) {
+    const { data: tpl } = await admin
+      .from('email_templates')
+      .select('subject, body, active')
+      .eq('key', EZTRANS_TEMPLATE_KEY)
+      .maybeSingle();
+    const row = tpl as { subject: string; body: string; active: boolean } | null;
+    if (row?.active && row.subject && row.body) {
+      tplSubject = row.subject;
+      tplBody = row.body;
+    }
+  }
+
+  // An override arrives already rendered by the panel, but it is run through
+  // the same substitution anyway: an operator who pastes a {{variable}} in
+  // while editing gets it filled rather than mailed out raw.
+  const text = renderEzTransTemplate(hasOverride ? body.body as string : tplBody, vars);
 
   const pdfLines: PdfLine[] = [
     { text: 'PACKING LIST', size: 18, bold: true, gap: 4 },
@@ -226,7 +264,7 @@ async function handle(req: Request): Promise<Response> {
   // EMAIL_TEST_RECIPIENT is set nothing reaches the 3PL.
   const testRecipient = Deno.env.get('EMAIL_TEST_RECIPIENT');
   const to = testRecipient || EZTRANS_EMAIL;
-  const baseSubject = `Order confirmed — ${order.order_ref} · ${SKU} · Serial ${serial}`;
+  const baseSubject = renderEzTransTemplate(hasOverride ? body.subject as string : tplSubject, vars);
   const subject = testRecipient ? `[TEST → ${EZTRANS_EMAIL}] ${baseSubject}` : baseSubject;
   const emailText = testRecipient
     ? `*** TEST MODE — this email would have been sent to ${EZTRANS_EMAIL} ***\n` +
@@ -258,5 +296,11 @@ async function handle(req: Request): Promise<Response> {
   }
   const sent = await resendRes.json() as { id: string };
 
-  return json(200, { email_id: sent.id, master_carton: masterCarton, to, attachments: 2 });
+  return json(200, {
+    email_id: sent.id,
+    master_carton: masterCarton,
+    to,
+    attachments: 2,
+    wording: hasOverride ? 'edited' : 'template',
+  });
 }

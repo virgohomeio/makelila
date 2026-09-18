@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render as rtlRender, screen, fireEvent, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
+import type { ReactElement } from 'react';
 
 type SaveLabelInput = { carrier: string; tracking_num: string; label_pdf?: File };
 
@@ -14,8 +16,8 @@ const { placementMock, saveLabelMock, sendMock, logActionMock } = vi.hoisted(() 
       return Promise.resolve({ label_pdf_path: 'q-1/label-1.pdf' });
     },
   ),
-  sendMock: vi.fn((queueId: string) => {
-    void queueId;
+  sendMock: vi.fn((queueId: string, override?: { subject: string; body: string }) => {
+    void queueId; void override;
     return Promise.resolve({ email_id: 're_1' });
   }),
   logActionMock: vi.fn(() => Promise.resolve()),
@@ -28,6 +30,14 @@ vi.mock('../../../lib/eztrans', async () => {
     useEzTransPlacement: placementMock,
     saveEzTransLabel: saveLabelMock,
     sendEzTransBooking: sendMock,
+    // Pinned to the built-in default. Left real, this hook queries
+    // email_templates over the network — which in a jsdom run rejects after
+    // the test has finished and surfaces as an intermittent suite error.
+    useEzTransTemplate: () => ({
+      template: { subject: actual.DEFAULT_EZTRANS_SUBJECT, body: actual.DEFAULT_EZTRANS_BODY },
+      source: 'built-in' as const,
+      loading: false,
+    }),
   };
 });
 
@@ -42,6 +52,9 @@ vi.mock('../../../lib/activityLog', async () => {
 
 import { EzTransPanel } from '../queue/EzTransPanel';
 import type { FulfillmentQueueRow } from '../../../lib/fulfillment';
+
+// The panel links to the Templates tab, so it needs a router around it.
+const render = (ui: ReactElement) => rtlRender(<MemoryRouter>{ui}</MemoryRouter>);
 
 const row: FulfillmentQueueRow = {
   id: 'q-1', order_id: 'o-1', step: 3, assigned_serial: 'LL01-P100X-00412',
@@ -121,7 +134,9 @@ describe('EzTransPanel', () => {
     fillLabel();
     fireEvent.click(sendButton());
 
-    await waitFor(() => expect(sendMock).toHaveBeenCalledWith('q-1'));
+    // No second argument: an untouched email sends from the saved wording,
+    // not from a copy the panel rendered.
+    await waitFor(() => expect(sendMock).toHaveBeenCalledWith('q-1', undefined));
     expect(saveLabelMock).toHaveBeenCalledTimes(1);
     const [queueId, input]: [string, SaveLabelInput] = saveLabelMock.mock.calls[0];
     expect(queueId).toBe('q-1');
@@ -171,9 +186,56 @@ describe('EzTransPanel', () => {
   it('previews the email with the master carton read off the pallet', () => {
     render(<EzTransPanel row={row} order={order} />);
     fillLabel();
-    fireEvent.click(screen.getByRole('button', { name: /preview email/i }));
-    const preview = screen.getAllByText(/Master Carton: 1/).length;
-    expect(preview).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole('button', { name: /preview \/ edit email/i }));
+    expect(screen.getAllByText(/Master Carton: 1/).length).toBeGreaterThan(0);
     expect(screen.getByText(/Tracking Number: PUR123456789/)).toBeInTheDocument();
+  });
+
+  it('sends the operator edit when the wording has been changed', async () => {
+    render(<EzTransPanel row={row} order={order} />);
+    fillLabel();
+    fireEvent.click(screen.getByRole('button', { name: /preview \/ edit email/i }));
+    fireEvent.click(screen.getByRole('button', { name: /edit this one/i }));
+    fireEvent.change(screen.getByLabelText(/^body:$/i), {
+      target: { value: 'Please expedite this one — customer is waiting.' },
+    });
+    fireEvent.click(sendButton());
+
+    await waitFor(() => expect(sendMock).toHaveBeenCalledTimes(1));
+    const [, override] = sendMock.mock.calls[0];
+    expect(override?.body).toBe('Please expedite this one — customer is waiting.');
+    // The subject was not touched, so it goes as rendered rather than blank.
+    expect(override?.subject).toContain('#1184');
+  });
+
+  it('resets an edit back to the saved wording', () => {
+    render(<EzTransPanel row={row} order={order} />);
+    fillLabel();
+    fireEvent.click(screen.getByRole('button', { name: /preview \/ edit email/i }));
+    fireEvent.click(screen.getByRole('button', { name: /edit this one/i }));
+
+    const bodyBox = screen.getByLabelText(/^body:$/i);
+    const original = (bodyBox as HTMLTextAreaElement).value;
+    expect(original).toContain('Hello EZ Trans team');
+
+    fireEvent.change(bodyBox, { target: { value: 'scratch that' } });
+    expect((screen.getByLabelText(/^body:$/i) as HTMLTextAreaElement).value).toBe('scratch that');
+
+    fireEvent.click(screen.getByRole('button', { name: /reset to/i }));
+    expect((screen.getByLabelText(/^body:$/i) as HTMLTextAreaElement).value).toBe(original);
+  });
+
+  it('leaves the packing list alone however the email is edited', () => {
+    render(<EzTransPanel row={row} order={order} />);
+    fillLabel();
+    fireEvent.click(screen.getByRole('button', { name: /preview \/ edit email/i }));
+    fireEvent.click(screen.getByRole('button', { name: /edit this one/i }));
+    fireEvent.change(screen.getByLabelText(/^body:$/i), { target: { value: 'hi' } });
+
+    // The packing-list preview still carries every field the pickers need.
+    const list = screen.getByText(/PACKING LIST/).textContent ?? '';
+    expect(list).toContain('Serial No: LL01-P100X-00412');
+    expect(list).toContain('Master Carton: 1');
+    expect(list).toContain('SKU: LILA-P100X');
   });
 });
