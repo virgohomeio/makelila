@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { confirmLabel, type FulfillmentQueueRow } from '../../../lib/fulfillment';
+import { EzTransPanel, type EzTransOrder } from './EzTransPanel';
 import styles from '../Fulfillment.module.css';
 
 const CARRIERS = ['UPS', 'FedEx', 'Purolator', 'Canada Post', 'Canpar', 'GLS'] as const;
@@ -9,11 +10,14 @@ const AMAZON_URL     = 'https://www.amazon.com/gp/your-account/order-history';
 
 export function StepLabel({
   row,
-  country,
+  order,
 }: {
   row: FulfillmentQueueRow;
-  country: 'US' | 'CA';
+  /** The whole order: the EZ Trans packing list needs the customer's full
+   *  name, address, email and phone, not just the country. */
+  order: EzTransOrder;
 }) {
+  const country = order.country;
   const [carrier, setCarrier] = useState<string>('');
   const [tracking, setTracking] = useState<string>('');
   const [starterTracking, setStarterTracking] = useState<string>('');
@@ -42,6 +46,9 @@ export function StepLabel({
   return (
     <div>
       <h3 style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>Attach the shipping label details</h3>
+
+      {/* Renders only when the assigned unit is held at the EZTrans 3PL. */}
+      <EzTransPanel row={row} order={order} />
 
       <div style={{
         background: 'var(--color-info-bg)',

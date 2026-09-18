@@ -716,3 +716,92 @@
   display: inline-block; padding: 2px 8px; background: #fffaf0;
   color: #c05621; border-radius: 4px; font-size: .7rem; font-weight: 600;
 }
+
+/* ── EZ Trans / Goorooship booking (step 3) ─────────────────────────────── */
+/* Only rendered when the assigned unit is held at the EZTrans 3PL. Set apart
+   from the Freightcom card because it is the other, mutually-exclusive path:
+   an operator who sees this one should not be booking Freightcom. */
+.ezTransPanel {
+  background: #fff;
+  border: 1.5px solid var(--color-crimson);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  margin-bottom: 14px;
+}
+.ezTransLead {
+  font-size: 11px;
+  color: var(--color-ink-muted);
+  line-height: 1.5;
+  margin: 2px 0 10px;
+}
+.ezTransSteps {
+  list-style: decimal;
+  margin: 0 0 10px;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ezTransSteps li {
+  font-size: 11px;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.ezTransHint {
+  color: var(--color-ink-subtle);
+  font-size: 10px;
+}
+.ezTransPreviewToggle {
+  background: transparent;
+  border: 1px solid var(--color-border);
+  color: var(--color-ink-subtle);
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 10px;
+  cursor: pointer;
+}
+.ezTransPreviewToggle:hover { color: var(--color-ink); border-color: var(--color-ink-subtle); }
+.ezTransFacts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 22px;
+  margin: 0 0 4px;
+}
+.ezTransFacts div { display: flex; flex-direction: column; gap: 1px; }
+.ezTransFacts dt {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--color-ink-subtle);
+}
+.ezTransFacts dd {
+  margin: 0;
+  font-size: 11px;
+  color: var(--color-ink);
+  font-family: ui-monospace, monospace;
+}
+.ezTransSent {
+  font-size: 11px;
+  color: var(--color-success);
+  margin-top: 8px;
+}
+.ezTransPreviewLabel {
+  font-size: 10px;
+  color: var(--color-ink-subtle);
+  margin: 10px 0 3px;
+}
+.ezTransPreview {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  padding: 10px;
+  border-radius: 4px;
+  font-size: 10px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  max-height: 280px;
+  overflow-y: auto;
+  margin: 0;
+}

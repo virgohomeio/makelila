@@ -25,8 +25,15 @@ type Order = {
   kind: 'sale' | 'replacement';
   customer_name: string;
   customer_email: string | null;
+  // Address + phone are here for the EZ Trans packing list, which has to carry
+  // the customer's full name, full address, email and phone. select('*')
+  // already returned them.
+  customer_phone: string | null;
+  address_line: string | null;
+  address_line2: string | null;
   city: string;
   region_state: string | null;
+  postal_code: string | null;
   country: 'US' | 'CA';
   status: OrderStatus;
   placed_at: string | null;
@@ -172,7 +179,7 @@ export default function Queue() {
               <>
                 {selected.step === 1 && <StepAssign row={selected} />}
                 {selected.step === 2 && <StepTest row={selected} />}
-                {selected.step === 3 && <StepLabel row={selected} country={selectedOrder.country} />}
+                {selected.step === 3 && <StepLabel row={selected} order={selectedOrder} />}
                 {selected.step === 4 && <StepDock row={selected} />}
                 {selected.step === 5 && <StepEmail row={selected} order={selectedOrder} />}
                 {selected.step === 6 && <StepFulfilled row={selected} order={selectedOrder} />}
