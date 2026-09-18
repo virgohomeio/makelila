@@ -1,8 +1,8 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import {
   useParts, usePartShipments, adjustPartStock, recordPartShipment,
-  updatePartField, parsePartFieldInput, effectiveDemandBySku,
-  type Part, type PartCategory, type PartEditableField,
+  updatePartField, parsePartFieldInput, effectiveDemandBySku, createPart,
+  type Part, type PartCategory, type PartEditableField, type NewPartInput,
 } from '../../lib/parts';
 import { useReplacementOrders } from '../../lib/orders';
 import { replacementDemandBySku } from '../../lib/replacementTags';
@@ -12,7 +12,7 @@ import styles from './Stock.module.css';
 type CatFilter = 'all' | PartCategory;
 
 export function PartsTab() {
-  const { parts, loading: pLoading } = useParts();
+  const { parts, loading: pLoading, refresh: refreshParts } = useParts();
   const { shipments, loading: sLoading } = usePartShipments();
   const { customers, loading: cLoading } = useCustomers();
   const { orders: replacementOrders } = useReplacementOrders();
@@ -20,6 +20,7 @@ export function PartsTab() {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [shipForPartId, setShipForPartId] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
 
   const filtered = useMemo(
     () => catFilter === 'all' ? parts : parts.filter(p => p.category === catFilter),
@@ -86,7 +87,13 @@ export function PartsTab() {
     if (value === (p[field] ?? null)) return true;
     setBusy(p.id); setError(null);
     try { await updatePartField(p, field, value); return true; }
-    catch (e) { setError((e as Error).message); return false; }
+    catch (e) {
+      const msg = (e as Error).message;
+      setError(/demand_override.*does not exist/.test(msg)
+        ? 'Manual demand needs a database update that has not been applied yet — the other columns still save.'
+        : msg);
+      return false;
+    }
     finally { setBusy(null); }
   };
 
@@ -121,6 +128,7 @@ export function PartsTab() {
             >{c === 'all' ? 'All' : c.charAt(0).toUpperCase() + c.slice(1)}</button>
           ))}
         </div>
+        <button className={styles.addPartBtn} onClick={() => setAdding(true)}>+ Add part / consumable</button>
         {error && <div className={styles.errorBar}>{error}</div>}
       </div>
 
@@ -288,6 +296,19 @@ export function PartsTab() {
         </table>
       </div>
 
+      {adding && (
+        <AddPartModal
+          existingParts={parts}
+          onClose={() => setAdding(false)}
+          onSubmit={async (input) => {
+            setError(null);
+            await createPart(input, parts.map(p => p.id));
+            await refreshParts();
+            setAdding(false);
+          }}
+        />
+      )}
+
       {shipForPart && (
         <ShipPartModal
           part={shipForPart}
@@ -306,6 +327,152 @@ export function PartsTab() {
           }}
         />
       )}
+    </div>
+  );
+}
+
+/** Add a SKU to the catalog. Deliberately small: SKU, name, category and the
+ *  numbers. Everything else is editable in the table afterwards. */
+function AddPartModal({
+  existingParts, onClose, onSubmit,
+}: {
+  existingParts: Part[];
+  onClose: () => void;
+  onSubmit: (input: NewPartInput) => Promise<void>;
+}) {
+  const [sku, setSku] = useState('');
+  const [name, setName] = useState('');
+  const [category, setCategory] = useState<PartCategory>('consumable');
+  const [onHand, setOnHand] = useState('0');
+  const [reorder, setReorder] = useState('0');
+  const [cost, setCost] = useState('');
+  const [supplier, setSupplier] = useState('');
+  const [location, setLocation] = useState('');
+  const [notes, setNotes] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const skuTaken = existingParts.some(p => p.sku.toLowerCase() === sku.trim().toLowerCase());
+
+  const submit = async () => {
+    const onHandNum = parsePartFieldInput('on_hand', onHand);
+    const reorderNum = parsePartFieldInput('reorder_point', reorder);
+    const costNum = parsePartFieldInput('cost_per_unit_usd', cost);
+    if (!sku.trim() || !name.trim()) { setError('SKU and name are both required.'); return; }
+    if (skuTaken) { setError(`SKU ${sku.trim()} already exists.`); return; }
+    if (onHandNum == null || reorderNum == null) { setError('On hand and reorder at must be whole numbers of 0 or more.'); return; }
+    if (costNum === undefined) { setError('Cost must be a dollar amount like 24.50, or blank.'); return; }
+    setSubmitting(true); setError(null);
+    try {
+      await onSubmit({
+        sku, name, category,
+        on_hand: onHandNum,
+        reorder_point: reorderNum,
+        cost_per_unit_usd: costNum,
+        supplier: supplier.trim() || null,
+        location: location.trim() || null,
+        notes: notes.trim() || null,
+      });
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className={styles.modalBackdrop} onClick={onClose}>
+      <div className={styles.modalCard} onClick={e => e.stopPropagation()}>
+        <div className={styles.modalHead}>
+          <strong>Add part / consumable</strong>
+          <button onClick={onClose} className={styles.modalClose}>✕</button>
+        </div>
+        <div className={styles.modalBody}>
+          <div className={styles.modalGrid}>
+            <div className={styles.modalRow}>
+              <label htmlFor="newPartSku">SKU</label>
+              <input
+                id="newPartSku" className={styles.modalInput} autoFocus
+                value={sku} onChange={e => setSku(e.target.value)}
+                placeholder="LILA-TOTE"
+              />
+            </div>
+            <div className={styles.modalRow}>
+              <label htmlFor="newPartName">Name</label>
+              <input
+                id="newPartName" className={styles.modalInput}
+                value={name} onChange={e => setName(e.target.value)}
+                placeholder="Tote Bag"
+              />
+            </div>
+            <div className={styles.modalRow}>
+              <label htmlFor="newPartCategory">Category</label>
+              <select
+                id="newPartCategory" className={styles.modalInput}
+                value={category} onChange={e => setCategory(e.target.value as PartCategory)}
+              >
+                <option value="consumable">consumable</option>
+                <option value="replacement">replacement</option>
+              </select>
+            </div>
+            <div className={styles.modalRow}>
+              <label htmlFor="newPartOnHand">On hand</label>
+              <input
+                id="newPartOnHand" className={styles.modalInput} inputMode="numeric"
+                value={onHand} onChange={e => setOnHand(e.target.value)}
+              />
+            </div>
+            <div className={styles.modalRow}>
+              <label htmlFor="newPartReorder">Reorder at</label>
+              <input
+                id="newPartReorder" className={styles.modalInput} inputMode="numeric"
+                value={reorder} onChange={e => setReorder(e.target.value)}
+              />
+            </div>
+            <div className={styles.modalRow}>
+              <label htmlFor="newPartCost">Cost</label>
+              <input
+                id="newPartCost" className={styles.modalInput} inputMode="decimal"
+                value={cost} onChange={e => setCost(e.target.value)}
+                placeholder="optional"
+              />
+            </div>
+            <div className={styles.modalRow}>
+              <label htmlFor="newPartSupplier">Supplier</label>
+              <input
+                id="newPartSupplier" className={styles.modalInput}
+                value={supplier} onChange={e => setSupplier(e.target.value)}
+                placeholder="optional"
+              />
+            </div>
+            <div className={styles.modalRow}>
+              <label htmlFor="newPartLocation">Location</label>
+              <input
+                id="newPartLocation" className={styles.modalInput}
+                value={location} onChange={e => setLocation(e.target.value)}
+                placeholder="optional"
+              />
+            </div>
+          </div>
+          <div className={styles.modalRow}>
+            <label htmlFor="newPartNotes">Notes</label>
+            <textarea
+              id="newPartNotes" className={styles.modalTextarea} rows={2}
+              value={notes} onChange={e => setNotes(e.target.value)}
+              placeholder="Optional — what this is for, where it came from."
+            />
+          </div>
+          {error && <div className={styles.errorBar}>{error}</div>}
+        </div>
+        <div className={styles.modalFoot}>
+          <button onClick={onClose} className={styles.modalSecondary}>Cancel</button>
+          <button
+            onClick={() => void submit()}
+            className={styles.modalPrimary}
+            disabled={submitting || !sku.trim() || !name.trim() || skuTaken}
+          >{submitting ? 'Adding…' : 'Add to inventory'}</button>
+        </div>
+      </div>
     </div>
   );
 }

@@ -12,11 +12,14 @@ const lid = {
 };
 
 const updatePartField = vi.fn(async (..._args: unknown[]) => {});
+const createPart = vi.fn(async (..._args: unknown[]) => 'C-TOTE');
+const refresh = vi.fn(async () => {});
 vi.mock('../../../lib/parts', async () => ({
   ...await vi.importActual<typeof import('../../../lib/parts')>('../../../lib/parts'),
-  useParts: () => ({ parts: [lid, tote], loading: false }),
+  useParts: () => ({ parts: [lid, tote], loading: false, refresh }),
   usePartShipments: () => ({ shipments: [], loading: false }),
   updatePartField: (...args: unknown[]) => updatePartField(...args),
+  createPart: (...args: unknown[]) => createPart(...args),
 }));
 vi.mock('../../../lib/orders', () => ({ useReplacementOrders: () => ({ orders: [] }) }));
 vi.mock('../../../lib/customers', () => ({ useCustomers: () => ({ customers: [], loading: false }) }));
@@ -26,7 +29,7 @@ import { PartsTab } from '../PartsTab';
 const row = (name: string) => screen.getByText(name).closest('tr') as HTMLElement;
 
 describe('Stock › Parts — editable numbers', () => {
-  beforeEach(() => updatePartField.mockClear());
+  beforeEach(() => { updatePartField.mockClear(); createPart.mockClear(); });
 
   it('shows a consumable’s on-hand count instead of n/a', () => {
     render(<PartsTab />);
@@ -73,5 +76,59 @@ describe('Stock › Parts — editable numbers', () => {
     fireEvent.change(input, { target: { value: '$3.75' } });
     fireEvent.keyDown(input, { key: 'Enter' });
     await waitFor(() => expect(updatePartField).toHaveBeenCalledWith(tote, 'cost_per_unit_usd', 3.75));
+  });
+});
+
+describe('Stock › Parts — adding a SKU', () => {
+  beforeEach(() => { createPart.mockClear(); refresh.mockClear(); });
+
+  const open = () => {
+    render(<PartsTab />);
+    fireEvent.click(screen.getByRole('button', { name: '+ Add part / consumable' }));
+  };
+
+  it('creates a consumable with the count typed in, then re-reads the table', async () => {
+    open();
+    fireEvent.change(screen.getByLabelText('SKU'), { target: { value: 'LILA-MAGNET' } });
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Magnet' } });
+    fireEvent.change(screen.getByLabelText('On hand'), { target: { value: '32' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add to inventory' }));
+
+    await waitFor(() => expect(createPart).toHaveBeenCalledTimes(1));
+    const [input, existingIds] = createPart.mock.calls[0] as [Record<string, unknown>, string[]];
+    expect(input).toMatchObject({
+      sku: 'LILA-MAGNET', name: 'Magnet', category: 'consumable',
+      on_hand: 32, reorder_point: 0, cost_per_unit_usd: null, supplier: null,
+    });
+    expect(existingIds).toEqual(['P-LID-V36', 'C-TOTE']);
+    await waitFor(() => expect(refresh).toHaveBeenCalled());
+  });
+
+  it('refuses a SKU that already exists', () => {
+    open();
+    fireEvent.change(screen.getByLabelText('SKU'), { target: { value: 'lila-tote' } });
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Tote Bag' } });
+    expect(screen.getByRole('button', { name: 'Add to inventory' })).toBeDisabled();
+    expect(createPart).not.toHaveBeenCalled();
+  });
+
+  it('refuses a negative on-hand count', async () => {
+    open();
+    fireEvent.change(screen.getByLabelText('SKU'), { target: { value: 'LILA-MAGNET' } });
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Magnet' } });
+    fireEvent.change(screen.getByLabelText('On hand'), { target: { value: '-4' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add to inventory' }));
+    await waitFor(() => expect(screen.getByText(/whole numbers of 0 or more/)).toBeInTheDocument());
+    expect(createPart).not.toHaveBeenCalled();
+  });
+
+  it('surfaces a write failure instead of closing the form', async () => {
+    createPart.mockRejectedValueOnce(new Error('new row violates row-level security policy'));
+    open();
+    fireEvent.change(screen.getByLabelText('SKU'), { target: { value: 'LILA-MAGNET' } });
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Magnet' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add to inventory' }));
+    await waitFor(() => expect(screen.getByText(/row-level security/)).toBeInTheDocument());
+    expect(screen.getByRole('button', { name: 'Add to inventory' })).toBeInTheDocument();
   });
 });

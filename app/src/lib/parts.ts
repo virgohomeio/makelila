@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase } from './supabase';
 import { logAction } from './activityLog';
@@ -41,9 +41,21 @@ export type PartShipment = {
 
 // ---------- hooks ----------
 
-export function useParts(): { parts: Part[]; loading: boolean } {
+export function useParts(): { parts: Part[]; loading: boolean; refresh: () => Promise<void> } {
   const [parts, setParts] = useState<Part[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Re-read the table on demand. The realtime subscription below normally
+  // carries new rows, but a dropped socket would otherwise strand the list —
+  // and adding a part you can't see reads as the write having failed.
+  const refresh = useCallback(async () => {
+    const { data, error } = await supabase
+      .from('parts')
+      .select('*')
+      .order('category', { ascending: true })
+      .order('name', { ascending: true });
+    if (!error && data) setParts(data as Part[]);
+  }, []);
 
   useEffect(() => {
     let channel: RealtimeChannel | null = null;
@@ -79,7 +91,7 @@ export function useParts(): { parts: Part[]; loading: boolean } {
     return () => { cancelled = true; if (channel) void channel.unsubscribe(); };
   }, []);
 
-  return { parts, loading };
+  return { parts, loading, refresh };
 }
 
 export function usePartShipments(): { shipments: PartShipment[]; loading: boolean } {
@@ -176,6 +188,51 @@ export async function updatePartField(
     v == null ? (field === 'demand_override' ? 'auto' : '—')
       : field === 'cost_per_unit_usd' ? `$${Number(v).toFixed(2)}` : String(v);
   await logAction('part_edit', part.id, `${part.sku} ${FIELD_LABEL[field]}: ${fmt(part[field])} → ${fmt(value)}`);
+}
+
+/** A new part's primary key. parts.id is a text PK holding human-readable
+ *  codes ('P-LID-V36', 'C-STARTER'), so derive one from the category prefix
+ *  and the SKU, and suffix it if that code is taken. */
+export function suggestPartId(
+  category: PartCategory,
+  sku: string,
+  existingIds: string[],
+): string {
+  const prefix = category === 'consumable' ? 'C' : 'P';
+  const body = sku.trim().toUpperCase()
+    .replace(/^LILA[-_ ]?/, '')
+    .replace(/[^A-Z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'PART';
+  const base = `${prefix}-${body}`;
+  const taken = new Set(existingIds);
+  if (!taken.has(base)) return base;
+  for (let n = 2; ; n++) if (!taken.has(`${base}-${n}`)) return `${base}-${n}`;
+}
+
+export type NewPartInput = {
+  sku: string;
+  name: string;
+  category: PartCategory;
+  on_hand: number;
+  reorder_point: number;
+  cost_per_unit_usd: number | null;
+  supplier: string | null;
+  location: string | null;
+  notes: string | null;
+};
+
+/** Add a SKU to the parts catalog. Returns the generated part id. */
+export async function createPart(input: NewPartInput, existingIds: string[]): Promise<string> {
+  const id = suggestPartId(input.category, input.sku, existingIds);
+  const { error } = await supabase.from('parts').insert({
+    id,
+    ...input,
+    sku: input.sku.trim(),
+    name: input.name.trim(),
+  });
+  if (error) throw error;
+  await logAction('part_add', id, `${input.sku.trim()} — ${input.name.trim()} (${input.category}), ${input.on_hand} on hand`);
+  return id;
 }
 
 /** Demand per SKU as every screen should read it: the derived count from
