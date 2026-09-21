@@ -7,6 +7,7 @@ import {
   useEzTransPlacement,
   useEzTransTemplate,
   packingListPreview,
+  EZTRANS_CC,
   EZTRANS_EMAIL,
   EZTRANS_SENT_ACTION,
   GOOROOSHIP_SHIP_URL,
@@ -315,6 +316,10 @@ export function EzTransPanel({
         <div><dt>Serial No</dt><dd>{placement.serial}</dd></div>
         <div><dt>Master carton</dt><dd>{placement.masterCarton ?? '— (no pallet on record)'}</dd></div>
         <div><dt>Ship to</dt><dd>{order.customer_name}</dd></div>
+        {/* Named rather than implied: the 3PL's group address is on here at
+            their own request, and the operator should be able to see who the
+            booking reaches without opening the sent mail to find out. */}
+        <div><dt>Copied</dt><dd>{EZTRANS_CC.join(', ')}</dd></div>
       </dl>
 
       {sentAt && (

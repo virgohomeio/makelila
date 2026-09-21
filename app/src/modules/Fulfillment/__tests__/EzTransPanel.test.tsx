@@ -460,4 +460,10 @@ describe('EzTransPanel', () => {
     expect(override?.body).toBe('Please expedite.');
     expect(override?.packing_list).toBe('# PACKING LIST\nTote bag: 1');
   });
+  it('shows who is copied, so the recipient list is not a matter of faith', () => {
+    render(<EzTransPanel row={row} order={order} />);
+    const copied = screen.getByText(/reina@virgohome\.io/).textContent ?? '';
+    expect(copied).toContain('huayi@virgohome.io');
+    expect(copied).toContain('support@goorooship.ca');
+  });
 });
