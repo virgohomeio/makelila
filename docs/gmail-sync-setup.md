@@ -172,3 +172,60 @@ Then open the existing Support Tickets tab — gmail tickets appear alongside Hu
 - Slack notification on urgent — landing in **PR3**.
 
 See [docs/superpowers/specs/2026-05-19-gmail-ticket-pipeline-design.md](superpowers/specs/2026-05-19-gmail-ticket-pipeline-design.md) for full scope.
+
+---
+
+## Sending as a person: the EZ Trans booking
+
+Everything above is about *reading* mailboxes. The same service account also
+sends the EZ Trans booking confirmation
+([`send-eztrans-booking`](../supabase/functions/send-eztrans-booking/index.ts)),
+and that needs one extra scope.
+
+**Why Gmail and not Resend.** Resend hands a message to the recipient's mail
+server and has no access to any mailbox, so a booking it sends "from" Reina
+leaves no trace in Reina's account — nothing in Sent, and the 3PL's reply
+threads somewhere she cannot see. Gmail's `users.messages.send`, called while
+impersonating her, files the message in her Sent folder exactly as if she had
+pressed send. It also means Resend sender verification stops mattering:
+Workspace already owns `virgohome.io`, so nothing has to be proved to a third
+party to send as its own user. (Resend *cannot* send as `@virgohome.io` today
+in any case — that domain has no `resend._domainkey` record.)
+
+### What to add
+
+1. **Scope.** In the same Domain Wide Delegation entry as step 2, append:
+   ```
+   https://www.googleapis.com/auth/gmail.send
+   ```
+   Re-authorize. Nothing else in the entry changes.
+
+2. **Secret.** `GOOGLE_SERVICE_ACCOUNT_KEY` must be set on the
+   `send-eztrans-booking` function too — the same base64 value from step 4.
+
+| Name | Required | Value |
+|---|---|---|
+| `GOOGLE_SERVICE_ACCOUNT_KEY` | for the Gmail path | Same base64 service-account JSON as above. Unset → falls back to Resend. |
+| `EZTRANS_GMAIL_SENDER` | optional | Mailbox to send as. Defaults to the address inside `EZTRANS_FROM`, so normally leave it unset and let the two stay in step. |
+| `EZTRANS_FROM` | optional | Defaults to `VCycene Fulfillment <reina@virgohome.io>`. |
+| `EZTRANS_CC` | optional | Comma-separated. Defaults to `huayi@virgohome.io`. |
+
+The impersonated mailbox must match the `From` address — Gmail will not let an
+account send as an unrelated address. Leaving `EZTRANS_GMAIL_SENDER` unset
+keeps them in step automatically.
+
+### Checking it took
+
+Send a booking from Fulfillment → Queue → step 3. The panel says which pipe
+carried it, and so does the activity-log line:
+
+- *"Sent from … — it is in that mailbox's Sent folder"* → Gmail path, working.
+- *"Sent from … via Resend — there is no copy in that mailbox's Sent folder"*
+  → still on the fallback; the same line carries the reason.
+
+`unauthorized_client` in that reason means the scope above was not added, or
+was spelled differently, in the Admin Console entry.
+
+**The fallback is deliberate.** A missing credential must never hold up a
+shipment, so the booking still goes out via Resend — it just goes out without
+a Sent-folder record, and says so rather than leaving that to be discovered.
