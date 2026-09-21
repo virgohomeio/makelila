@@ -41,20 +41,28 @@ export function EzTransPanel({
   onLabelSaved?: (v: { carrier: string; tracking_num: string }) => void;
 }) {
   const { placement, loading } = useEzTransPlacement(row.assigned_serial);
-  const { template, source: templateSource } = useEzTransTemplate();
+  const { template, packingList: packingListTemplate, source: templateSource } = useEzTransTemplate();
   const [carrier, setCarrier] = useState(row.carrier ?? '');
   const [tracking, setTracking] = useState(row.tracking_num ?? '');
   const [pdf, setPdf] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [justSent, setJustSent] = useState<string | null>(null);
+  // A send that went out from a different address than intended is still a
+  // send, so it is reported next to the success line rather than as an error.
+  const [sendWarning, setSendWarning] = useState<string | null>(null);
   const [showPreview, setShowPreview] = useState(false);
   // Null while the operator hasn't touched the wording — the email then simply
   // tracks the template and the live label details. Once they type, their text
   // is held as-is and stops following those, which is the point of editing it.
   const [editedSubject, setEditedSubject] = useState<string | null>(null);
   const [editedBody, setEditedBody] = useState<string | null>(null);
+  // The packing list is edited separately from the wording: they are two
+  // documents with different readers, and an operator fixing a handling note
+  // on the PDF should not have to re-approve the email to send it.
+  const [editedPacking, setEditedPacking] = useState<string | null>(null);
   const edited = editedSubject !== null || editedBody !== null;
+  const packingEdited = editedPacking !== null;
 
   // "Already emailed" survives a reload, so an operator coming back to the row
   // doesn't double-book the 3PL. Logged against the order, which is where the
@@ -76,17 +84,21 @@ export function EzTransPanel({
       carrier: carrier || null,
       tracking: tracking.trim() || null,
       template,
+      packingListTemplate,
     });
-  }, [order, placement, carrier, tracking, template]);
+  }, [order, placement, carrier, tracking, template, packingListTemplate]);
 
   // Opening the editor is what commits the current rendering as the starting
   // text — before that the fields are unset so the preview keeps tracking the
   // template and the label details as they are typed in above.
   const subjectValue = editedSubject ?? booking?.subject ?? '';
   const bodyValue = editedBody ?? booking?.body ?? '';
+  const packingValue = editedPacking ?? booking?.packingListText ?? '';
 
   const [editing, setEditing] = useState(false);
+  const [editingPacking, setEditingPacking] = useState(false);
   const bodyRef = useRef<HTMLTextAreaElement | null>(null);
+  const packingRef = useRef<HTMLTextAreaElement | null>(null);
   useEffect(() => {
     if (editing && bodyRef.current) {
       // Grow to fit rather than making the operator scroll a 6-row box.
@@ -94,12 +106,18 @@ export function EzTransPanel({
       bodyRef.current.style.height = `${Math.min(bodyRef.current.scrollHeight, 420)}px`;
     }
   }, [editing, bodyValue]);
+  useEffect(() => {
+    if (editingPacking && packingRef.current) {
+      packingRef.current.style.height = 'auto';
+      packingRef.current.style.height = `${Math.min(packingRef.current.scrollHeight, 420)}px`;
+    }
+  }, [editingPacking, packingValue]);
 
   if (loading || !placement || !booking) return null;
 
   const handleSend = async () => {
     if (!ready) return;
-    setBusy(true); setError(null);
+    setBusy(true); setError(null); setSendWarning(null);
     try {
       // Save first: the edge function reads the label off the queue row rather
       // than taking it from this form, so there is exactly one copy of the
@@ -110,16 +128,25 @@ export function EzTransPanel({
         ...(pdf ? { label_pdf: pdf } : {}),
       });
       onLabelSaved?.({ carrier, tracking_num: tracking.trim() });
-      await sendEzTransBooking(
+      const sent = await sendEzTransBooking(
         row.id,
-        edited ? { subject: subjectValue, body: bodyValue } : undefined,
+        edited || packingEdited
+          ? {
+              subject: subjectValue,
+              body: bodyValue,
+              ...(packingEdited ? { packing_list: packingValue } : {}),
+            }
+          : undefined,
       );
+      setSendWarning(sent.warning ?? null);
       await logAction(
         EZTRANS_SENT_ACTION,
         order.order_ref,
         `Booking confirmation, packing list + ${carrier} label sent to ${EZTRANS_EMAIL} — ` +
         `serial ${placement.serial}, master carton ${placement.masterCarton ?? '—'}, ` +
-        `tracking ${tracking.trim()}${edited ? ' · wording edited for this order' : ''}`,
+        `tracking ${tracking.trim()}${edited ? ' · wording edited for this order' : ''}` +
+        `${packingEdited ? ' · packing list edited for this order' : ''}` +
+        `${sent.warning ? ` · ${sent.warning}` : ''}`,
         { entityType: 'order', entityId: order.id, unitSerial: placement.serial },
       );
       setPdf(null);
@@ -209,7 +236,11 @@ export function EzTransPanel({
               type="button"
               className={styles.ezTransPreviewToggle}
               onClick={() => setShowPreview(v => !v)}
-            >{showPreview ? 'Hide email' : edited ? 'Show edited email' : 'Preview / edit email'}</button>
+            >{showPreview
+              ? 'Hide email'
+              : edited || packingEdited
+                ? 'Show edited email + packing list'
+                : 'Preview / edit email + packing list'}</button>
             {!ready && (
               <span className={styles.ezTransHint}>
                 Carrier, tracking number and the label PDF are all required before this can be sent.
@@ -230,6 +261,7 @@ export function EzTransPanel({
           ✓ Confirmation, packing list and label sent to {EZTRANS_EMAIL} at {new Date(sentAt).toLocaleString()}.
         </div>
       )}
+      {sendWarning && <div className={styles.ezTransWarning}>⚠ {sendWarning}</div>}
       {error && <div className={styles.error}>{error}</div>}
 
       {showPreview && (
@@ -286,8 +318,8 @@ export function EzTransPanel({
                 />
               </label>
               <span className={styles.ezTransHint}>
-                The packing list and the label are attached automatically and are not
-                editable here — they are rebuilt from this order when it sends.
+                The label is attached automatically. The packing list is edited
+                separately, below.
               </span>
             </div>
           ) : (
@@ -298,8 +330,55 @@ export function EzTransPanel({
             </pre>
           )}
 
-          <div className={styles.ezTransPreviewLabel}>Attached packing list (PDF):</div>
-          <pre className={styles.ezTransPreview}>{booking.packingList.join('\n')}</pre>
+          <div className={styles.ezTransPreviewHead}>
+            <span className={styles.ezTransPreviewLabel}>Attached packing list (PDF)</span>
+            {editingPacking ? (
+              <>
+                <button
+                  type="button"
+                  className={styles.ezTransPreviewToggle}
+                  onClick={() => setEditedPacking(null)}
+                  disabled={!packingEdited}
+                >Reset packing list</button>
+                <button
+                  type="button"
+                  className={styles.ezTransPreviewToggle}
+                  onClick={() => setEditingPacking(false)}
+                >Done editing</button>
+              </>
+            ) : (
+              <button
+                type="button"
+                className={styles.ezTransPreviewToggle}
+                onClick={() => setEditingPacking(true)}
+              >Edit packing list</button>
+            )}
+            <span className={styles.ezTransHint}>
+              {packingEdited
+                ? 'Edited for this order only — the saved packing list is unchanged.'
+                : 'Start a line with # for the title and ## for a section heading.'}
+            </span>
+          </div>
+
+          {editingPacking ? (
+            <div className={styles.ezTransEditor}>
+              <label>
+                Packing list:
+                <textarea
+                  ref={packingRef}
+                  value={packingValue}
+                  onChange={e => setEditedPacking(e.target.value)}
+                  spellCheck
+                />
+              </label>
+              <span className={styles.ezTransHint}>
+                Shown as EZ Trans will read it, with this order's details already
+                filled in. Start a line with # for the title, ## for a heading.
+              </span>
+            </div>
+          ) : (
+            <pre className={styles.ezTransPreview}>{booking.packingList.join('\n')}</pre>
+          )}
         </>
       )}
     </div>

@@ -9,17 +9,24 @@
 //
 // The wording comes from the operator's edit for this order, else the
 // `eztrans_booking` row in email_templates, else the built-in default in
-// _shared/eztransTemplate.ts. The packing list is never templated — it is
-// rebuilt here from the queue row, the order and the shelf row, so an edited
-// email cannot change the document the 3PL picks from.
+// _shared/eztransTemplate.ts. The packing list resolves the same way through
+// `eztrans_packing_list`. Whichever wording wins, every {{variable}} is
+// filled from the DB here — an edited document cannot put a serial, carton or
+// tracking number on the wire that the queue row does not say.
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { corsHeaders } from '../_shared/cors.ts';
 import { authenticate } from '../_shared/auth.ts';
-import { buildTextPdf, toBase64, type PdfLine } from '../_shared/simplePdf.ts';
+import { buildTextPdf, toBase64 } from '../_shared/simplePdf.ts';
 import {
   DEFAULT_EZTRANS_BODY,
+  DEFAULT_EZTRANS_PACKING_LIST,
   DEFAULT_EZTRANS_SUBJECT,
+  EZTRANS_CC_DEFAULT,
+  EZTRANS_FROM_DEFAULT,
+  EZTRANS_FROM_FALLBACK,
+  EZTRANS_PACKING_LIST_KEY,
   EZTRANS_TEMPLATE_KEY,
+  packingListLines,
   renderEzTransTemplate,
 } from '../_shared/eztransTemplate.ts';
 
@@ -108,7 +115,9 @@ async function handle(req: Request): Promise<Response> {
     return json(403, { error: 'This function requires an operator JWT — cron-secret not accepted.' });
   }
 
-  const body = await req.json() as { queue_id?: string; subject?: string; body?: string };
+  const body = await req.json() as {
+    queue_id?: string; subject?: string; body?: string; packing_list?: string;
+  };
   if (!body.queue_id) return json(400, { error: 'queue_id required' });
 
   // The operator may have edited the wording in the step-3 panel. Both halves
@@ -125,6 +134,23 @@ async function handle(req: Request): Promise<Response> {
     }
     if (body.subject.length > 300) return json(400, { error: 'subject is too long (max 300 characters)' });
     if (body.body.length > 20000) return json(400, { error: 'body is too long (max 20000 characters)' });
+  }
+
+  // The packing list is edited independently of the wording, so it is checked
+  // on its own terms. An empty one is refused rather than quietly falling back
+  // to the default: the operator cleared the document the 3PL picks from, and
+  // sending a stock list instead of the one they meant is worse than an error.
+  const hasPackingOverride = body.packing_list !== undefined;
+  if (hasPackingOverride) {
+    if (typeof body.packing_list !== 'string') {
+      return json(400, { error: 'packing_list must be a string' });
+    }
+    if (!body.packing_list.trim()) {
+      return json(400, { error: 'an edited packing list cannot be empty' });
+    }
+    if (body.packing_list.length > 20000) {
+      return json(400, { error: 'packing list is too long (max 20000 characters)' });
+    }
   }
 
   const { data: q, error: qErr } = await admin
@@ -197,6 +223,10 @@ async function handle(req: Request): Promise<Response> {
     carrier: q.carrier,
     tracking: q.tracking_num,
     order_ref: order.order_ref,
+    // The PDF wants the address on its own lines; the email indents
+    // continuation lines under "Address: " instead.
+    customer_address_block: addr.join('\n'),
+    date: new Date().toISOString().slice(0, 10),
   };
 
   let tplSubject = DEFAULT_EZTRANS_SUBJECT;
@@ -214,37 +244,28 @@ async function handle(req: Request): Promise<Response> {
     }
   }
 
+  let tplPackingList = DEFAULT_EZTRANS_PACKING_LIST;
+  if (!hasPackingOverride) {
+    const { data: tpl } = await admin
+      .from('email_templates')
+      .select('body, active')
+      .eq('key', EZTRANS_PACKING_LIST_KEY)
+      .maybeSingle();
+    const row = tpl as { body: string; active: boolean } | null;
+    if (row?.active && row.body) tplPackingList = row.body;
+  }
+
   // An override arrives already rendered by the panel, but it is run through
   // the same substitution anyway: an operator who pastes a {{variable}} in
   // while editing gets it filled rather than mailed out raw.
   const text = renderEzTransTemplate(hasOverride ? body.body as string : tplBody, vars);
 
-  const pdfLines: PdfLine[] = [
-    { text: 'PACKING LIST', size: 18, bold: true, gap: 4 },
-    { text: `Order: ${order.order_ref}`, size: 10 },
-    { text: `Date: ${new Date().toISOString().slice(0, 10)}`, size: 10, gap: 14 },
+  // Same substitution as the email: an edited list still gets its serial,
+  // carton and tracking from the rows above, not from what was typed.
+  const packingListText = renderEzTransTemplate(
+    hasPackingOverride ? body.packing_list as string : tplPackingList, vars);
+  const pdfLines = packingListLines(packingListText);
 
-    { text: 'SHIP TO', size: 11, bold: true, gap: 2 },
-    { text: order.customer_name, size: 10, bold: true },
-    ...addr.map((l): PdfLine => ({ text: l, size: 10 })),
-    { text: `Email: ${email}`, size: 10 },
-    { text: `Phone: ${phone}`, size: 10, gap: 14 },
-
-    { text: 'CONTENTS', size: 11, bold: true, gap: 2 },
-    { text: `Product Name: ${PRODUCT_NAME}`, size: 10 },
-    { text: `SKU: ${SKU}`, size: 10 },
-    { text: `Serial No: ${serial}`, size: 10 },
-    { text: `Batch/Lot Number: ${BATCH_LOT}`, size: 10 },
-    { text: `Master Carton: ${masterCarton}`, size: 10 },
-    { text: `Quantity: ${QUANTITY}`, size: 10, gap: 14 },
-
-    { text: 'SHIPPING', size: 11, bold: true, gap: 2 },
-    { text: `Carrier: ${q.carrier}`, size: 10 },
-    { text: `Tracking No: ${q.tracking_num}`, size: 10, gap: 18 },
-
-    { text: 'VCycene Inc. — LILA Composter', size: 9 },
-    { text: 'Questions: support@lilacomposter.com', size: 9 },
-  ];
   const pdf = toBase64(buildTextPdf(pdfLines));
   const safeRef = order.order_ref.replace(/[^A-Za-z0-9._-]/g, '');
 
@@ -272,16 +293,28 @@ async function handle(req: Request): Promise<Response> {
       text
     : text;
 
-  const resendRes = await fetch('https://api.resend.com/emails', {
+  // Sender and CC are env-overridable so the address can move without a
+  // deploy. The sending domain must be verified in Resend — an unverified one
+  // is refused outright, which is called out below rather than left as a 502.
+  const from = Deno.env.get('EZTRANS_FROM') || EZTRANS_FROM_DEFAULT;
+  const cc = (Deno.env.get('EZTRANS_CC') ?? EZTRANS_CC_DEFAULT.join(','))
+    .split(',').map(a => a.trim()).filter(Boolean);
+  const replyTo = from.replace(/^.*<|>.*$/g, '');
+
+  const send = (sender: string) => fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${resendKey}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      from: 'VCycene Team <support@lilacomposter.com>',
-      reply_to: 'support@lilacomposter.com',
+      from: sender,
+      // Replies go to the intended sender even when the From had to fall back.
+      reply_to: replyTo,
       to: [to],
+      // Copied on every booking so there is a second pair of eyes on what the
+      // 3PL was told. Suppressed in test mode along with the real recipient.
+      ...(cc.length && !testRecipient ? { cc } : {}),
       subject,
       text: emailText,
       attachments: [
@@ -290,9 +323,37 @@ async function handle(req: Request): Promise<Response> {
       ],
     }),
   });
+
+  let usedFrom = from;
+  let warning: string | null = null;
+  let resendRes = await send(from);
+
+  // Resend refuses a From on a domain that is not verified for this account.
+  // A shipment should not wait on a DNS change, so retry from the address that
+  // has always been verified — and say so, rather than letting the operator
+  // believe the mail went out as Reina.
   if (!resendRes.ok) {
-    const bodyText = await resendRes.text();
-    return json(502, { error: `Resend ${resendRes.status}: ${bodyText.slice(0, 400)}` });
+    const firstError = await resendRes.text();
+    const unverified = /not verified|domain_not_verified/i.test(firstError);
+    if (unverified && from !== EZTRANS_FROM_FALLBACK) {
+      const domain = from.replace(/^.*<|>.*$/g, '').split('@')[1] ?? from;
+      resendRes = await send(EZTRANS_FROM_FALLBACK);
+      if (resendRes.ok) {
+        usedFrom = EZTRANS_FROM_FALLBACK;
+        warning =
+          `Sent from ${EZTRANS_FROM_FALLBACK} instead of ${from}: ${domain} is not a verified ` +
+          `sending domain on this Resend account. Replies still go to ${replyTo}. ` +
+          `Verify ${domain} in Resend (add its SPF + DKIM records in DNS) and this stops happening.`;
+      } else {
+        const secondError = await resendRes.text();
+        return json(502, {
+          error: `Resend refused both senders. ${from}: ${firstError.slice(0, 200)} — ` +
+            `${EZTRANS_FROM_FALLBACK}: ${secondError.slice(0, 200)}`,
+        });
+      }
+    } else {
+      return json(502, { error: `Resend ${resendRes.status}: ${firstError.slice(0, 400)}` });
+    }
   }
   const sent = await resendRes.json() as { id: string };
 
@@ -300,7 +361,11 @@ async function handle(req: Request): Promise<Response> {
     email_id: sent.id,
     master_carton: masterCarton,
     to,
+    cc,
+    from: usedFrom,
+    ...(warning ? { warning } : {}),
     attachments: 2,
     wording: hasOverride ? 'edited' : 'template',
+    packing_list: hasPackingOverride ? 'edited' : 'template',
   });
 }

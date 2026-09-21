@@ -16,11 +16,12 @@ const { placementMock, saveLabelMock, sendMock, logActionMock } = vi.hoisted(() 
       return Promise.resolve({ label_pdf_path: 'q-1/label-1.pdf' });
     },
   ),
-  sendMock: vi.fn((queueId: string, override?: { subject: string; body: string }) => {
+  sendMock: vi.fn((queueId: string, override?: { subject: string; body: string; packing_list?: string }):
+    Promise<{ email_id: string; from?: string; warning?: string }> => {
     void queueId; void override;
     return Promise.resolve({ email_id: 're_1' });
   }),
-  logActionMock: vi.fn(() => Promise.resolve()),
+  logActionMock: vi.fn((..._args: unknown[]) => Promise.resolve()),
 }));
 
 vi.mock('../../../lib/eztrans', async () => {
@@ -35,6 +36,7 @@ vi.mock('../../../lib/eztrans', async () => {
     // the test has finished and surfaces as an intermittent suite error.
     useEzTransTemplate: () => ({
       template: { subject: actual.DEFAULT_EZTRANS_SUBJECT, body: actual.DEFAULT_EZTRANS_BODY },
+      packingList: actual.DEFAULT_EZTRANS_PACKING_LIST,
       source: 'built-in' as const,
       loading: false,
     }),
@@ -186,7 +188,7 @@ describe('EzTransPanel', () => {
   it('previews the email with the master carton read off the pallet', () => {
     render(<EzTransPanel row={row} order={order} />);
     fillLabel();
-    fireEvent.click(screen.getByRole('button', { name: /preview \/ edit email/i }));
+    fireEvent.click(screen.getByRole('button', { name: /preview \/ edit email \+ packing list/i }));
     expect(screen.getAllByText(/Master Carton: 1/).length).toBeGreaterThan(0);
     expect(screen.getByText(/Tracking Number: PUR123456789/)).toBeInTheDocument();
   });
@@ -194,7 +196,7 @@ describe('EzTransPanel', () => {
   it('sends the operator edit when the wording has been changed', async () => {
     render(<EzTransPanel row={row} order={order} />);
     fillLabel();
-    fireEvent.click(screen.getByRole('button', { name: /preview \/ edit email/i }));
+    fireEvent.click(screen.getByRole('button', { name: /preview \/ edit email \+ packing list/i }));
     fireEvent.click(screen.getByRole('button', { name: /edit this one/i }));
     fireEvent.change(screen.getByLabelText(/^body:$/i), {
       target: { value: 'Please expedite this one — customer is waiting.' },
@@ -211,7 +213,7 @@ describe('EzTransPanel', () => {
   it('resets an edit back to the saved wording', () => {
     render(<EzTransPanel row={row} order={order} />);
     fillLabel();
-    fireEvent.click(screen.getByRole('button', { name: /preview \/ edit email/i }));
+    fireEvent.click(screen.getByRole('button', { name: /preview \/ edit email \+ packing list/i }));
     fireEvent.click(screen.getByRole('button', { name: /edit this one/i }));
 
     const bodyBox = screen.getByLabelText(/^body:$/i);
@@ -228,7 +230,7 @@ describe('EzTransPanel', () => {
   it('leaves the packing list alone however the email is edited', () => {
     render(<EzTransPanel row={row} order={order} />);
     fillLabel();
-    fireEvent.click(screen.getByRole('button', { name: /preview \/ edit email/i }));
+    fireEvent.click(screen.getByRole('button', { name: /preview \/ edit email \+ packing list/i }));
     fireEvent.click(screen.getByRole('button', { name: /edit this one/i }));
     fireEvent.change(screen.getByLabelText(/^body:$/i), { target: { value: 'hi' } });
 
@@ -237,5 +239,85 @@ describe('EzTransPanel', () => {
     expect(list).toContain('Serial No: LL01-P100X-00412');
     expect(list).toContain('Master Carton: 1');
     expect(list).toContain('SKU: LILA-P100X');
+  });
+  it('lets the operator edit the packing list and sends what they wrote', async () => {
+    render(<EzTransPanel row={row} order={order} />);
+    fillLabel();
+    fireEvent.click(screen.getByRole('button', { name: /preview \/ edit email \+ packing list/i }));
+    fireEvent.click(screen.getByRole('button', { name: /edit packing list/i }));
+
+    const box = screen.getByLabelText(/^packing list:$/i) as HTMLTextAreaElement;
+    // Rendered, like the email editor above it — the operator edits the
+    // document as the 3PL will read it, not a form full of placeholders.
+    expect(box.value).toContain('# PACKING LIST');
+    expect(box.value).toContain('Serial No: LL01-P100X-00412');
+    expect(box.value).not.toContain('{{');
+
+    fireEvent.change(box, { target: { value: '# PICK LIST\nHandle upright.\nSerial No: {{serial}}' } });
+    fireEvent.click(sendButton());
+
+    await waitFor(() => expect(sendMock).toHaveBeenCalledTimes(1));
+    const [, override] = sendMock.mock.calls[0];
+    expect(override?.packing_list).toBe('# PICK LIST\nHandle upright.\nSerial No: {{serial}}');
+  });
+
+  it('sends no packing-list override when only the wording was touched', async () => {
+    render(<EzTransPanel row={row} order={order} />);
+    fillLabel();
+    fireEvent.click(screen.getByRole('button', { name: /preview \/ edit email \+ packing list/i }));
+    fireEvent.click(screen.getByRole('button', { name: /edit this one/i }));
+    fireEvent.change(screen.getByLabelText(/^body:$/i), { target: { value: 'hi' } });
+    fireEvent.click(sendButton());
+
+    await waitFor(() => expect(sendMock).toHaveBeenCalledTimes(1));
+    // Absent, not a copy of the default: the server then reads the saved
+    // template, so a packing list edited in Templates still wins.
+    expect(sendMock.mock.calls[0][1]?.packing_list).toBeUndefined();
+  });
+
+  it('resets an edited packing list back to the saved one', () => {
+    render(<EzTransPanel row={row} order={order} />);
+    fillLabel();
+    fireEvent.click(screen.getByRole('button', { name: /preview \/ edit email \+ packing list/i }));
+    fireEvent.click(screen.getByRole('button', { name: /edit packing list/i }));
+
+    const box = () => screen.getByLabelText(/^packing list:$/i) as HTMLTextAreaElement;
+    const original = box().value;
+    fireEvent.change(box(), { target: { value: 'scratch that' } });
+    expect(box().value).toBe('scratch that');
+
+    fireEvent.click(screen.getByRole('button', { name: /reset packing list/i }));
+    expect(box().value).toBe(original);
+  });
+
+  it('keeps the two documents separate — an edited list leaves the wording alone', async () => {
+    render(<EzTransPanel row={row} order={order} />);
+    fillLabel();
+    fireEvent.click(screen.getByRole('button', { name: /preview \/ edit email \+ packing list/i }));
+    fireEvent.click(screen.getByRole('button', { name: /edit packing list/i }));
+    fireEvent.change(screen.getByLabelText(/^packing list:$/i), { target: { value: '# PICK LIST' } });
+    fireEvent.click(sendButton());
+
+    await waitFor(() => expect(sendMock).toHaveBeenCalledTimes(1));
+    const [, override] = sendMock.mock.calls[0];
+    expect(override?.body).toContain('Hello EZ Trans team');
+  });
+  it('tells the operator when the booking went out from a different address', async () => {
+    sendMock.mockResolvedValueOnce({
+      email_id: 'e1',
+      from: 'VCycene Team <support@lilacomposter.com>',
+      warning: 'Sent from VCycene Team <support@lilacomposter.com> instead of ' +
+        'VCycene Fulfillment <reina@virgohome.io>: virgohome.io is not a verified sending domain.',
+    });
+    render(<EzTransPanel row={row} order={order} />);
+    fillLabel();
+    fireEvent.click(sendButton());
+
+    // Reported, not swallowed: the mail went, but not as the operator expects.
+    expect(await screen.findByText(/not a verified sending domain/i)).toBeInTheDocument();
+    // And it is on the record, not just on screen.
+    await waitFor(() => expect(logActionMock).toHaveBeenCalled());
+    const note = String(logActionMock.mock.calls.at(-1)?.[2] ?? '');
+    expect(note).toMatch(/not a verified sending domain/i);
   });
 });

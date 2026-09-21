@@ -10,11 +10,16 @@
 // 'eztrans_booking', edited in the Templates tab) with a built-in default
 // below for environments where that row hasn't been migrated in yet. The panel
 // pre-fills from it and the operator can still tweak a one-off before sending.
-// The packing list is NOT part of the template — see EzTransBooking.
+// The packing list is a template too (key 'eztrans_packing_list'), editable
+// the same way. Its variables are still filled from the order and the queue
+// row on the server, so an edit changes the wording, not the shipment.
 
 import { useEffect, useState } from 'react';
 import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from './supabase';
 import { renderTemplate, useEmailTemplate } from './templates';
+// One implementation of the marker rules, imported rather than mirrored —
+// unlike the string defaults, which must stay literal on both sides.
+import { packingListLines } from '../../../supabase/functions/_shared/eztransTemplate';
 
 /** Where a shipment out of EZ Trans gets booked. */
 export const GOOROOSHIP_SHIP_URL = 'https://app.goorooship.ca/ship';
@@ -36,6 +41,14 @@ export const EZTRANS_SENT_ACTION = 'fq_eztrans_booking_sent';
 
 /** email_templates.key for the operator-editable wording (Templates tab). */
 export const EZTRANS_TEMPLATE_KEY = 'eztrans_booking';
+
+/** email_templates.key for the operator-editable packing list. */
+export const EZTRANS_PACKING_LIST_KEY = 'eztrans_packing_list';
+
+/** Who the booking confirmation comes from, and who is copied. Mirrors the
+ *  edge function's defaults; eztransPackingList.test.ts fails on drift. */
+export const EZTRANS_FROM = 'VCycene Fulfillment <reina@virgohome.io>';
+export const EZTRANS_CC = ['huayi@virgohome.io'];
 
 // Duplicated from supabase/functions/_shared/eztransTemplate.ts so the panel
 // can preview without a round-trip, and so a send still works in an
@@ -76,6 +89,32 @@ export const DEFAULT_EZTRANS_BODY =
   '\n' +
   'Thank you,\n' +
   'The VCycene Team';
+
+export const DEFAULT_EZTRANS_PACKING_LIST =
+  '# PACKING LIST\n' +
+  'Order: {{order_ref}}\n' +
+  'Date: {{date}}\n' +
+  '\n' +
+  '## SHIP TO\n' +
+  '{{customer_name}}\n' +
+  '{{customer_address_block}}\n' +
+  'Email: {{customer_email}}\n' +
+  'Phone: {{customer_phone}}\n' +
+  '\n' +
+  '## CONTENTS\n' +
+  'Product Name: {{product_name}}\n' +
+  'SKU: {{sku}}\n' +
+  'Serial No: {{serial}}\n' +
+  'Batch/Lot Number: {{batch_lot}}\n' +
+  'Master Carton: {{master_carton}}\n' +
+  'Quantity: {{quantity}}\n' +
+  '\n' +
+  '## SHIPPING\n' +
+  'Carrier: {{carrier}}\n' +
+  'Tracking No: {{tracking}}\n' +
+  '\n' +
+  'VCycene Inc. - LILA Composter\n' +
+  'Questions: support@lilacomposter.com';
 
 export type EzTransPlacement = {
   serial: string;
@@ -135,10 +174,12 @@ export function addressOneLine(o: EzTransShipTo): string {
 export type EzTransBooking = {
   subject: string;
   body: string;
-  /** The packing list, as the lines that go on the attached PDF. Built here,
-   *  never from the template: it is the document EZ Trans picks from, and a
-   *  field edited out of it would silently ship a box nobody can identify. */
+  /** The packing list as it will appear on the attached PDF, one entry per
+   *  printed line — the `# `/`## ` markers already stripped. For preview. */
   packingList: string[];
+  /** The same document as raw template text, markers intact. This is what the
+   *  editor edits and what is sent as the override. */
+  packingListText: string;
 };
 
 export type EzTransBookingArgs = {
@@ -170,6 +211,10 @@ export function ezTransVariables(args: EzTransBookingArgs): Record<string, strin
     carrier: carrier ?? '—',
     tracking: tracking ?? '—',
     order_ref: order.order_ref,
+    // The PDF wants the address as its own lines; the email indents
+    // continuation lines under "Address: " instead.
+    customer_address_block: addressLines(order).join('\n'),
+    date: new Date().toISOString().slice(0, 10),
   };
 }
 
@@ -179,42 +224,25 @@ export function ezTransVariables(args: EzTransBookingArgs): Record<string, strin
  *  is absent (the row hasn't been migrated into this environment) the built-in
  *  default stands in, so a send is never blocked on a pending migration. */
 export function buildEzTransBooking(
-  args: EzTransBookingArgs & { template?: { subject: string; body: string } | null },
+  args: EzTransBookingArgs & {
+    template?: { subject: string; body: string } | null;
+    /** The operator-editable packing list. Empty or absent falls back to the
+     *  built-in default, so a send is never blocked on a pending migration. */
+    packingListTemplate?: string | null;
+  },
 ): EzTransBooking {
-  const { order, serial, masterCarton } = args;
-  const addr = addressLines(order);
-  const email = order.customer_email ?? '—';
-  const phone = order.customer_phone ?? '—';
-  const carton = masterCarton ?? '—';
-
   const vars = ezTransVariables(args);
   const subject = renderTemplate(args.template?.subject || DEFAULT_EZTRANS_SUBJECT, vars);
   const body = renderTemplate(args.template?.body || DEFAULT_EZTRANS_BODY, vars);
 
-  const packingList = [
-    'PACKING LIST',
-    `Order: ${order.order_ref}`,
-    '',
-    'SHIP TO',
-    order.customer_name,
-    ...addr,
-    `Email: ${email}`,
-    `Phone: ${phone}`,
-    '',
-    'CONTENTS',
-    `Product Name: ${PACKING_LIST_PRODUCT_NAME}`,
-    `SKU: ${PACKING_LIST_SKU}`,
-    `Serial No: ${serial}`,
-    `Batch/Lot Number: ${PACKING_LIST_BATCH_LOT}`,
-    `Master Carton: ${carton}`,
-    `Quantity: ${PACKING_LIST_QUANTITY}`,
-    '',
-    'SHIPPING',
-    `Carrier: ${vars.carrier}`,
-    `Tracking No: ${vars.tracking}`,
-  ];
+  // The packing list is rendered through the same substitution as the email,
+  // so an edit changes the wording while the serial, carton and tracking are
+  // still whatever the order and the queue row say.
+  const packingListText = renderTemplate(
+    args.packingListTemplate || DEFAULT_EZTRANS_PACKING_LIST, vars);
+  const packingList = packingListLines(packingListText).map(l => l.text);
 
-  return { subject, body, packingList };
+  return { subject, body, packingList, packingListText };
 }
 
 /** The label details Goorooship gives back, saved onto the queue row.
@@ -305,31 +333,35 @@ export function useEzTransPlacement(serial: string | null | undefined): {
  *  like it had simply been ignored). */
 export function useEzTransTemplate(): {
   template: { subject: string; body: string };
+  packingList: string;
   source: 'template' | 'built-in';
   loading: boolean;
 } {
   const { template, loading } = useEmailTemplate(EZTRANS_TEMPLATE_KEY);
+  const { template: packing, loading: packingLoading } = useEmailTemplate(EZTRANS_PACKING_LIST_KEY);
   const usable = template && template.active ? template : null;
+  const usablePacking = packing && packing.active && packing.body ? packing : null;
   return {
     template: usable
       ? { subject: usable.subject, body: usable.body }
       : { subject: DEFAULT_EZTRANS_SUBJECT, body: DEFAULT_EZTRANS_BODY },
+    packingList: usablePacking ? usablePacking.body : DEFAULT_EZTRANS_PACKING_LIST,
     source: usable ? 'template' : 'built-in',
-    loading,
+    loading: loading || packingLoading,
   };
 }
 
 /** Send the booking confirmation, packing list and label to cs@goorooship.ca.
  *
- *  `override` is the subject/body the operator typed for this one order. The
- *  packing list and the label are NOT overridable: the edge function rebuilds
- *  the list from the queue row, the order and the shelf row, and pulls the
- *  label out of storage, so an edited email can never put different numbers on
- *  the documents the 3PL actually picks and ships from. */
+ *  `override` is what the operator typed for this one order — the subject and
+ *  body, and optionally the packing list. Whatever the wording, the edge
+ *  function fills every {{variable}} from the queue row, the order and the
+ *  shelf row, and pulls the label straight out of storage: an edit changes
+ *  what the documents say, never which shipment they describe. */
 export async function sendEzTransBooking(
   queueId: string,
-  override?: { subject: string; body: string },
-): Promise<{ email_id: string }> {
+  override?: { subject: string; body: string; packing_list?: string },
+): Promise<{ email_id: string; from?: string; warning?: string }> {
   const { data: { session } } = await supabase.auth.getSession();
   const res = await fetch(`${SUPABASE_URL}/functions/v1/send-eztrans-booking`, {
     method: 'POST',
@@ -341,6 +373,7 @@ export async function sendEzTransBooking(
     body: JSON.stringify({
       queue_id: queueId,
       ...(override ? { subject: override.subject, body: override.body } : {}),
+      ...(override?.packing_list ? { packing_list: override.packing_list } : {}),
     }),
   });
   const bodyText = await res.text();
@@ -352,6 +385,6 @@ export async function sendEzTransBooking(
     } catch { /* keep raw */ }
     throw new Error(`EZ Trans email failed (${res.status}): ${detail}`);
   }
-  try { return JSON.parse(bodyText) as { email_id: string }; }
+  try { return JSON.parse(bodyText) as { email_id: string; from?: string; warning?: string }; }
   catch { throw new Error('EZ Trans email: response was not JSON'); }
 }
