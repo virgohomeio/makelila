@@ -200,12 +200,14 @@ in any case — that domain has no `resend._domainkey` record.)
    ```
    Re-authorize. Nothing else in the entry changes.
 
-2. **Secret.** `GOOGLE_SERVICE_ACCOUNT_KEY` must be set on the
-   `send-eztrans-booking` function too — the same base64 value from step 4.
+2. **Secret.** `GOOGLE_SERVICE_ACCOUNT_KEY` from step 4. Supabase edge-function
+   secrets are set per *project*, not per function, so if the Gmail sync is
+   already working this is already in place and there is nothing to add — the
+   sending function picks up the same value.
 
 | Name | Required | Value |
 |---|---|---|
-| `GOOGLE_SERVICE_ACCOUNT_KEY` | for the Gmail path | Same base64 service-account JSON as above. Unset → falls back to Resend. |
+| `GOOGLE_SERVICE_ACCOUNT_KEY` | for the Gmail path | Same base64 service-account JSON as step 4 — project-wide, so set once for both. Unset → falls back to Resend. |
 | `EZTRANS_GMAIL_SENDER` | optional | Mailbox to send as. Defaults to the address inside `EZTRANS_FROM`, so normally leave it unset and let the two stay in step. |
 | `EZTRANS_FROM` | optional | Defaults to `VCycene Fulfillment <reina@virgohome.io>`. |
 | `EZTRANS_CC` | optional | Comma-separated. Defaults to `huayi@virgohome.io`. |
