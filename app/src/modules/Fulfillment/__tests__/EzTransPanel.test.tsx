@@ -421,4 +421,43 @@ describe('EzTransPanel', () => {
     expect(screen.getByText(/Fridge magnet: 1/)).toBeInTheDocument();
     expect(screen.getByText(/Tote bag: 1/)).toBeInTheDocument();
   });
+  it('keeps an edited subject and body when the operator comes back', () => {
+    const { unmount } = render(<EzTransPanel row={row} order={order} />);
+    fillLabel();
+    fireEvent.click(screen.getByRole('button', { name: /preview \/ edit email \+ packing list/i }));
+    fireEvent.click(screen.getByRole('button', { name: /edit this one/i }));
+    fireEvent.change(screen.getByLabelText(/^subject:$/i), { target: { value: 'RUSH — #1184' } });
+    fireEvent.change(screen.getByLabelText(/^body:$/i), { target: { value: 'Please expedite.' } });
+    unmount();
+
+    render(<EzTransPanel row={row} order={order} />);
+    fireEvent.click(screen.getByRole('button', { name: /show edited email \+ packing list/i }));
+    fireEvent.click(screen.getByRole('button', { name: /edit this one/i }));
+    expect((screen.getByLabelText(/^subject:$/i) as HTMLInputElement).value).toBe('RUSH — #1184');
+    expect((screen.getByLabelText(/^body:$/i) as HTMLTextAreaElement).value).toBe('Please expedite.');
+  });
+
+  it('sends the restored edits rather than the template', async () => {
+    const { unmount } = render(<EzTransPanel row={row} order={order} />);
+    fillLabel();
+    fireEvent.click(screen.getByRole('button', { name: /preview \/ edit email \+ packing list/i }));
+    fireEvent.click(screen.getByRole('button', { name: /edit this one/i }));
+    fireEvent.change(screen.getByLabelText(/^body:$/i), { target: { value: 'Please expedite.' } });
+    fireEvent.click(screen.getByRole('button', { name: /edit packing list/i }));
+    fireEvent.change(screen.getByLabelText(/^packing list:$/i), {
+      target: { value: '# PACKING LIST\nTote bag: 1' },
+    });
+    unmount();
+
+    // A fresh panel for the same order, as if the operator had navigated away.
+    // The carrier and tracking come back off the queue row in the real app;
+    // this stub row carries neither, so they are re-entered here.
+    render(<EzTransPanel row={row} order={order} />);
+    fillLabel();
+    fireEvent.click(sendButton());
+    await waitFor(() => expect(sendMock).toHaveBeenCalledTimes(1));
+    const [, override] = sendMock.mock.calls[0];
+    expect(override?.body).toBe('Please expedite.');
+    expect(override?.packing_list).toBe('# PACKING LIST\nTote bag: 1');
+  });
 });

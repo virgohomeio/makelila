@@ -151,6 +151,9 @@ describe('who the booking email comes from', () => {
     // thing putting a copy in her mailbox at all.
     expect(EZTRANS_CC).toContain('reina@virgohome.io');
     expect(EZTRANS_CC).toContain('huayi@virgohome.io');
+    // Goorooship asked that their group address be copied on every inquiry,
+    // so a booking does not sit unread while one person is away.
+    expect(EZTRANS_CC).toContain('support@goorooship.ca');
   });
 
   it('does not drift from the edge function copy', () => {

@@ -20,11 +20,22 @@ export const EZTRANS_PACKING_LIST_KEY = 'eztrans_packing_list';
 
 /** Who the booking confirmation comes from, and who is copied on it.
  *
+ *  support@goorooship.ca is on the Cc at the 3PL's own request — they asked
+ *  that their group address be copied on every inquiry, so a message does not
+ *  sit unread while one person is away. It is a real external recipient, and
+ *  is suppressed along with the To address whenever EMAIL_TEST_RECIPIENT is
+ *  set, so a test send never reaches them.
+ *
  *  Overridable per-environment with EZTRANS_FROM / EZTRANS_CC on the edge
- *  function, so the address can be moved without a deploy. Note the sending
- *  domain has to be verified in Resend or the API rejects the send outright. */
+ *  function, so the addresses can be changed without a deploy. Note the
+ *  sending domain has to be verified in Resend, or the API rejects the send
+ *  outright — which is why the Gmail path is preferred. */
 export const EZTRANS_FROM_DEFAULT = 'VCycene Fulfillment <reina@virgohome.io>';
-export const EZTRANS_CC_DEFAULT = ['reina@virgohome.io', 'huayi@virgohome.io'];
+export const EZTRANS_CC_DEFAULT = [
+  'reina@virgohome.io',
+  'huayi@virgohome.io',
+  'support@goorooship.ca',
+];
 
 /** Sender of last resort, on the domain that has been verified in Resend since
  *  this app started sending mail.

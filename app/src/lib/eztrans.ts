@@ -48,7 +48,12 @@ export const EZTRANS_PACKING_LIST_KEY = 'eztrans_packing_list';
 /** Who the booking confirmation comes from, and who is copied. Mirrors the
  *  edge function's defaults; eztransPackingList.test.ts fails on drift. */
 export const EZTRANS_FROM = 'VCycene Fulfillment <reina@virgohome.io>';
-export const EZTRANS_CC = ['reina@virgohome.io', 'huayi@virgohome.io'];
+export const EZTRANS_CC = [
+  'reina@virgohome.io',
+  'huayi@virgohome.io',
+  // The 3PL asked for their group address on every inquiry.
+  'support@goorooship.ca',
+];
 
 // Duplicated from supabase/functions/_shared/eztransTemplate.ts so the panel
 // can preview without a round-trip, and so a send still works in an
