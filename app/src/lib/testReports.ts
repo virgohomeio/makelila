@@ -106,6 +106,44 @@ export async function signedReportUrl(path: string, expiresInSeconds = 120): Pro
   return data.signedUrl;
 }
 
+/** A test report already attached to a unit in Stock. `result` is the parsed
+ *  electrical_check, carried alongside so a caller can show *what the report
+ *  said* rather than only that a file exists. */
+export type AttachedTestReport = {
+  path: string;
+  name: string | null;
+  uploadedAt: string | null;
+  result: QcCheck | null;
+  failedTests: string | null;
+};
+
+/** The report attached to `serial` in Stock, or null when the unit has none.
+ *
+ *  Fulfillment step 2 asks the operator to verify the test report and used to
+ *  offer only a blank "paste a URL" box, even when Stock already held the
+ *  report for that exact serial. This is the lookup that lets the step fill
+ *  itself in.
+ *
+ *  A query failure throws rather than returning null: "no report attached" is
+ *  a QC statement about the machine, and a broken lookup must never be allowed
+ *  to masquerade as one. */
+export async function fetchUnitTestReport(serial: string): Promise<AttachedTestReport | null> {
+  const { data, error } = await supabase
+    .from('units')
+    .select('test_report_path, test_report_name, test_report_uploaded_at, electrical_check, electrical_failed_tests')
+    .eq('serial', serial)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data?.test_report_path) return null;
+  return {
+    path: data.test_report_path as string,
+    name: (data.test_report_name as string | null) ?? null,
+    uploadedAt: (data.test_report_uploaded_at as string | null) ?? null,
+    result: (data.electrical_check as QcCheck | null) ?? null,
+    failedTests: (data.electrical_failed_tests as string | null) ?? null,
+  };
+}
+
 /** Open a unit's stored test report in a new tab.
  *
  *  The QC modal's report link used to sign the URL and only then call

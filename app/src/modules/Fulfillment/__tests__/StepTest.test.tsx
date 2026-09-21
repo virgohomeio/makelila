@@ -1,9 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
-const { confirmTestMock, flagReworkMock } = vi.hoisted(() => ({
+const { confirmTestMock, flagReworkMock, fetchReportMock, openReportMock } = vi.hoisted(() => ({
   confirmTestMock: vi.fn(() => Promise.resolve()),
   flagReworkMock: vi.fn(() => Promise.resolve()),
+  fetchReportMock: vi.fn(),
+  openReportMock: vi.fn(() => Promise.resolve()),
 }));
 
 vi.mock('../../../lib/fulfillment', async () => {
@@ -14,6 +16,11 @@ vi.mock('../../../lib/fulfillment', async () => {
     flagRework: flagReworkMock,
   };
 });
+
+vi.mock('../../../lib/testReports', () => ({
+  fetchUnitTestReport: fetchReportMock,
+  openTestReport: openReportMock,
+}));
 
 vi.mock('../../../lib/auth', () => ({
   useAuth: () => ({
@@ -41,10 +48,15 @@ describe('StepTest', () => {
   beforeEach(() => {
     confirmTestMock.mockClear();
     flagReworkMock.mockClear();
+    openReportMock.mockClear();
+    fetchReportMock.mockReset();
+    // Default: no report attached, which is the pre-existing manual-URL world.
+    fetchReportMock.mockResolvedValue(null);
   });
 
   it('Test passed calls confirmTestReport with the URL', async () => {
     render(<StepTest row={row} />);
+    await screen.findByPlaceholderText(/drive\.google/i);
     fireEvent.change(screen.getByPlaceholderText(/drive\.google/i), {
       target: { value: 'https://drive.example/test.pdf' },
     });
@@ -52,6 +64,64 @@ describe('StepTest', () => {
     await waitFor(() => {
       expect(confirmTestMock).toHaveBeenCalledWith('q-test', 'https://drive.example/test.pdf');
     });
+  });
+
+
+  const attached = {
+    path: 'LL01-00000000050/1784233188583-LL01-00000000050.md',
+    name: 'LL01-00000000050.md',
+    uploadedAt: '2026-07-16T20:19:48.842+00:00',
+    result: 'pass' as const,
+    failedTests: null,
+  };
+
+  it('fills the step in from the report already attached to the unit in Stock', async () => {
+    fetchReportMock.mockResolvedValue(attached);
+    render(<StepTest row={row} />);
+
+    // The attached report is named on screen, so there is nothing to paste.
+    expect(await screen.findByText(/LL01-00000000050\.md/)).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText(/drive\.google/i)).not.toBeInTheDocument();
+  });
+
+  it('records the attached report path when the operator proceeds', async () => {
+    fetchReportMock.mockResolvedValue(attached);
+    render(<StepTest row={row} />);
+    await screen.findByText(/LL01-00000000050\.md/);
+
+    fireEvent.click(screen.getByRole('button', { name: /test passed/i }));
+    await waitFor(() => {
+      expect(confirmTestMock).toHaveBeenCalledWith('q-test', attached.path);
+    });
+  });
+
+  it('opens the attached report through openTestReport', async () => {
+    fetchReportMock.mockResolvedValue(attached);
+    render(<StepTest row={row} />);
+    fireEvent.click(await screen.findByRole('button', { name: /open report/i }));
+    expect(openReportMock).toHaveBeenCalledWith(attached.path);
+  });
+
+  it('surfaces a failing electrical check instead of just showing the file', async () => {
+    fetchReportMock.mockResolvedValue({ ...attached, result: 'fail', failedTests: 'Left Motor' });
+    render(<StepTest row={row} />);
+    expect(await screen.findByText(/electrical check failed/i)).toBeInTheDocument();
+    expect(screen.getByText(/Left Motor/)).toBeInTheDocument();
+  });
+
+  it('says plainly when the unit has no test report attached', async () => {
+    fetchReportMock.mockResolvedValue(null);
+    render(<StepTest row={row} />);
+    expect(await screen.findByText(/no test report attached/i)).toBeInTheDocument();
+    // The manual URL field stays as the fallback so the step is never blocked.
+    expect(screen.getByPlaceholderText(/drive\.google/i)).toBeInTheDocument();
+  });
+
+  it('does not claim "no test report" when the lookup itself failed', async () => {
+    fetchReportMock.mockRejectedValue(new Error('permission denied'));
+    render(<StepTest row={row} />);
+    expect(await screen.findByText(/permission denied/i)).toBeInTheDocument();
+    expect(screen.queryByText(/no test report attached/i)).not.toBeInTheDocument();
   });
 
   it('Flag rework requires an issue; calls flagRework with serial + issue + reporter', async () => {

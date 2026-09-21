@@ -900,3 +900,40 @@
   outline: none;
   border-color: var(--color-crimson);
 }
+
+/* Step 2 — the test report Stock already holds for the assigned serial, shown
+   in place of the blank "paste a URL" box it used to offer. */
+.reportPanel {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-surface);
+  max-width: 500px;
+}
+.reportPanelPass { border-color: var(--color-success-border); background: var(--color-success-bg); }
+.reportPanelFail { border-color: var(--color-error-border); background: var(--color-error-bg); }
+.reportPanelMissing { border-color: var(--color-warning-border); background: var(--color-warning-bg); }
+
+.reportHead { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.reportVerdict { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
+.reportVerdictPass { color: var(--color-success); }
+.reportVerdictFail { color: var(--color-error); }
+.reportVerdictMissing { color: var(--color-warning); }
+
+.reportFile { font-size: 11px; color: var(--color-ink-subtle); word-break: break-all; }
+.reportMeta { font-size: 11px; color: var(--color-ink-subtle); margin-top: 4px; }
+.reportFailed { font-size: 11px; color: var(--color-error); margin-top: 4px; font-weight: 600; }
+
+.reportOpen {
+  margin-left: auto;
+  background: #fff;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-ink);
+  cursor: pointer;
+}
+.reportOpen:hover { border-color: var(--color-ink-subtle); }
