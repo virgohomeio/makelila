@@ -11,7 +11,7 @@ import {
   fetchUnassignedQueueItems,
   type QueueItemForAssignment,
 } from '../../lib/fulfillment';
-import { signedReportUrl } from '../../lib/testReports';
+import { openTestReport } from '../../lib/testReports';
 import { UnitTimeline } from '../../components/UnitTimeline';
 import styles from './Stock.module.css';
 
@@ -498,9 +498,10 @@ function QcEditorModal({
               <button
                 type="button"
                 className={styles.reportOpenBtn}
-                onClick={async () => {
-                  try { window.open(await signedReportUrl(unit.test_report_path!), '_blank', 'noopener'); }
-                  catch (e) { onError((e as Error).message); }
+                onClick={() => {
+                  // Must not await before openTestReport — it claims the tab
+                  // synchronously so the popup blocker doesn't eat the click.
+                  openTestReport(unit.test_report_path!).catch(e => onError((e as Error).message));
                 }}
               >
                 {unit.test_report_name ?? 'test report'} ↗

@@ -105,3 +105,39 @@ export async function signedReportUrl(path: string, expiresInSeconds = 120): Pro
   if (error || !data) throw new Error(error?.message ?? 'Could not create signed URL');
   return data.signedUrl;
 }
+
+/** Open a unit's stored test report in a new tab.
+ *
+ *  The QC modal's report link used to sign the URL and only then call
+ *  window.open, so the open landed outside the click's user-gesture window and
+ *  browsers blocked it silently — the link simply did nothing. It also passed
+ *  'noopener', which makes window.open return null by spec, so there was no
+ *  handle to check and a blocked tab looked like a successful one.
+ *
+ *  Even unblocked, the tab came up empty: storage serves these reports as
+ *  application/octet-stream (the bulk importer's contentType never stuck on the
+ *  stored objects), and browsers download that rather than render it. So the
+ *  file is fetched and handed over as a blob re-typed as plain text — markdown
+ *  has no in-browser viewer, and the reports are read as text anyway.
+ *
+ *  Same shape as openInvoiceInNewTab: claim the tab synchronously, sever the
+ *  opener by hand, and fall back to the current tab if the open was blocked. */
+export async function openTestReport(path: string): Promise<void> {
+  const tab = window.open('', '_blank');
+  if (tab) {
+    try { tab.opener = null; } catch { /* cross-origin guard; harmless */ }
+    try { tab.document.write('Loading test report…'); } catch { /* not writable; fine */ }
+  }
+  try {
+    const signedUrl = await signedReportUrl(path);
+    const res = await fetch(signedUrl);
+    if (!res.ok) throw new Error(`Test report download failed (${res.status})`);
+    const blob = await res.blob();
+    const url = URL.createObjectURL(new Blob([blob], { type: 'text/plain;charset=utf-8' }));
+    if (tab && !tab.closed) tab.location.replace(url);
+    else window.location.assign(url);
+  } catch (e) {
+    try { tab?.close(); } catch { /* already gone */ }
+    throw e;
+  }
+}
