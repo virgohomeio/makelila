@@ -353,6 +353,11 @@ export function useEzTransTemplate(): {
 
 /** Send the booking confirmation, packing list and label to cs@goorooship.ca.
  *
+ *  `sent_via` says which pipe carried it. 'gmail' means it went out as the From
+ *  mailbox and is filed in that person's Sent folder; 'resend' means it was not,
+ *  and `warning` explains why — worth showing, since the difference is whether
+ *  there is any record of the send on the sender's own side.
+ *
  *  `override` is what the operator typed for this one order — the subject and
  *  body, and optionally the packing list. Whatever the wording, the edge
  *  function fills every {{variable}} from the queue row, the order and the
@@ -361,7 +366,7 @@ export function useEzTransTemplate(): {
 export async function sendEzTransBooking(
   queueId: string,
   override?: { subject: string; body: string; packing_list?: string },
-): Promise<{ email_id: string; from?: string; warning?: string }> {
+): Promise<{ email_id: string; from?: string; sent_via?: 'gmail' | 'resend'; warning?: string }> {
   const { data: { session } } = await supabase.auth.getSession();
   const res = await fetch(`${SUPABASE_URL}/functions/v1/send-eztrans-booking`, {
     method: 'POST',
@@ -385,6 +390,10 @@ export async function sendEzTransBooking(
     } catch { /* keep raw */ }
     throw new Error(`EZ Trans email failed (${res.status}): ${detail}`);
   }
-  try { return JSON.parse(bodyText) as { email_id: string; from?: string; warning?: string }; }
+  try {
+    return JSON.parse(bodyText) as {
+      email_id: string; from?: string; sent_via?: 'gmail' | 'resend'; warning?: string;
+    };
+  }
   catch { throw new Error('EZ Trans email: response was not JSON'); }
 }

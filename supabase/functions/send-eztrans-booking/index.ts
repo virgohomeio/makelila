@@ -7,6 +7,13 @@
 // and it will not send until carrier, tracking number and label are on the
 // queue row.
 //
+// Sent through Gmail as the From address, so the booking lands in that
+// person's Sent folder and the reply from the 3PL threads into their inbox —
+// a record, from their end, that EZ Trans was told. Resend cannot do that at
+// any setting: it has no access to a mailbox, so mail it sends "from" someone
+// leaves no trace in their account. Resend stays as the fallback for when the
+// Gmail service account isn't configured, and says so rather than going quiet.
+//
 // The wording comes from the operator's edit for this order, else the
 // `eztrans_booking` row in email_templates, else the built-in default in
 // _shared/eztransTemplate.ts. The packing list resolves the same way through
@@ -17,6 +24,8 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { corsHeaders } from '../_shared/cors.ts';
 import { authenticate } from '../_shared/auth.ts';
 import { buildTextPdf, toBase64 } from '../_shared/simplePdf.ts';
+import { getGmailAccessToken, type ServiceAccountKey } from '../_shared/gmail-auth.ts';
+import { GMAIL_SEND_SCOPE, sendGmailMessage } from '../_shared/gmailSend.ts';
 import {
   DEFAULT_EZTRANS_BODY,
   DEFAULT_EZTRANS_PACKING_LIST,
@@ -326,6 +335,64 @@ async function handle(req: Request): Promise<Response> {
 
   let usedFrom = from;
   let warning: string | null = null;
+  let sentVia: 'gmail' | 'resend' = 'resend';
+  let emailId: string | null = null;
+
+  // Gmail first, impersonating the From mailbox. Workspace already owns the
+  // domain, so nothing has to be verified with a third party — and the sent
+  // message is filed in that mailbox, which is the point of preferring it.
+  const saKeyB64 = Deno.env.get('GOOGLE_SERVICE_ACCOUNT_KEY');
+  const gmailSender = Deno.env.get('EZTRANS_GMAIL_SENDER') || replyTo;
+  let gmailError: string | null = null;
+  if (saKeyB64 && gmailSender) {
+    try {
+      const saKey = JSON.parse(atob(saKeyB64)) as ServiceAccountKey;
+      const token = await getGmailAccessToken(saKey, gmailSender, GMAIL_SEND_SCOPE);
+      const sent = await sendGmailMessage(token, {
+        from,
+        to: [to],
+        cc: testRecipient ? [] : cc,
+        subject,
+        text: emailText,
+        attachments: [
+          { filename: `shipping-label-${safeRef}.pdf`, contentType: 'application/pdf', base64: labelPdf },
+          { filename: `packing-list-${safeRef}.pdf`, contentType: 'application/pdf', base64: pdf },
+        ],
+      });
+      emailId = sent.id;
+      sentVia = 'gmail';
+      usedFrom = from;
+    } catch (e) {
+      // Not fatal — fall through to Resend so a shipment is never held up by a
+      // credential problem, but carry the reason so it can be reported.
+      gmailError = (e as Error).message;
+    }
+  } else {
+    gmailError = saKeyB64
+      ? 'EZTRANS_GMAIL_SENDER is not set and the From address has no mailbox to send as'
+      : 'GOOGLE_SERVICE_ACCOUNT_KEY is not set on this function';
+  }
+
+  if (emailId) {
+    return json({
+      email_id: emailId,
+      master_carton: masterCarton,
+      to,
+      cc: testRecipient ? [] : cc,
+      from: usedFrom,
+      sent_via: sentVia,
+      attachments: 2,
+      wording: hasOverride ? 'edited' : 'template',
+      packing_list: hasPackingOverride ? 'edited' : 'template',
+    });
+  }
+
+  warning =
+    `Sent through Resend, not Gmail, so there is no copy in ${gmailSender || 'the sender'}'s ` +
+    `Sent folder: ${gmailError}. Set GOOGLE_SERVICE_ACCOUNT_KEY on this function and grant the ` +
+    `service account the ${GMAIL_SEND_SCOPE} scope for ${gmailSender || 'the sender'} in the ` +
+    `Workspace admin console, and the booking will be sent from that mailbox instead.`;
+
   let resendRes = await send(from);
 
   // Resend refuses a From on a domain that is not verified for this account.
@@ -343,7 +410,7 @@ async function handle(req: Request): Promise<Response> {
         warning =
           `Sent from ${EZTRANS_FROM_FALLBACK} instead of ${from}: ${domain} is not a verified ` +
           `sending domain on this Resend account. Replies still go to ${replyTo}. ` +
-          `Verify ${domain} in Resend (add its SPF + DKIM records in DNS) and this stops happening.`;
+          `${warning ?? ''}`;
       } else {
         const secondError = await resendRes.text();
         return json(502, {
@@ -361,8 +428,9 @@ async function handle(req: Request): Promise<Response> {
     email_id: sent.id,
     master_carton: masterCarton,
     to,
-    cc,
+    cc: testRecipient ? [] : cc,
     from: usedFrom,
+    sent_via: sentVia,
     ...(warning ? { warning } : {}),
     attachments: 2,
     wording: hasOverride ? 'edited' : 'template',

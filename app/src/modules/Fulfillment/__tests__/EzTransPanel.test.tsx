@@ -17,7 +17,7 @@ const { placementMock, saveLabelMock, sendMock, logActionMock } = vi.hoisted(() 
     },
   ),
   sendMock: vi.fn((queueId: string, override?: { subject: string; body: string; packing_list?: string }):
-    Promise<{ email_id: string; from?: string; warning?: string }> => {
+    Promise<{ email_id: string; from?: string; sent_via?: 'gmail' | 'resend'; warning?: string }> => {
     void queueId; void override;
     return Promise.resolve({ email_id: 're_1' });
   }),
@@ -319,5 +319,35 @@ describe('EzTransPanel', () => {
     await waitFor(() => expect(logActionMock).toHaveBeenCalled());
     const note = String(logActionMock.mock.calls.at(-1)?.[2] ?? '');
     expect(note).toMatch(/not a verified sending domain/i);
+  });
+  it('says the booking is in the sender\'s Sent folder when Gmail carried it', async () => {
+    sendMock.mockResolvedValueOnce({
+      email_id: 'g1',
+      from: 'VCycene Fulfillment <reina@virgohome.io>',
+      sent_via: 'gmail',
+    });
+    render(<EzTransPanel row={row} order={order} />);
+    fillLabel();
+    fireEvent.click(sendButton());
+
+    expect(await screen.findByText(/in that mailbox's Sent folder/i)).toBeInTheDocument();
+    await waitFor(() => expect(logActionMock).toHaveBeenCalled());
+    expect(String(logActionMock.mock.calls.at(-1)?.[2] ?? ''))
+      .toMatch(/in their Gmail Sent folder/i);
+  });
+
+  it('says plainly when there will be no Sent-folder copy', async () => {
+    sendMock.mockResolvedValueOnce({
+      email_id: 'r1',
+      from: 'VCycene Team <support@lilacomposter.com>',
+      sent_via: 'resend',
+      warning: 'Sent through Resend, not Gmail, so there is no copy in reina@virgohome.io\'s Sent folder.',
+    });
+    render(<EzTransPanel row={row} order={order} />);
+    fillLabel();
+    fireEvent.click(sendButton());
+
+    expect(await screen.findByText(/no copy in that mailbox's Sent folder/i)).toBeInTheDocument();
+    expect(screen.getByText(/no copy in reina@virgohome\.io's Sent folder/i)).toBeInTheDocument();
   });
 });

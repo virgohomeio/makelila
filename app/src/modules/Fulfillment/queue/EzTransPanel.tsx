@@ -51,6 +51,9 @@ export function EzTransPanel({
   // A send that went out from a different address than intended is still a
   // send, so it is reported next to the success line rather than as an error.
   const [sendWarning, setSendWarning] = useState<string | null>(null);
+  // Where the last send actually went out from, so the operator can tell at a
+  // glance whether it will show up in the sender's own Sent folder.
+  const [sentFrom, setSentFrom] = useState<{ from: string; via: string } | null>(null);
   const [showPreview, setShowPreview] = useState(false);
   // Null while the operator hasn't touched the wording — the email then simply
   // tracks the template and the live label details. Once they type, their text
@@ -117,7 +120,7 @@ export function EzTransPanel({
 
   const handleSend = async () => {
     if (!ready) return;
-    setBusy(true); setError(null); setSendWarning(null);
+    setBusy(true); setError(null); setSendWarning(null); setSentFrom(null);
     try {
       // Save first: the edge function reads the label off the queue row rather
       // than taking it from this form, so there is exactly one copy of the
@@ -139,6 +142,7 @@ export function EzTransPanel({
           : undefined,
       );
       setSendWarning(sent.warning ?? null);
+      setSentFrom(sent.from ? { from: sent.from, via: sent.sent_via ?? 'resend' } : null);
       await logAction(
         EZTRANS_SENT_ACTION,
         order.order_ref,
@@ -146,6 +150,9 @@ export function EzTransPanel({
         `serial ${placement.serial}, master carton ${placement.masterCarton ?? '—'}, ` +
         `tracking ${tracking.trim()}${edited ? ' · wording edited for this order' : ''}` +
         `${packingEdited ? ' · packing list edited for this order' : ''}` +
+        `${sent.sent_via === 'gmail'
+            ? ` · sent from ${sent.from ?? 'the sender'} — in their Gmail Sent folder`
+            : ' · sent via Resend — no copy in the sender\'s Sent folder'}` +
         `${sent.warning ? ` · ${sent.warning}` : ''}`,
         { entityType: 'order', entityId: order.id, unitSerial: placement.serial },
       );
@@ -259,6 +266,13 @@ export function EzTransPanel({
       {sentAt && (
         <div className={styles.ezTransSent}>
           ✓ Confirmation, packing list and label sent to {EZTRANS_EMAIL} at {new Date(sentAt).toLocaleString()}.
+          {sentFrom && (
+            <div>
+              {sentFrom.via === 'gmail'
+                ? `Sent from ${sentFrom.from} — it is in that mailbox's Sent folder.`
+                : `Sent from ${sentFrom.from} via Resend — there is no copy in that mailbox's Sent folder.`}
+            </div>
+          )}
         </div>
       )}
       {sendWarning && <div className={styles.ezTransWarning}>⚠ {sendWarning}</div>}
