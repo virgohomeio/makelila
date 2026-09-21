@@ -144,8 +144,12 @@ describe('packingListLines — how the template becomes a PDF', () => {
 });
 
 describe('who the booking email comes from', () => {
-  it('is sent by Reina with Huayi copied', () => {
+  it('is sent by Reina, with Reina and Huayi both copied', () => {
     expect(EZTRANS_FROM).toContain('reina@virgohome.io');
+    // Reina is copied as well as sending: while the Gmail path is not
+    // configured the mail goes out through Resend, and the Cc is the only
+    // thing putting a copy in her mailbox at all.
+    expect(EZTRANS_CC).toContain('reina@virgohome.io');
     expect(EZTRANS_CC).toContain('huayi@virgohome.io');
   });
 

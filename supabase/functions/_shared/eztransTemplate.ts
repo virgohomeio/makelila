@@ -24,7 +24,7 @@ export const EZTRANS_PACKING_LIST_KEY = 'eztrans_packing_list';
  *  function, so the address can be moved without a deploy. Note the sending
  *  domain has to be verified in Resend or the API rejects the send outright. */
 export const EZTRANS_FROM_DEFAULT = 'VCycene Fulfillment <reina@virgohome.io>';
-export const EZTRANS_CC_DEFAULT = ['huayi@virgohome.io'];
+export const EZTRANS_CC_DEFAULT = ['reina@virgohome.io', 'huayi@virgohome.io'];
 
 /** Sender of last resort, on the domain that has been verified in Resend since
  *  this app started sending mail.

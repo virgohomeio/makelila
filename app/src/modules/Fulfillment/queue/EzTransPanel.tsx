@@ -6,6 +6,7 @@ import {
   sendEzTransBooking,
   useEzTransPlacement,
   useEzTransTemplate,
+  packingListPreview,
   EZTRANS_EMAIL,
   EZTRANS_SENT_ACTION,
   GOOROOSHIP_SHIP_URL,
@@ -54,6 +55,9 @@ export function EzTransPanel({
   // Where the last send actually went out from, so the operator can tell at a
   // glance whether it will show up in the sender's own Sent folder.
   const [sentFrom, setSentFrom] = useState<{ from: string; via: string } | null>(null);
+  // What the server says it actually sent, so "did my edit get used?" is
+  // answerable from the panel rather than from the 3PL's reply.
+  const [sentDocs, setSentDocs] = useState<{ wording: string; packingList: string } | null>(null);
   const [showPreview, setShowPreview] = useState(false);
   // Null while the operator hasn't touched the wording — the email then simply
   // tracks the template and the live label details. Once they type, their text
@@ -120,7 +124,7 @@ export function EzTransPanel({
 
   const handleSend = async () => {
     if (!ready) return;
-    setBusy(true); setError(null); setSendWarning(null); setSentFrom(null);
+    setBusy(true); setError(null); setSendWarning(null); setSentFrom(null); setSentDocs(null);
     try {
       // Save first: the edge function reads the label off the queue row rather
       // than taking it from this form, so there is exactly one copy of the
@@ -143,6 +147,9 @@ export function EzTransPanel({
       );
       setSendWarning(sent.warning ?? null);
       setSentFrom(sent.from ? { from: sent.from, via: sent.sent_via ?? 'resend' } : null);
+      setSentDocs(sent.wording && sent.packing_list
+        ? { wording: sent.wording, packingList: sent.packing_list }
+        : null);
       await logAction(
         EZTRANS_SENT_ACTION,
         order.order_ref,
@@ -266,6 +273,12 @@ export function EzTransPanel({
       {sentAt && (
         <div className={styles.ezTransSent}>
           ✓ Confirmation, packing list and label sent to {EZTRANS_EMAIL} at {new Date(sentAt).toLocaleString()}.
+          {sentDocs && (
+            <div>
+              Packing list: {sentDocs.packingList === 'edited' ? 'your edit for this order' : 'the saved template'}
+              {' · '}Wording: {sentDocs.wording === 'edited' ? 'your edit for this order' : 'the saved template'}
+            </div>
+          )}
           {sentFrom && (
             <div>
               {sentFrom.via === 'gmail'
@@ -391,7 +404,9 @@ export function EzTransPanel({
               </span>
             </div>
           ) : (
-            <pre className={styles.ezTransPreview}>{booking.packingList.join('\n')}</pre>
+            // Previews packingValue, not the template: an edit must be visible
+            // here, since this is where an operator checks their work.
+            <pre className={styles.ezTransPreview}>{packingListPreview(packingValue)}</pre>
           )}
         </>
       )}

@@ -48,7 +48,7 @@ export const EZTRANS_PACKING_LIST_KEY = 'eztrans_packing_list';
 /** Who the booking confirmation comes from, and who is copied. Mirrors the
  *  edge function's defaults; eztransPackingList.test.ts fails on drift. */
 export const EZTRANS_FROM = 'VCycene Fulfillment <reina@virgohome.io>';
-export const EZTRANS_CC = ['huayi@virgohome.io'];
+export const EZTRANS_CC = ['reina@virgohome.io', 'huayi@virgohome.io'];
 
 // Duplicated from supabase/functions/_shared/eztransTemplate.ts so the panel
 // can preview without a round-trip, and so a send still works in an
@@ -245,6 +245,18 @@ export function buildEzTransBooking(
   return { subject, body, packingList, packingListText };
 }
 
+/** A packing-list document as the PDF will print it: the `# `/`## ` markers
+ *  stripped, nothing else changed.
+ *
+ *  The panel used to preview `booking.packingList`, which is built from the
+ *  template — so an operator who edited the list and closed the editor was
+ *  shown the stock document under the heading "Attached packing list (PDF)".
+ *  The edit was reaching the 3PL; the panel was denying it. Previewing the
+ *  same text that gets sent is the fix. */
+export function packingListPreview(text: string): string {
+  return packingListLines(text).map(l => l.text).join('\n');
+}
+
 /** The label details Goorooship gives back, saved onto the queue row.
  *
  *  Deliberately does NOT advance the step: the operator is still standing in
@@ -366,7 +378,10 @@ export function useEzTransTemplate(): {
 export async function sendEzTransBooking(
   queueId: string,
   override?: { subject: string; body: string; packing_list?: string },
-): Promise<{ email_id: string; from?: string; sent_via?: 'gmail' | 'resend'; warning?: string }> {
+): Promise<{
+  email_id: string; from?: string; sent_via?: 'gmail' | 'resend'; warning?: string;
+  wording?: 'edited' | 'template'; packing_list?: 'edited' | 'template';
+}> {
   const { data: { session } } = await supabase.auth.getSession();
   const res = await fetch(`${SUPABASE_URL}/functions/v1/send-eztrans-booking`, {
     method: 'POST',
@@ -393,6 +408,7 @@ export async function sendEzTransBooking(
   try {
     return JSON.parse(bodyText) as {
       email_id: string; from?: string; sent_via?: 'gmail' | 'resend'; warning?: string;
+      wording?: 'edited' | 'template'; packing_list?: 'edited' | 'template';
     };
   }
   catch { throw new Error('EZ Trans email: response was not JSON'); }

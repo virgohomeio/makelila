@@ -17,7 +17,10 @@ const { placementMock, saveLabelMock, sendMock, logActionMock } = vi.hoisted(() 
     },
   ),
   sendMock: vi.fn((queueId: string, override?: { subject: string; body: string; packing_list?: string }):
-    Promise<{ email_id: string; from?: string; sent_via?: 'gmail' | 'resend'; warning?: string }> => {
+    Promise<{
+      email_id: string; from?: string; sent_via?: 'gmail' | 'resend'; warning?: string;
+      wording?: 'edited' | 'template'; packing_list?: 'edited' | 'template';
+    }> => {
     void queueId; void override;
     return Promise.resolve({ email_id: 're_1' });
   }),
@@ -349,5 +352,35 @@ describe('EzTransPanel', () => {
 
     expect(await screen.findByText(/no copy in that mailbox's Sent folder/i)).toBeInTheDocument();
     expect(screen.getByText(/no copy in reina@virgohome\.io's Sent folder/i)).toBeInTheDocument();
+  });
+  it('shows the edited packing list in the preview, not the stock one', async () => {
+    // Reported as "my edit was not included": the edit did reach the PDF, but
+    // closing the editor dropped the preview back to the template, so the
+    // panel showed the stock document as "Attached packing list (PDF)".
+    render(<EzTransPanel row={row} order={order} />);
+    fillLabel();
+    fireEvent.click(screen.getByRole('button', { name: /preview \/ edit email \+ packing list/i }));
+    fireEvent.click(screen.getByRole('button', { name: /edit packing list/i }));
+    fireEvent.change(screen.getByLabelText(/^packing list:$/i), {
+      target: { value: '# PACKING LIST\nFridge magnet: 1\nTote bag: 1' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /done editing/i }));
+
+    const preview = screen.getByText(/PACKING LIST/).textContent ?? '';
+    expect(preview).toContain('Fridge magnet: 1');
+    expect(preview).toContain('Tote bag: 1');
+    // And it is no longer claiming the stock contents.
+    expect(preview).not.toContain('Batch/Lot Number');
+  });
+  it('reports back which packing list the server actually sent', async () => {
+    sendMock.mockResolvedValueOnce({
+      email_id: 'e2', wording: 'template', packing_list: 'edited',
+    });
+    render(<EzTransPanel row={row} order={order} />);
+    fillLabel();
+    fireEvent.click(sendButton());
+
+    expect(await screen.findByText(/Packing list: your edit for this order/i)).toBeInTheDocument();
+    expect(screen.getByText(/Wording: the saved template/i)).toBeInTheDocument();
   });
 });
