@@ -105,6 +105,7 @@ describe('EzTransPanel', () => {
     placementMock.mockReset().mockReturnValue(AT_EZTRANS);
     saveLabelMock.mockClear();
     sendMock.mockClear();
+    localStorage.clear();
     logActionMock.mockClear();
   });
 
@@ -382,5 +383,42 @@ describe('EzTransPanel', () => {
 
     expect(await screen.findByText(/Packing list: your edit for this order/i)).toBeInTheDocument();
     expect(screen.getByText(/Wording: the saved template/i)).toBeInTheDocument();
+  });
+  it('does not carry one order\'s packing-list edit onto another order', () => {
+    // The panel is rendered without a key, so switching orders in the queue
+    // reuses the same component instance. An edit left in state would ride
+    // across and put the wrong customer's document in front of the 3PL.
+    const { rerender } = render(<EzTransPanel row={row} order={order} />);
+    fillLabel();
+    fireEvent.click(screen.getByRole('button', { name: /preview \/ edit email \+ packing list/i }));
+    fireEvent.click(screen.getByRole('button', { name: /edit packing list/i }));
+    fireEvent.change(screen.getByLabelText(/^packing list:$/i), {
+      target: { value: '# PACKING LIST\nFridge magnet: 1' },
+    });
+
+    const otherRow = { ...row, id: 'q-other', order_id: 'o-other' };
+    const otherOrder = { ...order, id: 'o-other', order_ref: '#9999' };
+    rerender(<EzTransPanel row={otherRow} order={otherOrder} />);
+
+    fireEvent.click(screen.getByRole('button', { name: /preview \/ edit email \+ packing list/i }));
+    expect(screen.queryByText(/Fridge magnet: 1/)).not.toBeInTheDocument();
+  });
+
+  it('keeps a packing-list edit when the operator comes back to the order', () => {
+    // "It doesn't save my changes": the draft lived only in component state, so
+    // stepping away to another order and back lost the edit entirely.
+    const { unmount } = render(<EzTransPanel row={row} order={order} />);
+    fillLabel();
+    fireEvent.click(screen.getByRole('button', { name: /preview \/ edit email \+ packing list/i }));
+    fireEvent.click(screen.getByRole('button', { name: /edit packing list/i }));
+    fireEvent.change(screen.getByLabelText(/^packing list:$/i), {
+      target: { value: '# PACKING LIST\nFridge magnet: 1\nTote bag: 1' },
+    });
+    unmount();
+
+    render(<EzTransPanel row={row} order={order} />);
+    fireEvent.click(screen.getByRole('button', { name: /show edited email \+ packing list/i }));
+    expect(screen.getByText(/Fridge magnet: 1/)).toBeInTheDocument();
+    expect(screen.getByText(/Tote bag: 1/)).toBeInTheDocument();
   });
 });

@@ -71,6 +71,53 @@ export function EzTransPanel({
   const edited = editedSubject !== null || editedBody !== null;
   const packingEdited = editedPacking !== null;
 
+  // Edits used to live only in component state, so stepping away to another
+  // order and back lost them — "it doesn't save my changes". They are kept
+  // against the queue row instead, which also stops one order's document from
+  // riding along to the next: this panel is rendered without a key, so the
+  // same instance serves every row the operator clicks through.
+  //
+  // Deliberately not cleared after a send. The panel offers a resend, and
+  // silently reverting to the stock document between the two would be a worse
+  // surprise than a draft that outstays its welcome; Reset is one click.
+  const draftKey = `eztrans-draft:${row.id}`;
+  const freshlyLoaded = useRef(true);
+
+  useEffect(() => {
+    let draft: { subject?: string; body?: string; packingList?: string } | null = null;
+    try {
+      const raw = localStorage.getItem(draftKey);
+      if (raw) draft = JSON.parse(raw);
+    } catch {
+      // Unreadable or unavailable storage (private mode, quota, bad JSON) is
+      // not worth breaking the panel over — the operator just starts fresh.
+    }
+    setEditedSubject(draft?.subject ?? null);
+    setEditedBody(draft?.body ?? null);
+    setEditedPacking(draft?.packingList ?? null);
+    freshlyLoaded.current = true;
+  }, [draftKey]);
+
+  useEffect(() => {
+    // Skip the pass right after a load, so restoring a draft cannot immediately
+    // overwrite it with the nulls this render still holds.
+    if (freshlyLoaded.current) { freshlyLoaded.current = false; return; }
+    try {
+      if (editedSubject === null && editedBody === null && editedPacking === null) {
+        localStorage.removeItem(draftKey);
+      } else {
+        localStorage.setItem(draftKey, JSON.stringify({
+          ...(editedSubject !== null ? { subject: editedSubject } : {}),
+          ...(editedBody !== null ? { body: editedBody } : {}),
+          ...(editedPacking !== null ? { packingList: editedPacking } : {}),
+        }));
+      }
+    } catch {
+      // Storage unavailable — the edit still sends, it just won't survive a
+      // reload. Not worth an error in front of the operator.
+    }
+  }, [draftKey, editedSubject, editedBody, editedPacking]);
+
   // "Already emailed" survives a reload, so an operator coming back to the row
   // doesn't double-book the 3PL. Logged against the order, which is where the
   // rest of this order's history lives.
