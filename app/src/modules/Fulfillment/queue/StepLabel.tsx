@@ -1,18 +1,13 @@
 import { useState } from 'react';
 import { confirmLabel, type FulfillmentQueueRow } from '../../../lib/fulfillment';
 import { EzTransPanel, type EzTransOrder } from './EzTransPanel';
+import { StepBlockers } from './StepBlockers';
 import styles from '../Fulfillment.module.css';
 
 const CARRIERS = ['UPS', 'FedEx', 'Purolator', 'Canada Post', 'Canpar', 'GLS'] as const;
 
 const FREIGHTCOM_URL = 'https://live.freightcom.com/c/mNyRdnwfdBn2raBkyImG9lemXej03RJB/ship/new';
 const AMAZON_URL     = 'https://www.amazon.com/gp/your-account/order-history';
-
-/** "a, b and c" — the blockers read as a sentence, not a bullet list. */
-function listPhrase(items: string[]): string {
-  if (items.length <= 1) return items.join('');
-  return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
-}
 
 export function StepLabel({
   row,
@@ -184,11 +179,7 @@ export function StepLabel({
         <button className={styles.confirmBtn} onClick={handleConfirm} disabled={!ready || busy}>
           {busy ? 'Saving…' : '✓ Confirm label'}
         </button>
-        {!ready && (
-          <span className={styles.labelBlockers} data-testid="label-blockers">
-            Still needs {listPhrase(blockers)}.
-          </span>
-        )}
+        <StepBlockers blockers={blockers} />
       </div>
       {error && <div style={{ color: 'var(--color-error)', fontSize: 11, marginTop: 6 }}>{error}</div>}
     </div>

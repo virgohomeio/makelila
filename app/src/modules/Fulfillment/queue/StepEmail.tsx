@@ -4,6 +4,7 @@ import {
   type FulfillmentQueueRow,
 } from '../../../lib/fulfillment';
 import { markOrderShipped } from '../../../lib/orders';
+import { StepBlockers } from './StepBlockers';
 import styles from '../Fulfillment.module.css';
 
 function trackingUrl(carrier: string | null, tracking: string | null): string {
@@ -33,6 +34,11 @@ export function StepEmail({
   const [shipError, setShipError] = useState<string | null>(null);
 
   const canSend = !!order.customer_email;
+  // A customer with no email on file blocks this step with nothing on screen
+  // to say so — the operator has to go add one in Customers first.
+  const blockers: string[] = [];
+  if (!canSend) blockers.push('an email address on this customer');
+  if (shippingCost.trim() === '') blockers.push('the actual shipping cost');
   const alreadySent = !!row.email_sent_at;
 
   // Auto-send is intentionally disabled: shipping cost must be recorded before
@@ -123,6 +129,7 @@ export function StepEmail({
         >
           {busy ? 'Sending…' : alreadySent || autoSent ? '✉ Resend email' : '✉ Send email'}
         </button>
+        <StepBlockers blockers={blockers} />
       </div>
       {error && <div style={{ color: 'var(--color-error)', fontSize: 11, marginTop: 6 }}>{error}</div>}
     </div>

@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { assignUnit, type FulfillmentQueueRow } from '../../../lib/fulfillment';
 import { useUnits, type Unit } from '../../../lib/stock';
+import { StepBlockers } from './StepBlockers';
 import styles from '../Fulfillment.module.css';
 
 function qcIssues(u: Unit): string[] {
@@ -153,6 +154,7 @@ export function StepAssign({ row }: { row: FulfillmentQueueRow }) {
         <button className={styles.confirmBtn} onClick={handleConfirm} disabled={!picked || busy}>
           {busy ? 'Assigning…' : `✓ Confirm ${picked ?? ''}`}
         </button>
+        <StepBlockers blockers={picked ? [] : ['a unit picked from the grid above']} />
         {error && <span style={{ color: 'var(--color-error)', fontSize: 11 }}>{error}</span>}
       </div>
     </div>

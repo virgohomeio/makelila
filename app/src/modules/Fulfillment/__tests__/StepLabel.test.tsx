@@ -43,7 +43,7 @@ describe('StepLabel — why Confirm label is disabled', () => {
     render(<StepLabel row={{ ...row, carrier: 'UPS', tracking_num: '1Z2985EADK98125759' }} order={order('US')} />);
 
     expect(screen.getByRole('button', { name: /Confirm label/ })).toBeDisabled();
-    expect(screen.getByTestId('label-blockers')).toHaveTextContent(
+    expect(screen.getByTestId('step-blockers')).toHaveTextContent(
       /compost starter kit tracking number/i,
     );
   });
@@ -51,7 +51,7 @@ describe('StepLabel — why Confirm label is disabled', () => {
   it('names every missing field when nothing has been filled in', () => {
     render(<StepLabel row={row} order={order('US')} />);
 
-    const blockers = screen.getByTestId('label-blockers');
+    const blockers = screen.getByTestId('step-blockers');
     expect(blockers).toHaveTextContent(/carrier/i);
     expect(blockers).toHaveTextContent(/tracking number/i);
     expect(blockers).toHaveTextContent(/compost starter kit/i);
@@ -61,17 +61,17 @@ describe('StepLabel — why Confirm label is disabled', () => {
     render(<StepLabel row={{ ...row, carrier: 'UPS', tracking_num: '1Z999' }} order={order('CA')} />);
 
     expect(screen.getByRole('button', { name: /Confirm label/ })).toBeEnabled();
-    expect(screen.queryByTestId('label-blockers')).toBeNull();
+    expect(screen.queryByTestId('step-blockers')).toBeNull();
   });
 
   it('drops the hint as soon as the last field is filled in', () => {
     render(<StepLabel row={{ ...row, carrier: 'UPS', tracking_num: '1Z999' }} order={order('US')} />);
 
-    expect(screen.getByTestId('label-blockers')).toBeInTheDocument();
+    expect(screen.getByTestId('step-blockers')).toBeInTheDocument();
     fireEvent.change(screen.getByPlaceholderText(/Amazon order details/i), {
       target: { value: 'TBA303011917292' },
     });
-    expect(screen.queryByTestId('label-blockers')).toBeNull();
+    expect(screen.queryByTestId('step-blockers')).toBeNull();
     expect(screen.getByRole('button', { name: /Confirm label/ })).toBeEnabled();
   });
 });
