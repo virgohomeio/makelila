@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
 const { confirmLabelMock } = vi.hoisted(() => ({
-  confirmLabelMock: vi.fn(() => Promise.resolve()),
+  // Typed with its real signature so the patch argument can be asserted on.
+  confirmLabelMock: vi.fn((_id: string, _patch: Record<string, unknown>) => Promise.resolve()),
 }));
 
 vi.mock('../../../lib/fulfillment', async () => {
@@ -36,42 +37,54 @@ const order = (country: 'US' | 'CA'): EzTransOrder => ({
   region_state: 'AR', postal_code: '72774', country,
 });
 
-describe('StepLabel — why Confirm label is disabled', () => {
+const labelled = { ...row, carrier: 'UPS', tracking_num: '1Z2985EADK98125759' };
+
+describe('StepLabel — the Freightcom details are the whole gate', () => {
   beforeEach(() => confirmLabelMock.mockClear());
 
-  it('names the missing Amazon tracking number on a US order', () => {
-    render(<StepLabel row={{ ...row, carrier: 'UPS', tracking_num: '1Z2985EADK98125759' }} order={order('US')} />);
+  it('lets a US order through on carrier + tracking alone, like a CA one', () => {
+    render(<StepLabel row={labelled} order={order('US')} />);
 
-    expect(screen.getByRole('button', { name: /Confirm label/ })).toBeDisabled();
-    expect(screen.getByTestId('step-blockers')).toHaveTextContent(
-      /compost starter kit tracking number/i,
-    );
+    expect(screen.getByRole('button', { name: /Confirm label/ })).toBeEnabled();
+    expect(screen.queryByTestId('step-blockers')).toBeNull();
   });
 
-  it('names every missing field when nothing has been filled in', () => {
+  it('still lets a CA order through', () => {
+    render(<StepLabel row={labelled} order={order('CA')} />);
+    expect(screen.getByRole('button', { name: /Confirm label/ })).toBeEnabled();
+  });
+
+  it('names the missing Freightcom fields when they are blank', () => {
     render(<StepLabel row={row} order={order('US')} />);
 
     const blockers = screen.getByTestId('step-blockers');
     expect(blockers).toHaveTextContent(/carrier/i);
     expect(blockers).toHaveTextContent(/tracking number/i);
-    expect(blockers).toHaveTextContent(/compost starter kit/i);
+    // The Amazon number is recorded when known, never demanded.
+    expect(blockers).not.toHaveTextContent(/compost starter/i);
   });
 
-  it('never asks a CA order for starter tracking', () => {
-    render(<StepLabel row={{ ...row, carrier: 'UPS', tracking_num: '1Z999' }} order={order('CA')} />);
+  it('keeps the starter field for US orders and saves what is typed there', async () => {
+    render(<StepLabel row={labelled} order={order('US')} />);
 
-    expect(screen.getByRole('button', { name: /Confirm label/ })).toBeEnabled();
-    expect(screen.queryByTestId('step-blockers')).toBeNull();
-  });
-
-  it('drops the hint as soon as the last field is filled in', () => {
-    render(<StepLabel row={{ ...row, carrier: 'UPS', tracking_num: '1Z999' }} order={order('US')} />);
-
-    expect(screen.getByTestId('step-blockers')).toBeInTheDocument();
     fireEvent.change(screen.getByPlaceholderText(/Amazon order details/i), {
       target: { value: 'TBA303011917292' },
     });
-    expect(screen.queryByTestId('step-blockers')).toBeNull();
-    expect(screen.getByRole('button', { name: /Confirm label/ })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: /Confirm label/ }));
+
+    await waitFor(() => expect(confirmLabelMock).toHaveBeenCalledWith('q-1', expect.objectContaining({
+      carrier: 'UPS',
+      tracking_num: '1Z2985EADK98125759',
+      starter_tracking_num: 'TBA303011917292',
+    })));
+  });
+
+  it('omits the starter field entirely when it was left blank', async () => {
+    render(<StepLabel row={labelled} order={order('US')} />);
+
+    fireEvent.click(screen.getByRole('button', { name: /Confirm label/ }));
+
+    await waitFor(() => expect(confirmLabelMock).toHaveBeenCalled());
+    expect(confirmLabelMock.mock.calls[0][1]).not.toHaveProperty('starter_tracking_num');
   });
 });

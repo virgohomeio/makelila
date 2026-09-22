@@ -29,13 +29,14 @@ export function StepLabel({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Named so a disabled Confirm label can say what it is still waiting for
-  // rather than just greying out — a US order needs the Amazon half too, and
-  // that is easy to miss when the Freightcom card above is already complete.
+  // The Freightcom details are the whole gate, on a US order as much as a CA
+  // one. The Amazon starter-kit number used to be mandatory for every US
+  // order, which stranded any that never shipped a starter kit: there was no
+  // number to paste and no way past step 3. It is recorded when known now,
+  // never demanded.
   const blockers: string[] = [];
   if (!carrier) blockers.push('a carrier');
   if (!tracking.trim()) blockers.push('the Freightcom tracking number');
-  if (country === 'US' && !starterTracking.trim()) blockers.push('the compost starter kit tracking number');
   const ready = blockers.length === 0;
 
   const handleConfirm = async () => {
@@ -46,7 +47,9 @@ export function StepLabel({
         carrier,
         tracking_num: tracking.trim(),
         ...(pdf ? { label_pdf: pdf } : {}),
-        ...(country === 'US' ? { starter_tracking_num: starterTracking.trim() } : {}),
+        ...(country === 'US' && starterTracking.trim()
+          ? { starter_tracking_num: starterTracking.trim() }
+          : {}),
       });
     } catch (e) { setError((e as Error).message); }
     finally { setBusy(false); }
@@ -160,7 +163,7 @@ export function StepLabel({
         <div className={styles.labelSection}>
           <div className={styles.labelSectionHead}>Compost starter kit (Amazon)</div>
           <label style={{ display: 'block', fontSize: 11, color: 'var(--color-ink-subtle)', marginTop: 4 }}>
-            Tracking number:
+            Tracking number (optional — only if this order ships a starter kit):
           </label>
           <input
             type="text"
