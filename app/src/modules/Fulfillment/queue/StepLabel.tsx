@@ -8,6 +8,12 @@ const CARRIERS = ['UPS', 'FedEx', 'Purolator', 'Canada Post', 'Canpar', 'GLS'] a
 const FREIGHTCOM_URL = 'https://live.freightcom.com/c/mNyRdnwfdBn2raBkyImG9lemXej03RJB/ship/new';
 const AMAZON_URL     = 'https://www.amazon.com/gp/your-account/order-history';
 
+/** "a, b and c" — the blockers read as a sentence, not a bullet list. */
+function listPhrase(items: string[]): string {
+  if (items.length <= 1) return items.join('');
+  return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
+}
+
 export function StepLabel({
   row,
   order,
@@ -28,9 +34,14 @@ export function StepLabel({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const lilaReady = !!carrier && !!tracking.trim();
-  const starterReady = country === 'CA' || !!starterTracking.trim();
-  const ready = lilaReady && starterReady;
+  // Named so a disabled Confirm label can say what it is still waiting for
+  // rather than just greying out — a US order needs the Amazon half too, and
+  // that is easy to miss when the Freightcom card above is already complete.
+  const blockers: string[] = [];
+  if (!carrier) blockers.push('a carrier');
+  if (!tracking.trim()) blockers.push('the Freightcom tracking number');
+  if (country === 'US' && !starterTracking.trim()) blockers.push('the compost starter kit tracking number');
+  const ready = blockers.length === 0;
 
   const handleConfirm = async () => {
     if (!ready) return;
@@ -173,6 +184,11 @@ export function StepLabel({
         <button className={styles.confirmBtn} onClick={handleConfirm} disabled={!ready || busy}>
           {busy ? 'Saving…' : '✓ Confirm label'}
         </button>
+        {!ready && (
+          <span className={styles.labelBlockers} data-testid="label-blockers">
+            Still needs {listPhrase(blockers)}.
+          </span>
+        )}
       </div>
       {error && <div style={{ color: 'var(--color-error)', fontSize: 11, marginTop: 6 }}>{error}</div>}
     </div>

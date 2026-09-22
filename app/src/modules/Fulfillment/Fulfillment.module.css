@@ -493,6 +493,8 @@
   cursor: pointer;
 }
 .confirmBtn:disabled { background: var(--color-border); color: var(--color-ink-faint); cursor: not-allowed; }
+/* Sits beside a disabled Confirm label and names the fields still missing. */
+.labelBlockers { font-size: 11px; color: var(--color-ink-subtle); }
 
 .shelfLayout {
   display: flex;
