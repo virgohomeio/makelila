@@ -240,5 +240,11 @@ select cron.schedule(
   $CRON$
 );
 
+-- New tables are invisible to PostgREST until its schema cache reloads, and
+-- both edge functions reach the database through it. Without this the probe's
+-- first run would fail with PGRST205 "could not find the table" — which reads
+-- like the migration never ran, rather than like a stale cache.
+notify pgrst, 'reload schema';
+
 comment on table public.freight_rate_probes is
   'Freightcom rate samples: one row per carrier rate per (order, pickup date, run). Separate from freight_quotes on purpose — the Sales Freight card reads that table unbounded.';
