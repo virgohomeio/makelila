@@ -1,24 +1,24 @@
-import { useEffect, useRef, useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   sendFulfillmentEmail,
+  shipmentEmailVars,
+  renderShipmentEmail,
   type FulfillmentQueueRow,
 } from '../../../lib/fulfillment';
 import { markOrderShipped } from '../../../lib/orders';
+import { useEmailTemplate, updateTemplate } from '../../../lib/templates';
 import { StepBlockers } from './StepBlockers';
 import styles from '../Fulfillment.module.css';
 
-function trackingUrl(carrier: string | null, tracking: string | null): string {
-  if (!tracking) return 'https://www.ups.com/track?loc=en_US';
-  switch (carrier) {
-    case 'UPS':          return `https://www.ups.com/track?tracknum=${encodeURIComponent(tracking)}`;
-    case 'FedEx':        return `https://www.fedex.com/fedextrack/?trknbr=${encodeURIComponent(tracking)}`;
-    case 'Purolator':    return `https://www.purolator.com/en/shipping/tracker?pin=${encodeURIComponent(tracking)}`;
-    case 'Canada Post':  return `https://www.canadapost-postescanada.ca/track-reperage/en#/search?searchFor=${encodeURIComponent(tracking)}`;
-    case 'Canpar':       return `https://www.canpar.com/en/track/TrackingAction.do?reference=${encodeURIComponent(tracking)}`;
-    case 'GLS':          return `https://gls-us.com/tracking?trackingNumber=${encodeURIComponent(tracking)}`;
-    default:             return 'https://www.ups.com/track?loc=en_US';
-  }
-}
+/** The Step-5 body is no longer hardcoded here. It is rendered from the
+ *  'shipment_confirmation' row in email_templates — the same row the
+ *  send-fulfillment-email edge function renders — so the preview and the
+ *  email that actually goes out cannot drift apart.
+ *
+ *  The operator can edit the rendered subject/body in place. An edit applies to
+ *  that one send unless they also press "Save as default", which writes the
+ *  edit back to the template for every shipment after it. */
+const TEMPLATE_KEY = 'shipment_confirmation';
 
 export function StepEmail({
   row,
@@ -29,51 +29,34 @@ export function StepEmail({
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [autoSent] = useState(false);
   const [shippingCost, setShippingCost] = useState('');
   const [shipError, setShipError] = useState<string | null>(null);
 
-  const canSend = !!order.customer_email;
+  const { template, loading: tplLoading, refresh: refreshTemplate } = useEmailTemplate(TEMPLATE_KEY);
+
+  const vars = useMemo(() => shipmentEmailVars(row, order), [row, order]);
+  const baseSubject = template ? renderShipmentEmail(template.subject, vars) : '';
+  const baseBody = template ? renderShipmentEmail(template.body, vars) : '';
+
+  // null = untouched, so the fields keep tracking the template as it loads or
+  // changes underneath. A string means the operator has typed something.
+  const [subjectEdit, setSubjectEdit] = useState<string | null>(null);
+  const [bodyEdit, setBodyEdit] = useState<string | null>(null);
+  const [saveState, setSaveState] = useState<'idle' | 'confirm' | 'saving' | 'saved'>('idle');
+
+  const subject = subjectEdit ?? baseSubject;
+  const body = bodyEdit ?? baseBody;
+  const dirty = (subjectEdit !== null && subjectEdit !== baseSubject)
+    || (bodyEdit !== null && bodyEdit !== baseBody);
+
+  const canSend = !!order.customer_email && !!template;
   // A customer with no email on file blocks this step with nothing on screen
   // to say so — the operator has to go add one in Customers first.
   const blockers: string[] = [];
-  if (!canSend) blockers.push('an email address on this customer');
+  if (!order.customer_email) blockers.push('an email address on this customer');
+  if (!template && !tplLoading) blockers.push(`the '${TEMPLATE_KEY}' email template (missing from the database)`);
   if (shippingCost.trim() === '') blockers.push('the actual shipping cost');
   const alreadySent = !!row.email_sent_at;
-
-  // Auto-send is intentionally disabled: shipping cost must be recorded before
-  // the fulfillment email is sent (markOrderShipped is called in handleSend).
-  // The ref is kept to avoid removing the import of useRef and to guard against
-  // accidental re-enables without re-adding the cost gate.
-  const autoSendAttempted = useRef(false);
-  useEffect(() => { autoSendAttempted.current = true; }, []);
-
-  const firstName = order.customer_name.split(' ')[0];
-  const track = trackingUrl(row.carrier, row.tracking_num);
-  const starterBlock = order.country === 'US' && row.starter_tracking_num
-    ? `\nCompost Starter Kit (ships separately via Amazon)\n\n` +
-      `Starter Tracking Number: ${row.starter_tracking_num}\n\n`
-    : '';
-  const preview =
-    `Subject: Your LILA has officially shipped! 🎉 (${order.order_ref})\n` +
-    `From: VCycene Team <support@lilacomposter.com>\n` +
-    `To: ${order.customer_email ?? '<no email>'}\n\n` +
-    `Hi ${firstName},\n\n` +
-    `Your LILA has officially shipped! 🎉 It's on its way to you. Here are your shipping details:\n\n` +
-    `Carrier: ${row.carrier ?? ''}\n\n` +
-    `Tracking Number: ${row.tracking_num ?? ''}\n\n` +
-    `Tracking Link: ${track}\n` +
-    starterBlock + `\n` +
-    `You can use the link above to check on your delivery progress at any time.\n\n` +
-    `Important next steps\n\n` +
-    `1. Mandatory onboarding session\n` +
-    `Once your unit arrives, you'll need to book a mandatory onboarding session before using LILA. This session is required to ensure your first batches produce high-quality compost, avoid common mistakes, and help you get the best results from day one.\n` +
-    `Book a session here: https://calendly.com/lila-ed.\n\n` +
-    `2. Please keep the original box\n` +
-    `Please do not throw out the original packaging for the first 30 days after delivery. In the rare event of shipping damage or if a return is required during our 30-day refund period, the unit must be returned in its original box.\n\n` +
-    `Thank you again for being part of the LILA community and supporting our mission to make composting effortless and sustainable. We can't wait to see the difference your LILA will make in your home.\n\n` +
-    `Happy Composting! 🌱\n` +
-    `-The VCycene Team`;
 
   const handleSend = async () => {
     if (!canSend) return;
@@ -86,22 +69,123 @@ export function StepEmail({
     setBusy(true); setError(null);
     try {
       await markOrderShipped(order.id, n, 'CAD');
-      await sendFulfillmentEmail(row.id);
+      // Only send overrides when the operator actually changed something, so
+      // an untouched send stays a pure render of the stored template.
+      await sendFulfillmentEmail(row.id, dirty ? { subject, body } : undefined);
     }
     catch (e) { setError((e as Error).message); }
     finally { setBusy(false); }
   };
 
+  /** Write the edit back to the template. The rendered values are swapped back
+   *  out for their {{placeholders}} first — saving "Hi Juanita," as the default
+   *  would greet every future customer by this one's name. */
+  const handleSaveDefault = async () => {
+    if (!template) return;
+    if (saveState !== 'confirm') { setSaveState('confirm'); return; }
+    setSaveState('saving'); setError(null);
+    try {
+      await updateTemplate(template.id, {
+        subject: unrender(subject, vars, template.subject),
+        body: unrender(body, vars, template.body),
+      });
+      // This hook has no realtime subscription, so without the refetch the
+      // fields would snap back to the pre-save wording the moment the local
+      // edits are cleared.
+      await refreshTemplate();
+      setSubjectEdit(null); setBodyEdit(null);
+      setSaveState('saved');
+    } catch (e) {
+      setError(`Could not save the default: ${(e as Error).message}`);
+      setSaveState('idle');
+    }
+  };
+
+  const handleReset = () => { setSubjectEdit(null); setBodyEdit(null); setSaveState('idle'); };
+
   return (
     <div>
       <h3 style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>Send the shipment-confirmation email</h3>
-      <div style={{ fontSize: 10, color: 'var(--color-ink-subtle)', marginBottom: 4 }}>Preview:</div>
-      <pre style={{
-        background: 'var(--color-surface)', border: '1px solid var(--color-border)',
-        padding: 10, borderRadius: 4, fontSize: 10, lineHeight: 1.5,
-        whiteSpace: 'pre-wrap', maxHeight: 320, overflowY: 'auto',
-      }}>{preview}</pre>
-      {(alreadySent || autoSent) && (
+
+      {tplLoading && <div style={{ fontSize: 11, color: 'var(--color-ink-subtle)' }}>Loading the template…</div>}
+      {!tplLoading && !template && (
+        <div style={{ fontSize: 11, color: 'var(--color-error)', marginBottom: 6 }}>
+          The '{TEMPLATE_KEY}' email template is missing from the database — migration
+          20260923120000 has not been applied. Nothing can be sent until it is.
+        </div>
+      )}
+
+      {template && (
+        <>
+          <div style={{ fontSize: 10, color: 'var(--color-ink-subtle)', marginBottom: 4 }}>
+            From: VCycene Team &lt;support@lilacomposter.com&gt; · To: {order.customer_email ?? '<no email>'}
+          </div>
+
+          <label style={{ display: 'block', fontSize: 10, color: 'var(--color-ink-subtle)', marginBottom: 2 }}>
+            Subject
+            <input
+              type="text"
+              value={subject}
+              onChange={e => { setSubjectEdit(e.target.value); setSaveState('idle'); }}
+              style={{
+                display: 'block', width: '100%', marginTop: 2, padding: '5px 7px',
+                fontSize: 11, border: '1px solid var(--color-border)', borderRadius: 4,
+              }}
+            />
+          </label>
+
+          <label style={{ display: 'block', fontSize: 10, color: 'var(--color-ink-subtle)', margin: '6px 0 2px' }}>
+            Body — edit before sending if you need to
+            <textarea
+              value={body}
+              onChange={e => { setBodyEdit(e.target.value); setSaveState('idle'); }}
+              rows={16}
+              style={{
+                display: 'block', width: '100%', marginTop: 2,
+                background: 'var(--color-surface)', border: '1px solid var(--color-border)',
+                padding: 10, borderRadius: 4, fontSize: 10, lineHeight: 1.5,
+                fontFamily: 'inherit', resize: 'vertical',
+              }}
+            />
+          </label>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', margin: '4px 0 2px' }}>
+            {dirty && (
+              <>
+                <button
+                  type="button"
+                  onClick={handleSaveDefault}
+                  disabled={saveState === 'saving'}
+                  style={{ fontSize: 10, padding: '3px 8px', cursor: 'pointer' }}
+                >
+                  {saveState === 'saving' ? 'Saving…'
+                    : saveState === 'confirm' ? 'Overwrite it for everyone?'
+                    : 'Save as default'}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleReset}
+                  style={{ fontSize: 10, padding: '3px 8px', cursor: 'pointer' }}
+                >
+                  Reset
+                </button>
+                <span style={{ fontSize: 10, color: 'var(--color-ink-subtle)' }}>
+                  {saveState === 'confirm'
+                    ? 'This replaces the stored template for every future shipment.'
+                    : 'Edited — this send only, unless you save it as the default.'}
+                </span>
+              </>
+            )}
+            {saveState === 'saved' && !dirty && (
+              <span style={{ fontSize: 10, color: 'var(--color-success, #2f855a)' }}>
+                ✓ Saved as the default for future shipments.
+              </span>
+            )}
+          </div>
+        </>
+      )}
+
+      {alreadySent && (
         <div style={{ fontSize: 11, color: 'var(--color-success, #2f855a)', margin: '6px 0' }}>
           ✓ Email sent{row.email_sent_at && ` at ${new Date(row.email_sent_at).toLocaleString()}`}.
         </div>
@@ -127,11 +211,33 @@ export function StepEmail({
           onClick={handleSend}
           disabled={!canSend || busy || shippingCost.trim() === ''}
         >
-          {busy ? 'Sending…' : alreadySent || autoSent ? '✉ Resend email' : '✉ Send email'}
+          {busy ? 'Sending…' : alreadySent ? '✉ Resend email' : '✉ Send email'}
         </button>
         <StepBlockers blockers={blockers} />
       </div>
       {error && <div style={{ color: 'var(--color-error)', fontSize: 11, marginTop: 6 }}>{error}</div>}
     </div>
   );
+}
+
+/** Turn a rendered string back into a template by restoring {{placeholders}}.
+ *
+ *  Saving the preview verbatim would bake this order's name, carrier and
+ *  tracking number into the default. Each variable's rendered value is swapped
+ *  back for its placeholder; values too short or too generic to match safely
+ *  (a one-letter first name, an empty carrier) are skipped, and if the result
+ *  no longer contains a placeholder the stored template had, the operator
+ *  deleted it deliberately — that is respected.
+ *
+ *  `original` is only used to keep the untouched case byte-identical. */
+function unrender(rendered: string, vars: Record<string, string>, original: string): string {
+  if (rendered === renderShipmentEmail(original, vars)) return original;
+  let out = rendered;
+  for (const [name, value] of Object.entries(vars)) {
+    // Short values produce false hits ("Al" inside "Also"); the starter block
+    // is structural text rather than a value worth re-placeholdering.
+    if (name === 'starter_block' || !value || value.length < 3) continue;
+    out = out.split(value).join(`{{${name}}}`);
+  }
+  return out;
 }

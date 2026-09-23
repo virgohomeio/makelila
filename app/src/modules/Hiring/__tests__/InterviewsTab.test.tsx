@@ -83,7 +83,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   localStorage.clear();
   vi.mocked(useInterviews).mockReturnValue({ interviews: [], loading: false });
-  vi.mocked(useEmailTemplate).mockReturnValue({ template: screeningTemplate, loading: false });
+  vi.mocked(useEmailTemplate).mockReturnValue({ template: screeningTemplate, loading: false, refresh: vi.fn() });
   vi.mocked(useShortlistedCandidates).mockReturnValue({ candidates: [], loading: false });
   vi.mocked(useSchedulingUrl).mockReturnValue({ schedulingUrl: null, loading: false, save: vi.fn() });
 });
@@ -303,7 +303,7 @@ describe('InterviewsTab screening invite draft', () => {
 
   it('says so when the screening template is missing from the library', () => {
     withCandidates([shortlisted()]);
-    vi.mocked(useEmailTemplate).mockReturnValue({ template: null, loading: false });
+    vi.mocked(useEmailTemplate).mockReturnValue({ template: null, loading: false, refresh: vi.fn() });
     render(<InterviewsTab />);
     const panel = expandCandidate();
 

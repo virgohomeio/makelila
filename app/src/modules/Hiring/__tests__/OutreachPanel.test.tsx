@@ -53,7 +53,7 @@ function withShortlist(candidates: ShortlistedCandidate[]) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(useEmailTemplate).mockReturnValue({ template, loading: false });
+  vi.mocked(useEmailTemplate).mockReturnValue({ template, loading: false, refresh: vi.fn() });
   vi.mocked(useSchedulingUrl).mockReturnValue({ schedulingUrl: null, loading: false, save: vi.fn() });
   withShortlist([]);
 });

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from './supabase';
 import { logAction } from './activityLog';
@@ -97,9 +97,23 @@ export function useEmailTemplates(): { templates: EmailTemplate[]; loading: bool
  *  callers that render a single known template (the Hiring board's screening
  *  invite draft) rather than browsing the library — useEmailTemplates() would
  *  pull every row and open a channel on each mount. */
-export function useEmailTemplate(key: string): { template: EmailTemplate | null; loading: boolean } {
+/** One template by key. `refresh` re-reads it: this hook fetches once with no
+ *  realtime subscription, so a caller that edits the row (Step 5's "Save as
+ *  default") must ask for the new copy or keep rendering the old one. */
+export function useEmailTemplate(key: string): {
+  template: EmailTemplate | null; loading: boolean; refresh: () => Promise<void>;
+} {
   const [template, setTemplate] = useState<EmailTemplate | null>(null);
   const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    const { data, error } = await supabase
+      .from('email_templates')
+      .select('*')
+      .eq('key', key)
+      .maybeSingle();
+    setTemplate(!error && data ? (data as EmailTemplate) : null);
+  }, [key]);
 
   useEffect(() => {
     let cancelled = false;
@@ -117,7 +131,7 @@ export function useEmailTemplate(key: string): { template: EmailTemplate | null;
     return () => { cancelled = true; };
   }, [key]);
 
-  return { template, loading };
+  return { template, loading, refresh: load };
 }
 
 /** The signed-in operator's own booking link (profiles.scheduling_url), which

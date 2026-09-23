@@ -3,6 +3,7 @@ import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from './supabase';
 import { logAction } from './activityLog';
 import { cancelOrder, returnOrderToReview, type ReviewLanding } from './orders';
+import { renderTemplate } from './templates';
 
 export type FulfillmentStep = 1 | 2 | 3 | 4 | 5 | 6;
 export type ShelfSlotStatus = 'available' | 'reserved' | 'rework' | 'empty' | 'held';
@@ -592,7 +593,64 @@ export async function setStarterTracking(queueId: string, starter_tracking_num: 
  *  Uses direct fetch rather than supabase.functions.invoke so the response
  *  body can be read on non-2xx (functions.invoke consumes it internally and
  *  exposes only "Edge Function returned a non-2xx status code"). */
-export async function sendFulfillmentEmail(queueId: string): Promise<{ email_id: string }> {
+/** Carrier-specific pre-filled tracking URL. Mirrors trackingUrl() in the
+ *  send-fulfillment-email edge function — keep the two switches in sync. */
+export function trackingUrlFor(carrier: string | null, tracking: string | null): string {
+  if (!tracking) return 'https://www.ups.com/track?loc=en_US';
+  switch (carrier) {
+    case 'UPS':          return `https://www.ups.com/track?tracknum=${encodeURIComponent(tracking)}`;
+    case 'FedEx':        return `https://www.fedex.com/fedextrack/?trknbr=${encodeURIComponent(tracking)}`;
+    case 'Purolator':    return `https://www.purolator.com/en/shipping/tracker?pin=${encodeURIComponent(tracking)}`;
+    case 'Canada Post':  return `https://www.canadapost-postescanada.ca/track-reperage/en#/search?searchFor=${encodeURIComponent(tracking)}`;
+    case 'Canpar':       return `https://www.canpar.com/en/track/TrackingAction.do?reference=${encodeURIComponent(tracking)}`;
+    case 'GLS':          return `https://gls-us.com/tracking?trackingNumber=${encodeURIComponent(tracking)}`;
+    default:             return 'https://www.ups.com/track?loc=en_US';
+  }
+}
+
+/** The {{variables}} the 'shipment_confirmation' template is rendered against.
+ *  Built here so the Step-5 preview and the edge function agree on every value. */
+export function shipmentEmailVars(
+  row: Pick<FulfillmentQueueRow, 'carrier' | 'tracking_num' | 'starter_tracking_num'>,
+  order: { customer_name: string; order_ref: string; country: 'US' | 'CA' },
+): Record<string, string> {
+  // US orders ship the compost starter kit separately through Amazon. Empty
+  // on every CA order, which is why renderShipmentEmail strips the placeholder
+  // rather than printing it.
+  const starterBlock = order.country === 'US' && row.starter_tracking_num
+    ? `\nCompost Starter Kit (ships separately via Amazon)\n\n` +
+      `Starter Tracking Number: ${row.starter_tracking_num}\n`
+    : '';
+  return {
+    customer_first_name: order.customer_name.split(' ')[0] ?? order.customer_name,
+    order_ref: order.order_ref,
+    carrier: row.carrier ?? '',
+    tracking_num: row.tracking_num ?? '',
+    tracking_url: trackingUrlFor(row.carrier, row.tracking_num),
+    starter_block: starterBlock,
+  };
+}
+
+/** renderTemplate() plus the starter_block exception: a missing variable stays
+ *  visible as {{name}}, but an empty starter block is removed along with the
+ *  newline after it. Mirrors render() in the send-fulfillment-email edge
+ *  function — keep the two in sync. */
+export function renderShipmentEmail(template: string, vars: Record<string, string>): string {
+  const withBlock = template.replace(
+    // No newline is consumed: the placeholder sits alone on its own line, so
+    // dropping just the text leaves the blank line that separates the sections.
+    /\{\{\s*starter_block\s*\}\}/g,
+    () => vars.starter_block || '',
+  );
+  return renderTemplate(withBlock, vars);
+}
+
+/** Sends the Step-5 shipment confirmation. `overrides` carries an operator's
+ *  per-send edit of the subject/body; omit them to send the stored template. */
+export async function sendFulfillmentEmail(
+  queueId: string,
+  overrides?: { subject?: string; body?: string },
+): Promise<{ email_id: string }> {
   await currentUserId();
   const { data: { session } } = await supabase.auth.getSession();
   const res = await fetch(`${SUPABASE_URL}/functions/v1/send-fulfillment-email`, {
@@ -602,7 +660,11 @@ export async function sendFulfillmentEmail(queueId: string): Promise<{ email_id:
       apikey: SUPABASE_ANON_KEY,
       Authorization: `Bearer ${session?.access_token ?? SUPABASE_ANON_KEY}`,
     },
-    body: JSON.stringify({ queue_id: queueId }),
+    body: JSON.stringify({
+      queue_id: queueId,
+      subject_override: overrides?.subject,
+      body_override: overrides?.body,
+    }),
   });
   const bodyText = await res.text();
   if (!res.ok) {
