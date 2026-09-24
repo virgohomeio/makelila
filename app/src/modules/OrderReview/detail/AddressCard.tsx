@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import type { Order, AreaType, Dwelling } from '../../../lib/orders';
 import {
-  setSalesConfirmedFit, verifyAddress, setAreaType, setDwelling, AREA_TYPE_LABEL,
+  setSalesConfirmedFit, setRuralCheckConfirmed, needsRuralManualCheck, ruralCheckAvailable,
+  verifyAddress, setAreaType, setDwelling, AREA_TYPE_LABEL,
 } from '../../../lib/orders';
 import {
   DWELLING_LABEL, DWELLING_NOTE, dwellingProvenance, needsFitConfirmation,
@@ -315,6 +316,36 @@ export function AddressCard({ order }: { order: Order }) {
             <label htmlFor={`sales-fit-${order.id}`}>
               Sales confirmed fit with customer (required for a{' '}
               {DWELLING_LABEL[order.address_verdict].toLowerCase()} address)
+            </label>
+          </div>
+        )}
+
+        {/* The fourth confirm criterion. A rural or remote destination is the
+            one the classifier can say the least about: whether the carrier
+            serves the road at all, what the extended-area surcharge comes to,
+            and whether the customer needs a terminal pickup or an appointment
+            are all things only a person can settle. Ticking this is that
+            person saying they did.
+
+            Hidden — rather than shown and broken — while the migration behind
+            the two columns is unapplied, since the write would fail. The
+            blocker strip says so in that state and lets the order through. */}
+        {needsRuralManualCheck(order) && ruralCheckAvailable(order) && (
+          <div className={styles.salesConfirmToggle}>
+            <input
+              type="checkbox"
+              id={`rural-check-${order.id}`}
+              checked={!!order.rural_check_confirmed_at}
+              onChange={async e => {
+                try { await setRuralCheckConfirmed(order.id, e.target.checked); }
+                catch (err2) { say((err2 as Error).message, true); }
+              }}
+            />
+            <label htmlFor={`rural-check-${order.id}`}>
+              Rural / remote delivery checked — the carrier serves this address, the
+              surcharge is accepted, and any delivery arrangement is agreed with the
+              customer (required for a{' '}
+              {order.area_type === 'rural' ? 'rural' : 'rural-route'} address)
             </label>
           </div>
         )}

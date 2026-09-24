@@ -1,10 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 
-const { verifyAddressMock, setDwellingMock, setAreaTypeMock } = vi.hoisted(() => ({
+const {
+  verifyAddressMock, setDwellingMock, setAreaTypeMock, setRuralCheckConfirmedMock,
+} = vi.hoisted(() => ({
   verifyAddressMock: vi.fn(),
   setDwellingMock:   vi.fn(() => Promise.resolve()),
   setAreaTypeMock:   vi.fn(() => Promise.resolve()),
+  setRuralCheckConfirmedMock: vi.fn(() => Promise.resolve()),
 }));
 
 vi.mock('../../../lib/orders', async () => {
@@ -15,6 +18,7 @@ vi.mock('../../../lib/orders', async () => {
     setDwelling:   setDwellingMock,
     setAreaType:   setAreaTypeMock,
     setSalesConfirmedFit: vi.fn(() => Promise.resolve()),
+    setRuralCheckConfirmed: setRuralCheckConfirmedMock,
   };
 });
 vi.mock('../../../lib/templates', () => ({ sendTemplate: vi.fn(() => Promise.resolve({ message_id: 'm1' })) }));
@@ -211,5 +215,63 @@ describe('AddressCard — operator override', () => {
     const select = screen.getByLabelText('Building type');
     const values = Array.from(select.querySelectorAll('option')).map(o => (o as HTMLOptionElement).value);
     expect(values).toEqual(['house', 'apt', 'condo', 'remote', 'business', 'po_box']);
+  });
+});
+
+// The fourth confirm criterion is signed off here, next to the older fit
+// checkbox: a rural or remote delivery needs a person to establish the things
+// no classifier can — that the carrier serves the road, that the extended-area
+// surcharge is accepted, and that any arrangement the customer needs is agreed.
+describe('AddressCard — signing off a rural / remote delivery', () => {
+  const rural = mkOrder({
+    area_type: 'rural',
+    area_type_source: 'verified',
+    address_verified_at: '2026-09-10T15:14:35Z',
+    rural_check_confirmed_at: null,
+  });
+
+  it('offers the sign-off on a rural address, unticked', () => {
+    render(<AddressCard order={rural} />);
+    const box = screen.getByLabelText(/rural \/ remote delivery checked/i) as HTMLInputElement;
+    expect(box.checked).toBe(false);
+  });
+
+  it('records the sign-off when it is ticked', async () => {
+    render(<AddressCard order={rural} />);
+    fireEvent.click(screen.getByLabelText(/rural \/ remote delivery checked/i));
+    await waitFor(() => {
+      expect(setRuralCheckConfirmedMock).toHaveBeenCalledWith('o1', true);
+    });
+  });
+
+  it('shows it ticked once it has been signed off', () => {
+    render(<AddressCard order={mkOrder({
+      ...rural, rural_check_confirmed_at: '2026-09-23T15:00:00Z',
+    })} />);
+    const box = screen.getByLabelText(/rural \/ remote delivery checked/i) as HTMLInputElement;
+    expect(box.checked).toBe(true);
+  });
+
+  // The USPS rural-route record is the second, independent signal — an address
+  // whose area type nothing classified still gets the check.
+  it('offers it on a rural-route dwelling with no area type', () => {
+    render(<AddressCard order={mkOrder({
+      address_verdict: 'remote', address_verdict_source: 'google',
+      rural_check_confirmed_at: null,
+    })} />);
+    expect(screen.getByLabelText(/rural \/ remote delivery checked/i)).toBeInTheDocument();
+  });
+
+  it('is absent on an address that is neither', () => {
+    render(<AddressCard order={mkOrder({ area_type: 'urban', rural_check_confirmed_at: null })} />);
+    expect(screen.queryByLabelText(/rural \/ remote delivery checked/i)).not.toBeInTheDocument();
+  });
+
+  // Offering a checkbox whose write would fail is worse than not offering it.
+  // mkOrder omits the columns, which is what select('*') returns while the
+  // migration behind them is unapplied.
+  it('is absent while the migration behind it is unapplied', () => {
+    render(<AddressCard order={mkOrder({ area_type: 'rural' })} />);
+    expect(screen.queryByLabelText(/rural \/ remote delivery checked/i)).not.toBeInTheDocument();
   });
 });

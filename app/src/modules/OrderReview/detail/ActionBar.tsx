@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { Order } from '../../../lib/orders';
-import { CRITERIA_COUNT } from './ReadinessChecklist';
+import { criteriaCount } from './ReadinessChecklist';
 import styles from '../OrderReview.module.css';
 
 type ExpandedAction = 'flag' | 'hold' | 'info' | 'cancel' | null;
@@ -134,7 +134,7 @@ export function ActionBar({
           disabled={!confirmReady}
           title={confirmReady
             ? 'Confirm this order'
-            : `Clear the blockers below first — ${CRITERIA_COUNT} criteria must be met`}
+            : `Clear the blockers below first — ${criteriaCount(order)} criteria must be met`}
         >✓ Confirm order</button>
 
         {/* Holding is one click; until this button existed, un-holding was not

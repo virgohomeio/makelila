@@ -158,6 +158,18 @@ export type Order = {
   shipping_line_title: string | null;
   line_items: LineItem[];
   sales_confirmed_fit: boolean;
+  /** When an operator signed off the manual check a rural or remote delivery
+   *  needs — see needsRuralManualCheck. THREE states, not two:
+   *
+   *    undefined — the column isn't there. The migration ships behind the
+   *        gated workflow, so a frontend deploy can land first and select('*')
+   *        comes back without the key. The fourth criterion warns and passes.
+   *    null      — applied, and nobody has checked this order. Blocks Confirm.
+   *    timestamp — an operator signed it off.
+   *
+   *  Optional for the same reason reconciled_at is. */
+  rural_check_confirmed_at?: string | null;
+  rural_check_confirmed_by?: string | null;
   // An operator's verdict on an order that predates the fulfillment queue —
   // see lib/reconcile.ts. Optional rather than `| null` because the columns
   // ship behind the gated migration workflow, so select('*') returns rows
@@ -305,6 +317,61 @@ export async function addOrderNote(
 export async function setSalesConfirmedFit(id: string, value: boolean): Promise<void> {
   const { error } = await supabase.from('orders').update({ sales_confirmed_fit: value }).eq('id', id);
   if (error) throw error;
+}
+
+/** Does this order need a person to look at the delivery before it ships?
+ *
+ *  Two independent signals say an address is rural or remote, and either one
+ *  alone is a reason to look:
+ *
+ *    area_type 'rural'       — Canada Post encodes rural in the FSA's second
+ *        character, plus the operator-maintained remote-prefix list, the
+ *        verify-address model, or an operator's own override.
+ *    address_verdict 'remote' — the dwelling verdict: USPS record type R
+ *        (rural route / highway contract), or an RR / general-delivery /
+ *        concession / sideroad match on the street line.
+ *
+ *  Reading only the first would miss a US rural-route address whose area type
+ *  nothing ever classified — urban and suburban can't be told apart from a
+ *  postal code, so area_type is null on plenty of orders that are plainly not
+ *  in town.
+ *
+ *  Sales only. Replacements are born approved in Fulfillment and never reach
+ *  Order Review, but canConfirm() runs for every rail row, so this answers for
+ *  one rather than blocking it. */
+export function needsRuralManualCheck(
+  order: Pick<Order, 'kind' | 'area_type' | 'address_verdict'>,
+): boolean {
+  if (order.kind !== 'sale') return false;
+  return order.area_type === 'rural' || order.address_verdict === 'remote';
+}
+
+/** Whether the columns behind the rural check exist on this row at all — i.e.
+ *  whether the migration has been applied. See rural_check_confirmed_at. */
+export function ruralCheckAvailable(order: Order): boolean {
+  return order.rural_check_confirmed_at !== undefined;
+}
+
+/** Sign off (or withdraw) the manual check on a rural/remote delivery. Stamps
+ *  who and when, because this is the criterion that says a human accepted a
+ *  surcharge and an arrangement — "someone ticked a box" is not enough to go
+ *  back to six weeks later. */
+export async function setRuralCheckConfirmed(id: string, value: boolean): Promise<void> {
+  const userId = value ? await currentUserId() : null;
+  const { error } = await supabase
+    .from('orders')
+    .update({
+      rural_check_confirmed_at: value ? new Date().toISOString() : null,
+      rural_check_confirmed_by: userId,
+    })
+    .eq('id', id);
+  if (error) throw error;
+  await logAction(
+    value ? 'rural_check_confirmed' : 'rural_check_cleared',
+    id,
+    value ? 'rural/remote delivery checked' : 'rural/remote check withdrawn',
+    { entityType: 'order', entityId: id },
+  );
 }
 
 // One definition, shared with the edge functions via _shared/addressClassify.ts,

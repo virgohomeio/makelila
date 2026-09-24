@@ -1,4 +1,5 @@
 import type { Order } from '../../../lib/orders';
+import { needsRuralManualCheck, ruralCheckAvailable } from '../../../lib/orders';
 import { DWELLING_LABEL, needsFitConfirmation } from '../../../lib/addressClassify';
 import { CUSTOMER_CARD_ID, ADDRESS_CARD_ID, PRECHECK_ID, revealCard } from './anchors';
 import styles from '../OrderReview.module.css';
@@ -15,7 +16,7 @@ import styles from '../OrderReview.module.css';
 // quote to Whitehorse still confirms; confirming with nobody having checked the
 // postal code no longer does.
 //
-// Every count rendered anywhere in the module derives from CRITERIA_COUNT, so
+// Every count rendered anywhere in the module derives from criteriaCount(), so
 // the copy cannot drift from the logic — it claimed three criteria for months
 // after the freight check was dropped.
 /** Has a carrier rate actually been pulled for this order?
@@ -35,9 +36,17 @@ export function evaluateReadiness(order: Order): {
   contact: boolean;
   address: boolean;
   preship: boolean;
+  /** The rural/remote manual check. True when it is met OR not asked for, so
+   *  the three older criteria keep counting the way they always did on the
+   *  orders that don't go anywhere rural. */
+  rural: boolean;
+  /** Whether the fourth criterion applies to this order at all — the strip
+   *  renders a row only when it does. */
+  ruralRequired: boolean;
   reason1: string;
   reason2: string;
   reason3: string;
+  reason4: string;
 } {
   const emailOk = !!order.customer_email;
   const phoneOk = !!order.customer_phone;
@@ -100,16 +109,51 @@ export function evaluateReadiness(order: Order): {
       ? 'Freight was quoted, but the address it was quoted against has not been verified'
       : 'Address verified — no carrier rate has been pulled for it yet';
 
-  return { contact, address: addressOk, preship, reason1, reason2, reason3 };
+  // The fourth gate, and the only conditional one: an order going somewhere
+  // rural or remote does not confirm until a person says they looked at it.
+  //
+  // Everything needed to know this was already on screen — a grey "Rural" tag
+  // on the rail row, an amber Area line in the summary above — and nothing
+  // asked anybody for anything, so a rural delivery confirmed exactly like a
+  // downtown house. What the operator is signing off is the three things the
+  // classifier cannot: that the carrier serves the address, that the
+  // extended-area surcharge is accepted, and that any arrangement the
+  // customer needs (terminal pickup, an appointment, a tail-lift) is agreed.
+  //
+  // An unapplied migration must not be able to strand an order: the columns
+  // ship behind the gated workflow, and until it runs the criterion says so
+  // and passes.
+  const ruralRequired = needsRuralManualCheck(order);
+  const ruralColumns = ruralCheckAvailable(order);
+  const ruralSignedAt = order.rural_check_confirmed_at ?? null;
+  const rural = !ruralRequired || !ruralColumns || !!ruralSignedAt;
+  const ruralWhat = order.area_type === 'rural' ? 'Rural or remote area' : 'Rural-route address';
+  const reason4 =
+    !ruralRequired
+      ? 'Not a rural or remote delivery'
+    : !ruralColumns
+      ? `${ruralWhat} — check the carrier serves it before you confirm. (Sign-off is not recorded yet: the migration adding it has not been applied.)`
+    : ruralSignedAt
+      ? `${ruralWhat} — checked ${new Date(ruralSignedAt).toLocaleDateString('en-US')}`
+      : `${ruralWhat} — nobody has checked that the carrier serves it and the surcharge is accepted`;
+
+  return {
+    contact, address: addressOk, preship, rural, ruralRequired,
+    reason1, reason2, reason3, reason4,
+  };
 }
 
-/** The number of criteria that gate Confirm. Single source for every count
- *  rendered anywhere in the module. */
-export const CRITERIA_COUNT = 3;
+/** The number of criteria that gate Confirm for THIS order — three, plus the
+ *  rural check when the address is one. Single source for every count rendered
+ *  anywhere in the module, which is why it is a function now: a fixed 4 would
+ *  tell every urban order it had a criterion it does not have. */
+export function criteriaCount(order: Order): number {
+  return needsRuralManualCheck(order) ? 4 : 3;
+}
 
 export function canConfirm(order: Order): boolean {
   const r = evaluateReadiness(order);
-  return r.contact && r.address && r.preship;
+  return r.contact && r.address && r.preship && r.rural;
 }
 
 /** The blocker strip. Sits directly under the Confirm button it gates, so the
@@ -117,15 +161,17 @@ export function canConfirm(order: Order): boolean {
  *  link on the same line as the fault it repairs. */
 export function ReadinessChecklist({ order }: { order: Order }) {
   const r = evaluateReadiness(order);
-  const met = [r.contact, r.address, r.preship].filter(Boolean).length;
-  const allOk = met === CRITERIA_COUNT;
-  const outstanding = CRITERIA_COUNT - met;
+  const total = criteriaCount(order);
+  const met = [r.contact, r.address, r.preship, ...(r.ruralRequired ? [r.rural] : [])]
+    .filter(Boolean).length;
+  const allOk = met === total;
+  const outstanding = total - met;
 
   if (allOk) {
     return (
       <div className={`${styles.blockers} ${styles.blockersOk}`}>
         <div className={styles.blockHead}>
-          <span className={styles.blockCount}>{met} of {CRITERIA_COUNT}</span>
+          <span className={styles.blockCount}>{met} of {total}</span>
           criteria met — ready to confirm
         </div>
       </div>
@@ -136,7 +182,7 @@ export function ReadinessChecklist({ order }: { order: Order }) {
     <div className={`${styles.blockers} ${styles.blockersWarn}`}>
       <div className={styles.blockHead}>
         {outstanding} blocker{outstanding === 1 ? '' : 's'} before you can confirm
-        <span className={styles.blockCount}>· {met} of {CRITERIA_COUNT} met</span>
+        <span className={styles.blockCount}>· {met} of {total} met</span>
       </div>
       <div className={styles.blockList}>
         <div className={styles.blockItem}>
@@ -181,6 +227,26 @@ export function ReadinessChecklist({ order }: { order: Order }) {
             >Run above →</button>
           )}
         </div>
+        {/* Only on the orders it applies to. A permanent "not a rural
+            delivery ✓" row on every order is a line of green nobody reads,
+            and the whole point of this criterion is to be noticed on the few
+            orders that have it. */}
+        {r.ruralRequired && (
+          <div className={styles.blockItem}>
+            <span className={`${styles.blockMark} ${r.rural ? styles.blockMarkOk : styles.blockMarkNo}`}>
+              {r.rural ? '✓' : '!'}
+            </span>
+            <span className={styles.blockWhat}>Rural delivery</span>
+            <span className={styles.blockWhy}>{r.reason4}</span>
+            {!r.rural && (
+              <button
+                type="button"
+                className={styles.blockFix}
+                onClick={() => revealCard(ADDRESS_CARD_ID)}
+              >Fix in Address →</button>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
