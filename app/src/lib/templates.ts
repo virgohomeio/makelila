@@ -242,6 +242,41 @@ export async function updateTemplate(id: string, patch: Partial<Pick<EmailTempla
   await logAction('template_updated', id, Object.keys(patch).join(', '));
 }
 
+/** The logged send of one template for one order, newest first.
+ *
+ *  email_messages has no order column, so the link is made through the
+ *  rendered variables — every shipment confirmation records the order_ref it
+ *  was built from. Returns null when nothing was logged, which is the honest
+ *  answer for anything sent before the fulfilment send started writing an
+ *  audit row on 2026-09-24. */
+export function useSentEmail(templateKey: string, orderRef: string | null): {
+  message: EmailMessage | null; loading: boolean;
+} {
+  const [message, setMessage] = useState<EmailMessage | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    (async () => {
+      if (!orderRef) { if (!cancelled) { setMessage(null); setLoading(false); } return; }
+      const { data, error } = await supabase
+        .from('email_messages')
+        .select('*')
+        .eq('template_key', templateKey)
+        .eq('variables->>order_ref', orderRef)
+        .order('created_at', { ascending: false })
+        .limit(1);
+      if (cancelled) return;
+      setMessage(!error && data && data.length > 0 ? (data[0] as EmailMessage) : null);
+      setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [templateKey, orderRef]);
+
+  return { message, loading };
+}
+
 /** Create a template row. Used when a surface wants to persist wording for a
  *  key that was never seeded — saving from Step 5 on a database where the
  *  shipment-confirmation migration has not run, for instance. */
