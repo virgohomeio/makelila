@@ -2,8 +2,11 @@ import { describe, it, expect } from 'vitest';
 import {
   addressLines,
   addressOneLine,
+  attachmentFilenames,
   buildEzTransBooking,
   masterCartonFromSkid,
+  needsPesticideWorksheet,
+  pesticideWorksheetSummary,
   EZTRANS_EMAIL,
   PACKING_LIST_SKU,
   type EzTransShipTo,
@@ -103,8 +106,8 @@ describe('buildEzTransBooking', () => {
     expect(booking.body).toContain('SHIPPING LABEL (attached)');
     expect(booking.body).toContain('Carrier: Purolator');
     expect(booking.body).toContain('Tracking Number: PUR123456789');
-    expect(booking.body).toContain('print the attached label');
-    expect(booking.body).toContain('the shipping label are attached');
+    expect(booking.body).toContain('print the attached PDF and affix the shipping label');
+    expect(booking.body).toContain('attached together as one PDF');
     const list = booking.packingList.join('\n');
     expect(list).toContain('Carrier: Purolator');
     expect(list).toContain('Tracking No: PUR123456789');
@@ -148,5 +151,63 @@ describe('buildEzTransBooking', () => {
   it('is addressed to the 3PL, not the customer', () => {
     expect(EZTRANS_EMAIL).toBe('cs@goorooship.ca');
     expect(booking.body).not.toContain('Happy Composting');
+  });
+});
+
+
+describe('what goes out with the booking', () => {
+  it('merges the label and the packing list into one attachment', () => {
+    expect(attachmentFilenames('#1184', 'Purolator'))
+      .toEqual(['shipping-label-and-packing-list-1184.pdf']);
+  });
+
+  it('adds the pesticide worksheet on a UPS booking', () => {
+    expect(attachmentFilenames('#1184', 'UPS')).toEqual([
+      'shipping-label-and-packing-list-1184.pdf',
+      'pesticide-worksheet-1184.pdf',
+    ]);
+  });
+
+  it('only UPS gets one — nobody else brokers their own entries', () => {
+    expect(needsPesticideWorksheet('UPS')).toBe(true);
+    expect(needsPesticideWorksheet(' ups ')).toBe(true);
+    for (const carrier of ['FedEx', 'Purolator', 'Canada Post', 'Canpar', 'GLS', '', null]) {
+      expect(needsPesticideWorksheet(carrier)).toBe(false);
+    }
+  });
+
+  it('tells the 3PL to look for the second PDF only when there is one', () => {
+    const base = {
+      order: ORDER,
+      serial: 'LL01-P100X-00412',
+      masterCarton: '1',
+      tracking: '1Z2985EADK93221574',
+    };
+    const ups = buildEzTransBooking({ ...base, carrier: 'UPS' });
+    expect(ups.body).toContain('attached together as one PDF');
+    expect(ups.body).toContain('pesticide worksheet for this entry is attached as a second PDF');
+
+    const other = buildEzTransBooking({ ...base, carrier: 'Purolator' });
+    expect(other.body).toContain('attached together as one PDF');
+    expect(other.body).not.toContain('pesticide worksheet');
+  });
+
+  it('shows the operator the worksheet fields that came off this shipment', () => {
+    const summary = pesticideWorksheetSummary({
+      orderRef: '#1252', serial: 'LL01-00000000369', tracking: '1Z2985EADK93221574',
+    });
+    const byLabel = Object.fromEntries(summary.map(f => [f.label, f.value]));
+    expect(byLabel['Shipment number']).toBe('1Z2985EADK93221574');
+    expect(byLabel['Tariff number']).toBe('8509.80.5095');
+    expect(byLabel['Description of goods']).toContain('LL01-00000000369');
+    expect(byLabel['Description of goods']).toContain('Order ref #1252');
+    expect(byLabel['Signed by']).toContain('Huayi Gao');
+  });
+
+  it('says a missing tracking number rather than filing a blank one', () => {
+    const summary = pesticideWorksheetSummary({
+      orderRef: '#1252', serial: 'LL01-00000000369', tracking: null,
+    });
+    expect(summary.find(f => f.label === 'Shipment number')?.value).toBe('—');
   });
 });

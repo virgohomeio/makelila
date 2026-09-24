@@ -1,6 +1,7 @@
 // Confirm an order with the EZ Trans 3PL after it has been booked on
-// Goorooship: the packing list they pick from and the shipping label they
-// print, both attached.
+// Goorooship: the shipping label they print and the packing list they pick
+// from, merged into one attachment, plus — on a UPS booking — the FIFRA
+// pesticide worksheet UPS Supply Chain Solutions needs to broker the entry.
 //
 // Operator path: Fulfillment > Queue > step 3 (Attach the shipping label).
 // The panel only appears when the unit assigned at step 1 is held at EZTrans,
@@ -24,6 +25,14 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { corsHeaders } from '../_shared/cors.ts';
 import { authenticate } from '../_shared/auth.ts';
 import { buildTextPdf, toBase64 } from '../_shared/simplePdf.ts';
+import { mergePdfs } from '../_shared/pdfMerge.ts';
+import { pngToPdfImage } from '../_shared/pngToPdfImage.ts';
+import {
+  formatWorksheetDate,
+  pesticideWorksheetLines,
+  SIGNATURE_BUCKET,
+  SIGNATURE_PATH,
+} from '../_shared/pesticideWorksheet.ts';
 import { getGmailAccessToken, type ServiceAccountKey } from '../_shared/gmail-auth.ts';
 import { GMAIL_SEND_SCOPE, sendGmailMessage } from '../_shared/gmailSend.ts';
 import {
@@ -35,6 +44,8 @@ import {
   EZTRANS_FROM_FALLBACK,
   EZTRANS_PACKING_LIST_KEY,
   EZTRANS_TEMPLATE_KEY,
+  attachmentsNote,
+  needsPesticideWorksheet,
   packingListLines,
   renderEzTransTemplate,
 } from '../_shared/eztransTemplate.ts';
@@ -236,6 +247,7 @@ async function handle(req: Request): Promise<Response> {
     // continuation lines under "Address: " instead.
     customer_address_block: addr.join('\n'),
     date: new Date().toISOString().slice(0, 10),
+    attachments_note: attachmentsNote(q.carrier),
   };
 
   let tplSubject = DEFAULT_EZTRANS_SUBJECT;
@@ -275,7 +287,7 @@ async function handle(req: Request): Promise<Response> {
     hasPackingOverride ? body.packing_list as string : tplPackingList, vars);
   const pdfLines = packingListLines(packingListText);
 
-  const pdf = toBase64(buildTextPdf(pdfLines));
+  const packingListPdf = buildTextPdf(pdfLines);
   const safeRef = order.order_ref.replace(/[^A-Za-z0-9._-]/g, '');
 
   // The label the operator attached in step 3, straight out of the private
@@ -288,7 +300,68 @@ async function handle(req: Request): Promise<Response> {
   if (labelErr || !labelBlob) {
     return json(502, { error: `could not read the shipping label (${q.label_pdf_path}): ${labelErr?.message ?? 'not found'}` });
   }
-  const labelPdf = toBase64(new Uint8Array(await labelBlob.arrayBuffer()));
+  const labelPdf = new Uint8Array(await labelBlob.arrayBuffer());
+
+  // One file, label first: EZ Trans prints the attachment and tapes it to the
+  // carton, and two attachments is one chance to print only half of it. A
+  // carrier label that pdf-lib cannot parse falls back to two attachments
+  // rather than holding the shipment — the warning says which happened.
+  let mergeWarning: string | null = null;
+  let documents: Array<{ filename: string; bytes: Uint8Array }>;
+  try {
+    documents = [{
+      filename: `shipping-label-and-packing-list-${safeRef}.pdf`,
+      bytes: await mergePdfs([labelPdf, packingListPdf]),
+    }];
+  } catch (e) {
+    mergeWarning =
+      `The shipping label and the packing list went out as two attachments, not one: ` +
+      `the label PDF could not be merged (${(e as Error).message}). Both documents are ` +
+      `attached and correct — only the combining failed.`;
+    documents = [
+      { filename: `shipping-label-${safeRef}.pdf`, bytes: labelPdf },
+      { filename: `packing-list-${safeRef}.pdf`, bytes: packingListPdf },
+    ];
+  }
+
+  // UPS brokers its own US entries and will not act as importer of record
+  // without a FIFRA worksheet, so one rides along on every UPS booking. The
+  // date on it is today — the day the label was attached and this went out,
+  // which is what the worksheets filed by hand carried.
+  let worksheetWarning: string | null = null;
+  const needsWorksheet = needsPesticideWorksheet(q.carrier);
+  if (needsWorksheet) {
+    // The signature is a real person's, so it is not in the repo — it is read
+    // from a private bucket with the service role, the same way the label is.
+    let signature = null;
+    try {
+      const { data: sigBlob, error: sigErr } = await admin.storage
+        .from(SIGNATURE_BUCKET).download(SIGNATURE_PATH);
+      if (sigErr || !sigBlob) throw new Error(sigErr?.message ?? 'not found');
+      signature = pngToPdfImage(new Uint8Array(await sigBlob.arrayBuffer()));
+    } catch (e) {
+      // Said out loud rather than quietly sending an unsigned customs form,
+      // which the broker would bounce a day later.
+      worksheetWarning =
+        `The pesticide worksheet went out UNSIGNED: ${SIGNATURE_BUCKET}/${SIGNATURE_PATH} ` +
+        `could not be read (${(e as Error).message}). Upload the signature PNG to that path, ` +
+        `then resend — or sign the attached worksheet by hand before it reaches the broker.`;
+    }
+    documents.push({
+      filename: `pesticide-worksheet-${safeRef}.pdf`,
+      bytes: buildTextPdf(pesticideWorksheetLines({
+        trackingNumber: q.tracking_num,
+        serial,
+        batchLot: BATCH_LOT,
+        quantity: QUANTITY,
+        orderRef: order.order_ref,
+        date: formatWorksheetDate(new Date()),
+        signature,
+      })),
+    });
+  }
+
+  const attachments = documents.map(d => ({ filename: d.filename, base64: toBase64(d.bytes) }));
 
   // Same testing override as send-fulfillment-email: while
   // EMAIL_TEST_RECIPIENT is set nothing reaches the 3PL.
@@ -326,10 +399,7 @@ async function handle(req: Request): Promise<Response> {
       ...(cc.length && !testRecipient ? { cc } : {}),
       subject,
       text: emailText,
-      attachments: [
-        { filename: `shipping-label-${safeRef}.pdf`, content: labelPdf },
-        { filename: `packing-list-${safeRef}.pdf`, content: pdf },
-      ],
+      attachments: attachments.map(a => ({ filename: a.filename, content: a.base64 })),
     }),
   });
 
@@ -354,10 +424,9 @@ async function handle(req: Request): Promise<Response> {
         cc: testRecipient ? [] : cc,
         subject,
         text: emailText,
-        attachments: [
-          { filename: `shipping-label-${safeRef}.pdf`, contentType: 'application/pdf', base64: labelPdf },
-          { filename: `packing-list-${safeRef}.pdf`, contentType: 'application/pdf', base64: pdf },
-        ],
+        attachments: attachments.map(a => ({
+          filename: a.filename, contentType: 'application/pdf', base64: a.base64,
+        })),
       });
       emailId = sent.id;
       sentVia = 'gmail';
@@ -373,15 +442,23 @@ async function handle(req: Request): Promise<Response> {
       : 'GOOGLE_SERVICE_ACCOUNT_KEY is not set on this function';
   }
 
+  // Whatever happened to the documents is reported either way — through
+  // Gmail it is the only warning there is, through Resend it joins the one
+  // about the sender.
+  const documentWarning = [mergeWarning, worksheetWarning].filter(Boolean).join(' ') || null;
+
   if (emailId) {
-    return json({
+    return json(200, {
       email_id: emailId,
       master_carton: masterCarton,
       to,
       cc: testRecipient ? [] : cc,
       from: usedFrom,
       sent_via: sentVia,
-      attachments: 2,
+      ...(documentWarning ? { warning: documentWarning } : {}),
+      attachments: attachments.map(a => a.filename),
+      combined: !mergeWarning,
+      pesticide_worksheet: needsWorksheet ? (worksheetWarning ? 'unsigned' : 'signed') : 'not-required',
       wording: hasOverride ? 'edited' : 'template',
       packing_list: hasPackingOverride ? 'edited' : 'template',
     });
@@ -431,8 +508,12 @@ async function handle(req: Request): Promise<Response> {
     cc: testRecipient ? [] : cc,
     from: usedFrom,
     sent_via: sentVia,
-    ...(warning ? { warning } : {}),
-    attachments: 2,
+    ...(warning || documentWarning
+      ? { warning: [warning, documentWarning].filter(Boolean).join(' ') }
+      : {}),
+    attachments: attachments.map(a => a.filename),
+    combined: !mergeWarning,
+    pesticide_worksheet: needsWorksheet ? (worksheetWarning ? 'unsigned' : 'signed') : 'not-required',
     wording: hasOverride ? 'edited' : 'template',
     packing_list: hasPackingOverride ? 'edited' : 'template',
   });

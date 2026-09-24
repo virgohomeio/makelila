@@ -54,7 +54,9 @@ describe('buildTextPdf', () => {
 
   it('folds non-ASCII text instead of emitting bytes Helvetica cannot show', () => {
     const folded = render(buildTextPdf([{ text: 'Montréal — Québec 🌱' }]));
-    expect(folded).toContain('(Montreal - Quebec ) Tj');
+    // The trailing space the dropped emoji left behind goes with it: lines
+    // are wrapped now, and wrapping normalises the whitespace between words.
+    expect(folded).toContain('(Montreal - Quebec) Tj');
   });
 
   it('breaks onto a second page rather than writing off the bottom', () => {

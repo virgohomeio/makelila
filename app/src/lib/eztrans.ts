@@ -19,7 +19,18 @@ import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from './supabase';
 import { renderTemplate, useEmailTemplate } from './templates';
 // One implementation of the marker rules, imported rather than mirrored —
 // unlike the string defaults, which must stay literal on both sides.
-import { packingListLines } from '../../../supabase/functions/_shared/eztransTemplate';
+import {
+  attachmentsNote,
+  needsPesticideWorksheet,
+  packingListLines,
+} from '../../../supabase/functions/_shared/eztransTemplate';
+import {
+  goodsDescription,
+  PESTICIDE_CERTIFIER,
+  PESTICIDE_PART_NUMBER,
+  PESTICIDE_TARIFF_NUMBER,
+  formatWorksheetDate,
+} from '../../../supabase/functions/_shared/pesticideWorksheet';
 
 /** Where a shipment out of EZ Trans gets booked. */
 export const GOOROOSHIP_SHIP_URL = 'https://app.goorooship.ca/ship';
@@ -35,6 +46,43 @@ export const PACKING_LIST_PRODUCT_NAME = 'LILA Kitchen Composter';
 export const PACKING_LIST_SKU = 'LILA-P100X';
 export const PACKING_LIST_BATCH_LOT = 'P100X';
 export const PACKING_LIST_QUANTITY = 1;
+
+export { needsPesticideWorksheet };
+
+/** What the 3PL receives, given the carrier on the queue row. The panel names
+ *  these so an operator can see before sending whether the pesticide worksheet
+ *  is going out — the same rule the edge function attaches by. */
+export function attachmentFilenames(orderRef: string, carrier: string | null): string[] {
+  const safeRef = orderRef.replace(/[^A-Za-z0-9._-]/g, '');
+  const names = [`shipping-label-and-packing-list-${safeRef}.pdf`];
+  if (needsPesticideWorksheet(carrier)) names.push(`pesticide-worksheet-${safeRef}.pdf`);
+  return names;
+}
+
+/** The fields the UPS pesticide worksheet is tailored with for this shipment,
+ *  for the read-only summary in the panel. The document itself is built on the
+ *  server — this is the same data, so an operator can check the tracking
+ *  number and the serial before the form goes to the broker. */
+export function pesticideWorksheetSummary(args: {
+  orderRef: string; serial: string; tracking: string | null;
+}): Array<{ label: string; value: string }> {
+  return [
+    { label: 'Shipment number', value: args.tracking || '—' },
+    { label: 'Part number', value: PESTICIDE_PART_NUMBER },
+    {
+      label: 'Description of goods',
+      value: goodsDescription({
+        serial: args.serial,
+        batchLot: PACKING_LIST_BATCH_LOT,
+        quantity: PACKING_LIST_QUANTITY,
+        orderRef: args.orderRef,
+      }),
+    },
+    { label: 'Tariff number', value: PESTICIDE_TARIFF_NUMBER },
+    { label: 'Date', value: formatWorksheetDate(new Date()) },
+    { label: 'Signed by', value: `${PESTICIDE_CERTIFIER.name}, ${PESTICIDE_CERTIFIER.title}` },
+  ];
+}
 
 /** The activity_log type written after a confirmation is sent. */
 export const EZTRANS_SENT_ACTION = 'fq_eztrans_booking_sent';
@@ -66,8 +114,7 @@ export const DEFAULT_EZTRANS_BODY =
   'Hello EZ Trans team,\n' +
   '\n' +
   'We are confirming that an order has been placed and the shipment has been ' +
-  'booked on Goorooship. Please fulfill it on your end. The packing list and ' +
-  'the shipping label are attached to this email.\n' +
+  'booked on Goorooship. Please fulfill it on your end. {{attachments_note}}\n' +
   '\n' +
   'CUSTOMER\n' +
   'Name: {{customer_name}}\n' +
@@ -86,7 +133,7 @@ export const DEFAULT_EZTRANS_BODY =
   'SHIPPING LABEL (attached)\n' +
   'Carrier: {{carrier}}\n' +
   'Tracking Number: {{tracking}}\n' +
-  'Please print the attached label and affix it to the carton.\n' +
+  'Please print the attached PDF and affix the shipping label to the carton.\n' +
   '\n' +
   'Order reference: {{order_ref}}\n' +
   '\n' +
@@ -220,6 +267,9 @@ export function ezTransVariables(args: EzTransBookingArgs): Record<string, strin
     // continuation lines under "Address: " instead.
     customer_address_block: addressLines(order).join('\n'),
     date: new Date().toISOString().slice(0, 10),
+    // What the 3PL should be looking for: one merged label + packing list, and
+    // on a UPS booking the pesticide worksheet too.
+    attachments_note: attachmentsNote(carrier),
   };
 }
 
@@ -380,13 +430,26 @@ export function useEzTransTemplate(): {
  *  function fills every {{variable}} from the queue row, the order and the
  *  shelf row, and pulls the label straight out of storage: an edit changes
  *  what the documents say, never which shipment they describe. */
+export type EzTransSendResult = {
+  email_id: string;
+  from?: string;
+  sent_via?: 'gmail' | 'resend';
+  warning?: string;
+  wording?: 'edited' | 'template';
+  packing_list?: 'edited' | 'template';
+  /** What actually went out, by filename. */
+  attachments?: string[];
+  /** False when the label could not be merged and went as its own attachment. */
+  combined?: boolean;
+  /** 'unsigned' means the worksheet was built but the signature asset could
+   *  not be read — it needs signing by hand before the broker sees it. */
+  pesticide_worksheet?: 'signed' | 'unsigned' | 'not-required';
+};
+
 export async function sendEzTransBooking(
   queueId: string,
   override?: { subject: string; body: string; packing_list?: string },
-): Promise<{
-  email_id: string; from?: string; sent_via?: 'gmail' | 'resend'; warning?: string;
-  wording?: 'edited' | 'template'; packing_list?: 'edited' | 'template';
-}> {
+): Promise<EzTransSendResult> {
   const { data: { session } } = await supabase.auth.getSession();
   const res = await fetch(`${SUPABASE_URL}/functions/v1/send-eztrans-booking`, {
     method: 'POST',
@@ -410,11 +473,6 @@ export async function sendEzTransBooking(
     } catch { /* keep raw */ }
     throw new Error(`EZ Trans email failed (${res.status}): ${detail}`);
   }
-  try {
-    return JSON.parse(bodyText) as {
-      email_id: string; from?: string; sent_via?: 'gmail' | 'resend'; warning?: string;
-      wording?: 'edited' | 'template'; packing_list?: 'edited' | 'template';
-    };
-  }
+  try { return JSON.parse(bodyText) as EzTransSendResult; }
   catch { throw new Error('EZ Trans email: response was not JSON'); }
 }

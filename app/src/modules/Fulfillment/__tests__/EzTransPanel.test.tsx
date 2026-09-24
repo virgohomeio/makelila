@@ -20,6 +20,8 @@ const { placementMock, saveLabelMock, sendMock, logActionMock } = vi.hoisted(() 
     Promise<{
       email_id: string; from?: string; sent_via?: 'gmail' | 'resend'; warning?: string;
       wording?: 'edited' | 'template'; packing_list?: 'edited' | 'template';
+      attachments?: string[]; combined?: boolean;
+      pesticide_worksheet?: 'signed' | 'unsigned' | 'not-required';
     }> => {
     void queueId; void override;
     return Promise.resolve({ email_id: 're_1' });
@@ -465,5 +467,91 @@ describe('EzTransPanel', () => {
     const copied = screen.getByText(/reina@virgohome\.io/).textContent ?? '';
     expect(copied).toContain('huayi@virgohome.io');
     expect(copied).toContain('support@goorooship.ca');
+  });
+});
+
+describe('the UPS pesticide worksheet', () => {
+  beforeEach(() => {
+    placementMock.mockReset().mockReturnValue(AT_EZTRANS);
+    sendMock.mockClear();
+    logActionMock.mockClear();
+    localStorage.clear();
+  });
+
+  function fillUps() {
+    fireEvent.change(screen.getByLabelText(/carrier/i), { target: { value: 'UPS' } });
+    fireEvent.change(screen.getByLabelText(/tracking number/i), {
+      target: { value: '1Z2985EADK93221574' },
+    });
+    fireEvent.change(screen.getByLabelText(/shipping label pdf/i), { target: { files: [labelFile()] } });
+  }
+
+  it('names one merged attachment on a non-UPS booking', () => {
+    render(<EzTransPanel row={row} order={order} />);
+    fillLabel();
+    expect(screen.getByText('shipping-label-and-packing-list-1184.pdf')).toBeInTheDocument();
+    expect(screen.queryByText(/pesticide/i)).not.toBeInTheDocument();
+  });
+
+  it('adds the worksheet to what is attached once the carrier is UPS', () => {
+    render(<EzTransPanel row={row} order={order} />);
+    fillUps();
+    expect(screen.getByText(
+      'shipping-label-and-packing-list-1184.pdf, pesticide-worksheet-1184.pdf',
+    )).toBeInTheDocument();
+    expect(screen.getByText(/UPS brokers this entry/i)).toBeInTheDocument();
+  });
+
+  it('shows the fields the worksheet is tailored with, off this shipment', () => {
+    render(<EzTransPanel row={row} order={order} />);
+    fillUps();
+    fireEvent.click(screen.getByRole('button', { name: /preview \/ edit email \+ packing list/i }));
+    expect(screen.getByText(/Attached UPS pesticide worksheet/i)).toBeInTheDocument();
+    // The tracking number on the form is the one being filed, not a stale one.
+    expect(screen.getAllByText('1Z2985EADK93221574').length).toBeGreaterThan(0);
+    expect(screen.getByText('8509.80.5095')).toBeInTheDocument();
+    expect(screen.getByText(/Huayi Gao/)).toBeInTheDocument();
+  });
+
+  it('tells the 3PL in the email body that a second PDF is coming', () => {
+    render(<EzTransPanel row={row} order={order} />);
+    fillUps();
+    fireEvent.click(screen.getByRole('button', { name: /preview \/ edit email \+ packing list/i }));
+    expect(screen.getByText(/pesticide worksheet for this entry is attached as a second PDF/i))
+      .toBeInTheDocument();
+  });
+
+  it('records an unsigned worksheet in the audit trail rather than letting it pass', async () => {
+    sendMock.mockResolvedValueOnce({
+      email_id: 're_2',
+      attachments: ['shipping-label-and-packing-list-1184.pdf', 'pesticide-worksheet-1184.pdf'],
+      combined: true,
+      pesticide_worksheet: 'unsigned',
+      warning: 'The pesticide worksheet went out UNSIGNED',
+    });
+    render(<EzTransPanel row={row} order={order} />);
+    fillUps();
+    fireEvent.click(sendButton());
+    await waitFor(() => expect(logActionMock).toHaveBeenCalled());
+    const note = String(logActionMock.mock.calls[0][2]);
+    expect(note).toContain('UPS pesticide worksheet');
+    expect(note).toContain('worksheet UNSIGNED');
+    expect(screen.getByText(/went out UNSIGNED/)).toBeInTheDocument();
+  });
+
+  it('says so when the label had to go as its own attachment', async () => {
+    sendMock.mockResolvedValueOnce({
+      email_id: 're_3',
+      attachments: ['shipping-label-1184.pdf', 'packing-list-1184.pdf'],
+      combined: false,
+    });
+    render(<EzTransPanel row={row} order={order} />);
+    fillLabel();
+    fireEvent.click(sendButton());
+    await waitFor(() => expect(logActionMock).toHaveBeenCalled());
+    expect(String(logActionMock.mock.calls[0][2]))
+      .toContain('label and packing list sent separately');
+    expect(screen.getByText(/Attached: shipping-label-1184.pdf, packing-list-1184.pdf/))
+      .toBeInTheDocument();
   });
 });

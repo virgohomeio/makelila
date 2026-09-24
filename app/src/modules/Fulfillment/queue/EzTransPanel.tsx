@@ -7,6 +7,9 @@ import {
   useEzTransPlacement,
   useEzTransTemplate,
   packingListPreview,
+  attachmentFilenames,
+  needsPesticideWorksheet,
+  pesticideWorksheetSummary,
   EZTRANS_CC,
   EZTRANS_EMAIL,
   EZTRANS_SENT_ACTION,
@@ -59,6 +62,9 @@ export function EzTransPanel({
   // What the server says it actually sent, so "did my edit get used?" is
   // answerable from the panel rather than from the 3PL's reply.
   const [sentDocs, setSentDocs] = useState<{ wording: string; packingList: string } | null>(null);
+  // What the server says it attached, so "did the worksheet go?" is answerable
+  // from the panel rather than from the broker.
+  const [sentFiles, setSentFiles] = useState<string[] | null>(null);
   const [showPreview, setShowPreview] = useState(false);
   // Null while the operator hasn't touched the wording — the email then simply
   // tracks the template and the live label details. Once they type, their text
@@ -130,6 +136,13 @@ export function EzTransPanel({
   const labelOnFile = !!row.label_pdf_path;
   const ready = !!carrier && !!tracking.trim() && (!!pdf || labelOnFile);
 
+  // UPS brokers its own US entries and needs a FIFRA worksheet with them, so
+  // one is built and attached on those bookings only. Decided by the same
+  // helper the edge function uses, so this cannot promise a document the send
+  // does not attach.
+  const worksheetGoes = needsPesticideWorksheet(carrier);
+  const attachments = attachmentFilenames(order.order_ref, carrier);
+
   const booking = useMemo(() => {
     if (!placement) return null;
     return buildEzTransBooking({
@@ -172,7 +185,8 @@ export function EzTransPanel({
 
   const handleSend = async () => {
     if (!ready) return;
-    setBusy(true); setError(null); setSendWarning(null); setSentFrom(null); setSentDocs(null);
+    setBusy(true); setError(null); setSendWarning(null);
+    setSentFrom(null); setSentDocs(null); setSentFiles(null);
     try {
       // Save first: the edge function reads the label off the queue row rather
       // than taking it from this form, so there is exactly one copy of the
@@ -198,12 +212,17 @@ export function EzTransPanel({
       setSentDocs(sent.wording && sent.packing_list
         ? { wording: sent.wording, packingList: sent.packing_list }
         : null);
+      setSentFiles(sent.attachments ?? null);
       await logAction(
         EZTRANS_SENT_ACTION,
         order.order_ref,
-        `Booking confirmation, packing list + ${carrier} label sent to ${EZTRANS_EMAIL} — ` +
+        `Booking confirmation, packing list + ${carrier} label ` +
+        `${worksheetGoes ? '+ UPS pesticide worksheet ' : ''}sent to ${EZTRANS_EMAIL} — ` +
         `serial ${placement.serial}, master carton ${placement.masterCarton ?? '—'}, ` +
-        `tracking ${tracking.trim()}${edited ? ' · wording edited for this order' : ''}` +
+        `tracking ${tracking.trim()}` +
+        `${sent.pesticide_worksheet === 'unsigned' ? ' · worksheet UNSIGNED' : ''}` +
+        `${sent.combined === false ? ' · label and packing list sent separately' : ''}` +
+        `${edited ? ' · wording edited for this order' : ''}` +
         `${packingEdited ? ' · packing list edited for this order' : ''}` +
         `${sent.sent_via === 'gmail'
             ? ` · sent from ${sent.from ?? 'the sender'} — in their Gmail Sent folder`
@@ -303,11 +322,15 @@ export function EzTransPanel({
               : edited || packingEdited
                 ? 'Show edited email + packing list'
                 : 'Preview / edit email + packing list'}</button>
-            {!ready && (
+            {!ready ? (
               <span className={styles.ezTransHint}>
                 Carrier, tracking number and the label PDF are all required before this can be sent.
               </span>
-            )}
+            ) : worksheetGoes ? (
+              <span className={styles.ezTransHint}>
+                UPS brokers this entry — the signed pesticide worksheet is attached too.
+              </span>
+            ) : null}
           </div>
         </li>
       </ol>
@@ -316,6 +339,10 @@ export function EzTransPanel({
         <div><dt>Serial No</dt><dd>{placement.serial}</dd></div>
         <div><dt>Master carton</dt><dd>{placement.masterCarton ?? '— (no pallet on record)'}</dd></div>
         <div><dt>Ship to</dt><dd>{order.customer_name}</dd></div>
+        {/* Named rather than counted: on a UPS booking a third document goes
+            to the broker, and an operator should not have to open the sent
+            mail to find out whether it did. */}
+        <div><dt>Attached</dt><dd>{attachments.join(', ')}</dd></div>
         {/* Named rather than implied: the 3PL's group address is on here at
             their own request, and the operator should be able to see who the
             booking reaches without opening the sent mail to find out. */}
@@ -325,6 +352,7 @@ export function EzTransPanel({
       {sentAt && (
         <div className={styles.ezTransSent}>
           ✓ Confirmation, packing list and label sent to {EZTRANS_EMAIL} at {new Date(sentAt).toLocaleString()}.
+          {sentFiles && <div>Attached: {sentFiles.join(', ')}</div>}
           {sentDocs && (
             <div>
               Packing list: {sentDocs.packingList === 'edited' ? 'your edit for this order' : 'the saved template'}
@@ -397,14 +425,15 @@ export function EzTransPanel({
                 />
               </label>
               <span className={styles.ezTransHint}>
-                The label is attached automatically. The packing list is edited
-                separately, below.
+                The label and the packing list are merged into one attached PDF
+                automatically{worksheetGoes ? ', and UPS shipments carry the pesticide worksheet too' : ''}.
+                The packing list is edited separately, below.
               </span>
             </div>
           ) : (
             <pre className={styles.ezTransPreview}>
               {`Subject: ${subjectValue}\n` +
-               `Attachments: shipping-label.pdf · packing-list.pdf\n\n` +
+               `Attachments: ${attachments.join(' · ')}\n\n` +
                bodyValue}
             </pre>
           )}
@@ -459,6 +488,27 @@ export function EzTransPanel({
             // Previews packingValue, not the template: an edit must be visible
             // here, since this is where an operator checks their work.
             <pre className={styles.ezTransPreview}>{packingListPreview(packingValue)}</pre>
+          )}
+
+          {worksheetGoes && (
+            <>
+              <div className={styles.ezTransPreviewHead}>
+                <span className={styles.ezTransPreviewLabel}>Attached UPS pesticide worksheet (PDF)</span>
+                <span className={styles.ezTransHint}>
+                  Built and signed on send. Not editable — it is a FIFRA
+                  declaration to CBP, so its wording is fixed in code.
+                </span>
+              </div>
+              <dl className={styles.ezTransFacts}>
+                {pesticideWorksheetSummary({
+                  orderRef: order.order_ref,
+                  serial: placement.serial,
+                  tracking: tracking.trim() || null,
+                }).map(f => (
+                  <div key={f.label}><dt>{f.label}</dt><dd>{f.value}</dd></div>
+                ))}
+              </dl>
+            </>
           )}
         </>
       )}

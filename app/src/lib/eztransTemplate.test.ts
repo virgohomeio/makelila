@@ -22,11 +22,18 @@ import {
   renderEzTransTemplate,
 } from '../../../supabase/functions/_shared/eztransTemplate.ts';
 
-const MIGRATION = Object.values(
-  import.meta.glob('../../../supabase/migrations/*_eztrans_booking_template.sql', {
+// Every migration that touches this template row, not just the one that
+// seeded it: the wording has been changed since (the label and the packing
+// list are one attachment now), and what matters is that the row a migrated
+// database ends up with is the built-in default — not which file put it there.
+const MIGRATION = Object.entries(
+  import.meta.glob('../../../supabase/migrations/*_eztrans_booking*.sql', {
     query: '?raw', import: 'default', eager: true,
   }) as Record<string, string>,
-)[0];
+)
+  .sort(([a], [b]) => a.localeCompare(b))
+  .map(([, sql]) => sql)
+  .join('\n');
 
 const ORDER: EzTransShipTo & { order_ref: string } = {
   order_ref: '#1184',
@@ -72,12 +79,12 @@ describe('the built-in default does not drift from the edge function copy', () =
   });
 });
 
-describe('the seed migration matches the built-in default', () => {
-  it('is in the repo', () => {
+describe('the migrations leave the row matching the built-in default', () => {
+  it('are in the repo', () => {
     expect(MIGRATION).toBeTruthy();
   });
 
-  it('seeds the same key and the same subject and body', () => {
+  it('leaves the same key and the same subject and body', () => {
     // The migration writes E'...' strings, so \n is an escape there and a real
     // newline here. Compare after undoing that.
     const unescape = (s: string) => s.replace(/\\n/g, '\n').replace(/''/g, "'");

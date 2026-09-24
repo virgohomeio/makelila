@@ -55,8 +55,7 @@ export const DEFAULT_EZTRANS_BODY =
   'Hello EZ Trans team,\n' +
   '\n' +
   'We are confirming that an order has been placed and the shipment has been ' +
-  'booked on Goorooship. Please fulfill it on your end. The packing list and ' +
-  'the shipping label are attached to this email.\n' +
+  'booked on Goorooship. Please fulfill it on your end. {{attachments_note}}\n' +
   '\n' +
   'CUSTOMER\n' +
   'Name: {{customer_name}}\n' +
@@ -75,7 +74,7 @@ export const DEFAULT_EZTRANS_BODY =
   'SHIPPING LABEL (attached)\n' +
   'Carrier: {{carrier}}\n' +
   'Tracking Number: {{tracking}}\n' +
-  'Please print the attached label and affix it to the carton.\n' +
+  'Please print the attached PDF and affix the shipping label to the carton.\n' +
   '\n' +
   'Order reference: {{order_ref}}\n' +
   '\n' +
@@ -165,8 +164,32 @@ export function packingListLines(rendered: string): PackingListLine[] {
 export const EZTRANS_TEMPLATE_VARIABLES = [
   'customer_name', 'customer_address', 'customer_email', 'customer_phone',
   'product_name', 'sku', 'serial', 'batch_lot', 'master_carton', 'quantity',
-  'carrier', 'tracking', 'order_ref',
+  'carrier', 'tracking', 'order_ref', 'attachments_note',
 ] as const;
+
+/** Does a booking on this carrier need the UPS pesticide worksheet?
+ *
+ *  UPS Supply Chain Solutions brokers its own US entries and will not act as
+ *  importer of record on one that prompts for an EPA-regulated pesticide or
+ *  pesticide device without a FIFRA worksheet on file. Nobody else asks for
+ *  one, so it rides along on UPS bookings only.
+ *
+ *  The one place that decides. Both the panel (which tells the operator what
+ *  is going out, and previews it) and the edge function (which builds and
+ *  attaches it) call this, so the preview and the email cannot disagree. */
+export function needsPesticideWorksheet(carrier: string | null | undefined): boolean {
+  return (carrier ?? '').trim().toLowerCase() === 'ups';
+}
+
+/** The {{attachments_note}} sentence: what is attached, in the body of the
+ *  email, so the 3PL knows to look for a second file on a UPS booking. */
+export function attachmentsNote(carrier: string | null | undefined): string {
+  const base = 'The shipping label and the packing list are attached together as one PDF — ' +
+    'the shipping label is the first page.';
+  return needsPesticideWorksheet(carrier)
+    ? `${base} The signed UPS pesticide worksheet for this entry is attached as a second PDF.`
+    : base;
+}
 
 /** Same substitution rule as lib/templates.ts renderTemplate: an unknown or
  *  empty variable is left standing as `{{name}}` rather than silently becoming
