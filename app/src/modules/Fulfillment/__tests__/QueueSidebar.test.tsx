@@ -162,4 +162,41 @@ describe('QueueSidebar', () => {
       expect(screen.getByText(/OVERDUE/)).toBeInTheDocument();
     });
   });
+
+  // The Shipped tab is a 100+ row history, not a work list. Ordered by order
+  // ref it read as noise; an operator looking one up knows roughly *when* it
+  // went, so the rail is bucketed by month with the newest at the top.
+  describe('shipped tab, by month', () => {
+    const june = mkRow({ id: 'qj', order_id: 'o1', step: 6, fulfilled_at: '2026-06-11T10:00:00Z' });
+    const sept = mkRow({ id: 'qs', order_id: 'o2', step: 6, fulfilled_at: '2026-09-02T10:00:00Z' });
+
+    const openShipped = (rows: FulfillmentQueueRow[]) => {
+      const { container } = render(<MemoryRouter><QueueSidebar
+        readyRows={[]} shippedRows={rows} orderLookup={orders}
+        selectedId={null} onSelect={vi.fn()} /></MemoryRouter>);
+      fireEvent.click(screen.getByRole('button', { name: /^shipped/i }));
+      return container;
+    };
+
+    it('heads each month and puts the newest one first', () => {
+      const container = openShipped([june, sept]);
+      const headings = Array.from(container.querySelectorAll('h3')).map(h => h.textContent);
+      expect(headings).toEqual(['September 20261', 'June 20261']);
+    });
+
+    it('lists the rows under the month they shipped in', () => {
+      const container = openShipped([june, sept]);
+      // Bob (#1002) shipped in September, Alice (#1001) in June.
+      const names = Array.from(container.querySelectorAll('h3, [class*="rowName"]'))
+        .map(el => el.textContent?.replace(/\d\/6$/, ''));
+      expect(names).toEqual(['September 20261', 'Bob', 'June 20261', 'Alice']);
+    });
+
+    it('leaves the ready tab ungrouped', () => {
+      const { container } = render(<MemoryRouter><QueueSidebar
+        readyRows={[row1]} shippedRows={[june]} orderLookup={orders}
+        selectedId={null} onSelect={vi.fn()} /></MemoryRouter>);
+      expect(container.querySelectorAll('h3')).toHaveLength(0);
+    });
+  });
 });

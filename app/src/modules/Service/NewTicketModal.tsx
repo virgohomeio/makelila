@@ -8,6 +8,10 @@ import {
   type Customer,
 } from '../../lib/customers';
 import { useUnits } from '../../lib/stock';
+import {
+  useTeamRoster, matchTeamMembers, teamUnits, holderMatchesMember, setTeamUnitHolder,
+  type TeamMember,
+} from '../../lib/team';
 import styles from './Service.module.css';
 
 /** The "New support ticket" dialog. Lived inside SupportTab until the ticket
@@ -15,7 +19,19 @@ import styles from './Service.module.css';
  *  the operator raising it is standing on the old ticket, not on the Support
  *  list. Kept in its own file rather than exported from SupportTab because
  *  SupportTab already imports TicketDetailPanel, and importing back the other
- *  way would close the cycle. */
+ *  way would close the cycle.
+ *
+ *  The subject can be a CUSTOMER or a TEAM MEMBER. It used to be a customer
+ *  only, so ticketing a colleague's LILA Pro meant giving them a customer
+ *  record — which is how Huayi Gao, Pedrum Amin, George Yin and Support LILA
+ *  ended up in public.customers, counted as customers by every rollup and
+ *  export. A team subject writes no customer_id and no Klaviyo event.
+ *  Spec: docs/superpowers/specs/2026-09-24-team-member-support-tickets-design.md */
+
+/** Who the ticket is about. */
+type Subject =
+  | { kind: 'customer'; customer: Customer }
+  | { kind: 'team'; member: TeamMember };
 
 export function NewTicketModal({
   customers, presetCustomer, presetSubject, presetDescription, presetUnitSerial,
@@ -33,12 +49,17 @@ export function NewTicketModal({
   onCreated: (t: ServiceTicket) => void;
 }) {
   const { units } = useUnits();
+  const { members } = useTeamRoster();
   const [subject, setSubject] = useState(presetSubject ?? '');
   const [description, setDescription] = useState(presetDescription ?? '');
   const [priority, setPriority] = useState<TicketPriority>('normal');
   const [customerSearch, setCustomerSearch] = useState('');
   // Pre-seed the customer when opened from a profile's "+ Add ticket".
-  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(presetCustomer ?? null);
+  const [picked, setPicked] = useState<Subject | null>(
+    presetCustomer ? { kind: 'customer', customer: presetCustomer } : null,
+  );
+  const selectedCustomer = picked?.kind === 'customer' ? picked.customer : null;
+  const selectedMember = picked?.kind === 'team' ? picked.member : null;
   const [resyncing, setResyncing] = useState(false);
   const [resyncMsg, setResyncMsg] = useState<string | null>(null);
 
@@ -78,6 +99,32 @@ export function NewTicketModal({
     setSerialAutoFilled(true);
   }, [selectedCustomer, units, unitSerial, serialAutoFilled]);
 
+  // The team's machines, and which of them are this member's. Twelve of the
+  // fifteen record no holder at all, so the picker offers a member's own units
+  // first and then the unclaimed ones — picking an unclaimed one records them
+  // as the holder, so the next ticket auto-fills. A customer's unit is never
+  // in this list.
+  const allTeamUnits = useMemo(() => teamUnits(units), [units]);
+  const memberUnits = useMemo(
+    () => (selectedMember ? allTeamUnits.filter(u => holderMatchesMember(u, selectedMember)) : []),
+    [allTeamUnits, selectedMember],
+  );
+  const unclaimedTeamUnits = useMemo(
+    () => allTeamUnits.filter(u => !(u.customer_name ?? '').trim()),
+    [allTeamUnits],
+  );
+
+  // Auto-fill a team member's serial the same way the customer path does, but
+  // only when exactly one unit already names them — with two, picking is the
+  // operator's call.
+  useEffect(() => {
+    if (!selectedMember) return;
+    if (unitSerial && !serialAutoFilled) return;
+    if (memberUnits.length !== 1) return;
+    setUnitSerial(memberUnits[0].serial);
+    setSerialAutoFilled(true);
+  }, [selectedMember, memberUnits, unitSerial, serialAutoFilled]);
+
   const matchedUnitCount = useMemo(() => {
     if (!selectedCustomer) return 0;
     const lcName = selectedCustomer.full_name.toLowerCase();
@@ -94,25 +141,57 @@ export function NewTicketModal({
     ).slice(0, 8);
   }, [customers, customerSearch]);
 
-  const canSubmit = subject.trim().length > 0 && selectedCustomer !== null && !submitting;
+  const teamCandidates = useMemo(
+    () => matchTeamMembers(members, customerSearch).slice(0, 8),
+    [members, customerSearch],
+  );
+
+  const canSubmit = subject.trim().length > 0 && picked !== null && !submitting;
 
   const submit = async () => {
-    if (!selectedCustomer) return;
+    if (!picked) return;
     setSubmitting(true);
     setError(null);
+    const serial = unitSerial.trim() || null;
     try {
-      const row = await createTicket({
+      if (picked.kind === 'team') {
+        const member = picked.member;
+        // Remember whose machine this is before the ticket is written, so a
+        // unit that was anonymous stops being anonymous even if the operator
+        // never comes back to this dialog.
+        const unit = serial ? allTeamUnits.find(u => u.serial === serial) : undefined;
+        if (unit && !holderMatchesMember(unit, member)) {
+          await setTeamUnitHolder(serial as string, member.display_name);
+        }
+        onCreated(await createTicket({
+          category: 'support',
+          subject: subject.trim(),
+          description: description.trim() || null,
+          priority,
+          // No customer record, by design: a colleague must not be counted as
+          // a customer. The roster address is what identifies them.
+          customer_id: null,
+          customer_name: member.display_name,
+          customer_email: member.email,
+          customer_phone: null,
+          unit_serial: serial,
+          is_team: true,
+        }));
+        return;
+      }
+
+      const customer = picked.customer;
+      onCreated(await createTicket({
         category: 'support',
         subject: subject.trim(),
         description: description.trim() || null,
         priority,
-        customer_id: selectedCustomer.id,
-        customer_name: selectedCustomer.full_name,
-        customer_email: selectedCustomer.email,
-        customer_phone: selectedCustomer.phone,
-        unit_serial: unitSerial.trim() || null,
-      });
-      onCreated(row);
+        customer_id: customer.id,
+        customer_name: customer.full_name,
+        customer_email: customer.email,
+        customer_phone: customer.phone,
+        unit_serial: serial,
+      }));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to create ticket');
       setSubmitting(false);
@@ -139,17 +218,27 @@ export function NewTicketModal({
             />
           </div>
           <div className={styles.modalRow}>
-            <label>Customer *</label>
-            {selectedCustomer ? (
+            <label>Subject *</label>
+            {picked ? (
               <div className={styles.modalSelected}>
-                <strong>{selectedCustomer.full_name}</strong>
+                <strong>
+                  {selectedMember ? selectedMember.display_name : selectedCustomer?.full_name}
+                </strong>
                 <span className={styles.muted}>
-                  {[selectedCustomer.email, selectedCustomer.phone, selectedCustomer.city]
-                    .filter(Boolean).join(' · ') || '—'}
+                  {selectedMember
+                    ? `team · ${selectedMember.email}`
+                    : [selectedCustomer?.email, selectedCustomer?.phone, selectedCustomer?.city]
+                        .filter(Boolean).join(' · ') || '—'}
                 </span>
                 <button
                   className={styles.modalLinkBtn}
-                  onClick={() => { setSelectedCustomer(null); setCustomerSearch(''); }}
+                  onClick={() => {
+                    setPicked(null);
+                    setCustomerSearch('');
+                    // The serial belonged to whoever was selected; keeping it
+                    // would file the next subject's ticket against their machine.
+                    if (serialAutoFilled) { setUnitSerial(''); setSerialAutoFilled(false); }
+                  }}
                 >change</button>
               </div>
             ) : (
@@ -161,13 +250,13 @@ export function NewTicketModal({
                   onChange={e => setCustomerSearch(e.target.value)}
                   placeholder="Type a name, email, or phone…"
                 />
-                {candidates.length > 0 && (
+                {(candidates.length > 0 || teamCandidates.length > 0) && (
                   <div className={styles.modalDropdown}>
                     {candidates.map(c => (
                       <button
                         key={c.id}
                         type="button"
-                        onClick={() => setSelectedCustomer(c)}
+                        onClick={() => setPicked({ kind: 'customer', customer: c })}
                         className={styles.modalDropItem}
                       >
                         <strong>{c.full_name}</strong>
@@ -176,9 +265,20 @@ export function NewTicketModal({
                         </span>
                       </button>
                     ))}
+                    {teamCandidates.map(m => (
+                      <button
+                        key={m.email}
+                        type="button"
+                        onClick={() => setPicked({ kind: 'team', member: m })}
+                        className={styles.modalDropItem}
+                      >
+                        <strong>{m.display_name}</strong>
+                        <span className={styles.muted}>team · {m.email}</span>
+                      </button>
+                    ))}
                   </div>
                 )}
-                {customerSearch.trim() && candidates.length === 0 && (
+                {customerSearch.trim() && candidates.length === 0 && teamCandidates.length === 0 && (
                   <div style={{ marginTop: 4, display: 'flex', flexDirection: 'column', gap: 4 }}>
                     <span className={styles.muted} style={{ fontSize: 11 }}>
                       No matching customer. If you just received their message, the HubSpot sync may be a few minutes behind.
@@ -223,14 +323,43 @@ export function NewTicketModal({
               </select>
             </div>
             <div className={styles.modalRow}>
-              <label>Unit serial</label>
-              <input
-                type="text"
-                className={styles.modalInput}
-                value={unitSerial}
-                onChange={e => { setUnitSerial(e.target.value); setSerialAutoFilled(false); }}
-                placeholder="LL01-… (optional)"
-              />
+              <label htmlFor="new-ticket-serial">Unit serial</label>
+              {selectedMember ? (
+                <select
+                  id="new-ticket-serial"
+                  className={styles.modalSelect}
+                  value={unitSerial}
+                  onChange={e => { setUnitSerial(e.target.value); setSerialAutoFilled(false); }}
+                >
+                  <option value="">— none —</option>
+                  {memberUnits.map(u => (
+                    <option key={u.serial} value={u.serial}>
+                      {u.serial} · {u.batch}
+                    </option>
+                  ))}
+                  {unclaimedTeamUnits.map(u => (
+                    <option key={u.serial} value={u.serial}>
+                      {u.serial} · {u.batch} · no holder on file
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  id="new-ticket-serial"
+                  type="text"
+                  className={styles.modalInput}
+                  value={unitSerial}
+                  onChange={e => { setUnitSerial(e.target.value); setSerialAutoFilled(false); }}
+                  placeholder="LL01-… (optional)"
+                />
+              )}
+              {selectedMember && unitSerial
+                && !memberUnits.some(u => u.serial === unitSerial) && (
+                <span className={styles.muted} style={{ fontSize: 10, marginTop: 2 }}>
+                  No holder is recorded for this machine — creating the ticket
+                  files it to {selectedMember.display_name}.
+                </span>
+              )}
               {serialAutoFilled && matchedUnitCount > 0 && (
                 <span className={styles.muted} style={{ fontSize: 10, marginTop: 2 }}>
                   Auto-filled from {selectedCustomer?.full_name}'s {matchedUnitCount === 1 ? 'shipped unit' : `most recent of ${matchedUnitCount} shipped units`} — edit to override.

@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { FulfillmentQueueRow } from '../../../lib/fulfillment';
 import type { Order, OrderStatus } from '../../../lib/orders';
 import { replacementItemTags } from '../../../lib/replacementTags';
 import { refundFlagLabel, refundFlagTitle, type RefundFlag } from '../../../lib/refundedOrders';
 import { shippedMarkLabel, shippedMarkTitle, type ShippedMark } from '../../../lib/shippedOrders';
+import { groupShippedByMonth } from './shippedMonths';
 import { useNavigate } from 'react-router-dom';
 import { Button, EmptyState } from '../../../components/ui';
 import styles from '../Fulfillment.module.css';
@@ -90,6 +91,77 @@ export function QueueSidebar({
   const [tab, setTab] = useState<'ready' | 'shipped'>('ready');
   const navigate = useNavigate();
   const rows = tab === 'ready' ? readyRows : shippedRows;
+  // Ready to ship is a work list and stays in pick order. Shipped is history:
+  // month headings, newest first. See ./shippedMonths.
+  const shippedGroups = useMemo(
+    () => groupShippedByMonth(shippedRows, shippedMarks),
+    [shippedRows, shippedMarks],
+  );
+
+  function renderRow(r: FulfillmentQueueRow) {
+    const o = orderLookup.get(r.order_id);
+    const shippedMark = shippedMarks?.get(r.id) ?? null;
+    // A row that is no longer owed a box reads as done even though its
+    // step never got there — otherwise it lands in Shipped still shouting
+    // "OVERDUE by 91d" about a box the customer has had since June.
+    const fulfilled = r.step === 6 || !!shippedMark;
+    const overdue = !fulfilled && r.due_date && new Date(r.due_date) < new Date(new Date().setHours(0,0,0,0));
+    const paused = !fulfilled && o?.status && o.status !== 'approved';
+    const cls = [
+      styles.queueRow,
+      r.id === selectedId ? styles.selected : '',
+      overdue ? styles.overdue : '',
+      // Only fade as fulfilled in the ready tab (where they'd appear mixed in);
+      // in the shipped tab every row is fulfilled so no need to de-emphasise.
+      fulfilled && tab === 'ready' ? styles.fulfilled : '',
+      r.priority && !fulfilled ? styles.priority : '',
+      paused ? styles.paused : '',
+    ].filter(Boolean).join(' ');
+    const refundFlag = refundFlags?.get(r.order_id) ?? null;
+    const pauseBadge = paused
+      ? (o?.status === 'flagged' ? '⚑ FLAGGED' : o?.status === 'held' ? '⏸ HELD' : '• PAUSED')
+      : null;
+    return (
+      <div key={r.id} className={cls} onClick={() => onSelect(r.id)} role="button" tabIndex={0}>
+        <div className={styles.rowName}>
+          {r.priority && !fulfilled && <span className={styles.priorityBadge} title="Priority — expedite">⭐</span>}
+          {o?.customer_name ?? r.order_id}
+          {o?.kind === 'replacement' && (
+            <span className="replBadge" title="Warranty / service replacement — not a sale">
+              {replacementBadgeLabel(o)}
+            </span>
+          )}
+          <span className={styles.stepBadge}>{r.step}/6</span>
+        </div>
+        <div className={styles.rowMeta}>
+          {o?.order_ref ?? '—'} · {o?.city ?? ''} · {o?.country ?? ''}
+        </div>
+        {shippedMark && (
+          <div
+            className={`${styles.refundBadge} ${styles.refundBadgeSoft}`}
+            title={shippedMarkTitle(shippedMark)}
+          >
+            {shippedMarkLabel(shippedMark)}
+          </div>
+        )}
+        {refundFlag && (
+          <div
+            className={`${styles.refundBadge} ${refundFlag.level === 'order' ? '' : styles.refundBadgeSoft}`}
+            title={refundFlagTitle(refundFlag)}
+          >
+            {refundFlagLabel(refundFlag)}
+          </div>
+        )}
+        {pauseBadge ? (
+          <div className={styles.pauseBadge}>{pauseBadge}</div>
+        ) : (
+          <div className={dueClass(r.due_date, fulfilled)}>
+            {dueLabel(r.due_date, fulfilled)}
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <aside className={styles.sidebar}>
@@ -123,70 +195,21 @@ export function QueueSidebar({
             body="Orders move here as they leave the dock."
           />
         )
-      ) : rows.map(r => {
-        const o = orderLookup.get(r.order_id);
-        const shippedMark = shippedMarks?.get(r.id) ?? null;
-        // A row that is no longer owed a box reads as done even though its
-        // step never got there — otherwise it lands in Shipped still shouting
-        // "OVERDUE by 91d" about a box the customer has had since June.
-        const fulfilled = r.step === 6 || !!shippedMark;
-        const overdue = !fulfilled && r.due_date && new Date(r.due_date) < new Date(new Date().setHours(0,0,0,0));
-        const paused = !fulfilled && o?.status && o.status !== 'approved';
-        const cls = [
-          styles.queueRow,
-          r.id === selectedId ? styles.selected : '',
-          overdue ? styles.overdue : '',
-          // Only fade as fulfilled in the ready tab (where they'd appear mixed in);
-          // in the shipped tab every row is fulfilled so no need to de-emphasise.
-          fulfilled && tab === 'ready' ? styles.fulfilled : '',
-          r.priority && !fulfilled ? styles.priority : '',
-          paused ? styles.paused : '',
-        ].filter(Boolean).join(' ');
-        const refundFlag = refundFlags?.get(r.order_id) ?? null;
-        const pauseBadge = paused
-          ? (o?.status === 'flagged' ? '⚑ FLAGGED' : o?.status === 'held' ? '⏸ HELD' : '• PAUSED')
-          : null;
-        return (
-          <div key={r.id} className={cls} onClick={() => onSelect(r.id)} role="button" tabIndex={0}>
-            <div className={styles.rowName}>
-              {r.priority && !fulfilled && <span className={styles.priorityBadge} title="Priority — expedite">⭐</span>}
-              {o?.customer_name ?? r.order_id}
-              {o?.kind === 'replacement' && (
-                <span className="replBadge" title="Warranty / service replacement — not a sale">
-                  {replacementBadgeLabel(o)}
-                </span>
-              )}
-              <span className={styles.stepBadge}>{r.step}/6</span>
-            </div>
-            <div className={styles.rowMeta}>
-              {o?.order_ref ?? '—'} · {o?.city ?? ''} · {o?.country ?? ''}
-            </div>
-            {shippedMark && (
-              <div
-                className={`${styles.refundBadge} ${styles.refundBadgeSoft}`}
-                title={shippedMarkTitle(shippedMark)}
-              >
-                {shippedMarkLabel(shippedMark)}
-              </div>
-            )}
-            {refundFlag && (
-              <div
-                className={`${styles.refundBadge} ${refundFlag.level === 'order' ? '' : styles.refundBadgeSoft}`}
-                title={refundFlagTitle(refundFlag)}
-              >
-                {refundFlagLabel(refundFlag)}
-              </div>
-            )}
-            {pauseBadge ? (
-              <div className={styles.pauseBadge}>{pauseBadge}</div>
-            ) : (
-              <div className={dueClass(r.due_date, fulfilled)}>
-                {dueLabel(r.due_date, fulfilled)}
-              </div>
-            )}
+      ) : tab === 'ready' ? (
+        readyRows.map(renderRow)
+      ) : (
+        shippedGroups.map(g => (
+          <div key={g.key || 'undated'} className={styles.monthGroup}>
+            {/* Sticky so the month you are scrolling through stays named — the
+                tab is 100+ rows deep and the heading is the only landmark. */}
+            <h3 className={styles.monthHeading}>
+              {g.label}
+              <span className={styles.monthCount}>{g.rows.length}</span>
+            </h3>
+            {g.rows.map(renderRow)}
           </div>
-        );
-      })}
+        ))
+      )}
     </aside>
   );
 }

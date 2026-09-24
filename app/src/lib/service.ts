@@ -956,6 +956,11 @@ export type NewTicketInput = {
   customer_email?: string | null;
   customer_phone?: string | null;
   unit_serial?: string | null;
+  /** The subject is a colleague, not a customer (see lib/team.ts). Suppresses
+   *  the Klaviyo event below — a ticket raised for a team member must not file
+   *  them as a marketing profile. `customer_id` is null on these; the roster
+   *  address in `customer_email` is what identifies them. */
+  is_team?: boolean;
 };
 
 export async function createTicket(input: NewTicketInput): Promise<ServiceTicket> {
@@ -979,7 +984,12 @@ export async function createTicket(input: NewTicketInput): Promise<ServiceTicket
   const row = data as ServiceTicket;
   await logAction('ticket_created', row.id, `${row.ticket_number} ${input.subject}`,
     { entityType: 'ticket', entityId: row.id, unitSerial: input.unit_serial ?? undefined },
-    { klaviyoEvent: 'Support Ticket Opened', ...(input.customer_email ? { klaviyoEmail: input.customer_email } : {}) });
+    // A team member's ticket is logged like any other but never leaves the
+    // building: no Klaviyo event, so a colleague's work address can't be
+    // created as a marketing profile by raising a ticket about their machine.
+    input.is_team
+      ? undefined
+      : { klaviyoEvent: 'Support Ticket Opened', ...(input.customer_email ? { klaviyoEmail: input.customer_email } : {}) });
   return row;
 }
 

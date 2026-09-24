@@ -90,9 +90,12 @@ export default function Queue() {
     // Moved, not hidden: the row still has an order behind it that someone has
     // to close out, and Shipped is where they will go looking for it.
     const alreadyShipped = ready.filter(r => shippedMarks.has(r.id));
+    // Left unsorted on purpose: the sidebar buckets this tab by the month each
+    // box went out and orders it newest-first (queue/shippedMonths.ts). Sorting
+    // by order ref here only to have it thrown away read like the real order.
     return {
       readyRows: readySorted,
-      shippedRows: [...fulfilled, ...alreadyShipped].sort(byRef),
+      shippedRows: [...fulfilled, ...alreadyShipped],
     };
   }, [ready, fulfilled, orderLookup, shippedMarks]);
 

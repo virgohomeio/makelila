@@ -117,6 +117,44 @@
   border-bottom: 2px solid var(--color-ink);
 }
 
+/* Month buckets on the Shipped tab. Ready to ship is a short work list and
+   stays flat; Shipped is 100+ rows of history, so it is cut into months with
+   the newest at the top and each heading pinned while you scroll past it. */
+.monthGroup {
+  display: flex;
+  flex-direction: column;
+}
+
+.monthHeading {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin: 0;
+  /* Opaque, and the sidebar's own ground rather than --color-raised: white is
+     what a *selected* row wears here, and a heading must not look picked. */
+  padding: var(--space-2) var(--space-4);
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+  font-size: var(--font-size-meta);
+  font-weight: 600;
+  color: var(--color-ink-muted);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.monthCount {
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--font-numeric);
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--color-ink-faint);
+}
+
 /* A queue row. Selection is ink, not red: which row you are reading is
    state, and the accent is reserved for the action you can take on it.
    Condition markers — priority, paused, overdue — keep their own colours,
