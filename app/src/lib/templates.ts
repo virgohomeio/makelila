@@ -236,10 +236,26 @@ export function renderTemplate(template: string, vars: Record<string, string | u
 
 // ---------- mutations ----------
 
-export async function updateTemplate(id: string, patch: Partial<Pick<EmailTemplate, 'name' | 'description' | 'subject' | 'body' | 'category' | 'active'>>): Promise<void> {
+export async function updateTemplate(id: string, patch: Partial<Pick<EmailTemplate, 'name' | 'description' | 'subject' | 'body' | 'category' | 'active' | 'variables'>>): Promise<void> {
   const { error } = await supabase.from('email_templates').update(patch).eq('id', id);
   if (error) throw error;
   await logAction('template_updated', id, Object.keys(patch).join(', '));
+}
+
+/** Create a template row. Used when a surface wants to persist wording for a
+ *  key that was never seeded — saving from Step 5 on a database where the
+ *  shipment-confirmation migration has not run, for instance. */
+export async function createTemplate(input: Pick<EmailTemplate,
+  'key' | 'name' | 'category' | 'subject' | 'body'
+> & { description?: string; variables?: string[] }): Promise<void> {
+  const { error } = await supabase.from('email_templates').insert({
+    key: input.key, name: input.name, category: input.category,
+    description: input.description ?? null,
+    subject: input.subject, body: input.body,
+    variables: input.variables ?? [],
+  });
+  if (error) throw error;
+  await logAction('template_created', input.key, input.name);
 }
 
 export async function sendTemplate(input: {

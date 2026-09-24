@@ -6,18 +6,22 @@ import {
   type FulfillmentQueueRow,
 } from '../../../lib/fulfillment';
 import { markOrderShipped } from '../../../lib/orders';
-import { useEmailTemplate, updateTemplate } from '../../../lib/templates';
+import { useEmailTemplate, updateTemplate, createTemplate } from '../../../lib/templates';
+import {
+  SHIPMENT_EMAIL_DEFAULT,
+  SHIPMENT_EMAIL_VARIABLES,
+  unsupportedVariables,
+} from '../../../lib/shipmentEmailTemplate';
 import { StepBlockers } from './StepBlockers';
 import styles from '../Fulfillment.module.css';
 
-/** The Step-5 body is no longer hardcoded here. It is rendered from the
- *  'shipment_confirmation' row in email_templates — the same row the
- *  send-fulfillment-email edge function renders — so the preview and the
- *  email that actually goes out cannot drift apart.
+/** Step 5 renders SHIPMENT_EMAIL_DEFAULT unless the stored
+ *  'shipment_confirmation' row overrides it, and sends exactly what is on
+ *  screen — so the draft and the email cannot drift apart.
  *
- *  The operator can edit the rendered subject/body in place. An edit applies to
- *  that one send unless they also press "Save as default", which writes the
- *  edit back to the template for every shipment after it. */
+ *  The operator can edit the subject/body in place. An edit applies to that one
+ *  send unless they also press "Save as default", which stores it for every
+ *  shipment after it. */
 const TEMPLATE_KEY = 'shipment_confirmation';
 
 export function StepEmail({
@@ -35,8 +39,17 @@ export function StepEmail({
   const { template, loading: tplLoading, refresh: refreshTemplate } = useEmailTemplate(TEMPLATE_KEY);
 
   const vars = useMemo(() => shipmentEmailVars(row, order), [row, order]);
-  const baseSubject = template ? renderShipmentEmail(template.subject, vars) : '';
-  const baseBody = template ? renderShipmentEmail(template.body, vars) : '';
+
+  // A stored row wins only if this renderer can actually fill every
+  // placeholder in it. The row seeded in May declares {{calendly_url}}, which
+  // nothing supplies any more — rendering it would put a literal
+  // "{{calendly_url}}" in the customer's email, so the built-in default is
+  // used instead and the operator is told why.
+  const staleVars = template ? unsupportedVariables(template) : [];
+  const source = template && staleVars.length === 0 ? template : SHIPMENT_EMAIL_DEFAULT;
+
+  const baseSubject = renderShipmentEmail(source.subject, vars);
+  const baseBody = renderShipmentEmail(source.body, vars);
 
   // null = untouched, so the fields keep tracking the template as it loads or
   // changes underneath. A string means the operator has typed something.
@@ -49,12 +62,12 @@ export function StepEmail({
   const dirty = (subjectEdit !== null && subjectEdit !== baseSubject)
     || (bodyEdit !== null && bodyEdit !== baseBody);
 
-  const canSend = !!order.customer_email && !!template;
+  // Sending never depends on the stored row: the default below always renders.
+  const canSend = !!order.customer_email;
   // A customer with no email on file blocks this step with nothing on screen
   // to say so — the operator has to go add one in Customers first.
   const blockers: string[] = [];
   if (!order.customer_email) blockers.push('an email address on this customer');
-  if (!template && !tplLoading) blockers.push(`the '${TEMPLATE_KEY}' email template (missing from the database)`);
   if (shippingCost.trim() === '') blockers.push('the actual shipping cost');
   const alreadySent = !!row.email_sent_at;
 
@@ -69,9 +82,10 @@ export function StepEmail({
     setBusy(true); setError(null);
     try {
       await markOrderShipped(order.id, n, 'CAD');
-      // Only send overrides when the operator actually changed something, so
-      // an untouched send stays a pure render of the stored template.
-      await sendFulfillmentEmail(row.id, dirty ? { subject, body } : undefined);
+      // The rendered text always travels with the request. The edge function
+      // has no copy of the wording of its own, so what is on screen here is
+      // exactly what Resend is handed.
+      await sendFulfillmentEmail(row.id, { subject, body, edited: dirty });
     }
     catch (e) { setError((e as Error).message); }
     finally { setBusy(false); }
@@ -81,13 +95,21 @@ export function StepEmail({
    *  out for their {{placeholders}} first — saving "Hi Juanita," as the default
    *  would greet every future customer by this one's name. */
   const handleSaveDefault = async () => {
-    if (!template) return;
     if (saveState !== 'confirm') { setSaveState('confirm'); return; }
     setSaveState('saving'); setError(null);
     try {
-      await updateTemplate(template.id, {
-        subject: unrender(subject, vars, template.subject),
-        body: unrender(body, vars, template.body),
+      const patch = {
+        subject: unrender(subject, vars, source.subject),
+        body: unrender(body, vars, source.body),
+      };
+      // Updating a stale row replaces the placeholders it used to declare, so
+      // saving is also how an operator repairs one without waiting on a
+      // migration. If the row was never seeded at all, create it.
+      if (template) await updateTemplate(template.id, { ...patch, variables: [...SHIPMENT_EMAIL_VARIABLES] });
+      else await createTemplate({
+        key: TEMPLATE_KEY, name: 'LILA has shipped', category: 'fulfillment',
+        description: 'Step-5 shipment confirmation. Saved from the Fulfillment queue.',
+        ...patch, variables: [...SHIPMENT_EMAIL_VARIABLES],
       });
       // This hook has no realtime subscription, so without the refetch the
       // fields would snap back to the pre-save wording the moment the local
@@ -107,15 +129,16 @@ export function StepEmail({
     <div>
       <h3 style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>Send the shipment-confirmation email</h3>
 
-      {tplLoading && <div style={{ fontSize: 11, color: 'var(--color-ink-subtle)' }}>Loading the template…</div>}
-      {!tplLoading && !template && (
-        <div style={{ fontSize: 11, color: 'var(--color-error)', marginBottom: 6 }}>
-          The '{TEMPLATE_KEY}' email template is missing from the database — migration
-          20260923120000 has not been applied. Nothing can be sent until it is.
+      {tplLoading && <div style={{ fontSize: 11, color: 'var(--color-ink-subtle)' }}>Loading the saved wording…</div>}
+      {!tplLoading && staleVars.length > 0 && (
+        <div style={{ fontSize: 10, color: 'var(--color-ink-subtle)', marginBottom: 6 }}>
+          Showing the built-in wording. The saved template still uses{' '}
+          {staleVars.map(v => `{{${v}}}`).join(', ')}, which this step can no longer fill.
+          Press “Save as default” after any edit to replace it.
         </div>
       )}
 
-      {template && (
+      {!tplLoading && (
         <>
           <div style={{ fontSize: 10, color: 'var(--color-ink-subtle)', marginBottom: 4 }}>
             From: VCycene Team &lt;support@lilacomposter.com&gt; · To: {order.customer_email ?? '<no email>'}

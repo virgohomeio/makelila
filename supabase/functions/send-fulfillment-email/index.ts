@@ -61,15 +61,19 @@ async function handle(req: Request): Promise<Response> {
     );
   }
 
-  // subject_override / body_override carry an operator's per-send edit from
-  // Step 5. When present they are sent verbatim — already rendered client-side
-  // against the same template this function would otherwise render itself.
-  const body = await req.json() as {
+  // `subject`/`body` are the rendered text exactly as the operator saw it in
+  // Step 5, sent verbatim. This function keeps NO copy of the wording: the
+  // default lives in app/src/lib/shipmentEmailTemplate.ts so there is only one
+  // of it. When they are absent the stored email_templates row is rendered as
+  // a fallback, and if that row is unusable the send is refused rather than
+  // guessed at. `edited` only annotates the audit row.
+  const input = await req.json() as {
     queue_id?: string;
-    subject_override?: string;
-    body_override?: string;
+    subject?: string;
+    body?: string;
+    edited?: boolean;
   };
-  if (!body.queue_id) {
+  if (!input.queue_id) {
     return new Response(JSON.stringify({ error: 'queue_id required' }), {
       status: 400, headers: { ...corsHeaders, 'content-type': 'application/json' },
     });
@@ -79,7 +83,7 @@ async function handle(req: Request): Promise<Response> {
   const { data: q, error: qErr } = await admin
     .from('fulfillment_queue')
     .select('*')
-    .eq('id', body.queue_id)
+    .eq('id', input.queue_id)
     .single<QueueRow>();
   if (qErr || !q) {
     return new Response(JSON.stringify({ error: 'queue row not found' }), {
@@ -131,29 +135,6 @@ async function handle(req: Request): Promise<Response> {
       `Starter Tracking Number: ${q.starter_tracking_num}\n`
     : '';
 
-  // The body used to be hardcoded here AND in the Step-5 preview, two copies
-  // that drifted. It now comes from the 'shipment_confirmation' row in
-  // email_templates, which the preview renders too and an operator can edit.
-  const { data: tpl, error: tplErr } = await admin
-    .from('email_templates')
-    .select('key, subject, body, active')
-    .eq('key', 'shipment_confirmation')
-    .maybeSingle<{ key: string; subject: string; body: string; active: boolean }>();
-  // Hard-fail rather than falling back to a stale hardcoded copy: a silent
-  // fallback would send wording nobody can see or edit in the app.
-  if (tplErr || !tpl) {
-    return new Response(
-      JSON.stringify({ error: "email template 'shipment_confirmation' not found \u2014 run migration 20260923120000" }),
-      { status: 500, headers: { ...corsHeaders, 'content-type': 'application/json' } },
-    );
-  }
-  if (!tpl.active) {
-    return new Response(
-      JSON.stringify({ error: "email template 'shipment_confirmation' is inactive \u2014 re-activate it in Templates" }),
-      { status: 409, headers: { ...corsHeaders, 'content-type': 'application/json' } },
-    );
-  }
-
   const vars: Record<string, string> = {
     customer_first_name: firstName,
     order_ref: order.order_ref,
@@ -163,8 +144,34 @@ async function handle(req: Request): Promise<Response> {
     starter_block: starterBlock,
   };
 
-  const renderedSubject = render(tpl.subject, vars);
-  const text = render(tpl.body, vars);
+  // Normally the caller sends the rendered text. The stored template is only
+  // read when it does not — a fallback for any non-UI caller.
+  let renderedSubject = input.subject?.trim() ?? '';
+  let text = input.body?.trim() ?? '';
+  if (!renderedSubject || !text) {
+    const { data: tpl } = await admin
+      .from('email_templates')
+      .select('subject, body, active')
+      .eq('key', 'shipment_confirmation')
+      .maybeSingle<{ subject: string; body: string; active: boolean }>();
+    if (!tpl || !tpl.active) {
+      return new Response(
+        JSON.stringify({ error: "no subject/body supplied and the 'shipment_confirmation' template is missing or inactive" }),
+        { status: 409, headers: { ...corsHeaders, 'content-type': 'application/json' } },
+      );
+    }
+    renderedSubject = renderedSubject || render(tpl.subject, vars);
+    text = text || render(tpl.body, vars);
+    // A stored row that still names variables this function cannot supply
+    // would put a literal {{placeholder}} in a customer's inbox.
+    const leftover = [...`${renderedSubject}\n${text}`.matchAll(/\{\{\s*(\w+)\s*\}\}/g)].map(m => m[1]);
+    if (leftover.length > 0) {
+      return new Response(
+        JSON.stringify({ error: `stored template leaves ${[...new Set(leftover)].join(', ')} unfilled \u2014 re-save it from Step 5` }),
+        { status: 409, headers: { ...corsHeaders, 'content-type': 'application/json' } },
+      );
+    }
+  }
 
   // Testing override: if EMAIL_TEST_RECIPIENT is set, redirect every send to
   // that address instead of the real customer. Subject gets a [TEST → <real>]
@@ -173,26 +180,23 @@ async function handle(req: Request): Promise<Response> {
   const testRecipient = Deno.env.get('EMAIL_TEST_RECIPIENT');
   const realTo = order.customer_email;
   const to = testRecipient || realTo;
-  // An operator's Step-5 edit wins over the rendered template.
-  const finalSubject = body.subject_override?.trim() || renderedSubject;
-  const finalBody = body.body_override?.trim() || text;
-  const subject = testRecipient ? `[TEST → ${realTo}] ${finalSubject}` : finalSubject;
+  const subject = testRecipient ? `[TEST → ${realTo}] ${renderedSubject}` : renderedSubject;
   const emailText = testRecipient
     ? `*** TEST MODE — this email would have been sent to ${realTo} ***\n` +
       `*** EMAIL_TEST_RECIPIENT is set on the edge function; unset to go live ***\n\n` +
-      finalBody
-    : finalBody;
+      text
+    : text;
 
   // Log the send up front so there is an audit row even if Resend errors.
   // Matters more now the body is operator-editable: the template no longer
   // tells you what a given customer actually received.
   const { data: logRow } = await admin.from('email_messages').insert({
-    template_key: tpl.key,
+    template_key: 'shipment_confirmation',
     recipient_email: realTo,
     recipient_name: order.customer_name,
     subject,
     body: emailText,
-    variables: { ...vars, edited_by_operator: body.body_override ? 'yes' : 'no' },
+    variables: { ...vars, edited_by_operator: input.edited ? 'yes' : 'no' },
     status: 'queued',
     sent_by: _caller.user_id,
   }).select('id').maybeSingle<{ id: string }>();
@@ -245,7 +249,7 @@ async function handle(req: Request): Promise<Response> {
       fulfilled_at: now,
       fulfilled_by: userId,
     })
-    .eq('id', body.queue_id);
+    .eq('id', input.queue_id);
   if (upErr) {
     return new Response(JSON.stringify({ error: `db update failed: ${upErr.message}` }), {
       status: 500, headers: { ...corsHeaders, 'content-type': 'application/json' },

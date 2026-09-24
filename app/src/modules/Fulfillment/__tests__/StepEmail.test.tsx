@@ -1,42 +1,41 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
-const { sendEmailMock, markOrderShippedMock, updateTemplateMock, refreshMock, templateRow } = vi.hoisted(() => ({
+const { sendEmailMock, markOrderShippedMock, updateTemplateMock, createTemplateMock, refreshMock, tplState } = vi.hoisted(() => ({
   sendEmailMock: vi.fn(() => Promise.resolve({ email_id: 're_123' })),
   markOrderShippedMock: vi.fn(() => Promise.resolve()),
   updateTemplateMock: vi.fn(() => Promise.resolve()),
+  createTemplateMock: vi.fn(() => Promise.resolve()),
   refreshMock: vi.fn(() => Promise.resolve()),
-  // Mirrors the row seeded by migration 20260923120000.
-  templateRow: {
-    id: 'tpl-1', key: 'shipment_confirmation', name: 'LILA has shipped',
-    category: 'fulfillment' as const, description: null,
-    subject: 'Your LILA has officially shipped! 🎉 ({{order_ref}})',
-    body: [
-      'Hi {{customer_first_name}},',
-      '',
-      'Carrier: {{carrier}}',
-      '',
-      'Tracking Number: {{tracking_num}}',
-      '',
-      'Tracking Link: {{tracking_url}}',
-      '{{starter_block}}',
-      'Book a weekday session (business hours):',
-      'https://calendly.com/lila-ed/intro-call',
-      '',
-      'Evenings or weekends work better? Book here:',
-      'https://calendly.com/lila-ed/lila-onboarding-with-danica-patrik',
-    ].join('\n'),
-    variables: [], channel: 'email' as const, active: true,
-    created_at: '2026-09-23T00:00:00Z', updated_at: '2026-09-23T00:00:00Z',
-  },
+  // Swapped per test: null (never seeded), the stale May row, or a good row.
+  tplState: { current: null as null | Record<string, unknown> },
 }));
+
+/** The row actually live in production on 2026-09-23: it declares
+ *  {{calendly_url}}, which the Step-5 renderer does not supply. */
+const staleRow = {
+  id: 'tpl-1', key: 'shipment_confirmation', name: 'LILA has shipped',
+  category: 'fulfillment' as const, description: null,
+  subject: 'Your LILA has officially shipped! 🎉 ({{order_ref}})',
+  body: 'Hi {{customer_first_name}},\n\nBook a session here: {{calendly_url}}.',
+  variables: ['calendly_url'], channel: 'email' as const, active: true,
+  created_at: '2026-05-13T00:00:00Z', updated_at: '2026-05-13T00:00:00Z',
+};
+
+const goodRow = {
+  ...staleRow,
+  body: 'Hi {{customer_first_name}},\n\nTracking Link: {{tracking_url}}\n{{starter_block}}\nOperator wording.',
+  variables: ['customer_first_name', 'tracking_url', 'starter_block'],
+  updated_at: '2026-09-24T00:00:00Z',
+};
 
 vi.mock('../../../lib/templates', async () => {
   const actual = await vi.importActual<typeof import('../../../lib/templates')>('../../../lib/templates');
   return {
     ...actual,
-    useEmailTemplate: () => ({ template: templateRow, loading: false, refresh: refreshMock }),
+    useEmailTemplate: () => ({ template: tplState.current, loading: false, refresh: refreshMock }),
     updateTemplate: updateTemplateMock,
+    createTemplate: createTemplateMock,
   };
 });
 
@@ -77,7 +76,10 @@ const orderNoEmail  = { id: 'o-ne', customer_name: 'Cory C',     customer_email:
 describe('StepEmail', () => {
   beforeEach(() => {
     sendEmailMock.mockClear(); markOrderShippedMock.mockClear();
-    updateTemplateMock.mockClear(); refreshMock.mockClear();
+    updateTemplateMock.mockClear(); createTemplateMock.mockClear(); refreshMock.mockClear();
+    // Default: the stale row that shipped to production — the built-in
+    // wording must win over it.
+    tplState.current = { ...staleRow };
   });
 
   it('Send disabled until shipping cost is entered', () => {
@@ -140,7 +142,10 @@ describe('StepEmail', () => {
     render(<StepEmail row={rowBase} order={orderCA} />);
     fireEvent.change(screen.getByPlaceholderText('42.75'), { target: { value: '42.75' } });
     fireEvent.click(screen.getByRole('button', { name: /send email/i }));
-    await waitFor(() => expect(sendEmailMock).toHaveBeenCalledWith('q-e', undefined));
+    await waitFor(() => expect(sendEmailMock).toHaveBeenCalled());
+    const [, content] = sendEmailMock.mock.calls[0] as unknown as [string, { subject: string; body: string; edited: boolean }];
+    expect(content.edited).toBe(false);
+    expect(content.body).toContain('https://calendly.com/lila-ed/intro-call');
   });
 
   it('An edited body is what gets sent', async () => {
@@ -151,7 +156,65 @@ describe('StepEmail', () => {
     await waitFor(() => expect(sendEmailMock).toHaveBeenCalledWith('q-e', {
       subject: 'Your LILA has officially shipped! 🎉 (#1002)',
       body: 'Hand-written note.',
+      edited: true,
     }));
+  });
+
+  // The regression this whole fallback exists for: the row live in production
+  // declares {{calendly_url}}, so rendering it put a literal placeholder in
+  // the draft and neither booking link appeared.
+  it('A stale stored row is ignored — both links show, no raw placeholder', () => {
+    tplState.current = { ...staleRow };
+    render(<StepEmail row={rowBase} order={orderCA} />);
+    const body = (screen.getByRole('textbox', { name: /Body/ }) as HTMLTextAreaElement).value;
+    expect(body).toContain('https://calendly.com/lila-ed/intro-call');
+    expect(body).toContain('https://calendly.com/lila-ed/lila-onboarding-with-danica-patrik');
+    expect(body).not.toContain('{{calendly_url}}');
+    expect(body).not.toContain('{{');
+    expect(screen.getByText(/Showing the built-in wording/)).toBeInTheDocument();
+  });
+
+  it('Both links show when no template row exists at all', () => {
+    tplState.current = null;
+    render(<StepEmail row={rowBase} order={orderCA} />);
+    const body = (screen.getByRole('textbox', { name: /Body/ }) as HTMLTextAreaElement).value;
+    expect(body).toContain('https://calendly.com/lila-ed/intro-call');
+    expect(body).toContain('https://calendly.com/lila-ed/lila-onboarding-with-danica-patrik');
+    expect(screen.getByRole('button', { name: /send email/i })).toBeInTheDocument();
+  });
+
+  it('A renderable stored row overrides the built-in wording', () => {
+    tplState.current = { ...goodRow };
+    render(<StepEmail row={rowBase} order={orderCA} />);
+    const body = (screen.getByRole('textbox', { name: /Body/ }) as HTMLTextAreaElement).value;
+    expect(body).toContain('Operator wording.');
+    expect(body).not.toContain('https://calendly.com/lila-ed/intro-call');
+    expect(screen.queryByText(/Showing the built-in wording/)).not.toBeInTheDocument();
+  });
+
+  it('Saving over a stale row replaces its declared variables', async () => {
+    tplState.current = { ...staleRow };
+    render(<StepEmail row={rowBase} order={orderCA} />);
+    const bodyBox = screen.getByRole('textbox', { name: /Body/ }) as HTMLTextAreaElement;
+    fireEvent.change(bodyBox, { target: { value: `${bodyBox.value}\n\nPS.` } });
+    fireEvent.click(screen.getByRole('button', { name: /save as default/i }));
+    fireEvent.click(screen.getByRole('button', { name: /overwrite it for everyone/i }));
+    await waitFor(() => expect(updateTemplateMock).toHaveBeenCalledTimes(1));
+    const [, patch] = updateTemplateMock.mock.calls[0] as unknown as [string, { body: string; variables: string[] }];
+    expect(patch.variables).toContain('starter_block');
+    expect(patch.variables).not.toContain('calendly_url');
+    expect(patch.body).not.toContain('{{calendly_url}}');
+  });
+
+  it('Saving with no row at all creates one', async () => {
+    tplState.current = null;
+    render(<StepEmail row={rowBase} order={orderCA} />);
+    const bodyBox = screen.getByRole('textbox', { name: /Body/ }) as HTMLTextAreaElement;
+    fireEvent.change(bodyBox, { target: { value: `${bodyBox.value}\n\nPS.` } });
+    fireEvent.click(screen.getByRole('button', { name: /save as default/i }));
+    fireEvent.click(screen.getByRole('button', { name: /overwrite it for everyone/i }));
+    await waitFor(() => expect(createTemplateMock).toHaveBeenCalledTimes(1));
+    expect(updateTemplateMock).not.toHaveBeenCalled();
   });
 
   it('Save as default needs a second click, then writes back with placeholders restored', async () => {
@@ -196,7 +259,10 @@ describe('StepEmail', () => {
     // Currency is passed explicitly — the storage column is named `_usd` but
     // holds CAD, so the caller states it rather than letting anything infer.
     await waitFor(() => expect(markOrderShippedMock).toHaveBeenCalledWith('o-ca', 42.75, 'CAD'));
-    await waitFor(() => expect(sendEmailMock).toHaveBeenCalledWith('q-e', undefined));
+    await waitFor(() => expect(sendEmailMock).toHaveBeenCalled());
+    const [, content] = sendEmailMock.mock.calls[0] as unknown as [string, { subject: string; body: string; edited: boolean }];
+    expect(content.edited).toBe(false);
+    expect(content.body).toContain('https://calendly.com/lila-ed/intro-call');
   });
 
   it('Does NOT auto-send (auto-send disabled; shipping cost required first)', async () => {

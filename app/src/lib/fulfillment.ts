@@ -645,11 +645,15 @@ export function renderShipmentEmail(template: string, vars: Record<string, strin
   return renderTemplate(withBlock, vars);
 }
 
-/** Sends the Step-5 shipment confirmation. `overrides` carries an operator's
- *  per-send edit of the subject/body; omit them to send the stored template. */
+/** Sends the Step-5 shipment confirmation.
+ *
+ *  `content` is the rendered subject/body exactly as the operator sees it in
+ *  the queue — the edge function keeps no copy of the wording, so this is what
+ *  gets sent. `edited` records whether they changed it by hand, for the audit
+ *  row. Omitting `content` falls back to the stored template server-side. */
 export async function sendFulfillmentEmail(
   queueId: string,
-  overrides?: { subject?: string; body?: string },
+  content?: { subject: string; body: string; edited: boolean },
 ): Promise<{ email_id: string }> {
   await currentUserId();
   const { data: { session } } = await supabase.auth.getSession();
@@ -662,8 +666,9 @@ export async function sendFulfillmentEmail(
     },
     body: JSON.stringify({
       queue_id: queueId,
-      subject_override: overrides?.subject,
-      body_override: overrides?.body,
+      subject: content?.subject,
+      body: content?.body,
+      edited: content?.edited ?? false,
     }),
   });
   const bodyText = await res.text();
