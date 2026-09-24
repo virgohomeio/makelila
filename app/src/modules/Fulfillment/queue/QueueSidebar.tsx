@@ -67,6 +67,19 @@ function dueLabel(dueDate: string | null, fulfilled: boolean): string {
   return `⏰ Due in ${days}d`;
 }
 
+/** Does this shipped row answer the operator's search?
+ *
+ *  Shipped is 100+ rows and someone opening it is looking one order up. What
+ *  they have in hand is a name off an email, or the order ref off an invoice —
+ *  so both match, and the ref matches with or without its leading "#" (the
+ *  series is written "#1188" here and "1188" nearly everywhere else).
+ */
+function matchesQuery(o: QueueOrderSummary | undefined, needle: string): boolean {
+  if (!needle) return true;
+  const hay = [o?.customer_name ?? '', o?.order_ref ?? '', (o?.order_ref ?? '').replace(/^#/, '')];
+  return hay.some(h => h.toLowerCase().includes(needle));
+}
+
 export function QueueSidebar({
   readyRows,
   shippedRows,
@@ -89,13 +102,22 @@ export function QueueSidebar({
   shippedMarks?: Map<string, ShippedMark>;
 }) {
   const [tab, setTab] = useState<'ready' | 'shipped'>('ready');
+  // Shipped only. Ready to ship is a short work list you read top to bottom;
+  // Shipped is the archive, and the only way into it used to be scrolling.
+  const [query, setQuery] = useState('');
   const navigate = useNavigate();
-  const rows = tab === 'ready' ? readyRows : shippedRows;
+  const needle = query.trim().toLowerCase();
+
+  const matchedShipped = useMemo(
+    () => (needle ? shippedRows.filter(r => matchesQuery(orderLookup.get(r.order_id), needle)) : shippedRows),
+    [shippedRows, orderLookup, needle],
+  );
+  const rows = tab === 'ready' ? readyRows : matchedShipped;
   // Ready to ship is a work list and stays in pick order. Shipped is history:
   // month headings, newest first. See ./shippedMonths.
   const shippedGroups = useMemo(
-    () => groupShippedByMonth(shippedRows, shippedMarks),
-    [shippedRows, shippedMarks],
+    () => groupShippedByMonth(matchedShipped, shippedMarks),
+    [matchedShipped, shippedMarks],
   );
 
   function renderRow(r: FulfillmentQueueRow) {
@@ -168,7 +190,7 @@ export function QueueSidebar({
       <div className={styles.sidebarTabs}>
         <button
           className={`${styles.sidebarTab} ${tab === 'ready' ? styles.activeTab : ''}`}
-          onClick={() => setTab('ready')}
+          onClick={() => { setTab('ready'); setQuery(''); }}
         >
           Ready to ship <span className={styles.sidebarTabCount}>{readyRows.length}</span>
         </button>
@@ -179,6 +201,27 @@ export function QueueSidebar({
           Shipped <span className={styles.sidebarTabCount}>{shippedRows.length}</span>
         </button>
       </div>
+      {tab === 'shipped' && shippedRows.length > 0 && (
+        <div className={styles.sidebarSearchWrap}>
+          <span className={styles.sidebarSearchIcon} aria-hidden="true">⌕</span>
+          <input
+            className={styles.sidebarSearch}
+            type="search"
+            placeholder="Search a customer or order #…"
+            aria-label="Search shipped orders"
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+          />
+          {query && (
+            <button
+              type="button"
+              className={styles.sidebarSearchClear}
+              onClick={() => setQuery('')}
+              aria-label="Clear search"
+            >×</button>
+          )}
+        </div>
+      )}
       {rows.length === 0 ? (
         // "No queued orders." told an operator nothing they could act on, and
         // an empty ready-queue is the one moment they have attention to spare.
@@ -188,6 +231,14 @@ export function QueueSidebar({
             title="Nothing queued"
             body="Orders arrive here once they are confirmed in Sales."
             action={<Button small onClick={() => navigate('/order-review')}>Go to Sales</Button>}
+          />
+        ) : needle ? (
+          // A search that finds nothing must not read as an empty archive —
+          // say what was searched for, and offer the way back to all of it.
+          <EmptyState
+            title={`No shipped order matches “${query.trim()}”`}
+            body="Search runs over the customer name and the order ref."
+            action={<Button small onClick={() => setQuery('')}>Clear search</Button>}
           />
         ) : (
           <EmptyState

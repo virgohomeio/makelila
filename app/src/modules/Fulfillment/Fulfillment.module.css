@@ -60,6 +60,9 @@
 }
 
 .sidebar {
+  /* Height of the Shipped tab's sticky search box, shared with the sticky
+     month headings that park under it. */
+  --queue-search-h: 50px;
   background: var(--color-surface);
   border-right: 1px solid var(--color-border);
   display: flex;
@@ -117,6 +120,66 @@
   border-bottom: 2px solid var(--color-ink);
 }
 
+/* Look-up box over the Shipped tab. Sticks above the scroll so it stays
+   reachable 100 rows down, and sits on the rail's own ground so it reads as
+   part of the chrome rather than as the first row. */
+.sidebarSearchWrap {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  flex-shrink: 0;
+  /* Fixed, because .monthHeading sticks directly beneath it — see the note
+     there. 8px padding + a 34px control. */
+  height: var(--queue-search-h);
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.sidebarSearchIcon {
+  position: absolute;
+  left: 22px; top: 50%;
+  transform: translateY(-50%);
+  color: var(--color-ink-subtle);
+  font-size: var(--font-size-body);
+  pointer-events: none;
+}
+
+.sidebarSearch {
+  width: 100%;
+  background: var(--color-raised);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 6px 26px 6px 28px;
+  font-size: var(--font-size-body);
+  color: var(--color-ink);
+}
+.sidebarSearch::placeholder { color: var(--color-ink-faint); }
+.sidebarSearch:focus-visible {
+  outline: none;
+  border-color: var(--color-ink-faint);
+  box-shadow: var(--focus-ring);
+}
+/* Safari draws its own clear affordance on type="search"; ours is the one
+   that matches the rest of the app. */
+.sidebarSearch::-webkit-search-cancel-button { display: none; }
+
+.sidebarSearchClear {
+  position: absolute;
+  right: 20px; top: 50%;
+  transform: translateY(-50%);
+  border: none;
+  background: var(--color-border);
+  color: var(--color-ink-muted);
+  width: 17px; height: 17px;
+  border-radius: 50%;
+  font-size: var(--font-size-meta);
+  line-height: 1;
+  padding: 0;
+  cursor: pointer;
+}
+.sidebarSearchClear:hover { background: var(--color-ink-faint); color: var(--color-ink); }
+
 /* Month buckets on the Shipped tab. Ready to ship is a short work list and
    stays flat; Shipped is 100+ rows of history, so it is cut into months with
    the newest at the top and each heading pinned while you scroll past it. */
@@ -127,7 +190,8 @@
 
 .monthHeading {
   position: sticky;
-  top: 0;
+  /* Below the search box, not under it — both stick in the same scroller. */
+  top: var(--queue-search-h);
   z-index: 1;
   margin: 0;
   /* Opaque, and the sidebar's own ground rather than --color-raised: white is

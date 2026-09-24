@@ -198,5 +198,72 @@ describe('QueueSidebar', () => {
         selectedId={null} onSelect={vi.fn()} /></MemoryRouter>);
       expect(container.querySelectorAll('h3')).toHaveLength(0);
     });
+
+    // Shipped is 100+ rows of archive; scrolling it was the only way in.
+    describe('search', () => {
+      const search = () => screen.getByLabelText('Search shipped orders');
+
+      it('has no search box on the ready tab', () => {
+        render(<MemoryRouter><QueueSidebar
+          readyRows={[row1]} shippedRows={[june, sept]} orderLookup={orders}
+          selectedId={null} onSelect={vi.fn()} /></MemoryRouter>);
+        expect(screen.queryByLabelText('Search shipped orders')).not.toBeInTheDocument();
+      });
+
+      it('narrows the list to the matching customer', () => {
+        openShipped([june, sept]);
+        fireEvent.change(search(), { target: { value: 'ali' } });
+        expect(screen.getByText('Alice')).toBeInTheDocument();
+        expect(screen.queryByText('Bob')).not.toBeInTheDocument();
+      });
+
+      it('drops the months that have no match left', () => {
+        const container = openShipped([june, sept]);
+        fireEvent.change(search(), { target: { value: 'alice' } });
+        const headings = Array.from(container.querySelectorAll('h3')).map(h => h.textContent);
+        expect(headings).toEqual(['June 20261']);
+      });
+
+      it('matches the order ref with or without its #', () => {
+        openShipped([june, sept]);
+        fireEvent.change(search(), { target: { value: '1002' } });
+        expect(screen.getByText('Bob')).toBeInTheDocument();
+        expect(screen.queryByText('Alice')).not.toBeInTheDocument();
+
+        fireEvent.change(search(), { target: { value: '#1002' } });
+        expect(screen.getByText('Bob')).toBeInTheDocument();
+      });
+
+      it('keeps the tab count showing the whole archive, not the matches', () => {
+        openShipped([june, sept]);
+        fireEvent.change(search(), { target: { value: 'alice' } });
+        expect(screen.getByRole('button', { name: /^shipped/i })).toHaveTextContent('2');
+      });
+
+      it('says nothing matched rather than looking like an empty archive', () => {
+        openShipped([june, sept]);
+        fireEvent.change(search(), { target: { value: 'zzz' } });
+        expect(screen.getByText(/No shipped order matches/i)).toBeInTheDocument();
+        expect(screen.queryByText(/Nothing shipped yet/i)).not.toBeInTheDocument();
+      });
+
+      it('clears back to the full list', () => {
+        openShipped([june, sept]);
+        fireEvent.change(search(), { target: { value: 'alice' } });
+        fireEvent.click(screen.getByLabelText('Clear search'));
+        expect(screen.getByText('Alice')).toBeInTheDocument();
+        expect(screen.getByText('Bob')).toBeInTheDocument();
+      });
+
+      // Otherwise a hidden filter is still running when you come back.
+      it('forgets the query when you leave for the ready tab', () => {
+        openShipped([june, sept]);
+        fireEvent.change(search(), { target: { value: 'alice' } });
+        fireEvent.click(screen.getByRole('button', { name: /^ready to ship/i }));
+        fireEvent.click(screen.getByRole('button', { name: /^shipped/i }));
+        expect(search()).toHaveValue('');
+        expect(screen.getByText('Bob')).toBeInTheDocument();
+      });
+    });
   });
 });
