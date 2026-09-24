@@ -181,7 +181,7 @@ export default function Queue() {
                 {selected.step === 2 && <StepTest row={selected} />}
                 {selected.step === 3 && <StepLabel row={selected} order={selectedOrder} />}
                 {selected.step === 4 && <StepDock row={selected} />}
-                {selected.step === 5 && <StepEmail row={selected} order={selectedOrder} />}
+                {selected.step === 5 && <StepEmail row={selected} order={selectedOrder} onSent={() => { void refresh(); }} />}
                 {selected.step === 6 && <StepFulfilled row={selected} order={selectedOrder} />}
               </>
             )}

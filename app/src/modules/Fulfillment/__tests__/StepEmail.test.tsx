@@ -65,9 +65,13 @@ const rowBase: FulfillmentQueueRow = {
   label_pdf_path: null, label_confirmed_at: null, label_confirmed_by: null,
   dock_printed: true, dock_affixed: true, dock_docked: true, dock_notified: true, dock_picked_up: true,
   dock_confirmed_at: null, dock_confirmed_by: null,
-  starter_tracking_num: null, email_sent_at: '2026-04-19T12:00:00Z', email_sent_by: null,
+  starter_tracking_num: null, email_sent_at: null, email_sent_by: null,
   fulfilled_at: null, fulfilled_by: null, due_date: null, priority: false, created_at: '2026-04-19T00:00:00Z',
 };
+
+/** A row whose email already went out — step 5 is done and the edge function
+ *  would refuse a second send. */
+const sentRow: FulfillmentQueueRow = { ...rowBase, email_sent_at: '2026-04-19T12:00:00Z' };
 
 const orderUS       = { id: 'o-us', customer_name: 'Alice Ames', customer_email: 'a@ex.com', order_ref: '#1001', country: 'US' as const };
 const orderCA       = { id: 'o-ca', customer_name: 'Bob Boxer',  customer_email: 'b@ex.com', order_ref: '#1002', country: 'CA' as const };
@@ -241,6 +245,46 @@ describe('StepEmail', () => {
     await waitFor(() => expect(refreshMock).toHaveBeenCalled());
   });
 
+  // The bug behind "I clicked Send and nothing happened" (#1184, 2026-09-24):
+  // the send landed — queue row at step 6, Resend id logged — but the only
+  // signal the UI had was row.email_sent_at arriving over a realtime socket
+  // that this board is documented to drop. Confirmation must not depend on it.
+  it('Confirms the send locally, without waiting for the row prop to update', async () => {
+    render(<StepEmail row={rowBase} order={orderCA} />);
+    fireEvent.change(screen.getByPlaceholderText('42.75'), { target: { value: '42.75' } });
+    fireEvent.click(screen.getByRole('button', { name: /send email/i }));
+    await waitFor(() => expect(screen.getByText(/this order is now fulfilled/)).toBeInTheDocument());
+  });
+
+  it('Asks the board to re-read the queue after a send', async () => {
+    const onSent = vi.fn();
+    render(<StepEmail row={rowBase} order={orderCA} onSent={onSent} />);
+    fireEvent.change(screen.getByPlaceholderText('42.75'), { target: { value: '42.75' } });
+    fireEvent.click(screen.getByRole('button', { name: /send email/i }));
+    await waitFor(() => expect(onSent).toHaveBeenCalledTimes(1));
+  });
+
+  it('Does not ask for a re-read when the send failed', async () => {
+    const onSent = vi.fn();
+    sendEmailMock.mockRejectedValueOnce(new Error('Resend 502'));
+    render(<StepEmail row={rowBase} order={orderCA} onSent={onSent} />);
+    fireEvent.change(screen.getByPlaceholderText('42.75'), { target: { value: '42.75' } });
+    fireEvent.click(screen.getByRole('button', { name: /send email/i }));
+    await waitFor(() => expect(screen.getByText(/Resend 502/)).toBeInTheDocument());
+    expect(onSent).not.toHaveBeenCalled();
+  });
+
+  // The edge function refuses a second send (409 'email already sent'), so a
+  // button offering one could only ever produce an error.
+  it('Blocks a second send instead of offering a Resend that always fails', async () => {
+    render(<StepEmail row={rowBase} order={orderCA} />);
+    fireEvent.change(screen.getByPlaceholderText('42.75'), { target: { value: '42.75' } });
+    fireEvent.click(screen.getByRole('button', { name: /send email/i }));
+    await waitFor(() => expect(screen.getByText(/this order is now fulfilled/)).toBeInTheDocument());
+    expect(screen.getByRole('button', { name: /email sent/i })).toBeDisabled();
+    expect(sendEmailMock).toHaveBeenCalledTimes(1);
+  });
+
   it('Reset drops the edit and the Save/Reset buttons', () => {
     render(<StepEmail row={rowBase} order={orderCA} />);
     const body = screen.getByRole('textbox', { name: /Body/ }) as HTMLTextAreaElement;
@@ -266,26 +310,30 @@ describe('StepEmail', () => {
   });
 
   it('Does NOT auto-send (auto-send disabled; shipping cost required first)', async () => {
-    const freshRow = { ...rowBase, email_sent_at: null, email_sent_by: null };
-    render(<StepEmail row={freshRow} order={orderCA} />);
+    render(<StepEmail row={rowBase} order={orderCA} />);
     // Wait a tick to confirm no auto-send fires
     await new Promise(r => setTimeout(r, 50));
     expect(sendEmailMock).not.toHaveBeenCalled();
   });
 
+  it('An already-sent row shows the sent state and no live Send button', () => {
+    render(<StepEmail row={sentRow} order={orderCA} />);
+    expect(screen.getByRole('button', { name: /email sent/i })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: /^✉ Send email$/ })).not.toBeInTheDocument();
+  });
+
   it('Does NOT auto-send when email_sent_at is already populated', () => {
-    render(<StepEmail row={rowBase} order={orderCA} />);
+    render(<StepEmail row={sentRow} order={orderCA} />);
     expect(sendEmailMock).not.toHaveBeenCalled();
   });
 
   it('Does NOT auto-send when customer_email is missing', () => {
-    const freshRow = { ...rowBase, email_sent_at: null };
-    render(<StepEmail row={freshRow} order={orderNoEmail} />);
+    render(<StepEmail row={rowBase} order={orderNoEmail} />);
     expect(sendEmailMock).not.toHaveBeenCalled();
   });
 
   it('Does NOT auto-send when tracking_num is missing', () => {
-    const noTracking = { ...rowBase, email_sent_at: null, tracking_num: null };
+    const noTracking = { ...rowBase, tracking_num: null };
     render(<StepEmail row={noTracking} order={orderCA} />);
     expect(sendEmailMock).not.toHaveBeenCalled();
   });

@@ -27,11 +27,20 @@ const TEMPLATE_KEY = 'shipment_confirmation';
 export function StepEmail({
   row,
   order,
+  onSent,
 }: {
   row: FulfillmentQueueRow;
   order: { id: string; customer_name: string; customer_email: string | null; order_ref: string; country: 'US'|'CA' };
+  /** Ask the board to re-read the queue. The send moves the row to step 6 in
+   *  the database, but the board learns that over a realtime socket it is
+   *  documented to drop, so it is told explicitly too. */
+  onSent?: () => void;
 }) {
   const [busy, setBusy] = useState(false);
+  // Confirmation the operator can trust the instant the send returns. Relying
+  // on row.email_sent_at alone made a completed send look like a dead button
+  // whenever the socket was down (#1184, 2026-09-24).
+  const [justSent, setJustSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [shippingCost, setShippingCost] = useState('');
   const [shipError, setShipError] = useState<string | null>(null);
@@ -69,7 +78,7 @@ export function StepEmail({
   const blockers: string[] = [];
   if (!order.customer_email) blockers.push('an email address on this customer');
   if (shippingCost.trim() === '') blockers.push('the actual shipping cost');
-  const alreadySent = !!row.email_sent_at;
+  const alreadySent = !!row.email_sent_at || justSent;
 
   const handleSend = async () => {
     if (!canSend) return;
@@ -86,6 +95,8 @@ export function StepEmail({
       // has no copy of the wording of its own, so what is on screen here is
       // exactly what Resend is handed.
       await sendFulfillmentEmail(row.id, { subject, body, edited: dirty });
+      setJustSent(true);
+      onSent?.();
     }
     catch (e) { setError((e as Error).message); }
     finally { setBusy(false); }
@@ -210,7 +221,9 @@ export function StepEmail({
 
       {alreadySent && (
         <div style={{ fontSize: 11, color: 'var(--color-success, #2f855a)', margin: '6px 0' }}>
-          ✓ Email sent{row.email_sent_at && ` at ${new Date(row.email_sent_at).toLocaleString()}`}.
+          ✓ Email sent{row.email_sent_at
+            ? ` at ${new Date(row.email_sent_at).toLocaleString()}`
+            : ' — this order is now fulfilled'}.
         </div>
       )}
       <label className={styles.shippingCostLabel}>
@@ -229,14 +242,16 @@ export function StepEmail({
       </label>
       {shipError && <p className={styles.error}>{shipError}</p>}
       <div className={styles.stepBar}>
+        {/* No Resend: the edge function refuses a second send with 409 'email
+            already sent', so a button offering one could only ever error. */}
         <button
           className={styles.confirmBtn}
           onClick={handleSend}
-          disabled={!canSend || busy || shippingCost.trim() === ''}
+          disabled={!canSend || busy || alreadySent || shippingCost.trim() === ''}
         >
-          {busy ? 'Sending…' : alreadySent ? '✉ Resend email' : '✉ Send email'}
+          {busy ? 'Sending…' : alreadySent ? '✓ Email sent' : '✉ Send email'}
         </button>
-        <StepBlockers blockers={blockers} />
+        {!alreadySent && <StepBlockers blockers={blockers} />}
       </div>
       {error && <div style={{ color: 'var(--color-error)', fontSize: 11, marginTop: 6 }}>{error}</div>}
     </div>
