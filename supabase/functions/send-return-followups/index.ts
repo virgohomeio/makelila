@@ -18,6 +18,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { corsHeaders } from '../_shared/cors.ts';
 import { authenticate } from '../_shared/auth.ts';
+import { archiveBcc, DEFAULT_ARCHIVE_BCC } from '../_shared/emailArchive.ts';
 
 const REMIND_DAYS = 7;    // BR-16 first interval — mirrors CUSTOMER_REMIND_DAYS
 const ESCALATE_DAYS = 14; // BR-16 second interval — mirrors CUSTOMER_ESCALATE_DAYS
@@ -131,6 +132,10 @@ async function handle(req: Request): Promise<Response> {
         from: 'VCycene Team <support@lilacomposter.com>',
         reply_to: 'support@lilacomposter.com',
         to: [dest], subject, text: emailBody,
+        // Blind copy to the internal archive so a send can be confirmed from an
+        // inbox as well as the audit table. archiveBcc drops it for mail that
+        // is internal-only or already addressed there.
+        bcc: archiveBcc(dest, Deno.env.get('EMAIL_ARCHIVE_BCC') ?? DEFAULT_ARCHIVE_BCC),
       }),
     });
     if (!resendRes.ok) {

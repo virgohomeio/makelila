@@ -1,5 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { corsHeaders } from '../_shared/cors.ts';
+import { archiveBcc, DEFAULT_ARCHIVE_BCC } from '../_shared/emailArchive.ts';
 
 const REINA = 'reina@virgohome.io';
 const GEORGE = 'george@virgohome.io';
@@ -63,6 +64,10 @@ Deno.serve(async (req: Request) => {
       postResend(resendKey, {
         from: FROM,
         to: [ret.customer_email],
+        // Blind copy to the internal archive so a send can be confirmed from an
+        // inbox as well as the audit table. archiveBcc drops it for mail that
+        // is internal-only or already addressed there.
+        bcc: archiveBcc(ret.customer_email, Deno.env.get('EMAIL_ARCHIVE_BCC') ?? DEFAULT_ARCHIVE_BCC),
         subject: `Your Return Application Received — Ref. ${custRef}`,
         html: customerHtml(ret, custRef),
       }),

@@ -5,6 +5,7 @@
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { authenticate } from '../_shared/auth.ts';
+import { archiveBcc, DEFAULT_ARCHIVE_BCC } from '../_shared/emailArchive.ts';
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -88,6 +89,10 @@ serve(async (req) => {
       body: JSON.stringify({
         from: fromAddress,
         to: [o.customer_email as string],
+        // Blind copy to the internal archive so a send can be confirmed from an
+        // inbox as well as the audit table. archiveBcc drops it for mail that
+        // is internal-only or already addressed there.
+        bcc: archiveBcc(o.customer_email as string, Deno.env.get('EMAIL_ARCHIVE_BCC') ?? DEFAULT_ARCHIVE_BCC),
         subject,
         text: body,
       }),

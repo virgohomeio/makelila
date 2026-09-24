@@ -4,6 +4,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { corsHeaders } from '../_shared/cors.ts';
 import { authenticate } from '../_shared/auth.ts';
+import { archiveBcc, DEFAULT_ARCHIVE_BCC } from '../_shared/emailArchive.ts';
 
 type QueueRow = {
   id: string;
@@ -213,6 +214,10 @@ async function handle(req: Request): Promise<Response> {
       from: 'VCycene Team <support@lilacomposter.com>',
       reply_to: 'support@lilacomposter.com',
       to: [to],
+      // Blind copy to the internal archive so a send can be confirmed from an
+      // inbox as well as the audit table. archiveBcc drops it for mail that
+      // is internal-only or already addressed there.
+      bcc: archiveBcc(to, Deno.env.get('EMAIL_ARCHIVE_BCC') ?? DEFAULT_ARCHIVE_BCC),
       subject,
       text: emailText,
     }),
