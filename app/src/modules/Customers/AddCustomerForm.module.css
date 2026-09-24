@@ -1,0 +1,88 @@
+/* The Directory's Add-customer drawer.
+ *
+ * Its own module rather than more classes in Customers.module.css: that file is
+ * one 66KB sheet carrying two design regimes, where a class name declared twice
+ * silently loses to the later block. A form that only this drawer uses has no
+ * reason to be in there competing for names.
+ *
+ * The drawer chrome itself (.panelBackdrop, .panel, .panelHeader, .panelBody,
+ * .section, .searchInput, .linkBtn) is still borrowed from Customers.module.css
+ * — this drawer should be the same object as the customer panel it opens into,
+ * not a lookalike. Only the form's own furniture lives here. */
+
+.field {
+  display: block;
+  margin-bottom: var(--space-2);
+}
+.field:last-child { margin-bottom: 0; }
+
+.fieldLabel {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin-bottom: 3px;
+  font-size: var(--font-size-meta);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-ink-muted);
+}
+
+/* "optional" is set quieter than the label and not uppercased, so a scan down
+   the column reads the field names and not a stutter of the same word. */
+.fieldOptional {
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--color-ink-subtle);
+}
+
+/* Two short fields on one line, so the drawer stops being a vertical stack of
+   identical boxes. One column once there isn't room for two. */
+.fieldPair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+.fieldPair .field { margin-bottom: 0; }
+.fieldPair:last-child { margin-bottom: 0; }
+
+@media (max-width: 420px) {
+  .fieldPair { grid-template-columns: 1fr; }
+}
+
+/* Help text for a card. Its own element because a label class standing in for
+   a paragraph gets a label's line-height. */
+.note {
+  margin: 0 0 var(--space-2);
+  font-size: var(--font-size-body);
+  line-height: 1.45;
+  color: var(--color-ink-muted);
+}
+
+.textarea {
+  resize: vertical;
+  min-height: 60px;
+  line-height: 1.45;
+}
+
+/* Save / Cancel, ruled off from the fields they commit. */
+.actions {
+  display: flex;
+  gap: var(--space-2);
+  padding-top: var(--space-3);
+  margin-top: var(--space-3);
+  border-top: 1px solid var(--color-border);
+}
+
+.error {
+  margin-top: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-error-border);
+  border-radius: var(--radius-md);
+  background: var(--color-error-bg);
+  color: var(--color-error);
+  font-size: var(--font-size-body);
+  line-height: 1.45;
+}

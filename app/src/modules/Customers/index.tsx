@@ -25,6 +25,7 @@ import { useCustomerInvoices, openInvoiceInNewTab } from '../../lib/invoices';
 import { PanelSection, PanelRow } from './Panel';
 import { NameSection } from './NameSection';
 import { AdditionalUsersSection } from './AdditionalUsersSection';
+import { AddCustomerForm } from './AddCustomerForm';
 import {
   PageHeader, Tabs, Chip, ChipRow, Button, EmptyState,
 } from '../../components/ui';
@@ -112,6 +113,7 @@ export default function Customers() {
   const [toast, setToast] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
+  const [addingCustomer, setAddingCustomer] = useState(false);
   const selectedCustomer = useMemo(
     () => customers.find(c => c.id === selectedCustomerId) ?? null,
     [customers, selectedCustomerId],
@@ -161,6 +163,18 @@ export default function Customers() {
       lastSync: lastSync ? new Date(lastSync) : null,
     };
   }, [customers]);
+
+  // A manually-added customer lands in its own panel: creating the record and
+  // filling it in are one task, and the operator shouldn't have to search the
+  // directory for the row they just typed. refreshCustomers() rather than
+  // waiting on realtime — it doesn't fire reliably for this app's own writes.
+  const handleCustomerCreated = async (id: string) => {
+    setAddingCustomer(false);
+    setError(null);
+    await refreshCustomers();
+    setSelectedCustomerId(id);
+    setToast('Customer added');
+  };
 
   const handleSync = async () => {
     setBusy(true); setError(null); setToast(null);
@@ -274,6 +288,9 @@ export default function Customers() {
         actions={tab === 'directory' ? (
           <>
             <ExportMenu busy={busy} onExport={handleExport} onKlaviyo={handleKlaviyoPush} />
+            <Button onClick={() => setAddingCustomer(true)} disabled={busy}>
+              Add customer
+            </Button>
             <Button variant="primary" onClick={handleSync} disabled={busy}>
               {busy ? 'Syncing…' : 'Sync from HubSpot'}
             </Button>
@@ -441,6 +458,13 @@ export default function Customers() {
         )}
       </div>
     </div>
+
+    {addingCustomer && (
+      <AddCustomerForm
+        onClose={() => setAddingCustomer(false)}
+        onCreated={id => { void handleCustomerCreated(id); }}
+      />
+    )}
 
     {selectedCustomer && (
       <CustomerDetailPanel
