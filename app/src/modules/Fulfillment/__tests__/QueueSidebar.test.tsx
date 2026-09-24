@@ -203,13 +203,6 @@ describe('QueueSidebar', () => {
     describe('search', () => {
       const search = () => screen.getByLabelText('Search shipped orders');
 
-      it('has no search box on the ready tab', () => {
-        render(<MemoryRouter><QueueSidebar
-          readyRows={[row1]} shippedRows={[june, sept]} orderLookup={orders}
-          selectedId={null} onSelect={vi.fn()} /></MemoryRouter>);
-        expect(screen.queryByLabelText('Search shipped orders')).not.toBeInTheDocument();
-      });
-
       it('narrows the list to the matching customer', () => {
         openShipped([june, sept]);
         fireEvent.change(search(), { target: { value: 'ali' } });
@@ -255,14 +248,81 @@ describe('QueueSidebar', () => {
         expect(screen.getByText('Bob')).toBeInTheDocument();
       });
 
-      // Otherwise a hidden filter is still running when you come back.
-      it('forgets the query when you leave for the ready tab', () => {
-        openShipped([june, sept]);
-        fireEvent.change(search(), { target: { value: 'alice' } });
-        fireEvent.click(screen.getByRole('button', { name: /^ready to ship/i }));
+      // Looking someone up starts on one tab and usually ends on the other.
+      it('carries the query across the tab switch', () => {
+        render(<MemoryRouter><QueueSidebar
+          readyRows={[row1]} shippedRows={[june, sept]} orderLookup={orders}
+          selectedId={null} onSelect={vi.fn()} /></MemoryRouter>);
+        fireEvent.change(screen.getByLabelText('Search orders ready to ship'), { target: { value: 'bob' } });
         fireEvent.click(screen.getByRole('button', { name: /^shipped/i }));
-        expect(search()).toHaveValue('');
+        expect(search()).toHaveValue('bob');
         expect(screen.getByText('Bob')).toBeInTheDocument();
+        expect(screen.queryByText('Alice')).not.toBeInTheDocument();
+      });
+    });
+
+    describe('search on the ready tab', () => {
+      const readySearch = () => screen.getByLabelText('Search orders ready to ship');
+      const openReady = (ready: FulfillmentQueueRow[], shipped: FulfillmentQueueRow[] = []) =>
+        render(<MemoryRouter><QueueSidebar
+          readyRows={ready} shippedRows={shipped} orderLookup={orders}
+          selectedId={null} onSelect={vi.fn()} /></MemoryRouter>).container;
+
+      it('narrows the ready list to the matching customer', () => {
+        openReady([row1, row2]);
+        fireEvent.change(readySearch(), { target: { value: 'ali' } });
+        expect(screen.getByText('Alice')).toBeInTheDocument();
+        expect(screen.queryByText('Bob')).not.toBeInTheDocument();
+      });
+
+      it('matches the order ref with or without its #', () => {
+        openReady([row1, row2]);
+        fireEvent.change(readySearch(), { target: { value: '#1002' } });
+        expect(screen.getByText('Bob')).toBeInTheDocument();
+        expect(screen.queryByText('Alice')).not.toBeInTheDocument();
+      });
+
+      it('leaves the ready list ungrouped while searching', () => {
+        const container = openReady([row1, row2]);
+        fireEvent.change(readySearch(), { target: { value: 'ali' } });
+        expect(container.querySelectorAll('h3')).toHaveLength(0);
+      });
+
+      it('keeps the tab count on the whole queue, not the matches', () => {
+        openReady([row1, row2]);
+        fireEvent.change(readySearch(), { target: { value: 'ali' } });
+        expect(screen.getByRole('button', { name: /^ready to ship/i })).toHaveTextContent('2');
+      });
+
+      it('says nothing matched rather than looking like an empty queue', () => {
+        openReady([row1, row2]);
+        fireEvent.change(readySearch(), { target: { value: 'zzz' } });
+        expect(screen.getByText(/No order ready to ship matches/i)).toBeInTheDocument();
+        expect(screen.queryByText(/Nothing queued/i)).not.toBeInTheDocument();
+      });
+
+      // The order is not on the floor because it already went out — the miss
+      // is the answer, and the other tab is where the answer lives.
+      it('points at Shipped when the miss is sitting there', () => {
+        openReady([row1], [sept]);
+        fireEvent.change(readySearch(), { target: { value: 'bob' } });
+        expect(screen.getByText(/1 match under Shipped/i)).toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: /look in shipped/i }));
+        expect(screen.getByText('Bob')).toBeInTheDocument();
+      });
+
+      it('falls back to clearing when neither tab has a match', () => {
+        openReady([row1], [sept]);
+        fireEvent.change(readySearch(), { target: { value: 'zzz' } });
+        expect(screen.queryByText(/match under/i)).not.toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: /show all orders/i }));
+        expect(screen.getByText('Alice')).toBeInTheDocument();
+      });
+
+      it('has no search box when the queue is empty', () => {
+        openReady([]);
+        expect(screen.queryByLabelText('Search orders ready to ship')).not.toBeInTheDocument();
+        expect(screen.getByText(/Nothing queued/i)).toBeInTheDocument();
       });
     });
   });

@@ -67,12 +67,11 @@ function dueLabel(dueDate: string | null, fulfilled: boolean): string {
   return `⏰ Due in ${days}d`;
 }
 
-/** Does this shipped row answer the operator's search?
+/** Does this row answer the operator's search?
  *
- *  Shipped is 100+ rows and someone opening it is looking one order up. What
- *  they have in hand is a name off an email, or the order ref off an invoice —
- *  so both match, and the ref matches with or without its leading "#" (the
- *  series is written "#1188" here and "1188" nearly everywhere else).
+ *  What the operator has in hand is a name off an email, or the order ref off
+ *  an invoice — so both match, and the ref matches with or without its leading
+ *  "#" (the series is written "#1188" here and "1188" nearly everywhere else).
  */
 function matchesQuery(o: QueueOrderSummary | undefined, needle: string): boolean {
   if (!needle) return true;
@@ -102,23 +101,36 @@ export function QueueSidebar({
   shippedMarks?: Map<string, ShippedMark>;
 }) {
   const [tab, setTab] = useState<'ready' | 'shipped'>('ready');
-  // Shipped only. Ready to ship is a short work list you read top to bottom;
-  // Shipped is the archive, and the only way into it used to be scrolling.
+  // One query, both tabs. Looking a customer up usually starts as "is their
+  // machine still on the floor?" and ends as "no — when did it go out?", so
+  // the query survives the tab switch instead of making you retype it.
   const [query, setQuery] = useState('');
   const navigate = useNavigate();
   const needle = query.trim().toLowerCase();
 
+  const filter = (rs: FulfillmentQueueRow[]) =>
+    needle ? rs.filter(r => matchesQuery(orderLookup.get(r.order_id), needle)) : rs;
+  const matchedReady = useMemo(
+    () => filter(readyRows),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [readyRows, orderLookup, needle],
+  );
   const matchedShipped = useMemo(
-    () => (needle ? shippedRows.filter(r => matchesQuery(orderLookup.get(r.order_id), needle)) : shippedRows),
+    () => filter(shippedRows),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [shippedRows, orderLookup, needle],
   );
-  const rows = tab === 'ready' ? readyRows : matchedShipped;
+  const rows = tab === 'ready' ? matchedReady : matchedShipped;
   // Ready to ship is a work list and stays in pick order. Shipped is history:
   // month headings, newest first. See ./shippedMonths.
   const shippedGroups = useMemo(
     () => groupShippedByMonth(matchedShipped, shippedMarks),
     [matchedShipped, shippedMarks],
   );
+  // The tab counts stay on the whole population, never the match — they are
+  // how you see how much the search is hiding. The other tab's count doubles
+  // as "3 of their orders are over there", which is why it is worth a glance.
+  const tabMatchCount = tab === 'ready' ? matchedShipped.length : matchedReady.length;
 
   function renderRow(r: FulfillmentQueueRow) {
     const o = orderLookup.get(r.order_id);
@@ -190,7 +202,7 @@ export function QueueSidebar({
       <div className={styles.sidebarTabs}>
         <button
           className={`${styles.sidebarTab} ${tab === 'ready' ? styles.activeTab : ''}`}
-          onClick={() => { setTab('ready'); setQuery(''); }}
+          onClick={() => setTab('ready')}
         >
           Ready to ship <span className={styles.sidebarTabCount}>{readyRows.length}</span>
         </button>
@@ -201,14 +213,14 @@ export function QueueSidebar({
           Shipped <span className={styles.sidebarTabCount}>{shippedRows.length}</span>
         </button>
       </div>
-      {tab === 'shipped' && shippedRows.length > 0 && (
+      {(tab === 'ready' ? readyRows.length : shippedRows.length) > 0 && (
         <div className={styles.sidebarSearchWrap}>
           <span className={styles.sidebarSearchIcon} aria-hidden="true">⌕</span>
           <input
             className={styles.sidebarSearch}
             type="search"
             placeholder="Search a customer or order #…"
-            aria-label="Search shipped orders"
+            aria-label={tab === 'ready' ? 'Search orders ready to ship' : 'Search shipped orders'}
             value={query}
             onChange={e => setQuery(e.target.value)}
           />
@@ -226,19 +238,33 @@ export function QueueSidebar({
         // "No queued orders." told an operator nothing they could act on, and
         // an empty ready-queue is the one moment they have attention to spare.
         // Each state now says what is true and where the next row comes from.
-        tab === 'ready' ? (
+        needle ? (
+          // A search that finds nothing must not read as an empty queue — say
+          // what was searched for, point at the other tab when the order is
+          // sitting in it, and offer the way back to the whole list.
+          <EmptyState
+            title={`No ${tab === 'ready' ? 'order ready to ship' : 'shipped order'} matches “${query.trim()}”`}
+            body={
+              tabMatchCount > 0
+                ? `${tabMatchCount} match${tabMatchCount === 1 ? '' : 'es'} under ${tab === 'ready' ? 'Shipped' : 'Ready to ship'}.`
+                : 'Search runs over the customer name and the order ref.'
+            }
+            action={
+              tabMatchCount > 0
+                ? <Button small onClick={() => setTab(tab === 'ready' ? 'shipped' : 'ready')}>
+                    Look in {tab === 'ready' ? 'Shipped' : 'Ready to ship'}
+                  </Button>
+                  // Named for the outcome, not the mechanism — the ✕ in the
+                  // box is already "Clear search", and two controls with one
+                  // name is a coin toss for anyone driving this by keyboard.
+                : <Button small onClick={() => setQuery('')}>Show all orders</Button>
+            }
+          />
+        ) : tab === 'ready' ? (
           <EmptyState
             title="Nothing queued"
             body="Orders arrive here once they are confirmed in Sales."
             action={<Button small onClick={() => navigate('/order-review')}>Go to Sales</Button>}
-          />
-        ) : needle ? (
-          // A search that finds nothing must not read as an empty archive —
-          // say what was searched for, and offer the way back to all of it.
-          <EmptyState
-            title={`No shipped order matches “${query.trim()}”`}
-            body="Search runs over the customer name and the order ref."
-            action={<Button small onClick={() => setQuery('')}>Clear search</Button>}
           />
         ) : (
           <EmptyState
@@ -247,7 +273,7 @@ export function QueueSidebar({
           />
         )
       ) : tab === 'ready' ? (
-        readyRows.map(renderRow)
+        matchedReady.map(renderRow)
       ) : (
         shippedGroups.map(g => (
           <div key={g.key || 'undated'} className={styles.monthGroup}>
