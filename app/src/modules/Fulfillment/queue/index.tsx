@@ -6,6 +6,7 @@ import type { OrderStatus, Order as FullOrder } from '../../../lib/orders';
 import { QueueSidebar } from './QueueSidebar';
 import { QueueHeader } from './QueueHeader';
 import { StepAssign } from './StepAssign';
+import { StepPartsOnly } from './StepPartsOnly';
 import { StepTest } from './StepTest';
 import { StepLabel } from './StepLabel';
 import { StepDock } from './StepDock';
@@ -13,6 +14,7 @@ import { StepEmail } from './StepEmail';
 import { StepFulfilled } from './StepFulfilled';
 import { EmptyState } from '../../../components/ui';
 import { indexRefundFlags, useRefundMarks } from '../../../lib/refundedOrders';
+import { isPartsOnlyReplacement } from '../../../lib/replacementTags';
 import {
   indexShippedQueueRows, shippedMarkHeading, shippedMarkTitle, useShippedEvidence,
   type ShippedMark,
@@ -135,6 +137,9 @@ export default function Queue() {
 
   const selected = allRows.find(r => r.id === selectedId) ?? null;
   const selectedOrder = selected ? orderLookup.get(selected.order_id) : null;
+  const partsOnly = !!selectedOrder
+    && selectedOrder.kind === 'replacement'
+    && isPartsOnlyReplacement(selectedOrder);
 
   return (
     <div className={styles.queueLayout}>
@@ -180,8 +185,20 @@ export default function Queue() {
               <PauseBanner status={selectedOrder.status} orderId={selectedOrder.id} />
             ) : (
               <>
-                {selected.step === 1 && <StepAssign row={selected} />}
-                {selected.step === 2 && <StepTest row={selected} />}
+                {/* Assign and Test are both about a machine: pick one off the
+                    shelf, confirm its test report. A replacement carrying only
+                    parts has neither, and the picker is the one thing an
+                    operator holding a lid must not use — assigning a unit would
+                    reserve it and mark it shipped against an order that never
+                    contained it. Those two steps become "put it in the mail and
+                    say so"; Label, Dock and Email still apply to a parts box,
+                    so they are left alone. */}
+                {selected.step === 1 && (partsOnly
+                  ? <StepPartsOnly row={selected} order={selectedOrder} onShipped={() => { void refresh(); }} />
+                  : <StepAssign row={selected} />)}
+                {selected.step === 2 && (partsOnly
+                  ? <StepPartsOnly row={selected} order={selectedOrder} onShipped={() => { void refresh(); }} />
+                  : <StepTest row={selected} />)}
                 {selected.step === 3 && <StepLabel row={selected} order={selectedOrder} />}
                 {selected.step === 4 && <StepDock row={selected} />}
                 {selected.step === 5 && <StepEmail row={selected} order={selectedOrder} onSent={() => { void refresh(); }} />}

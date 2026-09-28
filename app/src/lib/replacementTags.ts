@@ -246,3 +246,33 @@ export function replacementItemsLabel(line_items: Order['line_items']): string {
   }
   return segs.join(' + ') || '—';
 }
+
+/** True when a replacement carries no whole machine — only parts and
+ *  consumables (a lid, a hopper, a filter, a starter kit).
+ *
+ *  This is the question "can this box leave without the fulfillment queue?".
+ *  A unit has to be picked off the shelf, tested, and have its serial recorded
+ *  against the order, and the 6-step queue exists for exactly that. A $24 lid
+ *  has none of it: the queue's first step is "assign a ready machine", which an
+ *  operator holding a lid cannot take and must not fake — so a parts-only
+ *  replacement that got sent to the queue used to sit there with no way
+ *  forward, and the only route out was the linked ticket.
+ *
+ *  Conservative in both directions — it gates a write that skips the serial:
+ *    - no line items at all → false. An empty row says nothing about what is in
+ *      the box, and reading that as "parts" would let a unit ship unrecorded.
+ *    - awaiting_batch_id set → false. A batch-blocked order is owed a machine
+ *      even when its line_items never captured one (R-0032).
+ *    - the item TAGS are checked as well as the line kinds, so a free-text
+ *      Excel-backfilled "P100X replacement" description still reads as a unit.
+ */
+export function isPartsOnlyReplacement(
+  o: Pick<Order, 'line_items' | 'awaiting_batch_id'>,
+): boolean {
+  const items = (o.line_items ?? []) as Array<Record<string, unknown>>;
+  if (items.length === 0) return false;
+  if (o.awaiting_batch_id) return false;
+  const unitKinds = new Set(['unit', 'unit_pending', 'base', 'base_pending']);
+  if (items.some(li => unitKinds.has(String((li as { kind?: unknown })?.kind ?? '')))) return false;
+  return !replacementItemTags(o).some(isUnitTag);
+}

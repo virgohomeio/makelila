@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { replacementItemTags, replacementStageTag, replacementDemandBySku, replacementUnitDemandByBatch, isUnitTag, replacementQueueKinds, queuedForReplacementLabel, isLiveReplacement, replacementItemsLabel } from './replacementTags';
+import { replacementItemTags, replacementStageTag, replacementDemandBySku, replacementUnitDemandByBatch, isUnitTag, replacementQueueKinds, queuedForReplacementLabel, isLiveReplacement, replacementItemsLabel, isPartsOnlyReplacement } from './replacementTags';
 
 const order = (line_items: unknown[], extra: Partial<{ awaiting_batch_id: string | null; replacement_state: string | null; shipped_at: string | null; delivered_at: string | null; status: string }> = {}) =>
   ({ line_items, awaiting_batch_id: null, replacement_state: 'ready', status: 'approved', ...extra }) as never;
@@ -229,5 +229,44 @@ describe('replacementItemsLabel', () => {
 
   it('gives an em dash rather than an empty card for an empty order', () => {
     expect(replacementItemsLabel([] as never)).toBe('—');
+  });
+});
+
+// The gate on "mark shipped without the queue": it skips the serial, so a
+// wrong `true` here ships a machine with nothing recorded against it.
+describe('isPartsOnlyReplacement', () => {
+  it('is true for structured part lines', () => {
+    expect(isPartsOnlyReplacement(order([
+      { kind: 'part', sku: 'LILA-LID-V36', qty: 1 },
+      { kind: 'part', sku: 'LILA-FILTER', qty: 2 },
+    ]))).toBe(true);
+  });
+
+  it('is true for an out-of-stock part still on order', () => {
+    expect(isPartsOnlyReplacement(order([{ kind: 'part_pending', sku: 'LILA-HOPPER', qty: 1 }]))).toBe(true);
+  });
+
+  it('is true for a free-text part line the importer never mapped', () => {
+    expect(isPartsOnlyReplacement(order([{ kind: 'part', description: 'both side latch' }]))).toBe(true);
+  });
+
+  it('is false for a whole unit or a base', () => {
+    expect(isPartsOnlyReplacement(order([{ kind: 'unit', batch: 'P100', unit_serial: '00019' }]))).toBe(false);
+    expect(isPartsOnlyReplacement(order([{ kind: 'unit_pending', batch: 'P100X' }]))).toBe(false);
+    expect(isPartsOnlyReplacement(order([{ kind: 'base', batch: 'BASE-01', unit_serial: 'B-7' }]))).toBe(false);
+    expect(isPartsOnlyReplacement(order([{ kind: 'base_pending', batch: 'BASE-02' }]))).toBe(false);
+  });
+
+  it('is false for a part line that names a machine in free text', () => {
+    expect(isPartsOnlyReplacement(order([{ kind: 'part', description: 'replacement P100X machine' }]))).toBe(false);
+  });
+
+  it('is false while the order is blocked on a batch (R-0032)', () => {
+    expect(isPartsOnlyReplacement(order([{ kind: 'part', sku: 'LILA-LID-V36' }], { awaiting_batch_id: 'P100X' })))
+      .toBe(false);
+  });
+
+  it('is false for an empty order — nothing recorded is not the same as parts', () => {
+    expect(isPartsOnlyReplacement(order([]))).toBe(false);
   });
 });

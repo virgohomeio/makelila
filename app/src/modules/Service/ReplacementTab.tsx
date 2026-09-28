@@ -1,13 +1,14 @@
 import { useMemo, useState } from 'react';
 import {
-  useReplacementOrders, queueReplacementForFulfillment, type Order,
+  useReplacementOrders, queueReplacementForFulfillment, markPartsReplacementShipped,
+  type Order,
 } from '../../lib/orders';
 import { useFulfillmentQueue } from '../../lib/fulfillment';
 
 import {
   replacementItemTags, replacementStageTag, type StageTag,
   replacementUnitDemandByBatch, replacementDemandBySku,
-  replacementItemsLabel, isLiveReplacement,
+  replacementItemsLabel, isLiveReplacement, isPartsOnlyReplacement,
 } from '../../lib/replacementTags';
 import { useBatches, useUnits, type Batch } from '../../lib/stock';
 import { useParts, effectiveDemandBySku } from '../../lib/parts';
@@ -127,6 +128,13 @@ export default function ReplacementTab() {
   const [filter, setFilter] = useState<Filter>('all');
   const [openTicketId, setOpenTicketId] = useState<string | null>(null);
   const [queueing, setQueueing] = useState<string | null>(null);
+  // The parts-only "we mailed it" dialog: the order it is open on, plus the
+  // carrier/tracking the operator has in hand (both optional).
+  const [shipTarget, setShipTarget] = useState<Order | null>(null);
+  const [shipCarrier, setShipCarrier] = useState('');
+  const [shipTracking, setShipTracking] = useState('');
+  const [shipping, setShipping] = useState(false);
+  const [shipError, setShipError] = useState<string | null>(null);
 
   const queueStepByOrder = useMemo(() => {
     const m = new Map<string, number>();
@@ -161,6 +169,34 @@ export default function ReplacementTab() {
       window.alert(`Could not send ${o.order_ref} to the queue: ${(e as Error).message}`);
     } finally {
       setQueueing(null);
+    }
+  }
+
+  function openShipDialog(o: Order) {
+    setShipTarget(o);
+    setShipCarrier(o.carrier ?? '');
+    setShipTracking(o.tracking_num ?? '');
+    setShipError(null);
+  }
+
+  /** "Mark shipped" — the box of parts left the building.
+   *
+   *  Parts and consumables have no machine to assign and no test report, so
+   *  they never needed the 6-step queue; this records the shipment the same way
+   *  reaching step 6 would (see markPartsReplacementShipped). The row's Items
+   *  chips are in front of the operator when they click, which is the check
+   *  that matters — the lib call refuses anything carrying a unit. */
+  async function handleMarkShipped() {
+    const o = shipTarget;
+    if (!o) return;
+    setShipping(true); setShipError(null);
+    try {
+      await markPartsReplacementShipped(o.id, { carrier: shipCarrier, tracking_num: shipTracking });
+      setShipTarget(null);
+    } catch (e) {
+      setShipError((e as Error).message);
+    } finally {
+      setShipping(false);
     }
   }
 
@@ -429,19 +465,34 @@ export default function ReplacementTab() {
                   </td>
                   <td>{daysOpen}</td>
                   <td>
-                    {queueStep != null ? (
-                      <span className={styles.pill}>
-                        {queueStep === 6 ? 'Shipped' : `In queue · step ${queueStep}`}
-                      </span>
+                    {queueStep === 6 ? (
+                      <span className={styles.pill}>Shipped</span>
                     ) : !isLiveReplacement(o) ? (
                       <span className={styles.muted}>—</span>
                     ) : (
-                      <button
-                        type="button"
-                        className={styles.btnSecondary}
-                        disabled={queueing === o.id}
-                        onClick={() => void handleQueue(o)}
-                      >{queueing === o.id ? 'Queueing…' : 'Ready to Ship'}</button>
+                      <div className={styles.fulfillCell}>
+                        {queueStep != null ? (
+                          <span className={styles.pill}>{`In queue · step ${queueStep}`}</span>
+                        ) : (
+                          <button
+                            type="button"
+                            className={styles.btnSecondary}
+                            disabled={queueing === o.id}
+                            onClick={() => void handleQueue(o)}
+                          >{queueing === o.id ? 'Queueing…' : 'Ready to Ship'}</button>
+                        )}
+                        {/* Parts and consumables skip the queue: there is no
+                            machine to assign and no test report to confirm, so
+                            the box just goes in the mail and someone says so. */}
+                        {isPartsOnlyReplacement(o) && (
+                          <button
+                            type="button"
+                            className={styles.btnSecondary}
+                            onClick={() => openShipDialog(o)}
+                            title="Record this parts replacement as shipped — no machine to assign, so it skips the 6-step queue"
+                          >Mark shipped</button>
+                        )}
+                      </div>
                     )}
                   </td>
                 </tr>
@@ -449,6 +500,69 @@ export default function ReplacementTab() {
             })}
           </tbody>
         </table>
+      )}
+
+      {shipTarget && (
+        <div className={styles.modalBackdrop} onClick={() => { if (!shipping) setShipTarget(null); }}>
+          <div className={styles.modalCard} onClick={e => e.stopPropagation()}>
+            <header className={styles.modalHead}>
+              <span>Mark {shipTarget.order_ref} shipped</span>
+              <button
+                className={styles.modalClose}
+                onClick={() => setShipTarget(null)}
+                disabled={shipping}
+                aria-label="Close"
+              >×</button>
+            </header>
+
+            <div className={styles.modalBody}>
+              <p style={{ margin: '0 0 10px', fontSize: 12, lineHeight: 1.55 }}>
+                <strong>{replacementItemsLabel(shipTarget.line_items)}</strong> to{' '}
+                {shipTarget.customer_name}. This records the shipment the same way reaching
+                step&nbsp;6 of the queue would — it shows as Shipped in Fulfillment ›
+                Queue and clears the customer&rsquo;s &ldquo;Queued for Replacement&rdquo; chip.
+              </p>
+
+              <div className={styles.modalGrid}>
+                <div className={styles.modalRow}>
+                  <label htmlFor="ship-carrier">Carrier (optional)</label>
+                  <input
+                    id="ship-carrier"
+                    className={styles.modalInput}
+                    placeholder="e.g. Canada Post"
+                    value={shipCarrier}
+                    onChange={e => setShipCarrier(e.target.value)}
+                  />
+                </div>
+                <div className={styles.modalRow}>
+                  <label htmlFor="ship-tracking">Tracking number (optional)</label>
+                  <input
+                    id="ship-tracking"
+                    className={styles.modalInput}
+                    placeholder="Leave blank if there is none"
+                    value={shipTracking}
+                    onChange={e => setShipTracking(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <p className={styles.muted} style={{ fontSize: 11, margin: '10px 0 0', lineHeight: 1.5 }}>
+                Stock isn&rsquo;t touched — these parts came off on-hand when the replacement was
+                raised. Shipping cost is left for the carrier invoice to fill in.
+              </p>
+              {shipError && <div className={styles.modalError}>{shipError}</div>}
+            </div>
+
+            <footer className={styles.modalFoot}>
+              <button className={styles.modalSecondary} onClick={() => setShipTarget(null)} disabled={shipping}>
+                Cancel
+              </button>
+              <button className={styles.modalPrimary} onClick={() => void handleMarkShipped()} disabled={shipping}>
+                {shipping ? 'Recording…' : 'Mark shipped'}
+              </button>
+            </footer>
+          </div>
+        </div>
       )}
 
       {openTicket && (

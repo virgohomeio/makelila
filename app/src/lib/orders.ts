@@ -5,6 +5,9 @@ import { logAction } from './activityLog';
 import { adjustPartStock } from './parts';
 import { functionErrorMessage } from './functionError';
 import { refundFlagForOrderId, refundFlagTitle } from './refundedOrders';
+// replacementTags only ever `import type`s from here, so this is not a runtime
+// cycle — the Order import on that side is erased.
+import { isPartsOnlyReplacement } from './replacementTags';
 import {
   guessDwellingFromText,
   type AreaType, type Dwelling, type DwellingSource, type UnitStatus,
@@ -1354,6 +1357,139 @@ async function shelfSerialFor(lineItems: unknown): Promise<string | null> {
     .in('serial', serials);
   const onShelf = new Set(((data ?? []) as Array<{ serial: string }>).map(r => r.serial));
   return serials.find(s => onShelf.has(s)) ?? null;
+}
+
+/** Record a PARTS-ONLY replacement as shipped, in one click, without walking
+ *  the 6-step fulfillment queue.
+ *
+ *  The queue's first two steps are "assign a ready machine off the shelf" and
+ *  "confirm its test report". A lid, a hopper or a filter has neither, so a
+ *  parts-only replacement had nowhere to go: left on Fulfillment ›
+ *  Replacements it sat there after the box had gone out, and pushed into the
+ *  queue with "Ready to Ship" it stranded at step 1, where the only way
+ *  forward was to assign a machine nobody was shipping. The one existing
+ *  escape was the linked ticket's "Replacement Shipped" button, which ships
+ *  EVERY live replacement on that case at once — wrong for a customer owed
+ *  both a lid today and a P100X in two months.
+ *
+ *  Effect is deliberately identical to the ticket-level hand-off
+ *  (shipQueuedReplacementsForTicket), so every other screen agrees:
+ *    - orders.shipped_at is stamped and status flips to 'approved' (it went out
+ *      the door; a replacement created as 'pending' never gets approved by the
+ *      sales flow). Shipping cost is NOT written — nobody has the carrier
+ *      invoice yet and a 0 would corrupt the finance rollups.
+ *    - a fulfillment_queue row is upserted at step 6, which IS the Queue ›
+ *      SHIPPED list. No assigned_serial, ever: there is no machine in the box,
+ *      and an omitted column on an upsert keeps whatever the row already had.
+ *    - the linked ticket moves off "Queued for Replacement" and onto
+ *      "Replacement Sent", but only once nothing else on that case is still
+ *      owed — see the sibling check below.
+ *
+ *  Parts stock is untouched: createReplacementOrder decremented on_hand when
+ *  the replacement was raised, so deducting again here would double-count it.
+ *
+ *  `carrier`/`tracking_num` are optional — the operator often has a tracking
+ *  number and the row's Tracking column is the only place it would ever live.
+ *  Blank fields are omitted from both writes rather than written as null, so
+ *  marking a queued row shipped can't blank a label recorded earlier. */
+export async function markPartsReplacementShipped(
+  orderId: string,
+  opts: { carrier?: string | null; tracking_num?: string | null } = {},
+): Promise<{ order_ref: string; ticket_marked_sent: boolean }> {
+  const { data: order, error: oErr } = await supabase
+    .from('orders')
+    .select('id, order_ref, kind, status, shipped_at, delivered_at, line_items, awaiting_batch_id, linked_ticket_id')
+    .eq('id', orderId)
+    .single();
+  if (oErr || !order) throw new Error(`Replacement not found: ${oErr?.message ?? 'no row'}`);
+  if (order.kind !== 'replacement') {
+    throw new Error('This is not a replacement order — a sale is shipped from Fulfillment › Queue.');
+  }
+  if (order.status === 'cancelled') {
+    throw new Error('This replacement was cancelled. Raise a new one from the service ticket.');
+  }
+  if (order.shipped_at || order.delivered_at) {
+    throw new Error('This replacement has already shipped.');
+  }
+  if (((order.line_items ?? []) as unknown[]).length === 0) {
+    throw new Error(
+      `${order.order_ref} has no items recorded, so there is nothing to say shipped. `
+      + 'Add what was sent on the ticket first.',
+    );
+  }
+  if (!isPartsOnlyReplacement(order)) {
+    throw new Error(
+      `${order.order_ref} carries a whole unit. Ship it through Fulfillment › Queue so the `
+      + "machine's serial is recorded against the order.",
+    );
+  }
+
+  const carrier = (opts.carrier ?? '').trim() || null;
+  const tracking = (opts.tracking_num ?? '').trim() || null;
+  const shipment = { ...(carrier ? { carrier } : {}), ...(tracking ? { tracking_num: tracking } : {}) };
+
+  const shippedAt = new Date().toISOString();
+  const { error: uErr } = await supabase
+    .from('orders')
+    .update({ shipped_at: shippedAt, status: 'approved', ...shipment })
+    .eq('id', orderId);
+  if (uErr) throw new Error(`Mark ${order.order_ref} shipped: ${uErr.message}`);
+
+  const { error: qErr } = await supabase
+    .from('fulfillment_queue')
+    .upsert(
+      { order_id: orderId, step: 6, fulfilled_at: shippedAt, ...shipment },
+      { onConflict: 'order_id' },
+    );
+  if (qErr) throw new Error(`Queue ${order.order_ref} as shipped: ${qErr.message}`);
+
+  await logAction(
+    'replacement_shipped',
+    order.order_ref,
+    `parts replacement marked shipped${carrier || tracking ? ` · ${[carrier, tracking].filter(Boolean).join(' ')}` : ''}`,
+  );
+
+  // The ticket half. Only when this was the LAST thing the case was waiting on:
+  // a customer owed a lid and a machine is still owed the machine, and calling
+  // that "Replacement Sent" would tell CS they were done waiting. The shipment
+  // above is already recorded, so nothing here may fail the call — same
+  // best-effort precedent as markOrderShipped.
+  let ticketMarkedSent = false;
+  if (order.linked_ticket_id) {
+    const ticketId = order.linked_ticket_id as string;
+    try {
+      // This order no longer counts as live — shipped_at is stamped above.
+      const stillOwed = await liveReplacementsForTicket(ticketId);
+      if (stillOwed.length === 0) {
+        const { error: tagErr } = await supabase.rpc('remove_ticket_tag', {
+          p_ticket_id: ticketId, p_tag: 'queued_for_replacement',
+        });
+        if (tagErr) console.warn('Clearing queued_for_replacement tag failed (non-fatal):', tagErr.message);
+
+        // A closed case stays closed — the operator already finished it, and
+        // reopening it is not what "the lid went out" means. A ticket whose
+        // primary status is already 'replacement_sent' is skipped too: the tag
+        // array may not duplicate the primary status.
+        const { data: ticket } = await supabase
+          .from('service_tickets')
+          .select('status')
+          .eq('id', ticketId)
+          .single();
+        const status = (ticket as { status?: string } | null)?.status;
+        if (status !== 'closed' && status !== 'replacement_sent') {
+          const { error: sentErr } = await supabase.rpc('add_ticket_tag', {
+            p_ticket_id: ticketId, p_tag: 'replacement_sent',
+          });
+          if (sentErr) console.warn('Setting replacement_sent tag failed (non-fatal):', sentErr.message);
+          else ticketMarkedSent = true;
+        }
+      }
+    } catch (e) {
+      console.warn('Updating the ticket after a parts shipment failed (non-fatal):', (e as Error).message);
+    }
+  }
+
+  return { order_ref: order.order_ref as string, ticket_marked_sent: ticketMarkedSent };
 }
 
 // ─── Cancelling an order / pulling it back out of fulfillment ───────────────
