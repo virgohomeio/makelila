@@ -56,6 +56,15 @@ export type FulfillmentQueueRow = {
   dock_confirmed_at: string | null;
   dock_confirmed_by: string | null;
 
+  // The Goorooship day batch (20260929120000_eztrans_daily_batch.sql). Optional
+  // because migrations here are applied by hand: select('*') on a database
+  // that has not run it yet simply returns rows without them, and the batch
+  // footer shows an empty day rather than throwing. See lib/eztransBatch.ts.
+  eztrans_confirmed_at?: string | null;
+  eztrans_confirmed_by?: string | null;
+  eztrans_packing_list?: string | null;
+  eztrans_batch_sent_at?: string | null;
+
   starter_tracking_num: string | null;
   email_sent_at: string | null;
   email_sent_by: string | null;

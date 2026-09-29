@@ -16,6 +16,13 @@ import {
   GOOROOSHIP_SHIP_URL,
   type EzTransShipTo,
 } from '../../../lib/eztrans';
+import {
+  confirmEzTransOrder,
+  unconfirmEzTransOrder,
+  markEzTransSentOutsideBatch,
+  batchAttachmentFilenames,
+  EZTRANS_BATCH_CONFIRMED_ACTION,
+} from '../../../lib/eztransBatch';
 import { logAction, useActivityForEntity } from '../../../lib/activityLog';
 import type { FulfillmentQueueRow } from '../../../lib/fulfillment';
 import styles from '../Fulfillment.module.css';
@@ -40,10 +47,14 @@ export function EzTransPanel({
   row,
   order,
   onLabelSaved,
+  onBatchChanged,
 }: {
   row: FulfillmentQueueRow;
   order: EzTransOrder;
   onLabelSaved?: (v: { carrier: string; tracking_num: string }) => void;
+  /** Re-read the queue after this order joins or leaves the day's batch, so
+   *  the footer at the bottom of the page catches up without a reload. */
+  onBatchChanged?: () => void;
 }) {
   const { placement, loading } = useEzTransPlacement(row.assigned_serial);
   const { template, packingList: packingListTemplate, source: templateSource } = useEzTransTemplate();
@@ -66,6 +77,11 @@ export function EzTransPanel({
   // from the panel rather than from the broker.
   const [sentFiles, setSentFiles] = useState<string[] | null>(null);
   const [showPreview, setShowPreview] = useState(false);
+  // The day-batch stamp as this panel last saw it. Seeded from the row and
+  // moved locally on confirm so the operator gets an answer before the
+  // realtime round-trip; the row wins again on the next render of a fresh one.
+  const [confirmedAt, setConfirmedAt] = useState<string | null>(row.eztrans_confirmed_at ?? null);
+  const [batchSentAt, setBatchSentAt] = useState<string | null>(row.eztrans_batch_sent_at ?? null);
   // Null while the operator hasn't touched the wording — the email then simply
   // tracks the template and the live label details. Once they type, their text
   // is held as-is and stops following those, which is the point of editing it.
@@ -89,6 +105,14 @@ export function EzTransPanel({
   // surprise than a draft that outstays its welcome; Reset is one click.
   const draftKey = `eztrans-draft:${row.id}`;
   const freshlyLoaded = useRef(true);
+
+  // This panel is rendered without a key, so one instance serves every row the
+  // operator clicks through — the stamp has to follow the row rather than
+  // stay where the last confirm left it.
+  useEffect(() => {
+    setConfirmedAt(row.eztrans_confirmed_at ?? null);
+    setBatchSentAt(row.eztrans_batch_sent_at ?? null);
+  }, [row.id, row.eztrans_confirmed_at, row.eztrans_batch_sent_at]);
 
   useEffect(() => {
     let draft: { subject?: string; body?: string; packingList?: string } | null = null;
@@ -242,6 +266,20 @@ export function EzTransPanel({
         `${sent.warning ? ` · ${sent.warning}` : ''}`,
         { entityType: 'order', entityId: order.id, unitSerial: placement.serial },
       );
+      // An order mailed on its own must not also ride along in the evening's
+      // batch. Only meaningful for a row that was confirmed; the mutation is a
+      // no-op otherwise, so there is nothing to branch on here.
+      try {
+        await markEzTransSentOutsideBatch(row.id);
+        setBatchSentAt(new Date().toISOString());
+        onBatchChanged?.();
+      } catch (e) {
+        // The email is already away — this is bookkeeping, and losing it must
+        // not read as a failed send. Say it next to the success line instead.
+        setSendWarning(w => [w, `This order could not be marked as sent for the day batch ` +
+          `(${(e as Error).message}) — remove it from today's batch by hand so the 3PL is ` +
+          `not emailed the same carton twice.`].filter(Boolean).join(' '));
+      }
       setPdf(null);
       setJustSent(new Date().toISOString());
     } catch (e) {
@@ -251,7 +289,85 @@ export function EzTransPanel({
     }
   };
 
+  /** Put this order in today's Goorooship batch.
+   *
+   *  This is the normal path now: EZ Trans asked for one email a day rather
+   *  than one per box, so confirming is what "it ships today" means — the
+   *  carrier, the tracking number, the label and the packing list go onto the
+   *  queue row, and the button at the bottom of the queue mails every order
+   *  confirmed today in a single message.
+   *
+   *  The packing list travels only when it was edited. Storing a copy of the
+   *  rendered template instead would freeze today's wording into the row and
+   *  quietly beat a later edit in the Templates tab, which is the same trap
+   *  the per-order send avoids by sending the field only when it changed. */
+  const handleConfirm = async () => {
+    if (!ready) return;
+    setBusy(true); setError(null);
+    try {
+      const { confirmed_at } = await confirmEzTransOrder(row.id, {
+        carrier,
+        tracking_num: tracking.trim(),
+        ...(pdf ? { label_pdf: pdf } : {}),
+        packing_list: packingEdited ? packingValue : null,
+      });
+      onLabelSaved?.({ carrier, tracking_num: tracking.trim() });
+      const files = batchAttachmentFilenames({
+        customerName: order.customer_name,
+        tracking: tracking.trim(),
+        needsWorksheet: worksheetGoes,
+      });
+      await logAction(
+        EZTRANS_BATCH_CONFIRMED_ACTION,
+        order.order_ref,
+        `Confirmed for the Goorooship day batch — serial ${placement.serial}, ` +
+        `master carton ${placement.masterCarton ?? '—'}, ${carrier} ${tracking.trim()} · ` +
+        `documents ${[files.combined, files.worksheet].filter(Boolean).join(', ')}` +
+        `${packingEdited ? ' · packing list edited for this order' : ''}`,
+        { entityType: 'order', entityId: order.id, unitSerial: placement.serial },
+      );
+      setPdf(null);
+      setConfirmedAt(confirmed_at);
+      // confirmEzTransOrder clears the sent stamp, so a corrected shipment
+      // rejoins the day's batch rather than staying marked as gone.
+      setBatchSentAt(null);
+      onBatchChanged?.();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** Pull this order back out of today's batch. The booking itself stands —
+   *  carrier, tracking and the label stay on the row. */
+  const handleUnconfirm = async () => {
+    setBusy(true); setError(null);
+    try {
+      await unconfirmEzTransOrder(row.id);
+      await logAction(
+        EZTRANS_BATCH_CONFIRMED_ACTION,
+        order.order_ref,
+        `Removed from the Goorooship day batch — ${carrier || '—'} ${tracking.trim() || '—'}. ` +
+        `The booking stands; it is simply not in today's email.`,
+        { entityType: 'order', entityId: order.id, unitSerial: placement.serial },
+      );
+      setConfirmedAt(null);
+      onBatchChanged?.();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const sentAt = justSent ?? priorSend?.ts ?? null;
+  const inBatch = !!confirmedAt && !batchSentAt;
+  const batchFiles = batchAttachmentFilenames({
+    customerName: order.customer_name,
+    tracking: tracking.trim() || '—',
+    needsWorksheet: worksheetGoes,
+  });
 
   return (
     <div className={styles.ezTransPanel}>
@@ -321,9 +437,16 @@ export function EzTransPanel({
         </li>
 
         <li>
+          <span className={styles.ezTransStepTitle}>
+            Confirm it for today's batch
+          </span>
           <div className={styles.ezTransStepRow}>
-            <button className={styles.confirmBtn} onClick={handleSend} disabled={!ready || busy}>
-              {busy ? 'Sending…' : sentAt ? `✉ Resend to ${EZTRANS_EMAIL}` : `✉ Send confirmation to ${EZTRANS_EMAIL}`}
+            <button className={styles.confirmBtn} onClick={handleConfirm} disabled={!ready || busy}>
+              {busy
+                ? 'Saving…'
+                : inBatch
+                  ? '✓ Update this order in today’s batch'
+                  : '✓ Confirm carrier, tracking + packing list'}
             </button>
             <button
               type="button"
@@ -336,13 +459,60 @@ export function EzTransPanel({
                 : 'Preview / edit email + packing list'}</button>
             {!ready ? (
               <span className={styles.ezTransHint}>
-                Carrier, tracking number and the label PDF are all required before this can be sent.
+                Carrier, tracking number and the label PDF are all required before this
+                order can join a batch.
               </span>
-            ) : worksheetGoes ? (
+            ) : (
               <span className={styles.ezTransHint}>
-                UPS brokers this entry — the signed pesticide worksheet is attached too.
+                Confirming adds it to today's Goorooship email — sent from the button at
+                the bottom of the queue.{worksheetGoes
+                  ? ' UPS brokers this entry — the signed pesticide worksheet goes with it.'
+                  : ''}
               </span>
-            ) : null}
+            )}
+          </div>
+
+          {batchSentAt ? (
+            <div className={styles.ezTransSent}>
+              ✓ Went out in the Goorooship batch of {new Date(batchSentAt).toLocaleString()}.
+              Confirm again only to send a correction.
+            </div>
+          ) : inBatch ? (
+            <div className={styles.ezTransBatchChip}>
+              <span>
+                ✓ In today's batch since {new Date(confirmedAt as string).toLocaleTimeString()} —
+                it goes out with {batchFiles.combined}
+                {batchFiles.worksheet ? ` and ${batchFiles.worksheet}` : ''}.
+              </span>
+              <button
+                type="button"
+                className={styles.ezTransPreviewToggle}
+                onClick={handleUnconfirm}
+                disabled={busy}
+              >Remove from today's batch</button>
+            </div>
+          ) : null}
+        </li>
+
+        <li>
+          {/* The old path, kept but demoted. EZ Trans wants one email a day,
+              and an order mailed on its own is one the picker has to reconcile
+              against the batch by hand — but a single rush shipment at 6pm is
+              a real thing, so the button stays where it always was. Sending
+              here also stamps the row as sent, so it cannot go out twice. */}
+          <span className={styles.ezTransStepTitle}>Or send this one order on its own</span>
+          <div className={styles.ezTransStepRow}>
+            <button
+              type="button"
+              className={styles.ezTransPreviewToggle}
+              onClick={handleSend}
+              disabled={!ready || busy}
+            >
+              {busy ? 'Sending…' : sentAt ? `✉ Resend to ${EZTRANS_EMAIL} now` : `✉ Send to ${EZTRANS_EMAIL} now`}
+            </button>
+            <span className={styles.ezTransHint}>
+              For a rush shipment that cannot wait for the end-of-day email.
+            </span>
           </div>
         </li>
       </ol>

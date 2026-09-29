@@ -1054,3 +1054,126 @@
   font-size: 11px;
   line-height: 1.5;
 }
+
+/* --- Today's Goorooship batch -------------------------------------------
+   EZ Trans asked for one email a day rather than one per box, so the
+   end-of-day send sits under the queue rather than inside any one order's
+   step. queuePage exists only to stack the two: the grid above keeps its own
+   fixed height and this bar follows it down the page. */
+.queuePage {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.batchFooter {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-raised);
+  padding: var(--space-4) var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.batchFooterHead {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.batchTitle {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  color: var(--color-ink);
+}
+
+.batchCount {
+  font-size: 11px;
+  color: var(--color-ink-muted);
+}
+
+.batchEmpty {
+  font-size: 11px;
+  color: var(--color-ink-muted);
+  line-height: 1.55;
+  margin: 0;
+  max-width: 68ch;
+}
+
+.batchList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  /* A busy day is a long list, and the button under it must stay reachable
+     without scrolling the whole page past the queue. */
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.batchItem {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  background: var(--color-surface);
+}
+
+/* Already mailed: still listed, because "did this one go?" is the question
+   the operator is asking, but visibly not part of what the button will send. */
+.batchItemSent { opacity: 0.6; }
+
+.batchItemMain {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--color-ink-muted);
+}
+
+.batchItemMain strong { font-size: 12px; color: var(--color-ink); }
+
+.batchTag {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--color-info-bg);
+  border: 1px solid var(--color-info-border);
+  color: var(--color-ink-muted);
+}
+
+.batchDocs {
+  font-family: ui-monospace, monospace;
+  font-size: 10px;
+  color: var(--color-ink-faint);
+  margin-top: 2px;
+  word-break: break-all;
+}
+
+.batchActions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+/* The "in today's batch" line inside the step-3 EZ Trans panel. */
+.ezTransBatchChip {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--color-ink-muted);
+  background: var(--color-info-bg);
+  border: 1px solid var(--color-info-border);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+}

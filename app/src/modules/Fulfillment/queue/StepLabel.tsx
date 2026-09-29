@@ -12,11 +12,15 @@ const AMAZON_URL     = 'https://www.amazon.com/gp/your-account/order-history';
 export function StepLabel({
   row,
   order,
+  onBatchChanged,
 }: {
   row: FulfillmentQueueRow;
   /** The whole order: the EZ Trans packing list needs the customer's full
    *  name, address, email and phone, not just the country. */
   order: EzTransOrder;
+  /** Passed through to the EZ Trans panel: confirming an order into the day's
+   *  Goorooship batch has to reach the footer at the bottom of the queue. */
+  onBatchChanged?: () => void;
 }) {
   const country = order.country;
   // Seeded from the row so a label already attached — by the EZ Trans panel
@@ -64,6 +68,7 @@ export function StepLabel({
         row={row}
         order={order}
         onLabelSaved={({ carrier: c, tracking_num: t }) => { setCarrier(c); setTracking(t); }}
+        onBatchChanged={onBatchChanged}
       />
 
       <div style={{

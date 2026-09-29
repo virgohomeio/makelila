@@ -5,8 +5,21 @@ import type { ReactElement } from 'react';
 
 type SaveLabelInput = { carrier: string; tracking_num: string; label_pdf?: File };
 
-const { placementMock, saveLabelMock, sendMock, logActionMock } = vi.hoisted(() => ({
+const {
+  placementMock, saveLabelMock, sendMock, logActionMock,
+  confirmMock, unconfirmMock, markSentMock,
+} = vi.hoisted(() => ({
   placementMock: vi.fn(),
+  confirmMock: vi.fn(
+    (queueId: string, input: {
+      carrier: string; tracking_num: string; label_pdf?: File; packing_list?: string | null;
+    }) => {
+      void queueId; void input;
+      return Promise.resolve({ confirmed_at: '2026-09-29T18:00:00Z', label_pdf_path: null });
+    },
+  ),
+  unconfirmMock: vi.fn((queueId: string) => { void queueId; return Promise.resolve(); }),
+  markSentMock: vi.fn((queueId: string) => { void queueId; return Promise.resolve(); }),
   // Declared with its real signature so `mock.calls[0]` is typed and the
   // assertions below need no cast — a cast in a test file is a tsc -b failure
   // waiting to happen, and tsc -b is what gates the deploy.
@@ -45,6 +58,20 @@ vi.mock('../../../lib/eztrans', async () => {
       source: 'built-in' as const,
       loading: false,
     }),
+  };
+});
+
+// The day-batch writes go straight to Supabase, which does not exist in a
+// jsdom run. Only the three mutations are stubbed — the filename helpers stay
+// real, because what an attachment is called is part of what this panel
+// promises the operator.
+vi.mock('../../../lib/eztransBatch', async () => {
+  const actual = await vi.importActual<typeof import('../../../lib/eztransBatch')>('../../../lib/eztransBatch');
+  return {
+    ...actual,
+    confirmEzTransOrder: confirmMock,
+    unconfirmEzTransOrder: unconfirmMock,
+    markEzTransSentOutsideBatch: markSentMock,
   };
 });
 
@@ -100,7 +127,8 @@ function fillLabel() {
   fireEvent.change(screen.getByLabelText(/shipping label pdf/i), { target: { files: [labelFile()] } });
 }
 
-const sendButton = () => screen.getByRole('button', { name: /send confirmation to cs@goorooship\.ca/i });
+const sendButton = () => screen.getByRole('button', { name: /send to cs@goorooship\.ca now/i });
+const confirmButton = () => screen.getByRole('button', { name: /confirm carrier, tracking \+ packing list/i });
 
 describe('EzTransPanel', () => {
   beforeEach(() => {
@@ -109,6 +137,9 @@ describe('EzTransPanel', () => {
     sendMock.mockClear();
     localStorage.clear();
     logActionMock.mockClear();
+    confirmMock.mockClear();
+    unconfirmMock.mockClear();
+    markSentMock.mockClear();
   });
 
   it('stays out of the way for a unit that is not at EZ Trans', () => {
@@ -123,17 +154,19 @@ describe('EzTransPanel', () => {
       .toHaveAttribute('href', 'https://app.goorooship.ca/ship');
   });
 
-  it('will not send until carrier, tracking and the label are all present', () => {
+  it('will not confirm or send until carrier, tracking and the label are all present', () => {
     render(<EzTransPanel row={row} order={order} />);
+    expect(confirmButton()).toBeDisabled();
     expect(sendButton()).toBeDisabled();
 
     fireEvent.change(screen.getByLabelText(/carrier/i), { target: { value: 'Purolator' } });
-    expect(sendButton()).toBeDisabled();
+    expect(confirmButton()).toBeDisabled();
 
     fireEvent.change(screen.getByLabelText(/tracking number/i), { target: { value: 'PUR123456789' } });
-    expect(sendButton()).toBeDisabled();
+    expect(confirmButton()).toBeDisabled();
 
     fireEvent.change(screen.getByLabelText(/shipping label pdf/i), { target: { files: [labelFile()] } });
+    expect(confirmButton()).toBeEnabled();
     expect(sendButton()).toBeEnabled();
   });
 
@@ -512,6 +545,99 @@ describe('EzTransPanel', () => {
     expect(override?.body).toBe('Please expedite.');
     expect(override?.packing_list).toBe('# PACKING LIST\nTote bag: 1');
   });
+  it('puts the order in today\u2019s batch with the label and the packing list', async () => {
+    render(<EzTransPanel row={row} order={order} />);
+    fillLabel();
+    fireEvent.click(confirmButton());
+
+    await waitFor(() => expect(confirmMock).toHaveBeenCalledTimes(1));
+    const [queueId, input] = confirmMock.mock.calls[0];
+    expect(queueId).toBe('q-1');
+    expect(input.carrier).toBe('Purolator');
+    expect(input.tracking_num).toBe('PUR123456789');
+    expect(input.label_pdf?.name).toBe('goorooship-label.pdf');
+    // Null, not a copy of the rendered template: a copy stored on the row
+    // would freeze today's wording and beat a later edit in the Templates tab.
+    expect(input.packing_list).toBeNull();
+    // Nothing is emailed by confirming — that is the whole point of the batch.
+    expect(sendMock).not.toHaveBeenCalled();
+  });
+
+  it('pins an edited packing list to the row so the evening send can read it', async () => {
+    // The edit used to live only in this browser's localStorage, which an
+    // end-of-day send from another machine could not see.
+    render(<EzTransPanel row={row} order={order} />);
+    fillLabel();
+    fireEvent.click(screen.getByRole('button', { name: /preview \/ edit email \+ packing list/i }));
+    fireEvent.click(screen.getByRole('button', { name: /edit packing list/i }));
+    fireEvent.change(screen.getByLabelText(/^packing list:$/i), {
+      target: { value: '# PICK LIST\nHandle upright.' },
+    });
+    fireEvent.click(confirmButton());
+
+    await waitFor(() => expect(confirmMock).toHaveBeenCalledTimes(1));
+    expect(confirmMock.mock.calls[0][1].packing_list).toBe('# PICK LIST\nHandle upright.');
+  });
+
+  it('says the order is in today\u2019s batch, and names what will go with it', async () => {
+    render(<EzTransPanel row={row} order={order} />);
+    fillLabel();
+    fireEvent.click(confirmButton());
+    expect(await screen.findByText(/in today's batch since/i)).toBeInTheDocument();
+    expect(screen.getByText(/label-and-packing-list-Juanita-M-Wells-PUR123456789\.pdf/))
+      .toBeInTheDocument();
+  });
+
+  it('lets the operator pull an order back out of today\u2019s batch', async () => {
+    const onBatchChanged = vi.fn();
+    render(
+      <EzTransPanel
+        row={{ ...row, carrier: 'UPS', tracking_num: '1ZABC', label_pdf_path: 'q-1/l.pdf',
+               eztrans_confirmed_at: '2026-09-29T18:00:00Z' }}
+        order={order}
+        onBatchChanged={onBatchChanged}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /remove from today's batch/i }));
+    await waitFor(() => expect(unconfirmMock).toHaveBeenCalledWith('q-1'));
+    expect(onBatchChanged).toHaveBeenCalled();
+  });
+
+  it('keeps an order mailed on its own out of the evening batch', async () => {
+    // Both paths reach the same 3PL. A rush shipment sent from here must not
+    // also ride along in the day's email, or the picker gets the same carton
+    // twice.
+    render(<EzTransPanel row={row} order={order} />);
+    fillLabel();
+    fireEvent.click(sendButton());
+    await waitFor(() => expect(markSentMock).toHaveBeenCalledWith('q-1'));
+  });
+
+  it('does not report a failed bookkeeping write as a failed send', async () => {
+    markSentMock.mockRejectedValueOnce(new Error('network error'));
+    render(<EzTransPanel row={row} order={order} />);
+    fillLabel();
+    fireEvent.click(sendButton());
+    // The email went. The warning says what did not.
+    expect(await screen.findByText(/could not be marked as sent for the day batch/i))
+      .toBeInTheDocument();
+    expect(screen.getByText(/Confirmation, packing list and label sent/i)).toBeInTheDocument();
+  });
+
+  it('shows an order that already went out in a batch rather than offering it again', () => {
+    render(
+      <EzTransPanel
+        row={{ ...row, carrier: 'UPS', tracking_num: '1ZABC', label_pdf_path: 'q-1/l.pdf',
+               eztrans_confirmed_at: '2026-09-29T18:00:00Z',
+               eztrans_batch_sent_at: '2026-09-29T21:00:00Z' }}
+        order={order}
+      />,
+    );
+    expect(screen.getByText(/Went out in the Goorooship batch of/i)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /remove from today's batch/i }))
+      .not.toBeInTheDocument();
+  });
+
   it('shows who is copied, so the recipient list is not a matter of faith', () => {
     render(<EzTransPanel row={row} order={order} />);
     const copied = screen.getByText(/reina@virgohome\.io/).textContent ?? '';
@@ -525,6 +651,8 @@ describe('the UPS pesticide worksheet', () => {
     placementMock.mockReset().mockReturnValue(AT_EZTRANS);
     sendMock.mockClear();
     logActionMock.mockClear();
+    confirmMock.mockClear();
+    markSentMock.mockClear();
     localStorage.clear();
   });
 

@@ -12,6 +12,7 @@ import { StepLabel } from './StepLabel';
 import { StepDock } from './StepDock';
 import { StepEmail } from './StepEmail';
 import { StepFulfilled } from './StepFulfilled';
+import { GoorooshipDailyBatch } from './GoorooshipDailyBatch';
 import { EmptyState } from '../../../components/ui';
 import { indexRefundFlags, useRefundMarks } from '../../../lib/refundedOrders';
 import { isPartsOnlyReplacement } from '../../../lib/replacementTags';
@@ -141,73 +142,97 @@ export default function Queue() {
     && selectedOrder.kind === 'replacement'
     && isPartsOnlyReplacement(selectedOrder);
 
+  // Everything the Goorooship footer needs to name a box and address it. The
+  // orders the page already fetched, narrowed rather than re-read.
+  const batchOrders = useMemo(() => {
+    const m = new Map<string, { id: string; order_ref: string; customer_name: string }>();
+    for (const o of orders) m.set(o.id, { id: o.id, order_ref: o.order_ref, customer_name: o.customer_name });
+    return m;
+  }, [orders]);
+
   return (
-    <div className={styles.queueLayout}>
-      <QueueSidebar
-        readyRows={readyRows}
-        shippedRows={shippedRows}
-        orderLookup={orderLookup}
-        refundFlags={refundFlags}
-        shippedMarks={shippedMarks}
-        selectedId={selectedId}
-        onSelect={id => { setNotice(null); setSelectedId(id); }}
-      />
-      <section className={styles.detail}>
-        {loading ? (
-          <div>Loading…</div>
-        ) : !selected || !selectedOrder ? (
-          <div>
-            {notice && <div className={styles.queueNotice}>✓ {notice}</div>}
-            {/* Was a bare sentence set flush to the top-left of a 1000px-tall
-                empty pane. It now sits in the shared EmptyState, so this
-                reads the same as every other "nothing selected" pane. */}
-            <EmptyState
-              title="No order open"
-              body="Pick an order from the queue to test it, dock it, print its label and send the shipping email."
-            />
-          </div>
-        ) : (
-          <>
-            <QueueHeader
-              row={selected}
-              order={selectedOrder}
-              onRemoved={message => { setNotice(message); setSelectedId(null); }}
-              onStepChanged={() => { void refresh(); }}
-            />
-            {shippedMarks.has(selected.id) ? (
-              // Ahead of the pause banner: "we already sent this" outranks
-              // "fulfillment is paused" for anyone holding a second machine.
-              <AlreadyShippedBanner
-                mark={shippedMarks.get(selected.id)!}
-                orderId={selectedOrder.id}
+    <div className={styles.queuePage}>
+      <div className={styles.queueLayout}>
+        <QueueSidebar
+          readyRows={readyRows}
+          shippedRows={shippedRows}
+          orderLookup={orderLookup}
+          refundFlags={refundFlags}
+          shippedMarks={shippedMarks}
+          selectedId={selectedId}
+          onSelect={id => { setNotice(null); setSelectedId(id); }}
+        />
+        <section className={styles.detail}>
+          {loading ? (
+            <div>Loading…</div>
+          ) : !selected || !selectedOrder ? (
+            <div>
+              {notice && <div className={styles.queueNotice}>✓ {notice}</div>}
+              {/* Was a bare sentence set flush to the top-left of a 1000px-tall
+                  empty pane. It now sits in the shared EmptyState, so this
+                  reads the same as every other "nothing selected" pane. */}
+              <EmptyState
+                title="No order open"
+                body="Pick an order from the queue to test it, dock it, print its label and send the shipping email."
               />
-            ) : selectedOrder.status !== 'approved' && selected.step < 6 ? (
-              <PauseBanner status={selectedOrder.status} orderId={selectedOrder.id} />
-            ) : (
-              <>
-                {/* Assign and Test are both about a machine: pick one off the
-                    shelf, confirm its test report. A replacement carrying only
-                    parts has neither, and the picker is the one thing an
-                    operator holding a lid must not use — assigning a unit would
-                    reserve it and mark it shipped against an order that never
-                    contained it. Those two steps become "put it in the mail and
-                    say so"; Label, Dock and Email still apply to a parts box,
-                    so they are left alone. */}
-                {selected.step === 1 && (partsOnly
-                  ? <StepPartsOnly row={selected} order={selectedOrder} onShipped={() => { void refresh(); }} />
-                  : <StepAssign row={selected} />)}
-                {selected.step === 2 && (partsOnly
-                  ? <StepPartsOnly row={selected} order={selectedOrder} onShipped={() => { void refresh(); }} />
-                  : <StepTest row={selected} />)}
-                {selected.step === 3 && <StepLabel row={selected} order={selectedOrder} />}
-                {selected.step === 4 && <StepDock row={selected} />}
-                {selected.step === 5 && <StepEmail row={selected} order={selectedOrder} onSent={() => { void refresh(); }} />}
-                {selected.step === 6 && <StepFulfilled row={selected} order={selectedOrder} />}
-              </>
-            )}
-          </>
-        )}
-      </section>
+            </div>
+          ) : (
+            <>
+              <QueueHeader
+                row={selected}
+                order={selectedOrder}
+                onRemoved={message => { setNotice(message); setSelectedId(null); }}
+                onStepChanged={() => { void refresh(); }}
+              />
+              {shippedMarks.has(selected.id) ? (
+                // Ahead of the pause banner: "we already sent this" outranks
+                // "fulfillment is paused" for anyone holding a second machine.
+                <AlreadyShippedBanner
+                  mark={shippedMarks.get(selected.id)!}
+                  orderId={selectedOrder.id}
+                />
+              ) : selectedOrder.status !== 'approved' && selected.step < 6 ? (
+                <PauseBanner status={selectedOrder.status} orderId={selectedOrder.id} />
+              ) : (
+                <>
+                  {/* Assign and Test are both about a machine: pick one off the
+                      shelf, confirm its test report. A replacement carrying only
+                      parts has neither, and the picker is the one thing an
+                      operator holding a lid must not use — assigning a unit would
+                      reserve it and mark it shipped against an order that never
+                      contained it. Those two steps become "put it in the mail and
+                      say so"; Label, Dock and Email still apply to a parts box,
+                      so they are left alone. */}
+                  {selected.step === 1 && (partsOnly
+                    ? <StepPartsOnly row={selected} order={selectedOrder} onShipped={() => { void refresh(); }} />
+                    : <StepAssign row={selected} />)}
+                  {selected.step === 2 && (partsOnly
+                    ? <StepPartsOnly row={selected} order={selectedOrder} onShipped={() => { void refresh(); }} />
+                    : <StepTest row={selected} />)}
+                  {selected.step === 3 && (
+                    <StepLabel
+                      row={selected}
+                      order={selectedOrder}
+                      onBatchChanged={() => { void refresh(); }}
+                    />
+                  )}
+                  {selected.step === 4 && <StepDock row={selected} />}
+                  {selected.step === 5 && <StepEmail row={selected} order={selectedOrder} onSent={() => { void refresh(); }} />}
+                  {selected.step === 6 && <StepFulfilled row={selected} order={selectedOrder} />}
+                </>
+              )}
+            </>
+          )}
+        </section>
+      </div>
+      {/* EZ Trans asked for one email a day rather than one per box, so the
+          end-of-day send lives at the bottom of the page the orders are worked
+          from rather than inside any one order's step. */}
+      <GoorooshipDailyBatch
+        rows={allRows}
+        orders={batchOrders}
+        onSent={() => { void refresh(); }}
+      />
     </div>
   );
 }
