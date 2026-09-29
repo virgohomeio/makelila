@@ -10,6 +10,11 @@ import {
   type Customer, type CustomerAdditionalUser,
 } from '../../lib/customers';
 import { useOrders } from '../../lib/orders';
+import {
+  useCustomerAddressIndex, resolveCustomerAddress, hasResolvedAddress,
+  formatAddressLine, formatAddressBlock,
+  type ResolvedCustomerAddress,
+} from '../../lib/customerAddress';
 import { formatMoney } from '../../lib/money';
 import { useUnits } from '../../lib/stock';
 import { useServiceTickets } from '../../lib/service';
@@ -99,6 +104,15 @@ export default function Customers() {
     (c: Customer) => serialsForCustomer(c, serialIndex),
     [serialIndex],
   );
+  // The address comes off the customer's latest ORDER, which is the copy Sales
+  // verifies and the freight label is printed from. The `customers` columns are
+  // only the fallback for people who have never ordered — see
+  // lib/customerAddress for why a second stored copy was the bug.
+  const { index: addressIndex } = useCustomerAddressIndex();
+  const addressFor = useCallback(
+    (c: Customer) => resolveCustomerAddress(c, addressIndex),
+    [addressIndex],
+  );
   // Every household user in the directory, so the search box can look past the
   // purchaser's name (the per-customer hook only covers the open panel).
   const { byCustomerId: usersByCustomerId } = useAllCustomerAdditionalUsers();
@@ -128,13 +142,13 @@ export default function Customers() {
       if (country === 'US' && c.country !== 'US') continue;
       if (country === 'other' && (c.country === 'CA' || c.country === 'US')) continue;
       if (noEmailOnly && c.email) continue;
-      if (noAddressOnly && (c.city || c.region || c.postal_code)) continue;
+      if (noAddressOnly && hasResolvedAddress(addressFor(c))) continue;
       const m = matchCustomerSearch(c, usersByCustomerId.get(c.id) ?? NO_HOUSEHOLD_USERS, search);
       if (!m.matched) continue;
       rows.push({ customer: c, via: m.via });
     }
     return rows.sort((a, b) => a.customer.full_name.localeCompare(b.customer.full_name));
-  }, [customers, country, noEmailOnly, noAddressOnly, search, usersByCustomerId]);
+  }, [customers, country, noEmailOnly, noAddressOnly, search, usersByCustomerId, addressFor]);
 
   const stats = useMemo(() => {
     const s = { total: 0, ca: 0, us: 0, other: 0, withEmail: 0, withPhone: 0, withAddress: 0 };
@@ -146,7 +160,7 @@ export default function Customers() {
       else s.other++;
       if (c.email) s.withEmail++;
       if (c.phone) s.withPhone++;
-      if (c.city || c.region || c.postal_code) s.withAddress++;
+      if (hasResolvedAddress(addressFor(c))) s.withAddress++;
       if (c.last_synced_at) {
         const t = new Date(c.last_synced_at).getTime();
         if (t > lastSync) lastSync = t;
@@ -160,7 +174,7 @@ export default function Customers() {
       noAddress: s.total - s.withAddress,
       lastSync: lastSync ? new Date(lastSync) : null,
     };
-  }, [customers]);
+  }, [customers, addressFor]);
 
   const handleSync = async () => {
     setBusy(true); setError(null); setToast(null);
@@ -433,6 +447,7 @@ export default function Customers() {
                   via={via}
                   selected={c.id === selectedCustomerId}
                   serials={serialsFor(c)}
+                  address={addressFor(c)}
                   onSelect={() => setSelectedCustomerId(c.id)}
                 />
               ))}
@@ -445,6 +460,7 @@ export default function Customers() {
     {selectedCustomer && (
       <CustomerDetailPanel
         customer={selectedCustomer}
+        address={addressFor(selectedCustomer)}
         allCustomers={customers}
         onChanged={() => { void refreshCustomers(); }}
         onClose={() => setSelectedCustomerId(null)}
@@ -533,11 +549,13 @@ function DirectorySkeleton() {
 }
 
 function CustomerRow(
-  { c, serials, via, selected, onSelect }:
-  { c: Customer; serials: string[]; via: string | null; selected: boolean; onSelect: () => void },
+  { c, serials, address, via, selected, onSelect }:
+  {
+    c: Customer; serials: string[]; address: ResolvedCustomerAddress;
+    via: string | null; selected: boolean; onSelect: () => void;
+  },
 ) {
-  const cityRegion = [c.city, c.region].filter(Boolean).join(', ');
-  const addr = [c.address_line, cityRegion, c.postal_code, c.country].filter(Boolean).join(' · ');
+  const addr = formatAddressLine(address);
   const dash = <span className={styles.dash}>—</span>;
   return (
     <tr
@@ -581,8 +599,13 @@ function CustomerRow(
 // Contact details — read-only until you hit Edit. Email and phone are
 // operator-editable here: makelila is the system of record and the HubSpot sync
 // only fills BLANK columns, so a correction made here is never clobbered.
-// Address stays read-only (it's per-order on the Order Review side).
-function ContactSection({ customer, onChanged }: { customer: Customer; onChanged: () => void }) {
+// The address is read-only and comes off the order, because that is the copy
+// Sales verifies and the label is printed from — it says which order, so an
+// operator who needs to change it knows where to go.
+function ContactSection(
+  { customer, address, onChanged }:
+  { customer: Customer; address: ResolvedCustomerAddress; onChanged: () => void },
+) {
   const [editing, setEditing] = useState(false);
   const [email, setEmail] = useState(customer.email ?? '');
   const [phone, setPhone] = useState(customer.phone ?? '');
@@ -597,9 +620,18 @@ function ContactSection({ customer, onChanged }: { customer: Customer; onChanged
     setErr(null);
   }, [customer.id, customer.email, customer.phone]);
 
-  const cityRegion = [customer.city, customer.region].filter(Boolean).join(', ');
-  const fullAddress = [customer.address_line, cityRegion, customer.postal_code, customer.country]
-    .filter(Boolean).join(', ');
+  const fullAddress = formatAddressBlock(address);
+  // Where the address came from. An unverified order address is still the one we
+  // ship to — it just hasn't been checked against Google yet, and saying so is
+  // the difference between a confirmed address and an assumed one.
+  const addressNote =
+    address.source === 'directory'
+      ? (fullAddress ? 'From the customer record — no order address on file.' : null)
+      : `From order ${address.orderRef}${
+          address.verifiedAt
+            ? ` · verified ${new Date(address.verifiedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
+            : ' · not yet verified in Sales'
+        }`;
 
   // Compare case-insensitively: we store lowercased, but rows seeded before that
   // may hold mixed case, and re-typing the same address shouldn't read as a change.
@@ -630,6 +662,7 @@ function ContactSection({ customer, onChanged }: { customer: Customer; onChanged
         <PanelRow label="Email" value={customer.email} />
         <PanelRow label="Phone" value={customer.phone} />
         <PanelRow label="Address" value={fullAddress} multiline />
+        {addressNote && <div className={styles.addressSource}>{addressNote}</div>}
         <div style={{ marginTop: 6 }}>
           <button className={styles.linkBtn} onClick={() => setEditing(true)}>
             Edit email / phone
@@ -658,6 +691,7 @@ function ContactSection({ customer, onChanged }: { customer: Customer; onChanged
         </div>
       )}
       <PanelRow label="Address" value={fullAddress} multiline />
+      {addressNote && <div className={styles.addressSource}>{addressNote}</div>}
       <div style={{ marginTop: 6, display: 'flex', gap: 8 }}>
         <button className={styles.linkBtn} disabled={busy || !dirty} onClick={() => void save()}>
           {busy ? 'Saving…' : 'Save'}
@@ -862,8 +896,12 @@ function PrimaryUserSection({ customer, onChanged }: { customer: Customer; onCha
   );
 }
 
-function CustomerDetailPanel({ customer, allCustomers, onChanged, onClose }: {
+function CustomerDetailPanel({ customer, address, allCustomers, onChanged, onClose }: {
   customer: Customer;
+  // Resolved by the directory and passed in, so the list row and the open panel
+  // cannot show different addresses for the same person — exactly the drift
+  // lib/heldUnits describes for serials.
+  address: ResolvedCustomerAddress;
   allCustomers: Customer[];
   onChanged: () => void;
   onClose: () => void;
@@ -908,7 +946,7 @@ function CustomerDetailPanel({ customer, allCustomers, onChanged, onClose }: {
 
         <div className={styles.panelBody}>
           <NameSection customer={customer} onChanged={onChanged} />
-          <ContactSection customer={customer} onChanged={onChanged} />
+          <ContactSection customer={customer} address={address} onChanged={onChanged} />
 
           <PurchaserLinkSection customer={customer} allCustomers={allCustomers} onChanged={onChanged} />
           <PrimaryUserSection customer={customer} onChanged={onChanged} />

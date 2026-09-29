@@ -4,6 +4,10 @@ import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from './supabase';
 import { logAction } from './activityLog';
 import { DEFAULT_RATES, type ProfitabilityRates, type AcquisitionSpendRow } from './profitability';
 import { batchCensus, type UnitCensus } from './batchLandedCost';
+import {
+  ADDRESS_ORDER_COLUMNS, buildCustomerAddressIndex, resolveCustomerAddress,
+  type AddressOrder,
+} from './customerAddress';
 
 export type Customer = {
   id: string;
@@ -1548,14 +1552,19 @@ export async function exportPurchasers(opts: { minusRefunds: boolean }): Promise
   count: number;
   excluded: number;
 }> {
-  // 1. Set of customer emails (lowercased) who have purchased
-  const [{ data: orderEmails }, { data: unitNames }] = await Promise.all([
-    supabase.from('orders').select('customer_email').not('customer_email', 'is', null),
+  // 1. Set of customer emails (lowercased) who have purchased. The same rows
+  //    carry the shipping addresses the export writes out — the address on the
+  //    customer's latest order, not the `customers` snapshot, which has no
+  //    second address line (see lib/customerAddress).
+  const [{ data: orderRows }, { data: unitNames }] = await Promise.all([
+    supabase.from('orders').select(ADDRESS_ORDER_COLUMNS),
     supabase.from('units').select('customer_name').eq('status', 'shipped'),
   ]);
+  const orders = (orderRows ?? []) as unknown as AddressOrder[];
+  const addressIndex = buildCustomerAddressIndex(orders);
   const purchaserEmails = new Set<string>();
   const purchaserNames = new Set<string>();
-  for (const r of (orderEmails ?? []) as { customer_email: string | null }[]) {
+  for (const r of orders) {
     if (r.customer_email) purchaserEmails.add(r.customer_email.toLowerCase().trim());
   }
   for (const r of (unitNames ?? []) as { customer_name: string | null }[]) {
@@ -1586,7 +1595,7 @@ export async function exportPurchasers(opts: { minusRefunds: boolean }): Promise
   // 3. Pull all customers, filter
   const { data: customers, error } = await supabase
     .from('customers')
-    .select('email, first_name, last_name, full_name, phone, address_line, city, region, postal_code, country, onboard_date')
+    .select('id, email, first_name, last_name, full_name, phone, address_line, city, region, postal_code, country, onboard_date')
     .order('full_name', { ascending: true });
   if (error) throw new Error(`Customer load failed: ${error.message}`);
 
@@ -1608,8 +1617,11 @@ export async function exportPurchasers(opts: { minusRefunds: boolean }): Promise
     rows.push(c);
   }
 
-  // 4. CSV
-  const header = ['email','first_name','last_name','phone','address_line','city','region','postal_code','country','onboard_date'];
+  // 4. CSV. `address_line2` is its own column rather than being folded into
+  //    address_line: an apartment number jammed onto the street line is not an
+  //    address Klaviyo (or a courier) can read back apart, and address2 is a
+  //    field both of them have.
+  const header = ['email','first_name','last_name','phone','address_line','address_line2','city','region','postal_code','country','onboard_date'];
   const esc = (v: string | null | undefined): string => {
     if (v == null) return '';
     const s = String(v);
@@ -1617,9 +1629,10 @@ export async function exportPurchasers(opts: { minusRefunds: boolean }): Promise
   };
   const lines = [header.join(',')];
   for (const r of rows) {
+    const a = resolveCustomerAddress(r as unknown as Customer, addressIndex);
     lines.push([
       esc(r.email), esc(r.first_name), esc(r.last_name), esc(r.phone),
-      esc(r.address_line), esc(r.city), esc(r.region), esc(r.postal_code), esc(r.country),
+      esc(a.line1), esc(a.line2), esc(a.city), esc(a.region), esc(a.postal_code), esc(a.country),
       esc(r.onboard_date),
     ].join(','));
   }

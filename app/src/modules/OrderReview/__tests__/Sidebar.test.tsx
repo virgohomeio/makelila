@@ -16,6 +16,7 @@ function mkOrder(partial: Partial<Order> & { id: string; status: Order['status']
     address_line2: null,
     city: 'Portland',
     region_state: 'OR',
+    postal_code: '97201',
     country: 'US',
     address_verdict: 'house',
     address_verdict_source: 'sync-guess',
