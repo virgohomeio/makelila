@@ -197,12 +197,16 @@ export function EzTransPanel({
         ...(pdf ? { label_pdf: pdf } : {}),
       });
       onLabelSaved?.({ carrier, tracking_num: tracking.trim() });
+      // Each document travels only when it was actually edited. Sending a copy
+      // of the rendered wording alongside a packing-list edit reads to the edge
+      // function as an operator edit of the wording too, which makes it skip
+      // the email_templates lookup and mail the built-in default over anything
+      // saved in the Templates tab — the edit "not saving" when the mail went.
       const sent = await sendEzTransBooking(
         row.id,
         edited || packingEdited
           ? {
-              subject: subjectValue,
-              body: bodyValue,
+              ...(edited ? { subject: subjectValue, body: bodyValue } : {}),
               ...(packingEdited ? { packing_list: packingValue } : {}),
             }
           : undefined,
@@ -213,6 +217,14 @@ export function EzTransPanel({
         ? { wording: sent.wording, packingList: sent.packing_list }
         : null);
       setSentFiles(sent.attachments ?? null);
+      // What the server says it used, not what this panel meant to send. The
+      // two disagreeing is precisely the failure worth recording: an operator
+      // asking "did my edit actually go out?" has only the activity trail to
+      // answer from, and a trail that reports the intent cannot answer it.
+      // Falls back to the panel's own flags for a response that predates the
+      // server reporting either.
+      const wordingWentEdited = sent.wording ? sent.wording === 'edited' : edited;
+      const listWentEdited = sent.packing_list ? sent.packing_list === 'edited' : packingEdited;
       await logAction(
         EZTRANS_SENT_ACTION,
         order.order_ref,
@@ -222,8 +234,8 @@ export function EzTransPanel({
         `tracking ${tracking.trim()}` +
         `${sent.pesticide_worksheet === 'unsigned' ? ' · worksheet UNSIGNED' : ''}` +
         `${sent.combined === false ? ' · label and packing list sent separately' : ''}` +
-        `${edited ? ' · wording edited for this order' : ''}` +
-        `${packingEdited ? ' · packing list edited for this order' : ''}` +
+        `${wordingWentEdited ? ' · wording edited for this order' : ''}` +
+        `${listWentEdited ? ' · packing list edited for this order' : ''}` +
         `${sent.sent_via === 'gmail'
             ? ` · sent from ${sent.from ?? 'the sender'} — in their Gmail Sent folder`
             : ' · sent via Resend — no copy in the sender\'s Sent folder'}` +

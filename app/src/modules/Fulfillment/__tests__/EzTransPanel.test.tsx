@@ -306,7 +306,57 @@ describe('EzTransPanel', () => {
 
     await waitFor(() => expect(sendMock).toHaveBeenCalledTimes(1));
     const [, override] = sendMock.mock.calls[0];
-    expect(override?.body).toContain('Hello EZ Trans team');
+    // Absent, not a copy of the rendered default — the same rule the packing
+    // list has always followed. Sent, it is indistinguishable from an operator
+    // edit, and the edge function would skip the email_templates lookup and
+    // mail the built-in default over wording saved in the Templates tab.
+    expect(override?.subject).toBeUndefined();
+    expect(override?.body).toBeUndefined();
+    expect(override?.packing_list).toBe('# PICK LIST');
+  });
+
+  it('does not claim a wording edit in the audit trail when only the list was touched', async () => {
+    render(<EzTransPanel row={row} order={order} />);
+    fillLabel();
+    fireEvent.click(screen.getByRole('button', { name: /preview \/ edit email \+ packing list/i }));
+    fireEvent.click(screen.getByRole('button', { name: /edit packing list/i }));
+    fireEvent.change(screen.getByLabelText(/^packing list:$/i), { target: { value: '# PICK LIST' } });
+    fireEvent.click(sendButton());
+
+    await waitFor(() => expect(logActionMock).toHaveBeenCalledTimes(1));
+    const detail = String(logActionMock.mock.calls[0][2]);
+    expect(detail).toContain('packing list edited for this order');
+    expect(detail).not.toContain('wording edited for this order');
+  });
+
+  it('records what the server actually used, not what the panel hoped', async () => {
+    // "Did my edit go out?" has to be answerable from the activity trail. The
+    // panel's own flags say what it meant to send; only the response says what
+    // was used, and the two disagreeing is exactly the bug worth catching.
+    sendMock.mockResolvedValueOnce({
+      email_id: 're_1', wording: 'template', packing_list: 'template',
+    });
+    render(<EzTransPanel row={row} order={order} />);
+    fillLabel();
+    fireEvent.click(screen.getByRole('button', { name: /preview \/ edit email \+ packing list/i }));
+    fireEvent.click(screen.getByRole('button', { name: /edit this one/i }));
+    fireEvent.change(screen.getByLabelText(/^body:$/i), { target: { value: 'Please expedite.' } });
+    fireEvent.click(sendButton());
+
+    await waitFor(() => expect(logActionMock).toHaveBeenCalledTimes(1));
+    expect(String(logActionMock.mock.calls[0][2])).not.toContain('wording edited for this order');
+  });
+
+  it('sends a cleared packing list rather than falling back to the stock one', async () => {
+    render(<EzTransPanel row={row} order={order} />);
+    fillLabel();
+    fireEvent.click(screen.getByRole('button', { name: /preview \/ edit email \+ packing list/i }));
+    fireEvent.click(screen.getByRole('button', { name: /edit packing list/i }));
+    fireEvent.change(screen.getByLabelText(/^packing list:$/i), { target: { value: '' } });
+    fireEvent.click(sendButton());
+
+    await waitFor(() => expect(sendMock).toHaveBeenCalledTimes(1));
+    expect(sendMock.mock.calls[0][1]?.packing_list).toBe('');
   });
   it('tells the operator when the booking went out from a different address', async () => {
     sendMock.mockResolvedValueOnce({

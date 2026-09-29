@@ -425,8 +425,12 @@ export function useEzTransTemplate(): {
  *  and `warning` explains why — worth showing, since the difference is whether
  *  there is any record of the send on the sender's own side.
  *
- *  `override` is what the operator typed for this one order — the subject and
- *  body, and optionally the packing list. Whatever the wording, the edge
+ *  `override` is what the operator typed for this one order. The two documents
+ *  travel independently: pass the wording only when the wording was edited and
+ *  the packing list only when the list was, because the edge function reads an
+ *  absent field as "use the saved template". A copy of the rendered default
+ *  sent here is indistinguishable from an edit, and would throw away wording
+ *  saved in the Templates tab. Whatever the wording, the edge
  *  function fills every {{variable}} from the queue row, the order and the
  *  shelf row, and pulls the label straight out of storage: an edit changes
  *  what the documents say, never which shipment they describe. */
@@ -448,7 +452,7 @@ export type EzTransSendResult = {
 
 export async function sendEzTransBooking(
   queueId: string,
-  override?: { subject: string; body: string; packing_list?: string },
+  override?: { subject?: string; body?: string; packing_list?: string },
 ): Promise<EzTransSendResult> {
   const { data: { session } } = await supabase.auth.getSession();
   const res = await fetch(`${SUPABASE_URL}/functions/v1/send-eztrans-booking`, {
@@ -458,10 +462,16 @@ export async function sendEzTransBooking(
       apikey: SUPABASE_ANON_KEY,
       Authorization: `Bearer ${session?.access_token ?? SUPABASE_ANON_KEY}`,
     },
+    // Presence, not truthiness. The edge function reads a missing field as
+    // "use the saved template", so a document the operator cleared has to go
+    // on the wire as the empty string it is — dropped as falsy, the server
+    // would quietly mail the 3PL the stock document instead, and its own "an
+    // edited packing list cannot be empty" guard would never run.
     body: JSON.stringify({
       queue_id: queueId,
-      ...(override ? { subject: override.subject, body: override.body } : {}),
-      ...(override?.packing_list ? { packing_list: override.packing_list } : {}),
+      ...(override?.subject !== undefined ? { subject: override.subject } : {}),
+      ...(override?.body !== undefined ? { body: override.body } : {}),
+      ...(override?.packing_list !== undefined ? { packing_list: override.packing_list } : {}),
     }),
   });
   const bodyText = await res.text();
