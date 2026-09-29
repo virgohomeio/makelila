@@ -86,6 +86,12 @@ export type Order = {
   address_line2: string | null;
   city: string;
   region_state: string | null;
+  // The postal code on the order. Declared late (2026-09-29): the column has
+  // always been there and `createOrder` has always written it, but the type
+  // omitted it, so the only postal codes the frontend could read were the
+  // verify-address pair below — and those are null on every order nobody has
+  // run Verify on.
+  postal_code: string | null;
   country: 'US' | 'CA';
   // Dwelling type. ALWAYS read alongside address_verdict_source — the value is
   // only as good as where it came from, and 'sync-guess' (the default for every
