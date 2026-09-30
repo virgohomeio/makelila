@@ -3,6 +3,7 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { QueueSidebar, type QueueOrderSummary } from '../queue/QueueSidebar';
 import type { FulfillmentQueueRow } from '../../../lib/fulfillment';
+import type { GoorooshipSend } from '../../../lib/pickupQueue';
 
 function mkRow(partial: Partial<FulfillmentQueueRow> & { id: string; order_id: string }): FulfillmentQueueRow {
   return {
@@ -324,6 +325,90 @@ describe('QueueSidebar', () => {
         expect(screen.queryByLabelText('Search orders ready to ship')).not.toBeInTheDocument();
         expect(screen.getByText(/Nothing queued/i)).toBeInTheDocument();
       });
+    });
+  });
+
+  // --- To be picked up -----------------------------------------------------
+  //
+  // The third rail. The sidebar does not decide who belongs in it — the page
+  // splits the rows (lib/pickupQueue.ts) — so what is tested here is that it
+  // renders as its own tab, says why each row is in it, and stays out of the
+  // other two.
+  describe('the To be picked up tab', () => {
+    const dockRow = mkRow({
+      id: 'q9', order_id: 'o1', step: 4,
+      label_confirmed_at: '2026-09-29T20:00:00Z',
+      carrier: 'UPS', tracking_num: '1Z2985EADK92030095',
+    });
+    const sends = new Map<string, GoorooshipSend>([
+      ['o1', { at: '2026-09-29T20:12:00Z', via: 'booking' }],
+    ]);
+
+    const openPickup = () => {
+      render(<MemoryRouter><QueueSidebar
+        readyRows={[row2]} pickupRows={[dockRow]} shippedRows={[shippedRow]}
+        orderLookup={orders} goorooshipSends={sends}
+        selectedId={null} onSelect={vi.fn()}
+      /></MemoryRouter>);
+      fireEvent.click(screen.getByRole('button', { name: /to be picked up 1/i }));
+    };
+
+    it('sits between Ready to ship and Shipped, with its own count', () => {
+      render(<MemoryRouter><QueueSidebar
+        readyRows={[row1, row2]} pickupRows={[dockRow]} shippedRows={[shippedRow]}
+        orderLookup={orders} selectedId={null} onSelect={vi.fn()}
+      /></MemoryRouter>);
+      const tabs = screen.getAllByRole('button')
+        .filter(b => /ready to ship|to be picked up|shipped/i.test(b.textContent ?? ''));
+      expect(tabs.map(b => b.textContent)).toEqual([
+        'Ready to ship 2', 'To be picked up 1', 'Shipped 1',
+      ]);
+    });
+
+    it('shows its rows only under its own tab', () => {
+      openPickup();
+      expect(screen.getByText('Alice')).toBeInTheDocument();
+      // row2 (Bob) is the ready row and must not bleed through.
+      expect(screen.queryByText('Bob')).not.toBeInTheDocument();
+    });
+
+    it('badges each row with the Goorooship email that put it there', () => {
+      openPickup();
+      expect(screen.getByText(/GOOROOSHIP NOTIFIED/i)).toBeInTheDocument();
+      expect(screen.getByTitle(/own booking email/i)).toBeInTheDocument();
+    });
+
+    it('does not badge the same order under Ready to ship', () => {
+      render(<MemoryRouter><QueueSidebar
+        readyRows={[dockRow]} shippedRows={[]}
+        orderLookup={orders} goorooshipSends={sends}
+        selectedId={null} onSelect={vi.fn()}
+      /></MemoryRouter>);
+      expect(screen.queryByText(/GOOROOSHIP NOTIFIED/i)).not.toBeInTheDocument();
+    });
+
+    it('says what the rail is for when it is empty', () => {
+      render(<MemoryRouter><QueueSidebar
+        readyRows={[row1]} pickupRows={[]} shippedRows={[]}
+        orderLookup={orders} selectedId={null} onSelect={vi.fn()}
+      /></MemoryRouter>);
+      fireEvent.click(screen.getByRole('button', { name: /to be picked up 0/i }));
+      expect(screen.getByText(/Nothing waiting on a carrier/i)).toBeInTheDocument();
+      expect(screen.getByText(/Goorooship email carrying it has gone out/i)).toBeInTheDocument();
+    });
+
+    it('points a fruitless search at the pickup rail when the order is there', () => {
+      render(<MemoryRouter><QueueSidebar
+        readyRows={[row2]} pickupRows={[dockRow]} shippedRows={[]}
+        orderLookup={orders} goorooshipSends={sends}
+        selectedId={null} onSelect={vi.fn()}
+      /></MemoryRouter>);
+      fireEvent.change(screen.getByLabelText('Search orders ready to ship'), {
+        target: { value: 'Alice' },
+      });
+      expect(screen.getByText(/1 match under To be picked up/i)).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: /look in to be picked up/i }));
+      expect(screen.getByText('Alice')).toBeInTheDocument();
     });
   });
 });

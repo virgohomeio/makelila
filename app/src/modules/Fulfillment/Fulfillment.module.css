@@ -88,17 +88,35 @@
 
 .sidebarTab {
   flex: 1;
+  /* Three rails share a 300px rail, so a tab gets ~100px. The label sits over
+     its count rather than beside it — "To be picked up 9" on one line either
+     clips or drags the other two tabs down to unreadable. */
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
   background: none;
   border: none;
   border-bottom: 2px solid transparent;
   color: var(--color-ink-subtle);
-  font-size: 12px;
+  font-size: var(--font-size-meta);
   font-weight: 500;
-  padding: var(--space-3) var(--space-2);
+  line-height: 1.25;
+  padding: var(--space-2) var(--space-1);
   cursor: pointer;
   text-align: center;
   transition: color var(--dur-fast) var(--ease-out);
   margin-bottom: -1px;
+}
+
+/* Wraps to two lines at the narrowest widths rather than clipping; the tabs
+   stay the same height either way so the bar does not jump on a tab switch. */
+.sidebarTabLabel {
+  display: flex;
+  align-items: center;
+  min-height: 2.5em;
 }
 
 .sidebarTab:hover { color: var(--color-ink-muted); }
@@ -110,7 +128,6 @@
   font-family: var(--font-mono);
   font-variant-numeric: var(--font-numeric);
   color: var(--color-ink-faint);
-  margin-left: var(--space-1);
 }
 .sidebarTab.activeTab .sidebarTabCount { color: var(--color-ink-muted); }
 
@@ -272,6 +289,15 @@
   color: var(--color-error);
   border: 1px solid var(--color-error-border);
 }
+/* "Goorooship notified" on a row in the pickup rail. Green rather than the
+   warning amber the other two badges use: nothing is wrong with these rows —
+   the carton is out of our hands and the badge is saying so. */
+.pickupBadge {
+  background: var(--color-success-bg);
+  color: var(--color-success);
+  border-color: var(--color-success-border);
+}
+
 .refundBadgeSoft {
   background: var(--color-warning-bg);
   color: var(--color-warning);
