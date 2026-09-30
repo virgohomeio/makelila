@@ -16,6 +16,7 @@ import { GoorooshipDailyBatch } from './GoorooshipDailyBatch';
 import { EmptyState } from '../../../components/ui';
 import { indexRefundFlags, useRefundMarks } from '../../../lib/refundedOrders';
 import { isPartsOnlyReplacement } from '../../../lib/replacementTags';
+import { splitAwaitingPickup, useGoorooshipSends } from '../../../lib/pickupQueue';
 import {
   indexShippedQueueRows, shippedMarkHeading, shippedMarkTitle, useShippedEvidence,
   type ShippedMark,
@@ -53,6 +54,9 @@ export default function Queue() {
   const { ready, fulfilled, loading, refresh } = useFulfillmentQueue();
   const { marks: refundMarks } = useRefundMarks();
   const { evidence: shippedEvidence } = useShippedEvidence();
+  // Which orders the 3PL has already been told about — the third of the three
+  // things that move a row out of Ready to ship and into To be picked up.
+  const { sends: goorooshipSends, refresh: refreshSends } = useGoorooshipSends();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [orders, setOrders] = useState<Order[]>([]);
   // What happened to the row that just left the queue (cancelled / moved back).
@@ -77,7 +81,7 @@ export default function Queue() {
     [ready, orderLookup, shippedEvidence],
   );
 
-  const { readyRows, shippedRows } = useMemo(() => {
+  const { readyRows, pickupRows, shippedRows } = useMemo(() => {
     const byRef = (a: FulfillmentQueueRow, b: FulfillmentQueueRow) => {
       const refA = orderLookup.get(a.order_id)?.order_ref ?? '';
       const refB = orderLookup.get(b.order_id)?.order_ref ?? '';
@@ -93,23 +97,34 @@ export default function Queue() {
     // Moved, not hidden: the row still has an order behind it that someone has
     // to close out, and Shipped is where they will go looking for it.
     const alreadyShipped = ready.filter(r => shippedMarks.has(r.id));
+    // Labelled, docked and already emailed to Goorooship: waiting on the
+    // carrier, not on us. Split off the sorted rail so both halves keep pick
+    // order, and split rather than filtered so nothing goes missing.
+    const { ready: stillOurs, pickup } = splitAwaitingPickup(readySorted, goorooshipSends);
     // Left unsorted on purpose: the sidebar buckets this tab by the month each
     // box went out and orders it newest-first (queue/shippedMonths.ts). Sorting
     // by order ref here only to have it thrown away read like the real order.
     return {
-      readyRows: readySorted,
+      readyRows: stillOurs,
+      pickupRows: pickup,
       shippedRows: [...fulfilled, ...alreadyShipped],
     };
-  }, [ready, fulfilled, orderLookup, shippedMarks]);
+  }, [ready, fulfilled, orderLookup, shippedMarks, goorooshipSends]);
 
-  const allRows = useMemo(() => [...readyRows, ...shippedRows], [readyRows, shippedRows]);
+  const allRows = useMemo(
+    () => [...readyRows, ...pickupRows, ...shippedRows],
+    [readyRows, pickupRows, shippedRows],
+  );
 
   // A queued order whose money has already gone back should never be picked.
   // Shipped rows are history and are left unbadged — the box is gone, and that
   // is the returns team's problem, not the picker's.
   const refundFlags = useMemo(
-    () => indexRefundFlags(readyRows.flatMap(r => orderLookup.get(r.order_id) ?? []), refundMarks),
-    [readyRows, orderLookup, refundMarks],
+    () => indexRefundFlags(
+      [...readyRows, ...pickupRows].flatMap(r => orderLookup.get(r.order_id) ?? []),
+      refundMarks,
+    ),
+    [readyRows, pickupRows, orderLookup, refundMarks],
   );
 
   // Fetch orders referenced by the queue rows (one-shot; orders rarely change once approved)
@@ -155,10 +170,12 @@ export default function Queue() {
       <div className={styles.queueLayout}>
         <QueueSidebar
           readyRows={readyRows}
+          pickupRows={pickupRows}
           shippedRows={shippedRows}
           orderLookup={orderLookup}
           refundFlags={refundFlags}
           shippedMarks={shippedMarks}
+          goorooshipSends={goorooshipSends}
           selectedId={selectedId}
           onSelect={id => { setNotice(null); setSelectedId(id); }}
         />
@@ -213,7 +230,7 @@ export default function Queue() {
                     <StepLabel
                       row={selected}
                       order={selectedOrder}
-                      onBatchChanged={() => { void refresh(); }}
+                      onBatchChanged={() => { void refresh(); void refreshSends(); }}
                     />
                   )}
                   {selected.step === 4 && <StepDock row={selected} />}
@@ -231,7 +248,7 @@ export default function Queue() {
       <GoorooshipDailyBatch
         rows={allRows}
         orders={batchOrders}
-        onSent={() => { void refresh(); }}
+        onSent={() => { void refresh(); void refreshSends(); }}
       />
     </div>
   );
