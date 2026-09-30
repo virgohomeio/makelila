@@ -9,7 +9,8 @@ import {
   useAllCustomerAdditionalUsers, matchCustomerSearch,
   type Customer, type CustomerAdditionalUser,
 } from '../../lib/customers';
-import { useOrders } from '../../lib/orders';
+import { useOrders, AREA_TYPE_LABEL, areaTypeProvenance } from '../../lib/orders';
+import { DWELLING_LABEL, DWELLING_NOTE, dwellingProvenance } from '../../lib/addressClassify';
 import {
   useCustomerAddressIndex, resolveCustomerAddress, hasResolvedAddress,
   formatAddressLine, formatAddressBlock,
@@ -596,6 +597,61 @@ function CustomerRow(
 }
 
 
+// What kind of building we're delivering to, and whether the area is urban,
+// suburban or rural. Both are decided on the ORDER, by Verify address in Sales,
+// and both are only worth their provenance: a building of "House" from
+// 'sync-guess' is a regex over the street line that was right for 280 of 287
+// orders because it says "House" for almost everything. So each claim carries
+// the sentence that says where it came from, in the same words the Order Review
+// card uses, and an unconfirmed one is styled as an open question rather than
+// as an answer.
+//
+// A customer with no order gets neither row: `customers` records no building or
+// area, and an absent claim must not be dressed up as an unconfirmed one.
+function AddressClaims({ address }: { address: ResolvedCustomerAddress }) {
+  if (address.source !== 'order' || !address.dwellingSource) return null;
+  const dwellingConfirmed =
+    address.dwellingSource === 'google' || address.dwellingSource === 'manual';
+  // The area provenance sentence is built from the order's own fields, so the
+  // directory and the Order Review card say the same thing about the same order.
+  const areaSource = areaTypeProvenance({
+    area_type: address.areaType,
+    area_type_source: address.areaTypeSource ?? 'auto',
+    address_verified_at: address.verifiedAt,
+    address_area_type_error: address.areaTypeError,
+  });
+
+  return (
+    <>
+      <PanelRow
+        label="Building"
+        value={address.dwelling ? DWELLING_LABEL[address.dwelling] : 'Unknown'}
+      />
+      <div className={styles.addressSource}>
+        {address.dwelling && dwellingConfirmed
+          ? DWELLING_NOTE[address.dwelling]
+          : 'Not confirmed — a guess from the address text, and wrong often enough to check.'}
+      </div>
+      <div className={styles.addressSource}>
+        {dwellingProvenance(address.dwellingSource, address.verifiedAt)}
+      </div>
+
+      <PanelRow
+        label="Area"
+        value={address.areaType ? AREA_TYPE_LABEL[address.areaType] : 'Not classified'}
+      />
+      <div className={styles.addressSource}>
+        {address.areaType === 'rural'
+          ? 'Rural or remote delivery — expect a freight surcharge and a longer transit.'
+          : address.areaType
+            ? 'Standard delivery area.'
+            : 'Urban and suburban cannot be told apart from a postal code, so nothing is assumed.'}
+      </div>
+      <div className={styles.addressSource}>{areaSource}</div>
+    </>
+  );
+}
+
 // Contact details — read-only until you hit Edit. Email and phone are
 // operator-editable here: makelila is the system of record and the HubSpot sync
 // only fills BLANK columns, so a correction made here is never clobbered.
@@ -663,6 +719,7 @@ function ContactSection(
         <PanelRow label="Phone" value={customer.phone} />
         <PanelRow label="Address" value={fullAddress} multiline />
         {addressNote && <div className={styles.addressSource}>{addressNote}</div>}
+        <AddressClaims address={address} />
         <div style={{ marginTop: 6 }}>
           <button className={styles.linkBtn} onClick={() => setEditing(true)}>
             Edit email / phone
@@ -692,6 +749,7 @@ function ContactSection(
       )}
       <PanelRow label="Address" value={fullAddress} multiline />
       {addressNote && <div className={styles.addressSource}>{addressNote}</div>}
+      <AddressClaims address={address} />
       <div style={{ marginTop: 6, display: 'flex', gap: 8 }}>
         <button className={styles.linkBtn} disabled={busy || !dirty} onClick={() => void save()}>
           {busy ? 'Saving…' : 'Save'}

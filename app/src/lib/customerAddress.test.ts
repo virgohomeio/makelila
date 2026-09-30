@@ -31,6 +31,11 @@ function ord(p: Partial<AddressOrder> & { order_ref: string }): AddressOrder {
     postal_code: p.postal_code ?? null,
     address_customer_postal: p.address_customer_postal ?? null,
     address_google_postal: p.address_google_postal ?? null,
+    address_verdict: p.address_verdict ?? 'house',
+    address_verdict_source: p.address_verdict_source ?? 'sync-guess',
+    area_type: p.area_type ?? null,
+    area_type_source: p.area_type_source ?? 'auto',
+    address_area_type_error: p.address_area_type_error ?? null,
     country: p.country ?? null,
     placed_at: p.placed_at ?? null,
     created_at: p.created_at ?? '2026-01-01T00:00:00Z',
@@ -180,6 +185,42 @@ describe('resolveCustomerAddress', () => {
       address_customer_postal: 'N3Y4K3', placed_at: '2026-08-01T00:00:00Z',
     })]);
     expect(a.postal_code).toBe('N3Y4K3');
+  });
+});
+
+describe('building type and area type', () => {
+  // They belong to the order the address came from. Carrying them on the
+  // resolved address is what lets the directory profile show them without
+  // re-deciding which order is the current one.
+  it('come from the same order as the address', () => {
+    const a = resolve(cust({ id: 'c1' }), [ord({
+      order_ref: '#1272', customer_id: 'c1', address_line: '901',
+      address_verdict: 'remote', address_verdict_source: 'google',
+      area_type: 'rural', area_type_source: 'verified',
+      placed_at: '2026-08-01T00:00:00Z',
+    })]);
+    expect(a.dwelling).toBe('remote');
+    expect(a.dwellingSource).toBe('google');
+    expect(a.areaType).toBe('rural');
+    expect(a.areaTypeSource).toBe('verified');
+  });
+
+  it('are absent for a customer with no order — the record holds neither', () => {
+    const a = resolve(cust({ id: 'c1', address_line: '5 Elm St' }), []);
+    expect(a.source).toBe('directory');
+    expect(a.dwelling).toBeNull();
+    expect(a.dwellingSource).toBeNull();
+    expect(a.areaType).toBeNull();
+    expect(a.areaTypeSource).toBeNull();
+  });
+
+  it('carries the reason a classification failed', () => {
+    const a = resolve(cust({ id: 'c1' }), [ord({
+      order_ref: '#1', customer_id: 'c1', address_line: '1 A St',
+      address_area_type_error: 'no provider key', placed_at: '2026-08-01T00:00:00Z',
+    })]);
+    expect(a.areaType).toBeNull();
+    expect(a.areaTypeError).toBe('no provider key');
   });
 });
 

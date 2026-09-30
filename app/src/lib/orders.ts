@@ -387,6 +387,50 @@ export async function setRuralCheckConfirmed(id: string, value: boolean): Promis
 // so the values the sync writes and the values the card renders cannot drift.
 export type { AreaType, Dwelling, DwellingSource, UnitStatus };
 
+/**
+ * The postal code an order actually has.
+ *
+ * `address_customer_postal` and `address_google_postal` are both written by the
+ * verify-address step and are null until somebody runs it — which is the case
+ * for 219 of 317 orders. Reading only those made the Order Review card say the
+ * postal code was "Not on file" on most orders, while `postal_code` — synced
+ * from Shopify and written by createOrder since the beginning — held it.
+ *
+ * Order Review and the Customer Directory both call this, so the two screens
+ * cannot show a different postal code for the same order.
+ */
+export function orderPostalCode(o: Pick<
+  Order, 'postal_code' | 'address_customer_postal' | 'address_google_postal'
+>): string | null {
+  return o.postal_code ?? o.address_customer_postal ?? o.address_google_postal;
+}
+
+/**
+ * One sentence saying where an order's area type came from — the counterpart to
+ * `dwellingProvenance` in addressClassify, and shared by the Order Review card
+ * and the Customer Directory profile for the same reason.
+ *
+ * A blank area type has two very different meanings and they must not read
+ * alike: nobody has looked, or something tried and failed. Only the second one
+ * is actionable, so it names the failure.
+ */
+export function areaTypeProvenance(o: Pick<
+  Order, 'area_type' | 'area_type_source' | 'address_verified_at' | 'address_area_type_error'
+>): string {
+  if (o.area_type_source === 'manual') return 'set by an operator';
+  if (o.area_type_source === 'verified') {
+    const when = o.address_verified_at
+      ? ` ${new Date(o.address_verified_at).toLocaleDateString()}`
+      : '';
+    return `classified by address verification${when}`;
+  }
+  if (o.area_type) return 'from the postal-code rule';
+  if (o.address_area_type_error) {
+    return `could not be classified — ${o.address_area_type_error}`;
+  }
+  return 'not classified yet — run Verify address on the order';
+}
+
 /** Full labels for the detail card dropdown. */
 export const AREA_TYPE_LABEL: Record<AreaType, string> = {
   urban:    'Urban',

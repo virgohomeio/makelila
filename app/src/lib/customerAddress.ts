@@ -31,7 +31,9 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from './supabase';
+import { orderPostalCode } from './orders';
 import type { Customer } from './customers';
+import type { AreaType, Dwelling, DwellingSource } from './addressClassify';
 
 /** The order columns this module reads — every one of them also a field of
  *  `Order`, so an `Order[]` is accepted wherever this is. Nullable where the
@@ -49,10 +51,19 @@ export interface AddressOrder {
   /** The postal code on the order, as synced. */
   postal_code: string | null;
   /** What the customer typed, and Google's standardized form of it. Both are
-   *  fallbacks for `postal_code` on orders old enough to have neither — see
-   *  postalOf. */
+   *  fallbacks for `postal_code` — see orderPostalCode in lib/orders. */
   address_customer_postal: string | null;
   address_google_postal: string | null;
+  /** The two claims Order Review makes about the address beyond the address
+   *  itself: what kind of building it is, and whether the area is urban,
+   *  suburban or rural. Each is only worth its `_source`, so both travel with
+   *  one — a dwelling of 'house' from 'sync-guess' is a regex over the street
+   *  line, not a fact. */
+  address_verdict: Dwelling;
+  address_verdict_source: DwellingSource;
+  area_type: AreaType | null;
+  area_type_source: string;
+  address_area_type_error: string | null;
   country: string | null;
   placed_at: string | null;
   created_at: string | null;
@@ -64,7 +75,9 @@ export interface AddressOrder {
 export const ADDRESS_ORDER_COLUMNS =
   'order_ref, customer_id, customer_email, address_line, address_line2, city, '
   + 'region_state, postal_code, address_customer_postal, address_google_postal, '
-  + 'country, placed_at, created_at, address_verified_at';
+  + 'country, placed_at, created_at, address_verified_at, '
+  + 'address_verdict, address_verdict_source, area_type, area_type_source, '
+  + 'address_area_type_error';
 
 export type CustomerAddressSource = 'order' | 'directory';
 
@@ -84,6 +97,18 @@ export interface ResolvedCustomerAddress {
    *  nobody has run Verify address on it yet — the address is still the one we
    *  ship to, it just hasn't been checked. */
   verifiedAt: string | null;
+  /** What kind of building, and how good the answer is. Null for a customer
+   *  with no order: `customers` records none of this, and an absent claim must
+   *  not be dressed up as an unconfirmed one. ALWAYS read `dwellingSource`
+   *  alongside `dwelling`. */
+  dwelling: Dwelling | null;
+  dwellingSource: DwellingSource | null;
+  /** Urban / suburban / rural, and where that came from. `areaType` is null
+   *  both when nobody has classified it and when a classification failed;
+   *  `areaTypeError` is what tells those apart. */
+  areaType: AreaType | null;
+  areaTypeSource: string | null;
+  areaTypeError: string | null;
 }
 
 /** An order only describes a deliverable address if it has a street line. The
@@ -91,18 +116,6 @@ export interface ResolvedCustomerAddress {
  *  win would replace a complete directory address with an incomplete one. */
 function hasStreet(o: AddressOrder): boolean {
   return !!o.address_line?.trim();
-}
-
-/**
- * The postal code to show: the order's own, which is the value Order Review
- * puts on the card and the label is printed from. The verify columns are
- * fallbacks, not upgrades — `address_google_postal` is USPS's ZIP+4 on US
- * orders, and swapping it in would rewrite nineteen directory rows to a longer
- * form of a code that was already right. Where Google and the customer disagree
- * it is Sales' job to settle it, on the order, where the mismatch is explained.
- */
-function postalOf(o: AddressOrder): string | null {
-  return o.postal_code ?? o.address_customer_postal ?? o.address_google_postal;
 }
 
 /** Newest first. Recency is the primary key because people move: the address on
@@ -166,11 +179,16 @@ export function resolveCustomerAddress(
       line2: o.address_line2,
       city: o.city,
       region: o.region_state,
-      postal_code: postalOf(o),
+      postal_code: orderPostalCode(o),
       country: o.country,
       source: 'order',
       orderRef: o.order_ref,
       verifiedAt: o.address_verified_at,
+      dwelling: o.address_verdict,
+      dwellingSource: o.address_verdict_source,
+      areaType: o.area_type,
+      areaTypeSource: o.area_type_source,
+      areaTypeError: o.address_area_type_error,
     };
   }
   return {
@@ -183,6 +201,11 @@ export function resolveCustomerAddress(
     source: 'directory',
     orderRef: null,
     verifiedAt: null,
+    dwelling: null,
+    dwellingSource: null,
+    areaType: null,
+    areaTypeSource: null,
+    areaTypeError: null,
   };
 }
 
