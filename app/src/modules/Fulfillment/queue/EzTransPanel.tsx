@@ -25,11 +25,11 @@ import {
 } from '../../../lib/eztransBatch';
 import { logAction, useActivityForEntity } from '../../../lib/activityLog';
 import type { FulfillmentQueueRow } from '../../../lib/fulfillment';
+import { QUEUE_CARRIERS } from '../../../lib/queueCarrier';
 import styles from '../Fulfillment.module.css';
 
 export type EzTransOrder = EzTransShipTo & { id: string; order_ref: string };
 
-const CARRIERS = ['UPS', 'FedEx', 'Purolator', 'Canada Post', 'Canpar', 'GLS'] as const;
 
 /** The Goorooship half of step 3.
  *
@@ -399,7 +399,7 @@ export function EzTransPanel({
               Carrier:
               <select value={carrier} onChange={e => setCarrier(e.target.value)}>
                 <option value="">— select —</option>
-                {CARRIERS.map(c => <option key={c} value={c}>{c}</option>)}
+                {QUEUE_CARRIERS.map(c => <option key={c} value={c}>{c}</option>)}
               </select>
             </label>
 

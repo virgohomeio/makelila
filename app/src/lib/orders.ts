@@ -8,6 +8,7 @@ import { refundFlagForOrderId, refundFlagTitle } from './refundedOrders';
 // replacementTags only ever `import type`s from here, so this is not a runtime
 // cycle — the Order import on that side is erased.
 import { isPartsOnlyReplacement } from './replacementTags';
+import { queueCarrier } from './queueCarrier';
 import {
   guessDwellingFromText,
   type AreaType, type Dwelling, type DwellingSource, type UnitStatus,
@@ -1310,15 +1311,12 @@ export async function shipQueuedReplacementsForTicket(ticketId: string): Promise
   const shipped: string[] = [];
 
   for (const o of (linked ?? []) as Array<{ id: string; order_ref: string; line_items: unknown }>) {
-    const { error: oErr } = await supabase
-      .from('orders')
-      .update({ shipped_at: shippedAt, status: 'approved' })
-      .eq('id', o.id);
-    if (oErr) throw new Error(`Mark ${o.order_ref} shipped: ${oErr.message}`);
-
     const serial = await shelfSerialFor(o.line_items);
-    // Only send assigned_serial when we have one: on an upsert that hits an
-    // existing queue row, an omitted column keeps whatever is already there,
+    // Queue row first, order second — same reason as markPartsReplacementShipped:
+    // there is no transaction across two calls, and an order stamped shipped
+    // whose queue row never moved sits in "Ready to ship" and refuses its own
+    // retry. Only send assigned_serial when we have one: on an upsert that hits
+    // an existing queue row, an omitted column keeps whatever is already there,
     // so a parts-only ship can't blank out a serial assigned earlier.
     const { error: qErr } = await supabase
       .from('fulfillment_queue')
@@ -1327,6 +1325,12 @@ export async function shipQueuedReplacementsForTicket(ticketId: string): Promise
         { onConflict: 'order_id' },
       );
     if (qErr) throw new Error(`Queue ${o.order_ref} as shipped: ${qErr.message}`);
+
+    const { error: oErr } = await supabase
+      .from('orders')
+      .update({ shipped_at: shippedAt, status: 'approved' })
+      .eq('id', o.id);
+    if (oErr) throw new Error(`Mark ${o.order_ref} shipped: ${oErr.message}`);
 
     shipped.push(o.order_ref);
     await logAction(
@@ -1391,7 +1395,19 @@ async function shelfSerialFor(lineItems: unknown): Promise<string | null> {
  *  `carrier`/`tracking_num` are optional — the operator often has a tracking
  *  number and the row's Tracking column is the only place it would ever live.
  *  Blank fields are omitted from both writes rather than written as null, so
- *  marking a queued row shipped can't blank a label recorded earlier. */
+ *  marking a queued row shipped can't blank a label recorded earlier. The
+ *  carrier reaches the two columns differently, because they are not the same
+ *  kind of column: see lib/queueCarrier.ts.
+ *
+ *  The queue row is written BEFORE the order is stamped, and that order is
+ *  load-bearing. There is no transaction across two PostgREST calls, so one of
+ *  them can be the last one that lands; the only choice available is which
+ *  half-state a failure leaves. Stamping the order first leaves a shipment that
+ *  every screen but the picker's believes in, and blocks its own retry on the
+ *  `shipped_at` guard above — R-0069 was wedged exactly that way. Writing the
+ *  queue first leaves a row under Queue › SHIPPED and an order that still reads
+ *  as live, which is visibly unfinished and retries cleanly: the guard reads
+ *  `orders.shipped_at`, and the upsert is idempotent. */
 export async function markPartsReplacementShipped(
   orderId: string,
   opts: { carrier?: string | null; tracking_num?: string | null } = {},
@@ -1426,22 +1442,29 @@ export async function markPartsReplacementShipped(
 
   const carrier = (opts.carrier ?? '').trim() || null;
   const tracking = (opts.tracking_num ?? '').trim() || null;
-  const shipment = { ...(carrier ? { carrier } : {}), ...(tracking ? { tracking_num: tracking } : {}) };
+  // orders.carrier is free text and keeps whatever the operator typed — "Amazon"
+  // is the true answer to how a jumper left the building. fulfillment_queue.carrier
+  // is CHECK-constrained to six freight carriers, so only a value it can hold
+  // goes there and anything else is omitted, which leaves a label recorded at
+  // step 4 in place rather than failing the whole shipment.
+  const queued = queueCarrier(carrier);
+  const orderShipment = { ...(carrier ? { carrier } : {}), ...(tracking ? { tracking_num: tracking } : {}) };
+  const queueShipment = { ...(queued ? { carrier: queued } : {}), ...(tracking ? { tracking_num: tracking } : {}) };
 
   const shippedAt = new Date().toISOString();
-  const { error: uErr } = await supabase
-    .from('orders')
-    .update({ shipped_at: shippedAt, status: 'approved', ...shipment })
-    .eq('id', orderId);
-  if (uErr) throw new Error(`Mark ${order.order_ref} shipped: ${uErr.message}`);
-
   const { error: qErr } = await supabase
     .from('fulfillment_queue')
     .upsert(
-      { order_id: orderId, step: 6, fulfilled_at: shippedAt, ...shipment },
+      { order_id: orderId, step: 6, fulfilled_at: shippedAt, ...queueShipment },
       { onConflict: 'order_id' },
     );
   if (qErr) throw new Error(`Queue ${order.order_ref} as shipped: ${qErr.message}`);
+
+  const { error: uErr } = await supabase
+    .from('orders')
+    .update({ shipped_at: shippedAt, status: 'approved', ...orderShipment })
+    .eq('id', orderId);
+  if (uErr) throw new Error(`Mark ${order.order_ref} shipped: ${uErr.message}`);
 
   await logAction(
     'replacement_shipped',

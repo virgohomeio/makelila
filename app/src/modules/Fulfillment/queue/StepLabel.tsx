@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import { confirmLabel, type FulfillmentQueueRow } from '../../../lib/fulfillment';
+import { QUEUE_CARRIERS } from '../../../lib/queueCarrier';
 import { EzTransPanel, type EzTransOrder } from './EzTransPanel';
 import { StepBlockers } from './StepBlockers';
 import styles from '../Fulfillment.module.css';
 
-const CARRIERS = ['UPS', 'FedEx', 'Purolator', 'Canada Post', 'Canpar', 'GLS'] as const;
 
 const FREIGHTCOM_URL = 'https://live.freightcom.com/c/mNyRdnwfdBn2raBkyImG9lemXej03RJB/ship/new';
 const AMAZON_URL     = 'https://www.amazon.com/gp/your-account/order-history';
@@ -115,7 +115,7 @@ export function StepLabel({
           style={{ padding: '6px 10px', fontSize: 11, border: '1px solid var(--color-border)', borderRadius: 4 }}
         >
           <option value="">— select —</option>
-          {CARRIERS.map(c => <option key={c} value={c}>{c}</option>)}
+          {QUEUE_CARRIERS.map(c => <option key={c} value={c}>{c}</option>)}
         </select>
 
         <label style={{ display: 'block', fontSize: 11, color: 'var(--color-ink-subtle)', marginTop: 10 }}>

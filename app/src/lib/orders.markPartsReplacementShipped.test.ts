@@ -20,8 +20,14 @@ const { fromMock, rpcMock, state } = vi.hoisted(() => {
     ordersReads: number;
     updates: Array<{ table: string; patch: any }>;
     upserts: Array<{ table: string; row: any; opts: any }>;
+    /** Every write in the order it was issued. The sequence is the assertion in
+     *  'writes the queue row before stamping the order'. */
+    writes: string[];
+    /** Set to simulate the constraint that broke R-0069. */
+    upsertError: { message: string } | null;
   } = {
     order: null, siblings: [], ticket: null, ordersReads: 0, updates: [], upserts: [],
+    writes: [], upsertError: null,
   };
 
   const terminal = (result: any): any => {
@@ -43,10 +49,16 @@ const { fromMock, rpcMock, state } = vi.hoisted(() => {
       }
       return terminal({ data: state.ticket, error: null });
     },
-    update: (patch: any) => { state.updates.push({ table, patch }); return terminal({ data: null, error: null }); },
+    update: (patch: any) => {
+      state.updates.push({ table, patch });
+      state.writes.push(`update:${table}`);
+      return terminal({ data: null, error: null });
+    },
     upsert: (row: any, opts: any) => {
       state.upserts.push({ table, row, opts });
-      return terminal({ data: null, error: null });
+      state.writes.push(`upsert:${table}`);
+      const error = table === 'fulfillment_queue' ? state.upsertError : null;
+      return terminal({ data: null, error });
     },
   }));
 
@@ -75,6 +87,7 @@ const queueUpsert = () => state.upserts.find(u => u.table === 'fulfillment_queue
 beforeEach(() => {
   vi.clearAllMocks();
   state.updates = []; state.upserts = []; state.ordersReads = 0; state.siblings = [];
+  state.writes = []; state.upsertError = null;
   state.ticket = { status: 'waiting_on_customer', tags: ['queued_for_replacement'] };
   state.order = {
     id: 'o-1', order_ref: 'R-0062', kind: 'replacement', status: 'pending',
@@ -116,6 +129,50 @@ describe('markPartsReplacementShipped', () => {
     await markPartsReplacementShipped('o-1', { carrier: '', tracking_num: '   ' });
     expect(orderPatch()).not.toHaveProperty('tracking_num');
     expect(queueUpsert()?.row).not.toHaveProperty('tracking_num');
+  });
+
+  // R-0069, 2026-09-29. A replacement jumper went out in an Amazon box and the
+  // operator typed "Amazon" into the free-text Carrier field.
+  // fulfillment_queue.carrier is CHECK-constrained to six freight carriers, so
+  // the queue upsert threw — after the order had already been stamped. The
+  // shipment ended up recorded on the order, unlogged, its queue row still at
+  // step 1 in "Ready to ship", the ticket still tagged Queued for Replacement,
+  // and the retry refused by its own shipped_at guard.
+  it('keeps a carrier the queue column would reject off the queue row', async () => {
+    await markPartsReplacementShipped('o-1', { carrier: 'Amazon', tracking_num: 'TBA123' });
+    // The order keeps the operator's answer — it is the true one.
+    expect(orderPatch()).toMatchObject({ carrier: 'Amazon', tracking_num: 'TBA123' });
+    // The queue row takes the tracking number and simply no carrier, rather
+    // than taking the whole shipment down. Omitted, not null: a carrier
+    // recorded at step 4 survives.
+    expect(queueUpsert()?.row).toMatchObject({ step: 6, tracking_num: 'TBA123' });
+    expect(queueUpsert()?.row).not.toHaveProperty('carrier');
+    expect(logActionMock).toHaveBeenCalled();
+  });
+
+  it('normalises a known carrier onto the spelling the column stores', async () => {
+    await markPartsReplacementShipped('o-1', { carrier: 'canada post' });
+    // Free text on the order is left as typed; the constrained column is not.
+    expect(orderPatch()).toMatchObject({ carrier: 'canada post' });
+    expect(queueUpsert()?.row).toMatchObject({ carrier: 'Canada Post' });
+  });
+
+  // Two PostgREST calls, no transaction — so the only question is which
+  // half-state a failure leaves. A stamped order with a stuck queue row is the
+  // one that hides in "Ready to ship" AND blocks its own retry, so the
+  // fallible write goes first.
+  it('writes the queue row before stamping the order', async () => {
+    await markPartsReplacementShipped('o-1');
+    expect(state.writes).toEqual(['upsert:fulfillment_queue', 'update:orders']);
+  });
+
+  it('leaves the order unstamped when the queue write fails, so a retry works', async () => {
+    state.upsertError = { message: 'violates check constraint "fulfillment_queue_carrier_check"' };
+    await expect(markPartsReplacementShipped('o-1')).rejects.toThrow(/Queue R-0062 as shipped/);
+    expect(state.updates).toEqual([]);
+    expect(logActionMock).not.toHaveBeenCalled();
+    // The ticket is untouched too: nothing claims the box went out.
+    expect(rpcMock).not.toHaveBeenCalled();
   });
 
   it('moves the ticket off Queued for Replacement and onto Replacement Sent', async () => {
