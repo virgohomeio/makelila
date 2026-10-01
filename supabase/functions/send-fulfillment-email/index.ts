@@ -5,6 +5,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { corsHeaders } from '../_shared/cors.ts';
 import { authenticate } from '../_shared/auth.ts';
 import { archiveBcc, DEFAULT_ARCHIVE_BCC } from '../_shared/emailArchive.ts';
+import { textToEmailHtml } from '../_shared/emailHtml.ts';
 
 type QueueRow = {
   id: string;
@@ -223,6 +224,10 @@ async function handle(req: Request): Promise<Response> {
       bcc: archiveBcc(to, Deno.env.get('EMAIL_ARCHIVE_BCC') ?? DEFAULT_ARCHIVE_BCC),
       subject,
       text: emailText,
+      // The body is authored and audited as plain text; the HTML part is
+      // derived from it so the two cannot say different things. It is what
+      // makes the Lovely install guide show as a picture rather than a URL.
+      html: textToEmailHtml(emailText),
     }),
   });
   if (!resendRes.ok) {

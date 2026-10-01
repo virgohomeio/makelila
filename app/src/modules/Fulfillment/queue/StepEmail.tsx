@@ -183,6 +183,14 @@ export function StepEmail({
             />
           </label>
 
+          {/* The textarea is plain text, so the install guide can only appear
+              here as a URL. Without this line an operator would reasonably
+              assume the customer gets a bare link and "fix" it by deleting it. */}
+          <div style={{ fontSize: 10, color: 'var(--color-ink-subtle)', marginBottom: 4 }}>
+            A line that is only an image URL is sent as the picture itself — that is how the
+            Lovely install guide reaches the customer. Keep it on its own line.
+          </div>
+
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', margin: '4px 0 2px' }}>
             {dirty && (
               <>

@@ -14,6 +14,18 @@
 /** Every placeholder the Step-5 renderer knows how to fill. A stored template
  *  that reaches for anything outside this set cannot be rendered correctly, so
  *  it is rejected in favour of the default below. */
+/** The Lovely install guide, hosted on the app's own GitHub Pages origin.
+ *
+ *  An emailed image needs a public, permanent URL. Every Supabase storage
+ *  bucket on this project is private — a signed URL expires and would leave a
+ *  broken image in an inbox a week later — so the asset lives in app/public/,
+ *  which Pages serves at this address for as long as the site is up.
+ *
+ *  A line in the body that is nothing but an image URL is rendered as an <img>
+ *  in the HTML part of the email (see _shared/emailHtml.ts) and left as a
+ *  working link in the text part. */
+export const LOVELY_INSTALL_GUIDE_URL = 'https://lila.vip/lovely-install-guide.png';
+
 export const SHIPMENT_EMAIL_VARIABLES = [
   'customer_first_name',
   'order_ref',
@@ -36,6 +48,28 @@ Tracking Number: {{tracking_num}}
 Tracking Link: {{tracking_url}}
 {{starter_block}}
 You can use the link above to check on your delivery progress at any time.
+
+Before you set up your LILA: get the Lovely App
+
+Lovely is LILA's companion app, and you'll need it to get started. It walks you through setup step by step, lets you check on and control your LILA from your phone, and sends you alerts when your LILA needs attention.
+
+Lovely isn't in the App Store or Google Play. You add it to your phone straight from your browser, which takes under a minute:
+
+iPhone
+1. Open lilalovely.io in Safari.
+2. Tap the Share button at the bottom of the screen.
+3. Scroll down, tap Add to Home Screen, then tap Add.
+
+Android
+1. Open lilalovely.io in Chrome.
+2. Tap the ⋮ menu in the top right corner.
+3. Tap Add to Home screen (or Install app), then confirm.
+
+https://lila.vip/lovely-install-guide.png
+
+Once it's added, always open Lovely from the ladybug icon on your home screen rather than from your browser, and tap Allow when it asks to send notifications. That way you won't miss any alerts from your LILA.
+
+Questions or trouble installing? Just reply to this email and we'll help.
 
 Important next steps
 

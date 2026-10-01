@@ -2,7 +2,9 @@ import { describe, it, expect } from 'vitest';
 // ?raw so this reads the committed migration itself, not a copy of it — the
 // same trick tokens.test.ts uses, and it keeps @types/node out of the build.
 import migrationSql from '../../../supabase/migrations/20260923120000_shipment_confirmation_editable.sql?raw';
+import { textToEmailHtml } from '../../../supabase/functions/_shared/emailHtml.ts';
 import {
+  LOVELY_INSTALL_GUIDE_URL,
   SHIPMENT_EMAIL_DEFAULT,
   SHIPMENT_EMAIL_VARIABLES,
   unsupportedVariables,
@@ -22,6 +24,27 @@ describe('SHIPMENT_EMAIL_DEFAULT', () => {
 
   it('only uses placeholders the renderer can fill', () => {
     expect(unsupportedVariables(SHIPMENT_EMAIL_DEFAULT)).toEqual([]);
+  });
+
+  it('tells the customer how to install Lovely on both platforms', () => {
+    const body = SHIPMENT_EMAIL_DEFAULT.body;
+    expect(body).toContain('Before you set up your LILA: get the Lovely App');
+    expect(body).toContain('lilalovely.io');
+    expect(body).toMatch(/iPhone[\s\S]*Safari/);
+    expect(body).toMatch(/Android[\s\S]*Chrome/);
+  });
+
+  it('puts the install guide on a line of its own so it sends as a picture', () => {
+    // The whole image mechanism hinges on this line standing alone. A stray
+    // word on it would quietly turn the guide back into a bare link.
+    expect(SHIPMENT_EMAIL_DEFAULT.body.split('\n')).toContain(LOVELY_INSTALL_GUIDE_URL);
+    expect(textToEmailHtml(SHIPMENT_EMAIL_DEFAULT.body))
+      .toContain(`<img src="${LOVELY_INSTALL_GUIDE_URL}"`);
+  });
+
+  it('puts the app ahead of the onboarding session it is needed for', () => {
+    const body = SHIPMENT_EMAIL_DEFAULT.body;
+    expect(body.indexOf('get the Lovely App')).toBeLessThan(body.indexOf('Important next steps'));
   });
 });
 
