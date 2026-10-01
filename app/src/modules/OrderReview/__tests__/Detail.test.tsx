@@ -69,7 +69,7 @@ const order: Order = {
   quo_thread_url: null,
   address_line: '2847 SW Corbett',
   address_line2: null,
-  city: 'Portland', region_state: 'OR', country: 'US',
+  city: 'Portland', region_state: 'OR', postal_code: '97201', country: 'US',
   address_verdict: 'house',
     address_verdict_source: 'sync-guess',
     address_unit_status: null,
