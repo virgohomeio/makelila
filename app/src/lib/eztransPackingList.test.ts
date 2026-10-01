@@ -41,8 +41,7 @@ const ORDER: EzTransShipTo & { order_ref: string } = {
 
 const ARGS = {
   order: ORDER,
-  serial: 'LL01-P100X-00412',
-  masterCarton: '1',
+  units: [{ serial: 'LL01-P100X-00412', masterCarton: '1' }],
   carrier: 'Purolator',
   tracking: 'PUR123456789',
 };
@@ -162,11 +161,18 @@ describe('who the booking email comes from', () => {
   });
 });
 
-const MIGRATION = Object.values(
-  import.meta.glob('../../../supabase/migrations/*_eztrans_packing_list_template.sql', {
+// Every migration that touches this template row, not only the one that
+// seeded it — the wording has changed since (a packing list names every
+// machine on the order now), and what matters is that the row a migrated
+// database ends up with is the built-in default, not which file put it there.
+const MIGRATION = Object.entries(
+  import.meta.glob('../../../supabase/migrations/*_eztrans_*packing_list*.sql', {
     query: '?raw', import: 'default', eager: true,
   }) as Record<string, string>,
-)[0];
+)
+  .sort(([a], [b]) => a.localeCompare(b))
+  .map(([, sql]) => sql)
+  .join('\n');
 
 describe('the seed migration matches the built-in packing list', () => {
   it('is in the repo', () => {

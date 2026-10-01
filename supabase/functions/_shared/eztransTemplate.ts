@@ -49,7 +49,7 @@ export const EZTRANS_CC_DEFAULT = [
 export const EZTRANS_FROM_FALLBACK = 'VCycene Team <support@lilacomposter.com>';
 
 export const DEFAULT_EZTRANS_SUBJECT =
-  'Order confirmed — {{order_ref}} · {{sku}} · Serial {{serial}}';
+  'Order confirmed — {{order_ref}} · {{quantity}} × {{sku}} · Serial {{serial}}';
 
 export const DEFAULT_EZTRANS_BODY =
   'Hello EZ Trans team,\n' +
@@ -66,10 +66,9 @@ export const DEFAULT_EZTRANS_BODY =
   'SHIPMENT\n' +
   'Product Name: {{product_name}}\n' +
   'SKU: {{sku}}\n' +
-  'Serial No: {{serial}}\n' +
   'Batch/Lot Number: {{batch_lot}}\n' +
-  'Master Carton: {{master_carton}}\n' +
   'Quantity: {{quantity}}\n' +
+  '{{units_block}}\n' +
   '\n' +
   'SHIPPING LABEL (attached)\n' +
   'Carrier: {{carrier}}\n' +
@@ -78,7 +77,7 @@ export const DEFAULT_EZTRANS_BODY =
   '\n' +
   'Order reference: {{order_ref}}\n' +
   '\n' +
-  'Please reply to confirm once the unit is picked and the shipment is on its way.\n' +
+  'Please reply to confirm once the order is picked and the shipment is on its way.\n' +
   '\n' +
   'Thank you,\n' +
   'The VCycene Team';
@@ -110,10 +109,9 @@ export const DEFAULT_EZTRANS_PACKING_LIST =
   '## CONTENTS\n' +
   'Product Name: {{product_name}}\n' +
   'SKU: {{sku}}\n' +
-  'Serial No: {{serial}}\n' +
   'Batch/Lot Number: {{batch_lot}}\n' +
-  'Master Carton: {{master_carton}}\n' +
   'Quantity: {{quantity}}\n' +
+  '{{units_block}}\n' +
   '\n' +
   '## SHIPPING\n' +
   'Carrier: {{carrier}}\n' +
@@ -127,7 +125,7 @@ export const DEFAULT_EZTRANS_PACKING_LIST =
 export const EZTRANS_PACKING_LIST_VARIABLES = [
   'customer_name', 'customer_address_block', 'customer_email', 'customer_phone',
   'product_name', 'sku', 'serial', 'batch_lot', 'master_carton', 'quantity',
-  'carrier', 'tracking', 'order_ref', 'date',
+  'units_block', 'carrier', 'tracking', 'order_ref', 'date',
 ] as const;
 
 /** Structurally a PdfLine from _shared/simplePdf.ts, redeclared here so this
@@ -164,8 +162,52 @@ export function packingListLines(rendered: string): PackingListLine[] {
 export const EZTRANS_TEMPLATE_VARIABLES = [
   'customer_name', 'customer_address', 'customer_email', 'customer_phone',
   'product_name', 'sku', 'serial', 'batch_lot', 'master_carton', 'quantity',
-  'carrier', 'tracking', 'order_ref', 'attachments_note',
+  'units_block', 'carrier', 'tracking', 'order_ref', 'attachments_note',
 ] as const;
+
+/** One machine on a booking: its serial and the carton it is picked from. */
+export type EzTransUnit = { serial: string; masterCarton: string | null };
+
+/** The unit-dependent half of the template variables, for however many
+ *  machines are on the order.
+ *
+ *  An order is not one machine. M-0001 is three LILA Pros, and until this
+ *  existed the booking named exactly one of them: the 3PL was told to pick a
+ *  single serial off a single carton, and the other two were on the order, in
+ *  the queue and reserved in Stock without appearing on the document EZ Trans
+ *  actually works from. One box would have shipped against a three-unit order.
+ *
+ *  `serial` and `master_carton` stay, as lists, because an operator's own
+ *  template may still use them and a template that silently names one of three
+ *  machines is the bug. Cartons are de-duplicated: three units off EZ-P10 is
+ *  one carton number, not "10, 10, 10".
+ *
+ *  `units_block` is the pairing. A flat serial list plus a flat carton list
+ *  cannot say WHICH machine is on which carton once the two differ, and the
+ *  3PL picks by carton. */
+export function unitVariables(units: EzTransUnit[]): {
+  serial: string;
+  master_carton: string;
+  quantity: string;
+  unit_count: string;
+  units_block: string;
+} {
+  const serials = units.map(u => u.serial);
+  const cartons: string[] = [];
+  for (const u of units) {
+    const c = u.masterCarton ?? '—';
+    if (!cartons.includes(c)) cartons.push(c);
+  }
+  return {
+    serial: serials.join(', ') || '—',
+    master_carton: cartons.join(', ') || '—',
+    quantity: String(units.length),
+    unit_count: String(units.length),
+    units_block: units
+      .map(u => `Serial No: ${u.serial} — Master Carton: ${u.masterCarton ?? '—'}`)
+      .join('\n'),
+  };
+}
 
 /** Does a booking on this carrier need the UPS pesticide worksheet?
  *

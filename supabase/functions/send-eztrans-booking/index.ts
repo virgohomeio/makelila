@@ -48,6 +48,8 @@ import {
   needsPesticideWorksheet,
   packingListLines,
   renderEzTransTemplate,
+  unitVariables,
+  type EzTransUnit,
 } from '../_shared/eztransTemplate.ts';
 
 const EZTRANS_LOCATION = 'EZTrans';
@@ -55,7 +57,6 @@ const EZTRANS_EMAIL = 'cs@goorooship.ca';
 const PRODUCT_NAME = 'LILA Kitchen Composter';
 const SKU = 'LILA-P100X';
 const BATCH_LOT = 'P100X';
-const QUANTITY = 1;
 
 type QueueRow = {
   id: string;
@@ -202,25 +203,63 @@ async function handle(req: Request): Promise<Response> {
     .single<OrderRow>();
   if (oErr || !order) return json(404, { error: 'order not found' });
 
-  // Re-derive the location and carton from the DB rather than trusting the
+  // Every machine on the order. fulfillment_queue_units is the set;
+  // assigned_serial is the first pick and is unioned in so a database that has
+  // not run 20261001130000_fulfillment_queue_units.sql still books its one
+  // unit rather than failing.
+  const { data: unitRows } = await admin
+    .from('fulfillment_queue_units')
+    .select('unit_serial, assigned_at')
+    .eq('queue_id', q.id)
+    .order('assigned_at', { ascending: true });
+  const assigned = ((unitRows as Array<{ unit_serial: string }> | null) ?? []).map(u => u.unit_serial);
+  const firstPick: string = q.assigned_serial;
+  if (!assigned.includes(firstPick)) assigned.unshift(firstPick);
+
+  // Re-derive the locations and cartons from the DB rather than trusting the
   // caller: the packing list is what the 3PL picks from, and a stale preview
   // must not be able to put a different pallet on it.
   const [slotRes, unitRes] = await Promise.all([
-    admin.from('shelf_slots').select('skid, location').eq('serial', q.assigned_serial),
-    admin.from('units').select('location, pallet').eq('serial', q.assigned_serial).maybeSingle(),
+    admin.from('shelf_slots').select('serial, skid, location').in('serial', assigned),
+    admin.from('units').select('serial, location, pallet').in('serial', assigned),
   ]);
-  const slots = (slotRes.data as Array<{ skid: string; location: string }> | null) ?? [];
-  const slot = slots.find(s => s.location === EZTRANS_LOCATION) ?? null;
-  const unit = (unitRes.data as { location: string | null; pallet: string | null } | null) ?? null;
+  const slots = (slotRes.data as Array<{ serial: string; skid: string; location: string }> | null) ?? [];
+  const unitsAt = (unitRes.data as Array<{ serial: string; location: string | null; pallet: string | null }> | null) ?? [];
+  const ezSlot = new Map<string, string>();
+  for (const s of slots) {
+    if (s.location === EZTRANS_LOCATION && !ezSlot.has(s.serial)) ezSlot.set(s.serial, s.skid);
+  }
+  const unitBySerial = new Map(unitsAt.map(u => [u.serial, u]));
 
-  if (!slot && unit?.location !== EZTRANS_LOCATION) {
+  const units: EzTransUnit[] = [];
+  const offsite: string[] = [];
+  for (const serialNo of assigned) {
+    const skid = ezSlot.get(serialNo) ?? null;
+    const unit = unitBySerial.get(serialNo) ?? null;
+    if (!skid && unit?.location !== EZTRANS_LOCATION) { offsite.push(serialNo); continue; }
+    units.push({ serial: serialNo, masterCarton: masterCartonFromSkid(skid ?? unit?.pallet ?? null) });
+  }
+
+  if (units.length === 0) {
     return json(409, {
-      error: `unit ${q.assigned_serial} is not held at ${EZTRANS_LOCATION} — book this shipment through Freightcom instead`,
+      error: `${assigned.length === 1 ? 'unit' : 'units'} ${assigned.join(', ')} ` +
+        `${assigned.length === 1 ? 'is' : 'are'} not held at ${EZTRANS_LOCATION} — ` +
+        'book this shipment through Freightcom instead',
+    });
+  }
+  // A partial pick is refused rather than sent short. The 3PL can only pick
+  // what they hold, so a booking naming two of three machines ships an
+  // incomplete order and says nothing about it.
+  if (offsite.length > 0) {
+    return json(409, {
+      error: `${offsite.length} of this order's ${assigned.length} units are not held at ` +
+        `${EZTRANS_LOCATION} (${offsite.join(', ')}) — move them there, or ship them separately`,
     });
   }
 
-  const masterCarton = masterCartonFromSkid(slot?.skid ?? unit?.pallet ?? null) ?? '—';
-  const serial = q.assigned_serial;
+  const unitVars = unitVariables(units);
+  const masterCarton = unitVars.master_carton;
+  const serial = unitVars.serial;
   const addr = addressLines(order);
   const email = order.customer_email ?? '—';
   const phone = order.customer_phone ?? '—';
@@ -236,10 +275,10 @@ async function handle(req: Request): Promise<Response> {
     customer_phone: phone,
     product_name: PRODUCT_NAME,
     sku: SKU,
-    serial,
     batch_lot: BATCH_LOT,
-    master_carton: masterCarton,
-    quantity: String(QUANTITY),
+    // serial / master_carton / quantity / units_block over every machine on
+    // the order — the same helper the panel previews with.
+    ...unitVars,
     carrier: q.carrier,
     tracking: q.tracking_num,
     order_ref: order.order_ref,
@@ -351,9 +390,11 @@ async function handle(req: Request): Promise<Response> {
       filename: `pesticide-worksheet-${safeRef}.pdf`,
       bytes: buildTextPdf(pesticideWorksheetLines({
         trackingNumber: q.tracking_num,
+        // Every machine under this tracking number. One entry, one worksheet,
+        // and a worksheet naming one of three is a false declaration.
         serial,
         batchLot: BATCH_LOT,
-        quantity: QUANTITY,
+        quantity: units.length,
         orderRef: order.order_ref,
         date: formatWorksheetDate(new Date()),
         signature,

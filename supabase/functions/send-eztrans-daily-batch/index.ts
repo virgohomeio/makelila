@@ -50,6 +50,8 @@ import {
   needsPesticideWorksheet,
   packingListLines,
   renderEzTransTemplate,
+  unitVariables,
+  type EzTransUnit,
 } from '../_shared/eztransTemplate.ts';
 import {
   batchAttachmentFilenames,
@@ -67,7 +69,6 @@ const EZTRANS_EMAIL = 'cs@goorooship.ca';
 const PRODUCT_NAME = 'LILA Kitchen Composter';
 const SKU = 'LILA-P100X';
 const BATCH_LOT = 'P100X';
-const QUANTITY = 1;
 
 /** How many orders one email may carry.
  *
@@ -221,7 +222,29 @@ async function handle(req: Request): Promise<Response> {
   // Location and carton come from the DB, never from the caller: the packing
   // list is what the 3PL picks from, and a stale browser must not be able to
   // put a different pallet on it.
-  const serials = rows.map(r => r.assigned_serial).filter((s): s is string => !!s);
+  // Every machine on every row in the batch, not one per order. An order for
+  // three LILA Pros has to reach EZ Trans naming all three.
+  const { data: quRows } = await admin
+    .from('fulfillment_queue_units')
+    .select('queue_id, unit_serial, assigned_at')
+    .in('queue_id', rows.map(r => r.id))
+    .order('assigned_at', { ascending: true });
+  const assignedByQueue = new Map<string, string[]>();
+  for (const u of ((quRows as Array<{ queue_id: string; unit_serial: string }> | null) ?? [])) {
+    const list = assignedByQueue.get(u.queue_id) ?? [];
+    list.push(u.unit_serial);
+    assignedByQueue.set(u.queue_id, list);
+  }
+  // assigned_serial is unioned in, so a database that has not run
+  // 20261001130000_fulfillment_queue_units.sql still sends its one unit.
+  for (const r of rows) {
+    if (!r.assigned_serial) continue;
+    const list = assignedByQueue.get(r.id) ?? [];
+    if (!list.includes(r.assigned_serial)) list.unshift(r.assigned_serial);
+    assignedByQueue.set(r.id, list);
+  }
+
+  const serials = [...new Set([...assignedByQueue.values()].flat())];
   const [slotRes, unitRes] = await Promise.all([
     serials.length
       ? admin.from('shelf_slots').select('serial, skid, location').in('serial', serials)
@@ -319,16 +342,38 @@ async function handle(req: Request): Promise<Response> {
       skipped.push({ queue_id: id, order_ref: ref, reason: 'no shipping label attached' });
       continue;
     }
-    const skid = ezSlot.get(row.assigned_serial) ?? null;
-    const unit = units.get(row.assigned_serial) ?? null;
-    if (!skid && unit?.location !== EZTRANS_LOCATION) {
+    // Filtered rather than asserted: there is no local type-checker for these
+    // functions, so the null is removed in a way that cannot be wrong.
+    const assigned = (assignedByQueue.get(id) ?? [row.assigned_serial])
+      .filter((s): s is string => !!s);
+    const rowUnits: EzTransUnit[] = [];
+    const offsite: string[] = [];
+    for (const serialNo of assigned) {
+      const skid = ezSlot.get(serialNo) ?? null;
+      const unit = units.get(serialNo) ?? null;
+      if (!skid && unit?.location !== EZTRANS_LOCATION) { offsite.push(serialNo); continue; }
+      rowUnits.push({ serial: serialNo, masterCarton: masterCartonFromSkid(skid ?? unit?.pallet ?? null) });
+    }
+    if (rowUnits.length === 0) {
       skipped.push({
         queue_id: id, order_ref: ref,
-        reason: `unit ${row.assigned_serial} is not held at ${EZTRANS_LOCATION} — ` +
+        reason: `${assigned.length === 1 ? 'unit' : 'units'} ${assigned.join(', ')} ` +
+          `${assigned.length === 1 ? 'is' : 'are'} not held at ${EZTRANS_LOCATION} — ` +
           'book this shipment through Freightcom instead',
       });
       continue;
     }
+    // Skipped rather than sent short: the 3PL can only pick what they hold, so
+    // a batch line naming two of three machines ships an incomplete order.
+    if (offsite.length > 0) {
+      skipped.push({
+        queue_id: id, order_ref: ref,
+        reason: `${offsite.length} of this order's ${assigned.length} units are not held at ` +
+          `${EZTRANS_LOCATION} (${offsite.join(', ')}) — move them there, or ship them separately`,
+      });
+      continue;
+    }
+    const unitVars = unitVariables(rowUnits);
 
     const { data: labelBlob, error: labelErr } = await admin.storage
       .from('order-labels').download(row.label_pdf_path);
@@ -341,7 +386,7 @@ async function handle(req: Request): Promise<Response> {
     }
     const labelPdf = new Uint8Array(await labelBlob.arrayBuffer());
 
-    const masterCarton = masterCartonFromSkid(skid ?? unit?.pallet ?? null) ?? '—';
+    const masterCarton = unitVars.master_carton;
     const addr = addressLines(order);
     const vars: Record<string, string> = {
       customer_name: order.customer_name,
@@ -350,10 +395,10 @@ async function handle(req: Request): Promise<Response> {
       customer_phone: order.customer_phone ?? '—',
       product_name: PRODUCT_NAME,
       sku: SKU,
-      serial: row.assigned_serial,
       batch_lot: BATCH_LOT,
-      master_carton: masterCarton,
-      quantity: String(QUANTITY),
+      // serial / master_carton / quantity / units_block over every machine on
+      // this order — the same helper the panel previews with.
+      ...unitVars,
       carrier: row.carrier,
       tracking: row.tracking_num,
       order_ref: order.order_ref,
@@ -390,9 +435,10 @@ async function handle(req: Request): Promise<Response> {
     if (worksheet) {
       worksheetBytes = buildTextPdf(pesticideWorksheetLines({
         trackingNumber: row.tracking_num,
-        serial: row.assigned_serial,
+        // One entry covers the whole shipment, so every machine is declared.
+        serial: unitVars.serial,
         batchLot: BATCH_LOT,
-        quantity: QUANTITY,
+        quantity: rowUnits.length,
         orderRef: order.order_ref,
         date: worksheetDate,
         signature,
@@ -406,7 +452,7 @@ async function handle(req: Request): Promise<Response> {
         orderRef: order.order_ref,
         customerName: order.customer_name,
         address: addr.join(', '),
-        serial: row.assigned_serial,
+        serial: unitVars.serial,
         masterCarton,
         carrier: row.carrier,
         tracking: row.tracking_num,

@@ -4,7 +4,7 @@ import {
   buildEzTransBooking,
   saveEzTransLabel,
   sendEzTransBooking,
-  useEzTransPlacement,
+  useEzTransPlacements,
   useEzTransTemplate,
   packingListPreview,
   attachmentFilenames,
@@ -56,7 +56,10 @@ export function EzTransPanel({
    *  the footer at the bottom of the page catches up without a reload. */
   onBatchChanged?: () => void;
 }) {
-  const { placement, loading } = useEzTransPlacement(row.assigned_serial);
+  // Every machine on the order, not just the first one picked. An order for
+  // three LILA Pros books as one Goorooship shipment, and the 3PL has to be
+  // told about all three or two of them never leave the warehouse.
+  const { placements, offsite, loading } = useEzTransPlacements(row.assigned_serials);
   const { template, packingList: packingListTemplate, source: templateSource } = useEzTransTemplate();
   const [carrier, setCarrier] = useState(row.carrier ?? '');
   const [tracking, setTracking] = useState(row.tracking_num ?? '');
@@ -158,7 +161,11 @@ export function EzTransPanel({
   // A label uploaded on an earlier pass is still on the row, so a resend (or a
   // corrected tracking number) doesn't force the operator to find the file again.
   const labelOnFile = !!row.label_pdf_path;
-  const ready = !!carrier && !!tracking.trim() && (!!pdf || labelOnFile);
+  // offsite blocks the send outright. Booking a three-unit order while one of
+  // the three sits on our own floor would tell the 3PL to pick a machine they
+  // do not hold — they would ship what they could find and nobody would learn
+  // the order went out short until the customer counted boxes.
+  const ready = !!carrier && !!tracking.trim() && (!!pdf || labelOnFile) && offsite.length === 0;
 
   // UPS brokers its own US entries and needs a FIFRA worksheet with them, so
   // one is built and attached on those bookings only. Decided by the same
@@ -168,17 +175,16 @@ export function EzTransPanel({
   const attachments = attachmentFilenames(order.order_ref, carrier);
 
   const booking = useMemo(() => {
-    if (!placement) return null;
+    if (placements.length === 0) return null;
     return buildEzTransBooking({
       order,
-      serial: placement.serial,
-      masterCarton: placement.masterCarton,
+      units: placements.map(p => ({ serial: p.serial, masterCarton: p.masterCarton })),
       carrier: carrier || null,
       tracking: tracking.trim() || null,
       template,
       packingListTemplate,
     });
-  }, [order, placement, carrier, tracking, template, packingListTemplate]);
+  }, [order, placements, carrier, tracking, template, packingListTemplate]);
 
   // Opening the editor is what commits the current rendering as the starting
   // text — before that the fields are unset so the preview keeps tracking the
@@ -205,7 +211,15 @@ export function EzTransPanel({
     }
   }, [editingPacking, packingValue]);
 
-  if (loading || !placement || !booking) return null;
+  if (loading || placements.length === 0 || !booking) return null;
+
+  // Shorthand for the parts of the panel that still speak about one machine.
+  const first = placements[0];
+  const serials = placements.map(p => p.serial);
+  // De-duplicated: three machines off EZ-P10 is one skid and one carton, not
+  // the same number printed three times.
+  const skidSummary = [...new Set(placements.map(p => p.skid).filter(Boolean))].join(', ');
+  const cartonSummary = [...new Set(placements.map(p => p.masterCarton ?? '—'))].join(', ');
 
   const handleSend = async () => {
     if (!ready) return;
@@ -254,7 +268,8 @@ export function EzTransPanel({
         order.order_ref,
         `Booking confirmation, packing list + ${carrier} label ` +
         `${worksheetGoes ? '+ UPS pesticide worksheet ' : ''}sent to ${EZTRANS_EMAIL} — ` +
-        `serial ${placement.serial}, master carton ${placement.masterCarton ?? '—'}, ` +
+        `${serials.length} unit(s) ${serials.join(', ')}, ` +
+        `master carton ${cartonSummary}, ` +
         `tracking ${tracking.trim()}` +
         `${sent.pesticide_worksheet === 'unsigned' ? ' · worksheet UNSIGNED' : ''}` +
         `${sent.combined === false ? ' · label and packing list sent separately' : ''}` +
@@ -264,7 +279,7 @@ export function EzTransPanel({
             ? ` · sent from ${sent.from ?? 'the sender'} — in their Gmail Sent folder`
             : ' · sent via Resend — no copy in the sender\'s Sent folder'}` +
         `${sent.warning ? ` · ${sent.warning}` : ''}`,
-        { entityType: 'order', entityId: order.id, unitSerial: placement.serial },
+        { entityType: 'order', entityId: order.id, unitSerial: first.serial },
       );
       // An order mailed on its own must not also ride along in the evening's
       // batch. Only meaningful for a row that was confirmed; the mutation is a
@@ -320,11 +335,11 @@ export function EzTransPanel({
       await logAction(
         EZTRANS_BATCH_CONFIRMED_ACTION,
         order.order_ref,
-        `Confirmed for the Goorooship day batch — serial ${placement.serial}, ` +
-        `master carton ${placement.masterCarton ?? '—'}, ${carrier} ${tracking.trim()} · ` +
+        `Confirmed for the Goorooship day batch — ${serials.length} unit(s) ${serials.join(', ')}, ` +
+        `master carton ${cartonSummary}, ${carrier} ${tracking.trim()} · ` +
         `documents ${[files.combined, files.worksheet].filter(Boolean).join(', ')}` +
         `${packingEdited ? ' · packing list edited for this order' : ''}`,
-        { entityType: 'order', entityId: order.id, unitSerial: placement.serial },
+        { entityType: 'order', entityId: order.id, unitSerial: first.serial },
       );
       setPdf(null);
       setConfirmedAt(confirmed_at);
@@ -350,7 +365,7 @@ export function EzTransPanel({
         order.order_ref,
         `Removed from the Goorooship day batch — ${carrier || '—'} ${tracking.trim() || '—'}. ` +
         `The booking stands; it is simply not in today's email.`,
-        { entityType: 'order', entityId: order.id, unitSerial: placement.serial },
+        { entityType: 'order', entityId: order.id, unitSerial: first.serial },
       );
       setConfirmedAt(null);
       onBatchChanged?.();
@@ -373,11 +388,27 @@ export function EzTransPanel({
     <div className={styles.ezTransPanel}>
       <div className={styles.labelSectionHead}>EZ Trans shipment (Goorooship)</div>
       <p className={styles.ezTransLead}>
-        {placement.serial} is held at EZ Trans
-        {placement.skid ? ` on ${placement.skid}` : ''} — book this shipment on
+        {placements.length === 1
+          ? `${first.serial} is`
+          : `${placements.length} machines are`} held at EZ Trans
+        {skidSummary ? ` on ${skidSummary}` : ''} — book this shipment on
         Goorooship, attach the label it gives you, then send EZ Trans the
-        confirmation so they can fulfill it.
+        confirmation so they can fulfill {placements.length === 1 ? 'it' : 'them'}.
       </p>
+
+      {offsite.length > 0 && (
+        /* Loud, and it disables the send. An order whose machines are split
+           between the 3PL and our own floor is not one Goorooship shipment,
+           and the way that goes wrong is silent: EZ Trans picks what they
+           hold, the box leaves short, and nothing says so until the customer
+           counts. Either move the stock or split the order. */
+        <p className={styles.ezTransWarning}>
+          ⚠ {offsite.length} of this order's {row.assigned_serials.length} machines
+          {offsite.length === 1 ? ' is' : ' are'} not held at EZ Trans: {offsite.join(', ')}.
+          EZ Trans cannot pick {offsite.length === 1 ? 'it' : 'them'}, so this booking is
+          blocked — move the stock to EZ Trans, or ship those units separately.
+        </p>
+      )}
 
       <ol className={styles.ezTransSteps}>
         <li>
@@ -518,8 +549,19 @@ export function EzTransPanel({
       </ol>
 
       <dl className={styles.ezTransFacts}>
-        <div><dt>Serial No</dt><dd>{placement.serial}</dd></div>
-        <div><dt>Master carton</dt><dd>{placement.masterCarton ?? '— (no pallet on record)'}</dd></div>
+        {/* One row per machine. A single "Serial No" line was how an order
+            for three read as an order for one. */}
+        <div>
+          <dt>{placements.length === 1 ? 'Serial No' : `Serial Nos (${placements.length})`}</dt>
+          <dd>
+            {placements.map(p => (
+              <div key={p.serial}>
+                {p.serial} — master carton {p.masterCarton ?? '— (no pallet on record)'}
+              </div>
+            ))}
+          </dd>
+        </div>
+        <div><dt>Quantity</dt><dd>{placements.length}</dd></div>
         <div><dt>Ship to</dt><dd>{order.customer_name}</dd></div>
         {/* Named rather than counted: on a UPS booking a third document goes
             to the broker, and an operator should not have to open the sent
@@ -684,7 +726,7 @@ export function EzTransPanel({
               <dl className={styles.ezTransFacts}>
                 {pesticideWorksheetSummary({
                   orderRef: order.order_ref,
-                  serial: placement.serial,
+                  serials,
                   tracking: tracking.trim() || null,
                 }).map(f => (
                   <div key={f.label}><dt>{f.label}</dt><dd>{f.value}</dd></div>

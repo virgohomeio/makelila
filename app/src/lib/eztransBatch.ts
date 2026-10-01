@@ -64,6 +64,9 @@ export type EzTransBatchQueueRow = EzTransBatchFields & {
   id: string;
   order_id: string;
   assigned_serial: string | null;
+  /** Every machine on the row. Optional so a test can state a row in five
+   *  lines; falls back to assigned_serial, which is the first pick. */
+  assigned_serials?: string[];
   carrier: string | null;
   tracking_num: string | null;
 };
@@ -81,6 +84,8 @@ export type EzTransBatchItem = {
   orderId: string;
   orderRef: string;
   customerName: string;
+  /** Every machine on the order, comma-joined — an order for three reads as
+   *  three here, not as whichever one was picked first. */
   serial: string | null;
   carrier: string;
   tracking: string;
@@ -154,7 +159,8 @@ export function buildDailyBatch(
       orderId: r.order_id,
       orderRef: order.order_ref,
       customerName: order.customer_name,
-      serial: r.assigned_serial,
+      serial: (r.assigned_serials?.length ? r.assigned_serials : [r.assigned_serial])
+        .filter(Boolean).join(', ') || null,
       carrier: r.carrier!,
       tracking: r.tracking_num!,
       confirmedAt: r.eztrans_confirmed_at!,

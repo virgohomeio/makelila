@@ -46,7 +46,7 @@ vi.mock('../../../lib/eztrans', async () => {
   const actual = await vi.importActual<typeof import('../../../lib/eztrans')>('../../../lib/eztrans');
   return {
     ...actual,
-    useEzTransPlacement: placementMock,
+    useEzTransPlacements: placementMock,
     saveEzTransLabel: saveLabelMock,
     sendEzTransBooking: sendMock,
     // Pinned to the built-in default. Left real, this hook queries
@@ -113,7 +113,8 @@ const order = {
 };
 
 const AT_EZTRANS = {
-  placement: { serial: 'LL01-P100X-00412', skid: 'EZ-P01', pallet: 'P01', masterCarton: '1' },
+  placements: [{ serial: 'LL01-P100X-00412', skid: 'EZ-P01', pallet: 'P01', masterCarton: '1' }],
+  offsite: [],
   loading: false,
 };
 
@@ -143,7 +144,7 @@ describe('EzTransPanel', () => {
   });
 
   it('stays out of the way for a unit that is not at EZ Trans', () => {
-    placementMock.mockReturnValue({ placement: null, loading: false });
+    placementMock.mockReturnValue({ placements: [], offsite: [], loading: false });
     const { container } = render(<EzTransPanel row={row} order={order} />);
     expect(container).toBeEmptyDOMElement();
   });
@@ -731,5 +732,71 @@ describe('the UPS pesticide worksheet', () => {
       .toContain('label and packing list sent separately');
     expect(screen.getByText(/Attached: shipping-label-1184.pdf, packing-list-1184.pdf/))
       .toBeInTheDocument();
+  });
+});
+
+// M-0001 is three LILA Pros. The panel named one of them, so the operator had
+// nothing on screen saying the other two were part of this shipment.
+describe('an order for more than one machine', () => {
+  const THREE_ROW: FulfillmentQueueRow = {
+    ...row,
+    assigned_serial: 'LL01-00000000397',
+    assigned_serials: ['LL01-00000000397', 'LL01-00000000398', 'LL01-00000000400'],
+  };
+  const THREE = {
+    placements: [
+      { serial: 'LL01-00000000397', skid: 'EZ-P10', pallet: 'P10', masterCarton: '10' },
+      { serial: 'LL01-00000000398', skid: 'EZ-P10', pallet: 'P10', masterCarton: '10' },
+      { serial: 'LL01-00000000400', skid: 'EZ-P10', pallet: 'P10', masterCarton: '10' },
+    ],
+    offsite: [],
+    loading: false,
+  };
+
+  beforeEach(() => {
+    placementMock.mockReset().mockReturnValue(THREE);
+  });
+
+  it('says three machines are held, not one serial', () => {
+    render(<EzTransPanel row={THREE_ROW} order={order} />);
+    expect(screen.getByText(/3 machines are/i)).toBeInTheDocument();
+  });
+
+  it('lists every serial in the shipment facts', () => {
+    render(<EzTransPanel row={THREE_ROW} order={order} />);
+    for (const serial of THREE.placements.map(p => p.serial)) {
+      expect(screen.getAllByText(new RegExp(serial)).length).toBeGreaterThan(0);
+    }
+    expect(screen.getByText('Quantity')).toBeInTheDocument();
+  });
+
+  it('puts all three on the email the 3PL receives', () => {
+    render(<EzTransPanel row={THREE_ROW} order={order} />);
+    fireEvent.click(screen.getByRole('button', { name: /preview \/ edit email \+ packing list/i }));
+    // The rendered preview is the email, verbatim — the same text the send
+    // posts, so asserting on it is asserting on what the 3PL opens.
+    const previews = document.querySelectorAll('pre');
+    const text = [...previews].map(el => el.textContent ?? '').join('\n');
+    for (const serial of THREE.placements.map(p => p.serial)) {
+      expect(text).toContain(serial);
+    }
+    expect(text).toContain('Quantity: 3');
+  });
+
+  // A split order is not one Goorooship shipment. Booking it would tell the
+  // 3PL to pick a machine they do not hold, and the box would leave short with
+  // nothing on any screen saying so.
+  it('blocks the booking when one of the machines is not at EZ Trans', () => {
+    placementMock.mockReturnValue({
+      placements: THREE.placements.slice(0, 2),
+      offsite: ['LL01-00000000400'],
+      loading: false,
+    });
+    render(<EzTransPanel row={THREE_ROW} order={order} />);
+    fillLabel();
+    expect(screen.getByText(/not held at EZ Trans/i)).toBeInTheDocument();
+    expect(screen.getByText(/LL01-00000000400/)).toBeInTheDocument();
+    expect(sendButton()).toBeDisabled();
+    expect(confirmButton()).toBeDisabled();
   });
 });

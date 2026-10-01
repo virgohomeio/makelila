@@ -4,6 +4,7 @@ import {
   addressOneLine,
   attachmentFilenames,
   buildEzTransBooking,
+  ezTransVariables,
   masterCartonFromSkid,
   needsPesticideWorksheet,
   pesticideWorksheetSummary,
@@ -78,8 +79,7 @@ describe('addressLines', () => {
 describe('buildEzTransBooking', () => {
   const booking = buildEzTransBooking({
     order: ORDER,
-    serial: 'LL01-P100X-00412',
-    masterCarton: '1',
+    units: [{ serial: 'LL01-P100X-00412', masterCarton: '1' }],
     carrier: 'Purolator',
     tracking: 'PUR123456789',
   });
@@ -138,8 +138,7 @@ describe('buildEzTransBooking', () => {
   it('marks a missing field rather than printing "null" on a picking document', () => {
     const blank = buildEzTransBooking({
       order: { ...ORDER, customer_email: null, customer_phone: null },
-      serial: 'LL01-P100X-00412',
-      masterCarton: null,
+      units: [{ serial: 'LL01-P100X-00412', masterCarton: null }],
       carrier: null,
       tracking: null,
     });
@@ -179,8 +178,7 @@ describe('what goes out with the booking', () => {
   it('tells the 3PL to look for the second PDF only when there is one', () => {
     const base = {
       order: ORDER,
-      serial: 'LL01-P100X-00412',
-      masterCarton: '1',
+      units: [{ serial: 'LL01-P100X-00412', masterCarton: '1' }],
       tracking: '1Z2985EADK93221574',
     };
     const ups = buildEzTransBooking({ ...base, carrier: 'UPS' });
@@ -194,7 +192,7 @@ describe('what goes out with the booking', () => {
 
   it('shows the operator the worksheet fields that came off this shipment', () => {
     const summary = pesticideWorksheetSummary({
-      orderRef: '#1252', serial: 'LL01-00000000369', tracking: '1Z2985EADK93221574',
+      orderRef: '#1252', serials: ['LL01-00000000369'], tracking: '1Z2985EADK93221574',
     });
     const byLabel = Object.fromEntries(summary.map(f => [f.label, f.value]));
     expect(byLabel['Shipment number']).toBe('1Z2985EADK93221574');
@@ -206,8 +204,88 @@ describe('what goes out with the booking', () => {
 
   it('says a missing tracking number rather than filing a blank one', () => {
     const summary = pesticideWorksheetSummary({
-      orderRef: '#1252', serial: 'LL01-00000000369', tracking: null,
+      orderRef: '#1252', serials: ['LL01-00000000369'], tracking: null,
     });
     expect(summary.find(f => f.label === 'Shipment number')?.value).toBe('—');
+  });
+});
+
+// The failure this was written for: M-0001 is three LILA Pros, and the booking
+// EZ Trans works from named exactly one of them. The other two were on the
+// order, in the queue and reserved in Stock, and absent from the only document
+// the 3PL reads — so one box would have shipped against a three-unit order.
+describe('an order for more than one machine', () => {
+  const THREE = {
+    order: ORDER,
+    units: [
+      { serial: 'LL01-00000000397', masterCarton: '10' },
+      { serial: 'LL01-00000000398', masterCarton: '10' },
+      { serial: 'LL01-00000000400', masterCarton: '11' },
+    ],
+    carrier: 'Day & Ross',
+    tracking: 'A12453936',
+  };
+
+  it('counts the machines rather than reporting one', () => {
+    expect(ezTransVariables(THREE).quantity).toBe('3');
+  });
+
+  it('names every serial, not just the first picked', () => {
+    const vars = ezTransVariables(THREE);
+    expect(vars.serial).toBe('LL01-00000000397, LL01-00000000398, LL01-00000000400');
+  });
+
+  it('pairs each serial with the carton it is picked from', () => {
+    expect(ezTransVariables(THREE).units_block).toBe(
+      'Serial No: LL01-00000000397 — Master Carton: 10\n' +
+      'Serial No: LL01-00000000398 — Master Carton: 10\n' +
+      'Serial No: LL01-00000000400 — Master Carton: 11',
+    );
+  });
+
+  // Three machines off EZ-P10 is one carton number. Printing it three times
+  // reads as three cartons to the person picking.
+  it('de-duplicates the carton list', () => {
+    expect(ezTransVariables({
+      ...THREE,
+      units: [
+        { serial: 'LL01-00000000397', masterCarton: '10' },
+        { serial: 'LL01-00000000398', masterCarton: '10' },
+      ],
+    }).master_carton).toBe('10');
+  });
+
+  it('puts all three on the packing list and in the email body', () => {
+    const { body, packingList } = buildEzTransBooking(THREE);
+    for (const serial of ['LL01-00000000397', 'LL01-00000000398', 'LL01-00000000400']) {
+      expect(body).toContain(serial);
+      expect(packingList.join('\n')).toContain(serial);
+    }
+    expect(packingList.join('\n')).toContain('Quantity: 3');
+  });
+
+  // The subject is what a picker sees in their inbox before opening anything.
+  it('says how many machines in the subject line', () => {
+    expect(buildEzTransBooking(THREE).subject).toContain('3 × LILA-P100X');
+  });
+
+  // One customs entry, one worksheet. Declaring one of three machines is a
+  // false declaration, not merely an incomplete one.
+  it('declares every machine on the UPS worksheet', () => {
+    const summary = pesticideWorksheetSummary({
+      orderRef: 'M-0001',
+      serials: THREE.units.map(u => u.serial),
+      tracking: '1Z2985EADK93221574',
+    });
+    const goods = summary.find(f => f.label === 'Description of goods')!.value;
+    for (const u of THREE.units) expect(goods).toContain(u.serial);
+    expect(goods).toContain('Qty 3');
+  });
+
+  it('leaves no placeholder behind on a multi-unit booking', () => {
+    const { body, subject, packingList } = buildEzTransBooking(THREE);
+    expect(body).not.toMatch(/\{\{/);
+    expect(subject).not.toMatch(/\{\{/);
+    expect(packingList.join('\n')).not.toMatch(/\{\{/);
   });
 });

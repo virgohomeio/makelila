@@ -23,6 +23,8 @@ import {
   attachmentsNote,
   needsPesticideWorksheet,
   packingListLines,
+  unitVariables,
+  type EzTransUnit,
 } from '../../../supabase/functions/_shared/eztransTemplate';
 import {
   goodsDescription,
@@ -45,6 +47,9 @@ export const EZTRANS_EMAIL = 'cs@goorooship.ca';
 export const PACKING_LIST_PRODUCT_NAME = 'LILA Kitchen Composter';
 export const PACKING_LIST_SKU = 'LILA-P100X';
 export const PACKING_LIST_BATCH_LOT = 'P100X';
+/** Kept for the single-unit callers that still ask for "one machine"; the
+ *  quantity on a booking is now the number of units assigned to the queue row,
+ *  not a constant. See unitVariables in _shared/eztransTemplate.ts. */
 export const PACKING_LIST_QUANTITY = 1;
 
 export { needsPesticideWorksheet };
@@ -64,7 +69,7 @@ export function attachmentFilenames(orderRef: string, carrier: string | null): s
  *  server — this is the same data, so an operator can check the tracking
  *  number and the serial before the form goes to the broker. */
 export function pesticideWorksheetSummary(args: {
-  orderRef: string; serial: string; tracking: string | null;
+  orderRef: string; serials: string[]; tracking: string | null;
 }): Array<{ label: string; value: string }> {
   return [
     { label: 'Shipment number', value: args.tracking || '—' },
@@ -72,9 +77,12 @@ export function pesticideWorksheetSummary(args: {
     {
       label: 'Description of goods',
       value: goodsDescription({
-        serial: args.serial,
+        // One entry covers the whole shipment, so every machine on it is
+        // declared. A worksheet naming one of three is a false declaration to
+        // CBP, not merely an incomplete one.
+        serial: args.serials.join(', ') || '—',
         batchLot: PACKING_LIST_BATCH_LOT,
-        quantity: PACKING_LIST_QUANTITY,
+        quantity: args.serials.length || PACKING_LIST_QUANTITY,
         orderRef: args.orderRef,
       }),
     },
@@ -108,7 +116,7 @@ export const EZTRANS_CC = [
 // environment where the template row has not been migrated in yet.
 // eztransTemplate.test.ts fails the build if the two copies drift.
 export const DEFAULT_EZTRANS_SUBJECT =
-  'Order confirmed — {{order_ref}} · {{sku}} · Serial {{serial}}';
+  'Order confirmed — {{order_ref}} · {{quantity}} × {{sku}} · Serial {{serial}}';
 
 export const DEFAULT_EZTRANS_BODY =
   'Hello EZ Trans team,\n' +
@@ -125,10 +133,9 @@ export const DEFAULT_EZTRANS_BODY =
   'SHIPMENT\n' +
   'Product Name: {{product_name}}\n' +
   'SKU: {{sku}}\n' +
-  'Serial No: {{serial}}\n' +
   'Batch/Lot Number: {{batch_lot}}\n' +
-  'Master Carton: {{master_carton}}\n' +
   'Quantity: {{quantity}}\n' +
+  '{{units_block}}\n' +
   '\n' +
   'SHIPPING LABEL (attached)\n' +
   'Carrier: {{carrier}}\n' +
@@ -137,7 +144,7 @@ export const DEFAULT_EZTRANS_BODY =
   '\n' +
   'Order reference: {{order_ref}}\n' +
   '\n' +
-  'Please reply to confirm once the unit is picked and the shipment is on its way.\n' +
+  'Please reply to confirm once the order is picked and the shipment is on its way.\n' +
   '\n' +
   'Thank you,\n' +
   'The VCycene Team';
@@ -156,10 +163,9 @@ export const DEFAULT_EZTRANS_PACKING_LIST =
   '## CONTENTS\n' +
   'Product Name: {{product_name}}\n' +
   'SKU: {{sku}}\n' +
-  'Serial No: {{serial}}\n' +
   'Batch/Lot Number: {{batch_lot}}\n' +
-  'Master Carton: {{master_carton}}\n' +
   'Quantity: {{quantity}}\n' +
+  '{{units_block}}\n' +
   '\n' +
   '## SHIPPING\n' +
   'Carrier: {{carrier}}\n' +
@@ -236,8 +242,9 @@ export type EzTransBooking = {
 
 export type EzTransBookingArgs = {
   order: EzTransShipTo & { order_ref: string };
-  serial: string;
-  masterCarton: string | null;
+  /** Every machine on this order, in pick order. One element is the ordinary
+   *  case; M-0001 is three. */
+  units: EzTransUnit[];
   /** From the Goorooship booking. Both are required before the email can go. */
   carrier: string | null;
   tracking: string | null;
@@ -246,7 +253,7 @@ export type EzTransBookingArgs = {
 /** Everything the template can interpolate. Missing values become an em dash
  *  rather than a blank, so a gap on the 3PL's copy reads as a gap. */
 export function ezTransVariables(args: EzTransBookingArgs): Record<string, string> {
-  const { order, serial, masterCarton, carrier, tracking } = args;
+  const { order, units, carrier, tracking } = args;
   return {
     customer_name: order.customer_name,
     // Continuation lines are indented under "Address: " so the block still
@@ -256,10 +263,12 @@ export function ezTransVariables(args: EzTransBookingArgs): Record<string, strin
     customer_phone: order.customer_phone ?? '—',
     product_name: PACKING_LIST_PRODUCT_NAME,
     sku: PACKING_LIST_SKU,
-    serial,
     batch_lot: PACKING_LIST_BATCH_LOT,
-    master_carton: masterCarton ?? '—',
-    quantity: String(PACKING_LIST_QUANTITY),
+    // serial / master_carton / quantity / units_block, over every machine on
+    // the order. Same helper the edge functions use, so the preview in the
+    // panel and the document the 3PL receives cannot disagree about how many
+    // machines are being picked.
+    ...unitVariables(units),
     carrier: carrier ?? '—',
     tracking: tracking ?? '—',
     order_ref: order.order_ref,
@@ -347,51 +356,77 @@ export async function saveEzTransLabel(
   return { label_pdf_path };
 }
 
-/** Is this unit sitting at EZ Trans, and on which pallet?
+/** Are these units sitting at EZ Trans, and on which pallets?
  *
  *  Two records can say a unit is at EZ Trans: the shelf board (shelf_slots,
  *  which also carries the pallet key) and Stock (units.location + units.pallet).
  *  Either is enough to route the order through Goorooship; the shelf row wins
- *  for the carton number because that is what the 3PL is looking at. */
-export function useEzTransPlacement(serial: string | null | undefined): {
-  placement: EzTransPlacement | null;
+ *  for the carton number because that is what the 3PL is looking at.
+ *
+ *  Every assigned unit is resolved, not just the first. `offsite` names the
+ *  ones that came back not at EZ Trans — an order whose machines are split
+ *  across the 3PL and our own floor cannot be booked as one Goorooship
+ *  shipment, and the panel has to be able to say so rather than quietly
+ *  booking the units it could find. */
+export function useEzTransPlacements(serials: string[]): {
+  placements: EzTransPlacement[];
+  offsite: string[];
   loading: boolean;
 } {
-  const [placement, setPlacement] = useState<EzTransPlacement | null>(null);
+  const [placements, setPlacements] = useState<EzTransPlacement[]>([]);
+  const [offsite, setOffsite] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // The array identity changes on every queue read; the serials rarely do.
+  const key = serials.join(',');
+
   useEffect(() => {
-    if (!serial) { setPlacement(null); setLoading(false); return; }
+    const list = key ? key.split(',') : [];
+    if (list.length === 0) { setPlacements([]); setOffsite([]); setLoading(false); return; }
     let cancelled = false;
     setLoading(true);
     (async () => {
       const [slotRes, unitRes] = await Promise.all([
-        supabase.from('shelf_slots').select('skid, location').eq('serial', serial),
-        supabase.from('units').select('location, pallet').eq('serial', serial).maybeSingle(),
+        supabase.from('shelf_slots').select('serial, skid, location').in('serial', list),
+        supabase.from('units').select('serial, location, pallet').in('serial', list),
       ]);
       if (cancelled) return;
 
-      const slots = (slotRes.data as Array<{ skid: string; location: string }> | null) ?? [];
+      const slots = (slotRes.data as Array<{ serial: string; skid: string; location: string }> | null) ?? [];
+      const units = (unitRes.data as Array<{ serial: string; location: string | null; pallet: string | null }> | null) ?? [];
+
       // A serial can linger on an old slot after a move, so prefer the row
       // that actually says EZTrans over whichever row came back first.
-      const slot = slots.find(s => s.location === EZTRANS_LOCATION) ?? null;
-      const unit = (unitRes.data as { location: string | null; pallet: string | null } | null) ?? null;
+      const ezSlot = new Map<string, string>();
+      for (const s of slots) {
+        if (s.location === EZTRANS_LOCATION && !ezSlot.has(s.serial)) ezSlot.set(s.serial, s.skid);
+      }
+      const unitBySerial = new Map(units.map(u => [u.serial, u]));
 
-      const atEzTrans = !!slot || unit?.location === EZTRANS_LOCATION;
-      if (!atEzTrans) { setPlacement(null); setLoading(false); return; }
+      const found: EzTransPlacement[] = [];
+      const missing: string[] = [];
+      // Pick order, not whatever order the two reads came back in: the
+      // packing list lists the machines in the order they were assigned.
+      for (const serial of list) {
+        const skid = ezSlot.get(serial) ?? null;
+        const unit = unitBySerial.get(serial) ?? null;
+        if (!skid && unit?.location !== EZTRANS_LOCATION) { missing.push(serial); continue; }
+        found.push({
+          serial,
+          skid,
+          pallet: unit?.pallet ?? null,
+          masterCarton: masterCartonFromSkid(skid ?? unit?.pallet ?? null),
+        });
+      }
 
-      setPlacement({
-        serial,
-        skid: slot?.skid ?? null,
-        pallet: unit?.pallet ?? null,
-        masterCarton: masterCartonFromSkid(slot?.skid ?? unit?.pallet ?? null),
-      });
+      setPlacements(found);
+      setOffsite(missing);
       setLoading(false);
     })();
     return () => { cancelled = true; };
-  }, [serial]);
+  }, [key]);
 
-  return { placement, loading };
+  return { placements, offsite, loading };
 }
 
 /** The operator-editable wording, plus whether it came from the Templates tab

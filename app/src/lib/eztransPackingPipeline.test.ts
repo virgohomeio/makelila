@@ -7,6 +7,7 @@ import {
   DEFAULT_EZTRANS_PACKING_LIST,
   packingListLines,
   renderEzTransTemplate,
+  unitVariables,
 } from '../../../supabase/functions/_shared/eztransTemplate.ts';
 import { buildTextPdf } from '../../../supabase/functions/_shared/simplePdf.ts';
 import { buildEzTransBooking, type EzTransShipTo } from './eztrans';
@@ -26,8 +27,7 @@ const ORDER: EzTransShipTo & { order_ref: string } = {
 
 const ARGS = {
   order: ORDER,
-  serial: 'LL01-00000000351',
-  masterCarton: '1',
+  units: [{ serial: 'LL01-00000000351', masterCarton: '1' }],
   carrier: 'Purolator',
   tracking: '520763643704',
 };
@@ -47,10 +47,10 @@ function serverPdfFor(packingOverride?: string): string {
     customer_phone: ORDER.customer_phone!,
     product_name: 'LILA Kitchen Composter',
     sku: 'LILA-P100X',
-    serial: ARGS.serial,
     batch_lot: 'P100X',
-    master_carton: '1',
-    quantity: '1',
+    // Same helper the edge function fills these from, so this stays a mirror
+    // of the server rather than a second opinion about it.
+    ...unitVariables(ARGS.units),
     carrier: ARGS.carrier,
     tracking: ARGS.tracking,
     order_ref: ORDER.order_ref,

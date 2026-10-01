@@ -50,8 +50,7 @@ const ORDER: EzTransShipTo & { order_ref: string } = {
 
 const ARGS = {
   order: ORDER,
-  serial: 'LL01-P100X-00412',
-  masterCarton: '1',
+  units: [{ serial: 'LL01-P100X-00412', masterCarton: '1' }],
   carrier: 'Purolator',
   tracking: 'PUR123456789',
 };
