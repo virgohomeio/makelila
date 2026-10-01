@@ -56,6 +56,55 @@ describe('markShippedForOrder', () => {
     expect(mark?.basis).toBe('ref');
   });
 
+  // A reship is the one case where a stamped, shipped unit is not the answer.
+  // #1189's machine LL01-00000000355 went out 2026-09-22 and is still stamped
+  // '#1189' at status 'shipped' — correctly, it did ship. The box then had to go
+  // out again, so an operator sent the order back to review (which stamps
+  // reconcile_outcome='open') and re-confirmed it. The new queue row was marked
+  // ALREADY SHIPPED on the strength of the first machine and filed under
+  // Shipped, so the second box never reached the picker: Ready to ship was
+  // empty for an order that very much needed packing.
+  //
+  // 'open' is an operator saying this order still owes the customer a machine.
+  // That is a person's statement about this order, and it outranks evidence
+  // about a box that has already been and gone.
+  it('leaves a reship in the rail even though its first machine is stamped and shipped', () => {
+    const evidence: ShippedEvidence = {
+      ...EVIDENCE,
+      units: [
+        ...EVIDENCE.units,
+        {
+          serial: 'LL01-00000000355', status: 'shipped',
+          customer_order_ref: '#1189', shipped_at: '2026-09-22',
+        },
+      ],
+    };
+    const order = {
+      id: 'o-1189', order_ref: '#1189', kind: 'sale', reconcile_outcome: 'open',
+    };
+    expect(markShippedForOrder(order, '2026-10-01T18:17:22Z', evidence)).toBeNull();
+  });
+
+  // The override is a human verdict, not a blanket exemption: without it the
+  // same order is still marked, which is what keeps the six stuck rows of
+  // 2026-09-04 out of the picker's rail.
+  it('still marks the same order when nobody has called it open', () => {
+    const evidence: ShippedEvidence = {
+      ...EVIDENCE,
+      units: [
+        ...EVIDENCE.units,
+        {
+          serial: 'LL01-00000000355', status: 'shipped',
+          customer_order_ref: '#1189', shipped_at: '2026-09-22',
+        },
+      ],
+    };
+    const mark = markShippedForOrder(
+      { id: 'o-1189', order_ref: '#1189', kind: 'sale' }, '2026-10-01T18:17:22Z', evidence);
+    expect(mark?.basis).toBe('ref');
+    expect(mark?.serial).toBe('LL01-00000000355');
+  });
+
   it('ignores a unit reserved against the order but not shipped', () => {
     // LL01-...302 carries ref #1169 at status 'reserved'. #1169 is still marked
     // shipped, but on LL01-...255 — the one that actually left.

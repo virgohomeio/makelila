@@ -35,6 +35,12 @@ import { normaliseOrderRef } from './refundedOrders';
  *  repeat customer's brand-new order included. It is far too blunt to decide
  *  whether a specific box has been packed.
  *
+ *  One thing outranks both signals: `reconcile_outcome = 'open'`, an operator
+ *  saying this order still owes the customer a machine. Both signals above read
+ *  shipping records, and a reship is precisely the case where those records are
+ *  true and beside the point — the first box went out, which is why a second
+ *  one has to. See markShippedForOrder.
+ *
  *  Replacements answer to a third signal instead, and only that one:
  *
  *    'ticket-closed' — the support case behind the replacement is closed. A
@@ -84,6 +90,9 @@ export type ShippableOrder = {
   kind?: 'sale' | 'replacement' | string | null;
   /** Replacements only: the support case this box was raised to settle. */
   linked_ticket_id?: string | null;
+  /** 'open' is an operator's verdict that this order still owes the customer a
+   *  machine — see markShippedForOrder, which lets it beat the evidence. */
+  reconcile_outcome?: string | null;
 };
 
 const EMPTY_EVIDENCE: ShippedEvidence = { units: [], shipments: [], closedTicketIds: new Set() };
@@ -130,6 +139,27 @@ export function markShippedForOrder(
     }
     return null;
   }
+
+  // A reship is the one case where a stamped, shipped machine is not the
+  // answer. #1189's LL01-00000000355 went out 2026-09-22 and is still stamped
+  // '#1189' at status 'shipped' — rightly, it did ship. The box then had to go
+  // out again, so an operator sent the order back to review (which stamps
+  // reconcile_outcome='open') and re-confirmed it. The new queue row was marked
+  // ALREADY SHIPPED on the strength of the first machine and filed under
+  // Shipped, so Ready to ship was empty for an order that badly needed packing.
+  //
+  // Everything else here is inference from shipping records. 'open' is not: it
+  // is a person saying, about this order, that the customer is still owed a
+  // machine, and that outranks evidence about a box which has already been and
+  // gone. It is also the same verdict that keeps the order visible in Sales at
+  // all (bucketOrders), so the two screens now agree on what it means.
+  //
+  // Narrow on purpose. Of the six live queue rows the 'ref' signal marks, only
+  // the reship carries 'open'; #1169, #1171, #1178 and #1180 have no verdict
+  // and stay marked. A date guard here would not do — #1169's machine shipped
+  // before its own queue row existed, so dates would have put it back in front
+  // of the picker, which is the exact bug this module was written to stop.
+  if (order.reconcile_outcome === 'open') return null;
 
   const ref = normaliseOrderRef(order.order_ref);
   if (ref) {

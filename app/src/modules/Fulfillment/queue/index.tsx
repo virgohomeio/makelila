@@ -48,6 +48,10 @@ type Order = {
   line_items: FullOrder['line_items'];
   awaiting_batch_id: string | null;
   linked_ticket_id: string | null;
+  // 'open' is an operator saying this order still owes the customer a machine,
+  // and it is what keeps a reship out of the already-shipped rail even though
+  // its first machine is stamped and shipped. select('*') returns it.
+  reconcile_outcome: string | null;
 };
 
 export default function Queue() {
