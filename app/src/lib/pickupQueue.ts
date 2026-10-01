@@ -58,18 +58,50 @@ export type PickupQueueRow = {
   label_confirmed_at: string | null;
   /** Added by 20260929120000; undefined on a database without it. */
   eztrans_batch_sent_at?: string | null;
+  /** When this queue row was created — what dates a log send against it. */
+  created_at?: string | null;
 };
 
 /** Has the 3PL been told about this row's carton, and when? Null if not.
  *
  *  The column wins over the log when both exist: it is the row's own record of
- *  the send that is holding it out of later batches. */
+ *  the send that is holding it out of later batches.
+ *
+ *  The log is keyed by ORDER, not by queue row, and an order can outlive its
+ *  row — "Shipment Not Ready" deletes the row, and re-confirming mints a new
+ *  one. #1189 was booked to Goorooship on 2026-09-22, shipped, then sent back to
+ *  be reshipped and re-confirmed on 2026-10-01. That September email was about
+ *  the first carton, which has long since been collected. Read onto the new row
+ *  it would park the reship under "To be picked up" the moment a label was
+ *  confirmed, badged GOOROOSHIP NOTIFIED, with nobody having told the 3PL a
+ *  thing about the second box.
+ *
+ *  So a log send older than the row is about a carton that is no longer this
+ *  one. The row's own stamp is never date-checked — it is about this row by
+ *  construction — and a row whose created_at is unknown keeps the old
+ *  behaviour, since an absent date is not grounds to drop a real send. #1189 is
+ *  the only live row where a send predates the row; every other one was mailed
+ *  after its row existed, which is the normal order of events. */
 export function goorooshipSend(
   row: PickupQueueRow,
   sends: Map<string, GoorooshipSend>,
 ): GoorooshipSend | null {
   if (row.eztrans_batch_sent_at) return { at: row.eztrans_batch_sent_at, via: 'batch' };
-  return sends.get(row.order_id) ?? null;
+  const send = sends.get(row.order_id);
+  if (!send) return null;
+  if (predatesRow(send.at, row.created_at)) return null;
+  return send;
+}
+
+/** Did `sentAt` happen strictly before the row existed? False whenever either
+ *  date is missing or unparseable — this only ever discards a send, so an
+ *  unknown date must not be read as grounds to discard one. */
+function predatesRow(sentAt: string, rowCreatedAt: string | null | undefined): boolean {
+  if (!rowCreatedAt) return false;
+  const sent = Date.parse(sentAt);
+  const created = Date.parse(rowCreatedAt);
+  if (!Number.isFinite(sent) || !Number.isFinite(created)) return false;
+  return sent < created;
 }
 
 /** Is this row waiting on the carrier rather than on us? */

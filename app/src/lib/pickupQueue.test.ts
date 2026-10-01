@@ -65,6 +65,50 @@ describe('goorooshipSend', () => {
   it('is null when the 3PL has not been told', () => {
     expect(goorooshipSend(mkRow({ id: 'q1', order_id: 'o1' }), NO_SENDS)).toBeNull();
   });
+
+  // The log is keyed by order, not by queue row, and a queue row can be newer
+  // than the order's last send. #1189 was booked to Goorooship on 2026-09-22,
+  // shipped, then sent back to be reshipped — which deletes the queue row — and
+  // re-confirmed on 2026-10-01, minting a fresh row. That September email was
+  // about the first carton; it has been collected and delivered. Read onto the
+  // new row it would park the reship under "To be picked up" the moment a label
+  // was confirmed, badged GOOROOSHIP NOTIFIED, with nobody having told the 3PL
+  // anything about the second box.
+  //
+  // A send can only concern a carton whose row already existed when it went, so
+  // one older than the row is about a carton that is no longer this one.
+  it('ignores a send that predates the queue row — it was a previous carton', () => {
+    const row = mkRow({
+      id: 'q-new', order_id: 'o-1189',
+      eztrans_batch_sent_at: null, created_at: '2026-10-01T18:17:22Z',
+    });
+    const sends = new Map<string, GoorooshipSend>([
+      ['o-1189', { at: '2026-09-22T19:08:49Z', via: 'booking' }],
+    ]);
+    expect(goorooshipSend(row, sends)).toBeNull();
+    expect(isAwaitingPickup(row, sends)).toBe(false);
+  });
+
+  it('keeps a send made after the row was created — that is this carton', () => {
+    const row = mkRow({
+      id: 'q1', order_id: 'o1',
+      eztrans_batch_sent_at: null, created_at: '2026-09-23T20:56:16Z',
+    });
+    const sends = new Map<string, GoorooshipSend>([
+      ['o1', { at: '2026-09-29T19:57:05Z', via: 'booking' }],
+    ]);
+    expect(goorooshipSend(row, sends)?.at).toBe('2026-09-29T19:57:05Z');
+  });
+
+  // The row's own stamp is about the row by construction, so it is never
+  // second-guessed on a date.
+  it('still trusts the row stamp even if it somehow predates the row', () => {
+    const row = mkRow({
+      id: 'q1', order_id: 'o1',
+      eztrans_batch_sent_at: '2026-09-20T10:00:00Z', created_at: '2026-10-01T18:17:22Z',
+    });
+    expect(goorooshipSend(row, NO_SENDS)?.via).toBe('batch');
+  });
 });
 
 describe('isAwaitingPickup', () => {
