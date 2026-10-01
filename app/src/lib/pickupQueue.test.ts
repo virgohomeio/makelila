@@ -122,10 +122,16 @@ describe('isAwaitingPickup', () => {
     expect(isAwaitingPickup(mkRow({ id: 'q1', order_id: 'o1', step: 3 }), sends)).toBe(false);
   });
 
-  it('leaves a row whose box has already gone', () => {
-    // Step 5 is the customer shipping email: the carrier has been and gone.
-    expect(isAwaitingPickup(mkRow({ id: 'q1', order_id: 'o1', step: 5 }), sends)).toBe(false);
+  // Step 5 was excluded until 2026-10-01, on the reasoning that the carrier
+  // had been and gone by then. It put #1194 and #1266 back in the picker's
+  // work list with nothing left to pack — the rail runs to fulfilment now.
+  it('keeps a row whose box has gone but whose customer email has not', () => {
+    expect(isAwaitingPickup(mkRow({ id: 'q1', order_id: 'o1', step: 5 }), sends)).toBe(true);
+  });
+
+  it('leaves a fulfilled row to the Shipped rail', () => {
     expect(isAwaitingPickup(mkRow({ id: 'q1', order_id: 'o1', step: 6 }), sends)).toBe(false);
+    expect(isAwaitingPickup(mkRow({ id: 'q1', order_id: 'o1', step: 7 }), sends)).toBe(false);
   });
 
   it('leaves a rewound row whose label is no longer confirmed', () => {
@@ -156,5 +162,14 @@ describe('pickupBadgeTitle', () => {
   it('names which of the two emails carried the carton', () => {
     expect(pickupBadgeTitle({ at: '2026-09-30T17:56:34Z', via: 'batch' })).toMatch(/day batch/i);
     expect(pickupBadgeTitle({ at: '2026-09-29T20:12:00Z', via: 'booking' })).toMatch(/own booking email/i);
+  });
+
+  // The rail holds both halves of the handoff, so the badge must not tell an
+  // operator a carton is awaiting collection days after the dock was confirmed.
+  it('says what the row is actually waiting on, by step', () => {
+    const send = { at: '2026-09-29T20:12:00Z', via: 'booking' } as const;
+    expect(pickupBadgeTitle(send, 4)).toMatch(/waiting on the carrier/i);
+    expect(pickupBadgeTitle(send, 5)).toMatch(/collected/i);
+    expect(pickupBadgeTitle(send, 5)).not.toMatch(/waiting on the carrier/i);
   });
 });

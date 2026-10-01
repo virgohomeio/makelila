@@ -10,9 +10,18 @@
 //
 // A row belongs in "To be picked up" when all three are true:
 //
-//   1. it is at step 4, the dock handoff;
+//   1. it is at the dock handoff or past it — step 4 or step 5;
 //   2. its label is confirmed — carrier and tracking number are on the row;
 //   3. the Goorooship email carrying it has actually gone out.
+//
+// (1) was step 4 exactly until 2026-10-01, on the reasoning that step 5 is the
+// customer's shipping email and by then the carrier has been and gone. That
+// put #1194 and #1266 back under Ready to ship after the dock was confirmed —
+// both boxes gone, both rows sitting in the picker's work list with nothing to
+// pack. Whatever step 5 is, it is not warehouse work, and Ready to ship is
+// read to decide what to pack next. So the rail runs from the handoff to
+// fulfilment: once the carton is labelled and the 3PL has it, the row is out
+// of the packer's hands whether or not the customer has been emailed yet.
 //
 // The third is the one that needs care, because the app has mailed the 3PL two
 // different ways and only one of them leaves a mark on the queue row:
@@ -34,8 +43,15 @@ import { supabase } from './supabase';
 import { EZTRANS_SENT_ACTION } from './eztrans';
 import { EZTRANS_BATCH_SENT_ACTION } from './eztransBatch';
 
-/** The dock-handoff step. Named because "4" appears nowhere else as a fact. */
+/** The dock-handoff step, where the pickup rail starts. Named because "4"
+ *  appears nowhere else as a fact. */
 export const PICKUP_STEP = 4;
+
+/** Step 6, where the queue is done with a row. The pickup rail stops below it:
+ *  a fulfilled row belongs to Shipped. The queue hands this function only
+ *  rows under step 6, so this is a guard rather than a filter — but the
+ *  function is exported and the bound should be stated, not assumed. */
+export const FULFILLED_STEP = 6;
 
 /** The two activity-log types that mean "Goorooship has this shipment". */
 export const GOOROOSHIP_SENT_TYPES: readonly string[] = [
@@ -104,12 +120,16 @@ function predatesRow(sentAt: string, rowCreatedAt: string | null | undefined): b
   return sent < created;
 }
 
-/** Is this row waiting on the carrier rather than on us? */
+/** Is this row out of the packer's hands — with the carrier, or already gone?
+ *
+ *  Named for the rail rather than literally: a step-5 row has usually been
+ *  collected already. What the two steps share is that no one in the warehouse
+ *  has anything left to pack. */
 export function isAwaitingPickup(
   row: PickupQueueRow,
   sends: Map<string, GoorooshipSend>,
 ): boolean {
-  if (row.step !== PICKUP_STEP) return false;
+  if (row.step < PICKUP_STEP || row.step >= FULFILLED_STEP) return false;
   // Step 4 implies a confirmed label today, but a row can be rewound and the
   // operator's rule names the label explicitly, so it is checked rather than
   // assumed. A carton with no tracking number is not waiting on anyone.
@@ -136,14 +156,25 @@ export function splitAwaitingPickup<T extends PickupQueueRow>(
 /** Badge text for a row in the pickup rail. */
 export const PICKUP_BADGE_LABEL = '✉ GOOROOSHIP NOTIFIED';
 
-/** The hover explanation behind that badge — which email, and when. */
-export function pickupBadgeTitle(send: GoorooshipSend): string {
+/** The hover explanation behind that badge — which email, when, and what the
+ *  row is actually waiting on.
+ *
+ *  The rail now holds both halves of the handoff, so the closing sentence has
+ *  to come off the step rather than being the same for everything on it:
+ *  telling an operator a step-5 carton is "waiting on the carrier to collect"
+ *  when the dock was confirmed days ago is the kind of small lie that makes
+ *  people stop reading the badge. */
+export function pickupBadgeTitle(send: GoorooshipSend, step: number = PICKUP_STEP): string {
   const when = Number.isNaN(Date.parse(send.at))
     ? send.at
     : new Date(send.at).toLocaleString();
-  return send.via === 'batch'
-    ? `Sent to Goorooship in the day batch on ${when}. Waiting on the carrier to collect.`
-    : `Sent to Goorooship as its own booking email on ${when}. Waiting on the carrier to collect.`;
+  const how = send.via === 'batch'
+    ? `Sent to Goorooship in the day batch on ${when}.`
+    : `Sent to Goorooship as its own booking email on ${when}.`;
+  const waiting = step > PICKUP_STEP
+    ? 'Collected — the shipment-confirmation email to the customer is still to send.'
+    : 'Waiting on the carrier to collect.';
+  return `${how} ${waiting}`;
 }
 
 /** One activity_log row, narrowed to what identifies a send. */

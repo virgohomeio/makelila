@@ -240,7 +240,7 @@ export function QueueSidebar({
         {pickupSend && (
           <div
             className={`${styles.refundBadge} ${styles.pickupBadge}`}
-            title={pickupBadgeTitle(pickupSend)}
+            title={pickupBadgeTitle(pickupSend, r.step)}
           >
             {PICKUP_BADGE_LABEL}
           </div>
