@@ -38,14 +38,16 @@ describe('shipmentEmailVars', () => {
 });
 
 describe('trackingUrlFor', () => {
-  // These six must match the switch in the send-fulfillment-email edge
-  // function; Canpar and GLS were missing there and silently sent a UPS link.
+  // These must match the switch in the send-fulfillment-email edge function;
+  // Canpar and GLS were missing there and silently sent a UPS link.
   it.each([
     ['UPS', 'https://www.ups.com/track?tracknum=X1'],
     ['FedEx', 'https://www.fedex.com/fedextrack/?trknbr=X1'],
     ['Purolator', 'https://www.purolator.com/en/shipping/tracker?pin=X1'],
     ['Canpar', 'https://www.canpar.com/en/track/TrackingAction.do?reference=X1'],
     ['GLS', 'https://gls-us.com/tracking?trackingNumber=X1'],
+    // Not prefilled — Day & Ross has no deep link — but their page, not UPS'.
+    ['Day & Ross', 'https://dayross.com/track-shipments'],
   ])('%s', (carrier, expected) => {
     expect(trackingUrlFor(carrier, 'X1')).toBe(expected);
   });

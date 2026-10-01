@@ -3,7 +3,10 @@
  *
  *  This list is not a UI preference. It is a CHECK constraint on the column
  *  (`fulfillment_queue_carrier_check`, widened to six in the 20260605110000
- *  migration), so a value outside it does not degrade the write — it fails it.
+ *  migration and to seven in 20261001150000), so a value outside it does not
+ *  degrade the write — it fails it. Adding a carrier here means widening that
+ *  constraint in the same change, or the new option fails every write made
+ *  with it.
  *
  *  That cost us a shipment. R-0069 was a replacement jumper that went out in an
  *  Amazon box on 2026-09-29, and "Amazon" is what the operator typed into the
@@ -27,7 +30,9 @@
  *  import it — fulfillment already imports orders, and the reverse would close
  *  a runtime cycle.
  */
-export const QUEUE_CARRIERS = ['UPS', 'FedEx', 'Purolator', 'Canada Post', 'Canpar', 'GLS'] as const;
+export const QUEUE_CARRIERS = [
+  'UPS', 'FedEx', 'Purolator', 'Canada Post', 'Canpar', 'GLS', 'Day & Ross',
+] as const;
 
 export type QueueCarrier = typeof QUEUE_CARRIERS[number];
 
@@ -39,6 +44,16 @@ function key(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
+/** Other names for a carrier already on the list, key()-normalised. "Day &
+ *  Ross" is the one carrier here whose name an operator is as likely to write
+ *  out as "Day and Ross", and key() keeps those apart: it strips the ampersand
+ *  but not the word. Without this the two spellings would be two carriers, one
+ *  of which quietly doesn't record. */
+const ALIASES: Record<string, QueueCarrier> = {
+  dayandross: 'Day & Ross',
+  dayrossfreight: 'Day & Ross',
+};
+
 /** The operator's carrier as `fulfillment_queue.carrier` can hold it, or null
  *  when the column would reject it (including blank and undefined). Never
  *  throws: a carrier nobody anticipated is a thing to leave out of one column,
@@ -46,5 +61,6 @@ function key(s: string): string {
 export function queueCarrier(raw: string | null | undefined): QueueCarrier | null {
   const trimmed = (raw ?? '').trim();
   if (!trimmed) return null;
-  return QUEUE_CARRIERS.find(c => key(c) === key(trimmed)) ?? null;
+  const k = key(trimmed);
+  return QUEUE_CARRIERS.find(c => key(c) === k) ?? ALIASES[k] ?? null;
 }

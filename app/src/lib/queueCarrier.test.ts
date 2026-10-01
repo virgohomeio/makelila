@@ -32,6 +32,18 @@ describe('queueCarrier', () => {
     expect(queueCarrier('ups')).toBe('UPS');
     expect(queueCarrier('FedEx ')).toBe('FedEx');
     expect(queueCarrier('purolator')).toBe('Purolator');
+    expect(queueCarrier('day & ross')).toBe('Day & Ross');
+    expect(queueCarrier('DAY&ROSS')).toBe('Day & Ross');
+  });
+
+  // key() strips the ampersand but keeps the word, so "Day and Ross" is not a
+  // spelling variant to the normaliser — it needs the alias, and an operator
+  // writing the name out should not be the difference between a recorded
+  // shipment and a half-written one.
+  it('accepts Day & Ross written out as a word', () => {
+    expect(queueCarrier('Day and Ross')).toBe('Day & Ross');
+    expect(queueCarrier('DayAndRoss')).toBe('Day & Ross');
+    expect(queueCarrier('Day & Ross Freight')).toBe('Day & Ross');
   });
 
   // A near-miss is not a match. "Canada" alone could be anything, and guessing

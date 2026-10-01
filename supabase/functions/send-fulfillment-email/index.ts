@@ -127,6 +127,9 @@ async function handle(req: Request): Promise<Response> {
       // a Canpar shipment previewed a Canpar link and sent a UPS one.
       case 'Canpar':       return `https://www.canpar.com/en/track/TrackingAction.do?reference=${encodeURIComponent(tracking)}`;
       case 'GLS':          return `https://gls-us.com/tracking?trackingNumber=${encodeURIComponent(tracking)}`;
+      // Day & Ross publishes no prefillable tracking URL — their own search
+      // page, which is still better than the UPS default below.
+      case 'Day & Ross':   return 'https://dayross.com/track-shipments';
       default:             return 'https://www.ups.com/track?loc=en_US';
     }
   }

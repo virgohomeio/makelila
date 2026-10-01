@@ -171,7 +171,7 @@ describe('what goes out with the booking', () => {
   it('only UPS gets one — nobody else brokers their own entries', () => {
     expect(needsPesticideWorksheet('UPS')).toBe(true);
     expect(needsPesticideWorksheet(' ups ')).toBe(true);
-    for (const carrier of ['FedEx', 'Purolator', 'Canada Post', 'Canpar', 'GLS', '', null]) {
+    for (const carrier of ['FedEx', 'Purolator', 'Canada Post', 'Canpar', 'GLS', 'Day & Ross', '', null]) {
       expect(needsPesticideWorksheet(carrier)).toBe(false);
     }
   });

@@ -819,6 +819,11 @@ export function trackingUrlFor(carrier: string | null, tracking: string | null):
     case 'Canada Post':  return `https://www.canadapost-postescanada.ca/track-reperage/en#/search?searchFor=${encodeURIComponent(tracking)}`;
     case 'Canpar':       return `https://www.canpar.com/en/track/TrackingAction.do?reference=${encodeURIComponent(tracking)}`;
     case 'GLS':          return `https://gls-us.com/tracking?trackingNumber=${encodeURIComponent(tracking)}`;
+    // Day & Ross has no documented deep link — their form posts the number
+    // rather than reading it off the query string — so this is the search page
+    // itself. Unprefilled, but the customer's own carrier: the default below
+    // would hand a Day & Ross shipment a UPS tracking page.
+    case 'Day & Ross':   return 'https://dayross.com/track-shipments';
     default:             return 'https://www.ups.com/track?loc=en_US';
   }
 }
