@@ -59,7 +59,7 @@ import { StepEmail } from '../queue/StepEmail';
 import type { FulfillmentQueueRow } from '../../../lib/fulfillment';
 
 const rowBase: FulfillmentQueueRow = {
-  id: 'q-e', order_id: 'o-e', step: 5, assigned_serial: 'LL01-00000000050',
+  id: 'q-e', order_id: 'o-e', step: 5, assigned_serial: 'LL01-00000000050', assigned_serials: ['LL01-00000000050'],
   test_report_url: null, test_confirmed_at: null, test_confirmed_by: null,
   carrier: 'UPS', tracking_num: '1ZABC',
   label_pdf_path: null, label_confirmed_at: null, label_confirmed_by: null,

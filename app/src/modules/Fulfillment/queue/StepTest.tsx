@@ -22,7 +22,18 @@ export function StepTest({ row }: { row: FulfillmentQueueRow }) {
   const [lookup, setLookup] = useState<'loading' | 'done' | 'error'>('loading');
   const [lookupError, setLookupError] = useState<string | null>(null);
 
-  const serial = row.assigned_serial;
+  // One report per machine, so the panel below is about ONE of the units on
+  // this row and the operator says which. Defaults to the first pick; the
+  // switcher only appears when there is more than one to switch between.
+  const serials = row.assigned_serials;
+  const [serial, setSerial] = useState<string | null>(serials[0] ?? row.assigned_serial);
+  // A rewind-and-repick changes the set under us, so follow it rather than
+  // holding a serial that is no longer on the row.
+  useEffect(() => {
+    if (serial && serials.includes(serial)) return;
+    setSerial(serials[0] ?? row.assigned_serial);
+  }, [serials, serial, row.assigned_serial]);
+
   useEffect(() => {
     if (!serial) { setReport(null); setLookup('done'); return; }
     let cancelled = false;
@@ -47,10 +58,10 @@ export function StepTest({ row }: { row: FulfillmentQueueRow }) {
   };
 
   const handleFlag = async () => {
-    if (!issue.trim() || !row.assigned_serial) return;
+    if (!issue.trim() || !serial) return;
     setBusy(true); setError(null);
     try {
-      await flagRework(row.id, row.assigned_serial, issue.trim(), name);
+      await flagRework(row.id, serial, issue.trim(), name);
       setMode('idle'); setIssue('');
     }
     catch (e) { setError((e as Error).message); }
@@ -60,8 +71,34 @@ export function StepTest({ row }: { row: FulfillmentQueueRow }) {
   return (
     <div>
       <h3 style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>
-        Verify the test report for unit <code>{row.assigned_serial}</code>
+        {serials.length > 1
+          ? <>Verify the test reports for {serials.length} units</>
+          : <>Verify the test report for unit <code>{serial}</code></>}
       </h3>
+
+      {serials.length > 1 && (
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10, alignItems: 'center' }}>
+          <span style={{ fontSize: 11, color: 'var(--color-ink-muted)' }}>Checking:</span>
+          {serials.map(s => (
+            <button
+              key={s}
+              type="button"
+              onClick={() => setSerial(s)}
+              aria-pressed={s === serial}
+              style={{
+                font: 'inherit', fontSize: 11, fontVariantNumeric: 'tabular-nums',
+                padding: '3px 8px', borderRadius: 4, cursor: 'pointer',
+                background: s === serial ? 'var(--color-crimson)' : 'var(--color-raised)',
+                color: s === serial ? 'var(--color-raised)' : 'var(--color-ink-muted)',
+                border: `1px solid ${s === serial ? 'var(--color-crimson)' : 'var(--color-border)'}`,
+              }}
+            >{s}</button>
+          ))}
+          <span style={{ fontSize: 10.5, color: 'var(--color-ink-muted)' }}>
+            — “Test passed” covers the whole order, so check each one first.
+          </span>
+        </div>
+      )}
 
       {lookup === 'loading' && (
         <div className={styles.reportMeta}>Checking Stock for a test report…</div>

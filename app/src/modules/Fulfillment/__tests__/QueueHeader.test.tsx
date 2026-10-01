@@ -31,7 +31,7 @@ import { QueueHeader } from '../queue/QueueHeader';
 import { goBackStep, type FulfillmentQueueRow } from '../../../lib/fulfillment';
 
 const row = {
-  id: 'q-1', order_id: 'o-1', step: 1, assigned_serial: '00019',
+  id: 'q-1', order_id: 'o-1', step: 1, assigned_serial: '00019', assigned_serials: ['00019'],
   test_report_url: null, test_confirmed_at: null, test_confirmed_by: null,
   carrier: null, tracking_num: null, label_pdf_path: null,
   label_confirmed_at: null, label_confirmed_by: null,

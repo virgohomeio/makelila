@@ -7,7 +7,7 @@ import type { GoorooshipSend } from '../../../lib/pickupQueue';
 
 function mkRow(partial: Partial<FulfillmentQueueRow> & { id: string; order_id: string }): FulfillmentQueueRow {
   return {
-    step: 1, assigned_serial: null,
+    step: 1, assigned_serial: null, assigned_serials: [],
     test_report_url: null, test_confirmed_at: null, test_confirmed_by: null,
     carrier: null, tracking_num: null, label_pdf_path: null,
     label_confirmed_at: null, label_confirmed_by: null,

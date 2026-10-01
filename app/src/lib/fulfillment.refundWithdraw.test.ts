@@ -25,12 +25,18 @@ type QueueRow = {
   assigned_serial: string | null; fulfilled_at: string | null;
 };
 
-/** A supabase double just wide enough for the withdraw path. */
-function harness(queueRows: QueueRow[], unitStatus = 'reserved') {
+/** A supabase double just wide enough for the withdraw path.
+ *
+ *  `assignedUnits` is the fulfillment_queue_units side: the set of machines on
+ *  the row. Left empty, the release falls back to the row's own
+ *  assigned_serial, which is what a pre-migration database does. */
+function harness(queueRows: QueueRow[], unitStatus = 'reserved', assignedUnits: string[] = []) {
   const state = {
     deletedQueueIds: [] as string[],
     unitUpdates: [] as any[],
     slotUpdates: [] as any[],
+    releasedSerials: [] as string[],
+    clearedLinkQueueIds: [] as string[],
   };
   fromMock.mockImplementation((table: string) => {
     if (table === 'fulfillment_queue') {
@@ -55,10 +61,35 @@ function harness(queueRows: QueueRow[], unitStatus = 'reserved') {
         }),
       } as any;
     }
+    if (table === 'fulfillment_queue_units') {
+      return {
+        select: () => ({
+          eq: () => ({
+            order: () => Promise.resolve({
+              data: assignedUnits.map((unit_serial, i) => ({
+                unit_serial, assigned_at: `2026-05-0${i + 1}T00:00:00Z`,
+              })),
+              error: null,
+            }),
+          }),
+        }),
+        delete: () => ({
+          eq: (_c: string, id: string) => {
+            state.clearedLinkQueueIds.push(id);
+            return Promise.resolve({ error: null });
+          },
+        }),
+      } as any;
+    }
     if (table === 'units') {
       return {
         select: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve({ data: { status: unitStatus } }) }) }),
-        update: (patch: any) => { state.unitUpdates.push(patch); return { eq: () => Promise.resolve({ error: null }) }; },
+        update: (patch: any) => { state.unitUpdates.push(patch); return {
+          eq: (_c: string, serial: string) => {
+            state.releasedSerials.push(serial);
+            return Promise.resolve({ error: null });
+          },
+        }; },
       } as any;
     }
     if (table === 'shelf_slots') {
@@ -106,6 +137,26 @@ describe('withdrawOrderFromQueue', () => {
     ]);
     await expect(withdrawOrderFromQueue('order-1', 'refunded')).resolves.toBe(false);
     expect(state.deletedQueueIds).toEqual([]);
+  });
+
+  it('frees every machine on a multi-unit order, not just the first', async () => {
+    // The whole point of the child table: releasing only assigned_serial would
+    // leave two machines reserved against an order that is no longer queued.
+    const state = harness(
+      [{ id: 'q1', order_id: 'order-1', step: 2, assigned_serial: 'LL01-0001', fulfilled_at: null }],
+      'reserved',
+      ['LL01-0001', 'LL01-0002', 'LL01-0003'],
+    );
+
+    await expect(withdrawOrderFromQueue('order-1', 'refunded')).resolves.toBe(true);
+
+    expect(state.releasedSerials).toEqual(['LL01-0001', 'LL01-0002', 'LL01-0003']);
+    expect(state.unitUpdates).toHaveLength(3);
+    expect(state.slotUpdates).toHaveLength(3);
+    // The links are cleared, and the row itself is deleted after the release —
+    // ON DELETE CASCADE would otherwise take the record of what to free.
+    expect(state.clearedLinkQueueIds).toEqual(['q1']);
+    expect(state.deletedQueueIds).toEqual(['q1']);
   });
 
   it('handles a queue row with no unit assigned yet', async () => {

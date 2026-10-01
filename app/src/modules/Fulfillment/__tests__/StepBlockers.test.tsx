@@ -1,14 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 
-const { assignUnitMock, useUnitsMock } = vi.hoisted(() => ({
-  assignUnitMock: vi.fn(() => Promise.resolve()),
+const { assignUnitsMock, useUnitsMock } = vi.hoisted(() => ({
+  assignUnitsMock: vi.fn(() => Promise.resolve()),
   useUnitsMock: vi.fn(),
 }));
 
 vi.mock('../../../lib/fulfillment', async () => {
   const actual = await vi.importActual<typeof import('../../../lib/fulfillment')>('../../../lib/fulfillment');
-  return { ...actual, assignUnit: assignUnitMock, toggleDockCheck: vi.fn(() => Promise.resolve()) };
+  return { ...actual, assignUnits: assignUnitsMock, toggleDockCheck: vi.fn(() => Promise.resolve()) };
 });
 
 vi.mock('../../../lib/stock', async () => {
@@ -28,7 +28,7 @@ import { StepEmail } from '../queue/StepEmail';
 import type { FulfillmentQueueRow } from '../../../lib/fulfillment';
 
 const row: FulfillmentQueueRow = {
-  id: 'q-1', order_id: 'o-1', step: 1, assigned_serial: null,
+  id: 'q-1', order_id: 'o-1', step: 1, assigned_serial: null, assigned_serials: [],
   test_report_url: null, test_confirmed_at: null, test_confirmed_by: null,
   carrier: 'UPS', tracking_num: '1ZABC', label_pdf_path: null,
   label_confirmed_at: null, label_confirmed_by: null,
@@ -52,20 +52,22 @@ describe('listPhrase', () => {
   });
 });
 
+const singleUnitOrder = { line_items: [{ sku: '', name: 'LILA Pro', qty: 1, price_usd: 2499 }] };
+
 describe('StepAssign — why Confirm is disabled', () => {
   beforeEach(() => {
-    assignUnitMock.mockClear();
+    assignUnitsMock.mockClear();
     useUnitsMock.mockReturnValue({ units: [readyUnit], loading: false });
   });
 
   it('asks the operator to pick a unit when none is selected', () => {
-    render(<StepAssign row={row} />);
+    render(<StepAssign row={row} order={singleUnitOrder} />);
     expect(screen.getByRole('button', { name: /Confirm/ })).toBeDisabled();
-    expect(screen.getByTestId('step-blockers')).toHaveTextContent(/a unit picked/i);
+    expect(screen.getByTestId('step-blockers')).toHaveTextContent(/unit picked/i);
   });
 
   it('clears the hint once a unit is picked', () => {
-    render(<StepAssign row={row} />);
+    render(<StepAssign row={row} order={singleUnitOrder} />);
     fireEvent.click(screen.getByText('00401'));
     expect(screen.queryByTestId('step-blockers')).toBeNull();
     expect(screen.getByRole('button', { name: /Confirm/ })).toBeEnabled();

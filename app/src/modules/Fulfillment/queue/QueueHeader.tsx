@@ -204,14 +204,24 @@ export function QueueHeader({
               <>
                 <li>The order is removed from the fulfillment queue.</li>
                 <li>It is marked cancelled and drops out of every Order Review tab.</li>
-                {row.assigned_serial && <li>Unit {row.assigned_serial} goes back into ready stock.</li>}
+                {row.assigned_serials.length > 0 && (
+                  <li>
+                    Unit{row.assigned_serials.length === 1 ? '' : 's'}{' '}
+                    {row.assigned_serials.join(', ')} go{row.assigned_serials.length === 1 ? 'es' : ''} back into ready stock.
+                  </li>
+                )}
                 <li>A cancellation record opens in Shipping › Cancellations for the refund team.</li>
               </>
             ) : (
               <>
                 <li>The shipment is removed from the fulfillment queue.</li>
                 <li>The order goes back to Sales › Orders — Pending for a sale, or the Replacement tab (Ready / Awaiting Stock&nbsp;·&nbsp;Batch, by what&rsquo;s in stock) for a replacement.</li>
-                {row.assigned_serial && <li>Unit {row.assigned_serial} goes back into ready stock.</li>}
+                {row.assigned_serials.length > 0 && (
+                  <li>
+                    Unit{row.assigned_serials.length === 1 ? '' : 's'}{' '}
+                    {row.assigned_serials.join(', ')} go{row.assigned_serials.length === 1 ? 'es' : ''} back into ready stock.
+                  </li>
+                )}
                 <li>Approving it again puts it back in the queue at step 1.</li>
               </>
             )}

@@ -112,7 +112,9 @@ export function Detail({
               const r = await releaseHold(order.id);
               const where = `back to ${r.landing.label}`;
               if (!r.queueRowRemoved) return where;
-              const unit = r.releasedSerial ? `, unit ${r.releasedSerial} back to stock` : '';
+              const unit = r.releasedSerials.length > 0
+                ? `, unit${r.releasedSerials.length === 1 ? '' : 's'} ${r.releasedSerials.join(', ')} back to stock`
+                : '';
               return `${where}; its open fulfillment row was pulled${unit}`;
             },
             'Hold released',

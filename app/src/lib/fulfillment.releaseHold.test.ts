@@ -76,7 +76,7 @@ describe('releaseHold', () => {
     // The machine must not stay reserved for an order that is back in review.
     expect(patchFor('units')).toMatchObject({ status: 'ready', customer_order_ref: null });
     expect(patchFor('shelf_slots')).toMatchObject({ status: 'available' });
-    expect(result.releasedSerial).toBe('00019');
+    expect(result.releasedSerials).toEqual(['00019']);
 
     // Pending is the intake state, so the hold's disposition stamps go with it —
     // and it lands in the same UPDATE as the status, not a second write.
@@ -95,12 +95,12 @@ describe('releaseHold', () => {
     const result = await releaseHold('o-1');
 
     expect(result.queueRowRemoved).toBe(false);
-    expect(result.releasedSerial).toBeNull();
+    expect(result.releasedSerials).toEqual([]);
     expect(state.deletes).not.toContain('fulfillment_queue');
     expect(patchFor('orders')).toMatchObject({ status: 'pending' });
   });
 
-  it('reports no released serial when the unit was never reserved', async () => {
+  it('reports no released serials when the unit was never reserved', async () => {
     state.unit = { status: 'shipped' };
 
     const result = await releaseHold('o-1');
@@ -108,7 +108,7 @@ describe('releaseHold', () => {
     expect(result.queueRowRemoved).toBe(true);
     // The row went, but nothing was returned to stock — the banner must not
     // claim a machine came back that never left.
-    expect(result.releasedSerial).toBeNull();
+    expect(result.releasedSerials).toEqual([]);
     expect(patchFor('units')).toBeUndefined();
   });
 

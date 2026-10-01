@@ -14,7 +14,10 @@ export function StepFulfilled({
   const fulfilledOn = row.fulfilled_at
     ? new Date(row.fulfilled_at).toLocaleString('en-US')
     : '—';
-  const serial = row.assigned_serial ?? '— not recorded —';
+  // Every machine that went out on this order, not just the first. A
+  // three-unit shipment that reported one serial read as a one-unit shipment.
+  const serials = row.assigned_serials;
+  const serialLabel = serials.length > 0 ? serials.join(', ') : '— not recorded —';
   const lilaShipment = [row.carrier, row.tracking_num].filter(Boolean).join(' · ') || '—';
   const starterKit = order.country === 'US'
     ? `Amazon · ${row.starter_tracking_num ?? '—'}`
@@ -44,7 +47,9 @@ export function StepFulfilled({
         {/* A replacement shipped from the service ticket skips the queue's
             email step, so don't claim an email that was never sent. */}
         <span style={{ color: 'var(--color-success)', fontSize: 11, fontVariantNumeric: 'tabular-nums' }}>
-          {row.email_sent_at ? 'Email sent · ' : ''}Unit {serial}
+          {row.email_sent_at ? 'Email sent · ' : ''}
+          {serials.length === 1 ? 'Unit ' : serials.length > 1 ? `${serials.length} units · ` : 'Unit '}
+          {serialLabel}
         </span>
       </div>
 
@@ -63,8 +68,8 @@ export function StepFulfilled({
         <span style={valStyle}>{order.order_ref}</span>
         <span style={labelStyle}>Email</span>
         <span style={valStyle}>{order.customer_email ?? '—'}</span>
-        <span style={labelStyle}>Serial shipped</span>
-        <span style={valStyle}>{serial}</span>
+        <span style={labelStyle}>{serials.length === 1 ? 'Serial shipped' : 'Serials shipped'}</span>
+        <span style={valStyle}>{serialLabel}</span>
         <span style={labelStyle}>LILA shipment</span>
         <span style={valStyle}>{lilaShipment}</span>
         <span style={labelStyle}>Starter kit</span>

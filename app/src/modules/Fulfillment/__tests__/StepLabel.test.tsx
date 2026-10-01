@@ -20,7 +20,7 @@ import type { FulfillmentQueueRow } from '../../../lib/fulfillment';
 import type { EzTransOrder } from '../queue/EzTransPanel';
 
 const row: FulfillmentQueueRow = {
-  id: 'q-1', order_id: 'o-1', step: 3, assigned_serial: 'LL01-00000000358',
+  id: 'q-1', order_id: 'o-1', step: 3, assigned_serial: 'LL01-00000000358', assigned_serials: ['LL01-00000000358'],
   test_report_url: null, test_confirmed_at: null, test_confirmed_by: null,
   carrier: null, tracking_num: null, label_pdf_path: null,
   label_confirmed_at: null, label_confirmed_by: null,

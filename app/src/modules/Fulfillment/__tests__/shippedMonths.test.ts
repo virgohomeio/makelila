@@ -5,7 +5,7 @@ import type { ShippedMark } from '../../../lib/shippedOrders';
 
 function mkRow(partial: Partial<FulfillmentQueueRow> & { id: string }): FulfillmentQueueRow {
   return {
-    order_id: 'o1', step: 6, assigned_serial: null,
+    order_id: 'o1', step: 6, assigned_serial: null, assigned_serials: [],
     test_report_url: null, test_confirmed_at: null, test_confirmed_by: null,
     carrier: null, tracking_num: null, label_pdf_path: null,
     label_confirmed_at: null, label_confirmed_by: null,

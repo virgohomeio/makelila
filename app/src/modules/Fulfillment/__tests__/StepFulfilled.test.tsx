@@ -18,7 +18,7 @@ import type { FulfillmentQueueRow } from '../../../lib/fulfillment';
 
 const row: FulfillmentQueueRow = {
   id: '7804f78b-6756-40ac-a105-54e65bf5ce4b', order_id: 'o-1', step: 6,
-  assigned_serial: 'LL01-00000000351',
+  assigned_serial: 'LL01-00000000351', assigned_serials: ['LL01-00000000351'],
   test_report_url: null, test_confirmed_at: null, test_confirmed_by: null,
   carrier: 'Purolator', tracking_num: '520763643704',
   label_pdf_path: null, label_confirmed_at: null, label_confirmed_by: null,

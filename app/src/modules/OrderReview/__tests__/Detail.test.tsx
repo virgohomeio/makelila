@@ -13,7 +13,7 @@ const {
   releaseHoldMock:  vi.fn(() => Promise.resolve({
     landing: { status: 'pending', replacement_state: null, label: 'Order Review › Pending' },
     queueRowRemoved: true,
-    releasedSerial: '00019',
+    releasedSerials: ['00019'],
   })),
 }));
 

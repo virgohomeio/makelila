@@ -91,7 +91,7 @@ import type { FulfillmentQueueRow } from '../../../lib/fulfillment';
 const render = (ui: ReactElement) => rtlRender(<MemoryRouter>{ui}</MemoryRouter>);
 
 const row: FulfillmentQueueRow = {
-  id: 'q-1', order_id: 'o-1', step: 3, assigned_serial: 'LL01-P100X-00412',
+  id: 'q-1', order_id: 'o-1', step: 3, assigned_serial: 'LL01-P100X-00412', assigned_serials: ['LL01-P100X-00412'],
   test_report_url: null, test_confirmed_at: null, test_confirmed_by: null,
   carrier: null, tracking_num: null,
   label_pdf_path: null, label_confirmed_at: null, label_confirmed_by: null,

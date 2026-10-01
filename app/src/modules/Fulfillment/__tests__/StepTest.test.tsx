@@ -34,7 +34,7 @@ import { StepTest } from '../queue/StepTest';
 import type { FulfillmentQueueRow } from '../../../lib/fulfillment';
 
 const row: FulfillmentQueueRow = {
-  id: 'q-test', order_id: 'o-test', step: 2, assigned_serial: 'LL01-00000000050',
+  id: 'q-test', order_id: 'o-test', step: 2, assigned_serial: 'LL01-00000000050', assigned_serials: ['LL01-00000000050'],
   test_report_url: null, test_confirmed_at: null, test_confirmed_by: null,
   carrier: null, tracking_num: null, label_pdf_path: null,
   label_confirmed_at: null, label_confirmed_by: null,
