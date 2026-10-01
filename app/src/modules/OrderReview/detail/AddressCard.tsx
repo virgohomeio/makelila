@@ -3,6 +3,7 @@ import type { Order, AreaType, Dwelling } from '../../../lib/orders';
 import {
   setSalesConfirmedFit, setRuralCheckConfirmed, needsRuralManualCheck, ruralCheckAvailable,
   verifyAddress, setAreaType, setDwelling, AREA_TYPE_LABEL,
+  orderPostalCode, areaTypeProvenance,
 } from '../../../lib/orders';
 import {
   DWELLING_LABEL, DWELLING_NOTE, dwellingProvenance, needsFitConfirmation,
@@ -189,8 +190,12 @@ export function AddressCard({ order }: { order: Order }) {
         </div>
         <div className={styles.contactLine}>
           <span className={styles.contactLabel}>{postalLabel}</span>
-          {order.address_customer_postal
-            ? <span>{order.address_customer_postal}</span>
+          {/* The order's postal code, not the verify-address copy of it: that
+              copy is null until somebody runs Verify, so reading it alone had
+              this row saying "Not on file" on 219 of 317 orders. Shared with
+              the Customer Directory so the two screens agree. */}
+          {orderPostalCode(order)
+            ? <span>{orderPostalCode(order)}</span>
             : <MissingField quoUrl={order.quo_thread_url} />}
         </div>
         <div className={styles.contactLine}>
@@ -293,12 +298,7 @@ export function AddressCard({ order }: { order: Order }) {
                 : 'Not classified. Urban and suburban cannot be told apart from a postal code, so nothing is assumed here.'}
           </span>
           <span className={styles.claimSource}>
-            {order.area_type_source === 'manual' ? 'set by an operator'
-              : order.area_type_source === 'verified' ? `classified by address verification${order.address_verified_at ? ` ${new Date(order.address_verified_at).toLocaleDateString()}` : ''}`
-              : order.area_type ? 'from the postal-code rule'
-              : order.address_area_type_error
-                ? `could not be classified — ${order.address_area_type_error}`
-                : 'run Verify to classify it'}
+            {areaTypeProvenance(order)}
           </span>
         </div>
 

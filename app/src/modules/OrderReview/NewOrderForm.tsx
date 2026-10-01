@@ -160,7 +160,9 @@ export default function NewOrderForm({ onClose, onCreated }: Props) {
             For a sale that did not come through the web store — taken on the phone, at an
             event, or invoiced directly. It becomes an ordinary order: it lands in Sales
             waiting for its address to be verified and freight quoted, and confirming it is
-            what sends it to Fulfillment.
+            what sends it to Fulfillment. Only the name and city are required here, but
+            Confirm also wants an email, a phone number and a street address on file — so
+            fill in whatever you have.
           </p>
 
           <section className={styles.section}>

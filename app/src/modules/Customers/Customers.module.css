@@ -481,6 +481,24 @@
   color: var(--color-ink);
   overflow-wrap: anywhere;
 }
+/* `multiline` had no rule of its own, so the one row that asks for it — the
+   address — rendered its line breaks as spaces. Only that row uses it, and an
+   operator checking an address against a freight label is comparing lines, not
+   scanning a sentence. */
+.kvValueMulti {
+  white-space: pre-line;
+}
+
+/* Provenance under the Address row: which order it came from and whether Sales
+   has verified it. Indented to the value column — .kvLabel's min-width plus
+   .kvRow's gap — so it reads as a footnote to the address above and not as a
+   field of its own. ink-muted rather than ink-subtle: this is small text that
+   still has to pass AA. */
+.addressSource {
+  margin: 1px 0 3px calc(78px + var(--space-3));
+  font-size: var(--font-size-meta);
+  color: var(--color-ink-muted);
+}
 
 /* Panel form field. Deliberately its own class: it used to share .searchInput
    with the directory's search box, so the two could not be styled apart. */
