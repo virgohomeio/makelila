@@ -173,7 +173,13 @@ export function StepEmail({
             <textarea
               value={body}
               onChange={e => { setBodyEdit(e.target.value); setSaveState('idle'); }}
-              rows={16}
+              // Sized to the body rather than fixed. At a flat 16 rows the
+              // Lovely App section pushed everything from the install steps
+              // down past the fold, and an operator checking the draft saw a
+              // truncated email with no hint there was more below — the change
+              // looked unshipped. Clamped so a pasted essay cannot run the
+              // step off-screen; the box is still drag-resizable.
+              rows={Math.min(48, Math.max(16, body.split('\n').length + 1))}
               style={{
                 display: 'block', width: '100%', marginTop: 2,
                 background: 'var(--color-surface)', border: '1px solid var(--color-border)',
