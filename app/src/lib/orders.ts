@@ -1750,6 +1750,10 @@ export async function queueReplacementForFulfillment(
  *  strand the order in Confirmed with no queue row, and re-approving it would
  *  not re-fire the auto_enqueue_on_approve trigger.
  *
+ *  A sale also gets reconcile_outcome='open', without which the landing above is
+ *  not true for any customer who already has a shipped unit — see the comment on
+ *  that line.
+ *
  *  `extraPatch` rides along on the same UPDATE rather than forcing a caller to
  *  issue a second write against the row it just moved — releaseHold uses it to
  *  clear the disposition stamps in the same breath as the status. */
@@ -1780,6 +1784,28 @@ export async function returnOrderToReview(
         ? 'Fulfillment › Replacements › Ready'
         : 'Fulfillment › Replacements › Awaiting Stock / Batch',
     };
+  } else {
+    // Make the sale landing above actually true. bucketOrders drops any order
+    // whose customer name matches a shipped unit's — signal (b), there to catch
+    // Excel-era shipments the queue never recorded. It is a name match, so it
+    // buries a reship just as readily: the customer DID receive a machine, and
+    // that is the whole reason this order is going out again.
+    //
+    // #1189 Cindy Bouchard is the case. It shipped 2026-09-30; an operator
+    // stepped the queue row back off step 6 (which clears fulfilled_at, so the
+    // already-shipped guard in loadRemovableQueueRow stops firing) and moved it
+    // here noting "Need to reship". The row went back to 'pending' as promised,
+    // its queue row was deleted — and then it appeared in no screen in the app.
+    // Not Pending, not Confirmed, not even All, and with no queue row left there
+    // was no second place to find it by. The toast named Order Review › Pending
+    // and the order was not there, or anywhere.
+    //
+    // 'open' is the reconcile outcome documented as the override that beats that
+    // heuristic (see recordStillOpen), and it is the honest reading of what an
+    // operator just did: whatever shipped against this customer's name before,
+    // a human has said this order still owes them a machine. Setting it here is
+    // what keeps this function's return value a true statement.
+    patch.reconcile_outcome = 'open';
   }
 
   Object.assign(patch, extraPatch);

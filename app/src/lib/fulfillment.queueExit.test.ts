@@ -175,8 +175,31 @@ describe('returnQueueRowToOrders', () => {
 
     expect(state.deletes).toContain('fulfillment_queue');
     expect(patchFor('units')).toMatchObject({ status: 'ready' });
-    expect(patchFor('orders')).toEqual({ status: 'pending' });
+    expect(patchFor('orders')).toEqual({ status: 'pending', reconcile_outcome: 'open' });
     expect(landing).toMatchObject({ status: 'pending', label: 'Order Review › Pending' });
+  });
+
+  // Sales hides any order whose customer already has a shipped unit — the
+  // name-match heuristic that catches legacy Excel-era shipments. A reship is
+  // exactly that customer, so the landing this function promises was a lie for
+  // one: #1189 Cindy Bouchard shipped 2026-09-30, was stepped back off step 6
+  // (which clears fulfilled_at, so the already-shipped guard stops firing) and
+  // moved here with the note "Need to reship". It then appeared in no tab at
+  // all — not Pending, not Confirmed, not even All — with no queue row left to
+  // find it by either. The operator was pointed at Order Review › Pending and
+  // the order was not there, or anywhere.
+  //
+  // Sending an order back to review is a human saying this order still owes the
+  // customer a machine, which is what reconcile's 'open' outcome means and the
+  // one signal documented to beat the heuristic.
+  it('keeps a sale visible in Pending when its customer already has a shipped unit', async () => {
+    const landing = await returnQueueRowToOrders('q-1', 'Need to reship');
+    const returned = { ...state.order, ...patchFor('orders') } as unknown as Order;
+
+    const buckets = bucketOrders([returned], new Set(), new Set(['amy gaw']));
+    expect(buckets.pending.map(o => o.order_ref)).toEqual(['#1179']);
+    expect(buckets.all.map(o => o.order_ref)).toEqual(['#1179']);
+    expect(landing.label).toBe('Order Review › Pending');
   });
 
   // The landing for a replacement is Fulfillment › Replacements, not Sales.
