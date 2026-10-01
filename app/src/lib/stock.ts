@@ -240,6 +240,30 @@ async function currentUserId(): Promise<string> {
   return data.user.id;
 }
 
+/** Moving a machine back to 'ready' is a release, so it lets go of the customer
+ *  as well as the status — the same pair releaseAssignedUnit clears when a
+ *  reserved unit goes back on the shelf.
+ *
+ *  Status alone is not enough. A unit left stamped with the order it went out
+ *  on, while sellable again, is the "ready but still has a customer" state
+ *  UnitsTab counts as suspect, and the picker would offer the machine under
+ *  somebody else's name.
+ *
+ *  This is the only route a shipped machine has back into stock.
+ *  releaseAssignedUnit deliberately frees nothing but a 'reserved' unit, and
+ *  the picker's backfill mode pairs a shipped unit to an order *without*
+ *  flipping its status — a historical record, not a machine going out again.
+ *  LL01-00000000355 went to Cindy Bouchard on #1189, came back to be reshipped,
+ *  and no screen in the app could put it back on the shelf.
+ *
+ *  The shelf slot needs no help: trg_sync_shelf_slot_on_unit_status_change
+ *  flips it to 'available' on the way to 'ready'. Nor does shipped_at get
+ *  cleared — the machine did make that trip, and units_guard_shipment_consistency
+ *  only polices stamping it, never keeping it. */
+function releasePatchFor(newStatus: UnitStatus): Record<string, null> {
+  return newStatus === 'ready' ? { customer_name: null, customer_order_ref: null } : {};
+}
+
 export async function updateUnitStatus(
   serial: string,
   newStatus: UnitStatus,
@@ -253,7 +277,12 @@ export async function updateUnitStatus(
     : existing?.notes ?? null;
   const { error } = await supabase
     .from('units')
-    .update({ status: newStatus, status_updated_by: userId, notes: nextNotes })
+    .update({
+      status: newStatus,
+      status_updated_by: userId,
+      notes: nextNotes,
+      ...releasePatchFor(newStatus),
+    })
     .eq('serial', serial);
   if (error) throw error;
   await logAction('stock_status', serial, `${existing?.status ?? '?'} → ${newStatus}`,

@@ -106,6 +106,47 @@ describe('updateUnitStatus', () => {
       expect.anything(),
     );
   });
+
+  // Putting a machine back to 'ready' is a release, and a release has to let go
+  // of the customer too. Writing status alone leaves the unit sellable while
+  // still stamped with the order it went out on — the "ready but still has a
+  // customer" state UnitsTab counts as suspect, and the picker would offer the
+  // machine under someone else's name.
+  //
+  // LL01-00000000355 is why this matters. It shipped to Cindy Bouchard on
+  // #1189, came back to be sent out again, and nothing in the app could return
+  // it to stock: releaseAssignedUnit only ever frees a 'reserved' unit, and
+  // Stock's dropdown wrote the status and nothing else. Backfill mode in the
+  // picker is not the answer either — it pairs a unit to an order *without*
+  // flipping its status, for historical records, not for a machine that is
+  // genuinely going out again.
+  it('clears the customer stamps when a unit goes back to ready', async () => {
+    singleResult.data = { status: 'shipped' };
+    await updateUnitStatus('LL01-00000000355', 'ready');
+
+    expect(updateMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'ready',
+        customer_name: null,
+        customer_order_ref: null,
+      }),
+    );
+  });
+
+  // Only on the way back to stock. Every other status leaves the stamps alone —
+  // a shipped or scrapped machine must keep saying who it went to.
+  it.each(['shipped', 'scrap', 'rework', 'lost'] as const)(
+    'leaves the customer stamps alone when moving to %s', async (next) => {
+      singleResult.data = { status: 'ready' };
+      await updateUnitStatus('LL01-00000000001', next);
+
+      expect(updateMock).toHaveBeenCalledWith(
+        expect.not.objectContaining({ customer_name: null }),
+      );
+      expect(updateMock).toHaveBeenCalledWith(
+        expect.not.objectContaining({ customer_order_ref: null }),
+      );
+    });
 });
 
 // ── Fulfillment queue: quarantine exclusion ───────────────────────────────────
