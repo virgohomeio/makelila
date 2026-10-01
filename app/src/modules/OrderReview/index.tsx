@@ -6,6 +6,7 @@ import { MobileBackHeader } from '../../components/MobileBackHeader';
 import { Sidebar } from './Sidebar';
 import { SkippedPanel } from './SkippedPanel';
 import { Detail } from './Detail';
+import NewOrderForm from './NewOrderForm';
 import Templates from '../Templates';
 import Upload from '../Upload';
 import Reconcile from './Reconcile';
@@ -36,6 +37,11 @@ export default function OrderReview() {
   // page header rather than inside the order rail's header.
   const [sync, setSync] = useState<SyncState>({ kind: 'idle' });
   const [skipsOpen, setSkipsOpen] = useState(false);
+  const [newOrderOpen, setNewOrderOpen] = useState(false);
+  // What the last hand-made order became. The database decides the status —
+  // an order with no phone is flagged by a trigger, not by us — so the operator
+  // is told where the row actually went rather than where it was aimed.
+  const [created, setCreated] = useState<{ order_ref: string; status: string } | null>(null);
   // A sync used to sit behind a disabled button with no sign of life for over a
   // minute, which is indistinguishable from a hung one. Ticking the elapsed
   // seconds is the cheapest possible proof it is still running.
@@ -137,6 +143,25 @@ export default function OrderReview() {
                 ? `Syncing… ${elapsed}s`
                 : '⟲ Sync from Shopify'}
             </button>
+            {/* Beside the sync rather than in the rail: both of these put
+                orders into the module, and this is the one for a sale Shopify
+                never saw. */}
+            <button
+              type="button"
+              className={styles.newOrderBtn}
+              onClick={() => { setCreated(null); setNewOrderOpen(true); }}
+              title="Create an order for a sale that did not come through the web store — a phone sale, an event, a direct invoice"
+            >
+              + New order
+            </button>
+            {created && (
+              <span className={created.status === 'flagged' ? styles.newOrderFlag : styles.newOrderDone}>
+                {created.order_ref} created
+                {created.status === 'flagged'
+                  ? ' — it has no phone number, so it is in Flagged'
+                  : ' — it is in Pending'}
+              </span>
+            )}
             {sync.kind === 'done' && skipsOpen && sync.result.skipped > 0 && (
               <SkippedPanel
                 result={sync.result}
@@ -173,6 +198,20 @@ export default function OrderReview() {
           >Upload</button>
         </div>
       </div>
+      {newOrderOpen && (
+        <NewOrderForm
+          onClose={() => setNewOrderOpen(false)}
+          onCreated={(result) => {
+            setNewOrderOpen(false);
+            setCreated({ order_ref: result.order_ref, status: result.status });
+            // Open it straight away: the next thing this order needs is its
+            // address verified and freight quoted, and both live in the detail
+            // pane. A flagged one is not in Pending, so the rail would not
+            // show it and the operator would think nothing happened.
+            navigate(`/order-review/${result.id}`);
+          }}
+        />
+      )}
     </div>
   );
 

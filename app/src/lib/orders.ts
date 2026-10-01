@@ -2280,6 +2280,248 @@ export async function createPendingReplacement(input: ReplacementOrderInput):
   return { id: row.id, order_ref: row.order_ref };
 }
 
+/* ── Manual sales orders ─────────────────────────────────────────────────── */
+
+// A sale that never went through the web store: agreed on the phone, taken at a
+// market stall, invoiced to a municipality. Everything else in Sales arrives
+// through sync-shopify-orders or the invoice importer, so until now there were
+// two ways to handle one, and both were bad — ask the customer to re-place an
+// order they had already paid for, or ship the machine with no order row at all
+// and meet it again months later in the reconcile screen, as a shipped unit
+// nobody could tie to anything.
+//
+// The design goal is that the row is unremarkable five seconds after it exists.
+// It is a kind='sale' order at status 'pending', and from there it is the same
+// order as #1284: it sits in Sales › Pending, it wants its address verified and
+// its freight quoted, Confirm is what approves it, and approving it is what
+// fires auto_enqueue_on_approve and puts it in the fulfillment queue at step 1.
+// Nothing downstream of this function knows the order was typed by hand.
+//
+// Three fields carry the weight of that, and each is a mistake waiting to be
+// made:
+//
+//   status      — 'pending', never 'approved'. The enqueue trigger is UPDATE-only
+//                 (see createReplacementOrder's note on the same point), so
+//                 birthing it approved would both skip the pre-ship checks and
+//                 fail to queue it, leaving it stranded in Confirmed.
+//   freight     — zero, with no field in the form to set it. freightQuoted()
+//                 reads source 'manual' + a non-zero estimate as "a carrier rate
+//                 was pulled for this address", which is the third of the four
+//                 criteria Confirm is gated on. A number typed at creation time
+//                 would satisfy that gate with no quote behind it.
+//   reconcile   — 'open'. bucketOrders drops any order whose customer name
+//                 matches a shipped unit's, which is how a repeat customer's
+//                 brand-new order would be invisible in every tab the moment it
+//                 was created. 'open' is the documented operator override for
+//                 exactly this (lib/reconcile.ts > recordStillOpen), and on an
+//                 order made seconds ago it is a statement of fact.
+//
+// Deliberately NOT set: cogs_usd (the orders_set_sale_cogs trigger fills it from
+// the schedule on INSERT, and a 0 here would read as a free machine in every
+// margin rollup) and status when the order has no phone number — the existing
+// auto_flag_orders_without_phone BEFORE INSERT trigger turns that into 'flagged'
+// just as it does for a synced order, which is why this returns the status the
+// database actually settled on rather than the one it asked for.
+
+export type ManualOrderLine = {
+  name: string;
+  /** Shopify leaves this empty on most sale lines; it is informational here. */
+  sku: string;
+  qty: number;
+  price_usd: number;
+};
+
+export type ManualOrderInput = {
+  customer_name: string;
+  customer_email: string | null;
+  customer_phone: string | null;
+  address: {
+    address_line: string | null;
+    address_line2: string | null;
+    city: string;
+    region_state: string | null;
+    country: 'US' | 'CA';
+    postal_code: string | null;
+  };
+  currency: string;
+  line_items: ManualOrderLine[];
+  /** 'paid' or 'pending' only. The two settled states ('refunded', 'voided')
+   *  hold an order out of the Pending queue, and no new order is in either. */
+  financial_status: 'paid' | 'pending';
+  /** How the customer paid, when it is worth recording — shown on the Payment
+   *  card. Free text: these are e-transfers and cheques, not Shopify gateways. */
+  payment_method?: string | null;
+  /** ISO. Must be on or after SALES_QUEUE_START or the order is in no Sales tab. */
+  placed_at: string;
+  /** Optional first note on the order — where the sale came from, usually. */
+  note?: string;
+};
+
+/** The standard free-shipping threshold every synced sale carries. */
+const SALE_FREIGHT_THRESHOLD_USD = 200;
+
+/** How many consecutive taken refs to walk past before giving up. A collision
+ *  needs two operators creating an order in the same instant, so more than one
+ *  is already surprising; eight is a loop guard, not a capacity. */
+const MANUAL_REF_ATTEMPTS = 8;
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+/** Order total and unit count for a set of hand-entered lines. Exported so the
+ *  form can show the operator the same numbers that will be written. */
+export function manualOrderTotals(lines: ManualOrderLine[]): { subtotal: number; units: number } {
+  return {
+    subtotal: round2(lines.reduce((sum, li) => sum + li.qty * li.price_usd, 0)),
+    units: lines.reduce((sum, li) => sum + li.qty, 0),
+  };
+}
+
+/** The next ref in the manual series (M-0001, M-0002, …).
+ *
+ *  A fourth order_ref series, independent of the other three on purpose:
+ *  Shopify's '#1284', the invoice importer's 'INV-', and replacements' 'R-'.
+ *  Shopify's counter is outside our control and keeps climbing, so anything
+ *  that tried to extend it would eventually be handed the same number by the
+ *  store — which is precisely how the 14 INV- rows came to collide.
+ *
+ *  Computed in the client rather than by an RPC like next_replacement_order_ref,
+ *  because that would need a migration and migrations here are applied by hand
+ *  through a gated workflow — the feature would be dead in production until
+ *  someone ran it. The UNIQUE constraint on order_ref is the real serializer
+ *  either way; createManualOrder walks to the next number on a 23505. */
+export async function nextManualOrderRef(): Promise<string> {
+  const { data, error } = await supabase
+    .from('orders')
+    .select('order_ref')
+    .like('order_ref', 'M-%');
+  if (error) throw new Error(`Could not read the manual order refs: ${error.message}`);
+
+  // Numeric max, not lexicographic: 'M-0009' sorts above 'M-0010' as text.
+  const highest = (data ?? []).reduce((max, row: { order_ref: string }) => {
+    const m = /^M-(\d+)$/.exec(row.order_ref);
+    return m ? Math.max(max, Number(m[1])) : max;
+  }, 0);
+  return `M-${String(highest + 1).padStart(4, '0')}`;
+}
+
+function assertValidManualOrder(input: ManualOrderInput): void {
+  if (!input.customer_name.trim()) throw new Error('A customer name is required');
+  if (!input.address.city.trim()) throw new Error('A city is required');
+  if (input.line_items.length === 0) throw new Error('At least one line item is required');
+  for (const li of input.line_items) {
+    if (!li.name.trim()) throw new Error('Every line needs a product name');
+    if (!Number.isFinite(li.qty) || li.qty < 1) throw new Error('Every line needs a quantity of at least 1');
+    if (!Number.isFinite(li.price_usd) || li.price_usd < 0) throw new Error('A line price cannot be negative');
+  }
+}
+
+/** Creates a sales order by hand. Returns the new id and ref, plus the status
+ *  the database settled on — 'flagged' rather than 'pending' when the order has
+ *  no phone number, because the existing trigger says so. */
+export async function createManualOrder(input: ManualOrderInput): Promise<{
+  id: string;
+  order_ref: string;
+  status: OrderStatus;
+}> {
+  assertValidManualOrder(input);
+
+  const { data: auth } = await supabase.auth.getUser();
+  const operator = auth.user?.email ?? 'unknown';
+  const { subtotal } = manualOrderTotals(input.line_items);
+  const nowIso = new Date().toISOString();
+
+  const row = {
+    kind: 'sale' as const,
+    status: 'pending' as const,
+    customer_name: input.customer_name.trim(),
+    customer_email: input.customer_email?.trim() || null,
+    customer_phone: input.customer_phone?.trim() || null,
+    address_line: input.address.address_line?.trim() || null,
+    address_line2: input.address.address_line2?.trim() || null,
+    city: input.address.city.trim(),
+    region_state: input.address.region_state?.trim() || null,
+    country: input.address.country,
+    postal_code: input.address.postal_code?.trim() || null,
+    address_customer_postal: input.address.postal_code?.trim() || null,
+    // The text guess, flagged as a guess — identical to how a synced order
+    // arrives, so the Address card renders it unconfirmed until Verify runs.
+    address_verdict: guessDwellingFromText(
+      input.address.address_line, input.address.address_line2, input.address.postal_code,
+    ),
+    address_verdict_source: 'sync-guess' as const,
+    // See the freight note above: zero, and the form has no field for it.
+    freight_estimate_usd: 0,
+    freight_threshold_usd: SALE_FREIGHT_THRESHOLD_USD,
+    freight_estimate_source: 'manual',
+    currency: input.currency,
+    subtotal_usd: subtotal,
+    total_usd: subtotal,
+    financial_status: input.financial_status,
+    payment_methods: input.payment_method?.trim() ? [input.payment_method.trim()] : null,
+    line_items: input.line_items.map(li => ({
+      // The legacy Shopify sale shape, which is what every sale line in the
+      // table uses and what the Line items card reads.
+      sku: li.sku.trim(),
+      name: li.name.trim(),
+      qty: li.qty,
+      price_usd: li.price_usd,
+    })),
+    placed_at: input.placed_at,
+    attribution_source: 'manual',
+    // The anti-heuristic stamp — see the reconcile note above.
+    reconciled_at: nowIso,
+    reconciled_by: operator,
+    reconcile_outcome: 'open' as const,
+    reconcile_note: 'Created by hand in Sales — nothing has shipped against it',
+  };
+
+  const first = await nextManualOrderRef();
+  const base = Number(first.slice(2));
+
+  for (let attempt = 0; attempt < MANUAL_REF_ATTEMPTS; attempt++) {
+    const order_ref = `M-${String(base + attempt).padStart(4, '0')}`;
+    const { data: created, error } = await supabase
+      .from('orders')
+      .insert({ ...row, order_ref })
+      .select('id, order_ref, status')
+      .single();
+
+    // 23505 on this table is the UNIQUE on order_ref: somebody took the number
+    // between our read and our write. Walk on rather than failing.
+    if (error?.code === '23505') continue;
+    if (error || !created) throw new Error(`Could not create the order: ${error?.message ?? 'no row returned'}`);
+
+    await logAction(
+      'order_manual_create',
+      created.order_ref,
+      `${row.customer_name} · ${input.line_items.length} line${input.line_items.length === 1 ? '' : 's'}`
+        + ` · ${input.currency} ${subtotal.toFixed(2)} · ${input.financial_status} · by ${operator}`,
+      { entityType: 'order', entityId: created.id },
+    );
+
+    // The note is a convenience, and the order already exists. A failure here
+    // must not read to the operator as "the order was not created" — that is
+    // how you get two of them.
+    const note = input.note?.trim();
+    if (note) {
+      try {
+        await addOrderNote(created.id, operator, note);
+      } catch (e) {
+        console.warn('manual order created, but its note did not save:', (e as Error).message);
+      }
+    }
+
+    return { id: created.id, order_ref: created.order_ref, status: created.status as OrderStatus };
+  }
+
+  throw new Error(
+    `Could not allocate an order reference after ${MANUAL_REF_ATTEMPTS} attempts — `
+    + 'M-' + String(base).padStart(4, '0') + ' and the refs after it are all taken. Try again.',
+  );
+}
+
 /** Live-subscribed list of all replacement orders, newest first. */
 export function useReplacementOrders(): { orders: Order[]; loading: boolean } {
   const [orders, setOrders] = useState<Order[]>([]);
