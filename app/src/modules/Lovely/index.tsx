@@ -5,15 +5,17 @@ import { ActivityTab } from './ActivityTab';
 import { VerificationTab } from './VerificationTab';
 import { OnboardingTab } from './OnboardingTab';
 import { FirmwareTab } from './FirmwareTab';
+import { TicketsTab } from './TicketsTab';
 import styles from './Lovely.module.css';
 
-type Tab = 'users' | 'activity' | 'verification' | 'onboarding' | 'firmware';
+type Tab = 'users' | 'activity' | 'tickets' | 'verification' | 'onboarding' | 'firmware';
 
 // Every tab is open to all signed-in operators. The edge functions behind them
 // gate on the @virgohome.io org domain, which is the real perimeter here.
 const TABS: { key: Tab; label: string }[] = [
   { key: 'users', label: 'Users' },
   { key: 'activity', label: 'Activity' },
+  { key: 'tickets', label: 'Tickets' },
   { key: 'verification', label: 'Verification' },
   { key: 'onboarding', label: 'Onboarding' },
   { key: 'firmware', label: 'Firmware' },
@@ -62,6 +64,7 @@ export default function Lovely() {
 
       {tab === 'users' && <UsersTab />}
       {tab === 'activity' && <ActivityTab />}
+      {tab === 'tickets' && <TicketsTab />}
       {tab === 'verification' && <VerificationTab />}
       {tab === 'onboarding' && (
         <OnboardingTab onGoToVerification={() => setTab('verification')} />
