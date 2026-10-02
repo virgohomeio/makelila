@@ -587,3 +587,27 @@
 }
 .ticketPhoto img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .ticketPhotoPending { opacity: 0.6; }
+
+/* ---- Compost feedback: rating filter chips ---- */
+
+.ratingChips { display: flex; gap: 6px; flex-wrap: wrap; }
+.ratingChip {
+  border: 1px solid rgba(44, 42, 37, 0.1);
+  background: #fff;
+  color: var(--color-ink-muted);
+  border-radius: 999px;
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.ratingChip:hover { color: var(--color-ink); border-color: rgba(44, 42, 37, 0.2); }
+.ratingChipActive,
+.ratingChipActive:hover {
+  background: var(--color-ink);
+  border-color: var(--color-ink);
+  color: #fff;
+}
+.ratingChipCount { opacity: 0.6; font-variant-numeric: tabular-nums; margin-left: 2px; }
+.feedbackNote { max-width: 36ch; white-space: pre-wrap; overflow-wrap: anywhere; }
