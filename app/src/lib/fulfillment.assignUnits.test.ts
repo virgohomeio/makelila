@@ -18,11 +18,17 @@ const { fromMock, state } = vi.hoisted(() => {
     unitStatuses: Record<string, string>;
     /** Child rows already on the row, oldest first. */
     existingLinks: string[];
+    /** The step the queue row is sitting on when the assignment comes in. */
+    queueStep: number;
     /** Error the fulfillment_queue_units write returns, if any. */
     linkError: any;
     upserts: Array<{ table: string; rows: any }>;
     updates: Array<{ table: string; patch: any; match: Record<string, any> }>;
-  } = { unitStatuses: {}, existingLinks: [], linkError: null, upserts: [], updates: [] };
+    deletes: Array<{ table: string; match: Record<string, any> }>;
+  } = {
+    unitStatuses: {}, existingLinks: [], queueStep: 1, linkError: null,
+    upserts: [], updates: [], deletes: [],
+  };
 
   const chain = (resolve: (f: Record<string, any>) => any): any => {
     const filters: Record<string, any> = {};
@@ -38,18 +44,28 @@ const { fromMock, state } = vi.hoisted(() => {
   };
 
   const fromMock = vi.fn((table: string) => ({
-    select: (...a: any[]) => chain(() => {
+    select: (...a: any[]) => chain((filters) => {
       if (table === 'orders') {
         return { data: { order_ref: 'M-0001', customer_name: 'James San Roman' }, error: null };
       }
+      if (table === 'fulfillment_queue') {
+        return { data: { step: state.queueStep, assigned_serial: state.existingLinks[0] ?? null }, error: null };
+      }
       if (table === 'units') {
+        // A single-serial read (the release path) resolves to that one row.
+        if (filters.serial) {
+          const status = state.unitStatuses[filters.serial];
+          return { data: status ? { serial: filters.serial, status } : null, error: null };
+        }
         return {
           data: Object.entries(state.unitStatuses).map(([serial, status]) => ({ serial, status })),
           error: null,
         };
       }
       if (table === 'fulfillment_queue_units') {
-        if (state.linkError) return { data: null, error: state.linkError };
+        // Only a missing table fails the READ as well — a constraint violation
+        // is something the upsert reports, not the select.
+        if (state.linkError?.code === '42P01') return { data: null, error: state.linkError };
         return {
           data: state.existingLinks.map((unit_serial, i) => ({
             unit_serial, assigned_at: `2026-10-0${i + 1}T00:00:00Z`,
@@ -66,10 +82,22 @@ const { fromMock, state } = vi.hoisted(() => {
     update: (patch: any) => {
       const c = chain((filters) => {
         state.updates.push({ table, patch, match: filters });
+        // Keep the fake units table honest: a release really does change the
+        // status the next read sees, and the pickable check depends on it.
+        if (table === 'units' && filters.serial && typeof patch.status === 'string') {
+          state.unitStatuses[filters.serial] = patch.status;
+        }
         return { data: null, error: null };
       });
       return c;
     },
+    delete: () => chain((filters) => {
+      state.deletes.push({ table, match: filters });
+      // The links really are gone afterwards, so the re-read that picks
+      // assigned_serial sees an empty row.
+      if (table === 'fulfillment_queue_units') state.existingLinks = [];
+      return { data: null, error: null };
+    }),
   }));
 
   return { fromMock, state };
@@ -100,9 +128,11 @@ const linkRows = () => state.upserts.find(u => u.table === 'fulfillment_queue_un
 beforeEach(() => {
   state.unitStatuses = Object.fromEntries(THREE.map(s => [s, 'ready']));
   state.existingLinks = [];
+  state.queueStep = 1;
   state.linkError = null;
   state.upserts = [];
   state.updates = [];
+  state.deletes = [];
   vi.mocked(logAction).mockClear();
 });
 
@@ -163,8 +193,55 @@ describe('assignUnits', () => {
     // Moving it would silently re-point the FK and the older reads at a
     // different machine than the one they have been naming all along.
     state.existingLinks = ['LL01-0001'];
+    state.queueStep = 2;
     await assignUnits('q-1', ['LL01-0002'], 'o-1');
     expect(queuePatch()).toEqual({ assigned_serial: 'LL01-0001', step: 2 });
+    // Past step 1 the existing pick is real, so nothing is released.
+    expect(state.deletes).toHaveLength(0);
+  });
+
+  describe('a row still carrying links on step 1', () => {
+    // Step 1 IS the assign step, so a link on a step-1 row is a leftover — the
+    // QC flag used to rewind the row without releasing what it held. Order
+    // #1286 piled up six of them over six flag-and-re-pick cycles, and the
+    // board told the operator six machines were assigned to a customer she had
+    // picked none for.
+    beforeEach(() => {
+      state.existingLinks = ['LL01-0001', 'LL01-0002'];
+      state.unitStatuses['LL01-0001'] = 'reserved';
+      state.unitStatuses['LL01-0002'] = 'rework';
+      state.queueStep = 1;
+    });
+
+    it('releases the leftovers before reserving the new pick', async () => {
+      await assignUnits('q-1', ['LL01-0003'], 'o-1');
+
+      // The sibling that was still only reserved goes back into ready stock.
+      const freed = unitPatches().find(p => p.match.serial === 'LL01-0001')!;
+      expect(freed.patch).toEqual({ status: 'ready', customer_order_ref: null, customer_name: null });
+      // The links go with it: the row owns exactly what was just picked.
+      expect(state.deletes).toContainEqual({ table: 'fulfillment_queue_units', match: { queue_id: 'q-1' } });
+      expect(linkRows().map((r: any) => r.unit_serial)).toEqual(['LL01-0003']);
+    });
+
+    it('leaves a flagged machine in rework rather than selling it again', async () => {
+      await assignUnits('q-1', ['LL01-0003'], 'o-1');
+      expect(unitPatches().find(p => p.match.serial === 'LL01-0002')).toBeUndefined();
+    });
+
+    it('points assigned_serial at the machine actually picked', async () => {
+      // The leftover must not keep naming the row — the step-6 trigger ships
+      // whatever assigned_serial and the links name.
+      await assignUnits('q-1', ['LL01-0003'], 'o-1');
+      expect(queuePatch()).toEqual({ assigned_serial: 'LL01-0003', step: 2 });
+    });
+
+    it('can re-pick a machine that was left reserved to this same order', async () => {
+      // The leftover is released first for exactly this reason: otherwise the
+      // pickable check sees 'reserved' and refuses the operator's own unit.
+      await expect(assignUnits('q-1', ['LL01-0001'], 'o-1')).resolves.toBeUndefined();
+      expect(queuePatch()).toEqual({ assigned_serial: 'LL01-0001', step: 2 });
+    });
   });
 
   it('ignores a serial picked twice', async () => {

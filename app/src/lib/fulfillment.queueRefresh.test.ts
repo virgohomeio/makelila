@@ -88,6 +88,41 @@ describe('useFulfillmentQueue staleness', () => {
     expect(result.current.ready[0].step).toBe(4);
   });
 
+  // Step 1 IS "assign a ready unit", so a row sitting on it owns nothing —
+  // whatever the row still names is a leftover from a flag that rewound it
+  // without releasing. Order #1286 showed the operator six assigned machines
+  // on the screen that asks her to pick one.
+  it('reports no assigned units on a row sitting at step 1', async () => {
+    orderMock.mockResolvedValue({
+      data: [{
+        ...rowAt(1)[0],
+        fulfillment_queue_units: [
+          { unit_serial: 'LL01-00000000413', assigned_at: '2026-10-02T20:57:58Z' },
+          { unit_serial: 'LL01-00000000414', assigned_at: '2026-10-02T20:58:14Z' },
+        ],
+      }],
+      error: null,
+    });
+    const { result } = renderHook(() => useFulfillmentQueue());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.ready[0].assigned_serials).toEqual([]);
+  });
+
+  it('still reports the assigned units once the row is past step 1', async () => {
+    orderMock.mockResolvedValue({
+      data: [{
+        ...rowAt(2)[0],
+        fulfillment_queue_units: [
+          { unit_serial: 'LL01-00000000414', assigned_at: '2026-10-02T20:58:14Z' },
+        ],
+      }],
+      error: null,
+    });
+    const { result } = renderHook(() => useFulfillmentQueue());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.ready[0].assigned_serials).toEqual(['LL01-00000000414']);
+  });
+
   it('tears the channel down with removeChannel, not unsubscribe', async () => {
     orderMock.mockResolvedValue({ data: rowAt(5), error: null });
     const { result, unmount } = renderHook(() => useFulfillmentQueue());

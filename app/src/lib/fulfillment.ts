@@ -139,6 +139,13 @@ function isMissingRelation(error: { code?: string; message?: string } | null): b
 /** The assigned set for a row, oldest pick first, with the single-serial
  *  fallback for a database that has not run the migration. */
 function serialsOf(row: FulfillmentQueueRow & { fulfillment_queue_units?: EmbeddedUnit[] }): string[] {
+  // Step 1 IS the assign step, so a row sitting on it has nothing assigned by
+  // definition. Any link still attached is stale — a QC flag used to drop the
+  // row back here while leaving its child rows behind — and showing it tells
+  // the operator a machine is reserved for this customer when none is (#1286
+  // carried six). Never surface it; assignUnits clears the rows for good the
+  // next time the order is picked.
+  if (row.step <= 1) return [];
   const embedded = row.fulfillment_queue_units;
   if (embedded && embedded.length > 0) {
     return [...embedded]
@@ -173,7 +180,10 @@ async function fetchQueueRows(): Promise<FulfillmentQueueRow[] | null> {
     .order('due_date', { ascending: true });
   if (plain.error || !plain.data) return null;
   return (plain.data as FulfillmentQueueRow[])
-    .map(r => ({ ...r, assigned_serials: r.assigned_serial ? [r.assigned_serial] : [] }));
+    .map(r => ({
+      ...r,
+      assigned_serials: r.step > 1 && r.assigned_serial ? [r.assigned_serial] : [],
+    }));
 }
 
 export function useFulfillmentQueue(): {
@@ -229,7 +239,12 @@ export function useFulfillmentQueue(): {
                 const merged = known.length > 0
                   ? known
                   : (row.assigned_serial ? [row.assigned_serial] : []);
-                const next_row = { ...row, assigned_serials: merged };
+                // …except back at step 1, where nothing is assigned: a flag
+                // that rewinds the row must not leave the old set on screen.
+                const next_row = {
+                  ...row,
+                  assigned_serials: row.step <= 1 ? [] : merged,
+                };
                 if (idx >= 0) { const next = [...prev]; next[idx] = next_row; return next; }
                 return [...prev, next_row];
               }
@@ -499,6 +514,36 @@ export async function assignUnits(queueId: string, serials: string[], orderId: s
     .single();
   if (oErr) throw oErr;
 
+  // Self-heal before reserving anything, and before the pickable check below —
+  // a leftover reservation from this very row would otherwise fail that check.
+  //
+  // A row on step 1 is unassigned by definition, so whatever is still linked to
+  // it is a leftover: from the old flag path, which rewound the row without
+  // releasing, or from a release that died partway. Leaving it there means the
+  // order holds two reservations for every machine it is actually for, and that
+  // the step-6 trigger marks all of them shipped to this customer. Releasing is
+  // safe — anything genuinely meant for this order is picked again, in this
+  // call.
+  const { data: qBefore, error: qbErr } = await supabase
+    .from('fulfillment_queue')
+    .select('step, assigned_serial')
+    .eq('id', queueId)
+    .maybeSingle();
+  if (qbErr) throw qbErr;
+  if ((qBefore?.step ?? 1) <= 1) {
+    const stale = await releaseAssignedUnits(
+      queueId,
+      (qBefore?.assigned_serial as string | null) ?? null,
+    );
+    if (stale.length > 0) {
+      await logAction(
+        'fq_assign_cleared_stale',
+        queueId,
+        `Released ${stale.join(', ')} left over on step 1`,
+      );
+    }
+  }
+
   // Backlog #57 — a unit that is already 'shipped' is being paired, not
   // picked (the historical-backfill flow): keep its status and stamp backfill
   // metadata instead of overwriting to 'reserved'. Read every picked unit in
@@ -618,7 +663,21 @@ export async function confirmTestReport(queueId: string, testReportUrl?: string)
   await logAction('fq_test_ok', queueId, 'Test verified');
 }
 
-/** Step 2 fail: flag rework → drops order back to step 1; flips slot to 'rework'. */
+/** Step 2 fail: flag rework → drops the order back to step 1 and releases
+ *  every machine it had reserved.
+ *
+ *  A flag is Junaid's problem now, not the customer's: the flagged machine goes
+ *  to rework and stops being owed to anybody, and its siblings go back into
+ *  ready stock. Clearing `assigned_serial` alone is what this did before, and
+ *  it left the real assignment behind in three places — the unit still stamped
+ *  with the customer's name and order, the child-table link still naming it,
+ *  and the step-6 sync trigger still ready to mark it 'shipped' to that
+ *  customer. Order #1286 collected six such links across six flag/re-pick
+ *  cycles, three of them machines already in rework.
+ *
+ *  The flagged unit is left 'rework' (the build_defects insert below promotes
+ *  it by trigger) — only its customer stamps are cleared. Its siblings are
+ *  still 'reserved', so the shared release path returns them to 'ready'. */
 export async function flagRework(
   queueId: string,
   serial: string,
@@ -643,13 +702,40 @@ export async function flagRework(
     .update({ status: 'rework', updated_at: new Date().toISOString() })
     .eq('serial', serial);
   if (slotErr) throw slotErr;
+
+  // The flagged machine stops being this customer's. It stays 'rework' — it is
+  // not sellable until Junaid clears the defect — but nothing should still
+  // read it as reserved for the order.
+  const { error: unstampErr } = await supabase
+    .from('units')
+    .update({ customer_order_ref: null, customer_name: null })
+    .eq('serial', serial);
+  if (unstampErr) throw new Error(`Failed to unassign ${serial}: ${unstampErr.message}`);
+
+  // Everything else the row had reserved goes back into ready stock, and every
+  // link is dropped: the row is about to sit on step 1, which means unassigned.
+  const { data: qRow } = await supabase
+    .from('fulfillment_queue')
+    .select('assigned_serial')
+    .eq('id', queueId)
+    .maybeSingle();
+  const released = await releaseAssignedUnits(
+    queueId,
+    (qRow?.assigned_serial as string | null) ?? null,
+  );
+
   // Drop queue row to step 1 + clear assigned serial
   const { error: qErr } = await supabase
     .from('fulfillment_queue')
     .update({ step: 1, assigned_serial: null })
     .eq('id', queueId);
   if (qErr) throw qErr;
-  await logAction('fq_test_flagged', queueId, `${serial}: ${issue}`);
+  await logAction(
+    'fq_test_flagged',
+    queueId,
+    `${serial}: ${issue}`
+    + (released.length > 0 ? ` — released ${released.join(', ')} back to ready` : ''),
+  );
 
   // Also create a service_tickets row so the Service module's Repair
   // tab picks this up. Idempotent on fulfillment_queue_id; if the
@@ -953,6 +1039,9 @@ async function releaseAssignedUnit(serial: string | null): Promise<boolean> {
  *  always was). */
 async function releaseAssignedUnits(queueId: string, fallback: string | null): Promise<string[]> {
   const serials = await assignedSerials(queueId, fallback);
+  // Nothing linked, nothing to free — and no reason to issue a delete. The
+  // common case (a first assignment on a clean row) should not write at all.
+  if (serials.length === 0) return [];
   const released: string[] = [];
   for (const serial of serials) {
     if (await releaseAssignedUnit(serial)) released.push(serial);
