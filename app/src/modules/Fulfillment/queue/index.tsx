@@ -203,7 +203,10 @@ export default function Queue() {
                 row={selected}
                 order={selectedOrder}
                 onRemoved={message => { setNotice(message); setSelectedId(null); }}
-                onStepChanged={() => { void refresh(); }}
+                // A rebook moves the row between rails as well as steps: its
+                // Goorooship send is retired, so the badge and the "To be
+                // picked up" split have to be re-read too.
+                onStepChanged={() => { void refresh(); void refreshSends(); }}
               />
               {shippedMarks.has(selected.id) ? (
                 // Ahead of the pause banner: "we already sent this" outranks

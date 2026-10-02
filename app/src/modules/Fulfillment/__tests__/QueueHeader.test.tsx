@@ -5,10 +5,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
-const { cancelMock, moveBackMock } = vi.hoisted(() => ({
+const { cancelMock, moveBackMock, rebookMock } = vi.hoisted(() => ({
   cancelMock: vi.fn(() => Promise.resolve()),
   moveBackMock: vi.fn(() => Promise.resolve({
     status: 'pending', replacement_state: null, label: 'Order Review › Pending',
+  })),
+  rebookMock: vi.fn(() => Promise.resolve({
+    order_ref: 'R-0002',
+    previous: { carrier: 'Canpar', tracking_num: 'D420000112' },
+    restored: ['00019'],
   })),
 }));
 
@@ -21,6 +26,11 @@ vi.mock('../../../lib/fulfillment', async () => {
     setQueuePriority: vi.fn(() => Promise.resolve()),
     goBackStep: vi.fn(() => Promise.resolve()),
   };
+});
+
+vi.mock('../../../lib/rebookShipment', async () => {
+  const actual = await vi.importActual<typeof import('../../../lib/rebookShipment')>('../../../lib/rebookShipment');
+  return { ...actual, rebookShipment: rebookMock };
 });
 
 vi.mock('../../../lib/auth', () => ({
@@ -49,7 +59,60 @@ const order = {
   placed_at: '2026-06-05T00:00:00Z', created_at: '2026-06-05T00:00:00Z',
 };
 
-beforeEach(() => { cancelMock.mockClear(); moveBackMock.mockClear(); });
+beforeEach(() => { cancelMock.mockClear(); moveBackMock.mockClear(); rebookMock.mockClear(); });
+
+// The booking was made and then cancelled — the carrier was stood down, the
+// pickup called off — and the whole shipment has to be booked again against the
+// same order and the same machine.
+describe('Rebook Shipment', () => {
+  const booked = {
+    ...row, step: 6, carrier: 'Canpar', tracking_num: 'D420000112',
+    label_confirmed_at: '2026-10-01T12:00:00Z',
+    email_sent_at: '2026-10-01T18:00:00Z', fulfilled_at: '2026-10-01T18:00:00Z',
+  } as FulfillmentQueueRow;
+
+  it('is offered on a shipped order — the one place the other two exits are not', () => {
+    render(<QueueHeader row={booked} order={order} />);
+    expect(screen.getByRole('button', { name: /rebook shipment/i })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /^cancel order$/i })).toBeNull();
+  });
+
+  it('is not offered before a label exists', () => {
+    render(<QueueHeader row={row} order={order} />);
+    expect(screen.queryByRole('button', { name: /rebook shipment/i })).toBeNull();
+  });
+
+  it('names the booking that is about to be torn up, and asks first', () => {
+    render(<QueueHeader row={booked} order={order} />);
+    fireEvent.click(screen.getByRole('button', { name: /rebook shipment/i }));
+
+    expect(screen.getByText(/Canpar · D420000112/)).toBeTruthy();
+    expect(screen.getByText(/Ready to ship/)).toBeTruthy();
+    expect(rebookMock).not.toHaveBeenCalled();
+  });
+
+  it('rebooks with the operator note and tells the board to re-read', async () => {
+    const onStepChanged = vi.fn();
+    render(<QueueHeader row={booked} order={order} onStepChanged={onStepChanged} />);
+    fireEvent.click(screen.getByRole('button', { name: /rebook shipment/i }));
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'pickup cancelled' } });
+    fireEvent.click(screen.getByRole('button', { name: /rebook this shipment/i }));
+
+    await waitFor(() => {
+      expect(rebookMock).toHaveBeenCalledWith('q-1', 'pickup cancelled');
+      expect(onStepChanged).toHaveBeenCalled();
+    });
+  });
+
+  // Unlike Cancel Order, a note is a courtesy here: the row stays, and nothing
+  // is lost by rebooking without one.
+  it('does not demand a note', () => {
+    render(<QueueHeader row={booked} order={order} />);
+    fireEvent.click(screen.getByRole('button', { name: /rebook shipment/i }));
+    expect(screen.getByRole('button', { name: /rebook this shipment/i }))
+      .toHaveProperty('disabled', false);
+  });
+});
 
 describe('QueueHeader exit actions', () => {
   it('offers both actions beside the Due pill on an open order', () => {

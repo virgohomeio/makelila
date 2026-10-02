@@ -3,12 +3,16 @@ import {
   setQueuePriority, goBackStep, cancelOrderFromQueue, returnQueueRowToOrders,
   type FulfillmentQueueRow,
 } from '../../../lib/fulfillment';
+import { canRebookShipment, rebookShipment } from '../../../lib/rebookShipment';
 import { orderDue, type Order } from '../../../lib/orders';
 import { replacementItemsLabel } from '../../../lib/replacementTags';
 import styles from '../Fulfillment.module.css';
 
-/** Which of the two "this order leaves the queue" panels is open, if any. */
-type ExitPanel = 'cancel' | 'moveBack' | null;
+/** Which of the header's confirm panels is open, if any.
+ *
+ *  The first two take the order out of the queue; the third keeps it and sends
+ *  it backwards. All three ask before they act, and all three take a note. */
+type ExitPanel = 'cancel' | 'moveBack' | 'rebook' | null;
 
 export function QueueHeader({
   row,
@@ -73,6 +77,28 @@ export function QueueHeader({
     try {
       const landing = await returnQueueRowToOrders(row.id, exitReason);
       onRemoved?.(`${order.order_ref} — ${order.customer_name} left the queue and is back in ${landing.label}.`);
+    } catch (e) {
+      setError((e as Error).message);
+      setBusy(false);
+    }
+  };
+
+  // The booking was made and then cancelled — the carrier never came, or the
+  // pickup was called off — and the whole shipment has to be booked again. The
+  // row goes back to step 3 with carrier, tracking, the label, the dock
+  // checklist and both emails cleared, keeping the pick and the test report.
+  const canRebook = canRebookShipment(row);
+  const handleRebook = async () => {
+    setBusy(true); setError(null);
+    try {
+      await rebookShipment(row.id, exitReason);
+      setPanel(null);
+      setExitReason('');
+      // Don't wait on the realtime socket: the row has just moved from Shipped
+      // (or To be picked up) to Ready to ship, and the operator is about to
+      // type a new tracking number into the step this reveals.
+      onStepChanged?.();
+      setBusy(false);
     } catch (e) {
       setError((e as Error).message);
       setBusy(false);
@@ -156,6 +182,15 @@ export function QueueHeader({
               Due: {due.dueLabel}
             </span>
           )}
+          {canRebook && (
+            <button
+              className={panel === 'rebook' ? styles.exitBtnOn : styles.exitBtn}
+              onClick={() => openPanel('rebook')}
+              disabled={busy}
+              aria-expanded={panel === 'rebook'}
+              title="The carrier booking was cancelled — send this order back to the label step to book a new shipment"
+            >Rebook Shipment</button>
+          )}
           {!fulfilled && (
             <>
               <button
@@ -197,10 +232,41 @@ export function QueueHeader({
           <div className={styles.exitPanelTitle}>
             {panel === 'cancel'
               ? `Cancel ${order.order_ref} — ${order.customer_name}?`
-              : `Move ${order.order_ref} back to Sales › Orders?`}
+              : panel === 'rebook'
+                ? `Book a new shipment for ${order.order_ref} — ${order.customer_name}?`
+                : `Move ${order.order_ref} back to Sales › Orders?`}
           </div>
           <ul className={styles.exitPanelList}>
-            {panel === 'cancel' ? (
+            {panel === 'rebook' ? (
+              <>
+                <li>
+                  The order goes back to <strong>Ready to ship</strong> at step 3 (Label), where a
+                  new carrier, tracking number and label are attached.
+                </li>
+                <li>
+                  The cancelled booking is cleared
+                  {(row.carrier || row.tracking_num)
+                    ? <> — {[row.carrier, row.tracking_num].filter(Boolean).join(' · ')} comes off the
+                        row, along with the label PDF and the dock checklist.</>
+                    : <> — the label PDF and the dock checklist come off the row.</>}
+                </li>
+                <li>
+                  Goorooship is told again: the order drops out of the batch it was sent in and can be
+                  confirmed into a new day&rsquo;s batch.
+                </li>
+                <li>
+                  The customer&rsquo;s shipment email can be sent again, with the new tracking number.
+                </li>
+                {row.assigned_serials.length > 0 && (
+                  <li>
+                    Unit{row.assigned_serials.length === 1 ? '' : 's'}{' '}
+                    {row.assigned_serials.join(', ')} stay{row.assigned_serials.length === 1 ? 's' : ''}{' '}
+                    with this order, reserved — the pick and the test report are kept. A machine the
+                    queue had marked shipped goes back on the shelf.
+                  </li>
+                )}
+              </>
+            ) : panel === 'cancel' ? (
               <>
                 <li>The order is removed from the fulfillment queue.</li>
                 <li>It is marked cancelled and drops out of every Order Review tab.</li>
@@ -233,17 +299,25 @@ export function QueueHeader({
             rows={2}
             placeholder={panel === 'cancel'
               ? 'Reason for cancelling (required) — e.g. customer changed their mind'
-              : 'Note (optional) — e.g. waiting on a replacement chamber'}
+              : panel === 'rebook'
+                ? 'Note (optional) — e.g. pickup cancelled, rebooking with GLS'
+                : 'Note (optional) — e.g. waiting on a replacement chamber'}
           />
           <div className={styles.exitPanelActions}>
             <button
               className={panel === 'cancel' ? styles.exitConfirmDanger : styles.exitConfirm}
-              onClick={() => void (panel === 'cancel' ? handleCancelOrder() : handleMoveBack())}
+              onClick={() => void (
+                panel === 'cancel' ? handleCancelOrder()
+                : panel === 'rebook' ? handleRebook()
+                : handleMoveBack()
+              )}
               disabled={busy || (panel === 'cancel' && !exitReason.trim())}
             >
               {busy
                 ? 'Working…'
-                : panel === 'cancel' ? 'Cancel this order' : 'Move back to Orders'}
+                : panel === 'cancel' ? 'Cancel this order'
+                : panel === 'rebook' ? 'Rebook this shipment'
+                : 'Move back to Orders'}
             </button>
             <button className={styles.backBtn} onClick={() => setPanel(null)} disabled={busy}>
               Never mind

@@ -11,6 +11,7 @@ import {
 } from './pickupQueue';
 import { EZTRANS_SENT_ACTION } from './eztrans';
 import { EZTRANS_BATCH_SENT_ACTION } from './eztransBatch';
+import { REBOOK_ACTION } from './rebookShipment';
 
 function mkRow(p: Partial<PickupQueueRow> & { id: string; order_id: string }): PickupQueueRow {
   return { step: PICKUP_STEP, label_confirmed_at: '2026-09-29T20:00:00Z', ...p };
@@ -37,6 +38,34 @@ describe('indexGoorooshipSends', () => {
       { ts: '2026-09-21T20:01:00Z', type: EZTRANS_SENT_ACTION, entity_id: 'o1' },
     ]);
     expect(m.get('o1')?.at).toBe('2026-09-21T21:10:00Z');
+  });
+
+  // Rebooking cancels the carrier booking AND the email that announced it.
+  it('retires a send the order has since been rebooked out of', () => {
+    const m = indexGoorooshipSends([
+      { ts: '2026-09-29T20:12:00Z', type: EZTRANS_BATCH_SENT_ACTION, entity_id: 'o1' },
+      { ts: '2026-10-01T09:00:00Z', type: REBOOK_ACTION,             entity_id: 'o1' },
+    ]);
+    expect(m.has('o1')).toBe(false);
+  });
+
+  it('keeps the send that followed the rebook — the new carton was mailed', () => {
+    const m = indexGoorooshipSends([
+      { ts: '2026-09-29T20:12:00Z', type: EZTRANS_BATCH_SENT_ACTION, entity_id: 'o1' },
+      { ts: '2026-10-01T09:00:00Z', type: REBOOK_ACTION,             entity_id: 'o1' },
+      { ts: '2026-10-01T17:40:00Z', type: EZTRANS_BATCH_SENT_ACTION, entity_id: 'o1' },
+    ]);
+    expect(m.get('o1')).toEqual({ at: '2026-10-01T17:40:00Z', via: 'batch' });
+  });
+
+  it('retires only the rebooked order, not everything in the same batch', () => {
+    const m = indexGoorooshipSends([
+      { ts: '2026-09-29T20:12:00Z', type: EZTRANS_BATCH_SENT_ACTION, entity_id: 'o1' },
+      { ts: '2026-09-29T20:12:00Z', type: EZTRANS_BATCH_SENT_ACTION, entity_id: 'o2' },
+      { ts: '2026-10-01T09:00:00Z', type: REBOOK_ACTION,             entity_id: 'o1' },
+    ]);
+    expect(m.has('o1')).toBe(false);
+    expect(m.get('o2')?.at).toBe('2026-09-29T20:12:00Z');
   });
 
   it('ignores unrelated log types and rows with no order behind them', () => {

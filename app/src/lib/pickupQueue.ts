@@ -37,11 +37,19 @@
 //
 // So the log is the complete signal and the column is the fast one; a row
 // qualifies on either.
+//
+// A send can also be retired. "Rebook Shipment" (lib/rebookShipment.ts) is an
+// operator saying the carrier booking was cancelled and a new one is being
+// made, which is exactly as true of the email that announced it: the row goes
+// back to step 3 and belongs under Ready to ship until the 3PL is told about
+// the replacement carton. So a send at or before an order's latest rebook does
+// not count, the same way a send older than the row does not.
 
 import { useCallback, useEffect, useState } from 'react';
 import { supabase } from './supabase';
 import { EZTRANS_SENT_ACTION } from './eztrans';
 import { EZTRANS_BATCH_SENT_ACTION } from './eztransBatch';
+import { REBOOK_ACTION } from './rebookShipment';
 
 /** The dock-handoff step, where the pickup rail starts. Named because "4"
  *  appears nowhere else as a fact. */
@@ -57,6 +65,14 @@ export const FULFILLED_STEP = 6;
 export const GOOROOSHIP_SENT_TYPES: readonly string[] = [
   EZTRANS_SENT_ACTION,
   EZTRANS_BATCH_SENT_ACTION,
+];
+
+/** Every log type this module reads. A rebook is not a send — it is the thing
+ *  that retires one, so it has to be fetched alongside them or the rail would
+ *  go on believing in a collection that was cancelled. */
+export const GOOROOSHIP_LOG_TYPES: readonly string[] = [
+  ...GOOROOSHIP_SENT_TYPES,
+  REBOOK_ACTION,
 ];
 
 /** When the 3PL was told about a shipment, and by which of the two paths. */
@@ -189,10 +205,24 @@ export type GoorooshipSendLogRow = {
  *  Pure, so the mapping can be tested without a database — and so the rule
  *  that a resend supersedes an earlier one is stated once. */
 export function indexGoorooshipSends(rows: GoorooshipSendLogRow[]): Map<string, GoorooshipSend> {
+  // Pass one: when each order's booking was last torn up. A rebook says the
+  // carrier booking before it was cancelled, so every send at or before it is
+  // about a carton that is no longer coming — the operator is back at step 3
+  // booking a fresh label, and the 3PL has been told nothing about that one.
+  const rebookedAt = new Map<string, string>();
+  for (const r of rows) {
+    if (r.type !== REBOOK_ACTION || !r.entity_id) continue;
+    const prev = rebookedAt.get(r.entity_id);
+    if (prev && !isBefore(prev, r.ts)) continue;
+    rebookedAt.set(r.entity_id, r.ts);
+  }
+
   const m = new Map<string, GoorooshipSend>();
   for (const r of rows) {
     if (!r.entity_id) continue;
     if (!GOOROOSHIP_SENT_TYPES.includes(r.type)) continue;
+    const cancelled = rebookedAt.get(r.entity_id);
+    if (cancelled && !isBefore(cancelled, r.ts)) continue;
     const prev = m.get(r.entity_id);
     if (prev && Date.parse(prev.at) >= Date.parse(r.ts)) continue;
     m.set(r.entity_id, {
@@ -201,6 +231,14 @@ export function indexGoorooshipSends(rows: GoorooshipSendLogRow[]): Map<string, 
     });
   }
   return m;
+}
+
+/** Did `a` happen strictly before `b`? False when either is unparseable, so an
+ *  unreadable timestamp can never silently retire a real send. */
+function isBefore(a: string, b: string): boolean {
+  const at = Date.parse(a);
+  const bt = Date.parse(b);
+  return Number.isFinite(at) && Number.isFinite(bt) && at < bt;
 }
 
 /** Every Goorooship send on record, by order id.
@@ -223,7 +261,7 @@ export function useGoorooshipSends(): {
     const { data, error } = await supabase
       .from('activity_log')
       .select('ts, type, entity_id')
-      .in('type', GOOROOSHIP_SENT_TYPES)
+      .in('type', GOOROOSHIP_LOG_TYPES)
       .order('ts', { ascending: true })
       .limit(5000);
     if (error) { console.error('Goorooship sends fetch failed:', error); return; }

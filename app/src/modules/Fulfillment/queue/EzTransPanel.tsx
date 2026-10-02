@@ -16,6 +16,7 @@ import {
   GOOROOSHIP_SHIP_URL,
   type EzTransShipTo,
 } from '../../../lib/eztrans';
+import { REBOOK_ACTION } from '../../../lib/rebookShipment';
 import {
   confirmEzTransOrder,
   unconfirmEzTransOrder,
@@ -155,8 +156,18 @@ export function EzTransPanel({
   // "Already emailed" survives a reload, so an operator coming back to the row
   // doesn't double-book the 3PL. Logged against the order, which is where the
   // rest of this order's history lives.
+  //
+  // Unless the booking it announced has since been torn up: a rebook is the
+  // operator saying the carrier was stood down and a new carton is going out,
+  // and the 3PL has been told nothing about that one. Leaving the banner up
+  // would warn them off the send they are here to make. Entries arrive
+  // newest-first, so the first of each type is the latest.
   const { entries } = useActivityForEntity({ entityType: 'order', entityId: order.id, limit: 50 });
-  const priorSend = entries.find(e => e.type === EZTRANS_SENT_ACTION) ?? null;
+  const lastSend = entries.find(e => e.type === EZTRANS_SENT_ACTION) ?? null;
+  const rebookedAt = entries.find(e => e.type === REBOOK_ACTION)?.ts ?? null;
+  const priorSend = lastSend && rebookedAt && Date.parse(lastSend.ts) <= Date.parse(rebookedAt)
+    ? null
+    : lastSend;
 
   // A label uploaded on an earlier pass is still on the row, so a resend (or a
   // corrected tracking number) doesn't force the operator to find the file again.
