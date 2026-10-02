@@ -8,6 +8,8 @@ import {
   buildActionItemBoard, dropTarget, type ActionItemColumn,
 } from './actionItemWeek';
 import styles from './Service.module.css';
+import { TicketPartyLabel } from './TicketPartyLabel';
+import type { PartyResolver } from '../../lib/customers';
 
 // A week-view board of every OPEN action item across all support tickets,
 // sitting under the owner board. Columns are Overdue · Mon…Sun · No due date;
@@ -17,9 +19,13 @@ import styles from './Service.module.css';
 type Props = {
   tickets: ServiceTicket[];
   onSelectTicket: (t: ServiceTicket) => void;
+  /** FR-6 resolver, supplied by the Support tab so the board names the same
+   *  person the queue does. Omitted in bare renders — cards then fall back to
+   *  the ticket's own customer_name snapshot. */
+  partiesFor?: PartyResolver;
 };
 
-export function ActionItemKanban({ tickets, onSelectTicket }: Props) {
+export function ActionItemKanban({ tickets, onSelectTicket, partiesFor }: Props) {
   const [collapsed, setCollapsed] = useState(true);
   const [weekOffset, setWeekOffset] = useState(0);
   const [dragId, setDragId] = useState<string | null>(null);
@@ -157,6 +163,7 @@ export function ActionItemKanban({ tickets, onSelectTicket }: Props) {
                 <div className={styles.kanbanColBody}>
                   {col.items.map(it => (
                     <ActionItemCard
+                      partiesFor={partiesFor}
                       key={it.id}
                       item={it}
                       ticket={ticketById.get(it.ticket_id)}
@@ -186,10 +193,11 @@ export function ActionItemKanban({ tickets, onSelectTicket }: Props) {
 }
 
 function ActionItemCard({
-  item, ticket, overdue, dragging, onDragStart, onDragEnd, onClick,
+  item, ticket, partiesFor, overdue, dragging, onDragStart, onDragEnd, onClick,
 }: {
   item: TicketActionItem;
   ticket: ServiceTicket | undefined;
+  partiesFor?: PartyResolver;
   overdue: boolean;
   dragging: boolean;
   onDragStart: () => void;
@@ -216,7 +224,7 @@ function ActionItemCard({
       </div>
       <div className={styles.kanbanCardSubject}>{item.body}</div>
       <div className={styles.kanbanCardMeta}>
-        {ticket?.customer_name ?? ticket?.customer_email ?? 'No customer'}
+        <TicketPartyLabel ticket={ticket} partiesFor={partiesFor} />
         {item.author_email && (
           <span className={styles.kanbanCardTopic}> · {item.author_email.split('@')[0]}</span>
         )}

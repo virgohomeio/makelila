@@ -1,7 +1,8 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import {
   useParts, usePartShipments, adjustPartStock, recordPartShipment,
-  type Part, type PartCategory,
+  updatePartField, parsePartFieldInput, effectiveDemandBySku, createPart,
+  type Part, type PartCategory, type PartEditableField, type NewPartInput,
 } from '../../lib/parts';
 import { useReplacementOrders } from '../../lib/orders';
 import { replacementDemandBySku } from '../../lib/replacementTags';
@@ -11,7 +12,7 @@ import styles from './Stock.module.css';
 type CatFilter = 'all' | PartCategory;
 
 export function PartsTab() {
-  const { parts, loading: pLoading } = useParts();
+  const { parts, loading: pLoading, refresh: refreshParts } = useParts();
   const { shipments, loading: sLoading } = usePartShipments();
   const { customers, loading: cLoading } = useCustomers();
   const { orders: replacementOrders } = useReplacementOrders();
@@ -19,6 +20,7 @@ export function PartsTab() {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [shipForPartId, setShipForPartId] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
 
   const filtered = useMemo(
     () => catFilter === 'all' ? parts : parts.filter(p => p.category === catFilter),
@@ -37,16 +39,21 @@ export function PartsTab() {
   // (Service > Replacement), keyed by SKU. Uses the SAME item-tag derivation
   // the Replacement tab shows — so description rows like "both side latch" map
   // to side latch-L + side latch-R — keeping Demand consistent with the chips.
-  const demandBySku = useMemo(
+  // A typed override (parts.demand_override) wins over the derived count.
+  const derivedDemandBySku = useMemo(
     () => replacementDemandBySku(replacementOrders),
     [replacementOrders],
+  );
+  const demandBySku = useMemo(
+    () => effectiveDemandBySku(derivedDemandBySku, parts),
+    [derivedDemandBySku, parts],
   );
 
   const stats = useMemo(() => {
     const replacement = parts.filter(p => p.category === 'replacement');
     const consumable  = parts.filter(p => p.category === 'consumable');
-    const lowStock = replacement.filter(p => p.on_hand <= p.reorder_point && p.reorder_point > 0).length;
-    const inventoryValue = replacement.reduce(
+    const lowStock = parts.filter(isLow).length;
+    const inventoryValue = parts.reduce(
       (sum, p) => sum + (p.on_hand * Number(p.cost_per_unit_usd ?? 0)), 0,
     );
     // eslint-disable-next-line react-hooks/purity
@@ -67,6 +74,29 @@ export function PartsTab() {
     };
   }, [parts, shipments]);
 
+  const saveField = async (p: Part, field: PartEditableField, raw: string): Promise<boolean> => {
+    const value = parsePartFieldInput(field, raw);
+    if (value === undefined) {
+      setError(field === 'cost_per_unit_usd'
+        ? `Cost must be a dollar amount like 24.50 (or blank).`
+        : field === 'demand_override'
+          ? `Demand must be a whole number of 0 or more (or blank for auto).`
+          : `Must be a whole number of 0 or more.`);
+      return false;
+    }
+    if (value === (p[field] ?? null)) return true;
+    setBusy(p.id); setError(null);
+    try { await updatePartField(p, field, value); return true; }
+    catch (e) {
+      const msg = (e as Error).message;
+      setError(/demand_override.*does not exist/.test(msg)
+        ? 'Manual demand needs a database update that has not been applied yet — the other columns still save.'
+        : msg);
+      return false;
+    }
+    finally { setBusy(null); }
+  };
+
   const adjust = async (p: Part, delta: number, reason: string) => {
     setBusy(p.id); setError(null);
     try { await adjustPartStock(p.id, delta, reason); }
@@ -83,7 +113,7 @@ export function PartsTab() {
       <div className={styles.kpiRowParts}>
         <KPI label="Total SKUs" value={stats.totalParts} sub={`${stats.replacementCount} repl · ${stats.consumableCount} consum`} />
         <KPI label="Low stock" value={stats.lowStock} tone={stats.lowStock > 0 ? 'warn' : undefined} sub={stats.lowStock > 0 ? 'reorder needed' : 'all healthy'} />
-        <KPI label="Inventory $" value={`$${stats.inventoryValue.toLocaleString('en-US')}`} sub="replacement parts on hand" />
+        <KPI label="Inventory $" value={`$${stats.inventoryValue.toLocaleString('en-US')}`} sub="parts + consumables on hand" />
         <KPI label="Shipped (30d)" value={stats.recentShips} sub={`${stats.totalShipments} all-time`} />
       </div>
 
@@ -98,6 +128,7 @@ export function PartsTab() {
             >{c === 'all' ? 'All' : c.charAt(0).toUpperCase() + c.slice(1)}</button>
           ))}
         </div>
+        <button className={styles.addPartBtn} onClick={() => setAdding(true)}>+ Add part / consumable</button>
         {error && <div className={styles.errorBar}>{error}</div>}
       </div>
 
@@ -120,7 +151,9 @@ export function PartsTab() {
           </thead>
           <tbody>
             {filtered.map(p => {
-              const low = p.on_hand <= p.reorder_point && p.reorder_point > 0 && p.category === 'replacement';
+              const low = isLow(p);
+              const derived = derivedDemandBySku.get(p.sku) ?? 0;
+              const overridden = p.demand_override != null;
               return (
                 <tr key={p.id} className={low ? styles.rowLowStock : ''}>
                   <td className={styles.serial}>{p.sku}</td>
@@ -132,45 +165,75 @@ export function PartsTab() {
                   </td>
                   <td>{p.supplier ?? <span className={styles.muted}>—</span>}</td>
                   <td className={styles.numCol}>
-                    {p.category === 'replacement'
-                      ? <strong className={low ? styles.lowText : ''}>{p.on_hand}</strong>
-                      : <span className={styles.muted}>n/a</span>}
+                    <EditableNum
+                      label={`${p.name} on hand`}
+                      initial={String(p.on_hand)}
+                      disabled={busy === p.id}
+                      onSave={raw => saveField(p, 'on_hand', raw)}
+                    >
+                      <strong className={low ? styles.lowText : ''}>{p.on_hand}</strong>
+                    </EditableNum>
                   </td>
                   <td className={styles.numCol}>
-                    {(() => {
-                      const demand = demandBySku.get(p.sku) ?? 0;
-                      if (demand === 0) return <span className={styles.muted}>—</span>;
-                      // Flag a shortfall: more queued than on hand (replacement parts).
-                      const short = p.category === 'replacement' && demand > p.on_hand;
-                      return <strong className={short ? styles.lowText : ''} title={short ? 'Queued demand exceeds on-hand stock' : 'Queued for replacement'}>{demand}</strong>;
-                    })()}
+                    <EditableNum
+                      label={`${p.name} demand`}
+                      initial={overridden ? String(p.demand_override) : ''}
+                      placeholder={`auto (${derived})`}
+                      hint="Blank = auto from replacement orders"
+                      disabled={busy === p.id}
+                      onSave={raw => saveField(p, 'demand_override', raw)}
+                    >
+                      {(() => {
+                        const demand = demandBySku.get(p.sku) ?? 0;
+                        const tag = overridden
+                          ? <span className={styles.manualTag} title={`Set by hand — replacement orders alone give ${derived}`}>manual</span>
+                          : null;
+                        if (demand === 0) return <>{tag}<span className={styles.muted}>—</span></>;
+                        // Flag a shortfall: more demand than on hand.
+                        const short = demand > p.on_hand;
+                        return <>{tag}<strong className={short ? styles.lowText : ''} title={short ? 'Demand exceeds on-hand stock' : 'Queued for replacement'}>{demand}</strong></>;
+                      })()}
+                    </EditableNum>
                   </td>
-                  <td className={styles.numCol}>{p.reorder_point > 0 ? p.reorder_point : <span className={styles.muted}>—</span>}</td>
                   <td className={styles.numCol}>
-                    {p.cost_per_unit_usd != null ? `$${Number(p.cost_per_unit_usd).toFixed(2)}` : <span className={styles.muted}>—</span>}
+                    <EditableNum
+                      label={`${p.name} reorder at`}
+                      initial={String(p.reorder_point)}
+                      disabled={busy === p.id}
+                      onSave={raw => saveField(p, 'reorder_point', raw)}
+                    >
+                      {p.reorder_point > 0 ? p.reorder_point : <span className={styles.muted}>—</span>}
+                    </EditableNum>
+                  </td>
+                  <td className={styles.numCol}>
+                    <EditableNum
+                      label={`${p.name} cost`}
+                      initial={p.cost_per_unit_usd != null ? Number(p.cost_per_unit_usd).toFixed(2) : ''}
+                      placeholder="$"
+                      disabled={busy === p.id}
+                      onSave={raw => saveField(p, 'cost_per_unit_usd', raw)}
+                    >
+                      {p.cost_per_unit_usd != null ? `$${Number(p.cost_per_unit_usd).toFixed(2)}` : <span className={styles.muted}>—</span>}
+                    </EditableNum>
                   </td>
                   <td className={styles.numCol}>{shipCountByPart.get(p.id) ?? 0}</td>
                   <td>
                     <span className={styles.adjustGroup}>
-                      {p.category === 'replacement' && (
-                        <>
-                          <button
-                            className={styles.adjustBtn}
-                            onClick={() => void adjust(p, -1, 'manual decrement')}
-                            disabled={busy === p.id || p.on_hand === 0}
-                          >−1</button>
-                          <button
-                            className={styles.adjustBtn}
-                            onClick={() => void adjust(p, +1, 'manual increment')}
-                            disabled={busy === p.id}
-                          >+1</button>
-                          <button
-                            className={styles.adjustBtn}
-                            onClick={() => void adjust(p, +10, 'restock')}
-                            disabled={busy === p.id}
-                          >+10</button>
-                        </>
-                      )}
+                      <button
+                        className={styles.adjustBtn}
+                        onClick={() => void adjust(p, -1, 'manual decrement')}
+                        disabled={busy === p.id || p.on_hand === 0}
+                      >−1</button>
+                      <button
+                        className={styles.adjustBtn}
+                        onClick={() => void adjust(p, +1, 'manual increment')}
+                        disabled={busy === p.id}
+                      >+1</button>
+                      <button
+                        className={styles.adjustBtn}
+                        onClick={() => void adjust(p, +10, 'restock')}
+                        disabled={busy === p.id}
+                      >+10</button>
                       <button
                         className={styles.shipBtn}
                         onClick={() => setShipForPartId(p.id)}
@@ -233,6 +296,19 @@ export function PartsTab() {
         </table>
       </div>
 
+      {adding && (
+        <AddPartModal
+          existingParts={parts}
+          onClose={() => setAdding(false)}
+          onSubmit={async (input) => {
+            setError(null);
+            await createPart(input, parts.map(p => p.id));
+            await refreshParts();
+            setAdding(false);
+          }}
+        />
+      )}
+
       {shipForPart && (
         <ShipPartModal
           part={shipForPart}
@@ -251,6 +327,152 @@ export function PartsTab() {
           }}
         />
       )}
+    </div>
+  );
+}
+
+/** Add a SKU to the catalog. Deliberately small: SKU, name, category and the
+ *  numbers. Everything else is editable in the table afterwards. */
+function AddPartModal({
+  existingParts, onClose, onSubmit,
+}: {
+  existingParts: Part[];
+  onClose: () => void;
+  onSubmit: (input: NewPartInput) => Promise<void>;
+}) {
+  const [sku, setSku] = useState('');
+  const [name, setName] = useState('');
+  const [category, setCategory] = useState<PartCategory>('consumable');
+  const [onHand, setOnHand] = useState('0');
+  const [reorder, setReorder] = useState('0');
+  const [cost, setCost] = useState('');
+  const [supplier, setSupplier] = useState('');
+  const [location, setLocation] = useState('');
+  const [notes, setNotes] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const skuTaken = existingParts.some(p => p.sku.toLowerCase() === sku.trim().toLowerCase());
+
+  const submit = async () => {
+    const onHandNum = parsePartFieldInput('on_hand', onHand);
+    const reorderNum = parsePartFieldInput('reorder_point', reorder);
+    const costNum = parsePartFieldInput('cost_per_unit_usd', cost);
+    if (!sku.trim() || !name.trim()) { setError('SKU and name are both required.'); return; }
+    if (skuTaken) { setError(`SKU ${sku.trim()} already exists.`); return; }
+    if (onHandNum == null || reorderNum == null) { setError('On hand and reorder at must be whole numbers of 0 or more.'); return; }
+    if (costNum === undefined) { setError('Cost must be a dollar amount like 24.50, or blank.'); return; }
+    setSubmitting(true); setError(null);
+    try {
+      await onSubmit({
+        sku, name, category,
+        on_hand: onHandNum,
+        reorder_point: reorderNum,
+        cost_per_unit_usd: costNum,
+        supplier: supplier.trim() || null,
+        location: location.trim() || null,
+        notes: notes.trim() || null,
+      });
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className={styles.modalBackdrop} onClick={onClose}>
+      <div className={styles.modalCard} onClick={e => e.stopPropagation()}>
+        <div className={styles.modalHead}>
+          <strong>Add part / consumable</strong>
+          <button onClick={onClose} className={styles.modalClose}>✕</button>
+        </div>
+        <div className={styles.modalBody}>
+          <div className={styles.modalGrid}>
+            <div className={styles.modalRow}>
+              <label htmlFor="newPartSku">SKU</label>
+              <input
+                id="newPartSku" className={styles.modalInput} autoFocus
+                value={sku} onChange={e => setSku(e.target.value)}
+                placeholder="LILA-TOTE"
+              />
+            </div>
+            <div className={styles.modalRow}>
+              <label htmlFor="newPartName">Name</label>
+              <input
+                id="newPartName" className={styles.modalInput}
+                value={name} onChange={e => setName(e.target.value)}
+                placeholder="Tote Bag"
+              />
+            </div>
+            <div className={styles.modalRow}>
+              <label htmlFor="newPartCategory">Category</label>
+              <select
+                id="newPartCategory" className={styles.modalInput}
+                value={category} onChange={e => setCategory(e.target.value as PartCategory)}
+              >
+                <option value="consumable">consumable</option>
+                <option value="replacement">replacement</option>
+              </select>
+            </div>
+            <div className={styles.modalRow}>
+              <label htmlFor="newPartOnHand">On hand</label>
+              <input
+                id="newPartOnHand" className={styles.modalInput} inputMode="numeric"
+                value={onHand} onChange={e => setOnHand(e.target.value)}
+              />
+            </div>
+            <div className={styles.modalRow}>
+              <label htmlFor="newPartReorder">Reorder at</label>
+              <input
+                id="newPartReorder" className={styles.modalInput} inputMode="numeric"
+                value={reorder} onChange={e => setReorder(e.target.value)}
+              />
+            </div>
+            <div className={styles.modalRow}>
+              <label htmlFor="newPartCost">Cost</label>
+              <input
+                id="newPartCost" className={styles.modalInput} inputMode="decimal"
+                value={cost} onChange={e => setCost(e.target.value)}
+                placeholder="optional"
+              />
+            </div>
+            <div className={styles.modalRow}>
+              <label htmlFor="newPartSupplier">Supplier</label>
+              <input
+                id="newPartSupplier" className={styles.modalInput}
+                value={supplier} onChange={e => setSupplier(e.target.value)}
+                placeholder="optional"
+              />
+            </div>
+            <div className={styles.modalRow}>
+              <label htmlFor="newPartLocation">Location</label>
+              <input
+                id="newPartLocation" className={styles.modalInput}
+                value={location} onChange={e => setLocation(e.target.value)}
+                placeholder="optional"
+              />
+            </div>
+          </div>
+          <div className={styles.modalRow}>
+            <label htmlFor="newPartNotes">Notes</label>
+            <textarea
+              id="newPartNotes" className={styles.modalTextarea} rows={2}
+              value={notes} onChange={e => setNotes(e.target.value)}
+              placeholder="Optional — what this is for, where it came from."
+            />
+          </div>
+          {error && <div className={styles.errorBar}>{error}</div>}
+        </div>
+        <div className={styles.modalFoot}>
+          <button onClick={onClose} className={styles.modalSecondary}>Cancel</button>
+          <button
+            onClick={() => void submit()}
+            className={styles.modalPrimary}
+            disabled={submitting || !sku.trim() || !name.trim() || skuTaken}
+          >{submitting ? 'Adding…' : 'Add to inventory'}</button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -416,6 +638,70 @@ function ShipPartModal({
         </div>
       </div>
     </div>
+  );
+}
+
+/** Low stock: at or under a reorder point someone has actually set. */
+function isLow(p: Part): boolean {
+  return p.reorder_point > 0 && p.on_hand <= p.reorder_point;
+}
+
+/** A table number that turns into an input on click. Enter or leaving the
+ *  field saves; Escape cancels. onSave resolves false to keep the input open
+ *  (bad input, failed write) so the typed value isn't lost. */
+function EditableNum({
+  label, initial, placeholder, hint, disabled, onSave, children,
+}: {
+  label: string;
+  initial: string;
+  placeholder?: string;
+  hint?: string;
+  disabled?: boolean;
+  onSave: (raw: string) => Promise<boolean>;
+  children: ReactNode;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  if (draft === null) {
+    return (
+      <button
+        type="button"
+        className={styles.editCell}
+        onClick={() => setDraft(initial)}
+        disabled={disabled}
+        aria-label={`Edit ${label}`}
+        title={hint ? `Click to edit · ${hint}` : 'Click to edit'}
+      >{children}</button>
+    );
+  }
+
+  const commit = async () => {
+    if (saving) return;
+    setSaving(true);
+    const ok = await onSave(draft);
+    setSaving(false);
+    if (ok) setDraft(null);
+  };
+
+  return (
+    <input
+      className={styles.editInput}
+      aria-label={label}
+      inputMode="decimal"
+      autoFocus
+      value={draft}
+      placeholder={placeholder}
+      title={hint}
+      disabled={saving}
+      onChange={e => setDraft(e.target.value)}
+      onFocus={e => e.target.select()}
+      onBlur={() => void commit()}
+      onKeyDown={e => {
+        if (e.key === 'Enter') { e.preventDefault(); void commit(); }
+        if (e.key === 'Escape') { e.preventDefault(); setDraft(null); }
+      }}
+    />
   );
 }
 

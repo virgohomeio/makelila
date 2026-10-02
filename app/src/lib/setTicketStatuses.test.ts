@@ -5,13 +5,21 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { updateMock, eqMock, fromMock, logActionMock, cancelPendingMock, shipQueuedMock } = vi.hoisted(() => ({
+const {
+  updateMock, eqMock, fromMock, logActionMock, cancelPendingMock, shipQueuedMock,
+  selectMock, selectEqMock, maybeSingleMock, liveReplacementsMock,
+} = vi.hoisted(() => ({
   updateMock: vi.fn(),
   eqMock: vi.fn(),
   fromMock: vi.fn(),
   logActionMock: vi.fn(() => Promise.resolve()),
   cancelPendingMock: vi.fn(() => Promise.resolve()),
   shipQueuedMock: vi.fn(() => Promise.resolve([] as string[])),
+  // Reading the ticket's CURRENT statuses, for the queued-replacement lock.
+  selectMock: vi.fn(),
+  selectEqMock: vi.fn(),
+  maybeSingleMock: vi.fn(),
+  liveReplacementsMock: vi.fn(() => Promise.resolve([] as Array<{ id: string; order_ref: string }>)),
 }));
 
 vi.mock('./supabase', () => ({
@@ -21,9 +29,15 @@ vi.mock('./activityLog', () => ({ logAction: logActionMock }));
 vi.mock('./orders', () => ({
   cancelPendingReplacementsForTicket: cancelPendingMock,
   shipQueuedReplacementsForTicket: shipQueuedMock,
+  liveReplacementsForTicket: liveReplacementsMock,
 }));
 
-import { setTicketStatuses } from './service';
+import { setTicketStatuses, QueuedReplacementLockedError } from './service';
+
+/** Pretend the stored ticket currently holds these statuses. */
+function ticketHolds(status: string, tags: string[] = []) {
+  maybeSingleMock.mockResolvedValue({ data: { status, tags }, error: null });
+}
 
 /** The patch object handed to supabase.update() for the last call. */
 const patch = () => updateMock.mock.calls[0][0] as Record<string, unknown>;
@@ -33,7 +47,12 @@ describe('setTicketStatuses', () => {
     vi.clearAllMocks();
     eqMock.mockResolvedValue({ error: null });
     updateMock.mockReturnValue({ eq: eqMock });
-    fromMock.mockReturnValue({ update: updateMock } as any);
+    // Default: the ticket is not queued, so the lock never engages.
+    maybeSingleMock.mockResolvedValue({ data: { status: 'waiting_on_us', tags: [] }, error: null });
+    selectEqMock.mockReturnValue({ maybeSingle: maybeSingleMock });
+    selectMock.mockReturnValue({ eq: selectEqMock });
+    liveReplacementsMock.mockResolvedValue([]);
+    fromMock.mockReturnValue({ update: updateMock, select: selectMock } as any);
   });
 
   // The primary lives in `status`; `tags` holds only the extras. If the primary
@@ -161,5 +180,91 @@ describe('setTicketStatuses', () => {
   it('throws when the update fails', async () => {
     eqMock.mockResolvedValue({ error: { message: 'rls' } });
     await expect(setTicketStatuses('t1', ['on_hold'])).rejects.toBeTruthy();
+  });
+});
+
+// ── Queued-for-Replacement lock ────────────────────────────────────────────
+// The tag is set automatically when a replacement order is created, so it must
+// not be clearable by hand while that order is still live: the order is the
+// source of truth for whether the customer is waiting on a unit. Two routes
+// OUT stay open, because both resolve the order rather than orphaning it.
+describe('setTicketStatuses — queued replacement lock', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    eqMock.mockResolvedValue({ error: null });
+    updateMock.mockReturnValue({ eq: eqMock });
+    selectEqMock.mockReturnValue({ maybeSingle: maybeSingleMock });
+    selectMock.mockReturnValue({ eq: selectEqMock });
+    fromMock.mockReturnValue({ update: updateMock, select: selectMock } as any);
+    liveReplacementsMock.mockResolvedValue([]);
+    maybeSingleMock.mockResolvedValue({ data: { status: 'waiting_on_us', tags: [] }, error: null });
+  });
+
+  it('blocks a bare removal while an order is live, and writes nothing', async () => {
+    ticketHolds('queued_for_replacement');
+    liveReplacementsMock.mockResolvedValue([{ id: 'o1', order_ref: 'R-0042' }]);
+
+    await expect(setTicketStatuses('t1', ['in_progress']))
+      .rejects.toBeInstanceOf(QueuedReplacementLockedError);
+    expect(updateMock).not.toHaveBeenCalled();
+  });
+
+  it('names the blocking orders in the error', async () => {
+    ticketHolds('in_progress', ['queued_for_replacement']);
+    liveReplacementsMock.mockResolvedValue([
+      { id: 'o1', order_ref: 'R-0042' }, { id: 'o2', order_ref: 'R-0043' },
+    ]);
+    await expect(setTicketStatuses('t1', ['in_progress'])).rejects.toMatchObject({
+      orderRefs: ['R-0042', 'R-0043'],
+    });
+  });
+
+  it('detects the tag when it sits in tags rather than status', async () => {
+    ticketHolds('waiting_on_us', ['queued_for_replacement']);
+    liveReplacementsMock.mockResolvedValue([{ id: 'o1', order_ref: 'R-0042' }]);
+    await expect(setTicketStatuses('t1', ['waiting_on_us']))
+      .rejects.toBeInstanceOf(QueuedReplacementLockedError);
+  });
+
+  it('allows removal once the order is cancelled', async () => {
+    ticketHolds('queued_for_replacement');
+    liveReplacementsMock.mockResolvedValue([]);   // cancelled in Sales
+    await setTicketStatuses('t1', ['in_progress']);
+    expect(patch().status).toBe('in_progress');
+    expect(patch().tags).toEqual([]);
+  });
+
+  // Escape hatch 1 — the unit went out. shipQueuedReplacementsForTicket hands
+  // the order to Fulfillment, so nothing is orphaned.
+  it('allows Replacement Sent even with a live order', async () => {
+    ticketHolds('queued_for_replacement');
+    liveReplacementsMock.mockResolvedValue([{ id: 'o1', order_ref: 'R-0042' }]);
+    await setTicketStatuses('t1', ['replacement_sent']);
+    expect(patch().status).toBe('replacement_sent');
+    expect(shipQueuedMock).toHaveBeenCalledWith('t1');
+  });
+
+  // Escape hatch 2 — Complete cancels an awaiting replacement on the way out.
+  it('allows Complete even with a live order', async () => {
+    ticketHolds('queued_for_replacement');
+    liveReplacementsMock.mockResolvedValue([{ id: 'o1', order_ref: 'R-0042' }]);
+    await setTicketStatuses('t1', ['closed']);
+    expect(patch().status).toBe('closed');
+    expect(cancelPendingMock).toHaveBeenCalledWith('t1');
+  });
+
+  it('keeping the tag while editing other statuses is not a removal', async () => {
+    ticketHolds('queued_for_replacement');
+    liveReplacementsMock.mockResolvedValue([{ id: 'o1', order_ref: 'R-0042' }]);
+    await setTicketStatuses('t1', ['queued_for_replacement', 'on_hold']);
+    expect(patch().status).toBe('queued_for_replacement');
+    expect(patch().tags).toEqual(['on_hold']);
+  });
+
+  it('does not pay for the lookup when the ticket was never queued', async () => {
+    ticketHolds('waiting_on_us');
+    await setTicketStatuses('t1', ['in_progress']);
+    expect(liveReplacementsMock).not.toHaveBeenCalled();
+    expect(patch().status).toBe('in_progress');
   });
 });

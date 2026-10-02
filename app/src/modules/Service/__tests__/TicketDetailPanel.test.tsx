@@ -18,23 +18,37 @@ vi.mock('../../../lib/service', async () => {
     useClassificationLog: vi.fn(() => ({ entries: [], loading: false })),
   };
 });
+let customersToReturn: unknown[] = [];
 vi.mock('../../../lib/customers', async () => {
   const actual = await vi.importActual<typeof import('../../../lib/customers')>('../../../lib/customers');
-  return { ...actual, useCustomers: vi.fn(() => ({ customers: [] })) };
+  return { ...actual, useCustomers: vi.fn(() => ({ customers: customersToReturn })) };
 });
 const readyReplacementsMock = vi.fn(() => Promise.resolve([] as Array<{ id: string; order_ref: string }>));
+const liveReplacementsMock = vi.fn(() => Promise.resolve([] as Array<{ id: string; order_ref: string }>));
 const shipQueuedMock = vi.fn(() => Promise.resolve([] as string[]));
 const cancelReplacementMock = vi.fn(() => Promise.resolve());
+const cancelForTicketMock = vi.fn(() => Promise.resolve([] as string[]));
 vi.mock('../../../lib/orders', async () => {
   const actual = await vi.importActual<typeof import('../../../lib/orders')>('../../../lib/orders');
   return {
     ...actual,
     useReplacementSummary: vi.fn(() => ({ summary: null, loading: false })),
     readyReplacementsForTicket: (...a: unknown[]) => readyReplacementsMock(...(a as [])),
+    liveReplacementsForTicket: (...a: unknown[]) => liveReplacementsMock(...(a as [])),
     shipQueuedReplacementsForTicket: (...a: unknown[]) => shipQueuedMock(...(a as [])),
     cancelReplacementOrder: (...a: unknown[]) => cancelReplacementMock(...(a as [])),
+    cancelReplacementsForTicket: (...a: unknown[]) => cancelForTicketMock(...(a as [])),
   };
 });
+vi.mock('../NewTicketModal', () => ({
+  NewTicketModal: (p: { title?: string; presetSubject?: string; onCreated: (t: unknown) => void }) => (
+    <div data-testid="new-ticket-modal">
+      <span>{p.title}</span>
+      <span data-testid="preset-subject">{p.presetSubject}</span>
+      <button onClick={() => p.onCreated({ ticket_number: 'TKT-9' })}>stub-create</button>
+    </div>
+  ),
+}));
 vi.mock('../../../lib/auth', () => ({
   useAuth: vi.fn(() => ({ user: { email: 'huayi@virgohome.io' } })),
 }));
@@ -43,7 +57,9 @@ vi.mock('../../../lib/auth', () => ({
 vi.mock('../TicketNotes', () => ({ TicketNotes: () => null }));
 vi.mock('../TicketActionItems', () => ({ TicketActionItems: () => null }));
 vi.mock('../AttachmentStrip', () => ({ AttachmentStrip: () => null }));
-vi.mock('../../../components/DeviceContextHeader', () => ({ DeviceContextHeader: () => null }));
+vi.mock('../../../components/DeviceContextHeader', () => ({
+  DeviceContextHeader: () => <div data-testid="device-context-header" />,
+}));
 
 import { TicketDetailPanel } from '../TicketDetailPanel';
 
@@ -102,8 +118,12 @@ describe('TicketDetailPanel — Status is multi-select', () => {
   beforeEach(() => {
     setTicketStatusesMock.mockClear();
     readyReplacementsMock.mockClear();
+    liveReplacementsMock.mockClear();
+    liveReplacementsMock.mockResolvedValue([]);
     shipQueuedMock.mockClear();
     cancelReplacementMock.mockClear();
+    cancelForTicketMock.mockClear();
+    cancelForTicketMock.mockResolvedValue([]);
   });
 
   it('offers every status, including Queued for Replacement, in ONE row', () => {
@@ -228,5 +248,186 @@ describe('TicketDetailPanel — Status is multi-select', () => {
     fireEvent.click(statusButton('Complete'));
     // Empty set — setTicketStatuses falls back to Action Needed.
     expect(setTicketStatusesMock).toHaveBeenCalledWith('t1', []);
+  });
+});
+
+// The chip strip is device context for a ticket, and the Support Tickets tab
+// no longer wants it. The other tabs that open this panel still do, so the
+// default stays on and Support opts out explicitly.
+describe('TicketDetailPanel device context', () => {
+  it('renders the chip strip by default', () => {
+    render(<TicketDetailPanel ticket={mkTicket()} onClose={() => {}} />);
+    expect(screen.getByTestId('device-context-header')).toBeTruthy();
+  });
+
+  it('omits the chip strip when showDeviceContext is false', () => {
+    render(<TicketDetailPanel ticket={mkTicket()} onClose={() => {}} showDeviceContext={false} />);
+    expect(screen.queryByTestId('device-context-header')).toBeNull();
+  });
+});
+
+// FR-6: the detail panel is where an operator decides who to talk to, so it
+// has to distinguish the person using the machine from the person who paid —
+// and the diagnosis SMS has to be honest about which number it reaches.
+const mkCust = (over: Record<string, unknown> = {}) => ({
+  id: 'c-chad', full_name: 'Chad Wu', phone: '+14165550100', email: 'chad@example.com',
+  purchaser_id: null, primary_user_name: null, primary_user_phone: null,
+  primary_user_email: null, primary_user_relationship: null, ...over,
+});
+
+describe('TicketDetailPanel — purchaser vs primary user', () => {
+  beforeEach(() => { customersToReturn = []; });
+
+  it('names the primary user and the purchaser in the Customer block', () => {
+    customersToReturn = [mkCust({ primary_user_name: 'Sarah Wu' })];
+    render(<TicketDetailPanel
+      ticket={mkTicket({ customer_id: 'c-chad', customer_name: 'Chad Wu' })}
+      onClose={() => {}} />);
+    expect(screen.getAllByText('Sarah Wu').length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Chad Wu/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Primary user/).length).toBeGreaterThan(0);
+  });
+
+  it('greets the primary user, not the purchaser, in the diagnosis SMS', () => {
+    customersToReturn = [mkCust({ primary_user_name: 'Sarah Wu' })];
+    render(<TicketDetailPanel
+      ticket={mkTicket({
+        customer_id: 'c-chad', customer_name: 'Chad Wu',
+        customer_phone: '+14165550100',
+      })}
+      onClose={() => {}} />);
+    fireEvent.click(screen.getByText('Send diagnosis link'));
+    const box = document.querySelector('textarea') as HTMLTextAreaElement;
+    expect(box.value).toContain('Sarah');
+    expect(box.value).not.toContain('Chad');
+  });
+
+  it('still greets the purchaser when they are the only person on the record', () => {
+    customersToReturn = [mkCust({})];
+    render(<TicketDetailPanel
+      ticket={mkTicket({
+        customer_id: 'c-chad', customer_name: 'Chad Wu',
+        customer_phone: '+14165550100',
+      })}
+      onClose={() => {}} />);
+    fireEvent.click(screen.getByText('Send diagnosis link'));
+    expect((document.querySelector('textarea') as HTMLTextAreaElement).value).toContain('Chad');
+  });
+
+  it('warns when the SMS cannot reach the primary user own number', () => {
+    // The send-followup-sms edge function resolves the destination from
+    // customers.phone server-side, so a primary user with their own number on
+    // file will NOT receive it. Say so rather than implying otherwise.
+    customersToReturn = [mkCust({
+      primary_user_name: 'Sarah Wu', primary_user_phone: '+14165550199',
+    })];
+    render(<TicketDetailPanel
+      ticket={mkTicket({
+        customer_id: 'c-chad', customer_name: 'Chad Wu',
+        customer_phone: '+14165550100',
+      })}
+      onClose={() => {}} />);
+    fireEvent.click(screen.getByText('Send diagnosis link'));
+    expect(screen.getByText(/goes to the purchaser's number/i)).toBeTruthy();
+  });
+});
+
+/* Lily Xu's R-0048: refunded, ticket ST-2026-0406 closed, and the replacement
+ * still sitting in Fulfillment › Replacements. Nothing on the panel could act
+ * on it — the status dropdown is unreachable on a closed ticket, and Order
+ * Review's cancel refuses on a live ticket only, so a closed one fell between
+ * the two. These three buttons are the way out. */
+describe('TicketDetailPanel — replacement outcome buttons', () => {
+  beforeEach(() => {
+    setTicketStatusesMock.mockClear();
+    liveReplacementsMock.mockClear();
+    liveReplacementsMock.mockResolvedValue([]);
+    shipQueuedMock.mockClear();
+    shipQueuedMock.mockResolvedValue(['R-0048']);
+    cancelForTicketMock.mockClear();
+    cancelForTicketMock.mockResolvedValue(['R-0048']);
+    customersToReturn = [];
+  });
+
+  const withLive = async (t = mkTicket()) => {
+    liveReplacementsMock.mockResolvedValue([{ id: 'o-48', order_ref: 'R-0048' }]);
+    render(<TicketDetailPanel ticket={t} onClose={() => {}} />);
+    await screen.findByText('Replacement Shipped');
+  };
+
+  it('shows both buttons for a live replacement even on a CLOSED ticket', async () => {
+    await withLive(mkTicket({ status: 'closed', tags: [] }));
+    expect(screen.getByText('Replacement Shipped')).toBeTruthy();
+    expect(screen.getByText('Replacement Cancelled')).toBeTruthy();
+  });
+
+  it('shows neither button when nothing is live', async () => {
+    render(<TicketDetailPanel ticket={mkTicket()} onClose={() => {}} />);
+    await waitFor(() => expect(liveReplacementsMock).toHaveBeenCalled());
+    expect(screen.queryByText('Replacement Shipped')).toBeNull();
+    expect(screen.queryByText('Replacement Cancelled')).toBeNull();
+  });
+
+  it('ships the order AND moves the ticket to Replacement Sent', async () => {
+    await withLive(mkTicket({ status: 'queued_for_replacement' }));
+    fireEvent.click(screen.getByText('Replacement Shipped'));
+    fireEvent.click(screen.getByText('Yes, it shipped'));
+    await waitFor(() => expect(shipQueuedMock).toHaveBeenCalledWith('t1'));
+    await waitFor(() => {
+      const next = (setTicketStatusesMock.mock.calls.at(-1) as unknown as unknown[])[1] as string[];
+      expect(next).toContain('replacement_sent');
+      expect(next).not.toContain('queued_for_replacement');
+    });
+  });
+
+  it('still ships the order on a closed ticket, without reopening it', async () => {
+    await withLive(mkTicket({ status: 'closed', tags: [] }));
+    fireEvent.click(screen.getByText('Replacement Shipped'));
+    fireEvent.click(screen.getByText('Yes, it shipped'));
+    await waitFor(() => expect(shipQueuedMock).toHaveBeenCalledWith('t1'));
+    expect(setTicketStatusesMock).not.toHaveBeenCalled();
+  });
+
+  it('cancels every live replacement on the ticket and clears the buttons', async () => {
+    await withLive(mkTicket({ status: 'closed', tags: [] }));
+    fireEvent.click(screen.getByText('Replacement Cancelled'));
+    fireEvent.click(screen.getByText('Yes, cancel it'));
+    await waitFor(() => expect(cancelForTicketMock).toHaveBeenCalledWith('t1'));
+    // The lookup that re-runs after the cancel now finds nothing.
+    liveReplacementsMock.mockResolvedValue([]);
+    await waitFor(() => expect(screen.queryByText('Replacement Cancelled')).toBeNull());
+  });
+
+  it('drops Queued for Replacement when the marker is a tag on another status', async () => {
+    await withLive(mkTicket({ status: 'in_progress', tags: ['queued_for_replacement'] }));
+    fireEvent.click(screen.getByText('Replacement Cancelled'));
+    fireEvent.click(screen.getByText('Yes, cancel it'));
+    await waitFor(() => {
+      const next = (setTicketStatusesMock.mock.calls.at(-1) as unknown as unknown[])[1] as string[];
+      expect(next).not.toContain('queued_for_replacement');
+      expect(next).toContain('in_progress');
+    });
+  });
+
+  it('asks before opening the new-ticket form for a damaged replacement', async () => {
+    await withLive();
+    fireEvent.click(screen.getByText('Replacement Received Damaged'));
+    expect(screen.getByText('Create a new ticket for this customer?')).toBeTruthy();
+    expect(screen.queryByTestId('new-ticket-modal')).toBeNull();
+
+    fireEvent.click(screen.getByText('Create ticket'));
+    expect(screen.getByTestId('new-ticket-modal')).toBeTruthy();
+    expect(screen.getByTestId('preset-subject').textContent).toContain('TKT-1');
+
+    fireEvent.click(screen.getByText('stub-create'));
+    await screen.findByText(/New ticket TKT-9 raised/);
+  });
+
+  it('offers the damaged button after the replacement already shipped', async () => {
+    render(<TicketDetailPanel
+      ticket={mkTicket({ replacement_order_id: 'o-48' })}
+      onClose={() => {}} />);
+    await screen.findByText('Replacement Received Damaged');
+    expect(screen.queryByText('Replacement Shipped')).toBeNull();
   });
 });

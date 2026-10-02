@@ -10,6 +10,38 @@ import type { ServiceTicket } from '../../../lib/service';
 // > picker > createReplacementOrder — with only the data layer stubbed.
 
 const createReplacementOrderMock = vi.fn().mockResolvedValue({ id: 'o9', order_ref: 'R-0009' });
+const markPartsShippedMock = vi.fn().mockResolvedValue({ order_ref: 'R-0001', ticket_marked_sent: true });
+
+const LIVE_ORDER = {
+  id: 'o1', order_ref: 'R-0001', kind: 'replacement', status: 'pending',
+  customer_name: 'Sam', cogs_usd: 12.5, shipped_at: null, delivered_at: null,
+  created_at: '2026-06-02T00:00:00Z', linked_ticket_id: 't2', awaiting_batch_id: null,
+  line_items: [{ kind: 'part', part_id: 'p1', sku: 'HINGE', name: 'Lid Hinge', qty: 1, cost_per_unit_usd: 4.2 }],
+};
+
+// R-0051, prod: cancelled 2026-08-31 because the customer went to
+// return/refund. Cancelling keeps the row and only flips `status` — every
+// other column still reads like a live order awaiting a P100X.
+const CANCELLED_ORDER = {
+  id: 'o51', order_ref: 'R-0051', kind: 'replacement', status: 'cancelled',
+  customer_name: 'Amanda Acker', cogs_usd: 0, shipped_at: null, delivered_at: null,
+  created_at: '2026-07-08T00:00:00Z', linked_ticket_id: 't3',
+  replacement_state: 'awaiting', awaiting_batch_id: 'P100X',
+  line_items: [{ kind: 'unit_pending', batch: 'P100X', name: 'LILA (P100X, awaiting batch)', qty: 1, cost_usd: 314 }],
+};
+
+// A live replacement carrying a whole machine. The one-click ship must not be
+// offered here: it records no serial, and the queue's Assign step is what pairs
+// the machine with the order.
+const UNIT_ORDER = {
+  id: 'o7', order_ref: 'R-0007', kind: 'replacement', status: 'pending',
+  customer_name: 'Dana', cogs_usd: 312, shipped_at: null, delivered_at: null,
+  created_at: '2026-06-04T00:00:00Z', linked_ticket_id: 't4', awaiting_batch_id: null,
+  line_items: [{ kind: 'unit', batch: 'B7', unit_serial: 'LL01-284', name: 'LILA (B7)', qty: 1, cost_usd: 312 }],
+};
+
+/** Mutable so a test can choose what the tab is handed. */
+let ordersFixture: unknown[] = [LIVE_ORDER];
 
 const TRIAGE_TICKET = {
   id: 't1',
@@ -58,16 +90,9 @@ vi.mock('../../../lib/orders', async () => {
   return {
     ...actual,
     createReplacementOrder: (...args: unknown[]) => createReplacementOrderMock(...(args as [])),
+    markPartsReplacementShipped: (...args: unknown[]) => markPartsShippedMock(...(args as [])),
     useReplacementSummary: () => ({ summary: null, loading: false }),
-    useReplacementOrders: () => ({
-      orders: [
-        { id: 'o1', order_ref: 'R-0001', kind: 'replacement', status: 'pending',
-          customer_name: 'Sam', cogs_usd: 12.5, shipped_at: null, delivered_at: null,
-          created_at: '2026-06-02T00:00:00Z', linked_ticket_id: 't2',
-          line_items: [{ kind: 'part', part_id: 'p1', sku: 'HINGE', name: 'Lid Hinge', qty: 1, cost_per_unit_usd: 4.2 }] },
-      ],
-      loading: false,
-    }),
+    useReplacementOrders: () => ({ orders: ordersFixture, loading: false }),
   };
 });
 vi.mock('../../../lib/service', async () => {
@@ -87,7 +112,8 @@ vi.mock('../../../lib/stock', () => ({
     loading: false,
   }),
 }));
-vi.mock('../../../lib/parts', () => ({
+vi.mock('../../../lib/parts', async () => ({
+  ...await vi.importActual<typeof import('../../../lib/parts')>('../../../lib/parts'),
   useParts: () => ({
     parts: [{ id: 'p1', sku: 'HINGE', name: 'Lid Hinge', category: 'replacement', on_hand: 5, cost_per_unit_usd: 4.2 }],
     loading: false,
@@ -118,7 +144,10 @@ const renderTab = () =>
   );
 
 describe('Fulfillment > Replacements — still ticket-driven', () => {
-  beforeEach(() => createReplacementOrderMock.mockClear());
+  beforeEach(() => {
+    createReplacementOrderMock.mockClear();
+    ordersFixture = [LIVE_ORDER];
+  });
 
   it('renders the replacement queue, not the old PostShipment tab', () => {
     renderTab();
@@ -159,5 +188,90 @@ describe('Fulfillment > Replacements — still ticket-driven', () => {
       customer_name: 'Linda',
       line_items: [expect.objectContaining({ kind: 'part', sku: 'HINGE' })],
     });
+  });
+});
+
+// Prod, 2026-09-11: Amanda Acker's R-0051 was cancelled on 2026-08-31 and went
+// on sitting in this table with an "awaiting batch" chip and no sign it was
+// cancelled — the tab telling the operator she was queued for a P100X eleven
+// days after someone had decided she was not.
+describe('Fulfillment > Replacements — a cancelled replacement is not queued work', () => {
+  beforeEach(() => {
+    createReplacementOrderMock.mockClear();
+    ordersFixture = [LIVE_ORDER, CANCELLED_ORDER];
+  });
+
+  it('keeps a cancelled order out of the default list', () => {
+    renderTab();
+    expect(screen.getByText('R-0001')).toBeInTheDocument();
+    expect(screen.queryByText('R-0051')).not.toBeInTheDocument();
+    expect(screen.queryByText('Amanda Acker')).not.toBeInTheDocument();
+  });
+
+  it('never labels it "awaiting batch" — that chip is a claim on a unit', () => {
+    renderTab();
+    fireEvent.click(screen.getByRole('button', { name: 'awaiting batch' }));
+    expect(screen.queryByText('R-0051')).not.toBeInTheDocument();
+  });
+
+  it('still reaches it under Cancelled, reading as cancelled', () => {
+    renderTab();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancelled' }));
+    expect(screen.getByText('R-0051')).toBeInTheDocument();
+    expect(screen.getByText('cancelled')).toBeInTheDocument();
+    // The live one is not cancelled, so it is not in this view.
+    expect(screen.queryByText('R-0001')).not.toBeInTheDocument();
+  });
+
+  it('does not count it as open replacement demand', () => {
+    renderTab();
+    // "Awaiting batch" KPI counts live orders only; the cancelled P100X is the
+    // only awaiting-batch row in the fixture, so the count must be zero.
+    const kpi = screen.getByText('Awaiting batch').closest('div')?.parentElement;
+    expect(kpi?.textContent).toMatch(/0/);
+  });
+});
+
+// A parts replacement has no machine to assign and no test report, so the
+// 6-step queue has nothing to offer it — before this, the box went in the mail
+// and the order sat on this board looking owed.
+describe('Fulfillment > Replacements — marking a parts replacement shipped', () => {
+  beforeEach(() => {
+    markPartsShippedMock.mockClear();
+    ordersFixture = [LIVE_ORDER, UNIT_ORDER];
+  });
+
+  it('offers it on the parts row and not on the row carrying a unit', () => {
+    renderTab();
+    const shipButtons = screen.getAllByRole('button', { name: 'Mark shipped' });
+    expect(shipButtons).toHaveLength(1);
+    // Same row as the parts order, i.e. not the unit's.
+    expect(shipButtons[0].closest('tr')).toHaveTextContent('R-0001');
+  });
+
+  it('records the shipment with the tracking the operator types', async () => {
+    renderTab();
+    fireEvent.click(screen.getByRole('button', { name: 'Mark shipped' }));
+
+    // The dialog names what is in the box before anyone confirms.
+    expect(await screen.findByText(/Mark R-0001 shipped/)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(/carrier/i), { target: { value: 'Canada Post' } });
+    fireEvent.change(screen.getByLabelText(/tracking number/i), { target: { value: '1Z999' } });
+    // The row's button and the dialog's confirm read the same; the dialog's is
+    // the later one in the DOM.
+    fireEvent.click(screen.getAllByRole('button', { name: 'Mark shipped' }).slice(-1)[0]);
+
+    await waitFor(() => expect(markPartsShippedMock).toHaveBeenCalledTimes(1));
+    expect(markPartsShippedMock.mock.calls[0]).toEqual([
+      'o1', { carrier: 'Canada Post', tracking_num: '1Z999' },
+    ]);
+  });
+
+  it('surfaces a refusal from the data layer instead of closing quietly', async () => {
+    markPartsShippedMock.mockRejectedValueOnce(new Error('R-0001 carries a whole unit.'));
+    renderTab();
+    fireEvent.click(screen.getByRole('button', { name: 'Mark shipped' }));
+    fireEvent.click(screen.getAllByRole('button', { name: 'Mark shipped' }).slice(-1)[0]);
+    expect(await screen.findByText(/carries a whole unit/)).toBeInTheDocument();
   });
 });

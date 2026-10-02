@@ -120,6 +120,8 @@ Migration is therefore scoped by **routed surface**, not by directory.
 Brand tokens in `tokens.css` are correct and stay. Changes:
 
 - **Deepen error red** so it is distinguishable from Ladybug Red: `--color-error` moves from `#c53030` to `#7F1D1D`. Measured: `#c53030` sits at a 1.038 relative-luminance ratio from `#CC2D30` (indistinguishable); `#7F1D1D` sits at 1.90, and holds 10.02:1 against white for text use.
+- **The rest of the error family is corrected alongside it.** `--color-error-strong` was `#e53e3e` — 4.13:1 on white, below the AA floor, while being used as text in ~9 places — and becomes `#A61B1B` (7.52:1). Because that token was also doing duty as a vivid accent on the dark Fulfillment sidebar, where the deeper value drops to 2.27:1 against a 3:1 non-text floor, the accent role splits out into `--color-error-accent: #e53e3e`, for dark surfaces only.
+- **Known exemption:** the ≥1.7 separation holds against `--color-crimson`, not against `--color-crimson-dark` `#991B1E` (the primary button's hover state), which sits at 1.207 from `--color-error`. Brand tokens are fixed by operator instruction, so this is recorded rather than resolved. Consequence for the component work: a filled danger button must not appear on a screen where the primary button is also filled red.
 - **Ladybug Red `#CC2D30` is reserved for action and attention only** — primary buttons, active nav item, unread counts. Never a decorative fill, never a status background.
 - **Delete the cool ramp.** Every `#718096`, `#4a5568`, `#e2e8f0`, `#cbd5e0`, `#f7fafc`, `#edf2f7`, `#1a202c` maps onto the warm equivalent.
 - Status colours (success/warning/info/purple) stay, referenced only via tokens.

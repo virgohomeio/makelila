@@ -1,0 +1,267 @@
+/* The new-order dialog. Its own module rather than more classes in
+   OrderReview.module.css: a long shared stylesheet is where a duplicate class
+   name silently loses to whichever block comes last. */
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(var(--color-ink-rgb), 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 16px;
+}
+
+.card {
+  background: var(--color-raised);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  width: 640px;
+  max-width: 100%;
+  /* dvh, not vh — on iOS Safari the URL bar would otherwise crop the footer,
+     which is where the submit button is. */
+  max-height: 90dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+
+.headTitle {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-ink);
+}
+
+.close {
+  background: transparent;
+  border: none;
+  font-size: 18px;
+  line-height: 1;
+  color: var(--color-ink-muted);
+  cursor: pointer;
+  /* 44px of hit area without 44px of visible button. */
+  padding: 10px;
+  margin: -10px;
+}
+
+.body {
+  padding: 14px 16px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.lede {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--color-ink-muted);
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sectionHead {
+  margin: 0;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--color-ink-muted);
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.grid2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.gridAddr {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr 0.8fr;
+  gap: 10px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--color-ink-muted);
+}
+
+.input,
+.inputNum,
+.select,
+.textarea {
+  padding: 7px 9px;
+  font-size: 12px;
+  font-family: inherit;
+  color: var(--color-ink);
+  background: var(--color-raised);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  min-width: 0;
+}
+
+.input:focus,
+.inputNum:focus,
+.select:focus,
+.textarea:focus {
+  outline: none;
+  border-color: var(--color-crimson);
+}
+
+.inputNum {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.textarea {
+  resize: vertical;
+  min-height: 54px;
+}
+
+.hint {
+  font-size: 10.5px;
+  line-height: 1.45;
+  /* ink-muted, not ink-subtle: the subtle token does not clear AA on this
+     ground and these hints carry the reason the form behaves as it does. */
+  color: var(--color-ink-muted);
+}
+
+.warn {
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: var(--color-warning);
+  background: var(--color-warning-bg);
+  border: 1px solid var(--color-warning-border);
+  border-radius: var(--radius-sm);
+  padding: 6px 8px;
+}
+
+.lineRow {
+  display: grid;
+  grid-template-columns: 1fr 0.8fr 56px 90px 28px;
+  gap: 8px;
+  align-items: center;
+}
+
+.lineRemove {
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-ink-muted);
+  font-size: 14px;
+  line-height: 1;
+  height: 28px;
+  cursor: pointer;
+}
+
+.lineRemove:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.lineFoot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.total {
+  font-size: 12px;
+  color: var(--color-ink-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.total strong {
+  color: var(--color-ink);
+}
+
+.error {
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--color-error-strong);
+  background: var(--color-error-bg);
+  border: 1px solid var(--color-error-border);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+}
+
+.foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--color-border);
+  background: var(--color-surface);
+  flex-wrap: wrap;
+}
+
+.footNote {
+  font-size: 10.5px;
+  color: var(--color-ink-muted);
+}
+
+.footBtns {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+@media (max-width: 700px) {
+  .backdrop {
+    padding: 0;
+    align-items: stretch;
+  }
+
+  .card {
+    width: 100%;
+    max-height: 100dvh;
+    border-radius: 0;
+    border: none;
+  }
+
+  .grid2,
+  .gridAddr {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  /* Four inputs across is unreadable on a phone; product and SKU take the
+     first row and the numbers sit under them. */
+  .lineRow {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .lineRemove {
+    grid-column: 2;
+    justify-self: end;
+    width: 44px;
+    height: 36px;
+  }
+}

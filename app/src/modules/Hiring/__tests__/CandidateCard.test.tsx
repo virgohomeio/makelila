@@ -19,8 +19,8 @@ function candidate(over: Partial<Candidate> & { id: string }): Candidate {
     posting_id: 'p1', full_name: 'Jenivan Sivakumaru', email: 'j@example.com', phone: null,
     source: 'indeed', resume_url: 'p1/resume.pdf', ingested_via: 'manual_upload',
     enrichment_status: 'resume_attached', indeed_relay_email: null, indeed_dashboard_url: null,
-    qualifications_tags: [], stage_index: 0, scores: {}, suggested_scores: null,
-    applied_at: '2026-07-01T00:00:00Z', rejected_at: null, hired_at: null,
+    qualifications_tags: [], stage_index: 0, scores: {}, suggested_scores: null, project_scores: {},
+    applied_at: '2026-07-01T00:00:00Z', rejected_at: null, rejection_stage: null, hired_at: null,
     screening_invite_sent_at: null, screening_invite_sent_by: null,
     ...over,
   };
@@ -37,7 +37,7 @@ describe('CandidateCard decision tags', () => {
   it('shows no decision tag when the candidate is undecided', () => {
     render(<CandidateCard candidate={candidate({ id: 'c1' })} pipelineStages={stages} onSelectCandidate={() => {}} />);
     expect(screen.queryByText('Shortlisted')).toBeNull();
-    expect(screen.queryByText('Rejected')).toBeNull();
+    expect(screen.queryByText(/Rejected —/)).toBeNull();
   });
 
   it('shows a Shortlisted tag when hired_at is set', () => {
@@ -46,16 +46,34 @@ describe('CandidateCard decision tags', () => {
       pipelineStages={stages} onSelectCandidate={() => {}}
     />);
     expect(screen.getByText('Shortlisted')).toBeTruthy();
-    expect(screen.queryByText('Rejected')).toBeNull();
+    expect(screen.queryByText(/Rejected —/)).toBeNull();
   });
 
-  it('shows a Rejected tag when rejected_at is set', () => {
+  it('labels a resume-screening rejection as such', () => {
+    render(<CandidateCard
+      candidate={candidate({ id: 'c1', rejected_at: '2026-07-30T00:00:00Z', rejection_stage: 'resume_screening' })}
+      pipelineStages={stages} onSelectCandidate={() => {}}
+    />);
+    expect(screen.getByText('Rejected — resume screen')).toBeTruthy();
+    expect(screen.queryByText('Shortlisted')).toBeNull();
+  });
+
+  it('labels an interview-stage rejection as such', () => {
+    render(<CandidateCard
+      candidate={candidate({ id: 'c1', rejected_at: '2026-07-30T00:00:00Z', rejection_stage: 'interview' })}
+      pipelineStages={stages} onSelectCandidate={() => {}}
+    />);
+    expect(screen.getByText('Rejected — interview')).toBeTruthy();
+    expect(screen.queryByText('Shortlisted')).toBeNull();
+  });
+
+  // Rows rejected before rejection_stage existed all came from this board.
+  it('treats a legacy rejection with no stage as a resume-screening one', () => {
     render(<CandidateCard
       candidate={candidate({ id: 'c1', rejected_at: '2026-07-30T00:00:00Z' })}
       pipelineStages={stages} onSelectCandidate={() => {}}
     />);
-    expect(screen.getByText('Rejected')).toBeTruthy();
-    expect(screen.queryByText('Shortlisted')).toBeNull();
+    expect(screen.getByText('Rejected — resume screen')).toBeTruthy();
   });
 
   it('shows Shortlisted (not Rejected) when a legacy row has both timestamps', () => {
@@ -64,7 +82,7 @@ describe('CandidateCard decision tags', () => {
       pipelineStages={stages} onSelectCandidate={() => {}}
     />);
     expect(screen.getByText('Shortlisted')).toBeTruthy();
-    expect(screen.queryByText('Rejected')).toBeNull();
+    expect(screen.queryByText(/Rejected —/)).toBeNull();
   });
 
   it('labels the shortlist button "Shortlist" and it calls hireCandidate', () => {
@@ -102,7 +120,7 @@ describe('CandidateCard decision tags', () => {
     const rejectButton = screen.getByRole('button', { name: 'Reject' }) as HTMLButtonElement;
     expect(rejectButton.disabled).toBe(false);
     fireEvent.click(rejectButton);
-    expect(rejectCandidate).toHaveBeenCalledWith('c1');
+    expect(rejectCandidate).toHaveBeenCalledWith('c1', 'resume_screening');
   });
 });
 

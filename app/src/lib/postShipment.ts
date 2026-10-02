@@ -6,6 +6,9 @@ import { sendTemplate } from './templates';
 import {
   invoiceAmountCad, pickRefundBasisInvoice, invoicesForCustomerEmail, type CustomerInvoice,
 } from './invoices';
+import { resolveRefundOrderId } from './refundedOrders';
+import { withdrawOrderFromQueue } from './fulfillment';
+import { cancelOpenOrdersForRefund, type AutoCancelOutcome } from './refundAutoCancel';
 
 const APP_BASE_URL = 'https://lila.vip';
 const REFUND_URL = `${APP_BASE_URL}/post-shipment?tab=refunds`;
@@ -73,12 +76,15 @@ export function returnStatusAllowsRefund(status: ReturnStatus): boolean {
 //   • "Return Form Submitted" (the PRD's Intake / New stage) — a card just
 //     auto-generated from the customer's form, before the unit is physically
 //     back: created / pickup_scheduled / picked_up.
-//   • "Return & Inspection" — the returned unit is physically back and being
-//     inspected: received / inspected.
-// Terminal / post-request statuses (refunded, denied, closed, discarded) belong
-// to neither pre-refund column and return null.
+//   • "Return & Inspection" — the unit question is settled and the case is
+//     ready to compile: received / inspected, or discarded (BR-7 — the
+//     customer disposed of a defective unit, so nothing is coming back but the
+//     refund is still owed). Treating 'discarded' as terminal here made a card
+//     vanish from the board the moment its unit status was set to it.
+// Terminal / post-request statuses (refunded, denied, closed) belong to neither
+// pre-refund column and return null.
 export const RETURN_INTAKE_STATUSES: ReturnStatus[] = ['created', 'pickup_scheduled', 'picked_up'];
-export const RETURN_INSPECTION_STATUSES: ReturnStatus[] = ['received', 'inspected'];
+export const RETURN_INSPECTION_STATUSES: ReturnStatus[] = ['received', 'inspected', 'discarded'];
 
 export type PreRefundStage = 'intake' | 'inspection';
 
@@ -354,6 +360,150 @@ export async function setReturnDisposition(id: string, disposition: ReturnDispos
   if (error) throw error;
   await logAction('return_disposition', id, disposition ?? 'cleared',
     { entityType: 'return', entityId: id });
+}
+
+// ============================================================================
+// The unit a refund case is about
+// ============================================================================
+// A refund card names a machine the customer no longer holds. Once the unit is
+// back it leaves `shipped`, so anything keyed on "currently held" renders it as
+// nothing — which is why most cards on this board show no serial at all: 28 of
+// 51 returns never captured `unit_serial` in the first place.
+//
+// This resolves the machine from whatever the case does carry. Every answer is
+// labelled with the path that produced it, because the paths are not equally
+// trustworthy: the June 2026 fulfillment backfill wrote `units.customer_id`
+// pointing at the wrong person on nine units, so a customer-record match can
+// hand back a stranger's machine. The operator sees which path answered and
+// decides. Nothing here writes — see confirmCaseUnitSerial for that.
+
+/** How a case's unit was found, worst-to-best trust reading upward. */
+export type CaseUnitVia = 'case' | 'order' | 'unit_name' | 'customer';
+
+export const CASE_UNIT_VIA_LABEL: Record<CaseUnitVia, string> = {
+  case: 'recorded on the case',
+  order: 'matched by order ref',
+  unit_name: 'matched by name on the unit',
+  customer: 'matched via customer record',
+};
+
+/** The unit columns this resolution reads. */
+export type CaseUnitRow = {
+  serial: string;
+  status: string;
+  customer_id: string | null;
+  customer_name: string | null;
+  customer_order_ref: string | null;
+};
+
+export type CaseUnitCandidate = { serial: string; status: string };
+
+export type CaseUnitResolution = {
+  serial: string | null;
+  /** The unit's status *now* — the machine may be in rework, scrapped, or back
+   *  out with someone else. Null when nothing resolved. */
+  status: string | null;
+  via: CaseUnitVia | null;
+  /** True when the serial came off the case row itself, not a guess. */
+  confirmed: boolean;
+  /** Other units that tied at the winning path. Non-empty means ambiguous. */
+  others: CaseUnitCandidate[];
+  /** The name written on the matched unit, when it is someone other than the
+   *  customer this case is about. Only the customer-record path can produce
+   *  this, and when it does the match is standing on a `units.customer_id` that
+   *  disagrees with the unit's own name — the exact shape the June backfill
+   *  left behind. Both of today's customer-path matches look like this, so the
+   *  card has to say whose name is actually on the machine. */
+  conflictingName: string | null;
+};
+
+const NO_UNIT: CaseUnitResolution = {
+  serial: null, status: null, via: null, confirmed: false, others: [], conflictingName: null,
+};
+
+const normalizeRef = (v: string | null | undefined): string | null =>
+  (v ?? '').replace(/^#/, '').trim().toLowerCase() || null;
+
+const normalizeName = (v: string | null | undefined): string | null =>
+  (v ?? '').trim().toLowerCase() || null;
+
+/** Find the machine a refund/return case is about.
+ *
+ *  Tries the case's own `unit_serial` first, then order ref, then the name
+ *  typed on the unit row, then the directory customer's linked units. Stops at
+ *  the first path that matches and reports which one it was. `customerId` is
+ *  resolved by the caller (see lookupContactRow) so this stays pure. */
+export function resolveCaseUnit(opts: {
+  caseSerial?: string | null;
+  orderRef?: string | null;
+  customerName?: string | null;
+  customerId?: string | null;
+  units: CaseUnitRow[];
+}): CaseUnitResolution {
+  const { units } = opts;
+  const byStatus = (u: CaseUnitRow): CaseUnitCandidate => ({ serial: u.serial, status: u.status });
+
+  const caseSerial = (opts.caseSerial ?? '').trim();
+  if (caseSerial) {
+    const known = units.find(u => u.serial === caseSerial);
+    return {
+      serial: caseSerial,
+      status: known?.status ?? null,
+      via: 'case',
+      confirmed: true,
+      others: [],
+      conflictingName: null,
+    };
+  }
+
+  const caseName = normalizeName(opts.customerName);
+  const pick = (matches: CaseUnitRow[], via: CaseUnitVia): CaseUnitResolution | null => {
+    if (matches.length === 0) return null;
+    const [first, ...rest] = matches;
+    const onUnit = normalizeName(first.customer_name);
+    return {
+      serial: first.serial,
+      status: first.status,
+      via,
+      confirmed: false,
+      others: rest.map(byStatus),
+      conflictingName: onUnit && caseName && onUnit !== caseName ? first.customer_name : null,
+    };
+  };
+
+  const ref = normalizeRef(opts.orderRef);
+  if (ref) {
+    const hit = pick(units.filter(u => normalizeRef(u.customer_order_ref) === ref), 'order');
+    if (hit) return hit;
+  }
+
+  if (caseName) {
+    const hit = pick(units.filter(u => normalizeName(u.customer_name) === caseName), 'unit_name');
+    if (hit) return hit;
+  }
+
+  const customerId = (opts.customerId ?? '').trim();
+  if (customerId) {
+    const hit = pick(units.filter(u => u.customer_id === customerId), 'customer');
+    if (hit) return hit;
+  }
+
+  return NO_UNIT;
+}
+
+/** Record a resolved serial on the return, so the case stops guessing and every
+ *  downstream report reads the same answer. Operator-confirmed only — nothing
+ *  calls this automatically. */
+export async function confirmCaseUnitSerial(returnId: string, serial: string): Promise<void> {
+  const value = serial.trim();
+  if (!value) throw new Error('A serial is required to confirm the unit.');
+  const { error } = await supabase
+    .from('returns')
+    .update({ unit_serial: value })
+    .eq('id', returnId);
+  if (error) throw error;
+  await logAction('return_unit_confirmed', returnId, value,
+    { entityType: 'return', entityId: returnId, unitSerial: value });
 }
 
 async function hasField(id: string, field: string): Promise<boolean> {
@@ -698,6 +848,14 @@ export function refundExecutorEmail(method: RefundMethod | null): string {
     ? REFUND_EXECUTORS.payments
     : REFUND_EXECUTORS.finance;
 }
+
+// FR-9d: who is told when a card lands in Finance Review. Kept separate from
+// REFUND_EXECUTORS.finance — that one is "who executes a payout", this one is
+// "who owns the Finance Review column" — so the two can diverge without one
+// silently re-routing the other. Her account is yueli@ but the board (and she)
+// says Julie, so greet her by the name she uses rather than the local-part.
+export const REFUND_FINANCE_REVIEWER = 'yueli@virgohome.io';
+export const REFUND_FINANCE_REVIEWER_NAME = 'Julie';
 
 // FR-12 fee breakdown (BR-9/BR-10, honouring current terms per OQ-1). The
 // restocking fee defaults to $50; return shipping is operator-entered actual
@@ -1099,6 +1257,13 @@ async function currentUserId(): Promise<string> {
   return data.user.id;
 }
 
+/** Reporting hook for the auto-cancel that fires when a card is created. The
+ *  caller passes this when it has somewhere to show the result; the cancels
+ *  happen either way. */
+export type RefundRequestOpts = {
+  onAutoCancel?: (outcome: AutoCancelOutcome) => void;
+};
+
 export async function submitRefundRequest(input: {
   return_id?: string;
   order_id?: string;
@@ -1109,7 +1274,7 @@ export async function submitRefundRequest(input: {
   payment_method?: string;
   reason?: string;
   notes?: string;
-}): Promise<string> {
+}, opts: RefundRequestOpts = {}): Promise<string> {
   const userId = await currentUserId();
   const { data: created, error } = await supabase.from('refund_approvals').insert({
     ...input,
@@ -1133,6 +1298,42 @@ export async function submitRefundRequest(input: {
         event_id: `return-${input.order_id ?? Date.now()}`,
       },
     });
+
+  // The card now exists, so this customer is in the refund workflow — and
+  // nothing more should be on its way to them. Every order they still have in
+  // flight, sale or replacement, comes out of the fulfillment queue and is
+  // cancelled. See lib/refundAutoCancel.ts for what "in flight" means and why
+  // it is judged so conservatively.
+  //
+  // Best-effort, in the same sense as the audit log above: the card has already
+  // committed, and failing here would tell the operator the refund could not be
+  // created when it plainly was. It is NOT silent though — a failure is logged
+  // to the activity trail and handed to onAutoCancel, so the operator is told
+  // to cancel by hand rather than left believing it happened.
+  try {
+    const outcome = await cancelOpenOrdersForRefund({
+      refundId: newRefundId,
+      customerEmail: input.customer_email,
+      customerName: input.customer_name,
+      // The order this card is FOR is spared: it only leaves the fulfillment
+      // queue. Cancelling it filed a second live request on the Cancellations
+      // board for the same money as the card itself.
+      refundOrderId: input.order_id,
+    });
+    opts.onAutoCancel?.(outcome);
+  } catch (e) {
+    const message = (e as Error).message;
+    console.warn('Auto-cancelling the customer\'s open orders failed (non-fatal):', message);
+    try {
+      await logAction('refund_auto_cancel_failed', newRefundId, message);
+    } catch { /* the warning above is the last resort */ }
+    opts.onAutoCancel?.({
+      cancelled: [],
+      failed: [{ order_ref: 'this customer\'s open orders', message }],
+      skippedNoEmail: false,
+      withdrewOwnOrder: null,
+    });
+  }
 
   // FR-15 (revised 2026-08-04): NO customer email here. Compiling a case into
   // the refund pipeline is an internal move — the customer already got the
@@ -1180,21 +1381,30 @@ export async function defaultRefundAmountFromInvoice(
  *  (Julie) confirms or corrects it — and the payment method — at Finance
  *  Review, then it carries to Pedrum in the Refund Queue. Auto-fills the
  *  purchaser/customer from the return. */
-export async function compileReturnToRefund(r: ReturnRow): Promise<void> {
+export async function compileReturnToRefund(
+  r: ReturnRow, opts: RefundRequestOpts = {},
+): Promise<void> {
   const usePurchaser = r.is_purchaser === false;
   const email = ((usePurchaser && r.purchaser_email?.trim()) ? r.purchaser_email.trim() : r.customer_email) ?? undefined;
   const opening = await defaultRefundAmountFromInvoice(email, r.original_order_ref, r.refund_amount_usd);
+  // order_id is a UUID FK to orders(id) and original_order_ref is human text
+  // ("#1107", "1216", "I don't know, please ask Edward"), so this used to be
+  // left null — on all 18 live refunds. That made a refund invisible to every
+  // order surface: Sales listed a refunded order like any other and confirming
+  // it queued a machine for someone we had already paid back. Resolve the ref
+  // to the real order and record it; null when it genuinely can't be pinned to
+  // one order, which is honest and no worse than before.
+  const orderId = await resolveRefundOrderId(email, r.original_order_ref);
   const refundId = await submitRefundRequest({
     return_id: r.id,
-    // NOTE: don't pass order_id — that column is a UUID FK to orders(id), not the
-    // human original_order_ref (e.g. "#1107"). The refund links via return_id.
+    ...(orderId ? { order_id: orderId } : {}),
     customer_name: (usePurchaser && r.purchaser_name?.trim()) ? r.purchaser_name.trim() : r.customer_name,
     customer_email: email,
     refund_amount_usd: opening.amount,
     currency: opening.currency,
     reason: r.reason ?? undefined,
     // no payment_method — Finance sets the method at Finance Review.
-  });
+  }, opts);
   if (opening.invoice) {
     await logAction('refund_amount_from_invoice', refundId,
       `$${opening.amount.toFixed(2)} CAD from invoice #${opening.invoice.invoice_number}`);
@@ -1289,6 +1499,37 @@ export async function confirmPurchaserLinkage(returnId: string): Promise<void> {
   await logAction('return_purchaser_linkage_confirmed', returnId, 'manager confirmed purchaser linkage');
 }
 
+/** FR-9d: knock on the Finance Officer's door the moment a card enters her
+ *  column. Before this, manager_review → finance_review was the only stage move
+ *  in the refund flow that notified nobody — the neighbouring hops already send
+ *  refund_queued_executor (FR-9a) and refund_executed_am (FR-9b) — so the first
+ *  thing she heard was send-refund-reminders, the 3-day *overdue* digest, up to
+ *  four days later. Best-effort by design: the stage move has already committed
+ *  when this runs, so a mail failure must never surface as a failed approval. */
+async function notifyFinanceReviewEntry(
+  id: string,
+  card: { customer_name?: string | null; customer_email?: string | null; refund_amount_usd?: number | null } | null,
+): Promise<void> {
+  try {
+    await sendTemplate({
+      template_key: 'refund_finance_review',
+      to: REFUND_FINANCE_REVIEWER,
+      to_name: REFUND_FINANCE_REVIEWER_NAME,
+      variables: {
+        finance_first_name: REFUND_FINANCE_REVIEWER_NAME,
+        customer_name: card?.customer_name ?? card?.customer_email ?? 'Unknown customer',
+        amount: card?.refund_amount_usd != null
+          ? `$${Number(card.refund_amount_usd).toFixed(2)}`
+          : '$—',
+        refund_url: REFUND_URL,
+      },
+      related_refund_id: id,
+    });
+  } catch (e) {
+    console.warn('Finance Review entry email failed (non-fatal):', (e as Error).message);
+  }
+}
+
 export async function managerApprove(id: string, note?: string): Promise<void> {
   const userId = await currentUserId();
 
@@ -1336,6 +1577,8 @@ export async function managerApprove(id: string, note?: string): Promise<void> {
   await logAction('refund_manager_approved', id, note ?? 'approved');
   // FR-15 (revised 2026-08-04): no customer email on manager approval — an
   // internal stage move. The customer is told once, at Refunded.
+  // FR-9d: but Finance *is* told, now that the card is sitting in her column.
+  await notifyFinanceReviewEntry(id, approval);
 }
 
 export type FinanceApproveOpts = {
@@ -1442,10 +1685,29 @@ export async function financeApprove(id: string, opts: FinanceApproveOpts): Prom
  *  is the operator actually executing the payout and marking it done. The Klaviyo
  *  "Refund Processed" event fires here — the moment money actually moves — not at
  *  finance approval. */
+/** Just enough of a refund_approvals row to find the order it refunded. */
+type RefundedApprovalRow = {
+  order_id: string | null;
+  customer_email: string | null;
+  returns: { original_order_ref: string | null } | { original_order_ref: string | null }[] | null;
+};
+
+/** Once a refund is paid, take its order out of the fulfillment queue so no one
+ *  ships against it. Falls back to resolving the human order ref for the older
+ *  cards written before order_id was ever populated. */
+async function releaseRefundedOrderFromQueue(approval: RefundedApprovalRow): Promise<void> {
+  const linked = Array.isArray(approval.returns) ? approval.returns[0] : approval.returns;
+  const orderId = approval.order_id
+    ?? await resolveRefundOrderId(approval.customer_email, linked?.original_order_ref);
+  if (!orderId) return;
+  const withdrawn = await withdrawOrderFromQueue(orderId, 'Order refunded — pulled from the queue');
+  if (withdrawn) await logAction('refund_order_withdrawn', orderId, 'refunded before it shipped');
+}
+
 export async function executeRefund(id: string, note?: string): Promise<void> {
   const { data: approval, error: aErr } = await supabase
     .from('refund_approvals')
-    .select('id, status, customer_email, customer_name, refund_amount_usd, refund_method, submitted_by')
+    .select('id, status, order_id, customer_email, customer_name, refund_amount_usd, refund_method, submitted_by, returns(original_order_ref)')
     .eq('id', id)
     .single();
   if (aErr || !approval) throw new Error(`Refund approval not found: ${aErr?.message}`);
@@ -1460,6 +1722,16 @@ export async function executeRefund(id: string, note?: string): Promise<void> {
   await logAction('refund_executed', id, note?.trim() || 'paid out',
     undefined,
     { klaviyoEvent: 'Refund Processed', ...(approval.customer_email ? { klaviyoEmail: approval.customer_email as string } : {}) });
+
+  // The money is back with the customer — nothing should still be waiting to
+  // ship to them on this order. Best-effort: a refund that has been paid out
+  // must never be rolled back because a queue row wouldn't budge, so a failure
+  // here is logged and the payout stands.
+  try {
+    await releaseRefundedOrderFromQueue(approval as RefundedApprovalRow);
+  } catch (e) {
+    console.warn('Withdrawing the refunded order from the queue failed (non-fatal):', (e as Error).message);
+  }
 
   // FR-9b: notify the Account Manager (the case owner who submitted it) that the
   // payout is done, so they can tell the customer. Best-effort — never blocks
@@ -1514,6 +1786,75 @@ export async function denyRefund(id: string, stage: 'submitted' | 'manager_revie
   await logAction('refund_denied', id, `${stage}: ${reason}`);
 }
 
+/** The statuses a RETURN can still be cancelled from: the two Account-Manager
+ *  columns before a refund card exists — Return Form Submitted and Return &
+ *  Inspection. Once the case is refunded, denied or closed it has left them. */
+export function canCancelReturnRequest(status: ReturnStatus): boolean {
+  return preRefundStage(status) !== null;
+}
+
+/** Pull a return case that should never have been raised.
+ *
+ *  The return columns are an intake queue fed by a public form, so they collect
+ *  the same junk the cancellation column does: test submissions, duplicates of
+ *  a case already being worked, forms filled in by mistake. Before this, the
+ *  only ways out were forward (compile it into a refund card) or a status
+ *  dropdown that says nothing about why.
+ *
+ *  'closed' is terminal for a return, so the card leaves both columns — the
+ *  same exit a compiled case takes, minus the refund card. */
+export async function cancelReturnRequest(id: string, reason: string): Promise<void> {
+  const note = reason.trim();
+  if (!note) throw new Error('A reason is required to cancel a request.');
+
+  const { error } = await supabase.from('returns')
+    .update({ status: 'closed' }).eq('id', id);
+  if (error) throw error;
+
+  await logAction('return_request_cancelled', id, note, { entityType: 'return', entityId: id });
+  await addReturnNote(id, `Request cancelled: ${note}`);
+}
+
+/** The statuses a refund card can still be cancelled from: everywhere the case
+ *  is live work. Once it is refunded, denied or closed the decision is made and
+ *  recorded, and "cancelling" would erase history rather than unwanted work. */
+export const CANCELLABLE_REFUND_STATUSES: RefundStatus[] = [
+  'submitted', 'manager_review', 'finance_review', 'refund_queue',
+];
+
+export function canCancelRefundRequest(status: RefundStatus): boolean {
+  return CANCELLABLE_REFUND_STATUSES.includes(status);
+}
+
+/** Pull a refund card that should never have been raised — a test, a
+ *  duplicate, an intake in error.
+ *
+ *  This is NOT a denial. A denial is a decision about a customer's money and
+ *  belongs in the Denied column where it can be read as one; a card parked
+ *  there because someone was testing the board says we refused a customer who
+ *  never asked. So a cancelled request goes to 'closed': it leaves the board,
+ *  and — because 'closed' is not one of the shipping-relevant statuses in
+ *  refundedOrders.ts — it stops standing between that customer and a shipment.
+ *
+ *  It undoes nothing else. Orders the card cancelled when it was created stay
+ *  cancelled; re-queueing those is a deliberate act, the same as after a
+ *  denial. */
+export async function cancelRefundRequest(id: string, reason: string): Promise<void> {
+  const note = reason.trim();
+  if (!note) throw new Error('A reason is required to cancel a request.');
+
+  // Status first: this is the write that can be refused (refund_approvals
+  // UPDATE is RLS-gated), and a note explaining a cancellation that never
+  // happened is worse than no note.
+  const { error } = await supabase.from('refund_approvals')
+    .update({ status: 'closed' }).eq('id', id);
+  if (error) throw error;
+
+  await logAction('refund_request_cancelled', id, note);
+  // The thread is where the next person looks, so the reason lives there too.
+  await addRefundNote(id, `Request cancelled: ${note}`);
+}
+
 export async function closeRefund(id: string): Promise<void> {
   const { error } = await supabase.from('refund_approvals').update({ status: 'closed' }).eq('id', id);
   if (error) throw error;
@@ -1541,9 +1882,26 @@ export function refundBackPatch(toStatus: RefundBackTarget): Record<string, unkn
 }
 
 export async function sendRefundBack(id: string, toStatus: RefundBackTarget): Promise<void> {
+  // FR-9d: the second door into Finance Review — the executor bouncing a card
+  // back from the Refund Queue. Read the card first (it's about to be patched)
+  // so the notice can name the customer + amount; a read failure only costs us
+  // those details, never the send-back itself.
+  let card: { customer_name?: string | null; customer_email?: string | null; refund_amount_usd?: number | null } | null = null;
+  if (toStatus === 'finance_review') {
+    try {
+      const { data } = await supabase
+        .from('refund_approvals')
+        .select('customer_name, customer_email, refund_amount_usd')
+        .eq('id', id)
+        .single();
+      card = data as typeof card;
+    } catch { /* fall through with null — the email still goes, just generic */ }
+  }
+
   const { error } = await supabase.from('refund_approvals').update(refundBackPatch(toStatus)).eq('id', id);
   if (error) throw error;
   await logAction('refund_sent_back', id, `→ ${toStatus}`);
+  if (toStatus === 'finance_review') await notifyFinanceReviewEntry(id, card);
 }
 
 // "Uncompile" — remove the refund request so the case returns to Return &
@@ -1713,6 +2071,8 @@ async function createCancellationRefund(
   // (status 'submitted') for the Account Manager to verify before George sees
   // it, rather than jumping the queue straight into Manager Review.
   return submitRefundRequest({
+    ...(await resolveRefundOrderId(c.customer_email, c.order_ref)
+      .then(id => (id ? { order_id: id } : {}))),
     customer_name: c.customer_name,
     customer_email: c.customer_email,
     refund_amount_usd: opening.amount,
@@ -1769,4 +2129,24 @@ export async function compileCancellationToRefund(c: OrderCancellation): Promise
  *  the order was never charged). Closes the cancellation without a refund. */
 export async function dismissCancellationRefund(c: OrderCancellation, opsNote?: string): Promise<void> {
   await processCancellation(c.id, false, undefined, opsNote);
+}
+
+/** Refunds-board action on a cancellation card: this request should not be on
+ *  the board at all.
+ *
+ *  Distinct from "No refund needed", which is a finding about the money (the
+ *  order was never charged). This is a finding about the REQUEST: two Sales
+ *  orders raised to test the workflow, cancelled, and queued here as live
+ *  refund work for money nobody ever paid.
+ *
+ *  Recorded as 'completed' with no refund, because the database allows this
+ *  table only 'submitted' or 'completed' — the reason, not a status word, is
+ *  what says it was cancelled, and it is written in two places: the row's ops
+ *  notes (read in the Cancellations tab) and the card's own notes thread. */
+export async function cancelCancellationRequest(c: OrderCancellation, reason: string): Promise<void> {
+  const note = reason.trim();
+  if (!note) throw new Error('A reason is required to cancel a request.');
+  await processCancellation(c.id, false, undefined, `Request cancelled: ${note}`);
+  await logAction('cancellation_request_cancelled', c.order_ref ?? c.id, note);
+  await addCancellationNote(c.id, `Request cancelled: ${note}`);
 }

@@ -85,3 +85,13 @@
 .removeBtn:disabled { opacity: 0.5; cursor: not-allowed; }
 .errText { color: var(--color-error, #c53030); font-size: 11px; margin-top: 4px; }
 .emptyRow { font-size: 13px; color: var(--color-ink-muted); padding: 8px 0; }
+
+/* One cause, stated once: when the PDF reader is down every file in the batch
+   carries the same extract_error, and a per-row message alone reads as N
+   unrelated problems. */
+.warnBanner {
+  margin: 8px 0 12px; padding: 10px 12px;
+  background: #fffaf0; border: 1px solid #f6ad55;
+  border-radius: var(--radius-sm, 6px);
+  font-size: 12px; color: #7b341e; word-break: break-word;
+}

@@ -90,6 +90,38 @@ back to `support@lilacomposter.com` when an order carries no customer email.
 Rates come back **CAD for a US destination too**, so `cheapestCadQuote` and
 `selectQuote` need no currency handling beyond what they already do.
 
+## What a rate is accurate to
+
+Measured 2026-09-10 with `freightcom-endpoint-scan`'s `rate_body` passthrough,
+origin L3R9Z7, 23 kg 61×61×61 cm boxes. This is the whole list — everything else
+you can put in the body is either ignored or priced by the carrier itself.
+
+| Change to the request | Cheapest CAD rate |
+|---|---|
+| 1 package → M1N 1H9 (Toronto) | **$36.43** (Canpar Ground) |
+| 2 packages → same address | **$59.98** |
+| 1 package, body also carries street / city / region / `residential: true` | **$36.43** — accepted, changes nothing |
+| 1 package → P0T 2W0 (rural ON) | **$125.52**, incl. `extended-area` $39.53 |
+| 1 package → 90210 (US) | $167.87 (UPS Standard), 9 rates instead of 22 |
+
+Two things follow, and `freightcom-quote` got both wrong until 2026-09-10:
+
+- **Box count is the only thing in our control that moves the price.** The
+  function rated a single package for every order regardless of line items, so a
+  two-unit order was quoted at ~60% of its cost. `packagesForLineItems()` in
+  `_shared/freightcom.ts` now builds the list from the order, dropping promo
+  lines ("Unlock 30% Off in Cart") and parts.
+- **The postal code is the whole destination**, so a rate against a postal code
+  address verification has already proven wrong is a confident number about a
+  place the parcel will never go. `quotableDestinationPostal()` switches to the
+  postal authority's code when `address_match = 'mismatch'`, and the response
+  reports which code it used.
+
+Each rate itemises its own surcharges, which is where the address's character
+shows up — `residential-delivery` $2.40, `extended-area` $39.53, `fuel` scaling
+with the base. They ride in `freight_quotes.raw`; `quoteSurcharges()` in
+`app/src/lib/freight.ts` reads them out for the Sales summary.
+
 ## Two id spaces that never meet
 
 Finance documents look like this:

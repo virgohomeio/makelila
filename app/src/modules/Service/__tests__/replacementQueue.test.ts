@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { replacementQueueKindsByTicket, groupQueueKinds } from '../replacementQueue';
+import {
+  replacementQueueKindsByTicket, groupQueueKinds,
+  matchesReplacementKind, replacementKindOptions,
+} from '../replacementQueue';
 import type { ServiceTicket, TicketStatus } from '../../../lib/service';
 import type { Order } from '../../../lib/orders';
 
@@ -61,5 +64,74 @@ describe('groupQueueKinds', () => {
 
   it('is empty when nothing is queued', () => {
     expect(groupQueueKinds([t('t1')], new Map())).toEqual([]);
+  });
+});
+
+describe('matchesReplacementKind', () => {
+  it('lets everything through on "all", including tickets with no resolvable order', () => {
+    expect(matchesReplacementKind(['P100X'], 'all')).toBe(true);
+    expect(matchesReplacementKind([], 'all')).toBe(true);
+  });
+
+  it('separates parts from batches', () => {
+    expect(matchesReplacementKind(['PARTS'], 'parts')).toBe(true);
+    expect(matchesReplacementKind(['P100X'], 'parts')).toBe(false);
+    expect(matchesReplacementKind(['P100X'], 'any_batch')).toBe(true);
+    expect(matchesReplacementKind(['LILA-Mini'], 'any_batch')).toBe(true);
+    expect(matchesReplacementKind(['PARTS'], 'any_batch')).toBe(false);
+  });
+
+  it('narrows to one batch', () => {
+    expect(matchesReplacementKind(['P100X'], 'batch:P100X')).toBe(true);
+    expect(matchesReplacementKind(['LILA-Mini'], 'batch:P100X')).toBe(false);
+    expect(matchesReplacementKind(['PARTS'], 'batch:P100X')).toBe(false);
+  });
+
+  it('excludes a ticket with no resolvable order from every specific filter', () => {
+    // Otherwise an unresolvable ticket would masquerade as a parts order.
+    expect(matchesReplacementKind([], 'parts')).toBe(false);
+    expect(matchesReplacementKind([], 'any_batch')).toBe(false);
+    expect(matchesReplacementKind([], 'batch:P100X')).toBe(false);
+  });
+});
+
+describe('replacementKindOptions', () => {
+  const kinds = new Map([
+    ['t1', ['PARTS']], ['t2', ['PARTS']], ['t3', ['P100X']], ['t4', ['LILA-Mini']],
+  ]);
+  const tickets = [t('t1'), t('t2'), t('t3'), t('t4')];
+
+  it('counts All, Parts and Any batch, then one entry per batch', () => {
+    expect(replacementKindOptions(tickets, kinds)).toEqual([
+      { key: 'all',             label: 'All',       count: 4, group: 'all' },
+      { key: 'parts',           label: 'Parts',     count: 2, group: 'parts' },
+      { key: 'any_batch',       label: 'Any batch', count: 2, group: 'any_batch' },
+      { key: 'batch:LILA-Mini', label: 'LILA-Mini', count: 1, group: 'batch' },
+      { key: 'batch:P100X',     label: 'P100X',     count: 1, group: 'batch' },
+    ]);
+  });
+
+  it('surfaces a batch it has never seen before, with no code change', () => {
+    // The whole point: a future batch appears the moment one replacement
+    // order carries it. Nothing here is a hardcoded batch list.
+    const opts = replacementKindOptions([t('t1')], new Map([['t1', ['P250-Neo']]]));
+    expect(opts.map(o => o.key)).toEqual(['all', 'any_batch', 'batch:P250-Neo']);
+  });
+
+  it('hides buckets that would read as a dead chip', () => {
+    const opts = replacementKindOptions([t('t1')], new Map([['t1', ['PARTS']]]));
+    expect(opts.map(o => o.key)).toEqual(['all', 'parts']);
+  });
+
+  it('counts a ticket with no resolvable order under All only', () => {
+    const opts = replacementKindOptions([t('t1'), t('t2')], new Map([['t1', ['PARTS']]]));
+    expect(opts).toEqual([
+      { key: 'all',   label: 'All',   count: 2, group: 'all' },
+      { key: 'parts', label: 'Parts', count: 1, group: 'parts' },
+    ]);
+  });
+
+  it('is just All when nothing is queued', () => {
+    expect(replacementKindOptions([], new Map()).map(o => o.key)).toEqual(['all']);
   });
 });

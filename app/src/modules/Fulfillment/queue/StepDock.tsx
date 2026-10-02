@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { toggleDockCheck, confirmDock, type FulfillmentQueueRow } from '../../../lib/fulfillment';
+import { StepBlockers } from './StepBlockers';
 import styles from '../Fulfillment.module.css';
 
 const ITEMS = [
@@ -14,6 +15,9 @@ export function StepDock({ row }: { row: FulfillmentQueueRow }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const allDone = ITEMS.every(i => row[i.col]);
+  // Named rather than counted: with five look-alike checkboxes, "2 to go" still
+  // makes the operator re-read the list.
+  const blockers = ITEMS.filter(i => !row[i.col]).map(i => i.label.toLowerCase());
 
   const toggle = async (item: typeof ITEMS[number]) => {
     const next = !row[item.col];
@@ -46,6 +50,7 @@ export function StepDock({ row }: { row: FulfillmentQueueRow }) {
         <button className={styles.confirmBtn} onClick={confirm} disabled={!allDone || busy}>
           {busy ? 'Saving…' : '✓ Confirm dock & proceed to Step 5'}
         </button>
+        <StepBlockers blockers={blockers} />
       </div>
       {error && <div style={{ color: 'var(--color-error)', fontSize: 11, marginTop: 6 }}>{error}</div>}
     </div>

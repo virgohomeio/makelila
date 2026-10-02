@@ -124,6 +124,43 @@ describe('cancelOrderFromQueue', () => {
     expect(buckets.approved).toEqual([]);
   });
 
+  // Shopify has already given this customer their money back, so there is no
+  // refund left to work. Filing the cancellation as a live request puts a card
+  // in front of the refund team for a payment that already happened — what
+  // re-populated Cancellation Requests when seven settled orders were cleared
+  // out of the queue on 2026-08-21.
+  it('files an already-refunded order as settled, not as a live refund request', async () => {
+    state.order = { ...state.order, financial_status: 'refunded' };
+    await cancelOrderFromQueue('q-1', 'refunded');
+
+    const row = state.inserts.find(i => i.table === 'order_cancellations')?.row;
+    expect(row).toMatchObject({ status: 'completed' });
+    expect(row.refund_approval_id ?? null).toBeNull();
+    expect(row.processed_at).toEqual(expect.any(String));
+    expect(row.ops_notes).toMatch(/already refunded/i);
+  });
+
+  // An authorization that was never captured is the same story: no money moved,
+  // so nothing is owed back.
+  it('files a voided order as settled too', async () => {
+    state.order = { ...state.order, financial_status: 'voided' };
+    await cancelOrderFromQueue('q-1', 'never charged');
+    expect(state.inserts.find(i => i.table === 'order_cancellations')?.row)
+      .toMatchObject({ status: 'completed' });
+  });
+
+  // The other half of the rule: money the customer actually paid is a refund
+  // the team owes, and that still has to reach the board.
+  it.each(['paid', 'partially_refunded', null])(
+    'still queues a %s order — that refund is genuinely owed', async (fin) => {
+      state.order = { ...state.order, financial_status: fin };
+      await cancelOrderFromQueue('q-1', 'Customer changed their mind');
+
+      const row = state.inserts.find(i => i.table === 'order_cancellations')?.row;
+      expect(row).toMatchObject({ status: 'submitted' });
+      expect(row.processed_at ?? null).toBeNull();
+    });
+
   it('does not file a cancellation for a replacement — nothing was paid for it', async () => {
     state.order = { ...state.order, kind: 'replacement', order_ref: 'R-0002', replacement_state: 'ready' };
     await cancelOrderFromQueue('q-1', 'customer no longer needs it');
@@ -138,11 +175,41 @@ describe('returnQueueRowToOrders', () => {
 
     expect(state.deletes).toContain('fulfillment_queue');
     expect(patchFor('units')).toMatchObject({ status: 'ready' });
-    expect(patchFor('orders')).toEqual({ status: 'pending' });
+    expect(patchFor('orders')).toEqual({ status: 'pending', reconcile_outcome: 'open' });
     expect(landing).toMatchObject({ status: 'pending', label: 'Order Review › Pending' });
   });
 
-  it('sends a replacement back to Replacement › Ready when its unit is still on the shelf', async () => {
+  // Sales hides any order whose customer already has a shipped unit — the
+  // name-match heuristic that catches legacy Excel-era shipments. A reship is
+  // exactly that customer, so the landing this function promises was a lie for
+  // one: #1189 Cindy Bouchard shipped 2026-09-30, was stepped back off step 6
+  // (which clears fulfilled_at, so the already-shipped guard stops firing) and
+  // moved here with the note "Need to reship". It then appeared in no tab at
+  // all — not Pending, not Confirmed, not even All — with no queue row left to
+  // find it by either. The operator was pointed at Order Review › Pending and
+  // the order was not there, or anywhere.
+  //
+  // Sending an order back to review is a human saying this order still owes the
+  // customer a machine, which is what reconcile's 'open' outcome means and the
+  // one signal documented to beat the heuristic.
+  it('keeps a sale visible in Pending when its customer already has a shipped unit', async () => {
+    const landing = await returnQueueRowToOrders('q-1', 'Need to reship');
+    const returned = { ...state.order, ...patchFor('orders') } as unknown as Order;
+
+    const buckets = bucketOrders([returned], new Set(), new Set(['amy gaw']));
+    expect(buckets.pending.map(o => o.order_ref)).toEqual(['#1179']);
+    expect(buckets.all.map(o => o.order_ref)).toEqual(['#1179']);
+    expect(landing.label).toBe('Order Review › Pending');
+  });
+
+  // The landing for a replacement is Fulfillment › Replacements, not Sales.
+  // It read "Order Review › Replacement" until that tab was removed in
+  // 0fb7f45; after it went, an operator clicking "Shipment Not Ready" was sent
+  // to a screen that no longer existed, chasing an order Sales had stopped
+  // listing. The order was never lost — Fulfillment › Replacements lists every
+  // replacement — but nothing said so, and nothing there could put it back in
+  // the queue until queueReplacementForFulfillment().
+  it('sends a replacement back to Fulfillment › Replacements › Ready when its unit is still on the shelf', async () => {
     state.order = {
       ...state.order, kind: 'replacement', order_ref: 'R-0002',
       line_items: [{ kind: 'unit', unit_serial: '00019', batch: 'P150', qty: 1 }],
@@ -152,7 +219,7 @@ describe('returnQueueRowToOrders', () => {
     expect(patchFor('orders')).toMatchObject({
       status: 'pending', replacement_state: 'ready', awaiting_batch_id: null,
     });
-    expect(landing.label).toBe('Order Review › Replacement › Ready');
+    expect(landing.label).toBe('Fulfillment › Replacements › Ready');
   });
 
   it('sends a replacement to Awaiting Stock / Batch when its unit is gone, tagged with the batch', async () => {
@@ -169,7 +236,7 @@ describe('returnQueueRowToOrders', () => {
     expect(patchFor('orders')).toMatchObject({
       status: 'pending', replacement_state: 'awaiting', awaiting_batch_id: 'P100X',
     });
-    expect(landing.label).toBe('Order Review › Replacement › Awaiting Stock / Batch');
+    expect(landing.label).toBe('Fulfillment › Replacements › Awaiting Stock / Batch');
   });
 
   it('sends a replacement to Awaiting Stock / Batch when a part has run out', async () => {
@@ -181,7 +248,7 @@ describe('returnQueueRowToOrders', () => {
 
     const landing = await returnQueueRowToOrders('q-1');
     expect(patchFor('orders')).toMatchObject({ replacement_state: 'awaiting', awaiting_batch_id: null });
-    expect(landing.label).toBe('Order Review › Replacement › Awaiting Stock / Batch');
+    expect(landing.label).toBe('Fulfillment › Replacements › Awaiting Stock / Batch');
   });
 
   it('refuses an order that has already shipped', async () => {

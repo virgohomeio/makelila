@@ -1,29 +1,47 @@
 import { useState } from 'react';
 import { confirmLabel, type FulfillmentQueueRow } from '../../../lib/fulfillment';
+import { QUEUE_CARRIERS } from '../../../lib/queueCarrier';
+import { EzTransPanel, type EzTransOrder } from './EzTransPanel';
+import { StepBlockers } from './StepBlockers';
 import styles from '../Fulfillment.module.css';
 
-const CARRIERS = ['UPS', 'FedEx', 'Purolator', 'Canada Post', 'Canpar', 'GLS'] as const;
 
 const FREIGHTCOM_URL = 'https://live.freightcom.com/c/mNyRdnwfdBn2raBkyImG9lemXej03RJB/ship/new';
 const AMAZON_URL     = 'https://www.amazon.com/gp/your-account/order-history';
 
 export function StepLabel({
   row,
-  country,
+  order,
+  onBatchChanged,
 }: {
   row: FulfillmentQueueRow;
-  country: 'US' | 'CA';
+  /** The whole order: the EZ Trans packing list needs the customer's full
+   *  name, address, email and phone, not just the country. */
+  order: EzTransOrder;
+  /** Passed through to the EZ Trans panel: confirming an order into the day's
+   *  Goorooship batch has to reach the footer at the bottom of the queue. */
+  onBatchChanged?: () => void;
 }) {
-  const [carrier, setCarrier] = useState<string>('');
-  const [tracking, setTracking] = useState<string>('');
-  const [starterTracking, setStarterTracking] = useState<string>('');
+  const country = order.country;
+  // Seeded from the row so a label already attached — by the EZ Trans panel
+  // below, or on an earlier pass that was rewound — doesn't have to be typed
+  // in twice.
+  const [carrier, setCarrier] = useState<string>(row.carrier ?? '');
+  const [tracking, setTracking] = useState<string>(row.tracking_num ?? '');
+  const [starterTracking, setStarterTracking] = useState<string>(row.starter_tracking_num ?? '');
   const [pdf, setPdf] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const lilaReady = !!carrier && !!tracking.trim();
-  const starterReady = country === 'CA' || !!starterTracking.trim();
-  const ready = lilaReady && starterReady;
+  // The Freightcom details are the whole gate, on a US order as much as a CA
+  // one. The Amazon starter-kit number used to be mandatory for every US
+  // order, which stranded any that never shipped a starter kit: there was no
+  // number to paste and no way past step 3. It is recorded when known now,
+  // never demanded.
+  const blockers: string[] = [];
+  if (!carrier) blockers.push('a carrier');
+  if (!tracking.trim()) blockers.push('the Freightcom tracking number');
+  const ready = blockers.length === 0;
 
   const handleConfirm = async () => {
     if (!ready) return;
@@ -33,7 +51,9 @@ export function StepLabel({
         carrier,
         tracking_num: tracking.trim(),
         ...(pdf ? { label_pdf: pdf } : {}),
-        ...(country === 'US' ? { starter_tracking_num: starterTracking.trim() } : {}),
+        ...(country === 'US' && starterTracking.trim()
+          ? { starter_tracking_num: starterTracking.trim() }
+          : {}),
       });
     } catch (e) { setError((e as Error).message); }
     finally { setBusy(false); }
@@ -42,6 +62,14 @@ export function StepLabel({
   return (
     <div>
       <h3 style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>Attach the shipping label details</h3>
+
+      {/* Renders only when the assigned unit is held at the EZTrans 3PL. */}
+      <EzTransPanel
+        row={row}
+        order={order}
+        onLabelSaved={({ carrier: c, tracking_num: t }) => { setCarrier(c); setTracking(t); }}
+        onBatchChanged={onBatchChanged}
+      />
 
       <div style={{
         background: 'var(--color-info-bg)',
@@ -87,7 +115,7 @@ export function StepLabel({
           style={{ padding: '6px 10px', fontSize: 11, border: '1px solid var(--color-border)', borderRadius: 4 }}
         >
           <option value="">— select —</option>
-          {CARRIERS.map(c => <option key={c} value={c}>{c}</option>)}
+          {QUEUE_CARRIERS.map(c => <option key={c} value={c}>{c}</option>)}
         </select>
 
         <label style={{ display: 'block', fontSize: 11, color: 'var(--color-ink-subtle)', marginTop: 10 }}>
@@ -119,12 +147,19 @@ export function StepLabel({
             >Remove</button>
           </div>
         ) : (
-          <input
-            type="file"
-            accept="application/pdf"
-            onChange={e => setPdf(e.target.files?.[0] ?? null)}
-            style={{ fontSize: 11 }}
-          />
+          <>
+            <input
+              type="file"
+              accept="application/pdf"
+              onChange={e => setPdf(e.target.files?.[0] ?? null)}
+              style={{ fontSize: 11 }}
+            />
+            {row.label_pdf_path && (
+              <div style={{ fontSize: 10, color: 'var(--color-ink-subtle)', marginTop: 3 }}>
+                A label is already on this order — pick a file only to replace it.
+              </div>
+            )}
+          </>
         )}
       </div>
 
@@ -133,7 +168,7 @@ export function StepLabel({
         <div className={styles.labelSection}>
           <div className={styles.labelSectionHead}>Compost starter kit (Amazon)</div>
           <label style={{ display: 'block', fontSize: 11, color: 'var(--color-ink-subtle)', marginTop: 4 }}>
-            Tracking number:
+            Tracking number (optional — only if this order ships a starter kit):
           </label>
           <input
             type="text"
@@ -152,6 +187,7 @@ export function StepLabel({
         <button className={styles.confirmBtn} onClick={handleConfirm} disabled={!ready || busy}>
           {busy ? 'Saving…' : '✓ Confirm label'}
         </button>
+        <StepBlockers blockers={blockers} />
       </div>
       {error && <div style={{ color: 'var(--color-error)', fontSize: 11, marginTop: 6 }}>{error}</div>}
     </div>

@@ -3,7 +3,7 @@ import { renderHook, waitFor } from '@testing-library/react';
 import {
   useJobPostings, useCandidates, useInterviews,
   createJobPosting, addPostingInterviewer, searchInternalProfiles, getCurrentUserId,
-  updateCandidateStage, recordCandidateScore, rejectCandidate, hireCandidate,
+  updateCandidateStage, recordCandidateScore, rejectCandidate, hireCandidate, recordProjectScores,
   createInterview, recordInterviewDecision, updatePostingRubric,
   suggestScreeningRubric, uploadAndScoreResume, getResumeSignedUrl, getResumeObjectUrl,
   isAssignedInterviewerAnywhere, extractFunctionErrorMessage, getPostingInterviewers,
@@ -149,16 +149,28 @@ describe('mutations', () => {
     expect(mockUpdate).toHaveBeenCalledWith({ scores: { culture_fit: 4 } });
   });
 
-  it('rejectCandidate sets rejected_at and clears hired_at (switching a shortlisted candidate)', async () => {
+  it('rejectCandidate records the resume-screening stage and clears hired_at (switching a shortlisted candidate)', async () => {
     mockEq.mockReturnValueOnce({ then: (f: (v: unknown) => unknown) => Promise.resolve({ error: null }).then(f) });
-    await rejectCandidate('c1');
-    expect(mockUpdate).toHaveBeenCalledWith({ rejected_at: expect.any(String), hired_at: null });
+    await rejectCandidate('c1', 'resume_screening');
+    expect(mockUpdate).toHaveBeenCalledWith({ rejected_at: expect.any(String), rejection_stage: 'resume_screening', hired_at: null });
   });
 
-  it('hireCandidate sets hired_at and clears rejected_at (switching a rejected candidate)', async () => {
+  it('rejectCandidate records the interview stage when rejecting from the Interviews board', async () => {
+    mockEq.mockReturnValueOnce({ then: (f: (v: unknown) => unknown) => Promise.resolve({ error: null }).then(f) });
+    await rejectCandidate('c1', 'interview');
+    expect(mockUpdate).toHaveBeenCalledWith({ rejected_at: expect.any(String), rejection_stage: 'interview', hired_at: null });
+  });
+
+  it('hireCandidate sets hired_at and clears the rejection, stage included (switching a rejected candidate)', async () => {
     mockEq.mockReturnValueOnce({ then: (f: (v: unknown) => unknown) => Promise.resolve({ error: null }).then(f) });
     await hireCandidate('c1');
-    expect(mockUpdate).toHaveBeenCalledWith({ hired_at: expect.any(String), rejected_at: null });
+    expect(mockUpdate).toHaveBeenCalledWith({ hired_at: expect.any(String), rejected_at: null, rejection_stage: null });
+  });
+
+  it('recordProjectScores writes the project_scores object', async () => {
+    mockEq.mockReturnValueOnce({ then: (f: (v: unknown) => unknown) => Promise.resolve({ error: null }).then(f) });
+    await recordProjectScores('c1', { 'Question 1': 4, 'Question 2': 5 });
+    expect(mockUpdate).toHaveBeenCalledWith({ project_scores: { 'Question 1': 4, 'Question 2': 5 } });
   });
 
   it('createInterview inserts a row and returns it', async () => {

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from './supabase';
 import { logAction } from './activityLog';
@@ -97,9 +97,23 @@ export function useEmailTemplates(): { templates: EmailTemplate[]; loading: bool
  *  callers that render a single known template (the Hiring board's screening
  *  invite draft) rather than browsing the library — useEmailTemplates() would
  *  pull every row and open a channel on each mount. */
-export function useEmailTemplate(key: string): { template: EmailTemplate | null; loading: boolean } {
+/** One template by key. `refresh` re-reads it: this hook fetches once with no
+ *  realtime subscription, so a caller that edits the row (Step 5's "Save as
+ *  default") must ask for the new copy or keep rendering the old one. */
+export function useEmailTemplate(key: string): {
+  template: EmailTemplate | null; loading: boolean; refresh: () => Promise<void>;
+} {
   const [template, setTemplate] = useState<EmailTemplate | null>(null);
   const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    const { data, error } = await supabase
+      .from('email_templates')
+      .select('*')
+      .eq('key', key)
+      .maybeSingle();
+    setTemplate(!error && data ? (data as EmailTemplate) : null);
+  }, [key]);
 
   useEffect(() => {
     let cancelled = false;
@@ -117,7 +131,7 @@ export function useEmailTemplate(key: string): { template: EmailTemplate | null;
     return () => { cancelled = true; };
   }, [key]);
 
-  return { template, loading };
+  return { template, loading, refresh: load };
 }
 
 /** The signed-in operator's own booking link (profiles.scheduling_url), which
@@ -222,10 +236,61 @@ export function renderTemplate(template: string, vars: Record<string, string | u
 
 // ---------- mutations ----------
 
-export async function updateTemplate(id: string, patch: Partial<Pick<EmailTemplate, 'name' | 'description' | 'subject' | 'body' | 'category' | 'active'>>): Promise<void> {
+export async function updateTemplate(id: string, patch: Partial<Pick<EmailTemplate, 'name' | 'description' | 'subject' | 'body' | 'category' | 'active' | 'variables'>>): Promise<void> {
   const { error } = await supabase.from('email_templates').update(patch).eq('id', id);
   if (error) throw error;
   await logAction('template_updated', id, Object.keys(patch).join(', '));
+}
+
+/** The logged send of one template for one order, newest first.
+ *
+ *  email_messages has no order column, so the link is made through the
+ *  rendered variables — every shipment confirmation records the order_ref it
+ *  was built from. Returns null when nothing was logged, which is the honest
+ *  answer for anything sent before the fulfilment send started writing an
+ *  audit row on 2026-09-24. */
+export function useSentEmail(templateKey: string, orderRef: string | null): {
+  message: EmailMessage | null; loading: boolean;
+} {
+  const [message, setMessage] = useState<EmailMessage | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    (async () => {
+      if (!orderRef) { if (!cancelled) { setMessage(null); setLoading(false); } return; }
+      const { data, error } = await supabase
+        .from('email_messages')
+        .select('*')
+        .eq('template_key', templateKey)
+        .eq('variables->>order_ref', orderRef)
+        .order('created_at', { ascending: false })
+        .limit(1);
+      if (cancelled) return;
+      setMessage(!error && data && data.length > 0 ? (data[0] as EmailMessage) : null);
+      setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [templateKey, orderRef]);
+
+  return { message, loading };
+}
+
+/** Create a template row. Used when a surface wants to persist wording for a
+ *  key that was never seeded — saving from Step 5 on a database where the
+ *  shipment-confirmation migration has not run, for instance. */
+export async function createTemplate(input: Pick<EmailTemplate,
+  'key' | 'name' | 'category' | 'subject' | 'body'
+> & { description?: string; variables?: string[] }): Promise<void> {
+  const { error } = await supabase.from('email_templates').insert({
+    key: input.key, name: input.name, category: input.category,
+    description: input.description ?? null,
+    subject: input.subject, body: input.body,
+    variables: input.variables ?? [],
+  });
+  if (error) throw error;
+  await logAction('template_created', input.key, input.name);
 }
 
 export async function sendTemplate(input: {

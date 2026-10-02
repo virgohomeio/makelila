@@ -118,6 +118,98 @@ export function buildShipmentDetails(input: {
   };
 }
 
+/** The LILA composter as it ships: one 23 kg box, 61 cm on every side. Every
+ *  caller rated exactly one of these no matter what the order said, which is
+ *  the whole of the multi-unit defect below. */
+export const LILA_PACKAGE: FreightcomPackage = {
+  weight_kg: 23, length_cm: 61, width_cm: 61, height_cm: 61, description: 'LILA Composter',
+};
+
+/** A line item as the orders table holds one. Shopify-synced sale lines carry
+ *  no `kind`; replacement lines do. */
+export type QuotableLineItem = {
+  kind?: string;
+  name?: string;
+  qty?: number;
+  price_usd?: number;
+};
+
+/** Cart lines that are not a thing in a box: a discount unlock, a gift card, a
+ *  tip. They carry a qty of 1 like everything else, so without this an order
+ *  with a promo line would be rated as two composters. Matched from the start
+ *  of the name, not on a loose "off"/"sale" substring — "LILA Composter
+ *  (Pre-order 20% OFF)" is a real unit and must not be dropped. */
+const NON_SHIPPABLE_LINE =
+  /^(?:unlock\b|gift\s*card|e-?gift|discount\b|donation\b|tip\b|warranty\b|protection\s+plan\b|installation\b|shipping\s+protection\b)/i;
+
+/** How many composter boxes this order actually puts on a truck.
+ *
+ *  Freight scales with the box count and nothing else: measured against the
+ *  live API on 2026-09-10, L3R9Z7 → M1N 1H9 rates $36.43 CAD for one package
+ *  and $59.98 for two. `freightcom-quote` rated a single package for every
+ *  order regardless, so a two-unit order was quoted at roughly 60% of its real
+ *  cost. Parts are excluded — a replacement part is not a 23 kg pallet box, and
+ *  rating it as one overstates the freight rather than understating it. */
+export function shippableUnitCount(items: QuotableLineItem[] | null | undefined): number {
+  let n = 0;
+  for (const li of items ?? []) {
+    if (li?.kind === 'part') continue;
+    if (NON_SHIPPABLE_LINE.test((li?.name ?? '').trim())) continue;
+    const qty = Number(li?.qty);
+    n += Number.isFinite(qty) && qty > 0 ? Math.floor(qty) : 1;
+  }
+  return n;
+}
+
+/** The package list to rate for an order. Always at least one box: an order
+ *  whose lines we cannot read still needs a number an operator can work with,
+ *  and a zero-package body is rejected by Freightcom outright. */
+export function packagesForLineItems(items: QuotableLineItem[] | null | undefined): FreightcomPackage[] {
+  const n = Math.max(1, shippableUnitCount(items));
+  return Array.from({ length: n }, () => ({ ...LILA_PACKAGE }));
+}
+
+/** Which postal code to rate against.
+ *
+ *  A rate is only as accurate as the destination it was asked about, and the
+ *  destination we hold can be wrong: address verification exists precisely
+ *  because customers mistype their postal code. When it has established that
+ *  the customer's code is wrong AND has the postal authority's own code, that
+ *  is the one to quote — otherwise Sales prices an order against a place the
+ *  parcel will never go.
+ *
+ *  Anything short of a confirmed mismatch keeps the customer's code: an
+ *  unverified or unverifiable address is not evidence of anything. */
+export function quotableDestinationPostal(order: {
+  postal_code?: string | null;
+  country?: string | null;
+  address_match?: string | null;
+  address_google_postal?: string | null;
+}): { postal_code: string | null; source: 'customer' | 'verified' } {
+  const country = order.country === 'US' ? 'US' : 'CA';
+  const customer = rateablePostal(order.postal_code, country);
+  const verified = rateablePostal(order.address_google_postal, country);
+  if (order.address_match === 'mismatch' && verified) {
+    return { postal_code: verified, source: 'verified' };
+  }
+  return { postal_code: customer, source: 'customer' };
+}
+
+/** A postal code in the form Freightcom rates on. Google hands back ZIP+4
+ *  ("42320-2143") and customers type spaces; neither is what the carrier wants,
+ *  and a US +4 is more precision than any rate engine uses. */
+export function rateablePostal(
+  postal: string | null | undefined, country: string,
+): string | null {
+  const raw = (postal ?? '').toUpperCase().replace(/[\s-]/g, '');
+  if (!raw) return null;
+  if (country === 'US') {
+    const m = raw.match(/^(\d{5})\d{0,4}$/);
+    return m ? m[1] : null;
+  }
+  return raw;
+}
+
 /** Tomorrow, UTC — the default expected ship date every caller uses. */
 export function nextShipDate(now: number): ShipDate {
   const d = new Date(now + 86_400_000);

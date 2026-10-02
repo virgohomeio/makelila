@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
   useDeviceContext,
   computeCoverageState,
@@ -42,15 +43,17 @@ interface ChipProps {
   label: string;
   title?: string;
   onClick?: () => void;
-  href?: string;
+  to?: string;
 }
 
-function Chip({ colorClass, label, title, onClick, href }: ChipProps) {
-  if (href) {
+function Chip({ colorClass, label, title, onClick, to }: ChipProps) {
+  // A router Link, not an <a href="#/…">: the app runs on BrowserRouter, so a
+  // hash href never navigated anywhere — the chip's own count was unverifiable.
+  if (to) {
     return (
-      <a className={`${styles.chip} ${colorClass}`} href={href} title={title}>
+      <Link className={`${styles.chip} ${colorClass}`} to={to} title={title}>
         {label}
-      </a>
+      </Link>
     );
   }
   return (
@@ -72,8 +75,8 @@ interface Props {
   currentTicketId?: string;
 }
 
-export function DeviceContextHeader({ unitSerial, currentTicketId: _currentTicketId }: Props) {
-  const ctx = useDeviceContext(unitSerial);
+export function DeviceContextHeader({ unitSerial, currentTicketId }: Props) {
+  const ctx = useDeviceContext(unitSerial, currentTicketId);
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   // ── "No unit linked" state ────────────────────────────────────────────
@@ -134,9 +137,16 @@ export function DeviceContextHeader({ unitSerial, currentTicketId: _currentTicke
   }
 
   // ── 3. Open tickets chip ────────────────────────────────────────────────────
+  // The count is open *support* tickets on this unit (see countOpenSupportTickets),
+  // minus the one on screen — so say "other" when there is one on screen, and
+  // never say "no prior tickets", which claims no history when what was
+  // measured is no open work.
   const oc = ctx.openTicketCount;
   const ocColor = oc === 0 ? styles.chipGrey : oc <= 2 ? styles.chipAmber : styles.chipRed;
-  const ocLabel = oc === 0 ? 'No prior tickets' : `${oc} open ticket${oc === 1 ? '' : 's'}`;
+  const ocOther = currentTicketId ? 'other ' : '';
+  const ocLabel = oc === 0
+    ? `No ${ocOther}open tickets`
+    : `${oc} ${ocOther}open ticket${oc === 1 ? '' : 's'}`;
 
   // ── 4. Returns chip ─────────────────────────────────────────────────────────
   const rc = ctx.returnCount;
@@ -195,7 +205,7 @@ export function DeviceContextHeader({ unitSerial, currentTicketId: _currentTicke
         <Chip
           colorClass={ocColor}
           label={ocLabel}
-          href={oc > 0 ? `#/service?unit_serial=${encodeURIComponent(unitSerial)}` : undefined}
+          to={oc > 0 ? `/service?tab=support&unit_serial=${encodeURIComponent(unitSerial)}` : undefined}
           onClick={oc === 0 ? toggleDrawer : undefined}
         />
 

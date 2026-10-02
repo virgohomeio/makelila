@@ -16,8 +16,17 @@ function mkOrder(partial: Partial<Order> & { id: string; status: Order['status']
     address_line2: null,
     city: 'Portland',
     region_state: 'OR',
+    postal_code: '97201',
     country: 'US',
     address_verdict: 'house',
+    address_verdict_source: 'sync-guess',
+    address_unit_status: null,
+    address_area_type_error: null,
+    address_validation_granularity: null,
+    address_usps_dpv: null,
+    address_usps_record_type: null,
+    address_is_residential: null,
+    address_is_business: null,
     area_type: 'suburban',
     area_type_source: 'auto',
     address_verified_at: null,
@@ -79,10 +88,10 @@ describe('Sidebar', () => {
       <Sidebar
         all={[p1, p2, h1, f1]}
         pending={[p1, p2]}
+        pendingBacklog={[]}
         held={[h1]}
         flagged={[f1]}
         approved={[]}
-        replacement={[]}
         cancelled={[c1]}
         selectedId={selectedId}
         onSelect={onSelect}
@@ -99,7 +108,7 @@ describe('Sidebar', () => {
 
   it('switches tab content when a tab is clicked', () => {
     render_();
-    fireEvent.click(screen.getByText(/Flagged \(1\)/));
+    fireEvent.click(screen.getByRole('button', { name: /^Flagged: 1 order$/ }));
     expect(screen.getByText('Flagged Customer')).toBeInTheDocument();
     expect(screen.queryByText('Alice Ames')).not.toBeInTheDocument();
   });
@@ -112,6 +121,59 @@ describe('Sidebar', () => {
     expect(screen.queryByText('Alice Ames')).not.toBeInTheDocument();
   });
 
+  // The cutoff trims the Pending queue, and a queue that quietly drops rows is
+  // a queue nobody can trust. The rail has to say what is being held back and
+  // give a way to it, or #1082 just looks lost.
+  it('reports how many pending orders the cutoff is holding back', () => {
+    const stale = mkOrder({ id: 'x1', status: 'pending', customer_name: 'Richard Ahola' });
+    render(
+      <Sidebar
+        all={[p1, stale]} pending={[p1]} pendingBacklog={[stale]}
+        held={[]} flagged={[]} approved={[]} cancelled={[]}
+        selectedId={null} onSelect={vi.fn()}
+      />,
+    );
+    const note = screen.getByRole('button', { name: /1 held back from this queue/i });
+    expect(note).toBeInTheDocument();
+    // And it is a way through, not just a label: it opens the tab that has them.
+    expect(screen.queryByText('Richard Ahola')).not.toBeInTheDocument();
+    fireEvent.click(note);
+    expect(screen.getByText('Richard Ahola')).toBeInTheDocument();
+  });
+
+  // Confirmed's only rule was age, and age is a module-wide filter now, so it
+  // holds nothing back and must not claim to. Pending keeps its money rule and
+  // is the only tab that can still show the note.
+  it('shows no held-back note on Confirmed, which holds nothing back', () => {
+    const refunded = mkOrder({ id: 'r1', status: 'pending', customer_name: 'Sherry Tang' });
+    render(
+      <Sidebar
+        all={[p1, refunded]} pending={[p1]} pendingBacklog={[refunded]}
+        held={[]} flagged={[]} approved={[]}
+        cancelled={[]} selectedId={null} onSelect={vi.fn()}
+      />,
+    );
+    // Pending holds one back on the money rule, so the note is there.
+    expect(screen.getByRole('button', { name: /1 held back from this queue/i }))
+      .toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /^Confirmed: 0 orders$/ }));
+    expect(screen.queryByText(/held back/i)).not.toBeInTheDocument();
+  });
+
+  // Every tab starts at the cutoff and search only looks in the open tab, so
+  // the rail says where the module begins rather than leaving someone to
+  // conclude an older order was deleted.
+  it('says what date the module starts from', () => {
+    render_();
+    expect(screen.getByText(/from Jun 2, 2026/)).toBeInTheDocument();
+  });
+
+  it('says nothing about a backlog when the cutoff is holding nothing back', () => {
+    render_();
+    expect(screen.queryByText(/held back/i)).not.toBeInTheDocument();
+  });
+
   it('invokes onSelect with the row id when a row is clicked', () => {
     const onSelect = vi.fn();
     render_(null, onSelect);
@@ -122,11 +184,11 @@ describe('Sidebar', () => {
   it('shows empty-state copy when the active tab has no rows', () => {
     render(
       <Sidebar
-        all={[]} pending={[]} held={[]} flagged={[]} approved={[]} replacement={[]} cancelled={[]}
+        all={[]} pending={[]} pendingBacklog={[]} held={[]} flagged={[]} approved={[]} cancelled={[]}
         selectedId={null} onSelect={vi.fn()}
       />,
     );
-    expect(screen.getByText(/no orders in this tab/i)).toBeInTheDocument();
+    expect(screen.getByText(/nothing in pending/i)).toBeInTheDocument();
   });
 
   // Cancelled orders are dead but not gone: they get their own tab so the team
@@ -134,7 +196,7 @@ describe('Sidebar', () => {
   it('keeps cancelled orders out of every live tab but lists them under Cancelled', () => {
     render_();
     expect(screen.queryByText('Gabriella Hottya')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByText(/Cancelled \(1\)/));
+    fireEvent.click(screen.getByRole('button', { name: /^Cancelled: 1 order$/ }));
     expect(screen.getByText('Gabriella Hottya')).toBeInTheDocument();
     expect(screen.queryByText('Alice Ames')).not.toBeInTheDocument();
   });
@@ -153,20 +215,53 @@ describe('Sidebar', () => {
     });
     render(
       <Sidebar
-        all={[]} pending={[]} held={[]} flagged={[]} approved={[]} replacement={[]}
+        all={[]} pending={[]} pendingBacklog={[]} held={[]} flagged={[]} approved={[]}
         cancelled={[newer, older]}
         selectedId={null} onSelect={vi.fn()}
       />,
     );
-    fireEvent.click(screen.getByText(/Cancelled \(2\)/));
+    fireEvent.click(screen.getByRole('button', { name: /^Cancelled: 2 orders$/ }));
     const names = screen.getAllByText(/Cancel$/).map(n => n.textContent);
     expect(names).toEqual(['Newer Cancel', 'Older Cancel']);
   });
 
   it('marks a cancelled row as cancelled instead of showing an SLA countdown', () => {
     render_();
-    fireEvent.click(screen.getByText(/Cancelled \(1\)/));
-    expect(screen.getByText('CANCELLED')).toBeInTheDocument();
-    expect(screen.queryByText(/OVERDUE/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /^Cancelled: 1 order$/ }));
+    const row = screen.getByRole('button', { name: /Gabriella Hottya/ });
+    expect(row).toHaveTextContent(/cancelled/i);
+    expect(row).not.toHaveTextContent(/OVERDUE/);
+  });
+
+  // The rail is a scanning surface: identity on the left, state right-aligned
+  // so tags and SLA chips form columns down the list. Rows are real buttons,
+  // so the whole row is keyboard-reachable rather than a div with role.
+  it('renders each order as a button carrying its ref, city and country', () => {
+    render_();
+    const row = screen.getByRole('button', { name: /Alice Ames/ });
+    expect(row).toHaveTextContent('#p1');
+    expect(row).toHaveTextContent('Portland');
+    expect(row).toHaveTextContent('US');
+  });
+
+  it('reports how many orders the active tab is showing', () => {
+    render_();
+    expect(screen.getByText('2 orders')).toBeInTheDocument();
+  });
+
+  it('names the tab and the query when a search returns nothing', () => {
+    render_();
+    fireEvent.change(screen.getByPlaceholderText(/search name/i), { target: { value: 'zzz' } });
+    expect(screen.getByText(/Nothing in Pending matches/i)).toBeInTheDocument();
+    expect(screen.getByText('0 orders matching')).toBeInTheDocument();
+  });
+
+  it('clears the query from the search box', () => {
+    render_();
+    const box = screen.getByPlaceholderText(/search name/i);
+    fireEvent.change(box, { target: { value: 'bob' } });
+    expect(screen.queryByText('Alice Ames')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /clear search/i }));
+    expect(screen.getByText('Alice Ames')).toBeInTheDocument();
   });
 });

@@ -1,27 +1,27 @@
 import { useMemo, useState } from 'react';
 import type { Order } from '../../lib/orders';
-import { supabase } from '../../lib/supabase';
+import { SALES_QUEUE_START } from '../../lib/orders';
 import { OrderRow } from './OrderRow';
+import { indexRefundFlags, useRefundMarks } from '../../lib/refundedOrders';
+import { useOrderCommAssessments } from '../../lib/orderComms';
+import { EmptyState } from '../../components/ui';
 import styles from './OrderReview.module.css';
 
-type Tab = 'pending' | 'held' | 'flagged' | 'approved' | 'replacement' | 'all' | 'cancelled';
-
-type SyncState =
-  | { kind: 'idle' }
-  | { kind: 'syncing' }
-  | { kind: 'done'; imported: number; skipped: number }
-  | { kind: 'error'; message: string };
+type Tab = 'pending' | 'held' | 'flagged' | 'approved' | 'all' | 'cancelled';
 
 export function Sidebar({
-  pending, held, flagged, approved, replacement, all, cancelled,
+  pending, pendingBacklog, held, flagged, approved, all, cancelled,
   selectedId,
   onSelect,
 }: {
   pending: Order[];
+  /** What Pending holds back because the money already went back. They are not
+   *  in that tab but are still in All, so the rail says so rather than letting
+   *  them disappear quietly. */
+  pendingBacklog: Order[];
   held: Order[];
   flagged: Order[];
   approved: Order[];
-  replacement: Order[];
   all: Order[];
   /** Terminal — cancelled here or from the fulfillment queue. Already sorted
    *  newest-cancelled first by bucketOrders. */
@@ -30,26 +30,15 @@ export function Sidebar({
   onSelect: (id: string) => void;
 }) {
   const [tab, setTab] = useState<Tab>('pending');
-  // Replacement sub-tab: ready-to-ship vs waiting on out-of-stock parts / a
-  // pending unit batch (spec 2026-06-08).
-  const [replSub, setReplSub] = useState<'ready' | 'awaiting'>('ready');
   const [query, setQuery] = useState('');
-
-  const replReady = useMemo(
-    () => replacement.filter(o => o.replacement_state !== 'awaiting'),
-    [replacement],
-  );
-  const replAwaiting = useMemo(
-    () => replacement.filter(o => o.replacement_state === 'awaiting'),
-    [replacement],
-  );
-  const [sync, setSync] = useState<SyncState>({ kind: 'idle' });
+  // One query for the whole rail rather than one per row: a refund badge is
+  // cheap to compute and expensive to fetch.
+  const { marks } = useRefundMarks();
 
   const source = tab === 'pending'     ? pending
                : tab === 'held'        ? held
                : tab === 'flagged'     ? flagged
                : tab === 'approved'    ? approved
-               : tab === 'replacement' ? (replSub === 'awaiting' ? replAwaiting : replReady)
                : tab === 'cancelled'   ? cancelled
                : all;
 
@@ -68,97 +57,129 @@ export function Sidebar({
     return [...filtered].sort((a, b) => a.order_ref.localeCompare(b.order_ref));
   }, [source, query, tab]);
 
+  const refundFlags = useMemo(() => indexRefundFlags(visible, marks), [visible, marks]);
+  // One query for the whole rail. Only 'unclear' reaches the row — see the
+  // commConcern note on OrderRow.
+  const { byOrderId: commAssessments } = useOrderCommAssessments();
+
   const tabs: Array<{ key: Tab; label: string; count: number }> = [
     { key: 'pending',     label: 'Pending',     count: pending.length },
     { key: 'held',        label: 'Held',        count: held.length },
     { key: 'flagged',     label: 'Flagged',     count: flagged.length },
     { key: 'approved',    label: 'Confirmed',   count: approved.length },
-    { key: 'replacement', label: 'Replacement', count: replacement.length },
     { key: 'all',         label: 'All',         count: all.length },
     { key: 'cancelled',   label: 'Cancelled',   count: cancelled.length },
   ];
 
-  const runSync = async () => {
-    setSync({ kind: 'syncing' });
-    const { data, error } = await supabase.functions.invoke<{
-      fetched: number;
-      imported: number;
-      skipped: number;
-    }>('sync-shopify-orders', { body: {} });
-    if (error) {
-      setSync({ kind: 'error', message: error.message });
-      return;
-    }
-    if (!data) {
-      setSync({ kind: 'error', message: 'empty response' });
-      return;
-    }
-    setSync({ kind: 'done', imported: data.imported, skipped: data.skipped });
-  };
+  const activeTabLabel = tabs.find(t => t.key === tab)?.label ?? '';
+
+  // Rendered from the constant itself, so moving the cutoff moves this label
+  // too — a hardcoded date here would go stale the first time it changed.
+  const cutoffLabel = new Date(`${SALES_QUEUE_START}T00:00:00`)
+    .toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+
+  // Age is a module-wide filter now, so no tab holds a row back for being old.
+  // Pending is the only queue with a rule of its own left — the money one — and
+  // what it holds back is still in All, which is where the note points.
+  const queueBacklog = tab === 'pending' ? pendingBacklog : [];
 
   return (
     <aside className={styles.sidebar}>
       <div className={styles.sidebarHeader}>
-        <div className={styles.syncRow}>
-          <button
-            className={styles.syncBtn}
-            onClick={runSync}
-            disabled={sync.kind === 'syncing'}
-          >
-            {sync.kind === 'syncing' ? 'Syncing…' : '⟲ Sync from Shopify'}
-          </button>
-          <div className={styles.syncStatus}>
-            {sync.kind === 'done' &&
-              `${sync.imported} new · ${sync.skipped} skipped`}
-            {sync.kind === 'error' && (
-              <span className={styles.syncError}>Failed: {sync.message}</span>
-            )}
-          </div>
+        <div className={styles.searchWrap}>
+          <span className={styles.searchIcon} aria-hidden="true">⌕</span>
+          <input
+            className={styles.search}
+            placeholder="Search name, email, order #"
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+          />
+          {query && (
+            <button
+              type="button"
+              className={styles.searchClear}
+              onClick={() => setQuery('')}
+              aria-label="Clear search"
+            >×</button>
+          )}
         </div>
 
-        <div className={`${styles.tabBar} ${styles.tabBarScroll}`}>
+        {/* Seven statuses wrap onto two rows. They used to scroll sideways,
+            which put Cancelled off the edge of the rail. */}
+        <div className={styles.tabBar}>
           {tabs.map(t => (
             <button
               key={t.key}
-              className={`${styles.tab} ${tab === t.key ? styles.activeTab : ''}`}
+              type="button"
+              className={[
+                styles.tab,
+                tab === t.key ? styles.activeTab : '',
+                t.count === 0 ? styles.tabZero : '',
+              ].filter(Boolean).join(' ')}
               onClick={() => setTab(t.key)}
+              aria-pressed={tab === t.key}
+              // Without this the badge runs into the label and the tab
+              // announces as "Flagged1".
+              aria-label={`${t.label}: ${t.count} order${t.count === 1 ? '' : 's'}`}
             >
-              {t.label} ({t.count})
+              {t.label}<span className={styles.tabCount}>{t.count}</span>
             </button>
           ))}
         </div>
-        {tab === 'replacement' && (
-          <div className={styles.tabBar}>
-            <button
-              className={`${styles.tab} ${replSub === 'ready' ? styles.activeTab : ''}`}
-              onClick={() => setReplSub('ready')}
-            >
-              Replacement Orders (Ready) ({replReady.length})
-            </button>
-            <button
-              className={`${styles.tab} ${replSub === 'awaiting' ? styles.activeTab : ''}`}
-              onClick={() => setReplSub('awaiting')}
-            >
-              Awaiting Stock / Batch ({replAwaiting.length})
-            </button>
-          </div>
-        )}
-        <input
-          className={styles.search}
-          placeholder="Search name, email, order #"
-          value={query}
-          onChange={e => setQuery(e.target.value)}
-        />
+
       </div>
+
+      {/* Every tab starts at the cutoff, so an older order is in none of them
+          and search will not find it either. Say so once, here, rather than
+          leaving someone to conclude the row was deleted. */}
+      <div className={styles.railCount}>
+        {visible.length} order{visible.length === 1 ? '' : 's'}{query.trim() ? ' matching' : ''}
+        <span className={styles.railCutoff} title={`Sales shows orders placed on or after ${cutoffLabel}. Older orders still exist and are unchanged, but no tab lists them and search does not reach them.`}>
+          {' '}· from {cutoffLabel}
+        </span>
+      </div>
+
+      {/* A queue that quietly drops rows is a queue nobody can trust. When the
+          cutoff is holding anything back, say how much and where it went. */}
+      {queueBacklog.length > 0 && (
+        <button
+          type="button"
+          className={styles.backlogNote}
+          onClick={() => setTab('all')}
+          title="Held back from this queue: already refunded, so there is nothing left to confirm, pick or ship. They keep their rows and stay searchable — click to see them in All."
+        >
+          {queueBacklog.length} held back from this queue — see All
+        </button>
+      )}
+
       <div className={styles.list}>
         {visible.length === 0 ? (
-          <div className={styles.emptyList}>No orders in this tab.</div>
-        ) : visible.map(o => (
+          query.trim() ? (
+            <EmptyState
+              title="No match"
+              body={`Nothing in ${activeTabLabel} matches “${query.trim()}”. Try a different name, email or order number, or switch tabs.`}
+            />
+          ) : (
+            <EmptyState
+              title={`Nothing in ${activeTabLabel}`}
+              body="Sync from Shopify to pull in orders placed since the last run."
+            />
+          )
+        ) : visible.map((o, i) => (
           <OrderRow
             key={o.id}
             order={o}
+            // Drives the load stagger. Capped at 14 so a long queue's last row
+            // isn't held behind a quarter-second run-up it gains nothing from.
+            revealIndex={Math.min(i, 14)}
             isSelected={o.id === selectedId}
             onClick={() => onSelect(o.id)}
+            refundFlag={refundFlags.get(o.id) ?? null}
+            commConcern={
+              commAssessments[o.id]?.verdict === 'unclear'
+                ? commAssessments[o.id].headline
+                : null
+            }
           />
         ))}
       </div>

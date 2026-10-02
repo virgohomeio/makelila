@@ -5,6 +5,7 @@ import { SupportTab } from './SupportTab';
 import { FollowUpsTab } from './FollowUpsTab';
 import { useIsMobile } from '../../lib/useMediaQuery';
 import { MobileTabbedModule, type MobileTab } from '../../components/MobileTabbedModule';
+import { PageHeader, Tabs } from '../../components/ui';
 import styles from './Service.module.css';
 
 // Replacement used to be a tab here; it now lives at /fulfillment/replacements
@@ -63,15 +64,19 @@ export default function Service() {
 
   return (
     <div className={styles.layout}>
-      <div className={styles.tabs}>
-        {TABS.map(t => (
-          <button
-            key={t.key}
-            className={`${styles.tab} ${tab === t.key ? styles.active : ''}`}
-            onClick={() => setTab(t.key)}
-          >{t.label}</button>
-        ))}
-      </div>
+      {/* Service shipped with no page title while Sales had one, so moving
+          between the two lost and regained a heading for no reason. Both now
+          open the same way. */}
+      <PageHeader
+        title="Service"
+        meta="Onboarding calls, follow-ups and support for shipped units."
+      />
+      <Tabs
+        ariaLabel="Service sections"
+        items={TABS.map(t => ({ key: t.key, label: t.label }))}
+        active={tab}
+        onChange={(k) => setTab(k as Tab)}
+      />
       <div className={styles.panel}>
         {tab === 'inbox'       && <InboxTab />}
         {tab === 'onboarding'  && <OnboardingTab />}

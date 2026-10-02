@@ -9,6 +9,8 @@ import {
   preRefundStage, customerWaitState,
   useOrderCancellations, pendingCancellationRefunds, cancellationForRefund,
   compileCancellationToRefund, dismissCancellationRefund, type OrderCancellation,
+  cancelCancellationRequest, cancelRefundRequest, canCancelRefundRequest,
+  cancelReturnRequest, canCancelReturnRequest,
   setReturnDisposition, updateReturnStatus,
   useCaseAttachments, uploadCaseAttachment, deleteCaseAttachment, returnAttachmentSignedUrl,
   RETURN_ATTACH_INPUT_ACCEPT, RETURN_ATTACH_CATEGORIES, RETURN_ATTACH_ALLOWED_MIME,
@@ -16,9 +18,14 @@ import {
   type ReturnAttachment, type ReturnAttachmentCategory,
   useCaseNotes, addCaseNote, updateCaseNote, deleteCaseNote, type CaseNote,
   REFUND_STATUS_META, REFUND_METHODS, REFUND_METHOD_META,
+  resolveCaseUnit, confirmCaseUnitSerial, CASE_UNIT_VIA_LABEL,
+  type CaseUnitResolution,
   UNIT_STATUS_LABEL, RETURN_DISPOSITION_META,
   type RefundApproval, type ReturnRow, type RefundMethod, type ReturnDisposition, type ReturnStatus, type ReturnCategory,
 } from '../../lib/postShipment';
+import { autoCancelBanner, type AutoCancelOutcome } from '../../lib/refundAutoCancel';
+import { useUnits, STATUS_META, type UnitStatus } from '../../lib/stock';
+import { Link } from 'react-router-dom';
 
 // Operator-facing unit-status stages, editable from the refund detail panel.
 const UNIT_STAGES: { value: ReturnStatus; label: string }[] = [
@@ -34,7 +41,7 @@ const UNIT_STAGES: { value: ReturnStatus; label: string }[] = [
   { value: 'inspected',        label: 'Unit inspected' },
   { value: 'discarded',        label: 'Unit discarded by customer' },
 ];
-import { useQueuedReplacements, holdReplacement, type Order } from '../../lib/orders';
+import { useQueuedReplacements, cancelOrder, type Order } from '../../lib/orders';
 import {
   useOnboardDates, useCustomerIdByEmail, useCustomers, refundUsageWindow,
   resolveRefundParties, resolvePurchaserId,
@@ -52,6 +59,7 @@ import { useAuth } from '../../lib/auth';
 import { canDo } from '../../lib/permissions';
 import { supabase } from '../../lib/supabase';
 import styles from './PostShipment.module.css';
+import { CancelRequestAction } from './CancelRequestAction';
 
 const STAR = '★';
 
@@ -111,6 +119,7 @@ export function RefundsTab() {
   const { byEmail: invoicesByEmail } = useInvoicesByCustomerEmail();
   const { byEmail: customerIdByEmail } = useCustomerIdByEmail();
   const { customers } = useCustomers();
+  const { units } = useUnits();
   const { tickets: allTickets } = useServiceTickets();
   const { user, profile, role } = useAuth();
   // Gate on the profile email (loaded from the DB, stable) — the auth session's
@@ -124,6 +133,13 @@ export function RefundsTab() {
   const [financeModalId, setFinanceModalId] = useState<string | null>(null);
   const [openTicketId, setOpenTicketId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // What the auto-cancel did when the last card was created. Not an error —
+  // cancelling the customer's open orders is the intended effect — but the
+  // operator has to be told which orders just went, and told loudly if one
+  // would not go.
+  const [autoCancelNote, setAutoCancelNote] = useState<string | null>(null);
+  const reportAutoCancel = (outcome: AutoCancelOutcome) =>
+    setAutoCancelNote(autoCancelBanner(outcome));
 
   // Ticket opened from a refund card's history — resolved from the live list
   // so realtime edits keep it fresh.
@@ -285,8 +301,8 @@ export function RefundsTab() {
   // FR-1 (PRD §4): the two Account-Manager-owned columns before Manager Review.
   // A return without a refund request yet is split by unit status into
   // "Return Form Submitted" (Intake / New — form in, unit not yet back) and
-  // "Return & inspection" (unit physically back, being inspected). Reina owns
-  // both. Terminal statuses (refunded/denied/closed/discarded) drop out.
+  // "Return & inspection" (unit back or discarded, ready to compile). Reina
+  // owns both. Terminal statuses (refunded/denied/closed) drop out.
   const preRefundReturns = useMemo(() => {
     const withApproval = new Set(approvals.map(a => a.return_id).filter(Boolean) as string[]);
     const eligible = returns
@@ -327,6 +343,23 @@ export function RefundsTab() {
     caseEmail: c.email,
     casePhone: c.phone,
     directory: lookupContactRow(contactIndex, { email: c.email, name: c.name }),
+  });
+
+  // The machine a case is about. Once a unit is back it leaves `shipped`, so
+  // nothing keyed on "currently held" finds it — and most cases on this board
+  // never captured a serial to begin with. resolveCaseUnit reaches through the
+  // order ref, the name on the unit and the customer record, and reports which
+  // of those answered so the operator can judge the guess. The directory row is
+  // resolved here, the same way the contact block resolves it.
+  const caseUnitFor = (c: {
+    serial?: string | null; orderRef?: string | null;
+    email?: string | null; name?: string | null;
+  }): CaseUnitResolution => resolveCaseUnit({
+    caseSerial: c.serial,
+    orderRef: c.orderRef,
+    customerName: c.name,
+    customerId: lookupContactRow(contactIndex, { email: c.email, name: c.name })?.id ?? null,
+    units,
   });
 
   const contactFor = (refund: RefundApproval, linkedReturn: ReturnRow | null): CustomerContact => {
@@ -389,7 +422,11 @@ export function RefundsTab() {
   // amount + payment method are set by Finance (Julie) at Finance Review.
   const compileReturn = async (r: ReturnRow) => {
     setError(null);
-    try { await compileReturnToRefund(r); await refreshApprovals(); }
+    setAutoCancelNote(null);
+    try {
+      await compileReturnToRefund(r, { onAutoCancel: reportAutoCancel });
+      await refreshApprovals();
+    }
     catch (e) { setError((e as Error).message); }
   };
 
@@ -434,6 +471,7 @@ export function RefundsTab() {
             key={c.id}
             c={c}
             canOwn={ownsRefundColumn(userEmail, 'cancellation')}
+            canCancel={canFlow}
             parties={partiesFor({ filerEmail: c.customer_email, filerName: c.customer_name })}
             contact={contactForCase({
               email: c.customer_email, phone: c.customer_phone, name: c.customer_name,
@@ -471,6 +509,21 @@ export function RefundsTab() {
         </button>
         {error && <span className={styles.refundsError}>{error}</span>}
       </div>
+
+      {autoCancelNote && (
+        <div className={styles.autoCancelBanner}>
+          <span className={styles.replWarnIcon}>⛔</span>
+          <div className={styles.replWarnBody}>
+            <strong>Open orders cancelled</strong>
+            <span>{autoCancelNote}</span>
+          </div>
+          <button
+            className={styles.autoCancelDismiss}
+            onClick={() => setAutoCancelNote(null)}
+            title="Dismiss"
+          >✕</button>
+        </div>
+      )}
 
       <div ref={topScrollRef} className={styles.kanbanScrollTop} onScroll={syncFromTop}>
         <div style={{ width: scrollW }} />
@@ -533,6 +586,13 @@ export function RefundsTab() {
           cancellation={cancellationForRefund(cancellations, selectedRefund.id)}
           parties={partiesForRefund(selectedRefund, selectedReturn)}
           contact={contactFor(selectedRefund, selectedReturn)}
+          caseUnit={caseUnitFor({
+            serial: selectedReturn?.unit_serial,
+            orderRef: selectedReturn?.original_order_ref,
+            email: selectedRefund.customer_email ?? selectedReturn?.customer_email,
+            name: selectedRefund.customer_name,
+          })}
+          returnId={selectedReturn?.id ?? null}
           canApproveHere={ownsRefundColumn(userEmail, selectedRefund.status)}
           usage={usageFor(selectedRefund, selectedReturn)}
           invoices={invoicesFor(selectedRefund, selectedReturn)}
@@ -551,6 +611,7 @@ export function RefundsTab() {
         <CreateManualRefundModal
           onClose={() => setShowRequestModal(false)}
           onError={setError}
+          onAutoCancel={reportAutoCancel}
           onMoved={refreshApprovals}
         />
       )}
@@ -565,7 +626,12 @@ export function RefundsTab() {
           contact={contactForCase({
             email: r.customer_email, phone: r.customer_phone, name: r.customer_name,
           })}
+          caseUnit={caseUnitFor({
+            serial: r.unit_serial, orderRef: r.original_order_ref,
+            email: r.customer_email, name: r.customer_name,
+          })}
           canOwn={ownsRefundColumn(userEmail, preRefundStage(r.status))}
+          canCancel={canFlow}
           usage={usageForEmail(email)}
           invoices={invoicesForEmail(email)}
           tickets={ticketsForEmails([r.purchaser_email, r.customer_email])}
@@ -1471,11 +1537,15 @@ function InspectionCard({ r, parties, onView }: {
 
 // The column actions for a pre-refund return (intake → inspection → compile).
 // They live in the return's full view now that the board card is collapsed.
-function InspectionActions({ r, canOwn, onCompile, onError }: {
+function InspectionActions({ r, canOwn, canCancel, onCompile, onError, onCancelled }: {
   r: ReturnRow;
   canOwn: boolean;
+  /** Pulling a junk case off the board is open to everyone working it — only
+   *  moving a real one forward belongs to the column owner. */
+  canCancel: boolean;
   onCompile: () => void;
   onError: (msg: string | null) => void;
+  onCancelled?: () => void;
 }) {
   const [statusBusy, setStatusBusy] = useState(false);
   const runStatus = async (s: ReturnStatus) => {
@@ -1521,6 +1591,18 @@ function InspectionActions({ r, canOwn, onCompile, onError }: {
           )}
         </>
       )}
+      {/* The return columns are an intake queue fed by a public form, so they
+          collect the same junk the cancellation column does — test
+          submissions, duplicates, forms filled in by mistake. Same control,
+          same required reason. */}
+      {canCancel && canCancelReturnRequest(r.status) && (
+        <CancelRequestAction
+          disabled={statusBusy}
+          title="This return case should not be on the board (test, duplicate, raised in error) — closes it with a reason"
+          onCancel={async (reason) => { await cancelReturnRequest(r.id, reason); onCancelled?.(); }}
+          onError={onError}
+        />
+      )}
     </div>
   );
 }
@@ -1534,12 +1616,15 @@ function InspectionActions({ r, canOwn, onCompile, onError }: {
 // opens a refund card in Completeness; "No refund needed" closes the request
 // out for orders that were never charged.
 export function CancellationCard({
-  c, parties, contact, canOwn, usage, invoices, tickets, onOpenTicket, onError,
+  c, parties, contact, canOwn, canCancel, usage, invoices, tickets, onOpenTicket, onError,
 }: {
   c: OrderCancellation;
   parties: Parties;
   contact: CustomerContact;
   canOwn: boolean;
+  /** Anyone working the board may pull a request that should not be here —
+   *  this is not the column owner's forward-motion right. */
+  canCancel: boolean;
   usage: RefundUsageWindow;
   invoices: CustomerInvoice[];
   tickets: ServiceTicket[];
@@ -1633,6 +1718,18 @@ export function CancellationCard({
         ) : (
           <span className={styles.refundCardHint}>Reina moves these forward</span>
         )}
+        {/* Not owner-gated. Pedrum's two "Support LILA" test orders queued here
+            as live refund work and only Reina could clear them; junk on the
+            board is everyone's problem. Moving a real case FORWARD is still
+            hers alone. */}
+        {canCancel && (
+          <CancelRequestAction
+            disabled={busy}
+            title="This cancellation request should not be on the board (test, duplicate, raised in error)"
+            onCancel={reason => cancelCancellationRequest(c, reason)}
+            onError={onError}
+          />
+        )}
       </div>
     </div>
     </div>
@@ -1698,11 +1795,91 @@ export function ContactBlock({ contact }: { contact: CustomerContact }) {
 }
 
 // ============================================================================
+// The machine this case is about
+// ============================================================================
+// A refund case names a unit the customer has already sent back, so the moment
+// it leaves `shipped` every "currently held" lookup renders it as nothing — and
+// most cases on this board never captured a serial at all. resolveCaseUnit
+// reaches for it instead, and this block shows the answer together with the
+// path that produced it: an operator deciding a refund needs to know whether
+// the serial came off the case itself or was inferred from a customer record
+// that the June backfill may have pointed at the wrong person. A confirmed
+// serial is stated plainly; a guess says it is one, and offers to become fact.
+function CaseUnitBlock({ unit, returnId, onError, onConfirmed }: {
+  unit: CaseUnitResolution;
+  returnId: string | null;
+  onError: (msg: string) => void;
+  onConfirmed: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+
+  if (!unit.serial) {
+    return (
+      <div className={styles.contactBlock}>
+        <div className={styles.contactRow}>
+          <span className={styles.contactLabel}>Unit</span>
+          <span className={styles.contactMissing}>
+            No serial on this case, and nothing on file identifies the machine
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  const confirmable = !unit.confirmed && returnId !== null;
+  const confirm = () => {
+    if (!returnId || !unit.serial) return;
+    setBusy(true);
+    void confirmCaseUnitSerial(returnId, unit.serial)
+      .then(onConfirmed)
+      .catch(e => onError((e as Error).message))
+      .finally(() => setBusy(false));
+  };
+
+  return (
+    <div className={styles.contactBlock}>
+      <div className={styles.contactRow}>
+        <span className={styles.contactLabel}>Unit</span>
+        <span className={styles.contactValue}>
+          <Link className={styles.contactLink} to={`/customers?tab=fleet&serial=${unit.serial}`}>
+            {unit.serial}
+          </Link>
+          {unit.status && (
+            <span className={styles.caseUnitStatus}>
+              now {STATUS_META[unit.status as UnitStatus]?.label ?? unit.status}
+            </span>
+          )}
+        </span>
+      </div>
+      <div className={styles.contactRow}>
+        <span className={styles.contactLabel}>Source</span>
+        <span className={unit.confirmed ? styles.contactValue : styles.caseUnitGuess}>
+          {CASE_UNIT_VIA_LABEL[unit.via ?? 'case']}
+          {unit.others.length > 0 && (
+            <> · {unit.others.length === 1
+              ? `1 other unit also matches (${unit.others[0].serial})`
+              : `${unit.others.length} other units also match`}</>
+          )}
+          {unit.conflictingName && (
+            <> · the unit itself is recorded to <strong>{unit.conflictingName}</strong></>
+          )}
+          {confirmable && (
+            <button className={styles.caseUnitConfirm} disabled={busy} onClick={confirm}>
+              {busy ? 'Saving…' : 'Confirm'}
+            </button>
+          )}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
 // Detail panel — shown below the Kanban when a card is selected.
 // Renders the linked return-form data + approve / deny actions.
 // ============================================================================
 function RefundDetailPanel({
-  refund, linkedReturn, cancellation = null, parties, contact, canApproveHere, usage, invoices, tickets, onOpenTicket, queuedReplacements, canFlow, onClose, onError, onMoved, onOpenFinanceModal,
+  refund, linkedReturn, cancellation = null, parties, contact, caseUnit, returnId, canApproveHere, usage, invoices, tickets, onOpenTicket, queuedReplacements, canFlow, onClose, onError, onMoved, onOpenFinanceModal,
 }: {
   refund: RefundApproval;
   linkedReturn: ReturnRow | null;
@@ -1717,6 +1894,8 @@ function RefundDetailPanel({
   tickets: ServiceTicket[];
   onOpenTicket: (ticketId: string) => void;
   queuedReplacements: Order[];
+  caseUnit: CaseUnitResolution;
+  returnId: string | null;
   canFlow: boolean;
   onClose: () => void;
   onError: (msg: string | null) => void;
@@ -1727,7 +1906,7 @@ function RefundDetailPanel({
   onOpenFinanceModal: (id: string) => void;
 }) {
   const [busy, setBusy] = useState(false);
-  const [holdBusy, setHoldBusy] = useState<string | null>(null);
+  const [cancelBusy, setCancelBusy] = useState<string | null>(null);
   const meta = REFUND_STATUS_META[refund.status];
   const cancellationId = cancellation?.id ?? null;
 
@@ -1861,6 +2040,8 @@ function RefundDetailPanel({
             {linkedReturn?.original_order_ref ?? 'No order reference on file'}
           </div>
           <ContactBlock contact={contact} />
+          <CaseUnitBlock unit={caseUnit} returnId={returnId}
+                         onError={onError} onConfirmed={onMoved} />
           {/* Top of the card, not buried at the bottom — the customer's own
               words are the first thing an approver wants. */}
           {linkedReturn && (
@@ -1896,35 +2077,43 @@ function RefundDetailPanel({
         <button onClick={onClose} className={styles.refundDetailClose} title="Close detail">✕</button>
       </div>
 
+      {/* Opening a refund card auto-cancels everything the customer still has
+          in flight (lib/refundAutoCancel.ts), so a replacement showing up here
+          is one the auto-cancel could not take: it was skipped because its
+          ticket reads as finished, it failed, or the card predates the
+          feature. Either way it needs a decision now, and the action is
+          Cancel — not the old Hold, which wrote a replacement_state the
+          database does not accept and so never held anything. */}
       {queuedReplacements.length > 0 && (
         <div className={styles.replWarnBanner}>
           <span className={styles.replWarnIcon}>⚠</span>
           <div className={styles.replWarnBody}>
             <strong>
               {queuedReplacements.length === 1
-                ? 'This customer has a queued replacement'
-                : `This customer has ${queuedReplacements.length} queued replacements`}
-              — hold before refunding
+                ? 'This customer still has a replacement queued'
+                : `This customer still has ${queuedReplacements.length} replacements queued`}
+              {' '}— cancel before this refund goes out
             </strong>
             <div className={styles.replWarnRow}>
               {queuedReplacements.map(rpl => (
                 <span key={rpl.id} className={styles.replWarnRef}>{rpl.order_ref} ({rpl.replacement_state})</span>
               ))}
-              {queuedReplacements.filter(rpl => rpl.replacement_state !== 'held').map(rpl => (
+              {queuedReplacements.map(rpl => (
                 <button
                   key={rpl.id}
                   className={styles.replWarnHoldBtn}
-                  disabled={holdBusy === rpl.id}
+                  disabled={cancelBusy === rpl.id}
                   onClick={() => {
-                    setHoldBusy(rpl.id);
-                    void holdReplacement(
+                    setCancelBusy(rpl.id);
+                    void cancelOrder(
                       rpl.id,
-                      `Held: refund in progress for ${refund.customer_name}`,
+                      `Cancelled: a refund is in progress for ${refund.customer_name}. `
+                      + 'Nothing ships to a customer we are paying back.',
                     ).catch(e => onError((e as Error).message))
-                      .finally(() => setHoldBusy(null));
+                      .finally(() => setCancelBusy(null));
                   }}
                 >
-                  {holdBusy === rpl.id ? '…' : `Hold ${rpl.order_ref}`}
+                  {cancelBusy === rpl.id ? '…' : `Cancel ${rpl.order_ref}`}
                 </button>
               ))}
             </div>
@@ -2097,9 +2286,28 @@ function RefundDetailPanel({
               </button>
             )}
             {canDeny && (
-              <button onClick={openDeny} disabled={busy} className={styles.refundDetailDenyBtn}>
+              <button onClick={openDeny} disabled={busy} className={styles.refundDetailDenyBtn}
+                title="We are refusing this customer's refund. If the card itself should not exist — a test, a duplicate — cancel the request instead.">
                 ✕ Deny
               </button>
+            )}
+            {/* Cancelling is not denying: it says the card should never have
+                been raised, so the case leaves the board as 'closed' instead of
+                standing in Denied as a customer we turned down (and, being
+                closed, it stops blocking that customer's orders from shipping). */}
+            {canFlow && canCancelRefundRequest(refund.status) && (
+              <CancelRequestAction
+                label="✕ Cancel request"
+                confirmLabel="Confirm cancel"
+                disabled={busy}
+                title="This refund card should not exist (test, duplicate, raised in error) — closes it off the board with a reason"
+                onCancel={async (reason) => {
+                  await cancelRefundRequest(refund.id, reason);
+                  onClose();
+                  await onMoved();
+                }}
+                onError={onError}
+              />
             )}
             {refund.status === 'refunded' && (
               <button onClick={() => void runClose()} disabled={busy} className={styles.refundCloseBtn}
@@ -2294,11 +2502,13 @@ function CancellationFormAnswers({ c }: { c: OrderCancellation }) {
 
 // Read-only viewer for a return's full submitted form — opened by clicking a
 // card in the Return & inspection column (before a refund request exists).
-export function ReturnDetailModal({ r, parties, contact, canOwn, usage, invoices, tickets, onOpenTicket, onCompile, onError, onClose }: {
+export function ReturnDetailModal({ r, parties, contact, caseUnit, canOwn, canCancel, usage, invoices, tickets, onOpenTicket, onCompile, onError, onClose }: {
   r: ReturnRow;
   parties: Parties;
   contact: CustomerContact;
+  caseUnit: CaseUnitResolution;
   canOwn: boolean;
+  canCancel: boolean;
   usage: RefundUsageWindow;
   invoices: CustomerInvoice[];
   tickets: ServiceTicket[];
@@ -2325,6 +2535,8 @@ export function ReturnDetailModal({ r, parties, contact, canOwn, usage, invoices
             mailing address the return form never captured, and each one says
             so when it isn't on file. */}
         <ContactBlock contact={contact} />
+        <CaseUnitBlock unit={caseUnit} returnId={r.id}
+                       onError={onError} onConfirmed={onClose} />
         {/* Full case context — same blocks the refund detail panel shows:
             usage window, sales invoice + order #, ticket history, saved notes,
             then the return form answers. */}
@@ -2350,7 +2562,8 @@ export function ReturnDetailModal({ r, parties, contact, canOwn, usage, invoices
           {/* Column actions — these used to live on the board card, which is
               now collapsed to the case's identity. */}
           <div style={{ marginTop: 12, borderTop: '1px solid #edf2f7', paddingTop: 12 }}>
-            <InspectionActions r={r} canOwn={canOwn} onCompile={onCompile} onError={onError} />
+            <InspectionActions r={r} canOwn={canOwn} canCancel={canCancel}
+              onCompile={onCompile} onError={onError} onCancelled={onClose} />
           </div>
         </div>
       </div>
@@ -2399,10 +2612,13 @@ function RefundStep({ label, ts, note, active, negative }: {
 // (both are keyed to its id), so submit creates the card first and then files
 // them against it.
 function CreateManualRefundModal({
-  onClose, onError, onMoved,
+  onClose, onError, onAutoCancel, onMoved,
 }: {
   onClose: () => void;
   onError: (msg: string | null) => void;
+  /** What the card's creation cancelled — reported on the board behind the
+   *  modal, which is still standing when this closes. */
+  onAutoCancel: (outcome: AutoCancelOutcome) => void;
   /** Re-read the board once the card exists — see RefundDetailPanel. */
   onMoved: () => Promise<void>;
 }) {
@@ -2479,7 +2695,7 @@ function CreateManualRefundModal({
         currency: opening.currency,
         reason,
         notes: purchaser ? `Opened from directory entry "${picked?.full_name}" (user); refund books to the purchaser.` : undefined,
-      });
+      }, { onAutoCancel });
 
       if (files.length) {
         setStep(`Uploading ${files.length} file${files.length > 1 ? 's' : ''}…`);

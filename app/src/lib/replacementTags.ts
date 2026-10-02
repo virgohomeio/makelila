@@ -105,13 +105,23 @@ export function replacementItemTags(
  *   - unit whose batch is available   → "Unit"             (e.g. P100, P150)
  *   - any other / unnamed parts       → "Parts/Consumables"
  *  `isPendingBatch(batch)` is true when that batch has no arrived stock yet
- *  (caller derives it from batches.arrived_at). Every order with line_items —
- *  even "unspecified parts" — gets a stage; only a truly empty row is null. */
+ *  (caller derives it from batches.arrived_at). Every LIVE order with
+ *  line_items — even "unspecified parts" — gets a stage; a truly empty row and
+ *  a cancelled one are null.
+ *
+ *  Cancelled is null rather than a stage of its own because every stage here is
+ *  a claim on stock: "awaiting batch" says a unit is owed, "Parts/Consumables"
+ *  says a part is. Amanda Acker's R-0051 was cancelled on 2026-08-31 and kept
+ *  wearing an "awaiting batch" chip in Fulfillment › Replacements, which is the
+ *  board telling an operator she was queued for a P100X eleven days after
+ *  someone had decided she was not. `status` is in the Pick so no caller can
+ *  ask the question without supplying the answer. */
 export function replacementStageTag(
-  o: Pick<Order, 'line_items'>,
+  o: Pick<Order, 'line_items' | 'status'>,
   tags: string[],
   isPendingBatch: (batch: string) => boolean,
 ): StageTag | null {
+  if (o.status === 'cancelled') return null;
   const unitTags = tags.filter(isUnitTag);
   if (unitTags.length > 0) {
     return unitTags.some(isPendingBatch) ? 'awaiting batch' : 'Unit';
@@ -140,16 +150,35 @@ export function queuedForReplacementLabel(kind: string): string {
   return `Queued for ${kind} Replacement`;
 }
 
+/** What the demand rollups need off an order. `status` is in here on purpose:
+ *  a cancelled replacement is not demand, and leaving the field out of the type
+ *  is exactly how it went uncounted for so long — the helpers physically could
+ *  not see it. Widening the Pick makes every caller supply it. */
+export type ReplacementDemandRow =
+  Pick<Order, 'line_items' | 'awaiting_batch_id' | 'shipped_at' | 'delivered_at' | 'status'>;
+
+/** Still queued: not cancelled, not shipped, not delivered.
+ *
+ *  Cancelling used to DELETE the replacement row (releaseAndDeleteReplacement),
+ *  so "does this row exist" was a good enough liveness test and nothing checked
+ *  status. Cancelling from the fulfillment queue keeps the row and marks it
+ *  cancelled instead, which made that assumption wrong everywhere at once:
+ *  Stock > Parts demand, Build's per-batch demand, Finance's projection and the
+ *  Replacement tab's open count all kept counting orders nobody was waiting on. */
+export function isLiveReplacement(o: ReplacementDemandRow): boolean {
+  return o.status !== 'cancelled' && !o.shipped_at && !o.delivered_at;
+}
+
 /** Per-batch replacement demand for whole LILA units, queued across un-shipped
  *  replacement orders (Service > Replacement). Uses the same item-tag
  *  derivation the Replacement tab shows, keeping only the unit tags (P100,
  *  P100X, P150 …). Powers the Stock > LILA Units supply-vs-demand section. */
 export function replacementUnitDemandByBatch(
-  orders: Array<Pick<Order, 'line_items' | 'awaiting_batch_id' | 'shipped_at' | 'delivered_at'>>,
+  orders: Array<ReplacementDemandRow>,
 ): Map<string, number> {
   const m = new Map<string, number>();
   for (const o of orders) {
-    if (o.shipped_at || o.delivered_at) continue; // only still-queued
+    if (!isLiveReplacement(o)) continue; // only still-queued
     for (const tag of replacementItemTags(o)) {
       if (isUnitTag(tag)) m.set(tag, (m.get(tag) ?? 0) + 1);
     }
@@ -164,15 +193,86 @@ export function replacementUnitDemandByBatch(
  *  an order counts as 1 (replacement orders are qty-1-per-part in practice).
  *  Ambiguous tags (no L/R side) and unit tags don't map to a SKU → not counted. */
 export function replacementDemandBySku(
-  orders: Array<Pick<Order, 'line_items' | 'awaiting_batch_id' | 'shipped_at' | 'delivered_at'>>,
+  orders: Array<ReplacementDemandRow>,
 ): Map<string, number> {
   const m = new Map<string, number>();
   for (const o of orders) {
-    if (o.shipped_at || o.delivered_at) continue; // only still-queued
+    if (!isLiveReplacement(o)) continue; // only still-queued
     for (const tag of replacementItemTags(o)) {
       const sku = PART_SKU_BY_TAG[tag];
       if (sku) m.set(sku, (m.get(sku) ?? 0) + 1);
     }
   }
   return m;
+}
+
+/** What a replacement order actually contains, in operator words: "1 unit",
+ *  "Replacement Top Lid (v3.6)", "1 unit + Hopper". Lives here rather than in
+ *  the Replacement tab that used to own it because the fulfillment queue needs
+ *  the same sentence — a queue card that says "Jeff Mottle — LILA Pro" when the
+ *  box holds a lid is worse than saying nothing.
+ *
+ *  Defensive about shape: line_items arrive from two paths, the in-app #55
+ *  workflow (full schema with qty/sku/cost) and the Excel backfill (looser —
+ *  `{kind:'part',description}` / `{kind:'unit',batch,unit_serial}` /
+ *  `{kind:'unit_pending',batch}`). Part descriptions are surfaced verbatim so
+ *  the result reads "1 unit + Hopper" rather than "1 unit + 1 part". */
+export function replacementItemsLabel(line_items: Order['line_items']): string {
+  let parts = 0;
+  let units = 0;
+  let unitsPending = 0;
+  const partDescs: string[] = [];
+  for (const li of line_items ?? []) {
+    const raw = li as Record<string, unknown>;
+    const k = raw.kind as string | undefined;
+    if (k === 'part') {
+      parts += typeof raw.qty === 'number' ? raw.qty : 1;
+      const desc = (raw.description ?? raw.name) as string | undefined;
+      if (desc) partDescs.push(desc);
+    } else if (k === 'unit') {
+      units += 1;
+    } else if (k === 'unit_pending') {
+      unitsPending += 1;
+    }
+  }
+  const segs: string[] = [];
+  if (units > 0)        segs.push(`${units} unit${units !== 1 ? 's' : ''}`);
+  if (unitsPending > 0) segs.push(`${unitsPending} unit${unitsPending !== 1 ? 's' : ''} (pending)`);
+  if (partDescs.length > 0) {
+    const joined = partDescs.join(', ');
+    segs.push(joined.length > 50 ? joined.slice(0, 47) + '…' : joined);
+  } else if (parts > 0) {
+    segs.push(`${parts} part${parts !== 1 ? 's' : ''}`);
+  }
+  return segs.join(' + ') || '—';
+}
+
+/** True when a replacement carries no whole machine — only parts and
+ *  consumables (a lid, a hopper, a filter, a starter kit).
+ *
+ *  This is the question "can this box leave without the fulfillment queue?".
+ *  A unit has to be picked off the shelf, tested, and have its serial recorded
+ *  against the order, and the 6-step queue exists for exactly that. A $24 lid
+ *  has none of it: the queue's first step is "assign a ready machine", which an
+ *  operator holding a lid cannot take and must not fake — so a parts-only
+ *  replacement that got sent to the queue used to sit there with no way
+ *  forward, and the only route out was the linked ticket.
+ *
+ *  Conservative in both directions — it gates a write that skips the serial:
+ *    - no line items at all → false. An empty row says nothing about what is in
+ *      the box, and reading that as "parts" would let a unit ship unrecorded.
+ *    - awaiting_batch_id set → false. A batch-blocked order is owed a machine
+ *      even when its line_items never captured one (R-0032).
+ *    - the item TAGS are checked as well as the line kinds, so a free-text
+ *      Excel-backfilled "P100X replacement" description still reads as a unit.
+ */
+export function isPartsOnlyReplacement(
+  o: Pick<Order, 'line_items' | 'awaiting_batch_id'>,
+): boolean {
+  const items = (o.line_items ?? []) as Array<Record<string, unknown>>;
+  if (items.length === 0) return false;
+  if (o.awaiting_batch_id) return false;
+  const unitKinds = new Set(['unit', 'unit_pending', 'base', 'base_pending']);
+  if (items.some(li => unitKinds.has(String((li as { kind?: unknown })?.kind ?? '')))) return false;
+  return !replacementItemTags(o).some(isUnitTag);
 }

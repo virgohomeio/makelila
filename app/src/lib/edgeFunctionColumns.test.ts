@@ -48,14 +48,29 @@ describe('edge functions reference real orders columns', () => {
     // customer_email joined this select on 2026-08-13: Freightcom refuses to
     // rate an international shipment without an email address at each end, so a
     // rename of that column would silently break every US order again.
-    for (const fn of [
-      'freightcom-quote/index.ts',
-      'freightcom-book/index.ts',
-      'book-return-label/index.ts',
-    ]) {
+    //
+    // Asserted one column at a time rather than as one exact literal:
+    // freightcom-quote reads four more of them (line_items, address_match,
+    // address_google_postal, address_verified_at) to decide how many boxes to
+    // rate and which postal code to rate against, and pinning the whole select
+    // string made adding a column look like a regression.
+    const REQUIRED: Record<string, string[]> = {
+      'freightcom-quote/index.ts': [
+        'id', 'postal_code', 'country', 'customer_email',
+        'line_items', 'address_match', 'address_google_postal',
+      ],
+      'freightcom-book/index.ts':   ['id', 'postal_code', 'country', 'customer_email'],
+      'book-return-label/index.ts': ['id', 'postal_code', 'country', 'customer_email'],
+    };
+    for (const [fn, columns] of Object.entries(REQUIRED)) {
       const found = files.find(([path]) => path === fn);
       expect(found, `${fn} not found`).toBeTruthy();
-      expect(found![1], fn).toMatch(/\.select\('id, postal_code, country, customer_email'\)/);
+      const select = found![1].match(/\.select\('([^']*postal_code[^']*)'\)/);
+      expect(select, `${fn} has no orders select`).toBeTruthy();
+      const selected = select![1].split(/,\s*/);
+      for (const col of columns) {
+        expect(selected, `${fn} select is missing ${col}`).toContain(col);
+      }
     }
   });
 });

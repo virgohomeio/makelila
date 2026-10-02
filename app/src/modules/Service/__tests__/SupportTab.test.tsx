@@ -7,6 +7,7 @@ import { SupportTab } from '../SupportTab';
 // SupportTab uses useNavigate (deep-link to replacement orders), so every
 // render needs a Router context.
 const render = (ui: ReactElement) => rtlRender(<MemoryRouter>{ui}</MemoryRouter>);
+import { STATUS_META, TICKET_STATUSES } from '../../../lib/service';
 import type { ServiceTicket } from '../../../lib/service';
 import type { Order } from '../../../lib/orders';
 
@@ -64,9 +65,10 @@ vi.mock('../../../lib/service', async () => {
     useTicketsClosedSince: vi.fn(() => ({ closedIds: new Set<string>(), loading: false })),
   };
 });
+let customersToReturn: unknown[] = [];
 vi.mock('../../../lib/customers', async () => {
   const actual = await vi.importActual<typeof import('../../../lib/customers')>('../../../lib/customers');
-  return { ...actual, useCustomers: vi.fn(() => ({ customers: [] })) };
+  return { ...actual, useCustomers: vi.fn(() => ({ customers: customersToReturn })) };
 });
 let replacementOrdersToReturn: Order[] = [];
 vi.mock('../../../lib/orders', async () => {
@@ -130,7 +132,23 @@ describe('SupportTab status resilience', () => {
     expect(screen.queryByText(/^Closed \d/)).not.toBeInTheDocument();
   });
 
-  it('Open KPI counts every ticket that is not closed', () => {
+  // Intake and throughput share one 7-day window so the pair reads as
+  // "N in, M out" over the same period.
+  it('counts intake over the past seven days, not just today', () => {
+    const now = Date.now();
+    const daysAgo = (n: number) => new Date(now - n * 86_400_000).toISOString();
+    ticketsToReturn = [
+      mkTicket({ id: 'a', status: 'waiting_on_us', created_at: daysAgo(0) }),
+      mkTicket({ id: 'b', status: 'waiting_on_us', created_at: daysAgo(3) }),
+      mkTicket({ id: 'c', status: 'waiting_on_us', created_at: daysAgo(6) }),
+      // Outside the window.
+      mkTicket({ id: 'd', status: 'waiting_on_us', created_at: daysAgo(9) }),
+    ];
+    render(<SupportTab />);
+    expect(screen.getByText(/new this week/)).toHaveTextContent('3 new this week');
+  });
+
+  it('the header open count covers every ticket that is not closed', () => {
     ticketsToReturn = [
       mkTicket({ id: 'o1', status: 'in_progress' }),
       mkTicket({ id: 'o2', status: 'waiting_on_us' }),
@@ -138,10 +156,75 @@ describe('SupportTab status resilience', () => {
       mkTicket({ id: 'c1', status: 'closed', closed_at: '2026-06-03T00:00:00Z' }),
     ];
     render(<SupportTab />);
-    // Kpi renders <div.kpiCard><div>label</div><div>value</div></div>, so the
-    // label's parent is the card holding both label and value.
-    const openCard = screen.getByText('Open').parentElement;
-    expect(openCard).toHaveTextContent('3');
+    // The five KPI tiles collapsed into one sentence plus the queue bar; the
+    // open figure now lives in the sentence.
+    expect(screen.getByText(/open across/)).toHaveTextContent('3 open across');
+  });
+
+  // Every status stays filterable, including ones nothing currently holds — a
+  // status an operator can set has to be a status they can find.
+  it('offers all nine statuses as filters, even at zero', () => {
+    ticketsToReturn = [mkTicket({ id: 'o1', status: 'waiting_on_us' })];
+    render(<SupportTab />);
+    for (const s of TICKET_STATUSES) {
+      expect(
+        screen.getAllByRole('button', { name: new RegExp(STATUS_META[s].label) }).length,
+        `${STATUS_META[s].label} is not offered as a filter`,
+      ).toBeGreaterThan(0);
+    }
+  });
+
+  // The rail is the one piece of the row that encodes a number as position, so
+  // assert the label it derives rather than the geometry.
+  it('shows how long each customer has gone untouched', () => {
+    const now = Date.now();
+    const daysAgo = (n: number) => new Date(now - n * 86_400_000).toISOString();
+    ticketsToReturn = [
+      mkTicket({ id: 'fresh', customer_id: 'c1', customer_name: 'Fresh Co',
+                 status: 'waiting_on_us', last_message_at: daysAgo(2) }),
+      mkTicket({ id: 'stale', customer_id: 'c2', customer_name: 'Stale Co',
+                 status: 'waiting_on_us', last_message_at: daysAgo(68) }),
+    ];
+    render(<SupportTab />);
+    const rows = screen.queryAllByRole('table').map(t => t.textContent ?? '').join(' ');
+    expect(rows).toContain('2d');
+    expect(rows).toContain('2mo');
+  });
+
+  it('offers the three saved views with counts', () => {
+    const now = Date.now();
+    const recent = new Date(now - 86_400_000).toISOString();
+    // mkTicket's default created_at is months old, so anything meant to be
+    // NOT idle needs an explicit recent touch.
+    ticketsToReturn = [
+      mkTicket({ id: 'u1', status: 'waiting_on_us', owner_email: null,
+                 last_message_at: recent }),
+      mkTicket({ id: 'i1', status: 'waiting_on_us', owner_email: 'a@b.io',
+                 last_message_at: new Date(now - 90 * 86_400_000).toISOString() }),
+      mkTicket({ id: 'r1', status: 'queued_for_replacement', owner_email: 'a@b.io',
+                 last_message_at: recent }),
+    ];
+    render(<SupportTab />);
+    expect(screen.getByRole('button', { name: /Unowned/ })).toHaveTextContent('1');
+    expect(screen.getByRole('button', { name: /Idle 30 days\+/ })).toHaveTextContent('1');
+    expect(screen.getByRole('button', { name: /Replacement queue/ })).toHaveTextContent('1');
+  });
+
+  it('filters the table down to a chosen status', () => {
+    ticketsToReturn = [
+      mkTicket({ id: 'o1', status: 'in_progress', subject: 'Motor stalled' }),
+      mkTicket({ id: 'o2', status: 'on_hold', subject: 'Waiting on parts' }),
+    ];
+    render(<SupportTab />);
+    // The status labels also appear on the filter legend, so assert against
+    // the row tables only.
+    const rows = () => screen.queryAllByRole('table').map(t => t.textContent ?? '').join(' ');
+    expect(rows()).toContain('Waiting on parts');
+
+    fireEvent.click(screen.getAllByRole('button', { name: /In Progress/ })[0]);
+
+    expect(rows()).toContain('Motor stalled');
+    expect(rows()).not.toContain('Waiting on parts');
   });
 });
 
@@ -213,5 +296,216 @@ describe('SupportTab replacement queue labels', () => {
     replacementOrdersToReturn = [mkReplacementOrder('o6', [{ kind: 'unit', batch: 'P150' }])];
     render(<SupportTab />);
     expect(tableText()).toContain('Queued for P150 Replacement');
+  });
+});
+
+// The device-context chip counts open support tickets for one unit and links
+// here with ?unit_serial=. Landing with the list unfiltered is what let the
+// chip's number go unchecked, so the param has to narrow the queue.
+describe('SupportTab ?unit_serial= deep link', () => {
+  const renderAt = (url: string) =>
+    rtlRender(<MemoryRouter initialEntries={[url]}>{<SupportTab />}</MemoryRouter>);
+
+  beforeEach(() => {
+    ticketsToReturn = [
+      mkTicket({ id: 'u1', unit_serial: 'LL01-00000000244', subject: 'this unit', customer_name: 'Teresa' }),
+      mkTicket({ id: 'u2', unit_serial: 'LL01-00000000999', subject: 'another unit', customer_name: 'Bob' }),
+    ];
+  });
+
+  it('narrows the queue to the linked unit', () => {
+    renderAt('/service?tab=support&unit_serial=LL01-00000000244');
+    expect(screen.getAllByText('this unit').length).toBeGreaterThan(0);
+    expect(screen.queryByText('another unit')).toBeNull();
+  });
+
+  it('shows the serial in the search box so the operator can see why the list is short', () => {
+    renderAt('/service?tab=support&unit_serial=LL01-00000000244');
+    const search = screen.getByLabelText(/search tickets/i) as HTMLInputElement;
+    expect(search.value).toBe('LL01-00000000244');
+  });
+
+  it('leaves the queue whole with no unit_serial param', () => {
+    renderAt('/service?tab=support');
+    expect(screen.getAllByText('this unit').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('another unit').length).toBeGreaterThan(0);
+  });
+});
+
+// FR-6: a support ticket is about whoever USES the machine. The ticket row
+// carries only a customer_name snapshot, so the primary user has to be
+// resolved from the directory at read time — and the purchaser must stay
+// visible, since the warranty and any refund belong to them.
+const mkCustomer = (over: Record<string, unknown>) => ({
+  id: 'c-chad', full_name: 'Chad Wu', phone: '+1 416 555 0100', email: 'chad@example.com',
+  purchaser_id: null, primary_user_name: null, primary_user_phone: null,
+  primary_user_email: null, primary_user_relationship: null, ...over,
+});
+
+describe('SupportTab — purchaser vs primary user', () => {
+  beforeEach(() => { customersToReturn = []; });
+
+  it('headlines the primary user and still names the purchaser', () => {
+    customersToReturn = [mkCustomer({ primary_user_name: 'Sarah Wu' })];
+    ticketsToReturn = [mkTicket({ id: 't1', customer_id: 'c-chad', customer_name: 'Chad Wu' })];
+    render(<SupportTab />);
+    expect(screen.getAllByText('Sarah Wu').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Chad Wu').length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Primary user/).length).toBeGreaterThan(0);
+  });
+
+  it('shows a single plain name when nobody else is the primary user', () => {
+    customersToReturn = [mkCustomer({})];
+    ticketsToReturn = [mkTicket({ id: 't1', customer_id: 'c-chad', customer_name: 'Chad Wu' })];
+    render(<SupportTab />);
+    expect(screen.getAllByText('Chad Wu').length).toBeGreaterThan(0);
+    expect(screen.queryByText(/Primary user/)).toBeNull();
+  });
+
+  it('finds the ticket when searching the primary user, who is not on the ticket row', () => {
+    customersToReturn = [mkCustomer({ primary_user_name: 'Sarah Wu' })];
+    ticketsToReturn = [
+      mkTicket({ id: 't1', customer_id: 'c-chad', customer_name: 'Chad Wu', subject: 'lid jammed' }),
+      mkTicket({ id: 't2', customer_id: null, customer_name: 'Someone Else', subject: 'unrelated' }),
+    ];
+    render(<SupportTab />);
+    fireEvent.change(screen.getByLabelText(/search tickets/i), { target: { value: 'Sarah' } });
+    expect(screen.getAllByText('Sarah Wu').length).toBeGreaterThan(0);
+    expect(screen.queryByText('unrelated')).toBeNull();
+  });
+
+  it('still finds the ticket when searching the purchaser', () => {
+    customersToReturn = [mkCustomer({ primary_user_name: 'Sarah Wu' })];
+    ticketsToReturn = [
+      mkTicket({ id: 't1', customer_id: 'c-chad', customer_name: 'Chad Wu', subject: 'lid jammed' }),
+      mkTicket({ id: 't2', customer_id: null, customer_name: 'Someone Else', subject: 'unrelated' }),
+    ];
+    render(<SupportTab />);
+    fireEvent.change(screen.getByLabelText(/search tickets/i), { target: { value: 'Chad' } });
+    expect(screen.getAllByText('Sarah Wu').length).toBeGreaterThan(0);
+    expect(screen.queryByText('unrelated')).toBeNull();
+  });
+});
+
+// The Unassigned table sits directly under the grouped rows. Rendering names
+// through a different path there is how the two halves of one screen drift
+// apart, so it goes through the same component even though a ticket with no
+// customer_id always resolves to its own snapshot.
+describe('SupportTab — unassigned rows use the same name rendering', () => {
+  beforeEach(() => { customersToReturn = []; });
+
+  it('renders the unassigned ticket name through the shared party component', () => {
+    ticketsToReturn = [mkTicket({ id: 'u1', customer_id: null, customer_name: 'Walk-in Wendy' })];
+    const { container } = render(<SupportTab />);
+    const names = Array.from(container.querySelectorAll('[data-party-name]'))
+      .map(n => n.textContent);
+    expect(names).toContain('Walk-in Wendy');
+  });
+});
+
+// The chips are the whole point of the feature: separating the customer waiting
+// on a lid (ships today) from the one waiting on a batch that has not landed.
+describe('SupportTab — parts vs batch replacement chips', () => {
+  beforeEach(() => {
+    replacementOrdersToReturn = [];
+    customersToReturn = [];
+  });
+
+  /** Three queued customers: two parts, one P100X, one LILA-Mini. */
+  function seedQueue() {
+    ticketsToReturn = [
+      mkTicket({ id: 't1', customer_id: 'c1', customer_name: 'Parts Pat',
+                 status: 'queued_for_replacement', replacement_order_id: 'o1' }),
+      mkTicket({ id: 't2', customer_id: 'c2', customer_name: 'Parts Pam',
+                 status: 'queued_for_replacement', replacement_order_id: 'o2' }),
+      mkTicket({ id: 't3', customer_id: 'c3', customer_name: 'Batch Bob',
+                 status: 'queued_for_replacement', replacement_order_id: 'o3' }),
+      mkTicket({ id: 't4', customer_id: 'c4', customer_name: 'Mini Mo',
+                 status: 'queued_for_replacement', replacement_order_id: 'o4' }),
+    ];
+    replacementOrdersToReturn = [
+      mkReplacementOrder('o1', [{ kind: 'part', sku: 'LILA-LID-V36' }]),
+      mkReplacementOrder('o2', [{ kind: 'part', sku: 'LILA-FILTER' }]),
+      mkReplacementOrder('o3', [{ kind: 'unit_pending', batch: 'P100X' }]),
+      mkReplacementOrder('o4', [{ kind: 'unit_pending', batch: 'LILA-Mini' }]),
+    ];
+  }
+
+  const openQueue = () =>
+    fireEvent.click(screen.getByRole('button', { name: /Replacement queue/ }));
+  const chips = () =>
+    screen.getByRole('group', { name: /replacement kind/i });
+  const tableText = () => screen.getAllByRole('table').map(t => t.textContent ?? '').join(' ');
+
+  it('hides the chips until the replacement queue view is open', () => {
+    seedQueue();
+    render(<SupportTab />);
+    expect(screen.queryByRole('group', { name: /replacement kind/i })).toBeNull();
+    openQueue();
+    expect(chips()).toBeTruthy();
+  });
+
+  it('offers All, Parts, Any batch and one chip per batch present', () => {
+    seedQueue();
+    render(<SupportTab />);
+    openQueue();
+    const labels = Array.from(chips().querySelectorAll('button')).map(b => b.textContent);
+    expect(labels).toEqual(['All4', 'Parts2', 'Any batch2', 'LILA-Mini1', 'P100X1']);
+  });
+
+  it('narrows to parts only', () => {
+    seedQueue();
+    render(<SupportTab />);
+    openQueue();
+    fireEvent.click(screen.getByRole('button', { name: /^Parts2$/ }));
+    expect(tableText()).toContain('Parts Pat');
+    expect(tableText()).toContain('Parts Pam');
+    expect(tableText()).not.toContain('Batch Bob');
+    expect(tableText()).not.toContain('Mini Mo');
+  });
+
+  it('narrows to a single batch, excluding the other batch and parts', () => {
+    seedQueue();
+    render(<SupportTab />);
+    openQueue();
+    fireEvent.click(screen.getByRole('button', { name: /^P100X1$/ }));
+    expect(tableText()).toContain('Batch Bob');
+    expect(tableText()).not.toContain('Mini Mo');
+    expect(tableText()).not.toContain('Parts Pat');
+  });
+
+  it('rolls every batch up under Any batch', () => {
+    seedQueue();
+    render(<SupportTab />);
+    openQueue();
+    fireEvent.click(screen.getByRole('button', { name: /^Any batch2$/ }));
+    expect(tableText()).toContain('Batch Bob');
+    expect(tableText()).toContain('Mini Mo');
+    expect(tableText()).not.toContain('Parts Pat');
+  });
+
+  it('surfaces a batch nobody has hardcoded', () => {
+    ticketsToReturn = [mkTicket({
+      id: 't9', customer_id: 'c9', customer_name: 'Future Fran',
+      status: 'queued_for_replacement', replacement_order_id: 'o9',
+    })];
+    replacementOrdersToReturn = [
+      mkReplacementOrder('o9', [{ kind: 'unit_pending', batch: 'P250-Neo' }]),
+    ];
+    render(<SupportTab />);
+    openQueue();
+    const labels = Array.from(chips().querySelectorAll('button')).map(b => b.textContent);
+    expect(labels).toContain('P250-Neo1');
+  });
+
+  it('clears the narrowing when leaving the replacement view', () => {
+    seedQueue();
+    render(<SupportTab />);
+    openQueue();
+    fireEvent.click(screen.getByRole('button', { name: /^Parts2$/ }));
+    expect(tableText()).not.toContain('Batch Bob');
+    openQueue();  // toggles the saved view back off
+    openQueue();  // and back on — the chip must not still be applied
+    expect(tableText()).toContain('Batch Bob');
   });
 });

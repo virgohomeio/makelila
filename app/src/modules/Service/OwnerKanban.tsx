@@ -4,6 +4,8 @@ import {
   type ServiceTicket, type TicketPriority,
 } from '../../lib/service';
 import styles from './Service.module.css';
+import { TicketPartyLabel } from './TicketPartyLabel';
+import type { PartyResolver } from '../../lib/customers';
 
 // A compact, owner-swimlane board that sits under the KPI strip. Columns are
 // the owners who currently hold ≥1 active (non-closed) ticket, plus an
@@ -64,9 +66,12 @@ type Props = {
   tickets: ServiceTicket[];
   currentUserEmail: string | null | undefined;
   onSelectTicket: (t: ServiceTicket) => void;
+  /** FR-6 resolver from the Support tab, so the board names the same person
+   *  the list view does. Omitted in bare renders — falls back to the snapshot. */
+  partiesFor?: PartyResolver;
 };
 
-export function OwnerKanban({ tickets, currentUserEmail, onSelectTicket }: Props) {
+export function OwnerKanban({ tickets, currentUserEmail, onSelectTicket, partiesFor }: Props) {
   const [collapsed, setCollapsed] = useState(false);
   const [dragId, setDragId] = useState<string | null>(null);
   const [overCol, setOverCol] = useState<string | null>(null);
@@ -134,6 +139,7 @@ export function OwnerKanban({ tickets, currentUserEmail, onSelectTicket }: Props
                     <KanbanCard
                       key={t.id}
                       ticket={t}
+                      partiesFor={partiesFor}
                       dragging={dragId === t.id}
                       onDragStart={() => setDragId(t.id)}
                       onDragEnd={() => { setDragId(null); setOverCol(null); }}
@@ -154,9 +160,10 @@ export function OwnerKanban({ tickets, currentUserEmail, onSelectTicket }: Props
 }
 
 function KanbanCard({
-  ticket, dragging, onDragStart, onDragEnd, onClick,
+  ticket, partiesFor, dragging, onDragStart, onDragEnd, onClick,
 }: {
   ticket: ServiceTicket;
+  partiesFor?: PartyResolver;
   dragging: boolean;
   onDragStart: () => void;
   onDragEnd: () => void;
@@ -178,7 +185,7 @@ function KanbanCard({
       </div>
       <div className={styles.kanbanCardSubject}>{ticket.subject}</div>
       <div className={styles.kanbanCardMeta}>
-        {ticket.customer_name ?? ticket.customer_email ?? 'No customer'}
+        <TicketPartyLabel ticket={ticket} partiesFor={partiesFor} />
         {ticket.topic && <span className={styles.kanbanCardTopic}> · {topicLabel(ticket.topic)}</span>}
       </div>
     </div>

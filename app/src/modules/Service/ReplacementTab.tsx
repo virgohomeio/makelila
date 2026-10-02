@@ -1,20 +1,30 @@
 import { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { useReplacementOrders, type Order } from '../../lib/orders';
-import { isReplacementLine } from '../../lib/orders';
+import {
+  useReplacementOrders, queueReplacementForFulfillment, markPartsReplacementShipped,
+  type Order,
+} from '../../lib/orders';
+import { useFulfillmentQueue } from '../../lib/fulfillment';
+
 import {
   replacementItemTags, replacementStageTag, type StageTag,
   replacementUnitDemandByBatch, replacementDemandBySku,
+  replacementItemsLabel, isLiveReplacement, isPartsOnlyReplacement,
 } from '../../lib/replacementTags';
 import { useBatches, useUnits, type Batch } from '../../lib/stock';
-import { useParts } from '../../lib/parts';
+import { useParts, effectiveDemandBySku } from '../../lib/parts';
 import { useServiceTickets, type TicketTopic } from '../../lib/service';
+import { useCustomers, buildPartyResolver, type CustomerPartyRow } from '../../lib/customers';
+import { TicketPartyLabel } from './TicketPartyLabel';
 import { TicketDetailPanel } from './TicketDetailPanel';
 import styles from './Service.module.css';
 
-type Stage = 'pending' | 'approved' | 'fulfilling' | 'shipped' | 'delivered' | 'closed' | 'awaiting_batch';
+type Stage = 'pending' | 'approved' | 'fulfilling' | 'shipped' | 'delivered' | 'closed'
+  | 'awaiting_batch' | 'cancelled';
 
 function stageFor(o: Order): Stage {
+  // Cancelled outranks everything: a cancelled replacement is not awaiting a
+  // batch and not fulfilling, whatever its other columns still say.
+  if (o.status === 'cancelled') return 'cancelled';
   // Backlog #71 — batch-blocked orders surface as their own group so
   // operators can see at a glance which orders are stuck waiting on
   // inbound stock vs. actionable in the normal pipeline.
@@ -25,51 +35,23 @@ function stageFor(o: Order): Stage {
   return o.status as Stage;
 }
 
-function summarize(line_items: Order['line_items']): string {
-  // Defensive: line_items can come from two paths:
-  //   1. The in-app #55 replacement workflow — full schema (qty, cost_*, sku).
-  //   2. The Excel backfill (migration 20260605080000) — looser shape:
-  //      `{kind:'part',description}` / `{kind:'unit',batch,unit_serial}` /
-  //      `{kind:'unit_pending',batch}` (serial not yet assigned).
-  // We count both shapes + surface descriptions for part rows so the
-  // table reads "1 unit + Hopper" instead of "1 unit + 1 part".
-  let parts = 0;
-  let units = 0;
-  let unitsPending = 0;
-  const partDescs: string[] = [];
-  for (const li of line_items) {
-    const k = (li as { kind?: string }).kind;
-    if (k === 'part') {
-      parts += isReplacementLine(li) ? li.qty : 1;
-      const desc = (li as { description?: string; name?: string }).description
-                ?? (li as { name?: string }).name;
-      if (desc) partDescs.push(desc);
-    } else if (k === 'unit') {
-      units += 1;
-    } else if (k === 'unit_pending') {
-      unitsPending += 1;
-    }
-  }
-  const segs: string[] = [];
-  if (units > 0)        segs.push(`${units} unit${units !== 1 ? 's' : ''}`);
-  if (unitsPending > 0) segs.push(`${unitsPending} unit${unitsPending !== 1 ? 's' : ''} (pending)`);
-  if (partDescs.length > 0) {
-    const joined = partDescs.join(', ');
-    segs.push(joined.length > 50 ? joined.slice(0, 47) + '…' : joined);
-  } else if (parts > 0) {
-    segs.push(`${parts} part${parts !== 1 ? 's' : ''}`);
-  }
-  return segs.join(' + ') || '—';
-}
-
 // Filter by the operator-facing item stage (spec 2026-06-08), not the pipeline
 // status. Every replacement is a unit (ready→Unit / pending→awaiting batch) or
 // parts/consumables.
-const STAGE_FILTERS: { key: 'all' | StageTag; label: string }[] = [
+//
+// 'Cancelled' is the exception, and sits apart from the stages on purpose: it
+// answers "what happened to this order", not "what is in the box". Cancelled
+// rows are excluded from every other view including All — this table is the
+// list of replacements someone is waiting on, and a cancelled order is the one
+// thing on it nobody is. They stay reachable here because the row is still the
+// record of what was promised and withdrawn.
+type Filter = 'all' | StageTag | 'cancelled';
+const STAGE_FILTERS: { key: Filter; label: string }[] = [
   { key: 'all',                label: 'All' },
   { key: 'Unit',               label: 'Unit' },
   { key: 'awaiting batch',     label: 'awaiting batch' },
   { key: 'Parts/Consumables',  label: 'Parts/Consumables' },
+  { key: 'cancelled',          label: 'Cancelled' },
 ];
 
 // Backlog #41 — topics that signal "this ticket is asking for a replacement"
@@ -86,12 +68,24 @@ const CLOSED_TICKET_STATUSES = new Set(['resolved', 'closed']);
 // ticket-triage section above the order table.
 export default function ReplacementTab() {
   const { orders, loading } = useReplacementOrders();
+  // Queue membership, read from the queue itself rather than inferred from
+  // orders.status. Inferring it is what the deleted Sales tab did — it filtered
+  // on replacement_state while Confirm wrote status, and the two disagreeing is
+  // the whole reason that tab had to go.
+  const { all: queueRows } = useFulfillmentQueue();
   const { batches } = useBatches();
   const { units } = useUnits();
   const { parts } = useParts();
   // Pull every support/repair ticket so we can filter for triage candidates.
   // useServiceTickets() with no arg returns all categories; we filter below.
   const { tickets } = useServiceTickets();
+  // FR-6: the triage row names a person, so resolve the household rather than
+  // printing the ticket's stale customer_name snapshot.
+  const { customers } = useCustomers();
+  const partiesFor = useMemo(
+    () => buildPartyResolver(customers as CustomerPartyRow[]),
+    [customers],
+  );
 
   // Queued replacement demand vs supply — units (ready vs needed, by batch)
   // and parts/consumables (on-hand vs queued). Drawn from un-shipped
@@ -112,11 +106,13 @@ export default function ReplacementTab() {
     const totalReady = units.filter(u => u.status === 'ready').length;
     const totalToBuild = unitRows.reduce((n, r) => n + r.toBuild, 0);
 
-    const partDemand = replacementDemandBySku(orders);
+    // Same Demand as Stock › Parts: derived from orders, overridden by hand.
+    const partDemand = effectiveDemandBySku(replacementDemandBySku(orders), parts);
     const partRows = [...partDemand.entries()]
+      .filter(([, d]) => d > 0)
       .map(([sku, d]) => {
         const p = parts.find(pp => pp.sku === sku);
-        const onHand = p && p.category === 'replacement' ? p.on_hand : 0;
+        const onHand = p ? p.on_hand : 0;
         return { sku, name: p?.name ?? sku, onHand, demand: d, toGet: Math.max(0, d - onHand) };
       })
       .sort((a, b) => b.demand - a.demand || a.name.localeCompare(b.name));
@@ -129,8 +125,80 @@ export default function ReplacementTab() {
       partRows, partsOnHand, partsQueued, partsToGet,
     };
   }, [orders, units, parts]);
-  const [filter, setFilter] = useState<'all' | StageTag>('all');
+  const [filter, setFilter] = useState<Filter>('all');
   const [openTicketId, setOpenTicketId] = useState<string | null>(null);
+  const [queueing, setQueueing] = useState<string | null>(null);
+  // The parts-only "we mailed it" dialog: the order it is open on, plus the
+  // carrier/tracking the operator has in hand (both optional).
+  const [shipTarget, setShipTarget] = useState<Order | null>(null);
+  const [shipCarrier, setShipCarrier] = useState('');
+  const [shipTracking, setShipTracking] = useState('');
+  const [shipping, setShipping] = useState(false);
+  const [shipError, setShipError] = useState<string | null>(null);
+
+  const queueStepByOrder = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const r of queueRows) m.set(r.order_id, r.step);
+    return m;
+  }, [queueRows]);
+
+  /** "Ready to Ship" — hand a replacement to Fulfillment › Queue › Ready to
+   *  ship. This is the only way a replacement enters the queue.
+   *
+   *  Creating one on a service ticket says the customer needs a part or a unit.
+   *  It does not say anyone has picked it, which is why the order stops on this
+   *  screen and waits for a person to say the box is ready.
+   *
+   *  A short stock check is a question, not a refusal: half these orders came
+   *  off the Excel import as free text ("both side latch") and the parts table
+   *  has nothing to match them against. The operator holding the box knows
+   *  better than the lookup does. */
+  async function handleQueue(o: Order) {
+    setQueueing(o.id);
+    try {
+      const first = await queueReplacementForFulfillment(o.id);
+      if (!first.queued) {
+        const ok = window.confirm(
+          `Stock for ${o.order_ref} looks short: ${first.blocked}.\n\n`
+          + 'Mark it Ready to Ship anyway?',
+        );
+        if (!ok) return;
+        await queueReplacementForFulfillment(o.id, { force: true });
+      }
+    } catch (e) {
+      window.alert(`Could not send ${o.order_ref} to the queue: ${(e as Error).message}`);
+    } finally {
+      setQueueing(null);
+    }
+  }
+
+  function openShipDialog(o: Order) {
+    setShipTarget(o);
+    setShipCarrier(o.carrier ?? '');
+    setShipTracking(o.tracking_num ?? '');
+    setShipError(null);
+  }
+
+  /** "Mark shipped" — the box of parts left the building.
+   *
+   *  Parts and consumables have no machine to assign and no test report, so
+   *  they never needed the 6-step queue; this records the shipment the same way
+   *  reaching step 6 would (see markPartsReplacementShipped). The row's Items
+   *  chips are in front of the operator when they click, which is the check
+   *  that matters — the lib call refuses anything carrying a unit. */
+  async function handleMarkShipped() {
+    const o = shipTarget;
+    if (!o) return;
+    setShipping(true); setShipError(null);
+    try {
+      await markPartsReplacementShipped(o.id, { carrier: shipCarrier, tracking_num: shipTracking });
+      setShipTarget(null);
+    } catch (e) {
+      setShipError((e as Error).message);
+    } finally {
+      setShipping(false);
+    }
+  }
 
   const batchById = useMemo(() => {
     const m = new Map<string, Batch>();
@@ -164,8 +232,12 @@ export default function ReplacementTab() {
   }, [tickets]);
 
   const filtered = useMemo(() => {
-    if (filter === 'all') return orders;
-    return orders.filter(o => {
+    if (filter === 'cancelled') return orders.filter(o => o.status === 'cancelled');
+    // Every other view is work still owed, so cancelled never appears in it —
+    // not even under All. See STAGE_FILTERS.
+    const live = orders.filter(o => o.status !== 'cancelled');
+    if (filter === 'all') return live;
+    return live.filter(o => {
       const tags = replacementItemTags(o);
       const st = replacementStageTag(o, tags, b => pendingBatchIds.has(b) || !batchById.has(b));
       return st === filter;
@@ -179,8 +251,15 @@ export default function ReplacementTab() {
 
   const now = Date.now();
   const monthAgo = now - 30 * 86400_000;
-  const open = orders.filter(o => !o.delivered_at).length;
-  const awaitingBatch = orders.filter(o => o.awaiting_batch_id && !o.shipped_at && !o.delivered_at).length;
+  // isLiveReplacement, not `!delivered_at`: cancelling from the fulfillment
+  // queue keeps the row (it used to delete it), so a cancelled replacement was
+  // counting as open and as batch demand forever.
+  const open = orders.filter(isLiveReplacement).length;
+  const awaitingBatch = orders.filter(o => o.awaiting_batch_id && isLiveReplacement(o)).length;
+  // The number that went missing when Sales stopped carrying replacements: live
+  // orders with no fulfillment_queue row. Most are legitimately waiting on a
+  // batch; the rest are the ones nobody can see are stuck.
+  const notQueued = orders.filter(o => isLiveReplacement(o) && !queueStepByOrder.has(o.id)).length;
   const shipped30 = orders.filter(o => o.shipped_at && new Date(o.shipped_at).getTime() > monthAgo).length;
   const delivered30 = orders.filter(o => o.delivered_at && new Date(o.delivered_at).getTime() > monthAgo).length;
   const cogs30: number[] = orders
@@ -267,6 +346,10 @@ export default function ReplacementTab() {
         <div className={styles.kpiCard}><div className={styles.kpiLabel}>Open</div><div className={styles.kpiValue}>{open}</div></div>
         <div className={styles.kpiCard}><div className={styles.kpiLabel}>Triage candidates</div><div className={styles.kpiValue}>{triageCandidates.length}</div></div>
         <div className={styles.kpiCard}><div className={styles.kpiLabel}>Awaiting batch</div><div className={styles.kpiValue}>{awaitingBatch}</div></div>
+        <div className={styles.kpiCard} title="Live replacements nobody has marked Ready to Ship yet — most are legitimately waiting on a batch or a part. Click “Ready to Ship” on a row to send it to Fulfillment › Queue.">
+          <div className={styles.kpiLabel}>Not in queue</div>
+          <div className={styles.kpiValue}>{notQueued}</div>
+        </div>
         <div className={styles.kpiCard}><div className={styles.kpiLabel}>Shipped (30d)</div><div className={styles.kpiValue}>{shipped30}</div></div>
         <div className={styles.kpiCard}><div className={styles.kpiLabel}>Delivered (30d)</div><div className={styles.kpiValue}>{delivered30}</div></div>
         <div className={styles.kpiCard}><div className={styles.kpiLabel}>Avg COGS (30d)</div><div className={styles.kpiValue}>{avgCogs == null ? '—' : `$${avgCogs.toFixed(2)}`}</div></div>
@@ -298,7 +381,7 @@ export default function ReplacementTab() {
                 return (
                   <tr key={t.id} className={styles.row} onClick={() => setOpenTicketId(t.id)} style={{ cursor: 'pointer' }}>
                     <td style={{ fontFamily: 'ui-monospace, monospace' }}>{t.ticket_number}</td>
-                    <td>{t.customer_name ?? t.customer_email ?? '—'}</td>
+                    <td><TicketPartyLabel ticket={t} partiesFor={partiesFor} /></td>
                     <td><span className={styles.triageTopic}>{t.topic}</span></td>
                     <td>{t.subject.length > 60 ? t.subject.slice(0, 57) + '…' : t.subject}</td>
                     <td>{t.status}</td>
@@ -322,13 +405,16 @@ export default function ReplacementTab() {
       </div>
 
       {filtered.length === 0 ? (
-        <div className={styles.empty}>No replacement orders.</div>
+        <div className={styles.empty}>
+          {filter === 'cancelled' ? 'No cancelled replacement orders.' : 'No replacement orders.'}
+        </div>
       ) : (
         <table className={styles.table}>
           <thead>
             <tr>
               <th>Order #</th><th>Ticket</th><th>Customer</th><th>Items</th>
               <th>Tracking</th><th>COGS</th><th>Item Type</th><th>Days open</th>
+              <th>Fulfillment</th>
             </tr>
           </thead>
           <tbody>
@@ -338,9 +424,15 @@ export default function ReplacementTab() {
               const batch = o.awaiting_batch_id ? batchById.get(o.awaiting_batch_id) : null;
               const tags = replacementItemTags(o);
               const stageTag = replacementStageTag(o, tags, isPendingBatch);
+              const queueStep = queueStepByOrder.get(o.id);
               return (
                 <tr key={o.id} className={styles.row}>
-                  <td><Link to={`/order-review/${o.id}`}>{o.order_ref}</Link></td>
+                  {/* Not a link. /order-review/:id resolves out of
+                      bucketOrders' `all` + `cancelled`, and 0fb7f45 made both
+                      sales-only, so every replacement sent there has landed on
+                      an empty detail pane since. This row already carries
+                      everything that page would have shown. */}
+                  <td>{o.order_ref}</td>
                   <td>
                     {o.linked_ticket_id ? (
                       <button
@@ -355,7 +447,7 @@ export default function ReplacementTab() {
                     <div className={styles.tagRow}>
                       {tags.length > 0
                         ? tags.map(t => <span key={t} className={styles.itemTag}>{t}</span>)
-                        : <span className={styles.muted}>{summarize(o.line_items)}</span>}
+                        : <span className={styles.muted}>{replacementItemsLabel(o.line_items)}</span>}
                     </div>
                   </td>
                   <td>
@@ -372,11 +464,105 @@ export default function ReplacementTab() {
                       : <span className={styles.muted}>{stage}</span>}
                   </td>
                   <td>{daysOpen}</td>
+                  <td>
+                    {queueStep === 6 ? (
+                      <span className={styles.pill}>Shipped</span>
+                    ) : !isLiveReplacement(o) ? (
+                      <span className={styles.muted}>—</span>
+                    ) : (
+                      <div className={styles.fulfillCell}>
+                        {queueStep != null ? (
+                          <span className={styles.pill}>{`In queue · step ${queueStep}`}</span>
+                        ) : (
+                          <button
+                            type="button"
+                            className={styles.btnSecondary}
+                            disabled={queueing === o.id}
+                            onClick={() => void handleQueue(o)}
+                          >{queueing === o.id ? 'Queueing…' : 'Ready to Ship'}</button>
+                        )}
+                        {/* Parts and consumables skip the queue: there is no
+                            machine to assign and no test report to confirm, so
+                            the box just goes in the mail and someone says so. */}
+                        {isPartsOnlyReplacement(o) && (
+                          <button
+                            type="button"
+                            className={styles.btnSecondary}
+                            onClick={() => openShipDialog(o)}
+                            title="Record this parts replacement as shipped — no machine to assign, so it skips the 6-step queue"
+                          >Mark shipped</button>
+                        )}
+                      </div>
+                    )}
+                  </td>
                 </tr>
               );
             })}
           </tbody>
         </table>
+      )}
+
+      {shipTarget && (
+        <div className={styles.modalBackdrop} onClick={() => { if (!shipping) setShipTarget(null); }}>
+          <div className={styles.modalCard} onClick={e => e.stopPropagation()}>
+            <header className={styles.modalHead}>
+              <span>Mark {shipTarget.order_ref} shipped</span>
+              <button
+                className={styles.modalClose}
+                onClick={() => setShipTarget(null)}
+                disabled={shipping}
+                aria-label="Close"
+              >×</button>
+            </header>
+
+            <div className={styles.modalBody}>
+              <p style={{ margin: '0 0 10px', fontSize: 12, lineHeight: 1.55 }}>
+                <strong>{replacementItemsLabel(shipTarget.line_items)}</strong> to{' '}
+                {shipTarget.customer_name}. This records the shipment the same way reaching
+                step&nbsp;6 of the queue would — it shows as Shipped in Fulfillment ›
+                Queue and clears the customer&rsquo;s &ldquo;Queued for Replacement&rdquo; chip.
+              </p>
+
+              <div className={styles.modalGrid}>
+                <div className={styles.modalRow}>
+                  <label htmlFor="ship-carrier">Carrier (optional)</label>
+                  <input
+                    id="ship-carrier"
+                    className={styles.modalInput}
+                    placeholder="e.g. Canada Post"
+                    value={shipCarrier}
+                    onChange={e => setShipCarrier(e.target.value)}
+                  />
+                </div>
+                <div className={styles.modalRow}>
+                  <label htmlFor="ship-tracking">Tracking number (optional)</label>
+                  <input
+                    id="ship-tracking"
+                    className={styles.modalInput}
+                    placeholder="Leave blank if there is none"
+                    value={shipTracking}
+                    onChange={e => setShipTracking(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <p className={styles.muted} style={{ fontSize: 11, margin: '10px 0 0', lineHeight: 1.5 }}>
+                Stock isn&rsquo;t touched — these parts came off on-hand when the replacement was
+                raised. Shipping cost is left for the carrier invoice to fill in.
+              </p>
+              {shipError && <div className={styles.modalError}>{shipError}</div>}
+            </div>
+
+            <footer className={styles.modalFoot}>
+              <button className={styles.modalSecondary} onClick={() => setShipTarget(null)} disabled={shipping}>
+                Cancel
+              </button>
+              <button className={styles.modalPrimary} onClick={() => void handleMarkShipped()} disabled={shipping}>
+                {shipping ? 'Recording…' : 'Mark shipped'}
+              </button>
+            </footer>
+          </div>
+        </div>
       )}
 
       {openTicket && (
