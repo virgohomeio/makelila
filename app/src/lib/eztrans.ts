@@ -54,13 +54,18 @@ export const PACKING_LIST_QUANTITY = 1;
 
 export { needsPesticideWorksheet };
 
-/** What the 3PL receives, given the carrier on the queue row. The panel names
+/** What the 3PL receives, given where the order is going. The panel names
  *  these so an operator can see before sending whether the pesticide worksheet
- *  is going out — the same rule the edge function attaches by. */
-export function attachmentFilenames(orderRef: string, carrier: string | null): string[] {
+ *  is going out — the same rule the edge function attaches by.
+ *
+ *  Takes the destination rather than the carrier: a US shipment is a customs
+ *  entry whoever carries it, and this used to key on `carrier === 'UPS'`. */
+export function attachmentFilenames(
+  orderRef: string, dest: { country?: string | null } | null,
+): string[] {
   const safeRef = orderRef.replace(/[^A-Za-z0-9._-]/g, '');
   const names = [`shipping-label-and-packing-list-${safeRef}.pdf`];
-  if (needsPesticideWorksheet(carrier)) names.push(`pesticide-worksheet-${safeRef}.pdf`);
+  if (needsPesticideWorksheet(dest)) names.push(`pesticide-worksheet-${safeRef}.pdf`);
   return names;
 }
 
@@ -277,8 +282,9 @@ export function ezTransVariables(args: EzTransBookingArgs): Record<string, strin
     customer_address_block: addressLines(order).join('\n'),
     date: new Date().toISOString().slice(0, 10),
     // What the 3PL should be looking for: one merged label + packing list, and
-    // on a UPS booking the pesticide worksheet too.
-    attachments_note: attachmentsNote(carrier),
+    // on a shipment into the US the pesticide worksheet too — plus what to do
+    // with it, which is upload it for the broker rather than pack it.
+    attachments_note: attachmentsNote(order),
   };
 }
 

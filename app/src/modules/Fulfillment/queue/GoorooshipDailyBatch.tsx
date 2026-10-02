@@ -19,7 +19,7 @@ import styles from '../Fulfillment.module.css';
  *  message rather than one per box: a picker working a stack of ten cartons
  *  out of ten separate emails loses one. So step 3 confirms an order into the
  *  day's batch and this bar sends the lot — one PDF per order holding its
- *  shipping label and packing list, with the UPS pesticide worksheet beside
+ *  shipping label and packing list, with the US pesticide worksheet beside
  *  it as its own file, every attachment named for the customer and the
  *  tracking number so the 3PL knows at a glance which carton it belongs to.
  *
@@ -123,8 +123,10 @@ export function GoorooshipDailyBatch({
         </button>
         <span className={styles.ezTransHint}>
           One email to {EZTRANS_EMAIL} carrying every order confirmed today. Each order's
-          shipping label and packing list go as one PDF; a UPS shipment's pesticide
+          shipping label and packing list go as one PDF; a US shipment's pesticide
           worksheet goes as a second file, both named for the customer and the tracking number.
+          The email tells them the worksheet is a customs document to upload for the broker,
+          not paperwork for the carton.
         </span>
       </div>
 

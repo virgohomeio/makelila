@@ -64,8 +64,10 @@ import { GoorooshipDailyBatch } from '../queue/GoorooshipDailyBatch';
 import type { EzTransBatchOrder, EzTransBatchQueueRow } from '../../../lib/eztransBatch';
 
 const ORDERS = new Map<string, EzTransBatchOrder>([
-  ['o-a', { id: 'o-a', order_ref: '#1184', customer_name: 'Juanita M Wells' }],
-  ['o-b', { id: 'o-b', order_ref: '#1185', customer_name: 'Marc Bérubé' }],
+  // o-a goes to the US, so it carries a pesticide worksheet; o-b is domestic.
+  // The destination is what decides, not the carrier on the row.
+  ['o-a', { id: 'o-a', order_ref: '#1184', customer_name: 'Juanita M Wells', country: 'US' }],
+  ['o-b', { id: 'o-b', order_ref: '#1185', customer_name: 'Marc Bérubé', country: 'CA' }],
 ]);
 
 /** Today, locally — the bar buckets by the operator's calendar day. */
@@ -101,8 +103,8 @@ describe('GoorooshipDailyBatch', () => {
     );
     expect(screen.getByText('Juanita M Wells')).toBeInTheDocument();
     expect(screen.getByText(/1 waiting/)).toBeInTheDocument();
-    // UPS, so the worksheet rides along as its own file — both named for the
-    // customer and the tracking number.
+    // A US entry, so the worksheet rides along as its own file — both named for
+    // the customer and the tracking number.
     expect(screen.getByText(
       'label-and-packing-list-Juanita-M-Wells-U1.pdf · pesticide-worksheet-Juanita-M-Wells-U1.pdf',
     )).toBeInTheDocument();

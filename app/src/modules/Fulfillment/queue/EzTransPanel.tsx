@@ -178,12 +178,12 @@ export function EzTransPanel({
   // the order went out short until the customer counted boxes.
   const ready = !!carrier && !!tracking.trim() && (!!pdf || labelOnFile) && offsite.length === 0;
 
-  // UPS brokers its own US entries and needs a FIFRA worksheet with them, so
-  // one is built and attached on those bookings only. Decided by the same
-  // helper the edge function uses, so this cannot promise a document the send
-  // does not attach.
-  const worksheetGoes = needsPesticideWorksheet(carrier);
-  const attachments = attachmentFilenames(order.order_ref, carrier);
+  // A shipment into the US is a customs entry and needs a FIFRA worksheet with
+  // it, so one is built and attached on those bookings only — the destination
+  // decides, not the carrier. Decided by the same helper the edge function
+  // uses, so this cannot promise a document the send does not attach.
+  const worksheetGoes = needsPesticideWorksheet(order);
+  const attachments = attachmentFilenames(order.order_ref, order);
 
   const booking = useMemo(() => {
     if (placements.length === 0) return null;
@@ -278,7 +278,7 @@ export function EzTransPanel({
         EZTRANS_SENT_ACTION,
         order.order_ref,
         `Booking confirmation, packing list + ${carrier} label ` +
-        `${worksheetGoes ? '+ UPS pesticide worksheet ' : ''}sent to ${EZTRANS_EMAIL} — ` +
+        `${worksheetGoes ? '+ US pesticide worksheet ' : ''}sent to ${EZTRANS_EMAIL} — ` +
         `${serials.length} unit(s) ${serials.join(', ')}, ` +
         `master carton ${cartonSummary}, ` +
         `tracking ${tracking.trim()}` +
@@ -508,7 +508,8 @@ export function EzTransPanel({
               <span className={styles.ezTransHint}>
                 Confirming adds it to today's Goorooship email — sent from the button at
                 the bottom of the queue.{worksheetGoes
-                  ? ' UPS brokers this entry — the signed pesticide worksheet goes with it.'
+                  ? ' This is a US entry — the signed pesticide worksheet goes with it,'
+                    + ' for the 3PL to upload for the broker rather than pack.'
                   : ''}
               </span>
             )}
@@ -661,7 +662,7 @@ export function EzTransPanel({
               </label>
               <span className={styles.ezTransHint}>
                 The label and the packing list are merged into one attached PDF
-                automatically{worksheetGoes ? ', and UPS shipments carry the pesticide worksheet too' : ''}.
+                automatically{worksheetGoes ? ', and US shipments carry the pesticide worksheet too' : ''}.
                 The packing list is edited separately, below.
               </span>
             </div>
@@ -728,7 +729,7 @@ export function EzTransPanel({
           {worksheetGoes && (
             <>
               <div className={styles.ezTransPreviewHead}>
-                <span className={styles.ezTransPreviewLabel}>Attached UPS pesticide worksheet (PDF)</span>
+                <span className={styles.ezTransPreviewLabel}>Attached US pesticide worksheet (PDF)</span>
                 <span className={styles.ezTransHint}>
                   Built and signed on send. Not editable — it is a FIFRA
                   declaration to CBP, so its wording is fixed in code.

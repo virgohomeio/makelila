@@ -1,7 +1,7 @@
 // Confirm an order with the EZ Trans 3PL after it has been booked on
 // Goorooship: the shipping label they print and the packing list they pick
-// from, merged into one attachment, plus — on a UPS booking — the FIFRA
-// pesticide worksheet UPS Supply Chain Solutions needs to broker the entry.
+// from, merged into one attachment, plus — on a shipment into the US — the
+// FIFRA pesticide worksheet the broker needs to clear the entry.
 //
 // Operator path: Fulfillment > Queue > step 3 (Attach the shipping label).
 // The panel only appears when the unit assigned at step 1 is held at EZTrans,
@@ -286,7 +286,7 @@ async function handle(req: Request): Promise<Response> {
     // continuation lines under "Address: " instead.
     customer_address_block: addr.join('\n'),
     date: new Date().toISOString().slice(0, 10),
-    attachments_note: attachmentsNote(q.carrier),
+    attachments_note: attachmentsNote(order),
   };
 
   let tplSubject = DEFAULT_EZTRANS_SUBJECT;
@@ -363,12 +363,13 @@ async function handle(req: Request): Promise<Response> {
     ];
   }
 
-  // UPS brokers its own US entries and will not act as importer of record
-  // without a FIFRA worksheet, so one rides along on every UPS booking. The
-  // date on it is today — the day the label was attached and this went out,
-  // which is what the worksheets filed by hand carried.
+  // A shipment into the US is a customs entry, and the tariff the LILA Pro
+  // classifies under prompts CBP's pesticide question — so one rides along on
+  // every US booking, whoever carries it. The date on it is today — the day the
+  // label was attached and this went out, which is what the worksheets filed by
+  // hand carried.
   let worksheetWarning: string | null = null;
-  const needsWorksheet = needsPesticideWorksheet(q.carrier);
+  const needsWorksheet = needsPesticideWorksheet(order);
   if (needsWorksheet) {
     // The signature is a real person's, so it is not in the repo — it is read
     // from a private bucket with the service role, the same way the label is.

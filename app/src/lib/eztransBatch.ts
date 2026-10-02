@@ -76,6 +76,9 @@ export type EzTransBatchOrder = {
   id: string;
   order_ref: string;
   customer_name: string;
+  /** Destination. Decides whether the shipment carries a pesticide worksheet —
+   *  a US entry needs one whoever carries it. */
+  country?: string | null;
 };
 
 /** One confirmed order as the footer panel lists it. */
@@ -143,7 +146,7 @@ export function buildDailyBatch(
     const f = batchAttachmentFilenames({
       customerName: order.customer_name,
       tracking: r.tracking_num!,
-      needsWorksheet: needsPesticideWorksheet(r.carrier),
+      needsWorksheet: needsPesticideWorksheet(order),
     });
     return f.worksheet ? [f.combined, f.worksheet] : [f.combined];
   }));
@@ -151,7 +154,7 @@ export function buildDailyBatch(
   let cursor = 0;
   const items: EzTransBatchItem[] = onToday.map(r => {
     const order = orders.get(r.order_id)!;
-    const worksheet = needsPesticideWorksheet(r.carrier);
+    const worksheet = needsPesticideWorksheet(order);
     const documents = names.slice(cursor, cursor + (worksheet ? 2 : 1));
     cursor += documents.length;
     return {

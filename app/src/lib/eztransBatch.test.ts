@@ -65,9 +65,11 @@ function row(over: Partial<EzTransBatchQueueRow> & { id: string }): EzTransBatch
 }
 
 const ORDERS = new Map<string, EzTransBatchOrder>([
-  ['o-a', { id: 'o-a', order_ref: '#1184', customer_name: 'Juanita M Wells' }],
-  ['o-b', { id: 'o-b', order_ref: '#1185', customer_name: 'Marc Bérubé' }],
-  ['o-c', { id: 'o-c', order_ref: '#1186', customer_name: 'Juanita M Wells' }],
+  // Destination, not carrier, is what decides whether a pesticide worksheet
+  // rides along — o-a and o-c ship to the US, o-b is domestic.
+  ['o-a', { id: 'o-a', order_ref: '#1184', customer_name: 'Juanita M Wells', country: 'US' }],
+  ['o-b', { id: 'o-b', order_ref: '#1185', customer_name: 'Marc Bérubé', country: 'CA' }],
+  ['o-c', { id: 'o-c', order_ref: '#1186', customer_name: 'Juanita M Wells', country: 'US' }],
 ]);
 
 /** 14:05 local on the given local calendar day, as an ISO string. */
@@ -169,7 +171,7 @@ describe('what each attachment is called', () => {
 describe('the documents an order contributes', () => {
   const today = localNoonIso(2026, 9, 29);
 
-  it('is one merged PDF, plus the worksheet only on a UPS booking', () => {
+  it('is one merged PDF, plus the worksheet only on a US shipment', () => {
     const { pending } = buildDailyBatch(
       [
         row({ id: 'a', order_id: 'o-a', eztrans_confirmed_at: today, carrier: 'UPS', tracking_num: 'U1' }),
@@ -187,6 +189,29 @@ describe('the documents an order contributes', () => {
     expect(pending[1].documents).toEqual(['label-and-packing-list-Marc-Berube-P1.pdf']);
   });
 
+  // A US shipment booked on a Canadian carrier still crosses the border and
+  // still prompts the FIFRA question at the entry. Keying the worksheet off the
+  // carrier would have sent this one with nothing.
+  it('goes on a US shipment regardless of who carries it', () => {
+    const { pending } = buildDailyBatch(
+      [row({ id: 'a', order_id: 'o-a', eztrans_confirmed_at: today, carrier: 'GLS', tracking_num: 'G1' })],
+      ORDERS,
+      '2026-09-29',
+    );
+    expect(pending[0].worksheet).toBe(true);
+    expect(pending[0].documents).toContain('pesticide-worksheet-Juanita-M-Wells-G1.pdf');
+  });
+
+  it('stays off a Canadian shipment booked on UPS', () => {
+    const { pending } = buildDailyBatch(
+      [row({ id: 'b', order_id: 'o-b', eztrans_confirmed_at: today, carrier: 'UPS', tracking_num: 'U9' })],
+      ORDERS,
+      '2026-09-29',
+    );
+    expect(pending[0].worksheet).toBe(false);
+    expect(pending[0].documents).toEqual(['label-and-packing-list-Marc-Berube-U9.pdf']);
+  });
+
   it('stays matched to the right order when an earlier one carried two files', () => {
     // The cursor walking the deduped name list is the whole risk here: get it
     // wrong by one and a customer's worksheet is filed under someone else's
@@ -194,16 +219,16 @@ describe('the documents an order contributes', () => {
     const { pending } = buildDailyBatch(
       [
         row({ id: 'a', order_id: 'o-a', eztrans_confirmed_at: today, carrier: 'UPS', tracking_num: 'U1' }),
-        row({ id: 'b', order_id: 'o-b', eztrans_confirmed_at: today, carrier: 'UPS', tracking_num: 'U2' }),
-        row({ id: 'c', order_id: 'o-c', eztrans_confirmed_at: today, carrier: 'FedEx', tracking_num: 'F1' }),
+        row({ id: 'b', order_id: 'o-c', eztrans_confirmed_at: today, carrier: 'UPS', tracking_num: 'U2' }),
+        row({ id: 'c', order_id: 'o-b', eztrans_confirmed_at: today, carrier: 'FedEx', tracking_num: 'F1' }),
       ],
       ORDERS,
       '2026-09-29',
     );
     expect(pending.map(p => p.documents)).toEqual([
       ['label-and-packing-list-Juanita-M-Wells-U1.pdf', 'pesticide-worksheet-Juanita-M-Wells-U1.pdf'],
-      ['label-and-packing-list-Marc-Berube-U2.pdf', 'pesticide-worksheet-Marc-Berube-U2.pdf'],
-      ['label-and-packing-list-Juanita-M-Wells-F1.pdf'],
+      ['label-and-packing-list-Juanita-M-Wells-U2.pdf', 'pesticide-worksheet-Juanita-M-Wells-U2.pdf'],
+      ['label-and-packing-list-Marc-Berube-F1.pdf'],
     ]);
   });
 
@@ -236,7 +261,18 @@ describe('the body of the batch email', () => {
 
   it('mentions the worksheets only when some are going', () => {
     expect(batchAttachmentsNote(3, 0)).not.toMatch(/pesticide/);
-    expect(batchAttachmentsNote(3, 2)).toMatch(/2 of them ship UPS/);
+    expect(batchAttachmentsNote(3, 2)).toMatch(/2 of them ship to the US/);
+  });
+
+  // #1279 went out in a batch with its worksheet attached and UPS held the
+  // entry anyway: the note read as a description of carton paperwork, so the
+  // 3PL never uploaded the form for clearance.
+  it('tells the 3PL to upload the worksheets rather than pack them', () => {
+    const note = batchAttachmentsNote(4, 2);
+    expect(note).toMatch(/upload/i);
+    expect(note).toMatch(/customs document/i);
+    expect(note).toMatch(/do not print/i);
+    expect(note).toMatch(/brokerage/i);
   });
 });
 

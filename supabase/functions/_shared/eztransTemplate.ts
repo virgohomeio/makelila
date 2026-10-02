@@ -209,28 +209,50 @@ export function unitVariables(units: EzTransUnit[]): {
   };
 }
 
-/** Does a booking on this carrier need the UPS pesticide worksheet?
+/** Does this shipment need the pesticide worksheet?
  *
- *  UPS Supply Chain Solutions brokers its own US entries and will not act as
- *  importer of record on one that prompts for an EPA-regulated pesticide or
- *  pesticide device without a FIFRA worksheet on file. Nobody else asks for
- *  one, so it rides along on UPS bookings only.
+ *  Decided by the DESTINATION, not the carrier. A shipment into the US is a
+ *  customs entry, and the tariff the LILA Pro classifies under (8509.80.5095)
+ *  prompts CBP's pesticide/pesticide-device question — so every US entry needs
+ *  a FIFRA worksheet on file or it is held for clearance, whoever carries it.
+ *
+ *  This used to key on `carrier === 'UPS'`, because UPS Supply Chain Solutions
+ *  brokers our US entries and is who asks for the form. Every US shipment
+ *  booked so far has in fact been UPS, so the two rules agreed in practice and
+ *  the gap never fired — but a US shipment booked on any other carrier would
+ *  have gone with no worksheet at all, and five domestic Canadian moves that
+ *  happened to be on UPS carried a US customs declaration for an entry that
+ *  never happens.
+ *
+ *  Takes the order rather than a bare string on purpose: the old signature was
+ *  `(carrier)`, and a same-shaped swap to `(country)` would have compiled
+ *  everywhere while silently asking the wrong question.
  *
  *  The one place that decides. Both the panel (which tells the operator what
- *  is going out, and previews it) and the edge function (which builds and
- *  attaches it) call this, so the preview and the email cannot disagree. */
-export function needsPesticideWorksheet(carrier: string | null | undefined): boolean {
-  return (carrier ?? '').trim().toLowerCase() === 'ups';
+ *  is going out, and previews it) and the edge functions (which build and
+ *  attach it) call this, so the preview and the email cannot disagree. */
+export function needsPesticideWorksheet(dest: { country?: string | null } | null | undefined): boolean {
+  return (dest?.country ?? '').trim().toUpperCase() === 'US';
 }
 
 /** The {{attachments_note}} sentence: what is attached, in the body of the
- *  email, so the 3PL knows to look for a second file on a UPS booking. */
-export function attachmentsNote(carrier: string | null | undefined): string {
+ *  email, so the 3PL knows to look for a second file on a US shipment.
+ *
+ *  The worksheet sentence says what to DO with it, not just that it is there.
+ *  #1270 and #1279 both went out with the worksheet correctly attached and UPS
+ *  held both entries anyway: everything else in this email is paperwork to
+ *  print and tape to a carton, so that is what the form was treated as, and
+ *  nobody uploaded it for clearance. The 3PL then had to be sent the form by
+ *  hand, two days later, with the shipments sitting in a UPS warehouse
+ *  accruing storage fees. */
+export function attachmentsNote(dest: { country?: string | null } | null | undefined): string {
   const base = 'The shipping label and the packing list are attached together as one PDF — ' +
     'the shipping label is the first page.';
-  return needsPesticideWorksheet(carrier)
-    ? `${base} The signed UPS pesticide worksheet for this entry is attached as a second PDF.`
-    : base;
+  if (!needsPesticideWorksheet(dest)) return base;
+  return `${base} A signed pesticide worksheet (FIFRA) for this US entry is attached as a ` +
+    'second PDF. That one is a customs document, not carton paperwork: please upload it to ' +
+    'this shipment on Goorooship and pass it to UPS brokerage for clearance. Do not print it ' +
+    'or tape it to the box — UPS holds the shipment until the broker has the form.';
 }
 
 /** Same substitution rule as lib/templates.ts renderTemplate: an unknown or

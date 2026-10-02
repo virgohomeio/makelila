@@ -164,8 +164,15 @@ export default function Queue() {
   // Everything the Goorooship footer needs to name a box and address it. The
   // orders the page already fetched, narrowed rather than re-read.
   const batchOrders = useMemo(() => {
-    const m = new Map<string, { id: string; order_ref: string; customer_name: string }>();
-    for (const o of orders) m.set(o.id, { id: o.id, order_ref: o.order_ref, customer_name: o.customer_name });
+    const m = new Map<string, {
+      id: string; order_ref: string; customer_name: string; country?: string | null;
+    }>();
+    // country rides along because it is what decides whether a shipment carries
+    // a pesticide worksheet — without it the footer would promise the wrong
+    // documents.
+    for (const o of orders) m.set(o.id, {
+      id: o.id, order_ref: o.order_ref, customer_name: o.customer_name, country: o.country,
+    });
     return m;
   }, [orders]);
 

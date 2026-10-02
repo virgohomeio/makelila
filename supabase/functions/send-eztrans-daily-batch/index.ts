@@ -10,8 +10,8 @@
 //
 // Per order the documents are what they always were — the shipping label and
 // the packing list merged into one PDF, plus the FIFRA worksheet as its own
-// file on a UPS booking, because UPS Supply Chain Solutions will not broker a
-// US entry for a pesticide device without one. What changed is their names:
+// file on a shipment into the US, because the broker will not clear a US entry
+// for a possible pesticide device without one. What changed is their names:
 // with ten shipments in one message, "packing-list-1184.pdf" does not tell a
 // picker which carton a worksheet belongs to, so every file is named for the
 // customer and the tracking number.
@@ -430,7 +430,7 @@ async function handle(req: Request): Promise<Response> {
         `Both are attached and correct.`);
     }
 
-    const worksheet = needsPesticideWorksheet(row.carrier);
+    const worksheet = needsPesticideWorksheet(order);
     let worksheetBytes: Uint8Array | null = null;
     if (worksheet) {
       worksheetBytes = buildTextPdf(pesticideWorksheetLines({

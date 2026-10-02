@@ -7,11 +7,42 @@ it is a kitchen appliance, not a pesticide device — so the form used to be
 filled in by hand, one PDF per tracking number, and attached to the EZ Trans
 booking manually.
 
-It is now built and attached automatically. When the carrier on a
-Fulfillment → Queue step-3 EZ Trans booking is **UPS**,
+It is now built and attached automatically. When a Fulfillment → Queue step-3
+EZ Trans booking is going **to the US**,
 [`send-eztrans-booking`](../supabase/functions/send-eztrans-booking/index.ts)
-attaches `pesticide-worksheet-<order>.pdf` alongside the merged shipping label
-+ packing list.
+(and [`send-eztrans-daily-batch`](../supabase/functions/send-eztrans-daily-batch/index.ts)
+for the day batch) attaches `pesticide-worksheet-<order>.pdf` alongside the
+merged shipping label + packing list.
+
+## The rule is the destination, not the carrier
+
+`needsPesticideWorksheet` keyed on `carrier === 'UPS'` until 2026-10-02, because
+UPS Supply Chain Solutions is who asks for the form. Every US shipment booked so
+far has in fact been UPS, so the two rules agreed in practice and nothing was
+ever missed — but a US shipment booked on any other carrier would have gone with
+no worksheet at all, and five domestic Canadian moves that happened to be on UPS
+carried a US customs declaration for an entry that never happens. It keys on
+`orders.country === 'US'` now, and takes the order rather than a bare string so a
+stale `(carrier)` call site fails `tsc -b` instead of silently asking the wrong
+question.
+
+## Attaching it is not the same as filing it
+
+#1270 (`1Z2985EADK99477145`) and #1279 (`1Z2985EADK97550836`) both went out with
+a correctly-built, correctly-named worksheet attached, and UPS held both entries
+anyway: "Your shipment has been held due to a possible Pesticide or Pesticide
+Device… Please complete and upload the attached form for clearance."
+
+Everything else in that email is paperwork for a carton — print the label, tape
+it to the box, pick from the packing list — so that is what the worksheet was
+taken for. It was never uploaded to the shipment on Goorooship or passed to UPS
+brokerage, and two days later the form had to be sent by hand while the boxes sat
+in a UPS warehouse accruing storage fees.
+
+So `attachmentsNote` / `batchAttachmentsNote` now say what to *do* with it, in
+the body of the email: it is a customs document, upload it to the shipment and
+pass it to UPS brokerage, do not print it or tape it to the box. The filename
+alone was not instruction enough.
 
 ## What varies per shipment
 

@@ -155,39 +155,78 @@ describe('buildEzTransBooking', () => {
 
 
 describe('what goes out with the booking', () => {
+  const US_ORDER: EzTransShipTo & { order_ref: string } = {
+    ...ORDER, order_ref: '#1270', city: 'Gahanna', region_state: 'OH',
+    postal_code: '43230', country: 'US',
+  };
+
   it('merges the label and the packing list into one attachment', () => {
-    expect(attachmentFilenames('#1184', 'Purolator'))
+    expect(attachmentFilenames('#1184', ORDER))
       .toEqual(['shipping-label-and-packing-list-1184.pdf']);
   });
 
-  it('adds the pesticide worksheet on a UPS booking', () => {
-    expect(attachmentFilenames('#1184', 'UPS')).toEqual([
-      'shipping-label-and-packing-list-1184.pdf',
-      'pesticide-worksheet-1184.pdf',
+  it('adds the pesticide worksheet on a shipment to the US', () => {
+    expect(attachmentFilenames('#1270', US_ORDER)).toEqual([
+      'shipping-label-and-packing-list-1270.pdf',
+      'pesticide-worksheet-1270.pdf',
     ]);
   });
 
-  it('only UPS gets one — nobody else brokers their own entries', () => {
-    expect(needsPesticideWorksheet('UPS')).toBe(true);
-    expect(needsPesticideWorksheet(' ups ')).toBe(true);
-    for (const carrier of ['FedEx', 'Purolator', 'Canada Post', 'Canpar', 'GLS', 'Day & Ross', '', null]) {
-      expect(needsPesticideWorksheet(carrier)).toBe(false);
+  // The rule is the destination, not the carrier. UPS has brokered every US
+  // entry booked so far, so keying on the carrier looked equivalent — but a US
+  // shipment booked on anything else would have gone with no worksheet at all,
+  // and CBP holds the entry either way.
+  it('keys on the destination country, not the carrier', () => {
+    expect(needsPesticideWorksheet({ country: 'US' })).toBe(true);
+    expect(needsPesticideWorksheet({ country: ' us ' })).toBe(true);
+    for (const country of ['CA', '', null, undefined]) {
+      expect(needsPesticideWorksheet({ country })).toBe(false);
     }
+  });
+
+  it('still goes on a US shipment that was not booked with UPS', () => {
+    expect(attachmentFilenames('#1270', { country: 'US' }))
+      .toContain('pesticide-worksheet-1270.pdf');
+  });
+
+  it('does not go on a Canadian shipment that happens to be on UPS', () => {
+    // Five of these exist. A FIFRA declaration on a domestic Canadian move is
+    // a customs form for an entry that never happens.
+    expect(attachmentFilenames('#1184', { country: 'CA' }))
+      .toEqual(['shipping-label-and-packing-list-1184.pdf']);
   });
 
   it('tells the 3PL to look for the second PDF only when there is one', () => {
     const base = {
-      order: ORDER,
       units: [{ serial: 'LL01-P100X-00412', masterCarton: '1' }],
       tracking: '1Z2985EADK93221574',
+      carrier: 'UPS',
     };
-    const ups = buildEzTransBooking({ ...base, carrier: 'UPS' });
-    expect(ups.body).toContain('attached together as one PDF');
-    expect(ups.body).toContain('pesticide worksheet for this entry is attached as a second PDF');
+    const us = buildEzTransBooking({ ...base, order: US_ORDER });
+    expect(us.body).toContain('attached together as one PDF');
+    expect(us.body).toContain('pesticide worksheet');
 
-    const other = buildEzTransBooking({ ...base, carrier: 'Purolator' });
-    expect(other.body).toContain('attached together as one PDF');
-    expect(other.body).not.toContain('pesticide worksheet');
+    const ca = buildEzTransBooking({ ...base, order: ORDER });
+    expect(ca.body).toContain('attached together as one PDF');
+    expect(ca.body).not.toContain('pesticide worksheet');
+  });
+
+  // The failure this was written for: the worksheet WAS attached to #1270 and
+  // #1279 and UPS held both entries anyway. The email framed every attachment
+  // as something to print and tape to the carton, so the 3PL filed it with the
+  // packing list and never uploaded it for clearance. The instruction has to be
+  // in the body of the email, not implied by a filename.
+  it('says the worksheet is a customs document to upload, not carton paperwork', () => {
+    const us = buildEzTransBooking({
+      order: US_ORDER,
+      units: [{ serial: 'LL01-P100X-00412', masterCarton: '1' }],
+      tracking: '1Z2985EADK99477145',
+      carrier: 'UPS',
+    });
+    expect(us.body).toMatch(/upload/i);
+    expect(us.body).toMatch(/customs document/i);
+    expect(us.body).toMatch(/do not print/i);
+    expect(us.body).toMatch(/brokerage/i);
   });
 
   it('shows the operator the worksheet fields that came off this shipment', () => {

@@ -647,7 +647,15 @@ describe('EzTransPanel', () => {
   });
 });
 
-describe('the UPS pesticide worksheet', () => {
+describe('the US pesticide worksheet', () => {
+  // Same order, shipped across the border. The worksheet is decided by the
+  // destination, not the carrier — #1270 and #1279 were both UPS and both got
+  // the form; a US shipment on any other carrier used to get nothing.
+  const usOrder = {
+    ...order, city: 'Gahanna', region_state: 'OH', postal_code: '43230',
+    country: 'US' as const,
+  };
+
   beforeEach(() => {
     placementMock.mockReset().mockReturnValue(AT_EZTRANS);
     sendMock.mockClear();
@@ -665,42 +673,65 @@ describe('the UPS pesticide worksheet', () => {
     fireEvent.change(screen.getByLabelText(/shipping label pdf/i), { target: { files: [labelFile()] } });
   }
 
-  it('names one merged attachment on a non-UPS booking', () => {
+  it('names one merged attachment on a domestic booking', () => {
     render(<EzTransPanel row={row} order={order} />);
     fillLabel();
     expect(screen.getByText('shipping-label-and-packing-list-1184.pdf')).toBeInTheDocument();
     expect(screen.queryByText(/pesticide/i)).not.toBeInTheDocument();
   });
 
-  it('adds the worksheet to what is attached once the carrier is UPS', () => {
+  it('leaves it off a Canadian booking even on UPS', () => {
     render(<EzTransPanel row={row} order={order} />);
+    fillUps();
+    expect(screen.getByText('shipping-label-and-packing-list-1184.pdf')).toBeInTheDocument();
+    expect(screen.queryByText(/pesticide/i)).not.toBeInTheDocument();
+  });
+
+  it('adds the worksheet to what is attached on a shipment to the US', () => {
+    render(<EzTransPanel row={row} order={usOrder} />);
     fillUps();
     expect(screen.getByText(
       'shipping-label-and-packing-list-1184.pdf, pesticide-worksheet-1184.pdf',
     )).toBeInTheDocument();
-    expect(screen.getByText(/UPS brokers this entry/i)).toBeInTheDocument();
+    expect(screen.getByText(/This is a US entry/i)).toBeInTheDocument();
+  });
+
+  it('adds it on a US shipment that is not booked with UPS', () => {
+    render(<EzTransPanel row={row} order={usOrder} />);
+    fireEvent.change(screen.getByLabelText(/carrier/i), { target: { value: 'GLS' } });
+    fireEvent.change(screen.getByLabelText(/tracking number/i), { target: { value: 'G1' } });
+    fireEvent.change(screen.getByLabelText(/shipping label pdf/i), { target: { files: [labelFile()] } });
+    expect(screen.getByText(
+      'shipping-label-and-packing-list-1184.pdf, pesticide-worksheet-1184.pdf',
+    )).toBeInTheDocument();
   });
 
   it('shows the fields the worksheet is tailored with, off this shipment', () => {
-    render(<EzTransPanel row={row} order={order} />);
+    render(<EzTransPanel row={row} order={usOrder} />);
     fillUps();
     fireEvent.click(screen.getByRole('button', { name: /preview \/ edit email \+ packing list/i }));
-    expect(screen.getByText(/Attached UPS pesticide worksheet/i)).toBeInTheDocument();
+    expect(screen.getByText(/Attached US pesticide worksheet/i)).toBeInTheDocument();
     // The tracking number on the form is the one being filed, not a stale one.
     expect(screen.getAllByText('1Z2985EADK93221574').length).toBeGreaterThan(0);
     expect(screen.getByText('8509.80.5095')).toBeInTheDocument();
     expect(screen.getByText(/Huayi Gao/)).toBeInTheDocument();
   });
 
-  it('tells the 3PL in the email body that a second PDF is coming', () => {
-    render(<EzTransPanel row={row} order={order} />);
+  it('tells the 3PL in the email body to upload the worksheet, not pack it', () => {
+    // The whole point of the fix: #1270 and #1279 went out with the worksheet
+    // attached and UPS held both entries, because the email read as a list of
+    // things to print and tape to a carton.
+    render(<EzTransPanel row={row} order={usOrder} />);
     fillUps();
     fireEvent.click(screen.getByRole('button', { name: /preview \/ edit email \+ packing list/i }));
-    expect(screen.getByText(/pesticide worksheet for this entry is attached as a second PDF/i))
+    expect(screen.getByText(/pesticide worksheet \(FIFRA\) for this US entry/i))
       .toBeInTheDocument();
+    expect(screen.getByText(/upload it to this shipment on Goorooship/i)).toBeInTheDocument();
+    expect(screen.getByText(/Do not print it or tape it to the box/i)).toBeInTheDocument();
   });
 
   it('records an unsigned worksheet in the audit trail rather than letting it pass', async () => {
+    // A US entry, so the worksheet is in play at all.
     sendMock.mockResolvedValueOnce({
       email_id: 're_2',
       attachments: ['shipping-label-and-packing-list-1184.pdf', 'pesticide-worksheet-1184.pdf'],
@@ -708,12 +739,12 @@ describe('the UPS pesticide worksheet', () => {
       pesticide_worksheet: 'unsigned',
       warning: 'The pesticide worksheet went out UNSIGNED',
     });
-    render(<EzTransPanel row={row} order={order} />);
+    render(<EzTransPanel row={row} order={usOrder} />);
     fillUps();
     fireEvent.click(sendButton());
     await waitFor(() => expect(logActionMock).toHaveBeenCalled());
     const note = String(logActionMock.mock.calls[0][2]);
-    expect(note).toContain('UPS pesticide worksheet');
+    expect(note).toContain('US pesticide worksheet');
     expect(note).toContain('worksheet UNSIGNED');
     expect(screen.getByText(/went out UNSIGNED/)).toBeInTheDocument();
   });

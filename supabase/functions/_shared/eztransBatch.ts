@@ -76,10 +76,10 @@ export function batchAttachmentSlug(customerName: string, tracking: string): str
  *
  *  `combined` is the label and the packing list as one file, label first —
  *  the 3PL prints it and tapes page one to the carton. `worksheet` is the
- *  FIFRA declaration, which UPS Supply Chain Solutions brokers US entries
- *  with; it stays a separate file because it goes to the broker, not on the
- *  box, and both carry the customer + tracking so neither has to be opened to
- *  find out which shipment it belongs to. */
+ *  FIFRA declaration every US entry needs; it stays a separate file because it
+ *  is uploaded to the shipment and passed to the broker rather than packed with
+ *  the box, and both carry the customer + tracking so neither has to be opened
+ *  to find out which shipment it belongs to. */
 export function batchAttachmentFilenames(args: {
   customerName: string; tracking: string; needsWorksheet: boolean;
 }): { combined: string; worksheet: string | null } {
@@ -143,6 +143,14 @@ export function batchAttachmentsNote(orderCount: number, worksheetCount: number)
     `holding its shipping label and its packing list — the shipping label is the first page. ` +
     `Every file is named for the customer and the tracking number it belongs to.`;
   if (worksheetCount === 0) return base;
-  return `${base} ${worksheetCount} of them ship UPS and carry a separate signed pesticide ` +
-    `worksheet for the broker, named the same way.`;
+  // Says what to DO with the worksheets, not just that they are there. #1279
+  // went out in a batch with its worksheet correctly attached and UPS held the
+  // entry anyway: every other attachment in this email is paperwork for a
+  // carton, so that is what the form was taken for, and nobody uploaded it for
+  // clearance.
+  return `${base} ${worksheetCount} of them ship to the US and carry a signed pesticide ` +
+    `worksheet (FIFRA) as a separate PDF, named the same way. Those are customs documents, ` +
+    `not carton paperwork: please upload each one to its shipment on Goorooship and pass it ` +
+    `to UPS brokerage for clearance. Do not print them or tape them to the boxes — UPS holds ` +
+    `a US shipment until the broker has its form.`;
 }
