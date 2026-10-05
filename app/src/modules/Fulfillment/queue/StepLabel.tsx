@@ -12,12 +12,25 @@ const AMAZON_URL     = 'https://www.amazon.com/gp/your-account/order-history';
 export function StepLabel({
   row,
   order,
+  isEzTrans = false,
+  goorooshipSentAt = null,
   onBatchChanged,
 }: {
   row: FulfillmentQueueRow;
   /** The whole order: the EZ Trans packing list needs the customer's full
    *  name, address, email and phone, not just the country. */
   order: EzTransOrder;
+  /** Is a machine on this order held at the EZ Trans 3PL? If so, EZ Trans has
+   *  to be emailed before anybody can call a pickup scheduled — see the gate
+   *  below. Defaults to false so a caller that cannot answer (or an order with
+   *  no machine on it at all) gets the Freightcom behaviour, which is the one
+   *  that asks for nothing extra. */
+  isEzTrans?: boolean;
+  /** When the Goorooship email carrying this order went out, null if it has
+   *  not. Read off the queue's own index of sends (lib/pickupQueue.ts) rather
+   *  than re-derived here, so the gate on this button and the rail the row
+   *  lands in are answering out of one place. */
+  goorooshipSentAt?: string | null;
   /** Passed through to the EZ Trans panel: confirming an order into the day's
    *  Goorooship batch has to reach the footer at the bottom of the queue. */
   onBatchChanged?: () => void;
@@ -38,9 +51,20 @@ export function StepLabel({
   // order, which stranded any that never shipped a starter kit: there was no
   // number to paste and no way past step 3. It is recorded when known now,
   // never demanded.
+  //
+  // On an EZ Trans order the email is a third gate. This button is what books
+  // the pickup — it moves the row to the dock handoff and into "To be picked
+  // up", which says to everyone reading the queue that the carton is with the
+  // 3PL and the carrier is coming for it. EZ Trans does not touch a box they
+  // have not been emailed about, so clicking it before the booking email goes
+  // out puts a carton in that rail that nobody is coming to collect. Confirm
+  // the order into the day batch (or send the booking on its own) in the panel
+  // above first.
   const blockers: string[] = [];
   if (!carrier) blockers.push('a carrier');
   if (!tracking.trim()) blockers.push('the Freightcom tracking number');
+  const awaitingGoorooship = isEzTrans && !goorooshipSentAt;
+  if (awaitingGoorooship) blockers.push('the Goorooship email to EZ Trans to go out');
   const ready = blockers.length === 0;
 
   const handleConfirm = async () => {
@@ -185,7 +209,7 @@ export function StepLabel({
 
       <div className={styles.stepBar}>
         <button className={styles.confirmBtn} onClick={handleConfirm} disabled={!ready || busy}>
-          {busy ? 'Saving…' : '✓ Confirm label'}
+          {busy ? 'Saving…' : '✓ Pickup scheduled'}
         </button>
         <StepBlockers blockers={blockers} />
       </div>

@@ -527,3 +527,73 @@ export async function sendEzTransBooking(
   try { return JSON.parse(bodyText) as EzTransSendResult; }
   catch { throw new Error('EZ Trans email: response was not JSON'); }
 }
+
+/** Which of these queue rows ship out of EZ Trans.
+ *
+ *  The same question `useEzTransPlacements` asks about one row — "is this
+ *  machine held at the 3PL?" — asked once for a whole rail. The queue needs it
+ *  to decide which rows the Goorooship email gates: stock on our own floor is
+ *  booked through Freightcom and no email to EZ Trans is ever coming for it, so
+ *  holding those rows back until one arrives would strand them for good.
+ *
+ *  A row counts when ANY of its machines is held there, which is the same bar
+ *  the panel renders on — so the gate on Pickup scheduled and the panel behind
+ *  it can never disagree about which orders EZ Trans is picking. A row with no
+ *  machine assigned (a parts-only replacement) is not one of them.
+ *
+ *  `loading` matters to the caller: an empty set reads as "none of these are EZ
+ *  Trans", which is the permissive answer, and handing that out before the
+ *  query returns would flash rows through the gate. Callers wait. */
+export function useEzTransRowIds(
+  rows: Array<{ id: string; assigned_serials: string[] }>,
+): { ezTransRowIds: Set<string>; loading: boolean } {
+  const [ezTransRowIds, setEzTransRowIds] = useState<Set<string>>(new Set());
+  const [loading, setLoading] = useState(true);
+
+  // The array identity changes on every queue read; what is actually asked
+  // here — which serials sit on which row — rarely does.
+  const key = rows.map(r => `${r.id}=${r.assigned_serials.join('|')}`).join(',');
+
+  useEffect(() => {
+    const pairs = key
+      ? key.split(',').map(p => {
+          const [id, serials] = p.split('=');
+          return { id, serials: serials ? serials.split('|').filter(Boolean) : [] };
+        })
+      : [];
+    const serials = [...new Set(pairs.flatMap(p => p.serials))];
+    if (serials.length === 0) { setEzTransRowIds(new Set()); setLoading(false); return; }
+
+    let cancelled = false;
+    setLoading(true);
+    void (async () => {
+      const [slotRes, unitRes] = await Promise.all([
+        supabase.from('shelf_slots').select('serial, location').in('serial', serials),
+        supabase.from('units').select('serial, location').in('serial', serials),
+      ]);
+      if (cancelled) return;
+      if (slotRes.error || unitRes.error) {
+        // Leave the previous answer standing rather than reporting "nothing is
+        // at EZ Trans", which is the answer that opens the gate.
+        console.error('EZ Trans placement lookup failed:', slotRes.error ?? unitRes.error);
+        setLoading(false);
+        return;
+      }
+
+      const atEzTrans = new Set<string>();
+      for (const r of [...(slotRes.data ?? []), ...(unitRes.data ?? [])] as Array<{
+        serial: string; location: string | null;
+      }>) {
+        if (r.location === EZTRANS_LOCATION) atEzTrans.add(r.serial);
+      }
+
+      setEzTransRowIds(new Set(
+        pairs.filter(p => p.serials.some(s => atEzTrans.has(s))).map(p => p.id),
+      ));
+      setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [key]);
+
+  return { ezTransRowIds, loading };
+}

@@ -12,7 +12,15 @@
 //
 //   1. it is at the dock handoff or past it — step 4 or step 5;
 //   2. its label is confirmed — carrier and tracking number are on the row;
-//   3. the Goorooship email carrying it has actually gone out.
+//   3. if it ships out of EZ Trans, the Goorooship email carrying it has
+//      actually gone out.
+//
+// (3) gained its condition on 2026-10-05. It was written when the rail held
+// only EZ Trans cartons, and read flatly it kept every Freightcom box — stock
+// picked off our own floor, which no 3PL is ever emailed about — in Ready to
+// ship for ever after its label was confirmed. Step 3 now refuses to confirm
+// an EZ Trans label until that email has gone, so for the rows the condition
+// applies to it is true by the time the row arrives.
 //
 // (1) was step 4 exactly until 2026-10-01, on the reasoning that step 5 is the
 // customer's shipping email and by then the carrier has been and gone. That
@@ -136,20 +144,43 @@ function predatesRow(sentAt: string, rowCreatedAt: string | null | undefined): b
   return sent < created;
 }
 
+/** Does this row ship out of EZ Trans — i.e. is the Goorooship email part of
+ *  its handoff at all?
+ *
+ *  Unknown counts as yes. The caller's answer comes off a query that has to
+ *  return before it means anything, and the two wrong answers are not
+ *  symmetric: calling an EZ Trans row ours holds a labelled carton in Ready to
+ *  ship for a moment, while calling one of ours EZ Trans's would park it in
+ *  the pickup rail with no email behind it. */
+export type IsEzTransRow = (row: PickupQueueRow) => boolean;
+const ALWAYS_EZTRANS: IsEzTransRow = () => true;
+
 /** Is this row out of the packer's hands — with the carrier, or already gone?
  *
  *  Named for the rail rather than literally: a step-5 row has usually been
  *  collected already. What the two steps share is that no one in the warehouse
- *  has anything left to pack. */
+ *  has anything left to pack.
+ *
+ *  The Goorooship email is the third condition only for the rows it exists
+ *  for. Stock picked off our own floor is booked through Freightcom and EZ
+ *  Trans is never emailed about it, so requiring a send there would leave
+ *  every Freightcom carton sitting in Ready to ship after the label was
+ *  confirmed, which is the one rail a picker reads to decide what to pack
+ *  next. For an EZ Trans row the send is still the whole point: the 3PL does
+ *  not touch a box it has not been told about, so until the email goes the
+ *  carton is still ours to chase. Step 3 gates the confirm on exactly the same
+ *  fact (queue/StepLabel.tsx), so the two cannot drift. */
 export function isAwaitingPickup(
   row: PickupQueueRow,
   sends: Map<string, GoorooshipSend>,
+  isEzTrans: IsEzTransRow = ALWAYS_EZTRANS,
 ): boolean {
   if (row.step < PICKUP_STEP || row.step >= FULFILLED_STEP) return false;
   // Step 4 implies a confirmed label today, but a row can be rewound and the
   // operator's rule names the label explicitly, so it is checked rather than
   // assumed. A carton with no tracking number is not waiting on anyone.
   if (!row.label_confirmed_at) return false;
+  if (!isEzTrans(row)) return true;
   return goorooshipSend(row, sends) !== null;
 }
 
@@ -162,10 +193,11 @@ export function isAwaitingPickup(
 export function splitAwaitingPickup<T extends PickupQueueRow>(
   rows: T[],
   sends: Map<string, GoorooshipSend>,
+  isEzTrans: IsEzTransRow = ALWAYS_EZTRANS,
 ): { ready: T[]; pickup: T[] } {
   const ready: T[] = [];
   const pickup: T[] = [];
-  for (const r of rows) (isAwaitingPickup(r, sends) ? pickup : ready).push(r);
+  for (const r of rows) (isAwaitingPickup(r, sends, isEzTrans) ? pickup : ready).push(r);
   return { ready, pickup };
 }
 

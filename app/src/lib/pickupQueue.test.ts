@@ -167,9 +167,33 @@ describe('isAwaitingPickup', () => {
     expect(isAwaitingPickup(mkRow({ id: 'q1', order_id: 'o1', label_confirmed_at: null }), sends)).toBe(false);
   });
 
-  it('leaves a dock row the 3PL has never been told about', () => {
-    // A machine picked off our own floor never gets a Goorooship email, and it
-    // is still ours to chase — so it stays in the work list.
+  it('leaves an EZ Trans row the 3PL has never been told about', () => {
+    // EZ Trans does not touch a box they have not been emailed about, so the
+    // carton is still ours to chase and stays in the work list.
+    expect(isAwaitingPickup(mkRow({ id: 'q2', order_id: 'o9' }), sends)).toBe(false);
+  });
+
+  // The email is a condition only for the rows it exists for. Stock picked off
+  // our own floor books through Freightcom and EZ Trans is never emailed about
+  // it — holding those back would have left every Freightcom carton in Ready
+  // to ship for ever once its label was confirmed.
+  it('moves a Freightcom row on the label alone', () => {
+    expect(isAwaitingPickup(mkRow({ id: 'q2', order_id: 'o9' }), sends, () => false)).toBe(true);
+  });
+
+  it('still asks the Freightcom row for the rest of the rule', () => {
+    const notEzTrans = () => false;
+    expect(isAwaitingPickup(mkRow({ id: 'q2', order_id: 'o9', step: 3 }), sends, notEzTrans)).toBe(false);
+    expect(isAwaitingPickup(mkRow({ id: 'q2', order_id: 'o9', step: 6 }), sends, notEzTrans)).toBe(false);
+    expect(
+      isAwaitingPickup(mkRow({ id: 'q2', order_id: 'o9', label_confirmed_at: null }), sends, notEzTrans),
+    ).toBe(false);
+  });
+
+  // The caller's answer comes off a query, and before it returns the two wrong
+  // answers are not symmetric: a carton parked under "To be picked up" with no
+  // email behind it is the one nobody chases.
+  it('requires the email when nobody says whether the row is EZ Trans', () => {
     expect(isAwaitingPickup(mkRow({ id: 'q2', order_id: 'o9' }), sends)).toBe(false);
   });
 });
@@ -184,6 +208,15 @@ describe('splitAwaitingPickup', () => {
     expect(ready.map(r => r.id)).toEqual(['q1', 'q3']);
     expect(pickup.map(r => r.id)).toEqual(['q2']);
     expect(ready.length + pickup.length).toBe(3);
+  });
+
+  it('sorts an EZ Trans carton and a Freightcom one by different rules', () => {
+    const sends = new Map<string, GoorooshipSend>();
+    const ez = mkRow({ id: 'q1', order_id: 'o1' });
+    const ours = mkRow({ id: 'q2', order_id: 'o2' });
+    const { ready, pickup } = splitAwaitingPickup([ez, ours], sends, r => r.id === 'q1');
+    expect(ready.map(r => r.id)).toEqual(['q1']);
+    expect(pickup.map(r => r.id)).toEqual(['q2']);
   });
 });
 

@@ -345,7 +345,7 @@ export function QueueSidebar({
         ) : tab === 'pickup' ? (
           <EmptyState
             title="Nothing waiting on a carrier"
-            body="An order moves here once its label is confirmed, it reaches the dock handoff, and the Goorooship email carrying it has gone out."
+            body="An order moves here when Pickup scheduled is clicked at step 3 — and for a carton EZ Trans is picking, only once the Goorooship email carrying it has gone out."
           />
         ) : (
           <EmptyState
