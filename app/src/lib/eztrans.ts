@@ -112,8 +112,11 @@ export const EZTRANS_FROM = 'VCycene Fulfillment <reina@virgohome.io>';
 export const EZTRANS_CC = [
   'reina@virgohome.io',
   'huayi@virgohome.io',
-  // The 3PL asked for their group address on every inquiry.
+  // The 3PL asked for their group addresses on every inquiry. Both are copied
+  // on every send whatever EZTRANS_CC is set to on the edge function — see
+  // EZTRANS_CC_REQUIRED in _shared/eztransTemplate.ts.
   'support@goorooship.ca',
+  'fulfillment@goorooship.ca',
 ];
 
 // Duplicated from supabase/functions/_shared/eztransTemplate.ts so the panel

@@ -43,13 +43,13 @@ import { getGmailAccessToken, type ServiceAccountKey } from '../_shared/gmail-au
 import { GMAIL_SEND_SCOPE, sendGmailMessage } from '../_shared/gmailSend.ts';
 import {
   DEFAULT_EZTRANS_PACKING_LIST,
-  EZTRANS_CC_DEFAULT,
   EZTRANS_FROM_DEFAULT,
   EZTRANS_FROM_FALLBACK,
   EZTRANS_PACKING_LIST_KEY,
   needsPesticideWorksheet,
   packingListLines,
   renderEzTransTemplate,
+  resolveEztransCc,
   unitVariables,
   type EzTransUnit,
 } from '../_shared/eztransTemplate.ts';
@@ -568,8 +568,7 @@ async function handle(req: Request): Promise<Response> {
     : text;
 
   const from = Deno.env.get('EZTRANS_FROM') || EZTRANS_FROM_DEFAULT;
-  const cc = (Deno.env.get('EZTRANS_CC') ?? EZTRANS_CC_DEFAULT.join(','))
-    .split(',').map(a => a.trim()).filter(Boolean);
+  const cc = resolveEztransCc(Deno.env.get('EZTRANS_CC'));
   const replyTo = from.replace(/^.*<|>.*$/g, '');
   const attachments = documents.map(d => ({ filename: d.filename, base64: toBase64(d.bytes) }));
 

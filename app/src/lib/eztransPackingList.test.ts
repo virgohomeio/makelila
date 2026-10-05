@@ -22,8 +22,10 @@ import {
   EZTRANS_PACKING_LIST_KEY as SHARED_PACKING_KEY,
   EZTRANS_FROM_DEFAULT,
   EZTRANS_CC_DEFAULT,
+  EZTRANS_CC_REQUIRED,
   packingListLines,
   renderEzTransTemplate,
+  resolveEztransCc,
 } from '../../../supabase/functions/_shared/eztransTemplate.ts';
 
 const ORDER: EzTransShipTo & { order_ref: string } = {
@@ -150,14 +152,30 @@ describe('who the booking email comes from', () => {
     // thing putting a copy in her mailbox at all.
     expect(EZTRANS_CC).toContain('reina@virgohome.io');
     expect(EZTRANS_CC).toContain('huayi@virgohome.io');
-    // Goorooship asked that their group address be copied on every inquiry,
+    // Goorooship asked that their group addresses be copied on every inquiry,
     // so a booking does not sit unread while one person is away.
     expect(EZTRANS_CC).toContain('support@goorooship.ca');
+    expect(EZTRANS_CC).toContain('fulfillment@goorooship.ca');
   });
 
   it('does not drift from the edge function copy', () => {
     expect(EZTRANS_FROM).toBe(EZTRANS_FROM_DEFAULT);
     expect(EZTRANS_CC).toEqual(EZTRANS_CC_DEFAULT);
+  });
+
+  // EZTRANS_CC on the edge function replaces the list wholesale, so an
+  // override written before Goorooship asked for these addresses would drop
+  // them silently. They are folded back in instead.
+  it('copies the 3PL group addresses even when EZTRANS_CC overrides the list', () => {
+    expect(resolveEztransCc('someone@virgohome.io'))
+      .toEqual(['someone@virgohome.io', ...EZTRANS_CC_REQUIRED]);
+    // An override that already lists one does not get it twice, whatever case
+    // it was typed in.
+    expect(resolveEztransCc('FULFILLMENT@Goorooship.ca, huayi@virgohome.io'))
+      .toEqual(['FULFILLMENT@Goorooship.ca', 'huayi@virgohome.io', 'support@goorooship.ca']);
+    // Unset, and set to the empty string, both mean "just the defaults".
+    expect(resolveEztransCc(undefined)).toEqual(EZTRANS_CC_DEFAULT);
+    expect(resolveEztransCc('')).toEqual(EZTRANS_CC_REQUIRED);
   });
 });
 

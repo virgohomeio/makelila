@@ -39,7 +39,6 @@ import {
   DEFAULT_EZTRANS_BODY,
   DEFAULT_EZTRANS_PACKING_LIST,
   DEFAULT_EZTRANS_SUBJECT,
-  EZTRANS_CC_DEFAULT,
   EZTRANS_FROM_DEFAULT,
   EZTRANS_FROM_FALLBACK,
   EZTRANS_PACKING_LIST_KEY,
@@ -48,6 +47,7 @@ import {
   needsPesticideWorksheet,
   packingListLines,
   renderEzTransTemplate,
+  resolveEztransCc,
   unitVariables,
   type EzTransUnit,
 } from '../_shared/eztransTemplate.ts';
@@ -418,11 +418,12 @@ async function handle(req: Request): Promise<Response> {
     : text;
 
   // Sender and CC are env-overridable so the address can move without a
-  // deploy. The sending domain must be verified in Resend — an unverified one
-  // is refused outright, which is called out below rather than left as a 502.
+  // deploy, except that the 3PL's own group addresses are always copied —
+  // resolveEztransCc folds them back into whatever EZTRANS_CC lists. The
+  // sending domain must be verified in Resend — an unverified one is refused
+  // outright, which is called out below rather than left as a 502.
   const from = Deno.env.get('EZTRANS_FROM') || EZTRANS_FROM_DEFAULT;
-  const cc = (Deno.env.get('EZTRANS_CC') ?? EZTRANS_CC_DEFAULT.join(','))
-    .split(',').map(a => a.trim()).filter(Boolean);
+  const cc = resolveEztransCc(Deno.env.get('EZTRANS_CC'));
   const replyTo = from.replace(/^.*<|>.*$/g, '');
 
   const send = (sender: string) => fetch('https://api.resend.com/emails', {
