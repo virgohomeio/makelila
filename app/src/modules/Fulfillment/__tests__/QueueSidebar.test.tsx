@@ -394,7 +394,7 @@ describe('QueueSidebar', () => {
       /></MemoryRouter>);
       fireEvent.click(screen.getByRole('button', { name: /to be picked up 0/i }));
       expect(screen.getByText(/Nothing waiting on a carrier/i)).toBeInTheDocument();
-      expect(screen.getByText(/Goorooship email carrying it has gone out/i)).toBeInTheDocument();
+      expect(screen.getByText(/Pickup scheduled is clicked at step 3/i)).toBeInTheDocument();
     });
 
     it('points a fruitless search at the pickup rail when the order is there', () => {

@@ -644,6 +644,7 @@ describe('EzTransPanel', () => {
     const copied = screen.getByText(/reina@virgohome\.io/).textContent ?? '';
     expect(copied).toContain('huayi@virgohome.io');
     expect(copied).toContain('support@goorooship.ca');
+    expect(copied).toContain('fulfillment@goorooship.ca');
   });
 });
 

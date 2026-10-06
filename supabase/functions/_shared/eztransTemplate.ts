@@ -20,11 +20,12 @@ export const EZTRANS_PACKING_LIST_KEY = 'eztrans_packing_list';
 
 /** Who the booking confirmation comes from, and who is copied on it.
  *
- *  support@goorooship.ca is on the Cc at the 3PL's own request — they asked
- *  that their group address be copied on every inquiry, so a message does not
- *  sit unread while one person is away. It is a real external recipient, and
- *  is suppressed along with the To address whenever EMAIL_TEST_RECIPIENT is
- *  set, so a test send never reaches them.
+ *  support@goorooship.ca and fulfillment@goorooship.ca are on the Cc at the
+ *  3PL's own request — they asked that their group addresses be copied on
+ *  every inquiry, so a message does not sit unread while one person is away.
+ *  They are real external recipients, and are suppressed along with the To
+ *  address whenever EMAIL_TEST_RECIPIENT is set, so a test send never reaches
+ *  them.
  *
  *  Overridable per-environment with EZTRANS_FROM / EZTRANS_CC on the edge
  *  function, so the addresses can be changed without a deploy. Note the
@@ -35,7 +36,38 @@ export const EZTRANS_CC_DEFAULT = [
   'reina@virgohome.io',
   'huayi@virgohome.io',
   'support@goorooship.ca',
+  'fulfillment@goorooship.ca',
 ];
+
+/** The Goorooship group addresses that are copied on EVERY email to the 3PL,
+ *  whatever EZTRANS_CC says.
+ *
+ *  EZTRANS_CC exists so the internal copies can be changed without a deploy,
+ *  but it replaces the whole list — so an override set before these addresses
+ *  were asked for would quietly drop them, and nobody would notice until a
+ *  booking sat unread. resolveEztransCc() folds them back in, so "always
+ *  copied" is a property of the code and not of an environment variable. */
+export const EZTRANS_CC_REQUIRED = [
+  'support@goorooship.ca',
+  'fulfillment@goorooship.ca',
+];
+
+/** The Cc list for a send: the EZTRANS_CC override (or the built-in default)
+ *  with the required Goorooship addresses folded in, de-duplicated
+ *  case-insensitively and in first-seen order. */
+export function resolveEztransCc(override?: string | null): string[] {
+  const listed = (override ?? EZTRANS_CC_DEFAULT.join(','))
+    .split(',').map(a => a.trim()).filter(Boolean);
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const addr of [...listed, ...EZTRANS_CC_REQUIRED]) {
+    const key = addr.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(addr);
+  }
+  return out;
+}
 
 /** Sender of last resort, on the domain that has been verified in Resend since
  *  this app started sending mail.

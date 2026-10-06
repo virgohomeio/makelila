@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { supabase } from '../../../lib/supabase';
 import { useFulfillmentQueue, type FulfillmentQueueRow } from '../../../lib/fulfillment';
@@ -16,7 +16,8 @@ import { GoorooshipDailyBatch } from './GoorooshipDailyBatch';
 import { EmptyState } from '../../../components/ui';
 import { indexRefundFlags, useRefundMarks } from '../../../lib/refundedOrders';
 import { isPartsOnlyReplacement } from '../../../lib/replacementTags';
-import { splitAwaitingPickup, useGoorooshipSends } from '../../../lib/pickupQueue';
+import { goorooshipSend, splitAwaitingPickup, useGoorooshipSends } from '../../../lib/pickupQueue';
+import { useEzTransRowIds } from '../../../lib/eztrans';
 import {
   indexShippedQueueRows, shippedMarkHeading, shippedMarkTitle, useShippedEvidence,
   type ShippedMark,
@@ -61,6 +62,17 @@ export default function Queue() {
   // Which orders the 3PL has already been told about — the third of the three
   // things that move a row out of Ready to ship and into To be picked up.
   const { sends: goorooshipSends, refresh: refreshSends } = useGoorooshipSends();
+  // Which of those rows EZ Trans is picking, which is what decides whether the
+  // Goorooship email is part of their handoff at all. Asked for the whole rail
+  // at once rather than per row: the answer gates step 3's button on the open
+  // order AND sorts every other row between the two rails.
+  const { ezTransRowIds, loading: ezTransLoading } = useEzTransRowIds(ready);
+  // One predicate, used by both, so the button and the rail cannot disagree
+  // about an order. Unknown reads as EZ Trans — see lib/pickupQueue.ts.
+  const isEzTransRow = useCallback(
+    (r: { id: string }) => ezTransLoading || ezTransRowIds.has(r.id),
+    [ezTransLoading, ezTransRowIds],
+  );
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [orders, setOrders] = useState<Order[]>([]);
   // What happened to the row that just left the queue (cancelled / moved back).
@@ -104,7 +116,7 @@ export default function Queue() {
     // Labelled, docked and already emailed to Goorooship: waiting on the
     // carrier, not on us. Split off the sorted rail so both halves keep pick
     // order, and split rather than filtered so nothing goes missing.
-    const { ready: stillOurs, pickup } = splitAwaitingPickup(readySorted, goorooshipSends);
+    const { ready: stillOurs, pickup } = splitAwaitingPickup(readySorted, goorooshipSends, isEzTransRow);
     // Left unsorted on purpose: the sidebar buckets this tab by the month each
     // box went out and orders it newest-first (queue/shippedMonths.ts). Sorting
     // by order ref here only to have it thrown away read like the real order.
@@ -113,7 +125,7 @@ export default function Queue() {
       pickupRows: pickup,
       shippedRows: [...fulfilled, ...alreadyShipped],
     };
-  }, [ready, fulfilled, orderLookup, shippedMarks, goorooshipSends]);
+  }, [ready, fulfilled, orderLookup, shippedMarks, goorooshipSends, isEzTransRow]);
 
   const allRows = useMemo(
     () => [...readyRows, ...pickupRows, ...shippedRows],
@@ -244,6 +256,8 @@ export default function Queue() {
                     <StepLabel
                       row={selected}
                       order={selectedOrder}
+                      isEzTrans={isEzTransRow(selected)}
+                      goorooshipSentAt={goorooshipSend(selected, goorooshipSends)?.at ?? null}
                       onBatchChanged={() => { void refresh(); void refreshSends(); }}
                     />
                   )}

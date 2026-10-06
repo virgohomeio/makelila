@@ -210,7 +210,7 @@ in any case — that domain has no `resend._domainkey` record.)
 | `GOOGLE_SERVICE_ACCOUNT_KEY` | for the Gmail path | Same base64 service-account JSON as step 4 — project-wide, so set once for both. Unset → falls back to Resend. |
 | `EZTRANS_GMAIL_SENDER` | optional | Mailbox to send as. Defaults to the address inside `EZTRANS_FROM`, so normally leave it unset and let the two stay in step. |
 | `EZTRANS_FROM` | optional | Defaults to `VCycene Fulfillment <reina@virgohome.io>`. |
-| `EZTRANS_CC` | optional | Comma-separated. Defaults to `huayi@virgohome.io`. |
+| `EZTRANS_CC` | optional | Comma-separated. Defaults to `reina@virgohome.io, huayi@virgohome.io, support@goorooship.ca, fulfillment@goorooship.ca`. The two `@goorooship.ca` group addresses are copied on every send even if this override leaves them out. |
 
 The impersonated mailbox must match the `From` address — Gmail will not let an
 account send as an unrelated address. Leaving `EZTRANS_GMAIL_SENDER` unset

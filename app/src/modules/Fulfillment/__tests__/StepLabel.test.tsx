@@ -45,13 +45,13 @@ describe('StepLabel — the Freightcom details are the whole gate', () => {
   it('lets a US order through on carrier + tracking alone, like a CA one', () => {
     render(<StepLabel row={labelled} order={order('US')} />);
 
-    expect(screen.getByRole('button', { name: /Confirm label/ })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /Pickup scheduled/ })).toBeEnabled();
     expect(screen.queryByTestId('step-blockers')).toBeNull();
   });
 
   it('still lets a CA order through', () => {
     render(<StepLabel row={labelled} order={order('CA')} />);
-    expect(screen.getByRole('button', { name: /Confirm label/ })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /Pickup scheduled/ })).toBeEnabled();
   });
 
   it('names the missing Freightcom fields when they are blank', () => {
@@ -70,7 +70,7 @@ describe('StepLabel — the Freightcom details are the whole gate', () => {
     fireEvent.change(screen.getByPlaceholderText(/Amazon order details/i), {
       target: { value: 'TBA303011917292' },
     });
-    fireEvent.click(screen.getByRole('button', { name: /Confirm label/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Pickup scheduled/ }));
 
     await waitFor(() => expect(confirmLabelMock).toHaveBeenCalledWith('q-1', expect.objectContaining({
       carrier: 'UPS',
@@ -82,9 +82,57 @@ describe('StepLabel — the Freightcom details are the whole gate', () => {
   it('omits the starter field entirely when it was left blank', async () => {
     render(<StepLabel row={labelled} order={order('US')} />);
 
-    fireEvent.click(screen.getByRole('button', { name: /Confirm label/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Pickup scheduled/ }));
 
     await waitFor(() => expect(confirmLabelMock).toHaveBeenCalled());
     expect(confirmLabelMock.mock.calls[0][1]).not.toHaveProperty('starter_tracking_num');
+  });
+});
+
+// Clicking this button is what schedules the pickup: the row moves to the dock
+// handoff and into "To be picked up", where it reads as a carton the carrier
+// is coming for. EZ Trans only come for a box they have been emailed about.
+describe('StepLabel — an EZ Trans carton needs the Goorooship email first', () => {
+  beforeEach(() => confirmLabelMock.mockClear());
+
+  it('blocks the pickup on an EZ Trans order the 3PL has not been emailed', () => {
+    render(<StepLabel row={labelled} order={order('CA')} isEzTrans />);
+
+    expect(screen.getByRole('button', { name: /Pickup scheduled/ })).toBeDisabled();
+    expect(screen.getByTestId('step-blockers')).toHaveTextContent(/Goorooship email/i);
+  });
+
+  it('names the email alongside the fields still missing, not instead of them', () => {
+    render(<StepLabel row={row} order={order('CA')} isEzTrans />);
+
+    const blockers = screen.getByTestId('step-blockers');
+    expect(blockers).toHaveTextContent(/carrier/i);
+    expect(blockers).toHaveTextContent(/tracking number/i);
+    expect(blockers).toHaveTextContent(/Goorooship email/i);
+  });
+
+  it('opens once the email has gone out', async () => {
+    render(
+      <StepLabel
+        row={labelled}
+        order={order('CA')}
+        isEzTrans
+        goorooshipSentAt="2026-10-05T17:40:00Z"
+      />,
+    );
+
+    const btn = screen.getByRole('button', { name: /Pickup scheduled/ });
+    expect(btn).toBeEnabled();
+    fireEvent.click(btn);
+    await waitFor(() => expect(confirmLabelMock).toHaveBeenCalled());
+  });
+
+  // Stock off our own floor books through Freightcom and EZ Trans is never
+  // emailed about it. Demanding a send there would close the step for good.
+  it('asks for no email on a Freightcom carton', () => {
+    render(<StepLabel row={labelled} order={order('CA')} isEzTrans={false} />);
+
+    expect(screen.getByRole('button', { name: /Pickup scheduled/ })).toBeEnabled();
+    expect(screen.queryByTestId('step-blockers')).toBeNull();
   });
 });
