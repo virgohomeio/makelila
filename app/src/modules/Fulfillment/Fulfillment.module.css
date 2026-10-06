@@ -412,10 +412,13 @@
   flex-shrink: 1;
 }
 
-/* "Cancel Order" / "Shipment Not Ready - Move Back to Orders". Both are
-   outlined rather than filled: they sit next to the Due pill on every open
-   order, so they must not out-shout the step the operator is actually on. */
-.exitBtn, .exitBtnOn, .exitBtnDanger, .exitBtnDangerOn {
+/* "Cancel Order" / "Flag Order" / "Shipment Not Ready - Move Back to Orders".
+   All are outlined rather than filled: they sit next to the Due pill on every
+   open order, so they must not out-shout the step the operator is actually on.
+   Flag is amber, between the neutral exits and the red one - it stops the
+   order without ending it. */
+.exitBtn, .exitBtnOn, .exitBtnDanger, .exitBtnDangerOn,
+.exitBtnWarn, .exitBtnWarnOn {
   background: #fff;
   border: 1px solid var(--color-border);
   padding: 6px 12px;
@@ -432,11 +435,18 @@
 .exitBtnDanger, .exitBtnDangerOn { color: #c53030; border-color: #fc8181; }
 .exitBtnDanger:hover:not(:disabled) { background: #fff5f5; }
 .exitBtnDangerOn { background: #fff5f5; }
+.exitBtnWarn, .exitBtnWarnOn {
+  color: var(--color-warning);
+  border-color: var(--color-warning-border);
+}
+.exitBtnWarn:hover:not(:disabled) { background: var(--color-warning-bg); }
+.exitBtnWarnOn { background: var(--color-warning-bg); }
 .exitBtn:disabled, .exitBtnOn:disabled,
-.exitBtnDanger:disabled, .exitBtnDangerOn:disabled { opacity: 0.5; cursor: not-allowed; }
+.exitBtnDanger:disabled, .exitBtnDangerOn:disabled,
+.exitBtnWarn:disabled, .exitBtnWarnOn:disabled { opacity: 0.5; cursor: not-allowed; }
 
-/* Inline confirm for either action: what will happen, then a reason. */
-.exitPanel, .exitPanelDanger {
+/* Inline confirm for any of them: what will happen, then a reason. */
+.exitPanel, .exitPanelDanger, .exitPanelWarn {
   margin-top: 10px;
   padding: 12px 14px;
   border-radius: var(--radius-sm);
@@ -446,6 +456,10 @@
 .exitPanelDanger {
   border-color: var(--color-error-border, #fc8181);
   background: var(--color-error-bg, #fff5f5);
+}
+.exitPanelWarn {
+  border-color: var(--color-warning-border);
+  background: var(--color-warning-bg);
 }
 .exitPanelTitle {
   font-size: 12px;
@@ -488,7 +502,7 @@
   gap: 8px;
   margin-top: 8px;
 }
-.exitConfirm, .exitConfirmDanger {
+.exitConfirm, .exitConfirmDanger, .exitConfirmWarn {
   border: none;
   padding: 7px 14px;
   border-radius: var(--radius-sm);
@@ -500,8 +514,13 @@
 }
 .exitConfirm { background: var(--color-info); }
 .exitConfirmDanger { background: #c53030; }
-.exitConfirm:hover:not(:disabled), .exitConfirmDanger:hover:not(:disabled) { filter: brightness(1.08); }
-.exitConfirm:disabled, .exitConfirmDanger:disabled { opacity: 0.5; cursor: not-allowed; }
+/* The deep end of the warning ramp, not --color-warning-strong: that is a
+   mid-amber, and white text on it does not clear AA. */
+.exitConfirmWarn { background: var(--color-warning); }
+.exitConfirm:hover:not(:disabled), .exitConfirmDanger:hover:not(:disabled),
+.exitConfirmWarn:hover:not(:disabled) { filter: brightness(1.08); }
+.exitConfirm:disabled, .exitConfirmDanger:disabled,
+.exitConfirmWarn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .duePill {
   padding: 5px 12px;

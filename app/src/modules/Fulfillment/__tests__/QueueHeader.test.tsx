@@ -5,8 +5,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
-const { cancelMock, moveBackMock, rebookMock } = vi.hoisted(() => ({
+const { cancelMock, flagMock, moveBackMock, rebookMock } = vi.hoisted(() => ({
   cancelMock: vi.fn(() => Promise.resolve()),
+  flagMock: vi.fn(() => Promise.resolve()),
   moveBackMock: vi.fn(() => Promise.resolve({
     status: 'pending', replacement_state: null, label: 'Order Review › Pending',
   })),
@@ -22,6 +23,7 @@ vi.mock('../../../lib/fulfillment', async () => {
   return {
     ...actual,
     cancelOrderFromQueue: cancelMock,
+    flagOrderFromQueue: flagMock,
     returnQueueRowToOrders: moveBackMock,
     setQueuePriority: vi.fn(() => Promise.resolve()),
     goBackStep: vi.fn(() => Promise.resolve()),
@@ -34,7 +36,11 @@ vi.mock('../../../lib/rebookShipment', async () => {
 });
 
 vi.mock('../../../lib/auth', () => ({
-  useAuth: () => ({ user: { id: 'u1', email: 'reina@virgohome.io' }, profile: null, loading: false }),
+  useAuth: () => ({
+    user: { id: 'u1', email: 'reina@virgohome.io' },
+    profile: { display_name: 'Reina' },
+    loading: false,
+  }),
 }));
 
 import { QueueHeader } from '../queue/QueueHeader';
@@ -59,7 +65,73 @@ const order = {
   placed_at: '2026-06-05T00:00:00Z', created_at: '2026-06-05T00:00:00Z',
 };
 
-beforeEach(() => { cancelMock.mockClear(); moveBackMock.mockClear(); rebookMock.mockClear(); });
+beforeEach(() => {
+  cancelMock.mockClear(); flagMock.mockClear();
+  moveBackMock.mockClear(); rebookMock.mockClear();
+});
+
+// The third exit, between cancelling and postponing: the order is stopped and
+// handed to Sales to answer something about, with the note the packer typed.
+describe('Flag Order', () => {
+  it('sits beside Cancel Order on an open order', () => {
+    render(<QueueHeader row={row} order={order} />);
+    expect(screen.getByRole('button', { name: /^flag order$/i })).toBeTruthy();
+  });
+
+  it('is gone once the order has shipped — that is a returns problem', () => {
+    const shipped = { ...row, step: 6, fulfilled_at: '2026-06-20T00:00:00Z' } as FulfillmentQueueRow;
+    render(<QueueHeader row={shipped} order={order} />);
+    expect(screen.queryByRole('button', { name: /^flag order$/i })).toBeNull();
+  });
+
+  // Sales lists no replacements, so flagging one would put it on a screen
+  // where it does not appear.
+  it('is not offered on a replacement', () => {
+    render(<QueueHeader row={row} order={{ ...order, kind: 'replacement' as const }} />);
+    expect(screen.queryByRole('button', { name: /^flag order$/i })).toBeNull();
+  });
+
+  it('says where the order is going before it goes, and asks first', () => {
+    render(<QueueHeader row={row} order={order} />);
+    fireEvent.click(screen.getByRole('button', { name: /^flag order$/i }));
+    expect(screen.getByText(/Sales › Flagged/)).toBeTruthy();
+    expect(flagMock).not.toHaveBeenCalled();
+  });
+
+  // The note is the whole feature: an order that stopped with no stated reason
+  // is what this replaces.
+  it('will not flag without a reason', () => {
+    render(<QueueHeader row={row} order={order} />);
+    fireEvent.click(screen.getByRole('button', { name: /^flag order$/i }));
+    expect(screen.getByRole('button', { name: /flag this order/i }))
+      .toHaveProperty('disabled', true);
+  });
+
+  it('flags with the reason and the operator’s name, then clears the pane', async () => {
+    const onRemoved = vi.fn();
+    render(<QueueHeader row={row} order={order} onRemoved={onRemoved} />);
+    fireEvent.click(screen.getByRole('button', { name: /^flag order$/i }));
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Address is a PO box' } });
+    fireEvent.click(screen.getByRole('button', { name: /flag this order/i }));
+
+    await waitFor(() => {
+      expect(flagMock).toHaveBeenCalledWith('q-1', 'Address is a PO box', 'Reina');
+      expect(onRemoved).toHaveBeenCalledWith(expect.stringMatching(/Sales › Flagged/));
+    });
+  });
+
+  it('shows the error and keeps the pane open when the flag is refused', async () => {
+    flagMock.mockRejectedValueOnce(new Error('A replacement cannot be flagged'));
+    const onRemoved = vi.fn();
+    render(<QueueHeader row={row} order={order} onRemoved={onRemoved} />);
+    fireEvent.click(screen.getByRole('button', { name: /^flag order$/i }));
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'nope' } });
+    fireEvent.click(screen.getByRole('button', { name: /flag this order/i }));
+
+    await waitFor(() => expect(screen.getByText(/A replacement cannot be flagged/)).toBeTruthy());
+    expect(onRemoved).not.toHaveBeenCalled();
+  });
+});
 
 // The booking was made and then cancelled — the carrier was stood down, the
 // pickup called off — and the whole shipment has to be booked again against the

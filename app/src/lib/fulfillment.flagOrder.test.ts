@@ -1,0 +1,180 @@
+// "Flag Order" in the fulfillment queue header.
+//
+// A packer picks an order up and finds something Sales has to answer before a
+// machine goes out — the address is wrong, the line items don't match what was
+// paid for, the customer has gone quiet. Cancelling is too final and "Shipment
+// Not Ready" drops it back into Pending, where it looks like ordinary work and
+// the reason is nowhere on the screen.
+//
+// Flagging is the third exit: the order leaves the queue, the machine goes back
+// on the shelf, and the order lands in Sales › Flagged carrying the note the
+// packer typed. These tests hold down that all four of those things happen, and
+// that a flag that cannot land honestly fails instead of half-landing.
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+const { fromMock, logMock, addOrderNoteMock, state } = vi.hoisted(() => {
+  const state: {
+    kind: string;
+    step: number;
+    fulfilledAt: string | null;
+    assignedSerial: string | null;
+    links: string[];
+    deletedQueueRows: number;
+    updateFails: string | null;
+    updates: Array<{ table: string; patch: any; match: Record<string, any> }>;
+    deletes: Array<{ table: string; match: Record<string, any> }>;
+  } = {
+    kind: 'sale', step: 2, fulfilledAt: null, assignedSerial: '00019', links: ['00019'],
+    deletedQueueRows: 1, updateFails: null, updates: [], deletes: [],
+  };
+
+  const chain = (resolve: (f: Record<string, any>) => any): any => {
+    const filters: Record<string, any> = {};
+    const c: any = {};
+    for (const m of ['select', 'in', 'is', 'order', 'limit'] as const) c[m] = () => c;
+    c.eq = (col: string, val: any) => { filters[col] = val; return c; };
+    c.single = () => Promise.resolve(resolve(filters));
+    c.maybeSingle = () => Promise.resolve(resolve(filters));
+    c.then = (ok: any, err: any) => Promise.resolve(resolve(filters)).then(ok, err);
+    return c;
+  };
+
+  const fromMock = vi.fn((table: string) => ({
+    select: (...a: any[]) => chain(() => {
+      if (table === 'fulfillment_queue') {
+        return {
+          data: {
+            id: 'q-1', order_id: 'o-1', step: state.step,
+            assigned_serial: state.assignedSerial, fulfilled_at: state.fulfilledAt,
+          },
+          error: null,
+        };
+      }
+      if (table === 'orders') {
+        return { data: { id: 'o-1', order_ref: '#1209', kind: state.kind }, error: null };
+      }
+      if (table === 'fulfillment_queue_units') {
+        return { data: state.links.map(unit_serial => ({ unit_serial })), error: null };
+      }
+      if (table === 'units') {
+        return { data: { serial: state.assignedSerial, status: 'reserved' }, error: null };
+      }
+      return { data: null, error: null };
+    }).select(...a),
+    update: (patch: any) => {
+      const c = chain((filters) => {
+        state.updates.push({ table, patch, match: filters });
+        return table === 'orders' && state.updateFails
+          ? { data: null, error: { message: state.updateFails } }
+          : { data: null, error: null };
+      });
+      return c;
+    },
+    delete: () => {
+      const c = chain((filters) => {
+        state.deletes.push({ table, match: filters });
+        return table === 'fulfillment_queue'
+          ? { data: Array(state.deletedQueueRows).fill({ id: 'q-1' }), error: null }
+          : { data: null, error: null };
+      });
+      return c;
+    },
+    insert: () => chain(() => ({ data: null, error: null })),
+  }));
+
+  return {
+    fromMock, state,
+    logMock: vi.fn(() => Promise.resolve()),
+    addOrderNoteMock: vi.fn(() => Promise.resolve()),
+  };
+});
+
+vi.mock('./supabase', () => ({
+  supabase: {
+    from: fromMock,
+    auth: { getUser: () => Promise.resolve({ data: { user: { id: 'u-1' } } }) },
+  },
+  SUPABASE_URL: 'https://example.supabase.co',
+  SUPABASE_ANON_KEY: 'anon',
+}));
+
+vi.mock('./activityLog', () => ({ logAction: logMock }));
+
+vi.mock('./orders', async () => {
+  const actual = await vi.importActual<typeof import('./orders')>('./orders');
+  return { ...actual, addOrderNote: addOrderNoteMock };
+});
+
+import { flagOrderFromQueue } from './fulfillment';
+
+beforeEach(() => {
+  Object.assign(state, {
+    kind: 'sale', step: 2, fulfilledAt: null, assignedSerial: '00019', links: ['00019'],
+    deletedQueueRows: 1, updateFails: null, updates: [], deletes: [],
+  });
+  logMock.mockClear();
+  addOrderNoteMock.mockClear();
+});
+
+const orderUpdate = () => state.updates.find(u => u.table === 'orders');
+
+describe('flagOrderFromQueue', () => {
+  it('marks the order flagged, which is what puts it in Sales › Flagged', async () => {
+    await flagOrderFromQueue('q-1', 'Address is a PO box', 'Huayi');
+    expect(orderUpdate()?.patch.status).toBe('flagged');
+    expect(orderUpdate()?.match.id).toBe('o-1');
+  });
+
+  // bucketOrders drops any order whose customer name matches a shipped unit's.
+  // Without this the flag would land the order on a screen that does not list
+  // it — the same disappearing act returnOrderToReview documents for #1189.
+  it('opens the reconcile outcome so a repeat customer’s order still shows', async () => {
+    await flagOrderFromQueue('q-1', 'Needs a new address', 'Huayi');
+    expect(orderUpdate()?.patch.reconcile_outcome).toBe('open');
+  });
+
+  it('writes the reason where Sales reads it, and to the log', async () => {
+    await flagOrderFromQueue('q-1', '  Customer asked to change the colour  ', 'Huayi');
+    expect(addOrderNoteMock).toHaveBeenCalledWith(
+      'o-1', 'Huayi',
+      expect.stringContaining('Customer asked to change the colour'),
+    );
+    expect(logMock).toHaveBeenCalledWith(
+      'fq_order_flagged', '#1209', 'Customer asked to change the colour',
+      { entityType: 'order', entityId: 'o-1' },
+    );
+  });
+
+  it('takes the row out of the queue and gives the machine back', async () => {
+    await flagOrderFromQueue('q-1', 'Wrong line items', 'Huayi');
+    expect(state.deletes.some(d => d.table === 'fulfillment_queue')).toBe(true);
+    expect(state.updates.some(u => u.table === 'units' && u.patch.status === 'ready')).toBe(true);
+  });
+
+  it('refuses to flag without a reason — the reason is the whole point', async () => {
+    await expect(flagOrderFromQueue('q-1', '   ', 'Huayi')).rejects.toThrow(/reason is required/i);
+    expect(state.deletes).toHaveLength(0);
+  });
+
+  it('refuses an order that has already shipped', async () => {
+    state.step = 6;
+    state.fulfilledAt = '2026-10-01T00:00:00Z';
+    await expect(flagOrderFromQueue('q-1', 'too late', 'Huayi')).rejects.toThrow(/already shipped/i);
+  });
+
+  // Sales filters kind='replacement' out of every bucket, so a flagged
+  // replacement would leave the queue and appear nowhere at all.
+  it('refuses a replacement, which Sales does not list', async () => {
+    state.kind = 'replacement';
+    await expect(flagOrderFromQueue('q-1', 'lid is wrong', 'Huayi'))
+      .rejects.toThrow(/replacement/i);
+    expect(state.deletes).toHaveLength(0);
+  });
+
+  it('says so when the order left the queue but would not flag', async () => {
+    state.updateFails = 'permission denied';
+    await expect(flagOrderFromQueue('q-1', 'bad address', 'Huayi'))
+      .rejects.toThrow(/left the queue/i);
+  });
+});

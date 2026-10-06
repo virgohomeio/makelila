@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from './supabase';
 import { logAction } from './activityLog';
-import { cancelOrder, returnOrderToReview, type ReviewLanding } from './orders';
+import { addOrderNote, cancelOrder, returnOrderToReview, type ReviewLanding } from './orders';
 import { renderTemplate } from './templates';
 
 export type FulfillmentStep = 1 | 2 | 3 | 4 | 5 | 6;
@@ -1216,6 +1216,94 @@ export async function cancelOrderFromQueue(queueId: string, reason: string): Pro
   await deleteQueueRow(queueId);
   await cancelOrder(row.order_id, reason);
   await logAction('fq_order_cancelled', queueId, reason.trim());
+}
+
+/** Queue header action — "Flag Order". The third way an order leaves the queue,
+ *  between the other two: it is not dead (Cancel Order) and it is not merely
+ *  not-today (Shipment Not Ready), it is an order Sales has to answer something
+ *  about before a machine goes out — the address will not deliver, the line
+ *  items do not match what was paid, the customer has gone quiet.
+ *
+ *  The order leaves the queue, the machine picked for it goes back into ready
+ *  stock, and the order lands in Sales › Flagged. It is re-queued the ordinary
+ *  way, by confirming it again once the flag is resolved.
+ *
+ *  The queue row goes for the same reason releaseHold pulls one: an order
+ *  sitting in review must not still be pickable. #1214 sat Held in Sales and
+ *  step-1 Ready-to-ship in Fulfillment at once for 29 days, and a flag left in
+ *  the queue would do exactly that again.
+ *
+ *  The reason is written twice, deliberately. The activity log records who
+ *  flagged what and when; order_notes is the card Sales actually reads when it
+ *  opens the order. A flag whose reason is only in the audit trail is, to the
+ *  person who has to act on it, an order that stopped moving for no stated
+ *  reason.
+ *
+ *  Replacements are refused. Sales filters kind='replacement' out of every
+ *  bucket, so flagging one would take it out of the queue and put it on a
+ *  screen that does not list it — the disappearing act returnOrderToReview
+ *  documents for #1189. Those use "Shipment Not Ready" instead, which lands
+ *  them in Fulfillment › Replacements where they are actually visible. */
+export async function flagOrderFromQueue(
+  queueId: string,
+  reason: string,
+  flaggedByName: string,
+): Promise<void> {
+  const userId = await currentUserId();
+  if (!reason.trim()) throw new Error('A reason is required to flag an order.');
+  const row = await loadRemovableQueueRow(queueId, 'flagged');
+
+  const { data: order, error: oErr } = await supabase
+    .from('orders')
+    .select('id, order_ref, kind')
+    .eq('id', row.order_id)
+    .single();
+  if (oErr || !order) throw new Error(`Order not found: ${oErr?.message ?? 'no row'}`);
+  if (order.kind === 'replacement') {
+    throw new Error(
+      'A replacement cannot be flagged — Sales does not list replacements, so it would '
+      + 'appear nowhere. Use "Shipment Not Ready — Move Back to Orders" instead.',
+    );
+  }
+
+  await releaseAssignedUnits(queueId, row.assigned_serial);
+  await deleteQueueRow(queueId);
+
+  const { error: uErr } = await supabase
+    .from('orders')
+    .update({
+      status: 'flagged',
+      dispositioned_by: userId,
+      dispositioned_at: new Date().toISOString(),
+      // Without this the order lands in no Sales tab at all for any customer
+      // who already has a shipped unit — bucketOrders' signal (b) is a name
+      // match, and it buries a flagged order as readily as it buried #1189.
+      reconcile_outcome: 'open',
+    })
+    .eq('id', row.order_id);
+  if (uErr) {
+    throw new Error(
+      `${order.order_ref} left the queue but could not be flagged: ${uErr.message}. `
+      + 'Find it in Sales › Pending and flag it from there.',
+    );
+  }
+
+  // The note is what Sales reads, but the flag has already landed by now. A
+  // failed insert must not report as "the flag did not happen" — the reason
+  // still reaches the activity log on the next line.
+  try {
+    await addOrderNote(
+      row.order_id,
+      flaggedByName,
+      `Flagged from the fulfillment queue: ${reason.trim()}`,
+    );
+  } catch (e) {
+    console.warn('flagOrderFromQueue: note insert failed (non-fatal):', (e as Error).message);
+  }
+
+  await logAction('fq_order_flagged', order.order_ref, reason.trim(), {
+    entityType: 'order', entityId: row.order_id,
+  });
 }
 
 /** Queue header action — "Shipment Not Ready — Move Back to Orders". The order

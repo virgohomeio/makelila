@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import {
   setQueuePriority, goBackStep, cancelOrderFromQueue, returnQueueRowToOrders,
-  type FulfillmentQueueRow,
+  flagOrderFromQueue, type FulfillmentQueueRow,
 } from '../../../lib/fulfillment';
+import { useAuth } from '../../../lib/auth';
 import { canRebookShipment, rebookShipment } from '../../../lib/rebookShipment';
 import { orderDue, type Order } from '../../../lib/orders';
 import { replacementItemsLabel } from '../../../lib/replacementTags';
@@ -10,9 +11,10 @@ import styles from '../Fulfillment.module.css';
 
 /** Which of the header's confirm panels is open, if any.
  *
- *  The first two take the order out of the queue; the third keeps it and sends
- *  it backwards. All three ask before they act, and all three take a note. */
-type ExitPanel = 'cancel' | 'moveBack' | 'rebook' | null;
+ *  The first three take the order out of the queue; the fourth keeps it and
+ *  sends it backwards. All of them ask before they act, and all of them take a
+ *  note — required to cancel and to flag, where the note is the whole point. */
+type ExitPanel = 'cancel' | 'flag' | 'moveBack' | 'rebook' | null;
 
 export function QueueHeader({
   row,
@@ -35,6 +37,8 @@ export function QueueHeader({
    *  than trusting the realtime socket to still be up. */
   onStepChanged?: () => void;
 }) {
+  const { profile, user } = useAuth();
+  const operatorName = profile?.display_name ?? user?.email ?? 'Unknown';
   const due = orderDue(order.placed_at ?? order.created_at);
   const STEP_LABELS = ['', 'Assign', 'Test', 'Label', 'Dock', 'Email', 'Fulfilled'];
   const [busy, setBusy] = useState(false);
@@ -49,9 +53,10 @@ export function QueueHeader({
     finally { setBusy(false); }
   };
 
-  // The two ways an order leaves the queue without shipping. Both take a reason
-  // (required to cancel, optional to move back) rather than a bare confirm —
-  // "why did this order stop" is the thing anyone reading the log later wants.
+  // The three ways an order leaves the queue without shipping. All take a
+  // reason (required to cancel and to flag, optional to move back) rather than
+  // a bare confirm — "why did this order stop" is the thing anyone reading the
+  // log, or the Sales tab it lands in, actually wants.
   const [panel, setPanel] = useState<ExitPanel>(null);
   const [exitReason, setExitReason] = useState('');
 
@@ -66,6 +71,21 @@ export function QueueHeader({
     try {
       await cancelOrderFromQueue(row.id, exitReason);
       onRemoved?.(`${order.order_ref} — ${order.customer_name} was cancelled and removed from the queue.`);
+    } catch (e) {
+      setError((e as Error).message);
+      setBusy(false);
+    }
+  };
+
+  // Flagging is for an order Sales has to answer something about — a bad
+  // address, line items that don't match what was paid. The note is required:
+  // it is the only thing that tells the person opening Sales › Flagged what
+  // they are being asked to fix.
+  const handleFlagOrder = async () => {
+    setBusy(true); setError(null);
+    try {
+      await flagOrderFromQueue(row.id, exitReason, operatorName);
+      onRemoved?.(`${order.order_ref} — ${order.customer_name} was flagged and is now in Sales › Flagged.`);
     } catch (e) {
       setError((e as Error).message);
       setBusy(false);
@@ -200,6 +220,19 @@ export function QueueHeader({
                 aria-expanded={panel === 'cancel'}
                 title="Cancel the whole order — it leaves the queue and every Order Review tab"
               >Cancel Order</button>
+              {/* Not offered on a replacement: Sales lists no replacements, so
+                  flagging one would take it out of the queue and put it on a
+                  screen where it does not appear. flagOrderFromQueue refuses
+                  one too — this just keeps the dead button off the card. */}
+              {order.kind !== 'replacement' && (
+                <button
+                  className={panel === 'flag' ? styles.exitBtnWarnOn : styles.exitBtnWarn}
+                  onClick={() => openPanel('flag')}
+                  disabled={busy}
+                  aria-expanded={panel === 'flag'}
+                  title="Flag this order for Sales — it leaves the queue with your note and lands in Sales › Flagged"
+                >Flag Order</button>
+              )}
               <button
                 className={panel === 'moveBack' ? styles.exitBtnOn : styles.exitBtn}
                 onClick={() => openPanel('moveBack')}
@@ -228,13 +261,19 @@ export function QueueHeader({
         </div>
       </div>
       {panel && (
-        <div className={panel === 'cancel' ? styles.exitPanelDanger : styles.exitPanel}>
+        <div className={
+          panel === 'cancel' ? styles.exitPanelDanger
+          : panel === 'flag' ? styles.exitPanelWarn
+          : styles.exitPanel
+        }>
           <div className={styles.exitPanelTitle}>
             {panel === 'cancel'
               ? `Cancel ${order.order_ref} — ${order.customer_name}?`
-              : panel === 'rebook'
-                ? `Book a new shipment for ${order.order_ref} — ${order.customer_name}?`
-                : `Move ${order.order_ref} back to Sales › Orders?`}
+              : panel === 'flag'
+                ? `Flag ${order.order_ref} — ${order.customer_name} for Sales?`
+                : panel === 'rebook'
+                  ? `Book a new shipment for ${order.order_ref} — ${order.customer_name}?`
+                  : `Move ${order.order_ref} back to Sales › Orders?`}
           </div>
           <ul className={styles.exitPanelList}>
             {panel === 'rebook' ? (
@@ -265,6 +304,21 @@ export function QueueHeader({
                     queue had marked shipped goes back on the shelf.
                   </li>
                 )}
+              </>
+            ) : panel === 'flag' ? (
+              <>
+                <li>The order is removed from the fulfillment queue.</li>
+                <li>
+                  It is marked <strong>flagged</strong> and moves to{' '}
+                  <strong>Sales › Flagged</strong>, where your note is on the order.
+                </li>
+                {row.assigned_serials.length > 0 && (
+                  <li>
+                    Unit{row.assigned_serials.length === 1 ? '' : 's'}{' '}
+                    {row.assigned_serials.join(', ')} go{row.assigned_serials.length === 1 ? 'es' : ''} back into ready stock.
+                  </li>
+                )}
+                <li>Nothing is cancelled and no refund is raised — confirming the order again puts it back in the queue at step 1.</li>
               </>
             ) : panel === 'cancel' ? (
               <>
@@ -299,23 +353,31 @@ export function QueueHeader({
             rows={2}
             placeholder={panel === 'cancel'
               ? 'Reason for cancelling (required) — e.g. customer changed their mind'
-              : panel === 'rebook'
-                ? 'Note (optional) — e.g. pickup cancelled, rebooking with GLS'
-                : 'Note (optional) — e.g. waiting on a replacement chamber'}
+              : panel === 'flag'
+                ? 'Why are you flagging this order? (required) — e.g. address is a PO box, customer has not confirmed the colour'
+                : panel === 'rebook'
+                  ? 'Note (optional) — e.g. pickup cancelled, rebooking with GLS'
+                  : 'Note (optional) — e.g. waiting on a replacement chamber'}
           />
           <div className={styles.exitPanelActions}>
             <button
-              className={panel === 'cancel' ? styles.exitConfirmDanger : styles.exitConfirm}
+              className={
+                panel === 'cancel' ? styles.exitConfirmDanger
+                : panel === 'flag' ? styles.exitConfirmWarn
+                : styles.exitConfirm
+              }
               onClick={() => void (
                 panel === 'cancel' ? handleCancelOrder()
+                : panel === 'flag' ? handleFlagOrder()
                 : panel === 'rebook' ? handleRebook()
                 : handleMoveBack()
               )}
-              disabled={busy || (panel === 'cancel' && !exitReason.trim())}
+              disabled={busy || ((panel === 'cancel' || panel === 'flag') && !exitReason.trim())}
             >
               {busy
                 ? 'Working…'
                 : panel === 'cancel' ? 'Cancel this order'
+                : panel === 'flag' ? 'Flag this order'
                 : panel === 'rebook' ? 'Rebook this shipment'
                 : 'Move back to Orders'}
             </button>
