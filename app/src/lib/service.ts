@@ -16,7 +16,8 @@ import {
 export type TicketCategory = 'onboarding' | 'support' | 'repair' | 'diagnosis_call';
 export type TicketSource =
   | 'calendly' | 'customer_form' | 'hubspot' | 'fulfillment_flag'
-  | 'ops_manual' | 'gmail' | 'quo' | 'google_calendar' | 'telemetry_auto';
+  | 'ops_manual' | 'gmail' | 'quo' | 'google_calendar' | 'telemetry_auto'
+  | 'lovely_app';
 
 export type TicketKind = 'conversation' | 'ticket';
 export type InboxDisposition = 'promoted' | 'sales' | 'follow_up' | 'dismissed';
@@ -131,6 +132,10 @@ export type ServiceTicket = {
   linear_issue_url: string | null;
   github_issue_url: string | null;
   engineering_resolved_at: string | null;
+  /** Lovely project damage_reports.id for source 'lovely_app' tickets; the
+   *  detail panel loads the report's photos by it. Optional: absent on rows
+   *  read before the column landed. */
+  lovely_report_id?: string | null;
 };
 
 export type CustomerLifecycle = {
@@ -287,6 +292,7 @@ export const SOURCE_LABEL: Record<TicketSource, string> = {
   quo:              'Quo',
   google_calendar:  'Calendar',
   telemetry_auto:   'Telemetry auto',
+  lovely_app:       'From Lovely app',
 };
 
 // Safe accessors for the display metadata above. A ticket's status / priority /

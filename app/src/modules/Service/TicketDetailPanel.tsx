@@ -24,6 +24,7 @@ import {
 } from '../../lib/orders';
 import { useAuth } from '../../lib/auth';
 import { AttachmentStrip } from './AttachmentStrip';
+import { LovelyReportPhotos } from './LovelyReportPhotos';
 import { TicketNotes } from './TicketNotes';
 import { NewTicketModal } from './NewTicketModal';
 import { TicketActionItems } from './TicketActionItems';
@@ -997,6 +998,15 @@ export function TicketDetailPanel({ ticket, onClose, showDeviceContext = true }:
                 </div>
               ))}
             </div>
+          </div>
+        )}
+
+        {ticket.lovely_report_id && (
+          <div className={styles.detailSection}>
+            <div className={styles.detailSectionLabel}>Lovely app photos</div>
+            {/* Keyed: the panel is reused across tickets, and the previous
+                report's photos must not show for a render on the next one. */}
+            <LovelyReportPhotos key={ticket.lovely_report_id} reportId={ticket.lovely_report_id} />
           </div>
         )}
 

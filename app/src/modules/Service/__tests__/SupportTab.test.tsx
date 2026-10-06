@@ -509,3 +509,24 @@ describe('SupportTab — parts vs batch replacement chips', () => {
     expect(tableText()).toContain('Batch Bob');
   });
 });
+
+describe('SupportTab — Lovely app tickets', () => {
+  it('badges a ticket synced from the Lovely app', () => {
+    ticketsToReturn = [mkTicket({ id: 'lv1', source: 'lovely_app', subject: 'Damage report: LL01-00000000372' })];
+    render(<SupportTab />);
+    expect(screen.getByText('From Lovely app')).toBeInTheDocument();
+  });
+
+  it('narrows the list to Lovely app tickets from the Source filter', () => {
+    ticketsToReturn = [
+      mkTicket({ id: 'lv2', source: 'lovely_app', subject: 'Damage report: LL01-00000000372' }),
+      mkTicket({ id: 'gm1', source: 'gmail', subject: 'email question' }),
+    ];
+    render(<SupportTab />);
+    expect(screen.getAllByText('email question').length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole('button', { name: /^Source/ }));
+    fireEvent.click(screen.getByRole('menuitemcheckbox', { name: /From Lovely app/ }));
+    expect(screen.queryByText('email question')).toBeNull();
+    expect(screen.getAllByText('Damage report: LL01-00000000372').length).toBeGreaterThan(0);
+  });
+});

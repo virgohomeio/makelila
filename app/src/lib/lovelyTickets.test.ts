@@ -8,7 +8,7 @@ vi.mock('./supabaseTelemetry', () => ({
   TELEMETRY_ANON_KEY: undefined,
 }));
 
-import { attachPhotos } from './lovelyTickets';
+import { attachPhotos, orderedPhotoPaths } from './lovelyTickets';
 
 const report = (id: string) => ({
   id, user_id: 'u1', serial_number: 'LL01-00000000372', notes: 'n',
@@ -34,5 +34,19 @@ describe('attachPhotos', () => {
       [{ damage_report_id: 'a', raw_object_path: null, created_at: null }],
     );
     expect(out[0].photoPaths).toEqual([]);
+  });
+});
+
+describe('orderedPhotoPaths', () => {
+  it('returns paths in upload order and drops rows without a path', () => {
+    expect(orderedPhotoPaths([
+      { raw_object_path: 'u1/2.jpg', created_at: '2026-09-30T00:00:02Z' },
+      { raw_object_path: null,       created_at: '2026-09-30T00:00:00Z' },
+      { raw_object_path: 'u1/1.jpg', created_at: '2026-09-30T00:00:01Z' },
+    ])).toEqual(['u1/1.jpg', 'u1/2.jpg']);
+  });
+
+  it('is empty for no images', () => {
+    expect(orderedPhotoPaths([])).toEqual([]);
   });
 });

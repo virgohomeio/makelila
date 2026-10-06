@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   onboardingAnchorDate, shouldNotifyAssignment, ownerFirstName,
-  ticketStatusSet,
+  ticketStatusSet, sourceLabel,
 } from './service';
 
 describe('ticketStatusSet', () => {
@@ -106,5 +106,11 @@ describe('ownerFirstName', () => {
   it('splits on separators in the local-part', () => {
     expect(ownerFirstName('mary.jane@virgohome.io')).toBe('Mary');
     expect(ownerFirstName('jon_snow@virgohome.io')).toBe('Jon');
+  });
+});
+
+describe('sourceLabel — Lovely app', () => {
+  it('labels tickets synced from the Lovely app', () => {
+    expect(sourceLabel('lovely_app')).toBe('From Lovely app');
   });
 });

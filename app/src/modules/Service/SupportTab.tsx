@@ -40,9 +40,10 @@ const SOURCE_FILTERS: { key: SourceFilter; label: string }[] = [
   { key: 'hubspot',        label: 'HubSpot' },
   { key: 'quo',            label: 'Quo' },
   { key: 'telemetry_auto', label: 'Telemetry auto' },
+  { key: 'lovely_app',     label: 'From Lovely app' },
 ];
 
-type SourceFilter = 'all' | 'customer_form' | 'hubspot' | 'gmail' | 'quo' | 'telemetry_auto';
+type SourceFilter = 'all' | 'customer_form' | 'hubspot' | 'gmail' | 'quo' | 'telemetry_auto' | 'lovely_app';
 type OwnerFilter = 'all' | 'none' | string;
 /** Saved views answer the three questions the queue's shape says matter, none
  *  of which was reachable before: who owns nothing, what has gone stale, and
@@ -918,7 +919,9 @@ function TicketRow({ t, partiesFor, queueKinds, now, selected, onClick }: {
       <td>
         {t.source === 'telemetry_auto'
           ? <span className={styles.telemetryAutoBadge}>Telemetry auto</span>
-          : sourceLabel(t.source)
+          : t.source === 'lovely_app'
+            ? <span className={styles.lovelyAppBadge}>From Lovely app</span>
+            : sourceLabel(t.source)
         }
       </td>
       <td><span className={styles.pill} style={{ background: 'var(--color-surface)', color: p.color }}>{p.label}</span></td>

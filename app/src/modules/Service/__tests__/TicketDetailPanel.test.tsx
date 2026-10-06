@@ -57,6 +57,9 @@ vi.mock('../../../lib/auth', () => ({
 vi.mock('../TicketNotes', () => ({ TicketNotes: () => null }));
 vi.mock('../TicketActionItems', () => ({ TicketActionItems: () => null }));
 vi.mock('../AttachmentStrip', () => ({ AttachmentStrip: () => null }));
+vi.mock('../LovelyReportPhotos', () => ({
+  LovelyReportPhotos: (p: { reportId: string }) => <div data-testid="lovely-photos">{p.reportId}</div>,
+}));
 vi.mock('../../../components/DeviceContextHeader', () => ({
   DeviceContextHeader: () => <div data-testid="device-context-header" />,
 }));
@@ -429,5 +432,25 @@ describe('TicketDetailPanel — replacement outcome buttons', () => {
       onClose={() => {}} />);
     await screen.findByText('Replacement Received Damaged');
     expect(screen.queryByText('Replacement Shipped')).toBeNull();
+  });
+});
+
+describe('TicketDetailPanel — Lovely app tickets', () => {
+  it('shows the source label and the report photos', () => {
+    render(
+      <TicketDetailPanel
+        ticket={mkTicket({ source: 'lovely_app', lovely_report_id: 'r-123' })}
+        onClose={() => {}}
+      />,
+    );
+    expect(screen.getByText('From Lovely app')).toBeInTheDocument();
+    expect(screen.getByText('Lovely app photos')).toBeInTheDocument();
+    expect(screen.getByTestId('lovely-photos')).toHaveTextContent('r-123');
+  });
+
+  it('shows no Lovely photos section on other tickets', () => {
+    render(<TicketDetailPanel ticket={mkTicket()} onClose={() => {}} />);
+    expect(screen.queryByText('Lovely app photos')).toBeNull();
+    expect(screen.queryByTestId('lovely-photos')).toBeNull();
   });
 });

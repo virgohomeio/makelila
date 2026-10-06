@@ -117,3 +117,66 @@ export async function signDamagePhotos(paths: string[]): Promise<Record<string, 
   }
   return ((JSON.parse(text) as { urls?: Record<string, string> }).urls) ?? {};
 }
+
+export function orderedPhotoPaths(
+  images: { raw_object_path: string | null; created_at: string | null }[],
+): string[] {
+  return images
+    .filter(i => i.raw_object_path)
+    .sort((a, b) => (a.created_at ?? '').localeCompare(b.created_at ?? ''))
+    .map(i => i.raw_object_path!);
+}
+
+// Photos for ONE damage report, for the Service ticket detail panel (tickets
+// with source 'lovely_app' carry the report id). Photos are never copied into
+// makelila: paths are read live and signed on demand, so a photo uploaded
+// after the ticket was created still shows.
+export function useLovelyReportPhotos(reportId: string | null): {
+  paths: string[];
+  urls: Record<string, string>;
+  loading: boolean;
+  error: string | null;
+} {
+  const [paths, setPaths] = useState<string[]>([]);
+  const [urls, setUrls] = useState<Record<string, string>>({});
+  const [loading, setLoading] = useState<boolean>(!!reportId);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setPaths([]);
+    setUrls({});
+    setError(null);
+    if (!reportId) { setLoading(false); return; }
+    if (!supabaseTelemetry) {
+      setLoading(false);
+      setError('Lovely telemetry not configured.');
+      return;
+    }
+    const telemetry = supabaseTelemetry;
+    let cancelled = false;
+    setLoading(true);
+    (async () => {
+      try {
+        const { data, error: imgErr } = await telemetry
+          .from('images')
+          .select('raw_object_path, created_at')
+          .eq('damage_report_id', reportId);
+        if (imgErr) throw new Error(imgErr.message);
+        const found = orderedPhotoPaths(
+          (data ?? []) as { raw_object_path: string | null; created_at: string | null }[],
+        );
+        if (cancelled) return;
+        setPaths(found);
+        const signed = await signDamagePhotos(found);
+        if (!cancelled) setUrls(signed);
+      } catch (e) {
+        if (!cancelled) setError((e as Error).message);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [reportId]);
+
+  return { paths, urls, loading, error };
+}
