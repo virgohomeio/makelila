@@ -157,10 +157,44 @@ describe('flagOrderFromQueue', () => {
     expect(state.deletes).toHaveLength(0);
   });
 
-  it('refuses an order that has already shipped', async () => {
-    state.step = 6;
-    state.fulfilledAt = '2026-10-01T00:00:00Z';
-    await expect(flagOrderFromQueue('q-1', 'too late', 'Huayi')).rejects.toThrow(/already shipped/i);
+  // A shipped order is flaggable too — "this one that went out has a problem"
+  // is a thing an operator needs to be able to say. What it must NOT do is
+  // behave like the pre-ship flag: the queue row IS the shipment record, and
+  // the machine is at the customer's house.
+  describe('on an order that has already shipped', () => {
+    beforeEach(() => { state.step = 6; state.fulfilledAt = '2026-10-01T00:00:00Z'; });
+
+    it('flags it', async () => {
+      await flagOrderFromQueue('q-1', 'customer says the lid arrived cracked', 'Huayi');
+      expect(orderUpdate()?.patch.status).toBe('flagged');
+    });
+
+    // Deleting it would throw away fulfilled_at, the tracking number and the
+    // carrier — the order would read as never shipped in every rollup that
+    // counts step 6.
+    it('keeps the queue row, which is the shipment record', async () => {
+      await flagOrderFromQueue('q-1', 'arrived cracked', 'Huayi');
+      expect(state.deletes.some(d => d.table === 'fulfillment_queue')).toBe(false);
+    });
+
+    // The machine is with the customer. Releasing it would put a shipped unit
+    // back on the shelf as sellable stock.
+    it('leaves the shipped machine alone', async () => {
+      await flagOrderFromQueue('q-1', 'arrived cracked', 'Huayi');
+      expect(state.updates.some(u => u.table === 'units')).toBe(false);
+      expect(state.deletes.some(d => d.table === 'fulfillment_queue_units')).toBe(false);
+    });
+
+    it('still records the reason in both places', async () => {
+      await flagOrderFromQueue('q-1', 'arrived cracked', 'Huayi');
+      expect(addOrderNoteMock).toHaveBeenCalledWith(
+        'o-1', 'Huayi', expect.stringContaining('arrived cracked'),
+      );
+      expect(logMock).toHaveBeenCalledWith(
+        'fq_order_flagged', '#1209', 'arrived cracked',
+        { entityType: 'order', entityId: 'o-1' },
+      );
+    });
   });
 
   // Replacements were refused until bucketOrders grew a keyhole for a flagged

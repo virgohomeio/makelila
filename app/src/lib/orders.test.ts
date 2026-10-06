@@ -544,6 +544,21 @@ describe('bucketOrders', () => {
     expect(b.all).toEqual([]);
   });
 
+  // The third automatic exclusion a flag has to beat. An operator can flag an
+  // order that already shipped ("this one arrived cracked"), and signal (a)
+  // would otherwise swallow it exactly the way signal (b) swallowed #1189.
+  it('shows a flagged order that has already been fulfilled', () => {
+    const b = bucketOrders(
+      [mk({ id: 'shipped-flagged', status: 'flagged' }),
+       mk({ id: 'shipped-quiet',   status: 'approved' })],
+      new Set(['shipped-flagged', 'shipped-quiet']), none,
+    );
+    expect(b.flagged.map(o => o.id)).toEqual(['shipped-flagged']);
+    expect(b.all.map(o => o.id)).toEqual(['shipped-flagged']);
+    // Everything that is not flagged is still hidden once it is fulfilled.
+    expect(b.approved).toEqual([]);
+  });
+
   it('still hides fulfilled and already-shipped orders from every tab', () => {
     const b = bucketOrders(
       [mk({ id: 'fulfilled', status: 'approved' }),

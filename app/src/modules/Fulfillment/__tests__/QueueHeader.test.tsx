@@ -78,10 +78,45 @@ describe('Flag Order', () => {
     expect(screen.getByRole('button', { name: /^flag order$/i })).toBeTruthy();
   });
 
-  it('is gone once the order has shipped — that is a returns problem', () => {
+  // The one action offered on every order in the queue. The other two exits are
+  // about getting a box back on the shelf, which is meaningless once it has
+  // gone — raising a problem with the order is not.
+  it('is still offered once the order has shipped, when the other exits are not', () => {
     const shipped = { ...row, step: 6, fulfilled_at: '2026-06-20T00:00:00Z' } as FulfillmentQueueRow;
     render(<QueueHeader row={shipped} order={order} />);
-    expect(screen.queryByRole('button', { name: /^flag order$/i })).toBeNull();
+    expect(screen.getByRole('button', { name: /^flag order$/i })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /^cancel order$/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /shipment not ready/i })).toBeNull();
+  });
+
+  it('promises a shipped order nothing will move', () => {
+    const shipped = { ...row, step: 6, fulfilled_at: '2026-06-20T00:00:00Z' } as FulfillmentQueueRow;
+    render(<QueueHeader row={shipped} order={order} />);
+    fireEvent.click(screen.getByRole('button', { name: /^flag order$/i }));
+    expect(screen.getByText(/still reads as shipped/)).toBeTruthy();
+    expect(screen.getByText(/stays with the customer/)).toBeTruthy();
+    expect(screen.queryByText(/removed from the fulfillment queue/)).toBeNull();
+  });
+
+  // The row survives a shipped flag, so announcing it through onRemoved would
+  // deselect the order and claim a removal that never happened.
+  it('keeps a flagged shipped order on screen and says so in place', async () => {
+    const shipped = { ...row, step: 6, fulfilled_at: '2026-06-20T00:00:00Z' } as FulfillmentQueueRow;
+    const onRemoved = vi.fn();
+    const onStepChanged = vi.fn();
+    render(
+      <QueueHeader row={shipped} order={order} onRemoved={onRemoved} onStepChanged={onStepChanged} />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /^flag order$/i }));
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'arrived cracked' } });
+    fireEvent.click(screen.getByRole('button', { name: /flag this order/i }));
+
+    await waitFor(() => {
+      expect(flagMock).toHaveBeenCalledWith('q-1', 'arrived cracked', 'Reina');
+      expect(screen.getByText(/is flagged/)).toBeTruthy();
+    });
+    expect(onRemoved).not.toHaveBeenCalled();
+    expect(onStepChanged).toHaveBeenCalled();
   });
 
   // Replacements were excluded until bucketOrders grew a keyhole for a flagged

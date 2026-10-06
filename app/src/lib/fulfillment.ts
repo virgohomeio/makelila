@@ -1247,7 +1247,24 @@ export async function cancelOrderFromQueue(queueId: string, reason: string): Pro
  *  The order keeps its replacement_state: it is not being re-planned here, it
  *  is being stopped, and Fulfillment › Replacements still lists it (badged
  *  Flagged) the whole time. Clearing the flag re-queues it through
- *  queueReplacementForFulfillment, which re-resolves stock from scratch. */
+ *  queueReplacementForFulfillment, which re-resolves stock from scratch.
+ *
+ *  An ALREADY-SHIPPED order is flaggable too, as of 2026-10-06, and means
+ *  something different: "this one that went out has a problem". Everything the
+ *  pre-ship flag does to get the box back on the shelf would be wrong here, so
+ *  none of it happens.
+ *
+ *    - The queue row stays. It IS the shipment record — fulfilled_at, the
+ *      carrier, the tracking number — and deleting it would make the order read
+ *      as never shipped in every rollup that counts step 6.
+ *    - The machine stays assigned. It is at the customer's house; releasing it
+ *      would put a shipped unit back on the shelf as sellable stock, which is
+ *      the hole step-6-ships-every-linked-serial exists to keep shut.
+ *
+ *  So a shipped flag is only the status, the note and the log entry. Whatever
+ *  the problem turns out to be, the machinery for it lives downstream — a
+ *  return, a refund, a replacement — and the flag is how Sales gets told to
+ *  start one. */
 export async function flagOrderFromQueue(
   queueId: string,
   reason: string,
@@ -1255,7 +1272,17 @@ export async function flagOrderFromQueue(
 ): Promise<void> {
   const userId = await currentUserId();
   if (!reason.trim()) throw new Error('A reason is required to flag an order.');
-  const row = await loadRemovableQueueRow(queueId, 'flagged');
+  // Deliberately NOT loadRemovableQueueRow: that refuses a shipped row, and a
+  // shipped order is flaggable here. What it would have refused, this branches
+  // on instead.
+  const { data: queueRow, error: qErr } = await supabase
+    .from('fulfillment_queue')
+    .select('id, order_id, step, assigned_serial, fulfilled_at')
+    .eq('id', queueId)
+    .single();
+  if (qErr || !queueRow) throw new Error(`Queue row not found: ${qErr?.message ?? 'no row'}`);
+  const row = queueRow as LeavingQueueRow;
+  const alreadyShipped = row.step === 6 || !!row.fulfilled_at;
 
   const { data: order, error: oErr } = await supabase
     .from('orders')
@@ -1265,8 +1292,12 @@ export async function flagOrderFromQueue(
   if (oErr || !order) throw new Error(`Order not found: ${oErr?.message ?? 'no row'}`);
   const isReplacement = order.kind === 'replacement';
 
-  await releaseAssignedUnits(queueId, row.assigned_serial);
-  await deleteQueueRow(queueId);
+  // Only a pre-ship flag pulls the order out of the pipeline. See the shipped
+  // paragraph above for why neither of these may run once the box has gone.
+  if (!alreadyShipped) {
+    await releaseAssignedUnits(queueId, row.assigned_serial);
+    await deleteQueueRow(queueId);
+  }
 
   const { error: uErr } = await supabase
     .from('orders')
@@ -1290,8 +1321,10 @@ export async function flagOrderFromQueue(
     .eq('id', row.order_id);
   if (uErr) {
     throw new Error(
-      `${order.order_ref} left the queue but could not be flagged: ${uErr.message}. `
-      + 'Find it in Sales › Pending and flag it from there.',
+      alreadyShipped
+        ? `${order.order_ref} could not be flagged: ${uErr.message}`
+        : `${order.order_ref} left the queue but could not be flagged: ${uErr.message}. `
+          + 'Find it in Sales › Pending and flag it from there.',
     );
   }
 

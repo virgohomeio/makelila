@@ -59,6 +59,9 @@ export function QueueHeader({
   // log, or the Sales tab it lands in, actually wants.
   const [panel, setPanel] = useState<ExitPanel>(null);
   const [exitReason, setExitReason] = useState('');
+  /** A shipped order stays on screen after it is flagged, so the only proof the
+   *  click did anything has to be rendered here. */
+  const [flagged, setFlagged] = useState(false);
 
   const openPanel = (next: ExitPanel) => {
     setPanel(prev => (prev === next ? null : next));
@@ -85,6 +88,17 @@ export function QueueHeader({
     setBusy(true); setError(null);
     try {
       await flagOrderFromQueue(row.id, exitReason, operatorName);
+      if (fulfilled) {
+        // The row does NOT go away on a shipped flag — the shipment record
+        // stays. Announcing it through onRemoved would clear the selection and
+        // claim a removal that did not happen, so it is said in place instead.
+        setPanel(null);
+        setExitReason('');
+        setFlagged(true);
+        onStepChanged?.();
+        setBusy(false);
+        return;
+      }
       onRemoved?.(`${order.order_ref} — ${order.customer_name} was flagged and is now in Sales › Flagged.`);
     } catch (e) {
       setError((e as Error).message);
@@ -212,29 +226,36 @@ export function QueueHeader({
             >Rebook Shipment</button>
           )}
           {!fulfilled && (
-            <>
-              <button
-                className={panel === 'cancel' ? styles.exitBtnDangerOn : styles.exitBtnDanger}
-                onClick={() => openPanel('cancel')}
-                disabled={busy}
-                aria-expanded={panel === 'cancel'}
-                title="Cancel the whole order — it leaves the queue and every Order Review tab"
-              >Cancel Order</button>
-              <button
-                className={panel === 'flag' ? styles.exitBtnWarnOn : styles.exitBtnWarn}
-                onClick={() => openPanel('flag')}
-                disabled={busy}
-                aria-expanded={panel === 'flag'}
-                title="Flag this order for Sales — it leaves the queue with your note and lands in Sales › Flagged"
-              >Flag Order</button>
-              <button
-                className={panel === 'moveBack' ? styles.exitBtnOn : styles.exitBtn}
-                onClick={() => openPanel('moveBack')}
-                disabled={busy}
-                aria-expanded={panel === 'moveBack'}
-                title="Take this shipment out of the queue and put the order back in Sales › Orders"
-              >Shipment Not Ready — Move Back to Orders</button>
-            </>
+            <button
+              className={panel === 'cancel' ? styles.exitBtnDangerOn : styles.exitBtnDanger}
+              onClick={() => openPanel('cancel')}
+              disabled={busy}
+              aria-expanded={panel === 'cancel'}
+              title="Cancel the whole order — it leaves the queue and every Order Review tab"
+            >Cancel Order</button>
+          )}
+          {/* The one action offered on EVERY order in the queue, shipped ones
+              included. The other two exits are about getting a box back on the
+              shelf, which is meaningless once it has gone; raising a problem
+              with an order is not. A shipped flag touches neither the queue row
+              nor the machine — see flagOrderFromQueue. */}
+          <button
+            className={panel === 'flag' ? styles.exitBtnWarnOn : styles.exitBtnWarn}
+            onClick={() => openPanel('flag')}
+            disabled={busy}
+            aria-expanded={panel === 'flag'}
+            title={fulfilled
+              ? 'Flag this shipped order for Sales — your note lands in Sales › Flagged; the shipment and the machine are left as they are'
+              : 'Flag this order for Sales — it leaves the queue with your note and lands in Sales › Flagged'}
+          >Flag Order</button>
+          {!fulfilled && (
+            <button
+              className={panel === 'moveBack' ? styles.exitBtnOn : styles.exitBtn}
+              onClick={() => openPanel('moveBack')}
+              disabled={busy}
+              aria-expanded={panel === 'moveBack'}
+              title="Take this shipment out of the queue and put the order back in Sales › Orders"
+            >Shipment Not Ready — Move Back to Orders</button>
           )}
           <button
             className={styles.backBtn}
@@ -264,7 +285,7 @@ export function QueueHeader({
             {panel === 'cancel'
               ? `Cancel ${order.order_ref} — ${order.customer_name}?`
               : panel === 'flag'
-                ? `Flag ${order.order_ref} — ${order.customer_name} for Sales?`
+                ? `Flag ${fulfilled ? 'shipped order ' : ''}${order.order_ref} — ${order.customer_name} for Sales?`
                 : panel === 'rebook'
                   ? `Book a new shipment for ${order.order_ref} — ${order.customer_name}?`
                   : `Move ${order.order_ref} back to Sales › Orders?`}
@@ -300,6 +321,29 @@ export function QueueHeader({
                 )}
               </>
             ) : panel === 'flag' ? (
+              fulfilled ? (
+                <>
+                  <li>
+                    It is marked <strong>flagged</strong> and appears in{' '}
+                    <strong>Sales › Flagged</strong>, where your note is on the order.
+                  </li>
+                  <li>
+                    The shipment is left exactly as it is — this row, its tracking number
+                    and its fulfilled date all stay, so the order still reads as shipped.
+                  </li>
+                  {row.assigned_serials.length > 0 && (
+                    <li>
+                      Unit{row.assigned_serials.length === 1 ? '' : 's'}{' '}
+                      {row.assigned_serials.join(', ')} stay{row.assigned_serials.length === 1 ? 's' : ''}{' '}
+                      with the customer — nothing goes back into stock.
+                    </li>
+                  )}
+                  <li>
+                    Nothing is cancelled and no refund is raised. A return, refund or
+                    replacement is still raised the usual way.
+                  </li>
+                </>
+              ) : (
               <>
                 <li>The order is removed from the fulfillment queue.</li>
                 <li>
@@ -325,6 +369,7 @@ export function QueueHeader({
                     : 'confirming the order again puts it back in the queue at step 1.'}
                 </li>
               </>
+              )
             ) : panel === 'cancel' ? (
               <>
                 <li>The order is removed from the fulfillment queue.</li>
@@ -390,6 +435,12 @@ export function QueueHeader({
               Never mind
             </button>
           </div>
+        </div>
+      )}
+      {flagged && (
+        <div className={styles.queueNotice} style={{ marginTop: 8, marginBottom: 0 }}>
+          ⚑ {order.order_ref} is flagged — it is in Sales › Flagged with your note. The
+          shipment is unchanged.
         </div>
       )}
       {error && <div style={{ color: 'var(--color-error)', fontSize: 11, marginTop: 4 }}>{error}</div>}

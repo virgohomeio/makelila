@@ -707,9 +707,15 @@ export function bucketOrders(
   //   (a) fulfillment_queue row reached step 6 / has fulfilled_at, OR
   //   (b) customer has a shipped unit (catches legacy Excel-only shipments
   //       where the queue row was never created or advanced).
+  //
+  // A flag beats every automatic exclusion below it. Three of them — fulfilled,
+  // shipped-customer-name, and the sales-only filter above — each exist to keep
+  // noise out of a work queue, and each would otherwise silently swallow a flag
+  // an operator deliberately raised. A human saying "look at this one" is the
+  // strongest signal this function gets, and nothing heuristic outranks it.
   const active = sales.filter(o => {
     if (o.status === 'cancelled') return false;
-    if (fulfilledOrderIds.has(o.id)) return false;
+    if (o.status !== 'flagged' && fulfilledOrderIds.has(o.id)) return false;
     // (b) is a *name* match, so it also hides every new order from any customer
     // who has ever received a unit — 112 of the 163 pending orders as of
     // 2026-08-28, four of them placed that fortnight. An explicit 'open'
