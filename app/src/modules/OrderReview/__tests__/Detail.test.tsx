@@ -3,8 +3,10 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
 const {
   dispositionMock, needInfoMock, addOrderNoteMock, useOrderNotesMock, cancelOrderMock,
-  releaseHoldMock,
+  releaseHoldMock, queueReplacementMock,
 } = vi.hoisted(() => ({
+  queueReplacementMock: vi.fn((): Promise<{ queued: boolean; blocked?: string }> =>
+    Promise.resolve({ queued: true })),
   dispositionMock:  vi.fn(() => Promise.resolve()),
   needInfoMock:     vi.fn(() => Promise.resolve()),
   addOrderNoteMock: vi.fn(() => Promise.resolve()),
@@ -26,6 +28,7 @@ vi.mock('../../../lib/orders', async () => {
     addOrderNote:   addOrderNoteMock,
     useOrderNotes:  useOrderNotesMock,
     cancelOrder:    cancelOrderMock,
+    queueReplacementForFulfillment: queueReplacementMock,
   };
 });
 
@@ -349,5 +352,63 @@ describe('Detail', () => {
     expect(screen.getByText(/ready to confirm/i)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /fix in/i })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /confirm order/i })).toBeEnabled();
+  });
+});
+
+
+// A flagged replacement is the one non-sale that reaches this pane: bucketOrders
+// admits it so the flag has somewhere to be answered. The sales review actions
+// are all unsafe on one — Confirm in particular writes status='approved', which
+// fires the enqueue trigger and re-queues the order without ever asking what
+// stock it needs. That is the shape of the bug that killed the old Sales
+// Replacement tab, and this branch exists to make it unreachable.
+describe('Detail — flagged replacement', () => {
+  const replacement = {
+    ...order, id: 'r-1', order_ref: 'R-0071', kind: 'replacement' as const, status: 'flagged' as const,
+  };
+
+  beforeEach(() => { queueReplacementMock.mockClear(); dispositionMock.mockClear(); });
+
+  it('offers none of the sales review actions', () => {
+    render(<Detail order={replacement} onAfterDisposition={vi.fn()} />);
+    expect(screen.queryByRole('button', { name: /confirm order/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^⏸ hold$/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /cancel order/i })).toBeNull();
+  });
+
+  it('says where the rest of the replacement is worked', () => {
+    render(<Detail order={replacement} onAfterDisposition={vi.fn()} />);
+    expect(screen.getByText(/Fulfillment › Replacements/)).toBeTruthy();
+  });
+
+  // The whole point of the branch: back through the replacement pipeline's own
+  // door, which re-derives stock, not through a bare status write.
+  it('clears the flag through the replacement re-queue path', async () => {
+    const after = vi.fn();
+    render(<Detail order={replacement} onAfterDisposition={after} />);
+    fireEvent.click(screen.getByRole('button', { name: /clear flag/i }));
+    await waitFor(() => {
+      expect(queueReplacementMock).toHaveBeenCalledWith('r-1');
+      expect(dispositionMock).not.toHaveBeenCalled();
+      expect(after).toHaveBeenCalled();
+    });
+  });
+
+  // A short order is reported, not forced. Fulfillment › Replacements is the
+  // screen that can knowingly override, because it shows the stock numbers.
+  it('reports a stock shortfall instead of queueing anyway', async () => {
+    queueReplacementMock.mockResolvedValueOnce({ queued: false, blocked: 'P100X' });
+    const after = vi.fn();
+    render(<Detail order={replacement} onAfterDisposition={after} />);
+    fireEvent.click(screen.getByRole('button', { name: /clear flag/i }));
+    await waitFor(() => expect(screen.getByText(/stock is short \(P100X\)/)).toBeTruthy());
+    expect(after).not.toHaveBeenCalled();
+  });
+
+  // The sale path must be untouched by the branch above.
+  it('still gives a flagged SALE the full review bar', () => {
+    render(<Detail order={{ ...order, status: 'flagged' }} onAfterDisposition={vi.fn()} />);
+    expect(screen.getByRole('button', { name: /confirm order/i })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /clear flag/i })).toBeNull();
   });
 });

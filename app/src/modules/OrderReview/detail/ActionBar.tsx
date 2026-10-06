@@ -32,6 +32,7 @@ export function ActionBar({
   onCancelOrder,
   onUncancel,
   onReleaseHold,
+  onClearReplacementFlag,
   confirmReady = true,
 }: {
   order: Order;
@@ -44,6 +45,9 @@ export function ActionBar({
   onUncancel?: () => void;
   /** Only a held order passes this — the way back out of a hold. */
   onReleaseHold?: () => void;
+  /** Only a flagged REPLACEMENT passes this — the single action that pane
+   *  offers. See the replacement branch below for why it is the only one. */
+  onClearReplacementFlag?: () => void;
   confirmReady?: boolean;
 }) {
   const [expanded, setExpanded] = useState<ExpandedAction>(null);
@@ -114,6 +118,45 @@ export function ActionBar({
             title="Undo this cancellation — the order goes back to Pending for review"
           >↩ Move back to Pending</button>
         ))}
+      </div>
+    );
+  }
+
+  // A flagged replacement is the one non-sale that reaches this pane at all:
+  // bucketOrders admits it so the flag has somewhere to be answered. Almost
+  // none of the review actions below are safe on one.
+  //
+  //   - "Confirm order" writes status='approved', which fires
+  //     auto_enqueue_approved_order and puts the order straight back in the ship
+  //     queue WITHOUT resolving what stock it actually needs. That is the exact
+  //     shape of the bug that killed the old Sales Replacement tab (0fb7f45):
+  //     a sales control writing a status while the replacement pipeline read a
+  //     different column.
+  //   - "Hold" writes a status bucketOrders does not admit for a replacement,
+  //     so the order would vanish out of Sales with no way back to it.
+  //   - "Cancel order" does work correctly on a replacement, but the cancelled
+  //     row is not bucketed either, so the pane would blank out mid-action.
+  //
+  // So it gets the one action that is correct: clear the flag through the
+  // replacement's OWN re-queue path, which re-derives stock from scratch rather
+  // than trusting a replacement_state stamped months ago. Everything else about
+  // the order is worked in Fulfillment › Replacements, which lists it the whole
+  // time it is flagged.
+  if (order.kind === 'replacement') {
+    return (
+      <div className={styles.actionBar}>
+        <span className={styles.flaggedBar}>
+          ⚑ Flagged replacement — cancelling, re-planning and shipping it all live in
+          Fulfillment › Replacements
+        </span>
+        {onClearReplacementFlag && (
+          <button
+            type="button"
+            className={`${styles.actionBtn} ${styles.actionRelease}`}
+            onClick={onClearReplacementFlag}
+            title="Clear the flag — re-checks the stock this replacement needs and puts it back in Fulfillment › Queue"
+          >▶ Clear flag &amp; re-queue</button>
+        )}
       </div>
     );
   }

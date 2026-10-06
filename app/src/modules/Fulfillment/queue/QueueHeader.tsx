@@ -220,19 +220,13 @@ export function QueueHeader({
                 aria-expanded={panel === 'cancel'}
                 title="Cancel the whole order — it leaves the queue and every Order Review tab"
               >Cancel Order</button>
-              {/* Not offered on a replacement: Sales lists no replacements, so
-                  flagging one would take it out of the queue and put it on a
-                  screen where it does not appear. flagOrderFromQueue refuses
-                  one too — this just keeps the dead button off the card. */}
-              {order.kind !== 'replacement' && (
-                <button
-                  className={panel === 'flag' ? styles.exitBtnWarnOn : styles.exitBtnWarn}
-                  onClick={() => openPanel('flag')}
-                  disabled={busy}
-                  aria-expanded={panel === 'flag'}
-                  title="Flag this order for Sales — it leaves the queue with your note and lands in Sales › Flagged"
-                >Flag Order</button>
-              )}
+              <button
+                className={panel === 'flag' ? styles.exitBtnWarnOn : styles.exitBtnWarn}
+                onClick={() => openPanel('flag')}
+                disabled={busy}
+                aria-expanded={panel === 'flag'}
+                title="Flag this order for Sales — it leaves the queue with your note and lands in Sales › Flagged"
+              >Flag Order</button>
               <button
                 className={panel === 'moveBack' ? styles.exitBtnOn : styles.exitBtn}
                 onClick={() => openPanel('moveBack')}
@@ -312,13 +306,24 @@ export function QueueHeader({
                   It is marked <strong>flagged</strong> and moves to{' '}
                   <strong>Sales › Flagged</strong>, where your note is on the order.
                 </li>
+                {order.kind === 'replacement' && (
+                  <li>
+                    It also stays in <strong>Fulfillment › Replacements</strong>, badged
+                    Flagged — clearing the flag there re-checks stock and re-queues it.
+                  </li>
+                )}
                 {row.assigned_serials.length > 0 && (
                   <li>
                     Unit{row.assigned_serials.length === 1 ? '' : 's'}{' '}
                     {row.assigned_serials.join(', ')} go{row.assigned_serials.length === 1 ? 'es' : ''} back into ready stock.
                   </li>
                 )}
-                <li>Nothing is cancelled and no refund is raised — confirming the order again puts it back in the queue at step 1.</li>
+                <li>
+                  Nothing is cancelled and no refund is raised —{' '}
+                  {order.kind === 'replacement'
+                    ? 'marking it Ready to Ship again puts it back in the queue at step 1.'
+                    : 'confirming the order again puts it back in the queue at step 1.'}
+                </li>
               </>
             ) : panel === 'cancel' ? (
               <>

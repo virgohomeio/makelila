@@ -84,11 +84,25 @@ describe('Flag Order', () => {
     expect(screen.queryByRole('button', { name: /^flag order$/i })).toBeNull();
   });
 
-  // Sales lists no replacements, so flagging one would put it on a screen
-  // where it does not appear.
-  it('is not offered on a replacement', () => {
+  // Replacements were excluded until bucketOrders grew a keyhole for a flagged
+  // one. They flag from the same button now.
+  it('is offered on a replacement too', () => {
     render(<QueueHeader row={row} order={{ ...order, kind: 'replacement' as const }} />);
-    expect(screen.queryByRole('button', { name: /^flag order$/i })).toBeNull();
+    expect(screen.getByRole('button', { name: /^flag order$/i })).toBeTruthy();
+  });
+
+  it('tells a replacement’s operator it stays listed in Replacements', () => {
+    render(<QueueHeader row={row} order={{ ...order, kind: 'replacement' as const }} />);
+    fireEvent.click(screen.getByRole('button', { name: /^flag order$/i }));
+    expect(screen.getByText(/Fulfillment › Replacements/)).toBeTruthy();
+    expect(screen.getByText(/Ready to Ship again/)).toBeTruthy();
+  });
+
+  it('keeps the sale wording on a sale', () => {
+    render(<QueueHeader row={row} order={order} />);
+    fireEvent.click(screen.getByRole('button', { name: /^flag order$/i }));
+    expect(screen.queryByText(/Fulfillment › Replacements/)).toBeNull();
+    expect(screen.getByText(/confirming the order again/i)).toBeTruthy();
   });
 
   it('says where the order is going before it goes, and asks first', () => {

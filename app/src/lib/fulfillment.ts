@@ -1239,11 +1239,15 @@ export async function cancelOrderFromQueue(queueId: string, reason: string): Pro
  *  person who has to act on it, an order that stopped moving for no stated
  *  reason.
  *
- *  Replacements are refused. Sales filters kind='replacement' out of every
- *  bucket, so flagging one would take it out of the queue and put it on a
- *  screen that does not list it — the disappearing act returnOrderToReview
- *  documents for #1189. Those use "Shipment Not Ready" instead, which lands
- *  them in Fulfillment › Replacements where they are actually visible. */
+ *  Replacements are flaggable too, as of 2026-10-06. They were refused at first
+ *  because Sales filters kind='replacement' out of every bucket, so flagging
+ *  one would have taken it out of the queue and put it on a screen that does
+ *  not list it. bucketOrders now carries a keyhole for exactly this case — a
+ *  FLAGGED replacement is admitted to Flagged and All — so the landing is real.
+ *  The order keeps its replacement_state: it is not being re-planned here, it
+ *  is being stopped, and Fulfillment › Replacements still lists it (badged
+ *  Flagged) the whole time. Clearing the flag re-queues it through
+ *  queueReplacementForFulfillment, which re-resolves stock from scratch. */
 export async function flagOrderFromQueue(
   queueId: string,
   reason: string,
@@ -1259,12 +1263,7 @@ export async function flagOrderFromQueue(
     .eq('id', row.order_id)
     .single();
   if (oErr || !order) throw new Error(`Order not found: ${oErr?.message ?? 'no row'}`);
-  if (order.kind === 'replacement') {
-    throw new Error(
-      'A replacement cannot be flagged — Sales does not list replacements, so it would '
-      + 'appear nowhere. Use "Shipment Not Ready — Move Back to Orders" instead.',
-    );
-  }
+  const isReplacement = order.kind === 'replacement';
 
   await releaseAssignedUnits(queueId, row.assigned_serial);
   await deleteQueueRow(queueId);
@@ -1275,10 +1274,18 @@ export async function flagOrderFromQueue(
       status: 'flagged',
       dispositioned_by: userId,
       dispositioned_at: new Date().toISOString(),
-      // Without this the order lands in no Sales tab at all for any customer
-      // who already has a shipped unit — bucketOrders' signal (b) is a name
-      // match, and it buries a flagged order as readily as it buried #1189.
-      reconcile_outcome: 'open',
+      // Belt and braces against bucketOrders' signal (b), the customer-NAME
+      // match that buried #1189. bucketOrders now exempts every flagged order
+      // from it outright, so this is no longer the only thing holding the
+      // order on screen — it stays because it is also the honest reading of
+      // what the operator just did, and it keeps the order visible if the flag
+      // is later cleared back to 'pending'.
+      //
+      // Sales-only. reconcile_outcome answers "did something already ship
+      // against this order?", a question the Reconcile screen asks of sales. A
+      // replacement is never reconciled, so writing it would stamp a
+      // sales-ledger value on a row no sales ledger counts.
+      ...(isReplacement ? {} : { reconcile_outcome: 'open' }),
     })
     .eq('id', row.order_id);
   if (uErr) {

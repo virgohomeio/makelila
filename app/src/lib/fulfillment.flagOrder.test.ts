@@ -163,13 +163,32 @@ describe('flagOrderFromQueue', () => {
     await expect(flagOrderFromQueue('q-1', 'too late', 'Huayi')).rejects.toThrow(/already shipped/i);
   });
 
-  // Sales filters kind='replacement' out of every bucket, so a flagged
-  // replacement would leave the queue and appear nowhere at all.
-  it('refuses a replacement, which Sales does not list', async () => {
+  // Replacements were refused until bucketOrders grew a keyhole for a flagged
+  // one. They flag like any other order now.
+  it('flags a replacement, which Sales admits only while it is flagged', async () => {
     state.kind = 'replacement';
-    await expect(flagOrderFromQueue('q-1', 'lid is wrong', 'Huayi'))
-      .rejects.toThrow(/replacement/i);
-    expect(state.deletes).toHaveLength(0);
+    await flagOrderFromQueue('q-1', 'wrong lid colour', 'Huayi');
+    expect(orderUpdate()?.patch.status).toBe('flagged');
+    expect(state.deletes.some(d => d.table === 'fulfillment_queue')).toBe(true);
+  });
+
+  // reconcile_outcome answers a question the Reconcile screen asks of SALES.
+  // A replacement is never reconciled, so stamping it would put a sales-ledger
+  // value on a row no sales ledger counts.
+  it('does not stamp a sales reconcile outcome on a replacement', async () => {
+    state.kind = 'replacement';
+    await flagOrderFromQueue('q-1', 'wrong lid colour', 'Huayi');
+    expect(orderUpdate()?.patch).not.toHaveProperty('reconcile_outcome');
+  });
+
+  // The replacement is being stopped, not re-planned. Clearing these would
+  // throw away what Fulfillment › Replacements reads to group it, and the
+  // re-queue path resolves stock from scratch anyway.
+  it('leaves a replacement’s stock planning alone', async () => {
+    state.kind = 'replacement';
+    await flagOrderFromQueue('q-1', 'wrong lid colour', 'Huayi');
+    expect(orderUpdate()?.patch).not.toHaveProperty('replacement_state');
+    expect(orderUpdate()?.patch).not.toHaveProperty('awaiting_batch_id');
   });
 
   it('says so when the order left the queue but would not flag', async () => {

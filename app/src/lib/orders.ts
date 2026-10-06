@@ -685,7 +685,16 @@ export function bucketOrders(
   // Age is applied here, once, rather than per tab. Every Sales tab starts on
   // SALES_QUEUE_START, so an order older than it is in no bucket at all — see
   // the constant for what that hides and why the operator asked for it.
-  const sales = cache.filter(o => o.kind !== 'replacement' && withinSalesQueue(o));
+  //
+  // One exception, added 2026-10-06: a replacement an operator FLAGGED from the
+  // fulfillment queue. Flagging is a question put to Sales — "this one has a
+  // problem, look at it" — and a question has to be asked somewhere the person
+  // answering it looks. Everything above still holds for every other
+  // replacement status, so this is a keyhole, not a reopened door: a flagged
+  // replacement that is then cancelled, held or re-queued leaves Sales again on
+  // the very next render.
+  const sales = cache.filter(o =>
+    (o.kind !== 'replacement' || o.status === 'flagged') && withinSalesQueue(o));
 
   // Cancelled is terminal and takes precedence over every other signal: a
   // cancelled order belongs in the Cancelled tab whether or not it was ever
@@ -706,8 +715,14 @@ export function bucketOrders(
     // 2026-08-28, four of them placed that fortnight. An explicit 'open'
     // verdict from the reconcile screen (lib/reconcile.ts) is a human saying
     // "nothing shipped against this one", and beats the heuristic.
+    //
+    // A flag is the same kind of statement and outranks it too. This matters
+    // most for the replacements admitted above: a replacement goes, by
+    // definition, to a customer who already has a machine, so signal (b) would
+    // match every one of them and the flag would land on no screen at all.
     if (
-      o.reconcile_outcome !== 'open'
+      o.status !== 'flagged'
+      && o.reconcile_outcome !== 'open'
       && shippedCustomers.has(o.customer_name.toLowerCase().trim())
     ) return false;
     return true;

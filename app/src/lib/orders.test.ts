@@ -485,10 +485,11 @@ describe('bucketOrders', () => {
     expect(b.cancelled.map(o => o.id)).toEqual(['new', 'old', 'blank']);
   });
 
-  // Sales is sales-only. Replacements are born approved and live in the
-  // fulfillment queue; there is no tab here that should ever show one, and
-  // `all` and `cancelled` are the two that used to leak.
-  it('keeps replacements out of every bucket, whatever their status', () => {
+  // Sales is sales-only, with exactly one exception: a replacement an operator
+  // flagged. Replacements are otherwise born approved and live in the
+  // fulfillment queue; there is no tab here that should show one, and `all`
+  // and `cancelled` are the two that used to leak.
+  it('keeps unflagged replacements out of every bucket, whatever their status', () => {
     const b = bucketOrders(
       [mk({ id: 'r-pending',   status: 'pending',   kind: 'replacement' }),
        mk({ id: 'r-approved',  status: 'approved',  kind: 'replacement' }),
@@ -500,6 +501,47 @@ describe('bucketOrders', () => {
     expect(b.pending.map(o => o.id)).toEqual(['s1']);
     expect(b.approved).toEqual([]);
     expect(b.cancelled).toEqual([]);
+  });
+
+  // The exception. An operator flagging a replacement from the fulfillment
+  // queue is asking Sales a question about it, so it has to be somewhere Sales
+  // looks — and `all` is what the /order-review/:id detail route resolves out
+  // of, so landing in Flagged without landing in All would be a dead click.
+  it('admits a flagged replacement to Flagged and All', () => {
+    const b = bucketOrders(
+      [mk({ id: 'r-flagged', status: 'flagged', kind: 'replacement' }),
+       mk({ id: 's-flagged', status: 'flagged', kind: 'sale' })],
+      none, none,
+    );
+    expect(b.flagged.map(o => o.id)).toEqual(['r-flagged', 's-flagged']);
+    expect(b.all.map(o => o.id)).toEqual(['r-flagged', 's-flagged']);
+  });
+
+  // A replacement goes, by definition, to someone who already has a machine,
+  // so the shipped-customer name match would bury every single one of them.
+  // An explicit human flag outranks a heuristic every time.
+  it('does not let the shipped-customer match bury a flagged order', () => {
+    const b = bucketOrders(
+      [mk({ id: 'r-flagged', status: 'flagged', kind: 'replacement', customer_name: 'Ada Ship' }),
+       mk({ id: 's-flagged', status: 'flagged', kind: 'sale',        customer_name: 'Ada Ship' }),
+       mk({ id: 's-pending', status: 'pending', kind: 'sale',        customer_name: 'Ada Ship' })],
+      none, new Set(['ada ship']),
+    );
+    expect(b.flagged.map(o => o.id)).toEqual(['r-flagged', 's-flagged']);
+    // The heuristic still does its job on everything that is not flagged.
+    expect(b.pending).toEqual([]);
+  });
+
+  // Flagging is not a way to smuggle a replacement into the rest of Sales:
+  // cancelling one from the detail pane must not leave it in the Cancelled tab,
+  // which is a sales ledger.
+  it('drops a flagged replacement again once it is cancelled', () => {
+    const b = bucketOrders(
+      [mk({ id: 'r', status: 'cancelled', kind: 'replacement', cancelled_at: '2026-10-06T00:00:00Z' })],
+      none, none,
+    );
+    expect(b.cancelled).toEqual([]);
+    expect(b.all).toEqual([]);
   });
 
   it('still hides fulfilled and already-shipped orders from every tab', () => {

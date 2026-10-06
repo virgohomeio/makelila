@@ -1,6 +1,9 @@
 import { useCallback, useState } from 'react';
 import type { Order } from '../../lib/orders';
-import { disposition, needInfo, addOrderNote, orderUrgency, orderDue, cancelOrder, uncancelOrder } from '../../lib/orders';
+import {
+  disposition, needInfo, addOrderNote, orderUrgency, orderDue, cancelOrder, uncancelOrder,
+  queueReplacementForFulfillment,
+} from '../../lib/orders';
 import { releaseHold } from '../../lib/fulfillment';
 import { useAuth } from '../../lib/auth';
 import { CustomerCard } from './detail/CustomerCard';
@@ -103,6 +106,26 @@ export function Detail({
           onHold={(reason) => wrap('Held',    () => disposition(order, 'held',    reason), 'Held', reason)}
           onNeedInfo={(note) => wrap('Need-info logged', () => needInfo(order, note), 'Need info', note)}
           onCancelOrder={(reason) => wrap('Cancelled', () => cancelOrder(order.id, reason), 'Cancelled', reason)}
+          // The only action a flagged replacement gets here. It goes back
+          // through the replacement pipeline's own door rather than through
+          // Confirm, so the stock it needs is re-derived now instead of being
+          // read off a replacement_state stamped months ago. A short order is
+          // reported rather than forced — Fulfillment › Replacements is where
+          // an operator can knowingly override that, and it has the stock
+          // numbers on screen to decide with.
+          onClearReplacementFlag={order.kind === 'replacement' ? () => wrap(
+            'Flag cleared',
+            async () => {
+              const r = await queueReplacementForFulfillment(order.id);
+              if (!r.queued) {
+                throw new Error(
+                  `stock is short (${r.blocked}). Clear the flag from `
+                  + 'Fulfillment › Replacements, which can queue it anyway.',
+                );
+              }
+              return 'stock re-checked, back in Fulfillment › Queue';
+            },
+          ) : undefined}
           // Like un-cancelling, this is a repair rather than queue work: the
           // operator is fixing THIS order and needs to watch it land in
           // Pending, so the panel stays put instead of advancing.

@@ -721,6 +721,18 @@
   border-color: var(--color-error-border);
 }
 
+/* Same slab as .cancelledBar, in the warning ramp: a flagged replacement is
+   stopped, not dead. */
+.flaggedBar {
+  font-size: var(--font-size-body);
+  font-weight: 600;
+  color: var(--color-warning);
+  background: var(--color-warning-bg);
+  border: 1px solid var(--color-warning-border);
+  border-radius: var(--radius-sm);
+  padding: 9px var(--space-3);
+}
+
 .cancelledBar {
   font-size: var(--font-size-body);
   font-weight: 600;
