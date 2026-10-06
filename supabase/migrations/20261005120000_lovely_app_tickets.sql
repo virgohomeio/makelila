@@ -37,11 +37,10 @@ begin
   end if;
 end $$;
 
--- invoke_edge_function() rides pg_net's 5 s default, which the first run (the
--- backfill: two round trips per report) would outlast. Use the explicit-timeout
--- variant from 20260922120000_freight_rate_probe.sql.
+-- The live invoke_edge_function() passes timeout_milliseconds := 180000, which
+-- covers the first (backfill) run: two round trips per report.
 select cron.schedule(
   'sync-lovely-tickets-15min',
   '*/15 * * * *',
-  $$ select public.invoke_edge_function_with_timeout('sync-lovely-tickets', '{}'::jsonb, 120000); $$
+  $$ select public.invoke_edge_function('sync-lovely-tickets'); $$
 );
