@@ -6,10 +6,13 @@
 // Not Ready" drops it back into Pending, where it looks like ordinary work and
 // the reason is nowhere on the screen.
 //
-// Flagging is the third exit: the order leaves the queue, the machine goes back
-// on the shelf, and the order lands in Sales › Flagged carrying the note the
-// packer typed. These tests hold down that all four of those things happen, and
-// that a flag that cannot land honestly fails instead of half-landing.
+// Flagging is the third disposition: the order is MARKED, in both places at
+// once. It stays in the fulfillment queue, badged Flagged with its packing
+// steps paused, and it appears in Sales › Flagged carrying the note the packer
+// typed. Nothing leaves the queue, no machine goes back on the shelf, and that
+// holds for a sale, a replacement and an already-shipped order alike — these
+// tests hold that down, along with a flag that cannot land failing honestly
+// instead of half-landing.
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
@@ -146,21 +149,34 @@ describe('flagOrderFromQueue', () => {
     );
   });
 
-  it('takes the row out of the queue and gives the machine back', async () => {
+  // The row used to be deleted here, which took the order off the board the
+  // packer was working and threw away the pick, the test report and the label
+  // already attached to it. The queue says FLAGGED instead — see
+  // flagOrderFromQueue — so the row stays exactly where it was.
+  it('leaves the row in the queue', async () => {
     await flagOrderFromQueue('q-1', 'Wrong line items', 'Huayi');
-    expect(state.deletes.some(d => d.table === 'fulfillment_queue')).toBe(true);
-    expect(state.updates.some(u => u.table === 'units' && u.patch.status === 'ready')).toBe(true);
+    expect(state.deletes.some(d => d.table === 'fulfillment_queue')).toBe(false);
+    expect(state.updates.some(u => u.table === 'fulfillment_queue')).toBe(false);
+  });
+
+  // The machine was released as part of pulling the row. With the row staying,
+  // the pick stays with it: the order is paused, not re-planned, and the
+  // machine must not become pickable for someone else in the meantime.
+  it('leaves the assigned machine reserved for the order', async () => {
+    await flagOrderFromQueue('q-1', 'Wrong line items', 'Huayi');
+    expect(state.updates.some(u => u.table === 'units')).toBe(false);
+    expect(state.deletes.some(d => d.table === 'fulfillment_queue_units')).toBe(false);
   });
 
   it('refuses to flag without a reason — the reason is the whole point', async () => {
     await expect(flagOrderFromQueue('q-1', '   ', 'Huayi')).rejects.toThrow(/reason is required/i);
-    expect(state.deletes).toHaveLength(0);
+    expect(state.updates).toHaveLength(0);
   });
 
   // A shipped order is flaggable too — "this one that went out has a problem"
-  // is a thing an operator needs to be able to say. What it must NOT do is
-  // behave like the pre-ship flag: the queue row IS the shipment record, and
-  // the machine is at the customer's house.
+  // is a thing an operator needs to be able to say. It behaves like every other
+  // flag now, and the stakes of getting it wrong are highest here: the queue row
+  // IS the shipment record, and the machine is at the customer's house.
   describe('on an order that has already shipped', () => {
     beforeEach(() => { state.step = 6; state.fulfilledAt = '2026-10-01T00:00:00Z'; });
 
@@ -203,7 +219,16 @@ describe('flagOrderFromQueue', () => {
     state.kind = 'replacement';
     await flagOrderFromQueue('q-1', 'wrong lid colour', 'Huayi');
     expect(orderUpdate()?.patch.status).toBe('flagged');
-    expect(state.deletes.some(d => d.table === 'fulfillment_queue')).toBe(true);
+  });
+
+  // The ask behind the 2026-10-07 change: a flagged replacement must behave
+  // like a flagged sale, which means staying on the queue board badged rather
+  // than disappearing from it.
+  it('leaves a flagged replacement in the queue, exactly like a sale', async () => {
+    state.kind = 'replacement';
+    await flagOrderFromQueue('q-1', 'wrong lid colour', 'Huayi');
+    expect(state.deletes.some(d => d.table === 'fulfillment_queue')).toBe(false);
+    expect(state.updates.some(u => u.table === 'units')).toBe(false);
   });
 
   // reconcile_outcome answers a question the Reconcile screen asks of SALES.
@@ -225,9 +250,12 @@ describe('flagOrderFromQueue', () => {
     expect(orderUpdate()?.patch).not.toHaveProperty('awaiting_batch_id');
   });
 
-  it('says so when the order left the queue but would not flag', async () => {
+  // Nothing is written before the status, so a refused flag leaves the order
+  // untouched — in the queue, approved, unflagged. The message says only that.
+  it('fails cleanly when the flag itself is refused', async () => {
     state.updateFails = 'permission denied';
     await expect(flagOrderFromQueue('q-1', 'bad address', 'Huayi'))
-      .rejects.toThrow(/left the queue/i);
+      .rejects.toThrow(/could not be flagged: permission denied/i);
+    expect(state.deletes).toHaveLength(0);
   });
 });

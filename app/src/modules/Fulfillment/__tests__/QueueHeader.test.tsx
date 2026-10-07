@@ -98,7 +98,7 @@ describe('Flag Order', () => {
     expect(screen.queryByText(/removed from the fulfillment queue/)).toBeNull();
   });
 
-  // The row survives a shipped flag, so announcing it through onRemoved would
+  // The row survives EVERY flag, so announcing it through onRemoved would
   // deselect the order and claim a removal that never happened.
   it('keeps a flagged shipped order on screen and says so in place', async () => {
     const shipped = { ...row, step: 6, fulfilled_at: '2026-06-20T00:00:00Z' } as FulfillmentQueueRow;
@@ -129,15 +129,34 @@ describe('Flag Order', () => {
   it('tells a replacement’s operator it stays listed in Replacements', () => {
     render(<QueueHeader row={row} order={{ ...order, kind: 'replacement' as const }} />);
     fireEvent.click(screen.getByRole('button', { name: /^flag order$/i }));
-    expect(screen.getByText(/Fulfillment › Replacements/)).toBeTruthy();
-    expect(screen.getByText(/Ready to Ship again/)).toBeTruthy();
+    expect(screen.getByText(/Service › Replacements/)).toBeTruthy();
+    expect(screen.getByText(/clearing the flag in Sales/i)).toBeTruthy();
   });
 
   it('keeps the sale wording on a sale', () => {
     render(<QueueHeader row={row} order={order} />);
     fireEvent.click(screen.getByRole('button', { name: /^flag order$/i }));
-    expect(screen.queryByText(/Fulfillment › Replacements/)).toBeNull();
+    expect(screen.queryByText(/Service › Replacements/)).toBeNull();
     expect(screen.getByText(/confirming the order again/i)).toBeTruthy();
+  });
+
+  // The whole point of the 2026-10-07 change: a flag used to delete the queue
+  // row, so the order the packer was holding vanished off the board. It stays,
+  // badged, and the panel has to promise that before the operator commits.
+  it('promises an un-shipped order it stays in the queue, badged', () => {
+    render(<QueueHeader row={row} order={order} />);
+    fireEvent.click(screen.getByRole('button', { name: /^flag order$/i }));
+    expect(screen.getByText(/stays in this queue/i)).toBeTruthy();
+    expect(screen.queryByText(/removed from the fulfillment queue/i)).toBeNull();
+  });
+
+  // Releasing the machine was part of pulling the row. With the row staying,
+  // the pick stays with it — nothing goes back on the shelf for someone else.
+  it('promises the assigned machine stays reserved', () => {
+    render(<QueueHeader row={row} order={order} />);
+    fireEvent.click(screen.getByRole('button', { name: /^flag order$/i }));
+    expect(screen.getByText(/stays reserved for this order/i)).toBeTruthy();
+    expect(screen.queryByText(/ready stock/i)).toBeNull();
   });
 
   it('says where the order is going before it goes, and asks first', () => {
@@ -156,17 +175,25 @@ describe('Flag Order', () => {
       .toHaveProperty('disabled', true);
   });
 
-  it('flags with the reason and the operator’s name, then clears the pane', async () => {
+  // An un-shipped flag now behaves exactly like a shipped one: the order stays
+  // selected, the confirmation is rendered in place, and the board re-reads so
+  // the FLAGGED badge and the pause banner appear without the realtime socket.
+  it('flags with the reason and the operator’s name, keeping the order on screen', async () => {
     const onRemoved = vi.fn();
-    render(<QueueHeader row={row} order={order} onRemoved={onRemoved} />);
+    const onStepChanged = vi.fn();
+    render(
+      <QueueHeader row={row} order={order} onRemoved={onRemoved} onStepChanged={onStepChanged} />,
+    );
     fireEvent.click(screen.getByRole('button', { name: /^flag order$/i }));
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Address is a PO box' } });
     fireEvent.click(screen.getByRole('button', { name: /flag this order/i }));
 
     await waitFor(() => {
       expect(flagMock).toHaveBeenCalledWith('q-1', 'Address is a PO box', 'Reina');
-      expect(onRemoved).toHaveBeenCalledWith(expect.stringMatching(/Sales › Flagged/));
+      expect(screen.getByText(/stays here in the queue/i)).toBeTruthy();
     });
+    expect(onRemoved).not.toHaveBeenCalled();
+    expect(onStepChanged).toHaveBeenCalled();
   });
 
   it('shows the error and keeps the pane open when the flag is refused', async () => {

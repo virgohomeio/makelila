@@ -1218,20 +1218,42 @@ export async function cancelOrderFromQueue(queueId: string, reason: string): Pro
   await logAction('fq_order_cancelled', queueId, reason.trim());
 }
 
-/** Queue header action — "Flag Order". The third way an order leaves the queue,
- *  between the other two: it is not dead (Cancel Order) and it is not merely
- *  not-today (Shipment Not Ready), it is an order Sales has to answer something
- *  about before a machine goes out — the address will not deliver, the line
- *  items do not match what was paid, the customer has gone quiet.
+/** Queue header action — "Flag Order". The third disposition an order can get
+ *  in the queue, between the other two: it is not dead (Cancel Order) and it is
+ *  not merely not-today (Shipment Not Ready), it is an order Sales has to
+ *  answer something about before a machine goes out — the address will not
+ *  deliver, the line items do not match what was paid, the customer has gone
+ *  quiet.
  *
- *  The order leaves the queue, the machine picked for it goes back into ready
- *  stock, and the order lands in Sales › Flagged. It is re-queued the ordinary
- *  way, by confirming it again once the flag is resolved.
+ *  A flag does NOT take the order out of the queue, as of 2026-10-07. It marks
+ *  it, in both places at once: the row stays in Fulfillment › Queue badged
+ *  ⚑ FLAGGED and red, with the step UI replaced by the pause banner, AND the
+ *  order appears in Sales › Flagged carrying the note. Nothing is released,
+ *  nothing is deleted, no step moves.
  *
- *  The queue row goes for the same reason releaseHold pulls one: an order
- *  sitting in review must not still be pickable. #1214 sat Held in Sales and
- *  step-1 Ready-to-ship in Fulfillment at once for 29 days, and a flag left in
- *  the queue would do exactly that again.
+ *  It used to delete the row and push the machine back on the shelf, on the
+ *  reasoning that an order in review must not still be pickable (#1214 sat Held
+ *  in Sales and step-1 Ready-to-ship in Fulfillment at once for 29 days). The
+ *  reasoning was right about the hazard and wrong about the fix: what made
+ *  #1214 dangerous was that the queue said nothing, not that the row existed.
+ *  The queue now SAYS flagged — the sidebar badge, the red row, and a pause
+ *  banner in place of every step control — so the row can stay, and staying is
+ *  what operators actually need: flagging an order you are packing should not
+ *  make it vanish from the list you are working, and the pick, the test report
+ *  and the label you already attached should still be there when Sales answers.
+ *
+ *  So the whole action is the status, the note and the log entry, identically
+ *  for a sale, a replacement and an already-shipped order:
+ *
+ *    - The queue row stays, at its step, with its carrier, tracking number and
+ *      (if shipped) fulfilled_at. On a shipped order that row IS the shipment
+ *      record; deleting it would make the order read as never shipped in every
+ *      rollup that counts step 6.
+ *    - The machine stays assigned. Pre-ship it stays reserved for this customer
+ *      rather than going back on the shelf for someone else to pick — the order
+ *      is paused, not re-planned. Post-ship it is at the customer's house, and
+ *      releasing it would put a shipped unit back in sellable stock (the hole
+ *      step-6-ships-every-linked-serial exists to keep shut).
  *
  *  The reason is written twice, deliberately. The activity log records who
  *  flagged what and when; order_notes is the card Sales actually reads when it
@@ -1239,32 +1261,17 @@ export async function cancelOrderFromQueue(queueId: string, reason: string): Pro
  *  person who has to act on it, an order that stopped moving for no stated
  *  reason.
  *
- *  Replacements are flaggable too, as of 2026-10-06. They were refused at first
- *  because Sales filters kind='replacement' out of every bucket, so flagging
- *  one would have taken it out of the queue and put it on a screen that does
- *  not list it. bucketOrders now carries a keyhole for exactly this case — a
- *  FLAGGED replacement is admitted to Flagged and All — so the landing is real.
- *  The order keeps its replacement_state: it is not being re-planned here, it
- *  is being stopped, and Fulfillment › Replacements still lists it (badged
- *  Flagged) the whole time. Clearing the flag re-queues it through
- *  queueReplacementForFulfillment, which re-resolves stock from scratch.
+ *  Replacements flag exactly like sales. Sales filters kind='replacement' out
+ *  of every bucket, so bucketOrders carries a keyhole for this case — a FLAGGED
+ *  replacement is admitted to Flagged and All — and the order keeps its
+ *  replacement_state because it is being stopped, not re-planned.
  *
- *  An ALREADY-SHIPPED order is flaggable too, as of 2026-10-06, and means
- *  something different: "this one that went out has a problem". Everything the
- *  pre-ship flag does to get the box back on the shelf would be wrong here, so
- *  none of it happens.
- *
- *    - The queue row stays. It IS the shipment record — fulfilled_at, the
- *      carrier, the tracking number — and deleting it would make the order read
- *      as never shipped in every rollup that counts step 6.
- *    - The machine stays assigned. It is at the customer's house; releasing it
- *      would put a shipped unit back on the shelf as sellable stock, which is
- *      the hole step-6-ships-every-linked-serial exists to keep shut.
- *
- *  So a shipped flag is only the status, the note and the log entry. Whatever
- *  the problem turns out to be, the machinery for it lives downstream — a
- *  return, a refund, a replacement — and the flag is how Sales gets told to
- *  start one. */
+ *  Clearing the flag is a Sales action in both directions, and both are
+ *  duplicate-safe against the row left in place: confirming a sale fires
+ *  auto_enqueue_on_approve, which inserts ON CONFLICT DO NOTHING, and clearing
+ *  a replacement's flag runs queueReplacementForFulfillment, whose
+ *  enqueueForFulfillment treats a 23505 as success. The order picks up at the
+ *  step it was flagged on rather than restarting at 1. */
 export async function flagOrderFromQueue(
   queueId: string,
   reason: string,
@@ -1272,17 +1279,16 @@ export async function flagOrderFromQueue(
 ): Promise<void> {
   const userId = await currentUserId();
   if (!reason.trim()) throw new Error('A reason is required to flag an order.');
-  // Deliberately NOT loadRemovableQueueRow: that refuses a shipped row, and a
-  // shipped order is flaggable here. What it would have refused, this branches
-  // on instead.
+  // Deliberately NOT loadRemovableQueueRow: that refuses a shipped row, and
+  // every row is flaggable here. Nothing leaves the queue, so there is nothing
+  // for it to guard.
   const { data: queueRow, error: qErr } = await supabase
     .from('fulfillment_queue')
-    .select('id, order_id, step, assigned_serial, fulfilled_at')
+    .select('id, order_id')
     .eq('id', queueId)
     .single();
   if (qErr || !queueRow) throw new Error(`Queue row not found: ${qErr?.message ?? 'no row'}`);
-  const row = queueRow as LeavingQueueRow;
-  const alreadyShipped = row.step === 6 || !!row.fulfilled_at;
+  const row = queueRow as { id: string; order_id: string };
 
   const { data: order, error: oErr } = await supabase
     .from('orders')
@@ -1291,13 +1297,6 @@ export async function flagOrderFromQueue(
     .single();
   if (oErr || !order) throw new Error(`Order not found: ${oErr?.message ?? 'no row'}`);
   const isReplacement = order.kind === 'replacement';
-
-  // Only a pre-ship flag pulls the order out of the pipeline. See the shipped
-  // paragraph above for why neither of these may run once the box has gone.
-  if (!alreadyShipped) {
-    await releaseAssignedUnits(queueId, row.assigned_serial);
-    await deleteQueueRow(queueId);
-  }
 
   const { error: uErr } = await supabase
     .from('orders')
@@ -1320,12 +1319,9 @@ export async function flagOrderFromQueue(
     })
     .eq('id', row.order_id);
   if (uErr) {
-    throw new Error(
-      alreadyShipped
-        ? `${order.order_ref} could not be flagged: ${uErr.message}`
-        : `${order.order_ref} left the queue but could not be flagged: ${uErr.message}. `
-          + 'Find it in Sales › Pending and flag it from there.',
-    );
+    // Nothing has been written yet when this fails, so the order is exactly
+    // where it was: still in the queue, still approved, unflagged.
+    throw new Error(`${order.order_ref} could not be flagged: ${uErr.message}`);
   }
 
   // The note is what Sales reads, but the flag has already landed by now. A

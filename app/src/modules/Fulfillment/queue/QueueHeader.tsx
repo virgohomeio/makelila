@@ -59,8 +59,8 @@ export function QueueHeader({
   // log, or the Sales tab it lands in, actually wants.
   const [panel, setPanel] = useState<ExitPanel>(null);
   const [exitReason, setExitReason] = useState('');
-  /** A shipped order stays on screen after it is flagged, so the only proof the
-   *  click did anything has to be rendered here. */
+  /** A flagged order stays on screen — it stays in the queue, badged — so the
+   *  only proof the click did anything has to be rendered here. */
   const [flagged, setFlagged] = useState(false);
 
   const openPanel = (next: ExitPanel) => {
@@ -88,18 +88,16 @@ export function QueueHeader({
     setBusy(true); setError(null);
     try {
       await flagOrderFromQueue(row.id, exitReason, operatorName);
-      if (fulfilled) {
-        // The row does NOT go away on a shipped flag — the shipment record
-        // stays. Announcing it through onRemoved would clear the selection and
-        // claim a removal that did not happen, so it is said in place instead.
-        setPanel(null);
-        setExitReason('');
-        setFlagged(true);
-        onStepChanged?.();
-        setBusy(false);
-        return;
-      }
-      onRemoved?.(`${order.order_ref} — ${order.customer_name} was flagged and is now in Sales › Flagged.`);
+      // The row does NOT go away on a flag, shipped or not — see
+      // flagOrderFromQueue. Announcing it through onRemoved would clear the
+      // selection and claim a removal that did not happen, so it is said in
+      // place instead, and the board re-reads so the badge appears without
+      // waiting on the realtime socket.
+      setPanel(null);
+      setExitReason('');
+      setFlagged(true);
+      onStepChanged?.();
+      setBusy(false);
     } catch (e) {
       setError((e as Error).message);
       setBusy(false);
@@ -237,8 +235,9 @@ export function QueueHeader({
           {/* The one action offered on EVERY order in the queue, shipped ones
               included. The other two exits are about getting a box back on the
               shelf, which is meaningless once it has gone; raising a problem
-              with an order is not. A shipped flag touches neither the queue row
-              nor the machine — see flagOrderFromQueue. */}
+              with an order is not. A flag touches neither the queue row nor the
+              machine — it marks the order in both places — see
+              flagOrderFromQueue. */}
           <button
             className={panel === 'flag' ? styles.exitBtnWarnOn : styles.exitBtnWarn}
             onClick={() => openPanel('flag')}
@@ -246,7 +245,7 @@ export function QueueHeader({
             aria-expanded={panel === 'flag'}
             title={fulfilled
               ? 'Flag this shipped order for Sales — your note lands in Sales › Flagged; the shipment and the machine are left as they are'
-              : 'Flag this order for Sales — it leaves the queue with your note and lands in Sales › Flagged'}
+              : 'Flag this order for Sales — it stays in the queue badged Flagged, and your note lands in Sales › Flagged'}
           >Flag Order</button>
           {!fulfilled && (
             <button
@@ -345,28 +344,32 @@ export function QueueHeader({
                 </>
               ) : (
               <>
-                <li>The order is removed from the fulfillment queue.</li>
                 <li>
-                  It is marked <strong>flagged</strong> and moves to{' '}
+                  It <strong>stays in this queue</strong>, badged ⚑ FLAGGED, with the
+                  packing steps paused until the flag is cleared.
+                </li>
+                <li>
+                  It is also marked <strong>flagged</strong> in{' '}
                   <strong>Sales › Flagged</strong>, where your note is on the order.
                 </li>
                 {order.kind === 'replacement' && (
                   <li>
-                    It also stays in <strong>Fulfillment › Replacements</strong>, badged
-                    Flagged — clearing the flag there re-checks stock and re-queues it.
+                    It stays in <strong>Service › Replacements</strong> too, badged Flagged.
                   </li>
                 )}
                 {row.assigned_serials.length > 0 && (
                   <li>
                     Unit{row.assigned_serials.length === 1 ? '' : 's'}{' '}
-                    {row.assigned_serials.join(', ')} go{row.assigned_serials.length === 1 ? 'es' : ''} back into ready stock.
+                    {row.assigned_serials.join(', ')} stay{row.assigned_serials.length === 1 ? 's' : ''}{' '}
+                    reserved for this order — nothing is released back to the shelf.
                   </li>
                 )}
                 <li>
                   Nothing is cancelled and no refund is raised —{' '}
                   {order.kind === 'replacement'
-                    ? 'marking it Ready to Ship again puts it back in the queue at step 1.'
-                    : 'confirming the order again puts it back in the queue at step 1.'}
+                    ? 'clearing the flag in Sales re-checks stock and restarts it at step '
+                    : 'confirming the order again restarts it at step '}
+                  {row.step}, where it is now.
                 </li>
               </>
               )
@@ -439,8 +442,11 @@ export function QueueHeader({
       )}
       {flagged && (
         <div className={styles.queueNotice} style={{ marginTop: 8, marginBottom: 0 }}>
-          ⚑ {order.order_ref} is flagged — it is in Sales › Flagged with your note. The
-          shipment is unchanged.
+          ⚑ {order.order_ref} is flagged — it is in Sales › Flagged with your note, and it
+          stays here in the queue badged Flagged.{' '}
+          {fulfilled
+            ? 'The shipment is unchanged.'
+            : `Packing is paused at step ${row.step} until the flag is cleared.`}
         </div>
       )}
       {error && <div style={{ color: 'var(--color-error)', fontSize: 11, marginTop: 4 }}>{error}</div>}
