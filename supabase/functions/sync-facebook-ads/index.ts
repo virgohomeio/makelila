@@ -167,6 +167,10 @@ Deno.serve(async (req: Request) => {
           clicks: n(a.clicks as string | undefined),
           ctr: n(a.ctr as string | undefined),
           leads: actionVal(a.actions, ['offsite_conversion.fb_pixel_lead', 'lead', 'onsite_conversion.lead_grouped']),
+          // Per-ad website purchases per day — lets the Journey Report attribute
+          // a single-sale day to the one creative that converted that day (same
+          // clean-day match as age/gender).
+          purchases: actionVal(a.actions, ['offsite_conversion.fb_pixel_purchase', 'purchase', 'omni_purchase']),
           synced_at: now,
         });
       }

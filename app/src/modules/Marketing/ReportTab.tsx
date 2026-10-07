@@ -1,6 +1,6 @@
 import { useMemo, useState, type CSSProperties } from 'react';
 import { useAllOrders, type Order } from '../../lib/orders';
-import { useFbCampaigns, useFbDemographics, type FbCampaign } from '../../lib/marketing/facebook';
+import { useFbCampaigns, useFbDemographics, useFbAds, type FbCampaign } from '../../lib/marketing/facebook';
 import {
   buildSalesReport, salesRowsToCsv, reportCells, REPORT_COLUMNS, UNKNOWN,
   useCustomerAttribution, type Attribution, type Demo,
@@ -18,12 +18,21 @@ const RANGES = [
   { label: 'All time', days: 0 },
 ];
 
+/** The short creative code an operator recognises (v20c, v13a…) pulled out of a
+ *  full Meta ad name; falls back to the trimmed ad name when there's no code. */
+function creativeLabel(adName: string | null): string | null {
+  if (!adName) return null;
+  const m = adName.match(/\bv\d+[a-z]?\b/i);
+  return m ? m[0].toLowerCase() : adName.trim();
+}
+
 export function ReportTab() {
   const { orders, loading: ordersLoading } = useAllOrders();
   const { byId, byEmail } = useCustomerAttribution();
   const { byCustomer: journeys } = useKlaviyoJourneys();
   const { campaigns } = useFbCampaigns(365);
   const { demographics } = useFbDemographics();
+  const { ads } = useFbAds();
   const [days, setDays] = useState(0);   // default: All time — show every sale
   const [campaignFilter, setCampaignFilter] = useState('all');
   const [pageSize, setPageSize] = useState(20);
@@ -135,6 +144,31 @@ export function ReportTab() {
       return { age: null, gender: null };
     };
 
+    // Best-effort exact ad creative: the SAME clean-day match as age/gender, but
+    // over Meta's per-ad purchases — if a day had exactly ONE Shopify sale AND
+    // exactly ONE creative recorded exactly ONE purchase that day, that's the
+    // creative the buyer saw (e.g. "v20c"). Exclude Mini (Shopline, not Shopify).
+    const creativeByDate = new Map<string, Map<string, number>>();
+    for (const ad of ads) {
+      if (!ad.date_start || !ad.purchases) continue;
+      if (/\bmini\b/i.test(ad.campaign_name ?? '')) continue;
+      const label = creativeLabel(ad.ad_name);
+      if (!label) continue;
+      const m = creativeByDate.get(ad.date_start) ?? new Map<string, number>();
+      m.set(label, (m.get(label) ?? 0) + (ad.purchases ?? 0));
+      creativeByDate.set(ad.date_start, m);
+    }
+    const creativeOf = (o: Order): string | null => {
+      const dt = estDate(o.placed_at ?? o.created_at);
+      const dayAds = creativeByDate.get(dt);
+      if (!dayAds) return null;
+      const total = Array.from(dayAds.values()).reduce((a, b) => a + b, 0);
+      const distinct = Array.from(dayAds.entries()).filter(([, v]) => v > 0);
+      const sales = salesByDate.get(dt) ?? 0;
+      if (sales === 1 && total === 1 && distinct.length === 1) return distinct[0][0];
+      return null;
+    };
+
     // Which campaign bucket each sale piled into (shown in the Campaign column).
     const groupOf = (o: Order): string | null => {
       const d = estDate(o.placed_at ?? o.created_at);
@@ -142,8 +176,8 @@ export function ReportTab() {
       return g ? g.label : null;
     };
 
-    return buildSalesReport(filtered, resolve, adSpendCad, journey, campaignName, demo, groupOf);
-  }, [orders, byId, byEmail, journeys, campaigns, campaignGroups, demographics, adSpendCad, cutoff, campaignFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+    return buildSalesReport(filtered, resolve, adSpendCad, journey, campaignName, demo, groupOf, creativeOf);
+  }, [orders, byId, byEmail, journeys, campaigns, campaignGroups, demographics, ads, adSpendCad, cutoff, campaignFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const pageCount = Math.max(1, Math.ceil(rows.length / pageSize));
   const safePage = Math.min(page, pageCount - 1);
@@ -200,9 +234,10 @@ export function ReportTab() {
 
       <div style={{ fontSize: 11, color: muted, marginBottom: 14 }}>
         One row per buyer, mirroring the manual Sale tracker. <strong>Purchase time</strong> + visit history are auto-filled
-        from Klaviyo; <strong>Age / Gender</strong> are best-effort from Meta's purchase demographics — filled only when a
-        sale is an unambiguous match (that day + country had one sale and Meta shows one purchase in one age/gender segment),
-        otherwise UNKNOWN. Still manual: the exact <strong>ad creative</strong> (v21a…) in Notes. Run Sync All to populate.
+        from Klaviyo. <strong>Age / Gender</strong> and the exact <strong>ad creative</strong> (v20c…) in Notes are best-effort
+        from Meta's purchase data — filled only on an unambiguous match (that day had exactly one sale and Meta shows exactly
+        one purchase in one age/gender segment / from one creative), otherwise UNKNOWN. Operator-tracked creative overrides
+        the auto match. Run Sync All to populate.
       </div>
 
       {/* Per-buyer table — exact tracker columns */}

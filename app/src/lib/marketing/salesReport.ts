@@ -35,6 +35,9 @@ export type SalesRow = {
   // Best-effort from Meta's purchase demographics (null when not a clean match).
   age: string | null;
   gender: string | null;
+  // Best-effort exact ad creative, from Meta's per-ad purchases (clean-day match;
+  // null when not unambiguous). Operator-tracked creative still overrides this.
+  creative: string | null;
   // Which campaign group this sale piled into (for verifying the bucketing).
   campaign_group: string | null;
 };
@@ -98,6 +101,7 @@ export function buildSalesReport(
   campaignName?: (raw: string) => string | null,
   demo?: (o: Order) => Demo,
   groupOf?: (o: Order) => string | null,
+  creativeOf?: (o: Order) => string | null,
 ): { rows: SalesRow[]; kpis: SalesKpis } {
   const sales = orders.filter(o => o.kind !== 'replacement');
 
@@ -139,6 +143,7 @@ export function buildSalesReport(
       journey_note: journey?.(o)?.note ?? null,
       age: demo?.(o)?.age ?? null,
       gender: demo?.(o)?.gender ?? null,
+      creative: creativeOf?.(o) ?? null,
       campaign_group: groupOf?.(o) ?? null,
     };
   });
@@ -277,8 +282,9 @@ export function reportCells(r: SalesRow): string[] {
   const secondary = firstReal && lastReal && firstReal !== lastReal
     ? (source === firstReal ? lastReal : firstReal)
     : null;
-  // Hand-tracked ad creative for this buyer, matched on name + purchase date.
-  const creative = manualCreative(r.name, date);
+  // Ad creative for this buyer: operator-tracked (manual sheets) wins; else the
+  // best-effort clean-day match from Meta's per-ad purchases; else none.
+  const creative = manualCreative(r.name, date) ?? r.creative;
   return [
     r.campaign_group ?? '—',
     r.name,
