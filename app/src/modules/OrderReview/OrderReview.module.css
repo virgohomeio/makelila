@@ -533,7 +533,7 @@
 /* Sale (order placement) date, shown on each order row. */
 .saleDate {
   font-weight: 600;
-  color: #cfcfcf;
+  color: var(--color-ink-faint);
   white-space: nowrap;
 }
 
