@@ -78,6 +78,14 @@ export type FulfillmentQueueRow = {
   eztrans_batch_sent_at?: string | null;
 
   starter_tracking_num: string | null;
+  // The other answer step 3 accepts about the compost starter: this order
+  // ships none, and why (20261007120000). Optional for the same reason the
+  // batch columns above are — migrations here are applied by hand, and
+  // select('*') on a database that has not run it simply returns rows without
+  // them. See lib/starterKit.ts.
+  starter_skipped_at?: string | null;
+  starter_skipped_by?: string | null;
+  starter_skip_reason?: string | null;
   email_sent_at: string | null;
   email_sent_by: string | null;
 
@@ -768,7 +776,8 @@ export async function flagRework(
   }
 }
 
-/** Step 3: upload PDF (optional) + save LILA carrier/tracking (and US starter tracking); advance 3→4. */
+/** Step 3: upload PDF (optional) + save LILA carrier/tracking + the Amazon
+ *  compost-starter tracking; advance 3→4. */
 export async function confirmLabel(
   queueId: string,
   input: { carrier: string; tracking_num: string; label_pdf?: File; starter_tracking_num?: string },
@@ -881,7 +890,9 @@ export async function confirmDock(queueId: string): Promise<void> {
   await logAction('fq_dock_confirmed', queueId, 'Dock check complete');
 }
 
-/** Step 5: US-only starter tracking input. */
+/** Step 5: a late correction to the starter tracking number. Step 3 is where
+ *  it is asked for now (lib/starterKit.ts); this is the one that was typed
+ *  wrong, or ordered after the box had already gone. */
 export async function setStarterTracking(queueId: string, starter_tracking_num: string): Promise<void> {
   const { error } = await supabase
     .from('fulfillment_queue')
@@ -920,10 +931,14 @@ export function shipmentEmailVars(
   row: Pick<FulfillmentQueueRow, 'carrier' | 'tracking_num' | 'starter_tracking_num'>,
   order: { customer_name: string; order_ref: string; country: 'US' | 'CA' },
 ): Record<string, string> {
-  // US orders ship the compost starter kit separately through Amazon. Empty
-  // on every CA order, which is why renderShipmentEmail strips the placeholder
-  // rather than printing it.
-  const starterBlock = order.country === 'US' && row.starter_tracking_num
+  // The compost starter ships separately through Amazon. Keyed on the number
+  // rather than on the destination: step 3 now asks for one on every machine
+  // sale, CA included (lib/starterKit.ts), and gating the block on country
+  // would record a Canadian customer's starter tracking and then never tell
+  // them it existed. Empty on an order that ships no starter — a replacement,
+  // or one an operator declared exempt — which is why renderShipmentEmail
+  // strips the placeholder rather than printing it.
+  const starterBlock = row.starter_tracking_num
     ? `\nCompost Starter Kit (ships separately via Amazon)\n\n` +
       `Starter Tracking Number: ${row.starter_tracking_num}\n`
     : '';

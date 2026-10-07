@@ -23,17 +23,25 @@ describe('shipmentEmailVars', () => {
     expect(shipmentEmailVars(row(), ca).customer_first_name).toBe('Juanita');
   });
 
-  it('starter block is empty for a CA order even when a starter number exists', () => {
-    expect(shipmentEmailVars(row({ starter_tracking_num: 'TBA1' }), ca).starter_block).toBe('');
-  });
-
-  it('starter block is empty for a US order with no starter number', () => {
-    expect(shipmentEmailVars(row(), us).starter_block).toBe('');
+  // Keyed on the number, not the destination. Step 3 asks for an Amazon
+  // starter number on every machine sale now, CA included (lib/starterKit.ts) —
+  // a country gate here would record a Canadian customer's starter tracking and
+  // then never tell them it was coming.
+  it('starter block is populated for a CA order with a starter number', () => {
+    expect(shipmentEmailVars(row({ starter_tracking_num: 'TBA1' }), ca).starter_block)
+      .toContain('Starter Tracking Number: TBA1');
   });
 
   it('starter block is populated for a US order with a starter number', () => {
     expect(shipmentEmailVars(row({ starter_tracking_num: 'TBA1' }), us).starter_block)
       .toContain('Starter Tracking Number: TBA1');
+  });
+
+  // An order that ships no starter — a replacement, or one an operator declared
+  // exempt — has no number and must not grow a starter section promising one.
+  it('starter block is empty with no number, whatever the destination', () => {
+    expect(shipmentEmailVars(row(), us).starter_block).toBe('');
+    expect(shipmentEmailVars(row(), ca).starter_block).toBe('');
   });
 });
 

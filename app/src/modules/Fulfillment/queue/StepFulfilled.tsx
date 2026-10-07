@@ -19,9 +19,20 @@ export function StepFulfilled({
   const serials = row.assigned_serials;
   const serialLabel = serials.length > 0 ? serials.join(', ') : '— not recorded —';
   const lilaShipment = [row.carrier, row.tracking_num].filter(Boolean).join(' · ') || '—';
-  const starterKit = order.country === 'US'
-    ? `Amazon · ${row.starter_tracking_num ?? '—'}`
-    : 'Packed In';
+  // What the row actually says, before what the destination used to imply.
+  // Step 3 now asks every machine sale for an Amazon starter number or a
+  // written exemption (lib/starterKit.ts), so on a row worked since then this
+  // is a fact rather than an assumption. 'Packed In' survives as the fallback
+  // for the CA orders that shipped before it, when the starter really did
+  // travel inside the carton — reading those as "not recorded" would throw
+  // away something true.
+  const starterKit = row.starter_tracking_num
+    ? `Amazon · ${row.starter_tracking_num}`
+    : row.starter_skipped_at
+      ? `None — ${row.starter_skip_reason ?? 'no reason recorded'}`
+      : order.country === 'US'
+        ? 'Amazon · —'
+        : 'Packed In';
 
   // Keep every row in the brand's Inter font (inherited). Use tabular-nums
   // so tracking numbers and serials align without switching font-family —

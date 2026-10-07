@@ -1235,3 +1235,91 @@
   border-radius: var(--radius-sm);
   padding: 6px 10px;
 }
+
+/* ─── Step 3: the compost starter ──────────────────────────────────────────
+   Bordered like the EZ Trans panel rather than like the plain .labelSection
+   cards around it: it is a prerequisite for the whole step, not one more field
+   on the shipping label, and the greyed-out Confirm underneath has to be
+   traceable to it at a glance. */
+.starterCard {
+  background: #fff;
+  border: 1.5px solid var(--color-warning-border);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  margin-bottom: 14px;
+}
+.starterHead {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+.starterHead .labelSectionHead { margin-bottom: 0; }
+.starterLead {
+  font-size: 11px;
+  color: var(--color-ink-muted);
+  line-height: 1.5;
+  margin: 6px 0 10px;
+}
+.starterRequiredTag,
+.starterDoneTag,
+.starterExemptTag {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.starterRequiredTag {
+  background: var(--color-warning-bg);
+  border: 1px solid var(--color-warning-border);
+  color: var(--color-warning);
+}
+.starterDoneTag {
+  background: var(--color-success-bg);
+  border: 1px solid var(--color-success-border);
+  color: var(--color-success);
+}
+.starterExemptTag {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  color: var(--color-ink-subtle);
+}
+.starterSkipForm {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--color-border);
+}
+.starterSkipForm label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11px;
+  color: var(--color-ink-subtle);
+  max-width: 420px;
+}
+.starterSkipForm input[type='text'] {
+  padding: 6px 10px;
+  font-size: 11px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+}
+/* Quiet on purpose. The exemption exists so a legitimate no-starter order is
+   not stranded, not as a shortcut past the step, so it reads as a link rather
+   than as the second of two buttons. */
+.starterSkipLink {
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin-top: 4px;
+  color: var(--color-ink-subtle);
+  font-size: 10px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.starterSkipLink:hover { color: var(--color-ink); }

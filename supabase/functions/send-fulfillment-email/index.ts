@@ -135,7 +135,12 @@ async function handle(req: Request): Promise<Response> {
     }
   }
 
-  const starterBlock = order.country === 'US' && q.starter_tracking_num
+  // Keyed on the number, not the destination. Step 3 asks for a compost-starter
+  // tracking number on every machine sale now, CA included (app/src/lib/
+  // starterKit.ts), and a country gate here would record a Canadian customer's
+  // starter and never tell them it was coming. Mirrors shipmentEmailVars() in
+  // app/src/lib/fulfillment.ts — keep the two in sync.
+  const starterBlock = q.starter_tracking_num
     ? `\nCompost Starter Kit (ships separately via Amazon)\n\n` +
       `Starter Tracking Number: ${q.starter_tracking_num}\n`
     : '';

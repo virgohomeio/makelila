@@ -49,6 +49,7 @@ export function EzTransPanel({
   order,
   onLabelSaved,
   onBatchChanged,
+  starterGap = null,
 }: {
   row: FulfillmentQueueRow;
   order: EzTransOrder;
@@ -56,6 +57,15 @@ export function EzTransPanel({
   /** Re-read the queue after this order joins or leaves the day's batch, so
    *  the footer at the bottom of the page catches up without a reload. */
   onBatchChanged?: () => void;
+  /** What the compost starter is still waiting on, null when nothing.
+   *
+   *  The soil is bought on Amazon and ships to the customer direct, so it never
+   *  touches this carton — but this is the last moment anyone looks at the
+   *  order before the 3PL has the box, and "we forgot the starter" is only
+   *  fixable before then. Computed by StepLabel so the three buttons that can
+   *  end step 3 — confirm into the batch, send on its own, Pickup scheduled —
+   *  are gated by one answer rather than three. */
+  starterGap?: string | null;
 }) {
   // Every machine on the order, not just the first one picked. An order for
   // three LILA Pros books as one Goorooship shipment, and the 3PL has to be
@@ -176,7 +186,8 @@ export function EzTransPanel({
   // the three sits on our own floor would tell the 3PL to pick a machine they
   // do not hold — they would ship what they could find and nobody would learn
   // the order went out short until the customer counted boxes.
-  const ready = !!carrier && !!tracking.trim() && (!!pdf || labelOnFile) && offsite.length === 0;
+  const ready = !!carrier && !!tracking.trim() && (!!pdf || labelOnFile)
+    && offsite.length === 0 && !starterGap;
 
   // A shipment into the US is a customs entry and needs a FIFRA worksheet with
   // it, so one is built and attached on those bookings only — the destination
@@ -499,7 +510,13 @@ export function EzTransPanel({
               : edited || packingEdited
                 ? 'Show edited email + packing list'
                 : 'Preview / edit email + packing list'}</button>
-            {!ready ? (
+            {starterGap ? (
+              <span className={styles.ezTransHint}>
+                The compost starter comes first — order it and paste the Amazon
+                tracking number in the card above. Once this email goes out the
+                3PL has the carton, and there is no adding a starter to it then.
+              </span>
+            ) : !ready ? (
               <span className={styles.ezTransHint}>
                 Carrier, tracking number and the label PDF are all required before this
                 order can join a batch.
@@ -554,7 +571,9 @@ export function EzTransPanel({
               {busy ? 'Sending…' : sentAt ? `✉ Resend to ${EZTRANS_EMAIL} now` : `✉ Send to ${EZTRANS_EMAIL} now`}
             </button>
             <span className={styles.ezTransHint}>
-              For a rush shipment that cannot wait for the end-of-day email.
+              {starterGap
+                ? 'Blocked for the same reason — the starter has to be ordered first.'
+                : 'For a rush shipment that cannot wait for the end-of-day email.'}
             </span>
           </div>
         </li>

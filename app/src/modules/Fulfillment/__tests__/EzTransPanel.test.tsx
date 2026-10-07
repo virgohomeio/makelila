@@ -832,3 +832,56 @@ describe('an order for more than one machine', () => {
     expect(confirmButton()).toBeDisabled();
   });
 });
+
+// The compost starter ships from Amazon direct to the customer and never joins
+// this carton — but once this email goes out the 3PL has the box, so this is
+// the last moment anyone can notice the soil was never ordered. StepLabel works
+// out the answer and hands it down, so the three buttons that can end step 3
+// are gated by one fact rather than three.
+describe('EzTransPanel — the starter blocks the Goorooship email too', () => {
+  beforeEach(() => {
+    placementMock.mockReset().mockReturnValue(AT_EZTRANS);
+    saveLabelMock.mockClear();
+    sendMock.mockClear();
+    confirmMock.mockClear();
+    localStorage.clear();
+  });
+
+  const STARTER_GAP = 'the compost starter ordered, with its Amazon tracking number';
+
+  it('blocks both sends on a shipment whose starter was never ordered', () => {
+    render(<EzTransPanel row={row} order={order} starterGap={STARTER_GAP} />);
+    fillLabel();
+
+    expect(confirmButton()).toBeDisabled();
+    expect(sendButton()).toBeDisabled();
+  });
+
+  // A greyed-out Send with a hint about the label PDF — which is right there,
+  // filled in — is worse than no hint at all.
+  it('says it is the starter, not the label details', () => {
+    render(<EzTransPanel row={row} order={order} starterGap={STARTER_GAP} />);
+    fillLabel();
+
+    expect(screen.getByText(/The compost starter comes first/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Carrier, tracking number and the label PDF are all required/i))
+      .toBeNull();
+  });
+
+  it('opens both sends once the starter is answered', () => {
+    render(<EzTransPanel row={row} order={order} starterGap={null} />);
+    fillLabel();
+
+    expect(confirmButton()).toBeEnabled();
+    expect(sendButton()).toBeEnabled();
+  });
+
+  // The panel predates the gate and is rendered from one call site, but the
+  // prop is optional — an absent answer must not shut the 3PL out.
+  it('asks for nothing when no answer is handed down at all', () => {
+    render(<EzTransPanel row={row} order={order} />);
+    fillLabel();
+
+    expect(confirmButton()).toBeEnabled();
+  });
+});
