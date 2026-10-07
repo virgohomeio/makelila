@@ -3,7 +3,7 @@ import { useAllOrders, type Order } from '../../lib/orders';
 import { useFbCampaigns, useFbDemographics, useFbAds, type FbCampaign } from '../../lib/marketing/facebook';
 import {
   buildSalesReport, salesRowsToCsv, reportCells, REPORT_COLUMNS, UNKNOWN,
-  useCustomerAttribution, type Attribution, type Demo,
+  useCustomerAttribution, isTestOrder, type Attribution, type Demo,
 } from '../../lib/marketing/salesReport';
 import { useKlaviyoJourneys, summarizeJourney } from '../../lib/marketing/journeyTiming';
 import { buildCampaignGroups } from '../../lib/marketing/campaignGroups';
@@ -85,7 +85,7 @@ export function ReportTab() {
   }, [uniqueCampaigns, cutoff, selectedGroup]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const { rows, kpis } = useMemo(() => {
-    const filtered = orders.filter(o => o.kind !== 'replacement' && inScope(o));
+    const filtered = orders.filter(o => o.kind !== 'replacement' && !isTestOrder(o) && inScope(o));
     const resolve = (o: Order): Attribution =>
       // Prefer the order's own Shopify attribution (google organic, meta, …);
       // fall back to the customer's first-touch, then unknown.
@@ -126,7 +126,7 @@ export function ReportTab() {
     }
     const salesByDate = new Map<string, number>();
     for (const o of orders) {
-      if (o.kind === 'replacement') continue;
+      if (o.kind === 'replacement' || isTestOrder(o)) continue;
       const dt = estDate(o.placed_at ?? o.created_at);
       salesByDate.set(dt, (salesByDate.get(dt) ?? 0) + 1);
     }

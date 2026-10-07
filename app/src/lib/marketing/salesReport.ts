@@ -68,11 +68,25 @@ export type Attribution = { source: string | null; medium: string | null; campai
 export function classifyPlan(o: Order): string {
   const pm = (o.payment_methods ?? []).map(s => s.toLowerCase());
   if (pm.some(p => p.includes('sezzle'))) return 'Sezzle';
+  // Klarna is a separate BNPL provider shown on the Shopify order's payment
+  // method — track it distinctly like Sezzle.
+  if (pm.some(p => p.includes('klarna'))) return 'Klarna';
   const text = (o.line_items ?? []).map(li => ('name' in li ? li.name : '')).join(' ').toLowerCase();
   if (/36[\s-]*month/.test(text)) return '36-Month Plan';
   if (/12[\s-]*month/.test(text)) return '12-Month Plan';
   if (/financ|payment plan|monthly/.test(text)) return 'Financing';
   return 'Outright';
+}
+
+// Pedrum's own test purchases on Shopify are not real sales. They must be kept
+// out of the Journey Report entirely — both the displayed rows AND the per-day
+// sale counts that drive the age/gender/creative clean-day match (a stray test
+// order on a real sale's day would otherwise make that day look ambiguous and
+// block the match). Matches his name or email; extend the pattern for any other
+// test buyer.
+const TEST_BUYER = /pedrum/i;
+export function isTestOrder(o: Order): boolean {
+  return TEST_BUYER.test(o.customer_email ?? '') || TEST_BUYER.test(o.customer_name ?? '');
 }
 
 function bump(map: Map<string, Breakdown>, key: string, revenue: number) {
