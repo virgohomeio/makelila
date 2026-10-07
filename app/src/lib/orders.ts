@@ -5,6 +5,7 @@ import { logAction } from './activityLog';
 import { adjustPartStock } from './parts';
 import { functionErrorMessage } from './functionError';
 import { refundFlagForOrderId, refundFlagTitle } from './refundedOrders';
+import { sendTemplate } from './templates';
 // replacementTags only ever `import type`s from here, so this is not a runtime
 // cycle — the Order import on that side is erased.
 import { isPartsOnlyReplacement } from './replacementTags';
@@ -243,10 +244,14 @@ const ACTION_TYPE: Record<Disposition, string> = {
   held:     'order_hold',
 };
 
-async function currentUserId(): Promise<string> {
+async function currentUser(): Promise<{ id: string; email: string | null }> {
   const { data } = await supabase.auth.getUser();
   if (!data.user) throw new Error('orders: not authenticated');
-  return data.user.id;
+  return { id: data.user.id, email: data.user.email ?? null };
+}
+
+async function currentUserId(): Promise<string> {
+  return (await currentUser()).id;
 }
 
 /** Refuse to move an order towards a shipment when the money for THAT order has
@@ -276,8 +281,61 @@ async function assertNotRefunded(orderId: string, action: string): Promise<void>
   throw new Error(`${action}: ${refundFlagTitle(flag)}`);
 }
 
+/** Who hears about every confirmed sale, and the name the mail greets.
+ *
+ *  Exported so re-routing the notice is a one-line change rather than a hunt
+ *  through the send site. */
+export const SALE_CONFIRMED_NOTIFY = 'reina@virgohome.io';
+export const SALE_CONFIRMED_NOTIFY_NAME = 'Reina';
+
+const APP_BASE_URL = 'https://lila.vip';
+const FULFILLMENT_QUEUE_URL = `${APP_BASE_URL}/fulfillment/queue`;
+
+/** Announce a confirmed sale to Customer Service.
+ *
+ *  Confirming in Order Review is the hand-off into fulfillment: this is the
+ *  write that fires auto_enqueue_approved_order, so the moment it lands the
+ *  order is in the queue with the 2-day SLA clock running. Nothing used to say
+ *  so — the only way to learn a sale had been confirmed was to open the queue
+ *  and spot a row that had not been there before.
+ *
+ *  Best-effort by design, mirroring notifyFinanceReviewEntry in
+ *  lib/postShipment.ts: the status UPDATE has already committed when this runs,
+ *  so a mail failure must never surface as a failed confirmation. An operator
+ *  who saw Confirm fail would click it again, and on this action that means a
+ *  second order_approve in the log for an order that was already confirmed. */
+async function notifySaleConfirmed(
+  order: Pick<Order, 'id' | 'order_ref' | 'customer_name'> &
+    Partial<Pick<Order, 'total_usd' | 'currency'>>,
+  confirmedByEmail: string | null,
+): Promise<void> {
+  try {
+    await sendTemplate({
+      template_key: 'sale_confirmed',
+      to: SALE_CONFIRMED_NOTIFY,
+      to_name: SALE_CONFIRMED_NOTIFY_NAME,
+      variables: {
+        recipient_first_name: SALE_CONFIRMED_NOTIFY_NAME,
+        order_ref: order.order_ref,
+        customer_name: order.customer_name || 'Unknown customer',
+        // total_usd holds the order's own currency despite the name — see the
+        // field comment on Order. Never relabel a CAD total as USD here.
+        amount: order.total_usd != null
+          ? `${Number(order.total_usd).toFixed(2)} ${order.currency ?? ''}`.trim()
+          : '\u2014',
+        confirmed_by: confirmedByEmail ?? 'An operator',
+        queue_url: FULFILLMENT_QUEUE_URL,
+        order_url: `${APP_BASE_URL}/order-review/${order.id}`,
+      },
+    });
+  } catch (e) {
+    console.warn('Sale-confirmed notification failed (non-fatal):', (e as Error).message);
+  }
+}
+
 export async function disposition(
-  order: Pick<Order, 'id' | 'order_ref' | 'customer_name'>,
+  order: Pick<Order, 'id' | 'order_ref' | 'customer_name'> &
+    Partial<Pick<Order, 'total_usd' | 'currency' | 'kind'>>,
   status: Disposition,
   reason?: string,
 ): Promise<void> {
@@ -287,7 +345,7 @@ export async function disposition(
   // refunded order rather than shipping it.
   if (status === 'approved') await assertNotRefunded(order.id, 'Cannot confirm this order');
 
-  const userId = await currentUserId();
+  const { id: userId, email } = await currentUser();
 
   const { error } = await supabase
     .from('orders')
@@ -300,6 +358,14 @@ export async function disposition(
   if (error) throw error;
 
   await logAction(ACTION_TYPE[status], order.order_ref, reason ?? order.customer_name);
+
+  // Only a sale, and only on Confirm. A replacement is not a sale — it is
+  // ticket-driven and never reaches Sales on its own — but one FLAGGED from the
+  // fulfillment queue does land back in Order Review (see bucketOrders), where
+  // it can be confirmed again from this same button. That one must stay quiet.
+  if (status === 'approved' && order.kind !== 'replacement') {
+    await notifySaleConfirmed(order, email);
+  }
 }
 
 export async function needInfo(
