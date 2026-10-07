@@ -1,0 +1,529 @@
+/* Customers > Timelines.
+ *
+ * Deliberately its own stylesheet rather than more blocks in
+ * Customers.module.css: that file is 66KB across two design regimes, and a
+ * duplicate class name there silently loses to the later block. Colour comes
+ * from tokens.css throughout — no raw hex, so this file is ready for the
+ * check-css-tokens ratchet when the Customers module's turn comes. */
+
+.tab {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* ── Coverage strip ───────────────────────────────────────────────────────── */
+
+/* The holes in the integrations, kept in the operator's face. Without this a
+ * column of em-dashes reads as "these customers did not do this" rather than
+ * "we have never recorded this". */
+.coverage {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.coverageCell {
+  flex: 1 1 140px;
+  min-width: 0;
+  padding: 10px 12px;
+  background: var(--color-raised);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+}
+
+.coverageLabel {
+  display: block;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-ink-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.coverageValue {
+  display: block;
+  margin-top: 2px;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--color-ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.coverageOf {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--color-ink-subtle);
+}
+
+/* A bar rather than a bare count: 42 against 179 is a different story from 42
+ * against 404, and the number alone does not say which. */
+.coverageBar {
+  margin-top: 6px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--color-border);
+  overflow: hidden;
+}
+
+.coverageBarFill {
+  height: 100%;
+  background: var(--color-phase-service);
+  border-radius: 2px;
+}
+
+/* ── Controls ─────────────────────────────────────────────────────────────── */
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.search {
+  flex: 1 1 220px;
+  min-width: 0;
+  padding: 7px 10px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--color-ink);
+  background: var(--color-raised);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+}
+
+.search:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-color: var(--color-ink-subtle);
+}
+
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--color-ink-muted);
+  white-space: nowrap;
+}
+
+.select {
+  padding: 7px 10px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--color-ink);
+  background: var(--color-raised);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+}
+
+/* Dates ⇄ Durations. A segmented control rather than a checkbox: these are two
+ * readings of the same grid, not an option on one of them. */
+.modeSwitch {
+  display: inline-flex;
+  padding: 2px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+}
+
+.modeBtn {
+  padding: 5px 12px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--color-ink-muted);
+  background: none;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.modeBtn:hover { color: var(--color-ink); }
+
+.modeBtnActive {
+  color: var(--color-ink);
+  background: var(--color-raised);
+  box-shadow: var(--shadow-sm);
+  font-weight: 600;
+}
+
+.count {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--color-ink-subtle);
+  white-space: nowrap;
+}
+
+/* ── Matrix ───────────────────────────────────────────────────────────────── */
+
+/* Seven columns at phone width do not fit and must not stretch the page, so the
+ * table gets its own scroller. */
+.tableWrap {
+  overflow-x: auto;
+  background: var(--color-raised);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.table th,
+.table td {
+  padding: 8px 10px;
+  text-align: left;
+  border-bottom: 1px solid var(--color-border);
+  white-space: nowrap;
+}
+
+.table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--color-surface);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-ink-muted);
+}
+
+.table tbody tr:last-child td { border-bottom: none; }
+
+.table tbody tr {
+  cursor: pointer;
+}
+
+.table tbody tr:hover td {
+  background: var(--color-surface);
+}
+
+.sortBtn {
+  font: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  text-transform: inherit;
+  letter-spacing: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+.sortBtn:hover { color: var(--color-ink); }
+
+.sortArrow {
+  color: var(--color-crimson);
+  margin-left: 3px;
+}
+
+.nameCell {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--color-raised);
+  font-weight: 500;
+  color: var(--color-ink);
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.table tbody tr:hover .nameCell { background: var(--color-surface); }
+
+.table th.nameCell {
+  z-index: 2;
+  background: var(--color-surface);
+  font-weight: 600;
+}
+
+.nameSub {
+  display: block;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--color-ink-subtle);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.date {
+  color: var(--color-ink);
+  font-variant-numeric: tabular-nums;
+}
+
+/* An em-dash, not a blank: "we have no date" is information and should occupy
+ * the cell rather than leave a hole the eye slides past. */
+.missing {
+  color: var(--color-ink-faint);
+}
+
+/* A typed date is marked, because an operator reading the grid needs to know
+ * which numbers came from a carrier and which from a colleague. */
+.manualMark {
+  color: var(--color-accent-clay);
+  margin-left: 3px;
+  font-size: 11px;
+}
+
+.gap {
+  color: var(--color-ink-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Long gaps earn attention in the Durations view — that is the whole reason the
+ * view exists. */
+.gapSlow { color: var(--color-warning); font-weight: 600; }
+.gapStalled { color: var(--color-error-strong); font-weight: 600; }
+
+/* A milestone dated BEFORE the one above it. A data error, not a fast delivery,
+ * so it does not share the "good" end of the scale — it is marked as broken. */
+.gapBackwards {
+  color: var(--color-error-strong);
+  font-weight: 600;
+  text-decoration: underline wavy var(--color-error-border);
+  text-underline-offset: 3px;
+}
+
+.callCount {
+  font-variant-numeric: tabular-nums;
+  color: var(--color-ink);
+}
+
+.noShow {
+  color: var(--color-error-strong);
+  font-size: 11px;
+  margin-left: 4px;
+}
+
+/* ── Detail panel ─────────────────────────────────────────────────────────── */
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: rgba(var(--color-ink-rgb), 0.28);
+  display: flex;
+  justify-content: flex-end;
+}
+
+.panel {
+  width: min(520px, 100%);
+  height: 100%;
+  overflow-y: auto;
+  background: var(--color-page);
+  box-shadow: var(--shadow-lg);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.panelHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.panelTitle {
+  margin: 0;
+  font-size: 18px;
+  color: var(--color-ink);
+}
+
+.panelSub {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: var(--color-ink-subtle);
+}
+
+.closeBtn {
+  font: inherit;
+  font-size: 18px;
+  line-height: 1;
+  padding: 4px 8px;
+  color: var(--color-ink-muted);
+  background: none;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.closeBtn:hover { color: var(--color-ink); background: var(--color-surface); }
+
+.sectionTitle {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-ink-muted);
+}
+
+/* The vertical rail. The line is drawn on the dot column so it connects the
+ * milestones rather than running the full height of the panel past the end. */
+.rail {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+}
+
+.railItem {
+  display: grid;
+  grid-template-columns: 16px 1fr;
+  gap: 10px;
+  padding-bottom: 14px;
+  position: relative;
+}
+
+.railItem:not(:last-child)::before {
+  content: '';
+  position: absolute;
+  left: 7px;
+  top: 14px;
+  bottom: 0;
+  width: 2px;
+  background: var(--color-border);
+}
+
+.dot {
+  width: 10px;
+  height: 10px;
+  margin-top: 4px;
+  border-radius: 50%;
+  background: var(--color-phase-service);
+  z-index: 1;
+}
+
+.dotMissing {
+  background: var(--color-raised);
+  border: 2px solid var(--color-border);
+  width: 10px;
+  height: 10px;
+  box-sizing: border-box;
+}
+
+.dotCall {
+  background: var(--color-phase-risk);
+}
+
+.railBody { min-width: 0; }
+
+.railLabel {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-ink);
+}
+
+.railDate {
+  font-size: 13px;
+  color: var(--color-ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.railDateMissing {
+  font-size: 13px;
+  color: var(--color-ink-faint);
+}
+
+.railMeta {
+  display: block;
+  font-size: 11px;
+  color: var(--color-ink-subtle);
+  margin-top: 1px;
+  overflow-wrap: anywhere;
+}
+
+.railGap {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  font-size: 11px;
+  color: var(--color-ink-muted);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.railEdit {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.dateInput {
+  padding: 4px 6px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--color-ink);
+  background: var(--color-raised);
+  border: 1px solid var(--color-border);
+  border-radius: 5px;
+}
+
+.dateInput:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.miniBtn {
+  padding: 4px 9px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--color-ink);
+  background: var(--color-raised);
+  border: 1px solid var(--color-border);
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.miniBtn:hover:not(:disabled) { background: var(--color-surface); }
+.miniBtn:disabled { opacity: 0.5; cursor: default; }
+
+.clearBtn { color: var(--color-error-strong); }
+
+.panelError {
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--color-error);
+  background: var(--color-error-bg);
+  border: 1px solid var(--color-error-border);
+  border-radius: 6px;
+}
+
+.callRow {
+  font-size: 13px;
+  color: var(--color-ink);
+}
+
+.empty {
+  font-size: 13px;
+  color: var(--color-ink-subtle);
+  margin: 6px 0 0;
+}
+
+.loading {
+  padding: 24px;
+  font-size: 13px;
+  color: var(--color-ink-muted);
+}
+
+/* ── Narrow ───────────────────────────────────────────────────────────────── */
+
+@media (max-width: 700px) {
+  .count { margin-left: 0; width: 100%; }
+  .panel { padding: 16px; }
+  /* The sticky name column costs more than it gives on a phone: it eats a
+   * third of the viewport and the horizontal scroll is the interaction. */
+  .nameCell, .table th.nameCell { position: static; }
+}

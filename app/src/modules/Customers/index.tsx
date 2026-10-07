@@ -21,6 +21,7 @@ import { useUnits } from '../../lib/stock';
 import { useServiceTickets } from '../../lib/service';
 import { Link, useSearchParams } from 'react-router-dom';
 import { ProfitabilityTab } from './ProfitabilityTab';
+import { TimelinesTab } from './TimelinesTab';
 import { JourneyTab } from './JourneyTab';
 import { useIsMobile } from '../../lib/useMediaQuery';
 import { NavCard } from '../../components/NavCard';
@@ -36,9 +37,9 @@ import {
 } from '../../components/ui';
 import styles from './Customers.module.css';
 
-type Tab = 'directory' | 'profitability' | 'journey' | 'fleet';
+type Tab = 'directory' | 'profitability' | 'timelines' | 'journey' | 'fleet';
 
-const TAB_KEYS: Tab[] = ['directory', 'fleet', 'profitability', 'journey'];
+const TAB_KEYS: Tab[] = ['directory', 'fleet', 'profitability', 'timelines', 'journey'];
 
 // Shared empty list for customers with no additional household users — keeps
 // the search filter from allocating a new array per row on every keystroke.
@@ -51,6 +52,7 @@ const TABS: { key: Tab; label: string }[] = [
   { key: 'directory',     label: 'Directory' },
   { key: 'fleet',         label: 'Fleet' },
   { key: 'profitability', label: 'Profitability' },
+  { key: 'timelines',     label: 'Timelines' },
   { key: 'journey',       label: 'Journey' },
 ];
 
@@ -58,6 +60,7 @@ const MOBILE_TAB_META: Record<Tab, { subtitle: string; icon: string; iconBg: str
   directory:     { subtitle: 'All customers · search',                  icon: '👥', iconBg: '#e3f0fb' },
   fleet:         { subtitle: 'Live device telemetry · machine health',  icon: '📡', iconBg: '#e3f0fb' },
   profitability: { subtitle: 'Revenue · returns · margin per customer', icon: '💰', iconBg: '#fff3e0' },
+  timelines:     { subtitle: 'Received · onboarded · first use · calls',  icon: '🕰️', iconBg: '#eef0fb' },
   journey:       { subtitle: '10-stage CJM · health per customer',      icon: '🛤️', iconBg: '#fef1f0' },
 };
 
@@ -255,6 +258,7 @@ export default function Customers() {
 
   const tabLabel =
     tab === 'journey'       ? 'Journey' :
+    tab === 'timelines'     ? 'Timelines' :
     tab === 'profitability' ? 'Profitability' :
     tab === 'fleet'         ? 'Fleet' :
                               'Directory';
@@ -273,6 +277,7 @@ export default function Customers() {
         )}
       </>
     ) : tab === 'journey' ? 'Where every customer sits in the ten-stage journey, and how they are doing.'
+      : tab === 'timelines' ? 'When each customer received their machine, started using it, was onboarded, and every diagnosis call since.'
       : tab === 'profitability' ? 'Revenue, returns and margin, per customer.'
       : 'Live telemetry from machines in the field.';
 
@@ -330,6 +335,10 @@ export default function Customers() {
 
   if (tab === 'profitability') {
     return <div className={styles.layout}>{header}<ProfitabilityTab /></div>;
+  }
+
+  if (tab === 'timelines') {
+    return <div className={styles.layout}>{header}<TimelinesTab /></div>;
   }
 
   if (tab === 'journey') {
