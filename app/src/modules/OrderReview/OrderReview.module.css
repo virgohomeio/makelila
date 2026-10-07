@@ -179,6 +179,13 @@
   margin-top: 2px;
 }
 
+/* Sale (order placement) date, shown on each order row. */
+.saleDate {
+  font-weight: 600;
+  color: #cfcfcf;
+  white-space: nowrap;
+}
+
 .tag {
   display: inline-block;
   font-size: 9px;

@@ -46,6 +46,11 @@ export function OrderRow({
           <span className="replBadge">Replacement</span>
         )}
         {' '}· {order.city}
+        {order.placed_at && (
+          <span className={styles.saleDate}>
+            {' '}· {new Date(order.placed_at).toLocaleDateString('en-CA', { month: 'short', day: 'numeric', year: 'numeric' })}
+          </span>
+        )}
         {(() => {
           const u = orderUrgency(order.placed_at);
           if (!u.label) return null;
