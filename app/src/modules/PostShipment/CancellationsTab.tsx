@@ -53,7 +53,7 @@ export function CancellationsTab() {
     <div className={styles.tabContent}>
       <div className={styles.kpiRow}>
         <KPI label="Awaiting processing" value={stats.open} tone={stats.open > 0 ? 'warn' : undefined}
-             sub={stats.open > 0 ? 'click to process' : 'queue clear'} />
+             sub={stats.open > 0 ? 'also queued on the Refunds board' : 'queue clear'} />
         <KPI label="Completed" value={stats.completed} sub="cancelled + refund routed" />
         <KPI label="Already received" value={stats.received}
              sub={stats.received > 0 ? 'consider Returns' : 'all pre-ship'} />
@@ -157,7 +157,7 @@ function CancellationDetail({
     // Money already collected? Spawn a refund_approval. Pre-charge cancel
     // (e.g. abandoned during checkout) → mark completed only, no refund.
     const refundConfirm = window.confirm(
-      `Process cancellation for ${c.customer_name}?\n\nClick OK if payment was already collected — this creates a refund_approval (manager_review) for $${c.order_amount_usd ?? 0}.\nClick Cancel if no money needs to be refunded (e.g. pre-charge cancel).`
+      `Process cancellation for ${c.customer_name}?\n\nClick OK if payment was already collected — this opens a refund card in Completeness on the Refunds board for $${c.order_amount_usd ?? 0}.\nClick Cancel if no money needs to be refunded (e.g. pre-charge cancel).`
     );
     const opsNote = window.prompt('Ops note (optional):') ?? undefined;
     setBusy(true); onError(null);
@@ -224,7 +224,7 @@ function CancellationDetail({
           {c.product_received
             ? '⚠ Customer says they received the unit — consider routing through Returns instead.'
             : canAct
-              ? 'Cancellations are always accepted. Process to cancel the order and route any refund.'
+              ? 'Cancellations are always accepted. This request is already queued on the Refunds board — process here or there.'
               : 'Completed — view only.'}
         </div>
         <div className={styles.refundDetailButtons}>

@@ -1,7 +1,13 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from './supabase';
 import { logAction } from './activityLog';
+import { DEFAULT_RATES, type ProfitabilityRates, type AcquisitionSpendRow } from './profitability';
+import { batchCensus, type UnitCensus } from './batchLandedCost';
+import {
+  ADDRESS_ORDER_COLUMNS, buildCustomerAddressIndex, resolveCustomerAddress,
+  type AddressOrder,
+} from './customerAddress';
 
 export type Customer = {
   id: string;
@@ -53,9 +59,332 @@ export type Customer = {
   last_touch_at: string | null;
   // J6: when true, the telemetry auto-ticket cron skips all units for this customer.
   telemetry_autoticket_suppress: boolean;
+  // FR-6: when set, this row is a USER acting for the purchaser at this id
+  // (gift/household case); refunds + accounting resolve to the purchaser.
+  // NULL = this row is its own purchaser. See resolvePurchaserId().
+  purchaser_id: string | null;
+  // FR-6: the PRIMARY USER of this customer's machine (e.g. a spouse) when
+  // different from the purchaser/account holder. Free-text — the primary user is
+  // usually not a customer of record. Surfaced on the refund card.
+  primary_user_name: string | null;
+  primary_user_phone: string | null;
+  primary_user_email: string | null;
+  // How that primary user relates to the purchaser (e.g. 'Spouse / partner').
+  // Text, not an enum — the UI picklist has an "Other…" free-text escape.
+  primary_user_relationship: string | null;
   created_at: string;
   updated_at: string;
 };
+
+// ── FR-6: CUSTOMER (purchaser) vs USER (submitter) ──────────────────────────
+// Every person is a customers row. A row representing a USER acting for someone
+// else links to the PURCHASER via purchaser_id; refunds/accounting book against
+// the purchaser. These pure helpers are the single resolution point.
+
+/** The accounting entity for a customer row: the linked purchaser if set,
+ *  otherwise the row itself. */
+export function resolvePurchaserId(row: { id: string; purchaser_id: string | null }): string {
+  return row.purchaser_id ?? row.id;
+}
+
+/** email (lowercased/trimmed) → resolved PURCHASER id. A user's email maps to
+ *  the purchaser they act for, so refund-card lookups book against the payer. */
+export function buildPurchaserIdByEmail(
+  rows: Array<{ id: string; email: string | null; purchaser_id: string | null }>,
+): Map<string, string> {
+  const m = new Map<string, string>();
+  for (const r of rows) {
+    if (r.email) m.set(r.email.toLowerCase().trim(), resolvePurchaserId(r));
+  }
+  return m;
+}
+
+// FR-6: resolve who a refund card is about. Every card has a PURCHASER (the
+// accounting entity) and a PRIMARY USER of the machine; by default the customer
+// who filed the form is BOTH, and we only split them when there's an explicit
+// link — a purchaser link (gift/household), or a separately-named primary user
+// (e.g. Chad bought it, Sarah uses it). No "unconfirmed" state: the labels are
+// always definite. `filerIs*` flags say which role the person who filled out the
+// form holds, so the card can make that clear.
+type CustLite = { id: string; full_name: string; purchaser_id: string | null; primary_user_name: string | null };
+export type RefundParties = {
+  purchaser: string;
+  primaryUser: string;      // defaults to the purchaser when none is linked
+  filer: string;            // who filled out the form
+  samePerson: boolean;      // purchaser === primaryUser
+  filerIsPurchaser: boolean;
+  filerIsPrimaryUser: boolean;
+};
+
+const sameName = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+
+export function resolveRefundParties(opts: {
+  filerEmail: string | null | undefined;
+  filerName: string;
+  byEmail: Map<string, CustLite>;
+  byId: Map<string, { full_name: string; primary_user_name: string | null }>;
+  // return-form attestation, used only when the filer isn't in the directory:
+  attestIsPurchaser?: boolean | null;
+  attestPurchaserName?: string | null;
+}): RefundParties {
+  const e = (opts.filerEmail ?? '').toLowerCase().trim();
+  const filerCust = e ? opts.byEmail.get(e) : undefined;
+  const filer = (filerCust?.full_name || opts.filerName || '').trim() || opts.filerName;
+
+  let purchaser: string;
+  let ownerPrimaryUserName: string | null = null;
+  let filerIsPurchaser: boolean;
+
+  if (filerCust?.purchaser_id) {
+    // Filer is a linked user acting for a purchaser (gift/household).
+    const owner = opts.byId.get(filerCust.purchaser_id);
+    purchaser = (owner?.full_name || '').trim() || filer;
+    ownerPrimaryUserName = owner?.primary_user_name?.trim() || null;
+    filerIsPurchaser = false;
+  } else if (filerCust) {
+    // Filer is a known customer and their own purchaser.
+    purchaser = (filerCust.full_name || '').trim() || filer;
+    ownerPrimaryUserName = filerCust.primary_user_name?.trim() || null;
+    filerIsPurchaser = true;
+  } else if (opts.attestIsPurchaser === false && opts.attestPurchaserName?.trim()) {
+    // Not in the directory, but the form says the filer isn't the buyer.
+    purchaser = opts.attestPurchaserName.trim();
+    filerIsPurchaser = false;
+  } else {
+    // Default: the filer is the purchaser.
+    purchaser = filer;
+    filerIsPurchaser = true;
+  }
+
+  // Primary user: an explicitly-named one wins; else the acting filer (when they
+  // aren't the purchaser); else the purchaser is also the primary user.
+  const primaryUser = ownerPrimaryUserName ?? (!filerIsPurchaser ? filer : purchaser);
+
+  return {
+    purchaser,
+    primaryUser,
+    filer,
+    samePerson: sameName(purchaser, primaryUser),
+    filerIsPurchaser,
+    filerIsPrimaryUser: sameName(primaryUser, filer),
+  };
+}
+
+// ── FR-6 for service tickets: who a ticket is about ─────────────────────────
+// A ticket is about whoever USES the machine, but whoever PAID still has to be
+// visible — warranty, refunds and accounting all book against them.
+//
+// Resolved at read time from the directory rather than read off the ticket:
+// service_tickets.customer_name is a snapshot taken at creation, so a renamed
+// or newly-split household keeps reading by its old name forever.
+//
+// The precedence deliberately matches resolveRefundParties(): a primary user
+// named on the PURCHASER's record outranks a linked user's own name. Two rules
+// would let one household read as two different people depending on the tab.
+
+export type CustomerPartyRow = Pick<
+  Customer,
+  'id' | 'full_name' | 'phone' | 'email' | 'purchaser_id'
+  | 'primary_user_name' | 'primary_user_phone' | 'primary_user_email'
+  | 'primary_user_relationship'
+>;
+
+export type CustomerParties = {
+  /** Headline name — the primary user of the machine. */
+  displayName: string;
+  /** Who paid. Identical to displayName when nobody else is named. */
+  purchaserName: string;
+  /** True only when these are genuinely two people, so the common case
+   *  renders as one plain name with no pills and no second line. */
+  split: boolean;
+  /** How the primary user relates to the purchaser, when recorded. */
+  relationship: string | null;
+  /** Best contact for the PRIMARY USER — their own if on file, else the
+   *  purchaser's, else the ticket snapshot. Outbound messages address the
+   *  person using the machine, but must still reach *somebody*. */
+  phone: string | null;
+  email: string | null;
+};
+
+/** Resolve the purchaser / primary-user pair behind a ticket. Pure. */
+export function resolveCustomerParties(opts: {
+  customer?: CustomerPartyRow | null;
+  byId?: Map<string, CustomerPartyRow>;
+  fallbackName?: string | null;
+  fallbackPhone?: string | null;
+  fallbackEmail?: string | null;
+}): CustomerParties {
+  const cust = opts.customer;
+
+  // No directory row: all we have is what the ticket captured. Fall back to it
+  // rather than guess, and claim no split we can't evidence.
+  if (!cust) {
+    const name = (opts.fallbackName ?? '').trim();
+    return {
+      displayName: name,
+      purchaserName: name,
+      split: false,
+      relationship: null,
+      phone: trimmed(opts.fallbackPhone),
+      email: trimmed(opts.fallbackEmail),
+    };
+  }
+
+  // The accounting entity: the linked purchaser, else the row itself. A
+  // dangling purchaser_id degrades to self — better a slightly incomplete card
+  // than one naming nobody at all.
+  const owner = (cust.purchaser_id ? opts.byId?.get(cust.purchaser_id) : null) ?? cust;
+  const purchaserName = (owner.full_name ?? '').trim();
+
+  const named = trimmed(owner.primary_user_name);
+  // Set only when this row is a USER acting for a different purchaser.
+  const linkedUser = owner.id !== cust.id ? cust : null;
+
+  let displayName: string;
+  let phone: string | null;
+  let email: string | null;
+
+  if (named) {
+    displayName = named;
+    phone = trimmed(owner.primary_user_phone);
+    email = trimmed(owner.primary_user_email);
+  } else if (linkedUser) {
+    displayName = (linkedUser.full_name ?? '').trim();
+    phone = trimmed(linkedUser.phone);
+    email = trimmed(linkedUser.email);
+  } else {
+    displayName = purchaserName;
+    phone = trimmed(cust.phone);
+    email = trimmed(cust.email);
+  }
+
+  // Someone who typed the purchaser's own name into the primary-user field has
+  // not created a second person. Collapse to the purchaser's canonical spelling
+  // so the card doesn't print the same human twice in two different casings.
+  const split = !sameName(displayName, purchaserName);
+  if (!split) displayName = purchaserName;
+
+  return {
+    displayName,
+    purchaserName,
+    split,
+    relationship: trimmed(owner.primary_user_relationship),
+    phone: phone ?? trimmed(owner.phone) ?? trimmed(opts.fallbackPhone),
+    email: email ?? trimmed(owner.email) ?? trimmed(opts.fallbackEmail),
+  };
+}
+
+/** The shape every Service surface consumes to name a ticket's person. */
+export type PartyResolver = (opts: {
+  customerId: string | null | undefined;
+  fallbackName?: string | null;
+  fallbackPhone?: string | null;
+  fallbackEmail?: string | null;
+}) => CustomerParties;
+
+/** Index the directory once, then resolve any number of tickets against it.
+ *  Every Service tab renders many rows, so the id map is built once per
+ *  customers array rather than per row. Pure — wrap in useMemo at the call
+ *  site and it recomputes only when the directory actually changes. */
+export function buildPartyResolver(customers: CustomerPartyRow[]): PartyResolver {
+  const byId = new Map<string, CustomerPartyRow>();
+  for (const c of customers) byId.set(c.id, c);
+
+  return ({ customerId, fallbackName, fallbackPhone, fallbackEmail }) =>
+    resolveCustomerParties({
+      customer: customerId ? byId.get(customerId) ?? null : null,
+      byId,
+      fallbackName,
+      fallbackPhone,
+      fallbackEmail,
+    });
+}
+
+// ── Card contact block (email / phone / address) ────────────────────────────
+// Every refund card has to say how to reach the customer. The case records
+// themselves are thin: a refund carries an email at best, a return form adds a
+// phone, and NEITHER ever carries an address — so the customer directory is
+// what fills the gaps. Case data wins where it exists (an operator may have
+// corrected it on the form); the directory backfills the rest. Nothing here
+// invents a value: a field with nothing behind it comes back null so the card
+// can say it isn't on file.
+
+export type CustomerContact = {
+  email: string | null;
+  phone: string | null;
+  address: string | null;
+};
+
+/** The directory columns a contact block reads. */
+export type ContactDirectoryRow = Pick<
+  Customer,
+  'email' | 'phone' | 'address_line' | 'city' | 'region' | 'postal_code' | 'country'
+>;
+
+const trimmed = (v: string | null | undefined): string | null => (v ?? '').trim() || null;
+
+/** One-line mailing address from a directory row, skipping the parts that are
+ *  blank. Null when the row has no address parts at all. */
+export function formatCustomerAddress(
+  row: Partial<ContactDirectoryRow> | null | undefined,
+): string | null {
+  if (!row) return null;
+  const parts = [row.address_line, row.city, row.region, row.postal_code, row.country]
+    .map(trimmed)
+    .filter((p): p is string => p !== null);
+  return parts.length ? parts.join(', ') : null;
+}
+
+/** The best email / phone / address we have for the person a card is about. */
+export function resolveCustomerContact(opts: {
+  caseEmail?: string | null;
+  casePhone?: string | null;
+  directory?: Partial<ContactDirectoryRow> | null;
+}): CustomerContact {
+  return {
+    email: trimmed(opts.caseEmail) ?? trimmed(opts.directory?.email),
+    phone: trimmed(opts.casePhone) ?? trimmed(opts.directory?.phone),
+    address: formatCustomerAddress(opts.directory),
+  };
+}
+
+export type ContactIndex<T> = { byEmail: Map<string, T>; byName: Map<string, T> };
+
+/** Index the directory for contact lookups. Email is the real key; the name
+ *  index is the fallback for cards that never captured an email. A name shared
+ *  by two customers is dropped from the name index — guessing which household
+ *  a card belongs to would put a stranger's address on it. */
+export function buildContactIndex<T extends { email: string | null; full_name: string }>(
+  rows: T[],
+): ContactIndex<T> {
+  const byEmail = new Map<string, T>();
+  const byName = new Map<string, T>();
+  const ambiguous = new Set<string>();
+  for (const row of rows) {
+    const email = trimmed(row.email)?.toLowerCase();
+    if (email && !byEmail.has(email)) byEmail.set(email, row);
+    const name = trimmed(row.full_name)?.toLowerCase();
+    if (!name) continue;
+    if (byName.has(name)) { ambiguous.add(name); continue; }
+    byName.set(name, row);
+  }
+  for (const name of ambiguous) byName.delete(name);
+  return { byEmail, byName };
+}
+
+/** Find a card's directory row: by email, else by an unambiguous full name. */
+export function lookupContactRow<T>(
+  index: ContactIndex<T>,
+  opts: { email?: string | null; name?: string | null },
+): T | null {
+  const email = trimmed(opts.email)?.toLowerCase();
+  if (email) {
+    const hit = index.byEmail.get(email);
+    if (hit) return hit;
+  }
+  const name = trimmed(opts.name)?.toLowerCase();
+  return (name && index.byName.get(name)) || null;
+}
 
 export function parseUtm(
   landingUrl: string | null | undefined,
@@ -213,7 +542,17 @@ export async function updateCustomerProfile(customerId: string, patch: CustomerP
   const { serial, ...rest } = patch;
   const update: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(rest)) update[k] = v === '' ? null : v;
-  if (serial !== undefined) update.serials = serial.trim() ? [serial.trim()] : [];
+  if (serial !== undefined) {
+    // The panel edits a single serial, but serials[] can legitimately hold
+    // several (a customer who owns two machines, or who has been through a
+    // replacement). Writing [serial] wholesale used to silently drop every
+    // other entry, so replace only the first element and keep the rest.
+    const next = serial.trim();
+    const { data: existing } = await supabase
+      .from('customers').select('serials').eq('id', customerId).single();
+    const rest_serials = ((existing?.serials as string[] | null) ?? []).slice(1);
+    update.serials = next ? [next, ...rest_serials] : rest_serials;
+  }
   const { error } = await supabase.from('customers').update(update).eq('id', customerId);
   if (error) throw error;
   await logAction('customer_profile_updated', customerId, Object.keys(patch).join(', '),
@@ -231,33 +570,117 @@ export type CustomerProfitability = {
   full_name: string;
   email: string | null;
   country: string | null;
+  // V9: province/state, read off the first sale order's ship-to (present on
+  // every sale order) and folded to a two-letter code. region_code prefixes
+  // the country — 'CA-ON' vs 'US-CA' — because 'CA' alone is ambiguous.
+  region: string | null;
+  region_code: string | null;
   onboard_date: string | null;
+  // V9: acquisition. Channel is the first sale order's UTM attribution
+  // collapsed to a budgetable bucket; later orders are upsells and must not
+  // re-attribute the customer. acquired_on anchors every cohort.
+  acquisition_channel: string;
+  acquisition_campaign: string | null;
+  first_order_at: string | null;
+  last_order_at: string | null;
+  acquired_on: string | null;
+  // V5: every amount is CAD, converted through public.fx_rates. The V4 `_usd`
+  // names were a misnomer on three of the four inputs — orders.total_usd/tax_usd
+  // follow orders.currency, cogs_usd is USD, shipping_cost_usd is CAD.
   // Revenue (net of tax — tax is pass-through to govt and not VCycene income)
-  revenue_usd: number;
+  revenue_cad: number;
+  // V9 revenue detail. gross is what list price would have been, so
+  // discount / gross is the discount rate. initial is the original machine
+  // purchase; everything after it is upsell.
+  gross_revenue_cad: number;
+  discount_cad: number;
+  initial_revenue_cad: number;
+  initial_discount_cad: number;
+  upsell_revenue_cad: number;
+  // Always 0 today — LILA sells no subscription or service plan. Kept as a
+  // column so the model is ready rather than reshaped later.
+  recurring_revenue_cad: number;
   // Sales tax collected on behalf of govt — informational, NOT part of margin
-  tax_collected_usd: number;
+  tax_collected_cad: number;
   // 4 cost buckets — sale_cogs + sale_shipping are sales-only;
   // expected_warranty covers ALL non-cancelled replacement orders;
   // expected_refund covers ALL non-denied refund approvals.
-  sale_cogs_usd: number;
-  sale_shipping_usd: number;
-  expected_warranty_cost_usd: number;
-  expected_refund_usd: number;
-  // Margin = revenue - all 4 buckets (no double-count)
-  net_margin_usd: number;
+  sale_cogs_cad: number;
+  sale_shipping_cad: number;
+  expected_warranty_cost_cad: number;
+  expected_refund_cad: number;
+  // V6 5th bucket: diagnosis-call labour, from public.diagnosis_calls.
+  // NULL — not 0 — while support_rates.hourly_cad is unset, so the card can
+  // distinguish "no calls" from "we haven't priced a person-hour yet".
+  support_cost_cad: number | null;
+  // V8 6th bucket: what it costs US to take a unit back — stocking +
+  // inspection + the return freight leg. Not to be confused with
+  // refund_approvals.restocking_fee_usd, which is a fee charged TO the
+  // customer and already nets out of expected_refund_cad.
+  return_handling_cad: number | null;
+  return_stocking_cad: number | null;
+  return_inspection_cad: number | null;
+  return_freight_cad: number | null;
+  // Returns where the unit physically came back. Customer-discarded returns
+  // are excluded — nothing shipped, so there was nothing to stock or inspect.
+  returns_handled: number;
+  // V9 buckets 7-9, priced from public.profitability_rates. All three are
+  // rated 0 until Finance sets them, and the UI says "unpriced" rather than
+  // letting the 0 read as "free".
+  payment_fee_cad: number;
+  sales_commission_cad: number;
+  installation_cost_cad: number;
+  // Bucket 10: consumables and repair parts bought at retail and drop-shipped
+  // to the customer (Amazon worm castings, jumper caps). Cost of goods, not
+  // freight -- the money buys product the customer keeps.
+  consumables_cost_cad: number;
+  consumable_item_count: number;
+  // Bucket 11: 3PL per-order handling (FlexSpace) -- order fee + picks.
+  // ESTIMATED from the contracted rate card, not from an invoice. Excludes
+  // transportation, which the 3PL passes through and bucket 2 already holds.
+  fulfilment_cost_cad: number;
+  fulfilment_order_count: number;
+  // Margin = revenue - all 10 buckets (no double-count)
+  net_margin_cad: number;
   // Settled-refund subset (status='refunded' only) — shown alongside
   // expected so operators can see in-flight vs booked.
-  settled_refund_usd: number;
+  settled_refund_cad: number;
   // Counts
   order_count: number;
+  // Sale orders with a unit traced to them. Lower than order_count whenever an
+  // order has not shipped, or its unit was never linked to the order ref.
+  units_shipped_count: number;
   replacement_count: number;
   open_replacement_count: number;
+  // Cost coverage. COGS is always filled, but batch_actual is the invoiced
+  // landed cost while schedule is the V-SAX roadmap projection. Shipping can
+  // still be genuinely unknown — shipping_uncosted_count > 0 means this
+  // customer's margin is an upper bound.
+  cogs_actual_count: number;
+  cogs_modelled_count: number;
+  shipping_costed_count: number;
+  shipping_uncosted_count: number;
+  // Sale orders whose freight came from a Freightcom invoice rather than the
+  // booking quote. The quote is never revised when an adjustment lands.
+  shipping_invoiced_count: number;
+  // Pre-Freightcom freight (Canpar/GLS/Purolator/FedEx, Oct 2025 - Jan 2026).
+  // Attributed per customer, because most of that cohort has no order record.
+  // Part of the shipping bucket, held separately so it stays auditable.
+  legacy_shipping_cad: number;
+  legacy_shipment_count: number;
   refund_count: number;
   in_flight_refund_count: number;
   ticket_count: number;
   // Leading indicator: open warranty/defect tickets with no replacement
   // order yet — expected_warranty will grow when these convert.
   open_warranty_ticket_count: number;
+  // Every diagnosis call and the total time on them, no-shows included —
+  // support_cost_cad bills both the same way.
+  diagnosis_call_count: number;
+  diagnosis_minutes: number;
+  // Subset of diagnosis_call_count the customer never joined, not additional
+  // to it. Billed, but surfaced separately so the waste stays legible.
+  diagnosis_noshow_count: number;
   is_team_member: boolean;
 };
 
@@ -276,7 +699,7 @@ export function useCustomerProfitability(): {
       const { data, error: err } = await supabase
         .from('customer_profitability')
         .select('*')
-        .order('net_margin_usd', { ascending: false });
+        .order('net_margin_cad', { ascending: false });
       if (cancelled) return;
       if (err) {
         setError(err as unknown as Error);
@@ -287,14 +710,46 @@ export function useCustomerProfitability(): {
       // can do arithmetic without string juggling.
       const coerced = (data ?? []).map((r: Record<string, unknown>) => ({
         ...r,
-        revenue_usd:                Number(r.revenue_usd ?? 0),
-        tax_collected_usd:          Number(r.tax_collected_usd ?? 0),
-        sale_cogs_usd:              Number(r.sale_cogs_usd ?? 0),
-        sale_shipping_usd:          Number(r.sale_shipping_usd ?? 0),
-        expected_warranty_cost_usd: Number(r.expected_warranty_cost_usd ?? 0),
-        expected_refund_usd:        Number(r.expected_refund_usd ?? 0),
-        settled_refund_usd:         Number(r.settled_refund_usd ?? 0),
-        net_margin_usd:             Number(r.net_margin_usd ?? 0),
+        revenue_cad:                Number(r.revenue_cad ?? 0),
+        gross_revenue_cad:          Number(r.gross_revenue_cad ?? 0),
+        discount_cad:               Number(r.discount_cad ?? 0),
+        initial_revenue_cad:        Number(r.initial_revenue_cad ?? 0),
+        initial_discount_cad:       Number(r.initial_discount_cad ?? 0),
+        upsell_revenue_cad:         Number(r.upsell_revenue_cad ?? 0),
+        recurring_revenue_cad:      Number(r.recurring_revenue_cad ?? 0),
+        payment_fee_cad:            Number(r.payment_fee_cad ?? 0),
+        sales_commission_cad:       Number(r.sales_commission_cad ?? 0),
+        installation_cost_cad:      Number(r.installation_cost_cad ?? 0),
+        consumables_cost_cad:       Number(r.consumables_cost_cad ?? 0),
+        fulfilment_cost_cad:        Number(r.fulfilment_cost_cad ?? 0),
+        fulfilment_order_count:     Number(r.fulfilment_order_count ?? 0),
+        consumable_item_count:      Number(r.consumable_item_count ?? 0),
+        shipping_invoiced_count:    Number(r.shipping_invoiced_count ?? 0),
+        legacy_shipping_cad:        Number(r.legacy_shipping_cad ?? 0),
+        legacy_shipment_count:      Number(r.legacy_shipment_count ?? 0),
+        units_shipped_count:        Number(r.units_shipped_count ?? 0),
+        acquisition_channel:        (r.acquisition_channel as string) ?? 'unknown',
+        tax_collected_cad:          Number(r.tax_collected_cad ?? 0),
+        sale_cogs_cad:              Number(r.sale_cogs_cad ?? 0),
+        sale_shipping_cad:          Number(r.sale_shipping_cad ?? 0),
+        expected_warranty_cost_cad: Number(r.expected_warranty_cost_cad ?? 0),
+        expected_refund_cad:        Number(r.expected_refund_cad ?? 0),
+        // Preserve null: it means the rate is unset, not that support was free.
+        support_cost_cad:           r.support_cost_cad == null ? null : Number(r.support_cost_cad),
+        return_handling_cad:        r.return_handling_cad == null ? null : Number(r.return_handling_cad),
+        return_stocking_cad:        r.return_stocking_cad == null ? null : Number(r.return_stocking_cad),
+        return_inspection_cad:      r.return_inspection_cad == null ? null : Number(r.return_inspection_cad),
+        return_freight_cad:         r.return_freight_cad == null ? null : Number(r.return_freight_cad),
+        returns_handled:            Number(r.returns_handled ?? 0),
+        diagnosis_call_count:       Number(r.diagnosis_call_count ?? 0),
+        diagnosis_minutes:          Number(r.diagnosis_minutes ?? 0),
+        diagnosis_noshow_count:     Number(r.diagnosis_noshow_count ?? 0),
+        settled_refund_cad:         Number(r.settled_refund_cad ?? 0),
+        net_margin_cad:             Number(r.net_margin_cad ?? 0),
+        cogs_actual_count:          Number(r.cogs_actual_count ?? 0),
+        cogs_modelled_count:        Number(r.cogs_modelled_count ?? 0),
+        shipping_costed_count:      Number(r.shipping_costed_count ?? 0),
+        shipping_uncosted_count:    Number(r.shipping_uncosted_count ?? 0),
       })) as CustomerProfitability[];
       setRows(coerced);
       setLoading(false);
@@ -303,6 +758,145 @@ export function useCustomerProfitability(): {
   }, []);
 
   return { rows, loading, error };
+}
+
+// ── Profitability inputs: rates and acquisition spend ───────────────────────
+// Both are small reference tables read once. They feed lib/profitability.ts,
+// which is where every formula that needs more than one customer lives.
+
+/** public.profitability_rates, keyed for direct use by the calc layer. */
+export function useProfitabilityRates(): {
+  rates: ProfitabilityRates;
+  loading: boolean;
+  error: Error | null;
+} {
+  const [rates, setRates] = useState<ProfitabilityRates>(DEFAULT_RATES);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data, error: err } = await supabase
+        .from('profitability_rates')
+        .select('key, value');
+      if (cancelled) return;
+      if (err) {
+        // A missing rates table must not blank the dashboard — fall back to
+        // the defaults, which are all zero, and let the UI flag them unpriced.
+        setError(err as unknown as Error);
+        setLoading(false);
+        return;
+      }
+      const next = { ...DEFAULT_RATES };
+      for (const row of (data ?? []) as { key: string; value: unknown }[]) {
+        if (row.key in next) {
+          (next as unknown as Record<string, number>)[row.key] = Number(row.value ?? 0);
+        }
+      }
+      setRates(next);
+      setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  return { rates, loading, error };
+}
+
+/** One cancelled sale order, and the machine LILA kept because of it.
+ *  Deliberately has no customer id: a cancelled order's cost belongs to the
+ *  company, not to the person who cancelled. Test orders on team accounts are
+ *  excluded by the view — no machine was built for those. See migration V16. */
+export type RetainedUnitCost = {
+  order_id: string;
+  order_ref: string | null;
+  customer_name: string | null;
+  placed_at: string | null;
+  cancelled_at: string | null;
+  cogs_basis: string | null;
+  cogs_cad: number;
+  freight_cad: number;
+  units_retained: number;
+};
+
+/** public.retained_unit_costs — cost of machines built for orders that were
+ *  later cancelled. Reported beside contribution margin, never inside it. */
+export function useRetainedUnitCosts(): {
+  rows: RetainedUnitCost[];
+  loading: boolean;
+  error: Error | null;
+} {
+  const [rows, setRows] = useState<RetainedUnitCost[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data, error: err } = await supabase
+        .from('retained_unit_costs')
+        .select('*')
+        .order('placed_at', { ascending: false });
+      if (cancelled) return;
+      if (err) {
+        setError(err as unknown as Error);
+        setLoading(false);
+        return;
+      }
+      setRows((data ?? []).map((r: Record<string, unknown>) => ({
+        order_id:       String(r.order_id ?? ''),
+        order_ref:      (r.order_ref as string) ?? null,
+        customer_name:  (r.customer_name as string) ?? null,
+        placed_at:      (r.placed_at as string) ?? null,
+        cancelled_at:   (r.cancelled_at as string) ?? null,
+        cogs_basis:     (r.cogs_basis as string) ?? null,
+        cogs_cad:       Number(r.cogs_cad ?? 0),
+        freight_cad:    Number(r.freight_cad ?? 0),
+        units_retained: Number(r.units_retained ?? 0),
+      })));
+      setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  return { rows, loading, error };
+}
+
+/** public.acquisition_spend_monthly — Meta spend plus any hand-entered rows. */
+export function useAcquisitionSpend(): {
+  spend: AcquisitionSpendRow[];
+  loading: boolean;
+  error: Error | null;
+} {
+  const [spend, setSpend] = useState<AcquisitionSpendRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data, error: err } = await supabase
+        .from('acquisition_spend_monthly')
+        .select('*')
+        .order('month', { ascending: true });
+      if (cancelled) return;
+      if (err) {
+        setError(err as unknown as Error);
+        setLoading(false);
+        return;
+      }
+      setSpend((data ?? []).map((r: Record<string, unknown>) => ({
+        channel:   String(r.channel ?? 'unknown'),
+        month:     String(r.month ?? ''),
+        spend_cad: Number(r.spend_cad ?? 0),
+        source:    String(r.source ?? 'manual'),
+      })));
+      setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  return { spend, loading, error };
 }
 
 // ── 30-day refund window (anchored on onboarding date) ──────────────────────
@@ -359,6 +953,9 @@ export function useOnboardDates(): { byEmail: Map<string, string | null>; loadin
  *  a household's records (tickets, etc.) by customer even when they span
  *  multiple emails — e.g. a couple where one partner's tickets carry a second
  *  email but all attach to one customer record. Read-only snapshot. */
+/** email → resolved PURCHASER id (FR-6). A gift/household user's email resolves
+ *  to the purchaser they act for, so refund lookups book the accounting entity,
+ *  not the submitter. */
 export function useCustomerIdByEmail(): { byEmail: Map<string, string>; loading: boolean } {
   const [byEmail, setByEmail] = useState<Map<string, string>>(new Map());
   const [loading, setLoading] = useState(true);
@@ -366,19 +963,532 @@ export function useCustomerIdByEmail(): { byEmail: Map<string, string>; loading:
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const { data } = await supabase.from('customers').select('id, email');
+      const { data } = await supabase.from('customers').select('id, email, purchaser_id');
       if (cancelled) return;
-      const m = new Map<string, string>();
-      for (const c of (data ?? []) as { id: string; email: string | null }[]) {
-        if (c.email) m.set(c.email.toLowerCase().trim(), c.id);
-      }
-      setByEmail(m);
+      setByEmail(buildPurchaserIdByEmail(
+        (data ?? []) as { id: string; email: string | null; purchaser_id: string | null }[],
+      ));
       setLoading(false);
     })();
     return () => { cancelled = true; };
   }, []);
 
   return { byEmail, loading };
+}
+
+/** FR-6: link a USER row to the PURCHASER it acts for (or pass null to unlink,
+ *  making the row its own purchaser again). */
+export async function setPurchaser(userId: string, purchaserId: string | null): Promise<void> {
+  if (purchaserId === userId) throw new Error('A customer cannot be their own linked purchaser.');
+  const { error } = await supabase.from('customers')
+    .update({ purchaser_id: purchaserId }).eq('id', userId);
+  if (error) throw error;
+  await logAction('customer_purchaser_linked', userId, purchaserId ?? 'unlinked');
+}
+
+/** Picklist for the primary user's relationship to the purchaser. Backed by a
+ *  plain text column, so this list can grow without a migration; the UI also
+ *  offers "Other…" for anything not covered here. */
+export const PRIMARY_USER_RELATIONSHIPS = [
+  'Spouse / partner',
+  'Parent',
+  'Child',
+  'Sibling',
+  // "Extended family", not "Other family member" — the picklist already ends in
+  // an "Other…" escape and two options starting with "Other" read as a mistake.
+  'Extended family',
+  'Roommate / housemate',
+  'Friend',
+  'Employee / staff',
+  'Property manager / caretaker',
+] as const;
+
+/** FR-6: set (or clear) the primary user of this customer's machine — a person
+ *  who is usually not a customer of record (e.g. a spouse), so free-text.
+ *  `relationship` is how they relate to the purchaser (see
+ *  PRIMARY_USER_RELATIONSHIPS; any string is accepted for the "Other…" case). */
+export async function setPrimaryUser(
+  customerId: string,
+  name: string | null,
+  phone: string | null,
+  email: string | null,
+  relationship: string | null,
+): Promise<void> {
+  const { error } = await supabase.from('customers').update({
+    primary_user_name: name?.trim() || null,
+    primary_user_phone: phone?.trim() || null,
+    primary_user_email: email?.trim() || null,
+    primary_user_relationship: relationship?.trim() || null,
+  }).eq('id', customerId);
+  if (error) throw error;
+  const rel = relationship?.trim();
+  await logAction(
+    'customer_primary_user_set',
+    customerId,
+    name?.trim() ? `${name.trim()}${rel ? ` (${rel})` : ''}` : 'cleared',
+    { entityType: 'customer', entityId: customerId },
+  );
+}
+
+// ── Other users in the household ────────────────────────────────────────────
+// primary_user_* holds ONE person. A household often has more: the purchaser
+// stays the primary user and a spouse/child/roommate is also someone we're in
+// contact with. Those live in customer_additional_users — free text, because
+// like the primary user they're usually not customers of record.
+
+export type CustomerAdditionalUser = {
+  id: string;
+  customer_id: string;
+  full_name: string;
+  phone: string | null;
+  email: string | null;
+  /** How they relate to the purchaser. See PRIMARY_USER_RELATIONSHIPS — text,
+   *  so the UI's "Other…" free-text escape can store anything. */
+  relationship: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+/** The household users for one customer, oldest first. Pass null when no
+ *  customer is selected — the hook then idles with an empty list. */
+export function useCustomerAdditionalUsers(customerId: string | null): {
+  users: CustomerAdditionalUser[];
+  loading: boolean;
+  refresh: () => Promise<void>;
+} {
+  const [users, setUsers] = useState<CustomerAdditionalUser[]>([]);
+  const [loading, setLoading] = useState(customerId !== null);
+  const [refreshTick, setRefreshTick] = useState(0);
+
+  useEffect(() => {
+    if (!customerId) { setUsers([]); setLoading(false); return; }
+    let channel: RealtimeChannel | null = null;
+    let cancelled = false;
+    setLoading(true);
+    (async () => {
+      const { data, error } = await supabase
+        .from('customer_additional_users')
+        .select('*')
+        .eq('customer_id', customerId)
+        .order('created_at', { ascending: true });
+      if (cancelled) return;
+      if (!error && data) setUsers(data as CustomerAdditionalUser[]);
+      setLoading(false);
+
+      // Two operators can have the same customer open; keep both lists live.
+      // The channel name is per-customer so switching customers tears down the
+      // old subscription instead of stacking filters.
+      channel = supabase
+        .channel(`customer_additional_users:${customerId}`)
+        .on('postgres_changes', {
+          event: '*', schema: 'public', table: 'customer_additional_users',
+          filter: `customer_id=eq.${customerId}`,
+        }, (payload) => {
+          setUsers(prev => {
+            if (payload.eventType === 'DELETE' && payload.old) {
+              return prev.filter(u => u.id !== (payload.old as { id: string }).id);
+            }
+            if (payload.new) {
+              const row = payload.new as CustomerAdditionalUser;
+              const idx = prev.findIndex(u => u.id === row.id);
+              if (idx >= 0) { const next = [...prev]; next[idx] = row; return next; }
+              return [...prev, row].sort((a, b) => a.created_at.localeCompare(b.created_at));
+            }
+            return prev;
+          });
+        })
+        .subscribe();
+    })();
+    return () => { cancelled = true; if (channel) void channel.unsubscribe(); };
+  }, [customerId, refreshTick]);
+
+  const refresh = async () => { setRefreshTick(t => t + 1); };
+
+  return { users, loading, refresh };
+}
+
+/** Fields an operator can set on a household user. */
+export type AdditionalUserInput = {
+  full_name: string;
+  phone?: string | null;
+  email?: string | null;
+  relationship?: string | null;
+};
+
+/** Trim to the shape the table wants: blanks become NULL, never ''. */
+function normalizeAdditionalUser(input: AdditionalUserInput) {
+  return {
+    full_name: input.full_name.trim(),
+    phone: input.phone?.trim() || null,
+    email: input.email?.trim() || null,
+    relationship: input.relationship?.trim() || null,
+  };
+}
+
+/** One-line audit detail: "Sarah Lockhart (Spouse / partner)". */
+function additionalUserLabel(row: { full_name: string; relationship: string | null }): string {
+  return row.relationship ? `${row.full_name} (${row.relationship})` : row.full_name;
+}
+
+/** Add another person in this customer's household. */
+export async function addCustomerAdditionalUser(
+  customerId: string,
+  input: AdditionalUserInput,
+): Promise<CustomerAdditionalUser> {
+  const row = normalizeAdditionalUser(input);
+  if (!row.full_name) throw new Error('A name is required.');
+  const { data, error } = await supabase
+    .from('customer_additional_users')
+    .insert({ customer_id: customerId, ...row })
+    .select()
+    .single();
+  if (error) throw error;
+  await logAction(
+    'customer_additional_user_added',
+    customerId,
+    additionalUserLabel(row),
+    { entityType: 'customer', entityId: customerId },
+  );
+  return data as CustomerAdditionalUser;
+}
+
+/** Edit a household user in place. */
+export async function updateCustomerAdditionalUser(
+  id: string,
+  customerId: string,
+  input: AdditionalUserInput,
+): Promise<void> {
+  const row = normalizeAdditionalUser(input);
+  if (!row.full_name) throw new Error('A name is required.');
+  const { error } = await supabase
+    .from('customer_additional_users')
+    .update(row)
+    .eq('id', id);
+  if (error) throw error;
+  await logAction(
+    'customer_additional_user_updated',
+    customerId,
+    additionalUserLabel(row),
+    { entityType: 'customer', entityId: customerId },
+  );
+}
+
+/** Remove a household user. `name` is passed in only so the audit line stays
+ *  readable after the row is gone. */
+export async function removeCustomerAdditionalUser(
+  id: string,
+  customerId: string,
+  name: string,
+): Promise<void> {
+  const { error } = await supabase
+    .from('customer_additional_users')
+    .delete()
+    .eq('id', id);
+  if (error) throw error;
+  await logAction(
+    'customer_additional_user_removed',
+    customerId,
+    name,
+    { entityType: 'customer', entityId: customerId },
+  );
+}
+
+/** Every household user in the directory, grouped by customer. The per-customer
+ *  hook above serves one open panel; the directory needs them all at once so a
+ *  search can look past the purchaser's name. One row per contact (not per
+ *  customer), so the whole table is small enough to hold. */
+export function useAllCustomerAdditionalUsers(): {
+  byCustomerId: Map<string, CustomerAdditionalUser[]>;
+  loading: boolean;
+  refresh: () => Promise<void>;
+} {
+  const [rows, setRows] = useState<CustomerAdditionalUser[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshTick, setRefreshTick] = useState(0);
+
+  useEffect(() => {
+    let channel: RealtimeChannel | null = null;
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await supabase
+        .from('customer_additional_users')
+        .select('*')
+        .order('created_at', { ascending: true });
+      if (cancelled) return;
+      if (!error && data) setRows(data as CustomerAdditionalUser[]);
+      setLoading(false);
+
+      // A user added in one operator's panel should become searchable in
+      // another's directory without a reload.
+      channel = supabase
+        .channel('customer_additional_users:all')
+        .on('postgres_changes', {
+          event: '*', schema: 'public', table: 'customer_additional_users',
+        }, (payload) => {
+          setRows(prev => {
+            if (payload.eventType === 'DELETE' && payload.old) {
+              return prev.filter(u => u.id !== (payload.old as { id: string }).id);
+            }
+            if (payload.new) {
+              const row = payload.new as CustomerAdditionalUser;
+              const idx = prev.findIndex(u => u.id === row.id);
+              if (idx >= 0) { const next = [...prev]; next[idx] = row; return next; }
+              return [...prev, row];
+            }
+            return prev;
+          });
+        })
+        .subscribe();
+    })();
+    return () => { cancelled = true; if (channel) void channel.unsubscribe(); };
+  }, [refreshTick]);
+
+  const byCustomerId = useMemo(() => {
+    const m = new Map<string, CustomerAdditionalUser[]>();
+    for (const r of rows) {
+      const arr = m.get(r.customer_id);
+      if (arr) arr.push(r);
+      else m.set(r.customer_id, [r]);
+    }
+    return m;
+  }, [rows]);
+
+  const refresh = async () => { setRefreshTick(t => t + 1); };
+
+  return { byCustomerId, loading, refresh };
+}
+
+// ── Directory search across everyone on a record ────────────────────────────
+// A customer record is a household, not just the person who paid. The name an
+// operator is handed — on the phone, in an email, on a support ticket — is
+// usually whoever USES the machine, and that's often the primary user or
+// another household user rather than the purchaser. Searching only
+// customers.full_name made those records unfindable by the only name the
+// operator had.
+
+/** The customer-row fields a directory search reads. */
+export type SearchableCustomer = {
+  full_name: string;
+  email: string | null;
+  phone: string | null;
+  city: string | null;
+  region: string | null;
+  primary_user_name: string | null;
+  primary_user_email: string | null;
+  primary_user_phone: string | null;
+  primary_user_relationship: string | null;
+};
+
+/** The household-user fields a directory search reads. */
+export type SearchableUser = {
+  full_name: string;
+  email: string | null;
+  phone: string | null;
+  relationship: string | null;
+};
+
+export type CustomerSearchMatch = {
+  matched: boolean;
+  /** Set only when the hit came from someone OTHER than the purchaser, so the
+   *  row can say why it's in the results (e.g. "Sarah Lockhart · Spouse"). */
+  via: string | null;
+};
+
+const SEARCH_MISS: CustomerSearchMatch = { matched: false, via: null };
+const SEARCH_HIT: CustomerSearchMatch = { matched: true, via: null };
+
+const fieldHit = (value: string | null | undefined, q: string) =>
+  !!value && value.toLowerCase().includes(q);
+
+/** "Sarah Lockhart · Spouse / partner", or just the name when there's no
+ *  relationship. Falls back to whatever contact detail we have when a person is
+ *  on the record without a name. */
+function viaLabel(person: {
+  full_name?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  relationship?: string | null;
+}): string {
+  const who = person.full_name?.trim() || person.email?.trim() || person.phone?.trim() || 'household user';
+  const rel = person.relationship?.trim();
+  return rel ? `${who} · ${rel}` : who;
+}
+
+/** Does this customer match the directory search box? Checks the purchaser's
+ *  own name/contact/city first, then the primary user, then everyone else in
+ *  the household — so a hit on the purchaser never gets annotated, and a hit on
+ *  anyone else reports who it was. An empty query matches everyone. */
+export function matchCustomerSearch(
+  c: SearchableCustomer,
+  users: SearchableUser[],
+  query: string,
+): CustomerSearchMatch {
+  const q = query.trim().toLowerCase();
+  if (!q) return SEARCH_HIT;
+
+  // The purchaser themself — the record's own identity.
+  if (
+    fieldHit(c.full_name, q) || fieldHit(c.email, q) || fieldHit(c.phone, q) ||
+    fieldHit(c.city, q) || fieldHit(c.region, q)
+  ) return SEARCH_HIT;
+
+  // The primary user (customers.primary_user_*): the one named person who uses
+  // the machine when that isn't the purchaser.
+  if (
+    fieldHit(c.primary_user_name, q) || fieldHit(c.primary_user_email, q) ||
+    fieldHit(c.primary_user_phone, q)
+  ) {
+    return {
+      matched: true,
+      via: viaLabel({
+        full_name: c.primary_user_name,
+        email: c.primary_user_email,
+        phone: c.primary_user_phone,
+        relationship: c.primary_user_relationship,
+      }),
+    };
+  }
+
+  // Everyone else in the household (customer_additional_users).
+  for (const u of users) {
+    if (fieldHit(u.full_name, q) || fieldHit(u.email, q) || fieldHit(u.phone, q)) {
+      return { matched: true, via: viaLabel(u) };
+    }
+  }
+
+  return SEARCH_MISS;
+}
+
+// ── Operator-editable contact details ───────────────────────────────────────
+// makelila is the system of record (docs/system-of-record.md): HubSpot's sync
+// only FILLS BLANK columns on an existing row and never clobbers a curated
+// value, and no other sync writes customers.email / customers.phone. So an
+// operator correction here sticks.
+
+/** Loose sanity check — we're catching typos, not policing valid addresses. */
+export function isPlausibleEmail(value: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+}
+
+/** Correct a customer's own email / phone from the directory. Email is the key
+ *  this app matches orders, tickets and refund cards on, so a duplicate would
+ *  silently merge two people's histories — that's rejected here rather than
+ *  left to a DB constraint (there is no unique index on customers.email). */
+export async function updateCustomerContact(
+  customerId: string,
+  patch: { email?: string | null; phone?: string | null },
+): Promise<void> {
+  const update: Record<string, string | null> = {};
+
+  if (patch.email !== undefined) {
+    const email = patch.email?.trim().toLowerCase() || null;
+    if (email && !isPlausibleEmail(email)) {
+      throw new Error(`"${email}" doesn't look like an email address.`);
+    }
+    if (email) {
+      const { data: clash, error: clashErr } = await supabase
+        .from('customers')
+        .select('id, full_name')
+        .ilike('email', email)
+        .neq('id', customerId)
+        .limit(1);
+      if (clashErr) throw clashErr;
+      const other = (clash ?? [])[0] as { id: string; full_name: string } | undefined;
+      if (other) {
+        throw new Error(
+          `${other.full_name || 'Another customer'} already uses ${email}. ` +
+          `Two customers can't share an email — orders and tickets are matched on it. ` +
+          `Link them as purchaser/user instead, or fix the other record first.`,
+        );
+      }
+    }
+    update.email = email;
+  }
+
+  if (patch.phone !== undefined) update.phone = patch.phone?.trim() || null;
+  if (Object.keys(update).length === 0) return;
+
+  const { error } = await supabase.from('customers').update(update).eq('id', customerId);
+  if (error) throw error;
+  await logAction('customer_contact_updated', customerId, Object.keys(update).join(', '),
+    { entityType: 'customer', entityId: customerId });
+}
+
+
+// ── Name correction ─────────────────────────────────────────────────────────
+// customers.full_name is a generated column, so fixing first_name / last_name
+// fixes every screen reading the customers row. Eleven other tables hold a
+// denormalized customer_name snapshot and several match back to the customer BY
+// that string, so the rename has to cascade or the record is orphaned, not just
+// mislabelled. All of that happens inside the rename_customer RPC (migration
+// 20260813090000) in one transaction.
+// Spec: docs/superpowers/specs/2026-08-13-customer-name-editing-design.md
+
+/** A row the rename left alone because its only key was a name another
+ *  customer also answers to. `id` is that table's primary key. */
+export type CustomerRenameSkip = { table: string; id: string; label: string | null };
+
+export type CustomerRenameResult = {
+  old_name: string;
+  new_name: string;
+  /** True when another customer shares the old name. Name-only matching is
+   *  suppressed in that case and the affected rows land in `skipped`. */
+  ambiguous: boolean;
+  /** table name → rows whose customer_name changed. Tables with no changes
+   *  are omitted. */
+  updated: Record<string, number>;
+  skipped: CustomerRenameSkip[];
+};
+
+async function callRenameCustomer(
+  customerId: string,
+  firstName: string,
+  lastName: string,
+  dryRun: boolean,
+): Promise<CustomerRenameResult> {
+  const { data, error } = await supabase.rpc('rename_customer', {
+    p_customer_id: customerId,
+    p_first_name: firstName,
+    p_last_name: lastName,
+    p_dry_run: dryRun,
+  });
+  if (error) throw new Error(error.message);
+  const r = (data ?? {}) as Partial<CustomerRenameResult>;
+  return {
+    old_name: r.old_name ?? '',
+    new_name: r.new_name ?? '',
+    ambiguous: r.ambiguous ?? false,
+    updated: r.updated ?? {},
+    skipped: r.skipped ?? [],
+  };
+}
+
+/** Total rows a rename touches across every table. */
+export function renameRowCount(result: CustomerRenameResult): number {
+  return Object.values(result.updated).reduce((a, b) => a + b, 0);
+}
+
+/** Dry run: what a rename WOULD change, writing nothing. Shares its predicate
+ *  with the real thing, so the confirm dialog can't promise the wrong number. */
+export function previewCustomerRename(
+  customerId: string, firstName: string, lastName: string,
+): Promise<CustomerRenameResult> {
+  return callRenameCustomer(customerId, firstName, lastName, true);
+}
+
+/** Apply the rename and every cascade. Throws if both names are blank — that
+ *  would erase the key the cascades match on. */
+export async function renameCustomer(
+  customerId: string, firstName: string, lastName: string,
+): Promise<CustomerRenameResult> {
+  const result = await callRenameCustomer(customerId, firstName, lastName, false);
+  await logAction(
+    'customer_renamed',
+    customerId,
+    `${result.old_name || '(no name)'} → ${result.new_name} (${renameRowCount(result)} records)`,
+    { entityType: 'customer', entityId: customerId },
+  );
+  return result;
 }
 
 export function useCustomers(): {
@@ -442,14 +1552,19 @@ export async function exportPurchasers(opts: { minusRefunds: boolean }): Promise
   count: number;
   excluded: number;
 }> {
-  // 1. Set of customer emails (lowercased) who have purchased
-  const [{ data: orderEmails }, { data: unitNames }] = await Promise.all([
-    supabase.from('orders').select('customer_email').not('customer_email', 'is', null),
+  // 1. Set of customer emails (lowercased) who have purchased. The same rows
+  //    carry the shipping addresses the export writes out — the address on the
+  //    customer's latest order, not the `customers` snapshot, which has no
+  //    second address line (see lib/customerAddress).
+  const [{ data: orderRows }, { data: unitNames }] = await Promise.all([
+    supabase.from('orders').select(ADDRESS_ORDER_COLUMNS),
     supabase.from('units').select('customer_name').eq('status', 'shipped'),
   ]);
+  const orders = (orderRows ?? []) as unknown as AddressOrder[];
+  const addressIndex = buildCustomerAddressIndex(orders);
   const purchaserEmails = new Set<string>();
   const purchaserNames = new Set<string>();
-  for (const r of (orderEmails ?? []) as { customer_email: string | null }[]) {
+  for (const r of orders) {
     if (r.customer_email) purchaserEmails.add(r.customer_email.toLowerCase().trim());
   }
   for (const r of (unitNames ?? []) as { customer_name: string | null }[]) {
@@ -480,7 +1595,7 @@ export async function exportPurchasers(opts: { minusRefunds: boolean }): Promise
   // 3. Pull all customers, filter
   const { data: customers, error } = await supabase
     .from('customers')
-    .select('email, first_name, last_name, full_name, phone, address_line, city, region, postal_code, country, onboard_date')
+    .select('id, email, first_name, last_name, full_name, phone, address_line, city, region, postal_code, country, onboard_date')
     .order('full_name', { ascending: true });
   if (error) throw new Error(`Customer load failed: ${error.message}`);
 
@@ -502,8 +1617,11 @@ export async function exportPurchasers(opts: { minusRefunds: boolean }): Promise
     rows.push(c);
   }
 
-  // 4. CSV
-  const header = ['email','first_name','last_name','phone','address_line','city','region','postal_code','country','onboard_date'];
+  // 4. CSV. `address_line2` is its own column rather than being folded into
+  //    address_line: an apartment number jammed onto the street line is not an
+  //    address Klaviyo (or a courier) can read back apart, and address2 is a
+  //    field both of them have.
+  const header = ['email','first_name','last_name','phone','address_line','address_line2','city','region','postal_code','country','onboard_date'];
   const esc = (v: string | null | undefined): string => {
     if (v == null) return '';
     const s = String(v);
@@ -511,9 +1629,10 @@ export async function exportPurchasers(opts: { minusRefunds: boolean }): Promise
   };
   const lines = [header.join(',')];
   for (const r of rows) {
+    const a = resolveCustomerAddress(r as unknown as Customer, addressIndex);
     lines.push([
       esc(r.email), esc(r.first_name), esc(r.last_name), esc(r.phone),
-      esc(r.address_line), esc(r.city), esc(r.region), esc(r.postal_code), esc(r.country),
+      esc(a.line1), esc(a.line2), esc(a.city), esc(a.region), esc(a.postal_code), esc(a.country),
       esc(r.onboard_date),
     ].join(','));
   }
@@ -759,4 +1878,156 @@ export async function setTelemetryAutoticketSuppress(
     suppress ? 'suppressed' : 'enabled',
     { entityType: 'customer', entityId: customerId },
   );
+}
+
+// ── Batch profitability inputs ──────────────────────────────────────────────
+// Which production batch each shipped machine came from, and whose economics
+// it carries. Feeds lib/batchProfitability.ts.
+
+/** A shipped unit joined to the customer whose profitability row covers it. */
+export type UnitBatchLinkRow = {
+  serial: string;
+  batch: string;
+  customerId: string | null;
+  shippedAt: string | null;
+  /** How the customer was resolved, so the UI can say how solid the link is. */
+  basis: 'order_ref' | 'unit_fk' | 'none';
+};
+
+/** What the factory invoice says about a batch — the input landed cost is
+ *  normalised from. */
+export type BatchInvoiceFacts = {
+  unitCount: number;
+  unitCostUsd: number | null;
+};
+
+/** A batch with nothing shipped yet — P100X today. Held separately because it
+ *  has no margin at all, and a zero would read as "broke even". */
+export type FutureBatchRow = {
+  id: string;
+  unitCount: number;
+  unitCostUsd: number | null;
+  expectedArrival: string | null;
+  arrivedAt: string | null;
+  manufacturer: string | null;
+  destination: string | null;
+};
+
+/**
+ *  Shipped units, resolved to a customer.
+ *
+ *  Resolution prefers the order reference over `units.customer_id`. Both
+ *  exist, but the June 2026 backfill left a handful of unit FKs pointing at
+ *  the wrong customer, whereas `customer_order_ref` -> `orders.order_ref` is
+ *  the link fulfilment actually writes when it ships. Where there is no order
+ *  ref — most of the P50N and P150 era, which predates order records — the FK
+ *  is all there is, and `basis` records which one was used.
+ */
+export function useUnitBatchLinks(): {
+  links: UnitBatchLinkRow[];
+  futureBatches: FutureBatchRow[];
+  /** Every unit of every batch, bucketed by disposition — the denominator for
+   *  yield-adjusted cost. Covers all statuses, not just shipped. */
+  census: Map<string, UnitCensus>;
+  /** Invoice facts per batch, for landed-cost normalisation. */
+  batchFacts: Map<string, BatchInvoiceFacts>;
+  loading: boolean;
+  error: Error | null;
+} {
+  const [links, setLinks] = useState<UnitBatchLinkRow[]>([]);
+  const [futureBatches, setFutureBatches] = useState<FutureBatchRow[]>([]);
+  const [census, setCensus] = useState<Map<string, UnitCensus>>(new Map());
+  const [batchFacts, setBatchFacts] = useState<Map<string, BatchInvoiceFacts>>(new Map());
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const [unitsRes, ordersRes, batchesRes, censusRes] = await Promise.all([
+        supabase
+          .from('units')
+          .select('serial, batch, customer_id, customer_order_ref, shipped_at, is_team_test')
+          .eq('status', 'shipped'),
+        supabase.from('orders').select('order_ref, customer_id'),
+        supabase
+          .from('batches')
+          .select('id, unit_count, unit_cost_usd, expected_arrival_date, arrived_at, manufacturer_short, destination'),
+        // Unfiltered: scrap, lost and rework are exactly the rows the shipped
+        // query above excludes, and they are what yield is made of.
+        supabase.from('units').select('batch, status'),
+      ]);
+      if (cancelled) return;
+
+      const err = unitsRes.error ?? ordersRes.error ?? batchesRes.error ?? censusRes.error;
+      if (err) {
+        setError(err as unknown as Error);
+        setLoading(false);
+        return;
+      }
+
+      const refToCustomer = new Map<string, string>();
+      for (const o of (ordersRes.data ?? []) as Record<string, unknown>[]) {
+        const ref = o.order_ref as string | null;
+        const cid = o.customer_id as string | null;
+        if (ref && cid) refToCustomer.set(ref, cid);
+      }
+
+      const rows: UnitBatchLinkRow[] = [];
+      for (const u of (unitsRes.data ?? []) as Record<string, unknown>[]) {
+        const batch = (u.batch as string | null) ?? null;
+        // A unit with no batch cannot be attributed to one; it would otherwise
+        // land in an "unknown" bucket that reads like a real production run.
+        if (!batch) continue;
+        const ref = u.customer_order_ref as string | null;
+        const viaRef = ref ? refToCustomer.get(ref) ?? null : null;
+        const viaFk = (u.customer_id as string | null) ?? null;
+        rows.push({
+          serial: String(u.serial ?? ''),
+          batch,
+          customerId: viaRef ?? viaFk,
+          shippedAt: (u.shipped_at as string | null) ?? null,
+          basis: viaRef ? 'order_ref' : viaFk ? 'unit_fk' : 'none',
+        });
+      }
+
+      const shippedBatches = new Set(rows.map(r => r.batch));
+      const future: FutureBatchRow[] = [];
+      const facts = new Map<string, BatchInvoiceFacts>();
+      for (const b of (batchesRes.data ?? []) as Record<string, unknown>[]) {
+        const id = String(b.id ?? '');
+        if (!id) continue;
+        // Facts are collected for every batch, shipped or not — landed cost
+        // has to be computed for the table rows as well as the future panel.
+        facts.set(id, {
+          unitCount: Number(b.unit_count ?? 0),
+          unitCostUsd: b.unit_cost_usd == null ? null : Number(b.unit_cost_usd),
+        });
+        // Only batches that have shipped nothing — everything else is already
+        // a row in the main table.
+        if (shippedBatches.has(id)) continue;
+        if (Number(b.unit_count ?? 0) <= 0) continue;
+        future.push({
+          id,
+          unitCount: Number(b.unit_count ?? 0),
+          unitCostUsd: b.unit_cost_usd == null ? null : Number(b.unit_cost_usd),
+          expectedArrival: (b.expected_arrival_date as string | null) ?? null,
+          arrivedAt: (b.arrived_at as string | null) ?? null,
+          manufacturer: (b.manufacturer_short as string | null) ?? null,
+          destination: (b.destination as string | null) ?? null,
+        });
+      }
+
+      setLinks(rows);
+      setFutureBatches(future);
+      setBatchFacts(facts);
+      setCensus(batchCensus(
+        (censusRes.data ?? []) as { batch: string | null; status: string | null }[],
+      ));
+      setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  return { links, futureBatches, census, batchFacts, loading, error };
 }

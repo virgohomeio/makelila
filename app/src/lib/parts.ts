@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase } from './supabase';
 import { logAction } from './activityLog';
@@ -16,6 +16,9 @@ export type Part = {
   cost_per_unit_usd: number | null;
   on_hand: number;
   reorder_point: number;
+  /** Operator-typed Demand. null = use the count derived from un-shipped
+   *  replacement orders. Absent until migration 20260917120000 is applied. */
+  demand_override?: number | null;
   location: string | null;
   notes: string | null;
   created_at: string;
@@ -38,9 +41,21 @@ export type PartShipment = {
 
 // ---------- hooks ----------
 
-export function useParts(): { parts: Part[]; loading: boolean } {
+export function useParts(): { parts: Part[]; loading: boolean; refresh: () => Promise<void> } {
   const [parts, setParts] = useState<Part[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Re-read the table on demand. The realtime subscription below normally
+  // carries new rows, but a dropped socket would otherwise strand the list —
+  // and adding a part you can't see reads as the write having failed.
+  const refresh = useCallback(async () => {
+    const { data, error } = await supabase
+      .from('parts')
+      .select('*')
+      .order('category', { ascending: true })
+      .order('name', { ascending: true });
+    if (!error && data) setParts(data as Part[]);
+  }, []);
 
   useEffect(() => {
     let channel: RealtimeChannel | null = null;
@@ -76,7 +91,7 @@ export function useParts(): { parts: Part[]; loading: boolean } {
     return () => { cancelled = true; if (channel) void channel.unsubscribe(); };
   }, []);
 
-  return { parts, loading };
+  return { parts, loading, refresh };
 }
 
 export function usePartShipments(): { shipments: PartShipment[]; loading: boolean } {
@@ -131,6 +146,107 @@ export async function adjustPartStock(partId: string, delta: number, reason: str
   const { error } = await supabase.from('parts').update({ on_hand: next }).eq('id', partId);
   if (error) throw error;
   await logAction('part_stock_adjust', partId, `${delta > 0 ? '+' : ''}${delta} (${reason})`);
+}
+
+/** Fields an operator can type over in Stock › Parts. */
+export type PartEditableField = 'on_hand' | 'demand_override' | 'reorder_point' | 'cost_per_unit_usd';
+
+const FIELD_LABEL: Record<PartEditableField, string> = {
+  on_hand: 'on hand',
+  demand_override: 'demand',
+  reorder_point: 'reorder at',
+  cost_per_unit_usd: 'cost',
+};
+
+/** Parse what an operator typed into an editable cell. Returns undefined when
+ *  the input is not a valid value for that field. Blank is only valid where
+ *  the column is nullable: demand (back to the derived count) and cost. */
+export function parsePartFieldInput(
+  field: PartEditableField,
+  raw: string,
+): number | null | undefined {
+  const t = raw.trim().replace(/^\$/, '');
+  if (t === '') return field === 'demand_override' || field === 'cost_per_unit_usd' ? null : undefined;
+  if (field === 'cost_per_unit_usd') {
+    if (!/^\d+(\.\d{0,2})?$|^\.\d{1,2}$/.test(t)) return undefined;
+    return Number(t);
+  }
+  if (!/^\d+$/.test(t)) return undefined;
+  return parseInt(t, 10);
+}
+
+/** Set one number on a part, as typed. Unlike adjustPartStock this is an
+ *  absolute write (a stock count, a price), not a delta. */
+export async function updatePartField(
+  part: Pick<Part, 'id' | 'sku'> & Partial<Record<PartEditableField, number | null>>,
+  field: PartEditableField,
+  value: number | null,
+): Promise<void> {
+  const { error } = await supabase.from('parts').update({ [field]: value }).eq('id', part.id);
+  if (error) throw error;
+  const fmt = (v: number | null | undefined) =>
+    v == null ? (field === 'demand_override' ? 'auto' : '—')
+      : field === 'cost_per_unit_usd' ? `$${Number(v).toFixed(2)}` : String(v);
+  await logAction('part_edit', part.id, `${part.sku} ${FIELD_LABEL[field]}: ${fmt(part[field])} → ${fmt(value)}`);
+}
+
+/** A new part's primary key. parts.id is a text PK holding human-readable
+ *  codes ('P-LID-V36', 'C-STARTER'), so derive one from the category prefix
+ *  and the SKU, and suffix it if that code is taken. */
+export function suggestPartId(
+  category: PartCategory,
+  sku: string,
+  existingIds: string[],
+): string {
+  const prefix = category === 'consumable' ? 'C' : 'P';
+  const body = sku.trim().toUpperCase()
+    .replace(/^LILA[-_ ]?/, '')
+    .replace(/[^A-Z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'PART';
+  const base = `${prefix}-${body}`;
+  const taken = new Set(existingIds);
+  if (!taken.has(base)) return base;
+  for (let n = 2; ; n++) if (!taken.has(`${base}-${n}`)) return `${base}-${n}`;
+}
+
+export type NewPartInput = {
+  sku: string;
+  name: string;
+  category: PartCategory;
+  on_hand: number;
+  reorder_point: number;
+  cost_per_unit_usd: number | null;
+  supplier: string | null;
+  location: string | null;
+  notes: string | null;
+};
+
+/** Add a SKU to the parts catalog. Returns the generated part id. */
+export async function createPart(input: NewPartInput, existingIds: string[]): Promise<string> {
+  const id = suggestPartId(input.category, input.sku, existingIds);
+  const { error } = await supabase.from('parts').insert({
+    id,
+    ...input,
+    sku: input.sku.trim(),
+    name: input.name.trim(),
+  });
+  if (error) throw error;
+  await logAction('part_add', id, `${input.sku.trim()} — ${input.name.trim()} (${input.category}), ${input.on_hand} on hand`);
+  return id;
+}
+
+/** Demand per SKU as every screen should read it: the derived count from
+ *  replacement orders, replaced wherever an operator has typed an override.
+ *  Overrides of 0 are kept (so the SKU reads 0, not the derived count). */
+export function effectiveDemandBySku(
+  derived: Map<string, number>,
+  parts: Array<Pick<Part, 'sku' | 'demand_override'>>,
+): Map<string, number> {
+  const m = new Map(derived);
+  for (const p of parts) {
+    if (p.demand_override != null) m.set(p.sku, p.demand_override);
+  }
+  return m;
 }
 
 export async function recordPartShipment(input: {

@@ -1,6 +1,10 @@
+import type { CSSProperties } from 'react';
 import type { Order } from '../../lib/orders';
+import { DWELLING_LABEL, needsFitConfirmation } from '../../lib/addressClassify';
 import { orderUrgency, AREA_TYPE_TAG } from '../../lib/orders';
+import { refundFlagLabel, refundFlagTitle, type RefundFlag } from '../../lib/refundedOrders';
 import { useQuotes } from '../../lib/freight';
+import { canConfirm } from './detail/ReadinessChecklist';
 import styles from './OrderReview.module.css';
 
 const AREA_TAG_CLASS: Record<NonNullable<Order['area_type']>, string> = {
@@ -9,14 +13,35 @@ const AREA_TAG_CLASS: Record<NonNullable<Order['area_type']>, string> = {
   rural:    styles.tagRural,
 };
 
+/** One row in the order rail.
+ *
+ *  A 2×2 grid, not a flowing meta line. Identity (name, ref, city) sits left;
+ *  state (blocker dot, SLA, country/area/risk tags) sits in a right-aligned
+ *  column so it forms real columns down the list. Comparing two orders used to
+ *  mean reading two wrapped sentences. */
 export function OrderRow({
   order,
   isSelected,
   onClick,
+  revealIndex = 0,
+  refundFlag = null,
+  commConcern = null,
 }: {
   order: Order;
   isSelected: boolean;
   onClick: () => void;
+  /** Position in the load stagger. See --i in OrderReview.module.css. */
+  revealIndex?: number;
+  /** Set when this order — or another order of this customer — has been
+   *  refunded. Confirming a refunded order queues a machine for someone we
+   *  have already paid back, and until this badge existed the row gave the
+   *  operator no way to know. */
+  refundFlag?: RefundFlag | null;
+  /** Set when the customer's recent support history casts doubt on shipping.
+   *  Only doubt is shown — a "clear to ship" chip on every row would be a
+   *  column of green that nobody reads, and the chip's whole job is to be
+   *  noticed. The reason itself is in the order's Customer card. */
+  commConcern?: string | null;
 }) {
   const cls = [
     styles.row,
@@ -28,49 +53,112 @@ export function OrderRow({
   const selectedQuote = quotes.find(q => q.selected) ?? null;
 
   const countryTag = order.country === 'CA' ? styles.tagCa : styles.tagUs;
-  const isRiskAddress = order.address_verdict === 'apt' || order.address_verdict === 'condo' || order.address_verdict === 'remote';
+  // Anything that isn't a plain house needs a person to look at it before the
+  // freight is booked. Reads off the shared rule so a new dwelling type can't
+  // be added without the list row learning about it.
+  const isRiskAddress = needsFitConfirmation(order.address_verdict);
+  // Louder than the dwelling tag, because it is the one that stops a delivery
+  // outright: the building has units and the order names none.
+  const unitMissing = order.address_unit_status === 'missing';
+  const isCancelled = order.status === 'cancelled';
+  // A dot rather than a chip: it says "this one isn't confirmable yet" without
+  // spending the width the SLA needs. Meaningless on terminal/decided rows.
+  const showBlockDot = !isCancelled && order.status !== 'approved' && !canConfirm(order);
+  const urgency = orderUrgency(order.placed_at);
+
+  const quoteLabel = selectedQuote
+    ? [
+        selectedQuote.provider,
+        selectedQuote.rate_cad != null
+          ? `$${selectedQuote.rate_cad.toFixed(0)} CAD`
+          : selectedQuote.rate_usd != null
+            ? `$${selectedQuote.rate_usd.toFixed(0)} USD`
+            : null,
+        selectedQuote.transit_days != null ? `${selectedQuote.transit_days}d` : null,
+      ].filter(Boolean).join(' ')
+    : null;
+
+  // The order's placement date — the sale date — shown on each row so the sale
+  // window an order belongs to is visible at a glance.
+  const saleDate = order.placed_at
+    ? new Date(order.placed_at).toLocaleDateString('en-CA', { month: 'short', day: 'numeric', year: 'numeric' })
+    : null;
+
+  // Read in order, the row's own text announces as one run-on string
+  // ("Alice Ames125d OVERDUE#p1· PortlandUS"). Spell it out instead.
+  const label = [
+    order.customer_name,
+    `order ${order.order_ref}`,
+    order.city,
+    saleDate ? `ordered ${saleDate}` : null,
+    isCancelled ? 'cancelled' : urgency.label || null,
+    showBlockDot ? 'not yet confirmable' : null,
+    refundFlag ? refundFlagLabel(refundFlag).toLowerCase() : null,
+    commConcern ? 'customer communication unclear' : null,
+  ].filter(Boolean).join(', ');
 
   return (
-    <div className={cls} onClick={onClick} role="button" tabIndex={0}>
-      <div className={styles.rowName}>{order.customer_name}</div>
-      <div className={styles.rowMeta}>
-        <span className={`${styles.tag} ${countryTag}`}>{order.country}</span>
+    <button
+      type="button"
+      className={cls}
+      onClick={onClick}
+      aria-label={label}
+      style={{ '--i': revealIndex } as CSSProperties}
+    >
+      <span className={styles.rowName}>{order.customer_name}</span>
+
+      <span className={styles.rowState}>
+        {showBlockDot && (
+          <span
+            className={styles.blockDot}
+            title="Not yet confirmable — open it to see what's missing"
+          />
+        )}
+        {isCancelled ? (
+          // An SLA countdown on a dead order is noise — say what happened.
+          <span className={styles.cancelledChip} title={order.cancelled_reason ?? undefined}>
+            Cancelled
+          </span>
+        ) : urgency.label ? (
+          <span className={`${styles.urgencyChip} ${styles[urgency.severity]}`}>{urgency.label}</span>
+        ) : null}
+      </span>
+
+      <span className={styles.rowMeta}>
+        <span className={styles.rowRef}>{order.order_ref}</span>
+        <span>· {order.city}</span>
+        {saleDate && <span className={styles.saleDate}>· {saleDate}</span>}
+        {quoteLabel && <span className={styles.rowFreight}>· {quoteLabel}</span>}
+      </span>
+
+      <span className={styles.rowTags}>
+        {refundFlag && (
+          <span
+            className={`${styles.tag} ${refundFlag.level === 'order' ? styles.tagRefunded : styles.tagRefundedCustomer}`}
+            title={refundFlagTitle(refundFlag)}
+          >
+            {refundFlagLabel(refundFlag)}
+          </span>
+        )}
+        {commConcern && (
+          <span className={`${styles.tag} ${styles.tagComms}`} title={commConcern}>
+            Comms
+          </span>
+        )}
+        {order.kind === 'replacement' && (
+          <span className={`${styles.tag} ${styles.tagCa}`}>Repl</span>
+        )}
+        {unitMissing && (
+          <span className={`${styles.tag} ${styles.tagRefunded}`} title="Multi-unit building with no unit number on the order">No unit #</span>
+        )}
         {isRiskAddress && (
-          <span className={`${styles.tag} ${styles.tagWarn}`}>{order.address_verdict}</span>
+          <span className={`${styles.tag} ${styles.tagWarn}`}>{DWELLING_LABEL[order.address_verdict]}</span>
         )}
         {order.area_type && (
           <span className={`${styles.tag} ${AREA_TAG_CLASS[order.area_type]}`}>{AREA_TYPE_TAG[order.area_type]}</span>
         )}
-        {order.order_ref}
-        {order.kind === 'replacement' && (
-          <span className="replBadge">Replacement</span>
-        )}
-        {' '}· {order.city}
-        {order.placed_at && (
-          <span className={styles.saleDate}>
-            {' '}· {new Date(order.placed_at).toLocaleDateString('en-CA', { month: 'short', day: 'numeric', year: 'numeric' })}
-          </span>
-        )}
-        {(() => {
-          const u = orderUrgency(order.placed_at);
-          if (!u.label) return null;
-          return <span className={`${styles.urgencyChip} ${styles[u.severity]}`}>{u.label}</span>;
-        })()}
-        {selectedQuote && (
-          <span style={{
-            fontSize: 10, padding: '2px 8px', borderRadius: 4,
-            background: 'var(--color-surface)', border: '1px solid var(--color-border)',
-            color: 'var(--color-ink-muted)',
-          }}>
-            {selectedQuote.provider} {selectedQuote.rate_cad != null
-              ? `$${selectedQuote.rate_cad.toFixed(0)} CAD`
-              : selectedQuote.rate_usd != null
-                ? `$${selectedQuote.rate_usd.toFixed(0)} USD`
-                : ''}
-            {selectedQuote.transit_days != null && ` · ${selectedQuote.transit_days}d`}
-          </span>
-        )}
-      </div>
-    </div>
+        <span className={`${styles.tag} ${countryTag}`}>{order.country}</span>
+      </span>
+    </button>
   );
 }

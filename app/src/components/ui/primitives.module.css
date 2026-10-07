@@ -1,0 +1,340 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   The shared control vocabulary.
+
+   Before this file, sixteen of eighteen modules defined their own `.tab*`
+   rules, nine their own filter chip and fourteen their own empty state — so
+   Sales rendered its tabs as a segmented control, Fulfillment as nine red
+   bordered boxes and Service as underlined text, and an operator moving
+   between them had to re-learn the same control three times. That is the
+   single largest reason the app reads as assembled rather than designed.
+
+   ── The colour rule this file exists to enforce ────────────────────────────
+   Ladybug Red marks THE PRIMARY ACTION, the wordmark, and a genuinely urgent
+   count. Nothing else. Every module had reached for it as its active-tab
+   colour, its selected-chip fill, its section-label colour and its footer
+   link, so red carried no information at all — a screen where everything is
+   emphasised has nothing emphasised.
+
+   Selection and activity are therefore carried by INK, the way they are in
+   the tools this app is measured against. That leaves red scarce enough to
+   mean something: on a converted screen it lands on roughly one element.
+
+   Every colour here goes through var(). This file is on the check:css-tokens
+   ratchet — see app/scripts/check-css-tokens.mjs.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Tabs ─────────────────────────────────────────────────────────────────
+   One tab language. Text on the page's own ground with a 2px ink rule under
+   the active one — no boxes, no fills, no borders per tab. The row sits on a
+   hairline and the active marker overlaps it, so the selected tab reads as
+   physically connected to the panel below rather than floating above it. */
+.tabs {
+  display: flex;
+  align-items: stretch;
+  gap: var(--space-5);
+  border-bottom: 1px solid var(--color-border);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.tabs::-webkit-scrollbar { display: none; }
+
+.tab {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 36px;
+  padding: 0;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  background: none;
+  color: var(--color-ink-subtle);
+  font-size: var(--font-size-body);
+  font-weight: 500;
+  white-space: nowrap;
+  transition: color var(--dur-fast) var(--ease-out),
+              border-color var(--dur-fast) var(--ease-out);
+}
+.tab:hover { color: var(--color-ink-muted); }
+.tab:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: var(--radius-sm); }
+
+.tabActive {
+  color: var(--color-ink);
+  font-weight: 600;
+  border-bottom-color: var(--color-ink);
+}
+
+/* Counts are data, so they take the data face and its tabular figures — a
+   tab row is the one place in the app where numbers sit directly beside
+   each other and a ragged column is immediately visible. */
+.tabCount {
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--font-numeric);
+  font-size: var(--font-size-meta);
+  color: var(--color-ink-faint);
+}
+.tabActive .tabCount { color: var(--color-ink-muted); }
+
+/* A group break inside a tab row. Fulfillment had a bare "|" character sitting
+   in its markup to do this job. */
+.tabGap {
+  align-self: center;
+  width: 1px;
+  height: 14px;
+  background: var(--color-border);
+  flex: none;
+}
+
+/* ── Filter chips ─────────────────────────────────────────────────────────
+   Selected is an ink fill, not a red one: on a filter row, "which one is on"
+   is a statement of state, and state is never an action. */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 28px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  background: var(--color-raised);
+  color: var(--color-ink-muted);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: background var(--dur-fast) var(--ease-out),
+              border-color var(--dur-fast) var(--ease-out),
+              color var(--dur-fast) var(--ease-out);
+}
+.chip:hover {
+  border-color: var(--color-ink-faint);
+  color: var(--color-ink);
+}
+.chip:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+
+.chipActive {
+  background: var(--color-ink);
+  border-color: var(--color-ink);
+  color: var(--color-page);
+}
+.chipActive:hover {
+  background: var(--color-ink);
+  border-color: var(--color-ink);
+  color: var(--color-page);
+}
+
+.chipCount {
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--font-numeric);
+  font-size: var(--font-size-meta);
+  color: var(--color-ink-faint);
+}
+.chipActive .chipCount { color: var(--color-ink-faint); }
+
+/* A zero count is not worth the same ink as a real one. */
+.chipZero { color: var(--color-ink-faint); }
+
+.chipRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+/* ── Buttons ──────────────────────────────────────────────────────────────
+   Danger is deliberately NOT a filled red. tokens.css records why:
+   --color-error measures a 1.207 luminance ratio against --color-crimson-dark,
+   so a filled danger button and the primary button's hover state read as the
+   same red. Danger is therefore an outline, which also matches how often it
+   should be reached for. */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  height: 32px;
+  padding: 0 var(--space-4);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-body);
+  font-weight: 600;
+  white-space: nowrap;
+  transition: background var(--dur-fast) var(--ease-out),
+              border-color var(--dur-fast) var(--ease-out),
+              color var(--dur-fast) var(--ease-out);
+}
+.btn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.btnPrimary {
+  background: var(--color-crimson);
+  border-color: var(--color-crimson);
+  color: var(--color-raised);
+}
+.btnPrimary:hover:not(:disabled) {
+  background: var(--color-crimson-dark);
+  border-color: var(--color-crimson-dark);
+}
+
+.btnSecondary {
+  background: var(--color-raised);
+  border-color: var(--color-border);
+  color: var(--color-ink);
+}
+.btnSecondary:hover:not(:disabled) {
+  border-color: var(--color-ink-faint);
+  background: var(--color-surface);
+}
+
+.btnGhost {
+  background: none;
+  border-color: transparent;
+  color: var(--color-ink-muted);
+}
+.btnGhost:hover:not(:disabled) {
+  background: var(--color-surface);
+  color: var(--color-ink);
+}
+
+.btnDanger {
+  background: var(--color-raised);
+  border-color: var(--color-error-border);
+  color: var(--color-error-strong);
+}
+.btnDanger:hover:not(:disabled) {
+  background: var(--color-error-bg);
+  border-color: var(--color-error-strong);
+}
+
+.btnSmall { height: 26px; padding: 0 var(--space-3); font-size: 12px; }
+
+/* ── Page header ──────────────────────────────────────────────────────────
+   Every module now opens the same way: what this screen is, what is in it
+   right now, and what you can do to it — left, left-small, right. Fulfillment
+   shipped with no page title at all while Sales had one, which is the kind of
+   difference nobody reports as a bug and everybody feels. */
+.pageHeader {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  padding-bottom: var(--space-4);
+}
+
+.pageTitle {
+  font-size: var(--font-size-title);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--color-ink);
+  line-height: 1.1;
+}
+
+/* The live count of what is on screen. Numbers take the data face so the
+   figure stays readable at 12px and doesn't jitter as it updates. */
+.pageMeta {
+  margin-top: var(--space-1);
+  font-size: 12px;
+  color: var(--color-ink-subtle);
+}
+.pageMeta strong {
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--font-numeric);
+  font-weight: 500;
+  color: var(--color-ink-muted);
+}
+
+.pageActions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* ── Empty state ──────────────────────────────────────────────────────────
+   Fourteen modules each wrote their own, and every one of them was a single
+   grey sentence centred in a void: "No orders in this tab." / "No queued
+   orders." / "Select a queued order from the left." An empty screen is the
+   one moment the interface has the operator's full attention and nothing to
+   compete with, so it says what is true, why, and what to do next. */
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  padding: var(--space-7) var(--space-5);
+  min-height: 220px;
+  text-align: center;
+}
+
+/* Deliberately not an illustration. A quiet ruled square reads as "this
+   container is empty" without asking to be looked at a second time. */
+.emptyMark {
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  display: grid;
+  place-items: center;
+  color: var(--color-ink-faint);
+  background: var(--color-raised);
+}
+
+.emptyTitle {
+  font-size: var(--font-size-section);
+  font-weight: 600;
+  color: var(--color-ink);
+}
+
+.emptyBody {
+  font-size: var(--font-size-body);
+  line-height: 1.5;
+  color: var(--color-ink-subtle);
+  max-width: 44ch;
+}
+
+.emptyAction { margin-top: var(--space-1); }
+
+/* ── Stat tiles ───────────────────────────────────────────────────────────
+   The number is the content, so it gets the data face and the whole optical
+   weight; the label is a caption and is sized like one. */
+.statRow {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: var(--space-3);
+}
+
+.stat {
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-raised);
+}
+
+.statLabel {
+  font-size: var(--font-size-meta);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-ink-subtle);
+}
+
+.statValue {
+  margin-top: var(--space-1);
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--font-numeric);
+  font-size: 22px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--color-ink);
+  line-height: 1.15;
+}
+
+/* A tile reading zero is reporting "nothing to do", which is good news and
+   should not shout. Only a tile the caller marks urgent takes the accent. */
+.statZero { color: var(--color-ink-faint); }
+.statUrgent { color: var(--color-crimson); }
+
+.statHint {
+  margin-top: 2px;
+  font-size: var(--font-size-meta);
+  color: var(--color-ink-faint);
+}

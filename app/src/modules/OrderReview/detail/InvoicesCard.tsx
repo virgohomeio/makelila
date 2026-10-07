@@ -1,5 +1,5 @@
 import type { Order } from '../../../lib/orders';
-import { useInvoicesByOrder, getInvoiceSignedUrl } from '../../../lib/invoices';
+import { useInvoicesByOrder, openInvoiceInNewTab } from '../../../lib/invoices';
 import { formatMoney } from '../../../lib/money';
 import styles from '../OrderReview.module.css';
 
@@ -10,10 +10,8 @@ export function InvoicesCard({ order }: { order: Order }) {
   const { invoices, loading } = useInvoicesByOrder(order.id);
 
   const view = async (path: string) => {
-    try {
-      const url = await getInvoiceSignedUrl(path);
-      window.open(url, '_blank', 'noopener');
-    } catch (e) { alert((e as Error).message); }
+    try { await openInvoiceInNewTab(path); }
+    catch (e) { alert((e as Error).message); }
   };
 
   return (

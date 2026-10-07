@@ -2,13 +2,13 @@ import { useState, useMemo } from 'react';
 import type { Order } from '../../../lib/orders';
 import { updateFreightEstimate, isReplacementLine } from '../../../lib/orders';
 import { formatMoney } from '../../../lib/money';
-import { useQuotes, selectQuote } from '../../../lib/freight';
+import { useQuotes, selectQuote, fetchFreightcomQuotes, cheapestCadQuote } from '../../../lib/freight';
 import styles from '../OrderReview.module.css';
 
 function SourceTag({ source }: { source: string }) {
   // Backlog #17 — surface where the freight number came from. Color hints:
-  // shopify = neutral, manual = blue (operator quote), future clickship /
-  // freightcom = green (live carrier API).
+  // shopify = neutral, manual = blue (operator quote), clickship / freightcom =
+  // green (live carrier API).
   const label =
     source === 'shopify'    ? 'Shopify'
   : source === 'manual'     ? 'operator edit'
@@ -16,6 +16,47 @@ function SourceTag({ source }: { source: string }) {
   : source === 'freightcom' ? 'Freightcom'
   : source;
   return <span className={`${styles.freightSourceTag} ${styles[`freightSourceTag_${source}`] ?? ''}`}>{label}</span>;
+}
+
+/** Pull live carrier rates for this order and adopt the cheapest as the
+ *  estimate. Sales previously had no path to this at all — quoting lived only
+ *  behind Shipping → Book a Label, so the card's only options were a link out
+ *  to the ClickShip portal and a box to retype the number into. The manual
+ *  paste below stays as the fallback for destinations the carrier won't rate. */
+function GetLiveQuote({ order, onQuoted }: { order: Order; onQuoted: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const run = async () => {
+    setBusy(true); setError(null);
+    try {
+      const quotes = await fetchFreightcomQuotes(order.id);
+      const cheapest = cheapestCadQuote(quotes);
+      if (!cheapest) {
+        setError('No carrier rates came back for this destination. Quote it in the portal and paste the total below.');
+        return;
+      }
+      await selectQuote(order.id, cheapest.id);
+      onQuoted();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div>
+      <button
+        onClick={run}
+        disabled={busy}
+        className={styles.freightQuoteBtn}
+      >
+        {busy ? 'Quoting…' : 'Get live quote'}
+      </button>
+      {error && <div style={{ color: 'var(--color-error)', fontSize: 10, marginTop: 4 }}>{error}</div>}
+    </div>
+  );
 }
 
 function EditFreight({ order }: { order: Order }) {
@@ -76,7 +117,7 @@ function EditFreight({ order }: { order: Order }) {
 const FREIGHT_CURRENCY = 'CAD';
 
 export function FreightCard({ order }: { order: Order }) {
-  const { quotes } = useQuotes(order.id);
+  const { quotes, refetch } = useQuotes(order.id);
 
   // Backlog #15 — total unit count across all line items, so the operator
   // knows what they're quoting freight for (a 2-unit order's freight should
@@ -124,8 +165,8 @@ export function FreightCard({ order }: { order: Order }) {
         {noQuote && (
           <div className={styles.freightNoQuote}>
             No freight quote on file. {order.country === 'CA'
-              ? 'Canadian customers under $100 CAD are covered by the free-shipping credit; quote the actual carrier cost below for cost tracking.'
-              : 'Get a quote from ClickShip and paste it below.'}
+              ? 'Canadian customers under $100 CAD are covered by the free-shipping credit; pull the actual carrier cost below for cost tracking.'
+              : 'Pull a live carrier rate below, or paste a portal quote.'}
           </div>
         )}
         {!noQuote && (
@@ -137,6 +178,7 @@ export function FreightCard({ order }: { order: Order }) {
             <div className={styles.costThreshold} style={{ left: `${thresholdPct}%` }} />
           </div>
         )}
+        <GetLiveQuote order={order} onQuoted={() => void refetch?.()} />
         <EditFreight order={order} />
         {quotes.length > 0 && (
           <div style={{ marginTop: 16 }}>
@@ -171,7 +213,7 @@ export function FreightCard({ order }: { order: Order }) {
                     <td style={{ textAlign: 'right' }}>
                       {!q.selected && (
                         <button
-                          onClick={() => void selectQuote(order.id, q.id)}
+                          onClick={() => void selectQuote(order.id, q.id).then(() => refetch?.())}
                           style={{
                             fontSize: 10, padding: '2px 8px', cursor: 'pointer',
                             background: 'none', border: '1px solid var(--color-border)',

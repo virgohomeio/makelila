@@ -1,0 +1,456 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { render as rtlRender, screen, fireEvent, within, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
+import type { ReactElement } from 'react';
+import type { ServiceTicket } from '../../../lib/service';
+
+const render = (ui: ReactElement) => rtlRender(<MemoryRouter>{ui}</MemoryRouter>);
+
+const setTicketStatusesMock = vi.fn(() => Promise.resolve());
+
+vi.mock('../../../lib/service', async () => {
+  const actual = await vi.importActual<typeof import('../../../lib/service')>('../../../lib/service');
+  return {
+    ...actual,
+    setTicketStatuses: (...args: unknown[]) => setTicketStatusesMock(...(args as [])),
+    useCustomerLifecycle: vi.fn(() => ({ row: null, loading: false })),
+    useTicketMessages: vi.fn(() => ({ messages: [], loading: false })),
+    useClassificationLog: vi.fn(() => ({ entries: [], loading: false })),
+  };
+});
+let customersToReturn: unknown[] = [];
+vi.mock('../../../lib/customers', async () => {
+  const actual = await vi.importActual<typeof import('../../../lib/customers')>('../../../lib/customers');
+  return { ...actual, useCustomers: vi.fn(() => ({ customers: customersToReturn })) };
+});
+const readyReplacementsMock = vi.fn(() => Promise.resolve([] as Array<{ id: string; order_ref: string }>));
+const liveReplacementsMock = vi.fn(() => Promise.resolve([] as Array<{ id: string; order_ref: string }>));
+const shipQueuedMock = vi.fn(() => Promise.resolve([] as string[]));
+const cancelReplacementMock = vi.fn(() => Promise.resolve());
+const cancelForTicketMock = vi.fn(() => Promise.resolve([] as string[]));
+vi.mock('../../../lib/orders', async () => {
+  const actual = await vi.importActual<typeof import('../../../lib/orders')>('../../../lib/orders');
+  return {
+    ...actual,
+    useReplacementSummary: vi.fn(() => ({ summary: null, loading: false })),
+    readyReplacementsForTicket: (...a: unknown[]) => readyReplacementsMock(...(a as [])),
+    liveReplacementsForTicket: (...a: unknown[]) => liveReplacementsMock(...(a as [])),
+    shipQueuedReplacementsForTicket: (...a: unknown[]) => shipQueuedMock(...(a as [])),
+    cancelReplacementOrder: (...a: unknown[]) => cancelReplacementMock(...(a as [])),
+    cancelReplacementsForTicket: (...a: unknown[]) => cancelForTicketMock(...(a as [])),
+  };
+});
+vi.mock('../NewTicketModal', () => ({
+  NewTicketModal: (p: { title?: string; presetSubject?: string; onCreated: (t: unknown) => void }) => (
+    <div data-testid="new-ticket-modal">
+      <span>{p.title}</span>
+      <span data-testid="preset-subject">{p.presetSubject}</span>
+      <button onClick={() => p.onCreated({ ticket_number: 'TKT-9' })}>stub-create</button>
+    </div>
+  ),
+}));
+vi.mock('../../../lib/auth', () => ({
+  useAuth: vi.fn(() => ({ user: { email: 'huayi@virgohome.io' } })),
+}));
+// Child panels each open their own Supabase subscriptions; stub them out so
+// this suite only exercises the Status / Tags rows.
+vi.mock('../TicketNotes', () => ({ TicketNotes: () => null }));
+vi.mock('../TicketActionItems', () => ({ TicketActionItems: () => null }));
+vi.mock('../AttachmentStrip', () => ({ AttachmentStrip: () => null }));
+vi.mock('../LovelyReportPhotos', () => ({
+  LovelyReportPhotos: (p: { reportId: string }) => <div data-testid="lovely-photos">{p.reportId}</div>,
+}));
+vi.mock('../../../components/DeviceContextHeader', () => ({
+  DeviceContextHeader: () => <div data-testid="device-context-header" />,
+}));
+
+import { TicketDetailPanel } from '../TicketDetailPanel';
+
+function mkTicket(partial: Partial<ServiceTicket> = {}): ServiceTicket {
+  return {
+    id: 't1',
+    ticket_number: 'TKT-1',
+    category: 'support',
+    source: 'gmail',
+    status: 'waiting_on_us',
+    priority: 'normal',
+    tags: [],
+    customer_id: null, customer_name: 'Alice', customer_email: 'a@x.com',
+    customer_phone: null, unit_serial: null, order_ref: null,
+    subject: 'help me', description: null, internal_notes: null,
+    defect_category: null, parts_needed: null,
+    calendly_event_uri: null, calendly_event_start: null, calendly_host_email: null,
+    hubspot_ticket_id: null, fulfillment_queue_id: null,
+    owner_email: null, resolved_at: null, closed_at: null,
+    replacement_order_id: null,
+    diagnosis_link_sent_at: null, diag_cohost_invited_at: null,
+    google_calendar_event_id: null,
+    created_at: '2026-06-01T00:00:00Z', updated_at: '2026-06-01T00:00:00Z',
+    gmail_thread_id: null, gmail_account: null,
+    topic: null, summary: null, suggested_next_action: null,
+    last_classified_at: null, classification_confidence: null,
+    message_count: 1,
+    first_message_at: '2026-06-01T00:00:00Z',
+    last_message_at: '2026-06-01T00:00:00Z',
+    is_manually_overridden: false,
+    issue_area: null,
+    kind: 'ticket',
+    inbox_disposition: null,
+    sla_policy_id: null,
+    first_response_due_at: null,
+    resolution_due_at: null,
+    first_responded_at: null,
+    sla_resolved_at: null,
+    sla_status: null,
+    root_cause: null,
+    linear_issue_url: null,
+    github_issue_url: null,
+    engineering_resolved_at: null,
+    ...partial,
+  } as ServiceTicket;
+}
+
+/** The buttons under the "Status" section label. The section is
+ *  `<div><div>Status</div><div class=actionsRow>…buttons…</div></div>`. */
+const statusButtons = () =>
+  within(screen.getByText('Status').parentElement!).getAllByRole('button');
+const statusButton = (label: string) =>
+  statusButtons().find(b => (b.textContent ?? '').includes(label))!;
+
+describe('TicketDetailPanel — Status is multi-select', () => {
+  beforeEach(() => {
+    setTicketStatusesMock.mockClear();
+    readyReplacementsMock.mockClear();
+    liveReplacementsMock.mockClear();
+    liveReplacementsMock.mockResolvedValue([]);
+    shipQueuedMock.mockClear();
+    cancelReplacementMock.mockClear();
+    cancelForTicketMock.mockClear();
+    cancelForTicketMock.mockResolvedValue([]);
+  });
+
+  it('offers every status, including Queued for Replacement, in ONE row', () => {
+    render(<TicketDetailPanel ticket={mkTicket()} onClose={() => {}} />);
+    const labels = statusButtons().map(b => b.textContent ?? '');
+    for (const expected of [
+      'Action Needed', 'In Progress', 'Awaiting Customer Response',
+      'Queued for Replacement', 'Return/Refund', 'Call Scheduled', 'On Hold', 'Complete',
+    ]) {
+      expect(labels.some(l => l.includes(expected))).toBe(true);
+    }
+    // There is no separate Tags control — statuses ARE the tags.
+    expect(screen.queryByText('Tags')).toBeNull();
+  });
+
+  it('checks every status the ticket holds, from status + tags', () => {
+    render(<TicketDetailPanel
+      ticket={mkTicket({ status: 'in_progress', tags: ['queued_for_replacement'] })}
+      onClose={() => {}}
+    />);
+    expect(statusButton('In Progress').textContent).toContain('✓');
+    expect(statusButton('Queued for Replacement').textContent).toContain('✓');
+    expect(statusButton('On Hold').textContent).not.toContain('✓');
+  });
+
+  it('adds a status alongside an existing one — the reported bug', () => {
+    render(<TicketDetailPanel
+      ticket={mkTicket({ status: 'in_progress', tags: ['queued_for_replacement'] })}
+      onClose={() => {}}
+    />);
+    fireEvent.click(statusButton('On Hold'));
+    expect(setTicketStatusesMock).toHaveBeenCalledWith(
+      't1', ['in_progress', 'queued_for_replacement', 'on_hold'],
+    );
+  });
+
+  it('removes a status without disturbing the others', () => {
+    render(<TicketDetailPanel
+      ticket={mkTicket({ status: 'in_progress', tags: ['queued_for_replacement', 'on_hold'] })}
+      onClose={() => {}}
+    />);
+    fireEvent.click(statusButton('On Hold'));
+    expect(setTicketStatusesMock).toHaveBeenCalledWith(
+      't1', ['in_progress', 'queued_for_replacement'],
+    );
+  });
+
+  it('keeps the auto-applied replacement status when another is added', () => {
+    // The replacement workflow tags the ticket; the operator then marks it
+    // Awaiting Customer Response. Both must survive.
+    render(<TicketDetailPanel
+      ticket={mkTicket({ status: 'waiting_on_us', tags: ['queued_for_replacement'] })}
+      onClose={() => {}}
+    />);
+    fireEvent.click(statusButton('Awaiting Customer Response'));
+    const [, next] = setTicketStatusesMock.mock.calls[0] as unknown as [string, string[]];
+    expect(next).toContain('queued_for_replacement');
+    expect(next).toContain('waiting_on_customer');
+  });
+
+  it('Complete is exclusive — selecting it clears the other statuses', async () => {
+    render(<TicketDetailPanel
+      ticket={mkTicket({ status: 'in_progress', tags: ['queued_for_replacement'] })}
+      onClose={() => {}}
+    />);
+    fireEvent.click(statusButton('Complete'));
+    // Closing now checks for a stranded 'ready' replacement first; with none,
+    // it closes straight through exactly as before.
+    await waitFor(() => expect(setTicketStatusesMock).toHaveBeenCalledWith('t1', ['closed']));
+  });
+
+  // A 'ready' replacement has a unit reserved. Closing used to leave it behind
+  // silently — the order stayed in Sales › Orders › Replacement with no
+  // shipped_at, which is how 15 resolved replacements piled up in that tab.
+  describe('closing a ticket that would strand a ready replacement', () => {
+    const withBlocker = () => {
+      readyReplacementsMock.mockResolvedValueOnce([{ id: 'o1', order_ref: 'R-0042' }]);
+      render(<TicketDetailPanel
+        ticket={mkTicket({ status: 'in_progress', tags: ['queued_for_replacement'] })}
+        onClose={() => {}}
+      />);
+      fireEvent.click(statusButton('Complete'));
+    };
+
+    it('asks instead of closing', async () => {
+      withBlocker();
+      await waitFor(() => expect(screen.getByText(/R-0042/)).toBeInTheDocument());
+      expect(setTicketStatusesMock).not.toHaveBeenCalled();
+    });
+
+    it('"Yes — shipped" runs the hand-off, then closes', async () => {
+      withBlocker();
+      await waitFor(() => screen.getByText('Yes — shipped'));
+      fireEvent.click(screen.getByText('Yes — shipped'));
+      await waitFor(() => expect(shipQueuedMock).toHaveBeenCalledWith('t1'));
+      expect(setTicketStatusesMock).toHaveBeenCalledWith('t1', ['closed']);
+      expect(cancelReplacementMock).not.toHaveBeenCalled();
+    });
+
+    it('"No" closes first, then releases the reserved stock', async () => {
+      withBlocker();
+      await waitFor(() => screen.getByText('No — release the stock'));
+      fireEvent.click(screen.getByText('No — release the stock'));
+      // Order matters: cancelReplacementOrder refuses while the ticket is open.
+      await waitFor(() => expect(cancelReplacementMock).toHaveBeenCalledWith('o1'));
+      expect(setTicketStatusesMock).toHaveBeenCalledWith('t1', ['closed']);
+      expect(shipQueuedMock).not.toHaveBeenCalled();
+    });
+
+    it('Cancel leaves the ticket open and the replacement untouched', async () => {
+      withBlocker();
+      await waitFor(() => screen.getByText('Cancel'));
+      fireEvent.click(screen.getByText('Cancel'));
+      expect(setTicketStatusesMock).not.toHaveBeenCalled();
+      expect(shipQueuedMock).not.toHaveBeenCalled();
+      expect(cancelReplacementMock).not.toHaveBeenCalled();
+    });
+  });
+
+  it('deselecting Complete reopens the ticket', () => {
+    render(<TicketDetailPanel ticket={mkTicket({ status: 'closed' })} onClose={() => {}} />);
+    fireEvent.click(statusButton('Complete'));
+    // Empty set — setTicketStatuses falls back to Action Needed.
+    expect(setTicketStatusesMock).toHaveBeenCalledWith('t1', []);
+  });
+});
+
+// The chip strip is device context for a ticket, and the Support Tickets tab
+// no longer wants it. The other tabs that open this panel still do, so the
+// default stays on and Support opts out explicitly.
+describe('TicketDetailPanel device context', () => {
+  it('renders the chip strip by default', () => {
+    render(<TicketDetailPanel ticket={mkTicket()} onClose={() => {}} />);
+    expect(screen.getByTestId('device-context-header')).toBeTruthy();
+  });
+
+  it('omits the chip strip when showDeviceContext is false', () => {
+    render(<TicketDetailPanel ticket={mkTicket()} onClose={() => {}} showDeviceContext={false} />);
+    expect(screen.queryByTestId('device-context-header')).toBeNull();
+  });
+});
+
+// FR-6: the detail panel is where an operator decides who to talk to, so it
+// has to distinguish the person using the machine from the person who paid —
+// and the diagnosis SMS has to be honest about which number it reaches.
+const mkCust = (over: Record<string, unknown> = {}) => ({
+  id: 'c-chad', full_name: 'Chad Wu', phone: '+14165550100', email: 'chad@example.com',
+  purchaser_id: null, primary_user_name: null, primary_user_phone: null,
+  primary_user_email: null, primary_user_relationship: null, ...over,
+});
+
+describe('TicketDetailPanel — purchaser vs primary user', () => {
+  beforeEach(() => { customersToReturn = []; });
+
+  it('names the primary user and the purchaser in the Customer block', () => {
+    customersToReturn = [mkCust({ primary_user_name: 'Sarah Wu' })];
+    render(<TicketDetailPanel
+      ticket={mkTicket({ customer_id: 'c-chad', customer_name: 'Chad Wu' })}
+      onClose={() => {}} />);
+    expect(screen.getAllByText('Sarah Wu').length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Chad Wu/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Primary user/).length).toBeGreaterThan(0);
+  });
+
+  it('greets the primary user, not the purchaser, in the diagnosis SMS', () => {
+    customersToReturn = [mkCust({ primary_user_name: 'Sarah Wu' })];
+    render(<TicketDetailPanel
+      ticket={mkTicket({
+        customer_id: 'c-chad', customer_name: 'Chad Wu',
+        customer_phone: '+14165550100',
+      })}
+      onClose={() => {}} />);
+    fireEvent.click(screen.getByText('Send diagnosis link'));
+    const box = document.querySelector('textarea') as HTMLTextAreaElement;
+    expect(box.value).toContain('Sarah');
+    expect(box.value).not.toContain('Chad');
+  });
+
+  it('still greets the purchaser when they are the only person on the record', () => {
+    customersToReturn = [mkCust({})];
+    render(<TicketDetailPanel
+      ticket={mkTicket({
+        customer_id: 'c-chad', customer_name: 'Chad Wu',
+        customer_phone: '+14165550100',
+      })}
+      onClose={() => {}} />);
+    fireEvent.click(screen.getByText('Send diagnosis link'));
+    expect((document.querySelector('textarea') as HTMLTextAreaElement).value).toContain('Chad');
+  });
+
+  it('warns when the SMS cannot reach the primary user own number', () => {
+    // The send-followup-sms edge function resolves the destination from
+    // customers.phone server-side, so a primary user with their own number on
+    // file will NOT receive it. Say so rather than implying otherwise.
+    customersToReturn = [mkCust({
+      primary_user_name: 'Sarah Wu', primary_user_phone: '+14165550199',
+    })];
+    render(<TicketDetailPanel
+      ticket={mkTicket({
+        customer_id: 'c-chad', customer_name: 'Chad Wu',
+        customer_phone: '+14165550100',
+      })}
+      onClose={() => {}} />);
+    fireEvent.click(screen.getByText('Send diagnosis link'));
+    expect(screen.getByText(/goes to the purchaser's number/i)).toBeTruthy();
+  });
+});
+
+/* Lily Xu's R-0048: refunded, ticket ST-2026-0406 closed, and the replacement
+ * still sitting in Fulfillment › Replacements. Nothing on the panel could act
+ * on it — the status dropdown is unreachable on a closed ticket, and Order
+ * Review's cancel refuses on a live ticket only, so a closed one fell between
+ * the two. These three buttons are the way out. */
+describe('TicketDetailPanel — replacement outcome buttons', () => {
+  beforeEach(() => {
+    setTicketStatusesMock.mockClear();
+    liveReplacementsMock.mockClear();
+    liveReplacementsMock.mockResolvedValue([]);
+    shipQueuedMock.mockClear();
+    shipQueuedMock.mockResolvedValue(['R-0048']);
+    cancelForTicketMock.mockClear();
+    cancelForTicketMock.mockResolvedValue(['R-0048']);
+    customersToReturn = [];
+  });
+
+  const withLive = async (t = mkTicket()) => {
+    liveReplacementsMock.mockResolvedValue([{ id: 'o-48', order_ref: 'R-0048' }]);
+    render(<TicketDetailPanel ticket={t} onClose={() => {}} />);
+    await screen.findByText('Replacement Shipped');
+  };
+
+  it('shows both buttons for a live replacement even on a CLOSED ticket', async () => {
+    await withLive(mkTicket({ status: 'closed', tags: [] }));
+    expect(screen.getByText('Replacement Shipped')).toBeTruthy();
+    expect(screen.getByText('Replacement Cancelled')).toBeTruthy();
+  });
+
+  it('shows neither button when nothing is live', async () => {
+    render(<TicketDetailPanel ticket={mkTicket()} onClose={() => {}} />);
+    await waitFor(() => expect(liveReplacementsMock).toHaveBeenCalled());
+    expect(screen.queryByText('Replacement Shipped')).toBeNull();
+    expect(screen.queryByText('Replacement Cancelled')).toBeNull();
+  });
+
+  it('ships the order AND moves the ticket to Replacement Sent', async () => {
+    await withLive(mkTicket({ status: 'queued_for_replacement' }));
+    fireEvent.click(screen.getByText('Replacement Shipped'));
+    fireEvent.click(screen.getByText('Yes, it shipped'));
+    await waitFor(() => expect(shipQueuedMock).toHaveBeenCalledWith('t1'));
+    await waitFor(() => {
+      const next = (setTicketStatusesMock.mock.calls.at(-1) as unknown as unknown[])[1] as string[];
+      expect(next).toContain('replacement_sent');
+      expect(next).not.toContain('queued_for_replacement');
+    });
+  });
+
+  it('still ships the order on a closed ticket, without reopening it', async () => {
+    await withLive(mkTicket({ status: 'closed', tags: [] }));
+    fireEvent.click(screen.getByText('Replacement Shipped'));
+    fireEvent.click(screen.getByText('Yes, it shipped'));
+    await waitFor(() => expect(shipQueuedMock).toHaveBeenCalledWith('t1'));
+    expect(setTicketStatusesMock).not.toHaveBeenCalled();
+  });
+
+  it('cancels every live replacement on the ticket and clears the buttons', async () => {
+    await withLive(mkTicket({ status: 'closed', tags: [] }));
+    fireEvent.click(screen.getByText('Replacement Cancelled'));
+    fireEvent.click(screen.getByText('Yes, cancel it'));
+    await waitFor(() => expect(cancelForTicketMock).toHaveBeenCalledWith('t1'));
+    // The lookup that re-runs after the cancel now finds nothing.
+    liveReplacementsMock.mockResolvedValue([]);
+    await waitFor(() => expect(screen.queryByText('Replacement Cancelled')).toBeNull());
+  });
+
+  it('drops Queued for Replacement when the marker is a tag on another status', async () => {
+    await withLive(mkTicket({ status: 'in_progress', tags: ['queued_for_replacement'] }));
+    fireEvent.click(screen.getByText('Replacement Cancelled'));
+    fireEvent.click(screen.getByText('Yes, cancel it'));
+    await waitFor(() => {
+      const next = (setTicketStatusesMock.mock.calls.at(-1) as unknown as unknown[])[1] as string[];
+      expect(next).not.toContain('queued_for_replacement');
+      expect(next).toContain('in_progress');
+    });
+  });
+
+  it('asks before opening the new-ticket form for a damaged replacement', async () => {
+    await withLive();
+    fireEvent.click(screen.getByText('Replacement Received Damaged'));
+    expect(screen.getByText('Create a new ticket for this customer?')).toBeTruthy();
+    expect(screen.queryByTestId('new-ticket-modal')).toBeNull();
+
+    fireEvent.click(screen.getByText('Create ticket'));
+    expect(screen.getByTestId('new-ticket-modal')).toBeTruthy();
+    expect(screen.getByTestId('preset-subject').textContent).toContain('TKT-1');
+
+    fireEvent.click(screen.getByText('stub-create'));
+    await screen.findByText(/New ticket TKT-9 raised/);
+  });
+
+  it('offers the damaged button after the replacement already shipped', async () => {
+    render(<TicketDetailPanel
+      ticket={mkTicket({ replacement_order_id: 'o-48' })}
+      onClose={() => {}} />);
+    await screen.findByText('Replacement Received Damaged');
+    expect(screen.queryByText('Replacement Shipped')).toBeNull();
+  });
+});
+
+describe('TicketDetailPanel — Lovely app tickets', () => {
+  it('shows the source label and the report photos', () => {
+    render(
+      <TicketDetailPanel
+        ticket={mkTicket({ source: 'lovely_app', lovely_report_id: 'r-123' })}
+        onClose={() => {}}
+      />,
+    );
+    expect(screen.getByText('From Lovely app')).toBeInTheDocument();
+    expect(screen.getByText('Lovely app photos')).toBeInTheDocument();
+    expect(screen.getByTestId('lovely-photos')).toHaveTextContent('r-123');
+  });
+
+  it('shows no Lovely photos section on other tickets', () => {
+    render(<TicketDetailPanel ticket={mkTicket()} onClose={() => {}} />);
+    expect(screen.queryByText('Lovely app photos')).toBeNull();
+    expect(screen.queryByTestId('lovely-photos')).toBeNull();
+  });
+});

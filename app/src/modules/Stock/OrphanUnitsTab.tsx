@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useUnits, linkUnitToCustomer, type Unit } from '../../lib/stock';
 import { useCustomers, type Customer } from '../../lib/customers';
+import { matchUnitToCustomer } from '../../lib/customerNameMatch';
 import styles from './Stock.module.css';
 
 // Backlog #69 — operator cleanup for the ~47 units whose customer_name is
@@ -73,6 +74,18 @@ function OrphanRow({ unit, customers }: { unit: Unit; customers: Customer[] }) {
       .slice(0, 5);
   }, [customers, search]);
 
+  // What the name matcher makes of this unit, so a row that is only unlinked
+  // because of an honorific or a parenthetical aside can be confirmed in one
+  // click instead of retyped. An 'ambiguous' verdict is shown but deliberately
+  // not offered as a button — that is exactly the case a human needs to settle.
+  const suggestion = useMemo(
+    () => matchUnitToCustomer(unit.customer_name, customers),
+    [unit.customer_name, customers],
+  );
+  const suggested = suggestion.customerId
+    ? customers.find(c => c.id === suggestion.customerId) ?? null
+    : null;
+
   async function link(customerId: string) {
     setBusy(true); setError(null);
     try {
@@ -102,6 +115,23 @@ function OrphanRow({ unit, customers }: { unit: Unit; customers: Customer[] }) {
       <td>{unit.customer_name}</td>
       <td>{unit.status}</td>
       <td>
+        {suggested && (
+          <button
+            type="button"
+            className={styles.orphanSuggestBtn}
+            onClick={() => link(suggested.id)}
+            disabled={busy}
+            title={suggested.email ?? ''}
+          >
+            Link to <strong>{suggested.full_name}</strong>
+            <span className={styles.orphanMatchMeta}> · {suggestion.confidence} match</span>
+          </button>
+        )}
+        {suggestion.confidence === 'ambiguous' && (
+          <p className={styles.orphanAmbiguous}>
+            {suggestion.candidates.length} customers share this name — pick the right one below.
+          </p>
+        )}
         <input
           type="text"
           className={styles.orphanSearch}

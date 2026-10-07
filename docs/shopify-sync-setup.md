@@ -81,19 +81,42 @@ Should show `sync-shopify-orders | ACTIVE`.
 
 Click **⟲ Sync from Shopify** at the top of the Order Review sidebar on
 https://lila.vip/. The button shows "Syncing…" while the function runs, then
-reports `N new · M skipped`. New rows appear via the existing realtime
-subscription on `orders`.
+reports `N new · M refreshed · K not imported`. New rows appear via the
+existing realtime subscription on `orders`. The button ticks its elapsed
+seconds while it runs and gives up after 180s rather than staying disabled.
 
 ## Behavior
 
-- Fetches up to 50 open + unfulfilled orders per click.
-- Only imports US/CA orders (schema constraint). Others are counted as skipped.
+- A manual click is a **full** sync (every order, `status=any`); the 5-minute
+  pg_cron job passes `{"incremental": true}` and looks back 10 minutes.
+- Only imports US/CA orders (schema constraint). Everything else is reported
+  under "not imported" — see below.
 - Orders missing a customer phone get auto-flagged by the `orders` insert
   trigger (QUO — the team's messaging tool — requires a phone).
 - `address_verdict` is heuristic (`apt`/`house`). Reviewers can adjust later.
 - `quo_thread_url` is always null on import — set it manually if a QUO thread
   exists.
 - Idempotent: `on conflict (order_ref) do nothing`.
+
+## "Not imported" is not the same as "failed"
+
+Every order Shopify returns that does not become a row is reported with a
+reason, and the count in the header opens the list (ref, date, total, buyer,
+line items). Only one of the four reasons is a fault:
+
+| Reason | What it means |
+| --- | --- |
+| `no_shipping_address` | Shopify has no shipping address for the order at all. This is the normal shape of a **no-ship product** — the `$1.00 LILA Mini Reservation`, a subscription buyout. `orders.country` is `NOT NULL` with a `CHECK ('US','CA')`, so there is nowhere to put one. |
+| `international` | Has a shipping address, but outside the US and Canada. |
+| `missing_city` | US/CA address with no city — a malformed address in Shopify. |
+| `db_error` | **A real failure.** The write was rejected; the detail carries the Postgres message. |
+
+As of 2026-09-10 a full sync reports 31 not imported, 30 of them
+`no_shipping_address`: 27 LILA Mini Reservations placed since 2026-08-14, plus
+older `Subscription Buyout` orders. **makeLILA has no surface for either.** If
+reservations are to be worked as pre-sale leads, that needs a home of its own —
+importing them into the Sales queue would need `orders.country` to become
+nullable and would put non-shippable $1 rows in a fulfilment queue.
 
 ## Rotating the token
 
@@ -108,6 +131,11 @@ Then `supabase secrets set SHOPIFY_ADMIN_TOKEN=<new token>` and re-deploy.
 
 ## Troubleshooting
 
+- **Sync is slow / the button stays disabled**: it should finish in seconds. A
+  full sync used to take ~70s because every order cost three DB round-trips
+  awaited in turn; the writes are now pooled. If it creeps back up, check
+  `DB_CONCURRENCY` in the function and the `function_edge_logs`
+  `execution_time_ms` for `sync-shopify-orders`.
 - **`Shopify 401`**: the admin token is wrong or the app was uninstalled.
   Re-run the token grab.
 - **`Shopify 403` / `Not enough permissions`**: the app is missing a scope.

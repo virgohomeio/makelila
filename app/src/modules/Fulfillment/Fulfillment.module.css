@@ -1,53 +1,51 @@
-.layout {
-  background: #fff;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--color-border);
-  overflow: hidden;
-}
+/* ══════════════════════════════════════════════════════════════════════════
+   Fulfillment — the app's busiest screen, and the one that looked least like
+   the rest of it.
 
-.tabs {
+   Two things were wrong and both are structural, not cosmetic.
+
+   1. The tab row. Nine tabs, each drawn as a bordered box filled with cream
+      and lettered in Ladybug Red, sitting on a 2px red rule, with a literal
+      "|" character in the markup between the third and fourth. Nine red
+      boxes read as nine buttons — or nine warnings — not as one control with
+      one selection, and it left red meaning nothing anywhere else on the
+      page. Tabs now come from components/ui; `.tabs` / `.tab` / `.tabDivider`
+      are gone from this file rather than restyled, and the group break is a
+      property of the tab data instead of a stray glyph.
+
+   2. The queue sidebar was a full dark theme — its own greys (#252525,
+      #232323), its own gradients (#3a2a0c → #222) and its own status ramp
+      (#fc8181 / #fbd38d / #68d391) — inside an otherwise warm, light app.
+      On an empty queue it rendered as a solid black rectangle 390px wide
+      containing the words "No queued orders". It is now the same recessed
+      cream every other list in the app sits on.
+
+      That move forces one correction that is not cosmetic: --color-error-accent
+      (#e53e3e) marked overdue rows, and tokens.css is explicit that it is a
+      dark-surface token — it measures 4.13:1 on white, under the 4.5:1 AA
+      floor. Overdue markers move to --color-error-strong, which is the
+      light-surface variant that exists for exactly this.
+   ══════════════════════════════════════════════════════════════════════════ */
+.layout {
   display: flex;
-  border-bottom: 2px solid var(--color-crimson);
-}
-.tab {
-  padding: 9px 20px;
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--color-crimson);
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-bottom: none;
-  cursor: pointer;
-  border-radius: var(--radius-md) var(--radius-md) 0 0;
-  margin-right: 3px;
-}
-.tab.active {
-  background: var(--color-crimson);
-  color: #fff;
+  flex-direction: column;
+  gap: var(--space-4);
 }
 
 .tabPanel {
-  padding: 16px;
-  min-height: calc(100vh - 200px);
-}
-
-.tabDivider {
-  width: 1px;
-  background: var(--color-dark-3, #333);
-  margin: 8px 4px;
-  align-self: stretch;
+  min-height: calc(100vh - 240px);
 }
 
 .queueLayout {
   display: grid;
-  grid-template-columns: 280px 1fr;
+  grid-template-columns: 300px 1fr;
   gap: 0;
-  height: calc(100vh - 220px);
+  height: calc(100vh - 240px);
   min-height: 500px;
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   overflow: hidden;
-  background: #fff;
+  background: var(--color-raised);
 }
 
 /* Mobile: stack sidebar above detail. Borders dropped at edge-to-edge. */
@@ -62,135 +60,328 @@
 }
 
 .sidebar {
-  background: var(--color-dark-1);
+  /* Height of the Shipped tab's sticky search box, shared with the sticky
+     month headings that park under it. */
+  --queue-search-h: 50px;
+  background: var(--color-surface);
+  border-right: 1px solid var(--color-border);
   display: flex;
   flex-direction: column;
   overflow-y: auto;
 }
 
 .sidebarHeader {
-  padding: 12px 14px;
-  font-size: 9px;
-  font-weight: 700;
-  color: #aaa;
-  letter-spacing: 0.5px;
-  border-bottom: 1px solid var(--color-dark-3);
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--font-size-meta);
+  font-weight: 600;
+  color: var(--color-ink-subtle);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--color-border);
 }
 
 .sidebarTabs {
-  display: flex;
+  /* Two by two, not four across. A fourth rail (Received) cut the per-tab
+     width from ~100px to ~75px, at which "To be picked up" breaks onto three
+     lines and drags the whole bar down with it. In pairs each tab gets 150px
+     and every label fits on one or two. */
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   flex-shrink: 0;
-  border-bottom: 1px solid var(--color-dark-3);
+  border-bottom: 1px solid var(--color-border);
 }
 
 .sidebarTab {
-  flex: 1;
+  /* The label sits over its count rather than beside it — "To be picked up 9"
+     on one line either clips or drags the other tabs down to unreadable. */
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
   background: none;
   border: none;
   border-bottom: 2px solid transparent;
-  color: #888;
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.5px;
-  padding: 11px 6px;
+  color: var(--color-ink-subtle);
+  font-size: var(--font-size-meta);
+  font-weight: 500;
+  line-height: 1.25;
+  padding: var(--space-2) var(--space-1);
   cursor: pointer;
   text-align: center;
-  transition: color 0.12s;
+  transition: color var(--dur-fast) var(--ease-out);
   margin-bottom: -1px;
 }
 
-.sidebarTab:hover { color: #ccc; }
+/* Wraps to two lines at the narrowest widths rather than clipping; the tabs
+   stay the same height either way so the bar does not jump on a tab switch. */
+.sidebarTabLabel {
+  display: flex;
+  align-items: center;
+  min-height: 2.5em;
+}
+
+.sidebarTab:hover { color: var(--color-ink-muted); }
+
+/* The counts were baked into the label as "READY TO SHIP (0)" — caps, and a
+   figure in brackets that a reader has to parse out of a sentence. Same
+   treatment as every other tab count in the app. */
+.sidebarTabCount {
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--font-numeric);
+  color: var(--color-ink-faint);
+}
+.sidebarTab.activeTab .sidebarTabCount { color: var(--color-ink-muted); }
 
 .sidebarTab.activeTab {
-  color: #fff;
-  border-bottom: 2px solid var(--color-crimson);
+  color: var(--color-ink);
+  font-weight: 600;
+  border-bottom: 2px solid var(--color-ink);
 }
 
-.queueRow {
-  padding: 10px 14px;
-  border-bottom: 1px solid #252525;
+/* Look-up box over the Shipped tab. Sticks above the scroll so it stays
+   reachable 100 rows down, and sits on the rail's own ground so it reads as
+   part of the chrome rather than as the first row. */
+.sidebarSearchWrap {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  flex-shrink: 0;
+  /* Fixed, because .monthHeading sticks directly beneath it — see the note
+     there. 8px padding + a 34px control. */
+  height: var(--queue-search-h);
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.sidebarSearchIcon {
+  position: absolute;
+  left: 22px; top: 50%;
+  transform: translateY(-50%);
+  color: var(--color-ink-subtle);
+  font-size: var(--font-size-body);
+  pointer-events: none;
+}
+
+.sidebarSearch {
+  width: 100%;
+  background: var(--color-raised);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 6px 26px 6px 28px;
+  font-size: var(--font-size-body);
+  color: var(--color-ink);
+}
+.sidebarSearch::placeholder { color: var(--color-ink-faint); }
+.sidebarSearch:focus-visible {
+  outline: none;
+  border-color: var(--color-ink-faint);
+  box-shadow: var(--focus-ring);
+}
+/* Safari draws its own clear affordance on type="search"; ours is the one
+   that matches the rest of the app. */
+.sidebarSearch::-webkit-search-cancel-button { display: none; }
+
+.sidebarSearchClear {
+  position: absolute;
+  right: 20px; top: 50%;
+  transform: translateY(-50%);
+  border: none;
+  background: var(--color-border);
+  color: var(--color-ink-muted);
+  width: 17px; height: 17px;
+  border-radius: 50%;
+  font-size: var(--font-size-meta);
+  line-height: 1;
+  padding: 0;
   cursor: pointer;
-  transition: background 0.1s;
 }
-.queueRow:hover { background: #232323; }
-.queueRow.selected {
-  background: #2a1010;
-  border-left: 3px solid var(--color-crimson);
-  padding-left: 11px;
-}
-.queueRow.overdue { border-left: 3px solid var(--color-error-strong); padding-left: 11px; }
-.queueRow.fulfilled { opacity: 0.65; }
-.queueRow.priority {
-  background: linear-gradient(90deg, #3a2a0c 0%, #222 60%);
-  border-left: 3px solid #f6ad55;
-  padding-left: 11px;
-}
-.queueRow.priority:hover { background: linear-gradient(90deg, #4a360f 0%, #2a2a2a 60%); }
-.queueRow.priority.selected { background: #3a1a1a; border-left: 3px solid var(--color-crimson); }
+.sidebarSearchClear:hover { background: var(--color-ink-faint); color: var(--color-ink); }
 
-.queueRow.paused {
-  background: linear-gradient(90deg, #3a1818 0%, #1f1818 70%);
-  border-left: 3px solid var(--color-error-strong);
-  padding-left: 11px;
+/* Month buckets on the Shipped tab. Ready to ship is a short work list and
+   stays flat; Shipped is 100+ rows of history, so it is cut into months with
+   the newest at the top and each heading pinned while you scroll past it. */
+.monthGroup {
+  display: flex;
+  flex-direction: column;
 }
-.queueRow.paused:hover { background: linear-gradient(90deg, #4a1e1e 0%, #2a1e1e 70%); }
-.queueRow.paused.selected { background: #4a1010; }
+
+.monthHeading {
+  position: sticky;
+  /* Below the search box, not under it — both stick in the same scroller. */
+  top: var(--queue-search-h);
+  z-index: 1;
+  margin: 0;
+  /* Opaque, and the sidebar's own ground rather than --color-raised: white is
+     what a *selected* row wears here, and a heading must not look picked. */
+  padding: var(--space-2) var(--space-4);
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+  font-size: var(--font-size-meta);
+  font-weight: 600;
+  color: var(--color-ink-muted);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.monthCount {
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--font-numeric);
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--color-ink-faint);
+}
+
+/* A queue row. Selection is ink, not red: which row you are reading is
+   state, and the accent is reserved for the action you can take on it.
+   Condition markers — priority, paused, overdue — keep their own colours,
+   because those are the one thing on this list that genuinely is urgent. */
+.queueRow {
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+  border-left: 3px solid transparent;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.queueRow:hover { background: rgba(var(--color-ink-rgb), 0.035); }
+.queueRow.selected {
+  background: var(--color-raised);
+  border-left-color: var(--color-ink);
+}
+.queueRow.overdue { border-left-color: var(--color-error-strong); }
+.queueRow.fulfilled { opacity: 0.6; }
+.queueRow.priority {
+  background: var(--color-warning-bg);
+  border-left-color: var(--color-warning-strong);
+}
+.queueRow.priority:hover { background: var(--color-warning-border); }
+.queueRow.priority.selected { border-left-color: var(--color-ink); }
+.queueRow.paused {
+  background: var(--color-error-bg);
+  border-left-color: var(--color-error-strong);
+}
+.queueRow.paused:hover { background: var(--color-error-border); }
+.queueRow.paused.selected { border-left-color: var(--color-ink); }
 
 .pauseBadge {
-  font-size: 9px;
-  font-weight: 800;
-  margin-top: 3px;
-  letter-spacing: 0.5px;
-  color: #fc8181;
+  font-size: var(--font-size-meta);
+  font-weight: 600;
+  margin-top: var(--space-1);
+  letter-spacing: 0.04em;
+  color: var(--color-error-strong);
+}
+
+/* This order was refunded but is still sitting in the queue. Nothing should
+   ship against it — say so where the picker is looking. */
+.refundBadge {
+  display: inline-block;
+  margin-top: var(--space-1);
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: var(--font-size-meta);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  background: var(--color-error-bg);
+  color: var(--color-error);
+  border: 1px solid var(--color-error-border);
+}
+/* "Goorooship notified" on a row in the pickup rail. Green rather than the
+   warning amber the other two badges use: nothing is wrong with these rows —
+   the carton is out of our hands and the badge is saying so. */
+.pickupBadge {
+  background: var(--color-success-bg);
+  color: var(--color-success);
+  border-color: var(--color-success-border);
+}
+
+.refundBadgeSoft {
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
+  border-color: var(--color-warning-border);
 }
 
 .priorityBadge {
   display: inline-block;
-  margin-right: 4px;
-  font-size: 10px;
+  margin-right: var(--space-1);
+  font-size: var(--font-size-meta);
 }
 
-.rowName { font-size: 11px; font-weight: 600; color: #e8e8e8; }
-.rowMeta { font-size: 10px; color: #888; margin-top: 2px; }
-.rowDue  { font-size: 9px; font-weight: 700; margin-top: 3px; }
-.rowDue.today { color: #fc8181; }
-.rowDue.soon  { color: #fbd38d; }
-.rowDue.ok    { color: #68d391; }
-.rowDue.done  { color: #48bb78; }
+.rowName { font-size: var(--font-size-body); font-weight: 600; color: var(--color-ink); }
+/* Serial + order ref live here, so this line is data. */
+.rowMeta {
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--font-numeric);
+  font-size: var(--font-size-meta);
+  color: var(--color-ink-subtle);
+  margin-top: 2px;
+}
+.rowDue  {
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--font-numeric);
+  font-size: var(--font-size-meta);
+  font-weight: 500;
+  margin-top: 3px;
+}
+/* The four due states were a dark-surface ramp (#fc8181 / #fbd38d / #68d391
+   / #48bb78) that would be close to invisible on cream. "ok" and "done" both
+   mean nothing-to-do, so they now share one quiet green instead of two
+   greens a reader had to tell apart. */
+.rowDue.today { color: var(--color-error-strong); }
+.rowDue.soon  { color: var(--color-warning); }
+.rowDue.ok    { color: var(--color-success); }
+.rowDue.done  { color: var(--color-success); }
 
 .stepBadge {
   display: inline-block;
-  font-size: 9px;
-  background: #2d2d2d;
-  color: #ccc;
-  padding: 2px 6px;
-  border-radius: 3px;
-  font-weight: 700;
-  margin-left: 6px;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-meta);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  color: var(--color-ink-muted);
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-sm);
+  font-weight: 500;
+  margin-left: var(--space-2);
 }
 
-.emptyList { padding: 20px 14px; color: var(--color-ink-faint); font-size: 11px; text-align: center; }
+.emptyList {
+  padding: var(--space-5) var(--space-4);
+  color: var(--color-ink-subtle);
+  font-size: var(--font-size-body);
+  text-align: center;
+}
 
 .detail {
-  padding: 16px 18px;
+  padding: var(--space-4) var(--space-5);
   overflow-y: auto;
 }
 
+/* The detail header was a 2px crimson rule under a crimson 14px/800 title —
+   one more place the accent was carrying a job (this is a heading) that ink
+   does better. */
 .header {
-  padding-bottom: 10px;
-  border-bottom: 2px solid var(--color-crimson);
-  margin-bottom: 14px;
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+  margin-bottom: var(--space-4);
 }
 .headerRow {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  gap: 12px;
+  gap: var(--space-3);
 }
 .headerTitle {
-  font-size: 14px;
-  font-weight: 800;
-  color: var(--color-crimson);
+  font-size: var(--font-size-section);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--color-ink);
 }
 .priorityBtnOff, .priorityBtnOn {
   border: 1px solid var(--color-border);
@@ -218,9 +409,131 @@
 .headerRight {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 8px;
+  flex-shrink: 1;
+}
+
+/* "Cancel Order" / "Flag Order" / "Shipment Not Ready - Move Back to Orders".
+   All are outlined rather than filled: they sit next to the Due pill on every
+   open order, so they must not out-shout the step the operator is actually on.
+   Flag is amber, between the neutral exits and the red one - it stops the
+   order without ending it. */
+.exitBtn, .exitBtnOn, .exitBtnDanger, .exitBtnDangerOn,
+.exitBtnWarn, .exitBtnWarnOn {
+  background: #fff;
+  border: 1px solid var(--color-border);
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
   flex-shrink: 0;
 }
+.exitBtn, .exitBtnOn { color: var(--color-ink-subtle); }
+.exitBtn:hover:not(:disabled) { border-color: var(--color-info); color: var(--color-info); }
+.exitBtnOn { background: #ebf8ff; color: var(--color-info); border-color: #90cdf4; }
+.exitBtnDanger, .exitBtnDangerOn { color: #c53030; border-color: #fc8181; }
+.exitBtnDanger:hover:not(:disabled) { background: #fff5f5; }
+.exitBtnDangerOn { background: #fff5f5; }
+.exitBtnWarn, .exitBtnWarnOn {
+  color: var(--color-warning);
+  border-color: var(--color-warning-border);
+}
+.exitBtnWarn:hover:not(:disabled) { background: var(--color-warning-bg); }
+.exitBtnWarnOn { background: var(--color-warning-bg); }
+.exitBtn:disabled, .exitBtnOn:disabled,
+.exitBtnDanger:disabled, .exitBtnDangerOn:disabled,
+.exitBtnWarn:disabled, .exitBtnWarnOn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Inline confirm for any of them: what will happen, then a reason. */
+.exitPanel, .exitPanelDanger, .exitPanelWarn {
+  margin-top: 10px;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  border: 1.5px solid #bee3f8;
+  background: #f7fbff;
+}
+.exitPanelDanger {
+  border-color: var(--color-error-border, #fc8181);
+  background: var(--color-error-bg, #fff5f5);
+}
+.exitPanelWarn {
+  border-color: var(--color-warning-border);
+  background: var(--color-warning-bg);
+}
+.exitPanelTitle {
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--color-ink);
+  margin-bottom: 6px;
+}
+.exitPanelList {
+  margin: 0 0 10px;
+  padding-left: 18px;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--color-ink-muted);
+}
+.exitPanelInput {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 7px 9px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-size: 11px;
+  resize: vertical;
+}
+
+/* The received-date picker in the same panel. A date is seven characters of
+   content, and at the textarea's full width the control reads as an empty
+   field the operator is meant to type a paragraph into. */
+.exitPanelDate {
+  width: auto;
+  max-width: 180px;
+  font-size: 12px;
+  padding: 6px 9px;
+}
+
+/* Confirmation left behind in the detail pane after a row leaves the queue. */
+.queueNotice {
+  margin-bottom: 12px;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  border: 1.5px solid #9ae6b4;
+  background: #f0fff4;
+  color: #276749;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.exitPanelActions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+.exitConfirm, .exitConfirmDanger, .exitConfirmWarn {
+  border: none;
+  padding: 7px 14px;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.exitConfirm { background: var(--color-info); }
+.exitConfirmDanger { background: #c53030; }
+/* The deep end of the warning ramp, not --color-warning-strong: that is a
+   mid-amber, and white text on it does not clear AA. */
+.exitConfirmWarn { background: var(--color-warning); }
+.exitConfirm:hover:not(:disabled), .exitConfirmDanger:hover:not(:disabled),
+.exitConfirmWarn:hover:not(:disabled) { filter: brightness(1.08); }
+.exitConfirm:disabled, .exitConfirmDanger:disabled,
+.exitConfirmWarn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .duePill {
   padding: 5px 12px;
@@ -340,6 +653,8 @@
   cursor: pointer;
 }
 .confirmBtn:disabled { background: var(--color-border); color: var(--color-ink-faint); cursor: not-allowed; }
+/* Sits beside a disabled Confirm label and names the fields still missing. */
+.labelBlockers { font-size: 11px; color: var(--color-ink-subtle); }
 
 .shelfLayout {
   display: flex;
@@ -359,10 +674,64 @@
 .shelfStats { font-size: 11px; color: var(--color-ink-subtle); }
 .shelfStats strong { color: var(--color-ink); font-weight: 700; }
 
+.shelfSection {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.shelfSectionHead {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--color-border);
+}
+.shelfSectionTitle {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--color-ink);
+  letter-spacing: 0.2px;
+}
+.shelfSectionMeta {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--color-ink-subtle);
+}
+.shelfSectionBlurb {
+  font-size: 11px;
+  color: var(--color-ink-faint);
+}
+.shelfSectionEmpty {
+  padding: 18px 12px;
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  color: var(--color-ink-faint);
+  text-align: center;
+}
+
 .skidGrid {
   display: grid;
   grid-template-columns: repeat(5, 1fr);
   gap: 12px;
+}
+
+/* A shipment that arrived with no pallet manifest is one big group, not a row
+   of five-slot cards — let it span the grid and wrap internally. */
+.skidCardWide { grid-column: 1 / -1; }
+.bulkGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(52px, 1fr));
+  gap: 4px;
+}
+.skidNote {
+  font-weight: 600;
+  color: var(--color-ink-faint);
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .skidCard {
@@ -509,3 +878,448 @@
   display: inline-block; padding: 2px 8px; background: #fffaf0;
   color: #c05621; border-radius: 4px; font-size: .7rem; font-weight: 600;
 }
+
+/* ── EZ Trans / Goorooship booking (step 3) ─────────────────────────────── */
+/* Only rendered when the assigned unit is held at the EZTrans 3PL. Set apart
+   from the Freightcom card because it is the other, mutually-exclusive path:
+   an operator who sees this one should not be booking Freightcom. */
+.ezTransPanel {
+  background: #fff;
+  border: 1.5px solid var(--color-crimson);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  margin-bottom: 14px;
+}
+.ezTransLead {
+  font-size: 11px;
+  color: var(--color-ink-muted);
+  line-height: 1.5;
+  margin: 2px 0 10px;
+}
+.ezTransSteps {
+  list-style: decimal;
+  margin: 0 0 10px;
+  padding-left: 18px;
+}
+/* The li stays a list-item so the step number actually renders — `display:
+   flex` on an li drops the marker — and the row layout lives on an inner
+   wrapper instead. */
+.ezTransSteps li {
+  font-size: 11px;
+  margin-bottom: 10px;
+}
+.ezTransStepRow {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.ezTransHint {
+  color: var(--color-ink-subtle);
+  font-size: 10px;
+}
+.ezTransPreviewToggle {
+  background: transparent;
+  border: 1px solid var(--color-border);
+  color: var(--color-ink-subtle);
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 10px;
+  cursor: pointer;
+}
+.ezTransPreviewToggle:hover { color: var(--color-ink); border-color: var(--color-ink-subtle); }
+.ezTransFacts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 22px;
+  margin: 0 0 4px;
+}
+.ezTransFacts div { display: flex; flex-direction: column; gap: 1px; }
+.ezTransFacts dt {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--color-ink-subtle);
+}
+.ezTransFacts dd {
+  margin: 0;
+  font-size: 11px;
+  color: var(--color-ink);
+  font-family: ui-monospace, monospace;
+}
+.ezTransSent {
+  font-size: 11px;
+  color: var(--color-success);
+  margin-top: 8px;
+}
+.ezTransPreviewLabel {
+  font-size: 10px;
+  color: var(--color-ink-subtle);
+  margin: 10px 0 3px;
+}
+.ezTransPreview {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  padding: 10px;
+  border-radius: 4px;
+  font-size: 10px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  max-height: 280px;
+  overflow-y: auto;
+  margin: 0;
+}
+
+/* The label-capture step inside the EZ Trans panel. Laid out as its own block
+   under the step number rather than inline, because it is three fields rather
+   than one control. */
+.ezTransStepTitle {
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--color-ink);
+  margin-bottom: 6px;
+}
+.ezTransForm {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 4px;
+}
+.ezTransForm label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11px;
+  color: var(--color-ink-subtle);
+  max-width: 340px;
+}
+.ezTransForm select,
+.ezTransForm input[type='text'] {
+  padding: 6px 10px;
+  font-size: 11px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+}
+.ezTransForm input[type='text'] { font-family: ui-monospace, monospace; }
+.ezTransForm input[type='file'] { font-size: 11px; }
+.ezTransFile {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--color-ink);
+}
+.ezTransFile button {
+  background: transparent;
+  border: 1px solid var(--color-border);
+  color: var(--color-ink-subtle);
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+/* Email preview / one-off editor inside the EZ Trans panel. */
+.ezTransPreviewHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 12px 0 4px;
+}
+.ezTransEditor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ezTransEditor label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11px;
+  color: var(--color-ink-subtle);
+}
+.ezTransEditor input,
+.ezTransEditor textarea {
+  width: 100%;
+  padding: 8px 10px;
+  font-size: 11px;
+  line-height: 1.5;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  color: var(--color-ink);
+  background: #fff;
+  font-family: inherit;
+}
+.ezTransEditor textarea {
+  min-height: 180px;
+  resize: vertical;
+}
+.ezTransEditor input:focus,
+.ezTransEditor textarea:focus {
+  outline: none;
+  border-color: var(--color-crimson);
+}
+
+/* Step 2 — the test report Stock already holds for the assigned serial, shown
+   in place of the blank "paste a URL" box it used to offer. */
+.reportPanel {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-surface);
+  max-width: 500px;
+}
+.reportPanelPass { border-color: var(--color-success-border); background: var(--color-success-bg); }
+.reportPanelFail { border-color: var(--color-error-border); background: var(--color-error-bg); }
+.reportPanelMissing { border-color: var(--color-warning-border); background: var(--color-warning-bg); }
+
+.reportHead { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.reportVerdict { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
+.reportVerdictPass { color: var(--color-success); }
+.reportVerdictFail { color: var(--color-error); }
+.reportVerdictMissing { color: var(--color-warning); }
+
+.reportFile { font-size: 11px; color: var(--color-ink-subtle); word-break: break-all; }
+.reportMeta { font-size: 11px; color: var(--color-ink-subtle); margin-top: 4px; }
+.reportFailed { font-size: 11px; color: var(--color-error); margin-top: 4px; font-weight: 600; }
+
+.reportOpen {
+  margin-left: auto;
+  background: #fff;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-ink);
+  cursor: pointer;
+}
+.reportOpen:hover { border-color: var(--color-ink-subtle); }
+
+/* The booking went out, but not from the address the operator expected —
+   reported beside the success line, not as a failure. */
+.ezTransWarning {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-warning-border);
+  border-radius: 4px;
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+/* --- Today's Goorooship batch -------------------------------------------
+   EZ Trans asked for one email a day rather than one per box, so the
+   end-of-day send sits under the queue rather than inside any one order's
+   step. queuePage exists only to stack the two: the grid above keeps its own
+   fixed height and this bar follows it down the page. */
+.queuePage {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.batchFooter {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-raised);
+  padding: var(--space-4) var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.batchFooterHead {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.batchTitle {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  color: var(--color-ink);
+}
+
+.batchCount {
+  font-size: 11px;
+  color: var(--color-ink-muted);
+}
+
+.batchEmpty {
+  font-size: 11px;
+  color: var(--color-ink-muted);
+  line-height: 1.55;
+  margin: 0;
+  max-width: 68ch;
+}
+
+.batchList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  /* A busy day is a long list, and the button under it must stay reachable
+     without scrolling the whole page past the queue. */
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.batchItem {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  background: var(--color-surface);
+}
+
+/* Already mailed: still listed, because "did this one go?" is the question
+   the operator is asking, but visibly not part of what the button will send. */
+.batchItemSent { opacity: 0.6; }
+
+.batchItemMain {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--color-ink-muted);
+}
+
+.batchItemMain strong { font-size: 12px; color: var(--color-ink); }
+
+.batchTag {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--color-info-bg);
+  border: 1px solid var(--color-info-border);
+  color: var(--color-ink-muted);
+}
+
+.batchDocs {
+  font-family: ui-monospace, monospace;
+  font-size: 10px;
+  color: var(--color-ink-faint);
+  margin-top: 2px;
+  word-break: break-all;
+}
+
+.batchActions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+/* The "in today's batch" line inside the step-3 EZ Trans panel. */
+.ezTransBatchChip {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--color-ink-muted);
+  background: var(--color-info-bg);
+  border: 1px solid var(--color-info-border);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+}
+
+/* ─── Step 3: the compost starter ──────────────────────────────────────────
+   Bordered like the EZ Trans panel rather than like the plain .labelSection
+   cards around it: it is a prerequisite for the whole step, not one more field
+   on the shipping label, and the greyed-out Confirm underneath has to be
+   traceable to it at a glance. */
+.starterCard {
+  background: #fff;
+  border: 1.5px solid var(--color-warning-border);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  margin-bottom: 14px;
+}
+.starterHead {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+.starterHead .labelSectionHead { margin-bottom: 0; }
+.starterLead {
+  font-size: 11px;
+  color: var(--color-ink-muted);
+  line-height: 1.5;
+  margin: 6px 0 10px;
+}
+.starterRequiredTag,
+.starterDoneTag,
+.starterExemptTag {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.starterRequiredTag {
+  background: var(--color-warning-bg);
+  border: 1px solid var(--color-warning-border);
+  color: var(--color-warning);
+}
+.starterDoneTag {
+  background: var(--color-success-bg);
+  border: 1px solid var(--color-success-border);
+  color: var(--color-success);
+}
+.starterExemptTag {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  color: var(--color-ink-subtle);
+}
+.starterSkipForm {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--color-border);
+}
+.starterSkipForm label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11px;
+  color: var(--color-ink-subtle);
+  max-width: 420px;
+}
+.starterSkipForm input[type='text'] {
+  padding: 6px 10px;
+  font-size: 11px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+}
+/* Quiet on purpose. The exemption exists so a legitimate no-starter order is
+   not stranded, not as a shortcut past the step, so it reads as a link rather
+   than as the second of two buttons. */
+.starterSkipLink {
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin-top: 4px;
+  color: var(--color-ink-subtle);
+  font-size: 10px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.starterSkipLink:hover { color: var(--color-ink); }

@@ -1,21 +1,58 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { useOrders } from '../../lib/orders';
+import { useOrders, syncShopifyOrders, type ShopifySyncResult } from '../../lib/orders';
 import { useIsMobile } from '../../lib/useMediaQuery';
 import { MobileBackHeader } from '../../components/MobileBackHeader';
 import { Sidebar } from './Sidebar';
+import { SkippedPanel } from './SkippedPanel';
 import { Detail } from './Detail';
+import NewOrderForm from './NewOrderForm';
 import Templates from '../Templates';
 import Upload from '../Upload';
+import Reconcile from './Reconcile';
+import { EmptyState } from '../../components/ui';
 import styles from './OrderReview.module.css';
+
+type SyncState =
+  | { kind: 'idle' }
+  | { kind: 'syncing'; startedAt: number }
+  | { kind: 'done'; result: ShopifySyncResult }
+  | { kind: 'error'; message: string };
 
 export default function OrderReview() {
   const { orderId } = useParams<{ orderId: string }>();
   const navigate = useNavigate();
   const isMobile = useIsMobile();
-  const { all, pending, held, flagged, approved, replacement, loading } = useOrders();
-  const selected = orderId ? all.find(o => o.id === orderId) ?? null : null;
-  const [view, setView] = useState<'orders' | 'templates' | 'upload'>('orders');
+  const { all, pending, pendingBacklog, held, flagged, approved, cancelled, loading } = useOrders();
+  // Every bucket here is sales-only. Replacements are created already-approved
+  // and live in Fulfillment; Sales never shows one, including by URL.
+  //
+  // Cancelled orders sit outside `all` (they are out of the live queue), but
+  // the Cancelled tab still has to be able to open one.
+  const selected = orderId
+    ? all.find(o => o.id === orderId) ?? cancelled.find(o => o.id === orderId) ?? null
+    : null;
+  const [view, setView] = useState<'orders' | 'reconcile' | 'templates' | 'upload'>('orders');
+  // Syncing is a module-level action, not a list filter, so it lives in the
+  // page header rather than inside the order rail's header.
+  const [sync, setSync] = useState<SyncState>({ kind: 'idle' });
+  const [skipsOpen, setSkipsOpen] = useState(false);
+  const [newOrderOpen, setNewOrderOpen] = useState(false);
+  // What the last hand-made order became. The database decides the status —
+  // an order with no phone is flagged by a trigger, not by us — so the operator
+  // is told where the row actually went rather than where it was aimed.
+  const [created, setCreated] = useState<{ order_ref: string; status: string } | null>(null);
+  // A sync used to sit behind a disabled button with no sign of life for over a
+  // minute, which is indistinguishable from a hung one. Ticking the elapsed
+  // seconds is the cheapest possible proof it is still running.
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    if (sync.kind !== 'syncing') return;
+    const startedAt = sync.startedAt;
+    setElapsed(0);
+    const id = setInterval(() => setElapsed(Math.round((Date.now() - startedAt) / 1000)), 1000);
+    return () => clearInterval(id);
+  }, [sync]);
 
   // Desktop auto-loads the first pending order so the right pane isn't empty
   // on first paint. On mobile we keep the sidebar visible (no order selected)
@@ -36,39 +73,158 @@ export default function OrderReview() {
     }
   };
 
-  const viewChips = (
-    <div className={styles.viewChips}>
-      <button
-        className={`${styles.viewChip} ${view === 'orders' ? styles.viewChipActive : ''}`}
-        onClick={() => setView('orders')}
-      >Orders</button>
-      <button
-        className={`${styles.viewChip} ${view === 'templates' ? styles.viewChipActive : ''}`}
-        onClick={() => setView('templates')}
-      >Templates</button>
-      <button
-        className={`${styles.viewChip} ${view === 'upload' ? styles.viewChipActive : ''}`}
-        onClick={() => setView('upload')}
-      >Upload</button>
+  const runSync = async () => {
+    setSync({ kind: 'syncing', startedAt: Date.now() });
+    setSkipsOpen(false);
+    try {
+      const r = await syncShopifyOrders();
+      setSync({ kind: 'done', result: r });
+    } catch (e) {
+      setSync({ kind: 'error', message: (e as Error).message });
+    }
+  };
+
+  const liveCount = all.length;
+
+  // Views (Orders / Templates / Upload) are a different navigational level
+  // from the status tabs in the rail, so they no longer wear the same crimson
+  // pill treatment those tabs use.
+  const header = (
+    <div className={styles.pageHead}>
+      <div>
+        <div className={styles.pageTitle}>Sales</div>
+        <div className={styles.pageSub}>
+          {loading
+            ? 'Loading orders…'
+            : `${liveCount} live order${liveCount === 1 ? '' : 's'} · ${pending.length} awaiting confirmation`}
+        </div>
+      </div>
+      <div className={styles.pageHeadRight}>
+        {view === 'orders' && (
+          <span className={styles.syncRow}>
+            <span className={styles.syncStatus}>
+              {sync.kind === 'done' && (
+                <>
+                  {sync.result.imported} new · {sync.result.refreshed} refreshed
+                  {sync.result.skipped > 0 && (
+                    <>
+                      {' · '}
+                      <button
+                        type="button"
+                        className={styles.syncSkipLink}
+                        onClick={() => setSkipsOpen(o => !o)}
+                        aria-expanded={skipsOpen}
+                        title="Orders Shopify returned that makeLILA has no row for — click for the list"
+                      >
+                        {sync.result.skipped} not imported
+                      </button>
+                    </>
+                  )}
+                  {sync.result.journeyBatchesFailed > 0 && (
+                    <span className={styles.syncError}>
+                      {' · attribution lookup failed for '}
+                      {sync.result.journeyBatchesFailed} batch
+                      {sync.result.journeyBatchesFailed === 1 ? '' : 'es'}
+                    </span>
+                  )}
+                </>
+              )}
+              {sync.kind === 'error' && (
+                <span className={styles.syncError}>Sync failed: {sync.message}</span>
+              )}
+            </span>
+            <button
+              type="button"
+              className={styles.syncBtn}
+              onClick={() => void runSync()}
+              disabled={sync.kind === 'syncing'}
+            >
+              {sync.kind === 'syncing'
+                ? `Syncing… ${elapsed}s`
+                : '⟲ Sync from Shopify'}
+            </button>
+            {/* Beside the sync rather than in the rail: both of these put
+                orders into the module, and this is the one for a sale Shopify
+                never saw. */}
+            <button
+              type="button"
+              className={styles.newOrderBtn}
+              onClick={() => { setCreated(null); setNewOrderOpen(true); }}
+              title="Create an order for a sale that did not come through the web store — a phone sale, an event, a direct invoice"
+            >
+              + New order
+            </button>
+            {created && (
+              <span className={created.status === 'flagged' ? styles.newOrderFlag : styles.newOrderDone}>
+                {created.order_ref} created
+                {created.status === 'flagged'
+                  ? ' — it has no phone number, so it is in Flagged'
+                  : ' — it is in Pending'}
+              </span>
+            )}
+            {sync.kind === 'done' && skipsOpen && sync.result.skipped > 0 && (
+              <SkippedPanel
+                result={sync.result}
+                onClose={() => setSkipsOpen(false)}
+              />
+            )}
+          </span>
+        )}
+        <div className={styles.viewChips}>
+          <button
+            type="button"
+            className={`${styles.viewChip} ${view === 'orders' ? styles.viewChipActive : ''}`}
+            onClick={() => setView('orders')}
+            aria-pressed={view === 'orders'}
+          >Orders</button>
+          <button
+            type="button"
+            className={`${styles.viewChip} ${view === 'reconcile' ? styles.viewChipActive : ''}`}
+            onClick={() => setView('reconcile')}
+            aria-pressed={view === 'reconcile'}
+            title="Pending orders whose customer already has a machine — say what actually happened to each"
+          >Reconcile</button>
+          <button
+            type="button"
+            className={`${styles.viewChip} ${view === 'templates' ? styles.viewChipActive : ''}`}
+            onClick={() => setView('templates')}
+            aria-pressed={view === 'templates'}
+          >Templates</button>
+          <button
+            type="button"
+            className={`${styles.viewChip} ${view === 'upload' ? styles.viewChipActive : ''}`}
+            onClick={() => setView('upload')}
+            aria-pressed={view === 'upload'}
+          >Upload</button>
+        </div>
+      </div>
+      {newOrderOpen && (
+        <NewOrderForm
+          onClose={() => setNewOrderOpen(false)}
+          onCreated={(result) => {
+            setNewOrderOpen(false);
+            setCreated({ order_ref: result.order_ref, status: result.status });
+            // Open it straight away: the next thing this order needs is its
+            // address verified and freight quoted, and both live in the detail
+            // pane. A flagged one is not in Pending, so the rail would not
+            // show it and the operator would think nothing happened.
+            navigate(`/order-review/${result.id}`);
+          }}
+        />
+      )}
     </div>
   );
 
+  if (view === 'reconcile') {
+    return <div className={styles.salesRoot}>{header}<Reconcile /></div>;
+  }
+
   if (view === 'templates') {
-    return (
-      <div>
-        {viewChips}
-        <Templates />
-      </div>
-    );
+    return <div className={styles.salesRoot}>{header}<Templates /></div>;
   }
 
   if (view === 'upload') {
-    return (
-      <div>
-        {viewChips}
-        <Upload />
-      </div>
-    );
+    return <div className={styles.salesRoot}>{header}<Upload /></div>;
   }
 
   // Mobile: single column. Sidebar (filter strip + order list) when no
@@ -76,43 +232,49 @@ export default function OrderReview() {
   if (isMobile) {
     if (selected) {
       return (
-        <div className={styles.layout}>
-          <MobileBackHeader
-            label={`#${selected.order_ref} · ${selected.customer_name}`}
-            onBack={() => navigate('/order-review')}
-          />
-          <Detail order={selected} onAfterDisposition={afterDisposition} />
+        <div className={styles.salesRoot}>
+          <div className={styles.layout}>
+            <MobileBackHeader
+              label={`${selected.order_ref} · ${selected.customer_name}`}
+              onBack={() => navigate('/order-review')}
+            />
+            <Detail order={selected} onAfterDisposition={afterDisposition} />
+          </div>
         </div>
       );
     }
     return (
-      <div className={styles.layout}>
-        {viewChips}
-        <Sidebar
-          all={all}
-          pending={pending}
-          held={held}
-          flagged={flagged}
-          approved={approved}
-          replacement={replacement}
-          selectedId={null}
-          onSelect={(id) => navigate(`/order-review/${id}`)}
-        />
+      <div className={styles.salesRoot}>
+        {header}
+        <div className={styles.layout}>
+          <Sidebar
+            all={all}
+            pending={pending}
+            pendingBacklog={pendingBacklog}
+            held={held}
+            flagged={flagged}
+            approved={approved}
+            cancelled={cancelled}
+            selectedId={null}
+            onSelect={(id) => navigate(`/order-review/${id}`)}
+          />
+        </div>
       </div>
     );
   }
 
   return (
-    <div>
-      {viewChips}
+    <div className={styles.salesRoot}>
+      {header}
       <div className={styles.layout}>
         <Sidebar
           all={all}
           pending={pending}
+          pendingBacklog={pendingBacklog}
           held={held}
           flagged={flagged}
           approved={approved}
-          replacement={replacement}
+          cancelled={cancelled}
           selectedId={orderId ?? null}
           onSelect={(id) => navigate(`/order-review/${id}`)}
         />
@@ -120,7 +282,12 @@ export default function OrderReview() {
           <Detail order={selected} onAfterDisposition={afterDisposition} />
         ) : (
           <section className={styles.empty}>
-            {loading ? 'Loading…' : 'Select an order from the left to review.'}
+            {loading ? 'Loading…' : (
+              <EmptyState
+                title="No order open"
+                body="Pick an order from the list to check its address, freight and line items before it goes to Fulfillment."
+              />
+            )}
           </section>
         )}
       </div>

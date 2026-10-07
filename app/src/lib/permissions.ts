@@ -19,12 +19,15 @@ export type Action =
   | 'approve_refund_manager'
   | 'approve_refund_finance'
   | 'deny_refund'
+  | 'submit_to_manager'             // FR-3: Account Manager advances a case to Manager Review
+  | 'move_refund_flow'              // everyone involved: move a card fwd/back + edit amount/notes
   | 'dispose_unit'                  // Reina's Returns disposition writes
   | 'edit_warranty_registration'    // Junaid's warranty write path
   | 'repost_journal';               // Finance QBO journal repost
 
 export type Module =
   | 'finance'      // restricted to finance + admin only
+  | 'hiring'       // restricted to finance + admin, or a posting-assigned interviewer — see canViewPosting()
   | 'orderReview'
   | 'fulfillment'
   | 'build'
@@ -41,12 +44,18 @@ const ACTION_ROLES: Record<Action, Role[]> = {
   approve_refund_manager:     ['manager', 'finance', 'admin'],
   approve_refund_finance:     ['finance', 'admin'],
   deny_refund:                ['manager', 'finance', 'admin'],
+  // FR-3: the Product Refund Account Manager is an operator-tier case owner
+  // today; a distinct "account_manager" role is a future RBAC-enum refinement.
+  submit_to_manager:          ['operator', 'manager', 'finance', 'admin'],
+  // Everyone involved in the refund workflow can move a card between columns
+  // (forward or back) and edit its amount/notes — the Account Manager included.
+  move_refund_flow:           ['operator', 'manager', 'finance', 'admin'],
   dispose_unit:               ['manager', 'finance', 'admin'],
   edit_warranty_registration: ['operator', 'manager', 'finance', 'admin'],
   repost_journal:             ['finance', 'admin'],
 };
 
-const RESTRICTED_MODULES: Module[] = ['finance'];
+const RESTRICTED_MODULES: Module[] = ['finance', 'hiring'];
 
 export function canDo(role: Role | null | undefined, action: Action): boolean {
   if (!role) return false;
@@ -68,4 +77,59 @@ export function canView(role: Role | null | undefined, module: Module): boolean 
 // onboarding funnel) without needing a dedicated restricted-module flag.
 export function isLeadership(role: Role | null | undefined): boolean {
   return role === 'finance' || role === 'admin';
+}
+
+/** Posting-level visibility for Hiring: leadership sees every posting;
+ *  anyone else needs to be an explicitly assigned interviewer on THAT
+ *  posting (checked server-side via posting_interviewers + the
+ *  can_view_posting() RLS helper — this client-side mirror is for
+ *  UI gating only, not the security boundary). */
+export function canViewPosting(role: Role | null | undefined, isAssignedInterviewer: boolean): boolean {
+  if (!role) return false;
+  if (isLeadership(role)) return true;
+  return isAssignedInterviewer;
+}
+
+/** Module-level Hiring access: leadership always gets in; a non-leadership
+ *  user gets in only if isAssignedToAnyPosting is true (computed via
+ *  lib/hiring.ts's isAssignedInterviewerAnywhere()). This is intentionally
+ *  a MODULE-level decision (can they open Hiring at all), distinct from
+ *  canViewPosting() (which posting can they see once inside — the RLS
+ *  layer already enforces that regardless of this check).
+ *
+ *  Note the null-role handling here deliberately differs from
+ *  canViewPosting()'s `if (!role) return false` guard. isAssignedToAnyPosting
+ *  is only ever true after a live posting_interviewers lookup filtered on
+ *  the authenticated caller's own id has already succeeded (RLS-gated on
+ *  that same id) — so a true value already proves this is a real,
+ *  identified user, independent of whether `profiles.role` has loaded.
+ *  A null/undefined role at that same moment reflects AuthProvider's
+ *  profile-role fetch (a separate query, see auth.tsx) not having resolved
+ *  yet — useAuth().loading only tracks session load, not profile load — not
+ *  an unauthenticated caller. Treating null-role-but-assigned as a denial
+ *  would flash-redirect a legitimate assigned interviewer to "/" whenever
+ *  the assignment check resolves before the profile-role fetch does, which
+ *  is a real, unpredictable race. So isAssignedToAnyPosting=true is
+ *  sufficient on its own, independent of role. */
+export function canAccessHiringModule(role: Role | null | undefined, isAssignedToAnyPosting: boolean): boolean {
+  return isLeadership(role) || isAssignedToAnyPosting;
+}
+
+/** Batch administration on the Stock page. Leadership always qualifies;
+ *  anyone else needs a `stock_managers` row (see the can_manage_batches()
+ *  RLS helper, which this mirrors). Deliberately NOT role-based: Junaid runs
+ *  Stock as an `operator`, and `operator` is the default role every new
+ *  sign-in receives — gating on it would gate on everyone.
+ *
+ *  Null-role handling follows canAccessHiringModule(), not canViewPosting():
+ *  isStockManager can only be true after an RLS-gated read filtered on the
+ *  caller's own id has already succeeded, so it proves an identified user on
+ *  its own. A null role at that moment means AuthProvider's profile fetch
+ *  has not resolved yet — treating it as a denial would flash-hide the
+ *  section from a legitimate stock manager. */
+export function canManageBatches(
+  role: Role | null | undefined,
+  isStockManager: boolean,
+): boolean {
+  return isLeadership(role) || isStockManager;
 }

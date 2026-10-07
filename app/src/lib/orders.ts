@@ -3,8 +3,23 @@ import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase } from './supabase';
 import { logAction } from './activityLog';
 import { adjustPartStock } from './parts';
+import { functionErrorMessage } from './functionError';
+import { refundFlagForOrderId, refundFlagTitle } from './refundedOrders';
+// replacementTags only ever `import type`s from here, so this is not a runtime
+// cycle — the Order import on that side is erased.
+import { isPartsOnlyReplacement } from './replacementTags';
+import { queueCarrier } from './queueCarrier';
+import {
+  guessDwellingFromText,
+  type AreaType, type Dwelling, type DwellingSource, type UnitStatus,
+} from './addressClassify';
 
-export type OrderStatus = 'pending' | 'approved' | 'flagged' | 'held';
+// 'cancelled' takes the order out of every live Order Review tab (see
+// useOrders) and it has no fulfillment_queue row. The row is kept for
+// finance/history rather than deleted. It is not quite terminal: a cancellation
+// made in error goes back to 'pending' through uncancelOrder, until money has
+// moved.
+export type OrderStatus = 'pending' | 'approved' | 'flagged' | 'held' | 'cancelled';
 
 export type LineItem =
   // Legacy Shopify-synced sale line — do not add new sale shapes here; extend the 'part'/'unit' variants instead.
@@ -46,8 +61,17 @@ export type Order = {
   // Held split in Order Review > Replacement. Null for non-replacement.
   replacement_state: 'ready' | 'awaiting' | 'held' | null;
   held_reason: string | null;
+  // Set together when status flips to 'cancelled' (Fulfillment > Queue >
+  // "Cancel Order"). Null on every live order.
+  cancelled_at: string | null;
+  cancelled_reason: string | null;
   cogs_usd: number | null;
+  /** Actual carrier/label cost. MISNAMED: the `_usd` suffix is historical and
+   *  wrong — the currency is whatever `shipping_cost_currency` says, and every
+   *  row populated to date is CAD. Never sum this without grouping by currency. */
   shipping_cost_usd: number | null;
+  /** ISO code for shipping_cost_usd. Required whenever that column is set. */
+  shipping_cost_currency: string | null;
   shipped_at: string | null;
   delivered_at: string | null;
   // Backlog #55 follow-up — carrier tracking. Populated by the Fulfillment
@@ -63,19 +87,46 @@ export type Order = {
   address_line2: string | null;
   city: string;
   region_state: string | null;
+  // The postal code on the order. Declared late (2026-09-29): the column has
+  // always been there and `createOrder` has always written it, but the type
+  // omitted it, so the only postal codes the frontend could read were the
+  // verify-address pair below — and those are null on every order nobody has
+  // run Verify on.
+  postal_code: string | null;
   country: 'US' | 'CA';
-  address_verdict: 'house' | 'apt' | 'remote' | 'condo';
+  // Dwelling type. ALWAYS read alongside address_verdict_source — the value is
+  // only as good as where it came from, and 'sync-guess' (the default for every
+  // order) is a text match on the address the customer typed, checked against
+  // nothing. Only 'google' means a postal authority confirmed it.
+  address_verdict: Dwelling;
+  address_verdict_source: DwellingSource;
   // Urban/suburban vs rural area classification (separate from address_verdict's
-  // dwelling type). area_type_source tracks provenance: 'auto' (postal-code
-  // guess on sync), 'verified' (set by the Verify-address step via Claude), or
-  // 'manual' (operator override). null = unclassified.
-  area_type: 'urban' | 'suburban' | 'rural' | null;
+  // dwelling type). area_type_source tracks provenance: 'auto' (the postal-code
+  // rule, which can only establish rural), 'verified' (set by the Verify-address
+  // step), or 'manual' (operator override). null = unclassified, and it is left
+  // null on purpose rather than defaulted.
+  area_type: AreaType | null;
   area_type_source: string;
+  // Why the last verify could not classify the area, when it couldn't. Non-null
+  // means the field is blank for a reason the operator can act on (no provider
+  // key, a model outage) rather than because nobody has looked yet.
+  address_area_type_error: string | null;
   address_verified_at: string | null;
   address_match: 'match' | 'mismatch' | 'unverifiable' | null;
+  // 'missing' = the building has units and this order names none. A freight
+  // delivery with no unit number gets left in a lobby or returned.
+  address_unit_status: UnitStatus | null;
   address_google_formatted: string | null;
   address_google_postal: string | null;
   address_customer_postal: string | null;
+  // Raw signals behind the dwelling verdict, kept so it can be explained after
+  // the fact: Google's validationGranularity, the USPS DPV confirmation code
+  // and record type, and Google's own residential/business flags.
+  address_validation_granularity: string | null;
+  address_usps_dpv: string | null;
+  address_usps_record_type: string | null;
+  address_is_residential: boolean | null;
+  address_is_business: boolean | null;
   address_claude_verdict: 'plausible' | 'implausible' | 'unknown' | null;
   address_claude_notes: string | null;
   address_claude_postal: string | null;
@@ -117,6 +168,26 @@ export type Order = {
   shipping_line_title: string | null;
   line_items: LineItem[];
   sales_confirmed_fit: boolean;
+  /** When an operator signed off the manual check a rural or remote delivery
+   *  needs — see needsRuralManualCheck. THREE states, not two:
+   *
+   *    undefined — the column isn't there. The migration ships behind the
+   *        gated workflow, so a frontend deploy can land first and select('*')
+   *        comes back without the key. The fourth criterion warns and passes.
+   *    null      — applied, and nobody has checked this order. Blocks Confirm.
+   *    timestamp — an operator signed it off.
+   *
+   *  Optional for the same reason reconciled_at is. */
+  rural_check_confirmed_at?: string | null;
+  rural_check_confirmed_by?: string | null;
+  // An operator's verdict on an order that predates the fulfillment queue —
+  // see lib/reconcile.ts. Optional rather than `| null` because the columns
+  // ship behind the gated migration workflow, so select('*') returns rows
+  // without them on an environment that hasn't run it yet.
+  reconciled_at?: string | null;
+  reconciled_by?: string | null;
+  reconcile_outcome?: 'shipped' | 'duplicate' | 'open' | null;
+  reconcile_note?: string | null;
   dispositioned_by: string | null;
   dispositioned_at: string | null;
   created_at: string;
@@ -161,7 +232,12 @@ export function orderDue(placed_at: string | null): {
   return { dueDate: due, dueLabel: due.toLocaleDateString('en-US'), severity };
 }
 
-const ACTION_TYPE: Record<Exclude<OrderStatus, 'pending'>, string> = {
+/** The three dispositions Order Review can set by hand. 'pending' is the intake
+ *  state and 'cancelled' is terminal (see cancelOrder) - neither is a review
+ *  decision, so neither goes through disposition(). */
+export type Disposition = Exclude<OrderStatus, 'pending' | 'cancelled'>;
+
+const ACTION_TYPE: Record<Disposition, string> = {
   approved: 'order_approve',
   flagged:  'order_flag',
   held:     'order_hold',
@@ -173,11 +249,44 @@ async function currentUserId(): Promise<string> {
   return data.user.id;
 }
 
+/** Refuse to move an order towards a shipment when the money for THAT order has
+ *  already gone back — or is on its way back.
+ *
+ *  Nothing used to stop this. refund_approvals.order_id is null on every live
+ *  row, so no surface in the app could tell that an order had been refunded:
+ *  Sales listed it like any other, and confirming it fires
+ *  auto_enqueue_approved_order, which puts it in the fulfillment queue. The
+ *  queue ships what it is handed.
+ *
+ *  Only an order-level flag blocks. A customer who was refunded on a DIFFERENT
+ *  order may perfectly well have bought again — that one gets a badge in Sales
+ *  and the queue, and the operator decides.
+ *
+ *  A lookup failure lets the action through. This guard exists to catch a rare
+ *  mistake; a flaky network must not be able to stop every shipment. */
+async function assertNotRefunded(orderId: string, action: string): Promise<void> {
+  let flag: Awaited<ReturnType<typeof refundFlagForOrderId>>;
+  try {
+    flag = await refundFlagForOrderId(orderId);
+  } catch (e) {
+    console.warn('refund check failed (non-fatal, proceeding):', (e as Error).message);
+    return;
+  }
+  if (!flag || flag.level !== 'order') return;
+  throw new Error(`${action}: ${refundFlagTitle(flag)}`);
+}
+
 export async function disposition(
   order: Pick<Order, 'id' | 'order_ref' | 'customer_name'>,
-  status: Exclude<OrderStatus, 'pending'>,
+  status: Disposition,
   reason?: string,
 ): Promise<void> {
+  // Guard here as well as in enqueueForFulfillment: this UPDATE is what fires
+  // auto_enqueue_approved_order, so by the time a queue row exists it is too
+  // late. Flagging and holding stay open — those are how an operator parks a
+  // refunded order rather than shipping it.
+  if (status === 'approved') await assertNotRefunded(order.id, 'Cannot confirm this order');
+
   const userId = await currentUserId();
 
   const { error } = await supabase
@@ -220,7 +329,108 @@ export async function setSalesConfirmedFit(id: string, value: boolean): Promise<
   if (error) throw error;
 }
 
-export type AreaType = 'urban' | 'suburban' | 'rural';
+/** Does this order need a person to look at the delivery before it ships?
+ *
+ *  Two independent signals say an address is rural or remote, and either one
+ *  alone is a reason to look:
+ *
+ *    area_type 'rural'       — Canada Post encodes rural in the FSA's second
+ *        character, plus the operator-maintained remote-prefix list, the
+ *        verify-address model, or an operator's own override.
+ *    address_verdict 'remote' — the dwelling verdict: USPS record type R
+ *        (rural route / highway contract), or an RR / general-delivery /
+ *        concession / sideroad match on the street line.
+ *
+ *  Reading only the first would miss a US rural-route address whose area type
+ *  nothing ever classified — urban and suburban can't be told apart from a
+ *  postal code, so area_type is null on plenty of orders that are plainly not
+ *  in town.
+ *
+ *  Sales only. Replacements are born approved in Fulfillment and never reach
+ *  Order Review, but canConfirm() runs for every rail row, so this answers for
+ *  one rather than blocking it. */
+export function needsRuralManualCheck(
+  order: Pick<Order, 'kind' | 'area_type' | 'address_verdict'>,
+): boolean {
+  if (order.kind !== 'sale') return false;
+  return order.area_type === 'rural' || order.address_verdict === 'remote';
+}
+
+/** Whether the columns behind the rural check exist on this row at all — i.e.
+ *  whether the migration has been applied. See rural_check_confirmed_at. */
+export function ruralCheckAvailable(order: Order): boolean {
+  return order.rural_check_confirmed_at !== undefined;
+}
+
+/** Sign off (or withdraw) the manual check on a rural/remote delivery. Stamps
+ *  who and when, because this is the criterion that says a human accepted a
+ *  surcharge and an arrangement — "someone ticked a box" is not enough to go
+ *  back to six weeks later. */
+export async function setRuralCheckConfirmed(id: string, value: boolean): Promise<void> {
+  const userId = value ? await currentUserId() : null;
+  const { error } = await supabase
+    .from('orders')
+    .update({
+      rural_check_confirmed_at: value ? new Date().toISOString() : null,
+      rural_check_confirmed_by: userId,
+    })
+    .eq('id', id);
+  if (error) throw error;
+  await logAction(
+    value ? 'rural_check_confirmed' : 'rural_check_cleared',
+    id,
+    value ? 'rural/remote delivery checked' : 'rural/remote check withdrawn',
+    { entityType: 'order', entityId: id },
+  );
+}
+
+// One definition, shared with the edge functions via _shared/addressClassify.ts,
+// so the values the sync writes and the values the card renders cannot drift.
+export type { AreaType, Dwelling, DwellingSource, UnitStatus };
+
+/**
+ * The postal code an order actually has.
+ *
+ * `address_customer_postal` and `address_google_postal` are both written by the
+ * verify-address step and are null until somebody runs it — which is the case
+ * for 219 of 317 orders. Reading only those made the Order Review card say the
+ * postal code was "Not on file" on most orders, while `postal_code` — synced
+ * from Shopify and written by createOrder since the beginning — held it.
+ *
+ * Order Review and the Customer Directory both call this, so the two screens
+ * cannot show a different postal code for the same order.
+ */
+export function orderPostalCode(o: Pick<
+  Order, 'postal_code' | 'address_customer_postal' | 'address_google_postal'
+>): string | null {
+  return o.postal_code ?? o.address_customer_postal ?? o.address_google_postal;
+}
+
+/**
+ * One sentence saying where an order's area type came from — the counterpart to
+ * `dwellingProvenance` in addressClassify, and shared by the Order Review card
+ * and the Customer Directory profile for the same reason.
+ *
+ * A blank area type has two very different meanings and they must not read
+ * alike: nobody has looked, or something tried and failed. Only the second one
+ * is actionable, so it names the failure.
+ */
+export function areaTypeProvenance(o: Pick<
+  Order, 'area_type' | 'area_type_source' | 'address_verified_at' | 'address_area_type_error'
+>): string {
+  if (o.area_type_source === 'manual') return 'set by an operator';
+  if (o.area_type_source === 'verified') {
+    const when = o.address_verified_at
+      ? ` ${new Date(o.address_verified_at).toLocaleDateString()}`
+      : '';
+    return `classified by address verification${when}`;
+  }
+  if (o.area_type) return 'from the postal-code rule';
+  if (o.address_area_type_error) {
+    return `could not be classified — ${o.address_area_type_error}`;
+  }
+  return 'not classified yet — run Verify address on the order';
+}
 
 /** Full labels for the detail card dropdown. */
 export const AREA_TYPE_LABEL: Record<AreaType, string> = {
@@ -248,6 +458,18 @@ export async function setAreaType(id: string, value: AreaType | null): Promise<v
   await logAction('area_type_set', id, value ?? 'unclassified');
 }
 
+/** Operator override of the dwelling type. Flips the source to 'manual' so
+ *  neither a Shopify re-sync nor a later verify silently replaces the operator's
+ *  own call — a person who has spoken to the customer knows more than either. */
+export async function setDwelling(id: string, value: Dwelling): Promise<void> {
+  const { error } = await supabase
+    .from('orders')
+    .update({ address_verdict: value, address_verdict_source: 'manual' })
+    .eq('id', id);
+  if (error) throw error;
+  await logAction('address_dwelling_set', id, value);
+}
+
 export async function updateFreightEstimate(id: string, amount: number): Promise<void> {
   // Backlog #17 — operator edit flips the source to 'manual' so the FreightCard
   // can render a "(operator edit)" tag and reporting can distinguish synced
@@ -266,31 +488,25 @@ export type VerifyAddressResult = {
   google_formatted: string | null;
   // Area type the verify step classified (urban/suburban/rural), written back
   // to the order with source 'verified'. null if it couldn't be determined.
-  area_type: 'urban' | 'suburban' | 'rural' | null;
+  area_type: AreaType | null;
+  // Why it couldn't, when it couldn't. A soft fallback that fails silently is
+  // how a blank field gets mistaken for a checked one.
+  area_type_error?: string | null;
+  // What kind of building, and whether that came from Google ('google') or is
+  // still the sync-time text guess ('sync-guess').
+  dwelling: Dwelling;
+  dwelling_source: DwellingSource;
+  // 'missing' = a multi-unit building with no unit number on the order. Flags
+  // the order, same as a postal mismatch.
+  unit_status: UnitStatus;
+  // Google's validationGranularity — PREMISE/SUB_PREMISE mean it resolved an
+  // actual building, ROUTE only a street.
+  granularity?: string | null;
   // Set when Google Address Validation failed (quota/billing/network) and we
   // degraded to 'unverifiable' rather than aborting. Lets the operator see the
   // verdict was downgraded for an infra reason, not a bad address.
   google_error?: string | null;
 };
-
-/** supabase-js collapses any non-2xx edge-function response into a generic
- *  "Edge Function returned a non-2xx status code"; the real `{ error }` JSON the
- *  function returned is on error.context (a Response). Pull it out so operators
- *  see the actual cause instead of the opaque default. */
-async function functionErrorMessage(error: unknown): Promise<string> {
-  const ctx = (error as { context?: unknown }).context;
-  if (ctx instanceof Response) {
-    try {
-      const body = (await ctx.clone().json()) as { error?: string };
-      if (body?.error) return body.error;
-    } catch { /* body wasn't JSON — fall through to text */ }
-    try {
-      const text = await ctx.text();
-      if (text) return text.slice(0, 400);
-    } catch { /* ignore */ }
-  }
-  return (error as Error)?.message ?? 'Edge function call failed';
-}
 
 export async function confirmAddress(orderId: string): Promise<{ order_ref: string; already_confirmed: boolean }> {
   const { data, error } = await supabase.functions.invoke<{ order_ref: string; already_confirmed: boolean }>(
@@ -329,18 +545,210 @@ function applyChange(cache: Order[], payload: { eventType: string; new: Order | 
   return cache;
 }
 
-export function useOrders(): {
+/** Every bucket here is sales-only (kind='sale'). Replacements are not shown in
+ *  Order Review at all — see the note in bucketOrders. */
+export type OrderBuckets = {
+  /** Every sale Order Review still shows — excludes fulfilled and cancelled.
+   *  Like every bucket here, it starts after SALES_QUEUE_START. */
   all: Order[];
+  /** The live confirmation queue — see isPendingQueueWork. */
   pending: Order[];
+  /** Pending sales the queue holds back because the money already went back.
+   *  Not hidden — they are still in `all`, and this is what the rail counts
+   *  when it says how many are being held back. Oldest first. */
+  pendingBacklog: Order[];
   held: Order[];
   flagged: Order[];
+  /** The live ship queue. */
   approved: Order[];
-  /** All kind='replacement' orders in the active set. Surfaced in
-   *  Order Review's "Replacement" tab so they don't dilute the
-   *  Pending/Held/Flagged/Confirmed sales tabs. */
-  replacement: Order[];
-  loading: boolean;
-} {
+  /** Terminal: cancelled from Sales or from the fulfillment queue. Out of every
+   *  live tab, but kept in its own so the team can still find the order and the
+   *  reason it died. Newest cancellation first. */
+  cancelled: Order[];
+};
+
+/** The pure core of useOrders — which orders are still live, and which tab each
+ *  one belongs to. Split out from the hook so the routing rules are testable
+ *  without standing up Supabase. */
+/** The Shopify money states in which nothing is left to give back: the order
+ *  was refunded in full, or the payment was authorized and voided without ever
+ *  being captured. 'partially_refunded' is deliberately NOT here — a balance
+ *  remains, so that cancellation still owes the customer a refund decision. */
+const SETTLED_FINANCIAL_STATUSES = new Set(['refunded', 'voided']);
+
+function alreadySettled(financialStatus: string | null | undefined): boolean {
+  return SETTLED_FINANCIAL_STATUSES.has((financialStatus ?? '').toLowerCase());
+}
+
+/** Sales' two work queues — Pending (review it) and Confirmed (ship it) — both
+ *  opened on the entire imported history, back to 2023-04-14. Pending held 19
+ *  rows older than anything anyone was working; Confirmed held 5, every one of
+ *  them an INV- row from the invoice importer with no fulfillment_queue row
+ *  behind it. Neither queue was finishable, and a queue you cannot finish stops
+ *  being read.
+ *
+ *  Same shape as CANCELLATION_QUEUE_START in postShipment: a date before which
+ *  rows are history rather than work.
+ *
+ *  As of 2026-09-10 it governs the whole module, not just the two queues: it is
+ *  applied once, in bucketOrders, so Pending, Confirmed, Held, Flagged, All and
+ *  Cancelled all start on the same date. That was a deliberate call by the
+ *  operator — Sales shows the current book of work and nothing else.
+ *
+ *  Because age is global, no tab can hold an older row, and there is no Backlog
+ *  tab to catch one. **39 rows are consequently not visible anywhere in
+ *  Sales**: 25 live (11 paid with nothing shipped) and 14 cancelled (8 with
+ *  money in). No data is deleted — every row is untouched in Postgres and
+ *  reappears the moment this date moves — but nothing in the module surfaces
+ *  them, and the rail's search only ever looks in the tab you have open. Any
+ *  refund still owed on one is tracked in Shipping › Cancellations, which keeps
+ *  its own CANCELLATION_QUEUE_START.
+ *
+ *  Read against placed_at ?? created_at, the same basis the tab's own SLA uses,
+ *  so an order's age means one thing on this screen. */
+export const SALES_QUEUE_START = '2026-06-02';
+
+/** True when an order is new enough to be queue work. Fails open: an order
+ *  whose date will not parse stays in the queue, because a row nobody can see
+ *  is worse than a row in the wrong order. */
+function withinSalesQueue(order: Order, since: string = SALES_QUEUE_START): boolean {
+  // Parse rather than string-compare — PostgREST timestamps carry an offset
+  // ('+00:00') that a lexicographic compare against a bare date gets wrong.
+  const basis = Date.parse(order.placed_at ?? order.created_at);
+  return Number.isNaN(basis) || basis >= Date.parse(since);
+}
+
+/** Is this order still work for the Pending queue?
+ *
+ *  The money test only. Age is no longer asked here — bucketOrders applies
+ *  SALES_QUEUE_START to every order before any bucket is built — so what is
+ *  left is whether the money already went back: Shopify says 'refunded' or
+ *  'voided', so there is nothing to confirm, pick or ship. #1183 Sherry Tang
+ *  was refunded on 2026-08-18 and #1231 Lisa Clarke on 2026-08-13; both sat in
+ *  Pending afterwards asking to be reviewed, because refunding an order never
+ *  moved its status.
+ *
+ *  Settled-ness is read from the same SETTLED_FINANCIAL_STATUSES that decides
+ *  whether cancelling files a refund request, so "we already paid this back"
+ *  means one thing across the app. 'partially_refunded' is not settled: a
+ *  balance remains, and that order is still live work.
+ *
+ *  A refunded order in this state is a bookkeeping loose end — it probably
+ *  wants cancelling properly, which files it in Shipping › Cancellations. This
+ *  rule only keeps it out of the queue meanwhile; it changes no data. */
+function isPendingQueueWork(order: Order): boolean {
+  return !alreadySettled(order.financial_status);
+}
+
+/** Confirmed deliberately does NOT take Pending's settled-money rule. A
+ *  confirmed order has been handed to fulfillment, and the money question there
+ *  is already answered better than a status field can: enqueueForFulfillment
+ *  refuses a refunded order outright, and withdrawOrderFromQueue pulls one that
+ *  gets refunded after the fact. Applying it here would quietly hide a row that
+ *  Fulfillment is still holding — the one place a Sales tab and the ship queue
+ *  must not disagree. Age was its only rule, and that is global now, so the tab
+ *  is simply every approved order.
+ */
+
+/** Oldest first — a backlog is read to work through it, not to skim it. */
+function byAgeAscending(a: Order, b: Order): number {
+  return (a.placed_at ?? a.created_at).localeCompare(b.placed_at ?? b.created_at);
+}
+
+export function bucketOrders(
+  cache: Order[],
+  fulfilledOrderIds: Set<string>,
+  shippedCustomers: Set<string>,
+): OrderBuckets {
+  // Sales carries sales, and that is the first thing decided here — every
+  // bucket below is downstream of it.
+  //
+  // Replacements are ticket-driven from end to end — raised on a service
+  // ticket, held in Fulfillment > Replacements, and sent to the queue when an
+  // operator marks one Ready to Ship. Sales is not on that path at any point,
+  // so there is nothing to decide about one here. They used to have their own
+  // tab in this sidebar, and it was a trap: the tab filtered on
+  // replacement_state while Confirm wrote status, so confirming a replacement
+  // moved nothing on screen and the row sat there looking unconfirmed. R-0067
+  // was approved four times in twenty seconds before anyone noticed the first
+  // click had worked. Their home is now Fulfillment > Queue (ready to ship)
+  // and Fulfillment > Replacements (awaiting stock), both fed by
+  // useReplacementOrders().
+  //
+  // This also retired the closed-ticket rule that used to live here (a
+  // replacement whose service ticket had closed left the Replacement tab,
+  // because shipped_at is only stamped on a ticket status no operator ever
+  // uses). It existed solely to keep that tab from filling with dead rows;
+  // with the tab gone it had nothing left to hide, and it took the
+  // closedTicketIds parameter with it.
+  //
+  // Age is applied here, once, rather than per tab. Every Sales tab starts on
+  // SALES_QUEUE_START, so an order older than it is in no bucket at all — see
+  // the constant for what that hides and why the operator asked for it.
+  //
+  // One exception, added 2026-10-06: a replacement an operator FLAGGED from the
+  // fulfillment queue. Flagging is a question put to Sales — "this one has a
+  // problem, look at it" — and a question has to be asked somewhere the person
+  // answering it looks. Everything above still holds for every other
+  // replacement status, so this is a keyhole, not a reopened door: a flagged
+  // replacement that is then cancelled, held or re-queued leaves Sales again on
+  // the very next render.
+  const sales = cache.filter(o =>
+    (o.kind !== 'replacement' || o.status === 'flagged') && withinSalesQueue(o));
+
+  // Cancelled is terminal and takes precedence over every other signal: a
+  // cancelled order belongs in the Cancelled tab whether or not it was ever
+  // queued, shipped or matched to a shipped unit.
+  const cancelled = sales
+    .filter(o => o.status === 'cancelled')
+    .sort((a, b) => (b.cancelled_at ?? '').localeCompare(a.cancelled_at ?? ''));
+
+  // Exclude orders that are fulfilled, by either signal:
+  //   (a) fulfillment_queue row reached step 6 / has fulfilled_at, OR
+  //   (b) customer has a shipped unit (catches legacy Excel-only shipments
+  //       where the queue row was never created or advanced).
+  //
+  // A flag beats every automatic exclusion below it. Three of them — fulfilled,
+  // shipped-customer-name, and the sales-only filter above — each exist to keep
+  // noise out of a work queue, and each would otherwise silently swallow a flag
+  // an operator deliberately raised. A human saying "look at this one" is the
+  // strongest signal this function gets, and nothing heuristic outranks it.
+  const active = sales.filter(o => {
+    if (o.status === 'cancelled') return false;
+    if (o.status !== 'flagged' && fulfilledOrderIds.has(o.id)) return false;
+    // (b) is a *name* match, so it also hides every new order from any customer
+    // who has ever received a unit — 112 of the 163 pending orders as of
+    // 2026-08-28, four of them placed that fortnight. An explicit 'open'
+    // verdict from the reconcile screen (lib/reconcile.ts) is a human saying
+    // "nothing shipped against this one", and beats the heuristic.
+    //
+    // A flag is the same kind of statement and outranks it too. This matters
+    // most for the replacements admitted above: a replacement goes, by
+    // definition, to a customer who already has a machine, so signal (b) would
+    // match every one of them and the flag would land on no screen at all.
+    if (
+      o.status !== 'flagged'
+      && o.reconcile_outcome !== 'open'
+      && shippedCustomers.has(o.customer_name.toLowerCase().trim())
+    ) return false;
+    return true;
+  });
+
+  const allPending  = active.filter(o => o.status === 'pending');
+  const allApproved = active.filter(o => o.status === 'approved');
+
+  return {
+    all:      active,
+    pending:  allPending.filter(isPendingQueueWork),
+    pendingBacklog: allPending.filter(o => !isPendingQueueWork(o)).sort(byAgeAscending),
+    held:     active.filter(o => o.status === 'held'),
+    flagged:  active.filter(o => o.status === 'flagged'),
+    approved: allApproved,
+    cancelled,
+  };
+}
+
+export function useOrders(): OrderBuckets & { loading: boolean } {
   const [cache, setCache] = useState<Order[]>([]);
   const [fulfilledOrderIds, setFulfilledOrderIds] = useState<Set<string>>(new Set());
   // Customer-name match (lowercased) for any shipped unit. Used as a second
@@ -440,6 +848,7 @@ export function useOrders(): {
           },
         )
         .subscribe();
+
     })();
 
     return () => {
@@ -450,33 +859,10 @@ export function useOrders(): {
     };
   }, []);
 
-  return useMemo(() => {
-    // Exclude orders that are fulfilled, by either signal:
-    //   (a) fulfillment_queue row reached step 6 / has fulfilled_at, OR
-    //   (b) customer has a shipped unit (catches legacy Excel-only shipments
-    //       where the queue row was never created or advanced).
-    const active = cache.filter(o => {
-      if (fulfilledOrderIds.has(o.id)) return false;
-      // Never hide replacement orders by the shipped-customer name check —
-      // a returning customer's replacement must always be visible in Order Review.
-      if (o.kind !== 'replacement' && shippedCustomers.has(o.customer_name.toLowerCase().trim())) return false;
-      return true;
-    });
-    // Replacement orders get their own tab in the Sidebar so the
-    // Pending/Held/Flagged/Confirmed sales tabs don't include them.
-    // The Service module still has its dedicated Replacement view via
-    // useReplacementOrders().
-    const sales = active.filter(o => o.kind !== 'replacement');
-    return {
-      all:         active,
-      pending:     sales.filter(o => o.status === 'pending'),
-      held:        sales.filter(o => o.status === 'held'),
-      flagged:     sales.filter(o => o.status === 'flagged'),
-      approved:    sales.filter(o => o.status === 'approved'),
-      replacement: active.filter(o => o.kind === 'replacement'),
-      loading,
-    };
-  }, [cache, fulfilledOrderIds, shippedCustomers, loading]);
+  return useMemo(
+    () => ({ ...bucketOrders(cache, fulfilledOrderIds, shippedCustomers), loading }),
+    [cache, fulfilledOrderIds, shippedCustomers, loading],
+  );
 }
 
 /** Every order in the table (including shipped/fulfilled) — for reporting, where
@@ -501,8 +887,10 @@ export function useAllOrders(): { orders: Order[]; loading: boolean } {
 }
 
 export function useOrder(id: string | null): { order: Order | null; loading: boolean } {
-  const { all, loading } = useOrders();
-  const order = id ? all.find(o => o.id === id) ?? null : null;
+  const { all, cancelled, loading } = useOrders();
+  // Cancelled orders live outside `all`, but a deep link to one still has to
+  // resolve — the Cancelled tab is how the team looks them up.
+  const order = id ? all.find(o => o.id === id) ?? cancelled.find(o => o.id === id) ?? null : null;
   return { order, loading: loading && !order };
 }
 
@@ -547,9 +935,17 @@ export function useReplacementSummary(orderId: string | null): { summary: Replac
   return { summary, loading };
 }
 
-/** All un-shipped replacement orders in 'ready' or 'awaiting' state.
- * Used by ReturnsTab/RefundsTab (#83) to warn when a customer has a queued
- * replacement that should be held before their refund is processed. */
+/** All un-shipped, un-cancelled replacement orders in 'ready' or 'awaiting'
+ * state. Used by ReturnsTab/RefundsTab (#83) to warn when a customer has a
+ * queued replacement that should be held before their refund is processed.
+ *
+ * `status` must be filtered as well as `replacement_state`: cancelling a
+ * replacement keeps the row and only flips `status`, leaving `replacement_state`
+ * at whatever it was. Amanda Acker's R-0051 was cancelled on 2026-08-31 with the
+ * reason "She is queued for return/refund" and went on warning Returns off her
+ * refund for eleven days — the warning arguing against the very thing that
+ * caused it. Same `.neq('status','cancelled')` the other replacement lookups
+ * here already carry. */
 export function useQueuedReplacements(): { replacements: Order[]; loading: boolean } {
   const [replacements, setReplacements] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
@@ -559,15 +955,26 @@ export function useQueuedReplacements(): { replacements: Order[]; loading: boole
     let cancelled = false;
 
     (async () => {
-      const { data, error } = await supabase
-        .from('orders')
-        .select('*')
-        .eq('kind', 'replacement')
-        .in('replacement_state', ['ready', 'awaiting'])
-        .is('shipped_at', null)
-        .order('created_at', { ascending: true });
+      // Same closed-ticket caveat as bucketOrders: shipped_at is almost never
+      // stamped, so `shipped_at IS NULL` alone would warn about replacements
+      // that were resolved months ago and block refunds that should proceed.
+      const [{ data, error }, { data: closedTickets }] = await Promise.all([
+        supabase
+          .from('orders')
+          .select('*')
+          .eq('kind', 'replacement')
+          .in('replacement_state', ['ready', 'awaiting'])
+          .neq('status', 'cancelled')
+          .is('shipped_at', null)
+          .order('created_at', { ascending: true }),
+        supabase.from('service_tickets').select('id').eq('status', 'closed'),
+      ]);
       if (cancelled) return;
-      if (!error && data) setReplacements(data as Order[]);
+      const closed = new Set((closedTickets ?? []).map(t => (t as { id: string }).id));
+      if (!error && data) {
+        setReplacements((data as Order[])
+          .filter(o => !(o.linked_ticket_id && closed.has(o.linked_ticket_id))));
+      }
       setLoading(false);
 
       channel = supabase
@@ -584,6 +991,7 @@ export function useQueuedReplacements(): { replacements: Order[]; loading: boole
                 const isQueued =
                   updated.kind === 'replacement' &&
                   (updated.replacement_state === 'ready' || updated.replacement_state === 'awaiting') &&
+                  updated.status !== 'cancelled' &&
                   !updated.shipped_at;
                 const idx = prev.findIndex(r => r.id === updated.id);
                 if (!isQueued) return prev.filter(r => r.id !== updated.id);
@@ -652,10 +1060,15 @@ type CancellableReplacement = {
   line_items: unknown;
 };
 
-/** Release a replacement's reserved stock, clear its ticket back-link, and
- *  delete the order so it drops off both the Sales (Order Review) and Service
- *  replacement lists via realtime. No guards — callers enforce them. */
-async function releaseAndDeleteReplacement(order: CancellableReplacement, note: string): Promise<void> {
+/** Give back everything a replacement order is holding: reserved units, parts
+ *  decremented at creation, and the ticket back-link + queued marker. Shared by
+ *  the two ways a replacement stops being live — deleted outright
+ *  (releaseAndDeleteReplacement) or kept as a cancelled row (cancelOrder). */
+async function releaseReplacementHolds(
+  order: CancellableReplacement,
+  note: string,
+  opts: { holdTicket?: boolean } = {},
+): Promise<void> {
   // Release reserved units (conditional → safe for every state; no-op when
   // nothing was reserved, e.g. an 'awaiting' order).
   const { error: uErr } = await supabase
@@ -671,17 +1084,98 @@ async function releaseAndDeleteReplacement(order: CancellableReplacement, note: 
     const lineItems = (order.line_items ?? []) as ReplacementLineItem[];
     for (const li of lineItems) {
       if (li.kind === 'part') {
-        await adjustPartStock(li.part_id, li.qty, `Replacement ${order.order_ref} cancelled`);
+        await adjustPartStock(li.part_id, li.qty, `Replacement ${order.order_ref} ${note}`);
       }
     }
   }
 
-  // Drop the ticket back-link so nothing dangles once the order is gone.
+  // Drop the ticket back-link so nothing dangles once the order is gone, and
+  // clear the queued marker — the customer is no longer waiting on this
+  // replacement. Best-effort on the tag: the order is being cancelled either
+  // way, so a tag failure must not strand it (same precedent as the auto-cancel
+  // on ticket close).
   if (order.linked_ticket_id) {
     await supabase.from('service_tickets')
       .update({ replacement_order_id: null })
       .eq('id', order.linked_ticket_id);
+    const { error: tagErr } = await supabase.rpc('remove_ticket_tag', {
+      p_ticket_id: order.linked_ticket_id, p_tag: 'queued_for_replacement',
+    });
+    if (tagErr) console.warn('Clearing queued_for_replacement tag failed (non-fatal):', tagErr.message);
+    if (opts.holdTicket) await holdTicketAfterCancel(order);
   }
+}
+
+/** After an operator cancels a replacement: the case is not finished, but it is
+ *  no longer waiting on a box. Move the ticket off "Queued for Replacement" and
+ *  onto "On Hold" so it reads as needing a decision rather than a shipment.
+ *
+ *  Opt-in, and never on the ticket-close path. Closing a ticket auto-cancels its
+ *  awaiting replacements through this same helper, and flipping status there
+ *  would reopen the case the operator just closed.
+ *
+ *  Conditional on the ticket having no OTHER live replacement. A ticket can
+ *  carry more than one (ST-2026-0489 briefly had two lids, five seconds apart
+ *  from a double-submit) and holding it while a sibling is still queued would
+ *  say the customer is waiting on a decision when they are waiting on a box.
+ *
+ *  Best-effort throughout: the order is already cancelled and its stock already
+ *  released, so a ticket that fails to move is a smaller problem than throwing
+ *  here and leaving the caller unsure which half happened. */
+async function holdTicketAfterCancel(order: CancellableReplacement): Promise<void> {
+  if (!order.linked_ticket_id) return;
+  try {
+    const { data: ticket } = await supabase
+      .from('service_tickets')
+      .select('status, ticket_number, tags')
+      .eq('id', order.linked_ticket_id)
+      .maybeSingle();
+    if (!ticket) return;
+
+    const t = ticket as { status: string; ticket_number: string | null; tags: string[] | null };
+    if (t.status === 'closed') return;
+    // Only move a ticket that was actually waiting on this replacement —
+    // status or tag, the two places the marker can live.
+    const wasQueued = t.status === 'queued_for_replacement'
+      || (t.tags ?? []).includes('queued_for_replacement');
+    if (!wasQueued) return;
+
+    const { data: siblings } = await supabase
+      .from('orders')
+      .select('id')
+      .eq('kind', 'replacement')
+      .eq('linked_ticket_id', order.linked_ticket_id)
+      .neq('id', order.id)
+      .neq('status', 'cancelled')
+      .is('shipped_at', null)
+      .is('delivered_at', null);
+    if (siblings && siblings.length > 0) return;
+
+    const { error } = await supabase
+      .from('service_tickets')
+      .update({ status: 'on_hold' })
+      .eq('id', order.linked_ticket_id);
+    if (error) {
+      console.warn('Moving the ticket to on_hold failed (non-fatal):', error.message);
+      return;
+    }
+    await logAction(
+      'ticket_status_change',
+      t.ticket_number ?? order.linked_ticket_id,
+      `Queued for Replacement → On Hold · replacement ${order.order_ref} cancelled`,
+    );
+  } catch (e) {
+    console.warn('Moving the ticket to on_hold failed (non-fatal):', (e as Error).message);
+  }
+}
+
+/** Release a replacement's reserved stock, clear its ticket back-link, and
+ *  delete the order so it drops off both the Sales (Order Review) and Service
+ *  replacement lists via realtime. No guards — callers enforce them. */
+async function releaseAndDeleteReplacement(
+  order: CancellableReplacement, note: string, opts: { holdTicket?: boolean } = {},
+): Promise<void> {
+  await releaseReplacementHolds(order, 'cancelled', opts);
 
   // Delete the order. select() back so an RLS-blocked delete (0 rows, no error)
   // surfaces as a failure instead of silently leaving it in place.
@@ -736,6 +1230,103 @@ export async function cancelReplacementOrder(orderId: string): Promise<void> {
  *  still cancel it manually from Order Review). 'awaiting' never reserved units
  *  or decremented parts, so there's nothing to release beyond deleting the row.
  *  Best-effort per order — a failure on one doesn't block the others. */
+/** Replacements queued for a ticket that have a unit reserved ('ready') and have
+ *  not shipped. Closing a ticket auto-cancels its 'awaiting' replacements but
+ *  deliberately leaves these alone — a reserved unit may be about to go out. So
+ *  they used to be stranded silently: the case closed, nothing stamped
+ *  shipped_at, and the order sat in Sales › Orders › Replacement.
+ *
+ *  The panel calls this before closing so it can ask the one person who knows
+ *  whether the box actually left. Empty array = close with no question. */
+export async function readyReplacementsForTicket(
+  ticketId: string,
+): Promise<Array<{ id: string; order_ref: string }>> {
+  const { data, error } = await supabase
+    .from('orders')
+    .select('id, order_ref')
+    .eq('kind', 'replacement')
+    .eq('linked_ticket_id', ticketId)
+    .eq('replacement_state', 'ready')
+    .neq('status', 'cancelled')
+    .is('shipped_at', null)
+    .is('delivered_at', null);
+  if (error) throw new Error(`Failed to look up ready replacements: ${error.message}`);
+  return (data ?? []) as Array<{ id: string; order_ref: string }>;
+}
+
+/** Every replacement still live for a ticket — either state ('awaiting' or
+ *  'ready'), not cancelled, not shipped, not delivered.
+ *
+ *  This is what makes the 'Queued for Replacement' status non-removable by
+ *  hand. The tag is set automatically when a replacement order is created, so
+ *  clearing it while the order is still sitting in Sales would leave the two
+ *  disagreeing about whether the customer is waiting on a unit — exactly the
+ *  drift the tag exists to prevent. The order is the source of truth; cancel
+ *  it in Sales or Fulfillment (or mark the ticket Replacement Sent / Complete)
+ *  and the tag follows.
+ *
+ *  Broader than readyReplacementsForTicket, which is scoped to 'ready' because
+ *  it answers a different question ("might this have shipped?"). */
+export async function liveReplacementsForTicket(
+  ticketId: string,
+): Promise<Array<{ id: string; order_ref: string }>> {
+  const { data, error } = await supabase
+    .from('orders')
+    .select('id, order_ref')
+    .eq('kind', 'replacement')
+    .eq('linked_ticket_id', ticketId)
+    .neq('status', 'cancelled')
+    .is('shipped_at', null)
+    .is('delivered_at', null);
+  if (error) throw new Error(`Failed to look up live replacements: ${error.message}`);
+  return (data ?? []) as Array<{ id: string; order_ref: string }>;
+}
+
+/** Cancel EVERY replacement still live for a ticket — the "Replacement
+ *  Cancelled" button on the ticket panel.
+ *
+ *  Deliberately wider and less guarded than the two neighbours above:
+ *    - cancelPendingReplacementsForTicket only ever touches 'awaiting' rows,
+ *      because it fires automatically on ticket close and a 'ready' row has a
+ *      unit reserved that might be walking out the door.
+ *    - cancelReplacementOrder refuses while the linked ticket is still open,
+ *      because it is reachable from Order Review where the operator may not
+ *      have the case in front of them.
+ *  Neither fits an operator standing on the ticket saying "this one is not
+ *  going out". They can see the case, so the ticket's status is not a gate —
+ *  Lily Xu's R-0048 sat in Fulfillment › Replacements for weeks precisely
+ *  because her ticket was already closed (refunded) and every existing path
+ *  either skipped it or refused.
+ *
+ *  Each order is released (reserved units freed, 'ready' parts restored),
+ *  unlinked from the ticket, and deleted — and orders.id CASCADEs to
+ *  fulfillment_queue, so the row leaves the Queue at the same moment it leaves
+ *  Sales and Fulfillment › Replacements. holdTicket moves a still-open ticket
+ *  off "Queued for Replacement" and onto "On Hold": the case isn't finished,
+ *  it just isn't waiting on a box.
+ *
+ *  Returns the refs actually cancelled, for the caller's message. */
+export async function cancelReplacementsForTicket(ticketId: string): Promise<string[]> {
+  const { data: linked, error } = await supabase
+    .from('orders')
+    .select('id, order_ref, replacement_state, linked_ticket_id, line_items')
+    .eq('kind', 'replacement')
+    .eq('linked_ticket_id', ticketId)
+    .neq('status', 'cancelled')
+    .is('shipped_at', null)
+    .is('delivered_at', null);
+  if (error) throw new Error(`Failed to look up linked replacements: ${error.message}`);
+
+  const cancelled: string[] = [];
+  for (const o of (linked ?? []) as CancellableReplacement[]) {
+    await releaseAndDeleteReplacement(
+      o, `cancelled on ticket ${ticketId} · stock released`, { holdTicket: true },
+    );
+    cancelled.push(o.order_ref);
+  }
+  return cancelled;
+}
+
 export async function cancelPendingReplacementsForTicket(ticketId: string): Promise<void> {
   const { data: linked, error } = await supabase
     .from('orders')
@@ -750,6 +1341,705 @@ export async function cancelPendingReplacementsForTicket(ticketId: string): Prom
   for (const o of (linked ?? []) as CancellableReplacement[]) {
     await releaseAndDeleteReplacement(o, `ticket completed → awaiting replacement cancelled`);
   }
+}
+
+/** Hand every live replacement queued for a ticket over to Fulfillment ›
+ *  Queue › SHIPPED. Fired when an operator sets the 'replacement_sent' status
+ *  on the ticket (see setTicketStatuses in lib/service.ts) — that click is the
+ *  operator saying the box left the building, so this records the shipment
+ *  rather than asking them to walk the order through the 6-step queue.
+ *
+ *  Per order:
+ *    - orders.shipped_at is stamped and status flips to 'approved' (it went out
+ *      the door; a replacement created as 'pending' never gets approved by the
+ *      sales flow). Shipping cost is deliberately NOT written — nobody has the
+ *      carrier invoice at this point, and a 0 would corrupt the finance
+ *      rollups. Freightcom sync fills it in later.
+ *    - a fulfillment_queue row is upserted at step 6 with fulfilled_at, which
+ *      is exactly what the Queue's SHIPPED tab lists. The row carries the
+ *      order_id, so the queue keeps showing kind='replacement' — the shipment
+ *      still reads as a replacement, not a sale.
+ *    - assigned_serial is set from the reserved unit when the replacement
+ *      carries one AND that serial is on a shelf slot (the column is FK'd to
+ *      shelf_slots). Setting it also lets the fq_sync_unit trigger flip the
+ *      unit to 'shipped'. Parts-only replacements simply have no serial.
+ *
+ *  Idempotent: orders that already shipped are skipped, so re-applying the
+ *  status (or applying it alongside other statuses) writes nothing new.
+ *  Returns the refs actually shipped, for the caller's log line. */
+export async function shipQueuedReplacementsForTicket(ticketId: string): Promise<string[]> {
+  const { data: linked, error } = await supabase
+    .from('orders')
+    .select('id, order_ref, line_items')
+    .eq('kind', 'replacement')
+    .eq('linked_ticket_id', ticketId)
+    .neq('status', 'cancelled')
+    .is('shipped_at', null)
+    .is('delivered_at', null);
+  if (error) throw new Error(`Failed to look up linked replacements: ${error.message}`);
+
+  const shippedAt = new Date().toISOString();
+  const shipped: string[] = [];
+
+  for (const o of (linked ?? []) as Array<{ id: string; order_ref: string; line_items: unknown }>) {
+    const serial = await shelfSerialFor(o.line_items);
+    // Queue row first, order second — same reason as markPartsReplacementShipped:
+    // there is no transaction across two calls, and an order stamped shipped
+    // whose queue row never moved sits in "Ready to ship" and refuses its own
+    // retry. Only send assigned_serial when we have one: on an upsert that hits
+    // an existing queue row, an omitted column keeps whatever is already there,
+    // so a parts-only ship can't blank out a serial assigned earlier.
+    const { error: qErr } = await supabase
+      .from('fulfillment_queue')
+      .upsert(
+        { order_id: o.id, step: 6, fulfilled_at: shippedAt, ...(serial ? { assigned_serial: serial } : {}) },
+        { onConflict: 'order_id' },
+      );
+    if (qErr) throw new Error(`Queue ${o.order_ref} as shipped: ${qErr.message}`);
+
+    const { error: oErr } = await supabase
+      .from('orders')
+      .update({ shipped_at: shippedAt, status: 'approved' })
+      .eq('id', o.id);
+    if (oErr) throw new Error(`Mark ${o.order_ref} shipped: ${oErr.message}`);
+
+    shipped.push(o.order_ref);
+    await logAction(
+      'replacement_shipped',
+      o.order_ref,
+      `replacement sent on ticket ${ticketId}${serial ? ` · unit ${serial}` : ''}`,
+    );
+  }
+
+  return shipped;
+}
+
+/** The first unit/base serial on a replacement that actually exists in
+ *  shelf_slots. fulfillment_queue.assigned_serial is FK'd to shelf_slots, so an
+ *  off-shelf serial would fail the insert outright — better to record the
+ *  shipment with no serial than to lose it. */
+async function shelfSerialFor(lineItems: unknown): Promise<string | null> {
+  const serials = ((lineItems ?? []) as ReplacementLineItem[])
+    .filter((li): li is Extract<ReplacementLineItem, { kind: 'unit' | 'base' }> =>
+      li?.kind === 'unit' || li?.kind === 'base')
+    .map(li => li.unit_serial)
+    .filter(Boolean);
+  if (serials.length === 0) return null;
+
+  const { data } = await supabase
+    .from('shelf_slots')
+    .select('serial')
+    .in('serial', serials);
+  const onShelf = new Set(((data ?? []) as Array<{ serial: string }>).map(r => r.serial));
+  return serials.find(s => onShelf.has(s)) ?? null;
+}
+
+/** Record a PARTS-ONLY replacement as shipped, in one click, without walking
+ *  the 6-step fulfillment queue.
+ *
+ *  The queue's first two steps are "assign a ready machine off the shelf" and
+ *  "confirm its test report". A lid, a hopper or a filter has neither, so a
+ *  parts-only replacement had nowhere to go: left on Fulfillment ›
+ *  Replacements it sat there after the box had gone out, and pushed into the
+ *  queue with "Ready to Ship" it stranded at step 1, where the only way
+ *  forward was to assign a machine nobody was shipping. The one existing
+ *  escape was the linked ticket's "Replacement Shipped" button, which ships
+ *  EVERY live replacement on that case at once — wrong for a customer owed
+ *  both a lid today and a P100X in two months.
+ *
+ *  Effect is deliberately identical to the ticket-level hand-off
+ *  (shipQueuedReplacementsForTicket), so every other screen agrees:
+ *    - orders.shipped_at is stamped and status flips to 'approved' (it went out
+ *      the door; a replacement created as 'pending' never gets approved by the
+ *      sales flow). Shipping cost is NOT written — nobody has the carrier
+ *      invoice yet and a 0 would corrupt the finance rollups.
+ *    - a fulfillment_queue row is upserted at step 6, which IS the Queue ›
+ *      SHIPPED list. No assigned_serial, ever: there is no machine in the box,
+ *      and an omitted column on an upsert keeps whatever the row already had.
+ *    - the linked ticket moves off "Queued for Replacement" and onto
+ *      "Replacement Sent", but only once nothing else on that case is still
+ *      owed — see the sibling check below.
+ *
+ *  Parts stock is untouched: createReplacementOrder decremented on_hand when
+ *  the replacement was raised, so deducting again here would double-count it.
+ *
+ *  `carrier`/`tracking_num` are optional — the operator often has a tracking
+ *  number and the row's Tracking column is the only place it would ever live.
+ *  Blank fields are omitted from both writes rather than written as null, so
+ *  marking a queued row shipped can't blank a label recorded earlier. The
+ *  carrier reaches the two columns differently, because they are not the same
+ *  kind of column: see lib/queueCarrier.ts.
+ *
+ *  The queue row is written BEFORE the order is stamped, and that order is
+ *  load-bearing. There is no transaction across two PostgREST calls, so one of
+ *  them can be the last one that lands; the only choice available is which
+ *  half-state a failure leaves. Stamping the order first leaves a shipment that
+ *  every screen but the picker's believes in, and blocks its own retry on the
+ *  `shipped_at` guard above — R-0069 was wedged exactly that way. Writing the
+ *  queue first leaves a row under Queue › SHIPPED and an order that still reads
+ *  as live, which is visibly unfinished and retries cleanly: the guard reads
+ *  `orders.shipped_at`, and the upsert is idempotent. */
+export async function markPartsReplacementShipped(
+  orderId: string,
+  opts: { carrier?: string | null; tracking_num?: string | null } = {},
+): Promise<{ order_ref: string; ticket_marked_sent: boolean }> {
+  const { data: order, error: oErr } = await supabase
+    .from('orders')
+    .select('id, order_ref, kind, status, shipped_at, delivered_at, line_items, awaiting_batch_id, linked_ticket_id')
+    .eq('id', orderId)
+    .single();
+  if (oErr || !order) throw new Error(`Replacement not found: ${oErr?.message ?? 'no row'}`);
+  if (order.kind !== 'replacement') {
+    throw new Error('This is not a replacement order — a sale is shipped from Fulfillment › Queue.');
+  }
+  if (order.status === 'cancelled') {
+    throw new Error('This replacement was cancelled. Raise a new one from the service ticket.');
+  }
+  if (order.shipped_at || order.delivered_at) {
+    throw new Error('This replacement has already shipped.');
+  }
+  if (((order.line_items ?? []) as unknown[]).length === 0) {
+    throw new Error(
+      `${order.order_ref} has no items recorded, so there is nothing to say shipped. `
+      + 'Add what was sent on the ticket first.',
+    );
+  }
+  if (!isPartsOnlyReplacement(order)) {
+    throw new Error(
+      `${order.order_ref} carries a whole unit. Ship it through Fulfillment › Queue so the `
+      + "machine's serial is recorded against the order.",
+    );
+  }
+
+  const carrier = (opts.carrier ?? '').trim() || null;
+  const tracking = (opts.tracking_num ?? '').trim() || null;
+  // orders.carrier is free text and keeps whatever the operator typed — "Amazon"
+  // is the true answer to how a jumper left the building. fulfillment_queue.carrier
+  // is CHECK-constrained to six freight carriers, so only a value it can hold
+  // goes there and anything else is omitted, which leaves a label recorded at
+  // step 4 in place rather than failing the whole shipment.
+  const queued = queueCarrier(carrier);
+  const orderShipment = { ...(carrier ? { carrier } : {}), ...(tracking ? { tracking_num: tracking } : {}) };
+  const queueShipment = { ...(queued ? { carrier: queued } : {}), ...(tracking ? { tracking_num: tracking } : {}) };
+
+  const shippedAt = new Date().toISOString();
+  const { error: qErr } = await supabase
+    .from('fulfillment_queue')
+    .upsert(
+      { order_id: orderId, step: 6, fulfilled_at: shippedAt, ...queueShipment },
+      { onConflict: 'order_id' },
+    );
+  if (qErr) throw new Error(`Queue ${order.order_ref} as shipped: ${qErr.message}`);
+
+  const { error: uErr } = await supabase
+    .from('orders')
+    .update({ shipped_at: shippedAt, status: 'approved', ...orderShipment })
+    .eq('id', orderId);
+  if (uErr) throw new Error(`Mark ${order.order_ref} shipped: ${uErr.message}`);
+
+  await logAction(
+    'replacement_shipped',
+    order.order_ref,
+    `parts replacement marked shipped${carrier || tracking ? ` · ${[carrier, tracking].filter(Boolean).join(' ')}` : ''}`,
+  );
+
+  // The ticket half. Only when this was the LAST thing the case was waiting on:
+  // a customer owed a lid and a machine is still owed the machine, and calling
+  // that "Replacement Sent" would tell CS they were done waiting. The shipment
+  // above is already recorded, so nothing here may fail the call — same
+  // best-effort precedent as markOrderShipped.
+  let ticketMarkedSent = false;
+  if (order.linked_ticket_id) {
+    const ticketId = order.linked_ticket_id as string;
+    try {
+      // This order no longer counts as live — shipped_at is stamped above.
+      const stillOwed = await liveReplacementsForTicket(ticketId);
+      if (stillOwed.length === 0) {
+        const { error: tagErr } = await supabase.rpc('remove_ticket_tag', {
+          p_ticket_id: ticketId, p_tag: 'queued_for_replacement',
+        });
+        if (tagErr) console.warn('Clearing queued_for_replacement tag failed (non-fatal):', tagErr.message);
+
+        // A closed case stays closed — the operator already finished it, and
+        // reopening it is not what "the lid went out" means. A ticket whose
+        // primary status is already 'replacement_sent' is skipped too: the tag
+        // array may not duplicate the primary status.
+        const { data: ticket } = await supabase
+          .from('service_tickets')
+          .select('status')
+          .eq('id', ticketId)
+          .single();
+        const status = (ticket as { status?: string } | null)?.status;
+        if (status !== 'closed' && status !== 'replacement_sent') {
+          const { error: sentErr } = await supabase.rpc('add_ticket_tag', {
+            p_ticket_id: ticketId, p_tag: 'replacement_sent',
+          });
+          if (sentErr) console.warn('Setting replacement_sent tag failed (non-fatal):', sentErr.message);
+          else ticketMarkedSent = true;
+        }
+      }
+    } catch (e) {
+      console.warn('Updating the ticket after a parts shipment failed (non-fatal):', (e as Error).message);
+    }
+  }
+
+  return { order_ref: order.order_ref as string, ticket_marked_sent: ticketMarkedSent };
+}
+
+// ─── Cancelling an order / pulling it back out of fulfillment ───────────────
+
+/** Where an order lands in Order Review once it's put back on the board. */
+export type ReviewLanding = {
+  status: OrderStatus;
+  replacement_state: 'ready' | 'awaiting' | null;
+  /** Operator-facing path, e.g. "Order Review › Replacement › Awaiting Stock / Batch". */
+  label: string;
+};
+
+/** Re-derive a replacement's Ready-vs-Awaiting state against CURRENT stock
+ *  rather than trusting the replacement_state stamped when it was created —
+ *  the units and parts it was built against may have been consumed by another
+ *  order while it sat in the fulfillment queue.
+ *
+ *  A line is satisfied when:
+ *    - part        → parts.on_hand covers its qty
+ *    - unit / base → the serial is still 'ready' or 'reserved' (reserved counts:
+ *                    it is reserved *for this order*)
+ *    - *_pending   → never; pending is what "we don't have it" is called
+ *  Any unsatisfied line ⇒ 'awaiting', and the first blocked unit's batch becomes
+ *  awaiting_batch_id so Fulfillment › Replacements groups it under that batch.
+ *
+ *  `blocked` names each unsatisfied line in operator words, because every
+ *  caller has to tell someone why the order is not going anywhere. */
+export async function resolveReplacementStockState(
+  order: { line_items: unknown },
+): Promise<{
+  replacement_state: 'ready' | 'awaiting';
+  awaiting_batch_id: string | null;
+  blocked: string[];
+}> {
+  const items = (order.line_items ?? []) as ReplacementLineItem[];
+  let blockedBatch: string | null = null;
+  const blocked: string[] = [];
+
+  /** What to call this line when telling an operator it is short. */
+  const label = (li: ReplacementLineItem): string => {
+    const raw = li as unknown as Record<string, unknown>;
+    for (const k of ['name', 'description', 'sku', 'batch'] as const) {
+      if (typeof raw[k] === 'string' && raw[k]) return raw[k] as string;
+    }
+    return 'an unnamed item';
+  };
+  const block = (li: ReplacementLineItem) => { blocked.push(label(li)); };
+
+  for (const li of items) {
+    switch (li.kind) {
+      case 'unit_pending':
+      case 'base_pending':
+        block(li);
+        if (!blockedBatch) blockedBatch = li.batch ?? null;
+        break;
+      case 'part_pending':
+        block(li);
+        break;
+      case 'part': {
+        // The Excel backfill wrote free-text lines — { kind: 'part',
+        // description: 'both side latch' } — with no part_id. There is nothing
+        // to look up, and looking up nothing used to return on_hand 0, marking
+        // every legacy replacement short of stock it may well have had. An
+        // unidentifiable line is a line only a human can rule on, so let it
+        // pass rather than blocking on a lookup that was never going to work.
+        if (!li.part_id) break;
+        const { data } = await supabase
+          .from('parts').select('on_hand').eq('id', li.part_id).maybeSingle();
+        if ((data?.on_hand ?? 0) < (li.qty ?? 1)) block(li);
+        break;
+      }
+      case 'unit':
+      case 'base': {
+        const { data } = await supabase
+          .from('units').select('status').eq('serial', li.unit_serial).maybeSingle();
+        if (data?.status !== 'ready' && data?.status !== 'reserved') {
+          block(li);
+          if (!blockedBatch) blockedBatch = li.batch ?? null;
+        }
+        break;
+      }
+    }
+  }
+
+  const ready = blocked.length === 0;
+  return {
+    replacement_state: ready ? 'ready' : 'awaiting',
+    // Cleared when ready, otherwise a stale batch would keep grouping the order
+    // under a batch it is no longer waiting on.
+    awaiting_batch_id: ready ? null : blockedBatch,
+    blocked,
+  };
+}
+
+/** Put a replacement into Fulfillment › Queue › Ready to ship. Backs the
+ *  "Ready to Ship" button on Fulfillment › Replacements, and is the ONLY way a
+ *  replacement enters the queue.
+ *
+ *  Replacements are ticket-driven: raised on a service ticket, they sit in
+ *  Fulfillment › Replacements until a person says the box is ready. Nothing
+ *  about creating the order means anyone has picked the item, so nothing
+ *  upstream of this call is entitled to queue it — not createReplacementOrder,
+ *  which enqueued at birth for two days and dropped un-picked replacements into
+ *  Ready to ship beside genuinely packed sales, and not the
+ *  auto_enqueue_on_approve trigger, which never sees the INSERT.
+ *
+ *  It also carries the 43 replacements raised before any of this: they were
+ *  reached through Sales › Replacement, and when that tab went (0fb7f45) the
+ *  only button that could queue one went with it.
+ *
+ *  Stock is re-derived rather than read off replacement_state: these rows were
+ *  stamped 'ready' or 'awaiting' months ago against stock that has since moved.
+ *  A short order is reported back, not thrown — the operator is entitled to
+ *  queue it anyway (`force`) when they know something the parts table does not,
+ *  which is routinely true of the free-text rows the Excel import left behind.
+ *
+ *  Setting status to 'approved' is what the queue lists on. It also fires
+ *  auto_enqueue_on_approve, so the insert that follows may lose the race to the
+ *  trigger; enqueueForFulfillment treats that duplicate as success. */
+export type QueueReplacementResult =
+  | { queued: true }
+  | { queued: false; blocked: string };
+
+export async function queueReplacementForFulfillment(
+  orderId: string,
+  opts: { force?: boolean } = {},
+): Promise<QueueReplacementResult> {
+  const { data: order, error: oErr } = await supabase
+    .from('orders')
+    .select('id, order_ref, kind, status, shipped_at, delivered_at, line_items')
+    .eq('id', orderId)
+    .single();
+  if (oErr || !order) throw new Error(`Replacement not found: ${oErr?.message ?? 'no row'}`);
+  if (order.kind !== 'replacement') {
+    throw new Error('This is not a replacement order — sales reach the queue by being confirmed.');
+  }
+  if (order.status === 'cancelled') {
+    throw new Error('This replacement was cancelled. Raise a new one from the service ticket.');
+  }
+  if (order.shipped_at || order.delivered_at) {
+    throw new Error('This replacement has already shipped.');
+  }
+
+  const stock = await resolveReplacementStockState(order);
+  if (stock.replacement_state !== 'ready' && !opts.force) {
+    return { queued: false, blocked: stock.blocked.join(', ') };
+  }
+
+  const { error: uErr } = await supabase
+    .from('orders')
+    .update({
+      status: 'approved',
+      replacement_state: 'ready',
+      // It is in the queue now; nothing is grouping it under a batch any more.
+      awaiting_batch_id: null,
+    })
+    .eq('id', orderId);
+  if (uErr) throw new Error(`Could not approve the replacement: ${uErr.message}`);
+
+  await enqueueForFulfillment(orderId);
+  await logAction(
+    'replacement_queued',
+    order.order_ref,
+    opts.force && stock.blocked.length > 0
+      ? `queued for fulfillment · operator override, stock short: ${stock.blocked.join(', ')}`
+      : 'queued for fulfillment',
+  );
+  return { queued: true };
+}
+
+/** Take an order back out of the fulfillment queue ("Shipment Not Ready").
+ *
+ *  A sale returns to Order Review › Pending — the tab every order starts in and
+ *  the one an operator re-approves from.
+ *
+ *  A replacement returns to Fulfillment › Replacements. It used to be announced
+ *  as landing in Order Review › Replacement, which stopped being true when that
+ *  tab was removed in 0fb7f45: Sales filters out kind='replacement' entirely,
+ *  so the order left the queue, appeared in no sales tab, and the toast pointed
+ *  the operator at a screen that no longer existed. Replacements always had a
+ *  second home; the label simply never followed them to it. Requeue from there
+ *  with queueReplacementForFulfillment().
+ *
+ *  Status goes back to 'pending' in both cases: leaving it 'approved' would
+ *  strand the order in Confirmed with no queue row, and re-approving it would
+ *  not re-fire the auto_enqueue_on_approve trigger.
+ *
+ *  A sale also gets reconcile_outcome='open', without which the landing above is
+ *  not true for any customer who already has a shipped unit — see the comment on
+ *  that line.
+ *
+ *  `extraPatch` rides along on the same UPDATE rather than forcing a caller to
+ *  issue a second write against the row it just moved — releaseHold uses it to
+ *  clear the disposition stamps in the same breath as the status. */
+export async function returnOrderToReview(
+  orderId: string,
+  extraPatch?: Record<string, unknown>,
+): Promise<ReviewLanding> {
+  const { data: order, error: oErr } = await supabase
+    .from('orders')
+    .select('id, order_ref, kind, line_items')
+    .eq('id', orderId)
+    .single();
+  if (oErr || !order) throw new Error(`Order not found: ${oErr?.message ?? 'no row'}`);
+
+  const patch: Record<string, unknown> = { status: 'pending' };
+  let landing: ReviewLanding = {
+    status: 'pending', replacement_state: null, label: 'Order Review › Pending',
+  };
+
+  if (order.kind === 'replacement') {
+    const stock = await resolveReplacementStockState(order);
+    patch.replacement_state = stock.replacement_state;
+    patch.awaiting_batch_id = stock.awaiting_batch_id;
+    landing = {
+      status: 'pending',
+      replacement_state: stock.replacement_state,
+      label: stock.replacement_state === 'ready'
+        ? 'Fulfillment › Replacements › Ready'
+        : 'Fulfillment › Replacements › Awaiting Stock / Batch',
+    };
+  } else {
+    // Make the sale landing above actually true. bucketOrders drops any order
+    // whose customer name matches a shipped unit's — signal (b), there to catch
+    // Excel-era shipments the queue never recorded. It is a name match, so it
+    // buries a reship just as readily: the customer DID receive a machine, and
+    // that is the whole reason this order is going out again.
+    //
+    // #1189 Cindy Bouchard is the case. It shipped 2026-09-30; an operator
+    // stepped the queue row back off step 6 (which clears fulfilled_at, so the
+    // already-shipped guard in loadRemovableQueueRow stops firing) and moved it
+    // here noting "Need to reship". The row went back to 'pending' as promised,
+    // its queue row was deleted — and then it appeared in no screen in the app.
+    // Not Pending, not Confirmed, not even All, and with no queue row left there
+    // was no second place to find it by. The toast named Order Review › Pending
+    // and the order was not there, or anywhere.
+    //
+    // 'open' is the reconcile outcome documented as the override that beats that
+    // heuristic (see recordStillOpen), and it is the honest reading of what an
+    // operator just did: whatever shipped against this customer's name before,
+    // a human has said this order still owes them a machine. Setting it here is
+    // what keeps this function's return value a true statement.
+    patch.reconcile_outcome = 'open';
+  }
+
+  Object.assign(patch, extraPatch);
+
+  const { error } = await supabase.from('orders').update(patch).eq('id', orderId);
+  if (error) throw new Error(`Failed to move the order back to Order Review: ${error.message}`);
+
+  await logAction('order_returned_to_review', order.order_ref, landing.label);
+  return landing;
+}
+
+function settledNote(financialStatus: string | null | undefined): string {
+  return (financialStatus ?? '').toLowerCase() === 'voided'
+    ? 'Closed on cancel: payment was voided, never captured — no refund owed.'
+    : 'Closed on cancel: Shopify shows this order already refunded — no refund owed.';
+}
+
+/** Cancel an order outright. The row is kept (finance still needs its totals)
+ *  but flipped to the terminal 'cancelled' status, which hides it from every
+ *  Order Review tab.
+ *
+ *  Effects:
+ *    - Sale        → a row in Shipping › Cancellations, so the refund team sees
+ *                    it beside the customer-submitted ones and can compile or
+ *                    dismiss the refund. Never auto-refunds. Orders Shopify has
+ *                    already settled are filed closed, so clearing stale
+ *                    already-refunded orders out of the queue does not mint
+ *                    refund requests for money that has already gone back.
+ *    - Replacement → no cancellation record (nothing was paid for a warranty
+ *                    replacement, so there is no refund to route); reserved
+ *                    units, decremented parts and the ticket back-link are all
+ *                    given back instead.
+ *
+ *  Callers are responsible for anything queue-side (removing the
+ *  fulfillment_queue row, releasing the unit picked at step 1). */
+export async function cancelOrder(orderId: string, reason: string): Promise<void> {
+  const userId = await currentUserId();
+  const note = reason.trim();
+  if (!note) throw new Error('A reason is required to cancel an order.');
+
+  const { data: order, error: oErr } = await supabase
+    .from('orders')
+    .select('id, order_ref, kind, status, replacement_state, linked_ticket_id, line_items, customer_name, customer_email, customer_phone, total_usd, placed_at, created_at, financial_status')
+    .eq('id', orderId)
+    .single();
+  if (oErr || !order) throw new Error(`Order not found: ${oErr?.message ?? 'no row'}`);
+  if (order.status === 'cancelled') throw new Error('This order is already cancelled.');
+
+  if (order.kind === 'replacement') {
+    // holdTicket: this is the operator-facing cancel — from the fulfillment
+    // queue's Cancel Order, or from Sales' Cancelled view. The customer's case
+    // is still open, it just isn't waiting on a box any more.
+    await releaseReplacementHolds(order as CancellableReplacement, 'cancelled', { holdTicket: true });
+  }
+
+  const nowIso = new Date().toISOString();
+  const { error: uErr } = await supabase
+    .from('orders')
+    .update({
+      status: 'cancelled',
+      cancelled_at: nowIso,
+      cancelled_reason: note,
+      dispositioned_by: userId,
+      dispositioned_at: nowIso,
+    })
+    .eq('id', orderId);
+  if (uErr) throw new Error(`Failed to cancel the order: ${uErr.message}`);
+
+  if (order.kind !== 'replacement') {
+    // A cancellation record only belongs on the Refunds board while the money
+    // is still with us. Orders Shopify has already settled — refunded outright,
+    // or an authorization voided before capture — are filed closed instead:
+    // they stay in the Cancellations tab as history and never open a refund
+    // card for a payment that already went back. Anything still paid (or
+    // partially refunded, where a balance remains) queues as a live request.
+    const settled = alreadySettled(order.financial_status);
+    // Non-fatal: the order is already cancelled, and a missing record is
+    // recoverable by hand — losing the cancel over it would not be.
+    const { error: cErr } = await supabase.from('order_cancellations').insert({
+      order_ref:        order.order_ref,
+      customer_name:    order.customer_name,
+      customer_email:   order.customer_email ?? '',
+      customer_phone:   order.customer_phone,
+      order_date:       (order.placed_at ?? order.created_at)?.slice(0, 10) ?? null,
+      order_amount_usd: order.total_usd,
+      purchase_channel: 'Shopify',
+      reason:           note,
+      description:      'Cancelled in makeLILA from the fulfillment queue before shipping.',
+      product_received: false,
+      status:           settled ? 'completed' : 'submitted',
+      processed_by:     settled ? userId : null,
+      processed_at:     settled ? nowIso : null,
+      ops_notes:        settled ? settledNote(order.financial_status) : null,
+    });
+    if (cErr) console.warn('Cancellation record insert failed (non-fatal):', cErr.message);
+  }
+
+  await logAction('order_cancelled', order.order_ref, note);
+}
+
+/** The same order, written the several ways this app has spelled it. Shopify
+ *  writes "#1184"; the cancellation form and older imports write "1184". A
+ *  cancellation record is paired to its order by ref alone (there is no FK), so
+ *  look under every spelling or the pairing quietly misses. */
+function orderRefVariants(ref: string): string[] {
+  const bare = ref.trim().replace(/^#/, '');
+  return Array.from(new Set([ref.trim(), bare, `#${bare}`].filter(Boolean)));
+}
+
+/** Undo a cancellation made in error — Sales › Cancelled › "Move back to
+ *  Pending". Cancelling used to be terminal with no undo anywhere in the app,
+ *  which meant one mis-click (#1184 Juanita M Wells, cancelled with the reason
+ *  "test") could only be fixed in the database.
+ *
+ *  It reverses the two things cancelOrder wrote:
+ *
+ *    - the order goes back to 'pending' — intake, not 'approved'. Same choice
+ *      as returnOrderToReview: landing it in Confirmed would strand it there
+ *      with no queue row, because re-approving would not re-fire
+ *      auto_enqueue_approved_order. It gets reviewed and confirmed again.
+ *    - the cancellation record is withdrawn, so the refund team stops seeing a
+ *      live request for an order that is live again. It is closed rather than
+ *      deleted: order_cancellations has no DELETE policy (a delete would come
+ *      back 0 rows with no error, reading as success), and status only allows
+ *      'submitted' or 'completed'. Closing it is what takes it off the Refunds
+ *      board — see pendingCancellationRefunds.
+ *
+ *  It refuses whenever the money has moved or is moving. Bringing an order back
+ *  to life after we have paid for it is the one mistake worse than the
+ *  cancellation being undone:
+ *
+ *    - a replacement — nothing was paid, but cancelling gave its reserved unit,
+ *      its parts and its ticket back, and that stock may since have gone to
+ *      someone else. Queue a fresh replacement from the ticket instead.
+ *    - an order Shopify already refunded or voided.
+ *    - an order with a refund card against it (assertNotRefunded).
+ *    - a cancellation already compiled into a refund request.
+ *
+ *  Anything queue-side is left alone, exactly as cancelOrder leaves it. */
+export async function uncancelOrder(orderId: string): Promise<void> {
+  const userId = await currentUserId();
+
+  const { data: order, error: oErr } = await supabase
+    .from('orders')
+    .select('id, order_ref, kind, status, financial_status')
+    .eq('id', orderId)
+    .single();
+  if (oErr || !order) throw new Error(`Order not found: ${oErr?.message ?? 'no row'}`);
+  if (order.status !== 'cancelled') throw new Error('This order is not cancelled.');
+
+  if (order.kind === 'replacement') {
+    throw new Error(
+      'Only a sale can be moved back to Pending. Cancelling this replacement released its '
+      + 'unit, its parts and its ticket, so queue a new replacement from the ticket instead.',
+    );
+  }
+  if (alreadySettled(order.financial_status)) {
+    throw new Error(
+      `Cannot move this order back to Pending: Shopify shows it as ${order.financial_status} — `
+      + 'the money has already gone back.',
+    );
+  }
+  await assertNotRefunded(orderId, 'Cannot move this order back to Pending');
+
+  // Withdraw the cancellation record BEFORE reviving the order. If this half
+  // fails the order stays cancelled and the operator can retry; the other
+  // order would briefly leave a live order with a live refund request against
+  // it, which is how an order that is about to ship gets refunded.
+  const { data: records, error: cErr } = await supabase
+    .from('order_cancellations')
+    .select('id, status, refund_approval_id, ops_notes')
+    .in('order_ref', orderRefVariants(order.order_ref));
+  if (cErr) throw new Error(`Could not check the cancellation record: ${cErr.message}`);
+
+  type PairedCancellation = {
+    id: string; status: string; refund_approval_id: string | null; ops_notes: string | null;
+  };
+  const paired = (records ?? []) as PairedCancellation[];
+
+  if (paired.some(c => c.refund_approval_id)) {
+    throw new Error(
+      'This cancellation has already been compiled into a refund request. Resolve the refund '
+      + 'in Shipping › Cancellations before moving the order back to Pending.',
+    );
+  }
+
+  const nowIso = new Date().toISOString();
+  const withdrawnNote = `Withdrawn ${nowIso.slice(0, 10)}: the order was moved back to Pending in makeLILA (cancelled in error). No refund owed.`;
+  for (const c of paired.filter(c => c.status === 'submitted')) {
+    const { error } = await supabase.from('order_cancellations').update({
+      status: 'completed',
+      processed_by: userId,
+      processed_at: nowIso,
+      ops_notes: [c.ops_notes, withdrawnNote].filter(Boolean).join('\n'),
+    }).eq('id', c.id);
+    if (error) throw new Error(`Failed to withdraw the cancellation record: ${error.message}`);
+  }
+
+  // 'pending' is the intake state, so the disposition stamps go with it: the
+  // order is back to having no decision on record, not carrying the cancel's.
+  const { error: uErr } = await supabase
+    .from('orders')
+    .update({
+      status: 'pending',
+      cancelled_at: null,
+      cancelled_reason: null,
+      dispositioned_by: null,
+      dispositioned_at: null,
+    })
+    .eq('id', orderId);
+  if (uErr) throw new Error(`Failed to move the order back to Pending: ${uErr.message}`);
+
+  await logAction('order_uncancelled', order.order_ref, 'moved back to Pending');
 }
 
 export function useOrderNotes(orderId: string | null): {
@@ -865,17 +2155,56 @@ const REPLACEMENT_ORDER_DEFAULTS = {
   freight_threshold_usd: 0,
   currency: 'USD',
   total_usd: 0,
+  // A replacement ships to an address we were given, not one anyone verified —
+  // the source says so, and the card renders it as unconfirmed until someone
+  // runs Verify. Callers override address_verdict with the text guess for the
+  // address they actually have.
   address_verdict: 'house' as const,
+  address_verdict_source: 'sync-guess' as const,
   sales_confirmed_fit: false,
 };
 
+/** Put an order into the fulfillment queue at step 1, due in 7 days — the same
+ *  SLA the auto_enqueue_on_approve trigger applies when a sale is confirmed.
+ *
+ *  A duplicate is success, not failure: fulfillment_queue.order_id is unique,
+ *  so a 23505 means the order is already queued (the trigger got there first,
+ *  or this is a retry after a partial failure). Anything else is real. */
+export async function enqueueForFulfillment(orderId: string): Promise<void> {
+  await assertNotRefunded(orderId, 'Cannot queue this order for fulfillment');
+  const due = new Date();
+  due.setDate(due.getDate() + 7);
+  const { error } = await supabase.from('fulfillment_queue').insert({
+    order_id: orderId,
+    due_date: due.toISOString().slice(0, 10),
+  });
+  if (error && error.code !== '23505') {
+    throw new Error(`Could not queue the order for fulfillment: ${error.message}`);
+  }
+}
+
 /** Creates a replacement order (kind='replacement', status='pending'),
- *  back-links the ticket, decrements parts.on_hand, and reserves any units.
+ *  back-links the ticket, decrements parts.on_hand and reserves any units.
  *  Returns the new order_ref + id.
  *
+ *  Replacements are ticket-driven and stop here, in Fulfillment › Replacements.
+ *  Raising one says the customer needs a part or a unit; it does not say a box
+ *  is packed. The operator says that, with "Ready to Ship" on the Replacements
+ *  row, and only that puts the order in Fulfillment › Queue — see
+ *  queueReplacementForFulfillment().
+ *
+ *  This deliberately does NOT enqueue at birth (as it briefly did in 0fb7f45).
+ *  Nothing about creating the order means anyone has picked the item, so
+ *  enqueue-at-birth dropped un-picked replacements into Ready to Ship beside
+ *  sales that were genuinely packed, and the operator lost the one place they
+ *  could say otherwise. 'pending' is safe here in a way it was not before that
+ *  commit: Sales no longer lists kind='replacement' at all, so a pending
+ *  replacement sits in Fulfillment › Replacements rather than silting up a
+ *  sales tab whose Confirm button did nothing visible.
+ *
  *  Atomicity caveat: the four writes (order INSERT, ticket UPDATE, parts
- *  decrement, units reserve) are NOT transactional. Partial-failure
- *  recovery, by step:
+ *  decrement, units reserve) are NOT transactional.
+ *  Partial-failure recovery, by step:
  *    - INSERT fails: nothing to clean up.
  *    - INSERT ok, ticket UPDATE fails: the order exists but no back-link.
  *      Manually run `update service_tickets set replacement_order_id = ?
@@ -902,6 +2231,8 @@ export async function createReplacementOrder(input: ReplacementOrderInput):
     .insert({
       order_ref,
       kind: 'replacement',
+      // Not 'approved' — see the note above. 'approved' is what the fulfillment
+      // queue lists on, and nothing has been picked yet.
       status: 'pending',
       replacement_state: 'ready',
       linked_ticket_id: input.ticket_id,
@@ -916,19 +2247,28 @@ export async function createReplacementOrder(input: ReplacementOrderInput):
       postal_code: input.address.postal_code,
       address_customer_postal: input.address.postal_code,
       ...REPLACEMENT_ORDER_DEFAULTS,
+      address_verdict: guessDwellingFromText(
+        input.address.address_line, null, input.address.postal_code,
+      ),
       line_items: input.line_items,
     })
     .select('id, order_ref')
     .single();
   if (insErr || !row) throw new Error(`Create order: ${insErr?.message ?? 'no row'}`);
 
-  // 2. Back-link the ticket and mark it queued_for_replacement so it surfaces
-  //    with that status in Support Tickets while the replacement is in flight.
+  // 2. Back-link the ticket and TAG it queued_for_replacement. The tag (not the
+  //    status) carries the marker, so whatever workflow state the operator set
+  //    survives — and they can layer other tags on top.
   const { error: tErr } = await supabase
     .from('service_tickets')
-    .update({ replacement_order_id: row.id, status: 'queued_for_replacement' })
+    .update({ replacement_order_id: row.id })
     .eq('id', input.ticket_id);
   if (tErr) throw new Error(`Link ticket: ${tErr.message}`);
+
+  const { error: tagErr } = await supabase.rpc('add_ticket_tag', {
+    p_ticket_id: input.ticket_id, p_tag: 'queued_for_replacement',
+  });
+  if (tagErr) throw new Error(`Tag ticket: ${tagErr.message}`);
 
   // 3. Decrement parts.on_hand atomically per line item. The RPC takes a
   //    transaction-level lock on the parts row and floors at 0, so two
@@ -1006,19 +2346,28 @@ export async function createPendingReplacement(input: ReplacementOrderInput):
       postal_code: input.address.postal_code,
       address_customer_postal: input.address.postal_code,
       ...REPLACEMENT_ORDER_DEFAULTS,
+      address_verdict: guessDwellingFromText(
+        input.address.address_line, null, input.address.postal_code,
+      ),
       line_items: input.line_items,
     })
     .select('id, order_ref')
     .single();
   if (insErr || !row) throw new Error(`Create pending replacement: ${insErr?.message ?? 'no row'}`);
 
-  // Back-link + queue the ticket. No stock decrement / unit reservation —
-  // the order is awaiting stock/batch and consumes nothing until promoted.
+  // Back-link + TAG the ticket queued_for_replacement (its status is left
+  // alone). No stock decrement / unit reservation — the order is awaiting
+  // stock/batch and consumes nothing until promoted.
   const { error: tErr } = await supabase
     .from('service_tickets')
-    .update({ replacement_order_id: row.id, status: 'queued_for_replacement' })
+    .update({ replacement_order_id: row.id })
     .eq('id', input.ticket_id);
   if (tErr) throw new Error(`Link ticket: ${tErr.message}`);
+
+  const { error: tagErr } = await supabase.rpc('add_ticket_tag', {
+    p_ticket_id: input.ticket_id, p_tag: 'queued_for_replacement',
+  });
+  if (tagErr) throw new Error(`Tag ticket: ${tagErr.message}`);
 
   await logAction(
     'replacement_create',
@@ -1026,6 +2375,248 @@ export async function createPendingReplacement(input: ReplacementOrderInput):
     `PENDING from ticket ${input.ticket_id} · ${input.line_items.length} items · awaiting ${pendingBatch?.batch ?? 'stock'}`,
   );
   return { id: row.id, order_ref: row.order_ref };
+}
+
+/* ── Manual sales orders ─────────────────────────────────────────────────── */
+
+// A sale that never went through the web store: agreed on the phone, taken at a
+// market stall, invoiced to a municipality. Everything else in Sales arrives
+// through sync-shopify-orders or the invoice importer, so until now there were
+// two ways to handle one, and both were bad — ask the customer to re-place an
+// order they had already paid for, or ship the machine with no order row at all
+// and meet it again months later in the reconcile screen, as a shipped unit
+// nobody could tie to anything.
+//
+// The design goal is that the row is unremarkable five seconds after it exists.
+// It is a kind='sale' order at status 'pending', and from there it is the same
+// order as #1284: it sits in Sales › Pending, it wants its address verified and
+// its freight quoted, Confirm is what approves it, and approving it is what
+// fires auto_enqueue_on_approve and puts it in the fulfillment queue at step 1.
+// Nothing downstream of this function knows the order was typed by hand.
+//
+// Three fields carry the weight of that, and each is a mistake waiting to be
+// made:
+//
+//   status      — 'pending', never 'approved'. The enqueue trigger is UPDATE-only
+//                 (see createReplacementOrder's note on the same point), so
+//                 birthing it approved would both skip the pre-ship checks and
+//                 fail to queue it, leaving it stranded in Confirmed.
+//   freight     — zero, with no field in the form to set it. freightQuoted()
+//                 reads source 'manual' + a non-zero estimate as "a carrier rate
+//                 was pulled for this address", which is the third of the four
+//                 criteria Confirm is gated on. A number typed at creation time
+//                 would satisfy that gate with no quote behind it.
+//   reconcile   — 'open'. bucketOrders drops any order whose customer name
+//                 matches a shipped unit's, which is how a repeat customer's
+//                 brand-new order would be invisible in every tab the moment it
+//                 was created. 'open' is the documented operator override for
+//                 exactly this (lib/reconcile.ts > recordStillOpen), and on an
+//                 order made seconds ago it is a statement of fact.
+//
+// Deliberately NOT set: cogs_usd (the orders_set_sale_cogs trigger fills it from
+// the schedule on INSERT, and a 0 here would read as a free machine in every
+// margin rollup) and status when the order has no phone number — the existing
+// auto_flag_orders_without_phone BEFORE INSERT trigger turns that into 'flagged'
+// just as it does for a synced order, which is why this returns the status the
+// database actually settled on rather than the one it asked for.
+
+export type ManualOrderLine = {
+  name: string;
+  /** Shopify leaves this empty on most sale lines; it is informational here. */
+  sku: string;
+  qty: number;
+  price_usd: number;
+};
+
+export type ManualOrderInput = {
+  customer_name: string;
+  customer_email: string | null;
+  customer_phone: string | null;
+  address: {
+    address_line: string | null;
+    address_line2: string | null;
+    city: string;
+    region_state: string | null;
+    country: 'US' | 'CA';
+    postal_code: string | null;
+  };
+  currency: string;
+  line_items: ManualOrderLine[];
+  /** 'paid' or 'pending' only. The two settled states ('refunded', 'voided')
+   *  hold an order out of the Pending queue, and no new order is in either. */
+  financial_status: 'paid' | 'pending';
+  /** How the customer paid, when it is worth recording — shown on the Payment
+   *  card. Free text: these are e-transfers and cheques, not Shopify gateways. */
+  payment_method?: string | null;
+  /** ISO. Must be on or after SALES_QUEUE_START or the order is in no Sales tab. */
+  placed_at: string;
+  /** Optional first note on the order — where the sale came from, usually. */
+  note?: string;
+};
+
+/** The standard free-shipping threshold every synced sale carries. */
+const SALE_FREIGHT_THRESHOLD_USD = 200;
+
+/** How many consecutive taken refs to walk past before giving up. A collision
+ *  needs two operators creating an order in the same instant, so more than one
+ *  is already surprising; eight is a loop guard, not a capacity. */
+const MANUAL_REF_ATTEMPTS = 8;
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+/** Order total and unit count for a set of hand-entered lines. Exported so the
+ *  form can show the operator the same numbers that will be written. */
+export function manualOrderTotals(lines: ManualOrderLine[]): { subtotal: number; units: number } {
+  return {
+    subtotal: round2(lines.reduce((sum, li) => sum + li.qty * li.price_usd, 0)),
+    units: lines.reduce((sum, li) => sum + li.qty, 0),
+  };
+}
+
+/** The next ref in the manual series (M-0001, M-0002, …).
+ *
+ *  A fourth order_ref series, independent of the other three on purpose:
+ *  Shopify's '#1284', the invoice importer's 'INV-', and replacements' 'R-'.
+ *  Shopify's counter is outside our control and keeps climbing, so anything
+ *  that tried to extend it would eventually be handed the same number by the
+ *  store — which is precisely how the 14 INV- rows came to collide.
+ *
+ *  Computed in the client rather than by an RPC like next_replacement_order_ref,
+ *  because that would need a migration and migrations here are applied by hand
+ *  through a gated workflow — the feature would be dead in production until
+ *  someone ran it. The UNIQUE constraint on order_ref is the real serializer
+ *  either way; createManualOrder walks to the next number on a 23505. */
+export async function nextManualOrderRef(): Promise<string> {
+  const { data, error } = await supabase
+    .from('orders')
+    .select('order_ref')
+    .like('order_ref', 'M-%');
+  if (error) throw new Error(`Could not read the manual order refs: ${error.message}`);
+
+  // Numeric max, not lexicographic: 'M-0009' sorts above 'M-0010' as text.
+  const highest = (data ?? []).reduce((max, row: { order_ref: string }) => {
+    const m = /^M-(\d+)$/.exec(row.order_ref);
+    return m ? Math.max(max, Number(m[1])) : max;
+  }, 0);
+  return `M-${String(highest + 1).padStart(4, '0')}`;
+}
+
+function assertValidManualOrder(input: ManualOrderInput): void {
+  if (!input.customer_name.trim()) throw new Error('A customer name is required');
+  if (!input.address.city.trim()) throw new Error('A city is required');
+  if (input.line_items.length === 0) throw new Error('At least one line item is required');
+  for (const li of input.line_items) {
+    if (!li.name.trim()) throw new Error('Every line needs a product name');
+    if (!Number.isFinite(li.qty) || li.qty < 1) throw new Error('Every line needs a quantity of at least 1');
+    if (!Number.isFinite(li.price_usd) || li.price_usd < 0) throw new Error('A line price cannot be negative');
+  }
+}
+
+/** Creates a sales order by hand. Returns the new id and ref, plus the status
+ *  the database settled on — 'flagged' rather than 'pending' when the order has
+ *  no phone number, because the existing trigger says so. */
+export async function createManualOrder(input: ManualOrderInput): Promise<{
+  id: string;
+  order_ref: string;
+  status: OrderStatus;
+}> {
+  assertValidManualOrder(input);
+
+  const { data: auth } = await supabase.auth.getUser();
+  const operator = auth.user?.email ?? 'unknown';
+  const { subtotal } = manualOrderTotals(input.line_items);
+  const nowIso = new Date().toISOString();
+
+  const row = {
+    kind: 'sale' as const,
+    status: 'pending' as const,
+    customer_name: input.customer_name.trim(),
+    customer_email: input.customer_email?.trim() || null,
+    customer_phone: input.customer_phone?.trim() || null,
+    address_line: input.address.address_line?.trim() || null,
+    address_line2: input.address.address_line2?.trim() || null,
+    city: input.address.city.trim(),
+    region_state: input.address.region_state?.trim() || null,
+    country: input.address.country,
+    postal_code: input.address.postal_code?.trim() || null,
+    address_customer_postal: input.address.postal_code?.trim() || null,
+    // The text guess, flagged as a guess — identical to how a synced order
+    // arrives, so the Address card renders it unconfirmed until Verify runs.
+    address_verdict: guessDwellingFromText(
+      input.address.address_line, input.address.address_line2, input.address.postal_code,
+    ),
+    address_verdict_source: 'sync-guess' as const,
+    // See the freight note above: zero, and the form has no field for it.
+    freight_estimate_usd: 0,
+    freight_threshold_usd: SALE_FREIGHT_THRESHOLD_USD,
+    freight_estimate_source: 'manual',
+    currency: input.currency,
+    subtotal_usd: subtotal,
+    total_usd: subtotal,
+    financial_status: input.financial_status,
+    payment_methods: input.payment_method?.trim() ? [input.payment_method.trim()] : null,
+    line_items: input.line_items.map(li => ({
+      // The legacy Shopify sale shape, which is what every sale line in the
+      // table uses and what the Line items card reads.
+      sku: li.sku.trim(),
+      name: li.name.trim(),
+      qty: li.qty,
+      price_usd: li.price_usd,
+    })),
+    placed_at: input.placed_at,
+    attribution_source: 'manual',
+    // The anti-heuristic stamp — see the reconcile note above.
+    reconciled_at: nowIso,
+    reconciled_by: operator,
+    reconcile_outcome: 'open' as const,
+    reconcile_note: 'Created by hand in Sales — nothing has shipped against it',
+  };
+
+  const first = await nextManualOrderRef();
+  const base = Number(first.slice(2));
+
+  for (let attempt = 0; attempt < MANUAL_REF_ATTEMPTS; attempt++) {
+    const order_ref = `M-${String(base + attempt).padStart(4, '0')}`;
+    const { data: created, error } = await supabase
+      .from('orders')
+      .insert({ ...row, order_ref })
+      .select('id, order_ref, status')
+      .single();
+
+    // 23505 on this table is the UNIQUE on order_ref: somebody took the number
+    // between our read and our write. Walk on rather than failing.
+    if (error?.code === '23505') continue;
+    if (error || !created) throw new Error(`Could not create the order: ${error?.message ?? 'no row returned'}`);
+
+    await logAction(
+      'order_manual_create',
+      created.order_ref,
+      `${row.customer_name} · ${input.line_items.length} line${input.line_items.length === 1 ? '' : 's'}`
+        + ` · ${input.currency} ${subtotal.toFixed(2)} · ${input.financial_status} · by ${operator}`,
+      { entityType: 'order', entityId: created.id },
+    );
+
+    // The note is a convenience, and the order already exists. A failure here
+    // must not read to the operator as "the order was not created" — that is
+    // how you get two of them.
+    const note = input.note?.trim();
+    if (note) {
+      try {
+        await addOrderNote(created.id, operator, note);
+      } catch (e) {
+        console.warn('manual order created, but its note did not save:', (e as Error).message);
+      }
+    }
+
+    return { id: created.id, order_ref: created.order_ref, status: created.status as OrderStatus };
+  }
+
+  throw new Error(
+    `Could not allocate an order reference after ${MANUAL_REF_ATTEMPTS} attempts — `
+    + 'M-' + String(base).padStart(4, '0') + ' and the refs after it are all taken. Try again.',
+  );
 }
 
 /** Live-subscribed list of all replacement orders, newest first. */
@@ -1066,28 +2657,54 @@ export function useReplacementOrders(): { orders: Order[]; loading: boolean } {
   return { orders, loading };
 }
 
-/** Records that an order shipped. Sets shipped_at and shipping_cost_usd
- *  (the actual freight/label cost from Freightcom/ClickShip). Works for
- *  both sales and replacements. */
-export async function markOrderShipped(orderId: string, shippingCostUsd: number): Promise<void> {
-  if (!Number.isFinite(shippingCostUsd) || shippingCostUsd < 0) {
-    throw new Error('shipping_cost_usd must be a non-negative number');
+/** Records that an order shipped. Sets shipped_at, the actual freight/label cost
+ *  from Freightcom/ClickShip, and the currency that cost is in. Works for both
+ *  sales and replacements.
+ *
+ *  The currency is explicit and required. The storage column is named
+ *  `shipping_cost_usd` but has only ever held CAD (see the 20260806170000
+ *  migration); the operator input was labelled USD while the backfill wrote CAD,
+ *  which is exactly the ambiguity this parameter removes. Callers state the
+ *  currency; nothing infers it from the column name. */
+export async function markOrderShipped(
+  orderId: string, shippingCost: number, currency: string = 'CAD',
+): Promise<void> {
+  if (!Number.isFinite(shippingCost) || shippingCost < 0) {
+    throw new Error('shipping cost must be a non-negative number');
   }
+  if (!/^[A-Z]{3}$/.test(currency)) {
+    throw new Error('shipping cost currency must be a 3-letter ISO code');
+  }
+  const shippingCostUsd = shippingCost;
   const { data: row, error: rErr } = await supabase
     .from('orders')
-    .select('order_ref, customer_email')
+    .select('order_ref, customer_email, kind, linked_ticket_id')
     .eq('id', orderId)
     .single();
   if (rErr || !row) throw new Error(`Read order: ${rErr?.message ?? 'not found'}`);
 
   const { error } = await supabase
     .from('orders')
-    .update({ shipped_at: new Date().toISOString(), shipping_cost_usd: shippingCostUsd })
+    .update({
+      shipped_at: new Date().toISOString(),
+      shipping_cost_usd: shippingCostUsd,
+      shipping_cost_currency: currency,
+    })
     .eq('id', orderId);
   if (error) throw new Error(error.message);
-  await logAction('order_shipped', row.order_ref, `shipping $${shippingCostUsd.toFixed(2)}`,
+  await logAction('order_shipped', row.order_ref, `shipping $${shippingCostUsd.toFixed(2)} ${currency}`,
     undefined,
     { klaviyoEvent: 'Order Shipped', ...((row.customer_email as string | null) ? { klaviyoEmail: row.customer_email as string } : {}) });
+
+  // A shipped replacement is no longer "queued" — drop the tag so the Support
+  // list doesn't show a stale chip. Best-effort: the shipment is already
+  // recorded and must not be failed by a tag write.
+  if (row.kind === 'replacement' && row.linked_ticket_id) {
+    const { error: tagErr } = await supabase.rpc('remove_ticket_tag', {
+      p_ticket_id: row.linked_ticket_id, p_tag: 'queued_for_replacement',
+    });
+    if (tagErr) console.warn('Clearing queued_for_replacement tag failed (non-fatal):', tagErr.message);
+  }
 }
 
 /** Shipped orders that have not yet been marked delivered.
@@ -1135,9 +2752,42 @@ export function useShippedOrders(): { orders: Order[]; loading: boolean } {
   return { orders, loading };
 }
 
+/** Today as the operator's calendar reads it — "YYYY-MM-DD", local, never UTC.
+ *  Used to bound a picked received date: at 9am in Toronto, "today" in UTC is
+ *  already the same day, but at 9pm it is tomorrow, and a date input offering
+ *  today would then be rejected as being in the future. */
+export function localDayString(d: Date = new Date()): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/** Turn a day an operator picked in an `<input type="date">` ("YYYY-MM-DD")
+ *  into a timestamp, anchored at local NOON rather than midnight.
+ *
+ *  A bare date goes into `new Date()` as UTC midnight, which is the previous
+ *  day everywhere west of Greenwich — so a shipment received on the 7th would
+ *  be filed, and later read back, as the 6th. Noon is far enough from both
+ *  edges that no timezone this app runs in can shift the day. Returns null
+ *  when the string is not a date at all. */
+export function calendarDayToIso(day: string): string | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day.trim());
+  if (!m) return null;
+  const dt = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 12, 0, 0, 0);
+  if (Number.isNaN(dt.getTime())) return null;
+  // Rejects 2026-02-31, which the Date constructor would roll into March.
+  if (dt.getMonth() !== Number(m[2]) - 1 || dt.getDate() !== Number(m[3])) return null;
+  return dt.toISOString();
+}
+
 /** Records that an order was delivered. For replacement orders, also closes
- *  the linked service ticket. Idempotent — safe to call twice. */
-export async function markOrderDelivered(orderId: string): Promise<void> {
+ *  the linked service ticket. Idempotent — safe to call twice.
+ *
+ *  `receivedOn` is the day the customer actually took delivery, as a local
+ *  "YYYY-MM-DD" — what Fulfillment > Queue's "Shipment Received" button
+ *  collects. Delivery is nearly always confirmed after the fact (the customer
+ *  mentions it on a call days later), so stamping `now()` would have put the
+ *  whole warranty and follow-up clock on the wrong day. Omit it and today is
+ *  used, which is what the History tab's "Mark delivered" button wants. */
+export async function markOrderDelivered(orderId: string, receivedOn?: string): Promise<void> {
   const { data: row, error: rErr } = await supabase
     .from('orders')
     .select('kind, linked_ticket_id, order_ref, delivered_at, shipped_at, customer_email')
@@ -1149,13 +2799,25 @@ export async function markOrderDelivered(orderId: string): Promise<void> {
     throw new Error('Cannot mark delivered: order has not been shipped yet.');
   }
 
-  const deliveredAt = new Date().toISOString();
+  let deliveredAt = new Date().toISOString();
+  if (receivedOn) {
+    const picked = calendarDayToIso(receivedOn);
+    if (!picked) throw new Error(`"${receivedOn}" is not a date — expected YYYY-MM-DD.`);
+    // Compared as calendar days, not instants: the noon anchor above is hours
+    // ahead of a morning "now", and an operator picking today must not be told
+    // the box arrives in the future.
+    if (receivedOn.trim() > localDayString()) {
+      throw new Error('A shipment cannot be received in the future.');
+    }
+    deliveredAt = picked;
+  }
   const { error: uErr } = await supabase
     .from('orders')
     .update({ delivered_at: deliveredAt })
     .eq('id', orderId);
   if (uErr) throw new Error(uErr.message);
-  await logAction('order_delivered', row.order_ref, 'delivery confirmed',
+  await logAction('order_delivered', row.order_ref,
+    receivedOn ? `delivery confirmed \u00b7 received ${receivedOn.trim()}` : 'delivery confirmed',
     undefined,
     { klaviyoEvent: 'Order Delivered', ...((row.customer_email as string | null) ? { klaviyoEmail: row.customer_email as string } : {}) });
 
@@ -1167,4 +2829,91 @@ export async function markOrderDelivered(orderId: string): Promise<void> {
     if (tErr) throw new Error(`Close ticket: ${tErr.message}`);
     await logAction('ticket_auto_closed', row.linked_ticket_id, `via replacement ${row.order_ref}`);
   }
+}
+
+/** Why a Shopify order never became a row in `orders`. Mirrors the `SkipReason`
+ *  union in supabase/functions/sync-shopify-orders/index.ts.
+ *
+ *  Only `db_error` is a failure. The rest are orders makeLILA has nowhere to
+ *  put: `orders.country` is NOT NULL with a CHECK of ('US','CA'), so a no-ship
+ *  product (the $1 LILA Mini Reservation, a subscription buyout) or an
+ *  international address has no home here. */
+export type ShopifySkipReason =
+  | 'no_shipping_address'
+  | 'international'
+  | 'missing_city'
+  | 'db_error';
+
+export type ShopifySkip = {
+  order_ref: string;
+  reason: ShopifySkipReason;
+  detail: string;
+  placed_at: string | null;
+  total: string | null;
+  currency: string | null;
+  customer: string | null;
+  items: string[];
+};
+
+export type ShopifySyncResult = {
+  fetched: number;
+  imported: number;
+  refreshed: number;
+  skipped: number;
+  skippedBreakdown: Partial<Record<ShopifySkipReason, number>>;
+  skippedDetails: ShopifySkip[];
+  journeyBatchesFailed: number;
+};
+
+export const SHOPIFY_SKIP_LABEL: Record<ShopifySkipReason, string> = {
+  no_shipping_address: 'No shipping address — nothing to fulfil against',
+  international: 'Ships outside the US and Canada',
+  missing_city: 'Shipping address has no city',
+  db_error: 'Write failed',
+};
+
+/** A full sync of ~250 orders now runs in seconds, but the ceiling has to
+ *  exist: without one a stalled request leaves the Sync button disabled with
+ *  no way back short of a page reload. */
+const SYNC_TIMEOUT_MS = 180_000;
+
+/** Pull new orders from Shopify. Wraps the `sync-shopify-orders` edge
+ *  function so the Sales module doesn't import `supabase` directly — see
+ *  AGENTS.md, "All Supabase queries go through lib/". */
+export async function syncShopifyOrders(): Promise<ShopifySyncResult> {
+  let data: ShopifySyncResult | null = null;
+  try {
+    const res = await supabase.functions.invoke<ShopifySyncResult>(
+      'sync-shopify-orders',
+      { body: {}, signal: AbortSignal.timeout(SYNC_TIMEOUT_MS) },
+    );
+    // supabase-js hides the function's own `{ error }` JSON behind a generic
+    // "non-2xx status code"; a dead Shopify token has to read as a dead token.
+    if (res.error) throw new Error(await functionErrorMessage(res.error));
+    data = res.data;
+  } catch (e) {
+    if ((e as Error)?.name === 'TimeoutError' || (e as Error)?.name === 'AbortError') {
+      throw new Error(
+        `Timed out after ${SYNC_TIMEOUT_MS / 1000}s. The sync may still be finishing on the server — reload in a minute before retrying.`,
+      );
+    }
+    throw e;
+  }
+  if (!data) throw new Error('empty response from sync-shopify-orders');
+
+  const result: ShopifySyncResult = {
+    fetched: data.fetched ?? 0,
+    imported: data.imported ?? 0,
+    refreshed: data.refreshed ?? 0,
+    skipped: data.skipped ?? 0,
+    skippedBreakdown: data.skippedBreakdown ?? {},
+    skippedDetails: data.skippedDetails ?? [],
+    journeyBatchesFailed: data.journeyBatchesFailed ?? 0,
+  };
+  await logAction(
+    'shopify_sync',
+    'orders',
+    `${result.imported} new, ${result.refreshed} refreshed, ${result.skipped} not imported (of ${result.fetched} fetched)`,
+  );
+  return result;
 }

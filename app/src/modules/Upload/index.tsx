@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from 'react';
 import {
-  bulkUploadAndMatch, useReviewQueueInvoices, assignInvoice, getInvoiceSignedUrl, deleteInvoice,
+  bulkUploadAndMatch, useReviewQueueInvoices, assignInvoice, openInvoiceInNewTab, deleteInvoice,
+  reextractInvoiceAmounts,
   type BulkUploadResult, type CustomerInvoice, type InvoiceDocType, type InvoiceMatchStatus,
 } from '../../lib/invoices';
 import { useCustomers } from '../../lib/customers';
@@ -41,6 +42,7 @@ export default function Upload() {
   const [files, setFiles] = useState<File[]>([]);
   const [busy, setBusy] = useState(false);
   const [results, setResults] = useState<BulkUploadResult[] | null>(null);
+  const [runError, setRunError] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
   const { customers } = useCustomers();
@@ -59,13 +61,17 @@ export default function Upload() {
 
   const run = async () => {
     if (files.length === 0) return;
-    setBusy(true); setResults(null);
+    setBusy(true); setResults(null); setRunError(null);
     try {
       const r = await bulkUploadAndMatch(files, kind.documentType);
       setResults(r);
       setFiles([]);
       if (fileInput.current) fileInput.current.value = '';
       void reloadQueue();
+    } catch (e) {
+      // Without this the promise rejected into the void: the button reset and
+      // nothing appeared, which reads as "the upload does nothing".
+      setRunError((e as Error).message);
     } finally {
       setBusy(false);
     }
@@ -74,6 +80,9 @@ export default function Upload() {
   const matchedCount = results?.filter(r => r.ok && r.invoice?.match_status === 'matched').length ?? 0;
   const reviewCount  = results?.filter(r => r.ok && r.invoice?.match_status !== 'matched').length ?? 0;
   const failedCount  = results?.filter(r => !r.ok).length ?? 0;
+  // Every file failing to parse is one cause, not N — an exhausted API key, a
+  // missing one. Say it once, at the top, with the provider's own message.
+  const unreadable   = results?.filter(r => r.ok && r.extract_error) ?? [];
 
   return (
     <div className={styles.layout}>
@@ -114,6 +123,7 @@ export default function Upload() {
         <button onClick={() => void run()} disabled={busy || files.length === 0} className={styles.uploadBtn}>
           {busy ? `Uploading & matching ${files.length}…` : `Upload & match ${files.length || ''}`.trim()}
         </button>
+        {runError && <div className={styles.errText}>Upload failed: {runError}</div>}
       </div>
 
       {results && (
@@ -123,6 +133,15 @@ export default function Upload() {
             <span className={styles.badgeReview}>{reviewCount} need review</span>
             {failedCount > 0 && <span className={styles.badgeFailed}>{failedCount} failed</span>}
           </div>
+          {unreadable.length > 0 && (
+            <div className={styles.warnBanner}>
+              <strong>
+                Couldn't read {unreadable.length} PDF{unreadable.length === 1 ? '' : 's'} —
+                {' '}filed by filename only, so nothing auto-matched.
+              </strong>
+              <div className={styles.errText}>{unreadable[0].extract_error}</div>
+            </div>
+          )}
           <table className={styles.table}>
             <thead>
               <tr><th>File</th><th>Invoice #</th><th>Order</th><th>Customer</th><th>Status</th><th></th></tr>
@@ -135,13 +154,22 @@ export default function Upload() {
                   <td className={styles.mono}>{r.invoice?.order_ref ?? '—'}</td>
                   <td>{r.ok ? (r.invoice?.customer_id ? (customerName.get(r.invoice.customer_id) ?? '—') : (r.invoice?.bill_to_name ?? '—')) : '—'}</td>
                   <td>{r.ok && r.invoice ? <StatusBadge status={r.invoice.match_status} /> : <span className={styles.badgeFailed}>failed</span>}</td>
-                  <td>{r.ok && r.invoice ? <ViewLink path={r.invoice.storage_path} /> : <span className={styles.errText} title={r.error}>{r.error}</span>}</td>
+                  <td>
+                    {r.ok && r.invoice
+                      ? <ViewLink path={r.invoice.storage_path} />
+                      : <span className={styles.errText} title={r.error}>{r.error}</span>}
+                    {r.extract_error && (
+                      <div className={styles.errText} title={r.extract_error}>couldn't read PDF</div>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       )}
+
+      <ReextractAmounts />
 
       <ReviewQueue
         invoices={reviewQueue}
@@ -154,6 +182,61 @@ export default function Upload() {
   );
 }
 
+// Invoices ingested before the Payment/Total Due split carry no payment_cad, so
+// a refund compiled from them still opens at whatever total_cad holds — $0.00
+// on any invoice that was already paid. This re-reads the stored PDFs and fills
+// the Payment figure in. Batched by the edge function; loop until a pass stops
+// making progress (PDFs that won't parse would otherwise repeat forever).
+function ReextractAmounts() {
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
+  const [errors, setErrors] = useState<{ file_name: string; error: string }[]>([]);
+
+  const run = async () => {
+    setBusy(true); setStatus('Re-reading…'); setErrors([]);
+    let updated = 0;
+    try {
+      for (;;) {
+        const res = await reextractInvoiceAmounts(20);
+        updated += res.updated;
+        setStatus(`Re-read ${updated} invoice${updated === 1 ? '' : 's'}, ${res.remaining} to go…`);
+        if (res.errors.length) setErrors(prev => [...prev, ...res.errors]);
+        if (res.updated === 0 || res.remaining === 0) {
+          setStatus(`Done — ${updated} invoice${updated === 1 ? '' : 's'} updated`
+            + (res.remaining ? `, ${res.remaining} could not be read` : '.'));
+          break;
+        }
+      }
+    } catch (e) {
+      setStatus(`Failed: ${(e as Error).message}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className={styles.dropCard}>
+      <div className={styles.kindDesc}>
+        <strong>Re-read invoice amounts.</strong> Pulls the "Payment" figure (what the customer
+        actually paid) off invoices already on file, so refund cards open at the right amount
+        instead of the $0.00 that "Total Due" shows on a paid invoice. Safe to re-run — it only
+        touches invoices with no Payment amount yet, and never changes who an invoice is filed under.
+      </div>
+      <button onClick={() => void run()} disabled={busy} className={styles.uploadBtn}>
+        {busy ? 'Re-reading…' : 'Re-read amounts from PDFs'}
+      </button>
+      {status && <div className={styles.pickedList}>{status}</div>}
+      {errors.length > 0 && (
+        <div className={styles.pickedList}>
+          {errors.map((e, i) => (
+            <div key={i} className={styles.errText}>{e.file_name}: {e.error}</div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function StatusBadge({ status }: { status: InvoiceMatchStatus }) {
   if (status === 'matched')      return <span className={styles.badgeMatched}>matched</span>;
   if (status === 'needs_review') return <span className={styles.badgeReview}>needs review</span>;
@@ -162,10 +245,8 @@ function StatusBadge({ status }: { status: InvoiceMatchStatus }) {
 
 function ViewLink({ path }: { path: string }) {
   const open = async () => {
-    try {
-      const url = await getInvoiceSignedUrl(path);
-      window.open(url, '_blank', 'noopener');
-    } catch (e) { alert((e as Error).message); }
+    try { await openInvoiceInNewTab(path); }
+    catch (e) { alert((e as Error).message); }
   };
   return <button className={styles.linkBtn} onClick={() => void open()}>View PDF</button>;
 }

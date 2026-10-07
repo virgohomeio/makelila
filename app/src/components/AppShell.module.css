@@ -1,0 +1,49 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   The ground every module is drawn on.
+
+   <main> was `background: #fff` set as an inline style object, which meant
+   the app had no ground ramp at all: cards, inputs and the page itself were
+   the same white, so nothing lifted off anything and every module had to
+   invent its own contrast with borders. tokens.css already documents the
+   ramp this replaces it with — surface (recessed) → page (default) → raised
+   (elevated) — and moving <main> onto --color-page is what makes the other
+   two rungs mean something.
+
+   The strata are the app's one piece of atmosphere, promoted here from the
+   Sales pilot where they were proven. LILA is a composter, so the ground
+   reads as sediment: fine horizontal layers.
+
+   They are set lighter and wider here than in the pilot — 1.5% ink on a 34px
+   rhythm, down from 2.8% on 26px. The pilot drew them behind a dense queue
+   that covered them; app-wide they are visible mainly in the gutter around a
+   module's cards, and at the pilot's weight a bare gutter read as lined
+   paper. The test for this value is that you should notice the ground has
+   depth and not be able to say why without looking for it.
+   ══════════════════════════════════════════════════════════════════════════ */
+.main {
+  background-color: var(--color-page);
+  background-image: repeating-linear-gradient(
+    180deg,
+    transparent 0 34px,
+    rgba(var(--color-ink-rgb), 0.015) 34px 35px
+  );
+  min-height: calc(100dvh - var(--nav-height));
+
+  /* Mobile V1: safe-area insets so the iPhone notch and home indicator never
+     crop content, and dvh so iOS Safari's collapsing URL bar doesn't either. */
+  padding: var(--space-5);
+  padding-top: max(var(--space-5), env(safe-area-inset-top));
+  padding-bottom: max(var(--space-5), env(safe-area-inset-bottom));
+  padding-left: max(var(--space-5), env(safe-area-inset-left));
+  padding-right: max(var(--space-5), env(safe-area-inset-right));
+}
+
+@media (max-width: 700px) {
+  .main {
+    padding: var(--space-3);
+    padding-top: max(var(--space-3), env(safe-area-inset-top));
+    padding-bottom: max(var(--space-3), env(safe-area-inset-bottom));
+    padding-left: max(var(--space-3), env(safe-area-inset-left));
+    padding-right: max(var(--space-3), env(safe-area-inset-right));
+  }
+}

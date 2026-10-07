@@ -86,8 +86,13 @@ export default function CancelOrderForm() {
       const finalReason = reason === 'Other' ? `Other: ${reasonOther.trim()}` : reason;
       const finalResolution = resolution === 'Other' ? `Other: ${resolutionOther.trim()}` : resolution;
       const amountNum = orderAmount.trim() ? Number(orderAmount.replace(/[^0-9.]/g, '')) : null;
+      // Generated here rather than read back: anon can INSERT into this table
+      // but not SELECT from it, so .select() on the insert would fail. The
+      // notification email needs the id, so we pick it before writing.
+      const cancellationId = crypto.randomUUID();
 
       const { error: insErr } = await supabase.from('order_cancellations').insert({
+        id: cancellationId,
         order_ref: orderRef.trim(),
         customer_name: fullName,
         customer_email: email.trim(),
@@ -105,6 +110,14 @@ export default function CancelOrderForm() {
         status: 'submitted',
       });
       if (insErr) throw insErr;
+
+      // Fire-and-forget: tell Reina a card just landed in Refunds →
+      // Cancellation Requests. Deliberately not awaited — a Resend outage must
+      // not cost the customer their submission, which is already committed.
+      supabase.functions
+        .invoke('send-cancellation-emails', { body: { cancellation_id: cancellationId } })
+        .catch(() => {});
+
       setRequestRef(ref);
     } catch (err) {
       setError(`Could not submit: ${(err as Error).message}. Please email support@lilacomposter.com if this persists.`);

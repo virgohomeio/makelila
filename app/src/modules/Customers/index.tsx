@@ -1,11 +1,21 @@
-import React, { lazy, Suspense, useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { CSSProperties } from 'react';
+import { buildHeldSerialIndex, serialsForCustomer, heldUnitsForCustomer } from '../../lib/heldUnits';
 import { isTelemetryConfigured } from '../../lib/supabaseTelemetry';
 const Dashboard = lazy(() => import('../Dashboard'));
 import {
   useCustomers, syncCustomersFromHubspot, exportPurchasers, pushToKlaviyo,
-  type Customer,
+  setPurchaser, setPrimaryUser, updateCustomerContact, PRIMARY_USER_RELATIONSHIPS,
+  useAllCustomerAdditionalUsers, matchCustomerSearch,
+  type Customer, type CustomerAdditionalUser,
 } from '../../lib/customers';
-import { useOrders } from '../../lib/orders';
+import { useOrders, AREA_TYPE_LABEL, areaTypeProvenance } from '../../lib/orders';
+import { DWELLING_LABEL, DWELLING_NOTE, dwellingProvenance } from '../../lib/addressClassify';
+import {
+  useCustomerAddressIndex, resolveCustomerAddress, hasResolvedAddress,
+  formatAddressLine, formatAddressBlock,
+  type ResolvedCustomerAddress,
+} from '../../lib/customerAddress';
 import { formatMoney } from '../../lib/money';
 import { useUnits } from '../../lib/stock';
 import { useServiceTickets } from '../../lib/service';
@@ -15,19 +25,61 @@ import { JourneyTab } from './JourneyTab';
 import { useIsMobile } from '../../lib/useMediaQuery';
 import { NavCard } from '../../components/NavCard';
 import { MobileBackHeader } from '../../components/MobileBackHeader';
+import { RouteErrorBoundary } from '../../components/RouteErrorBoundary';
 import { useCustomerEvents, useCustomerEngagement, eventMeta, dormancyBadge } from '../../lib/customerEvents';
-import { useCustomerInvoices, getInvoiceSignedUrl } from '../../lib/invoices';
+import { useCustomerInvoices, openInvoiceInNewTab } from '../../lib/invoices';
+import { PanelSection, PanelRow } from './Panel';
+import { NameSection } from './NameSection';
+import { AdditionalUsersSection } from './AdditionalUsersSection';
+import {
+  PageHeader, Tabs, Chip, ChipRow, Button, EmptyState,
+} from '../../components/ui';
 import styles from './Customers.module.css';
 
 type Tab = 'directory' | 'profitability' | 'journey' | 'fleet';
 
-const TAB_KEYS: Tab[] = ['directory', 'profitability', 'journey', 'fleet'];
+const TAB_KEYS: Tab[] = ['directory', 'fleet', 'profitability', 'journey'];
+
+// Shared empty list for customers with no additional household users — keeps
+// the search filter from allocating a new array per row on every keystroke.
+const NO_HOUSEHOLD_USERS: CustomerAdditionalUser[] = [];
+
+// Order per operator (2026-09-10): Directory first (default), then Fleet,
+// Profitability, Journey. One list now drives the desktop tab strip and the
+// mobile picker, which had drifted into two hand-kept copies.
+const TABS: { key: Tab; label: string }[] = [
+  { key: 'directory',     label: 'Directory' },
+  { key: 'fleet',         label: 'Fleet' },
+  { key: 'profitability', label: 'Profitability' },
+  { key: 'journey',       label: 'Journey' },
+];
+
+const MOBILE_TAB_META: Record<Tab, { subtitle: string; icon: string; iconBg: string }> = {
+  directory:     { subtitle: 'All customers · search',                  icon: '👥', iconBg: '#e3f0fb' },
+  fleet:         { subtitle: 'Live device telemetry · machine health',  icon: '📡', iconBg: '#e3f0fb' },
+  profitability: { subtitle: 'Revenue · returns · margin per customer', icon: '💰', iconBg: '#fff3e0' },
+  journey:       { subtitle: '10-stage CJM · health per customer',      icon: '🛤️', iconBg: '#fef1f0' },
+};
+
+type CountryFilter = 'all' | 'CA' | 'US' | 'other';
+
+const COUNTRY_FILTERS: { key: CountryFilter; label: string; statKey: 'total' | 'ca' | 'us' | 'other' }[] = [
+  { key: 'all',   label: 'All',    statKey: 'total' },
+  { key: 'CA',    label: 'Canada', statKey: 'ca' },
+  { key: 'US',    label: 'US',     statKey: 'us' },
+  { key: 'other', label: 'Other',  statKey: 'other' },
+];
+
+// The page-load settle, staggered down the three bands of the Directory.
+// prefers-reduced-motion removes the animation entirely in the stylesheet, so
+// the delay is inert rather than needing to be switched off here.
+const revealDelay = (ms: number) => ({ '--reveal-delay': `${ms}ms` } as CSSProperties);
 
 export default function Customers() {
   const [searchParams] = useSearchParams();
   const [tab, setTab] = useState<Tab>(() => {
     const p = searchParams.get('tab');
-    return (TAB_KEYS as string[]).includes(p ?? '') ? (p as Tab) : 'journey';
+    return (TAB_KEYS as string[]).includes(p ?? '') ? (p as Tab) : 'directory';
   });
   const isMobile = useIsMobile();
   // On mobile, start with the tab picker visible. Tapping a card flips this
@@ -43,36 +95,34 @@ export default function Customers() {
       setMobileTabPicked(true);
     }
   }, [paramTab]);
-  const { customers, loading } = useCustomers();
+  const { customers, loading, refresh: refreshCustomers } = useCustomers();
   const { units } = useUnits();
-  // Pre-build serial lookups so each row can render its serial(s) without
-  // re-filtering the full units list. The canonical units.customer_id FK
-  // (populated by the fulfillment-sheet sync, same link the Dashboard uses)
-  // is preferred; the lowercase-name map is a fallback for any unit not yet
-  // FK-linked.
-  const serialsByCustomerId = useMemo(() => {
-    const m = new Map<string, string[]>();
-    for (const u of units) {
-      if (!u.customer_id) continue;
-      const arr = m.get(u.customer_id);
-      if (arr) arr.push(u.serial);
-      else m.set(u.customer_id, [u.serial]);
-    }
-    return m;
-  }, [units]);
-  const serialsByCustomerName = useMemo(() => {
-    const m = new Map<string, string[]>();
-    for (const u of units) {
-      if (u.customer_id || !u.customer_name) continue;
-      const key = u.customer_name.toLowerCase();
-      const arr = m.get(key);
-      if (arr) arr.push(u.serial);
-      else m.set(key, [u.serial]);
-    }
-    return m;
-  }, [units]);
+  // Serial lookups live in lib/heldUnits so the list row below and the detail
+  // panel further down share one definition of "currently held" — they used to
+  // each hand-roll it and disagreed about returned machines.
+  const serialIndex = useMemo(() => buildHeldSerialIndex(units), [units]);
+  const serialsFor = useCallback(
+    (c: Customer) => serialsForCustomer(c, serialIndex),
+    [serialIndex],
+  );
+  // The address comes off the customer's latest ORDER, which is the copy Sales
+  // verifies and the freight label is printed from. The `customers` columns are
+  // only the fallback for people who have never ordered — see
+  // lib/customerAddress for why a second stored copy was the bug.
+  const { index: addressIndex } = useCustomerAddressIndex();
+  const addressFor = useCallback(
+    (c: Customer) => resolveCustomerAddress(c, addressIndex),
+    [addressIndex],
+  );
+  // Every household user in the directory, so the search box can look past the
+  // purchaser's name (the per-customer hook only covers the open panel).
+  const { byCustomerId: usersByCustomerId } = useAllCustomerAdditionalUsers();
   const [search, setSearch] = useState('');
-  const [country, setCountry] = useState<'all' | 'CA' | 'US' | 'other'>('all');
+  const [country, setCountry] = useState<CountryFilter>('all');
+  // Record gaps are a second, independent axis: 'US customers we cannot
+  // email' is a real question and was not askable before.
+  const [noEmailOnly, setNoEmailOnly] = useState(false);
+  const [noAddressOnly, setNoAddressOnly] = useState(false);
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -82,22 +132,24 @@ export default function Customers() {
     [customers, selectedCustomerId],
   );
 
+  // Search reads the whole household, not just the purchaser: the name an
+  // operator has been given is usually the person who USES the machine.
+  // `via` says which of them matched, so a row that surfaced under a name the
+  // Name column doesn't show still explains itself.
   const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return customers.filter(c => {
-      if (country === 'CA' && c.country !== 'CA') return false;
-      if (country === 'US' && c.country !== 'US') return false;
-      if (country === 'other' && (c.country === 'CA' || c.country === 'US')) return false;
-      if (q && !(
-        c.full_name.toLowerCase().includes(q) ||
-        c.email?.toLowerCase().includes(q) ||
-        c.phone?.toLowerCase().includes(q) ||
-        c.city?.toLowerCase().includes(q) ||
-        c.region?.toLowerCase().includes(q)
-      )) return false;
-      return true;
-    }).sort((a, b) => a.full_name.localeCompare(b.full_name));
-  }, [customers, country, search]);
+    const rows: Array<{ customer: Customer; via: string | null }> = [];
+    for (const c of customers) {
+      if (country === 'CA' && c.country !== 'CA') continue;
+      if (country === 'US' && c.country !== 'US') continue;
+      if (country === 'other' && (c.country === 'CA' || c.country === 'US')) continue;
+      if (noEmailOnly && c.email) continue;
+      if (noAddressOnly && hasResolvedAddress(addressFor(c))) continue;
+      const m = matchCustomerSearch(c, usersByCustomerId.get(c.id) ?? NO_HOUSEHOLD_USERS, search);
+      if (!m.matched) continue;
+      rows.push({ customer: c, via: m.via });
+    }
+    return rows.sort((a, b) => a.customer.full_name.localeCompare(b.customer.full_name));
+  }, [customers, country, noEmailOnly, noAddressOnly, search, usersByCustomerId, addressFor]);
 
   const stats = useMemo(() => {
     const s = { total: 0, ca: 0, us: 0, other: 0, withEmail: 0, withPhone: 0, withAddress: 0 };
@@ -109,14 +161,21 @@ export default function Customers() {
       else s.other++;
       if (c.email) s.withEmail++;
       if (c.phone) s.withPhone++;
-      if (c.city || c.region || c.postal_code) s.withAddress++;
+      if (hasResolvedAddress(addressFor(c))) s.withAddress++;
       if (c.last_synced_at) {
         const t = new Date(c.last_synced_at).getTime();
         if (t > lastSync) lastSync = t;
       }
     }
-    return { ...s, lastSync: lastSync ? new Date(lastSync) : null };
-  }, [customers]);
+    return {
+      ...s,
+      // The tiles report what needs work. 'with email, 90%' is the same
+      // fact read from the side that needs none.
+      noEmail: s.total - s.withEmail,
+      noAddress: s.total - s.withAddress,
+      lastSync: lastSync ? new Date(lastSync) : null,
+    };
+  }, [customers, addressFor]);
 
   const handleSync = async () => {
     setBusy(true); setError(null); setToast(null);
@@ -163,7 +222,7 @@ export default function Customers() {
         list_id: listId.trim(),
         filter: minusRefunds ? 'minus_refunds' : 'all_purchasers',
       });
-      setToast(`✓ Pushed ${r.pushed} profiles to Klaviyo list ${listId.trim()}${r.excluded ? ` (${r.excluded} excluded as refunded)` : ''}`);
+      setToast(`Pushed ${r.pushed} profiles to Klaviyo list ${listId.trim()}${r.excluded ? ` (${r.excluded} excluded as refunded)` : ''}`);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -171,34 +230,22 @@ export default function Customers() {
     }
   };
 
-  if (loading) return <div className={styles.loading}>Loading customers…</div>;
-
-  // Mobile: until a tab is picked, render a NavCard picker for the three
-  // sub-views. After pick, fall through to the existing render branches with
-  // a back affordance threaded in via MobileBackHeader. The Directory view is
-  // dense (table + filters) — for V1 it just renders inside the existing
-  // single-column layout.
+  // Mobile: until a tab is picked, render a NavCard picker for the four
+  // sub-views. Tapping a card flips `mobileTabPicked` and the branches below
+  // render with a MobileBackHeader in place of the desktop header.
   if (isMobile && !mobileTabPicked) {
-    const pickerTabs: { key: Tab; label: string; subtitle: string; icon: string; iconBg: string }[] = [
-      { key: 'journey',       label: 'Journey',       subtitle: '10-stage CJM · health per customer',           icon: '🛤️', iconBg: '#fef1f0' },
-      { key: 'profitability', label: 'Profitability', subtitle: 'Revenue · returns · margin per customer',      icon: '💰', iconBg: '#fff3e0' },
-      { key: 'directory',     label: 'Directory',     subtitle: 'All customers · search',     icon: '👥', iconBg: '#e3f0fb' },
-      { key: 'fleet',         label: 'Fleet',         subtitle: 'Live device telemetry · machine health',         icon: '📡', iconBg: '#e3f0fb' },
-    ];
     return (
       <div className={styles.layout}>
-        <div className={styles.header}>
-          <h2 className={styles.title}>Customers</h2>
-        </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: 4 }}>
-          {pickerTabs.map(t => (
+        <PageHeader title="Customers" meta="Directory, fleet, profitability and journey." />
+        <div className={styles.mobilePicker}>
+          {TABS.map(t => (
             <NavCard
               key={t.key}
               onClick={() => { setTab(t.key); setMobileTabPicked(true); }}
               title={t.label}
-              subtitle={t.subtitle}
-              icon={t.icon}
-              iconBg={t.iconBg}
+              subtitle={MOBILE_TAB_META[t.key].subtitle}
+              icon={MOBILE_TAB_META[t.key].icon}
+              iconBg={MOBILE_TAB_META[t.key].iconBg}
             />
           ))}
         </div>
@@ -206,9 +253,6 @@ export default function Customers() {
     );
   }
 
-  // After picking on mobile, render MobileBackHeader at the top of each
-  // branch instead of the desktop title-row + tabs strip. Tap the chevron
-  // to return to the tab picker.
   const tabLabel =
     tab === 'journey'       ? 'Journey' :
     tab === 'profitability' ? 'Profitability' :
@@ -216,191 +260,210 @@ export default function Customers() {
                               'Directory';
   const onMobileBack = () => setMobileTabPicked(false);
 
+  // What each tab is, in one line. The Directory's is live because it is the
+  // one tab whose contents change as you type.
+  const meta =
+    tab === 'directory' ? (
+      <>
+        <strong>{filtered.length}</strong> of <strong>{stats.total}</strong> customers
+        {stats.lastSync && (
+          <> · synced from HubSpot{' '}
+            <strong>{stats.lastSync.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</strong>
+          </>
+        )}
+      </>
+    ) : tab === 'journey' ? 'Where every customer sits in the ten-stage journey, and how they are doing.'
+      : tab === 'profitability' ? 'Revenue, returns and margin, per customer.'
+      : 'Live telemetry from machines in the field.';
+
+  // One header for all four tabs. Each branch used to declare its own title
+  // row, which is how the Directory's tab strip drifted a different colour
+  // from everything else in the app without anyone noticing.
+  const header = isMobile ? (
+    <MobileBackHeader label={tabLabel} onBack={onMobileBack} />
+  ) : (
+    <>
+      <PageHeader
+        title="Customers"
+        meta={meta}
+        actions={tab === 'directory' ? (
+          <>
+            <ExportMenu busy={busy} onExport={handleExport} onKlaviyo={handleKlaviyoPush} />
+            <Button variant="primary" onClick={handleSync} disabled={busy}>
+              {busy ? 'Syncing…' : 'Sync from HubSpot'}
+            </Button>
+          </>
+        ) : undefined}
+      />
+      <Tabs
+        ariaLabel="Customers sections"
+        items={TABS.map(t => ({ key: t.key, label: t.label }))}
+        active={tab}
+        onChange={k => setTab(k as Tab)}
+      />
+    </>
+  );
+
   if (tab === 'fleet') {
     if (!isTelemetryConfigured) {
       return (
         <div className={styles.layout}>
-          {isMobile ? (
-            <MobileBackHeader label={tabLabel} onBack={onMobileBack} />
-          ) : (
-            <div className={styles.header}>
-              <div className={styles.titleRow}>
-                <h2 className={styles.title}>Customers</h2>
-                <CustomersTabs tab={tab} onChange={setTab} />
-              </div>
-            </div>
-          )}
-          <div style={{ padding: 24, color: '#4a5568' }}>
-            <h2 style={{ marginTop: 0 }}>Telemetry not configured</h2>
-            <p>Set <code>VITE_TELEMETRY_SUPABASE_URL</code> and <code>VITE_TELEMETRY_SUPABASE_ANON_KEY</code> in <code>.env</code> and reload.</p>
-          </div>
+          {header}
+          <EmptyState
+            title="Telemetry is not configured"
+            body="Set VITE_TELEMETRY_SUPABASE_URL and VITE_TELEMETRY_SUPABASE_ANON_KEY in .env, then reload."
+          />
         </div>
       );
     }
     return (
       <div className={styles.layout}>
-        {isMobile ? (
-          <MobileBackHeader label={tabLabel} onBack={onMobileBack} />
-        ) : (
-          <div className={styles.header}>
-            <div className={styles.titleRow}>
-              <h2 className={styles.title}>Customers</h2>
-              <CustomersTabs tab={tab} onChange={setTab} />
-            </div>
-          </div>
-        )}
-        <Suspense fallback={<div style={{ padding: 24 }}>Loading fleet…</div>}>
-          <Dashboard />
-        </Suspense>
+        {header}
+        <RouteErrorBoundary label="Fleet">
+          <Suspense fallback={<div className={styles.loading}>Loading fleet…</div>}>
+            <Dashboard />
+          </Suspense>
+        </RouteErrorBoundary>
       </div>
     );
   }
 
   if (tab === 'profitability') {
-    return (
-      <div className={styles.layout}>
-        {isMobile ? (
-          <MobileBackHeader label={tabLabel} onBack={onMobileBack} />
-        ) : (
-          <div className={styles.header}>
-            <div className={styles.titleRow}>
-              <h2 className={styles.title}>Customers</h2>
-              <CustomersTabs tab={tab} onChange={setTab} />
-            </div>
-          </div>
-        )}
-        <ProfitabilityTab />
-      </div>
-    );
+    return <div className={styles.layout}>{header}<ProfitabilityTab /></div>;
   }
 
   if (tab === 'journey') {
-    return (
-      <div className={styles.layout}>
-        {isMobile ? (
-          <MobileBackHeader label={tabLabel} onBack={onMobileBack} />
-        ) : (
-          <div className={styles.header}>
-            <div className={styles.titleRow}>
-              <h2 className={styles.title}>Customers</h2>
-              <CustomersTabs tab={tab} onChange={setTab} />
-            </div>
-          </div>
-        )}
-        <JourneyTab />
-      </div>
-    );
+    return <div className={styles.layout}>{header}<JourneyTab /></div>;
   }
+
+  const filtersOn = country !== 'all' || noEmailOnly || noAddressOnly || search.trim() !== '';
+  const clearFilters = () => { setCountry('all'); setNoEmailOnly(false); setNoAddressOnly(false); setSearch(''); };
 
   return (
     <>
     <div className={styles.layout}>
-      {isMobile && <MobileBackHeader label={tabLabel} onBack={onMobileBack} />}
-      <div className={styles.header}>
-        <div className={styles.titleRow}>
-          <h2 className={styles.title}>Customers</h2>
-          {isMobile ? null : <CustomersTabs tab={tab} onChange={setTab} />}
+      {header}
+
+      {toast && (
+        <div className={`${styles.toast} ${styles.toastSuccess}`}>
+          <span className={styles.toastText}>{toast}</span>
+          <button className={styles.toastClose} onClick={() => setToast(null)} aria-label="Dismiss">✕</button>
         </div>
-        <div className={styles.headerActions}>
-          {stats.lastSync && (
-            <span className={styles.lastSync}>
-              Last HubSpot sync · {stats.lastSync.toLocaleString('en-US')}
-            </span>
+      )}
+      {error && (
+        <div className={`${styles.toast} ${styles.toastError}`}>
+          <span className={styles.toastText}>{error}</span>
+          <button className={styles.toastClose} onClick={() => setError(null)} aria-label="Dismiss">✕</button>
+        </div>
+      )}
+
+      {/* There is deliberately no KPI tile row here. The one this replaced
+          reported Total / Canada-US / With email / With address — four figures
+          the filter chips below already carry, in a form you can also click.
+          The total and the sync time live in the page header. */}
+      <div className={`${styles.filterBar} ${styles.reveal}`} style={revealDelay(0)}>
+        <div className={styles.search}>
+          <span className={styles.searchIcon} aria-hidden="true">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.4">
+              <circle cx="6.2" cy="6.2" r="4.2" />
+              <path d="M9.4 9.4 12.5 12.5" strokeLinecap="round" />
+            </svg>
+          </span>
+          <input
+            type="search"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search any name on the record, email, phone, city…"
+            aria-label="Search customers"
+            className={styles.searchField}
+          />
+          {search && (
+            <button className={styles.searchClear} onClick={() => setSearch('')} aria-label="Clear search">
+              <svg width="9" height="9" viewBox="0 0 9 9" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
+                <path d="M1 1l7 7M8 1l-7 7" />
+              </svg>
+            </button>
           )}
-          <button onClick={() => void handleExport(false)} disabled={busy} className={styles.exportBtn}>
-            ↓ All purchasers (CSV)
-          </button>
-          <button onClick={() => void handleExport(true)} disabled={busy} className={styles.exportBtn}>
-            ↓ Minus refunds (CSV)
-          </button>
-          <button onClick={() => void handleKlaviyoPush(false)} disabled={busy} className={styles.exportBtn}>
-            ↑ Push all → Klaviyo
-          </button>
-          <button onClick={() => void handleKlaviyoPush(true)} disabled={busy} className={styles.exportBtn}>
-            ↑ Push minus refunds → Klaviyo
-          </button>
-          <button onClick={handleSync} disabled={busy} className={styles.syncBtn}>
-            {busy ? 'Syncing…' : '⟳ Sync from HubSpot'}
-          </button>
+        </div>
+
+        <span className={styles.filterDivider} aria-hidden="true" />
+
+        {/* Country is one axis and record gaps are another, so they are two
+            chip groups rather than one row of six that would read as
+            mutually exclusive. */}
+        <ChipRow>
+          {COUNTRY_FILTERS.map(c => (
+            <Chip
+              key={c.key}
+              label={c.label}
+              count={stats[c.statKey]}
+              active={country === c.key}
+              onClick={() => setCountry(c.key)}
+            />
+          ))}
+        </ChipRow>
+
+        <span className={styles.filterDivider} aria-hidden="true" />
+
+        <ChipRow>
+          <Chip label="No email" count={stats.noEmail} active={noEmailOnly} onClick={() => setNoEmailOnly(v => !v)} />
+          <Chip label="No address" count={stats.noAddress} active={noAddressOnly} onClick={() => setNoAddressOnly(v => !v)} />
+        </ChipRow>
+
+        <div className={styles.movedNote}>
+          Follow-ups moved to <Link to="/service?tab=followups">Service → Follow-Ups</Link>
         </div>
       </div>
 
-      {toast && <div className={styles.toastSuccess}>{toast}</div>}
-      {error && <div className={styles.toastError}>{error}</div>}
-
-      <div className={styles.kpiRow}>
-        <KPI label="Total customers" value={stats.total} />
-        <KPI label="Canada / US" value={`${stats.ca} / ${stats.us}`} sub={stats.other > 0 ? `+ ${stats.other} other` : undefined} />
-        <KPI label="With email" value={stats.withEmail} sub={stats.total > 0 ? `${Math.round((stats.withEmail / stats.total) * 100)}% coverage` : undefined} />
-        <KPI label="With address" value={stats.withAddress} sub={stats.total > 0 ? `${Math.round((stats.withAddress / stats.total) * 100)}% coverage` : undefined} />
-      </div>
-
-      <div className={styles.followupMoved}>
-        Follow-ups now live in{' '}
-        <Link to="/service?tab=followups">Service → Follow-Ups →</Link>
-      </div>
-
-      <div className={styles.filterBar}>
-        {(['all','CA','US','other'] as const).map(c => (
-          <button
-            key={c}
-            onClick={() => setCountry(c)}
-            className={`${styles.chip} ${country === c ? styles.chipActive : ''}`}
-          >{c === 'all' ? 'All' : c === 'other' ? 'Other' : c}</button>
-        ))}
-        <input
-          type="search"
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          placeholder="Search name, email, phone, city…"
-          className={styles.searchInput}
-        />
-        <div className={styles.resultCount}>
-          {filtered.length} {filtered.length === 1 ? 'row' : 'rows'}
-        </div>
-      </div>
-
-      <div className={styles.tableWrap}>
-        <table className={styles.table}>
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Email</th>
-              <th>Phone</th>
-              <th>Serial(s)</th>
-              <th>Address</th>
-              <th>Last sync</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map(c => (
-              <CustomerRow
-                key={c.id}
-                c={c}
-                serials={
-                  // Sheet is the source of truth: prefer the synced serials,
-                  // then the canonical units.customer_id link, and only fall
-                  // back to name-matching for units not yet FK-linked.
-                  (c.serials && c.serials.length > 0)
-                    ? c.serials
-                    : (serialsByCustomerId.get(c.id)
-                        ?? serialsByCustomerName.get(c.full_name?.toLowerCase() ?? '')
-                        ?? [])
-                }
-                onSelect={() => setSelectedCustomerId(c.id)}
-              />
-            ))}
-            {filtered.length === 0 && (
-              <tr><td colSpan={6} className={styles.empty}>No customers match the filter.</td></tr>
-            )}
-          </tbody>
-        </table>
+      <div className={`${styles.tableWrap} ${styles.reveal}`} style={revealDelay(60)}>
+        {loading ? (
+          <DirectorySkeleton />
+        ) : filtered.length === 0 ? (
+          <EmptyState
+            title={filtersOn ? 'No customer matches these filters' : 'No customers yet'}
+            body={filtersOn
+              ? 'Search covers every name on a record — the purchaser, the primary user and anyone else in the household.'
+              : 'Customers arrive from HubSpot. Run a sync to bring them in.'}
+            action={filtersOn
+              ? <Button onClick={clearFilters}>Clear filters</Button>
+              : <Button variant="primary" onClick={handleSync} disabled={busy}>Sync from HubSpot</Button>}
+          />
+        ) : (
+          <table className={styles.table}>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Email</th>
+                <th>Phone</th>
+                <th>Serial</th>
+                <th>Address</th>
+                <th>Last sync</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map(({ customer: c, via }) => (
+                <CustomerRow
+                  key={c.id}
+                  c={c}
+                  via={via}
+                  selected={c.id === selectedCustomerId}
+                  serials={serialsFor(c)}
+                  address={addressFor(c)}
+                  onSelect={() => setSelectedCustomerId(c.id)}
+                />
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
     </div>
 
     {selectedCustomer && (
       <CustomerDetailPanel
         customer={selectedCustomer}
+        address={addressFor(selectedCustomer)}
+        allCustomers={customers}
+        onChanged={() => { void refreshCustomers(); }}
         onClose={() => setSelectedCustomerId(null)}
       />
     )}
@@ -408,57 +471,521 @@ export default function Customers() {
   );
 }
 
-function CustomerRow({ c, serials, onSelect }: { c: Customer; serials: string[]; onSelect: () => void }) {
-  const cityRegion = [c.city, c.region].filter(Boolean).join(', ');
-  const fullAddrParts = [c.address_line, cityRegion, c.postal_code, c.country].filter(Boolean);
-  const addr = fullAddrParts.join(' · ');
-  const serialsLabel = serials.length === 0
-    ? null
-    : serials.length === 1
-      ? serials[0]
-      : `${serials[0]} +${serials.length - 1}`;
+/* Four bulk-list operations that used to be four header buttons, each as loud
+   as Sync. They are reached for once a campaign, not once a shift. */
+function ExportMenu({ busy, onExport, onKlaviyo }: {
+  busy: boolean;
+  onExport: (minusRefunds: boolean) => void;
+  onKlaviyo: (minusRefunds: boolean) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const wrap = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointer = (e: PointerEvent) => {
+      if (!wrap.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('pointerdown', onPointer);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('pointerdown', onPointer);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  const pick = (fn: () => void) => { setOpen(false); fn(); };
+
   return (
-    <tr onClick={onSelect} className={styles.clickableRow}>
-      <td><strong>{c.full_name || <span className={styles.muted}>—</span>}</strong></td>
-      <td className={styles.mono}>{c.email ?? <span className={styles.muted}>—</span>}</td>
-      <td>{c.phone ?? <span className={styles.muted}>—</span>}</td>
-      <td className={styles.mono} title={serials.join(', ')}>
-        {serialsLabel ?? <span className={styles.muted}>—</span>}
+    <div className={styles.menuWrap} ref={wrap}>
+      <Button onClick={() => setOpen(o => !o)} disabled={busy} aria-expanded={open} aria-haspopup="menu">
+        Export ▾
+      </Button>
+      {open && (
+        <div className={styles.menu} role="menu">
+          <div className={styles.menuLabel}>Download CSV</div>
+          <button role="menuitem" className={styles.menuItem} onClick={() => pick(() => onExport(false))}>
+            All purchasers
+          </button>
+          <button role="menuitem" className={styles.menuItem} onClick={() => pick(() => onExport(true))}>
+            Purchasers minus refunds
+            <span>Leaves out anyone who has been refunded</span>
+          </button>
+          <div className={styles.menuLabel}>Push to Klaviyo</div>
+          <button role="menuitem" className={styles.menuItem} onClick={() => pick(() => onKlaviyo(false))}>
+            All purchasers
+          </button>
+          <button role="menuitem" className={styles.menuItem} onClick={() => pick(() => onKlaviyo(true))}>
+            Purchasers minus refunds
+            <span>Asks for the Klaviyo list ID first</span>
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* Skeleton rows inside the real table frame. The directory used to replace the
+   whole module with one line of centred grey text, so landing on the tab moved
+   every control on the page once the rows arrived. */
+function DirectorySkeleton() {
+  const widths = ['62%', '78%', '54%', '40%', '70%', '46%'];
+  return (
+    <table className={styles.table} aria-hidden="true">
+      <thead>
+        <tr><th>Name</th><th>Email</th><th>Phone</th><th>Serial</th><th>Address</th><th>Last sync</th></tr>
+      </thead>
+      <tbody>
+        {Array.from({ length: 9 }, (_, r) => (
+          <tr key={r}>
+            {widths.map((w, i) => (
+              <td key={i}><div className={styles.skelBar} style={{ width: w }} /></td>
+            ))}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function CustomerRow(
+  { c, serials, address, via, selected, onSelect }:
+  {
+    c: Customer; serials: string[]; address: ResolvedCustomerAddress;
+    via: string | null; selected: boolean; onSelect: () => void;
+  },
+) {
+  const addr = formatAddressLine(address);
+  const dash = <span className={styles.dash}>—</span>;
+  return (
+    <tr
+      onClick={onSelect}
+      // A row that opens a panel is a control, so it takes focus and answers
+      // to the keyboard like one.
+      tabIndex={0}
+      aria-selected={selected}
+      onKeyDown={e => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(); }
+      }}
+      className={`${styles.row} ${selected ? styles.rowSelected : ''}`}
+    >
+      <td className={styles.nameCell}>
+        <div className={styles.cellName}>{c.full_name || dash}</div>
+        {/* Why this row is in the results when the name searched for isn't the
+            purchaser's. */}
+        {via && <div className={styles.viaMatch}>via {via}</div>}
       </td>
-      <td title={addr}>{addr || <span className={styles.muted}>—</span>}</td>
-      <td className={styles.mono}>
+      <td className={styles.cellData} title={c.email ?? undefined}>{c.email ?? dash}</td>
+      <td className={styles.cellData}>{c.phone ?? dash}</td>
+      <td title={serials.join(', ')}>
+        {serials.length === 0 ? dash : (
+          <>
+            <span className={styles.serialChip}>{serials[0]}</span>
+            {serials.length > 1 && <span className={styles.serialMore}>+{serials.length - 1}</span>}
+          </>
+        )}
+      </td>
+      <td title={addr}>{addr || dash}</td>
+      <td className={styles.cellData}>
         {c.last_synced_at
           ? new Date(c.last_synced_at).toLocaleDateString('en-US', { year: '2-digit', month: 'short', day: 'numeric' })
-          : <span className={styles.muted}>—</span>}
+          : dash}
       </td>
     </tr>
   );
 }
 
-function CustomerDetailPanel({ customer, onClose }: { customer: Customer; onClose: () => void }) {
+
+// What kind of building we're delivering to, and whether the area is urban,
+// suburban or rural. Both are decided on the ORDER, by Verify address in Sales,
+// and both are only worth their provenance: a building of "House" from
+// 'sync-guess' is a regex over the street line that was right for 280 of 287
+// orders because it says "House" for almost everything. So each claim carries
+// the sentence that says where it came from, in the same words the Order Review
+// card uses, and an unconfirmed one is styled as an open question rather than
+// as an answer.
+//
+// A customer with no order gets neither row: `customers` records no building or
+// area, and an absent claim must not be dressed up as an unconfirmed one.
+function AddressClaims({ address }: { address: ResolvedCustomerAddress }) {
+  if (address.source !== 'order' || !address.dwellingSource) return null;
+  const dwellingConfirmed =
+    address.dwellingSource === 'google' || address.dwellingSource === 'manual';
+  // The area provenance sentence is built from the order's own fields, so the
+  // directory and the Order Review card say the same thing about the same order.
+  const areaSource = areaTypeProvenance({
+    area_type: address.areaType,
+    area_type_source: address.areaTypeSource ?? 'auto',
+    address_verified_at: address.verifiedAt,
+    address_area_type_error: address.areaTypeError,
+  });
+
+  return (
+    <>
+      <PanelRow
+        label="Building"
+        value={address.dwelling ? DWELLING_LABEL[address.dwelling] : 'Unknown'}
+      />
+      <div className={styles.addressSource}>
+        {address.dwelling && dwellingConfirmed
+          ? DWELLING_NOTE[address.dwelling]
+          : 'Not confirmed — a guess from the address text, and wrong often enough to check.'}
+      </div>
+      <div className={styles.addressSource}>
+        {dwellingProvenance(address.dwellingSource, address.verifiedAt)}
+      </div>
+
+      <PanelRow
+        label="Area"
+        value={address.areaType ? AREA_TYPE_LABEL[address.areaType] : 'Not classified'}
+      />
+      <div className={styles.addressSource}>
+        {address.areaType === 'rural'
+          ? 'Rural or remote delivery — expect a freight surcharge and a longer transit.'
+          : address.areaType
+            ? 'Standard delivery area.'
+            : 'Urban and suburban cannot be told apart from a postal code, so nothing is assumed.'}
+      </div>
+      <div className={styles.addressSource}>{areaSource}</div>
+    </>
+  );
+}
+
+// Contact details — read-only until you hit Edit. Email and phone are
+// operator-editable here: makelila is the system of record and the HubSpot sync
+// only fills BLANK columns, so a correction made here is never clobbered.
+// The address is read-only and comes off the order, because that is the copy
+// Sales verifies and the label is printed from — it says which order, so an
+// operator who needs to change it knows where to go.
+function ContactSection(
+  { customer, address, onChanged }:
+  { customer: Customer; address: ResolvedCustomerAddress; onChanged: () => void },
+) {
+  const [editing, setEditing] = useState(false);
+  const [email, setEmail] = useState(customer.email ?? '');
+  const [phone, setPhone] = useState(customer.phone ?? '');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  // Reset the draft whenever we switch customer or the row changes underneath us.
+  useEffect(() => {
+    setEditing(false);
+    setEmail(customer.email ?? '');
+    setPhone(customer.phone ?? '');
+    setErr(null);
+  }, [customer.id, customer.email, customer.phone]);
+
+  const fullAddress = formatAddressBlock(address);
+  // Where the address came from. An unverified order address is still the one we
+  // ship to — it just hasn't been checked against Google yet, and saying so is
+  // the difference between a confirmed address and an assumed one.
+  const addressNote =
+    address.source === 'directory'
+      ? (fullAddress ? 'From the customer record — no order address on file.' : null)
+      : `From order ${address.orderRef}${
+          address.verifiedAt
+            ? ` · verified ${new Date(address.verifiedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
+            : ' · not yet verified in Sales'
+        }`;
+
+  // Compare case-insensitively: we store lowercased, but rows seeded before that
+  // may hold mixed case, and re-typing the same address shouldn't read as a change.
+  const emailChanged =
+    (email.trim().toLowerCase() || null) !== (customer.email?.trim().toLowerCase() ?? null);
+  const dirty = emailChanged || (phone.trim() || null) !== (customer.phone ?? null);
+
+  const save = async () => {
+    setBusy(true); setErr(null);
+    try {
+      await updateCustomerContact(customer.id, { email, phone });
+      setEditing(false);
+      onChanged();
+    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+    finally { setBusy(false); }
+  };
+
+  const cancel = () => {
+    setEmail(customer.email ?? '');
+    setPhone(customer.phone ?? '');
+    setErr(null);
+    setEditing(false);
+  };
+
+  if (!editing) {
+    return (
+      <PanelSection title="Contact">
+        <PanelRow label="Email" value={customer.email} />
+        <PanelRow label="Phone" value={customer.phone} />
+        <PanelRow label="Address" value={fullAddress} multiline />
+        {addressNote && <div className={styles.addressSource}>{addressNote}</div>}
+        <AddressClaims address={address} />
+        <div style={{ marginTop: 6 }}>
+          <button className={styles.linkBtn} onClick={() => setEditing(true)}>
+            Edit email / phone
+          </button>
+        </div>
+      </PanelSection>
+    );
+  }
+
+  return (
+    <PanelSection title="Contact">
+      <div className={styles.kvLabel} style={{ marginBottom: 4 }}>
+        Email
+      </div>
+      <input className={styles.searchInput} type="email" placeholder="name@example.com"
+        value={email} disabled={busy} onChange={e => setEmail(e.target.value)} />
+      <div className={styles.kvLabel} style={{ margin: '6px 0 4px' }}>
+        Phone
+      </div>
+      <input className={styles.searchInput} type="tel" placeholder="e.g. 519-555-0142"
+        value={phone} disabled={busy} onChange={e => setPhone(e.target.value)} />
+      {emailChanged && (
+        <div className={styles.kvLabel} style={{ marginTop: 6 }}>
+          ⚠ Orders, tickets and refund cards are matched to this customer by email —
+          changing it re-points which of those show up on this record.
+        </div>
+      )}
+      <PanelRow label="Address" value={fullAddress} multiline />
+      {addressNote && <div className={styles.addressSource}>{addressNote}</div>}
+      <AddressClaims address={address} />
+      <div style={{ marginTop: 6, display: 'flex', gap: 8 }}>
+        <button className={styles.linkBtn} disabled={busy || !dirty} onClick={() => void save()}>
+          {busy ? 'Saving…' : 'Save'}
+        </button>
+        <button className={styles.linkBtn} disabled={busy} onClick={cancel}>Cancel</button>
+      </div>
+      {err && <div className={styles.toastError} style={{ marginTop: 6 }}>{err}</div>}
+    </PanelSection>
+  );
+}
+
+// FR-6: link a USER (submitter / gift recipient / household member) to the
+// PURCHASER of record. Refunds and accounting resolve to the purchaser, so this
+// is where operators fix the Lily Xu → Annie Wu class of case.
+function PurchaserLinkSection({ customer, allCustomers, onChanged }: {
+  customer: Customer;
+  allCustomers: Customer[];
+  onChanged: () => void;
+}) {
+  const [query, setQuery] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const purchaser = customer.purchaser_id
+    ? allCustomers.find(c => c.id === customer.purchaser_id) ?? null
+    : null;
+  const linkedUsers = useMemo(
+    () => allCustomers.filter(c => c.purchaser_id === customer.id),
+    [allCustomers, customer.id],
+  );
+
+  const matches = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (q.length < 2) return [];
+    return allCustomers
+      .filter(c => c.id !== customer.id && (
+        c.full_name.toLowerCase().includes(q) || c.email?.toLowerCase().includes(q)
+      ))
+      .slice(0, 8);
+  }, [query, allCustomers, customer.id]);
+
+  const run = async (fn: () => Promise<void>) => {
+    setBusy(true); setErr(null);
+    try { await fn(); setQuery(''); onChanged(); }
+    catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+    finally { setBusy(false); }
+  };
+
+  const label = (c: Customer) => `${c.full_name || '—'}${c.email ? ` · ${c.email}` : ''}`;
+
+  return (
+    <PanelSection title="Purchaser & users">
+      {purchaser ? (
+        <div className={styles.kvRow}>
+          <span className={styles.kvLabel}>Acts for purchaser</span>
+          <span className={styles.kvValue}>
+            {label(purchaser)}{' '}
+            <button className={styles.linkBtn} disabled={busy}
+              onClick={() => void run(() => setPurchaser(customer.id, null))}>Unlink</button>
+          </span>
+        </div>
+      ) : (
+        <>
+          <div className={styles.kvRow}>
+            <span className={styles.kvLabel}>Purchaser of record</span>
+            <span className={styles.kvValue}>This customer is the purchaser.</span>
+          </div>
+          <div style={{ marginTop: 6 }}>
+            <input
+              className={styles.searchInput}
+              placeholder="Link to a purchaser — type name or email…"
+              value={query}
+              disabled={busy}
+              onChange={e => setQuery(e.target.value)}
+            />
+            {matches.length > 0 && (
+              <div className={styles.section} style={{ marginTop: 4 }}>
+                {matches.map(m => (
+                  <div key={m.id} className={styles.kvRow}>
+                    <span className={styles.kvValue}>{label(m)}</span>
+                    <button className={styles.linkBtn} disabled={busy}
+                      onClick={() => void run(() => setPurchaser(customer.id, m.id))}>Link →</button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
+      {linkedUsers.length > 0 && (
+        <div style={{ marginTop: 8 }}>
+          <div className={styles.kvLabel}>Linked users ({linkedUsers.length})</div>
+          {linkedUsers.map(u => (
+            <div key={u.id} className={styles.kvRow}>
+              <span className={styles.kvValue}>{label(u)}</span>
+              <button className={styles.linkBtn} disabled={busy}
+                onClick={() => void run(() => setPurchaser(u.id, null))}>Unlink</button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {err && <div className={styles.toastError} style={{ marginTop: 6 }}>{err}</div>}
+    </PanelSection>
+  );
+}
+
+// FR-6: the PRIMARY USER of this customer's machine (e.g. a spouse) when
+// different from the purchaser. Free-text — usually not a customer of record.
+// Set here; surfaced on the refund card. Example: Chad (purchaser) → Sarah.
+//
+// The relationship picklist is PRIMARY_USER_RELATIONSHIPS; this sentinel is the
+// escape hatch. It is never stored — picking it just reveals the free-text box,
+// and what gets saved is whatever was typed there.
+const OTHER_RELATIONSHIP = 'Other…';
+
+function PrimaryUserSection({ customer, onChanged }: { customer: Customer; onChanged: () => void }) {
+  const [name, setName] = useState(customer.primary_user_name ?? '');
+  const [phone, setPhone] = useState(customer.primary_user_phone ?? '');
+  const [email, setEmail] = useState(customer.primary_user_email ?? '');
+  // The stored relationship is free text. If it isn't one of the picklist
+  // values it's an "Other…" entry, so the select shows Other and the text box
+  // carries the value.
+  const storedRel = customer.primary_user_relationship ?? '';
+  const isListed = (v: string) => (PRIMARY_USER_RELATIONSHIPS as readonly string[]).includes(v);
+  const [relChoice, setRelChoice] = useState(
+    storedRel === '' ? '' : isListed(storedRel) ? storedRel : OTHER_RELATIONSHIP,
+  );
+  const [relOther, setRelOther] = useState(storedRel && !isListed(storedRel) ? storedRel : '');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {
+    setName(customer.primary_user_name ?? '');
+    setPhone(customer.primary_user_phone ?? '');
+    setEmail(customer.primary_user_email ?? '');
+    const rel = customer.primary_user_relationship ?? '';
+    setRelChoice(rel === '' ? '' : isListed(rel) ? rel : OTHER_RELATIONSHIP);
+    setRelOther(rel && !isListed(rel) ? rel : '');
+  }, [customer.id, customer.primary_user_name, customer.primary_user_phone,
+      customer.primary_user_email, customer.primary_user_relationship]);
+
+  // What we'd actually store: the picked option, or the free text behind "Other…".
+  const relationship = relChoice === OTHER_RELATIONSHIP ? relOther.trim() : relChoice;
+
+  const dirty =
+    (name.trim() || null) !== (customer.primary_user_name ?? null) ||
+    (phone.trim() || null) !== (customer.primary_user_phone ?? null) ||
+    (email.trim() || null) !== (customer.primary_user_email ?? null) ||
+    (relationship || null) !== (customer.primary_user_relationship ?? null);
+
+  const save = async (clear?: boolean) => {
+    setBusy(true); setErr(null);
+    try {
+      await setPrimaryUser(
+        customer.id,
+        clear ? null : name,
+        clear ? null : phone,
+        clear ? null : email,
+        clear ? null : relationship,
+      );
+      if (clear) { setName(''); setPhone(''); setEmail(''); setRelChoice(''); setRelOther(''); }
+      onChanged();
+    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <PanelSection title="Primary user of the machine">
+      <div className={styles.kvLabel} style={{ marginBottom: 4 }}>
+        Who actually uses the machine, when different from the purchaser (e.g. a spouse), and how they
+        relate to the purchaser. Shown on the refund card.
+      </div>
+      <input className={styles.searchInput} placeholder="Primary user name (e.g. Sarah Lockhart)"
+        value={name} disabled={busy} onChange={e => setName(e.target.value)} />
+      <input className={styles.searchInput} style={{ marginTop: 4 }} type="tel" placeholder="Primary user phone (optional)"
+        value={phone} disabled={busy} onChange={e => setPhone(e.target.value)} />
+      <input className={styles.searchInput} style={{ marginTop: 4 }} type="email" placeholder="Primary user email (optional)"
+        value={email} disabled={busy} onChange={e => setEmail(e.target.value)} />
+      <select className={styles.searchInput} style={{ marginTop: 4 }}
+        value={relChoice} disabled={busy}
+        onChange={e => setRelChoice(e.target.value)}
+        aria-label="Primary user's relationship to the purchaser">
+        <option value="">Relationship to purchaser (optional)…</option>
+        {PRIMARY_USER_RELATIONSHIPS.map(r => <option key={r} value={r}>{r}</option>)}
+        <option value={OTHER_RELATIONSHIP}>{OTHER_RELATIONSHIP}</option>
+      </select>
+      {relChoice === OTHER_RELATIONSHIP && (
+        <input className={styles.searchInput} style={{ marginTop: 4 }}
+          placeholder="Describe the relationship (e.g. neighbour)"
+          value={relOther} disabled={busy} onChange={e => setRelOther(e.target.value)} />
+      )}
+      <div style={{ marginTop: 6, display: 'flex', gap: 8 }}>
+        <button className={styles.linkBtn} disabled={busy || !dirty} onClick={() => void save()}>Save</button>
+        {(customer.primary_user_name || customer.primary_user_phone || customer.primary_user_email
+          || customer.primary_user_relationship) && (
+          <button className={styles.linkBtn} disabled={busy} onClick={() => void save(true)}>Clear</button>
+        )}
+      </div>
+      {err && <div className={styles.toastError} style={{ marginTop: 6 }}>{err}</div>}
+    </PanelSection>
+  );
+}
+
+function CustomerDetailPanel({ customer, address, allCustomers, onChanged, onClose }: {
+  customer: Customer;
+  // Resolved by the directory and passed in, so the list row and the open panel
+  // cannot show different addresses for the same person — exactly the drift
+  // lib/heldUnits describes for serials.
+  address: ResolvedCustomerAddress;
+  allCustomers: Customer[];
+  onChanged: () => void;
+  onClose: () => void;
+}) {
   const { all: orders } = useOrders();
   const { units } = useUnits();
   const { tickets } = useServiceTickets();
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
   const lcEmail = customer.email?.toLowerCase() ?? '';
-  const lcName = customer.full_name.toLowerCase();
 
   const myOrders = lcEmail
     ? orders.filter(o => o.customer_email?.toLowerCase() === lcEmail)
     : [];
-  // Prefer the canonical units.customer_id link (populated by the
-  // fulfillment-sheet sync, same association the Dashboard uses); fall back to
-  // name-matching only for units not yet FK-linked, so a unit with a known FK
-  // never shows up under the wrong customer.
-  const myUnits = units.filter(u =>
-    u.customer_id
-      ? u.customer_id === customer.id
-      : u.customer_name?.toLowerCase() === lcName);
+  // Same rule as the directory list row — see lib/heldUnits. Panel and row
+  // used to disagree: the row hid returned machines while opening the same
+  // customer listed them as still held.
+  const myUnits = heldUnitsForCustomer(customer, units);
   const myTickets = lcEmail
     ? tickets.filter(t => t.customer_email?.toLowerCase() === lcEmail)
     : [];
-
-  const cityRegion = [customer.city, customer.region].filter(Boolean).join(', ');
-  const fullAddress = [customer.address_line, cityRegion, customer.postal_code, customer.country].filter(Boolean).join(', ');
 
   return (
     <div className={styles.panelBackdrop} onClick={onClose}>
@@ -468,15 +995,20 @@ function CustomerDetailPanel({ customer, onClose }: { customer: Customer; onClos
             <h2 className={styles.panelTitle}>{customer.full_name}</h2>
             <div className={styles.panelSubtitle}>{customer.email ?? 'no email'}</div>
           </div>
-          <button onClick={onClose} className={styles.panelClose} aria-label="Close">×</button>
+          <button onClick={onClose} className={styles.panelClose} aria-label="Close">
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
+              <path d="M1.5 1.5l9 9M10.5 1.5l-9 9" />
+            </svg>
+          </button>
         </div>
 
         <div className={styles.panelBody}>
-          <PanelSection title="Contact">
-            <PanelRow label="Email" value={customer.email} />
-            <PanelRow label="Phone" value={customer.phone} />
-            <PanelRow label="Address" value={fullAddress} multiline />
-          </PanelSection>
+          <NameSection customer={customer} onChanged={onChanged} />
+          <ContactSection customer={customer} address={address} onChanged={onChanged} />
+
+          <PurchaserLinkSection customer={customer} allCustomers={allCustomers} onChanged={onChanged} />
+          <PrimaryUserSection customer={customer} onChanged={onChanged} />
+          <AdditionalUsersSection customerId={customer.id} />
 
           <LilaAppActivitySection customerId={customer.id} />
 
@@ -545,7 +1077,7 @@ function CustomerDetailPanel({ customer, onClose }: { customer: Customer; onClos
                             </div>
                           )
                       }
-                      <div className={styles.orderCardRow} style={{ fontWeight: 600, borderTop: '1px solid var(--border)' }}>
+                      <div className={`${styles.orderCardRow} ${styles.orderTotalRow}`}>
                         <span className={styles.kvLabel}>Total</span>
                         <span>{formatMoney(o.total_usd, o.currency)}</span>
                       </div>
@@ -606,15 +1138,6 @@ function CustomerDetailPanel({ customer, onClose }: { customer: Customer; onClos
           <CustomerInvoicesSection customerId={customer.id} />
         </div>
       </div>
-    </div>
-  );
-}
-
-function PanelSection({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div className={styles.section}>
-      <div className={styles.sectionTitle}>{title}</div>
-      <div className={styles.sectionBody}>{children}</div>
     </div>
   );
 }
@@ -702,10 +1225,8 @@ function CustomerInvoicesSection({ customerId }: { customerId: string }) {
   const { invoices, loading } = useCustomerInvoices(customerId);
 
   const view = async (path: string) => {
-    try {
-      const url = await getInvoiceSignedUrl(path);
-      window.open(url, '_blank', 'noopener');
-    } catch (e) { alert((e as Error).message); }
+    try { await openInvoiceInNewTab(path); }
+    catch (e) { alert((e as Error).message); }
   };
 
   return (
@@ -730,52 +1251,11 @@ function CustomerInvoicesSection({ customerId }: { customerId: string }) {
             </span>
             <button
               onClick={() => void view(inv.storage_path)}
-              style={{ background: 'none', border: 'none', color: 'var(--color-crimson)', cursor: 'pointer', textDecoration: 'underline', fontSize: 12, padding: 0 }}
+              className={styles.linkBtn}
             >View</button>
           </div>
         ))
       )}
     </PanelSection>
-  );
-}
-
-function PanelRow({ label, value, multiline }: { label: string; value: string | null | undefined; multiline?: boolean }) {
-  return (
-    <div className={styles.kvRow}>
-      <span className={styles.kvLabel}>{label}</span>
-      <span className={multiline ? styles.kvValueMulti : styles.kvValue}>{value || '—'}</span>
-    </div>
-  );
-}
-
-function KPI({ label, value, sub }: { label: string; value: number | string; sub?: string }) {
-  return (
-    <div className={styles.kpi}>
-      <div className={styles.kpiLabel}>{label}</div>
-      <div className={styles.kpiValue}>{value}</div>
-      {sub && <div className={styles.kpiSub}>{sub}</div>}
-    </div>
-  );
-}
-
-function CustomersTabs({ tab, onChange }: { tab: Tab; onChange: (t: Tab) => void }) {
-  // Order per operator (2026-06-05): Journey first (default), Profitability,
-  // Directory last.
-  const tabs: { key: Tab; label: string }[] = [
-    { key: 'journey',       label: 'Journey' },
-    { key: 'profitability', label: 'Profitability' },
-    { key: 'directory',     label: 'Directory' },
-    { key: 'fleet',         label: 'Fleet' },
-  ];
-  return (
-    <div className={styles.customersTabs}>
-      {tabs.map(t => (
-        <button
-          key={t.key}
-          className={`${styles.customersTab} ${tab === t.key ? styles.customersTabActive : ''}`}
-          onClick={() => onChange(t.key)}
-        >{t.label}</button>
-      ))}
-    </div>
   );
 }

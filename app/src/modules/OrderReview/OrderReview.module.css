@@ -1,41 +1,148 @@
-.viewChips {
-  display: flex;
-  gap: 6px;
-  margin-bottom: 12px;
+/* Sales (Order Review) — migrated to design-system tokens 2026-08-21.
+ *
+ * This file is listed in app/scripts/check-css-tokens.mjs MIGRATED, so every
+ * colour here MUST go through var(--token). Raw hex fails the build.
+ *
+ * Three structural rules the layout depends on, worth knowing before editing:
+ *   1. The order rail is light (--color-surface). It used to be --color-dark-1
+ *      with a private palette of greys that existed nowhere else in the app.
+ *   2. .row is a 2×2 grid. The right-hand column is the state column, and it
+ *      is right-aligned so tags and SLA line up down the whole list. That
+ *      alignment is the only reason the queue scans — don't collapse it back
+ *      into a single flowing meta line.
+ *   3. The confirm SLA is stated ONCE per surface: .urgencyChip in the rail,
+ *      .slaBig in the detail header. It used to appear three times in three
+ *      vocabularies (row chip, body banner, action-bar due pill).
+ */
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Sales was the aesthetic pilot (2026-08-21). It was adopted app-wide on
+   2026-08-27, so both of its opt-ins have left this file:
+
+     Type   — the Raleway / IBM Plex Mono rebind now lives on :root in
+              tokens.css, where --font-sans and --font-mono bind to
+              --font-display and --font-data for every module at once.
+     Ground — the sediment strata moved to AppShell.module.css, so they are
+              drawn once for the whole app. Keeping a copy here would lay a
+              second set of layers over the first.
+
+   What is left below is only what is genuinely local to this queue: three
+   optical corrections Raleway needs at these specific sizes, and the one
+   orchestrated moment on load.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* Raleway runs optically larger and looser than the Inter these were set
+   against; these three are the places that needed re-tuning rather than a
+   global scale bump. */
+.salesRoot .pageTitle { letter-spacing: -0.02em; font-weight: 700; }
+.salesRoot .cardHead  { letter-spacing: 0.09em; font-weight: 700; }
+.salesRoot .tab       { letter-spacing: 0.01em; }
+
+/* The layout lifts off the sediment instead of sitting flush on it. */
+.salesRoot .layout { box-shadow: var(--shadow-md); }
+
+/* ── The one orchestrated moment ─────────────────────────────────────────
+   A queue settling into place on load, once. There are deliberately no
+   hover flourishes, no ambient loops and no scroll reveals anywhere else in
+   this module: an operator reads this list for hours, and motion behind a
+   work queue is a cost that has to earn its place. --i is capped by the
+   caller so a long queue's last row never waits on a long stagger. */
+@keyframes rowSettle {
+  from { opacity: 0; transform: translateY(-3px); }
+  to   { opacity: 1; transform: none; }
+}
+.salesRoot .row {
+  animation: rowSettle 300ms cubic-bezier(0.2, 0.7, 0.3, 1) both;
+  animation-delay: calc(var(--i, 0) * 18ms);
 }
 
-.viewChip {
+@keyframes seamIn {
+  from { opacity: 0; clip-path: inset(0 0 100% 0); }
+  to   { opacity: 1; clip-path: inset(0 0 0 0); }
+}
+.salesRoot .blockers {
+  animation: seamIn 360ms cubic-bezier(0.2, 0.7, 0.3, 1) both;
+  animation-delay: 90ms;
+}
+
+/* The signature element, read as a stratum: a core-sample edge on the one
+   strip that answers this page's only question. */
+.salesRoot .blockersWarn { box-shadow: inset 3px 0 0 var(--color-warning-strong); }
+.salesRoot .blockersOk   { box-shadow: inset 3px 0 0 var(--color-success); }
+
+@media (prefers-reduced-motion: reduce) {
+  .salesRoot .row,
+  .salesRoot .blockers { animation: none; }
+}
+
+/* ── Page header ─────────────────────────────────────────────────────────── */
+.pageHead {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-4);
+  margin-bottom: var(--space-3);
+}
+.pageTitle {
+  font-size: var(--font-size-title);
+  font-weight: 700;
+  letter-spacing: -0.4px;
+  line-height: 1;
+  color: var(--color-ink);
+}
+.pageSub {
+  font-size: var(--font-size-meta);
+  color: var(--color-ink-subtle);
+  margin-top: 5px;
+}
+.pageHeadRight {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* Views (Orders / Templates / Upload) are a different navigational level from
+   the status tabs inside the rail. They used to be crimson pills — visually
+   identical to the status tabs sitting directly below them. Quiet segmented
+   control instead, so the two levels stop competing. */
+.viewChips {
+  display: inline-flex;
   border: 1px solid var(--color-border);
-  background: #fff;
+  border-radius: var(--radius-md);
+  background: var(--color-raised);
+  overflow: hidden;
+}
+.viewChip {
+  border: none;
+  background: transparent;
   color: var(--color-ink-muted);
-  padding: 4px 12px;
-  border-radius: 12px;
-  font-size: 11px;
+  padding: 6px 14px;
+  font-size: var(--font-size-meta);
   font-weight: 600;
   cursor: pointer;
 }
-
+.viewChip + .viewChip { border-left: 1px solid var(--color-border); }
+.viewChip:hover { background: var(--color-page); color: var(--color-ink); }
 .viewChipActive {
-  background: var(--color-crimson);
-  color: #fff;
-  border-color: var(--color-crimson);
+  background: var(--color-surface);
+  color: var(--color-ink);
+  font-weight: 700;
 }
 
+/* ── Shell ───────────────────────────────────────────────────────────────── */
 .layout {
   display: grid;
-  grid-template-columns: 320px 1fr;
-  height: calc(100vh - 160px);
+  grid-template-columns: 344px 1fr;
+  height: calc(100vh - 176px);
   min-height: 560px;
-  background: #fff;
-  border-radius: var(--radius-md);
+  background: var(--color-raised);
+  border-radius: var(--radius-lg);
   border: 1px solid var(--color-border);
   overflow: hidden;
 }
 
-/* Mobile single-column drill (2026-06-07).
- * The desktop grid (sidebar | detail) is too wide for a phone. On mobile we
- * render a single column, controlled by the parent: sidebar visible when no
- * order is selected, detail visible (with a back header) when one is. */
+/* Mobile single-column drill (2026-06-07). The parent decides which column
+   renders: rail when nothing is selected, detail when something is. */
 @media (max-width: 700px) {
   .layout {
     display: block;
@@ -45,6 +152,18 @@
     border-left: none;
     border-right: none;
   }
+  .pageHead { flex-wrap: wrap; }
+  .pageHeadRight { margin-left: 0; width: 100%; }
+
+  /* On desktop the detail pane owns its own scroll (header pinned, body
+     scrolling under it). On a phone the layout is one block column with no
+     fixed height, so an inner scroller would collapse — let the page scroll
+     instead. */
+  .detail,
+  .detailBody { overflow: visible; }
+  .cards { grid-template-columns: 1fr; }
+  .detailId { row-gap: 4px; }
+  .slaBig { margin-left: 0; }
 }
 
 .empty {
@@ -52,131 +171,363 @@
   align-items: center;
   justify-content: center;
   color: var(--color-ink-subtle);
-  font-size: 12px;
-  padding: 40px;
+  font-size: var(--font-size-body);
+  padding: var(--space-7);
 }
 
+/* ── Order rail ──────────────────────────────────────────────────────────── */
 .sidebar {
-  background: var(--color-dark-1);
+  background: var(--color-surface);
+  border-right: 1px solid var(--color-border);
   display: flex;
   flex-direction: column;
   overflow: hidden;
 }
 
 .sidebarHeader {
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--color-dark-3);
+  padding: var(--space-3);
+  border-bottom: 1px solid var(--color-border);
 }
+
+.searchWrap { position: relative; margin-bottom: var(--space-3); }
+.searchIcon {
+  position: absolute;
+  left: 10px; top: 50%;
+  transform: translateY(-50%);
+  color: var(--color-ink-subtle);
+  font-size: var(--font-size-body);
+  pointer-events: none;
+}
+.search {
+  width: 100%;
+  background: var(--color-raised);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 7px 28px 7px 30px;
+  font-size: var(--font-size-body);
+  color: var(--color-ink);
+}
+.search::placeholder { color: var(--color-ink-faint); }
+.search:focus-visible { outline: none; border-color: var(--color-ink-faint); box-shadow: var(--focus-ring); }
+.searchClear {
+  position: absolute;
+  right: 6px; top: 50%;
+  transform: translateY(-50%);
+  border: none;
+  background: var(--color-border);
+  color: var(--color-ink-muted);
+  width: 17px; height: 17px;
+  border-radius: 50%;
+  font-size: var(--font-size-meta);
+  line-height: 1;
+  padding: 0;
+  cursor: pointer;
+}
+.searchClear:hover { background: var(--color-ink-faint); color: var(--color-ink); }
+
+/* Seven statuses wrap onto two rows. They used to be one horizontally
+   scrolling strip, which put Cancelled off the edge of a 320px rail. */
+.tabBar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--color-border);
+  background: var(--color-raised);
+  color: var(--color-ink-muted);
+  border-radius: 999px;
+  padding: 4px 5px 4px 11px;
+  font-size: var(--font-size-meta);
+  font-weight: 600;
+  cursor: pointer;
+}
+.tab:hover { border-color: var(--color-ink-faint); color: var(--color-ink); }
+.tabCount {
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--font-numeric);
+  background: var(--color-surface);
+  color: var(--color-ink-muted);
+  border-radius: 999px;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 700;
+  min-width: 20px;
+  text-align: center;
+}
+.tab.activeTab {
+  background: var(--color-crimson);
+  border-color: var(--color-crimson);
+  color: var(--color-raised);
+}
+.tab.activeTab .tabCount {
+  background: rgba(var(--color-ink-rgb), 0.22);
+  color: var(--color-raised);
+}
+.tabZero { color: var(--color-ink-faint); }
+.tabZero .tabCount { color: var(--color-ink-faint); }
+
+.railCount {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--color-ink-subtle);
+  padding: var(--space-2) var(--space-3) 0;
+}
+
+/* The cutoff's receipt: what the Pending queue is holding back, and the way to
+   it. A quiet line under the count, not a warning — the orders are fine, they
+   are just not this week's work. */
+.railCutoff {
+  color: var(--color-ink-faint);
+  font-weight: 400;
+  /* Cursor says the title is worth reading: it explains where older orders went. */
+  cursor: help;
+}
+
+.backlogNote {
+  display: block;
+  width: calc(100% - var(--space-3) * 2);
+  margin: var(--space-2) var(--space-3) 0;
+  padding: 6px var(--space-2);
+  background: var(--color-surface);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-meta);
+  color: var(--color-ink-muted);
+  text-align: left;
+  cursor: pointer;
+}
+.backlogNote:hover { border-color: var(--color-ink-faint); color: var(--color-ink); }
+.backlogNote:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 
 .syncRow {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
+  gap: var(--space-2);
+  /* anchors .skipPanel */
+  position: relative;
 }
+/* Was --color-us-navy: a legacy US-flag slot, off-palette and louder than the
+   primary action. Syncing is maintenance, not a decision. */
 .syncBtn {
-  background: var(--color-us-navy);
-  color: #fff;
-  border: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--color-raised);
+  color: var(--color-ink-muted);
+  border: 1px solid var(--color-border);
   padding: 6px 12px;
-  border-radius: var(--radius-sm);
-  font-size: 10px;
-  font-weight: 700;
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-meta);
+  font-weight: 600;
   cursor: pointer;
-  letter-spacing: 0.3px;
 }
-.syncBtn:disabled {
-  background: var(--color-dark-3);
-  color: var(--color-ink-faint);
-  cursor: not-allowed;
-}
-.syncStatus {
-  font-size: 10px;
-  color: var(--color-ink-faint);
-  flex: 1;
-}
-.syncError {
-  color: var(--color-error-strong);
-}
+.syncBtn:hover:not(:disabled) { background: var(--color-surface); color: var(--color-ink); }
+.syncBtn:disabled { color: var(--color-ink-faint); cursor: not-allowed; }
+.syncStatus { font-size: 10px; color: var(--color-ink-subtle); }
+.syncError { color: var(--color-error-strong); font-weight: 600; }
 
-.tabBar {
-  display: flex;
-  gap: 2px;
-  margin-bottom: 8px;
+/* An outline, not a fill. This button opens a form rather than deciding
+   anything, and a filled crimson here would compete with Confirm — the actual
+   primary action in this module — two panes away. */
+.newOrderBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--color-raised);
+  color: var(--color-crimson);
+  border: 1px solid var(--color-crimson);
+  padding: 6px 12px;
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-meta);
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
 }
+.newOrderBtn:hover { background: var(--color-crimson); color: var(--color-raised); }
+.newOrderDone { font-size: 10px; color: var(--color-success); font-weight: 600; }
+.newOrderFlag { font-size: 10px; color: var(--color-warning); font-weight: 600; }
 
-.tab {
-  flex: 1;
-  background: transparent;
+/* The skipped count is the one part of the sync result an operator may need to
+   act on, so it has to be reachable — not a number they have to trust. */
+.syncSkipLink {
+  background: none;
   border: none;
-  color: var(--color-ink-subtle);
-  font-size: 10px;
-  font-weight: 700;
-  padding: 6px 0;
+  padding: 0;
+  font: inherit;
+  color: var(--color-ink);
+  font-weight: 600;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
   cursor: pointer;
-  border-radius: 3px;
+}
+.syncSkipLink:hover { color: var(--color-accent-clay); }
+
+.skipPanel {
+  position: absolute;
+  top: calc(100% + var(--space-2));
+  right: 0;
+  z-index: 40;
+  width: min(560px, 80vw);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+  text-align: left;
+}
+.skipHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+  font-size: var(--font-size-meta);
+  font-weight: 600;
+  color: var(--color-ink);
+}
+.skipClose {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  color: var(--color-ink-subtle);
+}
+.skipClose:hover { color: var(--color-ink); }
+.skipBody { max-height: 340px; overflow-y: auto; }
+.skipGroup { padding: var(--space-2) var(--space-3); }
+.skipGroup + .skipGroup { border-top: 1px solid var(--color-border); }
+.skipGroupHead {
+  font-size: 10px;
   text-transform: uppercase;
-  letter-spacing: 0.4px;
+  letter-spacing: 0.04em;
+  color: var(--color-ink-subtle);
+  margin-bottom: 4px;
+}
+.skipRow {
+  display: flex;
+  gap: var(--space-2);
+  align-items: baseline;
+  padding: 2px 0;
+  font-size: var(--font-size-meta);
+}
+.skipRef { font-weight: 600; color: var(--color-ink); flex: 0 0 auto; }
+.skipMeta {
+  color: var(--color-ink-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.skipFoot {
+  padding: var(--space-2) var(--space-3);
+  border-top: 1px solid var(--color-border);
+  background: var(--color-raised);
+  font-size: 10px;
+  color: var(--color-ink-subtle);
+  line-height: 1.5;
 }
 
-.tab.activeTab {
-  background: var(--color-crimson);
-  color: #fff;
-}
-
-.search {
-  width: 100%;
-  background: var(--color-dark-2);
-  border: 1px solid var(--color-dark-3);
-  border-radius: 4px;
-  padding: 6px 10px;
-  font-size: 11px;
-  color: #ccc;
-}
-
-.list {
-  flex: 1;
-  overflow-y: auto;
-}
+.list { flex: 1; overflow-y: auto; }
+.list::-webkit-scrollbar { width: 8px; }
+.list::-webkit-scrollbar-track { background: transparent; }
+.list::-webkit-scrollbar-thumb { background: var(--color-border); border-radius: 4px; }
 
 .emptyList {
-  padding: 20px 14px;
-  color: var(--color-ink-faint);
-  font-size: 11px;
+  padding: var(--space-6) var(--space-4);
+  color: var(--color-ink-subtle);
+  font-size: var(--font-size-body);
   text-align: center;
 }
 
+/* ── Order row — the 2×2 grid ────────────────────────────────────────────── */
+/* The identity column keeps a floor. The tag strip is an `auto` track, so a
+   heavily tagged order (refund + dwelling + area + country) used to bid for as
+   much width as its chips wanted and squeeze the name down to a single letter
+   — "Raymond Keetch" rendered as "R…" on #1216. The name is how an operator
+   finds the row, so it outranks the chips: the chips wrap instead. */
 .row {
-  padding: 10px 14px;
-  border-bottom: 1px solid #252525;
+  display: grid;
+  grid-template-columns: minmax(8rem, 1fr) auto;
+  gap: 2px var(--space-2);
+  align-items: center;
+  width: 100%;
+  text-align: left;
+  padding: 9px var(--space-3) 9px 13px;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--color-border);
+  border-left: 3px solid transparent;
   cursor: pointer;
+  font: inherit;
   transition: background 0.1s;
 }
-
-.row:hover { background: #232323; }
+.row:hover { background: var(--color-page); }
+.row:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 
 .row.selected {
-  background: #2a1010;
-  border-left: 3px solid var(--color-crimson);
-  padding-left: 11px;
+  background: var(--color-raised);
+  border-left-color: var(--color-crimson);
 }
+.row.selected .rowName { font-weight: 700; }
 
-.row.flaggedRow {
-  border-left: 3px solid var(--color-error-strong);
-  padding-left: 11px;
-  background: #1a1010;
-}
+.row.flaggedRow { border-left-color: var(--color-error-strong); }
 
 .rowName {
-  font-size: 12px;
+  font-size: var(--font-size-body);
   font-weight: 600;
-  color: #e8e8e8;
+  color: var(--color-ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Clipped, not spilling: the ref/city/freight line is wider than its column on
+   a narrow rail, and an overflowing flex row paints itself over the tag strip
+   in the next column instead of being cut off. Least-important part goes
+   first — the freight quote ellipsises before the city is touched. */
+.rowMeta {
+  font-size: var(--font-size-meta);
+  color: var(--color-ink-subtle);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.rowRef {
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--font-numeric);
+  color: var(--color-ink-muted);
+  font-weight: 600;
+}
+/* Both state cells are justify-self:end — this is what makes tags and SLA
+   chips form true columns down the list. */
+.rowState { justify-self: end; display: flex; align-items: center; gap: 5px; }
+.rowTags  {
+  justify-self: end;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
 }
 
-.rowMeta {
-  font-size: 10px;
-  color: #888;
-  margin-top: 2px;
+/* A single dot means "this order has unmet confirm criteria" — readable at a
+   glance without spending a whole chip on it. */
+.blockDot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--color-warning-strong);
+  display: inline-block;
+  flex: none;
 }
 
 /* Sale (order placement) date, shown on each order row. */
@@ -189,93 +540,517 @@
 .tag {
   display: inline-block;
   font-size: 9px;
-  padding: 1px 5px;
+  padding: 2px 6px;
   border-radius: 3px;
   font-weight: 700;
-  margin-right: 4px;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  white-space: nowrap;
 }
-.tagCa { background: var(--color-crimson); color: #fff; }
-.tagUs { background: var(--color-us-navy); color: #fff; }
-.tagWarn { background: #742a2a; color: #feb2b2; }
-/* Area-type tags — urban/suburban/rural classification. */
-.tagUrban    { background: #2a4365; color: #bee3f8; }
-.tagSuburban { background: #22543d; color: #9ae6b4; }
-.tagRural    { background: #744210; color: #fbd38d; }
+/* Country and area are context, not alarms — they were solid crimson / navy /
+   blue / green / brown fills competing with the actual state signals. */
+.tagCa, .tagUs {
+  background: var(--color-surface);
+  color: var(--color-ink-muted);
+  border: 1px solid var(--color-border);
+}
+.tagUrban, .tagSuburban, .tagRural {
+  background: transparent;
+  color: var(--color-ink-subtle);
+  border: 1px solid var(--color-border);
+}
+/* An address that may not take a delivery IS an alarm. */
+.tagWarn {
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
+  border: 1px solid var(--color-warning-border);
+}
 
+/* Money already went back on THIS order — confirming it would ship a machine
+   we have been paid nothing for. The loudest tag on the row, deliberately. */
+.tagRefunded {
+  background: var(--color-error-bg);
+  color: var(--color-error);
+  border: 1px solid var(--color-error-border);
+}
+/* A different order of theirs was refunded. Often fine — they bought again —
+   so this reads as a caution, not a stop. */
+.tagRefundedCustomer {
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
+  border: 1px solid var(--color-warning-border);
+}
+
+.urgencyChip {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--font-numeric);
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.urgencyChip.ok      { background: var(--color-success-bg); color: var(--color-success); }
+.urgencyChip.urgent  { background: var(--color-warning-bg); color: var(--color-warning); }
+.urgencyChip.overdue { background: var(--color-error-bg);   color: var(--color-error); }
+
+.cancelledChip {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--color-surface);
+  color: var(--color-ink-subtle);
+  border: 1px solid var(--color-border);
+  white-space: nowrap;
+}
+
+/* ── Detail pane ─────────────────────────────────────────────────────────── */
 .detail {
   display: flex;
   flex-direction: column;
-  overflow-y: auto;
-  background: var(--color-surface);
+  overflow: hidden;
+  background: var(--color-page);
 }
 
-.detailBody {
-  flex: 1;
-  padding: 16px 18px;
+/* Identity and SLA are pinned above the actions, so you always know which
+   order you are about to act on — the reason drawer used to replace the whole
+   bar and take that context with it. */
+.detailHead {
+  flex: none;
+  background: var(--color-raised);
+  border-bottom: 1px solid var(--color-border);
+  padding: var(--space-3) var(--space-4) 0;
+}
+.detailId {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.detailRef {
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--font-numeric);
+  font-size: var(--font-size-section);
+  font-weight: 700;
+  color: var(--color-ink);
+}
+.detailName {
+  font-size: var(--font-size-section);
+  font-weight: 600;
+  color: var(--color-ink);
+}
+.detailWhere {
+  font-size: var(--font-size-meta);
+  color: var(--color-ink-subtle);
+}
+.slaBig {
+  margin-left: auto;
+  font-size: var(--font-size-meta);
+  font-weight: 700;
+  padding: 5px 12px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.slaBig.ok      { background: var(--color-success-bg); color: var(--color-success); }
+.slaBig.urgent  { background: var(--color-warning-bg); color: var(--color-warning); }
+.slaBig.overdue { background: var(--color-error-bg);   color: var(--color-error); }
+
+/* ── Action bar ──────────────────────────────────────────────────────────── */
+.actionBar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) 0;
+  flex-wrap: wrap;
+}
+.actionBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid transparent;
+  padding: 8px 14px;
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-body);
+  font-weight: 600;
+  cursor: pointer;
+}
+.actionBtn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+
+/* One primary. Green rather than Ladybug Red: confirming is the affirmative
+   disposition, and a red confirm button reads as destructive. Ladybug Red is
+   spent on the active status pill and the selected row instead. */
+.actionConfirm {
+  background: var(--color-success);
+  color: var(--color-raised);
+  padding: 8px 20px;
+  font-weight: 700;
+}
+.actionConfirm:disabled {
+  background: var(--color-border);
+  color: var(--color-ink-subtle);
+  cursor: not-allowed;
+}
+
+/* The three reversible dispositions share one quiet treatment. They used to be
+   three different coloured outlines, each claiming as much weight as Confirm. */
+.actionFlag, .actionHold, .actionInfo {
+  background: var(--color-raised);
+  border-color: var(--color-border);
+  color: var(--color-ink-muted);
+}
+.actionFlag:hover, .actionHold:hover, .actionInfo:hover {
+  border-color: var(--color-ink-faint);
+  color: var(--color-ink);
+  background: var(--color-page);
+}
+
+.actionRight { margin-left: auto; display: flex; align-items: center; gap: var(--space-2); }
+.actionDivider {
+  width: 1px;
+  height: 22px;
+  background: var(--color-border);
+}
+/* Cancelling takes an order out of every live tab. It was a solid red slab
+   sitting immediately beside Confirm; it is now a quiet text action behind a
+   divider, at the far end of the bar. */
+.actionCancel {
+  background: transparent;
+  border-color: transparent;
+  color: var(--color-error);
+  padding: 8px 10px;
+}
+.actionCancel:hover {
+  background: var(--color-error-bg);
+  border-color: var(--color-error-border);
+}
+
+/* Same slab as .cancelledBar, in the warning ramp: a flagged replacement is
+   stopped, not dead. */
+.flaggedBar {
+  font-size: var(--font-size-body);
+  font-weight: 600;
+  color: var(--color-warning);
+  background: var(--color-warning-bg);
+  border: 1px solid var(--color-warning-border);
+  border-radius: var(--radius-sm);
+  padding: 9px var(--space-3);
+}
+
+.cancelledBar {
+  font-size: var(--font-size-body);
+  font-weight: 600;
+  color: var(--color-error);
+  background: var(--color-error-bg);
+  border: 1px solid var(--color-error-border);
+  border-radius: var(--radius-sm);
+  padding: 9px var(--space-3);
+}
+
+/* The way back out of a mis-click, beside the cancellation it undoes. Quiet:
+   an order in the Cancelled tab is normally there on purpose, so this is a
+   neutral outline, never a second red slab competing with the summary. */
+.actionUncancel {
+  background: var(--color-raised);
+  border-color: var(--color-border);
+  color: var(--color-ink-muted);
+}
+.actionUncancel:hover { border-color: var(--color-ink-faint); color: var(--color-ink); }
+
+/* The way back out of a hold. Same quiet outline as the uncancel: a held order
+   is usually held on purpose, so this must not compete with Confirm. */
+.actionRelease {
+  background: var(--color-raised);
+  border-color: var(--color-border);
+  color: var(--color-ink-muted);
+}
+.actionRelease:hover { border-color: var(--color-ink-faint); color: var(--color-ink); }
+
+/* Confirm step, inline rather than a browser confirm(): the question names the
+   order and says what happens, which a native dialog cannot. */
+.uncancelConfirm {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.uncancelAsk {
+  font-size: var(--font-size-meta);
+  color: var(--color-ink-muted);
+  max-width: 44ch;
+}
+
+/* ── Reason drawer ───────────────────────────────────────────────────────── */
+/* Opens below the action bar instead of replacing it. */
+.reasonStack {
+  border-top: 1px solid var(--color-border);
+  padding: var(--space-3) 0;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: var(--space-2);
 }
+.drawerLabel {
+  font-size: var(--font-size-meta);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--color-ink-muted);
+}
+.cancelWarning {
+  font-size: var(--font-size-meta);
+  line-height: 1.5;
+  color: var(--color-error);
+  background: var(--color-error-bg);
+  border: 1px solid var(--color-error-border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+}
+.reasonRow { display: flex; gap: var(--space-2); align-items: center; }
+.reasonInput {
+  flex: 1;
+  padding: 8px var(--space-3);
+  font-size: var(--font-size-body);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-family: inherit;
+  color: var(--color-ink);
+}
+.reasonInput:focus-visible { outline: none; border-color: var(--color-ink-faint); box-shadow: var(--focus-ring); }
+.reasonSubmit {
+  background: var(--color-ink);
+  color: var(--color-raised);
+  border: 1px solid transparent;
+  padding: 8px var(--space-4);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-body);
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.reasonSubmit:disabled { background: var(--color-border); color: var(--color-ink-subtle); cursor: not-allowed; }
+/* "Discard" rather than "Cancel": in this bar, Cancel already means "kill the
+   order". Two meanings for one word, one keystroke apart, is a trap. */
+.reasonCancel {
+  background: var(--color-raised);
+  color: var(--color-ink-muted);
+  border: 1px solid var(--color-border);
+  padding: 8px var(--space-4);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-body);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.reasonCancel:hover { border-color: var(--color-ink-faint); color: var(--color-ink); }
+
+/* ── Blocker strip — the signature element ───────────────────────────────── */
+/* The module's whole job is "can this be confirmed, and if not what fixes it".
+   That question gets one strip, directly under the button it gates, with the
+   repair link on the same line as the fault. It used to be a card sitting
+   below the fold, stating faults you then had to hunt for in other cards. */
+.blockers { flex: none; }
+.blockersWarn { background: var(--color-warning-bg); border-bottom: 1px solid var(--color-warning-border); }
+.blockersOk   { background: var(--color-success-bg); border-bottom: 1px solid var(--color-success-border); }
+
+.blockHead {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 9px var(--space-4);
+  font-size: var(--font-size-meta);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.blockersWarn .blockHead { color: var(--color-warning); }
+.blockersOk .blockHead { color: var(--color-success); }
+.blockCount { font-family: var(--font-mono); font-variant-numeric: var(--font-numeric); }
+
+.blockList {
+  padding: 0 var(--space-4) 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.blockItem {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-size-body);
+  color: var(--color-ink);
+  flex-wrap: wrap;
+}
+.blockMark {
+  width: 15px; height: 15px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 9px;
+  font-weight: 700;
+  flex: none;
+}
+.blockMarkNo  { background: var(--color-warning-strong); color: var(--color-raised); }
+.blockMarkOk  { background: var(--color-success);        color: var(--color-raised); }
+.blockWhat { font-weight: 700; }
+.blockWhy  { color: var(--color-ink-muted); }
+.blockFix {
+  margin-left: auto;
+  flex: none;
+  border: 1px solid var(--color-warning-border);
+  background: var(--color-raised);
+  color: var(--color-warning);
+  font-size: var(--font-size-meta);
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.blockFix:hover {
+  background: var(--color-warning-strong);
+  border-color: var(--color-warning-strong);
+  color: var(--color-raised);
+}
+.blockFix:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+
+/* ── Detail body ─────────────────────────────────────────────────────────── */
+.detailBody {
+  flex: 1;
+  /* Explicit rather than relying on the auto min-size of a scroll container:
+     this is the one element that is allowed to shrink, and everything above it
+     in .detail is flex: none. Without it a tall pinned sibling can push the
+     card list out of a pane that hides its overflow. */
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-4);
+}
+.detailBody::-webkit-scrollbar { width: 8px; }
+.detailBody::-webkit-scrollbar-track { background: transparent; }
+.detailBody::-webkit-scrollbar-thumb { background: var(--color-border); border-radius: 4px; }
+
+/* Eight equal cards in one flat column meant scrolling to find anything.
+   They now group by the question they answer, two across. */
+.group + .group { margin-top: var(--space-5); }
+.groupLabel {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--color-ink-subtle);
+  margin: 0 0 var(--space-2);
+}
+.groupLabel::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--color-border);
+}
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: var(--space-3);
+  align-items: start;
+}
+.cardsWide { grid-template-columns: 1fr; }
 
 .card {
-  background: #fff;
+  background: var(--color-raised);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   overflow: hidden;
 }
+/* Target highlight for the blocker strip's "Fix in …" links. */
+.cardFlash { animation: cardFlash 1.4s ease-out; }
+@keyframes cardFlash {
+  0%, 30% { border-color: var(--color-warning-strong); box-shadow: 0 0 0 3px var(--color-warning-bg); }
+  100%    { border-color: var(--color-border); box-shadow: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cardFlash { animation: none; border-color: var(--color-warning-strong); }
+}
 
+/* Card titles were crimson — the brand red on eight headings at once, which is
+   what "reserved for action" is meant to prevent. */
 .cardHead {
-  padding: 9px 14px;
-  border-bottom: 1px solid #f0f0f0;
-  font-size: 9px;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+  font-size: 10px;
   font-weight: 700;
-  color: var(--color-crimson);
+  color: var(--color-ink-muted);
   letter-spacing: 0.7px;
   text-transform: uppercase;
-}
-
-.cardBody { padding: 12px 14px; font-size: 12px; color: var(--color-ink); }
-
-.missing {
-  color: var(--color-warning);
-  background: var(--color-warning-bg);
-  border: 1px dashed var(--color-warning-border);
-  border-radius: var(--radius-sm);
-  padding: 4px 8px;
-  font-size: 10px;
-  font-weight: 600;
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-2);
 }
-.missing::before {
-  content: '⚠';
+.cardBody {
+  padding: var(--space-3);
+  font-size: var(--font-size-body);
+  color: var(--color-ink);
 }
+
 .contactLine {
   display: flex;
   align-items: baseline;
-  gap: 8px;
-  margin-top: 4px;
-  font-size: 11px;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+  font-size: var(--font-size-body);
 }
 .contactLabel {
   color: var(--color-ink-subtle);
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.4px;
   min-width: 56px;
+  flex: none;
 }
 
-.muted { color: var(--color-ink-subtle); font-size: 11px; }
+/* Missing data now carries the repair action instead of only naming itself. */
+.missing {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-warning);
+  background: var(--color-warning-bg);
+  border: 1px dashed var(--color-warning-border);
+  border-radius: var(--radius-sm);
+  padding: 3px 4px 3px var(--space-2);
+  font-size: var(--font-size-meta);
+  font-weight: 600;
+}
+.missing::before { content: '⚠'; }
+.missingFix {
+  background: var(--color-raised);
+  border: 1px solid var(--color-warning-border);
+  color: var(--color-warning);
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 3px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.missingFix:hover {
+  background: var(--color-warning-strong);
+  border-color: var(--color-warning-strong);
+  color: var(--color-raised);
+}
+
+.muted { color: var(--color-ink-subtle); font-size: var(--font-size-meta); }
 
 .quoLink {
   display: inline-block;
   margin-top: 6px;
   background: var(--color-info);
-  color: #fff;
-  padding: 5px 12px;
-  border-radius: 4px;
+  color: var(--color-raised);
+  padding: 5px var(--space-3);
+  border-radius: var(--radius-sm);
   font-size: 10px;
   font-weight: 700;
   text-decoration: none;
@@ -285,246 +1060,79 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 9px 12px;
-  border-radius: var(--radius-md);
-  border-width: 1.5px;
-  border-style: solid;
+  padding: 9px var(--space-3);
+  border-radius: var(--radius-sm);
+  border: 1px solid;
   margin-top: 10px;
+  font-size: var(--font-size-meta);
 }
 .verdictHouse {
   background: var(--color-success-bg);
   border-color: var(--color-success-border);
   color: var(--color-success);
 }
+/* An unconfirmed apt/condo/remote address is a thing to resolve, not a failure.
+   It was error-red, which put it at the same weight as a cancelled order. */
 .verdictApt, .verdictCondo, .verdictRemote {
-  background: var(--color-error-bg);
-  border-color: var(--color-error-border);
-  color: var(--color-error);
+  background: var(--color-warning-bg);
+  border-color: var(--color-warning-border);
+  color: var(--color-warning);
 }
 
+.salesConfirmToggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: 10px;
+  padding: var(--space-2) 10px;
+  background: var(--color-warning-bg);
+  border: 1px solid var(--color-warning-border);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-meta);
+  color: var(--color-warning);
+}
+.salesConfirmToggle label { cursor: pointer; font-weight: 600; }
+
+/* ── Freight ─────────────────────────────────────────────────────────────── */
 .costBarWrap {
-  background: #e2e8f0;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
   border-radius: 3px;
   height: 8px;
   margin-top: 6px;
   position: relative;
+  overflow: hidden;
 }
-.costBarFill {
-  height: 100%;
-  border-radius: 3px;
-}
-.costBarUnder { background: #48bb78; }
-.costBarOver  { background: #e53e3e; }
+.costBarFill { height: 100%; border-radius: 3px; }
+.costBarUnder { background: var(--color-success); }
+.costBarOver  { background: var(--color-error-strong); }
 .costThreshold {
   position: absolute;
-  top: -3px;
-  bottom: -3px;
+  top: -3px; bottom: -3px;
   width: 2px;
-  background: #e53e3e;
+  background: var(--color-error-strong);
 }
-
-.liTable {
-  width: 100%;
-  font-size: 11px;
-  border-collapse: collapse;
-}
-.liTable th, .liTable td {
-  text-align: left;
-  padding: 6px 8px;
-  border-bottom: 1px solid var(--color-border);
-}
-.liTable th { color: var(--color-ink-subtle); font-weight: 700; font-size: 10px; text-transform: uppercase; }
-.liTable tfoot td { font-weight: 700; }
-
-.notesArea {
-  width: 100%;
-  min-height: 80px;
-  resize: vertical;
-  padding: 8px 10px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  font-size: 11px;
-  font-family: inherit;
-  color: var(--color-ink);
-}
-
-.notesStatus {
-  margin-top: 6px;
-  font-size: 10px;
-  color: var(--color-ink-faint);
-}
-
-.actionBar {
-  padding: 12px 18px;
-  border-bottom: 1px solid var(--color-border);
-  background: #fff;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.duePill {
-  margin-left: auto;
-  padding: 5px 12px;
-  border-radius: 999px;
-  font-size: 11px;
-  font-weight: 700;
-  border: 1.5px solid transparent;
-  white-space: nowrap;
-}
-.due_ok      { background: #f0fff4; color: #276749; border-color: #9ae6b4; }
-.due_urgent  { background: #fffaf0; color: #975a16; border-color: #f6ad55; }
-.due_overdue { background: #fff5f5; color: #c53030; border-color: #fc8181; }
-
-.actionBtn {
-  border: none;
-  padding: 9px 22px;
-  border-radius: var(--radius-sm);
-  font-size: 12px;
-  font-weight: 700;
-  cursor: pointer;
-}
-.actionConfirm { background: var(--color-success); color: #fff; }
-.actionFlag    { background: #fff; color: var(--color-error-strong); border: 1.5px solid var(--color-error-strong); }
-.actionHold    { background: #fff; color: var(--color-warning); border: 1.5px solid var(--color-warning-border); }
-.actionInfo    { background: #fff; color: var(--color-ink-muted); border: 1.5px solid var(--color-border); }
-
-.reasonRow { display: flex; gap: 8px; flex: 1; align-items: center; }
-.reasonInput {
-  flex: 1;
-  padding: 8px 10px;
-  font-size: 11px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  font-family: inherit;
-}
-.reasonSubmit { background: var(--color-ink); color: #fff; border: none; padding: 8px 14px; border-radius: var(--radius-sm); font-size: 11px; font-weight: 700; cursor: pointer; }
-.reasonCancel { background: #fff; color: var(--color-ink-subtle); border: 1px solid var(--color-border); padding: 8px 14px; border-radius: var(--radius-sm); font-size: 11px; cursor: pointer; }
-
-.banner {
-  background: var(--color-success-bg);
-  border: 1.5px solid var(--color-success-border);
-  border-radius: var(--radius-md);
-  padding: 10px 14px;
-  margin: 16px 18px 0;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: 11px;
-  color: var(--color-success);
-}
-.bannerClose {
-  background: transparent;
-  border: none;
-  color: var(--color-success);
-  cursor: pointer;
-  font-size: 14px;
-  font-weight: 700;
-}
-
-.bannerError {
-  background: var(--color-error-bg);
-  border: 1.5px solid var(--color-error-border);
-  border-radius: var(--radius-md);
-  padding: 10px 14px;
-  margin: 16px 18px 0;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: 11px;
-  color: var(--color-error);
-}
-.bannerCloseError {
-  background: transparent;
-  border: none;
-  color: var(--color-error);
-  cursor: pointer;
-  font-size: 14px;
-  font-weight: 700;
-}
-
-.notesSaveBtn {
-  background: var(--color-ink);
-  color: #fff;
-  border: none;
-  padding: 6px 14px;
-  border-radius: var(--radius-sm);
-  font-size: 11px;
-  font-weight: 700;
-  cursor: pointer;
-}
-.notesSaveBtn:disabled {
-  background: var(--color-border);
-  color: var(--color-ink-faint);
-  cursor: not-allowed;
-}
-
-.notesLog {
-  margin-top: 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  border-top: 1px solid var(--color-border);
-  padding-top: 10px;
-}
-.notesLogEmpty {
-  font-size: 10px;
-  color: var(--color-ink-faint);
-  font-style: italic;
-}
-.notesLogEntry {
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  padding: 8px 10px;
-}
-.notesLogMeta {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  font-size: 10px;
-  color: var(--color-ink-muted);
-  margin-bottom: 4px;
-}
-.notesLogTs {
-  color: var(--color-ink-faint);
-  font-family: ui-monospace, monospace;
-}
-.notesLogBody {
-  font-size: 11px;
-  color: var(--color-ink);
-  white-space: pre-wrap;
-}
-
-.readinessRow {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  font-size: 11px;
-  line-height: 1.5;
-  padding: 3px 0;
-}
-.readinessOk { color: var(--color-success); font-weight: 700; font-size: 13px; }
-.readinessFail { color: var(--color-error); font-weight: 700; font-size: 13px; }
 
 .freightEdit {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-top: 8px;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
 }
 .freightEdit input {
   width: 100px;
-  padding: 4px 8px;
+  padding: 4px var(--space-2);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
-  font-size: 11px;
-  font-family: ui-monospace, monospace;
+  font-size: var(--font-size-meta);
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--font-numeric);
+  color: var(--color-ink);
 }
 .freightEdit button {
   background: var(--color-ink);
-  color: #fff;
-  border: none;
+  color: var(--color-raised);
+  border: 1px solid transparent;
   padding: 4px 10px;
   border-radius: var(--radius-sm);
   font-size: 10px;
@@ -532,103 +1140,700 @@
   cursor: pointer;
 }
 .freightEdit .cancelBtn {
-  background: #fff;
-  color: var(--color-ink-subtle);
-  border: 1px solid var(--color-border);
+  background: var(--color-raised);
+  color: var(--color-ink-muted);
+  border-color: var(--color-border);
 }
-.freightHint { font-size: 9px; color: var(--color-ink-faint); margin-top: 4px; }
+.freightHint { font-size: 9px; color: var(--color-ink-subtle); margin-top: var(--space-1); }
 
-.salesConfirmToggle {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 10px;
-  padding: 8px 10px;
-  background: var(--color-warning-bg);
-  border: 1px solid var(--color-warning-border);
+.freightQuoteBtn {
+  margin-top: var(--space-2);
+  background: var(--color-ink);
+  color: var(--color-raised);
+  border: none;
+  padding: 5px var(--space-3);
   border-radius: var(--radius-sm);
-  font-size: 11px;
-  color: var(--color-warning);
-}
-.salesConfirmToggle label { cursor: pointer; font-weight: 600; }
-
-.urgencyChip {
-  display: inline-block;
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 700;
-  padding: 1px 6px;
-  border-radius: 3px;
-  margin-left: 4px;
-}
-.urgencyChip.ok { background: var(--color-success-bg); color: var(--color-success); }
-.urgencyChip.urgent { background: var(--color-warning-bg); color: var(--color-warning); border: 1px solid var(--color-warning-border); }
-.urgencyChip.overdue { background: var(--color-error-bg); color: var(--color-error); font-weight: 800; border: 1px solid var(--color-error-border); }
-
-.urgencyBanner {
-  padding: 6px 10px;
-  margin-bottom: 10px;
-  border-radius: var(--radius-sm);
-  font-size: 11px;
-  border: 1px solid;
-}
-.urgencyBanner.ok       { background: var(--color-success-bg); border-color: var(--color-success-border); color: var(--color-success); }
-.urgencyBanner.urgent   { background: var(--color-warning-bg); border-color: var(--color-warning-border); color: var(--color-warning); }
-.urgencyBanner.overdue  { background: var(--color-error-bg);   border-color: var(--color-error-border);   color: var(--color-error);   font-weight: 700; }
-
-/* .replBadge moved to src/styles/globals.css (backlog #62) */
-.replHeaderBanner {
-  background: #fffbeb; border-left: 4px solid #f6ad55;
-  padding: 8px 12px; border-radius: 6px;
-  font-size: .85rem; margin-bottom: 12px;
-  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
-}
-.replCancelWrap {
-  margin-left: auto;
-  display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap;
-}
-.replCancelBtn {
-  font-size: 11px; font-weight: 700;
-  padding: 4px 12px; border-radius: 6px;
-  border: 1px solid #fc8181; color: #9b2c2c; background: #fff;
   cursor: pointer;
 }
-.replCancelBtn:hover:not(:disabled) { background: #fff5f5; }
-.replCancelBtn:disabled { opacity: .5; cursor: not-allowed; }
-.replCancelHint {
-  font-size: 10px; color: #975a16; font-style: italic;
+.freightQuoteBtn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.freightSourceTag {
+  display: inline-block;
+  margin-left: var(--space-2);
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  vertical-align: middle;
+  background: var(--color-surface);
+  color: var(--color-ink-muted);
+  border: 1px solid var(--color-border);
 }
+.freightSourceTag_shopify { background: var(--color-surface); color: var(--color-ink-muted); }
+.freightSourceTag_manual  { background: var(--color-info-bg); color: var(--color-info); border-color: var(--color-info-border); }
+.freightSourceTag_clickship,
+.freightSourceTag_freightcom { background: var(--color-success-bg); color: var(--color-success); border-color: var(--color-success-border); }
+
+.freightNoQuote {
+  margin: var(--space-2) 0;
+  padding: 6px 10px;
+  background: var(--color-warning-bg);
+  border-left: 3px solid var(--color-warning-strong);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-meta);
+  color: var(--color-warning);
+  line-height: 1.4;
+}
+
+/* ── Line items ──────────────────────────────────────────────────────────── */
+.liTable {
+  width: 100%;
+  font-size: var(--font-size-meta);
+  border-collapse: collapse;
+}
+.liTable th,
+.liTable td {
+  text-align: left;
+  padding: 6px var(--space-2);
+  border-bottom: 1px solid var(--color-border);
+}
+.liTable th {
+  color: var(--color-ink-subtle);
+  font-weight: 700;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.liTable tfoot td { font-weight: 700; border-bottom: none; border-top: 1px solid var(--color-ink-faint); }
 .sku {
-  font-family: ui-monospace, monospace;
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--font-numeric);
   font-size: 10px;
   color: var(--color-ink-muted);
 }
 
-/* Backlog #14-#18 — freight UX bundle */
-.freightSourceTag {
-  display: inline-block;
-  margin-left: 8px;
-  padding: 1px 7px;
-  border-radius: 999px;
-  font-size: 0.65rem;
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  background: #edf2f7;
-  color: #4a5568;
-  vertical-align: middle;
+/* ── Notes ───────────────────────────────────────────────────────────────── */
+.notesArea {
+  width: 100%;
+  min-height: 72px;
+  resize: vertical;
+  padding: var(--space-2) 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-meta);
+  font-family: inherit;
+  color: var(--color-ink);
 }
-.freightSourceTag_shopify { background: #edf2f7; color: #4a5568; }
-.freightSourceTag_manual { background: #bee3f8; color: #2b6cb0; }
-.freightSourceTag_clickship,
-.freightSourceTag_freightcom { background: #c6f6d5; color: #22543d; }
+.notesArea:focus-visible { outline: none; border-color: var(--color-ink-faint); box-shadow: var(--focus-ring); }
+.notesStatus { margin-top: 6px; font-size: 10px; color: var(--color-error-strong); }
+.notesSaveBtn {
+  background: var(--color-ink);
+  color: var(--color-raised);
+  border: none;
+  padding: 6px var(--space-3);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-meta);
+  font-weight: 700;
+  cursor: pointer;
+}
+.notesSaveBtn:disabled { background: var(--color-border); color: var(--color-ink-subtle); cursor: not-allowed; }
 
-.freightNoQuote {
-  margin: 8px 0;
-  padding: 6px 10px;
-  background: #fefcbf;
-  border-left: 3px solid #d69e2e;
-  border-radius: 4px;
-  font-size: 0.75rem;
-  color: #744210;
+.notesLog {
+  margin-top: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  border-top: 1px solid var(--color-border);
+  padding-top: 10px;
+}
+.notesLogEmpty { font-size: 10px; color: var(--color-ink-subtle); font-style: italic; }
+.notesLogEntry {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) 10px;
+}
+.notesLogMeta {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 10px;
+  color: var(--color-ink-muted);
+  margin-bottom: var(--space-1);
+}
+.notesLogTs {
+  color: var(--color-ink-subtle);
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--font-numeric);
+}
+.notesLogBody { font-size: var(--font-size-meta); color: var(--color-ink); white-space: pre-wrap; }
+
+/* ── Replacement banner ──────────────────────────────────────────────────── */
+.replHeaderBanner {
+  background: var(--color-info-bg);
+  border: 1px solid var(--color-info-border);
+  color: var(--color-info);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-meta);
+  margin-bottom: var(--space-3);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.replCancelWrap { margin-left: auto; display: inline-flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+.replCancelBtn {
+  font-size: var(--font-size-meta);
+  font-weight: 700;
+  padding: 4px var(--space-3);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-error-border);
+  color: var(--color-error);
+  background: var(--color-raised);
+  cursor: pointer;
+}
+.replCancelBtn:hover:not(:disabled) { background: var(--color-error-bg); }
+.replCancelBtn:disabled { opacity: 0.5; cursor: not-allowed; }
+.replCancelHint { font-size: 10px; color: var(--color-warning); font-style: italic; }
+
+/* ── Disposition banner ──────────────────────────────────────────────────── */
+.banner, .bannerError {
+  border-radius: var(--radius-md);
+  padding: 10px var(--space-3);
+  margin: var(--space-3) var(--space-4) 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  font-size: var(--font-size-meta);
+}
+.banner {
+  background: var(--color-success-bg);
+  border: 1px solid var(--color-success-border);
+  color: var(--color-success);
+}
+.bannerError {
+  background: var(--color-error-bg);
+  border: 1px solid var(--color-error-border);
+  color: var(--color-error);
+}
+.bannerClose, .bannerCloseError {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: var(--font-size-section);
+  font-weight: 700;
+  line-height: 1;
+  padding: 0;
+}
+.bannerClose { color: var(--color-success); }
+.bannerCloseError { color: var(--color-error); }
+
+/* Selected carrier quote. Stays on the meta line rather than in the state
+   column: it is reference information, not a thing you act on from the list,
+   and putting it right would break the state column's alignment. */
+.rowFreight {
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--font-numeric);
+  color: var(--color-ink-subtle);
+  white-space: nowrap;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ============================================================ Communication indicator
+   The Sales card's answer to "has this customer said anything that should stop
+   this shipment?". Tone carries the verdict; the footnote carries which
+   channels were actually read, which matters because one of them (support
+   email) is not connected in production yet. */
+
+.commBox {
+  margin-top: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-left-width: 3px;
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+}
+.commGood {
+  border-color: var(--color-success-border);
+  border-left-color: var(--color-success);
+  background: var(--color-success-bg);
+}
+.commWarn {
+  border-color: var(--color-warning-border);
+  border-left-color: var(--color-warning-strong);
+  background: var(--color-warning-bg);
+}
+.commUnknown {
+  border-left-color: var(--color-border);
+}
+
+.commHeadline {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  font-size: var(--font-size-body);
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--color-ink);
+}
+.commGood .commHeadline { color: var(--color-success); }
+.commWarn .commHeadline { color: var(--color-warning); }
+.commUnknown .commHeadline { color: var(--color-ink-subtle); font-weight: 500; }
+.commIcon { flex: none; font-weight: 700; }
+
+.commConcerns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: var(--space-2);
+}
+.commConcern {
+  background: var(--color-raised);
+  border: 1px solid var(--color-warning-border);
+  color: var(--color-warning);
+  border-radius: 3px;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+
+.commQuote {
+  margin: var(--space-2) 0 0;
+  padding-left: var(--space-2);
+  border-left: 2px solid var(--color-warning-border);
+  font-size: var(--font-size-meta);
+  font-style: italic;
+  color: var(--color-ink);
+}
+.commQuote cite {
+  display: block;
+  margin-top: 2px;
+  font-style: normal;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--color-ink-subtle);
+}
+
+.commFoot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  font-size: 10px;
+  color: var(--color-ink-subtle);
+}
+.commRecheck {
+  flex: none;
+  background: none;
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
+  padding: 2px 7px;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--color-ink-muted);
+  cursor: pointer;
+}
+.commRecheck:hover:not(:disabled) {
+  border-color: var(--color-ink-muted);
+  color: var(--color-ink);
+}
+.commRecheck:disabled { opacity: 0.55; cursor: default; }
+
+.commError {
+  margin-top: var(--space-2);
+  font-size: 10px;
+  color: var(--color-warning);
+}
+
+/* Row chip. Warn-toned so it reads with the other risk tags in the rail. */
+.tagComms {
+  background: var(--color-warning-bg);
+  border-color: var(--color-warning-border);
+  color: var(--color-warning);
+}
+
+/* The model's specific sentence, under the fixed verdict label. */
+.commDetail {
+  margin-top: 3px;
+  font-size: var(--font-size-meta);
   line-height: 1.4;
+  color: var(--color-ink);
+}
+
+/* ── Address verification ────────────────────────────────────────────────
+   The card makes three claims — postal, dwelling type, area — and before this
+   they all rendered with identical weight whether a postal authority had
+   confirmed them or nobody had ever looked. Every claim now carries a
+   provenance line, and an unconfirmed claim is styled as the open question it
+   is rather than as an answer. */
+
+.claim {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-2) 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  margin-top: var(--space-2);
+}
+/* Confirmed by a postal authority. */
+.claimConfirmed {
+  background: var(--color-success-bg);
+  border-color: var(--color-success-border);
+}
+/* Needs a person: a wrong postal, a missing unit, an address that can't take
+   a freight delivery as it stands. */
+.claimBlocking {
+  background: var(--color-error-bg);
+  border-color: var(--color-error-border);
+}
+/* Real, but the operator should know before booking freight. */
+.claimCaution {
+  background: var(--color-warning-bg);
+  border-color: var(--color-warning-border);
+}
+/* Nobody has checked. Deliberately flat — an unchecked field should not read
+   as a result. */
+.claimUnchecked {
+  background: var(--color-surface);
+  border-style: dashed;
+}
+
+.claimHead {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.claimTitle {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--color-ink-subtle);
+  min-width: 76px;
+  flex: none;
+}
+.claimValue {
+  font-size: var(--font-size-body);
+  font-weight: 700;
+  color: var(--color-ink);
+}
+.claimValueUnchecked {
+  font-size: var(--font-size-body);
+  font-weight: 700;
+  color: var(--color-ink-subtle);
+  font-style: italic;
+}
+.claimNote {
+  font-size: var(--font-size-meta);
+  color: var(--color-ink-muted);
+}
+/* Where this claim came from. The single most important line on the card:
+   it is what lets an operator tell a checked fact from a starting guess. */
+.claimSource {
+  font-size: 10px;
+  color: var(--color-ink-subtle);
+  font-style: italic;
+}
+
+.claimSelect {
+  font-size: var(--font-size-meta);
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
+  background: var(--color-raised);
+  color: var(--color-ink);
+  cursor: pointer;
+}
+
+/* A multi-unit building with no unit number on the order. A freight driver
+   with nowhere to deliver leaves the pallet in a lobby or returns it to the
+   terminal, so this is the loudest thing on the card. */
+.unitAlert {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-top: 10px;
+  padding: 10px var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--color-error-bg);
+  border: 1px solid var(--color-error-border);
+  color: var(--color-error);
+}
+.unitAlertHead {
+  font-size: var(--font-size-meta);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.unitAlertBody { font-size: var(--font-size-meta); color: var(--color-ink); }
+
+.verifyRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-top: var(--space-2);
+}
+.verifySection {
+  margin-top: 14px;
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-border);
+}
+.verifyBtn {
+  padding: 6px var(--space-3);
+  font-size: var(--font-size-meta);
+  font-weight: 600;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  background: var(--color-crimson);
+  color: var(--color-raised);
+  border: 1px solid var(--color-crimson);
+}
+.verifyBtnDone {
+  background: var(--color-raised);
+  color: var(--color-ink-muted);
+  border-color: var(--color-border);
+}
+.verifyBtn:disabled { cursor: wait; opacity: 0.7; }
+
+.badge {
+  font-size: 10px;
+  padding: 3px var(--space-2);
+  border-radius: 3px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  border: 1px solid;
+}
+.badgeMatch {
+  background: var(--color-success-bg);
+  color: var(--color-success);
+  border-color: var(--color-success-border);
+}
+.badgeMismatch {
+  background: var(--color-error-bg);
+  color: var(--color-error);
+  border-color: var(--color-error-border);
+}
+.badgeUnverifiable {
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
+  border-color: var(--color-warning-border);
+}
+.badgeInfo {
+  background: var(--color-info-bg);
+  color: var(--color-info);
+  border-color: var(--color-info-border);
+}
+
+.mismatchDetail {
+  margin-top: 10px;
+  font-size: var(--font-size-meta);
+  color: var(--color-ink-muted);
+}
+.mismatchBtn {
+  margin-top: var(--space-2);
+  padding: 6px var(--space-3);
+  font-size: var(--font-size-meta);
+  font-weight: 600;
+  background: var(--color-crimson);
+  color: var(--color-raised);
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.mismatchBtn:disabled { cursor: not-allowed; opacity: 0.5; }
+
+.verifyMsg { margin-top: var(--space-2); font-size: var(--font-size-meta); color: var(--color-ink-muted); }
+.verifyMsgError { color: var(--color-error); }
+
+.awaiting {
+  margin-top: 10px;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--color-warning-bg);
+  border: 1px solid var(--color-warning-border);
+  font-size: var(--font-size-meta);
+  color: var(--color-warning);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.confirmed {
+  margin-top: 10px;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--color-success-bg);
+  border: 1px solid var(--color-success-border);
+  font-size: var(--font-size-meta);
+  color: var(--color-success);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* ── Pre-confirm checks ──────────────────────────────────────────────────
+   The two checks that gate a confirm, in the order they run, directly under
+   the Confirm button. Both actions already existed on cards below the fold;
+   what is new here is the sequence (freight cannot be quoted before the
+   address is verified) and the summary that says, in one place, what those
+   two checks established about this customer's address and what shipping to
+   it will cost. */
+.precheck {
+  /* Lives inside .detailBody now, so it scrolls with the cards it sits above
+     rather than competing with them for a fixed pane. */
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-raised);
+  padding: var(--space-3) var(--space-4);
+  margin-bottom: var(--space-5);
+}
+.precheckHead {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--color-ink-subtle);
+  margin-bottom: var(--space-2);
+}
+.precheckSteps {
+  display: flex;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+.precheckStep {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1 1 260px;
+  min-width: 240px;
+}
+.precheckBtn {
+  align-self: flex-start;
+  padding: 7px var(--space-3);
+  font-size: var(--font-size-body);
+  font-weight: 700;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  background: var(--color-crimson);
+  color: var(--color-raised);
+  border: 1px solid var(--color-crimson);
+}
+.precheckBtn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+/* A step that has already run is no longer the thing to click. */
+.precheckBtnDone {
+  background: var(--color-success-bg);
+  color: var(--color-success);
+  border-color: var(--color-success-border);
+}
+.precheckBtn:disabled {
+  background: var(--color-border);
+  color: var(--color-ink-subtle);
+  border-color: var(--color-border);
+  cursor: not-allowed;
+}
+.precheckBtnDone:disabled {
+  background: var(--color-success-bg);
+  color: var(--color-success);
+  border-color: var(--color-success-border);
+}
+/* The instruction under each button. Deliberately quiet — it explains an
+   order of operations, it is not itself a thing to act on. */
+.precheckHint {
+  font-size: var(--font-size-meta);
+  color: var(--color-ink-subtle);
+  line-height: 1.4;
+  max-width: 42ch;
+}
+.precheckError {
+  font-size: var(--font-size-meta);
+  color: var(--color-error);
+  max-width: 46ch;
+}
+.precheckPending {
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px dashed var(--color-border);
+  font-size: var(--font-size-meta);
+  color: var(--color-ink-subtle);
+  font-style: italic;
+}
+
+/* The summary. One row per thing the two checks established, each carrying
+   the sentence that says where it came from — same rule as the address
+   card's claims: never state a fact without its provenance. */
+.summary {
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-border);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.summaryRow {
+  display: grid;
+  grid-template-columns: 88px minmax(0, auto) 1fr;
+  align-items: baseline;
+  gap: var(--space-2);
+  padding: 5px 8px;
+  border-radius: var(--radius-sm);
+  border-left: 3px solid var(--color-border);
+  background: var(--color-surface);
+}
+.summaryRowOk   { border-left-color: var(--color-success); }
+.summaryRowWarn { border-left-color: var(--color-warning-strong); }
+.summaryRowBad  { border-left-color: var(--color-error); }
+.summaryLabel {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--color-ink-subtle);
+}
+.summaryValue {
+  font-size: var(--font-size-body);
+  font-weight: 700;
+  color: var(--color-ink);
+}
+.summaryNote {
+  font-size: var(--font-size-meta);
+  color: var(--color-ink-muted);
+}
+.summarySource {
+  grid-column: 2 / -1;
+  font-size: 10px;
+  font-style: italic;
+  color: var(--color-ink-subtle);
+}
+
+@media (max-width: 700px) {
+  .summaryRow { grid-template-columns: 1fr; gap: 2px; }
+  .summarySource { grid-column: 1; }
+}
+
+/* A summary row for something nothing has established. Flat and dashed on
+   purpose: it used to take the same green as a confirmed claim while its own
+   source line read "unconfirmed", and the border is what an operator reads. */
+.summaryRowUnchecked {
+  border-left-style: dashed;
+  border-left-color: var(--color-ink-subtle);
+  background: transparent;
+}
+.summaryValueUnchecked {
+  font-size: var(--font-size-body);
+  font-weight: 700;
+  font-style: italic;
+  color: var(--color-ink-subtle);
 }

@@ -1,98 +1,662 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   Customers — module chrome + the Directory tab.
+
+   Converted to the shared control vocabulary (components/ui) 2026-09-01, the
+   same pass Fulfillment, Order Review and Service went through. What changed
+   and why:
+
+     - The module opened with the wordmark face in Ladybug Red at 22px. Brolink
+       is wordmark-only (operator instruction 2026-06-07) and red means "the
+       primary action" — a page title is neither. The title is now ink, via the
+       PageHeader primitive, and the only red left on the screen is the Sync
+       button and a stat that is asking to be acted on.
+     - The tab strip was #2b6cb0 blue, a colour that appears nowhere in the
+       palette. It is now the shared Tabs primitive.
+     - Five equal-weight buttons sat in the header (two CSV exports, two
+       Klaviyo pushes, a sync), so nothing read as the main action. The four
+       bulk-list operations are now one Export menu; Sync is the primary.
+     - The Directory is a lookup table for ~150 people. Everything below is in
+       service of one job: find a name, see whether the record is complete,
+       open it. Nothing here decorates.
+
+   Journey, Profitability and Fleet share this file's chrome but keep their own
+   internals; they are not part of this pass.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* Transparent column on the page ground, matching Service and Fulfillment.
+   It used to be a white card wrapping the whole module, which flattened the
+   ground ramp — cards inside it had nothing to lift off. */
 .layout {
-  background: #fff;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--color-border);
-  overflow: hidden;
-  min-height: calc(100vh - 200px);
-  padding: 16px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: var(--space-4);
+  min-height: calc(100vh - 200px);
 }
 
-.header {
+/* ── Header: the Export menu ──────────────────────────────────────────────
+   Four destinations for one list. As buttons they took as much width and
+   weight as Sync, which is the action an operator actually reaches for. */
+.mobilePicker {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-.title {
-  font-family: var(--font-logo);
-  font-size: 22px;
-  letter-spacing: 0.05em;
-  color: var(--color-crimson);
-  margin: 0;
-}
-.headerActions {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-.lastSync {
-  font-size: 11px;
-  color: var(--color-ink-subtle);
-}
-.syncBtn {
-  background: var(--color-crimson);
-  color: #fff;
-  border: none;
-  padding: 8px 16px;
-  border-radius: var(--radius-sm);
-  font-size: 11px;
-  font-weight: 700;
-  cursor: pointer;
-  letter-spacing: 0.3px;
-}
-.syncBtn:hover { background: var(--color-crimson-dark); }
-.syncBtn:disabled { opacity: 0.6; cursor: not-allowed; }
-
-.shippedUnitRow {
-  border-bottom: 1px solid #f4f4f4;
-  padding: 4px 0;
-}
-.shippedUnitRow:last-child { border-bottom: none; }
-.trackingLine {
-  font-size: 11px;
-  color: var(--color-ink-subtle);
-  padding: 2px 0 4px 0;
-  margin-left: 2px;
-}
-.missingTracking {
-  color: var(--color-error, #c53030);
-  font-weight: 600;
-  font-style: italic;
+  flex-direction: column;
+  gap: var(--space-3);
 }
 
-.exportBtn {
-  background: #fff;
-  color: var(--color-ink-muted);
+.menuWrap { position: relative; }
+
+.menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + var(--space-1));
+  z-index: 30;
+  min-width: 244px;
+  padding: var(--space-1);
+  background: var(--color-raised);
   border: 1px solid var(--color-border);
-  padding: 8px 12px;
-  border-radius: var(--radius-sm);
-  font-size: 11px;
-  font-weight: 600;
-  cursor: pointer;
-  letter-spacing: 0.3px;
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
 }
-.exportBtn:hover { background: var(--color-surface); border-color: var(--color-ink-muted); }
-.exportBtn:disabled { opacity: 0.5; cursor: not-allowed; }
 
+.menuLabel {
+  padding: var(--space-2) var(--space-3) var(--space-1);
+  font-size: var(--font-size-meta);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-ink-subtle);
+}
+
+.menuItem {
+  display: block;
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  text-align: left;
+  font-size: var(--font-size-body);
+  color: var(--color-ink);
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.menuItem:hover:not(:disabled) { background: var(--color-surface); }
+.menuItem:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.menuItem:disabled { opacity: 0.45; cursor: not-allowed; }
+.menuItem span {
+  display: block;
+  margin-top: 1px;
+  font-size: var(--font-size-meta);
+  color: var(--color-ink-subtle);
+}
+
+/* ── Toasts ───────────────────────────────────────────────────────────────
+   Dismissible: a sync result used to sit on the page until the next action,
+   long after it had been read. */
+.toast {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid;
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-body);
+}
 .toastSuccess {
   background: var(--color-success-bg);
+  border-color: var(--color-success-border);
   color: var(--color-success);
-  border: 1px solid var(--color-success-border);
-  padding: 8px 14px;
-  border-radius: var(--radius-sm);
-  font-size: 12px;
-  font-weight: 600;
 }
 .toastError {
   background: var(--color-error-bg);
+  border-color: var(--color-error-border);
   color: var(--color-error);
-  border: 1px solid var(--color-error-border);
-  padding: 8px 14px;
+}
+.toastText { flex: 1; }
+.toastClose {
+  flex: none;
+  padding: 0 var(--space-1);
+  border: 0;
+  background: none;
+  color: inherit;
+  opacity: 0.6;
+  line-height: 1;
+}
+.toastClose:hover { opacity: 1; }
+.toastClose:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: var(--radius-sm); }
+
+/* ── Filter row ───────────────────────────────────────────────────────────
+   No card around it. It used to sit in a bordered white box directly above
+   another bordered white box, which drew a line the content didn't need.
+   Country is one axis (single-select); the record gaps are another
+   (independent toggles), so a hairline separates the two groups. */
+.filterBar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.filterDivider {
+  width: 1px;
+  height: 18px;
+  background: var(--color-border);
+  flex: none;
+}
+
+.search {
+  position: relative;
+  flex: 0 1 320px;
+  min-width: 200px;
+}
+
+.searchIcon {
+  position: absolute;
+  left: var(--space-3);
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--color-ink-faint);
+  pointer-events: none;
+  display: flex;
+}
+
+.searchField {
+  width: 100%;
+  height: 32px;
+  padding: 0 30px 0 30px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-raised);
+  color: var(--color-ink);
+  font-size: var(--font-size-body);
+}
+.searchField::placeholder { color: var(--color-ink-faint); }
+.searchField::-webkit-search-cancel-button { display: none; }
+/* Focus is the ring, not a red border: red is the primary action's colour and
+   a focused text field is not an action. */
+.searchField:focus {
+  outline: none;
+  border-color: var(--color-ink-faint);
+  box-shadow: var(--focus-ring);
+}
+
+.searchClear {
+  position: absolute;
+  right: var(--space-2);
+  top: 50%;
+  transform: translateY(-50%);
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: none;
+  color: var(--color-ink-subtle);
+}
+.searchClear:hover { background: var(--color-surface); color: var(--color-ink); }
+.searchClear:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+
+/* Where Follow-Ups went. A wayfinding note, not an announcement — it has been
+   on this page since the move and only needs to be findable. */
+.movedNote {
+  margin-left: auto;
+  font-size: var(--font-size-meta);
+  color: var(--color-ink-subtle);
+}
+.movedNote a {
+  color: var(--color-ink-muted);
+  font-weight: 600;
+  border-bottom: 1px solid var(--color-border);
+}
+.movedNote a:hover { color: var(--color-ink); border-bottom-color: var(--color-ink-faint); }
+
+/* ── The table ────────────────────────────────────────────────────────────
+   Compact density per tokens.css: --row-height, quiet rules, and every
+   identifier in the data face so email, serial and date columns line up down
+   the page. Raleway has no tabular figures — a directory scanned for a serial
+   is exactly the case --font-data exists for. */
+.tableWrap {
+  background: var(--color-raised);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: auto;
+  max-height: calc(100vh - 400px);
+  min-height: 280px;
+}
+
+.table {
+  width: 100%;
+  /* Fixed layout, because auto-layout hands the width to whichever column
+     happens to hold the longest string — one hyphenated surname was taking a
+     fifth of the table and squeezing the address column into an ellipsis. */
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-size: var(--font-size-body);
+}
+
+.table th:nth-child(1) { width: 19%; }
+.table th:nth-child(2) { width: 19%; }
+.table th:nth-child(3) { width: 11%; }
+.table th:nth-child(4) { width: 13%; }
+.table th:nth-child(5) { width: 27%; }
+.table th:nth-child(6) { width: 11%; }
+
+.table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  height: var(--row-height-header);
+  padding: 0 var(--space-3);
+  background: var(--color-raised);
+  border-bottom: 1px solid var(--color-border);
+  text-align: left;
+  font-size: var(--font-size-meta);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-ink-subtle);
+  white-space: nowrap;
+}
+
+.table td {
+  height: var(--row-height);
+  padding: 0 var(--space-3);
+  border-bottom: 1px solid rgba(var(--color-ink-rgb), 0.06);
+  vertical-align: middle;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.table tbody tr:last-child td { border-bottom: 0; }
+
+/* The 3px gutter is reserved on every row so selecting one doesn't shift the
+   column. Same selection language as the Order Review queue. */
+.table td:first-child { border-left: 3px solid transparent; }
+
+.row { cursor: pointer; }
+.row:hover td { background: var(--color-surface); }
+.row:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.rowSelected td { background: var(--color-surface); }
+.rowSelected td:first-child { border-left-color: var(--color-crimson); }
+
+/* The name is what the operator is looking for; it carries the weight and the
+   row's two lines of height when a household member matched instead. */
+.cellName, .viaMatch {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cellName {
+  font-weight: 600;
+  color: var(--color-ink);
+}
+.viaMatch {
+  margin-top: -2px;
+  font-size: var(--font-size-meta);
+  font-weight: 400;
+  color: var(--color-ink-subtle);
+}
+.nameCell { line-height: 1.3; }
+
+.cellData {
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--font-numeric);
+  font-size: 12px;
+  color: var(--color-ink-muted);
+}
+
+.serialChip {
+  display: inline-block;
+  padding: 1px var(--space-2);
+  border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--font-numeric);
+  font-size: 11px;
+  color: var(--color-ink-muted);
+}
+.serialMore {
+  margin-left: var(--space-1);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-ink-faint);
+}
+
+/* A blank field is information — it is why the "no email" filter exists — but
+   there are a lot of them, so it is a mark rather than a warning. */
+.dash { color: var(--color-ink-faint); }
+
+/* ── Loading ──────────────────────────────────────────────────────────────
+   Skeleton rows inside the real table frame, so the page doesn't jump a
+   screen-height when 150 customers land. */
+.skelBar {
+  height: 9px;
+  border-radius: var(--radius-sm);
+  background: rgba(var(--color-ink-rgb), 0.07);
+}
+
+/* ── Motion ───────────────────────────────────────────────────────────────
+   The whole budget: one page-load settle, staggered down the three bands of
+   the screen. Declared only inside no-preference, so reduced motion gets no
+   animation at all rather than one that has to be switched off. */
+@media (prefers-reduced-motion: no-preference) {
+  .reveal {
+    animation: settle var(--dur-settle) var(--ease-out) backwards;
+    animation-delay: var(--reveal-delay, 0ms);
+  }
+  .skelBar { animation: skelPulse 1.4s var(--ease-out) infinite; }
+  .panelBackdrop { animation: fade var(--dur-fast) var(--ease-out); }
+  .panel { animation: slideIn var(--dur-settle) var(--ease-out); }
+}
+
+@keyframes settle {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes skelPulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.45; }
+}
+@keyframes fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes slideIn {
+  from { transform: translateX(16px); opacity: 0; }
+  to   { transform: none; opacity: 1; }
+}
+
+/* ── Detail drawer ────────────────────────────────────────────────────────
+   Shared with the Journey panel and the two nested modals in NameSection /
+   AdditionalUsersSection. */
+.panelBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  justify-content: flex-end;
+  /* Warm, not black: a cold scrim over a cream page reads as a different
+     application's modal. */
+  background: rgba(var(--color-ink-rgb), 0.32);
+}
+
+.panel {
+  width: 480px;
+  max-width: 90vw;
+  height: 100vh;
+  background: var(--color-raised);
+  border-left: 1px solid var(--color-border);
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.panelHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+
+.panelTitle {
+  font-size: var(--font-size-section);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--color-ink);
+  line-height: 1.2;
+}
+
+.panelSubtitle {
+  margin-top: 2px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--color-ink-subtle);
+}
+
+.panelClose {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--color-ink-subtle);
+  transition: background var(--dur-fast) var(--ease-out),
+              color var(--dur-fast) var(--ease-out);
+}
+.panelClose:hover { background: var(--color-raised); color: var(--color-ink); }
+.panelClose:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+
+.panelBody {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-4) var(--space-5) var(--space-6);
+}
+
+.section { margin-bottom: var(--space-5); }
+.section:last-child { margin-bottom: 0; }
+
+.sectionTitle {
+  margin-bottom: var(--space-2);
+  padding-bottom: var(--space-1);
+  border-bottom: 1px solid var(--color-border);
+  font-size: var(--font-size-meta);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-ink-subtle);
+}
+
+.sectionBody {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.kvRow {
+  display: flex;
+  gap: var(--space-3);
+  align-items: baseline;
+  padding: 3px 0;
+  font-size: var(--font-size-body);
+}
+.kvLabel {
+  flex: none;
+  min-width: 78px;
+  font-size: var(--font-size-meta);
+  color: var(--color-ink-subtle);
+}
+.kvValue, .kvValueMulti {
+  flex: 1;
+  min-width: 0;
+  color: var(--color-ink);
+  overflow-wrap: anywhere;
+}
+/* `multiline` had no rule of its own, so the one row that asks for it — the
+   address — rendered its line breaks as spaces. Only that row uses it, and an
+   operator checking an address against a freight label is comparing lines, not
+   scanning a sentence. */
+.kvValueMulti {
+  white-space: pre-line;
+}
+
+/* Provenance under the Address row: which order it came from and whether Sales
+   has verified it. Indented to the value column — .kvLabel's min-width plus
+   .kvRow's gap — so it reads as a footnote to the address above and not as a
+   field of its own. ink-muted rather than ink-subtle: this is small text that
+   still has to pass AA. */
+.addressSource {
+  margin: 1px 0 3px calc(78px + var(--space-3));
+  font-size: var(--font-size-meta);
+  color: var(--color-ink-muted);
+}
+
+/* Panel form field. Deliberately its own class: it used to share .searchInput
+   with the directory's search box, so the two could not be styled apart. */
+.searchInput {
+  width: 100%;
+  height: 30px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-raised);
+  color: var(--color-ink);
+  font-size: var(--font-size-body);
+}
+.searchInput::placeholder { color: var(--color-ink-faint); }
+.searchInput:focus {
+  outline: none;
+  border-color: var(--color-ink-faint);
+  box-shadow: var(--focus-ring);
+}
+.searchInput:disabled { opacity: 0.55; }
+select.searchInput { padding-left: var(--space-2); }
+
+/* Panel action. Was an underlined crimson link, which spent the brand colour
+   on "Edit email / phone" twenty times over. It carries a resting border
+   rather than being a bare ghost: in a panel that is mostly labels and
+   read-only values, a control with no edge reads as more text. */
+.linkBtn {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-raised);
+  color: var(--color-ink-muted);
   font-size: 12px;
   font-weight: 600;
+  transition: background var(--dur-fast) var(--ease-out),
+              border-color var(--dur-fast) var(--ease-out),
+              color var(--dur-fast) var(--ease-out);
+}
+.linkBtn:hover:not(:disabled) {
+  background: var(--color-surface);
+  border-color: var(--color-ink-faint);
+  color: var(--color-ink);
+}
+.linkBtn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.linkBtn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.itemRow {
+  display: grid;
+  grid-template-columns: 1fr 80px 90px auto;
+  gap: var(--space-3);
+  align-items: center;
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid rgba(var(--color-ink-rgb), 0.06);
+  font-size: var(--font-size-body);
+}
+.itemRow:last-child { border-bottom: none; }
+
+.itemAmount {
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--font-numeric);
+  font-weight: 500;
+  text-align: right;
+}
+
+.emptyRow {
+  padding: var(--space-2) 0;
+  font-size: var(--font-size-body);
+  color: var(--color-ink-subtle);
+}
+
+.statusPill {
+  display: inline-block;
+  padding: 1px var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-ink-muted);
+}
+
+.shippedUnitRow {
+  padding: var(--space-1) 0;
+  border-bottom: 1px solid rgba(var(--color-ink-rgb), 0.06);
+}
+.shippedUnitRow:last-child { border-bottom: none; }
+
+.trackingLine {
+  padding: 2px 0 var(--space-1);
+  font-size: var(--font-size-meta);
+  color: var(--color-ink-subtle);
+}
+/* --color-error-strong, not --color-error: this sits on a light surface, where
+   the deep base token is the one that clears AA. */
+.missingTracking {
+  color: var(--color-error-strong);
+  font-weight: 600;
+}
+
+/* `var(--border)` is not a token and never has been, so these three borders
+   have simply not been drawing. */
+.orderCard {
+  margin-bottom: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+.orderCard:last-child { margin-bottom: 0; }
+
+.orderCardHeader {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.orderCardRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-2);
+  padding: 2px 0;
+  font-size: var(--font-size-body);
+}
+.orderCardRow > span:last-child {
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--font-numeric);
+}
+
+.orderTotalRow {
+  margin-top: var(--space-1);
+  padding-top: var(--space-1);
+  border-top: 1px solid var(--color-border);
+  font-weight: 600;
+}
+
+.orderFinancials {
+  margin-top: var(--space-2);
+  padding-top: var(--space-1);
+  border-top: 1px solid var(--color-border);
+}
+.orderLineItems {
+  margin-top: var(--space-2);
+  padding-top: var(--space-1);
+  border-top: 1px solid var(--color-border);
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--font-numeric);
+  font-size: 12px;
 }
 
 .loading {
@@ -102,148 +666,12 @@
   font-size: 13px;
 }
 
-.kpiRow {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 10px;
-}
-.kpi {
-  background: #fff;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  padding: 10px 14px;
-}
-.kpiLabel {
-  font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: var(--color-ink-subtle);
-  margin-bottom: 4px;
-}
-.kpiValue {
-  font-size: 20px;
-  font-weight: 800;
-  color: var(--color-ink);
-  font-variant-numeric: tabular-nums;
-}
-.kpiSub {
-  font-size: 10px;
-  color: var(--color-ink-subtle);
-  margin-top: 2px;
-}
-
-.filterBar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-  background: #fff;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  padding: 8px 12px;
-}
-.chip {
-  border: 1px solid var(--color-border);
-  background: #fff;
-  color: var(--color-ink-muted);
-  padding: 4px 10px;
-  border-radius: 12px;
-  font-size: 11px;
-  font-weight: 600;
-  cursor: pointer;
-}
-.chip:hover { border-color: var(--color-ink-subtle); color: var(--color-ink); }
-.chipActive {
-  background: var(--color-crimson);
-  color: #fff;
-  border-color: var(--color-crimson);
-}
-.searchInput {
-  flex: 1;
-  min-width: 200px;
-  padding: 6px 10px;
-  font-size: 12px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  font-family: inherit;
-}
-.searchInput:focus { outline: none; border-color: var(--color-crimson); }
-.resultCount {
-  font-size: 11px;
-  color: var(--color-ink-subtle);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
-.tableWrap {
-  background: #fff;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  overflow-x: auto;
-  overflow-y: auto;
-  max-height: calc(100vh - 480px);
-  min-height: 280px;
-}
-.table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 12px;
-}
-.table th {
-  position: sticky;
-  top: 0;
-  background: var(--color-surface);
-  border-bottom: 1.5px solid var(--color-border);
-  padding: 8px 10px;
-  text-align: left;
-  font-size: 10px;
-  font-weight: 700;
-  color: var(--color-ink-subtle);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  white-space: nowrap;
-}
-.table td {
-  padding: 7px 10px;
-  border-bottom: 1px solid #f0eee8;
-  vertical-align: middle;
-}
-.table tr:hover td { background: #fafaf6; }
-
-.mono { font-family: 'SF Mono', monospace; font-size: 11px; }
 .muted { color: var(--color-ink-faint); }
 .empty {
   padding: 30px;
   text-align: center;
   color: var(--color-ink-subtle);
   font-size: 12px;
-}
-
-.clickableRow {
-  cursor: pointer;
-}
-.clickableRow:hover {
-  background: var(--color-surface);
-}
-
-.panelBackdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(0,0,0,0.3);
-  z-index: 80;
-  display: flex;
-  justify-content: flex-end;
-}
-.panel {
-  width: 480px;
-  max-width: 90vw;
-  height: 100vh;
-  background: #fff;
-  border-left: 1px solid var(--color-border);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
 }
 
 /* Mobile: full viewport, no left-border (it's edge-to-edge). The backdrop
@@ -258,142 +686,32 @@
     padding-top: env(safe-area-inset-top);
   }
 }
-.panelHeader {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  padding: 18px 20px;
-  border-bottom: 1px solid var(--color-border);
-  background: var(--color-surface);
-}
-.panelTitle {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 700;
-  color: var(--color-ink);
-}
-.panelSubtitle {
-  font-size: 12px;
-  color: var(--color-ink-subtle);
-  margin-top: 2px;
-}
-.panelClose {
-  background: none;
-  border: none;
-  font-size: 24px;
-  cursor: pointer;
-  line-height: 1;
-  color: var(--color-ink-subtle);
-  padding: 0 6px;
-}
-.panelClose:hover {
-  color: var(--color-ink);
-}
-.panelBody {
-  flex: 1;
-  overflow-y: auto;
-  padding: 16px 20px;
-}
-.section {
-  margin-bottom: 22px;
-}
-.sectionTitle {
-  font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
-  color: var(--color-ink-subtle);
-  letter-spacing: 0.5px;
-  margin-bottom: 8px;
-}
-.sectionBody {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.kvRow {
-  display: flex;
-  gap: 8px;
-  align-items: baseline;
-  padding: 4px 0;
-  font-size: 12px;
-}
-.kvLabel {
-  min-width: 70px;
-  color: var(--color-ink-subtle);
-  font-size: 11px;
-}
-.kvValue, .kvValueMulti {
-  color: var(--color-ink);
-  flex: 1;
-}
-.kvValueMulti { white-space: pre-wrap; }
-.itemRow {
-  display: grid;
-  grid-template-columns: 1fr 80px 90px auto;
-  gap: 10px;
-  align-items: center;
+/* Other users in the household — one card per person, so several stacked
+   contacts stay visually separate rather than reading as one block. */
+.additionalUser {
   padding: 6px 0;
   border-bottom: 1px solid #f4f4f4;
   font-size: 12px;
 }
-.itemRow:last-child { border-bottom: none; }
-
-.orderCard {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 10px 12px;
-  margin-bottom: 8px;
-  background: var(--color-surface);
-}
-.orderCard:last-child { margin-bottom: 0; }
-.orderCardHeader {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
-  flex-wrap: wrap;
-}
-.orderCardRow {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 8px;
-  padding: 2px 0;
-  font-size: 12px;
-}
-.orderFinancials {
-  margin-top: 6px;
-  border-top: 1px solid #f4f4f4;
-  padding-top: 4px;
-}
-.orderLineItems {
-  margin-top: 6px;
-  border-top: 1px solid #f4f4f4;
-  padding-top: 4px;
-  opacity: 0.8;
-}
-.itemAmount {
-  font-variant-numeric: tabular-nums;
+.additionalUser:last-of-type { border-bottom: none; }
+.additionalUserName {
+  color: var(--color-ink);
   font-weight: 600;
-  text-align: right;
 }
-.emptyRow {
-  padding: 8px 0;
-  font-size: 12px;
+.additionalUserContact {
   color: var(--color-ink-subtle);
-  font-style: italic;
+  font-size: 11px;
+  margin-top: 2px;
 }
-.statusPill {
-  font-size: 10px;
-  padding: 2px 6px;
-  border-radius: 4px;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
-  font-weight: 600;
+.additionalUserActions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
 }
-
+.additionalUserForm {
+  padding: 6px 0;
+  border-bottom: 1px solid #f4f4f4;
+}
 
 /* Invoice rows */
 .invoiceRow {
@@ -420,18 +738,6 @@
   gap: 4px;
   align-items: center;
 }
-.linkBtn {
-  background: none;
-  border: none;
-  padding: 0 4px;
-  font-size: 11px;
-  color: var(--color-crimson);
-  cursor: pointer;
-  text-decoration: underline;
-  font-weight: 600;
-}
-.linkBtn:hover { opacity: 0.75; }
-.linkBtn:disabled { opacity: 0.4; cursor: not-allowed; }
 .invoiceUploadForm {
   margin-top: 10px;
   padding: 10px;
@@ -575,36 +881,6 @@
 .calEvent:hover { opacity: 0.8; }
 
 /* Customers module tabs (Directory / Profitability) */
-.titleRow {
-  display: flex;
-  align-items: center;
-  gap: 24px;
-  flex: 1;
-}
-.customersTabs {
-  display: flex;
-  gap: 4px;
-  border-bottom: 1px solid #e2e8f0;
-}
-.customersTab {
-  background: transparent;
-  border: none;
-  padding: 8px 16px;
-  cursor: pointer;
-  font-size: .9rem;
-  color: #718096;
-  border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
-}
-.customersTab:hover {
-  color: #2b6cb0;
-}
-.customersTabActive {
-  color: #2b6cb0;
-  border-bottom-color: #2b6cb0;
-  font-weight: 600;
-}
-
 /* Profitability tab */
 .profitabilityTab {
   padding: 16px 24px;
@@ -707,6 +983,86 @@
 .profStatGood { border-left: 4px solid #38a169; }
 .profStatBad  { border-left: 4px solid #c53030; }
 .profStatWarn { border-left: 4px solid #d69e2e; }
+/* Inline cost-provenance hints on a card's COGS / Shipping line. `est.` means
+   the roadmap projection rather than an invoiced batch price; `uncosted` means
+   freight we have no Freightcom invoice for, so the margin is an upper bound. */
+.profBasisHint {
+  font-size: .75rem;
+  color: #a0aec0;
+}
+.profUncostedHint {
+  font-size: .75rem;
+  color: #b7791f;
+}
+
+/* ── Retained units ───────────────────────────────────────────────────────────
+   Cost that belongs to no customer. A cancelled order is credited back and the
+   machine returns to stock, so it sits outside contribution margin — but the
+   machine was built, so it must stay visible. Deliberately styled as an aside
+   rather than a KPI: it is a real number, and it is not part of the total
+   above it. */
+.retainedBand {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 18px;
+  margin: 12px 0 4px;
+  padding: 12px 16px;
+  background: #fdfaf3;
+  border: 1px solid #f0e4c8;
+  border-left: 4px solid #d69e2e;
+  border-radius: 8px;
+}
+.retainedBandLabel {
+  font-size: .8rem;
+  font-weight: 600;
+  color: #7a5c12;
+}
+.retainedBandValue {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #2d3748;
+  font-variant-numeric: tabular-nums;
+}
+.retainedBandNote {
+  font-size: .78rem;
+  color: #8a7448;
+  flex: 1 1 220px;
+}
+
+/* ── Estimate marking ─────────────────────────────────────────────────────────
+   The model never presents an unmeasured number as measured, which only holds
+   if the reader can see which is which. Every figure that rests on a rate
+   rather than an invoice carries one of these, and the legend on the tab says
+   what they mean. Deliberately quiet: it should read as a footnote, not an
+   alarm — most of these numbers are perfectly usable, they are just not bills. */
+.estMark {
+  display: inline-block;
+  margin-left: 5px;
+  padding: 0 4px;
+  font-size: .62rem;
+  font-weight: 600;
+  letter-spacing: .03em;
+  text-transform: uppercase;
+  border-radius: 2px;
+  vertical-align: 2px;
+  background: #fdf3d9;
+  color: #8a6212;
+  border: 1px solid #f0dfae;
+}
+.estMarkPartial { background: #fdf3d9; color: #8a6212; border-color: #f0dfae; }
+.estMarkUnpriced { background: #eef1f4; color: #6b7684; border-color: #dde2e8; }
+
+.estLegend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  margin: 10px 0 0;
+  font-size: .75rem;
+  color: #718096;
+}
+.estLegend strong { font-weight: 600; color: #4a5568; }
 .profStatLabel {
   font-size: .75rem;
   color: #718096;
@@ -839,331 +1195,1256 @@
 }
 
 /* ─── Journey tab ──────────────────────────────────────────────────────────── */
-.journeyTab {
-  padding: 16px 24px;
+/* ─── Journey detail panel ──────────────────────────────────────────────── */
+/* ── Backlog #58 V9 — profitability dashboard ─────────────────────────────────
+   Views, KPI row, charts, the province/state choropleth and the customer
+   drill-down. Colour in the charts only ever encodes the sign of a number
+   (red money leaving, blue money staying); every mark is labelled with its
+   own value so nothing depends on colour alone. */
+
+.profViewNav {
+  display: flex;
+  gap: 2px;
+  border-bottom: 1px solid #e2e8f0;
+  margin-bottom: 14px;
+}
+.profViewTab {
+  padding: 8px 14px;
+  border: none;
+  background: none;
+  font-size: .85rem;
+  color: #718096;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.profViewTab:hover { color: #2d3748; }
+.profViewTabActive {
+  color: #1a202c;
+  font-weight: 600;
+  border-bottom-color: var(--color-crimson, #CC2D30);
 }
 
+.profClearBtn {
+  padding: 6px 12px;
+  border: 1px solid #cbd5e0;
+  border-radius: 6px;
+  background: #fff;
+  font-size: .8rem;
+  color: #4a5568;
+  cursor: pointer;
+}
+.profClearBtn:hover { background: #f7fafc; }
+
+.kpiGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.sectionHeading {
+  font-size: .95rem;
+  font-weight: 600;
+  color: #1a202c;
+  margin: 22px 0 8px;
+}
+.sectionNote {
+  font-size: .8rem;
+  color: #718096;
+  margin: 0 0 10px;
+  max-width: 68ch;
+  line-height: 1.5;
+}
+
+/* ── Charts ───────────────────────────────────────────────────────────────── */
+
+.overviewSplit {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.chartFigure {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 14px 16px;
+  margin: 0;
+}
+.chartTitle {
+  font-size: .85rem;
+  font-weight: 600;
+  color: #1a202c;
+  display: block;
+  margin-bottom: 10px;
+}
+.chartSub {
+  display: block;
+  font-size: .75rem;
+  font-weight: 400;
+  color: #718096;
+  margin-top: 2px;
+  line-height: 1.45;
+}
+.chartEmpty {
+  font-size: .8rem;
+  color: #718096;
+  padding: 18px 0;
+  line-height: 1.5;
+}
+.chartCanvas { width: 100%; }
+
+.waterfallSvg {
+  width: 100%;
+  height: 190px;
+  display: block;
+}
+.waterfallLabels {
+  display: flex;
+  margin-top: 6px;
+}
+.waterfallLabel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  min-width: 0;
+}
+.waterfallValue {
+  font-size: .7rem;
+  font-weight: 600;
+  color: #1a202c;
+  font-variant-numeric: tabular-nums;
+}
+.waterfallName {
+  font-size: .6rem;
+  color: #718096;
+  text-align: center;
+  line-height: 1.15;
+  word-break: break-word;
+}
+.waterfallTotal .waterfallName { color: #2d3748; font-weight: 600; }
+
+.histogram { display: flex; flex-direction: column; gap: 5px; }
+.histRow {
+  display: grid;
+  grid-template-columns: 110px 1fr 32px;
+  align-items: center;
+  gap: 8px;
+  cursor: default;
+}
+.histLabel { font-size: .74rem; color: #4a5568; font-variant-numeric: tabular-nums; }
+.histTrack { background: #f7fafc; border-radius: 3px; height: 14px; }
+.histBar { display: block; height: 14px; border-radius: 3px; min-width: 2px; }
+.histCount {
+  font-size: .74rem;
+  color: #1a202c;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.scatterSvg { width: 100%; height: 200px; display: block; }
+.scatterLabel { font-size: 2.6px; }
+.axisLabel { font-size: 2.8px; }
+.scatterReadout {
+  font-size: .75rem;
+  color: #4a5568;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid #edf2f7;
+}
+
+.cohortChart {
+  display: flex;
+  align-items: stretch;
+  gap: 3px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+.cohortCol {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 26px;
+  flex: 1;
+}
+.cohortBarArea {
+  height: 90px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.cohortBar { width: 100%; border-radius: 2px; }
+.cohortLabel {
+  font-size: .58rem;
+  color: #718096;
+  margin-top: 3px;
+  writing-mode: vertical-rl;
+  white-space: nowrap;
+}
+
+.cohortControls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: .8rem;
+  color: #4a5568;
+  margin-bottom: 8px;
+}
+.grainBtn, .grainActive {
+  padding: 4px 10px;
+  border: 1px solid #cbd5e0;
+  border-radius: 6px;
+  background: #fff;
+  font-size: .78rem;
+  cursor: pointer;
+  color: #4a5568;
+}
+.grainActive {
+  background: #1a202c;
+  border-color: #1a202c;
+  color: #fff;
+}
+.layoutToggle { display: flex; gap: 6px; margin: 12px 0 10px; }
+
+.bestWorst { display: flex; flex-direction: column; gap: 8px; }
+.bestWorstCard {
+  border: 1px solid #e2e8f0;
+  border-left: 4px solid #2a78d6;
+  border-radius: 6px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.bestWorstBad { border-left-color: #b93030; }
+.bestWorstTag {
+  font-size: .62rem;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: #718096;
+}
+.bestWorstCard strong { font-size: .95rem; color: #1a202c; }
+.bestWorstCard span:last-child { font-size: .78rem; color: #4a5568; }
+
+/* ── Geography choropleth ─────────────────────────────────────────────────── */
+
+.geoMapWrap {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 14px 16px;
+  margin-bottom: 18px;
+}
+.geoMapHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.geoMapTitle { font-size: .9rem; font-weight: 600; color: #1a202c; }
+.geoMapSub {
+  font-size: .75rem;
+  color: #718096;
+  margin-top: 2px;
+  max-width: 60ch;
+  line-height: 1.45;
+}
+.geoMeasureSelect {
+  padding: 6px 10px;
+  border: 1px solid #cbd5e0;
+  border-radius: 6px;
+  font-size: .8rem;
+  background: #fff;
+}
+.geoMapBody {
+  display: grid;
+  grid-template-columns: minmax(0, 4fr) minmax(200px, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+/* Below this the map's own labels start shrinking past legibility, so the
+   legend and readout give up the column and go underneath it. */
+@media (max-width: 1180px) {
+  .geoMapBody { grid-template-columns: minmax(0, 1fr); }
+}
+.geoMapSvg { width: 100%; height: auto; display: block; }
+
+.geoRegion { cursor: default; }
+.geoRegionActive { cursor: pointer; }
+/* Labels never eat the pointer — hovering "ON" must still hover Ontario. */
+.geoMapSvg text, .geoMapSvg polyline, .geoMapSvg circle { pointer-events: none; }
+
+.geoLabelCode { font-size: 12px; font-weight: 600; }
+.geoLabelValue { font-size: 10px; font-variant-numeric: tabular-nums; }
+.geoLabelCodeSmall { font-size: 9.5px; font-weight: 600; }
+.geoLabelValueSmall { font-size: 8.5px; font-variant-numeric: tabular-nums; }
+
+.geoInsetFrame { pointer-events: none; }
+.geoInsetLabel {
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: .06em;
+  fill: #718096;
+}
+.geoInsetValue {
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  fill: #1a202c;
+}
+
+.geoChipCode { font-size: 11px; font-weight: 600; fill: #1a202c; }
+.geoChipValue {
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  fill: #1a202c;
+}
+
+.geoSide { display: flex; flex-direction: column; gap: 12px; }
+.geoLegend { display: flex; flex-direction: column; gap: 4px; }
+.geoLegendScale { display: flex; height: 12px; border-radius: 3px; overflow: hidden; }
+.geoLegendScale span { flex: 1; }
+.geoLegendLabels {
+  display: flex;
+  justify-content: space-between;
+  font-size: .68rem;
+  color: #718096;
+  font-variant-numeric: tabular-nums;
+}
+.geoLegendNote {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+  font-size: .68rem;
+  color: #718096;
+}
+.geoLegendHatch {
+  width: 14px;
+  height: 12px;
+  border-radius: 2px;
+  border: 1px solid #e2e8f0;
+  background:
+    repeating-linear-gradient(45deg, #dcdcd8 0 1px, #fbfbfa 1px 6px);
+}
+.geoTooltip {
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 10px 12px;
+  background: #f7fafc;
+}
+.geoTooltipName { font-weight: 600; font-size: .85rem; color: #1a202c; margin-bottom: 6px; }
+.geoTooltip dl { margin: 0; display: flex; flex-direction: column; gap: 3px; }
+.geoTooltip dl > div { display: flex; justify-content: space-between; gap: 10px; }
+.geoTooltip dt { font-size: .72rem; color: #718096; }
+.geoTooltip dd {
+  margin: 0;
+  font-size: .72rem;
+  color: #1a202c;
+  font-variant-numeric: tabular-nums;
+}
+.geoTooltipHint {
+  font-size: .75rem;
+  color: #718096;
+  line-height: 1.5;
+}
+
+.rankList { display: flex; flex-direction: column; gap: 4px; }
+.rankRow {
+  display: grid;
+  grid-template-columns: 132px 1fr 66px 28px;
+  align-items: center;
+  gap: 8px;
+  border: none;
+  background: none;
+  padding: 3px 0;
+  cursor: pointer;
+  text-align: left;
+}
+.rankRow:hover { background: #f7fafc; }
+.rankName {
+  font-size: .78rem;
+  color: #2d3748;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rankTrack { background: #f7fafc; border-radius: 3px; height: 12px; }
+.rankBar { display: block; height: 12px; border-radius: 3px; min-width: 2px; }
+.rankValue {
+  font-size: .75rem;
+  text-align: right;
+  color: #1a202c;
+  font-variant-numeric: tabular-nums;
+}
+.rankCount { font-size: .7rem; color: #a0aec0; text-align: right; }
+
+/* ── Segment / customer tables ────────────────────────────────────────────── */
+
+.segTableWrap {
+  overflow-x: auto;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+}
+.segTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: .78rem;
+}
+.segTable th {
+  text-align: left;
+  padding: 9px 10px;
+  background: #f7fafc;
+  color: #4a5568;
+  font-weight: 600;
+  font-size: .7rem;
+  text-transform: uppercase;
+  letter-spacing: .03em;
+  white-space: nowrap;
+  border-bottom: 1px solid #e2e8f0;
+}
+.segTable td {
+  padding: 8px 10px;
+  border-bottom: 1px solid #edf2f7;
+  color: #2d3748;
+  white-space: nowrap;
+}
+.segTable tbody tr:last-child td { border-bottom: none; }
+.segTable .num { text-align: right; font-variant-numeric: tabular-nums; }
+.segName { font-weight: 500; color: #1a202c; display: flex; align-items: center; gap: 5px; }
+.segClickable { cursor: pointer; }
+.segClickable:hover { background: #f7fafc; }
+.segSelected { background: #ebf8ff; }
+.segLoss { background: #fffafa; }
+.lossMark { color: #b93030; font-size: .65rem; }
+.negative { color: #b93030; }
+.positive { color: #184f95; }
+.unpriced { color: #a0aec0; font-style: italic; font-size: .95em; }
+.paybackCell { font-size: .74rem; color: #4a5568; }
+
+/* ── Customer detail panel ────────────────────────────────────────────────── */
+
+.detailBackdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(11, 11, 11, 0.35);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 40px 20px;
+  overflow-y: auto;
+  z-index: 50;
+}
+.detailPanel {
+  background: #fff;
+  border-radius: 10px;
+  padding: 20px 24px;
+  width: min(920px, 100%);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, .2);
+}
+.detailHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  border-bottom: 1px solid #edf2f7;
+  padding-bottom: 12px;
+}
+.detailName { font-size: 1.1rem; font-weight: 600; color: #1a202c; }
+.detailMeta { font-size: .78rem; color: #718096; margin-top: 3px; }
+.detailClose {
+  border: none;
+  background: none;
+  font-size: 1.5rem;
+  line-height: 1;
+  color: #a0aec0;
+  cursor: pointer;
+  padding: 0 4px;
+}
+.detailClose:hover { color: #4a5568; }
+.detailHero {
+  font-size: 2rem;
+  font-weight: 700;
+  margin: 16px 0 20px;
+  font-variant-numeric: tabular-nums;
+  display: flex;
+  flex-direction: column;
+}
+.detailHeroLabel {
+  font-size: .72rem;
+  font-weight: 400;
+  color: #718096;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  margin-top: 2px;
+}
+.detailCols {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 20px;
+}
+.detailCols h4 {
+  font-size: .72rem;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: #718096;
+  margin: 0 0 8px;
+}
+.detailList { margin: 0; display: flex; flex-direction: column; gap: 4px; }
+.detailList > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: baseline;
+}
+.detailList dt { font-size: .76rem; color: #4a5568; }
+.detailList dd {
+  margin: 0;
+  font-size: .78rem;
+  color: #1a202c;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.detailRowStrong {
+  border-top: 1px solid #edf2f7;
+  padding-top: 4px;
+  margin-top: 2px;
+}
+.detailRowStrong dt, .detailRowStrong dd { font-weight: 600; }
+.detailUsage {
+  margin-top: 20px;
+  padding-top: 14px;
+  border-top: 1px solid #edf2f7;
+}
+.detailUsage h4 {
+  font-size: .72rem;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: #718096;
+  margin: 0 0 6px;
+}
+.detailUsage p {
+  margin: 0;
+  font-size: .78rem;
+  color: #4a5568;
+  line-height: 1.55;
+  max-width: 72ch;
+}
+.detailGaps {
+  margin-top: 16px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: #fffbeb;
+  border: 1px solid #f6ad55;
+  font-size: .76rem;
+  color: #744210;
+}
+.detailGaps ul { margin: 5px 0 0; padding-left: 18px; }
+.detailGaps li { margin-bottom: 2px; }
+
+/* ── Data-quality disclosure ──────────────────────────────────────────────── */
+
+.dataQuality {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+  padding: 10px 14px;
+  margin-top: 18px;
+}
+.dataQuality summary {
+  cursor: pointer;
+  font-size: .82rem;
+  font-weight: 600;
+  color: #4a5568;
+}
+.dataQualityBody {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px;
+}
+.dataQualityBody h5 {
+  font-size: .7rem;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: #718096;
+  margin: 0 0 5px;
+}
+.dataQualityBody p, .dataQualityBody li {
+  font-size: .76rem;
+  color: #4a5568;
+  line-height: 1.55;
+  margin: 0;
+}
+.dataQualityBody ul { margin: 0; padding-left: 16px; }
+.dataQualityBody li { margin-bottom: 4px; }
+.dataQualityBody code {
+  font-size: .95em;
+  background: #f7fafc;
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+/* Directory search: names the household member a row matched on, when that
+   isn't the purchaser whose name the Name column shows. */
+/* ══════════════════════════════════════════════════════════════════════════
+   Journey tab — the ten-stage CJM, per customer.
+
+   Converted alongside the Directory (2026-09-01). What this replaced:
+
+     - A funnel of eleven boxes, each with a 2px border in its own stage
+       colour: grey, gold, two blues, two purples, green, red, brown, green.
+       Ten hues, none of them in the palette, none of them encoding anything
+       the stage label wasn't already saying — and because every box was the
+       same width, the one thing an operator wants from a funnel (where the
+       customers actually are) could only be got by reading eleven numbers and
+       comparing them. The rail below encodes that as length instead.
+     - Card hover lifted 2px on a cold black shadow. In a grid of 146 cards
+       that is a lot of movement for "you are pointing at this one".
+     - The 32px coloured disc with an emoji in it. Satisfaction is now a dot
+       and the word itself, which is both quieter and more precise —
+       "concerned" and "neutral" were two emoji apart and easy to confuse.
+
+   Stage colour is gone; stage POSITION is the information, so the rail and
+   the timeline number the stages 01–10 and let ink carry the rest. The CJM's
+   own per-stage emoji stay in the detail panel, where the timeline reproduces
+   the canonical stage definitions.
+
+   Satisfaction keeps its colour, because there it is a real scale and the
+   sort order depends on it — remapped onto the status tokens.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.journeyTab {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+/* ── Nameless-customer banner ─────────────────────────────────────────────
+   Was #fffaf0 / #fbd38d / #744210 with a filled #c05621 button — a warning
+   built out of four hexes that only approximated the warning tokens. */
 .journeyNamelessBanner {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  background: #fffaf0;
-  border: 1px solid #fbd38d;
-  color: #744210;
-  border-radius: 8px;
-  padding: 12px 16px;
-  margin-bottom: 12px;
-  font-size: .85rem;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-warning-border);
+  border-radius: var(--radius-md);
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
+  font-size: var(--font-size-body);
 }
-.journeyNamelessHint {
-  color: #975a16;
-  font-size: .8rem;
-}
-.journeyNamelessBtn {
-  background: #c05621;
-  color: #fff;
-  border: none;
-  padding: 6px 14px;
-  border-radius: 6px;
-  font-size: .8rem;
-  font-weight: 700;
-  cursor: pointer;
-  white-space: nowrap;
-}
-.journeyNamelessBtn:hover:not(:disabled) { background: #9c4221; }
-.journeyNamelessBtn:disabled { opacity: .6; cursor: not-allowed; }
-.journeyNamelessResult {
-  background: #f0fff4;
-  border: 1px solid #9ae6b4;
-  color: #276749;
-  padding: 8px 14px;
-  border-radius: 6px;
-  font-size: .8rem;
-  margin-bottom: 12px;
-}
+.journeyNamelessHint { color: var(--color-ink-muted); }
 
-.journeyFunnel {
+/* ── Stage rail ───────────────────────────────────────────────────────────
+   One row, ten stages in order, plus All. Each cell carries its ordinal, its
+   name, its count in the data face, and a track whose fill is that count as a
+   share of the busiest stage — so the shape of the funnel is legible without
+   reading a single number. */
+.journeyRail {
   display: grid;
-  grid-template-columns: repeat(11, minmax(0, 1fr));
-  gap: 6px;
-  margin-bottom: 14px;
-}
-.journeyFunnelStage {
-  background: #fff;
-  border: 2px solid #cbd5e0;
-  border-radius: 6px;
-  padding: 8px 4px;
-  cursor: pointer;
-  text-align: center;
-  transition: transform .1s, background .1s;
-}
-.journeyFunnelStage:hover { transform: translateY(-1px); background: #f7fafc; }
-.journeyFunnelActive { background: #f7fafc; box-shadow: inset 0 -3px 0 currentColor; }
-.journeyFunnelLabel { font-size: .7rem; color: #2d3748; font-weight: 600; }
-.journeyFunnelCount { font-size: 1.1rem; font-weight: 700; color: #1a202c; margin-top: 2px; }
-
-.journeyControls {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  align-items: center;
-  margin-bottom: 16px;
-}
-.journeyResultCount {
-  margin-left: auto;
-  font-size: .8rem;
-  color: #718096;
+  grid-template-columns: auto repeat(10, minmax(0, 1fr));
+  gap: 1px;
+  padding: 1px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-border);
+  overflow: hidden;
 }
 
-.journeyGrid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 12px;
-}
-
-.journeyCard {
-  background: #fff;
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
-  padding: 12px 14px;
-  cursor: pointer;
-  text-align: left;
-  font-family: inherit;
+.journeyRailCell {
+  position: relative;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  transition: transform .1s, box-shadow .1s;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-2) var(--space-1);
+  border: 0;
+  background: var(--color-raised);
+  text-align: left;
+  transition: background var(--dur-fast) var(--ease-out);
 }
-.journeyCard:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 16px rgba(0,0,0,.08);
+.journeyRailCell:hover { background: var(--color-surface); }
+.journeyRailCell:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.journeyRailActive { background: var(--color-surface); }
+
+/* The phase band. Colour identifies which part of the journey a stage belongs
+   to; the label and the count stay ink, so nothing legible depends on hue.
+   4px rather than a hairline because the interest amber is a light colour and
+   a 1px rule of it would disappear against the card. */
+.journeyRailPhaseRule {
+  height: 4px;
+  margin: calc(var(--space-2) * -1) calc(var(--space-2) * -1) 0;
+  border-radius: var(--radius-pill) var(--radius-pill) 0 0;
+  background: var(--phase, transparent);
 }
-.journeyCardHead {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
+
+.journeyRailOrdinal {
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--font-numeric);
+  font-size: 10px;
+  color: var(--color-ink-faint);
 }
-.journeyCardName {
-  font-weight: 700;
-  font-size: .95rem;
-  color: #1a202c;
-  flex: 1;
+.journeyRailLabel {
+  font-size: var(--font-size-meta);
+  font-weight: 600;
+  line-height: 1.25;
+  color: var(--color-ink-subtle);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.journeyCardMood {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
+.journeyRailActive .journeyRailLabel { color: var(--color-ink); }
+
+.journeyRailCount {
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--font-numeric);
+  font-size: 17px;
+  font-weight: 500;
+  line-height: 1.1;
+  color: var(--color-ink);
+}
+/* A stage with nobody in it is not worth the same ink as a busy one. */
+.journeyRailZero { color: var(--color-ink-faint); }
+
+.journeyRailTrack {
+  height: 3px;
+  margin-top: auto;
+  border-radius: var(--radius-pill);
+  background: rgba(var(--color-ink-rgb), 0.07);
+  overflow: hidden;
+}
+.journeyRailFill {
+  height: 100%;
+  border-radius: var(--radius-pill);
+  /* Magnitude, in the stage's phase colour. Length is the number; the colour
+     is only saying which phase the number belongs to. */
+  background: var(--phase, var(--color-ink-faint));
+}
+/* Selection is ink, the way it is everywhere else in the app — so "which one
+   did I click" never competes with "which phase is this". */
+.journeyRailActive .journeyRailFill { background: var(--color-ink); }
+
+.journeyLegend {
   display: flex;
   align-items: center;
-  justify-content: center;
-  font-size: 18px;
-  color: #fff;
-  flex-shrink: 0;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  margin-top: calc(var(--space-2) * -1);
 }
+.journeyLegendItem {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-size-meta);
+  color: var(--color-ink-subtle);
+}
+.journeyLegendSwatch {
+  width: 10px;
+  height: 4px;
+  border-radius: var(--radius-pill);
+  flex: none;
+}
+
+/* ── Controls ─────────────────────────────────────────────────────────────
+   Same row the Directory uses: search, hairline, chips. Satisfaction was a
+   bare <select> with three options, which is a chip group wearing a disguise. */
+.journeyControls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+.journeyResultCount {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--font-numeric);
+  font-size: var(--font-size-meta);
+  color: var(--color-ink-subtle);
+  white-space: nowrap;
+}
+
+/* ── Cards ────────────────────────────────────────────────────────────────— */
+.journeyGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: var(--space-3);
+}
+
+.journeyCard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-raised);
+  text-align: left;
+  font: inherit;
+  transition: background var(--dur-fast) var(--ease-out),
+              border-color var(--dur-fast) var(--ease-out);
+}
+.journeyCard:hover {
+  background: var(--color-surface);
+  border-color: var(--color-ink-faint);
+}
+.journeyCard:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+
+.journeyCardHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+.journeyCardName {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--font-size-body);
+  font-weight: 600;
+  color: var(--color-ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Satisfaction: a dot and the word. The colour is the scale, the word is the
+   precision — neither is asked to work alone. */
+.journeyMood {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex: none;
+  font-size: var(--font-size-meta);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-ink-muted);
+}
+.journeyMoodDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+}
+
 .journeyCardStage {
-  display: inline-block;
-  font-size: .75rem;
-  font-weight: 700;
-  padding: 3px 8px;
-  border: 1px solid;
-  border-radius: 4px;
-  align-self: flex-start;
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  font-size: var(--font-size-body);
+  color: var(--color-ink);
+}
+.journeyCardStageOrdinal {
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--font-numeric);
+  font-size: var(--font-size-meta);
+  color: var(--color-ink-faint);
 }
 .journeyCardEmotion {
-  font-size: .75rem;
-  color: #4a5568;
-  font-style: italic;
-  line-height: 1.35;
+  font-size: var(--font-size-meta);
+  line-height: 1.4;
+  color: var(--color-ink-subtle);
 }
+
+/* Ten segments, one per stage. Where they are now is the solid one; where
+   they have been is faint; ahead of them is barely there. */
 .journeyCardMini {
   display: flex;
-  gap: 4px;
-  margin-top: 4px;
+  gap: 2px;
+  margin-top: auto;
+  padding-top: var(--space-1);
 }
 .journeyCardMiniDot {
   flex: 1;
-  height: 6px;
-  border-radius: 3px;
+  height: 4px;
+  border-radius: var(--radius-pill);
+  background: rgba(var(--color-ink-rgb), 0.09);
+}
+.journeyCardMiniReached { background: var(--color-ink-subtle); }
+.journeyCardMiniCurrent { background: var(--color-ink); }
+
+.journeyDormancy {
+  align-self: flex-start;
+  padding: 1px var(--space-2);
+  border: 1px solid;
+  border-radius: var(--radius-sm);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
-/* ─── Journey detail panel ──────────────────────────────────────────────── */
+/* ── Detail modal ─────────────────────────────────────────────────────────
+   Its own backdrop: the shared .panelBackdrop pins to the right for the
+   Directory drawer, and a 1200px panel pinned right reads as a drawer that
+   didn't make it to the edge. This one is a modal, so it is centred. */
+.journeyBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-5);
+  background: rgba(var(--color-ink-rgb), 0.32);
+}
+
 .journeyPanel {
-  background: #fff;
-  width: min(1200px, 96vw);
+  width: min(1200px, 100%);
   max-height: 92vh;
-  border-radius: 10px;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-raised);
+  box-shadow: var(--shadow-lg);
 }
-.journeyPanelMood {
-  display: inline-block;
-  margin-left: 12px;
-  padding: 3px 10px;
-  border-radius: 12px;
-  color: #fff;
-  font-size: .75rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: .03em;
+
+.journeyPanelBody {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
 }
+
+.journeyPanelHeadline {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
 .journeyManualBadge {
-  display: inline-block;
-  margin-left: 8px;
-  padding: 2px 8px;
-  border-radius: 4px;
-  background: #fefcbf;
-  color: #744210;
-  border: 1px solid #d69e2e;
-  font-size: .65rem;
-  font-weight: 700;
+  padding: 1px var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
-  letter-spacing: .04em;
+  color: var(--color-ink-muted);
 }
+
 .journeyStagePicker {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-3);
   flex-wrap: wrap;
-  padding: 10px 14px;
-  background: #f7fafc;
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
-  margin-bottom: 12px;
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
 }
 .journeyStagePickerLabel {
-  font-size: .8rem;
-  font-weight: 700;
-  color: #2d3748;
+  font-size: var(--font-size-meta);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-ink-subtle);
 }
-.journeyStagePickerSelect {
-  padding: 5px 10px;
-  font-size: .85rem;
-  border: 1px solid #cbd5e0;
-  border-radius: 6px;
-  background: #fff;
-  font-family: inherit;
-}
-.journeyStagePickerClear {
-  padding: 5px 12px;
-  font-size: .75rem;
-  background: #fff;
-  border: 1px solid #cbd5e0;
-  border-radius: 6px;
-  cursor: pointer;
-  color: #4a5568;
-}
-.journeyStagePickerClear:hover:not(:disabled) { background: #edf2f7; }
-.journeyStagePickerClear:disabled { opacity: .6; cursor: not-allowed; }
+.journeyStagePickerSelect { width: auto; min-width: 240px; }
 .journeyStagePickerErr {
-  font-size: .75rem;
-  color: #c53030;
-}
-.journeyPanelHint {
-  font-size: .75rem;
-  color: #4a5568;
-  background: #f7fafc;
-  padding: 8px 12px;
-  border-radius: 6px;
-  margin-bottom: 14px;
-}
-.journeyPanelHint code {
-  background: #edf2f7;
-  padding: 1px 5px;
-  border-radius: 3px;
-  font-size: .7rem;
+  font-size: var(--font-size-meta);
+  color: var(--color-error-strong);
 }
 
+.journeyAttribution {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  align-items: center;
+}
+.journeyAttrChip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  padding: 2px var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  font-size: var(--font-size-meta);
+  color: var(--color-ink-muted);
+}
+.journeyAttrChip strong {
+  font-family: var(--font-mono);
+  font-weight: 500;
+  color: var(--color-ink);
+}
+.journeyAttrLabel {
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-ink-subtle);
+}
+.journeyAttrUnknown {
+  font-size: var(--font-size-meta);
+  color: var(--color-ink-faint);
+}
+
+.journeyPanelHint {
+  padding: var(--space-3);
+  border-left: 2px solid var(--color-border);
+  font-size: var(--font-size-meta);
+  line-height: 1.5;
+  color: var(--color-ink-subtle);
+}
+.journeyPanelHint code {
+  font-family: var(--font-mono);
+  color: var(--color-ink-muted);
+}
+
+/* ── Timeline ─────────────────────────────────────────────────────────────
+   Ten columns. The heads used to be ten saturated colour blocks with white
+   text; they are now ink on the card ground, and the ordinal does the job the
+   colour was doing badly. The stage the customer is actually in is the only
+   one that gets an accent — which is the whole question this view answers. */
 .journeyTimeline {
   display: grid;
   grid-template-columns: repeat(10, minmax(0, 1fr));
-  gap: 6px;
-  margin-bottom: 18px;
+  gap: var(--space-1);
 }
+
 .journeyTimelineStage {
-  background: #fff;
-  border: 1px solid #e2e8f0;
-  border-top: 4px solid;
-  border-radius: 6px;
   display: flex;
   flex-direction: column;
-  min-height: 200px;
+  min-height: 190px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-raised);
+  overflow: hidden;
 }
-.journeyTimelineCurrent {
-  box-shadow: 0 0 0 2px #2b6cb0;
+.journeyTimelineCurrent { border-color: var(--color-ink); }
+.journeyTimelineCurrent .journeyTimelineHead {
+  background: var(--color-ink);
+  border-bottom-color: var(--color-ink);
 }
+.journeyTimelineCurrent .journeyTimelineLabel { color: var(--color-page); }
+.journeyTimelineCurrent .journeyTimelineOrdinal { color: var(--color-on-dark-muted); }
+
 .journeyTimelineHead {
-  color: #fff;
-  padding: 8px 6px;
+  padding: var(--space-2);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface);
   text-align: center;
 }
-.journeyTimelineEmoji { font-size: 18px; }
-.journeyTimelineLabel { font-size: .7rem; font-weight: 700; margin-top: 2px; }
+.journeyTimelineOrdinal {
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--font-numeric);
+  font-size: 10px;
+  color: var(--color-ink-faint);
+}
+.journeyTimelineEmoji { font-size: 15px; line-height: 1.3; }
+.journeyTimelineLabel {
+  font-size: var(--font-size-meta);
+  font-weight: 600;
+  color: var(--color-ink);
+  line-height: 1.25;
+}
+
 .journeyTimelineBody {
-  padding: 8px;
-  font-size: .7rem;
+  flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  flex: 1;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  font-size: var(--font-size-meta);
 }
 .journeyTimelineNotYet {
-  color: #a0aec0;
-  font-style: italic;
   text-align: center;
+  color: var(--color-ink-faint);
 }
 .journeyTimelineScore {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  padding: 6px 0;
-  border-bottom: 1px dashed #e2e8f0;
+  justify-content: center;
+  gap: var(--space-2);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--color-border);
 }
-.journeyTimelineScoreVal { font-size: 1rem; font-weight: 700; }
-.journeyTimelineScoreLabel { font-size: .65rem; color: #718096; text-transform: uppercase; }
+.journeyTimelineScoreVal {
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--font-numeric);
+  font-size: 13px;
+  font-weight: 500;
+}
+.journeyTimelineScoreLabel {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-ink-subtle);
+}
 .journeyTimelineSignals {
-  list-style: disc;
-  margin: 0;
-  padding-left: 14px;
-  color: #2d3748;
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: var(--space-1);
+  margin: 0;
+  padding-left: var(--space-4);
+  color: var(--color-ink-muted);
+  line-height: 1.4;
 }
-.journeyTimelineNoSignal { color: #a0aec0; }
+.journeyTimelineNoSignal { color: var(--color-ink-faint); list-style: none; margin-left: calc(var(--space-4) * -1); }
 .journeyTimelineEmotion {
   margin-top: auto;
-  padding-top: 6px;
-  border-top: 1px dotted #e2e8f0;
-  color: #4a5568;
-  font-style: italic;
-  font-size: .65rem;
-  line-height: 1.35;
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--color-border);
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--color-ink-subtle);
 }
 
+/* ── Raw signals ──────────────────────────────────────────────────────────— */
 .journeyDataDump {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
-  gap: 14px;
-  margin-top: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: var(--space-4);
 }
 .journeyDataDumpTitle {
-  font-size: .75rem;
-  font-weight: 700;
-  color: #2d3748;
-  margin-bottom: 6px;
+  margin-bottom: var(--space-2);
+  padding-bottom: var(--space-1);
+  border-bottom: 1px solid var(--color-border);
+  font-size: var(--font-size-meta);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-ink-subtle);
 }
 .journeyDataDumpRow {
-  font-size: .7rem;
-  color: #4a5568;
-  padding: 3px 0;
-  border-bottom: 1px dotted #edf2f7;
+  padding: var(--space-1) 0;
+  border-bottom: 1px solid rgba(var(--color-ink-rgb), 0.06);
+  font-size: var(--font-size-meta);
+  color: var(--color-ink-muted);
+}
+.journeyDataDumpRow:last-child { border-bottom: none; }
+.journeyDataDumpRow code {
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--font-numeric);
+  color: var(--color-ink);
 }
 
-.followupMoved { font-size: 13px; color: var(--color-ink-subtle); padding: 8px 0; }
-.followupMoved a { color: #2b6cb0; font-weight: 600; text-decoration: none; }
-.followupMoved a:hover { text-decoration: underline; }
+/* Skeleton cards while the six hooks this tab joins are still landing. */
+.journeySkelCard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-raised);
+  min-height: 118px;
+}
+
+@media (max-width: 1180px) {
+  /* Ten columns of anything stop being readable well before this; the rail
+     scrolls sideways and the timeline wraps to two rows of five. */
+  .journeyRail {
+    grid-template-columns: auto repeat(10, minmax(84px, 1fr));
+    overflow-x: auto;
+  }
+  .journeyTimeline { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+}
+
+/* ── Batch profitability ──────────────────────────────────────────────────── */
+
+.batchHeadline {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.batchHeadlineCard {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 12px 14px;
+  background: #fff;
+}
+.batchHeadlineLabel {
+  font-size: .7rem;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: #718096;
+}
+.batchHeadlineValue {
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: #1a202c;
+  margin-top: 4px;
+  font-variant-numeric: tabular-nums;
+}
+.batchHeadlineOf { font-size: 1rem; color: #a0aec0; font-weight: 400; }
+.batchHeadlineSub {
+  font-size: .75rem;
+  color: #718096;
+  margin-top: 3px;
+  line-height: 1.4;
+}
+
+/* The confounding notice. Amber rather than red: it qualifies the numbers,
+   it does not say they are broken. */
+.batchWarning {
+  border: 1px solid #f0d8a8;
+  border-left: 3px solid #d99a2b;
+  background: #fffdf7;
+  border-radius: 6px;
+  padding: 10px 14px;
+  font-size: .78rem;
+  line-height: 1.55;
+  color: #5b4a2a;
+  margin-bottom: 12px;
+  max-width: 92ch;
+}
+
+.batchEra { font-size: .76rem; color: #718096; white-space: nowrap; }
+.batchMixedMark { color: #a0aec0; margin-left: 2px; cursor: help; }
+/* Country split of a batch's units. Context for comparing two batches — the
+   tab deliberately carries no per-region margin. */
+.batchMarket {
+  font-size: .76rem;
+  color: #4a5568;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.futureBatchPanel {
+  margin-top: 22px;
+  padding-top: 16px;
+  border-top: 1px solid #edf2f7;
+}
+.futureBatchTitle { font-size: .9rem; font-weight: 600; color: #1a202c; }
+.futureBatchGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+.futureBatchCard {
+  border: 1px dashed #cbd5e0;
+  border-radius: 8px;
+  padding: 12px 14px;
+  background: #fcfcfb;
+}
+.futureBatchName { font-weight: 600; color: #1a202c; margin-bottom: 8px; }
+.futureBatchFacts { margin: 0; font-size: .76rem; }
+.futureBatchFacts > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 3px 0;
+}
+.futureBatchFacts dt { color: #718096; }
+.futureBatchFacts dd { margin: 0; color: #1a202c; font-variant-numeric: tabular-nums; }
+
+/* A batch whose cost is a modelled placeholder rather than an invoice. */
+.cogsModelled {
+  color: #9a6a12;
+  background: #fdf6e7;
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-size: .95em;
+  cursor: help;
+}

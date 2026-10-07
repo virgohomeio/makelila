@@ -3,7 +3,10 @@ import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from './supabase';
 import { logAction } from './activityLog';
 import { sendTemplate } from './templates';
-import { cancelPendingReplacementsForTicket } from './orders';
+import {
+  cancelPendingReplacementsForTicket, shipQueuedReplacementsForTicket,
+  liveReplacementsForTicket,
+} from './orders';
 
 // ============================================================ Types
 
@@ -13,13 +16,21 @@ import { cancelPendingReplacementsForTicket } from './orders';
 export type TicketCategory = 'onboarding' | 'support' | 'repair' | 'diagnosis_call';
 export type TicketSource =
   | 'calendly' | 'customer_form' | 'hubspot' | 'fulfillment_flag'
-  | 'ops_manual' | 'gmail' | 'quo' | 'google_calendar' | 'telemetry_auto';
+  | 'ops_manual' | 'gmail' | 'quo' | 'google_calendar' | 'telemetry_auto'
+  | 'lovely_app';
 
 export type TicketKind = 'conversation' | 'ticket';
 export type InboxDisposition = 'promoted' | 'sales' | 'follow_up' | 'dismissed';
+// Order is load-bearing: statuses are multi-select, and the FIRST one a ticket
+// holds in this order becomes its primary `status`. 'return_refund' sits with
+// 'queued_for_replacement' — both are post-sale escalations that outrank the
+// scheduling states below them. 'replacement_sent' follows
+// 'queued_for_replacement' because it is the next state of the same thread:
+// setting it clears "queued" and ships the order (see setTicketStatuses).
 export const TICKET_STATUSES = [
   'waiting_on_us', 'in_progress', 'waiting_on_customer',
-  'queued_for_replacement', 'call_scheduled', 'on_hold', 'closed',
+  'queued_for_replacement', 'replacement_sent', 'return_refund',
+  'call_scheduled', 'on_hold', 'closed',
 ] as const;
 export type TicketStatus = (typeof TICKET_STATUSES)[number];
 export type TicketPriority = 'low' | 'normal' | 'high' | 'urgent';
@@ -56,10 +67,16 @@ export type ServiceTicket = {
   ticket_number: string;
   category: TicketCategory;
   source: TicketSource;
+  /** The PRIMARY status. Statuses are multi-select (see `tags`); this column
+   *  mirrors the first one because open-vs-closed, closed_at, SLA resolution
+   *  and every open-queue count key off a single value. */
   status: TicketStatus;
-  // Multi-select status tags — separate from the single workflow `status`.
-  // Reuses the status vocabulary (TicketStatus keys). Optional: undefined on
-  // rows read before the `tags` column migration lands; treat as [] on read.
+  /** The full multi-select status set, including the primary that `status`
+   *  mirrors. Never render this alongside `status` — that double-prints the
+   *  primary. Read the set with ticketStatusSet(), write it with
+   *  setTicketStatuses(). Optional: undefined on rows read before the column
+   *  landed, and empty on rows only ever written by the pre-multi-select code;
+   *  ticketStatusSet() handles both by unioning with `status`. */
   tags?: TicketStatus[];
   priority: TicketPriority;
   customer_id: string | null;
@@ -115,6 +132,10 @@ export type ServiceTicket = {
   linear_issue_url: string | null;
   github_issue_url: string | null;
   engineering_resolved_at: string | null;
+  /** Lovely project damage_reports.id for source 'lovely_app' tickets; the
+   *  detail panel loads the report's photos by it. Optional: absent on rows
+   *  read before the column landed. */
+  lovely_report_id?: string | null;
 };
 
 export type CustomerLifecycle = {
@@ -187,15 +208,19 @@ export type TicketActionItem = {
   author_id: string | null;
   author_email: string | null;
   created_at: string;
+  /** Calendar day the item is due, 'YYYY-MM-DD', or null when unscheduled.
+   *  A `date` column, so it carries no timezone — compare it as a string. */
+  due_date: string | null;
 };
 
 // ============================================================ Display metadata
 
+/* Category badges, same warm ramp and same no-red rule as STATUS_META. */
 export const CATEGORY_META: Record<TicketCategory, { label: string; color: string; bg: string }> = {
-  onboarding:     { label: 'Onboarding',     color: '#276749', bg: '#f0fff4' },
-  support:        { label: 'Support',        color: '#2b6cb0', bg: '#ebf8ff' },
-  repair:         { label: 'Repair',         color: '#c05621', bg: '#fffaf0' },
-  diagnosis_call: { label: 'Diagnosis call', color: '#805ad5', bg: '#faf5ff' },
+  onboarding:     { label: 'Onboarding',     color: '#3E6B45', bg: '#EBF2EA' },
+  support:        { label: 'Support',        color: '#2F6660', bg: '#E8F1EF' },
+  repair:         { label: 'Repair',         color: '#8C4A2F', bg: '#F7EDE7' },
+  diagnosis_call: { label: 'Diagnosis call', color: '#6B4472', bg: '#F3EDF5' },
 };
 
 export const TOPIC_LABEL: Record<TicketTopic, string> = {
@@ -216,21 +241,45 @@ export const TOPIC_LABEL: Record<TicketTopic, string> = {
   other:                  'Other',
 };
 
+/* Status pill colours.
+ *
+ * These used to be drawn from the cool blue-gray ramp the redesign spec
+ * measured and marked for deletion (#2b6cb0 / #718096 / #edf2f7 …), which put
+ * a second, colder neutral palette next to the warm brand one in the same
+ * table. They are now warm hues that sit on --color-surface / --color-page.
+ *
+ * Two rules hold this set together:
+ *   1. No red. Ladybug Red means "action" — primary buttons, active nav,
+ *      unread counts — so no status may compete with it. That is also the
+ *      real fix for the collision the spec flagged between brand red and
+ *      error red: if nothing on the row is red, a destructive warning can
+ *      never be mistaken for a primary action.
+ *   2. Every `color` clears 4.5:1 against its own `bg` (WCAG AA for the
+ *      11px pill text). Asserted in service.statusColours.test.ts.
+ *
+ * Hex rather than var() because these are consumed as inline style values on
+ * pill elements, not from CSS; the raw-hex guardrail scopes to *.module.css. */
 export const STATUS_META: Record<TicketStatus, { label: string; color: string; bg: string }> = {
-  waiting_on_us:          { label: 'Action Needed',          color: '#2b6cb0', bg: '#ebf8ff' },
-  in_progress:            { label: 'In Progress',            color: '#c05621', bg: '#fffaf0' },
-  waiting_on_customer:    { label: 'Awaiting Customer Response', color: '#718096', bg: '#f7fafc' },
-  queued_for_replacement: { label: 'Queued for Replacement', color: '#553c9a', bg: '#faf5ff' },
-  call_scheduled:         { label: 'Call Scheduled',         color: '#2c7a7b', bg: '#e6fffa' },
-  on_hold:                { label: 'On Hold',                color: '#b7791f', bg: '#fffff0' },
-  closed:                 { label: 'Complete',               color: '#a0aec0', bg: '#edf2f7' },
+  waiting_on_us:          { label: 'Action Needed',          color: '#8C4A2F', bg: '#F7EDE7' },
+  in_progress:            { label: 'In Progress',            color: '#7D6114', bg: '#FAF4E2' },
+  waiting_on_customer:    { label: 'Awaiting Customer Response', color: '#5F5951', bg: '#F1EEE8' },
+  queued_for_replacement: { label: 'Queued for Replacement', color: '#6B4472', bg: '#F3EDF5' },
+  replacement_sent:       { label: 'Replacement Sent',       color: '#3E6B45', bg: '#EBF2EA' },
+  return_refund:          { label: 'Return/Refund',          color: '#8A3D5A', bg: '#F8EDF1' },
+  call_scheduled:         { label: 'Call Scheduled',         color: '#2F6660', bg: '#E8F1EF' },
+  on_hold:                { label: 'On Hold',                color: '#7A5E1E', bg: '#F7F1DE' },
+  closed:                 { label: 'Complete',               color: '#6E6862', bg: '#F0EDE7' },
 };
 
+/* Priority colours, warm ramp. 'urgent' is the one place a red is correct —
+ * it is a warning, not an action — so it uses the AA-legible error token
+ * value (--color-error-strong) rather than the old #c53030, which the spec
+ * measured as indistinguishable from Ladybug Red. */
 export const PRIORITY_META: Record<TicketPriority, { label: string; color: string }> = {
-  low:    { label: 'Low',    color: '#718096' },
-  normal: { label: 'Normal', color: '#2b6cb0' },
-  high:   { label: 'High',   color: '#c05621' },
-  urgent: { label: 'Urgent', color: '#c53030' },
+  low:    { label: 'Low',    color: '#6E6862' },
+  normal: { label: 'Normal', color: '#5C564E' },
+  high:   { label: 'High',   color: '#8C4A2F' },
+  urgent: { label: 'Urgent', color: '#A61B1B' },
 };
 
 export const SOURCE_LABEL: Record<TicketSource, string> = {
@@ -243,6 +292,7 @@ export const SOURCE_LABEL: Record<TicketSource, string> = {
   quo:              'Quo',
   google_calendar:  'Calendar',
   telemetry_auto:   'Telemetry auto',
+  lovely_app:       'From Lovely app',
 };
 
 // Safe accessors for the display metadata above. A ticket's status / priority /
@@ -259,12 +309,12 @@ function humanizeToken(raw: string): string {
 
 export function statusMeta(status: string): { label: string; color: string; bg: string } {
   return STATUS_META[status as TicketStatus]
-    ?? { label: humanizeToken(status), color: '#718096', bg: '#edf2f7' };
+    ?? { label: humanizeToken(status), color: '#6E6862', bg: '#F0EDE7' };
 }
 
 export function priorityMeta(priority: string): { label: string; color: string } {
   return PRIORITY_META[priority as TicketPriority]
-    ?? { label: humanizeToken(priority), color: '#718096' };
+    ?? { label: humanizeToken(priority), color: '#6E6862' };
 }
 
 export function sourceLabel(source: string): string {
@@ -707,7 +757,9 @@ export function useTicketActionItems(ticketId: string | null): {
   return { items, loading };
 }
 
-export async function addTicketActionItem(ticketId: string, body: string): Promise<void> {
+export async function addTicketActionItem(
+  ticketId: string, body: string, dueDate?: string | null,
+): Promise<void> {
   const trimmed = body.trim();
   if (!trimmed) throw new Error('Action item cannot be empty.');
   // getSession() reads the cached session locally (no network); getUser() hits
@@ -716,11 +768,78 @@ export async function addTicketActionItem(ticketId: string, body: string): Promi
   const { error } = await supabase.from('ticket_action_items').insert({
     ticket_id: ticketId,
     body: trimmed,
+    due_date: dueDate || null,
     author_id: session?.user?.id ?? null,
     author_email: session?.user?.email ?? null,
   });
   if (error) throw error;
-  await logAction('ticket_action_item_added', ticketId, trimmed.slice(0, 120));
+  await logAction('ticket_action_item_added', ticketId,
+    dueDate ? `${trimmed.slice(0, 100)} · due ${dueDate}` : trimmed.slice(0, 120));
+}
+
+/** Schedule (or unschedule, with null) an action item. `dueDate` is a
+ *  'YYYY-MM-DD' calendar day — see the due_date column comment. */
+export async function setTicketActionItemDueDate(
+  id: string, dueDate: string | null,
+): Promise<void> {
+  const { data, error } = await supabase
+    .from('ticket_action_items')
+    .update({ due_date: dueDate })
+    .eq('id', id)
+    .select('id, ticket_id, body');
+  if (error) throw error;
+  if (!data || data.length === 0) {
+    throw new Error('Action item was not rescheduled (no permission or already removed).');
+  }
+  await logAction('ticket_action_item_due_date_set', data[0].ticket_id as string,
+    `${(data[0].body as string).slice(0, 100)} · ${dueDate ?? 'no due date'}`);
+}
+
+/** Every OPEN action item across all tickets — the week board's data source.
+ *  Scoped to done=false because the board plans upcoming work; completed items
+ *  stay visible on their own ticket. Realtime on the whole table (no ticket
+ *  filter), so an item added or checked off anywhere re-buckets the board. */
+export function useOpenActionItems(): { items: TicketActionItem[]; loading: boolean } {
+  const [items, setItems] = useState<TicketActionItem[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let channel: RealtimeChannel | null = null;
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await supabase
+        .from('ticket_action_items')
+        .select('*')
+        .eq('done', false)
+        .order('due_date', { ascending: true, nullsFirst: false });
+      if (cancelled) return;
+      if (!error && data) setItems(data as TicketActionItem[]);
+      setLoading(false);
+
+      channel = supabase
+        .channel('ticket_action_items:open')
+        .on('postgres_changes',
+          { event: '*', schema: 'public', table: 'ticket_action_items' },
+          (payload) => {
+            setItems(prev => {
+              if (payload.eventType === 'DELETE' && payload.old) {
+                return prev.filter(i => i.id !== (payload.old as { id: string }).id);
+              }
+              if (!payload.new) return prev;
+              const row = payload.new as TicketActionItem;
+              // Checking an item off removes it from the board; unchecking
+              // brings it back. The subscription is unfiltered, so both
+              // directions arrive here as UPDATEs.
+              const rest = prev.filter(i => i.id !== row.id);
+              return row.done ? rest : [...rest, row];
+            });
+          })
+        .subscribe();
+    })();
+    return () => { cancelled = true; if (channel) void channel.unsubscribe(); };
+  }, []);
+
+  return { items, loading };
 }
 
 export async function setTicketActionItemDone(id: string, done: boolean): Promise<void> {
@@ -843,6 +962,11 @@ export type NewTicketInput = {
   customer_email?: string | null;
   customer_phone?: string | null;
   unit_serial?: string | null;
+  /** The subject is a colleague, not a customer (see lib/team.ts). Suppresses
+   *  the Klaviyo event below — a ticket raised for a team member must not file
+   *  them as a marketing profile. `customer_id` is null on these; the roster
+   *  address in `customer_email` is what identifies them. */
+  is_team?: boolean;
 };
 
 export async function createTicket(input: NewTicketInput): Promise<ServiceTicket> {
@@ -866,7 +990,12 @@ export async function createTicket(input: NewTicketInput): Promise<ServiceTicket
   const row = data as ServiceTicket;
   await logAction('ticket_created', row.id, `${row.ticket_number} ${input.subject}`,
     { entityType: 'ticket', entityId: row.id, unitSerial: input.unit_serial ?? undefined },
-    { klaviyoEvent: 'Support Ticket Opened', ...(input.customer_email ? { klaviyoEmail: input.customer_email } : {}) });
+    // A team member's ticket is logged like any other but never leaves the
+    // building: no Klaviyo event, so a colleague's work address can't be
+    // created as a marketing profile by raising a ticket about their machine.
+    input.is_team
+      ? undefined
+      : { klaviyoEvent: 'Support Ticket Opened', ...(input.customer_email ? { klaviyoEmail: input.customer_email } : {}) });
   return row;
 }
 
@@ -988,12 +1117,161 @@ export async function updateTicketStatus(id: string, status: TicketStatus): Prom
   }
 }
 
-/** Replace a ticket's status tags (multi-select, separate from `status`). */
-export async function updateTicketTags(id: string, tags: TicketStatus[]): Promise<void> {
-  const { error } = await supabase.from('service_tickets').update({ tags }).eq('id', id);
+/** Every status a ticket currently holds. Statuses are MULTI-SELECT: a ticket
+ *  can be In Progress and Queued for Replacement at the same time.
+ *
+ *  The set is the union of the `status` column and the `tags` array, in
+ *  TICKET_STATUSES order. Reading the union (rather than trusting `tags` alone)
+ *  keeps every pre-existing row correct — rows written before multi-select, and
+ *  rows whose tag was applied by the replacement workflow's add_ticket_tag RPC,
+ *  both carry the primary in `status` and only the extras in `tags`. */
+export function ticketStatusSet(
+  t: { status: TicketStatus; tags?: TicketStatus[] | null },
+): TicketStatus[] {
+  const held = new Set<TicketStatus>(
+    [t.status, ...(t.tags ?? [])].filter(Boolean) as TicketStatus[],
+  );
+  const known = TICKET_STATUSES.filter(s => held.has(s));
+  // Values the DB holds that this build doesn't recognize. The frontend and DB
+  // status vocabularies have drifted apart before (a 10-state UI against a
+  // 7-state DB white-screened the Support tab), so pass unknowns through to
+  // statusMeta's humanize fallback rather than silently dropping them.
+  const unknown = [...held].filter(s => !(TICKET_STATUSES as readonly string[]).includes(s));
+  return [...known, ...unknown];
+}
+
+/** Does this ticket currently hold 'queued_for_replacement', in either
+ *  `status` or `tags`? Read fresh rather than trusting the caller's `next`,
+ *  which describes the desired state, not the current one. */
+async function ticketHoldsQueuedForReplacement(id: string): Promise<boolean> {
+  const { data, error } = await supabase
+    .from('service_tickets')
+    .select('status, tags')
+    .eq('id', id)
+    .maybeSingle();
   if (error) throw error;
-  await logAction('ticket_tags_changed', id, tags.length ? tags.join(', ') : '(none)',
+  if (!data) return false;
+  const row = data as { status: string; tags: string[] | null };
+  return row.status === 'queued_for_replacement'
+    || (row.tags ?? []).includes('queued_for_replacement');
+}
+
+/** Replace the full set of statuses on a ticket.
+ *
+ *  `status` holds the PRIMARY (first in TICKET_STATUSES order) because
+ *  open-vs-closed is what the rest of the app keys off — closed_at, SLA
+ *  resolution, the Kanban, follow-ups, and every open count read that single
+ *  column. `tags` holds ONLY THE EXTRAS, never the primary.
+ *
+ *  That split matters: the Gmail sync and the reclassifier write `status`
+ *  directly. If `tags` also carried the primary, such a write would strand the
+ *  old primary in `tags` and the ticket would silently accumulate a stale
+ *  status. With extras-only, a bare `status` write just swaps the primary and
+ *  leaves the operator's extras intact. A DB trigger enforces the invariant for
+ *  writers that don't come through here.
+ *
+ *  'closed' is exclusive: a Complete ticket holds no other status, and closing
+ *  carries side effects (closed_at stamp, auto-cancel of a queued replacement).
+ *  Clearing every status falls back to Action Needed rather than leaving a
+ *  ticket in no state at all.
+ *
+ *  'replacement_sent' is the other status with side effects: it supersedes
+ *  'queued_for_replacement' (the customer is no longer waiting in a queue) and
+ *  hands the linked replacement order over to Fulfillment › Queue › SHIPPED. */
+/** Thrown when an operator tries to clear 'queued_for_replacement' by hand
+ *  while the replacement order behind it is still live. Carries the refs so
+ *  the caller can name them instead of showing a generic failure. */
+export class QueuedReplacementLockedError extends Error {
+  readonly orderRefs: string[];
+  constructor(orderRefs: string[]) {
+    const refs = orderRefs.join(', ');
+    super(
+      `Can't remove Queued for Replacement while ${refs} ` +
+      `${orderRefs.length === 1 ? 'is' : 'are'} still open. ` +
+      `Cancel ${orderRefs.length === 1 ? 'it' : 'them'} in Sales or Fulfillment first, ` +
+      `or mark the ticket Replacement Sent if the unit went out.`,
+    );
+    this.name = 'QueuedReplacementLockedError';
+    this.orderRefs = orderRefs;
+  }
+}
+
+export async function setTicketStatuses(id: string, next: TicketStatus[]): Promise<void> {
+  const held = new Set(next);
+  // Sent supersedes queued — the two never coexist, whichever way the operator
+  // clicked into it.
+  if (held.has('replacement_sent')) held.delete('queued_for_replacement');
+  const ordered: TicketStatus[] = held.has('closed')
+    ? ['closed']
+    : TICKET_STATUSES.filter(s => held.has(s));
+  const final: TicketStatus[] = ordered.length > 0 ? ordered : ['waiting_on_us'];
+  const status = final[0];
+
+  // 'queued_for_replacement' is set automatically when a replacement order is
+  // created, so it may not be cleared by hand while that order is still live —
+  // the order is the source of truth for whether the customer is waiting.
+  //
+  // Checked here rather than only in the panel because this function is the
+  // chokepoint every operator edit goes through. Two ways OUT of the tag stay
+  // open, and both are resolved above before we get here:
+  //   · 'replacement_sent'  — deleted the tag itself, and ships the order below
+  //   · 'closed' (Complete) — cancels the awaiting order below
+  // so we only block a bare removal.
+  const removingQueued =
+    !final.includes('queued_for_replacement') &&
+    !final.includes('replacement_sent') &&
+    status !== 'closed';
+  if (removingQueued) {
+    const wasQueued = await ticketHoldsQueuedForReplacement(id);
+    if (wasQueued) {
+      const live = await liveReplacementsForTicket(id);
+      if (live.length > 0) throw new QueuedReplacementLockedError(live.map(o => o.order_ref));
+    }
+  }
+
+  // Stamp closed_at on close, and CLEAR it on reopen so a later re-close gets a
+  // fresh timestamp (the DB trigger only coalesces, so without clearing, a
+  // reopened-then-reclosed ticket would keep its stale original close date).
+  const { error } = await supabase
+    .from('service_tickets')
+    .update({
+      status,
+      tags: final.slice(1),
+      closed_at: status === 'closed' ? new Date().toISOString() : null,
+    })
+    .eq('id', id);
+  if (error) throw error;
+  await logAction('ticket_status_changed', id, final.join(', '),
     { entityType: 'ticket', entityId: id });
+
+  // Marking a ticket complete means an 'awaiting' replacement queued for it is
+  // no longer needed. Scoped to 'awaiting' only: a 'ready' replacement has a
+  // unit reserved and may be about to ship.
+  //
+  // NOT best-effort, for the same reason the 'replacement_sent' branch below
+  // isn't: a console.warn nobody reads let this fail silently and leave the
+  // order sitting in Sales › Orders › Replacement. The status write above has
+  // already landed, so throwing here surfaces the problem in the panel without
+  // undoing the close, and the operator can re-click — the hand-off is
+  // idempotent (it only ever matches 'awaiting', un-shipped rows).
+  if (status === 'closed') {
+    await cancelPendingReplacementsForTicket(id);
+  }
+
+  // Replacement Sent → the replacement order(s) queued for this ticket move to
+  // Fulfillment › Queue › SHIPPED. NOT best-effort: the operator's click means
+  // "this shipped", and silently leaving the order sitting in Sales › Orders ›
+  // Replacement would be the exact drift this status exists to remove. The
+  // status write above has already landed, so a throw here surfaces in the
+  // panel and the operator can re-click once the cause is fixed (the hand-off
+  // is idempotent).
+  if (final.includes('replacement_sent')) {
+    const refs = await shipQueuedReplacementsForTicket(id);
+    if (refs.length > 0) {
+      await logAction('replacement_sent', id, `${refs.join(', ')} → Fulfillment queue (shipped)`,
+        { entityType: 'ticket', entityId: id });
+    }
+  }
 }
 
 export async function assignTicketOwner(id: string, owner_email: string | null): Promise<void> {
@@ -1001,6 +1279,80 @@ export async function assignTicketOwner(id: string, owner_email: string | null):
   if (error) throw error;
   await logAction('ticket_owner_assigned', id, owner_email ?? '(unassigned)',
     { entityType: 'ticket', entityId: id });
+}
+
+// Deep-link base for the assignment notification email. Custom domain, so the
+// router basename is '/'; the Service route lives at /service.
+const APP_BASE_URL = 'https://lila.vip';
+
+/** Best-guess first name from an @virgohome.io address, capitalized:
+ *  'reina@virgohome.io' → 'Reina', 'yueli@…' → 'Yueli'. */
+export function ownerFirstName(email: string): string {
+  const local = (email.split('@')[0] ?? email).split(/[._-]/)[0] ?? email;
+  return local ? local.charAt(0).toUpperCase() + local.slice(1) : email;
+}
+
+/** Decide whether assigning `newOwner` (previously `previousOwner`, by
+ *  operator `actorEmail`) should trigger a notification email. We notify only
+ *  when the owner actually changes to a real person other than the operator
+ *  making the change — no self-assignment spam, no email on unassign, no email
+ *  when the owner is unchanged. Pure + exported so it's unit-testable. */
+export function shouldNotifyAssignment(
+  previousOwner: string | null | undefined,
+  newOwner: string | null | undefined,
+  actorEmail: string | null | undefined,
+): boolean {
+  if (!newOwner) return false;                                  // unassigning
+  const next = newOwner.toLowerCase();
+  if (next === (previousOwner ?? '').toLowerCase()) return false; // unchanged
+  if (next === (actorEmail ?? '').toLowerCase()) return false;    // self-assign
+  return true;
+}
+
+async function sendTicketAssignmentEmail(
+  ticket: ServiceTicket,
+  assigneeEmail: string,
+  actorEmail: string | null | undefined,
+): Promise<void> {
+  await sendTemplate({
+    template_key: 'ticket_assigned',
+    to: assigneeEmail,
+    to_name: ownerFirstName(assigneeEmail),
+    variables: {
+      assignee_first_name: ownerFirstName(assigneeEmail),
+      ticket_number: ticket.ticket_number,
+      subject: ticket.subject,
+      customer_name: ticket.customer_name ?? ticket.customer_email ?? 'Unknown customer',
+      assigned_by: actorEmail ? ownerFirstName(actorEmail) : 'A teammate',
+      ticket_url: `${APP_BASE_URL}/service?tab=support`,
+    },
+  });
+}
+
+/** Assign (or clear) a ticket's owner and, when appropriate, email the new
+ *  owner that a ticket was assigned to them. The DB update + activity log
+ *  always happen; the email is best-effort and never blocks reassignment.
+ *  Returns whether a notification email went out (for optional UI feedback). */
+export async function reassignTicketOwner(
+  ticket: ServiceTicket,
+  newOwner: string | null,
+  actorEmail: string | null | undefined,
+): Promise<{ emailed: boolean }> {
+  const previous = ticket.owner_email ?? null;
+  if ((newOwner ?? null) === previous) return { emailed: false };
+
+  await assignTicketOwner(ticket.id, newOwner);
+
+  if (!shouldNotifyAssignment(previous, newOwner, actorEmail)) return { emailed: false };
+  try {
+    await sendTicketAssignmentEmail(ticket, newOwner as string, actorEmail);
+    return { emailed: true };
+  } catch (e) {
+    // Non-fatal: the reassignment already succeeded. Surface in console; the
+    // caller may show a soft toast but must not roll back the assignment.
+    console.warn('Ticket-assignment email failed (non-fatal):', (e as Error).message);
+    return { emailed: false };
+  }
 }
 
 // Walkthrough #41: defines the support → repair pipeline. Operators flip a
@@ -1543,10 +1895,40 @@ async function fetchDeviceContextTelemetry(unitSerial: string): Promise<DeviceCo
   return result;
 }
 
+/** Open tickets against one unit, counted the way the Support Tickets tab
+ *  counts them. `service_tickets` is a multi-purpose table and an unscoped
+ *  count reads far too high:
+ *    · kind='conversation' rows are untriaged Gmail/Quo threads. They are not
+ *      tickets, never carry status='closed', and sit in no queue the chip can
+ *      link to — 176 of them were being counted as open tickets.
+ *    · category 'onboarding' and 'diagnosis_call' tickets are closed out in
+ *      `customer_lifecycle` / the Follow-Ups calendar, never through `status`.
+ *      Not one has ever reached 'closed', so counting them pins the chip open
+ *      for the life of the customer.
+ *  That leaves 'support' — the population `useServiceTickets('support')` loads,
+ *  which is what the operator sees when they click the chip through. */
+function countOpenSupportTickets(unitSerial: string, excludeTicketId?: string) {
+  const q = supabase
+    .from('service_tickets')
+    .select('id', { count: 'exact', head: true })
+    .eq('unit_serial', unitSerial)
+    .eq('kind', 'ticket')
+    .eq('category', 'support')
+    .neq('status', 'closed');
+  return excludeTicketId ? q.neq('id', excludeTicketId) : q;
+}
+
 /** Hook that aggregates device context for a unit serial:
  *  unit QC fields, latest telemetry state, open ticket count,
- *  return count, and warranty registration. Used by DeviceContextHeader. */
-export function useDeviceContext(unitSerial: string | null): DeviceContext {
+ *  return count, and warranty registration. Used by DeviceContextHeader.
+ *
+ *  `excludeTicketId` drops the ticket the operator is already looking at, so
+ *  the chip reads "other open tickets" rather than counting the ticket on
+ *  screen as news. */
+export function useDeviceContext(
+  unitSerial: string | null,
+  excludeTicketId?: string,
+): DeviceContext {
   const warranty = useWarrantyRegistration(unitSerial);
   const [unit, setUnit] = useState<DeviceContextUnit | null>(null);
   const [telemetry, setTelemetry] = useState<DeviceContextTelemetry | null>(null);
@@ -1574,11 +1956,7 @@ export function useDeviceContext(unitSerial: string | null): DeviceContext {
           .select('firmware_version, electrical_check, mechanical_check, defect_notes, technician, status_updated_at, test_report_uploaded_at')
           .eq('serial', unitSerial)
           .maybeSingle(),
-        supabase
-          .from('service_tickets')
-          .select('id', { count: 'exact', head: true })
-          .eq('unit_serial', unitSerial)
-          .not('status', 'eq', 'closed'),
+        countOpenSupportTickets(unitSerial, excludeTicketId),
         supabase
           .from('returns')
           .select('id', { count: 'exact', head: true })
@@ -1602,7 +1980,7 @@ export function useDeviceContext(unitSerial: string | null): DeviceContext {
 
     return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [unitSerial]);
+  }, [unitSerial, excludeTicketId]);
 
   return { unit, telemetry, openTicketCount, returnCount, warranty, loading: loading || warranty.loading };
 }

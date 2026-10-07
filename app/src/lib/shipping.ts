@@ -269,7 +269,30 @@ export type AllShipmentRow = {
   customer_name: string;
   carrier: string;
   service: string;
+  /** What we were quoted at booking time. Null for shipments makelila didn't book. */
   rate_cad: number | null;
+  /** What Freightcom actually invoiced, in CAD. Authoritative when present —
+   *  surcharges, reweighs and residential fees mean this routinely differs from
+   *  the quote. Null when the shipment was billed in another currency. */
+  billed_cad: number | null;
+  /** The invoiced total in its native currency, whatever that is. */
+  billed_amount: number | null;
+  /** ISO code Freightcom invoiced in. Null until the row has been invoiced. */
+  billed_currency: string | null;
+  /** Actual carrier cost recorded against the linked order (operator-entered at
+   *  the Fulfilled step, or backfilled from the carrier spreadsheets). Used when
+   *  Freightcom has not invoiced — a real cost beats a quote. */
+  recorded_cost: number | null;
+  /** ISO code for recorded_cost. Read, never inferred from the column name. */
+  recorded_currency: string | null;
+  /** Charge breakdown behind billed_cad — shown as the Rate cell's hover text so
+   *  an unexpectedly high cost can be explained without opening Freightcom. */
+  base_charge_cad: number | null;
+  fuel_surcharge_cad: number | null;
+  residential_surcharge_cad: number | null;
+  remote_surcharge_cad: number | null;
+  other_surcharges: { name: string; amount_cad: number }[] | null;
+  invoice_number: string | null;
   primary_tracking_number: string | null;
   status: ShipmentStatus;
   booked_at: string;
@@ -277,6 +300,8 @@ export type AllShipmentRow = {
   freightcom_shipment_id: string;
   freightcom_status: string | null;
   status_synced_at: string | null;
+  /** When the Freightcom sync last wrote this row. Drives the staleness banner. */
+  synced_at: string | null;
   direction: ShipmentDirection;
   counterparty_name: string;
 };
@@ -286,14 +311,126 @@ export type AllClaimRow = Claim & {
   customer_name: string;
 };
 
-// Columns that exist regardless of whether the freightcom_status migration ran.
+// ── Shipment cost ──────────────────────────────────────────────────────────
+
+/**
+ * Which number the Rate column is showing, best first.
+ *   invoiced — what Freightcom actually billed. Authoritative.
+ *   recorded — the actual carrier cost captured against the order, either typed
+ *              in by an operator at the Fulfilled step or backfilled from the
+ *              carrier spreadsheets. A real cost that was really paid, just not
+ *              read from the Freightcom API — so it ranks below `invoiced` but
+ *              comfortably above a quote.
+ *   quoted   — the estimate captured at booking, shown only until a real cost
+ *              lands. Reweighs and residential/fuel surcharges routinely move
+ *              the final figure, so this must never be presented as the cost.
+ *   none     — nothing on file.
+ */
+export type CostBasis = 'invoiced' | 'recorded' | 'quoted' | 'none';
+
+export type ShipmentCost = {
+  amount: number | null;
+  currency: string;
+  basis: CostBasis;
+  /** True when the amount is not in CAD, so the column heading doesn't apply. */
+  foreign: boolean;
+};
+
+/**
+ * Resolves the single cost figure to display for a shipment.
+ *
+ * An invoiced total always wins over a quote, including a non-CAD one — a US
+ * lane billed in USD is still the real cost, and showing it labelled beats
+ * falling back to a Canadian estimate that was never charged. `billed_cad` is
+ * only populated when Freightcom billed in CAD (see the 20260806160000
+ * migration), so `foreign` is what tells the UI to print the currency code.
+ */
+export function resolveShipmentCost(row: {
+  billed_cad: number | null;
+  billed_amount?: number | null;
+  billed_currency?: string | null;
+  recorded_cost?: number | null;
+  recorded_currency?: string | null;
+  rate_cad: number | null;
+}): ShipmentCost {
+  if (row.billed_cad != null) {
+    return { amount: row.billed_cad, currency: 'CAD', basis: 'invoiced', foreign: false };
+  }
+  if (row.billed_amount != null) {
+    const currency = row.billed_currency ?? 'CAD';
+    return { amount: row.billed_amount, currency, basis: 'invoiced', foreign: currency !== 'CAD' };
+  }
+  if (row.recorded_cost != null) {
+    // The currency here is read, never assumed. The storage column is named
+    // `shipping_cost_usd` and holds CAD; trusting the name is the bug.
+    const currency = row.recorded_currency ?? 'CAD';
+    return { amount: row.recorded_cost, currency, basis: 'recorded', foreign: currency !== 'CAD' };
+  }
+  if (row.rate_cad != null) {
+    return { amount: row.rate_cad, currency: 'CAD', basis: 'quoted', foreign: false };
+  }
+  return { amount: null, currency: 'CAD', basis: 'none', foreign: false };
+}
+
+/** True for a basis that represents money actually spent, not an estimate. */
+export function isActualCost(basis: CostBasis): boolean {
+  return basis === 'invoiced' || basis === 'recorded';
+}
+
+/**
+ * Sums the CAD costs actually incurred across a set of rows.
+ *
+ * Quotes are excluded — adding an estimate to a total makes the total an
+ * estimate, and this figure is meant to be reconcilable. Non-CAD amounts are
+ * excluded too rather than being added across currencies at an implied rate
+ * of 1.0.
+ */
+export function totalActualCad(rows: Array<Parameters<typeof resolveShipmentCost>[0]>): number {
+  return rows.reduce((sum, r) => {
+    const c = resolveShipmentCost(r);
+    return isActualCost(c.basis) && !c.foreign ? sum + (c.amount ?? 0) : sum;
+  }, 0);
+}
+
+// Columns present on every deployment, migration applied or not.
 const SHIPMENT_BASE_COLS =
-  'id, order_id, carrier, service, rate_cad, primary_tracking_number, status, booked_at, label_url, freightcom_shipment_id, raw_payload';
+  'id, order_id, carrier, service, rate_cad, billed_cad, synced_at, primary_tracking_number, ' +
+  'status, booked_at, label_url, freightcom_shipment_id, raw_payload, ' +
+  'base_charge_cad, fuel_surcharge_cad, residential_surcharge_cad, remote_surcharge_cad, ' +
+  'other_surcharges, invoice_number';
+
+// Column groups added by later migrations. Selected when present; dropped one
+// group at a time when Postgres says they aren't, so the dashboard still renders
+// against a database that hasn't had the manual migration workflow run yet.
+// Ordered most-recent-migration first — that's the group most likely missing.
+const SHIPMENT_OPTIONAL_GROUPS = [
+  'billed_amount, billed_currency',        // 20260806160000
+  'freightcom_status, status_synced_at',   // freightcom status vocabulary
+];
 
 /** True for a Postgres "undefined column" error (42703) — the migration isn't applied. */
 export function isMissingColumnError(err: { code?: string; message?: string } | null): boolean {
   if (!err) return false;
   return err.code === '42703' || /column .* does not exist/i.test(err.message ?? '');
+}
+
+// The joined order supplies the recorded carrier cost. `shipping_cost_currency`
+// arrived with migration 20260806170000, so the join degrades too — otherwise a
+// database without that migration fails every variant and the table renders
+// empty rather than merely cost-less.
+const ORDER_JOIN_FULL = 'orders(order_ref, customer_name, shipping_cost_usd, shipping_cost_currency)';
+const ORDER_JOIN_MIN  = 'orders(order_ref, customer_name)';
+
+/** Progressively shorter column lists: all optional groups, then one fewer, … */
+export function shipmentSelectVariants(): string[] {
+  const variants: string[] = [];
+  for (let drop = 0; drop <= SHIPMENT_OPTIONAL_GROUPS.length; drop++) {
+    const groups = SHIPMENT_OPTIONAL_GROUPS.slice(drop);
+    variants.push([SHIPMENT_BASE_COLS, ...groups, ORDER_JOIN_FULL].join(', '));
+  }
+  // Last resort: nothing optional on either side of the join.
+  variants.push([SHIPMENT_BASE_COLS, ORDER_JOIN_MIN].join(', '));
+  return variants;
 }
 
 /** Returns all shipments across all orders, joined with order_ref + customer_name. */
@@ -305,40 +442,42 @@ export function useAllShipments(): { shipments: AllShipmentRow[]; loading: boole
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      // Try the full select (with the Freightcom-status columns). If the
-      // migration that adds them hasn't been applied yet, Postgres returns
-      // 42703 "column does not exist" — fall back to the base columns so the
-      // dashboard still renders (statuses come from the reverse-mapping).
-      // `data`/`err` are widened so the two differently-shaped selects share them.
+      // Try the fullest select first and drop one optional column group per
+      // retry. A database that hasn't had the manual migration workflow run
+      // returns 42703 "column does not exist"; the dashboard should still
+      // render, just without the columns that migration would have added.
       let data: unknown[] | null = null;
       let err: { code?: string; message?: string } | null = null;
 
-      {
+      for (const cols of shipmentSelectVariants()) {
         const r = await supabase
           .from('shipments')
-          .select(`${SHIPMENT_BASE_COLS}, freightcom_status, status_synced_at, orders(order_ref, customer_name)`)
+          .select(cols)
           .order('booked_at', { ascending: false });
         data = r.data; err = r.error;
-      }
-
-      if (!cancelled && err && isMissingColumnError(err)) {
-        const r = await supabase
-          .from('shipments')
-          .select(`${SHIPMENT_BASE_COLS}, orders(order_ref, customer_name)`)
-          .order('booked_at', { ascending: false });
-        data = r.data; err = r.error;
+        if (cancelled) return;
+        if (!err || !isMissingColumnError(err)) break;
       }
 
       if (cancelled) return;
       if (err) { setError(err.message ?? 'Failed to load shipments'); setLoading(false); return; }
       const rows: AllShipmentRow[] = ((data ?? []) as unknown as Array<{
         id: string; order_id: string; carrier: string; service: string;
-        rate_cad: number | null; primary_tracking_number: string | null;
+        rate_cad: number | null; billed_cad: number | null; synced_at: string | null;
+        billed_amount?: number | null; billed_currency?: string | null;
+        base_charge_cad: number | null; fuel_surcharge_cad: number | null;
+        residential_surcharge_cad: number | null; remote_surcharge_cad: number | null;
+        other_surcharges: { name: string; amount_cad: number }[] | null;
+        invoice_number: string | null;
+        primary_tracking_number: string | null;
         status: string; booked_at: string; label_url: string | null;
         freightcom_shipment_id: string;
         freightcom_status?: string | null; status_synced_at?: string | null;
         raw_payload?: ShipmentRawPayload;
-        orders: { order_ref: string; customer_name: string } | null;
+        orders: {
+          order_ref: string; customer_name: string;
+          shipping_cost_usd?: number | null; shipping_cost_currency?: string | null;
+        } | null;
       }>).map(s => {
         const party = deriveShipmentParty({
           raw_payload: s.raw_payload ?? null,
@@ -352,6 +491,18 @@ export function useAllShipments(): { shipments: AllShipmentRow[]; loading: boole
           carrier: s.carrier,
           service: s.service,
           rate_cad: s.rate_cad,
+          billed_cad: s.billed_cad,
+          billed_amount: s.billed_amount ?? null,
+          billed_currency: s.billed_currency ?? null,
+          recorded_cost: s.orders?.shipping_cost_usd ?? null,
+          recorded_currency: s.orders?.shipping_cost_currency ?? null,
+          base_charge_cad: s.base_charge_cad ?? null,
+          fuel_surcharge_cad: s.fuel_surcharge_cad ?? null,
+          residential_surcharge_cad: s.residential_surcharge_cad ?? null,
+          remote_surcharge_cad: s.remote_surcharge_cad ?? null,
+          other_surcharges: s.other_surcharges ?? null,
+          invoice_number: s.invoice_number ?? null,
+          synced_at: s.synced_at ?? null,
           primary_tracking_number: s.primary_tracking_number,
           status: s.status as ShipmentStatus,
           booked_at: s.booked_at,

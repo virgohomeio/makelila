@@ -775,6 +775,110 @@ Alpha feedback collection window is **closed**. The 11 items above plus the meet
 
 ---
 
+## Ryan Yuan — AI chatbot initiative — 2026-07-14 to 2026-07-17
+
+> Source: WhatsApp conversation between Huayi and Ryan Yuan. Ryan is already building a cross-platform AI chatbot initiative — a custom Meta/Facebook DM bot (built rather than using Meta's built-in keyword automation "because their built-in automation features were more just keywords that I believe won't suffice if we want top quality customer service") was presented to the team 2026-07-17, internally graded 10/10, pending Meta app review. The two items below extend that same initiative into makeLILA itself and into Quo/OpenPhone customer messaging. Ryan is separately maintaining his own product tracker for the chatbot initiative (offered 2026-07-17, Huayi confirmed) — that tracker, not this doc, is the source of truth for day-to-day build status; these entries exist so the ask is visible alongside the rest of the backlog.
+
+- **#100** makeLILA AI — internal chatbot over the makeLILA database, session chat history logging.
+  **Source:** Huayi (2026-07-14, WhatsApp). **Owner:** Ryan Yuan.
+  **Description:** A chatbot the team can talk to *within their own makeLILA sessions* to ask for any information already in the makeLILA database — orders, customers, tickets, stock, etc. — without navigating the UI. Same build philosophy as Ryan's Lovely App / Meta bot work: custom-built and grounded in real data, not a keyword-triggered FAQ bot.
+  **Requirements confirmed in chat:**
+    1. Chat interface reachable from within a makeLILA session (exact surface — floating widget, dedicated tab, etc. — not yet specified; Ryan to propose).
+    2. Answers grounded in live makeLILA data (Supabase) — not a general-purpose assistant.
+    3. **Session chat histories must be recorded in the makeLILA database** (Huayi, 2026-07-14: "We want the sessions chat histories and so on recorded in our database as well") — explicitly for operational insight (what the team asks most, where the data model has gaps), not just as a log.
+  **Cost baseline (per Ryan, 2026-07-17):** the same chatbot infra family (Lovely App + Meta AI bot) runs ~$7.40/1k messages on the model he's currently using; Huayi flagged that cost needs to be modeled against production sales volume as it scales, not just current chat volume, before committing to a per-message-billed model long-term.
+  **Open questions:** exact chat surface/UI; which makeLILA tables/modules are in scope for V1 vs. deferred; retention policy for the new session-history table; whether this reuses Ryan's existing Claude-model evaluation work (a 97-question baseline pulled from Quo + Fireflies transcripts, run across multiple Claude models) or needs its own eval set specific to internal makeLILA questions.
+  **Likely touch:** new `chat_sessions` / `chat_messages` tables (schema TBD by Ryan); new edge function or Lovely-app-style backend service for the chat; a new UI surface inside the makeLILA app itself (distinct from the customer-facing Lovely app) for the team to invoke it from.
+
+- **#101** Quo auto-reply bot — cron-driven first response within 1–2 hours.
+  **Source:** Huayi (2026-07-14, WhatsApp). **Owner:** Ryan Yuan.
+  **Description:** Today, customer messages arriving via Quo (OpenPhone) rely entirely on Reina and Huayi to reply manually — Huayi named this explicitly as a response-time bottleneck: *"Currently we have customers talking to us on quo and it rel[ies on] Reina and me to reply. We want a cron job for a quo bot to reply within 1-2 hours."* Goal: a scheduled job that gets a first response to inbound Quo messages within a 1–2 hour SLA, easing the load on Reina/Huayi without leaving customers waiting.
+  **Open questions (not yet resolved in chat — flag for Ryan/Huayi to settle before build):**
+    1. Auto-send vs. auto-draft-for-review — does the bot reply directly, or stage a draft an operator approves (mirrors the AI-draft-suggestion pattern already used in Reina's Service work)?
+    2. Scope of questions it can answer vs. when it should escalate/hold for a human — likely reuses the existing rules-first + Claude ticket classifier infra (`classifier.ts` / `classifier-llm.ts`, already wired into `sync-gmail-tickets` / `reclassify-ticket`) rather than building fresh.
+    3. Pricing: Ryan noted (2026-07-17) Quo/Zipchat likely have a free tier sufficient for now, but hadn't confirmed — verify before assuming $0 marginal cost, same cost-scaling caution Huayi raised for #100.
+  **Likely touch:** new cron-scheduled edge function (natural integration point: alongside the existing `sync-quo-tickets`); reuse of `_shared/classifier-llm.ts` for drafting/replying; either a `quo_auto_reply_sent_at`-style dedupe column (auto-send) or a draft-queue surface in the Service Inbox (auto-draft-for-review) depending on how question 1 is resolved.
+
+---
+
+## Refund workflow — coverage backlog + E2E test — 2026-07-27 (Huayi)
+
+### BACKLOG: Column-ownership override so Huayi can cover for Reina on vacation
+**Requested by:** Huayi, 2026-07-27. **Owner:** Huayi.
+**Description:** Column ownership is strict per-person today (`REFUND_COLUMN_OWNERS` in `app/src/modules/PostShipment/RefundsTab.tsx`): only `reina@virgohome.io` can move the Return Form Submitted / Return & Inspection / Completeness columns *forward*. When Reina is on vacation or unavailable, **Huayi (or a designated backup) needs to override and move cards through Reina's columns.** (Deny + back-moves are already open to everyone; this is only about the forward/approve action.)
+**Design options (pick one before build):**
+  1. **Leadership/admin override** — `isLeadership(role)` already exists (`finance` + `admin`); let it act on *any* column. Simplest, but also lets George/Julie move Reina's columns, not just Huayi.
+  2. **Named backup owner** — a per-column "backup" list (e.g. add Huayi to each column's owners), or a single global "backup owner" env/const. Keeps it to Huayi specifically.
+  3. **"Cover for X" toggle** — a temporary, self-service coverage switch (nicest UX, most work).
+**Touch:** `ownsRefundColumn` / `REFUND_COLUMN_OWNERS` in `RefundsTab.tsx`; possibly `permissions.ts`; if coverage should also redirect the reminder digest, mirror in `supabase/functions/send-refund-reminders` recipients.
+**⚠️ Hard prerequisite (blocks the test below too):** operators **Reina & Pedrum currently cannot write `refund_approvals` at all** — the UPDATE policy is still `with check is_manager()` (operators excluded), and there is no DELETE policy. Until this is relaxed to `is_internal_user()`, Reina can't submit a card to Manager Review and Pedrum can't mark a refund executed. SQL is in `docs/refund-approval-deploy-handoff.md`.
+
+### E2E refund test runbook (planned Tue 2026-07-28 AM) — "pretend refund"
+Goal: move one test card start→finish through every owner. **Do the prerequisites first or the test stalls.**
+
+**Prerequisites (must be done before the test):**
+- [ ] Run the `refund_approvals` RLS SQL (see handoff doc) — otherwise Reina's Submit-to-Manager and Pedrum's Mark-refunded steps **fail at the DB**.
+- [ ] Decide if the Huayi-override (backlog item above) needs to be built before the test, in case Reina doesn't action step 2. If not built, Huayi can only *deny*, not move forward, on Reina's columns.
+- [ ] Have a test card to move (either Reina submits a real test return form, or seed one).
+
+**Steps:**
+1. **Submit the return form as Reina** → card lands in **Return Form Submitted**.
+2. **Reina moves it → Manager Review** (Tue 7/28 AM): Return Form Submitted → (Return & Inspection or, for discard, straight to) Completeness → **Submit to Manager**. *Contingency:* if Reina doesn't, **Huayi overrides** and does it (requires the override above).
+3. **George** moves it: Manager Review → **Approve (manager)** → Finance Review.
+4. **Julie** moves it: Finance Review → **Approve amount → queue** (finance modal) → Refund Queue.
+5. **Pedrum** moves it: Refund Queue → **Mark refunded** → Refunded.
+6. Verify along the way: owner-only forward buttons appear for the right person; deny/back work for anyone; owner email digests fire (3-day cadence); customer status emails send at each transition (use `EMAIL_TEST_RECIPIENT` to avoid emailing a real customer during the test).
+
+---
+
+## FR-13 return shipping label (parked) — pulled from UI 2026-08-04 (Huayi)
+
+**Status:** UI removed, feature parked. **Owner:** Huayi.
+**What was removed:** the 🏷 **Generate return label** button on refund/return cards (Return Form Submitted + Return & Inspection columns, and the refund detail panel). The read-only tracking badge stays — if `returns.pickup_tracking` is filled by any other means, the card still shows `🏷 Carrier · TRACKING`.
+**What's still in the tree, unwired:** `bookReturnLabel()` in `app/src/lib/postShipment.ts` (no callers) and the deployed `supabase/functions/book-return-label` edge function (ACTIVE, v2 — never successfully booked anything).
+
+**Why it was pulled — three blockers, all must be fixed before rewiring:**
+
+1. **Hard bug: the edge fn reads a column that doesn't exist.** `book-return-label/index.ts` does `.select('id, address_postal_code, country')` on `orders`. The live table has `postal_code`, `address_customer_postal`, `address_google_postal`, `address_claude_postal` — no `address_postal_code`. PostgREST rejects the whole select; the code ignores the error (`const { data: order }`, no `error` check), so `order` is null and every click 400s with *"No customer postal code on file for this return (link an order with an address first)"* — even for returns whose order has a perfectly good postal code. Present since the only commit that ever touched the file (`1795bc8`); prod confirms no `shipments` row has ever carried a `return_id`.
+   *Fix:* select the real column(s) with a fallback chain (`address_customer_postal` → `postal_code` → `address_google_postal`), and surface the Postgres error instead of swallowing it.
+2. **Nothing reaches the customer.** On success the label PDF is only `window.open`'d in the operator's tab — and because that runs after an `await`, popup blockers commonly eat it, leaving no visible label at all. There is no label-delivery email (`send-return-emails` has no label branch). The customer needs the label, so this needs an email path (Resend template + `label_url`) before the button is worth having.
+3. **Carrier environment unverified.** `FREIGHTCOM_BASE_URL` defaults to the **sandbox** (`customer-external-api.ssd-test.freightcom.com`). Confirm the prod secret is set to the live host before re-enabling — otherwise a "successful" booking produces a test label against a real customer case.
+
+**Also worth revisiting when it comes back:** the booking is hardcoded to one 23 kg / 61×61×61 cm package and always picks the **cheapest** rate with ship date = tomorrow; there's no operator confirmation of carrier/date beyond a `window.confirm`. Return-address handling assumes the return ships from the original order's address, which won't hold when the user isn't the purchaser (see the customer/user split in the refund work).
+
+**Touch when rebuilding:** `supabase/functions/book-return-label/index.ts`; `bookReturnLabel()` in `app/src/lib/postShipment.ts`; re-add the control in `app/src/modules/PostShipment/RefundsTab.tsx` next to `ReturnTrackingBadge` (three render sites: `DispositionEditor`, the pre-refund card, the refund detail panel).
+
+---
+
+## Refund workflow customer emails — policy, 2026-08-04 (Huayi)
+
+**Decision:** in the refund/return workflow a customer hears from us **automatically exactly twice**:
+
+1. **Return form submitted** → the confirmation email (`send-return-emails`, fired from the public `/return` form). Unchanged.
+2. **Card reaches the Refunded column** → `refund_funds_sent_customer`, fired from `executeRefund()`. Copy now states **7–10 business days** for the funds to land.
+
+Every other automatic customer email in this workflow is off.
+
+**Stopped (were firing before this change):**
+
+| Trigger | Template | Where it lived | Prod sends before removal |
+|---|---|---|---|
+| Return compiled into a refund (→ Completeness) | `refund_application_received_customer` | `submitRefundRequest()` | 4 |
+| Manager approves (→ Finance Review) | `refund_approved_customer` | `managerApprove()` | 0 |
+| Finance approves (→ Refund Queue) | `refund_processing_customer` | `financeApprove()` | 8 |
+| Return sitting in Return Form Submitted 7+ days | `return_followup_customer` | `send-return-followups` edge fn, daily cron 15:00 UTC | 2 (last: 2026-08-04) |
+
+The first three were removed in code (`app/src/lib/postShipment.ts`). The fourth was cron-driven, so code alone wouldn't have stopped it — **cron job `send-return-followups` is now `active = false`** (migration `20260804140000_refund_customer_emails_reduced.sql`, applied to prod via MCP). The edge function itself is untouched; re-enabling is `select cron.alter_job(jobid, active := true) from cron.job where jobname = 'send-return-followups';`.
+
+**Unaffected — internal staff emails, still on:** `refund_queued_executor` (Finance approve → the payout executor), `refund_executed_am` (payout done → the case owner), `refund_reminder_digest` (`send-refund-reminders`, daily 14:00 UTC, goes to Reina/George/Julie/Pedrum only), and the internal `[Return Review]` copy that `send-return-emails` sends to Reina + George on form submit.
+
+**Deliberately left alone:**
+- The four now-unused customer templates stay `active` so an operator can still send one **by hand** from the Templates module — only the automatic sending was removed. Flip `active = false` on them if you want a hard block (note: the Templates UI has no active toggle, so that's a SQL/MCP change either way).
+- **Klaviyo flows are a separate faucet.** `logAction` still fires the `Refund Submitted` (on compile) and `Refund Processed` (on payout) Klaviyo events with the customer's email. If any Klaviyo flow is triggered off those metrics, customers will keep getting mail from Klaviyo regardless of anything in this repo — that has to be checked and switched off inside Klaviyo.
+- The BR-16 "Awaiting customer · day X" badge on the board still ages correctly (it's computed client-side from `created_at`); its copy changed from "reminder sent" to "needs a nudge" since nothing is auto-chasing the customer now. The 14-day `followup_escalated_at` stamp was set by the same dormant job, so it will stop being written — the red escalate state still triggers on the day count alone.
+
+---
+
 ## Reference
 
 - Email thread: "makeLILA app beta release, VCycene, Huayi" (started Apr 21, 2026)

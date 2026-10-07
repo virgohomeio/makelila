@@ -2,13 +2,19 @@ import { useMemo, useState } from 'react';
 import { STATUS_FILTERS, type FollowUpStatusKey, type DirectoryRow } from '../../lib/followupStatus';
 import { FU_STATE_META } from '../../lib/customers';
 import styles from './FollowUps.module.css';
+import type { PartyResolver } from '../../lib/customers';
+import { CustomerPartyName } from '../../components/CustomerPartyName';
 
 export function FollowUpDirectory({
-  rows, counts, overdueCount, onSelect,
+  rows, counts, overdueCount, partiesFor, onSelect,
 }: {
   rows: DirectoryRow[];
   counts: Record<FollowUpStatusKey, number>;
   overdueCount: number;
+  /** FR-6: the directory sits beside the calendar, which already names the
+   *  primary user. Without this the same household reads two ways on one
+   *  screen. Optional so bare renders still work. */
+  partiesFor?: PartyResolver;
   onSelect: (customerId: string) => void;
 }) {
   const [active, setActive] = useState<Set<FollowUpStatusKey>>(new Set());
@@ -39,7 +45,11 @@ export function FollowUpDirectory({
           ? <div className={styles.dirEmpty}>No customers match.</div>
           : filtered.map(r => (
             <button key={r.customer.id} className={styles.dirRow} onClick={() => onSelect(r.customer.id)}>
-              <div className={styles.dirRowName}>{r.customer.full_name}</div>
+              <div className={styles.dirRowName}>
+                {partiesFor
+                  ? <CustomerPartyName parties={partiesFor({ customerId: r.customer.id, fallbackName: r.customer.full_name })} variant="inline" />
+                  : r.customer.full_name}
+              </div>
               <div className={styles.dirRowMeta}>
                 {r.customer.onboard_date && <span>Onboarded {r.customer.onboard_date}</span>}
                 {r.customer.email && <span>{r.customer.email}</span>}

@@ -1,15 +1,17 @@
 import { useEffect, useState } from 'react';
 import {
   STATUS_META, STATUS_ORDER, getStatusMeta, updateUnitStatus, updateUnitFields,
-  QC_CHECK_META,
+  linkUnitToCustomer, QC_CHECK_META,
   type Unit, type UnitStatus, type QcCheck,
 } from '../../lib/stock';
+import { useCustomers } from '../../lib/customers';
+import { matchUnitToCustomer, isAutoLinkable } from '../../lib/customerNameMatch';
 import {
   assignUnit as fulfillmentAssignUnit,
   fetchUnassignedQueueItems,
   type QueueItemForAssignment,
 } from '../../lib/fulfillment';
-import { signedReportUrl } from '../../lib/testReports';
+import { openTestReport } from '../../lib/testReports';
 import { UnitTimeline } from '../../components/UnitTimeline';
 import styles from './Stock.module.css';
 
@@ -235,15 +237,31 @@ function AssignEditorModal({
   const [orderRef, setOrderRef] = useState(unit.customer_order_ref ?? '');
   const [location, setLocation] = useState(unit.location ?? '');
   const [busy, setBusy] = useState(false);
+  const { customers } = useCustomers();
 
   const save = async () => {
     setBusy(true); onError(null);
     try {
+      const trimmedName = customerName.trim();
       await updateUnitFields(unit.serial, {
-        customer_name:      customerName.trim() || null,
+        customer_name:      trimmedName || null,
         customer_order_ref: orderRef.trim() || null,
         location:           location.trim() || null,
       });
+      // Keep the canonical FK in step with the name typed here. This editor
+      // used to write customer_name alone, which is precisely how the Directory
+      // (which reads customer_id) drifted away from Stock: the FK was set once
+      // by the June 2026 backfill and nothing has maintained it since.
+      //
+      // Only unambiguous matches are linked automatically. Anything the matcher
+      // can't resolve is left unlinked on purpose, so it surfaces in the
+      // Unlinked units tab for an operator rather than being guessed at.
+      if (trimmedName !== (unit.customer_name ?? '')) {
+        const match = matchUnitToCustomer(trimmedName, customers);
+        if (isAutoLinkable(match) && match.customerId !== unit.customer_id) {
+          await linkUnitToCustomer(unit.serial, match.customerId!);
+        }
+      }
       onClose();
     } catch (e) {
       onError((e as Error).message);
@@ -480,9 +498,10 @@ function QcEditorModal({
               <button
                 type="button"
                 className={styles.reportOpenBtn}
-                onClick={async () => {
-                  try { window.open(await signedReportUrl(unit.test_report_path!), '_blank', 'noopener'); }
-                  catch (e) { onError((e as Error).message); }
+                onClick={() => {
+                  // Must not await before openTestReport — it claims the tab
+                  // synchronously so the popup blocker doesn't eat the click.
+                  openTestReport(unit.test_report_path!).catch(e => onError((e as Error).message));
                 }}
               >
                 {unit.test_report_name ?? 'test report'} ↗

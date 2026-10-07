@@ -1,8 +1,10 @@
 import { lazy, Suspense } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, Outlet, useParams } from 'react-router-dom';
 import { AuthProvider, ProtectedRoute, useAuth } from './lib/auth';
-import { canView, type Module } from './lib/permissions';
+import { canView, canAccessHiringModule, type Module } from './lib/permissions';
+import { useIsAssignedInterviewer } from './lib/hiring';
 import { AppShell } from './components/AppShell';
+import { RouteErrorBoundary } from './components/RouteErrorBoundary';
 import { MobileHome } from './components/MobileHome';
 import { useIsMobile } from './lib/useMediaQuery';
 // Eager: OrderReview is the default landing route + Login is on the auth
@@ -27,8 +29,8 @@ const Lovely      = lazy(() => import('./modules/Lovely'));
 const Team        = lazy(() => import('./modules/Team'));
 const Marketing   = lazy(() => import('./modules/Marketing'));
 const Finance     = lazy(() => import('./modules/Finance'));
-const Shipping    = lazy(() => import('./modules/Shipping'));
 const Products    = lazy(() => import('./modules/Products'));
+const Hiring      = lazy(() => import('./modules/Hiring'));
 
 function RequireRole({ role, children }: { role: Module; children: React.ReactNode }) {
   const { role: userRole, loading } = useAuth();
@@ -37,11 +39,27 @@ function RequireRole({ role, children }: { role: Module; children: React.ReactNo
   return <>{children}</>;
 }
 
+/** Hiring-specific route guard: leadership OR anyone assigned as an
+ *  interviewer on at least one posting (see lib/permissions.ts's
+ *  canAccessHiringModule doc comment for the null-role reasoning). Kept
+ *  separate from the generic RequireRole above — that component is shared
+ *  by every leadership-only module (Finance today, others later) and
+ *  Hiring's extra async assignment check doesn't belong there. */
+function RequireHiringAccess({ children }: { children: React.ReactNode }) {
+  const { role, loading: authLoading } = useAuth();
+  const { isAssigned, loading: assignedLoading } = useIsAssignedInterviewer();
+  if (authLoading || assignedLoading) return <div style={{ padding: 24 }}>Loading…</div>;
+  if (!canAccessHiringModule(role, isAssigned)) return <Navigate to="/" replace />;
+  return <>{children}</>;
+}
+
 function LazyRoute({ children }: { children: React.ReactNode }) {
   return (
-    <Suspense fallback={<div style={{ padding: 24, color: '#4a5568' }}>Loading…</div>}>
-      {children}
-    </Suspense>
+    <RouteErrorBoundary>
+      <Suspense fallback={<div style={{ padding: 24, color: '#4a5568' }}>Loading…</div>}>
+        {children}
+      </Suspense>
+    </RouteErrorBoundary>
   );
 }
 
@@ -49,6 +67,24 @@ function HomeRoute() {
   const isMobile = useIsMobile();
   if (isMobile) return <MobileHome />;
   return <Navigate to="/team" replace />;
+}
+
+/** Maps a pre-merge /shipping URL onto its Fulfillment tab.
+ *
+ *  Only `claims` needs translating. /shipping/claims was the carrier claims we
+ *  file with Freightcom, while /fulfillment/claims is the damage a customer
+ *  reports — sending the old link to the same-named new tab would land an
+ *  operator on the wrong list without any sign they were somewhere else. */
+const SHIPPING_TAB_MAP: Record<string, string> = {
+  shipping: 'shipping',
+  invoices: 'invoices',
+  claims:   'carrier-claims',
+};
+
+function ShippingRedirect() {
+  const { tab } = useParams<{ tab?: string }>();
+  const target = (tab && SHIPPING_TAB_MAP[tab]) ?? 'shipping';
+  return <Navigate to={`/fulfillment/${target}`} replace />;
 }
 
 export default function App() {
@@ -79,8 +115,14 @@ export default function App() {
             <Route path="order-review/:orderId" element={<OrderReview />} />
             <Route path="fulfillment"       element={<LazyRoute><Fulfillment /></LazyRoute>} />
             <Route path="fulfillment/:tab"  element={<LazyRoute><Fulfillment /></LazyRoute>} />
-            <Route path="shipping"      element={<LazyRoute><Shipping /></LazyRoute>} />
-            <Route path="shipping/:tab" element={<LazyRoute><Shipping /></LazyRoute>} />
+            {/* Shipping was folded into Fulfillment on 2026-08-28 — booking,
+                the delivery map, carrier invoices and carrier claims all
+                describe the same leg of an order. Old links and bookmarks are
+                mapped rather than dropped; note the tab rename, since
+                /shipping/claims and /fulfillment/claims were two different
+                things. */}
+            <Route path="shipping"      element={<ShippingRedirect />} />
+            <Route path="shipping/:tab" element={<ShippingRedirect />} />
             <Route path="build"         element={<Navigate to="/stock" replace />} />
             <Route path="post-shipment" element={<Navigate to="/fulfillment" replace />} />
             <Route path="service"       element={<LazyRoute><Service /></LazyRoute>} />
@@ -96,6 +138,11 @@ export default function App() {
               <RequireRole role="finance">
                 <LazyRoute><Finance /></LazyRoute>
               </RequireRole>
+            } />
+            <Route path="hiring" element={
+              <RequireHiringAccess>
+                <LazyRoute><Hiring /></LazyRoute>
+              </RequireHiringAccess>
             } />
             <Route path="products" element={<LazyRoute><Products /></LazyRoute>} />
           </Route>

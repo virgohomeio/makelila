@@ -1043,7 +1043,7 @@ export async function lastStatusSmsAt(serial: string, status: MachineStatus): Pr
 
 // ── Backlog #61: dataset labels (ML training pairs) ─────────────────────────
 
-export type DatasetLabelKind = 'smelly' | 'no_smell' | 'dry' | 'wet' | 'mixing' | 'not_mixing' | 'moldy_composter' | 'moldy_chamber' | 'other';
+export type DatasetLabelKind = 'smelly' | 'no_smell' | 'dry' | 'wet' | 'mixing' | 'not_mixing' | 'motor_jammed' | 'moldy_composter' | 'moldy_chamber' | 'other';
 export type DatasetLabelSource = 'sms' | 'phone' | 'ticket' | 'in_person' | 'operator_inferred';
 export type DatasetLabelConfidence = 'customer_reported' | 'operator_inferred';
 
@@ -1207,6 +1207,52 @@ export function useSerialToUser() {
   return { data, loading, error };
 }
 
+/** Pure — no React/Supabase dependency, safe to unit test in isolation.
+ *  Keeps only serials with a non-empty firmware string: most of the fleet
+ *  predates OTA firmware reporting, so `lila.firmware_version` is null for
+ *  the majority of rows. */
+export function buildFirmwareMap(
+  rows: Array<Record<string, unknown>>,
+): Record<string, string> {
+  const map: Record<string, string> = {};
+  for (const r of rows) {
+    const sn = r.serial_number;
+    const fw = r.firmware_version;
+    if (typeof sn === 'string' && sn && typeof fw === 'string' && fw.trim()) {
+      map[sn] = fw.trim();
+    }
+  }
+  return map;
+}
+
+/** Telemetry `lila.firmware_version` per serial. Serials that haven't
+ *  reported a firmware version are absent from the map. */
+export function useSerialFirmware() {
+  const [data, setData] = useState<Record<string, string>>({});
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const rows = await fetchAllLilaRows('serial_number, firmware_version');
+        if (cancelled) return;
+        setData(buildFirmwareMap(rows));
+      } catch (err) {
+        if (!cancelled) setError(err as Error);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return { data, loading, error };
+}
+
 export async function isRecentlyReceiving(
   serialNumber: string,
   windowMinutes = RECENT_RECEIVING_WINDOW_MINUTES,
@@ -1226,6 +1272,187 @@ export async function isRecentlyReceiving(
     .gte('created_at', startIso)
     .limit(1);
   return !!(ts && ts.length);
+}
+
+// Tables that prove a machine is alive. `isRecentlyReceiving` above checks
+// events + temperature_sensors; the Lovely PWA's own "connected" check uses
+// events + bme_sensors. Union all three so presence can never under-report
+// relative to what the customer is being told in the app.
+const PRESENCE_TABLES = ['events', 'bme_sensors', 'temperature_sensors'] as const;
+
+// PostgREST sends `.in()` lists in the query string, so very large fleets need
+// chunking to stay under the URL length cap.
+const PRESENCE_IN_CHUNK = 100;
+// Bounds the tier-2 fan-out below (one small query per table per quiet serial).
+const PRESENCE_CONCURRENCY = 8;
+
+// How far back tier 2 looks. MUST stay in step with MACHINE_INTERMITTENT_HOURS
+// in lovelyActivity.ts — not imported, because that module imports this one —
+// so that anything tier 2 fails to find is already past the "offline" cutoff
+// and the missing exact date cannot change a status. Shortening this below that
+// cutoff would silently start reporting live machines as offline.
+const PRESENCE_RECENT_WINDOW_HOURS = 72;
+
+function chunk<T>(items: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const out: R[] = new Array(items.length);
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (cursor < items.length) {
+      const i = cursor++;
+      out[i] = await fn(items[i]);
+    }
+  });
+  await Promise.all(workers);
+  return out;
+}
+
+/**
+ * Last-seen timestamp per serial, for a whole fleet at once.
+ *
+ * `isRecentlyReceiving` answers the same question for one serial in 2 queries,
+ * which would be 2N queries across a roster. This is three tiers instead, each
+ * cheaper to be wrong about than the last:
+ *
+ *   1. One batched query per telemetry table over the online window. We only
+ *      need *existence* here, so the result set stays small no matter how many
+ *      serials are passed. Anything reporting inside the window is resolved.
+ *   2. For the serials that stayed quiet, one `limit(1)` lookup per table
+ *      bounded to the recent window. The bound is what makes this cheap — see
+ *      PRESENCE_RECENT_WINDOW_HOURS.
+ *   3. Best-effort exact last-seen for whatever is still unresolved, purely so
+ *      the UI can print a real date for a long-dead unit. Never required for
+ *      correctness: by tier 3 we already know the machine is silent.
+ *
+ * Failures are contained rather than thrown. A serial ABSENT from the returned
+ * map is one we failed to learn anything about, which callers must treat as
+ * unknown — not as "the machine is down". Getting this wrong is what turned one
+ * slow query into a roster-wide false alarm.
+ */
+export type PresenceEntry = { at: string | null; exact: boolean };
+export type PresenceResult = {
+  presence: Map<string, PresenceEntry>;
+  warnings: string[];
+};
+
+export async function fetchTelemetryPresence(
+  serials: string[],
+): Promise<PresenceResult> {
+  const unique = Array.from(new Set(serials.filter(Boolean)));
+  const presence = new Map<string, PresenceEntry>();
+  const warnings: string[] = [];
+  if (unique.length === 0) return { presence, warnings };
+
+  const now = Date.now();
+  const onlineIso = new Date(now - RECENT_RECEIVING_WINDOW_MINUTES * 60_000).toISOString();
+  const recentIso = new Date(now - PRESENCE_RECENT_WINDOW_HOURS * 3_600_000).toISOString();
+
+  // ── Tier 1 — batched liveness over the online window ──────────────────────
+  const live = new Map<string, string>();
+  await Promise.all(
+    PRESENCE_TABLES.flatMap(table =>
+      chunk(unique, PRESENCE_IN_CHUNK).map(async group => {
+        const { data, error } = await supabase
+          .from(table)
+          .select('serial_number, created_at')
+          .in('serial_number', group)
+          .gte('created_at', onlineIso);
+        if (error) {
+          // One table going down costs one source of liveness, not the roster.
+          warnings.push(`${table}: ${error.message}`);
+          return;
+        }
+        for (const row of (data ?? []) as Array<{ serial_number: string; created_at: string }>) {
+          const seen = live.get(row.serial_number);
+          if (!seen || row.created_at > seen) live.set(row.serial_number, row.created_at);
+        }
+      }),
+    ),
+  );
+  for (const [serial, at] of live) presence.set(serial, { at, exact: true });
+
+  // ── Tier 2 — bounded last-seen for whatever stayed quiet ──────────────────
+  // The `gte` is load-bearing. These tables are indexed on
+  // (created_at, serial_number), so an unbounded `where serial = ? order by
+  // created_at desc limit 1` scans the entire index backward — measured at
+  // ~11.7s per serial on bme_sensors, past the statement timeout, and worst
+  // for exactly the dead serials that reach this tier. Bounding the range to
+  // the recent window turns it into a small range scan.
+  const quiet = unique.filter(s => !presence.has(s));
+  const unresolved: string[] = [];
+
+  await mapWithConcurrency(quiet, PRESENCE_CONCURRENCY, async serial => {
+    let latest: string | null = null;
+    let failed = false;
+    for (const table of PRESENCE_TABLES) {
+      const { data, error } = await supabase
+        .from(table)
+        .select('created_at')
+        .eq('serial_number', serial)
+        .gte('created_at', recentIso)
+        .order('created_at', { ascending: false })
+        .limit(1);
+      if (error) {
+        warnings.push(`${table}/${serial}: ${error.message}`);
+        failed = true;
+        continue;
+      }
+      const at = (data ?? [])[0]?.created_at as string | undefined;
+      if (at && (!latest || at > latest)) latest = at;
+    }
+
+    if (latest) {
+      presence.set(serial, { at: latest, exact: true });
+    } else if (failed) {
+      // Never established anything. Leave the serial out of the map entirely so
+      // the caller reads it as unknown.
+      unresolved.push(serial);
+    } else {
+      // Definitively silent across the window. The exact older date is still
+      // unknown, which `exact: false` records.
+      presence.set(serial, { at: null, exact: false });
+      unresolved.push(serial);
+    }
+  });
+
+  // ── Tier 3 — best-effort exact date for the long-quiet ────────────────────
+  // Unbounded, so it depends on a (serial_number, created_at DESC) index being
+  // present. Circuit-broken on the first failure: without that index every one
+  // of these times out, and hammering the database to improve a display string
+  // is not worth it. Whatever tier 2 already concluded stands.
+  let exactTierOpen = true;
+  await mapWithConcurrency(unresolved, PRESENCE_CONCURRENCY, async serial => {
+    if (!exactTierOpen) return;
+    let latest: string | null = null;
+    for (const table of PRESENCE_TABLES) {
+      if (!exactTierOpen) return;
+      const { data, error } = await supabase
+        .from(table)
+        .select('created_at')
+        .eq('serial_number', serial)
+        .order('created_at', { ascending: false })
+        .limit(1);
+      if (error) {
+        exactTierOpen = false;
+        warnings.push(`exact last-seen unavailable (${table}: ${error.message})`);
+        return;
+      }
+      const at = (data ?? [])[0]?.created_at as string | undefined;
+      if (at && (!latest || at > latest)) latest = at;
+    }
+    presence.set(serial, { at: latest, exact: true });
+  });
+
+  return { presence, warnings };
 }
 
 export function useMachineStatus(serialNumber: string | null) {

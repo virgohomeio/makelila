@@ -11,6 +11,8 @@ import {
 } from '../../lib/followups';
 import { STATUS_FILTERS, type FollowUpStatusKey } from '../../lib/followupStatus';
 import styles from './FollowUps.module.css';
+import type { PartyResolver } from '../../lib/customers';
+import { CustomerPartyName } from '../../components/CustomerPartyName';
 
 const labelOf = (k: FollowUpStatusKey) => STATUS_FILTERS.find(f => f.key === k)?.label ?? k;
 
@@ -19,10 +21,12 @@ const REPL_STATUS_LABEL: Record<string, string> = {
 };
 
 export function FollowUpDetailPanel({
-  customer, anchorDate, openTickets, isPaused, onClose, onChanged,
+  customer, anchorDate, openTickets, isPaused, partiesFor, onClose, onChanged,
 }: {
   customer: Customer;
   anchorDate: string | null;
+  /** FR-6 resolver — optional so bare renders fall back to the record name. */
+  partiesFor?: PartyResolver;
   openTickets: ServiceTicket[];
   isPaused: boolean;
   onClose: () => void;
@@ -68,7 +72,11 @@ export function FollowUpDetailPanel({
       {/* ── Header ─────────────────────────────────────────────── */}
       <div className={styles.profHeader}>
         <div className={styles.profHeaderTop}>
-          <strong className={styles.profName}>{customer.full_name}</strong>
+          <strong className={styles.profName}>
+            {partiesFor
+              ? <CustomerPartyName parties={partiesFor({ customerId: customer.id, fallbackName: customer.full_name })} />
+              : customer.full_name}
+          </strong>
           <button className={styles.closeBtn} onClick={onClose} title="Close">×</button>
         </div>
         <div className={styles.profHeaderRow}>

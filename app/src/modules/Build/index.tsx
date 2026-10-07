@@ -15,8 +15,6 @@ import { MobileTabbedModule, type MobileTab } from '../../components/MobileTabbe
 import styles from './Build.module.css';
 
 type View = 'board' | 'table' | 'qc';
-const BATCH_FILTERS = ['all', 'P50N', 'P100', 'P100X', 'P150', 'P200', 'LILA-Mini'] as const;
-type BatchFilter = typeof BATCH_FILTERS[number];
 
 function qcDateRange(days = 30) {
   const to = new Date();
@@ -33,7 +31,9 @@ export default function Build() {
   const { batches } = useBatches();
   const { orders: replacementOrders } = useReplacementOrders();
   const [view, setView] = useState<View>('board');
-  const [batchFilter, setBatchFilter] = useState<BatchFilter>('all');
+  // 'all' or a batches.id — chips come from the batches table (same source as Stock > LILA Units).
+  const [batchFilter, setBatchFilter] = useState<string>('all');
+  const batchFilters = useMemo(() => ['all', ...batches.map(b => b.id)], [batches]);
   const [search, setSearch] = useState('');
   const isMobile = useIsMobile();
   const [showNewPO, setShowNewPO] = useState(false);
@@ -70,8 +70,16 @@ export default function Build() {
   const [claimBusy, setClaimBusy] = useState(false);
   const [claimError, setClaimError] = useState<string | null>(null);
 
+  function openClaim() {
+    // Batches come from the `batches` table (same source as Stock > LILA Units);
+    // units.batch is an FK to it, so a hardcoded list would drift and fail inserts.
+    const defaultBatch = batches.find(b => b.id === 'P100')?.id ?? batches[0]?.id ?? '';
+    setShowClaimSerial({ batch: defaultBatch }); setClaimSerial(''); setClaimError(null);
+  }
+
   async function submitClaim() {
     if (!showClaimSerial) return;
+    if (!showClaimSerial.batch) { setClaimError('Pick a batch'); return; }
     const s = claimSerial.trim();
     if (!/^LL01-\d{11}$/.test(s)) { setClaimError('Format: LL01-NNNNNNNNNNN'); return; }
     setClaimBusy(true); setClaimError(null);
@@ -182,7 +190,7 @@ export default function Build() {
           <Kpi label="Ready" value={stats.ready} sub="→ fulfillment" />
         </div>
         <div className={styles.filterRow}>
-          {BATCH_FILTERS.map(b => (
+          {batchFilters.map(b => (
             <button
               key={b}
               className={`${styles.chip} ${batchFilter === b ? styles.chipActive : ''}`}
@@ -210,7 +218,7 @@ export default function Build() {
             >QC Dashboard</button>
           </div>
           <button className={styles.btnPrimary} onClick={() => { setPoPrefill(null); setShowNewPO(true); }}>+ New PO</button>
-          <button className={styles.btnSecondary} onClick={() => { setShowClaimSerial({ batch: 'P100' }); setClaimSerial(''); setClaimError(null); }}>+ Claim serial</button>
+          <button className={styles.btnSecondary} onClick={openClaim}>+ Claim serial</button>
         </div>
       </div>
       {loading && view !== 'qc' ? (
@@ -258,8 +266,8 @@ export default function Build() {
               value={showClaimSerial.batch}
               onChange={e => setShowClaimSerial({ batch: e.target.value })}
             >
-              {(['P50N', 'P100', 'P100X', 'P150', 'P200', 'LILA-Mini'] as const).map(b => (
-                <option key={b} value={b}>{b}</option>
+              {batches.map(b => (
+                <option key={b.id} value={b.id}>{b.id}</option>
               ))}
             </select>
           </div>
