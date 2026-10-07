@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { supabase } from '../../../lib/supabase';
 import { useFulfillmentQueue, type FulfillmentQueueRow } from '../../../lib/fulfillment';
@@ -247,7 +247,13 @@ export default function Queue() {
               />
             </div>
           ) : (
-            <>
+            // Keyed on the row, so picking a different order in the sidebar
+            // builds this pane fresh instead of handing the old one new props.
+            // Every panel below holds state that is true of exactly one order —
+            // a half-typed tracking number, a dock checkbox, "this just
+            // shipped" — and without a remount all of it is inherited by
+            // whichever order is clicked next.
+            <Fragment key={selected.id}>
               <QueueHeader
                 row={selected}
                 order={selectedOrder}
@@ -300,7 +306,7 @@ export default function Queue() {
                   {selected.step === 6 && <StepFulfilled row={selected} order={selectedOrder} />}
                 </>
               )}
-            </>
+            </Fragment>
           )}
         </section>
       </div>

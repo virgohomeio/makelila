@@ -469,3 +469,74 @@ describe('Shipment Received', () => {
     expect(screen.getByText(/originating support ticket is/i)).toBeTruthy();
   });
 });
+
+// The header is NOT remounted when the operator clicks a different order in the
+// sidebar — same element, same position, new props — so every "this just
+// happened" piece of local state outlives the order it was true of unless the
+// header clears it. It did not, which is how #1203 came to wear #1190's
+// "Received: 9/24/2026" pill while its own delivered_at was null in the
+// database: a claim about one customer's box, rendered on another's.
+describe('switching to another order', () => {
+  const shippedRow = { ...row, step: 6, fulfilled_at: '2026-06-01T00:00:00Z' } as FulfillmentQueueRow;
+  const shippedOrder = { ...order, id: 'o-1', delivered_at: null };
+  // The next row down the sidebar: shipped the same day, never received.
+  const otherRow = { ...shippedRow, id: 'q-2', order_id: 'o-2' } as FulfillmentQueueRow;
+  const otherOrder = {
+    ...shippedOrder, id: 'o-2', order_ref: '#1203', customer_name: 'Charlotte Robinson',
+  };
+
+  const recordReceipt = () => {
+    fireEvent.click(screen.getByRole('button', { name: /^shipment received$/i }));
+    fireEvent.change(screen.getByLabelText(/date the shipment was received/i), {
+      target: { value: '2026-06-09' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /record as received/i }));
+  };
+
+  it('does not carry one order’s arrival onto the next', async () => {
+    const { rerender } = render(<QueueHeader row={shippedRow} order={shippedOrder} />);
+    recordReceipt();
+    await waitFor(() => expect(screen.getByText(/Received: 6\/9\/2026/)).toBeTruthy());
+
+    rerender(<QueueHeader row={otherRow} order={otherOrder} />);
+    expect(screen.queryByText(/Received:/)).toBeNull();
+    expect(screen.queryByText(/recorded as received on/i)).toBeNull();
+    // And the un-received order can still be received, which the stale pill
+    // was suppressing.
+    expect(screen.getByRole('button', { name: /^shipment received$/i })).toBeTruthy();
+  });
+
+  it('does not carry one order’s flag onto the next', async () => {
+    const { rerender } = render(<QueueHeader row={shippedRow} order={shippedOrder} />);
+    fireEvent.click(screen.getByRole('button', { name: /^flag order$/i }));
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'arrived cracked' } });
+    fireEvent.click(screen.getByRole('button', { name: /flag this order/i }));
+    await waitFor(() => expect(screen.getByText(/is flagged/)).toBeTruthy());
+
+    rerender(<QueueHeader row={otherRow} order={otherOrder} />);
+    expect(screen.queryByText(/is flagged/)).toBeNull();
+  });
+
+  // A half-typed cancellation reason belongs to the order it was typed about.
+  it('closes an open panel and drops the reason typed into it', () => {
+    const { rerender } = render(<QueueHeader row={row} order={{ ...order, id: 'o-1' }} />);
+    fireEvent.click(screen.getByRole('button', { name: /^cancel order$/i }));
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'customer changed their mind' } });
+
+    rerender(<QueueHeader row={{ ...row, id: 'q-2', order_id: 'o-2' }} order={{ ...order, id: 'o-2', order_ref: '#1203' }} />);
+    expect(screen.queryByRole('textbox')).toBeNull();
+    expect(screen.queryByText(/customer changed their mind/)).toBeNull();
+  });
+
+  // An error raised against one order must not be read as this one's.
+  it('clears an error from the order before it', async () => {
+    deliveredMock.mockRejectedValueOnce(new Error('A shipment cannot be received in the future.'));
+    const { rerender } = render(<QueueHeader row={shippedRow} order={shippedOrder} />);
+    fireEvent.click(screen.getByRole('button', { name: /^shipment received$/i }));
+    fireEvent.click(screen.getByRole('button', { name: /record as received/i }));
+    await waitFor(() => expect(screen.getByText(/cannot be received in the future/i)).toBeTruthy());
+
+    rerender(<QueueHeader row={otherRow} order={otherOrder} />);
+    expect(screen.queryByText(/cannot be received in the future/i)).toBeNull();
+  });
+});

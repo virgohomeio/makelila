@@ -166,6 +166,31 @@ export function QueueHeader({
   // still null right after the write. Held locally so the card can say it
   // worked without waiting on the re-read.
   const [justReceived, setJustReceived] = useState<string | null>(null);
+
+  // Everything held above is true of ONE order, and this header is not
+  // remounted when the operator clicks a different row in the sidebar — React
+  // sees the same element in the same place and just hands it new props. So
+  // every one of those "this just happened" flags outlives the order it was
+  // about unless they are cleared here, which is how #1203 came to wear
+  // #1190's "Received: 9/24/2026" pill with its own delivered_at still null in
+  // the database. A stale pill is not cosmetic: it reads as a confirmed
+  // arrival, and it takes away the Shipment Received button that would record
+  // the real one.
+  //
+  // Reset during render rather than in an effect — an effect paints the stale
+  // claim for a frame first, and this is a claim about a customer's box.
+  const [renderedRow, setRenderedRow] = useState(row.id);
+  if (renderedRow !== row.id) {
+    setRenderedRow(row.id);
+    setPanel(null);
+    setExitReason('');
+    setError(null);
+    setBusy(false);
+    setFlagged(false);
+    setJustReceived(null);
+    setReceivedOn(localDayString());
+  }
+
   const receivedDay = justReceived
     ?? (order.delivered_at ? order.delivered_at.slice(0, 10) : null);
   const canRecordReceipt = hasShipped && !!order.id && !receivedDay;
