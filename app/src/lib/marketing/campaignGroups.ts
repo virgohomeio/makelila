@@ -18,8 +18,8 @@ const DEFS: {
   key: string; name: string; match: RegExp;
   start: string; end: string | null; discount: string;
 }[] = [
-  { key: 'fall',       name: 'Fall Sale 2026',             match: /fall/i,                                                     start: '2026-09-17', end: null,         discount: '20% Off' },
-  { key: 'summer',     name: 'Summer Pre Order 2026',      match: /summer|pre[\s-]?order/i,                                    start: '2026-06-03', end: '2026-09-16', discount: '25% Off' },
+  { key: 'fall',       name: 'Fall Sale 2026',             match: /fall/i,                                                     start: '2026-09-02', end: null,         discount: '20% Off' },
+  { key: 'summer',     name: 'Summer Pre Order 2026',      match: /summer|pre[\s-]?order/i,                                    start: '2026-06-03', end: '2026-09-01', discount: '25% Off' },
   { key: 'latespring', name: 'Late Spring Sale (v2) 2026', match: /late[\s-]?spring|spring[^a-z]*(v ?2|version 2)|\bv2\b/i,     start: '2026-05-11', end: '2026-06-02', discount: '20% Off' },
   { key: 'spring',     name: 'Spring Sale 2026',           match: /spring/i,                                                   start: '2026-04-01', end: '2026-05-10', discount: '30% Off' },
   { key: 'march',      name: 'March Sale 2026',            match: /march/i,                                                    start: '2026-03-01', end: '2026-03-31', discount: '10% Off' },
