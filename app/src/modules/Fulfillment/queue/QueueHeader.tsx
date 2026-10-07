@@ -5,7 +5,7 @@ import {
 } from '../../../lib/fulfillment';
 import { useAuth } from '../../../lib/auth';
 import { canRebookShipment, rebookShipment } from '../../../lib/rebookShipment';
-import { orderDue, type Order } from '../../../lib/orders';
+import { orderDue, markOrderDelivered, localDayString, type Order } from '../../../lib/orders';
 import { replacementItemsLabel } from '../../../lib/replacementTags';
 import styles from '../Fulfillment.module.css';
 
@@ -14,13 +14,15 @@ import styles from '../Fulfillment.module.css';
  *  The first three take the order out of the queue; the fourth keeps it and
  *  sends it backwards. All of them ask before they act, and all of them take a
  *  note — required to cancel and to flag, where the note is the whole point. */
-type ExitPanel = 'cancel' | 'flag' | 'moveBack' | 'rebook' | null;
+type ExitPanel = 'cancel' | 'flag' | 'moveBack' | 'rebook' | 'received' | null;
 
 export function QueueHeader({
   row,
   order,
+  shipped = false,
   onRemoved,
   onStepChanged,
+  onReceived,
 }: {
   row: FulfillmentQueueRow;
   order: {
@@ -29,7 +31,21 @@ export function QueueHeader({
     kind?: 'sale' | 'replacement';
     line_items?: Order['line_items'];
     linked_ticket_id?: string | null;
+    /** Needed to record the arrival — optional only so the bare renders in
+     *  the tests keep working; without it the Shipment Received button is not
+     *  offered at all. */
+    id?: string;
+    /** When the customer confirmed the box arrived. Set = this order is in the
+     *  Received rail and the button is replaced by the date. */
+    delivered_at?: string | null;
   };
+  /** True when the box has gone even though the row never reached step 6 — a
+   *  shipment booked outside the queue, recognised by lib/shippedOrders. Those
+   *  rows sit under Shipped and can be received like any other. */
+  shipped?: boolean;
+  /** Called after an arrival is recorded, so the board can re-read the orders
+   *  it fetched once and move the row to the Received rail. */
+  onReceived?: () => void;
   /** Called once the row is gone from the queue, with a line to show in the
    *  now-empty detail pane (the row itself disappears via realtime). */
   onRemoved?: (message: string) => void;
@@ -45,6 +61,9 @@ export function QueueHeader({
   const [error, setError] = useState<string | null>(null);
 
   const fulfilled = row.step === 6;
+  // "The box is gone" — step 6, or shipped some other way entirely. This, not
+  // `fulfilled`, is what makes an arrival recordable.
+  const hasShipped = fulfilled || shipped;
 
   const handleTogglePriority = async () => {
     setBusy(true); setError(null);
@@ -137,6 +156,34 @@ export function QueueHeader({
     }
   };
 
+  // The arrival. Unlike the four panels above, nothing leaves the queue and
+  // nothing is undone — the row moves from Shipped to Received and stays
+  // readable there. The date is asked for rather than stamped as now(): a
+  // customer confirms delivery on a call days after the fact, and now() would
+  // have put the warranty and follow-up clocks on the wrong day.
+  const [receivedOn, setReceivedOn] = useState(() => localDayString());
+  // The orders behind the queue are fetched once, so `order.delivered_at` is
+  // still null right after the write. Held locally so the card can say it
+  // worked without waiting on the re-read.
+  const [justReceived, setJustReceived] = useState<string | null>(null);
+  const receivedDay = justReceived
+    ?? (order.delivered_at ? order.delivered_at.slice(0, 10) : null);
+  const canRecordReceipt = hasShipped && !!order.id && !receivedDay;
+  const handleReceived = async () => {
+    if (!order.id) return;
+    setBusy(true); setError(null);
+    try {
+      await markOrderDelivered(order.id, receivedOn);
+      setPanel(null);
+      setJustReceived(receivedOn);
+      onReceived?.();
+      setBusy(false);
+    } catch (e) {
+      setError((e as Error).message);
+      setBusy(false);
+    }
+  };
+
   // Any step but the first can be rewound, by anyone on the team. Step 6 was
   // gated to a single hardcoded email address, which left everyone else unable
   // to undo a mis-click on the one step where a mis-click actually reaches the
@@ -214,6 +261,23 @@ export function QueueHeader({
               Due: {due.dueLabel}
             </span>
           )}
+          {receivedDay && (
+            <span
+              className={`${styles.duePill} ${styles.fulfilledPill}`}
+              title="The customer confirmed this shipment arrived"
+            >
+              Received: {new Date(`${receivedDay}T12:00:00`).toLocaleDateString('en-US')}
+            </span>
+          )}
+          {canRecordReceipt && (
+            <button
+              className={panel === 'received' ? styles.exitBtnOn : styles.exitBtn}
+              onClick={() => openPanel('received')}
+              disabled={busy}
+              aria-expanded={panel === 'received'}
+              title="The customer has the box — record the day it arrived and move this order to the Received rail"
+            >Shipment Received</button>
+          )}
           {canRebook && (
             <button
               className={panel === 'rebook' ? styles.exitBtnOn : styles.exitBtn}
@@ -274,7 +338,52 @@ export function QueueHeader({
           )}
         </div>
       </div>
-      {panel && (
+      {panel === 'received' && (
+        <div className={styles.exitPanel}>
+          <div className={styles.exitPanelTitle}>
+            When did {order.customer_name} receive {order.order_ref}?
+          </div>
+          <ul className={styles.exitPanelList}>
+            <li>
+              The order moves from <strong>Shipped</strong> to{' '}
+              <strong>Received</strong> in this queue, filed under the month it arrived.
+            </li>
+            <li>
+              It drops off <strong>Awaiting delivery confirmation</strong> in
+              Fulfillment › History.
+            </li>
+            {order.kind === 'replacement' && order.linked_ticket_id && (
+              <li>
+                The originating support ticket is <strong>closed</strong>, dated
+                the day you pick here.
+              </li>
+            )}
+            <li>
+              Pick the day the customer actually got the box, not today — the
+              warranty and follow-up clocks both count from this date.
+            </li>
+          </ul>
+          <input
+            className={`${styles.exitPanelInput} ${styles.exitPanelDate}`}
+            type="date"
+            value={receivedOn}
+            max={localDayString()}
+            onChange={e => setReceivedOn(e.target.value)}
+            aria-label="Date the shipment was received"
+          />
+          <div className={styles.exitPanelActions}>
+            <button
+              className={styles.exitConfirm}
+              onClick={() => void handleReceived()}
+              disabled={busy || !receivedOn}
+            >{busy ? 'Working…' : 'Record as received'}</button>
+            <button className={styles.backBtn} onClick={() => setPanel(null)} disabled={busy}>
+              Never mind
+            </button>
+          </div>
+        </div>
+      )}
+      {panel && panel !== 'received' && (
         <div className={
           panel === 'cancel' ? styles.exitPanelDanger
           : panel === 'flag' ? styles.exitPanelWarn
@@ -438,6 +547,13 @@ export function QueueHeader({
               Never mind
             </button>
           </div>
+        </div>
+      )}
+      {justReceived && (
+        <div className={styles.queueNotice} style={{ marginTop: 8, marginBottom: 0 }}>
+          ✓ {order.order_ref} is recorded as received on{' '}
+          {new Date(`${justReceived}T12:00:00`).toLocaleDateString('en-US')} — it is in the
+          Received rail of this queue.
         </div>
       )}
       {flagged && (

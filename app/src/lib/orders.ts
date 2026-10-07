@@ -2752,9 +2752,42 @@ export function useShippedOrders(): { orders: Order[]; loading: boolean } {
   return { orders, loading };
 }
 
+/** Today as the operator's calendar reads it — "YYYY-MM-DD", local, never UTC.
+ *  Used to bound a picked received date: at 9am in Toronto, "today" in UTC is
+ *  already the same day, but at 9pm it is tomorrow, and a date input offering
+ *  today would then be rejected as being in the future. */
+export function localDayString(d: Date = new Date()): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/** Turn a day an operator picked in an `<input type="date">` ("YYYY-MM-DD")
+ *  into a timestamp, anchored at local NOON rather than midnight.
+ *
+ *  A bare date goes into `new Date()` as UTC midnight, which is the previous
+ *  day everywhere west of Greenwich — so a shipment received on the 7th would
+ *  be filed, and later read back, as the 6th. Noon is far enough from both
+ *  edges that no timezone this app runs in can shift the day. Returns null
+ *  when the string is not a date at all. */
+export function calendarDayToIso(day: string): string | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day.trim());
+  if (!m) return null;
+  const dt = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 12, 0, 0, 0);
+  if (Number.isNaN(dt.getTime())) return null;
+  // Rejects 2026-02-31, which the Date constructor would roll into March.
+  if (dt.getMonth() !== Number(m[2]) - 1 || dt.getDate() !== Number(m[3])) return null;
+  return dt.toISOString();
+}
+
 /** Records that an order was delivered. For replacement orders, also closes
- *  the linked service ticket. Idempotent — safe to call twice. */
-export async function markOrderDelivered(orderId: string): Promise<void> {
+ *  the linked service ticket. Idempotent — safe to call twice.
+ *
+ *  `receivedOn` is the day the customer actually took delivery, as a local
+ *  "YYYY-MM-DD" — what Fulfillment > Queue's "Shipment Received" button
+ *  collects. Delivery is nearly always confirmed after the fact (the customer
+ *  mentions it on a call days later), so stamping `now()` would have put the
+ *  whole warranty and follow-up clock on the wrong day. Omit it and today is
+ *  used, which is what the History tab's "Mark delivered" button wants. */
+export async function markOrderDelivered(orderId: string, receivedOn?: string): Promise<void> {
   const { data: row, error: rErr } = await supabase
     .from('orders')
     .select('kind, linked_ticket_id, order_ref, delivered_at, shipped_at, customer_email')
@@ -2766,13 +2799,25 @@ export async function markOrderDelivered(orderId: string): Promise<void> {
     throw new Error('Cannot mark delivered: order has not been shipped yet.');
   }
 
-  const deliveredAt = new Date().toISOString();
+  let deliveredAt = new Date().toISOString();
+  if (receivedOn) {
+    const picked = calendarDayToIso(receivedOn);
+    if (!picked) throw new Error(`"${receivedOn}" is not a date — expected YYYY-MM-DD.`);
+    // Compared as calendar days, not instants: the noon anchor above is hours
+    // ahead of a morning "now", and an operator picking today must not be told
+    // the box arrives in the future.
+    if (receivedOn.trim() > localDayString()) {
+      throw new Error('A shipment cannot be received in the future.');
+    }
+    deliveredAt = picked;
+  }
   const { error: uErr } = await supabase
     .from('orders')
     .update({ delivered_at: deliveredAt })
     .eq('id', orderId);
   if (uErr) throw new Error(uErr.message);
-  await logAction('order_delivered', row.order_ref, 'delivery confirmed',
+  await logAction('order_delivered', row.order_ref,
+    receivedOn ? `delivery confirmed \u00b7 received ${receivedOn.trim()}` : 'delivery confirmed',
     undefined,
     { klaviyoEvent: 'Order Delivered', ...((row.customer_email as string | null) ? { klaviyoEmail: row.customer_email as string } : {}) });
 

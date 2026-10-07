@@ -411,4 +411,62 @@ describe('QueueSidebar', () => {
       expect(screen.getByText('Alice')).toBeInTheDocument();
     });
   });
+
+  // The fourth rail. A box having left the dock and the customer having it are
+  // two different claims, so Received is its own rail rather than a badge on
+  // Shipped — and it is filled by an operator confirming the arrival, never by
+  // a carrier scan.
+  describe('Received rail', () => {
+    const receivedRow = mkRow({ id: 'q4', order_id: 'o1', step: 6, fulfilled_at: '2026-06-01T00:00:00Z' });
+    const receivedAt = new Map([['q4', '2026-06-09T12:00:00Z']]);
+
+    it('is a tab of its own, counted', () => {
+      render(<MemoryRouter><QueueSidebar
+        readyRows={[]} shippedRows={[shippedRow]} receivedRows={[receivedRow]}
+        receivedAt={receivedAt} orderLookup={orders} selectedId={null} onSelect={vi.fn()}
+      /></MemoryRouter>);
+      expect(screen.getByRole('button', { name: /^received 1$/i })).toBeInTheDocument();
+    });
+
+    it('dates each card by when the customer got it, not when it shipped', () => {
+      render(<MemoryRouter><QueueSidebar
+        readyRows={[]} shippedRows={[]} receivedRows={[receivedRow]}
+        receivedAt={receivedAt} orderLookup={orders} selectedId={null} onSelect={vi.fn()}
+      /></MemoryRouter>);
+      fireEvent.click(screen.getByRole('button', { name: /^received 1$/i }));
+      expect(screen.getByText(/Received 6\/9\/2026/)).toBeInTheDocument();
+      // Not the step-6 pill every other shipped row wears.
+      expect(screen.queryByText(/Fulfilled/i)).not.toBeInTheDocument();
+    });
+
+    it('buckets by the month of arrival', () => {
+      render(<MemoryRouter><QueueSidebar
+        readyRows={[]} shippedRows={[]} receivedRows={[receivedRow]}
+        receivedAt={receivedAt} orderLookup={orders} selectedId={null} onSelect={vi.fn()}
+      /></MemoryRouter>);
+      fireEvent.click(screen.getByRole('button', { name: /^received 1$/i }));
+      expect(screen.getByText(/June 2026/i)).toBeInTheDocument();
+    });
+
+    it('a shipped order is not in it until someone records the arrival', () => {
+      render(<MemoryRouter><QueueSidebar
+        readyRows={[]} shippedRows={[shippedRow]} receivedRows={[]}
+        orderLookup={orders} selectedId={null} onSelect={vi.fn()}
+      /></MemoryRouter>);
+      fireEvent.click(screen.getByRole('button', { name: /^received 0$/i }));
+      expect(screen.getByText(/Nothing confirmed as received/i)).toBeInTheDocument();
+      expect(screen.getByText(/Shipment Received is clicked/i)).toBeInTheDocument();
+    });
+
+    it('a fruitless search names it like any other rail', () => {
+      render(<MemoryRouter><QueueSidebar
+        readyRows={[row2]} shippedRows={[]} receivedRows={[receivedRow]}
+        receivedAt={receivedAt} orderLookup={orders} selectedId={null} onSelect={vi.fn()}
+      /></MemoryRouter>);
+      fireEvent.change(screen.getByLabelText('Search orders ready to ship'), {
+        target: { value: 'Alice' },
+      });
+      expect(screen.getByText(/1 match under Received/i)).toBeInTheDocument();
+    });
+  });
 });

@@ -5,7 +5,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
-const { cancelMock, flagMock, moveBackMock, rebookMock } = vi.hoisted(() => ({
+const { cancelMock, flagMock, moveBackMock, rebookMock, deliveredMock } = vi.hoisted(() => ({
+  deliveredMock: vi.fn(() => Promise.resolve()),
   cancelMock: vi.fn(() => Promise.resolve()),
   flagMock: vi.fn(() => Promise.resolve()),
   moveBackMock: vi.fn(() => Promise.resolve({
@@ -28,6 +29,11 @@ vi.mock('../../../lib/fulfillment', async () => {
     setQueuePriority: vi.fn(() => Promise.resolve()),
     goBackStep: vi.fn(() => Promise.resolve()),
   };
+});
+
+vi.mock('../../../lib/orders', async () => {
+  const actual = await vi.importActual<typeof import('../../../lib/orders')>('../../../lib/orders');
+  return { ...actual, markOrderDelivered: deliveredMock };
 });
 
 vi.mock('../../../lib/rebookShipment', async () => {
@@ -67,7 +73,7 @@ const order = {
 
 beforeEach(() => {
   cancelMock.mockClear(); flagMock.mockClear();
-  moveBackMock.mockClear(); rebookMock.mockClear();
+  moveBackMock.mockClear(); rebookMock.mockClear(); deliveredMock.mockClear();
 });
 
 // The third exit, between cancelling and postponing: the order is stopped and
@@ -377,5 +383,89 @@ describe('QueueHeader step rewind', () => {
     fireEvent.click(backBtn());
     await waitFor(() => expect(screen.getByText(/rewind blocked/i)).toBeTruthy());
     expect(onStepChanged).not.toHaveBeenCalled();
+  });
+});
+
+// The end of the line. A shipped order is not done — the customer still has to
+// actually get the box — and the day they got it is what the warranty and the
+// follow-up clocks count from, so it is asked for rather than stamped as now().
+describe('Shipment Received', () => {
+  const shippedRow = { ...row, step: 6, fulfilled_at: '2026-06-01T00:00:00Z' } as FulfillmentQueueRow;
+  const shippedOrder = { ...order, id: 'o-1', delivered_at: null };
+  const receivedBtn = () => screen.getByRole('button', { name: /^shipment received$/i });
+
+  it('is not offered on an order that has not shipped', () => {
+    render(<QueueHeader row={row} order={shippedOrder} />);
+    expect(screen.queryByRole('button', { name: /^shipment received$/i })).toBeNull();
+  });
+
+  it('is offered at step 6', () => {
+    render(<QueueHeader row={shippedRow} order={shippedOrder} />);
+    expect(receivedBtn()).toBeTruthy();
+  });
+
+  // A shipment booked outside the queue never reaches step 6 — lib/shippedOrders
+  // is what recognises those — and the customer still got a box.
+  it('is offered on a row shipped some other way', () => {
+    render(<QueueHeader row={row} order={shippedOrder} shipped />);
+    expect(receivedBtn()).toBeTruthy();
+  });
+
+  it('records the day picked, not today', async () => {
+    const onReceived = vi.fn();
+    render(<QueueHeader row={shippedRow} order={shippedOrder} onReceived={onReceived} />);
+    fireEvent.click(receivedBtn());
+    fireEvent.change(screen.getByLabelText(/date the shipment was received/i), {
+      target: { value: '2026-06-09' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /record as received/i }));
+    await waitFor(() => expect(deliveredMock).toHaveBeenCalledWith('o-1', '2026-06-09'));
+    // The orders behind the queue are read once, so the board has to be told.
+    await waitFor(() => expect(onReceived).toHaveBeenCalled());
+  });
+
+  it('nothing is written until the operator confirms', () => {
+    render(<QueueHeader row={shippedRow} order={shippedOrder} />);
+    fireEvent.click(receivedBtn());
+    expect(deliveredMock).not.toHaveBeenCalled();
+  });
+
+  it('says so in place afterwards — the row stays on screen', async () => {
+    render(<QueueHeader row={shippedRow} order={shippedOrder} />);
+    fireEvent.click(receivedBtn());
+    fireEvent.change(screen.getByLabelText(/date the shipment was received/i), {
+      target: { value: '2026-06-09' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /record as received/i }));
+    await waitFor(() => expect(screen.getByText(/recorded as received on/i)).toBeTruthy());
+    // Twice over, and both are wanted: the notice says what just happened, and
+    // the pill beside the Fulfilled one is what the card reads as from now on.
+    expect(screen.getAllByText(/6\/9\/2026/).length).toBeGreaterThan(0);
+    expect(screen.getByText(/Received: 6\/9\/2026/)).toBeTruthy();
+  });
+
+  it('shows the date instead of the button once it is on file', () => {
+    render(<QueueHeader row={shippedRow} order={{ ...shippedOrder, delivered_at: '2026-06-09T12:00:00Z' }} />);
+    expect(screen.queryByRole('button', { name: /^shipment received$/i })).toBeNull();
+    expect(screen.getByText(/Received: 6\/9\/2026/)).toBeTruthy();
+  });
+
+  it('surfaces a rejected date instead of claiming it saved', async () => {
+    deliveredMock.mockRejectedValueOnce(new Error('A shipment cannot be received in the future.'));
+    const onReceived = vi.fn();
+    render(<QueueHeader row={shippedRow} order={shippedOrder} onReceived={onReceived} />);
+    fireEvent.click(receivedBtn());
+    fireEvent.click(screen.getByRole('button', { name: /record as received/i }));
+    await waitFor(() => expect(screen.getByText(/cannot be received in the future/i)).toBeTruthy());
+    expect(onReceived).not.toHaveBeenCalled();
+  });
+
+  it('warns that the ticket closes when the box is a replacement', () => {
+    render(<QueueHeader
+      row={shippedRow}
+      order={{ ...shippedOrder, kind: 'replacement' as const, linked_ticket_id: 't-9' }}
+    />);
+    fireEvent.click(receivedBtn());
+    expect(screen.getByText(/originating support ticket is/i)).toBeTruthy();
   });
 });

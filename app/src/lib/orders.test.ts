@@ -28,7 +28,7 @@ vi.mock('./activityLog', () => ({
   logAction: logActionMock,
 }));
 
-import { bucketOrders, SALES_QUEUE_START, type Order, disposition, needInfo, nextReplacementOrderRef, createReplacementOrder, createPendingReplacement, hasPendingLine, markOrderShipped, markOrderDelivered, cancelReplacementOrder } from './orders';
+import { bucketOrders, SALES_QUEUE_START, type Order, disposition, needInfo, nextReplacementOrderRef, createReplacementOrder, createPendingReplacement, hasPendingLine, markOrderShipped, markOrderDelivered, localDayString, calendarDayToIso, cancelReplacementOrder } from './orders';
 
 describe('disposition', () => {
   beforeEach(() => {
@@ -420,6 +420,107 @@ describe('markOrderDelivered', () => {
     await expect(markOrderDelivered('o1')).rejects.toThrow(/not been shipped/i);
   });
 
+  // The arrival is nearly always confirmed after the fact — a customer
+  // mentions it on a call days later — so the day is asked for rather than
+  // stamped as now(). Everything downstream (warranty, follow-ups, the ticket
+  // close) dates from what is written here.
+  it('writes the operator-picked day, anchored at local noon', async () => {
+    const orderSingle = vi.fn().mockResolvedValue({
+      data: { kind: 'sale', linked_ticket_id: null, order_ref: '#1113',
+              delivered_at: null, shipped_at: '2026-06-04T10:00:00Z' }, error: null,
+    });
+    const orderEqSel = vi.fn().mockReturnValue({ single: orderSingle });
+    const orderUpdateEq = vi.fn().mockResolvedValue({ error: null });
+    const orderUpdate = vi.fn().mockReturnValue({ eq: orderUpdateEq });
+    fromMock.mockImplementation(((table: string) => {
+      if (table === 'orders') return { update: orderUpdate, select: () => ({ eq: orderEqSel }) };
+      if (table === 'service_tickets') return { update: vi.fn() };
+      throw new Error(`unexpected table ${table}`);
+    }) as any);
+
+    await markOrderDelivered('o1', '2026-06-09');
+
+    const written = orderUpdate.mock.calls[0][0].delivered_at as string;
+    // Read back as a LOCAL day it must still be the 9th. Midnight-anchored it
+    // would come back as the 8th anywhere west of Greenwich.
+    expect(localDayString(new Date(written))).toBe('2026-06-09');
+  });
+
+  it('dates the replacement ticket close from the picked day too', async () => {
+    const orderSingle = vi.fn().mockResolvedValue({
+      data: { kind: 'replacement', linked_ticket_id: 't1', order_ref: 'R-0007',
+              delivered_at: null, shipped_at: '2026-06-04T10:00:00Z' }, error: null,
+    });
+    const orderEqSel = vi.fn().mockReturnValue({ single: orderSingle });
+    const orderUpdate = vi.fn().mockReturnValue({ eq: vi.fn().mockResolvedValue({ error: null }) });
+    const ticketUpdate = vi.fn().mockReturnValue({ eq: vi.fn().mockResolvedValue({ error: null }) });
+    fromMock.mockImplementation(((table: string) => {
+      if (table === 'orders') return { update: orderUpdate, select: () => ({ eq: orderEqSel }) };
+      if (table === 'service_tickets') return { update: ticketUpdate };
+      throw new Error(`unexpected table ${table}`);
+    }) as any);
+
+    await markOrderDelivered('o1', '2026-06-09');
+
+    const closedAt = ticketUpdate.mock.calls[0][0].closed_at as string;
+    expect(localDayString(new Date(closedAt))).toBe('2026-06-09');
+  });
+
+  it('refuses a day in the future', async () => {
+    const orderSingle = vi.fn().mockResolvedValue({
+      data: { kind: 'sale', linked_ticket_id: null, order_ref: '#1113',
+              delivered_at: null, shipped_at: '2026-06-04T10:00:00Z' }, error: null,
+    });
+    const orderEqSel = vi.fn().mockReturnValue({ single: orderSingle });
+    const orderUpdate = vi.fn();
+    fromMock.mockImplementation(((table: string) => {
+      if (table === 'orders') return { update: orderUpdate, select: () => ({ eq: orderEqSel }) };
+      throw new Error(`unexpected table ${table}`);
+    }) as any);
+
+    const nextYear = new Date(); nextYear.setFullYear(nextYear.getFullYear() + 1);
+    await expect(markOrderDelivered('o1', localDayString(nextYear)))
+      .rejects.toThrow(/future/i);
+    expect(orderUpdate).not.toHaveBeenCalled();
+  });
+
+  // Picking today must never read as the future, whatever time of day it is —
+  // the noon anchor is hours ahead of a morning "now", so the guard has to
+  // compare calendar days rather than instants.
+  it('accepts today', async () => {
+    const orderSingle = vi.fn().mockResolvedValue({
+      data: { kind: 'sale', linked_ticket_id: null, order_ref: '#1113',
+              delivered_at: null, shipped_at: '2026-06-04T10:00:00Z' }, error: null,
+    });
+    const orderEqSel = vi.fn().mockReturnValue({ single: orderSingle });
+    const orderUpdate = vi.fn().mockReturnValue({ eq: vi.fn().mockResolvedValue({ error: null }) });
+    fromMock.mockImplementation(((table: string) => {
+      if (table === 'orders') return { update: orderUpdate, select: () => ({ eq: orderEqSel }) };
+      if (table === 'service_tickets') return { update: vi.fn() };
+      throw new Error(`unexpected table ${table}`);
+    }) as any);
+
+    await markOrderDelivered('o1', localDayString());
+
+    expect(orderUpdate).toHaveBeenCalled();
+  });
+
+  it('rejects a day that is not a date', async () => {
+    const orderSingle = vi.fn().mockResolvedValue({
+      data: { kind: 'sale', linked_ticket_id: null, order_ref: '#1113',
+              delivered_at: null, shipped_at: '2026-06-04T10:00:00Z' }, error: null,
+    });
+    const orderEqSel = vi.fn().mockReturnValue({ single: orderSingle });
+    const orderUpdate = vi.fn();
+    fromMock.mockImplementation(((table: string) => {
+      if (table === 'orders') return { update: orderUpdate, select: () => ({ eq: orderEqSel }) };
+      throw new Error(`unexpected table ${table}`);
+    }) as any);
+
+    await expect(markOrderDelivered('o1', '2026-02-31')).rejects.toThrow(/not a date/i);
+    expect(orderUpdate).not.toHaveBeenCalled();
+  });
+
   it('is idempotent — early-returns when delivered_at is already set', async () => {
     const orderSingle = vi.fn().mockResolvedValue({
       data: { kind: 'replacement', linked_ticket_id: 't1', order_ref: 'R-0007',
@@ -436,6 +537,26 @@ describe('markOrderDelivered', () => {
     await markOrderDelivered('o1');
     expect(orderUpdate).not.toHaveBeenCalled();
     expect(ticketUpdate).not.toHaveBeenCalled();
+  });
+});
+
+// The one piece of this that is pure, and the one that goes wrong silently:
+// a bare "YYYY-MM-DD" through `new Date()` is UTC midnight, i.e. the previous
+// day for every timezone this app is used in.
+describe('calendarDayToIso', () => {
+  it('lands on the day that was picked, read back locally', () => {
+    const iso = calendarDayToIso('2026-10-07');
+    expect(iso).not.toBeNull();
+    expect(localDayString(new Date(iso!))).toBe('2026-10-07');
+  });
+
+  it('refuses a day that does not exist rather than rolling it into March', () => {
+    expect(calendarDayToIso('2026-02-31')).toBeNull();
+  });
+
+  it('refuses anything that is not YYYY-MM-DD', () => {
+    expect(calendarDayToIso('07/10/2026')).toBeNull();
+    expect(calendarDayToIso('')).toBeNull();
   });
 });
 

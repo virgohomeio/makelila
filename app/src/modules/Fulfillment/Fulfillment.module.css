@@ -81,16 +81,19 @@
 }
 
 .sidebarTabs {
-  display: flex;
+  /* Two by two, not four across. A fourth rail (Received) cut the per-tab
+     width from ~100px to ~75px, at which "To be picked up" breaks onto three
+     lines and drags the whole bar down with it. In pairs each tab gets 150px
+     and every label fits on one or two. */
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   flex-shrink: 0;
   border-bottom: 1px solid var(--color-border);
 }
 
 .sidebarTab {
-  flex: 1;
-  /* Three rails share a 300px rail, so a tab gets ~100px. The label sits over
-     its count rather than beside it — "To be picked up 9" on one line either
-     clips or drags the other two tabs down to unreadable. */
+  /* The label sits over its count rather than beside it — "To be picked up 9"
+     on one line either clips or drags the other tabs down to unreadable. */
   min-width: 0;
   display: flex;
   flex-direction: column;
@@ -483,6 +486,16 @@
   font: inherit;
   font-size: 11px;
   resize: vertical;
+}
+
+/* The received-date picker in the same panel. A date is seven characters of
+   content, and at the textarea's full width the control reads as an empty
+   field the operator is meant to type a paragraph into. */
+.exitPanelDate {
+  width: auto;
+  max-width: 180px;
+  font-size: 12px;
+  padding: 6px 9px;
 }
 
 /* Confirmation left behind in the detail pane after a row leaves the queue. */

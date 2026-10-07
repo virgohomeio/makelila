@@ -43,6 +43,10 @@ type Order = {
   status: OrderStatus;
   placed_at: string | null;
   created_at: string;
+  // When the customer confirmed the box arrived. Written by the card's
+  // "Shipment Received" button; it is the whole basis of the Received rail.
+  // select('*') already returns it.
+  delivered_at: string | null;
   // Replacements only: what is actually in the box, and the case it came from.
   // select('*') already returns these; they were simply never read here, which
   // is why the card called a $24 lid a LILA Pro.
@@ -97,7 +101,12 @@ export default function Queue() {
     [ready, orderLookup, shippedEvidence],
   );
 
-  const { readyRows, pickupRows, shippedRows } = useMemo(() => {
+  // Bumped after an arrival is recorded. The orders behind the queue are read
+  // once (they rarely change after approval), so without this the row would
+  // keep rendering under Shipped with delivered_at still null locally.
+  const [ordersEpoch, setOrdersEpoch] = useState(0);
+
+  const { readyRows, pickupRows, shippedRows, receivedRows } = useMemo(() => {
     const byRef = (a: FulfillmentQueueRow, b: FulfillmentQueueRow) => {
       const refA = orderLookup.get(a.order_id)?.order_ref ?? '';
       const refB = orderLookup.get(b.order_id)?.order_ref ?? '';
@@ -120,17 +129,36 @@ export default function Queue() {
     // Left unsorted on purpose: the sidebar buckets this tab by the month each
     // box went out and orders it newest-first (queue/shippedMonths.ts). Sorting
     // by order ref here only to have it thrown away read like the real order.
+    // The end of the line. A box having left the dock and the customer having
+    // it are two different claims, so Received is its own rail rather than a
+    // badge on Shipped: the carrier's "delivered" scan is not what fills it —
+    // an operator confirming the arrival is.
+    const everythingShipped = [...fulfilled, ...alreadyShipped];
+    const receivedOf = (r: FulfillmentQueueRow) =>
+      orderLookup.get(r.order_id)?.delivered_at ?? null;
     return {
       readyRows: stillOurs,
       pickupRows: pickup,
-      shippedRows: [...fulfilled, ...alreadyShipped],
+      shippedRows: everythingShipped.filter(r => !receivedOf(r)),
+      receivedRows: everythingShipped.filter(r => !!receivedOf(r)),
     };
   }, [ready, fulfilled, orderLookup, shippedMarks, goorooshipSends, isEzTransRow]);
 
   const allRows = useMemo(
-    () => [...readyRows, ...pickupRows, ...shippedRows],
-    [readyRows, pickupRows, shippedRows],
+    () => [...readyRows, ...pickupRows, ...shippedRows, ...receivedRows],
+    [readyRows, pickupRows, shippedRows, receivedRows],
   );
+
+  // Arrival dates by queue row id — buckets the Received rail by month and
+  // dates each of its cards.
+  const receivedAt = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const r of receivedRows) {
+      const at = orderLookup.get(r.order_id)?.delivered_at;
+      if (at) m.set(r.id, at);
+    }
+    return m;
+  }, [receivedRows, orderLookup]);
 
   // A queued order whose money has already gone back should never be picked.
   // Shipped rows are history and are left unbadged — the box is gone, and that
@@ -157,7 +185,7 @@ export default function Queue() {
         if (error) { console.error('Queue orders fetch failed:', error); return; }
         setOrders((data as Order[]) ?? []);
       });
-  }, [ready, fulfilled]);
+  }, [ready, fulfilled, ordersEpoch]);
 
   // Default-select first row on load. Skipped while a notice is showing so the
   // confirmation isn't blown away by an auto-select the operator didn't ask for.
@@ -195,6 +223,8 @@ export default function Queue() {
           readyRows={readyRows}
           pickupRows={pickupRows}
           shippedRows={shippedRows}
+          receivedRows={receivedRows}
+          receivedAt={receivedAt}
           orderLookup={orderLookup}
           refundFlags={refundFlags}
           shippedMarks={shippedMarks}
@@ -226,6 +256,10 @@ export default function Queue() {
                 // Goorooship send is retired, so the badge and the "To be
                 // picked up" split have to be re-read too.
                 onStepChanged={() => { void refresh(); void refreshSends(); }}
+                // A row can be shipped without ever reaching step 6 — see
+                // shippedMarks above. Those are receivable too.
+                shipped={shippedMarks.has(selected.id)}
+                onReceived={() => setOrdersEpoch(e => e + 1)}
               />
               {shippedMarks.has(selected.id) ? (
                 // Ahead of the pause banner: "we already sent this" outranks
