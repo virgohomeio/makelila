@@ -73,13 +73,44 @@ export type UploadOutcome = {
   status: 'paired' | 'unmatched' | 'error';
   result?: QcCheck;
   message?: string;
+  mac?: string | null;     // normalised MAC from the report; null when the report has none
+  macClash?: string;       // the other serial that already holds this MAC (paired anyway)
 };
+
+/** The other serial already holding `mac`, or undefined when the MAC is new
+ *  or belongs to this same unit (a re-upload). Units already in the database
+ *  are checked first, then files paired earlier in this same drop. */
+function macClashFor(
+  mac: string,
+  serial: string,
+  macOwners: Map<string, string>,
+  seenThisDrop: Map<string, string>,
+): string | undefined {
+  for (const owner of [macOwners.get(mac), seenThisDrop.get(mac)]) {
+    if (owner && owner !== serial) return owner;
+  }
+  return undefined;
+}
 
 /** Bulk-upload .md test reports. Each file is paired to a unit by serial
  *  (in-file "Serial Number", falling back to the filename). Files whose serial
- *  isn't a known unit are reported as 'unmatched' and skipped. */
-export async function uploadTestReports(files: File[], validSerials: Set<string>): Promise<UploadOutcome[]> {
+ *  isn't a known unit are reported as 'unmatched' and skipped.
+ *
+ *  `macOwners` is mac_address → serial for every unit already carrying a MAC
+ *  (the Units tab builds it from the loaded units, so no extra round trip). A
+ *  MAC that already belongs to a *different* serial is a clash: the file is
+ *  still paired and the MAC still written — the same ESP32 showing up under two
+ *  serials is a labelling problem for the operator to sort out, not a reason to
+ *  drop the test result — but the outcome carries `macClash` so the uploader
+ *  can warn, and an activity-log entry records it. A report with no MAC line
+ *  leaves the unit's existing MAC alone. */
+export async function uploadTestReports(
+  files: File[],
+  validSerials: Set<string>,
+  macOwners: Map<string, string> = new Map(),
+): Promise<UploadOutcome[]> {
   const outcomes: UploadOutcome[] = [];
+  const seenThisDrop = new Map<string, string>();
 
   for (const file of files) {
     const text = await file.text();
@@ -91,6 +122,9 @@ export async function uploadTestReports(files: File[], validSerials: Set<string>
       continue;
     }
 
+    const mac = parsed.mac;
+    const macClash = mac ? macClashFor(mac, serial, macOwners, seenThisDrop) : undefined;
+
     try {
       const path = `${serial}/${Date.now()}-${file.name}`;
       const { error: upErr } = await supabase.storage
@@ -98,20 +132,29 @@ export async function uploadTestReports(files: File[], validSerials: Set<string>
         .upload(path, file, { contentType: 'text/markdown', upsert: false });
       if (upErr) throw upErr;
 
+      const patch: Record<string, unknown> = {
+        electrical_check: parsed.result,
+        electrical_failed_tests: parsed.failedTests.length ? parsed.failedTests.join(', ') : null,
+        test_report_path: path,
+        test_report_name: file.name,
+        test_report_uploaded_at: new Date().toISOString(),
+      };
+      if (mac) patch.mac_address = mac;
+
       const { error: dbErr } = await supabase
         .from('units')
-        .update({
-          electrical_check: parsed.result,
-          electrical_failed_tests: parsed.failedTests.length ? parsed.failedTests.join(', ') : null,
-          test_report_path: path,
-          test_report_name: file.name,
-          test_report_uploaded_at: new Date().toISOString(),
-        })
+        .update(patch)
         .eq('serial', serial);
       if (dbErr) throw dbErr;
 
-      await logAction('unit_test_report', serial, parsed.result);
-      outcomes.push({ fileName: file.name, serial, status: 'paired', result: parsed.result });
+      if (mac) seenThisDrop.set(mac, serial);
+
+      await logAction('unit_test_report', serial, mac ? `${parsed.result} mac=${mac}` : parsed.result);
+      if (macClash) {
+        await logAction('unit_mac_duplicate', serial, `mac=${mac} also on ${macClash}`,
+          { entityType: 'unit', unitSerial: serial });
+      }
+      outcomes.push({ fileName: file.name, serial, status: 'paired', result: parsed.result, mac, macClash });
     } catch (e) {
       outcomes.push({ fileName: file.name, serial, status: 'error', message: (e as Error).message });
     }
