@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-08
 **Module:** Stock (LILA Units tab) — test-report uploader, unit table, QC modal
-**Status:** designed, not built.
+**Status:** built on branch feat/test-report-mac-uniqueness; migration not yet applied.
 
 ## Problem
 
