@@ -163,11 +163,114 @@ describe('confirming the label on a Freightcom order, end to end', () => {
     expect(screen.getByTestId('step-blockers')).toHaveTextContent(/Freightcom booking/i);
   });
 
-  // An order whose machines ARE at the 3PL must not get this panel: it would
-  // offer a Freightcom booking for a carton Goorooship is collecting.
-  it('does not offer the Freightcom panel on an EZ Trans order', () => {
+  // An EZ Trans order defaults to Goorooship, which is the usual answer for a
+  // machine the 3PL is holding.
+  it('defaults an EZ Trans order to Goorooship, not Freightcom', () => {
     render(<StepLabel row={row} order={order} isEzTrans goorooshipSentAt="2026-10-05T17:40:00Z" />);
 
     expect(screen.queryByTestId('freightcom-panel')).toBeNull();
+    expect(screen.getByTestId('carrier-route')).toBeInTheDocument();
+  });
+
+  // Own-floor stock has only one possible answer — EZ Trans cannot pick a
+  // machine they do not hold — so there is nothing to ask.
+  it('asks nothing about the route on an own-floor order', () => {
+    render(<StepLabel row={row} order={order} isEzTrans={false} />);
+
+    expect(screen.queryByTestId('carrier-route')).toBeNull();
+    expect(screen.getByTestId('freightcom-panel')).toBeInTheDocument();
+  });
+});
+
+// #1258, the order this fix is for. Ian Stichbury's machine was sitting at the
+// EZ Trans 3PL and the carton went out on Canpar, booked in the Freightcom
+// portal. Step 3 read the shelf rather than asking, so it offered only the
+// Goorooship panel and held Pickup scheduled on "the Goorooship email to EZ
+// Trans to go out" — an email for a booking that was never going to be made.
+//
+// Worse, the plain label card rendered below that panel looked like the place
+// to type the carrier, the tracking number and the label, and was not: the
+// panel keeps its own copy, so the operator's Canpar number sat in a card no
+// button read while the panel above said all three were still required.
+describe('an EZ Trans machine going out on a Freightcom booking (#1258)', () => {
+  beforeEach(() => {
+    confirmLabelMock.mockClear();
+    saveQueueLabelMock.mockClear();
+    logActionMock.mockClear();
+  });
+
+  // The decoy. There must be exactly one carrier field on the step, and it
+  // must belong to the panel that reads it.
+  it('offers no second set of label fields behind the Goorooship panel', () => {
+    render(<StepLabel row={row} order={order} isEzTrans />);
+
+    // EzTransPanel is stubbed out here, so any carrier select still on screen
+    // is one StepLabel rendered itself — which is exactly the decoy.
+    expect(screen.queryAllByRole('combobox')).toHaveLength(0);
+    expect(screen.queryByTestId('freightcom-carrier')).toBeNull();
+  });
+
+  it('lets the operator say it was booked on Freightcom, and confirm it', async () => {
+    render(<StepLabel row={row} order={order} isEzTrans />);
+
+    // As found: the only gate offered is an email that is never going out.
+    expect(screen.getByTestId('step-blockers')).toHaveTextContent(/Goorooship email/i);
+    expect(screen.queryByTestId('freightcom-panel')).toBeNull();
+
+    fireEvent.click(screen.getByTestId('route-freightcom'));
+
+    // The Freightcom panel takes over, and so does its gate.
+    expect(screen.getByTestId('freightcom-panel')).toBeInTheDocument();
+    const blockers = screen.getByTestId('step-blockers');
+    expect(blockers).toHaveTextContent(/Freightcom booking/i);
+    expect(blockers).not.toHaveTextContent(/Goorooship email/i);
+
+    // #1258's actual label.
+    fireEvent.change(screen.getByTestId('freightcom-carrier'), { target: { value: 'Canpar' } });
+    fireEvent.change(screen.getByTestId('freightcom-tracking'), {
+      target: { value: 'D556276790000169272001' },
+    });
+    fireEvent.change(screen.getByTestId('freightcom-label-pdf'), { target: { files: [pdfFile()] } });
+    fireEvent.click(screen.getByTestId('freightcom-confirm'));
+
+    await waitFor(() => expect(saveQueueLabelMock).toHaveBeenCalledWith('q-1169', expect.objectContaining({
+      carrier: 'Canpar', tracking_num: 'D556276790000169272001',
+    })));
+
+    // And the step opens — on a row the 3PL was never emailed about.
+    const pickup = screen.getByRole('button', { name: /Pickup scheduled/ });
+    await waitFor(() => expect(pickup).toBeEnabled());
+    expect(screen.queryByTestId('step-blockers')).toBeNull();
+  });
+
+  // Switching back must not leave the Freightcom gate standing in for the
+  // email: the 3PL still has to be told to hand the box over.
+  it('restores the Goorooship gate when the route is switched back', () => {
+    render(<StepLabel row={row} order={order} isEzTrans />);
+
+    fireEvent.click(screen.getByTestId('route-freightcom'));
+    fireEvent.click(screen.getByTestId('route-goorooship'));
+
+    expect(screen.queryByTestId('freightcom-panel')).toBeNull();
+    expect(screen.getByTestId('step-blockers')).toHaveTextContent(/Goorooship email/i);
+  });
+
+  // The row's three columns are written by BOTH panels, so on an EZ Trans
+  // order they cannot stand in for a Freightcom confirm — filling the
+  // Goorooship panel and then flipping the route would otherwise open the gate
+  // on a booking nobody made.
+  it('does not read a Goorooship-saved label as a Freightcom booking', () => {
+    const goorooshipSaved = {
+      ...row,
+      carrier: 'Canpar',
+      tracking_num: 'D556276790000169272001',
+      label_pdf_path: 'q-1169/label-1.pdf',
+    };
+    render(<StepLabel row={goorooshipSaved} order={order} isEzTrans />);
+
+    fireEvent.click(screen.getByTestId('route-freightcom'));
+
+    expect(screen.getByTestId('step-blockers')).toHaveTextContent(/Freightcom booking/i);
+    expect(screen.getByRole('button', { name: /Pickup scheduled/ })).toBeDisabled();
   });
 });

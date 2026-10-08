@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { confirmLabel, type FulfillmentQueueRow } from '../../../lib/fulfillment';
-import { freightcomBookingConfirmed, FREIGHTCOM_SHIP_URL } from '../../../lib/freightcomBooking';
-import { QUEUE_CARRIERS } from '../../../lib/queueCarrier';
+import { freightcomBookingConfirmed, useFreightcomBooked } from '../../../lib/freightcomBooking';
 import { starterBlocker } from '../../../lib/starterKit';
 import { EzTransPanel, type EzTransOrder } from './EzTransPanel';
 import { FreightcomPanel } from './FreightcomPanel';
@@ -53,16 +52,51 @@ export function StepLabel({
       ? { at: row.starter_skipped_at, reason: row.starter_skip_reason ?? '' }
       : null,
   );
-  // Whether the Freightcom booking is on the record. Seeded from the row and
-  // moved locally when the panel confirms, rather than waited for over
-  // realtime: a gate that needs a socket round-trip to open reads as the app
-  // refusing work the operator has just finished.
-  const [freightcomConfirmed, setFreightcomConfirmed] = useState(
-    () => freightcomBookingConfirmed(row),
-  );
-  const [pdf, setPdf] = useState<File | null>(null);
+  // Set when the Freightcom panel confirms in this session, so the gate opens
+  // without waiting on a socket round-trip — a gate that needs realtime to
+  // notice reads as the app refusing work the operator has just finished.
+  const [justBookedFreightcom, setJustBookedFreightcom] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Which carrier this carton is actually going out with.
+  //
+  // Where the stock sits is a good guess and not the answer. A machine at the
+  // EZ Trans 3PL usually books through Goorooship, but not always — #1258 went
+  // out on Canpar booked in the Freightcom portal while its unit sat at EZ
+  // Trans — and an operator who has done that has no way to say so if the step
+  // reads the shelf instead of asking them.
+  //
+  // (The evidence said otherwise, and the evidence was wrong: the `shipments`
+  // table only holds bookings made through the Freightcom API, so a portal
+  // booking leaves no row there and looked like no Freightcom shipment at all.)
+  //
+  // So the guess seeds it and the operator overrides it. The override survives
+  // a reload because confirming a Freightcom booking writes a line to the
+  // order's history, and that line is read back here — no column, no
+  // migration, and a rebook retires it along with the booking it describes.
+  const { booked: freightcomBooked, loading: bookedLoading } = useFreightcomBooked(order.id);
+  const [routeOverride, setRouteOverride] = useState<'goorooship' | 'freightcom' | null>(null);
+  const route: 'goorooship' | 'freightcom' =
+    routeOverride
+    ?? (freightcomBooked || justBookedFreightcom ? 'freightcom'
+        : isEzTrans ? 'goorooship'
+        : 'freightcom');
+
+  // Is the Freightcom booking on the record?
+  //
+  // Not simply "the row has a carrier, a tracking number and a label on it".
+  // The Goorooship panel writes those same three columns, so on an EZ Trans
+  // order they are equally consistent with a Goorooship booking — reading the
+  // row alone would let an operator fill the Goorooship panel, flip the route
+  // to Freightcom and find the gate already open on a booking nobody made.
+  // There, only the log line (or a confirm in this session) is proof.
+  //
+  // On an own-floor order the Freightcom panel is the only thing that writes
+  // those columns, so the row IS the proof — which also means the rows that
+  // reached step 3 before this log line existed are not stranded by it.
+  const freightcomConfirmed =
+    justBookedFreightcom || freightcomBooked || (!isEzTrans && freightcomBookingConfirmed(row));
 
   // Four gates, whichever carrier the order books with.
   //
@@ -101,16 +135,16 @@ export function StepLabel({
   const blockers: string[] = [];
   if (!carrier) blockers.push('a carrier');
   if (!tracking.trim()) {
-    blockers.push(isEzTrans ? 'the Goorooship tracking number' : 'the Freightcom tracking number');
+    blockers.push(route === 'goorooship' ? 'the Goorooship tracking number' : 'the Freightcom tracking number');
   }
   const starterGap = starterBlocker(order, {
     starter_tracking_num: starterTracking,
     starter_skipped_at: starterSkip?.at ?? null,
   });
   if (starterGap) blockers.push(starterGap);
-  const awaitingGoorooship = isEzTrans && !goorooshipSentAt;
+  const awaitingGoorooship = route === 'goorooship' && !goorooshipSentAt;
   if (awaitingGoorooship) blockers.push('the Goorooship email to EZ Trans to go out');
-  const awaitingFreightcom = !isEzTrans && !freightcomConfirmed;
+  const awaitingFreightcom = route === 'freightcom' && !freightcomConfirmed;
   if (awaitingFreightcom) blockers.push('the Freightcom booking to be confirmed');
   const ready = blockers.length === 0;
 
@@ -121,7 +155,6 @@ export function StepLabel({
       await confirmLabel(row.id, {
         carrier,
         tracking_num: tracking.trim(),
-        ...(pdf ? { label_pdf: pdf } : {}),
         // Saved whatever the destination: starter soil was never a US-only
         // product, only a US-only field.
         ...(starterTracking.trim() ? { starter_tracking_num: starterTracking.trim() } : {}),
@@ -148,11 +181,46 @@ export function StepLabel({
         onSkipChange={setStarterSkip}
       />
 
-      {/* One booking panel per order, picked by where the stock is sitting.
-          Both are the same four moves — open the carrier's portal, book it,
-          record the label it issued, confirm — and both hand the carrier and
-          tracking number back up here so this step closes in one click. */}
-      {isEzTrans ? (
+      {/* Which carrier, asked rather than assumed.
+          Only offered when the stock is at the 3PL, because that is the only
+          case with two real answers: a machine on our own floor cannot be
+          booked through Goorooship at all. */}
+      {isEzTrans && (
+        <div className={styles.routePicker} data-testid="carrier-route">
+          <span className={styles.routePickerLabel}>Booked through:</span>
+          <button
+            type="button"
+            className={route === 'goorooship' ? styles.routeBtnOn : styles.routeBtn}
+            onClick={() => setRouteOverride('goorooship')}
+            data-testid="route-goorooship"
+          >Goorooship (EZ Trans)</button>
+          <button
+            type="button"
+            className={route === 'freightcom' ? styles.routeBtnOn : styles.routeBtn}
+            onClick={() => setRouteOverride('freightcom')}
+            data-testid="route-freightcom"
+          >Freightcom</button>
+          <span className={styles.bookingHint}>
+            {route === 'freightcom'
+              ? 'This carton is going out on a Freightcom booking. EZ Trans still '
+                + 'hold the machine, so tell them to hand it over — switch back to '
+                + 'Goorooship to send that email.'
+              : 'Switch to Freightcom if you booked this one in the Freightcom portal.'}
+          </span>
+        </div>
+      )}
+
+      {/* Exactly one booking panel, and it owns the carrier, the tracking
+          number and the label PDF outright.
+
+          There used to be a second copy of those three fields below this —
+          a plain card that rendered alongside the Goorooship panel. It looked
+          like the place to type them and it was not: the panel reads its own
+          copy, so #1258 had a Canpar number and a label sitting in the lower
+          card while the panel above said "carrier, tracking number and the
+          label PDF are all required" and the step stayed shut. Two sets of one
+          field is a decoy, not a fallback. */}
+      {route === 'goorooship' ? (
         <EzTransPanel
           row={row}
           order={order}
@@ -165,99 +233,21 @@ export function StepLabel({
           row={row}
           order={order}
           onLabelSaved={({ carrier: c, tracking_num: t }) => { setCarrier(c); setTracking(t); }}
-          onConfirmed={() => setFreightcomConfirmed(true)}
+          onConfirmed={() => setJustBookedFreightcom(true)}
           starterGap={starterGap}
         />
       )}
 
-      {/* The EZ Trans panel renders nothing while it is still resolving where
-          the machines are, and nothing at all if that lookup fails — so the
-          plain fields stay available on an EZ Trans order as the way out of
-          that. A Freightcom order has no such hole: its panel always renders,
-          and owns these three fields outright. */}
-      {isEzTrans && (
-        <>
-          <div style={{
-            background: 'var(--color-info-bg)',
-            border: '1px solid var(--color-info-border)',
-            borderRadius: 'var(--radius-sm)',
-            padding: '8px 12px',
-            marginBottom: 14,
-            fontSize: 11,
-            color: 'var(--color-info)',
-            display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center',
-          }}>
-            <a
-              href={FREIGHTCOM_SHIP_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-              className={styles.extLinkBtn}
-            >Freightcom — New Shipment ↗</a>
-            <span style={{ marginLeft: 'auto', color: 'var(--color-info)' }}>
-              compost starter ships via Amazon
-            </span>
-          </div>
-
-          <div className={styles.labelSection}>
-            <div className={styles.labelSectionHead}>Label details</div>
-
-            <label style={{ display: 'block', fontSize: 11, color: 'var(--color-ink-subtle)', marginTop: 4 }}>
-              Carrier:
-            </label>
-            <select
-              value={carrier}
-              onChange={e => setCarrier(e.target.value)}
-              style={{ padding: '6px 10px', fontSize: 11, border: '1px solid var(--color-border)', borderRadius: 4 }}
-            >
-              <option value="">— select —</option>
-              {QUEUE_CARRIERS.map(c => <option key={c} value={c}>{c}</option>)}
-            </select>
-
-            <label style={{ display: 'block', fontSize: 11, color: 'var(--color-ink-subtle)', marginTop: 10 }}>
-              Tracking number:
-            </label>
-            <input
-              type="text"
-              value={tracking}
-              onChange={e => setTracking(e.target.value)}
-              placeholder="1Z… / paste from the label"
-              style={{
-                width: '100%', maxWidth: 340, padding: '6px 10px', fontSize: 11,
-                border: '1px solid var(--color-border)', borderRadius: 4, fontFamily: 'ui-monospace, monospace',
-              }}
-            />
-
-            <label style={{ display: 'block', fontSize: 11, color: 'var(--color-ink-subtle)', marginTop: 10 }}>
-              Label PDF (optional):
-            </label>
-            {pdf ? (
-              <div style={{ fontSize: 11, color: 'var(--color-ink)', marginTop: 3 }}>
-                {pdf.name} · {(pdf.size / 1024).toFixed(0)} KB
-                <button
-                  onClick={() => setPdf(null)}
-                  style={{
-                    marginLeft: 8, background: 'transparent', border: '1px solid var(--color-border)',
-                    color: 'var(--color-ink-subtle)', padding: '2px 8px', borderRadius: 3, fontSize: 10, cursor: 'pointer',
-                  }}
-                >Remove</button>
-              </div>
-            ) : (
-              <>
-                <input
-                  type="file"
-                  accept="application/pdf"
-                  onChange={e => setPdf(e.target.files?.[0] ?? null)}
-                  style={{ fontSize: 11 }}
-                />
-                {row.label_pdf_path && (
-                  <div style={{ fontSize: 10, color: 'var(--color-ink-subtle)', marginTop: 3 }}>
-                    A label is already on this order — pick a file only to replace it.
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-        </>
+      {/* The Goorooship panel renders nothing while it is still working out
+          where the machines are, and nothing at all if that lookup fails. That
+          used to be the reason for the duplicate card. The route picker is the
+          better answer: an operator facing an empty step can switch to
+          Freightcom and still record the booking. */}
+      {route === 'goorooship' && !bookedLoading && (
+        <p className={styles.bookingHint} data-testid="goorooship-escape">
+          No Goorooship panel above? The machines on this order could not be
+          located at EZ Trans. Switch to Freightcom to record the booking.
+        </p>
       )}
 
       <div className={styles.stepBar}>

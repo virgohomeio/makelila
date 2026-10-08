@@ -1323,3 +1323,46 @@
   cursor: pointer;
 }
 .starterSkipLink:hover { color: var(--color-ink); }
+
+/* Step 3's carrier route picker — "is this going out on Goorooship or on
+   Freightcom?". A segmented pair rather than a dropdown: there are exactly two
+   answers, and which one is live has to be readable without opening anything,
+   because it decides which booking panel is on screen and what the last gate
+   on Pickup scheduled is. */
+.routePicker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.routePickerLabel {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--color-ink-muted);
+}
+.routeBtn,
+.routeBtnOn {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 5px 12px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.routeBtn {
+  background: var(--color-surface);
+  color: var(--color-ink-muted);
+  border: 1px solid var(--color-border);
+}
+.routeBtn:hover {
+  color: var(--color-ink);
+  border-color: var(--color-ink-subtle);
+}
+/* The live one is stated, not merely tinted: an operator mistaking which route
+   is selected books the wrong carrier's workflow. */
+.routeBtnOn {
+  background: var(--color-info-bg);
+  color: var(--color-info);
+  border: 1.5px solid var(--color-info);
+}

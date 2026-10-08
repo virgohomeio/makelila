@@ -26,7 +26,8 @@
 // carrier and is deliberately left alone here: step 3 records a booking an
 // operator made, whichever door they used.)
 
-import { logAction } from './activityLog';
+import { logAction, useActivityForEntity } from './activityLog';
+import { REBOOK_ACTION } from './rebookShipment';
 import { saveQueueLabel } from './fulfillment';
 
 /** The Freightcom portal, opened at a blank shipment. The account path is
@@ -106,4 +107,37 @@ export async function confirmFreightcomBooking(
   );
 
   return { label_pdf_path };
+}
+
+/** Has this order been booked on Freightcom?
+ *
+ *  The durable answer to "which carrier is this carton going out with", and
+ *  the reason step 3 can remember that choice across a reload without a column
+ *  to hold it: the confirm above writes a line to the order's history, and
+ *  that line is the record.
+ *
+ *  Unless the booking it announced has since been torn up. "Rebook Shipment"
+ *  is an operator saying the carrier was stood down and a new carton is going
+ *  out — it clears the carrier, the tracking number and the label off the row
+ *  (lib/rebookShipment.ts), so the Freightcom booking it is describing no
+ *  longer exists. Entries arrive newest-first, so the first of each type is
+ *  the latest, and a confirm at or before the latest rebook does not count.
+ *  Read the same way EzTransPanel reads its own sends, so the two paths agree
+ *  about what a rebook retires. */
+export function useFreightcomBooked(orderId: string | null | undefined): {
+  booked: boolean;
+  at: string | null;
+  loading: boolean;
+} {
+  const { entries, loading } = useActivityForEntity({
+    entityType: 'order',
+    ...(orderId ? { entityId: orderId } : {}),
+    limit: 50,
+  });
+  const confirmed = entries.find(e => e.type === FREIGHTCOM_CONFIRMED_ACTION) ?? null;
+  const rebookedAt = entries.find(e => e.type === REBOOK_ACTION)?.ts ?? null;
+  const live = confirmed && rebookedAt && Date.parse(confirmed.ts) <= Date.parse(rebookedAt)
+    ? null
+    : confirmed;
+  return { booked: !!live, at: live?.ts ?? null, loading };
 }
