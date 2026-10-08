@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import {
   useBatches, useUnits, useStatusCountsByBatch, useIsStockManager,
-  STATUS_META, STATUS_ORDER, getStatusMeta,
+  STATUS_META, STATUS_ORDER, getStatusMeta, findMacDuplicates,
   type UnitStatus, type StatusCategory,
 } from '../../lib/stock';
 import { BatchCards } from './BatchCards';
@@ -26,6 +26,9 @@ export function UnitsTab() {
     for (const u of units) if (u.mac_address) m.set(u.mac_address, u.serial);
     return m;
   }, [units]);
+  // Units whose MAC is also on another unit — derived every render from the
+  // loaded list, so fixing either unit's MAC clears the flag on both.
+  const macDupes = useMemo(() => findMacDuplicates(units), [units]);
 
   const [batchFilter, setBatchFilter] = useState<string | null>(null);
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>('all');
@@ -57,7 +60,8 @@ export function UnitsTab() {
         (u.customer_name?.toLowerCase().includes(q)) ||
         (u.customer_order_ref?.toLowerCase().includes(q)) ||
         (u.carrier?.toLowerCase().includes(q)) ||
-        (u.location?.toLowerCase().includes(q))
+        (u.location?.toLowerCase().includes(q)) ||
+        (u.mac_address?.includes(q))
       )) return false;
       return true;
     });
@@ -136,7 +140,7 @@ export function UnitsTab() {
           type="search"
           value={search}
           onChange={e => setSearch(e.target.value)}
-          placeholder="Search serial, customer, carrier, location…"
+          placeholder="Search serial, customer, carrier, location, MAC…"
           className={styles.searchInput}
         />
 
@@ -148,7 +152,7 @@ export function UnitsTab() {
 
       <TestReportUploader validSerials={validSerials} macOwners={macOwners} />
 
-      <UnitTable units={filtered} />
+      <UnitTable units={filtered} macDupes={macDupes} />
     </div>
   );
 }
