@@ -29,6 +29,10 @@ vi.mock('../../../lib/starterKit', async () => {
 // The Goorooship half of step 3 has its own tests; it renders nothing for
 // stock on our own floor, which is the case under test here.
 vi.mock('../queue/EzTransPanel', () => ({ EzTransPanel: () => null }));
+// So does the Freightcom half. Both panels own a carrier select and a tracking
+// field, and this file is about the gates on "Pickup scheduled" — a real panel
+// here would have these tests querying two of each.
+vi.mock('../queue/FreightcomPanel', () => ({ FreightcomPanel: () => null }));
 
 import { StepLabel } from '../queue/StepLabel';
 import type { FulfillmentQueueRow } from '../../../lib/fulfillment';
@@ -54,8 +58,19 @@ const order = (country: 'US' | 'CA', kind: 'sale' | 'replacement' = 'sale'): Ste
   region_state: 'AR', postal_code: '72774', country,
 });
 
-/** Carrier and Freightcom tracking done — the starter still outstanding. */
-const labelled = { ...row, carrier: 'UPS', tracking_num: '1Z2985EADK98125759' };
+/** The booking done — the starter still outstanding.
+ *
+ *  All three fields, because all three are the booking: step 3 asks for the
+ *  carrier's own label PDF alongside the carrier and the tracking number, on a
+ *  Goorooship shipment and a Freightcom one alike. A row carrying two of the
+ *  three is a booking half made, and these tests are about the starter gate,
+ *  not that one. */
+const labelled = {
+  ...row,
+  carrier: 'UPS',
+  tracking_num: '1Z2985EADK98125759',
+  label_pdf_path: 'q-1/label-1760000000000.pdf',
+};
 /** And the starter answered with a number. */
 const starterOrdered = { ...labelled, starter_tracking_num: 'TBA303011917292' };
 
@@ -247,5 +262,64 @@ describe('StepLabel — an EZ Trans carton needs the Goorooship email first', ()
 
     expect(screen.getByRole('button', { name: /Pickup scheduled/ })).toBeEnabled();
     expect(screen.queryByTestId('step-blockers')).toBeNull();
+  });
+});
+
+// The other half of the same rule. A Freightcom carton is not emailed to
+// anybody, but it is still booked — on the Freightcom portal — and the label
+// that booking issues still has to reach the row. Until 2026-10-08 it did not
+// have to: the card offered the PDF as "(optional)" and the step opened on two
+// typed fields, which is why 28 of the 111 rows that have reached step 6 carry
+// a label and 12 of those 28 are EZ Trans rows, the only ones where it was
+// ever demanded.
+describe('StepLabel — a Freightcom carton needs its booking confirmed first', () => {
+  beforeEach(() => confirmLabelMock.mockClear());
+
+  /** Carrier and tracking typed, the starter answered — but no label PDF, so
+   *  the booking is not on the record. */
+  const noLabel = {
+    ...starterOrdered,
+    label_pdf_path: null,
+  };
+
+  it('blocks the pickup until the booking is confirmed', () => {
+    render(<StepLabel row={noLabel} order={order('CA')} />);
+
+    expect(screen.getByRole('button', { name: /Pickup scheduled/ })).toBeDisabled();
+    expect(screen.getByTestId('step-blockers')).toHaveTextContent(/Freightcom booking/i);
+  });
+
+  it('names the booking alongside the fields still missing, not instead of them', () => {
+    render(<StepLabel row={row} order={order('CA')} />);
+
+    const blockers = screen.getByTestId('step-blockers');
+    expect(blockers).toHaveTextContent(/carrier/i);
+    expect(blockers).toHaveTextContent(/tracking number/i);
+    expect(blockers).toHaveTextContent(/compost starter/i);
+    expect(blockers).toHaveTextContent(/Freightcom booking/i);
+  });
+
+  // The label on the row IS the confirmation — there is no separate column
+  // claiming it, precisely so the two cannot come to disagree.
+  it('takes a booking already on the row as confirmed', () => {
+    render(<StepLabel row={starterOrdered} order={order('CA')} />);
+
+    expect(screen.getByRole('button', { name: /Pickup scheduled/ })).toBeEnabled();
+  });
+
+  // An EZ Trans carton books through Goorooship and has its own gate. Asking
+  // it for a Freightcom confirm as well would be a second lock on one door.
+  it('asks for no Freightcom confirm on an EZ Trans carton', () => {
+    render(
+      <StepLabel
+        row={noLabel}
+        order={order('CA')}
+        isEzTrans
+        goorooshipSentAt="2026-10-05T17:40:00Z"
+      />,
+    );
+
+    expect(screen.queryByTestId('step-blockers')).toBeNull();
+    expect(screen.getByRole('button', { name: /Pickup scheduled/ })).toBeEnabled();
   });
 });

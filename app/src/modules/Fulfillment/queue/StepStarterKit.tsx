@@ -122,14 +122,14 @@ export function StepStarterKit({
             {Number.isNaN(Date.parse(skip.at)) ? '' : ` on ${new Date(skip.at).toLocaleString()}`}
             {skip.reason ? ` — ${skip.reason}` : ''}
           </p>
-          <div className={styles.ezTransStepRow}>
+          <div className={styles.bookingStepRow}>
             <button
               type="button"
-              className={styles.ezTransPreviewToggle}
+              className={styles.bookingPreviewToggle}
               onClick={handleWithdraw}
               disabled={busy}
             >{busy ? 'Saving…' : 'It does ship a starter — undo this'}</button>
-            <span className={styles.ezTransHint}>
+            <span className={styles.bookingHint}>
               Recorded in the activity log against {order.order_ref}.
             </span>
           </div>
@@ -143,20 +143,20 @@ export function StepStarterKit({
             soil to it.
           </p>
 
-          <div className={styles.ezTransStepRow}>
+          <div className={styles.bookingStepRow}>
             <a
               href={amazonOrdersUrl(order.country)}
               target="_blank"
               rel="noopener noreferrer"
               className={styles.extLinkBtn}
             >{store} — Order starter soil ↗</a>
-            <span className={styles.ezTransHint}>
+            <span className={styles.bookingHint}>
               Ships direct to {order.customer_name || 'the customer'} — it is not
               in our warehouse and never joins this carton.
             </span>
           </div>
 
-          <div className={styles.ezTransForm}>
+          <div className={styles.bookingForm}>
             <label>
               {store} tracking number:
               <input
@@ -182,20 +182,20 @@ export function StepStarterKit({
                   data-testid="starter-skip-reason"
                 />
               </label>
-              <div className={styles.ezTransStepRow}>
+              <div className={styles.bookingStepRow}>
                 <button
                   type="button"
-                  className={styles.ezTransPreviewToggle}
+                  className={styles.bookingPreviewToggle}
                   onClick={handleDeclare}
                   disabled={busy || !reason.trim()}
                 >{busy ? 'Saving…' : 'Record this and carry on'}</button>
                 <button
                   type="button"
-                  className={styles.ezTransPreviewToggle}
+                  className={styles.bookingPreviewToggle}
                   onClick={() => setDeclaring(false)}
                   disabled={busy}
                 >Cancel</button>
-                <span className={styles.ezTransHint}>
+                <span className={styles.bookingHint}>
                   {reason.trim()
                     ? 'Goes on the row and into the activity log.'
                     : 'A reason is required — without one this reads exactly like a starter nobody ordered.'}

@@ -86,7 +86,7 @@ export function GoorooshipDailyBatch({
         {pending.length > 0 && (
           <button
             type="button"
-            className={styles.ezTransPreviewToggle}
+            className={styles.bookingPreviewToggle}
             onClick={() => setShowPreview(v => !v)}
           >{showPreview ? 'Hide the email' : 'Preview the email'}</button>
         )}
@@ -106,7 +106,7 @@ export function GoorooshipDailyBatch({
       )}
 
       {showPreview && pending.length > 0 && (
-        <pre className={styles.ezTransPreview}>
+        <pre className={styles.bookingPreview}>
           {`To: ${EZTRANS_EMAIL}\nCc: ${EZTRANS_CC.join(', ')}\n\n` + previewOrdersBlock(pending)}
         </pre>
       )}
@@ -121,7 +121,7 @@ export function GoorooshipDailyBatch({
             ? 'Sending…'
             : `✉ Email Today's Fulfilled Orders to Goorooship${pending.length ? ` (${pending.length})` : ''}`}
         </button>
-        <span className={styles.ezTransHint}>
+        <span className={styles.bookingHint}>
           One email to {EZTRANS_EMAIL} carrying every order confirmed today. Each order's
           shipping label and packing list go as one PDF; a US shipment's pesticide
           worksheet goes as a second file, both named for the customer and the tracking number.
@@ -131,7 +131,7 @@ export function GoorooshipDailyBatch({
       </div>
 
       {result && (
-        <div className={styles.ezTransSent}>
+        <div className={styles.bookingSent}>
           ✓ {result.orders.length} shipment{result.orders.length === 1 ? '' : 's'} sent to {result.to}
           {result.cc.length ? ` (cc ${result.cc.join(', ')})` : ''}.
           <div>Attached: {result.attachments.join(', ')}</div>
@@ -143,7 +143,7 @@ export function GoorooshipDailyBatch({
             </div>
           )}
           {result.skipped.length > 0 && (
-            <div className={styles.ezTransWarning}>
+            <div className={styles.bookingWarning}>
               ⚠ Not included: {result.skipped
                 .map(s => `${s.order_ref ?? s.queue_id} (${s.reason})`)
                 .join('; ')}
@@ -151,7 +151,7 @@ export function GoorooshipDailyBatch({
           )}
         </div>
       )}
-      {result?.warning && <div className={styles.ezTransWarning}>⚠ {result.warning}</div>}
+      {result?.warning && <div className={styles.bookingWarning}>⚠ {result.warning}</div>}
       {error && <div className={styles.error}>{error}</div>}
     </section>
   );

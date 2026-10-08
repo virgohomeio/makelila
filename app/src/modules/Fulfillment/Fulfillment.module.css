@@ -883,20 +883,20 @@
 /* Only rendered when the assigned unit is held at the EZTrans 3PL. Set apart
    from the Freightcom card because it is the other, mutually-exclusive path:
    an operator who sees this one should not be booking Freightcom. */
-.ezTransPanel {
+.bookingPanel {
   background: #fff;
   border: 1.5px solid var(--color-crimson);
   border-radius: var(--radius-sm);
   padding: 12px 14px;
   margin-bottom: 14px;
 }
-.ezTransLead {
+.bookingLead {
   font-size: 11px;
   color: var(--color-ink-muted);
   line-height: 1.5;
   margin: 2px 0 10px;
 }
-.ezTransSteps {
+.bookingSteps {
   list-style: decimal;
   margin: 0 0 10px;
   padding-left: 18px;
@@ -904,21 +904,21 @@
 /* The li stays a list-item so the step number actually renders — `display:
    flex` on an li drops the marker — and the row layout lives on an inner
    wrapper instead. */
-.ezTransSteps li {
+.bookingSteps li {
   font-size: 11px;
   margin-bottom: 10px;
 }
-.ezTransStepRow {
+.bookingStepRow {
   display: flex;
   gap: 10px;
   align-items: center;
   flex-wrap: wrap;
 }
-.ezTransHint {
+.bookingHint {
   color: var(--color-ink-subtle);
   font-size: 10px;
 }
-.ezTransPreviewToggle {
+.bookingPreviewToggle {
   background: transparent;
   border: 1px solid var(--color-border);
   color: var(--color-ink-subtle);
@@ -927,38 +927,38 @@
   font-size: 10px;
   cursor: pointer;
 }
-.ezTransPreviewToggle:hover { color: var(--color-ink); border-color: var(--color-ink-subtle); }
-.ezTransFacts {
+.bookingPreviewToggle:hover { color: var(--color-ink); border-color: var(--color-ink-subtle); }
+.bookingFacts {
   display: flex;
   flex-wrap: wrap;
   gap: 4px 22px;
   margin: 0 0 4px;
 }
-.ezTransFacts div { display: flex; flex-direction: column; gap: 1px; }
-.ezTransFacts dt {
+.bookingFacts div { display: flex; flex-direction: column; gap: 1px; }
+.bookingFacts dt {
   font-size: 9px;
   font-weight: 800;
   letter-spacing: 0.4px;
   text-transform: uppercase;
   color: var(--color-ink-subtle);
 }
-.ezTransFacts dd {
+.bookingFacts dd {
   margin: 0;
   font-size: 11px;
   color: var(--color-ink);
   font-family: ui-monospace, monospace;
 }
-.ezTransSent {
+.bookingSent {
   font-size: 11px;
   color: var(--color-success);
   margin-top: 8px;
 }
-.ezTransPreviewLabel {
+.bookingPreviewLabel {
   font-size: 10px;
   color: var(--color-ink-subtle);
   margin: 10px 0 3px;
 }
-.ezTransPreview {
+.bookingPreview {
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   padding: 10px;
@@ -974,20 +974,20 @@
 /* The label-capture step inside the EZ Trans panel. Laid out as its own block
    under the step number rather than inline, because it is three fields rather
    than one control. */
-.ezTransStepTitle {
+.bookingStepTitle {
   display: block;
   font-size: 11px;
   font-weight: 700;
   color: var(--color-ink);
   margin-bottom: 6px;
 }
-.ezTransForm {
+.bookingForm {
   display: flex;
   flex-direction: column;
   gap: 8px;
   padding-bottom: 4px;
 }
-.ezTransForm label {
+.bookingForm label {
   display: flex;
   flex-direction: column;
   gap: 3px;
@@ -995,23 +995,23 @@
   color: var(--color-ink-subtle);
   max-width: 340px;
 }
-.ezTransForm select,
-.ezTransForm input[type='text'] {
+.bookingForm select,
+.bookingForm input[type='text'] {
   padding: 6px 10px;
   font-size: 11px;
   border: 1px solid var(--color-border);
   border-radius: 4px;
 }
-.ezTransForm input[type='text'] { font-family: ui-monospace, monospace; }
-.ezTransForm input[type='file'] { font-size: 11px; }
-.ezTransFile {
+.bookingForm input[type='text'] { font-family: ui-monospace, monospace; }
+.bookingForm input[type='file'] { font-size: 11px; }
+.bookingFile {
   display: inline-flex;
   align-items: center;
   gap: 8px;
   font-size: 11px;
   color: var(--color-ink);
 }
-.ezTransFile button {
+.bookingFile button {
   background: transparent;
   border: 1px solid var(--color-border);
   color: var(--color-ink-subtle);
@@ -1022,27 +1022,27 @@
 }
 
 /* Email preview / one-off editor inside the EZ Trans panel. */
-.ezTransPreviewHead {
+.bookingPreviewHead {
   display: flex;
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
   margin: 12px 0 4px;
 }
-.ezTransEditor {
+.bookingEditor {
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
-.ezTransEditor label {
+.bookingEditor label {
   display: flex;
   flex-direction: column;
   gap: 3px;
   font-size: 11px;
   color: var(--color-ink-subtle);
 }
-.ezTransEditor input,
-.ezTransEditor textarea {
+.bookingEditor input,
+.bookingEditor textarea {
   width: 100%;
   padding: 8px 10px;
   font-size: 11px;
@@ -1053,12 +1053,12 @@
   background: #fff;
   font-family: inherit;
 }
-.ezTransEditor textarea {
+.bookingEditor textarea {
   min-height: 180px;
   resize: vertical;
 }
-.ezTransEditor input:focus,
-.ezTransEditor textarea:focus {
+.bookingEditor input:focus,
+.bookingEditor textarea:focus {
   outline: none;
   border-color: var(--color-crimson);
 }
@@ -1102,7 +1102,7 @@
 
 /* The booking went out, but not from the address the operator expected —
    reported beside the success line, not as a failure. */
-.ezTransWarning {
+.bookingWarning {
   margin-top: 8px;
   padding: 8px 10px;
   border: 1px solid var(--color-warning-border);
@@ -1222,7 +1222,7 @@
 }
 
 /* The "in today's batch" line inside the step-3 EZ Trans panel. */
-.ezTransBatchChip {
+.bookingBatchChip {
   display: flex;
   align-items: center;
   flex-wrap: wrap;

@@ -776,6 +776,45 @@ export async function flagRework(
   }
 }
 
+/** Put a carrier, a tracking number and the carrier's own label PDF onto a
+ *  queue row without advancing the step.
+ *
+ *  Both booking paths need exactly this. Step 3 is two moves, not one: the
+ *  shipment is booked with the carrier — on the Goorooship portal for stock at
+ *  the EZ Trans 3PL, on the Freightcom portal for stock on our own floor — and
+ *  the label it issues is recorded here; only then does "Pickup scheduled"
+ *  move the row on. Keeping the recording separate from the advance is what
+ *  lets a half-finished booking be picked up where it stopped, and what lets
+ *  the booking panel save the label before the step is ready to close.
+ *
+ *  `confirmLabel` below is the advance, and writes the same three columns on
+ *  its way past so a row saved only there is no worse off.
+ */
+export async function saveQueueLabel(
+  queueId: string,
+  input: { carrier: string; tracking_num: string; label_pdf?: File },
+): Promise<{ label_pdf_path: string | null }> {
+  let label_pdf_path: string | null = null;
+  if (input.label_pdf) {
+    const path = `${queueId}/label-${Date.now()}.pdf`;
+    const { error: upErr } = await supabase.storage
+      .from('order-labels')
+      .upload(path, input.label_pdf, { contentType: 'application/pdf' });
+    if (upErr) throw upErr;
+    label_pdf_path = path;
+  }
+  const { error } = await supabase
+    .from('fulfillment_queue')
+    .update({
+      carrier: input.carrier,
+      tracking_num: input.tracking_num.trim(),
+      ...(label_pdf_path ? { label_pdf_path } : {}),
+    })
+    .eq('id', queueId);
+  if (error) throw error;
+  return { label_pdf_path };
+}
+
 /** Step 3: upload PDF (optional) + save LILA carrier/tracking + the Amazon
  *  compost-starter tracking; advance 3→4. */
 export async function confirmLabel(

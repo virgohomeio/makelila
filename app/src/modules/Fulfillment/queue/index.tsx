@@ -294,6 +294,12 @@ export default function Queue() {
                     : <StepTest row={selected} />)}
                   {selected.step === 3 && (
                     <StepLabel
+                      /* Keyed on the row, so none of step 3's state — a typed
+                         tracking number, a confirmed-booking banner — follows
+                         the operator to the next order they click. The panels
+                         under it are seeded from the row on mount, and an
+                         unkeyed step is how #1203 wore #1190's pill. */
+                      key={selected.id}
                       row={selected}
                       order={selectedOrder}
                       isEzTrans={isEzTransRow(selected)}
