@@ -37,11 +37,23 @@ vi.mock('../../../lib/activityLog', async () => {
   return { ...actual, logAction: logActionMock, useActivityForEntity: () => ({ entries: [], loading: false }) };
 });
 
-// The Goorooship panel renders nothing for stock on our own floor anyway, but
-// it reaches Supabase to find that out. This test is about the other branch.
+// The Goorooship panel reaches Supabase to find out where the machines are,
+// which a jsdom run cannot answer. Stubbed as a marker rather than as null, so
+// these tests can still see WHETHER it was rendered and with what label — the
+// handoff email is owed on both routes, and "it quietly stopped rendering" is
+// exactly the regression worth catching. Its own file covers what it does.
 vi.mock('../queue/EzTransPanel', async () => {
   const actual = await vi.importActual<typeof import('../queue/EzTransPanel')>('../queue/EzTransPanel');
-  return { ...actual, EzTransPanel: () => null };
+  return {
+    ...actual,
+    EzTransPanel: ({ externalLabel }: {
+      externalLabel?: { carrier: string; tracking_num: string; labelOnFile: boolean } | null;
+    }) => (
+      <div data-testid="eztrans-panel" data-external={externalLabel ? 'yes' : 'no'}>
+        {externalLabel ? `${externalLabel.carrier} ${externalLabel.tracking_num}` : 'own form'}
+      </div>
+    ),
+  };
 });
 
 // The starter card's writes go straight to Supabase; the rules stay real.
@@ -170,6 +182,7 @@ describe('confirming the label on a Freightcom order, end to end', () => {
 
     expect(screen.queryByTestId('freightcom-panel')).toBeNull();
     expect(screen.getByTestId('carrier-route')).toBeInTheDocument();
+    expect(screen.getByTestId('eztrans-panel')).toHaveAttribute('data-external', 'no');
   });
 
   // Own-floor stock has only one possible answer — EZ Trans cannot pick a
@@ -179,6 +192,8 @@ describe('confirming the label on a Freightcom order, end to end', () => {
 
     expect(screen.queryByTestId('carrier-route')).toBeNull();
     expect(screen.getByTestId('freightcom-panel')).toBeInTheDocument();
+    // Nothing is held at the 3PL, so there is no handoff to email about.
+    expect(screen.queryByTestId('eztrans-panel')).toBeNull();
   });
 });
 
@@ -253,6 +268,30 @@ describe('an EZ Trans machine going out on a Freightcom booking (#1258)', () => 
 
     expect(screen.queryByTestId('freightcom-panel')).toBeNull();
     expect(screen.getByTestId('step-blockers')).toHaveTextContent(/Goorooship email/i);
+  });
+
+  // The reason this route cannot simply drop the Goorooship panel: EZ Trans
+  // are holding the machine. Whoever booked the carrier, they will not hand
+  // the box over until they have been emailed, so the handoff still has to
+  // queue — into the same end-of-day batch it always did.
+  it('still queues the EZ Trans handoff email on the Freightcom route', async () => {
+    render(<StepLabel row={row} order={order} isEzTrans />);
+
+    fireEvent.click(screen.getByTestId('route-freightcom'));
+
+    const handoff = screen.getByTestId('eztrans-panel');
+    expect(handoff).toHaveAttribute('data-external', 'yes');
+
+    // And it is handed the Freightcom label rather than asking for one again.
+    fireEvent.change(screen.getByTestId('freightcom-carrier'), { target: { value: 'Canpar' } });
+    fireEvent.change(screen.getByTestId('freightcom-tracking'), {
+      target: { value: 'D556276790000169272001' },
+    });
+    fireEvent.change(screen.getByTestId('freightcom-label-pdf'), { target: { files: [pdfFile()] } });
+    fireEvent.click(screen.getByTestId('freightcom-confirm'));
+
+    await waitFor(() => expect(screen.getByTestId('eztrans-panel'))
+      .toHaveTextContent('Canpar D556276790000169272001'));
   });
 
   // The row's three columns are written by BOTH panels, so on an EZ Trans

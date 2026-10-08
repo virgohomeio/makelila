@@ -53,6 +53,7 @@ export function EzTransPanel({
   onLabelSaved,
   onBatchChanged,
   starterGap = null,
+  externalLabel = null,
 }: {
   row: FulfillmentQueueRow;
   order: EzTransOrder;
@@ -69,6 +70,17 @@ export function EzTransPanel({
    *  end step 3 — confirm into the batch, send on its own, Pickup scheduled —
    *  are gated by one answer rather than three. */
   starterGap?: string | null;
+  /** Set when the carton was booked somewhere other than Goorooship — today
+   *  that means the Freightcom portal, recorded by FreightcomPanel.
+   *
+   *  EZ Trans hold the machine whoever the carrier is, and they do not touch a
+   *  box they have not been emailed about. So the handoff email is owed on a
+   *  Freightcom booking exactly as it is on a Goorooship one, and this panel
+   *  has to be able to queue it without also asking for the label a second
+   *  time: when this is set the portal link and the label form give way to a
+   *  read-only line, and what is left is the two things that actually send —
+   *  confirm it into today's batch, or send this one order on its own. */
+  externalLabel?: { carrier: string; tracking_num: string; labelOnFile: boolean } | null;
 }) {
   // Every machine on the order, not just the first one picked. An order for
   // three LILA Pros books as one Goorooship shipment, and the 3PL has to be
@@ -185,11 +197,20 @@ export function EzTransPanel({
   // A label uploaded on an earlier pass is still on the row, so a resend (or a
   // corrected tracking number) doesn't force the operator to find the file again.
   const labelOnFile = !!row.label_pdf_path;
+
+  // The label this email is about. Its own form when Goorooship booked the
+  // carton, the Freightcom panel's answer when that did — one place, so the
+  // email cannot describe a different shipment from the one on the row.
+  const extern = externalLabel ?? null;
+  const effCarrier = extern ? extern.carrier : carrier;
+  const effTracking = extern ? extern.tracking_num : tracking;
+
   // offsite blocks the send outright. Booking a three-unit order while one of
   // the three sits on our own floor would tell the 3PL to pick a machine they
   // do not hold — they would ship what they could find and nobody would learn
   // the order went out short until the customer counted boxes.
-  const ready = !!carrier && !!tracking.trim() && (!!pdf || labelOnFile)
+  const ready = !!effCarrier && !!effTracking.trim()
+    && (extern ? extern.labelOnFile : (!!pdf || labelOnFile))
     && offsite.length === 0 && !starterGap;
 
   // A shipment into the US is a customs entry and needs a FIFRA worksheet with
@@ -204,12 +225,12 @@ export function EzTransPanel({
     return buildEzTransBooking({
       order,
       units: placements.map(p => ({ serial: p.serial, masterCarton: p.masterCarton })),
-      carrier: carrier || null,
-      tracking: tracking.trim() || null,
+      carrier: effCarrier || null,
+      tracking: effTracking.trim() || null,
       template,
       packingListTemplate,
     });
-  }, [order, placements, carrier, tracking, template, packingListTemplate]);
+  }, [order, placements, effCarrier, effTracking, template, packingListTemplate]);
 
   // Opening the editor is what commits the current rendering as the starting
   // text — before that the fields are unset so the preview keeps tracking the
@@ -254,12 +275,18 @@ export function EzTransPanel({
       // Save first: the edge function reads the label off the queue row rather
       // than taking it from this form, so there is exactly one copy of the
       // truth and a half-finished send can be picked up where it stopped.
-      await saveEzTransLabel(row.id, {
-        carrier,
-        tracking_num: tracking.trim(),
-        ...(pdf ? { label_pdf: pdf } : {}),
-      });
-      onLabelSaved?.({ carrier, tracking_num: tracking.trim() });
+      //
+      // Skipped when the booking came from the Freightcom panel, which has
+      // already written those same columns — saving again from a form this
+      // panel is not showing could only overwrite them with something staler.
+      if (!extern) {
+        await saveEzTransLabel(row.id, {
+          carrier,
+          tracking_num: tracking.trim(),
+          ...(pdf ? { label_pdf: pdf } : {}),
+        });
+        onLabelSaved?.({ carrier, tracking_num: tracking.trim() });
+      }
       // Each document travels only when it was actually edited. Sending a copy
       // of the rendered wording alongside a packing-list edit reads to the edge
       // function as an operator edit of the wording too, which makes it skip
@@ -291,11 +318,11 @@ export function EzTransPanel({
       await logAction(
         EZTRANS_SENT_ACTION,
         order.order_ref,
-        `Booking confirmation, packing list + ${carrier} label ` +
+        `Booking confirmation, packing list + ${effCarrier} label ` +
         `${worksheetGoes ? '+ US pesticide worksheet ' : ''}sent to ${EZTRANS_EMAIL} — ` +
         `${serials.length} unit(s) ${serials.join(', ')}, ` +
         `master carton ${cartonSummary}, ` +
-        `tracking ${tracking.trim()}` +
+        `tracking ${effTracking.trim()}` +
         `${sent.pesticide_worksheet === 'unsigned' ? ' · worksheet UNSIGNED' : ''}` +
         `${sent.combined === false ? ' · label and packing list sent separately' : ''}` +
         `${wordingWentEdited ? ' · wording edited for this order' : ''}` +
@@ -346,22 +373,22 @@ export function EzTransPanel({
     setBusy(true); setError(null);
     try {
       const { confirmed_at } = await confirmEzTransOrder(row.id, {
-        carrier,
-        tracking_num: tracking.trim(),
-        ...(pdf ? { label_pdf: pdf } : {}),
+        carrier: effCarrier,
+        tracking_num: effTracking.trim(),
+        ...(!extern && pdf ? { label_pdf: pdf } : {}),
         packing_list: packingEdited ? packingValue : null,
       });
-      onLabelSaved?.({ carrier, tracking_num: tracking.trim() });
+      if (!extern) onLabelSaved?.({ carrier, tracking_num: tracking.trim() });
       const files = batchAttachmentFilenames({
         customerName: order.customer_name,
-        tracking: tracking.trim(),
+        tracking: effTracking.trim(),
         needsWorksheet: worksheetGoes,
       });
       await logAction(
         EZTRANS_BATCH_CONFIRMED_ACTION,
         order.order_ref,
         `Confirmed for the Goorooship day batch — ${serials.length} unit(s) ${serials.join(', ')}, ` +
-        `master carton ${cartonSummary}, ${carrier} ${tracking.trim()} · ` +
+        `master carton ${cartonSummary}, ${effCarrier} ${effTracking.trim()} · ` +
         `documents ${[files.combined, files.worksheet].filter(Boolean).join(', ')}` +
         `${packingEdited ? ' · packing list edited for this order' : ''}`,
         { entityType: 'order', entityId: order.id, unitSerial: first.serial },
@@ -388,7 +415,7 @@ export function EzTransPanel({
       await logAction(
         EZTRANS_BATCH_CONFIRMED_ACTION,
         order.order_ref,
-        `Removed from the Goorooship day batch — ${carrier || '—'} ${tracking.trim() || '—'}. ` +
+        `Removed from the Goorooship day batch — ${effCarrier || '—'} ${effTracking.trim() || '—'}. ` +
         `The booking stands; it is simply not in today's email.`,
         { entityType: 'order', entityId: order.id, unitSerial: first.serial },
       );
@@ -405,20 +432,27 @@ export function EzTransPanel({
   const inBatch = !!confirmedAt && !batchSentAt;
   const batchFiles = batchAttachmentFilenames({
     customerName: order.customer_name,
-    tracking: tracking.trim() || '—',
+    tracking: effTracking.trim() || '—',
     needsWorksheet: worksheetGoes,
   });
 
   return (
     <div className={styles.bookingPanel}>
-      <div className={styles.labelSectionHead}>EZ Trans shipment (Goorooship)</div>
+      <div className={styles.labelSectionHead}>
+        {extern ? 'EZ Trans handoff email' : 'EZ Trans shipment (Goorooship)'}
+      </div>
       <p className={styles.bookingLead}>
         {placements.length === 1
           ? `${first.serial} is`
           : `${placements.length} machines are`} held at EZ Trans
-        {skidSummary ? ` on ${skidSummary}` : ''} — book this shipment on
-        Goorooship, attach the label it gives you, then send EZ Trans the
-        confirmation so they can fulfill {placements.length === 1 ? 'it' : 'them'}.
+        {skidSummary ? ` on ${skidSummary}` : ''} — {extern
+          ? <>this carton is booked on Freightcom, but EZ Trans still hold the
+              machine and will not touch a box they have not been emailed
+              about. Queue them the confirmation so they can hand
+              {placements.length === 1 ? ' it' : ' them'} over.</>
+          : <>book this shipment on Goorooship, attach the label it gives you,
+              then send EZ Trans the confirmation so they can fulfill
+              {placements.length === 1 ? ' it' : ' them'}.</>}
       </p>
 
       {offsite.length > 0 && (
@@ -436,6 +470,26 @@ export function EzTransPanel({
       )}
 
       <ol className={styles.bookingSteps}>
+        {/* Where the label comes from. Booked here on Goorooship, or booked
+            in the Freightcom portal and already recorded by the panel above —
+            in which case this is a read-only line, never a second form. Two
+            sets of one field is what left #1258's Canpar number in a card no
+            button read. */}
+        {extern ? (
+          <li>
+            <span className={styles.bookingStepTitle}>The label EZ Trans are to print</span>
+            <div className={styles.bookingStepRow} data-testid="eztrans-external-label">
+              <span className={styles.bookingHint}>
+                {extern.carrier} {extern.tracking_num}, booked on Freightcom
+                {extern.labelOnFile ? ' · label PDF on file' : ' · no label PDF yet'}.
+                {extern.labelOnFile
+                  ? ' It goes out with this email.'
+                  : ' Confirm the Freightcom booking above before sending.'}
+              </span>
+            </div>
+          </li>
+        ) : (
+          <>
         <li>
           <div className={styles.bookingStepRow}>
             <a
@@ -491,6 +545,8 @@ export function EzTransPanel({
             )}
           </div>
         </li>
+          </>
+        )}
 
         <li>
           <span className={styles.bookingStepTitle}>
@@ -761,7 +817,7 @@ export function EzTransPanel({
                 {pesticideWorksheetSummary({
                   orderRef: order.order_ref,
                   serials,
-                  tracking: tracking.trim() || null,
+                  tracking: effTracking.trim() || null,
                 }).map(f => (
                   <div key={f.label}><dt>{f.label}</dt><dd>{f.value}</dd></div>
                 ))}

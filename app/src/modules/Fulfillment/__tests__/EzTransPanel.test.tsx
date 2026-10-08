@@ -885,3 +885,96 @@ describe('EzTransPanel — the starter blocks the Goorooship email too', () => {
     expect(confirmButton()).toBeEnabled();
   });
 });
+
+// EZ Trans hold the machine whoever booked the carrier. When the carton went
+// out on a Freightcom booking — #1258, Canpar out of the Freightcom portal
+// while the unit sat at the 3PL — the handoff email is owed exactly as it is
+// on a Goorooship booking, and it has to queue into the same end-of-day batch.
+// What must NOT come with it is a second copy of the label fields: that decoy
+// is what left #1258's Canpar number in a card no button read.
+describe('EzTransPanel — the handoff email for a carton booked on Freightcom', () => {
+  const EXTERNAL = {
+    carrier: 'Canpar',
+    tracking_num: 'D556276790000169272001',
+    labelOnFile: true,
+  };
+
+  beforeEach(() => {
+    placementMock.mockReset().mockReturnValue(AT_EZTRANS);
+    saveLabelMock.mockClear();
+    sendMock.mockClear();
+    localStorage.clear();
+    logActionMock.mockClear();
+    confirmMock.mockClear();
+    markSentMock.mockClear();
+  });
+
+  it('asks for no label of its own, and names the one it was given', () => {
+    render(<EzTransPanel row={row} order={order} externalLabel={EXTERNAL} />);
+
+    expect(screen.queryByLabelText(/carrier/i)).toBeNull();
+    expect(screen.queryByLabelText(/tracking number/i)).toBeNull();
+    expect(screen.queryByLabelText(/shipping label pdf/i)).toBeNull();
+    expect(screen.queryByRole('link', { name: /goorooship — book a shipment/i })).toBeNull();
+
+    expect(screen.getByTestId('eztrans-external-label'))
+      .toHaveTextContent(/Canpar D556276790000169272001, booked on Freightcom/);
+  });
+
+  // The whole point: it still queues, into the same batch, from the same button.
+  it('queues into the day batch with the Freightcom label', async () => {
+    render(<EzTransPanel row={row} order={order} externalLabel={EXTERNAL} />);
+
+    const btn = confirmButton();
+    expect(btn).toBeEnabled();
+    fireEvent.click(btn);
+
+    await waitFor(() => expect(confirmMock).toHaveBeenCalledWith('q-1', expect.objectContaining({
+      carrier: 'Canpar', tracking_num: 'D556276790000169272001',
+    })));
+    // The Freightcom panel already wrote those columns; writing them again
+    // from a form this panel is not showing could only overwrite them staler.
+    expect(saveLabelMock).not.toHaveBeenCalled();
+    expect(confirmMock.mock.calls[0][1].label_pdf).toBeUndefined();
+  });
+
+  it('sends the one-order email with the Freightcom label too', async () => {
+    render(<EzTransPanel row={row} order={order} externalLabel={EXTERNAL} />);
+
+    fireEvent.click(sendButton());
+
+    await waitFor(() => expect(sendMock).toHaveBeenCalledWith('q-1', undefined));
+    expect(saveLabelMock).not.toHaveBeenCalled();
+    await waitFor(() => expect(logActionMock).toHaveBeenCalledWith(
+      expect.any(String), '#1184',
+      expect.stringContaining('Canpar label'),
+      expect.anything(),
+    ));
+    expect(logActionMock.mock.calls[0][2]).toContain('D556276790000169272001');
+  });
+
+  // The email carries the label as an attachment, so queueing one before the
+  // Freightcom booking is confirmed would mail the 3PL a box with no label.
+  it('will not queue before the Freightcom booking has a label on file', () => {
+    render(
+      <EzTransPanel row={row} order={order} externalLabel={{ ...EXTERNAL, labelOnFile: false }} />,
+    );
+
+    expect(confirmButton()).toBeDisabled();
+    expect(screen.getByTestId('eztrans-external-label'))
+      .toHaveTextContent(/Confirm the Freightcom booking above before sending/);
+  });
+
+  // The email body and the packing list are the 3PL's instruction sheet — both
+  // have to describe the carrier that is actually coming, not the one this
+  // panel's own (hidden, empty) form holds.
+  it('describes the Freightcom shipment in the documents it previews', () => {
+    render(<EzTransPanel row={row} order={order} externalLabel={EXTERNAL} />);
+
+    fireEvent.click(screen.getByRole('button', { name: /preview \/ edit email/i }));
+
+    // The email names it one way, the packing list the other.
+    expect(screen.getByText(/Tracking Number: D556276790000169272001/)).toBeInTheDocument();
+    expect(screen.getByText(/Tracking No: D556276790000169272001/)).toBeInTheDocument();
+  });
+});

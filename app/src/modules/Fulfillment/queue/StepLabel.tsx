@@ -202,24 +202,22 @@ export function StepLabel({
           >Freightcom</button>
           <span className={styles.bookingHint}>
             {route === 'freightcom'
-              ? 'This carton is going out on a Freightcom booking. EZ Trans still '
-                + 'hold the machine, so tell them to hand it over — switch back to '
-                + 'Goorooship to send that email.'
+              ? 'Booked in the Freightcom portal. EZ Trans still hold the machine, '
+                + 'so the handoff email is queued below as usual.'
               : 'Switch to Freightcom if you booked this one in the Freightcom portal.'}
           </span>
         </div>
       )}
 
-      {/* Exactly one booking panel, and it owns the carrier, the tracking
-          number and the label PDF outright.
+      {/* The booking panel: whichever portal issued the label owns the three
+          fields that describe it, and only that one renders them.
 
-          There used to be a second copy of those three fields below this —
-          a plain card that rendered alongside the Goorooship panel. It looked
-          like the place to type them and it was not: the panel reads its own
-          copy, so #1258 had a Canpar number and a label sitting in the lower
-          card while the panel above said "carrier, tracking number and the
-          label PDF are all required" and the step stayed shut. Two sets of one
-          field is a decoy, not a fallback. */}
+          There used to be a second copy below the Goorooship panel — a plain
+          card that looked like the place to type the carrier, the tracking
+          number and the label, and was not, because the panel reads its own
+          copy. #1258 had a Canpar number and a label sitting in that card
+          while the panel above said all three were still required and the
+          step stayed shut. Two sets of one field is a decoy, not a fallback. */}
       {route === 'goorooship' ? (
         <EzTransPanel
           row={row}
@@ -235,6 +233,27 @@ export function StepLabel({
           onLabelSaved={({ carrier: c, tracking_num: t }) => { setCarrier(c); setTracking(t); }}
           onConfirmed={() => setJustBookedFreightcom(true)}
           starterGap={starterGap}
+        />
+      )}
+
+      {/* And the handoff email, which is owed on either route.
+          Who booked the carrier and who is holding the box are two different
+          questions. EZ Trans hold the machine whichever portal issued the
+          label, and they do not touch a box they have not been emailed about —
+          so a Freightcom booking on EZ Trans stock still has to queue the same
+          confirmation, into the same end-of-day batch. It renders here with
+          the label it was given rather than asking for one again. */}
+      {isEzTrans && route === 'freightcom' && (
+        <EzTransPanel
+          row={row}
+          order={order}
+          onBatchChanged={onBatchChanged}
+          starterGap={starterGap}
+          externalLabel={{
+            carrier,
+            tracking_num: tracking,
+            labelOnFile: freightcomConfirmed,
+          }}
         />
       )}
 
