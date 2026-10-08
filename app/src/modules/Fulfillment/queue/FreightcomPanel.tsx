@@ -216,7 +216,12 @@ export function FreightcomPanel({
             <div className={styles.bookingSent} data-testid="freightcom-confirmed">
               ✓ Freightcom booking confirmed
               {justConfirmed ? ` at ${new Date(justConfirmed).toLocaleString()}` : ''} —
-              {' '}{row.carrier ?? carrier} {row.tracking_num ?? tracking}, label on file.
+              {/* The fields, not the row. They are seeded from the row on mount
+                  and hold whatever was last saved, so a corrected tracking
+                  number reads back as the corrected one; the row only catches
+                  up over realtime, and echoing it would show the operator the
+                  number they had just replaced. */}
+              {' '}{carrier} {tracking.trim()}, label on file.
               Confirm again only to correct it.
             </div>
           )}
