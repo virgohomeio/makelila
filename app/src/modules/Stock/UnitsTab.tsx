@@ -19,6 +19,13 @@ export function UnitsTab() {
   const { units, loading: uLoading } = useUnits();
   const countsByBatch = useStatusCountsByBatch(units);
   const validSerials = useMemo(() => new Set(units.map(u => u.serial)), [units]);
+  // mac_address → serial, so the uploader can warn when a report's MAC is
+  // already on a different unit without another round trip.
+  const macOwners = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const u of units) if (u.mac_address) m.set(u.mac_address, u.serial);
+    return m;
+  }, [units]);
 
   const [batchFilter, setBatchFilter] = useState<string | null>(null);
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>('all');
@@ -139,7 +146,7 @@ export function UnitsTab() {
         </div>
       </div>
 
-      <TestReportUploader validSerials={validSerials} />
+      <TestReportUploader validSerials={validSerials} macOwners={macOwners} />
 
       <UnitTable units={filtered} />
     </div>

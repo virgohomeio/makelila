@@ -750,7 +750,7 @@ describe('TestReportUploader — MAC warnings', () => {
     render(<TestReportUploader validSerials={new Set(['LL01-A', 'LL01-B'])} macOwners={new Map()} />);
     drop([md('LL01-B.md')]);
     expect(await screen.findByText(/LL01-B → MAC 98:a3:16:a6:97:b0 is already on LL01-A/)).toBeInTheDocument();
-    expect(screen.getByText(/paired/)).toHaveTextContent(/^1 paired/);
+    expect(screen.getByText('paired')).toHaveTextContent(/^1 paired/);
   });
 
   it('notes a paired report that carried no MAC', async () => {
@@ -768,7 +768,7 @@ describe('TestReportUploader — MAC warnings', () => {
     ]);
     render(<TestReportUploader validSerials={new Set(['LL01-A'])} macOwners={new Map()} />);
     drop([md('LL01-A.md')]);
-    await screen.findByText(/paired/);
+    await screen.findByText('paired');
     expect(screen.queryByText(/already on/)).toBeNull();
     expect(screen.queryByText(/no MAC ID/)).toBeNull();
   });
