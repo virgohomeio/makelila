@@ -2,7 +2,14 @@ import { useRef, useState } from 'react';
 import { uploadTestReports, type UploadOutcome } from '../../lib/testReports';
 import styles from './Stock.module.css';
 
-export function TestReportUploader({ validSerials }: { validSerials: Set<string> }) {
+export function TestReportUploader({
+  validSerials, macOwners = new Map(),
+}: {
+  validSerials: Set<string>;
+  /** mac_address → serial for every loaded unit that has a MAC. Lets the
+   *  uploader warn when a report's MAC already belongs to another serial. */
+  macOwners?: Map<string, string>;
+}) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [outcomes, setOutcomes] = useState<UploadOutcome[] | null>(null);
@@ -13,7 +20,7 @@ export function TestReportUploader({ validSerials }: { validSerials: Set<string>
     if (files.length === 0) return;
     setBusy(true); setOutcomes(null);
     try {
-      setOutcomes(await uploadTestReports(files, validSerials));
+      setOutcomes(await uploadTestReports(files, validSerials, macOwners));
     } finally {
       setBusy(false);
       if (inputRef.current) inputRef.current.value = '';
@@ -22,6 +29,9 @@ export function TestReportUploader({ validSerials }: { validSerials: Set<string>
 
   const paired = outcomes?.filter(o => o.status === 'paired') ?? [];
   const problems = outcomes?.filter(o => o.status !== 'paired') ?? [];
+  // Paired files that still deserve a look: a MAC already on another serial
+  // (same ESP32 under two labels), or a report that carried no MAC at all.
+  const macWarnings = paired.filter(o => o.macClash || o.mac == null);
 
   return (
     <div className={styles.reportUploader}>
@@ -51,6 +61,15 @@ export function TestReportUploader({ validSerials }: { validSerials: Set<string>
           <strong>{paired.length}</strong> paired
           {paired.length > 0 && (
             <span> ({paired.map(o => `${o.serial}: ${o.result}`).join(', ')})</span>
+          )}
+          {macWarnings.length > 0 && (
+            <ul className={styles.reportWarnings}>
+              {macWarnings.map((o, i) => (
+                o.macClash
+                  ? <li key={`${o.fileName}-${i}`}>⚠ {o.serial} → MAC {o.mac} is already on {o.macClash}</li>
+                  : <li key={`${o.fileName}-${i}`} className={styles.reportWarningQuiet}>{o.serial} → no MAC ID in report</li>
+              ))}
+            </ul>
           )}
           {problems.length > 0 && (
             <ul className={styles.reportProblems}>
