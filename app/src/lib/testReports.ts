@@ -6,18 +6,36 @@ const BUCKET = 'test-reports';
 
 export type ParsedTestReport = {
   serial: string | null;
+  mac: string | null;     // ESP32 MAC from the "MAC ID:" line, normalised; null when absent/garbled
   result: QcCheck;     // 'pass' | 'fail' | 'incomplete'
   passed: number | null;
   failed: number | null;
   failedTests: string[];  // e.g. ['Left Motor', 'Right Motor']
 };
 
-/** Parse a test-script .md report. Serial comes from the "Serial Number:" line;
- *  the overall result comes from the Summary "Failed:" count (any failure → fail,
- *  no parseable summary → incomplete). We intentionally only read the summary —
- *  the per-test breakdown lives in the stored file. */
+/** Canonical form for an ESP32 MAC: lowercase, colon-separated, six hex
+ *  octets. Accepts ":" or "-" separators and any case; anything else (five
+ *  octets, non-hex, empty) is null so a typo never lands in units.mac_address
+ *  and silently fails to match the next report for the same board. */
+export function normalizeMac(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const m = raw.trim().match(
+    /^([0-9a-f]{2})[:-]([0-9a-f]{2})[:-]([0-9a-f]{2})[:-]([0-9a-f]{2})[:-]([0-9a-f]{2})[:-]([0-9a-f]{2})$/i,
+  );
+  if (!m) return null;
+  return m.slice(1, 7).map(o => o.toLowerCase()).join(':');
+}
+
+/** Parse a test-script .md report. Serial comes from the "Serial Number:" line,
+ *  the MAC from the "MAC ID:" line right under it; the overall result comes
+ *  from the Summary "Failed:" count (any failure → fail, no parseable summary →
+ *  incomplete). We intentionally only read the summary — the per-test
+ *  breakdown lives in the stored file. */
 export function parseTestReport(text: string): ParsedTestReport {
   const serialMatch = text.match(/Serial Number:\**\s*([A-Za-z0-9-]+)/i);
+  // Label tolerance mirrors the serial line: "**MAC ID:**", "MAC ID:",
+  // "**MAC Address:**" all match. The value is validated by normalizeMac.
+  const macMatch = text.match(/MAC(?:\s+(?:ID|Address))?\**:\**\s*([0-9A-Fa-f]{2}(?:[:-][0-9A-Fa-f]{2}){5})\b/i);
   const passedMatch = text.match(/Passed:\s*(\d+)/i);
   const failedMatch = text.match(/Failed:\s*(\d+)/i);
 
@@ -37,7 +55,11 @@ export function parseTestReport(text: string): ParsedTestReport {
   else if (failed > 0) result = 'fail';
   else result = 'pass';
 
-  return { serial: serialMatch ? serialMatch[1] : null, result, passed, failed, failedTests };
+  return {
+    serial: serialMatch ? serialMatch[1] : null,
+    mac: normalizeMac(macMatch ? macMatch[1] : null),
+    result, passed, failed, failedTests,
+  };
 }
 
 /** Serial implied by a filename like "LL01-00000000332.md". */
