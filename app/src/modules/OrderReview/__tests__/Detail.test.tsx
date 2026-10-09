@@ -388,21 +388,50 @@ describe('Detail — flagged replacement', () => {
     render(<Detail order={replacement} onAfterDisposition={after} />);
     fireEvent.click(screen.getByRole('button', { name: /clear flag/i }));
     await waitFor(() => {
-      expect(queueReplacementMock).toHaveBeenCalledWith('r-1');
+      expect(queueReplacementMock).toHaveBeenCalledWith('r-1', { force: false });
       expect(dispositionMock).not.toHaveBeenCalled();
       expect(after).toHaveBeenCalled();
     });
   });
 
-  // A short order is reported, not forced. Fulfillment › Replacements is the
-  // screen that can knowingly override, because it shows the stock numbers.
-  it('reports a stock shortfall instead of queueing anyway', async () => {
+  // A short count asks rather than refuses. It used to throw and point the
+  // operator at Fulfillment › Replacements to click the identical override,
+  // which left the order stuck here for anyone working Sales.
+  it('asks before queueing a short replacement, and stays on the order', async () => {
     queueReplacementMock.mockResolvedValueOnce({ queued: false, blocked: 'P100X' });
     const after = vi.fn();
     render(<Detail order={replacement} onAfterDisposition={after} />);
     fireEvent.click(screen.getByRole('button', { name: /clear flag/i }));
-    await waitFor(() => expect(screen.getByText(/stock is short \(P100X\)/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/Stock looks short/)).toBeTruthy());
+    expect(screen.getByText(/P100X/)).toBeTruthy();
     expect(after).not.toHaveBeenCalled();
+  });
+
+  it('queues it anyway when the operator overrides', async () => {
+    queueReplacementMock.mockResolvedValueOnce({ queued: false, blocked: 'P100X' });
+    const after = vi.fn();
+    render(<Detail order={replacement} onAfterDisposition={after} />);
+    fireEvent.click(screen.getByRole('button', { name: /clear flag/i }));
+    await waitFor(() => screen.getByRole('button', { name: /queue it anyway/i }));
+
+    fireEvent.click(screen.getByRole('button', { name: /queue it anyway/i }));
+    await waitFor(() => {
+      expect(queueReplacementMock).toHaveBeenLastCalledWith('r-1', { force: true });
+      expect(after).toHaveBeenCalled();
+    });
+  });
+
+  // Discard puts the button back rather than leaving the order wearing a
+  // question nobody answered.
+  it('goes back to the plain button when the override is discarded', async () => {
+    queueReplacementMock.mockResolvedValueOnce({ queued: false, blocked: 'P100X' });
+    render(<Detail order={replacement} onAfterDisposition={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: /clear flag/i }));
+    await waitFor(() => screen.getByRole('button', { name: /discard/i }));
+
+    fireEvent.click(screen.getByRole('button', { name: /discard/i }));
+    expect(screen.getByRole('button', { name: /clear flag/i })).toBeTruthy();
+    expect(screen.queryByText(/Stock looks short/)).toBeNull();
   });
 
   // The sale path must be untouched by the branch above.

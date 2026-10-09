@@ -21,6 +21,12 @@ import styles from './OrderReview.module.css';
 
 type Banner = { variant: 'success' | 'error'; message: string } | null;
 
+/** Returned by a wrap()ped action that finished without dispositioning the
+ *  order — no banner, and the panel keeps its place. The action has put its own
+ *  question on screen instead and is waiting for an answer. Only the
+ *  short-stock override uses it. */
+const HALT = Symbol('halt');
+
 export function Detail({
   order,
   onAfterDisposition,
@@ -30,6 +36,9 @@ export function Detail({
 }) {
   const [banner, setBanner] = useState<Banner>(null);
   const dismissBanner = useCallback(() => setBanner(null), []);
+  // Set when a re-queue came back short: the parts it is short of, which the
+  // action bar turns into the override question. Null the rest of the time.
+  const [shortStock, setShortStock] = useState<string | null>(null);
   const { profile, user } = useAuth();
   const authorName = profile?.display_name ?? user?.email ?? 'Unknown';
 
@@ -37,7 +46,7 @@ export function Detail({
     label: string,
     /** A string return is appended to the success banner — for actions whose
      *  outcome is only known once they have run (see onReleaseHold). */
-    fn: () => Promise<void | string>,
+    fn: () => Promise<void | string | typeof HALT>,
     noteLabel?: string,
     reason?: string,
     /** Dispositioning moves on to the next order in the queue, which is the
@@ -48,6 +57,7 @@ export function Detail({
   ) => {
     try {
       const detail = await fn();
+      if (detail === HALT) return;
       const trimmed = reason?.trim();
       if (noteLabel && trimmed) {
         await addOrderNote(order.id, authorName, `${noteLabel}: ${trimmed}`);
@@ -64,6 +74,26 @@ export function Detail({
       });
     }
   };
+
+  /** Clear a flagged replacement's flag by sending it back through the
+   *  replacement re-queue path. Unforced, a short stock count comes back as a
+   *  question in the action bar instead of a failure; forced, it queues anyway
+   *  and queueReplacementForFulfillment records the override in the log. */
+  const clearReplacementFlag = (force: boolean) => wrap(
+    'Flag cleared',
+    async () => {
+      const short = shortStock;
+      const r = await queueReplacementForFulfillment(order.id, { force });
+      if (!r.queued) {
+        setShortStock(r.blocked);
+        return HALT;
+      }
+      setShortStock(null);
+      return force && short
+        ? `queued anyway with stock short (${short}) — in Fulfillment › Queue`
+        : 'stock re-checked, back in Fulfillment › Queue';
+    },
+  );
 
   const confirmReady = canConfirm(order);
   const isCancelled = order.status === 'cancelled';
@@ -109,23 +139,23 @@ export function Detail({
           // The only action a flagged replacement gets here. It goes back
           // through the replacement pipeline's own door rather than through
           // Confirm, so the stock it needs is re-derived now instead of being
-          // read off a replacement_state stamped months ago. A short order is
-          // reported rather than forced — Fulfillment › Replacements is where
-          // an operator can knowingly override that, and it has the stock
-          // numbers on screen to decide with.
-          onClearReplacementFlag={order.kind === 'replacement' ? () => wrap(
-            'Flag cleared',
-            async () => {
-              const r = await queueReplacementForFulfillment(order.id);
-              if (!r.queued) {
-                throw new Error(
-                  `stock is short (${r.blocked}). Clear the flag from `
-                  + 'Fulfillment › Replacements, which can queue it anyway.',
-                );
-              }
-              return 'stock re-checked, back in Fulfillment › Queue';
-            },
-          ) : undefined}
+          // read off a replacement_state stamped months ago.
+          //
+          // A short count asks rather than refuses, exactly as the same button
+          // on Fulfillment › Replacements does. It used to send the operator to
+          // that other screen to click the identical override, which left a
+          // flagged replacement with no way out of Sales at all whenever the
+          // parts table disagreed — and it disagrees routinely, because half
+          // these rows came off the Excel import as free text it can't match.
+          // The person holding the box is the one who knows; both screens now
+          // let them say so, through the same vetted `force` path that logs the
+          // override on the order.
+          onClearReplacementFlag={order.kind === 'replacement'
+            ? () => clearReplacementFlag(false)
+            : undefined}
+          clearFlagBlockedBy={shortStock}
+          onForceClearReplacementFlag={() => clearReplacementFlag(true)}
+          onDismissClearFlagBlock={() => setShortStock(null)}
           // Like un-cancelling, this is a repair rather than queue work: the
           // operator is fixing THIS order and needs to watch it land in
           // Pending, so the panel stays put instead of advancing.
