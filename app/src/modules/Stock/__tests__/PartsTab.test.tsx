@@ -9,9 +9,11 @@ const tote = {
 const lid = {
   ...tote, id: 'P-LID-V36', sku: 'LILA-LID-V36', name: 'Replacement Top Lid (v3.6)',
   category: 'replacement', cost_per_unit_usd: 24, on_hand: 5, reorder_point: 10, demand_override: 9,
+  supplier: 'Dongguan LC Technology',
 };
 
 const updatePartField = vi.fn(async (..._args: unknown[]) => {});
+const updatePartInfo = vi.fn(async (..._args: unknown[]) => {});
 const createPart = vi.fn(async (..._args: unknown[]) => 'C-TOTE');
 const refresh = vi.fn(async () => {});
 vi.mock('../../../lib/parts', async () => ({
@@ -19,6 +21,7 @@ vi.mock('../../../lib/parts', async () => ({
   useParts: () => ({ parts: [lid, tote], loading: false, refresh }),
   usePartShipments: () => ({ shipments: [], loading: false }),
   updatePartField: (...args: unknown[]) => updatePartField(...args),
+  updatePartInfo: (...args: unknown[]) => updatePartInfo(...args),
   createPart: (...args: unknown[]) => createPart(...args),
 }));
 vi.mock('../../../lib/orders', () => ({ useReplacementOrders: () => ({ orders: [] }) }));
@@ -130,5 +133,73 @@ describe('Stock › Parts — adding a SKU', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add to inventory' }));
     await waitFor(() => expect(screen.getByText(/row-level security/)).toBeInTheDocument());
     expect(screen.getByRole('button', { name: 'Add to inventory' })).toBeInTheDocument();
+  });
+});
+
+describe('Stock › Parts — editable details', () => {
+  beforeEach(() => { updatePartInfo.mockClear(); });
+
+  const edit = (cell: string, value: string, key = 'Enter') => {
+    fireEvent.click(screen.getByRole('button', { name: `Edit ${cell}` }));
+    const input = screen.getByRole('textbox', { name: cell });
+    fireEvent.change(input, { target: { value } });
+    fireEvent.keyDown(input, { key });
+    return input;
+  };
+
+  it('saves a typed name', async () => {
+    render(<PartsTab />);
+    edit('Tote Bag name', '  Canvas  Tote ');
+    await waitFor(() => expect(updatePartInfo).toHaveBeenCalledWith(tote, 'name', 'Canvas Tote'));
+  });
+
+  it('refuses a blank name without writing', () => {
+    render(<PartsTab />);
+    edit('Tote Bag name', '   ');
+    expect(updatePartInfo).not.toHaveBeenCalled();
+    expect(screen.getByText(/Name cannot be blank/)).toBeInTheDocument();
+  });
+
+  it('clears a supplier back to empty', async () => {
+    render(<PartsTab />);
+    edit('Replacement Top Lid (v3.6) supplier', '');
+    await waitFor(() => expect(updatePartInfo).toHaveBeenCalledWith(lid, 'supplier', null));
+  });
+
+  it('saves a note', async () => {
+    render(<PartsTab />);
+    edit('Tote Bag notes', 'Bundled with every US shipment');
+    await waitFor(() =>
+      expect(updatePartInfo).toHaveBeenCalledWith(tote, 'notes', 'Bundled with every US shipment'));
+  });
+
+  it('switches a category from the dropdown', async () => {
+    render(<PartsTab />);
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Tote Bag category' }));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Tote Bag category' }),
+      { target: { value: 'replacement' } });
+    await waitFor(() => expect(updatePartInfo).toHaveBeenCalledWith(tote, 'category', 'replacement'));
+  });
+
+  it('refuses a SKU another part already uses', () => {
+    render(<PartsTab />);
+    edit('Tote Bag SKU', 'lila-lid-v36');
+    expect(updatePartInfo).not.toHaveBeenCalled();
+    expect(screen.getByText(/already used by/)).toBeInTheDocument();
+  });
+
+  it('warns that a renamed SKU re-keys Demand', async () => {
+    render(<PartsTab />);
+    edit('Tote Bag SKU', 'lila-tote-v2');
+    await waitFor(() => expect(updatePartInfo).toHaveBeenCalledWith(tote, 'sku', 'LILA-TOTE-V2'));
+    expect(screen.getByText(/Demand is keyed by SKU/)).toBeInTheDocument();
+  });
+
+  it('leaves the cell open when the write fails', async () => {
+    updatePartInfo.mockRejectedValueOnce(new Error('new row violates row-level security policy'));
+    render(<PartsTab />);
+    edit('Tote Bag name', 'Canvas Tote');
+    await waitFor(() => expect(screen.getByText(/row-level security/)).toBeInTheDocument());
+    expect(screen.getByRole('textbox', { name: 'Tote Bag name' })).toBeInTheDocument();
   });
 });

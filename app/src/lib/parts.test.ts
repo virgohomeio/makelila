@@ -3,7 +3,9 @@ import { describe, it, expect, vi } from 'vitest';
 vi.mock('./supabase', () => ({ supabase: {} }));
 vi.mock('./activityLog', () => ({ logAction: vi.fn() }));
 
-import { effectiveDemandBySku, parsePartFieldInput, suggestPartId } from './parts';
+import {
+  effectiveDemandBySku, parsePartFieldInput, parsePartTextInput, suggestPartId,
+} from './parts';
 
 describe('effectiveDemandBySku', () => {
   it('keeps the derived count where no override is set', () => {
@@ -75,5 +77,35 @@ describe('suggestPartId', () => {
 
   it('falls back to a usable id when the SKU has nothing alphanumeric', () => {
     expect(suggestPartId('replacement', '///', [])).toBe('P-PART');
+  });
+});
+
+describe('parsePartTextInput', () => {
+  it('upper-cases and tidies a SKU, keeping the spaces real SKUs have', () => {
+    expect(parsePartTextInput('sku', '  lila-tote ')).toBe('LILA-TOTE');
+    expect(parsePartTextInput('sku', 'lila-carbon  pellets')).toBe('LILA-CARBON PELLETS');
+  });
+
+  it('rejects a blank or unusable SKU', () => {
+    expect(parsePartTextInput('sku', '   ')).toBeUndefined();
+    expect(parsePartTextInput('sku', 'lila*tote')).toBeUndefined();
+    expect(parsePartTextInput('sku', 'L'.repeat(61))).toBeUndefined();
+  });
+
+  it('collapses whitespace in a name and refuses a blank one', () => {
+    expect(parsePartTextInput('name', ' Tote   Bag ')).toBe('Tote Bag');
+    expect(parsePartTextInput('name', '  ')).toBeUndefined();
+    expect(parsePartTextInput('name', 'N'.repeat(121))).toBeUndefined();
+  });
+
+  it('treats a blank supplier or note as cleared, not invalid', () => {
+    expect(parsePartTextInput('supplier', '  ')).toBeNull();
+    expect(parsePartTextInput('supplier', ' VCycene ')).toBe('VCycene');
+    expect(parsePartTextInput('notes', '')).toBeNull();
+  });
+
+  it('keeps the line breaks an operator typed into a note', () => {
+    expect(parsePartTextInput('notes', ' first\nsecond ')).toBe('first\nsecond');
+    expect(parsePartTextInput('notes', 'x'.repeat(1001))).toBeUndefined();
   });
 });
