@@ -6,6 +6,7 @@ import {
   type FulfillmentQueueRow,
 } from '../../../lib/fulfillment';
 import { markOrderShipped } from '../../../lib/orders';
+import { useOrderRecipient } from '../../../lib/orderRecipient';
 import { useEmailTemplate, updateTemplate, createTemplate } from '../../../lib/templates';
 import {
   SHIPMENT_EMAIL_DEFAULT,
@@ -30,7 +31,13 @@ export function StepEmail({
   onSent,
 }: {
   row: FulfillmentQueueRow;
-  order: { id: string; customer_name: string; customer_email: string | null; order_ref: string; country: 'US'|'CA' };
+  /** customer_id is read so a replacement born off a phone-call ticket — no
+   *  email copied onto the order row — can still be addressed from the
+   *  customer record. See lib/orderRecipient.ts. */
+  order: {
+    id: string; customer_name: string; customer_email: string | null;
+    customer_id?: string | null; order_ref: string; country: 'US'|'CA';
+  };
   /** Ask the board to re-read the queue. The send moves the row to step 6 in
    *  the database, but the board learns that over a realtime socket it is
    *  documented to drop, so it is told explicitly too. */
@@ -71,12 +78,26 @@ export function StepEmail({
   const dirty = (subjectEdit !== null && subjectEdit !== baseSubject)
     || (bodyEdit !== null && bodyEdit !== baseBody);
 
+  // Who the mail actually goes to: the order's own column, else the linked
+  // customer record. Step 5 used to read order.customer_email alone, which
+  // blocked every replacement raised from a phone call — the order row has no
+  // email on it and the customer record does (R-0023, Candace Chan).
+  const recipient = useOrderRecipient(order);
+
   // Sending never depends on the stored row: the default below always renders.
-  const canSend = !!order.customer_email;
+  const canSend = !!recipient.email;
   // A customer with no email on file blocks this step with nothing on screen
   // to say so — the operator has to go add one in Customers first.
   const blockers: string[] = [];
-  if (!order.customer_email) blockers.push('an email address on this customer');
+  // Silent while the customer record is still being read, rather than naming a
+  // blocker that is about to clear itself.
+  if (!recipient.email && !recipient.loading) {
+    blockers.push(recipient.nameMismatch
+      // The directory row linked to this order names someone else, so its
+      // address is not safe to use — say which link is wrong, not "no email".
+      ? 'an email address on this order — the customer record linked to it names someone else'
+      : 'an email address on this customer');
+  }
   if (shippingCost.trim() === '') blockers.push('the actual shipping cost');
   const alreadySent = !!row.email_sent_at || justSent;
 
@@ -152,7 +173,12 @@ export function StepEmail({
       {!tplLoading && (
         <>
           <div style={{ fontSize: 10, color: 'var(--color-ink-subtle)', marginBottom: 4 }}>
-            From: VCycene Team &lt;support@lilacomposter.com&gt; · To: {order.customer_email ?? '<no email>'}
+            From: VCycene Team &lt;support@lilacomposter.com&gt; · To:{' '}
+            {recipient.loading ? 'checking the customer record…' : recipient.email ?? '<no email>'}
+            {/* An address that is not on the order is still the right one to
+                use, but the operator is told where it came from before they
+                send — this is the only place they can catch a bad link. */}
+            {recipient.source === 'directory' && ' (from the customer record — none on this order)'}
           </div>
 
           <label style={{ display: 'block', fontSize: 10, color: 'var(--color-ink-subtle)', marginBottom: 2 }}>

@@ -22,7 +22,14 @@ type OrderRow = {
   order_ref: string;
   customer_name: string;
   customer_email: string | null;
+  customer_id: string | null;
   country: 'US' | 'CA';
+};
+
+type CustomerRow = {
+  full_name: string | null;
+  email: string | null;
+  primary_user_email: string | null;
 };
 
 Deno.serve(async (req: Request) => {
@@ -105,13 +112,43 @@ async function handle(req: Request): Promise<Response> {
 
   const { data: order, error: oErr } = await admin
     .from('orders')
-    .select('order_ref, customer_name, customer_email, country')
+    .select('order_ref, customer_name, customer_email, customer_id, country')
     .eq('id', q.order_id)
     .single<OrderRow>();
-  if (oErr || !order || !order.customer_email) {
-    return new Response(JSON.stringify({ error: 'order missing or has no customer_email' }), {
+  if (oErr || !order) {
+    return new Response(JSON.stringify({ error: 'order missing' }), {
       status: 404, headers: { ...corsHeaders, 'content-type': 'application/json' },
     });
+  }
+
+  // Where the mail goes: the order's own column, else the linked customer
+  // record. A replacement raised from a phone call copies its email off a
+  // service ticket that has none, so the order row is null while the customer
+  // record holds the address — R-0023 could not be sent at all. Mirrors
+  // resolveOrderRecipient() in app/src/lib/orderRecipient.ts, which gates the
+  // Step-5 button; keep the two in sync.
+  let linkedCustomer: CustomerRow | null = null;
+  if (!order.customer_email?.trim() && order.customer_id) {
+    const { data: cust } = await admin
+      .from('customers')
+      .select('full_name, email, primary_user_email')
+      .eq('id', order.customer_id)
+      .maybeSingle<CustomerRow>();
+    linkedCustomer = cust ?? null;
+  }
+  const { email: recipient, nameMismatch } = resolveRecipient(order, linkedCustomer);
+  if (!recipient) {
+    return new Response(
+      JSON.stringify({
+        error: nameMismatch
+          // The customer_id trigger matches on name as well as email, so a
+          // linked record that names someone else is not a safe address.
+          ? `no email on order ${order.order_ref}, and the customer record linked to it names `
+            + `${linkedCustomer?.full_name ?? 'someone else'} rather than ${order.customer_name}`
+          : `no email on order ${order.order_ref} and none on the customer record`,
+      }),
+      { status: 404, headers: { ...corsHeaders, 'content-type': 'application/json' } },
+    );
   }
 
   const firstName = order.customer_name.split(' ')[0] ?? order.customer_name;
@@ -188,7 +225,7 @@ async function handle(req: Request): Promise<Response> {
   // prefix and the body is prepended with a banner so it's obvious the email
   // was not delivered to the customer. Unset this env var to go live.
   const testRecipient = Deno.env.get('EMAIL_TEST_RECIPIENT');
-  const realTo = order.customer_email;
+  const realTo = recipient;
   const to = testRecipient || realTo;
   const subject = testRecipient ? `[TEST → ${realTo}] ${renderedSubject}` : renderedSubject;
   const emailText = testRecipient
@@ -294,6 +331,41 @@ async function handle(req: Request): Promise<Response> {
     JSON.stringify({ email_id: sent.id }),
     { status: 200, headers: { ...corsHeaders, 'content-type': 'application/json' } },
   );
+}
+
+/** The one address this order's mail goes to, or null when there isn't one.
+ *
+ *  `orders.customer_email` is a snapshot: Shopify fills it on every sale, but a
+ *  replacement copies it off its service ticket, and a ticket raised by hand
+ *  from a phone call has no email on it. So the order column comes first and
+ *  the linked customer record is the fallback — primary user's own address
+ *  before the purchaser's, matching resolveCustomerParties in
+ *  app/src/lib/customers.ts.
+ *
+ *  The name check is the guard: `orders.customer_id` is set by a trigger that
+ *  matches on email OR NAME, so a linked record can be the wrong person.
+ *  Sending one customer's shipment confirmation to another is worse than
+ *  refusing, so a mismatch resolves to null.
+ *
+ *  Mirrors resolveOrderRecipient() in app/src/lib/orderRecipient.ts, which is
+ *  unit-tested — keep the two in sync. */
+function resolveRecipient(
+  order: OrderRow,
+  customer: CustomerRow | null,
+): { email: string | null; nameMismatch: boolean } {
+  const trim = (v: string | null | undefined) => (v ?? '').trim() || null;
+  const onOrder = trim(order.customer_email);
+  if (onOrder) return { email: onOrder, nameMismatch: false };
+  const fromDirectory = customer
+    ? trim(customer.primary_user_email) ?? trim(customer.email)
+    : null;
+  if (!fromDirectory) return { email: null, nameMismatch: false };
+  // Collapse internal whitespace too: customers.full_name is generated from
+  // first_name + last_name, so a blank component leaves a doubled space.
+  const norm = (v: string | null | undefined) => (v ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
+  const a = norm(order.customer_name);
+  if (a === '' || a !== norm(customer?.full_name)) return { email: null, nameMismatch: true };
+  return { email: fromDirectory, nameMismatch: false };
 }
 
 /** Render `{{variable}}` placeholders. A missing or empty value is left as

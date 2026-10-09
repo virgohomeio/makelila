@@ -1,10 +1,27 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 
-const { assignUnitsMock, useUnitsMock } = vi.hoisted(() => ({
+const { assignUnitsMock, useUnitsMock, useOrderRecipientMock, useEmailTemplateMock } = vi.hoisted(() => ({
   assignUnitsMock: vi.fn(() => Promise.resolve()),
   useUnitsMock: vi.fn(),
+  useOrderRecipientMock: vi.fn(),
+  // Resolved rather than loading, so the step renders its draft — the From/To
+  // line only exists once the wording has loaded.
+  useEmailTemplateMock: vi.fn(() => ({ template: null, loading: false, refresh: () => Promise.resolve() })),
 }));
+
+vi.mock('../../../lib/templates', async () => {
+  const actual = await vi.importActual<typeof import('../../../lib/templates')>('../../../lib/templates');
+  return { ...actual, useEmailTemplate: useEmailTemplateMock };
+});
+
+// The hook reads `customers` for the fallback address, which is a network call.
+// Mocked here so the step can be rendered against each resolution it has to
+// handle; the resolution itself is unit-tested in lib/orderRecipient.test.ts.
+vi.mock('../../../lib/orderRecipient', async () => {
+  const actual = await vi.importActual<typeof import('../../../lib/orderRecipient')>('../../../lib/orderRecipient');
+  return { ...actual, useOrderRecipient: useOrderRecipientMock };
+});
 
 vi.mock('../../../lib/fulfillment', async () => {
   const actual = await vi.importActual<typeof import('../../../lib/fulfillment')>('../../../lib/fulfillment');
@@ -98,6 +115,15 @@ describe('StepEmail — why Send is disabled', () => {
     order_ref: '#1202', country: 'US' as const,
   });
 
+  beforeEach(() => {
+    // Default: whatever is on the order row, nothing else linked — the shape
+    // every sale has.
+    useOrderRecipientMock.mockImplementation((o: { customer_email: string | null }) => ({
+      email: o.customer_email, source: o.customer_email ? 'order' : null,
+      nameMismatch: false, loading: false,
+    }));
+  });
+
   it('calls out a customer with no email on file', () => {
     render(<StepEmail row={{ ...row, step: 5 }} order={order(null)} />);
     const hint = screen.getByTestId('step-blockers');
@@ -116,5 +142,51 @@ describe('StepEmail — why Send is disabled', () => {
     render(<StepEmail row={{ ...row, step: 5 }} order={order('al@example.com')} />);
     fireEvent.change(screen.getByPlaceholderText('42.75'), { target: { value: '42.75' } });
     expect(screen.queryByTestId('step-blockers')).toBeNull();
+  });
+
+  // R-0023 (Candace Chan): a replacement raised from a phone call has no email
+  // on the order row, because the ticket it was copied from had none. The
+  // address was on her customer record the whole time, and Step 5 refused to
+  // send — telling the operator to add an email that already existed.
+  it('sends to the customer record when the order row carries no email', () => {
+    useOrderRecipientMock.mockReturnValue({
+      email: 'garycandacechan@gmail.com', source: 'directory',
+      nameMismatch: false, loading: false,
+    });
+    render(<StepEmail row={{ ...row, step: 5 }} order={order(null)} />);
+    const hint = screen.getByTestId('step-blockers');
+    expect(hint).toHaveTextContent(/shipping cost/i);
+    expect(hint).not.toHaveTextContent(/email address/i);
+  });
+
+  it('names where an off-order address came from before it is sent', () => {
+    useOrderRecipientMock.mockReturnValue({
+      email: 'garycandacechan@gmail.com', source: 'directory',
+      nameMismatch: false, loading: false,
+    });
+    render(<StepEmail row={{ ...row, step: 5 }} order={order(null)} />);
+    expect(screen.getByText(/garycandacechan@gmail\.com/)).toHaveTextContent(/from the customer record/i);
+  });
+
+  it('keeps blocking when the linked customer record names someone else', () => {
+    // orders.customer_id is set by a trigger that matches on name as well as
+    // email, so a linked record can be the wrong person. Refuse rather than
+    // email a stranger someone else's shipment.
+    useOrderRecipientMock.mockReturnValue({
+      email: null, source: null, nameMismatch: true, loading: false,
+    });
+    render(<StepEmail row={{ ...row, step: 5 }} order={order(null)} />);
+    expect(screen.getByTestId('step-blockers')).toHaveTextContent(/names someone else/i);
+    expect(screen.getByRole('button', { name: /Send/ })).toBeDisabled();
+  });
+
+  it('names no blocker while the customer record is still being read', () => {
+    useOrderRecipientMock.mockReturnValue({
+      email: null, source: null, nameMismatch: false, loading: true,
+    });
+    render(<StepEmail row={{ ...row, step: 5 }} order={order(null)} />);
+    const hint = screen.getByTestId('step-blockers');
+    expect(hint).toHaveTextContent(/shipping cost/i);
+    expect(hint).not.toHaveTextContent(/email address/i);
   });
 });
