@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase } from './supabase';
 import { logAction } from './activityLog';
+import type { Unit } from './stock';
 
 // ============================================================ Types
 
@@ -374,6 +375,90 @@ export async function assignSerial(input: {
   if (error) throw error;
   await logAction('serial_assigned', input.serial, input.batch,
     { entityType: 'unit', unitSerial: input.serial });
+}
+
+// ============================================================ Serial ranges
+
+export const SERIAL_PREFIX = 'LL01-';
+/** Guard against a typo like 691 → 7800 creating thousands of units. */
+export const MAX_CLAIM_RANGE = 500;
+
+/** "LL01-" + the number zero-padded to 11 digits — the only serial shape units use. */
+export function formatSerial(n: number): string {
+  return SERIAL_PREFIX + String(n).padStart(11, '0');
+}
+
+/** The serial number an operator typed, as a positive integer. Accepts "691",
+ *  "00000000691" or the full "LL01-00000000691" in any case. Null for anything
+ *  else, so a typo never turns into a unit. */
+export function parseSerialInput(raw: string): number | null {
+  const m = raw.trim().toUpperCase().match(/^(?:LL01-)?(\d{1,11})$/);
+  if (!m) return null;
+  const n = Number(m[1]);
+  return n > 0 ? n : null;
+}
+
+function assertClaimRange(from: number, to: number): void {
+  if (from > to) throw new Error('The first serial must not come after the last');
+  if (to - from + 1 > MAX_CLAIM_RANGE) {
+    throw new Error(`A range can hold at most ${MAX_CLAIM_RANGE} serials`);
+  }
+}
+
+export type RangeSkipReason = 'other_batch' | 'same_po' | 'other_po' | 'exists';
+
+export const RANGE_SKIP_LABEL: Record<RangeSkipReason, string> = {
+  other_batch: 'already in batch',
+  same_po: 'already on this PO',
+  other_po: 'already on another PO',
+  exists: 'already exists',
+};
+
+export type RangePlan = {
+  serials: string[];
+  create: string[];
+  linkPo: string[];
+  skipped: { serial: string; reason: RangeSkipReason; detail?: string }[];
+};
+
+/** What claiming `from`..`to` into `batch` (and optionally a PO) would do,
+ *  given the units that already exist. Existing units are never moved: the
+ *  only change ever planned for one is filling a missing PO when its batch
+ *  matches. Pure — the dialog previews with it, claimSerialRange commits with it. */
+export function planSerialRange(args: {
+  from: number;
+  to: number;
+  batch: string;
+  poId: string | null;
+  existing: Pick<Unit, 'serial' | 'batch' | 'po_id'>[];
+}): RangePlan {
+  const { from, to, batch, poId } = args;
+  assertClaimRange(from, to);
+  const bySerial = new Map(args.existing.map(u => [u.serial, u]));
+  const plan: RangePlan = { serials: [], create: [], linkPo: [], skipped: [] };
+  for (let n = from; n <= to; n++) {
+    const serial = formatSerial(n);
+    plan.serials.push(serial);
+    const u = bySerial.get(serial);
+    if (!u) plan.create.push(serial);
+    else if (u.batch !== batch) plan.skipped.push({ serial, reason: 'other_batch', detail: u.batch });
+    else if (u.po_id == null) {
+      if (poId) plan.linkPo.push(serial);
+      else plan.skipped.push({ serial, reason: 'exists' });
+    } else if (u.po_id === poId) plan.skipped.push({ serial, reason: 'same_po' });
+    else plan.skipped.push({ serial, reason: 'other_po' });
+  }
+  return plan;
+}
+
+/** Units "made" for a PO card: units linked to this PO, plus units with no PO
+ *  in the PO's batch. While nothing is linked this is exactly the old
+ *  same-batch count; it becomes exact as units carry their PO. */
+export function unitsMadeForPO(
+  order: Pick<FactoryOrder, 'id' | 'batch'>,
+  units: Pick<Unit, 'batch' | 'po_id'>[],
+): number {
+  return units.filter(u => u.po_id === order.id || (u.po_id == null && u.batch === order.batch)).length;
 }
 
 export async function logDefect(input: {
