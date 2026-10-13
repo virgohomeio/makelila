@@ -118,14 +118,18 @@ async function claimSerialRange(args: {
    serials count as created; a serial that appeared between read and write is
    moved to skipped `exists`. Insert-only on conflict, per the repo's
    system-of-record rule.
-4. If `linkPo` is non-empty: one
-   `.update({ po_id }).in('serial', linkPo).eq('batch', batch).is('po_id', null).select('serial')`.
-   Only returned serials count as linked.
+4. If a PO was chosen and `linkPo` is non-empty: one
+   `.update({ po_id }).gte('serial', first).lte('serial', last).eq('batch', batch).is('po_id', null).select('serial')`.
+   The range filter is used for the same URL-length reason as the read; units
+   created in step 3 already carry the PO, so they never match `po_id is null`.
+   Returned serials are the linked set. A planned `linkPo` serial that is not
+   returned was given a PO in the meantime and becomes skipped `other_po`.
 5. Activity log, in parallel:
    - per created serial: `logAction('serial_assigned', serial, batch, { entityType: 'unit', unitSerial: serial })`
      — identical to the single claim;
    - per linked serial: `logAction('unit_po_linked', serial, po_number, { entityType: 'unit', unitSerial: serial })`;
-   - one summary: `logAction('serials_claimed_range', po_number ?? batch, '<first>–<last>: <c> created, <l> linked, <s> skipped')`.
+   - one summary, written only when something was created or linked:
+     `logAction('serials_claimed_range', po_number ?? batch, '<first>–<last>: <c> created, <l> linked, <s> skipped')`.
 6. Return the result.
 
 A failed insert or update throws; nothing after it runs. The insert is a single
@@ -153,8 +157,8 @@ Fields, top to bottom:
    "Last" inputs.
 5. **Preview** (range mode, when both ends parse): `N new · L to link · S skipped`.
    With a PO: `PO <po_number>: <after> of <qty_ordered> ordered after this`,
-   where `after` = units already on the PO + new + linked. Over quantity shows
-   the line in warning colour; it does not block.
+   where `after` = units already on the PO + new + linked. Over quantity adds a
+   warning line, "That is more than PO <po_number> ordered.", and does not block.
 6. **Errors** inline: unparseable serial, first after last, over 500, and a PO
    whose batch has no `batches` row (`units.batch` is an FK, so the insert would
    fail): "Batch <id> has no batch record yet. Add it on the LILA Units tab
@@ -166,9 +170,10 @@ linked count, and a skipped list (`serial — reason`), with a Close button.
 
 ## PO card count (`app/src/modules/Build/PipelineBoard.tsx:101`)
 
-`unitsMadeCount` becomes
-`units.filter(u => u.po_id === o.id || (u.po_id == null && u.batch === o.batch)).length`.
-Identical to today while nothing is linked; exact once units carry their PO.
+New pure helper `unitsMadeForPO(order, units)` in `lib/build.ts`, used for
+`unitsMadeCount`: units whose `po_id` is this PO, plus units with no PO in the
+PO's batch. Identical to today while nothing is linked; exact once units carry
+their PO.
 
 ## Testing
 
