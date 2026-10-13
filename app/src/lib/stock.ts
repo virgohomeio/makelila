@@ -86,6 +86,9 @@ export const QC_CHECK_META: Record<QcCheck, { label: string; color: string; bg: 
 export type Unit = {
   serial: string;
   batch: string;
+  // Purchase order this unit was claimed under (factory_orders.id). Null for
+  // units claimed before POs were linked, or claimed with "No PO".
+  po_id: string | null;
   status: UnitStatus;
   color: UnitColor | null;
   location: string | null;
