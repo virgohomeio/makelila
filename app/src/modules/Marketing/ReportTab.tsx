@@ -18,12 +18,17 @@ const RANGES = [
   { label: 'All time', days: 0 },
 ];
 
-/** The short creative code an operator recognises (v20c, v13a…) pulled out of a
- *  full Meta ad name; falls back to the trimmed ad name when there's no code. */
-function creativeLabel(adName: string | null): string | null {
-  if (!adName) return null;
-  const m = adName.match(/\bv\d+[a-z]?\b/i);
-  return m ? m[0].toLowerCase() : adName.trim();
+/** The creative code an operator recognises (v28a, v13a…) pulled out of a Meta
+ *  ad name or a utm_content string. Prefers a code WITH a trailing letter — an
+ *  ad VERSION like "v1" has none — so "Fall 2026 v1 - v28a" → "v28a". Takes the
+ *  last such code; null when there's no recognisable creative code. */
+function creativeLabel(s: string | null): string | null {
+  if (!s) return null;
+  const lettered = [...s.matchAll(/\bv\d+[a-z]\b/gi)];
+  if (lettered.length) return lettered[lettered.length - 1][0].toLowerCase();
+  const any = [...s.matchAll(/\bv\d+[a-z]?\b/gi)];
+  if (any.length) return any[any.length - 1][0].toLowerCase();
+  return null;
 }
 
 export function ReportTab() {
@@ -159,6 +164,12 @@ export function ReportTab() {
       creativeByDate.set(ad.date_start, m);
     }
     const creativeOf = (o: Order): string | null => {
+      // Deterministic first: the ad creative from the order's OWN utm_content
+      // (e.g. "Fall 2026 v1 - v28a" → "v28a"), captured by Shopify on the order.
+      const fromContent = creativeLabel(o.attribution_content);
+      if (fromContent) return fromContent;
+      // Fallback for older orders with no utm_content: the best-effort clean-day
+      // match from Meta's per-ad purchases.
       const dt = estDate(o.placed_at ?? o.created_at);
       const dayAds = creativeByDate.get(dt);
       if (!dayAds) return null;
@@ -234,10 +245,10 @@ export function ReportTab() {
 
       <div style={{ fontSize: 11, color: muted, marginBottom: 14 }}>
         One row per buyer, mirroring the manual Sale tracker. <strong>Purchase time</strong> + visit history are auto-filled
-        from Klaviyo. <strong>Age / Gender</strong> and the exact <strong>ad creative</strong> (v20c…) in Notes are best-effort
-        from Meta's purchase data — filled only on an unambiguous match (that day had exactly one sale and Meta shows exactly
-        one purchase in one age/gender segment / from one creative), otherwise UNKNOWN. Operator-tracked creative overrides
-        the auto match. Run Sync All to populate.
+        from Klaviyo. The exact <strong>ad creative</strong> (v28a…) in Notes comes from the order's own Shopify
+        <strong>utm_content</strong> when present (deterministic), otherwise a best-effort Meta clean-day match.
+        <strong>Age / Gender</strong> are best-effort from Meta's purchase demographics — filled only on an unambiguous
+        single-sale day. Operator-tracked creative still overrides. Run Sync All to populate.
       </div>
 
       {/* Per-buyer table — exact tracker columns */}

@@ -157,6 +157,10 @@ export type Order = {
   attribution_source: string | null;
   attribution_medium: string | null;
   attribution_campaign: string | null;
+  // utm_content from the landing URL — for Meta ads this carries the exact ad
+  // creative (e.g. "Fall 2026 v1 - v28a"); the Journey Report reads the creative
+  // code (v28a) out of it for a deterministic per-order "Saw Meta Ad v28a".
+  attribution_content: string | null;
   // The specific referring URL from Shopify's customer journey (e.g. a Linktree
   // or Instagram link) — shown in the Report so a "Referral" isn't anonymous.
   attribution_referrer: string | null;
