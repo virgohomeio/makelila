@@ -2,12 +2,14 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, within } from '@testing-library/react';
 import Build from '../index';
 
-vi.mock('../../../lib/build', () => ({
+vi.mock('../../../lib/build', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../../../lib/build')>(),
   useFactoryOrders: () => ({ orders: [], loading: false }),
   useFreightShipments: () => ({ shipments: [], loading: false }),
   useBuildDefects: () => ({ defects: [], loading: false }),
   useBurnInTests: () => ({ tests: [], loading: false }),
   assignSerial: vi.fn().mockResolvedValue(undefined),
+  claimSerialRange: vi.fn(),
 }));
 vi.mock('../../../lib/stock', () => ({
   useUnits: () => ({ units: [], loading: false }),
@@ -37,8 +39,8 @@ import { assignSerial } from '../../../lib/build';
 
 function openClaim() {
   render(<Build />);
-  fireEvent.click(screen.getByRole('button', { name: '+ Claim serial' }));
-  return screen.getByRole('combobox');
+  fireEvent.click(screen.getByRole('button', { name: '+ Claim serials' }));
+  return screen.getByLabelText('Batch');
 }
 
 describe('Build › batch lists', () => {
@@ -63,6 +65,7 @@ describe('Build › batch lists', () => {
     const select = openClaim();
     expect((select as HTMLSelectElement).value).toBe('P100');
     fireEvent.change(select, { target: { value: 'P300' } });
+    fireEvent.click(screen.getByRole('button', { name: 'One serial' }));
     fireEvent.change(screen.getByPlaceholderText('LL01-00000000XYZ'), { target: { value: 'LL01-00000000123' } });
     fireEvent.click(screen.getByRole('button', { name: 'Create unit' }));
     await vi.waitFor(() =>

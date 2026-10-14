@@ -36,7 +36,7 @@ const unit = (serial: string, over: Partial<Unit> = {}): Unit => ({
   created_at: '2026-09-01T00:00:00Z', technician: null, electrical_check: 'pass',
   mechanical_check: null, defect_notes: null, electrical_failed_tests: null,
   test_report_path: null, test_report_name: null, test_report_uploaded_at: null,
-  is_team_test: false, backfilled_at: null, backfill_source: null, mac_address: null,
+  is_team_test: false, backfilled_at: null, backfill_source: null, mac_address: null, po_id: null,
   ...over,
 });
 
