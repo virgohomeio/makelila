@@ -371,6 +371,7 @@ export async function assignSerial(input: {
     serial: input.serial,
     batch: input.batch,
     status: 'ca-test',
+    ...(input.po_id ? { po_id: input.po_id } : {}),
   });
   if (error) throw error;
   await logAction('serial_assigned', input.serial, input.batch,
@@ -459,6 +460,89 @@ export function unitsMadeForPO(
   units: Pick<Unit, 'batch' | 'po_id'>[],
 ): number {
   return units.filter(u => u.po_id === order.id || (u.po_id == null && u.batch === order.batch)).length;
+}
+
+export type RangeClaimResult = {
+  created: string[];
+  linked: string[];
+  skipped: RangePlan['skipped'];
+};
+
+/** Claim every serial from `from` to `to` into `batch`, optionally under a PO.
+ *  The database decides, not the dialog's preview: the range is re-read here
+ *  and re-planned. New serials go in with one insert that ignores any serial
+ *  created in the meantime (insert-only on conflict); existing same-batch units
+ *  with no PO get this PO with one update. Nothing existing is moved.
+ *
+ *  Both writes filter on the serial range rather than an in() list — serials
+ *  are fixed-width, so the text range is exact and 500 serials never end up in
+ *  a request URL. */
+export async function claimSerialRange(args: {
+  from: number;
+  to: number;
+  batch: string;
+  po: { id: string; po_number: string } | null;
+}): Promise<RangeClaimResult> {
+  const { from, to, batch, po } = args;
+  assertClaimRange(from, to);
+  const first = formatSerial(from);
+  const last = formatSerial(to);
+
+  const { data: existing, error: readErr } = await supabase
+    .from('units')
+    .select('serial, batch, po_id')
+    .gte('serial', first)
+    .lte('serial', last);
+  if (readErr) throw readErr;
+
+  const plan = planSerialRange({
+    from, to, batch, poId: po?.id ?? null,
+    existing: (existing ?? []) as Pick<Unit, 'serial' | 'batch' | 'po_id'>[],
+  });
+  const skipped = [...plan.skipped];
+
+  let created: string[] = [];
+  if (plan.create.length > 0) {
+    const rows = plan.create.map(serial => ({
+      serial, batch, status: 'ca-test', ...(po ? { po_id: po.id } : {}),
+    }));
+    const { data, error } = await supabase
+      .from('units')
+      .upsert(rows, { onConflict: 'serial', ignoreDuplicates: true })
+      .select('serial');
+    if (error) throw error;
+    const got = new Set((data ?? []).map(r => (r as { serial: string }).serial));
+    created = plan.create.filter(s => got.has(s));
+    for (const s of plan.create) if (!got.has(s)) skipped.push({ serial: s, reason: 'exists' });
+  }
+
+  let linked: string[] = [];
+  if (po && plan.linkPo.length > 0) {
+    const { data, error } = await supabase
+      .from('units')
+      .update({ po_id: po.id })
+      .gte('serial', first)
+      .lte('serial', last)
+      .eq('batch', batch)
+      .is('po_id', null)
+      .select('serial');
+    if (error) throw error;
+    linked = (data ?? []).map(r => (r as { serial: string }).serial).sort();
+    const got = new Set(linked);
+    for (const s of plan.linkPo) if (!got.has(s)) skipped.push({ serial: s, reason: 'other_po' });
+  }
+
+  skipped.sort((a, b) => a.serial.localeCompare(b.serial));
+
+  await Promise.all([
+    ...created.map(s => logAction('serial_assigned', s, batch, { entityType: 'unit', unitSerial: s })),
+    ...linked.map(s => logAction('unit_po_linked', s, po!.po_number, { entityType: 'unit', unitSerial: s })),
+  ]);
+  if (created.length + linked.length > 0) {
+    await logAction('serials_claimed_range', po?.po_number ?? batch,
+      `${first}–${last}: ${created.length} created, ${linked.length} linked, ${skipped.length} skipped`);
+  }
+  return { created, linked, skipped };
 }
 
 export async function logDefect(input: {
