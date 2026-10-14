@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-13
 **Module:** Build (Stock › Build tab) — claim dialog, PO card; `units` table
-**Status:** designed, not built.
+**Status:** built on branch feat/claim-serial-range; migration not yet applied.
 
 ## Problem
 
