@@ -33,6 +33,9 @@ export function ActionBar({
   onUncancel,
   onReleaseHold,
   onClearReplacementFlag,
+  clearFlagBlockedBy,
+  onForceClearReplacementFlag,
+  onDismissClearFlagBlock,
   confirmReady = true,
 }: {
   order: Order;
@@ -48,6 +51,11 @@ export function ActionBar({
   /** Only a flagged REPLACEMENT passes this — the single action that pane
    *  offers. See the replacement branch below for why it is the only one. */
   onClearReplacementFlag?: () => void;
+  /** The parts the last re-queue attempt came back short of, if it did. Turns
+   *  the button into the override question. */
+  clearFlagBlockedBy?: string | null;
+  onForceClearReplacementFlag?: () => void;
+  onDismissClearFlagBlock?: () => void;
   confirmReady?: boolean;
 }) {
   const [expanded, setExpanded] = useState<ExpandedAction>(null);
@@ -142,6 +150,11 @@ export function ActionBar({
   // than trusting a replacement_state stamped months ago. Everything else about
   // the order is worked in Fulfillment › Replacements, which lists it the whole
   // time it is flagged.
+  //
+  // When that re-check comes back short, the shortfall is a question and not a
+  // wall: the same inline confirm the uncancel and release use, offering the
+  // same override Fulfillment › Replacements offers. Without it a flagged
+  // replacement the parts table can't account for had no way out of this pane.
   if (order.kind === 'replacement') {
     return (
       <div className={styles.actionBar}>
@@ -149,14 +162,31 @@ export function ActionBar({
           ⚑ Flagged replacement — cancelling, re-planning and shipping it all live in
           Fulfillment › Replacements
         </span>
-        {onClearReplacementFlag && (
+        {onClearReplacementFlag && (clearFlagBlockedBy ? (
+          <span className={styles.uncancelConfirm}>
+            <span className={styles.uncancelAsk}>
+              Stock looks short for {order.order_ref}: {clearFlagBlockedBy}. Queue it anyway?
+              The override is recorded on the order.
+            </span>
+            <button
+              type="button"
+              className={styles.reasonCancel}
+              onClick={onDismissClearFlagBlock}
+            >Discard</button>
+            <button
+              type="button"
+              className={styles.reasonSubmit}
+              onClick={onForceClearReplacementFlag}
+            >Queue it anyway</button>
+          </span>
+        ) : (
           <button
             type="button"
             className={`${styles.actionBtn} ${styles.actionRelease}`}
             onClick={onClearReplacementFlag}
             title="Clear the flag — re-checks the stock this replacement needs and puts it back in Fulfillment › Queue"
           >▶ Clear flag &amp; re-queue</button>
-        )}
+        ))}
       </div>
     );
   }

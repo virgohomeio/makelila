@@ -182,7 +182,12 @@ export default function ReplacementPickerModal({ ticket, parties, address, onClo
       const payload = {
         ticket_id: ticket.id,
         customer_name: ticket.customer_name ?? 'Unknown',
-        customer_email: ticket.customer_email,
+        // The ticket's own snapshot first, then the directory address `parties`
+        // already resolved. A ticket raised by hand from a phone call carries
+        // no email, and taking only the snapshot is what born every
+        // replacement that Step 5 then refused to send (R-0023) — the address
+        // was on the customer record the whole time.
+        customer_email: ticket.customer_email ?? parties?.email ?? null,
         customer_phone: ticket.customer_phone,
         address: addr,
         line_items: cart,
