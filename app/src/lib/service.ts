@@ -136,6 +136,11 @@ export type ServiceTicket = {
    *  detail panel loads the report's photos by it. Optional: absent on rows
    *  read before the column landed. */
   lovely_report_id?: string | null;
+  /** Lovely project feedback.id for 'lovely_app' tickets made from the app's
+   *  feedback button. Optional for the same reason as lovely_report_id. */
+  lovely_feedback_id?: string | null;
+  /** Path of the feedback's screenshot in the Lovely feedback-photos bucket. */
+  lovely_feedback_photo_path?: string | null;
 };
 
 export type CustomerLifecycle = {
