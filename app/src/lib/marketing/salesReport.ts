@@ -84,9 +84,14 @@ export function classifyPlan(o: Order): string {
 // order on a real sale's day would otherwise make that day look ambiguous and
 // block the match). Matches his name or email; extend the pattern for any other
 // test buyer.
-const TEST_BUYER = /pedrum/i;
+const TEST_BUYER = /pedrum|support\s*lila/i;
+// Known internal test discount codes — these orders aren't real sales. Extend
+// as new test codes appear. (An explicit list, not a /test/ match, so a real
+// promo like "LATEST" is never excluded by accident.)
+const TEST_CODES = new Set(['TESTPEDRUMTEST', 'USTYLERTEST', 'TESTCAMP', 'GOOGLEADSTEST']);
 export function isTestOrder(o: Order): boolean {
-  return TEST_BUYER.test(o.customer_email ?? '') || TEST_BUYER.test(o.customer_name ?? '');
+  if (TEST_BUYER.test(o.customer_email ?? '') || TEST_BUYER.test(o.customer_name ?? '')) return true;
+  return (o.discount_codes ?? []).some(c => TEST_CODES.has(c.toUpperCase().trim()));
 }
 
 function bump(map: Map<string, Breakdown>, key: string, revenue: number) {
