@@ -29,6 +29,7 @@ import { MobileBackHeader } from '../../components/MobileBackHeader';
 import { RouteErrorBoundary } from '../../components/RouteErrorBoundary';
 import { useCustomerEvents, useCustomerEngagement, eventMeta, dormancyBadge } from '../../lib/customerEvents';
 import { useCustomerInvoices, openInvoiceInNewTab } from '../../lib/invoices';
+import { CustomerShippingInvoices } from '../../components/ShippingInvoices';
 import { PanelSection, PanelRow } from './Panel';
 import { NameSection } from './NameSection';
 import { AdditionalUsersSection } from './AdditionalUsersSection';
@@ -1145,6 +1146,9 @@ function CustomerDetailPanel({ customer, address, allCustomers, onChanged, onClo
           </PanelSection>
 
           <CustomerInvoicesSection customerId={customer.id} />
+          <PanelSection title="Shipping invoices">
+            <CustomerShippingInvoices customerId={customer.id} />
+          </PanelSection>
         </div>
       </div>
     </div>

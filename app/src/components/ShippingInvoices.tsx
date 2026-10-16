@@ -1,0 +1,350 @@
+import { useRef, useState } from 'react';
+import {
+  useCustomerShippingInvoices, uploadShippingInvoice, deleteShippingInvoice,
+  openShippingInvoice, useProfitabilityAdjustment, saveProfitabilityAdjustment,
+  type CustomerShippingInvoice, type ShippingCurrency,
+} from '../lib/shippingInvoices';
+import styles from './ShippingInvoices.module.css';
+
+// Shared by Customers (profile panel), Customers › Profitability (detail
+// panel) and Upload (Shipping invoices kind) — one customer's shipping
+// invoices, with an upload form.
+
+const ACCEPT = 'application/pdf,image/png,image/jpeg,image/heic,image/webp';
+const CARRIERS = ['UPS', 'Freightcom', 'Goorooship', 'FedEx', 'Canpar', 'Purolator', 'Canada Post', 'USPS', 'Other'];
+
+function money(v: number, currency: ShippingCurrency): string {
+  return `${currency === 'USD' ? 'US$' : '$'}${v.toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+/** Parse a money input; blank → 0, junk → NaN so the form can refuse it. */
+function parseAmount(s: string): number {
+  const t = s.replace(/[$,\s]/g, '');
+  if (!t) return 0;
+  const n = Number(t);
+  return Number.isFinite(n) && n >= 0 ? n : NaN;
+}
+
+export function CustomerShippingInvoices({
+  customerId, onChanged, showForm = true,
+}: {
+  customerId: string;
+  /** Fired after an upload or delete, e.g. to refresh profitability. */
+  onChanged?: () => void;
+  showForm?: boolean;
+}) {
+  const { invoices, loading, error, reload } = useCustomerShippingInvoices(customerId);
+  const [opening, setOpening] = useState(false);
+
+  const changed = () => { void reload(); onChanged?.(); };
+
+  const remove = async (inv: CustomerShippingInvoice) => {
+    const label = inv.invoice_number || inv.file_name || 'this invoice';
+    if (!window.confirm(`Remove shipping invoice ${label}? This also deletes the uploaded file.`)) return;
+    try { await deleteShippingInvoice(inv); changed(); }
+    catch (e) { alert((e as Error).message); }
+  };
+
+  const view = async (path: string) => {
+    setOpening(true);
+    try { await openShippingInvoice(path); }
+    catch (e) { alert((e as Error).message); }
+    finally { setOpening(false); }
+  };
+
+  return (
+    <div className={styles.wrap}>
+      {loading ? (
+        <div className={styles.empty}>Loading shipping invoices…</div>
+      ) : error ? (
+        <div className={styles.error}>{error}</div>
+      ) : invoices.length === 0 ? (
+        <div className={styles.empty}>No shipping invoices on file for this customer.</div>
+      ) : (
+        <div className={styles.tableScroll}>
+          <table className={styles.table}>
+            <thead>
+              <tr>
+                <th>Date</th><th>Carrier</th><th>Invoice #</th><th>Order</th>
+                <th className={styles.num}>Freight</th>
+                <th className={styles.num}>Customs</th>
+                <th className={styles.num}>We covered</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {invoices.map(inv => (
+                <tr key={inv.id}>
+                  <td>{inv.invoice_date ?? '—'}</td>
+                  <td>{inv.carrier ?? '—'}</td>
+                  <td>{inv.invoice_number ?? '—'}</td>
+                  <td>{inv.order_ref ?? '—'}</td>
+                  <td className={styles.num}>
+                    {money(inv.freight_amount, inv.currency)}
+                    {!inv.counts_in_shipping && inv.freight_amount > 0 && (
+                      <div className={styles.muted} title="Already costed by the Freightcom sync, so not added to Shipping again">
+                        not added
+                      </div>
+                    )}
+                  </td>
+                  <td className={styles.num}>{money(inv.customs_amount, inv.currency)}</td>
+                  <td className={styles.num}>{money(inv.customs_covered_amount, inv.currency)}</td>
+                  <td>
+                    {inv.storage_path && (
+                      <button className={styles.linkBtn} disabled={opening}
+                              onClick={() => void view(inv.storage_path!)}>View</button>
+                    )}
+                    {' '}
+                    <button className={styles.removeBtn} onClick={() => void remove(inv)}>Remove</button>
+                    {inv.notes && <div className={styles.muted}>{inv.notes}</div>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {showForm && <ShippingInvoiceForm customerId={customerId} onSaved={changed} />}
+    </div>
+  );
+}
+
+export function ShippingInvoiceForm({
+  customerId, onSaved,
+}: {
+  customerId: string;
+  onSaved: () => void;
+}) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [file, setFile] = useState<File | null>(null);
+  const [carrier, setCarrier] = useState('UPS');
+  const [invoiceNumber, setInvoiceNumber] = useState('');
+  const [invoiceDate, setInvoiceDate] = useState('');
+  const [orderRef, setOrderRef] = useState('');
+  const [currency, setCurrency] = useState<ShippingCurrency>('CAD');
+  const [freight, setFreight] = useState('');
+  const [countsInShipping, setCountsInShipping] = useState(true);
+  const [customs, setCustoms] = useState('');
+  const [covered, setCovered] = useState('');
+  const [notes, setNotes] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [ok, setOk] = useState<string | null>(null);
+
+  const reset = () => {
+    setFile(null); if (fileRef.current) fileRef.current.value = '';
+    setInvoiceNumber(''); setInvoiceDate(''); setOrderRef('');
+    setFreight(''); setCustoms(''); setCovered(''); setNotes('');
+    setCountsInShipping(true);
+  };
+
+  const submit = async () => {
+    setErr(null); setOk(null);
+    const f = parseAmount(freight), c = parseAmount(customs), cov = parseAmount(covered);
+    if ([f, c, cov].some(Number.isNaN)) { setErr('Amounts must be positive numbers.'); return; }
+    if (!file && f === 0 && c === 0 && cov === 0) {
+      setErr('Attach the invoice or enter at least one amount.'); return;
+    }
+    setBusy(true);
+    try {
+      await uploadShippingInvoice({
+        customerId, file, carrier, invoiceNumber, invoiceDate, orderRef, currency,
+        freightAmount: f, countsInShipping, customsAmount: c, customsCoveredAmount: cov, notes,
+      });
+      reset();
+      setOk('Saved.');
+      onSaved();
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className={styles.form}>
+      <label className={styles.fieldWide}>
+        Invoice file (PDF or photo)
+        <input ref={fileRef} type="file" accept={ACCEPT} className={styles.input}
+               onChange={e => setFile(e.target.files?.[0] ?? null)} />
+      </label>
+      <label className={styles.field}>
+        Carrier
+        <select className={styles.input} value={carrier} onChange={e => setCarrier(e.target.value)}>
+          {CARRIERS.map(c => <option key={c} value={c}>{c}</option>)}
+        </select>
+      </label>
+      <label className={styles.field}>
+        Invoice #
+        <input className={styles.input} value={invoiceNumber} onChange={e => setInvoiceNumber(e.target.value)} />
+      </label>
+      <label className={styles.field}>
+        Invoice date
+        <input type="date" className={styles.input} value={invoiceDate} onChange={e => setInvoiceDate(e.target.value)} />
+      </label>
+      <label className={styles.field}>
+        Order #
+        <input className={styles.input} value={orderRef} placeholder="e.g. #1192" onChange={e => setOrderRef(e.target.value)} />
+      </label>
+      <label className={styles.field}>
+        Currency
+        <select className={styles.input} value={currency} onChange={e => setCurrency(e.target.value as ShippingCurrency)}>
+          <option value="CAD">CAD</option>
+          <option value="USD">USD</option>
+        </select>
+      </label>
+      <label className={styles.field}>
+        Freight we paid
+        <input className={styles.input} inputMode="decimal" value={freight} placeholder="0.00" onChange={e => setFreight(e.target.value)} />
+      </label>
+      <label className={styles.field}>
+        Customs / duty on invoice
+        <input className={styles.input} inputMode="decimal" value={customs} placeholder="0.00" onChange={e => setCustoms(e.target.value)} />
+      </label>
+      <label className={styles.field}>
+        Customs we cover
+        <input className={styles.input} inputMode="decimal" value={covered} placeholder="0.00" onChange={e => setCovered(e.target.value)} />
+      </label>
+      <label className={styles.check}>
+        <input type="checkbox" checked={countsInShipping} onChange={e => setCountsInShipping(e.target.checked)} />
+        Add the freight to this customer's shipping cost (untick if this shipment is already costed from the Freightcom sync)
+      </label>
+      <label className={styles.fieldWide}>
+        Notes
+        <input className={styles.input} value={notes} onChange={e => setNotes(e.target.value)} />
+      </label>
+      <div className={styles.hint}>
+        "Customs we cover" is the part of the duty bill VCycene pays or reimburses — it is what lands in the
+        customer's Customs &amp; duties cost on the Profitability tab. USD amounts convert at the company FX rate.
+      </div>
+      <div className={styles.actions}>
+        <button className={styles.primaryBtn} disabled={busy} onClick={() => void submit()}>
+          {busy ? 'Saving…' : 'Save shipping invoice'}
+        </button>
+        {err && <span className={styles.error}>{err}</span>}
+        {ok && <span className={styles.ok}>{ok}</span>}
+      </div>
+    </div>
+  );
+}
+
+/** Edit a customer's profitability by hand: customs covered with no invoice
+ *  on file, and an optional override of the whole Shipping bucket. */
+export function ProfitabilityAdjustmentEditor({
+  customerId, customerName, onSaved,
+}: {
+  customerId: string;
+  customerName: string;
+  onSaved?: () => void;
+}) {
+  const { adjustment, loading, error, reload } = useProfitabilityAdjustment(customerId);
+  const [editing, setEditing] = useState(false);
+  const [currency, setCurrency] = useState<ShippingCurrency>('CAD');
+  const [customs, setCustoms] = useState('');
+  const [override, setOverride] = useState('');
+  const [note, setNote] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const start = () => {
+    setCurrency(adjustment?.currency ?? 'CAD');
+    setCustoms(adjustment?.customs_covered_amount ? String(adjustment.customs_covered_amount) : '');
+    setOverride(adjustment?.shipping_override_amount != null ? String(adjustment.shipping_override_amount) : '');
+    setNote(adjustment?.note ?? '');
+    setErr(null);
+    setEditing(true);
+  };
+
+  const save = async () => {
+    const c = parseAmount(customs);
+    const o = override.trim() === '' ? null : parseAmount(override);
+    if (Number.isNaN(c) || (o != null && Number.isNaN(o))) { setErr('Amounts must be positive numbers.'); return; }
+    setBusy(true); setErr(null);
+    try {
+      await saveProfitabilityAdjustment({
+        customerId, customerName, currency,
+        customsCoveredAmount: c, shippingOverrideAmount: o, note,
+      });
+      await reload();
+      setEditing(false);
+      onSaved?.();
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (loading) return <div className={styles.empty}>Loading adjustments…</div>;
+
+  if (!editing) {
+    const cur = adjustment?.currency ?? 'CAD';
+    return (
+      <div className={styles.wrap}>
+        {error && <div className={styles.error}>{error}</div>}
+        <table className={styles.table}>
+          <tbody>
+            <tr>
+              <td>Customs covered (no invoice)</td>
+              <td className={styles.num}>{money(adjustment?.customs_covered_amount ?? 0, cur)}</td>
+            </tr>
+            <tr>
+              <td>Shipping override</td>
+              <td className={styles.num}>
+                {adjustment?.shipping_override_amount != null
+                  ? money(adjustment.shipping_override_amount, cur)
+                  : <span className={styles.muted}>none — computed</span>}
+              </td>
+            </tr>
+            {adjustment?.note && (
+              <tr><td colSpan={2} className={styles.muted}>{adjustment.note}</td></tr>
+            )}
+            {adjustment?.updated_by && (
+              <tr><td colSpan={2} className={styles.muted}>
+                Last edited by {adjustment.updated_by} on {adjustment.updated_at.slice(0, 10)}
+              </td></tr>
+            )}
+          </tbody>
+        </table>
+        <div>
+          <button className={styles.secondaryBtn} onClick={start} disabled={!!error}>Edit</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className={styles.form}>
+      <label className={styles.field}>
+        Currency
+        <select className={styles.input} value={currency} onChange={e => setCurrency(e.target.value as ShippingCurrency)}>
+          <option value="CAD">CAD</option>
+          <option value="USD">USD</option>
+        </select>
+      </label>
+      <label className={styles.field}>
+        Customs we covered
+        <input className={styles.input} inputMode="decimal" value={customs} placeholder="0.00" onChange={e => setCustoms(e.target.value)} />
+      </label>
+      <label className={styles.field}>
+        Shipping override
+        <input className={styles.input} inputMode="decimal" value={override} placeholder="blank = computed" onChange={e => setOverride(e.target.value)} />
+      </label>
+      <label className={styles.fieldWide}>
+        Reason / note
+        <input className={styles.input} value={note} placeholder="e.g. reimbursed UPS duty bill by e-transfer" onChange={e => setNote(e.target.value)} />
+      </label>
+      <div className={styles.hint}>
+        Customs here is added to any customs covered on uploaded shipping invoices. A shipping override replaces the
+        computed freight (Freightcom + legacy + uploaded invoices) in the margin; leave it blank to keep the computed figure.
+      </div>
+      <div className={styles.actions}>
+        <button className={styles.primaryBtn} disabled={busy} onClick={() => void save()}>
+          {busy ? 'Saving…' : 'Save'}
+        </button>
+        <button className={styles.secondaryBtn} disabled={busy} onClick={() => setEditing(false)}>Cancel</button>
+        {err && <span className={styles.error}>{err}</span>}
+      </div>
+    </div>
+  );
+}

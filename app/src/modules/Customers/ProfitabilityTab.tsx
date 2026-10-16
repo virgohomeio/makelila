@@ -6,7 +6,7 @@ import {
 } from '../../lib/customers';
 import {
   allocateCac, byChannel, byCohort, byCountry, byRegion, byVolume,
-  channelLabel, customerMetrics, isUnpriced, portfolio, profitDistribution,
+  channelLabel, customerMetrics, isUnpriced, shippingCostCad, portfolio, profitDistribution,
   reliability, retainedUnits, waterfall, CHANNEL_LABELS, VOLUME_LABELS,
   UNAVAILABLE_METRICS, costsBasis, marginBasis, BASIS_LABEL,
   type CustomerMetrics, type PortfolioMetrics, type BucketBasis,
@@ -43,7 +43,7 @@ const VIEWS: { key: ViewKey; label: string }[] = [
 ];
 
 export function ProfitabilityTab() {
-  const { rows, loading, error } = useCustomerProfitability();
+  const { rows, loading, error, reload } = useCustomerProfitability();
   const { rates } = useProfitabilityRates();
   const { spend } = useAcquisitionSpend();
   const { rows: retainedRows } = useRetainedUnitCosts();
@@ -290,9 +290,11 @@ export function ProfitabilityTab() {
         <div className={styles.detailBackdrop} onClick={() => setOpenCustomer(null)}>
           <div onClick={e => e.stopPropagation()}>
             <CustomerDetail
+              key={openRow.id}
               row={openRow}
               metrics={allMetrics.get(openRow.id)!}
               onClose={() => setOpenCustomer(null)}
+              onChanged={reload}
             />
           </div>
         </div>
@@ -894,6 +896,7 @@ function CustomersView({
                      variant="warn" est={totals.supportPriced ? 'estimated' : 'unpriced'} />
         <SummaryStat label="Consumables & parts"  value={fmt(totals.consumables)} variant="warn" />
         <SummaryStat label="3PL handling"          value={fmt(totals.fulfilment)} variant="warn" est="estimated" />
+        <SummaryStat label="Customs & duties covered" value={fmt(totals.customs)} variant="warn" />
         <SummaryStat label="Net margin"           value={fmt(totals.margin)}    variant={totals.margin < 0 ? 'bad' : 'good'} />
       </div>
       <EstimateLegend />
@@ -1136,6 +1139,24 @@ function ProfitCard({ row, onOpen }: { row: CustomerProfitability; onOpen: () =>
             </dd>
           </div>
         )}
+        {(row.uploaded_shipping_cad ?? 0) > 0 && (
+          <div title="freight from shipping invoices uploaded to this customer (Customers › profile, or Upload › Shipping invoices)">
+            <dt>Uploaded freight</dt>
+            <dd>{fmt(row.uploaded_shipping_cad ?? 0)}</dd>
+          </div>
+        )}
+        {row.shipping_override_cad != null && (
+          <div title={`Shipping overridden by an operator${row.adjustment_note ? ` — ${row.adjustment_note}` : ''}. Replaces the freight figures above in the margin.`}>
+            <dt>Shipping (override)</dt>
+            <dd>{fmt(row.shipping_override_cad)}</dd>
+          </div>
+        )}
+        {(row.customs_covered_cad ?? 0) > 0 && (
+          <div title="customs / duty we covered for this customer (US shipments are billed duty by UPS on delivery)">
+            <dt>Customs covered</dt>
+            <dd>{fmt(row.customs_covered_cad ?? 0)}</dd>
+          </div>
+        )}
         {row.consumables_cost_cad > 0 && (
           <div title={`${row.consumable_item_count} consumable/part order(s) bought at retail and shipped to this customer (worm castings, repair parts). Cost of goods, not freight — the postage on them was free.`}>
             <dt>Consumables</dt>
@@ -1259,7 +1280,8 @@ function aggregate(rs: CustomerProfitability[]) {
     (acc, r) => ({
       revenue:   acc.revenue   + r.revenue_cad,
       tax:       acc.tax       + r.tax_collected_cad,
-      salesCost: acc.salesCost + r.sale_cogs_cad + r.sale_shipping_cad + (r.legacy_shipping_cad ?? 0),
+      salesCost: acc.salesCost + r.sale_cogs_cad + shippingCostCad(r),
+      customs:   acc.customs   + (r.customs_covered_cad ?? 0),
       warranty:  acc.warranty  + r.expected_warranty_cost_cad,
       refund:    acc.refund    + r.expected_refund_cad,
       support:   acc.support   + (r.support_cost_cad ?? 0),
@@ -1271,7 +1293,7 @@ function aggregate(rs: CustomerProfitability[]) {
       supportPriced: acc.supportPriced || r.support_cost_cad != null,
       margin:    acc.margin    + r.net_margin_cad,
     }),
-    { revenue: 0, tax: 0, salesCost: 0, warranty: 0, refund: 0, support: 0, supportPriced: false, returnHandling: 0, consumables: 0, fulfilment: 0, margin: 0 },
+    { revenue: 0, tax: 0, salesCost: 0, customs: 0, warranty: 0, refund: 0, support: 0, supportPriced: false, returnHandling: 0, consumables: 0, fulfilment: 0, margin: 0 },
   );
 }
 

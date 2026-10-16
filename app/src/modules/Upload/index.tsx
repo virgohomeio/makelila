@@ -6,6 +6,7 @@ import {
 } from '../../lib/invoices';
 import { useCustomers } from '../../lib/customers';
 import { useOrders } from '../../lib/orders';
+import { CustomerShippingInvoices } from '../../components/ShippingInvoices';
 import styles from './Upload.module.css';
 
 // What can be uploaded. Extensible — add a kind here and (if it's not an
@@ -35,6 +36,11 @@ const UPLOAD_KINDS: UploadKind[] = [
     documentType: 'refund_receipt',
   },
 ];
+
+// Shipping invoices are filed by hand against one customer (carrier bills
+// don't carry a Shopify order # the matcher could key on), so this kind
+// renders its own form instead of the bulk matcher.
+const SHIPPING_KIND_KEY = 'shipping_invoice';
 
 export default function Upload() {
   const [kindKey, setKindKey] = useState(UPLOAD_KINDS[0].key);
@@ -103,8 +109,17 @@ export default function Upload() {
             {k.label}
           </button>
         ))}
+        <button
+          className={`${styles.kindChip} ${kindKey === SHIPPING_KIND_KEY ? styles.kindChipActive : ''}`}
+          onClick={() => { setKindKey(SHIPPING_KIND_KEY); setResults(null); }}
+        >
+          Shipping invoices
+        </button>
       </div>
 
+      {kindKey === SHIPPING_KIND_KEY ? (
+        <ShippingUpload customers={customers} />
+      ) : (<>
       <div className={styles.dropCard}>
         <div className={styles.kindDesc}>{kind.description}</div>
         <input
@@ -178,6 +193,56 @@ export default function Upload() {
         customerName={customerName}
         onAssigned={reloadQueue}
       />
+      </>)}
+    </div>
+  );
+}
+
+// Pick a customer, then file their shipping / customs invoices. The same
+// list + form appears on the customer's profile and in Profitability.
+function ShippingUpload({
+  customers,
+}: {
+  customers: { id: string; full_name: string; email: string | null }[];
+}) {
+  const [text, setText] = useState('');
+  const label = (c: { full_name: string; email: string | null }) =>
+    c.email ? `${c.full_name} (${c.email})` : c.full_name;
+  const byLabel = useMemo(() => {
+    const m = new Map<string, { id: string; name: string }>();
+    for (const c of customers) {
+      if (!c.full_name && !c.email) continue;
+      m.set(label(c).toLowerCase(), { id: c.id, name: c.full_name });
+      if (c.email) m.set(c.email.toLowerCase(), { id: c.id, name: c.full_name });
+    }
+    return m;
+  }, [customers]);
+  const picked = byLabel.get(text.trim().toLowerCase()) ?? null;
+
+  return (
+    <div className={styles.dropCard}>
+      <div className={styles.kindDesc}>
+        Carrier, freight and customs/duty invoices (UPS, Freightcom, Goorooship…), filed against one customer.
+        Freight we paid adds to the customer's shipping cost; customs we cover for them (US duty bills) goes to
+        their Customs &amp; duties cost on Customers › Profitability.
+      </div>
+      <input
+        className={styles.custInput}
+        list="shipping-upload-customers"
+        value={text}
+        onChange={e => setText(e.target.value)}
+        placeholder="Customer name or email"
+      />
+      <datalist id="shipping-upload-customers">
+        {customers.filter(c => c.full_name || c.email).map(c => <option key={c.id} value={label(c)} />)}
+      </datalist>
+      {text.trim() && !picked && <div className={styles.muted}>Pick a customer from the list.</div>}
+      {picked && (
+        <>
+          <div className={styles.pickedList}>Shipping invoices for <strong>{picked.name}</strong></div>
+          <CustomerShippingInvoices key={picked.id} customerId={picked.id} />
+        </>
+      )}
     </div>
   );
 }
