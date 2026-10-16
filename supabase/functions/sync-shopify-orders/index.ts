@@ -109,6 +109,10 @@ type MappedOrder = {
   attribution_source: string | null;
   attribution_medium: string | null;
   attribution_campaign: string | null;
+  // utm_content off the landing URL — for Meta ads this carries the exact ad
+  // creative (e.g. "Fall 2026 v1 - v28a"), which the Journey Report turns into
+  // a per-order "Saw Meta Ad v28a".
+  attribution_content: string | null;
   attribution_referrer: string | null;
   attribution_last_source: string | null;
   attribution_last_medium: string | null;
@@ -280,6 +284,7 @@ function mapOrder(
         attribution_source: a.source,
         attribution_medium: a.medium,
         attribution_campaign: a.campaign,
+        attribution_content: a.content,
         attribution_referrer: o.referring_site ?? null,
         // Last-visit fields only come from the GraphQL journey; null on REST.
         attribution_last_source: null,
@@ -290,7 +295,7 @@ function mapOrder(
   };
 }
 
-type Attribution = { source: string | null; medium: string | null; campaign: string | null };
+type Attribution = { source: string | null; medium: string | null; campaign: string | null; content: string | null };
 
 /** UTM params off the landing URL. Returns null if there's no utm_source. */
 function parseUtm(landingUrl: string | null | undefined): Attribution | null {
@@ -303,6 +308,7 @@ function parseUtm(landingUrl: string | null | undefined): Attribution | null {
       source,
       medium: url.searchParams.get('utm_medium'),
       campaign: url.searchParams.get('utm_campaign'),
+      content: url.searchParams.get('utm_content'),
     };
   } catch {
     return null;
@@ -321,9 +327,9 @@ function hostOf(url: string | null | undefined): string | null {
 function classifyReferrer(referring: string | null | undefined): Attribution | null {
   const host = hostOf(referring);
   if (!host) return null;
-  const organic = (source: string): Attribution => ({ source, medium: 'organic', campaign: null });
-  const social  = (source: string): Attribution => ({ source, medium: 'social', campaign: null });
-  const referral = (source: string): Attribution => ({ source, medium: 'referral', campaign: null });
+  const organic = (source: string): Attribution => ({ source, medium: 'organic', campaign: null, content: null });
+  const social  = (source: string): Attribution => ({ source, medium: 'social', campaign: null, content: null });
+  const referral = (source: string): Attribution => ({ source, medium: 'referral', campaign: null, content: null });
   if (/(^|\.)google\./.test(host))                         return organic('google');
   if (/(^|\.)bing\./.test(host))                           return organic('bing');
   if (/duckduckgo|(^|\.)yahoo\.|ecosia|(^|\.)baidu\./.test(host)) return organic(host);
@@ -344,7 +350,7 @@ function classifyReferrer(referring: string | null | undefined): Attribution | n
 function deriveAttribution(landingUrl: string | null | undefined, referring: string | null | undefined): Attribution {
   return parseUtm(landingUrl)
     ?? classifyReferrer(referring)
-    ?? { source: 'shopify_direct', medium: 'direct', campaign: null };
+    ?? { source: 'shopify_direct', medium: 'direct', campaign: null, content: null };
 }
 
 // Shopify's own conversion summary ("1st session from Google") lives on the
@@ -354,7 +360,7 @@ type FirstVisit = {
   source?: string | null;
   sourceType?: string | null;
   referrerUrl?: string | null;
-  utmParameters?: { source?: string | null; medium?: string | null; campaign?: string | null } | null;
+  utmParameters?: { source?: string | null; medium?: string | null; campaign?: string | null; content?: string | null } | null;
 };
 
 /** Map Shopify's firstVisit into our source/medium. Precedence: UTM tags →
@@ -363,14 +369,14 @@ type FirstVisit = {
 function journeyAttribution(fv: FirstVisit | null | undefined): Attribution | null {
   if (!fv) return null;
   const utm = fv.utmParameters;
-  if (utm?.source) return { source: utm.source, medium: utm.medium ?? null, campaign: utm.campaign ?? null };
+  if (utm?.source) return { source: utm.source, medium: utm.medium ?? null, campaign: utm.campaign ?? null, content: utm.content ?? null };
 
   // Prefer the actual referring site so a referral resolves to its real channel
   // (Instagram, Linktree, someblog.com) rather than a bare "referral".
   const known = classifyReferrer(fv.referrerUrl);
   if (known) return known;
   const host = hostOf(fv.referrerUrl);
-  if (host) return { source: host, medium: 'referral', campaign: null };
+  if (host) return { source: host, medium: 'referral', campaign: null, content: null };
 
   const src = (fv.source ?? '').toLowerCase().trim();
   if (!src) return null;
@@ -382,7 +388,7 @@ function journeyAttribution(fv: FirstVisit | null | undefined): Attribution | nu
     type === 'direct'   ? 'direct'   :
     type === 'referral' ? 'referral' :
     (type || 'referral');
-  return { source: src, medium, campaign: null };
+  return { source: src, medium, campaign: null, content: null };
 }
 
 /** Run `task` over `items` with at most `limit` in flight.
@@ -438,7 +444,7 @@ async function fetchJourneyAttribution(
   const withId = refs
     .map(ref => ({ ref, id: rawByRef.get(ref)?.id }))
     .filter((x): x is { ref: string; id: number } => typeof x.id === 'number');
-  const VISIT = 'source sourceType referrerUrl utmParameters { source medium campaign }';
+  const VISIT = 'source sourceType referrerUrl utmParameters { source medium campaign content }';
   const FIELDS = `customerJourneySummary { firstVisit { ${VISIT} } lastVisit { ${VISIT} } }`;
   const batches: Array<Array<{ ref: string; id: number }>> = [];
   for (let i = 0; i < withId.length; i += 40) batches.push(withId.slice(i, i + 40));
@@ -558,6 +564,7 @@ serve(async (req: Request) => {
         m.attribution_source = j.first.attr.source;
         m.attribution_medium = j.first.attr.medium;
         m.attribution_campaign = j.first.attr.campaign;
+        m.attribution_content = j.first.attr.content;
         if (j.first.referrer) m.attribution_referrer = j.first.referrer;
       }
       if (j?.last?.attr.source) {
@@ -667,6 +674,7 @@ serve(async (req: Request) => {
       attribution_source: m.attribution_source,
       attribution_medium: m.attribution_medium,
       attribution_campaign: m.attribution_campaign,
+      attribution_content: m.attribution_content,
       attribution_referrer: m.attribution_referrer,
       attribution_last_source: m.attribution_last_source,
       attribution_last_medium: m.attribution_last_medium,
