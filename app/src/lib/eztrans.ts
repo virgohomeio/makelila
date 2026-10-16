@@ -17,6 +17,7 @@
 import { useEffect, useState } from 'react';
 import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from './supabase';
 import { renderTemplate, useEmailTemplate } from './templates';
+import { saveQueueLabel } from './fulfillment';
 // One implementation of the marker rules, imported rather than mirrored —
 // unlike the string defaults, which must stay literal on both sides.
 import {
@@ -338,31 +339,16 @@ export function packingListPreview(text: string): string {
  *  step-3 -> step-4 transition, and it leaves `label_pdf_path` alone when no
  *  new file is picked, so the label uploaded here survives it.
  *
- *  Uses the same `order-labels` bucket and path convention as confirmLabel so
- *  a label is a label wherever it was attached from. */
+ *  Nothing here is particular to Goorooship, and the Freightcom panel now
+ *  records its label the same way, so the write itself lives in
+ *  lib/fulfillment.ts as `saveQueueLabel`. This name stays as the Goorooship
+ *  path's way in — one bucket, one path convention, one set of columns, so a
+ *  label is a label wherever it was attached from. */
 export async function saveEzTransLabel(
   queueId: string,
   input: { carrier: string; tracking_num: string; label_pdf?: File },
 ): Promise<{ label_pdf_path: string | null }> {
-  let label_pdf_path: string | null = null;
-  if (input.label_pdf) {
-    const path = `${queueId}/label-${Date.now()}.pdf`;
-    const { error: upErr } = await supabase.storage
-      .from('order-labels')
-      .upload(path, input.label_pdf, { contentType: 'application/pdf' });
-    if (upErr) throw upErr;
-    label_pdf_path = path;
-  }
-  const { error } = await supabase
-    .from('fulfillment_queue')
-    .update({
-      carrier: input.carrier,
-      tracking_num: input.tracking_num.trim(),
-      ...(label_pdf_path ? { label_pdf_path } : {}),
-    })
-    .eq('id', queueId);
-  if (error) throw error;
-  return { label_pdf_path };
+  return saveQueueLabel(queueId, input);
 }
 
 /** Are these units sitting at EZ Trans, and on which pallets?

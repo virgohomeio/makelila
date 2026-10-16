@@ -3,8 +3,10 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
 const {
   dispositionMock, needInfoMock, addOrderNoteMock, useOrderNotesMock, cancelOrderMock,
-  releaseHoldMock,
+  releaseHoldMock, queueReplacementMock,
 } = vi.hoisted(() => ({
+  queueReplacementMock: vi.fn((): Promise<{ queued: boolean; blocked?: string }> =>
+    Promise.resolve({ queued: true })),
   dispositionMock:  vi.fn(() => Promise.resolve()),
   needInfoMock:     vi.fn(() => Promise.resolve()),
   addOrderNoteMock: vi.fn(() => Promise.resolve()),
@@ -26,6 +28,7 @@ vi.mock('../../../lib/orders', async () => {
     addOrderNote:   addOrderNoteMock,
     useOrderNotes:  useOrderNotesMock,
     cancelOrder:    cancelOrderMock,
+    queueReplacementForFulfillment: queueReplacementMock,
   };
 });
 
@@ -349,5 +352,92 @@ describe('Detail', () => {
     expect(screen.getByText(/ready to confirm/i)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /fix in/i })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /confirm order/i })).toBeEnabled();
+  });
+});
+
+
+// A flagged replacement is the one non-sale that reaches this pane: bucketOrders
+// admits it so the flag has somewhere to be answered. The sales review actions
+// are all unsafe on one — Confirm in particular writes status='approved', which
+// fires the enqueue trigger and re-queues the order without ever asking what
+// stock it needs. That is the shape of the bug that killed the old Sales
+// Replacement tab, and this branch exists to make it unreachable.
+describe('Detail — flagged replacement', () => {
+  const replacement = {
+    ...order, id: 'r-1', order_ref: 'R-0071', kind: 'replacement' as const, status: 'flagged' as const,
+  };
+
+  beforeEach(() => { queueReplacementMock.mockClear(); dispositionMock.mockClear(); });
+
+  it('offers none of the sales review actions', () => {
+    render(<Detail order={replacement} onAfterDisposition={vi.fn()} />);
+    expect(screen.queryByRole('button', { name: /confirm order/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^⏸ hold$/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /cancel order/i })).toBeNull();
+  });
+
+  it('says where the rest of the replacement is worked', () => {
+    render(<Detail order={replacement} onAfterDisposition={vi.fn()} />);
+    expect(screen.getByText(/Fulfillment › Replacements/)).toBeTruthy();
+  });
+
+  // The whole point of the branch: back through the replacement pipeline's own
+  // door, which re-derives stock, not through a bare status write.
+  it('clears the flag through the replacement re-queue path', async () => {
+    const after = vi.fn();
+    render(<Detail order={replacement} onAfterDisposition={after} />);
+    fireEvent.click(screen.getByRole('button', { name: /clear flag/i }));
+    await waitFor(() => {
+      expect(queueReplacementMock).toHaveBeenCalledWith('r-1', { force: false });
+      expect(dispositionMock).not.toHaveBeenCalled();
+      expect(after).toHaveBeenCalled();
+    });
+  });
+
+  // A short count asks rather than refuses. It used to throw and point the
+  // operator at Fulfillment › Replacements to click the identical override,
+  // which left the order stuck here for anyone working Sales.
+  it('asks before queueing a short replacement, and stays on the order', async () => {
+    queueReplacementMock.mockResolvedValueOnce({ queued: false, blocked: 'P100X' });
+    const after = vi.fn();
+    render(<Detail order={replacement} onAfterDisposition={after} />);
+    fireEvent.click(screen.getByRole('button', { name: /clear flag/i }));
+    await waitFor(() => expect(screen.getByText(/Stock looks short/)).toBeTruthy());
+    expect(screen.getByText(/P100X/)).toBeTruthy();
+    expect(after).not.toHaveBeenCalled();
+  });
+
+  it('queues it anyway when the operator overrides', async () => {
+    queueReplacementMock.mockResolvedValueOnce({ queued: false, blocked: 'P100X' });
+    const after = vi.fn();
+    render(<Detail order={replacement} onAfterDisposition={after} />);
+    fireEvent.click(screen.getByRole('button', { name: /clear flag/i }));
+    await waitFor(() => screen.getByRole('button', { name: /queue it anyway/i }));
+
+    fireEvent.click(screen.getByRole('button', { name: /queue it anyway/i }));
+    await waitFor(() => {
+      expect(queueReplacementMock).toHaveBeenLastCalledWith('r-1', { force: true });
+      expect(after).toHaveBeenCalled();
+    });
+  });
+
+  // Discard puts the button back rather than leaving the order wearing a
+  // question nobody answered.
+  it('goes back to the plain button when the override is discarded', async () => {
+    queueReplacementMock.mockResolvedValueOnce({ queued: false, blocked: 'P100X' });
+    render(<Detail order={replacement} onAfterDisposition={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: /clear flag/i }));
+    await waitFor(() => screen.getByRole('button', { name: /discard/i }));
+
+    fireEvent.click(screen.getByRole('button', { name: /discard/i }));
+    expect(screen.getByRole('button', { name: /clear flag/i })).toBeTruthy();
+    expect(screen.queryByText(/Stock looks short/)).toBeNull();
+  });
+
+  // The sale path must be untouched by the branch above.
+  it('still gives a flagged SALE the full review bar', () => {
+    render(<Detail order={{ ...order, status: 'flagged' }} onAfterDisposition={vi.fn()} />);
+    expect(screen.getByRole('button', { name: /confirm order/i })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /clear flag/i })).toBeNull();
   });
 });

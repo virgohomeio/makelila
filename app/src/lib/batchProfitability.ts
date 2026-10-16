@@ -162,6 +162,7 @@ export function scaleMetrics(
       installation:   m.costs.installation * w,
       consumables:    m.costs.consumables * w,
       fulfilment:     m.costs.fulfilment * w,
+      customs:        m.costs.customs * w,
     },
     variableCosts:     m.variableCosts * w,
     contributionMargin: m.contributionMargin * w,

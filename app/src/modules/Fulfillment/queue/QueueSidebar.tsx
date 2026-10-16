@@ -82,13 +82,19 @@ function matchesQuery(o: QueueOrderSummary | undefined, needle: string): boolean
   return hay.some(h => h.toLowerCase().includes(needle));
 }
 
-/** The three rails, in the order the work moves through them. */
-type Tab = 'ready' | 'pickup' | 'shipped';
+/** The four rails, in the order the work moves through them. Received is the
+ *  end of the line: the box left the dock AND the customer has confirmed it
+ *  arrived. Until someone says so a shipped order stays under Shipped — the
+ *  carrier saying "delivered" is not the same claim. */
+type Tab = 'ready' | 'pickup' | 'shipped' | 'received';
+
+const ALL_TABS: Tab[] = ['ready', 'pickup', 'shipped', 'received'];
 
 const TAB_LABEL: Record<Tab, string> = {
   ready: 'Ready to ship',
   pickup: 'To be picked up',
   shipped: 'Shipped',
+  received: 'Received',
 };
 
 /** What a row in each rail *is*, for the "nothing matched" line. Written as a
@@ -97,6 +103,7 @@ const TAB_NOUN: Record<Tab, string> = {
   ready: 'order ready to ship',
   pickup: 'order waiting to be picked up',
   shipped: 'shipped order',
+  received: 'received order',
 };
 
 /** The search box's accessible name per rail. Spelled out rather than built
@@ -106,18 +113,21 @@ const TAB_SEARCH_LABEL: Record<Tab, string> = {
   ready: 'Search orders ready to ship',
   pickup: 'Search orders waiting to be picked up',
   shipped: 'Search shipped orders',
+  received: 'Search received orders',
 };
 
 export function QueueSidebar({
   readyRows,
   pickupRows = [],
   shippedRows,
+  receivedRows = [],
   orderLookup,
   selectedId,
   onSelect,
   refundFlags,
   shippedMarks,
   goorooshipSends,
+  receivedAt,
 }: {
   readyRows: FulfillmentQueueRow[];
   /** Labelled, docked, and already emailed to Goorooship — waiting on the
@@ -125,6 +135,10 @@ export function QueueSidebar({
    *  that has no notion of the third rail still renders the other two. */
   pickupRows?: FulfillmentQueueRow[];
   shippedRows: FulfillmentQueueRow[];
+  /** Shipped AND confirmed as arrived — `orders.delivered_at` is set. Optional
+   *  so a caller with no notion of the fourth rail still renders the other
+   *  three. See the Tab union above. */
+  receivedRows?: FulfillmentQueueRow[];
   orderLookup: Map<string, QueueOrderSummary>;
   selectedId: string | null;
   onSelect: (id: string) => void;
@@ -137,6 +151,9 @@ export function QueueSidebar({
   /** When the 3PL was told about each order, by order id. Only read to explain
    *  a pickup row's badge — the rails themselves are split by the caller. */
   goorooshipSends?: Map<string, GoorooshipSend>;
+  /** The day each order's shipment was received, by queue row id. Buckets the
+   *  Received rail by month and dates its rows. */
+  receivedAt?: Map<string, string>;
 }) {
   const [tab, setTab] = useState<Tab>('ready');
   // One query, both tabs. Looking a customer up usually starts as "is their
@@ -163,11 +180,18 @@ export function QueueSidebar({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [shippedRows, orderLookup, needle],
   );
+  const matchedReceived = useMemo(
+    () => filter(receivedRows),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [receivedRows, orderLookup, needle],
+  );
   const matched: Record<Tab, FulfillmentQueueRow[]> = {
-    ready: matchedReady, pickup: matchedPickup, shipped: matchedShipped,
+    ready: matchedReady, pickup: matchedPickup,
+    shipped: matchedShipped, received: matchedReceived,
   };
   const population: Record<Tab, FulfillmentQueueRow[]> = {
-    ready: readyRows, pickup: pickupRows, shipped: shippedRows,
+    ready: readyRows, pickup: pickupRows,
+    shipped: shippedRows, received: receivedRows,
   };
   const rows = matched[tab];
   // Ready to ship is a work list and stays in pick order. Shipped is history:
@@ -176,11 +200,17 @@ export function QueueSidebar({
     () => groupShippedByMonth(matchedShipped, shippedMarks),
     [matchedShipped, shippedMarks],
   );
+  // Same history, bucketed by the month the customer got the box rather than
+  // the month it left — see groupShippedByMonth's `dateOf`.
+  const receivedGroups = useMemo(
+    () => groupShippedByMonth(matchedReceived, shippedMarks, r => receivedAt?.get(r.id) ?? null),
+    [matchedReceived, shippedMarks, receivedAt],
+  );
   // The tab counts stay on the whole population, never the match — they are
   // how you see how much the search is hiding. A search that finds nothing
   // here but something next door is the common case (the operator is looking
   // for a customer, not for a rail), so name the rail that has them.
-  const elsewhere = (['ready', 'pickup', 'shipped'] as Tab[])
+  const elsewhere = ALL_TABS
     .filter(t => t !== tab && matched[t].length > 0);
   // "1 match under Shipped, 2 under To be picked up." — the noun rides on the
   // first clause only, so a miss that turns up in two rails still reads as a
@@ -222,6 +252,7 @@ export function QueueSidebar({
     const pauseBadge = paused
       ? (o?.status === 'flagged' ? '⚑ FLAGGED' : o?.status === 'held' ? '⏸ HELD' : '• PAUSED')
       : null;
+    const receivedOn = receivedAt?.get(r.id) ?? null;
     return (
       <div key={r.id} className={cls} onClick={() => onSelect(r.id)} role="button" tabIndex={0}>
         <div className={styles.rowName}>
@@ -263,6 +294,13 @@ export function QueueSidebar({
         )}
         {pauseBadge ? (
           <div className={styles.pauseBadge}>{pauseBadge}</div>
+        ) : receivedOn ? (
+          // The one rail where "✓ Fulfilled" would be the lesser fact: the box
+          // is not just gone, the customer has it, and the date is the answer
+          // to every question anyone opens this rail to ask.
+          <div className={`${styles.rowDue} ${styles.done}`}>
+            ✓ Received {new Date(receivedOn).toLocaleDateString('en-US')}
+          </div>
         ) : (
           <div className={dueClass(r.due_date, fulfilled)}>
             {dueLabel(r.due_date, fulfilled)}
@@ -275,7 +313,7 @@ export function QueueSidebar({
   return (
     <aside className={styles.sidebar}>
       <div className={styles.sidebarTabs}>
-        {(['ready', 'pickup', 'shipped'] as Tab[]).map(t => (
+        {ALL_TABS.map(t => (
           <button
             key={t}
             className={`${styles.sidebarTab} ${tab === t ? styles.activeTab : ''}`}
@@ -347,10 +385,15 @@ export function QueueSidebar({
             title="Nothing waiting on a carrier"
             body="An order moves here when Pickup scheduled is clicked at step 3 — and for a carton EZ Trans is picking, only once the Goorooship email carrying it has gone out."
           />
-        ) : (
+        ) : tab === 'shipped' ? (
           <EmptyState
             title="Nothing shipped yet"
             body="Orders move here as they leave the dock."
+          />
+        ) : (
+          <EmptyState
+            title="Nothing confirmed as received"
+            body="A shipped order moves here when Shipment Received is clicked on its card and the arrival date is recorded."
           />
         )
       ) : tab === 'ready' ? (
@@ -358,7 +401,7 @@ export function QueueSidebar({
       ) : tab === 'pickup' ? (
         matchedPickup.map(renderRow)
       ) : (
-        shippedGroups.map(g => (
+        (tab === 'received' ? receivedGroups : shippedGroups).map(g => (
           <div key={g.key || 'undated'} className={styles.monthGroup}>
             {/* Sticky so the month you are scrolling through stays named — the
                 tab is 100+ rows deep and the heading is the only landmark. */}

@@ -1,8 +1,10 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { useMemo, useState, type KeyboardEvent, type ReactNode } from 'react';
 import {
   useParts, usePartShipments, adjustPartStock, recordPartShipment,
   updatePartField, parsePartFieldInput, effectiveDemandBySku, createPart,
-  type Part, type PartCategory, type PartEditableField, type NewPartInput,
+  updatePartInfo, parsePartTextInput,
+  type Part, type PartCategory, type PartEditableField, type PartTextField,
+  type NewPartInput,
 } from '../../lib/parts';
 import { useReplacementOrders } from '../../lib/orders';
 import { replacementDemandBySku } from '../../lib/replacementTags';
@@ -10,6 +12,14 @@ import { useCustomers, type Customer } from '../../lib/customers';
 import styles from './Stock.module.css';
 
 type CatFilter = 'all' | PartCategory;
+
+/** What to tell an operator when a typed value won't do. */
+const TEXT_FIELD_ERROR: Record<PartTextField, string> = {
+  sku: 'SKU must be letters, numbers, spaces or - . _ / — up to 60 characters.',
+  name: 'Name cannot be blank, and is at most 120 characters.',
+  supplier: 'Supplier is at most 120 characters. Blank clears it.',
+  notes: 'Notes are at most 1000 characters. Blank clears them.',
+};
 
 export function PartsTab() {
   const { parts, loading: pLoading, refresh: refreshParts } = useParts();
@@ -21,6 +31,7 @@ export function PartsTab() {
   const [error, setError] = useState<string | null>(null);
   const [shipForPartId, setShipForPartId] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const filtered = useMemo(
     () => catFilter === 'all' ? parts : parts.filter(p => p.category === catFilter),
@@ -97,6 +108,38 @@ export function PartsTab() {
     finally { setBusy(null); }
   };
 
+  const saveText = async (p: Part, field: PartTextField, raw: string): Promise<boolean> => {
+    const value = parsePartTextInput(field, raw);
+    if (value === undefined) { setError(TEXT_FIELD_ERROR[field]); return false; }
+    // SKU is what Demand and the replacement tags key on, so it has to stay
+    // unique even though the database does not enforce it.
+    const clash = field === 'sku'
+      ? parts.find(o => o.id !== p.id && o.sku.toUpperCase() === value)
+      : undefined;
+    if (clash) {
+      setError(`SKU ${value} is already used by another part (${clash.name}).`);
+      return false;
+    }
+    if (value === (p[field] ?? null)) return true;
+    setBusy(p.id); setError(null); setNotice(null);
+    try {
+      await updatePartInfo(p, field, value);
+      if (field === 'sku') {
+        setNotice(`SKU renamed to ${value}. Demand is keyed by SKU, so this part reads 0 until the replacement-order tags use the new one.`);
+      }
+      return true;
+    }
+    catch (e) { setError((e as Error).message); return false; }
+    finally { setBusy(null); }
+  };
+
+  const saveCategory = async (p: Part, next: PartCategory): Promise<boolean> => {
+    setBusy(p.id); setError(null);
+    try { await updatePartInfo(p, 'category', next); return true; }
+    catch (e) { setError((e as Error).message); return false; }
+    finally { setBusy(null); }
+  };
+
   const adjust = async (p: Part, delta: number, reason: string) => {
     setBusy(p.id); setError(null);
     try { await adjustPartStock(p.id, delta, reason); }
@@ -130,6 +173,7 @@ export function PartsTab() {
         </div>
         <button className={styles.addPartBtn} onClick={() => setAdding(true)}>+ Add part / consumable</button>
         {error && <div className={styles.errorBar}>{error}</div>}
+        {notice && <div className={styles.noticeBar}>{notice}</div>}
       </div>
 
       <div className={styles.tableWrap}>
@@ -156,26 +200,61 @@ export function PartsTab() {
               const overridden = p.demand_override != null;
               return (
                 <tr key={p.id} className={low ? styles.rowLowStock : ''}>
-                  <td className={styles.serial}>{p.sku}</td>
-                  <td>{p.name}</td>
-                  <td>
-                    <span className={p.category === 'replacement' ? styles.badgeRepl : styles.badgeCons}>
-                      {p.category}
-                    </span>
+                  <td className={styles.serial}>
+                    <EditableCell
+                      label={`${p.name} SKU`}
+                      initial={p.sku}
+                      variant="text"
+                      hint="Demand is keyed by SKU"
+                      disabled={busy === p.id}
+                      onSave={raw => saveText(p, 'sku', raw)}
+                    >{p.sku}</EditableCell>
                   </td>
-                  <td>{p.supplier ?? <span className={styles.muted}>—</span>}</td>
+                  <td>
+                    <EditableCell
+                      label={`${p.name} name`}
+                      initial={p.name}
+                      variant="text"
+                      disabled={busy === p.id}
+                      onSave={raw => saveText(p, 'name', raw)}
+                    >{p.name}</EditableCell>
+                  </td>
+                  <td>
+                    <EditableCategory
+                      label={`${p.name} category`}
+                      value={p.category}
+                      disabled={busy === p.id}
+                      onSave={next => saveCategory(p, next)}
+                    >
+                      <span className={p.category === 'replacement' ? styles.badgeRepl : styles.badgeCons}>
+                        {p.category}
+                      </span>
+                    </EditableCategory>
+                  </td>
+                  <td>
+                    <EditableCell
+                      label={`${p.name} supplier`}
+                      initial={p.supplier ?? ''}
+                      placeholder="supplier"
+                      variant="text"
+                      disabled={busy === p.id}
+                      onSave={raw => saveText(p, 'supplier', raw)}
+                    >
+                      {p.supplier ?? <span className={styles.muted}>—</span>}
+                    </EditableCell>
+                  </td>
                   <td className={styles.numCol}>
-                    <EditableNum
+                    <EditableCell
                       label={`${p.name} on hand`}
                       initial={String(p.on_hand)}
                       disabled={busy === p.id}
                       onSave={raw => saveField(p, 'on_hand', raw)}
                     >
                       <strong className={low ? styles.lowText : ''}>{p.on_hand}</strong>
-                    </EditableNum>
+                    </EditableCell>
                   </td>
                   <td className={styles.numCol}>
-                    <EditableNum
+                    <EditableCell
                       label={`${p.name} demand`}
                       initial={overridden ? String(p.demand_override) : ''}
                       placeholder={`auto (${derived})`}
@@ -193,20 +272,20 @@ export function PartsTab() {
                         const short = demand > p.on_hand;
                         return <>{tag}<strong className={short ? styles.lowText : ''} title={short ? 'Demand exceeds on-hand stock' : 'Queued for replacement'}>{demand}</strong></>;
                       })()}
-                    </EditableNum>
+                    </EditableCell>
                   </td>
                   <td className={styles.numCol}>
-                    <EditableNum
+                    <EditableCell
                       label={`${p.name} reorder at`}
                       initial={String(p.reorder_point)}
                       disabled={busy === p.id}
                       onSave={raw => saveField(p, 'reorder_point', raw)}
                     >
                       {p.reorder_point > 0 ? p.reorder_point : <span className={styles.muted}>—</span>}
-                    </EditableNum>
+                    </EditableCell>
                   </td>
                   <td className={styles.numCol}>
-                    <EditableNum
+                    <EditableCell
                       label={`${p.name} cost`}
                       initial={p.cost_per_unit_usd != null ? Number(p.cost_per_unit_usd).toFixed(2) : ''}
                       placeholder="$"
@@ -214,7 +293,7 @@ export function PartsTab() {
                       onSave={raw => saveField(p, 'cost_per_unit_usd', raw)}
                     >
                       {p.cost_per_unit_usd != null ? `$${Number(p.cost_per_unit_usd).toFixed(2)}` : <span className={styles.muted}>—</span>}
-                    </EditableNum>
+                    </EditableCell>
                   </td>
                   <td className={styles.numCol}>{shipCountByPart.get(p.id) ?? 0}</td>
                   <td>
@@ -243,7 +322,17 @@ export function PartsTab() {
                     </span>
                   </td>
                   <td className={styles.notes} title={p.notes ?? ''}>
-                    {p.notes ?? <span className={styles.muted}>—</span>}
+                    <EditableCell
+                      label={`${p.name} notes`}
+                      initial={p.notes ?? ''}
+                      placeholder="note"
+                      variant="note"
+                      hint="Shift+Enter for a new line"
+                      disabled={busy === p.id}
+                      onSave={raw => saveText(p, 'notes', raw)}
+                    >
+                      {p.notes ?? <span className={styles.muted}>—</span>}
+                    </EditableCell>
                   </td>
                 </tr>
               );
@@ -646,17 +735,22 @@ function isLow(p: Part): boolean {
   return p.reorder_point > 0 && p.on_hand <= p.reorder_point;
 }
 
-/** A table number that turns into an input on click. Enter or leaving the
- *  field saves; Escape cancels. onSave resolves false to keep the input open
- *  (bad input, failed write) so the typed value isn't lost. */
-function EditableNum({
-  label, initial, placeholder, hint, disabled, onSave, children,
+/** A table cell that turns into an input on click. Enter or leaving the field
+ *  saves; Escape cancels. onSave resolves false to keep the input open (bad
+ *  input, failed write) so the typed value isn't lost.
+ *
+ *  `variant` only decides how the cell is drawn and typed into — numbers stay
+ *  right-aligned in a narrow box, text fills the column, a note gets a
+ *  textarea (Shift+Enter for a line break). Validation is the caller's. */
+function EditableCell({
+  label, initial, placeholder, hint, disabled, variant = 'num', onSave, children,
 }: {
   label: string;
   initial: string;
   placeholder?: string;
   hint?: string;
   disabled?: boolean;
+  variant?: 'num' | 'text' | 'note';
   onSave: (raw: string) => Promise<boolean>;
   children: ReactNode;
 }) {
@@ -667,7 +761,7 @@ function EditableNum({
     return (
       <button
         type="button"
-        className={styles.editCell}
+        className={`${styles.editCell} ${variant === 'num' ? '' : styles.editCellText}`}
         onClick={() => setDraft(initial)}
         disabled={disabled}
         aria-label={`Edit ${label}`}
@@ -684,24 +778,88 @@ function EditableNum({
     if (ok) setDraft(null);
   };
 
+  // Enter saves everywhere; in a note Shift+Enter is a line break instead.
+  const onKeyDown = (e: KeyboardEvent) => {
+    if (e.key === 'Enter' && !(variant === 'note' && e.shiftKey)) {
+      e.preventDefault(); void commit();
+    }
+    if (e.key === 'Escape') { e.preventDefault(); setDraft(null); }
+  };
+
+  const shared = {
+    'aria-label': label,
+    autoFocus: true,
+    value: draft,
+    placeholder,
+    title: hint,
+    disabled: saving,
+    onChange: (e: { target: { value: string } }) => setDraft(e.target.value),
+    onBlur: () => void commit(),
+    onKeyDown,
+  };
+
+  if (variant === 'note') {
+    return <textarea className={styles.editTextarea} rows={2} {...shared} />;
+  }
+
   return (
     <input
-      className={styles.editInput}
-      aria-label={label}
-      inputMode="decimal"
-      autoFocus
-      value={draft}
-      placeholder={placeholder}
-      title={hint}
-      disabled={saving}
-      onChange={e => setDraft(e.target.value)}
+      className={variant === 'num' ? styles.editInput : styles.editInputText}
+      inputMode={variant === 'num' ? 'decimal' : undefined}
       onFocus={e => e.target.select()}
-      onBlur={() => void commit()}
-      onKeyDown={e => {
-        if (e.key === 'Enter') { e.preventDefault(); void commit(); }
-        if (e.key === 'Escape') { e.preventDefault(); setDraft(null); }
-      }}
+      {...shared}
     />
+  );
+}
+
+/** Category is a two-value label, so it edits as a dropdown that saves the
+ *  moment a choice is made — no Enter, nothing to type wrong. */
+function EditableCategory({
+  label, value, disabled, onSave, children,
+}: {
+  label: string;
+  value: PartCategory;
+  disabled?: boolean;
+  onSave: (next: PartCategory) => Promise<boolean>;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        className={`${styles.editCell} ${styles.editCellText}`}
+        onClick={() => setOpen(true)}
+        disabled={disabled}
+        aria-label={`Edit ${label}`}
+        title="Click to change"
+      >{children}</button>
+    );
+  }
+
+  return (
+    <select
+      className={styles.editSelect}
+      aria-label={label}
+      autoFocus
+      value={value}
+      disabled={saving}
+      onBlur={() => setOpen(false)}
+      onKeyDown={e => { if (e.key === 'Escape') { e.preventDefault(); setOpen(false); } }}
+      onChange={async e => {
+        const next = e.target.value as PartCategory;
+        if (next === value) { setOpen(false); return; }
+        setSaving(true);
+        const ok = await onSave(next);
+        setSaving(false);
+        if (ok) setOpen(false);
+      }}
+    >
+      <option value="consumable">consumable</option>
+      <option value="replacement">replacement</option>
+    </select>
   );
 }
 

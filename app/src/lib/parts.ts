@@ -190,6 +190,62 @@ export async function updatePartField(
   await logAction('part_edit', part.id, `${part.sku} ${FIELD_LABEL[field]}: ${fmt(part[field])} → ${fmt(value)}`);
 }
 
+/** The descriptive fields an operator can type over in Stock › Parts.
+ *  parts.id is deliberately absent: it is the PK other tables point at. */
+export type PartTextField = 'sku' | 'name' | 'supplier' | 'notes';
+
+const TEXT_FIELD_LABEL: Record<PartTextField | 'category', string> = {
+  sku: 'SKU',
+  name: 'name',
+  supplier: 'supplier',
+  notes: 'notes',
+  category: 'category',
+};
+
+/** How long each column may get. Caps are generous — they exist to catch a
+ *  stray paste, not to ration what an operator writes. */
+const TEXT_FIELD_MAX: Record<PartTextField, number> = {
+  sku: 60, name: 120, supplier: 120, notes: 1000,
+};
+
+/** Parse what an operator typed into an editable text cell. Returns undefined
+ *  when the input is not usable for that field. Blank is only valid where the
+ *  column is nullable: supplier and notes, which it clears. */
+export function parsePartTextInput(
+  field: PartTextField,
+  raw: string,
+): string | null | undefined {
+  // Notes are the one field where a line break is content, not stray spacing.
+  const t = field === 'notes'
+    ? raw.trim()
+    : raw.trim().replace(/\s+/g, ' ');
+  if (t.length > TEXT_FIELD_MAX[field]) return undefined;
+  if (field === 'sku') {
+    const sku = t.toUpperCase();
+    // Real SKUs look like LILA-LID-V36 or LILA-CARBON PELLETS.
+    return /^[A-Z0-9][A-Z0-9 ._/-]*$/.test(sku) ? sku : undefined;
+  }
+  if (field === 'name') return t || undefined;
+  return t || null;
+}
+
+/** Set one descriptive field on a part. Category rides along here rather than
+ *  with the numbers: it is a label an operator picks, not a count. */
+export async function updatePartInfo(
+  part: Part,
+  field: PartTextField | 'category',
+  value: string | null,
+): Promise<void> {
+  const { error } = await supabase.from('parts').update({ [field]: value }).eq('id', part.id);
+  if (error) throw error;
+  const fmt = (v: string | null | undefined) =>
+    v == null || v === '' ? '—' : `"${v.length > 80 ? `${v.slice(0, 79)}…` : v}"`;
+  await logAction(
+    'part_edit', part.id,
+    `${part.sku} ${TEXT_FIELD_LABEL[field]}: ${fmt(part[field])} → ${fmt(value)}`,
+  );
+}
+
 /** A new part's primary key. parts.id is a text PK holding human-readable
  *  codes ('P-LID-V36', 'C-STARTER'), so derive one from the category prefix
  *  and the SKU, and suffix it if that code is taken. */

@@ -44,6 +44,32 @@ describe('edge functions reference real orders columns', () => {
     });
   }
 
+  it('reads the columns the shipment email needs to find a recipient', () => {
+    // send-fulfillment-email resolves the recipient from the order's own
+    // customer_email and, when that is null, from the customer record
+    // customer_id points at. Reading only the order column is the bug that
+    // made Candace Chan's replacement (R-0023) unsendable: the order row had
+    // no email and her customer record had one. A rename of either column
+    // would silently restore that, as a PostgREST 42703 reported as "not
+    // found".
+    const found = files.find(([path]) => path === 'send-fulfillment-email/index.ts');
+    expect(found, 'send-fulfillment-email/index.ts not found').toBeTruthy();
+    const src = found![1];
+
+    const orderSelect = src.match(/\.select\('([^']*customer_email[^']*)'\)/);
+    expect(orderSelect, 'no orders select naming customer_email').toBeTruthy();
+    for (const col of ['order_ref', 'customer_name', 'customer_email', 'customer_id']) {
+      expect(orderSelect![1].split(/,\s*/), `orders select is missing ${col}`).toContain(col);
+    }
+
+    // The fallback read itself: the directory columns the recipient rule uses.
+    const custSelect = src.match(/from\('customers'\)\s*\.select\('([^']*)'\)/);
+    expect(custSelect, 'no customers select — the fallback address cannot be read').toBeTruthy();
+    for (const col of ['full_name', 'email', 'primary_user_email']) {
+      expect(custSelect![1].split(/,\s*/), `customers select is missing ${col}`).toContain(col);
+    }
+  });
+
   it('reads the address and contact columns Freightcom needs when quoting and booking', () => {
     // customer_email joined this select on 2026-08-13: Freightcom refuses to
     // rate an international shipment without an email address at each end, so a

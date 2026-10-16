@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from './supabase';
 import { logAction } from './activityLog';
 import { DEFAULT_RATES, type ProfitabilityRates, type AcquisitionSpendRow } from './profitability';
 import { batchCensus, type UnitCensus } from './batchLandedCost';
+import { applyCostAdjustments, fetchCostAdjustmentInputs } from './shippingInvoices';
 import {
   ADDRESS_ORDER_COLUMNS, buildCustomerAddressIndex, resolveCustomerAddress,
   type AddressOrder,
@@ -682,24 +683,41 @@ export type CustomerProfitability = {
   // to it. Billed, but surfaced separately so the waste stays legible.
   diagnosis_noshow_count: number;
   is_team_member: boolean;
+  // Folded in client-side by applyCostAdjustments (lib/shippingInvoices.ts)
+  // from customer_shipping_invoices + customer_profitability_adjustments.
+  // Optional so fixtures built before them stay valid; absent reads as 0/null.
+  // Freight from uploaded shipping invoices marked counts_in_shipping.
+  uploaded_shipping_cad?: number;
+  shipping_invoice_count?: number;
+  // Operator override of the whole Shipping bucket; null = computed.
+  shipping_override_cad?: number | null;
+  // Bucket 12: customs/duty we covered for the customer (US DDU shipments).
+  customs_covered_cad?: number;
+  adjustment_note?: string | null;
 };
 
 export function useCustomerProfitability(): {
   rows: CustomerProfitability[];
   loading: boolean;
   error: Error | null;
+  reload: () => void;
 } {
   const [rows, setRows] = useState<CustomerProfitability[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
+  const [version, setVersion] = useState(0);
+  const reload = useCallback(() => setVersion(v => v + 1), []);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const { data, error: err } = await supabase
-        .from('customer_profitability')
-        .select('*')
-        .order('net_margin_cad', { ascending: false });
+      const [{ data, error: err }, adjustInputs] = await Promise.all([
+        supabase
+          .from('customer_profitability')
+          .select('*')
+          .order('net_margin_cad', { ascending: false }),
+        fetchCostAdjustmentInputs(),
+      ]);
       if (cancelled) return;
       if (err) {
         setError(err as unknown as Error);
@@ -751,13 +769,13 @@ export function useCustomerProfitability(): {
         shipping_costed_count:      Number(r.shipping_costed_count ?? 0),
         shipping_uncosted_count:    Number(r.shipping_uncosted_count ?? 0),
       })) as CustomerProfitability[];
-      setRows(coerced);
+      setRows(applyCostAdjustments(coerced, adjustInputs));
       setLoading(false);
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [version]);
 
-  return { rows, loading, error };
+  return { rows, loading, error, reload };
 }
 
 // ── Profitability inputs: rates and acquisition spend ───────────────────────

@@ -11,11 +11,17 @@ import {
   fetchUnassignedQueueItems,
   type QueueItemForAssignment,
 } from '../../lib/fulfillment';
-import { openTestReport } from '../../lib/testReports';
+import { openTestReport, normalizeMac } from '../../lib/testReports';
 import { UnitTimeline } from '../../components/UnitTimeline';
 import styles from './Stock.module.css';
 
-export function UnitTable({ units }: { units: Unit[] }) {
+export function UnitTable({
+  units, macDupes = new Map(),
+}: {
+  units: Unit[];
+  /** serial → other serials sharing its MAC (lib/stock findMacDuplicates). */
+  macDupes?: Map<string, string[]>;
+}) {
   // Preview-confirm pattern: pending status per row.
   // We keep a map of serial → pendingStatus so one row's edit doesn't clobber another's.
   const [pending, setPending] = useState<Record<string, UnitStatus>>({});
@@ -97,6 +103,7 @@ export function UnitTable({ units }: { units: Unit[] }) {
             const quarantinedSince = isQuarantined
               ? new Date(u.status_updated_at).toLocaleDateString('en-US', { year: '2-digit', month: 'short', day: 'numeric' })
               : null;
+            const dupSerials = macDupes.get(u.serial);
             return (
               <tr key={u.serial} className={isQuarantined ? styles.rowQuarantine : undefined}>
                 <td className={styles.serial}>
@@ -164,6 +171,11 @@ export function UnitTable({ units }: { units: Unit[] }) {
                   >
                     <QcChip label="E" v={u.electrical_check} />
                     <QcChip label="M" v={u.mechanical_check} />
+                    {dupSerials && (
+                      <span className={styles.qcDupMac} title={`Same MAC as ${dupSerials.join(', ')}`}>
+                        DUP MAC
+                      </span>
+                    )}
                   </button>
                 </td>
                 <td className={styles.notes} title={primaryNote ?? ''}>
@@ -204,6 +216,7 @@ export function UnitTable({ units }: { units: Unit[] }) {
       {qcUnit && (
         <QcEditorModal
           unit={qcUnit}
+          otherSerials={macDupes.get(qcUnit.serial) ?? []}
           onClose={() => setQcSerial(null)}
           onError={setError}
         />
@@ -433,9 +446,11 @@ function QcChip({ label, v }: { label: string; v: QcCheck | null }) {
 }
 
 function QcEditorModal({
-  unit, onClose, onError,
+  unit, otherSerials, onClose, onError,
 }: {
   unit: Unit;
+  /** Other serials holding this unit's MAC; empty when the MAC is unique. */
+  otherSerials: string[];
   onClose: () => void;
   onError: (msg: string | null) => void;
 }) {
@@ -444,9 +459,19 @@ function QcEditorModal({
   const [mCheck, setMCheck] = useState<QcCheck | ''>(unit.mechanical_check ?? '');
   const [defectNotes, setDefectNotes] = useState(unit.defect_notes ?? '');
   const [firmwareVersion, setFirmwareVersion] = useState(unit.firmware_version ?? '');
+  const [mac, setMac] = useState(unit.mac_address ?? '');
   const [busy, setBusy] = useState(false);
 
   const save = async () => {
+    // The only place a MAC is ever rejected: a value the operator typed. The
+    // uploader never gets here — a report's MAC is validated by the parser and
+    // simply dropped when garbled.
+    const macTyped = mac.trim();
+    const macNorm = macTyped ? normalizeMac(macTyped) : null;
+    if (macTyped && !macNorm) {
+      onError('MAC must be six hex pairs, e.g. 98:a3:16:a6:97:b0');
+      return;
+    }
     setBusy(true); onError(null);
     try {
       await updateUnitFields(unit.serial, {
@@ -455,6 +480,7 @@ function QcEditorModal({
         mechanical_check:  mCheck || null,
         defect_notes:      defectNotes.trim() || null,
         firmware_version:  firmwareVersion.trim() || null,
+        mac_address:       macNorm,
       });
       onClose();
     } catch (e) {
@@ -487,6 +513,20 @@ function QcEditorModal({
             placeholder="e.g. v1.2.4"
             className={styles.modalInput}
           />
+        </div>
+
+        <div className={styles.modalField}>
+          <label className={styles.modalLabel} htmlFor={`mac-${unit.serial}`}>MAC address</label>
+          <input
+            id={`mac-${unit.serial}`}
+            value={mac}
+            onChange={e => setMac(e.target.value)}
+            placeholder="e.g. 98:a3:16:a6:97:b0"
+            className={styles.modalInput}
+          />
+          {otherSerials.length > 0 && (
+            <div className={styles.modalHelp}>Also on {otherSerials.join(', ')}</div>
+          )}
         </div>
 
         <div className={styles.modalField}>

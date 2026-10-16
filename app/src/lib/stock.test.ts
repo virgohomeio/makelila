@@ -55,7 +55,7 @@ vi.mock('./supabaseTelemetry', () => ({
 }));
 
 import {
-  updateUnitStatus, mergeTimelineEvents, createBatch, isStockManager,
+  updateUnitStatus, mergeTimelineEvents, createBatch, isStockManager, findMacDuplicates,
   type TimelineEvent,
 } from './stock';
 
@@ -319,5 +319,38 @@ describe('isStockManager', () => {
     getUserMock.mockResolvedValue({ data: { user: null } });
     expect(await isStockManager()).toBe(false);
     expect(limitMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('findMacDuplicates', () => {
+  const u = (serial: string, mac: string | null) => ({ serial, mac_address: mac });
+
+  it('is empty when every MAC is unique', () => {
+    const r = findMacDuplicates([u('LL01-A', '98:a3:16:a6:97:b0'), u('LL01-B', '98:a3:16:a6:97:b1')]);
+    expect(r.size).toBe(0);
+  });
+
+  it('lists each of two sharing units under the other', () => {
+    const r = findMacDuplicates([u('LL01-A', '98:a3:16:a6:97:b0'), u('LL01-B', '98:a3:16:a6:97:b0')]);
+    expect(r.get('LL01-A')).toEqual(['LL01-B']);
+    expect(r.get('LL01-B')).toEqual(['LL01-A']);
+  });
+
+  it('lists the other two for each of three sharing units', () => {
+    const mac = '98:a3:16:a6:97:b0';
+    const r = findMacDuplicates([u('LL01-A', mac), u('LL01-B', mac), u('LL01-C', mac)]);
+    expect(r.get('LL01-A')).toEqual(['LL01-B', 'LL01-C']);
+    expect(r.get('LL01-B')).toEqual(['LL01-A', 'LL01-C']);
+    expect(r.get('LL01-C')).toEqual(['LL01-A', 'LL01-B']);
+  });
+
+  it('ignores units with no MAC', () => {
+    const r = findMacDuplicates([u('LL01-A', null), u('LL01-B', null), u('LL01-C', '98:a3:16:a6:97:b0')]);
+    expect(r.size).toBe(0);
+  });
+
+  it('does not flag a unit that only shares a MAC with itself', () => {
+    const r = findMacDuplicates([u('LL01-A', '98:a3:16:a6:97:b0')]);
+    expect(r.has('LL01-A')).toBe(false);
   });
 });

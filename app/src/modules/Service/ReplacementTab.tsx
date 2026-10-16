@@ -19,12 +19,17 @@ import { TicketDetailPanel } from './TicketDetailPanel';
 import styles from './Service.module.css';
 
 type Stage = 'pending' | 'approved' | 'fulfilling' | 'shipped' | 'delivered' | 'closed'
-  | 'awaiting_batch' | 'cancelled';
+  | 'awaiting_batch' | 'cancelled' | 'flagged';
 
 function stageFor(o: Order): Stage {
   // Cancelled outranks everything: a cancelled replacement is not awaiting a
   // batch and not fulfilling, whatever its other columns still say.
   if (o.status === 'cancelled') return 'cancelled';
+  // Flagged outranks the rest for the same reason cancelled does: an operator
+  // pulled this order out of the fulfillment queue and asked Sales a question
+  // about it. "awaiting batch" on a row that is actually stopped is a lie, and
+  // this table is read to decide what to build and ship.
+  if (o.status === 'flagged') return 'flagged';
   // Backlog #71 — batch-blocked orders surface as their own group so
   // operators can see at a glance which orders are stuck waiting on
   // inbound stock vs. actionable in the normal pipeline.
@@ -459,9 +464,18 @@ export default function ReplacementTab() {
                   </td>
                   <td>${(o.cogs_usd ?? 0).toFixed(2)}</td>
                   <td>
-                    {stageTag
-                      ? <span className={styles.stageTag} data-stage={stageTag}>{stageTag}</span>
-                      : <span className={styles.muted}>{stage}</span>}
+                    {/* The flag replaces the item tag rather than sitting next
+                        to it: what this row needs from someone right now is an
+                        answer in Sales, not a machine off the shelf. */}
+                    {stage === 'flagged'
+                      ? <span
+                          className={styles.stageTag}
+                          data-stage="flagged"
+                          title="Flagged from the fulfillment queue — the reason and the reply live in Sales › Flagged"
+                        >⚑ Flagged</span>
+                      : stageTag
+                        ? <span className={styles.stageTag} data-stage={stageTag}>{stageTag}</span>
+                        : <span className={styles.muted}>{stage}</span>}
                   </td>
                   <td>{daysOpen}</td>
                   <td>

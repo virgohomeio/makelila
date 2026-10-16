@@ -935,6 +935,7 @@
 .stageTag[data-stage='Unit'] { background: #e6fffa; color: #2c7a7b; }
 .stageTag[data-stage='awaiting batch'] { background: #fef3c7; color: #b7791f; }
 .stageTag[data-stage='Parts/Consumables'] { background: #ebf8ff; color: #2b6cb0; }
+.stageTag[data-stage='flagged'] { background: var(--color-warning-bg); color: var(--color-warning); }
 
 /* Fulfillment column on the Replacement table. A parts-only row carries a
    second action ("Mark shipped") beside its queue state, and the cell is

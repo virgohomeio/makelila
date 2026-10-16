@@ -28,7 +28,7 @@ vi.mock('./activityLog', () => ({
   logAction: logActionMock,
 }));
 
-import { bucketOrders, SALES_QUEUE_START, type Order, disposition, needInfo, nextReplacementOrderRef, createReplacementOrder, createPendingReplacement, hasPendingLine, markOrderShipped, markOrderDelivered, cancelReplacementOrder } from './orders';
+import { bucketOrders, SALES_QUEUE_START, type Order, disposition, needInfo, nextReplacementOrderRef, createReplacementOrder, createPendingReplacement, hasPendingLine, markOrderShipped, markOrderDelivered, localDayString, calendarDayToIso, cancelReplacementOrder } from './orders';
 
 describe('disposition', () => {
   beforeEach(() => {
@@ -420,6 +420,107 @@ describe('markOrderDelivered', () => {
     await expect(markOrderDelivered('o1')).rejects.toThrow(/not been shipped/i);
   });
 
+  // The arrival is nearly always confirmed after the fact — a customer
+  // mentions it on a call days later — so the day is asked for rather than
+  // stamped as now(). Everything downstream (warranty, follow-ups, the ticket
+  // close) dates from what is written here.
+  it('writes the operator-picked day, anchored at local noon', async () => {
+    const orderSingle = vi.fn().mockResolvedValue({
+      data: { kind: 'sale', linked_ticket_id: null, order_ref: '#1113',
+              delivered_at: null, shipped_at: '2026-06-04T10:00:00Z' }, error: null,
+    });
+    const orderEqSel = vi.fn().mockReturnValue({ single: orderSingle });
+    const orderUpdateEq = vi.fn().mockResolvedValue({ error: null });
+    const orderUpdate = vi.fn().mockReturnValue({ eq: orderUpdateEq });
+    fromMock.mockImplementation(((table: string) => {
+      if (table === 'orders') return { update: orderUpdate, select: () => ({ eq: orderEqSel }) };
+      if (table === 'service_tickets') return { update: vi.fn() };
+      throw new Error(`unexpected table ${table}`);
+    }) as any);
+
+    await markOrderDelivered('o1', '2026-06-09');
+
+    const written = orderUpdate.mock.calls[0][0].delivered_at as string;
+    // Read back as a LOCAL day it must still be the 9th. Midnight-anchored it
+    // would come back as the 8th anywhere west of Greenwich.
+    expect(localDayString(new Date(written))).toBe('2026-06-09');
+  });
+
+  it('dates the replacement ticket close from the picked day too', async () => {
+    const orderSingle = vi.fn().mockResolvedValue({
+      data: { kind: 'replacement', linked_ticket_id: 't1', order_ref: 'R-0007',
+              delivered_at: null, shipped_at: '2026-06-04T10:00:00Z' }, error: null,
+    });
+    const orderEqSel = vi.fn().mockReturnValue({ single: orderSingle });
+    const orderUpdate = vi.fn().mockReturnValue({ eq: vi.fn().mockResolvedValue({ error: null }) });
+    const ticketUpdate = vi.fn().mockReturnValue({ eq: vi.fn().mockResolvedValue({ error: null }) });
+    fromMock.mockImplementation(((table: string) => {
+      if (table === 'orders') return { update: orderUpdate, select: () => ({ eq: orderEqSel }) };
+      if (table === 'service_tickets') return { update: ticketUpdate };
+      throw new Error(`unexpected table ${table}`);
+    }) as any);
+
+    await markOrderDelivered('o1', '2026-06-09');
+
+    const closedAt = ticketUpdate.mock.calls[0][0].closed_at as string;
+    expect(localDayString(new Date(closedAt))).toBe('2026-06-09');
+  });
+
+  it('refuses a day in the future', async () => {
+    const orderSingle = vi.fn().mockResolvedValue({
+      data: { kind: 'sale', linked_ticket_id: null, order_ref: '#1113',
+              delivered_at: null, shipped_at: '2026-06-04T10:00:00Z' }, error: null,
+    });
+    const orderEqSel = vi.fn().mockReturnValue({ single: orderSingle });
+    const orderUpdate = vi.fn();
+    fromMock.mockImplementation(((table: string) => {
+      if (table === 'orders') return { update: orderUpdate, select: () => ({ eq: orderEqSel }) };
+      throw new Error(`unexpected table ${table}`);
+    }) as any);
+
+    const nextYear = new Date(); nextYear.setFullYear(nextYear.getFullYear() + 1);
+    await expect(markOrderDelivered('o1', localDayString(nextYear)))
+      .rejects.toThrow(/future/i);
+    expect(orderUpdate).not.toHaveBeenCalled();
+  });
+
+  // Picking today must never read as the future, whatever time of day it is —
+  // the noon anchor is hours ahead of a morning "now", so the guard has to
+  // compare calendar days rather than instants.
+  it('accepts today', async () => {
+    const orderSingle = vi.fn().mockResolvedValue({
+      data: { kind: 'sale', linked_ticket_id: null, order_ref: '#1113',
+              delivered_at: null, shipped_at: '2026-06-04T10:00:00Z' }, error: null,
+    });
+    const orderEqSel = vi.fn().mockReturnValue({ single: orderSingle });
+    const orderUpdate = vi.fn().mockReturnValue({ eq: vi.fn().mockResolvedValue({ error: null }) });
+    fromMock.mockImplementation(((table: string) => {
+      if (table === 'orders') return { update: orderUpdate, select: () => ({ eq: orderEqSel }) };
+      if (table === 'service_tickets') return { update: vi.fn() };
+      throw new Error(`unexpected table ${table}`);
+    }) as any);
+
+    await markOrderDelivered('o1', localDayString());
+
+    expect(orderUpdate).toHaveBeenCalled();
+  });
+
+  it('rejects a day that is not a date', async () => {
+    const orderSingle = vi.fn().mockResolvedValue({
+      data: { kind: 'sale', linked_ticket_id: null, order_ref: '#1113',
+              delivered_at: null, shipped_at: '2026-06-04T10:00:00Z' }, error: null,
+    });
+    const orderEqSel = vi.fn().mockReturnValue({ single: orderSingle });
+    const orderUpdate = vi.fn();
+    fromMock.mockImplementation(((table: string) => {
+      if (table === 'orders') return { update: orderUpdate, select: () => ({ eq: orderEqSel }) };
+      throw new Error(`unexpected table ${table}`);
+    }) as any);
+
+    await expect(markOrderDelivered('o1', '2026-02-31')).rejects.toThrow(/not a date/i);
+    expect(orderUpdate).not.toHaveBeenCalled();
+  });
+
   it('is idempotent — early-returns when delivered_at is already set', async () => {
     const orderSingle = vi.fn().mockResolvedValue({
       data: { kind: 'replacement', linked_ticket_id: 't1', order_ref: 'R-0007',
@@ -436,6 +537,26 @@ describe('markOrderDelivered', () => {
     await markOrderDelivered('o1');
     expect(orderUpdate).not.toHaveBeenCalled();
     expect(ticketUpdate).not.toHaveBeenCalled();
+  });
+});
+
+// The one piece of this that is pure, and the one that goes wrong silently:
+// a bare "YYYY-MM-DD" through `new Date()` is UTC midnight, i.e. the previous
+// day for every timezone this app is used in.
+describe('calendarDayToIso', () => {
+  it('lands on the day that was picked, read back locally', () => {
+    const iso = calendarDayToIso('2026-10-07');
+    expect(iso).not.toBeNull();
+    expect(localDayString(new Date(iso!))).toBe('2026-10-07');
+  });
+
+  it('refuses a day that does not exist rather than rolling it into March', () => {
+    expect(calendarDayToIso('2026-02-31')).toBeNull();
+  });
+
+  it('refuses anything that is not YYYY-MM-DD', () => {
+    expect(calendarDayToIso('07/10/2026')).toBeNull();
+    expect(calendarDayToIso('')).toBeNull();
   });
 });
 
@@ -485,10 +606,11 @@ describe('bucketOrders', () => {
     expect(b.cancelled.map(o => o.id)).toEqual(['new', 'old', 'blank']);
   });
 
-  // Sales is sales-only. Replacements are born approved and live in the
-  // fulfillment queue; there is no tab here that should ever show one, and
-  // `all` and `cancelled` are the two that used to leak.
-  it('keeps replacements out of every bucket, whatever their status', () => {
+  // Sales is sales-only, with exactly one exception: a replacement an operator
+  // flagged. Replacements are otherwise born approved and live in the
+  // fulfillment queue; there is no tab here that should show one, and `all`
+  // and `cancelled` are the two that used to leak.
+  it('keeps unflagged replacements out of every bucket, whatever their status', () => {
     const b = bucketOrders(
       [mk({ id: 'r-pending',   status: 'pending',   kind: 'replacement' }),
        mk({ id: 'r-approved',  status: 'approved',  kind: 'replacement' }),
@@ -500,6 +622,62 @@ describe('bucketOrders', () => {
     expect(b.pending.map(o => o.id)).toEqual(['s1']);
     expect(b.approved).toEqual([]);
     expect(b.cancelled).toEqual([]);
+  });
+
+  // The exception. An operator flagging a replacement from the fulfillment
+  // queue is asking Sales a question about it, so it has to be somewhere Sales
+  // looks — and `all` is what the /order-review/:id detail route resolves out
+  // of, so landing in Flagged without landing in All would be a dead click.
+  it('admits a flagged replacement to Flagged and All', () => {
+    const b = bucketOrders(
+      [mk({ id: 'r-flagged', status: 'flagged', kind: 'replacement' }),
+       mk({ id: 's-flagged', status: 'flagged', kind: 'sale' })],
+      none, none,
+    );
+    expect(b.flagged.map(o => o.id)).toEqual(['r-flagged', 's-flagged']);
+    expect(b.all.map(o => o.id)).toEqual(['r-flagged', 's-flagged']);
+  });
+
+  // A replacement goes, by definition, to someone who already has a machine,
+  // so the shipped-customer name match would bury every single one of them.
+  // An explicit human flag outranks a heuristic every time.
+  it('does not let the shipped-customer match bury a flagged order', () => {
+    const b = bucketOrders(
+      [mk({ id: 'r-flagged', status: 'flagged', kind: 'replacement', customer_name: 'Ada Ship' }),
+       mk({ id: 's-flagged', status: 'flagged', kind: 'sale',        customer_name: 'Ada Ship' }),
+       mk({ id: 's-pending', status: 'pending', kind: 'sale',        customer_name: 'Ada Ship' })],
+      none, new Set(['ada ship']),
+    );
+    expect(b.flagged.map(o => o.id)).toEqual(['r-flagged', 's-flagged']);
+    // The heuristic still does its job on everything that is not flagged.
+    expect(b.pending).toEqual([]);
+  });
+
+  // Flagging is not a way to smuggle a replacement into the rest of Sales:
+  // cancelling one from the detail pane must not leave it in the Cancelled tab,
+  // which is a sales ledger.
+  it('drops a flagged replacement again once it is cancelled', () => {
+    const b = bucketOrders(
+      [mk({ id: 'r', status: 'cancelled', kind: 'replacement', cancelled_at: '2026-10-06T00:00:00Z' })],
+      none, none,
+    );
+    expect(b.cancelled).toEqual([]);
+    expect(b.all).toEqual([]);
+  });
+
+  // The third automatic exclusion a flag has to beat. An operator can flag an
+  // order that already shipped ("this one arrived cracked"), and signal (a)
+  // would otherwise swallow it exactly the way signal (b) swallowed #1189.
+  it('shows a flagged order that has already been fulfilled', () => {
+    const b = bucketOrders(
+      [mk({ id: 'shipped-flagged', status: 'flagged' }),
+       mk({ id: 'shipped-quiet',   status: 'approved' })],
+      new Set(['shipped-flagged', 'shipped-quiet']), none,
+    );
+    expect(b.flagged.map(o => o.id)).toEqual(['shipped-flagged']);
+    expect(b.all.map(o => o.id)).toEqual(['shipped-flagged']);
+    // Everything that is not flagged is still hidden once it is fulfilled.
+    expect(b.approved).toEqual([]);
   });
 
   it('still hides fulfilled and already-shipped orders from every tab', () => {

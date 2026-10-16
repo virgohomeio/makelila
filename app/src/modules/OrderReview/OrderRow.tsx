@@ -78,12 +78,19 @@ export function OrderRow({
       ].filter(Boolean).join(' ')
     : null;
 
+  // The order's placement date — the sale date — shown on each row so the sale
+  // window an order belongs to is visible at a glance.
+  const saleDate = order.placed_at
+    ? new Date(order.placed_at).toLocaleDateString('en-CA', { month: 'short', day: 'numeric', year: 'numeric' })
+    : null;
+
   // Read in order, the row's own text announces as one run-on string
   // ("Alice Ames125d OVERDUE#p1· PortlandUS"). Spell it out instead.
   const label = [
     order.customer_name,
     `order ${order.order_ref}`,
     order.city,
+    saleDate ? `ordered ${saleDate}` : null,
     isCancelled ? 'cancelled' : urgency.label || null,
     showBlockDot ? 'not yet confirmable' : null,
     refundFlag ? refundFlagLabel(refundFlag).toLowerCase() : null,
@@ -120,6 +127,7 @@ export function OrderRow({
       <span className={styles.rowMeta}>
         <span className={styles.rowRef}>{order.order_ref}</span>
         <span>· {order.city}</span>
+        {saleDate && <span className={styles.saleDate}>· {saleDate}</span>}
         {quoteLabel && <span className={styles.rowFreight}>· {quoteLabel}</span>}
       </span>
 

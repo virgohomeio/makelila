@@ -35,6 +35,9 @@ export type SalesRow = {
   // Best-effort from Meta's purchase demographics (null when not a clean match).
   age: string | null;
   gender: string | null;
+  // Best-effort exact ad creative, from Meta's per-ad purchases (clean-day match;
+  // null when not unambiguous). Operator-tracked creative still overrides this.
+  creative: string | null;
   // Which campaign group this sale piled into (for verifying the bucketing).
   campaign_group: string | null;
 };
@@ -65,11 +68,30 @@ export type Attribution = { source: string | null; medium: string | null; campai
 export function classifyPlan(o: Order): string {
   const pm = (o.payment_methods ?? []).map(s => s.toLowerCase());
   if (pm.some(p => p.includes('sezzle'))) return 'Sezzle';
+  // Klarna is a separate BNPL provider shown on the Shopify order's payment
+  // method — track it distinctly like Sezzle.
+  if (pm.some(p => p.includes('klarna'))) return 'Klarna';
   const text = (o.line_items ?? []).map(li => ('name' in li ? li.name : '')).join(' ').toLowerCase();
   if (/36[\s-]*month/.test(text)) return '36-Month Plan';
   if (/12[\s-]*month/.test(text)) return '12-Month Plan';
   if (/financ|payment plan|monthly/.test(text)) return 'Financing';
   return 'Outright';
+}
+
+// Pedrum's own test purchases on Shopify are not real sales. They must be kept
+// out of the Journey Report entirely — both the displayed rows AND the per-day
+// sale counts that drive the age/gender/creative clean-day match (a stray test
+// order on a real sale's day would otherwise make that day look ambiguous and
+// block the match). Matches his name or email; extend the pattern for any other
+// test buyer.
+const TEST_BUYER = /pedrum|support\s*lila/i;
+// Known internal test discount codes — these orders aren't real sales. Extend
+// as new test codes appear. (An explicit list, not a /test/ match, so a real
+// promo like "LATEST" is never excluded by accident.)
+const TEST_CODES = new Set(['TESTPEDRUMTEST', 'USTYLERTEST', 'TESTCAMP', 'GOOGLEADSTEST']);
+export function isTestOrder(o: Order): boolean {
+  if (TEST_BUYER.test(o.customer_email ?? '') || TEST_BUYER.test(o.customer_name ?? '')) return true;
+  return (o.discount_codes ?? []).some(c => TEST_CODES.has(c.toUpperCase().trim()));
 }
 
 function bump(map: Map<string, Breakdown>, key: string, revenue: number) {
@@ -98,6 +120,7 @@ export function buildSalesReport(
   campaignName?: (raw: string) => string | null,
   demo?: (o: Order) => Demo,
   groupOf?: (o: Order) => string | null,
+  creativeOf?: (o: Order) => string | null,
 ): { rows: SalesRow[]; kpis: SalesKpis } {
   const sales = orders.filter(o => o.kind !== 'replacement');
 
@@ -139,6 +162,7 @@ export function buildSalesReport(
       journey_note: journey?.(o)?.note ?? null,
       age: demo?.(o)?.age ?? null,
       gender: demo?.(o)?.gender ?? null,
+      creative: creativeOf?.(o) ?? null,
       campaign_group: groupOf?.(o) ?? null,
     };
   });
@@ -277,8 +301,9 @@ export function reportCells(r: SalesRow): string[] {
   const secondary = firstReal && lastReal && firstReal !== lastReal
     ? (source === firstReal ? lastReal : firstReal)
     : null;
-  // Hand-tracked ad creative for this buyer, matched on name + purchase date.
-  const creative = manualCreative(r.name, date);
+  // Ad creative for this buyer: operator-tracked (manual sheets) wins; else the
+  // best-effort clean-day match from Meta's per-ad purchases; else none.
+  const creative = manualCreative(r.name, date) ?? r.creative;
   return [
     r.campaign_group ?? '—',
     r.name,

@@ -133,6 +133,49 @@
   border: 1px solid var(--color-crimson);
   border-radius: 3px;
 }
+/* Text/notes/category share the click-to-edit affordance of the number cells,
+   but fill their column instead of sitting in a narrow right-aligned box. */
+.editCellText {
+  display: block;
+  width: 100%;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.editInputText {
+  width: 100%;
+  min-width: 90px;
+  font: inherit;
+  padding: 1px 4px;
+  border: 1px solid var(--color-crimson);
+  border-radius: 3px;
+}
+.editTextarea {
+  width: 100%;
+  min-width: 140px;
+  font: inherit;
+  padding: 2px 4px;
+  border: 1px solid var(--color-crimson);
+  border-radius: 3px;
+  resize: vertical;
+}
+.editSelect {
+  font: inherit;
+  font-size: 11px;
+  padding: 1px 4px;
+  border: 1px solid var(--color-crimson);
+  border-radius: 3px;
+}
+.noticeBar {
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
+  font-size: 11px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--color-warning-border);
+  flex-basis: 100%;
+}
+
 .addPartBtn {
   margin-left: auto;
   background: #fff;
@@ -732,6 +775,17 @@
   font-weight: 600;
   padding: 1px 6px;
 }
+.qcDupMac {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 3px;
+  letter-spacing: 0.3px;
+  color: var(--color-error, #9b2c2c);
+  background: var(--color-error-bg, #fff5f5);
+  border: 1px solid var(--color-error-border, #fc8181);
+}
 
 .modalBackdrop {
   position: fixed;
@@ -840,6 +894,8 @@
 .reportDrop:hover { border-color: var(--color-info); color: var(--color-ink); }
 .reportResults { margin-top: 8px; font-size: 11px; color: var(--color-ink-muted); }
 .reportProblems { margin: 6px 0 0; padding-left: 16px; color: var(--color-error, #c53030); }
+.reportWarnings { margin: 6px 0 0; padding-left: 16px; color: var(--color-warning, #744210); }
+.reportWarningQuiet { color: var(--color-ink-subtle); }
 .reportLink { margin-top: 6px; font-size: 11px; color: var(--color-ink-muted); }
 .reportOpenBtn {
   background: none; border: none; padding: 0;
@@ -985,6 +1041,11 @@
   background: var(--color-surface);
   border-radius: var(--radius-sm);
   padding: 8px 10px;
+}
+.modalHelp {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--color-error, #c53030);
 }
 .modalError {
   font-size: 11px;

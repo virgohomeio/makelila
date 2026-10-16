@@ -5,6 +5,7 @@ import { logAction } from './activityLog';
 import { adjustPartStock } from './parts';
 import { functionErrorMessage } from './functionError';
 import { refundFlagForOrderId, refundFlagTitle } from './refundedOrders';
+import { sendTemplate } from './templates';
 // replacementTags only ever `import type`s from here, so this is not a runtime
 // cycle — the Order import on that side is erased.
 import { isPartsOnlyReplacement } from './replacementTags';
@@ -157,6 +158,10 @@ export type Order = {
   attribution_source: string | null;
   attribution_medium: string | null;
   attribution_campaign: string | null;
+  // utm_content from the landing URL — for Meta ads this carries the exact ad
+  // creative (e.g. "Fall 2026 v1 - v28a"); the Journey Report reads the creative
+  // code (v28a) out of it for a deterministic per-order "Saw Meta Ad v28a".
+  attribution_content: string | null;
   // The specific referring URL from Shopify's customer journey (e.g. a Linktree
   // or Instagram link) — shown in the Report so a "Referral" isn't anonymous.
   attribution_referrer: string | null;
@@ -243,10 +248,14 @@ const ACTION_TYPE: Record<Disposition, string> = {
   held:     'order_hold',
 };
 
-async function currentUserId(): Promise<string> {
+async function currentUser(): Promise<{ id: string; email: string | null }> {
   const { data } = await supabase.auth.getUser();
   if (!data.user) throw new Error('orders: not authenticated');
-  return data.user.id;
+  return { id: data.user.id, email: data.user.email ?? null };
+}
+
+async function currentUserId(): Promise<string> {
+  return (await currentUser()).id;
 }
 
 /** Refuse to move an order towards a shipment when the money for THAT order has
@@ -276,8 +285,61 @@ async function assertNotRefunded(orderId: string, action: string): Promise<void>
   throw new Error(`${action}: ${refundFlagTitle(flag)}`);
 }
 
+/** Who hears about every confirmed sale, and the name the mail greets.
+ *
+ *  Exported so re-routing the notice is a one-line change rather than a hunt
+ *  through the send site. */
+export const SALE_CONFIRMED_NOTIFY = 'reina@virgohome.io';
+export const SALE_CONFIRMED_NOTIFY_NAME = 'Reina';
+
+const APP_BASE_URL = 'https://lila.vip';
+const FULFILLMENT_QUEUE_URL = `${APP_BASE_URL}/fulfillment/queue`;
+
+/** Announce a confirmed sale to Customer Service.
+ *
+ *  Confirming in Order Review is the hand-off into fulfillment: this is the
+ *  write that fires auto_enqueue_approved_order, so the moment it lands the
+ *  order is in the queue with the 2-day SLA clock running. Nothing used to say
+ *  so — the only way to learn a sale had been confirmed was to open the queue
+ *  and spot a row that had not been there before.
+ *
+ *  Best-effort by design, mirroring notifyFinanceReviewEntry in
+ *  lib/postShipment.ts: the status UPDATE has already committed when this runs,
+ *  so a mail failure must never surface as a failed confirmation. An operator
+ *  who saw Confirm fail would click it again, and on this action that means a
+ *  second order_approve in the log for an order that was already confirmed. */
+async function notifySaleConfirmed(
+  order: Pick<Order, 'id' | 'order_ref' | 'customer_name'> &
+    Partial<Pick<Order, 'total_usd' | 'currency'>>,
+  confirmedByEmail: string | null,
+): Promise<void> {
+  try {
+    await sendTemplate({
+      template_key: 'sale_confirmed',
+      to: SALE_CONFIRMED_NOTIFY,
+      to_name: SALE_CONFIRMED_NOTIFY_NAME,
+      variables: {
+        recipient_first_name: SALE_CONFIRMED_NOTIFY_NAME,
+        order_ref: order.order_ref,
+        customer_name: order.customer_name || 'Unknown customer',
+        // total_usd holds the order's own currency despite the name — see the
+        // field comment on Order. Never relabel a CAD total as USD here.
+        amount: order.total_usd != null
+          ? `${Number(order.total_usd).toFixed(2)} ${order.currency ?? ''}`.trim()
+          : '\u2014',
+        confirmed_by: confirmedByEmail ?? 'An operator',
+        queue_url: FULFILLMENT_QUEUE_URL,
+        order_url: `${APP_BASE_URL}/order-review/${order.id}`,
+      },
+    });
+  } catch (e) {
+    console.warn('Sale-confirmed notification failed (non-fatal):', (e as Error).message);
+  }
+}
+
 export async function disposition(
-  order: Pick<Order, 'id' | 'order_ref' | 'customer_name'>,
+  order: Pick<Order, 'id' | 'order_ref' | 'customer_name'> &
+    Partial<Pick<Order, 'total_usd' | 'currency' | 'kind'>>,
   status: Disposition,
   reason?: string,
 ): Promise<void> {
@@ -287,7 +349,7 @@ export async function disposition(
   // refunded order rather than shipping it.
   if (status === 'approved') await assertNotRefunded(order.id, 'Cannot confirm this order');
 
-  const userId = await currentUserId();
+  const { id: userId, email } = await currentUser();
 
   const { error } = await supabase
     .from('orders')
@@ -300,6 +362,14 @@ export async function disposition(
   if (error) throw error;
 
   await logAction(ACTION_TYPE[status], order.order_ref, reason ?? order.customer_name);
+
+  // Only a sale, and only on Confirm. A replacement is not a sale — it is
+  // ticket-driven and never reaches Sales on its own — but one FLAGGED from the
+  // fulfillment queue does land back in Order Review (see bucketOrders), where
+  // it can be confirmed again from this same button. That one must stay quiet.
+  if (status === 'approved' && order.kind !== 'replacement') {
+    await notifySaleConfirmed(order, email);
+  }
 }
 
 export async function needInfo(
@@ -685,7 +755,16 @@ export function bucketOrders(
   // Age is applied here, once, rather than per tab. Every Sales tab starts on
   // SALES_QUEUE_START, so an order older than it is in no bucket at all — see
   // the constant for what that hides and why the operator asked for it.
-  const sales = cache.filter(o => o.kind !== 'replacement' && withinSalesQueue(o));
+  //
+  // One exception, added 2026-10-06: a replacement an operator FLAGGED from the
+  // fulfillment queue. Flagging is a question put to Sales — "this one has a
+  // problem, look at it" — and a question has to be asked somewhere the person
+  // answering it looks. Everything above still holds for every other
+  // replacement status, so this is a keyhole, not a reopened door: a flagged
+  // replacement that is then cancelled, held or re-queued leaves Sales again on
+  // the very next render.
+  const sales = cache.filter(o =>
+    (o.kind !== 'replacement' || o.status === 'flagged') && withinSalesQueue(o));
 
   // Cancelled is terminal and takes precedence over every other signal: a
   // cancelled order belongs in the Cancelled tab whether or not it was ever
@@ -698,16 +777,28 @@ export function bucketOrders(
   //   (a) fulfillment_queue row reached step 6 / has fulfilled_at, OR
   //   (b) customer has a shipped unit (catches legacy Excel-only shipments
   //       where the queue row was never created or advanced).
+  //
+  // A flag beats every automatic exclusion below it. Three of them — fulfilled,
+  // shipped-customer-name, and the sales-only filter above — each exist to keep
+  // noise out of a work queue, and each would otherwise silently swallow a flag
+  // an operator deliberately raised. A human saying "look at this one" is the
+  // strongest signal this function gets, and nothing heuristic outranks it.
   const active = sales.filter(o => {
     if (o.status === 'cancelled') return false;
-    if (fulfilledOrderIds.has(o.id)) return false;
+    if (o.status !== 'flagged' && fulfilledOrderIds.has(o.id)) return false;
     // (b) is a *name* match, so it also hides every new order from any customer
     // who has ever received a unit — 112 of the 163 pending orders as of
     // 2026-08-28, four of them placed that fortnight. An explicit 'open'
     // verdict from the reconcile screen (lib/reconcile.ts) is a human saying
     // "nothing shipped against this one", and beats the heuristic.
+    //
+    // A flag is the same kind of statement and outranks it too. This matters
+    // most for the replacements admitted above: a replacement goes, by
+    // definition, to a customer who already has a machine, so signal (b) would
+    // match every one of them and the flag would land on no screen at all.
     if (
-      o.reconcile_outcome !== 'open'
+      o.status !== 'flagged'
+      && o.reconcile_outcome !== 'open'
       && shippedCustomers.has(o.customer_name.toLowerCase().trim())
     ) return false;
     return true;
@@ -2731,9 +2822,42 @@ export function useShippedOrders(): { orders: Order[]; loading: boolean } {
   return { orders, loading };
 }
 
+/** Today as the operator's calendar reads it — "YYYY-MM-DD", local, never UTC.
+ *  Used to bound a picked received date: at 9am in Toronto, "today" in UTC is
+ *  already the same day, but at 9pm it is tomorrow, and a date input offering
+ *  today would then be rejected as being in the future. */
+export function localDayString(d: Date = new Date()): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/** Turn a day an operator picked in an `<input type="date">` ("YYYY-MM-DD")
+ *  into a timestamp, anchored at local NOON rather than midnight.
+ *
+ *  A bare date goes into `new Date()` as UTC midnight, which is the previous
+ *  day everywhere west of Greenwich — so a shipment received on the 7th would
+ *  be filed, and later read back, as the 6th. Noon is far enough from both
+ *  edges that no timezone this app runs in can shift the day. Returns null
+ *  when the string is not a date at all. */
+export function calendarDayToIso(day: string): string | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day.trim());
+  if (!m) return null;
+  const dt = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 12, 0, 0, 0);
+  if (Number.isNaN(dt.getTime())) return null;
+  // Rejects 2026-02-31, which the Date constructor would roll into March.
+  if (dt.getMonth() !== Number(m[2]) - 1 || dt.getDate() !== Number(m[3])) return null;
+  return dt.toISOString();
+}
+
 /** Records that an order was delivered. For replacement orders, also closes
- *  the linked service ticket. Idempotent — safe to call twice. */
-export async function markOrderDelivered(orderId: string): Promise<void> {
+ *  the linked service ticket. Idempotent — safe to call twice.
+ *
+ *  `receivedOn` is the day the customer actually took delivery, as a local
+ *  "YYYY-MM-DD" — what Fulfillment > Queue's "Shipment Received" button
+ *  collects. Delivery is nearly always confirmed after the fact (the customer
+ *  mentions it on a call days later), so stamping `now()` would have put the
+ *  whole warranty and follow-up clock on the wrong day. Omit it and today is
+ *  used, which is what the History tab's "Mark delivered" button wants. */
+export async function markOrderDelivered(orderId: string, receivedOn?: string): Promise<void> {
   const { data: row, error: rErr } = await supabase
     .from('orders')
     .select('kind, linked_ticket_id, order_ref, delivered_at, shipped_at, customer_email')
@@ -2745,13 +2869,25 @@ export async function markOrderDelivered(orderId: string): Promise<void> {
     throw new Error('Cannot mark delivered: order has not been shipped yet.');
   }
 
-  const deliveredAt = new Date().toISOString();
+  let deliveredAt = new Date().toISOString();
+  if (receivedOn) {
+    const picked = calendarDayToIso(receivedOn);
+    if (!picked) throw new Error(`"${receivedOn}" is not a date — expected YYYY-MM-DD.`);
+    // Compared as calendar days, not instants: the noon anchor above is hours
+    // ahead of a morning "now", and an operator picking today must not be told
+    // the box arrives in the future.
+    if (receivedOn.trim() > localDayString()) {
+      throw new Error('A shipment cannot be received in the future.');
+    }
+    deliveredAt = picked;
+  }
   const { error: uErr } = await supabase
     .from('orders')
     .update({ delivered_at: deliveredAt })
     .eq('id', orderId);
   if (uErr) throw new Error(uErr.message);
-  await logAction('order_delivered', row.order_ref, 'delivery confirmed',
+  await logAction('order_delivered', row.order_ref,
+    receivedOn ? `delivery confirmed \u00b7 received ${receivedOn.trim()}` : 'delivery confirmed',
     undefined,
     { klaviyoEvent: 'Order Delivered', ...((row.customer_email as string | null) ? { klaviyoEmail: row.customer_email as string } : {}) });
 

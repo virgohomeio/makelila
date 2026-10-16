@@ -1,24 +1,28 @@
 import { useState } from 'react';
 import {
   setQueuePriority, goBackStep, cancelOrderFromQueue, returnQueueRowToOrders,
-  type FulfillmentQueueRow,
+  flagOrderFromQueue, type FulfillmentQueueRow,
 } from '../../../lib/fulfillment';
+import { useAuth } from '../../../lib/auth';
 import { canRebookShipment, rebookShipment } from '../../../lib/rebookShipment';
-import { orderDue, type Order } from '../../../lib/orders';
+import { orderDue, markOrderDelivered, localDayString, type Order } from '../../../lib/orders';
 import { replacementItemsLabel } from '../../../lib/replacementTags';
 import styles from '../Fulfillment.module.css';
 
 /** Which of the header's confirm panels is open, if any.
  *
- *  The first two take the order out of the queue; the third keeps it and sends
- *  it backwards. All three ask before they act, and all three take a note. */
-type ExitPanel = 'cancel' | 'moveBack' | 'rebook' | null;
+ *  The first three take the order out of the queue; the fourth keeps it and
+ *  sends it backwards. All of them ask before they act, and all of them take a
+ *  note — required to cancel and to flag, where the note is the whole point. */
+type ExitPanel = 'cancel' | 'flag' | 'moveBack' | 'rebook' | 'received' | null;
 
 export function QueueHeader({
   row,
   order,
+  shipped = false,
   onRemoved,
   onStepChanged,
+  onReceived,
 }: {
   row: FulfillmentQueueRow;
   order: {
@@ -27,7 +31,21 @@ export function QueueHeader({
     kind?: 'sale' | 'replacement';
     line_items?: Order['line_items'];
     linked_ticket_id?: string | null;
+    /** Needed to record the arrival — optional only so the bare renders in
+     *  the tests keep working; without it the Shipment Received button is not
+     *  offered at all. */
+    id?: string;
+    /** When the customer confirmed the box arrived. Set = this order is in the
+     *  Received rail and the button is replaced by the date. */
+    delivered_at?: string | null;
   };
+  /** True when the box has gone even though the row never reached step 6 — a
+   *  shipment booked outside the queue, recognised by lib/shippedOrders. Those
+   *  rows sit under Shipped and can be received like any other. */
+  shipped?: boolean;
+  /** Called after an arrival is recorded, so the board can re-read the orders
+   *  it fetched once and move the row to the Received rail. */
+  onReceived?: () => void;
   /** Called once the row is gone from the queue, with a line to show in the
    *  now-empty detail pane (the row itself disappears via realtime). */
   onRemoved?: (message: string) => void;
@@ -35,12 +53,17 @@ export function QueueHeader({
    *  than trusting the realtime socket to still be up. */
   onStepChanged?: () => void;
 }) {
+  const { profile, user } = useAuth();
+  const operatorName = profile?.display_name ?? user?.email ?? 'Unknown';
   const due = orderDue(order.placed_at ?? order.created_at);
   const STEP_LABELS = ['', 'Assign', 'Test', 'Label', 'Dock', 'Email', 'Fulfilled'];
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const fulfilled = row.step === 6;
+  // "The box is gone" — step 6, or shipped some other way entirely. This, not
+  // `fulfilled`, is what makes an arrival recordable.
+  const hasShipped = fulfilled || shipped;
 
   const handleTogglePriority = async () => {
     setBusy(true); setError(null);
@@ -49,11 +72,15 @@ export function QueueHeader({
     finally { setBusy(false); }
   };
 
-  // The two ways an order leaves the queue without shipping. Both take a reason
-  // (required to cancel, optional to move back) rather than a bare confirm —
-  // "why did this order stop" is the thing anyone reading the log later wants.
+  // The three ways an order leaves the queue without shipping. All take a
+  // reason (required to cancel and to flag, optional to move back) rather than
+  // a bare confirm — "why did this order stop" is the thing anyone reading the
+  // log, or the Sales tab it lands in, actually wants.
   const [panel, setPanel] = useState<ExitPanel>(null);
   const [exitReason, setExitReason] = useState('');
+  /** A flagged order stays on screen — it stays in the queue, badged — so the
+   *  only proof the click did anything has to be rendered here. */
+  const [flagged, setFlagged] = useState(false);
 
   const openPanel = (next: ExitPanel) => {
     setPanel(prev => (prev === next ? null : next));
@@ -66,6 +93,30 @@ export function QueueHeader({
     try {
       await cancelOrderFromQueue(row.id, exitReason);
       onRemoved?.(`${order.order_ref} — ${order.customer_name} was cancelled and removed from the queue.`);
+    } catch (e) {
+      setError((e as Error).message);
+      setBusy(false);
+    }
+  };
+
+  // Flagging is for an order Sales has to answer something about — a bad
+  // address, line items that don't match what was paid. The note is required:
+  // it is the only thing that tells the person opening Sales › Flagged what
+  // they are being asked to fix.
+  const handleFlagOrder = async () => {
+    setBusy(true); setError(null);
+    try {
+      await flagOrderFromQueue(row.id, exitReason, operatorName);
+      // The row does NOT go away on a flag, shipped or not — see
+      // flagOrderFromQueue. Announcing it through onRemoved would clear the
+      // selection and claim a removal that did not happen, so it is said in
+      // place instead, and the board re-reads so the badge appears without
+      // waiting on the realtime socket.
+      setPanel(null);
+      setExitReason('');
+      setFlagged(true);
+      onStepChanged?.();
+      setBusy(false);
     } catch (e) {
       setError((e as Error).message);
       setBusy(false);
@@ -98,6 +149,59 @@ export function QueueHeader({
       // (or To be picked up) to Ready to ship, and the operator is about to
       // type a new tracking number into the step this reveals.
       onStepChanged?.();
+      setBusy(false);
+    } catch (e) {
+      setError((e as Error).message);
+      setBusy(false);
+    }
+  };
+
+  // The arrival. Unlike the four panels above, nothing leaves the queue and
+  // nothing is undone — the row moves from Shipped to Received and stays
+  // readable there. The date is asked for rather than stamped as now(): a
+  // customer confirms delivery on a call days after the fact, and now() would
+  // have put the warranty and follow-up clocks on the wrong day.
+  const [receivedOn, setReceivedOn] = useState(() => localDayString());
+  // The orders behind the queue are fetched once, so `order.delivered_at` is
+  // still null right after the write. Held locally so the card can say it
+  // worked without waiting on the re-read.
+  const [justReceived, setJustReceived] = useState<string | null>(null);
+
+  // Everything held above is true of ONE order, and this header is not
+  // remounted when the operator clicks a different row in the sidebar — React
+  // sees the same element in the same place and just hands it new props. So
+  // every one of those "this just happened" flags outlives the order it was
+  // about unless they are cleared here, which is how #1203 came to wear
+  // #1190's "Received: 9/24/2026" pill with its own delivered_at still null in
+  // the database. A stale pill is not cosmetic: it reads as a confirmed
+  // arrival, and it takes away the Shipment Received button that would record
+  // the real one.
+  //
+  // Reset during render rather than in an effect — an effect paints the stale
+  // claim for a frame first, and this is a claim about a customer's box.
+  const [renderedRow, setRenderedRow] = useState(row.id);
+  if (renderedRow !== row.id) {
+    setRenderedRow(row.id);
+    setPanel(null);
+    setExitReason('');
+    setError(null);
+    setBusy(false);
+    setFlagged(false);
+    setJustReceived(null);
+    setReceivedOn(localDayString());
+  }
+
+  const receivedDay = justReceived
+    ?? (order.delivered_at ? order.delivered_at.slice(0, 10) : null);
+  const canRecordReceipt = hasShipped && !!order.id && !receivedDay;
+  const handleReceived = async () => {
+    if (!order.id) return;
+    setBusy(true); setError(null);
+    try {
+      await markOrderDelivered(order.id, receivedOn);
+      setPanel(null);
+      setJustReceived(receivedOn);
+      onReceived?.();
       setBusy(false);
     } catch (e) {
       setError((e as Error).message);
@@ -182,6 +286,23 @@ export function QueueHeader({
               Due: {due.dueLabel}
             </span>
           )}
+          {receivedDay && (
+            <span
+              className={`${styles.duePill} ${styles.fulfilledPill}`}
+              title="The customer confirmed this shipment arrived"
+            >
+              Received: {new Date(`${receivedDay}T12:00:00`).toLocaleDateString('en-US')}
+            </span>
+          )}
+          {canRecordReceipt && (
+            <button
+              className={panel === 'received' ? styles.exitBtnOn : styles.exitBtn}
+              onClick={() => openPanel('received')}
+              disabled={busy}
+              aria-expanded={panel === 'received'}
+              title="The customer has the box — record the day it arrived and move this order to the Received rail"
+            >Shipment Received</button>
+          )}
           {canRebook && (
             <button
               className={panel === 'rebook' ? styles.exitBtnOn : styles.exitBtn}
@@ -192,22 +313,37 @@ export function QueueHeader({
             >Rebook Shipment</button>
           )}
           {!fulfilled && (
-            <>
-              <button
-                className={panel === 'cancel' ? styles.exitBtnDangerOn : styles.exitBtnDanger}
-                onClick={() => openPanel('cancel')}
-                disabled={busy}
-                aria-expanded={panel === 'cancel'}
-                title="Cancel the whole order — it leaves the queue and every Order Review tab"
-              >Cancel Order</button>
-              <button
-                className={panel === 'moveBack' ? styles.exitBtnOn : styles.exitBtn}
-                onClick={() => openPanel('moveBack')}
-                disabled={busy}
-                aria-expanded={panel === 'moveBack'}
-                title="Take this shipment out of the queue and put the order back in Sales › Orders"
-              >Shipment Not Ready — Move Back to Orders</button>
-            </>
+            <button
+              className={panel === 'cancel' ? styles.exitBtnDangerOn : styles.exitBtnDanger}
+              onClick={() => openPanel('cancel')}
+              disabled={busy}
+              aria-expanded={panel === 'cancel'}
+              title="Cancel the whole order — it leaves the queue and every Order Review tab"
+            >Cancel Order</button>
+          )}
+          {/* The one action offered on EVERY order in the queue, shipped ones
+              included. The other two exits are about getting a box back on the
+              shelf, which is meaningless once it has gone; raising a problem
+              with an order is not. A flag touches neither the queue row nor the
+              machine — it marks the order in both places — see
+              flagOrderFromQueue. */}
+          <button
+            className={panel === 'flag' ? styles.exitBtnWarnOn : styles.exitBtnWarn}
+            onClick={() => openPanel('flag')}
+            disabled={busy}
+            aria-expanded={panel === 'flag'}
+            title={fulfilled
+              ? 'Flag this shipped order for Sales — your note lands in Sales › Flagged; the shipment and the machine are left as they are'
+              : 'Flag this order for Sales — it stays in the queue badged Flagged, and your note lands in Sales › Flagged'}
+          >Flag Order</button>
+          {!fulfilled && (
+            <button
+              className={panel === 'moveBack' ? styles.exitBtnOn : styles.exitBtn}
+              onClick={() => openPanel('moveBack')}
+              disabled={busy}
+              aria-expanded={panel === 'moveBack'}
+              title="Take this shipment out of the queue and put the order back in Sales › Orders"
+            >Shipment Not Ready — Move Back to Orders</button>
           )}
           <button
             className={styles.backBtn}
@@ -227,14 +363,65 @@ export function QueueHeader({
           )}
         </div>
       </div>
-      {panel && (
-        <div className={panel === 'cancel' ? styles.exitPanelDanger : styles.exitPanel}>
+      {panel === 'received' && (
+        <div className={styles.exitPanel}>
+          <div className={styles.exitPanelTitle}>
+            When did {order.customer_name} receive {order.order_ref}?
+          </div>
+          <ul className={styles.exitPanelList}>
+            <li>
+              The order moves from <strong>Shipped</strong> to{' '}
+              <strong>Received</strong> in this queue, filed under the month it arrived.
+            </li>
+            <li>
+              It drops off <strong>Awaiting delivery confirmation</strong> in
+              Fulfillment › History.
+            </li>
+            {order.kind === 'replacement' && order.linked_ticket_id && (
+              <li>
+                The originating support ticket is <strong>closed</strong>, dated
+                the day you pick here.
+              </li>
+            )}
+            <li>
+              Pick the day the customer actually got the box, not today — the
+              warranty and follow-up clocks both count from this date.
+            </li>
+          </ul>
+          <input
+            className={`${styles.exitPanelInput} ${styles.exitPanelDate}`}
+            type="date"
+            value={receivedOn}
+            max={localDayString()}
+            onChange={e => setReceivedOn(e.target.value)}
+            aria-label="Date the shipment was received"
+          />
+          <div className={styles.exitPanelActions}>
+            <button
+              className={styles.exitConfirm}
+              onClick={() => void handleReceived()}
+              disabled={busy || !receivedOn}
+            >{busy ? 'Working…' : 'Record as received'}</button>
+            <button className={styles.backBtn} onClick={() => setPanel(null)} disabled={busy}>
+              Never mind
+            </button>
+          </div>
+        </div>
+      )}
+      {panel && panel !== 'received' && (
+        <div className={
+          panel === 'cancel' ? styles.exitPanelDanger
+          : panel === 'flag' ? styles.exitPanelWarn
+          : styles.exitPanel
+        }>
           <div className={styles.exitPanelTitle}>
             {panel === 'cancel'
               ? `Cancel ${order.order_ref} — ${order.customer_name}?`
-              : panel === 'rebook'
-                ? `Book a new shipment for ${order.order_ref} — ${order.customer_name}?`
-                : `Move ${order.order_ref} back to Sales › Orders?`}
+              : panel === 'flag'
+                ? `Flag ${fulfilled ? 'shipped order ' : ''}${order.order_ref} — ${order.customer_name} for Sales?`
+                : panel === 'rebook'
+                  ? `Book a new shipment for ${order.order_ref} — ${order.customer_name}?`
+                  : `Move ${order.order_ref} back to Sales › Orders?`}
           </div>
           <ul className={styles.exitPanelList}>
             {panel === 'rebook' ? (
@@ -266,6 +453,60 @@ export function QueueHeader({
                   </li>
                 )}
               </>
+            ) : panel === 'flag' ? (
+              fulfilled ? (
+                <>
+                  <li>
+                    It is marked <strong>flagged</strong> and appears in{' '}
+                    <strong>Sales › Flagged</strong>, where your note is on the order.
+                  </li>
+                  <li>
+                    The shipment is left exactly as it is — this row, its tracking number
+                    and its fulfilled date all stay, so the order still reads as shipped.
+                  </li>
+                  {row.assigned_serials.length > 0 && (
+                    <li>
+                      Unit{row.assigned_serials.length === 1 ? '' : 's'}{' '}
+                      {row.assigned_serials.join(', ')} stay{row.assigned_serials.length === 1 ? 's' : ''}{' '}
+                      with the customer — nothing goes back into stock.
+                    </li>
+                  )}
+                  <li>
+                    Nothing is cancelled and no refund is raised. A return, refund or
+                    replacement is still raised the usual way.
+                  </li>
+                </>
+              ) : (
+              <>
+                <li>
+                  It <strong>stays in this queue</strong>, badged ⚑ FLAGGED, with the
+                  packing steps paused until the flag is cleared.
+                </li>
+                <li>
+                  It is also marked <strong>flagged</strong> in{' '}
+                  <strong>Sales › Flagged</strong>, where your note is on the order.
+                </li>
+                {order.kind === 'replacement' && (
+                  <li>
+                    It stays in <strong>Service › Replacements</strong> too, badged Flagged.
+                  </li>
+                )}
+                {row.assigned_serials.length > 0 && (
+                  <li>
+                    Unit{row.assigned_serials.length === 1 ? '' : 's'}{' '}
+                    {row.assigned_serials.join(', ')} stay{row.assigned_serials.length === 1 ? 's' : ''}{' '}
+                    reserved for this order — nothing is released back to the shelf.
+                  </li>
+                )}
+                <li>
+                  Nothing is cancelled and no refund is raised —{' '}
+                  {order.kind === 'replacement'
+                    ? 'clearing the flag in Sales re-checks stock and restarts it at step '
+                    : 'confirming the order again restarts it at step '}
+                  {row.step}, where it is now.
+                </li>
+              </>
+              )
             ) : panel === 'cancel' ? (
               <>
                 <li>The order is removed from the fulfillment queue.</li>
@@ -299,23 +540,31 @@ export function QueueHeader({
             rows={2}
             placeholder={panel === 'cancel'
               ? 'Reason for cancelling (required) — e.g. customer changed their mind'
-              : panel === 'rebook'
-                ? 'Note (optional) — e.g. pickup cancelled, rebooking with GLS'
-                : 'Note (optional) — e.g. waiting on a replacement chamber'}
+              : panel === 'flag'
+                ? 'Why are you flagging this order? (required) — e.g. address is a PO box, customer has not confirmed the colour'
+                : panel === 'rebook'
+                  ? 'Note (optional) — e.g. pickup cancelled, rebooking with GLS'
+                  : 'Note (optional) — e.g. waiting on a replacement chamber'}
           />
           <div className={styles.exitPanelActions}>
             <button
-              className={panel === 'cancel' ? styles.exitConfirmDanger : styles.exitConfirm}
+              className={
+                panel === 'cancel' ? styles.exitConfirmDanger
+                : panel === 'flag' ? styles.exitConfirmWarn
+                : styles.exitConfirm
+              }
               onClick={() => void (
                 panel === 'cancel' ? handleCancelOrder()
+                : panel === 'flag' ? handleFlagOrder()
                 : panel === 'rebook' ? handleRebook()
                 : handleMoveBack()
               )}
-              disabled={busy || (panel === 'cancel' && !exitReason.trim())}
+              disabled={busy || ((panel === 'cancel' || panel === 'flag') && !exitReason.trim())}
             >
               {busy
                 ? 'Working…'
                 : panel === 'cancel' ? 'Cancel this order'
+                : panel === 'flag' ? 'Flag this order'
                 : panel === 'rebook' ? 'Rebook this shipment'
                 : 'Move back to Orders'}
             </button>
@@ -323,6 +572,22 @@ export function QueueHeader({
               Never mind
             </button>
           </div>
+        </div>
+      )}
+      {justReceived && (
+        <div className={styles.queueNotice} style={{ marginTop: 8, marginBottom: 0 }}>
+          ✓ {order.order_ref} is recorded as received on{' '}
+          {new Date(`${justReceived}T12:00:00`).toLocaleDateString('en-US')} — it is in the
+          Received rail of this queue.
+        </div>
+      )}
+      {flagged && (
+        <div className={styles.queueNotice} style={{ marginTop: 8, marginBottom: 0 }}>
+          ⚑ {order.order_ref} is flagged — it is in Sales › Flagged with your note, and it
+          stays here in the queue badged Flagged.{' '}
+          {fulfilled
+            ? 'The shipment is unchanged.'
+            : `Packing is paused at step ${row.step} until the flag is cleared.`}
         </div>
       )}
       {error && <div style={{ color: 'var(--color-error)', fontSize: 11, marginTop: 4 }}>{error}</div>}

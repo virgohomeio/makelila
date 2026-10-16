@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from './supabase';
 import { logAction } from './activityLog';
-import { cancelOrder, returnOrderToReview, type ReviewLanding } from './orders';
+import { addOrderNote, cancelOrder, returnOrderToReview, type ReviewLanding } from './orders';
 import { renderTemplate } from './templates';
 
 export type FulfillmentStep = 1 | 2 | 3 | 4 | 5 | 6;
@@ -78,6 +78,14 @@ export type FulfillmentQueueRow = {
   eztrans_batch_sent_at?: string | null;
 
   starter_tracking_num: string | null;
+  // The other answer step 3 accepts about the compost starter: this order
+  // ships none, and why (20261007120000). Optional for the same reason the
+  // batch columns above are — migrations here are applied by hand, and
+  // select('*') on a database that has not run it simply returns rows without
+  // them. See lib/starterKit.ts.
+  starter_skipped_at?: string | null;
+  starter_skipped_by?: string | null;
+  starter_skip_reason?: string | null;
   email_sent_at: string | null;
   email_sent_by: string | null;
 
@@ -768,7 +776,47 @@ export async function flagRework(
   }
 }
 
-/** Step 3: upload PDF (optional) + save LILA carrier/tracking (and US starter tracking); advance 3→4. */
+/** Put a carrier, a tracking number and the carrier's own label PDF onto a
+ *  queue row without advancing the step.
+ *
+ *  Both booking paths need exactly this. Step 3 is two moves, not one: the
+ *  shipment is booked with the carrier — on the Goorooship portal for stock at
+ *  the EZ Trans 3PL, on the Freightcom portal for stock on our own floor — and
+ *  the label it issues is recorded here; only then does "Pickup scheduled"
+ *  move the row on. Keeping the recording separate from the advance is what
+ *  lets a half-finished booking be picked up where it stopped, and what lets
+ *  the booking panel save the label before the step is ready to close.
+ *
+ *  `confirmLabel` below is the advance, and writes the same three columns on
+ *  its way past so a row saved only there is no worse off.
+ */
+export async function saveQueueLabel(
+  queueId: string,
+  input: { carrier: string; tracking_num: string; label_pdf?: File },
+): Promise<{ label_pdf_path: string | null }> {
+  let label_pdf_path: string | null = null;
+  if (input.label_pdf) {
+    const path = `${queueId}/label-${Date.now()}.pdf`;
+    const { error: upErr } = await supabase.storage
+      .from('order-labels')
+      .upload(path, input.label_pdf, { contentType: 'application/pdf' });
+    if (upErr) throw upErr;
+    label_pdf_path = path;
+  }
+  const { error } = await supabase
+    .from('fulfillment_queue')
+    .update({
+      carrier: input.carrier,
+      tracking_num: input.tracking_num.trim(),
+      ...(label_pdf_path ? { label_pdf_path } : {}),
+    })
+    .eq('id', queueId);
+  if (error) throw error;
+  return { label_pdf_path };
+}
+
+/** Step 3: upload PDF (optional) + save LILA carrier/tracking + the Amazon
+ *  compost-starter tracking; advance 3→4. */
 export async function confirmLabel(
   queueId: string,
   input: { carrier: string; tracking_num: string; label_pdf?: File; starter_tracking_num?: string },
@@ -881,7 +929,9 @@ export async function confirmDock(queueId: string): Promise<void> {
   await logAction('fq_dock_confirmed', queueId, 'Dock check complete');
 }
 
-/** Step 5: US-only starter tracking input. */
+/** Step 5: a late correction to the starter tracking number. Step 3 is where
+ *  it is asked for now (lib/starterKit.ts); this is the one that was typed
+ *  wrong, or ordered after the box had already gone. */
 export async function setStarterTracking(queueId: string, starter_tracking_num: string): Promise<void> {
   const { error } = await supabase
     .from('fulfillment_queue')
@@ -920,10 +970,14 @@ export function shipmentEmailVars(
   row: Pick<FulfillmentQueueRow, 'carrier' | 'tracking_num' | 'starter_tracking_num'>,
   order: { customer_name: string; order_ref: string; country: 'US' | 'CA' },
 ): Record<string, string> {
-  // US orders ship the compost starter kit separately through Amazon. Empty
-  // on every CA order, which is why renderShipmentEmail strips the placeholder
-  // rather than printing it.
-  const starterBlock = order.country === 'US' && row.starter_tracking_num
+  // The compost starter ships separately through Amazon. Keyed on the number
+  // rather than on the destination: step 3 now asks for one on every machine
+  // sale, CA included (lib/starterKit.ts), and gating the block on country
+  // would record a Canadian customer's starter tracking and then never tell
+  // them it existed. Empty on an order that ships no starter — a replacement,
+  // or one an operator declared exempt — which is why renderShipmentEmail
+  // strips the placeholder rather than printing it.
+  const starterBlock = row.starter_tracking_num
     ? `\nCompost Starter Kit (ships separately via Amazon)\n\n` +
       `Starter Tracking Number: ${row.starter_tracking_num}\n`
     : '';
@@ -1216,6 +1270,130 @@ export async function cancelOrderFromQueue(queueId: string, reason: string): Pro
   await deleteQueueRow(queueId);
   await cancelOrder(row.order_id, reason);
   await logAction('fq_order_cancelled', queueId, reason.trim());
+}
+
+/** Queue header action — "Flag Order". The third disposition an order can get
+ *  in the queue, between the other two: it is not dead (Cancel Order) and it is
+ *  not merely not-today (Shipment Not Ready), it is an order Sales has to
+ *  answer something about before a machine goes out — the address will not
+ *  deliver, the line items do not match what was paid, the customer has gone
+ *  quiet.
+ *
+ *  A flag does NOT take the order out of the queue, as of 2026-10-07. It marks
+ *  it, in both places at once: the row stays in Fulfillment › Queue badged
+ *  ⚑ FLAGGED and red, with the step UI replaced by the pause banner, AND the
+ *  order appears in Sales › Flagged carrying the note. Nothing is released,
+ *  nothing is deleted, no step moves.
+ *
+ *  It used to delete the row and push the machine back on the shelf, on the
+ *  reasoning that an order in review must not still be pickable (#1214 sat Held
+ *  in Sales and step-1 Ready-to-ship in Fulfillment at once for 29 days). The
+ *  reasoning was right about the hazard and wrong about the fix: what made
+ *  #1214 dangerous was that the queue said nothing, not that the row existed.
+ *  The queue now SAYS flagged — the sidebar badge, the red row, and a pause
+ *  banner in place of every step control — so the row can stay, and staying is
+ *  what operators actually need: flagging an order you are packing should not
+ *  make it vanish from the list you are working, and the pick, the test report
+ *  and the label you already attached should still be there when Sales answers.
+ *
+ *  So the whole action is the status, the note and the log entry, identically
+ *  for a sale, a replacement and an already-shipped order:
+ *
+ *    - The queue row stays, at its step, with its carrier, tracking number and
+ *      (if shipped) fulfilled_at. On a shipped order that row IS the shipment
+ *      record; deleting it would make the order read as never shipped in every
+ *      rollup that counts step 6.
+ *    - The machine stays assigned. Pre-ship it stays reserved for this customer
+ *      rather than going back on the shelf for someone else to pick — the order
+ *      is paused, not re-planned. Post-ship it is at the customer's house, and
+ *      releasing it would put a shipped unit back in sellable stock (the hole
+ *      step-6-ships-every-linked-serial exists to keep shut).
+ *
+ *  The reason is written twice, deliberately. The activity log records who
+ *  flagged what and when; order_notes is the card Sales actually reads when it
+ *  opens the order. A flag whose reason is only in the audit trail is, to the
+ *  person who has to act on it, an order that stopped moving for no stated
+ *  reason.
+ *
+ *  Replacements flag exactly like sales. Sales filters kind='replacement' out
+ *  of every bucket, so bucketOrders carries a keyhole for this case — a FLAGGED
+ *  replacement is admitted to Flagged and All — and the order keeps its
+ *  replacement_state because it is being stopped, not re-planned.
+ *
+ *  Clearing the flag is a Sales action in both directions, and both are
+ *  duplicate-safe against the row left in place: confirming a sale fires
+ *  auto_enqueue_on_approve, which inserts ON CONFLICT DO NOTHING, and clearing
+ *  a replacement's flag runs queueReplacementForFulfillment, whose
+ *  enqueueForFulfillment treats a 23505 as success. The order picks up at the
+ *  step it was flagged on rather than restarting at 1. */
+export async function flagOrderFromQueue(
+  queueId: string,
+  reason: string,
+  flaggedByName: string,
+): Promise<void> {
+  const userId = await currentUserId();
+  if (!reason.trim()) throw new Error('A reason is required to flag an order.');
+  // Deliberately NOT loadRemovableQueueRow: that refuses a shipped row, and
+  // every row is flaggable here. Nothing leaves the queue, so there is nothing
+  // for it to guard.
+  const { data: queueRow, error: qErr } = await supabase
+    .from('fulfillment_queue')
+    .select('id, order_id')
+    .eq('id', queueId)
+    .single();
+  if (qErr || !queueRow) throw new Error(`Queue row not found: ${qErr?.message ?? 'no row'}`);
+  const row = queueRow as { id: string; order_id: string };
+
+  const { data: order, error: oErr } = await supabase
+    .from('orders')
+    .select('id, order_ref, kind')
+    .eq('id', row.order_id)
+    .single();
+  if (oErr || !order) throw new Error(`Order not found: ${oErr?.message ?? 'no row'}`);
+  const isReplacement = order.kind === 'replacement';
+
+  const { error: uErr } = await supabase
+    .from('orders')
+    .update({
+      status: 'flagged',
+      dispositioned_by: userId,
+      dispositioned_at: new Date().toISOString(),
+      // Belt and braces against bucketOrders' signal (b), the customer-NAME
+      // match that buried #1189. bucketOrders now exempts every flagged order
+      // from it outright, so this is no longer the only thing holding the
+      // order on screen — it stays because it is also the honest reading of
+      // what the operator just did, and it keeps the order visible if the flag
+      // is later cleared back to 'pending'.
+      //
+      // Sales-only. reconcile_outcome answers "did something already ship
+      // against this order?", a question the Reconcile screen asks of sales. A
+      // replacement is never reconciled, so writing it would stamp a
+      // sales-ledger value on a row no sales ledger counts.
+      ...(isReplacement ? {} : { reconcile_outcome: 'open' }),
+    })
+    .eq('id', row.order_id);
+  if (uErr) {
+    // Nothing has been written yet when this fails, so the order is exactly
+    // where it was: still in the queue, still approved, unflagged.
+    throw new Error(`${order.order_ref} could not be flagged: ${uErr.message}`);
+  }
+
+  // The note is what Sales reads, but the flag has already landed by now. A
+  // failed insert must not report as "the flag did not happen" — the reason
+  // still reaches the activity log on the next line.
+  try {
+    await addOrderNote(
+      row.order_id,
+      flaggedByName,
+      `Flagged from the fulfillment queue: ${reason.trim()}`,
+    );
+  } catch (e) {
+    console.warn('flagOrderFromQueue: note insert failed (non-fatal):', (e as Error).message);
+  }
+
+  await logAction('fq_order_flagged', order.order_ref, reason.trim(), {
+    entityType: 'order', entityId: row.order_id,
+  });
 }
 
 /** Queue header action — "Shipment Not Ready — Move Back to Orders". The order

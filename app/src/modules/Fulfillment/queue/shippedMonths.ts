@@ -66,13 +66,19 @@ const UNDATED_LABEL = 'Date unknown';
 
 /** Shipped rows bucketed by the month they went out, newest month first and
  *  newest row first inside each. Rows whose date is not knowable keep their
- *  own bucket at the bottom rather than being guessed into a real month. */
+ *  own bucket at the bottom rather than being guessed into a real month.
+ *
+ *  `dateOf` overrides which date does the bucketing. The Received rail is the
+ *  same hundred-plus rows of history read by a different clock — what an
+ *  operator looking one up remembers is roughly when it ARRIVED, not when it
+ *  left the dock — so it passes the delivery date and gets the same months. */
 export function groupShippedByMonth(
   rows: FulfillmentQueueRow[],
   shippedMarks?: Map<string, ShippedMark>,
+  dateOf?: (row: FulfillmentQueueRow) => string | null,
 ): ShippedMonthGroup[] {
   const dated = rows.map(row => {
-    const iso = shippedOn(row, shippedMarks?.get(row.id));
+    const iso = dateOf ? dateOf(row) : shippedOn(row, shippedMarks?.get(row.id));
     const at = iso ? parseShipped(iso) : null;
     return { row, at };
   });

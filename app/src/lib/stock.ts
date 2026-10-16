@@ -86,6 +86,9 @@ export const QC_CHECK_META: Record<QcCheck, { label: string; color: string; bg: 
 export type Unit = {
   serial: string;
   batch: string;
+  // Purchase order this unit was claimed under (factory_orders.id). Null for
+  // units claimed before POs were linked, or claimed with "No PO".
+  po_id: string | null;
   status: UnitStatus;
   color: UnitColor | null;
   location: string | null;
@@ -115,6 +118,10 @@ export type Unit = {
   test_report_path: string | null;
   test_report_name: string | null;
   test_report_uploaded_at: string | null;
+  // ESP32 MAC from the uploaded test report (or typed in the QC modal),
+  // normalised "xx:xx:xx:xx:xx:xx". Null until a report with a MAC line is
+  // uploaded. Not unique at the DB level — see findMacDuplicates.
+  mac_address: string | null;
   // Backlog #59 — true for units the team uses for internal testing.
   // Default-filtered out of Dashboard / Customers / profitability rollups
   // so internal noise doesn't distort real-customer signals.
@@ -301,12 +308,37 @@ export async function linkUnitToCustomer(serial: string, customerId: string): Pr
     { entityType: 'unit', unitSerial: serial });
 }
 
+/** serial → the other serials holding the same mac_address.
+ *
+ *  Duplicate MACs are derived, not stored: the only column is
+ *  units.mac_address, and "duplicate" simply means another unit holds the same
+ *  value. Correcting or clearing the MAC on either unit clears the flag on both,
+ *  so nothing can go stale and there is nothing to dismiss. Units with no MAC
+ *  are never in the map; the map is empty when every MAC is unique. */
+export function findMacDuplicates(
+  units: Pick<Unit, 'serial' | 'mac_address'>[],
+): Map<string, string[]> {
+  const byMac = new Map<string, string[]>();
+  for (const u of units) {
+    if (!u.mac_address) continue;
+    const list = byMac.get(u.mac_address);
+    if (list) list.push(u.serial);
+    else byMac.set(u.mac_address, [u.serial]);
+  }
+  const out = new Map<string, string[]>();
+  for (const serials of byMac.values()) {
+    if (serials.length < 2) continue;
+    for (const s of serials) out.set(s, serials.filter(o => o !== s));
+  }
+  return out;
+}
+
 export async function updateUnitFields(
   serial: string,
   patch: Partial<Pick<Unit,
     'color' | 'location' | 'customer_name' | 'customer_order_ref' |
     'carrier' | 'firmware_version' | 'defect_reason' | 'shipped_at' | 'notes' |
-    'technician' | 'electrical_check' | 'mechanical_check' | 'defect_notes'
+    'technician' | 'electrical_check' | 'mechanical_check' | 'defect_notes' | 'mac_address'
   >>,
 ): Promise<void> {
   await currentUserId();

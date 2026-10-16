@@ -40,15 +40,20 @@ export type EzTransOrder = EzTransShipTo & { id: string; order_ref: string };
  *  are to print — so this panel only renders when the unit assigned at step 1
  *  is actually sitting at EZTrans. It renders nothing at all otherwise.
  *
- *  The label details captured here are the same three fields the Freightcom
- *  card below asks for, written to the same queue-row columns, so nothing has
- *  to be typed twice: `onLabelSaved` hands them up to StepLabel, which leaves
- *  Confirm label as a single click. */
+ *  Its sibling is FreightcomPanel, which does the same four moves for stock on
+ *  our own floor: open the carrier's portal, book the shipment there, record
+ *  the label it issued, confirm it. Step 3 shows one or the other, never both.
+ *  The label details captured here are the same three fields that panel asks
+ *  for, written to the same queue-row columns, so nothing has to be typed
+ *  twice: `onLabelSaved` hands them up to StepLabel, which leaves Pickup
+ *  scheduled as a single click. */
 export function EzTransPanel({
   row,
   order,
   onLabelSaved,
   onBatchChanged,
+  starterGap = null,
+  externalLabel = null,
 }: {
   row: FulfillmentQueueRow;
   order: EzTransOrder;
@@ -56,6 +61,26 @@ export function EzTransPanel({
   /** Re-read the queue after this order joins or leaves the day's batch, so
    *  the footer at the bottom of the page catches up without a reload. */
   onBatchChanged?: () => void;
+  /** What the compost starter is still waiting on, null when nothing.
+   *
+   *  The soil is bought on Amazon and ships to the customer direct, so it never
+   *  touches this carton — but this is the last moment anyone looks at the
+   *  order before the 3PL has the box, and "we forgot the starter" is only
+   *  fixable before then. Computed by StepLabel so the three buttons that can
+   *  end step 3 — confirm into the batch, send on its own, Pickup scheduled —
+   *  are gated by one answer rather than three. */
+  starterGap?: string | null;
+  /** Set when the carton was booked somewhere other than Goorooship — today
+   *  that means the Freightcom portal, recorded by FreightcomPanel.
+   *
+   *  EZ Trans hold the machine whoever the carrier is, and they do not touch a
+   *  box they have not been emailed about. So the handoff email is owed on a
+   *  Freightcom booking exactly as it is on a Goorooship one, and this panel
+   *  has to be able to queue it without also asking for the label a second
+   *  time: when this is set the portal link and the label form give way to a
+   *  read-only line, and what is left is the two things that actually send —
+   *  confirm it into today's batch, or send this one order on its own. */
+  externalLabel?: { carrier: string; tracking_num: string; labelOnFile: boolean } | null;
 }) {
   // Every machine on the order, not just the first one picked. An order for
   // three LILA Pros books as one Goorooship shipment, and the 3PL has to be
@@ -172,11 +197,21 @@ export function EzTransPanel({
   // A label uploaded on an earlier pass is still on the row, so a resend (or a
   // corrected tracking number) doesn't force the operator to find the file again.
   const labelOnFile = !!row.label_pdf_path;
+
+  // The label this email is about. Its own form when Goorooship booked the
+  // carton, the Freightcom panel's answer when that did — one place, so the
+  // email cannot describe a different shipment from the one on the row.
+  const extern = externalLabel ?? null;
+  const effCarrier = extern ? extern.carrier : carrier;
+  const effTracking = extern ? extern.tracking_num : tracking;
+
   // offsite blocks the send outright. Booking a three-unit order while one of
   // the three sits on our own floor would tell the 3PL to pick a machine they
   // do not hold — they would ship what they could find and nobody would learn
   // the order went out short until the customer counted boxes.
-  const ready = !!carrier && !!tracking.trim() && (!!pdf || labelOnFile) && offsite.length === 0;
+  const ready = !!effCarrier && !!effTracking.trim()
+    && (extern ? extern.labelOnFile : (!!pdf || labelOnFile))
+    && offsite.length === 0 && !starterGap;
 
   // A shipment into the US is a customs entry and needs a FIFRA worksheet with
   // it, so one is built and attached on those bookings only — the destination
@@ -190,12 +225,12 @@ export function EzTransPanel({
     return buildEzTransBooking({
       order,
       units: placements.map(p => ({ serial: p.serial, masterCarton: p.masterCarton })),
-      carrier: carrier || null,
-      tracking: tracking.trim() || null,
+      carrier: effCarrier || null,
+      tracking: effTracking.trim() || null,
       template,
       packingListTemplate,
     });
-  }, [order, placements, carrier, tracking, template, packingListTemplate]);
+  }, [order, placements, effCarrier, effTracking, template, packingListTemplate]);
 
   // Opening the editor is what commits the current rendering as the starting
   // text — before that the fields are unset so the preview keeps tracking the
@@ -240,12 +275,18 @@ export function EzTransPanel({
       // Save first: the edge function reads the label off the queue row rather
       // than taking it from this form, so there is exactly one copy of the
       // truth and a half-finished send can be picked up where it stopped.
-      await saveEzTransLabel(row.id, {
-        carrier,
-        tracking_num: tracking.trim(),
-        ...(pdf ? { label_pdf: pdf } : {}),
-      });
-      onLabelSaved?.({ carrier, tracking_num: tracking.trim() });
+      //
+      // Skipped when the booking came from the Freightcom panel, which has
+      // already written those same columns — saving again from a form this
+      // panel is not showing could only overwrite them with something staler.
+      if (!extern) {
+        await saveEzTransLabel(row.id, {
+          carrier,
+          tracking_num: tracking.trim(),
+          ...(pdf ? { label_pdf: pdf } : {}),
+        });
+        onLabelSaved?.({ carrier, tracking_num: tracking.trim() });
+      }
       // Each document travels only when it was actually edited. Sending a copy
       // of the rendered wording alongside a packing-list edit reads to the edge
       // function as an operator edit of the wording too, which makes it skip
@@ -277,11 +318,11 @@ export function EzTransPanel({
       await logAction(
         EZTRANS_SENT_ACTION,
         order.order_ref,
-        `Booking confirmation, packing list + ${carrier} label ` +
+        `Booking confirmation, packing list + ${effCarrier} label ` +
         `${worksheetGoes ? '+ US pesticide worksheet ' : ''}sent to ${EZTRANS_EMAIL} — ` +
         `${serials.length} unit(s) ${serials.join(', ')}, ` +
         `master carton ${cartonSummary}, ` +
-        `tracking ${tracking.trim()}` +
+        `tracking ${effTracking.trim()}` +
         `${sent.pesticide_worksheet === 'unsigned' ? ' · worksheet UNSIGNED' : ''}` +
         `${sent.combined === false ? ' · label and packing list sent separately' : ''}` +
         `${wordingWentEdited ? ' · wording edited for this order' : ''}` +
@@ -332,22 +373,22 @@ export function EzTransPanel({
     setBusy(true); setError(null);
     try {
       const { confirmed_at } = await confirmEzTransOrder(row.id, {
-        carrier,
-        tracking_num: tracking.trim(),
-        ...(pdf ? { label_pdf: pdf } : {}),
+        carrier: effCarrier,
+        tracking_num: effTracking.trim(),
+        ...(!extern && pdf ? { label_pdf: pdf } : {}),
         packing_list: packingEdited ? packingValue : null,
       });
-      onLabelSaved?.({ carrier, tracking_num: tracking.trim() });
+      if (!extern) onLabelSaved?.({ carrier, tracking_num: tracking.trim() });
       const files = batchAttachmentFilenames({
         customerName: order.customer_name,
-        tracking: tracking.trim(),
+        tracking: effTracking.trim(),
         needsWorksheet: worksheetGoes,
       });
       await logAction(
         EZTRANS_BATCH_CONFIRMED_ACTION,
         order.order_ref,
         `Confirmed for the Goorooship day batch — ${serials.length} unit(s) ${serials.join(', ')}, ` +
-        `master carton ${cartonSummary}, ${carrier} ${tracking.trim()} · ` +
+        `master carton ${cartonSummary}, ${effCarrier} ${effTracking.trim()} · ` +
         `documents ${[files.combined, files.worksheet].filter(Boolean).join(', ')}` +
         `${packingEdited ? ' · packing list edited for this order' : ''}`,
         { entityType: 'order', entityId: order.id, unitSerial: first.serial },
@@ -374,7 +415,7 @@ export function EzTransPanel({
       await logAction(
         EZTRANS_BATCH_CONFIRMED_ACTION,
         order.order_ref,
-        `Removed from the Goorooship day batch — ${carrier || '—'} ${tracking.trim() || '—'}. ` +
+        `Removed from the Goorooship day batch — ${effCarrier || '—'} ${effTracking.trim() || '—'}. ` +
         `The booking stands; it is simply not in today's email.`,
         { entityType: 'order', entityId: order.id, unitSerial: first.serial },
       );
@@ -391,20 +432,27 @@ export function EzTransPanel({
   const inBatch = !!confirmedAt && !batchSentAt;
   const batchFiles = batchAttachmentFilenames({
     customerName: order.customer_name,
-    tracking: tracking.trim() || '—',
+    tracking: effTracking.trim() || '—',
     needsWorksheet: worksheetGoes,
   });
 
   return (
-    <div className={styles.ezTransPanel}>
-      <div className={styles.labelSectionHead}>EZ Trans shipment (Goorooship)</div>
-      <p className={styles.ezTransLead}>
+    <div className={styles.bookingPanel}>
+      <div className={styles.labelSectionHead}>
+        {extern ? 'EZ Trans handoff email' : 'EZ Trans shipment (Goorooship)'}
+      </div>
+      <p className={styles.bookingLead}>
         {placements.length === 1
           ? `${first.serial} is`
           : `${placements.length} machines are`} held at EZ Trans
-        {skidSummary ? ` on ${skidSummary}` : ''} — book this shipment on
-        Goorooship, attach the label it gives you, then send EZ Trans the
-        confirmation so they can fulfill {placements.length === 1 ? 'it' : 'them'}.
+        {skidSummary ? ` on ${skidSummary}` : ''} — {extern
+          ? <>this carton is booked on Freightcom, but EZ Trans still hold the
+              machine and will not touch a box they have not been emailed
+              about. Queue them the confirmation so they can hand
+              {placements.length === 1 ? ' it' : ' them'} over.</>
+          : <>book this shipment on Goorooship, attach the label it gives you,
+              then send EZ Trans the confirmation so they can fulfill
+              {placements.length === 1 ? ' it' : ' them'}.</>}
       </p>
 
       {offsite.length > 0 && (
@@ -413,7 +461,7 @@ export function EzTransPanel({
            and the way that goes wrong is silent: EZ Trans picks what they
            hold, the box leaves short, and nothing says so until the customer
            counts. Either move the stock or split the order. */
-        <p className={styles.ezTransWarning}>
+        <p className={styles.bookingWarning}>
           ⚠ {offsite.length} of this order's {row.assigned_serials.length} machines
           {offsite.length === 1 ? ' is' : ' are'} not held at EZ Trans: {offsite.join(', ')}.
           EZ Trans cannot pick {offsite.length === 1 ? 'it' : 'them'}, so this booking is
@@ -421,22 +469,42 @@ export function EzTransPanel({
         </p>
       )}
 
-      <ol className={styles.ezTransSteps}>
+      <ol className={styles.bookingSteps}>
+        {/* Where the label comes from. Booked here on Goorooship, or booked
+            in the Freightcom portal and already recorded by the panel above —
+            in which case this is a read-only line, never a second form. Two
+            sets of one field is what left #1258's Canpar number in a card no
+            button read. */}
+        {extern ? (
+          <li>
+            <span className={styles.bookingStepTitle}>The label EZ Trans are to print</span>
+            <div className={styles.bookingStepRow} data-testid="eztrans-external-label">
+              <span className={styles.bookingHint}>
+                {extern.carrier} {extern.tracking_num}, booked on Freightcom
+                {extern.labelOnFile ? ' · label PDF on file' : ' · no label PDF yet'}.
+                {extern.labelOnFile
+                  ? ' It goes out with this email.'
+                  : ' Confirm the Freightcom booking above before sending.'}
+              </span>
+            </div>
+          </li>
+        ) : (
+          <>
         <li>
-          <div className={styles.ezTransStepRow}>
+          <div className={styles.bookingStepRow}>
             <a
               href={GOOROOSHIP_SHIP_URL}
               target="_blank"
               rel="noopener noreferrer"
               className={styles.extLinkBtn}
             >Goorooship — Book a shipment ↗</a>
-            <span className={styles.ezTransHint}>Book it first — the email says it is already booked.</span>
+            <span className={styles.bookingHint}>Book it first — the email says it is already booked.</span>
           </div>
         </li>
 
         <li>
-          <span className={styles.ezTransStepTitle}>Attach the label Goorooship issued</span>
-          <div className={styles.ezTransForm}>
+          <span className={styles.bookingStepTitle}>Attach the label Goorooship issued</span>
+          <div className={styles.bookingForm}>
             <label>
               Carrier:
               <select value={carrier} onChange={e => setCarrier(e.target.value)}>
@@ -458,7 +526,7 @@ export function EzTransPanel({
             <label>
               Shipping label PDF:
               {pdf ? (
-                <span className={styles.ezTransFile}>
+                <span className={styles.bookingFile}>
                   {pdf.name} · {(pdf.size / 1024).toFixed(0)} KB
                   <button type="button" onClick={() => setPdf(null)}>Remove</button>
                 </span>
@@ -471,18 +539,20 @@ export function EzTransPanel({
               )}
             </label>
             {labelOnFile && !pdf && (
-              <span className={styles.ezTransHint}>
+              <span className={styles.bookingHint}>
                 A label is already on this order — pick a file only to replace it.
               </span>
             )}
           </div>
         </li>
+          </>
+        )}
 
         <li>
-          <span className={styles.ezTransStepTitle}>
+          <span className={styles.bookingStepTitle}>
             Confirm it for today's batch
           </span>
-          <div className={styles.ezTransStepRow}>
+          <div className={styles.bookingStepRow}>
             <button className={styles.confirmBtn} onClick={handleConfirm} disabled={!ready || busy}>
               {busy
                 ? 'Saving…'
@@ -492,20 +562,26 @@ export function EzTransPanel({
             </button>
             <button
               type="button"
-              className={styles.ezTransPreviewToggle}
+              className={styles.bookingPreviewToggle}
               onClick={() => setShowPreview(v => !v)}
             >{showPreview
               ? 'Hide email'
               : edited || packingEdited
                 ? 'Show edited email + packing list'
                 : 'Preview / edit email + packing list'}</button>
-            {!ready ? (
-              <span className={styles.ezTransHint}>
+            {starterGap ? (
+              <span className={styles.bookingHint}>
+                The compost starter comes first — order it and paste the Amazon
+                tracking number in the card above. Once this email goes out the
+                3PL has the carton, and there is no adding a starter to it then.
+              </span>
+            ) : !ready ? (
+              <span className={styles.bookingHint}>
                 Carrier, tracking number and the label PDF are all required before this
                 order can join a batch.
               </span>
             ) : (
-              <span className={styles.ezTransHint}>
+              <span className={styles.bookingHint}>
                 Confirming adds it to today's Goorooship email — sent from the button at
                 the bottom of the queue.{worksheetGoes
                   ? ' This is a US entry — the signed pesticide worksheet goes with it,'
@@ -516,12 +592,12 @@ export function EzTransPanel({
           </div>
 
           {batchSentAt ? (
-            <div className={styles.ezTransSent}>
+            <div className={styles.bookingSent}>
               ✓ Went out in the Goorooship batch of {new Date(batchSentAt).toLocaleString()}.
               Confirm again only to send a correction.
             </div>
           ) : inBatch ? (
-            <div className={styles.ezTransBatchChip}>
+            <div className={styles.bookingBatchChip}>
               <span>
                 ✓ In today's batch since {new Date(confirmedAt as string).toLocaleTimeString()} —
                 it goes out with {batchFiles.combined}
@@ -529,7 +605,7 @@ export function EzTransPanel({
               </span>
               <button
                 type="button"
-                className={styles.ezTransPreviewToggle}
+                className={styles.bookingPreviewToggle}
                 onClick={handleUnconfirm}
                 disabled={busy}
               >Remove from today's batch</button>
@@ -543,24 +619,26 @@ export function EzTransPanel({
               against the batch by hand — but a single rush shipment at 6pm is
               a real thing, so the button stays where it always was. Sending
               here also stamps the row as sent, so it cannot go out twice. */}
-          <span className={styles.ezTransStepTitle}>Or send this one order on its own</span>
-          <div className={styles.ezTransStepRow}>
+          <span className={styles.bookingStepTitle}>Or send this one order on its own</span>
+          <div className={styles.bookingStepRow}>
             <button
               type="button"
-              className={styles.ezTransPreviewToggle}
+              className={styles.bookingPreviewToggle}
               onClick={handleSend}
               disabled={!ready || busy}
             >
               {busy ? 'Sending…' : sentAt ? `✉ Resend to ${EZTRANS_EMAIL} now` : `✉ Send to ${EZTRANS_EMAIL} now`}
             </button>
-            <span className={styles.ezTransHint}>
-              For a rush shipment that cannot wait for the end-of-day email.
+            <span className={styles.bookingHint}>
+              {starterGap
+                ? 'Blocked for the same reason — the starter has to be ordered first.'
+                : 'For a rush shipment that cannot wait for the end-of-day email.'}
             </span>
           </div>
         </li>
       </ol>
 
-      <dl className={styles.ezTransFacts}>
+      <dl className={styles.bookingFacts}>
         {/* One row per machine. A single "Serial No" line was how an order
             for three read as an order for one. */}
         <div>
@@ -586,7 +664,7 @@ export function EzTransPanel({
       </dl>
 
       {sentAt && (
-        <div className={styles.ezTransSent}>
+        <div className={styles.bookingSent}>
           ✓ Confirmation, packing list and label sent to {EZTRANS_EMAIL} at {new Date(sentAt).toLocaleString()}.
           {sentFiles && <div>Attached: {sentFiles.join(', ')}</div>}
           {sentDocs && (
@@ -604,35 +682,35 @@ export function EzTransPanel({
           )}
         </div>
       )}
-      {sendWarning && <div className={styles.ezTransWarning}>⚠ {sendWarning}</div>}
+      {sendWarning && <div className={styles.bookingWarning}>⚠ {sendWarning}</div>}
       {error && <div className={styles.error}>{error}</div>}
 
       {showPreview && (
         <>
-          <div className={styles.ezTransPreviewHead}>
-            <span className={styles.ezTransPreviewLabel}>Email to {EZTRANS_EMAIL}</span>
+          <div className={styles.bookingPreviewHead}>
+            <span className={styles.bookingPreviewLabel}>Email to {EZTRANS_EMAIL}</span>
             {editing ? (
               <>
                 <button
                   type="button"
-                  className={styles.ezTransPreviewToggle}
+                  className={styles.bookingPreviewToggle}
                   onClick={() => { setEditedSubject(null); setEditedBody(null); }}
                   disabled={!edited}
                 >Reset to {templateSource === 'template' ? 'template' : 'default'}</button>
                 <button
                   type="button"
-                  className={styles.ezTransPreviewToggle}
+                  className={styles.bookingPreviewToggle}
                   onClick={() => setEditing(false)}
                 >Done editing</button>
               </>
             ) : (
               <button
                 type="button"
-                className={styles.ezTransPreviewToggle}
+                className={styles.bookingPreviewToggle}
                 onClick={() => setEditing(true)}
               >Edit this one</button>
             )}
-            <span className={styles.ezTransHint}>
+            <span className={styles.bookingHint}>
               {edited
                 ? 'Edited for this order only — the saved wording is unchanged.'
                 : templateSource === 'template'
@@ -642,7 +720,7 @@ export function EzTransPanel({
           </div>
 
           {editing ? (
-            <div className={styles.ezTransEditor}>
+            <div className={styles.bookingEditor}>
               <label>
                 Subject:
                 <input
@@ -660,44 +738,44 @@ export function EzTransPanel({
                   spellCheck
                 />
               </label>
-              <span className={styles.ezTransHint}>
+              <span className={styles.bookingHint}>
                 The label and the packing list are merged into one attached PDF
                 automatically{worksheetGoes ? ', and US shipments carry the pesticide worksheet too' : ''}.
                 The packing list is edited separately, below.
               </span>
             </div>
           ) : (
-            <pre className={styles.ezTransPreview}>
+            <pre className={styles.bookingPreview}>
               {`Subject: ${subjectValue}\n` +
                `Attachments: ${attachments.join(' · ')}\n\n` +
                bodyValue}
             </pre>
           )}
 
-          <div className={styles.ezTransPreviewHead}>
-            <span className={styles.ezTransPreviewLabel}>Attached packing list (PDF)</span>
+          <div className={styles.bookingPreviewHead}>
+            <span className={styles.bookingPreviewLabel}>Attached packing list (PDF)</span>
             {editingPacking ? (
               <>
                 <button
                   type="button"
-                  className={styles.ezTransPreviewToggle}
+                  className={styles.bookingPreviewToggle}
                   onClick={() => setEditedPacking(null)}
                   disabled={!packingEdited}
                 >Reset packing list</button>
                 <button
                   type="button"
-                  className={styles.ezTransPreviewToggle}
+                  className={styles.bookingPreviewToggle}
                   onClick={() => setEditingPacking(false)}
                 >Done editing</button>
               </>
             ) : (
               <button
                 type="button"
-                className={styles.ezTransPreviewToggle}
+                className={styles.bookingPreviewToggle}
                 onClick={() => setEditingPacking(true)}
               >Edit packing list</button>
             )}
-            <span className={styles.ezTransHint}>
+            <span className={styles.bookingHint}>
               {packingEdited
                 ? 'Edited for this order only — the saved packing list is unchanged.'
                 : 'Start a line with # for the title and ## for a section heading.'}
@@ -705,7 +783,7 @@ export function EzTransPanel({
           </div>
 
           {editingPacking ? (
-            <div className={styles.ezTransEditor}>
+            <div className={styles.bookingEditor}>
               <label>
                 Packing list:
                 <textarea
@@ -715,7 +793,7 @@ export function EzTransPanel({
                   spellCheck
                 />
               </label>
-              <span className={styles.ezTransHint}>
+              <span className={styles.bookingHint}>
                 Shown as EZ Trans will read it, with this order's details already
                 filled in. Start a line with # for the title, ## for a heading.
               </span>
@@ -723,23 +801,23 @@ export function EzTransPanel({
           ) : (
             // Previews packingValue, not the template: an edit must be visible
             // here, since this is where an operator checks their work.
-            <pre className={styles.ezTransPreview}>{packingListPreview(packingValue)}</pre>
+            <pre className={styles.bookingPreview}>{packingListPreview(packingValue)}</pre>
           )}
 
           {worksheetGoes && (
             <>
-              <div className={styles.ezTransPreviewHead}>
-                <span className={styles.ezTransPreviewLabel}>Attached US pesticide worksheet (PDF)</span>
-                <span className={styles.ezTransHint}>
+              <div className={styles.bookingPreviewHead}>
+                <span className={styles.bookingPreviewLabel}>Attached US pesticide worksheet (PDF)</span>
+                <span className={styles.bookingHint}>
                   Built and signed on send. Not editable — it is a FIFRA
                   declaration to CBP, so its wording is fixed in code.
                 </span>
               </div>
-              <dl className={styles.ezTransFacts}>
+              <dl className={styles.bookingFacts}>
                 {pesticideWorksheetSummary({
                   orderRef: order.order_ref,
                   serials,
-                  tracking: tracking.trim() || null,
+                  tracking: effTracking.trim() || null,
                 }).map(f => (
                   <div key={f.label}><dt>{f.label}</dt><dd>{f.value}</dd></div>
                 ))}
