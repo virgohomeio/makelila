@@ -94,6 +94,23 @@ export function isTestOrder(o: Order): boolean {
   return (o.discount_codes ?? []).some(c => TEST_CODES.has(c.toUpperCase().trim()));
 }
 
+// A proper sale is $500 CAD or more. Anything under that is a LILA Mini $1
+// reservation or a lease/finance instalment — NOT a real sale — and is kept out
+// of the Journey Report entirely (rows, KPIs, and the clean-day counts).
+// `total_usd` holds the order's OWN currency (see the Order type), so USD orders
+// are converted to CAD before the threshold. The real-sale gap is wide
+// (reservations/instalments are tens of dollars; sales are $1,000+), so the
+// approximate FX rate never affects which side of $500 an order lands on.
+const USD_TO_CAD = 1.37;
+const MIN_SALE_CAD = 500;
+export function orderValueCad(o: Order): number {
+  const v = o.total_usd ?? 0;
+  return (o.currency ?? 'USD').toUpperCase() === 'CAD' ? v : v * USD_TO_CAD;
+}
+export function isRealSale(o: Order): boolean {
+  return orderValueCad(o) >= MIN_SALE_CAD;
+}
+
 function bump(map: Map<string, Breakdown>, key: string, revenue: number) {
   const k = key || '—';
   const cur = map.get(k) ?? { key: k, count: 0, revenue: 0 };
@@ -204,7 +221,7 @@ export const UNKNOWN = 'UNKNOWN';
 // sale piled into is visible for verification.
 export const REPORT_COLUMNS = [
   'Campaign', 'Name', 'Date', 'Time (EST)', 'City', 'Province/State', 'Country',
-  'Age Range', 'Gender', 'Source', 'Buyer Plan',
+  'Age Range', 'Gender', 'Source', 'Buyer Plan', 'Order Value',
   'Discount WELCOMELILA?', 'Discount CHECKOUTFIVE?', 'Other Codes?', 'Other Code 2',
   'Purchase Time after Purchase Visit', 'Notes',
 ] as const;
@@ -319,6 +336,7 @@ export function reportCells(r: SalesRow): string[] {
       : UNKNOWN),
     source,
     r.plan,
+    `$${Math.round(r.revenue).toLocaleString('en-US')} ${r.currency}`,
     yesNo(codes, 'WELCOMELILA'),
     yesNo(codes, 'CHECKOUTFIVE'),
     others[0] ?? 'No',
