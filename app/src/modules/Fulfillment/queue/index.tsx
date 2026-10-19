@@ -288,7 +288,7 @@ export default function Queue() {
                       so they are left alone. */}
                   {selected.step === 1 && (partsOnly
                     ? <StepPartsOnly row={selected} order={selectedOrder} onShipped={() => { void refresh(); }} />
-                    : <StepAssign row={selected} order={selectedOrder} />)}
+                    : <StepAssign key={selected.id} row={selected} order={selectedOrder} />)}
                   {selected.step === 2 && (partsOnly
                     ? <StepPartsOnly row={selected} order={selectedOrder} onShipped={() => { void refresh(); }} />
                     : <StepTest row={selected} />)}

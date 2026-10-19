@@ -558,19 +558,31 @@ export async function assignUnits(queueId: string, serials: string[], orderId: s
   // one go so a bad pick is caught before anything is written.
   const { data: existing, error: rErr } = await supabase
     .from('units')
-    .select('serial, status')
+    .select('serial, status, customer_order_ref')
     .in('serial', picked);
   if (rErr) throw rErr;
   const statuses = new Map(
     (existing ?? []).map(u => [(u as { serial: string }).serial, (u as { status: string }).status]),
   );
+  const reservedFor = new Map(
+    (existing ?? []).map(u => [
+      (u as { serial: string }).serial,
+      (u as { customer_order_ref: string | null }).customer_order_ref,
+    ]),
+  );
   // Only 'ready' units are pickable; 'shipped' is allowed for the backfill
   // flow. Everything else — team-test, quarantine, scrap, lost, in-production,
   // etc. — is out of circulation and must not be reserved onto an order.
+  //
+  // The one exception is a unit already 'reserved' for THIS order: a
+  // replacement names its machine when it is raised (createReplacementOrder
+  // reserves it then), so by the time it reaches this step its unit is no
+  // longer 'ready' — and refusing it stranded R-0073's 421 off the picker.
   const PICKABLE: ReadonlyArray<string> = ['ready', 'shipped'];
   for (const serial of picked) {
     const status = statuses.get(serial);
-    if (!status || !PICKABLE.includes(status)) {
+    const ownReservation = status === 'reserved' && reservedFor.get(serial) === order.order_ref;
+    if (!status || (!PICKABLE.includes(status) && !ownReservation)) {
       throw new Error(
         `Unit ${serial} is '${status ?? 'unknown'}' and cannot be assigned to a fulfillment order.`,
       );
