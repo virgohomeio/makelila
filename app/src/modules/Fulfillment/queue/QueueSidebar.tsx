@@ -243,10 +243,11 @@ export function QueueSidebar({
       paused ? styles.paused : '',
     ].filter(Boolean).join(' ');
     const refundFlag = refundFlags?.get(r.order_id) ?? null;
-    // Only in its own rail: under Ready to ship or Shipped the badge would be
-    // noise on every row, and in the pickup rail it is the whole reason the
-    // row is there — so it says which email went, and when.
-    const pickupSend = tab === 'pickup' && goorooshipSends
+    // In the pickup rail it is the whole reason the row is there. Ready to
+    // ship carries those same rows too (it mirrors Sales › Confirmed), so the
+    // badge rides there as well — it is how a picker tells a handed-off
+    // carton from one still to pack. Never under Shipped, where it is noise.
+    const pickupSend = (tab === 'pickup' || tab === 'ready') && goorooshipSends
       ? goorooshipSend(r, goorooshipSends)
       : null;
     const pauseBadge = paused
