@@ -4,24 +4,27 @@
 // kept clearly separate from Meta).
 //
 // Operator-triggered (user JWT) + cron-safe (x-cron-secret), same as the Meta
-// sync. Auth to Google: an OAuth2 refresh token (exchanged for a short-lived
-// access token each run) + a Google Ads developer token.
+// sync.
 //
-// Secrets (set in Edge Function secrets — never in code):
-//   GOOGLE_ADS_DEVELOPER_TOKEN     approved developer token (Ads API Center)
-//   GOOGLE_ADS_CLIENT_ID           OAuth2 client id
-//   GOOGLE_ADS_CLIENT_SECRET       OAuth2 client secret
-//   GOOGLE_ADS_REFRESH_TOKEN       refresh token for a user who can read the account
-//   GOOGLE_ADS_CUSTOMER_ID         the ad account to pull (digits; dashes are stripped)
-//   GOOGLE_ADS_LOGIN_CUSTOMER_ID   optional — the MCC/manager account id, if the
-//                                  account sits under a manager (digits)
+// Auth: reuses the SAME Google service account as the GA4 / Search Console pulls
+// (GOOGLE_SERVICE_ACCOUNT_JSON), minting a token for the `adwords` scope. The
+// service account's email must be added as a user on the Google Ads account
+// (Google Ads → Admin → Access and security → Users). Developer tokens were
+// sunset by Google (Sep 2026) and are not used.
+//
+// Secrets:
+//   GOOGLE_SERVICE_ACCOUNT_JSON    (already set — shared with GA4/Search Console)
+//   GOOGLE_ADS_CUSTOMER_ID         the ad account to pull (digits; dashes stripped)
+//   GOOGLE_ADS_LOGIN_CUSTOMER_ID   optional — the MCC/manager id, if the account
+//                                  is reached through a manager (digits)
 //   GOOGLE_ADS_API_VERSION         optional — defaults to v26 (bump as Google releases)
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { corsHeaders } from '../_shared/cors.ts';
 import { authenticate } from '../_shared/auth.ts';
+import { getGoogleAccessToken, type ServiceAccount } from '../_shared/google-auth.ts';
 
-const OAUTH_TOKEN_URL = 'https://oauth2.googleapis.com/token';
+const ADWORDS_SCOPE = 'https://www.googleapis.com/auth/adwords';
 
 type GaRow = {
   campaign?: { id?: string; name?: string; status?: string };
@@ -45,36 +48,21 @@ Deno.serve(async (req: Request) => {
   try { await authenticate(req, admin); }
   catch (e) { if (e instanceof Response) return e; throw e; }
 
-  const devToken     = Deno.env.get('GOOGLE_ADS_DEVELOPER_TOKEN');
-  const clientId     = Deno.env.get('GOOGLE_ADS_CLIENT_ID');
-  const clientSecret = Deno.env.get('GOOGLE_ADS_CLIENT_SECRET');
-  const refreshToken = Deno.env.get('GOOGLE_ADS_REFRESH_TOKEN');
-  const rawCustomer  = Deno.env.get('GOOGLE_ADS_CUSTOMER_ID');
+  const saJson = Deno.env.get('GOOGLE_SERVICE_ACCOUNT_JSON');
+  const rawCustomer = Deno.env.get('GOOGLE_ADS_CUSTOMER_ID');
   const loginCustomer = (Deno.env.get('GOOGLE_ADS_LOGIN_CUSTOMER_ID') ?? '').replace(/\D/g, '');
   const version = Deno.env.get('GOOGLE_ADS_API_VERSION') ?? 'v26';
-  if (!devToken || !clientId || !clientSecret || !refreshToken || !rawCustomer) {
-    return j({ error: 'Google Ads not configured: set GOOGLE_ADS_DEVELOPER_TOKEN, GOOGLE_ADS_CLIENT_ID, GOOGLE_ADS_CLIENT_SECRET, GOOGLE_ADS_REFRESH_TOKEN and GOOGLE_ADS_CUSTOMER_ID in Edge Function secrets.' }, 400);
-  }
+  if (!saJson) return j({ error: 'GOOGLE_SERVICE_ACCOUNT_JSON not configured (shared with GA4).' }, 400);
+  if (!rawCustomer) return j({ error: 'GOOGLE_ADS_CUSTOMER_ID not configured in Edge Function secrets.' }, 400);
   const customerId = rawCustomer.replace(/\D/g, '');
 
-  // 1) Refresh-token → short-lived access token.
+  // 1) Service-account access token for the Ads API (same SA as GA4).
   let accessToken: string;
   try {
-    const res = await fetch(OAUTH_TOKEN_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        client_id: clientId,
-        client_secret: clientSecret,
-        refresh_token: refreshToken,
-        grant_type: 'refresh_token',
-      }),
-    });
-    const body = await res.json();
-    if (!res.ok) return j({ error: `Google OAuth ${res.status}: ${JSON.stringify(body).slice(0, 300)}` }, 502);
-    accessToken = body.access_token as string;
+    const sa = JSON.parse(saJson) as ServiceAccount;
+    accessToken = await getGoogleAccessToken(sa, [ADWORDS_SCOPE]);
   } catch (e) {
-    return j({ error: `Google OAuth request failed: ${(e as Error).message}` }, 502);
+    return j({ error: `Service-account token failed: ${(e as Error).message}` }, 502);
   }
 
   // 2) Campaign metrics, one row per campaign per day (last 90 days).
@@ -88,7 +76,6 @@ Deno.serve(async (req: Request) => {
 
   const headers: Record<string, string> = {
     'Authorization': `Bearer ${accessToken}`,
-    'developer-token': devToken,
     'Content-Type': 'application/json',
   };
   if (loginCustomer) headers['login-customer-id'] = loginCustomer;
