@@ -65,14 +65,18 @@ Deno.serve(async (req: Request) => {
     return j({ error: `Service-account token failed: ${(e as Error).message}` }, 502);
   }
 
-  // 2) Campaign metrics, one row per campaign per day (last 90 days).
+  // 2) Campaign metrics, one row per campaign per day. GAQL has no LAST_90_DAYS
+  //    literal (only up to LAST_30_DAYS), so use an explicit 90-day BETWEEN range.
+  const until = new Date();
+  const since = new Date(); since.setDate(since.getDate() - 90);
+  const day = (d: Date) => d.toISOString().slice(0, 10);
   const query = `
     SELECT campaign.id, campaign.name, campaign.status,
            metrics.cost_micros, metrics.impressions, metrics.clicks,
            metrics.conversions, metrics.conversions_value,
            customer.currency_code, segments.date
     FROM campaign
-    WHERE segments.date DURING LAST_90_DAYS`;
+    WHERE segments.date BETWEEN '${day(since)}' AND '${day(until)}'`;
 
   const headers: Record<string, string> = {
     'Authorization': `Bearer ${accessToken}`,
