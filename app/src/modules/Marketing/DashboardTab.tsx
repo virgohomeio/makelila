@@ -1,8 +1,11 @@
 import { useMemo, type CSSProperties } from 'react';
 import { useFbCampaigns } from '../../lib/marketing/facebook';
+import { useGoogleAds, sumGoogleAds } from '../../lib/marketing/googleAds';
 import { useKlaviyoSyncStatus } from '../../lib/marketing/klaviyo';
 import { useCacByChannel } from '../../lib/marketing/cac';
 import { useAcquisitionOverview } from '../../lib/marketing/journey';
+
+const money = (n: number) => `$${Math.round(n).toLocaleString()}`;
 
 const subtle = 'var(--color-ink-subtle)';
 const muted = 'var(--color-ink-muted)';
@@ -13,6 +16,7 @@ const muted = 'var(--color-ink-muted)';
 // clear "not synced yet" hint instead of blank zeros.
 export function DashboardTab() {
   const { campaigns, loading: campsLoading } = useFbCampaigns(180);
+  const { rows: googleRows } = useGoogleAds();
   const { rows: cac, loading: cacLoading } = useCacByChannel();
   const { rows: acq, loading: acqLoading } = useAcquisitionOverview();
   const { logs } = useKlaviyoSyncStatus(1);
@@ -36,6 +40,18 @@ export function DashboardTab() {
     };
   }, [campaigns]);
 
+  const google = useMemo(() => sumGoogleAds(googleRows), [googleRows]);
+  // Meta's own reported conversions (website purchases).
+  const metaConversions = useMemo(
+    () => campaigns.reduce((s, c) => s + (c.metrics?.website_purchases ?? 0), 0),
+    [campaigns],
+  );
+  const metaCac = metaConversions ? ads.spend / metaConversions : null;
+  const googleCac = google.conversions ? google.spend / google.conversions : null;
+  const totalSpend = ads.spend + google.spend;
+  const totalConversions = metaConversions + google.conversions;
+  const blendedCac = totalConversions ? totalSpend / totalConversions : null;
+
   const topCampaigns = useMemo(
     () => [...campaigns].sort((a, b) => (b.spend_cad ?? 0) - (a.spend_cad ?? 0)).slice(0, 5),
     [campaigns],
@@ -46,6 +62,19 @@ export function DashboardTab() {
 
   return (
     <div>
+      {/* Combined paid-ads summary — Meta + Google, together and split. */}
+      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Paid ads summary — Meta + Google</div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 6 }}>
+        <Tile label="Total ad spend (CAD)" value={money(totalSpend)} sub={`${totalConversions.toLocaleString()} conversions`} />
+        <Tile label="Blended CAC" value={blendedCac != null ? money(blendedCac) : '—'} />
+        <Tile label="Meta spend" value={money(ads.spend)} sub={metaCac != null ? `$${metaCac.toFixed(0)} CAC · ${metaConversions} conv` : undefined} />
+        <Tile label="Google spend" value={money(google.spend)} sub={googleCac != null ? `$${googleCac.toFixed(0)} CAC · ${google.conversions} conv` : (google.hasData ? undefined : 'not synced')} />
+      </div>
+      <div style={{ fontSize: 11, color: muted, marginBottom: 16 }}>
+        Conversions are each platform's own reported numbers (Meta purchases, Google conversions). Meta reflects synced
+        campaign lifetime; Google reflects the last ~90 days.
+      </div>
+
       {/* Paid-ads KPI row */}
       <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Paid ads (Meta) — last 180 days synced</div>
       {campsLoading ? (
@@ -91,6 +120,20 @@ export function DashboardTab() {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* Paid ads (Google) */}
+      <div style={{ fontSize: 13, fontWeight: 600, margin: '18px 0 8px' }}>Paid ads (Google) — last ~90 days synced</div>
+      {!google.hasData ? (
+        <div style={notice}>No Google Ads data yet — <code>sync-google-ads</code> populates this every 3 hours.</div>
+      ) : (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 8 }}>
+          <Tile label="Ad spend (CAD)" value={money(google.spend)} />
+          <Tile label="Impressions" value={google.impressions.toLocaleString()} />
+          <Tile label="Clicks" value={google.clicks.toLocaleString()} sub={google.impressions ? `${((google.clicks / google.impressions) * 100).toFixed(2)}% CTR` : undefined} />
+          <Tile label="Conversions" value={google.conversions.toLocaleString()} sub={googleCac != null ? `$${googleCac.toFixed(0)} CAC` : undefined} />
+          <Tile label="Conv. value (CAD)" value={money(google.value)} sub={google.spend ? `${(google.value / google.spend).toFixed(2)}× ROAS` : undefined} />
         </div>
       )}
 
@@ -145,6 +188,7 @@ export function DashboardTab() {
       <div style={{ fontSize: 13, fontWeight: 600, margin: '18px 0 8px' }}>Data sources</div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12 }}>
         <SourceRow name="Meta Ads" ok={ads.hasData} detail={ads.hasData ? `${campaigns.length} campaign rows synced` : 'sync-facebook-ads not deployed yet'} />
+        <SourceRow name="Google Ads" ok={google.hasData} detail={google.hasData ? `${money(google.spend)} spend synced (last 90d)` : 'sync-google-ads: no data yet'} />
         <SourceRow name="Klaviyo (email)" ok={!!lastKlaviyo} detail={lastKlaviyo ? `last profile sync ${lastKlaviyo}` : 'sync-klaviyo-profiles not deployed yet'} />
         <SourceRow name="Attribution (first touch)" ok={acqTotal > 0} detail={`${acqTotal} customers with a source`} />
         <SourceRow name="Organic social / Google Analytics" ok={false} detail="not integrated yet (roadmap)" />

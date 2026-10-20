@@ -7,6 +7,7 @@ import {
 } from '../../lib/marketing/salesReport';
 import { useKlaviyoJourneys, summarizeJourney } from '../../lib/marketing/journeyTiming';
 import { buildCampaignGroups } from '../../lib/marketing/campaignGroups';
+import { useGoogleAds, sumGoogleAds } from '../../lib/marketing/googleAds';
 
 const subtle = 'var(--color-ink-subtle)';
 const muted = 'var(--color-ink-muted)';
@@ -38,6 +39,7 @@ export function ReportTab() {
   const { campaigns } = useFbCampaigns(365);
   const { demographics } = useFbDemographics();
   const { ads } = useFbAds();
+  const { rows: googleRows } = useGoogleAds();
   const [days, setDays] = useState(0);   // default: All time — show every sale
   const [campaignFilter, setCampaignFilter] = useState('all');
   const [pageSize, setPageSize] = useState(20);
@@ -88,6 +90,29 @@ export function ReportTab() {
     if (selectedGroup) return uniqueCampaigns.filter(c => c.campaign_id && selectedGroup.ids.has(c.campaign_id)).reduce((s, c) => s + (c.spend_cad ?? 0), 0);
     return uniqueCampaigns.filter(c => inRange(c.date_start)).reduce((s, c) => s + (c.spend_cad ?? 0), 0);
   }, [uniqueCampaigns, cutoff, selectedGroup]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Per-platform spend + conversions for the selected scope: Meta (fb_campaigns)
+  // and Google (google_ads_campaigns), separate and blended. Conversions are each
+  // platform's OWN reported conversions (Meta website purchases, Google
+  // conversions). Total ad spend here drives the blended CAC/ROAS/ROI below.
+  const platform = useMemo(() => {
+    const metaSpend = adSpendCad;
+    const metaCampaigns = selectedGroup
+      ? uniqueCampaigns.filter(c => c.campaign_id && selectedGroup.ids.has(c.campaign_id))
+      : uniqueCampaigns.filter(c => inRange(c.date_start));
+    const metaConversions = metaCampaigns.reduce((s, c) => s + (c.metrics?.website_purchases ?? 0), 0);
+    // Google date window, aligned to the selected group / range.
+    const gStart = selectedGroup ? selectedGroup.startDate : (days ? new Date(cutoff).toISOString().slice(0, 10) : null);
+    const gEnd = selectedGroup ? (selectedGroup.endDate ?? new Date().toISOString().slice(0, 10)) : null;
+    const g = sumGoogleAds(googleRows, gStart, gEnd);
+    return {
+      metaSpend, metaConversions, metaCac: metaConversions ? metaSpend / metaConversions : null,
+      googleSpend: g.spend, googleConversions: g.conversions, googleValue: g.value, googleHasData: g.hasData,
+      googleCac: g.conversions ? g.spend / g.conversions : null,
+      totalSpend: metaSpend + g.spend,
+      totalConversions: metaConversions + g.conversions,
+    };
+  }, [adSpendCad, uniqueCampaigns, selectedGroup, cutoff, days, googleRows]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const { rows, kpis } = useMemo(() => {
     const filtered = orders.filter(o => o.kind !== 'replacement' && !isTestOrder(o) && isRealSale(o) && inScope(o));
@@ -187,8 +212,8 @@ export function ReportTab() {
       return g ? g.label : null;
     };
 
-    return buildSalesReport(filtered, resolve, adSpendCad, journey, campaignName, demo, groupOf, creativeOf);
-  }, [orders, byId, byEmail, journeys, campaigns, campaignGroups, demographics, ads, adSpendCad, cutoff, campaignFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+    return buildSalesReport(filtered, resolve, platform.totalSpend, journey, campaignName, demo, groupOf, creativeOf);
+  }, [orders, byId, byEmail, journeys, campaigns, campaignGroups, demographics, ads, platform, cutoff, campaignFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const pageCount = Math.max(1, Math.ceil(rows.length / pageSize));
   const safePage = Math.min(page, pageCount - 1);
@@ -232,19 +257,29 @@ export function ReportTab() {
         )}
       </div>
 
-      {/* KPI block */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 16 }}>
+      {/* Combined KPI block — blended across Meta + Google ad spend. */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 10 }}>
         <Kpi label="Total sales" value={String(kpis.sales)} />
         <Kpi label="Revenue" value={money(kpis.revenue)} />
-        <Kpi label="Ad spend (CAD)" value={money(kpis.adSpendCad)} />
-        <Kpi label="CAC" value={kpis.cac != null ? money(kpis.cac) : '—'} />
+        <Kpi label="Ad spend — total (CAD)" value={money(platform.totalSpend)} />
+        <Kpi label="Blended CAC" value={kpis.cac != null ? money(kpis.cac) : '—'} />
         <Kpi label="ROAS" value={kpis.roas != null ? `${kpis.roas.toFixed(2)}×` : '—'} />
         <Kpi label="ROI" value={kpis.roiPct != null ? `${kpis.roiPct}%` : '—'} />
         <Kpi label="Gross profit" value={money(kpis.grossProfit)} />
       </div>
 
+      {/* Per-platform split — each platform's own spend + reported conversions + CAC. */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 16 }}>
+        <PlatformCard name="Meta ads" spend={platform.metaSpend} conversions={platform.metaConversions} cac={platform.metaCac}
+          note={platform.metaSpend === 0 ? 'no spend in this window' : undefined} />
+        <PlatformCard name="Google ads" spend={platform.googleSpend} conversions={platform.googleConversions} cac={platform.googleCac}
+          note={!platform.googleHasData ? 'no spend in this window' : undefined} />
+      </div>
+
       <div style={{ fontSize: 11, color: muted, marginBottom: 14 }}>
-        One row per buyer, mirroring the manual Sale tracker. <strong>Purchase time</strong> + visit history are auto-filled
+        One row per buyer, mirroring the manual Sale tracker. <strong>Ad spend, CAC, ROAS, ROI</strong> above are blended
+        across Meta + Google; the per-platform split (each platform's own reported conversions) sits right under them.
+        <strong>Purchase time</strong> + visit history are auto-filled
         from Klaviyo. The exact <strong>ad creative</strong> (v28a…) in Notes comes from the order's own Shopify
         <strong>utm_content</strong> when present (deterministic), otherwise a best-effort Meta clean-day match.
         <strong>Age / Gender</strong> are best-effort from Meta's purchase demographics — filled only on an unambiguous
@@ -331,6 +366,31 @@ function Kpi({ label, value }: { label: string; value: string }) {
     <div style={{ border: '1px solid var(--color-border)', borderRadius: 6, padding: '8px 14px', minWidth: 110 }}>
       <div style={{ fontSize: 10, color: subtle, textTransform: 'uppercase', letterSpacing: 0.3 }}>{label}</div>
       <div style={{ fontSize: 18, fontWeight: 700, marginTop: 2 }}>{value}</div>
+    </div>
+  );
+}
+
+function PlatformCard({ name, spend, conversions, cac, note }: {
+  name: string; spend: number; conversions: number; cac: number | null; note?: string;
+}) {
+  return (
+    <div style={{ border: '1px solid var(--color-border)', borderRadius: 6, padding: '8px 14px', minWidth: 250 }}>
+      <div style={{ fontSize: 11, fontWeight: 700, marginBottom: 5 }}>{name}</div>
+      <div style={{ display: 'flex', gap: 18 }}>
+        <PlatformStat label="Spend (CAD)" value={money(spend)} />
+        <PlatformStat label="Conversions" value={String(conversions)} />
+        <PlatformStat label="CAC" value={cac != null ? money(cac) : '—'} />
+      </div>
+      {note && <div style={{ fontSize: 10, color: subtle, marginTop: 3 }}>{note}</div>}
+    </div>
+  );
+}
+
+function PlatformStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <div style={{ fontSize: 10, color: subtle, textTransform: 'uppercase', letterSpacing: 0.3 }}>{label}</div>
+      <div style={{ fontSize: 15, fontWeight: 700, marginTop: 1 }}>{value}</div>
     </div>
   );
 }
