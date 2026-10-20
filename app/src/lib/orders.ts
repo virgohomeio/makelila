@@ -540,6 +540,31 @@ export async function setDwelling(id: string, value: Dwelling): Promise<void> {
   await logAction('address_dwelling_set', id, value);
 }
 
+/** Operator entry of the apartment/unit number, for the order the verify step
+ *  flagged as a multi-unit building with none on file. Getting the number from
+ *  the customer is the only way that blocker clears, and until now there was
+ *  nowhere to type it.
+ *
+ *  The unit status goes to 'ok' because a person has it from the customer; a
+ *  later Re-verify still checks it against the postal authority and can come
+ *  back 'unrecognized'. Clearing the field puts the status back to unknown
+ *  rather than guessing. sync-shopify-orders never overwrites a unit number
+ *  with Shopify's blank, so this survives the next sync. */
+export async function setAddressLine2(id: string, value: string): Promise<void> {
+  const line2 = value.trim() || null;
+  const { error } = await supabase
+    .from('orders')
+    .update({ address_line2: line2, address_unit_status: line2 ? 'ok' : null })
+    .eq('id', id);
+  if (error) throw error;
+  await logAction(
+    line2 ? 'address_unit_set' : 'address_unit_cleared',
+    id,
+    line2 ? `apartment/unit # set to "${line2}"` : 'apartment/unit # cleared',
+    { entityType: 'order', entityId: id },
+  );
+}
+
 export async function updateFreightEstimate(id: string, amount: number): Promise<void> {
   // Backlog #17 — operator edit flips the source to 'manual' so the FreightCard
   // can render a "(operator edit)" tag and reporting can distinguish synced

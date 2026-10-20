@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { Order, AreaType, Dwelling } from '../../../lib/orders';
 import {
   setSalesConfirmedFit, setRuralCheckConfirmed, needsRuralManualCheck, ruralCheckAvailable,
-  verifyAddress, setAreaType, setDwelling, AREA_TYPE_LABEL,
+  verifyAddress, setAreaType, setDwelling, setAddressLine2, AREA_TYPE_LABEL,
   orderPostalCode, areaTypeProvenance,
 } from '../../../lib/orders';
 import {
@@ -174,9 +174,33 @@ export function AddressCard({ order }: { order: Order }) {
         </div>
         <div className={styles.contactLine}>
           <span className={styles.contactLabel}>Apartment/Unit #</span>
-          {/* Always shown alongside the rest of the address; blank when the
-              customer didn't provide an apartment/unit. */}
-          <span>{order.address_line2 ?? ''}</span>
+          {/* Editable: when verify flags a multi-unit building with no unit
+              number, typing the one the customer gave is how that clears.
+              Saves on blur or Enter. */}
+          <input
+            key={`${order.id}:${order.address_line2 ?? ''}`}
+            className={`${styles.unitInput} ${unitMissing ? styles.unitInputMissing : ''}`}
+            aria-label="Apartment/Unit number"
+            placeholder={unitMissing ? 'Add unit # from customer' : '—'}
+            defaultValue={order.address_line2 ?? ''}
+            disabled={busy}
+            onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+            onBlur={async e => {
+              const next = e.currentTarget.value.trim();
+              if (next === (order.address_line2 ?? '').trim()) return;
+              setBusy(true);
+              try {
+                await setAddressLine2(order.id, next);
+                say(next
+                  ? `✓ Unit # saved. Re-verify to check it against the postal authority.`
+                  : 'Unit # cleared.');
+              } catch (err2) {
+                say(`Could not save unit #: ${(err2 as Error).message}`, true);
+              } finally {
+                setBusy(false);
+              }
+            }}
+          />
         </div>
         <div className={styles.contactLine}>
           <span className={styles.contactLabel}>City</span>
@@ -212,7 +236,7 @@ export function AddressCard({ order }: { order: Order }) {
             <span className={styles.unitAlertBody}>
               {order.address_google_formatted ?? order.address_line} is a multi-unit building.
               The street address is confirmed, but no apartment/unit number is on this order —
-              ask the customer for it before booking freight.
+              ask the customer for it, then enter it in Apartment/Unit # above.
             </span>
           </div>
         )}

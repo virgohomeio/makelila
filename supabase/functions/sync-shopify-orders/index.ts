@@ -683,10 +683,15 @@ serve(async (req: Request) => {
 
     let addressChanged = false;
     if (!operatorTouched) {
+      // Shopify's address2 is blank on most orders, and an operator who got the
+      // apartment/unit number from the customer types it into the Address card.
+      // A blank from Shopify must not wipe that — only a unit Shopify actually
+      // has replaces it.
+      const line2 = m.address_line2 ?? existing?.address_line2 ?? null;
       refreshPatch.customer_email = m.customer_email;
       refreshPatch.customer_phone = m.customer_phone;
       refreshPatch.address_line   = m.address_line;
-      refreshPatch.address_line2  = m.address_line2;
+      refreshPatch.address_line2  = line2;
       refreshPatch.city           = m.city;
       refreshPatch.region_state   = m.region_state;
       refreshPatch.country        = m.country;
@@ -715,7 +720,7 @@ serve(async (req: Request) => {
       if (
         (existing?.postal_code ?? null) !== (m.postal_code ?? null) ||
         (existing?.address_line ?? null) !== (m.address_line ?? null) ||
-        (existing?.address_line2 ?? null) !== (m.address_line2 ?? null)
+        (existing?.address_line2 ?? null) !== line2
       ) {
         // The address moved, so every verified fact about it is stale —
         // including the dwelling type and the unit check, which is the whole

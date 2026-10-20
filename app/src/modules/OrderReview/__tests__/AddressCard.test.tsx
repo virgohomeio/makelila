@@ -3,7 +3,9 @@ import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 
 const {
   verifyAddressMock, setDwellingMock, setAreaTypeMock, setRuralCheckConfirmedMock,
+  setAddressLine2Mock,
 } = vi.hoisted(() => ({
+  setAddressLine2Mock: vi.fn(() => Promise.resolve()),
   verifyAddressMock: vi.fn(),
   setDwellingMock:   vi.fn(() => Promise.resolve()),
   setAreaTypeMock:   vi.fn(() => Promise.resolve()),
@@ -19,6 +21,7 @@ vi.mock('../../../lib/orders', async () => {
     setAreaType:   setAreaTypeMock,
     setSalesConfirmedFit: vi.fn(() => Promise.resolve()),
     setRuralCheckConfirmed: setRuralCheckConfirmedMock,
+    setAddressLine2: setAddressLine2Mock,
   };
 });
 vi.mock('../../../lib/templates', () => ({ sendTemplate: vi.fn(() => Promise.resolve({ message_id: 'm1' })) }));
@@ -130,7 +133,23 @@ describe('AddressCard — the missing unit number', () => {
     // Said twice on purpose: once in the alert, once as the building type's
     // delivery consequence.
     expect(screen.getAllByText(/multi-unit building/i).length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText(/ask the customer for it before booking freight/i)).toBeInTheDocument();
+    expect(screen.getByText(/ask the customer for it, then enter it in Apartment\/Unit #/i)).toBeInTheDocument();
+  });
+
+  // #1310 (Justin Champagne): the card said "ask for the unit number" and had
+  // nowhere to put it, so the blocker could never be cleared.
+  it('lets an operator enter the unit number the customer gave', async () => {
+    render(<AddressCard order={noUnit} />);
+    const input = screen.getByLabelText('Apartment/Unit number');
+    fireEvent.change(input, { target: { value: ' 1 ' } });
+    fireEvent.blur(input);
+    await waitFor(() => expect(setAddressLine2Mock).toHaveBeenCalledWith(noUnit.id, '1'));
+  });
+
+  it('does not write when the unit number is unchanged', () => {
+    render(<AddressCard order={noUnit} />);
+    fireEvent.blur(screen.getByLabelText('Apartment/Unit number'));
+    expect(setAddressLine2Mock).not.toHaveBeenCalled();
   });
 
   it('cites the USPS record type behind the verdict', () => {

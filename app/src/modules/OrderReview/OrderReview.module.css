@@ -1561,6 +1561,18 @@
 /* A multi-unit building with no unit number on the order. A freight driver
    with nowhere to deliver leaves the pallet in a lobby or returns it to the
    terminal, so this is the loudest thing on the card. */
+.unitInput {
+  font-size: inherit;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
+  background: var(--color-raised);
+  color: var(--color-ink);
+  min-width: 0;
+  width: 10em;
+}
+.unitInputMissing { border-color: var(--color-error-border); }
+
 .unitAlert {
   display: flex;
   flex-direction: column;
