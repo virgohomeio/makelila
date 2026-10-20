@@ -378,15 +378,13 @@ describe('QueueSidebar', () => {
       expect(screen.getByTitle(/own booking email/i)).toBeInTheDocument();
     });
 
-    // Ready to ship mirrors Sales › Confirmed, so a handed-off carton is in it
-    // too — the badge is what tells the picker there is nothing to pack.
-    it('badges the same order under Ready to ship', () => {
+    it('does not badge the same order under Ready to ship', () => {
       render(<MemoryRouter><QueueSidebar
         readyRows={[dockRow]} shippedRows={[]}
         orderLookup={orders} goorooshipSends={sends}
         selectedId={null} onSelect={vi.fn()}
       /></MemoryRouter>);
-      expect(screen.getByText(/GOOROOSHIP NOTIFIED/i)).toBeInTheDocument();
+      expect(screen.queryByText(/GOOROOSHIP NOTIFIED/i)).not.toBeInTheDocument();
     });
 
     it('says what the rail is for when it is empty', () => {

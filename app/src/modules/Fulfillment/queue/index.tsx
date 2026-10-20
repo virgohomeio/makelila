@@ -123,12 +123,9 @@ export default function Queue() {
     // to close out, and Shipped is where they will go looking for it.
     const alreadyShipped = ready.filter(r => shippedMarks.has(r.id));
     // Labelled, docked and already emailed to Goorooship: waiting on the
-    // carrier, not on us. These STAY in Ready to ship as well — the operator
-    // asked (2026-10-20) that Sales › Confirmed and Ready to ship hold exactly
-    // the same orders, and splitting them out put 7 of 20 confirmed sales in
-    // a rail nobody counted. To be picked up is now a subset view of Ready
-    // to ship, and the row carries its GOOROOSHIP NOTIFIED badge in both.
-    const { pickup } = splitAwaitingPickup(readySorted, goorooshipSends, isEzTransRow);
+    // carrier, not on us. Split off the sorted rail so both halves keep pick
+    // order, and split rather than filtered so nothing goes missing.
+    const { ready: stillOurs, pickup } = splitAwaitingPickup(readySorted, goorooshipSends, isEzTransRow);
     // Left unsorted on purpose: the sidebar buckets this tab by the month each
     // box went out and orders it newest-first (queue/shippedMonths.ts). Sorting
     // by order ref here only to have it thrown away read like the real order.
@@ -140,18 +137,16 @@ export default function Queue() {
     const receivedOf = (r: FulfillmentQueueRow) =>
       orderLookup.get(r.order_id)?.delivered_at ?? null;
     return {
-      readyRows: readySorted,
+      readyRows: stillOurs,
       pickupRows: pickup,
       shippedRows: everythingShipped.filter(r => !receivedOf(r)),
       receivedRows: everythingShipped.filter(r => !!receivedOf(r)),
     };
   }, [ready, fulfilled, orderLookup, shippedMarks, goorooshipSends, isEzTransRow]);
 
-  // pickupRows is a subset of readyRows, so it is not added again — the day
-  // batch would otherwise see every handed-off carton twice.
   const allRows = useMemo(
-    () => [...readyRows, ...shippedRows, ...receivedRows],
-    [readyRows, shippedRows, receivedRows],
+    () => [...readyRows, ...pickupRows, ...shippedRows, ...receivedRows],
+    [readyRows, pickupRows, shippedRows, receivedRows],
   );
 
   // Arrival dates by queue row id — buckets the Received rail by month and
@@ -170,10 +165,10 @@ export default function Queue() {
   // is the returns team's problem, not the picker's.
   const refundFlags = useMemo(
     () => indexRefundFlags(
-      readyRows.flatMap(r => orderLookup.get(r.order_id) ?? []),
+      [...readyRows, ...pickupRows].flatMap(r => orderLookup.get(r.order_id) ?? []),
       refundMarks,
     ),
-    [readyRows, orderLookup, refundMarks],
+    [readyRows, pickupRows, orderLookup, refundMarks],
   );
 
   // Fetch orders referenced by the queue rows (one-shot; orders rarely change once approved)
