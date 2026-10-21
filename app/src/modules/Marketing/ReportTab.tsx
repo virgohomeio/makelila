@@ -188,10 +188,22 @@ export function ReportTab() {
       m.set(label, (m.get(label) ?? 0) + (ad.purchases ?? 0));
       creativeByDate.set(ad.date_start, m);
     }
+    // utm_content is sometimes the creative string ("Fall 2026 v1 - v28a") and
+    // sometimes the numeric Meta ad id (e.g. 120250118728320739). Map ad id → ad
+    // name via fb_ads so either form resolves to the creative code.
+    const adNameById = new Map<string, string>();
+    for (const ad of ads) if (ad.ad_id && ad.ad_name) adNameById.set(ad.ad_id, ad.ad_name);
+    const creativeFromContent = (content: string | null): string | null => {
+      const direct = creativeLabel(content);
+      if (direct) return direct;
+      const id = (content ?? '').trim();
+      if (/^\d+$/.test(id)) return creativeLabel(adNameById.get(id) ?? null);
+      return null;
+    };
     const creativeOf = (o: Order): string | null => {
-      // Deterministic first: the ad creative from the order's OWN utm_content
-      // (e.g. "Fall 2026 v1 - v28a" → "v28a"), captured by Shopify on the order.
-      const fromContent = creativeLabel(o.attribution_content);
+      // Deterministic first: the ad creative from the order's OWN utm_content —
+      // either the creative string or the Meta ad id (resolved via fb_ads).
+      const fromContent = creativeFromContent(o.attribution_content);
       if (fromContent) return fromContent;
       // Fallback for older orders with no utm_content: the best-effort clean-day
       // match from Meta's per-ad purchases.
