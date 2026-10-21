@@ -1,32 +1,14 @@
 import { useState } from 'react';
-import { toggleDockCheck, confirmDock, type FulfillmentQueueRow } from '../../../lib/fulfillment';
-import { StepBlockers } from './StepBlockers';
+import { confirmDock, type FulfillmentQueueRow } from '../../../lib/fulfillment';
 import styles from '../Fulfillment.module.css';
 
-const ITEMS = [
-  { key: 'printed' as const,   col: 'dock_printed' as const,   label: 'Label printed' },
-  { key: 'affixed' as const,   col: 'dock_affixed' as const,   label: 'Label affixed to box' },
-  { key: 'docked' as const,    col: 'dock_docked' as const,    label: 'Box on outbound dock' },
-  { key: 'notified' as const,  col: 'dock_notified' as const,  label: 'Carrier notified for pickup' },
-  { key: 'picked_up' as const, col: 'dock_picked_up' as const, label: 'Carrier picked up' },
-];
-
+// Step 4 is a single confirmation: the carrier has the box. The old five-item
+// handoff checklist was ticked all at once in practice, so it bought nothing.
 export function StepDock({ row }: { row: FulfillmentQueueRow }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const allDone = ITEMS.every(i => row[i.col]);
-  // Named rather than counted: with five look-alike checkboxes, "2 to go" still
-  // makes the operator re-read the list.
-  const blockers = ITEMS.filter(i => !row[i.col]).map(i => i.label.toLowerCase());
-
-  const toggle = async (item: typeof ITEMS[number]) => {
-    const next = !row[item.col];
-    try { await toggleDockCheck(row.id, item.key, next); }
-    catch (e) { setError((e as Error).message); }
-  };
 
   const confirm = async () => {
-    if (!allDone) return;
     setBusy(true); setError(null);
     try { await confirmDock(row.id); }
     catch (e) { setError((e as Error).message); }
@@ -35,22 +17,10 @@ export function StepDock({ row }: { row: FulfillmentQueueRow }) {
 
   return (
     <div>
-      <h3 style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>Dock handoff checklist</h3>
-      <ul style={{ listStyle: 'none', padding: 0, margin: '8px 0' }}>
-        {ITEMS.map(i => (
-          <li key={i.key} style={{ padding: '6px 0' }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 12 }}>
-              <input type="checkbox" checked={row[i.col]} onChange={() => toggle(i)} />
-              {i.label}
-            </label>
-          </li>
-        ))}
-      </ul>
       <div className={styles.stepBar}>
-        <button className={styles.confirmBtn} onClick={confirm} disabled={!allDone || busy}>
-          {busy ? 'Saving…' : '✓ Confirm dock & proceed to Step 5'}
+        <button className={styles.confirmBtn} onClick={confirm} disabled={busy}>
+          {busy ? 'Saving…' : '✓ Pickup confirmed, proceed to customer email'}
         </button>
-        <StepBlockers blockers={blockers} />
       </div>
       {error && <div style={{ color: 'var(--color-error)', fontSize: 11, marginTop: 6 }}>{error}</div>}
     </div>

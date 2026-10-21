@@ -926,13 +926,20 @@ export async function toggleDockCheck(
   if (error) throw error;
 }
 
-/** Step 4: all 4 checks confirmed → advance 4→5. */
+/** Step 4: pickup confirmed → advance 4→5. The UI no longer shows the
+ *  checklist, so the dock_* booleans are all stamped true here to keep the
+ *  row consistent with a completed handoff. */
 export async function confirmDock(queueId: string): Promise<void> {
   const userId = await currentUserId();
   const { error } = await supabase
     .from('fulfillment_queue')
     .update({
       step: 5,
+      dock_printed: true,
+      dock_affixed: true,
+      dock_docked: true,
+      dock_notified: true,
+      dock_picked_up: true,
       dock_confirmed_at: new Date().toISOString(),
       dock_confirmed_by: userId,
     })

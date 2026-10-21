@@ -91,20 +91,11 @@ describe('StepAssign — why Confirm is disabled', () => {
   });
 });
 
-describe('StepDock — why Confirm is disabled', () => {
-  it('names the checklist items still unticked', () => {
-    render(<StepDock row={{ ...row, step: 4, dock_printed: true, dock_affixed: true }} />);
-    const hint = screen.getByTestId('step-blockers');
-    expect(hint).toHaveTextContent(/box on outbound dock/i);
-    expect(hint).toHaveTextContent(/carrier picked up/i);
-    expect(hint).not.toHaveTextContent(/label printed/i);
-  });
-
-  it('says nothing once every box is ticked', () => {
-    render(<StepDock row={{
-      ...row, step: 4,
-      dock_printed: true, dock_affixed: true, dock_docked: true, dock_notified: true, dock_picked_up: true,
-    }} />);
+describe('StepDock — single pickup confirmation', () => {
+  it('offers the confirm button with no checklist to tick', () => {
+    render(<StepDock row={{ ...row, step: 4 }} />);
+    expect(screen.getByRole('button', { name: /Pickup confirmed, proceed to customer email/ })).toBeEnabled();
+    expect(screen.queryByRole('checkbox')).toBeNull();
     expect(screen.queryByTestId('step-blockers')).toBeNull();
   });
 });
