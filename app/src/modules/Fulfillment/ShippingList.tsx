@@ -5,7 +5,8 @@ import styles from './ShippingList.module.css';
 
 // Fulfillment › Shipping. One row per shipped machine: customer, unit, ship
 // date, cost, carrier, tracking number, and a link out to the carrier's
-// tracking page. Rebuilt from scratch 2026-10-21 — the old Freightcom
+// tracking page. Shipments booked in the queue but not yet marked shipped are
+// listed too, tagged Scheduled, since their tracking number already exists. Rebuilt from scratch 2026-10-21 — the old Freightcom
 // quote/book dashboard was retired at the operator's request.
 
 function fmtDate(iso: string | null): string {
@@ -34,10 +35,12 @@ export function ShippingList() {
     const q = search.trim().toLowerCase();
     if (!q) return rows;
     return rows.filter(r =>
-      `${r.customer_name ?? ''} ${r.serial} ${r.order_ref ?? ''} ${r.carrier ?? ''} ${r.tracking_num ?? ''}`
+      `${r.customer_name ?? ''} ${r.serial ?? ''} ${r.order_ref ?? ''} ${r.carrier ?? ''} ${r.tracking_num ?? ''}`
         .toLowerCase().includes(q),
     );
   }, [rows, search]);
+
+  const scheduledCount = useMemo(() => rows.filter(r => r.scheduled).length, [rows]);
 
   return (
     <div className={styles.wrap}>
@@ -49,7 +52,10 @@ export function ShippingList() {
           value={search}
           onChange={e => setSearch(e.target.value)}
         />
-        <span className={styles.count}>{filtered.length} of {rows.length} shipped units</span>
+        <span className={styles.count}>
+          {filtered.length} of {rows.length} shipments
+          {scheduledCount > 0 && ` · ${scheduledCount} scheduled, not yet marked shipped`}
+        </span>
         <Button onClick={refresh}>Refresh</Button>
       </div>
 
@@ -80,13 +86,20 @@ export function ShippingList() {
               {filtered.map(r => {
                 const url = shipmentTrackingUrl(r.carrier, r.tracking_num);
                 return (
-                  <tr key={r.serial}>
+                  <tr key={r.key}>
                     <td>
                       {r.customer_name ?? <span className={styles.muted}>—</span>}
                       {r.order_ref && <span className={styles.sub}>{r.order_ref}</span>}
                     </td>
-                    <td className={styles.mono}>{r.serial}</td>
-                    <td>{fmtDate(r.shipped_at)}</td>
+                    <td className={styles.mono}>{r.serial ?? <span className={styles.muted}>—</span>}</td>
+                    <td>
+                      {r.scheduled ? (
+                        <>
+                          <span className={styles.scheduled}>Scheduled</span>
+                          {r.scheduled_at && <span className={styles.sub}>label {fmtDate(r.scheduled_at)}</span>}
+                        </>
+                      ) : fmtDate(r.shipped_at)}
+                    </td>
                     <td className={styles.num}><Cost row={r} /></td>
                     <td>{r.carrier ?? <span className={styles.muted}>—</span>}</td>
                     <td className={styles.mono}>{r.tracking_num ?? <span className={styles.muted}>—</span>}</td>

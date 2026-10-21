@@ -668,16 +668,21 @@ export async function fetchInvoices(
 
 // ── Shipped units (Fulfillment › Shipping list) ────────────────────────────
 
-/** One shipped machine: who it went to, when, by which carrier, and what it
- *  cost to send. Read from `units` (one row per machine, the only table that
- *  covers every shipment — Freightcom, hand-booked and historical alike), with
- *  the cost taken from the linked order. */
+/** One machine that has shipped or is scheduled to ship: who it went to, when,
+ *  by which carrier, the tracking number and what it cost to send. */
 export type ShippedUnitRow = {
-  serial: string;
+  /** Stable React key — the serial, or the queue row id when no unit is linked. */
+  key: string;
+  serial: string | null;
   customer_name: string | null;
   order_ref: string | null;
   carrier: string | null;
+  /** Actual ship-out date. Null while the shipment is only scheduled. */
   shipped_at: string | null;
+  /** When the label was confirmed — shown for scheduled rows. */
+  scheduled_at: string | null;
+  /** Booked with a tracking number but the unit is not marked shipped yet. */
+  scheduled: boolean;
   tracking_num: string | null;
   /** orders.shipping_cost_usd — despite the name it usually holds CAD, so the
    *  currency is read from shipping_cost_currency, never inferred. */
@@ -693,8 +698,119 @@ const TRACKABLE_CARRIERS = new Set(['UPS', 'FedEx', 'Purolator', 'Canada Post', 
 export function shipmentTrackingUrl(carrier: string | null, tracking: string | null): string | null {
   const num = tracking?.trim();
   if (!num) return null;
-  if (carrier && TRACKABLE_CARRIERS.has(carrier)) return trackingUrlFor(carrier, num);
+  const known = carrier ? [...TRACKABLE_CARRIERS].find(c => c.toLowerCase() === carrier.trim().toLowerCase()) : undefined;
+  if (known) return trackingUrlFor(known, num);
   return `https://www.google.com/search?q=${encodeURIComponent(`${carrier ?? ''} tracking ${num}`.trim())}`;
+}
+
+type QueueJoin = {
+  id: string; step: number; carrier: string | null; tracking_num: string | null;
+  assigned_serial: string | null; label_confirmed_at: string | null;
+  fulfilled_at: string | null; created_at: string;
+  fulfillment_queue_units?: { unit_serial: string }[] | null;
+  orders: { order_ref: string | null; customer_name: string | null; status: string | null;
+            shipping_cost_usd: number | null; shipping_cost_currency: string | null } | null;
+};
+type UnitJoin = {
+  serial: string; status: string; customer_name: string | null; customer_order_ref: string | null;
+  carrier: string | null; shipped_at: string | null; tracking_num: string | null;
+};
+type OrderCost = { order_ref: string; customer_name: string | null;
+  shipping_cost_usd: number | null; shipping_cost_currency: string | null };
+type LegacyCost = { serial: string | null; tracking_number: string | null; carrier: string | null;
+  shipped_on: string | null; amount_cad: number | null };
+type LogRow = { serial_number: string | null; tracking_number: string | null; carrier: string | null;
+  shipping_date: string | null };
+
+const blank = (v: string | null | undefined): string | null => (v && v.trim() ? v.trim() : null);
+
+/**
+ * Merges every place a shipment's tracking number lives. The number typed in
+ * when a shipment is scheduled is saved on the fulfillment_queue row; units
+ * only get a copy once the row reaches step 6, and shipments from before the
+ * queue existed live in legacy_shipping_costs / fulfillment_log. Priority:
+ * queue → unit → legacy costs → fulfillment log.
+ */
+export function mergeShippedUnits(input: {
+  units: UnitJoin[]; queue: QueueJoin[]; orders: OrderCost[];
+  legacy: LegacyCost[]; log: LogRow[];
+}): ShippedUnitRow[] {
+  const unitBySerial = new Map(input.units.map(u => [u.serial, u]));
+  const orderByRef = new Map<string, OrderCost>();
+  for (const o of input.orders) {
+    // INV- refs can collide across customers; keep the first costed one.
+    const prev = orderByRef.get(o.order_ref);
+    if (!prev || (prev.shipping_cost_usd == null && o.shipping_cost_usd != null)) orderByRef.set(o.order_ref, o);
+  }
+  const legacyBySerial = new Map<string, LegacyCost>();
+  for (const l of input.legacy) if (l.serial && blank(l.tracking_number) && !legacyBySerial.has(l.serial)) legacyBySerial.set(l.serial, l);
+  const logBySerial = new Map<string, LogRow>();
+  for (const l of input.log) if (l.serial_number && blank(l.tracking_number) && !logBySerial.has(l.serial_number)) logBySerial.set(l.serial_number, l);
+
+  const out = new Map<string, ShippedUnitRow>();
+
+  // Queue rows with a tracking number, newest first so the latest booking for
+  // a serial (a reship) wins.
+  const queue = [...input.queue].sort((a, b) => b.created_at.localeCompare(a.created_at));
+  for (const q of queue) {
+    if (!blank(q.tracking_num) || q.orders?.status === 'cancelled') continue;
+    const serials = q.fulfillment_queue_units?.length
+      ? q.fulfillment_queue_units.map(u => u.unit_serial)
+      : q.assigned_serial ? [q.assigned_serial] : [null];
+    for (const serial of serials) {
+      const key = serial ?? `queue:${q.id}`;
+      if (out.has(key)) continue;
+      const unit = serial ? unitBySerial.get(serial) : undefined;
+      const shipped = q.step >= 6 || unit?.status === 'shipped';
+      out.set(key, {
+        key, serial,
+        customer_name: unit?.customer_name ?? q.orders?.customer_name ?? null,
+        order_ref: q.orders?.order_ref ?? unit?.customer_order_ref ?? null,
+        carrier: blank(q.carrier) ?? blank(unit?.carrier),
+        shipped_at: shipped ? (unit?.shipped_at ?? q.fulfilled_at) : null,
+        scheduled_at: q.label_confirmed_at,
+        scheduled: !shipped,
+        tracking_num: blank(q.tracking_num),
+        shipping_cost: q.orders?.shipping_cost_usd ?? null,
+        shipping_cost_currency: q.orders?.shipping_cost_currency ?? null,
+      });
+    }
+  }
+
+  // Every unit marked shipped that the queue didn't already cover.
+  for (const u of input.units) {
+    if (u.status !== 'shipped' || out.has(u.serial)) continue;
+    const order = u.customer_order_ref ? orderByRef.get(u.customer_order_ref) : undefined;
+    const legacy = legacyBySerial.get(u.serial);
+    const log = logBySerial.get(u.serial);
+    const tracking = blank(u.tracking_num) ?? blank(legacy?.tracking_number) ?? blank(log?.tracking_number);
+    const fromLegacy = !blank(u.tracking_num) && !!blank(legacy?.tracking_number);
+    const fromLog = !blank(u.tracking_num) && !fromLegacy && !!blank(log?.tracking_number);
+    const cost = order?.shipping_cost_usd ?? legacy?.amount_cad ?? null;
+    out.set(u.serial, {
+      key: u.serial, serial: u.serial,
+      customer_name: u.customer_name ?? order?.customer_name ?? null,
+      order_ref: u.customer_order_ref,
+      carrier: fromLegacy ? (blank(legacy?.carrier) ?? blank(u.carrier))
+             : fromLog ? (blank(log?.carrier) ?? blank(u.carrier))
+             : (blank(u.carrier) ?? blank(legacy?.carrier) ?? blank(log?.carrier)),
+      shipped_at: u.shipped_at ?? legacy?.shipped_on ?? log?.shipping_date ?? null,
+      scheduled_at: null,
+      scheduled: false,
+      tracking_num: tracking,
+      shipping_cost: cost,
+      shipping_cost_currency: order?.shipping_cost_usd != null ? order.shipping_cost_currency
+                            : legacy?.amount_cad != null ? 'CAD' : null,
+    });
+  }
+
+  // Scheduled first (they need watching), then newest ship date first.
+  return [...out.values()].sort((a, b) => {
+    if (a.scheduled !== b.scheduled) return a.scheduled ? -1 : 1;
+    const da = a.shipped_at ?? a.scheduled_at ?? '';
+    const db = b.shipped_at ?? b.scheduled_at ?? '';
+    return db.localeCompare(da);
+  });
 }
 
 export function useShippedUnits(): {
@@ -709,49 +825,50 @@ export function useShippedUnits(): {
     let cancelled = false;
     (async () => {
       setLoading(true);
-      const { data: units, error: uErr } = await supabase
-        .from('units')
-        .select('serial, customer_name, customer_order_ref, carrier, shipped_at, tracking_num')
-        .eq('status', 'shipped')
-        .order('shipped_at', { ascending: false, nullsFirst: false });
+      const [qRes, uRes, lRes, logRes] = await Promise.all([
+        supabase.from('fulfillment_queue')
+          .select('id, step, carrier, tracking_num, assigned_serial, label_confirmed_at, fulfilled_at, created_at, '
+                + 'fulfillment_queue_units(unit_serial), '
+                + 'orders(order_ref, customer_name, status, shipping_cost_usd, shipping_cost_currency)')
+          .not('tracking_num', 'is', null),
+        supabase.from('units')
+          .select('serial, status, customer_name, customer_order_ref, carrier, shipped_at, tracking_num')
+          .in('status', ['shipped', 'reserved']),
+        supabase.from('legacy_shipping_costs')
+          .select('serial, tracking_number, carrier, shipped_on, amount_cad')
+          .not('tracking_number', 'is', null),
+        supabase.from('fulfillment_log')
+          .select('serial_number, tracking_number, carrier, shipping_date')
+          .not('tracking_number', 'is', null),
+      ]);
       if (cancelled) return;
-      if (uErr) { setError(uErr.message); setLoading(false); return; }
+      const firstErr = qRes.error ?? uRes.error;
+      if (firstErr) { setError(firstErr.message); setLoading(false); return; }
+      // The two history tables only fill gaps — a failure there is reported but not fatal.
+      const softErr = lRes.error ?? logRes.error;
 
-      type U = { serial: string; customer_name: string | null; customer_order_ref: string | null;
-                 carrier: string | null; shipped_at: string | null; tracking_num: string | null };
-      const list = (units ?? []) as U[];
-      const refs = [...new Set(list.map(u => u.customer_order_ref).filter((r): r is string => !!r))];
-
-      const costs = new Map<string, { cost: number | null; currency: string | null; name: string | null }>();
+      const units = (uRes.data ?? []) as UnitJoin[];
+      const refs = [...new Set(units.filter(u => u.status === 'shipped')
+        .map(u => u.customer_order_ref).filter((r): r is string => !!r))];
+      let orders: OrderCost[] = [];
       if (refs.length) {
-        const { data: orders, error: oErr } = await supabase
+        const { data, error: oErr } = await supabase
           .from('orders')
           .select('order_ref, customer_name, shipping_cost_usd, shipping_cost_currency')
           .in('order_ref', refs);
         if (cancelled) return;
         if (oErr) setError(oErr.message);
-        for (const o of (orders ?? []) as { order_ref: string; customer_name: string | null;
-            shipping_cost_usd: number | null; shipping_cost_currency: string | null }[]) {
-          // INV- refs can collide across customers; keep the first costed one.
-          const prev = costs.get(o.order_ref);
-          if (prev?.cost != null) continue;
-          costs.set(o.order_ref, { cost: o.shipping_cost_usd, currency: o.shipping_cost_currency, name: o.customer_name });
-        }
+        orders = (data ?? []) as OrderCost[];
       }
 
-      setRows(list.map(u => {
-        const o = u.customer_order_ref ? costs.get(u.customer_order_ref) : undefined;
-        return {
-          serial: u.serial,
-          customer_name: u.customer_name ?? o?.name ?? null,
-          order_ref: u.customer_order_ref,
-          carrier: u.carrier,
-          shipped_at: u.shipped_at,
-          tracking_num: u.tracking_num,
-          shipping_cost: o?.cost ?? null,
-          shipping_cost_currency: o?.currency ?? null,
-        };
+      setRows(mergeShippedUnits({
+        units,
+        queue: (qRes.data ?? []) as unknown as QueueJoin[],
+        orders,
+        legacy: (lRes.data ?? []) as LegacyCost[],
+        log: (logRes.data ?? []) as LogRow[],
       }));
+      if (softErr) setError(softErr.message);
       setLoading(false);
     })();
     return () => { cancelled = true; };
