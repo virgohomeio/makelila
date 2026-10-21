@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { supabase } from './supabase';
 import { logAction } from './activityLog';
+import { trackingUrlFor } from './fulfillment';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -663,4 +664,98 @@ export async function fetchInvoices(
   });
   if (error) throw new Error(error.message);
   return (data as { invoices: FreightcomInvoice[] }).invoices ?? [];
+}
+
+// ── Shipped units (Fulfillment › Shipping list) ────────────────────────────
+
+/** One shipped machine: who it went to, when, by which carrier, and what it
+ *  cost to send. Read from `units` (one row per machine, the only table that
+ *  covers every shipment — Freightcom, hand-booked and historical alike), with
+ *  the cost taken from the linked order. */
+export type ShippedUnitRow = {
+  serial: string;
+  customer_name: string | null;
+  order_ref: string | null;
+  carrier: string | null;
+  shipped_at: string | null;
+  tracking_num: string | null;
+  /** orders.shipping_cost_usd — despite the name it usually holds CAD, so the
+   *  currency is read from shipping_cost_currency, never inferred. */
+  shipping_cost: number | null;
+  shipping_cost_currency: string | null;
+};
+
+const TRACKABLE_CARRIERS = new Set(['UPS', 'FedEx', 'Purolator', 'Canada Post', 'Canpar', 'GLS', 'Day & Ross']);
+
+/** Where to look a shipment up, or null when there is nothing to look up.
+ *  Known carriers deep-link via trackingUrlFor(); anything else falls back to
+ *  a web search for the number rather than a carrier page it isn't on. */
+export function shipmentTrackingUrl(carrier: string | null, tracking: string | null): string | null {
+  const num = tracking?.trim();
+  if (!num) return null;
+  if (carrier && TRACKABLE_CARRIERS.has(carrier)) return trackingUrlFor(carrier, num);
+  return `https://www.google.com/search?q=${encodeURIComponent(`${carrier ?? ''} tracking ${num}`.trim())}`;
+}
+
+export function useShippedUnits(): {
+  rows: ShippedUnitRow[]; loading: boolean; error: string | null; refresh: () => void;
+} {
+  const [rows, setRows] = useState<ShippedUnitRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [tick, setTick] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      const { data: units, error: uErr } = await supabase
+        .from('units')
+        .select('serial, customer_name, customer_order_ref, carrier, shipped_at, tracking_num')
+        .eq('status', 'shipped')
+        .order('shipped_at', { ascending: false, nullsFirst: false });
+      if (cancelled) return;
+      if (uErr) { setError(uErr.message); setLoading(false); return; }
+
+      type U = { serial: string; customer_name: string | null; customer_order_ref: string | null;
+                 carrier: string | null; shipped_at: string | null; tracking_num: string | null };
+      const list = (units ?? []) as U[];
+      const refs = [...new Set(list.map(u => u.customer_order_ref).filter((r): r is string => !!r))];
+
+      const costs = new Map<string, { cost: number | null; currency: string | null; name: string | null }>();
+      if (refs.length) {
+        const { data: orders, error: oErr } = await supabase
+          .from('orders')
+          .select('order_ref, customer_name, shipping_cost_usd, shipping_cost_currency')
+          .in('order_ref', refs);
+        if (cancelled) return;
+        if (oErr) setError(oErr.message);
+        for (const o of (orders ?? []) as { order_ref: string; customer_name: string | null;
+            shipping_cost_usd: number | null; shipping_cost_currency: string | null }[]) {
+          // INV- refs can collide across customers; keep the first costed one.
+          const prev = costs.get(o.order_ref);
+          if (prev?.cost != null) continue;
+          costs.set(o.order_ref, { cost: o.shipping_cost_usd, currency: o.shipping_cost_currency, name: o.customer_name });
+        }
+      }
+
+      setRows(list.map(u => {
+        const o = u.customer_order_ref ? costs.get(u.customer_order_ref) : undefined;
+        return {
+          serial: u.serial,
+          customer_name: u.customer_name ?? o?.name ?? null,
+          order_ref: u.customer_order_ref,
+          carrier: u.carrier,
+          shipped_at: u.shipped_at,
+          tracking_num: u.tracking_num,
+          shipping_cost: o?.cost ?? null,
+          shipping_cost_currency: o?.currency ?? null,
+        };
+      }));
+      setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [tick]);
+
+  return { rows, loading, error, refresh: () => setTick(t => t + 1) };
 }

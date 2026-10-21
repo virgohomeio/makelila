@@ -11,11 +11,11 @@ import ReplacementTab from '../Service/ReplacementTab';
 import { CancellationsTab } from '../PostShipment/CancellationsTab';
 import { ClaimsTab } from '../PostShipment/ClaimsTab';
 import { DeliveryMapTab } from '../PostShipment/DeliveryMapTab';
-// Shipping was its own top-level module until 2026-08-28. Its three tabs are
-// rendered here now; the files stay in Shipping/ because they carry their own
+// Shipping was its own top-level module until 2026-08-28. Its Invoices and
+// Claims tabs are rendered here; the files stay in Shipping/ because they carry their own
 // stylesheet, which is the same arrangement as the PostShipment and Service
 // tabs above.
-import { ShippingTab } from '../Shipping/tabs/ShippingTab';
+import { ShippingList } from './ShippingList';
 import { InvoicesTab } from '../Shipping/tabs/InvoicesTab';
 import { ClaimsTab as CarrierClaimsTab } from '../Shipping/tabs/ClaimsTab';
 import { useIsMobile } from '../../lib/useMediaQuery';
@@ -75,7 +75,7 @@ export default function Fulfillment() {
       { key: 'queue',         label: 'Fulfillment Queue', subtitle: 'Active orders moving through assign → ship', icon: '📦', iconBg: '#fff3e0', content: <Queue /> },
       { key: 'shelf',         label: 'Inventory Shelf',   subtitle: 'Skid assignments + on-hand units',           icon: '🪜', iconBg: '#e3f0fb', content: <Shelf /> },
       { key: 'history',       label: 'History',           subtitle: 'Fulfilled orders, searchable',               icon: '📜', iconBg: '#f5f1eb', content: <History /> },
-      { key: 'shipping',      label: 'Shipping',          subtitle: 'Quote, book and track with the carrier',     icon: '🚚', iconBg: '#e3f0fb', content: <ShippingTab /> },
+      { key: 'shipping',      label: 'Shipping',          subtitle: 'Shipped units, cost and tracking',            icon: '🚚', iconBg: '#e3f0fb', content: <ShippingList /> },
       { key: 'map',           label: 'Delivery Map',      subtitle: 'Open shipments on a map',                    icon: '🗺️', iconBg: '#e6f4ea', content: <DeliveryMapTab /> },
       { key: 'invoices',      label: 'Invoices',          subtitle: 'What the carrier actually billed',           icon: '🧾', iconBg: '#fffaf0', content: <InvoicesTab /> },
       { key: 'carrier-claims', label: 'Carrier Claims',   subtitle: 'Damage, loss and delay filed with Freightcom', icon: '📮', iconBg: '#e3f0fb', content: <CarrierClaimsTab /> },
@@ -112,7 +112,7 @@ export default function Fulfillment() {
         {active === 'queue'         ? <Queue /> :
          active === 'shelf'         ? <Shelf /> :
          active === 'history'       ? <History /> :
-         active === 'shipping'      ? <ShippingTab /> :
+         active === 'shipping'      ? <ShippingList /> :
          active === 'map'           ? <DeliveryMapTab /> :
          active === 'invoices'      ? <InvoicesTab /> :
          active === 'carrier-claims' ? <CarrierClaimsTab /> :
