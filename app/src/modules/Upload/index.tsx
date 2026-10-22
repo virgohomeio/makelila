@@ -1,10 +1,10 @@
-import { useMemo, useRef, useState } from 'react';
+import { useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import {
   bulkUploadAndMatch, useReviewQueueInvoices, assignInvoice, openInvoiceInNewTab, deleteInvoice,
   reextractInvoiceAmounts,
   type BulkUploadResult, type CustomerInvoice, type InvoiceDocType, type InvoiceMatchStatus,
 } from '../../lib/invoices';
-import { useCustomers } from '../../lib/customers';
+import { useCustomers, matchCustomerSearch, type Customer } from '../../lib/customers';
 import { useOrders } from '../../lib/orders';
 import { CustomerShippingInvoices } from '../../components/ShippingInvoices';
 import styles from './Upload.module.css';
@@ -200,24 +200,33 @@ export default function Upload() {
 
 // Pick a customer, then file their shipping / customs invoices. The same
 // list + form appears on the customer's profile and in Profitability.
-function ShippingUpload({
-  customers,
-}: {
-  customers: { id: string; full_name: string; email: string | null }[];
-}) {
+// A real search dropdown, not a <datalist>: the native one only matched on the
+// start of "Name (email)", mixed in the browser's autofill history, and rendered
+// unreadably in Safari/Chrome.
+function ShippingUpload({ customers }: { customers: Customer[] }) {
   const [text, setText] = useState('');
-  const label = (c: { full_name: string; email: string | null }) =>
-    c.email ? `${c.full_name} (${c.email})` : c.full_name;
-  const byLabel = useMemo(() => {
-    const m = new Map<string, { id: string; name: string }>();
-    for (const c of customers) {
-      if (!c.full_name && !c.email) continue;
-      m.set(label(c).toLowerCase(), { id: c.id, name: c.full_name });
-      if (c.email) m.set(c.email.toLowerCase(), { id: c.id, name: c.full_name });
-    }
-    return m;
-  }, [customers]);
-  const picked = byLabel.get(text.trim().toLowerCase()) ?? null;
+  const [picked, setPicked] = useState<Customer | null>(null);
+  const [open, setOpen] = useState(false);
+  const [active, setActive] = useState(0);
+
+  const matches = useMemo(() => {
+    const q = text.trim();
+    if (!q) return [];
+    return customers
+      .filter(c => (c.full_name || c.email) && matchCustomerSearch(c, [], q).matched)
+      .sort((a, b) => (a.full_name || a.email || '').localeCompare(b.full_name || b.email || ''))
+      .slice(0, 12);
+  }, [customers, text]);
+
+  const choose = (c: Customer) => { setPicked(c); setText(''); setOpen(false); };
+
+  const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (!matches.length) return;
+    if (e.key === 'ArrowDown') { e.preventDefault(); setOpen(true); setActive(i => Math.min(i + 1, matches.length - 1)); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setActive(i => Math.max(i - 1, 0)); }
+    else if (e.key === 'Enter') { e.preventDefault(); choose(matches[active] ?? matches[0]); }
+    else if (e.key === 'Escape') setOpen(false);
+  };
 
   return (
     <div className={styles.dropCard}>
@@ -226,20 +235,56 @@ function ShippingUpload({
         Freight we paid adds to the customer's shipping cost; customs we cover for them (US duty bills) goes to
         their Customs &amp; duties cost on Customers › Profitability.
       </div>
-      <input
-        className={styles.custInput}
-        list="shipping-upload-customers"
-        value={text}
-        onChange={e => setText(e.target.value)}
-        placeholder="Customer name or email"
-      />
-      <datalist id="shipping-upload-customers">
-        {customers.filter(c => c.full_name || c.email).map(c => <option key={c.id} value={label(c)} />)}
-      </datalist>
-      {text.trim() && !picked && <div className={styles.muted}>Pick a customer from the list.</div>}
+      {picked ? (
+        <div className={styles.pickedCustomer}>
+          <div>
+            <strong>{picked.full_name || picked.email}</strong>
+            <span className={styles.muted}>
+              {[picked.email, picked.phone, picked.city].filter(Boolean).join(' · ')}
+            </span>
+          </div>
+          <button type="button" className={styles.changeBtn} onClick={() => setPicked(null)}>Change customer</button>
+        </div>
+      ) : (
+        <div className={styles.custPicker}>
+          <input
+            className={styles.custSearch}
+            type="search"
+            autoComplete="off"
+            value={text}
+            onChange={e => { setText(e.target.value); setOpen(true); setActive(0); }}
+            onFocus={() => setOpen(true)}
+            onBlur={() => setTimeout(() => setOpen(false), 150)}
+            onKeyDown={onKey}
+            placeholder="Search customer by name, email or phone…"
+          />
+          {open && matches.length > 0 && (
+            <div className={styles.custDropdown} role="listbox">
+              {matches.map((c, i) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  role="option"
+                  aria-selected={i === active}
+                  className={`${styles.custOption} ${i === active ? styles.custOptionActive : ''}`}
+                  onMouseDown={e => e.preventDefault()}
+                  onMouseEnter={() => setActive(i)}
+                  onClick={() => choose(c)}
+                >
+                  <strong>{c.full_name || c.email}</strong>
+                  <span className={styles.muted}>{[c.email, c.phone, c.city].filter(Boolean).join(' · ') || '—'}</span>
+                </button>
+              ))}
+            </div>
+          )}
+          {text.trim() && matches.length === 0 && (
+            <div className={styles.muted}>No customer matches “{text.trim()}”.</div>
+          )}
+        </div>
+      )}
       {picked && (
         <>
-          <div className={styles.pickedList}>Shipping invoices for <strong>{picked.name}</strong></div>
+          <div className={styles.pickedList}>Shipping invoices for <strong>{picked.full_name || picked.email}</strong></div>
           <CustomerShippingInvoices key={picked.id} customerId={picked.id} />
         </>
       )}
