@@ -12,7 +12,7 @@ import styles from './ShippingInvoices.module.css';
 // invoices, with an upload form.
 
 const ACCEPT = 'application/pdf,image/png,image/jpeg,image/heic,image/webp';
-const CARRIERS = ['UPS', 'Freightcom', 'Goorooship', 'FedEx', 'Canpar', 'Purolator', 'Canada Post', 'USPS', 'Other'];
+const CARRIERS = ['UPS', 'Freightcom', 'Goorooship', 'FedEx', 'Canpar', 'GLS', 'Purolator', 'Canada Post', 'USPS', 'Other'];
 
 /** Map whatever the invoice reader called the carrier onto the picker. */
 function matchCarrier(name: string | null): string | null {
