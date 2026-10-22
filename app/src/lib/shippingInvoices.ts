@@ -190,6 +190,149 @@ export async function uploadShippingInvoice(input: ShippingInvoiceInput): Promis
   );
 }
 
+// ── Prefill from the invoice file ───────────────────────────────────────────
+
+export type ExtractedShippingFields = {
+  carrier: string | null;
+  invoice_number: string | null;
+  invoice_date: string | null;          // "YYYY-MM-DD"
+  order_number: string | null;          // digits only
+  ship_to_city: string | null;
+  ship_to_postal: string | null;
+};
+
+export type ShippingExtractResult = {
+  fields: ExtractedShippingFields;
+  provider: string | null;
+  extract_error: string | null;
+};
+
+async function fileToBase64(file: File): Promise<string> {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let binary = '';
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
+
+/** Read carrier / invoice # / date (and order hints) off a shipping invoice
+ *  via the extract-shipping-invoice edge function. Nothing is stored — the
+ *  form prefills its fields and the operator can still edit every one. */
+export async function extractShippingInvoice(file: File): Promise<ShippingExtractResult> {
+  const { data, error } = await supabase.functions.invoke<ShippingExtractResult & { error?: string }>(
+    'extract-shipping-invoice',
+    { body: { file_base64: await fileToBase64(file), mime_type: file.type || 'application/pdf', file_name: file.name } },
+  );
+  if (error) throw new Error(error.message);
+  if (!data || data.error) throw new Error(data?.error ?? 'No response from the invoice reader');
+  return data;
+}
+
+/** One of the customer's orders, described for the Order # picker. */
+export type CustomerOrderOption = {
+  order_ref: string;
+  date: string | null;                  // "YYYY-MM-DD"
+  kind: string;
+  status: string;
+  /** e.g. "LILA Pro ×1" — the line items in brief. */
+  items: string;
+  /** True when the order (its line items or the unit that shipped) is P100X. */
+  p100x: boolean;
+  batches: string[];
+  destination: string;                  // "Austin, TX, US"
+  postal_code: string | null;
+};
+
+type OrderLite = {
+  id: string; order_ref: string; kind: string | null; status: string;
+  line_items: Array<{ name?: string | null; qty?: number; batch?: string | null }> | null;
+  city: string | null; region_state: string | null; country: string | null;
+  postal_code: string | null; placed_at: string | null; created_at: string;
+};
+
+export async function fetchCustomerOrderOptions(customerId: string): Promise<CustomerOrderOption[]> {
+  const { data, error } = await supabase
+    .from('orders')
+    .select('id, order_ref, kind, status, line_items, city, region_state, country, postal_code, placed_at, created_at')
+    .eq('customer_id', customerId)
+    .order('created_at', { ascending: false });
+  if (error) throw new Error(error.message);
+  const orders = (data ?? []) as OrderLite[];
+  if (!orders.length) return [];
+
+  // The unit(s) that actually went out on each order — the batch tells P100X
+  // apart from earlier builds even when the line item just says "LILA Pro".
+  const batchesByOrder = new Map<string, Set<string>>();
+  const { data: q } = await supabase
+    .from('fulfillment_queue').select('id, order_id').in('order_id', orders.map(o => o.id));
+  const queue = (q ?? []) as { id: string; order_id: string }[];
+  if (queue.length) {
+    const { data: qu } = await supabase
+      .from('fulfillment_queue_units').select('queue_id, unit_serial').in('queue_id', queue.map(r => r.id));
+    const links = (qu ?? []) as { queue_id: string; unit_serial: string }[];
+    if (links.length) {
+      const { data: us } = await supabase
+        .from('units').select('serial, batch').in('serial', links.map(l => l.unit_serial));
+      const batchBySerial = new Map(((us ?? []) as { serial: string; batch: string | null }[])
+        .map(u => [u.serial, u.batch]));
+      const orderByQueue = new Map(queue.map(r => [r.id, r.order_id]));
+      for (const l of links) {
+        const orderId = orderByQueue.get(l.queue_id);
+        const batch = batchBySerial.get(l.unit_serial);
+        if (!orderId || !batch) continue;
+        const set = batchesByOrder.get(orderId) ?? new Set<string>();
+        set.add(batch);
+        batchesByOrder.set(orderId, set);
+      }
+    }
+  }
+
+  return orders.map(o => {
+    const lines = (o.line_items ?? []).filter(li => li?.name);
+    const batches = new Set(batchesByOrder.get(o.id) ?? []);
+    for (const li of lines) if (li.batch) batches.add(li.batch);
+    const text = [...lines.map(li => li.name ?? ''), ...batches].join(' ');
+    return {
+      order_ref: o.order_ref,
+      date: (o.placed_at ?? o.created_at)?.slice(0, 10) ?? null,
+      kind: o.kind ?? 'sale',
+      status: o.status,
+      items: lines.map(li => `${li.name}${li.qty && li.qty > 1 ? ` ×${li.qty}` : ''}`).join(', ') || 'no line items',
+      p100x: /P100X/i.test(text),
+      batches: [...batches],
+      destination: [o.city, o.region_state, o.country].filter(Boolean).join(', ') || 'no address',
+      postal_code: o.postal_code,
+    };
+  });
+}
+
+/** Pick the order a shipping invoice most likely belongs to: an order number
+ *  printed on it, else a ship-to postal code / city match, else the only order. */
+export function guessOrderRef(
+  options: CustomerOrderOption[], fields: ExtractedShippingFields | null,
+): string | null {
+  if (!options.length) return null;
+  const digits = fields?.order_number?.replace(/\D/g, '');
+  if (digits) {
+    const hit = options.find(o => o.order_ref.replace(/\D/g, '') === digits);
+    if (hit) return hit.order_ref;
+  }
+  const norm = (s: string | null | undefined) => (s ?? '').replace(/\s/g, '').toUpperCase();
+  if (fields?.ship_to_postal) {
+    const pc = norm(fields.ship_to_postal);
+    const hits = options.filter(o => o.postal_code && norm(o.postal_code) === pc);
+    if (hits.length === 1) return hits[0].order_ref;
+  }
+  if (fields?.ship_to_city) {
+    const city = fields.ship_to_city.trim().toLowerCase();
+    const hits = options.filter(o => o.destination.toLowerCase().startsWith(city));
+    if (hits.length === 1) return hits[0].order_ref;
+  }
+  return options.length === 1 ? options[0].order_ref : null;
+}
+
 export async function deleteShippingInvoice(inv: CustomerShippingInvoice): Promise<void> {
   const { error } = await supabase.from('customer_shipping_invoices').delete().eq('id', inv.id);
   if (error) throw new Error(error.message);

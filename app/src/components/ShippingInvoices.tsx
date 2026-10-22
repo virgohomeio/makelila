@@ -1,8 +1,9 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   useCustomerShippingInvoices, uploadShippingInvoice, deleteShippingInvoice,
   openShippingInvoice, useProfitabilityAdjustment, saveProfitabilityAdjustment,
-  type CustomerShippingInvoice, type ShippingCurrency,
+  extractShippingInvoice, fetchCustomerOrderOptions, guessOrderRef,
+  type CustomerShippingInvoice, type ShippingCurrency, type CustomerOrderOption,
 } from '../lib/shippingInvoices';
 import styles from './ShippingInvoices.module.css';
 
@@ -12,6 +13,31 @@ import styles from './ShippingInvoices.module.css';
 
 const ACCEPT = 'application/pdf,image/png,image/jpeg,image/heic,image/webp';
 const CARRIERS = ['UPS', 'Freightcom', 'Goorooship', 'FedEx', 'Canpar', 'Purolator', 'Canada Post', 'USPS', 'Other'];
+
+/** Map whatever the invoice reader called the carrier onto the picker. */
+function matchCarrier(name: string | null): string | null {
+  if (!name) return null;
+  const n = name.toLowerCase();
+  if (n.includes('clickship')) return 'Freightcom';
+  if (n.includes('united parcel')) return 'UPS';
+  if (n.includes('federal express')) return 'FedEx';
+  if (n.includes('postal service')) return 'USPS';
+  return CARRIERS.find(c => c !== 'Other' && n.includes(c.toLowerCase())) ?? 'Other';
+}
+
+const OTHER_ORDER = '__other__';
+
+function orderLabel(o: CustomerOrderOption): string {
+  const model = o.p100x ? 'P100X' : (o.batches.length ? o.batches.join('/') : null);
+  return [
+    o.order_ref,
+    o.date,
+    o.kind === 'replacement' ? 'replacement' : null,
+    model ? `${model} · ${o.items}` : o.items,
+    `→ ${o.destination}`,
+    o.status === 'cancelled' ? '(cancelled)' : null,
+  ].filter(Boolean).join(' · ');
+}
 
 function money(v: number, currency: ShippingCurrency): string {
   return `${currency === 'USD' ? 'US$' : '$'}${v.toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -130,10 +156,63 @@ export function ShippingInvoiceForm({
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
+  const [orders, setOrders] = useState<CustomerOrderOption[]>([]);
+  const [orderTyped, setOrderTyped] = useState(false);   // "Other" in the picker
+  const [reading, setReading] = useState(false);
+  const [readNote, setReadNote] = useState<string | null>(null);
+  const readSeq = useRef(0);
+
+  useEffect(() => {
+    let live = true;
+    setOrders([]); setOrderRef(''); setOrderTyped(false);
+    fetchCustomerOrderOptions(customerId)
+      .then(opts => {
+        if (!live) return;
+        setOrders(opts);
+        // A single order needs no choosing.
+        if (opts.length === 1) setOrderRef(opts[0].order_ref);
+      })
+      .catch(() => { /* picker falls back to a free-text box */ });
+    return () => { live = false; };
+  }, [customerId]);
+
+  /** Prefill carrier / invoice # / date / order from the chosen file. Every
+   *  field stays editable; a value the reader didn't find is left as it was. */
+  const pickFile = async (f: File | null) => {
+    setFile(f); setReadNote(null);
+    if (!f) return;
+    const seq = ++readSeq.current;
+    setReading(true);
+    try {
+      const { fields, extract_error } = await extractShippingInvoice(f);
+      if (seq !== readSeq.current) return;   // a newer file was picked meanwhile
+      const c = matchCarrier(fields.carrier);
+      if (c) setCarrier(c);
+      if (c === 'Other' && fields.carrier) {
+        setNotes(n => n || `Carrier: ${fields.carrier}`);
+      }
+      if (fields.invoice_number) setInvoiceNumber(fields.invoice_number);
+      if (fields.invoice_date) setInvoiceDate(fields.invoice_date);
+      const guess = guessOrderRef(orders, fields);
+      if (guess) { setOrderRef(guess); setOrderTyped(false); }
+      else if (!orders.length && fields.order_number) setOrderRef(`#${fields.order_number}`);
+      const found = [c && 'carrier', fields.invoice_number && 'invoice #', fields.invoice_date && 'date', guess && 'order']
+        .filter(Boolean);
+      setReadNote(found.length
+        ? `Filled ${found.join(', ')} from the invoice — check and edit if needed.`
+        : `Couldn't read the invoice details${extract_error ? ` (${extract_error})` : ''} — enter them by hand.`);
+    } catch (e) {
+      if (seq === readSeq.current) setReadNote(`Couldn't read the invoice (${(e as Error).message}) — enter the details by hand.`);
+    } finally {
+      if (seq === readSeq.current) setReading(false);
+    }
+  };
 
   const reset = () => {
+    readSeq.current++; setReading(false); setReadNote(null);
     setFile(null); if (fileRef.current) fileRef.current.value = '';
-    setInvoiceNumber(''); setInvoiceDate(''); setOrderRef('');
+    setInvoiceNumber(''); setInvoiceDate('');
+    setOrderRef(orders.length === 1 ? orders[0].order_ref : ''); setOrderTyped(false);
     setFreight(''); setCustoms(''); setCovered(''); setNotes('');
     setCountsInShipping(true);
   };
@@ -166,7 +245,9 @@ export function ShippingInvoiceForm({
       <label className={styles.fieldWide}>
         Invoice file (PDF or photo)
         <input ref={fileRef} type="file" accept={ACCEPT} className={styles.input}
-               onChange={e => setFile(e.target.files?.[0] ?? null)} />
+               onChange={e => void pickFile(e.target.files?.[0] ?? null)} />
+        {reading && <span className={styles.muted}>Reading invoice…</span>}
+        {!reading && readNote && <span className={styles.muted}>{readNote}</span>}
       </label>
       <label className={styles.field}>
         Carrier
@@ -182,10 +263,30 @@ export function ShippingInvoiceForm({
         Invoice date
         <input type="date" className={styles.input} value={invoiceDate} onChange={e => setInvoiceDate(e.target.value)} />
       </label>
-      <label className={styles.field}>
-        Order #
-        <input className={styles.input} value={orderRef} placeholder="e.g. #1192" onChange={e => setOrderRef(e.target.value)} />
-      </label>
+      {orders.length > 0 && !orderTyped ? (
+        <label className={styles.fieldWide}>
+          Order #
+          <select className={styles.input}
+                  value={orders.some(o => o.order_ref === orderRef) ? orderRef : ''}
+                  onChange={e => {
+                    if (e.target.value === OTHER_ORDER) { setOrderTyped(true); setOrderRef(''); }
+                    else setOrderRef(e.target.value);
+                  }}>
+            <option value="">— Pick the order this shipment was for —</option>
+            {orders.map(o => <option key={o.order_ref} value={o.order_ref}>{orderLabel(o)}</option>)}
+            <option value={OTHER_ORDER}>Other — type an order #…</option>
+          </select>
+        </label>
+      ) : (
+        <label className={styles.field}>
+          Order #
+          <input className={styles.input} value={orderRef} placeholder="e.g. #1192" onChange={e => setOrderRef(e.target.value)} />
+          {orders.length > 0 && (
+            <button type="button" className={styles.linkBtn}
+                    onClick={() => { setOrderTyped(false); setOrderRef(''); }}>Pick from this customer's orders</button>
+          )}
+        </label>
+      )}
       <label className={styles.field}>
         Currency
         <select className={styles.input} value={currency} onChange={e => setCurrency(e.target.value as ShippingCurrency)}>
