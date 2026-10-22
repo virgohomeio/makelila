@@ -1262,7 +1262,15 @@ async function currentUserId(): Promise<string> {
  *  happen either way. */
 export type RefundRequestOpts = {
   onAutoCancel?: (outcome: AutoCancelOutcome) => void;
+  /** A reimbursement: we are paying the customer back for something (a part
+   *  they bought, a shipping charge, a repair) — NOT unwinding a sale. Nothing
+   *  of theirs is cancelled or pulled from the fulfillment queue. */
+  reimbursement?: boolean;
 };
+
+/** Prefix that marks a refund card as a reimbursement. refund_approvals has no
+ *  column for it, so the reason carries it — visible on the card and in reports. */
+export const REIMBURSEMENT_REASON_PREFIX = 'Reimbursement';
 
 export async function submitRefundRequest(input: {
   return_id?: string;
@@ -1310,7 +1318,10 @@ export async function submitRefundRequest(input: {
   // created when it plainly was. It is NOT silent though — a failure is logged
   // to the activity trail and handed to onAutoCancel, so the operator is told
   // to cancel by hand rather than left believing it happened.
-  try {
+  if (opts.reimbursement) {
+    await logAction('refund_auto_cancel_skipped', newRefundId,
+      'Reimbursement — the customer\'s orders were left untouched');
+  } else try {
     const outcome = await cancelOpenOrdersForRefund({
       refundId: newRefundId,
       customerEmail: input.customer_email,
