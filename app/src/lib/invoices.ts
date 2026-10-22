@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { supabase } from './supabase';
+import { logAction } from './activityLog';
 
 export type InvoiceDocType = 'invoice' | 'refund_receipt';
 
@@ -379,6 +380,36 @@ export async function bulkUploadAndMatch(
     });
   }
   return results;
+}
+
+/** Upload one sales invoice / refund receipt straight from a customer's
+ *  profile. Runs the same parse + match as the Upload tab, then files it under
+ *  THIS customer — the operator chose the profile, so that wins over whatever
+ *  the matcher resolved. An order the matcher linked is kept only when it
+ *  belongs to this customer. */
+export async function uploadInvoiceForCustomer(
+  file: File, documentType: InvoiceDocType, customerId: string,
+): Promise<BulkUploadResult> {
+  const [res] = await bulkUploadAndMatch([file], documentType);
+  if (!res?.ok || !res.invoice) return res;
+  const inv = res.invoice;
+  if (inv.customer_id !== customerId || inv.match_status !== 'matched') {
+    const keepOrder = inv.customer_id === customerId;
+    await assignInvoice(inv.id, keepOrder
+      ? { customerId }
+      : { customerId, orderId: null, orderRef: inv.order_ref ?? null });
+    res.invoice = {
+      ...inv, customer_id: customerId, match_status: 'matched',
+      ...(keepOrder ? {} : { order_id: null }),
+    };
+  }
+  await logAction(
+    'invoice_uploaded',
+    inv.invoice_number || file.name,
+    `${documentType === 'refund_receipt' ? 'Refund receipt' : 'Sales invoice'} uploaded from the customer profile`,
+    { entityType: 'customer', entityId: customerId },
+  );
+  return res;
 }
 
 /** Manual assignment from the review queue: link an invoice to a customer

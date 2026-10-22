@@ -30,6 +30,7 @@ import { RouteErrorBoundary } from '../../components/RouteErrorBoundary';
 import { useCustomerEvents, useCustomerEngagement, eventMeta, dormancyBadge } from '../../lib/customerEvents';
 import { useCustomerInvoices, openInvoiceInNewTab } from '../../lib/invoices';
 import { CustomerShippingInvoices } from '../../components/ShippingInvoices';
+import { InvoiceUploadPicker } from '../../components/InvoiceUploadPicker';
 import { PanelSection, PanelRow } from './Panel';
 import { NameSection } from './NameSection';
 import { AdditionalUsersSection } from './AdditionalUsersSection';
@@ -977,6 +978,9 @@ function CustomerDetailPanel({ customer, address, allCustomers, onChanged, onClo
   const { all: orders } = useOrders();
   const { units } = useUnits();
   const { tickets } = useServiceTickets();
+  // Bumped by the Upload invoice picker so the invoice lists reload.
+  const [salesInvoiceRev, setSalesInvoiceRev] = useState(0);
+  const [shippingInvoiceRev, setShippingInvoiceRev] = useState(0);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
@@ -1145,9 +1149,16 @@ function CustomerDetailPanel({ customer, address, allCustomers, onChanged, onClo
             }
           </PanelSection>
 
-          <CustomerInvoicesSection customerId={customer.id} />
+          <CustomerInvoicesSection customerId={customer.id} reloadSignal={salesInvoiceRev} />
           <PanelSection title="Shipping invoices">
-            <CustomerShippingInvoices customerId={customer.id} />
+            <CustomerShippingInvoices customerId={customer.id} showForm={false} reloadSignal={shippingInvoiceRev} />
+            <InvoiceUploadPicker
+              key={customer.id}
+              customerId={customer.id}
+              onUploaded={kind => kind === 'sales'
+                ? setSalesInvoiceRev(n => n + 1)
+                : setShippingInvoiceRev(n => n + 1)}
+            />
           </PanelSection>
         </div>
       </div>
@@ -1234,8 +1245,9 @@ function LilaAppActivitySection({ customerId }: { customerId: string }) {
 // Invoices & refund receipts filed against this customer by the Upload module.
 // Auto-matched from the Shopify order # on the PDF (or assigned manually from
 // the Upload review queue).
-function CustomerInvoicesSection({ customerId }: { customerId: string }) {
-  const { invoices, loading } = useCustomerInvoices(customerId);
+function CustomerInvoicesSection({ customerId, reloadSignal = 0 }: { customerId: string; reloadSignal?: number }) {
+  const { invoices, loading, reload } = useCustomerInvoices(customerId);
+  useEffect(() => { if (reloadSignal) void reload(); }, [reloadSignal, reload]);
 
   const view = async (path: string) => {
     try { await openInvoiceInNewTab(path); }
@@ -1247,7 +1259,7 @@ function CustomerInvoicesSection({ customerId }: { customerId: string }) {
       {loading ? (
         <div className={styles.emptyRow}>Loading invoices…</div>
       ) : invoices.length === 0 ? (
-        <div className={styles.emptyRow}>No invoices on file. Upload them in the Upload tab.</div>
+        <div className={styles.emptyRow}>No invoices on file. Use Upload invoice below to add one.</div>
       ) : (
         invoices.map(inv => (
           <div key={inv.id} className={styles.itemRow}>

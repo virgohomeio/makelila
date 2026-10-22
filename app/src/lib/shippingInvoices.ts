@@ -333,6 +333,47 @@ export function guessOrderRef(
   return options.length === 1 ? options[0].order_ref : null;
 }
 
+export type ShippingInvoicePatch = {
+  orderRef: string;
+  carrier: string;
+  invoiceNumber: string;
+  invoiceDate: string;
+  currency: ShippingCurrency;
+  freightAmount: number;
+  countsInShipping: boolean;
+  customsAmount: number;
+  customsCoveredAmount: number;
+  notes: string;
+};
+
+/** Correct an invoice already on file (the file itself is not replaced). */
+export async function updateShippingInvoice(
+  inv: CustomerShippingInvoice, patch: ShippingInvoicePatch,
+): Promise<void> {
+  const { error } = await supabase.from('customer_shipping_invoices').update({
+    order_ref:              patch.orderRef.trim() || null,
+    carrier:                patch.carrier.trim() || null,
+    invoice_number:         patch.invoiceNumber.trim() || null,
+    invoice_date:           patch.invoiceDate || null,
+    currency:               patch.currency,
+    freight_amount:         patch.freightAmount,
+    counts_in_shipping:     patch.countsInShipping,
+    customs_amount:         patch.customsAmount,
+    customs_covered_amount: patch.customsCoveredAmount,
+    notes:                  patch.notes.trim() || null,
+  }).eq('id', inv.id);
+  if (error) throw new Error(isMissingTable(error) ? MISSING_MSG : `Save failed: ${error.message}`);
+
+  await logAction(
+    'shipping_invoice_edited',
+    patch.invoiceNumber.trim() || inv.file_name || 'shipping invoice',
+    `Edited ${patch.carrier.trim() || 'shipping'} invoice: freight ${inv.currency} ${inv.freight_amount.toFixed(2)}`
+      + ` → ${patch.currency} ${patch.freightAmount.toFixed(2)}, customs covered`
+      + ` ${inv.currency} ${inv.customs_covered_amount.toFixed(2)} → ${patch.currency} ${patch.customsCoveredAmount.toFixed(2)}`,
+    { entityType: 'customer', entityId: inv.customer_id },
+  );
+}
+
 export async function deleteShippingInvoice(inv: CustomerShippingInvoice): Promise<void> {
   const { error } = await supabase.from('customer_shipping_invoices').delete().eq('id', inv.id);
   if (error) throw new Error(error.message);

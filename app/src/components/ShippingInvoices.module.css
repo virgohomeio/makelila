@@ -158,3 +158,29 @@
 .tableScroll {
   overflow-x: auto;
 }
+
+/* ── Upload invoice picker (customer profile) ─────────────────────────── */
+
+.uploadPicker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.choiceRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.choiceBtn {
+  composes: secondaryBtn;
+}
+
+.choiceBtnActive {
+  composes: secondaryBtn;
+  border-color: var(--color-ink);
+  font-weight: 600;
+}

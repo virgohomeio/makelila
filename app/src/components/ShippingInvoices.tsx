@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import {
   useCustomerShippingInvoices, uploadShippingInvoice, deleteShippingInvoice,
   openShippingInvoice, useProfitabilityAdjustment, saveProfitabilityAdjustment,
-  extractShippingInvoice, fetchCustomerOrderOptions, guessOrderRef,
+  extractShippingInvoice, fetchCustomerOrderOptions, guessOrderRef, updateShippingInvoice,
   type CustomerShippingInvoice, type ShippingCurrency, type CustomerOrderOption,
 } from '../lib/shippingInvoices';
 import styles from './ShippingInvoices.module.css';
@@ -52,15 +52,20 @@ function parseAmount(s: string): number {
 }
 
 export function CustomerShippingInvoices({
-  customerId, onChanged, showForm = true,
+  customerId, onChanged, showForm = true, reloadSignal = 0,
 }: {
   customerId: string;
-  /** Fired after an upload or delete, e.g. to refresh profitability. */
+  /** Fired after an upload, edit or delete, e.g. to refresh profitability. */
   onChanged?: () => void;
   showForm?: boolean;
+  /** Bump to reload, e.g. after an upload made outside this component. */
+  reloadSignal?: number;
 }) {
   const { invoices, loading, error, reload } = useCustomerShippingInvoices(customerId);
   const [opening, setOpening] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+
+  useEffect(() => { if (reloadSignal) void reload(); }, [reloadSignal, reload]);
 
   const changed = () => { void reload(); onChanged?.(); };
 
@@ -99,7 +104,17 @@ export function CustomerShippingInvoices({
               </tr>
             </thead>
             <tbody>
-              {invoices.map(inv => (
+              {invoices.map(inv => editingId === inv.id ? (
+                <tr key={inv.id}>
+                  <td colSpan={8}>
+                    <ShippingInvoiceEditor
+                      invoice={inv}
+                      onCancel={() => setEditingId(null)}
+                      onSaved={() => { setEditingId(null); changed(); }}
+                    />
+                  </td>
+                </tr>
+              ) : (
                 <tr key={inv.id}>
                   <td>{inv.invoice_date ?? '—'}</td>
                   <td>{inv.carrier ?? '—'}</td>
@@ -121,6 +136,8 @@ export function CustomerShippingInvoices({
                               onClick={() => void view(inv.storage_path!)}>View</button>
                     )}
                     {' '}
+                    <button className={styles.linkBtn} onClick={() => setEditingId(inv.id)}>Edit</button>
+                    {' '}
                     <button className={styles.removeBtn} onClick={() => void remove(inv)}>Remove</button>
                     {inv.notes && <div className={styles.muted}>{inv.notes}</div>}
                   </td>
@@ -131,6 +148,144 @@ export function CustomerShippingInvoices({
         </div>
       )}
       {showForm && <ShippingInvoiceForm customerId={customerId} onSaved={changed} />}
+    </div>
+  );
+}
+
+/** Inline correction of an invoice already on file — every field editable. */
+function ShippingInvoiceEditor({
+  invoice, onCancel, onSaved,
+}: {
+  invoice: CustomerShippingInvoice;
+  onCancel: () => void;
+  onSaved: () => void;
+}) {
+  const knownCarrier = !invoice.carrier || CARRIERS.includes(invoice.carrier);
+  const [carrier, setCarrier] = useState(knownCarrier ? invoice.carrier ?? 'UPS' : 'Other');
+  const [carrierOther, setCarrierOther] = useState(knownCarrier ? '' : invoice.carrier ?? '');
+  const [invoiceNumber, setInvoiceNumber] = useState(invoice.invoice_number ?? '');
+  const [invoiceDate, setInvoiceDate] = useState(invoice.invoice_date ?? '');
+  const [orderRef, setOrderRef] = useState(invoice.order_ref ?? '');
+  const [currency, setCurrency] = useState<ShippingCurrency>(invoice.currency);
+  const [freight, setFreight] = useState(String(invoice.freight_amount));
+  const [countsInShipping, setCountsInShipping] = useState(invoice.counts_in_shipping);
+  const [customs, setCustoms] = useState(String(invoice.customs_amount));
+  const [covered, setCovered] = useState(String(invoice.customs_covered_amount));
+  const [notes, setNotes] = useState(invoice.notes ?? '');
+  const [orders, setOrders] = useState<CustomerOrderOption[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    fetchCustomerOrderOptions(invoice.customer_id)
+      .then(o => { if (live) setOrders(o); })
+      .catch(() => { /* free-text box only */ });
+    return () => { live = false; };
+  }, [invoice.customer_id]);
+
+  const carrierChoice = carrier;
+  const [orderTyped, setOrderTyped] = useState(false);
+
+  const save = async () => {
+    const f = parseAmount(freight), c = parseAmount(customs), cov = parseAmount(covered);
+    if ([f, c, cov].some(Number.isNaN)) { setErr('Amounts must be positive numbers.'); return; }
+    setBusy(true); setErr(null);
+    try {
+      await updateShippingInvoice(invoice, {
+        carrier: carrierChoice === 'Other' && carrierOther.trim() ? carrierOther : carrierChoice,
+        invoiceNumber, invoiceDate, orderRef, currency,
+        freightAmount: f, countsInShipping, customsAmount: c, customsCoveredAmount: cov, notes,
+      });
+      onSaved();
+    } catch (e) {
+      setErr((e as Error).message);
+      setBusy(false);
+    }
+  };
+
+  // Free-text when the operator asked for it, or the stored ref isn't one of
+  // this customer's orders (so the picker would silently drop it).
+  const orderFree = orderTyped || orders.length === 0
+    || (!!orderRef && !orders.some(o => o.order_ref === orderRef));
+
+  return (
+    <div className={styles.form}>
+      <label className={styles.field}>
+        Carrier
+        <select className={styles.input} value={carrierChoice}
+                onChange={e => { setCarrier(e.target.value); if (e.target.value !== 'Other') setCarrierOther(''); }}>
+          {CARRIERS.map(c => <option key={c} value={c}>{c}</option>)}
+        </select>
+      </label>
+      {carrierChoice === 'Other' && (
+        <label className={styles.field}>
+          Carrier name
+          <input className={styles.input} value={carrierOther} onChange={e => setCarrierOther(e.target.value)} />
+        </label>
+      )}
+      <label className={styles.field}>
+        Invoice #
+        <input className={styles.input} value={invoiceNumber} onChange={e => setInvoiceNumber(e.target.value)} />
+      </label>
+      <label className={styles.field}>
+        Invoice date
+        <input type="date" className={styles.input} value={invoiceDate} onChange={e => setInvoiceDate(e.target.value)} />
+      </label>
+      {!orderFree ? (
+        <label className={styles.fieldWide}>
+          Order #
+          <select className={styles.input} value={orderRef}
+                  onChange={e => {
+                    if (e.target.value === OTHER_ORDER) { setOrderTyped(true); setOrderRef(''); }
+                    else setOrderRef(e.target.value);
+                  }}>
+            <option value="">— No order —</option>
+            {orders.map(o => <option key={o.order_ref} value={o.order_ref}>{orderLabel(o)}</option>)}
+            <option value={OTHER_ORDER}>Other — type an order #…</option>
+          </select>
+        </label>
+      ) : (
+        <label className={styles.field}>
+          Order #
+          <input className={styles.input} value={orderRef} placeholder="e.g. #1192"
+                 onChange={e => setOrderRef(e.target.value)} />
+        </label>
+      )}
+      <label className={styles.field}>
+        Currency
+        <select className={styles.input} value={currency} onChange={e => setCurrency(e.target.value as ShippingCurrency)}>
+          <option value="CAD">CAD</option>
+          <option value="USD">USD</option>
+        </select>
+      </label>
+      <label className={styles.field}>
+        Freight we paid
+        <input className={styles.input} inputMode="decimal" value={freight} onChange={e => setFreight(e.target.value)} />
+      </label>
+      <label className={styles.field}>
+        Customs / duty on invoice
+        <input className={styles.input} inputMode="decimal" value={customs} onChange={e => setCustoms(e.target.value)} />
+      </label>
+      <label className={styles.field}>
+        Customs we cover
+        <input className={styles.input} inputMode="decimal" value={covered} onChange={e => setCovered(e.target.value)} />
+      </label>
+      <label className={styles.check}>
+        <input type="checkbox" checked={countsInShipping} onChange={e => setCountsInShipping(e.target.checked)} />
+        Add the freight to this customer's shipping cost
+      </label>
+      <label className={styles.fieldWide}>
+        Notes
+        <input className={styles.input} value={notes} onChange={e => setNotes(e.target.value)} />
+      </label>
+      <div className={styles.actions}>
+        <button className={styles.primaryBtn} disabled={busy} onClick={() => void save()}>
+          {busy ? 'Saving…' : 'Save changes'}
+        </button>
+        <button className={styles.secondaryBtn} disabled={busy} onClick={onCancel}>Cancel</button>
+        {err && <span className={styles.error}>{err}</span>}
+      </div>
     </div>
   );
 }
