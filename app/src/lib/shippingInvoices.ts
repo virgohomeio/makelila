@@ -25,6 +25,8 @@ export type CustomerShippingInvoice = {
   // False when the shipment is already costed by the Freightcom sync — the
   // invoice is kept for the record but not added to the Shipping bucket again.
   counts_in_shipping: boolean;
+  // Freight the CUSTOMER paid on this shipment. Record only — not in margin.
+  freight_customer_paid_amount: number;
   customs_amount: number;               // duty/brokerage printed on the invoice
   customs_covered_amount: number;       // the part of it WE paid for the customer
   file_name: string | null;
@@ -54,6 +56,19 @@ function isMissingTable(err: { code?: string } | null): boolean {
   return err?.code === 'PGRST205' || err?.code === '42P01';
 }
 
+const PAID_COL_MSG =
+  'Freight customer paid is not set up in the database yet — apply migration 20261022120000_shipping_invoice_customer_paid_freight.sql (or leave that field blank).';
+
+/** Only send freight_customer_paid_amount when it's needed, so saving keeps
+ *  working before migration 20261022120000 is applied. */
+function customerPaidCol(amount: number, existing = 0): { freight_customer_paid_amount?: number } {
+  return amount > 0 || existing > 0 ? { freight_customer_paid_amount: amount } : {};
+}
+
+function isMissingPaidCol(err: { message?: string } | null): boolean {
+  return !!err?.message?.includes('freight_customer_paid_amount');
+}
+
 const MISSING_MSG =
   'Shipping invoices are not set up in the database yet — apply migration 20261016120000_customer_shipping_invoices.sql.';
 
@@ -66,6 +81,7 @@ function coerceInvoice(r: Record<string, unknown>): CustomerShippingInvoice {
   return {
     ...(r as unknown as CustomerShippingInvoice),
     freight_amount: num(r.freight_amount),
+    freight_customer_paid_amount: num(r.freight_customer_paid_amount),
     customs_amount: num(r.customs_amount),
     customs_covered_amount: num(r.customs_covered_amount),
   };
@@ -136,6 +152,7 @@ export type ShippingInvoiceInput = {
   currency: ShippingCurrency;
   freightAmount: number;
   countsInShipping: boolean;
+  freightCustomerPaidAmount: number;
   customsAmount: number;
   customsCoveredAmount: number;
   notes?: string;
@@ -167,6 +184,7 @@ export async function uploadShippingInvoice(input: ShippingInvoiceInput): Promis
     currency:               input.currency,
     freight_amount:         input.freightAmount,
     counts_in_shipping:     input.countsInShipping,
+    ...customerPaidCol(input.freightCustomerPaidAmount),
     customs_amount:         input.customsAmount,
     customs_covered_amount: input.customsCoveredAmount,
     file_name:              file?.name ?? null,
@@ -176,13 +194,17 @@ export async function uploadShippingInvoice(input: ShippingInvoiceInput): Promis
   });
   if (insErr) {
     if (storagePath) await supabase.storage.from(BUCKET).remove([storagePath]);
-    throw new Error(isMissingTable(insErr) ? MISSING_MSG : `Save failed: ${insErr.message}`);
+    throw new Error(isMissingTable(insErr) ? MISSING_MSG
+      : isMissingPaidCol(insErr) ? PAID_COL_MSG : `Save failed: ${insErr.message}`);
   }
 
   await logAction(
     'shipping_invoice_uploaded',
     input.invoiceNumber?.trim() || file?.name || 'shipping invoice',
     `${input.carrier?.trim() || 'Shipping'} invoice: freight ${input.currency} ${input.freightAmount.toFixed(2)}`
+      + (input.freightCustomerPaidAmount > 0
+        ? `, customer paid freight ${input.currency} ${input.freightCustomerPaidAmount.toFixed(2)}`
+        : '')
       + (input.customsCoveredAmount > 0
         ? `, customs covered ${input.currency} ${input.customsCoveredAmount.toFixed(2)}`
         : ''),
@@ -341,6 +363,7 @@ export type ShippingInvoicePatch = {
   currency: ShippingCurrency;
   freightAmount: number;
   countsInShipping: boolean;
+  freightCustomerPaidAmount: number;
   customsAmount: number;
   customsCoveredAmount: number;
   notes: string;
@@ -358,11 +381,13 @@ export async function updateShippingInvoice(
     currency:               patch.currency,
     freight_amount:         patch.freightAmount,
     counts_in_shipping:     patch.countsInShipping,
+    ...customerPaidCol(patch.freightCustomerPaidAmount, inv.freight_customer_paid_amount),
     customs_amount:         patch.customsAmount,
     customs_covered_amount: patch.customsCoveredAmount,
     notes:                  patch.notes.trim() || null,
   }).eq('id', inv.id);
-  if (error) throw new Error(isMissingTable(error) ? MISSING_MSG : `Save failed: ${error.message}`);
+  if (error) throw new Error(isMissingTable(error) ? MISSING_MSG
+    : isMissingPaidCol(error) ? PAID_COL_MSG : `Save failed: ${error.message}`);
 
   await logAction(
     'shipping_invoice_edited',

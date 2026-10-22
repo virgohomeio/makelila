@@ -98,6 +98,7 @@ export function CustomerShippingInvoices({
               <tr>
                 <th>Date</th><th>Carrier</th><th>Invoice #</th><th>Order</th>
                 <th className={styles.num}>Freight</th>
+                <th className={styles.num}>Customer paid</th>
                 <th className={styles.num}>Customs</th>
                 <th className={styles.num}>We covered</th>
                 <th></th>
@@ -106,7 +107,7 @@ export function CustomerShippingInvoices({
             <tbody>
               {invoices.map(inv => editingId === inv.id ? (
                 <tr key={inv.id}>
-                  <td colSpan={8}>
+                  <td colSpan={9}>
                     <ShippingInvoiceEditor
                       invoice={inv}
                       onCancel={() => setEditingId(null)}
@@ -128,6 +129,7 @@ export function CustomerShippingInvoices({
                       </div>
                     )}
                   </td>
+                  <td className={styles.num}>{money(inv.freight_customer_paid_amount, inv.currency)}</td>
                   <td className={styles.num}>{money(inv.customs_amount, inv.currency)}</td>
                   <td className={styles.num}>{money(inv.customs_covered_amount, inv.currency)}</td>
                   <td>
@@ -169,6 +171,7 @@ function ShippingInvoiceEditor({
   const [currency, setCurrency] = useState<ShippingCurrency>(invoice.currency);
   const [freight, setFreight] = useState(String(invoice.freight_amount));
   const [countsInShipping, setCountsInShipping] = useState(invoice.counts_in_shipping);
+  const [customerPaid, setCustomerPaid] = useState(String(invoice.freight_customer_paid_amount));
   const [customs, setCustoms] = useState(String(invoice.customs_amount));
   const [covered, setCovered] = useState(String(invoice.customs_covered_amount));
   const [notes, setNotes] = useState(invoice.notes ?? '');
@@ -189,13 +192,14 @@ function ShippingInvoiceEditor({
 
   const save = async () => {
     const f = parseAmount(freight), c = parseAmount(customs), cov = parseAmount(covered);
-    if ([f, c, cov].some(Number.isNaN)) { setErr('Amounts must be positive numbers.'); return; }
+    const cp = parseAmount(customerPaid);
+    if ([f, cp, c, cov].some(Number.isNaN)) { setErr('Amounts must be positive numbers.'); return; }
     setBusy(true); setErr(null);
     try {
       await updateShippingInvoice(invoice, {
         carrier: carrierChoice === 'Other' && carrierOther.trim() ? carrierOther : carrierChoice,
         invoiceNumber, invoiceDate, orderRef, currency,
-        freightAmount: f, countsInShipping, customsAmount: c, customsCoveredAmount: cov, notes,
+        freightAmount: f, countsInShipping, freightCustomerPaidAmount: cp, customsAmount: c, customsCoveredAmount: cov, notes,
       });
       onSaved();
     } catch (e) {
@@ -264,6 +268,10 @@ function ShippingInvoiceEditor({
         <input className={styles.input} inputMode="decimal" value={freight} onChange={e => setFreight(e.target.value)} />
       </label>
       <label className={styles.field}>
+        Freight customer paid
+        <input className={styles.input} inputMode="decimal" value={customerPaid} onChange={e => setCustomerPaid(e.target.value)} />
+      </label>
+      <label className={styles.field}>
         Customs / duty on invoice
         <input className={styles.input} inputMode="decimal" value={customs} onChange={e => setCustoms(e.target.value)} />
       </label>
@@ -305,6 +313,7 @@ export function ShippingInvoiceForm({
   const [currency, setCurrency] = useState<ShippingCurrency>('CAD');
   const [freight, setFreight] = useState('');
   const [countsInShipping, setCountsInShipping] = useState(true);
+  const [customerPaid, setCustomerPaid] = useState('');
   const [customs, setCustoms] = useState('');
   const [covered, setCovered] = useState('');
   const [notes, setNotes] = useState('');
@@ -368,22 +377,23 @@ export function ShippingInvoiceForm({
     setFile(null); if (fileRef.current) fileRef.current.value = '';
     setInvoiceNumber(''); setInvoiceDate('');
     setOrderRef(orders.length === 1 ? orders[0].order_ref : ''); setOrderTyped(false);
-    setFreight(''); setCustoms(''); setCovered(''); setNotes('');
+    setFreight(''); setCustomerPaid(''); setCustoms(''); setCovered(''); setNotes('');
     setCountsInShipping(true);
   };
 
   const submit = async () => {
     setErr(null); setOk(null);
     const f = parseAmount(freight), c = parseAmount(customs), cov = parseAmount(covered);
-    if ([f, c, cov].some(Number.isNaN)) { setErr('Amounts must be positive numbers.'); return; }
-    if (!file && f === 0 && c === 0 && cov === 0) {
+    const cp = parseAmount(customerPaid);
+    if ([f, cp, c, cov].some(Number.isNaN)) { setErr('Amounts must be positive numbers.'); return; }
+    if (!file && f === 0 && cp === 0 && c === 0 && cov === 0) {
       setErr('Attach the invoice or enter at least one amount.'); return;
     }
     setBusy(true);
     try {
       await uploadShippingInvoice({
         customerId, file, carrier, invoiceNumber, invoiceDate, orderRef, currency,
-        freightAmount: f, countsInShipping, customsAmount: c, customsCoveredAmount: cov, notes,
+        freightAmount: f, countsInShipping, freightCustomerPaidAmount: cp, customsAmount: c, customsCoveredAmount: cov, notes,
       });
       reset();
       setOk('Saved.');
@@ -454,6 +464,10 @@ export function ShippingInvoiceForm({
         <input className={styles.input} inputMode="decimal" value={freight} placeholder="0.00" onChange={e => setFreight(e.target.value)} />
       </label>
       <label className={styles.field}>
+        Freight customer paid
+        <input className={styles.input} inputMode="decimal" value={customerPaid} placeholder="0.00" onChange={e => setCustomerPaid(e.target.value)} />
+      </label>
+      <label className={styles.field}>
         Customs / duty on invoice
         <input className={styles.input} inputMode="decimal" value={customs} placeholder="0.00" onChange={e => setCustoms(e.target.value)} />
       </label>
@@ -471,7 +485,8 @@ export function ShippingInvoiceForm({
       </label>
       <div className={styles.hint}>
         "Customs we cover" is the part of the duty bill VCycene pays or reimburses — it is what lands in the
-        customer's Customs &amp; duties cost on the Profitability tab. USD amounts convert at the company FX rate.
+        customer's Customs &amp; duties cost on the Profitability tab. "Freight customer paid" is kept for the record
+        only and does not change the margin. USD amounts convert at the company FX rate.
       </div>
       <div className={styles.actions}>
         <button className={styles.primaryBtn} disabled={busy} onClick={() => void submit()}>

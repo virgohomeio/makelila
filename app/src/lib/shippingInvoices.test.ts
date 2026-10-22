@@ -45,7 +45,7 @@ function row(over: Partial<CustomerProfitability> = {}): CustomerProfitability {
 function inv(over: Partial<CustomerShippingInvoice>): CustomerShippingInvoice {
   return {
     id: 'i', customer_id: 'c1', order_ref: null, carrier: 'UPS', invoice_number: null,
-    invoice_date: null, currency: 'CAD', freight_amount: 0, counts_in_shipping: true,
+    invoice_date: null, currency: 'CAD', freight_amount: 0, counts_in_shipping: true, freight_customer_paid_amount: 0,
     customs_amount: 0, customs_covered_amount: 0, file_name: null, storage_path: null,
     notes: null, uploaded_by: null, created_at: '2026-10-16', ...over,
   };
