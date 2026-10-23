@@ -3,6 +3,7 @@ import { useCustomers } from '../../lib/customers';
 import { useUnits } from '../../lib/stock';
 import { useCustomerLifecycle, useServiceTickets } from '../../lib/service';
 import { useAuth } from '../../lib/auth';
+import { useLovelyUsers } from '../../lib/lovely';
 import {
   buildTimelines, consecutiveGaps, coverage, gapDays, gapSeverity, toDay, timelinesCsv,
   setMilestoneOverride, clearMilestoneOverride,
@@ -14,7 +15,7 @@ import {
 import { Button, EmptyState } from '../../components/ui';
 import styles from './Timelines.module.css';
 
-// Customers > Timelines. A matrix of every customer against the six milestones,
+// Customers > Timelines. A matrix of every customer against the seven milestones,
 // and a per-customer rail behind each row.
 //
 // Spec: docs/superpowers/specs/2026-10-07-customer-timelines-tab-design.md
@@ -72,6 +73,7 @@ export function TimelinesTab() {
   const { tickets } = useServiceTickets();
   const { events } = useLovelyEvents();
   const { appLinks } = useCustomerAppLinks();
+  const { users: lovelyUsers } = useLovelyUsers();
   const { deliveries } = useCustomerDeliveries();
   const { calls } = useDiagnosisCalls();
   const { overrides, refresh: refreshOverrides } = useTimelineOverrides();
@@ -85,9 +87,9 @@ export function TimelinesTab() {
   const [openId, setOpenId] = useState<string | null>(null);
 
   const timelines = useMemo(() => buildTimelines({
-    customers, orders, units, lifecycle, tickets, events, appLinks,
+    customers, orders, units, lifecycle, tickets, events, appLinks, lovelyUsers,
     deliveries, diagnosisCalls: calls, overrides,
-  }), [customers, orders, units, lifecycle, tickets, events, appLinks, deliveries, calls, overrides]);
+  }), [customers, orders, units, lifecycle, tickets, events, appLinks, lovelyUsers, deliveries, calls, overrides]);
 
   // The coverage strip counts across the SCOPE, not the search: it is a
   // statement about the data we hold, and it should not move as you type.
@@ -303,6 +305,12 @@ function MatrixRow({ timeline, mode, onOpen }: {
                 {shortDate(v.date)}
                 {v.manual && <span className={styles.manualMark} title="Set by an operator">✎</span>}
               </span>
+            ) : def.key === 'app_onboarded' && timeline.app ? (
+              // Has a Lovely account but hasn't finished its onboarding yet —
+              // different from "no account", so it is not a bare dash.
+              <span className={styles.missing} title={`Lovely app: last finished “${timeline.app.label}”`}>
+                in setup
+              </span>
             ) : (
               <span className={styles.missing}>—</span>
             )}
@@ -478,6 +486,15 @@ function TimelineDetail({ timeline, onClose, onSaved }: {
                       : value.source ?? def.description}
                   </span>
                   {value.note && <span className={styles.railMeta}>“{value.note}”</span>}
+                  {def.key === 'app_onboarded' && (
+                    <span className={styles.railMeta}>
+                      {timeline.app
+                        ? timeline.app.done
+                          ? 'Lovely › Users status: tour_done (completed onboarding)'
+                          : `Lovely › Users status: ${timeline.app.step ?? 'none'} — last finished “${timeline.app.label}”, not signed on yet`
+                        : 'No Lovely app account matched to this customer'}
+                    </span>
+                  )}
 
                   {editing === def.key ? (
                     <div className={styles.railEdit}>

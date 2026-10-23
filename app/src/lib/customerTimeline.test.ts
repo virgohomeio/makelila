@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   buildTimelines, consecutiveGaps, coverage, gapDays, toDay,
   timelinesCsv, gapSeverity, MILESTONES, TABLE_MILESTONE_KEYS,
-  type TimelineInputs, type DiagnosisCall, type TimelineOverride,
+  type TimelineInputs, type DiagnosisCall, type TimelineOverride, type TimelineLovelyUser,
 } from './customerTimeline';
 import type { Customer } from './customers';
 import type { Order } from './orders';
@@ -394,8 +394,8 @@ describe('buildTimelines — overrides', () => {
     expect(t.milestones.onboarding_call.source).toBe('customers.onboard_date');
   });
 
-  it('only the three table-backed milestones read from the override table', () => {
-    expect(TABLE_MILESTONE_KEYS).toEqual(['ordered', 'onboarded', 'first_use']);
+  it('only the four table-backed milestones read from the override table', () => {
+    expect(TABLE_MILESTONE_KEYS).toEqual(['ordered', 'app_onboarded', 'onboarded', 'first_use']);
   });
 
   it('ignores an override belonging to another customer', () => {
@@ -520,5 +520,58 @@ describe('timelinesCsv', () => {
     }));
     const row = timelinesCsv(rows).split('\n')[1];
     expect(row.endsWith('2,2026-05-10,1')).toBe(true);
+  });
+});
+
+// ── Lovely app sign-on ──────────────────────────────────────────────────────
+
+describe('buildTimelines — signed onto Lovely app', () => {
+  const lovely = (over: Partial<TimelineLovelyUser> = {}): TimelineLovelyUser => ({
+    id: 'lu1', email: 'a@b.com', serial_number: null,
+    onboarding_step: 'tour_done', onboarding_step_at: null,
+    created_at: '2026-04-01T10:00:00Z', ...over,
+  });
+
+  it('dates a tour_done account by when the step was reached', () => {
+    const t = only(inputs({ lovelyUsers: [lovely({ onboarding_step_at: '2026-04-05T12:00:00Z' })] }));
+    expect(t.milestones.app_onboarded.date).toBe('2026-04-05');
+    expect(t.milestones.app_onboarded.source).toContain('onboarding_step_at');
+    expect(t.app).toEqual({ step: 'tour_done', label: 'Completed', done: true });
+  });
+
+  it('falls back to the onboarding_done event, then the signup day', () => {
+    const withEvent = only(inputs({
+      lovelyUsers: [lovely()],
+      events: [event({ event_type: 'lovely.onboarding_done', occurred_at: '2026-04-04T09:00:00Z' })],
+    }));
+    expect(withEvent.milestones.app_onboarded.date).toBe('2026-04-04');
+    const signupOnly = only(inputs({ lovelyUsers: [lovely()] }));
+    expect(signupOnly.milestones.app_onboarded.date).toBe('2026-04-01');
+    expect(signupOnly.milestones.app_onboarded.source).toContain('signup');
+  });
+
+  it('leaves a mid-setup account blank but reports its step', () => {
+    const t = only(inputs({ lovelyUsers: [lovely({ onboarding_step: 'hardware_done' })] }));
+    expect(t.milestones.app_onboarded.date).toBeNull();
+    expect(t.app).toEqual({ step: 'hardware_done', label: 'Hardware walkthrough', done: false });
+  });
+
+  it('matches by serial and by app link, not only email', () => {
+    const bySerial = only(inputs({
+      units: [unit({ serial: 'P100-001' })],
+      lovelyUsers: [lovely({ email: 'other@x.com', serial_number: 'p100-001' })],
+    }));
+    expect(bySerial.app?.done).toBe(true);
+    const byLink = only(inputs({
+      appLinks: [{ customer_id: 'c1', first_seen_at: null, lovely_user_id: 'lu9' }],
+      lovelyUsers: [lovely({ id: 'lu9', email: 'other@x.com' })],
+    }));
+    expect(byLink.app?.done).toBe(true);
+  });
+
+  it('has no app status when no Lovely account matches', () => {
+    const t = only(inputs({ lovelyUsers: [lovely({ email: 'nobody@x.com' })] }));
+    expect(t.app).toBeNull();
+    expect(t.milestones.app_onboarded.date).toBeNull();
   });
 });
