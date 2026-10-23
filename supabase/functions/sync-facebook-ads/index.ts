@@ -31,6 +31,7 @@ type Insight = {
   date_start?: string;
   date_stop?: string;
   actions?: ActionItem[];
+  action_values?: ActionItem[];
   video_p75_watched_actions?: ActionItem[];
   video_p100_watched_actions?: ActionItem[];
 };
@@ -82,7 +83,7 @@ Deno.serve(async (req: Request) => {
   // 2) Lifetime campaign-level insights (one row per campaign).
   const fields = [
     'campaign_id', 'campaign_name', 'spend', 'impressions', 'clicks', 'ctr', 'cpm',
-    'reach', 'frequency', 'inline_link_clicks', 'actions',
+    'reach', 'frequency', 'inline_link_clicks', 'actions', 'action_values',
     'video_p75_watched_actions', 'video_p100_watched_actions', 'date_start', 'date_stop',
   ].join(',');
 
@@ -135,47 +136,59 @@ Deno.serve(async (req: Request) => {
   const adRows: Record<string, unknown>[] = [];
   let adError: string | null = null;
   try {
-    const adFields = 'campaign_id,campaign_name,adset_id,adset_name,ad_id,ad_name,spend,impressions,clicks,ctr,actions,date_start,date_stop';
-    const until = new Date();
-    const since = new Date();
-    since.setDate(since.getDate() - 120);   // ~4 months back — covers every current campaign
+    const adFields = 'campaign_id,campaign_name,adset_id,adset_name,ad_id,ad_name,spend,impressions,clicks,ctr,actions,action_values,date_start,date_stop';
     const day = (d: Date) => d.toISOString().slice(0, 10);
-    const timeRange = encodeURIComponent(JSON.stringify({ since: day(since), until: day(until) }));
-    // time_increment=1 → one row per ad PER DAY, so the LILA Mini tab can filter
-    // by date range (today, last 7 days, …) and re-aggregate.
-    let url: string | null =
-      `${base}/${acct}/insights?level=ad&fields=${adFields}&time_range=${timeRange}&time_increment=1&limit=500&access_token=${encodeURIComponent(token)}`;
-    let pages = 0;
     const n = (v?: string) => (v != null && v !== '' ? Number(v) : null);
-    while (url && pages < 60) {
-      const res = await fetch(url);
-      const body = await res.json();
-      if (!res.ok) { adError = `Meta ad insights ${res.status}: ${JSON.stringify(body?.error ?? body).slice(0, 300)}`; break; }
-      for (const a of (body.data ?? []) as Array<Record<string, unknown> & { actions?: ActionItem[] }>) {
-        if (!a.ad_id || !a.date_start) continue;
-        adRows.push({
-          ad_id: a.ad_id,
-          ad_name: a.ad_name ?? a.ad_id,
-          adset_id: a.adset_id ?? null,
-          adset_name: a.adset_name ?? null,
-          campaign_id: a.campaign_id ?? null,
-          campaign_name: a.campaign_name ?? null,
-          date_start: a.date_start,
-          date_stop: a.date_stop ?? a.date_start,
-          spend_cad: n(a.spend as string | undefined),
-          impressions: n(a.impressions as string | undefined),
-          clicks: n(a.clicks as string | undefined),
-          ctr: n(a.ctr as string | undefined),
-          leads: actionVal(a.actions, ['offsite_conversion.fb_pixel_lead', 'lead', 'onsite_conversion.lead_grouped']),
-          // Per-ad website purchases per day — lets the Journey Report attribute
-          // a single-sale day to the one creative that converted that day (same
-          // clean-day match as age/gender).
-          purchases: actionVal(a.actions, ['offsite_conversion.fb_pixel_purchase', 'purchase', 'omni_purchase']),
-          synced_at: now,
-        });
+    const purchaseKeys = ['offsite_conversion.fb_pixel_purchase', 'purchase', 'omni_purchase'];
+    const WINDOW_DAYS = 120;   // ~4 months back — covers every current campaign
+    const CHUNK_DAYS = 15;     // per request: small enough to stay under Meta's
+                               // synchronous-insights data cap with time_increment=1.
+    const today = new Date();
+    // Walk BACKWARDS from today in CHUNK_DAYS slices. Requesting 120 days ×
+    // one-row-per-ad-per-day in a single paginated call makes Meta reject the
+    // later pages ("please reduce the amount of data"), which previously froze
+    // fb_ads with only the earliest ~500 rows. Small slices, newest first, keep
+    // every request light AND guarantee recent days land even if an older slice
+    // errors out.
+    for (let offset = 0; offset < WINDOW_DAYS && !adError; offset += CHUNK_DAYS) {
+      const until = new Date(today); until.setDate(until.getDate() - offset);
+      const since = new Date(today); since.setDate(since.getDate() - Math.min(offset + CHUNK_DAYS - 1, WINDOW_DAYS - 1));
+      const timeRange = encodeURIComponent(JSON.stringify({ since: day(since), until: day(until) }));
+      let url: string | null =
+        `${base}/${acct}/insights?level=ad&fields=${adFields}&time_range=${timeRange}&time_increment=1&limit=500&access_token=${encodeURIComponent(token)}`;
+      let pages = 0;
+      while (url && pages < 20) {
+        const res = await fetch(url);
+        const body = await res.json();
+        if (!res.ok) { adError = `Meta ad insights ${res.status}: ${JSON.stringify(body?.error ?? body).slice(0, 300)}`; break; }
+        for (const a of (body.data ?? []) as Array<Record<string, unknown> & { actions?: ActionItem[]; action_values?: ActionItem[] }>) {
+          if (!a.ad_id || !a.date_start) continue;
+          adRows.push({
+            ad_id: a.ad_id,
+            ad_name: a.ad_name ?? a.ad_id,
+            adset_id: a.adset_id ?? null,
+            adset_name: a.adset_name ?? null,
+            campaign_id: a.campaign_id ?? null,
+            campaign_name: a.campaign_name ?? null,
+            date_start: a.date_start,
+            date_stop: a.date_stop ?? a.date_start,
+            spend_cad: n(a.spend as string | undefined),
+            impressions: n(a.impressions as string | undefined),
+            clicks: n(a.clicks as string | undefined),
+            ctr: n(a.ctr as string | undefined),
+            leads: actionVal(a.actions, ['offsite_conversion.fb_pixel_lead', 'lead', 'onsite_conversion.lead_grouped']),
+            // Per-ad website purchases per day — lets the Journey Report attribute
+            // a single-sale day to the one creative that converted that day (same
+            // clean-day match as age/gender).
+            purchases: actionVal(a.actions, purchaseKeys),
+            // Per-ad purchase VALUE per day → Meta ROAS for a date range.
+            purchases_value: actionVal(a.action_values, purchaseKeys),
+            synced_at: now,
+          });
+        }
+        url = body.paging?.next ?? null;
+        pages++;
       }
-      url = body.paging?.next ?? null;
-      pages++;
     }
     if (adRows.length) {
       // Clean-replace: fb_ads is fully re-derived for the pulled window.
@@ -202,6 +215,7 @@ function buildRow(ins: Insight, meta: CampaignMeta | undefined, now: string): Re
   const add_payment_info    = actionVal(A, ['offsite_conversion.fb_pixel_add_payment_info', 'add_payment_info']);
   const checkouts_initiated = actionVal(A, ['offsite_conversion.fb_pixel_initiate_checkout', 'initiate_checkout', 'omni_initiated_checkout']);
   const website_purchases   = actionVal(A, ['offsite_conversion.fb_pixel_purchase', 'purchase', 'omni_purchase']);
+  const website_purchases_value = actionVal(ins.action_values, ['offsite_conversion.fb_pixel_purchase', 'purchase', 'omni_purchase']);
   const leads               = actionVal(A, ['offsite_conversion.fb_pixel_lead', 'lead', 'onsite_conversion.lead_grouped']);
   const link_clicks         = ins.inline_link_clicks != null ? Number(ins.inline_link_clicks) : actionVal(A, ['link_click']);
   const landing_page_views  = actionVal(A, ['landing_page_view']);
@@ -242,7 +256,7 @@ function buildRow(ins: Insight, meta: CampaignMeta | undefined, now: string): Re
     ctr: num(ins.ctr), cpm: num(ins.cpm), reach, frequency: num(ins.frequency),
     leads, link_clicks, landing_page_views,
     post_comments, post_reactions, post_shares, page_likes, post_saves,
-    website_purchases,
+    website_purchases, website_purchases_value,
     bid_strategy: meta?.bid_strategy ?? null,
     campaign_start: meta?.start_time ? meta.start_time.slice(0, 10) : null,
     campaign_end: meta?.stop_time ? meta.stop_time.slice(0, 10) : 'Ongoing',

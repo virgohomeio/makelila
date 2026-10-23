@@ -26,6 +26,7 @@ export type FbMetrics = {
   page_likes?: number;
   post_saves?: number;
   website_purchases?: number;
+  website_purchases_value?: number;
   bid_strategy?: string | null;
   campaign_start?: string | null;
   campaign_end?: string | null;
@@ -88,6 +89,7 @@ export type FbAd = {
   ctr: number | null;
   leads: number | null;
   purchases: number | null;
+  purchases_value: number | null;
 };
 
 /** Ad-level rows (one per ad) for per-ad-set + per-creative analysis. */
@@ -99,7 +101,7 @@ export function useFbAds(): { ads: FbAd[]; loading: boolean } {
     // (daily rows per ad × many campaigns), so page through with .range() —
     // otherwise the newest campaign silently falls off the end and never shows
     // in the LILA Mini dropdown.
-    const cols = 'ad_id, ad_name, adset_id, adset_name, campaign_id, campaign_name, date_start, spend_cad, impressions, clicks, ctr, leads, purchases';
+    const cols = 'ad_id, ad_name, adset_id, adset_name, campaign_id, campaign_name, date_start, spend_cad, impressions, clicks, ctr, leads, purchases, purchases_value';
     const PAGE = 1000;
     const all: FbAd[] = [];
     for (let from = 0; ; from += PAGE) {
