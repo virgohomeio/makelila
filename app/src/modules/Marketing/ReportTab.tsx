@@ -12,12 +12,25 @@ import { useGoogleAds, sumGoogleAds } from '../../lib/marketing/googleAds';
 const subtle = 'var(--color-ink-subtle)';
 const muted = 'var(--color-ink-muted)';
 
-const RANGES = [
-  { label: 'Last 30 days', days: 30 },
-  { label: 'Last 60 days', days: 60 },
-  { label: 'Last 90 days', days: 90 },
-  { label: 'All time', days: 0 },
+// Date-range options for the report's KPI/summary + order list. 'all' = every
+// sale; 'today'/'yesterday' = that single EST calendar day; the numeric keys are
+// rolling windows of N calendar days ending today (inclusive).
+const RANGES: { key: string; label: string }[] = [
+  { key: 'all', label: 'All time' },
+  { key: 'today', label: 'Today' },
+  { key: 'yesterday', label: 'Yesterday' },
+  { key: '7', label: 'Last 7 days' },
+  { key: '14', label: 'Last 14 days' },
+  { key: '30', label: 'Last 30 days' },
+  { key: '60', label: 'Last 60 days' },
+  { key: '90', label: 'Last 90 days' },
+  { key: '365', label: 'Last 365 days' },
 ];
+
+// fb_ads holds ~120 days of daily ad-level rows, so any window whose start is
+// within this many days is fully covered there (accurate per-day Meta spend);
+// older/unbounded windows fall back to the lifetime fb_campaigns totals.
+const FB_ADS_COVERAGE_DAYS = 120;
 
 /** The creative code an operator recognises (v28a, v13a…) pulled out of a Meta
  *  ad name or a utm_content string. Prefers a code WITH a trailing letter — an
@@ -40,17 +53,31 @@ export function ReportTab() {
   const { demographics } = useFbDemographics();
   const { ads } = useFbAds();
   const { rows: googleRows } = useGoogleAds();
-  const [days, setDays] = useState(0);   // default: All time — show every sale
+  const [rangeKey, setRangeKey] = useState('all');   // default: All time — show every sale
   const [campaignFilter, setCampaignFilter] = useState('all');
   const [pageSize, setPageSize] = useState(20);
   const [page, setPage] = useState(0);
 
-  const cutoff = useMemo(() => (days ? Date.now() - days * 86_400_000 : 0), [days]);
+  // The selected date window as inclusive EST YYYY-MM-DD bounds (null = unbounded
+  // = all time). `daily` says the window is short enough to source Meta spend
+  // from fb_ads (daily) rather than the lifetime fb_campaigns totals.
+  const dayStr = (ms: number) => new Date(ms).toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+  const range = useMemo(() => {
+    const now = Date.now();
+    const today = dayStr(now);
+    if (rangeKey === 'all') return { start: null as string | null, end: null as string | null, daily: false };
+    if (rangeKey === 'today') return { start: today, end: today, daily: true };
+    if (rangeKey === 'yesterday') { const y = dayStr(now - 86_400_000); return { start: y, end: y, daily: true }; }
+    const n = Number(rangeKey);
+    const start = dayStr(now - (n - 1) * 86_400_000);
+    return { start, end: today, daily: n <= FB_ADS_COVERAGE_DAYS };
+  }, [rangeKey]);
 
   const inRange = (iso: string | null | undefined) => {
-    if (!cutoff) return true;
+    if (!range.start) return true;               // all time
     if (!iso) return false;
-    return new Date(iso).getTime() >= cutoff;
+    const d = dayStr(new Date(iso).getTime());
+    return d >= range.start && d <= range.end!;
   };
 
   // Curated sale groups (each = many Meta campaigns), piled chronologically:
@@ -85,25 +112,40 @@ export function ReportTab() {
     return [...m.values(), ...noId];
   }, [campaigns]);
 
-  const adSpendCad = useMemo(() => {
-    // Group spend (all its Meta campaigns) when a group is picked; else range total.
-    if (selectedGroup) return uniqueCampaigns.filter(c => c.campaign_id && selectedGroup.ids.has(c.campaign_id)).reduce((s, c) => s + (c.spend_cad ?? 0), 0);
-    return uniqueCampaigns.filter(c => inRange(c.date_start)).reduce((s, c) => s + (c.spend_cad ?? 0), 0);
-  }, [uniqueCampaigns, cutoff, selectedGroup]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Per-platform spend + conversions for the selected scope: Meta (fb_campaigns)
-  // and Google (google_ads_campaigns), separate and blended. Conversions are each
-  // platform's OWN reported conversions (Meta website purchases, Google
-  // conversions). Total ad spend here drives the blended CAC/ROAS/ROI below.
+  // Per-platform spend + conversions for the selected scope: Meta and Google
+  // (google_ads_campaigns), separate and blended. Conversions are each platform's
+  // OWN reported conversions (Meta website purchases, Google conversions). Total
+  // ad spend here drives the blended CAC/ROAS/ROI below.
+  //
+  // Meta source depends on the window: a campaign GROUP or an unbounded / long
+  // (>120-day) window uses the lifetime fb_campaigns totals; a short bounded
+  // window (today … last 90 days) uses the daily ad-level fb_ads rows so spend +
+  // conversions reflect exactly that date range (fb_campaigns has no daily
+  // breakdown — its date_start is a lifetime boundary, so it can't be filtered).
   const platform = useMemo(() => {
-    const metaSpend = adSpendCad;
-    const metaCampaigns = selectedGroup
-      ? uniqueCampaigns.filter(c => c.campaign_id && selectedGroup.ids.has(c.campaign_id))
-      : uniqueCampaigns.filter(c => inRange(c.date_start));
-    const metaConversions = metaCampaigns.reduce((s, c) => s + (c.metrics?.website_purchases ?? 0), 0);
+    let metaSpend = 0;
+    let metaConversions = 0;
+    if (selectedGroup) {
+      const gc = uniqueCampaigns.filter(c => c.campaign_id && selectedGroup.ids.has(c.campaign_id));
+      metaSpend = gc.reduce((s, c) => s + (c.spend_cad ?? 0), 0);
+      metaConversions = gc.reduce((s, c) => s + (c.metrics?.website_purchases ?? 0), 0);
+    } else if (range.daily && range.start) {
+      // Short bounded window → sum daily ad-level rows within [start, end].
+      for (const ad of ads) {
+        if (!ad.date_start) continue;
+        const d = ad.date_start.slice(0, 10);
+        if (d < range.start || d > range.end!) continue;
+        metaSpend += ad.spend_cad ?? 0;
+        metaConversions += ad.purchases ?? 0;
+      }
+    } else {
+      // All time, or a window too long for fb_ads coverage → lifetime totals.
+      metaSpend = uniqueCampaigns.reduce((s, c) => s + (c.spend_cad ?? 0), 0);
+      metaConversions = uniqueCampaigns.reduce((s, c) => s + (c.metrics?.website_purchases ?? 0), 0);
+    }
     // Google date window, aligned to the selected group / range.
-    const gStart = selectedGroup ? selectedGroup.startDate : (days ? new Date(cutoff).toISOString().slice(0, 10) : null);
-    const gEnd = selectedGroup ? (selectedGroup.endDate ?? new Date().toISOString().slice(0, 10)) : null;
+    const gStart = selectedGroup ? selectedGroup.startDate : range.start;
+    const gEnd = selectedGroup ? (selectedGroup.endDate ?? dayStr(Date.now())) : range.end;
     const g = sumGoogleAds(googleRows, gStart, gEnd);
     return {
       metaSpend, metaConversions, metaCac: metaConversions ? metaSpend / metaConversions : null,
@@ -112,7 +154,7 @@ export function ReportTab() {
       totalSpend: metaSpend + g.spend,
       totalConversions: metaConversions + g.conversions,
     };
-  }, [adSpendCad, uniqueCampaigns, selectedGroup, cutoff, days, googleRows]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [uniqueCampaigns, ads, selectedGroup, range, googleRows]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const { rows, kpis } = useMemo(() => {
     const filtered = orders.filter(o => o.kind !== 'replacement' && !isTestOrder(o) && isRealSale(o) && inScope(o));
@@ -225,7 +267,7 @@ export function ReportTab() {
     };
 
     return buildSalesReport(filtered, resolve, platform.totalSpend, journey, campaignName, demo, groupOf, creativeOf);
-  }, [orders, byId, byEmail, journeys, campaigns, campaignGroups, demographics, ads, platform, cutoff, campaignFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [orders, byId, byEmail, journeys, campaigns, campaignGroups, demographics, ads, platform, range, campaignFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const pageCount = Math.max(1, Math.ceil(rows.length / pageSize));
   const safePage = Math.min(page, pageCount - 1);
@@ -250,8 +292,8 @@ export function ReportTab() {
             <option key={g.key} value={g.key}>{g.label}</option>
           ))}
         </select>
-        <select value={days} onChange={e => { setDays(Number(e.target.value)); setPage(0); }} style={selectStyle} disabled={campaignFilter !== 'all'}>
-          {RANGES.map(r => <option key={r.days} value={r.days}>{r.label}</option>)}
+        <select value={rangeKey} onChange={e => { setRangeKey(e.target.value); setPage(0); }} style={selectStyle} disabled={campaignFilter !== 'all'}>
+          {RANGES.map(r => <option key={r.key} value={r.key}>{r.label}</option>)}
         </select>
         <select value={pageSize} onChange={e => { setPageSize(Number(e.target.value)); setPage(0); }} style={selectStyle} title="Rows per page">
           {[20, 40, 60, 80, 100].map(n => <option key={n} value={n}>{n} / page</option>)}
