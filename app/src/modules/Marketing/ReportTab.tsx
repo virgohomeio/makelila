@@ -25,6 +25,7 @@ const RANGES: { key: string; label: string }[] = [
   { key: '60', label: 'Last 60 days' },
   { key: '90', label: 'Last 90 days' },
   { key: '365', label: 'Last 365 days' },
+  { key: 'custom', label: 'Custom range…' },
 ];
 
 // fb_ads holds ~120 days of daily ad-level rows, so any window whose start is
@@ -54,6 +55,8 @@ export function ReportTab() {
   const { ads } = useFbAds();
   const { rows: googleRows } = useGoogleAds();
   const [rangeKey, setRangeKey] = useState('all');   // default: All time — show every sale
+  const [customStart, setCustomStart] = useState('');   // YYYY-MM-DD, used when rangeKey === 'custom'
+  const [customEnd, setCustomEnd] = useState('');
   const [campaignFilter, setCampaignFilter] = useState('all');
   const [pageSize, setPageSize] = useState(20);
   const [page, setPage] = useState(0);
@@ -65,13 +68,24 @@ export function ReportTab() {
   const range = useMemo(() => {
     const now = Date.now();
     const today = dayStr(now);
+    // Earliest day fb_ads still covers — a window starting on/after it can use
+    // the accurate daily rows; an earlier start falls back to lifetime totals.
+    const coverFrom = dayStr(now - FB_ADS_COVERAGE_DAYS * 86_400_000);
     if (rangeKey === 'all') return { start: null as string | null, end: null as string | null, daily: false };
+    if (rangeKey === 'custom') {
+      if (!customStart && !customEnd) return { start: null as string | null, end: null as string | null, daily: false };
+      // Allow start or end alone; order them defensively if both given reversed.
+      let s = customStart || '0000-01-01';
+      let e = customEnd || today;
+      if (s > e) { const t = s; s = e; e = t; }
+      return { start: s, end: e, daily: s >= coverFrom };
+    }
     if (rangeKey === 'today') return { start: today, end: today, daily: true };
     if (rangeKey === 'yesterday') { const y = dayStr(now - 86_400_000); return { start: y, end: y, daily: true }; }
     const n = Number(rangeKey);
     const start = dayStr(now - (n - 1) * 86_400_000);
     return { start, end: today, daily: n <= FB_ADS_COVERAGE_DAYS };
-  }, [rangeKey]);
+  }, [rangeKey, customStart, customEnd]);
 
   const inRange = (iso: string | null | undefined) => {
     if (!range.start) return true;               // all time
@@ -295,6 +309,15 @@ export function ReportTab() {
         <select value={rangeKey} onChange={e => { setRangeKey(e.target.value); setPage(0); }} style={selectStyle} disabled={campaignFilter !== 'all'}>
           {RANGES.map(r => <option key={r.key} value={r.key}>{r.label}</option>)}
         </select>
+        {rangeKey === 'custom' && campaignFilter === 'all' && (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <input type="date" value={customStart} max={customEnd || undefined}
+              onChange={e => { setCustomStart(e.target.value); setPage(0); }} style={selectStyle} title="Start date" />
+            <span style={{ fontSize: 12, color: muted }}>→</span>
+            <input type="date" value={customEnd} min={customStart || undefined}
+              onChange={e => { setCustomEnd(e.target.value); setPage(0); }} style={selectStyle} title="End date" />
+          </span>
+        )}
         <select value={pageSize} onChange={e => { setPageSize(Number(e.target.value)); setPage(0); }} style={selectStyle} title="Rows per page">
           {[20, 40, 60, 80, 100].map(n => <option key={n} value={n}>{n} / page</option>)}
         </select>
