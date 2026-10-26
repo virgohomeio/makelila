@@ -3,7 +3,7 @@ import { corsHeaders } from '../_shared/cors.ts';
 import { archiveBcc, DEFAULT_ARCHIVE_BCC } from '../_shared/emailArchive.ts';
 
 const REINA = 'reina@virgohome.io';
-const GEORGE = 'george@virgohome.io';
+const HUAYI = 'huayi@virgohome.io';
 const FROM = 'VCycene Team <support@lilacomposter.com>';
 
 Deno.serve(async (req: Request) => {
@@ -71,11 +71,12 @@ Deno.serve(async (req: Request) => {
         subject: `Your Return Application Received — Ref. ${custRef}`,
         html: customerHtml(ret, custRef),
       }),
-      // 2. Internal review for Reina + George
+      // 2. Internal review — Reina + Huayi only. Replies stay internal: the
+      // customer must never be on the reply path of this email.
       postResend(resendKey, {
         from: FROM,
-        reply_to: ret.customer_email,
-        to: [REINA, GEORGE],
+        reply_to: [REINA, HUAYI],
+        to: [REINA, HUAYI],
         subject: `[Return Review] ${ret.original_order_ref} — ${ret.customer_name}` +
           (withinPolicy === false ? ' ⚠ Past 30 Days' : withinPolicy === true ? ' ✓ Within Policy' : ''),
         html: internalHtml(ret, order, daysSincePurchase, withinPolicy, proofUrl, custRef),
