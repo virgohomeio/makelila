@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { triggerFbIgSync } from '../../lib/marketing/social';
+import { triggerAllSocialSync } from '../../lib/marketing/social';
 import { useSocialOverview, groupPostsByDate, type SocialPost, type ChannelOverview } from '../../lib/marketing/socialPosts';
 
 const subtle = 'var(--color-ink-subtle)';
@@ -36,9 +36,8 @@ export function SocialTab() {
     const newFollowers = channels.reduce((s, c) => s + (c.followersDelta ?? 0), 0);
     const anyDelta = channels.some(c => c.followersDelta != null);
     const views28 = recentPosts.reduce((s, p) => s + (p.views ?? 0), 0);
-    const eng28 = recentPosts.reduce((s, p) => s + (p.engagement ?? 0), 0);
-    const lifetimeViews = channels.reduce((s, c) => s + (c.views ?? 0), 0);
-    return { followers, newFollowers, anyDelta, views28, eng28, lifetimeViews };
+    const totalViews = channels.reduce((s, c) => s + (c.views ?? 0), 0);
+    return { followers, newFollowers, anyDelta, views28, totalViews };
   }, [channels, recentPosts]);
 
   // Per-platform insights from the 28-day posts.
@@ -59,11 +58,11 @@ export function SocialTab() {
     [posts],
   );
 
-  async function syncFbIg() {
+  async function syncAll() {
     setSyncing(true); setMsg('');
     try {
-      const r = await triggerFbIgSync();
-      setMsg(`Synced ${r.channels.join(' + ') || 'nothing'}. Reload to see updated numbers.`);
+      const summary = await triggerAllSocialSync();
+      setMsg(`${summary} Reload to see updated numbers.`);
     } catch (e) { setMsg(`Sync failed: ${String(e)}`); } finally { setSyncing(false); }
   }
 
@@ -73,20 +72,19 @@ export function SocialTab() {
     <div>
       {/* Totals */}
       <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 2 }}>All channels — combined</div>
-      <div style={{ fontSize: 11, color: muted, marginBottom: 8 }}>Followers are current; new followers + views + engagement are the trailing 28 days.</div>
+      <div style={{ fontSize: 11, color: muted, marginBottom: 8 }}>Followers + total views are current totals; the 28-day figures are the trailing 28 days.</div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 18 }}>
         <Tile label="Total followers" value={abbr(totals.followers)} big />
-        <Tile label="New followers · 28d" value={totals.anyDelta ? signed(totals.newFollowers) : 'building…'} />
+        <Tile label="Followers · 28d" value={totals.anyDelta ? signed(totals.newFollowers) : 'building…'} />
+        <Tile label="Total views" value={abbr(totals.totalViews)} big />
         <Tile label="Views · 28d" value={abbr(totals.views28)} />
-        <Tile label="Engagement · 28d" value={abbr(totals.eng28)} />
-        <Tile label="Lifetime views" value={abbr(totals.lifetimeViews)} sub="YouTube + TikTok" />
       </div>
 
       <div style={{ marginBottom: 14, display: 'flex', alignItems: 'center', gap: 10 }}>
-        <button onClick={() => void syncFbIg()} disabled={syncing} style={{
+        <button onClick={() => void syncAll()} disabled={syncing} style={{
           padding: '6px 14px', fontSize: 13, fontWeight: 600, cursor: syncing ? 'wait' : 'pointer',
           background: 'var(--color-crimson)', color: '#fff', border: 'none', borderRadius: 6,
-        }}>{syncing ? 'Syncing…' : 'Sync Facebook & Instagram'}</button>
+        }}>{syncing ? 'Syncing…' : 'Sync all platforms'}</button>
         {msg && <span style={{ fontSize: 12, color: muted }}>{msg}</span>}
       </div>
 
