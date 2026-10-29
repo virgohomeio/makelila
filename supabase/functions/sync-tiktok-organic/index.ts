@@ -70,25 +70,35 @@ Deno.serve(async (req: Request) => {
   // 2) Recent videos → trailing-28d engagement + views.
   let engagement: number | null = null;
   let views: number | null = null;
+  const estDate = (ms: number) => new Date(ms).toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+  const posts: Record<string, unknown>[] = [];
   try {
-    const vlFields = 'id,create_time,like_count,comment_count,share_count,view_count';
+    const vlFields = 'id,create_time,like_count,comment_count,share_count,view_count,title,video_description,share_url';
     const vl = await fetch(`https://open.tiktokapis.com/v2/video/list/?fields=${vlFields}`, {
       method: 'POST', headers: { ...auth, 'content-type': 'application/json' }, body: JSON.stringify({ max_count: 20 }),
     });
-    const vld = await vl.json().catch(() => ({})) as { data?: { videos?: Array<Record<string, number>> }; error?: { code?: string } };
+    const vld = await vl.json().catch(() => ({})) as { data?: { videos?: Array<Record<string, number | string>> }; error?: { code?: string } };
     if (vl.ok && vld.data?.videos) {
       const cutoff = Math.floor((Date.now() - 28 * 86_400_000) / 1000);
       let eng = 0, vw = 0, any = false;
       for (const v of vld.data.videos) {
-        if ((v.create_time ?? 0) < cutoff) continue;
-        any = true;
-        eng += (v.like_count ?? 0) + (v.comment_count ?? 0) + (v.share_count ?? 0);
-        vw += v.view_count ?? 0;
+        const ct = Number(v.create_time ?? 0);
+        const like = Number(v.like_count ?? 0), comm = Number(v.comment_count ?? 0), shr = Number(v.share_count ?? 0), vwc = Number(v.view_count ?? 0);
+        if (ct >= cutoff) { any = true; eng += like + comm + shr; vw += vwc; }
+        if (v.id) posts.push({
+          platform: 'tiktok', post_id: String(v.id),
+          posted_at: ct ? new Date(ct * 1000).toISOString() : null, posted_date: ct ? estDate(ct * 1000) : null,
+          caption: (v.title as string) || (v.video_description as string) || null,
+          permalink: (v.share_url as string) ?? null, media_type: 'video',
+          views: vwc, likes: like, comments: comm, shares: shr, reach: null, engagement: like + comm + shr,
+          synced_at: new Date().toISOString(),
+        });
       }
       engagement = any ? eng : 0;
       views = any ? vw : 0;
     } else { notes.videos = JSON.stringify(vld.error ?? vld).slice(0, 160); }
   } catch (e) { notes.videos = (e as Error).message; }
+  if (posts.length) await admin.from('social_posts').upsert(posts, { onConflict: 'platform,post_id' });
 
   const asOf = new Date().toISOString().slice(0, 10);
   const now = new Date().toISOString();

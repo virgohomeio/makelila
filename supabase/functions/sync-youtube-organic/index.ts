@@ -63,31 +63,46 @@ Deno.serve(async (req: Request) => {
   //    published in that window (from each video's public statistics).
   const notes: Record<string, string> = {};
   let engagement: number | null = null;
+  const estDate = (iso: string) => new Date(iso).toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+  const posts: Record<string, unknown>[] = [];
+  const now28 = Date.now();
   try {
     if (uploads) {
-      const pl = await getJson(`${base}/playlistItems?part=contentDetails&playlistId=${encodeURIComponent(uploads)}&maxResults=50&key=${key}`);
+      // Pull the most recent ~30 uploads (covers the 28d window + a buffer for
+      // the per-post cross-platform comparison).
+      const pl = await getJson(`${base}/playlistItems?part=contentDetails&playlistId=${encodeURIComponent(uploads)}&maxResults=30&key=${key}`);
       if (pl.ok) {
-        const cutoff = Date.now() - 28 * 86_400_000;
-        const recentIds = ((pl.body.items as Array<{ contentDetails?: { videoId?: string; videoPublishedAt?: string } }> | undefined) ?? [])
-          .filter(it => { const t = Date.parse(it.contentDetails?.videoPublishedAt ?? ''); return !Number.isNaN(t) && t >= cutoff; })
+        const ids = ((pl.body.items as Array<{ contentDetails?: { videoId?: string; videoPublishedAt?: string } }> | undefined) ?? [])
           .map(it => it.contentDetails?.videoId)
           .filter((v): v is string => !!v);
-        if (recentIds.length) {
-          const vids = await getJson(`${base}/videos?part=statistics&id=${recentIds.join(',')}&key=${key}`);
+        if (ids.length) {
+          const vids = await getJson(`${base}/videos?part=snippet,statistics&id=${ids.join(',')}&key=${key}`);
           if (vids.ok) {
             let likes = 0, comments = 0;
-            for (const v of (vids.body.items as Array<{ statistics?: Record<string, unknown> }> | undefined) ?? []) {
-              likes += num(v.statistics?.likeCount) ?? 0;
-              comments += num(v.statistics?.commentCount) ?? 0;
+            const cutoff = now28 - 28 * 86_400_000;
+            for (const v of (vids.body.items as Array<{ id?: string; snippet?: Record<string, unknown>; statistics?: Record<string, unknown> }> | undefined) ?? []) {
+              const publishedAt = (v.snippet?.publishedAt as string | undefined) ?? '';
+              const vc = num(v.statistics?.viewCount) ?? 0;
+              const lc = num(v.statistics?.likeCount) ?? 0;
+              const cc = num(v.statistics?.commentCount) ?? 0;
+              const t = Date.parse(publishedAt);
+              if (!Number.isNaN(t) && t >= cutoff) { likes += lc; comments += cc; }
+              if (v.id) posts.push({
+                platform: 'youtube', post_id: v.id,
+                posted_at: publishedAt || null, posted_date: publishedAt ? estDate(publishedAt) : null,
+                caption: (v.snippet?.title as string | undefined) ?? null,
+                permalink: `https://youtu.be/${v.id}`, media_type: 'video',
+                views: vc, likes: lc, comments: cc, shares: null, reach: null, engagement: lc + cc,
+                synced_at: new Date().toISOString(),
+              });
             }
             engagement = likes + comments;
           } else { notes.videos = errMsg(vids.body, vids.status); }
-        } else {
-          engagement = 0;   // channel exists but posted nothing in the last 28 days
-        }
+        } else { engagement = 0; }
       } else { notes.playlist = errMsg(pl.body, pl.status); }
     } else { notes.uploads = 'no uploads playlist on channel'; }
   } catch (e) { notes.engagement = (e as Error).message; }
+  if (posts.length) await admin.from('social_posts').upsert(posts, { onConflict: 'platform,post_id' });
 
   const asOf = new Date().toISOString().slice(0, 10);
   const now = new Date().toISOString();
