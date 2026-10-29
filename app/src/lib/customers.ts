@@ -2049,3 +2049,104 @@ export function useUnitBatchLinks(): {
 
   return { links, futureBatches, census, batchFacts, loading, error };
 }
+
+// ── Primary user per machine ────────────────────────────────────────────────
+// customers.primary_user_* is ONE person per customer. A purchaser who bought
+// several machines for different people (one for themselves, others shipped to
+// family or colleagues) needs a primary user per serial. Those live in
+// unit_primary_users, keyed by serial; a row there overrides the customer-level
+// primary user for that machine.
+
+export type UnitPrimaryUser = {
+  unit_serial: string;
+  customer_id: string;
+  full_name: string;
+  phone: string | null;
+  email: string | null;
+  relationship: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+/** Per-machine primary users recorded for one customer, keyed by serial. Pass
+ *  null when no customer is selected — the hook then idles with an empty map. */
+export function useUnitPrimaryUsers(customerId: string | null): {
+  bySerial: Map<string, UnitPrimaryUser>;
+  loading: boolean;
+  refresh: () => Promise<void>;
+} {
+  const [rows, setRows] = useState<UnitPrimaryUser[]>([]);
+  const [loading, setLoading] = useState(customerId !== null);
+  const [refreshTick, setRefreshTick] = useState(0);
+
+  useEffect(() => {
+    if (!customerId) { setRows([]); setLoading(false); return; }
+    let channel: RealtimeChannel | null = null;
+    let cancelled = false;
+    setLoading(true);
+    (async () => {
+      const { data, error } = await supabase
+        .from('unit_primary_users')
+        .select('*')
+        .eq('customer_id', customerId);
+      if (cancelled) return;
+      if (!error && data) setRows(data as UnitPrimaryUser[]);
+      setLoading(false);
+
+      channel = supabase
+        .channel(`unit_primary_users:${customerId}`)
+        .on('postgres_changes', {
+          event: '*', schema: 'public', table: 'unit_primary_users',
+          filter: `customer_id=eq.${customerId}`,
+        }, (payload) => {
+          setRows(prev => {
+            if (payload.eventType === 'DELETE' && payload.old) {
+              return prev.filter(r => r.unit_serial !== (payload.old as { unit_serial: string }).unit_serial);
+            }
+            if (payload.new) {
+              const row = payload.new as UnitPrimaryUser;
+              return [...prev.filter(r => r.unit_serial !== row.unit_serial), row];
+            }
+            return prev;
+          });
+        })
+        .subscribe();
+    })();
+    return () => { cancelled = true; if (channel) void channel.unsubscribe(); };
+  }, [customerId, refreshTick]);
+
+  const refresh = async () => { setRefreshTick(t => t + 1); };
+  const bySerial = useMemo(() => new Map(rows.map(r => [r.unit_serial, r])), [rows]);
+  return { bySerial, loading, refresh };
+}
+
+/** Set (upsert) the primary user of one machine. A blank name clears it. */
+export async function setUnitPrimaryUser(
+  serial: string,
+  customerId: string,
+  input: AdditionalUserInput,
+): Promise<void> {
+  const row = normalizeAdditionalUser(input);
+  if (!row.full_name) {
+    await clearUnitPrimaryUser(serial, customerId);
+    return;
+  }
+  const { error } = await supabase.from('unit_primary_users').upsert({
+    unit_serial: serial, customer_id: customerId, ...row,
+  }, { onConflict: 'unit_serial' });
+  if (error) throw error;
+  await logAction(
+    'unit_primary_user_set',
+    serial,
+    additionalUserLabel(row),
+    { entityType: 'customer', entityId: customerId, unitSerial: serial },
+  );
+}
+
+/** Remove the per-machine primary user; the machine falls back to the
+ *  customer-level primary user (or the purchaser). */
+export async function clearUnitPrimaryUser(serial: string, customerId: string): Promise<void> {
+  const { error } = await supabase.from('unit_primary_users').delete().eq('unit_serial', serial);
+  if (error) throw error;
+  await logAction('unit_primary_user_set', serial, 'cleared', { entityType: 'customer', entityId: customerId, unitSerial: serial });
+}
