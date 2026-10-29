@@ -40,8 +40,8 @@ export function DashboardTab() {
       followers: socialChannels.reduce((s, c) => s + (c.followers ?? 0), 0),
       newFollowers: socialChannels.reduce((s, c) => s + (c.followersDelta ?? 0), 0),
       anyDelta: socialChannels.some(c => c.followersDelta != null),
+      totalViews: socialChannels.reduce((s, c) => s + (c.views ?? 0), 0),
       views28: recent.reduce((s, p) => s + (p.views ?? 0), 0),
-      eng28: recent.reduce((s, p) => s + (p.engagement ?? 0), 0),
       hasData: socialChannels.length > 0,
     };
   }, [socialPosts, socialChannels]);
@@ -164,13 +164,13 @@ export function DashboardTab() {
 
       {/* Organic social */}
       <div style={{ fontSize: 13, fontWeight: 600, margin: '18px 0 2px' }}>Organic social</div>
-      <div style={{ fontSize: 11, color: muted, marginBottom: 8 }}>Followers are current; new followers, views + engagement are the trailing 28 days. Full breakdown on the Social tab.</div>
+      <div style={{ fontSize: 11, color: muted, marginBottom: 8 }}>Followers + total views are current; the 28-day figures are the trailing 28 days. Full breakdown on the Social tab.</div>
       {socialTotals.hasData && (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 10 }}>
           <Tile label="Total followers" value={num(socialTotals.followers)} />
-          <Tile label="New followers · 28d" value={socialTotals.anyDelta ? (socialTotals.newFollowers > 0 ? '+' : '') + socialTotals.newFollowers.toLocaleString() : 'building…'} />
+          <Tile label="Followers · 28d" value={socialTotals.anyDelta ? (socialTotals.newFollowers > 0 ? '+' : '') + socialTotals.newFollowers.toLocaleString() : 'building…'} />
+          <Tile label="Total views" value={num(socialTotals.totalViews)} />
           <Tile label="Views · 28d" value={num(socialTotals.views28)} />
-          <Tile label="Engagement · 28d" value={num(socialTotals.eng28)} />
         </div>
       )}
       {socialOrdered.length === 0 ? (

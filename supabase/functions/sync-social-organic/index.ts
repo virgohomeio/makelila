@@ -155,6 +155,13 @@ Deno.serve(async (req: Request) => {
 
   // --- Per-post data for the cross-platform comparison (social_posts) ---
   const estDate = (iso: string) => new Date(iso).toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+  const firstVal = (data: InsightDatum[] | undefined, name: string): number | null => {
+    for (const d of data ?? []) if (d.name === name) {
+      const v = d.values?.[0]?.value ?? d.total_value?.value;
+      return typeof v === 'number' ? v : null;
+    }
+    return null;
+  };
   const sPosts: Record<string, unknown>[] = [];
   const nowIso = new Date().toISOString();
   type FbPost = { id?: string; message?: string; created_time?: string; permalink_url?: string; shares?: { count?: number }; reactions?: { summary?: { total_count?: number } }; comments?: { summary?: { total_count?: number } } };
@@ -168,11 +175,27 @@ Deno.serve(async (req: Request) => {
         const reactions = p.reactions?.summary?.total_count ?? 0;
         const comments = p.comments?.summary?.total_count ?? 0;
         const shares = p.shares?.count ?? 0;
+        // Per-post reach + video views (lifetime). Metric names churn, so try a
+        // couple and keep what returns; non-fatal.
+        // Meta renamed post insight metrics in 2026 (post_impressions_unique →
+        // post_total_media_view_unique), so request both old + new and keep what
+        // returns. Each metric is requested on its own so one invalid name can't
+        // void the rest.
+        let reach: number | null = null, views: number | null = null;
+        const fbPostMetric = async (name: string): Promise<number | null> => {
+          try {
+            const pi = await getJson(`${base}/${p.id}/insights?metric=${name}&access_token=${pageTok}`);
+            if (pi.ok) return firstVal(pi.body.data as InsightDatum[] | undefined, name);
+          } catch { /* ignore */ }
+          return null;
+        };
+        reach = await fbPostMetric('post_total_media_view_unique') ?? await fbPostMetric('post_impressions_unique');
+        views = await fbPostMetric('post_video_views') ?? await fbPostMetric('post_total_media_views') ?? await fbPostMetric('post_impressions');
         sPosts.push({
           platform: 'facebook', post_id: p.id,
           posted_at: p.created_time ?? null, posted_date: p.created_time ? estDate(p.created_time) : null,
           caption: p.message ?? null, permalink: p.permalink_url ?? null, media_type: 'post',
-          views: null, likes: reactions, comments, shares, reach: null, engagement: reactions + comments + shares,
+          views, likes: reactions, comments, shares, reach, engagement: reactions + comments + shares,
           synced_at: nowIso,
         });
       }
@@ -186,11 +209,23 @@ Deno.serve(async (req: Request) => {
         for (const m of (r.body.data as IgMedia[] | undefined) ?? []) {
           if (!m.id) continue;
           const likes = m.like_count ?? 0, comments = m.comments_count ?? 0;
+          // Per-media views + reach. 'views' is the modern unified metric; fall
+          // back to reach-only for media types that reject it.
+          let reach: number | null = null, views: number | null = null;
+          try {
+            let pi = await getJson(`${base}/${m.id}/insights?metric=views,reach&access_token=${pageTok}`);
+            if (!pi.ok) pi = await getJson(`${base}/${m.id}/insights?metric=reach&access_token=${pageTok}`);
+            if (pi.ok) {
+              const dd = pi.body.data as InsightDatum[] | undefined;
+              views = firstVal(dd, 'views');
+              reach = firstVal(dd, 'reach');
+            }
+          } catch { /* leave null */ }
           sPosts.push({
             platform: 'instagram', post_id: m.id,
             posted_at: m.timestamp ?? null, posted_date: m.timestamp ? estDate(m.timestamp) : null,
             caption: m.caption ?? null, permalink: m.permalink ?? null, media_type: (m.media_type ?? '').toLowerCase() || null,
-            views: null, likes, comments, shares: null, reach: null, engagement: likes + comments,
+            views, likes, comments, shares: null, reach, engagement: likes + comments,
             synced_at: nowIso,
           });
         }
