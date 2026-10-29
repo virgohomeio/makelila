@@ -153,6 +153,52 @@ Deno.serve(async (req: Request) => {
     });
   }
 
+  // --- Per-post data for the cross-platform comparison (social_posts) ---
+  const estDate = (iso: string) => new Date(iso).toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+  const sPosts: Record<string, unknown>[] = [];
+  const nowIso = new Date().toISOString();
+  type FbPost = { id?: string; message?: string; created_time?: string; permalink_url?: string; shares?: { count?: number }; reactions?: { summary?: { total_count?: number } }; comments?: { summary?: { total_count?: number } } };
+  type IgMedia = { id?: string; caption?: string; media_type?: string; timestamp?: string; permalink?: string; like_count?: number; comments_count?: number };
+  try {
+    const f = 'id,message,created_time,permalink_url,shares,reactions.summary(true),comments.summary(true)';
+    const r = await getJson(`${base}/${pageId}/published_posts?fields=${encodeURIComponent(f)}&limit=25&access_token=${pageTok}`);
+    if (r.ok) {
+      for (const p of (r.body.data as FbPost[] | undefined) ?? []) {
+        if (!p.id) continue;
+        const reactions = p.reactions?.summary?.total_count ?? 0;
+        const comments = p.comments?.summary?.total_count ?? 0;
+        const shares = p.shares?.count ?? 0;
+        sPosts.push({
+          platform: 'facebook', post_id: p.id,
+          posted_at: p.created_time ?? null, posted_date: p.created_time ? estDate(p.created_time) : null,
+          caption: p.message ?? null, permalink: p.permalink_url ?? null, media_type: 'post',
+          views: null, likes: reactions, comments, shares, reach: null, engagement: reactions + comments + shares,
+          synced_at: nowIso,
+        });
+      }
+    } else { notes.fb_posts_feed = errMsg(r.body, r.status); }
+  } catch (e) { notes.fb_posts_feed = (e as Error).message; }
+  if (ig?.id) {
+    try {
+      const f = 'id,caption,media_type,timestamp,permalink,like_count,comments_count';
+      const r = await getJson(`${base}/${ig.id}/media?fields=${encodeURIComponent(f)}&limit=25&access_token=${pageTok}`);
+      if (r.ok) {
+        for (const m of (r.body.data as IgMedia[] | undefined) ?? []) {
+          if (!m.id) continue;
+          const likes = m.like_count ?? 0, comments = m.comments_count ?? 0;
+          sPosts.push({
+            platform: 'instagram', post_id: m.id,
+            posted_at: m.timestamp ?? null, posted_date: m.timestamp ? estDate(m.timestamp) : null,
+            caption: m.caption ?? null, permalink: m.permalink ?? null, media_type: (m.media_type ?? '').toLowerCase() || null,
+            views: null, likes, comments, shares: null, reach: null, engagement: likes + comments,
+            synced_at: nowIso,
+          });
+        }
+      } else { notes.ig_posts_feed = errMsg(r.body, r.status); }
+    } catch (e) { notes.ig_posts_feed = (e as Error).message; }
+  }
+  if (sPosts.length) await admin.from('social_posts').upsert(sPosts, { onConflict: 'platform,post_id' });
+
   const { error } = await admin.from('social_metrics').upsert(rows, { onConflict: 'channel,as_of' });
   if (error) return j({ error: `DB upsert failed: ${error.message}` }, 500);
 

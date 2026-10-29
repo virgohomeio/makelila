@@ -5,6 +5,7 @@ import { useKlaviyoSyncStatus } from '../../lib/marketing/klaviyo';
 import { useCacByChannel } from '../../lib/marketing/cac';
 import { useAcquisitionOverview } from '../../lib/marketing/journey';
 import { useSocialMetrics, SOCIAL_CHANNELS } from '../../lib/marketing/socialOrganic';
+import { useSocialOverview } from '../../lib/marketing/socialPosts';
 
 const money = (n: number) => `$${Math.round(n).toLocaleString()}`;
 const num = (n: number | null) => (n == null ? '—' : n.toLocaleString());
@@ -23,12 +24,27 @@ export function DashboardTab() {
   const { rows: acq, loading: acqLoading } = useAcquisitionOverview();
   const { logs } = useKlaviyoSyncStatus(1);
   const { rows: social } = useSocialMetrics();
+  const { posts: socialPosts, channels: socialChannels } = useSocialOverview();
 
   // Order the synced channels by our canonical display order; drop unknowns.
   const socialOrdered = useMemo(() => {
     const byKey = new Map(social.map(r => [r.channel, r]));
     return SOCIAL_CHANNELS.map(c => ({ ...c, row: byKey.get(c.key) })).filter(c => c.row);
   }, [social]);
+
+  // Combined organic totals: followers now, + trailing-28d net new / views / engagement.
+  const socialTotals = useMemo(() => {
+    const cut = new Date(Date.now() - 28 * 86_400_000).toISOString().slice(0, 10);
+    const recent = socialPosts.filter(p => (p.posted_date ?? '') >= cut);
+    return {
+      followers: socialChannels.reduce((s, c) => s + (c.followers ?? 0), 0),
+      newFollowers: socialChannels.reduce((s, c) => s + (c.followersDelta ?? 0), 0),
+      anyDelta: socialChannels.some(c => c.followersDelta != null),
+      views28: recent.reduce((s, p) => s + (p.views ?? 0), 0),
+      eng28: recent.reduce((s, p) => s + (p.engagement ?? 0), 0),
+      hasData: socialChannels.length > 0,
+    };
+  }, [socialPosts, socialChannels]);
 
   const ads = useMemo(() => {
     let spend = 0, impressions = 0, clicks = 0, leads = 0;
@@ -148,7 +164,15 @@ export function DashboardTab() {
 
       {/* Organic social */}
       <div style={{ fontSize: 13, fontWeight: 600, margin: '18px 0 2px' }}>Organic social</div>
-      <div style={{ fontSize: 11, color: muted, marginBottom: 8 }}>Followers are current; reach + engagement are the trailing 28 days.</div>
+      <div style={{ fontSize: 11, color: muted, marginBottom: 8 }}>Followers are current; new followers, views + engagement are the trailing 28 days. Full breakdown on the Social tab.</div>
+      {socialTotals.hasData && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 10 }}>
+          <Tile label="Total followers" value={num(socialTotals.followers)} />
+          <Tile label="New followers · 28d" value={socialTotals.anyDelta ? (socialTotals.newFollowers > 0 ? '+' : '') + socialTotals.newFollowers.toLocaleString() : 'building…'} />
+          <Tile label="Views · 28d" value={num(socialTotals.views28)} />
+          <Tile label="Engagement · 28d" value={num(socialTotals.eng28)} />
+        </div>
+      )}
       {socialOrdered.length === 0 ? (
         <div style={notice}>No organic social data yet — <code>sync-social-organic</code> populates Facebook + Instagram daily (YouTube / TikTok / LinkedIn are separate setups).</div>
       ) : (
