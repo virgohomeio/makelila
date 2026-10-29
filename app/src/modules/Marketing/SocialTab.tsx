@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { triggerAllSocialSync } from '../../lib/marketing/social';
-import { useSocialOverview, groupPostsByDate, type SocialPost, type ChannelOverview } from '../../lib/marketing/socialPosts';
+import { useSocialOverview, groupPostsByDate, type SocialPost, type ChannelOverview, type PostDay } from '../../lib/marketing/socialPosts';
 
 const subtle = 'var(--color-ink-subtle)';
 const muted = 'var(--color-ink-muted)';
@@ -15,6 +15,16 @@ const CHANNELS: ChannelDef[] = [
   { key: 'linkedin',  label: 'LinkedIn',  icon: '💼', setup: 'Community Management API — pending approval' },
 ];
 const LABEL = new Map(CHANNELS.map(c => [c.key, c] as const));
+
+// Columns for the post-comparison table. Facebook + Instagram collapse into one
+// "Meta" column (same content ships to both), aggregated per day.
+type Col = { key: string; label: string; icon: string; platforms: string[] };
+const COLS: Col[] = [
+  { key: 'meta',     label: 'Meta (FB + IG)', icon: '🟦', platforms: ['facebook', 'instagram'] },
+  { key: 'youtube',  label: 'YouTube',        icon: '▶️', platforms: ['youtube'] },
+  { key: 'tiktok',   label: 'TikTok',         icon: '🎵', platforms: ['tiktok'] },
+  { key: 'linkedin', label: 'LinkedIn',       icon: '💼', platforms: ['linkedin'] },
+];
 
 const WINDOW_MS = 28 * 86_400_000;
 
@@ -55,6 +65,10 @@ export function SocialTab() {
   const days = useMemo(() => groupPostsByDate(posts).slice(0, 20), [posts]);
   const activePlatforms = useMemo(
     () => CHANNELS.map(c => c.key).filter(k => posts.some(p => p.platform === k)),
+    [posts],
+  );
+  const activeCols = useMemo(
+    () => COLS.filter(c => c.platforms.some(p => posts.some(pp => pp.platform === p))),
     [posts],
   );
 
@@ -101,7 +115,7 @@ export function SocialTab() {
       {/* Cross-platform post comparison */}
       <div style={{ fontSize: 13, fontWeight: 600, margin: '6px 0 2px' }}>Post performance by platform</div>
       <div style={{ fontSize: 11, color: muted, marginBottom: 8 }}>
-        Same day = same post (content goes out together). Each cell shows that platform's engagement and views for the day's post. Best per row is highlighted.
+        Same day = same post (content ships together). Each cell shows engagement + views for the day's post; Meta combines Facebook + Instagram. Best per row is highlighted.
       </div>
       {days.length === 0 ? (
         <p style={{ color: subtle, fontSize: 13 }}>No posts synced in the window yet.</p>
@@ -112,18 +126,16 @@ export function SocialTab() {
               <tr style={{ color: subtle, fontSize: 11, textAlign: 'left' }}>
                 <th style={{ padding: '4px 8px 6px 0', whiteSpace: 'nowrap' }}>Date</th>
                 <th style={{ padding: '4px 8px 6px 0', minWidth: 180 }}>Post</th>
-                {activePlatforms.map(p => (
-                  <th key={p} style={{ padding: '4px 8px 6px', textAlign: 'center' }}>{LABEL.get(p)?.icon} {LABEL.get(p)?.label}</th>
+                {activeCols.map(c => (
+                  <th key={c.key} style={{ padding: '4px 8px 6px', textAlign: 'center' }}>{c.icon} {c.label}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {days.map(d => {
-                const best = activePlatforms.reduce<string | null>((b, p) => {
-                  const e = d.byPlatform[p]?.engagement ?? -1;
-                  if (e < 0) return b;
-                  return b == null || e > (d.byPlatform[b]?.engagement ?? -1) ? p : b;
-                }, null);
+                const aggs = activeCols.map(c => ({ col: c, ...aggCol(d, c.platforms) }));
+                let best: string | null = null, bestEng = -1;
+                for (const a of aggs) if (a.anyPost && a.eng > bestEng) { best = a.col.key; bestEng = a.eng; }
                 return (
                   <tr key={d.date} style={{ borderTop: '1px solid var(--color-border)' }}>
                     <td style={{ padding: '6px 8px 6px 0', whiteSpace: 'nowrap', color: muted }}>
@@ -134,14 +146,13 @@ export function SocialTab() {
                         {d.caption ? d.caption.replace(/\s+/g, ' ').slice(0, 70) : '—'}
                       </span>
                     </td>
-                    {activePlatforms.map(p => {
-                      const post = d.byPlatform[p];
-                      const isBest = p === best && post;
+                    {aggs.map(a => {
+                      const isBest = a.col.key === best && a.anyPost;
                       return (
-                        <td key={p} style={{ padding: '6px 8px', textAlign: 'center', background: isBest ? 'color-mix(in srgb, var(--color-crimson) 10%, transparent)' : undefined, borderRadius: isBest ? 4 : undefined }}>
-                          {post ? (
-                            <Cell post={post} highlight={!!isBest} />
-                          ) : <span style={{ color: 'var(--color-border)' }}>·</span>}
+                        <td key={a.col.key} style={{ padding: '6px 8px', textAlign: 'center', background: isBest ? 'color-mix(in srgb, var(--color-crimson) 10%, transparent)' : undefined, borderRadius: isBest ? 4 : undefined }}>
+                          {a.anyPost
+                            ? <Cell eng={a.eng} views={a.views} permalink={a.permalink} caption={d.caption} highlight={isBest} />
+                            : <span style={{ color: 'var(--color-border)' }}>·</span>}
                         </td>
                       );
                     })}
@@ -169,7 +180,7 @@ export function SocialTab() {
                 <Stat label="Posts" value={String(ins.count)} />
                 <Stat label="Avg engagement" value={ins.count ? abbr(Math.round(ins.eng / ins.count)) : '—'} />
                 <Stat label="Total engagement" value={abbr(ins.eng)} />
-                <Stat label="Views" value={ins.views ? abbr(ins.views) : '—'} />
+                <Stat label="Views" value={abbr(ins.views)} />
               </div>
               {ins.best && (
                 <div style={{ fontSize: 11, color: muted, lineHeight: 1.4 }}>
@@ -177,7 +188,7 @@ export function SocialTab() {
                   {ins.best.permalink
                     ? <a href={ins.best.permalink} target="_blank" rel="noreferrer" style={{ color: 'var(--color-crimson)' }}>{(ins.best.caption ?? 'view').replace(/\s+/g, ' ').slice(0, 48)}</a>
                     : (ins.best.caption ?? '—').replace(/\s+/g, ' ').slice(0, 48)}
-                  {' '}· {abbr(ins.best.engagement)} eng{ins.best.views ? ` · ${abbr(ins.best.views)} views` : ''}
+                  {' '}· {abbr(ins.best.engagement)} eng{ins.best.views != null ? ` · ${abbr(ins.best.views)} views` : ''}
                 </div>
               )}
             </div>
@@ -188,15 +199,31 @@ export function SocialTab() {
   );
 }
 
-function Cell({ post, highlight }: { post: SocialPost; highlight: boolean }) {
+// Aggregate a column's platforms for one day (Meta sums FB + IG). `views` stays
+// null only when no post in the column reports a view count; a genuine 0 is kept.
+function aggCol(d: PostDay, platforms: string[]): { anyPost: boolean; eng: number; views: number | null; permalink: string | null } {
+  let eng = 0, views = 0, anyPost = false, anyViews = false;
+  let permalink: string | null = null;
+  for (const p of platforms) {
+    const post = d.byPlatform[p];
+    if (!post) continue;
+    anyPost = true;
+    eng += post.engagement ?? 0;
+    if (post.views != null) { views += post.views; anyViews = true; }
+    if (post.permalink && (!permalink || p === 'instagram')) permalink = post.permalink;
+  }
+  return { anyPost, eng, views: anyViews ? views : null, permalink };
+}
+
+function Cell({ eng, views, permalink, caption, highlight }: { eng: number; views: number | null; permalink: string | null; caption?: string | null; highlight: boolean }) {
   const inner = (
     <div style={{ lineHeight: 1.25 }}>
-      <div style={{ fontWeight: highlight ? 700 : 600, fontSize: 13 }}>{abbr(post.engagement)}<span style={{ fontSize: 9, color: subtle }}> eng</span></div>
-      {post.views ? <div style={{ fontSize: 10, color: muted }}>{abbr(post.views)} views</div> : null}
+      <div style={{ fontWeight: highlight ? 700 : 600, fontSize: 13 }}>{abbr(eng)}<span style={{ fontSize: 9, color: subtle }}> eng</span></div>
+      {views != null ? <div style={{ fontSize: 10, color: muted }}>{abbr(views)} views</div> : null}
     </div>
   );
-  return post.permalink
-    ? <a href={post.permalink} target="_blank" rel="noreferrer" style={{ color: 'inherit', textDecoration: 'none' }} title={post.caption ?? ''}>{inner}</a>
+  return permalink
+    ? <a href={permalink} target="_blank" rel="noreferrer" style={{ color: 'inherit', textDecoration: 'none' }} title={caption ?? ''}>{inner}</a>
     : inner;
 }
 
