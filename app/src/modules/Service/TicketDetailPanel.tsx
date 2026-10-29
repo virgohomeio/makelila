@@ -12,7 +12,7 @@ import {
   setRepairFields, reclassifyTicket, deleteTicket, updateTicketSubject, setTicketDescription,
   markDiagnosisLinkSent, setLinearIssueUrl, setGitHubIssueUrl,
   useCustomerLifecycle, warrantyState,
-  useTicketMessages, useClassificationLog,
+  useTicketMessages, useClassificationLog, sendTicketSms,
   autoTicketDescription,
 } from '../../lib/service';
 import { CANNED_SMS_TEMPLATES } from '../../lib/cannedSms';
@@ -198,6 +198,41 @@ export function TicketDetailPanel({ ticket, onClose, showDeviceContext = true }:
   }, [parties.displayName, ticket.customer_name]);
   const [diagBody, setDiagBody] = useState(diagDefaultBody);
 
+  // "Message on Quo" — free-form SMS from the Quo line, logged to this
+  // ticket's Conversation thread by send-ticket-sms.
+  const [quoOpen, setQuoOpen] = useState(false);
+  const [quoBody, setQuoBody] = useState('');
+  const [quoPhone, setQuoPhone] = useState('');
+  const [quoSending, setQuoSending] = useState(false);
+  const [quoError, setQuoError] = useState<string | null>(null);
+  const [quoSentTo, setQuoSentTo] = useState<string | null>(null);
+
+  function onOpenQuo() {
+    const fn = (parties.displayName || ticket.customer_name || '').trim().split(/\s+/)[0] || 'there';
+    setQuoBody(`Hi ${fn} — this is LILA Composter support. `);
+    setQuoPhone(smsPhone ?? '');
+    setQuoError(null);
+    setQuoSentTo(null);
+    setQuoOpen(true);
+  }
+
+  async function onSendQuo() {
+    setQuoSending(true); setQuoError(null);
+    try {
+      const res = await sendTicketSms({
+        ticket_id: ticket.id,
+        message: quoBody,
+        phone: quoPhone.trim() && quoPhone.trim() !== smsPhone ? quoPhone.trim() : null,
+      });
+      setQuoSentTo(res.test_redirected ? `${res.to ?? ''} (test redirect on)` : (res.to ?? quoPhone));
+      setQuoBody('');
+    } catch (e) {
+      setQuoError((e as Error).message);
+    } finally {
+      setQuoSending(false);
+    }
+  }
+
   // Feature 3 — "Link to engineering" dialog state.
   const [linkOpen, setLinkOpen] = useState(false);
   const [linkTarget, setLinkTarget] = useState<'linear' | 'github'>('linear');
@@ -274,7 +309,7 @@ export function TicketDetailPanel({ ticket, onClose, showDeviceContext = true }:
   const { rows: lifecycle } = useCustomerLifecycle();
   const lifecycleRow = ticket.unit_serial ? lifecycle.find(l => l.unit_serial === ticket.unit_serial) : null;
   const warranty = warrantyState(lifecycleRow ?? null);
-  const { messages } = useTicketMessages(ticket.source === 'gmail' ? ticket.id : null);
+  const { messages } = useTicketMessages(ticket.id);
   const { entries: classifyLog } = useClassificationLog(
     (ticket.source === 'gmail' || ticket.topic) ? ticket.id : null,
   );
@@ -547,6 +582,15 @@ export function TicketDetailPanel({ ticket, onClose, showDeviceContext = true }:
               Send diagnosis link
             </button>
           )}
+          <button
+            type="button"
+            className={styles.replacementBtn}
+            disabled={busy}
+            onClick={onOpenQuo}
+            title="Text this customer from the Quo line — the message is logged to this ticket"
+          >
+            Message on Quo
+          </button>
           {/* Feature 3 — engineering issue linking */}
           {ticket.linear_issue_url ? (
             <a
@@ -717,6 +761,61 @@ export function TicketDetailPanel({ ticket, onClose, showDeviceContext = true }:
             onClose={() => setNewTicketOpen(false)}
             onCreated={t => { setNewTicketOpen(false); setDamagedTicketNo(t.ticket_number); }}
           />
+        )}
+
+        {quoOpen && (
+          <div className={styles.diagModalBackdrop} onClick={() => !quoSending && setQuoOpen(false)}>
+            <div className={styles.diagModal} onClick={e => e.stopPropagation()} role="dialog" aria-label="Message on Quo">
+              <div className={styles.diagModalTitle}>Message {parties.displayName || ticket.customer_name || 'customer'} on Quo</div>
+              <label className={styles.diagModalMeta}>
+                To (phone)
+                <input
+                  className={styles.diagModalTextarea}
+                  value={quoPhone}
+                  onChange={e => setQuoPhone(e.target.value)}
+                  placeholder="+1 555 555 5555"
+                  disabled={quoSending}
+                  aria-label="Phone number"
+                />
+              </label>
+              {!smsPhone && (
+                <div className={styles.diagModalWarn}>
+                  No phone on file for this ticket. The number you enter is saved to the ticket after sending.
+                </div>
+              )}
+              {smsMissesPrimaryUser && (
+                <div className={styles.diagModalWarn}>
+                  {parties.displayName} has their own number on file ({parties.phone}); this is set to the
+                  purchaser's ({smsPhone}). Edit the number above to text {parties.displayName} instead.
+                </div>
+              )}
+              <textarea
+                className={styles.diagModalTextarea}
+                value={quoBody}
+                onChange={e => setQuoBody(e.target.value)}
+                rows={5}
+                disabled={quoSending}
+                aria-label="Message"
+                autoFocus
+              />
+              <div className={styles.diagModalMeta}>{quoBody.length} characters</div>
+              {quoError && <div className={styles.diagModalWarn}>{quoError}</div>}
+              {quoSentTo && <div className={styles.diagModalMeta}>Sent to {quoSentTo} — logged in the Conversation below.</div>}
+              <div className={styles.diagModalActions}>
+                <button
+                  type="button"
+                  className={styles.replacementBtn}
+                  disabled={quoSending || !quoBody.trim() || !quoPhone.trim()}
+                  onClick={() => void onSendQuo()}
+                >
+                  {quoSending ? 'Sending…' : 'Send SMS'}
+                </button>
+                <button type="button" onClick={() => setQuoOpen(false)} disabled={quoSending}>
+                  {quoSentTo ? 'Done' : 'Cancel'}
+                </button>
+              </div>
+            </div>
+          </div>
         )}
 
         {diagOpen && (
