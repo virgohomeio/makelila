@@ -89,7 +89,7 @@ export function SocialTab() {
       <div style={{ fontSize: 11, color: muted, marginBottom: 8 }}>Followers + total views are current totals; the 28-day figures are the trailing 28 days.</div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 18 }}>
         <Tile label="Total followers" value={abbr(totals.followers)} big />
-        <Tile label="Followers · 28d" value={totals.anyDelta ? signed(totals.newFollowers) : 'building…'} />
+        <Tile label="Followers · 28d" value={totals.anyDelta ? signed(totals.newFollowers) : 'building…'} sub={totals.anyDelta ? undefined : 'from tomorrow'} />
         <Tile label="Total views" value={abbr(totals.totalViews)} big />
         <Tile label="Views · 28d" value={abbr(totals.views28)} />
       </div>
@@ -108,7 +108,7 @@ export function SocialTab() {
         {CHANNELS.map(ch => {
           const m = byChannel.get(ch.key);
           const ins = insights.get(ch.key);
-          return <PlatformCard key={ch.key} def={ch} m={m} count={ins?.count ?? 0} avgEng={ins && ins.count ? Math.round(ins.eng / ins.count) : null} />;
+          return <PlatformCard key={ch.key} def={ch} m={m} views28={ins?.views ?? 0} />;
         })}
       </div>
 
@@ -217,9 +217,11 @@ function aggCol(d: PostDay, platforms: string[]): { anyPost: boolean; eng: numbe
 
 function Cell({ eng, views, permalink, caption, highlight }: { eng: number; views: number | null; permalink: string | null; caption?: string | null; highlight: boolean }) {
   const inner = (
-    <div style={{ lineHeight: 1.25 }}>
-      <div style={{ fontWeight: highlight ? 700 : 600, fontSize: 13 }}>{abbr(eng)}<span style={{ fontSize: 9, color: subtle }}> eng</span></div>
-      {views != null ? <div style={{ fontSize: 10, color: muted }}>{abbr(views)} views</div> : null}
+    <div style={{ lineHeight: 1.3 }}>
+      <div style={{ fontWeight: 700, fontSize: 14 }}>
+        {views != null ? abbr(views) : '—'}<span style={{ fontSize: 9, color: subtle, fontWeight: 400 }}> views</span>
+      </div>
+      <div style={{ fontSize: 11, color: muted, fontWeight: highlight ? 600 : 400 }}>{abbr(eng)} eng</div>
     </div>
   );
   return permalink
@@ -227,7 +229,7 @@ function Cell({ eng, views, permalink, caption, highlight }: { eng: number; view
     : inner;
 }
 
-function PlatformCard({ def, m, count, avgEng }: { def: ChannelDef; m: ChannelOverview | undefined; count: number; avgEng: number | null }) {
+function PlatformCard({ def, m, views28 }: { def: ChannelDef; m: ChannelOverview | undefined; views28: number }) {
   const connected = !!m;
   return (
     <div style={{ width: 230, border: '1px solid var(--color-border)', borderRadius: 8, padding: 14, opacity: connected ? 1 : 0.7 }}>
@@ -239,10 +241,10 @@ function PlatformCard({ def, m, count, avgEng }: { def: ChannelDef; m: ChannelOv
       {connected ? (
         <>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-            <Stat label="Followers" value={abbr(m!.followers)} sub={m!.followersDelta != null ? signed(m!.followersDelta) + ' · 28d' : undefined} />
-            <Stat label={def.key === 'youtube' || def.key === 'tiktok' ? 'Views' : 'Reach'} value={abbr(def.key === 'youtube' || def.key === 'tiktok' ? m!.views : m!.reach)} />
-            <Stat label="Engagement · 28d" value={abbr(m!.engagement)} />
-            <Stat label="Posts · 28d" value={String(count)} sub={avgEng != null ? `${abbr(avgEng)} avg` : undefined} />
+            <Stat label="Total followers" value={abbr(m!.followers)} />
+            <Stat label="Total views" value={abbr(m!.views)} />
+            <Stat label="Views · 28d" value={abbr(views28)} />
+            <Stat label="Followers · 28d" value={m!.followersDelta != null ? signed(m!.followersDelta) : 'building…'} sub={m!.followersDelta != null ? undefined : 'from tomorrow'} />
           </div>
         </>
       ) : (
@@ -275,11 +277,9 @@ function Stat({ label, value, sub }: { label: string; value: string; sub?: strin
   );
 }
 
+// Full number with thousands separators — no k/m abbreviation anywhere.
 function abbr(n: number | null | undefined): string {
   if (n == null) return '—';
-  const a = Math.abs(n);
-  if (a >= 1e6) return (n / 1e6).toFixed(1).replace(/\.0$/, '') + 'm';
-  if (a >= 1e4) return (n / 1e3).toFixed(1).replace(/\.0$/, '') + 'k';
-  return n.toLocaleString();
+  return Math.round(n).toLocaleString();
 }
 function signed(n: number): string { return (n > 0 ? '+' : '') + n.toLocaleString(); }
