@@ -139,10 +139,12 @@ export function ReportTab() {
   const platform = useMemo(() => {
     let metaSpend = 0;
     let metaConversions = 0;
+    let metaValue = 0;   // Meta's own reported purchase value → Meta ROAS.
     if (selectedGroup) {
       const gc = uniqueCampaigns.filter(c => c.campaign_id && selectedGroup.ids.has(c.campaign_id));
       metaSpend = gc.reduce((s, c) => s + (c.spend_cad ?? 0), 0);
       metaConversions = gc.reduce((s, c) => s + (c.metrics?.website_purchases ?? 0), 0);
+      metaValue = gc.reduce((s, c) => s + (c.metrics?.website_purchases_value ?? 0), 0);
     } else if (range.daily && range.start) {
       // Short bounded window → sum daily ad-level rows within [start, end].
       for (const ad of ads) {
@@ -151,20 +153,25 @@ export function ReportTab() {
         if (d < range.start || d > range.end!) continue;
         metaSpend += ad.spend_cad ?? 0;
         metaConversions += ad.purchases ?? 0;
+        metaValue += ad.purchases_value ?? 0;
       }
     } else {
       // All time, or a window too long for fb_ads coverage → lifetime totals.
       metaSpend = uniqueCampaigns.reduce((s, c) => s + (c.spend_cad ?? 0), 0);
       metaConversions = uniqueCampaigns.reduce((s, c) => s + (c.metrics?.website_purchases ?? 0), 0);
+      metaValue = uniqueCampaigns.reduce((s, c) => s + (c.metrics?.website_purchases_value ?? 0), 0);
     }
     // Google date window, aligned to the selected group / range.
     const gStart = selectedGroup ? selectedGroup.startDate : range.start;
     const gEnd = selectedGroup ? (selectedGroup.endDate ?? dayStr(Date.now())) : range.end;
     const g = sumGoogleAds(googleRows, gStart, gEnd);
+    // Per-platform ROAS = that platform's OWN reported conversion value / spend.
     return {
       metaSpend, metaConversions, metaCac: metaConversions ? metaSpend / metaConversions : null,
+      metaValue, metaRoas: metaSpend && metaValue ? metaValue / metaSpend : null,
       googleSpend: g.spend, googleConversions: g.conversions, googleValue: g.value, googleHasData: g.hasData,
       googleCac: g.conversions ? g.spend / g.conversions : null,
+      googleRoas: g.spend && g.value ? g.value / g.spend : null,
       totalSpend: metaSpend + g.spend,
       totalConversions: metaConversions + g.conversions,
     };
@@ -347,9 +354,9 @@ export function ReportTab() {
 
       {/* Per-platform split — each platform's own spend + reported conversions + CAC. */}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 16 }}>
-        <PlatformCard name="Meta ads" spend={platform.metaSpend} conversions={platform.metaConversions} cac={platform.metaCac}
+        <PlatformCard name="Meta ads" spend={platform.metaSpend} conversions={platform.metaConversions} cac={platform.metaCac} roas={platform.metaRoas}
           note={platform.metaSpend === 0 ? 'no spend in this window' : undefined} />
-        <PlatformCard name="Google ads" spend={platform.googleSpend} conversions={platform.googleConversions} cac={platform.googleCac}
+        <PlatformCard name="Google ads" spend={platform.googleSpend} conversions={platform.googleConversions} cac={platform.googleCac} roas={platform.googleRoas}
           note={!platform.googleHasData ? 'no spend in this window' : undefined} />
       </div>
 
@@ -447,16 +454,17 @@ function Kpi({ label, value }: { label: string; value: string }) {
   );
 }
 
-function PlatformCard({ name, spend, conversions, cac, note }: {
-  name: string; spend: number; conversions: number; cac: number | null; note?: string;
+function PlatformCard({ name, spend, conversions, cac, roas, note }: {
+  name: string; spend: number; conversions: number; cac: number | null; roas: number | null; note?: string;
 }) {
   return (
-    <div style={{ border: '1px solid var(--color-border)', borderRadius: 6, padding: '8px 14px', minWidth: 250 }}>
+    <div style={{ border: '1px solid var(--color-border)', borderRadius: 6, padding: '8px 14px', minWidth: 300 }}>
       <div style={{ fontSize: 11, fontWeight: 700, marginBottom: 5 }}>{name}</div>
       <div style={{ display: 'flex', gap: 18 }}>
         <PlatformStat label="Spend (CAD)" value={money(spend)} />
         <PlatformStat label="Conversions" value={String(conversions)} />
         <PlatformStat label="CAC" value={cac != null ? money(cac) : '—'} />
+        <PlatformStat label="ROAS" value={roas != null ? `${roas.toFixed(2)}×` : '—'} />
       </div>
       {note && <div style={{ fontSize: 10, color: subtle, marginTop: 3 }}>{note}</div>}
     </div>

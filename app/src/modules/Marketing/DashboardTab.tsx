@@ -4,8 +4,10 @@ import { useGoogleAds, sumGoogleAds } from '../../lib/marketing/googleAds';
 import { useKlaviyoSyncStatus } from '../../lib/marketing/klaviyo';
 import { useCacByChannel } from '../../lib/marketing/cac';
 import { useAcquisitionOverview } from '../../lib/marketing/journey';
+import { useSocialMetrics, SOCIAL_CHANNELS } from '../../lib/marketing/socialOrganic';
 
 const money = (n: number) => `$${Math.round(n).toLocaleString()}`;
+const num = (n: number | null) => (n == null ? '—' : n.toLocaleString());
 
 const subtle = 'var(--color-ink-subtle)';
 const muted = 'var(--color-ink-muted)';
@@ -20,6 +22,13 @@ export function DashboardTab() {
   const { rows: cac, loading: cacLoading } = useCacByChannel();
   const { rows: acq, loading: acqLoading } = useAcquisitionOverview();
   const { logs } = useKlaviyoSyncStatus(1);
+  const { rows: social } = useSocialMetrics();
+
+  // Order the synced channels by our canonical display order; drop unknowns.
+  const socialOrdered = useMemo(() => {
+    const byKey = new Map(social.map(r => [r.channel, r]));
+    return SOCIAL_CHANNELS.map(c => ({ ...c, row: byKey.get(c.key) })).filter(c => c.row);
+  }, [social]);
 
   const ads = useMemo(() => {
     let spend = 0, impressions = 0, clicks = 0, leads = 0;
@@ -137,6 +146,20 @@ export function DashboardTab() {
         </div>
       )}
 
+      {/* Organic social */}
+      <div style={{ fontSize: 13, fontWeight: 600, margin: '18px 0 2px' }}>Organic social</div>
+      <div style={{ fontSize: 11, color: muted, marginBottom: 8 }}>Followers are current; reach + engagement are the trailing 28 days.</div>
+      {socialOrdered.length === 0 ? (
+        <div style={notice}>No organic social data yet — <code>sync-social-organic</code> populates Facebook + Instagram daily (YouTube / TikTok / LinkedIn are separate setups).</div>
+      ) : (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 8 }}>
+          {socialOrdered.map(c => (
+            <SocialCard key={c.key} label={c.label}
+              followers={c.row!.followers} reach={c.row!.reach} engagement={c.row!.engagement} posts={c.row!.posts} />
+          ))}
+        </div>
+      )}
+
       {/* Acquisition mix */}
       <div style={{ fontSize: 13, fontWeight: 600, margin: '18px 0 8px' }}>Where customers come from (first touch)</div>
       {acqLoading ? (
@@ -191,7 +214,9 @@ export function DashboardTab() {
         <SourceRow name="Google Ads" ok={google.hasData} detail={google.hasData ? `${money(google.spend)} spend synced (last 90d)` : 'sync-google-ads: no data yet'} />
         <SourceRow name="Klaviyo (email)" ok={!!lastKlaviyo} detail={lastKlaviyo ? `last profile sync ${lastKlaviyo}` : 'sync-klaviyo-profiles not deployed yet'} />
         <SourceRow name="Attribution (first touch)" ok={acqTotal > 0} detail={`${acqTotal} customers with a source`} />
-        <SourceRow name="Organic social / Google Analytics" ok={false} detail="not integrated yet (roadmap)" />
+        <SourceRow name="Organic social (Facebook + Instagram)" ok={socialOrdered.length > 0} detail={socialOrdered.length > 0 ? `${socialOrdered.map(c => c.label).join(' + ')} synced` : 'sync-social-organic: no data yet'} />
+        <SourceRow name="Organic social (YouTube / TikTok / LinkedIn)" ok={false} detail="separate app setup — not wired yet" />
+        <SourceRow name="Google Analytics (GA4)" ok={false} detail="synced to ga4_daily — dashboard section coming" />
       </div>
     </div>
   );
@@ -203,6 +228,32 @@ function Tile({ label, value, sub }: { label: string; value: string; sub?: strin
       <div style={{ fontSize: 10, color: subtle, textTransform: 'uppercase', letterSpacing: 0.3 }}>{label}</div>
       <div style={{ fontSize: 18, fontWeight: 700, marginTop: 2 }}>{value}</div>
       {sub && <div style={{ fontSize: 11, color: muted, marginTop: 1 }}>{sub}</div>}
+    </div>
+  );
+}
+
+function SocialCard({ label, followers, reach, engagement, posts }: {
+  label: string; followers: number | null; reach: number | null; engagement: number | null; posts: number | null;
+}) {
+  return (
+    <div style={{ border: '1px solid var(--color-border)', borderRadius: 6, padding: '8px 14px', minWidth: 180 }}>
+      <div style={{ fontSize: 11, fontWeight: 700, marginBottom: 4 }}>{label}</div>
+      <div style={{ fontSize: 20, fontWeight: 700 }}>{num(followers)}</div>
+      <div style={{ fontSize: 10, color: subtle, textTransform: 'uppercase', letterSpacing: 0.3, marginBottom: 6 }}>followers</div>
+      <div style={{ display: 'flex', gap: 14 }}>
+        <MiniStat label="Reach 28d" value={num(reach)} />
+        <MiniStat label="Engage 28d" value={num(engagement)} />
+        <MiniStat label="Posts" value={num(posts)} />
+      </div>
+    </div>
+  );
+}
+
+function MiniStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <div style={{ fontSize: 13, fontWeight: 600 }}>{value}</div>
+      <div style={{ fontSize: 9, color: subtle, textTransform: 'uppercase', letterSpacing: 0.3 }}>{label}</div>
     </div>
   );
 }
