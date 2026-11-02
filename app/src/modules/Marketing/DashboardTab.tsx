@@ -1,5 +1,6 @@
 import { useMemo, type CSSProperties } from 'react';
 import { useFbCampaigns } from '../../lib/marketing/facebook';
+import { summarizeCampaignTypes } from '../../lib/marketing/campaignTypes';
 import { useGoogleAds, sumGoogleAds } from '../../lib/marketing/googleAds';
 import { useKlaviyoSyncStatus } from '../../lib/marketing/klaviyo';
 import { useCacByChannel } from '../../lib/marketing/cac';
@@ -93,6 +94,10 @@ export function DashboardTab() {
     [campaigns],
   );
 
+  // The four campaign types (revenue / Mini reservation / Sharpei leads /
+  // pre-Pedrum), each with its own spend + revenue.
+  const campaignTypes = useMemo(() => summarizeCampaignTypes(campaigns), [campaigns]);
+
   const acqTotal = acq.reduce((s, r) => s + r.count, 0);
   const lastKlaviyo = logs[0]?.synced_at ? new Date(logs[0].synced_at).toLocaleString('en-CA', { dateStyle: 'medium', timeStyle: 'short' }) : null;
 
@@ -112,6 +117,20 @@ export function DashboardTab() {
         Revenue + conversions are each platform's own reported numbers (Meta purchase value / purchases, Google conversion
         value / conversions); ROAS is revenue ÷ spend. Meta reflects synced campaign lifetime; Google reflects the last ~90 days.
       </div>
+
+      {/* Campaign-type breakdown — each type's own ad spend + revenue (Meta). */}
+      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 2 }}>Campaign breakdown (Meta) — spend + revenue by type</div>
+      <div style={{ fontSize: 11, color: muted, marginBottom: 8 }}>
+        Each Meta campaign is sorted into one type by name. Revenue campaigns + pre-Pedrum are judged on revenue/ROAS;
+        LILA Mini + Sharpei are lead-gen, so leads (not revenue) are the goal.
+      </div>
+      {ads.hasData ? (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginBottom: 18 }}>
+          {campaignTypes.map(t => <CampaignTypeCard key={t.key} t={t} />)}
+        </div>
+      ) : (
+        <div style={{ ...notice, marginBottom: 18 }}>No Meta campaign data yet — breakdown lights up once the ads sync has run.</div>
+      )}
 
       {/* Paid-ads KPI row */}
       <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Paid ads (Meta) — last 180 days synced</div>
@@ -256,6 +275,29 @@ export function DashboardTab() {
         <SourceRow name="Organic social (Facebook + Instagram)" ok={socialOrdered.length > 0} detail={socialOrdered.length > 0 ? `${socialOrdered.map(c => c.label).join(' + ')} synced` : 'sync-social-organic: no data yet'} />
         <SourceRow name="Organic social (YouTube / TikTok / LinkedIn)" ok={false} detail="separate app setup — not wired yet" />
         <SourceRow name="Google Analytics (GA4)" ok={false} detail="synced to ga4_daily — dashboard section coming" />
+      </div>
+    </div>
+  );
+}
+
+function CampaignTypeCard({ t }: { t: import('../../lib/marketing/campaignTypes').CampaignTypeSummary }) {
+  const isLeads = t.goal === 'leads';
+  return (
+    <div style={{ border: '1px solid var(--color-border)', borderRadius: 8, padding: 14, minWidth: 210, flex: '1 1 210px', maxWidth: 260 }}>
+      <div style={{ fontSize: 13, fontWeight: 700 }}>{t.label}</div>
+      <div style={{ fontSize: 10, color: subtle, marginBottom: 8 }}>{t.blurb} · {t.campaigns} campaign{t.campaigns === 1 ? '' : 's'}</div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+        <MiniStat label="Ad spend" value={money(t.spend)} />
+        <MiniStat label="Revenue" value={money(t.revenue)} />
+        {isLeads
+          ? <MiniStat label="Leads" value={t.leads.toLocaleString()} />
+          : <MiniStat label="Purchases" value={t.purchases.toLocaleString()} />}
+        <MiniStat
+          label={isLeads ? 'Cost / lead' : 'ROAS'}
+          value={isLeads
+            ? (t.leads ? `$${(t.spend / t.leads).toFixed(2)}` : '—')
+            : (t.roas != null ? `${t.roas.toFixed(2)}×` : '—')}
+        />
       </div>
     </div>
   );
