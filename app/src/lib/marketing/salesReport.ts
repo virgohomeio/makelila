@@ -29,6 +29,11 @@ export type SalesRow = {
   discount_codes: string[];
   revenue: number;
   currency: string;
+  // Shopify financial_status === 'refunded' — the customer got their money back
+  // in FULL. A 'partially_refunded' order is deliberately NOT a full refund (a
+  // balance remains), so it reads false here, matching how the rest of the app
+  // treats these two Shopify states (see SETTLED_FINANCIAL_STATUSES in orders.ts).
+  full_refund: boolean;
   // Derived from the buyer's Klaviyo events (null when we have none).
   purchase_time: string | null;
   journey_note: string | null;
@@ -175,6 +180,7 @@ export function buildSalesReport(
       discount_codes: codes,
       revenue,
       currency: o.currency || 'USD',
+      full_refund: (o.financial_status ?? '').toLowerCase() === 'refunded',
       purchase_time: journey?.(o)?.timeLabel ?? null,
       journey_note: journey?.(o)?.note ?? null,
       age: demo?.(o)?.age ?? null,
@@ -220,7 +226,7 @@ export const UNKNOWN = 'UNKNOWN';
 // Manual tracker columns, prefixed with a Campaign column so the bucketing each
 // sale piled into is visible for verification.
 export const REPORT_COLUMNS = [
-  'Campaign', 'Name', 'Date', 'Time (EST)', 'City', 'Province/State', 'Country',
+  'Campaign', 'Name', 'Full Refund?', 'Date', 'Time (EST)', 'City', 'Province/State', 'Country',
   'Age Range', 'Gender', 'Source', 'Buyer Plan', 'Order Value',
   'Discount WELCOMELILA?', 'Discount CHECKOUTFIVE?', 'Other Codes?', 'Other Code 2',
   'Purchase Time after Purchase Visit', 'Notes',
@@ -324,6 +330,8 @@ export function reportCells(r: SalesRow): string[] {
   return [
     r.campaign_group ?? '—',
     r.name,
+    // Full refund only (Shopify 'refunded'); a partial refund stays 'No'.
+    r.full_refund ? 'Yes' : 'No',
     date,
     time,
     r.city || UNKNOWN,

@@ -12,6 +12,10 @@ import { useGoogleAds, sumGoogleAds } from '../../lib/marketing/googleAds';
 const subtle = 'var(--color-ink-subtle)';
 const muted = 'var(--color-ink-muted)';
 
+// Column index of the Full Refund? flag, so the table can give a full refund a
+// crimson highlight (and mute the "No") without hard-coding a position.
+const REFUND_COL = REPORT_COLUMNS.indexOf('Full Refund?');
+
 // Date-range options for the report's KPI/summary + order list. 'all' = every
 // sale; 'today'/'yesterday' = that single EST calendar day; the numeric keys are
 // rolling windows of N calendar days ending today (inclusive).
@@ -384,14 +388,19 @@ export function ReportTab() {
             <tbody>
               {pagedRows.map(r => (
                 <tr key={r.order_ref} style={{ borderTop: '1px solid var(--color-border)' }}>
-                  {reportCells(r).map((cell, i) => (
-                    <td key={i} style={{
-                      padding: '7px 10px',
-                      color: cell === UNKNOWN ? subtle : 'inherit',
-                      fontStyle: cell === UNKNOWN ? 'italic' : 'normal',
-                      fontWeight: i === 0 ? 600 : 400,
-                    }}>{cell}</td>
-                  ))}
+                  {reportCells(r).map((cell, i) => {
+                    const isRefund = i === REFUND_COL;
+                    const fullRefund = isRefund && cell === 'Yes';
+                    return (
+                      <td key={i} style={{
+                        padding: '7px 10px',
+                        color: fullRefund ? 'var(--color-crimson)'
+                          : (isRefund || cell === UNKNOWN) ? subtle : 'inherit',
+                        fontStyle: cell === UNKNOWN ? 'italic' : 'normal',
+                        fontWeight: fullRefund || i === 0 ? 600 : 400,
+                      }}>{fullRefund ? 'Full refund' : cell}</td>
+                    );
+                  })}
                 </tr>
               ))}
               {rows.length === 0 && <tr><td colSpan={REPORT_COLUMNS.length} style={{ padding: 12, color: subtle }}>No sales in this window.</td></tr>}
