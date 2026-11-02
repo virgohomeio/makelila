@@ -77,6 +77,17 @@ export function DashboardTab() {
   const totalConversions = metaConversions + google.conversions;
   const blendedCac = totalConversions ? totalSpend / totalConversions : null;
 
+  // Revenue each platform attributes (Meta purchase value, Google conversion
+  // value), blended + per-platform ROAS.
+  const metaRevenue = useMemo(
+    () => campaigns.reduce((s, c) => s + (c.metrics?.website_purchases_value ?? 0), 0),
+    [campaigns],
+  );
+  const googleRevenue = google.value;
+  const totalRevenue = metaRevenue + googleRevenue;
+  const metaRoas = ads.spend ? metaRevenue / ads.spend : null;
+  const blendedRoas = totalSpend ? totalRevenue / totalSpend : null;
+
   const topCampaigns = useMemo(
     () => [...campaigns].sort((a, b) => (b.spend_cad ?? 0) - (a.spend_cad ?? 0)).slice(0, 5),
     [campaigns],
@@ -91,13 +102,15 @@ export function DashboardTab() {
       <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Paid ads summary — Meta + Google</div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 6 }}>
         <Tile label="Total ad spend (CAD)" value={money(totalSpend)} sub={`${totalConversions.toLocaleString()} conversions`} />
+        <Tile label="Total revenue (CAD)" value={money(totalRevenue)} sub={`Meta ${money(metaRevenue)} · Google ${money(googleRevenue)}`} />
+        <Tile label="Blended ROAS" value={blendedRoas != null ? `${blendedRoas.toFixed(2)}×` : '—'} sub="revenue ÷ spend" />
         <Tile label="Blended CAC" value={blendedCac != null ? money(blendedCac) : '—'} />
-        <Tile label="Meta spend" value={money(ads.spend)} sub={metaCac != null ? `$${metaCac.toFixed(0)} CAC · ${metaConversions} conv` : undefined} />
-        <Tile label="Google spend" value={money(google.spend)} sub={googleCac != null ? `$${googleCac.toFixed(0)} CAC · ${google.conversions} conv` : (google.hasData ? undefined : 'not synced')} />
+        <Tile label="Meta spend" value={money(ads.spend)} sub={metaRoas != null ? `${money(metaRevenue)} rev · ${metaRoas.toFixed(2)}× ROAS` : (metaCac != null ? `$${metaCac.toFixed(0)} CAC` : undefined)} />
+        <Tile label="Google spend" value={money(google.spend)} sub={googleCac != null ? `${money(googleRevenue)} rev · ${google.spend ? (googleRevenue / google.spend).toFixed(2) : '—'}× ROAS` : (google.hasData ? undefined : 'not synced')} />
       </div>
       <div style={{ fontSize: 11, color: muted, marginBottom: 16 }}>
-        Conversions are each platform's own reported numbers (Meta purchases, Google conversions). Meta reflects synced
-        campaign lifetime; Google reflects the last ~90 days.
+        Revenue + conversions are each platform's own reported numbers (Meta purchase value / purchases, Google conversion
+        value / conversions); ROAS is revenue ÷ spend. Meta reflects synced campaign lifetime; Google reflects the last ~90 days.
       </div>
 
       {/* Paid-ads KPI row */}
@@ -116,6 +129,8 @@ export function DashboardTab() {
           <Tile label="Impressions" value={ads.impressions.toLocaleString()} />
           <Tile label="Clicks" value={ads.clicks.toLocaleString()} sub={ads.ctr != null ? `${ads.ctr.toFixed(2)}% CTR` : undefined} />
           <Tile label="Leads" value={ads.leads.toLocaleString()} sub={ads.cpl != null ? `$${ads.cpl.toFixed(0)} CPL` : undefined} />
+          <Tile label="Purchases" value={metaConversions.toLocaleString()} sub={metaCac != null ? `$${metaCac.toFixed(0)} CAC` : undefined} />
+          <Tile label="Revenue (CAD)" value={money(metaRevenue)} sub={metaRoas != null ? `${metaRoas.toFixed(2)}× ROAS` : undefined} />
           <Tile label="Active campaigns" value={String(ads.active)} />
         </div>
       )}
@@ -158,7 +173,7 @@ export function DashboardTab() {
           <Tile label="Impressions" value={google.impressions.toLocaleString()} />
           <Tile label="Clicks" value={google.clicks.toLocaleString()} sub={google.impressions ? `${((google.clicks / google.impressions) * 100).toFixed(2)}% CTR` : undefined} />
           <Tile label="Conversions" value={google.conversions.toLocaleString()} sub={googleCac != null ? `$${googleCac.toFixed(0)} CAC` : undefined} />
-          <Tile label="Conv. value (CAD)" value={money(google.value)} sub={google.spend ? `${(google.value / google.spend).toFixed(2)}× ROAS` : undefined} />
+          <Tile label="Revenue — conv. value (CAD)" value={money(google.value)} sub={google.spend ? `${(google.value / google.spend).toFixed(2)}× ROAS` : undefined} />
         </div>
       )}
 

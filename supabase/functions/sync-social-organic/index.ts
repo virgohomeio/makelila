@@ -201,6 +201,52 @@ Deno.serve(async (req: Request) => {
       }
     } else { notes.fb_posts_feed = errMsg(r.body, r.status); }
   } catch (e) { notes.fb_posts_feed = (e as Error).message; }
+
+  // Facebook Reels — the team's video content publishes as Reels, which do NOT
+  // appear in /published_posts (only plain feed posts do). Pull them from the
+  // /video_reels edge and read each reel's view count. Without this the "Meta"
+  // column is effectively Instagram-only for every video day.
+  type FbReel = { id?: string; description?: string; created_time?: string; permalink_url?: string; reactions?: { summary?: { total_count?: number } }; comments?: { summary?: { total_count?: number } } };
+  // Reel view count: metric names churn, so try the video node's `views` field
+  // first, then a candidate list of video_insights metrics. Non-fatal.
+  const fbVideoViews = async (id: string): Promise<number | null> => {
+    try {
+      const r = await getJson(`${base}/${id}?fields=views&access_token=${pageTok}`);
+      const v = (r.body as { views?: unknown }).views;
+      if (r.ok && typeof v === 'number') return v;
+    } catch { /* ignore */ }
+    for (const metric of ['blue_reels_play_count', 'post_video_views', 'total_video_views']) {
+      try {
+        const vi = await getJson(`${base}/${id}/video_insights?metric=${metric}&access_token=${pageTok}`);
+        if (vi.ok) { const v = firstVal(vi.body.data as InsightDatum[] | undefined, metric); if (typeof v === 'number') return v; }
+      } catch { /* ignore */ }
+    }
+    return null;
+  };
+  try {
+    const fullF = 'id,description,created_time,permalink_url,reactions.summary(true),comments.summary(true)';
+    let r = await getJson(`${base}/${pageId}/video_reels?fields=${encodeURIComponent(fullF)}&limit=25&access_token=${pageTok}`);
+    let withCounts = true;
+    // If the edge rejects the summary sub-fields, retry with bare fields so we
+    // still capture the reels (and their views) even without like/comment counts.
+    if (!r.ok) { r = await getJson(`${base}/${pageId}/video_reels?fields=${encodeURIComponent('id,description,created_time,permalink_url')}&limit=25&access_token=${pageTok}`); withCounts = false; }
+    if (r.ok) {
+      for (const p of (r.body.data as FbReel[] | undefined) ?? []) {
+        if (!p.id) continue;
+        const reactions = withCounts ? (p.reactions?.summary?.total_count ?? 0) : 0;
+        const comments = withCounts ? (p.comments?.summary?.total_count ?? 0) : 0;
+        const views = await fbVideoViews(p.id);
+        sPosts.push({
+          platform: 'facebook', post_id: p.id,
+          posted_at: p.created_time ?? null, posted_date: p.created_time ? estDate(p.created_time) : null,
+          caption: p.description ?? null, permalink: p.permalink_url ?? null, media_type: 'reel',
+          views, likes: reactions, comments, shares: 0, reach: null, engagement: reactions + comments,
+          synced_at: nowIso,
+        });
+      }
+    } else { notes.fb_reels_feed = errMsg(r.body, r.status); }
+  } catch (e) { notes.fb_reels_feed = (e as Error).message; }
+
   if (ig?.id) {
     try {
       const f = 'id,caption,media_type,timestamp,permalink,like_count,comments_count';
