@@ -383,7 +383,7 @@ export function QueueSidebar({
         ) : tab === 'pickup' ? (
           <EmptyState
             title="Nothing waiting on a carrier"
-            body="An order moves here when Pickup scheduled is clicked at step 3 — and for a carton EZ Trans is picking, only once the Goorooship email carrying it has gone out."
+            body="An order moves here once the shipping email has gone to the customer (the step after Pickup scheduled) — and for a carton EZ Trans is picking, only once the Goorooship email carrying it has gone out."
           />
         ) : tab === 'shipped' ? (
           <EmptyState

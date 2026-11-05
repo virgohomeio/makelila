@@ -14,7 +14,7 @@ import { EZTRANS_BATCH_SENT_ACTION } from './eztransBatch';
 import { REBOOK_ACTION } from './rebookShipment';
 
 function mkRow(p: Partial<PickupQueueRow> & { id: string; order_id: string }): PickupQueueRow {
-  return { step: PICKUP_STEP, label_confirmed_at: '2026-09-29T20:00:00Z', ...p };
+  return { step: PICKUP_STEP, label_confirmed_at: '2026-09-29T20:00:00Z', email_sent_at: '2026-09-29T20:30:00Z', ...p };
 }
 
 const NO_SENDS = new Map<string, GoorooshipSend>();
@@ -228,10 +228,16 @@ describe('pickupBadgeTitle', () => {
 
   // The rail holds both halves of the handoff, so the badge must not tell an
   // operator a carton is awaiting collection days after the dock was confirmed.
-  it('says what the row is actually waiting on, by step', () => {
+  it('says the shipping email has gone and the row waits on the carrier', () => {
     const send = { at: '2026-09-29T20:12:00Z', via: 'booking' } as const;
     expect(pickupBadgeTitle(send, 4)).toMatch(/waiting on the carrier/i);
-    expect(pickupBadgeTitle(send, 5)).toMatch(/collected/i);
-    expect(pickupBadgeTitle(send, 5)).not.toMatch(/waiting on the carrier/i);
+    expect(pickupBadgeTitle(send, 5)).toMatch(/shipping email sent/i);
+  });
+
+  it('keeps a labelled row under Ready to ship until the shipping email has gone', () => {
+    const sends = new Map();
+    const notEzTrans = () => false;
+    expect(isAwaitingPickup(mkRow({ id: 'q1', order_id: 'o1', email_sent_at: null }), sends, notEzTrans)).toBe(false);
+    expect(isAwaitingPickup(mkRow({ id: 'q1', order_id: 'o1' }), sends, notEzTrans)).toBe(true);
   });
 });

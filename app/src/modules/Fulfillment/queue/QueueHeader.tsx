@@ -56,7 +56,7 @@ export function QueueHeader({
   const { profile, user } = useAuth();
   const operatorName = profile?.display_name ?? user?.email ?? 'Unknown';
   const due = orderDue(order.placed_at ?? order.created_at);
-  const STEP_LABELS = ['', 'Assign', 'Test', 'Label', 'Dock', 'Email', 'Fulfilled'];
+  const STEP_LABELS = ['', 'Assign', 'Test', 'Label', 'Email', 'Pickup', 'Fulfilled'];
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 

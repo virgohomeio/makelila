@@ -6,6 +6,11 @@ import { corsHeaders } from '../_shared/cors.ts';
 import { authenticate } from '../_shared/auth.ts';
 import { archiveBcc, DEFAULT_ARCHIVE_BCC } from '../_shared/emailArchive.ts';
 import { textToEmailHtml } from '../_shared/emailHtml.ts';
+import { resolveOrderPhone, sendQuoSms, type QuoSmsResult } from '../_shared/quoSms.ts';
+
+/** The automatic onboarding-instructions email goes this long after the
+ *  shipping email. send-onboarding-instructions (cron) does the sending. */
+const ONBOARDING_DELAY_MS = 24 * 60 * 60 * 1000;
 
 type QueueRow = {
   id: string;
@@ -16,6 +21,7 @@ type QueueRow = {
   tracking_num: string | null;
   starter_tracking_num: string | null;
   email_sent_at: string | null;
+  dock_confirmed_at: string | null;
 };
 
 type OrderRow = {
@@ -23,6 +29,8 @@ type OrderRow = {
   customer_name: string;
   customer_email: string | null;
   customer_id: string | null;
+  customer_phone: string | null;
+  kind: 'sale' | 'replacement';
   country: 'US' | 'CA';
 };
 
@@ -81,6 +89,8 @@ async function handle(req: Request): Promise<Response> {
     subject?: string;
     body?: string;
     edited?: boolean;
+    /** The condensed Quo text, as the operator saw it. Omitted → no text. */
+    sms?: string;
   };
   if (!input.queue_id) {
     return new Response(JSON.stringify({ error: 'queue_id required' }), {
@@ -104,15 +114,19 @@ async function handle(req: Request): Promise<Response> {
       status: 409, headers: { ...corsHeaders, 'content-type': 'application/json' },
     });
   }
-  if (q.step !== 5) {
-    return new Response(JSON.stringify({ error: `queue row at step ${q.step}, must be 5` }), {
+  // Step 4 since 2026-11-05: the shipping email is sent straight after
+  // "Pickup scheduled", while the row is still under Ready to ship, and
+  // "Pickup confirmed" comes after it. Step 5 is still accepted for a row
+  // that was docked under the old order (dock → email) and never emailed.
+  if (q.step !== 4 && q.step !== 5) {
+    return new Response(JSON.stringify({ error: `queue row at step ${q.step}, must be 4` }), {
       status: 409, headers: { ...corsHeaders, 'content-type': 'application/json' },
     });
   }
 
   const { data: order, error: oErr } = await admin
     .from('orders')
-    .select('order_ref, customer_name, customer_email, customer_id, country')
+    .select('order_ref, customer_name, customer_email, customer_id, customer_phone, kind, country')
     .eq('id', q.order_id)
     .single<OrderRow>();
   if (oErr || !order) {
@@ -199,11 +213,11 @@ async function handle(req: Request): Promise<Response> {
     const { data: tpl } = await admin
       .from('email_templates')
       .select('subject, body, active')
-      .eq('key', 'shipment_confirmation')
+      .eq('key', 'shipment_shipping_info')
       .maybeSingle<{ subject: string; body: string; active: boolean }>();
     if (!tpl || !tpl.active) {
       return new Response(
-        JSON.stringify({ error: "no subject/body supplied and the 'shipment_confirmation' template is missing or inactive" }),
+        JSON.stringify({ error: "no subject/body supplied and the 'shipment_shipping_info' template is missing or inactive" }),
         { status: 409, headers: { ...corsHeaders, 'content-type': 'application/json' } },
       );
     }
@@ -291,20 +305,61 @@ async function handle(req: Request): Promise<Response> {
     }).eq('id', msgId);
   }
 
-  // Update queue row → step 6 + fulfilled
   const now = new Date().toISOString();
   const userId = _caller.user_id;
 
-  const { error: upErr } = await admin
+  // The same information, condensed, as a Quo text to the phone on file.
+  // Best-effort: the email has gone, so a text that cannot be sent is
+  // reported back and logged rather than failing the step.
+  let sms: QuoSmsResult | null = null;
+  const smsText = input.sms?.trim();
+  if (smsText) {
+    const phone = await resolveOrderPhone(admin, order);
+    sms = await sendQuoSms(phone, smsText);
+    await admin.from('activity_log').insert({
+      user_id: userId,
+      type: sms.ok ? 'fq_shipping_sms_sent' : 'fq_shipping_sms_failed',
+      entity: input.queue_id,
+      detail: sms.ok
+        ? `${order.order_ref} · Quo text to ${sms.to}${sms.test_redirected ? ' (TEST redirect)' : ''}`
+        : `${order.order_ref} · Quo text not sent: ${sms.error}`,
+    }).then(() => undefined, (err) => { console.error('activity_log insert failed:', err); });
+  }
+
+  // A row docked under the old order (dock → email) is finished by this send,
+  // exactly as before. Every other row moves on to "Pickup confirmed", which
+  // is what now takes it to step 6.
+  const finishes = !!q.dock_confirmed_at;
+  const update: Record<string, unknown> = {
+    email_sent_at: now,
+    email_sent_by: userId,
+    // Onboarding instructions follow a day later — sales only. A replacement
+    // goes to a customer who has already been through onboarding.
+    onboarding_email_due_at: order.kind === 'sale'
+      ? new Date(Date.now() + ONBOARDING_DELAY_MS).toISOString()
+      : null,
+  };
+  if (finishes) {
+    update.step = 6;
+    update.fulfilled_at = now;
+    update.fulfilled_by = userId;
+  } else {
+    update.step = 5;
+  }
+
+  let { error: upErr } = await admin
     .from('fulfillment_queue')
-    .update({
-      step: 6,
-      email_sent_at: now,
-      email_sent_by: userId,
-      fulfilled_at: now,
-      fulfilled_by: userId,
-    })
+    .update(update)
     .eq('id', input.queue_id);
+  // The email has already gone: a database that has not run
+  // 20261105120000_onboarding_instructions_email.sql must not leave the row
+  // stuck at this step. Retry without the scheduling column and say so.
+  let onboardingScheduled = update.onboarding_email_due_at != null;
+  if (upErr && /onboarding_email_due_at/.test(upErr.message)) {
+    delete update.onboarding_email_due_at;
+    onboardingScheduled = false;
+    ({ error: upErr } = await admin.from('fulfillment_queue').update(update).eq('id', input.queue_id));
+  }
   if (upErr) {
     return new Response(JSON.stringify({ error: `db update failed: ${upErr.message}` }), {
       status: 500, headers: { ...corsHeaders, 'content-type': 'application/json' },
@@ -313,12 +368,9 @@ async function handle(req: Request): Promise<Response> {
 
   // Release the shelf slot back to empty (unit shipped). Flip status only;
   // leave `serial` set because fulfillment_queue.assigned_serial has a FK
-  // pointing here. Nullifying it errors and the error used to be silently
-  // swallowed (no .error check), which left 74 historical shipped units
-  // still showing as 'available' on the picker. The DB trigger
-  // sync_shelf_slot_on_unit_status_change (migration 20260603130000) also
-  // catches this when units.status flips to 'shipped' via other paths.
-  if (q.assigned_serial) {
+  // pointing here. Only on the send that finishes the row — otherwise
+  // confirmDock does it when the pickup is confirmed.
+  if (finishes && q.assigned_serial) {
     const { error: shelfErr } = await admin.from('shelf_slots')
       .update({ status: 'empty', updated_at: now })
       .eq('serial', q.assigned_serial);
@@ -328,7 +380,12 @@ async function handle(req: Request): Promise<Response> {
   }
 
   return new Response(
-    JSON.stringify({ email_id: sent.id }),
+    JSON.stringify({
+      email_id: sent.id,
+      step: finishes ? 6 : 5,
+      sms: sms ? (sms.ok ? { ok: true, to: sms.to } : { ok: false, error: sms.error }) : null,
+      onboarding_email_due_at: onboardingScheduled ? update.onboarding_email_due_at : null,
+    }),
     { status: 200, headers: { ...corsHeaders, 'content-type': 'application/json' } },
   );
 }

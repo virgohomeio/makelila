@@ -88,6 +88,12 @@ export type FulfillmentQueueRow = {
   starter_skip_reason?: string | null;
   email_sent_at: string | null;
   email_sent_by: string | null;
+  // The automatic next-day onboarding-instructions email
+  // (20261105120000_onboarding_instructions_email.sql). Optional for the same
+  // apply-by-hand reason as the columns above.
+  onboarding_email_due_at?: string | null;
+  onboarding_email_sent_at?: string | null;
+  onboarding_email_error?: string | null;
 
   fulfilled_at: string | null;
   fulfilled_by: string | null;
@@ -894,16 +900,31 @@ export async function goBackStep(queueId: string, currentStep: FulfillmentStep):
     update.assigned_serial = null;
   }
 
-  if (currentStep === 6) {
+  // Step order since 2026-11-05: 3 Label → 4 Email → 5 Pickup → 6 Fulfilled.
+  // Rewinding out of Pickup reopens the email, so the send can be retried
+  // (the edge function refuses a second send while email_sent_at is set), and
+  // withdraws a next-day onboarding email that has not gone yet.
+  if (currentStep === 5) {
     update.email_sent_at = null;
     update.email_sent_by = null;
+    update.onboarding_email_due_at = null;
+  }
+  if (currentStep === 6) {
     update.fulfilled_at = null;
     update.fulfilled_by = null;
+    update.dock_confirmed_at = null;
+    update.dock_confirmed_by = null;
   }
-  const { error } = await supabase
+  let { error } = await supabase
     .from('fulfillment_queue')
     .update(update)
     .eq('id', queueId);
+  // Migrations here are applied by hand; a database without the onboarding
+  // columns (20261105120000) has nothing scheduled to withdraw.
+  if (error && 'onboarding_email_due_at' in update && /onboarding_email_due_at/.test(error.message)) {
+    delete update.onboarding_email_due_at;
+    ({ error } = await supabase.from('fulfillment_queue').update(update).eq('id', queueId));
+  }
   if (error) throw error;
   await logAction('fq_step_back', queueId, `Step ${currentStep} → ${prev}`);
 }
@@ -926,15 +947,30 @@ export async function toggleDockCheck(
   if (error) throw error;
 }
 
-/** Step 4: pickup confirmed → advance 4→5. The UI no longer shows the
- *  checklist, so the dock_* booleans are all stamped true here to keep the
- *  row consistent with a completed handoff. */
+/** Step 5: pickup confirmed → the row is fulfilled (5→6).
+ *
+ *  Since 2026-11-05 the shipping email goes out first, at step 4, straight
+ *  after "Pickup scheduled"; confirming the carrier collected the box is what
+ *  closes the row, so this is now the write that takes it to step 6 (and so
+ *  fires the step-6 triggers: units shipped, warranty, Lovely serial link).
+ *  The dock_* booleans are all stamped true to keep the row consistent with a
+ *  completed handoff. */
 export async function confirmDock(queueId: string): Promise<void> {
   const userId = await currentUserId();
+  const { data: cur, error: rErr } = await supabase
+    .from('fulfillment_queue')
+    .select('email_sent_at, assigned_serial')
+    .eq('id', queueId)
+    .single();
+  if (rErr || !cur) throw new Error(`Read queue row: ${rErr?.message ?? 'not found'}`);
+  if (!cur.email_sent_at) throw new Error('Send the shipping email before confirming the pickup.');
+  const now = new Date().toISOString();
   const { error } = await supabase
     .from('fulfillment_queue')
     .update({
-      step: 5,
+      step: 6,
+      fulfilled_at: now,
+      fulfilled_by: userId,
       dock_printed: true,
       dock_affixed: true,
       dock_docked: true,
@@ -945,7 +981,16 @@ export async function confirmDock(queueId: string): Promise<void> {
     })
     .eq('id', queueId);
   if (error) throw error;
-  await logAction('fq_dock_confirmed', queueId, 'Dock check complete');
+  // The unit has left: free its shelf slot. Best-effort — the
+  // sync_shelf_slot_on_unit_status_change trigger also does this when the
+  // step-6 trigger flips the unit to shipped.
+  if (cur.assigned_serial) {
+    const { error: shelfErr } = await supabase.from('shelf_slots')
+      .update({ status: 'empty', updated_at: now })
+      .eq('serial', cur.assigned_serial as string);
+    if (shelfErr) console.warn('shelf slot release failed (non-fatal):', shelfErr.message);
+  }
+  await logAction('fq_dock_confirmed', queueId, 'Pickup confirmed — fulfilled');
 }
 
 /** Step 5: a late correction to the starter tracking number. Step 3 is where
@@ -1024,7 +1069,15 @@ export function renderShipmentEmail(template: string, vars: Record<string, strin
   return renderTemplate(withBlock, vars);
 }
 
-/** Sends the Step-5 shipment confirmation.
+export type SendFulfillmentEmailResult = {
+  email_id: string;
+  step?: number;
+  /** The Quo text sent with it; null when none was asked for. */
+  sms?: { ok: true; to: string } | { ok: false; error: string } | null;
+  onboarding_email_due_at?: string | null;
+};
+
+/** Sends the Step-4 shipping email (and its Quo text).
  *
  *  `content` is the rendered subject/body exactly as the operator sees it in
  *  the queue — the edge function keeps no copy of the wording, so this is what
@@ -1032,8 +1085,8 @@ export function renderShipmentEmail(template: string, vars: Record<string, strin
  *  row. Omitting `content` falls back to the stored template server-side. */
 export async function sendFulfillmentEmail(
   queueId: string,
-  content?: { subject: string; body: string; edited: boolean },
-): Promise<{ email_id: string }> {
+  content?: { subject: string; body: string; edited: boolean; sms?: string },
+): Promise<SendFulfillmentEmailResult> {
   await currentUserId();
   const { data: { session } } = await supabase.auth.getSession();
   const res = await fetch(`${SUPABASE_URL}/functions/v1/send-fulfillment-email`, {
@@ -1048,6 +1101,7 @@ export async function sendFulfillmentEmail(
       subject: content?.subject,
       body: content?.body,
       edited: content?.edited ?? false,
+      sms: content?.sms,
     }),
   });
   const bodyText = await res.text();
@@ -1059,7 +1113,7 @@ export async function sendFulfillmentEmail(
     } catch { /* keep raw */ }
     throw new Error(`Send email failed (${res.status}): ${detail}`);
   }
-  try { return JSON.parse(bodyText) as { email_id: string }; }
+  try { return JSON.parse(bodyText) as SendFulfillmentEmailResult; }
   catch { throw new Error('Send email: response was not JSON'); }
 }
 

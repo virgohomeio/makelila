@@ -483,3 +483,8 @@ verify_jwt = false
 # so caller identity isn't needed for correctness.
 [functions.verify-address]
 verify_jwt = false
+
+# send-onboarding-instructions: hourly cron (X-Cron-Secret) + operator JWT,
+# both checked in-function by _shared/auth.ts — same ES256 gateway workaround.
+[functions.send-onboarding-instructions]
+verify_jwt = false

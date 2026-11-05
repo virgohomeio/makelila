@@ -93,8 +93,8 @@ describe('StepAssign — why Confirm is disabled', () => {
 
 describe('StepDock — single pickup confirmation', () => {
   it('offers the confirm button with no checklist to tick', () => {
-    render(<StepDock row={{ ...row, step: 4 }} />);
-    expect(screen.getByRole('button', { name: /Pickup confirmed, proceed to customer email/ })).toBeEnabled();
+    render(<StepDock row={{ ...row, step: 5 }} />);
+    expect(screen.getByRole('button', { name: /Pickup confirmed — mark fulfilled/ })).toBeEnabled();
     expect(screen.queryByRole('checkbox')).toBeNull();
     expect(screen.queryByTestId('step-blockers')).toBeNull();
   });

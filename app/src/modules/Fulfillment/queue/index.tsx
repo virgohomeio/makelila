@@ -1,7 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { supabase } from '../../../lib/supabase';
-import { useFulfillmentQueue, type FulfillmentQueueRow } from '../../../lib/fulfillment';
+import { useFulfillmentQueue, type FulfillmentQueueRow, type SendFulfillmentEmailResult } from '../../../lib/fulfillment';
 import type { OrderStatus, Order as FullOrder } from '../../../lib/orders';
 import { QueueSidebar } from './QueueSidebar';
 import { QueueHeader } from './QueueHeader';
@@ -83,6 +83,9 @@ export default function Queue() {
   // The row disappears via realtime, so without this the detail pane would
   // silently fall back to "Select a queued order" with no confirmation.
   const [notice, setNotice] = useState<string | null>(null);
+  // What the shipping send just reported (email + Quo text), shown on the
+  // Pickup step it lands on. The email step unmounts when the row advances.
+  const [sendNote, setSendNote] = useState<{ rowId: string; result: SendFulfillmentEmailResult } | null>(null);
 
   const orderLookup = useMemo(() => {
     const m = new Map<string, Order>();
@@ -307,8 +310,24 @@ export default function Queue() {
                       onBatchChanged={() => { void refresh(); void refreshSends(); }}
                     />
                   )}
-                  {selected.step === 4 && <StepDock row={selected} />}
-                  {selected.step === 5 && <StepEmail row={selected} order={selectedOrder} onSent={() => { void refresh(); }} />}
+                  {/* Since 2026-11-05: 3 Label → 4 Email → 5 Pickup → 6.
+                      The shipping email is the window straight after "Pickup
+                      scheduled", while the card is still under Ready to ship.
+                      A step-5 row with no email is one docked under the old
+                      order (dock → email) — it still owes the email. */}
+                  {(selected.step === 4 || (selected.step === 5 && !selected.email_sent_at)) && (
+                    <StepEmail
+                      row={selected}
+                      order={selectedOrder}
+                      onSent={result => { setSendNote({ rowId: selected.id, result }); void refresh(); }}
+                    />
+                  )}
+                  {selected.step === 5 && !!selected.email_sent_at && (
+                    <>
+                      <SendNote note={sendNote?.rowId === selected.id ? sendNote.result : null} row={selected} />
+                      <StepDock row={selected} onConfirmed={() => { void refresh(); }} />
+                    </>
+                  )}
                   {selected.step === 6 && <StepFulfilled row={selected} order={selectedOrder} />}
                 </>
               )}
@@ -324,6 +343,31 @@ export default function Queue() {
         orders={batchOrders}
         onSent={() => { void refresh(); void refreshSends(); }}
       />
+    </div>
+  );
+}
+
+/** The shipping send's outcome, above the Pickup step: the email went, the
+ *  Quo text did or did not, and when the onboarding email is due. */
+function SendNote({ note, row }: { note: SendFulfillmentEmailResult | null; row: FulfillmentQueueRow }) {
+  const due = note?.onboarding_email_due_at ?? row.onboarding_email_due_at ?? null;
+  const sentOnboarding = row.onboarding_email_sent_at ?? null;
+  return (
+    <div style={{ fontSize: 11, marginBottom: 10, lineHeight: 1.6 }}>
+      <div style={{ color: 'var(--color-success)' }}>
+        ✓ Shipping email sent{row.email_sent_at ? ` ${new Date(row.email_sent_at).toLocaleString()}` : ''}.
+      </div>
+      {note?.sms && (note.sms.ok
+        ? <div style={{ color: 'var(--color-success)' }}>✓ Quo text sent to {note.sms.to}.</div>
+        : <div style={{ color: 'var(--color-error)' }}>✗ Quo text not sent: {note.sms.error}</div>)}
+      {sentOnboarding
+        ? <div style={{ color: 'var(--color-success)' }}>✓ Onboarding instructions sent {new Date(sentOnboarding).toLocaleString()}.</div>
+        : due
+          ? <div style={{ color: 'var(--color-ink-muted)' }}>Onboarding instructions email + text go out automatically {new Date(due).toLocaleString()}.</div>
+          : null}
+      {row.onboarding_email_error && (
+        <div style={{ color: 'var(--color-warning)' }}>Onboarding send: {row.onboarding_email_error}</div>
+      )}
     </div>
   );
 }
