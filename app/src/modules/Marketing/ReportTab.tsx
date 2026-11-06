@@ -15,6 +15,10 @@ const muted = 'var(--color-ink-muted)';
 // Column index of the Full Refund? flag, so the table can give a full refund a
 // crimson highlight (and mute the "No") without hard-coding a position.
 const REFUND_COL = REPORT_COLUMNS.indexOf('Full Refund?');
+// Column index of the Sale Source, so an external reseller sale (anything that
+// isn't our own website) can be colour-highlighted without a hard-coded index.
+const SOURCE_COL = REPORT_COLUMNS.indexOf('Sale Source');
+const OUR_WEBSITE = 'Our Website';
 
 // Date-range options for the report's KPI/summary + order list. 'all' = every
 // sale; 'today'/'yesterday' = that single EST calendar day; the numeric keys are
@@ -391,13 +395,18 @@ export function ReportTab() {
                   {reportCells(r).map((cell, i) => {
                     const isRefund = i === REFUND_COL;
                     const fullRefund = isRefund && cell === 'Yes';
+                    // An external reseller sale (Walmart / Best Buy / Collective)
+                    // stands out; our own website stays in the muted default.
+                    const isSource = i === SOURCE_COL;
+                    const external = isSource && cell !== OUR_WEBSITE;
                     return (
                       <td key={i} style={{
                         padding: '7px 10px',
                         color: fullRefund ? 'var(--color-crimson)'
+                          : external ? 'var(--color-info)'
                           : (isRefund || cell === UNKNOWN) ? subtle : 'inherit',
                         fontStyle: cell === UNKNOWN ? 'italic' : 'normal',
-                        fontWeight: fullRefund || i === 0 ? 600 : 400,
+                        fontWeight: fullRefund || external || i === 0 ? 600 : 400,
                       }}>{fullRefund ? 'Full refund' : cell}</td>
                     );
                   })}
@@ -425,6 +434,7 @@ export function ReportTab() {
 
       {/* Breakdowns */}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 20 }}>
+        <BreakdownTable title="By sale source" rows={kpis.bySource} />
         <BreakdownTable title="By channel" rows={kpis.byChannel} />
         <BreakdownTable title="By plan" rows={kpis.byPlan} />
         <BreakdownTable title="By province/state" rows={kpis.byProvince} />

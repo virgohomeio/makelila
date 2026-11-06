@@ -27,6 +27,12 @@ export type SalesRow = {
   last_referrer: string | null;
   plan: string;
   discount_codes: string[];
+  // Where the sale came through — the Shopify sales channel as a friendly label
+  // (orders.sales_channel): "Our Website" for our own storefront, or a reseller
+  // marketplace (Walmart / Best Buy via Mirakl, Shopify Collective) for an
+  // external sale. Distinct from the marketing Source column (Meta Ad, Google
+  // Organic, …), which is *how the buyer was acquired*, not where they bought.
+  sale_source: string;
   revenue: number;
   currency: string;
   // Shopify financial_status === 'refunded' — the customer got their money back
@@ -61,6 +67,9 @@ export type SalesKpis = {
   byProvince: Breakdown[];
   byPlan: Breakdown[];
   byDiscount: Breakdown[];
+  // Tally by Shopify sales channel (Our Website vs Walmart / Best Buy / Shopify
+  // Collective) so external reseller sales are totalled alongside our own.
+  bySource: Breakdown[];
 };
 
 export type Attribution = { source: string | null; medium: string | null; campaign: string | null };
@@ -150,6 +159,7 @@ export function buildSalesReport(
   const byProvince = new Map<string, Breakdown>();
   const byPlan = new Map<string, Breakdown>();
   const byDiscount = new Map<string, Breakdown>();
+  const bySource = new Map<string, Breakdown>();
 
   const rows: SalesRow[] = sales.map(o => {
     const a = resolve(o);
@@ -157,10 +167,12 @@ export function buildSalesReport(
     const plan = classifyPlan(o);
     const codes = o.discount_codes ?? [];
     const revenue = o.total_usd ?? 0;
+    const saleSource = saleSourceOf(o);
 
     bump(byChannel, channel, revenue);
     bump(byProvince, o.region_state ?? '—', revenue);
     bump(byPlan, plan, revenue);
+    bump(bySource, saleSource, revenue);
     if (codes.length === 0) bump(byDiscount, 'No code', revenue);
     else for (const c of codes) bump(byDiscount, c, revenue);
 
@@ -178,6 +190,7 @@ export function buildSalesReport(
       last_referrer: o.attribution_last_referrer ?? null,
       plan,
       discount_codes: codes,
+      sale_source: saleSource,
       revenue,
       currency: o.currency || 'USD',
       full_refund: (o.financial_status ?? '').toLowerCase() === 'refunded',
@@ -214,8 +227,20 @@ export function buildSalesReport(
       byProvince: sortBreakdown(byProvince),
       byPlan: sortBreakdown(byPlan),
       byDiscount: sortBreakdown(byDiscount),
+      bySource: sortBreakdown(bySource),
     },
   };
+}
+
+/** The Shopify sales channel a sale came through, as a friendly label. The sync
+ *  (sync-shopify-orders) already resolves source_name into a label on
+ *  orders.sales_channel; a blank or absent value (an order synced before the
+ *  column, or an older channel) falls back to "Our Website", our own storefront
+ *  and the only channel that existed before the Walmart/Best Buy/Collective
+ *  marketplaces were added. */
+export function saleSourceOf(o: Order): string {
+  const c = (o.sales_channel ?? '').trim();
+  return c || 'Our Website';
 }
 
 // Marker for any cell we can't populate from current data (age/gender demographics,
@@ -226,7 +251,7 @@ export const UNKNOWN = 'UNKNOWN';
 // Manual tracker columns, prefixed with a Campaign column so the bucketing each
 // sale piled into is visible for verification.
 export const REPORT_COLUMNS = [
-  'Campaign', 'Name', 'Full Refund?', 'Date', 'Time (EST)', 'City', 'Province/State', 'Country',
+  'Campaign', 'Name', 'Sale Source', 'Full Refund?', 'Date', 'Time (EST)', 'City', 'Province/State', 'Country',
   'Age Range', 'Gender', 'Source', 'Buyer Plan', 'Order Value',
   'Discount WELCOMELILA?', 'Discount CHECKOUTFIVE?', 'Other Codes?', 'Other Code 2',
   'Purchase Time after Purchase Visit', 'Notes',
@@ -330,6 +355,9 @@ export function reportCells(r: SalesRow): string[] {
   return [
     r.campaign_group ?? '—',
     r.name,
+    // Where the sale transacted (Shopify sales channel): Our Website, or a
+    // reseller marketplace (Walmart / Best Buy / Shopify Collective).
+    r.sale_source,
     // Full refund only (Shopify 'refunded'); a partial refund stays 'No'.
     r.full_refund ? 'Yes' : 'No',
     date,

@@ -153,6 +153,13 @@ export type Order = {
   discount_codes: string[] | null;
   payment_methods: string[] | null;
   financial_status: string | null;
+  // Which Shopify sales channel the order transacted through, as a friendly
+  // label (Our Website / Walmart / Best Buy / Shopify Collective / …), set by
+  // sync-shopify-orders from Shopify's source_name. Optional for the gated-
+  // migration reason reconciled_at is: select('*') on an environment that
+  // hasn't run the migration returns rows without the key. NULL/absent reads as
+  // "Our Website" in the Journey Report (the storefront is the default channel).
+  sales_channel?: string | null;
   // Per-order Shopify acquisition source (utm → referrer host → direct), set by
   // sync-shopify-orders. Preferred over the customer's first-touch in reporting.
   attribution_source: string | null;

@@ -41,6 +41,10 @@ type ShopifyOrder = {
   landing_site?: string | null;
   landing_site_ref?: string | null;
   referring_site?: string | null;
+  // Which sales channel created the order: 'web' (online store), 'pos',
+  // 'shopify_draft_order', or a marketplace connector app (Mirakl → Walmart /
+  // Best Buy, Shopify Collective). Drives the Journey Report's Sale Source.
+  source_name?: string | null;
   currency?: string | null;
   presentment_currency?: string | null;
   total_price?: string | null;
@@ -102,6 +106,8 @@ type MappedOrder = {
   discount_codes: string[] | null;
   payment_methods: string[] | null;
   financial_status: string | null;
+  // Friendly Shopify sales-channel label (Our Website / Walmart / …), from source_name.
+  sales_channel: string;
   line_items: Array<{ sku: string; name: string; qty: number; price_usd: number }>;
   placed_at: string | null;
   // Per-order acquisition source, Shopify-style: UTM on the landing URL wins,
@@ -118,6 +124,31 @@ type MappedOrder = {
   attribution_last_medium: string | null;
   attribution_last_referrer: string | null;
 };
+
+// Which Shopify sales channel an order came through, as a friendly label for the
+// Journey Report's Sale Source column. Shopify's REST `source_name` is 'web' for
+// the online store, 'pos' in person, 'shopify_draft_order' for a manually built
+// order, or a third-party app's id/handle for marketplace connectors (Mirakl →
+// Walmart / Best Buy, Shopify Collective). We can't always tell two Mirakl
+// marketplaces apart from source_name alone, so a bare 'mirakl' is labelled
+// generically and anything unrecognised is shown verbatim rather than guessed —
+// tighten the matches below as real values appear. Empty / 'web' ⇒ 'Our Website'.
+function salesChannelLabel(sourceName: string | null | undefined): string {
+  const raw = (sourceName ?? '').trim();
+  const s = raw.toLowerCase();
+  if (!s || s === 'web' || s === 'online_store' || s === 'online store') return 'Our Website';
+  if (s === 'pos') return 'Point of Sale';
+  if (s === 'shopify_draft_order' || s === 'draft_order' || s === 'iphone' || s === 'android') return 'Manual / Draft';
+  // Check the specific marketplace names before the generic connector so a
+  // source_name that actually says "walmart"/"best buy" resolves precisely.
+  if (/best\s*buy|bestbuy/.test(s)) return 'Best Buy';
+  if (/walmart/.test(s)) return 'Walmart';
+  if (/mirakl/.test(s)) return 'Marketplace (Mirakl)';
+  if (/collective/.test(s)) return 'Shopify Collective';
+  // Unknown app (a numeric app id or handle): surface it as-is so the channel is
+  // visible and never silently misfiled as our own website.
+  return raw;
+}
 
 function num(v: string | null | undefined): number | null {
   if (v == null || v === '') return null;
@@ -271,6 +302,7 @@ function mapOrder(
     discount_codes: o.discount_codes?.map(d => d.code).filter((c): c is string => !!c) ?? null,
     payment_methods: o.payment_gateway_names ?? null,
     financial_status: o.financial_status ?? null,
+    sales_channel: salesChannelLabel(o.source_name),
     line_items: (o.line_items ?? []).map(li => ({
       sku: li.sku ?? 'UNKNOWN',
       name: li.title ?? 'Unknown item',
@@ -668,6 +700,7 @@ serve(async (req: Request) => {
       discount_codes: m.discount_codes,
       payment_methods: m.payment_methods,
       financial_status: m.financial_status,
+      sales_channel: m.sales_channel,
       line_items: m.line_items,
       // Shopify-derived source of truth — safe to refresh; backfills existing
       // orders (that predate this column) on the next full sync.
