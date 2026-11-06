@@ -1395,6 +1395,15 @@ export async function defaultRefundAmountFromInvoice(
 export async function compileReturnToRefund(
   r: ReturnRow, opts: RefundRequestOpts = {},
 ): Promise<void> {
+  // "Discard → Completeness" compiles straight from the intake column, where
+  // the return is still created/pickup_scheduled/picked_up. Settle the unit
+  // question first (BR-7: customer discards a defective unit), otherwise every
+  // later gate — managerApprove, financeApprove — rejects the card and it sits
+  // in Manager Review however often the manager clicks Confirm. Done before the
+  // card is created so a failed write can't leave a stuck card behind.
+  if (r.disposition === 'discard' && !returnStatusAllowsRefund(r.status)) {
+    await updateReturnStatus(r.id, 'discarded');
+  }
   const usePurchaser = r.is_purchaser === false;
   const email = ((usePurchaser && r.purchaser_email?.trim()) ? r.purchaser_email.trim() : r.customer_email) ?? undefined;
   const opening = await defaultRefundAmountFromInvoice(email, r.original_order_ref, r.refund_amount_usd);
