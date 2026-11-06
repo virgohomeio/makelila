@@ -4,6 +4,35 @@ import type { QcCheck } from './stock';
 
 const BUCKET = 'test-reports';
 
+/** Which of a unit's two report slots a file goes into.
+ *  - 'china'  — the factory test report. Mandatory for every unit; its parsed
+ *               result drives electrical_check and its MAC fills mac_address.
+ *  - 'canada' — an optional re-test done in Canada on some units. Attached
+ *               alongside the China report and never overwrites the China
+ *               result, the failed-test list or the MAC. */
+export type TestReportOrigin = 'china' | 'canada';
+
+export const TEST_REPORT_ORIGIN_LABEL: Record<TestReportOrigin, string> = {
+  china: 'China test report',
+  canada: 'Canada test report',
+};
+
+/** File types accepted per slot. China reports are always the test script's
+ *  .md output (we parse it); Canada reports may also arrive as PDFs. */
+export const TEST_REPORT_ACCEPT: Record<TestReportOrigin, string> = {
+  china: '.md',
+  canada: '.md,.pdf',
+};
+
+export function isAcceptedReportFile(name: string, origin: TestReportOrigin): boolean {
+  const lower = name.toLowerCase();
+  return TEST_REPORT_ACCEPT[origin].split(',').some(ext => lower.endsWith(ext));
+}
+
+function contentTypeFor(name: string): string {
+  return name.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'text/markdown';
+}
+
 export type ParsedTestReport = {
   serial: string | null;
   mac: string | null;     // ESP32 MAC from the "MAC ID:" line, normalised; null when absent/garbled
@@ -62,9 +91,9 @@ export function parseTestReport(text: string): ParsedTestReport {
   };
 }
 
-/** Serial implied by a filename like "LL01-00000000332.md". */
+/** Serial implied by a filename like "LL01-00000000332.md" (or .pdf). */
 export function serialFromFilename(name: string): string {
-  return name.replace(/\.md$/i, '').trim();
+  return name.replace(/\.(md|pdf)$/i, '').trim();
 }
 
 export type UploadOutcome = {
@@ -75,6 +104,7 @@ export type UploadOutcome = {
   message?: string;
   mac?: string | null;     // normalised MAC from the report; null when the report has none
   macClash?: string;       // the other serial that already holds this MAC (paired anyway)
+  origin?: TestReportOrigin; // set on Canada uploads; absent means China
 };
 
 /** The other serial already holding `mac`, or undefined when the MAC is new
@@ -108,17 +138,55 @@ export async function uploadTestReports(
   files: File[],
   validSerials: Set<string>,
   macOwners: Map<string, string> = new Map(),
+  opts: {
+    /** Which slot to attach to. Defaults to the mandatory China report. */
+    origin?: TestReportOrigin;
+    /** Attach every file to this serial instead of pairing by content /
+     *  filename — used by the per-unit upload button in the QC modal. */
+    serial?: string;
+  } = {},
 ): Promise<UploadOutcome[]> {
+  const origin: TestReportOrigin = opts.origin ?? 'china';
   const outcomes: UploadOutcome[] = [];
   const seenThisDrop = new Map<string, string>();
 
   for (const file of files) {
-    const text = await file.text();
-    const parsed = parseTestReport(text);
-    const serial = parsed.serial ?? serialFromFilename(file.name);
+    const isPdf = file.name.toLowerCase().endsWith('.pdf');
+    const parsed = isPdf ? null : parseTestReport(await file.text());
+    const serial = opts.serial ?? parsed?.serial ?? serialFromFilename(file.name);
 
     if (!validSerials.has(serial)) {
       outcomes.push({ fileName: file.name, serial, status: 'unmatched', message: 'No matching unit serial' });
+      continue;
+    }
+
+    if (origin === 'canada') {
+      try {
+        const path = `${serial}/canada/${Date.now()}-${file.name}`;
+        const { error: upErr } = await supabase.storage
+          .from(BUCKET)
+          .upload(path, file, { contentType: contentTypeFor(file.name), upsert: false });
+        if (upErr) throw upErr;
+        const { error: dbErr } = await supabase
+          .from('units')
+          .update({
+            canada_test_report_path: path,
+            canada_test_report_name: file.name,
+            canada_test_report_uploaded_at: new Date().toISOString(),
+          })
+          .eq('serial', serial);
+        if (dbErr) throw dbErr;
+        const result = parsed && parsed.failed != null ? parsed.result : undefined;
+        await logAction('unit_test_report', serial, result ? `canada ${result}` : 'canada uploaded');
+        outcomes.push({ fileName: file.name, serial, status: 'paired', result, origin });
+      } catch (e) {
+        outcomes.push({ fileName: file.name, serial, status: 'error', message: (e as Error).message });
+      }
+      continue;
+    }
+
+    if (!parsed) {
+      outcomes.push({ fileName: file.name, serial, status: 'error', message: 'China test report must be the .md test-script output' });
       continue;
     }
 
@@ -129,7 +197,7 @@ export async function uploadTestReports(
       const path = `${serial}/${Date.now()}-${file.name}`;
       const { error: upErr } = await supabase.storage
         .from(BUCKET)
-        .upload(path, file, { contentType: 'text/markdown', upsert: false });
+        .upload(path, file, { contentType: contentTypeFor(file.name), upsert: false });
       if (upErr) throw upErr;
 
       const patch: Record<string, unknown> = {
@@ -154,7 +222,7 @@ export async function uploadTestReports(
         await logAction('unit_mac_duplicate', serial, `mac=${mac} also on ${macClash}`,
           { entityType: 'unit', unitSerial: serial });
       }
-      outcomes.push({ fileName: file.name, serial, status: 'paired', result: parsed.result, mac, macClash });
+      outcomes.push({ fileName: file.name, serial, status: 'paired', result: parsed.result, mac, macClash, origin });
     } catch (e) {
       outcomes.push({ fileName: file.name, serial, status: 'error', message: (e as Error).message });
     }
@@ -236,7 +304,9 @@ export async function openTestReport(path: string): Promise<void> {
     const res = await fetch(signedUrl);
     if (!res.ok) throw new Error(`Test report download failed (${res.status})`);
     const blob = await res.blob();
-    const url = URL.createObjectURL(new Blob([blob], { type: 'text/plain;charset=utf-8' }));
+    // PDFs (Canada reports) render natively; .md has no viewer, so plain text.
+    const type = path.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'text/plain;charset=utf-8';
+    const url = URL.createObjectURL(new Blob([blob], { type }));
     if (tab && !tab.closed) tab.location.replace(url);
     else window.location.assign(url);
   } catch (e) {

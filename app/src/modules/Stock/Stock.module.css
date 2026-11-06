@@ -1051,3 +1051,18 @@
   font-size: 11px;
   color: var(--color-error);
 }
+
+/* China / Canada test-report slot toggle + per-unit report slots (QC modal) */
+.reportOriginToggle { display: flex; gap: 6px; margin-bottom: 6px; flex-wrap: wrap; }
+.reportOriginBtn {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-ink-muted);
+  font-size: 11px; font-family: inherit;
+  padding: 4px 10px; cursor: pointer;
+}
+.reportOriginBtnActive { border-color: var(--color-info); color: var(--color-ink); font-weight: 600; }
+.reportSlot { margin-top: 6px; font-size: 11px; color: var(--color-ink-muted); display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.reportSlotLabel { font-weight: 600; color: var(--color-ink); }
+.reportSlotMissing { color: var(--color-error-strong); font-weight: 600; }

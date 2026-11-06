@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   STATUS_META, STATUS_ORDER, getStatusMeta, updateUnitStatus, updateUnitFields,
   linkUnitToCustomer, QC_CHECK_META,
@@ -11,7 +11,11 @@ import {
   fetchUnassignedQueueItems,
   type QueueItemForAssignment,
 } from '../../lib/fulfillment';
-import { openTestReport, normalizeMac } from '../../lib/testReports';
+import {
+  openTestReport, normalizeMac, uploadTestReports, isAcceptedReportFile,
+  TEST_REPORT_ACCEPT, TEST_REPORT_ORIGIN_LABEL,
+  type TestReportOrigin, type UploadOutcome,
+} from '../../lib/testReports';
 import { UnitTimeline } from '../../components/UnitTimeline';
 import styles from './Stock.module.css';
 
@@ -532,25 +536,26 @@ function QcEditorModal({
         <div className={styles.modalField}>
           <label className={styles.modalLabel}>Electrical check</label>
           <QcTri value={eCheck} onChange={setECheck} />
-          {unit.test_report_path && (
-            <div className={styles.reportLink}>
-              Report:{' '}
-              <button
-                type="button"
-                className={styles.reportOpenBtn}
-                onClick={() => {
-                  // Must not await before openTestReport — it claims the tab
-                  // synchronously so the popup blocker doesn't eat the click.
-                  openTestReport(unit.test_report_path!).catch(e => onError((e as Error).message));
-                }}
-              >
-                {unit.test_report_name ?? 'test report'} ↗
-              </button>
-              {unit.test_report_uploaded_at && (
-                <span className={styles.muted}> · {new Date(unit.test_report_uploaded_at).toLocaleDateString('en-US')}</span>
-              )}
-            </div>
-          )}
+          <TestReportSlot
+            serial={unit.serial}
+            origin="china"
+            required
+            path={unit.test_report_path}
+            name={unit.test_report_name}
+            uploadedAt={unit.test_report_uploaded_at}
+            onError={onError}
+            // The China report sets electrical_check server-side; mirror it
+            // here so "Save QC" doesn't write the stale value back over it.
+            onUploaded={o => { if (o.result) setECheck(o.result); }}
+          />
+          <TestReportSlot
+            serial={unit.serial}
+            origin="canada"
+            path={unit.canada_test_report_path ?? null}
+            name={unit.canada_test_report_name ?? null}
+            uploadedAt={unit.canada_test_report_uploaded_at ?? null}
+            onError={onError}
+          />
         </div>
 
         <div className={styles.modalField}>
@@ -581,6 +586,106 @@ function QcEditorModal({
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** One of a unit's two test-report slots in the QC modal: shows the attached
+ *  file (or "missing" for the mandatory China report) with an upload/replace
+ *  button. Uploading here attaches to this serial directly — no pairing. */
+function TestReportSlot({
+  serial, origin, required = false, path, name, uploadedAt, onError, onUploaded,
+}: {
+  serial: string;
+  origin: TestReportOrigin;
+  required?: boolean;
+  path: string | null;
+  name: string | null;
+  uploadedAt: string | null;
+  onError: (msg: string | null) => void;
+  onUploaded?: (o: UploadOutcome) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  // Optimistic copy of what was just uploaded, until realtime refreshes `unit`.
+  const [local, setLocal] = useState<{ path: string; name: string; at: string } | null>(null);
+  const shownPath = local?.path ?? path;
+  const shownName = local?.name ?? name;
+  const shownAt = local?.at ?? uploadedAt;
+
+  const onPick = async (files: FileList | null) => {
+    const file = files?.[0];
+    if (inputRef.current) inputRef.current.value = '';
+    if (!file) return;
+    if (!isAcceptedReportFile(file.name, origin)) {
+      onError(`${TEST_REPORT_ORIGIN_LABEL[origin]} must be ${TEST_REPORT_ACCEPT[origin].replace(',', ' or ')}`);
+      return;
+    }
+    setBusy(true); onError(null);
+    try {
+      const [o] = await uploadTestReports([file], new Set([serial]), new Map(), { origin, serial });
+      if (!o || o.status !== 'paired') throw new Error(o?.message ?? 'Upload failed');
+      // Path is generated inside the lib; the realtime refresh brings the real
+      // one. Until then the open link uses the previous path, so hide it.
+      setLocal({ path: '', name: file.name, at: new Date().toISOString() });
+      onUploaded?.(o);
+    } catch (e) {
+      onError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Once the unit row catches up with a newer upload, drop the optimistic copy.
+  useEffect(() => { setLocal(null); }, [path]);
+
+  return (
+    <div className={styles.reportSlot}>
+      <span className={styles.reportSlotLabel}>
+        {TEST_REPORT_ORIGIN_LABEL[origin]}{required ? ' (required)' : ' (optional)'}:
+      </span>
+      {shownName ? (
+        <>
+          {shownPath ? (
+            <button
+              type="button"
+              className={styles.reportOpenBtn}
+              onClick={() => {
+                // Must not await before openTestReport — it claims the tab
+                // synchronously so the popup blocker doesn't eat the click.
+                openTestReport(shownPath).catch(e => onError((e as Error).message));
+              }}
+            >
+              {shownName} ↗
+            </button>
+          ) : (
+            <span>{shownName}</span>
+          )}
+          {shownAt && (
+            <span className={styles.muted}>· {new Date(shownAt).toLocaleDateString('en-US')}</span>
+          )}
+        </>
+      ) : required ? (
+        <span className={styles.reportSlotMissing}>Missing</span>
+      ) : (
+        <span className={styles.muted}>None</span>
+      )}
+      <input
+        ref={inputRef}
+        type="file"
+        accept={TEST_REPORT_ACCEPT[origin]}
+        hidden
+        aria-label={`Upload ${TEST_REPORT_ORIGIN_LABEL[origin]}`}
+        onChange={e => void onPick(e.target.files)}
+      />
+      <button
+        type="button"
+        className={styles.reportOpenBtn}
+        disabled={busy}
+        onClick={() => inputRef.current?.click()}
+      >
+        {busy ? 'Uploading…' : shownName ? 'Replace' : 'Upload'}
+      </button>
     </div>
   );
 }
