@@ -1,6 +1,8 @@
 // sync-klaviyo-campaigns: pull email campaign performance into klaviyo_campaigns
 // for the Marketing → Email tab. Two Klaviyo calls:
-//   1. GET /api/campaigns  — names, status, send_time (email channel)
+//   1. GET /api/campaigns  — names, status, send_time, and the subject line
+//      (which lives on the campaign's email message, pulled via include) —
+//      email channel.
 //   2. POST /api/campaign-values-reports — per-campaign stats (opens, clicks,
 //      rates, revenue) over the last year, keyed to the "Placed Order" metric.
 //
@@ -70,23 +72,46 @@ Deno.serve(async (req: Request) => {
     return j({ error: `Klaviyo metrics request failed: ${(e as Error).message}` }, 502);
   }
 
-  // 2. Campaign names/status/send_time (email channel). Page through.
-  const meta = new Map<string, { name?: string; status?: string; send_time?: string }>();
+  // 2. Campaign names/status/send_time + subject line (email channel). The
+  //    subject is a property of the campaign's *message*, not the campaign, so
+  //    include=campaign-messages pulls the messages alongside and we resolve
+  //    each campaign's first message to its subject. Page through.
+  const meta = new Map<string, { name?: string; status?: string; send_time?: string; subject?: string }>();
   try {
     let url: string | null =
       'https://a.klaviyo.com/api/campaigns/?filter=' +
       encodeURIComponent("equals(messages.channel,'email')") +
-      '&fields%5Bcampaign%5D=name,status,send_time&sort=-created_at';
+      '&fields%5Bcampaign%5D=name,status,send_time' +
+      '&include=campaign-messages&fields%5Bcampaign-message%5D=definition' +
+      '&sort=-created_at';
     let pages = 0;
     while (url && pages < 20) {
       const res = await fetch(url, { headers: kHeaders() });
       if (!res.ok) return j({ error: `Klaviyo campaigns ${res.status}: ${(await res.text()).slice(0, 300)}` }, 502);
       const body = await res.json() as {
-        data?: Array<{ id: string; attributes?: { name?: string; status?: string; send_time?: string } }>;
+        data?: Array<{
+          id: string;
+          attributes?: { name?: string; status?: string; send_time?: string };
+          relationships?: { 'campaign-messages'?: { data?: Array<{ id: string }> } };
+        }>;
+        included?: Array<{ id: string; attributes?: { definition?: { content?: { subject?: string } } } }>;
         links?: { next?: string | null };
       };
+      // included is page-scoped: build the message→subject map for this page,
+      // then read each campaign's first message id out of it.
+      const subjectByMsg = new Map<string, string>();
+      for (const inc of body.included ?? []) {
+        const subj = inc.attributes?.definition?.content?.subject;
+        if (inc.id && typeof subj === 'string' && subj.trim()) subjectByMsg.set(inc.id, subj.trim());
+      }
       for (const c of body.data ?? []) {
-        meta.set(c.id, { name: c.attributes?.name, status: c.attributes?.status, send_time: c.attributes?.send_time });
+        const msgId = c.relationships?.['campaign-messages']?.data?.[0]?.id;
+        meta.set(c.id, {
+          name: c.attributes?.name,
+          status: c.attributes?.status,
+          send_time: c.attributes?.send_time,
+          subject: msgId ? subjectByMsg.get(msgId) : undefined,
+        });
       }
       url = body.links?.next ?? null;
       pages++;
@@ -137,6 +162,7 @@ Deno.serve(async (req: Request) => {
       return {
         campaign_id: id,
         name: m.name ?? null,
+        subject_line: m.subject ?? null,
         status: m.status ?? null,
         channel: 'email',
         send_time: m.send_time ?? null,
