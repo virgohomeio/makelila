@@ -58,6 +58,9 @@ export async function triggerKlaviyoEventsSync(): Promise<{ synced: number; scan
 export type KlaviyoCampaign = {
   campaign_id: string;
   name: string | null;
+  /** The email subject line recipients saw, from the campaign's message. NULL on
+   *  rows synced before the column existed (re-sync backfills them). */
+  subject_line: string | null;
   status: string | null;
   send_time: string | null;
   recipients: number | null;
