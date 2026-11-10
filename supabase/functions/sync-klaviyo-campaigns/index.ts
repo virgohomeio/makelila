@@ -82,7 +82,7 @@ Deno.serve(async (req: Request) => {
       'https://a.klaviyo.com/api/campaigns/?filter=' +
       encodeURIComponent("equals(messages.channel,'email')") +
       '&fields%5Bcampaign%5D=name,status,send_time' +
-      '&include=campaign-messages&fields%5Bcampaign-message%5D=definition' +
+      '&include=campaign-messages' +
       '&sort=-created_at';
     let pages = 0;
     while (url && pages < 20) {
@@ -94,14 +94,19 @@ Deno.serve(async (req: Request) => {
           attributes?: { name?: string; status?: string; send_time?: string };
           relationships?: { 'campaign-messages'?: { data?: Array<{ id: string }> } };
         }>;
-        included?: Array<{ id: string; attributes?: { definition?: { content?: { subject?: string } } } }>;
+        included?: Array<{ id: string; attributes?: {
+          definition?: { content?: { subject?: string } };
+          content?: { subject?: string };
+        } }>;
         links?: { next?: string | null };
       };
       // included is page-scoped: build the message→subject map for this page,
-      // then read each campaign's first message id out of it.
+      // then read each campaign's first message id out of it. The subject sits
+      // under definition.content.subject on some API revisions and content.subject
+      // on others, so read both rather than pin to one shape.
       const subjectByMsg = new Map<string, string>();
       for (const inc of body.included ?? []) {
-        const subj = inc.attributes?.definition?.content?.subject;
+        const subj = inc.attributes?.definition?.content?.subject ?? inc.attributes?.content?.subject;
         if (inc.id && typeof subj === 'string' && subj.trim()) subjectByMsg.set(inc.id, subj.trim());
       }
       for (const c of body.data ?? []) {
