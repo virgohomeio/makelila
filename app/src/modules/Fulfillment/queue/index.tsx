@@ -47,6 +47,9 @@ type Order = {
   // "Shipment Received" button; it is the whole basis of the Received rail.
   // select('*') already returns it.
   delivered_at: string | null;
+  // Received with no date on record (pre-October 2026 backfill). Lands in the
+  // Received rail's "Date unknown" bucket rather than under an invented month.
+  received_undated?: boolean;
   // Replacements only: what is actually in the box, and the case it came from.
   // select('*') already returns these; they were simply never read here, which
   // is why the card called a $24 lid a LILA Pro.
@@ -137,13 +140,15 @@ export default function Queue() {
     // badge on Shipped: the carrier's "delivered" scan is not what fills it —
     // an operator confirming the arrival is.
     const everythingShipped = [...fulfilled, ...alreadyShipped];
-    const receivedOf = (r: FulfillmentQueueRow) =>
-      orderLookup.get(r.order_id)?.delivered_at ?? null;
+    const receivedOf = (r: FulfillmentQueueRow) => {
+      const o = orderLookup.get(r.order_id);
+      return !!(o?.delivered_at || o?.received_undated);
+    };
     return {
       readyRows: stillOurs,
       pickupRows: pickup,
       shippedRows: everythingShipped.filter(r => !receivedOf(r)),
-      receivedRows: everythingShipped.filter(r => !!receivedOf(r)),
+      receivedRows: everythingShipped.filter(r => receivedOf(r)),
     };
   }, [ready, fulfilled, orderLookup, shippedMarks, goorooshipSends, isEzTransRow]);
 

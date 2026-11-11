@@ -75,6 +75,11 @@ export type Order = {
   shipping_cost_currency: string | null;
   shipped_at: string | null;
   delivered_at: string | null;
+  /** Received with no arrival date on record — set in bulk for boxes that
+   *  shipped before October 2026, where nobody knows the day it landed.
+   *  Counts as received everywhere the Received rail looks; delivered_at
+   *  stays null so no invented date reaches the customer timeline. */
+  received_undated?: boolean;
   // Backlog #55 follow-up — carrier tracking. Populated by the Fulfillment
   // step OR backfilled from the fulfillment Excel for replacement orders.
   // Per operator: tracking_num IS NOT NULL ⇒ shipped, NULL ⇒ to be shipped.

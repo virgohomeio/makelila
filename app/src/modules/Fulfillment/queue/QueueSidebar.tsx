@@ -301,6 +301,9 @@ export function QueueSidebar({
           <div className={`${styles.rowDue} ${styles.done}`}>
             ✓ Received {new Date(receivedOn).toLocaleDateString('en-US')}
           </div>
+        ) : tab === 'received' ? (
+          // Received, but nobody recorded the day (the pre-October backfill).
+          <div className={`${styles.rowDue} ${styles.done}`}>✓ Received</div>
         ) : (
           <div className={dueClass(r.due_date, fulfilled)}>
             {dueLabel(r.due_date, fulfilled)}
