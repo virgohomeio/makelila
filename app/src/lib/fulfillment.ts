@@ -97,6 +97,12 @@ export type FulfillmentQueueRow = {
 
   fulfilled_at: string | null;
   fulfilled_by: string | null;
+  // Whether the Shopify order was marked fulfilled too
+  // (20261117120000_fulfillment_queue_shopify_sync.sql). Written by the
+  // push-shopify-fulfillments edge function, which confirmDock calls. Optional
+  // for the same apply-by-hand reason as the columns above.
+  shopify_fulfilled_at?: string | null;
+  shopify_sync_error?: string | null;
 
   due_date: string | null;
   priority: boolean;
@@ -991,6 +997,55 @@ export async function confirmDock(queueId: string): Promise<void> {
     if (shelfErr) console.warn('shelf slot release failed (non-fatal):', shelfErr.message);
   }
   await logAction('fq_dock_confirmed', queueId, 'Pickup confirmed — fulfilled');
+  // Mark the Shopify order fulfilled too. Fire-and-forget: the box has left
+  // whatever Shopify says, so a Shopify outage or a missing token scope must
+  // never undo or block the pickup confirmation. The edge function records the
+  // outcome on the row, and the Fulfilled panel offers a retry on failure.
+  void pushShopifyFulfillment(queueId).catch(err =>
+    console.warn('Shopify fulfillment push failed (non-fatal):', (err as Error).message));
+}
+
+export type ShopifyPushOutcome =
+  | { status: 'pushed'; order_ref: string | null }
+  | { status: 'already_fulfilled'; order_ref: string | null }
+  | { status: 'skipped'; reason: string; order_ref: string | null }
+  | { status: 'failed'; error: string; order_ref: string | null };
+
+/** Marks this queue row's Shopify order as fulfilled, with the row's tracking
+ *  number and carrier. Called automatically from confirmDock and by the retry
+ *  button on the Fulfilled panel. Replacements are skipped server-side — they
+ *  are makeLILA-only orders. Direct fetch for the same reason as
+ *  sendFulfillmentEmail: functions.invoke hides the error body on non-2xx. */
+export async function pushShopifyFulfillment(queueId: string): Promise<ShopifyPushOutcome> {
+  const { data: { session } } = await supabase.auth.getSession();
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/push-shopify-fulfillments`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      apikey: SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${session?.access_token ?? SUPABASE_ANON_KEY}`,
+    },
+    body: JSON.stringify({ queue_id: queueId }),
+  });
+  const bodyText = await res.text();
+  let parsed: (Partial<ShopifyPushOutcome> & { error?: string; reason?: string }) | null = null;
+  try { parsed = JSON.parse(bodyText); } catch { /* keep raw */ }
+  if (!res.ok) {
+    throw new Error(`Shopify sync failed (${res.status}): ${parsed?.error ?? bodyText}`);
+  }
+  if (!parsed?.status) throw new Error('Shopify sync: response was not understood');
+  const outcome = parsed as ShopifyPushOutcome;
+  const ref = outcome.order_ref ?? '';
+  if (outcome.status === 'pushed') {
+    await logAction('fq_shopify_fulfilled', queueId, `Marked ${ref} fulfilled in Shopify`);
+  } else if (outcome.status === 'already_fulfilled') {
+    await logAction('fq_shopify_fulfilled', queueId, `${ref} was already fulfilled in Shopify`);
+  } else if (outcome.status === 'failed') {
+    await logAction('fq_shopify_sync_failed', queueId, `Shopify sync failed for ${ref}: ${outcome.error}`);
+  } else if (!outcome.reason.startsWith('replacement')) {
+    await logAction('fq_shopify_sync_failed', queueId, `Shopify sync skipped for ${ref}: ${outcome.reason}`);
+  }
+  return outcome;
 }
 
 /** Step 5: a late correction to the starter tracking number. Step 3 is where
