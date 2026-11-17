@@ -3018,9 +3018,9 @@ function FinanceApproveModal({
           </div>
         )}
         {nonDefectDiscard && (
-          <div className={styles.financeModalWarn}>
-            ⚠ Customer discarded the unit, but the return isn't recorded as a defect or shipping damage
-            — the restocking fee applies by default. Waive it below if the discard was approved as a defect.
+          <div className={styles.modalHint} style={{ marginBottom: 12 }}>
+            ✓ Ready to approve — the customer discarded the unit. It isn't recorded as a defect, so the
+            $50 restocking fee is pre-filled below; set it to 0 if you're waiving it. Approve button is at the bottom.
           </div>
         )}
         {localError && <div className={styles.financeModalError}>{localError}</div>}
