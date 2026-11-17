@@ -11,7 +11,7 @@ import {
   compileCancellationToRefund, dismissCancellationRefund, type OrderCancellation,
   cancelCancellationRequest, cancelRefundRequest, canCancelRefundRequest,
   cancelReturnRequest, canCancelReturnRequest,
-  setReturnDisposition, updateReturnStatus,
+  setReturnDisposition, updateReturnStatus, returnStatusAllowsRefund,
   useCaseAttachments, uploadCaseAttachment, deleteCaseAttachment, returnAttachmentSignedUrl,
   RETURN_ATTACH_INPUT_ACCEPT, RETURN_ATTACH_CATEGORIES, RETURN_ATTACH_ALLOWED_MIME,
   RETURN_CATEGORIES, RETURN_CATEGORY_META, manualRefundReason, REIMBURSEMENT_REASON_PREFIX,
@@ -2934,14 +2934,19 @@ function FinanceApproveModal({
   const [busy, setBusy] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
 
-  const FINANCE_OK_STATUSES = ['received', 'inspected', 'refunded', 'closed'];
   const DEFECTIVE_CATEGORIES: ReturnCategory[] = ['product_defect', 'shipping_damage'];
   const isDefectiveDiscard =
     linkedReturn?.status === 'discarded' && (
       (linkedReturn.return_category != null && DEFECTIVE_CATEGORIES.includes(linkedReturn.return_category)) ||
       linkedReturn.return_reasons.some(r => /defect|crack|malfunction|hardware|broken|damag/i.test(r))
     );
-  const returnNotReceived = linkedReturn != null && !FINANCE_OK_STATUSES.includes(linkedReturn.status) && !isDefectiveDiscard;
+  // Gate on the same rule financeApprove() enforces (any discarded return is
+  // refundable). isDefectiveDiscard only decides the fee defaults below — it
+  // used to also block approval, which stranded non-defect discards in
+  // Finance Review after the manager had already approved them (Raymond
+  // Keetch #1216, software_issue, 2026-11-17).
+  const returnNotReceived = linkedReturn != null && !returnStatusAllowsRefund(linkedReturn.status);
+  const nonDefectDiscard = linkedReturn?.status === 'discarded' && !isDefectiveDiscard;
 
   const amount = Number(amountStr);
   const amountChanged = !Number.isNaN(amount) && Number(amount.toFixed(2)) !== Number(original.toFixed(2));
@@ -3010,6 +3015,12 @@ function FinanceApproveModal({
           <div className={styles.financeModalWarn}>
             ⚠ Linked return is in "<strong>{linkedReturn!.status}</strong>" status — refund can only
             be processed after the unit is received, or marked as discarded due to a confirmed defect or damage.
+          </div>
+        )}
+        {nonDefectDiscard && (
+          <div className={styles.financeModalWarn}>
+            ⚠ Customer discarded the unit, but the return isn't recorded as a defect or shipping damage
+            — the restocking fee applies by default. Waive it below if the discard was approved as a defect.
           </div>
         )}
         {localError && <div className={styles.financeModalError}>{localError}</div>}
