@@ -1,0 +1,453 @@
+<title>Profitability Tab Status Update</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=Public+Sans:wght@400;600&family=JetBrains+Mono:wght@400;600&display=swap">
+
+<style>
+  :root {
+    --paper:#F5F6F3; --card:#FFFFFF; --card-alt:#ECEEE9;
+    --ink:#14181A; --ink-2:#39423E; --muted:#5A6560;
+    --rule:#DCE0DA; --rule-hard:#BFC6BD;
+    --accent:#1F5F5B; --accent-bg:#DFEBE9;
+    --ok:#2E6B4A; --ok-bg:#E1EDE5;
+    --warn:#8A5A0F; --warn-bg:#F5EAD5;
+    --crit:#A32E23; --crit-bg:#F6E2DF;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper:#0E1211; --card:#161B19; --card-alt:#1D2321;
+      --ink:#E8ECE8; --ink-2:#C2CAC5; --muted:#8A958F;
+      --rule:#262E2B; --rule-hard:#3A443F;
+      --accent:#6FBDB4; --accent-bg:#17302E;
+      --ok:#6FBE93; --ok-bg:#15291F;
+      --warn:#DCA84F; --warn-bg:#2C2415;
+      --crit:#E6867B; --crit-bg:#311D1B;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper:#0E1211; --card:#161B19; --card-alt:#1D2321;
+    --ink:#E8ECE8; --ink-2:#C2CAC5; --muted:#8A958F;
+    --rule:#262E2B; --rule-hard:#3A443F;
+    --accent:#6FBDB4; --accent-bg:#17302E;
+    --ok:#6FBE93; --ok-bg:#15291F;
+    --warn:#DCA84F; --warn-bg:#2C2415;
+    --crit:#E6867B; --crit-bg:#311D1B;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--paper); color: var(--ink);
+    font-family: "Public Sans", ui-sans-serif, system-ui, sans-serif;
+    font-size: 16px; line-height: 1.5; margin: 0; padding: 0;
+    -webkit-font-smoothing: antialiased;
+    scroll-snap-type: y proximity;
+  }
+
+  .slide {
+    scroll-snap-align: start;
+    min-height: 100vh;
+    display: flex; flex-direction: column; justify-content: center;
+    padding: 72px 40px 64px;
+    border-bottom: 1px solid var(--rule);
+    position: relative;
+  }
+  .inner { max-width: 1000px; margin: 0 auto; width: 100%; }
+
+  .snum {
+    position: absolute; top: 26px; right: 32px;
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 11px; font-weight: 600; letter-spacing: .1em;
+    color: var(--muted);
+  }
+  .eyebrow {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 11px; font-weight: 600; letter-spacing: .14em;
+    text-transform: uppercase; color: var(--accent); margin: 0 0 16px;
+  }
+
+  h1 {
+    font-family: "Bricolage Grotesque", ui-sans-serif, sans-serif;
+    font-weight: 800; font-size: clamp(2.4rem, 6.5vw, 4.4rem);
+    line-height: 1.0; letter-spacing: -.028em; margin: 0 0 24px;
+    text-wrap: balance;
+  }
+  h2 {
+    font-family: "Bricolage Grotesque", ui-sans-serif, sans-serif;
+    font-weight: 700; font-size: clamp(1.7rem, 4vw, 2.6rem);
+    line-height: 1.08; letter-spacing: -.02em; margin: 0 0 10px;
+    text-wrap: balance;
+  }
+  .sub { font-size: 1.05rem; color: var(--muted); margin: 0 0 30px; max-width: 62ch; }
+
+  /* Title slide */
+  .title-meta {
+    display: flex; flex-wrap: wrap; gap: 10px 30px; margin-top: 34px;
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 12.5px; color: var(--muted);
+  }
+  .title-meta b { color: var(--ink-2); font-weight: 600; }
+  .flag {
+    display: inline-block; background: var(--warn-bg); color: var(--warn);
+    border: 1px solid var(--warn); border-radius: 4px;
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 12px; font-weight: 600; letter-spacing: .05em;
+    text-transform: uppercase; padding: 8px 14px; margin-top: 30px;
+  }
+
+  /* KPIs */
+  .kpis {
+    display: grid; gap: 1px; background: var(--rule);
+    border: 1px solid var(--rule); border-radius: 6px; overflow: hidden;
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  }
+  .kpi { background: var(--card); padding: 20px 20px 22px; }
+  .kpi-l {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 10.5px; font-weight: 600; letter-spacing: .09em;
+    text-transform: uppercase; color: var(--muted); margin: 0 0 10px;
+  }
+  .kpi-v {
+    font-family: "Bricolage Grotesque", ui-sans-serif, sans-serif;
+    font-weight: 700; font-size: 1.85rem; line-height: 1;
+    letter-spacing: -.022em; font-variant-numeric: tabular-nums;
+  }
+  .kpi-v.bad { color: var(--crit); } .kpi-v.good { color: var(--ok); }
+  .kpi-n { font-size: 12.5px; color: var(--muted); margin-top: 9px; }
+
+  /* Chips */
+  .chip {
+    display: inline-block;
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 10.5px; font-weight: 600; letter-spacing: .05em;
+    text-transform: uppercase; padding: 3px 8px; border-radius: 3px;
+    white-space: nowrap; border: 1px solid transparent; line-height: 1.4;
+  }
+  .chip.ok{background:var(--ok-bg);color:var(--ok);border-color:var(--ok);}
+  .chip.warn{background:var(--warn-bg);color:var(--warn);border-color:var(--warn);}
+  .chip.crit{background:var(--crit-bg);color:var(--crit);border-color:var(--crit);}
+  .chip.off{background:var(--card-alt);color:var(--muted);border-color:var(--rule-hard);}
+
+  /* Lists */
+  ul.big { list-style: none; padding: 0; margin: 0; display: grid; gap: 1px;
+           background: var(--rule); border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; }
+  ul.big li {
+    background: var(--card); padding: 15px 20px;
+    display: grid; grid-template-columns: 1fr auto; gap: 8px 18px; align-items: center;
+  }
+  ul.big li b { font-weight: 600; font-size: 1.02rem; }
+  ul.big li span.why { grid-column: 1 / -1; color: var(--muted); font-size: 13.5px; margin-top: -2px; }
+  .amt {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-variant-numeric: tabular-nums; font-size: 14.5px; color: var(--ink-2);
+    white-space: nowrap;
+  }
+
+  /* Tables */
+  .tw { overflow-x: auto; border: 1px solid var(--rule); border-radius: 6px; background: var(--card); }
+  table { border-collapse: collapse; width: 100%; font-size: 14.5px; min-width: 620px; }
+  th, td { text-align: left; padding: 11px 14px; border-bottom: 1px solid var(--rule); vertical-align: middle; }
+  thead th {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 10.5px; font-weight: 600; letter-spacing: .08em;
+    text-transform: uppercase; color: var(--muted);
+    background: var(--card-alt); border-bottom: 1px solid var(--rule-hard);
+  }
+  tbody tr:last-child td { border-bottom: none; }
+  td.num, th.num { text-align: right; font-family: "JetBrains Mono", ui-monospace, monospace;
+                   font-variant-numeric: tabular-nums; white-space: nowrap; }
+  tr.total td { background: var(--card-alt); font-weight: 600; border-top: 2px solid var(--rule-hard); }
+  .neg { color: var(--crit); } .pos { color: var(--ok); }
+  .mono { font-family: "JetBrains Mono", ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+
+  /* Two-column split */
+  .split { display: grid; gap: 20px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+  .panel { background: var(--card); border: 1px solid var(--rule); border-radius: 6px; padding: 22px 24px; }
+  .panel.ok   { border-top: 4px solid var(--ok); }
+  .panel.crit { border-top: 4px solid var(--crit); }
+  .panel h3 {
+    font-family: "Bricolage Grotesque", ui-sans-serif, sans-serif;
+    font-weight: 700; font-size: 1.16rem; margin: 0 0 14px; letter-spacing: -.01em;
+  }
+  .panel ul { padding-left: 19px; margin: 0; }
+  .panel li { margin: 8px 0; font-size: 15px; }
+
+  .legend { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(215px, 1fr)); }
+  .legend div { background: var(--card); border: 1px solid var(--rule); border-radius: 6px; padding: 16px 18px; }
+  .legend p { margin: 10px 0 0; font-size: 14px; color: var(--ink-2); }
+
+  .statement {
+    font-family: "Bricolage Grotesque", ui-sans-serif, sans-serif;
+    font-weight: 600; font-size: clamp(1.25rem, 2.9vw, 1.8rem);
+    line-height: 1.28; letter-spacing: -.014em; text-wrap: balance;
+    border-top: 2px solid var(--ink); border-bottom: 2px solid var(--ink);
+    padding: 26px 0; margin: 0;
+  }
+  code {
+    font-family: "JetBrains Mono", ui-monospace, monospace; font-size: .87em;
+    background: var(--card-alt); padding: 1.5px 5px; border-radius: 3px; border: 1px solid var(--rule);
+  }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  @media (max-width: 640px) { .slide { padding: 60px 22px 52px; } }
+</style>
+
+<!-- 1 ─ Title ────────────────────────────────────────────── -->
+<section class="slide">
+  <div class="inner">
+    <p class="eyebrow">makeLILA · Customers → Profitability</p>
+    <h1>What the Profitability tab knows, and what it doesn't</h1>
+    <p class="sub">A breakdown of every cost bucket: what is measured, what is estimated, and what still needs verifying.</p>
+    <div class="title-meta">
+      <span><b>Date</b> 28 Aug 2026</span>
+      <span><b>Scope</b> All-time, team accounts excluded</span>
+      <span><b>Currency</b> CAD</span>
+    </div>
+    <div class="flag">Status update · provisional · not finance-verified</div>
+  </div>
+</section>
+
+<!-- 2 ─ Headline ─────────────────────────────────────────── -->
+<section class="slide"><span class="snum">02</span>
+  <div class="inner">
+    <h2>Where we stand</h2>
+    <p class="sub">The tab is built and running against live data. The margin figure is not yet reliable.</p>
+    <div class="kpis">
+      <div class="kpi"><p class="kpi-l">Customers</p><div class="kpi-v">335</div><p class="kpi-n">179 with revenue</p></div>
+      <div class="kpi"><p class="kpi-l">Revenue, net of tax</p><div class="kpi-v">$199,891.77</div><p class="kpi-n">Measured</p></div>
+      <div class="kpi"><p class="kpi-l">Variable cost</p><div class="kpi-v">$215,572.08</div><p class="kpi-n">Eleven buckets</p></div>
+      <div class="kpi"><p class="kpi-l">Contribution margin</p><div class="kpi-v bad">−$15,680.31</div><p class="kpi-n">−7.8% · not reliable yet</p></div>
+      <div class="kpi"><p class="kpi-l">Acquisition cost</p><div class="kpi-v bad">$0.00</div><p class="kpi-n">Spend allocates to nobody</p></div>
+      <div class="kpi"><p class="kpi-l">Warranty claim rate</p><div class="kpi-v">23.5%</div><p class="kpi-n">Measured</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- 3 ─ Views ────────────────────────────────────────────── -->
+<section class="slide"><span class="snum">03</span>
+  <div class="inner">
+    <h2>What is live on the tab</h2>
+    <p class="sub">Five views, all rendering against live data.</p>
+    <ul class="big">
+      <li><b>Overview</b> — KPIs, margin waterfall, profit distribution, best/worst regions <span class="chip warn">Live, caveated</span></li>
+      <li><b>Geography</b> — choropleth map on real province and state outlines <span class="chip ok">Live</span></li>
+      <li><b>Channels &amp; segments</b> — margin by acquisition channel and purchase volume <span class="chip warn">Live, CAC blank</span></li>
+      <li><b>Cohorts</b> — month and quarter cohorts by first sale <span class="chip ok">Live</span></li>
+      <li><b>Customers</b> — per-customer table with full cost drill-down <span class="chip ok">Live</span></li>
+    </ul>
+  </div>
+</section>
+
+<!-- 4 ─ Key ──────────────────────────────────────────────── -->
+<section class="slide"><span class="snum">04</span>
+  <div class="inner">
+    <h2>How to read every number</h2>
+    <p class="sub">The tab marks each figure with its basis. A cost we have not measured is never shown as if we had.</p>
+    <div class="legend">
+      <div><span class="chip ok">Measured</span><p>Summed from bills and records. Safe to quote.</p></div>
+      <div><span class="chip warn">Estimated</span><p>A rate × a quantity. The rate is an assumption set by hand.</p></div>
+      <div><span class="chip off">Unpriced</span><p>No rate set, so it reads $0. Margin is an upper bound.</p></div>
+      <div><span class="chip crit">Needs fixing</span><p>Live and displayed, but known to be incorrect.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- 5 ─ Buckets ──────────────────────────────────────────── -->
+<section class="slide"><span class="snum">05</span>
+  <div class="inner">
+    <h2>The eleven cost buckets</h2>
+    <p class="sub">Every dollar belongs to exactly one bucket. Together they are the whole of variable cost.</p>
+    <div class="tw"><table>
+      <thead><tr><th>Bucket</th><th class="num">Amount</th><th>Source</th><th>Basis</th></tr></thead>
+      <tbody>
+        <tr><td>Product COGS</td><td class="num">$150,872.17</td><td>Batch actuals, or the build schedule</td><td><span class="chip warn">79% estimated</span></td></tr>
+        <tr><td>Shipping</td><td class="num">$19,293.18</td><td>Freightcom invoices + hand-entered legacy freight</td><td><span class="chip warn">Incomplete</span></td></tr>
+        <tr><td>Warranty</td><td class="num">$14,924.02</td><td>Cost of replacement orders</td><td><span class="chip warn">Part estimated</span></td></tr>
+        <tr><td>Refunds</td><td class="num">$21,306.17</td><td>Refund approvals</td><td><span class="chip ok">Measured</span></td></tr>
+        <tr><td>Support labour</td><td class="num">$1,855.91</td><td>Diagnosis call minutes × hourly rate</td><td><span class="chip warn">Estimated</span></td></tr>
+        <tr><td>Return handling</td><td class="num">$5,367.27</td><td>Stocking + inspection + return freight</td><td><span class="chip warn">Estimated</span></td></tr>
+        <tr><td>Payment fees</td><td class="num">$0.00</td><td>Rate not set</td><td><span class="chip off">Unpriced</span></td></tr>
+        <tr><td>Sales commission</td><td class="num">$0.00</td><td>Rate not set</td><td><span class="chip off">Unpriced</span></td></tr>
+        <tr><td>Installation</td><td class="num">$0.00</td><td>Self-install, so likely genuinely nil</td><td><span class="chip off">Unpriced</span></td></tr>
+        <tr><td>Consumables &amp; parts</td><td class="num">$1,811.46</td><td>Retail purchases shipped to customers</td><td><span class="chip ok">Measured</span></td></tr>
+        <tr><td>3PL handling</td><td class="num">$141.90</td><td>FlexSpace contracted rate card</td><td><span class="chip warn">Estimated</span></td></tr>
+        <tr class="total"><td>Total variable cost</td><td class="num">$215,572.08</td><td>Revenue less cost = <b class="neg">−$15,680.31</b></td><td><span class="chip warn">Mixed</span></td></tr>
+      </tbody>
+    </table></div>
+  </div>
+</section>
+
+<!-- 6 ─ Accurate ─────────────────────────────────────────── -->
+<section class="slide"><span class="snum">06</span>
+  <div class="inner">
+    <h2>Accurate today</h2>
+    <p class="sub">Measured from records. Safe to present.</p>
+    <ul class="big">
+      <li><b>Revenue, discounts and tax</b><span class="amt">$199,891.77 net</span></li>
+      <li><b>Refunds</b> — 18 approvals, all settled<span class="amt">$21,306.17</span></li>
+      <li><b>Consumables and parts</b> — 78 items<span class="amt">$1,811.46</span></li>
+      <li><b>Freight where invoiced</b> — 169 invoiced charges on file<span class="amt">$19,293.18</span></li>
+      <li><b>Warranty claim rate</b><span class="amt">23.5%</span></li>
+      <li><b>US vs Canada profitability split</b><span class="amt">robust</span></li>
+      <li><b>Model structure</b> — eleven buckets, no double counting<span class="amt">tested</span></li>
+    </ul>
+  </div>
+</section>
+
+<!-- 7 ─ Estimated ────────────────────────────────────────── -->
+<section class="slide"><span class="snum">07</span>
+  <div class="inner">
+    <h2>Live, but resting on assumptions</h2>
+    <p class="sub">Real arithmetic on a rate somebody set by hand. Each needs sign-off.</p>
+    <ul class="big">
+      <li><b>Product COGS</b><span class="chip warn">Needs batch actuals</span>
+        <span class="why">Only 72 of 214 orders use real build cost. The other 142 use the roadmap schedule — 79% of COGS dollars.</span></li>
+      <li><b>Support labour rate</b><span class="chip warn">$75/hr, unconfirmed</span>
+        <span class="why">A blended person-hour never reconciled to payroll.</span></li>
+      <li><b>Return handling rates</b><span class="chip warn">$50 + 1hr, unconfirmed</span>
+        <span class="why">Stocking fee and inspection time are both assumptions. Return freight is missing for most returns.</span></li>
+      <li><b>3PL handling</b><span class="chip warn">No invoice reconciled</span>
+        <span class="why">Contracted rate card applied to 22 orders. Never checked against a FlexSpace bill.</span></li>
+      <li><b>Exchange rate</b><span class="chip warn">One fixed rate</span>
+        <span class="why">A single hand-set rate applied to all history, so older USD orders are restated at today's rate.</span></li>
+    </ul>
+  </div>
+</section>
+
+<!-- 8 ─ Unpriced ─────────────────────────────────────────── -->
+<section class="slide"><span class="snum">08</span>
+  <div class="inner">
+    <h2>Real costs currently priced at zero</h2>
+    <p class="sub">Wired end-to-end, showing $0 because no rate exists. Margin is an upper bound until they are set.</p>
+    <ul class="big">
+      <li><b>Payment processing fees</b><span class="amt">≈ $6,697 missing</span>
+        <span class="why">Needed: a blended rate across Shopify Payments, Sezzle and QuickBooks.</span></li>
+      <li><b>Sales commission</b><span class="amt">unknown</span>
+        <span class="why">Needed: a percentage of revenue, or written confirmation it is nil.</span></li>
+      <li><b>Installation</b><span class="amt">likely $0</span>
+        <span class="why">LILA ships self-install, so zero is plausibly correct. Needs confirming.</span></li>
+    </ul>
+    <p class="sub" style="margin-top:26px;margin-bottom:0">
+      All three are a one-line update to <code>profitability_rates</code>. No code change, no deploy.
+    </p>
+  </div>
+</section>
+
+<!-- 9 ─ Wrong ────────────────────────────────────────────── -->
+<section class="slide"><span class="snum">09</span>
+  <div class="inner">
+    <h2>Known to be wrong</h2>
+    <p class="sub">Two issues. Both are being displayed today and both need fixing before the number is used.</p>
+    <ul class="big">
+      <li><b>Instalment orders are each charged a full machine's build cost</b><span class="chip crit">≈ $19,511 overstated</span>
+        <span class="why">Monthly payment plans arrive as separate orders, and nothing distinguishes an instalment from a full purchase. Affects 16 customers across 44 orders. Correcting it moves the headline margin from −$15,680 to roughly +$3,831. It also inflates the freight gap and distorts revenue per order.</span></li>
+      <li><b>Acquisition cost is $0 for every customer</b><span class="chip crit">$69,133.81 stranded</span>
+        <span class="why">The Meta sync pulls lifetime campaign totals instead of a monthly breakdown, so all spend collapses into a single month in which no customer was acquired. CAC, LTV:CAC and payback are blank across the whole tab.</span></li>
+    </ul>
+  </div>
+</section>
+
+<!-- 10 ─ Gaps ────────────────────────────────────────────── -->
+<section class="slide"><span class="snum">10</span>
+  <div class="inner">
+    <h2>Data still missing</h2>
+    <p class="sub">Not wrong, but incomplete — each leaves a number weaker than it should be.</p>
+    <div class="tw"><table>
+      <thead><tr><th>Gap</th><th class="num">Scale</th><th>Effect</th></tr></thead>
+      <tbody>
+        <tr><td>Shipped orders with no freight on file</td><td class="num">62 orders</td><td>Freight understated; imputed at nothing</td></tr>
+        <tr><td>Spend feeds for non-Meta channels</td><td class="num">73 customers</td><td>No CAC for organic search, referral, direct, email</td></tr>
+        <tr><td>Sale orders with no attribution</td><td class="num">16 of 214</td><td>No channel to allocate spend against</td></tr>
+        <tr><td>Shipped units not linked to an order</td><td class="num">95 of 176</td><td>Per-unit metrics have no reliable denominator</td></tr>
+        <tr><td>Recoverable HST inside refunds</td><td class="num">≈ $2,200</td><td>Refunded customers look worse than they are</td></tr>
+        <tr><td>Orders costed before they ship</td><td class="num">122 pending</td><td>$99,228 of COGS recognised ahead of fulfilment</td></tr>
+      </tbody>
+    </table></div>
+  </div>
+</section>
+
+<!-- 11 ─ Geography ───────────────────────────────────────── -->
+<section class="slide"><span class="snum">11</span>
+  <div class="inner">
+    <h2>Geography</h2>
+    <p class="sub">The clearest signal on the tab, and the one that survives the caveats.</p>
+    <div class="kpis" style="margin-bottom:22px">
+      <div class="kpi"><p class="kpi-l">United States</p><div class="kpi-v good">+$32,959</div><p class="kpi-n">98 customers · +26.8% margin</p></div>
+      <div class="kpi"><p class="kpi-l">Canada</p><div class="kpi-v bad">−$48,139</div><p class="kpi-n">163 customers · −62.4% margin</p></div>
+      <div class="kpi"><p class="kpi-l">Ontario alone</p><div class="kpi-v bad">−$20,785</div><p class="kpi-n">112 customers · biggest single drag</p></div>
+    </div>
+    <div class="tw"><table>
+      <thead><tr><th>Strongest regions</th><th class="num">Per customer</th><th>Weakest regions</th><th class="num">Per customer</th></tr></thead>
+      <tbody>
+        <tr><td>Virginia</td><td class="num pos">+$933</td><td>Manitoba</td><td class="num neg">−$3,486</td></tr>
+        <tr><td>New York</td><td class="num pos">+$617</td><td>British Columbia</td><td class="num neg">−$580</td></tr>
+        <tr><td>Florida</td><td class="num pos">+$488</td><td>Alberta</td><td class="num neg">−$232</td></tr>
+        <tr><td>Texas</td><td class="num pos">+$303</td><td>Connecticut</td><td class="num neg">−$188</td></tr>
+        <tr><td>Quebec</td><td class="num pos">+$293</td><td>Ontario</td><td class="num neg">−$186</td></tr>
+      </tbody>
+    </table></div>
+    <p class="sub" style="margin-top:22px;margin-bottom:0">
+      <b>Caveat:</b> Manitoba and British Columbia are distorted by the instalment issue. The US vs Canada
+      split can be presented; individual small-province rankings cannot.
+    </p>
+  </div>
+</section>
+
+<!-- 12 ─ Asks ────────────────────────────────────────────── -->
+<section class="slide"><span class="snum">12</span>
+  <div class="inner">
+    <h2>What we need</h2>
+    <p class="sub">In impact order.</p>
+    <div class="tw"><table>
+      <thead><tr><th class="num">#</th><th>Needed</th><th>Owner</th></tr></thead>
+      <tbody>
+        <tr><td class="num">1</td><td>A flag on orders identifying an instalment and linking it to its parent purchase</td><td>Eng + Shopify</td></tr>
+        <tr><td class="num">2</td><td>Re-run the Meta spend sync with a monthly breakdown</td><td>Eng</td></tr>
+        <tr><td class="num">3</td><td>A blended payment-processing rate and a commission rate</td><td>Finance</td></tr>
+        <tr><td class="num">4</td><td>Actual landed build cost per batch for the remaining 142 orders</td><td>Manufacturing</td></tr>
+        <tr><td class="num">5</td><td>Freightcom invoice export for the uncosted shipped orders</td><td>Ops</td></tr>
+        <tr><td class="num">6</td><td>Monthly spend for non-Meta channels</td><td>Marketing</td></tr>
+        <tr><td class="num">7</td><td>Sign-off on the hand-set rates: hourly, stocking, inspection, FX</td><td>Finance</td></tr>
+        <tr><td class="num">8</td><td>One FlexSpace invoice to reconcile the 3PL rate card</td><td>Finance</td></tr>
+        <tr><td class="num">9</td><td>Policy calls: is refunded HST recoverable, is cost recognised at order or at ship, is FX fixed or at order date</td><td>Finance</td></tr>
+        <tr><td class="num">10</td><td>Link shipped units to their order; UTMs on the 16 unattributed orders</td><td>Data cleanup</td></tr>
+      </tbody>
+    </table></div>
+  </div>
+</section>
+
+<!-- 13 ─ Summary ─────────────────────────────────────────── -->
+<section class="slide"><span class="snum">13</span>
+  <div class="inner">
+    <h2>Summary</h2>
+    <div class="split" style="margin-bottom:30px">
+      <div class="panel ok">
+        <h3>Safe to present</h3>
+        <ul>
+          <li>Revenue, discounts and tax</li>
+          <li>Refunds</li>
+          <li>Consumables and parts</li>
+          <li>Invoiced freight</li>
+          <li>Warranty claim rate</li>
+          <li>US vs Canada split</li>
+          <li>The model's structure</li>
+        </ul>
+      </div>
+      <div class="panel crit">
+        <h3>Do not present as fact</h3>
+        <ul>
+          <li>The −$15,680.31 headline margin</li>
+          <li>Any CAC, LTV:CAC or payback figure</li>
+          <li>COGS at the order level</li>
+          <li>Revenue per order</li>
+          <li>Province-level rankings</li>
+          <li>Margins for instalment customers</li>
+        </ul>
+      </div>
+    </div>
+    <p class="statement">
+      The dashboard is built, wired and tested. It currently reports a loss on every machine,
+      which we have good reason to believe is not true. Two fixes and three numbers from Finance
+      turn it into something we can run the business on.
+    </p>
+  </div>
+</section>

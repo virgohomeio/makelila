@@ -3,8 +3,20 @@ import styles from './Hiring.module.css';
 import { ResumeUploadPanel } from './ResumeUploadPanel';
 import {
   useJobPostings, useCandidates, updateCandidateStage, recordCandidateScore, rejectCandidate, hireCandidate,
-  getResumeSignedUrl, computeOverallScore, type Candidate, type CandidateSource, type RubricDimension,
+  getResumeObjectUrl, computeOverallScore, type Candidate, type CandidateSource, type RubricDimension,
 } from '../../lib/hiring';
+
+const SOURCE_LABEL: Record<CandidateSource, string> = {
+  indeed: 'Indeed',
+  linkedin: 'LinkedIn',
+  referral: 'Referral',
+  other: 'Other',
+  university_of_waterloo: 'University of Waterloo',
+  university_of_toronto: 'University of Toronto',
+  york_university: 'York University',
+};
+
+const SOURCES = Object.keys(SOURCE_LABEL) as CandidateSource[];
 
 export function ApplicantsTab({ onSelectCandidate }: { onSelectCandidate: (id: string) => void }) {
   const { postings, loading } = useJobPostings();
@@ -32,40 +44,59 @@ function PostingColumn({ postingId, title, pipelineStages, rubric, onSelectCandi
   postingId: string; title: string; pipelineStages: string[]; rubric: RubricDimension[]; onSelectCandidate: (id: string) => void;
 }) {
   const { candidates, loading } = useCandidates(postingId);
+  // Two separate source pickers, because they answer different questions: one
+  // tags the resumes being uploaded, the other narrows the list on screen.
+  // They used to be a single control, which read as a filter and did nothing.
   const [uploadSource, setUploadSource] = useState<CandidateSource>('indeed');
+  const [sourceFilter, setSourceFilter] = useState<CandidateSource | 'all'>('all');
+  const shown = sourceFilter === 'all' ? candidates : candidates.filter(c => c.source === sourceFilter);
 
   // Rank scored candidates by descending composite score; stub candidates
   // (no scores recorded yet) have nothing meaningful to rank by, so they're
-  // kept out of the sort and rendered after, in their existing order.
-  const scored = candidates
+  // kept out of the sort and rendered after, in their existing order. Both are
+  // derived from `shown`, so the source filter applies before ranking.
+  const scored = shown
     .filter(c => c.enrichment_status !== 'stub')
     .map(c => ({ candidate: c, overallScore: computeOverallScore(c.scores && Object.keys(c.scores).length ? c.scores : (c.suggested_scores ?? {}), rubric) }))
     .sort((a, b) => b.overallScore - a.overallScore);
-  const stubs = candidates.filter(c => c.enrichment_status === 'stub');
+  const stubs = shown.filter(c => c.enrichment_status === 'stub');
 
   return (
     <div className={styles.column}>
       <div className={styles.columnHeader}>
-        {title} <span className={styles.columnCount}>· {candidates.length}</span>
+        {title}
+        <span className={styles.columnCount}>
+          {sourceFilter === 'all' ? `· ${candidates.length}` : `· ${shown.length} of ${candidates.length}`}
+        </span>
       </div>
-      <select
-        className={styles.stageSelect}
-        value={uploadSource}
-        onChange={e => setUploadSource(e.target.value as CandidateSource)}
-        style={{ marginBottom: 8 }}
-      >
-        <option value="indeed">Indeed</option>
-        <option value="linkedin">LinkedIn</option>
-        <option value="referral">Referral</option>
-        <option value="other">Other</option>
-        <option value="university_of_waterloo">University of Waterloo</option>
-        <option value="university_of_toronto">University of Toronto</option>
-        <option value="york_university">York University</option>
-      </select>
+      <label className={styles.selectLabel}>
+        Source for uploaded resumes
+        <select
+          className={styles.stageSelect}
+          value={uploadSource}
+          onChange={e => setUploadSource(e.target.value as CandidateSource)}
+        >
+          {SOURCES.map(s => <option key={s} value={s}>{SOURCE_LABEL[s]}</option>)}
+        </select>
+      </label>
       <ResumeUploadPanel postingId={postingId} source={uploadSource} onUploaded={() => {}} />
       <h3 style={{ marginTop: 20 }}>Applicants</h3>
+      <label className={styles.selectLabel}>
+        Filter by source
+        <select
+          className={styles.stageSelect}
+          value={sourceFilter}
+          onChange={e => setSourceFilter(e.target.value as CandidateSource | 'all')}
+        >
+          <option value="all">All sources</option>
+          {SOURCES.map(s => <option key={s} value={s}>{SOURCE_LABEL[s]}</option>)}
+        </select>
+      </label>
       {loading && <div>Loading…</div>}
       {!loading && !candidates.length && <div>No applicants yet.</div>}
+      {!loading && !!candidates.length && !shown.length && sourceFilter !== 'all' && (
+        <div>No applicants from {SOURCE_LABEL[sourceFilter]}.</div>
+      )}
       {scored.map(({ candidate: c, overallScore }, i) => (
         <CandidateCard
           key={c.id} candidate={c} pipelineStages={pipelineStages} onSelectCandidate={onSelectCandidate}
@@ -94,22 +125,46 @@ function initialsOf(fullName: string): string {
   return (tokens[0][0] + tokens[tokens.length - 1][0]).toUpperCase();
 }
 
-function CandidateCard({ candidate, pipelineStages, onSelectCandidate, overallScore, rank }: {
+export function CandidateCard({ candidate, pipelineStages, onSelectCandidate, overallScore, rank }: {
   candidate: Candidate; pipelineStages: string[]; onSelectCandidate: (id: string) => void;
   overallScore?: number; rank?: number;
 }) {
   const [scores, setScores] = useState<Record<string, number>>({ ...(candidate.suggested_scores ?? {}), ...candidate.scores });
   const [resumeError, setResumeError] = useState<string | null>(null);
   const isStub = candidate.enrichment_status === 'stub';
+  // hired_at wins if a legacy row has both — the mutations clear the opposing column.
+  const decision = candidate.hired_at ? 'shortlisted' : candidate.rejected_at ? 'rejected' : null;
 
+  /** hiring-resumes is a private bucket, so the file needs a signed URL before
+   *  it can be shown, and that round trip is what made this button feel dead.
+   *  Two separate causes, both now handled:
+   *
+   *  1. Opening the tab *after* the await left it to the popup blocker, and
+   *     window.open's return value was ignored, so a blocked tab meant nothing
+   *     on screen. The tab is opened during the click instead.
+   *  2. Pointing that tab at the signed URL let the browser decide what to do
+   *     with the response; Firefox saved it and left the tab blank. It now gets
+   *     a blob: URL of the file itself (see getResumeObjectUrl). */
   async function viewResume() {
     if (!candidate.resume_url) return;
     setResumeError(null);
+
+    const tab = window.open('', '_blank');
+    if (!tab) {
+      setResumeError('Your browser blocked the resume tab — allow pop-ups for this site and try again.');
+      return;
+    }
+    // Opened without 'noopener' because that makes window.open return null and
+    // there'd be no handle to navigate; severing the link here instead.
+    tab.opener = null;
+
     try {
-      const signedUrl = await getResumeSignedUrl(candidate.resume_url);
-      window.open(signedUrl, '_blank', 'noopener,noreferrer');
-    } catch {
-      setResumeError('Could not open resume — try again.');
+      tab.location.href = await getResumeObjectUrl(candidate.resume_url);
+    } catch (e: unknown) {
+      // The real reason, not a generic retry: "Object not found" (the file was
+      // purged) and an auth failure need different responses from the operator.
+      tab.close();
+      setResumeError(`Could not open resume: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
@@ -137,6 +192,14 @@ function CandidateCard({ candidate, pipelineStages, onSelectCandidate, overallSc
       <div>
         <strong>{candidate.full_name}</strong>
         {isStub && <span className={styles.stubBadge}>Stub — no resume yet</span>}
+        {decision === 'shortlisted' && <span className={styles.decisionShortlisted}>Shortlisted</span>}
+        {/* Legacy rows rejected before rejection_stage existed carry null —
+            those all came from this board, so they read as resume screen. */}
+        {decision === 'rejected' && (
+          <span className={styles.decisionRejected}>
+            {candidate.rejection_stage === 'interview' ? 'Rejected — interview' : 'Rejected — resume screen'}
+          </span>
+        )}
       </div>
       <div style={{ fontSize: 12, color: 'var(--color-ink-subtle)' }}>
         {candidate.email ?? candidate.indeed_relay_email ?? '—'} · {candidate.phone ?? '—'}
@@ -178,9 +241,19 @@ function CandidateCard({ candidate, pipelineStages, onSelectCandidate, overallSc
             </div>
           )}
           <div style={{ marginTop: 8 }}>
-            <button onClick={() => void hireCandidate(candidate.id)}>Hire</button>
-            <button onClick={() => void rejectCandidate(candidate.id)} style={{ marginLeft: 8 }}>Reject</button>
-            <button onClick={() => onSelectCandidate(candidate.id)} style={{ marginLeft: 8 }}>Interviews →</button>
+            <button onClick={() => void hireCandidate(candidate.id)}>Shortlist</button>
+            <button onClick={() => void rejectCandidate(candidate.id, 'resume_screening')} style={{ marginLeft: 8 }}>Reject</button>
+            {/* The Interviews board lists shortlisted candidates only — jumping
+                there before a shortlist decision would land on a board this
+                candidate isn't on. */}
+            <button
+              onClick={() => onSelectCandidate(candidate.id)}
+              disabled={decision !== 'shortlisted'}
+              title={decision === 'shortlisted' ? undefined : 'Shortlist this candidate to schedule interviews'}
+              style={{ marginLeft: 8 }}
+            >
+              Interviews →
+            </button>
           </div>
         </>
       )}

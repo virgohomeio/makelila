@@ -2,11 +2,11 @@
 //
 // ⚠️ DEPLOYS TO THE **LOVELY** PROJECT (ref arfdopgbvlfmhmcfghhl), NOT makelila. verify_jwt=false.
 //
-// Approves a pending Lovely-app user (is_verified=true). Admin-only:
-//   1. validates the caller's makelila operator JWT (@virgohome.io), AND
-//   2. requires the caller to be finance/admin in makelila's `profiles`.
-// Reads makelila profiles with the caller's own token (RLS allows authenticated read);
-// writes the Lovely `users` row with the Lovely service role. Mirrors lovely-users.
+// Approves a pending Lovely-app user (is_verified=true). Open to any signed-in
+// makelila operator on the @virgohome.io org domain — the previous
+// finance/admin role check was removed deliberately so the whole team can clear
+// the verification queue. Writes the Lovely `users` row with the Lovely service
+// role. Mirrors lovely-users.
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
@@ -15,7 +15,6 @@ const MAKELILA_ANON_KEY =
   'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InR4ZWZ0YmJ6ZWZsZXF1dnJtampyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYyNzk3NjcsImV4cCI6MjA5MTg1NTc2N30.sWmDCODRuhutbHuXcoVIVRvVvVyZADpNysFkerOXNPw';
 
 const ALLOWED_EMAIL_DOMAIN = '@virgohome.io';
-const LEADERSHIP_ROLES = ['finance', 'admin'];
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -38,26 +37,14 @@ Deno.serve(async (req: Request) => {
   if (!authHeader?.startsWith('Bearer ')) return json({ error: 'Missing authorization header' }, 401);
   const token = authHeader.replace('Bearer ', '');
 
-  const makelila = createClient(MAKELILA_URL, MAKELILA_ANON_KEY, {
-    global: { headers: { Authorization: `Bearer ${token}` } },
-  });
+  const makelila = createClient(MAKELILA_URL, MAKELILA_ANON_KEY);
   const { data: userData, error: authErr } = await makelila.auth.getUser(token);
   const email = userData?.user?.email ?? '';
   if (authErr || !email.toLowerCase().endsWith(ALLOWED_EMAIL_DOMAIN)) {
     return json({ error: 'Unauthorized' }, 401);
   }
 
-  // 2. Enforce leadership (finance/admin) server-side, read with the caller's own token.
-  const { data: profile, error: roleErr } = await makelila
-    .from('profiles')
-    .select('role')
-    .eq('id', userData!.user!.id)
-    .single();
-  if (roleErr || !LEADERSHIP_ROLES.includes((profile?.role as string) ?? '')) {
-    return json({ error: 'Forbidden — leadership only' }, 403);
-  }
-
-  // 3. Read body.
+  // 2. Read body.
   const body = (await req.json().catch(() => ({}))) as { user_id?: string };
   if (!body.user_id) return json({ error: 'Missing user_id' }, 400);
 

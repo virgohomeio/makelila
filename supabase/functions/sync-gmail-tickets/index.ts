@@ -22,6 +22,7 @@ import { authenticate } from '../_shared/auth.ts';
 import { classify, type Category, type Priority, type ThreadInput } from '../_shared/classifier.ts';
 import { llmClassify, sha256Hex } from '../_shared/classifier-llm.ts';
 import { parseQuoSubject, parseFromHeader, normalizePhone } from '../_shared/quo-parsers.ts';
+import { isInternalSender, DEFAULT_INTERNAL_DOMAINS } from '../_shared/commAssessment.ts';
 
 // Maps classifier priority ('urgent'|'high'|'medium'|'low') to the DB enum
 // on service_tickets.priority ('urgent'|'high'|'normal'|'low').
@@ -39,7 +40,15 @@ type RunBudget = { llmCalls: number; llmMax: number };
 const GMAIL_QUERY = 'in:inbox -from:me -category:promotions -category:social -category:updates -category:forums newer_than:30d';
 const SCOPES = 'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.modify';
 const SYNC_LABEL_NAME = 'makelila/synced';
-const VIRGO_DOMAIN = '@virgohome.io';
+// Every domain the team replies to customers from — NOT just the Google one.
+// VCycene answers from virgohome.io (Google Workspace) and
+// lilacomposter.com (Microsoft 365), often in the same thread. Testing only
+// one of them filed the other's replies as inbound, i.e. as words the CUSTOMER
+// said, which is exactly backwards for anything reading these messages to
+// decide whether to ship. Override with INTERNAL_EMAIL_DOMAINS (CSV) if a
+// third domain appears.
+const INTERNAL_DOMAINS = (Deno.env.get('INTERNAL_EMAIL_DOMAINS') ?? '')
+  .split(',').map(d => d.trim()).filter(Boolean);
 
 type GmailMessage = {
   id: string;
@@ -271,8 +280,10 @@ async function upsertThread(
     const senderHeader = header(m, 'From') ?? '';
     const sender = parseFromHeader(senderHeader);
     const direction: 'inbound' | 'outbound' =
-      sender.email && (sender.email.endsWith(VIRGO_DOMAIN) || sender.email === mailbox)
-        ? 'outbound' : 'inbound';
+      isInternalSender(sender.email, {
+        domains: INTERNAL_DOMAINS.length ? INTERNAL_DOMAINS : DEFAULT_INTERNAL_DOMAINS,
+        mailbox,
+      }) ? 'outbound' : 'inbound';
     return {
       ticket_id: ticket.id,
       gmail_message_id: m.id,

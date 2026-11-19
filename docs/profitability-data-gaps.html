@@ -1,0 +1,666 @@
+<title>Profitability Data Gaps</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chivo:wght@400;600;800&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=JetBrains+Mono:wght@400;600&display=swap">
+
+<style>
+  /* Light palette — complete, on bare :root. Neutrals carry a slight green
+     bias (the subject is composting hardware); the accent is an ochre pulled
+     from worm castings, spent sparingly on rules and figures. */
+  :root {
+    --ground:      #FBFBF9;
+    --surface:     #FFFFFF;
+    --surface-alt: #F4F5F2;
+    --ink:         #1A1F1C;
+    --ink-soft:    #3D453F;
+    --muted:       #5C6660;
+    --hairline:    #DFE2DC;
+    --accent:      #A8641F;
+    --accent-soft: #F3E7D6;
+    --critical:    #A03028;
+    --warn:        #9A6B12;
+    --ok:          #2F6B4F;
+    --crit-bg:     #F7E6E4;
+    --warn-bg:     #F8EEDA;
+    --ok-bg:       #E2F0E8;
+    --shadow:      0 1px 2px rgba(26,31,28,.05), 0 6px 20px rgba(26,31,28,.05);
+  }
+  /* System-dark (no stamp) — guarded so an explicit light choice still wins. */
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:      #101413;
+      --surface:     #181D1B;
+      --surface-alt: #1F2523;
+      --ink:         #E9EDEA;
+      --ink-soft:    #C3CBC6;
+      --muted:       #8D9992;
+      --hairline:    #2C3431;
+      --accent:      #D9974A;
+      --accent-soft: #33261A;
+      --critical:    #E8837A;
+      --warn:        #DFAE55;
+      --ok:          #6FBF95;
+      --crit-bg:     #331E1C;
+      --warn-bg:     #2E2617;
+      --ok-bg:       #16291F;
+      --shadow:      0 1px 2px rgba(0,0,0,.3), 0 6px 20px rgba(0,0,0,.28);
+    }
+  }
+  /* Explicit dark choice. */
+  :root[data-theme="dark"] {
+    --ground:      #101413;
+    --surface:     #181D1B;
+    --surface-alt: #1F2523;
+    --ink:         #E9EDEA;
+    --ink-soft:    #C3CBC6;
+    --muted:       #8D9992;
+    --hairline:    #2C3431;
+    --accent:      #D9974A;
+    --accent-soft: #33261A;
+    --critical:    #E8837A;
+    --warn:        #DFAE55;
+    --ok:          #6FBF95;
+    --crit-bg:     #331E1C;
+    --warn-bg:     #2E2617;
+    --ok-bg:       #16291F;
+    --shadow:      0 1px 2px rgba(0,0,0,.3), 0 6px 20px rgba(0,0,0,.28);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: "Source Serif 4", Georgia, serif;
+    font-size: 17px;
+    line-height: 1.62;
+    margin: 0;
+    padding: 0 24px 96px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap { max-width: 940px; margin: 0 auto; }
+
+  h1, h2, h3, .ui { font-family: Chivo, "Helvetica Neue", Arial, sans-serif; }
+  .mono, td.num, .fig { font-family: "JetBrains Mono", ui-monospace, Menlo, monospace; }
+
+  /* ---------- masthead ---------- */
+  .masthead { padding: 72px 0 0; }
+  .eyebrow {
+    font-family: Chivo, sans-serif; font-size: 12px; font-weight: 600;
+    letter-spacing: .14em; text-transform: uppercase; color: var(--accent);
+    margin: 0 0 18px;
+  }
+  h1 {
+    font-size: clamp(34px, 5.4vw, 52px); font-weight: 800; line-height: 1.04;
+    letter-spacing: -.022em; margin: 0 0 20px; text-wrap: balance;
+  }
+  .standfirst {
+    font-size: 20px; color: var(--ink-soft); margin: 0; max-width: 63ch;
+    text-wrap: pretty;
+  }
+  .meta {
+    font-family: Chivo, sans-serif; font-size: 13px; color: var(--muted);
+    margin-top: 26px; padding-top: 18px; border-top: 1px solid var(--hairline);
+    display: flex; flex-wrap: wrap; gap: 8px 26px;
+  }
+
+  /* ---------- ledger strip ---------- */
+  .ledger {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 1px; background: var(--hairline); border: 1px solid var(--hairline);
+    border-radius: 3px; overflow: hidden; margin: 40px 0 8px;
+  }
+  .ledger div { background: var(--surface); padding: 16px 18px; }
+  .ledger dt {
+    font-family: Chivo, sans-serif; font-size: 10.5px; font-weight: 600;
+    letter-spacing: .1em; text-transform: uppercase; color: var(--muted);
+    margin: 0 0 7px;
+  }
+  .ledger dd {
+    margin: 0; font-family: "JetBrains Mono", monospace; font-size: 20px;
+    font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -.02em;
+  }
+  .ledger dd small { display:block; font-size: 11px; font-weight: 400; color: var(--muted); margin-top: 4px; letter-spacing: 0; }
+  .neg { color: var(--critical); }
+
+  /* ---------- sections ---------- */
+  section { margin-top: 68px; }
+  h2 {
+    font-size: 13px; font-weight: 600; letter-spacing: .13em;
+    text-transform: uppercase; color: var(--accent); margin: 0 0 8px;
+  }
+  .section-title {
+    font-family: Chivo, sans-serif; font-size: 27px; font-weight: 700;
+    letter-spacing: -.017em; margin: 0 0 14px; line-height: 1.2;
+  }
+  .lede { color: var(--ink-soft); margin: 0 0 30px; max-width: 66ch; }
+  p { max-width: 66ch; }
+
+  /* ---------- gap entries ---------- */
+  .gap {
+    background: var(--surface); border: 1px solid var(--hairline);
+    border-radius: 4px; box-shadow: var(--shadow);
+    margin-bottom: 18px; overflow: hidden;
+    display: grid; grid-template-columns: 62px 1fr;
+  }
+  .rank {
+    background: var(--surface-alt); border-right: 1px solid var(--hairline);
+    display: flex; flex-direction: column; align-items: center; padding-top: 22px; gap: 10px;
+  }
+  .rank .n {
+    font-family: "JetBrains Mono", monospace; font-size: 19px; font-weight: 600;
+    color: var(--ink); font-variant-numeric: tabular-nums;
+  }
+  .sev { width: 9px; height: 9px; border-radius: 50%; }
+  .sev-crit { background: var(--critical); }
+  .sev-warn { background: var(--warn); }
+  .sev-low  { background: var(--muted); }
+
+  .gap-body { padding: 20px 24px 22px; min-width: 0; }
+  .gap-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px 14px; margin-bottom: 12px; }
+  .gap-title { font-family: Chivo, sans-serif; font-size: 19px; font-weight: 700; margin: 0; letter-spacing: -.01em; }
+  .impact {
+    font-family: "JetBrains Mono", monospace; font-size: 13px; font-weight: 600;
+    font-variant-numeric: tabular-nums; margin-left: auto; white-space: nowrap;
+  }
+  .gap-body p { margin: 0 0 12px; font-size: 16px; }
+  .gap-body p:last-child { margin-bottom: 0; }
+
+  .ask {
+    background: var(--accent-soft); border-left: 2px solid var(--accent);
+    padding: 12px 16px; margin-top: 14px; border-radius: 0 3px 3px 0;
+  }
+  .ask .ui {
+    font-size: 10.5px; font-weight: 600; letter-spacing: .1em;
+    text-transform: uppercase; color: var(--accent); display: block; margin-bottom: 5px;
+  }
+  .ask p { margin: 0; font-size: 15.5px; }
+
+  .chip {
+    font-family: Chivo, sans-serif; font-size: 10.5px; font-weight: 600;
+    letter-spacing: .08em; text-transform: uppercase;
+    padding: 3px 9px; border-radius: 2px; white-space: nowrap;
+  }
+  .chip-crit { background: var(--crit-bg); color: var(--critical); }
+  .chip-warn { background: var(--warn-bg); color: var(--warn); }
+  .chip-ok   { background: var(--ok-bg);   color: var(--ok); }
+
+  /* ---------- tables ---------- */
+  .scroll { overflow-x: auto; margin: 22px 0; border: 1px solid var(--hairline); border-radius: 4px; background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; font-size: 14.5px; }
+  th, td { padding: 9px 14px; text-align: left; border-bottom: 1px solid var(--hairline); white-space: nowrap; }
+  th {
+    font-family: Chivo, sans-serif; font-size: 10.5px; font-weight: 600;
+    letter-spacing: .09em; text-transform: uppercase; color: var(--muted);
+    background: var(--surface-alt); position: sticky; top: 0;
+  }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  tbody tr:last-child td { border-bottom: none; }
+  tfoot td { font-weight: 600; background: var(--surface-alt); border-top: 2px solid var(--hairline); border-bottom: none; }
+  .dim { color: var(--muted); }
+
+  code {
+    font-family: "JetBrains Mono", monospace; font-size: .87em;
+    background: var(--surface-alt); padding: 1.5px 5px; border-radius: 3px;
+    border: 1px solid var(--hairline);
+  }
+
+  ul { padding-left: 20px; max-width: 66ch; }
+  li { margin-bottom: 7px; }
+
+  .callout {
+    border: 1px solid var(--hairline); border-left: 3px solid var(--warn);
+    background: var(--surface); border-radius: 0 4px 4px 0;
+    padding: 20px 24px; margin: 24px 0;
+  }
+  .callout .ui {
+    font-size: 10.5px; font-weight: 600; letter-spacing: .1em;
+    text-transform: uppercase; color: var(--warn); display: block; margin-bottom: 8px;
+  }
+  .callout p:last-child { margin-bottom: 0; }
+
+  .names {
+    font-family: "JetBrains Mono", monospace; font-size: 13.5px; line-height: 1.85;
+    color: var(--ink-soft); background: var(--surface-alt);
+    border: 1px solid var(--hairline); border-radius: 4px; padding: 16px 18px;
+    margin: 18px 0; max-width: none;
+  }
+
+  footer {
+    margin-top: 72px; padding-top: 22px; border-top: 1px solid var(--hairline);
+    font-family: Chivo, sans-serif; font-size: 13px; color: var(--muted);
+  }
+
+  @media (max-width: 620px) {
+    body { padding: 0 16px 64px; font-size: 16px; }
+    .gap { grid-template-columns: 44px 1fr; }
+    .gap-body { padding: 16px 16px 18px; }
+    .impact { margin-left: 0; }
+  }
+</style>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <p class="eyebrow">makeLILA · Customers → Profitability</p>
+    <h1>What the margin still can&rsquo;t see</h1>
+    <p class="standfirst">
+      Freight and consumables are now reconciled. What&rsquo;s left is nine gaps the
+      database cannot close on its own &mdash; ranked by how far each one moves the number,
+      with the exact thing needed to close it.
+    </p>
+    <div class="meta ui">
+      <span>27 August 2026</span>
+      <span>Source: <code>customer_profitability</code> v12</span>
+      <span>All amounts CAD</span>
+    </div>
+  </header>
+
+  <dl class="ledger">
+    <div><dt>Revenue</dt><dd class="fig">202,058<small>+12,744 founder cohort</small></dd></div>
+    <div><dt>Contribution margin</dt><dd class="fig neg">−23,583</dd></div>
+    <div><dt>Reconciled so far</dt><dd class="fig">17,016<small>freight, consumables, invoices</small></dd></div>
+    <div><dt>Open gaps</dt><dd class="fig">9<small>3 critical</small></dd></div>
+  </dl>
+
+  <section>
+    <h2>Read this first</h2>
+    <p class="section-title">The founder-cohort invoices, and one thing PAYMENT doesn&rsquo;t tell you</p>
+    <p class="lede">
+      You asked me to pull revenue from the sales invoices, using the figure beside
+      PAYMENT. I read all 17 PDFs on file for the 24 affected customers. The figure is
+      there &mdash; but on 13 of the 14 sale invoices it is <em>not</em> the whole amount collected.
+    </p>
+
+    <div class="callout">
+      <span class="ui">PAYMENT excludes the deposit</span>
+      <p>
+        These invoices bill in two parts. Michael Madigan&rsquo;s 1179 reads
+        <code>TOTAL 1,067.85</code>, <code>DEPOSIT 200.00</code>, <code>PAYMENT 867.85</code>.
+        He paid $1,067.85 &mdash; PAYMENT is only the balance after the deposit.
+      </p>
+      <p>
+        Across the 14 invoices, PAYMENT alone sums to <strong>$10,741.92</strong>; the
+        amount actually collected is <strong>$13,541.92</strong>. Taking PAYMENT literally
+        would understate revenue by <strong>$2,800</strong> &mdash; every deposit ever taken.
+        Only Lynn Liu&rsquo;s 1192 has no deposit line, which is why PAYMENT there equals the total.
+      </p>
+      <p>
+        I&rsquo;ve used <strong>TOTAL minus HST</strong> below. Tax is collected for the
+        government, so the model excludes it from revenue &mdash; the same rule Shopify
+        orders already follow.
+      </p>
+    </div>
+
+    <div class="scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>Customer</th><th>Inv.</th><th>Date</th>
+            <th class="num">Total</th><th class="num">Deposit</th>
+            <th class="num">Payment</th><th class="num">HST</th>
+            <th class="num">Net revenue</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>Ms. Yuanbo Luo</td><td class="mono">1002</td><td class="dim">2023-07-16</td><td class="num">858.80</td><td class="num">500.00</td><td class="num">358.80</td><td class="num dim">98.80</td><td class="num">760.00</td></tr>
+          <tr><td>Jim Christie</td><td class="mono">1120</td><td class="dim">2023-08-19</td><td class="num">751.45</td><td class="num">200.00</td><td class="num">551.45</td><td class="num dim">86.45</td><td class="num">665.00</td></tr>
+          <tr><td>Vicki Crooke</td><td class="mono">1145</td><td class="dim">2023-08-25</td><td class="num">751.45</td><td class="num">200.00</td><td class="num">551.45</td><td class="num dim">86.45</td><td class="num">665.00</td></tr>
+          <tr><td>Michael Haywood</td><td class="mono">1155</td><td class="dim">2023-09-01</td><td class="num">751.45</td><td class="num">200.00</td><td class="num">551.45</td><td class="num dim">86.45</td><td class="num">665.00</td></tr>
+          <tr><td>Scott Destephanis</td><td class="mono">1169</td><td class="dim">2023-09-02</td><td class="num">751.45</td><td class="num">200.00</td><td class="num">551.45</td><td class="num dim">86.45</td><td class="num">665.00</td></tr>
+          <tr><td>Olivia &amp; Jason Amaro</td><td class="mono">1174</td><td class="dim">2024-03-09</td><td class="num">1,067.85</td><td class="num">200.00</td><td class="num">867.85</td><td class="num dim">122.85</td><td class="num">945.00</td></tr>
+          <tr><td>Kelly Dyment</td><td class="mono">1175</td><td class="dim">2024-03-10</td><td class="num">1,067.85</td><td class="num">200.00</td><td class="num">867.85</td><td class="num dim">122.85</td><td class="num">945.00</td></tr>
+          <tr><td>Michael Madigan</td><td class="mono">1179</td><td class="dim">2024-03-14</td><td class="num">1,067.85</td><td class="num">200.00</td><td class="num">867.85</td><td class="num dim">122.85</td><td class="num">945.00</td></tr>
+          <tr><td>Chris &amp; Renata Grant</td><td class="mono">1182</td><td class="dim">2024-03-16</td><td class="num">1,067.85</td><td class="num">200.00</td><td class="num">867.85</td><td class="num dim">122.85</td><td class="num">945.00</td></tr>
+          <tr><td>Tony Rinella</td><td class="mono">1184</td><td class="dim">2024-03-16</td><td class="num">1,067.85</td><td class="num">200.00</td><td class="num">867.85</td><td class="num dim">122.85</td><td class="num">945.00</td></tr>
+          <tr><td>Alp Celebi</td><td class="mono">1188</td><td class="dim">2024-03-23</td><td class="num">1,067.85</td><td class="num">200.00</td><td class="num">867.85</td><td class="num dim">122.85</td><td class="num">945.00</td></tr>
+          <tr><td>Lynn Liu</td><td class="mono">1192</td><td class="dim">2024-06-18</td><td class="num">1,220.40</td><td class="num dim">&mdash;</td><td class="num">1,220.40</td><td class="num dim">140.40</td><td class="num">1,080.00</td></tr>
+          <tr><td>Sharon Corcoran</td><td class="mono">1200</td><td class="dim">2024-08-31</td><td class="num">694.95</td><td class="num">100.00</td><td class="num">594.95</td><td class="num dim">79.95</td><td class="num">615.00</td></tr>
+          <tr><td>Mary &amp; Marilynne Oskamp</td><td class="mono">1208</td><td class="dim">2024-09-08</td><td class="num">1,354.87</td><td class="num">200.00</td><td class="num">1,154.87</td><td class="num dim">155.87</td><td class="num">1,199.00</td></tr>
+        </tbody>
+        <tfoot>
+          <tr>
+            <td colspan="3">14 sale invoices</td>
+            <td class="num">13,541.92</td><td class="num">2,800.00</td>
+            <td class="num">10,741.92</td><td class="num">1,557.92</td>
+            <td class="num">11,984.00</td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+
+    <p>
+      Three of these customers were later <strong>refunded in full</strong> and the receipts are
+      on file: Yuanbo Luo ($858.80, refund 1204), Scott Destephanis ($751.45, refund 1206),
+      and Jamie Smyth ($858.80, refund 1205). Smyth has a refund receipt but
+      <em>no sale invoice</em> &mdash; the sale exists only as its own reversal.
+    </p>
+    <p>
+      Sharon Corcoran&rsquo;s 1200 is annotated <em>&ldquo;revised invoice for replacement of LILA
+      Mini, 3-year warranty, 1 year filter pack free&rdquo;</em> &mdash; a replacement sale, not a
+      first purchase. Worth confirming how you want it counted.
+    </p>
+
+    <div class="ask">
+      <span class="ui">Loaded &mdash; 27 August</span>
+      <p>
+        All 15 are in as approved sale orders (<code>INV-1002</code> … <code>INV-R1205</code>),
+        revenue booked at TOTAL − HST, HST recorded separately as tax. Jamie Smyth is
+        included from his refund receipt, which documents the original sale. Revenue is now
+        <strong>202,058</strong>; the customers with a machine and no order fell from 24 to
+        <strong>9</strong>.
+      </p>
+    </div>
+
+    <div class="callout">
+      <span class="ui">What the numbers then showed</span>
+      <p>
+        <strong>13 of the 15 sold below build cost.</strong> Against the $913.89 schedule COGS
+        for that era, the 20&ndash;30% founder discounts put most of the cohort underwater
+        before freight. Jim Christie lands at −$798, Sharon Corcoran −$776, Vicki Crooke −$736.
+        Only Lynn Liu (+$125) and Mary &amp; Marilynne Oskamp (+$234) clear &mdash; the two who
+        took the smallest discount.
+      </p>
+      <p>
+        Read this as provisional. That COGS is the <em>schedule</em> projection converted at
+        today&rsquo;s FX, not an invoiced 2023/24 build cost &mdash; which is gap 3 below. If the
+        real build cost then was lower, the cohort moves back toward break-even.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <h2>The register</h2>
+    <p class="section-title">Nine open gaps</p>
+    <p class="lede">
+      Ranked by effect on the reported margin. The dot marks severity; the figure on the
+      right is the amount at stake or the size of the exposure.
+    </p>
+
+    <article class="gap">
+      <div class="rank"><span class="n">1</span><span class="sev sev-crit"></span></div>
+      <div class="gap-body">
+        <div class="gap-head">
+          <h3 class="gap-title">9 machines shipped with no order behind them</h3>
+          <span class="chip chip-warn">Partly closed</span>
+          <span class="impact neg">−1,371 phantom</span>
+        </div>
+        <p>
+          Was 24, worth −$5,032. Fifteen have been closed from their invoices. The
+          <strong>nine below still carry cost with no revenue</strong> &mdash; freight, warranty
+          and support against a blank sale &mdash; so they read as the worst customers in the
+          book on missing data rather than performance.
+        </p>
+        <div class="names">
+          Albert &amp; Vincenza Salvatore · Caesar Radicioni · Caroline and Mike McMaurice ·
+          Doug Bailey · James &amp; Jill Washington · Mr. Phil Parkinson · Omniya Hussein ·
+          Salvatore DeCillis · Steven Yang
+        </div>
+        <div class="ask">
+          <span class="ui">Send</span>
+          <p>Sale amount and date for these nine &mdash; or confirmation they were free units. No invoice exists in storage for any of them.</p>
+        </div>
+      </div>
+    </article>
+
+    <article class="gap">
+      <div class="rank"><span class="n">2</span><span class="sev sev-crit"></span></div>
+      <div class="gap-body">
+        <div class="gap-head">
+          <h3 class="gap-title">CAC, LTV:CAC and payback are all inert</h3>
+          <span class="chip chip-crit">Blocking</span>
+          <span class="impact">69,134 unallocated</span>
+        </div>
+        <p>
+          The Meta sync pulls <em>lifetime-to-date</em> totals, not monthly. All 40 rows in
+          <code>fb_campaigns</code> carry the same <code>date_start</code> of 2023-07-27, so every
+          dollar of spend lands in a single month &mdash; July 2023, in which no customer was
+          acquired. The whole $69,134 goes unallocated and every customer&rsquo;s CAC is $0.
+        </p>
+        <p>
+          Downstream, the entire acquisition half of the tab is dead: <strong>LTV:CAC blank,
+          payback reading &ldquo;0 at sale · 0 short&rdquo;, lifetime profit just contribution
+          margin renamed.</strong> Separately, 88 buyers arrived through channels with no
+          spend feed at all &mdash; organic search 48, referral 24, organic social 12, email 3.
+        </p>
+        <div class="ask">
+          <span class="ui">Send</span>
+          <p>
+            Monthly Meta spend for Dec 2025 → Aug 2026 (or fix the sync to pull monthly
+            insights). Plus any spend for organic search, referral, social and email &mdash;
+            SEO retainer, referral incentives, email tooling.
+          </p>
+        </div>
+      </div>
+    </article>
+
+    <article class="gap">
+      <div class="rank"><span class="n">3</span><span class="sev sev-crit"></span></div>
+      <div class="gap-body">
+        <div class="gap-head">
+          <h3 class="gap-title">Two thirds of COGS is a projection</h3>
+          <span class="chip chip-crit">Blocking</span>
+          <span class="impact">152,378 at stake</span>
+        </div>
+        <p>
+          142 of 217 sale orders carry <code>cogs_basis = 'schedule'</code> &mdash; the V-SAX
+          roadmap projection &mdash; against 75 costed from an actual batch. COGS is
+          <strong>80% of revenue</strong> and the single largest driver of the reported loss.
+          Until it is invoiced, the headline number is substantially a forecast.
+        </p>
+        <div class="ask">
+          <span class="ui">Send</span>
+          <p>Actual per-batch build costs, so <code>batch_actual</code> can replace the schedule.</p>
+        </div>
+      </div>
+    </article>
+
+    <article class="gap">
+      <div class="rank"><span class="n">4</span><span class="sev sev-crit"></span></div>
+      <div class="gap-body">
+        <div class="gap-head">
+          <h3 class="gap-title">24 refunded orders have no approval record</h3>
+          <span class="chip chip-crit">Understated</span>
+          <span class="impact">~5,060 missing</span>
+        </div>
+        <p>
+          The refund bucket reads <code>refund_approvals</code> only: 15 rows, $15,524. But 32
+          sale orders carry a Shopify <code>financial_status</code> of refunded or
+          partially_refunded, worth $20,584 of revenue &mdash; and 21 of them have no matching
+          approval. Money went back that the model never sees.
+        </p>
+        <p>
+          Three more joined that list today: Yuanbo Luo, Scott Destephanis and Jamie Smyth
+          now have revenue booked from their invoices, but their refunds are not yet a cost.
+          A related blind spot: all 15 approvals sit at status <code>refunded</code>, so the
+          &ldquo;expected vs settled&rdquo; split on the tab carries no information at all.
+        </p>
+        <div class="ask">
+          <span class="ui">Send</span>
+          <p>Refund amount and date for the 24 orders with no approval row &mdash; the three founder refunds total $2,469.05 and their receipts are already on file.</p>
+        </div>
+      </div>
+    </article>
+
+    <article class="gap">
+      <div class="rank"><span class="n">5</span><span class="sev sev-warn"></span></div>
+      <div class="gap-body">
+        <div class="gap-head">
+          <h3 class="gap-title">Three cost buckets have never been priced</h3>
+          <span class="chip chip-warn">Upper bound</span>
+          <span class="impact">~6,000 est.</span>
+        </div>
+        <p>
+          Payment fees, sales commission and installation all sit at a rate of zero. Payment
+          fees are the real omission &mdash; at a blended 2.9% of roughly $210k charged gross
+          that is about $6,000, which would take the margin to near −$28.6k. Installation may
+          genuinely be zero while LILA ships self-install.
+        </p>
+        <p>
+          No code change is involved. Each is a single <code>update</code> on
+          <code>profitability_rates</code>, and every margin, LTV and payback figure moves with it.
+        </p>
+        <div class="ask">
+          <span class="ui">Send</span>
+          <p>The three rates: blended processor percentage, commission percentage, install cost per unit.</p>
+        </div>
+      </div>
+    </article>
+
+    <article class="gap">
+      <div class="rank"><span class="n">6</span><span class="sev sev-warn"></span></div>
+      <div class="gap-body">
+        <div class="gap-head">
+          <h3 class="gap-title">No return-leg freight on any of 51 returns</h3>
+          <span class="chip chip-warn">Upper bound</span>
+          <span class="impact">~4,600 flat-rated</span>
+        </div>
+        <p>
+          <code>returns.return_shipping_cad</code> is null on all 51. Only $367 was recovered by
+          matching pickup tracking numbers across 40 handled returns &mdash; about $9 each. The
+          return-handling bucket is therefore almost entirely the flat $50 stocking plus
+          $75 inspection, with the actual freight home missing.
+        </p>
+        <div class="ask">
+          <span class="ui">Send</span>
+          <p>Return shipping costs &mdash; likely the same carrier records the 44 legacy rows came from.</p>
+        </div>
+      </div>
+    </article>
+
+    <article class="gap">
+      <div class="rank"><span class="n">7</span><span class="sev sev-warn"></span></div>
+      <div class="gap-body">
+        <div class="gap-head">
+          <h3 class="gap-title">52 shipped orders still carry no freight</h3>
+          <span class="chip chip-warn">Upper bound</span>
+          <span class="impact">~7,800 est.</span>
+        </div>
+        <p>
+          Split two ways: <strong>17 predate Freightcom</strong> and are not among the 44 legacy
+          rows you sent, so their carrier records are still outstanding. The other
+          <strong>34 are Freightcom-era</strong> and most are probably just awaiting invoicing &mdash;
+          they should resolve on their own as the sync catches up.
+        </p>
+        <div class="ask">
+          <span class="ui">Send</span>
+          <p>Carrier records for the 17 pre-Freightcom orders. Re-check the 34 in a few weeks.</p>
+        </div>
+      </div>
+    </article>
+
+    <article class="gap">
+      <div class="rank"><span class="n">8</span><span class="sev sev-low"></span></div>
+      <div class="gap-body">
+        <div class="gap-head">
+          <h3 class="gap-title">28 shipments belong to nobody</h3>
+          <span class="chip chip-warn">Unattributed</span>
+          <span class="impact">1,695</span>
+        </div>
+        <p>
+          These Freightcom shipments have no <code>order_id</code>, so their cost sits outside every
+          customer&rsquo;s margin. Eight of them do carry a unit serial, which makes them
+          matchable without any new information from you.
+        </p>
+        <p>
+          Alongside them: <strong>17 shipped units have no customer</strong>, and serial
+          <code>LL01-00000000117</code> appears on two different shipments &mdash; Jamie Smyth in
+          October, Daniel Chevalier in January. Either a unit came back and went out again,
+          or one of those serials is a typo.
+        </p>
+        <div class="ask">
+          <span class="ui">Send</span>
+          <p>Nothing yet &mdash; I can match the 8 by serial. Confirm what happened with LL01-00000000117.</p>
+        </div>
+      </div>
+    </article>
+
+    <article class="gap">
+      <div class="rank"><span class="n">9</span><span class="sev sev-low"></span></div>
+      <div class="gap-body">
+        <div class="gap-head">
+          <h3 class="gap-title">Cancelled orders still count as revenue</h3>
+          <span class="chip chip-warn">Overstated</span>
+          <span class="impact">9,912</span>
+        </div>
+        <p>
+          Twenty cancelled sale orders contribute their revenue <em>and</em> their COGS to the
+          model. Replacement orders explicitly exclude cancelled ones; sale orders never did.
+          The same condition, treated two different ways.
+        </p>
+        <p>
+          This one needs a decision rather than data &mdash; say the word and it is a one-line
+          change to the view.
+        </p>
+        <div class="ask">
+          <span class="ui">Decide</span>
+          <p>Exclude cancelled sale orders from revenue and COGS, to match how replacements are handled?</p>
+        </div>
+      </div>
+    </article>
+  </section>
+
+  <section>
+    <h2>No data required</h2>
+    <p class="section-title">Model decisions waiting on you</p>
+    <p class="lede">
+      Four known distortions that need a judgement call, not a spreadsheet. Each is a
+      contained change once you&rsquo;ve picked a side.
+    </p>
+
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Issue</th><th>Effect today</th><th>Fix</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><strong>FX restates history</strong></td>
+            <td class="dim">93 USD orders revalue whenever Finance edits one row</td>
+            <td>Store the rate on the order date</td>
+          </tr>
+          <tr>
+            <td><strong>&ldquo;Units&rdquo; means orders</strong></td>
+            <td class="dim">220 machines across 217 orders; qty sits unused in line items</td>
+            <td>Read <code>line_items[].qty</code></td>
+          </tr>
+          <tr>
+            <td><strong>Warranty rate defined twice</strong></td>
+            <td class="dim">Segment table and reliability line can disagree on screen</td>
+            <td>Pick one definition</td>
+          </tr>
+          <tr>
+            <td><strong>Insights ignore filters</strong></td>
+            <td class="dim">Filter to Ontario, the panel still shows the whole book</td>
+            <td>One-word change</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>
+      Genuinely unanswerable without new systems, and correctly labelled as such on the tab:
+      machine telemetry and utilization, churn, residential vs commercial split, and
+      per-rep CAC.
+    </p>
+  </section>
+
+  <section>
+    <h2>Summary</h2>
+    <p class="section-title">If you only send three things</p>
+    <ul>
+      <li><strong>Sale amounts for the nine customers with no invoice</strong> &mdash; closes the last $1,371 of phantom loss.</li>
+      <li><strong>Monthly Meta spend</strong> &mdash; turns CAC, LTV:CAC and payback from blank into real numbers.</li>
+      <li><strong>The payment-processor rate</strong> &mdash; one line of SQL, roughly $6,000 of cost that is genuinely being incurred and not counted.</li>
+    </ul>
+    <p>
+      Send them as files rather than pasted text. Three of the last four inputs were
+      truncated at 50,000 characters mid-transfer.
+    </p>
+  </section>
+
+  <footer>
+    Figures read live from <code>customer_profitability</code> v12 on 27 August 2026.
+    Invoice amounts transcribed from the 17 PDFs in <code>customer-invoices</code> storage.
+  </footer>
+
+</div>

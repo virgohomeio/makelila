@@ -1,8 +1,9 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { corsHeaders } from '../_shared/cors.ts';
+import { archiveBcc, DEFAULT_ARCHIVE_BCC } from '../_shared/emailArchive.ts';
 
 const REINA = 'reina@virgohome.io';
-const GEORGE = 'george@virgohome.io';
+const HUAYI = 'huayi@virgohome.io';
 const FROM = 'VCycene Team <support@lilacomposter.com>';
 
 Deno.serve(async (req: Request) => {
@@ -63,14 +64,19 @@ Deno.serve(async (req: Request) => {
       postResend(resendKey, {
         from: FROM,
         to: [ret.customer_email],
+        // Blind copy to the internal archive so a send can be confirmed from an
+        // inbox as well as the audit table. archiveBcc drops it for mail that
+        // is internal-only or already addressed there.
+        bcc: archiveBcc(ret.customer_email, Deno.env.get('EMAIL_ARCHIVE_BCC') ?? DEFAULT_ARCHIVE_BCC),
         subject: `Your Return Application Received — Ref. ${custRef}`,
         html: customerHtml(ret, custRef),
       }),
-      // 2. Internal review for Reina + George
+      // 2. Internal review — Reina + Huayi only. Replies stay internal: the
+      // customer must never be on the reply path of this email.
       postResend(resendKey, {
         from: FROM,
-        reply_to: ret.customer_email,
-        to: [REINA, GEORGE],
+        reply_to: [REINA, HUAYI],
+        to: [REINA, HUAYI],
         subject: `[Return Review] ${ret.original_order_ref} — ${ret.customer_name}` +
           (withinPolicy === false ? ' ⚠ Past 30 Days' : withinPolicy === true ? ' ✓ Within Policy' : ''),
         html: internalHtml(ret, order, daysSincePurchase, withinPolicy, proofUrl, custRef),

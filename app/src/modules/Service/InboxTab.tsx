@@ -1,8 +1,10 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   useInbox, setInboxDisposition, SOURCE_LABEL, slaChip,
   type InboxDisposition, type ServiceTicket,
 } from '../../lib/service';
+import { useCustomers, buildPartyResolver, type CustomerPartyRow } from '../../lib/customers';
+import { TicketPartyLabel } from './TicketPartyLabel';
 import { useIsMobile } from '../../lib/useMediaQuery';
 import { NavCard } from '../../components/NavCard';
 import { MobileBackHeader } from '../../components/MobileBackHeader';
@@ -48,6 +50,13 @@ export function InboxTab() {
   const [filter, setFilter] = useState<DispositionFilter>('untriaged');
   const [sourceFilter, setSourceFilter] = useState<InboxSourceFilter>('all_sources');
   const { rows: allRows, loading } = useInbox(filter);
+  // FR-6: a conversation is a service_tickets row like any other, so resolve
+  // the household rather than printing its stale customer_name snapshot.
+  const { customers } = useCustomers();
+  const partiesFor = useMemo(
+    () => buildPartyResolver(customers as CustomerPartyRow[]),
+    [customers],
+  );
   const rows = sourceFilter === 'telemetry_auto'
     ? allRows.filter(r => r.source === 'telemetry_auto')
     : allRows;
@@ -70,7 +79,8 @@ export function InboxTab() {
     return (
       <>
         <MobileBackHeader
-          label={r.customer_name ?? r.customer_phone ?? r.customer_email ?? 'Unknown'}
+          label={partiesFor({ customerId: r.customer_id, fallbackName: r.customer_name }).displayName
+            || r.customer_phone || r.customer_email || 'Unknown'}
           onBack={() => setOpenId(null)}
         />
         <div style={{ padding: 4, display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -158,7 +168,8 @@ export function InboxTab() {
             <NavCard
               key={r.id}
               onClick={() => setOpenId(r.id)}
-              title={r.customer_name ?? r.customer_phone ?? r.customer_email ?? 'Unknown'}
+              title={partiesFor({ customerId: r.customer_id, fallbackName: r.customer_name }).displayName
+                || r.customer_phone || r.customer_email || 'Unknown'}
               subtitle={
                 (r.subject ? r.subject + ' · ' : '') +
                 (r.description ? r.description.slice(0, 60) : 'no body') +
@@ -231,7 +242,11 @@ export function InboxTab() {
                     {channelIcon(r.source)}
                   </span>
                 </td>
-                <td>{r.customer_name ?? r.customer_phone ?? r.customer_email ?? 'Unknown'}</td>
+                <td>
+                  {r.customer_name || r.customer_id
+                    ? <TicketPartyLabel ticket={r} partiesFor={partiesFor} />
+                    : (r.customer_phone ?? r.customer_email ?? 'Unknown')}
+                </td>
                 <td className={styles.inboxSnippet}>
                   {r.subject && <div className={styles.inboxSubject}>{r.subject}</div>}
                   {r.description && (

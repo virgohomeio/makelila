@@ -104,7 +104,7 @@ export function classifyChannel(source: string | null | undefined, medium?: stri
   if (s.includes('klaviyo') || s.includes('email') || m === 'email') return 'Email';
   if (s.includes('hubspot')) return 'HubSpot (legacy)';
   if (m === 'referral' || s.includes('referral')) return 'Referral';
-  if (s.includes('shopify') || s.includes('direct') || m === 'direct' || m === 'none') return 'Direct';
+  if (s.includes('shopify') || s.includes('direct') || s === 'offline' || m === 'direct' || m === 'none') return 'Direct';
   return paid ? `${source} (Paid)` : source;
 }
 

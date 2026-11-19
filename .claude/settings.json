@@ -11,6 +11,7 @@
       "Bash(npx supabase *)",
       "mcp__claude_ai_Supabase__list_migrations",
       "mcp__claude_ai_Supabase__apply_migration",
+      "mcp__supabase__apply_migration",
       "Bash(grep -nA3 \"export type TicketStatus\" app/src/lib/service.ts)",
       "Bash(git cherry-pick *)",
       "Bash(git ls-tree *)",

@@ -114,3 +114,22 @@ export function canViewPosting(role: Role | null | undefined, isAssignedIntervie
 export function canAccessHiringModule(role: Role | null | undefined, isAssignedToAnyPosting: boolean): boolean {
   return isLeadership(role) || isAssignedToAnyPosting;
 }
+
+/** Batch administration on the Stock page. Leadership always qualifies;
+ *  anyone else needs a `stock_managers` row (see the can_manage_batches()
+ *  RLS helper, which this mirrors). Deliberately NOT role-based: Junaid runs
+ *  Stock as an `operator`, and `operator` is the default role every new
+ *  sign-in receives — gating on it would gate on everyone.
+ *
+ *  Null-role handling follows canAccessHiringModule(), not canViewPosting():
+ *  isStockManager can only be true after an RLS-gated read filtered on the
+ *  caller's own id has already succeeded, so it proves an identified user on
+ *  its own. A null role at that moment means AuthProvider's profile fetch
+ *  has not resolved yet — treating it as a denial would flash-hide the
+ *  section from a legitimate stock manager. */
+export function canManageBatches(
+  role: Role | null | undefined,
+  isStockManager: boolean,
+): boolean {
+  return isLeadership(role) || isStockManager;
+}

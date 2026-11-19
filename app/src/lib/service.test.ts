@@ -1,5 +1,44 @@
 import { describe, it, expect } from 'vitest';
-import { onboardingAnchorDate, shouldNotifyAssignment, ownerFirstName } from './service';
+import {
+  onboardingAnchorDate, shouldNotifyAssignment, ownerFirstName,
+  ticketStatusSet, sourceLabel,
+} from './service';
+
+describe('ticketStatusSet', () => {
+  it('unions the status column with the tags array', () => {
+    expect(ticketStatusSet({ status: 'in_progress', tags: ['queued_for_replacement'] }))
+      .toEqual(['in_progress', 'queued_for_replacement']);
+  });
+
+  it('returns TICKET_STATUSES order, not tag insertion order', () => {
+    expect(ticketStatusSet({ status: 'on_hold', tags: ['queued_for_replacement', 'in_progress'] }))
+      .toEqual(['in_progress', 'queued_for_replacement', 'on_hold']);
+  });
+
+  it('includes the Return/Refund status', () => {
+    expect(ticketStatusSet({ status: 'return_refund', tags: ['on_hold'] }))
+      .toEqual(['return_refund', 'on_hold']);
+  });
+
+  it('never duplicates a status that is in both columns', () => {
+    expect(ticketStatusSet({ status: 'in_progress', tags: ['in_progress', 'on_hold'] }))
+      .toEqual(['in_progress', 'on_hold']);
+  });
+
+  it('handles rows written before multi-select (null / empty tags)', () => {
+    expect(ticketStatusSet({ status: 'waiting_on_us', tags: null })).toEqual(['waiting_on_us']);
+    expect(ticketStatusSet({ status: 'waiting_on_us', tags: [] })).toEqual(['waiting_on_us']);
+  });
+
+  // The frontend and DB status vocabularies have drifted before and
+  // white-screened the Support tab. Unknown values must survive to the
+  // humanize fallback, never be filtered away.
+  it('passes through statuses this build does not recognize', () => {
+    expect(ticketStatusSet({ status: 'triaging' as never, tags: [] })).toEqual(['triaging']);
+    expect(ticketStatusSet({ status: 'in_progress', tags: ['triaging' as never] }))
+      .toEqual(['in_progress', 'triaging']);
+  });
+});
 
 describe('onboardingAnchorDate', () => {
   it('uses the latest onboarding call date, sliced to YYYY-MM-DD', () => {
@@ -67,5 +106,11 @@ describe('ownerFirstName', () => {
   it('splits on separators in the local-part', () => {
     expect(ownerFirstName('mary.jane@virgohome.io')).toBe('Mary');
     expect(ownerFirstName('jon_snow@virgohome.io')).toBe('Jon');
+  });
+});
+
+describe('sourceLabel — Lovely app', () => {
+  it('labels tickets synced from the Lovely app', () => {
+    expect(sourceLabel('lovely_app')).toBe('From Lovely app');
   });
 });

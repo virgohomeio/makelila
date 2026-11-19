@@ -1,9 +1,29 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   The one piece of chrome on every screen.
+
+   It was a flat strip of twelve 11px labels in a cold #888, in an order that
+   matched nothing — Team and Marketing led, Products trailed, and Stock sat
+   between Shipping and Service, breaking the one sequence a reader could
+   otherwise have inferred. Twelve equally-weighted items with no seams give
+   an operator no sense of where they are, so every switch is a scan of all
+   twelve rather than a glance at a group of four.
+
+   The modules are now ordered as an order's life (Sales → Fulfillment →
+   Shipping → Service), then the records that outlive it, then the company.
+   Hairlines mark the two seams. Nothing was added or removed.
+
+   Colour: every grey now comes from the --color-on-dark ramp, so the nav
+   belongs to the same warm palette as the page instead of being four
+   hand-picked neutrals. Ladybug Red is left doing exactly one job here —
+   the active marker and the wordmark — and no longer also paints the
+   notification bell sitting inches away from it.
+   ══════════════════════════════════════════════════════════════════════════ */
 .nav {
   background: var(--color-dark-0);
   display: flex;
   align-items: center;
   gap: 0;
-  padding: 0 16px;
+  padding: 0 var(--space-3);
   border-radius: 0;
   height: var(--nav-height);
   width: 100%;
@@ -16,61 +36,97 @@
 .brand {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding-right: 20px;
+  gap: var(--space-2);
+  padding-right: var(--space-4);
+  margin-right: var(--space-3);
   border-right: 1px solid var(--color-dark-3);
-  margin-right: 8px;
-  color: #fff;
+  color: var(--color-on-dark);
   text-decoration: none;
   cursor: pointer;
+  flex: none;
 }
 
-.brand:hover .brandWordmark {
-  color: var(--color-crimson-dark);
-}
+.brand:hover .brandWordmark { color: var(--color-crimson-dark); }
+.brand:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: var(--radius-sm); }
 
 .brandLogo {
-  height: 28px;
+  height: 24px;
   width: auto;
   display: block;
   /* The logo PNG has a white background in the source artwork; treat it as
      a square badge on the dark nav by masking with the provided square. */
-  background: #fff;
-  border-radius: 4px;
+  background: var(--color-raised);
+  border-radius: var(--radius-sm);
   padding: 2px;
 }
 
 .brandWordmark {
   font-family: var(--font-logo);
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 700;
   letter-spacing: 0.1em;
   color: var(--color-crimson);
+  transition: color var(--dur-fast) var(--ease-out);
 }
 
+/* 12px/500 rather than 11px/600. The old weight was compensating for a size
+   that was too small to read at a glance, which is why the strip looked
+   dense and shouty at the same time. */
 .item {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 0 14px;
   height: var(--nav-height);
-  font-size: 11px;
-  font-weight: 600;
-  color: #888;
+  padding: 0 var(--space-3);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.005em;
+  color: var(--color-on-dark-muted);
   cursor: pointer;
   border-bottom: 2px solid transparent;
-  transition: color 0.1s;
   white-space: nowrap;
+  transition: color var(--dur-fast) var(--ease-out),
+              background var(--dur-fast) var(--ease-out);
 }
 
-.item:hover { color: #ccc; }
+.item:hover {
+  color: var(--color-on-dark);
+  background: var(--color-dark-2);
+}
+.item:focus-visible { outline: none; box-shadow: inset var(--focus-ring); }
 
 .active {
-  color: #fff;
-  border-bottom: 2px solid var(--color-crimson);
+  color: var(--color-on-dark);
+  font-weight: 600;
+  background: var(--color-dark-1);
+  border-bottom-color: var(--color-crimson);
+}
+.active:hover { background: var(--color-dark-1); }
+
+/* The seam between one group of modules and the next. */
+.groupBreak {
+  align-self: center;
+  width: 1px;
+  height: 16px;
+  margin: 0 var(--space-2);
+  background: var(--color-dark-3);
+  flex: none;
 }
 
 .spacer { flex: 1; }
+
+/* The right-hand cluster: notifications, then who you are. The bell used to
+   sit immediately after the wordmark, ahead of every module link — the one
+   position in a nav bar that reads as "part of the brand lockup" rather than
+   "your alerts". */
+.tray {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding-left: var(--space-3);
+  margin-left: var(--space-2);
+  border-left: 1px solid var(--color-dark-3);
+  flex: none;
+}
 
 /* ============================================================
  * Mobile drilldown nav (2026-06-07 redesign, backlog #80)
@@ -84,15 +140,15 @@
  * ============================================================ */
 @media (max-width: 700px) {
   .nav {
-    padding: 0 12px;
+    padding: 0 var(--space-3);
     border-radius: 0;
     /* iOS notch breathing room. */
-    padding-left: max(12px, env(safe-area-inset-left));
-    padding-right: max(12px, env(safe-area-inset-right));
+    padding-left: max(var(--space-3), env(safe-area-inset-left));
+    padding-right: max(var(--space-3), env(safe-area-inset-right));
   }
 
   .brand {
-    padding-right: 12px;
+    padding-right: var(--space-3);
     margin-right: 0;
     flex-shrink: 0;
     border-right: none;
@@ -103,17 +159,21 @@
     font-size: 18px;
   }
 
-  .item {
-    display: none;
-  }
+  .item, .groupBreak { display: none; }
+
+  .tray { border-left: none; padding-left: 0; margin-left: 0; }
 
   .spacer { flex: 1; }
 }
 
-/* Coarse-pointer (touch) devices — hover styles never trigger, so the
- * "inactive item" color stays at #888 forever. Bump it brighter so
- * inactive items are still legible at arm's length. */
+/* Coarse-pointer (touch) devices — hover styles never trigger, so an
+ * inactive item's colour is the only colour it will ever have. Lift it to
+ * the full on-dark ramp so items stay legible at arm's length. */
 @media (hover: none) {
-  .item { color: #b0b0b0; }
-  .item:hover { color: #b0b0b0; }
+  .item { color: var(--color-on-dark); }
+  .item:hover { color: var(--color-on-dark); background: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .item, .brandWordmark { transition: none; }
 }

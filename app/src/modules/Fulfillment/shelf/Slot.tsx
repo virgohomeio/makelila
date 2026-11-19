@@ -12,12 +12,13 @@ const SHELF_STATUS_REASON: Record<string, string> = {
 };
 
 function slotTooltip(slot: ShelfSlot): string {
-  if (!slot.serial) return `Empty · Skid ${slot.skid} · slot ${slot.slot_index}`;
+  const where = `${slot.location} · ${slot.skid} · slot ${slot.slot_index}`;
+  if (!slot.serial) return `Empty · ${where}`;
   return [
     slot.serial,
     `Shelf: ${SHELF_STATUS_REASON[slot.status] ?? slot.status}`,
     slot.unit_status ? `Machine: ${getStatusMeta(slot.unit_status).label}` : null,
-    `Skid ${slot.skid} · slot ${slot.slot_index}`,
+    where,
   ].filter(Boolean).join('\n');
 }
 

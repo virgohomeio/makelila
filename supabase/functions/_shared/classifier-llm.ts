@@ -28,6 +28,19 @@ const TICKET_STATUSES = [
 ] as const;
 type TicketStatus = (typeof TICKET_STATUSES)[number];
 
+// 'queued_for_replacement' is no longer a status the classifier may assign — it
+// is a TAG owned by the replacement-order workflow (see migration
+// 20260810120000), which knows an actual replacement order exists. Inferring it
+// from message text would clobber the operator's workflow status.
+//
+// It stays in TICKET_STATUSES above so validation still ACCEPTS it and we
+// coerce rather than discarding an otherwise-good classification — the prompt
+// no longer offers it, but a cached or in-flight response still might.
+const CLASSIFIER_STATUS_FALLBACK: Record<string, TicketStatus> = {
+  queued_for_replacement: 'in_progress',
+};
+const CLASSIFIABLE_STATUSES = TICKET_STATUSES.filter(s => !(s in CLASSIFIER_STATUS_FALLBACK));
+
 export type UnitContext = {
   serial: string;
   model?: string | null;
@@ -86,7 +99,7 @@ Analyze this support thread and return strict JSON with exactly these fields:
 {
   "priority": one of ["urgent","high","medium","low"],
   "category": one of [${LLM_CATEGORIES.map(c => `"${c}"`).join(',')}],
-  "status": one of ["waiting_on_us","in_progress","waiting_on_customer","queued_for_replacement","call_scheduled","on_hold","closed"],
+  "status": one of [${CLASSIFIABLE_STATUSES.map(s => `"${s}"`).join(',')}],
   "issue_area": one of ["electrical","mechanical","software","shipping","billing","onboarding","other"],
   "root_cause": "concise specific root cause in plain English, max 120 chars",
   "summary": "1-2 sentences on the current state of this support case",
@@ -97,8 +110,10 @@ Analyze this support thread and return strict JSON with exactly these fields:
 Status assignment rules:
 - waiting_on_us: last message was inbound from customer and staff has not replied yet
 - waiting_on_customer: staff replied last; waiting for customer response
-- in_progress: being actively diagnosed or worked (appointment pending, trial fix underway)
-- queued_for_replacement: confirmed hardware defect, unit replacement arranged or pending
+- in_progress: being actively diagnosed or worked (appointment pending, trial fix underway).
+  A confirmed hardware defect with a replacement arranged is ALSO in_progress —
+  "queued for replacement" is a tag applied by the replacement-order workflow,
+  never a status you assign.
 - call_scheduled: a call or technician visit is booked
 - on_hold: parked — waiting for parts, carrier update, or third party
 - closed: fully resolved or acknowledged as closed
@@ -154,7 +169,9 @@ Respond with JSON only. No markdown, no preamble.`;
     if (!TICKET_STATUSES.includes(parsed.status as TicketStatus)) return null;
     if (!ISSUE_AREAS.includes(parsed.issue_area as IssueArea)) return null;
     if (typeof parsed.root_cause !== 'string') return null;
-    return parsed;
+    // Coerce statuses the classifier is no longer allowed to assign.
+    const fallback = CLASSIFIER_STATUS_FALLBACK[parsed.status];
+    return fallback ? { ...parsed, status: fallback } : parsed;
   } catch {
     console.warn(`Failed to parse LLM JSON: ${text.slice(0, 200)}`);
     return null;

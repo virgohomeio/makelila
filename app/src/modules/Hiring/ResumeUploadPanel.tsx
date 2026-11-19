@@ -2,7 +2,13 @@ import { useCallback, useState } from 'react';
 import styles from './Hiring.module.css';
 import { uploadAndScoreResume, type CandidateSource } from '../../lib/hiring';
 
-type UploadState = { file: File; status: 'pending' | 'uploading' | 'scoring' | 'done' | 'error'; message?: string };
+type UploadState = {
+  file: File;
+  status: 'pending' | 'uploading' | 'scoring' | 'done' | 'error';
+  message?: string;
+  /** Filed a new applicant, or matched one already on the board. */
+  duplicate?: boolean;
+};
 
 export function ResumeUploadPanel({ postingId, source, onUploaded }: {
   postingId: string; source: CandidateSource; onUploaded: () => void;
@@ -23,7 +29,8 @@ export function ResumeUploadPanel({ postingId, source, onUploaded }: {
       try {
         setUploads(prev => prev.map(u => u.file === entry.file ? { ...u, status: 'scoring' } : u));
         const result = await uploadAndScoreResume({ postingId, file: entry.file, source });
-        setUploads(prev => prev.map(u => u.file === entry.file ? { ...u, status: 'done', message: result.full_name } : u));
+        setUploads(prev => prev.map(u =>
+          u.file === entry.file ? { ...u, status: 'done', message: result.full_name, duplicate: result.duplicate } : u));
         onUploaded();
       } catch (e) {
         const message = e instanceof Error ? e.message : 'Unknown error';
@@ -51,12 +58,14 @@ export function ResumeUploadPanel({ postingId, source, onUploaded }: {
         <div key={i} className={styles.uploadRow}>
           <span>{u.file.name}</span>
           <span className={`${styles.uploadStatus} ${
-            u.status === 'error' ? styles.uploadError : u.status === 'done' ? styles.uploadSuccess : styles.uploadPending
+            u.status === 'error' ? styles.uploadError
+              : u.status === 'done' ? (u.duplicate ? styles.uploadDuplicate : styles.uploadSuccess)
+              : styles.uploadPending
           }`}>
             {u.status === 'pending' && 'Queued'}
             {u.status === 'uploading' && 'Uploading…'}
             {u.status === 'scoring' && 'Scoring against JD…'}
-            {u.status === 'done' && `Filed: ${u.message}`}
+            {u.status === 'done' && (u.duplicate ? `Already on the board: ${u.message}` : `Filed: ${u.message}`)}
             {u.status === 'error' && u.message}
           </span>
         </div>

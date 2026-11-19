@@ -2,8 +2,6 @@
   position: relative;
   display: flex;
   align-items: center;
-  margin-left: 4px;
-  margin-right: 8px;
 }
 
 .bell {
@@ -16,7 +14,12 @@
   border: none;
   border-radius: 8px;
   background: transparent;
-  color: var(--color-crimson);
+  /* The glyph is chrome, not an alert. It was crimson at all times, which
+     put a permanent red mark in the nav two inches from the red wordmark and
+     left nothing for the badge to escalate to. The unread badge below stays
+     crimson — an unread count is exactly the kind of urgent number the
+     accent is reserved for. */
+  color: var(--color-on-dark-muted);
   font-size: 18px;
   line-height: 1;
   cursor: pointer;
@@ -24,6 +27,7 @@
 
 .bell:hover {
   background: var(--color-dark-3);
+  color: var(--color-on-dark);
 }
 
 .bellActive {
@@ -39,7 +43,7 @@
   padding: 0 4px;
   border-radius: 999px;
   background: var(--color-crimson);
-  color: #fff;
+  color: var(--color-raised);
   font-size: 10px;
   font-weight: 800;
   line-height: 16px;

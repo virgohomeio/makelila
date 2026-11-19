@@ -7,6 +7,12 @@
 
 Every LILA Composter is covered by a **3-year manufacturer warranty** from the original date of purchase.
 
+### Warranty Activation Requirement (effective 2026-08-06)
+
+To activate and maintain manufacturer warranty coverage, the unit must be connected to the **Lovely App** — either before the customer's onboarding session or immediately after it. App connection enables the remote diagnostics and firmware updates that keep the unit eligible for warranty service. This requirement applies to all onboarding sessions conducted from 2026-08-06 onward.
+
+*(Draft note: exact consequence for a unit never connected — full coverage void vs. partial, e.g. no remote-diagnosis/firmware coverage — is pending confirmation; do not quote a specific outcome to customers until finalized.)*
+
 ### What's Covered
 
 **Mechanical & Electrical Components**

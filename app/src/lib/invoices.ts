@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { supabase } from './supabase';
+import { logAction } from './activityLog';
 
 export type InvoiceDocType = 'invoice' | 'refund_receipt';
 
@@ -22,6 +23,14 @@ export type CustomerInvoice = {
   storage_path: string;
   invoice_date: string | null;   // ISO date "YYYY-MM-DD"
   total_cad: number | null;
+  // What the customer actually paid — the invoice's "Payment" line. This, not
+  // total_cad, is what a refund is based on: "Total Due" reads $0.00 once the
+  // payment has been applied, which is why refund cards used to open at $0.00.
+  // Null on invoices ingested before the split, until "Re-read amounts" runs.
+  payment_cad: number | null;
+  // When the PDF was last read for payment_cad — set even when the invoice has
+  // no Payment line, so the backfill doesn't revisit it forever.
+  payment_extracted_at: string | null;
   bill_to_name: string | null;
   match_status: InvoiceMatchStatus;
   match_method: string | null;   // 'order_number' | 'email' | 'name' | 'manual' | null
@@ -35,8 +44,85 @@ export type BulkUploadResult = {
   ok: boolean;
   invoice?: CustomerInvoice;
   error?: string;
+  // Why the PDF's fields couldn't be read, when the row was still filed. The
+  // row lands in the review queue either way, so without this the operator
+  // sees "unassigned" with no cause — which is how an extractor that had been
+  // dead since 2026-08-13 went unnoticed until every upload needed assigning
+  // by hand. Always render it.
   extract_error?: string | null;
+  // Which LLM provider read the PDF ('claude' | 'qwen' | 'openai'), null when
+  // none could.
+  provider?: string | null;
 };
+
+/** The amount an invoice is worth in CAD, for display and for defaulting a
+ *  refund: the "Payment" figure when we have it, else the invoice total. Both
+ *  can be legitimately absent (unparsed PDF), hence null. Zero is treated as
+ *  "no usable amount" — a $0.00 total is the "Total Due" artefact this column
+ *  pair exists to work around, never a real invoice value. */
+export function invoiceAmountCad(inv: Pick<CustomerInvoice, 'payment_cad' | 'total_cad'>): number | null {
+  for (const v of [inv.payment_cad, inv.total_cad]) {
+    if (v != null && Number(v) > 0) return Number(v);
+  }
+  return null;
+}
+
+/** The invoice to base a refund on for this customer, newest first, preferring
+ *  one whose order_ref matches the return's order. Refund receipts are skipped —
+ *  a refund is priced off the original sale, not off a previous refund. */
+export function pickRefundBasisInvoice(
+  invoices: CustomerInvoice[],
+  orderRef?: string | null,
+): CustomerInvoice | null {
+  const sales = invoices.filter(i => i.document_type === 'invoice' && invoiceAmountCad(i) != null);
+  if (!sales.length) return null;
+  const ref = (orderRef ?? '').trim().replace(/^#/, '');
+  if (ref) {
+    const onOrder = sales.find(i => (i.order_ref ?? '').trim().replace(/^#/, '') === ref);
+    if (onOrder) return onOrder;
+  }
+  return [...sales].sort((a, b) =>
+    (b.invoice_date ?? b.created_at).localeCompare(a.invoice_date ?? a.created_at))[0];
+}
+
+/** One customer's invoices, looked up by email — the same email → customer →
+ *  invoice chain the Refunds tab renders, but as a one-shot query for callers
+ *  outside React (e.g. compiling a return into a refund). */
+export async function invoicesForCustomerEmail(email: string): Promise<CustomerInvoice[]> {
+  const clean = email.trim().toLowerCase();
+  if (!clean) return [];
+  const { data: custs } = await supabase
+    .from('customers').select('id').ilike('email', clean);
+  const ids = ((custs ?? []) as { id: string }[]).map(c => c.id);
+  if (!ids.length) return [];
+  const { data } = await supabase
+    .from('customer_invoices').select('*').in('customer_id', ids);
+  return (data ?? []) as CustomerInvoice[];
+}
+
+/** Re-read amounts from the stored PDFs for invoices never read for a payment
+ *  (i.e. everything ingested before the Payment/Total Due split). One batch per
+ *  call; loop while `updated > 0 && remaining > 0`. Rows whose PDF won't parse
+ *  come back in `stalled`/`errors` and stay unread, so a loop watching only
+ *  `remaining` would never terminate. */
+export type ReextractResult = {
+  processed: number;
+  updated: number;
+  remaining: number;
+  stalled: number;
+  errors: { file_name: string; error: string }[];
+  providers?: string[];
+};
+
+export async function reextractInvoiceAmounts(limit = 20): Promise<ReextractResult> {
+  const { data, error } = await supabase.functions.invoke('match-invoice', {
+    body: { reextract: true, limit },
+  });
+  if (error) throw new Error(error.message);
+  const res = data as ReextractResult & { error?: string };
+  if (res?.error) throw new Error(res.error);
+  return res;
+}
 
 export function useCustomerInvoices(customerId: string) {
   const [invoices, setInvoices] = useState<CustomerInvoice[]>([]);
@@ -155,6 +241,35 @@ export async function getInvoiceSignedUrl(storagePath: string): Promise<string> 
   return data.signedUrl;
 }
 
+/** Open an invoice PDF in a new tab.
+ *
+ *  Every "View" button used to sign the URL first and only then call
+ *  window.open — by which point the await had ended the user-gesture window,
+ *  so browsers blocked the tab silently (Safari always, Chrome depending on
+ *  how long signing took). The click looked like it did nothing at all.
+ *
+ *  So claim the tab synchronously inside the gesture, then point it at the
+ *  signed URL once we have it. Note the open() deliberately omits 'noopener':
+ *  that feature makes the call return null by spec, and we need the handle —
+ *  the opener is severed manually instead. If the browser blocked even the
+ *  synchronous open, fall back to navigating the current tab so the operator
+ *  still gets the PDF. */
+export async function openInvoiceInNewTab(storagePath: string): Promise<void> {
+  const tab = window.open('', '_blank');
+  if (tab) {
+    try { tab.opener = null; } catch { /* cross-origin guard; harmless */ }
+    try { tab.document.write('Loading invoice…'); } catch { /* not writable; fine */ }
+  }
+  try {
+    const url = await getInvoiceSignedUrl(storagePath);
+    if (tab && !tab.closed) tab.location.replace(url);
+    else window.location.assign(url);
+  } catch (e) {
+    try { tab?.close(); } catch { /* already gone */ }
+    throw e;
+  }
+}
+
 export async function deleteInvoice(id: string, storagePath: string): Promise<void> {
   const { error: dbErr } = await supabase
     .from('customer_invoices')
@@ -246,7 +361,9 @@ export async function bulkUploadAndMatch(
       continue;
     }
 
-    const { data, error } = await supabase.functions.invoke<{ invoice: CustomerInvoice; extract_error: string | null }>(
+    const { data, error } = await supabase.functions.invoke<{
+      invoice: CustomerInvoice; extract_error: string | null; provider: string | null;
+    }>(
       'match-invoice',
       { body: { storage_path: storagePath, file_name: file.name, document_type: documentType } },
     );
@@ -257,9 +374,42 @@ export async function bulkUploadAndMatch(
       results.push({ file_name: file.name, ok: false, error: error?.message ?? 'No response from matcher' });
       continue;
     }
-    results.push({ file_name: file.name, ok: true, invoice: data.invoice, extract_error: data.extract_error });
+    results.push({
+      file_name: file.name, ok: true, invoice: data.invoice,
+      extract_error: data.extract_error, provider: data.provider,
+    });
   }
   return results;
+}
+
+/** Upload one sales invoice / refund receipt straight from a customer's
+ *  profile. Runs the same parse + match as the Upload tab, then files it under
+ *  THIS customer — the operator chose the profile, so that wins over whatever
+ *  the matcher resolved. An order the matcher linked is kept only when it
+ *  belongs to this customer. */
+export async function uploadInvoiceForCustomer(
+  file: File, documentType: InvoiceDocType, customerId: string,
+): Promise<BulkUploadResult> {
+  const [res] = await bulkUploadAndMatch([file], documentType);
+  if (!res?.ok || !res.invoice) return res;
+  const inv = res.invoice;
+  if (inv.customer_id !== customerId || inv.match_status !== 'matched') {
+    const keepOrder = inv.customer_id === customerId;
+    await assignInvoice(inv.id, keepOrder
+      ? { customerId }
+      : { customerId, orderId: null, orderRef: inv.order_ref ?? null });
+    res.invoice = {
+      ...inv, customer_id: customerId, match_status: 'matched',
+      ...(keepOrder ? {} : { order_id: null }),
+    };
+  }
+  await logAction(
+    'invoice_uploaded',
+    inv.invoice_number || file.name,
+    `${documentType === 'refund_receipt' ? 'Refund receipt' : 'Sales invoice'} uploaded from the customer profile`,
+    { entityType: 'customer', entityId: customerId },
+  );
+  return res;
 }
 
 /** Manual assignment from the review queue: link an invoice to a customer

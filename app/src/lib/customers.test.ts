@@ -48,7 +48,7 @@ vi.mock('./activityLog', () => ({
 }));
 
 // ── import after mocks ──────────────────────────────────────────────────────
-import { parseUtm, upsertHubSpotContact, followUpDueDates, computeFuState, refundUsageWindow, resolvePurchaserId, buildPurchaserIdByEmail, type Customer } from './customers';
+import { parseUtm, upsertHubSpotContact, followUpDueDates, computeFuState, refundUsageWindow, resolvePurchaserId, buildPurchaserIdByEmail, resolveRefundParties, isPlausibleEmail, PRIMARY_USER_RELATIONSHIPS, type Customer } from './customers';
 
 const base: Customer = {
   id: 'c1', hubspot_id: null, email: 'a@b.com', first_name: null, last_name: null,
@@ -62,7 +62,9 @@ const base: Customer = {
   journey_stage_override_at: null, journey_stage_override_by: null,
   first_touch_source: null, first_touch_campaign_id: null, first_touch_at: null,
   last_touch_source: null, last_touch_campaign_id: null, last_touch_at: null,
-  telemetry_autoticket_suppress: false, purchaser_id: null, created_at: '', updated_at: '',
+  telemetry_autoticket_suppress: false, purchaser_id: null,
+  primary_user_name: null, primary_user_phone: null, primary_user_email: null,
+  primary_user_relationship: null, created_at: '', updated_at: '',
 };
 
 // ── refundUsageWindow (30-day refund eligibility window) ────────────────────
@@ -294,5 +296,90 @@ describe('buildPurchaserIdByEmail', () => {
   it('skips rows without an email', () => {
     const m = buildPurchaserIdByEmail([{ id: 'x', email: null, purchaser_id: null }]);
     expect(m.size).toBe(0);
+  });
+});
+
+// FR-6: the customer directory link is the authoritative purchaser/user source
+// for the refund workflow. A filer whose customer row points at a purchaser is
+// the USER; the linked row is the PURCHASER.
+// FR-6: every card resolves to a definite purchaser + primary user (no
+// "unconfirmed"). The filer defaults to being both, splitting only on a link.
+describe('resolveRefundParties', () => {
+  const cust = (id: string, full_name: string, purchaser_id: string | null, primary_user_name: string | null) =>
+    ({ id, full_name, purchaser_id, primary_user_name });
+  const byEmail = new Map([
+    ['amanda@x.com', cust('amanda', 'Amanda Acker', null, null)],
+    ['chad@x.com',   cust('chad', 'Chad Lockhart', null, 'Sarah Lockhart')],
+    ['lily@x.com',   cust('lily', 'Lily Xiao Xu', 'annie', null)],
+  ]);
+  const byId = new Map<string, { full_name: string; primary_user_name: string | null }>([
+    ['amanda', { full_name: 'Amanda Acker', primary_user_name: null }],
+    ['chad',   { full_name: 'Chad Lockhart', primary_user_name: 'Sarah Lockhart' }],
+    ['annie',  { full_name: 'Annie Chunli Wu', primary_user_name: null }],
+    ['lily',   { full_name: 'Lily Xiao Xu', primary_user_name: null }],
+  ]);
+
+  it('a lone customer is BOTH purchaser and primary user (no split, no "?")', () => {
+    const r = resolveRefundParties({ filerEmail: 'amanda@x.com', filerName: 'Amanda Acker', byEmail, byId });
+    expect(r).toMatchObject({ purchaser: 'Amanda Acker', primaryUser: 'Amanda Acker', samePerson: true, filerIsPurchaser: true, filerIsPrimaryUser: true });
+  });
+
+  it('splits when a separate primary user is named (Chad purchaser, Sarah primary user)', () => {
+    const r = resolveRefundParties({ filerEmail: 'Chad@X.com ', filerName: 'Chad Lockhart', byEmail, byId });
+    expect(r).toMatchObject({ purchaser: 'Chad Lockhart', primaryUser: 'Sarah Lockhart', samePerson: false, filerIsPurchaser: true, filerIsPrimaryUser: false });
+  });
+
+  it('a linked filer is the primary user, the linked row is the purchaser (Lily files for Annie)', () => {
+    const r = resolveRefundParties({ filerEmail: 'lily@x.com', filerName: 'Lily Xu', byEmail, byId });
+    expect(r).toMatchObject({ purchaser: 'Annie Chunli Wu', primaryUser: 'Lily Xiao Xu', filerIsPurchaser: false, filerIsPrimaryUser: true });
+  });
+
+  it('unknown filer with a gift attestation → purchaser from the form, filer is the primary user', () => {
+    const r = resolveRefundParties({ filerEmail: 'rj@x.com', filerName: 'RJ', byEmail, byId, attestIsPurchaser: false, attestPurchaserName: 'Katrina' });
+    expect(r).toMatchObject({ purchaser: 'Katrina', primaryUser: 'RJ', filerIsPurchaser: false, filerIsPrimaryUser: true });
+  });
+
+  it('unknown filer, no attestation → filer is both', () => {
+    const r = resolveRefundParties({ filerEmail: 'ghost@x.com', filerName: 'Ghost', byEmail, byId });
+    expect(r).toMatchObject({ purchaser: 'Ghost', primaryUser: 'Ghost', samePerson: true, filerIsPurchaser: true });
+  });
+});
+
+// ── isPlausibleEmail (guards the directory's editable contact fields) ────────
+describe('isPlausibleEmail', () => {
+  it.each([
+    'reina@virgohome.io',
+    'first.last+tag@sub.example.co.uk',
+    '  padded@example.com  ',
+  ])('accepts %s', (v) => {
+    expect(isPlausibleEmail(v)).toBe(true);
+  });
+
+  it.each([
+    'not-an-email',
+    'missing@tld',
+    '@example.com',
+    'two words@example.com',
+    'spaces in@both.com',
+    '',
+  ])('rejects %s', (v) => {
+    expect(isPlausibleEmail(v)).toBe(false);
+  });
+});
+
+// ── primary-user relationship picklist ──────────────────────────────────────
+describe('PRIMARY_USER_RELATIONSHIPS', () => {
+  it('leads with the spouse/partner case the field was asked for', () => {
+    expect(PRIMARY_USER_RELATIONSHIPS[0]).toBe('Spouse / partner');
+  });
+
+  it('has no duplicates and no blank entries (they back <option value>)', () => {
+    const list = [...PRIMARY_USER_RELATIONSHIPS];
+    expect(new Set(list).size).toBe(list.length);
+    expect(list.every(v => v.trim().length > 0)).toBe(true);
+  });
+
+  it('does not itself contain the Other sentinel — that is UI-only, never stored', () => {
+    expect([...PRIMARY_USER_RELATIONSHIPS].some(v => v.startsWith('Other'))).toBe(false);
   });
 });

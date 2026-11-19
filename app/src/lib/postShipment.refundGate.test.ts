@@ -6,7 +6,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // ── hoisted mock state ──────────────────────────────────────────────────────
-const { fromMock, getUserMock, logActionMock, state } = vi.hoisted(() => {
+const { fromMock, getSessionMock, getUserMock, logActionMock, state } = vi.hoisted(() => {
   const state: {
     approval: any;
     ret: any;
@@ -14,6 +14,11 @@ const { fromMock, getUserMock, logActionMock, state } = vi.hoisted(() => {
     updateCalled: boolean;
   } = { approval: null, ret: null, updatePatch: null, updateCalled: false };
 
+  // currentUserId() prefers the cached session and only falls back to
+  // getUser() when there is none, so both have to resolve to the same manager.
+  const getSessionMock = vi.fn(() =>
+    Promise.resolve({ data: { session: { user: { id: 'mgr-1' } } } }),
+  );
   const getUserMock = vi.fn(() =>
     Promise.resolve({ data: { user: { id: 'mgr-1' } } }),
   );
@@ -40,11 +45,11 @@ const { fromMock, getUserMock, logActionMock, state } = vi.hoisted(() => {
     }),
   }));
 
-  return { fromMock, getUserMock, logActionMock, state };
+  return { fromMock, getSessionMock, getUserMock, logActionMock, state };
 });
 
 vi.mock('./supabase', () => ({
-  supabase: { from: fromMock, auth: { getUser: getUserMock } },
+  supabase: { from: fromMock, auth: { getSession: getSessionMock, getUser: getUserMock } },
 }));
 vi.mock('./activityLog', () => ({ logAction: logActionMock }));
 
@@ -95,10 +100,13 @@ describe('returnStatusAllowsRefund', () => {
 // FR-1 (PRD §4): the two Account-Manager-owned pre-manager columns. A return
 // with no refund request yet belongs to "Return Form Submitted" (Intake / New)
 // or "Return & Inspection" by its unit status. Terminal statuses map to neither.
+// 'discarded' is not terminal here: the unit question is settled (BR-7) but the
+// refund is still owed, so it waits in Return & Inspection to be compiled —
+// mapping it to null made the card vanish from the board (Amanda Acker, #1172).
 describe('preRefundStage (FR-1 board split)', () => {
   const intake: ReturnStatus[] = ['created', 'pickup_scheduled', 'picked_up'];
-  const inspection: ReturnStatus[] = ['received', 'inspected'];
-  const neither: ReturnStatus[] = ['refunded', 'denied', 'closed', 'discarded'];
+  const inspection: ReturnStatus[] = ['received', 'inspected', 'discarded'];
+  const neither: ReturnStatus[] = ['refunded', 'denied', 'closed'];
 
   it.each(intake)('routes "%s" to the Return Form Submitted (intake) column', (status) => {
     expect(preRefundStage(status)).toBe('intake');
@@ -118,7 +126,7 @@ describe('preRefundStage (FR-1 board split)', () => {
     const overlap = RETURN_INTAKE_STATUSES.filter(s => RETURN_INSPECTION_STATUSES.includes(s));
     expect(overlap).toEqual([]);
     expect([...RETURN_INTAKE_STATUSES, ...RETURN_INSPECTION_STATUSES].sort()).toEqual(
-      ['created', 'inspected', 'picked_up', 'pickup_scheduled', 'received'].sort(),
+      ['created', 'discarded', 'inspected', 'picked_up', 'pickup_scheduled', 'received'].sort(),
     );
   });
 });

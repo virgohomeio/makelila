@@ -4,6 +4,13 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { corsHeaders } from '../_shared/cors.ts';
 import { authenticate } from '../_shared/auth.ts';
+import { archiveBcc, DEFAULT_ARCHIVE_BCC } from '../_shared/emailArchive.ts';
+import { textToEmailHtml } from '../_shared/emailHtml.ts';
+import { resolveOrderPhone, sendQuoSms, type QuoSmsResult } from '../_shared/quoSms.ts';
+
+/** The automatic onboarding-instructions email goes this long after the
+ *  shipping email. send-onboarding-instructions (cron) does the sending. */
+const ONBOARDING_DELAY_MS = 24 * 60 * 60 * 1000;
 
 type QueueRow = {
   id: string;
@@ -14,13 +21,23 @@ type QueueRow = {
   tracking_num: string | null;
   starter_tracking_num: string | null;
   email_sent_at: string | null;
+  dock_confirmed_at: string | null;
 };
 
 type OrderRow = {
   order_ref: string;
   customer_name: string;
   customer_email: string | null;
+  customer_id: string | null;
+  customer_phone: string | null;
+  kind: 'sale' | 'replacement';
   country: 'US' | 'CA';
+};
+
+type CustomerRow = {
+  full_name: string | null;
+  email: string | null;
+  primary_user_email: string | null;
 };
 
 Deno.serve(async (req: Request) => {
@@ -61,8 +78,21 @@ async function handle(req: Request): Promise<Response> {
     );
   }
 
-  const body = await req.json() as { queue_id?: string };
-  if (!body.queue_id) {
+  // `subject`/`body` are the rendered text exactly as the operator saw it in
+  // Step 5, sent verbatim. This function keeps NO copy of the wording: the
+  // default lives in app/src/lib/shipmentEmailTemplate.ts so there is only one
+  // of it. When they are absent the stored email_templates row is rendered as
+  // a fallback, and if that row is unusable the send is refused rather than
+  // guessed at. `edited` only annotates the audit row.
+  const input = await req.json() as {
+    queue_id?: string;
+    subject?: string;
+    body?: string;
+    edited?: boolean;
+    /** The condensed Quo text, as the operator saw it. Omitted → no text. */
+    sms?: string;
+  };
+  if (!input.queue_id) {
     return new Response(JSON.stringify({ error: 'queue_id required' }), {
       status: 400, headers: { ...corsHeaders, 'content-type': 'application/json' },
     });
@@ -72,7 +102,7 @@ async function handle(req: Request): Promise<Response> {
   const { data: q, error: qErr } = await admin
     .from('fulfillment_queue')
     .select('*')
-    .eq('id', body.queue_id)
+    .eq('id', input.queue_id)
     .single<QueueRow>();
   if (qErr || !q) {
     return new Response(JSON.stringify({ error: 'queue row not found' }), {
@@ -84,21 +114,55 @@ async function handle(req: Request): Promise<Response> {
       status: 409, headers: { ...corsHeaders, 'content-type': 'application/json' },
     });
   }
-  if (q.step !== 5) {
-    return new Response(JSON.stringify({ error: `queue row at step ${q.step}, must be 5` }), {
+  // Step 4 since 2026-11-05: the shipping email is sent straight after
+  // "Pickup scheduled", while the row is still under Ready to ship, and
+  // "Pickup confirmed" comes after it. Step 5 is still accepted for a row
+  // that was docked under the old order (dock → email) and never emailed.
+  if (q.step !== 4 && q.step !== 5) {
+    return new Response(JSON.stringify({ error: `queue row at step ${q.step}, must be 4` }), {
       status: 409, headers: { ...corsHeaders, 'content-type': 'application/json' },
     });
   }
 
   const { data: order, error: oErr } = await admin
     .from('orders')
-    .select('order_ref, customer_name, customer_email, country')
+    .select('order_ref, customer_name, customer_email, customer_id, customer_phone, kind, country')
     .eq('id', q.order_id)
     .single<OrderRow>();
-  if (oErr || !order || !order.customer_email) {
-    return new Response(JSON.stringify({ error: 'order missing or has no customer_email' }), {
+  if (oErr || !order) {
+    return new Response(JSON.stringify({ error: 'order missing' }), {
       status: 404, headers: { ...corsHeaders, 'content-type': 'application/json' },
     });
+  }
+
+  // Where the mail goes: the order's own column, else the linked customer
+  // record. A replacement raised from a phone call copies its email off a
+  // service ticket that has none, so the order row is null while the customer
+  // record holds the address — R-0023 could not be sent at all. Mirrors
+  // resolveOrderRecipient() in app/src/lib/orderRecipient.ts, which gates the
+  // Step-5 button; keep the two in sync.
+  let linkedCustomer: CustomerRow | null = null;
+  if (!order.customer_email?.trim() && order.customer_id) {
+    const { data: cust } = await admin
+      .from('customers')
+      .select('full_name, email, primary_user_email')
+      .eq('id', order.customer_id)
+      .maybeSingle<CustomerRow>();
+    linkedCustomer = cust ?? null;
+  }
+  const { email: recipient, nameMismatch } = resolveRecipient(order, linkedCustomer);
+  if (!recipient) {
+    return new Response(
+      JSON.stringify({
+        error: nameMismatch
+          // The customer_id trigger matches on name as well as email, so a
+          // linked record that names someone else is not a safe address.
+          ? `no email on order ${order.order_ref}, and the customer record linked to it names `
+            + `${linkedCustomer?.full_name ?? 'someone else'} rather than ${order.customer_name}`
+          : `no email on order ${order.order_ref} and none on the customer record`,
+      }),
+      { status: 404, headers: { ...corsHeaders, 'content-type': 'application/json' } },
+    );
   }
 
   const firstName = order.customer_name.split(' ')[0] ?? order.customer_name;
@@ -111,48 +175,93 @@ async function handle(req: Request): Promise<Response> {
       case 'FedEx':        return `https://www.fedex.com/fedextrack/?trknbr=${encodeURIComponent(tracking)}`;
       case 'Purolator':    return `https://www.purolator.com/en/shipping/tracker?pin=${encodeURIComponent(tracking)}`;
       case 'Canada Post':  return `https://www.canadapost-postescanada.ca/track-reperage/en#/search?searchFor=${encodeURIComponent(tracking)}`;
+      // Canpar and GLS were missing here while the Step-5 preview had them, so
+      // a Canpar shipment previewed a Canpar link and sent a UPS one.
+      case 'Canpar':       return `https://www.canpar.com/en/track/TrackingAction.do?reference=${encodeURIComponent(tracking)}`;
+      case 'GLS':          return `https://gls-us.com/tracking?trackingNumber=${encodeURIComponent(tracking)}`;
+      // Day & Ross publishes no prefillable tracking URL — their own search
+      // page, which is still better than the UPS default below.
+      case 'Day & Ross':   return 'https://dayross.com/track-shipments';
       default:             return 'https://www.ups.com/track?loc=en_US';
     }
   }
 
-  const starterBlock = order.country === 'US' && q.starter_tracking_num
+  // Keyed on the number, not the destination. Step 3 asks for a compost-starter
+  // tracking number on every machine sale now, CA included (app/src/lib/
+  // starterKit.ts), and a country gate here would record a Canadian customer's
+  // starter and never tell them it was coming. Mirrors shipmentEmailVars() in
+  // app/src/lib/fulfillment.ts — keep the two in sync.
+  const starterBlock = q.starter_tracking_num
     ? `\nCompost Starter Kit (ships separately via Amazon)\n\n` +
-      `Starter Tracking Number: ${q.starter_tracking_num}\n\n`
+      `Starter Tracking Number: ${q.starter_tracking_num}\n`
     : '';
 
-  const text =
-    `Hi ${firstName},\n\n` +
-    `Your LILA has officially shipped! 🎉 It's on its way to you. Here are your shipping details:\n\n` +
-    `Carrier: ${q.carrier ?? ''}\n\n` +
-    `Tracking Number: ${q.tracking_num ?? ''}\n\n` +
-    `Tracking Link: ${trackingUrl(q.carrier, q.tracking_num)}\n` +
-    starterBlock + `\n` +
-    `You can use the link above to check on your delivery progress at any time.\n\n` +
-    `Important next steps\n\n` +
-    `1. Mandatory onboarding session\n` +
-    `Once your unit arrives, you'll need to book a mandatory onboarding session before using LILA. This session is required to ensure your first batches produce high-quality compost, avoid common mistakes, and help you get the best results from day one.\n` +
-    `Book a session here: https://calendly.com/lila-ed.\n\n` +
-    `2. Please keep the original box\n` +
-    `Please do not throw out the original packaging for the first 30 days after delivery. In the rare event of shipping damage or if a return is required during our 30-day refund period, the unit must be returned in its original box.\n\n` +
-    `Thank you again for being part of the LILA community and supporting our mission to make composting effortless and sustainable. We can't wait to see the difference your LILA will make in your home.\n\n` +
-    `Happy Composting! 🌱\n` +
-    `-The VCycene Team`;
+  const vars: Record<string, string> = {
+    customer_first_name: firstName,
+    order_ref: order.order_ref,
+    carrier: q.carrier ?? '',
+    tracking_num: q.tracking_num ?? '',
+    tracking_url: trackingUrl(q.carrier, q.tracking_num),
+    starter_block: starterBlock,
+  };
+
+  // Normally the caller sends the rendered text. The stored template is only
+  // read when it does not — a fallback for any non-UI caller.
+  let renderedSubject = input.subject?.trim() ?? '';
+  let text = input.body?.trim() ?? '';
+  if (!renderedSubject || !text) {
+    const { data: tpl } = await admin
+      .from('email_templates')
+      .select('subject, body, active')
+      .eq('key', 'shipment_shipping_info')
+      .maybeSingle<{ subject: string; body: string; active: boolean }>();
+    if (!tpl || !tpl.active) {
+      return new Response(
+        JSON.stringify({ error: "no subject/body supplied and the 'shipment_shipping_info' template is missing or inactive" }),
+        { status: 409, headers: { ...corsHeaders, 'content-type': 'application/json' } },
+      );
+    }
+    renderedSubject = renderedSubject || render(tpl.subject, vars);
+    text = text || render(tpl.body, vars);
+    // A stored row that still names variables this function cannot supply
+    // would put a literal {{placeholder}} in a customer's inbox.
+    const leftover = [...`${renderedSubject}\n${text}`.matchAll(/\{\{\s*(\w+)\s*\}\}/g)].map(m => m[1]);
+    if (leftover.length > 0) {
+      return new Response(
+        JSON.stringify({ error: `stored template leaves ${[...new Set(leftover)].join(', ')} unfilled \u2014 re-save it from Step 5` }),
+        { status: 409, headers: { ...corsHeaders, 'content-type': 'application/json' } },
+      );
+    }
+  }
 
   // Testing override: if EMAIL_TEST_RECIPIENT is set, redirect every send to
   // that address instead of the real customer. Subject gets a [TEST → <real>]
   // prefix and the body is prepended with a banner so it's obvious the email
   // was not delivered to the customer. Unset this env var to go live.
   const testRecipient = Deno.env.get('EMAIL_TEST_RECIPIENT');
-  const realTo = order.customer_email;
+  const realTo = recipient;
   const to = testRecipient || realTo;
-  const subject = testRecipient
-    ? `[TEST → ${realTo}] Your LILA has officially shipped! 🎉 (${order.order_ref})`
-    : `Your LILA has officially shipped! 🎉 (${order.order_ref})`;
+  const subject = testRecipient ? `[TEST → ${realTo}] ${renderedSubject}` : renderedSubject;
   const emailText = testRecipient
     ? `*** TEST MODE — this email would have been sent to ${realTo} ***\n` +
       `*** EMAIL_TEST_RECIPIENT is set on the edge function; unset to go live ***\n\n` +
       text
     : text;
+
+  // Log the send up front so there is an audit row even if Resend errors.
+  // Matters more now the body is operator-editable: the template no longer
+  // tells you what a given customer actually received.
+  const { data: logRow } = await admin.from('email_messages').insert({
+    template_key: 'shipment_confirmation',
+    recipient_email: realTo,
+    recipient_name: order.customer_name,
+    subject,
+    body: emailText,
+    variables: { ...vars, edited_by_operator: input.edited ? 'yes' : 'no' },
+    status: 'queued',
+    sent_by: _caller.user_id,
+  }).select('id').maybeSingle<{ id: string }>();
+  const msgId = logRow?.id ?? null;
 
   // Send via Resend
   const resendRes = await fetch('https://api.resend.com/emails', {
@@ -165,33 +274,92 @@ async function handle(req: Request): Promise<Response> {
       from: 'VCycene Team <support@lilacomposter.com>',
       reply_to: 'support@lilacomposter.com',
       to: [to],
+      // Blind copy to the internal archive so a send can be confirmed from an
+      // inbox as well as the audit table. archiveBcc drops it for mail that
+      // is internal-only or already addressed there.
+      bcc: archiveBcc(to, Deno.env.get('EMAIL_ARCHIVE_BCC') ?? DEFAULT_ARCHIVE_BCC),
       subject,
       text: emailText,
+      // The body is authored and audited as plain text; the HTML part is
+      // derived from it so the two cannot say different things. It is what
+      // makes the Lovely install guide show as a picture rather than a URL.
+      html: textToEmailHtml(emailText),
     }),
   });
   if (!resendRes.ok) {
     const bodyText = await resendRes.text();
+    if (msgId) {
+      await admin.from('email_messages').update({
+        status: 'failed', error: `Resend ${resendRes.status}: ${bodyText.slice(0, 400)}`,
+      }).eq('id', msgId);
+    }
     return new Response(
       JSON.stringify({ error: `Resend ${resendRes.status}: ${bodyText.slice(0, 400)}` }),
       { status: 502, headers: { ...corsHeaders, 'content-type': 'application/json' } },
     );
   }
   const sent = await resendRes.json() as { id: string };
+  if (msgId) {
+    await admin.from('email_messages').update({
+      status: 'sent', resend_id: sent.id, sent_at: new Date().toISOString(),
+    }).eq('id', msgId);
+  }
 
-  // Update queue row → step 6 + fulfilled
   const now = new Date().toISOString();
   const userId = _caller.user_id;
 
-  const { error: upErr } = await admin
+  // The same information, condensed, as a Quo text to the phone on file.
+  // Best-effort: the email has gone, so a text that cannot be sent is
+  // reported back and logged rather than failing the step.
+  let sms: QuoSmsResult | null = null;
+  const smsText = input.sms?.trim();
+  if (smsText) {
+    const phone = await resolveOrderPhone(admin, order);
+    sms = await sendQuoSms(phone, smsText);
+    await admin.from('activity_log').insert({
+      user_id: userId,
+      type: sms.ok ? 'fq_shipping_sms_sent' : 'fq_shipping_sms_failed',
+      entity: input.queue_id,
+      detail: sms.ok
+        ? `${order.order_ref} · Quo text to ${sms.to}${sms.test_redirected ? ' (TEST redirect)' : ''}`
+        : `${order.order_ref} · Quo text not sent: ${sms.error}`,
+    }).then(() => undefined, (err) => { console.error('activity_log insert failed:', err); });
+  }
+
+  // A row docked under the old order (dock → email) is finished by this send,
+  // exactly as before. Every other row moves on to "Pickup confirmed", which
+  // is what now takes it to step 6.
+  const finishes = !!q.dock_confirmed_at;
+  const update: Record<string, unknown> = {
+    email_sent_at: now,
+    email_sent_by: userId,
+    // Onboarding instructions follow a day later — sales only. A replacement
+    // goes to a customer who has already been through onboarding.
+    onboarding_email_due_at: order.kind === 'sale'
+      ? new Date(Date.now() + ONBOARDING_DELAY_MS).toISOString()
+      : null,
+  };
+  if (finishes) {
+    update.step = 6;
+    update.fulfilled_at = now;
+    update.fulfilled_by = userId;
+  } else {
+    update.step = 5;
+  }
+
+  let { error: upErr } = await admin
     .from('fulfillment_queue')
-    .update({
-      step: 6,
-      email_sent_at: now,
-      email_sent_by: userId,
-      fulfilled_at: now,
-      fulfilled_by: userId,
-    })
-    .eq('id', body.queue_id);
+    .update(update)
+    .eq('id', input.queue_id);
+  // The email has already gone: a database that has not run
+  // 20261105120000_onboarding_instructions_email.sql must not leave the row
+  // stuck at this step. Retry without the scheduling column and say so.
+  let onboardingScheduled = update.onboarding_email_due_at != null;
+  if (upErr && /onboarding_email_due_at/.test(upErr.message)) {
+    delete update.onboarding_email_due_at;
+    onboardingScheduled = false;
+    ({ error: upErr } = await admin.from('fulfillment_queue').update(update).eq('id', input.queue_id));
+  }
   if (upErr) {
     return new Response(JSON.stringify({ error: `db update failed: ${upErr.message}` }), {
       status: 500, headers: { ...corsHeaders, 'content-type': 'application/json' },
@@ -200,12 +368,9 @@ async function handle(req: Request): Promise<Response> {
 
   // Release the shelf slot back to empty (unit shipped). Flip status only;
   // leave `serial` set because fulfillment_queue.assigned_serial has a FK
-  // pointing here. Nullifying it errors and the error used to be silently
-  // swallowed (no .error check), which left 74 historical shipped units
-  // still showing as 'available' on the picker. The DB trigger
-  // sync_shelf_slot_on_unit_status_change (migration 20260603130000) also
-  // catches this when units.status flips to 'shipped' via other paths.
-  if (q.assigned_serial) {
+  // pointing here. Only on the send that finishes the row — otherwise
+  // confirmDock does it when the pickup is confirmed.
+  if (finishes && q.assigned_serial) {
     const { error: shelfErr } = await admin.from('shelf_slots')
       .update({ status: 'empty', updated_at: now })
       .eq('serial', q.assigned_serial);
@@ -215,7 +380,68 @@ async function handle(req: Request): Promise<Response> {
   }
 
   return new Response(
-    JSON.stringify({ email_id: sent.id }),
+    JSON.stringify({
+      email_id: sent.id,
+      step: finishes ? 6 : 5,
+      sms: sms ? (sms.ok ? { ok: true, to: sms.to } : { ok: false, error: sms.error }) : null,
+      onboarding_email_due_at: onboardingScheduled ? update.onboarding_email_due_at : null,
+    }),
     { status: 200, headers: { ...corsHeaders, 'content-type': 'application/json' } },
   );
+}
+
+/** The one address this order's mail goes to, or null when there isn't one.
+ *
+ *  `orders.customer_email` is a snapshot: Shopify fills it on every sale, but a
+ *  replacement copies it off its service ticket, and a ticket raised by hand
+ *  from a phone call has no email on it. So the order column comes first and
+ *  the linked customer record is the fallback — primary user's own address
+ *  before the purchaser's, matching resolveCustomerParties in
+ *  app/src/lib/customers.ts.
+ *
+ *  The name check is the guard: `orders.customer_id` is set by a trigger that
+ *  matches on email OR NAME, so a linked record can be the wrong person.
+ *  Sending one customer's shipment confirmation to another is worse than
+ *  refusing, so a mismatch resolves to null.
+ *
+ *  Mirrors resolveOrderRecipient() in app/src/lib/orderRecipient.ts, which is
+ *  unit-tested — keep the two in sync. */
+function resolveRecipient(
+  order: OrderRow,
+  customer: CustomerRow | null,
+): { email: string | null; nameMismatch: boolean } {
+  const trim = (v: string | null | undefined) => (v ?? '').trim() || null;
+  const onOrder = trim(order.customer_email);
+  if (onOrder) return { email: onOrder, nameMismatch: false };
+  const fromDirectory = customer
+    ? trim(customer.primary_user_email) ?? trim(customer.email)
+    : null;
+  if (!fromDirectory) return { email: null, nameMismatch: false };
+  // Collapse internal whitespace too: customers.full_name is generated from
+  // first_name + last_name, so a blank component leaves a doubled space.
+  const norm = (v: string | null | undefined) => (v ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
+  const a = norm(order.customer_name);
+  if (a === '' || a !== norm(customer?.full_name)) return { email: null, nameMismatch: true };
+  return { email: fromDirectory, nameMismatch: false };
+}
+
+/** Render `{{variable}}` placeholders. A missing or empty value is left as
+ *  `{{name}}` so gaps are visible rather than silently blank.
+ *
+ *  `starter_block` is the one exception: it is legitimately empty on every
+ *  non-US order, so its placeholder (and the newline after it) is removed
+ *  instead of printed. Keep in sync with renderShipmentEmail() in
+ *  app/src/lib/fulfillment.ts. */
+function render(template: string, vars: Record<string, string>): string {
+  const withBlock = template.replace(
+    // No newline is consumed: the placeholder sits alone on its own line, so
+    // dropping just the text leaves the blank line that separates the sections.
+    /\{\{\s*starter_block\s*\}\}/g,
+    () => vars.starter_block || '',
+  );
+  return withBlock.replace(/\{\{\s*(\w+)\s*\}\}/g, (match, name: string) => {
+    const v = vars[name];
+    if (v === undefined || v === null || v === '') return match;
+    return String(v);
+  });
 }

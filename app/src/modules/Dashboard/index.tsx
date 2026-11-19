@@ -19,6 +19,7 @@ import {
   useDatasetLabels,
   useLiveSerials,
   useMachineStatus,
+  useSerialFirmware,
   useSerialToUser,
   useTeamTestSerials,
   useUnitCustomerMap,
@@ -42,6 +43,7 @@ import styles from './Dashboard.module.css';
 export default function Dashboard() {
   const { data: serials, loading: serialsLoading, error: serialsErr } = useAvailableSerials();
   const { data: telemetryUserMap } = useSerialToUser();
+  const { data: firmwareMap } = useSerialFirmware();
   const { data: unitCustomerMap, refresh: refreshUnits } = useUnitCustomerMap();
   const { data: teamSerials } = useTeamTestSerials();
   const { live, checked } = useLiveSerials(serials);
@@ -161,6 +163,7 @@ export default function Dashboard() {
             serialNumber={selected}
             displayName={name}
             assigned={assigned}
+            firmware={firmwareMap[selected] ?? null}
             onAssign={() => setAssignTarget(selected)}
           />
           {assignTarget && (
@@ -207,6 +210,7 @@ export default function Dashboard() {
                 serialNumber={sn}
                 displayName={name}
                 assigned={assigned}
+                firmware={firmwareMap[sn] ?? null}
                 onSelect={() => setSelected(sn)}
                 onAssign={() => setAssignTarget(sn)}
                 onStatus={reportStatus}
@@ -226,6 +230,7 @@ export default function Dashboard() {
                 serialNumber={sn}
                 displayName={name}
                 assigned={assigned}
+                firmware={firmwareMap[sn] ?? null}
                 onSelect={() => setSelected(sn)}
                 onAssign={() => setAssignTarget(sn)}
               />
@@ -283,6 +288,7 @@ export default function Dashboard() {
                 serialNumber={sn}
                 displayName={name}
                 assigned={assigned}
+                firmware={firmwareMap[sn] ?? null}
                 active={selected === sn}
                 onSelect={() => setSelected(sn)}
                 onAssign={() => setAssignTarget(sn)}
@@ -301,6 +307,7 @@ export default function Dashboard() {
                 serialNumber={sn}
                 displayName={name}
                 assigned={assigned}
+                firmware={firmwareMap[sn] ?? null}
                 active={selected === sn}
                 onSelect={() => setSelected(sn)}
                 onAssign={() => setAssignTarget(sn)}
@@ -318,6 +325,7 @@ export default function Dashboard() {
               serialNumber={selected}
               displayName={name}
               assigned={assigned}
+              firmware={firmwareMap[selected] ?? null}
               onAssign={() => setAssignTarget(selected)}
             />
           );
@@ -366,6 +374,7 @@ function MobileMachineCard({
   serialNumber,
   displayName,
   assigned,
+  firmware,
   onSelect,
   onAssign,
   onStatus,
@@ -373,13 +382,17 @@ function MobileMachineCard({
   serialNumber: string;
   displayName: string;
   assigned: boolean;
+  firmware: string | null;
   onSelect: () => void;
   onAssign: () => void;
   onStatus?: (serial: string, status: MachineStatus | null) => void;
 }) {
   const { status, color } = useMachineStatus(serialNumber);
   useEffect(() => { onStatus?.(serialNumber, status); }, [serialNumber, status, onStatus]);
-  const subtitle = assigned ? `${serialNumber} · ${status ?? 'classifying…'}` : `${serialNumber} · unassigned`;
+  const fwSuffix = firmware ? ` · ${firmware}` : '';
+  const subtitle = assigned
+    ? `${serialNumber} · ${status ?? 'classifying…'}${fwSuffix}`
+    : `${serialNumber} · unassigned${fwSuffix}`;
   return (
     <div style={{ position: 'relative' }}>
       <NavCard
@@ -409,12 +422,14 @@ function OfflineMobileCard({
   serialNumber,
   displayName,
   assigned,
+  firmware,
   onSelect,
   onAssign,
 }: {
   serialNumber: string;
   displayName: string;
   assigned: boolean;
+  firmware: string | null;
   onSelect: () => void;
   onAssign: () => void;
 }) {
@@ -423,7 +438,7 @@ function OfflineMobileCard({
       <NavCard
         onClick={onSelect}
         title={displayName}
-        subtitle={`${serialNumber} · offline`}
+        subtitle={`${serialNumber} · offline${firmware ? ` · ${firmware}` : ''}`}
         icon={
           <span
             style={{
@@ -467,6 +482,7 @@ function MachineRow({
   serialNumber,
   displayName,
   assigned,
+  firmware,
   active,
   onSelect,
   onAssign,
@@ -475,6 +491,7 @@ function MachineRow({
   serialNumber: string;
   displayName: string;
   assigned: boolean;
+  firmware: string | null;
   active: boolean;
   onSelect: () => void;
   onAssign: () => void;
@@ -495,6 +512,9 @@ function MachineRow({
         />
         <span className={styles.machineName}>
           {displayName}
+          {firmware && (
+            <span className={styles.fwChip} title={`Firmware ${firmware}`}>{firmware}</span>
+          )}
           {!assigned && <AssignBadge onAssign={onAssign} />}
         </span>
         <span className={styles.machineStatus}>{status ?? '…'}</span>
@@ -511,6 +531,7 @@ function OfflineMachineRow({
   serialNumber,
   displayName,
   assigned,
+  firmware,
   active,
   onSelect,
   onAssign,
@@ -518,6 +539,7 @@ function OfflineMachineRow({
   serialNumber: string;
   displayName: string;
   assigned: boolean;
+  firmware: string | null;
   active: boolean;
   onSelect: () => void;
   onAssign: () => void;
@@ -535,6 +557,9 @@ function OfflineMachineRow({
         />
         <span className={styles.machineName}>
           {displayName}
+          {firmware && (
+            <span className={styles.fwChip} title={`Firmware ${firmware}`}>{firmware}</span>
+          )}
           {!assigned && <AssignBadge onAssign={onAssign} />}
         </span>
         <span className={styles.machineStatus}>offline</span>
@@ -547,11 +572,13 @@ function MachineDetail({
   serialNumber,
   displayName,
   assigned,
+  firmware,
   onAssign,
 }: {
   serialNumber: string;
   displayName: string;
   assigned: boolean;
+  firmware: string | null;
   onAssign: () => void;
 }) {
   const { data, loading, error, refresh } = useDashboardData(serialNumber);
@@ -614,7 +641,10 @@ function MachineDetail({
               </button>
             )}
           </div>
-          <p className={styles.muted}>{serialNumber}</p>
+          <p className={styles.muted}>
+            {serialNumber}
+            {firmware && ` · fw ${firmware}`}
+          </p>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <button className={styles.labelBtn} onClick={() => setLabelOpen(true)}>

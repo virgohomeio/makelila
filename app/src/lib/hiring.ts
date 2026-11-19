@@ -64,10 +64,24 @@ export interface Candidate {
   suggested_scores: Record<string, number> | null;
   applied_at: string;
   rejected_at: string | null;
+  /** Which gate the rejection happened at — set alongside rejected_at, null
+   *  otherwise. The Applicants board rejects at resume screening; the
+   *  Interviews board rejects after an interview. */
+  rejection_stage: RejectionStage | null;
   hired_at: string | null;
+  /** Take-home project scores, keyed by PROJECT_QUESTIONS labels. Same shape
+   *  as `scores` (the screening rubric). */
+  project_scores: Record<string, number>;
+  /** When an operator marked the screening invite as sent. The invite leaves
+   *  from their own mail client, so this is makeLILA's only record that the
+   *  candidate has been contacted — an operator marker, not a delivery
+   *  receipt. */
+  screening_invite_sent_at: string | null;
+  screening_invite_sent_by: string | null;
 }
 
 export type InterviewDecision = 'advance' | 'reject' | 'hold' | 'no_show';
+export type RejectionStage = 'resume_screening' | 'interview';
 
 export interface Interview {
   id: string;
@@ -86,7 +100,7 @@ export interface Interview {
 const POSTING_COLUMNS =
   'id, title, department, location, comp_range, status, indeed_url, linkedin_url, job_description, screening_rubric, pipeline_stages, created_at';
 const CANDIDATE_COLUMNS =
-  'id, posting_id, full_name, email, phone, source, resume_url, ingested_via, enrichment_status, indeed_relay_email, indeed_dashboard_url, qualifications_tags, stage_index, scores, suggested_scores, applied_at, rejected_at, hired_at';
+  'id, posting_id, full_name, email, phone, source, resume_url, ingested_via, enrichment_status, indeed_relay_email, indeed_dashboard_url, qualifications_tags, stage_index, scores, suggested_scores, project_scores, applied_at, rejected_at, rejection_stage, hired_at, screening_invite_sent_at, screening_invite_sent_by';
 const INTERVIEW_COLUMNS =
   'id, candidate_id, round_label, interviewer_id, calendly_event_uri, scheduled_at, held_at, decision, decision_notes, decided_by, decided_at';
 
@@ -148,6 +162,61 @@ export function useCandidates(postingId: string | null): { candidates: Candidate
       .subscribe();
     return () => { cancelled = true; void supabase.removeChannel(channel); };
   }, [postingId]);
+
+  return { candidates, loading };
+}
+
+export interface ShortlistedCandidate extends Candidate {
+  posting_title: string;
+}
+
+/** Every shortlisted candidate the operator can see, across all postings, with
+ *  the posting title joined in — the outreach panel's "who still needs an
+ *  email?" list.
+ *
+ *  One query rather than a useCandidates() per posting: the panel sits above a
+ *  board that already opens a channel per column, and fanning out a second
+ *  round of per-posting queries + channels to render a summary would double
+ *  that for no reason. RLS (can_view_posting) scopes the result set, so an
+ *  assigned-to-one-posting interviewer sees only their own.
+ *
+ *  Shortlist derivation matches the board: hired_at set (the shortlist marker)
+ *  and a real, resume-attached candidate. */
+export function useShortlistedCandidates(): { candidates: ShortlistedCandidate[]; loading: boolean } {
+  const [candidates, setCandidates] = useState<ShortlistedCandidate[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const fetchRows = async () => {
+      const { data, error } = await supabase
+        .from('candidates')
+        .select(`${CANDIDATE_COLUMNS}, job_postings(title)`)
+        .not('hired_at', 'is', null)
+        .neq('enrichment_status', 'stub')
+        .order('hired_at', { ascending: false });
+      if (cancelled || error || !data) return;
+      setCandidates(data.map(row => {
+        const { job_postings, ...candidate } = row as Candidate & {
+          job_postings: { title: string } | { title: string }[] | null;
+        };
+        // PostgREST returns an embedded to-one relation as an object, but
+        // some client/schema-cache combinations hand back a single-element
+        // array — normalize both.
+        const posting = Array.isArray(job_postings) ? job_postings[0] : job_postings;
+        return { ...candidate, posting_title: posting?.title ?? 'Unknown role' };
+      }));
+    };
+
+    (async () => { await fetchRows(); if (!cancelled) setLoading(false); })();
+
+    const channel = supabase
+      .channel(`candidates:shortlist:${crypto.randomUUID()}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'candidates' }, () => { void fetchRows(); })
+      .subscribe();
+    return () => { cancelled = true; void supabase.removeChannel(channel); };
+  }, []);
 
   return { candidates, loading };
 }
@@ -313,6 +382,10 @@ export type ParseResumeResult = {
   phone: string | null;
   suggested_scores: Record<string, number>;
   enrichment_status: EnrichmentStatus;
+  /** True when this resume belongs to someone already on the board — the
+   *  existing record was left as it is and no new applicant was created.
+   *  `candidate_id` points at that existing record. */
+  duplicate: boolean;
 };
 
 /** Uploads a resume file to the hiring-resumes bucket, then invokes
@@ -343,15 +416,42 @@ export async function recordCandidateScore(candidateId: string, scores: Record<s
   if (error) throw error;
 }
 
-export async function rejectCandidate(candidateId: string): Promise<void> {
+/** Each decision clears the opposing timestamp so a candidate carries at
+ *  most one decision tag (Shortlisted/Rejected) and re-clicking the other
+ *  button switches it. `stage` records which gate the rejection happened at:
+ *  the Applicants board passes 'resume_screening', the Interviews board's
+ *  Reject button passes 'interview'. */
+export async function rejectCandidate(candidateId: string, stage: RejectionStage): Promise<void> {
   const { error } = await supabase.from('candidates')
-    .update({ rejected_at: new Date().toISOString() }).eq('id', candidateId);
+    .update({ rejected_at: new Date().toISOString(), rejection_stage: stage, hired_at: null }).eq('id', candidateId);
   if (error) throw error;
 }
 
 export async function hireCandidate(candidateId: string): Promise<void> {
   const { error } = await supabase.from('candidates')
-    .update({ hired_at: new Date().toISOString() }).eq('id', candidateId);
+    .update({ hired_at: new Date().toISOString(), rejected_at: null, rejection_stage: null }).eq('id', candidateId);
+  if (error) throw error;
+}
+
+/** The post-interview take-home project is a fixed 2-question exercise;
+ *  these labels key candidates.project_scores. */
+export const PROJECT_QUESTIONS = ['Question 1', 'Question 2'] as const;
+
+export async function recordProjectScores(candidateId: string, scores: Record<string, number>): Promise<void> {
+  const { error } = await supabase.from('candidates').update({ project_scores: scores }).eq('id', candidateId);
+  if (error) throw error;
+}
+
+/** Records (or clears) "we have emailed this candidate their screening
+ *  invite". Set when the operator opens the mail draft from the board, and
+ *  settable by hand from the outreach panel for an invite that went out some
+ *  other way — or clearable when a draft was abandoned. */
+export async function markScreeningInviteSent(candidateId: string, sent: boolean): Promise<void> {
+  const userId = sent ? await getCurrentUserId() : null;
+  const { error } = await supabase.from('candidates').update({
+    screening_invite_sent_at: sent ? new Date().toISOString() : null,
+    screening_invite_sent_by: userId,
+  }).eq('id', candidateId);
   if (error) throw error;
 }
 
@@ -400,4 +500,29 @@ export async function getResumeSignedUrl(storagePath: string): Promise<string> {
   const { data, error } = await supabase.storage.from('hiring-resumes').createSignedUrl(storagePath, 3600);
   if (error || !data) throw error ?? new Error('getResumeSignedUrl: no signed URL returned');
   return data.signedUrl;
+}
+
+/** The resume as a local blob: URL, ready to hand to a viewer tab.
+ *
+ *  Navigating a tab straight at the signed URL leaves the rendering decision to
+ *  the browser and the storage response's Content-Disposition — Firefox treats
+ *  it as a download, so the tab we opened just sits there blank while the file
+ *  lands in Downloads. Storage logs confirmed the request itself succeeds (sign
+ *  200, fetch 200); it was only ever the display that failed. Fetching the
+ *  bytes here and handing over a blob: URL of a known type takes that decision
+ *  away from the browser.
+ *
+ *  Resumes are 70–160 KB PDFs, so buffering one is cheap. The caller owns the
+ *  returned URL — it stays valid until the page unloads. */
+export async function getResumeObjectUrl(storagePath: string): Promise<string> {
+  const signedUrl = await getResumeSignedUrl(storagePath);
+  const res = await fetch(signedUrl);
+  if (!res.ok) throw new Error(`Resume download failed (${res.status})`);
+  const blob = await res.blob();
+  // An empty or generic type would download rather than render; the bucket only
+  // accepts PDF and DOCX, and only PDF has an in-browser viewer to aim for.
+  const typed = blob.type === 'application/pdf' || !storagePath.toLowerCase().endsWith('.pdf')
+    ? blob
+    : new Blob([blob], { type: 'application/pdf' });
+  return URL.createObjectURL(typed);
 }

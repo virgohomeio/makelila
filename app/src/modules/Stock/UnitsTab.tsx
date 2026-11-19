@@ -1,12 +1,15 @@
 import { useMemo, useState } from 'react';
 import {
-  useBatches, useUnits, useStatusCountsByBatch,
-  STATUS_META, STATUS_ORDER, getStatusMeta,
+  useBatches, useUnits, useStatusCountsByBatch, useIsStockManager,
+  STATUS_META, STATUS_ORDER, getStatusMeta, findMacDuplicates,
   type UnitStatus, type StatusCategory,
 } from '../../lib/stock';
 import { BatchCards } from './BatchCards';
 import { UnitTable } from './UnitTable';
 import { TestReportUploader } from './TestReportUploader';
+import { NewBatchModal } from './NewBatchModal';
+import { useAuth } from '../../lib/auth';
+import { canManageBatches } from '../../lib/permissions';
 import styles from './Stock.module.css';
 
 type CategoryFilter = 'all' | StatusCategory;
@@ -16,12 +19,27 @@ export function UnitsTab() {
   const { units, loading: uLoading } = useUnits();
   const countsByBatch = useStatusCountsByBatch(units);
   const validSerials = useMemo(() => new Set(units.map(u => u.serial)), [units]);
+  // mac_address → serial, so the uploader can warn when a report's MAC is
+  // already on a different unit without another round trip.
+  const macOwners = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const u of units) if (u.mac_address) m.set(u.mac_address, u.serial);
+    return m;
+  }, [units]);
+  // Units whose MAC is also on another unit — derived every render from the
+  // loaded list, so fixing either unit's MAC clears the flag on both.
+  const macDupes = useMemo(() => findMacDuplicates(units), [units]);
 
   const [batchFilter, setBatchFilter] = useState<string | null>(null);
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>('all');
   const [statusFilter, setStatusFilter] = useState<UnitStatus | null>(null);
   const [search, setSearch] = useState('');
   const [suspectFilter, setSuspectFilter] = useState(false);
+
+  const { role } = useAuth();
+  const { isManager } = useIsStockManager();
+  const [showNewBatch, setShowNewBatch] = useState(false);
+  const canAddBatch = canManageBatches(role, isManager);
 
   // Suspect: ready units with a customer name stamped — likely a state mismatch
   // (unit was assigned/shipped but status wasn't updated in makelila).
@@ -42,7 +60,8 @@ export function UnitsTab() {
         (u.customer_name?.toLowerCase().includes(q)) ||
         (u.customer_order_ref?.toLowerCase().includes(q)) ||
         (u.carrier?.toLowerCase().includes(q)) ||
-        (u.location?.toLowerCase().includes(q))
+        (u.location?.toLowerCase().includes(q)) ||
+        (u.mac_address?.includes(q))
       )) return false;
       return true;
     });
@@ -52,6 +71,14 @@ export function UnitsTab() {
 
   return (
     <div className={styles.stockLayout}>
+      {canAddBatch && (
+        <div className={styles.batchAdminBar}>
+          <button className={styles.btnPrimary} onClick={() => setShowNewBatch(true)}>
+            + Add batch
+          </button>
+        </div>
+      )}
+      {showNewBatch && <NewBatchModal onClose={() => setShowNewBatch(false)} />}
       <BatchCards
         batches={batches}
         countsByBatch={countsByBatch}
@@ -113,7 +140,7 @@ export function UnitsTab() {
           type="search"
           value={search}
           onChange={e => setSearch(e.target.value)}
-          placeholder="Search serial, customer, carrier, location…"
+          placeholder="Search serial, customer, carrier, location, MAC…"
           className={styles.searchInput}
         />
 
@@ -123,9 +150,9 @@ export function UnitsTab() {
         </div>
       </div>
 
-      <TestReportUploader validSerials={validSerials} />
+      <TestReportUploader validSerials={validSerials} macOwners={macOwners} />
 
-      <UnitTable units={filtered} />
+      <UnitTable units={filtered} macDupes={macDupes} />
     </div>
   );
 }

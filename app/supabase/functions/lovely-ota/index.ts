@@ -6,8 +6,10 @@
 //   - 'list'   → all ota_updates incl. inactive drafts (the public RLS only exposes
 //                active ones, so this read needs the service role).
 //   - 'upsert' → create a new update or edit an existing one (by id) + toggle active.
-// Admin-only: validates the caller's makelila operator JWT (@virgohome.io) AND requires
-// finance/admin in makelila's `profiles`. Mirrors lovely-verify-user's auth gate.
+// Open to any signed-in makelila operator on the @virgohome.io org domain — the
+// previous finance/admin role check was removed deliberately. Note this means
+// publishing a firmware version to customer devices is available to the whole
+// team. Mirrors lovely-verify-user's auth gate.
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
@@ -16,7 +18,6 @@ const MAKELILA_ANON_KEY =
   'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InR4ZWZ0YmJ6ZWZsZXF1dnJtampyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYyNzk3NjcsImV4cCI6MjA5MTg1NTc2N30.sWmDCODRuhutbHuXcoVIVRvVvVyZADpNysFkerOXNPw';
 
 const ALLOWED_EMAIL_DOMAIN = '@virgohome.io';
-const LEADERSHIP_ROLES = ['finance', 'admin'];
 const OTA_COLS = 'id, version, description, release_notes, is_active, created_at, updated_at';
 
 const corsHeaders = {
@@ -40,23 +41,11 @@ Deno.serve(async (req: Request) => {
   if (!authHeader?.startsWith('Bearer ')) return json({ error: 'Missing authorization header' }, 401);
   const token = authHeader.replace('Bearer ', '');
 
-  const makelila = createClient(MAKELILA_URL, MAKELILA_ANON_KEY, {
-    global: { headers: { Authorization: `Bearer ${token}` } },
-  });
+  const makelila = createClient(MAKELILA_URL, MAKELILA_ANON_KEY);
   const { data: userData, error: authErr } = await makelila.auth.getUser(token);
   const email = userData?.user?.email ?? '';
   if (authErr || !email.toLowerCase().endsWith(ALLOWED_EMAIL_DOMAIN)) {
     return json({ error: 'Unauthorized' }, 401);
-  }
-
-  // 2. Enforce leadership (finance/admin) server-side.
-  const { data: profile, error: roleErr } = await makelila
-    .from('profiles')
-    .select('role')
-    .eq('id', userData!.user!.id)
-    .single();
-  if (roleErr || !LEADERSHIP_ROLES.includes((profile?.role as string) ?? '')) {
-    return json({ error: 'Forbidden — leadership only' }, 403);
   }
 
   const body = (await req.json().catch(() => ({}))) as {

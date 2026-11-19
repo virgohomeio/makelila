@@ -51,3 +51,26 @@ export async function triggerFbIgSync(): Promise<{ synced: number; channels: str
   if (error) throw new Error(await fnErrorMessage(error));
   return data as { synced: number; channels: string[] };
 }
+
+// Every organic-social sync. Runs them in parallel; each is independent, so one
+// failing (e.g. LinkedIn before approval) doesn't block the rest. Returns a
+// short per-platform ok/failed summary for the button's status line.
+const SOCIAL_SYNCS: { fn: string; label: string }[] = [
+  { fn: 'sync-social-organic', label: 'FB+IG' },
+  { fn: 'sync-youtube-organic', label: 'YouTube' },
+  { fn: 'sync-tiktok-organic', label: 'TikTok' },
+  { fn: 'sync-linkedin-organic', label: 'LinkedIn' },
+];
+
+export async function triggerAllSocialSync(): Promise<string> {
+  const results = await Promise.allSettled(
+    SOCIAL_SYNCS.map(async s => {
+      const { error } = await supabase.functions.invoke(s.fn);
+      if (error) throw new Error(await fnErrorMessage(error));
+      return s.label;
+    }),
+  );
+  const ok: string[] = [], failed: string[] = [];
+  results.forEach((r, i) => (r.status === 'fulfilled' ? ok : failed).push(SOCIAL_SYNCS[i].label));
+  return `Synced ${ok.join(', ') || 'none'}${failed.length ? ` · failed: ${failed.join(', ')}` : ''}.`;
+}

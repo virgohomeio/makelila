@@ -1,0 +1,22 @@
+-- Placeholder for a migration that was applied out of band.
+--
+-- Version 20260811134354 (2026-08-11 13:43:54 UTC) is recorded as applied in the remote
+-- supabase_migrations.schema_migrations table but had no file here. That is
+-- the signature of DDL run straight against the database — the Supabase
+-- dashboard's SQL editor, or the MCP apply_migration tool — both of which
+-- stamp the history table and write nothing to the repo.
+--
+-- Forty-nine versions accumulated that way between 2026-07-27 and 2026-09-14,
+-- and `supabase db push` refuses to run while remote history contains versions
+-- local history does not ("Remote migration versions not found in local
+-- migrations directory"). So every push failed, and five real migrations sat
+-- unapplied behind the wall until 2026-09-23.
+--
+-- This file exists solely to make the two histories agree. The version is
+-- already marked applied remotely, so push skips it and NOTHING HERE EVER
+-- RUNS. It intentionally contains no DDL: the statements that actually
+-- executed were never captured in git, and inventing plausible ones would
+-- misrepresent the database rather than document it. Recovering them means
+-- `supabase db pull` against the live schema.
+--
+-- Do not add DDL to this file. Write a new, dated migration instead.

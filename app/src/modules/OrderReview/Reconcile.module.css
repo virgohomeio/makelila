@@ -1,0 +1,188 @@
+/* Reconcile — the shipped-before-the-app-knew backlog.
+ *
+ *  Grouped by customer rather than listed flat, because the decision is a
+ *  customer-level one: "two orders, one machine" is only visible when both
+ *  orders and every unit they could mean are on screen together. */
+
+.wrap {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-4) var(--space-5) var(--space-6);
+}
+
+.intro {
+  max-width: 74ch;
+  font-size: var(--font-size-body);
+  color: var(--color-ink-muted);
+  line-height: 1.55;
+  margin-bottom: var(--space-4);
+}
+
+.introHead {
+  font-weight: 700;
+  color: var(--color-ink);
+  margin-bottom: var(--space-1);
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.progress {
+  font-size: var(--font-size-meta);
+  color: var(--color-ink-subtle);
+  font-family: var(--font-data);
+}
+
+.progress strong { color: var(--color-ink); }
+
+.group {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-raised);
+  margin-bottom: var(--space-4);
+  overflow: hidden;
+}
+
+.groupHead {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.custName {
+  font-weight: 700;
+  font-size: var(--font-size-section);
+  color: var(--color-ink);
+}
+
+.custMeta {
+  font-size: var(--font-size-meta);
+  color: var(--color-ink-subtle);
+}
+
+/* The customer's machines, so the pairing can be checked by eye. */
+.unitList {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.unitChip {
+  font-family: var(--font-data);
+  font-size: var(--font-size-meta);
+  color: var(--color-ink-muted);
+  background: var(--color-page);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  padding: 2px var(--space-2);
+}
+
+.unitChipClaimed {
+  color: var(--color-ink-subtle);
+  text-decoration: line-through;
+}
+
+.orderRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-3);
+  align-items: center;
+  padding: var(--space-3) var(--space-4);
+}
+
+.orderRow + .orderRow { border-top: 1px solid var(--color-border); }
+
+.orderId {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.ref {
+  font-family: var(--font-data);
+  font-weight: 700;
+  color: var(--color-ink);
+  font-size: var(--font-size-body);
+}
+
+.orderMeta {
+  font-size: var(--font-size-meta);
+  color: var(--color-ink-subtle);
+  font-family: var(--font-data);
+}
+
+.why {
+  margin-top: 2px;
+  font-size: var(--font-size-meta);
+  color: var(--color-ink-muted);
+}
+
+.whyLow { color: var(--color-warning); }
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.picker {
+  font-family: var(--font-data);
+  font-size: var(--font-size-meta);
+  color: var(--color-ink);
+  background: var(--color-raised);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 3px var(--space-1);
+  max-width: 190px;
+}
+
+/* The suggested verdict is marked, not pre-applied. */
+.suggested { box-shadow: inset 0 -2px 0 var(--color-accent-gold); }
+
+.confirmBar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-size-meta);
+  color: var(--color-error);
+}
+
+.done {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-size-meta);
+  font-family: var(--font-data);
+  color: var(--color-success);
+}
+
+.doneCancelled { color: var(--color-ink-subtle); }
+
+.rowError {
+  font-size: var(--font-size-meta);
+  color: var(--color-error-strong);
+  max-width: 40ch;
+  text-align: right;
+}
+
+.loadError {
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-error-border);
+  background: var(--color-error-bg);
+  color: var(--color-error);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-body);
+}

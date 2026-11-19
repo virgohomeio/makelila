@@ -1,0 +1,75 @@
+/* FR-6 party name. Deliberately quiet: the split household is the exception,
+   and the labels exist to be read when they appear, not to decorate every row. */
+
+.party {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.nameRow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* The name carries NO typography of its own — no weight, no size, no colour.
+   It inherits from the row it sits in, so a customer with a separate primary
+   user renders identically to one without. Only the split layout adds the
+   ellipsis, and it does so by context so the class name stays the same in
+   both cases. */
+.name {
+  min-width: 0;
+}
+
+.nameRow > .name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pill {
+  flex: none;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.pillUser {
+  background: #ebf8ff;
+  color: #2b6cb0;
+}
+
+.purchaserRow {
+  font-size: 11px;
+  color: #718096;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.purchaserLabel {
+  text-transform: uppercase;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  color: #a0aec0;
+}
+
+/* No weight here either — the purchaser is a name like any other. The row's
+   size and colour already place it below the headline. */
+.purchaserName {
+  font-weight: inherit;
+}
+
+/* Inline variant — one line, purchaser de-emphasised but never dropped. */
+.inlineFor {
+  color: #718096;
+  font-weight: 400;
+}

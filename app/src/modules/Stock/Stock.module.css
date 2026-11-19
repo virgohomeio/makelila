@@ -108,6 +108,99 @@
 .adjustBtn:hover { border-color: var(--color-crimson); color: var(--color-crimson); }
 .adjustBtn:disabled { opacity: 0.4; cursor: not-allowed; }
 
+/* Click-to-edit numbers in the Parts table */
+.editCell {
+  background: none;
+  border: 1px dashed transparent;
+  border-radius: 3px;
+  padding: 1px 4px;
+  margin: -2px -5px;
+  font: inherit;
+  color: inherit;
+  text-align: right;
+  cursor: text;
+  min-width: 28px;
+}
+.editCell:hover:not(:disabled),
+.editCell:focus-visible { border-color: var(--color-border); background: #fff; }
+.editCell:disabled { cursor: wait; }
+.editInput {
+  width: 64px;
+  font: inherit;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  padding: 1px 4px;
+  border: 1px solid var(--color-crimson);
+  border-radius: 3px;
+}
+/* Text/notes/category share the click-to-edit affordance of the number cells,
+   but fill their column instead of sitting in a narrow right-aligned box. */
+.editCellText {
+  display: block;
+  width: 100%;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.editInputText {
+  width: 100%;
+  min-width: 90px;
+  font: inherit;
+  padding: 1px 4px;
+  border: 1px solid var(--color-crimson);
+  border-radius: 3px;
+}
+.editTextarea {
+  width: 100%;
+  min-width: 140px;
+  font: inherit;
+  padding: 2px 4px;
+  border: 1px solid var(--color-crimson);
+  border-radius: 3px;
+  resize: vertical;
+}
+.editSelect {
+  font: inherit;
+  font-size: 11px;
+  padding: 1px 4px;
+  border: 1px solid var(--color-crimson);
+  border-radius: 3px;
+}
+.noticeBar {
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
+  font-size: 11px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--color-warning-border);
+  flex-basis: 100%;
+}
+
+.addPartBtn {
+  margin-left: auto;
+  background: #fff;
+  border: 1px solid var(--color-border);
+  color: var(--color-ink-muted);
+  padding: 4px 10px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.addPartBtn:hover { border-color: var(--color-crimson); color: var(--color-crimson); }
+
+.manualTag {
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--color-ink-muted);
+  background: var(--color-surface);
+  border-radius: 8px;
+  padding: 1px 5px;
+  margin-right: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
 .partsShipHeader {
   font-size: 11px;
   font-weight: 700;
@@ -682,6 +775,17 @@
   font-weight: 600;
   padding: 1px 6px;
 }
+.qcDupMac {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 3px;
+  letter-spacing: 0.3px;
+  color: var(--color-error, #9b2c2c);
+  background: var(--color-error-bg, #fff5f5);
+  border: 1px solid var(--color-error-border, #fc8181);
+}
 
 .modalBackdrop {
   position: fixed;
@@ -790,6 +894,8 @@
 .reportDrop:hover { border-color: var(--color-info); color: var(--color-ink); }
 .reportResults { margin-top: 8px; font-size: 11px; color: var(--color-ink-muted); }
 .reportProblems { margin: 6px 0 0; padding-left: 16px; color: var(--color-error, #c53030); }
+.reportWarnings { margin: 6px 0 0; padding-left: 16px; color: var(--color-warning, #744210); }
+.reportWarningQuiet { color: var(--color-ink-subtle); }
 .reportLink { margin-top: 6px; font-size: 11px; color: var(--color-ink-muted); }
 .reportOpenBtn {
   background: none; border: none; padding: 0;
@@ -891,6 +997,27 @@
   font-size: 0.75rem;
   color: #b7791f;
 }
+/* One-click confirmation of the name matcher's suggestion. Sits above the
+   search box because for most rows it is the whole interaction. */
+.orphanSuggestBtn {
+  width: 100%;
+  text-align: left;
+  padding: 6px 10px;
+  margin: 0 0 6px;
+  background: #f0fff4;
+  border: 1px solid #9ae6b4;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+.orphanSuggestBtn:hover:not(:disabled) {
+  background: #c6f6d5;
+}
+.orphanAmbiguous {
+  margin: 0 0 6px;
+  font-size: 0.75rem;
+  color: #b7791f;
+}
 .orphanBadge {
   display: inline-block;
   margin-left: 6px;
@@ -901,3 +1028,41 @@
   font-size: 0.7rem;
   font-weight: 600;
 }
+
+.batchAdminBar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 8px;
+}
+.modalHint {
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--color-ink-subtle);
+  background: var(--color-surface);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+}
+.modalHelp {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--color-error, #c53030);
+}
+.modalError {
+  font-size: 11px;
+  color: var(--color-error);
+}
+
+/* China / Canada test-report slot toggle + per-unit report slots (QC modal) */
+.reportOriginToggle { display: flex; gap: 6px; margin-bottom: 6px; flex-wrap: wrap; }
+.reportOriginBtn {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-ink-muted);
+  font-size: 11px; font-family: inherit;
+  padding: 4px 10px; cursor: pointer;
+}
+.reportOriginBtnActive { border-color: var(--color-info); color: var(--color-ink); font-weight: 600; }
+.reportSlot { margin-top: 6px; font-size: 11px; color: var(--color-ink-muted); display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.reportSlotLabel { font-weight: 600; color: var(--color-ink); }
+.reportSlotMissing { color: var(--color-error-strong); font-weight: 600; }

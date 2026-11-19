@@ -7,11 +7,14 @@ import {
   type ServiceTicket, type CustomerLifecycle,
 } from '../../lib/service';
 import {
-  useCustomers, computeFuState, recordFollowUp,
+  useCustomers, computeFuState, recordFollowUp, buildPartyResolver,
   FU_STATE_META, FU1_DAYS, FU2_DAYS,
-  type Customer, type FuState,
+  type Customer, type FuState, type CustomerPartyRow, type PartyResolver,
 } from '../../lib/customers';
+import { CustomerPartyName } from '../../components/CustomerPartyName';
+import { TicketPartyLabel } from './TicketPartyLabel';
 import { TicketDetailPanel } from './TicketDetailPanel';
+import { EmptyState } from '../../components/ui';
 import styles from './Service.module.css';
 
 // View modes — walkthrough #31 asked for an explicit "needs onboarding —
@@ -40,6 +43,13 @@ export function OnboardingTab() {
     for (const c of customers) m.set(c.id, c);
     return m;
   }, [customers]);
+
+  // FR-6: onboarding is the call held WITH the primary user, so every row here
+  // leads with them and keeps the purchaser behind.
+  const partiesFor = useMemo(
+    () => buildPartyResolver(customers as CustomerPartyRow[]),
+    [customers],
+  );
 
   const notScheduled = useMemo(
     () => lifecycle.filter(l => l.onboarding_status === 'not_scheduled'),
@@ -154,7 +164,7 @@ export function OnboardingTab() {
       </div>
 
       {view === 'not_scheduled' && (
-        <NotScheduledView rows={notScheduled} customerById={customerById} />
+        <NotScheduledView rows={notScheduled} customerById={customerById} partiesFor={partiesFor} />
       )}
 
       {view === 'scheduled' && (
@@ -162,21 +172,22 @@ export function OnboardingTab() {
           tickets={tickets}
           scheduledLifecycle={scheduled}
           customerById={customerById}
+          partiesFor={partiesFor}
           selectedId={selectedTicketId}
           onSelect={setSelectedTicketId}
         />
       )}
 
       {view === 'call_complete' && (
-        <AllUnitsView rows={callComplete} customerById={customerById} />
+        <AllUnitsView rows={callComplete} customerById={customerById} partiesFor={partiesFor} />
       )}
 
       {view === 'check_ins' && (
-        <CheckInsView rows={checkIns} today={today} />
+        <CheckInsView rows={checkIns} today={today} partiesFor={partiesFor} />
       )}
 
       {view === 'all_units' && (
-        <AllUnitsView rows={lifecycle} customerById={customerById} />
+        <AllUnitsView rows={lifecycle} customerById={customerById} partiesFor={partiesFor} />
       )}
 
       {selectedTicket && <TicketDetailPanel ticket={selectedTicket} onClose={() => setSelectedTicketId(null)} />}
@@ -194,7 +205,20 @@ const DEFAULT_BULLETS = [
   'Reply to this email anytime — we\'re always happy to help',
 ];
 
-function LifecycleActions({ row, customer }: { row: CustomerLifecycle; customer?: Customer | null }) {
+function LifecycleActions({ row, customer, partiesFor }: {
+  row: CustomerLifecycle;
+  customer?: Customer | null;
+  partiesFor: PartyResolver;
+}) {
+  // FR-6: the post-onboarding follow-up is about using the machine, so it goes
+  // to the PRIMARY USER at their own address when one is on file, and greets
+  // them by name. Falls back to the purchaser when they have no address —
+  // better the purchaser receives it than nobody does.
+  const parties = partiesFor({
+    customerId: customer?.id ?? null,
+    fallbackName: customer?.full_name ?? null,
+    fallbackEmail: customer?.email ?? null,
+  });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [showFollowup, setShowFollowup] = useState(false);
@@ -266,9 +290,9 @@ function LifecycleActions({ row, customer }: { row: CustomerLifecycle; customer?
               disabled={sendBusy}
               onClick={() => {
                 setSendBusy(true); setSendErr(null);
-                const firstName = (customer.full_name ?? '').split(' ')[0] || 'there';
+                const firstName = (parties.displayName || customer.full_name || '').split(' ')[0] || 'there';
                 void sendPostOnboardingFollowup(
-                  row.id, customer.email!, customer.full_name ?? '',
+                  row.id, parties.email ?? customer.email!, parties.displayName || customer.full_name || '',
                   { customer_first_name: firstName, bullet_1: bullets[0], bullet_2: bullets[1], bullet_3: bullets[2] },
                 ).then(() => setShowFollowup(false))
                   .catch(e => setSendErr((e as Error).message))
@@ -289,12 +313,18 @@ function LifecycleActions({ row, customer }: { row: CustomerLifecycle; customer?
 // ───────────────────────────────────────────────────────────────────────
 // Views
 // ───────────────────────────────────────────────────────────────────────
-function NotScheduledView({ rows, customerById }: {
+function NotScheduledView({ rows, customerById, partiesFor }: {
   rows: CustomerLifecycle[];
   customerById: Map<string, Customer>;
+  partiesFor: PartyResolver;
 }) {
   if (rows.length === 0) {
-    return <div className={styles.empty}>Nobody waiting — every shipped customer has been scheduled, completed, or skipped.</div>;
+    return (
+      <EmptyState
+        title="Nobody waiting"
+        body="Every shipped customer has been scheduled, completed or skipped."
+      />
+    );
   }
   // Oldest shipments first — those have been waiting longest.
   const sorted = [...rows].sort((a, b) => new Date(a.shipped_at).getTime() - new Date(b.shipped_at).getTime());
@@ -318,11 +348,15 @@ function NotScheduledView({ rows, customerById }: {
               <td>{new Date(l.shipped_at).toLocaleDateString()}</td>
               <td>{daysSince}d</td>
               <td>
-                <div>{c?.full_name ?? <span className={styles.muted}>— no customer linked —</span>}</div>
+                <div>
+                  {c
+                    ? <CustomerPartyName parties={partiesFor({ customerId: c.id, fallbackName: c.full_name })} />
+                    : <span className={styles.muted}>— no customer linked —</span>}
+                </div>
                 {c && <div style={{ fontSize: 10, color: 'var(--color-ink-subtle)' }}>{c.email ?? c.phone ?? ''}</div>}
               </td>
               <td style={{ fontFamily: 'ui-monospace, monospace', fontSize: 10 }}>{l.unit_serial}</td>
-              <td><LifecycleActions row={l} customer={c} /></td>
+              <td><LifecycleActions row={l} customer={c} partiesFor={partiesFor} /></td>
             </tr>
           );
         })}
@@ -332,11 +366,12 @@ function NotScheduledView({ rows, customerById }: {
 }
 
 function ScheduledView({
-  tickets, scheduledLifecycle, customerById, selectedId, onSelect,
+  tickets, scheduledLifecycle, customerById, partiesFor, selectedId, onSelect,
 }: {
   tickets: ServiceTicket[];
   scheduledLifecycle: CustomerLifecycle[];
   customerById: Map<string, Customer>;
+  partiesFor: PartyResolver;
   selectedId: string | null;
   onSelect: (id: string) => void;
 }) {
@@ -349,7 +384,12 @@ function ScheduledView({
   }, [scheduledLifecycle]);
 
   if (tickets.length === 0) {
-    return <div className={styles.empty}>No upcoming onboarding sessions booked.</div>;
+    return (
+      <EmptyState
+        title="No sessions booked"
+        body="Onboarding calls booked through Calendly appear here as soon as a customer picks a slot."
+      />
+    );
   }
   return (
     <table className={styles.table}>
@@ -372,7 +412,6 @@ function ScheduledView({
             && new Date(t.calendly_event_start).getTime() < Date.now();
           const lc = t.unit_serial ? lifecycleBySerial.get(t.unit_serial) : null;
           const c = t.customer_id ? customerById.get(t.customer_id) : null;
-          const customerLabel = t.customer_name ?? c?.full_name ?? t.customer_email ?? '—';
           return (
             <tr
               key={t.id}
@@ -380,13 +419,13 @@ function ScheduledView({
               onClick={() => onSelect(t.id)}
             >
               <td>{t.calendly_event_start ? new Date(t.calendly_event_start).toLocaleString() : '—'}</td>
-              <td>{customerLabel}</td>
+              <td><TicketPartyLabel ticket={t} partiesFor={partiesFor} /></td>
               <td style={{ fontFamily: 'ui-monospace, monospace', fontSize: 10 }}>{t.unit_serial ?? '—'}</td>
               <td>{t.calendly_host_email ?? '—'}</td>
               <td>{callPast
                 ? <span className={styles.pill} style={{ background: '#f0fff4', color: '#276749' }}>Call Completed</span>
                 : <span className={styles.pill} style={{ background: s.bg, color: s.color }}>{s.label}</span>}</td>
-              <td>{lc ? <LifecycleActions row={lc} customer={c} /> : <span className={styles.muted}>—</span>}</td>
+              <td>{lc ? <LifecycleActions row={lc} customer={c} partiesFor={partiesFor} /> : <span className={styles.muted}>—</span>}</td>
             </tr>
           );
         })}
@@ -395,11 +434,12 @@ function ScheduledView({
   );
 }
 
-function AllUnitsView({ rows, customerById }: {
+function AllUnitsView({ rows, customerById, partiesFor }: {
   rows: CustomerLifecycle[];
   customerById: Map<string, Customer>;
+  partiesFor: PartyResolver;
 }) {
-  if (rows.length === 0) return <div className={styles.empty}>No shipped units yet.</div>;
+  if (rows.length === 0) return <EmptyState title="No shipped units yet" body="Units appear here once Fulfillment marks them shipped." />;
   return (
     <table className={styles.table}>
       <thead>
@@ -419,7 +459,11 @@ function AllUnitsView({ rows, customerById }: {
           return (
             <tr key={l.id}>
               <td>{new Date(l.shipped_at).toLocaleDateString()}</td>
-              <td>{c?.full_name ?? <span className={styles.muted}>—</span>}</td>
+              <td>
+                {c
+                  ? <CustomerPartyName parties={partiesFor({ customerId: c.id, fallbackName: c.full_name })} />
+                  : <span className={styles.muted}>—</span>}
+              </td>
               <td style={{ fontFamily: 'ui-monospace, monospace', fontSize: 10 }}>{l.unit_serial}</td>
               <td>{l.onboarding_status}</td>
               <td>
@@ -434,7 +478,7 @@ function AllUnitsView({ rows, customerById }: {
                   {w.state === 'na'      && 'N/A'}
                 </span>
               </td>
-              <td><LifecycleActions row={l} customer={c} /></td>
+              <td><LifecycleActions row={l} customer={c} partiesFor={partiesFor} /></td>
             </tr>
           );
         })}
@@ -457,12 +501,18 @@ function checkInDueDate(c: Customer): Date {
   return d;
 }
 
-function CheckInsView({ rows, today }: {
+function CheckInsView({ rows, today, partiesFor }: {
   rows: { c: Customer; fu: FuState }[];
   today: Date;
+  partiesFor: PartyResolver;
 }) {
   if (rows.length === 0) {
-    return <div className={styles.empty}>No check-ins due — everyone&apos;s onboarding follow-ups are up to date.</div>;
+    return (
+      <EmptyState
+        title="No check-ins due"
+        body="Everyone's onboarding follow-ups are up to date."
+      />
+    );
   }
   const todayMid = new Date(today); todayMid.setHours(0, 0, 0, 0);
   return (
@@ -489,7 +539,9 @@ function CheckInsView({ rows, today }: {
           return (
             <tr key={c.id}>
               <td>
-                <div>{c.full_name}</div>
+                <div>
+                  <CustomerPartyName parties={partiesFor({ customerId: c.id, fallbackName: c.full_name })} />
+                </div>
                 <div style={{ fontSize: 10, color: 'var(--color-ink-subtle)' }}>{c.email ?? c.phone ?? ''}</div>
               </td>
               <td>{c.onboard_date ? new Date(c.onboard_date + 'T00:00:00').toLocaleDateString() : '—'}</td>

@@ -308,6 +308,21 @@ async function handle(req: Request): Promise<Response> {
       // is an INPUT: we seed NEW customers from it and FILL BLANK fields on
       // existing rows, but never clobber a value an operator may have curated.
       if (!existing) {
+        // A contact with no name is a marketing lead (newsletter popup, ad lead
+        // form, chat widget), not a customer — HubSpot's contacts endpoint has
+        // no lifecycle filter, so we gate here instead. Creating a row for one
+        // puts a permanently blank entry in the Customers directory, since
+        // customers.full_name is generated from first/last name. They enter
+        // makelila when they earn a name: a real HubSpot contact record, or a
+        // Shopify order (sync-shopify-orders creates from order name/email).
+        //
+        // Note this gates the INSERT, not the whole contact — an email-only
+        // contact that matches an EXISTING customer still falls through to the
+        // fill path below, so it can still contribute a phone or address.
+        if (!p.firstname?.trim() && !p.lastname?.trim()) {
+          skipped.push({ id: c.id, reason: 'lead: no name, no existing customer' });
+          continue;
+        }
         const { data: insRows, error: insErr } = await admin
           .from('customers')
           .insert({ hubspot_id: c.id, ...candidate, last_synced_at: now })

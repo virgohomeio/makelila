@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { canDo, canView, canViewPosting, canAccessHiringModule, type Role, type Action, type Module } from './permissions';
+import { canDo, canView, canViewPosting, canAccessHiringModule, canManageBatches, type Role, type Action, type Module } from './permissions';
 
 describe('canDo', () => {
   // Source-of-truth matrix mirroring ACTION_ROLES inside permissions.ts.
@@ -137,5 +137,31 @@ describe('canAccessHiringModule', () => {
   it('returns false for a null/undefined role with no confirmed assignment', () => {
     expect(canAccessHiringModule(null, false)).toBe(false);
     expect(canAccessHiringModule(undefined, false)).toBe(false);
+  });
+});
+
+describe('canManageBatches', () => {
+  const roles: Array<Role | null> = ['operator', 'manager', 'finance', 'admin', null];
+
+  it.each(roles)('role %s + allowlisted = true', (role) => {
+    expect(canManageBatches(role, true)).toBe(true);
+  });
+
+  it.each(roles)('role %s + not allowlisted = leadership only', (role) => {
+    const expected = role === 'finance' || role === 'admin';
+    expect(canManageBatches(role, false)).toBe(expected);
+  });
+
+  // Mirrors canAccessHiringModule: a true allowlist flag can only come from an
+  // RLS-gated read filtered on the caller's own id, so it stands on its own
+  // while AuthProvider's separate profile fetch is still in flight.
+  it('admits an allowlisted user whose role has not loaded yet', () => {
+    expect(canManageBatches(null, true)).toBe(true);
+    expect(canManageBatches(undefined, true)).toBe(true);
+  });
+
+  it('denies an unloaded role with no allowlist row', () => {
+    expect(canManageBatches(null, false)).toBe(false);
+    expect(canManageBatches(undefined, false)).toBe(false);
   });
 });

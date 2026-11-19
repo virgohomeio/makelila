@@ -5,6 +5,8 @@ import {
   createReplacementOrder, createPendingReplacement, hasPendingLine,
   type ReplacementLineItem,
 } from '../../lib/orders';
+import type { CustomerParties } from '../../lib/customers';
+import { CustomerPartyName } from '../../components/CustomerPartyName';
 import styles from './Service.module.css';
 
 // Backlog #64 — fallback when batches.unit_cost_usd is null (cost not
@@ -23,6 +25,10 @@ type Props = {
     customer_phone: string | null;
     ticket_number: string;
   };
+  /** FR-6: resolved by the detail panel that opens this modal, so the header
+   *  names the same person the ticket does. Optional — falls back to the
+   *  ticket's own snapshot name. */
+  parties?: CustomerParties;
   address: {
     address_line: string | null;
     city: string;
@@ -34,7 +40,7 @@ type Props = {
   onCreated: (result: { id: string; order_ref: string }) => void;
 };
 
-export default function ReplacementPickerModal({ ticket, address, onClose, onCreated }: Props) {
+export default function ReplacementPickerModal({ ticket, parties, address, onClose, onCreated }: Props) {
   const { parts, loading: partsLoading } = useParts();
   const { units, loading: unitsLoading } = useUnits();
   const { batches } = useBatches();
@@ -176,7 +182,12 @@ export default function ReplacementPickerModal({ ticket, address, onClose, onCre
       const payload = {
         ticket_id: ticket.id,
         customer_name: ticket.customer_name ?? 'Unknown',
-        customer_email: ticket.customer_email,
+        // The ticket's own snapshot first, then the directory address `parties`
+        // already resolved. A ticket raised by hand from a phone call carries
+        // no email, and taking only the snapshot is what born every
+        // replacement that Step 5 then refused to send (R-0023) — the address
+        // was on the customer record the whole time.
+        customer_email: ticket.customer_email ?? parties?.email ?? null,
         customer_phone: ticket.customer_phone,
         address: addr,
         line_items: cart,
@@ -200,7 +211,13 @@ export default function ReplacementPickerModal({ ticket, address, onClose, onCre
     }}>
       <div className={styles.modalCard} onClick={(e) => e.stopPropagation()}>
         <header className={styles.modalHead}>
-          <span>Send replacement — {ticket.customer_name} (ticket {ticket.ticket_number})</span>
+          <span>
+            Send replacement —{' '}
+            {parties
+              ? <CustomerPartyName parties={parties} variant="inline" />
+              : ticket.customer_name}
+            {' '}(ticket {ticket.ticket_number})
+          </span>
           <button className={styles.modalClose} onClick={onClose} aria-label="Close">×</button>
         </header>
 

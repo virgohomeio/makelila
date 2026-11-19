@@ -86,6 +86,9 @@ export const QC_CHECK_META: Record<QcCheck, { label: string; color: string; bg: 
 export type Unit = {
   serial: string;
   batch: string;
+  // Purchase order this unit was claimed under (factory_orders.id). Null for
+  // units claimed before POs were linked, or claimed with "No PO".
+  po_id: string | null;
   status: UnitStatus;
   color: UnitColor | null;
   location: string | null;
@@ -112,9 +115,19 @@ export type Unit = {
   defect_notes: string | null;
   // Uploaded electrical test report (.md) in the 'test-reports' storage bucket.
   electrical_failed_tests: string | null;  // comma-joined failed test names from the report
+  // China factory test report — mandatory for every unit.
   test_report_path: string | null;
   test_report_name: string | null;
   test_report_uploaded_at: string | null;
+  // Canada test report — optional, only some units are re-tested in Canada.
+  // Attached alongside the China report; never drives electrical_check.
+  canada_test_report_path?: string | null;
+  canada_test_report_name?: string | null;
+  canada_test_report_uploaded_at?: string | null;
+  // ESP32 MAC from the uploaded test report (or typed in the QC modal),
+  // normalised "xx:xx:xx:xx:xx:xx". Null until a report with a MAC line is
+  // uploaded. Not unique at the DB level — see findMacDuplicates.
+  mac_address: string | null;
   // Backlog #59 — true for units the team uses for internal testing.
   // Default-filtered out of Dashboard / Customers / profitability rollups
   // so internal noise doesn't distort real-customer signals.
@@ -240,6 +253,30 @@ async function currentUserId(): Promise<string> {
   return data.user.id;
 }
 
+/** Moving a machine back to 'ready' is a release, so it lets go of the customer
+ *  as well as the status — the same pair releaseAssignedUnit clears when a
+ *  reserved unit goes back on the shelf.
+ *
+ *  Status alone is not enough. A unit left stamped with the order it went out
+ *  on, while sellable again, is the "ready but still has a customer" state
+ *  UnitsTab counts as suspect, and the picker would offer the machine under
+ *  somebody else's name.
+ *
+ *  This is the only route a shipped machine has back into stock.
+ *  releaseAssignedUnit deliberately frees nothing but a 'reserved' unit, and
+ *  the picker's backfill mode pairs a shipped unit to an order *without*
+ *  flipping its status — a historical record, not a machine going out again.
+ *  LL01-00000000355 went to Cindy Bouchard on #1189, came back to be reshipped,
+ *  and no screen in the app could put it back on the shelf.
+ *
+ *  The shelf slot needs no help: trg_sync_shelf_slot_on_unit_status_change
+ *  flips it to 'available' on the way to 'ready'. Nor does shipped_at get
+ *  cleared — the machine did make that trip, and units_guard_shipment_consistency
+ *  only polices stamping it, never keeping it. */
+function releasePatchFor(newStatus: UnitStatus): Record<string, null> {
+  return newStatus === 'ready' ? { customer_name: null, customer_order_ref: null } : {};
+}
+
 export async function updateUnitStatus(
   serial: string,
   newStatus: UnitStatus,
@@ -253,7 +290,12 @@ export async function updateUnitStatus(
     : existing?.notes ?? null;
   const { error } = await supabase
     .from('units')
-    .update({ status: newStatus, status_updated_by: userId, notes: nextNotes })
+    .update({
+      status: newStatus,
+      status_updated_by: userId,
+      notes: nextNotes,
+      ...releasePatchFor(newStatus),
+    })
     .eq('serial', serial);
   if (error) throw error;
   await logAction('stock_status', serial, `${existing?.status ?? '?'} → ${newStatus}`,
@@ -272,12 +314,37 @@ export async function linkUnitToCustomer(serial: string, customerId: string): Pr
     { entityType: 'unit', unitSerial: serial });
 }
 
+/** serial → the other serials holding the same mac_address.
+ *
+ *  Duplicate MACs are derived, not stored: the only column is
+ *  units.mac_address, and "duplicate" simply means another unit holds the same
+ *  value. Correcting or clearing the MAC on either unit clears the flag on both,
+ *  so nothing can go stale and there is nothing to dismiss. Units with no MAC
+ *  are never in the map; the map is empty when every MAC is unique. */
+export function findMacDuplicates(
+  units: Pick<Unit, 'serial' | 'mac_address'>[],
+): Map<string, string[]> {
+  const byMac = new Map<string, string[]>();
+  for (const u of units) {
+    if (!u.mac_address) continue;
+    const list = byMac.get(u.mac_address);
+    if (list) list.push(u.serial);
+    else byMac.set(u.mac_address, [u.serial]);
+  }
+  const out = new Map<string, string[]>();
+  for (const serials of byMac.values()) {
+    if (serials.length < 2) continue;
+    for (const s of serials) out.set(s, serials.filter(o => o !== s));
+  }
+  return out;
+}
+
 export async function updateUnitFields(
   serial: string,
   patch: Partial<Pick<Unit,
     'color' | 'location' | 'customer_name' | 'customer_order_ref' |
     'carrier' | 'firmware_version' | 'defect_reason' | 'shipped_at' | 'notes' |
-    'technician' | 'electrical_check' | 'mechanical_check' | 'defect_notes'
+    'technician' | 'electrical_check' | 'mechanical_check' | 'defect_notes' | 'mac_address'
   >>,
 ): Promise<void> {
   await currentUserId();
@@ -563,4 +630,93 @@ export function useUnitTimeline(unitSerial: string): { events: TimelineEvent[]; 
     events,
     loading: activityLoading || otherLoading,
   };
+}
+
+// ---------- batch administration ----------
+
+export type BatchInput = {
+  id: string;
+  unit_count: number;
+  manufacturer: string;
+  version?: string | null;
+  manufacturer_short?: string | null;
+  incoterm?: string | null;
+  unit_cost_usd?: number | null;
+  total_cost_usd?: number | null;
+  invoice_no?: string | null;
+  invoice_date?: string | null;
+  expected_arrival_date?: string | null;
+  arrived_at?: string | null;
+  destination?: string | null;
+  notes?: string | null;
+};
+
+const blankToNull = (v: string | null | undefined): string | null => v?.trim() || null;
+
+/** Create a batch row. Gated server-side by the batches_insert RLS policy
+ *  (can_manage_batches()); the UI gate is cosmetic. */
+export async function createBatch(input: BatchInput): Promise<void> {
+  const id = input.id.trim();
+  const manufacturer = input.manufacturer.trim();
+  if (!id) throw new Error('Batch ID is required');
+  if (!manufacturer) throw new Error('Manufacturer is required');
+  if (!Number.isInteger(input.unit_count) || input.unit_count < 1) {
+    throw new Error('Unit count must be a positive whole number');
+  }
+
+  const { error } = await supabase.from('batches').insert({
+    id,
+    unit_count: input.unit_count,
+    manufacturer,
+    version: blankToNull(input.version),
+    manufacturer_short: blankToNull(input.manufacturer_short),
+    incoterm: blankToNull(input.incoterm),
+    unit_cost_usd: input.unit_cost_usd ?? null,
+    total_cost_usd: input.total_cost_usd ?? null,
+    invoice_no: blankToNull(input.invoice_no),
+    invoice_date: blankToNull(input.invoice_date),
+    expected_arrival_date: blankToNull(input.expected_arrival_date),
+    arrived_at: blankToNull(input.arrived_at),
+    destination: blankToNull(input.destination),
+    notes: blankToNull(input.notes),
+  });
+
+  if (error) {
+    // 23505 = unique_violation on the text PK.
+    throw new Error(error.code === '23505' ? `Batch "${id}" already exists` : error.message);
+  }
+
+  await logAction('batch_created', id, `${input.unit_count} units · ${manufacturer}`);
+}
+
+/** True if the signed-in user has a stock_managers row. The SELECT policy
+ *  only exposes the caller's own row, so this is self-scoped by construction.
+ *  Returns false rather than throwing — a failed read must not blank the tab. */
+export async function isStockManager(): Promise<boolean> {
+  const { data: auth } = await supabase.auth.getUser();
+  const userId = auth.user?.id;
+  if (!userId) return false;
+  const { data, error } = await supabase
+    .from('stock_managers')
+    .select('profile_id')
+    .eq('profile_id', userId)
+    .limit(1);
+  if (error) return false;
+  return (data?.length ?? 0) > 0;
+}
+
+/** Hook wrapper for isStockManager() — fetches once on mount. Pair with
+ *  canManageBatches(role, isManager) from lib/permissions.ts. */
+export function useIsStockManager(): { isManager: boolean; loading: boolean } {
+  const [isManager, setIsManager] = useState(false);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const result = await isStockManager();
+      if (!cancelled) { setIsManager(result); setLoading(false); }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+  return { isManager, loading };
 }

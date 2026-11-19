@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../supabase';
 import { classifyChannel } from './journey';
+import { manualCreative, manualAge, manualGender } from './manualCreatives';
+import { regionName } from '../regions';
 import type { Order } from '../orders';
 
 // Auto sales-attribution report — the programmatic version of the manual
@@ -26,14 +28,28 @@ export type SalesRow = {
   last_referrer: string | null;
   plan: string;
   discount_codes: string[];
+  // Where the sale came through — the Shopify sales channel as a friendly label
+  // (orders.sales_channel): "Our Website" for our own storefront, or a reseller
+  // marketplace (Walmart / Best Buy via Mirakl, Shopify Collective) for an
+  // external sale. Distinct from the marketing Source column (Meta Ad, Google
+  // Organic, …), which is *how the buyer was acquired*, not where they bought.
+  sale_source: string;
   revenue: number;
   currency: string;
+  // Shopify financial_status === 'refunded' — the customer got their money back
+  // in FULL. A 'partially_refunded' order is deliberately NOT a full refund (a
+  // balance remains), so it reads false here, matching how the rest of the app
+  // treats these two Shopify states (see SETTLED_FINANCIAL_STATUSES in orders.ts).
+  full_refund: boolean;
   // Derived from the buyer's Klaviyo events (null when we have none).
   purchase_time: string | null;
   journey_note: string | null;
   // Best-effort from Meta's purchase demographics (null when not a clean match).
   age: string | null;
   gender: string | null;
+  // Best-effort exact ad creative, from Meta's per-ad purchases (clean-day match;
+  // null when not unambiguous). Operator-tracked creative still overrides this.
+  creative: string | null;
   // Which campaign group this sale piled into (for verifying the bucketing).
   campaign_group: string | null;
 };
@@ -52,18 +68,62 @@ export type SalesKpis = {
   byProvince: Breakdown[];
   byPlan: Breakdown[];
   byDiscount: Breakdown[];
+  // Tally by Shopify sales channel (Our Website vs Walmart / Best Buy / Shopify
+  // Collective) so external reseller sales are totalled alongside our own.
+  bySource: Breakdown[];
 };
 
 export type Attribution = { source: string | null; medium: string | null; campaign: string | null };
 
-/** Buyer plan from the order's payment method / line items. We can tell Outright
- *  from financed (Sezzle); the exact 12 vs 36-month term isn't in our data. */
+/** Buyer plan, matching the manual tracker's labels: Outright, Sezzle, and the
+ *  LILA financing terms (12-Month / 36-Month Plan). Sezzle is read from the
+ *  payment method; the financing term is read from the line-item name when Meta/
+ *  Shopify carries it, falling back to a generic "Financing" when the term isn't
+ *  in our data, and Outright otherwise. */
 export function classifyPlan(o: Order): string {
   const pm = (o.payment_methods ?? []).map(s => s.toLowerCase());
-  if (pm.some(p => p.includes('sezzle'))) return 'Financing (Sezzle)';
-  const items = (o.line_items ?? []).map(li => ('name' in li ? li.name : '').toLowerCase());
-  if (items.some(n => n.includes('month') || n.includes('financ') || n.includes('plan'))) return 'Financing';
+  if (pm.some(p => p.includes('sezzle'))) return 'Sezzle';
+  // Klarna is a separate BNPL provider shown on the Shopify order's payment
+  // method — track it distinctly like Sezzle.
+  if (pm.some(p => p.includes('klarna'))) return 'Klarna';
+  const text = (o.line_items ?? []).map(li => ('name' in li ? li.name : '')).join(' ').toLowerCase();
+  if (/36[\s-]*month/.test(text)) return '36-Month Plan';
+  if (/12[\s-]*month/.test(text)) return '12-Month Plan';
+  if (/financ|payment plan|monthly/.test(text)) return 'Financing';
   return 'Outright';
+}
+
+// Pedrum's own test purchases on Shopify are not real sales. They must be kept
+// out of the Journey Report entirely — both the displayed rows AND the per-day
+// sale counts that drive the age/gender/creative clean-day match (a stray test
+// order on a real sale's day would otherwise make that day look ambiguous and
+// block the match). Matches his name or email; extend the pattern for any other
+// test buyer.
+const TEST_BUYER = /pedrum|support\s*lila/i;
+// Known internal test discount codes — these orders aren't real sales. Extend
+// as new test codes appear. (An explicit list, not a /test/ match, so a real
+// promo like "LATEST" is never excluded by accident.)
+const TEST_CODES = new Set(['TESTPEDRUMTEST', 'USTYLERTEST', 'TESTCAMP', 'GOOGLEADSTEST']);
+export function isTestOrder(o: Order): boolean {
+  if (TEST_BUYER.test(o.customer_email ?? '') || TEST_BUYER.test(o.customer_name ?? '')) return true;
+  return (o.discount_codes ?? []).some(c => TEST_CODES.has(c.toUpperCase().trim()));
+}
+
+// A proper sale is $500 CAD or more. Anything under that is a LILA Mini $1
+// reservation or a lease/finance instalment — NOT a real sale — and is kept out
+// of the Journey Report entirely (rows, KPIs, and the clean-day counts).
+// `total_usd` holds the order's OWN currency (see the Order type), so USD orders
+// are converted to CAD before the threshold. The real-sale gap is wide
+// (reservations/instalments are tens of dollars; sales are $1,000+), so the
+// approximate FX rate never affects which side of $500 an order lands on.
+const USD_TO_CAD = 1.37;
+const MIN_SALE_CAD = 500;
+export function orderValueCad(o: Order): number {
+  const v = o.total_usd ?? 0;
+  return (o.currency ?? 'USD').toUpperCase() === 'CAD' ? v : v * USD_TO_CAD;
+}
+export function isRealSale(o: Order): boolean {
+  return orderValueCad(o) >= MIN_SALE_CAD;
 }
 
 function bump(map: Map<string, Breakdown>, key: string, revenue: number) {
@@ -75,6 +135,21 @@ function bump(map: Map<string, Breakdown>, key: string, revenue: number) {
 }
 
 const sortBreakdown = (m: Map<string, Breakdown>) => Array.from(m.values()).sort((a, b) => b.revenue - a.revenue);
+
+/** Breakdown label for a sale's province/state: a country flag plus the full
+ *  name ("🇨🇦 Ontario", "🇺🇸 California") instead of the bare code. `regionName`
+ *  wants a "CA-ON" style code and echoes that code back when it can't map it, so
+ *  fall back to the bare region in that case (never "CA-ON"), and to a plain dash
+ *  when the order has no region at all. */
+export function provinceLabel(country: string | null | undefined, region: string | null | undefined): string {
+  const r = (region ?? '').trim();
+  if (!r) return '—';
+  const c = (country ?? '').trim().toUpperCase();
+  const flag = c === 'CA' ? '🇨🇦 ' : c === 'US' ? '🇺🇸 ' : '';
+  const named = c ? regionName(`${c}-${r}`) : r;
+  const name = named.includes('-') ? r : named;
+  return `${flag}${name}`;
+}
 
 export type JourneyInfo = { timeLabel: string | null; note: string | null };
 export type Demo = { age: string | null; gender: string | null };
@@ -92,6 +167,7 @@ export function buildSalesReport(
   campaignName?: (raw: string) => string | null,
   demo?: (o: Order) => Demo,
   groupOf?: (o: Order) => string | null,
+  creativeOf?: (o: Order) => string | null,
 ): { rows: SalesRow[]; kpis: SalesKpis } {
   const sales = orders.filter(o => o.kind !== 'replacement');
 
@@ -99,6 +175,7 @@ export function buildSalesReport(
   const byProvince = new Map<string, Breakdown>();
   const byPlan = new Map<string, Breakdown>();
   const byDiscount = new Map<string, Breakdown>();
+  const bySource = new Map<string, Breakdown>();
 
   const rows: SalesRow[] = sales.map(o => {
     const a = resolve(o);
@@ -106,10 +183,12 @@ export function buildSalesReport(
     const plan = classifyPlan(o);
     const codes = o.discount_codes ?? [];
     const revenue = o.total_usd ?? 0;
+    const saleSource = saleSourceOf(o);
 
     bump(byChannel, channel, revenue);
-    bump(byProvince, o.region_state ?? '—', revenue);
+    bump(byProvince, provinceLabel(o.country, o.region_state), revenue);
     bump(byPlan, plan, revenue);
+    bump(bySource, saleSource, revenue);
     if (codes.length === 0) bump(byDiscount, 'No code', revenue);
     else for (const c of codes) bump(byDiscount, c, revenue);
 
@@ -127,12 +206,15 @@ export function buildSalesReport(
       last_referrer: o.attribution_last_referrer ?? null,
       plan,
       discount_codes: codes,
+      sale_source: saleSource,
       revenue,
       currency: o.currency || 'USD',
+      full_refund: (o.financial_status ?? '').toLowerCase() === 'refunded',
       purchase_time: journey?.(o)?.timeLabel ?? null,
       journey_note: journey?.(o)?.note ?? null,
       age: demo?.(o)?.age ?? null,
       gender: demo?.(o)?.gender ?? null,
+      creative: creativeOf?.(o) ?? null,
       campaign_group: groupOf?.(o) ?? null,
     };
   });
@@ -161,8 +243,20 @@ export function buildSalesReport(
       byProvince: sortBreakdown(byProvince),
       byPlan: sortBreakdown(byPlan),
       byDiscount: sortBreakdown(byDiscount),
+      bySource: sortBreakdown(bySource),
     },
   };
+}
+
+/** The Shopify sales channel a sale came through, as a friendly label. The sync
+ *  (sync-shopify-orders) already resolves source_name into a label on
+ *  orders.sales_channel; a blank or absent value (an order synced before the
+ *  column, or an older channel) falls back to "Our Website", our own storefront
+ *  and the only channel that existed before the Walmart/Best Buy/Collective
+ *  marketplaces were added. */
+export function saleSourceOf(o: Order): string {
+  const c = (o.sales_channel ?? '').trim();
+  return c || 'Our Website';
 }
 
 // Marker for any cell we can't populate from current data (age/gender demographics,
@@ -173,8 +267,8 @@ export const UNKNOWN = 'UNKNOWN';
 // Manual tracker columns, prefixed with a Campaign column so the bucketing each
 // sale piled into is visible for verification.
 export const REPORT_COLUMNS = [
-  'Campaign', 'Name', 'Date', 'Time (EST)', 'City', 'Province/State', 'Country',
-  'Age Range', 'Gender', 'Source', 'Buyer Plan',
+  'Campaign', 'Name', 'Sale Source', 'Full Refund?', 'Date', 'Time (EST)', 'City', 'Province/State', 'Country',
+  'Age Range', 'Gender', 'Source', 'Buyer Plan', 'Order Value',
   'Discount WELCOMELILA?', 'Discount CHECKOUTFIVE?', 'Other Codes?', 'Other Code 2',
   'Purchase Time after Purchase Visit', 'Notes',
 ] as const;
@@ -190,8 +284,11 @@ export function sourceLabel(channel: string): string {
   if (!channel || channel === 'Unknown' || channel === '—') return UNKNOWN;
   // The manual tracker wrote Facebook/Instagram paid simply as "Meta Ad".
   if (/^(Facebook|Instagram) Paid$/.test(channel) || channel === 'Paid Social') return 'Meta Ad';
-  // Search engines: match Shopify's "google organic search" phrasing.
-  if (channel === 'Google Organic' || channel === 'Bing Organic') return `${channel} Search`;
+  // Search engines: the manual tracker calls organic search "Google Organic
+  // Search/SEO". Shopify reports it as the generic 'organic_search' → "Organic
+  // Search"; label that and Google organic the same way.
+  if (channel === 'Google Organic' || channel === 'Organic Search') return 'Google Organic Search/SEO';
+  if (channel === 'Bing Organic') return 'Bing Organic Search/SEO';
   return channel;
 }
 
@@ -233,14 +330,17 @@ function realSource(label: string | null): string | null {
   return label;
 }
 
-function buildNote(r: SalesRow, source: string, secondary: string | null): string {
+function buildNote(r: SalesRow, source: string, secondary: string | null, creative: string | null): string {
   const bits: string[] = [];
-  if (source !== UNKNOWN) bits.push(`Saw ${source}`);
+  // Operator-tracked ad creative (from the manual sale sheets) is authoritative —
+  // name the exact Meta ad they saw, e.g. "Saw Meta Ad v13a". Falls back to the
+  // auto source label when we have no hand-tracked creative for this buyer.
+  if (creative) bits.push(`Saw Meta Ad ${creative}`);
+  else if (source !== UNKNOWN) bits.push(`Saw ${source}`);
   if (secondary) bits.push(`also ${secondary}`);
   if (r.campaign) bits.push(`campaign ${r.campaign}`);
   // Visit history from Klaviyo when we have it; otherwise flag it's not captured.
   bits.push(r.journey_note ?? 'visit history UNKNOWN');
-  // Exact ad creative (v21a…) can't be auto-detected — operator adds it manually.
   return bits.length ? bits.join('; ') : UNKNOWN;
 }
 
@@ -265,26 +365,36 @@ export function reportCells(r: SalesRow): string[] {
   const secondary = firstReal && lastReal && firstReal !== lastReal
     ? (source === firstReal ? lastReal : firstReal)
     : null;
+  // Ad creative for this buyer: operator-tracked (manual sheets) wins; else the
+  // best-effort clean-day match from Meta's per-ad purchases; else none.
+  const creative = manualCreative(r.name, date) ?? r.creative;
   return [
     r.campaign_group ?? '—',
     r.name,
+    // Where the sale transacted (Shopify sales channel): Our Website, or a
+    // reseller marketplace (Walmart / Best Buy / Shopify Collective).
+    r.sale_source,
+    // Full refund only (Shopify 'refunded'); a partial refund stays 'No'.
+    r.full_refund ? 'Yes' : 'No',
     date,
     time,
     r.city || UNKNOWN,
     r.region || UNKNOWN,
     (r.country && COUNTRY_NAME[r.country]) || r.country || UNKNOWN,
-    r.age && r.age.toLowerCase() !== 'unknown' ? r.age : UNKNOWN,       // best-effort from Meta
-    r.gender && r.gender.toLowerCase() !== 'unknown'                    // best-effort from Meta
+    // Operator-tracked age/gender (from the manual sheets) wins; else best-effort from Meta; else UNKNOWN.
+    manualAge(r.name, date) ?? (r.age && r.age.toLowerCase() !== 'unknown' ? r.age : UNKNOWN),
+    manualGender(r.name, date) ?? (r.gender && r.gender.toLowerCase() !== 'unknown'
       ? r.gender.charAt(0).toUpperCase() + r.gender.slice(1).toLowerCase()
-      : UNKNOWN,
+      : UNKNOWN),
     source,
     r.plan,
+    `$${Math.round(r.revenue).toLocaleString('en-US')} ${r.currency}`,
     yesNo(codes, 'WELCOMELILA'),
     yesNo(codes, 'CHECKOUTFIVE'),
     others[0] ?? 'No',
     others[1] ?? 'No',
     r.purchase_time ?? UNKNOWN,   // from the buyer's Klaviyo purchase-visit timing
-    buildNote(r, source, secondary),
+    buildNote(r, source, secondary, creative),
   ];
 }
 

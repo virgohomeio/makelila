@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render as rtlRender, screen, fireEvent } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
+import type { ReactElement } from 'react';
 import { DeviceContextHeader } from '../DeviceContextHeader';
+
+const render = (ui: ReactElement) => rtlRender(<MemoryRouter>{ui}</MemoryRouter>);
 import type { DeviceContext } from '../../lib/service';
 
 // ── Mock useDeviceContext ──────────────────────────────────────────────────────
@@ -15,6 +19,7 @@ const { mockCtx } = vi.hoisted(() => ({
       warranty: { registration: null, loading: false },
       loading: false,
     } as DeviceContext,
+    lastExcludeTicketId: undefined as string | undefined,
   },
 }));
 
@@ -22,7 +27,10 @@ vi.mock('../../lib/service', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../lib/service')>();
   return {
     ...actual,
-    useDeviceContext: (_serial: string | null) => mockCtx.current,
+    useDeviceContext: (_serial: string | null, excludeTicketId?: string) => {
+      mockCtx.lastExcludeTicketId = excludeTicketId;
+      return mockCtx.current;
+    },
   };
 });
 
@@ -232,5 +240,43 @@ describe('DeviceContextHeader', () => {
     const telChip = screen.getByText(/NOT_MIXING/i).closest('button');
     expect(telChip).toBeTruthy();
     expect(telChip?.title).toMatch(/false positive/i);
+  });
+  // 6. Open-tickets chip — the number must read as what the Support tab shows.
+
+  it('labels the zero case by what it measures (open, not "prior")', () => {
+    mockCtx.current = { ...mockCtx.current, openTicketCount: 0 };
+    render(<DeviceContextHeader unitSerial="LL01-001" />);
+    expect(screen.getByText(/^No open tickets$/)).toBeTruthy();
+    expect(screen.queryByText(/no prior tickets/i)).toBeNull();
+  });
+
+  it('says "other" when a ticket is open in front of the operator', () => {
+    mockCtx.current = { ...mockCtx.current, openTicketCount: 2 };
+    render(<DeviceContextHeader unitSerial="LL01-001" currentTicketId="t-1" />);
+    expect(screen.getByText(/^2 other open tickets$/)).toBeTruthy();
+  });
+
+  it('says "no other open tickets" when the current ticket is the only one', () => {
+    mockCtx.current = { ...mockCtx.current, openTicketCount: 0 };
+    render(<DeviceContextHeader unitSerial="LL01-001" currentTicketId="t-1" />);
+    expect(screen.getByText(/^No other open tickets$/)).toBeTruthy();
+  });
+
+  it('singularises one open ticket', () => {
+    mockCtx.current = { ...mockCtx.current, openTicketCount: 1 };
+    render(<DeviceContextHeader unitSerial="LL01-001" />);
+    expect(screen.getByText(/^1 open ticket$/)).toBeTruthy();
+  });
+
+  it('passes currentTicketId to useDeviceContext so the ticket is not counted twice', () => {
+    render(<DeviceContextHeader unitSerial="LL01-001" currentTicketId="t-99" />);
+    expect(mockCtx.lastExcludeTicketId).toBe('t-99');
+  });
+
+  it('links the chip to the Support tab filtered by this unit', () => {
+    mockCtx.current = { ...mockCtx.current, openTicketCount: 2 };
+    render(<DeviceContextHeader unitSerial="LL01-001" />);
+    const link = screen.getByText(/^2 open tickets$/).closest('a');
+    expect(link?.getAttribute('href')).toBe('/service?tab=support&unit_serial=LL01-001');
   });
 });

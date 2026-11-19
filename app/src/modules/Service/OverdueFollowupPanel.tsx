@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import {
   generateFollowupDrafts, sendFollowupSms,
-  type FollowupDraft,
+  type FollowupDraft, type PartyResolver,
 } from '../../lib/customers';
 import {
   CANNED_SMS_TEMPLATES, CANNED_SMS_OPTIONS, type CannedSmsKey,
@@ -11,6 +11,14 @@ import styles from './FollowUps.module.css';
 type Props = {
   overdueCount: number;
   overdueCustomerIds: string[];   // sorted: most-overdue first
+  /** FR-6: resolves each draft's household so the message is addressed to the
+   *  person actually using the machine. Optional — bare renders fall back to
+   *  the draft's own customer_name.
+   *
+   *  NOTE: only the NAME changes. The send still goes through
+   *  send-followup-sms, which resolves the destination number from
+   *  customers.phone server-side, so the SMS reaches the purchaser's phone. */
+  partiesFor?: PartyResolver;
 };
 
 const BATCH_OPTIONS = [5, 10, 20, 50] as const;
@@ -23,7 +31,7 @@ type DraftRowState =
   | { status: 'skipped';  draft: FollowupDraft }
   | { status: 'error';    draft: FollowupDraft; error: string; editedMessage: string };
 
-export function OverdueFollowupPanel({ overdueCount, overdueCustomerIds }: Props) {
+export function OverdueFollowupPanel({ overdueCount, overdueCustomerIds, partiesFor }: Props) {
   const [batchSize, setBatchSize] = useState<BatchSize>(10);
   const [generating, setGenerating] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
@@ -138,6 +146,7 @@ export function OverdueFollowupPanel({ overdueCount, overdueCustomerIds }: Props
             <DraftCard
               key={r.draft.customer_id}
               state={r}
+              partiesFor={partiesFor}
               onApprove={() => {
                 if (r.status === 'pending' || r.status === 'error') void handleApprove(r);
               }}
@@ -156,9 +165,10 @@ export function OverdueFollowupPanel({ overdueCount, overdueCustomerIds }: Props
 }
 
 function DraftCard({
-  state, onApprove, onSkip, onEdit,
+  state, partiesFor, onApprove, onSkip, onEdit,
 }: {
   state: DraftRowState;
+  partiesFor?: PartyResolver;
   onApprove: () => void;
   onSkip: () => void;
   onEdit: (text: string) => void;
@@ -167,13 +177,17 @@ function DraftCard({
     onEdit(CANNED_SMS_TEMPLATES[key].body(firstName));
   }
   const d = state.draft;
-  const header = `${d.customer_name} · ${d.fu_kind.toUpperCase()} · ${d.days_overdue}d overdue`;
+  const addressee = partiesFor
+    ? partiesFor({ customerId: d.customer_id, fallbackName: d.customer_name }).displayName
+      || d.customer_name
+    : d.customer_name;
+  const header = `${addressee} · ${d.fu_kind.toUpperCase()} · ${d.days_overdue}d overdue`;
   if (state.status === 'sent') {
     return (
       <div className={styles.draftCard}>
         <div className={styles.draftHeader}>{header}</div>
         <div className={styles.draftSent}>
-          ✓ Sent to {d.customer_name}{state.testRedirected ? ' (TEST redirect)' : ''}
+          ✓ Sent to {addressee}{state.testRedirected ? ' (TEST redirect)' : ''}
         </div>
       </div>
     );
@@ -224,7 +238,7 @@ function DraftCard({
           onChange={e => {
             const key = e.target.value as CannedSmsKey;
             if (key) {
-              const firstName = d.customer_name.split(/\s+/)[0] || 'there';
+              const firstName = addressee.split(/\s+/)[0] || 'there';
               insertCanned(key, firstName);
             }
           }}

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import type { FactoryOrder, FreightShipment, BuildDefect, BurnInTest } from '../../lib/build';
+import { unitsMadeForPO, type FactoryOrder, type FreightShipment, type BuildDefect, type BurnInTest } from '../../lib/build';
 import type { Unit } from '../../lib/stock';
 import { BatchCard } from './cards/BatchCard';
 import { UnitCard } from './cards/UnitCard';
@@ -98,7 +98,7 @@ export function PipelineBoard({ orders, shipments, defects, tests, units, batchF
         <Column title="PO / Production" count={cols.inProduction.length}>
           {cols.inProduction.map(o => (
             <BatchCard key={o.id} mode="po" order={o}
-              unitsMadeCount={units.filter(u => u.batch === o.batch).length}
+              unitsMadeCount={unitsMadeForPO(o, units)}
               onClick={() => setSelectedOrderId(o.id)} />
           ))}
         </Column>

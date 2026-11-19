@@ -218,17 +218,26 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
+  min-width: 0;              /* let the card shrink to its column, never overflow */
+  overflow: hidden;          /* nothing bleeds into the column to the right */
+  overflow-wrap: anywhere;   /* long names/emails/tracking #s wrap, not overflow */
 }
 .refundCardHead {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;   /* the name area can be multi-line (purchaser + user) */
+  gap: 8px;
 }
+/* The name/party area takes the remaining width and may wrap; the amount keeps
+   its intrinsic width and never gets pushed out of the card. */
+.refundCardHead > :first-child { flex: 1 1 auto; min-width: 0; }
+.refundCardHead > :last-child:not(:first-child) { flex: 0 0 auto; }
 .refundAmount {
   font-weight: 800;
   color: var(--color-ink);
   font-variant-numeric: tabular-nums;
   font-size: 14px;
+  flex: 0 0 auto;
 }
 .refundReason {
   color: var(--color-ink-muted);
@@ -604,6 +613,39 @@
   font-style: italic;
 }
 
+/* Opens the customer's form answers from inside a detail view. Deliberately
+   loud — it sits at the top of the card and is the thing operators reach for. */
+.openFormBtn {
+  display: inline-block;
+  background: var(--color-crimson);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.openFormBtn:hover { filter: brightness(1.08); }
+
+/* The one action on a collapsed board card: open the full refund card. */
+.openFullCardBtn {
+  margin-top: 4px;
+  width: 100%;
+  background: #fff;
+  color: var(--color-ink);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.openFullCardBtn:hover {
+  background: var(--color-surface-subtle, #f7fafc);
+  border-color: var(--color-ink-faint);
+}
+
 /* ============================================================ Detail panel */
 .refundDetail {
   background: #fff;
@@ -656,6 +698,80 @@
   color: var(--color-ink-subtle);
   margin-top: 4px;
 }
+/* Customer contact block on the refund card — email / phone / address, with a
+   plain "not on file" line for anything the case and the directory both lack. */
+.contactBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 8px;
+  padding: 7px 10px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  max-width: 520px;
+}
+.contactRow {
+  display: flex;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.contactLabel {
+  color: var(--color-ink-subtle);
+  min-width: 58px;
+  flex-shrink: 0;
+}
+.contactValue {
+  color: var(--color-ink);
+  font-weight: 600;
+  word-break: break-word;
+}
+.contactLink {
+  color: var(--color-ink);
+  font-weight: 600;
+  text-decoration: none;
+  word-break: break-word;
+}
+.contactLink:hover { color: var(--color-crimson); text-decoration: underline; }
+.contactMissing {
+  color: var(--color-ink-faint);
+  font-style: italic;
+}
+
+/* The machine a refund case is about. Sits in the contact block so the case's
+   identifying facts read as one group. A serial recorded on the case looks like
+   any other fact; an inferred one is set apart, because an operator approving a
+   refund has to be able to tell a fact from a guess at a glance. */
+.caseUnitStatus {
+  margin-left: 8px;
+  font-weight: 500;
+  color: var(--color-ink-subtle);
+}
+.caseUnitGuess {
+  color: var(--color-ink-subtle);
+  font-style: italic;
+  word-break: break-word;
+}
+.caseUnitConfirm {
+  margin-left: 8px;
+  padding: 1px 8px;
+  font: inherit;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 600;
+  color: var(--color-ink);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  cursor: pointer;
+}
+.caseUnitConfirm:hover:not(:disabled) {
+  color: var(--color-crimson);
+  border-color: var(--color-crimson);
+}
+.caseUnitConfirm:disabled { opacity: 0.55; cursor: default; }
+
 .refundDetailClose {
   background: transparent;
   border: none;
@@ -1447,3 +1563,34 @@
 /* Finance modal banners */
 .financeModalWarn { background: #fffaf0; border: 1px solid #fbd38d; color: #c05621; padding: 10px 12px; border-radius: 6px; font-size: 13px; margin-bottom: 12px; }
 .financeModalError { background: var(--color-error-bg, #fff5f5); border: 1px solid #fc8181; color: var(--color-error, #9b2c2c); padding: 10px 12px; border-radius: 6px; font-size: 13px; margin-bottom: 12px; }
+
+/* Reports what creating a refund card just cancelled. Not an error — the
+   cancels are the intended effect — but it is a consequence the operator did
+   not click for, so it sits above the board until they dismiss it. Reuses
+   .replWarnIcon / .replWarnBody for the layout it shares with the queued-
+   replacement warning. */
+.autoCancelBanner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 0 0 10px;
+  padding: 10px 14px;
+  background: var(--color-error-bg);
+  border: 1px solid var(--color-error);
+  border-radius: var(--radius-md);
+  font-size: 12px;
+  color: var(--color-error);
+}
+.autoCancelDismiss {
+  flex-shrink: 0;
+  align-self: center;
+  padding: 2px 6px;
+  background: none;
+  border: none;
+  color: inherit;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.7;
+}
+.autoCancelDismiss:hover { opacity: 1; }

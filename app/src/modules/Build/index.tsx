@@ -1,7 +1,6 @@
 import { useMemo, useState } from 'react';
 import {
   useFactoryOrders, useFreightShipments, useBuildDefects, useBurnInTests,
-  assignSerial,
 } from '../../lib/build';
 import { useUnits, useBatches } from '../../lib/stock';
 import { useReplacementOrders } from '../../lib/orders';
@@ -9,14 +8,13 @@ import { replacementUnitDemandByBatch } from '../../lib/replacementTags';
 import { PipelineBoard } from './PipelineBoard';
 import { TableView } from './TableView';
 import { NewPOModal } from './NewPOModal';
+import { ClaimSerialsModal } from './ClaimSerialsModal';
 import { BuildQCDashboard } from './BuildQCDashboard';
 import { useIsMobile } from '../../lib/useMediaQuery';
 import { MobileTabbedModule, type MobileTab } from '../../components/MobileTabbedModule';
 import styles from './Build.module.css';
 
 type View = 'board' | 'table' | 'qc';
-const BATCH_FILTERS = ['all', 'P50N', 'P100', 'P100X', 'P150', 'P200', 'LILA-Mini'] as const;
-type BatchFilter = typeof BATCH_FILTERS[number];
 
 function qcDateRange(days = 30) {
   const to = new Date();
@@ -33,7 +31,9 @@ export default function Build() {
   const { batches } = useBatches();
   const { orders: replacementOrders } = useReplacementOrders();
   const [view, setView] = useState<View>('board');
-  const [batchFilter, setBatchFilter] = useState<BatchFilter>('all');
+  // 'all' or a batches.id — chips come from the batches table (same source as Stock > LILA Units).
+  const [batchFilter, setBatchFilter] = useState<string>('all');
+  const batchFilters = useMemo(() => ['all', ...batches.map(b => b.id)], [batches]);
   const [search, setSearch] = useState('');
   const isMobile = useIsMobile();
   const [showNewPO, setShowNewPO] = useState(false);
@@ -65,22 +65,9 @@ export default function Build() {
     setShowNewPO(false);
     setPoPrefill(null);
   }
-  const [showClaimSerial, setShowClaimSerial] = useState<{ batch: string } | null>(null);
-  const [claimSerial, setClaimSerial] = useState('');
-  const [claimBusy, setClaimBusy] = useState(false);
-  const [claimError, setClaimError] = useState<string | null>(null);
-
-  async function submitClaim() {
-    if (!showClaimSerial) return;
-    const s = claimSerial.trim();
-    if (!/^LL01-\d{11}$/.test(s)) { setClaimError('Format: LL01-NNNNNNNNNNN'); return; }
-    setClaimBusy(true); setClaimError(null);
-    try {
-      await assignSerial({ serial: s, batch: showClaimSerial.batch });
-      setShowClaimSerial(null); setClaimSerial('');
-    } catch (e) { setClaimError((e as Error).message); }
-    finally { setClaimBusy(false); }
-  }
+  // The dialog lists batches from the `batches` table (same source as Stock >
+  // LILA Units); units.batch is an FK to it, so a hardcoded list would drift.
+  const [showClaim, setShowClaim] = useState(false);
 
   const stats = useMemo(() => {
     const inFlight = orders.filter(o => ['placed','in_production','ready_to_ship','shipped'].includes(o.status));
@@ -182,7 +169,7 @@ export default function Build() {
           <Kpi label="Ready" value={stats.ready} sub="→ fulfillment" />
         </div>
         <div className={styles.filterRow}>
-          {BATCH_FILTERS.map(b => (
+          {batchFilters.map(b => (
             <button
               key={b}
               className={`${styles.chip} ${batchFilter === b ? styles.chipActive : ''}`}
@@ -210,7 +197,7 @@ export default function Build() {
             >QC Dashboard</button>
           </div>
           <button className={styles.btnPrimary} onClick={() => { setPoPrefill(null); setShowNewPO(true); }}>+ New PO</button>
-          <button className={styles.btnSecondary} onClick={() => { setShowClaimSerial({ batch: 'P100' }); setClaimSerial(''); setClaimError(null); }}>+ Claim serial</button>
+          <button className={styles.btnSecondary} onClick={() => setShowClaim(true)}>+ Claim serials</button>
         </div>
       </div>
       {loading && view !== 'qc' ? (
@@ -245,34 +232,13 @@ export default function Build() {
       )}
     </div>
     {showNewPO && <NewPOModal prefill={poPrefill ?? undefined} onClose={closeNewPO} />}
-    {showClaimSerial && (
-      <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-           onClick={() => setShowClaimSerial(null)}>
-        <div onClick={e => e.stopPropagation()}
-          style={{ background: '#fff', borderRadius: 'var(--radius-md)', padding: 20, width: 380 }}>
-          <h3 style={{ margin: '0 0 12px', fontSize: 16 }}>Claim a serial</h3>
-          <div style={{ marginBottom: 10 }}>
-            <label style={{ display: 'block', fontSize: 12, marginBottom: 4, color: 'var(--color-text-secondary)' }}>Batch</label>
-            <select
-              className={styles.input}
-              value={showClaimSerial.batch}
-              onChange={e => setShowClaimSerial({ batch: e.target.value })}
-            >
-              {(['P50N', 'P100', 'P100X', 'P150', 'P200', 'LILA-Mini'] as const).map(b => (
-                <option key={b} value={b}>{b}</option>
-              ))}
-            </select>
-          </div>
-          <input className={styles.input} placeholder="LL01-00000000XYZ"
-            value={claimSerial}
-            onChange={e => setClaimSerial(e.target.value.toUpperCase())} />
-          {claimError && <div style={{ color: 'var(--color-error)', fontSize: 11, marginTop: 6 }}>{claimError}</div>}
-          <div className={styles.actionsRow}>
-            <button className={styles.btnPrimary} disabled={claimBusy} onClick={submitClaim}>Create unit</button>
-            <button className={styles.btnSecondary} disabled={claimBusy} onClick={() => setShowClaimSerial(null)}>Cancel</button>
-          </div>
-        </div>
-      </div>
+    {showClaim && (
+      <ClaimSerialsModal
+        batches={batches}
+        orders={orders}
+        units={units}
+        onClose={() => setShowClaim(false)}
+      />
     )}
     </>
   );

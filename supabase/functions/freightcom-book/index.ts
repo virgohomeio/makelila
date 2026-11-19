@@ -12,6 +12,7 @@
 //   SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY
 
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
+import { buildShipmentDetails, nextShipDate } from '../_shared/freightcom.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -89,44 +90,41 @@ async function handle(req: Request): Promise<Response> {
   const serviceId = (quote.raw as Record<string, unknown>)?.service_id as string | undefined;
   if (!serviceId) return json({ error: 'Quote raw data missing service_id' }, 400);
 
-  // Load order destination
+  // Load order destination. Same column bug as freightcom-quote carried: the
+  // orders column is `postal_code`, and selecting `address_postal_code` failed
+  // the whole request as "Order not found".
   const { data: order, error: oErr } = await admin
     .from('orders')
-    .select('id, address_postal_code, country')
+    // customer_email: an international shipment is refused without an email at
+    // each end — see _shared/freightcom.ts.
+    .select('id, postal_code, country, customer_email')
     .eq('id', order_id)
     .single();
-  if (oErr || !order) return json({ error: 'Order not found' }, 404);
+  if (oErr || !order) {
+    return json({ error: 'Order not found', details: oErr?.message ?? null }, 404);
+  }
 
-  const destPostal = (order.address_postal_code as string | null)?.replace(/\s/g, '');
-  if (!destPostal) return json({ error: 'Order has no destination postal code' }, 400);
+  const destPostal = order.postal_code as string | null;
+  if (!destPostal?.trim()) return json({ error: 'Order has no destination postal code' }, 400);
 
   // Build ship date (tomorrow)
-  const tomorrow = new Date(Date.now() + 86_400_000);
-  const shipDate = { year: tomorrow.getUTCFullYear(), month: tomorrow.getUTCMonth() + 1, day: tomorrow.getUTCDate() };
-
-  const pkgs = DEFAULT_PACKAGES.map(p => ({
-    measurements: {
-      weight: { unit: 'kg', value: p.weight_kg },
-      cuboid: { unit: 'cm', l: p.length_cm, w: p.width_cm, h: p.height_cm },
-    },
-    description: p.description,
-  }));
+  const shipDate = nextShipDate(Date.now());
 
   // POST /shipment
   const bookReq = {
     unique_id: quote_id,  // idempotency key — same quote can't be double-booked
     payment_method_id: paymentMethodId,
     service_id: serviceId,
-    details: {
-      expected_ship_date: shipDate,
-      packaging_type: 'package',
-      packaging_properties: { packages: pkgs },
-      origin: { address: { postal_code: ORIGIN_POSTAL, country: ORIGIN_COUNTRY } },
+    details: buildShipmentDetails({
+      origin:      { postal_code: ORIGIN_POSTAL, country: ORIGIN_COUNTRY },
       destination: {
-        address: { postal_code: destPostal, country: order.country === 'US' ? 'US' : 'CA' },
-        signature_requirement: 'not-required',
+        postal_code: destPostal,
+        country:     (order.country as string) ?? 'CA',
+        email:       order.customer_email as string | null,
       },
-    },
+      packages: DEFAULT_PACKAGES,
+      shipDate,
+    }),
   };
 
   const bookRes = await fetch(`${baseUrl}/shipment`, {

@@ -4,20 +4,67 @@ import type { QcCheck } from './stock';
 
 const BUCKET = 'test-reports';
 
+/** Which of a unit's two report slots a file goes into.
+ *  - 'china'  — the factory test report. Mandatory for every unit; its parsed
+ *               result drives electrical_check and its MAC fills mac_address.
+ *  - 'canada' — an optional re-test done in Canada on some units. Attached
+ *               alongside the China report and never overwrites the China
+ *               result, the failed-test list or the MAC. */
+export type TestReportOrigin = 'china' | 'canada';
+
+export const TEST_REPORT_ORIGIN_LABEL: Record<TestReportOrigin, string> = {
+  china: 'China test report',
+  canada: 'Canada test report',
+};
+
+/** File types accepted per slot. China reports are always the test script's
+ *  .md output (we parse it); Canada reports may also arrive as PDFs. */
+export const TEST_REPORT_ACCEPT: Record<TestReportOrigin, string> = {
+  china: '.md',
+  canada: '.md,.pdf',
+};
+
+export function isAcceptedReportFile(name: string, origin: TestReportOrigin): boolean {
+  const lower = name.toLowerCase();
+  return TEST_REPORT_ACCEPT[origin].split(',').some(ext => lower.endsWith(ext));
+}
+
+function contentTypeFor(name: string): string {
+  return name.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'text/markdown';
+}
+
 export type ParsedTestReport = {
   serial: string | null;
+  mac: string | null;     // ESP32 MAC from the "MAC ID:" line, normalised; null when absent/garbled
   result: QcCheck;     // 'pass' | 'fail' | 'incomplete'
   passed: number | null;
   failed: number | null;
   failedTests: string[];  // e.g. ['Left Motor', 'Right Motor']
 };
 
-/** Parse a test-script .md report. Serial comes from the "Serial Number:" line;
- *  the overall result comes from the Summary "Failed:" count (any failure → fail,
- *  no parseable summary → incomplete). We intentionally only read the summary —
- *  the per-test breakdown lives in the stored file. */
+/** Canonical form for an ESP32 MAC: lowercase, colon-separated, six hex
+ *  octets. Accepts ":" or "-" separators and any case; anything else (five
+ *  octets, non-hex, empty) is null so a typo never lands in units.mac_address
+ *  and silently fails to match the next report for the same board. */
+export function normalizeMac(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const m = raw.trim().match(
+    /^([0-9a-f]{2})[:-]([0-9a-f]{2})[:-]([0-9a-f]{2})[:-]([0-9a-f]{2})[:-]([0-9a-f]{2})[:-]([0-9a-f]{2})$/i,
+  );
+  if (!m) return null;
+  return m.slice(1, 7).map(o => o.toLowerCase()).join(':');
+}
+
+/** Parse a test-script .md report. Serial comes from the "Serial Number:" line,
+ *  the MAC from the "MAC ID:" line right under it; the overall result comes
+ *  from the Summary "Failed:" count (any failure → fail, no parseable summary →
+ *  incomplete). We intentionally only read the summary — the per-test
+ *  breakdown lives in the stored file. */
 export function parseTestReport(text: string): ParsedTestReport {
   const serialMatch = text.match(/Serial Number:\**\s*([A-Za-z0-9-]+)/i);
+  // Label tolerance mirrors the serial line: "**MAC ID:**", "MAC ID:",
+  // "**MAC Address:**" all match. The value is validated by normalizeMac.
+  const macMatch = text.match(/MAC(?:\s+(?:ID|Address))?\**:\**\s*([0-9A-Fa-f]{2}(?:[:-][0-9A-Fa-f]{2}){5})\b/i);
   const passedMatch = text.match(/Passed:\s*(\d+)/i);
   const failedMatch = text.match(/Failed:\s*(\d+)/i);
 
@@ -37,12 +84,16 @@ export function parseTestReport(text: string): ParsedTestReport {
   else if (failed > 0) result = 'fail';
   else result = 'pass';
 
-  return { serial: serialMatch ? serialMatch[1] : null, result, passed, failed, failedTests };
+  return {
+    serial: serialMatch ? serialMatch[1] : null,
+    mac: normalizeMac(macMatch ? macMatch[1] : null),
+    result, passed, failed, failedTests,
+  };
 }
 
-/** Serial implied by a filename like "LL01-00000000332.md". */
+/** Serial implied by a filename like "LL01-00000000332.md" (or .pdf). */
 export function serialFromFilename(name: string): string {
-  return name.replace(/\.md$/i, '').trim();
+  return name.replace(/\.(md|pdf)$/i, '').trim();
 }
 
 export type UploadOutcome = {
@@ -51,45 +102,127 @@ export type UploadOutcome = {
   status: 'paired' | 'unmatched' | 'error';
   result?: QcCheck;
   message?: string;
+  mac?: string | null;     // normalised MAC from the report; null when the report has none
+  macClash?: string;       // the other serial that already holds this MAC (paired anyway)
+  origin?: TestReportOrigin; // set on Canada uploads; absent means China
 };
+
+/** The other serial already holding `mac`, or undefined when the MAC is new
+ *  or belongs to this same unit (a re-upload). Units already in the database
+ *  are checked first, then files paired earlier in this same drop. */
+function macClashFor(
+  mac: string,
+  serial: string,
+  macOwners: Map<string, string>,
+  seenThisDrop: Map<string, string>,
+): string | undefined {
+  for (const owner of [macOwners.get(mac), seenThisDrop.get(mac)]) {
+    if (owner && owner !== serial) return owner;
+  }
+  return undefined;
+}
 
 /** Bulk-upload .md test reports. Each file is paired to a unit by serial
  *  (in-file "Serial Number", falling back to the filename). Files whose serial
- *  isn't a known unit are reported as 'unmatched' and skipped. */
-export async function uploadTestReports(files: File[], validSerials: Set<string>): Promise<UploadOutcome[]> {
+ *  isn't a known unit are reported as 'unmatched' and skipped.
+ *
+ *  `macOwners` is mac_address → serial for every unit already carrying a MAC
+ *  (the Units tab builds it from the loaded units, so no extra round trip). A
+ *  MAC that already belongs to a *different* serial is a clash: the file is
+ *  still paired and the MAC still written — the same ESP32 showing up under two
+ *  serials is a labelling problem for the operator to sort out, not a reason to
+ *  drop the test result — but the outcome carries `macClash` so the uploader
+ *  can warn, and an activity-log entry records it. A report with no MAC line
+ *  leaves the unit's existing MAC alone. */
+export async function uploadTestReports(
+  files: File[],
+  validSerials: Set<string>,
+  macOwners: Map<string, string> = new Map(),
+  opts: {
+    /** Which slot to attach to. Defaults to the mandatory China report. */
+    origin?: TestReportOrigin;
+    /** Attach every file to this serial instead of pairing by content /
+     *  filename — used by the per-unit upload button in the QC modal. */
+    serial?: string;
+  } = {},
+): Promise<UploadOutcome[]> {
+  const origin: TestReportOrigin = opts.origin ?? 'china';
   const outcomes: UploadOutcome[] = [];
+  const seenThisDrop = new Map<string, string>();
 
   for (const file of files) {
-    const text = await file.text();
-    const parsed = parseTestReport(text);
-    const serial = parsed.serial ?? serialFromFilename(file.name);
+    const isPdf = file.name.toLowerCase().endsWith('.pdf');
+    const parsed = isPdf ? null : parseTestReport(await file.text());
+    const serial = opts.serial ?? parsed?.serial ?? serialFromFilename(file.name);
 
     if (!validSerials.has(serial)) {
       outcomes.push({ fileName: file.name, serial, status: 'unmatched', message: 'No matching unit serial' });
       continue;
     }
 
+    if (origin === 'canada') {
+      try {
+        const path = `${serial}/canada/${Date.now()}-${file.name}`;
+        const { error: upErr } = await supabase.storage
+          .from(BUCKET)
+          .upload(path, file, { contentType: contentTypeFor(file.name), upsert: false });
+        if (upErr) throw upErr;
+        const { error: dbErr } = await supabase
+          .from('units')
+          .update({
+            canada_test_report_path: path,
+            canada_test_report_name: file.name,
+            canada_test_report_uploaded_at: new Date().toISOString(),
+          })
+          .eq('serial', serial);
+        if (dbErr) throw dbErr;
+        const result = parsed && parsed.failed != null ? parsed.result : undefined;
+        await logAction('unit_test_report', serial, result ? `canada ${result}` : 'canada uploaded');
+        outcomes.push({ fileName: file.name, serial, status: 'paired', result, origin });
+      } catch (e) {
+        outcomes.push({ fileName: file.name, serial, status: 'error', message: (e as Error).message });
+      }
+      continue;
+    }
+
+    if (!parsed) {
+      outcomes.push({ fileName: file.name, serial, status: 'error', message: 'China test report must be the .md test-script output' });
+      continue;
+    }
+
+    const mac = parsed.mac;
+    const macClash = mac ? macClashFor(mac, serial, macOwners, seenThisDrop) : undefined;
+
     try {
       const path = `${serial}/${Date.now()}-${file.name}`;
       const { error: upErr } = await supabase.storage
         .from(BUCKET)
-        .upload(path, file, { contentType: 'text/markdown', upsert: false });
+        .upload(path, file, { contentType: contentTypeFor(file.name), upsert: false });
       if (upErr) throw upErr;
+
+      const patch: Record<string, unknown> = {
+        electrical_check: parsed.result,
+        electrical_failed_tests: parsed.failedTests.length ? parsed.failedTests.join(', ') : null,
+        test_report_path: path,
+        test_report_name: file.name,
+        test_report_uploaded_at: new Date().toISOString(),
+      };
+      if (mac) patch.mac_address = mac;
 
       const { error: dbErr } = await supabase
         .from('units')
-        .update({
-          electrical_check: parsed.result,
-          electrical_failed_tests: parsed.failedTests.length ? parsed.failedTests.join(', ') : null,
-          test_report_path: path,
-          test_report_name: file.name,
-          test_report_uploaded_at: new Date().toISOString(),
-        })
+        .update(patch)
         .eq('serial', serial);
       if (dbErr) throw dbErr;
 
-      await logAction('unit_test_report', serial, parsed.result);
-      outcomes.push({ fileName: file.name, serial, status: 'paired', result: parsed.result });
+      if (mac) seenThisDrop.set(mac, serial);
+
+      await logAction('unit_test_report', serial, mac ? `${parsed.result} mac=${mac}` : parsed.result);
+      if (macClash) {
+        await logAction('unit_mac_duplicate', serial, `mac=${mac} also on ${macClash}`,
+          { entityType: 'unit', unitSerial: serial });
+      }
+      outcomes.push({ fileName: file.name, serial, status: 'paired', result: parsed.result, mac, macClash, origin });
     } catch (e) {
       outcomes.push({ fileName: file.name, serial, status: 'error', message: (e as Error).message });
     }
@@ -104,4 +237,80 @@ export async function signedReportUrl(path: string, expiresInSeconds = 120): Pro
   const { data, error } = await supabase.storage.from(BUCKET).createSignedUrl(path, expiresInSeconds);
   if (error || !data) throw new Error(error?.message ?? 'Could not create signed URL');
   return data.signedUrl;
+}
+
+/** A test report already attached to a unit in Stock. `result` is the parsed
+ *  electrical_check, carried alongside so a caller can show *what the report
+ *  said* rather than only that a file exists. */
+export type AttachedTestReport = {
+  path: string;
+  name: string | null;
+  uploadedAt: string | null;
+  result: QcCheck | null;
+  failedTests: string | null;
+};
+
+/** The report attached to `serial` in Stock, or null when the unit has none.
+ *
+ *  Fulfillment step 2 asks the operator to verify the test report and used to
+ *  offer only a blank "paste a URL" box, even when Stock already held the
+ *  report for that exact serial. This is the lookup that lets the step fill
+ *  itself in.
+ *
+ *  A query failure throws rather than returning null: "no report attached" is
+ *  a QC statement about the machine, and a broken lookup must never be allowed
+ *  to masquerade as one. */
+export async function fetchUnitTestReport(serial: string): Promise<AttachedTestReport | null> {
+  const { data, error } = await supabase
+    .from('units')
+    .select('test_report_path, test_report_name, test_report_uploaded_at, electrical_check, electrical_failed_tests')
+    .eq('serial', serial)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data?.test_report_path) return null;
+  return {
+    path: data.test_report_path as string,
+    name: (data.test_report_name as string | null) ?? null,
+    uploadedAt: (data.test_report_uploaded_at as string | null) ?? null,
+    result: (data.electrical_check as QcCheck | null) ?? null,
+    failedTests: (data.electrical_failed_tests as string | null) ?? null,
+  };
+}
+
+/** Open a unit's stored test report in a new tab.
+ *
+ *  The QC modal's report link used to sign the URL and only then call
+ *  window.open, so the open landed outside the click's user-gesture window and
+ *  browsers blocked it silently — the link simply did nothing. It also passed
+ *  'noopener', which makes window.open return null by spec, so there was no
+ *  handle to check and a blocked tab looked like a successful one.
+ *
+ *  Even unblocked, the tab came up empty: storage serves these reports as
+ *  application/octet-stream (the bulk importer's contentType never stuck on the
+ *  stored objects), and browsers download that rather than render it. So the
+ *  file is fetched and handed over as a blob re-typed as plain text — markdown
+ *  has no in-browser viewer, and the reports are read as text anyway.
+ *
+ *  Same shape as openInvoiceInNewTab: claim the tab synchronously, sever the
+ *  opener by hand, and fall back to the current tab if the open was blocked. */
+export async function openTestReport(path: string): Promise<void> {
+  const tab = window.open('', '_blank');
+  if (tab) {
+    try { tab.opener = null; } catch { /* cross-origin guard; harmless */ }
+    try { tab.document.write('Loading test report…'); } catch { /* not writable; fine */ }
+  }
+  try {
+    const signedUrl = await signedReportUrl(path);
+    const res = await fetch(signedUrl);
+    if (!res.ok) throw new Error(`Test report download failed (${res.status})`);
+    const blob = await res.blob();
+    // PDFs (Canada reports) render natively; .md has no viewer, so plain text.
+    const type = path.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'text/plain;charset=utf-8';
+    const url = URL.createObjectURL(new Blob([blob], { type }));
+    if (tab && !tab.closed) tab.location.replace(url);
+    else window.location.assign(url);
+  } catch (e) {
+    try { tab?.close(); } catch { /* already gone */ }
+    throw e;
+  }
 }

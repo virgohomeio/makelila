@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { replacementItemTags, replacementStageTag, replacementDemandBySku, replacementUnitDemandByBatch, isUnitTag } from './replacementTags';
+import { replacementItemTags, replacementStageTag, replacementDemandBySku, replacementUnitDemandByBatch, isUnitTag, replacementQueueKinds, queuedForReplacementLabel, isLiveReplacement, replacementItemsLabel, isPartsOnlyReplacement } from './replacementTags';
 
-const order = (line_items: unknown[], extra: Partial<{ awaiting_batch_id: string | null; replacement_state: string | null; shipped_at: string | null; delivered_at: string | null }> = {}) =>
-  ({ line_items, awaiting_batch_id: null, replacement_state: 'ready', ...extra }) as never;
+const order = (line_items: unknown[], extra: Partial<{ awaiting_batch_id: string | null; replacement_state: string | null; shipped_at: string | null; delivered_at: string | null; status: string }> = {}) =>
+  ({ line_items, awaiting_batch_id: null, replacement_state: 'ready', status: 'approved', ...extra }) as never;
 
 describe('replacementItemTags', () => {
   it('maps structured part SKUs to the vocabulary', () => {
@@ -48,6 +48,51 @@ describe('replacementStageTag', () => {
   });
   it('truly empty → null', () => {
     expect(replacementStageTag(order([]), [], isPending)).toBeNull();
+  });
+  it('cancelled → null, whatever the items still say (R-0051, Amanda Acker)', () => {
+    // Her cancelled P100X kept rendering an "awaiting batch" chip in
+    // Fulfillment > Replacements, which is the tab saying she is queued for a
+    // unit nobody is building for her. A cancelled order has no live stage.
+    expect(replacementStageTag(
+      order([{ kind: 'unit_pending', batch: 'P100X' }], { awaiting_batch_id: 'P100X', status: 'cancelled' }),
+      ['P100X'], isPending,
+    )).toBeNull();
+    expect(replacementStageTag(
+      order([{ kind: 'part', sku: 'LILA-HOPPER' }], { status: 'cancelled' }), ['hopper'], isPending,
+    )).toBeNull();
+  });
+});
+
+describe('replacementQueueKinds', () => {
+  it('a whole-unit replacement → its batch code', () => {
+    expect(replacementQueueKinds(order([{ kind: 'unit', batch: 'P100' }]))).toEqual(['P100']);
+    expect(replacementQueueKinds(order([{ kind: 'unit_pending', batch: 'P100X' }]))).toEqual(['P100X']);
+    expect(replacementQueueKinds(order([{ kind: 'unit_pending', batch: 'LILA-Mini' }]))).toEqual(['LILA-Mini']);
+  });
+
+  it('batch-blocked with empty line_items → the awaiting batch', () => {
+    expect(replacementQueueKinds(order([], { awaiting_batch_id: 'P100X' }))).toEqual(['P100X']);
+  });
+
+  it('parts / consumables → PARTS', () => {
+    expect(replacementQueueKinds(order([{ kind: 'part', sku: 'LILA-LID-V36' }]))).toEqual(['PARTS']);
+    // Off-vocabulary parts (e.g. the Jumper) yield no item tag but are still parts.
+    expect(replacementQueueKinds(order([{ kind: 'part_pending', sku: 'LILA-JUMPER', name: 'Jumper' }]))).toEqual(['PARTS']);
+  });
+
+  it('a unit shipped alongside parts reads as the unit', () => {
+    expect(replacementQueueKinds(order([
+      { kind: 'unit_pending', batch: 'P100X' }, { kind: 'part', sku: 'LILA-HOPPER' },
+    ]))).toEqual(['P100X']);
+  });
+
+  it('an empty order yields no kind', () => {
+    expect(replacementQueueKinds(order([]))).toEqual([]);
+  });
+
+  it('labels read "Queued for <kind> Replacement"', () => {
+    expect(queuedForReplacementLabel('P100X')).toBe('Queued for P100X Replacement');
+    expect(queuedForReplacementLabel('PARTS')).toBe('Queued for PARTS Replacement');
   });
 });
 
@@ -125,5 +170,103 @@ describe('LILA-Mini upcoming batch', () => {
       order([{ kind: 'unit_pending', batch: 'LILA-Mini' }], { shipped_at: '2026-06-01' }), // shipped → skip
     ]);
     expect(m.get('LILA-Mini')).toBe(2);
+  });
+});
+
+// Cancelling a replacement used to DELETE the row, so "the row exists" was a
+// good enough liveness test and none of these helpers looked at status. The
+// fulfillment queue's Cancel Order keeps the row and marks it cancelled
+// instead, which broke that assumption in four places at once: Stock > Parts
+// demand, Build's per-batch demand, Finance's projection, and the Replacement
+// tab's open count all kept counting orders nobody was waiting on.
+describe('cancelled replacements are not demand', () => {
+  it('isLiveReplacement excludes cancelled, shipped and delivered', () => {
+    expect(isLiveReplacement(order([]))).toBe(true);
+    expect(isLiveReplacement(order([], { status: 'cancelled' }))).toBe(false);
+    expect(isLiveReplacement(order([], { shipped_at: '2026-08-01T00:00:00Z' }))).toBe(false);
+    expect(isLiveReplacement(order([], { delivered_at: '2026-08-04T00:00:00Z' }))).toBe(false);
+  });
+
+  it('drops a cancelled order out of per-SKU part demand', () => {
+    const live = order([{ kind: 'part', sku: 'LILA-LID-V36' }]);
+    const dead = order([{ kind: 'part', sku: 'LILA-LID-V36' }], { status: 'cancelled' });
+    expect(replacementDemandBySku([live, dead]).get('LILA-LID-V36')).toBe(1);
+  });
+
+  it('drops a cancelled order out of per-batch unit demand', () => {
+    const live = order([{ kind: 'unit', batch: 'P100X' }]);
+    const dead = order([{ kind: 'unit', batch: 'P100X' }], { status: 'cancelled' });
+    expect(replacementUnitDemandByBatch([live, dead]).get('P100X')).toBe(1);
+  });
+});
+
+// The fulfillment queue card used to read "Jeff Mottle — LILA Pro" for a $24
+// lid, because "LILA Pro" was hardcoded for every order in the queue. This is
+// the sentence that replaced it, shared with Fulfillment > Replacements so the
+// two surfaces name the same box the same way.
+describe('replacementItemsLabel', () => {
+  it('names the part rather than counting it', () => {
+    expect(replacementItemsLabel([
+      { kind: 'part', sku: 'LILA-LID-V36', name: 'Replacement Top Lid (v3.6)', qty: 1 },
+    ] as never)).toBe('Replacement Top Lid (v3.6)');
+  });
+
+  it('counts units and appends named parts', () => {
+    expect(replacementItemsLabel([
+      { kind: 'unit', batch: 'P100' },
+      { kind: 'part', description: 'Hopper', qty: 1 },
+    ] as never)).toBe('1 unit + Hopper');
+  });
+
+  it('falls back to a part count when nothing is named', () => {
+    expect(replacementItemsLabel([{ kind: 'part', qty: 3 }] as never)).toBe('3 parts');
+  });
+
+  it('marks a unit whose batch has not landed as pending', () => {
+    expect(replacementItemsLabel([{ kind: 'unit_pending', batch: 'P100X' }] as never))
+      .toBe('1 unit (pending)');
+  });
+
+  it('gives an em dash rather than an empty card for an empty order', () => {
+    expect(replacementItemsLabel([] as never)).toBe('—');
+  });
+});
+
+// The gate on "mark shipped without the queue": it skips the serial, so a
+// wrong `true` here ships a machine with nothing recorded against it.
+describe('isPartsOnlyReplacement', () => {
+  it('is true for structured part lines', () => {
+    expect(isPartsOnlyReplacement(order([
+      { kind: 'part', sku: 'LILA-LID-V36', qty: 1 },
+      { kind: 'part', sku: 'LILA-FILTER', qty: 2 },
+    ]))).toBe(true);
+  });
+
+  it('is true for an out-of-stock part still on order', () => {
+    expect(isPartsOnlyReplacement(order([{ kind: 'part_pending', sku: 'LILA-HOPPER', qty: 1 }]))).toBe(true);
+  });
+
+  it('is true for a free-text part line the importer never mapped', () => {
+    expect(isPartsOnlyReplacement(order([{ kind: 'part', description: 'both side latch' }]))).toBe(true);
+  });
+
+  it('is false for a whole unit or a base', () => {
+    expect(isPartsOnlyReplacement(order([{ kind: 'unit', batch: 'P100', unit_serial: '00019' }]))).toBe(false);
+    expect(isPartsOnlyReplacement(order([{ kind: 'unit_pending', batch: 'P100X' }]))).toBe(false);
+    expect(isPartsOnlyReplacement(order([{ kind: 'base', batch: 'BASE-01', unit_serial: 'B-7' }]))).toBe(false);
+    expect(isPartsOnlyReplacement(order([{ kind: 'base_pending', batch: 'BASE-02' }]))).toBe(false);
+  });
+
+  it('is false for a part line that names a machine in free text', () => {
+    expect(isPartsOnlyReplacement(order([{ kind: 'part', description: 'replacement P100X machine' }]))).toBe(false);
+  });
+
+  it('is false while the order is blocked on a batch (R-0032)', () => {
+    expect(isPartsOnlyReplacement(order([{ kind: 'part', sku: 'LILA-LID-V36' }], { awaiting_batch_id: 'P100X' })))
+      .toBe(false);
+  });
+
+  it('is false for an empty order — nothing recorded is not the same as parts', () => {
+    expect(isPartsOnlyReplacement(order([]))).toBe(false);
   });
 });

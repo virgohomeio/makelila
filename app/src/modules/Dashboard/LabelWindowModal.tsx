@@ -20,6 +20,7 @@ const LABELS: { value: DatasetLabelKind; description: string }[] = [
   { value: 'wet',        description: 'Compost is too wet' },
   { value: 'mixing',     description: 'Mixing/turnover is working' },
   { value: 'not_mixing',       description: 'Mixing appears stuck' },
+  { value: 'motor_jammed',     description: 'Chamber motor jammed — stalled or unable to turn (paired with chamber_motor_left/right current)' },
   { value: 'moldy_composter', description: 'Mold visible inside the composter body' },
   { value: 'moldy_chamber',   description: 'Mold visible inside the mixing chamber' },
   { value: 'other',           description: 'Other (capture context in notes)' },

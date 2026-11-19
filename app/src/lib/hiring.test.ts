@@ -3,9 +3,9 @@ import { renderHook, waitFor } from '@testing-library/react';
 import {
   useJobPostings, useCandidates, useInterviews,
   createJobPosting, addPostingInterviewer, searchInternalProfiles, getCurrentUserId,
-  updateCandidateStage, recordCandidateScore, rejectCandidate, hireCandidate,
+  updateCandidateStage, recordCandidateScore, rejectCandidate, hireCandidate, recordProjectScores,
   createInterview, recordInterviewDecision, updatePostingRubric,
-  suggestScreeningRubric, uploadAndScoreResume, getResumeSignedUrl,
+  suggestScreeningRubric, uploadAndScoreResume, getResumeSignedUrl, getResumeObjectUrl,
   isAssignedInterviewerAnywhere, extractFunctionErrorMessage, getPostingInterviewers,
   computeOverallScore, type RubricDimension,
 } from './hiring';
@@ -150,16 +150,28 @@ describe('mutations', () => {
     expect(mockUpdate).toHaveBeenCalledWith({ scores: { culture_fit: 4 } });
   });
 
-  it('rejectCandidate sets rejected_at', async () => {
+  it('rejectCandidate records the resume-screening stage and clears hired_at (switching a shortlisted candidate)', async () => {
     mockEq.mockReturnValueOnce({ then: (f: (v: unknown) => unknown) => Promise.resolve({ error: null }).then(f) });
-    await rejectCandidate('c1');
-    expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({ rejected_at: expect.any(String) }));
+    await rejectCandidate('c1', 'resume_screening');
+    expect(mockUpdate).toHaveBeenCalledWith({ rejected_at: expect.any(String), rejection_stage: 'resume_screening', hired_at: null });
   });
 
-  it('hireCandidate sets hired_at', async () => {
+  it('rejectCandidate records the interview stage when rejecting from the Interviews board', async () => {
+    mockEq.mockReturnValueOnce({ then: (f: (v: unknown) => unknown) => Promise.resolve({ error: null }).then(f) });
+    await rejectCandidate('c1', 'interview');
+    expect(mockUpdate).toHaveBeenCalledWith({ rejected_at: expect.any(String), rejection_stage: 'interview', hired_at: null });
+  });
+
+  it('hireCandidate sets hired_at and clears the rejection, stage included (switching a rejected candidate)', async () => {
     mockEq.mockReturnValueOnce({ then: (f: (v: unknown) => unknown) => Promise.resolve({ error: null }).then(f) });
     await hireCandidate('c1');
-    expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({ hired_at: expect.any(String) }));
+    expect(mockUpdate).toHaveBeenCalledWith({ hired_at: expect.any(String), rejected_at: null, rejection_stage: null });
+  });
+
+  it('recordProjectScores writes the project_scores object', async () => {
+    mockEq.mockReturnValueOnce({ then: (f: (v: unknown) => unknown) => Promise.resolve({ error: null }).then(f) });
+    await recordProjectScores('c1', { 'Question 1': 4, 'Question 2': 5 });
+    expect(mockUpdate).toHaveBeenCalledWith({ project_scores: { 'Question 1': 4, 'Question 2': 5 } });
   });
 
   it('createInterview inserts a row and returns it', async () => {
@@ -288,6 +300,47 @@ describe('mutations', () => {
     const url = await getResumeSignedUrl('p1/abc-resume.pdf');
     expect(mockCreateSignedUrl).toHaveBeenCalledWith('p1/abc-resume.pdf', 3600);
     expect(url).toBe('https://.../signed?token=abc');
+  });
+});
+
+// The storage response carries a Content-Disposition the browser is free to
+// treat as a download — Firefox does, leaving the viewer tab blank. Fetching
+// the bytes and handing over a blob: URL takes that decision away from it.
+describe('getResumeObjectUrl', () => {
+  beforeEach(() => {
+    vi.stubGlobal('URL', Object.assign(globalThis.URL, { createObjectURL: vi.fn(() => 'blob:makelila/resume') }));
+  });
+
+  // Plain-object responses, not `new Response(blob)`: undici's Response treats
+  // jsdom's Blob (the global in this test environment) as blob-like and calls
+  // .stream() on it, which jsdom's Blob doesn't implement on CI's Node 20 —
+  // that TypeError blocked the Pages deploy. Same pattern as lovely.test.ts.
+  it('fetches the signed URL and hands back a blob URL', async () => {
+    mockCreateSignedUrl.mockResolvedValueOnce({ data: { signedUrl: 'https://storage/signed?token=abc' }, error: null });
+    const blob = new Blob(['%PDF-1.4'], { type: 'application/pdf' });
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, status: 200, blob: async () => blob })));
+
+    expect(await getResumeObjectUrl('p1/abc-resume.pdf')).toBe('blob:makelila/resume');
+    expect(fetch).toHaveBeenCalledWith('https://storage/signed?token=abc');
+    const passed = vi.mocked(URL.createObjectURL).mock.calls[0][0] as Blob;
+    expect(passed.type).toBe('application/pdf');
+  });
+
+  // A resume the browser hands back as octet-stream would download instead of
+  // rendering; .pdf paths get the type restored so the viewer takes it.
+  it('restores the pdf type when the response has none', async () => {
+    mockCreateSignedUrl.mockResolvedValueOnce({ data: { signedUrl: 'https://storage/signed?token=abc' }, error: null });
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, status: 200, blob: async () => new Blob(['%PDF-1.4']) })));
+
+    await getResumeObjectUrl('p1/abc-resume.pdf');
+    expect((vi.mocked(URL.createObjectURL).mock.calls[0][0] as Blob).type).toBe('application/pdf');
+  });
+
+  it('reports the status when the file cannot be fetched', async () => {
+    mockCreateSignedUrl.mockResolvedValueOnce({ data: { signedUrl: 'https://storage/signed?token=abc' }, error: null });
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 403 })));
+
+    await expect(getResumeObjectUrl('p1/abc-resume.pdf')).rejects.toThrow(/403/);
   });
 });
 
