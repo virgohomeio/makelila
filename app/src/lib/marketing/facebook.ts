@@ -149,14 +149,28 @@ export function useFbDemographics(): { demographics: FbDemographic[]; loading: b
   const [loading, setLoading] = useState(true);
   useEffect(() => {
     let cancelled = false;
-    void supabase
-      .from('fb_demographics')
-      .select('campaign_id, campaign_name, date, age, gender, country, leads, purchases')
-      .then(({ data, error }) => {
-        if (cancelled) return;
-        if (!error && data) setDemographics(data as FbDemographic[]);
-        setLoading(false);
-      });
+    // Supabase caps a single response at 1000 rows. fb_demographics is one row
+    // per campaign × date × age × gender × country, which runs well past that,
+    // so page through with .range() — otherwise older dates and whole campaigns
+    // silently fall off and the age breakdown is built from a partial set.
+    const cols = 'campaign_id, campaign_name, date, age, gender, country, leads, purchases';
+    const PAGE = 1000;
+    void (async () => {
+      const all: FbDemographic[] = [];
+      for (let from = 0; ; from += PAGE) {
+        const { data, error } = await supabase
+          .from('fb_demographics')
+          .select(cols)
+          .order('date', { ascending: false })
+          .range(from, from + PAGE - 1);
+        if (error || !data) break;
+        all.push(...(data as FbDemographic[]));
+        if (data.length < PAGE) break;
+      }
+      if (cancelled) return;
+      setDemographics(all);
+      setLoading(false);
+    })();
     return () => { cancelled = true; };
   }, []);
   return { demographics, loading };
