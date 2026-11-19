@@ -12,6 +12,13 @@ import { useGoogleAds, sumGoogleAds } from '../../lib/marketing/googleAds';
 const subtle = 'var(--color-ink-subtle)';
 const muted = 'var(--color-ink-muted)';
 
+// Meta age brackets in order, with a midpoint for the weighted-average age. Same
+// buckets the Demographics tab uses, so the two agree.
+const AGE_ORDER = ['13-17', '18-24', '25-34', '35-44', '45-54', '55-64', '65+'];
+const AGE_MID: Record<string, number> = {
+  '13-17': 15, '18-24': 21, '25-34': 29.5, '35-44': 39.5, '45-54': 49.5, '55-64': 59.5, '65+': 70,
+};
+
 // Column index of the Full Refund? flag, so the table can give a full refund a
 // crimson highlight (and mute the "No") without hard-coding a position.
 const REFUND_COL = REPORT_COLUMNS.indexOf('Full Refund?');
@@ -298,6 +305,32 @@ export function ReportTab() {
     return buildSalesReport(filtered, resolve, platform.totalSpend, journey, campaignName, demo, groupOf, creativeOf);
   }, [orders, byId, byEmail, journeys, campaigns, campaignGroups, demographics, ads, platform, range, campaignFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Meta age distribution for LILA Pro — the purchases Meta attributes by age
+  // bracket, across every demographic row whose campaign is NOT Mini and NOT
+  // Sharpei. All-time and independent of the sales date filter above: these are
+  // Meta's own attributed purchases, not Shopify sales, so they aren't scoped to
+  // the order window.
+  const proAges = useMemo(() => {
+    const isPro = (name: string | null) => {
+      const n = (name ?? '').toLowerCase();
+      return !/sharpei|waitlist/.test(n) && !/\bmini\b/.test(n);
+    };
+    const map = new Map<string, number>();
+    for (const d of demographics) {
+      if (d.age === 'all' || d.gender === 'all') continue;   // skip Meta's aggregate rows
+      if (!isPro(d.campaign_name)) continue;
+      map.set(d.age, (map.get(d.age) ?? 0) + (d.purchases ?? 0));
+    }
+    const ageRows = [...map.entries()]
+      .map(([age, count]) => ({ age, count }))
+      .filter(e => e.count > 0)
+      .sort((a, b) => AGE_ORDER.indexOf(a.age) - AGE_ORDER.indexOf(b.age));
+    const total = ageRows.reduce((s, e) => s + e.count, 0);
+    let wsum = 0, wn = 0;
+    for (const e of ageRows) { const mid = AGE_MID[e.age]; if (mid != null) { wsum += mid * e.count; wn += e.count; } }
+    return { rows: ageRows, total, avg: wn > 0 ? wsum / wn : null };
+  }, [demographics]);
+
   const pageCount = Math.max(1, Math.ceil(rows.length / pageSize));
   const safePage = Math.min(page, pageCount - 1);
   const pagedRows = rows.slice(safePage * pageSize, (safePage + 1) * pageSize);
@@ -439,7 +472,42 @@ export function ReportTab() {
         <BreakdownTable title="By plan" rows={kpis.byPlan} />
         <BreakdownTable title="By province/state" rows={kpis.byProvince} />
         <BreakdownTable title="By discount code" rows={kpis.byDiscount} />
+        <AgeBreakdown title="By age — Meta · LILA Pro" rows={proAges.rows} total={proAges.total} avg={proAges.avg} />
       </div>
+    </div>
+  );
+}
+
+/** Meta's purchase demographics by age bracket for LILA Pro (every campaign that
+ *  isn't Mini or Sharpei). Mirrors the Demographics tab's "LILA Pro → By age" so
+ *  the numbers match; shows the count and share per bracket plus a weighted
+ *  average age. Purchases are Meta-attributed, not the Shopify sales above. */
+function AgeBreakdown({ title, rows, total, avg }: {
+  title: string;
+  rows: { age: string; count: number }[];
+  total: number;
+  avg: number | null;
+}) {
+  return (
+    <div style={{ minWidth: 220 }}>
+      <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>{title}</div>
+      <table style={{ borderCollapse: 'collapse', fontSize: 12, width: '100%' }}>
+        <tbody>
+          {rows.map(r => (
+            <tr key={r.age} style={{ borderTop: '1px solid var(--color-border)' }}>
+              <td style={{ padding: '4px 0' }}>{r.age}</td>
+              <td style={{ textAlign: 'right', color: muted, fontVariantNumeric: 'tabular-nums' }}>{r.count.toLocaleString()}</td>
+              <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{total > 0 ? `${Math.round((r.count / total) * 100)}%` : '—'}</td>
+            </tr>
+          ))}
+          {rows.length === 0 && <tr><td style={{ color: subtle, padding: '4px 0' }}>No Meta purchase demographics yet</td></tr>}
+        </tbody>
+      </table>
+      {avg != null && rows.length > 0 && (
+        <div style={{ fontSize: 11, color: muted, marginTop: 4 }}>
+          Avg age ~{Math.round(avg)} · {total.toLocaleString()} Meta purchases
+        </div>
+      )}
     </div>
   );
 }
