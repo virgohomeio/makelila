@@ -14,6 +14,9 @@ vi.mock('../../../lib/hiring', () => ({
   hireCandidate: vi.fn(),
   getResumeObjectUrl: vi.fn(),
   uploadAndScoreResume: vi.fn(),
+  // Ranking calls this per candidate during render; a flat 0 keeps every
+  // candidate equal so these source-filter assertions stay order-agnostic.
+  computeOverallScore: vi.fn(() => 0),
 }));
 
 const posting: JobPosting = {
