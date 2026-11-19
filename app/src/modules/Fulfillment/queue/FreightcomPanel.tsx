@@ -3,6 +3,7 @@ import {
   confirmFreightcomBooking,
   freightcomBookingConfirmed,
   FREIGHTCOM_SHIP_URL,
+  type FreightcomPackage,
 } from '../../../lib/freightcomBooking';
 import type { FulfillmentQueueRow } from '../../../lib/fulfillment';
 import { QUEUE_CARRIERS } from '../../../lib/queueCarrier';
@@ -41,7 +42,7 @@ export function FreightcomPanel({
   onConfirmed,
   starterGap = null,
 }: {
-  row: FulfillmentQueueRow;
+  row: FulfillmentQueueRow & { extra_packages?: FreightcomPackage[] | null };
   order: EzTransOrder;
   /** Hands the saved carrier and tracking number up to StepLabel, so
    *  "Pickup scheduled" is a single click after a confirm rather than the same
@@ -58,9 +59,14 @@ export function FreightcomPanel({
    *  carton leaves, and this is the last moment anyone looks at the order. */
   starterGap?: string | null;
 }) {
+  const serials = row.assigned_serials ?? [];
   const [carrier, setCarrier] = useState(row.carrier ?? '');
-  const [tracking, setTracking] = useState(row.tracking_num ?? '');
-  const [pdf, setPdf] = useState<File | null>(null);
+  // One entry per box — Freightcom issues a label and a tracking number for
+  // each. Box 1 is the row's own tracking_num / label_pdf_path; boxes 2..N
+  // live in extra_packages. Starts at one box; a multi-machine order gets a
+  // nudge below to add the rest rather than a forced count, since a pallet
+  // booking (Day & Ross) can carry several machines on one label.
+  const [boxes, setBoxes] = useState<Box[]>(() => initialBoxes(row));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // The local echo of a confirm, so the operator gets an answer before the
@@ -71,26 +77,50 @@ export function FreightcomPanel({
   // A label uploaded on an earlier pass is already on the row, so a correction
   // — a re-keyed tracking number, a different carrier — doesn't send the
   // operator looking for the file again.
-  const labelOnFile = !!row.label_pdf_path;
   const confirmed = !!justConfirmed || freightcomBookingConfirmed(row);
+  const multi = boxes.length > 1;
 
-  const ready = !!carrier && !!tracking.trim() && (!!pdf || labelOnFile) && !starterGap;
+  const boxReady = (b: Box) => !!b.tracking.trim() && (!!b.pdf || !!b.pathOnFile);
+  const ready = !!carrier && boxes.every(boxReady) && !starterGap;
 
-  const serials = row.assigned_serials ?? [];
+  const updateBox = (i: number, patch: Partial<Box>) =>
+    setBoxes(bs => bs.map((b, j) => (j === i ? { ...b, ...patch } : b)));
+  const addBox = () => setBoxes(bs => [...bs, emptyBox()]);
+  const removeBox = (i: number) => setBoxes(bs => (bs.length > 1 ? bs.filter((_, j) => j !== i) : bs));
 
   const handleConfirm = async () => {
     if (!ready) return;
     setBusy(true); setError(null);
+    const [first, ...rest] = boxes;
     try {
-      await confirmFreightcomBooking(row.id, {
+      const saved = await confirmFreightcomBooking(row.id, {
         carrier,
-        tracking_num: tracking.trim(),
-        ...(pdf ? { label_pdf: pdf } : {}),
+        tracking_num: first.tracking.trim(),
+        ...(first.pdf ? { label_pdf: first.pdf } : {}),
+        // Always sent, so removing a box here removes it from the record.
+        // Skipped only when the row never had extras and still has none, so
+        // a single-box confirm does not depend on the extra_packages column.
+        ...(rest.length || (row.extra_packages?.length ?? 0) > 0
+          ? {
+              extra_packages: rest.map(b => ({
+                tracking_num: b.tracking.trim(),
+                label_pdf: b.pdf,
+                label_pdf_path: b.pathOnFile,
+              })),
+            }
+          : {}),
         order: { id: order.id, order_ref: order.order_ref },
         serials,
       });
-      onLabelSaved?.({ carrier, tracking_num: tracking.trim() });
-      setPdf(null);
+      onLabelSaved?.({ carrier, tracking_num: first.tracking.trim() });
+      // The new files are on the record now; keep the fields, drop the picks.
+      setBoxes(bs => bs.map((b, i) => ({
+        ...b,
+        pdf: null,
+        pathOnFile: i === 0
+          ? (saved.label_pdf_path ?? b.pathOnFile)
+          : (saved.extra_packages?.[i - 1]?.label_pdf_path ?? b.pathOnFile),
+      })));
       setJustConfirmed(new Date().toISOString());
       onConfirmed?.();
     } catch (e) {
@@ -143,38 +173,69 @@ export function FreightcomPanel({
               </select>
             </label>
 
-            <label>
-              Tracking number:
-              <input
-                type="text"
-                value={tracking}
-                onChange={e => setTracking(e.target.value)}
-                placeholder="Paste from the Freightcom label"
-                data-testid="freightcom-tracking"
-              />
-            </label>
+            {boxes.map((b, i) => (
+              <fieldset
+                key={b.key}
+                className={multi ? styles.bookingBox : styles.bookingBoxSingle}
+                data-testid={`freightcom-box-${i + 1}`}
+              >
+                {multi && (
+                  <legend>
+                    Box {i + 1} of {boxes.length}
+                    <button
+                      type="button"
+                      onClick={() => removeBox(i)}
+                      data-testid={`freightcom-remove-box-${i + 1}`}
+                    >Remove box</button>
+                  </legend>
+                )}
+                <label>
+                  Tracking number:
+                  <input
+                    type="text"
+                    value={b.tracking}
+                    onChange={e => updateBox(i, { tracking: e.target.value })}
+                    placeholder="Paste from the Freightcom label"
+                    data-testid={i === 0 ? 'freightcom-tracking' : `freightcom-tracking-${i + 1}`}
+                  />
+                </label>
 
-            <label>
-              Shipping label PDF:
-              {pdf ? (
-                <span className={styles.bookingFile}>
-                  {pdf.name} · {(pdf.size / 1024).toFixed(0)} KB
-                  <button type="button" onClick={() => setPdf(null)}>Remove</button>
-                </span>
-              ) : (
-                <input
-                  type="file"
-                  accept="application/pdf"
-                  onChange={e => setPdf(e.target.files?.[0] ?? null)}
-                  data-testid="freightcom-label-pdf"
-                />
-              )}
-            </label>
-            {labelOnFile && !pdf && (
-              <span className={styles.bookingHint}>
-                A label is already on this order — pick a file only to replace it.
+                <label>
+                  Shipping label PDF:
+                  {b.pdf ? (
+                    <span className={styles.bookingFile}>
+                      {b.pdf.name} · {(b.pdf.size / 1024).toFixed(0)} KB
+                      <button type="button" onClick={() => updateBox(i, { pdf: null })}>Remove</button>
+                    </span>
+                  ) : (
+                    <input
+                      type="file"
+                      accept="application/pdf"
+                      onChange={e => updateBox(i, { pdf: e.target.files?.[0] ?? null })}
+                      data-testid={i === 0 ? 'freightcom-label-pdf' : `freightcom-label-pdf-${i + 1}`}
+                    />
+                  )}
+                </label>
+                {b.pathOnFile && !b.pdf && (
+                  <span className={styles.bookingHint}>
+                    A label is already on file for this box — pick a file only to replace it.
+                  </span>
+                )}
+              </fieldset>
+            ))}
+            {serials.length > boxes.length && (
+              <span className={styles.bookingHint} data-testid="freightcom-box-nudge">
+                {serials.length} machines, {boxes.length} {boxes.length === 1 ? 'label' : 'labels'} —
+                if Freightcom issued a label per box, add a box for each so every
+                tracking number and label is on the record.
               </span>
             )}
+            <button
+              type="button"
+              className={styles.bookingAddBox}
+              onClick={addBox}
+              data-testid="freightcom-add-box"
+            >+ Add another box</button>
           </div>
         </li>
 
@@ -201,8 +262,9 @@ export function FreightcomPanel({
               </span>
             ) : !ready ? (
               <span className={styles.bookingHint}>
-                Carrier, tracking number and the label PDF are all required before this
-                booking can be confirmed.
+                {multi
+                  ? 'Carrier, plus a tracking number and label PDF for every box, are required before this booking can be confirmed.'
+                  : 'Carrier, tracking number and the label PDF are all required before this booking can be confirmed.'}
               </span>
             ) : (
               <span className={styles.bookingHint}>
@@ -221,7 +283,8 @@ export function FreightcomPanel({
                   number reads back as the corrected one; the row only catches
                   up over realtime, and echoing it would show the operator the
                   number they had just replaced. */}
-              {' '}{carrier} {tracking.trim()}, label on file.
+              {' '}{carrier} {boxes.map(b => b.tracking.trim()).join(', ')},
+              {multi ? ` ${boxes.length} labels on file.` : ' label on file.'}
               Confirm again only to correct it.
             </div>
           )}
@@ -242,4 +305,36 @@ export function FreightcomPanel({
       {error && <div className={styles.error}>{error}</div>}
     </div>
   );
+}
+
+type Box = {
+  key: string;
+  tracking: string;
+  pdf: File | null;
+  /** Set when this box already has a label in storage. */
+  pathOnFile: string | null;
+};
+
+let boxSeq = 0;
+function emptyBox(): Box {
+  return { key: `box-${++boxSeq}`, tracking: '', pdf: null, pathOnFile: null };
+}
+
+function initialBoxes(
+  row: FulfillmentQueueRow & { extra_packages?: FreightcomPackage[] | null },
+): Box[] {
+  const first: Box = {
+    ...emptyBox(),
+    tracking: row.tracking_num ?? '',
+    pathOnFile: row.label_pdf_path ?? null,
+  };
+  const extras = Array.isArray(row.extra_packages) ? row.extra_packages : [];
+  if (extras.length) {
+    return [first, ...extras.map(p => ({
+      ...emptyBox(),
+      tracking: p.tracking_num ?? '',
+      pathOnFile: p.label_pdf_path || null,
+    }))];
+  }
+  return [first];
 }

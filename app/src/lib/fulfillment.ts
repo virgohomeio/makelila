@@ -1086,9 +1086,21 @@ export function trackingUrlFor(carrier: string | null, tracking: string | null):
 /** The {{variables}} the 'shipment_confirmation' template is rendered against.
  *  Built here so the Step-5 preview and the edge function agree on every value. */
 export function shipmentEmailVars(
-  row: Pick<FulfillmentQueueRow, 'carrier' | 'tracking_num' | 'starter_tracking_num'>,
+  row: Pick<FulfillmentQueueRow, 'carrier' | 'tracking_num' | 'starter_tracking_num'> & {
+    /** Boxes 2..N of a multi-box Freightcom booking (lib/freightcomBooking.ts). */
+    extra_packages?: { tracking_num: string }[] | null;
+  },
   order: { customer_name: string; order_ref: string; country: 'US' | 'CA' },
 ): Record<string, string> {
+  // A multi-box booking has a tracking number per box; the customer gets all
+  // of them, and a link for each (deduped — a carrier with no prefillable URL
+  // gives the same search page for every box).
+  const numbers = [row.tracking_num, ...(row.extra_packages ?? []).map(p => p.tracking_num)]
+    .map(n => n?.trim())
+    .filter((n): n is string => !!n);
+  const urls = numbers.length > 1
+    ? [...new Set(numbers.map(n => trackingUrlFor(row.carrier, n)))]
+    : [trackingUrlFor(row.carrier, row.tracking_num)];
   // The compost starter ships separately through Amazon. Keyed on the number
   // rather than on the destination: step 3 now asks for one on every machine
   // sale, CA included (lib/starterKit.ts), and gating the block on country
@@ -1104,8 +1116,8 @@ export function shipmentEmailVars(
     customer_first_name: order.customer_name.split(' ')[0] ?? order.customer_name,
     order_ref: order.order_ref,
     carrier: row.carrier ?? '',
-    tracking_num: row.tracking_num ?? '',
-    tracking_url: trackingUrlFor(row.carrier, row.tracking_num),
+    tracking_num: numbers.length > 1 ? numbers.join(', ') : (row.tracking_num ?? ''),
+    tracking_url: urls.join('\n'),
     starter_block: starterBlock,
   };
 }

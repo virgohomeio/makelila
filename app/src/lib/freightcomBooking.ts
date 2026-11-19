@@ -29,6 +29,7 @@
 import { logAction, useActivityForEntity } from './activityLog';
 import { REBOOK_ACTION } from './rebookShipment';
 import { saveQueueLabel } from './fulfillment';
+import { supabase } from './supabase';
 
 /** The Freightcom portal, opened at a blank shipment. The account path is
  *  ours; it was inline in StepLabel before this module existed. */
@@ -41,12 +42,39 @@ export const FREIGHTCOM_SHIP_URL =
  *  an order's history has to show for a Freightcom carton. */
 export const FREIGHTCOM_CONFIRMED_ACTION = 'fq_freightcom_booking_confirmed';
 
-/** The parts of a queue row that are the booking. */
+/** Boxes 2..N of a multi-box booking — one label and one tracking number
+ *  each, same carrier as box 1. Box 1 stays in the row's own carrier /
+ *  tracking_num / label_pdf_path so every existing reader keeps working
+ *  (20261119120000_fulfillment_queue_extra_packages.sql). */
+export type FreightcomPackage = {
+  tracking_num: string;
+  label_pdf_path: string;
+};
+
+/** The parts of a queue row that are the booking. `extra_packages` is
+ *  optional because migrations here are applied by hand: select('*') on a
+ *  database that has not run it simply returns rows without it. */
 export type FreightcomBookingRow = {
   carrier: string | null;
   tracking_num: string | null;
   label_pdf_path: string | null;
+  extra_packages?: FreightcomPackage[] | null;
 };
+
+/** Every box on the booking, box 1 first. Empty when nothing is recorded. */
+export function freightcomPackages(row: FreightcomBookingRow): FreightcomPackage[] {
+  const first = row.tracking_num?.trim()
+    ? [{ tracking_num: row.tracking_num.trim(), label_pdf_path: row.label_pdf_path ?? '' }]
+    : [];
+  const rest = Array.isArray(row.extra_packages) ? row.extra_packages : [];
+  return [...first, ...rest.filter(p => p && p.tracking_num?.trim())];
+}
+
+/** All tracking numbers on the booking, comma-separated — for one-line
+ *  displays and log lines. */
+export function freightcomTrackingSummary(row: FreightcomBookingRow): string {
+  return freightcomPackages(row).map(p => p.tracking_num).join(', ');
+}
 
 /** Is this order's Freightcom booking on the record?
  *
@@ -81,22 +109,58 @@ export async function confirmFreightcomBooking(
     carrier: string;
     tracking_num: string;
     label_pdf?: File;
+    /** Boxes 2..N, in order. Each needs a tracking number and either a new
+     *  label PDF or the path of one already on file. Omit to leave whatever
+     *  extra boxes are on the row untouched; pass [] to clear them. */
+    extra_packages?: { tracking_num: string; label_pdf?: File | null; label_pdf_path?: string | null }[];
     /** For the log line only. */
     order: { id: string; order_ref: string };
     serials: string[];
   },
-): Promise<{ label_pdf_path: string | null }> {
+): Promise<{ label_pdf_path: string | null; extra_packages: FreightcomPackage[] | null }> {
   const { label_pdf_path } = await saveQueueLabel(queueId, {
     carrier: input.carrier,
     tracking_num: input.tracking_num,
     ...(input.label_pdf ? { label_pdf: input.label_pdf } : {}),
   });
 
-  const tracking = input.tracking_num.trim();
+  let extras: FreightcomPackage[] | null = null;
+  if (input.extra_packages) {
+    extras = [];
+    for (const [i, p] of input.extra_packages.entries()) {
+      const tn = p.tracking_num.trim();
+      if (!tn) throw new Error(`Box ${i + 2} needs a tracking number.`);
+      let path = p.label_pdf_path ?? null;
+      if (p.label_pdf) {
+        path = `${queueId}/label-${Date.now()}-box${i + 2}.pdf`;
+        const { error: upErr } = await supabase.storage
+          .from('order-labels')
+          .upload(path, p.label_pdf, { contentType: 'application/pdf' });
+        if (upErr) throw upErr;
+      }
+      if (!path) throw new Error(`Box ${i + 2} needs its label PDF.`);
+      extras.push({ tracking_num: tn, label_pdf_path: path });
+    }
+    const { error } = await supabase
+      .from('fulfillment_queue')
+      .update({ extra_packages: extras })
+      .eq('id', queueId);
+    if (error) {
+      throw new Error(
+        /extra_packages/.test(error.message)
+          ? 'Box 1 was saved, but this database cannot hold more boxes yet — ' +
+            'migration 20261119120000_fulfillment_queue_extra_packages.sql has not been applied.'
+          : error.message,
+      );
+    }
+  }
+
+  const tracking = [input.tracking_num.trim(), ...(extras ?? []).map(p => p.tracking_num)].join(', ');
   await logAction(
     FREIGHTCOM_CONFIRMED_ACTION,
     input.order.order_ref,
     `Freightcom booking confirmed — ${input.carrier} ${tracking}` +
+    `${extras && extras.length ? ` · ${extras.length + 1} boxes` : ''}` +
     `${input.serials.length ? ` · ${input.serials.length} unit(s) ${input.serials.join(', ')}` : ''}` +
     ` · label PDF ${label_pdf_path ? 'attached' : 'already on the row'}`,
     {
@@ -106,7 +170,7 @@ export async function confirmFreightcomBooking(
     },
   );
 
-  return { label_pdf_path };
+  return { label_pdf_path, extra_packages: extras };
 }
 
 /** Has this order been booked on Freightcom?
