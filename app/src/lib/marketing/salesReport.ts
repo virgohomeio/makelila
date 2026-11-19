@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { supabase } from '../supabase';
 import { classifyChannel } from './journey';
 import { manualCreative, manualAge, manualGender } from './manualCreatives';
+import { regionName } from '../regions';
 import type { Order } from '../orders';
 
 // Auto sales-attribution report — the programmatic version of the manual
@@ -135,6 +136,21 @@ function bump(map: Map<string, Breakdown>, key: string, revenue: number) {
 
 const sortBreakdown = (m: Map<string, Breakdown>) => Array.from(m.values()).sort((a, b) => b.revenue - a.revenue);
 
+/** Breakdown label for a sale's province/state: a country flag plus the full
+ *  name ("🇨🇦 Ontario", "🇺🇸 California") instead of the bare code. `regionName`
+ *  wants a "CA-ON" style code and echoes that code back when it can't map it, so
+ *  fall back to the bare region in that case (never "CA-ON"), and to a plain dash
+ *  when the order has no region at all. */
+export function provinceLabel(country: string | null | undefined, region: string | null | undefined): string {
+  const r = (region ?? '').trim();
+  if (!r) return '—';
+  const c = (country ?? '').trim().toUpperCase();
+  const flag = c === 'CA' ? '🇨🇦 ' : c === 'US' ? '🇺🇸 ' : '';
+  const named = c ? regionName(`${c}-${r}`) : r;
+  const name = named.includes('-') ? r : named;
+  return `${flag}${name}`;
+}
+
 export type JourneyInfo = { timeLabel: string | null; note: string | null };
 export type Demo = { age: string | null; gender: string | null };
 
@@ -170,7 +186,7 @@ export function buildSalesReport(
     const saleSource = saleSourceOf(o);
 
     bump(byChannel, channel, revenue);
-    bump(byProvince, o.region_state ?? '—', revenue);
+    bump(byProvince, provinceLabel(o.country, o.region_state), revenue);
     bump(byPlan, plan, revenue);
     bump(bySource, saleSource, revenue);
     if (codes.length === 0) bump(byDiscount, 'No code', revenue);
