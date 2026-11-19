@@ -1,7 +1,6 @@
 import { useNavigate, useParams } from 'react-router-dom';
 import Queue from './queue';
 import Shelf from './shelf';
-import History from './history';
 import { ReturnsTab } from '../PostShipment/ReturnsTab';
 import { RefundsTab } from '../PostShipment/RefundsTab';
 // The replacement queue lives in Service/ (it leans on Service.module.css +
@@ -24,12 +23,12 @@ import { PageHeader, Tabs } from '../../components/ui';
 import styles from './Fulfillment.module.css';
 
 type Tab =
-  | 'queue' | 'shelf' | 'history'
+  | 'queue' | 'shelf'
   | 'shipping' | 'map' | 'invoices' | 'carrier-claims'
   | 'returns' | 'refunds' | 'replacements' | 'cancellations' | 'claims';
 
 const VALID_TABS: Tab[] = [
-  'queue', 'shelf', 'history',
+  'queue', 'shelf',
   'shipping', 'map', 'invoices', 'carrier-claims',
   'returns', 'refunds', 'replacements', 'cancellations', 'claims',
 ];
@@ -49,7 +48,6 @@ const FULFILLMENT_TABS: { key: Tab; label: string; startsGroup?: boolean }[] = [
   // Out the door.
   { key: 'queue',         label: 'Queue' },
   { key: 'shelf',         label: 'Shelf' },
-  { key: 'history',       label: 'History' },
   // With the carrier.
   { key: 'shipping',      label: 'Shipping', startsGroup: true },
   { key: 'map',           label: 'Delivery map' },
@@ -74,7 +72,6 @@ export default function Fulfillment() {
     const mobileTabs: MobileTab<Tab>[] = [
       { key: 'queue',         label: 'Fulfillment Queue', subtitle: 'Active orders moving through assign → ship', icon: '📦', iconBg: '#fff3e0', content: <Queue /> },
       { key: 'shelf',         label: 'Inventory Shelf',   subtitle: 'Skid assignments + on-hand units',           icon: '🪜', iconBg: '#e3f0fb', content: <Shelf /> },
-      { key: 'history',       label: 'History',           subtitle: 'Fulfilled orders, searchable',               icon: '📜', iconBg: '#f5f1eb', content: <History /> },
       { key: 'shipping',      label: 'Shipping',          subtitle: 'Shipped units, cost and tracking',            icon: '🚚', iconBg: '#e3f0fb', content: <ShippingList /> },
       { key: 'map',           label: 'Delivery Map',      subtitle: 'Open shipments on a map',                    icon: '🗺️', iconBg: '#e6f4ea', content: <DeliveryMapTab /> },
       { key: 'invoices',      label: 'Invoices',          subtitle: 'What the carrier actually billed',           icon: '🧾', iconBg: '#fffaf0', content: <InvoicesTab /> },
@@ -111,7 +108,6 @@ export default function Fulfillment() {
       <div className={styles.tabPanel}>
         {active === 'queue'         ? <Queue /> :
          active === 'shelf'         ? <Shelf /> :
-         active === 'history'       ? <History /> :
          active === 'shipping'      ? <ShippingList /> :
          active === 'map'           ? <DeliveryMapTab /> :
          active === 'invoices'      ? <InvoicesTab /> :
