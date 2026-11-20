@@ -65,3 +65,38 @@
   background: var(--color-warning-bg);
   border: 1px solid var(--color-warning-border);
 }
+
+.costView { display: inline-flex; align-items: baseline; gap: 8px; }
+.editBtn {
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-info);
+  cursor: pointer;
+}
+.editBtn:hover { text-decoration: underline; }
+.costEdit { display: inline-flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.costInputs { display: inline-flex; align-items: center; gap: 4px; }
+.costInput {
+  width: 90px;
+  padding: 4px 6px;
+  font-size: 13px;
+  text-align: right;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-raised);
+  color: var(--color-ink);
+}
+.costCurrency {
+  padding: 4px;
+  font-size: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-raised);
+  color: var(--color-ink);
+}
+.costActions { display: inline-flex; gap: 4px; }
+.costErr { font-size: 11px; color: var(--color-error); white-space: normal; }

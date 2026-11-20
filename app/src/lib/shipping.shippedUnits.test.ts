@@ -62,3 +62,35 @@ describe('shipmentTrackingUrl', () => {
     expect(shipmentTrackingUrl('Personal Delivery', 'X1')).toContain('google.com/search');
   });
 });
+
+describe('shipping cost editing', () => {
+  it('carries the order id so the cost can be corrected on the order', () => {
+    const rows = mergeShippedUnits({
+      units: [unit('S5'), unit('S6', { customer_order_ref: '#1002' })],
+      queue: [{ id: 'q5', step: 6, carrier: 'UPS', tracking_num: '1ZQ', assigned_serial: 'S5',
+                label_confirmed_at: null, fulfilled_at: null, created_at: '2026-11-01',
+                fulfillment_queue_units: [{ unit_serial: 'S5' }], orders: { ...order, id: 'o1' } }],
+      orders: [{ id: 'o2', order_ref: '#1002', customer_name: 'Bo', shipping_cost_usd: 10, shipping_cost_currency: 'CAD' }],
+      legacy: [], log: [{ serial_number: 'S6', tracking_number: '1ZL', carrier: 'UPS', shipping_date: '2026-01-01' }],
+    });
+    const by = Object.fromEntries(rows.map(r => [r.serial, r]));
+    expect(by.S5.order_id).toBe('o1');
+    expect(by.S6.order_id).toBe('o2');
+  });
+
+  it('leaves order_id null when no order was found (row stays read-only)', () => {
+    const rows = mergeShippedUnits({
+      units: [unit('S7', { customer_order_ref: null })], queue: [], orders: [],
+      legacy: [{ serial: 'S7', tracking_number: 'D9', carrier: 'Canpar', shipped_on: '2025-10-01', amount_cad: 50 }],
+      log: [],
+    });
+    expect(rows[0]).toMatchObject({ order_id: null, shipping_cost: 50 });
+  });
+
+  it('rejects a negative or non-numeric cost before touching the database', async () => {
+    const { updateOrderShippingCost } = await import('./shipping');
+    await expect(updateOrderShippingCost('o1', -5, 'CAD')).rejects.toThrow(/non-negative/);
+    await expect(updateOrderShippingCost('o1', Number.NaN, 'CAD')).rejects.toThrow(/non-negative/);
+    await expect(updateOrderShippingCost('o1', 5, 'cad')).rejects.toThrow(/3-letter/);
+  });
+});

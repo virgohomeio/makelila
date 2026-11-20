@@ -688,6 +688,9 @@ export type ShippedUnitRow = {
    *  currency is read from shipping_cost_currency, never inferred. */
   shipping_cost: number | null;
   shipping_cost_currency: string | null;
+  /** The order the cost is stored on, when one was found. Editing the cost
+   *  writes orders.shipping_cost_usd, so every unit on that order changes. */
+  order_id: string | null;
 };
 
 const TRACKABLE_CARRIERS = new Set(['UPS', 'FedEx', 'Purolator', 'Canada Post', 'Canpar', 'GLS', 'Day & Ross']);
@@ -708,14 +711,14 @@ type QueueJoin = {
   assigned_serial: string | null; label_confirmed_at: string | null;
   fulfilled_at: string | null; created_at: string;
   fulfillment_queue_units?: { unit_serial: string }[] | null;
-  orders: { order_ref: string | null; customer_name: string | null; status: string | null;
+  orders: { id?: string; order_ref: string | null; customer_name: string | null; status: string | null;
             shipping_cost_usd: number | null; shipping_cost_currency: string | null } | null;
 };
 type UnitJoin = {
   serial: string; status: string; customer_name: string | null; customer_order_ref: string | null;
   carrier: string | null; shipped_at: string | null; tracking_num: string | null;
 };
-type OrderCost = { order_ref: string; customer_name: string | null;
+type OrderCost = { id?: string; order_ref: string; customer_name: string | null;
   shipping_cost_usd: number | null; shipping_cost_currency: string | null };
 type LegacyCost = { serial: string | null; tracking_number: string | null; carrier: string | null;
   shipped_on: string | null; amount_cad: number | null };
@@ -773,6 +776,7 @@ export function mergeShippedUnits(input: {
         tracking_num: blank(q.tracking_num),
         shipping_cost: q.orders?.shipping_cost_usd ?? null,
         shipping_cost_currency: q.orders?.shipping_cost_currency ?? null,
+        order_id: q.orders?.id ?? null,
       });
     }
   }
@@ -801,6 +805,7 @@ export function mergeShippedUnits(input: {
       shipping_cost: cost,
       shipping_cost_currency: order?.shipping_cost_usd != null ? order.shipping_cost_currency
                             : legacy?.amount_cad != null ? 'CAD' : null,
+      order_id: order?.id ?? null,
     });
   }
 
@@ -829,7 +834,7 @@ export function useShippedUnits(): {
         supabase.from('fulfillment_queue')
           .select('id, step, carrier, tracking_num, assigned_serial, label_confirmed_at, fulfilled_at, created_at, '
                 + 'fulfillment_queue_units(unit_serial), '
-                + 'orders(order_ref, customer_name, status, shipping_cost_usd, shipping_cost_currency)')
+                + 'orders(id, order_ref, customer_name, status, shipping_cost_usd, shipping_cost_currency)')
           .not('tracking_num', 'is', null),
         supabase.from('units')
           .select('serial, status, customer_name, customer_order_ref, carrier, shipped_at, tracking_num')
@@ -854,7 +859,7 @@ export function useShippedUnits(): {
       if (refs.length) {
         const { data, error: oErr } = await supabase
           .from('orders')
-          .select('order_ref, customer_name, shipping_cost_usd, shipping_cost_currency')
+          .select('id, order_ref, customer_name, shipping_cost_usd, shipping_cost_currency')
           .in('order_ref', refs);
         if (cancelled) return;
         if (oErr) setError(oErr.message);
@@ -875,4 +880,31 @@ export function useShippedUnits(): {
   }, [tick]);
 
   return { rows, loading, error, refresh: () => setTick(t => t + 1) };
+}
+
+/** Corrects the shipping cost recorded on an order (Fulfillment › Shipping).
+ *  The cost lives on the order, not the unit, so every machine on that order
+ *  shows the new figure. The column is named shipping_cost_usd but holds
+ *  whatever currency is written alongside it; the caller states it. */
+export async function updateOrderShippingCost(
+  orderId: string, cost: number, currency: string,
+): Promise<void> {
+  if (!Number.isFinite(cost) || cost < 0) throw new Error('Shipping cost must be a non-negative number');
+  if (!/^[A-Z]{3}$/.test(currency)) throw new Error('Currency must be a 3-letter code');
+  const { data: before, error: rErr } = await supabase
+    .from('orders')
+    .select('order_ref, shipping_cost_usd, shipping_cost_currency')
+    .eq('id', orderId)
+    .single();
+  if (rErr || !before) throw new Error(`Read order: ${rErr?.message ?? 'not found'}`);
+  const { error } = await supabase
+    .from('orders')
+    .update({ shipping_cost_usd: cost, shipping_cost_currency: currency })
+    .eq('id', orderId);
+  if (error) throw new Error(error.message);
+  const prev = before.shipping_cost_usd == null
+    ? 'none'
+    : `$${Number(before.shipping_cost_usd).toFixed(2)} ${before.shipping_cost_currency ?? ''}`.trim();
+  await logAction('shipping_cost_corrected', before.order_ref as string,
+    `shipping ${prev} → $${cost.toFixed(2)} ${currency}`);
 }

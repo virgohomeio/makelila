@@ -1,5 +1,7 @@
 import { useMemo, useState } from 'react';
-import { useShippedUnits, shipmentTrackingUrl, type ShippedUnitRow } from '../../lib/shipping';
+import {
+  useShippedUnits, shipmentTrackingUrl, updateOrderShippingCost, type ShippedUnitRow,
+} from '../../lib/shipping';
 import { Button, EmptyState } from '../../components/ui';
 import styles from './ShippingList.module.css';
 
@@ -27,6 +29,103 @@ function Cost({ row }: { row: ShippedUnitRow }) {
   );
 }
 
+/** Shipping cost cell. The cost is stored once per order, so a correction made
+ *  on any of an order's rows applies to all of them. Rows with no order found
+ *  (pre-queue legacy shipments) stay read-only. */
+function CostCell({ row, unitsOnOrder, onSaved }: {
+  row: ShippedUnitRow; unitsOnOrder: number; onSaved: () => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [amount, setAmount] = useState('');
+  const [currency, setCurrency] = useState('CAD');
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  if (!row.order_id) return <Cost row={row} />;
+
+  const start = () => {
+    setAmount(row.shipping_cost != null ? Number(row.shipping_cost).toFixed(2) : '');
+    setCurrency(row.shipping_cost_currency ?? 'CAD');
+    setErr(null);
+    setEditing(true);
+  };
+
+  const save = async () => {
+    const n = Number(amount);
+    if (amount.trim() === '' || !Number.isFinite(n) || n < 0) { setErr('Enter a valid amount'); return; }
+    setSaving(true);
+    setErr(null);
+    try {
+      await updateOrderShippingCost(row.order_id!, Math.round(n * 100) / 100, currency);
+      setEditing(false);
+      onSaved();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!editing) {
+    return (
+      <span className={styles.costView}>
+        <Cost row={row} />
+        <button
+          type="button"
+          className={styles.editBtn}
+          onClick={start}
+          aria-label={`Edit shipping cost for ${row.order_ref ?? 'this order'}`}
+          title="Edit shipping cost"
+        >
+          Edit
+        </button>
+      </span>
+    );
+  }
+
+  return (
+    <form
+      className={styles.costEdit}
+      onSubmit={e => { e.preventDefault(); void save(); }}
+      onKeyDown={e => { if (e.key === 'Escape') setEditing(false); }}
+    >
+      <span className={styles.costInputs}>
+        <span className={styles.muted}>$</span>
+        <input
+          className={styles.costInput}
+          type="number"
+          inputMode="decimal"
+          min="0"
+          step="0.01"
+          value={amount}
+          onChange={e => setAmount(e.target.value)}
+          aria-label="Shipping cost"
+          autoFocus
+          disabled={saving}
+        />
+        <select
+          className={styles.costCurrency}
+          value={currency}
+          onChange={e => setCurrency(e.target.value)}
+          aria-label="Currency"
+          disabled={saving}
+        >
+          <option value="CAD">CAD</option>
+          <option value="USD">USD</option>
+        </select>
+      </span>
+      {unitsOnOrder > 1 && (
+        <span className={styles.sub}>Applies to all {unitsOnOrder} units on {row.order_ref}</span>
+      )}
+      {err && <span className={styles.costErr}>{err}</span>}
+      <span className={styles.costActions}>
+        <Button small variant="primary" type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save'}</Button>
+        <Button small variant="ghost" onClick={() => setEditing(false)} disabled={saving}>Cancel</Button>
+      </span>
+    </form>
+  );
+}
+
 export function ShippingList() {
   const { rows, loading, error, refresh } = useShippedUnits();
   const [search, setSearch] = useState('');
@@ -41,6 +140,12 @@ export function ShippingList() {
   }, [rows, search]);
 
   const scheduledCount = useMemo(() => rows.filter(r => r.scheduled).length, [rows]);
+
+  const unitsPerOrder = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const r of rows) if (r.order_id) m.set(r.order_id, (m.get(r.order_id) ?? 0) + 1);
+    return m;
+  }, [rows]);
 
   return (
     <div className={styles.wrap}>
@@ -100,7 +205,13 @@ export function ShippingList() {
                         </>
                       ) : fmtDate(r.shipped_at)}
                     </td>
-                    <td className={styles.num}><Cost row={r} /></td>
+                    <td className={styles.num}>
+                      <CostCell
+                        row={r}
+                        unitsOnOrder={r.order_id ? unitsPerOrder.get(r.order_id) ?? 1 : 1}
+                        onSaved={refresh}
+                      />
+                    </td>
                     <td>{r.carrier ?? <span className={styles.muted}>—</span>}</td>
                     <td className={styles.mono}>{r.tracking_num ?? <span className={styles.muted}>—</span>}</td>
                     <td>
