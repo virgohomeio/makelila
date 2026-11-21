@@ -18,7 +18,12 @@ const DEFS: {
   key: string; name: string; match: RegExp;
   start: string; end: string | null; discount: string;
 }[] = [
-  { key: 'fall',       name: 'Fall Sale 2026',             match: /fall/i,                                                     start: '2026-09-02', end: null,         discount: '20% Off' },
+  // Holiday 2026 is listed first so it wins the name match over 'december' below:
+  // the live Meta ads reuse last year's "December Holiday 2025 …" names, so without
+  // this precedence their spend would fall into the 2025 group. Rename the ads to
+  // 2026 for a clean spend split, after which this regex can be tightened.
+  { key: 'holiday2026', name: 'Holiday Sale 2026',          match: /holiday|christmas|xmas|black[\s-]?friday|bfcm|cyber[\s-]?monday/i, start: '2026-11-21', end: '2026-12-31', discount: '35% Off' },
+  { key: 'fall',       name: 'Fall Sale 2026',             match: /fall/i,                                                     start: '2026-09-02', end: '2026-11-20', discount: '20% Off' },
   { key: 'summer',     name: 'Summer Pre Order 2026',      match: /summer|pre[\s-]?order/i,                                    start: '2026-06-03', end: '2026-09-01', discount: '25% Off' },
   { key: 'latespring', name: 'Late Spring Sale (v2) 2026', match: /late[\s-]?spring|spring[^a-z]*(v ?2|version 2)|\bv2\b/i,     start: '2026-05-11', end: '2026-06-02', discount: '20% Off' },
   { key: 'spring',     name: 'Spring Sale 2026',           match: /spring/i,                                                   start: '2026-04-01', end: '2026-05-10', discount: '30% Off' },
