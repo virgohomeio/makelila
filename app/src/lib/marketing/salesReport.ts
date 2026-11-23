@@ -28,11 +28,11 @@ export type SalesRow = {
   last_referrer: string | null;
   plan: string;
   discount_codes: string[];
-  // Where the sale came through — the Shopify sales channel as a friendly label
-  // (orders.sales_channel): "Our Website" for our own storefront, or a reseller
-  // marketplace (Walmart / Best Buy via Mirakl, Shopify Collective) for an
-  // external sale. Distinct from the marketing Source column (Meta Ad, Google
-  // Organic, …), which is *how the buyer was acquired*, not where they bought.
+  // Where the sale came through, as one of three buckets (see saleSourceOf):
+  // "Shopify Website" for our own storefront, or a reseller marketplace
+  // ("Walmart" / "Best Buy", plus "Shopify Collective"). Distinct from the
+  // marketing Source column (Meta Ad, Google Organic, …), which is *how the
+  // buyer was acquired*, not where they bought.
   sale_source: string;
   revenue: number;
   currency: string;
@@ -68,7 +68,7 @@ export type SalesKpis = {
   byProvince: Breakdown[];
   byPlan: Breakdown[];
   byDiscount: Breakdown[];
-  // Tally by Shopify sales channel (Our Website vs Walmart / Best Buy / Shopify
+  // Tally by sales channel (Shopify Website vs Walmart / Best Buy / Shopify
   // Collective) so external reseller sales are totalled alongside our own.
   bySource: Breakdown[];
 };
@@ -248,15 +248,27 @@ export function buildSalesReport(
   };
 }
 
-/** The Shopify sales channel a sale came through, as a friendly label. The sync
- *  (sync-shopify-orders) already resolves source_name into a label on
- *  orders.sales_channel; a blank or absent value (an order synced before the
- *  column, or an older channel) falls back to "Our Website", our own storefront
- *  and the only channel that existed before the Walmart/Best Buy/Collective
- *  marketplaces were added. */
+// The three buckets a sale is marked with in the report. A reseller marketplace
+// (Walmart / Best Buy via Mirakl, Shopify Collective) is named explicitly; every
+// other sale — our own storefront, the subscription-app checkout channels, and
+// older orders with no channel — is our Shopify website.
+export const SHOPIFY_WEBSITE = 'Shopify Website';
+
+/** The sales channel a sale came through, normalised to one of three buckets:
+ *  "Walmart", "Best Buy", or "Shopify Website" (plus "Shopify Collective" for
+ *  that reseller). orders.sales_channel carries the raw Shopify source_name the
+ *  sync resolved: the reseller marketplaces arrive as "Walmart" / "Best Buy",
+ *  while our own storefront arrives as "Our Website", as a subscription-app
+ *  checkout channel (e.g. "subscription_contract_checkout_one"), or blank on
+ *  older orders — all of which are sales through our Shopify site, so they map to
+ *  "Shopify Website". Matched by keyword so a new channel variant still lands in
+ *  the right bucket. */
 export function saleSourceOf(o: Order): string {
-  const c = (o.sales_channel ?? '').trim();
-  return c || 'Our Website';
+  const lc = (o.sales_channel ?? '').trim().toLowerCase();
+  if (lc.includes('walmart')) return 'Walmart';
+  if (lc.includes('best buy') || lc.includes('bestbuy')) return 'Best Buy';
+  if (lc.includes('collective')) return 'Shopify Collective';
+  return SHOPIFY_WEBSITE;
 }
 
 // Marker for any cell we can't populate from current data (age/gender demographics,
@@ -371,8 +383,8 @@ export function reportCells(r: SalesRow): string[] {
   return [
     r.campaign_group ?? '—',
     r.name,
-    // Where the sale transacted (Shopify sales channel): Our Website, or a
-    // reseller marketplace (Walmart / Best Buy / Shopify Collective).
+    // Where the sale transacted: Shopify Website, or a reseller marketplace
+    // (Walmart / Best Buy / Shopify Collective).
     r.sale_source,
     // Full refund only (Shopify 'refunded'); a partial refund stays 'No'.
     r.full_refund ? 'Yes' : 'No',
