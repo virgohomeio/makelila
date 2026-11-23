@@ -2,7 +2,7 @@ import { useMemo, useState, type CSSProperties } from 'react';
 import { useAllOrders, type Order } from '../../lib/orders';
 import { useFbCampaigns, useFbDemographics, useFbAds, type FbCampaign } from '../../lib/marketing/facebook';
 import {
-  buildSalesReport, salesRowsToCsv, reportCells, REPORT_COLUMNS, UNKNOWN,
+  buildSalesReport, salesRowsToCsv, reportCells, REPORT_COLUMNS, UNKNOWN, SHOPIFY_WEBSITE,
   useCustomerAttribution, isTestOrder, isRealSale, type Attribution, type Demo,
 } from '../../lib/marketing/salesReport';
 import { useKlaviyoJourneys, summarizeJourney } from '../../lib/marketing/journeyTiming';
@@ -25,7 +25,6 @@ const REFUND_COL = REPORT_COLUMNS.indexOf('Full Refund?');
 // Column index of the Sale Source, so an external reseller sale (anything that
 // isn't our own website) can be colour-highlighted without a hard-coded index.
 const SOURCE_COL = REPORT_COLUMNS.indexOf('Sale Source');
-const OUR_WEBSITE = 'Our Website';
 
 // Date-range options for the report's KPI/summary + order list. 'all' = every
 // sale; 'today'/'yesterday' = that single EST calendar day; the numeric keys are
@@ -431,7 +430,7 @@ export function ReportTab() {
                     // An external reseller sale (Walmart / Best Buy / Collective)
                     // stands out; our own website stays in the muted default.
                     const isSource = i === SOURCE_COL;
-                    const external = isSource && cell !== OUR_WEBSITE;
+                    const external = isSource && cell !== SHOPIFY_WEBSITE;
                     return (
                       <td key={i} style={{
                         padding: '7px 10px',
