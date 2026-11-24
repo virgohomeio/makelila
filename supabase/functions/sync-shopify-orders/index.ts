@@ -2,6 +2,11 @@ import { serve } from 'https://deno.land/std@0.224.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.0';
 import { corsHeaders } from '../_shared/cors.ts';
 import { authenticate } from '../_shared/auth.ts';
+import { archiveBcc, DEFAULT_ARCHIVE_BCC } from '../_shared/emailArchive.ts';
+import {
+  isMarketplaceChannel, marketplaceAlertRecipients, arrivalVariables, renderTemplate,
+  ARRIVAL_FALLBACK_SUBJECT, ARRIVAL_FALLBACK_BODY,
+} from '../_shared/marketplace.ts';
 import { guessDwellingFromText, areaTypeFromPostal, type Dwelling } from '../_shared/addressClassify.ts';
 
 type ShopifyAddress = {
@@ -507,6 +512,83 @@ async function fetchJourneyAttribution(
   return { journey: out, failedBatches: failed };
 }
 
+/** Email the team when a marketplace order (Walmart, Best Buy, Mirakl) first
+ *  lands, before anyone confirms it: the marketplace's Ship By clock is already
+ *  running. Called only with orders this run INSERTED, so each order alerts
+ *  once, and the first run after deploy does not alert on history.
+ *
+ *  Best-effort: a mail failure is recorded on email_messages and in the sync
+ *  response, and never fails the sync. Every send is logged to email_messages
+ *  (sent_by null = system) so "did the alert go out?" has an answer. */
+async function notifyMarketplaceArrivals(
+  admin: ReturnType<typeof createClient>,
+  orders: MappedOrder[],
+): Promise<{ sent: number; failed: string[] }> {
+  const out = { sent: 0, failed: [] as string[] };
+  if (orders.length === 0) return out;
+  const resendKey = Deno.env.get('RESEND_API_KEY');
+  if (!resendKey) {
+    out.failed.push('RESEND_API_KEY not set');
+    return out;
+  }
+  const recipients = marketplaceAlertRecipients(Deno.env.get('MARKETPLACE_ALERT_TO'));
+
+  const { data: tpl } = await admin
+    .from('email_templates')
+    .select('subject, body, active')
+    .eq('key', 'marketplace_order_arrived')
+    .maybeSingle();
+  const t = tpl as { subject: string; body: string; active: boolean } | null;
+  if (t && !t.active) return out; // switched off in Templates on purpose
+  const subjectTpl = t?.subject ?? ARRIVAL_FALLBACK_SUBJECT;
+  const bodyTpl = t?.body ?? ARRIVAL_FALLBACK_BODY;
+  const testRecipient = Deno.env.get('EMAIL_TEST_RECIPIENT');
+
+  for (const o of orders) {
+    const vars = arrivalVariables(o);
+    const subject0 = renderTemplate(subjectTpl, vars);
+    const body = renderTemplate(bodyTpl, vars);
+    for (const to of recipients) {
+      const dest = testRecipient || to;
+      const subject = testRecipient ? `[TEST → ${to}] ${subject0}` : subject0;
+      const { data: msg } = await admin.from('email_messages').insert({
+        template_key: 'marketplace_order_arrived',
+        recipient_email: to,
+        subject, body, variables: vars,
+        status: 'queued',
+        sent_by: null,
+      }).select('id').single();
+      const msgId = (msg as { id: string } | null)?.id ?? null;
+      try {
+        const res = await fetch('https://api.resend.com/emails', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            from: 'makeLILA <support@lilacomposter.com>',
+            to: [dest],
+            bcc: archiveBcc(dest, Deno.env.get('EMAIL_ARCHIVE_BCC') ?? DEFAULT_ARCHIVE_BCC),
+            subject,
+            text: body,
+          }),
+        });
+        if (!res.ok) throw new Error(`Resend ${res.status}: ${(await res.text()).slice(0, 300)}`);
+        const sent = await res.json() as { id?: string };
+        if (msgId) {
+          await admin.from('email_messages')
+            .update({ status: 'sent', resend_id: sent.id ?? null, sent_at: new Date().toISOString() })
+            .eq('id', msgId);
+        }
+        out.sent++;
+      } catch (e) {
+        const err = (e as Error).message;
+        out.failed.push(`${o.order_ref} → ${to}: ${err}`);
+        if (msgId) await admin.from('email_messages').update({ status: 'failed', error: err }).eq('id', msgId);
+      }
+    }
+  }
+  return out;
+}
+
 serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -677,6 +759,11 @@ serve(async (req: Request) => {
     }
   }
   imported = insertedRefs.size;
+
+  const marketplaceAlerts = await notifyMarketplaceArrivals(
+    admin,
+    mapped.filter(m => insertedRefs.has(m.order_ref) && isMarketplaceChannel(m.sales_channel)),
+  );
 
   // Anything the insert refused has no row to refresh — updating it would match
   // nothing and still count itself a success, on top of the skip it already
@@ -900,6 +987,7 @@ serve(async (req: Request) => {
       skipped: skipped.length,
       skippedBreakdown,
       journeyBatchesFailed,
+      marketplaceAlerts,
       skippedDetails: skipped,
     }),
     { status: 200, headers: { ...corsHeaders, 'content-type': 'application/json' } },

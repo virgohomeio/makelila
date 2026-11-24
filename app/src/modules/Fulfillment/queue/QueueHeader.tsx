@@ -7,6 +7,7 @@ import { useAuth } from '../../../lib/auth';
 import { canRebookShipment, rebookShipment } from '../../../lib/rebookShipment';
 import { orderDue, markOrderDelivered, localDayString, type Order } from '../../../lib/orders';
 import { replacementItemsLabel } from '../../../lib/replacementTags';
+import { isMarketplaceChannel, marketplaceOf, setMarketplaceShipBy, isIsoDay, formatIsoDay } from '../../../lib/marketplace';
 import styles from '../Fulfillment.module.css';
 
 /** Which of the header's confirm panels is open, if any.
@@ -38,6 +39,9 @@ export function QueueHeader({
     /** When the customer confirmed the box arrived. Set = this order is in the
      *  Received rail and the button is replaced by the date. */
     delivered_at?: string | null;
+    /** Marketplace orders (Walmart, Best Buy, Mirakl) are due by their Ship By
+     *  date, which can be corrected here. */
+    sales_channel?: string | null;
   };
   /** True when the box has gone even though the row never reached step 6 — a
    *  shipment booked outside the queue, recognised by lib/shippedOrders. Those
@@ -64,6 +68,26 @@ export function QueueHeader({
   // "The box is gone" — step 6, or shipped some other way entirely. This, not
   // `fulfilled`, is what makes an arrival recordable.
   const hasShipped = fulfilled || shipped;
+
+  // Marketplace orders: the queue due date IS the marketplace Ship By date.
+  // Editable here so an order confirmed before the date was known (or with a
+  // typo) can be put right without going back through Sales.
+  const marketplace = order.kind !== 'replacement' && isMarketplaceChannel(order.sales_channel)
+    ? marketplaceOf(order.sales_channel)
+    : null;
+  const [shipByDraft, setShipByDraft] = useState<string | null>(null);
+  const shipByValue = shipByDraft ?? (row.due_date ?? '').slice(0, 10);
+  const shipByDirty = shipByDraft !== null && shipByDraft !== (row.due_date ?? '').slice(0, 10);
+  const handleSaveShipBy = async () => {
+    if (!order.id || !shipByDraft || !isIsoDay(shipByDraft)) return;
+    setBusy(true); setError(null);
+    try {
+      await setMarketplaceShipBy({ id: order.id, order_ref: order.order_ref }, shipByDraft);
+      setShipByDraft(null);
+      onStepChanged?.();
+    } catch (e) { setError((e as Error).message); }
+    finally { setBusy(false); }
+  };
 
   const handleTogglePriority = async () => {
     setBusy(true); setError(null);
@@ -262,7 +286,27 @@ export function QueueHeader({
           </div>
           <div className={styles.headerMeta}>
             {order.order_ref} · {order.city}{order.region_state ? `, ${order.region_state}` : ''} · {order.country}
-            {row.due_date && <> · Due {new Date(row.due_date).toLocaleDateString('en-US')}</>}
+            {marketplace && !fulfilled && order.id ? (
+              <> · <label className={styles.shipByField} title={`${marketplace} Ship By date from Seller Center. Seller Center cancels the order if it is not marked shipped by then.`}>
+                <span className={styles.shipByLabel}>{marketplace} Ship By</span>
+                <input
+                  type="date"
+                  className={styles.shipByInput}
+                  value={shipByValue}
+                  onChange={e => setShipByDraft(e.target.value)}
+                  aria-label={`${marketplace} Ship By date`}
+                  disabled={busy}
+                />
+                {shipByDirty && (
+                  <button
+                    type="button"
+                    className={styles.shipBySave}
+                    onClick={handleSaveShipBy}
+                    disabled={busy || !isIsoDay(shipByDraft ?? '')}
+                  >Save</button>
+                )}
+              </label></>
+            ) : row.due_date && <> · Due {formatIsoDay(row.due_date)}</>}
             {/* Why this box exists. Cancelling from here moves the ticket to
                 On Hold, so the operator should be one click from reading it. */}
             {order.kind === 'replacement' && order.linked_ticket_id && (

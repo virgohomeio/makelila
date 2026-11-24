@@ -3,6 +3,17 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import { Sidebar } from '../Sidebar';
 import type { Order } from '../../../lib/orders';
 
+// The reason notes for Needs attention, without a network read.
+vi.mock('../../../lib/marketplace', async (importOriginal) => {
+  const real = await importOriginal<typeof import('../../../lib/marketplace')>();
+  return {
+    ...real,
+    useAttentionNotes: () => new Map([
+      ['h1', [{ id: 1, order_id: 'h1', author_id: 'u', author_name: 'Reina', body: 'Held: customer moving house', created_at: '2026-11-20T00:00:00Z' }]],
+    ]),
+  };
+});
+
 function mkOrder(partial: Partial<Order> & { id: string; status: Order['status'] }): Order {
   return {
     id: partial.id,
@@ -70,6 +81,7 @@ function mkOrder(partial: Partial<Order> & { id: string; status: Order['status']
     delivered_at: null,
     created_at: '2026-04-17T00:00:00Z',
     placed_at: '2026-04-19T00:00:00Z',
+    sales_channel: partial.sales_channel ?? null,
   };
 }
 
@@ -108,9 +120,46 @@ describe('Sidebar', () => {
 
   it('switches tab content when a tab is clicked', () => {
     render_();
-    fireEvent.click(screen.getByRole('button', { name: /^Flagged: 1 order$/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^Cancelled: 1 order$/ }));
+    expect(screen.getByText('Gabriella Hottya')).toBeInTheDocument();
+    expect(screen.queryByText('Alice Ames')).not.toBeInTheDocument();
+  });
+
+  // Process change 2026-11-19, item 4: one view for Held and Flagged, but they
+  // stay two statuses, and each row carries its reason.
+  it('shows Held and Flagged together in Needs attention, each with status and reason', () => {
+    render_();
+    expect(screen.queryByRole('button', { name: /^Held:/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Flagged:/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /^Needs attention: 2 orders$/ }));
+    expect(screen.getByText('Held Customer')).toBeInTheDocument();
     expect(screen.getByText('Flagged Customer')).toBeInTheDocument();
     expect(screen.queryByText('Alice Ames')).not.toBeInTheDocument();
+    expect(screen.getByText('customer moving house')).toBeInTheDocument();
+    // f1 has no note and no phone: the automatic no-phone flag.
+    expect(screen.getByText(/No phone number on the order/)).toBeInTheDocument();
+    expect(screen.getByText('Held')).toBeInTheDocument();
+    expect(screen.getByText('Flagged')).toBeInTheDocument();
+  });
+
+  it('filters to marketplace orders, with the pending marketplace count on the chip', () => {
+    const w = mkOrder({ id: 'w1', status: 'pending', customer_name: 'Walmart Buyer', sales_channel: 'Walmart' });
+    render(
+      <Sidebar
+        all={[p1, w]} pending={[p1, w]} pendingBacklog={[]}
+        held={[]} flagged={[]} approved={[]} cancelled={[]}
+        selectedId={null} onSelect={vi.fn()}
+      />,
+    );
+    const chip = screen.getByRole('button', { name: /^Marketplace/ });
+    expect(chip).toHaveTextContent('1');
+    fireEvent.click(chip);
+    expect(screen.getByText('Walmart Buyer')).toBeInTheDocument();
+    expect(screen.queryByText('Alice Ames')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Pending: 1 order$/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /^Our website/ }));
+    expect(screen.getByText('Alice Ames')).toBeInTheDocument();
+    expect(screen.queryByText('Walmart Buyer')).not.toBeInTheDocument();
   });
 
   it('filters by search query within the active tab', () => {

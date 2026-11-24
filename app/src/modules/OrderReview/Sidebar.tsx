@@ -5,9 +5,18 @@ import { OrderRow } from './OrderRow';
 import { indexRefundFlags, useRefundMarks } from '../../lib/refundedOrders';
 import { useOrderCommAssessments } from '../../lib/orderComms';
 import { EmptyState } from '../../components/ui';
+import {
+  attentionReason, useAttentionNotes, matchesChannel, CHANNEL_FILTER_LABEL,
+  type ChannelFilter,
+} from '../../lib/marketplace';
 import styles from './OrderReview.module.css';
 
-type Tab = 'pending' | 'held' | 'flagged' | 'approved' | 'all' | 'cancelled';
+// Held and Flagged share one tab, "Needs attention" (process change
+// 2026-11-19, item 4). They remain two separate statuses: each row says which
+// one it is and why.
+type Tab = 'pending' | 'attention' | 'approved' | 'all' | 'cancelled';
+
+const CHANNELS: ChannelFilter[] = ['all', 'marketplace', 'website'];
 
 export function Sidebar({
   pending, pendingBacklog, held, flagged, approved, all, cancelled,
@@ -31,16 +40,25 @@ export function Sidebar({
 }) {
   const [tab, setTab] = useState<Tab>('pending');
   const [query, setQuery] = useState('');
+  const [channel, setChannel] = useState<ChannelFilter>('all');
   // One query for the whole rail rather than one per row: a refund badge is
   // cheap to compute and expensive to fetch.
   const { marks } = useRefundMarks();
 
-  const source = tab === 'pending'     ? pending
-               : tab === 'held'        ? held
-               : tab === 'flagged'     ? flagged
-               : tab === 'approved'    ? approved
-               : tab === 'cancelled'   ? cancelled
-               : all;
+  // Held first, then Flagged, each oldest ref first (the sort below keeps
+  // that order stable within a status).
+  const attention = useMemo(() => [...held, ...flagged], [held, flagged]);
+  const attentionNotes = useAttentionNotes(useMemo(() => attention.map(o => o.id), [attention]));
+
+  const byChannel = (list: Order[]) => channel === 'all' ? list : list.filter(o => matchesChannel(o, channel));
+
+  const source = byChannel(
+      tab === 'pending'     ? pending
+    : tab === 'attention'   ? attention
+    : tab === 'approved'    ? approved
+    : tab === 'cancelled'   ? cancelled
+    : all,
+  );
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -54,7 +72,9 @@ export function Sidebar({
     // Live tabs are a work queue, so they read best by order ref. Cancelled is
     // a lookup list — the one you just killed should be at the top.
     if (tab === 'cancelled') return filtered;
-    return [...filtered].sort((a, b) => a.order_ref.localeCompare(b.order_ref));
+    const statusRank = (o: Order) => (tab === 'attention' && o.status === 'flagged' ? 1 : 0);
+    return [...filtered].sort((a, b) =>
+      statusRank(a) - statusRank(b) || a.order_ref.localeCompare(b.order_ref));
   }, [source, query, tab]);
 
   const refundFlags = useMemo(() => indexRefundFlags(visible, marks), [visible, marks]);
@@ -63,13 +83,16 @@ export function Sidebar({
   const { byOrderId: commAssessments } = useOrderCommAssessments();
 
   const tabs: Array<{ key: Tab; label: string; count: number }> = [
-    { key: 'pending',     label: 'Pending',     count: pending.length },
-    { key: 'held',        label: 'Held',        count: held.length },
-    { key: 'flagged',     label: 'Flagged',     count: flagged.length },
-    { key: 'approved',    label: 'Confirmed',   count: approved.length },
-    { key: 'all',         label: 'All',         count: all.length },
-    { key: 'cancelled',   label: 'Cancelled',   count: cancelled.length },
+    { key: 'pending',     label: 'Pending',         count: byChannel(pending).length },
+    { key: 'attention',   label: 'Needs attention', count: byChannel(attention).length },
+    { key: 'approved',    label: 'Confirmed',       count: byChannel(approved).length },
+    { key: 'all',         label: 'All',             count: byChannel(all).length },
+    { key: 'cancelled',   label: 'Cancelled',       count: byChannel(cancelled).length },
   ];
+
+  // How many marketplace orders are waiting to be confirmed, on the filter
+  // chip itself, so they are visible from any tab.
+  const marketplacePending = pending.filter(o => matchesChannel(o, 'marketplace')).length;
 
   const activeTabLabel = tabs.find(t => t.key === tab)?.label ?? '';
 
@@ -127,6 +150,27 @@ export function Sidebar({
           ))}
         </div>
 
+        {/* Marketplace orders (Walmart, Best Buy, Mirakl) carry a Ship By
+            deadline that cancels the order when missed, so they can be pulled
+            out on their own from any tab. */}
+        <div className={styles.channelBar} role="group" aria-label="Sales channel">
+          {CHANNELS.map(c => (
+            <button
+              key={c}
+              type="button"
+              className={[styles.tab, channel === c ? styles.activeTab : ''].filter(Boolean).join(' ')}
+              onClick={() => setChannel(c)}
+              aria-pressed={channel === c}
+              title={c === 'marketplace'
+                ? 'Walmart, Best Buy and Mirakl orders. The count is how many are Pending.'
+                : undefined}
+            >
+              {CHANNEL_FILTER_LABEL[c]}
+              {c === 'marketplace' && <span className={styles.tabCount}>{marketplacePending}</span>}
+            </button>
+          ))}
+        </div>
+
       </div>
 
       {/* Every tab starts at the cutoff, so an older order is in none of them
@@ -175,6 +219,9 @@ export function Sidebar({
             isSelected={o.id === selectedId}
             onClick={() => onSelect(o.id)}
             refundFlag={refundFlags.get(o.id) ?? null}
+            attention={tab === 'attention' && (o.status === 'held' || o.status === 'flagged')
+              ? attentionReason(o, attentionNotes.get(o.id) ?? [])
+              : null}
             commConcern={
               commAssessments[o.id]?.verdict === 'unclear'
                 ? commAssessments[o.id].headline

@@ -123,6 +123,14 @@ export default function Queue() {
       .filter(r => !shippedMarks.has(r.id))
       .sort((a, b) => {
         if (a.priority !== b.priority) return a.priority ? -1 : 1;
+        // Among priority rows the earliest deadline goes first: a marketplace
+        // order's due_date is its Ship By date, and that is the order the
+        // marketplace will cancel them in. A row with no date sorts last.
+        if (a.priority && b.priority && a.due_date !== b.due_date) {
+          if (!a.due_date) return 1;
+          if (!b.due_date) return -1;
+          return a.due_date.localeCompare(b.due_date);
+        }
         return byRef(a, b);
       });
     // Moved, not hidden: the row still has an order behind it that someone has

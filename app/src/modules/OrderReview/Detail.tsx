@@ -5,6 +5,7 @@ import {
   queueReplacementForFulfillment,
 } from '../../lib/orders';
 import { releaseHold } from '../../lib/fulfillment';
+import { setMarketplaceShipBy, formatIsoDay } from '../../lib/marketplace';
 import { useAuth } from '../../lib/auth';
 import { CustomerCard } from './detail/CustomerCard';
 import { AddressCard }  from './detail/AddressCard';
@@ -16,6 +17,7 @@ import { InvoicesCard } from './detail/InvoicesCard';
 import { ActionBar }    from './detail/ActionBar';
 import { ConfirmBanner } from './detail/ConfirmBanner';
 import { PreConfirmChecks } from './detail/PreConfirmChecks';
+import { AutoConfirmDryRun } from './detail/AutoConfirmDryRun';
 import { ReadinessChecklist, canConfirm } from './detail/ReadinessChecklist';
 import styles from './OrderReview.module.css';
 
@@ -131,7 +133,18 @@ export function Detail({
         <ActionBar
           order={order}
           confirmReady={confirmReady}
-          onApprove={() => wrap('Approved', () => disposition(order, 'approved'))}
+          onApprove={(shipBy) => wrap('Approved', async () => {
+            await disposition(order, 'approved');
+            if (!shipBy) return;
+            // The confirm has committed by now, so a failed Ship By write is
+            // reported on the banner rather than as a failed confirmation.
+            try {
+              await setMarketplaceShipBy(order, shipBy);
+              return `due ${formatIsoDay(shipBy)} (Ship By), priority`;
+            } catch (e) {
+              return `but the Ship By date was not saved (${(e as Error).message}). Set it in the fulfillment queue`;
+            }
+          })}
           onFlag={(reason) => wrap('Flagged', () => disposition(order, 'flagged', reason), 'Flagged', reason)}
           onHold={(reason) => wrap('Held',    () => disposition(order, 'held',    reason), 'Held', reason)}
           onNeedInfo={(note) => wrap('Need-info logged', () => needInfo(order, note), 'Need info', note)}
@@ -204,6 +217,7 @@ export function Detail({
             First in the body still puts them under Confirm order, and now the
             whole card scrolls as one column. */}
         {!isCancelled && order.kind === 'sale' && <PreConfirmChecks order={order} />}
+        {order.kind === 'sale' && order.status === 'pending' && <AutoConfirmDryRun order={order} />}
 
         {/* Eight equal cards in one flat column meant scrolling to find
             anything. They now group by the question they answer. */}

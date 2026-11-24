@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { Order } from '../../../lib/orders';
 import { criteriaCount } from './ReadinessChecklist';
+import { isIsoDay, isMarketplaceOrder, marketplaceOf } from '../../../lib/marketplace';
 import styles from '../OrderReview.module.css';
 
 type ExpandedAction = 'flag' | 'hold' | 'info' | 'cancel' | null;
@@ -39,7 +40,9 @@ export function ActionBar({
   confirmReady = true,
 }: {
   order: Order;
-  onApprove: () => void;
+  /** A marketplace sale passes the Ship By date typed at Confirm; every other
+   *  order is confirmed without one. */
+  onApprove: (shipBy?: string) => void;
   onFlag: (reason: string) => void;
   onHold: (reason: string) => void;
   onNeedInfo: (note: string) => void;
@@ -62,6 +65,7 @@ export function ActionBar({
   const [reason, setReason] = useState('');
   const [confirmingUncancel, setConfirmingUncancel] = useState(false);
   const [confirmingRelease, setConfirmingRelease] = useState(false);
+  const [shipBy, setShipBy] = useState('');
 
   const submit = () => {
     if (expanded === 'flag') {
@@ -194,6 +198,16 @@ export function ActionBar({
   const drawer = expanded ? DRAWER[expanded] : null;
   const submitDisabled = !!drawer?.required && !reason.trim();
 
+  // A marketplace order is due by the marketplace's Ship By date, not our
+  // default 7 days, and Seller Center cancels it when that passes. Until the
+  // date comes through the sync, it is typed in here at Confirm, and Confirm
+  // waits for it.
+  const marketplace = isMarketplaceOrder(order)
+    ? marketplaceOf(order.sales_channel)
+    : null;
+  const needsShipBy = !!marketplace && order.status !== 'approved';
+  const shipByOk = !needsShipBy || isIsoDay(shipBy);
+
   return (
     <>
       {/* The bar never goes away. Opening a reason used to replace it
@@ -203,12 +217,28 @@ export function ActionBar({
         <button
           type="button"
           className={`${styles.actionBtn} ${styles.actionConfirm}`}
-          onClick={onApprove}
-          disabled={!confirmReady}
-          title={confirmReady
-            ? 'Confirm this order'
-            : `Clear the blockers below first — ${criteriaCount(order)} criteria must be met`}
+          onClick={() => onApprove(needsShipBy ? shipBy : undefined)}
+          disabled={!confirmReady || !shipByOk}
+          title={!confirmReady
+            ? `Clear the blockers below first — ${criteriaCount(order)} criteria must be met`
+            : !shipByOk
+              ? `Enter the ${marketplace} Ship By date from Seller Center first`
+              : 'Confirm this order'}
         >✓ Confirm order</button>
+
+        {needsShipBy && (
+          <label className={styles.shipByField} title={`The Ship By date ${marketplace} shows in Seller Center. It becomes this order's due date in the fulfillment queue.`}>
+            <span className={styles.shipByLabel}>{marketplace} Ship By</span>
+            <input
+              type="date"
+              className={styles.shipByInput}
+              value={shipBy}
+              onChange={e => setShipBy(e.target.value)}
+              aria-label={`${marketplace} Ship By date`}
+              required
+            />
+          </label>
+        )}
 
         {/* Holding is one click; until this button existed, un-holding was not
             possible from the app at all. It sits beside Confirm because those

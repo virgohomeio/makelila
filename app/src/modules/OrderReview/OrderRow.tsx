@@ -26,6 +26,7 @@ export function OrderRow({
   revealIndex = 0,
   refundFlag = null,
   commConcern = null,
+  attention = null,
 }: {
   order: Order;
   isSelected: boolean;
@@ -42,6 +43,9 @@ export function OrderRow({
    *  column of green that nobody reads, and the chip's whole job is to be
    *  noticed. The reason itself is in the order's Customer card. */
   commConcern?: string | null;
+  /** Set in Needs attention: why this order is Held or Flagged. Held and
+   *  Flagged stay separate statuses, so the row names which one it is. */
+  attention?: { text: string; by: string | null } | null;
 }) {
   const cls = [
     styles.row,
@@ -99,6 +103,7 @@ export function OrderRow({
     reseller ? `${reseller} order` : null,
     refundFlag ? refundFlagLabel(refundFlag).toLowerCase() : null,
     commConcern ? 'customer communication unclear' : null,
+    attention ? `${order.status}: ${attention.text}` : null,
   ].filter(Boolean).join(', ');
 
   return (
@@ -168,6 +173,15 @@ export function OrderRow({
         )}
         <span className={`${styles.tag} ${countryTag}`}>{order.country}</span>
       </span>
+
+      {attention && (
+        <span className={styles.rowReason} title={attention.by ? `${attention.text} (${attention.by})` : attention.text}>
+          <span className={order.status === 'held' ? styles.reasonHeld : styles.reasonFlagged}>
+            {order.status === 'held' ? 'Held' : 'Flagged'}
+          </span>
+          <span className={styles.reasonText}>{attention.text}</span>
+        </span>
+      )}
     </button>
   );
 }
