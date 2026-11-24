@@ -7,10 +7,10 @@ import { useOrderCommAssessments } from '../../lib/orderComms';
 import { EmptyState } from '../../components/ui';
 import styles from './OrderReview.module.css';
 
-type Tab = 'pending' | 'held' | 'flagged' | 'approved' | 'all' | 'cancelled';
+type Tab = 'pending' | 'attention' | 'priority' | 'approved' | 'all' | 'cancelled';
 
 export function Sidebar({
-  pending, pendingBacklog, held, flagged, approved, all, cancelled,
+  pending, pendingBacklog, held, flagged, priority, approved, all, cancelled,
   selectedId,
   onSelect,
 }: {
@@ -19,8 +19,16 @@ export function Sidebar({
    *  in that tab but are still in All, so the rail says so rather than letting
    *  them disappear quietly. */
   pendingBacklog: Order[];
+  /** Held and Flagged are one tab now — "Needs Attention" — because both mean
+   *  the same thing to the operator working the rail: this order is parked and
+   *  waiting on a person, not moving through the queue. They stay distinct
+   *  statuses underneath (each row still says which), and are passed in
+   *  separately so the merge lives here and nowhere else. */
   held: Order[];
   flagged: Order[];
+  /** Walmart / Best Buy and hand-pinned orders — a cross-cut over the live
+   *  queue, not a status. See OrderBuckets.priority. */
+  priority: Order[];
   approved: Order[];
   all: Order[];
   /** Terminal — cancelled here or from the fulfillment queue. Already sorted
@@ -35,9 +43,14 @@ export function Sidebar({
   // cheap to compute and expensive to fetch.
   const { marks } = useRefundMarks();
 
+  // Flagged leads held in the merged tab's raw order, but every live tab is
+  // re-sorted by order ref below, so this only decides ties — the operator
+  // reads Needs Attention by ref like the other queues.
+  const attention = useMemo(() => [...flagged, ...held], [flagged, held]);
+
   const source = tab === 'pending'     ? pending
-               : tab === 'held'        ? held
-               : tab === 'flagged'     ? flagged
+               : tab === 'attention'   ? attention
+               : tab === 'priority'    ? priority
                : tab === 'approved'    ? approved
                : tab === 'cancelled'   ? cancelled
                : all;
@@ -63,12 +76,12 @@ export function Sidebar({
   const { byOrderId: commAssessments } = useOrderCommAssessments();
 
   const tabs: Array<{ key: Tab; label: string; count: number }> = [
-    { key: 'pending',     label: 'Pending',     count: pending.length },
-    { key: 'held',        label: 'Held',        count: held.length },
-    { key: 'flagged',     label: 'Flagged',     count: flagged.length },
-    { key: 'approved',    label: 'Confirmed',   count: approved.length },
-    { key: 'all',         label: 'All',         count: all.length },
-    { key: 'cancelled',   label: 'Cancelled',   count: cancelled.length },
+    { key: 'pending',     label: 'Pending',         count: pending.length },
+    { key: 'attention',   label: 'Needs Attention', count: held.length + flagged.length },
+    { key: 'priority',    label: 'PRIORITY',        count: priority.length },
+    { key: 'approved',    label: 'Confirmed',       count: approved.length },
+    { key: 'all',         label: 'All',             count: all.length },
+    { key: 'cancelled',   label: 'Cancelled',       count: cancelled.length },
   ];
 
   const activeTabLabel = tabs.find(t => t.key === tab)?.label ?? '';
@@ -104,8 +117,10 @@ export function Sidebar({
           )}
         </div>
 
-        {/* Seven statuses wrap onto two rows. They used to scroll sideways,
-            which put Cancelled off the edge of the rail. */}
+        {/* Six tabs wrap onto two rows. They used to scroll sideways, which put
+            the last one off the edge of the rail. PRIORITY carries an amber
+            accent so the one time-critical queue reads differently from the
+            status tabs around it. */}
         <div className={styles.tabBar}>
           {tabs.map(t => (
             <button
@@ -114,6 +129,7 @@ export function Sidebar({
               className={[
                 styles.tab,
                 tab === t.key ? styles.activeTab : '',
+                t.key === 'priority' ? styles.tabPriority : '',
                 t.count === 0 ? styles.tabZero : '',
               ].filter(Boolean).join(' ')}
               onClick={() => setTab(t.key)}

@@ -44,6 +44,16 @@ export type Order = {
   order_ref: string;
   kind: OrderKind;
   status: OrderStatus;
+  // Operator-set "work this first" flag, independent of status. A priority
+  // order still lives in its real status bucket (Pending / Needs Attention /
+  // Confirmed) AND surfaces in the PRIORITY tab. Walmart and Best Buy orders
+  // are priority automatically (see isPriority) regardless of this column —
+  // this flag is only for the ones an operator pins by hand.
+  //
+  // Optional for the same gated-migration reason sales_channel is: a frontend
+  // deploy can land before the migration runs, and select('*') then comes back
+  // without the key. Absent/false both read as "not hand-pinned".
+  is_priority?: boolean | null;
   // Canonical FK to customers.id (backlog #68). Auto-populated by the
   // orders_auto_customer_id trigger; sync-shopify-orders doesn't need to
   // set it explicitly. Use this for any "the customer for this order"
@@ -542,6 +552,44 @@ export function resellerLabel(o: Order): 'Walmart' | 'Best Buy' | 'Shopify Colle
   return null;
 }
 
+/** Whether an order belongs in the PRIORITY tab. Two independent reasons, and
+ *  either alone is enough:
+ *
+ *    - It came through a reseller marketplace that promises the customer a fast
+ *      turnaround (Walmart, Best Buy). These are priority automatically and
+ *      cannot be un-prioritised — missing a marketplace SLA risks the channel.
+ *    - An operator pinned it by hand (is_priority), for a reason the row itself
+ *      doesn't carry — a VIP, a promised date, a complaint to get ahead of.
+ *
+ *  Reseller is read off sales_channel (synced from Shopify), so it needs no
+ *  column of its own and is live the moment an order syncs. */
+export function isPriority(o: Order): boolean {
+  return resellerLabel(o) !== null || o.is_priority === true;
+}
+
+/** True only for the reseller-driven, automatic kind of priority — the kind an
+ *  operator can't toggle off. The action bar uses it to show a fixed badge
+ *  rather than a toggle. */
+export function isAutoPriority(o: Order): boolean {
+  return resellerLabel(o) !== null;
+}
+
+/** Pin or unpin an order's hand-set priority flag. No-op semantics on a reseller
+ *  order are enforced in the UI (the toggle isn't offered) rather than here, so
+ *  this stays a plain column write. Logged so the order's history shows who
+ *  pinned it and when. */
+export async function setOrderPriority(
+  order: Pick<Order, 'id' | 'order_ref'>,
+  value: boolean,
+): Promise<void> {
+  const { error } = await supabase
+    .from('orders')
+    .update({ is_priority: value })
+    .eq('id', order.id);
+  if (error) throw error;
+  await logAction(value ? 'order_prioritized' : 'order_deprioritized', order.order_ref);
+}
+
 /** Operator override of the auto-guessed area type. Flips the source to
  *  'manual' so a later Shopify re-sync won't clobber the choice. Passing null
  *  clears it back to unclassified (and back to auto provenance). */
@@ -680,6 +728,12 @@ export type OrderBuckets = {
   pendingBacklog: Order[];
   held: Order[];
   flagged: Order[];
+  /** Live orders that need working first: every Walmart / Best Buy order
+   *  (automatic — see isPriority) plus any an operator pinned by hand. A
+   *  cross-cut, not a status — each of these is ALSO in its real status bucket,
+   *  exactly like `all`. Reseller orders lead, then hand-pinned, each oldest
+   *  first, so the marketplace SLA is what the operator sees at the top. */
+  priority: Order[];
   /** The live ship queue. */
   approved: Order[];
   /** Terminal: cancelled from Sales or from the fulfillment queue. Out of every
@@ -858,12 +912,22 @@ export function bucketOrders(
   const allPending  = active.filter(o => o.status === 'pending');
   const allApproved = active.filter(o => o.status === 'approved');
 
+  // Priority is a cross-cut over the live orders, so it draws from `active`
+  // (cancelled and fulfilled already dropped) rather than from any one status.
+  // Reseller-driven priority first, then hand-pinned, each oldest-first: a
+  // marketplace SLA is the more time-critical of the two and belongs on top.
+  const priority = [
+    ...active.filter(o => isAutoPriority(o)).sort(byAgeAscending),
+    ...active.filter(o => !isAutoPriority(o) && o.is_priority === true).sort(byAgeAscending),
+  ];
+
   return {
     all:      active,
     pending:  allPending.filter(isPendingQueueWork),
     pendingBacklog: allPending.filter(o => !isPendingQueueWork(o)).sort(byAgeAscending),
     held:     active.filter(o => o.status === 'held'),
     flagged:  active.filter(o => o.status === 'flagged'),
+    priority,
     approved: allApproved,
     cancelled,
   };

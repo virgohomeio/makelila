@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { Order } from '../../../lib/orders';
+import { isAutoPriority, resellerLabel } from '../../../lib/orders';
 import { criteriaCount } from './ReadinessChecklist';
 import styles from '../OrderReview.module.css';
 
@@ -32,6 +33,7 @@ export function ActionBar({
   onCancelOrder,
   onUncancel,
   onReleaseHold,
+  onSetPriority,
   onClearReplacementFlag,
   clearFlagBlockedBy,
   onForceClearReplacementFlag,
@@ -44,6 +46,10 @@ export function ActionBar({
   onHold: (reason: string) => void;
   onNeedInfo: (note: string) => void;
   onCancelOrder: (reason: string) => void;
+  /** Pin / unpin the hand-set priority flag. Offered on every live sale; a
+   *  Walmart / Best Buy order shows a fixed badge instead (priority there is
+   *  automatic and can't be toggled). */
+  onSetPriority?: (value: boolean) => void;
   /** Only the Cancelled view passes this — the way back out of a mis-click. */
   onUncancel?: () => void;
   /** Only a held order passes this — the way back out of a hold. */
@@ -260,6 +266,26 @@ export function ActionBar({
           onClick={() => open('info')}
           aria-expanded={expanded === 'info'}
         >? Need info</button>
+
+        {/* Pins the order to the PRIORITY tab. Walmart / Best Buy orders are
+            already there automatically, so they get a fixed badge rather than a
+            toggle — their priority isn't the operator's to remove. */}
+        {onSetPriority && (isAutoPriority(order) ? (
+          <span
+            className={`${styles.actionBtn} ${styles.actionPriorityAuto}`}
+            title={`${resellerLabel(order)} orders are priority automatically — this can't be turned off`}
+          >★ Priority · {resellerLabel(order)}</span>
+        ) : (
+          <button
+            type="button"
+            className={`${styles.actionBtn} ${order.is_priority ? styles.actionPriorityOn : styles.actionPriority}`}
+            onClick={() => onSetPriority(!order.is_priority)}
+            aria-pressed={order.is_priority === true}
+            title={order.is_priority
+              ? 'Remove this order from the PRIORITY tab'
+              : 'Pin this order to the PRIORITY tab so it is worked first'}
+          >{order.is_priority ? '★ Priority' : '☆ Make priority'}</button>
+        ))}
 
         {/* Takes the order out of every live tab, and the only way back is the
             Cancelled view. It sits behind a divider at the far end rather than

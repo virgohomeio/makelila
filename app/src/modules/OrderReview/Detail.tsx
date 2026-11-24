@@ -2,7 +2,7 @@ import { useCallback, useState } from 'react';
 import type { Order } from '../../lib/orders';
 import {
   disposition, needInfo, addOrderNote, orderUrgency, orderDue, cancelOrder, uncancelOrder,
-  queueReplacementForFulfillment,
+  queueReplacementForFulfillment, setOrderPriority,
 } from '../../lib/orders';
 import { releaseHold } from '../../lib/fulfillment';
 import { useAuth } from '../../lib/auth';
@@ -136,6 +136,19 @@ export function Detail({
           onHold={(reason) => wrap('Held',    () => disposition(order, 'held',    reason), 'Held', reason)}
           onNeedInfo={(note) => wrap('Need-info logged', () => needInfo(order, note), 'Need info', note)}
           onCancelOrder={(reason) => wrap('Cancelled', () => cancelOrder(order.id, reason), 'Cancelled', reason)}
+          // Pinning is not queue work — the operator is tagging THIS order, not
+          // dispositioning it — so the panel stays put rather than advancing to
+          // the next order. Only a live sale gets the control; the auto badge a
+          // reseller order shows instead isn't wired to a handler.
+          onSetPriority={order.kind === 'sale' && !isCancelled
+            ? (value) => wrap(
+                value ? 'Marked priority' : 'Priority removed',
+                () => setOrderPriority(order, value),
+                undefined,
+                undefined,
+                { stay: true },
+              )
+            : undefined}
           // The only action a flagged replacement gets here. It goes back
           // through the replacement pipeline's own door rather than through
           // Confirm, so the stock it needs is re-derived now instead of being
