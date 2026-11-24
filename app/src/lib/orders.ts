@@ -728,11 +728,11 @@ export type OrderBuckets = {
   pendingBacklog: Order[];
   held: Order[];
   flagged: Order[];
-  /** Live orders that need working first: every Walmart / Best Buy order
-   *  (automatic — see isPriority) plus any an operator pinned by hand. A
-   *  cross-cut, not a status — each of these is ALSO in its real status bucket,
-   *  exactly like `all`. Reseller orders lead, then hand-pinned, each oldest
-   *  first, so the marketplace SLA is what the operator sees at the top. */
+  /** Confirmed orders to ship first — a post-confirmation queue, not a status.
+   *  Every Walmart / Best Buy order (automatic — see isPriority) plus any an
+   *  operator pinned by hand, but only once CONFIRMED: a pending priority order
+   *  stays in Pending and appears here when it is approved. These rows are also
+   *  in `approved`. Reseller orders lead, then hand-pinned, each oldest first. */
   priority: Order[];
   /** The live ship queue. */
   approved: Order[];
@@ -914,13 +914,15 @@ export function bucketOrders(
   const allPending  = active.filter(o => o.status === 'pending');
   const allApproved = active.filter(o => o.status === 'approved');
 
-  // Priority is a cross-cut over the live orders, so it draws from `active`
-  // (cancelled and fulfilled already dropped) rather than from any one status.
-  // Reseller-driven priority first, then hand-pinned, each oldest-first: a
-  // marketplace SLA is the more time-critical of the two and belongs on top.
+  // Priority is a post-confirmation ship-order queue, NOT a cross-cut over every
+  // status: an order becomes "work this first" only once it has been confirmed,
+  // so it draws from the confirmed (approved) set alone. A pending Walmart order
+  // stays in Pending and surfaces here the moment it is confirmed. Reseller-driven
+  // priority leads the hand-pinned, each oldest-first — a marketplace SLA is the
+  // more time-critical of the two and belongs on top.
   const priority = [
-    ...active.filter(o => isAutoPriority(o)).sort(byAgeAscending),
-    ...active.filter(o => !isAutoPriority(o) && o.is_priority === true).sort(byAgeAscending),
+    ...allApproved.filter(o => isAutoPriority(o)).sort(byAgeAscending),
+    ...allApproved.filter(o => !isAutoPriority(o) && o.is_priority === true).sort(byAgeAscending),
   ];
 
   return {
