@@ -48,13 +48,25 @@ export function useGoogleAds(): { rows: GoogleAdsCampaign[]; loading: boolean } 
 }
 
 /** Sum Google Ads rows, optionally within an inclusive YYYY-MM-DD date window
- *  (to match a Journey Report campaign-group / date range). */
-export function sumGoogleAds(rows: GoogleAdsCampaign[], start?: string | null, end?: string | null): GoogleAdsTotals {
+ *  (to match a Journey Report campaign-group / date range).
+ *
+ *  `nameMatches`, when given, also restricts the sum to campaigns whose name it
+ *  accepts — this is how a specific sale GROUP (e.g. Holiday 2026) sums only its
+ *  own Google campaigns instead of every campaign that happened to run in the
+ *  window. A plain date range (no group) passes no matcher and sums everything,
+ *  which is the right "all Google spend this period" blend for that view. */
+export function sumGoogleAds(
+  rows: GoogleAdsCampaign[],
+  start?: string | null,
+  end?: string | null,
+  nameMatches?: (name: string | null) => boolean,
+): GoogleAdsTotals {
   let spend = 0, impressions = 0, clicks = 0, conversions = 0, value = 0;
   let any = false;
   for (const r of rows) {
     if (start && r.date < start) continue;
     if (end && r.date > end) continue;
+    if (nameMatches && !nameMatches(r.campaign_name)) continue;
     any = true;
     spend += r.spend ?? 0;
     impressions += r.impressions ?? 0;
