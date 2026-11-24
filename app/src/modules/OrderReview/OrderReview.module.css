@@ -566,6 +566,15 @@
   border: 1px solid var(--color-warning-border);
 }
 
+/* This sale came through a reseller marketplace (Walmart / Best Buy), not our
+   own site — flagged blue so a marketplace order is obvious at a glance in the
+   rail. Our own storefront carries no tag. */
+.tagReseller {
+  background: var(--color-info-bg);
+  color: var(--color-info);
+  border: 1px solid var(--color-info-border);
+}
+
 /* Money already went back on THIS order — confirming it would ship a machine
    we have been paid nothing for. The loudest tag on the row, deliberately. */
 .tagRefunded {

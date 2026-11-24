@@ -528,6 +528,20 @@ export const AREA_TYPE_TAG: Record<AreaType, string> = {
   rural:    'Rural',
 };
 
+/** The reseller marketplace an order came through, or null for our own Shopify
+ *  storefront. Read off orders.sales_channel (the label sync-shopify-orders
+ *  resolves from Shopify's source_name) by keyword, so a channel-name variant
+ *  still lands in the right bucket. Only resellers get a label — a null return
+ *  means "our website", which carries no marker. Mirrors the Journey Report's
+ *  Sale Source bucketing (saleSourceOf) so the two agree. */
+export function resellerLabel(o: Order): 'Walmart' | 'Best Buy' | 'Shopify Collective' | null {
+  const lc = (o.sales_channel ?? '').trim().toLowerCase();
+  if (lc.includes('walmart')) return 'Walmart';
+  if (lc.includes('best buy') || lc.includes('bestbuy')) return 'Best Buy';
+  if (lc.includes('collective')) return 'Shopify Collective';
+  return null;
+}
+
 /** Operator override of the auto-guessed area type. Flips the source to
  *  'manual' so a later Shopify re-sync won't clobber the choice. Passing null
  *  clears it back to unclassified (and back to auto provenance). */
