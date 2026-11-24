@@ -6,7 +6,7 @@ import {
   useCustomerAttribution, isTestOrder, isRealSale, type Attribution, type Demo,
 } from '../../lib/marketing/salesReport';
 import { useKlaviyoJourneys, summarizeJourney } from '../../lib/marketing/journeyTiming';
-import { buildCampaignGroups } from '../../lib/marketing/campaignGroups';
+import { buildCampaignGroups, groupMatchesName } from '../../lib/marketing/campaignGroups';
 import { useGoogleAds, sumGoogleAds } from '../../lib/marketing/googleAds';
 
 const subtle = 'var(--color-ink-subtle)';
@@ -178,7 +178,14 @@ export function ReportTab() {
     // Google date window, aligned to the selected group / range.
     const gStart = selectedGroup ? selectedGroup.startDate : range.start;
     const gEnd = selectedGroup ? (selectedGroup.endDate ?? dayStr(Date.now())) : range.end;
-    const g = sumGoogleAds(googleRows, gStart, gEnd);
+    // For a specific sale group, sum ONLY that group's Google campaigns (by the
+    // same name matcher Meta uses), not every campaign that ran in the window —
+    // otherwise an always-on PMax / brand campaign bleeds into the sale's spend.
+    // A plain date range (no group) still blends all Google spend for the period.
+    const g = sumGoogleAds(
+      googleRows, gStart, gEnd,
+      selectedGroup ? (name) => groupMatchesName(selectedGroup, name) : undefined,
+    );
     // Per-platform ROAS = that platform's OWN reported conversion value / spend.
     return {
       metaSpend, metaConversions, metaCac: metaConversions ? metaSpend / metaConversions : null,
