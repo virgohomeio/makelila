@@ -585,6 +585,28 @@ describe('bucketOrders', () => {
     expect(b.cancelled).toEqual([]);
   });
 
+  // PRIORITY is a cross-cut, not a status: Walmart / Best Buy orders are in it
+  // automatically, a hand-pinned order joins them, and each is ALSO in its real
+  // status bucket. Reseller-driven priority leads the hand-pinned.
+  it('collects reseller and hand-pinned orders into the priority bucket', () => {
+    const b = bucketOrders(
+      [mk({ id: 'plain',  status: 'pending' }),
+       mk({ id: 'pinned', status: 'held', is_priority: true }),
+       mk({ id: 'wal',    status: 'pending', sales_channel: 'Walmart' }),
+       mk({ id: 'bb',     status: 'approved', sales_channel: 'Best Buy' })],
+      none, none,
+    );
+    // Reseller first (oldest-first within each group — all share a date here, so
+    // input order holds), then hand-pinned.
+    expect(b.priority.map(o => o.id)).toEqual(['wal', 'bb', 'pinned']);
+    // A plain order is never in priority.
+    expect(b.priority.map(o => o.id)).not.toContain('plain');
+    // And priority orders keep their real status tab.
+    expect(b.pending.map(o => o.id)).toEqual(['plain', 'wal']);
+    expect(b.held.map(o => o.id)).toEqual(['pinned']);
+    expect(b.approved.map(o => o.id)).toEqual(['bb']);
+  });
+
   it('pulls a cancelled order out of every live tab and into cancelled', () => {
     const b = bucketOrders(
       [mk({ id: 'live', status: 'pending' }),
