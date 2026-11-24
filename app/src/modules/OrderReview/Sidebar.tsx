@@ -75,6 +75,36 @@ export function Sidebar({
   // commConcern note on OrderRow.
   const { byOrderId: commAssessments } = useOrderCommAssessments();
 
+  const renderRow = (o: Order, i: number) => (
+    <OrderRow
+      key={o.id}
+      order={o}
+      // Drives the load stagger. Capped at 14 so a long queue's last row
+      // isn't held behind a quarter-second run-up it gains nothing from.
+      revealIndex={Math.min(i, 14)}
+      isSelected={o.id === selectedId}
+      onClick={() => onSelect(o.id)}
+      refundFlag={refundFlags.get(o.id) ?? null}
+      commConcern={
+        commAssessments[o.id]?.verdict === 'unclear'
+          ? commAssessments[o.id].headline
+          : null
+      }
+    />
+  );
+
+  // PRIORITY spans several statuses at once, so it reads as labeled sections
+  // rather than one flat list. Pending leads (these still need confirming — the
+  // actual work), Needs Attention next, and Confirmed trails because those are
+  // already in the ship queue and shown only so the operator can see the whole
+  // priority picture. Each section draws from `visible`, so it inherits the
+  // search filter and the by-ref sort.
+  const prioritySections = [
+    { key: 'pending',   label: 'Pending',         rows: visible.filter(o => o.status === 'pending') },
+    { key: 'attention', label: 'Needs Attention', rows: visible.filter(o => o.status === 'held' || o.status === 'flagged') },
+    { key: 'confirmed', label: 'Confirmed',       rows: visible.filter(o => o.status === 'approved') },
+  ].filter(s => s.rows.length > 0);
+
   const tabs: Array<{ key: Tab; label: string; count: number }> = [
     { key: 'pending',     label: 'Pending',         count: pending.length },
     { key: 'attention',   label: 'Needs Attention', count: held.length + flagged.length },
@@ -181,23 +211,20 @@ export function Sidebar({
               body="Sync from Shopify to pull in orders placed since the last run."
             />
           )
-        ) : visible.map((o, i) => (
-          <OrderRow
-            key={o.id}
-            order={o}
-            // Drives the load stagger. Capped at 14 so a long queue's last row
-            // isn't held behind a quarter-second run-up it gains nothing from.
-            revealIndex={Math.min(i, 14)}
-            isSelected={o.id === selectedId}
-            onClick={() => onSelect(o.id)}
-            refundFlag={refundFlags.get(o.id) ?? null}
-            commConcern={
-              commAssessments[o.id]?.verdict === 'unclear'
-                ? commAssessments[o.id].headline
-                : null
-            }
-          />
-        ))}
+        ) : tab === 'priority' ? (
+          // Split into Pending / Needs Attention / Confirmed so a confirmed
+          // priority order (already in the ship queue) never sits indistinguishably
+          // next to one still waiting to be confirmed.
+          prioritySections.map(section => (
+            <div key={section.key} className={styles.railGroup}>
+              <div className={styles.railGroupHeader}>
+                {section.label}
+                <span className={styles.railGroupCount}>{section.rows.length}</span>
+              </div>
+              {section.rows.map((o, i) => renderRow(o, i))}
+            </div>
+          ))
+        ) : visible.map((o, i) => renderRow(o, i))}
       </div>
     </aside>
   );

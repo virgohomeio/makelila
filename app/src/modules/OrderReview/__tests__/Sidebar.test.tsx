@@ -135,6 +135,31 @@ describe('Sidebar', () => {
     expect(screen.queryByText('Alice Ames')).not.toBeInTheDocument();
   });
 
+  // PRIORITY spans statuses, so it splits into Pending / Confirmed sections. The
+  // refs are set so a flat by-ref sort would put the CONFIRMED order first —
+  // proving the section order (Pending leads) is what's driving the layout, not
+  // the ref sort.
+  it('groups the PRIORITY tab with Pending ahead of Confirmed', () => {
+    const walP = mkOrder({ id: 'wp', status: 'pending',  customer_name: 'Pending Priority',   sales_channel: 'Walmart',  order_ref: '#2002' });
+    const bbC  = mkOrder({ id: 'bc', status: 'approved', customer_name: 'Confirmed Priority', sales_channel: 'Best Buy', order_ref: '#2001' });
+    render(
+      <Sidebar
+        all={[walP, bbC]} pending={[walP]} pendingBacklog={[]}
+        held={[]} flagged={[]} priority={[walP, bbC]} approved={[bbC]} cancelled={[]}
+        selectedId={null} onSelect={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /^PRIORITY: 2 orders$/ }));
+    const pending = screen.getByText('Pending Priority');
+    const confirmed = screen.getByText('Confirmed Priority');
+    expect(pending).toBeInTheDocument();
+    expect(confirmed).toBeInTheDocument();
+    // Pending row precedes Confirmed row in the DOM despite the higher ref.
+    expect(
+      pending.compareDocumentPosition(confirmed) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
   it('filters by search query within the active tab', () => {
     render_();
     const searchBox = screen.getByPlaceholderText(/search name/i);
