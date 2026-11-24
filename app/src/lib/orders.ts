@@ -825,9 +825,11 @@ function isPendingQueueWork(order: Order): boolean {
  *  is simply every approved order.
  */
 
-/** Oldest first — a backlog is read to work through it, not to skim it. */
+/** Oldest first — a backlog is read to work through it, not to skim it. Fails
+ *  open like withinSalesQueue: an order missing both dates sorts to the top
+ *  rather than crashing the comparator (and with it the whole rail). */
 function byAgeAscending(a: Order, b: Order): number {
-  return (a.placed_at ?? a.created_at).localeCompare(b.placed_at ?? b.created_at);
+  return (a.placed_at ?? a.created_at ?? '').localeCompare(b.placed_at ?? b.created_at ?? '');
 }
 
 export function bucketOrders(
