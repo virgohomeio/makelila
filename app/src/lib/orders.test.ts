@@ -590,14 +590,14 @@ describe('bucketOrders', () => {
   // status bucket. Reseller-driven priority leads the hand-pinned.
   it('collects reseller and hand-pinned orders into the priority bucket', () => {
     const b = bucketOrders(
-      [mk({ id: 'plain',  status: 'pending' }),
-       mk({ id: 'pinned', status: 'held', is_priority: true }),
-       mk({ id: 'wal',    status: 'pending', sales_channel: 'Walmart' }),
-       mk({ id: 'bb',     status: 'approved', sales_channel: 'Best Buy' })],
+      [mk({ id: 'plain',  status: 'pending',  placed_at: '2026-11-10T00:00:00Z' }),
+       mk({ id: 'pinned', status: 'held',     placed_at: '2026-11-11T00:00:00Z', is_priority: true }),
+       mk({ id: 'wal',    status: 'pending',  placed_at: '2026-11-12T00:00:00Z', sales_channel: 'Walmart' }),
+       mk({ id: 'bb',     status: 'approved', placed_at: '2026-11-13T00:00:00Z', sales_channel: 'Best Buy' })],
       none, none,
     );
-    // Reseller first (oldest-first within each group — all share a date here, so
-    // input order holds), then hand-pinned.
+    // Reseller group first, oldest-first within it (wal 11-12 before bb 11-13),
+    // then the hand-pinned group.
     expect(b.priority.map(o => o.id)).toEqual(['wal', 'bb', 'pinned']);
     // A plain order is never in priority.
     expect(b.priority.map(o => o.id)).not.toContain('plain');
