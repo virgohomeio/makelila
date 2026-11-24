@@ -468,6 +468,33 @@
   text-align: center;
 }
 
+/* Status sections inside the PRIORITY tab. The header sticks to the top of the
+   scroll area so you always know whether the rows under your eye are still to be
+   confirmed or already in the ship queue. */
+.railGroupHeader {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-page);
+  border-bottom: 1px solid var(--color-border);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--color-ink-subtle);
+}
+.railGroupCount {
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--font-numeric);
+  color: var(--color-ink-faint);
+}
+/* A hair of space between one section's last row and the next header. */
+.railGroup + .railGroup .railGroupHeader { margin-top: var(--space-2); }
+
 /* ── Order row — the 2×2 grid ────────────────────────────────────────────── */
 /* The identity column keeps a floor. The tag strip is an `auto` track, so a
    heavily tagged order (refund + dwelling + area + country) used to bid for as
